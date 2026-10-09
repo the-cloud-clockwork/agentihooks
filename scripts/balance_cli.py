@@ -70,14 +70,13 @@ def cmd_balance_settings() -> int:
     return 0
 
 
-def _declarations(tokens: list[str]) -> dict[str, tuple[str, str]]:
+def _declarations(tokens: list[str]) -> dict[str, tuple[str, str | None]]:
     from scripts.routing.master_account import HARNESSES
 
     if not tokens:
         raise ValueError("name claude=<slug> or codex=<slug|default>, or pass --clear")
     slugs: dict[str, str] = {}
     tiers: dict[str, str] = {}
-    harness = ""
     for token in tokens:
         key, sep, value = token.partition("=")
         if sep and key in HARNESSES:
@@ -85,18 +84,19 @@ def _declarations(tokens: list[str]) -> dict[str, tuple[str, str]]:
                 raise ValueError(f"{key} is declared twice")
             if not value.strip():
                 raise ValueError(f"{key}= needs a slug")
-            harness, slugs[key] = key, value
+            slugs[key] = value
         elif sep and key == "tier":
-            if not harness:
+            if not slugs:
                 raise ValueError(f"{token} must follow claude=<slug> or codex=<slug>")
             if not value.strip():
                 raise ValueError("tier= needs a label")
+            harness = next(reversed(slugs))
             if harness in tiers:
                 raise ValueError(f"{harness} has two tiers")
             tiers[harness] = value
         else:
             raise ValueError(f"expected claude=<slug>, codex=<slug|default> or tier=<label>, got {token}")
-    return {key: (slug, tiers.get(key, "")) for key, slug in slugs.items()}
+    return {key: (slug, tiers.get(key)) for key, slug in slugs.items()}
 
 
 def cmd_balance_master_account(tokens: list[str], clear: bool = False, now: float | None = None) -> int:

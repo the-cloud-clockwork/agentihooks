@@ -100,6 +100,12 @@ class RouteDecision:
         return API_ACCOUNT if self.kind == API else self.credential.account
 
 
+@dataclass(frozen=True)
+class RowMarks:
+    current: str = ""
+    master: "MasterAccount | None" = None
+
+
 class RoutingError(RuntimeError):
     def __init__(self, message: str, results: list[ProbeResult] | None = None):
         super().__init__(message)
@@ -859,9 +865,9 @@ def _api_line(slot: Slot, include_fable: bool, sessions: Mapping[str, int] | Non
     ]
 
 
-def _account_text(account: str, current: str, master: "MasterAccount | None") -> str:
-    text = f"{account} (current)" if current and account == current else account
-    return f"{text} {master.marker}" if master and master.slug == account else text
+def _account_text(account: str, marks: RowMarks) -> str:
+    text = f"{account} (current)" if marks.current and account == marks.current else account
+    return f"{text} {marks.master.marker}" if marks.master and marks.master.slug == account else text
 
 
 def _interactive_line(
@@ -884,12 +890,12 @@ def render_table(
     results: list[ProbeResult],
     now: int | None = None,
     include_fable: bool = False,
-    current: str = "",
     observed: Mapping[str, float] | None = None,
     sessions: Mapping[str, int] | None = None,
     api: Sequence[Slot] = (),
-    master: "MasterAccount | None" = None,
+    marks: RowMarks = RowMarks(),
 ) -> str:
+    master = marks.master
     timestamp = int(time.time()) if now is None else now
     headers = [
         "#",
@@ -914,7 +920,7 @@ def render_table(
         cap = _cap_text(account_cap(result, timestamp, include_fable))
         row = [
             str(rank),
-            _account_text(result.account, current, master),
+            _account_text(result.account, marks),
             SUBSCRIPTION,
             result.state,
             *([f"{sessions.get(result.account, 0)}/{cap}"] if sessions is not None else []),

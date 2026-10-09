@@ -381,6 +381,37 @@ def test_the_declared_masters_mark_their_rows_and_a_tokenless_claude_slug_gets_a
     assert [row.master for row in agents_quota.with_masters(rows, subscription, {})] == ["MASTER", ""]
 
 
+def test_an_interactive_master_already_listed_is_marked_and_not_listed_twice():
+    from scripts.routing.master_account import MasterAccount
+
+    home = ProbeResult("home-login", "ok", "OK", 78.0, QuotaWindow(used=8.0), QuotaWindow(used=22.0))
+    rows = agents_quota.claude_rows([home], {}, "cached", {}, now=1000)
+    master = MasterAccount("claude", "home-login", "", INTERACTIVE)
+
+    marked = agents_quota.with_masters(rows, {"claude": master}, {})
+    assert [(row.account, row.kind, row.master) for row in marked] == [("home-login", "subscription", "MASTER")]
+    lone = agents_quota.with_masters([], {"claude": MasterAccount("claude", "away", "", INTERACTIVE)}, {})
+    assert [(row.account, row.sessions) for row in lone] == [("away", 0)]
+    plain = agents_quota.render(agents_quota.with_masters(rows, {}, {}), now=1000).splitlines()
+    assert plain[0].startswith("AGENT   ACCOUNT     KIND")
+    assert plain[1].startswith("claude  home-login  subscription")
+
+
+def test_tokenless_table_puts_an_interactive_master_above_the_codex_table(monkeypatch):
+    from scripts.routing.master_account import MasterAccount
+
+    monkeypatch.setattr(agents_quota, "codex_table", lambda: "codex table")
+    interactive = MasterAccount("claude", "home", "max", INTERACTIVE)
+
+    lines = agents_quota.tokenless_table(interactive, {"home": 2}).splitlines()
+    assert lines[2].split()[:6] == ["-", "home", "MASTER", "max", "interactive", "MASTERS"]
+    assert lines[2].split()[6] == "2/?"
+    assert lines[-1] == "codex table"
+    assert agents_quota.tokenless_table(None, {}) == "codex table"
+    subscription = MasterAccount("claude", "luna", "", SUBSCRIPTION)
+    assert agents_quota.tokenless_table(subscription, {}) == "codex table"
+
+
 def test_every_quota_reader_marks_the_declared_masters(monkeypatch):
     from hooks.context import account_sessions
     from scripts import claude_quota_balancer, codex_router, install

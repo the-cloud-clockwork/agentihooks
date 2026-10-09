@@ -150,11 +150,12 @@ def test_master_account_declares_both_harnesses_with_their_tiers(monkeypatch, tm
     monkeypatch.setenv("AH_CC_TOKEN_luna", "t")
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
 
-    assert balance_cli.cmd_balance_master_account(["claude=home", "tier=max", "codex=default"], now=1.0) == 0
+    tokens = ["claude=home", "tier=max", "codex=default", "tier=pro"]
+    assert balance_cli.cmd_balance_master_account(tokens, now=1.0) == 0
     assert capsys.readouterr().out.splitlines() == [
         f"store=file {store.path}",
         "claude: home interactive MASTER max",
-        "codex: default interactive MASTER",
+        "codex: default interactive MASTER pro",
     ]
     assert store.get("master-account-claude") == "home"
     assert store.get("master-tier-claude") == "max"
@@ -164,9 +165,43 @@ def test_master_account_declares_both_harnesses_with_their_tiers(monkeypatch, tm
     assert balance_cli.cmd_balance_master_account(["claude=luna"], now=2.0) == 0
     assert capsys.readouterr().out.splitlines()[1:] == [
         "claude: luna subscription MASTER",
-        "codex: default interactive MASTER",
+        "codex: default interactive MASTER pro",
     ]
     assert store.get("master-tier-claude") is None
+
+
+def test_master_account_records_the_agent_and_the_clock(monkeypatch, tmp_path, capsys):
+    store = FileSettings(tmp_path / "routing-settings.json")
+    monkeypatch.setattr(balance_cli, "_routing_settings", lambda: store)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@test")
+    monkeypatch.setattr(balance_cli.time, "time", lambda: 7.0)
+
+    assert balance_cli.cmd_balance_master_account(["claude=home", "tier=a=b"]) == 0
+    assert store.get("master-tier-claude") == "a=b"
+    assert {(entry["actor"], entry["at"]) for entry in store.history()} == {("engineer@test", 7.0)}
+    assert balance_cli.cmd_balance_master_account([], clear=True, now=9.0) == 0
+    assert {entry["at"] for entry in store.history()[2:]} == {9.0}
+    assert capsys.readouterr().err == ""
+
+
+def test_the_master_account_help_names_its_arguments(monkeypatch, capsys):
+    monkeypatch.setenv("COLUMNS", "300")
+    monkeypatch.setenv("NO_COLOR", "1")
+    parser = argparse.ArgumentParser(prog="agentihooks")
+    balance_cli.add_parser(parser.add_subparsers(dest="command"))
+    pages = []
+    for argv in (["balance"], ["balance", "master-account"]):
+        with pytest.raises(SystemExit):
+            parser.parse_args([*argv, "--help"])
+        pages.append(capsys.readouterr().out)
+    balance, master = pages
+
+    assert (
+        "Declare the account masters run on: claude=<slug> [tier=<label>] codex=<slug|default> [tier=<label>]"
+        in balance
+    )
+    assert "[HARNESS=SLUG|tier=LABEL ...]" in master
+    assert "Remove the declaration, of the named harnesses only" in master
 
 
 @pytest.mark.parametrize(

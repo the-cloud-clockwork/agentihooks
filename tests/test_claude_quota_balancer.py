@@ -422,7 +422,9 @@ def test_table_marks_current_account_and_cache_age():
     alpha = balancer.parse_probe("ALPHA", _stream(0.20, 0.30), 100)
     beta = balancer.parse_probe("BETA", _stream(0.10, 0.40), 100)
 
-    table = balancer.render_table([alpha, beta], now=1000, current="BETA", observed={"ALPHA": 400, "BETA": 1000})
+    table = balancer.render_table(
+        [alpha, beta], now=1000, marks=balancer.RowMarks(current="BETA"), observed={"ALPHA": 400, "BETA": 1000}
+    )
 
     assert "BETA (current)" in table
     assert "ALPHA (current)" not in table
@@ -534,7 +536,9 @@ def test_table_marks_the_declared_master_row_with_its_tier():
     alpha = balancer.parse_probe("alpha", _stream(0.10, 0.20), 100)
     beta = balancer.parse_probe("beta", _stream(0.10, 0.30), 100)
 
-    table = balancer.render_table([alpha, beta], now=0, master=MasterAccount("claude", "beta", "max", SUBSCRIPTION))
+    table = balancer.render_table(
+        [alpha, beta], now=0, marks=balancer.RowMarks(master=MasterAccount("claude", "beta", "max", SUBSCRIPTION))
+    )
     rows = {line.split()[1]: line for line in table.splitlines()[2:]}
 
     assert rows["beta"].split()[1:4] == ["beta", "MASTER", "max"]
@@ -546,14 +550,28 @@ def test_a_tokenless_master_is_an_interactive_row_serving_masters_only():
     from scripts.routing.master_account import MasterAccount
 
     alpha = balancer.parse_probe("alpha", _stream(0.10, 0.20), 100)
+    marks = balancer.RowMarks(master=MasterAccount("claude", "home", "", INTERACTIVE))
 
-    table = balancer.render_table(
-        [alpha], now=0, sessions={"home": 1}, master=MasterAccount("claude", "home", "", INTERACTIVE)
-    )
+    table = balancer.render_table([alpha], now=0, sessions={"home": 1}, marks=marks)
     lines = table.splitlines()
 
     assert lines[3].split() == ["-", "home", "MASTER", "interactive", "MASTERS", "1/?", "-", "?", *["n/a"] * 5]
     assert "session(s)" not in table
+    wide = balancer.render_table([], now=0, include_fable=True, observed={}, sessions={}, marks=marks)
+    assert wide.splitlines()[2].split() == [
+        "-",
+        "home",
+        "MASTER",
+        "interactive",
+        "MASTERS",
+        "0/?",
+        "-",
+        "?",
+        *["n/a"] * 7,
+        "-",
+    ]
+    subscription = balancer.RowMarks(master=MasterAccount("claude", "home", "", SUBSCRIPTION))
+    assert len(balancer.render_table([alpha], now=0, marks=subscription).splitlines()) == 3
 
 
 def test_reserve_account_is_chosen_only_when_no_other_has_room(monkeypatch, tmp_path):
