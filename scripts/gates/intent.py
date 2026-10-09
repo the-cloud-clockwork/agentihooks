@@ -5,6 +5,8 @@ import json
 import re
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Callable
@@ -326,6 +328,14 @@ def fix_steps(slug: str) -> str:
 
 
 @dataclass(frozen=True)
+class _Judgment:
+    pr: dict
+    previous: dict | None
+    state: dict | None
+    answer: tuple[str, str] | None
+
+
+@dataclass(frozen=True)
 class Check:
     slug: str
     mode: str
@@ -340,7 +350,7 @@ class Check:
     def run(self, doc):
         if self.mode == "off":
             return []
-        verdicts, actions = Verdicts(self.slug, NAME, self.home), []
+        verdicts, actions, tasks = Verdicts(self.slug, NAME, self.home), [], []
         for task in doc["tasks"]:
             states = ("pr", "claimed") if self.mode == "coach" else ("pr",)
             if task.get("state") not in states or not task.get("pr_url"):
@@ -348,25 +358,34 @@ class Check:
             record = verdicts.read(task["id"]) or verdicts.write(task["id"], PENDING, RUNNING, self.now_ms)
             if self.mode != "coach" and record["verdict"] != PENDING:
                 continue
-            if self._keep_if_unmoved(task, verdicts):
-                continue
-            pr = self.view(task["pr_url"])
-            if pr is not None:
-                actions += self._check(doc, task, pr, verdicts)
+            if not self._keep_if_unmoved(task, verdicts):
+                tasks.append(task)
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            pending = [(task, workers.submit(copy_context().run, self._judge, doc, task)) for task in tasks]
+            for task, future in pending:
+                judgment = future.result()
+                if judgment is not None:
+                    actions += self._check(task, judgment, verdicts)
         return actions
 
-    def _check(self, doc, task, pr, verdicts):
-        coaching = self._coaching()
-        previous = coaching.read(task["id"]) if self.mode == "coach" else None
-        head = pr.get("head")
-        if self.mode == "coach" and not head:
-            return []
-        if previous and previous["head"] == head:
+    def _judge(self, doc, task):
+        pr = self.view(task["pr_url"])
+        if pr is None or (self.mode == "coach" and not pr.get("head")):
+            return None
+        previous = self._coaching().read(task["id"]) if self.mode == "coach" else None
+        if previous and previous["head"] == pr.get("head"):
+            return _Judgment(pr, previous, None, None)
+        state = intent_history.prepare(state_of(doc, task, pr))
+        return _Judgment(pr, previous, state, self.ask(state))
+
+    def _check(self, task, judgment, verdicts):
+        previous, pr = judgment.previous, judgment.pr
+        if judgment.state is None:
             self._keep(task, previous, verdicts)
             return []
         rounds = min(previous["coach_rounds"] + (previous["verdict"] == FAIL), 2) if previous else 0
-        state = intent_history.prepare(state_of(doc, task, pr))
-        verdict, reason = self.ask(state)
+        state, (verdict, reason) = judgment.state, judgment.answer
+        head = pr.get("head")
         intent_history.append(
             self.slug,
             {
@@ -383,7 +402,7 @@ class Check:
         fields = {"coach_rounds": rounds, "head": head, "url": task["pr_url"]} if self.mode == "coach" else {}
         verdicts.write(task["id"], verdict, reason, self.now_ms, **fields)
         if self.mode == "coach":
-            coaching.write(task["id"], verdict, reason, self.now_ms, **fields)
+            self._coaching().write(task["id"], verdict, reason, self.now_ms, **fields)
         who = Who(name=task.get("claimed_by", ""), task=task["id"])
         actions = [f"task {task['id']} intent check {verdict}"]
         if verdict == UNCHECKED:
