@@ -1268,6 +1268,22 @@ def test_the_autoscale_command_prints_the_decision_for_a_fixture(tmp_path, capsy
     assert store.redis.get(store.key("sw", "quota-capacity")) is None
 
 
+def test_the_autoscale_command_previews_a_manual_swarm_without_applying_it(tmp_path, capsys, monkeypatch):
+    from scripts.swarm import cli
+
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="manual"))
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    fixture = tmp_path / "readings.json"
+    fixture.write_text(json.dumps(_readings()))
+    cli.main(["sw", "autoscale", "--fixture", str(fixture), "--json"])
+    printed = json.loads(capsys.readouterr().out)
+    assert (printed["scaling"], printed["applied"]) == ("manual", False)
+    assert printed["ceilings"] == {"eng": 2, "ci": 1, "plan": 0}
+    assert store.config("sw").scaling == "manual"
+    assert store.redis.get(store.key("sw", "quota-capacity")) is None
+
+
 def test_configured_reads_each_lane_cap_in_lane_order():
     config = SwarmConfig("sw", "/repo", max_eng=3, max_ci=2, max_plan=1)
     assert capacity._configured(config) == {"eng": 3, "ci": 2, "plan": 1}
@@ -1308,9 +1324,11 @@ def test_autoscaled_uses_the_swarm_watermarks_and_the_stored_state():
     from scripts.swarm import autoscale, host_budget
 
     config = SwarmConfig(
-        "sw", "/repo", max_eng=1, max_ci=0, max_plan=0, load_high=2.0, load_low=1.5, memory_per_agent_mb=1000
+        "sw", "/repo", max_eng=1, max_ci=0, max_plan=5, load_high=2.0, load_low=1.5, memory_per_agent_mb=1000
     )
-    inputs = capacity.fixture_inputs(_readings())
+    inputs = capacity.fixture_inputs(
+        {**_readings(), "host": {"load1": 0, "cpus": 8, "available_mb": 5000, "agents": 0}}
+    )
     scaled, decision = capacity.autoscaled(config, inputs)
     room = host_budget.room(inputs.host(), host_budget.Thresholds(2.0, 1.5, 1000), None)
     previous = {"ceilings": {"eng": 2, "ci": 1, "plan": 0}, "pending_raise": {"target": 9, "ticks": 1}}
@@ -1327,7 +1345,7 @@ def test_autoscaled_seeds_from_the_configured_caps_and_an_idle_raise():
     from scripts.swarm import autoscale, host_budget
 
     config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=1, max_plan=0)
-    inputs = capacity.fixture_inputs({**_readings(), "previous": {}, "demand": None})
+    inputs = capacity.fixture_inputs({**_readings(), "previous": {}, "demand": None, "live": {}})
     _, decision = capacity.autoscaled(config, inputs)
     room = host_budget.room(inputs.host(), host_budget.Thresholds(), None)
     previous = {"ceilings": {"eng": 2, "ci": 1, "plan": 0}, "pending_raise": {"target": None, "ticks": 0}}
@@ -1357,19 +1375,23 @@ def test_live_inputs_read_quota_without_a_refresh_and_count_ready_demand(monkeyp
     store.redis.set(store.key("sw", "quota-capacity"), json.dumps(stored))
     store.put_agent("sw", AgentRecord("engineer@x-0001", "eng", "e0", state="working"))
     ledger = FakeLedger([{"id": f"e{n}"} for n in range(3)] + [{"id": "c", "lane": "ci"}])
+    state = ledger.state
+    slugs = []
+    monkeypatch.setattr(ledger, "state", lambda slug: slugs.append(slug) or state(slug))
     seen = []
-    observed = [account(cap=6)]
+    observed = [account(cap=6), account("warned", cap=6, left=1)]
     monkeypatch.setattr(
         capacity, "accounts", lambda env, now, refresh=True: seen.append((env, now, refresh)) or observed
     )
     inputs = capacity.live_inputs("sw", store, ledger, {"X": "1"}, 5_000)
+    assert slugs == ["sw"]
     assert seen == [({"X": "1"}, 5.0, False)]
     assert inputs.observations == observed
     assert [agent.name for agent in inputs.agents] == ["engineer@x-0001"]
     assert inputs.demand == {"eng": 3, "ci": 1, "plan": 0}
     assert inputs.host is host_budget.read_host
     assert inputs.previous == stored
-    assert inputs.warned == {}
+    assert inputs.warned == {("claude", "warned"): "week"}
 
 
 def test_autoscale_lines_name_the_mode_the_raise_the_room_and_the_reason():
@@ -1405,7 +1427,9 @@ def test_the_autoscale_command_prints_exact_output_for_an_unknown_swarm(tmp_path
     fixture = tmp_path / "readings.json"
     fixture.write_text(json.dumps(_readings()))
     unknown = SwarmConfig("new", "", max_eng=0, max_ci=0)
-    _, decision = capacity.autoscaled(unknown, capacity.fixture_inputs(_readings()))
+    readings = {**_readings(), "previous": {}, "live": {}}
+    fixture.write_text(json.dumps(readings))
+    _, decision = capacity.autoscaled(unknown, capacity.fixture_inputs(readings))
     cli.main(["new", "autoscale", "--fixture", str(fixture), "--json"])
     expected = json.dumps({"scaling": "auto", "applied": True, **decision}, indent=2)
     assert capsys.readouterr().out == expected + "\n"
@@ -1420,7 +1444,8 @@ def test_quota_capacity_hands_autoscale_its_previous_state_and_warnings(tmp_path
     from scripts.swarm import runtime as module
 
     seen = []
-    monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: [account(cap=6)])
+    observed = [account(cap=6), account("warned", cap=6, left=1)]
+    monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: observed)
     monkeypatch.setattr(capacity, "autoscaled", lambda config, inputs: seen.append(inputs) or (config, None))
     rt = module.HerdrRuntime(home=tmp_path)
     previous = {"autoscale": {"ceilings": {"eng": 2, "ci": 0, "plan": 0}}}
@@ -1428,7 +1453,7 @@ def test_quota_capacity_hands_autoscale_its_previous_state_and_warnings(tmp_path
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
     demand = {"eng": 1, "ci": 0, "plan": 0}
     rt.quota_capacity(config, [], 100, demand)
-    assert seen == [capacity.ScaleInputs([account(cap=6)], [], demand, rt.host, previous, rt._quota_warned())]
+    assert seen == [capacity.ScaleInputs(observed, [], demand, rt.host, previous, {("claude", "warned"): "week"})]
 
 
 def api(harness="claude", weight=25, sessions=0, cap=10**6):
