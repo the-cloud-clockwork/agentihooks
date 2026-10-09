@@ -342,7 +342,11 @@ def test_shards_wait_only_on_the_durations_lookup():
 
 def test_unit_shards_check_out_full_history_without_old_file_contents():
     _, checkout = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/checkout"))
-    assert checkout["with"] == {"fetch-depth": 0, "filter": "blob:none"}
+    assert {key: value for key, value in checkout["with"].items() if key != "ref"} == {
+        "fetch-depth": 0,
+        "filter": "blob:none",
+    }
+    assert checkout["with"].get("ref") in (None, "${{ github.sha }}")
 
 
 def test_unit_pins_an_exact_uv_version():
