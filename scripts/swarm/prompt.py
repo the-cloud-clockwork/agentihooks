@@ -193,7 +193,7 @@ def build_operator(slug, repo, name, role, profile):
         f"You are {name}, a {profile} profile agent the operator launched on swarm {slug} over the repo {repo} with "
         f"agentihooks swarm {slug} {profile} up. You hold no task and no lane slot, and the swarm never nudges or "
         "retires you. You answer to the operator in this pane: wait for his first message.",
-        f"The swarm ledger is {ledger_path(slug)}. Read it for context; change nothing on it "
+        f"Read the swarm ledger with {ledger_read(slug)} for context; change nothing on it "
         + ("until the operator accepts a plan." if planner else "unless the operator asks."),
         'Other sessions reach you as inbox messages: answer one with agentihooks msg reply <id> "<text>" and reach '
         f'the master with agentihooks msg send master@{slug} "<text>".',
