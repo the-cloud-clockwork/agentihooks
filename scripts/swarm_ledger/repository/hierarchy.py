@@ -7,10 +7,6 @@ CREATE INDEX IF NOT EXISTS work_dependencies_required ON work_dependencies(ledge
 KINDS = {"plans": "plan", "phases": "phase", "slices": "slice", "tasks": "task"}
 NODES = "SELECT node_id, kind, parent_id, position FROM work_nodes WHERE ledger_slug=?"
 DEPENDENCIES = "SELECT node_id, requires_id FROM work_dependencies WHERE ledger_slug=?"
-COUNTS = (
-    "SELECT (SELECT COUNT(*) FROM work_nodes WHERE ledger_slug=?), "
-    "(SELECT COUNT(*) FROM work_dependencies WHERE ledger_slug=?)"
-)
 DELETE_NODE = "DELETE FROM work_nodes WHERE ledger_slug=? AND node_id=?"
 UPSERT_NODE = (
     "INSERT INTO work_nodes VALUES (?, ?, ?, ?, ?) ON CONFLICT(ledger_slug,node_id) DO UPDATE SET "
@@ -57,11 +53,8 @@ def apply(connection, slug: str, old: tuple, new: tuple) -> None:
     connection.executemany(INSERT_DEPENDENCY, [(slug, *edge) for edge in new_dependencies - old_dependencies])
 
 
-def sync(connection, slug: str, before: dict, after: dict) -> None:
-    old, new = project(before), project(after)
-    if connection.execute(COUNTS, (slug, slug)).fetchone() != (len(old[0]), len(old[1])):
-        old = stored(connection, slug)
-    apply(connection, slug, old, new)
+def sync(connection, slug: str, state: dict) -> None:
+    apply(connection, slug, stored(connection, slug), project(state))
 
 
 def drift(have: tuple, want: tuple) -> dict:
