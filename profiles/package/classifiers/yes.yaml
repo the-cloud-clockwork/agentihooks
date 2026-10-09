@@ -5,8 +5,8 @@ questions:
   - name: verdict
     type: yesno
     instructions: "{instructions}"
-    true: "{true}"
-    false: "{false}"
+    "true": "{true}"
+    "false": "{false}"
 thresholds:
   probability: 0.5
 rule:
