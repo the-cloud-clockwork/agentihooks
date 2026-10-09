@@ -641,3 +641,52 @@ def test_operation_author_is_resolved_once_per_write(monkeypatch):
     assert "writer" in state["_meta"]["members"]
     sync([{"op": "ack", "id": "again", "by": "writer", "rev": 1}])
     assert calls == ["alias", "writer"]
+
+
+def test_alias_operation_stores_the_canonical_author(monkeypatch):
+    from scripts.swarm_ledger import ledger_core
+
+    state = make_ledger()
+    ctx = ledger_core.Context(state["_meta"], ledger_core.now_ms())
+    monkeypatch.setattr("scripts.swarm.naming.resolve_name", lambda name: "writer" if name == "alias" else name)
+    assert ledger_core.apply_op(state, {"op": "join", "id": "joined", "by": "alias"}, ctx)
+    assert "writer" in ctx.meta["members"]
+    assert "alias" not in ctx.meta["members"]
+
+
+def test_stale_and_claimed_alerts_do_not_need_an_inbox(monkeypatch, capsys):
+    def unavailable():
+        raise OSError("offline")
+
+    monkeypatch.setattr("scripts.inbox.store.connect", unavailable)
+    state = {
+        "_meta": {"rev": 2},
+        "alerts": [
+            {"id": "old", "rev": 1, "state": "open", "target": "master"},
+            {"id": "claimed", "rev": 2, "state": "claimed", "target": "master"},
+        ],
+    }
+    assert ledger_server.deliver_alerts(SLUG, state) == []
+    assert capsys.readouterr().err == ""
+
+
+def test_expiry_waits_one_scan_interval_after_startup(monkeypatch):
+    make_ledger()
+    state = refuse_a_plan()
+    monkeypatch.setattr(core, "now_ms", lambda: state["alerts"][0]["at"] + 3600000)
+    monkeypatch.setenv("SWARM_RELOAD", "0")
+    sleeps = []
+
+    def tick(interval):
+        sleeps.append(interval)
+        alert = ledger_server.repository.read(SLUG, "alerts")["alerts"][0]
+        if len(sleeps) < 16:
+            assert alert["state"] == "open"
+        else:
+            assert alert["state"] == "done"
+            raise InterruptedError("scan observed")
+
+    monkeypatch.setattr(ledger_server.time, "sleep", tick)
+    with pytest.raises(InterruptedError, match="scan observed"):
+        ledger_server.watch_ledgers(interval=0)
+    assert len(sleeps) == 16
