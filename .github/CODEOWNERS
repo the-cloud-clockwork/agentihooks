@@ -24,6 +24,7 @@
 /tests/test_codeowners.py @nestorcolt
 /tests/test_count_floor.py @nestorcolt
 /tests/test_dev_durations.py @nestorcolt
+/tests/test_gate_protected.py @nestorcolt
 /tests/test_rulesets.py @nestorcolt
 /tests/test_shard_budget.py @nestorcolt
 /tests/test_shard_check.py @nestorcolt
