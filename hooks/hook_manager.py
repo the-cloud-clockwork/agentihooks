@@ -1407,18 +1407,6 @@ def on_pre_tool_use(payload: dict) -> None:
                 flush=True,
             )
 
-    # --- Prepush guard: a push needs a HEAD that passed python -m scripts.ci_prepush ---
-    if tool_name == "Bash":
-        try:
-            from hooks.context.prepush_guard import check_prepush
-
-            check_prepush(payload)
-        except BlockAction:
-            raise
-        except Exception as e:
-            log("prepush_guard check failed", {"error": str(e)})
-            print(f"WARNING: prepush_guard check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
-
     # --- kubectl mutation guard: HARD FLOOR — block live-system state mutation ---
     if tool_name == "Bash":
         try:

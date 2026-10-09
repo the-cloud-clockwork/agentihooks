@@ -352,6 +352,10 @@ def check_branch_guard(payload: dict) -> None:
             )
             raise BlockAction(f"BLOCKED: {message}")
 
+    from hooks.context.prepush_guard import check_prepush
+
+    check_prepush(payload)
+
     # Branch creation — default-deny unless operator signaled this turn (§14)
     session_id = payload.get("session_id", "")
     for pattern in _BRANCH_CREATE_PATTERNS:
