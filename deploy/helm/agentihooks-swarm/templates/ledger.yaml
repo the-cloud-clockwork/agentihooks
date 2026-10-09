@@ -1,0 +1,92 @@
+{{- $fullname := include "swarm.fullname" . }}
+{{- $host := printf "%s-ledger" $fullname }}
+{{- $port := .Values.ledger.port }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $host }}
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ledger
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "swarm.selector" (dict "root" . "component" "ledger") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ $port }}
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $host }}
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ledger
+spec:
+  replicas: 1
+  serviceName: {{ $host }}
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "swarm.selector" (dict "root" . "component" "ledger") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "swarm.labels" . | nindent 8 }}
+        app.kubernetes.io/component: ledger
+    spec:
+      {{- include "swarm.podSecurity" . | nindent 6 }}
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: ledger
+          image: {{ include "swarm.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "swarm.containerSecurity" . | nindent 10 }}
+          ports:
+            - name: http
+              containerPort: {{ $port }}
+          env:
+            {{- include "swarm.env" . | nindent 12 }}
+            - name: LEDGER_HOST
+              value: 0.0.0.0
+            - name: LEDGER_PORT
+              value: {{ $port | quote }}
+            - name: LEDGER_DIR
+              value: /data
+            - name: SWARM_RELOAD
+              value: "0"
+            - name: SWARM_PUBLIC_URL
+              value: {{ .Values.ledger.publicUrl | default (ternary (printf "https://%s" .Values.ingress.host) (include "swarm.ledgerUrl" .) .Values.ingress.enabled) | quote }}
+            - name: SWARM_ALLOWED_HOSTS
+              value: {{ printf "%s:%v,%s.%s:%v,%s.%s.svc:%v,%s.%s.svc.cluster.local:%v%s" $host $port $host .Release.Namespace $port $host .Release.Namespace $port $host .Release.Namespace $port (ternary (printf ",%s" .Values.ingress.host) "" .Values.ingress.enabled) | quote }}
+            {{- include "swarm.extraEnv" .Values.ledger.env | nindent 12 }}
+          {{- include "swarm.envFrom" . | nindent 10 }}
+          readinessProbe:
+            {{- include "swarm.healthz" . | nindent 12 }}
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            {{- include "swarm.healthz" . | nindent 12 }}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.ledger.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with .Values.ledger.persistence.storageClassName }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.ledger.persistence.size }}
