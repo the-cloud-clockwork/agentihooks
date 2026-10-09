@@ -102,7 +102,7 @@ from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.status import auto_snapshot, findings, status_report, task_counts, verdict_store
-from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, connect
+from scripts.swarm.store import ASSIST, AUTO_SCALING, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, connect
 from scripts.swarm.tick import agent_status, primed, skip_refused, tick
 from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, ledger_workspace, plan_shape
 from scripts.swarm_v2.runtime.routed import routed
@@ -777,7 +777,7 @@ def autoscale_lines(config, decision):
     caps = decision["ceilings"]
     pending = decision["pending_raise"]
     lines = [f"scaling {config.scaling}, ceilings eng {caps['eng']}, ci {caps['ci']}, plan {caps['plan']}"]
-    if config.scaling != "auto":
+    if config.scaling != AUTO_SCALING:
         lines.append(
             f"manual scaling keeps the configured caps eng {config.max_eng}, ci {config.max_ci}, plan {config.max_plan}"
         )
@@ -796,9 +796,9 @@ def cmd_autoscale(store, args):
         inputs = capacity.fixture_inputs(json.loads(Path(args.fixture).read_text()))
     else:
         inputs = capacity.live_inputs(args.slug, store, LedgerClient(), dict(os.environ), now_ms())
-    _, decision = capacity.autoscaled(replace(config, scaling="auto"), inputs)
+    _, decision = capacity.autoscaled(replace(config, scaling=AUTO_SCALING), inputs)
     if args.json:
-        print(json.dumps({"scaling": config.scaling, **decision}, indent=2))
+        print(json.dumps({"scaling": config.scaling, "applied": config.scaling == AUTO_SCALING, **decision}, indent=2))
         return
     print("\n".join(autoscale_lines(config, decision)))
 

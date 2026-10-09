@@ -1185,6 +1185,22 @@ def test_an_auto_swarm_lowers_its_ceiling_at_once_when_quota_drains(tmp_path, mo
     assert decision["autoscale"]["pending_raise"] == {"target": None, "ticks": 0}
 
 
+def test_an_auto_swarm_holds_its_previous_host_room_between_the_watermarks(tmp_path, monkeypatch):
+    from scripts.swarm.host_budget import HostSample
+
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="auto"))
+    ledger = FakeLedger([{"id": f"e{n}"} for n in range(4)])
+    ledger.comment = lambda slug, item, text, by: None
+    rt = _scaling_runtime(tmp_path, monkeypatch, [account(cap=6)])
+    first = _scaling_tick(store, ledger, rt, 1000)["autoscale"]["host"]["room"]
+    assert first > 0
+    rt.host = lambda: HostSample(load1=10.0, cpus=8, available_mb=64_000, agents=2)
+    second = _scaling_tick(store, ledger, rt, 61_000)["autoscale"]["host"]
+    assert second["room"] == first
+    assert "previous room" in second["reason"]
+
+
 def test_the_autoscale_command_prints_the_decision_for_a_fixture(tmp_path, capsys, monkeypatch):
     from scripts.swarm import cli
 
@@ -1210,7 +1226,7 @@ def test_the_autoscale_command_prints_the_decision_for_a_fixture(tmp_path, capsy
     )
     cli.main(["sw", "autoscale", "--fixture", str(fixture), "--json"])
     printed = json.loads(capsys.readouterr().out)
-    assert printed["scaling"] == "auto"
+    assert (printed["scaling"], printed["applied"]) == ("auto", True)
     assert printed["ceilings"] == {"plan": 0, "ci": 1, "eng": 2}
     assert printed["host"]["room"] > 0
     cli.main(["sw", "autoscale", "--fixture", str(fixture)])

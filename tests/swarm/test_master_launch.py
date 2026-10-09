@@ -710,6 +710,17 @@ def test_a_new_master_reads_quota_before_it_is_placed(up, monkeypatch):
     assert order == [("quota", "sw", AT / 1000), "spawn"]
 
 
+def test_a_new_master_primes_quota_with_the_stored_decision(up, monkeypatch):
+    store, _, rt = up
+    stored = {"autoscale": {"ceilings": {"eng": 3, "ci": 1, "plan": 0}, "pending_raise": {"target": 6, "ticks": 2}}}
+    store.redis.set(store.key("sw", "quota-capacity"), json.dumps(stored))
+    order = []
+    monkeypatch.setattr(rt, "quota_previous", lambda decision: order.append(decision), raising=False)
+    monkeypatch.setattr(rt, "quota_capacity", lambda config, agents, now: order.append("quota"), raising=False)
+    direct(store, rt, master_launch.NEW)
+    assert order == [stored, "quota"]
+
+
 def quota_master(monkeypatch, tmp_path, observed):
     monkeypatch.setattr(capacity, "accounts", lambda environ, now, refresh=True: observed)
     rt = runtime.HerdrRuntime(

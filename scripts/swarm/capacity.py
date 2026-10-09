@@ -6,7 +6,7 @@ from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, session_bands
 from scripts.swarm import autoscale, host_budget
-from scripts.swarm.store import AUTO_SCALING
+from scripts.swarm.store import AUTO_SCALING, SwarmConfig
 
 LANES = ("eng", "ci", "plan")
 
@@ -192,7 +192,7 @@ class ScaleInputs:
     warned: dict = field(default_factory=dict)
 
 
-def autoscaled(config, inputs: ScaleInputs) -> tuple:
+def autoscaled(config: SwarmConfig, inputs: ScaleInputs) -> tuple[SwarmConfig, dict | None]:
     if config.scaling != AUTO_SCALING:
         return config, None
     stored = inputs.previous.get("autoscale") or {}
