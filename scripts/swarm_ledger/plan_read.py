@@ -33,10 +33,12 @@ def chunk(text: str, lines: str, margin: int = MARGIN) -> str:
     return "".join(f"{row}\n" for row in rows[max(1, start - margin) - 1 : min(len(rows), end + margin)])
 
 
-def exact(doc: dict, ref: dict, lines: str) -> str:
-    text = chunk(_ledger("plan_ranges").stored_text(ref, doc), lines, margin=0)
+def exact(doc: dict, task: dict) -> str:
+    phase = next((p for p in doc.get("phases", []) if p.get("id") == task.get("phase")), {})
+    source = _ledger("plan_packages").text() if _packaged(phase, task) else _stored(doc, phase, task)
+    text = chunk(source, task["plan_lines"], margin=0)
     if not text.strip():
-        raise ValueError(f"plan lines {lines} hold no text")
+        raise ValueError(f"plan lines {task['plan_lines']} hold no text")
     return text
 
 
@@ -86,26 +88,36 @@ def _sliced_task(doc: dict, slug: str, task_id: str | None) -> dict:
     return task
 
 
+def _url(phase: dict, task: dict) -> str:
+    return task.get("plan_url") or phase.get("plan_url") or ""
+
+
+def _packaged(phase: dict, task: dict) -> bool:
+    linked = _ledger("plan_packages").linked
+    return not phase.get("plan_ref") and bool(task) and linked(task.get("plan_slice", ""), _url(phase, task))
+
+
+def _stored(doc: dict, phase: dict, task: dict) -> str:
+    ref = phase.get("plan_ref")
+    if not ref and task and _url(phase, task):
+        ref = {"artifact": _url(phase, task), "lines": task["plan_lines"]}
+    if not ref:
+        raise ValueError(f"phase {phase.get('id')} has no plan range")
+    return _ledger("plan_ranges").stored_text(ref, doc)
+
+
 def read(doc: dict, slug: str, task_id: str | None, phase_id: str | None) -> str:
     task = {} if phase_id else _sliced_task(doc, slug, task_id)
     if not phase_id and not task.get("plan_lines"):
         return f"This task has no plan lines; its description is the whole spec.\n\n{task.get('description', '')}\n"
-    from scripts.swarm_ledger import plan_packages
-
     phase_id = phase_id or task.get("phase")
     phase = next((p for p in doc.get("phases", []) if p.get("id") == phase_id), None)
     if phase is None:
         raise ValueError(f"no phase {phase_id} in ledger {slug}")
-    ref = phase.get("plan_ref")
-    url = task.get("plan_url") or phase.get("plan_url") or ""
-    if not ref and task and plan_packages.linked(task.get("plan_slice", ""), url):
-        return plan_packages.read(task["plan_lines"])
-    if not ref and task and url:
-        ref = {"artifact": url, "lines": task["plan_lines"]}
-    if not ref:
-        raise ValueError(f"phase {phase_id} has no plan range")
-    source = _ledger("plan_ranges").stored_text(ref, doc)
-    lines = task.get("plan_lines") or ref["lines"]
+    if _packaged(phase, task):
+        return _ledger("plan_packages").read(task["plan_lines"])
+    source = _stored(doc, phase, task)
+    lines = task.get("plan_lines") or phase["plan_ref"]["lines"]
     return chunk(source, lines) + (linked(source, lines) if task else "")
 
 
