@@ -13,6 +13,7 @@ from xdist.workermanage import NodeManager
 from hooks.secrets import scan
 from tests import conftest
 from tests.shards import (
+    FIRST_SHARD_FILES,
     assign_files,
     discover_test_files,
     setup_nodes_in_parallel,
@@ -181,6 +182,36 @@ def test_new_case_in_a_sparsely_measured_module_stays_on_a_collecting_shard(tmp_
     assert selections == [{known, unknown}, set()]
 
 
+@pytest.mark.parametrize("workers", [None, 4])
+def test_the_codex_file_runs_whole_in_the_first_shard_that_installs_the_codex_cli(tmp_path, workers):
+    (tmp_path / "tests/routing").mkdir(parents=True)
+    pinned = "tests/routing/test_codex_api.py"
+    for path in (pinned, "tests/test_a.py", "tests/test_b.py"):
+        (tmp_path / path).write_text("pass\n")
+    codex = [f"{pinned}::test_{n}" for n in range(4)]
+    durations = {**dict.fromkeys(codex, 2.0), "tests/test_a.py::t": 50.0, "tests/test_b.py::t": 1.0}
+    (tmp_path / ".test_durations").write_text(json.dumps(durations))
+    selections = []
+    for shard in (1, 2, 3):
+        config = SimpleNamespace(
+            getoption=lambda name, shard=shard: f"{shard}/3",
+            stash=pytest.Stash(),
+            rootpath=tmp_path,
+            option=SimpleNamespace(numprocesses=None),
+            **({"workerinput": {"workercount": workers}} if workers else {}),
+        )
+        collected = not conftest.pytest_ignore_collect(tmp_path / pinned, config)
+        items = [SimpleNamespace(nodeid=node) for node in codex] if collected else []
+        conftest.pytest_collection_modifyitems(config, items)
+        selections.append({item.nodeid for item in items})
+    assert selections == [set(codex), set(), set()]
+
+
+def test_every_file_pinned_to_the_first_shard_exists():
+    assert FIRST_SHARD_FILES
+    assert FIRST_SHARD_FILES <= set(discover_test_files(_ROOT))
+
+
 def test_grouped_files_reads_real_markers_and_ignores_fixture_strings(tmp_path):
     from tests.shards import grouped_files
 
@@ -245,7 +276,7 @@ def test_shard_option_accounts_for_serial_worker_groups(tmp_path, worker):
 
 
 def test_shard_option_collects_only_that_shards_files(pytestconfig):
-    files = discover_test_files(_ROOT)
+    files = [path for path in discover_test_files(_ROOT) if path not in FIRST_SHARD_FILES]
     shard = 2
     expected = set(assign_files(_stored_durations(), files, 4, source_sizes(_ROOT, files))[shard - 1])
     assert "shard" in vars(pytestconfig.option)
@@ -327,7 +358,7 @@ def _configured(monkeypatch, numprocesses, **extra):
 
 def test_the_controller_warms_its_shards_test_modules_once_per_worker(monkeypatch):
     calls, config = _configured(monkeypatch, 4)
-    files = discover_test_files(_ROOT)
+    files = [path for path in discover_test_files(_ROOT) if path not in FIRST_SHARD_FILES]
     durations = {node: seconds for node, seconds in _stored_durations().items() if node.split("::", 1)[0] in files}
     part = conftest.assign_nodes(durations, 4, conftest.grouped_files(_ROOT, files), 4)[1]
     known = {node.split("::", 1)[0] for node in durations}

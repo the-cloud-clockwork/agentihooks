@@ -2,7 +2,7 @@ import pytest
 
 from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
 from scripts.gates import intent
-from scripts.swarm import model_pick, priority_sweep, profile_choice, slice_screen, trace_plan
+from scripts.swarm import host_budget, model_pick, priority_sweep, profile_choice, runtime, slice_screen, trace_plan
 
 
 @pytest.fixture(autouse=True)
@@ -25,6 +25,12 @@ def isolate_classifier(monkeypatch):
     monkeypatch.setattr(intent, "stamp_body", lambda url, doc, task, run=None: False)
     monkeypatch.setattr(intent, "pr_view", lambda url, run=None: None)
     monkeypatch.setattr(intent, "pr_head", lambda url, run=None: None)
+
+
+@pytest.fixture(autouse=True)
+def roomy_host(monkeypatch):
+    sample = host_budget.HostSample(load1=0.5, cpus=8, available_mb=64_000, agents=2)
+    monkeypatch.setattr(runtime.HerdrRuntime, "host", lambda self: sample)
 
 
 @pytest.fixture

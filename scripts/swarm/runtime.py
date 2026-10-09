@@ -17,6 +17,7 @@ from scripts.profiles import binding, plugins
 from scripts.swarm import (
     affinity,
     effort_range,
+    host_budget,
     live_binding,
     model_pick,
     naming,
@@ -153,6 +154,7 @@ class HerdrRuntime:
         self._binding_pids = {}
         self.refusals = {}
         self.end, self.reap = reaper.retire, reaper.reap
+        self._quota_previous = {}
 
     def has_capacity(self, config):
         environ = dict(os.environ)
@@ -201,9 +203,14 @@ class HerdrRuntime:
         self._quota_accounts = capacity.accounts(dict(os.environ), now, refresh=placing)
         self._quota_held = {}
         accounts = self._quota_successor_accounts(requirements) if requirements else None
+        warned = self._quota_warned()
+        inputs = capacity.ScaleInputs(self._quota_accounts, agents, demand, self.host, self._quota_previous, warned)
+        config, scaled = capacity.autoscaled(config, inputs)
         decision = capacity.calculate(
-            config, self._quota_accounts, agents, demand, requirements, accounts, warned=self._quota_warned()
+            config, self._quota_accounts, agents, demand, requirements, accounts, warned=warned
         )
+        if scaled:
+            decision["autoscale"] = scaled
         for task, reason in self._quota_held.items():
             decision["reason"] += f"; quota handoff {task} waits: {reason}"
         self._quota_allocations = decision["allocation"]
@@ -217,6 +224,12 @@ class HerdrRuntime:
             self._quota_task_accounts = {task: slot["account"] for task, slot in slots.items()}
             decision["tasks"] = dict(self._quota_tasks)
         return decision
+
+    def host(self) -> host_budget.HostSample:
+        return host_budget.read_host()
+
+    def quota_previous(self, decision: dict) -> None:
+        self._quota_previous = decision
 
     def quota_requirements(self, config: SwarmConfig, ready: dict) -> dict:
         from scripts.swarm.capacity import _harnesses
