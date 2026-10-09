@@ -49,9 +49,10 @@ jobs:
       - name: Decide from the base branch rule whether the chart proof is due
         id: paths
         env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
-          HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         run: |
+          set -o pipefail
           rule=deploy/helm/agentihooks-swarm/ci/kind-due.sh
           if [[ -n $BASE ]] && git cat-file -e "$BASE:$rule"; then
             git show "$BASE:$rule" | bash -s "$BASE" "$HEAD" >> "$GITHUB_OUTPUT"

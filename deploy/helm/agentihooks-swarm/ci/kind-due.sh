@@ -5,14 +5,16 @@ base=$1
 head=$2
 paths=(
   deploy/helm/agentihooks-swarm/
+  .github/workflows/helm-kind.yml
+  .github/workflows/test.yml
   Dockerfile
   .dockerignore
   pyproject.toml
-  .github/workflows/helm-kind.yml
-  .github/workflows/test.yml
-  scripts/swarm/controller.py
-  scripts/swarm/lease.py
-  scripts/hive/
+  README.md
+  hooks/
+  scripts/
+  profiles/
+  media/
 )
 changed="$(git diff --name-only "$base...$head" -- "${paths[@]}")"
 if [[ -n $changed ]]; then

@@ -99,13 +99,8 @@ printf 'controller restarts: 0\n'
 
 docker exec "$cluster-control-plane" pkill -STOP -f "agentihooks controller run"
 printf 'controller frozen; its lease must lapse and the liveness probe must restart it\n'
-for _ in $(seq 300); do
-  restarts="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')"
-  if [[ $restarts == 1 ]]; then
-    break
-  fi
-  sleep 1
-done
+kubectl wait pod "${controller[@]}" --for=jsonpath='{.status.containerStatuses[0].restartCount}'=1 --timeout 5m || true
+restarts="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')"
 if [[ $restarts != 1 ]]; then
   printf 'the liveness probe never restarted the frozen controller (restarts: %s)\n' "$restarts" >&2
   exit 1

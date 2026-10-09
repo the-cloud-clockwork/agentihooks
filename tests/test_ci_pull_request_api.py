@@ -121,8 +121,6 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/packaging/hive-join-smoke.sh",
         "scripts/packaging/swarm-smoke.sh",
         "scripts/size_limits.py",
-        "scripts/swarm/controller.py",
-        "scripts/swarm/lease.py",
         "scripts/swarm_ledger/artifact_sanity.py",
         "tests/count_floor.py",
         "tests/coverage_baseline.py",
