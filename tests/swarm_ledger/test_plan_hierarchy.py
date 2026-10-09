@@ -240,6 +240,8 @@ def test_malformed_plan_ops_are_refused(op, error):
         ({"plans": [{"id": "a"}], "phases": [{"id": "p1", "plan": 3}]}, "phases/p1/plan must be str"),
         ({"plans": [{"id": "a"}, {"id": "a"}]}, "every plans item needs a unique id"),
         ({"plans": [1]}, "plans must be a list of objects"),
+        ({"plans": [{"id": ""}]}, "every plans item needs a unique id"),
+        ({"plans": [{"id": 5}]}, "every plans item needs a unique id"),
         ({"slices": 3}, "slices must be a list of objects"),
         ({"slices": [{"id": "a.x"}, {"id": "a.x"}]}, "every slices item needs a unique id"),
         ({"plans": [{"id": "a", "url": "ftp://x"}]}, "url must be an http or https link"),
