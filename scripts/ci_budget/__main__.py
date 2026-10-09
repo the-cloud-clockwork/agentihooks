@@ -50,9 +50,9 @@ def _summary(result: dict) -> str:
 
 
 def main(argv: list[str] | None = None, now: Callable[[], float] = time.time) -> int:
-    parser = argparse.ArgumentParser(description="print each Tests stage's wall time against its budget")
-    parser.add_argument("--run", type=Path, required=True, help="the run as the runs endpoint returns it")
-    parser.add_argument("--jobs", type=Path, required=True, help="this attempt's jobs, one JSON object per line")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run", type=Path, required=True)
+    parser.add_argument("--jobs", type=Path, required=True)
     args = parser.parse_args(argv)
     run_doc = json.loads(args.run.read_text())
     jobs = [json.loads(line) for line in args.jobs.read_text().splitlines() if line]

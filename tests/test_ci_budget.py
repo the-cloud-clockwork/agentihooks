@@ -37,9 +37,30 @@ JOBS = [
 ]
 
 
+def _workflow_jobs():
+    return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+
+
+def test_seconds_reads_github_timestamps_as_utc():
+    assert ci_budget.seconds("1970-01-01T00:01:00Z") == 60
+
+
+@pytest.mark.parametrize(
+    ("name", "stage"),
+    [
+        ("Gate — Required", "gate-required"),
+        ("unit (3.12, 1)", "unit"),
+        ("swarm-image / hive-join", "swarm-image"),
+        ("a b / c", "a b"),
+        ("a b (1)", "a b"),
+    ],
+)
+def test_stage_of_names_the_job_or_reusable_workflow_id(name, stage):
+    assert ci_budget.stage_of(name) == stage
+
+
 def test_a_stage_spans_first_job_creation_to_last_job_end():
-    spent = ci_budget.stages(JOBS)
-    assert spent == {
+    assert ci_budget.stages(JOBS) == {
         "durations": 35,
         "unit": 270,
         "swarm-image": 95,
@@ -48,23 +69,46 @@ def test_a_stage_spans_first_job_creation_to_last_job_end():
     }
 
 
-def test_report_orders_stages_slowest_first_and_flags_over_budget_and_unbudgeted():
+def test_report_orders_stages_slowest_first_then_by_name():
+    jobs = [_job("wiring", "00:00", "00:10"), _job("size", "00:00", "00:10"), _job("lint", "00:00", "00:20")]
+    result = ci_budget.report({"run_started_at": START}, jobs, ci_budget.seconds("2026-10-09T07:01:00Z"))
+    assert result == {
+        "total": 60,
+        "stages": [
+            {"stage": "lint", "seconds": 20, "budget": 150},
+            {"stage": "size", "seconds": 10, "budget": 90},
+            {"stage": "wiring", "seconds": 10, "budget": 60},
+        ],
+    }
+
+
+def test_a_stage_at_its_budget_and_a_run_at_fifteen_minutes_are_inside_budget():
+    assert ci_budget.verdict({"seconds": 60, "budget": 60}) == "ok"
+    assert ci_budget.verdict({"seconds": 61, "budget": 60}) == "over"
+    assert ci_budget.verdict({"seconds": 1, "budget": None}) == "no budget"
+    assert ci_budget.run_state(900) == "ok"
+    assert ci_budget.run_state(901) == "over"
+
+
+def test_render_prints_every_stage_and_the_run_against_the_budget():
     result = ci_budget.report({"run_started_at": START}, JOBS, ci_budget.seconds("2026-10-09T07:16:00Z"))
-    assert result["total"] == 960
-    assert [row["stage"] for row in result["stages"]] == ["mutation", "unit", "swarm-image", "durations", "brand-new"]
-    assert [ci_budget.verdict(row) for row in result["stages"]] == ["over", "ok", "ok", "ok", "no budget"]
-    lines = ci_budget.render(result)
-    assert lines[1].split() == ["mutation", "10m00s", "8m00s", "over"]
-    assert lines[-1].split()[-3:] == ["16m00s", "15m00s", "over"]
+    assert [line.split() for line in ci_budget.render(result)] == [
+        ["stage", "wall", "budget", "verdict"],
+        ["mutation", "10m00s", "8m00s", "over"],
+        ["unit", "4m30s", "5m00s", "ok"],
+        ["swarm-image", "1m35s", "3m00s", "ok"],
+        ["durations", "0m35s", "1m00s", "ok"],
+        ["brand-new", "0m10s", "none", "no", "budget"],
+        ["push", "to", "this", "report", "16m00s", "15m00s", "over"],
+    ]
 
 
 def test_every_job_of_the_tests_workflow_has_a_budget():
-    jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
-    assert set(jobs) == set(ci_budget.BUDGETS)
+    assert set(_workflow_jobs()) == set(ci_budget.BUDGETS)
 
 
 def test_the_longest_chain_of_budgets_to_gate_required_fits_fifteen_minutes():
-    jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    jobs = _workflow_jobs()
 
     def chain(job):
         needs = jobs[job].get("needs", [])
@@ -84,14 +128,31 @@ def _files(tmp_path, jobs):
 def test_cli_prints_the_table_summary_and_annotations(tmp_path, monkeypatch, capsys):
     summary = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
-    code = main(_files(tmp_path, JOBS), now=lambda: ci_budget.seconds("2026-10-09T07:16:00Z"))
-    out = capsys.readouterr().out
-    assert code == 0
-    assert out.splitlines()[1].split() == ["mutation", "10m00s", "8m00s", "over"]
-    assert "::warning title=Stage over budget::mutation took 10m00s against its budget of 8m00s" in out
-    assert "::warning title=Stage without a budget::brand-new took 0m10s and has no budget" in out
-    assert "::error title=Run over fifteen minutes::push to this report took 16m00s against 15m00s" in out
-    assert "| mutation | 10m00s | 8m00s | over |" in summary.read_text()
+    jobs = [JOBS[0], JOBS[5], JOBS[-1]]
+    end = ci_budget.seconds("2026-10-09T07:16:00Z")
+    assert main(_files(tmp_path, jobs), now=lambda: end) == 0
+    assert capsys.readouterr().out == "\n".join(
+        [
+            *ci_budget.render(ci_budget.report({"run_started_at": START}, jobs, end)),
+            "::warning title=Stage over budget::mutation took 10m00s against its budget of 8m00s",
+            "::warning title=Stage without a budget::brand-new took 0m10s and has no budget",
+            "::error title=Run over fifteen minutes::push to this report took 16m00s against 15m00s",
+            "",
+        ]
+    )
+    assert summary.read_text() == "\n".join(
+        [
+            "## Stage budget",
+            "",
+            "| Stage | Wall | Budget | Verdict |",
+            "| --- | ---: | ---: | --- |",
+            "| mutation | 10m00s | 8m00s | over |",
+            "| durations | 0m35s | 1m00s | ok |",
+            "| brand-new | 0m10s | none | no budget |",
+            "| push to this report | 16m00s | 15m00s | over |",
+            "",
+        ]
+    )
 
 
 def test_cli_inside_every_budget_prints_no_annotation(tmp_path, monkeypatch, capsys):
@@ -114,8 +175,16 @@ def test_cli_fails_when_the_jobs_were_not_read(tmp_path):
         main(args)
 
 
+@pytest.mark.parametrize("dropped", ["--run", "--jobs"])
+def test_cli_requires_both_files(tmp_path, dropped):
+    args = _files(tmp_path, JOBS)
+    index = args.index(dropped)
+    with pytest.raises(SystemExit):
+        main(args[:index] + args[index + 2 :])
+
+
 def test_stage_budget_runs_after_every_gate_need_and_gate_required_needs_it():
-    jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    jobs = _workflow_jobs()
     job, gate = jobs[ci_budget.SELF], jobs["gate-required"]
     assert set(job["needs"]) == set(gate["needs"]) - {ci_budget.SELF}
     assert ci_budget.SELF in gate["needs"]

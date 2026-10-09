@@ -37,7 +37,7 @@ BUDGETS = {
 
 
 def seconds(stamp: str) -> float:
-    return datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
+    return datetime.fromisoformat(stamp).timestamp()
 
 
 def stage_of(name: str) -> str:

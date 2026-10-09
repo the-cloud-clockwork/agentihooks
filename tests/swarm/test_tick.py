@@ -1000,6 +1000,16 @@ def test_account_reads_and_spawns_hold_the_placement_lock_and_the_rest_does_not(
     assert not tick_module.PLACING.locked()
 
 
+def test_the_tick_hands_the_ci_budget_pass_its_ledger(store, monkeypatch):
+    from scripts.ci_budget import defects
+
+    seen = []
+    monkeypatch.setattr(defects, "refresh", lambda *args: seen.append(args) or [])
+    ledger = tasks(("t1", "eng"))
+    tick("sw", store, ledger, FakeRuntime(), 1)
+    assert [(args[0], args[3], args[4]) for args in seen] == [("sw", ledger, 1)]
+
+
 def test_an_operator_write_to_a_stopped_swarm_starts_its_master_and_no_engineers(store):
     from scripts.inbox.store import InboxStore
 
