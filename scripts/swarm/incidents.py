@@ -1,6 +1,7 @@
 import socket
 
 from scripts.swarm import push
+from scripts.swarm.store import PREFIX
 
 STEP = """
 local active = tonumber(redis.call('HGET', KEYS[1], 'active') or '0')
@@ -20,7 +21,7 @@ return event
 
 
 def key(kind: str) -> str:
-    return f"agentihooks:host:{socket.gethostname()}:incident:{kind}"
+    return f"{PREFIX}:host:{socket.gethostname()}:incident:{kind}"
 
 
 def step(redis, kind: str, bad: bool) -> str:
