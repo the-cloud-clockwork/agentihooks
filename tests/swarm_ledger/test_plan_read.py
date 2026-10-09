@@ -240,7 +240,7 @@ def test_linked_follows_only_links_inside_the_slice():
 
 
 def test_linked_skips_a_section_anchored_inside_the_slice():
-    source = '## W\n- see [A](#ca) and [B](#cb)\n<a id="ca"></a>\n### A\n- a\n<a id="cb"></a>\n### B\n- b\n'
+    source = '## W\n- see [A](#ca) and [B](#cb), quoting <a id="cb"></a>\n<a id="ca"></a>\n### A\n- a\n<a id="cb"></a>\n### B\n- b\n'
     assert plan_read.linked(source, "1-5") == "\n### B\n- b\n"
 
 
@@ -249,7 +249,7 @@ def test_linked_is_empty_for_a_slice_without_anchor_links():
 
 
 def test_section_runs_to_the_plan_end_without_a_later_heading():
-    assert plan_read.section('<a id="z"></a>\n## Z\n- z\n  \n<a id="y"></a>\n', "z") == "## Z\n- z\n"
+    assert plan_read.section('<a id="z"></a>\n## Z\n- z\n  \n<a id="y.1"></a>\n', "z") == "## Z\n- z\n"
 
 
 def test_section_is_empty_unless_a_heading_follows_the_anchor():

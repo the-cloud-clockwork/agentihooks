@@ -61,8 +61,9 @@ def section(source: str, anchor: str) -> str:
 
 def linked(source: str, lines: str) -> str:
     start, end = _ledger("plan_ranges").bounds(lines)
-    text = "\n".join(source.splitlines()[start - 1 : end])
-    anchors = dict.fromkeys(anchor for anchor in LINK.findall(text) if f'<a id="{anchor}"></a>' not in text)
+    rows = source.splitlines()[start - 1 : end]
+    tags = {row.strip() for row in rows}
+    anchors = dict.fromkeys(anchor for anchor in LINK.findall("\n".join(rows)) if f'<a id="{anchor}"></a>' not in tags)
     return "".join(f"\n{case}" for anchor in anchors if (case := section(source, anchor)))
 
 
