@@ -32,9 +32,9 @@ def needs_of(job: dict) -> set[str]:
 
 
 def _skips_pull_requests(term: str) -> bool:
-    operands = re.split(r"\s*(==|!=)\s*", term.strip())
-    if len(operands) == 3 and operands[2] == "github.event_name":
-        term = f"{operands[2]} {operands[1]} {operands[0]}"
+    operands = re.split(r"(==|!=)", term)
+    if len(operands) == 3 and operands[2].strip() == "github.event_name":
+        term = f"github.event_name {operands[1]} {operands[0]}"
     match = EVENT_TERM.fullmatch(term.strip())
     if match is None:
         return False
