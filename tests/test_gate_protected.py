@@ -307,3 +307,20 @@ def test_the_protected_grader_reports_gate_required_on_the_head():
     assert all('context="$CONTEXT"' in step["run"] for step in statuses)
     assert _protected_workflow()["env"]["CONTEXT"] == gate_protected.GATE
     assert statuses[-1]["if"] == "${{ always() }}"
+
+
+@pytest.mark.parametrize("weakened", [False, True])
+def test_only_the_canonical_reuse_protocol_is_an_allowed_transition(weakened):
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["gate-required"] = base["jobs"].pop("gate")
+    head = copy.deepcopy(base)
+    head["jobs"]["reuse"] = {"runs-on": "ubuntu-latest"}
+    head["jobs"]["queue-baseline"] = {"runs-on": "ubuntu-latest"}
+    head["jobs"]["gate-required"]["needs"].extend(["reuse", "queue-baseline"])
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps()
+    if weakened:
+        head["jobs"]["gate-required"]["steps"][0]["run"] += "true\n"
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    assert bool(problems) == weakened, problems
