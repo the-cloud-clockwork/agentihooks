@@ -4,7 +4,7 @@ import json
 import tarfile
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -12,7 +12,7 @@ from scripts.swarm_v2 import worker_image
 
 
 def artifact(name, version):
-    content = f"#!/bin/sh\nprintf '{name} {version}\\n'\n".encode()
+    content = f'#!/bin/sh\n[ "$1" = "--version" ] || exit 2\nprintf "{name} {version}\\n"\n'.encode()
     return {
         "version": version,
         "url": f"https://example.test/{version}/{name}",
@@ -97,10 +97,13 @@ def test_install_verifies_every_download_before_mutating_binaries(locked, tmp_pa
 
 def test_install_native_binaries_and_reject_wrong_version(locked, tmp_path, monkeypatch):
     _, lock, payloads = locked
-    monkeypatch.setattr(worker_image.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(payloads[url]))
+    download = Mock(side_effect=lambda url, timeout: io.BytesIO(payloads[url]))
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", download)
     destination = tmp_path / "bin"
     destination.mkdir()
     worker_image.install_tools(lock, destination)
+    assert download.call_args_list == [call(tool["url"], timeout=120) for tool in lock["tools"].values()]
+    assert all(binary.stat().st_mode & 0o777 == 0o755 for binary in destination.iterdir())
     assert worker_image.tool_versions(lock, destination) == {name: f"{name} 1.2.3" for name in lock["tools"]}
     (destination / "herdr").write_text("#!/bin/sh\nprintf 'herdr 9.9.9\\n'\n")
     with pytest.raises(ValueError) as error:
@@ -119,10 +122,13 @@ def test_codex_archive_installs_only_named_binary(locked, tmp_path, monkeypatch)
             archive.addfile(member, io.BytesIO(content))
     payloads[url] = buffer.getvalue()
     lock["tools"]["codex"].update(member="codex-linux", sha256=hashlib.sha256(payloads[url]).hexdigest())
-    monkeypatch.setattr(worker_image.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(payloads[url]))
+    download = Mock(side_effect=lambda url, timeout: io.BytesIO(payloads[url]))
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", download)
     destination = tmp_path / "bin"
     destination.mkdir()
     worker_image.install_tools(lock, destination)
+    assert download.call_args_list == [call(tool["url"], timeout=120) for tool in lock["tools"].values()]
+    assert all(binary.stat().st_mode & 0o777 == 0o755 for binary in destination.iterdir())
     assert not (tmp_path / "escape").exists()
     assert worker_image.tool_versions(lock, destination)["codex"] == "codex 1.2.3"
 
@@ -210,7 +216,8 @@ def test_observed_inventory_checks_python_shell_and_tool_versions(locked, monkey
     monkeypatch.setattr(worker_image.platform, "python_version", lambda: "3.12.12")
     query = Mock(return_value=SimpleNamespace(stdout="git=1:2.39.5-0+deb12u3\nbash=5.2\n"))
     monkeypatch.setattr(worker_image.subprocess, "run", query)
-    monkeypatch.setattr(worker_image, "tool_versions", lambda data, binaries: {"herdr": "herdr 1.2.3"})
+    versions = Mock(return_value={"herdr": "herdr 1.2.3"})
+    monkeypatch.setattr(worker_image, "tool_versions", versions)
     monkeypatch.setattr(
         worker_image.importlib.metadata,
         "distributions",
@@ -225,6 +232,7 @@ def test_observed_inventory_checks_python_shell_and_tool_versions(locked, monkey
         "debian_packages": ["bash=5.2", "git=1:2.39.5-0+deb12u3"],
         "python_packages": ["alpha==1.0.0", "zeta==2.0.0"],
     }
+    versions.assert_called_once_with(lock, Path("/bin"))
     query.assert_called_once_with(
         ["dpkg-query", "-W", "-f=${Package}=${Version}\n"], check=True, capture_output=True, text=True
     )
@@ -240,15 +248,21 @@ def test_observed_inventory_checks_python_shell_and_tool_versions(locked, monkey
 
 
 def test_manifest_contains_observed_inventory_and_immutable_templates(locked, tmp_path, monkeypatch):
-    path, _, _ = locked
+    path, lock, _ = locked
     observed = {"python": "3.12.12", "tools": {"herdr": "herdr 1.2.3"}}
-    monkeypatch.setattr(worker_image, "observed_inventory", lambda lock, binaries: observed)
+    inventory = Mock(return_value=observed)
+    monkeypatch.setattr(worker_image, "observed_inventory", inventory)
+    monkeypatch.setattr(io, "text_encoding", lambda encoding, *args: "utf-16" if encoding is None else encoding)
     templates = tmp_path / "templates"
     templates.mkdir()
-    (templates / "profile.md").write_text("fixture profile")
+    (templates / "profile.md").write_text("fixture profile", encoding="utf-8")
     (templates / "empty").mkdir()
     worker_image.write_manifest(path, "amd64", "tested-commit", templates)
-    manifest = json.loads(path.with_name("manifest.json").read_text())
+    manifest_bytes = path.with_name("manifest.json").read_bytes()
+    manifest = json.loads(manifest_bytes.decode("utf-8"))
+    assert manifest_bytes == (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    inventory.assert_called_once_with(lock, Path("/usr/local/bin"))
+    inventory.reset_mock()
     assert manifest == {
         "schema_version": 1,
         "package": "SV2-IMG-01",
@@ -262,14 +276,15 @@ def test_manifest_contains_observed_inventory_and_immutable_templates(locked, tm
         "worker_image_build_validation_failures": 0,
         "manifest": manifest,
     }
+    inventory.assert_called_once_with(lock, Path("/usr/local/bin"))
     manifest["declared"]["python"] = "bad"
-    path.with_name("manifest.json").write_text(json.dumps(manifest))
+    path.with_name("manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(ValueError) as error:
         worker_image.report(path)
     assert str(error.value) == "installed inventory differs from build manifest"
     manifest["declared"]["python"] = "3.12.12"
     manifest["observed"] = {}
-    path.with_name("manifest.json").write_text(json.dumps(manifest))
+    path.with_name("manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(ValueError) as error:
         worker_image.report(path)
     assert str(error.value) == "installed inventory differs from build manifest"
@@ -286,13 +301,15 @@ def test_build_rejects_selected_base_that_differs_from_lock(locked, monkeypatch)
 @pytest.mark.parametrize("action", ["validate", "install", "manifest", "report", "shell-packages"])
 def test_build_command_routes_locked_actions(locked, monkeypatch, capsys, action):
     path, lock, _ = locked
+    lock["shell_packages"].update(bash="5.2", curl="7.88")
+    path.write_text(json.dumps(lock))
     monkeypatch.setattr(
         "sys.argv",
         ["worker_image", action, "--lock", str(path), "--architecture", "amd64", "--source-revision", "tested"],
     )
     install = Mock()
     manifest = Mock()
-    report = Mock(return_value={"ok": True})
+    report = Mock(return_value={"zeta": 2, "alpha": 1})
     monkeypatch.setattr(worker_image, "install_tools", install)
     monkeypatch.setattr(worker_image, "write_manifest", manifest)
     monkeypatch.setattr(worker_image, "report", report)
@@ -303,10 +320,77 @@ def test_build_command_routes_locked_actions(locked, monkeypatch, capsys, action
         manifest.assert_called_once_with(path, "amd64", "tested", Path("/opt/agentihooks/templates"))
     elif action == "report":
         report.assert_called_once_with(path)
-        assert capsys.readouterr().out == '{"ok": true}\n'
+        assert capsys.readouterr().out == '{"alpha": 1, "zeta": 2}\n'
     elif action == "shell-packages":
-        assert capsys.readouterr().out == "git=1:2.39.5-0+deb12u3\n"
+        assert capsys.readouterr().out == "git=1:2.39.5-0+deb12u3 bash=5.2 curl=7.88\n"
     else:
         install.assert_not_called()
         manifest.assert_not_called()
         report.assert_not_called()
+
+
+@pytest.mark.parametrize("field", ["version", "sha256", "url", "version_output"])
+def test_missing_artifact_metadata_has_the_rejection_contract(locked, field):
+    path, lock, _ = locked
+    del lock["tools"]["herdr"][field]
+    path.write_text(json.dumps(lock))
+    with pytest.raises(ValueError) as error:
+        worker_image.load_lock(path, "amd64")
+    assert str(error.value) == "invalid artifact lock: herdr"
+
+
+def test_lock_decodes_utf8_independently_of_the_default_codec(locked, monkeypatch):
+    path, lock, _ = locked
+    lock["tools"]["herdr"]["version_output"] = "hé rdr 1.2.3"
+    path.write_text(json.dumps(lock, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(io, "text_encoding", lambda encoding, *args: "latin-1" if encoding is None else encoding)
+    assert worker_image.load_lock(path, "amd64") == lock
+
+
+def test_version_probe_rejects_a_failed_binary_with_matching_output(locked, tmp_path):
+    _, lock, _ = locked
+    (tmp_path / "herdr").write_text("#!/bin/sh\nprintf 'herdr 1.2.3\\n'\nexit 7\n")
+    (tmp_path / "herdr").chmod(0o755)
+    with pytest.raises(worker_image.subprocess.CalledProcessError) as error:
+        worker_image.tool_versions(lock, tmp_path)
+    assert error.value.returncode == 7
+
+
+def test_archive_requires_the_locked_gzip_format(locked, tmp_path, monkeypatch):
+    _, lock, payloads = locked
+    url = lock["tools"]["codex"]["url"]
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        member = tarfile.TarInfo("codex-linux")
+        member.size = len(payloads[url])
+        archive.addfile(member, io.BytesIO(payloads[url]))
+    payloads[url] = buffer.getvalue()
+    lock["tools"]["codex"].update(member="codex-linux", sha256=hashlib.sha256(payloads[url]).hexdigest())
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(payloads[url]))
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    with pytest.raises(tarfile.ReadError):
+        worker_image.install_tools(lock, destination)
+    assert list(destination.iterdir()) == []
+
+
+def test_command_defaults_use_the_image_paths_and_unknown_revision(locked, monkeypatch):
+    _, lock, _ = locked
+    load = Mock(return_value=lock)
+    manifest = Mock()
+    monkeypatch.setattr(worker_image, "load_lock", load)
+    monkeypatch.setattr(worker_image, "write_manifest", manifest)
+    monkeypatch.setattr("sys.argv", ["worker_image", "manifest"])
+    worker_image.main()
+    load.assert_called_once_with(Path("/opt/swarm-node/versions.lock"), "amd64")
+    manifest.assert_called_once_with(
+        Path("/opt/swarm-node/versions.lock"), "amd64", "unknown", Path("/opt/agentihooks/templates")
+    )
+
+
+def test_command_rejects_unknown_actions(monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["worker_image", "unexpected"])
+    with pytest.raises(SystemExit) as error:
+        worker_image.main()
+    assert error.value.code == 2
+    assert "invalid choice: 'unexpected'" in capsys.readouterr().err
