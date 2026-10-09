@@ -204,6 +204,7 @@ def test_the_default_base_is_fetched_from_origin_dev(repo, tmp_path):
     origin = tmp_path / "origin.git"
     _git(tmp_path, "init", "-q", "--bare", str(origin))
     _git(repo, "remote", "add", "origin", str(origin))
+    _git(repo, "config", "remote.origin.tagOpt", "--tags")
     _git(repo, "push", "-q", "origin", "dev")
     _git(repo, "fetch", "-q", "origin")
     _git(repo, "checkout", "-q", "-b", "work")

@@ -301,7 +301,10 @@ class TestResolveCwd:
     def test_a_cd_prefix_names_the_directory(self, tmp_path, quote):
         from hooks.context.branch_guard import _resolve_cwd
 
-        assert _resolve_cwd(f"cd {quote}{tmp_path}{quote} && git push", "/") == str(tmp_path)
+        work = tmp_path / "workX"
+        work.mkdir()
+
+        assert _resolve_cwd(f"cd {quote}{work}{quote} && git push", "/") == str(work)
 
     def test_a_cd_prefix_expands_home_and_variables(self, tmp_path, monkeypatch):
         from hooks.context.branch_guard import _resolve_cwd
