@@ -183,32 +183,49 @@ class RedisStore:
         self.redis.hset(self.key(slug, "config"), mapping=_fields(config))
         return config
 
-    def claim(self, slug, task, agent, lease_ms):
-        return bool(self.redis.set(self.key(slug, "claim", task), agent, nx=True, px=lease_ms))
+    def claim(self, slug: str, task: str, agent: str, lease_ms: int) -> bool:
+        return self._if_holder(
+            self.key(slug, "claim", task),
+            None,
+            lambda pipe, key: pipe.set(key, agent, nx=True, px=lease_ms),
+            self._claim_guards(slug, task),
+        )
 
     def claimant(self, slug, task):
         return self.redis.get(self.key(slug, "claim", task))
 
-    def refresh(self, slug, task, agent, lease_ms):
-        return self._if_holder(self.key(slug, "claim", task), agent, lambda pipe, key: pipe.pexpire(key, lease_ms))
+    def refresh(self, slug: str, task: str, agent: str, lease_ms: int) -> bool:
+        return self._if_holder(
+            self.key(slug, "claim", task),
+            agent,
+            lambda pipe, key: pipe.pexpire(key, lease_ms),
+            self._claim_guards(slug, task),
+        )
 
-    def release(self, slug, task, agent):
-        return self._if_holder(self.key(slug, "claim", task), agent, lambda pipe, key: pipe.delete(key))
+    def release(self, slug: str, task: str, agent: str) -> bool:
+        return self._if_holder(
+            self.key(slug, "claim", task),
+            agent,
+            lambda pipe, key: pipe.delete(key),
+            self._claim_guards(slug, task),
+        )
 
-    def _if_holder(self, key, agent, action):
+    def _if_holder(self, key, agent, action, guards=()):
         from redis.exceptions import WatchError
 
         with self.redis.pipeline() as pipe:
             try:
-                pipe.watch(key)
-                if pipe.get(key) != agent:
+                pipe.watch(key, *guards)
+                if any(pipe.exists(guard) for guard in guards) or pipe.get(key) != agent:
                     return False
                 pipe.multi()
                 action(pipe, key)
-                pipe.execute()
-                return True
+                return bool(pipe.execute()[0])
             except WatchError:
                 return False
+
+    def _claim_guards(self, slug, task):
+        return self.key(slug, "task-authority", task), self.key(slug, "claim-journal", task)
 
     def put_handoff(self, slug, task, text, seat="", envelope=None):
         with self.redis.pipeline() as pipe:
