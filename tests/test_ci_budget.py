@@ -108,8 +108,10 @@ def test_cli_fails_when_the_jobs_list_is_empty(tmp_path, capsys):
 
 
 def test_cli_fails_when_the_jobs_were_not_read(tmp_path):
+    args = _files(tmp_path, JOBS)
+    (tmp_path / "jobs.jsonl").unlink()
     with pytest.raises(FileNotFoundError):
-        main(["--run", str(tmp_path / "run.json"), "--jobs", str(tmp_path / "jobs.jsonl")])
+        main(args)
 
 
 def test_stage_budget_runs_after_every_gate_need_and_gate_required_needs_it():

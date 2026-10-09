@@ -99,17 +99,18 @@ def refresh(
         return []
     actions = []
     for item in runs:
-        seen = key(slug, "seen", str(item["id"]))
-        spent = ci_budget.seconds(item["updated_at"]) - ci_budget.seconds(item["run_started_at"])
-        if spent <= ci_budget.RUN_BUDGET_S or redis.exists(seen):
-            continue
+        seen = key(slug, "seen", str(item.get("id")))
         try:
+            spent = ci_budget.seconds(item["updated_at"]) - ci_budget.seconds(item["run_started_at"])
+            if spent <= ci_budget.RUN_BUDGET_S or redis.exists(seen):
+                continue
             text = defect(item, _jobs(config.repo, item["id"], run))
+            if text and ledger.followup(slug, text) is False:
+                continue
         except READ_ERRORS as exc:
-            _skipped(f"reading the jobs of Tests run {item['id']}", exc)
+            _skipped(f"Tests run {item.get('id')}", exc)
             continue
         if text:
-            ledger.followup(slug, text)
             actions.append("filed a ledger follow up for a pull request Tests run over fifteen minutes")
         redis.set(seen, now_ms, ex=SEEN_TTL_S)
     return actions
