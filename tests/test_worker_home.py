@@ -625,3 +625,243 @@ def test_cli_reports_a_refusal(fixture, capsys):
     ]
     assert worker_home.main(argv) == 1
     assert capsys.readouterr().err == "ERROR: invalid attempt id: ../x\n"
+
+
+def test_request_document_and_record_hold_exact_fields(fixture):
+    templates, volume = fixture
+    req = request(templates, volume)
+    document = {
+        "attempt": "attempt-1",
+        "profiles": {"claude": "fixture-claude", "codex": "fixture-codex"},
+        "interpreter": sys.executable,
+        "accounts": ACCOUNTS,
+        "endpoints": ENDPOINTS,
+        "uid": os.geteuid(),
+        "gid": os.getegid(),
+    }
+    assert worker_home._document(req) == document
+    assert worker_home._record(req, "abc", {"fixture-claude": "d1"}, 1.23456) == {
+        "schema_version": 1,
+        "package": "SV2-IMG-02",
+        "attempt": "attempt-1",
+        "digest": "abc",
+        "profiles": document["profiles"],
+        "profile_digests": {"fixture-claude": "d1"},
+        "accounts": ACCOUNTS,
+        "endpoints": ENDPOINTS,
+        "interpreter": sys.executable,
+        "homes": {"claude": "homes/claude", "codex": "homes/codex"},
+        "worker_profile_materialization_seconds": 1.235,
+    }
+
+
+def test_json_is_indented_sorted_and_ends_with_a_newline():
+    assert worker_home._json({"b": 1, "a": [2]}) == '{\n  "a": [\n    2\n  ],\n  "b": 1\n}\n'
+
+
+def test_digest_does_not_depend_on_dict_order(fixture):
+    templates, volume = fixture
+    forward = request(templates, volume, profiles={"claude": "fixture-claude", "codex": "fixture-codex"})
+    backward = request(templates, volume, profiles={"codex": "fixture-codex", "claude": "fixture-claude"})
+    assert worker_home._digest(forward, {"a": "1", "b": "2"}) == worker_home._digest(backward, {"b": "2", "a": "1"})
+
+
+def test_environment_falls_back_to_the_default_path(monkeypatch):
+    monkeypatch.delenv("PATH", raising=False)
+    assert worker_home._environment() == {"PATH": os.defpath, "LANG": "C.UTF-8"}
+
+
+def test_interpreter_probe_runs_from_root_with_a_clean_environment(monkeypatch, tmp_path):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0, stdout=f" {tmp_path} \n")
+
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setattr(worker_home.subprocess, "run", run)
+    assert worker_home.interpreter_prefix(Path("/opt/venv/bin/python")) == tmp_path.resolve()
+    assert calls == [
+        (
+            ["/opt/venv/bin/python", "-c", "import hooks, sys; print(sys.prefix)"],
+            {
+                "cwd": "/",
+                "env": {"PATH": "/usr/bin", "LANG": "C.UTF-8"},
+                "capture_output": True,
+                "text": True,
+                "timeout": 30,
+            },
+        )
+    ]
+
+
+def test_code_roots_name_the_checkout_and_the_install(monkeypatch, tmp_path):
+    import scripts.install as package_install
+
+    monkeypatch.setattr(package_install, "install_root", lambda: tmp_path)
+    assert worker_home.code_roots() == [CODE_ROOT, tmp_path.resolve()]
+
+
+def test_render_log_holds_stderr_and_the_child_gets_its_attempt_and_target(tmp_path, monkeypatch):
+    attempt = tmp_path / "attempt"
+    for folder in ("run", "homes/claude"):
+        (attempt / folder).mkdir(parents=True)
+    (attempt / worker_home.PENDING).write_text(json.dumps({"request": {"interpreter": sys.executable}}))
+    seen = []
+
+    def command(path, target):
+        seen.append((path, target))
+        return [sys.executable, "-c", "import sys; print('out'); sys.stdout.flush(); print('err', file=sys.stderr)"]
+
+    monkeypatch.setattr(worker_home, "child_command", command)
+    REAL_RENDER(attempt, "claude")
+    assert seen == [(attempt, "claude")]
+    assert (attempt / "run" / "render-claude.log").read_text() == "out\nerr\n"
+
+
+def test_an_endpoint_without_a_host_is_refused(fixture):
+    templates, volume = fixture
+    with pytest.raises(worker_home.BootstrapError) as error:
+        worker_home.bootstrap(request(templates, volume, endpoints={"BRAIN_URL": "http:///brain"}))
+    assert str(error.value) == "invalid service endpoint: BRAIN_URL"
+
+
+def test_profile_features_install_beside_the_package_features(fixture):
+    templates, volume = fixture
+    claude = templates / "fixture-claude"
+    for subdir, name in (
+        ("agents", "fixture-agent.md"),
+        ("commands", "fixture-command.md"),
+        ("rules", "fixture-rule.md"),
+    ):
+        (claude / ".claude" / subdir).mkdir(parents=True)
+        (claude / ".claude" / subdir / name).write_text(f"# {name}\n")
+    skill = claude / ".claude" / "skills" / "fixture-skill"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: fixture-skill\ndescription: fixture\n---\n")
+    (claude / "persona-link.md").symlink_to("CLAUDE.md")
+    worker_home.bootstrap(request(templates, volume))
+    attempt = volume / "attempt-1"
+    home = attempt / "homes" / "claude" / ".claude"
+    assert (home / "skills" / "fixture-skill").exists() and (home / "skills" / "handoff").exists()
+    assert (home / "agents" / "fixture-agent.md").exists()
+    assert (home / "commands" / "fixture-command.md").exists()
+    assert (home / "rules" / "fixture-rule.md").exists() and (home / "rules" / "agentihooks-toolbelt.md").exists()
+    copy = attempt / "profiles" / "fixture-claude" / "persona-link.md"
+    assert copy.is_symlink() and os.readlink(copy) == "CLAUDE.md"
+    for target in ("claude", "codex"):
+        state = attempt / "homes" / target / ".agentihooks"
+        assert oct(state.stat().st_mode & 0o777) == "0o700"
+        linked = [{"name": n, "path": str(attempt / "profiles" / n)} for n in ("fixture-claude", "fixture-codex")]
+        assert json.loads((state / "state.json").read_text())["linked_profiles"] == linked
+    for folder in ("run", "tmp"):
+        assert oct((attempt / folder).stat().st_mode & 0o777) == "0o700"
+
+
+def test_materialization_seconds_measure_elapsed_time(fixture, monkeypatch):
+    templates, volume = fixture
+    ticks = iter([100.0, 102.5])
+    monkeypatch.setattr(worker_home, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
+    record = worker_home.bootstrap(request(templates, volume))
+    assert record["worker_profile_materialization_seconds"] == 2.5
+
+
+def test_a_permissions_rule_naming_an_outside_path_is_admitted(tmp_path):
+    claude_home(tmp_path, {"permissions": {"additionalDirectories": ["/home/operator/dev"]}})
+    check(tmp_path, "claude")
+
+
+def test_every_codex_export_is_read_as_a_value():
+    script = "header\nexport A=\"${A:='/opt/a'}\"\nexport B=\"${B:='/opt/b'}\"\n"
+    assert worker_home._wrapper(script) == (["/opt/a", "/opt/b"], [])
+
+
+@pytest.mark.parametrize(
+    ("word", "pieces"),
+    [
+        ("http://a://etc", []),
+        ("/x=1://etc", ["/x", "1", "/etc"]),
+        ("1:///Xa", ["1", "/Xa"]),
+    ],
+)
+def test_pieces_split_a_word_into_candidate_paths(word, pieces):
+    assert worker_home._pieces(word) == pieces
+
+
+def test_quoted_paths_stay_whole():
+    assert worker_home._paths("python '/opt/x y'") == ["/opt/x y"]
+
+
+def test_owner_refusal_names_the_expected_uid_and_gid(tmp_path, monkeypatch):
+    claude_home(tmp_path, {})
+    monkeypatch.setattr(Path, "lstat", lambda path: SimpleNamespace(st_uid=5, st_gid=7, st_mode=0o100644))
+    roots = [tmp_path.resolve()]
+    with pytest.raises(worker_home.BootstrapError) as error:
+        worker_home._check_home(tmp_path, "claude", roots, (5, 8))
+    assert str(error.value) == "claude home holds a file not owned by 5:8"
+
+
+def test_pairs_keep_later_equals_in_the_value():
+    assert worker_home._pairs(["URL=https://x?a=b"], "--endpoint") == {"URL": "https://x?a=b"}
+
+
+def test_parser_defaults_and_types():
+    parser = worker_home.build_parser()
+    assert parser.prog == "python -m scripts.swarm_v2.worker_home"
+    assert vars(parser.parse_args(["bootstrap", "--attempt", "a"])) == {
+        "command": "bootstrap",
+        "root": Path("/home/worker/attempts"),
+        "attempt": "a",
+        "templates": Path("/opt/agentihooks/templates"),
+        "interpreter": Path("/opt/venv/bin/python"),
+        "uid": 10001,
+        "gid": 10001,
+        "profile": [],
+        "account": [],
+        "endpoint": [],
+    }
+    args = parser.parse_args(
+        ["bootstrap", "--attempt=a", "--root=/r", "--templates=/t", "--interpreter=/i", "--uid=5", "--gid=6"]
+    )
+    assert (args.root, args.templates, args.interpreter, args.uid, args.gid) == (
+        Path("/r"),
+        Path("/t"),
+        Path("/i"),
+        5,
+        6,
+    )
+    assert vars(parser.parse_args(["render", "/a", "codex"])) == {
+        "command": "render",
+        "attempt": Path("/a"),
+        "target": "codex",
+    }
+
+
+@pytest.mark.parametrize("argv", [[], ["bootstrap"], ["render", "/a", "copilot"]])
+def test_parser_refuses_missing_or_unknown_arguments(argv, capsys):
+    with pytest.raises(SystemExit) as stop:
+        worker_home.build_parser().parse_args(argv)
+    assert stop.value.code == 2
+
+
+@pytest.mark.parametrize("flag", ["--account", "--endpoint"])
+def test_cli_names_the_flag_of_a_pair_without_a_value(flag, capsys):
+    assert worker_home.main(["bootstrap", "--attempt=a", f"{flag}=claude"]) == 1
+    assert capsys.readouterr().err == f"ERROR: {flag} needs KEY=VALUE: claude\n"
+
+
+def test_cli_prints_the_record_as_sorted_indented_json(fixture, capsys):
+    templates, volume = fixture
+    argv = [
+        "bootstrap",
+        f"--root={volume}",
+        "--attempt=attempt-1",
+        f"--templates={templates}",
+        f"--interpreter={sys.executable}",
+        f"--uid={os.geteuid()}",
+        f"--gid={os.getegid()}",
+        "--profile=claude=fixture-claude",
+    ]
+    assert worker_home.main(argv) == 0
+    record = json.loads((volume / "attempt-1" / worker_home.RECORD).read_text())
+    assert capsys.readouterr().out == json.dumps({**record, "reused": False}, indent=2, sort_keys=True) + "\n"
