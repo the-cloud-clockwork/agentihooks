@@ -299,6 +299,27 @@ def test_master_reader_reads_the_journal_from_the_last_live_binding():
     assert "--until" not in seen[0]
 
 
+def test_master_reader_with_no_binding_reads_from_the_first_master_transfer():
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 1, 0))
+    row = {
+        "id": "f1",
+        "reason": "fresh",
+        "task": "master",
+        "successor": "m@1",
+        "at": 7000,
+        "binding": {"state": "absent"},
+    }
+    store.redis.hset(store.key("sw", "transfers"), "f1", json.dumps(row))
+    seen = []
+    spawn_read.master_records(store, "sw", run=_journal({"journal": []}, seen))
+    assert seen[0][4:6] == ["--since", "@7.000"]
+
+
 @pytest.mark.parametrize(
     "failure,error",
     [

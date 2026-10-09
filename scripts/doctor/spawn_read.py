@@ -61,13 +61,15 @@ def master_records(
     *,
     until: str | None = None,
 ) -> dict:
-    """Without since, the journal is read from the last live master binding, so it spans the whole open outage."""
+    """Without since, the journal is read from the last live master binding, else from the first master transfer,
+    else whole, so it spans the whole open outage."""
     rows = [row for row in transfers.list_transfers(store, slug) if row["task"] == MASTER]
     agents = [asdict(a) for a in store.agents(slug) if a.lane == MASTER]
     if since is None:
         bound = [r["binding"]["at"] for r in rows if r["binding"]["state"] == "live"]
         bound += [a["started_at"] for a in agents if a["state"] == "working"]
-        since = f"@{max(bound) / 1000:.3f}" if bound else None
+        start = max(bound) if bound else min((r["at"] for r in rows), default=None)
+        since = None if start is None else f"@{start / 1000:.3f}"
     entries, error = _grep("master spawn failed", since, until, run)
     return {
         "slug": slug,

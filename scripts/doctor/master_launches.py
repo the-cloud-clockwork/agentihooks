@@ -204,6 +204,7 @@ def missed(record: dict, replay: Replay, window: tuple[int, int], detectors: tup
     after the failure, judged against the verdicts given before that pass."""
     if record["journal"] is None:
         raise Unavailable(f"{MISSED} unavailable: {record['journal_error']}")
-    since, until, returned = *window, {}
+    since, until = window
+    returned = {}
     passes = [replay.pass_after(a.at) for a in attempts(record) if since <= a.at <= until]
     return sum(1 for at in passes if not _covered(as_of(record, at), at, replay, detectors, returned))
