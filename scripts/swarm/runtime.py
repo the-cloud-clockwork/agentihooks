@@ -740,7 +740,7 @@ class HerdrRuntime:
         try:
             capture = self.herdr(["pane", "read", found["pane_id"], "--source", "visible", "--format", "ansi"])
         except Exception:
-            return PaneObservation(state)
+            return PaneObservation("unknown" if agent.lane == MASTER else state)
         text = capture.get("text", "")
         title = selection_prompt(text)
         if title or state == "blocked":

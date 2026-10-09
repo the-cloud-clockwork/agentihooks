@@ -150,3 +150,26 @@ def test_tick_runs_the_master_wake_pass(setup):
     actions = tick("sw", store, ledger, runtime, START + WINDOW)
     assert f"woke idle master {master.name} to work waiting Priorities" in actions
     assert sent == [(master.name, PROMPT)]
+
+
+def test_failed_master_pane_read_never_wakes(setup):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    store, master, _, doc, sent = setup
+    doc["followups"] = [{"done": False}]
+    runtime = HerdrRuntime()
+    runtime.live_names = lambda: {master.name}
+    runtime._get = lambda target: {
+        "pane_id": master.pane_id,
+        "name": master.name.replace("@", "-"),
+        "agent_status": "idle",
+    }
+
+    def failed_read(args):
+        raise OSError("pane read unavailable")
+
+    runtime.herdr = failed_read
+    runtime.nudge = lambda agent, text: sent.append((agent.name, text))
+    assert master_wake.run("sw", store, runtime, doc, START) == []
+    assert master_wake.run("sw", store, runtime, doc, START + WINDOW) == []
+    assert sent == []
