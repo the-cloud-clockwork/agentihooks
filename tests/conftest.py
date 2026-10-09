@@ -13,6 +13,10 @@ from unittest.mock import patch
 
 import pytest
 
+for _redis_name in list(os.environ):
+    if "REDIS" in _redis_name.upper():
+        os.environ.pop(_redis_name)
+
 from tests import installer_isolation, ledger_guard, redis_key_guard, swarm_v2_isolation
 from tests.shards import (
     FIRST_SHARD_FILES,
