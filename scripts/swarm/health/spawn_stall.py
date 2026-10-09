@@ -41,11 +41,12 @@ def eligible(store, slug: str, ledger, at: int, runtime) -> bool:
         requirements = runtime.quota_requirements(config, prepared)
     if reader := getattr(runtime, "quota_capacity", None):
         runtime.quota_previous(capacity.read(store, slug))
+        capacity.feed_spent(runtime, store, at)
         decision = reader(config, agents, at / 1000, demand, requirements, refresh=False)
     else:
         inputs = capacity.live_inputs(slug, store, ledger, dict(os.environ), at)
-        host = capacity.host_room(config, inputs)
-        config, _ = capacity.autoscaled(config, inputs)
+        host = capacity.granted(capacity.host_room(config, inputs), inputs.previous, inputs.now_ms)
+        config, _ = capacity.autoscaled(config, inputs, host)
         decision = capacity.calculate(
             config, inputs.observations, inputs.agents, inputs.demand, requirements, warned=inputs.warned
         )
