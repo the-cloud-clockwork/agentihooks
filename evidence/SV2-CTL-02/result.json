@@ -33,7 +33,8 @@
     "format": "ruff format check passed on changed Python files",
     "limits": "84 units over limits, 84 base allowlist entries, zero errors against the stacked controller base",
     "guard_fault": "Removing script refusal made the real client boundary test fail; restoring it made real refusal and fake evaluation tests pass. The real client dispatch stub was never invoked by valid code.",
-    "worker_expiry_control": "Four delayed admit renew release complete requests crossed signed worker token expiry; red before fix and green after; no task state journal or claimant changes."
+    "worker_expiry_control": "Four delayed admit renew release complete requests crossed signed worker token expiry; red before fix and green after; no task state journal or claimant changes.",
+    "store_mutation_followup": "CI run 37890437465: 87 killed, 15 surviving store mutations. Eleven isolated authority/journal/claim and holder replacement race cases added; authority suite 52 passed in 1.55 seconds. Standards cleared three equivalent SET NX mutations under WATCH and absent GET; other survivors require next CI qualification."
   },
   "cases": {
     "a": "evidence/SV2-CTL-02/a-result.json",

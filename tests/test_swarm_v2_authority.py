@@ -624,3 +624,33 @@ def test_legacy_claim_watches_authority_record_created_at_commit(fixture, monkey
     assert raced == [True]
     assert store.claimant("fixture", "task") == ("retained-authority" if record == "claim" else None)
     assert store.redis.get(key) == "retained-authority"
+
+
+@pytest.mark.parametrize("operation", ["refresh", "release"])
+def test_legacy_holder_write_watches_successor_replacement(fixture, monkeypatch, operation):
+    store, authority, controller, clock, start = fixture
+    assert store.claim("fixture", "task", "old", 500)
+    original = store.redis.pipeline
+    raced = []
+
+    def pipeline(*args, **kwargs):
+        pipe = original(*args, **kwargs)
+        execute = pipe.execute
+
+        def run(*args, **kwargs):
+            if not raced:
+                raced.append(True)
+                store.redis.set(store.key("fixture", "claim", "task"), "successor", px=500)
+            return execute(*args, **kwargs)
+
+        pipe.execute = run
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    if operation == "refresh":
+        result = store.refresh("fixture", "task", "old", 1000)
+    else:
+        result = store.release("fixture", "task", "old")
+    assert result is False
+    assert raced == [True]
+    assert store.claimant("fixture", "task") == "successor"
