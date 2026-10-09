@@ -469,6 +469,17 @@ class TestCheckPass:
         got = run_pass(tmp_path, usable=0.9)
         assert (got.viewed, verdicts(tmp_path).read(TASK)["verdict"]) == ([], "fail")
 
+    def test_a_verdict_with_no_phase_is_judged_again(self, tmp_path):
+        verdicts(tmp_path).write(TASK, "fail", "old", NOW - 5)
+        got = run_pass(tmp_path, usable=0.9)
+        assert got.viewed == [URL]
+        assert verdicts(tmp_path).read(TASK)["verdict"] == "pass"
+
+    def test_a_fail_from_another_phase_stops_denying_while_it_is_judged_again(self, tmp_path):
+        verdicts(tmp_path).write(TASK, "fail", "old", NOW - 5, phase="p1")
+        check(tmp_path, view=lambda url: None).run(DOC)
+        assert verdicts(tmp_path).read(TASK)["verdict"] == "pending"
+
     def test_off_skips_the_check(self, tmp_path):
         got = run_pass(tmp_path, mode="off")
         assert (got.actions, got.viewed, verdicts(tmp_path).read(TASK)) == ([], [], None)
@@ -486,7 +497,7 @@ class TestCheckPass:
 
     @pytest.mark.parametrize("verdict", ["pass", "fail", "unchecked"])
     def test_a_judged_task_is_not_asked_again(self, tmp_path, verdict):
-        verdicts(tmp_path).write(TASK, verdict, "done before", NOW - 5)
+        verdicts(tmp_path).write(TASK, verdict, "done before", NOW - 5, phase="p8")
         got = run_pass(tmp_path)
         assert (got.actions, got.viewed) == ([], [])
         assert verdicts(tmp_path).read(TASK)["at"] == NOW - 5
@@ -529,7 +540,7 @@ class TestCheckPass:
             {**base, "id": "c", "pr_url": "https://github.com/o/r/pull/404"},
             {**base, "id": "d"},
         ]
-        verdicts(tmp_path).write("b", "pass", "judged", NOW - 5)
+        verdicts(tmp_path).write("b", "pass", "judged", NOW - 5, phase="p8")
 
         def view(url):
             return None if url.endswith("/404") else PR

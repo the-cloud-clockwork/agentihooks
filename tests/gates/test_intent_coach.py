@@ -357,7 +357,7 @@ def test_environment_and_catalog_accept_intent_coach():
 def test_an_unmoved_head_is_read_once_and_skips_the_full_view(tmp_path):
     url = DOC["tasks"][0]["pr_url"]
     Verdicts(SLUG, "intent-coach", tmp_path).write(
-        TASK, "fail", "missing behavior", 5, coach_rounds=1, head="original", url="old"
+        TASK, "fail", "missing behavior", 5, coach_rounds=1, head="original", url="old", phase="p8"
     )
     heads, views = [], []
     check = intent.Check(

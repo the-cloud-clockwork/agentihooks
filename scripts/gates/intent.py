@@ -89,7 +89,7 @@ def _phase(doc, task):
 
 
 def _same_phase(record, task):
-    return record.get("phase", task.get("phase", "")) == task.get("phase", "")
+    return record.get("phase", "") == task.get("phase", "")
 
 
 def section(doc, task):
@@ -369,7 +369,7 @@ class Check:
                 (task, record, workers.submit(copy_context().run, self._judge, doc, task)) for task, record in tasks
             ]
             for task, record, future in pending:
-                if not record:
+                if not record or not _same_phase(record, task):
                     verdicts.write(task["id"], PENDING, RUNNING, self.now_ms)
                 judgment = future.result()
                 if judgment is not None:
