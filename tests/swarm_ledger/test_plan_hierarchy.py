@@ -577,18 +577,42 @@ def test_a_batch_without_a_plan_keeps_the_ops_that_were_accepted():
     assert [phase.get("plan") for phase in state["phases"]] == ["plans/c", None]
 
 
+STALE = "phase p1 moves to plans/b without a new plan_ref: publish the plan for the phase to move it"
+
+
 @pytest.mark.parametrize("reference", [{"plan_url": ISSUE}, {"plan_ref": REF}])
-def test_a_plan_change_without_a_new_plan_ref_is_refused_and_changes_nothing(reference):
-    before = held()
-    phase = next(p for p in before["phases"] if p["id"] == "p1")
-    assert ledger_plans.stale_refusal({**phase, **reference}, {"plan": "plans/b"}) == (
-        "phase p1 moves to plans/b without a new plan_ref: publish the plan for the phase to move it"
-    )
+def test_stale_refusal_names_a_plan_change_without_a_new_plan_ref(reference):
+    phase = {"id": "p1", "plan": "plans/a", **reference}
+    assert ledger_plans.stale_refusal(phase, {"plan": "plans/b"}) == STALE
+    with pytest.raises(ValueError) as raised:
+        ledger_plans.check_move(phase, {"plan": "plans/b"})
+    assert str(raised.value) == STALE
+    assert ledger_plans.check_move(phase, {"plan": "plans/a"}) is None
+
+
+def test_a_plan_change_without_a_new_plan_url_link_is_refused_and_changes_nothing():
+    held()
     run("phase_update", item="phases/p1", fields={"plan_url": ISSUE})
     before = core.sync(SLUG)[0]
     state, rejected, refusal = link("p1", "plans/b")
-    assert rejected
-    assert "phase p1 moves to plans/b without a new plan_ref: publish the plan for the phase to move it" in refusal
+    assert (len(rejected), refusal) == (1, [STALE])
+    assert unchanged(before, state)
+
+
+def test_a_plan_change_without_a_new_plan_ref_is_refused_and_changes_nothing():
+    file = ledger_artifacts.store(SLUG, "plan.md", PLAN.encode())
+    artifact = f"http://127.0.0.1:8765/artifacts/{SLUG}/{file['id']}"
+    run("join", role="member")
+    run("artifact_add", task="", title="Plan", file=file, plan=True)
+    run("plan_add", plan="a", title="Plan", artifact=artifact)
+    plans("b")
+    fields = {"plan": "plans/a", "plan_ref": {"artifact": artifact, "lines": "3-9"}}
+    assert run("phase_update", item="phases/p1", fields=fields)[1] == []
+    assert run("slice_add", phase="phases/p1", anchor="first")[1] == []
+    before = core.sync(SLUG)[0]
+    assert before["slices"] == [{"id": "a.first", "phase": "phases/p1", "anchor": "first", "lines": "4-6"}]
+    state, rejected, refusal = link("p1", "plans/b")
+    assert (len(rejected), refusal) == (1, [STALE])
     assert unchanged(before, state)
 
 
@@ -603,15 +627,17 @@ def test_a_plan_change_without_a_new_plan_ref_is_refused_and_changes_nothing(ref
         ({}, {"plan": "plans/b"}),
     ],
 )
-def test_a_plan_change_with_a_new_plan_ref_or_without_an_earlier_reference_is_not_stale(phase, fields):
+def test_a_new_plan_ref_a_kept_plan_or_a_first_plan_link_is_not_stale(phase, fields):
     assert ledger_plans.stale_refusal(phase, fields) == ""
 
 
 def test_moving_a_phase_onto_a_plan_that_cannot_be_read_is_refused_and_keeps_its_slices():
     before = held()
     state, rejected, refusal = run("phase_update", item="phases/p1", fields={"plan": "plans/b", "plan_url": ISSUE})
-    assert rejected
-    assert "phase p1 plan cannot be read: plan artifact must name a stored ledger artifact" in refusal
+    assert (len(rejected), refusal) == (
+        1,
+        ["phase p1 plan cannot be read: plan artifact must name a stored ledger artifact"],
+    )
     assert unchanged(before, state)
     assert state["tasks"][0]["slice"] == "slices/a.first"
 
