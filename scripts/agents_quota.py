@@ -193,12 +193,13 @@ def _interactive_row(master: "MasterAccount", sessions: dict[str, int]) -> Quota
     )
 
 
+def _mark(row: QuotaRow, master: "MasterAccount | None") -> QuotaRow:
+    declared = master is not None and row.kind != API and row.account == master.slug
+    return replace(row, master=master.marker) if declared else row
+
+
 def with_masters(rows: list[QuotaRow], masters: dict[str, "MasterAccount"], sessions: dict[str, int]) -> list[QuotaRow]:
-    marked = []
-    for row in rows:
-        master = masters.get(row.agent)
-        declared = master is not None and row.kind != API and row.account == master.slug
-        marked.append(replace(row, master=master.marker) if declared else row)
+    marked = [_mark(row, masters.get(row.agent)) for row in rows]
     claude = masters.get("claude")
     if claude and claude.kind == INTERACTIVE and not any(row.master for row in marked if row.agent == "claude"):
         index = next((i for i, row in enumerate(marked) if row.agent != "claude"), len(marked))

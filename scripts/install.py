@@ -5688,6 +5688,7 @@ def cmd_balance(
     )
     from scripts.routing import master_account, place
     from scripts.routing.claude_api import ClaudeApiSource
+    from scripts.routing.slots import INTERACTIVE
 
     session_env = dict(os.environ)
     _load_claude_runtime_env()
@@ -5725,6 +5726,8 @@ def cmd_balance(
             )
         return 0 if session.account else 1
     if not credentials:
+        if master and master.kind == INTERACTIVE:
+            print(render_table([], sessions=live, master=master))
         print(codex_table())
         print("agentihooks: no non-empty AH_CC_TOKEN_* variables found", file=sys.stderr)
         return 2

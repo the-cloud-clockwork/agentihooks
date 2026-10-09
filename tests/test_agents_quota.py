@@ -387,7 +387,10 @@ def test_every_quota_reader_marks_the_declared_masters(monkeypatch):
     from scripts.routing.master_account import MasterAccount
 
     agents_quota._page_cache.clear()
-    masters = {"claude": MasterAccount("claude", "home", "", INTERACTIVE)}
+    masters = {
+        "claude": MasterAccount("claude", "home", "", INTERACTIVE),
+        "codex": MasterAccount("codex", "default", "pro", INTERACTIVE),
+    }
     monkeypatch.setattr(
         agents_quota, "_masters", lambda harness="": {k: v for k, v in masters.items() if harness in ("", k)}
     )
@@ -400,7 +403,6 @@ def test_every_quota_reader_marks_the_declared_masters(monkeypatch):
     monkeypatch.setattr(codex_router, "accounts", lambda environ: [CodexAccount("default")])
     monkeypatch.setattr(codex_router, "routing_pool", lambda environ: [CodexAccount("default")])
     monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {})
-    masters["codex"] = MasterAccount("codex", "default", "pro", INTERACTIVE)
 
     assert [(row.account, row.master) for row in agents_quota._claude(False, 1.0)] == [("home", "MASTER")]
     assert [(row.account, row.master) for row in agents_quota._codex(5.0)] == [("default", "MASTER pro")]
@@ -411,7 +413,7 @@ def test_every_quota_reader_marks_the_declared_masters(monkeypatch):
     ]
 
 
-def test_masters_read_the_routing_settings_through_the_routing_client(monkeypatch, tmp_path):
+def test_masters_fall_back_to_the_file_routing_settings_without_redis(monkeypatch, tmp_path):
     from scripts.routing import place
     from scripts.routing.settings import FileSettings
 

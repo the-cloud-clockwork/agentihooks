@@ -342,6 +342,23 @@ class TestClaudeRouting:
         assert lines[1].split()[:5] == ["codex", "default", "subscription", "SIGNED_OUT", "0/?"]
         assert lines[2].split()[:5] == ["codex", "alpha", "subscription", "NORMAL", "2/6"]
 
+    def test_cmd_balance_without_claude_tokens_still_lists_an_interactive_master(self, monkeypatch, capsys):
+        from scripts import agents_quota
+        from scripts import claude_quota_balancer as balancer
+        from scripts.routing import master_account
+        from scripts.routing.master_account import MasterAccount
+
+        monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+        monkeypatch.setattr(balancer, "discover_credentials", lambda environ: [])
+        monkeypatch.setattr(agents_quota, "_codex", lambda now: [])
+        monkeypatch.setattr(
+            master_account, "load", lambda environ: {"claude": MasterAccount("claude", "home", "max", "interactive")}
+        )
+
+        assert install.cmd_balance(include_fable=False, refresh=False, timeout=10) == 2
+        lines = capsys.readouterr().out.splitlines()
+        assert lines[2].split()[:5] == ["-", "home", "MASTER", "max", "interactive"]
+
     def test_cmd_balance_lists_the_claude_api_slot_with_kind_weight_and_cap(self, monkeypatch, tmp_path, capsys):
         from scripts import agents_quota
         from scripts import claude_quota_balancer as balancer
