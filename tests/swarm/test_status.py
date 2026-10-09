@@ -73,3 +73,25 @@ def test_busy_tool_stall_is_reported_until_a_new_tool_call_or_named_wait(monkeyp
     activity.record("Read", {}, env, tmp_path, now_ms=at)
     assert "stalled" not in [f["kind"] for f in findings(store, "sw", config, ledger.tasks("sw"), [])]
     assert runtime.nudged == [] and runtime.killed == []
+
+
+def test_stall_report_respects_actual_launch_and_startup_grace(monkeypatch, tmp_path):
+    import fakeredis
+
+    from scripts.swarm.health import activity
+    from scripts.swarm.health import findings as health
+    from scripts.swarm.status import _health_rows
+    from scripts.swarm.store import AgentRecord
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    monkeypatch.setattr(activity, "default_root", lambda: tmp_path)
+    at = 1_000_000
+    name = "engineer@a1b2c3-0001"
+    limits = health.limits({"AGENTIHOOKS_HEALTH_STALLED_MINUTES": "4"})
+    worker = AgentRecord(
+        name, "eng", "t1", started_at=at - 11 * 60_000, launched_at=at - 4 * 60_000, pane_state="working"
+    )
+    rows = _health_rows(store, "sw", [worker], {}, at)
+    assert health.stalled(rows, limits) == []
+    rows = _health_rows(store, "sw", [worker], {}, at + 3 * 60_000)
+    assert [f.kind for f in health.stalled(rows, limits)] == ["stalled"]

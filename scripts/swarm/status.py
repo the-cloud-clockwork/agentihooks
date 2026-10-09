@@ -28,7 +28,7 @@ from scripts.swarm.health import activity, checks, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.naming import swarm_name
 from scripts.swarm.store import ASSIST, SwarmError
-from scripts.swarm.tick import agent_status
+from scripts.swarm.tick import STARTUP_GRACE_MS, agent_status
 from scripts.swarm_ledger import plan_shape
 from scripts.swarm_v2.runtime import observe
 
@@ -100,9 +100,10 @@ def _health_rows(store, slug, agents, quiet, at):
     latest = activity.last_events(slug)
     rows = []
     for agent in agents:
-        last = latest.get(agent.name, agent.started_at)
+        started = launch_check.session_started_at(agent)
+        last = max(latest.get(agent.name, 0), started)
         minutes = (at - last) // health.MINUTE_MS if last else None
-        if quiet_gate.declared_wait(store.redis, slug, agent.name, at):
+        if at - started <= STARTUP_GRACE_MS or quiet_gate.declared_wait(store.redis, slug, agent.name, at):
             minutes = None
         rows.append({**agent.__dict__, "quiet_minutes": quiet.get(agent.name), "tool_quiet_minutes": minutes})
     return rows
