@@ -12,23 +12,24 @@ def test_mean_test_seconds_reads_stored_timings_of_selected_files_only():
 
 
 @pytest.mark.parametrize(
-    ("seconds", "mutants", "stats", "expected"),
+    ("seconds", "mutants", "expected"),
     [
-        (0, 0, 0, 1),
-        (1, 1, 0, 1),
-        (960, 500, 0, 1),
-        (961, 500, 0, 2),
-        (4800, 500, 0, 5),
-        (4800, 3, 0, 3),
-        (1000, 500, 460, 2),
-        (1001, 500, 460, 3),
-        (10, 500, 960, 1),
-        (2000, 500, 5000, 5),
-        (10**6, 10**4, 0, 10),
+        (0, 0, 1),
+        (1, 1, 1),
+        (960, 500, 1),
+        (961, 500, 2),
+        (4800, 500, 5),
+        (4800, 3, 3),
+        (10**6, 10**4, 10),
     ],
 )
-def test_shard_count_fills_each_shard_to_its_target_and_stays_within_the_limit(seconds, mutants, stats, expected):
-    assert plan.shard_count(seconds, mutants, stats, 240, 10) == expected
+def test_shard_count_fills_each_shard_to_its_target_and_stays_within_the_limit(seconds, mutants, expected):
+    assert plan.shard_count(seconds, mutants, 240, 10) == expected
+
+
+@pytest.mark.parametrize(("stats", "expected"), [(0, 1), (1, 1), (360, 1), (361, 2), (1920, 6), (10**6, 10)])
+def test_stats_parts_split_the_stats_pass_to_its_target_and_stay_within_the_limit(stats, expected):
+    assert plan.stats_part_count(stats, 90, 10) == expected
 
 
 def _project(tmp_path, durations):
@@ -97,21 +98,29 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("scripts.ci_mutation.plan.discover_changes", discover)
     monkeypatch.setattr(
         "scripts.ci_mutation.plan.estimate",
-        lambda root, changes: (1601.4, 50, 0) if (root, changes) == (tmp_path, {"scripts/sample.py": {2}}) else None,
+        lambda root, changes: (1601.4, 50, 1201) if (root, changes) == (tmp_path, {"scripts/sample.py": {2}}) else None,
     )
+    monkeypatch.setattr("sys.argv", [*__import__("sys").argv, "--stats-target", "100"])
     assert plan.main() == 0
     assert calls == [(tmp_path, "base", "HEAD")]
-    assert output.read_text() == "shards=[0, 1, 2, 3]\n"
+    assert output.read_text() == "shards=[0, 1, 2, 3]\nstats_parts=[0, 1, 2, 3]\n"
     assert capsys.readouterr().out == (
-        "Changed line mutants: 50\nEstimated mutation seconds: 1601, stats seconds: 0\nMutation shards: 4\n"
+        "Changed line mutants: 50\nEstimated mutation seconds: 1601, stats seconds: 1201\n"
+        "Mutation shards: 4\nStats parts: 4\n"
     )
 
 
 @pytest.mark.parametrize(
-    ("estimated", "shards"),
-    [((0, 0, 0), "[0]"), ((962, 500, 0), "[0, 1]"), ((10**6, 10**4, 0), json.dumps(list(range(10))))],
+    ("estimated", "shards", "parts"),
+    [
+        ((0, 0, 0), "[0]", "[0]"),
+        ((962, 500, 361), "[0, 1]", "[0, 1]"),
+        ((10**6, 10**4, 10**6), json.dumps(list(range(10))), json.dumps(list(range(10)))),
+    ],
 )
-def test_main_defaults_to_origin_dev_a_four_minute_target_and_ten_shards(tmp_path, monkeypatch, estimated, shards):
+def test_main_defaults_to_origin_dev_a_four_minute_target_and_ten_shards(
+    tmp_path, monkeypatch, estimated, shards, parts
+):
     output = tmp_path / "github-output"
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
@@ -126,4 +135,4 @@ def test_main_defaults_to_origin_dev_a_four_minute_target_and_ten_shards(tmp_pat
     monkeypatch.setattr("scripts.ci_mutation.plan.estimate", lambda root, changes: estimated)
     assert plan.main() == 0
     assert calls == [(tmp_path, "origin/dev", "HEAD")]
-    assert output.read_text() == f"shards={shards}\n"
+    assert output.read_text() == f"shards={shards}\nstats_parts={parts}\n"
