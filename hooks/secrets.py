@@ -99,8 +99,8 @@ _MEMORY_PATTERNS: list[_Pattern] = [
     _Pattern(
         "secret_assignment",
         re.compile(
-            r"(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY|PRIVATE_KEY|ACCESS_KEY)(?:\s*(?:=(?!=)|:)\s*"
-            r"""(?:["']?[^\s"'$<{]+)|["']\s*:\s*["'][^\s"'$<{]+)""",
+            r"(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY|PRIVATE_KEY|ACCESS_KEY)(?:[^\S\r\n]*(?:=(?!=)|:)[^\S\r\n]*"
+            r"""(?:["']?[^\s"'$<{]+)|["'][^\S\r\n]*:[^\S\r\n]*["'][^\s"'$<{]+)""",
             re.IGNORECASE,
         ),
     ),
@@ -112,7 +112,11 @@ def _get_patterns(mode: str) -> list[_Pattern]:
     if mode == "off":
         return []
     if mode == "memory":
-        return _STANDARD_PATTERNS + _STRICT_PATTERNS + _MEMORY_PATTERNS
+        return (
+            [pattern for pattern in _STANDARD_PATTERNS if pattern.name != "generic_secret"]
+            + _STRICT_PATTERNS
+            + _MEMORY_PATTERNS
+        )
     if mode == "strict":
         return _STANDARD_PATTERNS + _STRICT_PATTERNS
     # "warn" and "standard" both use the standard set

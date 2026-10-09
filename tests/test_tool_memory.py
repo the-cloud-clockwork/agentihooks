@@ -270,6 +270,19 @@ def test_memory_preserves_guidance_after_empty_assignment(tmp_path):
         assert tool_memory._read_entries() == [entry]
 
 
+def test_memory_rejects_multiline_bearer_credentials(tmp_path):
+    from hooks import tool_memory
+
+    entry = {"tool": "Bash", "error": "Error: Bearer\n" + "a" * 24}
+    memory = tmp_path / "memory.ndjson"
+    with patch.object(tool_memory, "MEMORY_PATH", memory), patch("hooks.common.inject_banner") as banner:
+        tool_memory._append_entry(entry)
+        assert not memory.exists(), "multiline credential entry was stored"
+        memory.write_text(json.dumps(entry) + "\n")
+        tool_memory.inject_memory()
+        banner.assert_not_called()
+
+
 class TestIsErrorExplicitStatus:
     def test_file_tools_trust_only_explicit_flags(self):
         from hooks.tool_memory import _is_error, strict_detection

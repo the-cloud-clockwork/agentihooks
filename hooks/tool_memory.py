@@ -168,7 +168,7 @@ def _contains_secret(value: object) -> bool:
         )
     if isinstance(value, (list, tuple)):
         return any(_contains_secret(item) for item in value)
-    return isinstance(value, str) and any(redact(line, mode="memory") != line for line in value.splitlines())
+    return isinstance(value, str) and redact(value, mode="memory") != value
 
 
 # ---------------------------------------------------------------------------
