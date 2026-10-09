@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x_recorded__mutmut_4:00b0d9f501acb5b22bafa9e135755418e1fce8b5eed270009ea4a2707e7c8895": {
+    "reader": "Standards",
+    "reason": "Only SELECT, DISTINCT and FROM keyword casing changes; SQLite returns the same distinct recorded agent names."
+  }
+}

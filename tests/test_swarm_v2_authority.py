@@ -1,4 +1,4 @@
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 import pytest
 
@@ -46,6 +46,7 @@ def test_partitioned_worker_cannot_mutate_its_successor(fixture, operation):
     assert successor.generation == 2
     assert successor.execution_id == new.execution_id
     assert [row["event"] for row in authority.journal("task")] == ["admitted", "fenced", "admitted"]
+    assert authority.journal("task")[1]["claim"] == {**asdict(first), "state": "fenced"}
     before = authority.journal("task")
     args = {"renew": (100,), "release": (), "complete": ({"outcome": "done"},)}[operation]
     with pytest.raises(SwarmError) as error:
@@ -79,6 +80,13 @@ def test_current_holder_renews_releases_and_completes_by_generation(fixture):
     assert done.result == {"outcome": "done"}
     assert authority.complete(token, 2, {"outcome": "done"}) == done
     assert store.claimant("fixture", "task") is None
+    assert [row["event"] for row in authority.journal("task")] == [
+        "admitted",
+        "renewed",
+        "released",
+        "admitted",
+        "completed",
+    ]
 
 
 def test_legacy_writers_cannot_change_distributed_claims(fixture):
@@ -657,3 +665,123 @@ def test_legacy_holder_write_watches_successor_replacement(fixture, monkeypatch,
     assert result is False
     assert raced == [True]
     assert store.claimant("fixture", "task") == "successor"
+
+
+def test_one_millisecond_task_lease_is_valid(fixture):
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    claim = authority.admit(token, 1)
+    assert claim.lease_deadline_ms == clock[0] + 1
+
+
+def test_a_later_retired_attempt_cannot_be_admitted_again(fixture):
+    store, authority, controller, clock, start = fixture
+    old, old_token = start()
+    authority.admit(old_token, 100)
+    authority.release(old_token, 1)
+    new, token = start("eng-2@fixture")
+    authority.admit(token, 100)
+    released = authority.release(token, 2)
+    journal = authority.journal("task")
+    for retired_token in (token, old_token):
+        with pytest.raises(SwarmError) as error:
+            authority.admit(retired_token, 100)
+        assert str(error.value) == "stale_generation"
+    with pytest.raises(SwarmError) as error:
+        authority.release(token, 2)
+    assert str(error.value) == "stale_generation"
+    assert authority.current("task") == released
+    assert authority.journal("task") == journal
+
+
+@pytest.mark.parametrize("operation", ["renew", "release", "complete"])
+def test_task_expiry_refuses_before_a_delayed_controller_expiry(fixture, monkeypatch, operation):
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    claim = authority.admit(token, 100)
+    clock[0] = claim.lease_deadline_ms
+    original = store.redis.pipeline
+
+    def pipeline(*args, **kwargs):
+        pipe = original(*args, **kwargs)
+        execute = pipe.execute
+
+        def run(*args, **kwargs):
+            if any(cmd[0][0] == "EVAL" for cmd in pipe.command_stack):
+                clock[0] = controller.held.expires_at
+            return execute(*args, **kwargs)
+
+        pipe.execute = run
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    args = {"renew": (100,), "release": (), "complete": ({},)}[operation]
+    with pytest.raises(SwarmError) as error:
+        getattr(authority, operation)(token, 1, *args)
+    assert str(error.value) == "stale_generation"
+    assert authority.stale_generation_rejections_total() == 1
+    assert authority.current("task") == claim
+
+
+@pytest.mark.parametrize(
+    "operation, record",
+    [
+        ("renew", "claim"),
+        ("renew", "executions"),
+        ("renew", "control-owner"),
+        ("renew", "launch-grants"),
+        ("renew", "launch-registrations"),
+        ("renew", "launch-grants-disabled"),
+        ("replay", "task-authority"),
+        ("replay", "claim-journal"),
+        ("replay", "claim"),
+        ("replay", "control-owner"),
+    ],
+)
+def test_concurrent_authority_changes_are_bounded(fixture, monkeypatch, operation, record):
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    claim = authority.admit(token, 100)
+    journal = authority.journal("task")
+    key = (
+        store.key("fixture", record, "task")
+        if record in ("claim", "task-authority", "claim-journal")
+        else store.key("fixture", record)
+    )
+    original = store.redis.pipeline
+    raced = []
+    clock[0] += 1
+
+    def pipeline(*args, **kwargs):
+        pipe = original(*args, **kwargs)
+        execute = pipe.execute
+
+        def run(*args, **kwargs):
+            if any(cmd[0][0] == "EVAL" for cmd in pipe.command_stack):
+                raced.append(True)
+                clock[0] += 1
+                if record == "control-owner":
+                    controller.renew()
+                elif store.redis.type(key) == "hash":
+                    field, value = next(iter(store.redis.hgetall(key).items()))
+                    store.redis.hset(key, field, value)
+                elif record == "claim-journal":
+                    store.redis.lset(key, 0, store.redis.lindex(key, 0))
+                else:
+                    store.redis.set(key, store.redis.get(key) or "disabled")
+            return execute(*args, **kwargs)
+
+        pipe.execute = run
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    with pytest.raises(SwarmError) as error:
+        if operation == "renew":
+            authority.renew(token, 1, 100)
+        else:
+            authority.replay("task")
+    assert str(error.value) == "dependency_unavailable"
+    assert raced == [True] * 5
+    assert authority.current("task") == claim
+    assert authority.journal("task") == journal
+    assert store.claimant("fixture", "task") == agent.name

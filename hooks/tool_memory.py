@@ -156,6 +156,21 @@ def _is_error(tool_result, strict=False):
     return False, ""
 
 
+def _contains_secret(value: object) -> bool:
+    from hooks.secrets import redact
+
+    if isinstance(value, dict):
+        return any(
+            _contains_secret(key)
+            or _contains_secret(item)
+            or (isinstance(item, (str, int, float)) and _contains_secret(f"{key}={item}"))
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple)):
+        return any(_contains_secret(item) for item in value)
+    return isinstance(value, str) and redact(value, mode="memory") != value
+
+
 # ---------------------------------------------------------------------------
 # File I/O
 # ---------------------------------------------------------------------------
@@ -172,7 +187,9 @@ def _read_entries():
                 line = line.strip()
                 if line:
                     try:
-                        entries.append(json.loads(line))
+                        entry = json.loads(line)
+                        if not _contains_secret(entry):
+                            entries.append(entry)
                     except json.JSONDecodeError:
                         continue
     except Exception:  # NOSONAR — hooks must never crash the parent process
@@ -182,6 +199,8 @@ def _read_entries():
 
 def _append_entry(entry):
     """Append a single NDJSON entry, rotating if needed."""
+    if _contains_secret(entry):
+        return
     try:
         MEMORY_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -206,6 +225,7 @@ def _append_entry(entry):
 
 def _append_entries(new_entries):
     """Append multiple NDJSON entries, rotating if needed."""
+    new_entries = [entry for entry in new_entries if not _contains_secret(entry)]
     if not new_entries:
         return
     try:
@@ -289,6 +309,8 @@ def _scan_transcript_for_errors(transcript_path, session_id=""):
                     continue
 
                 tool_info = tool_uses.get(rec.get("tool_use_id", ""), {})
+                if _contains_secret([rec, tool_info]):
+                    continue
                 raw = rec.get("raw", {})
                 ts = raw.get("timestamp", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
                 new_entries.append(
@@ -407,8 +429,8 @@ def record_error(payload):
         return
 
     detected, error_text = _is_error(tool_result, strict=strict_detection(tool_name))
-    if not detected:
-        return  # No error - exit silently
+    if not detected or _contains_secret(payload):
+        return
 
     # Build NDJSON record
     session_id = payload.get("session_id", "")

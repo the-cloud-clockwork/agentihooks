@@ -174,8 +174,13 @@ jobs:
           BASE: ${{ inputs.base }}
         run: |
           filter="status=success"
-          if [[ "${BASE#origin/}" != dev ]]; then
+          if [[ "${BASE#origin/}" == "$GITHUB_REF_NAME" ]]; then
+            filter+="&head_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.parents[0].sha')"
+          elif [[ "${BASE#origin/}" != dev ]]; then
             sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/${BASE#origin/}" --jq .sha)
+            if [[ "$sha" == "$GITHUB_SHA" ]]; then
+              sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.parents[0].sha')
+            fi
             filter+="&head_sha=$sha"
           fi
           runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=dev&event=push&$filter&per_page=20" --jq '.workflow_runs[] | "\(.id) \(.head_sha)"')
@@ -240,24 +245,17 @@ jobs:
           ls -A ~/dev-durations
           echo "queued=true" >> "$GITHUB_OUTPUT"
 
-  unit:
+  # Every shard of a version splits on the one map this job chooses, so the whole suite is collected once per version, not once per shard.
+  split:
     needs: [durations]
     runs-on: ubuntu-latest
     timeout-minutes: 7
     permissions:
       contents: read
-    env:
-      CODEX_RELEASE: rust-v0.160.0
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
-        exclude:
-          - {python-version: "3.11", shard: 5}
-          - {python-version: "3.11", shard: 6}
-          - {python-version: "3.11", shard: 7}
-          - {python-version: "3.11", shard: 8}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -313,6 +311,84 @@ jobs:
         name: Use the test environment
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
 
+      - name: Download the queued run's dev durations
+        if: needs.durations.outputs.queued == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: dev-durations
+          path: ~/dev-durations
+
+      - name: Restore latest dev durations
+        if: needs.durations.outputs.key != ''
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/dev-durations
+          key: ${{ needs.durations.outputs.key }}
+          fail-on-cache-miss: true
+
+      - name: Adopt latest dev durations
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256 --collected collected.json
+
+      - name: Upload the chosen durations
+        uses: actions/upload-artifact@v4
+        with:
+          name: split-${{ matrix.python-version }}
+          path: |
+            .test_durations
+            durations.sha256
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+      - name: Upload collected tests
+        if: github.event.pull_request.base.ref != 'main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: collected-${{ matrix.python-version }}
+          path: collected.json
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+  unit:
+    needs: [split]
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    permissions:
+      contents: read
+    env:
+      CODEX_RELEASE: rust-v0.160.0
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        exclude:
+          - {python-version: "3.11", shard: 5}
+          - {python-version: "3.11", shard: 6}
+          - {python-version: "3.11", shard: 7}
+          - {python-version: "3.11", shard: 8}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      - *python
+
+      - *day
+
+      - *venv
+
+      - *uv
+
+      - *install
+
+      - *use-venv
+
       # tests.shards pins the live Codex test's file to shard 1; only the 3.12 shard 1 installs the CLI it runs.
       - name: Restore the Codex CLI
         id: codex
@@ -336,49 +412,10 @@ jobs:
           echo "$HOME/codex" >> "$GITHUB_PATH"
           echo "CODEX_CLI_REQUIRED=1" >> "$GITHUB_ENV"
 
-      - name: Download the queued run's dev durations
-        if: needs.durations.outputs.queued == 'true'
+      - name: Download the durations this run splits on
         uses: actions/download-artifact@v4
         with:
-          name: dev-durations
-          path: ~/dev-durations
-
-      - name: Restore latest dev durations
-        if: needs.durations.outputs.key != ''
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/dev-durations
-          key: ${{ needs.durations.outputs.key }}
-          fail-on-cache-miss: true
-
-      - name: Adopt latest dev durations
-        env:
-          PYTHON_VERSION: ${{ matrix.python-version }}
-        run: python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256
-
-      - name: Record collected tests
-        if: matrix.shard == 1 && github.event.pull_request.base.ref != 'main'
-        run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          from tests.shard_check import collect
-
-          nodeids = collect("tests/")
-          if not nodeids:
-              raise SystemExit("Collection failed or found no tests")
-          Path("collected.json").write_text(json.dumps(nodeids))
-          PY
-
-      - name: Upload collected tests
-        if: matrix.shard == 1 && github.event.pull_request.base.ref != 'main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: collected-${{ matrix.python-version }}
-          path: collected.json
-          if-no-files-found: error
-          retention-days: 14
-          overwrite: true
+          name: split-${{ matrix.python-version }}
 
       # NOT `-m unit`: only 439 of 999 tests carry that marker, so 560 —
       # including every ownership-scope test guarding what uninstall and prune
@@ -854,7 +891,7 @@ jobs:
         run: python -m scripts.swarm_ledger.artifact_sanity tests/fixtures/artifacts/*
 
   coverage-ratchet:
-    needs: [unit, queue-baseline]
+    needs: [durations, unit, queue-baseline]
     if: ${{ !cancelled() && needs.unit.result == 'success' && (github.event_name != 'merge_group' || needs['queue-baseline'].result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -881,23 +918,63 @@ jobs:
       - name: Resolve the measured base tree
         id: base
         env:
-          DISPATCHED: ${{ inputs.base }}
+          DISPATCHED_BASE: ${{ needs.durations.outputs.base }}
           QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
         run: |
-          if [[ -n "$QUEUE_BASE" ]]; then
-            base="$QUEUE_BASE"
-          else
-            base=$(git rev-parse "${DISPATCHED:-HEAD^1}")
-          fi
+          base=$(git rev-parse "${QUEUE_BASE:-${DISPATCHED_BASE:-${PUSH_BEFORE:-HEAD^1}}}")
           echo "commit=$base" >> "$GITHUB_OUTPUT"
           echo "tree=$(git rev-parse "$base^{tree}")" >> "$GITHUB_OUTPUT"
 
       - name: Restore the exact coverage baseline
+        id: cached
         if: github.event_name != 'merge_group' && github.event_name != 'workflow_dispatch'
         uses: actions/cache/restore@v4
         with:
           path: ~/coverage-baseline
           key: coverage-baseline-${{ steps.base.outputs.tree }}
+
+      # The cache evicts a baseline seven days after its last read, and a dev commit the queue merged may get no push run,
+      # so a miss falls back to the artifact any passed run of the base kept.
+      - name: Mint the tcc main ci App token
+        id: app-token
+        if: steps.cached.outcome == 'success' && steps.cached.outputs.cache-hit != 'true'
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-contents: read
+
+      - name: Find the run that published the base baseline
+        id: base-run
+        if: steps.app-token.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BASE: ${{ steps.base.outputs.commit }}
+        run: |
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$BASE&status=success&per_page=20" --jq '.workflow_runs[].id')
+          for run in $runs; do
+            kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=coverage-baseline" --jq '[.artifacts[] | select(.expired | not)] | length')
+            if [[ "$kept" -gt 0 ]]; then
+              echo "Restoring the coverage baseline of base $BASE from passed run $run"
+              echo "id=$run" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "::error::No passed Tests run on base $BASE kept a live coverage-baseline artifact."
+          exit 1
+
+      - name: Download the base baseline its run published
+        if: steps.base-run.outcome == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-baseline
+          path: ~/coverage-baseline
+          run-id: ${{ steps.base-run.outputs.id }}
+          repository: ${{ github.repository }}
+          github-token: ${{ steps.app-token.outputs.token }}
 
       - name: Download the queue base coverage baseline
         if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
@@ -930,7 +1007,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [durations, unit, shard-check, test-count, coverage-ratchet, size, lint, sonar, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, wiring, semgrep, dependency-audit]
+    needs: [durations, split, unit, shard-check, test-count, coverage-ratchet, size, lint, sonar, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, wiring, semgrep, dependency-audit]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1014,9 +1091,9 @@ jobs:
           key: durations-samples-${{ github.sha }}
 
   coverage-baseline:
-    needs: [unit, coverage-ratchet, gate-required, sonar]
-    # A red ratchet still publishes: skipping it would leave the next head with no base to grade against.
-    if: ${{ !cancelled() && github.event_name == 'push' && needs.unit.result == 'success' && needs.sonar.result == 'success' && !(needs['gate-required'].result != 'success' && needs['coverage-ratchet'].result != 'failure') }}
+    needs: [unit, gate-required]
+    # Any measured dev push publishes: a skipped one leaves the next head with no base to grade against.
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.unit.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -1070,7 +1147,7 @@ jobs:
           name: coverage-baseline
           path: ~/coverage-baseline
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 90
           overwrite: true
 
   # A later queue entry's base is the earlier entry's merge commit, so the run that measured it may still be finishing.

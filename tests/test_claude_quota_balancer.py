@@ -603,6 +603,25 @@ def test_fable_routing_caps_on_the_tighter_weekly_window():
     assert " 0/0 " in table.splitlines()[2]
 
 
+def test_an_api_slot_renders_as_its_own_open_row_with_weight_and_cap():
+    from scripts.routing.slots import Slot
+
+    result = balancer.ProbeResult("ALPHA", "allowed", "NORMAL", 70, balancer.QuotaWindow(20), balancer.QuotaWindow(30))
+    slot = Slot("claude", "api", 3, 1, kind=API, weight=25, provider="gateway")
+    table = balancer.render_table([result], now=1000, sessions={"ALPHA": 2, "api": 1}, api=[slot])
+    assert table.splitlines() == [
+        "#  ACCOUNT        KIND          STATE   SESSIONS  WEIGHT  CAP  ROUTING LEFT  5H LEFT  5H RESET  7D LEFT  7D RESET",
+        "-  -------------  ------------  ------  --------  ------  ---  ------------  -------  --------  -------  --------",
+        "1  ALPHA          subscription  NORMAL  2/6       -       6    70%           80%      ?         70%      ?       ",
+        "-  api (gateway)  api           OPEN    1/3       25%     3    n/a           n/a      n/a       n/a      n/a     ",
+    ]
+    wide = balancer.render_table([result], now=1000, include_fable=True, observed={"ALPHA": 990}, api=[slot])
+    assert wide.splitlines()[3] == (
+        "-  api (gateway)  api           OPEN    25%     3    n/a           n/a      n/a       n/a      n/a       "
+        "n/a         n/a          -  "
+    )
+
+
 def test_a_week_that_reset_before_now_counts_as_full():
     spent = balancer.ProbeResult(
         "a", "allowed", "NORMAL", 1.0, balancer.QuotaWindow(10.0), balancer.QuotaWindow(99.0, 500)

@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import KW_ONLY, dataclass, field
 from datetime import datetime, timezone
@@ -22,13 +22,15 @@ from scripts import session_bands
 from scripts.claude_config import claude_home
 from scripts.routing import claude_api, envs, place
 from scripts.routing.envs import subscription_child
-from scripts.routing.slots import API, SUBSCRIPTION, Slot
+from scripts.routing.slots import API, API_UNBOUNDED, SUBSCRIPTION, Slot
 
 TOKEN_PREFIX = "AH_CC_TOKEN_"
 HARNESS = "claude"
 OAUTH_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 MAX_PROBE_WORKERS = 3
 CACHE_TTL_SECONDS = 60
+OPEN = "OPEN"
+NOT_APPLICABLE = "n/a"
 
 
 @dataclass(frozen=True)
@@ -830,7 +832,27 @@ def _span(remaining: int) -> str:
 
 
 def _cap_text(cap: int | None) -> str:
-    return "?" if cap is None else str(cap)
+    if cap is None:
+        return "?"
+    return "none" if cap >= API_UNBOUNDED else str(cap)
+
+
+def _weight_text(weight: float | None) -> str:
+    return "-" if weight is None else f"{weight}%"
+
+
+def _api_line(slot: Slot, include_fable: bool, sessions: Mapping[str, int] | None, observed: bool) -> list[str]:
+    return [
+        "-",
+        f"{slot.account} ({slot.provider})",
+        API,
+        OPEN,
+        *([f"{slot.sessions}/{_cap_text(slot.cap)}"] if sessions is not None else []),
+        _weight_text(slot.weight),
+        _cap_text(slot.cap),
+        *[NOT_APPLICABLE] * (7 if include_fable else 5),
+        *(["-"] if observed else []),
+    ]
 
 
 def render_table(
@@ -840,13 +862,17 @@ def render_table(
     current: str = "",
     observed: Mapping[str, float] | None = None,
     sessions: Mapping[str, int] | None = None,
+    api: Sequence[Slot] = (),
 ) -> str:
     timestamp = int(time.time()) if now is None else now
     headers = [
         "#",
         "ACCOUNT",
+        "KIND",
         "STATE",
         *(["SESSIONS"] if sessions is not None else []),
+        "WEIGHT",
+        "CAP",
         "ROUTING LEFT",
         "5H LEFT",
         "5H RESET",
@@ -859,15 +885,15 @@ def render_table(
         headers.append("AGE")
     rows = []
     for rank, result in enumerate(rank_results(results, include_fable), 1):
+        cap = _cap_text(account_cap(result, timestamp, include_fable))
         row = [
             str(rank),
             f"{result.account} (current)" if current and result.account == current else result.account,
+            SUBSCRIPTION,
             result.state,
-            *(
-                [f"{sessions.get(result.account, 0)}/{_cap_text(account_cap(result, timestamp, include_fable))}"]
-                if sessions is not None
-                else []
-            ),
+            *([f"{sessions.get(result.account, 0)}/{cap}"] if sessions is not None else []),
+            _weight_text(None),
+            cap,
             _percent(result.margin),
             _percent(result.five_hour.remaining),
             _duration(result.five_hour.resets_at, timestamp),
@@ -880,6 +906,7 @@ def render_table(
             seen = observed.get(result.account)
             row.append("?" if seen is None else _span(max(0, timestamp - int(seen))))
         rows.append(row)
+    rows.extend(_api_line(slot, include_fable, sessions, observed is not None) for slot in api)
     widths = [max(len(headers[index]), *(len(row[index]) for row in rows)) for index in range(len(headers))]
     lines = ["  ".join(value.ljust(widths[index]) for index, value in enumerate(headers))]
     lines.append("  ".join("-" * width for width in widths))
@@ -887,7 +914,7 @@ def render_table(
     errors = [f"{result.account}: {result.error}" for result in rank_results(results, include_fable) if result.error]
     if errors:
         lines.extend(["", *errors])
-    known = {result.account for result in results}
+    known = {result.account for result in results} | {slot.account for slot in api}
     unlisted = {account: count for account, count in (sessions or {}).items() if account not in known}
     if unlisted:
         lines.extend(["", *(f"{account}: {count} session(s)" for account, count in sorted(unlisted.items()))])

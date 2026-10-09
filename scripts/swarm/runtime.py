@@ -251,10 +251,10 @@ class HerdrRuntime:
                     or profile_choice.DEFAULT_PROFILES[lane]
                 )
                 requested = _set(chosen.get("agent"))
-                if plugins.claude_only(profile):
-                    options.append(("claude",))
-                elif requested:
+                if requested:
                     options.append((requested,))
+                elif plugins.claude_only(profile):
+                    options.append(("claude",))
                 elif (
                     saved.get("harness") in agent_choice.AGENTS
                     and (task.get("handoff_envelope") or {}).get("reason") != "quota"
@@ -278,7 +278,9 @@ class HerdrRuntime:
                 return quota_handoff.exclusion(row, thresholds, predecessor)
 
             eligible = [row for row in rows if not reason(row)]
-            first = next((h for h in ("claude", "codex") if any(row.harness == h for row in eligible)), None)
+            first = next(
+                (h for h in agent_choice.preferring(predecessor[0]) if any(row.harness == h for row in eligible)), None
+            )
             accounts.setdefault(lane, {})[index] = {(row.harness, row.name) for row in eligible if row.harness == first}
             if first is None:
                 task = self._quota_ready_ids[lane][index]
@@ -307,7 +309,9 @@ class HerdrRuntime:
         from scripts.swarm.capacity import offered, pick
 
         seat = pick(offered(self._quota_accounts, self._quota_warned()))
-        return (seat.harness, "rotation") if seat else ("claude", agent_choice.ALL_FULL)
+        return (
+            (seat.harness, "rotation") if seat else (agent_choice.fallback(self._quota_accounts), agent_choice.ALL_FULL)
+        )
 
     def _quota_transfer(self, saved, profile, environ, lane, want, planned=None):
         from scripts.swarm import quota_handoff
@@ -326,10 +330,11 @@ class HerdrRuntime:
 
         candidates = [row for row in self._quota_accounts if not blocked(row)]
         preferred = [row for row in candidates if planned and row.harness == planned[0]]
+        order = agent_choice.preferring(saved["harness"])
         account = (
             next((row for row in preferred if row.name == planned[1]), None)
-            or quota_handoff.successor(preferred, True, thresholds)
-            or quota_handoff.successor(candidates, "codex" in harnesses, thresholds)
+            or quota_handoff.successor(preferred, order, thresholds)
+            or quota_handoff.successor(candidates, order, thresholds)
         )
         if account is None:
             raise SpawnError(

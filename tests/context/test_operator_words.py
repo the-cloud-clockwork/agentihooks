@@ -30,7 +30,7 @@ def test_a_quote_matches_the_words_as_typed_and_not_their_upper_case_spelling():
 def test_words_are_kept_per_agent_under_the_state_home(tmp_path, monkeypatch):
     monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path / "fresh" / "home")
     assert operator_words.record("Master A/b c", "ship it", now=100)
-    assert [p.name for p in (tmp_path / "fresh" / "home" / "operator_words").iterdir()] == ["Master_A_b_c.json"]
+    assert [p.name for p in (tmp_path / "fresh" / "home" / "operator_words").iterdir()] == ["words.sqlite3"]
     assert operator_words.matching("Master A/b c", "ship it", now=101) == "ship it"
 
 
@@ -114,11 +114,197 @@ def test_other_tools_empty_answers_and_unnamed_sessions_record_nothing():
     assert not operator_words.heard_answer(answer, {}, now=100)
 
 
-def test_only_the_latest_entries_are_kept():
-    for n in range(operator_words.ROWS_KEPT + 1):
-        operator_words.record("master@a1-1", f"word{n} said", now=100 + n)
-    assert operator_words.matching("master@a1-1", "word0 said", within=None) == ""
-    assert operator_words.matching("master@a1-1", f"word{operator_words.ROWS_KEPT} said", within=None)
+def test_the_five_hundred_and_first_oldest_prompt_still_relays():
+    from scripts.swarm_ledger import ledger_relay
+
+    for n in range(501):
+        operator_words.heard_prompt(f"word{n} said", ENV, now=100 + n)
+    assert ledger_relay.verified("master@a1-1", "word0 said") == "word0 said"
+    assert ledger_relay.verified("master@a1-1", "word500 said") == "word500 said"
+
+
+def test_line_hash_lookup_obeys_names_and_the_window():
+    operator_words.record("master@a1-1", "Preface\nShip  it\nEnd", now=100)
+    operator_words.record("master@a1-1", "Ship it\nLatest", now=101)
+    with operator_words._store() as connection:
+        assert operator_words._line_match(connection, "master@a1-1", "ship it", None) == ("Ship it\nLatest",)
+        assert operator_words._line_match(connection, "master@a1-1", "ship it", 101) is None
+        assert operator_words._line_match(connection, "master@a1-1", "ship it", 100) == ("Ship it\nLatest",)
+        assert operator_words._line_match(connection, "master@a1-1", "ship", None) is None
+        assert operator_words._line_match(connection, "master@b2-1", "ship it", None) is None
+
+
+def test_each_line_is_indexed_with_its_sha256_hash():
+    assert operator_words._hash("ship it") == "bef4261f394bf71fd2b565cd76396ac9ed7953f9110c69ee49d7a82871238fbf"
+
+
+def test_retained_json_words_relay_after_upgrade_and_are_removed_on_forget(tmp_path, monkeypatch):
+    import json
+
+    from scripts.swarm_ledger import ledger_relay
+
+    monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path)
+    folder = tmp_path / "operator_words"
+    folder.mkdir()
+    path = folder / "demo-master-1.json"
+    path.write_text(json.dumps({"sessions": ["old-session"], "rows": [{"at": 100, "words": "Keep the old quote"}]}))
+    assert operator_words.recorded("demo-master-*") == ["demo-master-1"]
+    assert ledger_relay.verified("demo-master-1", "Keep the old quote") == "Keep the old quote"
+    assert json.loads(path.read_text()) == {"sessions": ["old-session"]}
+    assert not operator_words.heard_prompt(
+        "new words",
+        {"AGENTIHOOKS_AGENT_NAME": "demo-master-1", "AGENTIHOOKS_SWARM": "demo"},
+        now=101,
+        session="new-session",
+    )
+    assert ledger_relay.verified("demo-master-1", "Keep the old quote") == "Keep the old quote"
+    operator_words.forget("demo")
+    assert ledger_relay.verified("demo-master-1", "Keep the old quote") == ""
+    assert operator_words.recorded("demo-master-*") == []
+
+
+def test_upgrade_uses_the_registered_swarm_for_modern_agent_names(tmp_path, monkeypatch):
+    import json
+
+    from hooks import _redis
+    from scripts.swarm.naming import NameRegistry
+
+    monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path)
+    redis = object()
+    monkeypatch.setattr(
+        NameRegistry, "slug_of", lambda self, name: {(redis, "master@abcdef-0001"): "demo"}[(self.redis, name)]
+    )
+    monkeypatch.setattr(_redis, "get_redis", lambda: redis)
+    folder = tmp_path / "operator_words"
+    folder.mkdir()
+    path = folder / "master@abcdef-0001.json"
+    path.write_text(json.dumps({"sessions": [], "rows": [{"at": 100, "words": "Registered old words"}]}))
+    assert operator_words.matching("master@abcdef-0001", "Registered old words", now=101) == "Registered old words"
+    assert json.loads(path.read_text()) == {"sessions": []}
+    operator_words.forget("demo")
+    assert operator_words.matching("master@abcdef-0001", "Registered old words", within=None) == ""
+
+
+def test_upgrade_retries_modern_names_after_the_registry_recovers(tmp_path, monkeypatch):
+    import json
+
+    from hooks import _redis
+    from scripts.swarm.naming import NameRegistry
+
+    monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(_redis, "get_redis", lambda: None)
+    folder = tmp_path / "operator_words"
+    folder.mkdir()
+    path = folder / "master@abcdef-0001.json"
+    old = {"sessions": ["old"], "rows": [{"at": 100, "words": "Unresolved words"}]}
+    path.write_text(json.dumps(old))
+    assert operator_words.recorded("master@abcdef-*") == []
+    assert json.loads(path.read_text()) == old
+    assert operator_words.heard_prompt(
+        "New words", {"AGENTIHOOKS_AGENT_NAME": "master@abcdef-0001", "AGENTIHOOKS_SWARM": "demo"}, now=101
+    )
+    redis = object()
+    monkeypatch.setattr(
+        NameRegistry, "slug_of", lambda self, name: {(redis, "master@abcdef-0001"): "demo"}[(self.redis, name)]
+    )
+    monkeypatch.setattr(_redis, "get_redis", lambda: redis)
+    assert operator_words.matching("master@abcdef-0001", "Unresolved words", now=102) == "Unresolved words"
+    assert json.loads(path.read_text()) == {"sessions": ["old"]}
+    operator_words.forget("demo")
+    assert operator_words.recorded("master@abcdef-*") == []
+    assert operator_words.matching("master@abcdef-0001", "New words", within=None) == ""
+    assert operator_words.matching("master@abcdef-0001", "Unresolved words", within=None) == ""
+
+
+def test_upgrade_retry_keeps_one_copy_when_cleaning_the_old_file_failed(tmp_path, monkeypatch):
+    import json
+
+    import pytest
+
+    monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path)
+    folder = tmp_path / "operator_words"
+    folder.mkdir()
+    path = folder / "demo-master-1.json"
+    path.write_text(json.dumps({"sessions": [], "rows": [{"at": 100, "words": "Once"}]}))
+    save = operator_words._save
+
+    def fail_save(name, data):
+        raise OSError("interrupted cleanup")
+
+    monkeypatch.setattr(operator_words, "_save", fail_save)
+    with pytest.raises(OSError, match="interrupted cleanup"):
+        operator_words.matching("demo-master-1", "Once", now=101)
+    monkeypatch.setattr(operator_words, "_save", save)
+    assert operator_words.matching("demo-master-1", "Once", now=101) == "Once"
+    with operator_words._store() as connection:
+        assert connection.execute("SELECT swarm, name, at, words, norm FROM entries").fetchall() == [
+            ("demo", "demo-master-1", 100.0, "Once", "once")
+        ]
+    assert json.loads(path.read_text()) == {"sessions": []}
+
+
+def test_whole_line_lookup_precedes_a_newer_substring_match():
+    operator_words.record("master@a1-1", "Ship it", now=100)
+    operator_words.record("master@a1-1", "Do not ship it", now=101)
+    assert operator_words.matching("master@a1-1", "ship it", now=102) == "Ship it"
+    assert operator_words.matching("master@a1-1", "ship", now=102) == "Do not ship it"
+
+
+def test_empty_quotes_match_nothing():
+    operator_words.record("master@a1-1", "ship it", now=100)
+    assert operator_words.matching("master@a1-1", "", now=101) == ""
+    assert operator_words.matching("master@a1-1", " \n\t ", now=101) == ""
+
+
+def test_default_and_absent_swarms_are_recorded_without_swarm_ownership():
+    operator_words.record("plain", "default words", now=100)
+    operator_words.record("absent", "absent words", now=100, swarm=None)
+    operator_words.forget("")
+    assert operator_words.recorded("*") == []
+
+
+def test_question_answers_are_removed_with_their_swarm():
+    assert operator_words.heard_answer(
+        {"tool_name": "AskUserQuestion", "tool_response": {"answers": {"q": "Swarm answer"}}}, ENV, now=100
+    )
+    assert operator_words.matching("master@a1-1", "Swarm answer", now=101) == "Swarm answer"
+    operator_words.forget("demo")
+    assert operator_words.matching("master@a1-1", "Swarm answer", within=None) == ""
+
+
+def test_upgrade_continues_past_empty_and_unresolved_files(tmp_path, monkeypatch):
+    import json
+
+    from hooks import _redis
+
+    monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(_redis, "get_redis", lambda: None)
+    folder = tmp_path / "operator_words"
+    folder.mkdir()
+    (folder / "aaa.json").write_text(json.dumps({"sessions": ["first"], "rows": []}))
+    (folder / "master@abcdef-0001.json").write_text(json.dumps({"rows": [{"at": 100, "words": "Pending"}]}))
+    path = folder / "z-demo-master-1.json"
+    path.write_text(json.dumps({"rows": [{"at": 100, "words": "Known"}]}))
+    glob = type(folder).glob
+    monkeypatch.setattr(type(folder), "glob", lambda self, pattern: iter(sorted(glob(self, pattern))))
+    assert operator_words.matching("z-demo-master-1", "Known", now=101) == "Known"
+    assert json.loads(path.read_text()) == {"sessions": []}
+
+
+def test_completed_upgrade_does_not_scan_legacy_files_again(tmp_path, monkeypatch):
+    import json
+
+    monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path)
+    folder = tmp_path / "operator_words"
+    folder.mkdir()
+    (folder / "demo-master-1.json").write_text(json.dumps({"rows": [{"at": 100, "words": "Known"}]}))
+    assert operator_words.matching("demo-master-1", "Known", now=101) == "Known"
+
+    def no_scan(name):
+        raise AssertionError("completed migration scanned legacy files")
+
+    monkeypatch.setattr(operator_words, "_load", no_scan)
+    assert operator_words.matching("demo-master-1", "Known", now=101) == "Known"
 
 
 def test_words_outside_the_window_are_kept_and_found_with_no_window():

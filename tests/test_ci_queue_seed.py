@@ -150,7 +150,7 @@ def test_a_restored_baseline_for_another_tree_is_red(tmp_path, measured, fails):
 
 def test_every_unit_shard_downloads_the_one_republished_dev_durations():
     jobs = _jobs()
-    steps = jobs["unit"]["steps"]
+    steps = jobs["split"]["steps"]
     download = _step(steps, "Download the queued run's dev durations")
     adopt = _step(steps, "Adopt latest dev durations")
     assert download["if"] == "needs.durations.outputs.queued == 'true'"
@@ -394,6 +394,7 @@ def dispatch_lookup(tmp_path):
             LISTED=_LISTED,
             FAIL_COMMIT=fail_commit,
             GITHUB_OUTPUT=str(output),
+            GITHUB_REF_NAME="feature",
             GITHUB_REPOSITORY="the-cloud-clockwork/agentihooks",
             **{
                 f"KEPT_{k.removeprefix('run')}": json.dumps(

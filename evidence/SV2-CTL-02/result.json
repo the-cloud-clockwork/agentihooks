@@ -4,7 +4,7 @@
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1951",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2024",
-  "tested_commit": "9d7d986ee4cf615064b2d74f3f51af09d5316b16",
+  "tested_commit": "6980bcabd85bec9181a7fb8250e38717770b033b",
   "status": "fixture-qualified-on-integrated-controller-awaiting-ci",
   "evidence_class": "Mocked Redis server with an actual Lua interpreter and aligned server clock; transactional Redis client paths and signed fixture grants; no production rollout claimed.",
   "interfaces": [
@@ -28,13 +28,14 @@
   },
   "validation": {
     "command": "python -m pytest tests/test_swarm_v2_authority.py tests/swarm/test_store.py tests/swarm/test_tick.py tests/test_swarm_v2_controller.py tests/swarm/test_execution_identity.py tests/test_swarm_redis_key_prefix.py tests/test_live_redis_guard.py -q --tb=short --cov=scripts.swarm_v2.authority --cov-report=term-missing tests/test_suite_speed.py",
-    "output": "339 passed in 39.52 seconds; authority 178 statements, zero missing, 100 percent coverage",
+    "output": "365 passed in 35.86 seconds; authority 178 statements, zero missing, 100 percent coverage",
     "lint": "ruff check passed on changed Python files",
     "format": "ruff format check passed on changed Python files",
     "limits": "84 units over limits, 84 base allowlist entries, zero errors against the stacked controller base",
     "guard_fault": "Removing script refusal made the real client boundary test fail; restoring it made real refusal and fake evaluation tests pass. The real client dispatch stub was never invoked by valid code.",
     "worker_expiry_control": "Four delayed admit renew release complete requests crossed signed worker token expiry; red before fix and green after; no task state journal or claimant changes.",
-    "store_mutation_followup": "CI run 37890437465: 87 killed, 15 surviving store mutations. Eleven isolated authority/journal/claim and holder replacement race cases added; authority suite 52 passed in 1.55 seconds. Standards cleared three equivalent SET NX mutations under WATCH and absent GET; other survivors require next CI qualification."
+    "store_mutation_followup": "CI run 37893903406: 99 store mutants killed, three equivalent NX mutants cleared, zero failures.",
+    "authority_mutation_followup": "CI run 37893903406: 559 killed, 48 authority survivors. Exact journals, fenced snapshots, later retired attempts, one millisecond leases, early task expiry precedence, real Redis TIME reads and ten isolated scope churn cases now exercise the reported variants. Standards cleared only the unused replay worker deadline default. Renewed CI must qualify the assertions."
   },
   "cases": {
     "a": "evidence/SV2-CTL-02/a-result.json",

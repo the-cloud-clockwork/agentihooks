@@ -383,14 +383,19 @@ def test_warning_ignores_unknown_state_and_handles_empty_observations():
 
 def test_required_claude_successor_uses_an_eligible_account():
     row = account("healthy", five=10, week=20)
-    assert quota_handoff.successor([row], False, quota_handoff.Thresholds()) == row
+    assert quota_handoff.successor([row], ("claude",), quota_handoff.Thresholds()) == row
 
 
 def test_an_eligible_weekly_only_codex_account_can_receive_the_successor():
     row = replace(account("default", "codex", week=20), five_left=None)
-    assert quota_handoff.successor([row], True, quota_handoff.Thresholds()) == row
-    assert quota_handoff.successor([replace(row, week_left=None)], True, quota_handoff.Thresholds()) is None
-    assert quota_handoff.successor([replace(row, state="UNKNOWN")], True, quota_handoff.Thresholds()) is None
+    assert quota_handoff.successor([row], ("claude", "codex"), quota_handoff.Thresholds()) == row
+    assert (
+        quota_handoff.successor([replace(row, week_left=None)], ("claude", "codex"), quota_handoff.Thresholds()) is None
+    )
+    assert (
+        quota_handoff.successor([replace(row, state="UNKNOWN")], ("claude", "codex"), quota_handoff.Thresholds())
+        is None
+    )
 
 
 def test_quota_transfer_obeys_its_allocation_without_a_task_pin(tmp_path, monkeypatch):
@@ -457,14 +462,14 @@ def test_successor_uses_most_routing_left_and_skips_unplaceable_accounts(state):
         account("best", five=10, week=20),
         account("cx", "codex", five=0, week=0),
     ]
-    assert quota_handoff.successor(rows, True, quota_handoff.Thresholds()).name == "best"
+    assert quota_handoff.successor(rows, ("claude", "codex"), quota_handoff.Thresholds()).name == "best"
 
 
 def test_successor_falls_back_to_codex_and_respects_profile_and_floor():
     rows = [account("cc", state="DRAIN"), account("cx", "codex", five=10, week=20)]
-    assert quota_handoff.successor(rows, True, quota_handoff.Thresholds()) == rows[1]
-    assert quota_handoff.successor(rows, False, quota_handoff.Thresholds()) is None
-    assert quota_handoff.successor([replace(rows[1], cap=0)], True, quota_handoff.Thresholds()) is None
+    assert quota_handoff.successor(rows, ("claude", "codex"), quota_handoff.Thresholds()) == rows[1]
+    assert quota_handoff.successor(rows, ("claude",), quota_handoff.Thresholds()) is None
+    assert quota_handoff.successor([replace(rows[1], cap=0)], ("claude", "codex"), quota_handoff.Thresholds()) is None
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
@@ -704,20 +709,22 @@ def test_api_agents_receive_no_subscription_warning(harness):
     assert storage.redis.hgetall(storage.key("sw", "quota-warning-lives")) == {}
 
 
-@pytest.mark.parametrize("harness,allow_codex", [("claude", False), ("claude", True), ("codex", True)])
+@pytest.mark.parametrize(
+    "harness,harnesses", [("claude", ("claude",)), ("claude", ("claude", "codex")), ("codex", ("claude", "codex"))]
+)
 @pytest.mark.parametrize("sessions,cap,eligible", [(0, 1, True), (1, 1, False), (0, 0, False), (999, 1000, True)])
-def test_api_successors_use_capacity_without_subscription_readings(harness, allow_codex, sessions, cap, eligible):
+def test_api_successors_use_capacity_without_subscription_readings(harness, harnesses, sessions, cap, eligible):
     row = capacity.Account(harness, "api", "OPEN", sessions, None, None, cap, kind="api")
-    assert quota_handoff.successor([row], allow_codex, quota_handoff.Thresholds()) == (row if eligible else None)
+    assert quota_handoff.successor([row], harnesses, quota_handoff.Thresholds()) == (row if eligible else None)
     assert quota_handoff.exclusion(row, quota_handoff.Thresholds()) == ("" if eligible else "has no free seats")
 
 
 def test_api_successors_preserve_harness_and_predecessor_restrictions():
     api = capacity.Account("codex", "api", "OPEN", 0, None, None, 1, kind="api")
-    assert quota_handoff.successor([api], False, quota_handoff.Thresholds()) is None
+    assert quota_handoff.successor([api], ("claude",), quota_handoff.Thresholds()) is None
     assert quota_handoff.exclusion(api, quota_handoff.Thresholds(), ("codex", "api")) == "is the account handing off"
     pool = account("token", harness="codex", five=0, week=0, sessions=0)
-    assert quota_handoff.successor([api, pool], True, quota_handoff.Thresholds()) == api
+    assert quota_handoff.successor([api, pool], ("claude", "codex"), quota_handoff.Thresholds()) == api
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
@@ -755,4 +762,4 @@ def test_swarm_quota_transfer_routes_to_api_with_no_window_readings(tmp_path, mo
 def test_api_successor_ties_use_the_existing_account_name_order():
     api = capacity.Account("claude", "api", "OPEN", 0, None, None, 1, kind="api")
     token = account("aaa", five=0, week=0, sessions=0)
-    assert quota_handoff.successor([api, token], False, quota_handoff.Thresholds()) == token
+    assert quota_handoff.successor([api, token], ("claude",), quota_handoff.Thresholds()) == token

@@ -165,7 +165,11 @@ along a `delegates-to` link; a `can-observe` link refuses the send and names why
 sender read that seat's items with `agentihooks msg inbox --of <seat>`. The operator, the master, a
 sender holding no seat, and a swarm without links are never restricted.
 
-Built-in templates (`default`, `codex-ci`) ship with agentihooks. User templates live in
+Built-in templates (`default`, `codex-ci`, `codex-only`, `claude-only`) ship with agentihooks.
+`codex-only` and `claude-only` pin `agent` on the eng, ci, plan and master lanes, so every seat runs on
+one harness; a Claude only profile on a `codex-only` lane is refused with its reason. Where nothing pins a
+harness, a launch takes the harness with an open seat, and with no open seat on either harness it is
+refused rather than defaulting to Claude. User templates live in
 `$AGENTIHOOKS_HOME/swarm-templates/` and win over a built-in of the same name. `create --template` stores
 the template name and lane map in the swarm config.
 

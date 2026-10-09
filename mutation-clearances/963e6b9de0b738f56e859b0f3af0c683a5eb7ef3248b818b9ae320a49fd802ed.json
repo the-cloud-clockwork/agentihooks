@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__append__mutmut_15:db9b634bba9ecf9ee4accc8bf4782588706799b5f3b0b7f4edaf6d1a855e0d17": {
+    "reader": "Standards",
+    "reason": "Only INSERT and VALUES keyword casing changes; SQLite inserts the same bound line name, hash and entry id."
+  }
+}

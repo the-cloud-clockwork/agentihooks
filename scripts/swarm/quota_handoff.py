@@ -89,8 +89,10 @@ def refusal(
     )
 
 
-def successor(accounts: list[capacity.Account], allow_codex: bool, thresholds: Thresholds) -> capacity.Account | None:
-    for harness in ("claude", "codex") if allow_codex else ("claude",):
+def successor(
+    accounts: list[capacity.Account], harnesses: tuple[str, ...], thresholds: Thresholds
+) -> capacity.Account | None:
+    for harness in harnesses:
         eligible = [row for row in accounts if row.harness == harness and not exclusion(row, thresholds)]
         if eligible:
             return min(

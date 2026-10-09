@@ -985,7 +985,7 @@ def test_rotation_picks_the_fewest_session_seat_or_asks_choose(tmp_path):
     assert runtime._rotation("", {}) == ("codex", "rotation")
     assert runtime._rotation("claude", {}) == ("codex", "requested")
     runtime._quota_accounts = [capacity.Account("codex", "cx", "CLOSED", 0, 90, 90, 0)]
-    assert runtime._rotation("", {}) == ("claude", agent_choice.ALL_FULL)
+    assert runtime._rotation("", {}) == ("codex", agent_choice.ALL_FULL)
     assert calls == ["", "claude"]
 
 
