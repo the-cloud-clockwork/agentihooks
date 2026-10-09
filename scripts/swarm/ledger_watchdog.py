@@ -6,6 +6,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from scripts.inbox.store import InboxStore
@@ -23,14 +24,27 @@ POLL_S = 0.1
 ENSURE_TIMEOUT_S = 30
 LOCK_KEY = f"{PREFIX}:ledger-server-restart"
 LOCK_MS = 120_000
+RUNAWAY_KEY = f"{PREFIX}:ledger-server-runaway"
+RUNAWAY_MS = 900_000
+STARTED_KEY = f"{PREFIX}:ledger-server-started"
 SCRIPT = "ledger_server.py"
+ERROR_KEPT = 200
 RUNAWAY, STALE = "runaway", "stale"
 RUNAWAY_TEXT = "The ledger server was restarted because {why}."
 SLOW_TEXT = "The ledger server restarted on new code and its writes are slow: {took}."
+DOWN_TEXT = "The ledger server was stopped because {why} and did not start again: {error}."
 
 
 class Host:
-    def __init__(self, folder, proc, kill, run, sleep, clock):
+    def __init__(
+        self,
+        folder: Path,
+        proc: Path,
+        kill: Callable[[int, int], None],
+        run: Callable[..., subprocess.CompletedProcess],
+        sleep: Callable[[float], None],
+        clock: Callable[[], float],
+    ):
         self.folder, self.proc, self.kill, self.run, self.sleep, self.clock = folder, proc, kill, run, sleep, clock
 
 
@@ -48,12 +62,23 @@ def seen(pid: int, proc: Path) -> dict | None:
     fields = dict(line.split(":", 1) for line in status.splitlines() if ":" in line)
     try:
         return {"threads": int(fields["Threads"]), "rss_kb": int(fields.get("VmRSS", "0").split()[0]), "argv": argv}
-    except (KeyError, ValueError):
+    except (KeyError, ValueError, IndexError):
         return None
 
 
 def script(argv: list[str]) -> str | None:
     return next((arg for arg in argv if Path(arg).name == SCRIPT), None)
+
+
+def launch(pid: int, argv: list[str], proc: Path) -> list[str] | None:
+    found = script(argv)
+    if found is None:
+        return None
+    try:
+        path = Path(found) if Path(found).is_absolute() else (proc / str(pid) / "cwd").resolve(strict=True) / found
+    except OSError:
+        return None
+    return [argv[0], str(path)] if path.is_file() else None
 
 
 def alive(pid: int, proc: Path) -> bool:
@@ -79,32 +104,40 @@ def why(folder: Path, pid: int, facts: dict) -> tuple[str, str] | None:
 def _signal(host: Host, pid: int, sig: int) -> None:
     try:
         host.kill(pid, sig)
-    except ProcessLookupError:
+    except OSError:
         pass
 
 
-def restart(host: Host, pid: int, argv: list[str]) -> None:
+def _ours(pid: int, proc: Path) -> bool:
+    facts = seen(pid, proc)
+    return facts is not None and script(facts["argv"]) is not None
+
+
+def restart(host: Host, pid: int, command: list[str]) -> str:
     _signal(host, pid, signal.SIGTERM)
     for _ in range(round(STOP_WAIT_S / POLL_S)):
         if not alive(pid, host.proc):
             break
         host.sleep(POLL_S)
-    if alive(pid, host.proc):
+    if alive(pid, host.proc) and _ours(pid, host.proc):
         _signal(host, pid, signal.SIGKILL)
-    command = [argv[0], script(argv), "--ensure"]
     try:
-        host.run(
-            command,
+        done = host.run(
+            [*command, "--ensure"],
             env={**os.environ, "LEDGER_DIR": str(host.folder)},
             capture_output=True,
+            text=True,
             timeout=ENSURE_TIMEOUT_S,
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        print(f"ledger server start failed: {exc}", file=sys.stderr)
+        return str(exc)
+    if done.returncode == 0:
+        return ""
+    return ((done.stderr or "").strip() or f"exit code {done.returncode}")[-ERROR_KEPT:]
 
 
-def writes(ledger, slug: str, inputs: dict, clock) -> list[tuple[float, bool]]:
+def writes(ledger, slug: str, inputs: dict, clock: Callable[[], float]) -> list[tuple[float, bool]]:
     took = []
     for _ in range(WRITES):
         started, failed = clock(), False
@@ -139,11 +172,19 @@ def _runaway(store, slug: str, ledger, reason: str) -> list[str]:
     return [f"restarted the ledger server because {reason}"]
 
 
-def _stale(store, slug: str, ledger, runtime, clock) -> list[str]:
+def _stale(store, slug: str, ledger, runtime, clock: Callable[[], float]) -> list[str]:
     took = writes(ledger, slug, time_left.inputs_of(store, slug, runtime), clock)
     if slow(took):
         _mail(store, slug, SLOW_TEXT.format(took=described(took)))
     return [f"restarted the ledger server on new code; three writes took {described(took)}"]
+
+
+def _claimed(store, folder: Path, pid: int, kind: str) -> bool:
+    if kind == STALE and store.redis.get(STARTED_KEY) == str(pid) and not server_code.recorded(folder, pid):
+        return False
+    if kind == RUNAWAY and not store.redis.set(RUNAWAY_KEY, pid, nx=True, px=RUNAWAY_MS):
+        return False
+    return bool(store.redis.set(LOCK_KEY, pid, nx=True, px=LOCK_MS))
 
 
 def watch(store, slug: str, ledger, runtime, host: Host | None = None) -> list[str]:
@@ -152,13 +193,15 @@ def watch(store, slug: str, ledger, runtime, host: Host | None = None) -> list[s
     host = host or default_host()
     pid = ledger_host.server_pid(host.folder)
     facts = seen(pid, host.proc) if pid is not None else None
-    if facts is None or script(facts["argv"]) is None:
+    command = launch(pid, facts["argv"], host.proc) if facts else None
+    found = why(host.folder, pid, facts) if command else None
+    if found is None or not _claimed(store, host.folder, pid, found[0]):
         return []
-    found = why(host.folder, pid, facts)
-    if found is None or not store.redis.set(LOCK_KEY, pid, nx=True, px=LOCK_MS):
-        return []
-    restart(host, pid, facts["argv"])
     kind, reason = found
+    if error := restart(host, pid, command):
+        _mail(store, slug, DOWN_TEXT.format(why=reason, error=error))
+        return [f"stopped the ledger server because {reason} and it did not start again: {error}"]
+    store.redis.set(STARTED_KEY, ledger_host.server_pid(host.folder) or "")
     return (
         _runaway(store, slug, ledger, reason) if kind == RUNAWAY else _stale(store, slug, ledger, runtime, host.clock)
     )

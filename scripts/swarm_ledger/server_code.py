@@ -14,16 +14,21 @@ SUFFIXES = (".py", ".html", ".js", ".css")
 RECORD = ".server.code"
 
 
-def code_stamp(code_dirs=CODE_DIRS):
-    return max(
-        (p.stat().st_mtime_ns for d in code_dirs for p in d.rglob("*") if p.suffix in SUFFIXES),
-        default=0,
-    )
+def _mtime(path: Path) -> int:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
 
 
-def record(folder: Path, pid: int, code_dirs=CODE_DIRS) -> None:
-    loaded = {"pid": pid, "stamp": code_stamp(code_dirs), "dirs": [str(d) for d in code_dirs]}
-    (folder / RECORD).write_text(json.dumps(loaded))
+def code_stamp(code_dirs: tuple[Path, ...] = CODE_DIRS) -> int:
+    return max((_mtime(p) for d in code_dirs for p in d.rglob("*") if p.suffix in SUFFIXES), default=0)
+
+
+def record(folder: Path, pid: int, stamp: int, code_dirs: tuple[Path, ...] = CODE_DIRS) -> None:
+    written = folder / f"{RECORD}.{pid}"
+    written.write_text(json.dumps({"pid": pid, "stamp": stamp, "dirs": [str(d) for d in code_dirs]}))
+    written.replace(folder / RECORD)
 
 
 def loaded(folder: Path) -> dict | None:
@@ -32,6 +37,11 @@ def loaded(folder: Path) -> dict | None:
     except (OSError, ValueError):
         return None
     return held if isinstance(held, dict) else None
+
+
+def recorded(folder: Path, pid: int) -> bool:
+    held = loaded(folder)
+    return held is not None and held.get("pid") == pid
 
 
 def stale(folder: Path, pid: int) -> bool:

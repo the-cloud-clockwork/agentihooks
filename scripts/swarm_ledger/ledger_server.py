@@ -65,6 +65,7 @@ LOGO = ROOT / "media" / "agentihooks-logo.png"
 
 HUB = Hub()
 BIN_SWEEP_EVERY = 15
+LOADED_STAMP = code_stamp()
 
 
 @functools.cache
@@ -914,8 +915,8 @@ def serve():
     threading.Thread(target=watch_ledgers, daemon=True).start()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     stopped = server_lifetime.watch(server, core.LEDGER_DIR, PORT)
+    server_code.record(PIDFILE.parent, os.getpid(), LOADED_STAMP)
     PIDFILE.write_text(str(os.getpid()))
-    server_code.record(PIDFILE.parent, os.getpid())
     print(f"ledger server on {BASE}, dir {core.LEDGER_DIR}", flush=True)
     try:
         server.serve_forever()

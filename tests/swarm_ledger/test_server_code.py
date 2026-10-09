@@ -37,9 +37,23 @@ def test_the_server_and_the_swarm_share_one_list_of_code_folders():
 
 def test_the_record_names_the_process_its_folders_and_the_stamp_it_loaded(tmp_path):
     code = code_tree(tmp_path)
-    server_code.record(tmp_path, 4242, (code,))
-    assert json.loads((tmp_path / ".server.code").read_text()) == {"pid": 4242, "stamp": 30, "dirs": [str(code)]}
-    assert server_code.loaded(tmp_path) == {"pid": 4242, "stamp": 30, "dirs": [str(code)]}
+    server_code.record(tmp_path, 4242, 17, (code,))
+    assert json.loads((tmp_path / ".server.code").read_text()) == {"pid": 4242, "stamp": 17, "dirs": [str(code)]}
+    assert server_code.loaded(tmp_path) == {"pid": 4242, "stamp": 17, "dirs": [str(code)]}
+    assert sorted(p.name for p in tmp_path.iterdir()) == [".server.code", "code"]
+
+
+def test_a_code_file_that_cannot_be_read_counts_as_no_change(tmp_path):
+    code = code_tree(tmp_path)
+    (code / "broken.py").symlink_to(tmp_path / "missing.py")
+    assert server_code.code_stamp((code,)) == 30
+
+
+def test_only_the_server_s_own_record_counts_as_recorded(tmp_path):
+    assert not server_code.recorded(tmp_path, 4242)
+    server_code.record(tmp_path, 4242, 0, ())
+    assert server_code.recorded(tmp_path, 4242)
+    assert not server_code.recorded(tmp_path, 4243)
 
 
 def test_a_missing_broken_or_odd_record_reads_as_nothing(tmp_path):
@@ -53,7 +67,7 @@ def test_a_missing_broken_or_odd_record_reads_as_nothing(tmp_path):
 def test_a_server_is_current_only_while_its_own_record_matches_the_code_on_disk(tmp_path):
     code = code_tree(tmp_path)
     assert server_code.stale(tmp_path, 4242)
-    server_code.record(tmp_path, 4242, (code,))
+    server_code.record(tmp_path, 4242, 30, (code,))
     assert not server_code.stale(tmp_path, 4242)
     assert server_code.stale(tmp_path, 4243)
     os.utime(code / "a.py", ns=(31, 31))
@@ -80,6 +94,11 @@ def test_serve_records_the_code_it_loaded_beside_its_pid_file(monkeypatch, tmp_p
     monkeypatch.setattr(ledger_server.server_lifetime, "watch", lambda *args: ledger_server.threading.Event())
     monkeypatch.setattr(ledger_server.legacy, "adopt", lambda stored: None)
     monkeypatch.setattr(ledger_server, "PIDFILE", tmp_path / ".server.pid")
-    monkeypatch.setattr(ledger_server.server_code, "record", lambda *args: recorded.append(args))
+    monkeypatch.setattr(
+        ledger_server.server_code,
+        "record",
+        lambda *args: recorded.append((*args, (tmp_path / ".server.pid").exists())),
+    )
     ledger_server.serve()
-    assert recorded == [(tmp_path, os.getpid())]
+    assert recorded == [(tmp_path, os.getpid(), ledger_server.LOADED_STAMP, False)]
+    assert ledger_server.LOADED_STAMP > 0
