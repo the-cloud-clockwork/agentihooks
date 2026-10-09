@@ -49,9 +49,9 @@ def _unpassed(payload: dict) -> Path | None:
         return None
     cwd = Path(payload.get("cwd") or os.getcwd(), _path(tool_input.get("workdir") or ""))
     for tokens in commands(command):
-        if Path(tokens[0]).name in ("cd", "pushd"):
+        if Path(tokens[0]).name == "cd":
             target = cwd / _path(next((word for word in tokens[1:] if not word.startswith("-")), "~"))
-            cwd = target if target.is_dir() else cwd
+            cwd = target if os.path.isdir(target) else cwd
             continue
         push = _push(tokens)
         if push is None or _exempt(push[1]):

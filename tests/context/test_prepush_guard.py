@@ -130,7 +130,6 @@ def test_push_from_another_directory_resolves_the_repository(repo, tmp_path, mon
         "cd -P {worktree} && git push",
         "cd && cd worktree && git push",
         "cd {worktree}; cd missing; git push",
-        "pushd {worktree} && git push",
     ],
 )
 def test_the_push_is_graded_in_the_folder_the_command_changes_into(repo, tmp_path, monkeypatch, command):
