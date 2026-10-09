@@ -3,7 +3,7 @@ import os
 import signal
 import subprocess
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import replace
 
 import pytest
@@ -47,29 +47,39 @@ def record(namespace=ANTON, pid=PID, start=STARTED, execution="exe-1"):
 
 
 def children():
-    return {pid for pid, row in processes().items() if row.ppid == os.getpid() and row.state != "Z"}
+    rows = [row for row in processes().values() if row.state != "Z"]
+    found, parents = set(), {os.getpid()}
+    while parents:
+        parents = {row.pid for row in rows if row.ppid in parents} - found
+        found |= parents
+    return found
 
 
 @contextmanager
 def bounded(what, seconds=30):
+    finished = []
+
     def expired(signum, frame):
-        pytest.fail(f"{what} did not finish within {seconds} seconds", pytrace=False)
+        if not finished:
+            pytest.fail(f"{what} did not finish within {seconds} seconds")
 
     before = children()
     previous = signal.signal(signal.SIGALRM, expired)
-    # SIGALRM cannot interrupt a wait inside C code; the faulthandler dump ends the worker with every stack instead.
+    # Ends the worker, which xdist reports as a crash in this test, when SIGALRM cannot interrupt the wait.
     faulthandler.dump_traceback_later(seconds + 10, exit=True)
     try:
         signal.setitimer(signal.ITIMER_REAL, seconds)
         yield
     finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
+        finished.append(True)
         faulthandler.cancel_dump_traceback_later()
+        signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous)
         left = children() - before
         for pid in left:
-            os.kill(pid, signal.SIGKILL)
-            os.waitpid(pid, 0)
+            with suppress(ProcessLookupError, ChildProcessError):
+                os.kill(pid, signal.SIGKILL)
+                os.waitpid(pid, 0)
     assert not left, f"{what} left child processes running"
 
 
@@ -259,15 +269,10 @@ def test_a_store_call_blocked_on_its_server_fails_within_its_bound():
 
 
 def test_the_bound_refuses_a_child_process_that_outlives_the_test():
-    child = None
-    try:
-        with pytest.raises(AssertionError, match="a sleeper left child processes running"):
-            with bounded("a sleeper"):
-                child = subprocess.Popen(["sleep", "30"])
-    finally:
-        if child is not None:
-            child.kill()
-            child.wait()
+    with pytest.raises(AssertionError, match="a sleeper left child processes running"):
+        with bounded("a sleeper"):
+            child = subprocess.Popen(["sleep", "30"])
+    assert child.pid not in processes()
 
 
 def test_the_routed_runtime_reports_why_the_router_refused(tmp_path, monkeypatch):
