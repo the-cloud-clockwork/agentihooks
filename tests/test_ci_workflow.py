@@ -94,7 +94,7 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
 
 
 def test_unit_restores_one_venv_per_interpreter_and_dependency_files():
-    _, cache = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/cache@"))
+    _, cache = _unit_step_index(lambda s: s.get("id") == "venv")
     _, python = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/setup-python"))
     key = cache["with"]["key"]
     assert cache["with"]["path"] == "~/venv"
@@ -108,7 +108,7 @@ def test_unit_restores_one_venv_per_interpreter_and_dependency_files():
 
 
 def test_a_restored_venv_skips_uv_and_the_install():
-    _, cache = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/cache@"))
+    _, cache = _unit_step_index(lambda s: s.get("id") == "venv")
     hit = f"steps.{cache['id']}.outputs.cache-hit != 'true'"
     for predicate in (
         lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"),
@@ -119,10 +119,35 @@ def test_a_restored_venv_skips_uv_and_the_install():
 
 
 def test_unit_tests_run_from_the_venv():
-    path_index, path = _unit_step_index(lambda s: "GITHUB_PATH" in s.get("run", ""))
+    path_index, path = _unit_step_index(lambda s: s.get("name") == "Use the test environment")
     run_index, _ = _unit_step_index(lambda s: s.get("name") == "Run tests")
     assert path["run"].strip() == 'echo "$HOME/venv/bin" >> "$GITHUB_PATH"'
     assert path_index < run_index
+
+
+def test_only_the_first_shard_installs_the_pinned_codex_cli_and_requires_its_live_test():
+    from tests.shards import FIRST_SHARD_FILES
+
+    job = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]
+    release = job["env"]["CODEX_RELEASE"]
+    assert re.fullmatch(r"rust-v\d+\.\d+\.\d+", release)
+    only = "matrix.python-version == '3.12' && matrix.shard == 1"
+    restore_index, restore = _unit_step_index(lambda s: s.get("id") == "codex")
+    install_index, install = _unit_step_index(lambda s: s.get("name") == "Install the Codex CLI")
+    use_index, use = _unit_step_index(lambda s: s.get("name") == "Use the Codex CLI")
+    run_index, _ = _unit_step_index(lambda s: s.get("name") == "Run tests")
+    assert restore["if"] == only
+    assert restore["uses"] == "actions/cache@v4"
+    assert restore["with"] == {"path": "~/codex", "key": "codex-${{ runner.os }}-${{ env.CODEX_RELEASE }}"}
+    assert install["if"] == "steps.codex.outcome == 'success' && steps.codex.outputs.cache-hit != 'true'"
+    assert "releases/download/${CODEX_RELEASE}/codex-x86_64-unknown-linux-musl.zst" in install["run"]
+    assert use["if"] == "steps.codex.outcome == 'success'"
+    assert use["run"].strip().splitlines() == [
+        'echo "$HOME/codex" >> "$GITHUB_PATH"',
+        'echo "CODEX_CLI_REQUIRED=1" >> "$GITHUB_ENV"',
+    ]
+    assert restore_index < install_index < use_index < run_index
+    assert FIRST_SHARD_FILES == {"tests/routing/test_codex_api.py"}
 
 
 def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():

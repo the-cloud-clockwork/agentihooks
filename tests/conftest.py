@@ -15,6 +15,7 @@ import pytest
 
 from tests import installer_isolation, ledger_guard, redis_key_guard, swarm_v2_isolation
 from tests.shards import (
+    FIRST_SHARD_FILES,
     assign_files,
     assign_nodes,
     discover_test_files,
@@ -80,7 +81,9 @@ def _shard_files(config) -> frozenset[str]:
     if SHARD_FILES not in config.stash:
         index, shards = (int(part) for part in config.getoption("shard").split("/"))
         durations = json.loads((config.rootpath / ".test_durations").read_text())
-        files = discover_test_files(config.rootpath)
+        discovered = discover_test_files(config.rootpath)
+        pinned = FIRST_SHARD_FILES.intersection(discovered)
+        files = [path for path in discovered if path not in pinned]
         workers = (
             getattr(config, "workerinput", {}).get("workercount")
             or getattr(getattr(config, "option", None), "numprocesses", None)
@@ -96,11 +99,12 @@ def _shard_files(config) -> frozenset[str]:
             for node, shard in config.stash[NODE_SHARDS].items():
                 owners.setdefault(node.split("::", 1)[0], set()).add(shard)
             config.stash[FILE_SHARDS] = {path: sorted(shards) for path, shards in owners.items()}
+            config.stash[FILE_SHARDS].update(dict.fromkeys(pinned, [0]))
             known = {node.split("::", 1)[0] for node in measured}
             files = {node.split("::", 1)[0] for node in parts[index - 1]} | (set(files) - known)
         else:
             files = assign_files(durations, files, shards, source_sizes(config.rootpath, files))[index - 1]
-        config.stash[SHARD_FILES] = frozenset(files)
+        config.stash[SHARD_FILES] = frozenset(files) | (pinned if index == 1 else frozenset())
     return config.stash[SHARD_FILES]
 
 
