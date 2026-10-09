@@ -189,7 +189,7 @@ function loadRouting() {
   if (routingRead || Date.now() - routingAt < ROUTING_READ_MS) return;
   routingAt = Date.now();
   routingRead = readRouting().then((resp) => (resp.ok ? resp.json() : Promise.reject(resp.status)))
-    .then((reply) => { routing = reply.data; renderQuota(swarm, Date.now(), true); })
+    .then((reply) => { routing = reply.data; renderQuota(swarm, Date.now()); })
     .catch(() => {})
     .finally(() => { routingRead = null; });
 }
