@@ -15,6 +15,7 @@ jobs:
     timeout-minutes: 15
     env:
       KIND_VERSION: v0.27.0
+      KIND_NODE_IMAGE: kindest/node:v1.37.0
     steps:
       - uses: actions/checkout@v4
       - name: Install kind
@@ -29,5 +30,58 @@ jobs:
           fi
           helm version --short
           kubectl version --client
+      - name: Restore chart image
+        id: chart-image
+        uses: actions/cache@v4
+        with:
+          path: .kind-cache/image.tar
+          key: kind-image-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Dockerfile', '.dockerignore', 'pyproject.toml', 'README.md', 'hooks/**', 'scripts/**', 'profiles/**', 'media/agentihooks-logo.png', 'deploy/helm/agentihooks-swarm/**') }}
+      - name: Restore build layers
+        if: steps.chart-image.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: .kind-cache/build
+          key: kind-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Dockerfile', '.dockerignore', 'pyproject.toml', 'README.md', 'hooks/**', 'scripts/**', 'profiles/**', 'media/agentihooks-logo.png') }}
+          restore-keys: kind-build-v1-${{ runner.os }}-${{ runner.arch }}-
+      - name: Set up buildx
+        if: steps.chart-image.outputs.cache-hit != 'true'
+        uses: docker/setup-buildx-action@v4
+      - name: Prepare chart image
+        run: |
+          if [[ "${{ steps.chart-image.outputs.cache-hit }}" == true ]]; then
+            docker load -i .kind-cache/image.tar
+          else
+            mkdir -p .kind-cache
+            docker buildx build --load -t local/agentihooks-swarm:dev \
+              --cache-from type=local,src=.kind-cache/build \
+              --cache-to type=local,dest=.kind-cache/build,mode=max .
+            docker save -o .kind-cache/image.tar local/agentihooks-swarm:dev
+          fi
+      - name: Restore cluster images
+        id: cluster-images
+        uses: actions/cache@v4
+        with:
+          path: .kind-cache/cluster.tar
+          key: kind-cluster-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.KIND_NODE_IMAGE }}-${{ hashFiles('deploy/helm/agentihooks-swarm/**') }}
+      - name: Prepare cluster images
+        run: |
+          mapfile -t images < <(helm template agentihooks-swarm deploy/helm/agentihooks-swarm \
+            -f deploy/helm/agentihooks-swarm/ci/kind-values.yaml \
+            | awk '$1 == "image:" {gsub(/"/, "", $2); if ($2 != "local/agentihooks-swarm:dev") print $2}' | sort -u)
+          if [[ "${{ steps.cluster-images.outputs.cache-hit }}" == true ]]; then
+            docker load -i .kind-cache/cluster.tar
+          else
+            dependencies=("$KIND_NODE_IMAGE")
+            for image in "${images[@]}"; do
+              if [[ $image != local/agentihooks-swarm:dev ]]; then
+                dependencies+=("$image")
+              fi
+            done
+            for image in "${dependencies[@]}"; do docker pull "$image"; done
+            docker save -o .kind-cache/cluster.tar "${dependencies[@]}"
+          fi
+          printf 'KIND_DEPENDENCY_IMAGES=%s\n' "${images[*]}" >> "$GITHUB_ENV"
       - name: Lint, install and prove the chart in kind
+        env:
+          KIND_IMAGE_READY: "true"
         run: bash deploy/helm/agentihooks-swarm/ci/kind-smoke.sh

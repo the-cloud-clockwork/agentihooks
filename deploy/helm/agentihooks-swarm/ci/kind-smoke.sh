@@ -36,12 +36,21 @@ for tag in "$digest" "@$digest" "$(printf 'b%.0s' $(seq 40))"; do
     exit 1
   fi
 done
-docker build -q -t "$image" . >/dev/null &
+if [[ ${KIND_IMAGE_READY:-false} == true ]]; then
+  docker image inspect "$image" >/dev/null &
+else
+  docker build -q -t "$image" . >/dev/null &
+fi
 build=$!
 trap finish EXIT
-kind create cluster --name "$cluster" --wait 120s
+node_image=()
+if [[ -n ${KIND_NODE_IMAGE:-} ]]; then
+  node_image=(--image "$KIND_NODE_IMAGE")
+fi
+kind create cluster --name "$cluster" "${node_image[@]}" --wait 120s
 wait "$build"
-kind load docker-image "$image" --name "$cluster"
+read -r -a dependency_images <<< "${KIND_DEPENDENCY_IMAGES:-}"
+kind load docker-image "$image" "${dependency_images[@]}" --name "$cluster"
 helm install "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m
 helm test "$release" --logs --timeout 2m
 

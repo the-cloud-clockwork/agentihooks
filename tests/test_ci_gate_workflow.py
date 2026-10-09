@@ -417,7 +417,7 @@ def test_kind_image_cache_hit_and_miss_prepare_image_and_keep_the_chart_proof(tm
     binary = tmp_path / "docker"
     binary.write_text(
         '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%s\\n" "$*" >> "$CALLS"\n'
-        'if [[ $1 == save ]]; then mkdir -p .kind-cache; touch .kind-cache/image.tar; fi\n'
+        "if [[ $1 == save ]]; then mkdir -p .kind-cache; touch .kind-cache/image.tar; fi\n"
     )
     binary.chmod(0o755)
     if hit:
