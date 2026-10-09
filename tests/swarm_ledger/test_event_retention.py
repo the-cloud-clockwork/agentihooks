@@ -60,10 +60,11 @@ def assert_stored(path, state):
 
 
 def test_without_an_acknowledgement_retention_keeps_the_newest_events(repo, path):
-    state, _ = write(repo, 1, 2, 3, 4, 5)
+    state, revisions = write(repo, 1, 2, 3, 4, 5)
     assert len(state["_meta"]["events"]) == 3
     assert chats(state) == ["m3", "m4", "m5"]
-    assert "events_ack" not in state["_meta"] and "events_trimmed" not in state["_meta"]
+    assert "events_ack" not in state["_meta"]
+    assert state["_meta"]["events_trimmed"] == revisions[2]
     assert_stored(path, state)
 
 
@@ -99,11 +100,18 @@ def test_an_acknowledgement_is_monotonic_and_records_no_event(repo):
     assert state["_meta"]["events_ack"] == 5
 
 
+def test_an_acknowledgement_never_passes_the_head_revision(repo):
+    state, _ = write(repo, 1)
+    head = state["_meta"]["rev"]
+    state = acknowledge(repo, head + 50)
+    assert state["_meta"]["events_ack"] == head
+
+
 @pytest.mark.parametrize(
     "operation",
     [ack(1, by="eng"), ack(-1), ack(True), {"op": "events_ack", "id": "a", "by": "swarm"}],
 )
-def test_an_acknowledgement_is_the_swarm_s_with_a_nonnegative_revision(repo, operation):
+def test_only_the_swarm_acknowledges_a_nonnegative_revision(repo, operation):
     with pytest.raises(ValueError):
         repo.domain.check_body({"ops": [operation]})
     with pytest.raises(ValueError):

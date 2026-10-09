@@ -82,12 +82,6 @@ def event_row(slug: str, event: dict, path: dict, catch_up: bool, ordinal: int) 
     }
 
 
-def lost_through(meta: dict, events: list) -> int | None:
-    if "events_ack" in meta:
-        return meta.get("events_trimmed")
-    return events[0]["rev"] - 1 if events else None
-
-
 def event_rows(slug: str, events: list, known: dict, cursor: int | None, now_ms: int, lost: int | None) -> list:
     rows, positions = [], Counter()
     if cursor is not None and lost is not None and lost > cursor:
@@ -187,7 +181,7 @@ def record(box: metrics_outbox.Outbox, slug: str, now_ms: int, ledger: LedgerCli
     for event in events:
         if event["kind"] == "added":
             births.setdefault(event["target"], event["at"])
-    box.append(EVENTS, event_rows(slug, events, known, cursor, now_ms, lost_through(doc["_meta"], events)))
+    box.append(EVENTS, event_rows(slug, events, known, cursor, now_ms, doc["_meta"].get("events_trimmed")))
     if snapshot is None or now_ms - snapshot >= SNAPSHOT_MS:
         box.append(SNAPSHOTS, snapshot_rows(slug, now_ms, doc, nodes, current, births))
         snapshot = now_ms

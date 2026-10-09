@@ -45,9 +45,9 @@ def apply(slug, state, core, changes=None, ops=None, gate=None, created=False):
     ctx.changed = bool(ctx.events or ctx.dirty or found != meta.get("warnings") or created)
     if ctx.changed:
         meta.update(rev=ctx.rev, updated_at=ctx.at, warnings=found)
-        log, ack = meta["events"] + ctx.events, meta.get("events_ack")
-        start = retained(log, ack, core.EVENTS_KEPT, core.EVENTS_CEILING)
-        if start and ack is not None:
+        log = meta["events"] + ctx.events
+        start = retained(log, meta.get("events_ack"), core.EVENTS_KEPT, core.EVENTS_CEILING)
+        if start:
             meta["events_trimmed"] = max(meta.get("events_trimmed", 0), log[start - 1].get("rev", 0))
         meta["events"] = log[start:]
     state["_meta"] = meta

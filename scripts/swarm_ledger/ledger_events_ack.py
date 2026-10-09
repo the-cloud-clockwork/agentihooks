@@ -10,7 +10,8 @@ def check(op):
 
 
 def apply(doc, op, ctx):
-    if op["rev"] > ctx.meta.get("events_ack", -1):
-        ctx.meta["events_ack"] = op["rev"]
+    revision = min(op["rev"], ctx.meta["rev"])
+    if revision > ctx.meta.get("events_ack", -1):
+        ctx.meta["events_ack"] = revision
         ctx.dirty = True
     return True

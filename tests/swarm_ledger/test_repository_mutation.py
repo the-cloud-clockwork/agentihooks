@@ -60,13 +60,13 @@ def derived(monkeypatch):
 def test_apply_folds_changes_and_ops_in_order_and_records_the_change(derived):
     calls = []
     doc = {"chat": [1, 2, 3, 4, 5], "big": ["w1"]}
-    meta = {"rev": 4, "events": ["e0"], "warnings": ["old"]}
+    meta = {"rev": 4, "events": [{"rev": 3}], "warnings": ["old"]}
     ops = [{"op": "stats_sync", "id": "s"}, {"op": "add", "id": "refused"}, {"op": "add", "id": "a"}]
     doc["_meta"] = meta
     rejected, ctx = mutation.apply("demo", doc, domain(calls), ["bad-1", "refuse-1"], ops, "G")
     assert rejected == ["bad-1", "refused"]
     assert calls == [
-        ("earliest", {"rev": 4, "events": ["e0"], "warnings": ["old"], "members": {}}, 50),
+        ("earliest", {"rev": 4, "events": [{"rev": 3}], "warnings": ["old"], "members": {}}, 50),
         ("changes", doc, ["bad-1", "refuse-1"]),
         ("op", "G", doc, "refused"),
         ("op", "G", doc, "a"),
@@ -85,6 +85,7 @@ def test_apply_folds_changes_and_ops_in_order_and_records_the_change(derived):
     assert meta == {
         "rev": 5,
         "events": ["a", "s"],
+        "events_trimmed": 3,
         "warnings": ["w1", "refuse-1"],
         "members": {},
         "created_at": 7,

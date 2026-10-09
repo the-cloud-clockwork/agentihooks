@@ -4,6 +4,7 @@ import json
 from .rows import changes, encode
 
 LAST = "SELECT MAX(position) FROM events WHERE slug=?"
+COUNT = "SELECT COUNT(*) FROM events WHERE slug=?"
 APPEND = "INSERT INTO events VALUES (?, ?, ?, ?, ?)"
 TRIM = (
     "DELETE FROM events WHERE slug=? AND position NOT IN "
@@ -56,6 +57,8 @@ def append_events(connection, slug: str, events: list, kept: int) -> None:
         start = -1 if last is None else last
         for offset, event in enumerate(events, 1):
             connection.execute(APPEND, (slug, f"p{start + offset}", event.get("rev"), start + offset, encode(event)))
+    elif connection.execute(COUNT, (slug,)).fetchone()[0] <= kept:
+        return
     connection.execute(TRIM, (slug, slug, kept))
 
 
