@@ -209,6 +209,25 @@ def test_the_operator_launch_binds_the_swarm_with_no_task_and_its_own_lane(tmp_p
     assert placed.pane_id == "w1:p7"
 
 
+def test_a_failed_operator_launch_ends_the_session_by_its_name(tmp_path):
+    from scripts.swarm.tick import SpawnError
+
+    runs = []
+
+    def run_(argv, **kwargs):
+        runs.append(argv)
+        return SimpleNamespace(returncode=1, stdout="", stderr="no account has room")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run_, choose=lambda *_: ("claude", "open"))
+    config = SimpleNamespace(
+        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    with pytest.raises(SpawnError) as caught:
+        runtime.operator(config, "planner@a1b2c3-0001", "planner", "hello")
+    assert str(caught.value) == "no account has room"
+    assert runs[-1][1:] == ["terminate-agent", "planner@a1b2c3-0001", "--force-shared"]
+
+
 def test_the_operator_launch_opens_claude_in_the_swarm_space_with_the_inbox_channel(tmp_path, monkeypatch):
     _, seen = _operator_launch(tmp_path, monkeypatch)
     argv = seen["argv"]
