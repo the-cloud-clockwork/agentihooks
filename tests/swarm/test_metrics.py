@@ -1,7 +1,6 @@
 import sqlite3
 from contextlib import closing
 
-import fakeredis
 import pytest
 
 from scripts.swarm import cli, metrics, metrics_outbox
@@ -85,6 +84,8 @@ def test_an_unwritable_swarm_home_is_reported_and_never_stops_the_tick(tmp_path,
 
 
 def test_run_tick_records_metrics_after_the_priority_pass(monkeypatch):
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", ".", 0, 0, state="paused"))
     order = []
