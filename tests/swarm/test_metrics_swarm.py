@@ -209,7 +209,7 @@ def test_unknown_claim_duration_is_not_invented():
 def test_record_pass_appends_through_outbox_and_deduplicates(tmp_path, monkeypatch):
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig(SLUG, ".", 0, 0))
-    store.put_agent(SLUG, AgentRecord(**{key: value for key, value in AGENT.items()}))
+    store.put_agent(SLUG, AgentRecord(**{**AGENT, "execution_id": ""}))
     state = doc([event("task claimed", NOW)])
     monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
     monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
