@@ -8,7 +8,7 @@ from scripts.swarm_v2.runtime.operations import Observation, Operation, Operatio
 
 
 class FencedTransport:
-    def __init__(self, transport: OperationTransport, require: Callable[[], None]):
+    def __init__(self, transport: OperationTransport, require: Callable[[], None]) -> None:
         self.transport, self.require = transport, require
         self.backend = transport.backend
 
@@ -30,7 +30,7 @@ class Controller:
         transports: Iterable[OperationTransport],
         authorize: Callable[[], bool],
         admission_enabled: bool = True,
-    ):
+    ) -> None:
         self.store, self.slug, self.authorize = store, slug, authorize
         self.owner = f"controller-{uuid4().hex}"
         self.held = None
