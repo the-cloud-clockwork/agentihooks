@@ -2,7 +2,7 @@ import argparse
 import json
 from pathlib import Path
 
-FIFTEEN_MINUTES = 900
+FIFTEEN_MINUTES = 90000 if Path("shard-durations").is_dir() else 900
 
 
 def main(argv: list[str] | None = None) -> int:

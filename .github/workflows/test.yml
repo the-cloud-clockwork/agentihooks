@@ -328,6 +328,23 @@ jobs:
           SHARD: ${{ matrix.shard }}/${{ matrix.python-version == '3.12' && 8 || 4 }}
         run: python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' tests/ -v -n auto --dist loadgroup --shard "$SHARD" --tb=short --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
 
+      - name: Plant over budget duration result
+        if: matrix.shard == 1
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("durations.json")
+          durations = json.loads(path.read_text())
+          durations[next(iter(durations))] += 1000
+          path.write_text(json.dumps(durations))
+          plant = Path("shard-durations/plant/durations.json")
+          plant.parent.mkdir(parents=True)
+          plant.write_text(path.read_text())
+          PY
+          python -m tests.shard_budget shard-durations/plant/durations.json
+
       # Shards balance on these: per-test times here differ from a local run.
       - name: Upload durations
         uses: actions/upload-artifact@v4
