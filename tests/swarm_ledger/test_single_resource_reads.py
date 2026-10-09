@@ -60,6 +60,16 @@ def test_a_single_resource_read_loads_no_whole_ledger(live, whole_loads):
     assert whole_loads == []
 
 
+@pytest.mark.parametrize(
+    ("path", "status"), [("tasks", 200), ("metadata", 200), ("members/api-reader", 200), ("tasks/t1/comments/x", 404)]
+)
+def test_reads_beyond_one_item_still_load_the_whole_ledger(live, whole_loads, path, status):
+    seed()
+    whole_loads.clear()
+    assert request(live, "GET", path)[0] == status
+    assert whole_loads[0] == ("document", SLUG)
+
+
 def test_a_single_resource_read_answers_what_the_whole_ledger_read_answers(live):
     paths = seed()
     state = repository.get_document(SLUG)
