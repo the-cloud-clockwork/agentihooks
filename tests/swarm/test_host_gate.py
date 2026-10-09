@@ -50,12 +50,12 @@ def test_manual_caps_above_the_host_room_spawn_up_to_the_room_and_the_rest_once_
     assert [name for name, _ in runtime.masters] == ["master@a1b2c3-0001"]
     assert _workers(runtime) == ["t1"]
     assert held in actions
-    assert tick.spawn_hold(store, "sw") == held
+    assert tick.spawn_holds(store, "sw") == [held]
     _decide(store, 3)
     actions = tick.tick("sw", store, ledger, runtime, now_ms=61_000)
     assert _workers(runtime) == ["t1", "t3", "t2"]
     assert not any(action.startswith("holding spawns") for action in actions)
-    assert tick.spawn_hold(store, "sw") == ""
+    assert tick.spawn_holds(store, "sw") == []
 
 
 def test_an_unknown_host_lets_every_spawn_pass(store):

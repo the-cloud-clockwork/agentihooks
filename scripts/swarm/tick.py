@@ -669,8 +669,9 @@ def _host_full(slug, store, now_ms):
     return f"host {host['limit']}, room {host['room']} is used: {host['reason']}"
 
 
-def spawn_hold(store, slug):
-    return store.redis.get(store.key(slug, SPAWN_HOLD)) or ""
+def spawn_holds(store, slug):
+    held = store.redis.get(store.key(slug, SPAWN_HOLD))
+    return [held] if held else []
 
 
 def _spawn_stop(slug, config, store, runtime, now_ms):
