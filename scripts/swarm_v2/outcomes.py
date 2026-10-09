@@ -174,7 +174,9 @@ class Outcomes:
         claim = self.authority.current(scope.task_id)
         self.authority.controller.require()
         self.authority._identity(scope, generation, claim)
-        outcome = claim.result if claim.state == "completed" else self.integrate(token, generation)
+        outcome = (
+            claim.result if claim.result.get("phase") == "externally_verified" else self.integrate(token, generation)
+        )
         if outcome.get("phase") != "externally_verified":
             raise SwarmError("the provider outcome is not externally verified")
         claim = self._receipt(token, generation, outcome)
@@ -195,16 +197,21 @@ class Outcomes:
 
     def _receipt(self, token: str, generation: int, outcome: dict) -> TaskClaim:
         def check(pipe, scope, previous):
+            proof = outcome["proposal"]["proof"]
+            if self.verify_proof(proof) is not True:
+                raise SwarmError("required proof artifacts are absent or unverified")
+            if not self.integration_enabled:
+                raise SwarmError("final integration is paused")
+            if self.authority._scope(token) != scope:
+                raise SwarmError("forbidden_scope")
+            self.authority.controller.require()
             self.authority._identity(scope, generation, previous)
             if previous.state != "completed":
                 self.authority._holder(scope, generation, previous)
             if previous.result != outcome:
                 self._conflict()
-            if not self.integration_enabled:
-                raise SwarmError("final integration is paused")
-            proof = outcome["proposal"]["proof"]
-            if self.verify_proof(proof) is not True:
-                raise SwarmError("required proof artifacts are absent or unverified")
+            pipe.multi()
+            pipe.execute()
             return previous
 
         return self.authority._write(token, "outcome_checked", check)

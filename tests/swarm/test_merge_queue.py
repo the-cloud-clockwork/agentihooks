@@ -22,6 +22,13 @@ def runner(*responses):
     return run, calls
 
 
+@pytest.fixture(autouse=True)
+def task_ledger(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: [{"id": "t1", "pr_url": URL}]))
+
+
 def test_state_reports_an_open_pull_request_without_a_queue_entry():
     run, calls = runner({"data": {"resource": OPEN}})
     assert merge_queue.operate("state", URL, run) == {
@@ -125,6 +132,23 @@ def test_cli_refuses_distributed_final_mutations_before_provider_calls(monkeypat
     state.redis, state.key = metadata.redis, metadata.key
     state.redis.set(state.key("sw", "task-authority", "t1"), "{}")
     assert cli.main(["sw", "merge", action, URL]) == 1
+
+
+@pytest.mark.parametrize("same_link", [False, True])
+def test_cli_refuses_another_distributed_tasks_pull_request(monkeypatch, same_link):
+    from types import SimpleNamespace
+
+    state = swarm_of("eng")
+    rows = [
+        {"id": "t1", "pr_url": URL if same_link else "https://github.com/o/r/pull/8"},
+        {"id": "t2", "pr_url": URL},
+    ]
+    monkeypatch.setattr(cli, "connect", lambda: state)
+    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: rows))
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    monkeypatch.setattr(merge_queue, "operate", lambda *args: pytest.fail("foreign provider mutation"))
+    state.redis.set(state.key("sw", "task-authority", "t2"), "{}")
+    assert cli.main(["sw", "merge", "queue", URL]) == 1
 
 
 @pytest.mark.parametrize("action", ["queue", "dequeue"])

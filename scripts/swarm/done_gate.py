@@ -40,6 +40,17 @@ def require_local(store: object, slug: str, task_id: str) -> None:
         raise SwarmError("distributed final mutations require the controller outcome path")
 
 
+def require_target(store: object, slug: str, task_id: str, url: str, tasks: list[dict]) -> None:
+    from scripts.swarm.store import SwarmError
+
+    own = next((task for task in tasks if task["id"] == task_id), {})
+    if own.get("pr_url") != url:
+        raise SwarmError("final integration must target this task's recorded pull request")
+    for task in tasks:
+        if task.get("pr_url") == url:
+            require_local(store, slug, task["id"])
+
+
 def recheck_pass(store, slug, doc, ledger, now_ms, github):
     tasks = {t["id"]: t for t in doc.get("tasks", [])}
     actions = []

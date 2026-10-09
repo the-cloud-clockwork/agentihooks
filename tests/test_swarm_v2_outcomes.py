@@ -442,3 +442,52 @@ def test_ledger_completion_refuses_tampered_payload(monkeypatch, tmp_path):
     assert rejected == ["tampered"]
     assert repository.get_document(outcomes.authority.slug)["tasks"][0] == before
     assert outcomes.authority.current(proposal.task_id).state == "active"
+
+
+def test_interrupted_authority_completion_replays_the_committed_ledger(monkeypatch, tmp_path):
+    from tests import sv2_ctl05_cases
+
+    outcomes, repository, token, proposal, *_ = sv2_ctl05_cases.build(monkeypatch, tmp_path)
+    outcomes.propose(token, proposal)
+    original = outcomes.authority.complete
+
+    def interrupt(worker_token, generation, result):
+        raise ConnectionError("interrupted after ledger commit")
+
+    monkeypatch.setattr(outcomes.authority, "complete", interrupt)
+    with pytest.raises(ConnectionError, match="after ledger commit"):
+        outcomes.complete(token, proposal.generation, repository)
+    before = repository.get_document(outcomes.authority.slug)
+    assert before["tasks"][0]["done"] is True
+    assert outcomes.authority.current(proposal.task_id).state == "active"
+    monkeypatch.setattr(outcomes.authority, "complete", original)
+    completed = outcomes.complete(token, proposal.generation, repository)
+    assert completed["ledger_revision"] == before["_meta"]["rev"]
+    assert repository.get_document(outcomes.authority.slug) == before
+    assert outcomes.authority.current(proposal.task_id).state == "completed"
+    assert len(outcomes.provider.calls) == 1
+
+
+def test_replacement_during_final_proof_verification_rolls_back_the_ledger(monkeypatch, tmp_path):
+    from scripts.swarm.store import SwarmError
+    from tests import sv2_ctl05_cases
+
+    outcomes, repository, token, proposal, clock, start, agent = sv2_ctl05_cases.build(monkeypatch, tmp_path)
+    outcomes.propose(token, proposal)
+    outcomes.integrate(token, proposal.generation)
+    before = repository.get_document(outcomes.authority.slug)
+    checks = []
+
+    def verify(proof):
+        checks.append(proof)
+        if len(checks) == 3:
+            clock[0] += 30_001
+            _, replacement_token = start(previous=agent.execution_id)
+            outcomes.authority.admit(replacement_token, 30_000)
+        return proof == proposal.proof
+
+    outcomes.verify_proof = verify
+    with pytest.raises(SwarmError):
+        outcomes.complete(token, proposal.generation, repository)
+    assert repository.get_document(outcomes.authority.slug) == before
+    assert outcomes.authority.current(proposal.task_id).generation == 2

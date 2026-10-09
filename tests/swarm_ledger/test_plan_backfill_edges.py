@@ -13,7 +13,9 @@ plan_ledger = test_plan_backfill.plan_ledger
 
 
 def context():
-    return SimpleNamespace(refused=[], dirty=False, record=lambda *args, **kwargs: None, stamp=lambda *args: None)
+    return SimpleNamespace(
+        meta={}, refused=[], dirty=False, record=lambda *args, **kwargs: None, stamp=lambda *args: None
+    )
 
 
 @pytest.mark.parametrize("state,done", [("done", False), ("open", True)])

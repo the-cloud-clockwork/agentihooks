@@ -978,6 +978,7 @@ def cmd_merge(store, args):
     if args.action != "state":
         agent = _worker(store, args)
         done_gate.require_local(store, args.slug, agent.task)
+        done_gate.require_target(store, args.slug, agent.task, args.url, LedgerClient().tasks(args.slug))
     print(json.dumps(merge_queue.operate(args.action, args.url)))
 
 
