@@ -59,8 +59,9 @@ def test_model_pick_raises_to_the_floor_or_keeps_the_lane_default(answer, params
 
 def test_model_pick_rejects_with_the_lane_default():
     assert model_pick.RULE.rejections == {"effort": "lane default"}
-    assert model_pick.RULE.values["effort"][0] == "lane default"
-    assert set(LEVELS) <= set(model_pick.RULE.values["effort"])
+    assert model_pick.RULE.values == {
+        "effort": ("lane default", "high", "low", "max", "medium", "xhigh"),
+    }
 
 
 @pytest.mark.parametrize(
@@ -106,7 +107,7 @@ TASKS = [{"id": "t1", "title": "one"}]
 
 
 @pytest.mark.parametrize(
-    ("size", "serves", "params", "expected"),
+    ("size", "serves", "confidence", "expected"),
     [
         (score(2, 0.7), 0.9, 0.7, True),
         (score(2, 0.69), 0.9, 0.7, False),
@@ -151,7 +152,10 @@ def test_trace_plan_passes_a_grown_plan_without_a_size_answer():
 
 
 def test_trace_plan_params_carry_each_piece_ruling():
-    fresh = [trace_plan.Piece("tests", ("tests/test_a.py",), "proof"), trace_plan.Piece("clear", (), "none")]
+    fresh = [
+        trace_plan.Piece("tests", ("tests/test_a.py",), "proof"),
+        trace_plan.Piece("clear", ("mutation-clearances/a.json",), "none"),
+    ]
     assert trace_plan._params(fresh, 1, False) == {
         "pieces": [
             {"slot": 1, "number": 2, "what": "tests", "ruling": False},
