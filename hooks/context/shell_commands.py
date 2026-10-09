@@ -94,7 +94,12 @@ def _heredoc_marker(line: str, quote: str | None) -> tuple[int, str | None]:
             continue
         if quote is None and line.startswith("<<", index):
             return index, None
-        if character == quote:
+        if quote is None and character == "#" and (index == 0 or line[index - 1].isspace()):
+            return index, None
+        if quote is None and line.startswith("$'", index):
+            quote, index = "$'", index + 2
+            continue
+        if quote and character == quote[-1]:
             quote = None
         elif quote is None and character in {"'", '"'}:
             quote = character
@@ -109,6 +114,9 @@ def _heredocs(command: str, depth: int) -> tuple[str, list[list[str]]]:
         start, quote = _heredoc_marker(line, quote)
         if start < 0:
             kept.append(line)
+            continue
+        if line[start] == "#":
+            kept.append(line[:start] + "\n")
             continue
         prefix, tail = line[:start], line[start + 2 :]
         delimiters = shlex.split(tail.removeprefix("-"))

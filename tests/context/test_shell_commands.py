@@ -127,6 +127,7 @@ def test_missing_heredoc_delimiter_is_invalid():
         ('grep -n "cat <<EOF" f', [["grep", "-n", "cat <<EOF", "f"]]),
         ("grep -c \\<\\< f", [["grep", "-c", "<<", "f"]]),
         ("echo 'a\n<<b'\nbash <<EOF\npytest\nEOF", [["pytest"], ["echo", "a\n<<b"], ["bash"]]),
+        ("echo ok # don't\nbash <<EOF\npytest\nEOF", [["pytest"], ["echo", "ok"], ["bash"]]),
         (
             "bash <<EOF\necho ready\npytest -q\nEOF\necho done",
             [

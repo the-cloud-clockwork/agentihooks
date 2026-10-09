@@ -79,6 +79,18 @@ RUNNERS = [
     "python3 - <<'EOF'\nimport os\nos.system('python -m pytest')\nEOF",
     "node -e \"require('child_process').execSync('npx jest')\"",
     "node -e \"require('node:test')\"",
+    "python3 -c \"getattr(__builtins__, '__import__')('pytest').main()\"",
+    "python3 -c \"vars(__builtins__)['__import__']('unittest').main()\"",
+    "node -e \"const M = require('mocha'); new M().run()\"",
+    "node -e \"require('jest-cli').run()\"",
+    "node -e \"require('vitest/node').startVitest('unit')\"",
+    "python3 -c \"import os; getattr(os, 'system')('python -m pytest')\"",
+    "python3 -c \"eval(\\\"__import__('os').system('python -m pytest')\\\")\"",
+    "node -e \"require('child_process')['exec']('npx jest')\"",
+    'node -e "new Function(\'require(\\"child_process\\").execSync(\\"npx jest\\")\')()"',
+    "python3 - $'\\' ' <<EOF\nimport pytest; pytest.main(); print(\"'\")  # \"\nEOF",
+    "# don't\npython3 - <<'EOF'\nimport pytest; pytest.main(); print(\"'\")  # \"\nEOF",
+    "cd tests # run them\npytest -q",
 ]
 
 WRAPPERS = [
@@ -180,7 +192,11 @@ def test_non_test_commands_pass(command, monkeypatch):
         "python3 -c \"import pathlib; p = pathlib.Path('t.yml'); p.write_text(p.read_text().replace('pytest -x', 'pytest -q'))\"",
         "python3 - <<'EOF'\nfrom pathlib import Path\np = Path('.github/workflows/test.yml')\nold = '''run: python -m pytest -x'''\n"
         'p.write_text(p.read_text().replace(old, "run: python -m pytest -q"))  # pytest\nEOF',
-        "node -e \"fs.writeFileSync('p.json', s.replace('jest', 'vitest')) // jest\"",
+        "node -e \"fs.writeFileSync('p.json', s.replace('jest --ci', 'vitest run')) // jest\"",
+        "python3 -c \"'" + "\\\\" * 80 + '"',
+        "echo \"don't\" # it's\ncat <<EOF\npytest\nEOF",
+        "grep -n '^<<<<<<< \\|^=======\\|^>>>>>>> ' .github/workflows/test.yml",
+        'git show HEAD:tests/test_a.py | grep -c "<<<<<<< HEAD"',
     ],
 )
 def test_reads_and_quoted_runner_names_pass(command, monkeypatch):
