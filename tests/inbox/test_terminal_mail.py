@@ -133,6 +133,7 @@ def test_a_resumable_master_keeps_mail_after_retirement(setup, monkeypatch, stat
 
     store, inbox, master = setup
     monkeypatch.setattr("scripts.inbox.addresses.get_active_sessions", lambda **kwargs: {})
+    monkeypatch.delenv("AGENTIHOOKS_INBOX_REDELIVER_S", raising=False)
     clock = [1_000_000]
     monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: clock[0])
     item = inbox.send("operator", master.seat, "Resume work")
