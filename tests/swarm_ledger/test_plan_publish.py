@@ -406,6 +406,8 @@ def test_publish_plan_refuses_a_multi_phase_plan_without_phase_headings(plan_led
         ),
         ("intro\n# Plan\n## First\n\n<!-- slice: two -->\n## Two\n", "p1", "First on line 3"),
         ("## First\nOne\n<!-- slice: two -->\n## Two\n", "p1", "First on line 1"),
+        ("# Plan\n## Build the page\n### First\nSteps\n### Second\nSteps\n", "p1", "First on line 3, Second on line 5"),
+        ("# Plan\n## Build\n### First\nOne\n", "p1", "First on line 3"),
     ],
 )
 def test_publish_plan_refuses_task_sections_without_a_slice_marker(
@@ -426,7 +428,7 @@ def test_publish_plan_refuses_task_sections_without_a_slice_marker(
     ("text", "lines"),
     [
         (
-            "# Plan\n## Build\nIntro\n<!-- slice: first -->\n\n### First\n#### Detail\n"
+            "# Plan\n## Build\nIntro\n<!-- slice: first -->\n  \n### First\n#### Detail\n"
             "```\n### Not a heading\n```\n<!-- slice: second -->\n### Second\n",
             "2-12",
         ),

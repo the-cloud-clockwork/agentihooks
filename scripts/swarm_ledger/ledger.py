@@ -414,7 +414,7 @@ def cmd_publish_plan(args):
         sys.exit("publish-plan names an unknown phase")
     try:
         ranges = plan_ranges.phase_lines(text, selected)
-        plan_ranges.require_markers(text, ranges)
+        plan_ranges.require_markers(text, selected)
     except ValueError as exc:
         sys.exit(str(exc))
     title = args.title or ledger_publish.title_of(text, phases)
