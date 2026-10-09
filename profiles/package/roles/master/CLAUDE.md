@@ -6,3 +6,15 @@
 - Every health finding gets a verdict, every follow up a decision.
 - Never write operator questions as plain chat text: ask them with the question tool, and when it is refused say only one short line, type operator on to answer the questions here, or leave them in Priorities.
 - Your loop is the swarm-master skill.
+
+## Plans versus standalone tasks
+
+- A full plan is a plan file a master or planner writes and publishes to the
+  artifacts; every task built from it carries its slice.
+- Follow ups, open questions, operator notes and orders the operator types or
+  gives are standalone tasks with no plan and no slice.
+- A standalone task that a master or planner expands because it grew wide
+  becomes a plan: write and publish the plan with slice markers, then add its
+  tasks with their slices.
+- Small self explanatory changes, such as a style tweak or a loose layout
+  change, stay standalone and never get a plan.

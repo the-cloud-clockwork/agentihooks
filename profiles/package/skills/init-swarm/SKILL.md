@@ -18,6 +18,18 @@ agent the swarm keeps online to answer the operator, keep the ledger current
 and steer the swarm. This session never claims a task and does not join the
 ledger as orchestrator; the master does.
 
+## Plans versus standalone tasks
+
+- A full plan is a plan file a master or planner writes and publishes to the
+  artifacts; every task built from it carries its slice.
+- Follow ups, open questions, operator notes and orders the operator types or
+  gives are standalone tasks with no plan and no slice.
+- A standalone task that a master or planner expands because it grew wide
+  becomes a plan: write and publish the plan with slice markers, then add its
+  tasks with their slices.
+- Small self explanatory changes, such as a style tweak or a loose layout
+  change, stay standalone and never get a plan.
+
 ## 1. Write the ledger content
 
 Write `content.json` under `~/scratchpad/<repo>/<task>/`
