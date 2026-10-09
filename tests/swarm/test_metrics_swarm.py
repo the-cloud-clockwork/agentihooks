@@ -7,6 +7,7 @@ import pytest
 
 from scripts.swarm import metrics_swarm
 from scripts.swarm.host_budget import HostSample
+from scripts.swarm import metrics_outbox
 from scripts.swarm.metrics_outbox import Outbox, Settings
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
@@ -213,8 +214,8 @@ def test_record_pass_appends_through_outbox_and_deduplicates(tmp_path, monkeypat
     state = doc([event("task claimed", NOW)])
     monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
     monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
-    monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda: [])
-    monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug: [])
+    monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
+    monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
     box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
     try:
         metrics_swarm.record_pass(box, SLUG, NOW, store, state, [], {})
@@ -238,24 +239,32 @@ def test_review_round_uses_stored_review_event():
 
 def test_reviews_reuse_the_existing_intent_snapshot(tmp_path, monkeypatch):
     monkeypatch.setattr(metrics_swarm.gate_log, "gates_dir", lambda slug: tmp_path)
-    assert metrics_swarm.read_review_events(SLUG) == []
-    folder = tmp_path / "intent"
-    folder.mkdir()
-    state = {
-        "reviewer_findings": {
-            "reviews": [
-                {"id": "review", "submittedAt": "2027-01-15T08:00:00+00:00"},
-                {"id": "pending", "submittedAt": None},
-            ]
+    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
+    try:
+        assert metrics_swarm.read_review_events(SLUG, box).rows == []
+        folder = tmp_path / "intent"
+        folder.mkdir()
+        state = {
+            "reviewer_findings": {
+                "reviews": [
+                    {"id": "review", "submittedAt": "2027-01-15T08:00:00+00:00"},
+                    {"id": "pending", "submittedAt": None},
+                ]
+            }
         }
-    }
-    source = {"task": "t", "agent": "worker", "classifier_input": json.dumps({"state": state})}
-    (folder / "history.jsonl").write_text(json.dumps(source) + "\n")
-    events = metrics_swarm.read_review_events(SLUG)
-    assert events == [{"kind": "review round", "target": "tasks/t", "at": NOW, "by": "worker", "review_id": "review"}]
-    rows = metrics_swarm.delivery_rows(SLUG, doc(events), [AGENT], {})
-    assert len(rows) == 1
-    assert rows[0]["kind"] == "review_round"
+        source = {"task": "t", "agent": "worker", "classifier_input": json.dumps({"state": state})}
+        other = {**source, "agent": "replacement"}
+        (folder / "history.jsonl").write_text(json.dumps(source) + "\n" + json.dumps(other) + "\n")
+        batch = metrics_swarm.read_review_events(SLUG, box)
+        expected = {"kind": "review round", "target": "tasks/t", "at": NOW, "review_id": "review"}
+        assert batch.rows == [expected, expected]
+        rows = metrics_swarm.delivery_rows(SLUG, doc(batch.rows), [AGENT], {})
+        assert rows[0] == rows[1]
+        assert rows[0]["agent"] == "worker"
+        metrics_swarm._checkpoint(box, batch)
+        assert metrics_swarm.read_review_events(SLUG, box).rows == []
+    finally:
+        box.close()
 
 
 def test_held_spawns_count_ready_tasks_with_room_but_without_placements(monkeypatch):
@@ -266,6 +275,69 @@ def test_held_spawns_count_ready_tasks_with_room_but_without_placements(monkeypa
     assert metrics_swarm._held_spawns(None, SLUG, doc(), quota, [AGENT]) == 1
     assert metrics_swarm._held_spawns(None, SLUG, doc(), quota, []) == 2
     assert metrics_swarm._held_spawns(None, SLUG, doc(), {}, [AGENT]) == 0
+
+
+def test_done_task_is_observed_once_even_when_completion_precedes_the_tick(tmp_path, monkeypatch):
+    from scripts.swarm import metrics
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig(SLUG, ".", 0, 0))
+    state = doc([event("task claimed", NOW), event("task pr", NOW + 1_000), event("task done", NOW + 5_000)])
+    state["tasks"] = [{**TASK, "state": "done"}]
+    store.redis.rpush(store.key(SLUG, "history"), json.dumps({**AGENT, "ended_at": NOW + 5_000, "reason": "finished"}))
+    calls = []
+
+    def view(url):
+        calls.append(url)
+        return SimpleNamespace(state="MERGED", merged_at=NOW + 4_000)
+
+    monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(1.0, 1, 512, 0))
+    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
+    monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
+    spool = tmp_path / "outbox.db"
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: spool)
+    monkeypatch.setattr(metrics_outbox, "post", lambda *args: (_ for _ in ()).throw(OSError("sink down")))
+    configured = {"AGENTIHOOKS_METRICS_URL": "http://sink", "AGENTIHOOKS_METRICS_USER": "test"}
+    snapshot = metrics_swarm.TickInput(store, state, [], view)
+    assert metrics.record_pass(SLUG, NOW + 6_000, 0, configured, snapshot) == []
+    assert metrics.record_pass(SLUG, NOW + 7_000, 0, configured, snapshot) == []
+    assert calls == [TASK["pr_url"]]
+    box = Outbox(spool, Settings("http://sink", "", ""))
+    try:
+        merged = [row for row in box.recent("delivery_events", NOW + 7_000) if row["kind"] == "merge"]
+        assert len(merged) == 1
+        assert merged[0]["claim_to_merge_seconds"] == 4.0
+        assert merged[0]["agent"] == "worker"
+        assert_node(merged[0])
+    finally:
+        box.close()
+
+
+def test_classifier_source_positions_survive_append_and_partial_lines(tmp_path, monkeypatch):
+    path = tmp_path / "decisions.jsonl"
+    monkeypatch.setattr(metrics_swarm.decision_log, "log_path", lambda: path)
+    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
+    call = {"ts": "2027-01-15T08:00:00+00:00", "purpose": "intent", "source": "api", "latency_ms": 10, "answers": {}}
+    try:
+        assert metrics_swarm.read_classifier_calls(box).rows == []
+        path.write_text(json.dumps(call) + "\n" + json.dumps(call)[:-1])
+        first = metrics_swarm.read_classifier_calls(box)
+        assert len(first.rows) == 1
+        row = metrics_swarm.classifier_rows(first.rows, "machine")[0]
+        assert metrics_swarm.classifier_rows(metrics_swarm.read_classifier_calls(box).rows, "machine")[0] == row
+        metrics_swarm._checkpoint(box, first)
+        assert metrics_swarm.read_classifier_calls(box).rows == []
+        with path.open("a") as stream:
+            stream.write("}\n")
+        second = metrics_swarm.read_classifier_calls(box)
+        assert len(second.rows) == 1
+        assert metrics_swarm.classifier_rows(second.rows, "machine")[0]["event_id"] != row["event_id"]
+        metrics_swarm._checkpoint(box, second)
+        metrics_swarm._checkpoint(box, first)
+        assert metrics_swarm.read_classifier_calls(box).rows == []
+    finally:
+        box.close()
 
 
 def test_all_generated_rows_match_the_shared_outbox_schema():

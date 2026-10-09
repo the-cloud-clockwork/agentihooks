@@ -20,11 +20,7 @@ def record_pass(slug, now_ms, actions, environ=os.environ, swarm=None):
         try:
             box.append(TICKS, [tick_row(slug, now_ms, actions)])
             if swarm is not None:
-                pulls = {
-                    task["pr_url"]: swarm.view(task["pr_url"])
-                    for task in swarm.doc["tasks"]
-                    if task.get("pr_url") and task["state"] in ("pr", "claimed")
-                }
+                pulls = metrics_swarm.pull_rows(box, now_ms, swarm)
                 metrics_swarm.record_pass(box, slug, now_ms, swarm.store, swarm.doc, swarm.findings, pulls)
             box.flush(now_ms)
         finally:

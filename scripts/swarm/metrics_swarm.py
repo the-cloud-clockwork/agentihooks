@@ -4,6 +4,7 @@ import socket
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from pathlib import Path
 
 from hooks.classifier import decision_log
 from scripts.gates import log as gate_log
@@ -58,6 +59,44 @@ class TickInput:
     doc: dict
     findings: list
     view: Callable[[str], object]
+
+
+@dataclass(frozen=True)
+class LogBatch:
+    source: str
+    position: int
+    rows: list
+
+
+def _log_batch(path: Path, box: metrics_outbox.Outbox) -> LogBatch:
+    if not path.exists():
+        return LogBatch("", 0, [])
+    stat = path.stat()
+    source = f"{path}:{stat.st_dev}:{stat.st_ino}"
+    with box.db:
+        box.db.execute(
+            "CREATE TABLE IF NOT EXISTS metrics_offsets (source TEXT PRIMARY KEY, position INTEGER NOT NULL)"
+        )
+    saved = box.db.execute("SELECT position FROM metrics_offsets WHERE source = ?", (source,)).fetchone()
+    position, rows = saved[0] if saved else 0, []
+    with path.open("rb") as stream:
+        stream.seek(position)
+        while line := stream.readline():
+            if not line.endswith(b"\n"):
+                break
+            row = json.loads(line)
+            rows.append({**row, "_source_id": f"{source}:{position}"})
+            position = stream.tell()
+    return LogBatch(source, position, rows)
+
+
+def _checkpoint(box: metrics_outbox.Outbox, batch: LogBatch) -> None:
+    if batch.source:
+        with box.db:
+            box.db.execute(
+                "INSERT INTO metrics_offsets VALUES (?, ?) ON CONFLICT(source) DO UPDATE SET position = MAX(position, excluded.position)",
+                (batch.source, batch.position),
+            )
 
 
 def _base(slug: str, at: int, identity: object, task: dict) -> dict:
@@ -126,7 +165,11 @@ def delivery_rows(slug: str, doc: dict, agents: list, pulls: dict) -> list[dict]
             continue
         task = _task(doc, task_id)
         agent = _owner(agents, task_id, source["at"], source.get("by", ""))
-        rows.append(_delivery(_event(slug, task, agent, source["at"], kinds[source["kind"]], source), task))
+        rows.append(
+            _delivery(
+                _event(slug, task, agent, source["at"], kinds[source["kind"]], source.get("review_id", source)), task
+            )
+        )
     for task in doc.get("tasks", []):
         pull = pulls.get(task.get("pr_url"))
         if pull is None or pull.state != "MERGED" or pull.merged_at is None:
@@ -204,7 +247,7 @@ def classifier_rows(calls: list, host: str) -> list[dict]:
             **_base(
                 f"host:{host}",
                 int(datetime.fromisoformat(source["ts"]).timestamp() * 1000),
-                ["classifier", index, source],
+                ["classifier", source.get("_source_id", index), source],
                 {},
             ),
             "host": host,
@@ -217,13 +260,26 @@ def classifier_rows(calls: list, host: str) -> list[dict]:
     ]
 
 
-def read_review_events(slug: str) -> list[dict]:
-    path = gate_log.gates_dir(slug) / "intent" / "history.jsonl"
-    if not path.exists():
-        return []
+def pull_rows(box: metrics_outbox.Outbox, now_ms: int, swarm: TickInput) -> dict:
+    completed = {
+        event["target"].removeprefix("tasks/")
+        for event in swarm.doc.get("_meta", {}).get("events", [])
+        if event["kind"] == "task done" and event["at"] >= now_ms - metrics_outbox.DAY_MS
+    }
+    recorded = {row["pull_request"] for row in box.recent("delivery_events", now_ms) if row["kind"] == "merge"}
+    return {
+        task["pr_url"]: swarm.view(task["pr_url"])
+        for task in swarm.doc["tasks"]
+        if task.get("pr_url")
+        and task["pr_url"] not in recorded
+        and (task["state"] in ("pr", "claimed") or task["id"] in completed)
+    }
+
+
+def read_review_events(slug: str, box: metrics_outbox.Outbox) -> LogBatch:
+    batch = _log_batch(gate_log.gates_dir(slug) / "intent" / "history.jsonl", box)
     events = []
-    for line in path.read_text().splitlines():
-        source = json.loads(line)
+    for source in batch.rows:
         state = json.loads(source["classifier_input"])["state"]
         for review in state.get("reviewer_findings", {}).get("reviews", []):
             if not review.get("submittedAt"):
@@ -233,15 +289,14 @@ def read_review_events(slug: str) -> list[dict]:
                     "kind": "review round",
                     "target": f"tasks/{source['task']}",
                     "at": int(datetime.fromisoformat(review["submittedAt"]).timestamp() * 1000),
-                    "by": source["agent"],
                     "review_id": review["id"],
                 }
             )
-    return events
+    return LogBatch(batch.source, batch.position, events)
 
 
-def read_classifier_calls() -> list[dict]:
-    return decision_log.read()
+def read_classifier_calls(box: metrics_outbox.Outbox) -> LogBatch:
+    return _log_batch(decision_log.log_path(), box)
 
 
 def _held_spawns(store: RedisStore, slug: str, doc: dict, quota: dict, agents: list) -> int:
@@ -266,13 +321,16 @@ def record_pass(
     gates, reruns = gate_rows(slug, doc, agents, gate_log.recent(slug, limit=None))
     quota = capacity.read(store, slug)
     quota["held_spawns"] = _held_spawns(store, slug, doc, quota, [asdict(agent) for agent in store.agents(slug)])
-    review_doc = {**doc, "_meta": {"events": [*doc.get("_meta", {}).get("events", []), *read_review_events(slug)]}}
+    reviews, classifiers = read_review_events(slug, box), read_classifier_calls(box)
+    review_doc = {**doc, "_meta": {"events": [*doc.get("_meta", {}).get("events", []), *reviews.rows]}}
     batches = (
         (AGENTS, agent_rows(slug, doc, agents) + gates + signal_rows(slug, doc, agents, handoffs, found)),
         (DELIVERY, delivery_rows(slug, review_doc, agents, pulls) + reruns),
         (HOST, [host_row(slug, now_ms, host_budget.read_host(), quota)]),
         (QUOTA, quota_rows(slug, now_ms, quota)),
-        (CLASSIFIERS, classifier_rows(read_classifier_calls(), socket.gethostname())),
+        (CLASSIFIERS, classifier_rows(classifiers.rows, socket.gethostname())),
     )
     for table, rows in batches:
         box.append(table, [row for row in rows if row["ts_ms"] >= now_ms - metrics_outbox.DAY_MS])
+    _checkpoint(box, reviews)
+    _checkpoint(box, classifiers)
