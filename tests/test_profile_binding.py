@@ -319,6 +319,13 @@ def test_only_a_master_quota_transfer_continues_with_an_effort_outside_the_swarm
     assert str(error.value) == "unsupported quota transfer: saved effort is outside the current swarm range"
 
 
+def test_a_quota_transfer_compares_its_saved_effort_by_rank_across_harness_names(monkeypatch):
+    env = {"AGENTIHOOKS_RUN_MODEL": "sol", "AGENTIHOOKS_RUN_EFFORT": "max"}
+    monkeypatch.setattr(binding, "process", lambda: (123, "codex", env, "original"))
+    swarm = {"AGENTIHOOKS_SWARM_EFFORT_RANGE": "medium:max", "AGENTIHOOKS_SWARM_LANE": "eng"}
+    assert binding.continuation([], "codex", swarm) == ["-m", "sol", "-c", 'model_reasoning_effort="xhigh"']
+
+
 @pytest.mark.parametrize("lane_agent", ["auto", "codex"])
 def test_swarm_handoff_keeps_profile_harness_model_effort_and_account(tmp_path, lane_agent):
     from types import SimpleNamespace
