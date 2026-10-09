@@ -3,8 +3,6 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-import fakeredis
-
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm_v2.admission import (
     ADMITTED,
@@ -34,8 +32,14 @@ def policy(data, global_cap=None, swarm_cap=None):
     )
 
 
+def fresh_store():
+    import fakeredis
+
+    return RedisStore(fakeredis.FakeRedis(decode_responses=True))
+
+
 def build(data, slots=None, **caps):
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store = fresh_store()
     store.create(SwarmConfig(data["swarm"], "agentihooks", 10, 0))
     provider = {"slots": data["provider_slots"] if slots is None else slots, "sessions": 0}
     admission = PendingAdmission(store, policy(data, **caps), lambda slug: provider["slots"])

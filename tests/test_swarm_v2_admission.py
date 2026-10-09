@@ -1,9 +1,8 @@
 import json
 
-import fakeredis
 import pytest
 
-from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
+from scripts.swarm.store import SwarmConfig, SwarmError
 from scripts.swarm.tick import tick
 from scripts.swarm_v2 import admission as admission_module
 from scripts.swarm_v2.admission import (
@@ -21,7 +20,7 @@ from scripts.swarm_v2.admission import (
     Template,
     requested,
 )
-from tests.sv2_ctl03_cases import build, inputs, outcomes, run_case
+from tests.sv2_ctl03_cases import build, fresh_store, inputs, outcomes, run_case
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
@@ -31,7 +30,7 @@ COMPUTE = Template("compute", Resources(8192, 8000))
 
 
 def make(global_cap=3, swarm_cap=3, ttl=100, slots=10, store=None):
-    store = store or RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store = store or fresh_store()
     for slug in ("a", "b"):
         store.create(SwarmConfig(slug, "/repo", 10, 0))
     provider = {"slots": slots}
@@ -53,7 +52,7 @@ def test_requested_reads_task_resources_over_the_default():
     assert requested({"id": "t", "resources": None}, default) == default
     assert requested({"id": "t", "resources": {"memory_mib": "9000"}}, default) == Resources(9000, 1000)
     assert requested({"id": "t", "resources": {"cpu_millis": 6000}}, default) == Resources(4096, 6000)
-    for bad in ({"memory_mib": 0}, {"cpu_millis": -1}):
+    for bad in ({"memory_mib": 0}, {"cpu_millis": -1}, {"cpu_millis": 0}):
         with pytest.raises(ValueError, match="^resources must be positive$"):
             requested({"id": "t", "resources": bad}, default)
     for bad in (["memory_mib"], "8192"):
@@ -139,7 +138,7 @@ def test_a_request_fitting_one_template_on_both_dimensions_is_possible():
 
 
 def test_no_templates_makes_every_request_impossible():
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store = fresh_store()
     gate = PendingAdmission(store, Policy(3, 3, 100, (), Resources(1, 1)), lambda s: 3)
     got = gate.admit("a", ids("t1"), 0)
     assert got[0].outcome == IMPOSSIBLE
@@ -329,7 +328,10 @@ def test_tick_spawns_only_admitted_tasks_and_blocks_the_impossible_one():
     )
     assert all(ledger.rows[t]["state"] == "open" for t in ("t05", "t10"))
     assert sorted(gate.pending("sw", data["clock_ms"])) == ["t01", "t02", "t03"]
-    assert runtime.tasks[0]["admission"]["reservation"] == gate.pending("sw", data["clock_ms"])["t01"].reservation
+    assert runtime.tasks[0]["admission"] == {
+        "reservation": gate.pending("sw", data["clock_ms"])["t01"].reservation,
+        "deadline_ms": data["clock_ms"] + data["pending_ttl_ms"],
+    }
 
 
 def test_tick_releases_the_reservation_of_a_failed_spawn():
@@ -359,7 +361,9 @@ def test_tick_releases_the_reservation_when_the_ledger_refuses_the_claim():
         return original(slug, task_id, fields, by, if_state)
 
     ledger.update_task = refuse
-    tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
+    actions = tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
+    assert "task t01 is claimed on the ledger, not claimed" in actions
+    assert not [a for a in actions if a.startswith("spawn failed")]
     assert "t01" not in gate.pending("sw", data["clock_ms"])
     assert [task for _, _, task in runtime.spawned] == ["t02", "t03", "t05"]
     assert gate.pending_execution_admission_total("sw") == {ADMITTED: 4, RELEASED: 1, IMPOSSIBLE: 1, DEFERRED: 5}
@@ -417,9 +421,56 @@ def test_a_passed_launch_check_activates_the_task_reservation(monkeypatch):
 
 def test_a_runtime_without_admission_spawns_as_before():
     data = inputs()
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store = fresh_store()
     store.create(SwarmConfig("sw", "/repo", 10, 0))
     ledger, runtime = FakeLedger([{**t, "lane": "eng"} for t in data["tasks"]]), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
     assert len(runtime.spawned) == 10
     assert "admission" not in runtime.tasks[0]
+
+
+def test_keys_are_named_per_swarm():
+    store, gate, _ = make()
+    assert gate.key("a").endswith(":a:pending-admission")
+    assert gate.total_key("a").endswith(":a:pending-admission-total")
+
+
+def test_the_provider_slot_source_is_asked_for_the_admitting_swarm():
+    store, gate, _ = make()
+    asked = []
+    gate.provider_slots = lambda slug: asked.append(slug) or 10
+    gate.admit("b", ids("u1"), 0)
+    assert asked == ["b"]
+
+
+@pytest.mark.parametrize("caps", [(0, 3), (3, 0)])
+def test_either_cap_at_zero_turns_admission_off(caps):
+    store, gate, _ = make(*caps)
+    assert gate.admit("a", ids("t1"), 0) == [Decision("t1", DEFERRED, reason="distributed admission is set to zero")]
+
+
+def _race(monkeypatch, gate, write):
+    real, raced = gate._decide, []
+
+    def racing(*args):
+        if not raced:
+            raced.append(True)
+            write()
+        return real(*args)
+
+    monkeypatch.setattr(gate, "_decide", racing)
+
+
+def test_a_write_by_another_swarm_alone_forces_a_retry(monkeypatch):
+    store, gate, _ = make(global_cap=1, swarm_cap=3)
+    _race(monkeypatch, gate, lambda: PendingAdmission(store, gate.policy, lambda s: 10).admit("b", ids("u1"), 0))
+    assert outcomes(gate.admit("a", ids("t1"), 0)) == {"t1": DEFERRED}
+    assert store.redis.zrange(gate.global_key, 0, -1) == ["b\tu1"]
+
+
+def test_a_write_to_this_swarm_alone_forces_a_retry(monkeypatch):
+    store, gate, _ = make(global_cap=10, swarm_cap=1)
+    row = json.dumps({"reservation": "r", "deadline_ms": 100, "resources": {}})
+    _race(monkeypatch, gate, lambda: store.redis.hset(gate.key("a"), "rival", row))
+    assert outcomes(gate.admit("a", ids("t1"), 0)) == {"t1": DEFERRED}
+    assert sorted(gate.pending("a", 0)) == ["rival"]

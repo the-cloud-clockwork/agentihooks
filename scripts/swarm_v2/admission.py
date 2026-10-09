@@ -4,12 +4,11 @@ Admission never chooses a node or instance: an approved template only proves som
 """
 
 import json
+import math
 from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
 from uuid import uuid4
-
-from redis.exceptions import WatchError
 
 from scripts.swarm.store import PREFIX, RedisStore, SwarmError
 
@@ -113,6 +112,8 @@ class PendingAdmission:
         return {k: int(v) for k, v in self.store.redis.hgetall(self.total_key(slug)).items()}
 
     def _retry(self, attempt: Callable):
+        from redis.exceptions import WatchError
+
         for _ in range(ATTEMPTS):
             try:
                 return attempt()
@@ -127,7 +128,7 @@ class PendingAdmission:
             rows = {task: json.loads(raw) for task, raw in pipe.hgetall(key).items()}
             expired = [task for task, row in rows.items() if row["deadline_ms"] <= now_ms]
             live = {task: row for task, row in rows.items() if row["deadline_ms"] > now_ms}
-            across = pipe.zcount(self.global_key, f"({now_ms}", "+inf")
+            across = pipe.zcount(self.global_key, f"({now_ms}", math.inf)
             decisions, written = [], {}
             for task in tasks:
                 decision = self._decide(task, live, written, (across, slots), now_ms)
@@ -139,7 +140,7 @@ class PendingAdmission:
                     }
                 decisions.append(decision)
             pipe.multi()
-            pipe.zremrangebyscore(self.global_key, "-inf", now_ms)
+            pipe.zremrangebyscore(self.global_key, -math.inf, now_ms)
             if expired:
                 pipe.hdel(key, *expired)
             for task, row in written.items():
@@ -188,6 +189,6 @@ class PendingAdmission:
             pipe.multi()
             pipe.hdel(key, task)
             pipe.zrem(self.global_key, f"{slug}\t{task}")
-            pipe.hincrby(self.total_key(slug), outcome, 1)
+            pipe.hincrby(self.total_key(slug), outcome)
             pipe.execute()
         return True
