@@ -350,6 +350,17 @@ def test_a_task_without_a_phase_is_refused_its_slice():
     )
 
 
+def test_only_an_update_of_a_parent_field_checks_the_slice_link():
+    doc = {
+        "slices": [{"id": "a.x", "phase": "phases/p1", "anchor": "x"}],
+        "tasks": [{"id": "t1", "phase": "p2", "slice": "slices/a.x"}],
+    }
+    assert ledger_tasks._parent_refusal(doc, {"item": "tasks/t1", "fields": {"state": "done"}}) == ""
+    assert ledger_tasks._parent_refusal(doc, {"item": "tasks/t1", "fields": {"phase": "p2"}}) == (
+        "task t1 is in phase p2 but its slice slices/a.x belongs to phases/p1"
+    )
+
+
 def test_a_named_slice_keeps_a_plan_slice_already_given():
     doc = {"slices": [{"id": "a.x", "phase": "phases/p1", "anchor": "x", "lines": "2-3"}]}
     fields = {"slice": "slices/a.x", "plan_slice": "y"}
