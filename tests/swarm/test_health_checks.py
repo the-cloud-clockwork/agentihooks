@@ -123,7 +123,7 @@ def test_status_raises_worker_ceremony_only_past_the_talk_budget(monkeypatch):
     events = [{"kind": "comment edited", "target": "phases/p1", "by": "sw-eng-1", "at": at} for _ in range(25)]
     store.redis.set(f"{store.key('green-proof', 'checks')}:green:{URL}", "0")
     marks = Progress(store.redis, "green-proof")
-    marks.outcome("sw-eng-1", "pushed", 1)
+    marks.outcome("sw-eng-1", "pushed", at)
     for _ in range(10):
         marks.talk("sw-eng-1")
     assert status.findings(store, "green-proof", config, tasks, events) == []
