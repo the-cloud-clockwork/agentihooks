@@ -17,6 +17,11 @@ def level(effort):
     return None if found is None else EFFORTS["claude"][found]
 
 
+def named(harness, effort):
+    found = rank(effort)
+    return effort if found is None else EFFORTS[harness][found]
+
+
 def of(config):
     return getattr(config, "effort_min", DEFAULT[0]), getattr(config, "effort_max", DEFAULT[1])
 
