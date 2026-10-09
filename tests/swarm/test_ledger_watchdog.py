@@ -239,7 +239,7 @@ def test_a_server_the_tick_may_not_signal_is_reported_and_never_started_again(st
     plant(host.proc, host.argv, pid=4243)
     store.redis.delete(ledger_watchdog.LOCK_KEY)
     ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host)
-    assert len(master_mail(store)) == 2
+    assert len(master_mail(store)) == 1
 
 
 def test_a_start_that_fails_or_hangs_returns_its_error(tmp_path):

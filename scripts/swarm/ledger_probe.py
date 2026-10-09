@@ -145,13 +145,11 @@ def observe(
     actions, notices = [], held.get("notices", [])
     if not held.get("alert") and slow >= PASSES:
         text = _raised(sample, (facts or ledger_host.facts)())
-        incidents.mail(store.redis, "ledger", master_address(store, slug), text + PAUSED)
         notices = [*notices, for_operator(text)]
         held.update(alert=True, raised_at=now_ms)
         actions.append("raised the ledger slow alert")
     elif held.get("alert") and fast >= PASSES:
         text = CLEARED.format(took=sample.took())
-        incidents.mail(store.redis, "ledger", master_address(store, slug), text, True)
         notices = [*notices, for_operator(text)]
         held.update(alert=False)
         actions.append("cleared the ledger slow alert")
