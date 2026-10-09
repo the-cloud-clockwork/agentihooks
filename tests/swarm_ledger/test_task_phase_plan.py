@@ -159,3 +159,16 @@ def test_an_invalid_replacement_slice_keeps_the_original_task():
     state, rejected = update(phase="p2", plan_slice="missing")
     assert rejected == ["move-phase-plan_slice"]
     assert task(state) == before
+
+
+
+@pytest.mark.parametrize("destination_plan", [False, True])
+def test_phase_move_leaves_the_callers_fields_reusable(destination_plan):
+    if destination_plan:
+        anchored(SLUG, "new", phase="p2")
+    fields = {"phase": "p2"}
+    op = {"op": "task_update", "id": "reusable", "by": MASTER, "item": "tasks/t1", "fields": fields}
+    core.check_op(op)
+    core.sync(SLUG, ops=[op])
+    assert fields == {"phase": "p2"}
+    core.check_op(op)
