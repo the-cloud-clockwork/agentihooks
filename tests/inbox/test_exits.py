@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.inbox import exits
+from scripts.inbox import exits, wake
 from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
@@ -243,7 +243,7 @@ def test_the_sweep_closes_a_gone_agents_wait_notice_after_a_live_agents_on_the_s
 
 def test_exit_sweep_reads_only_unsettled_mail(redis, monkeypatch):
     store, inbox = RedisStore(redis), InboxStore(redis)
-    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    store.create(SwarmConfig("sw", "/repo", 1, 0))
     store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
     closed = inbox.send("sender", "sw-eng-1", "finished work")
     inbox.close(closed.id, "sw-eng-1", "done", "finished")
@@ -538,7 +538,7 @@ def test_unreceived_task_mail_is_not_cancelled_as_a_new_occupant_receives_it(red
 
 def test_the_sweep_skips_a_settled_agent_until_mail_reaches_it_again(redis, monkeypatch):
     store, inbox = RedisStore(redis), InboxStore(redis)
-    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    store.create(SwarmConfig("sw", "/repo", 1, 0))
     store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
     settled, settle = [], exits.settle
     monkeypatch.setattr(exits, "settle", lambda inbox, name, *rest: settled.append(name) or settle(inbox, name, *rest))
@@ -550,7 +550,7 @@ def test_the_sweep_skips_a_settled_agent_until_mail_reaches_it_again(redis, monk
     exits.sweep(inbox, "sw", store, dict)
     exits.sweep(inbox, "sw", store, dict)
     assert settled == ["sw-eng-1", "sw-eng-1"]
-    assert inbox.get(late.id).address == "eng-1@sw"
+    assert (inbox.get(late.id).address, inbox.get(late.id).state) == ("eng-1@sw", "pending")
 
 
 def test_the_sweep_reads_the_swarms_seats_once(redis, monkeypatch):
@@ -619,7 +619,7 @@ def test_each_gone_agent_is_settled_once_per_sweep(redis, monkeypatch):
 
 
 def seat_notice_taken(inbox, store, state):
-    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    store.create(SwarmConfig("sw", "/repo", 1, 0))
     store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
     item = inbox.send("swarm", "eng-1@sw", "intent check for task t1", ref="tasks/t1")
     inbox.deliver(item.id, "sw-eng-1")
@@ -806,3 +806,151 @@ def test_seat_mail_that_changed_hands_during_settlement_is_left_alone(redis, mon
     after = inbox.get(item.id)
     expected = ("eng-9@sw", "pending") if race == "moved" else ("eng-1@sw", "read")
     assert (after.address, after.state) == expected
+
+
+def seat_mail(inbox, store, seat, sender="sender", text="contract\nsecond line"):
+    from scripts.swarm.naming import TYPES, NameRegistry
+
+    names = NameRegistry(inbox.redis)
+    names.mint_code("sw", "sw", "/repo")
+    lane = seat.partition("-")[0]
+    occupant = names.next("sw", lane if lane in TYPES else "eng")
+    store.seats.occupy(seat, occupant, 1)
+    return inbox.send(sender, seat, text), occupant
+
+
+@pytest.mark.parametrize(("lane", "cap"), [("eng", 2), ("ci", 1), ("plan", 0)])
+@pytest.mark.parametrize("state", ["pending", "delivered", "confirmed", "read"])
+def test_seat_mail_above_its_lane_cap_is_settled_and_its_sender_told(redis, lane, cap, state):
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 2, 1, max_plan=0))
+    item, occupant = seat_mail(inbox, store, f"{lane}-3@sw")
+    if state in ("delivered", "confirmed"):
+        inbox.deliver(item.id, occupant)
+    if state == "confirmed":
+        inbox.confirm(item.id, occupant)
+    if state == "read":
+        inbox.read(item.id, occupant)
+    exits.sweep(inbox, "sw", store, dict)
+    closed = inbox.get(item.id)
+    assert (closed.address, closed.state) == (f"{lane}-3@sw", "cancelled")
+    assert closed.reason == f"cancelled: {lane}-3@sw can get no successor: the {lane} lane cap is {cap}"
+    assert inbox.history(item.id)[-1]["by"] == "swarm"
+    [notice] = inbox.pending_items("sender")
+    assert notice.fyi is True
+    assert notice.sender == "swarm"
+    assert notice.text == (
+        f"{lane}-3@sw can get no successor: the {lane} lane cap is {cap}, so your message {item.id}: contract "
+        "is closed. Send it to whoever carries that work on if it still matters."
+    )
+
+
+@pytest.mark.parametrize("seat", ["eng-2@sw", "ci-1@sw", "plan-3@sw", "qa-9@sw", "eng-x@sw"])
+def test_seat_mail_within_its_lane_cap_waits_for_the_next_occupant(redis, seat):
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 2, 1, max_plan=3))
+    item, _ = seat_mail(inbox, store, seat)
+    exits.sweep(inbox, "sw", store, dict)
+    assert (inbox.get(item.id).address, inbox.get(item.id).state) == (seat, "pending")
+    assert inbox.pending_items("sender") == []
+
+
+def test_a_live_agent_above_the_cap_keeps_its_seat_mail(redis):
+    from scripts.swarm.store import AgentRecord
+
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 0, 0, state="stopped"))
+    item, occupant = seat_mail(inbox, store, "eng-3@sw")
+    store.put_agent("sw", AgentRecord(name=occupant, lane="eng", task="t3", seat="eng-3@sw"))
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(item.id).state == "pending"
+
+
+def test_a_finished_agent_above_the_cap_leaves_its_seat_mail_to_be_settled(redis):
+    from scripts.swarm.store import AgentRecord
+
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    item, occupant = seat_mail(inbox, store, "eng-1@sw")
+    store.put_agent("sw", AgentRecord(name=occupant, lane="eng", task="t1", seat="eng-1@sw", state="finished"))
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(item.id).reason == "cancelled: eng-1@sw can get no successor: the eng lane cap is 0"
+
+
+def test_a_stopping_swarm_keeps_mail_on_seats_within_its_cap(redis):
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 1, 0, state="stopping"))
+    item, _ = seat_mail(inbox, store, "eng-1@sw")
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(item.id).state == "pending"
+
+
+def test_a_stopped_swarm_settles_the_mail_on_its_lane_seats_but_not_its_master(redis):
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 3, 3, state="stopped"))
+    item, _ = seat_mail(inbox, store, "ci-1@sw", text="x" * 250)
+    master, _ = seat_mail(inbox, store, "master@sw")
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(item.id).reason == "cancelled: ci-1@sw can get no successor: the swarm stopped"
+    assert inbox.get(master.id).state == "pending"
+    [notice] = inbox.pending_items("sender")
+    assert notice.text.startswith(f"ci-1@sw can get no successor: the swarm stopped, so your message {item.id}: ")
+    assert notice.text.count("x") == 200
+
+
+def test_seat_mail_moved_elsewhere_during_settlement_is_left_alone(redis, monkeypatch):
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    item, _ = seat_mail(inbox, store, "eng-3@sw")
+    later = inbox.send("other", "eng-3@sw", "later contract")
+    snapshot = inbox.open_items("eng-3@sw")
+    inbox.redirect(item.id, "swarm", "eng-1@sw", "moved meanwhile")
+    monkeypatch.setattr(inbox, "open_items", lambda address: snapshot if address == "eng-3@sw" else [])
+    exits.sweep(inbox, "sw", store, dict)
+    assert (inbox.get(item.id).address, inbox.get(item.id).state) == ("eng-1@sw", "pending")
+    assert inbox.pending_items("sender") == []
+    assert inbox.get(later.id).state == "cancelled"
+
+
+def test_a_seat_within_its_cap_does_not_stop_the_settling_of_a_later_seat(redis):
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 1, 0))
+    kept, _ = seat_mail(inbox, store, "eng-1@sw")
+    settled, _ = seat_mail(inbox, store, "eng-3@sw")
+    exits.sweep(inbox, "sw", store, dict)
+    assert (inbox.get(kept.id).state, inbox.get(settled.id).state) == ("pending", "cancelled")
+
+
+def test_swarm_mail_on_a_seat_above_its_cap_is_settled_without_a_notice(redis):
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    item, _ = seat_mail(inbox, store, "eng-1@sw", sender="swarm")
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(item.id).state == "cancelled"
+    assert [entry.id for entry in inbox.inbox("swarm")] == []
+    assert [entry.id for entry in inbox.inbox("master@sw")] == []
+
+
+def test_settling_unfillable_seat_mail_withdraws_its_open_master_escalation(redis):
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    item, _ = seat_mail(inbox, store, "eng-1@sw")
+    answered = inbox.send("swarm", "master@sw", "earlier escalation", ref=f"inbox-escalation:{item.id}")
+    inbox.close(answered.id, "swarm", "done", "answered")
+    raised = inbox.send("swarm", "master@sw", "nobody read it", ref=f"inbox-escalation:{item.id}")
+    inbox.note(item.id, "woken", "swarm", "prompted sw-eng-1 to read its inbox", 2)
+    inbox.note(item.id, wake.TO_MASTER, "swarm", wake.raised_note("master@sw", answered.id), 3)
+    inbox.note(item.id, wake.TO_MASTER, "swarm", wake.raised_note("master@sw", raised.id), 4)
+    exits.sweep(inbox, "sw", store, dict)
+    withdrawn = inbox.get(raised.id)
+    assert withdrawn.state == "cancelled"
+    assert withdrawn.reason == f"cancelled: message {item.id} is closed, eng-1@sw can get no successor"
+    assert inbox.history(raised.id)[-1]["by"] == "swarm"
+    assert inbox.get(answered.id).state == "done"
+
+
+def test_the_sweep_settles_seat_mail_of_an_unknown_swarm_as_before(redis):
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    item, _ = seat_mail(inbox, store, "eng-3@sw")
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(item.id).state == "pending"
