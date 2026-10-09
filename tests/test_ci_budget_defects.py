@@ -45,7 +45,7 @@ def _job(name, created, completed, run_id=1):
 def _jobs(run_id, gate_end):
     return [
         _job("mutation", "00:05", "14:09", run_id),
-        _job("kind-due", "00:05", "00:20", run_id),
+        _job("split", "00:05", "00:20", run_id),
         _job("Gate — Required", "14:10", gate_end, run_id),
     ]
 
