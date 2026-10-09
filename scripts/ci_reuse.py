@@ -157,6 +157,8 @@ def _matrix(job):
     if not isinstance(matrix, dict):
         return 1
     axes = {key: values for key, values in matrix.items() if key not in {"include", "exclude"}}
+    if any(not isinstance(values, list) for values in axes.values()):
+        return 1
     rows = [dict(zip(axes, values, strict=True)) for values in itertools.product(*axes.values())]
     rows = [
         row
