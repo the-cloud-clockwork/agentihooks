@@ -1,9 +1,14 @@
+import os
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from hooks.context.account_sessions import CODEX_DEFAULT, CODEX_TOKEN_PREFIX, TOKEN_PREFIX
 from scripts.routing.settings import SettingsStore
 from scripts.routing.slots import INTERACTIVE, SUBSCRIPTION
+
+if TYPE_CHECKING:
+    from scripts.claude_quota_balancer import RowMarks
 
 HARNESSES = ("claude", "codex")
 
@@ -33,7 +38,7 @@ def check(harness: str, slug: str, environ: Mapping[str, str]) -> None:
 
 def declare(
     store: SettingsStore,
-    declarations: Mapping[str, tuple[str, str]],
+    declarations: Mapping[str, tuple[str, str | None]],
     environ: Mapping[str, str],
     actor: str,
     now: float,
@@ -42,7 +47,7 @@ def declare(
         check(harness, slug, environ)
     for harness, (slug, tier) in declarations.items():
         store.set(f"master-account-{harness}", slug, actor, now)
-        store.set(f"master-tier-{harness}", tier or None, actor, now)
+        store.set(f"master-tier-{harness}", tier, actor, now)
 
 
 def clear(store: SettingsStore, harnesses: Iterable[str], actor: str, now: float) -> None:
@@ -65,3 +70,9 @@ def load(environ: Mapping[str, str]) -> dict[str, MasterAccount]:
     from scripts.routing.settings import open_store
 
     return declared(open_store(place._client(environ), environ), environ)
+
+
+def row_marks(current: str = "", environ: Mapping[str, str] = os.environ) -> "RowMarks":
+    from scripts.claude_quota_balancer import RowMarks
+
+    return RowMarks(current, load(environ).get("claude"))

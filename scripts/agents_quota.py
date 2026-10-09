@@ -14,12 +14,14 @@ from scripts.claude_quota_balancer import (
     MASTERS_ONLY,
     NOT_APPLICABLE,
     OPEN,
+    RowMarks,
     _cap_text,
     _duration,
     _percent,
     _span,
     _weight_text,
     account_cap,
+    render_table,
 )
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, Slot
 
@@ -235,12 +237,20 @@ def _codex(now: float) -> list[QuotaRow]:
     pool = codex_router.accounts(os.environ)
     sessions = codex_sessions_by_account()
     rows = codex_rows(pool, codex_router.quotas(pool, os.environ), sessions, now)
-    return with_masters(rows + api_rows(CodexApiSource(sessions), "codex", now), _masters("codex"), sessions)
+    master = _masters("codex").get("codex")
+    return [_mark(row, master) for row in rows + api_rows(CodexApiSource(sessions), "codex", now)]
 
 
 def codex_table() -> str:
     now = time.time()
     return render(_codex(now), int(now))
+
+
+def tokenless_table(master: "MasterAccount | None", sessions: dict[str, int]) -> str:
+    table = codex_table()
+    if master is None or master.kind != INTERACTIVE:
+        return table
+    return f"{render_table([], sessions=sessions, marks=RowMarks(master=master))}\n{table}"
 
 
 def _page_quota(now: float) -> dict:
