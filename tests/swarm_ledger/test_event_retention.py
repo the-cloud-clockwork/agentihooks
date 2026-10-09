@@ -92,13 +92,13 @@ def test_the_ceiling_trims_unacknowledged_events_and_marks_the_highest_lost(repo
 
 
 def test_an_acknowledgement_is_monotonic_and_records_no_event(repo):
-    state, _ = write(repo, 1, 2)
+    state, revisions = write(repo, 1, 2)
     before = state["_meta"]["events"]
-    state = acknowledge(repo, 5)
-    assert state["_meta"]["events_ack"] == 5
+    state = acknowledge(repo, revisions[2])
+    assert state["_meta"]["events_ack"] == revisions[2]
     assert state["_meta"]["events"] == before
-    state = acknowledge(repo, 3)
-    assert state["_meta"]["events_ack"] == 5
+    state = acknowledge(repo, revisions[1])
+    assert state["_meta"]["events_ack"] == revisions[2]
 
 
 def test_an_acknowledgement_never_passes_the_head_revision(repo):
