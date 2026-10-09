@@ -1,8 +1,10 @@
 import argparse
+import hashlib
 import io
 import itertools
 import json
 import os
+import re
 import subprocess
 import zipfile
 from datetime import UTC, datetime
@@ -91,6 +93,19 @@ def _passed(workflow, jobs):
     return True
 
 
+def _digest(record):
+    return hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _authenticated(prefix, record, jobs):
+    attestations = [job for job in jobs if job["name"] == "reuse" and job["conclusion"] == "success"]
+    if len(attestations) != 1:
+        return False
+    log = _api(f"{prefix}/jobs/{attestations[0]['id']}/logs", binary=True).decode()
+    digests = re.findall(r"(?m)^\\S+ required-tree-sha256=([0-9a-f]{64})$", log)
+    return digests == [_digest(record)]
+
+
 def _proof(path):
     with zipfile.ZipFile(io.BytesIO(_api(path, binary=True))) as archive:
         entry = archive.getinfo("provenance.json")
@@ -137,7 +152,7 @@ def _find(args, current):
         if not coverage <= kept:
             continue
         jobs = _pages(f"{source}/attempts/{run['run_attempt']}/jobs", "jobs")
-        if _passed(workflow, jobs):
+        if _passed(workflow, jobs) and _authenticated(prefix, record, jobs):
             return run
     return None
 
@@ -161,6 +176,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"No reusable full result: {type(exc).__name__}")
     record["reused"] = source is not None
     args.record.write_text(json.dumps(record))
+    print(f"required-tree-sha256={_digest(record)}")
     outputs = {
         "reused": str(record["reused"]).lower(),
         "run": str(source["id"]) if source else "",
