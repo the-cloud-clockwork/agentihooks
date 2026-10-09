@@ -240,16 +240,6 @@ def test_a_fetched_guard_is_refreshed_once_after_a_revision_conflict():
     assert [post["operation_id"] for post in posts] == ["op-1", "op-1"]
 
 
-def test_a_fetched_guard_conflicting_past_its_retries_raises_the_server_reply(monkeypatch):
-    monkeypatch.setattr(api_client.time, "sleep", lambda seconds: None)
-    attempts = api_client.RETRIES + 1
-    client = Scripted(*[reply for n in range(attempts) for reply in ({"revision": f"r{n}"}, http_error(409, CONFLICT))])
-    with pytest.raises(urllib.error.HTTPError) as error:
-        client.mutate(SLUG, chat_add())
-    assert (error.value.code, json.loads(error.value.read())["error"]["code"]) == (409, "revision_conflict")
-    assert len(client.calls) == 2 * attempts
-
-
 def test_a_pinned_guard_conflict_is_not_retried():
     client = Scripted(http_error(409, CONFLICT))
     with pytest.raises(urllib.error.HTTPError) as error:

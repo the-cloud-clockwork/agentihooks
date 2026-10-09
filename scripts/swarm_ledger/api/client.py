@@ -10,7 +10,7 @@ from urllib.parse import quote, urlencode
 from . import resources, schemas
 
 RETRIES = 5
-BACKOFF = 0.05
+BACKOFF = 0.25
 
 
 class ResourceClient:
@@ -60,7 +60,8 @@ class ResourceClient:
         return state
 
     def mutate(self, slug: str, operations: list) -> dict:
-        fetched = {schemas.target(operation) for operation in operations if not operation.get("expected_revision")}
+        unpinned = [operation for operation in operations if not operation.get("expected_revision")]
+        fetched = {schemas.target(operation) for operation in unpinned}
         for attempt in range(RETRIES + 1):
             try:
                 return self.send(slug, operations)
@@ -72,9 +73,8 @@ class ResourceClient:
                 raise replay
             if attempt == RETRIES:
                 raise exhausted(replay, error, fetched)
-            for operation in operations:
-                if schemas.target(operation) in fetched:
-                    del operation["expected_revision"]
+            for operation in unpinned:
+                operation.pop("expected_revision", None)
             time.sleep(random.uniform(BACKOFF * 2**attempt / 2, BACKOFF * 2**attempt))
 
     def send(self, slug: str, operations: list) -> dict:
@@ -102,6 +102,7 @@ def failure(exc: urllib.error.HTTPError) -> tuple[urllib.error.HTTPError, dict]:
 
 
 def exhausted(replay: urllib.error.HTTPError, error: dict, fetched: set) -> urllib.error.HTTPError:
-    message = f"revision conflict on {', '.join(sorted(fetched))} persisted after {RETRIES} retries"
-    body = json.dumps({"error": {**error, "message": f"{error.get('message', '')}: {message}"}}).encode()
+    message = f"revision conflict persisted after {RETRIES} retries on a batch guarding {', '.join(sorted(fetched))}"
+    detail = ": ".join(part for part in (error.get("message"), message) if part)
+    body = json.dumps({"error": {**error, "message": detail}}).encode()
     return urllib.error.HTTPError(replay.url, replay.code, message, replay.hdrs, io.BytesIO(body))
