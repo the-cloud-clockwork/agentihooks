@@ -170,6 +170,99 @@ def test_failed_master_pane_read_never_wakes(setup):
 
     runtime.herdr = failed_read
     runtime.nudge = lambda agent, text: sent.append((agent.name, text))
+    assert runtime.observe(master).state == "unknown"
     assert master_wake.run("sw", store, runtime, doc, START) == []
     assert master_wake.run("sw", store, runtime, doc, START + WINDOW) == []
     assert sent == []
+
+
+@pytest.mark.parametrize("source", ["empty", "followup"])
+def test_missing_or_excluded_work_sources_do_not_wake(setup, source):
+    doc = setup[3]
+    doc.clear()
+    if source == "followup":
+        doc["followups"] = [{"out_of_scope": True}]
+    assert run(setup, START) == []
+    assert run(setup, START + WINDOW) == []
+    assert setup[4] == []
+
+
+@pytest.mark.parametrize("reason", ["worker", "finished", "busy", "recent", "retry", "typed", "no work"])
+def test_an_ineligible_record_does_not_suppress_the_waiting_master(setup, reason):
+    store, first, runtime, doc, sent = setup
+    second = replace(first, name="master@a1b2c3-0002", pane_id="w1:m2")
+    store.put_agent("sw", second)
+    runtime.live.add(second.name)
+    runtime.statuses[second.name] = "idle"
+    doc["followups"] = [{"done": False}]
+    if reason == "worker":
+        store.put_agent("sw", replace(first, lane="eng"))
+    elif reason == "finished":
+        store.put_agent("sw", replace(first, state="finished"))
+    elif reason == "busy":
+        runtime.statuses[first.name] = "working"
+    elif reason == "recent":
+        store.drop_agent("sw", first.name)
+    elif reason == "typed":
+        runtime.typed[first.name] = "draft"
+    elif reason == "no work":
+        doc.clear()
+        InboxStore(store.redis).send("worker", second.name, "Work waits")
+    run(setup, START)
+    if reason == "recent":
+        store.drop_agent("sw", second.name)
+        store.put_agent("sw", first)
+        store.put_agent("sw", second)
+    elif reason == "retry":
+        runtime.typed[second.name] = "draft"
+        run(setup, START + WINDOW - 1)
+        run(setup, START + WINDOW)
+        runtime.typed.clear()
+        sent.clear()
+    assert run(setup, START + WINDOW + 1) == [f"woke idle master {second.name} to work waiting Priorities"]
+    assert sent == [(second.name, PROMPT)]
+
+
+def test_a_replacement_master_starts_its_own_idle_window(setup):
+    store, first, runtime, doc, sent = setup
+    doc["followups"] = [{"done": False}]
+    run(setup, START)
+    store.drop_agent("sw", first.name)
+    second = replace(first, name="master@a1b2c3-0002", pane_id="w1:m2")
+    store.put_agent("sw", second)
+    runtime.live = {second.name}
+    runtime.statuses[second.name] = "idle"
+    assert run(setup, START + WINDOW - 1) == []
+    assert run(setup, START + WINDOW) == []
+    assert sent == []
+    assert run(setup, START + 2 * WINDOW - 1)
+
+
+@pytest.mark.parametrize("state", ["stopped", "stopping"])
+def test_the_tick_does_not_wake_a_master_while_shutting_down(setup, state, monkeypatch):
+    from scripts.swarm import tick as tick_module
+
+    store, master, runtime, _, sent = setup
+    ledger = FakeLedger([{"id": "t", "state": "blocked"}])
+    store.update("sw", state=state)
+    monkeypatch.setattr(tick_module, "_reap", lambda *args: [])
+    monkeypatch.setattr(tick_module.lifetime, "retire_idle_master", lambda *args: [])
+    monkeypatch.setattr(tick_module, "_close_space", lambda *args: [])
+    runtime.retire = lambda *args, **kwargs: False
+    master_wake.run("sw", store, runtime, ledger.state("sw"), START)
+    tick("sw", store, ledger, runtime, START + WINDOW)
+    assert sent == []
+
+
+def test_removing_a_swarm_removes_its_idle_window(setup):
+    store, master, _, doc, sent = setup
+    doc["followups"] = [{"done": False}]
+    run(setup, START)
+    config = store.config("sw")
+    store.drop_agent("sw", master.name)
+    store.remove("sw")
+    store.create(config)
+    store.put_agent("sw", master)
+    assert run(setup, START + WINDOW) == []
+    assert sent == []
+    assert run(setup, START + 2 * WINDOW)
