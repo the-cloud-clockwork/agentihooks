@@ -96,6 +96,11 @@ RUNNERS = [
     "node -e \"import('vitest/node').then(v => v.startVitest('unit'))\"",
     "node --input-type=module -e \"import M from 'mocha'; await new M().run()\"",
     "python3 -c \"import asyncio; asyncio.run(asyncio.create_subprocess_shell('python -m pytest'))\"",
+    "python3 -c \"eval('import pytest; pytest.main()')\"",
+    "python3 -c \"exec(compile('import pytest; pytest.main()', 'x', 'exec'))\"",
+    'node -e "eval(\'require(\\"mocha\\").run()\')"',
+    "node -e \"const m = 'mocha'; new (require(m))().run()\"",
+    "node -e \"require('vm').runInThisContext('require(\\\"jest\\\").run()')\"",
     "node --input-type=module -e \"import { startVitest } from 'vitest/node'; await startVitest('unit')\"",
 ]
 
@@ -200,6 +205,7 @@ def test_non_test_commands_pass(command, monkeypatch):
         'p.write_text(p.read_text().replace(old, "run: python -m pytest -q"))  # pytest\nEOF',
         "node -e \"fs.writeFileSync('p.json', s.replace('jest', 'vitest')) // jest\"",
         "python3 -c \"print('pytest')\"",
+        "python3 -c \"import pathlib; p = pathlib.Path('ecosystem.yml'); p.write_text(p.read_text().replace('pytest -x', 'pytest -q'))\"",
         "python3 -c \"print(open('pytest.ini').read())\"",
         "node -e \"console.log('jest')\"",
         "echo ok #c; pytest -q",

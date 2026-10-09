@@ -70,7 +70,9 @@ _LITERAL = (
     r"(?P<q>\"{3}|'{3}|[\"'`])(?:\\.|(?!(?P=q))[^\\])*(?P=q)"
 )
 _LAUNCH = re.compile(
-    r"\w*(?:subprocess|system|popen|spawn|exec)\w*|\b(?:run_module|run_path|__import__|import_module|child_process)\b"
+    r"\b(?:\w+_)?(?:subprocess|system|popen|spawn|exec)\w*"
+    r"|\b(?:eval|compile|Function|vm|run_module|run_path|__import__|import_module|child_process)\b"
+    r"|\brequire\s*\(\s*[A-Za-z_$]"
 )
 _DENY = (
     "BLOCKED: Local test and mutation runs are disabled. Push and open a draft pull request so CI runs the tests. "
