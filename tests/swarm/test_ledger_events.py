@@ -160,8 +160,14 @@ def test_a_new_priority_makes_one_master_item_naming_the_item_and_the_ask(store)
 
 def test_priorities_open_before_the_first_pass_make_no_item(store):
     run(store, with_priorities(priority("questions/q1", "Answer: which port")))
-    run(store, with_priorities(priority("questions/q1", "Answer: which port")))
-    assert texts(store, MASTER_SEAT) == []
+    run(store, with_priorities(priority("questions/q1", "Answer: which port"), priority("tasks/t1", "Blocked: no key")))
+    (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
+    assert "tasks/t1" in item.text and "questions/q1" not in item.text
+
+
+def test_the_first_pass_mark_does_not_expire(store):
+    run(store, with_priorities())
+    assert store.redis.ttl(store.key("sw", "priorities-seeded")) == -1
 
 
 def test_a_repeated_ask_on_the_same_item_makes_nothing_new(store):
@@ -182,15 +188,41 @@ def test_a_priority_raised_again_after_it_cleared_makes_a_new_item(store):
 
 def test_a_priority_the_master_added_makes_no_item(store):
     run(store, with_priorities())
-    run(store, with_priorities(priority("phases/p1", "Approve the plan", by="sw-master-1")))
-    assert texts(store, MASTER_SEAT) == []
+    run(store, with_priorities(priority("phases/p1", "Approve the plan", by="sw-master-1"), priority("tasks/t1", "Go")))
+    (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
+    assert "tasks/t1" in item.text and "phases/p1" not in item.text
 
 
-def test_a_swarm_with_no_live_master_gets_no_priority_item(store):
-    store.drop_agent("sw", "sw-master-1")
+def test_an_agent_ask_replacing_the_master_priority_on_its_item_makes_one_item(store):
     run(store, with_priorities())
-    run(store, with_priorities(priority("tasks/t1", "Blocked: the deploy key is missing", by="ledger")))
+    run(store, with_priorities(priority("phases/p1", "Approve the plan", by="sw-master-1")))
+    run(store, with_priorities(priority("phases/p1", "Approve the plan now", pid="p-agent")))
+    (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
+    assert "Approve the plan now" in item.text
+
+
+def test_a_priority_added_by_another_swarm_master_makes_an_item(store):
+    run(store, with_priorities())
+    run(store, with_priorities(priority("tasks/t1", "Look at this", by="other-master-1")))
+    assert len(texts(store, MASTER_SEAT)) == 1
+
+
+def test_a_priority_the_swarm_raised_after_its_own_ask_makes_no_item(store):
+    run(store, with_priorities())
+    run(store, with_priorities(priority("followups/f1", "Open half an hour", by="swarm"), priority("tasks/t1", "Go")))
+    (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
+    assert "tasks/t1" in item.text and "followups/f1" not in item.text
+
+
+def test_a_swarm_with_no_live_master_gets_no_priority_item_until_a_master_returns(store):
+    run(store, with_priorities())
+    store.drop_agent("sw", "sw-master-1")
+    row = priority("tasks/t1", "Blocked: the deploy key is missing", by="ledger")
+    run(store, with_priorities(row))
     assert texts(store, MASTER_SEAT) == []
+    store.put_agent("sw", AgentRecord("sw-master-2", MASTER, MASTER, seat=MASTER_SEAT))
+    run(store, with_priorities(row))
+    assert len(texts(store, MASTER_SEAT)) == 1
 
 
 def open_followup(added_at, **fields):

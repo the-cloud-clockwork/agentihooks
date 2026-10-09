@@ -446,27 +446,27 @@ def _followups(mail, doc, events, ledger, now_ms):
 
 
 def _priorities(mail, doc):
+    key = mail.store.key(mail.slug, "priorities-sent")
+    rows = {p["item"]: p for p in doc.get("priorities", [])}
+    seen = mail.store.redis.smembers(key)
+    gone = seen - rows.keys()
+    if gone:
+        mail.store.redis.srem(key, *gone)
     if not mail.has_master:
         return []
-    key = mail.store.key(mail.slug, "priorities-sent")
-    rows = {p["item"]: p for p in doc.get("priorities", []) if not p.get("cleared")}
-    seen = mail.store.redis.hgetall(key)
-    gone = [item for item in seen if item not in rows]
-    if gone:
-        mail.store.redis.hdel(key, *gone)
-    first = mail.once("priorities:seeded", lambda: None)
+    seeding = mail.store.redis.set(mail.store.key(mail.slug, "priorities-seeded"), 1, nx=True)
     sent = []
     for item, row in rows.items():
-        if item in seen:
+        if item in seen or row["by"] == SENDER or not _by_agent(mail, row):
             continue
-        if not first and _by_agent(mail, row):
+        if not seeding:
             text = (
                 f"New priority on ledger {mail.slug} for {item}: {row['text']}\n"
                 "Triage it: resolve it if the call is yours, else leave it for the operator."
             )
             mail.inbox.send(SENDER, mail.master, text, ref=f"{mail.slug}:priority:{item}")
             sent.append(f"told {mail.master}: priority {item}")
-        mail.store.redis.hset(key, item, row["id"])
+        mail.store.redis.sadd(key, item)
     return sent
 
 
