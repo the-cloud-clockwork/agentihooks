@@ -162,11 +162,11 @@ def test_phase_pass_never_ticks_a_phase_to_plan_or_planning(store):
     assert phases.phase_pass(None, store, "sw", data, Ledger()) == [] and Ledger.ticked == []
 
 
-def node(address, depth):
-    return {"node": address, "kind": address.split("/")[0][:-1], "depth": depth}
+def node(address, depth, state="open"):
+    return {"node": address, "kind": address.split("/")[0][:-1], "depth": depth, "state": state}
 
 
-def test_phase_pass_reads_each_phase_s_tasks_from_the_ledger_hierarchy(store):
+def test_phase_pass_reads_each_phase_s_tasks_and_states_from_the_ledger_hierarchy(store):
     from scripts.swarm import phases
 
     class Inbox:
@@ -186,22 +186,15 @@ def test_phase_pass_reads_each_phase_s_tasks_from_the_ledger_hierarchy(store):
                 node("plans/a", 0),
                 node("phases/p1", 1),
                 node("slices/s1", 2),
-                node("tasks/t1", 3),
-                node("tasks/t2", 2),
+                node("tasks/t1", 3, "done"),
+                node("tasks/t2", 2, "done"),
+                node("tasks/t5", 2, "out_of_scope"),
                 node("phases/p2", 1),
                 node("tasks/t3", 2),
                 node("tasks/t4", 0),
             ]
 
-    data = doc(
-        [{"id": "p1", "title": "Build"}, {"id": "p2", "title": "Ship", "done": True}],
-        [
-            {"id": "t1", "phase": "p1", "state": "done"},
-            {"id": "t2", "phase": "p1", "state": "done"},
-            {"id": "t3", "phase": "p2", "state": "open"},
-            {"id": "t4", "phase": "p1", "state": "open"},
-        ],
-    )
+    data = doc([{"id": "p1", "title": "Build"}, {"id": "p2", "title": "Ship", "done": True}])
     assert phases.phase_pass(Inbox(), store, "sw", data, Ledger()) == ["phase p1 ticked", "phase p2 reopened"]
     assert Ledger.ticked == [("p1", True), ("p2", False)]
     assert Inbox.sent[0].endswith("all 2 tasks closed.") and Inbox.sent[1].endswith("reopened for t3.")

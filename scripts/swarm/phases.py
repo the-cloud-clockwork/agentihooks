@@ -10,18 +10,17 @@ REOPENED = "A task that is not done landed in this phase, so the swarm reopened 
 
 
 def phase_pass(inbox, store, slug, doc, ledger):
-    tasks = {t["id"]: t for t in doc.get("tasks", []) if not t.get("out_of_scope")}
     try:
         under = phase_tasks(ledger.hierarchy(slug))
     except OSError as exc:
-        # A ledger server not yet restarted onto the hierarchy resource answers 404; the next tick retries.
+        # A refused or unreachable hierarchy read (a server not yet restarted, an oversized reply) waits a tick.
         return [f"phase pass skipped, the hierarchy read failed: {exc}"]
     mail, actions = Mail(inbox, store, slug), []
     for phase in doc.get("phases", []):
-        mine = [tasks[tid] for tid in under.get(phase["id"], []) if tid in tasks]
+        mine = [(tid, state) for tid, state in under.get(phase["id"], []) if state != "out_of_scope"]
         if phase.get("out_of_scope") or not mine:
             continue
-        open_ids = [t["id"] for t in mine if t.get("state") != "done"]
+        open_ids = [tid for tid, state in mine if state != "done"]
         done = not open_ids
         if done == bool(phase.get("done")):
             continue
@@ -44,5 +43,5 @@ def phase_tasks(rows: list) -> dict:
             phase = (row["node"].removeprefix("phases/"), row["depth"])
             found[phase[0]] = []
         elif row["kind"] == "task" and phase is not None:
-            found[phase[0]].append(row["node"].removeprefix("tasks/"))
+            found[phase[0]].append((row["node"].removeprefix("tasks/"), row["state"]))
     return found

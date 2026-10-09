@@ -24,7 +24,7 @@ STATE = {
         {"id": "t4", "phase": "p1", "slice": "slices/s1", "state": "pr"},
         {"id": "t5", "phase": "p3", "state": "open"},
         {"id": "t6", "phase": "p4", "depends_on": ["t1"], "state": "open"},
-        {"id": "t7", "state": "open"},
+        {"id": "t7", "state": "open", "out_of_scope": True},
         {"id": "t8", "phase": "p2", "depends_on": ["t6"], "state": "done"},
     ],
     "_meta": {"rev": 1},
@@ -196,7 +196,7 @@ def test_tree_without_a_node_prints_the_whole_ledger(repo, monkeypatch, capsys):
     monkeypatch.setattr(ledger, "resource", lambda slug, path: routes.ledger_read(server(repo), slug, path, {})["data"])
     ledger.cmd_tree(SimpleNamespace(slug=SLUG, node=None))
     lines = capsys.readouterr().out.splitlines()
-    assert lines[0] == "plans/a  open" and lines[-1] == "tasks/t7  open" and len(lines) == 16
+    assert lines[0] == "plans/a  open" and lines[-1] == "tasks/t7  out_of_scope" and len(lines) == 16
 
 
 def test_tree_reads_without_a_member_name():

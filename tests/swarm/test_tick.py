@@ -38,9 +38,14 @@ class FakeLedger:
             row
             for phase in getattr(self, "phases", [])
             for row in [
-                {"node": f"phases/{phase['id']}", "kind": "phase", "depth": 0},
+                {"node": f"phases/{phase['id']}", "kind": "phase", "depth": 0, "state": "open"},
                 *(
-                    {"node": f"tasks/{t['id']}", "kind": "task", "depth": 1}
+                    {
+                        "node": f"tasks/{t['id']}",
+                        "kind": "task",
+                        "depth": 1,
+                        "state": "out_of_scope" if t.get("out_of_scope") else t["state"],
+                    }
                     for t in tasks
                     if t.get("phase") == phase["id"]
                 ),

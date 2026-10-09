@@ -200,4 +200,6 @@ def node_state(kind: str, item: dict, doc: dict) -> str:
 
     if kind == "phase":
         return lifecycle(item, doc)
+    if item.get("out_of_scope"):
+        return "out_of_scope"
     return item.get("state") or ("done" if item.get("done") else "open")
