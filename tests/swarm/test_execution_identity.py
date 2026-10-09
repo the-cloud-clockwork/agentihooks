@@ -424,10 +424,27 @@ def test_agent_projection_is_compatible_with_the_preceding_strict_reader(store, 
     assert store.agents("fixture") == [current]
 
 
+def test_hive_ownership_survives_execution_updates_without_changing_the_legacy_projection(store, agent):
+    current = store.start_execution("fixture", replace(agent, hive="member-one"))
+    assert store.agents("fixture")[0].hive == "member-one"
+    assert "hive" not in json.loads(store.redis.hget(store.key("fixture", "agents"), current.name))
+    store.put_agent("fixture", replace(current, idle_ticks=2))
+    assert store.agents("fixture")[0].hive == "member-one"
+
+
+def test_execution_records_saved_before_hive_ownership_load_with_an_empty_hive(store, agent):
+    current = store.start_execution("fixture", agent)
+    raw = json.loads(store.redis.hget(store.key("fixture", "executions"), current.execution_id))
+    raw.pop("hive")
+    store.redis.hset(store.key("fixture", "executions"), current.execution_id, json.dumps(raw))
+    assert store.agents("fixture")[0].hive == ""
+
+
 @pytest.mark.parametrize(
     "changes",
     [
         {"execution_id": "exe-unadmitted"},
+        {"hive": "member-one"},
         {"generation": 1},
         {"runtime_target": {"pid": 1}},
         {"runtime_backend": "unsupported"},
