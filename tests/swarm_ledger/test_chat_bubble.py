@@ -51,5 +51,5 @@ assert.equal(unreadCount([], 0), 0);
         self.assertRegex(page, r"\.notif-text:hover[^{]*\{[^}]*background")
         self.assertRegex(
             page,
-            r'(?s)class: "notif-text".{0,240}?on: \{ click: \(ev\) => \{ if \(!getSelection\(\)\.toString\(\)\) jumpToNotice\(ev, n\.item\)',
+            r'(?s)class: "notif-text".{0,240}?on: \{ click: \(ev\) => \{ if \(n\.item && !getSelection\(\)\.toString\(\)\) jumpToNotice\(ev, n\.item\)',
         )

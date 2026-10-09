@@ -93,7 +93,7 @@ def test_the_controller_writes_and_reads_a_remote_ledger_as_the_service(live, co
         client.followup(SLUG, "Controller follow up")
         assert isinstance(client.tasks(SLUG), list)
         state = client.state(SLUG)
-    assert any(entry.get("text") == "Controller hello" for entry in state["chat"])
+    assert any(entry.get("text") == "Controller hello" for entry in state["notifications"])
     assert any(item.get("text") == "Controller follow up" for item in state["followups"])
 
 

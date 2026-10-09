@@ -17,7 +17,7 @@ agentihooks swarm <id> set eng-agent=claude|codex|auto eng-model=M eng-effort=E 
 agentihooks swarm <id> set effort-min=E effort-max=E               every lane launch effort stays in this range (default medium, high)
 agentihooks swarm <id> set master-agent=claude|codex              master affinity; a change orders the live master to hand off to that harness
 agentihooks swarm <id> save-template NAME                         write this swarm's lanes, caps and compact limit as a template
-agentihooks swarm <id> send-message TEXT                          operator message to the swarm chat
+agentihooks swarm <id> send-message TEXT                          message to every live agent's inbox
 agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]     master or operator judges a health finding
 agentihooks swarm <id> lift AGENT GATE                            operator or master lets one agent past a gate for one hour
 agentihooks swarm <id> learned                                    list every seat's learned notes with seat and number
@@ -825,8 +825,8 @@ def cmd_lift(store, args):
 
 def cmd_send_message(store, args):
     store.config(args.slug)
-    LedgerClient().say(args.slug, args.text)
-    print(json.dumps({"posted": True}))
+    sender = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME") or delivery.OPERATOR
+    print(json.dumps({"sent": delivery.send(store, args.slug, args.text, sender=sender, to="all")}))
 
 
 def _me(store, args):
@@ -1258,11 +1258,12 @@ def _retire(store, slug, agent, exit_text):
 
 def cmd_say(store, args):
     agent = _me(store, args)
-    text = f"@{args.to} {args.text}" if args.to in ("eng", "ci") else args.text
-    if args.to:
-        delivery.send(store, args.slug, args.text, sender=agent.name, to=args.to, fyi=args.fyi)
-    LedgerClient().say(args.slug, text, by=agent.name)
-    print(json.dumps({"posted": True}))
+    if args.to in ("", delivery.OPERATOR):
+        LedgerClient().say(args.slug, args.text, by=agent.name)
+        print(json.dumps({"posted": True}))
+        return
+    sent = delivery.send(store, args.slug, args.text, sender=agent.name, to=args.to, fyi=args.fyi)
+    print(json.dumps({"sent": sent}))
 
 
 def build_parser():

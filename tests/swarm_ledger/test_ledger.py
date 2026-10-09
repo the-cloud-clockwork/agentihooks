@@ -1,4 +1,5 @@
 import json
+import re
 
 import pytest
 
@@ -145,7 +146,7 @@ def test_a_refused_artifact_without_a_reason_says_to_join_and_name_a_task(cli):
 @pytest.mark.parametrize(
     ("argv", "entry"),
     [
-        (["say", " Hi "], {"op": "add", "thread": "chat", "text": "Hi", "by": "eng-1"}),
+        (["say", " Hi "], {"op": "add", "thread": "chat", "text": "Hi", "by": "eng-1", "to": "operator"}),
         (["comment", "tasks/t1", "Hi"], {"op": "add", "thread": "tasks/t1/comments", "text": "Hi", "by": "eng-1"}),
         (["edit", "chat", "m1", "Hi"], {"op": "edit", "thread": "chat", "id": "m1", "text": "Hi", "by": "eng-1"}),
     ],
@@ -154,6 +155,11 @@ def test_text_commands_send_their_entry(cli, capsys, argv, entry):
     (sent,) = cli(argv, applied)
     assert {key: sent[key] for key in entry} == entry
     assert capsys.readouterr().out
+
+
+def test_say_names_its_line_with_ten_hex_digits(cli):
+    (sent,) = cli(["say", "Hi"], applied)
+    assert re.fullmatch(r"m-[0-9a-f]{10}", sent["id"])
 
 
 @pytest.mark.parametrize("argv", [["say", "Hi"], ["comment", "tasks/t1", "Hi"]], ids=" ".join)
