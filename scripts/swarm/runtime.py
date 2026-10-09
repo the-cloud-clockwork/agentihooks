@@ -520,9 +520,14 @@ class HerdrRuntime:
             picked = _lane_default(lane, agent, {} if quota_transfer else chosen)
         picked = replace(picked, effort=saved["effort"]) if saved else picked
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
-        route = ["--route", saved["account"]] if saved.get("account") else []
+        route_kind = saved.get("route_kind", task.get("route_kind", "subscription"))
+        route = (
+            ["--route", "interactive"]
+            if route_kind == "interactive"
+            else (["--route", saved["account"]] if saved.get("account") else [])
+        )
         account = None
-        if hasattr(self, "_quota_accounts"):
+        if hasattr(self, "_quota_accounts") and route_kind != "interactive":
             account = self._quota_account(agent, saved.get("account") or self._planned_account(task["id"], agent), None)
             route = ["--route", account.name]
         placed = timing.call(
@@ -555,6 +560,7 @@ class HerdrRuntime:
             profile_decision={**decision.record(), **placed.profile_decision},
             choice=agent_choice.choice_kind(reason),
             overlays=list(decision.overlays),
+            route_kind="api" if placed.account == "api" else route_kind,
         )
 
     def resume(self, config, agent, text):
@@ -579,7 +585,11 @@ class HerdrRuntime:
             agent.effort or defaults.effort,
             source=agent.model_source or ("recorded" if agent.model else defaults.source),
         )
-        route = ["--route", agent.account] if agent.account else []
+        route = (
+            ["--route", "interactive"]
+            if agent.route_kind == "interactive"
+            else (["--route", agent.account] if agent.account else [])
+        )
         model = _model_args(
             agent.harness,
             picked.__dict__,
@@ -602,6 +612,7 @@ class HerdrRuntime:
             model_source=picked.source,
             profile_decision={**agent.profile_decision, **placed.profile_decision},
             overlays=agent.overlays,
+            route_kind=agent.route_kind,
         )
 
     def operator(self, config, name, profile, text):

@@ -88,6 +88,7 @@ class AgentSpec:
     channel: bool = False
     overlays: tuple = ()
     bundle_revision: str = ""
+    auth: str = ""
 
 
 SPAWN = "AGENTIHOOKS_SWARM_SPAWN"
@@ -253,6 +254,7 @@ def _agent_command(
         command = [
             agentihooks_bin,
             "codex",
+            *(["--route", spec.auth] if spec.auth else []),
             "--agentihooks-report",
             str(report),
             *(["resume", spec.resume] if spec.resume else []),
@@ -265,6 +267,7 @@ def _agent_command(
     command = [
         agentihooks_bin,
         "claude",
+        *(["--route", spec.auth] if spec.auth else []),
         *(["--agentihooks-exclude", spec.exclude] if spec.exclude else []),
         *(["--agentihooks-fallback-bare"] if spec.fallback_bare else []),
         "--agentihooks-report",
@@ -521,6 +524,7 @@ def _parser() -> argparse.ArgumentParser:
         default="",
         help=AGENT_HELP,
     )
+    parser.add_argument("--auth", choices=("interactive",), default="", help="Use the declared interactive login")
     parser.add_argument("--profile", default="", help="Role profile for this run")
     parser.add_argument(
         "--overlay", action="append", default=[], help="Overlay the profile wears; repeat for up to three"
@@ -598,7 +602,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         agent, reason = (
             (_handoff_agent(args.agent, active_env, claude_args), "handoff")
             if args.handoff
-            else agent_choice.choose(args.agent, active_env)
+            else ((args.agent or "claude", "interactive") if args.auth else agent_choice.choose(args.agent, active_env))
         )
         agent = agent or "claude"
         if args.handoff:
@@ -630,6 +634,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
                 channel=channel,
                 overlays=tuple(args.overlay),
                 bundle_revision=args.bundle_revision,
+                auth=args.auth,
             ),
         )
         host, explicit = _select_host(args.host, active_env)
