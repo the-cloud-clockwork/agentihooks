@@ -1066,17 +1066,22 @@ def block_agent(store, slug, agent, note, ledger):
 def cmd_trace_plan(store, args):
     agent = _worker(store, args)
     ledger = LedgerClient()
-    state = trace_plan.intent(ledger.state(args.slug), agent.task)
+    doc = ledger.state(args.slug)
+    state = trace_plan.intent(doc, agent.task)
     who = Who(name=agent.name, swarm=args.slug, task=agent.task)
     folder = ledger_workspace.folder(args.slug, agent.task)
-    mode = modes.configured(trace_plan.GATE, store.config(args.slug).gates)
+    config = store.config(args.slug)
+    mode = modes.configured(trace_plan.GATE, config.gates)
     try:
         record, block = trace_plan.run(folder, state, ledger, who, mode)
     except ValueError as exc:
         raise SwarmError(str(exc)) from exc
     if block:
         block_agent(store, args.slug, agent, trace_plan.block_note(record), ledger)
-    print(json.dumps(trace_plan.report(agent.task, record, block)))
+    checked = None
+    if record["verdict"] != trace_plan.FAIL:
+        checked = intent.plan_check(args.slug, doc, agent.task, record, intent.mode_of(config), now_ms())
+    print(json.dumps({**trace_plan.report(agent.task, record, block), "intent": checked}))
 
 
 def cmd_wait_inbox(store, args, agent):

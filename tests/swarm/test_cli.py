@@ -3,7 +3,9 @@ import subprocess
 
 import pytest
 
+from scripts.gates import intent
 from scripts.gates import log as gate_log
+from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli, runtime, timer
 from scripts.swarm.health import checks
@@ -1974,6 +1976,7 @@ def _traced(env, monkeypatch, tmp_path, plan, *p_yes):
     asked["size"] = Answer(type="score", score=1.0, confidence=0.9)
     seen = []
     monkeypatch.setattr(trace_plan, "decide", lambda state, q, **k: seen.append(state) or DecisionResult(asked, "m"))
+    monkeypatch.setattr(intent, "judge", lambda state: seen.append(state) or ("pass", "the phase can use it"))
     folder = tmp_path / "_home" / ".agentihooks" / "swarm" / "sw" / "tasks" / "t1"
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "plan.md").write_text(plan)
@@ -1995,6 +1998,40 @@ def test_trace_plan_traces_the_callers_task_and_files_cut_pieces(env, capsys, mo
     assert ledger.followups == [("sw", "Cut from the plan of task t1: a generator")]
     assert json.loads((folder / "plan-verdict.json").read_text())["verdict"] == "pass"
     assert ledger.rows["t1"]["state"] != "blocked"
+
+
+def test_trace_plan_judges_intent_on_the_kept_pieces_before_the_pull_request_opens(env, capsys, monkeypatch, tmp_path):
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    plan = "- walls | doghouse | it shelters the dog\n- a generator | power | it powers a light\n"
+    _, seen = _traced(env, monkeypatch, tmp_path, plan, 0.9, 0.1)
+    monkeypatch.setattr(cli, "now_ms", lambda: 4242)
+    capsys.readouterr()
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "trace-plan") == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["intent"] == {"verdict": "pass", "reason": "the phase can use it"}
+    assert seen[1]["pull_request_body"] == "- walls | doghouse | it shelters the dog\n"
+    assert [Verdicts("sw", "intent").read("t1")[k] for k in ("verdict", "at")] == ["pass", 4242]
+
+
+def test_trace_plan_judges_no_intent_with_the_intent_gate_off(env, capsys, monkeypatch, tmp_path):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    store.update("sw", gates={"intent": "off"})
+    _, seen = _traced(env, monkeypatch, tmp_path, "- walls | doghouse | it shelters the dog\n", 0.9)
+    capsys.readouterr()
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "trace-plan") == 0
+    assert (json.loads(capsys.readouterr().out)["intent"], len(seen)) == (None, 1)
+
+
+def test_trace_plan_judges_no_intent_for_a_failed_plan(env, capsys, monkeypatch, tmp_path):
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    _, seen = _traced(env, monkeypatch, tmp_path, "- a generator | power | it powers a light\n", 0.1)
+    capsys.readouterr()
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "trace-plan") == 0
+    assert (json.loads(capsys.readouterr().out)["intent"], len(seen)) == (None, 1)
 
 
 def test_trace_plan_blocks_the_task_on_the_second_failed_plan_when_enforced(env, capsys, monkeypatch, tmp_path):
