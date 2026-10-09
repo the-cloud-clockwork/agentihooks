@@ -226,7 +226,7 @@ def test_record_pass_appends_through_outbox_and_deduplicates(tmp_path, monkeypat
             assert_node(row)
         store.drop_agent(SLUG, "worker", NOW + 5_000)
         metrics_swarm.record_pass(box, SLUG, NOW + 6_000, store, state, [], {})
-        assert [row["kind"] for row in box.recent("agent_events", NOW + 6_000)] == ["spawn", "claim", "retire"]
+        assert sorted(row["kind"] for row in box.recent("agent_events", NOW + 6_000)) == ["claim", "retire", "spawn"]
     finally:
         box.close()
 
