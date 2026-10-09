@@ -164,9 +164,15 @@ def test_the_pinned_checksum_tracks_the_scanner_version():
     assert env["SONAR_SCANNER_SHA256"] == "da9f4e64a3d555f08ce38b5469ebd91fe2b311af473f7001a5ee5c1fd58b004b"
 
 
-def test_the_node_runtime_is_restored_with_the_sonar_downloads():
-    cache = _step("Restore Sonar downloads")
-    assert "~/.sonar/js/node-runtime" in cache["with"]["path"].splitlines()
+def test_the_node_runtime_has_its_own_cache_so_the_downloads_entry_keeps_its_version():
+    names = [step.get("name") for step in _sonar()["steps"]]
+    node = _step("Restore the SonarJS Node runtime")
+    assert node["uses"] == "actions/cache@v4"
+    assert node["with"]["path"] == "~/.sonar/js/node-runtime"
+    assert "${{ steps.proxy.outputs.version }}" in node["with"]["key"]
+    assert "if" not in node
+    assert names.index("Restore the SonarJS Node runtime") < names.index("SonarQube Scan")
+    assert "node-runtime" not in _step("Restore Sonar downloads")["with"]["path"]
 
 
 def _merge_tree(tmp_path, combine_body):
