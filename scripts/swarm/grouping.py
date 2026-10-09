@@ -156,10 +156,10 @@ def _apply(slug, ledger, mail, group):
 
 def _propose(slug, ledger, mail, group):
     lead, members = group[0]["id"], [t["id"] for t in group[1:]]
-    text = ASK.format(lead=lead, members=", ".join(members), slug=slug, members_args=" ".join(members))
-    mail.send(f"group-proposed:{key(group)}", mail.master, text)
     if ledger.priority(slug, f"tasks/{lead}", PROPOSE.format(n=len(group))) is False:
         raise LedgerRefused(f"the proposal under task {lead} was dropped")
+    text = ASK.format(lead=lead, members=", ".join(members), slug=slug, members_args=" ".join(members))
+    mail.send(f"group-proposed:{key(group)}", mail.master, text)
     return [f"proposed grouping tasks {', '.join(members)} under {lead}"]
 
 

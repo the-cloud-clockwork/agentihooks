@@ -325,6 +325,7 @@ def test_a_dropped_proposal_is_recorded_as_refused(asked, store):
     actions = grouping.group_pass("sw", config, store, ledger, doc(task("a"), task("b")))
     assert actions == ["skipped grouping under task a: the ledger refused its write"]
     assert store.redis.hget(store.key("sw", grouping.SEEN), "a,b") == "refused"
+    assert InboxStore(store.redis).inbox(seat_address("sw", MASTER)) == []
 
 
 def test_nothing_to_group_asks_nothing(asked, store):
