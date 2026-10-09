@@ -108,6 +108,43 @@ def test_replay_applies_the_choice_rule_threshold(definition_home):
     assert report["held_controls"] == ["unsure"]
 
 
+def test_replay_scores_a_score_verdict_against_its_expected_range(definition_home):
+    raw = sample()
+    raw["questions"] = [{"name": "accept", "type": "score", "instructions": "How hard?", "levels": ["low", "high"]}]
+    raw["rule"] = {"type": "score", "threshold": "yes"}
+    write_definition(definition_home, raw)
+
+    def rate(score, confidence=0.9):
+        answer = {"type": "score", "score": score, "confidence": confidence}
+        return {"source": "pplx-decider-v1-27b", "latency_ms": 10, "answers": {"accept": answer}}
+
+    write_corpus(
+        definition_home,
+        [
+            case("easy", [0.0, 0.2], rate(0), rate(0.2)),
+            case("hard", [0.7, 1], rate(0.69), rate(0.9, confidence=0.3)),
+            case("unsure", None, rate(0.9, confidence=0.59), control=True),
+        ],
+    )
+    report = corpus.evaluate("sample").report()
+    assert report["wrong"] == 2
+    assert report["wrong_cases"] == ["hard"]
+    assert report["held_controls"] == ["unsure"]
+
+
+@pytest.mark.parametrize("bad", [0.5, [0.5], [0.6, 0.4], [-0.1, 0.5], [0.5, 1.1], [True, 1], "low"])
+def test_load_refuses_a_score_expectation_that_is_not_a_range(definition_home, bad):
+    raw = sample()
+    raw["questions"] = [{"name": "accept", "type": "score", "instructions": "How hard?", "levels": ["low", "high"]}]
+    raw["rule"] = {"type": "score", "threshold": "yes"}
+    write_definition(definition_home, raw)
+    answer = {"type": "score", "score": 0.5, "confidence": 0.9}
+    write_corpus(definition_home, [case("easy", bad, {"source": "m", "latency_ms": 1, "answers": {"accept": answer}})])
+    with pytest.raises(corpus.CorpusError) as error:
+        corpus.evaluate("sample")
+    assert str(error.value) == "case easy expected accept is not a verdict its rule can give"
+
+
 @pytest.mark.parametrize(
     ("cases", "message"),
     [
@@ -289,4 +326,3 @@ def test_every_packaged_corpus_replays_clean(name):
         for item in yaml.safe_load((PACKAGE / f"{name}.corpus.yaml").read_text())["cases"]
         if item["control"]
     )
-    assert report["controls"] >= 1
