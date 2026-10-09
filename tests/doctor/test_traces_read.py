@@ -315,8 +315,8 @@ LOCAL = {
 
 
 class Project:
-    def __init__(self, name, traces=()):
-        self.name, self.traces = name, list(traces)
+    def __init__(self, name, traces=(), listed=True):
+        self.name, self.traces, self.listed = name, list(traces), listed
 
     def __call__(self, path, params):
         if path == "projects":
@@ -326,7 +326,7 @@ class Project:
             return {"data": [{"id": "p", "name": self.name}]}
         if path == "traces":
             tags = params["tags"] if isinstance(params["tags"], list) else [params["tags"]]
-            rows = [t for t in self.traces if set(tags) <= set(t["tags"])]
+            rows = [t for t in self.traces if set(tags) <= set(t["tags"])] if self.listed or len(tags) > 1 else []
             return _page(rows if params["page"] == 1 else [], params["page"], 1)
         return _page([], params["page"], 1)
 
@@ -350,7 +350,7 @@ def test_an_empty_project_while_exporters_report_accepted_observations_is_a_read
     data = traces_read.record("s", HISTORICAL, WORKING, 10**9, Project("antoncore"), home=tmp_path)
     assert data["reader"]["failures"] == [
         "Langfuse project antoncore holds no trace tagged swarm:s while the exporters of s-eng-1, s-ci-1 "
-        "report accepted observations: the reader's keys belong to another project"
+        "report accepted exports: the reader's keys may belong to another project"
     ]
     assert [b["read"] for b in data["active"]] == [False, False]
     assert data["reader"]["active"] == {"bindings": 2, "read": 0}
@@ -363,7 +363,9 @@ def test_an_unreadable_project_name_still_names_the_empty_read(tmp_path, monkeyp
 
     monkeypatch.setattr(registry, "progress", lambda session_id, harness: dict(LOCAL))
     data = traces_read.record("s", [], WORKING[:1], 10**9, Project(None), home=tmp_path)
-    assert data["reader"]["failures"][0].startswith("Langfuse project unknown holds no trace tagged swarm:s")
+    assert data["reader"]["failures"][0].startswith(
+        "Langfuse project unknown (ConnectionError) holds no trace tagged swarm:s"
+    )
 
 
 def test_an_empty_project_with_no_accepted_observations_is_judged_as_read(tmp_path, monkeypatch):
@@ -400,3 +402,27 @@ def test_working_agents_without_traces_in_a_project_that_holds_the_swarm_stay_mi
         "s-ci-1.5.unattributed",
         "s-eng-1.5.unattributed",
     ]
+
+
+def test_a_failed_listing_with_accepted_exports_is_one_listing_failure(tmp_path, monkeypatch):
+    from scripts.doctor import registry
+
+    monkeypatch.setattr(registry, "progress", lambda session_id, harness: dict(LOCAL))
+
+    def listing_down(path, params):
+        if path == "traces" and isinstance(params["tags"], str):
+            raise ConnectionError("refused")
+        return Project("antoncore")(path, params)
+
+    data = traces_read.record("s", [], WORKING[:1], 10**9, listing_down, home=tmp_path)
+    assert data["reader"]["failures"] == ["trace listing failed: ConnectionError: refused"]
+
+
+def test_a_binding_trace_missing_from_an_empty_listing_is_not_an_empty_project(tmp_path, monkeypatch):
+    from scripts.doctor import registry
+
+    monkeypatch.setattr(registry, "progress", lambda session_id, harness: dict(LOCAL))
+    project = Project("agent-swarm", [_tagged("s-eng-1", "c1")], listed=False)
+    data = traces_read.record("s", [], WORKING[:1], 10**9, project, home=tmp_path)
+    assert data["reader"]["failures"] == []
+    assert data["active"][0]["read"] is True
