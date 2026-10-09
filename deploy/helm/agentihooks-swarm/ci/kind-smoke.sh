@@ -23,6 +23,14 @@ finish() {
 
 helm lint --strict "$chart"
 helm lint --strict "$chart" -f "$chart/ci/kind-values.yaml"
+digest="sha256:$(printf 'a%.0s' $(seq 64))"
+helm template "$release" "$chart" --set image.tag="dev@$digest" >/dev/null
+for tag in "$digest" "@$digest" "$(printf 'b%.0s' $(seq 40))"; do
+  if helm template "$release" "$chart" --set image.tag="$tag" >/dev/null 2>&1; then
+    printf 'the chart rendered image.tag %s, which is not a floating tag\n' "$tag" >&2
+    exit 1
+  fi
+done
 docker build -q -t "$image" . >/dev/null
 trap finish EXIT
 kind create cluster --name "$cluster" --wait 120s
