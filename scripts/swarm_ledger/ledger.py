@@ -314,6 +314,11 @@ def cmd_show(args):
     print(SHOW_JSON(call(args.slug)))
 
 
+def cmd_tree(args):
+    for row in resource(args.slug, f"hierarchy/subtree/{args.node}" if args.node else "hierarchy"):
+        print(f"{'  ' * row['depth']}{row['node']}  {row['state']}")
+
+
 def cmd_status(args):
     state = call(args.slug)
     print(
@@ -792,6 +797,9 @@ def build_parser():
     delete.add_argument("entries", nargs="+")
     sub.add_parser("audit")
     sub.add_parser("show")
+    sub.add_parser("tree", help="print a plan, phase, slice or task and everything under it, with states").add_argument(
+        "node", nargs="?", help="plans/<id>, phases/<id>, slices/<id> or tasks/<id>; default the whole ledger"
+    )
     priority = sub.add_parser("priority")
     priority.add_argument("action", choices=["add", "clear"])
     priority.add_argument("values", nargs="*")
@@ -860,7 +868,7 @@ def main():
     if text := refusal(args.name, Who.from_env()):
         sys.exit(f"agentihooks ledger: {text}")
     args.name = resolve_name(args.name) if args.name else args.name
-    if not args.slug or not (args.name or args.command in ("url", "show")):
+    if not args.slug or not (args.name or args.command in ("url", "show", "tree")):
         sys.exit("--slug and --as are required")
     globals()[f"cmd_{args.command.replace('-', '_')}"](args)
 
