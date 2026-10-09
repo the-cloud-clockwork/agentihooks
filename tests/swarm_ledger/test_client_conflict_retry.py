@@ -112,6 +112,16 @@ def test_a_retry_reuses_the_operation_id_so_an_applied_write_is_not_duplicated(l
     assert [row["id"] for row in client.collection(SLUG, "chat")].count("retry-once") == 1
 
 
+TITLES = [
+    "Apple river stone",
+    "Maple tiger orange",
+    "Violet harbor candle",
+    "Meadow falcon copper",
+    "Silver garden willow",
+    "Lantern compass thunder",
+]
+
+
 class Crowded(api_client.ResourceClient):
     def __init__(self, base, credentials, barrier, conflicts):
         super().__init__(base, credentials)
@@ -134,7 +144,7 @@ def test_a_burst_of_writers_reading_one_revision_all_land(live):  # noqa: F811
     from tests.swarm_ledger.test_ledger_authority import ledger
 
     writers, conflicts, results = api_client.RETRIES + 1, [], {}
-    barrier = threading.Barrier(writers)
+    barrier = threading.Barrier(writers, timeout=30)
 
     def add(n):
         client = Crowded(ledger.BASE, ledger.credentials(SLUG, service=True), barrier, conflicts)
@@ -150,13 +160,3 @@ def test_a_burst_of_writers_reading_one_revision_all_land(live):  # noqa: F811
     assert conflicts.count(409) >= writers - 1
     client = api_client.ResourceClient(ledger.BASE, ledger.credentials(SLUG, service=True))
     assert {f"b{n}" for n in range(writers)} <= {row["id"] for row in client.collection(SLUG, "tasks")}
-
-
-TITLES = [
-    "Apple river stone",
-    "Maple tiger orange",
-    "Violet harbor candle",
-    "Meadow falcon copper",
-    "Silver garden willow",
-    "Lantern compass thunder",
-]
