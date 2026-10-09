@@ -148,7 +148,7 @@ def test_local_and_remote_sessions_sharing_a_pid_coexist_in_one_registry(world, 
     assert world.fleet.fleet_registry_stale_records() == 1
 
 
-def test_a_pid_reused_with_another_start_time_exits_only_the_record_of_that_machine(world):
+def test_a_pid_reused_with_another_start_time_suspects_only_the_record_of_that_machine(world):
     world.two_machines()
 
     assert world.fleet.observe(scope("anton"), {PID: process(222)}) == 1
