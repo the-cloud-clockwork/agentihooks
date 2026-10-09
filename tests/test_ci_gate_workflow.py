@@ -45,6 +45,16 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
         assert jobs["swarm-image"]["uses"] == "./.github/workflows/swarm-smoke.yml"
 
 
+def test_post_shard_graders_do_not_wait_on_each_other_and_the_gate_needs_each():
+    jobs = _workflow()["jobs"]
+    graders = {"shard-check", "coverage-ratchet", "sonar"}
+    for name in graders:
+        needs = jobs[name]["needs"]
+        assert "unit" in needs
+        assert not graders & set(needs), f"{name} waits on another post shard grader"
+    assert graders <= set(jobs["gate-required"]["needs"])
+
+
 def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel():
     job = _workflow()["jobs"]["semgrep"]
     assert "needs" not in job
