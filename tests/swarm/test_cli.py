@@ -2169,12 +2169,21 @@ def test_set_stores_the_scaling_settings_and_reports_them(env, capsys):
     assert store.config("sw").scaling == "auto"
 
 
-@pytest.mark.parametrize("pair", ["load-low=3", "load-high=x", "memory-per-agent=-1", "scaling=sometimes"])
-def test_set_refuses_bad_scaling_settings(env, pair):
+@pytest.mark.parametrize(
+    ("pair", "reason"),
+    [
+        ("load-low=3", "load low must be above 0 and at most load high, and load high at most 10"),
+        ("load-high=x", "load-high takes a number, the one minute load per CPU"),
+        ("memory-per-agent=-1", "memory-per-agent takes a whole number of MB"),
+        ("scaling=sometimes", "scaling must be one of auto, manual"),
+    ],
+)
+def test_set_refuses_bad_scaling_settings(env, capsys, pair, reason):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
     before = store.config("sw")
     assert run("sw", "set", pair) == 1
+    assert capsys.readouterr().err.strip() == f"swarm: {reason}"
     assert store.config("sw") == before
 
 

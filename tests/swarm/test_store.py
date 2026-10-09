@@ -265,3 +265,17 @@ def test_create_refuses_memory_that_cannot_round_trip(store, memory):
         store.create(config(memory_per_agent_mb=memory))
     assert store.redis.hgetall(store.key("smoke", "config")) == {}
     assert store.slugs() == []
+
+
+def test_scaling_boundaries_round_trip_and_manual_preserves_lane_caps(store):
+    store.create(config())
+    stored = store.update("smoke", scaling="manual", load_low=10.0, load_high=10.0, memory_per_agent_mb=1)
+    assert store.config("smoke") == stored
+    assert (stored.max_eng, stored.max_ci, stored.max_plan) == (2, 1, 1)
+
+
+def test_scaling_update_explains_the_allowed_modes(store):
+    store.create(config())
+    with pytest.raises(SwarmError) as caught:
+        store.update("smoke", scaling="sometimes")
+    assert str(caught.value) == "scaling must be one of auto, manual"
