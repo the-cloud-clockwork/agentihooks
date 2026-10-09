@@ -1,8 +1,11 @@
+import os
+import signal
+from contextlib import contextmanager
 from dataclasses import replace
 
 import pytest
 
-from hooks.proc import Process
+from hooks.proc import Process, processes
 from scripts.swarm import reaper
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
@@ -38,6 +41,26 @@ def record(namespace=ANTON, pid=PID, start=STARTED, execution="exe-1"):
         generation=1 if execution else 0,
         runtime_target={k: v for k, v in runtime_target.items() if v is not None},
     )
+
+
+def children():
+    return {pid for pid, row in processes().items() if row.ppid == os.getpid()}
+
+
+@contextmanager
+def bounded(what, seconds=30):
+    def expired(signum, frame):
+        pytest.fail(f"{what} did not finish within {seconds} seconds", pytrace=False)
+
+    before = children()
+    previous = signal.signal(signal.SIGALRM, expired)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+    assert children() <= before, f"{what} left child processes running"
 
 
 def test_the_local_namespace_is_the_boot_id_and_the_pid_namespace_link(tmp_path):
@@ -197,13 +220,34 @@ def test_anton_and_a_remote_worker_sharing_pid_4321_are_each_ended_only_by_their
 def test_a_qualified_execution_started_by_the_store_terminates_through_the_router(tmp_path, monkeypatch):
     import fakeredis
 
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
-    seed = replace(record(execution=""), name=store.next_name("sw", "eng"), seat="eng-1@sw")
-    started = store.start_execution("sw", seed)
-    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
-    assert RuntimeRouter([local]).terminate(store.execution("sw", started.execution_id)).ok
-    assert ended == [(started.name, PID, (), STARTED)]
+    with bounded("the store started execution terminate"):
+        store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+        store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
+        seed = replace(record(execution=""), name=store.next_name("sw", "eng"), seat="eng-1@sw")
+        started = store.start_execution("sw", seed)
+        local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+        assert RuntimeRouter([local]).terminate(store.execution("sw", started.execution_id)).ok
+        assert ended == [(started.name, PID, (), STARTED)]
+
+
+def test_a_store_call_blocked_on_its_server_fails_within_its_bound_and_names_the_wait():
+    import fakeredis
+
+    server = fakeredis.FakeServer()
+    store = RedisStore(fakeredis.FakeRedis(server=server, decode_responses=True))
+    with server.lock, pytest.raises(pytest.fail.Exception, match="^store admission did not finish within 0.5 seconds$"):
+        with bounded("store admission", 0.5):
+            store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
+
+
+def test_the_bound_refuses_a_child_process_that_outlives_the_test():
+    import subprocess
+
+    with pytest.raises(AssertionError, match="a sleeper left child processes running"):
+        with bounded("a sleeper"):
+            child = subprocess.Popen(["sleep", "30"])
+    child.kill()
+    child.wait()
 
 
 def test_the_routed_runtime_reports_why_the_router_refused(tmp_path, monkeypatch):
