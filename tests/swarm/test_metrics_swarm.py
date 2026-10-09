@@ -112,7 +112,9 @@ def test_gate_denies_idle_and_reruns_keep_observed_time():
         ("gate_deny", NOW + 1, "outside scope"),
         ("idle", NOW + 2, "idle tick 1"),
     ]
+    assert [row["finding_kind"] for row in agent] == ["", ""]
     assert [(row["kind"], row["ts_ms"]) for row in delivery] == [("rerun", NOW + 3)]
+    assert "finding_kind" not in delivery[0]
 
 
 def test_handoff_and_health_finding_have_stable_source_ids():
