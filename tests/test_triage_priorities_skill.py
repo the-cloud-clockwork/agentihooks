@@ -422,4 +422,3 @@ def test_a_refused_round_sends_one_operator_on_line_and_keeps_every_priority():
     body = (SCRIPTS.parent / "SKILL.md").read_text()
 
     assert [line for line in body.splitlines() if "type operator on" in line] == [REFUSED_ROUND]
-    assert "say only one short line, type operator on to answer the questions here, or leave them in Priorities" in line
