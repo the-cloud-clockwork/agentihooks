@@ -26,6 +26,7 @@ from scripts.swarm import (
     ci_speed,
     claim_order,
     control_notifications,
+    dev_red,
     difficulty,
     grouping,
     launch_check,
@@ -165,6 +166,7 @@ def tick(slug, store, ledger, runtime, now_ms):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
     actions += skip_refused(_orphans, slug, store, ledger, rows)
+    actions += skip_refused(dev_red.reopen_pass, slug, config, store, ledger, rows)
     actions += skip_refused(difficulty.size_pass, slug, ledger, doc)
     actions += skip_refused(grouping.release_pass, slug, store, ledger, doc)
     actions += skip_refused(grouping.group_pass, slug, config, store, ledger, doc)
