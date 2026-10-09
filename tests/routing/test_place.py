@@ -205,6 +205,18 @@ def test_a_malformed_redis_url_is_a_settings_error(monkeypatch, tmp_path):
     assert str(raised.value) == "routing settings are unreadable: ValueError"
 
 
+def test_api_side_asks_the_source_at_the_given_time():
+    seen = []
+
+    class Timed:
+        def slots(self, environ, now):
+            seen.append(now)
+            return []
+
+    assert place.api_side(Timed(), "claude", {}, NOW) == ([], 0)
+    assert seen == [NOW]
+
+
 def test_unreadable_settings_close_only_the_api_side(monkeypatch, capsys):
     def unreadable(harness, environ):
         raise place.SettingsError("routing settings are unreadable: KeyError")

@@ -58,7 +58,7 @@ def api_side(source: "SlotSource", harness: str, environ: Mapping[str, str], now
     try:
         rules = policy(harness, environ)
     except SettingsError as exc:
-        print(f"[{harness}] api side closed: {exc}", file=sys.stderr, flush=True)
+        print(f"[{harness}] api side closed: {exc}", file=sys.stderr)
         return [], 0
     return [replace(slot, cap=rules.cap) for slot in found], rules.weight
 

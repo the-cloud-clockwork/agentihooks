@@ -706,6 +706,20 @@ def test_a_reserved_account_is_used_before_the_api_at_weight_0(monkeypatch, tmp_
     assert _pick(env, tmp_path, {"LOW": 3}).account == "LOW"
 
 
+def test_the_launch_time_reaches_the_api_side_and_an_excluded_api_has_no_weight(monkeypatch, tmp_path):
+    env = {**_three(monkeypatch), "ANTHROPIC_API_KEY": "key"}
+    seen = []
+
+    def api_side(source, harness, environ, now):
+        seen.append(now)
+        return [], 0
+
+    monkeypatch.setattr(place, "api_side", api_side)
+    _pick(env, tmp_path)
+    assert seen == [1000]
+    assert balancer._api_side(env, {}, {"api"}, 1000) == ([], 0)
+
+
 def test_an_api_pick_is_never_replaced_by_the_reserve_rule(monkeypatch, tmp_path):
     env = {**_three(monkeypatch), "ANTHROPIC_API_KEY": "key", "AGENTIHOOKS_RESERVE_ACCOUNTS": "api"}
     _weighted(monkeypatch, 100)

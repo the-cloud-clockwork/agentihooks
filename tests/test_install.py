@@ -14,6 +14,30 @@ import install  # noqa: I001
 
 
 class TestClaudeRouting:
+    def test_cmd_claude_prints_the_selection_with_the_fable_window_it_routed_on(self, monkeypatch, capsys):
+        from scripts import claude_quota_balancer as balancer
+
+        decision = argparse.Namespace(account="WINNER")
+        seen = []
+        monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+        monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/claude")
+        monkeypatch.setattr(balancer, "select_credential", lambda *args, **kwargs: decision)
+        monkeypatch.setattr(balancer, "route_requires_fable", lambda *args, **kwargs: True)
+        monkeypatch.setattr(balancer, "launch_environment", lambda chosen, environ: {})
+        monkeypatch.setattr(install, "_write_route_report", lambda *args, **kwargs: None)
+        monkeypatch.setattr(
+            balancer, "format_selection", lambda chosen, fable: seen.append((chosen, fable)) or "picked"
+        )
+
+        def execvpe(executable, command, environ):
+            raise RuntimeError("exec intercepted")
+
+        monkeypatch.setattr(install.os, "execvpe", execvpe)
+        with pytest.raises(RuntimeError, match="exec intercepted"):
+            install.cmd_claude([])
+        assert seen == [(decision, True)]
+        assert capsys.readouterr().out == "picked\n"
+
     def test_cmd_claude_exports_winner_for_process_tree(self, monkeypatch):
         from scripts import claude_quota_balancer as balancer
 
