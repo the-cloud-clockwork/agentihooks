@@ -28,6 +28,8 @@ LOCK_MS = 120_000
 RUNAWAY_KEY = f"{PREFIX}:ledger-server-runaway"
 RUNAWAY_MS = 900_000
 STARTED_KEY = f"{PREFIX}:ledger-server-started"
+DOWN_KEY = f"{PREFIX}:ledger-server-restart-failed"
+DOWN_MS = 3_600_000
 SCRIPT = "ledger_server.py"
 ERROR_KEPT = 200
 RUNAWAY, STALE = "runaway", "stale"
@@ -208,7 +210,9 @@ def watch(store, slug: str, ledger, runtime, host: Host | None = None) -> list[s
         return []
     kind, reason = found
     if error := restart(host, pid, command):
-        _mail(store, slug, DOWN_TEXT.format(why=reason, error=error))
+        if store.redis.get(DOWN_KEY) != str(pid):
+            _mail(store, slug, DOWN_TEXT.format(why=reason, error=error))
+            store.redis.set(DOWN_KEY, pid, px=DOWN_MS)
         return [f"the ledger server needed a restart because {reason}, and the restart failed: {error}"]
     store.redis.set(STARTED_KEY, ledger_host.server_pid(host.folder) or "")
     return (

@@ -214,6 +214,17 @@ def test_a_server_the_tick_may_not_signal_is_reported_and_never_started_again(st
         "[Errno 1] Operation not permitted"
     ]
     assert host.calls == [] and store.redis.get(ledger_watchdog.STARTED_KEY) is None
+    assert len(master_mail(store)) == 1
+    store.redis.delete(ledger_watchdog.LOCK_KEY)
+    assert ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host) != []
+    assert len(master_mail(store)) == 1
+    assert 0 < store.redis.pttl(ledger_watchdog.DOWN_KEY) <= 3_600_000
+    assert ledger_watchdog.DOWN_KEY == f"{PREFIX}:ledger-server-restart-failed"
+    (host.folder / ".server.pid").write_text("4243")
+    plant(host.proc, host.argv, pid=4243)
+    store.redis.delete(ledger_watchdog.LOCK_KEY)
+    ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host)
+    assert len(master_mail(store)) == 2
 
 
 def test_a_start_that_fails_or_hangs_returns_its_error(tmp_path):
