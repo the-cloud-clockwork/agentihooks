@@ -591,6 +591,27 @@ def test_master_launch_missed_measure_refuses_times_without_a_zone(env, monkeypa
     )
 
 
+def test_master_launch_missed_measure_defaults_to_the_last_hour_with_the_doctor_timings(env, monkeypatch, capsys):
+    from scripts.doctor import master_launches
+
+    assert doctor.main([WATCHED, "start"]) == 0
+    capsys.readouterr()
+    for name in ("AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES", "AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES"):
+        monkeypatch.delenv(name, raising=False)
+    now = 1791588800000
+    monkeypatch.setattr(swarm_cli, "now_ms", lambda: now)
+    record = {"slug": WATCHED, "transfers": [], "restored": [], "agents": [], "journal": [], "journal_error": ""}
+    monkeypatch.setattr(doctor.spawn_read, "master_records", lambda store, slug, **kwargs: record)
+    monkeypatch.setattr(doctor.spawn_read, "doctor_passes", lambda slug, **kwargs: (5,))
+    calls = []
+    monkeypatch.setattr(master_launches, "missed", lambda *args: calls.append(args) or 3)
+    assert doctor.main([WATCHED, "measure", "master-launch-missed"]) == 0
+    assert capsys.readouterr().out == "master-launch-missed 3\n"
+    [(_, replay, window, _)] = calls
+    assert window == (now - 3_600_000, now)
+    assert (replay.cooldown_ms, replay.interval_ms, replay.passes) == (3_600_000, 600_000, (5,))
+
+
 def test_failed_spawn_measure_accepts_a_window_ending_now(env, monkeypatch, capsys):
     store, _, _ = env
     assert doctor.main([WATCHED, "start"]) == 0

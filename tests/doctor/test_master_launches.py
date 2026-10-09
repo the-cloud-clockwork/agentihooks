@@ -6,6 +6,7 @@ from dataclasses import asdict
 import pytest
 
 from scripts.doctor import master_launches, spawn_read
+from scripts.swarm.health.findings import Finding
 from tests.doctor.recorded import load
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -371,3 +372,208 @@ def test_doctor_passes_refuses_an_unreadable_journal():
 
     with pytest.raises(SwarmError, match="Doctor passes unavailable: FileNotFoundError: journalctl"):
         spawn_read.doctor_passes("sw-doctor", "@1", "@2", run=run)
+
+
+def bare(transfers=(), restored=(), agents=(), journal=()):
+    return {
+        "slug": "sw",
+        "transfers": list(transfers),
+        "restored": list(restored),
+        "agents": list(agents),
+        "journal": list(journal),
+        "journal_error": "",
+    }
+
+
+def absent(row_id="a1", at=1000, reason="recycle"):
+    binding = {"state": "absent", "at": at + 5}
+    return {"id": row_id, "reason": reason, "task": "master", "successor": f"m@{row_id}", "at": at, "binding": binding}
+
+
+def spawn_line(at, error="boom"):
+    return {"at": at, "pid": "9", "message": f"sw: master spawn failed: {error}"}
+
+
+def test_the_recorded_outage_finding_is_exact():
+    record = outage()
+    last = failure_times(record)[-1]
+    assert master_launches.findings(master_launches.as_of(record, last + master_launches.MATCH_MS)) == [
+        Finding(
+            "master launch failed",
+            "rig-grade-swarm@1791575842404",
+            "12 failed master launches with no live master after them",
+            (
+                f"error: {ERROR}",
+                "attempt: transfer ac248650eba744098a0de8da11ada7cd for master@323133-0092, recycle handoff at "
+                "2026-10-09 20:25:21 UTC",
+                "binding: no launched master bound since 2026-10-09 19:57:22 UTC",
+            ),
+            "a failed master launch with no live binding after it",
+            12,
+        )
+    ]
+
+
+def test_the_unavailable_finding_is_exact():
+    record = {**bare(), "journal": None, "journal_error": "gone"}
+    assert master_launches.findings(record) == [
+        Finding(
+            "master launch evidence unavailable",
+            "sw",
+            "the tick journal is unreadable, so fresh master launch failures and launch errors are unavailable",
+            ("journal: gone",),
+            "the journal cannot be read",
+            1,
+        )
+    ]
+
+
+def test_sanitize_removes_a_strict_only_secret():
+    token = "Bearer " + "a" * 30
+    assert token not in master_launches.sanitize(f"refused {token}")
+
+
+def test_times_read_in_utc():
+    assert master_launches._iso(0) == "1970-01-01 00:00:00 UTC"
+    assert master_launches._iso(61_500) == "1970-01-01 00:01:01 UTC"
+
+
+@pytest.mark.parametrize(
+    "line_at,error",
+    [(1000, "boom"), (1000 + master_launches.MATCH_MS, "boom"), (1001 + master_launches.MATCH_MS, None)],
+)
+def test_a_journal_error_matches_within_one_minute_of_the_failure(line_at, error):
+    found = master_launches.attempts(bare([absent()], journal=[spawn_line(line_at)]))
+    assert found[0].error == (error or master_launches.NO_LINE)
+    assert len(found) == (1 if error else 2)
+
+
+def test_a_journal_line_before_the_failure_is_a_fresh_attempt():
+    found = master_launches.attempts(bare([absent()], journal=[spawn_line(999)]))
+    assert [(a.at, a.path, a.error) for a in found] == [
+        (999, "fresh", "boom"),
+        (
+            1000,
+            "recycle handoff",
+            "unavailable: no master spawn failed line in the journal within a minute of the failure",
+        ),
+    ]
+
+
+def test_an_unknown_transfer_reason_is_its_own_path():
+    [found] = master_launches.attempts(bare([absent(reason="operator")], journal=[spawn_line(1000)]))
+    assert found.path == "operator"
+
+
+def test_a_restore_outcome_without_its_transfer_row_is_an_attempt_and_a_resumed_one_is_not():
+    outcome = {
+        "name": "master@x-1",
+        "lane": "master",
+        "outcome": "awaiting-decision",
+        "reason": "resume failed to start: gone",
+        "at": 5000,
+        "transfer": "r9",
+    }
+    resumed = {**outcome, "outcome": "resumed", "transfer": "r8"}
+    assert master_launches.attempts(bare(restored=[outcome, resumed])) == [
+        master_launches.Attempt(
+            5000, "native resume", "restore of master@x-1 on transfer r9", "resume failed to start: gone"
+        )
+    ]
+
+
+def test_failures_at_the_same_moment_are_both_kept():
+    found = master_launches.attempts(bare([absent("a1"), absent("a2")]))
+    assert sorted(a.identity for a in found) == ["transfer a1 for m@a1", "transfer a2 for m@a2"]
+
+
+@pytest.mark.parametrize(
+    "agent,binding_at,failed",
+    [
+        ({"started_at": 1001, "state": "working"}, None, False),
+        ({"started_at": 1001, "state": "starting"}, None, True),
+        (None, 1000, False),
+        (None, 999, True),
+    ],
+)
+def test_a_live_binding_or_working_master_after_the_failure_resolves_it(agent, binding_at, failed):
+    rows = [absent()]
+    if binding_at is not None:
+        rows.append({**absent("b1", at=1), "binding": {"state": "live", "at": binding_at}})
+    record = bare(rows, agents=[agent] if agent else [], journal=[spawn_line(1000)])
+    assert bool(master_launches.findings(record)) is failed
+
+
+def test_a_failure_at_time_zero_with_no_binding_is_found():
+    [found] = master_launches.findings(bare([absent(at=0)], journal=[spawn_line(0)]))
+    assert found.measure == 1
+
+
+def test_as_of_keeps_what_was_written_by_then_and_hides_later_bindings():
+    live = {
+        "id": "l1",
+        "reason": "recycle",
+        "task": "master",
+        "successor": "m",
+        "at": 10,
+        "binding": {"state": "live", "at": 50},
+    }
+    unstamped = {**live, "id": "l2", "binding": {"state": "live"}}
+    later = {**live, "id": "l3", "at": 51}
+    record = bare(
+        [live, unstamped, later],
+        restored=[{"at": 50}, {"at": 51}],
+        agents=[{"started_at": 50}, {"started_at": 51}],
+        journal=[{"at": 50}, {"at": 51}],
+    )
+    assert master_launches.as_of(record, 50) == {
+        **record,
+        "transfers": [live, unstamped],
+        "restored": [{"at": 50}],
+        "agents": [{"started_at": 50}],
+        "journal": [{"at": 50}],
+    }
+    assert master_launches.as_of(record, 49)["transfers"] == [{**live, "binding": {"state": "pending"}}, unstamped]
+
+
+def test_the_old_detector_replay_reads_exactly_the_last_hour():
+    at = 10 * master_launches.JOURNAL_MS
+    lines = [
+        spawn_line(at - master_launches.JOURNAL_MS - 1),
+        spawn_line(at - master_launches.JOURNAL_MS),
+        spawn_line(at),
+        spawn_line(at + 1),
+    ]
+    assert [f.measure for f in master_launches.journal_hour(bare(journal=lines), at)] == [2]
+
+
+@pytest.mark.parametrize(
+    "measure,evidence,at,shown",
+    [
+        (1, ("a",), 5, False),
+        (2, ("b",), 10**9, False),
+        (3, ("b",), 5 + 100, True),
+        (3, ("b",), 5 + 99, False),
+    ],
+)
+def test_a_judged_finding_returns_only_when_it_grew_with_new_evidence_after_the_cooldown(measure, evidence, at, shown):
+    verdict = {"at": 5, "measure": 2 if measure > 1 else 1, "evidence": ["a"]}
+    finding = Finding("master launch failed", "sw@1", "s", evidence, "t", measure)
+    assert master_launches._shown(finding, verdict, at, 100) is shown
+
+
+def test_a_finding_judged_at_the_pass_time_and_returned_stays_shown():
+    finding = Finding("master launch failed", "sw@1", "s", ("e1",), "t", 5)
+    played = master_launches.Replay({finding.id: {"verdict": {"at": 100, "measure": 2, "evidence": []}}}, 0, 1)
+    returned = {}
+    assert master_launches._seen(finding, 100, played, returned) is True
+    assert returned == {finding.id: 100}
+    fell = Finding("master launch failed", "sw@1", "s", ("e2",), "t", 1)
+    assert master_launches._seen(fell, 200, played, returned) is True
+
+
+def test_the_missed_window_includes_its_edges():
+    record = outage()
+    times = failure_times(record)
+    for edge in (times[0], times[-1]):
+        assert master_launches.missed(record, replay(record), (edge, edge), (master_launches.journal_hour,)) == 1

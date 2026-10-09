@@ -2,13 +2,13 @@
 restore outcomes and the tick journal, and a replay counting the failures no detector put before the Doctor master."""
 
 import re
+import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
 
 from hooks.secrets import redact
 from scripts.doctor import spawns
 from scripts.swarm.health.findings import Finding
-from scripts.swarm.store import MASTER, SwarmError
+from scripts.swarm.store import SwarmError
 
 KIND = "master launch failed"
 UNAVAILABLE = "master launch evidence unavailable"
@@ -20,6 +20,7 @@ ERROR_CHARS = 300
 FAILED = re.compile(r"master spawn failed: (.+)", re.S)
 AWAITING = "awaiting-decision"
 PATHS = {"recycle": "recycle handoff", "restore": "native resume"}
+NO_LINE = "unavailable: no master spawn failed line in the journal within a minute of the failure"
 
 
 class Unavailable(SwarmError):
@@ -39,7 +40,7 @@ def sanitize(text: str) -> str:
 
 
 def _iso(ms):
-    return datetime.fromtimestamp(ms / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    return time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(ms / 1000))
 
 
 def _lines(record):
@@ -64,22 +65,20 @@ def _take(lines, at, record):
         return f"unavailable: {record['journal_error']}"
     match = next((line for line in lines if at <= line[0] <= at + MATCH_MS), None)
     if match is None:
-        return "unavailable: no master spawn failed line in the journal within a minute of the failure"
+        return NO_LINE
     lines.remove(match)
     return match[2]
 
 
 def attempts(record: dict) -> list[Attempt]:
-    """Every failed master launch, oldest first, each with its error or why the error is unavailable."""
+    """Every failed master launch, oldest first, each with its error or why the error is unavailable.
+    The record holds only master rows, outcomes and agents, as spawn_read.master_records reads them."""
     lines, retried = sorted(_lines(record)), _retried(record["transfers"])
-    resumes = {o["transfer"]: o for o in record["restored"] if o["lane"] == MASTER and o["outcome"] == AWAITING}
-    failed = sorted(
-        ((_failed_at(row, retried), row) for row in record["transfers"] if row["binding"]["state"] == "absent"),
-        key=lambda pair: pair[0],
-    )
+    resumes = {o["transfer"]: o for o in record["restored"] if o["outcome"] == AWAITING}
+    failed = [row for row in record["transfers"] if row["binding"]["state"] == "absent"]
     found = []
-    for at, row in failed:
-        outcome = resumes.pop(row["id"], None)
+    for row in sorted(failed, key=lambda row: _failed_at(row, retried)):
+        at, outcome = _failed_at(row, retried), resumes.pop(row["id"], None)
         error = outcome["reason"] if outcome else _take(lines, at, record)
         path = PATHS.get(row["reason"], row["reason"])
         found.append(Attempt(at, path, f"transfer {row['id']} for {row['successor']}", sanitize(error)))
@@ -94,7 +93,7 @@ def attempts(record: dict) -> list[Attempt]:
 def _bound(record):
     return [
         *(row["binding"]["at"] for row in record["transfers"] if row["binding"]["state"] == "live"),
-        *(a["started_at"] for a in record["agents"] if a["lane"] == MASTER and a["state"] == "working"),
+        *(a["started_at"] for a in record["agents"] if a["state"] == "working"),
     ]
 
 
@@ -110,8 +109,8 @@ def _unavailable(record):
 
 
 def findings(record: dict) -> list[Finding]:
-    last_bound = max(_bound(record), default=-1)
-    failed = [a for a in attempts(record) if a.at > last_bound]
+    bound = _bound(record)
+    failed = [a for a in attempts(record) if all(a.at > b for b in bound)]
     if not failed:
         return [] if record["journal"] is not None else [_unavailable(record)]
     first, last = failed[0], failed[-1]
@@ -185,18 +184,21 @@ class Replay:
         return min([p for p in self.passes if p >= failed_at] + [failed_at + self.interval_ms])
 
 
-def _covered(record, at, replay, detectors, returned):
+def _seen(finding, at, replay, returned):
     """A finding that came back after its verdict stays shown until the next verdict, as VerdictStore keeps it."""
-    covered = False
-    for f in (f for detect in detectors for f in detect(record, at) if f.kind == KIND or f.id == OLD_ID):
-        verdict = (replay.verdicts.get(f.id) or {}).get("verdict")
-        if verdict and verdict["at"] <= at and returned.get(f.id) == verdict["at"]:
-            covered = True
-        elif _shown(f, verdict, at, replay.cooldown_ms):
-            if verdict and verdict["at"] <= at:
-                returned[f.id] = verdict["at"]
-            covered = True
-    return covered
+    verdict = (replay.verdicts.get(finding.id) or {}).get("verdict")
+    judged = verdict and verdict["at"] <= at
+    if judged and returned.get(finding.id) == verdict["at"]:
+        return True
+    shown = _shown(finding, verdict, at, replay.cooldown_ms)
+    if shown and judged:
+        returned[finding.id] = verdict["at"]
+    return shown
+
+
+def _covered(record, at, replay, detectors, returned):
+    found = [f for detect in detectors for f in detect(record, at) if f.kind == KIND or f.id == OLD_ID]
+    return any([_seen(f, at, replay, returned) for f in found])
 
 
 def missed(record: dict, replay: Replay, window: tuple[int, int], detectors: tuple) -> int:
