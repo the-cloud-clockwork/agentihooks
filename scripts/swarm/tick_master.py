@@ -153,7 +153,7 @@ def _promote(slug, store, ledger, runtime, state, minutes, now_ms):
             ledger.notify(slug, NOBODY_NOTICE.format(minutes=_shown(minutes)))
         return state, actions + ["no live engineer to promote"]
     agent, reason = engineers[0], state["failure"]
-    error = master_alarm.error(store, slug, state.get("forced_at", state["since"])) or reason
+    error = master_alarm.error(store, slug, state["forced_at"]) or reason
     InboxStore(store.redis).send(SENDER, agent.name, prompt(slug, agent, reason, minutes, error))
     store.seats.note(agent.seat, "promoted", reason, now_ms)
     store.seats.note(agent.seat, "message", "the promoted prompt", now_ms)
