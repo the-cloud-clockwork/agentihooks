@@ -591,8 +591,8 @@ def _launch_order(slug, store, tasks):
         tasks,
         key=lambda task: (
             ledger_rank.order(task),
-            not claim_order.resumed(task),
             bool(store.launch_failure(slug, task["id"])),
+            not claim_order.resumed(task),
         ),
     )
 

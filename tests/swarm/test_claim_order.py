@@ -68,7 +68,7 @@ def test_a_dependency_missing_from_the_ledger_still_blocks_the_dependent():
     assert ordered(ledger)[:2] == ["big", "c1"]
 
 
-def test_key_is_rank_then_the_fast_clear_exception_then_depth():
+def test_key_is_rank_then_resumed_work_then_the_fast_clear_exception_then_depth():
     ledger = rows(
         {"id": "a", "rank": "high", "difficulty": "S", "phase": "p1"},
         {"id": "b", "depends_on": ["a"], "phase": "p1"},

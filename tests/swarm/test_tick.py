@@ -1356,6 +1356,15 @@ def test_a_fresh_task_of_a_higher_rank_still_goes_ahead_of_a_resumed_one(store):
     assert spawned_ids(runtime) == ["urgent"]
 
 
+def test_a_resumed_task_whose_launch_failed_takes_only_a_slot_left_over(store):
+    store.update("sw", max_eng=1)
+    ledger = FakeLedger([{"id": "resumed", "branch": "engineer-a1b2c3-0005"}, {"id": "fresh"}])
+    store.note_launch_failure("sw", "resumed", "canary timeout")
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["fresh"]
+
+
 @pytest.mark.parametrize(
     ("parked_on", "blocker_done", "lives"), [(["t1"], False, 0), ([], False, 1), (["t1"], True, 1)]
 )
