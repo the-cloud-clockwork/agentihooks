@@ -31,7 +31,7 @@
     "output": "85 passed",
     "lint": "ruff check passed on changed Python files",
     "format": "ruff format check passed on changed Python files",
-    "review": "Standards and Spec readers round one: superseded generation deletion, unmeasured case fields, missing connection reset and grant cases, unfenced count write, unused view owner and a same name fixture collision fixed with tests; the lease to delete window and the launch labelling are recorded as limitations; round two added a grant revoked between read and delete and a lease takeover inside the delete that leaves the new leader counts untouched, and unbundled the reconciler arguments",
+    "review": "Standards and Spec readers round one: superseded generation deletion, unmeasured case fields, missing connection reset and grant cases, unfenced count write, unused view owner and a same name fixture collision fixed with tests; the lease to delete window and the launch labelling are recorded as limitations; round two added a grant revoked between read and delete and a lease takeover inside the delete that leaves the new leader counts untouched, and unbundled the reconciler arguments; review closed after round three: the launch labelling Spec finding was upheld as follow up issue 2078, the lease to delete window was accepted by the Standards reader as a recorded residual",
     "mutation": "Pending the pull request CI run"
   },
   "cases": {
@@ -46,7 +46,7 @@
     "proof": "Case C restarts a controller with cleanup disabled over the same store after a managed orphan appears: the orphan survives, the newer incarnation stays matched and no launch happens."
   },
   "remaining_limitations": [
-    "No Pod creation path exists yet; the Kubernetes runtime package must label every Pod it creates with labels(owner_for(slug), execution_id), otherwise its Pods are never listed and cannot be matched or cleaned.",
+    "No Pod creation path exists yet; the Kubernetes runtime package must label every Pod it creates with labels(owner_for(slug), execution_id), otherwise its Pods are never listed and cannot be matched or cleaned. Tracked by https://github.com/the-cloud-clockwork/agentihooks/issues/2078; issue 2050 stays open until it closes.",
     "No Kubernetes API Pod source exists yet; it must implement PodSource over label selector list, watch with 410 expiry and delete with a uid precondition.",
     "The lease check and the Pod delete are not one transaction: a controller paused after its final lease check can still issue one delete, as the takeover test shows. The PodSource contract requires a uid precondition, which limits that delete to the exact orphan observed, and execution ids are fresh per attempt, so a new leader never adopts that Pod; the stale controller then refuses to write counts.",
     "Missing pod executions are reported, not relaunched; relaunch stays with the tick and admission path.",
@@ -55,5 +55,8 @@
     "controller_orphans_by_class is a Redis hash read through a method; no telemetry exporter emits it yet.",
     "Mutation qualification is pending the pull request CI run."
   ],
-  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2074"
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2074",
+  "follow_ups": [
+    "https://github.com/the-cloud-clockwork/agentihooks/issues/2078"
+  ]
 }
