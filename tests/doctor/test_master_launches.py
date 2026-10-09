@@ -354,7 +354,9 @@ def test_master_reader_keeps_only_master_agents():
 
 def test_doctor_passes_reads_the_logged_pass_times():
     seen = []
-    line = json.dumps({"MESSAGE": "sw-doctor: doctor pass: 3 new findings", "__REALTIME_TIMESTAMP": "5000000"})
+    line = json.dumps(
+        {"MESSAGE": "sw-doctor: doctor pass: 3 new findings", "_PID": "1", "__REALTIME_TIMESTAMP": "5000000"}
+    )
 
     def run(argv, **kwargs):
         seen.append(argv)
@@ -577,3 +579,93 @@ def test_the_missed_window_includes_its_edges():
     times = failure_times(record)
     for edge in (times[0], times[-1]):
         assert master_launches.missed(record, replay(record), (edge, edge), (master_launches.journal_hour,)) == 1
+
+
+def recording(stdout=""):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, stdout, "")
+
+    return calls, run
+
+
+def journal_command(pattern, since, until):
+    return [
+        "journalctl",
+        "--user",
+        "-u",
+        "agentihooks-swarm.service",
+        *(["--since", since] if since else []),
+        *(["--until", until] if until else []),
+        "-o",
+        "json",
+        "--output-fields=MESSAGE,_PID",
+        "-g",
+        pattern,
+        "--no-pager",
+    ]
+
+
+RUN_OPTIONS = {"capture_output": True, "text": True, "check": False, "timeout": 30}
+
+
+def test_the_journal_reads_run_exact_commands():
+    store, _ = _store_with_outage()
+    calls, run = recording()
+    spawn_read.master_records(store, "rig-grade-swarm", since="@1", until="@2", run=run)
+    spawn_read.doctor_passes("rig-grade-swarm-doctor", "@3", "@4", run=run)
+    assert calls == [
+        (journal_command("master spawn failed", "@1", "@2"), RUN_OPTIONS),
+        (journal_command("rig-grade-swarm-doctor: doctor pass", "@3", "@4"), RUN_OPTIONS),
+    ]
+
+
+def test_a_journal_entry_keeps_its_millisecond_its_pid_and_its_message():
+    entry = {"MESSAGE": "sw: master spawn failed: x", "_PID": "77", "__REALTIME_TIMESTAMP": "5000999"}
+    store, _ = _store_with_outage()
+    _, run = recording(json.dumps(entry) + "\n")
+    read = spawn_read.master_records(store, "sw", run=run)
+    assert read["journal"] == [{"at": 5000, "pid": "77", "message": "sw: master spawn failed: x"}]
+    assert type(read["journal"][0]["at"]) is int
+
+
+def test_master_reader_takes_only_master_outcomes_and_working_masters_as_bindings():
+    import fakeredis
+
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 1, 0))
+    outcomes = [{"name": "m", "lane": "master", "transfer": "t"}, {"name": "e", "lane": "eng", "transfer": "u"}]
+    store.put_restored("sw", outcomes)
+    row = {
+        "id": "f1",
+        "reason": "fresh",
+        "task": "master",
+        "successor": "m@1",
+        "at": 7000,
+        "binding": {"state": "absent"},
+    }
+    store.redis.hset(store.key("sw", "transfers"), "f1", json.dumps(row))
+    store.put_agent("sw", AgentRecord("master@sw-1", "master", "master", state="starting", started_at=9000))
+    calls, run = recording()
+    read = spawn_read.master_records(store, "sw", run=run)
+    assert read["restored"] == [outcomes[0]]
+    assert calls[0][0][4:6] == ["--since", "@7.000"]
+    store.put_agent("sw", AgentRecord("master@sw-2", "master", "master", state="working", started_at=9000))
+    spawn_read.master_records(store, "sw", run=run)
+    assert calls[1][0][4:6] == ["--since", "@9.000"]
+
+
+def test_master_reader_with_no_master_rows_reads_the_whole_journal():
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 1, 0))
+    calls, run = recording()
+    spawn_read.master_records(store, "sw", run=run)
+    assert calls[0][0] == journal_command("master spawn failed", None, None)

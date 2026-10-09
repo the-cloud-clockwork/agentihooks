@@ -111,6 +111,5 @@ def _grep(pattern, since, until, run):
         return None, f"journalctl exit {done.returncode}: {done.stderr.strip()}"
     entries = (json.loads(line) for line in done.stdout.splitlines() if line.strip())
     return [
-        {"at": int(e["__REALTIME_TIMESTAMP"]) // 1000, "pid": e.get("_PID", ""), "message": e["MESSAGE"]}
-        for e in entries
+        {"at": int(e["__REALTIME_TIMESTAMP"]) // 1000, "pid": e["_PID"], "message": e["MESSAGE"]} for e in entries
     ], ""
