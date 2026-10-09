@@ -261,10 +261,15 @@ def test_untracked_files_do_not_hold_an_open_and_a_folder_outside_git_holds_noth
 
 def test_a_trailing_valued_option_and_a_forced_refspec_still_name_the_branch(tree):
     assert destinations(tree, ["origin", "+task", "-o"]) == {"task"}
+    assert destinations(tree, ["origin", "+Xtask"]) == {"Xtask"}
 
 
 def test_a_remote_url_in_another_case_still_names_the_pull_request_repo(tree, tmp_path):
     assert not gate(pull()).decide(bash("git push https://github.com/O/R.git task", tree), ME, state(tmp_path)).allowed
+
+
+def test_a_push_to_a_remote_outside_github_is_held_as_the_task_repo(tree, tmp_path):
+    assert not gate(pull()).decide(bash("git push /srv/mirror.git task", tree), ME, state(tmp_path)).allowed
 
 
 def test_the_open_refusal_names_both_readers_when_neither_ran():
@@ -277,7 +282,7 @@ def test_the_open_refusal_names_both_readers_when_neither_ran():
 
 def test_a_session_with_a_task_but_no_swarm_is_never_held(tree, tmp_path):
     who = Who(name="ci@1-1", lane="ci", task="t1")
-    assert gate(pull()).decide(bash("git push", tree), who, state(tmp_path)).allowed
+    assert gate(pull()).decide(bash("git push; gh pr create --base dev", tree), who, state(tmp_path)).allowed
 
 
 def test_a_push_passes_when_the_ledger_has_no_such_task(tree, tmp_path):
