@@ -149,8 +149,12 @@ def test_queued_merges_are_analysed_as_their_pull_request(tmp_path, head_ref, la
             "-Dsonar.pullrequest.key=dispatch-diffcheck-plant-1 -Dsonar.pullrequest.branch=diffcheck/plant-1 -Dsonar.pullrequest.base=dev",
         ),
         (
-            "ci-323133-0157",
-            "-Dsonar.pullrequest.key=dispatch-ci-323133-0157 -Dsonar.pullrequest.branch=ci-323133-0157 -Dsonar.pullrequest.base=dev",
+            "feature-x",
+            "-Dsonar.pullrequest.key=dispatch-feature-x -Dsonar.pullrequest.branch=feature-x -Dsonar.pullrequest.base=dev",
+        ),
+        (
+            "a/b/c",
+            "-Dsonar.pullrequest.key=dispatch-a-b-c -Dsonar.pullrequest.branch=a/b/c -Dsonar.pullrequest.base=dev",
         ),
     ],
 )
