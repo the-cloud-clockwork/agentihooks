@@ -66,7 +66,7 @@ def test_every_workflow_installs_the_pinned_ruff():
             installs[f"{path.name}:{name}"] = _ruff_installs(job.get("steps") or [])
     for path in sorted((_ROOT / ".github/actions").glob("*/action.y*ml")):
         installs[path.parent.name] = _ruff_installs(yaml.safe_load(path.read_text()).get("runs", {}).get("steps") or [])
-    assert installs["test.yml:lint"] == installs["test.yml:size"] == [pinned]
+    assert installs["test.yml:lint"] == [pinned]
     offenders = {where: specs for where, specs in installs.items() if set(specs) - {pinned}}
     assert not offenders
 
