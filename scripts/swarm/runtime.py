@@ -79,6 +79,10 @@ def _model_args(agent, chosen, environ, bounds, preserve=False):
     return model_flags(agent, _set(chosen.get("model")) or model, effort)
 
 
+def preserves_effort(saved: dict, lane: str, quota_transfer: bool) -> bool:
+    return bool(saved) and (lane != MASTER or quota_transfer)
+
+
 def _lane_default(lane, agent, chosen):
     if lane == MASTER:
         return model_pick.frontier(agent)
@@ -515,7 +519,13 @@ class HerdrRuntime:
                 *argv,
                 "--",
                 *route,
-                *_model_args(agent, picked.__dict__, environ, effort_range.of(config), preserve=bool(saved)),
+                *_model_args(
+                    agent,
+                    picked.__dict__,
+                    environ,
+                    effort_range.of(config),
+                    preserve=preserves_effort(saved, lane, quota_transfer),
+                ),
                 *mode,
             ],
             predecessor=_predecessor(task),
