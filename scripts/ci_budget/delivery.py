@@ -85,7 +85,15 @@ def recent(repo: str, since_s: float, read: Callable) -> list[dict]:
         page += 1
 
 
-def refresh(slug: str, config, store, ledger, doc: dict, now_ms: int, read: Callable | None = None) -> list[str]:
+def refresh(
+    slug: str,
+    config: SwarmConfig,
+    store: RedisStore,
+    ledger: LedgerClient,
+    doc: dict,
+    now_ms: int,
+    read: Callable | None = None,
+) -> list[str]:
     check_key = store.key(slug, "delivery-budget-check")
     if now_ms - int(store.redis.get(check_key) or 0) < REFRESH_MS:
         return []
