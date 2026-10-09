@@ -249,6 +249,51 @@ def test_pre_tool_use_blocks_each_harness(target, name, args, monkeypatch):
         hook_manager.on_pre_tool_use(payload)
 
 
+CLEARANCE_WRITER = (
+    "python3 - <<'PY'\n"
+    "import json\n"
+    "from pathlib import Path\n"
+    "from scripts.ci_mutation.clearances import write_clearance\n"
+    "root = Path('/home/iamroot/dev/worktrees/agentihooks/engineer-323133-0837')\n"
+    "records = json.loads(Path('/home/iamroot/scratchpad/agentihooks/rig-grade-swarm-mt3/"
+    "standards-equivalence-rulings.json').read_text())\n"
+    "for record in records:\n"
+    "    write_clearance(root, record['key'], {'reader': 'Standards reader', 'reason': record['reason']})\n"
+    "print(len(records))\n"
+    "PY"
+)
+
+
+def test_native_clearance_writer_passes(monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+    from hooks.targets.normalizer import normalize_payload
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    check_local_tests(normalize_payload({"tool_name": "exec", "tool_input": {"cmd": CLEARANCE_WRITER}}))
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        CLEARANCE_WRITER.removesuffix("PY") + "from scripts.ci_mutation.runner import main\nmain()\nPY",
+        CLEARANCE_WRITER.removesuffix("PY") + "import scripts.ci_mutation.selection\nPY",
+        CLEARANCE_WRITER.removesuffix("PY") + "import subprocess\nsubprocess.run(['python', '-m', 'pytest'])\nPY",
+        CLEARANCE_WRITER.removesuffix("PY") + "import pytest\npytest.main()\nPY",
+        CLEARANCE_WRITER + "\npython -m scripts.ci_mutation",
+        "python3 -m scripts.ci_mutation",
+    ],
+)
+def test_clearance_writer_mixed_with_a_runner_is_blocked(command, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+    from hooks.targets.normalizer import normalize_payload
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    with pytest.raises(BlockAction, match="draft pull request"):
+        check_local_tests(normalize_payload({"tool_name": "exec", "tool_input": {"cmd": command}}))
+
+
 def test_later_commands_and_substitutions_are_checked(monkeypatch):
     from hooks.context.local_test_guard import check_local_tests
 
