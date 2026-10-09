@@ -10,6 +10,7 @@ from scripts.swarm_ledger import (
     ledger,
     ledger_artifacts,
     ledger_phases,
+    ledger_plans,
     ledger_publish,
     ledger_tasks,
     ledger_workspace,
@@ -573,6 +574,10 @@ ROLLOUT = (
     "# Rollout\n## Build\n<!-- slice: first -->\n### First\nOne\n<!-- slice: second -->\n### Second\n\n"
     "## Ship\n<!-- slice: launch -->\n### Launch\nGo\n"
 )
+REVISED = (
+    "# Rollout\n## Build\n<!-- slice: first -->\n### First\nOne\nTwo\n<!-- slice: third -->\n### Third\n\n"
+    "## Ship\n<!-- slice: launch -->\n### Launch\nGo\n"
+)
 
 
 def published(slug, tmp_path, monkeypatch):
@@ -645,17 +650,54 @@ def test_publish_plan_refuses_a_slice_name_repeated_across_its_phases(plan_ledge
     assert capsys.readouterr().out == ""
 
 
-def test_republishing_a_revised_plan_over_its_slices_is_refused(plan_ledger, tmp_path, monkeypatch):
-    _, plan_id = published(plan_ledger, tmp_path, monkeypatch)
+def test_republishing_a_revised_plan_moves_its_phases_and_reconciles_slices_and_tasks(
+    plan_ledger, tmp_path, monkeypatch, capsys
+):
+    _, old = published(plan_ledger, tmp_path, monkeypatch)
+    add(plan_ledger, "build", plan_slice="first")
+    add(plan_ledger, "polish", plan_slice="second")
+    add(plan_ledger, "ship", phase="p2", plan_slice="launch")
+    capsys.readouterr()
     plan = tmp_path / "plan.md"
-    plan.write_text(ROLLOUT + "Then watch it\n", encoding="utf-8")
+    plan.write_text(REVISED, encoding="utf-8")
     revised = ledger_artifacts.store(plan_ledger, "plan.md", plan.read_bytes())
     monkeypatch.setattr(ledger, "upload_artifact", lambda *a: revised)
+    cli(monkeypatch, plan_ledger, "publish-plan", str(plan), "--phase", "p1,p2")
+    new = ledger_plans.plan_id(revised["id"])
+    state = core.sync(plan_ledger)[0]
+    assert [row["id"] for row in state["plans"]] == [old, new]
+    assert [phase["plan"] for phase in state["phases"]] == [f"plans/{new}"] * 2
+    assert state["slices"] == [
+        {"id": f"{new}.first", "phase": "phases/p1", "anchor": "first", "lines": "3-6"},
+        {"id": f"{new}.third", "phase": "phases/p1", "anchor": "third", "lines": "7-8"},
+        {"id": f"{new}.launch", "phase": "phases/p2", "anchor": "launch", "lines": "11-13"},
+    ]
+    parents = {t["id"]: [t.get(key) for key in ("slice", "plan_slice", "plan_lines")] for t in state["tasks"]}
+    assert parents == {
+        "build": [f"slices/{new}.first", "first", "3-6"],
+        "polish": [None, None, None],
+        "ship": [f"slices/{new}.launch", "launch", "11-13"],
+    }
+    assert json.loads(capsys.readouterr().out) == {
+        "plan_url": PLAN,
+        "published_to": "issue",
+        "phases": ["p1", "p2"],
+        "tasks": {"changed": ["build", "ship"], "cleared": ["polish"]},
+    }
+
+
+def test_a_refused_publish_leaves_no_plan_entry(plan_ledger, tmp_path, monkeypatch):
+    refusal = ledger_plans.phase_refusal
+    monkeypatch.setattr(
+        ledger_plans, "phase_refusal", lambda doc, phase: "phase refused" if phase.get("plan") else refusal(doc, phase)
+    )
     with pytest.raises(SystemExit) as raised:
-        cli(monkeypatch, plan_ledger, "publish-plan", str(plan), "--phase", "p1,p2")
-    assert "holds slices of another plan" in raised.value.code
-    phases = core.sync(plan_ledger)[0]["phases"]
-    assert [phase["plan"] for phase in phases] == [f"plans/{plan_id}"] * 2
+        published(plan_ledger, tmp_path, monkeypatch)
+    assert "phase refused" in raised.value.code
+    state = core.sync(plan_ledger)[0]
+    assert state.get("plans", []) == []
+    assert [phase.get("plan") for phase in state["phases"]] == [None, None]
+    assert [e["target"] for e in state["_meta"]["events"] if e["target"].startswith("plans/")] == []
 
 
 def test_anchors_of_an_empty_stored_plan_are_none(monkeypatch):
