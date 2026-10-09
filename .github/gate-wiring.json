@@ -1,5 +1,10 @@
 {
   "not_gates": {
+    "test.yml/delivery-budget": {
+      "reason": "Reports completed required check timings after Gate Required; it measures delivery and does not grade code.",
+      "owner": "ci-12@rig-grade-swarm",
+      "expires": "2027-04-09"
+    },
     "test.yml/queue-baseline": {
       "reason": "Restores the exact base tree baseline for the coverage ratchet; the ratchet needs it and is the gate once it lands.",
       "owner": "ci-2@rig-grade-swarm",
