@@ -9,12 +9,12 @@ import yaml
 
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
-API_CALL = re.compile(r"\bgh\b(?!-)|api\.github\.com|GITHUB_API_URL")
-MODULE = re.compile(r"\bpython3?\s+(?:-\w+\s+)*-m\s+([\w.]+)")
+API_CALL = re.compile(r"\b_?gh\b(?!-)|api\.github\.com|GITHUB_API_URL")
+MODULE = re.compile(r"\bpython3?\b[^\n;&|]*?\s-m\s+([\w.]+)")
 BESIDE = re.compile(r"\$\(dirname \"\$0\"\)|\$\{?GITHUB_ACTION_PATH\}?")
 WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
 # The documented local `--ci` download; the workflow passes `--samples` with `--ci 5`, so CI never calls these.
-LOCAL_ONLY = {ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids"}}
+LOCAL_ONLY = {ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"}}
 TOKEN = re.compile(r"github\.token|secrets\.(github|gh)_\w*", re.IGNORECASE)
 APP_TOKEN = "${{ steps.app-token.outputs.token }}"
 
@@ -100,7 +100,7 @@ def _reached_source(path: Path) -> str:
     return "\n".join(lines)
 
 
-def test_no_script_a_step_runs_calls_the_api():
+def test_no_script_a_tests_workflow_step_runs_calls_the_api():
     calls = _api_calls((step.get("run", ""), here) for _, step, here in _all_steps())
     assert sorted(str(path.relative_to(ROOT)) for path in calls) == [
         ".github/actions/browser-cache/select-artifacts.sh",
@@ -148,6 +148,7 @@ def test_each_local_only_exemption_names_a_function_that_calls_the_api():
         ("bash -x .github/coverage/combine.sh", ".github/coverage/combine.sh"),
         ('"./scripts/brain-smoke"', "scripts/brain-smoke"),
         ("python -I -m tests.shard_check", "tests/shard_check.py"),
+        ("python -W ignore -m tests.shard_check", "tests/shard_check.py"),
         ('bash "${GITHUB_WORKSPACE}/.github/coverage/combine.sh"', ".github/coverage/combine.sh"),
     ],
     ids=[
@@ -159,6 +160,7 @@ def test_each_local_only_exemption_names_a_function_that_calls_the_api():
         "interpreter-flag",
         "quoted-executable",
         "python-flag",
+        "python-option-value",
         "workspace-path",
     ],
 )
