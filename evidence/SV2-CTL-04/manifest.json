@@ -1,11 +1,11 @@
 {
-  "tested_commit": "a3610af8acf974a2c378d1b26a9fccbd4f346635",
+  "tested_commit": "86e41ac5454a444e3e5f69f7c8a7ea0a6af5aa5a",
   "evidence_class": "mocked Redis, fake clock and fake Pod source; no Kubernetes, autoscaler or EC2 calls",
   "inputs": {
     "tests/fixtures/swarm_v2/reconcile-orphans.json": "a0e09d77cc72f6a9a1b471dfe6acc6d6b1d0a335f64ca0e68f50c6a04a402e53",
     "tests/sv2_ctl04_cases.py": "9a1dc50b209358c404b0a585fbfe9c03892d4013fe8c5a3c580cdebbc7199d5a",
-    "tests/test_swarm_v2_controller.py": "b29b33b6a22874ff1829b8a29f4d4090919ce2cd8ea5d5622f641da44accd0cf",
+    "tests/test_swarm_v2_controller.py": "fbeb80b5c40a64704e700b2e5a18aebf09510af544958e0cda2fc9444ee399ca",
     "scripts/swarm_v2/controller.py": "88846e0a5b429360ec79e5b7cc61cabe8280567bff7ff0f7e7c6c7533b11a040",
-    "scripts/swarm_v2/kubernetes/watch.py": "36a5f4a8ebe9add280dde767e92a35b8efa00ccf813360d7aa223644bb3efccb"
+    "scripts/swarm_v2/kubernetes/watch.py": "9b82d4ed5611927b6661b2124fdc8e15a7fb0a3a379224daca724eef4d1e55be"
   }
 }
