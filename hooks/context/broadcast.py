@@ -877,7 +877,7 @@ def foreign_session(info: dict, namespace: str) -> bool:
     return bool(recorded and namespace) and recorded != namespace
 
 
-def _mark_suspect(info: dict, now_dt: datetime) -> bool:
+def _mark_suspect(info: dict, now_dt: datetime, summary: dict) -> bool:
     if info.get("status", "alive") not in ("alive", "handed_off"):
         return False
     try:
@@ -887,6 +887,7 @@ def _mark_suspect(info: dict, now_dt: datetime) -> bool:
     if (now_dt - seen).total_seconds() <= SESSION_SUSPECT_SECONDS:
         return False
     info["status"] = "suspect"
+    summary["suspect"] += 1
     return True
 
 
@@ -909,9 +910,7 @@ def _heartbeat_locked() -> dict:
         status = info.get("status", "alive")
         pid = info.get("pid", 0)
         if foreign_session(info, here):
-            if _mark_suspect(info, now_dt):
-                summary["suspect"] += 1
-                changed = True
+            changed = _mark_suspect(info, now_dt, summary) or changed
             continue
 
         ts_str = info.get("last_seen") or info.get("started_at")
