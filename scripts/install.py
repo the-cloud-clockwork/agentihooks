@@ -6624,7 +6624,7 @@ def main() -> None:
         "trace", help="Directives a session received and the layer behind each; --wrong records a correction"
     )
     sub.add_parser("classify", help="Ask the decision models typed questions: --state FILE --questions FILE")
-    sub.add_parser("classifier", help="Decision classifier records: stats [--purpose P]")
+    sub.add_parser("classifier", help="Decision classifier records: stats [--purpose P], eval NAME [--live N]")
     sub.add_parser(
         "profile",
         help="Render a profile into its own home: render NAME --target claude|codex|copilot [--force] [--out DIR [--bundle DIR]]",
