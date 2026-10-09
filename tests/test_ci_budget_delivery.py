@@ -156,3 +156,59 @@ def test_unknown_render_never_claims_time_is_zero():
         delivery.render({"head": None, "queue": None, "combined": None, "remaining": None})
         == "Delivery budget: head checks unknown; queue checks unknown; combined unknown; remaining unknown of 900 seconds."
     )
+
+
+def test_api_reads_every_page_as_json_without_slurp(monkeypatch):
+    import json
+
+    from scripts.ci_budget import delivery
+
+    calls = []
+
+    def run(command, **options):
+        calls.append((command, options))
+        return SimpleNamespace(stdout=json.dumps({"id": 10}) + "\n\n" + json.dumps({"id": 20}) + "\n")
+
+    monkeypatch.setattr(delivery.subprocess, "run", run)
+    assert delivery.api("checkout", "endpoint", ".jobs[]") == [{"id": 10}, {"id": 20}]
+    assert calls == [
+        (
+            ["gh", "api", "endpoint", "--jq", ".jobs[] | @json", "--paginate"],
+            {"cwd": "checkout", "check": True, "capture_output": True, "text": True, "timeout": 60},
+        )
+    ]
+    calls.clear()
+    assert delivery.api("checkout", "endpoint", ".[]", paginate=False) == [{"id": 10}, {"id": 20}]
+    assert calls[0][0] == ["gh", "api", "endpoint", "--jq", ".[] | @json"]
+
+
+@pytest.mark.parametrize(
+    "jobs", [[], [_job(None)], [_job("2026-10-09T07:08:00Z", conclusion="skipped")], [_job("2026-10-09T07:29:00Z")]]
+)
+def test_missing_completed_required_check_is_unknown(jobs):
+    from scripts.ci_budget import delivery
+
+    pull, data, read, _ = _evidence()
+    data["repos/owner/repo/actions/runs/10/attempts/1/jobs?per_page=100"] = jobs
+    assert delivery.collect("owner/repo", pull, read)["head"] is None
+
+
+def test_recent_merge_reader_stops_after_old_updated_pages():
+    from scripts.ci_budget import delivery
+
+    pull, _, _, _ = _evidence()
+    first = [{**pull, "number": i} for i in range(100)]
+    second = [{**pull, "number": i + 100, "updated_at": "2026-10-09T07:00:00Z", "merged_at": None} for i in range(100)]
+    calls = []
+
+    def read(endpoint, field, **options):
+        calls.append((endpoint, field, options))
+        return first if endpoint.endswith("page=1") else second
+
+    assert delivery.recent("owner/repo", ci_budget.seconds("2026-10-09T07:15:00Z"), read) == first
+    assert len(calls) == 2
+    assert calls[1] == (
+        "repos/owner/repo/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=2",
+        ".[]",
+        {"paginate": False},
+    )
