@@ -24,6 +24,7 @@ BUDGETS = {
     "worker-image": 300,
     "swarm-image": 180,
     "semgrep": 120,
+    "ledger-load": 240,
     "brain-smoke": 90,
     "kind-due": 60,
     "helm-kind": 480,
