@@ -3,9 +3,9 @@
   "dependency": "SV2-RUN-04",
   "integration_gate": "G1",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1899",
-  "pull_request": "",
-  "tested_commit": "a3e90281916d6c2d5d4d8bfecfeaaa7872a9a630",
-  "status": "implemented-service-fixture-qualified-awaiting-dependency-and-integration",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1942",
+  "tested_commit": "02a4510dd1304ab1a29900fe390b20f7f150d18f",
+  "status": "G1 command service fixture qualified; pull request checks pending",
   "evidence_class": "isolated fakeredis and mocked command transports; no live terminal, Pod or UI rollout proof",
   "interfaces": [
     "Action: attach, detach, answer, drain, cancel and force-stop",
@@ -34,15 +34,17 @@
     "externally_verified": "None: no live terminal, Kubernetes, authenticated receiver or UI control proof at this stage."
   },
   "validation": {
-    "focused_tests": "155 passed in 1.88 seconds: command service, operation journal and accepted runtime protocol, two pytest workers",
+    "focused_tests": "157 passed in 2.29 seconds: command service, operation journal and accepted runtime protocol, two pytest workers",
     "lint": "ruff check passed for changed Python files",
     "format": "ruff format --check passed for changed Python files",
-    "limits": "ruff complexity, branches, arguments and statements passed; size gate: 84 units over a limit, 84 on the base allowlist, 0 errors"
+    "limits": "ruff complexity, branches, arguments and statements passed; size gate: 84 units over a limit, 84 on the base allowlist, 0 errors",
+    "continuous_integration": "Required tests and mutation tracked on pull request 1942; pending at report publication."
   },
   "cases": {
     "a": "evidence/SV2-RUN-05/a-result.json",
     "b": "evidence/SV2-RUN-05/b-result.json",
-    "c": "evidence/SV2-RUN-05/c-result.json"
+    "c": "evidence/SV2-RUN-05/c-result.json",
+    "recovery_boundary": "Transport applied detach but acknowledgement was lost; UNKNOWN journal entry was exported, restored and reconciled to APPLIED without a second effect. After replacement accepted a new drain, an old request was refused without overwriting registry or journal."
   },
   "rollback_rehearsal": {
     "action": "Construct Commands with enabled false. It hides new command controls and returns unsupported for new effects while retaining read-only attempt state. Existing local RuntimeRouter and controls are unchanged.",
@@ -50,16 +52,22 @@
     "proof": "Case C restores exported coordination state, retains working status, hides new controls and leaves the task running."
   },
   "remaining_limitations": [
-    "This parked life does not claim the package or integration gate complete; the observation dependency is still open.",
     "Commands is an injectable service; CLI and authenticated ledger receivers have not been wired to it.",
     "No production CommandTransport exists yet. A concrete backend must separately implement viewer registration, terminal answers, drain, cooperative task stop and identity-fenced forced termination, observing operation identity to reconcile lost acknowledgements.",
     "The mock transport models cooperative cancellation without releasing authority; final checkpoint and task-stop behavior must be proved when the concrete adapter is connected.",
     "The trusted authentication adapter must resolve the operator role or verify a scoped launch grant, rather than accepting a request-provided Principal.",
-    "Actual UI buttons and terminal profiles remain unchanged; later connected controls require the scratch-page visual proof and applicable live rollout evidence.",
-    "Continuous integration and mutation are not run for the parked branch's pull request because no pull request has been opened yet."
+    "Actual UI buttons and terminal profiles remain unchanged; later connected controls require the scratch-page visual proof and applicable live rollout evidence."
   ],
   "reviews": {
-    "Standards": "S1 closed after explicit authenticated Role and named operator subject were added; no open findings in parked service scope",
-    "Spec": "P2 closed; distinct operator audit identity and master incarnation fencing verified; real receiver and transport remain named gaps"
+    "Standards": "No service code findings; evidence refresh awaiting same reader re-review.",
+    "Spec": "No service behavior findings; interrupted recovery and current evidence fixes awaiting same reader re-review."
+  },
+  "scope_decision": "Master confirmed G1 isolated qualification on 2026-10-09: mocked receivers and transports qualify here; production integration belongs to later rollout gates.",
+  "dependency_evidence": "SV2-RUN-04 merged through pull request 1896; successor restacked command service onto origin/dev without conflicts.",
+  "fixture_clock": {
+    "initial_ms": 0,
+    "recovery_ms": 1,
+    "authority_expires_ms": 100,
+    "lease_obligation": "No command-service lease. Authentication adapter supplies current authority; fixture advances expiry deterministically."
   }
 }

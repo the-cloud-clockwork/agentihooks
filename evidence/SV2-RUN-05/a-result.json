@@ -1,5 +1,5 @@
 {
-  "tested_commit": "a3e90281916d6c2d5d4d8bfecfeaaa7872a9a630",
+  "tested_commit": "02a4510dd1304ab1a29900fe390b20f7f150d18f",
   "evidence_class": "isolated fakeredis and mocked command transports; no live terminal, Pod or UI rollout proof",
   "passed": true,
   "independent_fixtures": [
@@ -9,6 +9,7 @@
       "saved_profile_removed": true,
       "cooperative_stop_requested": true,
       "authority_unchanged": true,
+      "fake_clock_ms": 0,
       "other_backend_untouched": true,
       "audit": [
         {
@@ -18,7 +19,7 @@
             "execution_id": "",
             "generation": 0
           },
-          "execution_id": "exe-83ebec135fd9486e9d099c244fea78ac",
+          "execution_id": "exe-15edc0c1ca7148d18a8bb133aeca5517",
           "generation": 1,
           "command": "detach",
           "backend": "kubernetes",
@@ -31,7 +32,7 @@
             "execution_id": "",
             "generation": 0
           },
-          "execution_id": "exe-83ebec135fd9486e9d099c244fea78ac",
+          "execution_id": "exe-15edc0c1ca7148d18a8bb133aeca5517",
           "generation": 1,
           "command": "cancel",
           "backend": "kubernetes",
@@ -49,6 +50,7 @@
       "saved_profile_removed": true,
       "cooperative_stop_requested": true,
       "authority_unchanged": true,
+      "fake_clock_ms": 0,
       "other_backend_untouched": true,
       "audit": [
         {
@@ -58,7 +60,7 @@
             "execution_id": "",
             "generation": 0
           },
-          "execution_id": "exe-9cf2d8d3dc5e48098b0f3fa76815fa01",
+          "execution_id": "exe-53c65301267c4ef9a7663b9dd36d6490",
           "generation": 1,
           "command": "detach",
           "backend": "kubernetes",
@@ -71,7 +73,7 @@
             "execution_id": "",
             "generation": 0
           },
-          "execution_id": "exe-9cf2d8d3dc5e48098b0f3fa76815fa01",
+          "execution_id": "exe-53c65301267c4ef9a7663b9dd36d6490",
           "generation": 1,
           "command": "cancel",
           "backend": "kubernetes",

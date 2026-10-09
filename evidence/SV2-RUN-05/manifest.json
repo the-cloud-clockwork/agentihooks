@@ -1,12 +1,12 @@
 {
-  "tested_commit": "a3e90281916d6c2d5d4d8bfecfeaaa7872a9a630",
+  "tested_commit": "02a4510dd1304ab1a29900fe390b20f7f150d18f",
   "evidence_class": "isolated fakeredis and mocked command transports; no live terminal, Pod or UI rollout proof",
   "inputs": {
     "scripts/swarm_v2/runtime/commands.py": "db9e905406dbb4cbc9a6161d2a9eeb1dc0e43ae6a1feecb1e26fed01b0446b8a",
     "scripts/swarm_v2/runtime/operations.py": "4bf24d225ed0c6b2ed48adfaabbc32ca8d430fa977f00bdc9088f6547659df65",
-    "tests/test_swarm_v2_commands.py": "6640c6fc0dc69cb539dd1378a1deb7aaf105c81dccd028e984b33bc488a30f7b",
-    "tests/sv2_run05_cases.py": "a30fe492652ab1d9349a2fe705832c2cb576dbdf11bee6e1d9314590157aaf50",
-    "tests/fixtures/swarm_v2/runtime-commands.json": "e78fc19437b3fb8dc38f113b77c50ea38a291d25cf2216815fa700d7c5732109",
+    "tests/test_swarm_v2_commands.py": "78f71e716aaf74f0711c4deaa07a1577f423633d9c1587a65057e6d5a68f8e1c",
+    "tests/sv2_run05_cases.py": "8a7241916cd5f26919951f90eb21c4cfa0d5b251b96ecc1a19d1798f56271dca",
+    "tests/fixtures/swarm_v2/runtime-commands.json": "3ff0917943de15271a9fc0f2b6e77fb8148f5856990d9a38d7e989771a9b7589",
     "evidence/SV2-RUN-05/generate_case_results.py": "1d00c08249e6ecf897d556616487eeb7b72ae81c18a714df23e37167cfefd569",
     "Swarm-v2.md": "901950210888681b37156ed3f990b4c9b6050cee78468293993b656999bd26d9"
   }
