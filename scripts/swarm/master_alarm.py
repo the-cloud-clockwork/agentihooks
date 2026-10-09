@@ -37,25 +37,25 @@ def failed(store, slug, text, at) -> None:
     _save(store, slug, {**read(store, slug), "error": text, "at": at})
 
 
-def clear(store, slug, back=True) -> list[str]:
-    """back tells everyone the outage reached that the master is live again."""
-    state = read(store, slug)
-    if not state:
-        return []
-    store.redis.delete(store.key(slug, KEY))
-    if not back:
-        return []
-    inbox = InboxStore(store.redis)
+def clear(store, slug) -> list[str]:
+    state = drop(store, slug)
     told = [*state.get("told", []), *([seat_address(state["doctor"], MASTER)] if state.get("doctor") else [])]
+    inbox = InboxStore(store.redis)
     for address in told:
         inbox.send(SENDER, address, BACK.format(slug=slug))
     return [f"told {address} the master is back" for address in told]
 
 
+def drop(store, slug) -> dict:
+    state = read(store, slug)
+    store.redis.delete(store.key(slug, KEY))
+    return state
+
+
 def run(slug, store, runtime, promoted) -> list[str]:
     """promoted names the engineer restoring the master, whose promoted prompt replaces this notice."""
     state = read(store, slug)
-    if not state.get("error"):
+    if not state.get("error") or store.config(slug).state == "stopping":
         return []
     told, live = state.get("told", []), runtime.live_names()
     agents = sorted(

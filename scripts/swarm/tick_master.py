@@ -77,7 +77,7 @@ def run(slug, config, store, ledger, runtime, now_ms, launch) -> list[str]:
     launched = launch()
     actions = [FORCED.format(minutes=_shown(minutes)), *launched] if forcing else launched
     if config.state == "stopping":
-        master_alarm.clear(store, slug, back=False)
+        master_alarm.drop(store, slug)
         return actions + _stop(slug, store, ledger, state, now_ms)
     if master := _bound(store, slug, runtime):
         back = master_alarm.clear(store, slug)

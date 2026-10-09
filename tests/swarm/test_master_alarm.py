@@ -217,3 +217,25 @@ def test_a_forced_launch_with_no_hook_names_the_silent_master(store):  # noqa: F
     promoted = [text for _, text in mail(store, engineer.name) if text.startswith("PROMOTED")]
     error = master_start.NO_HOOK.format(name=silent)
     assert promoted == [tick_master.prompt("sw", engineer, tick_master.NO_HOOK, 5, error)]
+
+
+def test_a_stopping_swarm_drops_the_alarm_without_any_notice(store):  # noqa: F811
+    runtime, ledger = broken_outage(doctored(store))
+    names = [a.name for a in workers(store)]
+    store.update("sw", state="stopping")
+    tick("sw", store, ledger, runtime, 1 + DOWN)
+    assert master_alarm.read(store, "sw") == {}
+    assert [text for _, text in mail(store, DOCTOR_MASTER)] == [master_alarm.DOCTOR.format(slug="sw", error=BROKEN)]
+    back = ("swarm", master_alarm.BACK.format(slug="sw"))
+    assert all(back not in mail(store, name) and len(notices(store, name)) == 1 for name in names)
+
+
+def test_a_stopping_swarm_sends_no_alarm_while_its_master_pass_is_skipped(store):  # noqa: F811
+    doctored(store)
+    runtime = FakeRuntime()
+    runtime.live.add(ENGINEER)
+    store.put_agent("sw", AgentRecord(ENGINEER, "eng", "t1", state="working", seat="eng-1@sw"))
+    master_alarm.failed(store, "sw", BROKEN, 1)
+    store.update("sw", state="stopping")
+    assert master_alarm.run("sw", store, runtime, "") == []
+    assert mail(store, DOCTOR_MASTER) == []
