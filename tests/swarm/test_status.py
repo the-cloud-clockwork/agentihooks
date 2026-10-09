@@ -90,6 +90,9 @@ def test_stall_report_respects_actual_launch_and_startup_grace(monkeypatch, tmp_
     name = "engineer@a1b2c3-0001"
     limits = health.limits({"AGENTIHOOKS_HEALTH_STALLED_MINUTES": "4"})
     worker = AgentRecord(name, "eng", "t1", started_at=at - 11 * 60_000, launched_at=at - 4 * 60_000)
+    activity.record(
+        "Read", {}, {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": name}, tmp_path, now_ms=at - 4 * 60_000
+    )
     store.redis.set(store.key("sw", "pane-state", name), "working")
     rows = _health_rows(store, "sw", [worker], {}, at)
     assert health.stalled(rows, limits) == []
@@ -112,4 +115,29 @@ def test_unknown_start_and_tool_times_are_not_reported_as_a_stall(monkeypatch, t
     monkeypatch.setattr(activity, "default_root", lambda: tmp_path)
     worker = AgentRecord("engineer@a1b2c3-0001", "eng", "t1")
     rows = _health_rows(store, "sw", [worker], {}, 1_000_000)
+    assert rows[0]["tool_quiet_minutes"] is None
+
+
+def test_missing_tool_clock_remains_unmeasured_despite_old_launch_or_heartbeat(monkeypatch, tmp_path):
+    import fakeredis
+
+    from scripts.swarm import idle
+    from scripts.swarm.health import activity
+    from scripts.swarm.health import findings as health
+    from scripts.swarm.status import _health_rows
+    from scripts.swarm.store import AgentRecord
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    monkeypatch.setattr(activity, "default_root", lambda: tmp_path)
+    at = 3_000_000
+    name = "engineer@a1b2c3-0001"
+    worker = AgentRecord(name, "eng", "t1", started_at=at - 41 * 60_000)
+    store.redis.set(store.key("sw", "pane-state", name), "working")
+    idle.beat(store.redis, "sw", name, "working", at - 1_000)
+    rows = _health_rows(store, "sw", [worker], {}, at)
+    assert health.stalled(rows, health.Limits()) == []
+    assert rows[0]["tool_quiet_minutes"] is None
+    idle.beat(store.redis, "sw", name, "working", at - 11 * 60_000)
+    rows = _health_rows(store, "sw", [worker], {}, at)
+    assert health.stalled(rows, health.Limits()) == []
     assert rows[0]["tool_quiet_minutes"] is None
