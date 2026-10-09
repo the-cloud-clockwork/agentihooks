@@ -53,7 +53,14 @@ def gate_rows(home):
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
 
+def started(redis, by=ENG):
+    marks = progress.Progress(redis, SLUG)
+    if not marks.read(by).outcome_at:
+        marks.outcome(by, "pushed", 1)
+
+
 def fill(redis, home, by=ENG, count=talk.BUDGET):
+    started(redis, by)
     for n in range(count):
         _, rejected = say(redis, home, by, n)
         assert rejected == []
@@ -127,6 +134,17 @@ def test_an_outcome_resets_the_count(redis, tmp_path):
     assert rejected == []
 
 
+def test_talk_before_the_first_outcome_is_not_counted(redis, tmp_path):
+    mode(redis, "enforce")
+    for n in range(talk.BUDGET + 3):
+        assert say(redis, tmp_path, n=n)[1] == []
+    assert progress.Progress(redis, SLUG).read(ENG).talk == 0
+    assert gate_rows(tmp_path) == []
+    outcome(redis, tmp_path)
+    say(redis, tmp_path, n=99)
+    assert progress.Progress(redis, SLUG).read(ENG).talk == 1
+
+
 @pytest.mark.parametrize(
     ("fields", "kind"),
     [
@@ -153,6 +171,7 @@ def test_a_refused_task_update_records_no_outcome(redis, tmp_path):
 
 
 def test_comments_and_followups_count_as_talk(redis, tmp_path):
+    started(redis, CI)
     gate = budget(redis, tmp_path)
     comment = {"op": "add", "thread": "phases/p1/comments", "id": "c1", "text": "did it", "by": CI}
     followup = {"op": "add_item", "id": "f1", "by": CI, "list": "followups", "text": "later"}
@@ -307,6 +326,7 @@ def direct(redis, home, doc, op, meta=None, at=1000):
 
 
 def at_budget(redis, by=ENG):
+    started(redis, by)
     marks = progress.Progress(redis, SLUG)
     for _ in range(talk.BUDGET):
         marks.talk(by)

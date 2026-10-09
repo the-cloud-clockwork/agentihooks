@@ -56,6 +56,8 @@ def test_outcome_once_stamps_a_resolution_only_the_first_time(store):
         "cd /w && git push origin HEAD",
         "gh pr create --base dev --title x --body-file b.md",
         "git -C /w push",
+        "cd /w\ngit push -u origin HEAD",
+        "cd /w\ngh pr create --base dev --fill",
     ],
 )
 def test_pushes_and_opened_pull_requests_are_outcomes(command):
