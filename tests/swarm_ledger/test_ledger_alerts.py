@@ -579,9 +579,7 @@ def test_a_repeated_refusal_persists_its_new_deadline(monkeypatch):
 
 
 @pytest.mark.parametrize("refused", [False, True])
-def test_write_with_fifty_alerts_stays_within_old_time_plus_margin(inbox, monkeypatch, refused):
-    import time
-
+def test_write_with_fifty_alerts_resolves_fewer_names_than_it_holds_alerts(inbox, monkeypatch, refused):
     from scripts.swarm_ledger.api import mutations, resources
 
     make_ledger()
@@ -604,22 +602,22 @@ def test_write_with_fifty_alerts_stays_within_old_time_plus_margin(inbox, monkey
     ]
     ledger_server.repository.import_document(SLUG, state, replace=True)
 
-    def slow_name(name):
-        time.sleep(0.02)
+    resolved = []
+
+    def counted_name(name, *_):
+        resolved.append(name)
         return name
 
-    monkeypatch.setattr("scripts.swarm.naming.resolve_name", slow_name)
-    monkeypatch.setattr(inbox.names, "resolve", slow_name)
+    monkeypatch.setattr("scripts.swarm.naming.resolve_name", counted_name)
+    monkeypatch.setattr(inbox.names, "resolve", counted_name)
     op = {"op": "ack", "id": "one", "by": "writer", "rev": state["_meta"]["rev"]}
     guards = {}
     if refused:
         op = {"op": "task_add", "id": "one", "by": "writer", "task": "t1", "title": "Proof", "lane": "eng"}
         guards = {"tasks": resources.resource_revision(state, "tasks")}
-    started = time.perf_counter()
     reply = mutations.apply(ledger_server, SLUG, "", {"operation_id": "timed", "ops": [op], "guards": guards})
-    elapsed = time.perf_counter() - started
     assert reply["rejected"] == (["one"] if refused else [])
-    assert elapsed < 0.585293 + 0.150
+    assert len(resolved) < len(state["alerts"]), resolved
 
 
 def test_operation_author_is_resolved_once_per_write(monkeypatch):
