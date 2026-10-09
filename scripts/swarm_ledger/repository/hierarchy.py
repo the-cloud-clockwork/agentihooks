@@ -1,0 +1,84 @@
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS work_nodes (ledger_slug TEXT NOT NULL REFERENCES ledgers(slug) ON DELETE CASCADE, node_id TEXT NOT NULL, kind TEXT NOT NULL, parent_id TEXT, position INTEGER NOT NULL, PRIMARY KEY(ledger_slug,node_id));
+CREATE INDEX IF NOT EXISTS work_nodes_parent ON work_nodes(ledger_slug,parent_id,position);
+CREATE TABLE IF NOT EXISTS work_dependencies (ledger_slug TEXT NOT NULL, node_id TEXT NOT NULL, requires_id TEXT NOT NULL, PRIMARY KEY(ledger_slug,node_id,requires_id), FOREIGN KEY(ledger_slug,node_id) REFERENCES work_nodes(ledger_slug,node_id) ON DELETE CASCADE);
+CREATE INDEX IF NOT EXISTS work_dependencies_required ON work_dependencies(ledger_slug,requires_id);
+"""
+KINDS = {"plans": "plan", "phases": "phase", "slices": "slice", "tasks": "task"}
+NODES = "SELECT node_id, kind, parent_id, position FROM work_nodes WHERE ledger_slug=?"
+DEPENDENCIES = "SELECT node_id, requires_id FROM work_dependencies WHERE ledger_slug=?"
+COUNTS = (
+    "SELECT (SELECT COUNT(*) FROM work_nodes WHERE ledger_slug=?), "
+    "(SELECT COUNT(*) FROM work_dependencies WHERE ledger_slug=?)"
+)
+DELETE_NODE = "DELETE FROM work_nodes WHERE ledger_slug=? AND node_id=?"
+UPSERT_NODE = (
+    "INSERT INTO work_nodes VALUES (?, ?, ?, ?, ?) ON CONFLICT(ledger_slug,node_id) DO UPDATE SET "
+    "kind=excluded.kind, parent_id=excluded.parent_id, position=excluded.position"
+)
+DELETE_DEPENDENCY = "DELETE FROM work_dependencies WHERE ledger_slug=? AND node_id=? AND requires_id=?"
+INSERT_DEPENDENCY = "INSERT OR IGNORE INTO work_dependencies VALUES (?, ?, ?)"
+
+
+def parent(collection: str, item: dict) -> str | None:
+    if collection == "phases":
+        return item.get("plan") or None
+    if collection == "slices":
+        return item.get("phase") or None
+    if collection == "tasks":
+        return item.get("slice") or (f"phases/{item['phase']}" if item.get("phase") else None)
+    return None
+
+
+def project(state: dict) -> tuple[dict, set]:
+    nodes, dependencies = {}, set()
+    for collection, kind in KINDS.items():
+        for position, item in enumerate(state.get(collection) or []):
+            node = f"{collection}/{item['id']}"
+            nodes[node] = (kind, parent(collection, item), position)
+            dependencies.update((node, f"{collection}/{required}") for required in item.get("depends_on") or [])
+    return nodes, dependencies
+
+
+def stored(connection, slug: str) -> tuple[dict, set]:
+    nodes = {
+        node: (kind, parent_id, position) for node, kind, parent_id, position in connection.execute(NODES, (slug,))
+    }
+    return nodes, set(connection.execute(DEPENDENCIES, (slug,)))
+
+
+def apply(connection, slug: str, old: tuple, new: tuple) -> None:
+    (old_nodes, old_dependencies), (new_nodes, new_dependencies) = old, new
+    connection.executemany(DELETE_NODE, [(slug, node) for node in old_nodes if node not in new_nodes])
+    connection.executemany(
+        UPSERT_NODE, [(slug, node, *row) for node, row in new_nodes.items() if old_nodes.get(node) != row]
+    )
+    connection.executemany(DELETE_DEPENDENCY, [(slug, *edge) for edge in old_dependencies - new_dependencies])
+    connection.executemany(INSERT_DEPENDENCY, [(slug, *edge) for edge in new_dependencies - old_dependencies])
+
+
+def sync(connection, slug: str, before: dict, after: dict) -> None:
+    old, new = project(before), project(after)
+    if connection.execute(COUNTS, (slug, slug)).fetchone() != (len(old[0]), len(old[1])):
+        old = stored(connection, slug)
+    apply(connection, slug, old, new)
+
+
+def drift(have: tuple, want: tuple) -> dict:
+    (have_nodes, have_dependencies), (want_nodes, want_dependencies) = have, want
+    report = {
+        "missing_nodes": sorted(node for node in want_nodes if node not in have_nodes),
+        "extra_nodes": sorted(node for node in have_nodes if node not in want_nodes),
+        "changed_nodes": sorted(
+            node for node in want_nodes if node in have_nodes and have_nodes[node] != want_nodes[node]
+        ),
+        "missing_dependencies": sorted(list(edge) for edge in want_dependencies - have_dependencies),
+        "extra_dependencies": sorted(list(edge) for edge in have_dependencies - want_dependencies),
+    }
+    return {**report, "drift": sum(len(found) for found in report.values())}
+
+
+def rebuild(connection, slug: str, state: dict) -> dict:
+    have, want = stored(connection, slug), project(state)
+    apply(connection, slug, have, want)
+    return drift(have, want)
