@@ -134,23 +134,42 @@ def _step(job, name):
     return next(step for step in _workflow()["jobs"][job]["steps"] if step.get("name") == name)
 
 
-@pytest.mark.parametrize(("dispatched", "graded"), [("HEAD", "HEAD^1"), ("", "HEAD^1"), ("HEAD^1", "HEAD^1")])
-def test_coverage_ratchet_never_grades_a_dispatched_head_against_itself(tmp_path, dispatched, graded):
+@pytest.mark.parametrize(
+    ("dispatched", "ref", "graded"),
+    [
+        ("HEAD", "feature", "parent"),
+        ("", "feature", "parent"),
+        ("HEAD^1", "feature", "parent"),
+        ("origin/dev", "dev", "parent"),
+        ("origin/dev", "feature", "newer"),
+    ],
+)
+def test_coverage_ratchet_never_grades_a_dispatched_head_against_itself(tmp_path, dispatched, ref, graded):
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")
-    _commit(repo, {"a": "1"})
-    _commit(repo, {"a": "2"})
+    commits = {
+        "parent": _commit(repo, {"a": "1"}),
+        "head": _commit(repo, {"a": "2"}),
+        "newer": _commit(repo, {"a": "3"}),
+    }
+    _git(repo, "update-ref", "refs/remotes/origin/dev", commits["newer"])
+    _git(repo, "checkout", "-q", "--detach", commits["head"])
     output = tmp_path / "output"
     output.write_text("")
-    env = dict(os.environ, DISPATCHED=dispatched, QUEUE_BASE="", GITHUB_OUTPUT=str(output))
+    env = dict(os.environ, DISPATCHED=dispatched, QUEUE_BASE="", GITHUB_REF_NAME=ref, GITHUB_OUTPUT=str(output))
     step = _step("coverage-ratchet", "Resolve the measured base tree")
     subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True)
-    assert f"commit={_git(repo, 'rev-parse', graded)}\n" in output.read_text()
+    assert f"commit={commits[graded]}\n" in output.read_text()
 
 
-@pytest.mark.parametrize(("dispatched", "restored"), [("head", "parent"), ("other", "other")])
-def test_durations_restores_the_parent_baseline_when_the_dispatched_base_is_the_head(tmp_path, dispatched, restored):
+@pytest.mark.parametrize(
+    ("dispatched", "ref", "restored"),
+    [("head", "feature", "parent"), ("other", "feature", "other"), ("origin/dev", "dev", "parent")],
+)
+def test_durations_restores_the_parent_baseline_when_the_dispatched_base_is_the_head(
+    tmp_path, dispatched, ref, restored
+):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "gh").write_text(
@@ -170,6 +189,7 @@ def test_durations_restores_the_parent_baseline_when_the_dispatched_base_is_the_
         PATH=f"{bin_dir}:{os.environ['PATH']}",
         BASE=dispatched,
         GITHUB_SHA="head",
+        GITHUB_REF_NAME=ref,
         GITHUB_REPOSITORY="o/r",
         GITHUB_OUTPUT=str(output),
     )

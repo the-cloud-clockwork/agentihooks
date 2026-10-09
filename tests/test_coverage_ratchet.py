@@ -87,6 +87,14 @@ def test_a_deleted_module_pairs_with_no_unrelated_added_module():
     assert ratchet.pair_moves({"hooks/a.py": SOURCE}, {"hooks/z.py": UNRELATED, "hooks/broken.py": "def ("}) == {}
 
 
+def test_a_shared_generic_name_without_the_old_lines_pairs_nothing():
+    old_cli = "import sys\n\n\ndef main():\n    sys.exit(run(sys.argv))\n\n\ndef run(argv):\n    return len(argv)\n"
+    new_cli = "import json\n\n\ndef main():\n    print(json.dumps({}))\n\n\ndef run(argv):\n    return 0\n"
+    one_name = "def main():\n    return 1\n\n\ndef helper():\n    return 2\n\n\ndef other():\n    return 3\n"
+    assert ratchet.pair_moves({"hooks/old_cli.py": old_cli}, {"scripts/new_cli.py": new_cli}) == {}
+    assert ratchet.pair_moves({"hooks/old.py": one_name}, {"scripts/new.py": "def main():\n    return 1\n"}) == {}
+
+
 def _repo(tmp_path, files):
     for name, text in files.items():
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
@@ -104,7 +112,7 @@ def test_a_move_rewritten_below_git_rename_similarity_is_followed(tmp_path):
     listed = subprocess.run(
         ["git", "-C", str(tmp_path), "diff", "--name-status", "-M", "HEAD~1", "HEAD"], capture_output=True, text=True
     ).stdout
-    assert not listed.startswith("R")
+    assert not any(line.startswith("R") for line in listed.splitlines())
     assert coverage_history.renamed(tmp_path, "HEAD~1") == {"hooks/a.py": "scripts/b.py"}
     base = _measure("b1", {"hooks/a.py": {1, 2, 3}}, {"hooks/a.py": SOURCE})
     head_source = {"scripts/b.py": REWRITTEN}.get

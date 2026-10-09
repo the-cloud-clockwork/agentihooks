@@ -60,18 +60,30 @@ def _defined(source: str) -> set[str]:
         tree = ast.parse(source)
     except SyntaxError:
         return set()
-    return {
-        node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
-    }
+    kinds = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+    return {node.name for node in ast.walk(tree) if isinstance(node, kinds) and not node.name.startswith("__")}
+
+
+def _retained(old: str, new: str) -> bool:
+    kept = [number for number, line in enumerate(old.splitlines(), 1) if line.strip()]
+    mapped = line_map(old, new)
+    return 2 * sum(number in mapped for number in kept) >= len(kept)
 
 
 def pair_moves(gone: dict[str, str], added: dict[str, str]) -> dict[str, str]:
+    defined = {path: _defined(new) for path, new in added.items()}
     pairs = {}
     for old_path, old in gone.items():
         names = _defined(old)
-        scored = [(len(names & _defined(new)), len(line_map(old, new)), path) for path, new in added.items()]
-        shared, _, path = max(scored, default=(0, 0, ""))
-        if shared:
+        scored = [
+            (len(names & defined[path]), len(line_map(old, added[path])), path)
+            for path in added
+            if names & defined[path]
+        ]
+        if not scored:
+            continue
+        shared, _, path = max(scored)
+        if 2 * shared >= len(names) and _retained(old, added[path]):
             pairs[old_path] = path
     return pairs
 
