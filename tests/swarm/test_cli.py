@@ -285,6 +285,24 @@ def test_block_on_dev_red_is_refused_while_dev_is_green(env, capsys, monkeypatch
     assert store.redis.hgetall(dev_red.key("sw")) == {}
 
 
+def test_block_on_dev_red_says_why_when_the_runs_cannot_be_read(env, capsys, monkeypatch):
+    from scripts.swarm import dev_red
+
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+
+    def offline(repo, run=None):
+        raise subprocess.CalledProcessError(1, ["gh"], stderr="gh: offline")
+
+    monkeypatch.setattr(dev_red, "latest", offline)
+    capsys.readouterr()
+    assert run("sw", "--as", "ci@a1b2c3-0001", "block", "--dev-red", "dev is red") == 1
+    assert capsys.readouterr().err == "swarm: cannot read the dev Tests runs: gh: offline\n"
+    assert ledger.rows["t2"]["state"] != "blocked"
+    assert store.redis.hgetall(dev_red.key("sw")) == {}
+
+
 def test_a_plain_block_drops_an_earlier_dev_red_cause(env):
     from scripts.swarm import dev_red
 

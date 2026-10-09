@@ -1030,16 +1030,6 @@ def _close_members(ledger, slug, agent, lead, fields):
 def cmd_block(store, args):
     agent = _worker(store, args)
     ledger = LedgerClient()
-    red_run = None
-    if args.dev_red:
-        red_run = dev_red.record(store.redis, args.slug, agent.task, store.config(args.slug).repo)
-        if red_run is None:
-            raise SwarmError(
-                "the latest finished dev Tests run did not fail, so dev is not red; "
-                "keep working or block for the real reason"
-            )
-    else:
-        dev_red.clear(store.redis, args.slug, agent.task)
     rows = {task["id"]: task for task in ledger.tasks(args.slug)}
     for dependency in rows[agent.task].get("depends_on", []):
         if rows[dependency]["state"] != "done":
@@ -1050,14 +1040,28 @@ def cmd_block(store, args):
             waits.settle_notices(InboxStore(store.redis), agent, "a new wait")
             print(json.dumps({"task": agent.task, "state": "claimed", "waits_on": held}))
             return
-    block_agent(store, args.slug, agent, args.note, ledger)
+    red_run = _dev_red_run(store, args.slug) if args.dev_red else None
+    block_agent(store, args.slug, agent, args.note, ledger, red_run)
     cause = {"dev_red_run": red_run} if red_run is not None else {}
     print(
         json.dumps({"task": agent.task, "state": "blocked", **cause, "next": "stop now; the swarm closes this session"})
     )
 
 
-def block_agent(store, slug, agent, note, ledger):
+def _dev_red_run(store, slug):
+    try:
+        red_run = dev_red.failing_run(store.config(slug).repo)
+    except dev_red.READ_ERRORS as exc:
+        raise SwarmError(f"cannot read the dev Tests runs: {getattr(exc, 'stderr', None) or exc}") from exc
+    if red_run is None:
+        raise SwarmError(
+            "the latest finished dev Tests run did not fail, so dev is not red; keep working or block for the real reason"
+        )
+    return red_run
+
+
+def block_agent(store, slug, agent, note, ledger, red_run=None):
+    dev_red.hold(store.redis, slug, agent.task, red_run)
     ledger.update_task(slug, agent.task, {"state": "blocked"}, by=agent.name)
     ledger.comment(slug, agent.task, note, by=agent.name)
     waits.settle_notices(InboxStore(store.redis), agent, "a block")
