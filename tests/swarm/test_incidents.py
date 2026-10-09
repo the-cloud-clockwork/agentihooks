@@ -57,3 +57,28 @@ def test_host_pressure_pushes_and_mails_once_then_resolves(store, monkeypatch, l
     assert sent.call_count == 2
     assert "resolved" in sent.call_args.args[1]
     assert len(master_mail(store)) == 2
+
+
+def test_watchdog_outage_shares_probe_push_and_resolves(store, monkeypatch, tmp_path):
+    from scripts.swarm import incidents, ledger_watchdog, push
+    from tests.swarm.test_ledger_watchdog import PID, Host, plant
+    from tests.swarm.test_tick import FakeRuntime
+
+    sent = Mock(return_value=True)
+    monkeypatch.setattr(push, "send", sent)
+    host = Host(tmp_path, code=1, stderr="port busy")
+    plant(host.proc, host.argv)
+    (host.folder / ".server.pid").write_text(str(PID))
+    clock = Clock()
+    ledger = ProbedLedger(clock)
+    incidents.step(store.redis, "ledger", True)
+    ledger_watchdog.watch(store, "sw", ledger, FakeRuntime(), host)
+    assert sent.call_count == 1
+    assert sent.call_args.args[0] == "critical"
+    assert "restart failed" in sent.call_args.args[1]
+    assert len(master_mail(store)) == 1
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    assert sent.call_count == 2
+    assert "fast again" in sent.call_args.args[1]
+    assert len(master_mail(store)) == 2
