@@ -292,7 +292,13 @@ def rank_refusal(by, field="rank"):
     return ""
 
 
-def update_refusal(doc, op):
+def update_refusal(doc: dict, op: dict, meta: dict | None = None) -> str:
+    if (
+        meta is not None
+        and op["item"].split("/")[1] in meta.get("outcomes", {})
+        and any(key in op["fields"] for key in ("state", "proof", "pr_url", "claimed_by"))
+    ):
+        return "committed outcomes require controller reconciliation"
     for field in ("rank", "difficulty", "phase"):
         if field in op["fields"] and (refusal := rank_refusal(op["by"], field)):
             return refusal
@@ -356,14 +362,9 @@ def _update(doc, op, ctx):
     others = [t for t in doc["tasks"] if t["id"] != task_id]
     if task is None or not _known(others, op["fields"].get("depends_on", []) + op["fields"].get("parked_on", [])):
         return False
-    if task_id in ctx.meta.get("outcomes", {}) and any(
-        key in op["fields"] for key in ("state", "proof", "pr_url", "claimed_by")
-    ):
-        ctx.refused.append("committed outcomes require controller reconciliation")
-        return False
     if op.get("if_state") and task.get("state", "open") not in op["if_state"]:
         return True
-    if refusal := update_refusal(doc, op):
+    if refusal := update_refusal(doc, op, ctx.meta):
         ctx.refused.append(refusal)
         return False
     if "rank" in op["fields"]:
@@ -397,7 +398,7 @@ def _update(doc, op, ctx):
     return True
 
 
-def complete_outcome(doc: dict, op: dict, ctx, outcome: dict, actor: str) -> bool:
+def complete_outcome(doc: dict, op: dict, ctx: object, outcome: dict, actor: str) -> bool:
     from scripts.swarm_ledger.api.resources import revision
 
     proposal = outcome["proposal"]
@@ -405,7 +406,13 @@ def complete_outcome(doc: dict, op: dict, ctx, outcome: dict, actor: str) -> boo
     task = next((row for row in doc["tasks"] if row["id"] == task_id), None)
     receipt = {"operation_id": outcome["operation_id"], "digest": revision(outcome)}
     known = ctx.meta.get("outcomes", {}).get(task_id)
-    if task is None or op["item"] != f"tasks/{task_id}" or op["by"] != actor:
+    if (
+        task is None
+        or op["op"] != "task_update"
+        or op["item"] != f"tasks/{task_id}"
+        or op["by"] != actor
+        or op["fields"] != {"state": "done", "pr_url": proposal["pr_url"], "proof": proposal["proof"]}
+    ):
         ctx.refused.append("outcome identity conflict")
         return False
     if known:

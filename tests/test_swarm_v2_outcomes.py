@@ -374,7 +374,7 @@ def test_ledger_completion_rejects_changed_revision_without_overwriting(fixture)
         "op": "task_update",
         "item": f"tasks/{proposal.task_id}",
         "by": authority.current(proposal.task_id).holder,
-        "fields": {"state": "done"},
+        "fields": {"state": "done", "pr_url": proposal.pr_url, "proof": proposal.proof},
     }
     before = json.loads(json.dumps(doc))
     assert not ledger_tasks.complete_outcome(doc, op, ctx, authority.current(proposal.task_id).result, op["by"])
@@ -392,3 +392,53 @@ def test_package_acceptance_cases_repeat_independently(monkeypatch, tmp_path, ca
     assert first == second
     assert first["outcome_conflicts_total"] == 0
     assert set(sv2_ctl05_cases.manifest()) == {"outcome-attempts.json", "task-authority.json"}
+
+
+def test_ledger_transaction_rolls_back_when_ownership_changes_at_the_final_check(monkeypatch, tmp_path):
+    from scripts.swarm.store import SwarmError
+    from tests import sv2_ctl05_cases
+
+    outcomes, repository, token, proposal, clock, start, agent = sv2_ctl05_cases.build(monkeypatch, tmp_path)
+    outcomes.propose(token, proposal)
+    outcomes.integrate(token, proposal.generation)
+    before = repository.get_document(outcomes.authority.slug)
+    original = outcomes._receipt
+    checks = []
+
+    def replace_before_final_check(worker_token, generation, result):
+        checks.append(generation)
+        if len(checks) == 3:
+            clock[0] += 30_001
+            _, successor_token = start(previous=agent.execution_id)
+            outcomes.authority.admit(successor_token, 30_000)
+        return original(worker_token, generation, result)
+
+    monkeypatch.setattr(outcomes, "_receipt", replace_before_final_check)
+    with pytest.raises(SwarmError):
+        outcomes.complete(token, proposal.generation, repository)
+    assert repository.get_document(outcomes.authority.slug) == before
+    assert outcomes.authority.current(proposal.task_id).generation == 2
+
+
+def test_ledger_completion_refuses_tampered_payload(monkeypatch, tmp_path):
+    from scripts.swarm_v2.outcomes import CompletionGate
+    from tests import sv2_ctl05_cases
+
+    outcomes, repository, token, proposal, *_ = sv2_ctl05_cases.build(monkeypatch, tmp_path)
+    outcomes.propose(token, proposal)
+    result = outcomes.integrate(token, proposal.generation)
+    actor = outcomes.authority.current(proposal.task_id).holder
+    before = repository.get_document(outcomes.authority.slug)["tasks"][0]
+    operation = {
+        "id": "tampered",
+        "op": "task_update",
+        "item": f"tasks/{proposal.task_id}",
+        "by": actor,
+        "fields": {"state": "done", "pr_url": proposal.pr_url, "proof": {"run": "success"}},
+    }
+    _, rejected = repository.apply_ops(
+        outcomes.authority.slug, ops=[operation], gate=CompletionGate(outcomes, token, proposal.generation, result)
+    )
+    assert rejected == ["tampered"]
+    assert repository.get_document(outcomes.authority.slug)["tasks"][0] == before
+    assert outcomes.authority.current(proposal.task_id).state == "active"
