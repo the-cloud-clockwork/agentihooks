@@ -9,6 +9,7 @@ agentihooks swarm <id> close [--note TEXT] [--now]                 a live master
 agentihooks swarm <id> reopen                                     keep the summary and settings, start a fresh master
 agentihooks swarm <id> take-master [--replace]                    this session becomes the master and prints its priming
 agentihooks swarm <id> master up [--last | --new]                 from a terminal: bring back the last master's conversation or start a new one
+agentihooks swarm <id> <profile> up                               from a terminal: any role or overlay profile (planner, engineer, cicd, qa, frontend) in a pane for you, no task
 agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
 agentihooks swarm <id> snapshot | restore [--from FILE]           save the swarm's state to its folder (stop does too); restore the newest, paused
 agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
@@ -27,6 +28,7 @@ agentihooks swarm <id> culture set FILE | show                    the swarm's sh
 agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
 agentihooks swarm <id> issue URL | pr URL | branch | done [--pr URL] | block NOTE | handoff DOC [--recap FILE] [--reason R] | say TEXT [--to NAME|eng|ci]
 agentihooks swarm <id> learned TEXT [--maturity data|note|insight|canon]   (default note; canon only by the master)
+agentihooks swarm <id> exit              an agent launched with <profile> up ends its own session
 agentihooks swarm <id> park DOC          hold a stacked task on its pushed branch until its open dependencies merge
 agentihooks swarm <id> restack           rebase parked task work onto dev after its dependencies merge
 agentihooks swarm <id> wait MINUTES [--reason TEXT]                 the tick counts no idle tick while it holds
@@ -64,6 +66,7 @@ from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import (
     affinity,
+    agent_up,
     clearance,
     control_notifications,
     delivery,
@@ -500,6 +503,18 @@ def cmd_master(store, args):
         timer.ensure(timer.entry_point())
     ledger.join(args.slug, launched.master, "orchestrator")
     print(json.dumps(asdict(launched)))
+
+
+def cmd_agent_up(store, args):
+    launched = agent_up.up(store, args.slug, HerdrRuntime(), args.profile, now_ms())
+    print(json.dumps(asdict(launched)))
+
+
+def cmd_exit(store, args):
+    name = store.names.resolve(args.name or Who.from_env().name)
+    agent_up.retire(store, args.slug, name, now_ms())
+    print(json.dumps({"exited": name}), flush=True)
+    HerdrRuntime().reap_name(name)
 
 
 def gate_mode(key, value):
@@ -1264,6 +1279,8 @@ def build_parser():
     pick = master_up.add_mutually_exclusive_group()
     pick.add_argument("--last", dest="choice", action="store_const", const=master_launch.LAST, default="")
     pick.add_argument("--new", dest="choice", action="store_const", const=master_launch.NEW)
+    sub.add_parser("agent-up").add_argument("profile")
+    sub.add_parser("exit")
     sub.add_parser("set").add_argument("pairs", nargs="+")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
@@ -1346,6 +1363,8 @@ def main(argv):
     else:
         if len(argv) > 1 and argv[1].partition("=")[0] in (*SETTABLE, *LANE_KEYS, *EFFORT_KEYS, "autonomy"):
             argv = [argv[0], "set", *argv[1:]]
+        elif len(argv) == 3 and argv[2] == "up" and argv[1] != "master":
+            argv = [argv[0], "agent-up", argv[1]]
         args = build_parser().parse_args(argv)
         handler = globals()[f"cmd_{args.command.replace('-', '_')}"]
     who = Who.from_env()

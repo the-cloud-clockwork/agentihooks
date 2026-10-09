@@ -216,7 +216,8 @@ def _add(doc, op, ctx):
         return False
     if not _known(tasks, op.get("depends_on", [])):
         return False
-    if refusal := add_refusal(tasks, op):
+    appended = {p["id"] for p in doc.get("phases", []) if p.get("added_by") == op["by"]}
+    if refusal := add_refusal(tasks, op, appended):
         ctx.refused.append(refusal)
         return False
     task = {
@@ -258,7 +259,7 @@ def _add(doc, op, ctx):
     return True
 
 
-def add_refusal(tasks, op):
+def add_refusal(tasks, op, appended=()):
     from scripts.swarm.naming import lane_of
 
     by, lane = op["by"], lane_of(op["by"])
@@ -268,7 +269,7 @@ def add_refusal(tasks, op):
         return ""
     plans = [t for t in tasks if (t.get("claimed_by"), t.get("lane"), t.get("state")) == (by, "plan", "claimed")]
     if not plans:
-        return f"{by} holds no plan task and cannot add tasks: {PROPOSE}"
+        return "" if op.get("phase") in appended else f"{by} holds no plan task and cannot add tasks: {PROPOSE}"
     if plans[0].get("phase") != op.get("phase"):
         return f"{by} plans phase {plans[0].get('phase')} and cannot add a task outside it: {PROPOSE}"
     return ""
