@@ -302,13 +302,20 @@ def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
     mail, github = Mail(inbox, store, slug), functools.cache(github)
     events = doc.get("_meta", {}).get("events", [])
     tasks = {t["id"]: t for t in doc.get("tasks", [])}
+    raised = _raised_for_operator(doc, events)
     return (
-        _events(mail, new_events(store, slug, doc, "events-cursor"), tasks)
+        _events(mail, new_events(store, slug, doc, "events-cursor"), tasks, raised)
         + _followups(mail, doc, events, ledger, now_ms)
         + _pull_requests(mail, tasks.values(), now_ms, github)
         + _settle_red_notices(mail, github)
-        + _priorities(mail, doc)
+        + _priorities(mail, doc, raised)
     )
+
+
+def _raised_for_operator(doc, events):
+    """Follow-ups the swarm itself added for the operator: a master notice about one would escalate into another."""
+    added = {e.get("target") for e in events if e.get("kind") == "added" and e.get("by") == SENDER}
+    return {f"followups/{f['id']}" for f in doc.get("followups", []) if f.get("needs_operator")} & added
 
 
 def _settle_red_notices(mail, github):
@@ -386,9 +393,9 @@ def _by_agent(mail, event):
     return not (lane_of(by) == MASTER and mail.store.names.slug_of(by) == mail.slug)
 
 
-def _events(mail, events, tasks):
+def _events(mail, events, tasks, raised):
     sent = []
-    for event in filter(lambda e: _by_agent(mail, e), events):
+    for event in filter(lambda e: _by_agent(mail, e) and e.get("target") not in raised, events):
         text = _describe(mail.slug, event, tasks)
         if text:
             sent += mail.send(
@@ -445,7 +452,7 @@ def _followups(mail, doc, events, ledger, now_ms):
     return sent
 
 
-def _priorities(mail, doc):
+def _priorities(mail, doc, raised):
     key = mail.store.key(mail.slug, "priorities-sent")
     rows = {p["item"]: p for p in doc.get("priorities", [])}
     seen = mail.store.redis.smembers(key)
@@ -459,7 +466,7 @@ def _priorities(mail, doc):
     for item, row in rows.items():
         if item in seen or row.get("by") == SENDER or not _by_agent(mail, row):
             continue
-        if not seeding:
+        if not seeding and item not in raised:
             text = (
                 f"New priority on ledger {mail.slug} for {item}: {row['text']}\n"
                 "Triage it: resolve it if the call is yours, else leave it for the operator."
