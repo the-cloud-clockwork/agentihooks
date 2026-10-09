@@ -17,7 +17,7 @@ def _workflow():
 def test_required_gate_runs_after_parallel_unit_and_lint():
     jobs = _workflow()["jobs"]
     gate = jobs["gate-required"]
-    required = {"unit", "lint", "sonar", "mutation", "test-count", "semgrep"}
+    required = {"unit", "lint", "sonar", "mutation", "test-count", "coverage-ratchet", "semgrep"}
     assert gate["name"] == "Gate — Required"
     assert (
         required
@@ -107,6 +107,27 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
         'cd "$RUNNER_TEMP/base"\n'
         'python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
     )
+
+
+def test_coverage_ratchet_grades_the_merged_shards_from_the_base_copy():
+    jobs = _workflow()["jobs"]
+    job = jobs["coverage-ratchet"]
+    assert job["needs"] == ["unit", "queue-baseline"]
+    download = next(step for step in job["steps"] if step.get("name") == "Download shard coverage")
+    assert download["with"]["pattern"] == "coverage-3.12-*"
+    grade = next(step for step in job["steps"] if step.get("name") == "Hold every line the base ran")
+    assert '[[ -f "$grader/tests/coverage_ratchet.py" ]] || grader="$GITHUB_WORKSPACE"' in grade["run"]
+    assert f"--shards {jobs['unit']['strategy']['matrix']['shard'][-1]}" in grade["run"]
+    report = job["steps"][-1]
+    assert report["if"].startswith("always()")
+    assert report["with"]["path"] == "coverage-ratchet/report.txt"
+
+
+def test_coverage_ratchet_grades_a_merge_group_against_the_branch_it_queues_onto():
+    job = _workflow()["jobs"]["coverage-ratchet"]
+    base = next(step for step in job["steps"] if step.get("name") == "Resolve the measured base tree")
+    assert base["env"]["QUEUE_BASE"] == "${{ github.event.merge_group.base_sha }}"
+    assert 'base="$QUEUE_BASE"' in base["run"]
 
 
 def test_test_count_refuses_a_base_without_its_grader(tmp_path):
