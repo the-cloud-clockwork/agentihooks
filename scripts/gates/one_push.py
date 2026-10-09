@@ -18,6 +18,7 @@ DRAFTS = frozenset({"--draft", "-d", "--undo"})
 NO_PUSH = frozenset({"--dry-run", "-n", "--delete", "-d"})
 VALUED = frozenset({"-C", "-c"})
 GH_VALUED = frozenset({"-R", "--repo"})
+PUSH_VALUED = frozenset({"-o", "--push-option", "--repo", "--receive-pack", "--exec"})
 PULL_REPO = re.compile(r"github\.com/([^/]+/[^/]+)/pull/\d+")
 MATCHED = re.compile(r"\bpush\b|\bpr\s+(?:create|ready)\b")
 
@@ -47,7 +48,7 @@ def actions(command, cwd):
         if program == "cd" and rest:
             here = here / Path(rest[0]).expanduser()
         elif program == "gh" and _gh_args(rest)[:2] in OPENS and not DRAFTS.intersection(rest):
-            yield "open", here, rest
+            yield "open", here, ()
         elif program == "git":
             where, args = _git_args(here, rest)
             if args[:1] == ["push"] and not NO_PUSH.intersection(args):
@@ -64,9 +65,19 @@ def unsaved(path):
     return "commits not on origin" if count(path, "HEAD", "--not", "--remotes=origin") else ""
 
 
+def positionals(args):
+    found, words = [], iter(args)
+    for word in words:
+        if word in PUSH_VALUED:
+            next(words, None)
+        elif not word.startswith("-"):
+            found.append(word)
+    return found
+
+
 def repo_of(path, args):
     """The repository a push writes: its remote argument as a URL or a remote name, origin when it names none."""
-    remote = next((arg for arg in args if not arg.startswith("-")), "origin")
+    remote = next(iter(positionals(args)), "origin")
     url = remote if "/" in remote else git(path, "remote", "get-url", remote).stdout.strip()
     found = GITHUB_RE.search(url)
     return f"{found.group(1)}/{found.group(2)}".lower() if found else ""
@@ -75,7 +86,7 @@ def repo_of(path, args):
 def destinations(path, args):
     """The branches a push writes: each refspec's destination, the current branch for HEAD or no refspec."""
     current = git(path, "branch", "--show-current").stdout.strip()
-    specs = [arg for arg in args if not arg.startswith("-")][1:]
+    specs = positionals(args)[1:]
     ends = [spec.lstrip("+").split(":")[-1].removeprefix("refs/heads/") for spec in specs] or [""]
     return {current if end in ("", "HEAD") else end for end in ends}
 
