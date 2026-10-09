@@ -66,7 +66,7 @@ def invoke(root, base, head, event, output, env=None):
             "--repository",
             "o/r",
             "--run",
-            "99",
+            "7",
             "--attempt",
             "1",
             "--record",
@@ -79,13 +79,13 @@ def invoke(root, base, head, event, output, env=None):
     )
 
 
-def test_an_identical_queue_tree_reuses_a_full_passed_run(reuse_repo, tmp_path):
+@pytest.fixture
+def full_source(reuse_repo, tmp_path):
     root, base, head, queue = reuse_repo
     original = tmp_path / "original.json"
     result = invoke(root, base, head, "pull_request", original)
     assert result.returncode == 0, result.stdout + result.stderr
     record = json.loads(original.read_text())
-    record["run"] = 7
     archive = io.BytesIO()
     with zipfile.ZipFile(archive, "w") as zipped:
         zipped.writestr("provenance.json", json.dumps(record))
@@ -98,11 +98,10 @@ def test_an_identical_queue_tree_reuses_a_full_passed_run(reuse_repo, tmp_path):
         "head_sha": head,
     }
     names = ["reuse", "unit (3.11, 1)", "unit (3.12, 1)", "lint", "Gate — Required"]
-    jobs = [{"name": name, "conclusion": "success"} for name in names] + [
-        {"name": "queue-baseline", "conclusion": "skipped"}
-    ]
+    jobs = [{"id": 91 + n, "name": name, "conclusion": "success"} for n, name in enumerate(names)]
+    jobs.append({"id": 97, "name": "queue-baseline", "conclusion": "skipped"})
     artifacts = [{"id": 42, "name": "required-tree-1", "expired": False}]
-    artifacts += [{"id": 50 + n, "name": f"coverage-3.12-{n}", "expired": False} for n in [1]]
+    artifacts.append({"id": 51, "name": "coverage-3.12-1", "expired": False})
     responses = {
         "repos/o/r/actions/workflows/test.yml/runs?event=pull_request&status=success&per_page=20": {
             "workflow_runs": [source]
@@ -113,6 +112,11 @@ def test_an_identical_queue_tree_reuses_a_full_passed_run(reuse_repo, tmp_path):
             "artifacts": artifacts,
         },
         "repos/o/r/actions/artifacts/42/zip": {"binary": base64.b64encode(archive.getvalue()).decode()},
+        "repos/o/r/actions/jobs/91/logs": {
+            "binary": base64.b64encode(
+                "".join(f"2026-10-09T11:00:00.000Z {line}\n" for line in result.stdout.splitlines()).encode()
+            ).decode()
+        },
     }
     fixture = tmp_path / "responses.json"
     fixture.write_text(json.dumps(responses))
@@ -127,10 +131,43 @@ def test_an_identical_queue_tree_reuses_a_full_passed_run(reuse_repo, tmp_path):
         "else: print(json.dumps(value))\n"
     )
     (bin_dir / "gh").chmod(0o755)
-    output = tmp_path / "queue.json"
     env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", REUSE_FIXTURE=str(fixture))
+    env.pop("GITHUB_OUTPUT", None)
+    return root, base, head, queue, env, responses, record
+
+
+def test_an_identical_queue_tree_reuses_a_full_passed_run(full_source, tmp_path):
+    root, base, head, queue, env, _, _ = full_source
+    output = tmp_path / "queue.json"
     result = invoke(root, base, queue, "merge_group", output, env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "reused=true" in result.stdout
     assert "run=7" in result.stdout
     assert json.loads(output.read_text())["tree"] == git(root, "rev-parse", f"{head}^{{tree}}")
+
+
+def test_a_one_line_difference_runs_fully(full_source, tmp_path):
+    root, base, _, _, env, _, _ = full_source
+    (root / "code.txt").write_text("planted\n")
+    git(root, "add", "code.txt")
+    plant = git(root, "commit-tree", git(root, "write-tree"), "-p", base, input="plant\n")
+    result = invoke(root, base, plant, "merge_group", tmp_path / "plant.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=false" in result.stdout
+
+
+def test_overwritten_metadata_cannot_claim_the_planted_tree_passed(full_source, tmp_path):
+    root, base, _, _, env, responses, record = full_source
+    (root / "code.txt").write_text("planted\n")
+    git(root, "add", "code.txt")
+    plant = git(root, "commit-tree", git(root, "write-tree"), "-p", base, input="plant\n")
+    record["commit"] = plant
+    record["tree"] = git(root, "rev-parse", f"{plant}^{{tree}}")
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("provenance.json", json.dumps(record))
+    responses["repos/o/r/actions/artifacts/42/zip"] = {"binary": base64.b64encode(archive.getvalue()).decode()}
+    Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
+    result = invoke(root, base, plant, "merge_group", tmp_path / "forged.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=false" in result.stdout
