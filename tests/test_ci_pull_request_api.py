@@ -17,7 +17,7 @@ WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
 LOCAL_ONLY = {ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"}}
 TOKEN = re.compile(
     r"github\s*(\.\s*token|\[\s*['\"]token['\"]\s*\])"
-    r"|secrets\s*(\.|\[\s*['\"])\s*(github|gh)\w*"
+    r"|secrets\s*(\.|\[\s*['\"])\s*(github|gh)\w*(token|pat)"
     r"|\$\{\{(?:(?!\}\})[\s\S])*?(?<![\w.'\"-])(secrets|github)\s*(\)|\}\})",
     re.IGNORECASE,
 )
@@ -43,8 +43,8 @@ def _all_jobs():
 
 def _all_steps():
     for name, job in _all_jobs():
-        for key in ("env", "with"):
-            if TOKEN.search(_values(job.get(key))):
+        for key in ("env", "with", "secrets"):
+            if isinstance(job.get(key), dict) and TOKEN.search(_values(job[key])):
                 yield name, {"name": f"job {key}", key: job[key]}, ROOT
         for step in job.get("steps", []):
             action = step.get("uses", "")
@@ -79,11 +79,20 @@ def test_no_step_on_any_event_holds_the_workflow_token_or_calls_the_api():
 
 
 @pytest.mark.parametrize("called", ["./.github/workflows/called.yml", "o/r/.github/workflows/called.yml@v1"])
-def test_a_reusable_workflow_call_passing_the_workflow_token_is_an_offender(monkeypatch, called):
-    caller = {"uses": called, "with": {"token": "${{ github.token }}"}}
+@pytest.mark.parametrize(
+    ("passed", "offenders"),
+    [
+        ({"with": {"token": "${{ github.token }}"}}, ["caller"]),
+        ({"secrets": {"token": "${{ secrets.GITHUB_TOKEN }}"}}, ["caller"]),
+        ({"secrets": "inherit"}, []),
+    ],
+    ids=["with-input", "secrets-mapping", "secrets-inherit"],
+)
+def test_a_reusable_workflow_call_passing_the_workflow_token_is_an_offender(monkeypatch, called, passed, offenders):
+    caller = {"uses": called, **passed}
     monkeypatch.setitem(globals(), "_jobs", lambda: {"caller": caller})
     monkeypatch.setitem(globals(), "_workflow", lambda name: {"jobs": {"inner": {"steps": []}}})
-    assert [job for job, step, _ in _all_steps() if _offends(step)] == ["caller"]
+    assert [job for job, step, _ in _all_steps() if _offends(step)] == offenders
 
 
 def _called(text: str, here: Path):
@@ -321,6 +330,7 @@ def test_each_way_of_reaching_the_api_is_an_offender(plant):
         "${{ toJSON(github.event) }}",
         "${{ secrets.SONAR_TOKEN }}",
         "${{ secrets['SONAR_TOKEN'] }}",
+        "${{ secrets.GITHUB_APP_ID }}",
         "${{ contains(github.ref, 'github') }}",
         "https://github.com/the-cloud-clockwork/agentihooks",
         'case "$host" in github) exit 0;; esac',
@@ -332,6 +342,7 @@ def test_each_way_of_reaching_the_api_is_an_offender(plant):
         "event-to-json",
         "other-secret",
         "bracketed-other-secret",
+        "github-named-other-secret",
         "quoted-word",
         "url",
         "shell-case-label",
