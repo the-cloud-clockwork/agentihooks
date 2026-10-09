@@ -180,7 +180,8 @@ def test_classifier_calls_are_host_scoped_with_stable_source_ids():
         "answers": {"ready": {"value": True}},
         "state_digest": "digest",
     }
-    rows = metrics_swarm.classifier_rows([call, call], "machine")
+    calls = [{**call, "_source_id": "first"}, {**call, "_source_id": "second"}]
+    rows = metrics_swarm.classifier_rows(calls, "machine")
     assert len(rows) == 2
     assert rows[0]["event_id"] != rows[1]["event_id"]
     assert {key: rows[0][key] for key in ("ledger", "plan", "phase", "slice", "task", "host")} == {
@@ -197,7 +198,7 @@ def test_classifier_calls_are_host_scoped_with_stable_source_ids():
         "latency_ms": 15,
         "verdict": '{"ready": {"value": true}}',
     }
-    assert metrics_swarm.classifier_rows([call, call], "machine") == rows
+    assert metrics_swarm.classifier_rows(calls, "machine") == rows
 
 
 def test_nullable_classifier_metadata_keeps_legacy_purpose_and_failed_backend():
@@ -209,7 +210,10 @@ def test_nullable_classifier_metadata_keeps_legacy_purpose_and_failed_backend():
         "latency_ms": 1,
         "answers": {},
     }
-    rows = metrics_swarm.classifier_rows([call, {**call, "definition": "named", "source": "api"}], "machine")
+    rows = metrics_swarm.classifier_rows(
+        [{**call, "_source_id": "first"}, {**call, "definition": "named", "source": "api", "_source_id": "second"}],
+        "machine",
+    )
     assert [(row["definition"], row["backend"]) for row in rows] == [("intent", ""), ("named", "api")]
     assert rows[0]["verdict"] == "{}"
     for row in rows:

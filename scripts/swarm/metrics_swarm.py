@@ -247,7 +247,7 @@ def classifier_rows(calls: list, host: str) -> list[dict]:
             **_base(
                 f"host:{host}",
                 int(datetime.fromisoformat(source["ts"]).timestamp() * 1000),
-                ["classifier", source.get("_source_id", index), source],
+                ["classifier", source["_source_id"]],
                 {},
             ),
             "host": host,
@@ -256,7 +256,7 @@ def classifier_rows(calls: list, host: str) -> list[dict]:
             "latency_ms": source["latency_ms"],
             "verdict": json.dumps(source["answers"], sort_keys=True),
         }
-        for index, source in enumerate(calls)
+        for source in calls
     ]
 
 
