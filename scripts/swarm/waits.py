@@ -8,7 +8,7 @@ import json
 import re
 
 from scripts.inbox.store import CLOSED, InboxError
-from scripts.swarm import idle
+from scripts.swarm import idle, mutation_wait
 from scripts.swarm.store import SwarmError
 
 KINDS = ("checks", "merge", "reply", "task")
@@ -74,6 +74,8 @@ def target_problem(kind, target, mine, rows, get):
     """Why the target cannot be waited on, or '' when the tick can check it."""
     if kind in ("checks", "merge"):
         return "" if PULL_URL.fullmatch(target) else f"wait on {kind} needs a pull request url, not {target}"
+    if kind == "mutation":
+        return "" if mutation_wait.RUN_URL.fullmatch(target) else "wait on mutation needs an Actions run url"
     if kind == "task":
         if target == mine:
             return f"task {target} is your own task"
@@ -109,6 +111,8 @@ def merge_resolution(held, github, reread, fresh):
 def resolution(held, rows, inbox, github, reread, fresh):
     """What ended the wait, in plain words, or '' while it still holds."""
     kind, target = held["kind"], held["target"]
+    if kind == "mutation":
+        return mutation_wait.resolution(held)
     if kind == "checks":
         return checks_resolution(held, github)
     if kind == "merge":
