@@ -1,6 +1,7 @@
 """Swarm agents as herdr panes: spawn through init-agent, find live ones by name, retire by the process recorded at
 spawn."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -39,6 +40,20 @@ STARTED_ROUTES = ("routed", "bare", "direct")
 AUTO = "auto"
 PICKED_LANES = ("eng", "ci")
 PLAN_MODE = ["--permission-mode", "plan"]
+
+
+def codex_plan_mode(environ):
+    home = Path(environ.get("HOME") or Path.home())
+    ledger = Path(environ.get("LEDGER_DIR") or home / "development-ledger").expanduser()
+    grants = ", ".join(
+        f'{json.dumps(str(root))}="write"' for root in (ledger, home / ".agentihooks" / "swarm", home / "scratchpad")
+    )
+    return [
+        "-c",
+        f'permissions.planner={{extends=":read-only", network={{enabled=true}}, filesystem={{{grants}}}}}',
+        "-c",
+        'default_permissions="planner"',
+    ]
 
 
 def _bin():
@@ -484,7 +499,7 @@ class HerdrRuntime:
             picked = timing.call(model_pick.pick, agent, {} if quota_transfer else chosen, task, environ)
         else:
             picked = _lane_default(lane, agent, {} if quota_transfer else chosen)
-        mode = PLAN_MODE if (lane, agent) == ("plan", "claude") else []
+        mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
         route = ["--route", saved["account"]] if saved.get("account") else []
         account = None
         if hasattr(self, "_quota_accounts"):
