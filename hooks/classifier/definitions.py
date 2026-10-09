@@ -200,6 +200,8 @@ def _paths(name: str) -> list[Path]:
 def _overrides(package: Definition, selected: Definition) -> None:
     if package.purpose != selected.purpose:
         raise DefinitionError("overrides must preserve package purpose")
+    if set(package.thresholds) != set(selected.thresholds):
+        raise DefinitionError("overrides must preserve package threshold keys")
     if package.rule.type == "code" or selected.rule.type == "code":
 
         def keys(definition):
@@ -223,7 +225,7 @@ def _environment(definition: Definition, environ: dict | None = None) -> Definit
                 value = float(raw)
             except ValueError as exc:
                 raise DefinitionError(f"threshold {key} must be between zero and one") from exc
-            thresholds[key] = value if legacy else _probability(value, key)
+            thresholds[key] = _probability(value, key)
     return replace(definition, thresholds=thresholds)
 
 
