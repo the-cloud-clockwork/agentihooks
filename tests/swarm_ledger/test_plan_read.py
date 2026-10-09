@@ -23,9 +23,13 @@ def slug(tmp_path, monkeypatch):
         "artifacts": [{"plan": True, "file": file}],
         "phases": [{"id": "p1", "plan_ref": ref}, {"id": "p2"}],
         "tasks": [
-            {"id": "mid", "phase": "p1", "plan_lines": "15-17"},
+            {"id": "mid", "phase": "p1", "plan_lines": "15-17", "description": "Do not print this description."},
             {"id": "top", "phase": "p1", "plan_lines": "2-3"},
-            {"id": "bare", "phase": "p1"},
+            {
+                "id": "bare",
+                "phase": "p1",
+                "description": "Keep engineers moving.\n\nUse this whole task specification.",
+            },
             {"id": "loose", "phase": "p2", "plan_lines": "4-5"},
         ],
     }
@@ -46,6 +50,13 @@ def refusal(argv, environ):
 
 def test_task_chunk_carries_ten_lines_of_margin_each_side(slug, capsys):
     assert run(capsys, ["--task", "mid"], {"AGENTIHOOKS_SWARM": slug}) == numbered(5, 27)
+
+
+def test_task_without_plan_lines_prints_its_description_as_the_whole_spec(slug, capsys):
+    assert run(capsys, ["--task", "bare"], {"AGENTIHOOKS_SWARM": slug}) == (
+        "This task has no plan lines; its description is the whole spec.\n\n"
+        "Keep engineers moving.\n\nUse this whole task specification.\n"
+    )
 
 
 def test_margin_is_clamped_to_the_plan_start(slug, capsys):
@@ -87,7 +98,6 @@ def test_numbered_keeps_the_plan_line_numbers_and_skips_blank_rows():
 @pytest.mark.parametrize(
     ("argv", "message"),
     [
-        (["--task", "bare"], "task bare has no plan lines"),
         (["--task", "gone"], "no task gone in ledger chunks"),
         (["--task", "loose"], "phase p2 has no plan range"),
         (["--phase", "p2"], "phase p2 has no plan range"),
