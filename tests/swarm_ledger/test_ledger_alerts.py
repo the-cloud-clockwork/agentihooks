@@ -539,7 +539,7 @@ def test_quiet_expiry_uses_original_time_for_an_older_refusal(monkeypatch):
 def test_server_sweep_tolerates_an_older_ledger_without_alerts(monkeypatch):
     state = make_ledger()
     state.pop("alerts")
-    monkeypatch.setattr(ledger_server.repository, "get_document", lambda slug: state)
+    monkeypatch.setattr(ledger_server.repository, "read", lambda slug, *keys: state)
     ledger_server.expire_alerts()
     assert "alerts" not in state
 
@@ -576,3 +576,68 @@ def test_a_repeated_refusal_persists_its_new_deadline(monkeypatch):
     stored = ledger_server.repository.get_document(SLUG)
     assert stored["alerts"][0]["last_refused_at"] == 10001000
     assert stored["_meta"]["rev"] == rev + 1
+
+
+@pytest.mark.parametrize("refused", [False, True])
+def test_write_with_fifty_alerts_stays_within_old_time_plus_margin(inbox, monkeypatch, refused):
+    import time
+
+    from scripts.swarm_ledger.api import mutations, resources
+
+    make_ledger()
+    state, _ = sync([{"op": "join", "id": "joined", "by": "writer"}])
+    if refused:
+        state, _ = sync(
+            [{"op": "task_add", "id": "seed", "by": "swarm", "task": "t1", "title": "Proof", "lane": "eng"}]
+        )
+    state["alerts"] = [
+        {
+            "id": f"old-{n}",
+            "text": f"Earlier refusal {n}",
+            "source": "sync",
+            "target": "operator",
+            "state": "open",
+            "at": core.now_ms(),
+            "rev": state["_meta"]["rev"],
+        }
+        for n in range(50)
+    ]
+    ledger_server.repository.import_document(SLUG, state, replace=True)
+
+    def slow_name(name):
+        time.sleep(0.02)
+        return name
+
+    monkeypatch.setattr("scripts.swarm.naming.resolve_name", slow_name)
+    monkeypatch.setattr(inbox.names, "resolve", slow_name)
+    op = {"op": "ack", "id": "one", "by": "writer", "rev": state["_meta"]["rev"]}
+    guards = {}
+    if refused:
+        op = {"op": "task_add", "id": "one", "by": "writer", "task": "t1", "title": "Proof", "lane": "eng"}
+        guards = {"tasks": resources.resource_revision(state, "tasks")}
+    started = time.perf_counter()
+    reply = mutations.apply(ledger_server, SLUG, "", {"operation_id": "timed", "ops": [op], "guards": guards})
+    elapsed = time.perf_counter() - started
+    assert reply["rejected"] == (["one"] if refused else [])
+    assert elapsed < 0.585293 + 0.150
+
+
+def test_operation_author_is_resolved_once_per_write(monkeypatch):
+    make_ledger()
+    calls = []
+
+    def resolve(name):
+        calls.append(name)
+        return "writer" if name == "alias" else name
+
+    monkeypatch.setattr("scripts.swarm.naming.resolve_name", resolve)
+    state, _ = sync(
+        [
+            {"op": "join", "id": "joined", "by": "alias"},
+            {"op": "ack", "id": "acknowledged", "by": "writer", "rev": 1},
+        ]
+    )
+    assert calls == ["alias"]
+    assert "writer" in state["_meta"]["members"]
+    sync([{"op": "ack", "id": "again", "by": "writer", "rev": 1}])
+    assert calls == ["alias", "writer"]

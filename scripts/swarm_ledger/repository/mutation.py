@@ -25,7 +25,7 @@ def apply(slug, state, core, changes=None, ops=None, gate=None, created=False):
         doc.setdefault("alerts", [])
         for text in ctx.refused[start:]:
             ledger_alerts.raise_warning(
-                doc, ctx, (ledger_alerts.SYNC, text, ledger_alerts.writer(op), ledger_alerts.item(op)), []
+                doc, ctx, (ledger_alerts.SYNC, text, ledger_alerts.writer(op, ctx), ledger_alerts.item(op)), []
             )
     ledger_artifacts.sweep(slug, doc, ctx)
     ledger_media.attach_paths(slug, doc, ctx.events)
