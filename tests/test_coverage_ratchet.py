@@ -290,6 +290,15 @@ def test_the_report_lists_every_missed_line_and_every_lost_line(tmp_path):
     assert "hooks/a.py:3 ran on base b1 and no head test runs it" in text
 
 
+def test_the_report_lists_only_lines_no_head_shard_ran(tmp_path):
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "hooks/a.py").write_text(SOURCE)
+    (tmp_path / "coverage-3.12-1").mkdir()
+    shard = _shard(tmp_path / "coverage-3.12-1/.coverage", {"hooks/a.py": [1, 2, 3]})
+    (tmp_path / "out").mkdir()
+    assert ratchet._missed(tmp_path, [shard], tmp_path / "out") == {"hooks/a.py": [4]}
+
+
 def test_a_failed_github_read_is_retried_before_the_gate_gives_up(monkeypatch):
     import subprocess
 
