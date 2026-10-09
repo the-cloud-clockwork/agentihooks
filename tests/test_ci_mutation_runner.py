@@ -317,7 +317,13 @@ def test_gate_persists_full_mutation_evidence_and_respects_reader_clearance(
     (tmp_path / "tests").mkdir()
     (tmp_path / "hooks/sample.py").write_text("def f():\n    return 1\n")
     (tmp_path / "tests/test_sample.py").write_text("pass\n")
-    row = {"name": "hooks.sample.x_f__mutmut_1", "status": "survived", "lines": [2], "fingerprint": "abc"}
+    row = {
+        "name": "hooks.sample.x_f__mutmut_1",
+        "status": "survived",
+        "lines": [2],
+        "fingerprint": "abc",
+        "diff": "-    return 1\n+    return 2",
+    }
 
     def mutate(root, work, selected, deadline):
         assert root == tmp_path
@@ -352,4 +358,10 @@ def test_gate_persists_full_mutation_evidence_and_respects_reader_clearance(
     assert report["files"][0]["counts"] == {"survived": 1}
     assert report["not_mutated"] == []
     assert json.loads((tmp_path / "output/report.json").read_text()) == report
-    assert json.loads(capsys.readouterr().out) == report["files"][0]
+    first, _, survivors = capsys.readouterr().out.partition("\n")
+    assert json.loads(first) == report["files"][0]
+    if fails:
+        assert survivors.startswith("survived on lines 2: hooks/sample.py:hooks.sample.x_f__mutmut_1:abc\n")
+        assert survivors.endswith("\n-    return 1\n+    return 2\n")
+    else:
+        assert survivors == ""
