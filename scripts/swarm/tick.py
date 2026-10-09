@@ -652,16 +652,21 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     agents, actions = store.agents(slug), []
     taken = {a.seat for a in agents}
     held = _held_for_master(slug, store, now_ms)
-    for lane, task in _spawn_order(slug, config, store, agents, rows, doc):
+    order = _spawn_order(slug, config, store, agents, rows, doc)
+    admitted = _admitted(slug, runtime, order, now_ms)
+    for lane, task in order:
         if held:
             return actions + held
         if not runtime.has_capacity(config):
             return actions + ["every agent is at its session cap, waiting"]
-        if blocked := _lives_spent(slug, store, ledger, rows, task):
+        blocked = _not_admitted(slug, ledger, rows, task, admitted) or _lives_spent(slug, store, ledger, rows, task)
+        if blocked:
+            _release_admission(slug, runtime, task)
             actions.append(blocked)
             continue
         name = store.next_name(slug, lane, now_ms)
         if not store.claim(slug, task["id"], name, LEASE_MS):
+            _release_admission(slug, runtime, task)
             continue
         handoff = store.handoff(slug, task["id"])
         if handoff:
@@ -695,6 +700,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             live = ledger.update_task(slug, task["id"], fields, if_state=("open",))
             task.update(live)
             if live["claimed_by"] != name:
+                _release_admission(slug, runtime, task)
                 store.release(slug, task["id"], name)
                 store.drop_agent(slug, name)
                 actions.append(f"task {task['id']} is {live['state']} on the ledger, not claimed")
@@ -705,6 +711,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             task["transfer"] = transfers.attach(store, slug, record)
             placed = runtime.spawn(config, lane, name, primed(store, slug, seat, task))
         except Exception as exc:
+            _release_admission(slug, runtime, task)
             _record_spawn_failure(slug, store, record, exc)
             actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
             if isinstance(exc, ProfileUnresolved):
@@ -735,6 +742,40 @@ def _spawn_order(slug, config, store, agents, rows, doc):
         ready = ready[: max(cap - busy, 0)]
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
     return [(lane, task) for _, lane, task in sorted(queue, key=lambda entry: entry[0])]
+
+
+def _admission(runtime):
+    from scripts.swarm_v2.admission import PendingAdmission
+
+    gate = getattr(runtime, "admission", None)
+    return gate if isinstance(gate, PendingAdmission) else None
+
+
+def _admitted(slug, runtime, order, now_ms):
+    gate = _admission(runtime)
+    if gate is None:
+        return None
+    return {d.task: d for d in gate.admit(slug, [task for _, task in order], now_ms)}
+
+
+def _not_admitted(slug, ledger, rows, task, admitted):
+    from scripts.swarm_v2.admission import DEFERRED, IMPOSSIBLE
+
+    decision = (admitted or {}).get(task["id"])
+    if decision is None:
+        return ""
+    if decision.outcome == IMPOSSIBLE:
+        return _unresolved(slug, ledger, rows, task["id"], decision.reason)
+    if decision.outcome == DEFERRED:
+        return f"task {task['id']} waits: {decision.reason}"
+    task["admission"] = {"reservation": decision.reservation, "deadline_ms": decision.deadline_ms}
+    return ""
+
+
+def _release_admission(slug, runtime, task):
+    held = task.get("admission")
+    if held:
+        _admission(runtime).release(slug, task["id"], held["reservation"])
 
 
 def _unresolved(slug, ledger, rows, task_id, reason):
