@@ -1,12 +1,17 @@
 name: Mutation preflight
 
 on:
+  workflow_call:
+    inputs:
+      base:
+        type: string
+        required: true
   push:
     branches-ignore: [dev, main, "gh-readonly-queue/**", "wip/**"]
 
 concurrency:
-  group: mutation-preflight-${{ github.ref }}
-  cancel-in-progress: true
+  group: mutation-preflight-${{ github.event_name == 'push' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 permissions:
   contents: read
@@ -14,7 +19,7 @@ permissions:
 
 jobs:
   pull-request:
-    if: ${{ !github.event.deleted }}
+    if: ${{ github.event_name == 'push' && !github.event.deleted }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
@@ -30,10 +35,11 @@ jobs:
 
   mutation:
     needs: pull-request
-    if: ${{ needs.pull-request.outputs.open == 'false' }}
+    if: ${{ !cancelled() && (github.event_name != 'push' || needs.pull-request.outputs.open == 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
+      BASE: ${{ inputs.base || 'origin/dev' }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
       - uses: actions/checkout@v4
@@ -55,7 +61,7 @@ jobs:
 
       - name: Select mutation tests before browser setup
         id: selection
-        run: python -m scripts.ci_mutation.browser --base origin/dev
+        run: python -m scripts.ci_mutation.browser --base "$BASE"
 
       - name: Install the browser that page tests drive
         id: browser
@@ -72,7 +78,7 @@ jobs:
       - name: Mutate changed Python files
         env:
           PYTHONUNBUFFERED: "1"
-        run: python -m scripts.ci_mutation --base origin/dev --budget 1080
+        run: python -m scripts.ci_mutation --base "$BASE" --budget 1080
 
       - name: Upload complete mutation evidence
         if: always()

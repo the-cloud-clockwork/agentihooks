@@ -5,7 +5,7 @@ description: Triages a swarm ledger's Priorities with the operator in the master
 
 # Triage Priorities
 
-The master runs this from its own pane, and the operator decides here; never send the operator to the page or to another pane. `SLUG` is the master's ledger. The scripts need `agentihooks ledger relay` (agentihooks with the relay command). They read the ledger file and write through `agentihooks ledger` as this session's agent name. Run them by full path in every call, because shell variables you set do not survive between calls. `CLAUDE_CONFIG_DIR` is set by the session itself: it names the master's rendered profile home, and is unset in the operator's own home:
+The master runs this from its own pane, and the operator decides here; never send the operator to the page or to another pane. `SLUG` is the master's ledger. The scripts need `agentihooks ledger relay` (agentihooks with the relay command). They read the ledger through `agentihooks ledger show` and write through `agentihooks ledger` as this session's agent name. Run them by full path in every call, because shell variables you set do not survive between calls. `CLAUDE_CONFIG_DIR` is set by the session itself: it names the master's rendered profile home, and is unset in the operator's own home:
 
 ```
 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/skills/triage-priorities/scripts/list_priorities.py

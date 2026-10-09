@@ -3,7 +3,7 @@
 
 Usage: list_priorities.py SLUG [--clear-resolved] [--skip ID...] [--as NAME]
 
-Reads LEDGER_DIR/SLUG.json (default ~/development-ledger). Prints JSON {"open": [...], "resolved": [...]}.
+Reads the ledger through `agentihooks ledger --slug SLUG show`. Prints JSON {"open": [...], "resolved": [...]}.
 --clear-resolved clears every resolved priority through `agentihooks ledger priority clear`.
 --skip leaves out the priorities the operator already decided this run.
 """
@@ -13,7 +13,6 @@ import json
 import os
 import subprocess
 import sys
-from pathlib import Path
 
 # The last comments carry the item's current ask; older ones are history.
 RECENT = 3
@@ -21,16 +20,14 @@ RECENT = 3
 GROUP_ORDER = ("questions", "approvals", "blocked", "follow ups", "phases", "tasks")
 
 
-def ledger_path(slug):
-    return Path(os.environ.get("LEDGER_DIR") or Path.home() / "development-ledger") / f"{slug}.json"
-
-
 def load(slug):
-    path = ledger_path(slug)
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        done = subprocess.run(["agentihooks", "ledger", "--slug", slug, "show"], capture_output=True, text=True)
+        if done.returncode:
+            raise ValueError((done.stderr or done.stdout).strip())
+        return json.loads(done.stdout)
     except (OSError, ValueError) as exc:
-        sys.exit(f"cannot read ledger {slug} in {path.parent}: {exc}. Check the slug with: agentihooks ledger list")
+        sys.exit(f"cannot read ledger {slug}: {exc}. Check the slug with: agentihooks ledger list")
 
 
 def find(doc, item):

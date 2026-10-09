@@ -1,11 +1,13 @@
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
 
+from hooks.config import CONDITIONS_TIMEOUT_SEC
 from scripts.gates import Call, Gate, Who, push_stop
 from scripts.gates.progress import Progress
-from scripts.gates.push_stop import TEMPLATE, PushStop, count, record_text
+from scripts.gates.push_stop import GATE_FAILED, GATE_SLOW, TEMPLATE, PushStop, count, record_text
 from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import InboxStore
 from scripts.swarm.naming import plain
@@ -464,3 +466,117 @@ def test_git_runs_in_the_worktree_with_a_timeout(monkeypatch):
 
 def test_a_count_git_cannot_answer_is_zero(tmp_path):
     assert count(tmp_path, "HEAD") == 0
+
+
+def install_gate(rig, code, before=""):
+    log = rig.root / "gate.log"
+    gate = rig.tree / "scripts" / "ci_prepush"
+    gate.mkdir(parents=True)
+    (rig.tree / "scripts" / "__init__.py").write_text("")
+    (gate / "__init__.py").write_text("")
+    (gate / "__main__.py").write_text(
+        "import os\n"
+        f"with open({str(log)!r}, 'a') as log:\n"
+        "    log.write(os.getcwd() + ' ' + os.environ.get('AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN', '') + '\\n')\n"
+        "print('gate output')\n"
+        "print('gate errors', file=__import__('sys').stderr)\n"
+        f"{before}raise SystemExit({code})\n"
+    )
+    git(rig.tree, "add", "scripts")
+    git(rig.tree, "commit", "-m", "gate")
+    return log
+
+
+def test_a_failing_pre_push_gate_keeps_the_branch_off_origin_and_names_the_worktree(monkeypatch, rig):
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    log = install_gate(rig, 1)
+    decision = rig.stop()
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {GATE_FAILED.format(path=rig.tree)}")
+    assert rig.remote_head() == ""
+    assert rig.ledger.comments == []
+    assert log.read_text() == f"{rig.tree} \n"
+
+
+def test_a_passing_pre_push_gate_runs_in_the_worktree_with_the_local_test_setting_then_pushes(capfd, monkeypatch, rig):
+    monkeypatch.setenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", "true")
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    log = install_gate(rig, 0)
+    capfd.readouterr()
+    assert rig.stop().allowed
+    assert rig.remote_head() == git(rig.tree, "rev-parse", "HEAD")
+    assert log.read_text() == f"{rig.tree} true\n"
+    assert capfd.readouterr() == ("", "")
+
+
+def test_a_head_the_gate_already_passed_is_pushed_without_running_it_again(rig):
+    from scripts.ci_prepush import stamp_path
+
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    log = install_gate(rig, 1)
+    head = git(rig.tree, "rev-parse", "HEAD")
+    stamp_path(rig.tree).write_text(head)
+    assert rig.stop().allowed
+    assert rig.remote_head() == head
+    assert not log.exists()
+
+
+def test_the_failure_text_is_exact():
+    assert GATE_FAILED.format(path="/w") == (
+        "The pre push gate failed in /w, so the stop hook did not push it. "
+        "Run python -m scripts.ci_prepush there, fix what fails and commit."
+    )
+    assert GATE_SLOW.format(path="/w", seconds=8.0) == (
+        "The pre push gate did not finish in 8 s in /w, so the stop hook did not push it. "
+        "Run python -m scripts.ci_prepush there and commit."
+    )
+
+
+def gone(pid):
+    status = Path(f"/proc/{pid}/status")
+    for _ in range(40):
+        if not status.exists() or "State:\tZ" in status.read_text():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_a_pre_push_gate_past_its_timeout_is_killed_with_its_children_and_keeps_the_branch_off_origin(monkeypatch, rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    pid = rig.root / "child.pid"
+    slow = (
+        "import subprocess, time\n"
+        "import sys\n"
+        "stubborn = 'import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(300)'\n"
+        "child = subprocess.Popen([sys.executable, '-c', stubborn])\n"
+        f"open({str(pid)!r}, 'w').write(str(child.pid))\n"
+        "time.sleep(30)\n"
+    )
+    install_gate(rig, 0, before=slow)
+    monkeypatch.setattr(push_stop, "GATE_TIMEOUT_S", 2)
+    decision = rig.stop()
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {GATE_SLOW.format(path=rig.tree, seconds=2)}")
+    assert rig.remote_head() == ""
+    assert gone(int(pid.read_text()))
+
+
+def test_the_gate_stops_two_seconds_before_the_stop_condition_is_killed():
+    assert push_stop.GATE_TIMEOUT_S == CONDITIONS_TIMEOUT_SEC - 2
+
+
+def test_a_pre_push_gate_killed_by_a_signal_keeps_the_branch_off_origin(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    install_gate(rig, "os.kill(os.getpid(), 9)")
+    decision = rig.stop()
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {GATE_FAILED.format(path=rig.tree)}")
+    assert rig.remote_head() == ""
+
+
+def test_a_pushed_head_with_dirty_files_never_runs_the_gate(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    log = install_gate(rig, 1)
+    git(rig.tree, "push", "origin", f"HEAD:refs/heads/{BRANCH}")
+    (rig.tree / "readme").write_text("changed\n")
+    decision = rig.stop()
+    assert (decision.allowed, decision.reason) == (False, TEMPLATE)
+    assert not log.exists()
