@@ -1,7 +1,7 @@
 import pytest
 
-from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger import ledger_artifacts, ledger_tasks, new_ledger
+from scripts.swarm_ledger import ledger_core as core
 from tests.swarm_ledger import legacy_page
 from tests.swarm_ledger.plan_slices import anchored
 
@@ -124,10 +124,17 @@ def test_a_refused_move_keeps_the_existing_plan_metadata():
     assert task(state) == before
 
 
-
 def test_replacement_slice_uses_the_destination_link_without_a_plan_reference():
     file = ledger_artifacts.store(SLUG, "destination.md", b"# Plan\n<!-- slice: new -->\nBuild new feature\n")
-    op = {"op": "artifact_add", "id": "destination", "by": MASTER, "task": "", "title": "Plan", "file": file, "plan": True}
+    op = {
+        "op": "artifact_add",
+        "id": "destination",
+        "by": MASTER,
+        "task": "",
+        "title": "Plan",
+        "file": file,
+        "plan": True,
+    }
     core.check_op(op)
     assert core.sync(SLUG, ops=[op])[1] == []
     url = f"http://127.0.0.1:8765/artifacts/{SLUG}/{file['id']}"
