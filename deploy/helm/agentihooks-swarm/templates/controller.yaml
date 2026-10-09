@@ -43,6 +43,8 @@ spec:
           env:
             {{- include "swarm.env" . | nindent 12 }}
           {{- include "swarm.envFrom" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.probe.resources | nindent 12 }}
       containers:
         - name: controller
           image: {{ include "swarm.image" . }}
@@ -75,10 +77,8 @@ spec:
               value: /run/agentihooks
             {{- include "swarm.extraEnv" .Values.controller.env | nindent 12 }}
           {{- include "swarm.envFrom" . | nindent 10 }}
-          {{- with .Values.controller.resources }}
           resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- toYaml .Values.controller.resources | nindent 12 }}
           volumeMounts:
             - name: home
               mountPath: /run/agentihooks

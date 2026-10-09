@@ -19,7 +19,14 @@ ledger:
     size: 1Gi
     storageClassName: ""
   env: {}
-  resources: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+      ephemeral-storage: 64Mi
+    limits:
+      memory: 512Mi
+      ephemeral-storage: 256Mi
 
 redis:
   enabled: true
@@ -34,18 +41,49 @@ redis:
   persistence:
     size: 1Gi
     storageClassName: ""
-  resources: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+      ephemeral-storage: 64Mi
+    limits:
+      memory: 512Mi
+      ephemeral-storage: 256Mi
 
 controller:
   env: {}
-  resources: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+      ephemeral-storage: 64Mi
+    limits:
+      memory: 512Mi
+      ephemeral-storage: 256Mi
 
 worker:
   enabled: false
   replicas: 0
   command: []
   env: {}
-  resources: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+      ephemeral-storage: 64Mi
+    limits:
+      memory: 512Mi
+      ephemeral-storage: 256Mi
+
+probe:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+      ephemeral-storage: 16Mi
+    limits:
+      memory: 128Mi
+      ephemeral-storage: 64Mi
 
 networkPolicy:
   enabled: true

@@ -32,8 +32,6 @@ spec:
             {{- include "swarm.env" . | nindent 12 }}
             {{- include "swarm.extraEnv" .Values.worker.env | nindent 12 }}
           {{- include "swarm.envFrom" . | nindent 10 }}
-          {{- with .Values.worker.resources }}
           resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- toYaml .Values.worker.resources | nindent 12 }}
 {{- end }}

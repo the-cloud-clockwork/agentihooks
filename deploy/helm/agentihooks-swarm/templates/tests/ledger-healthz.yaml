@@ -16,6 +16,8 @@ spec:
       image: {{ include "swarm.image" . }}
       imagePullPolicy: {{ .Values.image.pullPolicy }}
       {{- include "swarm.containerSecurity" . | nindent 6 }}
+      resources:
+        {{- toYaml .Values.probe.resources | nindent 8 }}
       env:
         - name: LEDGER_URL
           value: {{ include "swarm.ledgerUrl" . | quote }}

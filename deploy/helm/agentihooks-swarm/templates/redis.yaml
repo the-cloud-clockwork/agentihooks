@@ -59,10 +59,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
-          {{- with .Values.redis.resources }}
           resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- toYaml .Values.redis.resources | nindent 12 }}
   volumeClaimTemplates:
     - metadata:
         name: data

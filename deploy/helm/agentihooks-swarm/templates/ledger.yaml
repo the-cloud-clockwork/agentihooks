@@ -77,10 +77,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
-          {{- with .Values.ledger.resources }}
           resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- toYaml .Values.ledger.resources | nindent 12 }}
   volumeClaimTemplates:
     - metadata:
         name: data
