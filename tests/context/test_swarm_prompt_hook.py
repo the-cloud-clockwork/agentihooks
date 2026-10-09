@@ -3,6 +3,8 @@ import pytest
 import hooks.context.swarm_heartbeat as swarm_heartbeat
 from hooks import hook_manager
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
 
 @pytest.fixture
 def calls(monkeypatch):

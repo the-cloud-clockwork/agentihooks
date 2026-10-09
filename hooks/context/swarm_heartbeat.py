@@ -61,3 +61,21 @@ def report(model, effort="", environ=None, redis=None, now_ms=None):
         redis = redis_client(env)
     session_model.put(redis, slug, name, model, effort, time.time_ns() // 1_000_000 if now_ms is None else now_ms)
     return True
+
+
+def outcome(payload, environ=None, redis=None, now_ms=None):
+    """Record a push or an opened pull request as the worker's outcome on every harness; the ledger hook runs on Claude only."""
+    from scripts.gates.progress import Progress, outcome_of
+
+    env = os.environ if environ is None else environ
+    slug, name = env.get("AGENTIHOOKS_SWARM"), env.get("AGENTIHOOKS_AGENT_NAME")
+    command = (payload.get("tool_input") or {}).get("command") if payload.get("tool_name") == "Bash" else None
+    kind = outcome_of(command)
+    if not (slug and name and kind):
+        return ""
+    if redis is None:
+        from scripts.swarm.store import redis_client
+
+        redis = redis_client(env)
+    Progress(redis, slug).outcome(name, kind, now_ms)
+    return kind
