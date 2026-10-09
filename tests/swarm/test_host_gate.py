@@ -42,20 +42,35 @@ def _workers(runtime):
     return [task for _, _, task in runtime.spawned]
 
 
+def _room(store):
+    return json.loads(store.redis.get(store.key("sw", "quota-capacity")))["host"]["room"]
+
+
 def test_manual_caps_above_the_host_room_spawn_up_to_the_room_and_the_rest_once_room_returns(store):
     ledger, runtime = _ledger(), FakeRuntime()
     _decide(store, 2)
     actions = tick.tick("sw", store, ledger, runtime, now_ms=1_000)
-    held = f"holding spawns: host memory, room 2 is used: {MEMORY}"
+    held = f"holding spawns: host memory, no room left: {MEMORY}"
     assert [name for name, _ in runtime.masters] == ["master@a1b2c3-0001"]
     assert _workers(runtime) == ["t1"]
     assert held in actions
     assert tick.spawn_holds(store, "sw") == [held]
+    assert _room(store) == 0
     _decide(store, 3)
     actions = tick.tick("sw", store, ledger, runtime, now_ms=61_000)
     assert _workers(runtime) == ["t1", "t3", "t2"]
     assert not any(action.startswith("holding spawns") for action in actions)
     assert tick.spawn_holds(store, "sw") == []
+    assert _room(store) == 1
+
+
+def test_a_room_used_up_stays_used_until_a_new_reading_gives_more(store):
+    ledger, runtime = _ledger(), FakeRuntime()
+    _decide(store, 2)
+    tick.tick("sw", store, ledger, runtime, now_ms=1_000)
+    actions = tick.tick("sw", store, ledger, runtime, now_ms=61_000)
+    assert _workers(runtime) == ["t1"]
+    assert f"holding spawns: host memory, no room left: {MEMORY}" in actions
 
 
 def test_an_unknown_host_lets_every_spawn_pass(store):
@@ -64,6 +79,7 @@ def test_an_unknown_host_lets_every_spawn_pass(store):
     actions = tick.tick("sw", store, ledger, runtime, now_ms=1_000)
     assert _workers(runtime) == ["t1", "t3", "t2"]
     assert not any(action.startswith("holding") for action in actions)
+    assert _room(store) is None
 
 
 def test_a_decision_without_a_host_reading_never_holds(store):
@@ -71,19 +87,23 @@ def test_a_decision_without_a_host_reading_never_holds(store):
     store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"effective": CAPS}))
     tick.tick("sw", store, ledger, runtime, now_ms=1_000)
     assert _workers(runtime) == ["t1", "t3", "t2"]
+    assert "host" not in json.loads(store.redis.get(store.key("sw", "quota-capacity")))
 
 
-def test_the_master_seat_waits_for_host_room(store):
+def test_the_master_seat_waits_for_host_room_and_spends_it(store):
     runtime = FakeRuntime()
     reason = "one minute load 1.60 per CPU is above the high watermark 1.50, no room"
     _decide(store, 0, reason, "load")
     actions = tick.tick("sw", store, FakeLedger([]), runtime, now_ms=1_000)
-    assert f"holding the master spawn: host load, room 0 is used: {reason}" in actions
+    held = f"holding the master spawn: host load, no room left: {reason}"
+    assert held in actions
+    assert tick.spawn_holds(store, "sw") == [held]
     assert runtime.masters == []
     assert [a for a in store.agents("sw") if a.lane == MASTER] == []
     _decide(store, 1)
     actions = tick.tick("sw", store, FakeLedger([]), runtime, now_ms=61_000)
     assert "spawned master master@a1b2c3-0001" in actions
+    assert _room(store) == 0
 
 
 def test_the_quota_seat_check_runs_before_the_host_gate(store):
@@ -91,6 +111,14 @@ def test_the_quota_seat_check_runs_before_the_host_gate(store):
     actions = tick.tick("sw", store, _ledger(), FakeRuntime(full=True), now_ms=1_000)
     assert "no session slot for the master, waiting" in actions
     assert not any(action.startswith("holding") for action in actions)
+
+
+def test_a_paused_tick_clears_an_old_hold(store):
+    _decide(store, 2)
+    tick.tick("sw", store, _ledger(), FakeRuntime(), now_ms=1_000)
+    store.update("sw", state="paused")
+    tick.tick("sw", store, _ledger(), FakeRuntime(), now_ms=61_000)
+    assert tick.spawn_holds(store, "sw") == []
 
 
 def test_swarm_status_names_the_host_room_and_the_held_spawn(store, monkeypatch, capsys):
@@ -101,8 +129,8 @@ def test_swarm_status_names_the_host_room_and_the_held_spawn(store, monkeypatch,
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     assert cli.main(["sw", "status"]) == 0
     lines = capsys.readouterr().out.splitlines()
-    assert f"host room 2: {MEMORY}" in lines
-    assert f"holding spawns: host memory, room 2 is used: {MEMORY}" in lines
+    assert f"host room 0: {MEMORY}" in lines
+    assert f"holding spawns: host memory, no room left: {MEMORY}" in lines
 
 
 def test_swarm_status_names_an_unknown_host(store, monkeypatch, capsys):
