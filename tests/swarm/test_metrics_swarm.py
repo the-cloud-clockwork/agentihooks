@@ -5,9 +5,8 @@ from types import SimpleNamespace
 import fakeredis
 import pytest
 
-from scripts.swarm import metrics_swarm
+from scripts.swarm import metrics_outbox, metrics_swarm
 from scripts.swarm.host_budget import HostSample
-from scripts.swarm import metrics_outbox
 from scripts.swarm.metrics_outbox import Outbox, Settings
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
