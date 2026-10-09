@@ -297,8 +297,9 @@ agenti --route api              # force the api side; fails when no api endpoint
 
 The launch line reports `account`, `routing_left` and `sessions=n/cap`, or
 `account=api kind=api` for the api side. The api weight decides which side a
-launch takes; with every account at its cap the launch falls back to the api,
-and fails and names why when the api is full or absent.
+launch takes; with every account at its cap the launch falls back to the api.
+When the api is full or absent too, the launch fails with `no Claude account has
+a free session under its quota band`.
 
 ## `agentihooks balance`
 

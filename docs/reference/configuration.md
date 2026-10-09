@@ -216,7 +216,7 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 |----------|---------|-------------|
 | `AH_CC_TOKEN_<slug>` | — | One Claude subscription OAuth token per account |
 | `AH_CX_TOKEN_<slug>` | — | One Codex ChatGPT workspace access token per account |
-| `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` | — | Any credential that outranks the OAuth token in Claude Code's precedence offers a Claude `api` slot; token children never inherit them |
+| `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` | — | Offer a Claude `api` slot: a `CLAUDE_CODE_USE_*` platform flag, a foreign `ANTHROPIC_BASE_URL` with either credential, or `ANTHROPIC_API_KEY` alone. Token children never inherit them |
 | `CODEX_API_KEY`, `OPENAI_API_KEY` | — | Either offers a Codex `api` slot (first set wins) |
 | `AH_CX_API_BASE_URL`, `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Base URL of the Codex api provider; must carry no user, password, query or fragment |
 | `AH_ROUTE_API` | set by the router | Name-only marker on an api child; the process counts on account `api` and the quota policy skips it |
