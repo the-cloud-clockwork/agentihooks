@@ -1,5 +1,6 @@
 from scripts.swarm import host_budget
 from scripts.swarm.host_budget import HostSample, Thresholds
+from scripts.swarm.store import SwarmConfig
 
 LIMITS = Thresholds(load_high=1.5, load_low=1.0, memory_per_agent_mb=700)
 
@@ -145,3 +146,52 @@ def test_projection_equal_to_memory_names_memory():
 
     assert decision.room == 12
     assert "MB available memory fits 12" in decision.reason
+
+
+def test_each_room_names_the_limit_that_set_it():
+    assert host_budget.room(_sample(load1=40.0, available_mb=16000, agents=10), LIMITS, previous=5).limit == "load"
+    assert host_budget.room(_sample(load1=24.0, available_mb=16000, agents=10), LIMITS, previous=3).limit == "load"
+    assert host_budget.room(_sample(load1=24.0, available_mb=1400, agents=10), LIMITS, previous=5).limit == "memory"
+    assert host_budget.room(_sample(load1=18.0, available_mb=16000, agents=18), LIMITS).limit == "load"
+    assert host_budget.room(_sample(load1=0.0, available_mb=2100), LIMITS).limit == "memory"
+
+
+def test_thresholds_read_the_swarm_config():
+    config = SwarmConfig("sw", "/repo", 1, 0, load_high=2.5, load_low=1.25, memory_per_agent_mb=900)
+
+    assert host_budget.thresholds(config) == Thresholds(load_high=2.5, load_low=1.25, memory_per_agent_mb=900)
+
+
+def test_spawn_room_judges_a_sample_with_the_swarm_thresholds():
+    config = SwarmConfig("sw", "/repo", 1, 0, load_high=2.0, load_low=1.5, memory_per_agent_mb=1000)
+    sample = _sample(load1=4.0, available_mb=5000, agents=2, cpus=8)
+
+    assert host_budget.spawn_room(config, sample, 2) == host_budget.room(sample, Thresholds(2.0, 1.5, 1000), 2)
+
+
+def test_an_unknown_sample_has_no_room_limit_and_says_host_unknown():
+    decision = host_budget.spawn_room(SwarmConfig("sw", "/repo", 1, 0), None, 4)
+
+    assert decision == host_budget.Room(
+        None, "host unknown: the process files cannot be read, so spawns pass", "unknown"
+    )
+
+
+def test_a_host_without_process_files_reads_as_unknown(tmp_path):
+    assert host_budget.read_host(tmp_path) is None
+
+
+def test_a_meminfo_without_available_memory_reads_as_unknown(tmp_path):
+    (tmp_path / "loadavg").write_text("0.50 0.40 0.30 1/100 42\n")
+    (tmp_path / "meminfo").write_text("MemTotal: 16000000 kB\n")
+
+    assert host_budget.read_host(tmp_path) is None
+
+
+def test_a_readable_host_gives_its_sample(tmp_path):
+    (tmp_path / "loadavg").write_text("0.50 0.40 0.30 1/100 42\n")
+    (tmp_path / "meminfo").write_text("MemTotal: 16000000 kB\nMemAvailable: 2048000 kB\n")
+
+    sample = host_budget.read_host(tmp_path)
+
+    assert (sample.load1, sample.available_mb, sample.agents) == (0.5, 2000, 0)
