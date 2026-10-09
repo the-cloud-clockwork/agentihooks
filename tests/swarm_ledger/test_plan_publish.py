@@ -751,4 +751,4 @@ def test_anchors_of_an_empty_stored_plan_are_none(monkeypatch):
     from scripts.swarm_ledger import plan_ranges
 
     monkeypatch.setattr(plan_ranges, "stored_text", lambda ref, doc: "")
-    assert plan_ranges.anchors({}, {"plan_url": PLAN}) == []
+    assert plan_ranges.anchors({}, {"plan_url": "http://127.0.0.1:8765/artifacts/s/f.md"}) == []

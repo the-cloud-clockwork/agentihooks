@@ -168,18 +168,14 @@ def check_phase_ref(doc: dict, phase: dict) -> None:
 
 
 def anchors(doc: dict, phase: dict) -> list[str]:
-    try:
-        return stored_anchors(doc, phase)
-    except ValueError:
-        return []
-
-
-def stored_anchors(doc: dict, phase: dict) -> list[str]:
     ref = phase.get("plan_ref")
     url = ref["artifact"] if ref else phase.get("plan_url")
-    if not url:
+    if not url or not urlsplit(url).path.startswith("/artifacts/"):
         return []
-    text = stored_text({"artifact": url, "lines": "1-1"}, doc)
+    try:
+        text = stored_text({"artifact": url, "lines": "1-1"}, doc)
+    except (ValueError, OSError) as exc:
+        raise ValueError(f"phase {phase.get('id')} plan cannot be read: {exc}") from None
     return slice_anchors(text, ref["lines"] if ref else f"1-{len(text.splitlines())}") if text else []
 
 

@@ -3,7 +3,7 @@ import itertools
 
 import pytest
 
-from scripts.swarm_ledger import ledger_artifacts, ledger_phases, ledger_plans, ledger_tasks, new_ledger
+from scripts.swarm_ledger import ledger_artifacts, ledger_phases, ledger_plans, ledger_tasks, new_ledger, plan_ranges
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger.api import schemas
 from scripts.swarm_ledger.repository import rows
@@ -631,15 +631,31 @@ def test_a_new_plan_ref_a_kept_plan_or_a_first_plan_link_is_not_stale(phase, fie
     assert ledger_plans.stale_refusal(phase, fields) == ""
 
 
+MISSING = f"http://127.0.0.1:8765/artifacts/{SLUG}/missing.md"
+UNREADABLE = "phase p1 plan cannot be read: plan artifact is missing or is not marked as a plan"
+
+
 def test_moving_a_phase_onto_a_plan_that_cannot_be_read_is_refused_and_keeps_its_slices():
     before = held()
-    state, rejected, refusal = run("phase_update", item="phases/p1", fields={"plan": "plans/b", "plan_url": ISSUE})
-    assert (len(rejected), refusal) == (
-        1,
-        ["phase p1 plan cannot be read: plan artifact must name a stored ledger artifact"],
-    )
+    state, rejected, refusal = run("phase_update", item="phases/p1", fields={"plan": "plans/b", "plan_url": MISSING})
+    assert (len(rejected), refusal) == (1, [UNREADABLE])
     assert unchanged(before, state)
     assert state["tasks"][0]["slice"] == "slices/a.first"
+
+
+def test_moving_a_phase_onto_a_plan_linked_outside_the_ledger_clears_its_slices():
+    held()
+    state, rejected, _ = run("phase_update", item="phases/p1", fields={"plan": "plans/b", "plan_url": ISSUE})
+    assert rejected == []
+    assert (state["phases"][0]["plan"], state["slices"]) == ("plans/b", [])
+    assert "slice" not in state["tasks"][0]
+
+
+def test_a_task_added_to_a_phase_whose_plan_cannot_be_read_is_refused():
+    run("phase_update", item="phases/p1", fields={"plan_url": MISSING})
+    state, rejected, refusal = run("task_add", task="t1", title="Build", lane="eng", phase="p1")
+    assert (len(rejected), refusal) == (1, [UNREADABLE])
+    assert state["tasks"] == []
 
 
 def test_moved_raises_for_an_unreadable_plan_and_leaves_the_document_alone():
@@ -650,6 +666,16 @@ def test_moved_raises_for_an_unreadable_plan_and_leaves_the_document_alone():
     }
     kept = copy.deepcopy(doc)
     with pytest.raises(ValueError) as raised:
-        ledger_plans.moved(doc, {"id": "p1", "plan": "plans/b", "plan_url": ISSUE})
-    assert str(raised.value) == "phase p1 plan cannot be read: plan artifact must name a stored ledger artifact"
+        ledger_plans.moved(doc, {"id": "p1", "plan": "plans/b", "plan_url": MISSING})
+    assert str(raised.value) == UNREADABLE
     assert doc == kept
+
+
+def test_a_plan_file_that_cannot_be_opened_reads_as_unreadable(monkeypatch):
+    def gone(ref, doc):
+        raise OSError("gone")
+
+    monkeypatch.setattr(plan_ranges, "stored_text", gone)
+    with pytest.raises(ValueError) as raised:
+        plan_ranges.anchors({}, {"id": "p1", "plan_ref": {"artifact": MISSING, "lines": "1-2"}})
+    assert str(raised.value) == "phase p1 plan cannot be read: gone"
