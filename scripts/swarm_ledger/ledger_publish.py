@@ -39,15 +39,45 @@ def open_issue(path: str, title: str, repo: str, run=subprocess.run) -> str:
         f"{title}\n\n{path}",
         *(["--repo", repo] if repo else []),
     ]
+    return gh_issue(argv, run).strip().splitlines()[-1]
+
+
+def reused_issue(path: str, repo: str, run=subprocess.run) -> str:
+    argv = [
+        "gh",
+        "issue",
+        "list",
+        "--state",
+        "all",
+        "--search",
+        f'"{path}" in:body',
+        "--json",
+        "url,state,body",
+        *(["--repo", repo] if repo else []),
+    ]
+    found = [issue for issue in json.loads(gh_issue(argv, run)) if path in issue["body"]]
+    if not found:
+        return ""
+    issue = min(found, key=lambda issue: issue["state"] != "OPEN")
+    if issue["state"] != "OPEN":
+        gh_issue(["gh", "issue", "reopen", issue["url"]], run)
+    return issue["url"]
+
+
+def close_issue(url: str, run=subprocess.run) -> None:
+    gh_issue(["gh", "issue", "close", url, "--reason", "not planned"], run)
+
+
+def gh_issue(argv: list[str], run) -> str:
     done = run(argv, capture_output=True, text=True)
     if done.returncode:
-        raise PublishError(f"gh issue create failed: {(done.stderr or done.stdout).strip()}")
-    return done.stdout.strip().splitlines()[-1]
+        raise PublishError(f"gh issue {argv[2]} failed: {(done.stderr or done.stdout).strip()}")
+    return done.stdout
 
 
 def publish(path: str, title: str, repo: str, artifact, run=subprocess.run, *, issue_title: str) -> tuple[str, str]:
     issues = has_issues(repo, run)
     url = artifact(path, title)
     if issues:
-        return open_issue(url, issue_title, repo, run), "issue"
+        return reused_issue(url, repo, run) or open_issue(url, issue_title, repo, run), "issue"
     return url, "artifact"
