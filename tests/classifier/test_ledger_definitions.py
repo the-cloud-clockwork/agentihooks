@@ -174,3 +174,16 @@ def test_slice_flags_use_the_definition_the_screen_asked_with(packaged):
     assert slice_screen.flags(answers, [{"id": "t1"}], 0.7, stricter) == [
         "Classifier: task t1 may be off intent, serves the phase at probability 0.40."
     ]
+
+
+def test_the_screen_hands_its_run_definition_to_the_flags(packaged, monkeypatch):
+    answers = {"size_0": Answer("score", score=1.0, confidence=0.9), "serves_0": Answer("noul", noul=0.2)}
+    monkeypatch.setattr(slice_screen, "decide", lambda state, questions, **kwargs: DecisionResult(answers, "stub"))
+    monkeypatch.setattr(definitions, "load", lambda name, **kwargs: pytest.fail("flags reloaded the definition"))
+    phase = {"id": "p1", "title": "Build", "description": "Intent."}
+    plan = {"id": "plan-p1", "phase": "p1", "kind": "plan", "lane": "plan", "proof": {"slice": "t1"}}
+    task = {"id": "t1", "phase": "p1", "title": "One", "description": "Work."}
+    doc = {"overview": "Ship.", "phases": [phase], "tasks": [plan, task]}
+    assert slice_screen.screen(phase, doc, 0.7).flags == (
+        "Classifier: task t1 may be off intent, serves the phase at probability 0.20.",
+    )

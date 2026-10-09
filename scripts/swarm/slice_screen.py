@@ -55,8 +55,8 @@ def levels(definition: definitions.Definition) -> list[str]:
     return next(spec.question.levels for spec in definition.questions if spec.name == "size")
 
 
-def flags(answers, mine, confidence, definition=None):
-    definition = definition or definitions.load(PURPOSE)
+def flags(answers, mine, confidence, definition: definitions.Definition | None = None):
+    definition = definitions.load(PURPOSE) if definition is None else definition
     sizes, off_intent = levels(definition), definition.thresholds["off_intent"]
     found = []
     for i, task in enumerate(mine):
