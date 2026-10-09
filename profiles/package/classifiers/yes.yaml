@@ -1,0 +1,14 @@
+version: 1
+purpose: yes
+fallbacks: cli
+questions:
+  - name: verdict
+    type: yesno
+    instructions: "{instructions}"
+    true: "{true}"
+    false: "{false}"
+thresholds:
+  probability: 0.5
+rule:
+  type: "yes"
+  threshold: probability
