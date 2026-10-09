@@ -161,8 +161,11 @@ def test_free_port_starts_once_and_waits_for_readiness(isolated_server, monkeypa
     with (
         patch.object(server.ledger_link, "serving", side_effect=[None, None, str(isolated_server)]),
         patch.object(server.subprocess, "Popen") as start,
+        patch.object(server.time, "monotonic", side_effect=[100, 100, 100.5]),
+        patch.object(server.time, "sleep") as sleep,
     ):
         server.ensure()
+    sleep.assert_has_calls([call(0.1), call(0.1)])
     start.assert_called_once()
     assert start.call_args.args[0][-1] == "--serve"
     options = start.call_args.kwargs
