@@ -334,7 +334,7 @@ def test_a_replacement_master_gets_no_second_backstop_while_one_waits_unread(set
     assert sent == []
 
 
-def test_a_codex_master_gets_the_backstop_only_through_its_inbox(setup):
+def test_a_codex_master_gets_the_backstop_through_its_inbox_and_an_unread_one_reaches_the_operator(setup):
     from tests.inbox.test_wake import FakeHerdr, FakeLedger
 
     store, master, runtime, doc, sent = setup
@@ -352,5 +352,6 @@ def test_a_codex_master_gets_the_backstop_only_through_its_inbox(setup):
         wake.wake_now(inbox, "sw", [codex], herdr, at, wake.window_ms({}))
         wake.wake_pass(inbox, "sw", [codex], herdr, ledger, at, wake.window_ms({}))
     assert herdr.prompts == []
-    assert ledger.followups == []
+    assert ledger.flagged == [True]
+    assert "still unread" in ledger.followups[0][1]
     assert sent == []

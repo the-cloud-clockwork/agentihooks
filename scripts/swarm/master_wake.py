@@ -62,6 +62,6 @@ def _backstop(inbox: InboxStore, name: str, seat: str, work: bool) -> bool:
     if any(item.state == "pending" for item in earlier) or not (work or len(mail) > len(earlier)):
         return False
     for item in earlier:
-        inbox.close(item.id, item.address, "done")
-    inbox.send(wake.BY, seat, PROMPT, ref=f"{BACKSTOP_REF}:{name}", fyi=True)
+        inbox.close(item.id, item.address, "done", "a newer backstop replaced it")
+    inbox.send(wake.BY, seat, PROMPT, ref=f"{BACKSTOP_REF}:{name}")
     return True
