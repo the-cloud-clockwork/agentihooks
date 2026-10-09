@@ -181,11 +181,14 @@ def record(box: metrics_outbox.Outbox, slug: str, now_ms: int, ledger: LedgerCli
     for event in events:
         if event["kind"] == "added":
             births.setdefault(event["target"], event["at"])
-    box.append(EVENTS, event_rows(slug, events, known, cursor, now_ms))
+    batches = [(EVENTS, event_rows(slug, events, known, cursor, now_ms))]
     if snapshot is None or now_ms - snapshot >= SNAPSHOT_MS:
-        box.append(SNAPSHOTS, snapshot_rows(slug, now_ms, doc, nodes, current, births))
+        batches.append((SNAPSHOTS, snapshot_rows(slug, now_ms, doc, nodes, current, births)))
         snapshot = now_ms
-    with box.db:
-        box.db.executemany(SAVE_PATHS, [(slug, node, json.dumps(path)) for node, path in current.items()])
-        box.db.executemany(SAVE_BIRTHS, [(slug, node, at) for node, at in births.items()])
-        box.db.execute(SAVE_CHECKPOINT, (slug, doc["_meta"]["rev"], snapshot))
+
+    def checkpoint(connection):
+        connection.executemany(SAVE_PATHS, [(slug, node, json.dumps(path)) for node, path in current.items()])
+        connection.executemany(SAVE_BIRTHS, [(slug, node, at) for node, at in births.items()])
+        connection.execute(SAVE_CHECKPOINT, (slug, doc["_meta"]["rev"], snapshot))
+
+    box.append_many(batches, checkpoint)

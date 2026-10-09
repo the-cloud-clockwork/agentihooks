@@ -72,7 +72,7 @@ def test_identical_events_in_one_revision_each_survive_replay(box):
     assert all(row["revision"] == 5 and row["catch_up"] == 1 for row in rows)
 
 
-def test_a_gap_is_one_row_even_when_a_retry_follows_a_committed_append(box, monkeypatch):
+def test_a_failed_checkpoint_rolls_back_rows_and_retry_records_one_gap(box, monkeypatch):
     from scripts.swarm import metrics_ledger
 
     ledger = Ledger()
@@ -80,22 +80,26 @@ def test_a_gap_is_one_row_even_when_a_retry_follows_a_committed_append(box, monk
     metrics_ledger.record(box, "example", NOW, ledger)
     ledger.doc["_meta"]["events"] = []
     ledger.move("pr", 8, NOW + 1)
-    append = box.append
+    append = box.append_many
 
-    def interrupted(table, rows):
-        append(table, rows)
-        raise OSError("interrupted before checkpoint")
+    def interrupted(batches, checkpoint):
+        def failed(connection):
+            checkpoint(connection)
+            raise OSError("interrupted before checkpoint commit")
 
-    monkeypatch.setattr(box, "append", interrupted)
+        append(batches, failed)
+
+    monkeypatch.setattr(box, "append_many", interrupted)
     with pytest.raises(OSError, match="interrupted"):
         metrics_ledger.record(box, "example", NOW + 2, ledger)
-    monkeypatch.setattr(box, "append", append)
+    assert len(read(box, "ledger_events")) == 1
+    monkeypatch.setattr(box, "append_many", append)
     metrics_ledger.record(box, "example", NOW + 3, ledger)
     gaps = [row for row in read(box, "ledger_events") if row["kind"] == "history gap"]
     assert len(gaps) == 1
     assert gaps[0]["event_id"] == "gap:example:2:7"
     assert gaps[0]["first_missed"] == 2 and gaps[0]["last_missed"] == 7
-    assert gaps[0]["ts_ms"] == NOW + 2 and gaps[0]["catch_up"] == 0
+    assert gaps[0]["ts_ms"] == NOW + 3 and gaps[0]["catch_up"] == 0
     assert len(read(box, "ledger_events")) == 3
 
 
