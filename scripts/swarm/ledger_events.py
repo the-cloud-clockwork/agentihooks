@@ -464,9 +464,9 @@ def _priorities(mail, doc, raised):
     marker = mail.store.key(mail.slug, "priorities-seeded")
     seeding, sent = not mail.store.redis.exists(marker), []
     for item, row in rows.items():
-        if item in seen or item in raised or row.get("by") == SENDER or not _by_agent(mail, row):
+        if item in seen or row.get("by") == SENDER or not _by_agent(mail, row):
             continue
-        if not seeding:
+        if not seeding and item not in raised:
             text = (
                 f"New priority on ledger {mail.slug} for {item}: {row['text']}\n"
                 "Triage it: resolve it if the call is yours, else leave it for the operator."

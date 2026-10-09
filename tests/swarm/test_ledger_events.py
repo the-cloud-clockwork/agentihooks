@@ -189,6 +189,8 @@ def test_a_priority_on_a_follow_up_the_swarm_raised_for_the_operator_sends_the_m
     run(store, dict(doc, priorities=[]))
     doc["priorities"] = [priority(f"followups/{n}", "Decide: it", by="ledger") for n in ("f1", "f2")]
     run(store, doc)
+    doc["_meta"]["events"] = [e for e in doc["_meta"]["events"] if e["target"] != "followups/f1"]
+    run(store, doc)
     assert [i.ref for i in InboxStore(store.redis).inbox(MASTER_SEAT)] == ["sw:priority:followups/f2"]
 
 
