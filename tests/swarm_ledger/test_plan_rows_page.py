@@ -146,6 +146,9 @@ def test_a_plan_without_phases_shows_none(tab):
 def test_the_phases_section_folds_and_refills_its_plan_rows(tab):
     show(tab, shell_html(), ledger=ledger_state(DOC))
     tab.click("#phases-box > summary")
+    tab.reload()
+    tab.wait_for_function("() => document.getElementById('status').textContent !== 'loading'")
+    assert tab.evaluate("() => document.getElementById('phases-box').open") is False
     assert tab.locator("#phases > li").count() == 0
     tab.click("#phases-box > summary")
     tab.wait_for_function("() => document.querySelectorAll('#phases > li.plan').length === 3")
