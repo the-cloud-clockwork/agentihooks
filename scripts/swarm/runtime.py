@@ -18,6 +18,7 @@ from scripts.init_agent import PREDECESSOR
 from scripts.profiles import binding, plugins
 from scripts.swarm import (
     affinity,
+    capacity,
     effort_range,
     host_budget,
     live_binding,
@@ -175,7 +176,7 @@ class HerdrRuntime:
         self.refusals = {}
         self.end, self.reap = reaper.retire, reaper.reap
         self._quota_previous = {}
-        self._host_spent = None
+        self._host_spent = capacity.no_spawns
 
     def has_capacity(self, config):
         environ = dict(os.environ)
@@ -228,10 +229,9 @@ class HerdrRuntime:
         if requirements:
             requirements = self._quota_preferring(requirements)
         warned = self._quota_warned()
-        spent = self._host_spent or capacity.no_spawns
         previous = self._quota_previous
         inputs = capacity.ScaleInputs(
-            self._quota_accounts, agents, demand, self.host, previous, warned, spent, int(now * 1000)
+            self._quota_accounts, agents, demand, self.host, previous, warned, self._host_spent, int(now * 1000)
         )
         host = capacity.granted(capacity.host_room(config, inputs), previous, inputs.now_ms)
         config, scaled = capacity.autoscaled(config, inputs, host)
