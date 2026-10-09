@@ -5673,7 +5673,7 @@ def cmd_balance(
     from dataclasses import replace
 
     from hooks.context.account_sessions import sessions_by_account
-    from scripts.agents_quota import codex_table
+    from scripts.agents_quota import codex_table, tokenless_table
     from scripts.claude_quota_balancer import (
         RoutingError,
         ancestor_oauth_token,
@@ -5686,7 +5686,7 @@ def cmd_balance(
         is_routable,
         render_table,
     )
-    from scripts.routing import place
+    from scripts.routing import master_account, place
     from scripts.routing.claude_api import ClaudeApiSource
 
     session_env = dict(os.environ)
@@ -5716,14 +5716,14 @@ def cmd_balance(
                 render_table(
                     list(rows.values()),
                     include_fable=include_fable,
-                    current=session.account,
                     observed=observed,
                     sessions=live,
+                    marks=master_account.row_marks(session.account),
                 )
             )
         return 0 if session.account else 1
     if not credentials:
-        print(codex_table())
+        print(tokenless_table(master_account.row_marks().master, live))
         print("agentihooks: no non-empty AH_CC_TOKEN_* variables found", file=sys.stderr)
         return 2
     if show_account_metadata:
@@ -5749,7 +5749,7 @@ def cmd_balance(
     )
     api, weight = place.api_side(ClaudeApiSource(live), "claude", os.environ, time.time())
     api = [replace(slot, weight=weight) for slot in api]
-    print(render_table(results, include_fable=include_fable, sessions=live, api=api))
+    print(render_table(results, include_fable=include_fable, sessions=live, api=api, marks=master_account.row_marks()))
     print(f"\nsource={source}")
     print(f"\n{codex_table()}")
     return 0 if any(is_routable(result) for result in results) else 1
