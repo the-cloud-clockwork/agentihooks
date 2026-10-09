@@ -47,3 +47,9 @@ def test_push_failure_is_retryable_without_rendering_credentials(transport, caps
         transport.return_value.raise_for_status.side_effect = error
     assert push.send("alerts", "Host pressure") is False
     assert capsys.readouterr().err == "incident push failed; delivery will be retried\n"
+
+
+def test_push_keeps_the_configured_route_prefix(transport, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_PUSH_URL", "https://notifications.example/proxyX/")
+    assert push.send("alerts", "Host pressure") is True
+    assert transport.call_args.args == ("https://notifications.example/proxyX/api/v1/push",)

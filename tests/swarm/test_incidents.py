@@ -157,7 +157,7 @@ def test_unknown_host_does_not_resolve_pressure_and_read_failure_keeps_the_tick_
     monkeypatch.setattr(host_budget, "read_host", unreadable)
     cli.run_tick(store, "sw", FakeLedger([]), FakeRuntime(), FakeHerdr({}))
     assert store.redis.get(store.key("sw", "last-tick")) is not None
-    assert "host pressure check unavailable" in capsys.readouterr().err
+    assert capsys.readouterr().err.endswith("host pressure check unavailable\n")
 
 
 def test_concurrent_deliveries_send_one_push(store, monkeypatch):
@@ -220,3 +220,224 @@ def test_watchdog_failures_and_fast_probes_form_one_incident_per_tick(store, mon
     cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
     assert sent.call_count == expected * 2
     assert len(master_mail(store)) == expected * 2
+
+
+def test_bad_and_good_passes_must_be_consecutive(store):
+    from scripts.swarm import incidents
+
+    readings = [True, False, True, True, False, True, False, False]
+    assert [incidents.step(store.redis, "ledger", bad) for bad in readings] == [
+        "",
+        "",
+        "",
+        "raised",
+        "",
+        "",
+        "",
+        "resolved",
+    ]
+
+
+def test_each_new_incident_mails_once_and_marks_its_resolution_for_awareness(store):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import incidents
+
+    assert incidents.mail(store.redis, "ledger", "master@sw", "no incident") is False
+    assert incidents.mail(store.redis, "ledger", "master@sw", "no resolution", True) is False
+    for _ in range(2):
+        incidents.step(store.redis, "ledger", True)
+        incidents.step(store.redis, "ledger", True)
+        assert incidents.mail(store.redis, "ledger", "master@sw", "outage") is True
+        assert incidents.mail(store.redis, "ledger", "master@sw", "duplicate") is False
+        incidents.step(store.redis, "ledger", False)
+        incidents.step(store.redis, "ledger", False)
+        assert incidents.mail(store.redis, "ledger", "master@sw", "recovered", True) is True
+        assert incidents.mail(store.redis, "ledger", "master@sw", "duplicate recovery", True) is False
+    items = InboxStore(store.redis).pending_items("master@sw")
+    assert [(item.sender, item.text, item.fyi) for item in items] == [
+        ("swarm", "outage", False),
+        ("swarm", "recovered", True),
+        ("swarm", "outage", False),
+        ("swarm", "recovered", True),
+    ]
+
+
+@pytest.mark.parametrize("load,memory,bad", [(8.0, 512, False), (8.8, 512, True), (8.0, 511, True)])
+def test_pressure_watermarks_and_delivery_outputs(store, monkeypatch, load, memory, bad):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import host_budget, incidents, push
+    from scripts.swarm.store import SwarmConfig
+
+    store.create(SwarmConfig("bounds", "/repo", max_eng=1, max_ci=0, load_high=1.0, memory_per_agent_mb=512))
+    sent = Mock(return_value=True)
+    monkeypatch.setattr(push, "send", sent)
+    sample = host_budget.HostSample(load, 8, memory, 2)
+    monkeypatch.setattr(host_budget, "read_host", lambda: sample)
+    assert incidents.host_pressure(store, "bounds") == []
+    assert incidents.host_pressure(store, "bounds") == (["raised the host pressure alert"] if bad else [])
+    assert incidents.host_pressure(store, "bounds") == []
+    sample = host_budget.HostSample(0.5, 8, 64000, 2)
+    assert incidents.host_pressure(store, "bounds") == []
+    assert incidents.host_pressure(store, "bounds") == (["cleared the host pressure alert"] if bad else [])
+    assert incidents.host_pressure(store, "bounds") == []
+    expected = (
+        [
+            ("alerts", "Host pressure: load is above the high mark or memory is below one agent share."),
+            ("alerts", "Host pressure resolved: load and available memory are within the host budget."),
+        ]
+        if bad
+        else []
+    )
+    assert [call.args for call in sent.call_args_list] == expected
+    assert [item.text for item in InboxStore(store.redis).pending_items("master@bounds")] == [
+        text for _, text in expected
+    ]
+
+
+def test_probe_push_retry_after_recovery_preserves_the_delivery_messages(store, monkeypatch):
+    from scripts.swarm import push
+
+    sent = Mock(side_effect=[False, False, True, True])
+    monkeypatch.setattr(push, "send", sent)
+    clock = Clock()
+    ledger = ProbedLedger(clock, read_s=6.0)
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    ledger.read_s = 0.1
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    assert sent.call_args_list[-2].args == ("critical", "The ledger is slow or unavailable.")
+    assert sent.call_args_list[-1].args == (
+        "critical",
+        "The ledger server answers fast again: two swarm passes took read 0.1 seconds and write 0.1 seconds. "
+        "Idle and stale claim checks resume.",
+    )
+
+
+def test_a_successful_watchdog_restart_resolves_its_previous_failure(store, monkeypatch, tmp_path):
+    from scripts.swarm import ledger_watchdog, push
+    from tests.swarm.test_ledger_watchdog import PID, Host, plant
+    from tests.swarm.test_tick import FakeRuntime
+
+    sent = Mock(return_value=True)
+    monkeypatch.setattr(push, "send", sent)
+    host = Host(tmp_path, code=1, stderr="port busy")
+    plant(host.proc, host.argv)
+    (host.folder / ".server.pid").write_text(str(PID))
+    clock = Clock()
+    ledger = ProbedLedger(clock)
+    ledger_watchdog.watch(store, "sw", ledger, FakeRuntime(), host)
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    assert sent.call_count == 1
+    plant(host.proc, host.argv)
+    (host.folder / ".server.pid").write_text(str(PID))
+    host.code = 0
+    store.redis.delete(ledger_watchdog.LOCK_KEY)
+    ledger_watchdog.watch(store, "sw", ledger, FakeRuntime(), host)
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    assert sent.call_count == 2
+    assert "fast again" in sent.call_args.args[1]
+
+
+def test_a_paused_master_gets_a_new_incident_after_restoring_persisted_state(store):
+    from scripts.swarm import incidents
+
+    root = incidents.key("ledger")
+    store.redis.hset(root, mapping={"generation": 3, "active": 0})
+    store.redis.hset(f"{root}:mail:master@sw", mapping={"raised": 1, "resolved": 1})
+    incidents.step(store.redis, "ledger", True)
+    incidents.step(store.redis, "ledger", True)
+    incidents.step(store.redis, "ledger", False)
+    incidents.step(store.redis, "ledger", False)
+    incidents.step(store.redis, "ledger", True)
+    incidents.step(store.redis, "ledger", True)
+    assert incidents.mail(store.redis, "ledger", "master@sw", "new outage") is True
+    assert master_mail(store) == ["new outage"]
+
+
+@pytest.mark.parametrize("race", ["another caller", "recovery"])
+def test_mail_claim_observes_concurrent_delivery_and_recovery(store, monkeypatch, race):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from redis.client import Pipeline
+
+    from scripts.swarm import incidents
+
+    root = incidents.key("ledger")
+    incidents.step(store.redis, "ledger", True)
+    incidents.step(store.redis, "ledger", True)
+    paused, resume = Event(), Event()
+    blocked = [False]
+    original = Pipeline.hgetall
+
+    def delayed(pipe, name):
+        snapshot = original(pipe, name)
+        if name == f"{root}:mail:master@sw" and not blocked[0]:
+            blocked[0] = True
+            paused.set()
+            assert resume.wait(5)
+        return snapshot
+
+    monkeypatch.setattr(Pipeline, "hgetall", delayed)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        first = pool.submit(incidents.mail, store.redis, "ledger", "master@sw", "first")
+        assert paused.wait(5)
+        try:
+            if race == "another caller":
+                assert incidents.mail(store.redis, "ledger", "master@sw", "winner") is True
+            else:
+                incidents.step(store.redis, "ledger", False)
+                incidents.step(store.redis, "ledger", False)
+        finally:
+            resume.set()
+        assert first.result(timeout=5) is False
+    assert master_mail(store) == (["winner"] if race == "another caller" else [])
+
+
+def test_expired_delivery_owner_cannot_release_the_next_owner(store, monkeypatch):
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from scripts.swarm import incidents, push
+
+    now = [float(int(time.time()))]
+    monkeypatch.setattr(time, "time", lambda: now[0])
+    first_entered, first_release, second_entered, second_release = (Event() for _ in range(4))
+    attempts, received = [], []
+
+    def send(channel, text):
+        attempts.append(text)
+        if len(attempts) == 1:
+            first_entered.set()
+            assert first_release.wait(5)
+            return False
+        if len(attempts) == 2:
+            second_entered.set()
+            assert second_release.wait(5)
+        received.append(text)
+        return True
+
+    monkeypatch.setattr(push, "send", send)
+    incidents.step(store.redis, "ledger", True)
+    incidents.step(store.redis, "ledger", True)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(incidents.deliver, store.redis, "ledger", "outage", "recovered")
+        assert first_entered.wait(5)
+        now[0] += 30
+        second = pool.submit(incidents.deliver, store.redis, "ledger", "outage", "recovered")
+        try:
+            assert second_entered.wait(5)
+            first_release.set()
+            first.result(timeout=5)
+            incidents.deliver(store.redis, "ledger", "outage", "recovered")
+        finally:
+            first_release.set()
+            second_release.set()
+        second.result(timeout=5)
+    assert attempts == ["outage", "outage"]
+    assert received == ["outage"]
