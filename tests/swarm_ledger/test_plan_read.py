@@ -206,3 +206,102 @@ def test_ledger_modules_load_with_the_ledger_folder_first_on_the_path(monkeypatc
     assert sys.path[0] == str(HERE)
     plan_read._ledger("plan_ranges")
     assert sys.path.count(str(HERE)) == 1
+
+
+LINKED_PLAN = """# Plan
+## Work
+### W1
+- Positive: [A](#case.a).
+- Negative: [B](#case-b), again [A](#case.a).
+- Recovery: [C](#case-c), gone [X](#missing), bare [D](#no-heading).
+### W2
+- outside link [E](#case-e).
+## Cases
+<a id="case.a"></a>
+
+### Case A
+- a body
+```
+## fenced, not a heading
+```
+#### Detail
+- a detail
+
+<a id="case-b"></a>
+
+### Case B
+- b body
+## Tail
+<a id="case-c"></a>
+
+#### Case C
+- c body
+### After
+<a id="case-e"></a>
+### Case E
+- e body
+<a id="no-heading"></a>
+"""
+CASE_A = "### Case A\n- a body\n```\n## fenced, not a heading\n```\n#### Detail\n- a detail\n"
+CASE_B = "### Case B\n- b body\n"
+CASE_C = "#### Case C\n- c body\n"
+
+
+def test_linked_appends_each_anchored_section_once_in_link_order():
+    assert plan_read.linked(LINKED_PLAN, "3-6") == f"\n{CASE_A}\n{CASE_B}\n{CASE_C}"
+
+
+def test_linked_follows_only_links_inside_the_slice():
+    assert plan_read.linked(LINKED_PLAN, "4-4") == f"\n{CASE_A}"
+    assert plan_read.linked(LINKED_PLAN, "3-5") == f"\n{CASE_A}\n{CASE_B}"
+
+
+def test_linked_skips_a_section_anchored_inside_the_slice():
+    source = '## W\n- see [A](#ca) and [B](#cb), quoting <a id="cb"></a>\n  <a id="ca"></a>\n### A\n- a\n<a id="cb"></a>\n### B\n- b\n'
+    assert plan_read.linked(source, "1-5") == "\n### B\n- b\n"
+
+
+def test_linked_is_empty_for_a_slice_without_anchor_links():
+    assert plan_read.linked(LINKED_PLAN, "1-2") == ""
+
+
+def test_section_runs_to_the_plan_end_without_a_later_heading():
+    assert plan_read.section('<a id="z"></a>\n## Z\n- z\n  \n<a id="y.1"></a>\n', "z") == "## Z\n- z\n"
+
+
+def test_section_is_empty_unless_a_heading_follows_the_anchor():
+    assert plan_read.section(LINKED_PLAN, "no-heading") == ""
+    assert plan_read.section(LINKED_PLAN, "missing") == ""
+    assert plan_read.section('<a id="x"></a>\n\nprose\n## Other\n- o\n', "x") == ""
+    assert plan_read.section("## W\n- [M](#m)\nlast prose\n", "m") == ""
+
+
+def test_section_skips_blank_lines_after_the_anchor_and_stops_at_any_higher_heading():
+    assert plan_read.section('<a id="w"></a>\n   \n## W\n- w\n', "w") == "## W\n- w\n"
+    assert plan_read.section('<a id="e"></a>\n## E\n# F\n- f\n', "e") == "## E\n"
+    assert plan_read.section('<a id="e"></a>\n## E\n', "e") == "## E\n"
+
+
+def test_task_read_appends_the_linked_cases_after_the_slice(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
+    file = ledger_artifacts.store("linked", "plan.md", LINKED_PLAN.encode())
+    ref = {"artifact": f"http://127.0.0.1:8765/artifacts/linked/{file['id']}", "lines": "1-33"}
+    doc = {
+        "artifacts": [{"plan": True, "file": file}],
+        "phases": [{"id": "p1", "plan_ref": ref}],
+        "tasks": [{"id": "w1", "phase": "p1", "plan_lines": "3-6"}, {"id": "head", "phase": "p1", "plan_lines": "1-1"}],
+    }
+    SQLiteLedgerRepository(tmp_path / DATABASE).import_document("linked", {**doc, "_meta": {"rev": 1}})
+    rows = LINKED_PLAN.splitlines()
+    margin = "".join(f"{row}\n" for row in rows[:16])
+    assert run(capsys, ["--task", "w1"], {"AGENTIHOOKS_SWARM": "linked"}) == f"{margin}\n{CASE_A}\n{CASE_B}\n{CASE_C}"
+    assert run(capsys, ["--task", "head"], {"AGENTIHOOKS_SWARM": "linked"}) == "".join(f"{row}\n" for row in rows[:11])
+    assert run(capsys, ["--phase", "p1"], {"AGENTIHOOKS_SWARM": "linked"}) == LINKED_PLAN
+
+
+def test_swarm_v2_package_read_appends_the_linked_cases(monkeypatch):
+    from scripts.swarm_ledger import plan_packages
+
+    plan = "## 1. One\n## 2. Two\n## 3. Three\n" + LINKED_PLAN.replace("# Plan\n", "")
+    monkeypatch.setattr(plan_packages, "text", lambda: plan)
+    assert plan_packages.read("5-8").endswith(f"\n{CASE_A}\n{CASE_B}\n{CASE_C}")
