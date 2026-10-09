@@ -1,10 +1,11 @@
 import json
+import re
 from types import SimpleNamespace
 
 import pytest
 
 from scripts.swarm import phase_state, slice_check
-from scripts.swarm_ledger import ledger, ledger_tasks, plan_backfill, plan_ranges
+from scripts.swarm_ledger import ledger, ledger_tasks, plan_backfill, plan_packages, plan_ranges
 
 OP = {"op": "task_add", "id": "a", "by": "master", "task": "f1", "title": "Follow up", "lane": "eng", "phase": "p1"}
 
@@ -91,8 +92,25 @@ def test_a_follow_up_task_linking_the_plan_needs_no_plan_lines():
 
 
 def test_backfill_gives_a_follow_up_task_no_slice(monkeypatch, capsys):
-    doc = {"tasks": [{"id": "f1", "state": "open", "plan_url": "https://example.com/plan", "follow_up": True}]}
+    url = "https://example.com/plan"
+    doc = {"tasks": [{"id": "f1", "plan_url": url, "follow_up": True}, {"id": "t2", "plan_url": url}]}
+
+    def unnamed(task):
+        raise ValueError(f"no package for {task['id']}")
+
     monkeypatch.setattr(ledger, "call", lambda slug: doc)
     monkeypatch.setattr(ledger, "send", lambda *args, **kwargs: pytest.fail("a follow up task takes no slice"))
+    monkeypatch.setattr(plan_packages, "name", unnamed)
     plan_backfill.run(SimpleNamespace(slug="proof"))
-    assert json.loads(capsys.readouterr().out) == {"updated": [], "missing": []}
+    assert json.loads(capsys.readouterr().out) == {
+        "updated": [],
+        "missing": [{"task": "t2", "reason": "no package for t2"}],
+    }
+
+
+def test_task_add_help_names_the_follow_up_mark(monkeypatch, capsys):
+    monkeypatch.setenv("COLUMNS", "400")
+    with pytest.raises(SystemExit):
+        ledger.build_parser().parse_args(["--slug", "s", "--as", "master", "task", "add", "--help"])
+    pattern = r"\s--follow-up\s+a follow up task: no slice in a sliced phase, judged by its text\n"
+    assert re.search(pattern, capsys.readouterr().out)
