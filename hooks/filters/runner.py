@@ -3,7 +3,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import PurePath
 
 from hooks import classifier
@@ -23,6 +23,7 @@ class Finding:
     end: int
     text: str
     reason: str
+    context: str = ""
 
 
 def _passed() -> dict:
@@ -40,7 +41,7 @@ def _applies(spec: schema.FilterSpec, tool_input: dict) -> bool:
 def find(spec: schema.FilterSpec, pieces: list[extract.Piece], payload: dict | None = None) -> list[Finding]:
     payload = payload or {}
     if spec.mode == "classifier":
-        return [Finding(p.where, 0, len(p.text), p.text, "whole text") for p in pieces if p.text]
+        return [Finding(p.where, 0, len(p.text), p.text, "whole text", p.text) for p in pieces if p.text]
     named = scripts.resolve(payload.get("cwd")) if any(f.script for f in spec.finders) else {}
     path = extract.target_path(payload.get("tool_input") or {})
     tool = payload.get("tool_name", "")
@@ -57,7 +58,17 @@ def find(spec: schema.FilterSpec, pieces: list[extract.Piece], payload: dict | N
                     for match in finder.pattern.finditer(piece.text)
                     if match.group(0)
                 )
-    return findings
+    sources = {piece.where: piece.text for piece in pieces}
+    return [
+        replace(finding, context=_enclosing_lines(sources[finding.where], finding.start, finding.end))
+        for finding in findings
+    ]
+
+
+def _enclosing_lines(text: str, start: int, end: int) -> str:
+    first = text[:start].rfind("\n") + 1
+    last = text.find("\n", end - 1)
+    return text[first : len(text) if last < 0 else last]
 
 
 def _intent(spec: schema.FilterSpec, tool_input: dict) -> str:
@@ -68,7 +79,7 @@ def _intent(spec: schema.FilterSpec, tool_input: dict) -> str:
 def questions(spec: schema.FilterSpec, intent: str, findings: list[Finding]) -> dict:
     return {
         f"finding_{i}": classifier.YesNo(
-            f"{spec.question}\nIntent: {intent}\nFinding: {finding.text}\nReason: {finding.reason}",
+            f"{spec.question}\nIntent: {intent}\nFinding: {finding.text}\nReason: {finding.reason}\nContext: {finding.context}",
             true=TRUE,
             false=FALSE,
         )

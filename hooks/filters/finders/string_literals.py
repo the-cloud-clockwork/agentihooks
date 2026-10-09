@@ -3,7 +3,7 @@ import re
 import tokenize
 from pathlib import PurePath
 
-_WEB_SUFFIXES = {".js", ".ts", ".jsx", ".tsx", ".vue", ".svelte", ".html"}
+_WEB_SUFFIXES = {".js", ".ts", ".jsx", ".tsx", ".vue", ".svelte", ".html", ".htm"}
 _WEB = re.compile(r"""(?P<quote>["'`])(?P<literal>(?:\\.|(?!(?P=quote)).)*)(?P=quote)|>(?P<node>[^<>]+)<""", re.DOTALL)
 _DELIMITER = re.compile(r"(?i)^[rubf]*(\"\"\"|'''|\"|')")
 
