@@ -65,7 +65,7 @@ class OneLineIds(unittest.TestCase):
     def test_agent_quota_health_and_seat_names_render_as_id_cells(self):
         render = (
             function_source("agentRow")
-            + function_source("renderSwarm")
+            + function_source("quotaRow")
             + function_source("healthRow")
             + function_source("renderHandoffs")
         )

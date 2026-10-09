@@ -94,8 +94,10 @@ def workspace(server: ModuleType, slug: str, task_id: str) -> dict:
 
 
 def global_resource(handler: object, server: ModuleType, parts: list) -> dict:
-    from . import admin
+    from . import admin, routing
 
+    if parts == ["routing", "settings"]:
+        return routing.settings(handler, server, body)
     if parts == ["layout"]:
         return admin.layout(handler, server, None if handler.command == "GET" else body(handler, server))
     if handler.command == "GET" and parts[0] in ("ledgers", "bin"):
