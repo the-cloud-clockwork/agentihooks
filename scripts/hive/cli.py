@@ -1,16 +1,16 @@
-"""agentihooks hive invite|join|revoke|controller|serve."""
+"""agentihooks hive invite|join|revoke|controller|serve|set|show|list."""
 
 import argparse
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
-from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
-from scripts.hive import auth, server
+from scripts.hive import auth, registry, server
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -22,8 +22,8 @@ def redis_client() -> "Redis":
     return connect()
 
 
-def _home() -> Path:
-    return Path(os.environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks")
+def now_ms() -> int:
+    return time.time_ns() // 1_000_000
 
 
 def _join(url: str, code: str) -> dict:
@@ -68,7 +68,7 @@ def _parser() -> argparse.ArgumentParser:
     join.add_argument("code")
     sub.add_parser("revoke", help="Delete a member's ledger credential and Redis user").add_argument("id")
     sub.add_parser(
-        "controller", help="Write a new controller service credential to controller.env, retiring the previous one"
+        "controller", help="Write a new controller service credential to a private file, retiring the previous one"
     )
     serve = sub.add_parser("serve", help="Run the join endpoint")
     serve.add_argument("--host", default="127.0.0.1")
@@ -76,7 +76,32 @@ def _parser() -> argparse.ArgumentParser:
     serve.add_argument("--redis-url", help="Redis URL members connect to; defaults to this host's")
     serve.add_argument("--tls-cert", help="PEM certificate; required off loopback")
     serve.add_argument("--tls-key", help="PEM private key for --tls-cert")
+    settings = sub.add_parser("set", help=f"Set {', '.join(registry.SETTINGS)} as key=value")
+    settings.add_argument("id")
+    settings.add_argument("settings", nargs="*", metavar="key=value")
+    sub.add_parser("show", help="Print a hive's record as JSON").add_argument("id")
+    sub.add_parser("list", help="One line per hive with its liveness")
     return parser
+
+
+def _list() -> None:
+    now = now_ms()
+    for record in registry.hives(redis_client()):
+        state = "live" if registry.live(record, now) else "stale"
+        roles = ",".join(record["roles"])
+        print(f"{record['id']}\t{state}\tui={record['ui']}\troles={roles}\tmax-agents={record['max_agents']}")
+
+
+def _registry(args: argparse.Namespace) -> None:
+    if args.command == "set":
+        print(json.dumps(registry.update(redis_client(), args.id, args.settings)))
+    elif args.command == "show":
+        record = registry.show(redis_client(), args.id)
+        if record is None:
+            raise auth.HiveError(f"no hive {args.id}")
+        print(json.dumps(record))
+    else:
+        _list()
 
 
 def main(argv: list[str]) -> int:
@@ -86,14 +111,16 @@ def main(argv: list[str]) -> int:
             print(auth.invite(redis_client(), args.name))
         elif args.command == "join":
             grant = _join(args.url, args.code)
-            path = auth.write_env(_home(), args.url, grant)
+            path = auth.write_env(registry.home(), args.url, grant)
             print(f"joined the hive as {grant['id']}; credentials are in {path}")
         elif args.command == "revoke":
             auth.revoke(redis_client(), args.id)
             print(f"revoked {args.id}")
         elif args.command == "controller":
-            path = auth.write_controller_env(_home(), auth.issue_controller(redis_client()))
+            path = auth.write_controller_env(registry.home(), auth.issue_controller(redis_client()))
             print(f"issued a controller credential; it is in {path}")
+        elif args.command in ("set", "show", "list"):
+            _registry(args)
         else:
             return _serve(args)
     except auth.HiveError as exc:
