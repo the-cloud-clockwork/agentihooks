@@ -14,6 +14,7 @@ RUN_BUDGET_S = 15 * 60
 GATE = "Gate — Required"
 SELF = "stage-budget"
 BUDGETS = {
+    "delivery-budget": 60,
     "durations": 60,
     "split": 120,
     "unit": 300,
@@ -110,6 +111,19 @@ def delivery_api(endpoint: str) -> list[dict]:
     return json.loads(result.stdout)
 
 
+def delivery_start(run: dict, jobs: list[dict]) -> float:
+    if run.get("run_attempt", 1) == 1:
+        return seconds(run["created_at"])
+    return min(seconds(job["created_at"]) for job in jobs)
+
+
+def delivery_end(jobs: list[dict]) -> float | None:
+    return next(
+        (seconds(job["completed_at"]) for job in jobs if job["name"] == GATE and job.get("completed_at")),
+        None,
+    )
+
+
 def delivery_head(run: dict, repo: str, api: Callable[[str], list[dict]] | None = None) -> dict | None:
     if run.get("event") != "merge_group":
         return None
@@ -144,21 +158,24 @@ def delivery_head(run: dict, repo: str, api: Callable[[str], list[dict]] | None 
     end = seconds(gate["completed_at"])
     if end > seconds(run["created_at"]):
         return None
-    return {"run": final["id"], "seconds": round(end - seconds(final["created_at"]))}
+    jobs = [job for page in pages for job in page["jobs"]]
+    return {"run": final["id"], "seconds": round(end - delivery_start(final, jobs))}
 
 
-def delivery_report(run: dict, head: dict | None, end_s: float) -> dict:
-    queue = round(end_s - seconds(run["created_at"]))
+def delivery_report(run: dict, head: dict | None, end_s: float, jobs: list[dict] | None = None) -> dict:
+    listed = jobs or []
+    finished = delivery_end(listed)
+    queue = round((finished if finished is not None else end_s) - delivery_start(run, listed))
     spent = head["seconds"] if head is not None else None
     combined = spent + queue if spent is not None else None
     remaining = RUN_BUDGET_S - combined if combined is not None else None
     return {"head": spent, "queue": queue, "combined": combined, "remaining": remaining}
 
 
-def delivery_rows(result: dict) -> list[tuple[str, str]]:
+def delivery_rows(result: dict, final: bool = False) -> list[tuple[str, str]]:
     labels = {
         "head": "final head checks",
-        "queue": "queue checks so far",
+        "queue": "queue checks" if final else "queue checks so far",
         "combined": "combined delivery",
         "remaining": "remaining delivery",
     }

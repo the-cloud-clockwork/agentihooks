@@ -59,21 +59,23 @@ def main(argv: list[str] | None = None, now: Callable[[], float] = time.time) ->
     if not jobs:
         print(f"::error::{args.jobs} lists no jobs, so no stage can be measured.")
         return 1
-    head = ci_budget.delivery_head(run_doc, os.environ.get("GITHUB_REPOSITORY", ""))
+    final = ci_budget.delivery_end(jobs) is not None
+    head = ci_budget.delivery_head(run_doc, os.environ.get("GITHUB_REPOSITORY", "")) if final else None
     end = now()
     result = ci_budget.report(run_doc, jobs, end)
     print("\n".join(ci_budget.render(result)))
     print("\n".join(_annotations(result)))
     delivery = ""
     if run_doc.get("event") == "merge_group":
-        combined = ci_budget.delivery_report(run_doc, head, end)
-        rows = ci_budget.delivery_rows(combined)
+        combined = ci_budget.delivery_report(run_doc, head, end, jobs)
+        rows = ci_budget.delivery_rows(combined, final=final)
         print("\n".join(f"{label}: {spent}" for label, spent in rows))
         delivery = "\n".join(
             [
                 "## Delivery budget",
                 "",
-                f"Limit: {ci_budget.clock(ci_budget.RUN_BUDGET_S)}. Queue time includes runner wait and is measured through this report.",
+                f"Limit: {ci_budget.clock(ci_budget.RUN_BUDGET_S)}. Queue time includes runner wait.",
+                "Measured through Gate Required." if final else "Provisional: Gate Required has not completed.",
                 "",
                 "| Check cycle | Wall |",
                 "| --- | ---: |",

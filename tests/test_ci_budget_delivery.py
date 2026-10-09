@@ -36,6 +36,7 @@ def _head(run_id=10, **changes):
 def _gate(**changes):
     return {
         "name": ci_budget.GATE,
+        "created_at": START,
         "conclusion": "success",
         "completed_at": "2026-10-09T07:08:00Z",
         **changes,
@@ -82,10 +83,11 @@ def test_latest_rerun_is_selected_and_head_runner_wait_is_counted():
                 _head(10, run_started_at="2026-10-09T07:02:00Z", run_attempt=3),
                 _head(40, event="push"),
             ]
-        ]
+        ],
+        jobs=[[_gate(created_at="2026-10-09T07:02:00Z")]],
     )
     queue = {**QUEUE, "head_branch": f"refs/heads/{QUEUE['head_branch']}"}
-    assert ci_budget.delivery_head(queue, "owner/repo", api) == {"run": 10, "seconds": 480}
+    assert ci_budget.delivery_head(queue, "owner/repo", api) == {"run": 10, "seconds": 360}
     assert calls[-1] == "repos/owner/repo/actions/runs/10/attempts/3/jobs?per_page=100"
 
 
@@ -168,12 +170,20 @@ def test_unknown_head_never_becomes_zero_or_a_known_remaining_budget():
     ]
 
 
-def test_queue_cli_reads_head_through_api_and_reports_to_log_and_summary(tmp_path, monkeypatch, capsys):
-    api, _ = _api([[_head()]])
-    monkeypatch.setattr(ci_budget, "delivery_api", api)
-    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
-    summary = tmp_path / "summary.md"
-    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+def test_queue_final_report_uses_gate_completion_and_excludes_earlier_attempts():
+    jobs = [
+        {"name": "lint", "created_at": "2026-10-09T07:20:00Z", "completed_at": "2026-10-09T07:22:00Z"},
+        _gate(created_at="2026-10-09T07:26:00Z", completed_at="2026-10-09T07:27:00Z"),
+    ]
+    queue = {**QUEUE, "run_attempt": 2}
+    end = ci_budget.seconds("2026-10-09T07:30:00Z")
+    result = ci_budget.delivery_report(queue, {"seconds": 480}, end, jobs)
+    assert result == {"head": 480, "queue": 420, "combined": 900, "remaining": 0}
+    assert ci_budget.delivery_rows(result, final=True)[1] == ("queue checks", "7m00s")
+
+
+def test_provisional_queue_cli_does_not_fetch_head_without_token(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(ci_budget, "delivery_api", lambda endpoint: pytest.fail(endpoint))
     run_file, jobs_file = tmp_path / "run.json", tmp_path / "jobs.jsonl"
     run_file.write_text(json.dumps(QUEUE))
     jobs_file.write_text(
@@ -186,12 +196,39 @@ def test_queue_cli_reads_head_through_api_and_reports_to_log_and_summary(tmp_pat
             }
         )
     )
-    end = ci_budget.seconds("2026-10-09T07:18:01Z")
+    end = ci_budget.seconds("2026-10-09T07:17:00Z")
+    assert main(["--run", str(run_file), "--jobs", str(jobs_file)], now=lambda: end) == 0
+    output = capsys.readouterr().out
+    assert "final head checks: unknown" in output
+    assert "queue checks so far: 7m00s" in output
+    assert "combined delivery: unknown" in output
+    assert "remaining delivery: unknown" in output
+
+
+def test_queue_cli_reads_head_through_api_and_reports_to_log_and_summary(tmp_path, monkeypatch, capsys):
+    api, _ = _api([[_head()]])
+    monkeypatch.setattr(ci_budget, "delivery_api", api)
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    run_file, jobs_file = tmp_path / "run.json", tmp_path / "jobs.jsonl"
+    run_file.write_text(json.dumps(QUEUE))
+    jobs = [
+        {
+            "name": "lint",
+            "created_at": QUEUE["created_at"],
+            "completed_at": "2026-10-09T07:12:00Z",
+            "conclusion": "success",
+        },
+        _gate(created_at="2026-10-09T07:17:00Z", completed_at="2026-10-09T07:18:01Z"),
+    ]
+    jobs_file.write_text("\n".join(json.dumps(job) for job in jobs))
+    end = ci_budget.seconds("2026-10-09T07:19:10Z")
     assert main(["--run", str(run_file), "--jobs", str(jobs_file)], now=lambda: end) == 0
     output = capsys.readouterr().out
     for label, duration in [
         ("final head checks", "8m00s"),
-        ("queue checks so far", "8m01s"),
+        ("queue checks", "8m01s"),
         ("combined delivery", "16m01s"),
         ("remaining delivery", "-1m01s"),
     ]:
@@ -199,11 +236,15 @@ def test_queue_cli_reads_head_through_api_and_reports_to_log_and_summary(tmp_pat
         assert f"| {label} | {duration} |" in summary.read_text()
     assert "::warning title=Delivery over fifteen minutes::" in output
     assert "15m00s" in summary.read_text()
+    assert "Measured through Gate Required." in summary.read_text()
 
 
 def test_every_queue_report_can_read_pull_request_metadata():
     workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())
-    job = workflow["jobs"]["stage-budget"]
+    job = workflow["jobs"]["delivery-budget"]
+    assert job["needs"] == ["gate-required"]
+    assert job["if"] == "${{ always() && github.event_name == 'merge_group' }}"
+    assert "delivery-budget" not in workflow["jobs"]["gate-required"]["needs"]
     app = next(step for step in job["steps"] if step.get("id") == "app-token")
     assert app["with"]["permission-pull-requests"] == "read"
     reporter = next(step for step in job["steps"] if "scripts.ci_budget" in step.get("run", ""))
