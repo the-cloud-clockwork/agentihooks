@@ -157,12 +157,14 @@ def test_the_hierarchy_resource_names_phase_lifecycles_and_skips_items_without_a
         SLUG,
         {
             "phases": [{"id": "p1", "planning": "auto"}, {"id": "p2", "depends_on": ["p1"]}, {"title": "no id"}],
+            "slices": [{"id": "s1", "phase": "phases/p1", "done": True}],
             "_meta": {"rev": 1},
         },
     )
     reply = resources.hierarchy_read(found, SLUG, "hierarchy")
     assert [(row["node"], row["state"]) for row in reply["data"]] == [
         ("phases/p1", "to_plan"),
+        ("slices/s1", "done"),
         ("phases/p2", "waiting"),
     ]
 
@@ -234,4 +236,4 @@ def test_tree_takes_an_optional_node_and_documents_its_forms(capsys):
             parser.parse_args(argv)
     out = " ".join(capsys.readouterr().out.split())
     assert "tree print a plan, phase, slice or task and everything under it, with states" in out
-    assert "plans/<id>, phases/<id>, slices/<id> or tasks/<id>; default the whole ledger" in out
+    assert "node plans/<id>, phases/<id>, slices/<id> or tasks/<id>; default the whole ledger" in out
