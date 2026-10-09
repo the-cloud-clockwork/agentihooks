@@ -1,0 +1,37 @@
+{{- if .Values.worker.enabled }}
+{{- if not .Values.worker.command }}
+{{- fail "worker.command is the hive worker entry point" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "swarm.fullname" . }}-worker
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels:
+      {{- include "swarm.selector" (dict "root" . "component" "worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "swarm.labels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      {{- include "swarm.podSecurity" . | nindent 6 }}
+      containers:
+        - name: worker
+          image: {{ include "swarm.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "swarm.containerSecurity" . | nindent 10 }}
+          command:
+            {{- toYaml .Values.worker.command | nindent 12 }}
+          env:
+            {{- include "swarm.env" . | nindent 12 }}
+            {{- include "swarm.extraEnv" .Values.worker.env | nindent 12 }}
+          {{- include "swarm.envFrom" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+{{- end }}
