@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import ledger_state, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import ledger_state, loaded, serve_modules, shell_html
 
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/swarm-buildout"
@@ -46,6 +46,7 @@ def tab(browser):
     serve_modules(context, ledger_state(DOC))
     page = context.new_page()
     page.goto(URL)
+    settle(page)
     yield page
     context.close()
 
@@ -69,6 +70,8 @@ def outline(tab):
 
 
 def settle(tab):
+    loaded(tab)
+    tab.wait_for_selector("details[data-key]", state="attached")
     tab.wait_for_timeout(50)
 
 
@@ -81,6 +84,7 @@ def test_every_comment_section_shows_one_control_and_the_outline_one(tab):
 def test_notes_show_replies_under_the_note_and_remember_the_comments_toggle(tab):
     note = tab.locator("#item-notes-n1")
     note.locator("details[data-key] > summary").click()
+    note.locator(".entry-body").nth(1).wait_for()
     assert note.locator(".entry-body").all_text_contents() == ["Keep replies here", COMMENT["text"]]
     assert tab.locator("#item-notes-n2 details[data-key]").count() == 1
     assert comments(tab, "sec-notes") == {"labels": ["Show all comments"], "open": [True, False]}
