@@ -437,7 +437,7 @@ def test_a_codex_planner_writes_its_ledger_home_and_scratchpad(monkeypatch, envi
 
 
 def test_a_codex_planner_quotes_each_granted_path():
-    assert '"/q\\"x/development-ledger"="write"' in codex_plan_mode({"HOME": '/q"x'})[1]
+    assert codex_plan_mode({"HOME": '/q"x'})[1] == _grants('/q\\"x/development-ledger', '/q\\"x')
 
 
 @pytest.mark.parametrize(("lane", "agent"), [("eng", "codex"), ("ci", "codex"), ("plan", "claude")])
