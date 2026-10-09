@@ -399,6 +399,15 @@ def test_api_slot_replaces_stop_and_wait_only_with_room(five, week, sessions, ca
     assert (decision.target.account if decision.target else None) == ("api" if expected else None)
     text = qp.render(decision, "session", "/repo")
     assert "--route api" in text if expected else "--route api" not in text
+    if expected:
+        import shlex
+
+        from scripts.init_agent import _parser
+
+        command = next(line.removeprefix("2. Run: ") for line in text.splitlines() if line.startswith("2. Run: "))
+        parsed = _parser().parse_args(shlex.split(command)[2:])
+        assert parsed.handoff
+        assert parsed.claude_args == ["--", "--route", "api"]
 
 
 def test_api_fallback_preserves_subscription_target_and_operator_push():

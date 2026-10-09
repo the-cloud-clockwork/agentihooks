@@ -296,7 +296,7 @@ def render(d: Decision, session_id: str, cwd: str) -> str:
     if d.action == "handoff" and d.target:
         t = d.target
         age = max(0, int(time.time() - t.observed_at)) // 60
-        route = " --route api" if t.account == "api" else ""
+        route = " -- --route api" if t.account == "api" else ""
         status = (
             f"Api slot: {t.sessions}/{t.cap} sessions; subscription windows do not apply. "
             if route
