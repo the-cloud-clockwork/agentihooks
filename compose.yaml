@@ -60,7 +60,7 @@ services:
       - hive
       - serve
       - --host=0.0.0.0
-      - --redis-url=${SWARM_MEMBER_REDIS_URL:-redis://redis:6379/0}
+      - --redis-url=${SWARM_MEMBER_REDIS_URL:-${SWARM_REDIS_SCHEME:-redis}://redis:6379/0}
       - --tls-cert=/tls/cert.pem
       - --tls-key=/tls/key.pem
     ports:
@@ -90,6 +90,8 @@ services:
       - redis-data:/data
       - ./deploy/compose/redis:/compose:ro
       - ${SWARM_TLS_DIR:-./deploy/compose/tls}:/tls:ro
+    tmpfs:
+      - /run/swarm-tls
     healthcheck:
       test: [CMD, bash, /compose/healthcheck.sh]
       interval: 5s

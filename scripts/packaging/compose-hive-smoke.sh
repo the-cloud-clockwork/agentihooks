@@ -44,7 +44,7 @@ PY
 docker compose restart controller >/dev/null
 held=""
 for _ in $(seq 30); do
-  held="$(docker compose exec -T swarm agentihooks swarm "$slug" controller)"
+  held="$(docker compose exec -T swarm agentihooks swarm "$slug" controller || true)"
   if [[ $held == *'"owner": "compose-controller"'* ]]; then
     break
   fi
@@ -79,10 +79,10 @@ inbox="$(docker exec "$run-member" agentihooks msg inbox)"
 printf 'member inbox: %s\n' "$inbox"
 [[ $inbox == *"hello from the host"* ]]
 sleep 5
-restarts="$(docker inspect -f '{{.RestartCount}}' "$(docker compose ps -q controller)")"
-if [[ $restarts != 0 ]]; then
+state="$(docker inspect -f '{{.State.Running}} {{.RestartCount}}' "$(docker compose ps -q controller)")"
+if [[ $state != "true 0" ]]; then
   docker compose logs controller 2>&1 | grep -v swarm_tick_step | tail -5 >&2
-  printf 'the controller restarted %s times after taking the lease\n' "$restarts" >&2
+  printf 'the controller is not up after taking the lease (running, restarts: %s)\n' "$state" >&2
   exit 1
 fi
 printf 'controller: running, no restarts\n'
