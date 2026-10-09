@@ -119,6 +119,11 @@ def test_the_panel_fold_is_remembered_after_a_reload(tab):
     tab.locator("#alert-fab").click()
     tab.locator("#alert-fold > summary").click()
     assert tab.locator("#alert-fold").evaluate("el => el.open") is False
+    tab.wait_for_function(
+        """JSON.parse(localStorage.getItem('plan-ledger:alerts-page:fold') || '{}')
+            ['alert-fold'] === false"""
+    )
     tab.reload()
+    tab.wait_for_function("document.getElementById('status').textContent !== 'loading'")
     tab.locator("#alert-fab").click()
     assert tab.locator("#alert-fold").evaluate("el => el.open") is False
