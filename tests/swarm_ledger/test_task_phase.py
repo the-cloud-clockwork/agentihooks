@@ -2,6 +2,7 @@ import pytest
 
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger import ledger_tasks, new_ledger
+from tests.swarm_ledger import legacy_page
 
 SLUG = "taskphase-2026-01-01"
 MASTER = "master@abcdef-0001"
@@ -17,7 +18,7 @@ def ledger_dir(tmp_path, monkeypatch):
     phases = [{"title": "one", "description": "d"}, {"title": "two", "description": "e"}]
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": phases}
     html_path, _ = core.paths(SLUG)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     add = {"op": "task_add", "id": "seed", "by": "swarm", "task": "t1", "title": "a", "lane": "eng", "phase": "p1"}
     core.sync(SLUG, ops=[add])
 
