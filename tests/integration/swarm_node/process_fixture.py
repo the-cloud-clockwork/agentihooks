@@ -6,12 +6,11 @@ import socket
 import subprocess
 import sys
 import time
-
-from scripts.swarm_v2.supervision_protocol import acknowledge, context, write
+from pathlib import Path
 
 
 def herdr(args):
-    root, _ = context()
+    root = Path(os.environ["SWARM_SUPERVISION_DIR"])
     path = "\0swarm-" + root.name
     if args == ["server"]:
         server = socket.socket(socket.AF_UNIX)
@@ -39,6 +38,8 @@ def herdr(args):
 
 
 def process(role, mode):
+    from scripts.swarm_v2.supervision_protocol import context, write
+
     root, _ = context()
     write(root / f"fixture-{role}.json", {"pid": os.getpid(), "started": True})
     if mode == "stubborn":
@@ -59,6 +60,8 @@ def process(role, mode):
 
 
 def exporter(delay, mode):
+    from scripts.swarm_v2.supervision_protocol import acknowledge, context, write
+
     root, scope = context()
     acknowledge("exporter", pid=os.getpid(), status="ready")
     while not (root / "quiesced.json").exists():
