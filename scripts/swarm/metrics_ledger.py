@@ -4,6 +4,8 @@ from collections import Counter
 
 from scripts.swarm import metrics_outbox
 from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm_ledger.api.resources import node_state
+from scripts.swarm_ledger.repository import hierarchy
 
 PATH_KEYS = ("plan", "phase", "slice", "task")
 EMPTY_PATH = dict.fromkeys(PATH_KEYS, "")
@@ -61,12 +63,12 @@ def base(slug: str, ts_ms: int, identity: str, path: dict) -> dict:
     return {"event_id": identity, "ledger": slug, "ts_ms": ts_ms, **EMPTY_PATH, **path}
 
 
-def event_row(slug: str, event: dict, path: dict, catch_up: bool) -> dict:
+def event_row(slug: str, event: dict, path: dict, catch_up: bool, ordinal: int) -> dict:
     payload = json.dumps(event, sort_keys=True)
     identity = hashlib.sha256(payload.encode()).hexdigest()
     state = event["kind"].removeprefix("task ")
     return {
-        **base(slug, event["at"], f"ledger:{slug}:{identity}", path),
+        **base(slug, event["at"], f"ledger:{slug}:{ordinal}:{identity}", path),
         "revision": event["rev"],
         "kind": event["kind"],
         "by": event["by"],
@@ -81,15 +83,17 @@ def event_row(slug: str, event: dict, path: dict, catch_up: bool) -> dict:
 
 
 def event_rows(slug: str, events: list, known: dict, cursor: int | None, now_ms: int) -> list:
-    rows = []
+    rows, positions = [], Counter()
     if events and cursor is not None and events[0]["rev"] > cursor + 1:
         first, last = cursor + 1, events[0]["rev"] - 1
         gap = {"rev": last, "at": now_ms, "by": "metrics", "kind": "history gap", "target": ""}
-        row = event_row(slug, gap, {}, False)
-        rows.append({**row, "first_missed": first, "last_missed": last})
+        row = event_row(slug, gap, {}, False, 0)
+        rows.append({**row, "event_id": f"gap:{slug}:{first}:{last}", "first_missed": first, "last_missed": last})
     for event in events:
+        ordinal = positions[event["rev"]]
+        positions[event["rev"]] += 1
         if cursor is None or event["rev"] > cursor:
-            rows.append(event_row(slug, event, known.get(event["target"], {}), cursor is None))
+            rows.append(event_row(slug, event, known.get(event["target"], {}), cursor is None, ordinal))
     return rows
 
 
@@ -152,8 +156,18 @@ def snapshot_rows(slug: str, now_ms: int, doc: dict, nodes: list, known: dict, b
     return rows
 
 
+def snapshot_nodes(doc: dict) -> list:
+    projected, _ = hierarchy.project(doc)
+    items = {f"{collection}/{item['id']}": item for collection in hierarchy.KINDS for item in doc.get(collection, [])}
+    return [
+        {"node": node, "kind": kind, "parent": parent, "state": node_state(kind, items[node], doc)}
+        for node, (kind, parent, _) in projected.items()
+    ]
+
+
 def record(box: metrics_outbox.Outbox, slug: str, now_ms: int, ledger: LedgerClient) -> None:
-    doc, nodes = ledger.state(slug), ledger.hierarchy(slug)
+    doc = ledger.state(slug)
+    nodes = snapshot_nodes(doc)
     box.db.execute(CHECKPOINT)
     box.db.execute(PATHS)
     box.db.execute(BIRTHS)

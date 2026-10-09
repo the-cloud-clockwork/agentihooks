@@ -42,7 +42,7 @@ def test_record_pass_collects_ledger_rows_before_flushing(spool, monkeypatch, le
             "rev": 1,
             "events": [{"rev": 1, "at": NOW - 100, "kind": "task claimed", "target": "tasks/t", "by": "worker"}],
         },
-        "tasks": [{"id": "t", "lane": "ci"}],
+        "tasks": [{"id": "t", "lane": "ci", "state": "claimed"}],
         "time_left_minutes": 14,
     }
     nodes = [{"node": "tasks/t", "kind": "task", "parent": None, "state": "claimed", "depth": 0}]

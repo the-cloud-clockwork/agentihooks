@@ -50,6 +50,77 @@ def read(box, table):
     return sorted(box.recent(table, NOW + 1000), key=lambda row: row["ts_ms"])
 
 
+@pytest.fixture
+def box(tmp_path):
+    box = metrics_outbox.Outbox(tmp_path / "outbox.sqlite", metrics_outbox.Settings("http://sink", "", ""))
+    yield box
+    box.close()
+
+
+def test_identical_events_in_one_revision_each_survive_replay(box):
+    from scripts.swarm import metrics_ledger
+
+    ledger = Ledger()
+    for state in ("claimed", "open", "claimed"):
+        ledger.move(state, 5, NOW)
+    metrics_ledger.record(box, "example", NOW, ledger)
+    metrics_ledger.record(box, "example", NOW + 1, ledger)
+    rows = read(box, "ledger_events")
+    assert len(rows) == 3
+    assert [row["state"] for row in rows] == ["claimed", "open", "claimed"]
+    assert len({row["event_id"] for row in rows}) == 3
+    assert all(row["revision"] == 5 and row["catch_up"] == 1 for row in rows)
+
+
+def test_a_gap_is_one_row_even_when_a_retry_follows_a_committed_append(box, monkeypatch):
+    from scripts.swarm import metrics_ledger
+
+    ledger = Ledger()
+    ledger.move("claimed", 1, NOW)
+    metrics_ledger.record(box, "example", NOW, ledger)
+    ledger.doc["_meta"]["events"] = []
+    ledger.move("pr", 8, NOW + 1)
+    append = box.append
+
+    def interrupted(table, rows):
+        append(table, rows)
+        raise OSError("interrupted before checkpoint")
+
+    monkeypatch.setattr(box, "append", interrupted)
+    with pytest.raises(OSError, match="interrupted"):
+        metrics_ledger.record(box, "example", NOW + 2, ledger)
+    monkeypatch.setattr(box, "append", append)
+    metrics_ledger.record(box, "example", NOW + 3, ledger)
+    gaps = [row for row in read(box, "ledger_events") if row["kind"] == "history gap"]
+    assert len(gaps) == 1
+    assert gaps[0]["event_id"] == "gap:example:2:7"
+    assert gaps[0]["first_missed"] == 2 and gaps[0]["last_missed"] == 7
+    assert gaps[0]["ts_ms"] == NOW + 2 and gaps[0]["catch_up"] == 0
+    assert len(read(box, "ledger_events")) == 3
+
+
+def test_snapshot_hierarchy_counts_and_lanes_use_the_same_document(box, monkeypatch):
+    from scripts.swarm import metrics_ledger
+
+    ledger = Ledger()
+    state = ledger.state
+
+    def state_then_write(slug):
+        doc = state(slug)
+        ledger.doc["tasks"].append({"id": "new", "phase": "p", "lane": "ci", "state": "open"})
+        ledger.nodes.append({"node": "tasks/new", "parent": "phases/p", "kind": "task", "state": "open", "depth": 2})
+        return doc
+
+    monkeypatch.setattr(ledger, "state", state_then_write)
+    metrics_ledger.record(box, "example", NOW, ledger)
+    rows = read(box, "ledger_snapshots")
+    counts = [row for row in rows if row["measure"] == "tasks" and row["item"] == "" and row["state"] == "open"]
+    assert next(row["value"] for row in counts if row["lane"] == "") == 1.0
+    assert next(row["value"] for row in counts if row["lane"] == "eng") == 1.0
+    assert next(row["value"] for row in counts if row["lane"] == "ci") == 0.0
+    assert not any(row["task"] == "tasks/new" for row in rows)
+
+
 def test_four_task_states_become_distinct_rows_with_the_hierarchy_path(tmp_path):
     from scripts.swarm import metrics_ledger
 
