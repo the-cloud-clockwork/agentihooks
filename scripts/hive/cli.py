@@ -78,6 +78,8 @@ def _parser() -> argparse.ArgumentParser:
     settings.add_argument("settings", nargs="*", metavar="key=value")
     sub.add_parser("show", help="Print a hive's record as JSON").add_argument("id")
     sub.add_parser("list", help="One line per hive with its liveness")
+    sub.add_parser("run", help="Publish hive telemetry every fifteen seconds")
+    sub.add_parser("install", help="Write and enable the hive user service")
     return parser
 
 
@@ -113,6 +115,14 @@ def main(argv: list[str]) -> int:
         elif args.command == "revoke":
             auth.revoke(redis_client(), args.id)
             print(f"revoked {args.id}")
+        elif args.command == "run":
+            from scripts.hive import daemon
+
+            daemon.run(redis_client())
+        elif args.command == "install":
+            from scripts.hive import daemon
+
+            return 0 if daemon.install() else 1
         elif args.command in ("set", "show", "list"):
             _registry(args)
         else:
