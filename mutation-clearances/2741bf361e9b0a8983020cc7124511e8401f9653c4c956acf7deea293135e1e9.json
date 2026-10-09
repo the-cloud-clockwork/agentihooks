@@ -1,0 +1,6 @@
+{
+  "scripts/ci_reuse.py:scripts.ci_reuse.x__api__mutmut_6:7e9a55272277d39f16f11707fa97896924d89fbf7c010aefd9ab3a26d5a46e81": {
+    "reader": "Standards reviewer /root/standards_reader",
+    "reason": "diagnostic_only: Changing stderr capture on gh api changes visibility of subprocess diagnostics, not returned stdout, JSON decoding, exception type, authentication or reuse selection. Mutant change: +    value = subprocess.check_output([\"gh\", \"api\", path], ) Independent review of CI run 37933418386 mutation diff; no local run."
+  }
+}

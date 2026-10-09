@@ -1,0 +1,6 @@
+{
+  "scripts/ci_reuse.py:scripts.ci_reuse.x_main__mutmut_70:4921b2a15cd58de2b7b225479886e9e48dd71fa2ec029d5157978564a8df97d8": {
+    "reader": "Standards reviewer /root/standards_reader",
+    "reason": "diagnostic_only: Changing the fallback diagnostic changes its printed explanation only. The caught lookup failure still leaves source absent, records reused=false and runs full required suites. Mutant change: +            print(None) Independent review of CI run 37933418386 mutation diff; no local run."
+  }
+}

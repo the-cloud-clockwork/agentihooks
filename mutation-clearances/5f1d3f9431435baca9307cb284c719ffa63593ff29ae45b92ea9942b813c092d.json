@@ -1,0 +1,6 @@
+{
+  "scripts/ci_reuse.py:scripts.ci_reuse.x__matrix__mutmut_26:ffe5e2d99b7229a53dc0dbe6528dabfa2cafda0ce9d826ac925fe9ef9f2072e5": {
+    "reader": "Standards reviewer /root/standards_reader",
+    "reason": "equivalent: Every value tuple comes from itertools.product over exactly the same axes used as zip keys. Their lengths are equal by construction, so removing strict=True cannot change generated matrix rows or their count. Mutant change: +    rows = [dict(zip(axes, values, strict=None)) for values in itertools.product(*axes.values())] Independent review of CI run 37933418386 mutation diff; no local run."
+  }
+}

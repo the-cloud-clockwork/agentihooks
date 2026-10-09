@@ -1,0 +1,6 @@
+{
+  "scripts/ci_reuse.py:scripts.ci_reuse.x__revision__mutmut_4:3b886531a47a2898816dc710194057bfdd22f4f65ae56c59b0b1ccfbe01bb829": {
+    "reader": "Standards reviewer /root/standards_reader",
+    "reason": "diagnostic_only: Changing capture_output on git cat-file -e changes only whether its diagnostic stderr is captured. Return status still controls fetching and the resolved revision is unchanged; stdout of the existence check is unused. Mutant change: +    if subprocess.run([\"git\", \"cat-file\", \"-e\", ref], ).returncode: Independent review of CI run 37933418386 mutation diff; no local run."
+  }
+}

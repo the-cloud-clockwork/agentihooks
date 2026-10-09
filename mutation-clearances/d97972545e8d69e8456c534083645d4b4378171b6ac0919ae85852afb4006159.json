@@ -1,0 +1,6 @@
+{
+  "scripts/ci_reuse.py:scripts.ci_reuse.x__find__mutmut_146:19b4eaa8b48a68229af5c5809ca785a6fb03a68e5b0a96c760c1fd6095b03abd": {
+    "reader": "Standards reviewer /root/standards_reader",
+    "reason": "equivalent: Before this branch the tested commit tree was proven equal to the fixed queue tree. All later candidates whose tested tree passes equality have the same .github subtree. If that subtree mismatches the protected workflow, no later candidate can succeed; break and continue both return no reusable source. Mutant change: +            break Independent review of CI run 37933418386 mutation diff; no local run."
+  }
+}
