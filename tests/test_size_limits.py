@@ -264,10 +264,8 @@ def test_size_runs_beside_unit_graded_by_the_base_with_the_pinned_ruff():
         'if [[ -f "$RUNNER_TEMP/grader/scripts/size_limits.py" ]]; then\n'
         '  cd "$RUNNER_TEMP/grader"\n'
         '  python -m scripts.size_limits --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
-        'elif [[ -z "$(git -C "$RUNNER_TEMP/grader" log -1 --format=%H -- scripts/size_limits.py)" ]]; then\n'
-        '  python -m scripts.size_limits --bootstrap --head "$GITHUB_WORKSPACE"\n'
         "else\n"
-        '  echo "::error::dev once carried scripts/size_limits.py and no longer does, so nothing trusted can grade."\n'
+        '  echo "::error::dev carries no scripts/size_limits.py, so nothing trusted can grade."\n'
         "  exit 1\n"
         "fi\n"
     )
