@@ -179,6 +179,17 @@ def test_a_hung_unit_shard_fails_near_twice_the_slowest_shard():
     assert 2 * slowest_shard_minutes <= timeout <= 3 * slowest_shard_minutes
 
 
+def test_a_hung_unit_test_dumps_every_thread_stack_within_a_minute():
+    command = _pytest_command()
+    slowest_test = max(
+        max(json.loads((_ROOT / name).read_text()).values()) for name in (".test_durations", ".test_durations-3.12")
+    )
+    timeout = int(re.search(r"-o faulthandler_timeout=(\d+)", command).group(1))
+    assert slowest_test < timeout <= 60
+    assert "no:faulthandler" not in command
+    assert "faulthandler_exit_on_timeout" not in command
+
+
 def test_tests_run_on_pull_requests_into_dev_and_main():
     triggers = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())[True]
     assert set(triggers["pull_request"]["branches"]) == {"dev", "main"}
