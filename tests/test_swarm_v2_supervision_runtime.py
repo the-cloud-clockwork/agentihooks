@@ -180,6 +180,7 @@ def test_start_handshakes_before_launching_agent(supervisor, monkeypatch, failed
         ]
         native.assert_called_once_with(supervisor.launch.agent, supervisor.launch.attempt, supervisor.environment)
         assert supervisor.phase == "agent_launch"
+        assert calls[-1] == ("ready", "agent", 2)
     assert (supervisor.root / "running.json").exists() == (failed is None)
     if failed is None:
         assert protocol.read(supervisor.root / "running.json") == {
@@ -245,7 +246,7 @@ def test_drain_reports_acknowledged_material_only(supervisor, monkeypatch, clean
     monkeypatch.setattr(supervisor, "quiesce", lambda: clean)
     supervisor.stop = signal.SIGTERM
     supervisor.exits.update(agent=0)
-    supervisor.reaped.add(321)
+    supervisor.reaped.update({123, 321})
     protocol.write(supervisor.root / "agent.json", {**supervisor.scope, "pid": 123})
     acknowledgement = {**supervisor.scope, "status": "complete"}
     protocol.write(supervisor.root / "exporter.checkpoint.json", acknowledgement)
