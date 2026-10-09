@@ -105,7 +105,14 @@ def _health_rows(store, slug, agents, quiet, at):
         minutes = (at - last) // health.MINUTE_MS if last else None
         if at - started <= STARTUP_GRACE_MS or quiet_gate.declared_wait(store.redis, slug, agent.name, at):
             minutes = None
-        rows.append({**agent.__dict__, "quiet_minutes": quiet.get(agent.name), "tool_quiet_minutes": minutes})
+        rows.append(
+            {
+                **agent.__dict__,
+                "quiet_minutes": quiet.get(agent.name),
+                "tool_quiet_minutes": minutes,
+                "pane_state": store.redis.get(store.key(slug, "pane-state", agent.name)),
+            }
+        )
     return rows
 
 

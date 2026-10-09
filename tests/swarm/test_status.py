@@ -64,7 +64,7 @@ def test_busy_tool_stall_is_reported_until_a_new_tool_call_or_named_wait(monkeyp
     from scripts.swarm.tick import _watch_idle
 
     _watch_idle("sw", store, ledger, runtime, ledger.tasks("sw"), store.agents("sw")[0], at)
-    assert store.agents("sw")[0].pane_state == "working"
+    assert store.redis.get(store.key("sw", "pane-state", name)) == "working"
     found = findings(store, "sw", config, ledger.tasks("sw"), [])
     assert "stalled" in [f["kind"] for f in found]
     idle.declare_wait(store.redis, "sw", name, at + 60_000, "checks", at)
@@ -89,8 +89,9 @@ def test_stall_report_respects_actual_launch_and_startup_grace(monkeypatch, tmp_
     name = "engineer@a1b2c3-0001"
     limits = health.limits({"AGENTIHOOKS_HEALTH_STALLED_MINUTES": "4"})
     worker = AgentRecord(
-        name, "eng", "t1", started_at=at - 11 * 60_000, launched_at=at - 4 * 60_000, pane_state="working"
+        name, "eng", "t1", started_at=at - 11 * 60_000, launched_at=at - 4 * 60_000
     )
+    store.redis.set(store.key("sw", "pane-state", name), "working")
     rows = _health_rows(store, "sw", [worker], {}, at)
     assert health.stalled(rows, limits) == []
     rows = _health_rows(store, "sw", [worker], {}, at + 3 * 60_000)
