@@ -338,6 +338,10 @@ def fix_steps(slug: str) -> str:
     )
 
 
+def _fail_kind(mode):
+    return "deny" if mode == "enforce" else "observe"
+
+
 def _remember(slug, task, now_ms, state, answer, home):
     verdict, reason = answer
     record = {
@@ -374,7 +378,7 @@ def plan_check(slug, doc, task_id, traced, mode, now_ms, home=None):
     if verdict == UNCHECKED:
         log.append(slug, log.Row.of(NAME, "count", who, reason=reason), home)
     elif verdict == FAIL:
-        log.append(slug, log.Row.of(NAME, "deny" if mode == "enforce" else "observe", who, reason=reason), home)
+        log.append(slug, log.Row.of(NAME, _fail_kind(mode), who, reason=reason), home)
     return {"verdict": verdict, "reason": reason}
 
 
@@ -491,8 +495,7 @@ class Check:
         )
 
     def _failed(self, task, who, reason, rounds=0):
-        kind = "deny" if self.mode == "enforce" else "observe"
-        log.append(self.slug, log.Row.of(NAME, kind, who, reason=reason), self.home)
+        log.append(self.slug, log.Row.of(NAME, _fail_kind(self.mode), who, reason=reason), self.home)
         if self.mode == "coach" and rounds >= 2:
             text = f"Intent remains unmet after two fix rounds: {reason}. The master must review this shortfall."
             key, ref = f"intent-shortfall:{task['id']}:{self.now_ms}", f"tasks/{task['id']}"
