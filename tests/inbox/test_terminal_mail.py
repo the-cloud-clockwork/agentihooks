@@ -120,7 +120,10 @@ def test_a_resumable_master_keeps_mail_after_retirement(setup, monkeypatch, stat
 
     store, inbox, master = setup
     monkeypatch.setattr("scripts.inbox.addresses.get_active_sessions", lambda **kwargs: {})
+    clock = [1_000_000]
+    monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: clock[0])
     item = inbox.send("operator", master.seat, "Resume work")
+    clock[0] += 1
     if state != "pending":
         getattr(inbox, "deliver" if state == "delivered" else "read")(item.id, master.name)
     history = inbox.history(item.id)
