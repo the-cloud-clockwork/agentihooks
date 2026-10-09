@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from hooks.classifier import cli, corpus
+from hooks.classifier import cli, corpus, evaluation
 from hooks.classifier.errors import BackendFailure
 from hooks.classifier.result import Answer, DecisionResult
 from scripts.swarm import metrics_outbox
@@ -45,7 +45,7 @@ def home(definition_home):
 
 def test_replay_scores_a_planted_wrong_sample_as_a_miss(home):
     write_corpus(home, [case("typo", True, noul(0.9), noul(0.2))])
-    report = corpus.evaluate("sample").report()
+    report = evaluation.evaluate("sample").report()
     assert report["mode"] == "replay"
     assert report["samples"] == 2
     assert report["wrong"] == 1
@@ -69,7 +69,7 @@ def test_replay_scores_a_rejected_control_as_held(home):
             case("typo", True, noul(0.9, latency=50)),
         ],
     )
-    report = corpus.evaluate("sample").report()
+    report = evaluation.evaluate("sample").report()
     assert report["cases"] == 2
     assert report["controls"] == 1
     assert report["wrong"] == 0
@@ -82,7 +82,7 @@ def test_replay_scores_a_rejected_control_as_held(home):
 
 def test_replay_does_not_hold_a_control_one_sample_accepts(home):
     write_corpus(home, [case("unrelated", False, noul(0.1), noul(0.7, source="haiku"), control=True)])
-    report = corpus.evaluate("sample").report()
+    report = evaluation.evaluate("sample").report()
     assert report["held_controls"] == []
     assert report["wrong_cases"] == ["unrelated"]
     assert report["backends"]["liquid-d1"]["held_controls"] == ["unrelated"]
@@ -103,7 +103,7 @@ def test_replay_applies_the_choice_rule_threshold(definition_home):
         definition_home,
         [case("sure", "b", pick("b", 0.9)), case("unsure", None, pick("a", 0.4), control=True)],
     )
-    report = corpus.evaluate("sample").report()
+    report = evaluation.evaluate("sample").report()
     assert report["wrong_cases"] == []
     assert report["held_controls"] == ["unsure"]
 
@@ -126,7 +126,7 @@ def test_replay_scores_a_score_verdict_against_its_expected_range(definition_hom
             case("unsure", None, rate(0.9, confidence=0.59), control=True),
         ],
     )
-    report = corpus.evaluate("sample").report()
+    report = evaluation.evaluate("sample").report()
     assert report["wrong"] == 2
     assert report["wrong_cases"] == ["hard"]
     assert report["held_controls"] == ["unsure"]
@@ -141,7 +141,7 @@ def test_load_refuses_a_score_expectation_that_is_not_a_range(definition_home, b
     answer = {"type": "score", "score": 0.5, "confidence": 0.9}
     write_corpus(definition_home, [case("easy", bad, {"source": "m", "latency_ms": 1, "answers": {"accept": answer}})])
     with pytest.raises(corpus.CorpusError) as error:
-        corpus.evaluate("sample")
+        evaluation.evaluate("sample")
     assert str(error.value) == "case easy expected accept is not a verdict its rule can give"
 
 
@@ -164,18 +164,90 @@ def test_load_refuses_a_score_expectation_that_is_not_a_range(definition_home, b
         ([case("typo", True, noul(0.9), control=True)], "control case typo must expect only rejections"),
         ([case("typo", True, noul(0.9)), case("typo", True, noul(0.9))], "case names must be unique"),
         ([{**case("typo", True, noul(0.9)), "extra": 1}], "unknown case keys: extra"),
+        (["typo"], "case must be a mapping"),
+        ([{**case("typo", True, noul(0.9)), "name": ""}], "case name must be nonempty text"),
+        ([{k: v for k, v in case("typo", True, noul(0.9)).items() if k != "state"}], "case typo needs a state"),
+        ([{**case("typo", True, noul(0.9)), "params": [1]}], "case typo params must be a mapping"),
+        ([{**case("typo", True, noul(0.9)), "control": "yes"}], "case typo control must be true or false"),
+        ([case("typo", "yes", noul(0.9))], "case typo expected accept is not a verdict its rule can give"),
+        ([case("typo", None, noul(0.9))], "case typo expected accept is not a verdict its rule can give"),
+        ([case("typo", True, "sample")], "case typo sample 0 must be a mapping"),
+        ([case("typo", True, {**noul(0.9), "extra": 1})], "unknown case typo sample 0 keys: extra"),
+        ([case("typo", True, noul(0.9, source=""))], "case typo sample 0 needs a source"),
+        (
+            [case("typo", True, noul(0.9, latency=-1))],
+            "case typo sample 0 latency_ms must be a whole number of milliseconds",
+        ),
+        (
+            [case("typo", True, noul(0.9, latency=1.5))],
+            "case typo sample 0 latency_ms must be a whole number of milliseconds",
+        ),
+        (
+            [case("typo", True, {**noul(0.9), "answers": {"accept": {"type": "noul"}}})],
+            "case typo sample 0 answer accept must be a noul answer",
+        ),
     ],
 )
 def test_load_refuses_a_malformed_corpus(home, cases, message):
     write_corpus(home, cases)
     with pytest.raises(corpus.CorpusError) as error:
-        corpus.evaluate("sample")
+        evaluation.evaluate("sample")
+    assert str(error.value) == message
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        ("- 1\n", "corpus must be a mapping"),
+        ("version: 2\ncases: [1]\n", "corpus version must be 1"),
+        ("version: true\ncases: [1]\n", "corpus version must be 1"),
+        ("version: 1\ncases: []\n", "corpus cases must be a nonempty list"),
+        ("version: 1\n", "corpus cases must be a nonempty list"),
+        ("version: 1\ncases: [1]\nextra: 1\n", "unknown corpus keys: extra"),
+    ],
+)
+def test_load_refuses_a_malformed_corpus_document(home, text, message):
+    (home / "sample.corpus.yaml").write_text(text)
+    with pytest.raises(corpus.CorpusError) as error:
+        evaluation.evaluate("sample")
+    assert str(error.value) == message
+
+
+def test_load_refuses_an_unreadable_corpus(home):
+    (home / "sample.corpus.yaml").write_text("cases: [\n")
+    with pytest.raises(corpus.CorpusError) as error:
+        evaluation.evaluate("sample")
+    assert str(error.value).startswith("cannot read corpus sample: ")
+
+
+@pytest.mark.parametrize(
+    ("threshold", "expected", "message"),
+    [
+        ("yes", "c", "case typo expected accept is not a verdict its rule can give"),
+        (None, None, "case typo expected accept is not a verdict its rule can give"),
+        (None, "b", None),
+    ],
+)
+def test_load_checks_a_choice_expectation_against_its_options(definition_home, threshold, expected, message):
+    raw = sample()
+    raw["questions"] = [{"name": "accept", "type": "choice", "instructions": "Which?", "options": {"a": "A", "b": "B"}}]
+    raw["rule"] = {"type": "choice"} if threshold is None else {"type": "choice", "threshold": threshold}
+    write_definition(definition_home, raw)
+    answer = {"type": "choice", "choice": "b", "confidence": 0.9}
+    write_corpus(
+        definition_home, [case("typo", expected, {"source": "m", "latency_ms": 1, "answers": {"accept": answer}})]
+    )
+    if message is None:
+        assert evaluation.evaluate("sample").report()["wrong"] == 0
+        return
+    with pytest.raises(corpus.CorpusError) as error:
+        evaluation.evaluate("sample")
     assert str(error.value) == message
 
 
 def test_load_refuses_a_missing_corpus(home):
     with pytest.raises(corpus.CorpusError) as error:
-        corpus.evaluate("sample")
+        evaluation.evaluate("sample")
     assert str(error.value) == f"no corpus for classifier sample: {home / 'sample.corpus.yaml'}"
 
 
@@ -192,7 +264,7 @@ def test_code_rule_definitions_cannot_be_replayed(definition_home):
     write_definition(definition_home, raw)
     write_corpus(definition_home, [case("typo", True, noul(0.9))])
     with pytest.raises(corpus.CorpusError) as error:
-        corpus.evaluate("sample")
+        evaluation.evaluate("sample")
     assert str(error.value) == "classifier sample keeps a code rule; replay needs a yes, choice or score rule"
 
 
@@ -215,7 +287,7 @@ def test_live_runs_are_refused_in_ci(home, monkeypatch, value):
     write_corpus(home, [case("typo", True, noul(0.9))])
     backend = StubBackend("haiku", 0.9)
     with pytest.raises(corpus.CorpusError) as error:
-        corpus.evaluate("sample", repeats=1, backends=[backend])
+        evaluation.evaluate("sample", repeats=1, backends=[backend])
     assert str(error.value) == "live classifier runs are refused in CI"
     assert backend.calls == []
 
@@ -224,7 +296,7 @@ def test_live_asks_every_backend_repeats_times_per_case(home, monkeypatch):
     monkeypatch.delenv("CI", raising=False)
     write_corpus(home, [case("typo", True, noul(0.9)), case("unrelated", False, noul(0.1), control=True)])
     good, wrong, down = StubBackend("liquid-d1", 0.9), StubBackend("luna", 0.1), StubBackend("haiku")
-    report = corpus.evaluate("sample", repeats=2, backends=[good, wrong, down]).report()
+    report = evaluation.evaluate("sample", repeats=2, backends=[good, wrong, down]).report()
     assert [len(b.calls) for b in (good, wrong, down)] == [4, 4, 4]
     assert good.calls[0].state == {"task": "typo"}
     assert set(good.calls[0].questions) == {"accept"}
@@ -243,9 +315,9 @@ def test_live_backends_are_every_api_model_then_haiku_and_luna(monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_URL", "http://litellm:4000")
     monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_LITELLM_KEY", "test-key")
     monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_MODELS", "m1,m2")
-    assert [backend.name for backend in corpus.live_backends()] == ["m1", "m2", "haiku", "luna"]
+    assert [backend.name for backend in evaluation.live_backends()] == ["m1", "m2", "haiku", "luna"]
     monkeypatch.delenv("AGENTIHOOKS_CLASSIFIER_URL")
-    assert [backend.name for backend in corpus.live_backends()] == ["haiku", "luna"]
+    assert [backend.name for backend in evaluation.live_backends()] == ["haiku", "luna"]
 
 
 def test_eval_command_prints_the_report_and_fails_on_a_miss(home, capsys):
@@ -269,10 +341,35 @@ def test_eval_command_live_flag_reaches_the_backends(home, monkeypatch, capsys):
     monkeypatch.delenv("CI", raising=False)
     write_corpus(home, [case("typo", True, noul(0.9))])
     backend = StubBackend("haiku", 0.9)
-    monkeypatch.setattr(corpus, "live_backends", lambda: [backend])
+    monkeypatch.setattr(evaluation, "live_backends", lambda: [backend])
     assert cli.classifier_main(["eval", "sample", "--live", "3"]) == 0
     assert len(backend.calls) == 3
     assert json.loads(capsys.readouterr().out)["mode"] == "live"
+
+
+def test_eval_command_fails_a_live_run_where_no_backend_answered(home, monkeypatch, capsys):
+    monkeypatch.delenv("CI", raising=False)
+    write_corpus(home, [case("typo", True, noul(0.9))])
+    monkeypatch.setattr(evaluation, "live_backends", lambda: [StubBackend("haiku")])
+    assert cli.classifier_main(["eval", "sample", "--live", "1"]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert (report["wrong"], report["samples"], report["failures"]) == (0, 0, 1)
+
+
+def test_eval_command_refuses_a_negative_live_count(home, capsys):
+    with pytest.raises(SystemExit) as stopped:
+        cli.classifier_main(["eval", "sample", "--live", "-1"])
+    assert stopped.value.code == 2
+    assert capsys.readouterr().err.endswith("error: --live needs a count of zero or more\n")
+
+
+def test_eval_command_reports_a_metrics_failure_and_still_scores(home, monkeypatch, capsys):
+    write_corpus(home, [case("typo", True, noul(0.9))])
+    monkeypatch.setattr(evaluation, "record", lambda result, now_ms: ["metrics outbox failed: disk full"])
+    assert cli.classifier_main(["eval", "sample"]) == 0
+    captured = capsys.readouterr()
+    assert captured.err == "classifier eval: metrics outbox failed: disk full\n"
+    assert json.loads(captured.out)["wrong"] == 0
 
 
 def test_eval_writes_classifier_rows_to_the_metrics(home, tmp_path, monkeypatch):
@@ -281,12 +378,12 @@ def test_eval_writes_classifier_rows_to_the_metrics(home, tmp_path, monkeypatch)
     monkeypatch.setattr(metrics_outbox, "spool_path", lambda: spool)
     monkeypatch.setattr(metrics_outbox, "post", lambda sink, query, body: sent.append(query) or True)
     write_corpus(home, [case("typo", True, noul(0.9, latency=40), noul(0.2, source="haiku", latency=700))])
-    evaluation = corpus.evaluate("sample")
-    assert corpus.record(evaluation, 1_800_000_000_000, ON) == []
+    result = evaluation.evaluate("sample")
+    assert evaluation.record(result, 1_800_000_000_000, ON) == []
     assert sent[0].startswith("CREATE TABLE IF NOT EXISTS swarm.classifier_evals (")
     with closing(sqlite3.connect(spool)) as db:
         rows = [json.loads(row) for (row,) in db.execute("SELECT row FROM spool ORDER BY event_id")]
-    digest = evaluation.definition.digest
+    digest = result.definition.digest
     assert rows == [
         {
             "event_id": f"classifier-eval:sample:replay:1800000000000:{source}:typo:{index}",
@@ -314,13 +411,13 @@ def test_eval_metrics_are_off_without_settings(home, tmp_path, monkeypatch):
     spool = tmp_path / "metrics.sqlite"
     monkeypatch.setattr(metrics_outbox, "spool_path", lambda: spool)
     write_corpus(home, [case("typo", True, noul(0.9))])
-    assert corpus.record(corpus.evaluate("sample"), 1_800_000_000_000, {}) == []
+    assert evaluation.record(evaluation.evaluate("sample"), 1_800_000_000_000, {}) == []
     assert not spool.exists()
 
 
 @pytest.mark.parametrize("name", sorted(path.name.split(".")[0] for path in PACKAGE.glob("*.corpus.yaml")))
 def test_every_packaged_corpus_replays_clean(name):
-    report = corpus.evaluate(name).report()
+    report = evaluation.evaluate(name).report()
     assert report["wrong_cases"] == []
     assert report["held_controls"] == sorted(
         item["name"]

@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 
-from hooks.classifier import corpus, decision_log
+from hooks.classifier import decision_log, evaluation
 from hooks.classifier.core import decide
 from hooks.classifier.errors import ClassifierInputError, ClassifierRequestError, ClassifierUnavailable
 from hooks.classifier.questions import questions_from_wire
@@ -42,15 +42,15 @@ def classify_main(argv: list) -> int:
 
 def _evaluate(name: str, repeats: int) -> int:
     try:
-        evaluation = corpus.evaluate(name, repeats)
+        result = evaluation.evaluate(name, repeats)
     except ClassifierInputError as error:
         print(f"classifier eval: {error}", file=sys.stderr)
         return 2
-    for warning in corpus.record(evaluation, int(time.time() * 1000)):
+    for warning in evaluation.record(result, int(time.time() * 1000)):
         print(f"classifier eval: {warning}", file=sys.stderr)
-    report = evaluation.report()
+    report = result.report()
     print(json.dumps(report, indent=2))
-    return 1 if report["wrong"] else 0
+    return 1 if report["wrong"] or not report["samples"] else 0
 
 
 def classifier_main(argv: list) -> int:
