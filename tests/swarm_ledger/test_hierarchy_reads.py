@@ -1,0 +1,180 @@
+from types import SimpleNamespace
+
+import pytest
+
+from scripts.swarm_ledger import ledger
+from scripts.swarm_ledger.api import routes
+from scripts.swarm_ledger.api.errors import APIError
+from scripts.swarm_ledger.repository import sqlite as store
+
+SLUG = "hierarchy-reads"
+STATE = {
+    "plans": [{"id": "a"}, {"id": "b"}],
+    "phases": [
+        {"id": "p1", "plan": "plans/a"},
+        {"id": "p2", "plan": "plans/a", "done": True},
+        {"id": "p3", "plan": "plans/b"},
+        {"id": "p4"},
+    ],
+    "slices": [{"id": "s1", "phase": "phases/p1"}, {"id": "s2", "phase": "phases/p1"}],
+    "tasks": [
+        {"id": "t1", "phase": "p1", "slice": "slices/s1", "state": "done"},
+        {"id": "t2", "phase": "p1", "slice": "slices/s2", "state": "claimed"},
+        {"id": "t3", "phase": "p1", "state": "open"},
+        {"id": "t4", "phase": "p1", "slice": "slices/s1", "state": "pr"},
+        {"id": "t5", "phase": "p3", "state": "open"},
+        {"id": "t6", "phase": "p4", "depends_on": ["t1"], "state": "open"},
+        {"id": "t7", "state": "open"},
+        {"id": "t8", "phase": "p2", "depends_on": ["t6"], "state": "done"},
+    ],
+    "_meta": {"rev": 1},
+}
+PLAN_A = [
+    ("plans/a", 0),
+    ("phases/p1", 1),
+    ("slices/s1", 2),
+    ("tasks/t1", 3),
+    ("tasks/t4", 3),
+    ("slices/s2", 2),
+    ("tasks/t2", 3),
+    ("tasks/t3", 2),
+    ("phases/p2", 1),
+    ("tasks/t8", 2),
+]
+
+
+@pytest.fixture
+def repo(tmp_path):
+    found = store.SQLiteLedgerRepository(tmp_path / store.DATABASE)
+    found.import_document(SLUG, STATE)
+    return found
+
+
+def shape(rows):
+    return [(row["node"], row["depth"]) for row in rows]
+
+
+def test_subtree_of_a_plan_lists_its_phases_slices_and_tasks_in_display_order(repo):
+    rows = repo.nodes(SLUG, "subtree", "plans/a")
+    assert shape(rows) == PLAN_A
+    assert rows[1] == {"node": "phases/p1", "kind": "phase", "parent": "plans/a", "depth": 1}
+
+
+def test_subtree_of_a_phase_starts_at_the_phase(repo):
+    assert shape(repo.nodes(SLUG, "subtree", "phases/p1")) == [(node, depth - 1) for node, depth in PLAN_A[1:8]]
+
+
+def test_subtree_of_a_slice_lists_its_tasks_in_order(repo):
+    assert shape(repo.nodes(SLUG, "subtree", "slices/s1")) == [("slices/s1", 0), ("tasks/t1", 1), ("tasks/t4", 1)]
+
+
+def test_subtree_of_a_lone_task_is_the_task(repo):
+    assert repo.nodes(SLUG, "subtree", "tasks/t7") == [{"node": "tasks/t7", "kind": "task", "parent": None, "depth": 0}]
+
+
+def test_subtree_of_the_ledger_lists_every_root_plans_first(repo):
+    assert shape(repo.nodes(SLUG, "subtree")) == [
+        *PLAN_A,
+        ("plans/b", 0),
+        ("phases/p3", 1),
+        ("tasks/t5", 2),
+        ("phases/p4", 0),
+        ("tasks/t6", 1),
+        ("tasks/t7", 0),
+    ]
+
+
+def test_children_put_slices_before_lone_tasks(repo):
+    assert shape(repo.nodes(SLUG, "children", "phases/p1")) == [("slices/s1", 1), ("slices/s2", 1), ("tasks/t3", 1)]
+
+
+def test_children_of_the_ledger_are_its_roots(repo):
+    assert [row["node"] for row in repo.nodes(SLUG, "children")] == ["plans/a", "plans/b", "phases/p4", "tasks/t7"]
+
+
+def test_ancestors_run_from_the_root_down(repo):
+    assert shape(repo.nodes(SLUG, "ancestors", "tasks/t1")) == [("plans/a", 3), ("phases/p1", 2), ("slices/s1", 1)]
+    assert repo.nodes(SLUG, "ancestors", "plans/a") == []
+
+
+def test_dependents_follow_the_requires_links_downstream(repo):
+    assert shape(repo.nodes(SLUG, "dependents", "tasks/t1")) == [("tasks/t6", 1), ("tasks/t8", 2)]
+    assert repo.nodes(SLUG, "dependents", "tasks/t8") == []
+
+
+def test_an_unknown_node_is_refused(repo):
+    with pytest.raises(KeyError):
+        repo.nodes(SLUG, "subtree", "tasks/nope")
+
+
+def test_cycles_in_parents_and_dependencies_end(tmp_path):
+    loop = store.SQLiteLedgerRepository(tmp_path / store.DATABASE)
+    loop.import_document(
+        SLUG,
+        {
+            "tasks": [
+                {"id": "t1", "slice": "tasks/t1", "depends_on": ["t2"]},
+                {"id": "t2", "depends_on": ["t1"]},
+            ],
+            "_meta": {"rev": 1},
+        },
+    )
+    assert shape(loop.nodes(SLUG, "subtree")) == [("tasks/t2", 0)]
+    assert len(loop.nodes(SLUG, "subtree", "tasks/t1")) <= 4
+    assert len(loop.nodes(SLUG, "ancestors", "tasks/t1")) <= 3
+    assert {row["node"] for row in loop.nodes(SLUG, "dependents", "tasks/t1")} == {"tasks/t1", "tasks/t2"}
+
+
+def server(repo):
+    return SimpleNamespace(repository=repo)
+
+
+def test_the_hierarchy_resource_reads_the_ledger_tree_with_states(repo):
+    reply = routes.ledger_read(server(repo), SLUG, "hierarchy", {})
+    assert [(row["node"], row["state"]) for row in reply["data"][:3]] == [
+        ("plans/a", "open"),
+        ("phases/p1", "open"),
+        ("slices/s1", "open"),
+    ]
+    states = {row["node"]: row["state"] for row in reply["data"]}
+    assert (states["phases/p2"], states["tasks/t2"], states["tasks/t8"]) == ("done", "claimed", "done")
+    assert reply["revision"]
+
+
+def test_the_hierarchy_resource_runs_each_read_on_a_node(repo):
+    reply = routes.ledger_read(server(repo), SLUG, "hierarchy/subtree/slices/s1", {})
+    assert [row["node"] for row in reply["data"]] == ["slices/s1", "tasks/t1", "tasks/t4"]
+    reply = routes.ledger_read(server(repo), SLUG, "hierarchy/dependents/tasks/t1", {})
+    assert [row["node"] for row in reply["data"]] == ["tasks/t6", "tasks/t8"]
+
+
+@pytest.mark.parametrize("path", ["hierarchy/subtree/tasks/nope", "hierarchy/sideways/tasks/t1"])
+def test_the_hierarchy_resource_answers_missing_for_an_unknown_read_or_node(repo, path):
+    with pytest.raises(APIError) as caught:
+        routes.ledger_read(server(repo), SLUG, path, {})
+    assert caught.value.status == 404
+
+
+def test_tree_prints_the_subtree_indented_with_states(repo, monkeypatch, capsys):
+    read = []
+
+    def resource(slug, path):
+        read.append((slug, path))
+        return routes.ledger_read(server(repo), slug, path, {})["data"]
+
+    monkeypatch.setattr(ledger, "resource", resource)
+    ledger.cmd_tree(SimpleNamespace(slug=SLUG, node="slices/s1"))
+    assert read == [(SLUG, "hierarchy/subtree/slices/s1")]
+    assert capsys.readouterr().out.splitlines() == ["slices/s1  open", "  tasks/t1  done", "  tasks/t4  pr"]
+
+
+def test_tree_without_a_node_prints_the_whole_ledger(repo, monkeypatch, capsys):
+    monkeypatch.setattr(ledger, "resource", lambda slug, path: routes.ledger_read(server(repo), slug, path, {})["data"])
+    ledger.cmd_tree(SimpleNamespace(slug=SLUG, node=None))
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == "plans/a  open" and lines[-1] == "tasks/t7  open" and len(lines) == 16
+
+
+def test_tree_reads_without_a_member_name():
+    args = ledger.build_parser().parse_args(["--slug", SLUG, "tree", "phases/p1"])
+    assert (args.command, args.node) == ("tree", "phases/p1")
