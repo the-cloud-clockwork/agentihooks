@@ -1,11 +1,16 @@
 import io
 import json
+import random
+import time
 import urllib.error
 import urllib.request
 import uuid
 from urllib.parse import quote, urlencode
 
 from . import resources, schemas
+
+RETRIES = 5
+BACKOFF = 0.05
 
 
 class ResourceClient:
@@ -56,21 +61,21 @@ class ResourceClient:
 
     def mutate(self, slug: str, operations: list) -> dict:
         fetched = {schemas.target(operation) for operation in operations if not operation.get("expected_revision")}
-        try:
-            return self.send(slug, operations)
-        except urllib.error.HTTPError as exc:
-            replay, error = failure(exc)
-        if replay.code == 403 and "details" in error:
-            return error["details"]
-        if replay.code != 409 or error.get("code") != "revision_conflict" or not fetched:
-            raise replay
-        for operation in operations:
-            if schemas.target(operation) in fetched:
-                del operation["expected_revision"]
-        try:
-            return self.send(slug, operations)
-        except urllib.error.HTTPError as exc:
-            raise failure(exc)[0] from None
+        for attempt in range(RETRIES + 1):
+            try:
+                return self.send(slug, operations)
+            except urllib.error.HTTPError as exc:
+                replay, error = failure(exc)
+            if replay.code == 403 and "details" in error:
+                return error["details"]
+            if replay.code != 409 or error.get("code") != "revision_conflict" or not fetched:
+                raise replay
+            if attempt == RETRIES:
+                raise exhausted(replay, error, fetched)
+            for operation in operations:
+                if schemas.target(operation) in fetched:
+                    del operation["expected_revision"]
+            time.sleep(random.uniform(BACKOFF * 2**attempt / 2, BACKOFF * 2**attempt))
 
     def send(self, slug: str, operations: list) -> dict:
         guards, ops = {}, []
@@ -94,3 +99,9 @@ def failure(exc: urllib.error.HTTPError) -> tuple[urllib.error.HTTPError, dict]:
     except (ValueError, KeyError, TypeError):
         return replay, {}
     return replay, error if isinstance(error, dict) else {}
+
+
+def exhausted(replay: urllib.error.HTTPError, error: dict, fetched: set) -> urllib.error.HTTPError:
+    message = f"revision conflict on {', '.join(sorted(fetched))} persisted after {RETRIES} retries"
+    body = json.dumps({"error": {**error, "message": f"{error.get('message', '')}: {message}"}}).encode()
+    return urllib.error.HTTPError(replay.url, replay.code, message, replay.hdrs, io.BytesIO(body))
