@@ -11,16 +11,32 @@ def _workflow():
 
 def test_preflight_runs_on_task_branch_pushes_only():
     workflow = _workflow()
-    assert list(workflow[True]) == ["push"]
-    assert workflow[True]["push"] == {"branches-ignore": ["dev", "main", "gh-readonly-queue/**", "wip/**"]}
-    assert workflow["concurrency"] == {"group": "mutation-preflight-${{ github.ref }}", "cancel-in-progress": True}
+    events = workflow[True]
+    assert set(events) in ({"push"}, {"push", "workflow_call"})
+    assert events["push"] == {"branches-ignore": ["dev", "main", "gh-readonly-queue/**", "wip/**"]}
+    if "workflow_call" in events:
+        assert events["workflow_call"]["inputs"]["base"] == {"type": "string", "required": True}
+        assert workflow["concurrency"] == {
+            "group": "mutation-preflight-${{ github.event_name == 'push' && github.ref || github.run_id }}",
+            "cancel-in-progress": "${{ github.event_name == 'push' }}",
+        }
+    else:
+        assert workflow["concurrency"] == {"group": "mutation-preflight-${{ github.ref }}", "cancel-in-progress": True}
     assert workflow["permissions"] == {"contents": "read", "pull-requests": "read"}
 
 
 def test_preflight_skips_a_branch_with_an_open_pull_request():
-    jobs = _workflow()["jobs"]
+    workflow = _workflow()
+    jobs = workflow["jobs"]
     check = jobs["pull-request"]
-    assert check["if"] == "${{ !github.event.deleted }}"
+    if "workflow_call" in workflow[True]:
+        assert check["if"] == "${{ github.event_name == 'push' && !github.event.deleted }}"
+        assert jobs["mutation"]["if"] == (
+            "${{ !cancelled() && (github.event_name != 'push' || needs.pull-request.outputs.open == 'false') }}"
+        )
+    else:
+        assert check["if"] == "${{ !github.event.deleted }}"
+        assert jobs["mutation"]["if"] == "${{ needs.pull-request.outputs.open == 'false' }}"
     assert check["outputs"] == {"open": "${{ steps.open.outputs.open }}"}
     [step] = check["steps"]
     assert step["id"] == "open"
@@ -29,19 +45,24 @@ def test_preflight_skips_a_branch_with_an_open_pull_request():
     assert "state=open" in step["run"]
     assert """--jq '[.[] | select(.base.ref == "dev")] | length'""" in step["run"]
     assert jobs["mutation"]["needs"] == "pull-request"
-    assert jobs["mutation"]["if"] == "${{ needs.pull-request.outputs.open == 'false' }}"
 
 
 def test_preflight_mutates_against_dev_with_the_pull_request_budget():
-    job = _workflow()["jobs"]["mutation"]
+    workflow = _workflow()
+    job = workflow["jobs"]["mutation"]
     assert job["timeout-minutes"] == 20
     steps = job["steps"]
     assert steps[0]["with"] == {"fetch-depth": 0}
     names = [step.get("name") for step in steps]
     select = steps[names.index("Select mutation tests before browser setup")]
     mutate = steps[names.index("Mutate changed Python files")]
-    assert select["run"] == "python -m scripts.ci_mutation.browser --base origin/dev"
-    assert mutate["run"] == "python -m scripts.ci_mutation --base origin/dev --budget 1080"
+    if "workflow_call" in workflow[True]:
+        assert job["env"]["BASE"] == "${{ inputs.base || 'origin/dev' }}"
+        assert select["run"] == 'python -m scripts.ci_mutation.browser --base "$BASE"'
+        assert mutate["run"] == 'python -m scripts.ci_mutation --base "$BASE" --budget 1080'
+    else:
+        assert select["run"] == "python -m scripts.ci_mutation.browser --base origin/dev"
+        assert mutate["run"] == "python -m scripts.ci_mutation --base origin/dev --budget 1080"
     assert names.index("Install the browser that page tests drive") < names.index("Mutate changed Python files")
     assert steps[-1]["if"] == "always()"
     assert steps[-1]["with"]["name"] == "mutation-preflight-report"
