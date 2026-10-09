@@ -642,6 +642,8 @@ def _held_for_master(slug, store, now_ms):
 
 
 def _record_spawn_failure(slug, store, record, error):
+    if record_failure := timing.ON_FAILURE.get():
+        record_failure(f"{__name__}._spawn", error)
     transfers.failed(store, slug, record)
     if not isinstance(error, SpawnError) or error.status != "unavailable":
         store.note_launch_failure(slug, record.task, str(error))

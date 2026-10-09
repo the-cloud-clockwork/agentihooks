@@ -196,11 +196,12 @@ class HerdrRuntime:
         now: float,
         demand: dict | None = None,
         requirements: dict | None = None,
+        refresh: bool = True,
     ) -> dict:
         from scripts.swarm import capacity
 
         placing = demand is None or any(demand.values())
-        self._quota_accounts = capacity.accounts(dict(os.environ), now, refresh=placing)
+        self._quota_accounts = capacity.accounts(dict(os.environ), now, refresh=placing and refresh)
         self._quota_held = {}
         accounts = self._quota_successor_accounts(requirements) if requirements else None
         warned = self._quota_warned()

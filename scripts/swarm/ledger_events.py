@@ -357,6 +357,8 @@ def _settled(found):
 def findings_pass(inbox, store, slug, shown):
     mail, sent = Mail(inbox, store, slug), []
     for found in shown:
+        if found["kind"] == "spawn stall":
+            continue
         judged = (found.get("verdict") or {}).get("at", 0)
         text = (
             f"New health finding on swarm {slug}: {found['summary']} ({found['kind']}). Give it a verdict: "

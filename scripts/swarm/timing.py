@@ -11,6 +11,7 @@ from typing import Any
 
 SWARM = ContextVar("tick_swarm", default=None)
 BEFORE_STEP = ContextVar("tick_before_step", default=None)
+ON_FAILURE = ContextVar("tick_failure", default=None)
 
 
 def emit(stream, line: str) -> None:
@@ -48,8 +49,10 @@ def step(name: str) -> Iterator[None]:
     outcome = "success"
     try:
         yield
-    except BaseException:
+    except BaseException as exc:
         outcome = "error"
+        if record_failure := ON_FAILURE.get():
+            record_failure(name, exc)
         raise
     finally:
         ended = time.monotonic()

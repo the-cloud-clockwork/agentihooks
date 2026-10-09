@@ -163,77 +163,84 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
             runtime or routed(herdr=HerdrRuntime()),
             os.environ.get("AGENTIHOOKS_DEPLOYMENT", "local") == "local",
         )
-        controls = timing.call(command_runner.consume, store, slug)
-        if timing.call(ledger.binned, slug):
-            _, left = stop_now(store, slug, runtime or routed(herdr=HerdrRuntime()), ledger)
-            return [
-                f"the ledger is in the bin, still retiring {', '.join(left)}"
-                if left
-                else "the ledger is in the bin, stopped"
-            ]
-        inbox = InboxStore(store.redis)
-        try:
-            doc = timing.call(ledger.state, slug)
-        except LedgerGone as exc:
-            first = store.redis.set(store.key(slug, "ledger-gone"), 1, nx=True)
-            return [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
-        actions = skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
-        if actions:
-            doc = timing.call(ledger.state, slug)
-        ticked = skip_refused(phases.phase_pass, inbox, store, slug, doc, ledger)
-        actions += ticked
-        if ticked:
-            actions += skip_refused(
-                phase_planning.planning_pass,
-                inbox,
-                store,
-                slug,
-                timing.call(ledger.state, slug),
-                ledger,
-                store.config(slug),
-            )
-        actions += timing.call(tick, slug, store, ledger, runtime or routed(herdr=HerdrRuntime()), now_ms())
-        if store.config(slug).template == "doctor":
-            from scripts.doctor import cli as doctor
+        from scripts.swarm.health import spawn_stall
 
-            actions += skip_refused(doctor.timer, store, slug, now_ms())
-        herdr = messenger or delivery.HerdrMessenger()
-        timing.call(delivery.migrate_outbox, store, slug, inbox)
-        agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
-        skip_refused(delivery.relay_to_page, inbox, slug, agents, ledger)
-        doc, config = timing.call(ledger.state, slug), store.config(slug)
-        view = timing.call(ledger_events.tick_view, inbox, store, slug, doc)
-        actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms(), view)
-        actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), view)
-        mail, mode = ledger_events.Mail(inbox, store, slug), intent.mode_of(config)
-        actions += skip_refused(
-            intent.Check(
-                slug,
-                mode,
-                now_ms(),
-                ledger,
-                mail,
-                intent.pr_view,
-                intent.judge,
-                head=lambda url: getattr(view(url), "head", None),
-            ).run,
-            doc,
-        )
-        actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], view, now_ms())
-        rows = {t["id"]: t for t in doc["tasks"]}
-        actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms())
-        actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
-        actions += skip_refused(priority_sweep.priority_pass, store, slug, doc, ledger, None, view)
-        found = timing.call(findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
-        actions += skip_refused(ledger_events.findings_pass, inbox, store, slug, found)
-        window = wake.window_ms(os.environ)
-        actions += skip_refused(
-            wake.wake_pass, inbox, slug, agents, herdr, ledger, now_ms(), window, wake.quiet_ms(os.environ)
-        )
-        taken = timing.call(snapshot.auto, store, slug, now_ms(), os.environ)
-        store.redis.set(store.key(slug, "last-tick"), now_ms())
-        timing.call(command_runner.publish, store, slug, timing.call(ledger.state, slug))
-        return controls + actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
+        with spawn_stall.watch(store, slug, ledger, now_ms, runtime):
+            controls = timing.call(command_runner.consume, store, slug)
+            if timing.call(ledger.binned, slug):
+                _, left = stop_now(store, slug, runtime or routed(herdr=HerdrRuntime()), ledger)
+                return [
+                    f"the ledger is in the bin, still retiring {', '.join(left)}"
+                    if left
+                    else "the ledger is in the bin, stopped"
+                ]
+            inbox = InboxStore(store.redis)
+            try:
+                doc = timing.call(ledger.state, slug)
+            except LedgerGone as exc:
+                first = store.redis.set(store.key(slug, "ledger-gone"), 1, nx=True)
+                return (
+                    [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
+                )
+            actions = skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
+            if actions:
+                doc = timing.call(ledger.state, slug)
+            ticked = skip_refused(phases.phase_pass, inbox, store, slug, doc, ledger)
+            actions += ticked
+            if ticked:
+                actions += skip_refused(
+                    phase_planning.planning_pass,
+                    inbox,
+                    store,
+                    slug,
+                    timing.call(ledger.state, slug),
+                    ledger,
+                    store.config(slug),
+                )
+            actions += timing.call(tick, slug, store, ledger, runtime or routed(herdr=HerdrRuntime()), now_ms())
+            if store.config(slug).template == "doctor":
+                from scripts.doctor import cli as doctor
+
+                actions += skip_refused(doctor.timer, store, slug, now_ms())
+            herdr = messenger or delivery.HerdrMessenger()
+            timing.call(delivery.migrate_outbox, store, slug, inbox)
+            agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
+            skip_refused(delivery.relay_to_page, inbox, slug, agents, ledger)
+            doc, config = timing.call(ledger.state, slug), store.config(slug)
+            view = timing.call(ledger_events.tick_view, inbox, store, slug, doc)
+            actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms(), view)
+            actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), view)
+            mail, mode = ledger_events.Mail(inbox, store, slug), intent.mode_of(config)
+            actions += skip_refused(
+                intent.Check(
+                    slug,
+                    mode,
+                    now_ms(),
+                    ledger,
+                    mail,
+                    intent.pr_view,
+                    intent.judge,
+                    head=lambda url: getattr(view(url), "head", None),
+                ).run,
+                doc,
+            )
+            actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], view, now_ms())
+            rows = {t["id"]: t for t in doc["tasks"]}
+            actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms())
+            actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
+            actions += skip_refused(priority_sweep.priority_pass, store, slug, doc, ledger, None, view)
+            found = timing.call(
+                findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", [])
+            )
+            actions += skip_refused(ledger_events.findings_pass, inbox, store, slug, found)
+            window = wake.window_ms(os.environ)
+            actions += skip_refused(
+                wake.wake_pass, inbox, slug, agents, herdr, ledger, now_ms(), window, wake.quiet_ms(os.environ)
+            )
+            taken = timing.call(snapshot.auto, store, slug, now_ms(), os.environ)
+            store.redis.set(store.key(slug, "last-tick"), now_ms())
+            timing.call(command_runner.publish, store, slug, timing.call(ledger.state, slug))
+            return controls + actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
     finally:
         timing.BEFORE_STEP.reset(keeping)
         controller.release_tick_lock(store, slug, token)
