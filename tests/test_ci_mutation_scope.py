@@ -38,6 +38,34 @@ def test_package_initializer_selects_ordinary_package_imports(tmp_path):
     ]
 
 
+def test_tests_reaching_the_module_through_test_helpers_are_selected(tmp_path):
+    swarm = tmp_path / "tests" / "swarm"
+    swarm.mkdir(parents=True)
+    (swarm / "__init__.py").write_text("")
+    (swarm / "test_cli.py").write_text("from scripts.swarm import cli\n\n\ndef run():\n    return cli\n")
+    (swarm / "cases.py").write_text("from .test_cli import run\n")
+    (swarm / "test_kinds.py").write_text("from tests.swarm.test_cli import run  # noqa: F401\n")
+    (swarm / "test_chain.py").write_text("from tests.swarm import cases  # noqa: F401\n")
+    (swarm / "test_relative.py").write_text("from . import cases  # noqa: F401\n")
+    (swarm / "test_other.py").write_text("from scripts.swarm import prompt  # noqa: F401\n")
+    assert select_tests(tmp_path, Path("scripts/swarm/cli.py")) == [
+        "tests/swarm/test_chain.py",
+        "tests/swarm/test_cli.py",
+        "tests/swarm/test_kinds.py",
+        "tests/swarm/test_relative.py",
+    ]
+
+
+def test_a_change_reached_only_through_a_helper_selects_the_indirect_test(tmp_path):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "commands_cases.py").write_text("import hooks.context.commands as commands\n")
+    (tests / "test_indirect.py").write_text("import tests.commands_cases\n")
+    (tests / "test_unrelated.py").write_text("import tests.other_cases\n")
+    (tests / "other_cases.py").write_text("from hooks.context import other\n")
+    assert select_tests(tmp_path, Path("hooks/context/commands.py")) == ["tests/test_indirect.py"]
+
+
 def test_diff_discovers_only_changed_source_python_files(tmp_path):
     import subprocess
 
