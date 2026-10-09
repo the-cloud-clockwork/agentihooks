@@ -3,6 +3,8 @@ import pytest
 from scripts.routing import place, settings
 from scripts.routing.slots import API, API_UNBOUNDED, Slot
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
 NOW = 1_900_000_000.0
 
 
@@ -116,7 +118,6 @@ def test_policy_reads_each_harness_weight_and_cap_from_the_store(monkeypatch, tm
     assert place.policy("codex", env) == place.ApiPolicy(80, API_UNBOUNDED)
 
 
-@pytest.mark.xdist_group("fakeredis")
 def test_policy_reads_the_swarm_redis_when_it_answers(monkeypatch, tmp_path):
     import fakeredis
 
@@ -167,7 +168,6 @@ def test_an_unreadable_settings_file_is_a_settings_error(monkeypatch, tmp_path):
     assert str(raised.value) == "routing settings are unreadable: KeyError"
 
 
-@pytest.mark.xdist_group("fakeredis")
 def test_a_redis_read_failure_is_a_settings_error(monkeypatch, tmp_path):
     import redis
 

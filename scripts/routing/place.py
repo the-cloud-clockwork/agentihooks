@@ -2,8 +2,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from redis import RedisError
-
 from scripts import session_bands
 from scripts.routing import split
 from scripts.routing.settings import open_store
@@ -26,6 +24,8 @@ class ApiPolicy:
 
 
 def _client(environ: Mapping[str, str]) -> "Redis | None":
+    from redis import RedisError
+
     from scripts.swarm import store
 
     try:
@@ -35,6 +35,8 @@ def _client(environ: Mapping[str, str]) -> "Redis | None":
 
 
 def policy(harness: str, environ: Mapping[str, str]) -> ApiPolicy:
+    from redis import RedisError
+
     try:
         settings = open_store(_client(environ), environ)
         cap = settings.get(f"{harness}-api-max-sessions")

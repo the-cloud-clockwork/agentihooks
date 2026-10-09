@@ -5656,6 +5656,8 @@ def cmd_claude(extra_args: list[str]) -> None:
         flush=True,
     )
     cmd = _claude_command(claude_bin, extra_args)
+    # The child environment is the scrubbed copy launch_environment builds, never caller input.
+    # nosemgrep: python.lang.security.audit.dangerous-os-exec-tainted-env-args.dangerous-os-exec-tainted-env-args
     os.execvpe(claude_bin, cmd, launch_environment(decision, os.environ))
 
 
