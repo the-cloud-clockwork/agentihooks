@@ -105,6 +105,17 @@ def test_a_lone_generic_name_or_a_minority_of_names_pairs_nothing():
     assert ratchet.pair_moves({"hooks/old.py": lone}, {"scripts/new.py": _module({"main": "sys.exit(0)"})}) == {}
 
 
+def test_names_other_head_modules_also_define_never_pair_a_module():
+    old = _module({"main": "sys.exit(1)", "run": "return 1"})
+    new = _module({"main": "sys.exit(0)", "run": "return 0"})
+    elsewhere = _module({"main": "return 2", "run": "return 2"})
+    moves = ratchet.pair_moves({"hooks/old_cli.py": old}, {"scripts/new_cli.py": new}, [new, elsewhere])
+    assert moves == {}
+    assert ratchet.pair_moves({"hooks/old_cli.py": old}, {"scripts/new_cli.py": new}, [new]) == {
+        "hooks/old_cli.py": "scripts/new_cli.py"
+    }
+
+
 def _repo(tmp_path, files):
     for name, text in files.items():
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)

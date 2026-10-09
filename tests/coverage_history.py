@@ -26,7 +26,11 @@ def renamed(repo: Path, base: str) -> dict[str, str]:
         elif paths[0].startswith(GRADED) and paths[0].endswith(".py"):
             side, commit = (gone, base) if status == "D" else (added, "HEAD")
             side[paths[0]] = _show(repo, commit)(paths[0])
-    return moves | pair_moves(gone, added)
+    if not gone:
+        return moves
+    graded = git("ls-tree", "-r", "--name-only", "HEAD", "--", *GRADED, cwd=repo).split()
+    head = ((repo / path).read_text() for path in graded if path.endswith(".py"))
+    return moves | pair_moves(gone, added, head)
 
 
 def _show(repo: Path, commit: str) -> Source:
