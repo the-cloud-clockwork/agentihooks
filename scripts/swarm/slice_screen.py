@@ -5,16 +5,12 @@ Flags never send a slice back. At full autonomy the tick approves a slice only w
 
 from dataclasses import dataclass
 
-from hooks.classifier import ClassifierError, Score, YesNo, decide
+from hooks.classifier import ClassifierError, decide, definitions, runner
 from scripts.swarm import slice_check
 from scripts.swarm_ledger import ledger_kinds
 
 PURPOSE = "phase-slice"
-SIZES = ["trivial", "one pull request", "several pull requests", "a whole phase"]
-ONE_PR = SIZES.index("one pull request")
-OFF_INTENT = 0.3
-SERVES = "it advances the phase"
-ELSEWHERE = "it serves something else"
+ONE_PR = 1
 
 
 @dataclass(frozen=True)
@@ -46,29 +42,31 @@ def screen(phase, doc, confidence):
             for t in mine
         ],
     }
-    questions = {}
-    for i, t in enumerate(mine):
-        named = f"task {t['id']}, titled {t['title']}"
-        questions[f"size_{i}"] = Score(f"How much work is {named}?", SIZES)
-        questions[f"serves_{i}"] = YesNo(f"Does {named}, serve the phase intent?", true=SERVES, false=ELSEWHERE)
     try:
-        result = decide(state, questions, purpose=PURPOSE)
+        output = runner.run(PURPOSE, state, {"tasks": mine}, decider=decide)
     except ClassifierError:
         return Screen(reason="the classifier did not answer")
+    result = output.raw
     reason = "" if result.calibrated else f"the answer came from the fallback {result.source}"
-    return Screen(tuple(flags(result.answers, mine, confidence)), reason)
+    return Screen(tuple(flags(result.answers, mine, confidence, output.definition)), reason)
 
 
-def flags(answers, mine, confidence):
+def levels(definition: definitions.Definition) -> list[str]:
+    return next(spec.question.levels for spec in definition.questions if spec.name == "size")
+
+
+def flags(answers, mine, confidence, definition: definitions.Definition | None = None):
+    definition = definitions.load(PURPOSE) if definition is None else definition
+    sizes, off_intent = levels(definition), definition.thresholds["off_intent"]
     found = []
     for i, task in enumerate(mine):
         size, serves = answers[f"size_{i}"], answers[f"serves_{i}"]
         level = round(size.score)
         if level > ONE_PR and size.confidence >= confidence:
             found.append(
-                f"Classifier: task {task['id']} may be too big, {SIZES[level]} at confidence {size.confidence:.2f}."
+                f"Classifier: task {task['id']} may be too big, {sizes[level]} at confidence {size.confidence:.2f}."
             )
-        if serves.noul < OFF_INTENT:
+        if serves.noul < off_intent:
             found.append(
                 f"Classifier: task {task['id']} may be off intent, serves the phase at probability {serves.noul:.2f}."
             )
@@ -81,3 +79,9 @@ def hold(problems, result):
     if result.flags:
         return "the classifier flagged a task"
     return result.reason
+
+
+def __getattr__(name):
+    if name == "SIZES":
+        return levels(definitions.load(PURPOSE))
+    raise AttributeError(name)
