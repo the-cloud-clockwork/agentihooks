@@ -67,54 +67,6 @@ jobs:
     if: ${{ needs.kind-due.outputs.due == 'true' }}
     uses: ./.github/workflows/helm-kind.yml
 
-  wiring:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install PyYAML
-        run: python -m pip install "pyyaml>=6.0"
-
-      - name: Check every pull request job is a need of Gate Required
-        run: python -m scripts.ci_wiring
-
-  dependency-audit:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v10.2.0
-        with:
-          version: "0.12.23"
-          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
-          enable-cache: false
-
-      - name: Check out the base revision
-        env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
-        run: git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
-
-      # The base revision's copy grades once the base has one, so a pull request cannot loosen its own audit.
-      - name: Fail on known vulnerabilities new against the base
-        run: |
-          grader="$RUNNER_TEMP/base"
-          [[ -f "$grader/scripts/ci_dependency_audit.py" ]] || grader="$GITHUB_WORKSPACE"
-          cd "$grader"
-          python -m scripts.ci_dependency_audit --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
-
   # Every shard restores this one key, or nothing when the lookup found none, so all shards of a run split alike.
   durations:
     runs-on: ubuntu-latest
@@ -555,44 +507,6 @@ jobs:
           cd "$RUNNER_TEMP/base"
           python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
-  size:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install ruff
-        run: python -m pip install ruff==0.15.12
-
-      - name: Check out the base revision
-        env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
-        run: git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
-
-      - name: Check out the protected grader
-        run: |
-          git fetch --no-tags origin dev
-          git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
-
-      # dev's copy grades against the base's allowlist, so a pull request cannot loosen its own limits or allowlist.
-      - name: Hold the size and complexity limits
-        run: |
-          if [[ -f "$RUNNER_TEMP/grader/scripts/size_limits.py" ]]; then
-            cd "$RUNNER_TEMP/grader"
-            python -m scripts.size_limits --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
-          else
-            echo "::error::dev carries no scripts/size_limits.py, so nothing trusted can grade."
-            exit 1
-          fi
-
   sonar:
     # Waits for the shards' coverage through needs; the API that could poll for it has an hourly quota every run shares.
     needs: [unit]
@@ -843,6 +757,7 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     permissions:
@@ -862,13 +777,62 @@ jobs:
       - name: Install ruff
         run: python -m pip install ruff==0.15.12
 
+      - name: Install PyYAML
+        run: python -m pip install "pyyaml>=6.0"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+
+      - name: Check out the base revision
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
+        run: git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
+
+      - name: Check out the protected grader
+        run: |
+          git fetch --no-tags origin dev
+          git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
+
+      # Each control grades even after an earlier one is red, so one run reports every red control.
       - name: Lint check
+        if: ${{ !cancelled() }}
         run: python -m ruff check hooks/ scripts/ tests/
 
       - name: Format check
+        if: ${{ !cancelled() }}
         run: python -m ruff format --check hooks/ scripts/ tests/
 
+      - name: Check every pull request job is a need of Gate Required
+        if: ${{ !cancelled() }}
+        run: python -m scripts.ci_wiring
+
+      # dev's copy grades against the base's allowlist, so a pull request cannot loosen its own limits or allowlist.
+      - name: Hold the size and complexity limits
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/size_limits.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+            python -m scripts.size_limits --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+          else
+            echo "::error::dev carries no scripts/size_limits.py, so nothing trusted can grade."
+            exit 1
+          fi
+
+      # The base revision's copy grades once the base has one, so a pull request cannot loosen its own audit.
+      - name: Fail on known vulnerabilities new against the base
+        if: ${{ !cancelled() }}
+        run: |
+          grader="$RUNNER_TEMP/base"
+          [[ -f "$grader/scripts/ci_dependency_audit.py" ]] || grader="$GITHUB_WORKSPACE"
+          cd "$grader"
+          python -m scripts.ci_dependency_audit --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+
       - name: Select docs build
+        if: ${{ !cancelled() }}
         id: docs
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
@@ -877,29 +841,30 @@ jobs:
           if [[ -s "$RUNNER_TEMP/docs-changes" ]]; then echo "build=true" >> "$GITHUB_OUTPUT"; fi
 
       - name: Build docs with Jekyll
-        if: steps.docs.outputs.build == 'true'
+        if: ${{ !cancelled() && steps.docs.outputs.build == 'true' }}
         uses: actions/jekyll-build-pages@v1
         with:
           source: ./
           destination: ./_site
 
       - name: Select artifact browser checks
+        if: ${{ !cancelled() }}
         id: artifacts
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
         run: bash .github/actions/browser-cache/select-artifacts.sh
 
       - name: Install Playwright for artifact checks
-        if: steps.artifacts.outputs.browser == 'true'
+        if: ${{ !cancelled() && steps.artifacts.outputs.browser == 'true' }}
         run: python -m pip install "playwright>=1.44.0" "orjson>=3.10"
 
       - name: Install the artifact viewer browser
-        if: steps.artifacts.outputs.browser == 'true'
+        if: ${{ !cancelled() && steps.artifacts.outputs.browser == 'true' }}
         timeout-minutes: 2
         uses: ./.github/actions/browser-cache
 
       - name: Artifact sanity checks
-        if: steps.artifacts.outputs.browser == 'true'
+        if: ${{ !cancelled() && steps.artifacts.outputs.browser == 'true' }}
         run: python -m scripts.swarm_ledger.artifact_sanity tests/fixtures/artifacts/*
 
   coverage-ratchet:
@@ -1019,7 +984,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [durations, split, unit, shard-check, test-count, coverage-ratchet, size, lint, sonar, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, wiring, semgrep, dependency-audit]
+    needs: [durations, split, unit, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1031,7 +996,7 @@ jobs:
           KIND: ${{ needs.kind-due.outputs.due }}
         run: |
           echo "$NEEDS"
-          if ! jq -e --arg mutation "$MUTATION" --arg kind "${KIND:-}" 'all(to_entries[]; .value.result == "success" or (.key == "mutation" and .value.result == "skipped" and $mutation == "false") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false"))' <<< "$NEEDS"; then
+          if ! jq -e --arg mutation "$MUTATION" --arg kind "${KIND:-}" 'all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan") and .value.result == "skipped" and $mutation == "false") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false"))' <<< "$NEEDS"; then
             echo "::error::Every required gate must succeed."
             exit 1
           fi
@@ -1265,10 +1230,46 @@ jobs:
           retention-days: 7
           overwrite: true
 
+  mutation-plan:
+    if: ${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+
+      - name: Install dependencies
+        run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Size mutation shards from stored timings
+        id: plan
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || inputs.base }}
+        run: python -m scripts.ci_mutation.plan --base "$BASE"
+
   mutation:
+    needs: mutation-plan
     if: ${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.mutation-plan.outputs.shards) }}
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
@@ -1313,20 +1314,24 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           PYTHONUNBUFFERED: "1"
-        run: python -m scripts.ci_mutation --base "$BASE" --budget 1080
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ strategy.job-total }}
+        run: python -m scripts.ci_mutation --base "$BASE" --budget 1080 --shard "$SHARD" --shards "$SHARDS"
 
       - name: Mutate dispatched Python files
         if: github.event_name == 'workflow_dispatch'
         env:
           BASE: ${{ inputs.base }}
           PYTHONUNBUFFERED: "1"
-        run: python -m scripts.ci_mutation --base "$BASE" --budget 1080
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ strategy.job-total }}
+        run: python -m scripts.ci_mutation --base "$BASE" --budget 1080 --shard "$SHARD" --shards "$SHARDS"
 
       - name: Upload complete mutation evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mutation-report
+          name: mutation-report-${{ matrix.shard }}
           path: .mutation-gate/
           include-hidden-files: true
           retention-days: 7
