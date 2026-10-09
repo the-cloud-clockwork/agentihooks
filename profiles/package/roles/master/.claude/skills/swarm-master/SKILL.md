@@ -60,6 +60,24 @@ all arrive as inbox items. `agentihooks msg inbox` lists them,
 - The operator's words typed in your pane go on the ledger as his:
   `agentihooks ledger --slug <slug> --as <name> relay <item> "<text>" --quote "<his words>"`.
 
+## Plans you publish
+
+Every plan you write for the swarm gives each task its own chunk, so the agent
+reads only its slice and the tick's intent verdict judges the work against it.
+
+1. Write the plan in your scratchpad task folder. Put each phase under a
+   heading with its exact title, each task section under a heading one level
+   deeper, and one unique `<!-- slice: <id> -->` anchor immediately before each
+   task heading. The section ends at the next slice anchor or heading of the
+   same or higher level. Done when every task has an anchor.
+2. Publish it:
+   `agentihooks ledger --slug <slug> --as <name> publish-plan <plan-file> --phase <phase-ids>`.
+   Done when each phase shows its plan link.
+3. Add every task built from it with its anchor; the ledger computes the plan
+   lines, never type them:
+   `agentihooks ledger --slug <slug> --as <name> task add <id> "<title>" --lane eng --phase <phase> --plan-slice <id> --kind code --description "<seams and done when>"`.
+   Done when plan read prints the chunk for each planned task.
+
 ## Planner slices
 
 Review each slice against its phase intent, then
