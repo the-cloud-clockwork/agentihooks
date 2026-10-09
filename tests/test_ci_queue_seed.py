@@ -394,6 +394,7 @@ def dispatch_lookup(tmp_path):
             LISTED=_LISTED,
             FAIL_COMMIT=fail_commit,
             GITHUB_OUTPUT=str(output),
+            GITHUB_REF_NAME="feature",
             GITHUB_REPOSITORY="the-cloud-clockwork/agentihooks",
             **{
                 f"KEPT_{k.removeprefix('run')}": json.dumps(
