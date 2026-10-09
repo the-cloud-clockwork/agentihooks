@@ -2075,6 +2075,25 @@ def _tick_all(monkeypatch, run_tick, slugs, tick_seconds=0.05):
     return store
 
 
+def test_the_host_tick_refuses_a_controller_tick_setting(monkeypatch):
+    import types
+
+    from scripts import operator_env
+
+    ticked = []
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", "10")
+    monkeypatch.setattr(timer, "installed_refusal", lambda: "")
+    monkeypatch.setattr(operator_env, "fill", lambda environ: [])
+    monkeypatch.setattr(cli, "run_tick", lambda store, slug: ticked.append(slug))
+    with pytest.raises(SwarmError) as error:
+        cli.cmd_tick(types.SimpleNamespace(slugs=lambda: ["sw"]), None)
+    assert str(error.value) == (
+        "the tick refused to run: AGENTIHOOKS_CONTROLLER_TICK_SECONDS is for controller installs, "
+        "and the host timer ticks every 60 seconds"
+    )
+    assert ticked == []
+
+
 def test_the_tick_runs_every_swarm_at_the_same_time(monkeypatch, capsys):
     import threading
 

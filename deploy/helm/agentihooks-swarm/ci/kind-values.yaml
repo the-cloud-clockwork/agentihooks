@@ -2,9 +2,6 @@ image:
   repository: local/agentihooks-swarm
   tag: dev
   pullPolicy: Never
-ledger:
-  env:
-    AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "10"
 controller:
   livenessProbe:
     initialDelaySeconds: 60
