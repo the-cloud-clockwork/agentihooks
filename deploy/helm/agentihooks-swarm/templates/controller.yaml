@@ -56,6 +56,19 @@ spec:
               && . "$AGENTIHOOKS_HOME/controller/credential.env"
               && export AGENTIHOOKS_CONTROLLER_CREDENTIAL
               && exec agentihooks controller run
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - >-
+                  from scripts.swarm import lease; from scripts.swarm.store import connect;
+                  store = connect(); stale = [slug for slug in store.slugs() if not lease.current(store, slug)];
+                  assert not stale, f"no live controller lease for {stale}"
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
           env:
             {{- include "swarm.env" . | nindent 12 }}
             - name: AGENTIHOOKS_HOME
