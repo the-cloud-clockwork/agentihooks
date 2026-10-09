@@ -176,15 +176,16 @@ class HerdrRuntime:
         warned = self._quota_warned()
         return [row for row in self._quota_accounts if (row.harness, row.name) not in warned]
 
-    def _quota_refusal(self, agent):
+    def _quota_refusal(self, agent, harnesses=None):
         from scripts.swarm.capacity import warning
 
+        harnesses = harnesses or (agent,)
         warnings = "; ".join(
             f"{harness} {name} {warning(window)}"
             for (harness, name), window in self._quota_warned().items()
-            if harness == agent
+            if harness in harnesses
         )
-        return f"no {agent} account has placeable quota seats" + (f": {warnings}" if warnings else "")
+        return f"no {' or '.join(harnesses)} account has placeable quota seats" + (f": {warnings}" if warnings else "")
 
     def quota_capacity(
         self,
@@ -285,7 +286,7 @@ class HerdrRuntime:
             return agent, reason
         if not fixed and eligible:
             return eligible[0], f"fallthrough: {agent} has no placeable quota seats"
-        raise SpawnError(self._quota_refusal(agent), "unavailable")
+        raise SpawnError(self._quota_refusal(agent, None if fixed else agent_choice.AGENTS), "unavailable")
 
     def _rotation(self, requested, environ):
         if requested or not hasattr(self, "_quota_accounts"):
@@ -514,6 +515,12 @@ class HerdrRuntime:
             profile_decision={**agent.profile_decision, **placed.profile_decision},
             overlays=agent.overlays,
         )
+
+    def operator(self, config, name, profile, text):
+        """Open a claude session for the operator in the swarm's space, bound to the swarm with no task or lane slot."""
+        argv = self._argv(config, name, "claude", text, f"{name}.md", profile)
+        model = _model_args("claude", model_pick.frontier("claude").__dict__, dict(os.environ), effort_range.of(config))
+        return self._launch(config, naming.OPERATOR, "", name, [*argv, "--", *model])
 
     def _holds(self, pane_id, conversation_id):
         for _ in range(RESUME_CHECKS):

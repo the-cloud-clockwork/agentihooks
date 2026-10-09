@@ -29,6 +29,7 @@ UPDATABLE = (
     "artifact",
     "profile",
     "plan_url",
+    "plan_slice",
     "rank",
     "branch",
     "branch_repo",
@@ -108,9 +109,7 @@ def check(op):
         )
     if "state" in fields and fields["state"] not in STATES:
         raise ValueError(f"state must be one of {STATES}")
-    guard = op.get("if_state", [])
-    if not isinstance(guard, list) or not all(state in STATES for state in guard):
-        raise ValueError(f"if_state must be a list of states from {STATES}")
+    check_guards(op)
     check_lists(fields)
     check_stack(fields)
     check_bools(fields)
@@ -118,6 +117,14 @@ def check(op):
     check_urls(fields)
     check_rank(fields)
     ledger_kinds.check(fields)
+
+
+def check_guards(op: dict) -> None:
+    if not isinstance(op.get("if_plan_lines_missing", False), bool):
+        raise ValueError("if_plan_lines_missing must be a boolean")
+    guard = op.get("if_state", [])
+    if not isinstance(guard, list) or not all(state in STATES for state in guard):
+        raise ValueError(f"if_state must be a list of states from {STATES}")
 
 
 def check_stack(fields):
@@ -216,7 +223,8 @@ def _add(doc, op, ctx):
         return False
     if not _known(tasks, op.get("depends_on", [])):
         return False
-    if refusal := add_refusal(tasks, op):
+    appended = {p["id"] for p in doc.get("phases", []) if p.get("added_by") == op["by"]}
+    if refusal := add_refusal(tasks, op, appended):
         ctx.refused.append(refusal)
         return False
     task = {
@@ -248,7 +256,7 @@ def _add(doc, op, ctx):
         from scripts.swarm_ledger import plan_ranges
 
         try:
-            task["plan_lines"] = plan_ranges.task_slice(doc, phase, op["plan_slice"])
+            task["plan_lines"] = plan_ranges.task_slice(doc, phase, op["plan_slice"], task.get("plan_url", ""))
         except ValueError as exc:
             ctx.refused.append(str(exc))
             return False
@@ -258,7 +266,7 @@ def _add(doc, op, ctx):
     return True
 
 
-def add_refusal(tasks, op):
+def add_refusal(tasks, op, appended):
     from scripts.swarm.naming import lane_of
 
     by, lane = op["by"], lane_of(op["by"])
@@ -268,7 +276,7 @@ def add_refusal(tasks, op):
         return ""
     plans = [t for t in tasks if (t.get("claimed_by"), t.get("lane"), t.get("state")) == (by, "plan", "claimed")]
     if not plans:
-        return f"{by} holds no plan task and cannot add tasks: {PROPOSE}"
+        return "" if op.get("phase") in appended else f"{by} holds no plan task and cannot add tasks: {PROPOSE}"
     if plans[0].get("phase") != op.get("phase"):
         return f"{by} plans phase {plans[0].get('phase')} and cannot add a task outside it: {PROPOSE}"
     return ""
@@ -374,5 +382,34 @@ def _update(doc, op, ctx):
     return True
 
 
+def _set_slice(doc: dict, op: dict, ctx) -> bool:
+    fields = op["fields"]
+    if "plan_slice" not in fields:
+        return True
+    task_id = op["item"].split("/")[1]
+    task = next((t for t in doc.get("tasks", []) if t["id"] == task_id), None)
+    if task is None or (op.get("if_state") and task.get("state", "open") not in op["if_state"]):
+        return True
+    from scripts.swarm_ledger import plan_ranges
+
+    phase = next((p for p in doc.get("phases", []) if p["id"] == task.get("phase")), {})
+    try:
+        fields["plan_lines"] = plan_ranges.task_slice(
+            doc, phase, fields["plan_slice"], fields.get("plan_url", task.get("plan_url", ""))
+        )
+    except ValueError as exc:
+        ctx.refused.append(str(exc))
+        return False
+    return True
+
+
 def apply(doc, op, ctx):
-    return _add(doc, op, ctx) if op["op"] == "task_add" else _update(doc, op, ctx)
+    if op["op"] == "task_add":
+        return _add(doc, op, ctx)
+    if op.get("if_plan_lines_missing") and any(
+        t["id"] == op["item"].split("/")[1] and t.get("plan_lines") for t in doc.get("tasks", [])
+    ):
+        return True
+    if not _set_slice(doc, op, ctx):
+        return False
+    return _update(doc, op, ctx)

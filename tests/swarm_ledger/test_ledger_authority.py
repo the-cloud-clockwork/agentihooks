@@ -101,7 +101,7 @@ def tasks(reply):
 
 def test_pinned_worker_transport_cannot_create_a_task_as_master(crew):
     with pinned():
-        own = operation("add", by=WORKER, thread="chat", text="Worker control")
+        own = operation("add", by=WORKER, thread="chat", to="operator", text="Worker control")
         assert own["id"] not in ledger.request(SLUG, [own])["rejected"]
         denied = operation("task_add", by=WORKER, task="t1", title="Own author", lane="eng", phase="p1")
         assert denied["id"] in ledger.request(SLUG, [denied])["rejected"]
@@ -116,7 +116,7 @@ def test_pinned_worker_transport_cannot_create_a_task_as_master(crew):
 
 
 def test_pinned_worker_cannot_write_as_another_worker_or_the_operator(crew):
-    other = operation("add", by=OTHER, thread="chat", text="Other worker")
+    other = operation("add", by=OTHER, thread="chat", to="operator", text="Other worker")
     unsigned = operation("add", thread="chat", text="Operator words")
     with pinned():
         reply = ledger.request(SLUG, [other, unsigned])
@@ -152,7 +152,7 @@ def test_a_bound_master_still_adds_tasks(crew):
 def test_an_alias_of_the_bound_name_writes_as_that_agent(crew):
     alias = "engineer-323133-0256"
     with pinned(), patch.object(server.authority, "resolve_name", lambda name: WORKER if name == alias else name):
-        said = operation("add", by=alias, thread="chat", text="Alias control")
+        said = operation("add", by=alias, thread="chat", to="operator", text="Alias control")
         reply = ledger.request(SLUG, [said])
     assert said["id"] not in reply["rejected"]
 
@@ -201,7 +201,7 @@ def test_the_swarm_client_binds_agent_authored_writes_to_the_session(crew):
 
 
 def test_a_credential_for_one_name_refuses_another_agent_header(crew):
-    body = json.dumps({"ops": [operation("add", by=OTHER, thread="chat", text="Header swap")]})
+    body = json.dumps({"ops": [operation("add", by=OTHER, thread="chat", to="operator", text="Header swap")]})
     headers = {"Content-Type": "application/json", **agent_headers(crew, WORKER, header=OTHER)}
     before = core.paths(SLUG)[1].read_bytes()
     refused = send(crew, "PUT", f"/api/{SLUG}?view=agent", body, **headers)
@@ -313,6 +313,50 @@ def test_refusals_name_why_each_op_is_refused():
         assert authority.refusal(MASTER, {"by": MASTER, "op": "join", "role": "orchestrator"}) == ""
         assert authority.refusal("rig-master-1", {"by": "rig-master-1", "op": "join", "role": "orchestrator"}) == ""
         assert authority.refusal("", {"op": "add"}) == ""
+
+
+LAUNCHED = "engineer@323133-0258"
+
+
+@pytest.fixture
+def launched():
+    import fakeredis
+
+    from scripts.swarm.naming import NameRegistry
+
+    client = fakeredis.FakeRedis(decode_responses=True)
+    client.hset(NameRegistry.key("name", LAUNCHED), mapping={"swarm": "sw", "operator": "frontend", "retired_at": 0})
+    with patch.object(authority.store, "redis_client", lambda: client):
+        yield
+
+
+def test_an_operator_launched_name_is_refused_an_item_claim(launched):
+    claim = {"op": "claim", "by": LAUNCHED, "item": "phases/p1"}
+    with patch.object(authority, "resolve_name", lambda name: name):
+        assert authority.refusal(LAUNCHED, claim) == f"{LAUNCHED} was launched with swarm profile up and claims no item"
+        assert authority.refusal(OTHER, {**claim, "by": OTHER}) == ""
+        assert authority.refusal(LAUNCHED, {**claim, "op": "join"}) == ""
+
+
+def test_the_claim_check_lets_the_claim_through_when_redis_is_down():
+    from redis import ConnectionError as Down
+
+    def down():
+        raise Down("no redis")
+
+    with patch.object(authority.store, "redis_client", down):
+        assert authority.claim_refusal(LAUNCHED) == ""
+
+
+def test_the_server_refuses_the_claim_of_an_operator_launched_name(crew, launched):
+    assert admin_put(crew, operation("join", by=LAUNCHED))[0] == 200
+    claim = operation("claim", by=LAUNCHED, item="phases/p1")
+    body = json.dumps({"ops": [claim]})
+    headers = {"Content-Type": "application/json", **agent_headers(crew, LAUNCHED)}
+    status, data, _ = send(crew, "PUT", f"/api/{SLUG}?view=agent", body, **headers)
+    reply = json.loads(data)
+    assert (status, reply["rejected"]) == (200, [claim["id"]])
+    assert f"{LAUNCHED} was launched with swarm profile up and claims no item" in reply["_meta"]["warnings"]
 
 
 def test_the_transport_selects_the_bound_credential_only_in_a_pinned_session(crew):

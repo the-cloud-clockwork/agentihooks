@@ -1,0 +1,2 @@
+user default off
+user swarm on #@SWARM_REDIS_PASSWORD_SHA256@ ~* &* +@all

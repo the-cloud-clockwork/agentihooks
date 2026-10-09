@@ -78,6 +78,14 @@ def test_addressing_by_all_lane_and_name_skips_the_sender(store):
     assert names("sw-ci-1") == ["sw-ci-1"]
 
 
+def test_an_address_nobody_answers_to_is_refused_by_name(store):
+    from scripts.swarm.store import SwarmError
+
+    with pytest.raises(SwarmError) as refused:
+        delivery.recipients(store, "sw", "nobody", "sw-ci-1")
+    assert str(refused.value) == "nobody in swarm sw answers to nobody"
+
+
 def test_send_leaves_one_pending_inbox_item_per_recipient_from_the_real_sender(store):
     assert delivery.send(store, "sw", "merge the docs first", sender="sw-ci-1", to="eng") == ["sw-eng-1", "sw-eng-2"]
     for name in ("sw-eng-1", "sw-eng-2"):

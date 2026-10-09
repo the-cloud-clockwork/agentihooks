@@ -65,7 +65,17 @@ class Receipts:
         return _delivery(self.redis.hgetall(self.key("delivery", delivery_id)), delivery_id)
 
     def submitting(self, delivery_id, owner):
-        return transact(self.redis, lambda pipe: self._advance(pipe, delivery_id, owner, ("reserved",), "submitting"))
+        return transact(self.redis, lambda pipe: self._submit(pipe, delivery_id, owner))
+
+    def _submit(self, pipe, delivery_id, owner):
+        delivery = self._open(pipe, delivery_id, owner, ("reserved",))
+        pipe.watch(self.key("item", delivery.item))
+        item = self.store.get(delivery.item)
+        if item.state != "pending" or not self.store.acts_for(delivery.recipient, item.address, pipe):
+            raise DispatchError(
+                f"message {item.id} is {item.state} for {item.address}, not {delivery.recipient}'s to submit"
+            )
+        return self._advance(pipe, delivery_id, owner, ("reserved",), "submitting")
 
     def accept(self, delivery_id, owner, evidence):
         if evidence != self.get(delivery_id).digest:

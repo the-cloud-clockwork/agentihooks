@@ -86,7 +86,7 @@ jobs:
   # Every shard restores this one key, or nothing when the lookup found none, so all shards of a run split alike.
   durations:
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ github.event_name == 'merge_group' && 4 || 2 }}
+    timeout-minutes: ${{ (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch') && 4 || 2 }}
     permissions:
       contents: read
     outputs:
@@ -95,23 +95,24 @@ jobs:
     steps:
       - name: Look up the base revision's dev durations
         id: stored
-        if: github.event_name != 'merge_group'
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
         uses: actions/cache/restore@v4
         with:
           path: ~/dev-durations
           key: durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || github.sha }}
           lookup-only: true
 
-      # A queue ref cannot read caches saved on dev, so queue runs fetch dev's artifacts on the App's own API quota.
+      # Queue refs and dispatched branches cannot read caches saved on dev, so they fetch dev's artifacts on the App's own API quota.
       - name: Mint the tcc main ci App token
         id: app-token
-        if: github.event_name == 'merge_group'
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
         uses: actions/create-github-app-token@v3.2.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
           repositories: ${{ github.event.repository.name }}
           permission-actions: read
+          permission-contents: read
 
       - name: Find the latest passed dev push run
         id: dev-run
@@ -132,18 +133,48 @@ jobs:
           echo "Restoring dev durations from dev push run $run"
           echo "id=$run" >> "$GITHUB_OUTPUT"
 
+      - name: Find the dev push run of the dispatched base
+        id: base-run
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BASE: ${{ inputs.base }}
+        run: |
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/${BASE#origin/}" --jq .sha)
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=dev&event=push&head_sha=$sha&per_page=20" --jq '.workflow_runs[].id')
+          for run in $runs; do
+            kept=" $(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
+            if [[ "$kept" == *" durations-merged "* && "$kept" == *" coverage-baseline "* ]]; then
+              echo "Restoring dev durations and the coverage baseline of base $sha from dev push run $run"
+              echo "id=$run" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "::error::No dev push Tests run on base $BASE ($sha) kept live durations-merged and coverage-baseline artifacts; pin a base whose dev push run passed and finished."
+          exit 1
+
       - name: Download the dev durations
-        if: github.event_name == 'merge_group'
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
         uses: actions/download-artifact@v4
         with:
           name: durations-merged
           path: ~/dev-durations
-          run-id: ${{ steps.dev-run.outputs.id }}
+          run-id: ${{ steps.dev-run.outputs.id || steps.base-run.outputs.id }}
+          repository: ${{ github.repository }}
+          github-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Download the dispatched base's coverage baseline
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-baseline
+          path: ~/coverage-baseline
+          run-id: ${{ steps.base-run.outputs.id }}
           repository: ${{ github.repository }}
           github-token: ${{ steps.app-token.outputs.token }}
 
       - name: Republish the dev durations
-        if: github.event_name == 'merge_group'
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: dev-durations
@@ -153,9 +184,19 @@ jobs:
           retention-days: 7
           overwrite: true
 
+      - name: Republish the dispatched base's coverage baseline
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: queue-coverage-baseline
+          path: ~/coverage-baseline/
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
       - name: Mark the dev artifacts restored
         id: republished
-        if: github.event_name == 'merge_group'
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
         run: |
           ls -A ~/dev-durations
           echo "queued=true" >> "$GITHUB_OUTPUT"
@@ -220,8 +261,10 @@ jobs:
       - &install
         name: Install dependencies
         if: steps.venv.outputs.cache-hit != 'true'
+        env:
+          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
         run: |
-          uv venv --python "${{ steps.python.outputs.python-path }}" "$HOME/venv"
+          uv venv --python "$PYTHON_PATH" "$HOME/venv"
           uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - &use-venv
@@ -244,7 +287,9 @@ jobs:
           fail-on-cache-miss: true
 
       - name: Adopt latest dev durations
-        run: python -m tests.dev_durations ${{ matrix.python-version }} ~/dev-durations --hash durations.sha256
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256
 
       # NOT `-m unit`: only 439 of 999 tests carry that marker, so 560 —
       # including every ownership-scope test guarding what uninstall and prune
@@ -253,7 +298,8 @@ jobs:
         env:
           PYTHONUNBUFFERED: "1"
           PYTEST_ADDOPTS: ${{ matrix.python-version == '3.12' && format('--cov=hooks --cov=scripts --cov-report= --cov-config={0}/.github/coverage/coverage.ini', github.workspace) || '-p no:pytest_cov' }}
-        run: python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' tests/ -v -n auto --dist loadgroup --shard ${{ matrix.shard }}/${{ matrix.python-version == '3.12' && 8 || 4 }} --tb=short --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
+          SHARD: ${{ matrix.shard }}/${{ matrix.python-version == '3.12' && 8 || 4 }}
+        run: python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' tests/ -v -n auto --dist loadgroup --shard "$SHARD" --tb=short --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
 
       # Shards balance on these: per-test times here differ from a local run.
       - name: Upload durations
@@ -337,9 +383,11 @@ jobs:
       # The base revision's copy grades, so a pull request cannot loosen its own floor.
       - name: Hold the base revision's test count
         run: |
-          grader="$RUNNER_TEMP/base"
-          [[ -f "$grader/tests/count_floor.py" ]] || grader="$GITHUB_WORKSPACE"
-          cd "$grader"
+          if [[ ! -f "$RUNNER_TEMP/base/tests/count_floor.py" ]]; then
+            echo "::error::The base carries no tests/count_floor.py, so nothing trusted can grade."
+            exit 1
+          fi
+          cd "$RUNNER_TEMP/base"
           python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
   size:
@@ -370,16 +418,13 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
 
       # dev's copy grades against the base's allowlist, so a pull request cannot loosen its own limits or allowlist.
-      # The bootstrap branch runs only while dev's history has never carried the grader.
       - name: Hold the size and complexity limits
         run: |
           if [[ -f "$RUNNER_TEMP/grader/scripts/size_limits.py" ]]; then
             cd "$RUNNER_TEMP/grader"
             python -m scripts.size_limits --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
-          elif [[ -z "$(git -C "$RUNNER_TEMP/grader" log -1 --format=%H -- scripts/size_limits.py)" ]]; then
-            python -m scripts.size_limits --bootstrap --head "$GITHUB_WORKSPACE"
           else
-            echo "::error::dev once carried scripts/size_limits.py and no longer does, so nothing trusted can grade."
+            echo "::error::dev carries no scripts/size_limits.py, so nothing trusted can grade."
             exit 1
           fi
 
@@ -390,6 +435,7 @@ jobs:
     timeout-minutes: 15
     env:
       SONAR_SCANNER_VERSION: 7.2.0.5079
+      SONAR_SCANNER_SHA256: da9f4e64a3d555f08ce38b5469ebd91fe2b311af473f7001a5ee5c1fd58b004b
     permissions:
       contents: read
     steps:
@@ -403,6 +449,37 @@ jobs:
 
       - name: Install coverage
         run: python -m pip install "coverage>=7.4"
+
+      # Sonar refuses an analysis dated before the project's latest one, so a dev push run that dev already moved past leaves the analysis to the newer run.
+      - name: Check dev still points at this commit
+        id: current
+        if: github.event_name == 'push'
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          dev=$(git ls-remote origin refs/heads/dev)
+          [[ -n "$dev" ]]
+          if [[ "${dev%%[[:space:]]*}" == "$SHA" ]]; then echo "superseded=false" >> "$GITHUB_OUTPUT"; else echo "superseded=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Download shard coverage
+        if: steps.current.outputs.superseded != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-3.12-*
+          path: .coverage-shards
+
+      # The merge runs while the proxy starts and the downloads restore; the scan waits for it below.
+      - name: Merge shard coverage
+        id: merge
+        if: steps.current.outputs.superseded != 'true'
+        run: |
+          (
+            status=0
+            bash .github/coverage/combine.sh --downloaded 8 || status=$?
+            echo "$status" > "$RUNNER_TEMP/combine.next"
+            mv "$RUNNER_TEMP/combine.next" "$RUNNER_TEMP/combine.status"
+          ) < /dev/null > "$RUNNER_TEMP/combine.log" 2>&1 &
+          echo "pid=$!" >> "$GITHUB_OUTPUT"
 
       - name: Start Cloudflare Access proxy
         id: proxy
@@ -429,6 +506,7 @@ jobs:
         with:
           path: |
             ~/.sonar/cache
+            ~/.sonar/js/node-runtime
             ${{ runner.tool_cache }}/sonar-scanner-cli
           key: sonar-${{ runner.os }}-${{ runner.arch }}-${{ env.SONAR_SCANNER_VERSION }}-${{ steps.proxy.outputs.version }}
 
@@ -450,48 +528,89 @@ jobs:
           [[ -n "$branch" && "$branch" != *$'\n'* ]] || branch="pr-$number"
           echo "args=-Dsonar.pullrequest.key=$number -Dsonar.pullrequest.branch=$branch -Dsonar.pullrequest.base=${BASE_REF#refs/heads/}" >> "$GITHUB_OUTPUT"
 
-      # Sonar refuses an analysis dated before the project's latest one, so a dev push run that dev already moved past leaves the analysis to the newer run.
-      - name: Check dev still points at this commit
-        id: current
-        if: github.event_name == 'push'
+      - name: Wait for the coverage merge
+        if: always() && steps.current.outputs.superseded != 'true'
+        timeout-minutes: 5
         env:
-          SHA: ${{ github.sha }}
+          MERGE_PID: ${{ steps.merge.outputs.pid }}
         run: |
-          dev=$(git ls-remote origin refs/heads/dev)
-          [[ -n "$dev" ]]
-          if [[ "${dev%%[[:space:]]*}" == "$SHA" ]]; then echo "superseded=false" >> "$GITHUB_OUTPUT"; else echo "superseded=true" >> "$GITHUB_OUTPUT"; fi
+          until [[ -s "$RUNNER_TEMP/combine.status" ]]; do
+            if ! kill -0 "$MERGE_PID" 2> /dev/null && [[ ! -s "$RUNNER_TEMP/combine.status" ]]; then
+              echo "::error::The coverage merge ended without a status."
+              cat "$RUNNER_TEMP/combine.log" 2> /dev/null || true
+              exit 1
+            fi
+            sleep 0.2
+          done
+          cat "$RUNNER_TEMP/combine.log"
+          exit "$(< "$RUNNER_TEMP/combine.status")"
 
-      - name: Download shard coverage
-        if: steps.current.outputs.superseded != 'true'
-        uses: actions/download-artifact@v4
-        with:
-          pattern: coverage-3.12-*
-          path: .coverage-shards
-
-      - name: Merge shard coverage
-        if: steps.current.outputs.superseded != 'true'
-        run: bash .github/coverage/combine.sh --downloaded 8
-
+      # Runs the CLI directly: sonarqube-scan-action never finds its tool cache entry, since a four part version is not semver.
       - name: SonarQube Scan
         if: steps.current.outputs.superseded != 'true'
-        uses: sonarsource/sonarqube-scan-action@v6
-        with:
-          scannerVersion: ${{ env.SONAR_SCANNER_VERSION }}
-          args: ${{ steps.queued.outputs.args }}
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: http://127.0.0.1:9000
+          ARGS: ${{ steps.queued.outputs.args }}
+        run: |
+          scanner="$RUNNER_TOOL_CACHE/sonar-scanner-cli/$SONAR_SCANNER_VERSION/linux-x64"
+          if [[ ! -x "$scanner/bin/sonar-scanner" ]]; then
+            archive="$RUNNER_TEMP/sonar-scanner.zip"
+            curl --fail --silent --show-error --location --retry 3 -o "$archive" \
+              "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-$SONAR_SCANNER_VERSION-linux-x64.zip"
+            sha256sum --check --strict <<< "$SONAR_SCANNER_SHA256  $archive"
+            unzip -q -o "$archive" -d "$RUNNER_TEMP"
+            mkdir -p "$scanner"
+            cp -a "$RUNNER_TEMP/sonar-scanner-$SONAR_SCANNER_VERSION-linux-x64/." "$scanner/"
+          fi
+          read -ra extra <<< "$ARGS"
+          "$scanner/bin/sonar-scanner" -Dsonar.projectBaseDir=. "${extra[@]}"
+
+      - name: Upload coverage and analysis evidence
+        if: always() && steps.current.outputs.superseded != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonar-report
+          path: |
+            coverage.xml
+            .coverage-shards/
+            .scannerwork/report-task.txt
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
 
       - name: SonarQube Quality Gate
         id: gate
         if: steps.current.outputs.superseded != 'true'
-        uses: sonarsource/sonarqube-quality-gate-action@v1
         timeout-minutes: 5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: http://127.0.0.1:9000
+        run: |
+          set -o pipefail
+          api() { curl --fail --silent --show-error --max-time 10 --retry 2 --retry-all-errors -H "Authorization: Bearer $SONAR_TOKEN" "http://127.0.0.1:9000/api/$1"; }
+          task=$(sed -n 's/^ceTaskId=//p' .scannerwork/report-task.txt)
+          [[ -n "$task" ]] || { echo "::error::No Sonar task id in report-task.txt."; exit 1; }
+          while true; do
+            report=$(api "ce/task?id=$task")
+            status=$(jq -er .task.status <<<"$report")
+            [[ "$status" == PENDING || "$status" == IN_PROGRESS ]] || break
+            sleep 1
+          done
+          if [[ "$status" != SUCCESS ]]; then
+            echo "::error::The Sonar background task ended $status: $(jq -r '.task.errorMessage // "no message"' <<<"$report")"
+            exit 1
+          fi
+          analysis=$(jq -er .task.analysisId <<<"$report")
+          gate=$(api "qualitygates/project_status?analysisId=$analysis" | jq -er .projectStatus.status)
+          dashboard=$(sed -n 's/^dashboardUrl=//p' .scannerwork/report-task.txt)
+          if [[ "$gate" != OK ]]; then
+            echo "::error::Quality Gate has FAILED ($gate). Detailed information can be found at: $dashboard"
+            exit 1
+          fi
+          echo "Quality Gate has PASSED. $dashboard"
 
-      # The gate action grades against whatever gate the server binds, so a silent rebind would loosen it.
+      # The gate step grades against whatever gate the server binds, so a silent rebind would loosen it.
       - name: Hold the Delivery L2 conditions
         if: always() && steps.current.outputs.superseded != 'true'
         env:
@@ -520,20 +639,6 @@ jobs:
             echo "::error::The analysis was not graded on the Delivery L2 conditions. Foreign: ${foreign:-none}. Missing: ${missing:-none}."
             exit 1
           fi
-
-      - name: Upload coverage and analysis evidence
-        if: always() && steps.current.outputs.superseded != 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: sonar-report
-          path: |
-            coverage.xml
-            .coverage-shards/
-            .scannerwork/report-task.txt
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
-          overwrite: true
 
       - name: Stop the proxy
         if: always() && steps.proxy.outputs.pid != ''
@@ -622,7 +727,7 @@ jobs:
 
   refresh-durations:
     needs: [unit, lint, shard-check]
-    if: github.event_name == 'push'
+    if: ${{ !cancelled() && github.event_name == 'push' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -719,13 +824,13 @@ jobs:
       - name: Download this run's measured coverage
         uses: actions/download-artifact@v4
         with:
-          name: sonar-report
+          pattern: coverage-3.12-*
           path: baseline-coverage
 
       - name: Compute the coverage baseline
         run: |
           python -m tests.coverage_baseline --shards 8 \
-            --head-shards baseline-coverage/.coverage-shards \
+            --head-shards baseline-coverage \
             --out "$HOME/coverage-baseline/baseline.json" \
             --previous "$HOME/coverage-baseline/baseline.json"
 

@@ -84,3 +84,13 @@ def test_publisher_checks_parent_results_without_inheriting_skips():
     assert "github.event_name == 'push'" in condition
     assert "needs['gate-required'].result == 'success'" in condition
     assert "needs.sonar.result == 'success'" in condition
+
+
+def test_publisher_reads_shards_without_the_optional_sonar_report():
+    workflow = Path(__file__).parents[1] / ".github/workflows/test.yml"
+    job = yaml.safe_load(workflow.read_text())["jobs"]["coverage-baseline"]
+    steps = {step.get("name"): step for step in job["steps"]}
+    download = steps["Download this run's measured coverage"]["with"]
+    assert download["pattern"] == "coverage-3.12-*"
+    assert "name" not in download
+    assert f"--head-shards {download['path']} " in steps["Compute the coverage baseline"]["run"]

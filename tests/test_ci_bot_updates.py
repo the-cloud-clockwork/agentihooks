@@ -32,7 +32,7 @@ def test_ci_creates_no_commits_or_bot_pull_requests():
 def test_dev_push_publishes_merged_durations_with_read_permissions():
     job = _workflow("test.yml")["jobs"]["refresh-durations"]
     assert job["needs"] == ["unit", "lint", "shard-check"]
-    assert job["if"] == "github.event_name == 'push'"
+    assert job["if"] == "${{ !cancelled() && github.event_name == 'push' }}"
     assert job["permissions"] == {"contents": "read"}
     upload = next(s for s in job["steps"] if s.get("uses") == "actions/upload-artifact@v4")
     assert upload["with"]["name"] == "durations-merged"
@@ -51,14 +51,15 @@ def test_a_newer_dev_push_never_cancels_a_running_dev_push_run():
     }
 
 
-ADOPT = "python -m tests.dev_durations ${{ matrix.python-version }} ~/dev-durations --hash durations.sha256"
+ADOPT = 'python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256'
+ADOPT_ENV = {"PYTHON_VERSION": "${{ matrix.python-version }}"}
 
 
 def test_unit_shards_adopt_dev_durations_through_the_script_before_the_tests_run():
     steps = _workflow("test.yml")["jobs"]["unit"]["steps"]
     step = next(s for s in steps if s.get("name") == "Adopt latest dev durations")
     assert step["run"].strip() == ADOPT
-    assert "env" not in step
+    assert step["env"] == ADOPT_ENV
     assert steps.index(step) < next(i for i, s in enumerate(steps) if s.get("name") == "Run tests")
 
 
@@ -70,7 +71,7 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     refresh = jobs["refresh-durations"]
     save = next(s for s in refresh["steps"] if s.get("uses") == "actions/cache/save@v4")
     stage = next(s for s in refresh["steps"] if s.get("name") == "Stage merged durations for the cache")
-    assert refresh["if"] == "github.event_name == 'push'"
+    assert refresh["if"] == "${{ !cancelled() && github.event_name == 'push' }}"
     assert refresh["steps"].index(stage) == refresh["steps"].index(save) - 1
     assert restore["uses"] == "actions/cache/restore@v4"
     assert steps.index(restore) == steps.index(adopt) - 1
@@ -86,7 +87,9 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
         "key": "${{ steps.stored.outputs.cache-matched-key }}",
         "queued": "${{ steps.republished.outputs.queued }}",
     }
-    assert jobs["durations"]["timeout-minutes"] == "${{ github.event_name == 'merge_group' && 4 || 2 }}"
+    assert jobs["durations"]["timeout-minutes"] == (
+        "${{ (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch') && 4 || 2 }}"
+    )
     assert lookup["id"] == "stored"
     assert lookup["uses"] == "actions/cache/restore@v4"
     assert lookup["with"] == {
@@ -98,7 +101,7 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     assert "durations" in jobs["gate-required"]["needs"]
     assert "run" not in restore
     assert adopt["run"] == ADOPT
-    assert "env" not in adopt
+    assert adopt["env"] == ADOPT_ENV
 
 
 @pytest.mark.parametrize("bump,expected", [("patch", "2.17.1"), ("minor", "2.18.0"), ("major", "3.0.0")])

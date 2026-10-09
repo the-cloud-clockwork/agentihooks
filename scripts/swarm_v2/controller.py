@@ -58,8 +58,12 @@ class Controller:
         self._authorize()
         if self.held is None:
             return False
-        self.held = lease.renew(self.store, self.slug, self.held)
-        self.ready = self.held is not None and self.reconciled_epoch == self.held.epoch
+        try:
+            self.held = lease.renew(self.store, self.slug, self.held)
+        except SwarmError:
+            self.held = None
+            return False
+        self.ready = self.reconciled_epoch == self.held.epoch
         return self.ready
 
     def _authorize(self) -> None:

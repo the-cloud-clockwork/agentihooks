@@ -102,8 +102,8 @@ def test_each_successful_page_control_notifies_once(page, body, verb, state):
     assert put(body) == 200
     items = InboxStore(store.redis).mailbox(master.name)
     if body["action"] == "stop_now":
-        assert items == []
-        assert ledger.said[0][0].startswith(f"The operator {verb} from the page. The swarm is {state}.")
+        assert items == [] and ledger.said == []
+        assert ledger.notes[0][1].startswith(f"The operator {verb} from the page. The swarm is {state}.")
         return
     assert len(items) == 1
     assert items[0].fyi
@@ -112,7 +112,7 @@ def test_each_successful_page_control_notifies_once(page, body, verb, state):
         assert "Engineer cap 2, CI cap 1, Planner cap 1." in items[0].text
     if body["action"] == "verdict":
         assert "The verdict is resolved." in items[0].text
-    assert ledger.said == [(items[0].text, "swarm")]
+    assert ledger.said == []
 
 
 @pytest.mark.parametrize("action", ["pause", "doctor_start"])
@@ -152,7 +152,7 @@ def test_page_doctor_control_notifies_once(page, action):
     assert "Doctor from the page" in items[0].text
     state = "running" if action == "doctor_start" else "stopped"
     assert items[0].text.endswith(f"The Doctor is {state}.")
-    assert ledger.said == [(items[0].text, "swarm")]
+    assert ledger.said == []
 
 
 def test_page_pause_is_attributed_to_the_operator_even_if_the_server_inherited_the_master(page, monkeypatch):
@@ -164,4 +164,4 @@ def test_page_pause_is_attributed_to_the_operator_even_if_the_server_inherited_t
     assert items[0].sender == "operator"
     assert items[0].fyi
     assert items[0].text == "The operator paused the swarm from the page. The swarm is paused."
-    assert ledger.said == [(items[0].text, "swarm")]
+    assert ledger.said == []

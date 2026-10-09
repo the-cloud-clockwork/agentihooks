@@ -64,6 +64,7 @@ def test_claude_evaluation_routes_without_default_login(launch, monkeypatch, tmp
         include_fable=False,
         claude_bin="/usr/bin/claude",
         sessions={"winner": 1, "peer": 3},
+        exclude=["api"],
     )
     executable, argv, child = execute.call_args.args
     assert executable == "python3"

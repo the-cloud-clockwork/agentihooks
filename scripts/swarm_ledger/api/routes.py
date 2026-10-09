@@ -34,12 +34,16 @@ def dispatch(handler: object, server: ModuleType) -> dict | None:
     slug, path = parts[1], "/".join(parts[2:]) or "metadata"
     if not server.core.SLUG_RE.fullmatch(slug) or not handler.exists(slug):
         raise APIError(404, "ledger_missing", "No such ledger")
+    if path == "agent-token" and handler.command == "POST":
+        return agent_token(handler, server, slug)
     principal = server.authority.principal(
         server.core.read_token(server.repository.read_page(slug)),
         slug,
         handler.headers.get("X-Ledger-Token"),
         handler.headers.get("X-Ledger-Agent"),
     )
+    if principal is None and server.authority.controller(handler.headers.get("X-Controller-Credential")):
+        principal = ""
     if principal is None:
         raise APIError(403, "forbidden", "Missing or wrong ledger credential")
     if handler.command == "GET":
@@ -52,6 +56,16 @@ def dispatch(handler: object, server: ModuleType) -> dict | None:
             return workspace(server, slug, path.split("/")[1])
         return resources.read(server.repository.get_document(slug), path, query)
     return ledger_operation(handler, server, slug, path, principal)
+
+
+def agent_token(handler: object, server: ModuleType, slug: str) -> dict:
+    agent = handler.headers.get("X-Ledger-Agent")
+    if not agent:
+        raise APIError(403, "forbidden", "An agent token names its agent in X-Ledger-Agent")
+    if server.authority.hive_member(handler.headers.get("X-Hive-Credential")) is None:
+        raise APIError(403, "forbidden", "Missing or wrong hive credential")
+    admin = server.core.read_token(server.repository.read_page(slug))
+    return {"data": {"agent": agent, "token": server.authority.agent_token(admin, slug, agent)}}
 
 
 def events(handler: object, server: ModuleType, slug: str) -> None:

@@ -3,8 +3,8 @@
   "dependency": "SV2-RUN-03",
   "integration_gate": "G1",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1874",
-  "pull_request": "",
-  "tested_commit": "dd374e43e20e611ab6669df35ac27c92587f615e",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1896",
+  "tested_commit": "6c93f545a41e49eea00cc96d384e49822d26612b",
   "status": "implemented-fixture-qualified-not-live",
   "evidence_class": "mocked signals and isolated fakeredis; no live Kubernetes, SSH or rollout proof",
   "interfaces": [
@@ -33,10 +33,10 @@
     "mode": "standard, or conservative through AGENTIHOOKS_OBSERVATION_MODE"
   },
   "states": {
-    "observed": "",
-    "accepted": "",
+    "observed": "Local runs on tested_commit: 69 passed over the observe, status rows and status publication tests with two workers; observe module coverage 100 percent; ruff check and format clean; size gate 0 errors.",
+    "accepted": "Acceptance A, B and C pass on two independent fixtures each; Standards and Spec readers closed review after three rounds; the master accepted the heartbeat and operation id deviations.",
     "committed": "Implementation and fixture inputs committed on tested_commit; generated case manifest identifies exact input hashes.",
-    "externally_verified": ""
+    "externally_verified": "CI run 37861903812 on b39654bc passed the full unit suite, the required gate, sonar, lint, size and mutation with no survivors. The implementation inputs equal tested_commit; this completion record update changes metadata only."
   },
   "cases": {
     "a": "evidence/SV2-RUN-04/a-result.json",
@@ -55,12 +55,18 @@
     "Lost is recorded with an audit entry; fencing the old generation on lost is the controller claim path of later packages, not this observer.",
     "ObservationRefused carries the section 13.4 error class and retry classification; observations have no operation id because they mutate no runtime object.",
     "Legacy local agents without an execution record project their heartbeat only, as state unclassified; with no heartbeat, observed_at is null and sources empty.",
-    "The required fixture stale heartbeat with running Pod is exercised in case C and the unit tests; case B covers forbidden and unauthenticated reads; case A covers fresh heartbeat with SSH failure."
+    "The required fixture stale heartbeat with running Pod is exercised in case C and the unit tests; case B covers forbidden and unauthenticated reads; case A covers fresh heartbeat with SSH failure.",
+    "Section 13.4 operation ids and section 4.2 old generation fencing on lost are not part of this read path, and no command records an operator classification for a needs_operator attempt yet; both are proposed on the ledger for the operator to decide."
   ],
   "next_action": "Produce signals from the Kubernetes adapter and route tick suspect and lost decisions through Observer.",
   "decisions": [
     "A fresh heartbeat without a supervisor handshake classifies as working with partial confidence. Section 4.2 ties working to a confirmed main-agent identity, but the T-SV2-RUN-04-A output contract requires a terminal disconnect with fresh worker heartbeats to leave the task working; heartbeats are written by the main agent's own hooks, so the acceptance contract governs and the confidence field carries the weaker identity proof.",
-    "Each observation merges new signals into the stored latest reading per source; an older signal for a source is ignored, so a stale cursor cannot overwrite newer evidence while an empty batch still reclassifies known evidence as time passes."
+    "Each observation merges new signals into the stored latest reading per source; an older signal for a source is ignored, so a stale cursor cannot overwrite newer evidence while an empty batch still reclassifies known evidence as time passes.",
+    "Confirmed confidence needs an agreeing Kubernetes or supervisor reading inside fresh_s; older remembered readings stay visible in sources with their own observed_at but no longer confirm."
   ],
-  "compatibility": "Status report agent rows keep every earlier field and add observation, asserted by the status report rows test. SV2-RUN-01 to SV2-RUN-03 interfaces are unchanged."
+  "compatibility": "Status report agent rows keep every earlier field and add observation, asserted by the status report rows test. SV2-RUN-01 to SV2-RUN-03 interfaces are unchanged.",
+  "review": "Standards and Spec readers ran three rounds. Standards held one low finding: the watched write loop duplicates the operations journal loop; kept because sharing it would change the SV2-RUN-03 module outside this package.",
+  "mutation_resolution": "First CI mutation run left 18 survivors in observe. Remembered readings became an identity free Seen record and OK values a mapping, removing three equivalent mutants. Tests added for the freshness boundary, empty evidence time, the recovered flag, the record and audit keys, an unoccupied seat, accumulated discards, audit of several executions, a same time reclassification, the audit at the lost transition and exact refusal messages. No mutation clearances used.",
+  "ci_head": "b39654bc3290c4be6fc02d93bb09ad1d4ebb8d0e",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37861903812"
 }

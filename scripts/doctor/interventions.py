@@ -10,6 +10,7 @@ from pathlib import Path
 
 from scripts.inbox.seats import of_swarm, seat_address
 from scripts.inbox.store import InboxStore
+from scripts.swarm import control_notifications
 from scripts.swarm.ledger_client import LEDGER_DIR
 from scripts.swarm.store import MASTER, SwarmError
 
@@ -31,7 +32,6 @@ class Context:
     ledger: object
     watched: str
     doctor: str
-    by: str
     run: Callable = subprocess.run
     code: Path = LEDGER_DIR
     pidfile: Path = field(default_factory=_pidfile)
@@ -164,5 +164,7 @@ def apply(ctx, action, args):
         raise SwarmError(f"{action} is not an allowed intervention; the Doctor may only {', '.join(ALLOWED)}. {NEVER}")
     line = ALLOWED[action](ctx, args)
     for slug in (ctx.watched, ctx.doctor):
-        ctx.ledger.say(slug, line, by=ctx.by)
+        ctx.ledger.notify(slug, line)
+    boss = control_notifications.master(ctx.store, ctx.watched)
+    _send(ctx, (boss.seat or boss.name) if boss else seat_address(ctx.watched, MASTER), line)
     return line
