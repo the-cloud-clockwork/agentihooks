@@ -1,0 +1,51 @@
+version: 1
+purpose: intent-check
+fallbacks: cli
+questions:
+  - name: usable
+    type: yesno
+    instructions: Can the phase use this change as delivered, given the project overview, the phase intent and the task?
+    "true": the phase can use it as delivered
+    "false": the phase cannot use it as delivered
+  - name: delivers
+    type: yesno
+    instructions: Does the change deliver what the task text asks for?
+    "true": it delivers the task text
+    "false": part of the task text is missing
+  - name: reachable
+    type: yesno
+    instructions: >-
+      Can the people or agents the phase serves reach the change through something it ships, such as a command,
+      a hook, a page or a call site?
+    "true": something in the change reaches it
+    "false": nothing in the change reaches it
+  - name: weakens
+    type: yesno
+    instructions: >-
+      Does the change turn off, loosen, weaken or bypass anything the phase builds, such as a gate default, a
+      threshold, a check, a published record or a review step?
+    "true": the change weakens what the phase builds
+    "false": the change weakens nothing the phase builds
+  - name: underdelivers
+    type: yesno
+    instructions: Does the change leave out anything the plan chunk asks for?
+    "true": the change leaves out part of the plan chunk
+    "false": the change delivers every item of the plan chunk
+  - name: overdelivers
+    type: yesno
+    instructions: Does the change add scope the plan chunk does not ask for?
+    "true": the change adds scope beyond the plan chunk
+    "false": the change stays within the plan chunk
+  - name: misses_line
+    type: yesno
+    each: rows
+    instructions: 'Does the change leave out what plan line {item[0]} asks for: "{item[1]}"?'
+    "true": the change leaves out what this line asks for
+    "false": the change delivers what this line asks for, or the line asks for nothing
+thresholds:
+  fail: 0.3
+  reason: 0.5
+  weaken: 0.5
+  chunk: 0.5
+rule:
+  type: code
