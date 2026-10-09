@@ -135,6 +135,13 @@ def test_a_spawn_at_the_tick_time_counts_and_a_later_one_does_not(store):
     assert tick._host_full("sw", store, 60_000) == f"host memory room 1, 1 spawned since it was granted: {MEMORY}"
 
 
+def test_host_spent_counts_from_the_start_lag_before_since_through_now(store):
+    for name, at in (("early", 29_999), ("lagged", 30_000), ("now", 60_000), ("later", 60_001)):
+        tick._spend_host(store, name, at)
+    assert tick.host_spent(store, 60_000, 60_000) == 2
+    assert tick.host_spent(store, 60_001, 60_001) == 2
+
+
 def test_the_quota_seat_check_runs_before_the_host_gate(store):
     _decide(store, 0)
     actions = tick.tick("sw", store, _ledger(), FakeRuntime(full=True), now_ms=1_000)
