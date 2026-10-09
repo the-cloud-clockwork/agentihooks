@@ -429,6 +429,40 @@ def test_every_packaged_corpus_replays_clean(name):
     )
 
 
+def _purpose(path):
+    return yaml.safe_load(path.read_text())["purpose"]
+
+
+CLASSIFIERS = sorted(
+    path.stem for path in PACKAGE.glob("*.yaml") if ".corpus" not in path.name and _purpose(path) == path.stem
+)
+SEEDED = (
+    "filter",
+    "ledger-duplicate",
+    "model-pick",
+    "phase-slice",
+    "priority-resolve",
+    "profile-pick",
+    "task-difficulty",
+    "task-grouping",
+    "trace-plan",
+)
+
+
+def test_every_seeded_classifier_is_a_packaged_classifier():
+    assert set(SEEDED) <= set(CLASSIFIERS)
+
+
+@pytest.mark.parametrize("name", CLASSIFIERS)
+def test_every_packaged_classifier_has_a_corpus(name):
+    assert (PACKAGE / f"{name}.corpus.yaml").is_file()
+
+
+@pytest.mark.parametrize("name", SEEDED)
+def test_every_seeded_corpus_holds_ten_cases_from_the_decision_log(name):
+    assert len(evaluation.evaluate(name).cases) >= 10
+
+
 def one_line(text):
     return " ".join(text.split())
 
