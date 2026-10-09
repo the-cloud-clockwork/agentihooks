@@ -5,6 +5,7 @@ from typing import Protocol
 
 OWNER_LABEL = "swarm.agentihooks.io/controller-owner"
 EXECUTION_LABEL = "swarm.agentihooks.io/execution-id"
+BACKEND = "kubernetes"
 CLASSES = ("managed_orphan", "missing_pod", "foreign", "ambiguous", "terminating")
 
 
@@ -24,6 +25,16 @@ class PodSource(Protocol):
     def list_pods(self, selector: str) -> tuple[list[Pod], str]: ...
 
     def watch_pods(self, selector: str, resource_version: str) -> Iterator[tuple[str, Pod, str]]: ...
+
+    def read_pod(self, name: str) -> Pod | None: ...
+
+    def delete_pod(self, name: str, uid: str) -> None:
+        """Delete with a uid precondition, so a recreated Pod of the same name survives."""
+        ...
+
+
+def owner_for(slug: str) -> str:
+    return f"agentihooks-swarm-{slug}"
 
 
 def labels(owner: str, execution_id: str) -> dict:

@@ -1,0 +1,20 @@
+{
+  "schema_version": "2.0",
+  "package": "SV2-CTL-04",
+  "swarm": "fixture",
+  "cluster": {"remote_nodes": 0, "ec2_calls_allowed": 0},
+  "live": {"name": "eng-1", "uid": "uid-live"},
+  "incarnation": {"name": "eng-1", "uid": "uid-live-2"},
+  "managed_orphan": {"name": "eng-2", "uid": "uid-orphan", "execution_id": "exec-orphan"},
+  "late_orphan": {"name": "eng-4", "uid": "uid-late", "execution_id": "exec-late"},
+  "foreign": [
+    {"name": "eng-2-copy", "uid": "uid-lookalike", "labels": {"app": "eng-2"}},
+    {"name": "eng-2", "uid": "uid-lookalike-same-name", "labels": {"app": "eng-2"}},
+    {"name": "eng-3", "uid": "uid-other-swarm", "owner": "agentihooks-swarm-other", "execution_id": "exec-x"}
+  ],
+  "ambiguous": [
+    {"name": "eng-5", "uid": "uid-blank", "execution_id": ""},
+    {"name": "eng-6-a", "uid": "uid-twin-a", "execution_id": "exec-twin"},
+    {"name": "eng-6-b", "uid": "uid-twin-b", "execution_id": "exec-twin"}
+  ]
+}
