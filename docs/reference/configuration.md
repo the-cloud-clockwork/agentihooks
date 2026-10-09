@@ -215,7 +215,14 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AH_CC_TOKEN_<slug>` | — | One Claude subscription OAuth token per account |
-| — | — | Each account's live session cap comes from its five-hour window alone: 6 at 60%+ left, 4 at 40-60%, 3 at 10-40%, 2 at 5-10%, none below 5% until reset; no new session below 5% of the week. The next session goes to the eligible account with the fewest live sessions. |
+| `AH_CX_TOKEN_<slug>` | — | One Codex ChatGPT workspace access token per account |
+| `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` | — | Any credential that outranks the OAuth token in Claude Code's precedence offers a Claude `api` slot; token children never inherit them |
+| `CODEX_API_KEY`, `OPENAI_API_KEY` | — | Either offers a Codex `api` slot (first set wins) |
+| `AH_CX_API_BASE_URL`, `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Base URL of the Codex api provider; must carry no user, password, query or fragment |
+| `AH_ROUTE_API` | set by the router | Name-only marker on an api child; the process counts on account `api` and the quota policy skips it |
+| `AGENTIHOOKS_ROUTE_ACCOUNT` | set by the router | Account a Claude launch was routed to (`api` for the api side) |
+| — | — | Api weights and caps are routing settings, not variables: `agentihooks balance set` (see [CLI Commands](cli-commands.md#agentihooks-balance)) |
+| — | — | Each account's live session cap comes from its five-hour window alone: 6 at 60%+ left, 4 at 40-60%, 3 at 10-40%, 2 at 5-10%, none below 5% until reset; no new session below 5% of the week. The next session goes to the eligible account with the fewest live sessions, ties to the soonest resetting week. |
 | `QUOTA_POLICY_ENABLED` | `true` | Hand off / wait / stop when a session's own quota runs out |
 | `AGENTIHOOKS_HANDOFF_WEEK_PCT` | `98` | 7-day used % that triggers the quota policy |
 | `AGENTIHOOKS_HANDOFF_5H_PCT` | `99` | 5-hour used % that triggers the quota policy |

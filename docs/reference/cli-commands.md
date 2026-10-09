@@ -292,10 +292,37 @@ Launch Claude Code on one of the `AH_CC_TOKEN_<slug>` accounts, with
 agenti                          # fewest live sessions among accounts below their band cap
 agenti --route work             # force AH_CC_TOKEN_work, ignore the cap
 agenti --model fable            # Fable models also weigh the separate Fable quota
+agenti --route api              # force the api side; fails when no api endpoint is configured
 ```
 
-The launch line reports `account`, `routing_left` and `sessions=n/cap`; with
-every account at its cap the launch fails and names why.
+The launch line reports `account`, `routing_left` and `sessions=n/cap`, or
+`account=api kind=api` for the api side. The api weight decides which side a
+launch takes; with every account at its cap the launch falls back to the api,
+and fails and names why when the api is full or absent.
+
+## `agentihooks balance`
+
+Probe and rank every Claude account, plus the api row when an endpoint is
+configured. Columns: `#`, `ACCOUNT`, `KIND` (`subscription`, `api`), `STATE`,
+`SESSIONS` (live/cap), `WEIGHT` (api rows), `CAP`, `ROUTING LEFT` and the five
+hour and weekly windows (`n/a` on an api row).
+
+```bash
+agentihooks balance                                  # probe (60 s cache) and rank
+agentihooks balance --current                        # mark the account this session runs on
+agentihooks balance --refresh                        # ignore the cache
+agentihooks balance settings                         # every routing setting and the store in use
+agentihooks balance set claude-api-weight=25         # live share of the api side, 0 to 100
+agentihooks balance set codex-api-max-sessions=4     # api session cap; none clears it
+```
+
+`balance set KEY=VALUE ...` takes the keys `claude-api-weight`,
+`codex-api-weight`, `claude-api-max-sessions`, `codex-api-max-sessions`,
+`master-account-claude`, `master-account-codex`, `master-tier-claude` and
+`master-tier-codex`. It validates every pair before writing, prints
+`store=redis` or `store=file <path>` and one `key: before -> after` line per key,
+and exits 2 on an unknown key or an invalid value. See
+[Claude Account Load Balancing](../pillars/load-balancing.md#routing-settings).
 
 ---
 
@@ -364,7 +391,7 @@ live probe with `--refresh`) and one for Codex, read from the newest rate-limit
 event in Codex's session logs.
 
 ```bash
-agentihooks quota            # AGENT ACCOUNT STATE SESSIONS 5H LEFT 5H RESET 7D LEFT 7D RESET SOURCE
+agentihooks quota            # AGENT ACCOUNT KIND STATE SESSIONS WEIGHT CAP 5H LEFT 5H RESET 7D LEFT 7D RESET SOURCE
 agentihooks quota --json
 ```
 
