@@ -297,10 +297,11 @@ def test_a_corrected_task_on_a_final_head_is_judged_again_without_a_fix_round(tm
     assert gate(tmp_path, f"agentihooks swarm {SLUG} done --pr x").allowed
 
 
-def test_a_corrected_phase_is_judged_again_on_the_same_head(tmp_path):
+@pytest.mark.parametrize("change", [{"description": "Stop failures before merge."}, {"title": "Gate checks"}])
+def test_a_corrected_phase_is_judged_again_on_the_same_head(tmp_path, change):
     asked = []
     coach(tmp_path, {**PR, "head": "final"}, asked).run(DOC)
-    phases = [DOC["phases"][0], {**DOC["phases"][1], "description": "Stop failures before merge."}]
+    phases = [DOC["phases"][0], {**DOC["phases"][1], **change}]
     coach(tmp_path, {**PR, "head": "final"}, asked).run({**DOC, "phases": phases})
     assert len(asked) == 2
 

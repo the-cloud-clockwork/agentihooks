@@ -406,9 +406,8 @@ def plan_check(slug, doc, task_id, traced, mode, now_ms, home=None):
 
 def _inputs(doc, task):
     phase = _phase(doc, task)
-    judged = [task.get("title"), task.get("description"), task.get("phase"), phase.get("title")]
-    judged += [phase.get("description"), _plan_chunk(doc, task)]
-    return hashlib.sha256(json.dumps(judged, sort_keys=True).encode()).hexdigest()
+    judged = [task.get("title"), task.get("description"), phase.get("title"), phase.get("description")]
+    return hashlib.sha256(json.dumps([*judged, _plan_chunk(doc, task)]).encode()).hexdigest()
 
 
 def _same_inputs(previous, inputs):
