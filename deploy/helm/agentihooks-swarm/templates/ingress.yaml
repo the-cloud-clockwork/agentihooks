@@ -1,4 +1,7 @@
 {{- if .Values.ingress.enabled }}
+{{- if and .Values.networkPolicy.enabled (not .Values.networkPolicy.ingressFrom) }}
+{{- fail "ingress.enabled needs networkPolicy.ingressFrom to admit the ingress controller to the ledger" }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

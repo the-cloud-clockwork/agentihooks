@@ -19,6 +19,30 @@ spec:
         app.kubernetes.io/component: controller
     spec:
       {{- include "swarm.podSecurity" . | nindent 6 }}
+      initContainers:
+        - name: wait
+          image: {{ include "swarm.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "swarm.containerSecurity" . | nindent 10 }}
+          command:
+            - python
+            - -c
+            - |
+              import os, time, urllib.request
+              from scripts.swarm.store import redis_client
+              for _ in range(120):
+                  try:
+                      redis_client()
+                      urllib.request.urlopen(os.environ["LEDGER_URL"] + "/healthz", timeout=2).read()
+                      break
+                  except Exception as exc:
+                      print(f"waiting for Redis and the ledger: {exc}", flush=True)
+                      time.sleep(2)
+              else:
+                  raise SystemExit("Redis or the ledger never came up")
+          env:
+            {{- include "swarm.env" . | nindent 12 }}
+          {{- include "swarm.envFrom" . | nindent 10 }}
       containers:
         - name: controller
           image: {{ include "swarm.image" . }}

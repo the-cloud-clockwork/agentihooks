@@ -39,6 +39,9 @@ app.kubernetes.io/component: {{ .component }}
       name: {{ .Values.redis.existingSecret.name }}
       key: {{ required "redis.existingSecret.key names the key holding the Redis URL" .Values.redis.existingSecret.key }}
 {{- else if .Values.redis.url }}
+{{- if contains "@" .Values.redis.url }}
+{{- fail "redis.url must not carry credentials; put a credentialed URL in a Secret and set redis.existingSecret" }}
+{{- end }}
 - name: AGENTIHOOKS_SWARM_REDIS_URL
   value: {{ .Values.redis.url | quote }}
 {{- else if .Values.redis.enabled }}
