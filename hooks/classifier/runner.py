@@ -3,6 +3,7 @@ from dataclasses import dataclass, replace
 
 from hooks.classifier import decide, decision_log
 from hooks.classifier.definitions import Definition, DefinitionError, QuestionSpec, load
+from hooks.classifier.errors import ClassifierInputError
 from hooks.classifier.questions import Choice, Question, YesNo, validate
 from hooks.classifier.result import Answer, DecisionResult
 
@@ -84,7 +85,10 @@ def questions_for(definition: Definition, params: dict | None = None) -> dict[st
             if name in questions:
                 raise DefinitionError("expanded question names must be unique")
             questions[name] = question
-    validate(questions)
+    try:
+        validate(questions)
+    except ClassifierInputError as exc:
+        raise DefinitionError(str(exc)) from exc
     return questions
 
 
