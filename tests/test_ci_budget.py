@@ -60,7 +60,18 @@ def test_report_orders_stages_slowest_first_and_flags_over_budget_and_unbudgeted
 
 def test_every_job_of_the_tests_workflow_has_a_budget():
     jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
-    assert set(jobs) - {ci_budget.SELF} == set(ci_budget.BUDGETS)
+    assert set(jobs) == set(ci_budget.BUDGETS)
+
+
+def test_the_longest_chain_of_budgets_to_gate_required_fits_fifteen_minutes():
+    jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+
+    def chain(job):
+        needs = jobs[job].get("needs", [])
+        needs = [needs] if isinstance(needs, str) else needs
+        return ci_budget.BUDGETS[job] + max((chain(need) for need in needs), default=0)
+
+    assert chain("gate-required") <= ci_budget.RUN_BUDGET_S
 
 
 def _files(tmp_path, jobs):
@@ -89,6 +100,11 @@ def test_cli_inside_every_budget_prints_no_annotation(tmp_path, monkeypatch, cap
     out = capsys.readouterr().out
     assert "::" not in out
     assert out.splitlines()[-2].split()[-3:] == ["6m00s", "15m00s", "ok"]
+
+
+def test_cli_fails_when_the_jobs_list_is_empty(tmp_path, capsys):
+    assert main(_files(tmp_path, [])) == 1
+    assert "lists no jobs" in capsys.readouterr().out
 
 
 def test_cli_fails_when_the_jobs_were_not_read(tmp_path):

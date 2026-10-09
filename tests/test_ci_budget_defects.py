@@ -72,9 +72,7 @@ def _gh(calls):
         if "/jobs" in command[2]:
             run_id = int(command[2].split("/runs/")[1].split("/")[0])
             return subprocess.CompletedProcess(command, 0, "".join(json.dumps(j) + "\n" for j in JOBS[run_id]), "")
-        status = command[2].split("status=")[1].split("&")[0]
-        lines = [json.dumps(r) for r in RUNS if r["conclusion"] == status]
-        return subprocess.CompletedProcess(command, 0, "\n".join(lines), "")
+        return subprocess.CompletedProcess(command, 0, "\n".join(json.dumps(r) for r in RUNS), "")
 
     return run
 
@@ -135,3 +133,24 @@ def test_a_refused_ledger_write_is_retried_next_interval(swarm):
     ledger.followup = lambda slug, text: ledger.added.append((slug, text))
     defects.refresh("sw", config, store, ledger, NOW_MS + defects.REFRESH_MS, run=_gh([]))
     assert len(refused) == 1 and len(ledger.added) == 1
+
+
+def test_one_run_whose_jobs_cannot_be_read_does_not_hide_the_others(swarm):
+    store, config, ledger = swarm
+    calls = []
+    healthy = _gh(calls)
+
+    def run(command, **kwargs):
+        if command[2].startswith("repos/{owner}/{repo}/actions/runs/1/"):
+            raise subprocess.CalledProcessError(1, command, "", "HTTP 502")
+        return healthy(command, **kwargs)
+
+    defects.refresh("sw", config, store, ledger, NOW_MS, run=run)
+    assert ledger.added == []
+    assert any("/runs/3/jobs" in c for c in calls)
+    defects.refresh("sw", config, store, ledger, NOW_MS + defects.REFRESH_MS, run=healthy)
+    assert len(ledger.added) == 1
+
+
+def test_a_run_without_a_finished_gate_is_no_defect():
+    assert defects.defect(RUNS[0], JOBS[1][:1]) is None

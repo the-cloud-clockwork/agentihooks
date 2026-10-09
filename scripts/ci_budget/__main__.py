@@ -21,7 +21,7 @@ def _annotations(result: dict) -> list[str]:
                 f"::warning title=Stage over budget::{row['stage']} took {ci_budget.clock(row['seconds'])}"
                 f" against its budget of {ci_budget.clock(row['budget'])}"
             )
-    if result["total"] > ci_budget.RUN_BUDGET_S:
+    if ci_budget.run_state(result["total"]) == "over":
         lines.append(
             f"::error title=Run over fifteen minutes::push to this report took {ci_budget.clock(result['total'])}"
             f" against {ci_budget.clock(ci_budget.RUN_BUDGET_S)}"
@@ -31,12 +31,10 @@ def _annotations(result: dict) -> list[str]:
 
 def _summary(result: dict) -> str:
     rows = [
-        f"| {row['stage']} | {ci_budget.clock(row['seconds'])} | "
-        f"{'none' if row['budget'] is None else ci_budget.clock(row['budget'])} | {ci_budget.verdict(row)} |"
+        f"| {row['stage']} | {ci_budget.clock(row['seconds'])} | {ci_budget.budget_cell(row)} | {ci_budget.verdict(row)} |"
         for row in result["stages"]
     ]
     total = result["total"]
-    state = "over" if total > ci_budget.RUN_BUDGET_S else "ok"
     return "\n".join(
         [
             "## Stage budget",
@@ -44,7 +42,8 @@ def _summary(result: dict) -> str:
             "| Stage | Wall | Budget | Verdict |",
             "| --- | ---: | ---: | --- |",
             *rows,
-            f"| push to this report | {ci_budget.clock(total)} | {ci_budget.clock(ci_budget.RUN_BUDGET_S)} | {state} |",
+            f"| push to this report | {ci_budget.clock(total)} | {ci_budget.clock(ci_budget.RUN_BUDGET_S)} | "
+            f"{ci_budget.run_state(total)} |",
             "",
         ]
     )
@@ -57,6 +56,9 @@ def main(argv: list[str] | None = None, now: Callable[[], float] = time.time) ->
     args = parser.parse_args(argv)
     run_doc = json.loads(args.run.read_text())
     jobs = [json.loads(line) for line in args.jobs.read_text().splitlines() if line]
+    if not jobs:
+        print(f"::error::{args.jobs} lists no jobs, so no stage can be measured.")
+        return 1
     result = ci_budget.report(run_doc, jobs, now())
     print("\n".join(ci_budget.render(result)))
     print("\n".join(_annotations(result)))

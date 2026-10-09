@@ -32,6 +32,7 @@ BUDGETS = {
     "gate-required": 60,
     "refresh-durations": 120,
     "coverage-baseline": 120,
+    "stage-budget": 60,
 }
 
 
@@ -47,7 +48,7 @@ def stages(jobs: list[dict]) -> dict[str, float]:
     spans: dict[str, tuple[float, float]] = {}
     for job in jobs:
         stage = stage_of(job["name"])
-        if stage == SELF or job.get("conclusion") == "skipped" or not job.get("completed_at"):
+        if job.get("conclusion") == "skipped" or not job.get("completed_at"):
             continue
         begin, end = seconds(job["created_at"]), seconds(job["completed_at"])
         first, last = spans.get(stage, (begin, end))
@@ -77,12 +78,18 @@ def verdict(row: dict) -> str:
     return "over" if over(row) else "ok"
 
 
+def budget_cell(row: dict) -> str:
+    return "none" if row["budget"] is None else clock(row["budget"])
+
+
+def run_state(total: int) -> str:
+    return "over" if total > RUN_BUDGET_S else "ok"
+
+
 def render(result: dict) -> list[str]:
     lines = [f"{'stage':<20} {'wall':>7} {'budget':>7}  verdict"]
     for row in result["stages"]:
-        budget = "none" if row["budget"] is None else clock(row["budget"])
-        lines.append(f"{row['stage']:<20} {clock(row['seconds']):>7} {budget:>7}  {verdict(row)}")
+        lines.append(f"{row['stage']:<20} {clock(row['seconds']):>7} {budget_cell(row):>7}  {verdict(row)}")
     total = result["total"]
-    state = "over" if total > RUN_BUDGET_S else "ok"
-    lines.append(f"{'push to this report':<20} {clock(total):>7} {clock(RUN_BUDGET_S):>7}  {state}")
+    lines.append(f"{'push to this report':<20} {clock(total):>7} {clock(RUN_BUDGET_S):>7}  {run_state(total)}")
     return lines
