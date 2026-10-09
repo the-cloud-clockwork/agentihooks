@@ -626,16 +626,18 @@ def test_the_api_share_counts_live_sessions_on_reserved_accounts(monkeypatch, tm
     assert _pick(env, tmp_path, {"BEST": 2, "api": 1}).account == "LOW"
 
 
-def test_an_unreadable_routing_setting_refuses_the_launch(monkeypatch, tmp_path):
+def test_an_unreadable_routing_setting_closes_only_the_api_side(monkeypatch, tmp_path, capsys):
     env = {**_three(monkeypatch), "ANTHROPIC_API_KEY": "key"}
 
     def unreadable(harness, environ):
         raise place.SettingsError("routing settings are unreadable: KeyError")
 
     monkeypatch.setattr(place, "policy", unreadable)
+    assert _pick(env, tmp_path, {"BEST": 1, "MID": 1}).account == "LOW"
+    assert capsys.readouterr().err == "[claude] api side closed: routing settings are unreadable: KeyError\n"
     with pytest.raises(balancer.RoutingError) as raised:
-        _pick(env, tmp_path)
-    assert str(raised.value) == "routing settings are unreadable: KeyError"
+        _pick(env, tmp_path, {"BEST": 9, "MID": 9, "LOW": 9})
+    assert str(raised.value) == "no Claude account has a free session under its quota band"
 
 
 def test_a_token_named_api_is_reserved_for_the_api_route():
@@ -697,11 +699,11 @@ def test_routing_fails_only_when_the_pool_and_the_api_are_both_closed(monkeypatc
     assert str(raised.value) == "no Claude account has a free session under its quota band outside api"
 
 
-def test_a_reserved_account_yields_to_the_api_before_it_is_used(monkeypatch, tmp_path):
+def test_a_reserved_account_is_used_before_the_api_at_weight_0(monkeypatch, tmp_path):
     env = {**_three(monkeypatch), "ANTHROPIC_API_KEY": "key", "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST,MID"}
     _weighted(monkeypatch, 0, cap=1)
-    assert _pick(env, tmp_path, {"LOW": 4}).kind == API
-    assert _pick(env, tmp_path, {"LOW": 4, "api": 1}).account == "BEST"
+    assert _pick(env, tmp_path, {"LOW": 4}).account == "BEST"
+    assert _pick(env, tmp_path, {"LOW": 3}).account == "LOW"
 
 
 def test_route_api_resolves_to_the_api_endpoint_and_a_slug_to_its_token():

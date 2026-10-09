@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from scripts.routing import place, settings
@@ -132,14 +134,16 @@ def test_policy_reads_the_swarm_redis_when_it_answers(monkeypatch, tmp_path):
     assert seen == [env]
 
 
-@pytest.mark.parametrize("error", [ConnectionRefusedError("refused"), ValueError("bad scheme"), "redis"])
-def test_an_unreachable_or_misnamed_redis_falls_back_to_the_file_store(monkeypatch, error):
+@pytest.mark.parametrize("error", ["OSError", "ConnectionError"])
+def test_an_unreachable_redis_falls_back_to_the_file_store(monkeypatch, error):
     import redis
 
     from scripts.swarm import store
 
+    errors = {"OSError": ConnectionRefusedError, "ConnectionError": redis.ConnectionError}
+
     def refused(environ):
-        raise redis.ConnectionError("refused") if error == "redis" else error
+        raise errors[error]("refused")
 
     monkeypatch.setattr(store, "redis_client", refused)
     assert place._client({}) is None
@@ -166,6 +170,42 @@ def test_an_unreadable_settings_file_is_a_settings_error(monkeypatch, tmp_path):
     with pytest.raises(place.SettingsError) as raised:
         place.policy("claude", {"AGENTIHOOKS_HOME": str(tmp_path)})
     assert str(raised.value) == "routing settings are unreadable: KeyError"
+    (tmp_path / "routing-settings.json").write_text("[]")
+    with pytest.raises(place.SettingsError) as raised:
+        place.policy("claude", {"AGENTIHOOKS_HOME": str(tmp_path)})
+    assert str(raised.value) == "routing settings are unreadable: TypeError"
+
+
+@pytest.mark.parametrize(
+    ("key", "value"), [("claude-api-weight", "25"), ("claude-api-weight", 101), ("claude-api-max-sessions", "abc")]
+)
+def test_a_stored_value_its_validator_refuses_is_a_settings_error(monkeypatch, tmp_path, key, value):
+    monkeypatch.setattr(place, "_client", lambda environ: None)
+    (tmp_path / "routing-settings.json").write_text(json.dumps({"settings": {key: value}, "history": []}))
+    with pytest.raises(place.SettingsError) as raised:
+        place.policy("claude", {"AGENTIHOOKS_HOME": str(tmp_path)})
+    assert str(raised.value) == f"routing setting {key} is invalid"
+
+
+def test_a_malformed_redis_url_is_a_settings_error(monkeypatch, tmp_path):
+    from scripts.swarm import store
+
+    def misnamed(environ):
+        raise ValueError("bad scheme")
+
+    monkeypatch.setattr(store, "redis_client", misnamed)
+    with pytest.raises(place.SettingsError) as raised:
+        place.policy("claude", {"AGENTIHOOKS_HOME": str(tmp_path)})
+    assert str(raised.value) == "routing settings are unreadable: ValueError"
+
+
+def test_unreadable_settings_close_only_the_api_side(monkeypatch, capsys):
+    def unreadable(harness, environ):
+        raise place.SettingsError("routing settings are unreadable: KeyError")
+
+    monkeypatch.setattr(place, "policy", unreadable)
+    assert place.api_side(_Source([_api()]), "codex", {}, NOW) == ([], 0)
+    assert capsys.readouterr().err == "[codex] api side closed: routing settings are unreadable: KeyError\n"
 
 
 def test_a_redis_read_failure_is_a_settings_error(monkeypatch, tmp_path):

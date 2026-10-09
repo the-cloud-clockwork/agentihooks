@@ -1,10 +1,11 @@
+import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from scripts import session_bands
 from scripts.routing import split
-from scripts.routing.settings import open_store
+from scripts.routing.settings import VALIDATORS, open_store
 from scripts.routing.slots import API_UNBOUNDED, Slot
 
 if TYPE_CHECKING:
@@ -30,7 +31,7 @@ def _client(environ: Mapping[str, str]) -> "Redis | None":
 
     try:
         return store.redis_client(environ)
-    except (RedisError, OSError, ValueError):
+    except (RedisError, OSError):
         return None
 
 
@@ -41,8 +42,11 @@ def policy(harness: str, environ: Mapping[str, str]) -> ApiPolicy:
         settings = open_store(_client(environ), environ)
         cap = settings.get(f"{harness}-api-max-sessions")
         weight = settings.get(f"{harness}-api-weight")
-    except (RedisError, OSError, ValueError, KeyError) as exc:
+    except (RedisError, OSError, ValueError, KeyError, TypeError) as exc:
         raise SettingsError(f"routing settings are unreadable: {type(exc).__name__}") from exc
+    for key, value in ((f"{harness}-api-max-sessions", cap), (f"{harness}-api-weight", weight)):
+        if value is not None and not VALIDATORS[key](value):
+            raise SettingsError(f"routing setting {key} is invalid")
     return ApiPolicy(weight, API_UNBOUNDED if cap is None else cap)
 
 
@@ -50,7 +54,11 @@ def api_side(source: "SlotSource", harness: str, environ: Mapping[str, str], now
     found = source.slots(environ, now)
     if not found:
         return [], 0
-    rules = policy(harness, environ)
+    try:
+        rules = policy(harness, environ)
+    except SettingsError as exc:
+        print(f"[{harness}] api side closed: {exc}", file=sys.stderr, flush=True)
+        return [], 0
     return [replace(slot, cap=rules.cap) for slot in found], rules.weight
 
 

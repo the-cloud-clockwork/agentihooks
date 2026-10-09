@@ -729,8 +729,9 @@ def select_credential(
         slug.strip() for slug in active_env.get("AGENTIHOOKS_RESERVE_ACCOUNTS", str()).split(",") if slug.strip()
     }
     pool_live = sum(live.get(credential.account, 0) for credential in credentials)
-    seat = place.place(api, [seat for seat in seats if seat.account not in reserve], weight, pool_live)
-    seat = seat or place.place(api, seats, weight, pool_live)
+    seat = place.place(api, seats, weight, pool_live)
+    if seat is not None and seat.account in reserve:
+        seat = session_bands.pick(other for other in seats if other.account not in reserve) or seat
     if seat is None:
         outside = f" outside {', '.join(sorted(excluded))}" if excluded else ""
         raise RoutingError(f"no Claude account has a free session under its quota band{outside}", results)
@@ -748,10 +749,7 @@ def _api_side(
 ) -> tuple[list[Slot], int]:
     if API_ACCOUNT in excluded:
         return [], 0
-    try:
-        return place.api_side(claude_api.ClaudeApiSource(sessions), HARNESS, environ, now)
-    except place.SettingsError as exc:
-        raise RoutingError(str(exc)) from exc
+    return place.api_side(claude_api.ClaudeApiSource(sessions), HARNESS, environ, now)
 
 
 def forced(environ: Mapping[str, str], route: str) -> RouteDecision:

@@ -5577,8 +5577,8 @@ def _claude_command(claude_bin: str, extra_args: list[str]) -> list[str]:
 def cmd_claude(extra_args: list[str]) -> None:
     """Route to the healthiest Claude account, then replace this process with Claude.
 
-    The account with a free place under its session band and the fewest live sessions
-    wins; --route forces one account.
+    The api endpoint or the account with a free place under its session band and the
+    fewest live sessions wins, split by the api weight; --route forces one account or api.
     """
     import fcntl
 

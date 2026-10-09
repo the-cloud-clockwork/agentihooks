@@ -373,14 +373,15 @@ def test_the_codex_api_share_counts_live_sessions_on_accounts_without_a_seat(mon
     assert router.select(_accounts(), quotas, {"beta": 2, "api": 1}, NOW, environ=API_ENV)[0].name == "alpha"
 
 
-def test_an_unreadable_codex_routing_setting_refuses_the_launch(monkeypatch):
+def test_an_unreadable_codex_routing_setting_closes_only_the_api_side(monkeypatch, capsys):
     def unreadable(harness, environ):
         raise place.SettingsError("routing settings are unreadable: KeyError")
 
     monkeypatch.setattr(place, "policy", unreadable)
-    with pytest.raises(router.RoutingError) as raised:
-        router.select(_accounts(), {"alpha": _quota(10.0)}, {}, NOW, environ=API_ENV)
-    assert str(raised.value) == "routing settings are unreadable: KeyError"
+    assert router.select(_accounts(), {"alpha": _quota(10.0)}, {}, NOW, environ=API_ENV)[0].name == "alpha"
+    assert capsys.readouterr().err == "[codex] api side closed: routing settings are unreadable: KeyError\n"
+    with pytest.raises(router.RoutingError):
+        router.select(_accounts(), {}, {}, NOW, environ=API_ENV)
 
 
 API_ENV = {**ENV, "CODEX_API_KEY": "key"}
