@@ -119,7 +119,12 @@ def test_a_field_edit_reads_and_writes_only_its_own_row():
     assert (list(before), list(after)) == ([path], [path])
 
 
-@pytest.mark.parametrize(("old", "new"), [({"a": 1}, ["x"]), ([], {}), ({"x": []}, {"x": {}})])
+@pytest.mark.parametrize(("old", "new"), [({"a": 1}, ["x"]), ([], {})])
 def test_a_container_of_another_type_replaces_every_row(old, new):
     before, after = diff(old, new)
     assert (before, after) == (flatten(old), flatten(new))
+
+
+def test_an_empty_list_turned_empty_object_replaces_its_own_row():
+    old, new = {"x": []}, {"x": {}}
+    assert diff(old, new) == ({'["x"]': flatten(old)['["x"]']}, {'["x"]': flatten(new)['["x"]']})
