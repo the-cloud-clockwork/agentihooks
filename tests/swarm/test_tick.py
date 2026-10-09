@@ -564,6 +564,26 @@ def test_a_claimed_task_without_an_agent_is_reopened(store):
     assert "task t1 had no agent, reopened" in actions
 
 
+def test_a_task_blocked_on_dev_red_is_reopened_once_dev_tests_passes(store, monkeypatch):
+    from scripts.swarm import dev_red
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    ledger.comments = []
+    ledger.comment = lambda slug, task, text, by: ledger.comments.append((task, text, by))
+    store.update("sw", state="paused")
+    ledger.rows["t1"].update(state="blocked", claimed_by="engineer@a1b2c3-0009")
+    dev_red.hold(store.redis, "sw", "t1", 41)
+    read = []
+    monkeypatch.setattr(
+        dev_red, "latest", lambda repo, run=None: read.append(repo) or {"id": 42, "conclusion": "success"}
+    )
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert read == ["/repo"]
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
+    assert ("t1", dev_red.REOPENED, "swarm") in ledger.comments
+    assert "task t1 reopened, dev Tests passed after the red run that blocked it" in actions
+
+
 def test_a_task_held_by_a_known_agent_is_not_reopened_as_an_orphan(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     store.update("sw", state="paused")
