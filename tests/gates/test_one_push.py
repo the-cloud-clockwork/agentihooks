@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from scripts.gates import Call, Gate, Who, entry
-from scripts.gates.one_push import OnePush, actions, destinations, open_refusal, push_refusal
+from scripts.gates.one_push import OnePush, actions, destinations, open_refusal, push_refusal, queue_refusal
 from scripts.gates.subagents import SubagentBudget
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm.ledger_events import PullRequest
@@ -51,8 +51,10 @@ class Ledger:
         return [{"id": "t1", "pr_url": self.pr_url, "branch": self.branch}]
 
 
-def pull(state="OPEN", red=False, resolved=False):
-    return PullRequest(state=state, merged_at=None, pushed_at=None, red=red, resolved=resolved)
+def pull(state="OPEN", red=False, running=True, queued=False):
+    return PullRequest(
+        state=state, merged_at=None, pushed_at=None, red=red, resolved=not running, queued=queued, running=running
+    )
 
 
 def gate(found=None, pr_url=URL, target="claude", branch="task"):
@@ -158,7 +160,7 @@ def test_a_push_while_checks_run_and_none_is_red_is_refused(tree, tmp_path):
 
 @pytest.mark.parametrize(
     "found",
-    [pull(red=True), pull(resolved=True), pull(state="MERGED"), pull(state="CLOSED"), None],
+    [pull(red=True), pull(running=False), pull(state="MERGED"), pull(state="CLOSED"), None],
 )
 def test_a_push_passes_once_a_check_is_red_or_checks_resolved_or_the_pull_request_is_gone(tree, tmp_path, found):
     assert gate(found).decide(bash("git push", tree), ME, state(tmp_path)).allowed
@@ -194,4 +196,40 @@ def test_the_refusals_name_what_is_owed_and_the_way_out():
     assert push_refusal("demo", URL) == (
         f"checks still run on {URL} and none is red: a push now cancels them. Wait with agentihooks swarm demo wait "
         f"--on checks {URL}, then push once they resolve, or as soon as a check goes red"
+    )
+
+
+def test_a_push_while_the_pull_request_waits_in_the_merge_queue_is_refused(tree, tmp_path):
+    decision = gate(pull(running=False, queued=True)).decide(bash("git push", tree), ME, state(tmp_path))
+    assert decision.reason == queue_refusal("demo", URL)
+    assert gate(pull(running=False, queued=True, red=True)).decide(bash("git push", tree), ME, state(tmp_path)).allowed
+
+
+def test_a_reader_counts_when_either_its_name_or_its_type_names_it(tree, tmp_path):
+    budget = SubagentBudget()
+    for reader in ("standards-reader", "spec-reader"):
+        call = Call("Agent", {"name": f"{reader}-2", "subagent_type": reader})
+        budget.decide(call, ME, Verdicts("demo", "subagents", tmp_path))
+    assert gate().decide(bash("gh pr create --base dev", tree), ME, state(tmp_path)).allowed
+
+
+def test_gh_repo_flags_before_the_command_still_name_an_open():
+    assert [kind for kind, _, _ in actions("gh -R o/r pr create --base dev; gh --repo=o/r pr ready 7", "/x")] == [
+        "open",
+        "open",
+    ]
+
+
+def test_a_push_names_its_own_remote_for_the_repo_check(tree, tmp_path):
+    git(tree, "remote", "add", "fork", "https://github.com/o/elsewhere.git")
+    assert gate(pull()).decide(bash("git push fork task", tree), ME, state(tmp_path)).allowed
+    held = "git push https://github.com/o/r.git task"
+    assert not gate(pull()).decide(bash(held, tree), ME, state(tmp_path)).allowed
+    assert gate(pull()).decide(bash("git push https://github.com/o/other.git task", tree), ME, state(tmp_path)).allowed
+
+
+def test_the_queue_refusal_names_the_dequeue():
+    assert queue_refusal("demo", URL) == (
+        f"{URL} waits in the merge queue: a push now drops it. Dequeue first with agentihooks swarm demo merge "
+        f"dequeue {URL}, then push"
     )

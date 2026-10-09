@@ -711,3 +711,18 @@ def test_dead_gate_resolution_is_red_but_reminders_still_require_actual_failure(
         else []
     )
     assert texts(store, ENG_SEAT) == expected
+
+
+@pytest.mark.parametrize(
+    ("rollup", "suites", "running"),
+    [
+        ([], [QUEUED_TESTS], True),
+        ([{"name": "unit", "conclusion": "SUCCESS"}, {"name": "lint", "conclusion": None}], [], True),
+        ([{"name": "unit", "conclusion": "CANCELLED"}], [FINISHED_RUN], False),
+        ([], [], False),
+        ([{"name": "unit", "conclusion": "SUCCESS"}], [FINISHED_RUN, APP_SUITE], False),
+    ],
+)
+def test_a_pull_request_reports_whether_checks_still_run(rollup, suites, running):
+    raw = {"state": "OPEN", "statusCheckRollup": rollup, "checkSuites": suites}
+    assert ledger_events.pull_request(raw).running is running
