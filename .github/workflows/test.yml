@@ -1003,8 +1003,9 @@ jobs:
           key: durations-samples-${{ github.sha }}
 
   coverage-baseline:
-    needs: [gate-required, sonar]
-    if: ${{ !cancelled() && github.event_name == 'push' && needs['gate-required'].result == 'success' && needs.sonar.result == 'success' }}
+    needs: [unit, coverage-ratchet, gate-required, sonar]
+    # A red ratchet still publishes: skipping it would leave the next head with no base to grade against.
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.unit.result == 'success' && needs.sonar.result == 'success' && !(needs['gate-required'].result != 'success' && needs['coverage-ratchet'].result != 'failure') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

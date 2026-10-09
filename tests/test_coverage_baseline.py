@@ -78,12 +78,14 @@ def test_history_is_bounded_to_thirty_measurements(measured):
 def test_publisher_checks_parent_results_without_inheriting_skips():
     workflow = Path(__file__).parents[1] / ".github/workflows/test.yml"
     job = yaml.safe_load(workflow.read_text())["jobs"]["coverage-baseline"]
-    assert job["needs"] == ["gate-required", "sonar"]
+    assert job["needs"] == ["unit", "coverage-ratchet", "gate-required", "sonar"]
     condition = job["if"]
     assert "!cancelled()" in condition
     assert "github.event_name == 'push'" in condition
-    assert "needs['gate-required'].result == 'success'" in condition
+    assert "needs.unit.result == 'success'" in condition
     assert "needs.sonar.result == 'success'" in condition
+    gate = "needs['gate-required'].result != 'success'"
+    assert f"!({gate} && needs['coverage-ratchet'].result != 'failure')" in condition
 
 
 def test_publisher_reads_shards_without_the_optional_sonar_report():
