@@ -49,9 +49,11 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "split",
             "kind-due",
             "helm-kind",
+            "ledger-load",
             "mutation-plan",
             "reuse",
             "queue-baseline",
+            "stage-budget",
         }
     )
     assert gate["if"] == "${{ always() }}"
