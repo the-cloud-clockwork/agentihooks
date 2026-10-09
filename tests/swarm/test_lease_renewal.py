@@ -248,7 +248,7 @@ def test_run_tick_stops_between_steps_when_another_controller_took_the_lease(env
     assert timing.BEFORE_STEP.get() is None
 
 
-def test_without_a_tick_setting_the_lease_lives_three_minute_long_ticks(store, clock, monkeypatch):
+def test_default_tick_gives_a_three_minute_lease(store, clock, monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
     assert (lease.tick_ms(), lease.ttl_ms()) == (60000, 180000)
     held = lease.acquire(store, "sw", "home")
