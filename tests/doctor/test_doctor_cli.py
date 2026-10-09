@@ -580,6 +580,17 @@ def test_master_launch_missed_measure_refuses_an_unreadable_journal(env, monkeyp
     assert output.out == ""
 
 
+def test_master_launch_missed_measure_refuses_times_without_a_zone(env, monkeypatch, capsys):
+    assert doctor.main([WATCHED, "start"]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(swarm_cli, "now_ms", lambda: 1791588800000)
+    flags = ["--since", "2026-10-09T21:50", "--until", "2026-10-09T22:35"]
+    assert doctor.main([WATCHED, "measure", "master-launch-missed", *flags]) == 1
+    assert (
+        capsys.readouterr().err == "doctor: master-launch-missed takes times with a zone, such as 2026-10-09T19:50Z\n"
+    )
+
+
 def test_failed_spawn_measure_accepts_a_window_ending_now(env, monkeypatch, capsys):
     store, _, _ = env
     assert doctor.main([WATCHED, "start"]) == 0

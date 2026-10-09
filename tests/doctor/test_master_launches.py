@@ -125,8 +125,11 @@ def test_unreadable_journal_is_reported_as_unavailable():
     [found] = master_launches.findings(master_launches.as_of(record, last + master_launches.MATCH_MS))
     assert found.evidence[0] == "error: unavailable: journalctl: not found"
     assert "fresh launch failures unavailable: journalctl: not found" in found.evidence
-    with pytest.raises(master_launches.Unavailable, match="journalctl: not found"):
-        master_launches.findings({**record, "transfers": []})
+    [unavailable] = master_launches.findings({**record, "transfers": []})
+    assert unavailable.id == "master-launch-evidence-unavailable/rig-grade-swarm"
+    assert unavailable.evidence == ("journal: journalctl: not found",)
+    again = master_launches.findings({**record, "transfers": [], "journal_error": "journalctl timed out"})
+    assert (again[0].id, again[0].measure) == (unavailable.id, unavailable.measure)
 
 
 def test_error_text_is_sanitized():
@@ -191,6 +194,21 @@ def test_missed_replay_counts_only_failures_inside_the_window():
     times = failure_times(record)
     window = (times[5] - 1, times[7] + 1)
     assert master_launches.missed(record, replay(record), window, (master_launches.journal_hour,)) == 3
+
+
+def test_a_finding_back_after_its_verdict_stays_shown_until_the_next_verdict():
+    from scripts.swarm.health.findings import Finding
+
+    record = outage()
+    times = failure_times(record)
+    measures = iter((5, 1))
+
+    def falling(record, at):
+        return [Finding("failed spawn", "master", "s", (f"e{at}",), "t", next(measures))]
+
+    verdicts = {master_launches.OLD_ID: {"verdict": {"at": 0, "measure": 2, "evidence": []}}}
+    window = (times[0] - 1, times[1] + 1)
+    assert master_launches.missed(record, replay(record, verdicts), window, (falling,)) == 0
 
 
 def test_missed_replay_refuses_an_unreadable_journal():
@@ -270,6 +288,15 @@ def test_master_reader_treats_no_matching_lines_as_empty():
 
     read = spawn_read.master_records(store, "rig-grade-swarm", run=run)
     assert (read["journal"], read["journal_error"]) == ([], "")
+
+
+def test_master_reader_reads_the_journal_from_the_last_live_binding():
+    store, record = _store_with_outage()
+    seen = []
+    spawn_read.master_records(store, "rig-grade-swarm", run=_journal(record, seen))
+    live = max(r["binding"]["at"] for r in record["transfers"] if r["binding"]["state"] == "live")
+    assert seen[0][4:6] == ["--since", f"@{live / 1000:.3f}"]
+    assert "--until" not in seen[0]
 
 
 @pytest.mark.parametrize(

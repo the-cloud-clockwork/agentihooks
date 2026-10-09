@@ -297,6 +297,9 @@ def _window(args: Namespace, now: int) -> tuple[int, int] | None:
     if not args.finding.startswith("failed-spawn/") and args.finding != master_launches.MISSED:
         raise SwarmError(f"journal bounds are only supported for failed-spawn findings and {master_launches.MISSED}")
     since, until = _at_ms(args.since, "--since"), _at_ms(args.until, "--until")
+    zoned = all(datetime.fromisoformat(text).tzinfo for text in (args.since, args.until))
+    if args.finding == master_launches.MISSED and not zoned:
+        raise SwarmError(f"{master_launches.MISSED} takes times with a zone, such as 2026-10-09T19:50Z")
     if since >= until:
         raise SwarmError("--since must precede --until")
     if until > now:

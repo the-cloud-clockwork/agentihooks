@@ -56,19 +56,25 @@ def records(
 def master_records(
     store: RedisStore,
     slug: str,
-    since: str = "1 day ago",
+    since: str | None = None,
     run: Callable = subprocess.run,
     *,
     until: str | None = None,
 ) -> dict:
+    """Without since, the journal is read from the last live master binding, so it spans the whole open outage."""
+    rows = [row for row in transfers.list_transfers(store, slug) if row["task"] == MASTER]
+    agents = [asdict(a) for a in store.agents(slug) if a.lane == MASTER]
+    if since is None:
+        bound = [r["binding"]["at"] for r in rows if r["binding"]["state"] == "live"]
+        bound += [a["started_at"] for a in agents if a["state"] == "working"]
+        since = f"@{max(bound) / 1000:.3f}" if bound else None
     entries, error = _grep("master spawn failed", since, until, run)
-    journal = None if entries is None else [e for e in entries if e["message"].startswith(f"{slug}: ")]
     return {
         "slug": slug,
-        "transfers": [row for row in transfers.list_transfers(store, slug) if row["task"] == MASTER],
+        "transfers": rows,
         "restored": [row for row in store.restored(slug) if row["lane"] == MASTER],
-        "agents": [asdict(a) for a in store.agents(slug) if a.lane == MASTER],
-        "journal": journal,
+        "agents": agents,
+        "journal": None if entries is None else [e for e in entries if e["message"].startswith(f"{slug}: ")],
         "journal_error": error,
     }
 
@@ -86,8 +92,7 @@ def _grep(pattern, since, until, run):
         "--user",
         "-u",
         "agentihooks-swarm.service",
-        "--since",
-        since,
+        *(["--since", since] if since is not None else []),
         *(["--until", until] if until is not None else []),
         "-o",
         "json",

@@ -11,6 +11,7 @@ from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import MASTER, SwarmError
 
 KIND = "master launch failed"
+UNAVAILABLE = "master launch evidence unavailable"
 OLD_ID = "failed-spawn/master"
 MISSED = "master-launch-missed"
 MATCH_MS = 60_000
@@ -97,13 +98,22 @@ def _bound(record):
     ]
 
 
+def _unavailable(record):
+    return Finding(
+        UNAVAILABLE,
+        record["slug"],
+        "the tick journal is unreadable, so fresh master launch failures and launch errors are unavailable",
+        (f"journal: {record['journal_error']}",),
+        "the journal cannot be read",
+        1,
+    )
+
+
 def findings(record: dict) -> list[Finding]:
     last_bound = max(_bound(record), default=-1)
     failed = [a for a in attempts(record) if a.at > last_bound]
     if not failed:
-        if record["journal"] is None:
-            raise Unavailable(f"fresh master launch failures unavailable: {record['journal_error']}")
-        return []
+        return [] if record["journal"] is not None else [_unavailable(record)]
     first, last = failed[0], failed[-1]
     evidence = (
         f"error: {last.error}",
@@ -154,8 +164,7 @@ def latest(record: dict, at: int) -> list[Finding]:
 DETECTORS = (journal_hour, latest)
 
 
-def _shown(finding, stored, at, cooldown_ms):
-    verdict = (stored or {}).get("verdict")
+def _shown(finding, verdict, at, cooldown_ms):
     if not verdict or verdict["at"] > at:
         return True
     grew = finding.measure > verdict["measure"] and list(finding.evidence) != verdict["evidence"]
@@ -176,13 +185,18 @@ class Replay:
         return min([p for p in self.passes if p >= failed_at] + [failed_at + self.interval_ms])
 
 
-def _covered(record, at, replay, detectors):
-    return any(
-        _shown(f, replay.verdicts.get(f.id), at, replay.cooldown_ms)
-        for detect in detectors
-        for f in detect(record, at)
-        if f.kind == KIND or f.id == OLD_ID
-    )
+def _covered(record, at, replay, detectors, returned):
+    """A finding that came back after its verdict stays shown until the next verdict, as VerdictStore keeps it."""
+    covered = False
+    for f in (f for detect in detectors for f in detect(record, at) if f.kind == KIND or f.id == OLD_ID):
+        verdict = (replay.verdicts.get(f.id) or {}).get("verdict")
+        if verdict and verdict["at"] <= at and returned.get(f.id) == verdict["at"]:
+            covered = True
+        elif _shown(f, verdict, at, replay.cooldown_ms):
+            if verdict and verdict["at"] <= at:
+                returned[f.id] = verdict["at"]
+            covered = True
+    return covered
 
 
 def missed(record: dict, replay: Replay, window: tuple[int, int], detectors: tuple) -> int:
@@ -190,10 +204,6 @@ def missed(record: dict, replay: Replay, window: tuple[int, int], detectors: tup
     after the failure, judged against the verdicts given before that pass."""
     if record["journal"] is None:
         raise Unavailable(f"{MISSED} unavailable: {record['journal_error']}")
-    since, until = window
-    return sum(
-        1
-        for a in attempts(record)
-        if since <= a.at <= until
-        and not _covered(as_of(record, replay.pass_after(a.at)), replay.pass_after(a.at), replay, detectors)
-    )
+    since, until, returned = *window, {}
+    passes = [replay.pass_after(a.at) for a in attempts(record) if since <= a.at <= until]
+    return sum(1 for at in passes if not _covered(as_of(record, at), at, replay, detectors, returned))
