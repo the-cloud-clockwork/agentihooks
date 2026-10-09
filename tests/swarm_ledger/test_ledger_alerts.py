@@ -513,8 +513,10 @@ def test_repository_recovery_tolerates_an_older_ledger_without_alerts():
 
     state = make_ledger()
     state.pop("alerts")
+    expected_keys = {*state, "alerts"}
     mutation.apply(SLUG, state, core, ops=[{"op": "join", "id": "joined", "by": "writer"}])
     assert state["alerts"] == []
+    assert set(state) == expected_keys
 
 
 def test_quiet_expiry_uses_original_time_for_an_older_refusal(monkeypatch):
