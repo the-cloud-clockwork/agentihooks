@@ -61,7 +61,15 @@ def test_subtree_of_a_plan_lists_its_phases_slices_and_tasks_in_display_order(re
 
 
 def test_subtree_of_a_phase_starts_at_the_phase(repo):
-    assert shape(repo.nodes(SLUG, "subtree", "phases/p1")) == [(node, depth - 1) for node, depth in PLAN_A[1:8]]
+    assert shape(repo.nodes(SLUG, "subtree", "phases/p1")) == [
+        ("phases/p1", 0),
+        ("slices/s1", 1),
+        ("tasks/t1", 2),
+        ("tasks/t4", 2),
+        ("slices/s2", 1),
+        ("tasks/t2", 2),
+        ("tasks/t3", 1),
+    ]
 
 
 def test_subtree_of_a_slice_lists_its_tasks_in_order(repo):
@@ -89,7 +97,7 @@ def test_children_put_slices_before_lone_tasks(repo):
 
 
 def test_children_of_the_ledger_are_its_roots(repo):
-    assert [row["node"] for row in repo.nodes(SLUG, "children")] == ["plans/a", "plans/b", "phases/p4", "tasks/t7"]
+    assert shape(repo.nodes(SLUG, "children")) == [("plans/a", 0), ("plans/b", 0), ("phases/p4", 0), ("tasks/t7", 0)]
 
 
 def test_ancestors_run_from_the_root_down(repo):
@@ -122,7 +130,7 @@ def test_cycles_in_parents_and_dependencies_end(tmp_path):
     assert shape(loop.nodes(SLUG, "subtree")) == [("tasks/t2", 0)]
     assert len(loop.nodes(SLUG, "subtree", "tasks/t1")) <= 4
     assert len(loop.nodes(SLUG, "ancestors", "tasks/t1")) <= 3
-    assert {row["node"] for row in loop.nodes(SLUG, "dependents", "tasks/t1")} == {"tasks/t1", "tasks/t2"}
+    assert shape(loop.nodes(SLUG, "dependents", "tasks/t1")) == [("tasks/t2", 1)]
 
 
 def server(repo):
@@ -133,12 +141,28 @@ def test_the_hierarchy_resource_reads_the_ledger_tree_with_states(repo):
     reply = routes.ledger_read(server(repo), SLUG, "hierarchy", {})
     assert [(row["node"], row["state"]) for row in reply["data"][:3]] == [
         ("plans/a", "open"),
-        ("phases/p1", "open"),
+        ("phases/p1", "building"),
         ("slices/s1", "open"),
     ]
     states = {row["node"]: row["state"] for row in reply["data"]}
     assert (states["phases/p2"], states["tasks/t2"], states["tasks/t8"]) == ("done", "claimed", "done")
     assert reply["revision"]
+
+
+def test_the_hierarchy_resource_names_phase_lifecycles_and_skips_items_without_an_id(tmp_path):
+    found = store.SQLiteLedgerRepository(tmp_path / store.DATABASE)
+    found.import_document(
+        SLUG,
+        {
+            "phases": [{"id": "p1", "planning": "auto"}, {"id": "p2", "depends_on": ["p1"]}, {"title": "no id"}],
+            "_meta": {"rev": 1},
+        },
+    )
+    reply = routes.ledger_read(server(found), SLUG, "hierarchy", {})
+    assert [(row["node"], row["state"]) for row in reply["data"]] == [
+        ("phases/p1", "to_plan"),
+        ("phases/p2", "waiting"),
+    ]
 
 
 def test_the_hierarchy_resource_runs_each_read_on_a_node(repo):

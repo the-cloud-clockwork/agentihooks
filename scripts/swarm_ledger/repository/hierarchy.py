@@ -103,7 +103,7 @@ ROOT = (
 LEVELS = 3
 CHAIN = 64
 CHILDREN = (
-    f"SELECT n.node_id, n.kind, n.parent_id, 1 FROM work_nodes n WHERE n.ledger_slug=:slug AND {ROOT} "
+    f"SELECT n.node_id, n.kind, n.parent_id, :node IS NOT NULL FROM work_nodes n WHERE n.ledger_slug=:slug AND {ROOT} "
     f"ORDER BY {ordering('n')}"
 )
 SUBTREE = f"""
@@ -133,7 +133,7 @@ WITH RECURSIVE down(node_id, depth) AS (
   FROM work_dependencies d JOIN down ON d.ledger_slug=:slug AND d.requires_id=down.node_id WHERE down.depth < {CHAIN}
 )
 SELECT n.node_id, n.kind, n.parent_id, MIN(down.depth) AS nearest
-FROM down JOIN work_nodes n ON n.ledger_slug=:slug AND n.node_id=down.node_id
+FROM down JOIN work_nodes n ON n.ledger_slug=:slug AND n.node_id=down.node_id WHERE n.node_id != :node
 GROUP BY n.node_id ORDER BY nearest, {ordering("n")}
 """
 READS = {"children": CHILDREN, "subtree": SUBTREE, "ancestors": ANCESTORS, "dependents": DEPENDENTS}

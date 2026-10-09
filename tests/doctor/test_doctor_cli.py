@@ -40,8 +40,11 @@ class FileLedger(LedgerClient):
         return state
 
     def _resource(self, slug, path, collection=False):
-        from scripts.swarm_ledger.api.resources import value
+        from scripts.swarm_ledger.api.resources import hierarchy_read, value
+        from scripts.swarm_ledger.repository import repository
 
+        if path.startswith("hierarchy"):
+            return hierarchy_read(repository.bound(core), slug, path)["data"]
         return value(self._call(slug), path)
 
 
