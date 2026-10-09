@@ -275,7 +275,7 @@ def test_github_provider_refuses_foreign_repository_before_reading():
     from scripts.swarm.store import SwarmError
 
     provider = GitHubIntegration("example/repo", lambda query, variables: pytest.fail("foreign read"))
-    with pytest.raises(SwarmError, match="forbidden_scope"):
+    with pytest.raises(SwarmError, match="^forbidden_scope$"):
         provider.read("https://github.com/other/repo/pull/1")
 
 
@@ -365,6 +365,7 @@ def test_verified_outcome_completes_the_authoritative_ledger_once(fixture, tmp_p
         state["_meta"]["outcomes"][proposal.task_id]["digest"]
         == "b6f69fb841b5bee5a01e3a6eef94590760133e5465e26a948cc84ea851cdc305"
     )
+    assert state["_meta"]["outcomes"][proposal.task_id]["operation_id"] == result["operation_id"]
     assert result["ledger_revision"] == state["_meta"]["rev"]
     prior = state
     replay = outcomes.complete(token, proposal.generation, repository)
@@ -971,3 +972,46 @@ def test_authoritative_completion_refuses_incomplete_or_mismatched_effects(monke
     assert not ledger_tasks.complete_outcome(doc, operation, ctx, result, actor)
     assert ctx.refused == [expected]
     assert doc == before
+
+
+def test_committed_outcome_refusal_reports_the_exact_controller_requirement(monkeypatch, tmp_path):
+    from scripts.swarm_ledger import ledger_tasks
+    from tests import sv2_ctl05_cases
+
+    outcomes, repository, token, proposal, *_ = sv2_ctl05_cases.build(monkeypatch, tmp_path)
+    outcomes.propose(token, proposal)
+    outcomes.complete(token, proposal.generation, repository)
+    doc = repository.get_document(outcomes.authority.slug)
+    operation = {"item": f"tasks/{proposal.task_id}", "fields": {"state": "open"}}
+    assert (
+        ledger_tasks.update_refusal(doc, operation, doc["_meta"])
+        == "committed outcomes require controller reconciliation"
+    )
+
+
+def test_outcome_receipt_is_dirty_even_when_done_fields_are_already_present(monkeypatch, tmp_path):
+    from scripts.swarm_ledger import ledger_tasks
+    from scripts.swarm_ledger.api.resources import revision
+    from tests import sv2_ctl05_cases
+    from tests.swarm_ledger.test_tasks import core
+
+    outcomes, repository, token, proposal, *_ = sv2_ctl05_cases.build(monkeypatch, tmp_path)
+    outcomes.propose(token, proposal)
+    result = outcomes.integrate(token, proposal.generation)
+    doc = repository.get_document(outcomes.authority.slug)
+    ctx = core.Context(doc.pop("_meta"), 0)
+    actor = outcomes.authority.current(proposal.task_id).holder
+    fields = {"state": "done", "pr_url": proposal.pr_url, "proof": proposal.proof}
+    doc["tasks"][0].update(fields)
+    doc["tasks"][0]["done"] = True
+    result["proposal"]["task_revision"] = revision(doc["tasks"][0])
+    operation = {
+        "id": "receipt",
+        "op": "task_update",
+        "item": f"tasks/{proposal.task_id}",
+        "by": actor,
+        "fields": fields,
+    }
+    assert ledger_tasks.complete_outcome(doc, operation, ctx, result, actor)
+    assert ctx.dirty is True
+    assert ctx.meta["outcomes"][proposal.task_id]["operation_id"] == result["operation_id"]
