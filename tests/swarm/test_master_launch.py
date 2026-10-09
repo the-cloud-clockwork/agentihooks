@@ -515,7 +515,10 @@ def test_the_refusals_read_exactly(up, monkeypatch, capsys):
     assert capsys.readouterr().err.strip() == "swarm: no master started"
 
 
-def test_fill_takes_every_empty_key_from_a_bare_config():
+def test_fill_takes_every_empty_key_from_a_bare_config(monkeypatch):
+    from scripts import agent_choice
+
+    monkeypatch.setattr(agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
     bare = SwarmConfig("sw", "/repo", 0, 0)
     assert master_launch.fill({}, bare) == {"profile": "master", "harness": "claude", "model": "opus", "effort": "high"}
 
