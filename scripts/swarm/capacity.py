@@ -1,10 +1,11 @@
 import json
+from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass, replace
 
 from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, session_bands
-from scripts.routing import claude_api, codex_api, place
+from scripts.routing import claude_api, codex_api, place, split
 from scripts.routing.slots import API, SUBSCRIPTION
 
 LANES = ("eng", "ci", "plan")
@@ -106,27 +107,31 @@ def _seat(row: Account, cap: int) -> session_bands.Seat:
     )
 
 
-def seats(rows: list[Account]) -> list[session_bands.Seat]:
-    return [_seat(row, row.cap) for row in rows if row.cap is not None]
-
-
-def offered(rows: list[Account], closed=()) -> list[session_bands.Seat]:
+def offered(rows: list[Account], closed: Collection[tuple[str, str]] = ()) -> list[session_bands.Seat]:
     """Every row as a seat, closed and unknown rows at cap 0, so their live sessions weigh in the api share."""
     return [_seat(row, 0 if row.cap is None or (row.harness, row.name) in closed else row.cap) for row in rows]
 
 
-def _side(offered_seats: list[session_bands.Seat], harness: str) -> session_bands.Seat | None:
+def _side(
+    offered_seats: list[session_bands.Seat], harness: str, allowed: Callable[[session_bands.Seat], bool]
+) -> session_bands.Seat | None:
     api = [seat for seat in offered_seats if seat.harness == harness and seat.kind == API]
     pool = [seat for seat in offered_seats if seat.harness == harness and seat.kind != API]
     weight = max((seat.weight or 0 for seat in api), default=0)
-    return place.place(api, pool, weight, sum(seat.sessions for seat in pool))
+    api_open = [seat for seat in api if allowed(seat)]
+    pool_open = [seat for seat in pool if seat.free and allowed(seat)]
+    api_live, pool_live = sum(seat.sessions for seat in api), sum(seat.sessions for seat in pool)
+    side = split.choose_side(api_open, pool_open, weight, api_live, pool_live, any(seat.free for seat in api_open))
+    return None if side is None else session_bands.pick(api_open if side == "api" else pool_open)
 
 
-def pick(offered_seats) -> session_bands.Seat | None:
-    """The split side of each harness, then the free seat with the fewest sessions across harnesses."""
+def pick(
+    offered_seats: Iterable[session_bands.Seat], allowed: Callable[[session_bands.Seat], bool] = lambda seat: True
+) -> session_bands.Seat | None:
+    """The split side of each harness over every offered seat, then the allowed free seat with the fewest sessions."""
     offered_seats = list(offered_seats)
     harnesses = dict.fromkeys(seat.harness for seat in offered_seats)
-    return session_bands.pick(seat for harness in harnesses if (seat := _side(offered_seats, harness)))
+    return session_bands.pick(seat for harness in harnesses if (seat := _side(offered_seats, harness, allowed)))
 
 
 def free_seats(account: Account) -> int:
@@ -194,7 +199,7 @@ def _allocate(
         reserved = _reserved(limits, effective, options, cursors)
         eligible = [h for h in options[lane][index] if room(lane, index, h)]
         spare = [h for h in eligible if remaining[h] > reserved[h]] or eligible
-        seat = pick(s for s in held.values() if s.harness in spare and usable(lane, index, s))
+        seat = pick(held.values(), lambda s, lane=lane, index=index: s.harness in spare and usable(lane, index, s))
         held[(seat.harness, seat.account)] = replace(seat, sessions=seat.sessions + 1)
         allocation[lane][seat.harness] += 1
         placements[lane].append({"index": index, "harness": seat.harness, "account": seat.account})
@@ -235,7 +240,7 @@ def calculate(
     pool = [row for row in open_rows if row.kind != API]
     placeable = {h: sum(free_seats(row) for row in pool if row.harness == h) for h in ("claude", "codex")}
     allocation, placements = _allocate(config, effective, limits, offered(observations, warned), requirements, accounts)
-    restricted = sorted({row.state.lower() for row in observations if row.state != "OPEN"})
+    restricted = sorted({row.state.lower() for row in observations if row.state != "OPEN" and row.kind != API})
     reason = "accounts have quota" if not restricted else "accounts are " + ", ".join(restricted)
     reason += f"; Claude has {placeable['claude']} free seats and Codex has {placeable['codex']} free seats"
     reason += "".join(f", {harness} {name} {warning(window)}" for (harness, name), window in warned.items())
