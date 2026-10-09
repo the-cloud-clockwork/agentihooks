@@ -146,11 +146,11 @@ def test_replacement_slice_uses_the_destination_link_without_a_plan_reference():
     assert task(state)["plan_url"] == url
 
 
-def test_moving_phase_discards_explicit_lines_without_a_replacement_slice():
-    state, rejected = update(phase="p2", plan_lines="8-9")
-    assert rejected == []
-    assert task(state).get("plan_lines", "") == ""
-    assert task(state).get("plan_slice", "") == ""
+def test_phase_move_cannot_supply_its_own_plan_lines():
+    before = task(core.sync(SLUG)[0]).copy()
+    with pytest.raises(ValueError, match="task_update may set only"):
+        update(phase="p2", plan_lines="8-9")
+    assert task(core.sync(SLUG)[0]) == before
 
 
 def test_an_invalid_replacement_slice_keeps_the_original_task():
