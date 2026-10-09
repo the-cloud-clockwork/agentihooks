@@ -63,3 +63,18 @@ def test_scan_and_analysis_still_use_the_scan_token():
     for name in ("SonarQube Scan", "SonarQube Quality Gate", "Hold the Delivery L2 conditions"):
         step = next(s for s in steps if s.get("name") == name)
         assert step["env"]["SONAR_TOKEN"] == "${{ secrets.SONAR_TOKEN }}"
+
+
+def test_missing_reader_secret_cannot_pass_as_an_anonymous_public_project_read(tmp_path):
+    workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
+    step = next(s for s in workflow["jobs"]["sonar"]["steps"] if s.get("name") == "Hold the Delivery L2 binding")
+    curl = tmp_path / "curl"
+    curl.write_text('#!/usr/bin/env bash\nprintf \'%s\' \'{"qualityGate":{"name":"Delivery L2"}}\'\n')
+    curl.chmod(0o755)
+    result = subprocess.run(
+        ["bash", "-eo", "pipefail", "-c", step["run"]],
+        env=dict(os.environ, PATH=f"{tmp_path}:{os.environ['PATH']}", SONAR_READ_TOKEN=""),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0, result.stdout + result.stderr

@@ -507,6 +507,7 @@ jobs:
           SONAR_READ_TOKEN: ${{ secrets.SONAR_READ_TOKEN }}
         run: |
           set -o pipefail
+          : "${SONAR_READ_TOKEN:?SONAR_READ_TOKEN is not set}"
           bound=$(curl --fail --silent --show-error --max-time 10 \
             -H "Authorization: Bearer $SONAR_READ_TOKEN" \
             "http://127.0.0.1:9000/api/qualitygates/get_by_project?project=agentihooks" | jq -er .qualityGate.name)
