@@ -60,7 +60,7 @@ MASTER_WAITING = f"{PREFIX}:master-waiting"
 MASTER_WAIT_MS = 10 * 60 * 1000
 SPAWN_HOLD = "spawn-hold"
 HOST_SPENDS = f"{PREFIX}:host-spends"
-HOST_SPENDS_KEPT_MS = 60 * 60 * 1000
+HOST_SPENDS_KEPT = 1000
 HOST_START_LAG_MS = 30 * 1000
 # Swarms tick in threads; two placing from one live session count overfill an account.
 PLACING = threading.Lock()
@@ -668,8 +668,7 @@ def _host_full(slug, store, now_ms):
     host = capacity.read(store, slug).get("host") or {}
     if host.get("room") is None:
         return ""
-    since = host.get("granted_at", 0) - HOST_START_LAG_MS
-    recent = store.redis.zcount(HOST_SPENDS, since, "+inf")
+    recent = store.redis.zcount(HOST_SPENDS, host["granted_at"] - HOST_START_LAG_MS, now_ms)
     if recent < host["room"]:
         return ""
     return f"host {host['limit']} room {host['room']}, {recent} spawned since it was granted: {host['reason']}"
@@ -677,7 +676,7 @@ def _host_full(slug, store, now_ms):
 
 def _spend_host(store, name, now_ms):
     store.redis.zadd(HOST_SPENDS, {name: now_ms})
-    store.redis.zremrangebyscore(HOST_SPENDS, "-inf", now_ms - HOST_SPENDS_KEPT_MS)
+    store.redis.zremrangebyrank(HOST_SPENDS, 0, -HOST_SPENDS_KEPT - 1)
 
 
 def _hold(slug, store, text):

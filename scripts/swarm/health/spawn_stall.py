@@ -45,7 +45,7 @@ def eligible(store, slug: str, ledger, at: int, runtime) -> bool:
     else:
         inputs = capacity.live_inputs(slug, store, ledger, dict(os.environ), at)
         host = capacity.host_room(config, inputs)
-        config, _ = capacity.autoscaled(config, inputs, host)
+        config, _ = capacity.autoscaled(config, inputs)
         decision = capacity.calculate(
             config, inputs.observations, inputs.agents, inputs.demand, requirements, warned=inputs.warned
         )

@@ -119,12 +119,20 @@ def test_the_master_seat_waits_for_host_room(store):
     assert store.redis.zrange(tick.HOST_SPENDS, 0, -1, withscores=True) == [("master@a1b2c3-0001", 61_000.0)]
 
 
-def test_old_spawns_are_pruned_after_an_hour(store):
-    tick._spend_host(store, "old", 1_000)
-    tick._spend_host(store, "kept", 2_000)
-    tick._spend_host(store, "new", 1_000 + tick.HOST_SPENDS_KEPT_MS)
-    assert store.redis.zrange(tick.HOST_SPENDS, 0, -1) == ["kept", "new"]
-    assert tick.HOST_SPENDS_KEPT_MS == 3_600_000
+def test_only_the_newest_thousand_spawns_are_kept(store):
+    for n in range(tick.HOST_SPENDS_KEPT + 1):
+        tick._spend_host(store, f"agent-{n}", 1_000 + n)
+    kept = store.redis.zrange(tick.HOST_SPENDS, 0, -1)
+    assert len(kept) == tick.HOST_SPENDS_KEPT == 1000
+    assert (kept[0], kept[-1]) == ("agent-1", "agent-1000")
+
+
+def test_a_spawn_at_the_tick_time_counts_and_a_later_one_does_not(store):
+    _decide(store, 1, granted_at=50_000)
+    tick._spend_host(store, "later", 60_001)
+    assert tick._host_full("sw", store, 60_000) == ""
+    tick._spend_host(store, "now", 60_000)
+    assert tick._host_full("sw", store, 60_000) == f"host memory room 1, 1 spawned since it was granted: {MEMORY}"
 
 
 def test_the_quota_seat_check_runs_before_the_host_gate(store):

@@ -85,7 +85,7 @@ def _mem_available_mb(proc: Path) -> int:
     for line in (proc / "meminfo").read_text().splitlines():
         if line.startswith("MemAvailable:"):
             return int(line.split()[1]) // 1024
-    raise ValueError("meminfo has no MemAvailable line")
+    raise ValueError
 
 
 def read_host(proc: Path = Path("/proc")) -> HostSample | None:

@@ -1183,6 +1183,18 @@ def test_a_manual_swarm_with_an_unreadable_host_stores_host_unknown(tmp_path, mo
     }
 
 
+def test_an_auto_swarm_reads_the_host_once_and_autoscales_on_the_stored_room(tmp_path, monkeypatch):
+    readings = [_roomy_host(), None]
+    rt = _scaling_runtime(tmp_path, monkeypatch, [account(cap=6)])
+    rt.host = lambda: readings.pop(0)
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="auto")
+    decision = rt.quota_capacity(config, [], 100, {"eng": 1, "ci": 0, "plan": 0})
+    assert readings == [None]
+    stored = {key: value for key, value in decision["host"].items() if key != "granted_at"}
+    assert decision["autoscale"]["host"] == stored
+    assert stored["limit"] == "memory"
+
+
 def test_the_stored_top_level_host_room_wins_over_the_autoscale_copy():
     from scripts.swarm.host_budget import HostSample
 
