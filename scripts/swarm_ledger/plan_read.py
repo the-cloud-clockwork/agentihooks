@@ -8,6 +8,7 @@ The task defaults to AGENTIHOOKS_SWARM_TASK and the ledger to AGENTIHOOKS_SWARM.
 
 import argparse
 import os
+import re
 import sys
 from importlib import import_module
 
@@ -15,6 +16,8 @@ from scripts.swarm_ledger import HERE
 
 COMMAND = "agentihooks plan read"
 MARGIN = 10
+LINK = re.compile(r"\]\(#([\w.-]+)\)")
+ANCHOR = re.compile(r'<a id="[\w.-]+"></a>')
 
 
 def _ledger(name: str):
@@ -40,6 +43,27 @@ def exact(doc: dict, ref: dict, lines: str) -> str:
 def numbered(text: str, lines: str) -> list[tuple[int, str]]:
     start = _ledger("plan_ranges").bounds(lines)[0]
     return [(number, row.strip()) for number, row in enumerate(text.splitlines(), start) if row.strip()]
+
+
+def section(source: str, anchor: str) -> str:
+    entries = _ledger("plan_ranges").sections(source)
+    tag = f'<a id="{anchor}"></a>'
+    after = next((i for i, (_, depth, line) in enumerate(entries) if not depth and line.strip() == tag), len(entries))
+    heading = next((i for i in range(after + 1, len(entries)) if entries[i][1]), None)
+    if heading is None:
+        return ""
+    first, depth, _ = entries[heading]
+    stop = next((n for n, d, _ in entries[heading + 1 :] if 0 < d <= depth), None)
+    rows = source.splitlines()[first - 1 : stop and stop - 1]
+    while rows and (not rows[-1].strip() or ANCHOR.fullmatch(rows[-1].strip())):
+        rows.pop()
+    return "".join(f"{row}\n" for row in rows)
+
+
+def linked(source: str, lines: str) -> str:
+    start, end = _ledger("plan_ranges").bounds(lines)
+    anchors = dict.fromkeys(LINK.findall("\n".join(source.splitlines()[start - 1 : end])))
+    return "".join(f"\n{text}" for anchor in anchors if (text := section(source, anchor)))
 
 
 def pointer(task: dict) -> str:
@@ -76,7 +100,9 @@ def read(doc: dict, slug: str, task_id: str | None, phase_id: str | None) -> str
         ref = {"artifact": url, "lines": task["plan_lines"]}
     if not ref:
         raise ValueError(f"phase {phase_id} has no plan range")
-    return chunk(_ledger("plan_ranges").stored_text(ref, doc), task.get("plan_lines") or ref["lines"])
+    source = _ledger("plan_ranges").stored_text(ref, doc)
+    lines = task.get("plan_lines") or ref["lines"]
+    return chunk(source, lines) + (linked(source, lines) if task else "")
 
 
 def main(argv=None, environ=None) -> int:
