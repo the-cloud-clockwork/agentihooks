@@ -17,7 +17,7 @@ CONTENT = {
     "phases": [{"title": "Build"}, {"title": "Ship", "depends_on": ["p1"]}],
     "tasks": [
         {"title": "first", "phase": "p1", "lane": "eng"},
-        {"title": "second", "phase": "p1", "lane": "eng", "depends_on": ["t1"]},
+        {"title": "second", "phase": "p1", "lane": "eng"},
     ],
 }
 STATE = {
@@ -57,6 +57,7 @@ def repo(tmp_path, monkeypatch):
         monkeypatch.setitem(core.EXTENSION_OPS, name, ledger_tasks)
     found = store.SQLiteLedgerRepository(tmp_path / store.DATABASE)
     assert found.create(SLUG, CONTENT) is True
+    assert run(found, "task_update", item="tasks/t2", fields={"depends_on": ["t1"]})[1] == []
     return found
 
 
