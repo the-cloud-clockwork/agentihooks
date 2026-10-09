@@ -9,7 +9,7 @@ from scripts.gates.subagents import SubagentBudget
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm.ledger_events import PullRequest
 
-ME = Who(name="ci@1-1", swarm="demo", lane="ci", task="t1")
+ME = Who(name="ci@323133-0001", swarm="demo", lane="ci", task="t1")
 URL = "https://github.com/o/r/pull/7"
 
 
