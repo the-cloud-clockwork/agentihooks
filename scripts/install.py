@@ -5773,10 +5773,10 @@ def _setting_pair(pair: str) -> tuple[str, object]:
         raise ValueError(f"expected KEY=VALUE, got {pair}")
     if key not in VALIDATORS:
         raise ValueError(f"unknown routing setting {key}")
-    if text.lower() in ("none", "null", ""):
+    if text == "none":
         return key, None
     try:
-        value = json.loads(text)
+        value = text if key.startswith("master-") else json.loads(text)
     except json.JSONDecodeError:
         value = text
     if not VALIDATORS[key](value):
@@ -5795,6 +5795,7 @@ def cmd_balance_set(pairs: list[str], now: float | None = None) -> int:
     store = _routing_settings()
     actor = os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
     at = time.time() if now is None else now
+    print(f"store={_store_label(store)}")
     for key, value in changes:
         before = store.get(key)
         store.set(key, value, actor, at)
@@ -5805,10 +5806,55 @@ def cmd_balance_set(pairs: list[str], now: float | None = None) -> int:
 def cmd_balance_settings() -> int:
     from scripts.routing.settings import VALIDATORS
 
-    values = _routing_settings().all()
+    store = _routing_settings()
+    values = store.all()
+    print(f"store={_store_label(store)}")
     for key in VALIDATORS:
         print(f"{key}={_setting_text(values.get(key))}")
     return 0
+
+
+def _store_label(store: object) -> str:
+    from scripts.routing.settings import FileSettings
+
+    return f"file {store.path}" if isinstance(store, FileSettings) else "redis"
+
+
+def _add_balance_parser(sub: argparse._SubParsersAction) -> None:
+    balance_p = sub.add_parser("balance", help="Probe and rank Claude OAuth accounts without launching workload")
+    balance_p.add_argument("--dry-run", action="store_true", help="Report routing state without launching Claude")
+    balance_p.add_argument("--fable", action="store_true", help="Include the separate Fable weekly quota")
+    balance_p.add_argument(
+        "--show-account-metadata",
+        metavar="SLUG",
+        default="",
+        help="Print every JSON event returned by a fresh probe for AH_CC_TOKEN_<SLUG>",
+    )
+    balance_p.add_argument("--refresh", action="store_true", help="Ignore the 60-second quota cache")
+    balance_p.add_argument(
+        "--current",
+        action="store_true",
+        help="Name the account this Claude session runs on; other accounts come from the quota cache",
+    )
+    balance_p.add_argument("--timeout", type=float, default=60, help="Per-account probe timeout in seconds")
+    balance_sub = balance_p.add_subparsers(dest="balance_command")
+    balance_set_p = balance_sub.add_parser("set", help="Write routing settings: set KEY=VALUE ... (VALUE none clears)")
+    balance_set_p.add_argument("pairs", nargs="+", metavar="KEY=VALUE")
+    balance_sub.add_parser("settings", help="List every routing setting key with its value")
+
+
+def _run_balance(args: argparse.Namespace) -> int:
+    if args.balance_command == "set":
+        return cmd_balance_set(args.pairs)
+    if args.balance_command == "settings":
+        return cmd_balance_settings()
+    return cmd_balance(
+        include_fable=args.fable,
+        refresh=args.refresh,
+        timeout=args.timeout,
+        show_account_metadata=args.show_account_metadata,
+        current=args.current,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -6688,26 +6734,7 @@ def main() -> None:
     sub.add_parser("deps", help="Check or install the bundle's dev-environment dependencies: check|ensure")
     sub.add_parser("overlay", help="Overlay profiles in the linked bundle: new NAME --wears ROLES | check NAME")
 
-    balance_p = sub.add_parser("balance", help="Probe and rank Claude OAuth accounts without launching workload")
-    balance_p.add_argument("--dry-run", action="store_true", help="Report routing state without launching Claude")
-    balance_p.add_argument("--fable", action="store_true", help="Include the separate Fable weekly quota")
-    balance_p.add_argument(
-        "--show-account-metadata",
-        metavar="SLUG",
-        default="",
-        help="Print every JSON event returned by a fresh probe for AH_CC_TOKEN_<SLUG>",
-    )
-    balance_p.add_argument("--refresh", action="store_true", help="Ignore the 60-second quota cache")
-    balance_p.add_argument(
-        "--current",
-        action="store_true",
-        help="Name the account this Claude session runs on; other accounts come from the quota cache",
-    )
-    balance_p.add_argument("--timeout", type=float, default=60, help="Per-account probe timeout in seconds")
-    balance_sub = balance_p.add_subparsers(dest="balance_command")
-    balance_set_p = balance_sub.add_parser("set", help="Write routing settings: set KEY=VALUE ... (VALUE none clears)")
-    balance_set_p.add_argument("pairs", nargs="+", metavar="KEY=VALUE")
-    balance_sub.add_parser("settings", help="List every routing setting key with its value")
+    _add_balance_parser(sub)
 
     ign_p = sub.add_parser("ignore", help="Create a .claudeignore in the current directory")
     ign_p.add_argument(
@@ -7026,20 +7053,8 @@ notes:
         except ValueError:
             extra = []
         cmd_claude(extra)
-    elif args.command == "balance" and args.balance_command == "set":
-        sys.exit(cmd_balance_set(args.pairs))
-    elif args.command == "balance" and args.balance_command == "settings":
-        sys.exit(cmd_balance_settings())
     elif args.command == "balance":
-        sys.exit(
-            cmd_balance(
-                include_fable=args.fable,
-                refresh=args.refresh,
-                timeout=args.timeout,
-                show_account_metadata=args.show_account_metadata,
-                current=args.current,
-            )
-        )
+        sys.exit(_run_balance(args))
     elif args.command == "lint-claude":
         sys.path.insert(0, str(AGENTIHOOKS_ROOT))
         from scripts.claude_linter import format_report, lint_report
