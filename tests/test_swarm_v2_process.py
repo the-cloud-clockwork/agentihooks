@@ -72,7 +72,6 @@ def bounded(what, seconds=30):
         yield
     finally:
         finished.append(True)
-        faulthandler.cancel_dump_traceback_later()
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous)
         left = children() - before
@@ -80,6 +79,7 @@ def bounded(what, seconds=30):
             with suppress(ProcessLookupError, ChildProcessError):
                 os.kill(pid, signal.SIGKILL)
                 os.waitpid(pid, 0)
+        faulthandler.cancel_dump_traceback_later()
     assert not left, f"{what} left child processes running"
 
 
@@ -269,10 +269,16 @@ def test_a_store_call_blocked_on_its_server_fails_within_its_bound():
 
 
 def test_the_bound_refuses_a_child_process_that_outlives_the_test():
-    with pytest.raises(AssertionError, match="a sleeper left child processes running"):
-        with bounded("a sleeper"):
-            child = subprocess.Popen(["sleep", "30"])
-    assert child.pid not in processes()
+    child = None
+    try:
+        with pytest.raises(AssertionError, match="a sleeper left child processes running"):
+            with bounded("a sleeper"):
+                child = subprocess.Popen(["sleep", "30"])
+        assert child.pid not in processes()
+    finally:
+        if child is not None:
+            child.kill()
+            child.wait()
 
 
 def test_the_routed_runtime_reports_why_the_router_refused(tmp_path, monkeypatch):
