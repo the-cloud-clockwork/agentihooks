@@ -128,6 +128,15 @@ def worker_count(requested: int) -> int:
     return requested if os.environ.get("CI") else min(requested, 2)
 
 
+def shard_collector(collect, shard: tuple[int, int]):
+    def collect_shard_mutants(*, mutant_names):
+        mutants, by_path = collect(mutant_names=mutant_names)
+        owned = shard_names([key for _, key, _ in mutants], shard)
+        return [mutant for mutant in mutants if mutant[1] in owned], by_path
+
+    return collect_shard_mutants
+
+
 def run_selected(selection: Path, shard: tuple[int, int]) -> None:
     from mutmut import __main__ as runner
 
@@ -212,16 +221,9 @@ def run_selected(selection: Path, shard: tuple[int, int]) -> None:
                 return 1
         return run_tests(self, mutant_name=mutant_name, tests=tests)
 
-    collect_mutants = runner.collect_source_file_mutation_data
-
-    def collect_shard_mutants(*, mutant_names):
-        mutants, by_path = collect_mutants(mutant_names=mutant_names)
-        owned = shard_names([key for _, key, _ in mutants], shard)
-        return [mutant for mutant in mutants if mutant[1] in owned], by_path
-
     runner.collect_or_load_stats = collect_selected_stats
     # Every shard generates the same mutants, so names and clearance keys match an unsharded run; each runs its share.
-    runner.collect_source_file_mutation_data = collect_shard_mutants
+    runner.collect_source_file_mutation_data = shard_collector(runner.collect_source_file_mutation_data, shard)
     # The forced fail control passes no tests and would otherwise rerun every selected module.
     runner.PytestRunner.run_tests = run_related_tests
     # mutmut 3.6.0 writes one copy of a whole function per selected mutant.
