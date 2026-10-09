@@ -19,11 +19,6 @@ def stats_key(head: str, selected: dict[str, tuple[set[int], list[str]]]) -> str
     return hashlib.sha256(json.dumps({"head": head, "files": files}, sort_keys=True).encode()).hexdigest()
 
 
-def stats_part(buckets: list[list[str]], part: tuple[int, int]) -> list[list[str]]:
-    index, total = part
-    return buckets[index::total]
-
-
 def write_part(path: Path, key: str, part: tuple[int, int], results: list[dict]) -> None:
     index, total = part
     path.parent.mkdir(parents=True, exist_ok=True)

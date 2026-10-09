@@ -319,7 +319,6 @@ def test_selection_collects_one_stats_part_or_reuses_the_shared_stats(tmp_path, 
     from collections import defaultdict
 
     from scripts.ci_mutation.selection import run_selected
-    from scripts.ci_mutation.stats import load_parts
 
     monkeypatch.setenv("CI", "true")
     monkeypatch.chdir(tmp_path)
@@ -328,7 +327,8 @@ def test_selection_collects_one_stats_part_or_reuses_the_shared_stats(tmp_path, 
     selection.write_text(json.dumps({"scripts/sample.py": {"lines": [2], "tests": ["tests/test_sample.py"]}}))
     data = SimpleNamespace(exit_code_by_key={} if mode == "empty" else {"m": None}, load=lambda: None)
     config = SimpleNamespace(
-        source_paths=[Path("scripts/")], pytest_add_cli_args_test_selection=["tests/test_sample.py"]
+        source_paths=[Path("scripts/")],
+        pytest_add_cli_args_test_selection=["tests/test_c.py", "tests/test_a.py", "tests/test_b.py"],
     )
     engine = SimpleNamespace(tests_by_mangled_function_name=defaultdict(set), duration_by_test={}, stats_time=None)
     result = {
@@ -349,8 +349,8 @@ def test_selection_collects_one_stats_part_or_reuses_the_shared_stats(tmp_path, 
         return [result]
 
     def bucket_split(root, files, count):
-        assert (root, files) == (tmp_path, ["tests/test_sample.py"])
-        return [[f"tests/test_{n}.py"] for n in range(count)]
+        assert (root, files, count) == (tmp_path, ["tests/test_b.py"], 2)
+        return [files]
 
     class PytestRunner:
         def run_tests(self, *, mutant_name, tests):
@@ -381,8 +381,13 @@ def test_selection_collects_one_stats_part_or_reuses_the_shared_stats(tmp_path, 
             runner.collect_or_load_stats(object())
         assert done.value.code == 0
         assert config.source_paths == [Path("scripts/")]
-        assert seen == ([] if mode == "empty" else [([["tests/test_1.py"], ["tests/test_4.py"]], tmp_path)])
-        assert load_parts(part.parent, "key") == ([] if mode == "empty" else [result], "")
+        assert seen == ([] if mode == "empty" else [([["tests/test_b.py"]], tmp_path)])
+        assert json.loads(part.read_text()) == {
+            "key": "key",
+            "part": 1,
+            "parts": 3,
+            "results": [] if mode == "empty" else [result],
+        }
         assert saved == []
         raise SystemExit(7)
 
@@ -491,6 +496,27 @@ def test_stats_shards_balance_by_duration_and_keep_xdist_groups_together(tmp_pat
         ["tests/test_a.py", "tests/test_e.py"],
         ["tests/test_c.py", "tests/test_f.py"],
     ]
+
+
+@pytest.mark.parametrize("total", [1, 2, 3, 6])
+def test_stats_parts_split_files_by_duration_across_runners_even_inside_an_xdist_group(tmp_path, total):
+    from scripts.ci_mutation.selection import part_files
+
+    (tmp_path / "tests").mkdir()
+    files = [f"tests/test_{name}.py" for name in "abcdef"]
+    for path in files:
+        (tmp_path / path).write_text("import pytest\n\npytestmark = pytest.mark.xdist_group('fakeredis')\n")
+    seconds = {"a": 9, "b": 7, "c": 5, "d": 3, "e": 2, "f": 1}
+    (tmp_path / ".test_durations").write_text(
+        json.dumps({f"tests/test_{name}.py::t": value for name, value in seconds.items()} | {"tests/x.py::t": 50})
+    )
+    parts = [part_files(tmp_path, list(reversed(files)), (index, total)) for index in range(total)]
+    assert sorted(path for part in parts for path in part) == files
+    assert all(part == sorted(part) for part in parts)
+    loads = [sum(seconds[path[11]] for path in part) for part in parts]
+    expected = {1: [27], 2: [14, 13], 3: [9, 9, 9], 6: [9, 7, 5, 3, 2, 1]}[total]
+    assert loads == expected
+    assert part_files(tmp_path, files[:1], (2, 3)) == []
 
 
 def test_shard_stats_run_in_stats_mode_with_their_own_basetemp_and_record_everything(tmp_path, monkeypatch):

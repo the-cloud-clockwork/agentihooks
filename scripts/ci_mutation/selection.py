@@ -12,7 +12,7 @@ from mutmut.utils.format_utils import get_mutant_name
 
 from scripts.ci_mutation.mutant_shards import shard_names
 from scripts.ci_mutation.report import mutation_lines
-from scripts.ci_mutation.stats import stats_part, write_part
+from scripts.ci_mutation.stats import write_part
 
 GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
 
@@ -55,13 +55,28 @@ def keep_selected_tests(stats: dict[str, set[str]], tests_by_prefix: dict[str, s
     return kept
 
 
-def stats_shards(root: Path, files: list[str], count: int) -> list[list[str]]:
+def file_seconds(root: Path, files: list[str]) -> dict[str, float]:
     durations = root / ".test_durations"
     durations = json.loads(durations.read_text()) if durations.exists() else {}
     seconds = dict.fromkeys(files, 0.01)
     for nodeid, duration in durations.items():
         if (path := nodeid.partition("::")[0]) in seconds:
             seconds[path] += duration
+    return seconds
+
+
+def part_files(root: Path, files: list[str], part: tuple[int, int]) -> list[str]:
+    # Each part runs on its own runner, so an xdist group may span parts; stats_shards keeps it whole within one.
+    index, total = part
+    seconds = file_seconds(root, files)
+    parts = [[] for _ in range(total)]
+    for path in sorted(files, key=lambda path: (-seconds[path], path)):
+        min(parts, key=lambda chosen: sum(seconds[path] for path in chosen)).append(path)
+    return sorted(parts[index])
+
+
+def stats_shards(root: Path, files: list[str], count: int) -> list[list[str]]:
+    seconds = file_seconds(root, files)
     # Files that share an xdist group never run concurrently in CI, so they share a shard here.
     units = []
     for path in files:
@@ -167,13 +182,9 @@ def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stat
     try:
         if mode == "collect":
             output, key, index, total = Path(stats[0]), stats[1], int(stats[2]), int(stats[3])
-            buckets = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, workers * total)
-            write_part(
-                output,
-                key,
-                (index, total),
-                run_stats_buckets(runner, test_runner, stats_part(buckets, (index, total)), Path.cwd()),
-            )
+            files = part_files(Path.cwd(), config.pytest_add_cli_args_test_selection, (index, total))
+            buckets = stats_shards(Path.cwd(), files, workers) if files else []
+            write_part(output, key, (index, total), run_stats_buckets(runner, test_runner, buckets, Path.cwd()))
             raise SystemExit(0)
         shards = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, workers)
         collect_parallel_stats(runner, test_runner, shards, Path.cwd())
