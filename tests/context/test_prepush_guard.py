@@ -119,6 +119,45 @@ def test_push_from_another_directory_resolves_the_repository(repo, tmp_path, mon
         check_prepush(_bash(f"git -C {tmp_path} -C repo push", elsewhere))
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git status && cd {worktree} && git push",
+        "cd {worktree}\ngit push -u origin HEAD",
+        "cd ../worktree && git push",
+        "cd .. && git -C worktree push origin HEAD",
+        "cd /nowhere-at-all; cd {worktree} && git push",
+    ],
+)
+def test_the_push_is_graded_in_the_folder_the_command_changes_into(repo, tmp_path, command):
+    worktree = _init(tmp_path / "worktree")
+    _stamp(worktree)
+
+    check_prepush(_bash(command.format(worktree=worktree), repo))
+
+    _stamp(repo)
+    _git(worktree, "commit", "-q", "--allow-empty", "-m", "more")
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(_bash(command.format(worktree=worktree), repo))
+    assert str(blocked.value) == _message(worktree)
+
+
+@pytest.mark.parametrize("workdir", ["{worktree}", "../worktree"])
+def test_the_push_is_graded_in_the_shell_tool_workdir(repo, tmp_path, workdir):
+    worktree = _init(tmp_path / "worktree")
+    _stamp(worktree)
+    payload = _bash("git push origin HEAD", repo)
+    payload["tool_input"]["workdir"] = workdir.format(worktree=worktree)
+
+    check_prepush(payload)
+
+    _stamp(repo)
+    _git(worktree, "commit", "-q", "--allow-empty", "-m", "more")
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == _message(worktree)
+
+
 def test_a_later_push_in_the_same_command_is_checked(repo, tmp_path):
     other = _init(tmp_path / "other", guarded=False)
 
