@@ -81,9 +81,9 @@ research) is an `eng` task with a kind and a proof contract: read
 [work-beyond-code.md](work-beyond-code.md) for the kind and the contract.
 
 Each task gets its own chunk of the plan. In the plan file, put each manual
-phase under a heading with its exact title and one unique
-`<!-- slice: <id> -->` anchor naming the task immediately before each task
-section; the section ends at the next anchor or heading of the same or higher
+phase under a heading with its exact title, each task section under a heading
+one level deeper, and one unique `<!-- slice: <id> -->` anchor naming the task
+immediately before each task heading; the section ends at the next anchor or heading of the same or higher
 level. Publish it for the manual phases before adding their tasks:
 
 ```bash
@@ -111,8 +111,9 @@ from the parked branch, runs `swarm restack` and finishes it. Territory only
 orders claims: tasks clear of running work go first. Add the tasks a task waits
 on first; an unknown id is refused.
 
-Done when every manual phase has at least one task, every automatic phase has
-no tasks, every task names its done condition, and every task beyond code
+Done when every manual phase shows its published plan and has at least one
+task, every automatic phase has no tasks, every task carries its plan slice and
+names its done condition, and every task beyond code
 carries its kind with `--must`, `--check` and `--judge`.
 
 ## 4. Create and start

@@ -37,8 +37,10 @@ recaps, the learned notes, the ledger summary and the standing duties. Pass
 `--as <your master name>` on every `agentihooks swarm` and `agentihooks ledger`
 command it names.
 
-Every plan you publish carries one unique `<!-- slice: <id> -->` anchor naming
-each task immediately before its section. Publish it with
+Every plan you publish puts each phase under a heading with its exact title,
+each task under a heading one level deeper, and one unique
+`<!-- slice: <id> -->` anchor naming the task immediately before its heading.
+Publish it with
 `agentihooks ledger --slug <slug> --as <name> publish-plan <plan-file> --phase <phase-ids>`
 and add every task built from it with `--plan-slice <id>`, so its agent reads
 only its chunk.

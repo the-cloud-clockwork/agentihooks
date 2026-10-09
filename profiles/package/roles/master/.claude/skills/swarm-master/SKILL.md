@@ -63,21 +63,20 @@ all arrive as inbox items. `agentihooks msg inbox` lists them,
 ## Plans you publish
 
 Every plan you write for the swarm gives each task its own chunk, so the agent
-reads only its slice and the intent classifier judges the work against it.
+reads only its slice and the tick's intent verdict judges the work against it.
 
-1. Put each phase under a heading with its exact title, and one unique
-   `<!-- slice: <id> -->` anchor naming the task immediately before each task
-   section. The section ends at the next anchor or heading of the same or
-   higher level.
+1. Write the plan in your scratchpad task folder. Put each phase under a
+   heading with its exact title, each task section under a heading one level
+   deeper, and one unique `<!-- slice: <id> -->` anchor immediately before each
+   task heading. The section ends at the next slice anchor or heading of the
+   same or higher level. Done when every task has an anchor.
 2. Publish it:
    `agentihooks ledger --slug <slug> --as <name> publish-plan <plan-file> --phase <phase-ids>`.
+   Done when each phase shows its plan link.
 3. Add every task built from it with its anchor; the ledger computes the plan
    lines, never type them:
    `agentihooks ledger --slug <slug> --as <name> task add <id> "<title>" --lane eng --phase <phase> --plan-slice <id> --kind code --description "<seams and done when>"`.
-
-A task added later from a follow up has no section in the plan: it takes no
-`--plan-slice`, and its description is the whole spec. Done when
-`agentihooks plan read --task <id>` prints each planned task's chunk.
+   Done when plan read prints the chunk for each planned task.
 
 ## Planner slices
 
