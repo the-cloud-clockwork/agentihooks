@@ -313,3 +313,66 @@ def test_the_protected_script_runs_in_isolated_cli_mode(reuse_repo, tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert "reused=false" in result.stdout
     assert json.loads((tmp_path / "cli.json").read_text())["tree"] == git(root, "rev-parse", f"{head}^{{tree}}")
+
+
+def test_reused_outputs_append_to_the_github_action_output_file(full_source, tmp_path):
+    root, base, _, queue, env, _, _ = full_source
+    target = tmp_path / "action-output"
+    target.write_text("existing=kept\n")
+    result = invoke(root, base, queue, "merge_group", tmp_path / "outputs.json", {**env, "GITHUB_OUTPUT": str(target)})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert target.read_text() == f"existing=kept\nreused=true\nrun=7\nattempt=1\ngrader={base}\nrecorded=true\n"
+
+
+def test_an_uncached_commit_is_fetched_before_comparing_its_tree(full_source, tmp_path):
+    root, base, head, _, env, _, _ = full_source
+    remote = tmp_path / "remote.git"
+    remote.mkdir()
+    git(remote, "init", "--bare")
+    git(root, "remote", "add", "origin", str(remote))
+    git(root, "push", "origin", "dev")
+    tree = git(root, "rev-parse", f"{head}^{{tree}}")
+    unseen = git(remote, "commit-tree", tree, "-p", head, input="same remote tree\n")
+    git(remote, "update-ref", "refs/heads/new", unseen)
+    assert subprocess.run(["git", "-C", str(root), "cat-file", "-e", unseen], capture_output=True).returncode != 0
+    result = invoke(root, base, unseen, "merge_group", tmp_path / "fetched.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=true" in result.stdout
+    assert git(root, "rev-parse", unseen) == unseen
+
+
+def test_source_artifacts_and_jobs_are_read_across_every_page(full_source, tmp_path):
+    root, base, _, queue, env, responses, _ = full_source
+    for suffix, key in [("artifacts", "artifacts"), ("attempts/1/jobs", "jobs")]:
+        first = f"repos/o/r/actions/runs/7/{suffix}?per_page=100&page=1"
+        second = f"repos/o/r/actions/runs/7/{suffix}?per_page=100&page=2"
+        body = responses[first]
+        values = body[key]
+        responses[first] = {key: values[:1], "total_count": len(values)}
+        responses[second] = {key: values[1:], "total_count": len(values)}
+    Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
+    result = invoke(root, base, queue, "merge_group", tmp_path / "pages.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=true" in result.stdout
+
+
+@pytest.mark.parametrize("option", ["--base", "--head", "--event", "--repository", "--run", "--attempt", "--record"])
+def test_missing_required_command_input_is_rejected(option, reuse_repo, tmp_path):
+    from scripts import ci_reuse
+
+    root, base, head, _ = reuse_repo
+    pairs = {
+        "--base": base,
+        "--head": head,
+        "--event": "pull_request",
+        "--repository": "o/r",
+        "--run": "7",
+        "--attempt": "1",
+        "--record": str(tmp_path / "record.json"),
+    }
+    args = [part for key, value in pairs.items() if key != option for part in (key, value)]
+    with pytest.MonkeyPatch.context() as patch:
+        patch.chdir(root)
+        with pytest.raises(SystemExit) as caught:
+            ci_reuse.main(args)
+    assert caught.value.code == 2
