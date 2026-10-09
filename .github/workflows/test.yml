@@ -38,7 +38,33 @@ jobs:
   brain-smoke:
     uses: ./.github/workflows/brain-smoke.yml
 
+  kind-due:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      due: ${{ steps.paths.outputs.due }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide from the base branch rule whether the chart proof is due
+        id: paths
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        run: |
+          set -o pipefail
+          rule=deploy/helm/agentihooks-swarm/ci/kind-due.sh
+          if [[ -n $BASE ]] && git cat-file -e "$BASE:$rule"; then
+            git show "$BASE:$rule" | bash -s "$BASE" "$HEAD" >> "$GITHUB_OUTPUT"
+          else
+            echo due=true >> "$GITHUB_OUTPUT"
+          fi
+
   helm-kind:
+    needs: kind-due
+    if: ${{ needs.kind-due.outputs.due == 'true' }}
     uses: ./.github/workflows/helm-kind.yml
 
   wiring:
@@ -820,7 +846,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [durations, unit, shard-check, test-count, size, lint, sonar, mutation, swarm-image, worker-image, brain-smoke, helm-kind, wiring, semgrep, dependency-audit]
+    needs: [durations, unit, shard-check, test-count, size, lint, sonar, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, wiring, semgrep, dependency-audit]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -829,9 +855,10 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
           MUTATION: ${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}
+          KIND: ${{ needs.kind-due.outputs.due }}
         run: |
           echo "$NEEDS"
-          if ! jq -e --arg mutation "$MUTATION" 'all(to_entries[]; .value.result == "success" or (.key == "mutation" and .value.result == "skipped" and $mutation == "false"))' <<< "$NEEDS"; then
+          if ! jq -e --arg mutation "$MUTATION" --arg kind "${KIND:-}" 'all(to_entries[]; .value.result == "success" or (.key == "mutation" and .value.result == "skipped" and $mutation == "false") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false"))' <<< "$NEEDS"; then
             echo "::error::Every required gate must succeed."
             exit 1
           fi

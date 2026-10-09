@@ -32,6 +32,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "size",
             "dependency-audit",
             "durations",
+            "kind-due",
             "helm-kind",
         }
     )
@@ -155,6 +156,147 @@ def test_required_gate_is_red_unless_mutation_passed_or_was_not_due(mutation, ex
     assert (result.returncode == 0) == passes, result.stdout + result.stderr
     if result.returncode:
         assert "::error::" in result.stdout
+
+
+@pytest.mark.parametrize("due_job", ["success", "failure", "skipped", "cancelled"])
+@pytest.mark.parametrize("kind", ["success", "failure", "skipped", "cancelled"])
+@pytest.mark.parametrize("due", ["true", "false", ""])
+def test_required_gate_accepts_a_skipped_chart_proof_only_when_its_path_rule_said_not_due(due_job, kind, due):
+    jobs = _workflow()["jobs"]
+    gate = jobs["gate-required"]
+    step = gate["steps"][0]
+    assert {"kind-due", "helm-kind"} <= set(gate["needs"])
+    assert jobs["helm-kind"]["needs"] == "kind-due"
+    assert jobs["helm-kind"]["if"] == "${{ needs.kind-due.outputs.due == 'true' }}"
+    assert step["env"]["KIND"] == "${{ needs.kind-due.outputs.due }}"
+    needs = {"kind-due": {"result": due_job}, "helm-kind": {"result": kind}}
+    env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION="false", KIND=due)
+    result = subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
+    passes = due_job == "success" and (kind == "success" or (kind == "skipped" and due == "false"))
+    assert (result.returncode == 0) == passes, result.stdout + result.stderr
+
+
+def _git(repo, *args):
+    return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def _commit(repo, files):
+    for name, text in files.items():
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_text(text)
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "c")
+    return _git(repo, "rev-parse", "HEAD")
+
+
+RULE = "deploy/helm/agentihooks-swarm/ci/kind-due.sh"
+
+
+@pytest.fixture
+def kind_repo(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    base = _commit(repo, {RULE: (_ROOT / RULE).read_text(), "README.md": "a"})
+    return repo, base
+
+
+def _due_step(repo, base, head):
+    step = _workflow()["jobs"]["kind-due"]["steps"][-1]
+    output = repo.parent / "output"
+    output.write_text("")
+    env = dict(os.environ, BASE=base, HEAD=head, GITHUB_OUTPUT=str(output))
+    result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, capture_output=True, text=True)
+    return result, output.read_text()
+
+
+@pytest.mark.parametrize(
+    ("path", "due"),
+    [
+        ("deploy/helm/agentihooks-swarm/templates/controller.yaml", "true"),
+        ("deploy/helm/agentihooks-swarm/ci/kind-smoke.sh", "true"),
+        ("Dockerfile", "true"),
+        ("pyproject.toml", "true"),
+        (".github/workflows/helm-kind.yml", "true"),
+        ("scripts/swarm/lease.py", "true"),
+        ("scripts/swarm/tick.py", "true"),
+        ("scripts/swarm/store.py", "true"),
+        ("scripts/swarm_ledger/new_ledger.py", "true"),
+        ("hooks/hook_manager.py", "true"),
+        ("profiles/package/rules/x.md", "true"),
+        ("tests/test_x.py", "false"),
+        ("docs/x.md", "false"),
+        (".github/workflows/semgrep.yml", "false"),
+        ("deploy/helm/other/values.yaml", "false"),
+    ],
+)
+def test_chart_proof_is_due_only_when_chart_image_or_its_own_files_change(kind_repo, path, due):
+    repo, base = kind_repo
+    head = _commit(repo, {path: "changed"})
+    result, output = _due_step(repo, base, head)
+    assert result.returncode == 0, result.stderr
+    assert output == f"due={due}\n"
+
+
+def test_chart_proof_rule_covers_every_file_the_swarm_image_copies():
+    rule = (_ROOT / RULE).read_text()
+    listed = rule[rule.index("paths=(") : rule.index(")", rule.index("paths=("))].split()[1:]
+    sources = []
+    for line in (_ROOT / "Dockerfile").read_text().splitlines():
+        words = line.split()
+        if words[:1] == ["COPY"] and not any(w.startswith("--from") for w in words):
+            sources += words[1:-1]
+    assert sources
+    assert all(any(s == p or s.startswith(p) for p in listed) for s in sources), sources
+    assert {"Dockerfile", ".dockerignore", "deploy/helm/agentihooks-swarm/", ".github/workflows/helm-kind.yml"} <= set(
+        listed
+    )
+
+
+def test_chart_proof_rule_is_read_from_the_base_so_a_head_cannot_switch_it_off(kind_repo):
+    repo, base = kind_repo
+    head = _commit(repo, {RULE: "#!/usr/bin/env bash\necho due=false\n", "Dockerfile": "x"})
+    result, output = _due_step(repo, base, head)
+    assert result.returncode == 0, result.stderr
+    assert output == "due=true\n"
+
+
+def test_chart_proof_runs_on_dispatch_where_no_base_is_given(kind_repo):
+    repo, _ = kind_repo
+    head = _commit(repo, {"README.md": "b"})
+    result, output = _due_step(repo, "", head)
+    assert result.returncode == 0, result.stderr
+    assert output == "due=true\n"
+
+
+@pytest.mark.parametrize("base", ["0" * 40, "without-rule"])
+def test_chart_proof_runs_when_the_base_is_unknown_or_carries_no_rule(kind_repo, base):
+    repo, _ = kind_repo
+    if base == "without-rule":
+        _git(repo, "rm", "-q", RULE)
+        base = _commit(repo, {})
+    head = _commit(repo, {"docs/x.md": "b"})
+    result, output = _due_step(repo, base, head)
+    assert result.returncode == 0, result.stderr
+    assert output == "due=true\n"
+
+
+def test_chart_proof_rule_uses_the_push_before_commit_as_its_base():
+    step = _workflow()["jobs"]["kind-due"]["steps"][-1]
+    assert step["env"]["BASE"] == (
+        "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}"
+    )
+    assert step["env"]["HEAD"] == (
+        "${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}"
+    )
+    assert step["run"].startswith("set -o pipefail\n")
+
+
+def test_chart_proof_rule_fails_on_an_unknown_base(kind_repo):
+    repo, base = kind_repo
+    result = subprocess.run(["bash", str(repo / RULE), "f" * 40, base], cwd=repo, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "due=" not in result.stdout
 
 
 def test_unit_and_lint_run_on_every_event_and_feed_the_required_gate():
