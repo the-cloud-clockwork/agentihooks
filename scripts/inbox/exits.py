@@ -208,13 +208,25 @@ def _settle_unfillable(inbox: "InboxStore", config, seats: set) -> None:
             continue
         for item in inbox.open_items(seat):
             reason = f"cancelled: {seat} can get no successor: {why}"
-            if inbox.withdraw(item.id, BY, reason, seat) and item.sender != BY:
+            if not inbox.withdraw(item.id, BY, reason, seat):
+                continue
+            _withdraw_escalations(inbox, item.id, seat)
+            if item.sender != BY:
                 text = (
                     f"{seat} can get no successor: {why}, so your message {item.id}: "
                     f"{item.text.splitlines()[0][:200]} is closed. "
                     "Send it to whoever carries that work on if it still matters."
                 )
                 inbox.send(BY, notice_address(inbox, item.sender), text, fyi=True)
+
+
+def _withdraw_escalations(inbox: "InboxStore", item_id: str, seat: str) -> None:
+    from scripts.inbox.wake import TO_MASTER
+
+    for entry in inbox.history(item_id):
+        if entry.get("event") == TO_MASTER:
+            raised = entry["reason"].rpartition(" ")[2]
+            inbox.withdraw(raised, BY, f"cancelled: message {item_id} is closed, {seat} can get no successor")
 
 
 def _no_successor(seat: str, config) -> str:
