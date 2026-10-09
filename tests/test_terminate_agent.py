@@ -99,6 +99,28 @@ def test_terminate_uses_process_group(monkeypatch):
     assert calls == [(190, signal.SIGTERM)]
 
 
+def test_terminate_waits_for_the_group_to_exit(monkeypatch):
+    from unittest.mock import Mock
+
+    from scripts import terminate_agent
+
+    item = session()
+    alive = Mock(side_effect=[[item.process], [], [], []])
+    monkeypatch.setattr(terminate_agent, "_alive", alive)
+    monotonic = Mock(side_effect=[0.0, 0.0, 0.1])
+    monkeypatch.setattr(terminate_agent.time, "monotonic", monotonic)
+    sleep = Mock()
+    monkeypatch.setattr(terminate_agent.time, "sleep", sleep)
+    kill = Mock()
+    monkeypatch.setattr(terminate_agent.os, "killpg", kill)
+
+    assert terminate_agent.terminate(item, [item.process], 1) is False
+
+    sleep.assert_called_once_with(0.1)
+    kill.assert_called_once_with(item.process.pgid, signal.SIGTERM)
+    assert alive.call_count == 4
+
+
 def test_terminate_real_isolated_process_group():
     from scripts.terminate_agent import _process, terminate
 
