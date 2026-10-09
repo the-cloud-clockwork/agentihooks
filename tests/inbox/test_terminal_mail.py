@@ -47,7 +47,7 @@ def test_terminal_notice_has_no_retired_master_recipient(setup, action):
     noted = []
     ledger = SimpleNamespace(notify=lambda *args: noted.append(args))
     notify(store, Namespace(slug="proof", name="operator", now=True), ledger, master, action)
-    assert len(noted) == 1
+    assert [args[0] for args in noted] == ["proof"]
     assert [item.id for item in inbox.inbox(master.seat)] == [old.id]
     assert inbox.history(old.id) == history
 
