@@ -5,9 +5,15 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from scripts.swarm.metrics_outbox import DAY_MS, Outbox, Settings, Table
 
 from scripts.swarm import metrics_outbox
+
+DAY_MS, Outbox, Settings, Table = (
+    metrics_outbox.DAY_MS,
+    metrics_outbox.Outbox,
+    metrics_outbox.Settings,
+    metrics_outbox.Table,
+)
 
 NOW = 1_800_000_000_000
 SINK = Settings("http://clickhouse.test:8123", "writer", "pw")
