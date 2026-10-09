@@ -177,7 +177,13 @@ def test_an_unreadable_settings_file_is_a_settings_error(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("key", "value"), [("claude-api-weight", "25"), ("claude-api-weight", 101), ("claude-api-max-sessions", "abc")]
+    ("key", "value"),
+    [
+        ("claude-api-weight", "25"),
+        ("claude-api-weight", 101),
+        ("claude-api-weight", None),
+        ("claude-api-max-sessions", "abc"),
+    ],
 )
 def test_a_stored_value_its_validator_refuses_is_a_settings_error(monkeypatch, tmp_path, key, value):
     monkeypatch.setattr(place, "_client", lambda environ: None)

@@ -38,14 +38,15 @@ def _client(environ: Mapping[str, str]) -> "Redis | None":
 def policy(harness: str, environ: Mapping[str, str]) -> ApiPolicy:
     from redis import RedisError
 
+    cap_key, weight_key = f"{harness}-api-max-sessions", f"{harness}-api-weight"
     try:
         settings = open_store(_client(environ), environ)
-        cap = settings.get(f"{harness}-api-max-sessions")
-        weight = settings.get(f"{harness}-api-weight")
+        cap = settings.get(cap_key)
+        weight = settings.get(weight_key)
     except (RedisError, OSError, ValueError, KeyError, TypeError) as exc:
         raise SettingsError(f"routing settings are unreadable: {type(exc).__name__}") from exc
-    for key, value in ((f"{harness}-api-max-sessions", cap), (f"{harness}-api-weight", weight)):
-        if value is not None and not VALIDATORS[key](value):
+    for key, value in ((cap_key, cap), (weight_key, weight)):
+        if (value is not None or key == weight_key) and not VALIDATORS[key](value):
             raise SettingsError(f"routing setting {key} is invalid")
     return ApiPolicy(weight, API_UNBOUNDED if cap is None else cap)
 

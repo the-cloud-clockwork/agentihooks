@@ -706,6 +706,12 @@ def test_a_reserved_account_is_used_before_the_api_at_weight_0(monkeypatch, tmp_
     assert _pick(env, tmp_path, {"LOW": 3}).account == "LOW"
 
 
+def test_an_api_pick_is_never_replaced_by_the_reserve_rule(monkeypatch, tmp_path):
+    env = {**_three(monkeypatch), "ANTHROPIC_API_KEY": "key", "AGENTIHOOKS_RESERVE_ACCOUNTS": "api"}
+    _weighted(monkeypatch, 100)
+    assert _pick(env, tmp_path).kind == API
+
+
 def test_route_api_resolves_to_the_api_endpoint_and_a_slug_to_its_token():
     env = {"AH_CC_TOKEN_A": "a", "ANTHROPIC_API_KEY": "key"}
     assert balancer.forced(env, "api") == balancer.RouteDecision(None, None, "forced", kind=API)

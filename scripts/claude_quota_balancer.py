@@ -730,7 +730,7 @@ def select_credential(
     }
     pool_live = sum(live.get(credential.account, 0) for credential in credentials)
     seat = place.place(api, seats, weight, pool_live)
-    if seat is not None and seat.account in reserve:
+    if seat is not None and seat.kind != API and seat.account in reserve:
         seat = session_bands.pick(other for other in seats if other.account not in reserve) or seat
     if seat is None:
         outside = f" outside {', '.join(sorted(excluded))}" if excluded else ""
