@@ -57,7 +57,15 @@ def test_persisted_identifiers_remain_compatible_for_recorded_inputs():
         == "8d94cb92b46bd062190991419e3b60d33b6500bf2a7fb9e5a006a4005ff125ed"
     )
     handoffs = [{"id": "transfer", "at": NOW + 1, "task": "t", "predecessor": "worker", "reason": "recycle"}]
-    found = [{"id": "idle-with-claim/worker", "seen_at": NOW + 2, "subject": "worker", "summary": "idle"}]
+    found = [
+        {
+            "id": "idle-with-claim/worker",
+            "kind": "idle with claim",
+            "seen_at": NOW + 2,
+            "subject": "worker",
+            "summary": "idle",
+        }
+    ]
     assert {
         row["kind"]: row["event_id"] for row in metrics_swarm.signal_rows(SLUG, state, [agent], handoffs, found)
     } == {
@@ -156,9 +164,9 @@ def test_distinct_review_and_gate_events_keep_complete_node_and_actor_fields():
 def test_health_and_handoff_scopes_include_agent_task_and_host_findings():
     handoff = {"id": "transfer", "at": NOW, "predecessor": "worker", "task": "t", "reason": "recycle"}
     found = [
-        {"id": "agent", "seen_at": NOW, "subject": "worker", "summary": "agent"},
-        {"id": "task", "seen_at": NOW, "subject": "t", "summary": "task"},
-        {"id": "host", "seen_at": NOW, "subject": "machine", "summary": "host"},
+        {"id": "agent", "kind": "stale claim", "seen_at": NOW, "subject": "worker", "summary": "agent"},
+        {"id": "task", "kind": "proof loop", "seen_at": NOW, "subject": "t", "summary": "task"},
+        {"id": "host", "kind": "host pressure", "seen_at": NOW, "subject": "machine", "summary": "host"},
     ]
     rows = metrics_swarm.signal_rows(SLUG, doc(), [AGENT], [handoff], found)
     for row in rows[:3]:
@@ -293,10 +301,18 @@ def test_all_row_families_enter_the_outbox_and_replay_without_loss(box, tmp_path
     ready["eng"] = [{"id": "ready"}]
     monkeypatch.setattr(metrics_swarm.capacity, "ready_work", lambda *args: ({}, ready))
     ledger = doc([event("task claimed", NOW), event("task pr", NOW + 1)])
-    found = [{"id": "finding", "seen_at": NOW, "subject": "worker", "summary": "idle"}]
+    found = [{"id": "finding", "kind": "idle with claim", "seen_at": NOW, "subject": "worker", "summary": "idle"}]
     metrics_swarm.record_pass(box, SLUG, NOW + 30, store, ledger, found, {})
     metrics_swarm.record_pass(box, SLUG, NOW + 30, store, ledger, found, {})
     agents = box.recent("agent_events", NOW + 30)
+    assert {(row["kind"], row["finding_kind"]) for row in agents} == {
+        ("spawn", ""),
+        ("retire", ""),
+        ("claim", ""),
+        ("gate_deny", ""),
+        ("handoff", ""),
+        ("health_finding", "idle with claim"),
+    }
     assert sum(row["kind"] == "spawn" for row in agents) == 4
     assert sum(row["kind"] == "retire" for row in agents) == 3
     assert sum(row["kind"] == "gate_deny" for row in agents) == 25

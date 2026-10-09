@@ -129,6 +129,7 @@ def test_handoff_and_health_finding_have_stable_source_ids():
     rows = metrics_swarm.signal_rows(SLUG, doc(), [AGENT], handoffs, found)
     assert [row["kind"] for row in rows] == ["handoff", "health_finding"]
     assert [row["reason"] for row in rows] == ["recycle", "idle"]
+    assert [row["finding_kind"] for row in rows] == ["", "idle with claim"]
     assert (
         metrics_swarm.signal_rows(SLUG, doc(), [AGENT], handoffs, [{**found[0], "summary": "still idle"}])[1][
             "event_id"
