@@ -304,7 +304,9 @@
     "lint": "passed",
     "format": "passed",
     "complexity": "passed",
-    "size": "zero errors against original merge base; recheck pending"
+    "size": "zero errors against merge base after final changes",
+    "standards_review": "closed in scoped round two; no open findings",
+    "spec_review": "closed in scoped round two; no open findings"
   },
   "limitations": [
     "Synthetic controller authority; admitted registration delivery and renewal remain with execution adapter",
