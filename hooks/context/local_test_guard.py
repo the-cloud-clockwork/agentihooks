@@ -82,6 +82,8 @@ def _python_test(args: list[str]) -> bool:
                 return True
         elif arg.startswith(("-m", "-c")) and _PYTHON_TEST.search(arg[2:]):
             return True
+    if any(arg.startswith(("-m", "-c")) for arg in args):
+        return False
     return any(
         Path(arg).name in _RUNNERS or (Path(arg).name.startswith(("test_", "test-")) and arg.endswith(".py"))
         for arg in args

@@ -45,7 +45,7 @@ def _env_split(tokens: list[str]) -> list[str]:
     for index, token in enumerate(tokens):
         if token in {"-S", "--split-string"} and index + 1 < len(tokens):
             return tokens[:index] + shlex.split(tokens[index + 1]) + tokens[index + 2 :]
-        if token.startswith("-S") and token != "-S":
+        if token.startswith("-S"):
             return tokens[:index] + shlex.split(token[2:]) + tokens[index + 1 :]
         if token.startswith("--split-string="):
             return tokens[:index] + shlex.split(token.split("=", 1)[1]) + tokens[index + 1 :]

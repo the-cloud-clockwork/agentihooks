@@ -110,3 +110,50 @@ def test_missing_heredoc_delimiter_is_invalid():
 
     with pytest.raises(ValueError, match="Missing heredoc delimiter"):
         commands("bash <<")
+
+
+@pytest.mark.parametrize(
+    "command, expected",
+    [
+        ("env --split-string 'pytest -q' --maxfail 1", [["pytest", "-q", "--maxfail", "1"]]),
+        ('echo "$()"', [["echo", "$()"]]),
+        ("echo \"\" '$(pytest)'", [["echo", "", "$(pytest)"]]),
+        ("echo " + "'" + "\\" + "'" + ' "$(pytest)"', [["echo", "\\", "$(pytest)"], ["pytest"]]),
+        ("bash <<-END\n\tpytest\n\tEND\necho done", [["pytest"], ["bash"], ["echo", "done"]]),
+        ("bash <<EOF # << ignored\npytest\nEOF", [["pytest"], ["bash"]]),
+        (
+            "bash <<EOF\necho ready\npytest -q\nEOF\necho done",
+            [
+                ["echo", "ready"],
+                ["pytest", "-q"],
+                ["bash"],
+                ["echo", "done"],
+            ],
+        ),
+        (
+            "python - <<EOF\n EOF\nEOF \nEOF\necho done",
+            [
+                ["python", "-c", " EOF\nEOF \n"],
+                ["python", "-"],
+                ["echo", "done"],
+            ],
+        ),
+    ],
+)
+def test_remaining_parser_boundaries(command, expected):
+    from hooks.context.shell_commands import commands
+
+    assert commands(command) == expected
+
+
+def test_heredoc_and_separated_shell_depths_share_the_limit():
+    from hooks.context.shell_commands import commands
+
+    assert commands("bash -c 'pytest'; echo done", 9) == [["pytest"], ["echo", "done"]]
+    assert commands("cat <<EOF\nignored\nEOF", 9) == [["cat"]]
+    with pytest.raises(ValueError):
+        commands("cat <<EOF\nignored\nEOF", 10)
+    script = "bash <<EOF\nbash -c 'pytest'\nEOF"
+    assert commands(script, 8) == [["pytest"], ["bash"]]
+    with pytest.raises(ValueError):
+        commands(script, 9)

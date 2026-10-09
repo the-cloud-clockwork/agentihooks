@@ -19,6 +19,7 @@ RUNNERS = [
     "/venv/bin/pytest",
     "$V/pytest",
     "python -m pytest",
+    "python -m pytest -q",
     "python -mpytest",
     "python -m coverage run -m pytest",
     "python -c'import pytest; pytest.main()'",
@@ -127,6 +128,7 @@ def test_explicit_true_allows_tests(value, monkeypatch):
     [
         "echo pytest",
         "python -m json.tool",
+        "python -m json.tool pytest",
         "python -m",
         "python -c",
         "python -mjson.tool",
