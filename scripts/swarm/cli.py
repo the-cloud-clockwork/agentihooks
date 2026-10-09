@@ -75,6 +75,7 @@ from scripts.swarm import (
     idle,
     launch_check,
     ledger_events,
+    ledger_probe,
     master_launch,
     merge_queue,
     naming,
@@ -165,6 +166,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         )
         from scripts.swarm.health import spawn_stall
 
+        probed = timing.call(ledger_probe.observe, store, slug, ledger, runtime, now_ms())
         with spawn_stall.watch(store, slug, ledger, now_ms, runtime):
             controls = timing.call(command_runner.consume, store, slug)
             if timing.call(ledger.binned, slug):
@@ -240,7 +242,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
             taken = timing.call(snapshot.auto, store, slug, now_ms(), os.environ)
             store.redis.set(store.key(slug, "last-tick"), now_ms())
             timing.call(command_runner.publish, store, slug, timing.call(ledger.state, slug))
-            return controls + actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
+            return probed + controls + actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
     finally:
         timing.BEFORE_STEP.reset(keeping)
         controller.release_tick_lock(store, slug, token)

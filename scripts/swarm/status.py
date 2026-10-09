@@ -17,6 +17,7 @@ from scripts.swarm import (
     drain_watch,
     idle,
     launch_check,
+    ledger_probe,
     live_binding,
     overlays,
     quota_view,
@@ -34,6 +35,7 @@ from scripts.swarm_v2.runtime import observe
 
 DEFAULT_COMPACT_LIMIT = 600
 UNCLASSIFIED = "unclassified"
+PAUSED_WHILE_SLOW = ("idle with claim", "stale claim")
 
 
 def now_ms():
@@ -72,7 +74,7 @@ def findings(store, slug, config, tasks, events):
     ]
     quiet = quiet_gate.quiet_minutes(store.redis, slug, agents, {t["id"]: t for t in tasks}, now_ms())
     rows = _health_rows(store, slug, agents, quiet, now_ms())
-    return verdict_store(store, slug).visible(
+    found = verdict_store(store, slug).visible(
         health.findings(
             {"tasks": tasks, "_meta": {"events": events}},
             rows,
@@ -95,6 +97,9 @@ def findings(store, slug, config, tasks, events):
         now_ms(),
         limits.cooldown_minutes * 60_000,
     )
+    if ledger_probe.holding(store, slug):
+        return [f for f in found if f["kind"] not in PAUSED_WHILE_SLOW]
+    return found
 
 
 def _health_rows(store, slug, agents, quiet, at):
