@@ -1,6 +1,7 @@
 import ast
 import re
 import subprocess
+from functools import cache
 from pathlib import Path
 
 
@@ -33,21 +34,43 @@ def discover_changes(root: Path, base: str, head: str) -> dict[str, set[int]]:
     return changes
 
 
+def module_name(path: Path) -> str:
+    parts = path.with_suffix("").parts
+    return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+
+
+@cache
+def imported_names(text: str, package: tuple[str, ...]) -> frozenset[str]:
+    names = set()
+    for node in ast.walk(ast.parse(text)):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            base = package[: len(package) - node.level + 1] if node.level else ()
+            module = ".".join([*base, *([node.module] if node.module else [])])
+            names.add(module)
+            names.update(f"{module}.{alias.name}" for alias in node.names)
+    return frozenset(names)
+
+
 def select_tests(root: Path, source: Path) -> list[str]:
-    parts = source.with_suffix("").parts
-    if parts[-1] == "__init__":
-        parts = parts[:-1]
-    module = ".".join(parts)
-    parent, _, name = module.rpartition(".")
-    selected = []
-    for path in sorted((root / "tests").rglob("test_*.py")):
+    module = module_name(source)
+    named = re.compile(rf"(?<![\w.]){re.escape(module)}(?!\w)")
+    modules = {}
+    for path in sorted((root / "tests").rglob("*.py")):
+        if not path.is_file():
+            continue
         text = path.read_text()
-        nodes = ast.walk(ast.parse(text))
-        imports = any(
-            isinstance(node, ast.ImportFrom)
-            and (node.module == module or node.module == parent and any(alias.name == name for alias in node.names))
-            for node in nodes
-        )
-        if path.name == f"test_{source.stem}.py" or module in text or imports:
-            selected.append(path.relative_to(root).as_posix())
-    return selected
+        modules[path] = (text, imported_names(text, path.relative_to(root).parent.parts))
+    reaching = {
+        path
+        for path, (text, imported) in modules.items()
+        if module in imported or named.search(text) or path.name == f"test_{source.stem}.py"
+    }
+    for _ in modules:
+        reached = {module_name(path.relative_to(root)) for path in reaching}
+        added = {path for path, (_, imported) in modules.items() if path not in reaching and imported & reached}
+        if not added:
+            break
+        reaching |= added
+    return [path.relative_to(root).as_posix() for path in modules if path in reaching and path.name.startswith("test_")]
