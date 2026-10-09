@@ -2,10 +2,12 @@ import itertools
 
 import pytest
 
-from scripts.swarm_ledger import ledger_artifacts, ledger_plans, ledger_tasks, new_ledger
+from scripts.swarm_ledger import ledger_artifacts, ledger_phases, ledger_plans, ledger_tasks, new_ledger
 from scripts.swarm_ledger import ledger_core as core
+from scripts.swarm_ledger.api import schemas
 from scripts.swarm_ledger.repository import rows
 from tests.swarm_ledger import legacy_page
+from tests.swarm_ledger.plan_slices import anchored
 
 SLUG = "plan-hierarchy"
 IDS = itertools.count()
@@ -206,6 +208,12 @@ def test_legacy_plan_fields_are_checked_against_the_new_parents():
     ("op", "error"),
     [
         ({"op": "slice_add", "phase": "phases/p1"}, "slice_add needs phase and an anchor"),
+        ({"op": "slice_add", "phase": "phases/p1", "anchor": "x", "extra": 1}, "slice_add takes only phase anchor"),
+        ({"op": "plan_add", "by": 5, "plan": "a", "title": "A"}, "plan_add needs by, an agent name or operator"),
+        (
+            {"op": "slice_add", "by": "", "phase": "phases/p1", "anchor": "x"},
+            "slice_add needs by, an agent name or operator",
+        ),
         ({"op": "slice_add", "phase": "phases/p1", "anchor": 5}, "slice_add needs phase and an anchor"),
         ({"op": "plan_add", "title": "A"}, "plan_add needs plan, an id of letters, digits, _ and -"),
         (
@@ -231,6 +239,10 @@ def test_malformed_plan_ops_are_refused(op, error):
         ({"phases": [{"id": "p1", "plan": "plans/a"}]}, "phase p1 names an unknown plan plans/a"),
         ({"plans": [{"id": "a"}], "phases": [{"id": "p1", "plan": 3}]}, "phases/p1/plan must be str"),
         ({"plans": [{"id": "a"}, {"id": "a"}]}, "every plans item needs a unique id"),
+        ({"plans": [1]}, "plans must be a list of objects"),
+        ({"slices": 3}, "slices must be a list of objects"),
+        ({"slices": [{"id": "a.x"}, {"id": "a.x"}]}, "every slices item needs a unique id"),
+        ({"plans": [{"id": "a", "url": "ftp://x"}]}, "url must be an http or https link"),
         ({"slices": [{"id": "a.x", "phase": "phases/p1", "anchor": "x"}]}, "slice x names an unknown phase phases/p1"),
         ({"tasks": [{"id": "t1", "phase": "p1", "slice": "slices/a.x"}]}, "task t1 names an unknown slice slices/a.x"),
     ],
@@ -260,13 +272,14 @@ def test_a_task_naming_its_slice_needs_no_plan_slice_in_an_anchored_phase():
     state, rejected, _ = run("task_add", task="t1", title="Build", lane="eng", phase="p1", slice="slices/a.first")
     assert rejected == []
     assert (state["tasks"][-1]["plan_slice"], state["tasks"][-1]["plan_lines"]) == ("first", "4-6")
-    run("task_add", task="t2", title="Build", lane="eng", phase="p1", plan_slice="second")
+    assert ledger_tasks.unsliced_refusal(state, {"phase": "p1", "slice": "slices/a.first"}, "planner") == ""
+    run("task_add", task="t2", title="Build", lane="eng", phase="p1", plan_slice="first")
     _, rejected, refusal = run("task_update", item="tasks/t2", fields={"slice": "slices/a.second"})
     assert rejected and "task t2 names an unknown slice slices/a.second" in refusal
     run("slice_add", phase="phases/p1", anchor="second")
     state, rejected, _ = run("task_update", item="tasks/t2", fields={"slice": "slices/a.second"})
     assert rejected == []
-    assert state["tasks"][-1]["plan_lines"] == "7-9"
+    assert (state["tasks"][-1]["plan_slice"], state["tasks"][-1]["plan_lines"]) == ("second", "7-9")
 
 
 def test_legacy_lines_and_plan_ref_are_checked_against_the_new_parents():
@@ -283,3 +296,137 @@ def test_legacy_lines_and_plan_ref_are_checked_against_the_new_parents():
         ledger_plans.phase_refusal(doc, phase) == "phase p1 plan_ref http://host/artifacts/x/2 is not a link of plans/a"
     )
     assert ledger_plans.phase_refusal(doc, {**phase, "plan_ref": {"artifact": "http://host/artifacts/x/1"}}) == ""
+
+
+class Recorder:
+    def __init__(self):
+        self.refused, self.events = [], []
+
+    def record(self, by, kind, target, **extra):
+        self.events.append((by, kind, target, extra))
+
+
+def test_plan_and_slice_ops_start_their_collections_and_record_events():
+    doc, ctx = {"phases": [{"id": "p1", "plan": "plans/a"}]}, Recorder()
+    assert ledger_plans.apply(doc, {"op": "plan_add", "by": "planner", "plan": "a", "title": " Plan "}, ctx)
+    assert ledger_plans.apply(doc, {"op": "plan_add", "by": "planner", "plan": "a", "title": "Plan"}, ctx)
+    assert ledger_plans.apply(doc, {"op": "slice_add", "by": "planner", "phase": "phases/p1", "anchor": "x"}, ctx)
+    assert ctx.events == [
+        ("planner", "added", "plans/a", {"text": "Plan"}),
+        ("planner", "added", "slices/a.x", {"text": "x"}),
+    ]
+    assert doc["slices"] == [{"id": "a.x", "phase": "phases/p1", "anchor": "x", "lines": ""}]
+    assert ctx.refused == []
+
+
+def test_a_document_without_plan_collections_validates():
+    assert ledger_plans.validate({}) is None
+    assert ledger_plans.validate({"phases": [{"id": "p1"}], "tasks": [{"id": "t1"}]}) is None
+    with pytest.raises(ValueError, match="^phase p1 names an unknown plan plans/a$"):
+        ledger_plans.validate({"phases": [{"id": "p1", "plan": "plans/a"}]})
+    assert ledger_plans.phase_refusal({"plans": [{"id": "a"}]}, {"id": "p1", "plan": "plans/a"}) == ""
+    assert ledger_plans.with_plan_slice({}, {"slice": "slices/a.x"}) == {"slice": "slices/a.x"}
+
+
+def test_phase_refusals_name_every_stale_slice_and_check_only_present_links():
+    doc = {
+        "plans": [{"id": "a"}, {"id": "b", "artifact": "http://host/1", "url": ""}],
+        "slices": [{"id": "a.x", "phase": "phases/p1"}, {"id": "a.y", "phase": "phases/p1"}],
+    }
+    assert ledger_plans.phase_refusal(doc, {"id": "p1", "plan": "plans/b"}) == (
+        "phase p1 holds slices of another plan: a.x, a.y"
+    )
+    assert ledger_plans.phase_refusal(doc, {"id": "p2", "plan": "plans/a", "plan_url": "http://any"}) == ""
+    assert ledger_plans.phase_refusal(doc, {"id": "p2", "plan": "plans/b", "plan_url": "http://host/1"}) == ""
+    assert ledger_plans.phase_refusal(doc, {"id": "p2", "plan": "plans/b", "plan_url": "http://host/2"}) == (
+        "phase p2 plan_url http://host/2 is not a link of plans/b"
+    )
+
+
+def test_a_task_without_a_phase_is_refused_its_slice():
+    doc = {"slices": [{"id": "a.x", "phase": "phases/p1", "anchor": "x"}]}
+    assert ledger_plans.task_refusal(doc, {"id": "t1", "slice": "slices/a.x"}) == (
+        "task t1 is in phase none but its slice slices/a.x belongs to phases/p1"
+    )
+
+
+def test_a_named_slice_keeps_a_plan_slice_already_given():
+    doc = {"slices": [{"id": "a.x", "phase": "phases/p1", "anchor": "x", "lines": "2-3"}]}
+    fields = {"slice": "slices/a.x", "plan_slice": "y"}
+    assert ledger_plans.with_plan_slice(doc, fields) is fields
+    assert ledger_plans.with_plan_slice(doc, {"slice": "slices/a.x"}) == {"slice": "slices/a.x", "plan_slice": "x"}
+
+
+def test_a_slice_takes_its_lines_from_the_phase_plan_reference():
+    anchored(SLUG, "build")
+    plans("a")
+    assert link("p1", "plans/a")[1] == []
+    state, rejected, _ = run("slice_add", phase="phases/p1", anchor="build")
+    assert rejected == []
+    assert state["slices"][0]["lines"] == "2-3"
+
+
+@pytest.mark.parametrize("key", ["phase", "description", "workspace", "slice"])
+def test_task_text_fields_must_be_strings(key):
+    op = {"op": "task_add", "id": "x", "by": "planner", "task": "t1", "title": "T", "lane": "eng", key: 3}
+    with pytest.raises(ValueError, match="^phase, description, workspace and slice must be strings$"):
+        ledger_tasks.check(op)
+
+
+def test_a_phase_plan_must_be_a_string():
+    op = {"op": "phase_update", "id": "x", "by": "planner", "item": "phases/p1", "fields": {"plan": 3}}
+    with pytest.raises(ValueError, match="^plan must be a string$"):
+        ledger_phases.check(op)
+
+
+def test_appended_phases_are_checked_against_their_plans():
+    plans("a")
+    _, rejected, refusal = run("phase_append", phases=[{"phase": "p3", "title": "Third", "plan": "plans/b"}])
+    assert rejected and "phase p3 names an unknown plan plans/b" in refusal
+    state, rejected, _ = run("phase_append", phases=[{"phase": "p3", "title": "Third", "plan": "plans/a"}])
+    assert rejected == []
+    assert state["phases"][-1]["plan"] == "plans/a"
+
+
+def test_plan_ops_target_their_collections_and_artifacts_keep_a_boolean_plan():
+    assert schemas.target({"op": "plan_add"}) == "plans"
+    assert schemas.target({"op": "slice_add"}) == "slices"
+    assert schemas.operation_schema("artifact_add")["properties"]["plan"] == {"type": "boolean"}
+    assert schemas.operation_schema("plan_add")["properties"]["plan"]["type"] == "string"
+
+
+PLANNED = {
+    "phases": [{"title": "No id"}, {"id": "p1", "plan": "plans/plan-a"}, {"id": "p2"}],
+    "slices": [{"anchor": "x"}, {"id": "plan-a.first"}],
+}
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"phase": "p1", "plan_slice": "first", "slice": "slices/plan-a.other"},
+        {"phase": "p1", "plan_slice": ""},
+        {"phase": "p1"},
+        {"phase": "p2", "plan_slice": "first"},
+        {"phase": "p1", "plan_slice": "missing"},
+        {"phase": "p9", "plan_slice": "first"},
+    ],
+)
+def test_with_slice_leaves_fields_without_a_planned_slice_alone(fields):
+    assert ledger_plans.with_slice(PLANNED, fields) is fields
+
+
+def test_with_slice_names_the_slice_of_the_phase_plan():
+    fields = {"phase": "p1", "plan_slice": "first", "title": "Build"}
+    assert ledger_plans.with_slice(PLANNED, fields) == {**fields, "slice": "slices/plan-a.first"}
+
+
+@pytest.mark.parametrize("doc", [{}, {"phases": [{"id": "p1", "plan": "plans/plan-a"}]}])
+def test_with_slice_reads_a_document_without_phases_or_slices(doc):
+    fields = {"phase": "p1", "plan_slice": "first"}
+    assert ledger_plans.with_slice(doc, fields) is fields
+
+
+def test_plan_and_slice_ids_come_from_the_file_and_the_anchor():
+    assert ledger_plans.plan_id("0123456789abcdef.md") == "plan-0123456789ab"
+    assert ledger_plans.slice_id("plan-a", "first") == "plan-a.first"

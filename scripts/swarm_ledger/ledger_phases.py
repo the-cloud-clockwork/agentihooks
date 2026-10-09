@@ -147,7 +147,7 @@ def append(doc: dict, op: dict, ctx) -> bool:
     ]
     try:
         validate(doc["phases"] + added)
-        if refusal := next((text for phase in added if (text := ledger_plans.phase_refusal(doc, phase))), ""):
+        for refusal in filter(None, (ledger_plans.phase_refusal(doc, phase) for phase in added)):
             raise ValueError(refusal)
     except ValueError as exc:
         ctx.refused.append(str(exc))

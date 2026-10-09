@@ -58,13 +58,13 @@ def validate(doc: dict) -> None:
         *(phase_refusal(doc, row) for row in doc.get("phases", [])),
         *(task_refusal(doc, row) for row in doc.get("tasks", [])),
     ]
-    if refusal := next((text for text in refusals if text), ""):
+    for refusal in filter(None, refusals):
         raise ValueError(refusal)
 
 
 def find(doc: dict, address: str) -> dict:
-    kind, item = address.split("/", 1)
-    return next(row for row in doc.get(kind, []) if row.get("id") == item)
+    kind, item = address.split("/")
+    return next(row for row in doc[kind] if row.get("id") == item)
 
 
 def parent_refusal(doc: dict, owner: str, address: object, kind: str) -> str:
@@ -90,7 +90,7 @@ def phase_refusal(doc: dict, phase: dict) -> str:
     owner = f"phase {phase['id']}"
     if refusal := parent_refusal(doc, owner, address, "plans"):
         return refusal
-    prefix = f"{address.split('/', 1)[1]}."
+    prefix = f"{address.split('/')[1]}."
     if stale := [
         row["id"]
         for row in doc.get("slices", [])
@@ -98,7 +98,7 @@ def phase_refusal(doc: dict, phase: dict) -> str:
     ]:
         return f"{owner} holds slices of another plan: {', '.join(stale)}"
     plan = find(doc, address)
-    links = {plan.get(key) for key in LINKS} - {"", None}
+    links = [plan[key] for key in LINKS if plan.get(key)]
     legacy = (("plan_url", phase.get("plan_url")), ("plan_ref", (phase.get("plan_ref") or {}).get("artifact")))
     for key, link in legacy:
         if link and links and link not in links:
@@ -114,7 +114,7 @@ def task_refusal(doc: dict, task: dict) -> str:
     if refusal := parent_refusal(doc, owner, address, "slices"):
         return refusal
     row = find(doc, address)
-    if row.get("phase") != f"phases/{task.get('phase', '')}":
+    if row.get("phase") != f"phases/{task.get('phase')}":
         return (
             f"{owner} is in phase {task.get('phase') or 'none'} but its slice {address} belongs to {row.get('phase')}"
         )
@@ -130,6 +130,24 @@ def with_plan_slice(doc: dict, fields: dict) -> dict:
     if not row.get("lines") or "plan_slice" in fields:
         return fields
     return {**fields, "plan_slice": row["anchor"]}
+
+
+def with_slice(doc: dict, fields: dict) -> dict:
+    phase = next((p for p in doc.get("phases", []) if p.get("id") == fields.get("phase")), {})
+    if "slice" in fields or not fields.get("plan_slice") or not phase.get("plan"):
+        return fields
+    named = slice_id(phase["plan"].split("/")[1], fields["plan_slice"])
+    if not any(row.get("id") == named for row in doc.get("slices", [])):
+        return fields
+    return {**fields, "slice": f"slices/{named}"}
+
+
+def plan_id(file_id: str) -> str:
+    return f"plan-{file_id[:12]}"
+
+
+def slice_id(plan: str, anchor: str) -> str:
+    return f"{plan}.{anchor}"
 
 
 def apply(doc: dict, op: dict, ctx) -> bool:
@@ -160,7 +178,7 @@ def add_slice(doc: dict, op: dict, ctx) -> str:
         return f"phase {phase['id']} has no plan: link it to a plan before adding a slice"
     plan = find(doc, phase["plan"])
     slices = doc.setdefault("slices", [])
-    row = {"id": f"{plan['id']}.{op['anchor']}", "phase": op["phase"], "anchor": op["anchor"]}
+    row = {"id": slice_id(plan["id"], op["anchor"]), "phase": op["phase"], "anchor": op["anchor"]}
     if existing := next((item for item in slices if item["id"] == row["id"]), None):
         return "" if existing["phase"] == row["phase"] else f"slice {row['id']} already belongs to {existing['phase']}"
     try:
@@ -177,4 +195,4 @@ def slice_lines(doc: dict, phase: dict, plan: dict, anchor: str) -> str:
         return ""
     from scripts.swarm_ledger import plan_ranges
 
-    return plan_ranges.task_slice(doc, phase, anchor, plan.get("artifact", ""))
+    return plan_ranges.task_slice(doc, phase, anchor, plan["artifact"])
