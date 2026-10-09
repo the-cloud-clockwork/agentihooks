@@ -3,7 +3,7 @@
   "dependency": "SV2-CTL-03",
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2050",
-  "tested_commit": "86e41ac5454a444e3e5f69f7c8a7ea0a6af5aa5a",
+  "tested_commit": "1fda038ec3f7aa89770c66d407427b01883820ea",
   "status": "fixture-qualified-awaiting-ci",
   "evidence_class": "Mocked Redis (fakeredis), a fake clock and a fake Pod source that emits list, watch, expired cursor, connection reset and deletion events; no Kubernetes API, node autoscaler or EC2 call was made.",
   "interfaces": [
@@ -28,7 +28,7 @@
   },
   "validation": {
     "command": "python -m pytest tests/test_swarm_v2_controller.py tests/test_swarm_v2_watch.py tests/test_size_limits.py -q -n 2",
-    "output": "87 passed",
+    "output": "87 passed in the controller, watch and size limit modules, plus the evidence module, 205 in total after merging dev",
     "lint": "ruff check passed on changed Python files",
     "format": "ruff format check passed on changed Python files",
     "review": "Standards and Spec readers round one: superseded generation deletion, unmeasured case fields, missing connection reset and grant cases, unfenced count write, unused view owner and a same name fixture collision fixed with tests; the lease to delete window and the launch labelling are recorded as limitations; round two added a grant revoked between read and delete and a lease takeover inside the delete that leaves the new leader counts untouched, and unbundled the reconciler arguments; review closed after round three: the launch labelling Spec finding was upheld as follow up issue 2078, the lease to delete window was accepted by the Standards reader as a recorded residual",
