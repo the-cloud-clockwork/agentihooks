@@ -103,7 +103,7 @@ def tasks(reply):
 
 def test_pinned_worker_transport_cannot_create_a_task_as_master(crew):
     with pinned():
-        own = operation("add", by=WORKER, thread="chat", text="Worker control")
+        own = operation("add", by=WORKER, thread="chat", to="operator", text="Worker control")
         assert own["id"] not in ledger.request(SLUG, [own])["rejected"]
         denied = operation("task_add", by=WORKER, task="t1", title="Own author", lane="eng", phase="p1")
         assert denied["id"] in ledger.request(SLUG, [denied])["rejected"]
@@ -120,7 +120,7 @@ def test_pinned_worker_transport_cannot_create_a_task_as_master(crew):
 
 
 def test_pinned_worker_cannot_write_as_another_worker_or_the_operator(crew):
-    other = operation("add", by=OTHER, thread="chat", text="Other worker")
+    other = operation("add", by=OTHER, thread="chat", to="operator", text="Other worker")
     unsigned = operation("add", thread="chat", text="Operator words")
     with pinned():
         reply = ledger.request(SLUG, [other, unsigned])
@@ -156,7 +156,7 @@ def test_a_bound_master_still_adds_tasks(crew):
 def test_an_alias_of_the_bound_name_writes_as_that_agent(crew):
     alias = "engineer-323133-0256"
     with pinned(), patch.object(server.authority, "resolve_name", lambda name: WORKER if name == alias else name):
-        said = operation("add", by=alias, thread="chat", text="Alias control")
+        said = operation("add", by=alias, thread="chat", to="operator", text="Alias control")
         reply = ledger.request(SLUG, [said])
     assert said["id"] not in reply["rejected"]
 
@@ -206,7 +206,7 @@ def test_the_swarm_client_binds_agent_authored_writes_to_the_session(crew):
 
 
 def test_a_credential_for_one_name_refuses_another_agent_header(crew):
-    body = json.dumps({"ops": [operation("add", by=OTHER, thread="chat", text="Header swap")]})
+    body = json.dumps({"ops": [operation("add", by=OTHER, thread="chat", to="operator", text="Header swap")]})
     headers = {"Content-Type": "application/json", **agent_headers(crew, WORKER, header=OTHER)}
     before = repository.get_document(SLUG)
     refused = send(crew, "PUT", f"/api/{SLUG}?view=agent", body, **headers)

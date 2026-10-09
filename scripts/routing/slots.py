@@ -5,6 +5,7 @@ from typing import Literal, Protocol
 SUBSCRIPTION = "subscription"
 INTERACTIVE = "interactive"
 API = "api"
+API_UNBOUNDED = 10**6
 
 Kind = Literal["subscription", "interactive", "api"]
 

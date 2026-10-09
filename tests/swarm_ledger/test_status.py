@@ -97,7 +97,7 @@ class Style(unittest.TestCase):
     def test_chat_and_comment_writes_accept_issue_links(self):
         make_ledger()
         text = "The issue is https://github.com/the-cloud-clockwork/agentihooks/issues/613"
-        ops = [post("eng", text, 1, "chat"), post("eng", text, 2, "phases/p1/comments")]
+        ops = [post("eng", text, 1, "chat", to="operator"), post("eng", text, 2, "phases/p1/comments")]
         core.check_body({"ops": ops})
         state, _ = core.sync(SLUG, ops=ops)
         self.assertEqual([entry["text"] for entry in state["chat"]], [text])

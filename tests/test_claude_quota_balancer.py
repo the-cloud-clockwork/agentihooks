@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from scripts import claude_quota_balancer as balancer
+from scripts.routing import place
+from scripts.routing.slots import API, API_UNBOUNDED, SUBSCRIPTION
 
 
 def _stream(account_usage: float, weekly_usage: float, fable_usage: float | None = None) -> str:
@@ -607,3 +609,152 @@ def test_a_week_that_reset_before_now_counts_as_full():
     )
     assert balancer.account_cap(spent, 1000) == 6
     assert balancer.account_cap(spent, 400) == 0
+
+
+def _weighted(monkeypatch, weight, cap=API_UNBOUNDED):
+    def policy(harness, environ):
+        assert harness == "claude"
+        return place.ApiPolicy(weight, cap)
+
+    monkeypatch.setattr(place, "policy", policy)
+
+
+def test_the_api_share_counts_live_sessions_on_reserved_accounts(monkeypatch, tmp_path):
+    env = {**_three(monkeypatch), "ANTHROPIC_API_KEY": "key", "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST"}
+    _weighted(monkeypatch, 25)
+    assert _pick(env, tmp_path, {"BEST": 4, "api": 1}).kind == API
+    assert _pick(env, tmp_path, {"BEST": 2, "api": 1}).account == "LOW"
+
+
+def test_an_unreadable_routing_setting_closes_only_the_api_side(monkeypatch, tmp_path, capsys):
+    env = {**_three(monkeypatch), "ANTHROPIC_API_KEY": "key"}
+
+    def unreadable(harness, environ):
+        raise place.SettingsError("routing settings are unreadable: KeyError")
+
+    monkeypatch.setattr(place, "policy", unreadable)
+    assert _pick(env, tmp_path, {"BEST": 1, "MID": 1}).account == "LOW"
+    assert capsys.readouterr().err == "[claude] api side closed: routing settings are unreadable: KeyError\n"
+    with pytest.raises(balancer.RoutingError) as raised:
+        _pick(env, tmp_path, {"BEST": 9, "MID": 9, "LOW": 9})
+    assert str(raised.value) == "no Claude account has a free session under its quota band"
+
+
+def test_a_token_named_api_is_reserved_for_the_api_route():
+    env = {"AH_CC_TOKEN_api": "x", "AH_CC_TOKEN_": "y", "AH_CC_TOKEN_A": "a", "AH_CC_TOKEN_apix": "b"}
+    assert [credential.account for credential in balancer.discover_credentials(env)] == ["A", "apix"]
+
+
+def test_three_tokens_and_an_api_at_weight_25_give_api_one_of_every_four_sessions(monkeypatch, tmp_path):
+    env = {**_three(monkeypatch), "ANTHROPIC_API_KEY": "key"}
+    _weighted(monkeypatch, 25)
+    sessions, kinds = {}, []
+    for _ in range(8):
+        decision = _pick(env, tmp_path, dict(sessions))
+        kinds.append(decision.kind)
+        sessions[decision.account] = sessions.get(decision.account, 0) + 1
+    assert kinds == [API, SUBSCRIPTION, SUBSCRIPTION, SUBSCRIPTION] * 2
+    assert sessions == {"api": 2, "BEST": 2, "MID": 2, "LOW": 2}
+
+
+def test_with_every_token_week_below_five_percent_every_session_goes_to_api(monkeypatch, tmp_path):
+    spent = [balancer.parse_probe(name, _stream(0.10, 0.97), 100) for name in ("A", "B", "C")]
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: (spent, "cached"))
+    env = {"AH_CC_TOKEN_A": "a", "AH_CC_TOKEN_B": "b", "AH_CC_TOKEN_C": "c", "ANTHROPIC_API_KEY": "key"}
+    _weighted(monkeypatch, 0)
+    for live in range(4):
+        decision = _pick(env, tmp_path, {"api": live})
+        assert decision == balancer.RouteDecision(None, None, "cached", live, API_UNBOUNDED, kind=API)
+        assert decision.account == "api"
+    assert balancer.format_selection(decision) == "[agenti] account=api kind=api sessions=3/1000000 source=cached"
+
+
+def test_an_api_endpoint_alone_routes_without_any_token(monkeypatch, tmp_path):
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: pytest.fail("probed without tokens"))
+    _weighted(monkeypatch, 0)
+    decision = _pick({"ANTHROPIC_API_KEY": "key"}, tmp_path)
+    assert decision == balancer.RouteDecision(None, None, "cached", 0, API_UNBOUNDED, kind=API)
+
+
+def test_without_an_api_endpoint_no_routing_setting_is_read(monkeypatch, tmp_path):
+    env = _three(monkeypatch)
+    monkeypatch.setattr(place, "policy", lambda harness, environ: pytest.fail("policy read without an api slot"))
+    decision = _pick(env, tmp_path)
+    assert (decision.kind, decision.account) == (SUBSCRIPTION, "BEST")
+    with pytest.raises(balancer.RoutingError) as raised:
+        _pick({}, tmp_path)
+    assert str(raised.value) == "no non-empty AH_CC_TOKEN_* variables found"
+
+
+def test_routing_fails_only_when_the_pool_and_the_api_are_both_closed(monkeypatch, tmp_path):
+    env = {**_three(monkeypatch), "ANTHROPIC_API_KEY": "key"}
+    full = {"BEST": 6, "MID": 6, "LOW": 4}
+    _weighted(monkeypatch, 0, cap=2)
+    assert _pick(env, tmp_path, {**full, "api": 1}).kind == API
+    with pytest.raises(balancer.RoutingError) as raised:
+        _pick(env, tmp_path, {**full, "api": 2})
+    assert str(raised.value) == "no Claude account has a free session under its quota band"
+    with pytest.raises(balancer.RoutingError) as raised:
+        _pick(env, tmp_path, full, exclude=["api"])
+    assert str(raised.value) == "no Claude account has a free session under its quota band outside api"
+
+
+def test_a_reserved_account_is_used_before_the_api_at_weight_0(monkeypatch, tmp_path):
+    env = {**_three(monkeypatch), "ANTHROPIC_API_KEY": "key", "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST,MID"}
+    _weighted(monkeypatch, 0, cap=1)
+    assert _pick(env, tmp_path, {"LOW": 4}).account == "BEST"
+    assert _pick(env, tmp_path, {"LOW": 3}).account == "LOW"
+
+
+def test_the_launch_time_reaches_the_api_side_and_an_excluded_api_has_no_weight(monkeypatch, tmp_path):
+    env = {**_three(monkeypatch), "ANTHROPIC_API_KEY": "key"}
+    seen = []
+
+    def api_side(source, harness, environ, now):
+        seen.append(now)
+        return [], 0
+
+    monkeypatch.setattr(place, "api_side", api_side)
+    _pick(env, tmp_path)
+    assert seen == [1000]
+    assert balancer._api_side(env, {}, {"api"}, 1000) == ([], 0)
+
+
+def test_an_api_pick_is_never_replaced_by_the_reserve_rule(monkeypatch, tmp_path):
+    env = {**_three(monkeypatch), "ANTHROPIC_API_KEY": "key", "AGENTIHOOKS_RESERVE_ACCOUNTS": "api"}
+    _weighted(monkeypatch, 100)
+    assert _pick(env, tmp_path).kind == API
+
+
+def test_route_api_resolves_to_the_api_endpoint_and_a_slug_to_its_token():
+    env = {"AH_CC_TOKEN_A": "a", "ANTHROPIC_API_KEY": "key"}
+    assert balancer.forced(env, "api") == balancer.RouteDecision(None, None, "forced", kind=API)
+    assert balancer.forced(env, "A") == balancer.RouteDecision(
+        balancer.Credential("AH_CC_TOKEN_A", "a"), None, "forced"
+    )
+    assert balancer.forced(env, "A").account == "A"
+    with pytest.raises(balancer.RoutingError) as raised:
+        balancer.forced({"AH_CC_TOKEN_A": "a"}, "api")
+    assert str(raised.value) == "account 'api' needs an api endpoint; none is configured"
+
+
+def test_an_api_launch_carries_no_subscription_token_and_the_route_marker():
+    env = {"HOME": "/h", "AH_CC_TOKEN_A": "a", "CLAUDE_CODE_OAUTH_TOKEN": "oauth", "ANTHROPIC_API_KEY": "key"}
+    decision = balancer.RouteDecision(None, None, "forced", kind=API)
+    assert balancer.launch_environment(decision, env) == {
+        "HOME": "/h",
+        "ANTHROPIC_API_KEY": "key",
+        "AH_ROUTE_API": "1",
+        "AGENTIHOOKS_ROUTE_ACCOUNT": "api",
+    }
+
+
+def test_a_token_launch_carries_only_its_own_token_and_no_api_credential():
+    env = {"HOME": "/h", "AH_CC_TOKEN_A": "a", "AH_CC_TOKEN_B": "b", "ANTHROPIC_API_KEY": "key", "AH_ROUTE_API": "1"}
+    decision = balancer.RouteDecision(balancer.Credential("AH_CC_TOKEN_A", "a"), None, "forced")
+    assert balancer.launch_environment(decision, env) == {
+        "HOME": "/h",
+        "AH_CC_TOKEN_A": "a",
+        "CLAUDE_CODE_OAUTH_TOKEN": "a",
+        "AGENTIHOOKS_ROUTE_ACCOUNT": "A",
+    }

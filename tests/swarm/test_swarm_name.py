@@ -146,8 +146,8 @@ def test_status_list_and_names_show_the_swarm_name(env, capsys):  # noqa: F811
     store.redis.hset(store.key("old", "config"), "code", "")
     run("list")
     assert capsys.readouterr().out.splitlines() == [
-        "-\told\trunning\teng 1\tci 0\tplan 1\tagents 0\t/repo",
-        f"{name}\tsw\tpaused\teng 2\tci 1\tplan 1\tagents 0\t/repo",
+        "-\told\trunning\teng 1\tci 0\tplan 1\tscaling auto\tagents 0\t/repo",
+        f"{name}\tsw\tpaused\teng 2\tci 1\tplan 1\tscaling auto\tagents 0\t/repo",
     ]
     run("sw", "names")
     assert capsys.readouterr().out.startswith(f"name {name}\tcode ")

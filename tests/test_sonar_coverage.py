@@ -34,14 +34,9 @@ def test_sonar_sets_up_before_merging_coverage():
     steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["sonar"]["steps"]
     names = [step.get("name") or step.get("uses") for step in steps]
     merge = names.index("Merge shard coverage")
-    for setup in (
-        "actions/checkout@v4",
-        "actions/setup-python@v5",
-        "Install coverage",
-        "Start Cloudflare Access proxy",
-    ):
+    for setup in ("actions/checkout@v4", "actions/setup-python@v5", "Install coverage"):
         assert names.index(setup) < merge
-    assert names.index("Restore Sonar downloads") < merge < names.index("SonarQube Scan")
+    assert merge < names.index("Wait for the coverage merge") < names.index("SonarQube Scan")
     combine = (ROOT / ".github/coverage/combine.sh").read_text()
     assert "collect.py" in combine
     assert "gh run download" not in combine

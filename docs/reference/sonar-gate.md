@@ -12,7 +12,7 @@ agentihooks is bound to the `Delivery L2` gate, defined and bound in antoncore's
 | Duplicated lines | above 3 % |
 | Security hotspots reviewed | below 100 % |
 
-The job's `Hold the Delivery L2 conditions` step runs after the gate action and fails when:
+The job's `Hold the Delivery L2 conditions` step runs after the quality gate step and fails when:
 
 - the `Delivery L2` gate on the server holds conditions other than the five above, so a loosened threshold turns the job red;
 - the analysis was graded on a condition outside those five, as after a rebind to another gate;

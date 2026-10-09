@@ -38,7 +38,7 @@ def budget(redis, home):
 
 
 def say(redis, home, by=ENG, n=0, **extra):
-    op = {"op": "add", "thread": "chat", "id": f"m-{by}-{n}", "text": f"note {n}", "by": by, **extra}
+    op = {"op": "add", "thread": "chat", "id": f"m-{by}-{n}", "text": f"note {n}", "by": by, "to": "operator", **extra}
     return core.sync(SLUG, ops=[op], gate=budget(redis, home))
 
 
@@ -149,7 +149,7 @@ def test_comments_and_followups_count_as_talk(redis, tmp_path):
 @pytest.mark.parametrize("by", [MASTER, "operator", "swarm"])
 def test_only_eng_and_ci_agents_are_counted(redis, tmp_path, by):
     mode(redis, "enforce")
-    extra = {} if by == "operator" else {"by": by}
+    extra = {} if by == "operator" else {"by": by, "to": "operator"}
     op = {"op": "add", "thread": "chat", "id": "m-x", "text": "hello", **extra}
     for n in range(talk.BUDGET + 2):
         _, rejected = core.sync(SLUG, ops=[{**op, "id": f"m-{n}"}], gate=budget(redis, tmp_path))
@@ -201,7 +201,7 @@ def test_redis_down_lets_the_write_through_with_a_fail_open_row(redis, tmp_path)
     def down():
         raise ConnectionError("refused")
 
-    op = {"op": "add", "thread": "chat", "id": "m-down", "text": "hi", "by": ENG}
+    op = {"op": "add", "thread": "chat", "id": "m-down", "text": "hi", "by": ENG, "to": "operator"}
     _, rejected = core.sync(SLUG, ops=[op], gate=talk.Budget(SLUG, connect=down, home=tmp_path))
     assert rejected == []
     rows = gate_rows(tmp_path)
@@ -361,7 +361,7 @@ def test_a_fail_open_row_names_the_gate_and_the_ledger(redis, tmp_path):
     def down():
         raise ConnectionError("refused")
 
-    op = {"op": "add", "thread": "chat", "id": "m-down", "text": "hi", "by": ENG}
+    op = {"op": "add", "thread": "chat", "id": "m-down", "text": "hi", "by": ENG, "to": "operator"}
     core.sync(SLUG, ops=[op], gate=talk.Budget(SLUG, connect=down, home=tmp_path))
     assert [(r["gate"], r["tool"], r["agent"]) for r in gate_rows(tmp_path)] == [("talk", "ledger", ENG)]
 

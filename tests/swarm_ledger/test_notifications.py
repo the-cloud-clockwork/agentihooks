@@ -69,14 +69,29 @@ class Notifications(unittest.TestCase):
     def test_a_chat_answer_after_the_operator_notifies(self):
         core.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m1", "text": "where are we"}])
         core.sync(
-            SLUG, ops=[{"op": "add", "thread": "chat", "id": "m2", "by": "boss", "text": "Phase one is half done."}]
+            SLUG,
+            ops=[
+                {
+                    "op": "add",
+                    "thread": "chat",
+                    "id": "m2",
+                    "by": "boss",
+                    "reply_to": "m1",
+                    "text": "Phase one is half done.",
+                }
+            ],
         )
         self.assertEqual([(r["label"], r["item"]) for r in notes()], [("Reply", "chat")])
 
     def test_a_long_answer_is_kept_short_on_the_row(self):
         core.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m1", "text": "expand please"}])
         long = " ".join(["The phase is moving along well."] * 40)
-        core.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m2", "by": "boss", "long": True, "text": long}])
+        core.sync(
+            SLUG,
+            ops=[
+                {"op": "add", "thread": "chat", "id": "m2", "by": "boss", "long": True, "to": "operator", "text": long}
+            ],
+        )
         self.assertEqual(notes()[0]["text"], long[:280])
 
     def test_operator_actions_and_agent_status_alone_do_not_notify(self):

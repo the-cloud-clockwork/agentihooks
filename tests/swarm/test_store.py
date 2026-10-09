@@ -215,3 +215,71 @@ def test_links_round_trip_and_an_old_config_reads_as_none(store):
     assert store.config("smoke").links == links
     store.redis.hdel(store.key("smoke", "config"), "links")
     assert store.config("smoke").links == []
+
+
+def test_scaling_settings_round_trip_and_an_old_config_reads_the_defaults(store):
+    from scripts.swarm.store import DEFAULT_LOAD_HIGH, DEFAULT_LOAD_LOW, DEFAULT_MEMORY_PER_AGENT_MB
+
+    store.create(config(scaling="manual", load_high=1.5, load_low=0.5, memory_per_agent_mb=900))
+    read = store.config("smoke")
+    assert (read.scaling, read.load_high, read.load_low, read.memory_per_agent_mb) == ("manual", 1.5, 0.5, 900)
+    store.redis.hdel(store.key("smoke", "config"), "scaling", "load_high", "load_low", "memory_per_agent_mb")
+    read = store.config("smoke")
+    assert (read.scaling, read.load_high, read.load_low, read.memory_per_agent_mb) == (
+        "auto",
+        DEFAULT_LOAD_HIGH,
+        DEFAULT_LOAD_LOW,
+        DEFAULT_MEMORY_PER_AGENT_MB,
+    )
+    assert DEFAULT_LOAD_LOW < DEFAULT_LOAD_HIGH
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"load_low": 2.0, "load_high": 1.0},
+        {"load_low": 5.0},
+        {"scaling": "sometimes"},
+        {"memory_per_agent_mb": 0},
+        {"memory_per_agent_mb": 0.5},
+        {"memory_per_agent_mb": True},
+        {"load_high": 0.0, "load_low": 0.0},
+        {"load_low": True},
+        {"load_high": True},
+        {"load_high": "2"},
+    ],
+)
+def test_update_refuses_bad_scaling_settings_and_keeps_the_stored_ones(store, changes):
+    store.create(config())
+    before = store.config("smoke")
+    with pytest.raises(SwarmError):
+        store.update("smoke", **changes)
+    assert store.config("smoke") == before
+
+
+def test_create_refuses_a_low_watermark_above_the_high_one(store):
+    with pytest.raises(SwarmError, match="load low"):
+        store.create(config(load_low=2.0, load_high=1.0))
+
+
+@pytest.mark.parametrize("memory", [0.5, True])
+def test_create_refuses_memory_that_cannot_round_trip(store, memory):
+    with pytest.raises(SwarmError) as caught:
+        store.create(config(memory_per_agent_mb=memory))
+    assert str(caught.value) == "memory per agent must be a whole number of MB above 0"
+    assert store.redis.hgetall(store.key("smoke", "config")) == {}
+    assert store.slugs() == []
+
+
+def test_scaling_boundaries_round_trip_and_manual_preserves_lane_caps(store):
+    store.create(config())
+    stored = store.update("smoke", scaling="manual", load_low=10, load_high=10, memory_per_agent_mb=1)
+    assert store.config("smoke") == stored
+    assert (stored.max_eng, stored.max_ci, stored.max_plan) == (2, 1, 1)
+
+
+def test_scaling_update_explains_the_allowed_modes(store):
+    store.create(config())
+    with pytest.raises(SwarmError) as caught:
+        store.update("smoke", scaling="sometimes")
+    assert str(caught.value) == "scaling must be one of auto, manual"

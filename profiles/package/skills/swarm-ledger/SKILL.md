@@ -240,7 +240,7 @@ process runs between ticks.
 3. `agentihooks swarm <slug> start`: scales up at once; `pause` stops new spawns, `stop` drains, `stop --now`
    kills every agent and reopens its task. Change caps with `agentihooks swarm <slug> max-eng-agents=3`.
 4. `agentihooks swarm <slug> status` and `agentihooks swarm list` show agents, tasks and state.
-5. Talk to the swarm from the page chat or `agentihooks swarm <slug> send-message "@eng <text>"`; idle agents
+5. Talk to the swarm from the page chat, or reach every live agent's inbox with `agentihooks swarm <slug> send-message "<text>"`; idle agents
    get it in their pane at once, busy ones when their turn ends.
 
 Agents are told their task in their opening prompt and close it with `agentihooks swarm <slug> issue|pr|done|block|say`.

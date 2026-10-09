@@ -5577,8 +5577,8 @@ def _claude_command(claude_bin: str, extra_args: list[str]) -> list[str]:
 def cmd_claude(extra_args: list[str]) -> None:
     """Route to the healthiest Claude account, then replace this process with Claude.
 
-    The account with a free place under its session band and the fewest live sessions
-    wins; --route forces one account.
+    The api endpoint or the account with a free place under its session band and the
+    fewest live sessions wins, split by the api weight; --route forces one account or api.
     """
     import fcntl
 
@@ -5586,10 +5586,9 @@ def cmd_claude(extra_args: list[str]) -> None:
     from scripts.claude_quota_balancer import (
         RoutingError,
         _cache_path,
-        _child_environment,
-        credential_for_slug,
-        discover_credentials,
+        forced,
         format_selection,
+        launch_environment,
         render_table,
         route_requires_fable,
         select_credential,
@@ -5623,17 +5622,17 @@ def cmd_claude(extra_args: list[str]) -> None:
     route_lock = route_lock_path.open("a+", encoding="utf-8")
     fcntl.flock(route_lock, fcntl.LOCK_EX)
     try:
-        if route:
-            selected_credential = credential_for_slug(discover_credentials(os.environ), route)
-        else:
-            decision = select_credential(
+        decision = (
+            forced(os.environ, route)
+            if route
+            else select_credential(
                 os.environ,
                 include_fable=include_fable,
                 claude_bin=claude_bin,
                 sessions=sessions_by_account(),
                 exclude=excluded,
             )
-            selected_credential = decision.credential
+        )
     except RoutingError as exc:
         if fallback_bare and not route:
             print(f"[agenti] router unavailable ({exc}); launching bare Claude", file=sys.stderr, flush=True)
@@ -5649,23 +5648,16 @@ def cmd_claude(extra_args: list[str]) -> None:
     _write_route_report(
         report,
         status="routed",
-        account=selected_credential.account,
+        account=decision.account,
         placement="forced" if route else "open",
     )
-
-    kept = _child_environment(selected_credential, os.environ)
-    for name in [name for name in os.environ if name not in kept and name != selected_credential.env_name]:
-        del os.environ[name]
-    os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = selected_credential.token
-    os.environ["AGENTIHOOKS_ROUTE_ACCOUNT"] = selected_credential.account
     print(
-        f"[agenti] account={selected_credential.account} route=forced"
-        if route
-        else format_selection(decision, include_fable),
+        f"[agenti] account={decision.account} route=forced" if route else format_selection(decision, include_fable),
         flush=True,
     )
     cmd = _claude_command(claude_bin, extra_args)
-    os.execvpe(claude_bin, cmd, os.environ)
+    # nosemgrep: python.lang.security.audit.dangerous-os-exec-tainted-env-args.dangerous-os-exec-tainted-env-args
+    os.execvpe(claude_bin, cmd, launch_environment(decision, os.environ))
 
 
 def cmd_balance(
