@@ -322,7 +322,7 @@ def update_refusal(doc: dict, op: dict, meta: dict | None = None) -> str:
         return f"phase {phase} is not on this ledger: name one of its phase ids"
     task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), {})
     if phase is not None and phase != task.get("phase"):
-        return unsliced_refusal(doc, {**task, **op["fields"]}, op["by"])
+        return unsliced_refusal(doc, {**task, "plan_slice": "", **op["fields"]}, op["by"])
     return ""
 
 

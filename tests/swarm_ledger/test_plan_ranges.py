@@ -126,6 +126,13 @@ def test_a_task_without_a_slice_cannot_move_into_a_phase_whose_plan_has_anchors(
     state, rejected = core.sync(published, ops=[sliced])
     assert rejected == []
     assert (task(state, "elsewhere")["phase"], task(state, "elsewhere")["plan_lines"]) == ("p1", "7-9")
+    back = {**op, "id": "back", "fields": {"phase": "p2"}}
+    core.check_op(back)
+    assert core.sync(published, ops=[back])[1] == []
+    again = {**op, "id": "again"}
+    core.check_op(again)
+    state, rejected = core.sync(published, ops=[again])
+    assert (rejected, state["_meta"]["warnings"]) == (["again"], [UNSLICED])
 
 
 def test_plan_tasks_and_tasks_the_swarm_queues_need_no_slice(published):
