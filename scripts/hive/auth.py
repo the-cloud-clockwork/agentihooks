@@ -1,6 +1,7 @@
 """Hive credentials: a one-time invite code is exchanged for a ledger credential and a Redis ACL user."""
 
 import hashlib
+import hmac
 import os
 import secrets
 from pathlib import Path
@@ -87,6 +88,17 @@ def _with_user(url: str, user: str, password: str) -> str:
 
 def ledger_member(redis: "Redis", credential: str) -> str | None:
     return redis.get(f"{PREFIX}:ledger:{_digest(credential)}")
+
+
+def issue_controller(redis: "Redis") -> str:
+    credential = secrets.token_urlsafe()
+    redis.set(f"{PREFIX}:controller", _digest(credential))
+    return credential
+
+
+def controller(redis: "Redis", credential: str) -> bool:
+    expected = redis.get(f"{PREFIX}:controller")
+    return bool(credential and expected) and hmac.compare_digest(expected, _digest(credential))
 
 
 def revoke(redis: "Redis", member_id: str) -> None:
