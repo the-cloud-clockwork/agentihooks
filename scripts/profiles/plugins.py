@@ -63,10 +63,12 @@ def layer_skills(roots: Iterable[Path]) -> dict[str, Path]:
 def _installed(plugin: str, plugins_dir: Path) -> dict[str, Path]:
     try:
         installs = json.loads((plugins_dir / "installed_plugins.json").read_text())["plugins"][plugin]
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError):
         return {}
     for install in sorted(installs, key=lambda entry: entry.get("scope") != "user"):
-        root = Path(install.get("installPath") or "/nonexistent")
+        if not install.get("installPath"):
+            continue
+        root = Path(install["installPath"])
         try:
             listed = json.loads((root / ".claude-plugin" / "plugin.json").read_text()).get("skills")
         except (OSError, ValueError):
@@ -97,8 +99,7 @@ def replaced(plugin: str, chain: list[str], available: dict[str, Path], plugins_
         return browser.enabled(chain)
     if plugin in CODEX_PLUGIN_SKILLS:
         return bool(_installed(plugin, plugins_dir))
-    names = CODEX_SKILLS.get(plugin, ())
-    return bool(names) and all(name in available for name in names)
+    return plugin in CODEX_SKILLS and all(name in available for name in CODEX_SKILLS[plugin])
 
 
 def claude_only(name: str) -> bool:

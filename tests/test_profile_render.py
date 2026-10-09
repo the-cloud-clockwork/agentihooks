@@ -632,6 +632,88 @@ def test_a_bundle_codex_skill_replaces_a_plugin_for_the_gate(world):
     assert plugins.claude_only("frontend") is False
 
 
+def _plugin(root: Path, manifest: dict | None, skills: list[str]) -> Path:
+    for skill in skills:
+        _write(root / skill / "SKILL.md", f"---\nname: {Path(skill).name}\n---\n")
+    if manifest is not None:
+        _write(root / ".claude-plugin" / "plugin.json", json.dumps(manifest))
+    return root
+
+
+def _installs(home: Path, *installs: dict) -> Path:
+    plugins_dir = home / ".claude" / "plugins"
+    _write(plugins_dir / "installed_plugins.json", json.dumps({"plugins": {MATTPOCOCK: list(installs)}}))
+    return plugins_dir
+
+
+def test_installed_plugin_skills_prefer_the_user_scope_install(world, tmp_path):
+    from scripts.profiles import plugins
+
+    project = _plugin(tmp_path / "project", {"skills": ["./skills/a/tdd"]}, ["skills/a/tdd"])
+    user = _plugin(tmp_path / "user", {"skills": ["./skills/b/grill"]}, ["skills/b/grill"])
+    found = _installs(
+        world["home"], {"scope": "project", "installPath": str(project)}, {"scope": "user", "installPath": str(user)}
+    )
+
+    assert plugins.plugin_skills([MATTPOCOCK], found) == {"grill": user / "skills" / "b" / "grill"}
+
+
+def test_installed_plugin_skills_skip_an_install_without_a_path_or_a_manifest(world, tmp_path):
+    from scripts.profiles import plugins
+
+    broken = _plugin(tmp_path / "broken", None, ["skills/x/tdd"])
+    good = _plugin(tmp_path / "good", {"skills": ["./skills/x/tdd"]}, ["skills/x/tdd"])
+    found = _installs(
+        world["home"],
+        {"scope": "user"},
+        {"scope": "user", "installPath": str(broken)},
+        {"scope": "project", "installPath": str(good)},
+    )
+
+    assert plugins.plugin_skills([MATTPOCOCK], found) == {"tdd": good / "skills" / "x" / "tdd"}
+
+
+@pytest.mark.parametrize(("manifest", "folder"), [({"skills": "./kit/"}, "kit"), ({}, "skills")])
+def test_installed_plugin_skills_read_a_whole_skills_folder(world, tmp_path, manifest, folder):
+    from scripts.profiles import plugins
+
+    root = _plugin(tmp_path / "p", manifest, [f"{folder}/impeccable", "decoy/skills/other"])
+    found = _installs(world["home"], {"scope": "user", "installPath": str(root)})
+
+    assert plugins.plugin_skills([MATTPOCOCK], found) == {"impeccable": root / folder / "impeccable"}
+
+
+def test_the_gate_reads_the_operator_plugins_from_inside_a_profile_home(world, tmp_path, monkeypatch):
+    from scripts.profiles import plugins
+
+    kit = {"enabledPlugins": {MATTPOCOCK: True}}
+    _write(world["bundle"] / "profiles" / "rb-kit" / ".claude" / "settings.overrides.json", json.dumps(kit))
+    _mattpocock(world["home"], tmp_path)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "inside"))
+
+    assert plugins.claude_only("rb-role") is False
+
+
+def test_codex_render_inside_a_profile_home_links_the_operator_plugin_skills(world, tmp_path, monkeypatch):
+    from scripts.profiles import render
+
+    _write(world["bundle"] / "profiles" / "engineer" / "profile.yml", "name: engineer\nextends: [rb-base]\n")
+    plugin = _mattpocock(world["home"], tmp_path)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "inside"))
+
+    out = render.render_codex("engineer")
+
+    assert _codex_skills(out)["tdd"] == str(plugin / "skills" / "engineering" / "tdd")
+
+
+def test_codex_render_links_the_bundle_codex_skills(world):
+    from scripts.profiles import render
+
+    skill = _write(world["bundle"] / ".codex" / "skills" / "bundle-codex" / "SKILL.md", "---\nname: b\n---\n")
+
+    assert _codex_skills(render.render_codex("rb-role"))["bundle-codex"] == str(skill.parent)
+
+
 def test_codex_render_redoes_the_home_when_a_replacement_arrives(world):
     from scripts.profiles import render
 
@@ -644,6 +726,8 @@ def test_codex_render_redoes_the_home_when_a_replacement_arrives(world):
     out = render.render_codex("frontend")
 
     assert out is not None and "impeccable" in _codex_skills(out)
+    impeccable = world["home"] / ".agentihooks" / "codex-skills" / "impeccable"
+    assert json.loads((out / render.STAMP).read_text())["skills"]["impeccable"] == str(impeccable)
 
 
 def test_the_package_prefix_names_the_same_role(world, tmp_path, monkeypatch):

@@ -88,3 +88,24 @@ def test_the_quota_plan_keeps_claude_seats_for_tasks_pinned_to_claude(tmp_path, 
     ready = [{"id": "t1", "profile": "frontend"}, {"id": "t2", "profile": "kit"}]
     rows = [claude(sessions=5), codex(sessions=3)]
     assert _planned(tmp_path, monkeypatch, rows, ready) == {"t1": "codex", "t2": "claude"}
+
+
+@pytest.mark.parametrize(
+    ("ready", "rows", "placed"),
+    [
+        (["frontend", "kit"], [claude(sessions=4), codex(sessions=3)], {"t0": "claude", "t1": "claude"}),
+        (["frontend", "frontend"], [claude(sessions=4), codex(sessions=3)], {"t0": "claude", "t1": "claude"}),
+        (["frontend"], [claude(sessions=6), codex(sessions=6)], {}),
+    ],
+)
+def test_the_quota_plan_counts_each_claude_seat_once(tmp_path, monkeypatch, ready, rows, placed):
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda profile: profile == "kit")
+    tasks = [{"id": f"t{i}", "profile": profile} for i, profile in enumerate(ready)]
+    assert _planned(tmp_path, monkeypatch, rows, tasks) == placed
+
+
+def test_a_frontend_quota_handoff_follows_its_predecessor_harness(tmp_path, monkeypatch):
+    launch = {"profile": "frontend", "harness": "codex", "account": "default", "model": "gpt", "effort": "high"}
+    ready = [{"id": "q", "handoff_envelope": {"reason": "quota", "launch": launch}}]
+    rows = [claude(), codex("default"), codex("cx2")]
+    assert _planned(tmp_path, monkeypatch, rows, ready) == {"q": "codex"}
