@@ -1,6 +1,7 @@
 import hashlib
 import json
 import math
+import os
 import re
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
@@ -164,9 +165,49 @@ def _read(name: str, path: Path) -> Definition:
     return _parse(name, raw)
 
 
+def _paths(name: str) -> list[Path]:
+    from hooks.config import AGENTIHOOKS_HOME
+
+    paths = [profile_chain.BUILT_IN_PROFILES / "package" / "classifiers" / f"{name}.yaml"]
+    bundle = profile_chain.bundle_path(profile_chain.read_state())
+    if bundle is not None:
+        paths.append(bundle / ".claude" / "classifiers" / f"{name}.yaml")
+    paths.append(AGENTIHOOKS_HOME / "classifiers" / f"{name}.yaml")
+    return paths
+
+
+def _overrides(package: Definition, selected: Definition) -> None:
+    if package.purpose != selected.purpose:
+        raise DefinitionError("overrides must preserve package purpose")
+    if package.rule.type == "code" or selected.rule.type == "code":
+        keys = lambda definition: {(item.name, item.each) for item in definition.questions}
+        if keys(package) != keys(selected):
+            raise DefinitionError("code rule overrides must preserve package question keys")
+
+
+def _environment(definition: Definition) -> Definition:
+    prefix = f"AGENTIHOOKS_CLASSIFIER_{definition.name.upper().replace('-', '_')}_"
+    thresholds = dict(definition.thresholds)
+    for key, value in thresholds.items():
+        raw = os.environ.get(prefix + key.upper().replace("-", "_"))
+        if raw is not None:
+            try:
+                value = float(raw)
+            except ValueError as exc:
+                raise DefinitionError(f"threshold {key} must be between zero and one") from exc
+        thresholds[key] = _probability(value, key)
+    return replace(definition, thresholds=thresholds)
+
+
 def load(name: str) -> Definition:
     name = _identifier(name, "classifier name")
-    path = profile_chain.BUILT_IN_PROFILES / "package" / "classifiers" / f"{name}.yaml"
-    definition = _read(name, path)
+    paths = _paths(name)
+    existing = [path for path in paths if path.is_file()]
+    if not existing:
+        raise DefinitionError(f"unknown classifier definition: {name}")
+    definition = _read(name, existing[-1])
+    if paths[0].is_file() and existing[-1] != paths[0]:
+        _overrides(_read(name, paths[0]), definition)
+    definition = _environment(definition)
     digest = hashlib.sha256(json.dumps(asdict(definition), sort_keys=True).encode()).hexdigest()
     return replace(definition, digest=digest)
