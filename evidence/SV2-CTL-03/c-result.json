@@ -1,5 +1,5 @@
 {
-  "tested_commit": "0b4ecf6ab0783e6f30d335875014ccd874ee4d1b",
+  "tested_commit": "a86cb62794abe29ae7c773c1972814f54ed079b6",
   "evidence_class": "mocked Redis and fake clock; no Kubernetes or provider calls",
   "case": "T-SV2-CTL-03-C",
   "passed": true,

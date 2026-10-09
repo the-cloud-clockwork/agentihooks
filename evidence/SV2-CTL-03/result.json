@@ -3,7 +3,7 @@
   "dependency": "SV2-CTL-02",
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2047",
-  "tested_commit": "0b4ecf6ab0783e6f30d335875014ccd874ee4d1b",
+  "tested_commit": "a86cb62794abe29ae7c773c1972814f54ed079b6",
   "status": "fixture-qualified-awaiting-dependency-merge-and-ci",
   "evidence_class": "Mocked Redis (fakeredis WATCH transactions) and a fake clock; empty fixture cluster; no Kubernetes, node autoscaler or provider call was made.",
   "interfaces": [
@@ -27,7 +27,7 @@
   },
   "validation": {
     "command": "python -m pytest tests/test_swarm_v2_admission.py tests/swarm/test_tick.py tests/swarm/test_launch_check.py tests/test_size_limits.py -q -n 2 --cov=scripts.swarm_v2.admission --cov-report=term-missing",
-    "output": "286 passed in 10.46 seconds; admission 140 statements, zero missing, 100 percent coverage",
+    "output": "admission tests 38 passed after the non mapping resources fix; with tick, launch check and size limit tests 286 passed at 0b4ecf6a; admission 142 statements, 100 percent coverage",
     "lint": "ruff check passed on changed Python files",
     "format": "ruff format check passed on changed Python files",
     "limits": "Only the allowlisted parameter count of _spawn (8) exceeds a limit, unchanged; complexity and branches within 12"
@@ -41,7 +41,7 @@
   "rollback_rehearsal": {
     "action": "Set the global or swarm pending cap to zero: every new task is deferred with the reason distributed admission is set to zero, while a held reservation still activates so current attempts drain.",
     "authoritative_objects": "The per swarm pending reservation hash and the global pending sorted set; the outcome counter is observational.",
-    "proof": "Case C admits with a zero cap policy over the same store, admits nothing and activates the held reservation; case C also restarts the admission owner mid hold and replays the same three reservations without a new admission."
+    "proof": "Case C admits with a zero cap policy over the same store, admits nothing and activates the held reservation; case C also restarts the admission owner mid hold and replays the same three reservations without a new admission. Admission state lives only in Redis and each step is one WATCH MULTI transaction, so the restart is a second admission owner over the same store; no mid transaction interruption point exists to exercise."
   },
   "remaining_limitations": [
     "No Kubernetes runtime adapter exists yet to carry a PendingAdmission and create the pending Pods, so the tick path is inert in production; that adapter belongs to later packages and must construct Policy from its GitOps configuration, where the rollback is setting either cap to zero.",

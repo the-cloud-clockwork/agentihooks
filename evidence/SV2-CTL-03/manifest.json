@@ -1,10 +1,10 @@
 {
-  "tested_commit": "0b4ecf6ab0783e6f30d335875014ccd874ee4d1b",
+  "tested_commit": "a86cb62794abe29ae7c773c1972814f54ed079b6",
   "evidence_class": "mocked Redis and fake clock; no Kubernetes or provider calls",
   "inputs": {
     "tests/fixtures/swarm_v2/pending-admission.json": "3365e522318eee022aa79d45c6367bb0ca6a49a7de650d364a35e1af83aefdc1",
     "tests/sv2_ctl03_cases.py": "86f1ab334e3871756188e23a01460cbc00d2219868ef49bc6d35284824c58a65",
-    "scripts/swarm_v2/admission.py": "4afb0758500c1ec64785f0a0809a9ac316944972ebfa8297b5606e4dfd1325c7",
+    "scripts/swarm_v2/admission.py": "20fd52397e55351bad299decc84103325ccc9af743185b30ff6add17c105d42c",
     "scripts/swarm/tick.py": "0de7d5cad6ae1c141111c45def7a121c64bc75a6a0102cbd5f3a18afa1d77cc2"
   }
 }
