@@ -79,13 +79,22 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
 
 
 def mutate_files(
-    root: Path, work: Path, selected: dict[str, tuple[set[int], list[str]]], deadline: float
+    root: Path,
+    work: Path,
+    selected: dict[str, tuple[set[int], list[str]]],
+    deadline: float,
+    shard: tuple[int, int],
 ) -> tuple[dict[str, list[dict]], str]:
     tests = sorted({test for _, chosen in selected.values() for test in chosen})
     prepare_workspace(root, work, list(selected), tests)
     selection = work / "changed-lines.json"
     selection.write_text(
-        json.dumps({path: {"lines": sorted(lines), "tests": chosen} for path, (lines, chosen) in selected.items()})
+        json.dumps(
+            {
+                path: {"lines": sorted(lines), "tests": chosen, "shard": list(shard)}
+                for path, (lines, chosen) in selected.items()
+            }
+        )
     )
     log = work / "run.log"
     status = run_process(
@@ -109,7 +118,9 @@ def mutate_files(
     return json.loads(result_path.read_text()), ""
 
 
-def run_gate(root: Path, changes: dict[str, set[int]], output: Path, budget: float) -> dict:
+def run_gate(
+    root: Path, changes: dict[str, set[int]], output: Path, budget: float, shard: tuple[int, int] = (0, 1)
+) -> dict:
     output.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + budget
     cleared = load_clearances(root)
@@ -134,7 +145,7 @@ def run_gate(root: Path, changes: dict[str, set[int]], output: Path, budget: flo
             reasons.update(dict.fromkeys(group, "over budget"))
             continue
         work = Path(tempfile.mkdtemp(prefix=f"{index}-", dir=output))
-        results, reason = mutate_files(root, work, {path: selected[path] for path in group}, deadline)
+        results, reason = mutate_files(root, work, {path: selected[path] for path in group}, deadline, shard)
         if reason:
             reasons.update(dict.fromkeys(group, reason))
         else:

@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import tempfile
+import zlib
 from pathlib import Path
 from time import process_time
 
@@ -15,9 +16,9 @@ from scripts.ci_mutation.report import mutation_lines
 GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
 
 
-def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str, list[str]]:
+def changed_mutations(filename: str, source: str, changed: set[int]) -> tuple[object, list]:
     from libcst.metadata import MetadataWrapper, WhitespaceInclusivePositionProvider
-    from mutmut.mutation.file_mutation import combine_mutations_to_source, create_mutations
+    from mutmut.mutation.file_mutation import create_mutations
 
     module, mutations, _, _ = create_mutations(filename, source)
     positions = MetadataWrapper(module, unsafe_skip_copy=True).resolve(WhitespaceInclusivePositionProvider)
@@ -33,7 +34,30 @@ def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str
         )
         if changed.intersection(lines):
             selected.append(mutation)
-    code, names = combine_mutations_to_source(module, selected)
+    return module, selected
+
+
+def shard_share(filename: str, mutations: list, shard: tuple[int, int]) -> list:
+    index, total = shard
+    groups = {}
+    for mutation in mutations:
+        groups.setdefault(mutation.contained_by_top_level_function, []).append(mutation)
+    # Whole functions stay together so mutmut numbers each mutant as an unsharded run would, keeping clearance keys valid.
+    start = zlib.crc32(filename.encode()) % total
+    order = [(start + step) % total for step in range(total)]
+    loads = [0] * total
+    owner = {}
+    for function, members in sorted(groups.items(), key=lambda item: -len(item[1])):
+        owner[function] = min(order, key=loads.__getitem__)
+        loads[owner[function]] += len(members)
+    return [mutation for mutation in mutations if owner[mutation.contained_by_top_level_function] == index]
+
+
+def selected_mutants(filename: str, source: str, changed: set[int], shard: tuple[int, int]) -> tuple[str, list[str]]:
+    from mutmut.mutation.file_mutation import combine_mutations_to_source
+
+    module, selected = changed_mutations(filename, source, changed)
+    code, names = combine_mutations_to_source(module, shard_share(filename, selected, shard))
     return code, list(names)
 
 
@@ -130,7 +154,8 @@ def run_selected(selection: Path) -> None:
     related = set()
 
     def write_selected(*, out, source, filename):
-        code, names = selected_mutants(str(filename), source, set(changes[str(filename)]["lines"]))
+        change = changes[str(filename)]
+        code, names = selected_mutants(str(filename), source, set(change["lines"]), tuple(change["shard"]))
         bootstrap = (
             "import os as _mutmut_os\n"
             "from pathlib import Path as _mutmut_Path\n"
