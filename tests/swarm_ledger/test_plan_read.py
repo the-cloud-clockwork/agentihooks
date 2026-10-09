@@ -31,6 +31,7 @@ def slug(tmp_path, monkeypatch):
                 "description": "Keep engineers moving.\n\nUse this whole task specification.",
             },
             {"id": "loose", "phase": "p2", "plan_lines": "4-5"},
+            {"id": "empty", "phase": "p2"},
         ],
     }
     SQLiteLedgerRepository(tmp_path / DATABASE).import_document("chunks", {**doc, "_meta": {"rev": 1}})
@@ -56,6 +57,12 @@ def test_task_without_plan_lines_prints_its_description_as_the_whole_spec(slug, 
     assert run(capsys, ["--task", "bare"], {"AGENTIHOOKS_SWARM": slug}) == (
         "This task has no plan lines; its description is the whole spec.\n\n"
         "Keep engineers moving.\n\nUse this whole task specification.\n"
+    )
+
+
+def test_task_without_a_description_prints_an_empty_spec(slug, capsys):
+    assert run(capsys, ["--task", "empty"], {"AGENTIHOOKS_SWARM": slug}) == (
+        "This task has no plan lines; its description is the whole spec.\n\n\n"
     )
 
 
