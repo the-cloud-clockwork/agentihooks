@@ -33,6 +33,7 @@ def _missed(head: Path, shards: list[Path], out: Path) -> dict[str, list[int]]:
         combined.update(part)
     combined.write()
     coverage = Coverage(data_file=combined.base_filename(), config_file=False)
+    coverage.set_option("run:relative_files", True)
     coverage.load()
     cwd = Path.cwd()
     os.chdir(head)
