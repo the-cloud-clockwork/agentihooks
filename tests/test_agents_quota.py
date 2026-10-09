@@ -1,6 +1,8 @@
 import json
 import os
 
+import pytest
+
 from scripts import agents_quota, codex_quota
 from scripts.claude_quota_balancer import ProbeResult, QuotaWindow
 from scripts.codex_router import CodexAccount
@@ -39,6 +41,13 @@ def test_windows_map_by_length_not_by_slot():
 def test_an_event_without_rate_limits_is_skipped():
     assert codex_quota.parse_event(json.dumps({"timestamp": "2026-10-04T15:00:00Z", "payload": {"type": "x"}})) is None
     assert codex_quota.parse_event(_event("2026-10-04T15:00:00Z", None)) is None
+
+
+@pytest.mark.parametrize("content", ["", '{"payload": {"type": "x"}}\n', '{"rate_limits": null}\n'])
+def test_a_rollout_without_a_quota_event_has_no_reading(content, tmp_path):
+    path = tmp_path / "rollout.jsonl"
+    path.write_text(content)
+    assert codex_quota._last_in(path) is None
 
 
 def test_the_newest_observation_wins_across_rollouts(tmp_path):
