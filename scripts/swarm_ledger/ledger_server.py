@@ -606,8 +606,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(204)
         if self.headers.get("Origin") == FILE_ORIGIN:
             self.send_header("Access-Control-Allow-Origin", FILE_ORIGIN)
-            self.send_header("Access-Control-Allow-Methods", "GET, PUT, POST")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Ledger-Token, X-Ledger-Agent")
+            self.send_header("Access-Control-Allow-Methods", "GET, PUT, POST, PATCH")
+            self.send_header(
+                "Access-Control-Allow-Headers", "Content-Type, X-Ledger-Token, X-Ledger-Agent, X-Ledger-Slug"
+            )
             if self.headers.get("Access-Control-Request-Private-Network") == "true":
                 self.send_header("Access-Control-Allow-Private-Network", "true")
         self.end_headers()
@@ -825,6 +827,13 @@ class Handler(BaseHTTPRequestHandler):
         elif not ledger_bin.restore(slug):
             return self.send(404, "not in the bin", "text/plain")
         return self.send(200, json.dumps({"binned": sorted(ledger_bin.entries()), **reply}), "application/json")
+
+    def do_PATCH(self):
+        from scripts.swarm_ledger import api
+
+        if not self.path.startswith("/api/v1/"):
+            return self.send(404, "not found", "text/plain")
+        return api.handle(self, sys.modules[__name__])
 
     def do_PUT(self):
         if self.path.startswith("/api/v1/"):

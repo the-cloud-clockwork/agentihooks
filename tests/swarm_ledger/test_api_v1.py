@@ -761,13 +761,16 @@ def test_put_operations_and_options_keep_the_versioned_transport(live):
         response = conn.getresponse()
         assert response.status == 204
         assert response.getheader("Access-Control-Allow-Origin") == "null"
-        assert response.getheader("Access-Control-Allow-Methods") == "GET, PUT, POST"
-        assert response.getheader("Access-Control-Allow-Headers") == "Content-Type, X-Ledger-Token, X-Ledger-Agent"
+        assert response.getheader("Access-Control-Allow-Methods") == "GET, PUT, POST, PATCH"
+        assert (
+            response.getheader("Access-Control-Allow-Headers")
+            == "Content-Type, X-Ledger-Token, X-Ledger-Agent, X-Ledger-Slug"
+        )
         assert response.getheader("Access-Control-Allow-Private-Network") == "true"
         assert [row for row in response.getheaders() if row[0].lower().startswith("access-control")] == [
             ("Access-Control-Allow-Origin", "null"),
-            ("Access-Control-Allow-Methods", "GET, PUT, POST"),
-            ("Access-Control-Allow-Headers", "Content-Type, X-Ledger-Token, X-Ledger-Agent"),
+            ("Access-Control-Allow-Methods", "GET, PUT, POST, PATCH"),
+            ("Access-Control-Allow-Headers", "Content-Type, X-Ledger-Token, X-Ledger-Agent, X-Ledger-Slug"),
             ("Access-Control-Allow-Private-Network", "true"),
         ]
         assert response.read() == b""

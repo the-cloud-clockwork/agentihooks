@@ -1,6 +1,6 @@
 import { SLUG } from "./config.js";
 import { $, age, clock, h, span } from "./dom.js";
-import { writeSwarm } from "./api.js";
+import { readRouting, writeRouting, writeSwarm } from "./api.js";
 import { renderStats } from "./render.js";
 import { renderChatTo } from "./chat.js";
 import { clearNoteError, renderControls, renderGates, showNote } from "./controls.js";
@@ -177,9 +177,66 @@ function accountState(sw, r) {
 
 function quotaRows(sw, now) {
   const quota = sw.quota || {}, master = (sw.agents || []).find((a) => a.lane === "master") || {};
-  return (quota.rows || []).map((r) => ({ account: r.account, harness: r.agent, ...accountState(sw, r), five: percent(r.five_hour_left), fiveReset: resetIn(r.five_hour_resets_at, now),
-    seven: percent(r.seven_day_left), sevenReset: resetIn(r.seven_day_resets_at, now), sessions: r.sessions, cap: r.cap,
+  return (quota.rows || []).map((r) => ({ account: r.account, harness: r.agent, kind: r.kind || "subscription", ...accountState(sw, r), five: percent(r.five_hour_left), fiveReset: resetIn(r.five_hour_resets_at, now),
+    seven: percent(r.seven_day_left), sevenReset: resetIn(r.seven_day_resets_at, now), sessions: r.sessions, cap: r.cap, weight: r.weight,
     master: !!master.account && r.account === master.account && r.agent === (master.harness || "claude") }));
+}
+
+let routing = null, routingRead = null;
+
+function loadRouting() {
+  if (routingRead) return;
+  routingRead = readRouting().then((resp) => (resp.ok ? resp.json() : Promise.reject(resp.status)))
+    .then((reply) => { routing = reply.data; renderQuota(swarm, Date.now(), true); })
+    .catch(() => { routingRead = null; });
+}
+
+function routingKey(q, field) {
+  return `${q.harness}-api-${field === "cap" ? "max-sessions" : "weight"}`;
+}
+
+function routingValue(q, field) {
+  if (routing) return routing[routingKey(q, field)] ?? "";
+  const value = q[field];
+  return value == null || value >= 1e6 ? "" : value;
+}
+
+function routingInput(q, field) {
+  const input = h("input", { class: "sw-num", type: "text", inputmode: "numeric", "data-routing": routingKey(q, field),
+    "aria-label": `${q.harness} api ${field}`, placeholder: field === "cap" ? "none" : "0" });
+  input.value = String(routingValue(q, field));
+  return field === "weight" ? h("span", { class: "sw-field" }, input, h("span", { class: "sw-unit", text: "%" })) : input;
+}
+
+function quotaRow(q) {
+  const api = q.kind === "api";
+  return cells(idCell(q.account), q.harness, label(q.kind), q.state === "—" ? q.state : label(q.state), q.five, q.fiveReset, q.seven, q.sevenReset, q.routing, sessionCell(q),
+    api ? routingInput(q, "weight") : q.weight == null ? "—" : `${q.weight}%`, api ? routingInput(q, "cap") : q.cap,
+    q.master ? label("master", "master") : h("span"));
+}
+
+function renderQuota(sw, now, force) {
+  if (!sw || (!force && $("swarm-quota").contains(document.activeElement))) return;
+  loadRouting();
+  const quota = quotaRows(sw, now);
+  $("quota-count").textContent = quotaCount(sw, quota.length, now);
+  $("swarm-quota").replaceChildren(...(quota.length ? quota.map(quotaRow) : [emptyRow(13, "No quota observed yet.")]));
+}
+
+export async function saveRouting(input) {
+  const text = input.value.trim();
+  const value = text === "" ? null : /^-?\d+$/.test(text) ? Number(text) : text;
+  showNote("pending", "routing");
+  try {
+    const resp = await writeRouting({ [input.dataset.routing]: value });
+    const reply = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error((reply.error && reply.error.message) || `server answered ${resp.status}`);
+    routing = reply.data;
+    showNote("done", "routing");
+  } catch (e) {
+    showNote("error", "routing", e instanceof TypeError ? "ledger server unreachable" : e.message);
+  }
+  renderQuota(swarm, Date.now(), true);
 }
 
 function capacityLine(cap, now) {
@@ -189,7 +246,7 @@ function capacityLine(cap, now) {
 }
 
 function sessionCell(q) {
-  return h("span", { class: "sw-sessions-value", text: `${q.sessions}/${q.cap ?? "—"}` });
+  return h("span", { class: "sw-sessions-value", text: String(q.sessions) });
 }
 
 function quotaCount(sw, count, now) {
@@ -234,10 +291,7 @@ export function renderSwarm(sw) {
   $("alert-live").replaceChildren(...liveCaps(sw).map((text) => h("span", { text })));
   renderAgents(sw, now);
   renderOverlays(sw);
-  const quota = quotaRows(sw, now);
-  $("quota-count").textContent = quotaCount(sw, quota.length, now);
-  $("swarm-quota").replaceChildren(...(quota.length ? quota.map((q) => cells(idCell(q.account), q.harness, q.state === "—" ? q.state : label(q.state), q.five, q.fiveReset, q.seven, q.sevenReset, q.routing, sessionCell(q), q.master ? label("master", "master") : h("span")))
-    : [emptyRow(10, "No quota observed yet. Run agentihooks balance.")]));
+  renderQuota(sw, now);
   const capacity = capacityLine(sw.quota_capacity, now);
   $("quota-capacity").replaceChildren(...(capacity ? [h("span", { class: "sw-caplanes", text: capacity.lanes }), h("span", { text: capacity.changed }), h("span", { text: capacity.reason })] : []));
   const doctor = sw.doctor || {};
