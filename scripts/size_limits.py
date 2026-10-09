@@ -131,10 +131,7 @@ def grade(base: dict, head: dict, recorded: dict | None) -> list[str]:
     return errors
 
 
-def _base(args, recorded: dict | None) -> dict:
-    if args.bootstrap:
-        print(f"Bootstrap: the head's own {ALLOWLIST} stands in for the base allowlist.")
-        return recorded or {}
+def _base(args) -> dict:
     base = load(args.base)
     if base is None:
         raise GradeError(f"the base has no {ALLOWLIST}, so the head cannot be graded")
@@ -146,10 +143,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base")
     parser.add_argument("--head", type=Path, default=Path.cwd())
     parser.add_argument("--write", action="store_true")
-    parser.add_argument("--bootstrap", action="store_true")
     args = parser.parse_args(argv)
-    if not (args.write or args.bootstrap or args.base):
-        parser.error("grading needs --base, or --bootstrap where the base predates the gate")
+    if not (args.write or args.base):
+        parser.error("grading needs --base")
     if (version := _ruff_version()) != RUFF_VERSION:
         print(f"::error::The size gate needs ruff {RUFF_VERSION}, found {version or 'none'}, so it cannot grade.")
         return 1
@@ -159,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         head = measure(args.head)
         recorded = load(args.head)
-        base = _base(args, recorded)
+        base = _base(args)
     except (GradeError, SyntaxError, ValueError, OSError) as exc:
         print(f"::error::{exc}")
         return 1
