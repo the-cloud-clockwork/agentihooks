@@ -17,6 +17,7 @@ for ((shard=1; shard<=shards; shard++)); do
     fi
     reports+=("$report")
 done
+trap 'kill "${lcov_pid:-}" "${table_pid:-}" 2> /dev/null || true' EXIT
 lcov_log=$(mktemp)
 python "$(dirname "$0")/../../tests/js_lcov.py" --captures .coverage-shards --out lcov.info > "$lcov_log" 2>&1 &
 lcov_pid=$!

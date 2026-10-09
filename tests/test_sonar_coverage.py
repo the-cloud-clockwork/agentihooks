@@ -148,7 +148,7 @@ def meet(mine, theirs, failure):
 """
 
 
-def _stubbed_combine_tree(tmp_path, lcov_exit=0):
+def _stubbed_combine_tree(tmp_path, lcov_exit=0, xml_exit=0):
     shutil.copytree(ROOT / ".github/coverage", tmp_path / ".github/coverage")
     for shard in range(1, 3):
         report = tmp_path / ".coverage-shards" / f"coverage-3.12-{shard}" / ".coverage"
@@ -158,9 +158,11 @@ def _stubbed_combine_tree(tmp_path, lcov_exit=0):
     (tmp_path / "coverage/__init__.py").write_text("")
     (tmp_path / "coverage/__main__.py").write_text(
         _RENDEZVOUS
-        + """
+        + f"""
 if sys.argv[1] == "xml":
     meet("xml.started", "lcov.started", "the JS conversion never ran beside the XML")
+    if {xml_exit}:
+        sys.exit({xml_exit})
     Path("coverage.xml").write_text("<coverage/>")
 elif sys.argv[1] == "report":
     print("TOTAL")
@@ -196,6 +198,12 @@ def test_a_failed_js_conversion_fails_the_merge(tmp_path):
     result = _stubbed_combine_tree(tmp_path, lcov_exit=3)
     assert result.returncode == 3, result.stdout + result.stderr
     assert (tmp_path / "coverage.xml").exists()
+
+
+def test_a_failed_python_xml_fails_the_merge(tmp_path):
+    result = _stubbed_combine_tree(tmp_path, xml_exit=4)
+    assert result.returncode == 4, result.stdout + result.stderr
+    assert not (tmp_path / "coverage.xml").exists()
 
 
 def test_coverage_options_do_not_reach_nested_test_runners(tmp_path):
