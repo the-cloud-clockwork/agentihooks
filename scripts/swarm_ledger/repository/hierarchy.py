@@ -16,23 +16,36 @@ DELETE_DEPENDENCY = "DELETE FROM work_dependencies WHERE ledger_slug=? AND node_
 INSERT_DEPENDENCY = "INSERT OR IGNORE INTO work_dependencies VALUES (?, ?, ?)"
 
 
+def text(value) -> bool:
+    return isinstance(value, str) and bool(value)
+
+
 def parent(collection: str, item: dict) -> str | None:
     if collection == "phases":
-        return item.get("plan") or None
-    if collection == "slices":
-        return item.get("phase") or None
-    if collection == "tasks":
-        return item.get("slice") or (f"phases/{item['phase']}" if item.get("phase") else None)
-    return None
+        found = item.get("plan")
+    elif collection == "slices":
+        found = item.get("phase")
+    elif collection == "tasks":
+        found = item.get("slice") or (f"phases/{item['phase']}" if text(item.get("phase")) else None)
+    else:
+        found = None
+    return found if text(found) else None
 
 
 def project(state: dict) -> tuple[dict, set]:
     nodes, dependencies = {}, set()
     for collection, kind in KINDS.items():
         for position, item in enumerate(state.get(collection) or []):
+            if not isinstance(item, dict) or not text(item.get("id")):
+                continue
             node = f"{collection}/{item['id']}"
             nodes[node] = (kind, parent(collection, item), position)
-            dependencies.update((node, f"{collection}/{required}") for required in item.get("depends_on") or [])
+            required = item.get("depends_on")
+            dependencies.update(
+                (node, f"{collection}/{other}")
+                for other in (required if isinstance(required, list) else [])
+                if text(other)
+            )
     return nodes, dependencies
 
 

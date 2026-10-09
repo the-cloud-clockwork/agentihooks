@@ -81,6 +81,29 @@ def test_project_of_an_empty_document_is_empty():
     assert hierarchy.project({"tasks": None, "phases": []}) == ({}, set())
 
 
+def test_project_skips_malformed_items_and_links():
+    state = {
+        "phases": [{"id": "p1", "plan": 5}],
+        "tasks": [
+            {"title": "no id"},
+            "junk",
+            {"id": "t1", "phase": {"x": 1}, "depends_on": "t2"},
+            {"id": "t2", "slice": ["s"], "depends_on": ["", 3, "t1"]},
+            {"id": "", "phase": "p1"},
+        ],
+    }
+    assert hierarchy.project(state) == (
+        {"phases/p1": ("phase", None, 0), "tasks/t1": ("task", None, 2), "tasks/t2": ("task", None, 3)},
+        {("tasks/t2", "tasks/t1")},
+    )
+
+
+def test_an_imported_ledger_with_malformed_items_stores_the_rest(tmp_path):
+    copy = store.SQLiteLedgerRepository(tmp_path / store.DATABASE)
+    copy.import_document("loose", {"tasks": [{"title": "no id"}, {"id": "t1"}], "_meta": {"rev": 1}})
+    assert rows(copy, "loose") == ({"tasks/t1": ("task", None, 1)}, set())
+
+
 def test_create_stores_the_tables_of_the_document(repo):
     assert rows(repo) == (
         {
