@@ -79,8 +79,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = Path(args.root)
     merge_base = _git(root, "merge-base", args.base, args.head).strip()
-    base_workflows, _ = load(root, merge_base)
-    _, base_config = load(root, args.base)
+    base_workflows, branched_config = load(root, merge_base)
+    _, tip_config = load(root, args.base)
+    base_config = {
+        section: {**branched_config.get(section, {}), **tip_config.get(section, {})}
+        for section in ("not_gates", "outside_gate")
+    }
     head_workflows, head_config = load(root, args.head)
     problems = grade(base_workflows, base_config, head_workflows, head_config, datetime.now(UTC).date())
     print(f"graded {args.head[:12]} against merge base {merge_base[:12]}: {len(problems)} protected gate problems")

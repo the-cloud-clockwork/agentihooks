@@ -212,6 +212,24 @@ def test_main_reads_declarations_from_the_protected_tip(repo, capsys):
     assert gate_protected.main(["--root", str(repo), "--head", behind]) == 0
 
 
+def test_main_keeps_declarations_dev_retired_after_the_head_branched(repo, capsys):
+    workflow = _workflow()
+    workflow["jobs"]["slow"] = {"runs-on": "ubuntu-latest"}
+    other = {True: {"pull_request": None}, "jobs": {"job": {"runs-on": "ubuntu-latest"}}}
+    lasting = {**_entry(), "expires": "2999-01-01"}
+    declared = {"outside_gate": {"other.yml/job": lasting}, "not_gates": {"test.yml/slow": lasting}}
+    _commit(repo, {"test.yml": workflow, "other.yml": other}, declared, "base")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = copy.deepcopy(workflow)
+    head["jobs"]["audit"] = {"runs-on": "ubuntu-latest"}
+    head["jobs"]["gate"]["needs"].append("audit")
+    behind = _commit(repo, {"test.yml": head, "other.yml": other}, declared, "add audit")
+    _git(repo, "checkout", "-q", "dev")
+    _commit(repo, {"test.yml": _workflow()}, {}, "retire slow and other")
+    assert gate_protected.main(["--root", str(repo), "--head", behind]) == 0
+    assert capsys.readouterr().out.splitlines()[-1].endswith(": 0 protected gate problems")
+
+
 def test_main_reads_top_level_workflows_only_and_runs_without_a_wiring_file(repo, monkeypatch, capsys):
     _commit(repo, {"test.yaml": _workflow()}, {}, "base")
     (repo / ".github/gate-wiring.json").unlink()
