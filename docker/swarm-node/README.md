@@ -26,18 +26,19 @@ renders its Claude and Codex profiles into a private attempt home under
 `/home/worker/attempts/<attempt>`, one home per target, through the same target
 adapters `agentihooks init` uses. Only the selected profiles are copied in, and
 accounts are recorded as variable names, never values. Hook and MCP commands use
-the container interpreter; a profile whose hooks, MCP servers or environment
-values point at any path outside the attempt, the interpreter prefix or the
-agentihooks install fails bootstrap, as does a `..`, `~` or `$` path, and a
-noexec home volume when Codex is requested, because its hook wrapper must
-execute. Other relative paths are admitted. Rerunning an accepted request is a no-op, an interrupted one is
+the container interpreter. Every rendered setting except permission rules, every
+MCP server field and every Codex hook export is scanned: a path outside the
+attempt, the interpreter prefix or the agentihooks install fails bootstrap, as
+does any `..`, `~` or `$` path, and a noexec home volume when Codex is
+requested, because its hook wrapper must execute. Other relative paths are
+admitted. Rerunning an accepted request is a no-op, an interrupted one is
 rendered again from scratch, and a different request for an accepted attempt is
 refused. The execution record names the digest of each selected profile.
 Rollback selects the prior profile digest for new attempts; existing attempt
-homes are kept for recovery. Codex skips hooks it has not trusted, so the launch
-must trust them or pass `--dangerously-bypass-hook-trust`. This image introduces
-no orchestration service or embedded database. The existing ledger service
-Dockerfile remains separate.
+homes are kept for recovery. Codex skips hooks it has not trusted; trusting them
+at launch belongs to the supervisor package SV2-IMG-03, so the smoke proves hook
+loading with trust bypassed. This image introduces no orchestration service or
+embedded database. The existing ledger service Dockerfile remains separate.
 
 After committing inputs, `bash docker/swarm-node/smoke.sh OUTPUT_DIRECTORY`
 builds an archived clean context, starts two independent containers with network

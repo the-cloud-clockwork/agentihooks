@@ -20,6 +20,8 @@ PENDING = ".bootstrap-pending"
 NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 VARIABLE = re.compile(r"[A-Z][A-Z0-9_]{0,127}")
 SYSTEM_ROOTS = (Path("/usr/bin"), Path("/bin"), Path("/usr/local/bin"))
+SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*")
+EXPORT = re.compile(r'export (\w+)="\$\{\1:=(.*)\}"')
 
 
 class BootstrapError(ValueError):
@@ -222,40 +224,54 @@ def materialize(attempt: Path, target: str) -> None:
             adapter.register_mcp(_i._load_native_layer(layer).get("mcpServers") or {})
 
 
-def _claude_commands(home: Path) -> dict[str, list[str]]:
+def _strings(value: object) -> list[str]:
+    if isinstance(value, dict):
+        return [s for item in value.values() for s in _strings(item)]
+    if isinstance(value, list):
+        return [s for item in value for s in _strings(item)]
+    return [value] if isinstance(value, str) else []
+
+
+def _claude_surfaces(home: Path) -> dict[str, list[str]]:
     settings = json.loads((home / ".claude" / "settings.json").read_text(encoding="utf-8"))
-    hooks = [h.get("command", "") for groups in settings.get("hooks", {}).values() for g in groups for h in g["hooks"]]
     servers = json.loads((home / ".claude.json").read_text(encoding="utf-8")).get("mcpServers", {})
-    return {
-        "hook command": [*hooks, (settings.get("statusLine") or {}).get("command", "")],
-        "environment value": [shlex.quote(str(value)) for value in settings.get("env", {}).values()],
-        "MCP server": [_server_text(spec) for spec in servers.values()],
-    }
+    surfaces = {f"setting {key}": _strings(value) for key, value in settings.items() if key != "permissions"}
+    return surfaces | {"MCP server": _strings(servers)}
 
 
-def _codex_commands(home: Path) -> dict[str, list[str]]:
+def _wrapper(text: str) -> tuple[list[str], list[str]]:
+    exports, commands = [], []
+    for line in text.splitlines()[1:]:
+        found = EXPORT.fullmatch(line)
+        if found:
+            exports += shlex.split(found[2])
+        else:
+            commands.append(line)
+    return exports, commands
+
+
+def _codex_surfaces(home: Path) -> dict[str, list[str]]:
     codex = home / ".codex"
     config = tomllib.loads((codex / "config.toml").read_text(encoding="utf-8"))
     hooks = json.loads((codex / "hooks.json").read_text(encoding="utf-8"))["hooks"]
-    wrapper = (codex / "agentihooks-hook.sh").read_text(encoding="utf-8").splitlines()[1:]
-    return {
-        "hook command": [h["command"] for groups in hooks.values() for g in groups for h in g["hooks"]] + wrapper,
-        "notify command": [shlex.join(config.get("notify", []))],
-        "MCP server": [_server_text(spec) for spec in config.get("mcp_servers", {}).values()],
+    exports, commands = _wrapper((codex / "agentihooks-hook.sh").read_text(encoding="utf-8"))
+    surfaces = {f"setting {key}": _strings(value) for key, value in config.items() if key != "mcp_servers"}
+    return surfaces | {
+        "MCP server": _strings(config.get("mcp_servers", {})),
+        "hook command": _strings(hooks) + commands,
+        "environment value": exports,
     }
-
-
-def _server_text(spec: dict) -> str:
-    values = [str(value) for value in (spec.get("env") or {}).values()]
-    return shlex.join([spec.get("command", ""), *spec.get("args", []), spec.get("cwd", ""), *values])
 
 
 def _pieces(word: str) -> list[str]:
     pieces = []
     for part in [p for item in word.split("=") for p in re.split(r":(?!//)", item)]:
-        if "://" not in part:
+        scheme, separator, rest = part.partition("://")
+        if not separator:
             pieces.append(part)
-        elif urlsplit(part).scheme == "file":
+        elif not SCHEME.fullmatch(scheme):
+            pieces += [scheme, "/" + rest.lstrip("/")]
+        elif scheme.lower().split("+")[-1] == "file":
             pieces.append(urlsplit(part).path)
     return pieces
 
@@ -265,18 +281,21 @@ def _paths(text: str) -> list[str]:
         words = shlex.split(text)
     except ValueError:
         words = text.split()
-    return [piece for word in words for piece in _pieces(word) if "/" in piece]
+    pieces = [piece for word in words for piece in _pieces(word)]
+    return [piece for piece in pieces if "/" in piece or "$" in piece or piece.startswith("~")]
 
 
 def _leaves(path: str, roots: list[Path]) -> bool:
+    if "$" in path or path.startswith("~"):
+        return True
     if path.startswith("/"):
         return _escapes(Path(os.path.normpath(path)), roots)
-    return path.startswith("~") or "$" in path or ".." in Path(path).parts
+    return ".." in Path(path).parts
 
 
 def _check_home(attempt: Path, target: str, roots: list[Path], owner: tuple[int, int]) -> None:
     home = attempt / "homes" / target
-    surfaces = _claude_commands(home) if target == "claude" else _codex_commands(home)
+    surfaces = _claude_surfaces(home) if target == "claude" else _codex_surfaces(home)
     for surface, texts in surfaces.items():
         for path in [p for text in texts for p in _paths(text)]:
             if _leaves(path, roots):

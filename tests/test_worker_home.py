@@ -153,7 +153,7 @@ def test_profile_pointing_at_a_workstation_venv_fails_bootstrap(fixture):
     bad = request(templates, volume, profiles={"claude": "fixture-workstation", "codex": "fixture-codex"})
     with pytest.raises(worker_home.BootstrapError) as error:
         worker_home.bootstrap(bad)
-    assert str(error.value) == f"claude hook command leaves the execution root: {WORKSTATION_PYTHON}"
+    assert str(error.value) == f"claude setting hooks leaves the execution root: {WORKSTATION_PYTHON}"
     assert snapshot(volume) == before
     assert snapshot(templates) == sources
     assert not (volume / "attempt-1").exists()
@@ -170,6 +170,12 @@ def test_profile_pointing_at_a_workstation_venv_fails_bootstrap(fixture):
         ("python -m hooks --config=file:///etc/x", "/etc/x"),
         ("~/.venv/bin/python -m hooks", "~/.venv/bin/python"),
         ("$HOME/.venv/bin/python -m hooks", "$HOME/.venv/bin/python"),
+        (f"x={sys.prefix}:///etc/shadow python -m hooks", "/etc/shadow"),
+        (f"PYTHONPATH={sys.prefix}://etc/shadow python -m hooks", "/etc/shadow"),
+        (f"{sys.prefix}/$X/etc/shadow -m hooks", f"{sys.prefix}/$X/etc/shadow"),
+        ("$AGENTIHOOKS_PYTHON -m hooks", "$AGENTIHOOKS_PYTHON"),
+        ("~ -m hooks", "~"),
+        ("python -m hooks --config=git+file:///etc/x", "/etc/x"),
     ],
 )
 def test_hidden_or_relative_paths_in_a_hook_fail_bootstrap(fixture, command, offending):
@@ -180,7 +186,7 @@ def test_hidden_or_relative_paths_in_a_hook_fail_bootstrap(fixture, command, off
     settings.write_text(json.dumps(document))
     with pytest.raises(worker_home.BootstrapError) as error:
         worker_home.bootstrap(request(templates, volume, profiles={"claude": "fixture-workstation"}, accounts={}))
-    assert str(error.value) == f"claude hook command leaves the execution root: {offending}"
+    assert str(error.value) == f"claude setting hooks leaves the execution root: {offending}"
     assert list(volume.iterdir()) == []
 
 
@@ -203,8 +209,7 @@ def test_a_workstation_path_in_a_settings_environment_value_fails_bootstrap(fixt
     with pytest.raises(worker_home.BootstrapError) as error:
         worker_home.bootstrap(request(templates, volume, profiles={"claude": "fixture-claude"}, accounts={}))
     assert (
-        str(error.value)
-        == "claude environment value leaves the execution root: /home/operator/dev/tcc-ecosystem/.venv/bin"
+        str(error.value) == "claude setting env leaves the execution root: /home/operator/dev/tcc-ecosystem/.venv/bin"
     )
     assert list(volume.iterdir()) == []
 
@@ -222,7 +227,36 @@ def test_a_workstation_path_in_an_mcp_environment_fails_bootstrap(fixture, targe
     assert list(volume.iterdir()) == []
 
 
-def test_a_missing_execution_root_is_refused(fixture, tmp_path, capsys):
+def test_an_executable_setting_outside_the_root_fails_bootstrap(fixture):
+    templates, volume = fixture
+    settings = templates / "fixture-claude" / ".claude" / "settings.overrides.json"
+    document = json.loads(settings.read_text())
+    document["apiKeyHelper"] = "/home/operator/bin/key.sh"
+    settings.write_text(json.dumps(document))
+    with pytest.raises(worker_home.BootstrapError) as error:
+        worker_home.bootstrap(request(templates, volume, profiles={"claude": "fixture-claude"}, accounts={}))
+    assert str(error.value) == "claude setting apiKeyHelper leaves the execution root: /home/operator/bin/key.sh"
+    assert list(volume.iterdir()) == []
+
+
+def test_codex_wrapper_exports_are_scanned_as_values(fixture, monkeypatch):
+    templates, volume = fixture
+    calls = []
+    real = worker_home._wrapper
+
+    def spy(text):
+        exports, commands = real(text)
+        calls.append(exports)
+        return exports, commands
+
+    monkeypatch.setattr(worker_home, "_wrapper", spy)
+    worker_home.bootstrap(request(templates, volume, profiles={"codex": "fixture-codex"}, accounts={}))
+    assert calls == [list(ENDPOINTS.values())]
+    script = "x\nexport A=\"${A:='/home/op/.venv'}\"\nset -e\n"
+    assert real(script) == (["/home/op/.venv"], ["set -e"])
+
+
+def test_a_missing_execution_root_is_refused(fixture, tmp_path):
     templates, _ = fixture
     missing = tmp_path / "missing"
     with pytest.raises(worker_home.BootstrapError) as error:

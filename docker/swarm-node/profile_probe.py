@@ -66,7 +66,7 @@ def rejection(attempts: Path) -> dict:
     seconds = {name: round(int(Path(f"/tmp/{name}.ns").read_text(encoding="utf-8")) / 1e9, 3) for name in result}
     assert result["workstation"] == {
         "exit": 1,
-        "stderr": "ERROR: claude hook command leaves the execution root: /home/operator/dev/tcc-ecosystem/.venv/bin/python",
+        "stderr": "ERROR: claude setting hooks leaves the execution root: /home/operator/dev/tcc-ecosystem/.venv/bin/python",
     }, result
     assert result["interpreter"] == {
         "exit": 1,
