@@ -112,7 +112,7 @@ def _substitutions(command: str) -> list[str]:
             scripts.append(match[1] or match[2])
             index = match.end()
             continue
-        if character in {"'", '"\\"'}:
+        if character in {"'", '"'}:
             if not quote:
                 quote = character
             elif quote == character:
