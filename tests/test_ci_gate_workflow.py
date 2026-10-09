@@ -423,8 +423,13 @@ def test_kind_image_cache_hit_and_miss_prepare_image_and_keep_the_chart_proof(tm
     if hit:
         (tmp_path / ".kind-cache").mkdir()
         (tmp_path / ".kind-cache/image.tar").touch()
-    command = prepare["run"].replace("${{ steps.chart-image.outputs.cache-hit }}", str(hit).lower())
-    env = dict(os.environ, PATH=f"{tmp_path}:{os.environ['PATH']}", CALLS=str(tmp_path / "calls"))
+    command = prepare["run"]
+    env = dict(
+        os.environ,
+        PATH=f"{tmp_path}:{os.environ['PATH']}",
+        CALLS=str(tmp_path / "calls"),
+        CHART_IMAGE_CACHE_HIT=str(hit).lower(),
+    )
     subprocess.run(["bash", "-euo", "pipefail", "-c", command], cwd=tmp_path, env=env, check=True)
     calls = (tmp_path / "calls").read_text()
     assert ("buildx build" in calls) is not hit

@@ -47,8 +47,10 @@ jobs:
         if: steps.chart-image.outputs.cache-hit != 'true'
         uses: docker/setup-buildx-action@v4
       - name: Prepare chart image
+        env:
+          CHART_IMAGE_CACHE_HIT: ${{ steps.chart-image.outputs.cache-hit }}
         run: |
-          if [[ "${{ steps.chart-image.outputs.cache-hit }}" == true ]]; then
+          if [[ "$CHART_IMAGE_CACHE_HIT" == true ]]; then
             docker load -i .kind-cache/image.tar
           else
             mkdir -p .kind-cache
@@ -64,11 +66,13 @@ jobs:
           path: .kind-cache/cluster.tar
           key: kind-cluster-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.KIND_NODE_IMAGE }}-${{ hashFiles('deploy/helm/agentihooks-swarm/**') }}
       - name: Prepare cluster images
+        env:
+          CLUSTER_IMAGES_CACHE_HIT: ${{ steps.cluster-images.outputs.cache-hit }}
         run: |
           mapfile -t images < <(helm template agentihooks-swarm deploy/helm/agentihooks-swarm \
             -f deploy/helm/agentihooks-swarm/ci/kind-values.yaml \
             | awk '$1 == "image:" {gsub(/"/, "", $2); if ($2 != "local/agentihooks-swarm:dev") print $2}' | sort -u)
-          if [[ "${{ steps.cluster-images.outputs.cache-hit }}" == true ]]; then
+          if [[ "$CLUSTER_IMAGES_CACHE_HIT" == true ]]; then
             docker load -i .kind-cache/cluster.tar
           else
             dependencies=("$KIND_NODE_IMAGE")
