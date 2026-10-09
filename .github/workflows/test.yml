@@ -123,6 +123,7 @@ jobs:
     outputs:
       key: ${{ steps.stored.outputs.cache-matched-key }}
       queued: ${{ steps.republished.outputs.queued }}
+      base: ${{ steps.base-run.outputs.sha }}
     steps:
       - name: Look up the base revision's dev durations
         id: stored
@@ -176,15 +177,17 @@ jobs:
             sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/${BASE#origin/}" --jq .sha)
             filter+="&head_sha=$sha"
           fi
-          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=dev&event=push&$filter&per_page=20" --jq '.workflow_runs[].id')
-          for run in $runs; do
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=dev&event=push&$filter&per_page=20" --jq '.workflow_runs[] | "\(.id) \(.head_sha)"')
+          while read -r run head; do
+            [[ -n "$run" ]] || continue
             kept=" $(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
             if [[ "$kept" == *" durations-merged "* && "$kept" == *" coverage-baseline "* ]]; then
-              echo "Restoring dev durations and the coverage baseline for base $BASE from passed dev push run $run"
+              echo "Restoring dev durations and the coverage baseline for base $BASE from passed dev push run $run on $head"
               echo "id=$run" >> "$GITHUB_OUTPUT"
+              echo "sha=$head" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-          done
+          done <<< "$runs"
           echo "::error::No passed dev push Tests run for base $BASE kept live durations-merged and coverage-baseline artifacts; pin a base whose dev push run passed and finished."
           exit 1
 

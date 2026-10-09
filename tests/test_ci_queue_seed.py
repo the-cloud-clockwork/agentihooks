@@ -71,6 +71,7 @@ def test_queue_runs_restore_the_latest_dev_durations_on_the_app_token():
     assert upload["with"]["if-no-files-found"] == "error"
     assert steps.index(mint) < steps.index(find) < steps.index(download) < steps.index(upload)
     assert job["outputs"]["queued"] == "${{ steps.republished.outputs.queued }}"
+    assert job["outputs"]["base"] == "${{ steps.base-run.outputs.sha }}"
 
 
 def test_no_queue_run_carries_a_baseline_from_the_latest_dev_run():
@@ -416,7 +417,7 @@ def test_dispatch_on_dev_restores_the_newest_passed_dev_push_run(dispatch_lookup
         run111="durations-merged coverage-baseline",
     )
     assert result.returncode == 0, result.stderr
-    assert output == "id=222\n"
+    assert output == f"id=222\nsha={'b' * 40}\n"
     assert not [arg for arg in args if "/commits/" in arg]
     assert (
         "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs"
@@ -436,7 +437,7 @@ def test_dispatch_on_a_pinned_commit_restores_its_passed_dev_push_run(dispatch_l
         run222="durations-merged coverage-baseline",
     )
     assert result.returncode == 0, result.stderr
-    assert output == "id=111\n"
+    assert output == f"id=111\nsha={pinned}\n"
     assert "repos/the-cloud-clockwork/agentihooks/commits/" + pinned in args
     assert (
         "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs"
