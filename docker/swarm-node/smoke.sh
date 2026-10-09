@@ -75,7 +75,7 @@ else:
     lock['tools']['herdr']['sha256']='0'*64
 path.write_text(json.dumps(lock))
 PY
-    if "${build[@]}" --platform linux/amd64 -f "$context/docker/swarm-node/Dockerfile" \
+    if docker build --platform linux/amd64 -f "$context/docker/swarm-node/Dockerfile" \
         -t "$rejected" "$context" > "$output/$rejection.log" 2>&1; then
         echo "rejection fixture unexpectedly built: $rejection" >&2
         exit 1
@@ -86,7 +86,7 @@ PY
     fi
 done
 mv "$context/docker/swarm-node/versions.original" "$context/docker/swarm-node/versions.lock"
-"${build[@]}" --no-cache --platform linux/amd64 --build-arg SOURCE_REVISION="$revision" \
+docker build --no-cache --platform linux/amd64 --build-arg SOURCE_REVISION="$revision" \
     -f "$context/docker/swarm-node/Dockerfile" -t "$rebuild" "$context" > "$output/rebuild.log" 2>&1
 docker run --rm --network none --read-only --tmpfs /home/worker:uid=10001,gid=10001 \
     --tmpfs /tmp "$rebuild" > "$output/rebuild.json"
