@@ -37,7 +37,7 @@
     ['[data-gate-name="watch"]', "Counts watch calls since the last action against the count and watch to action ratio limits."],
     ['[data-gate-name="reruns"]', "Counts CI reruns per pull request head against the two rerun limit; jobs cancelled before reaching a runner are exempt."],
     ['[data-gate-name="build"]', "Checks edits and commits against the traced plan, its validity and task territory."],
-    ['[data-gate-name="one-push"]', "Holds a pull request until both reviews close and its work is on origin, and refuses a push while its checks run unless one is red."],
+    ['[data-gate-name="one-push"]', "Holds a pull request until both reviews close and its work is on origin; refuses a push while checks run and none is red."],
     ['[data-gate-name="quiet"]', "Checks claimed tasks for thirty minutes without progress; ledger commands remain available."],
     ['[data-gate-name="trace-plan"]', "Checks plan pieces against task, phase and project intent and the size of one pull request."],
     ["#quota-refresh", "Probe every Claude and Codex account now and redraw the quota table."],

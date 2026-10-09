@@ -19,6 +19,7 @@ NO_PUSH = frozenset({"--dry-run", "-n", "--delete", "-d"})
 VALUED = frozenset({"-C", "-c"})
 PULL_REPO = re.compile(r"github\.com/([^/]+/[^/]+)/pull/\d+")
 REMOTE_REPO = re.compile(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$")
+MATCHED = re.compile(r"\bpush\b|\bpr\s+(?:create|ready)\b")
 GIT_TIMEOUT_S = 20
 
 
@@ -96,10 +97,7 @@ class OnePush:
         self._ledger, self._github, self._target = ledger, github, target
 
     def matches(self, call):
-        command = call.command
-        return call.tool == "Bash" and (
-            ("git" in command and "push" in command) or ("gh" in command and " pr " in f" {command} ")
-        )
+        return call.tool == "Bash" and bool(MATCHED.search(call.command))
 
     def decide(self, call, who, state):
         if not (who.pinned and who.task) or lane_of(who.name) not in WORKERS:

@@ -23,16 +23,13 @@ def git(path, *args):
 
 @pytest.fixture
 def tree(tmp_path):
-    origin, work = tmp_path / "origin.git", tmp_path / "work"
-    git(tmp_path, "init", "--bare", "-q", str(origin))
+    work = tmp_path / "work"
     git(tmp_path, "init", "-q", str(work))
     git(work, "remote", "add", "origin", "https://github.com/o/r.git")
-    git(work, "config", "remote.origin.pushurl", str(origin))
     (work / "a.txt").write_text("a\n")
     git(work, "add", "a.txt")
     git(work, "commit", "-q", "-m", "a")
-    git(work, "push", "-q", str(origin), "HEAD:refs/heads/main")
-    git(work, "fetch", "-q", "origin")
+    git(work, "update-ref", "refs/remotes/origin/main", "HEAD")
     return work
 
 
