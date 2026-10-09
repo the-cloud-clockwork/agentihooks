@@ -83,8 +83,9 @@ class TestCreateFilter:
 
     def test_a_filter_cannot_run_async(self, bundle):
         conditions.arm_gate(SID)
-        with pytest.raises(conditions.ConditionError, match="a filter runs in process and cannot be async"):
+        with pytest.raises(conditions.ConditionError) as raised:
             _create(run_async=True)
+        assert str(raised.value) == "a filter runs in process and cannot be async"
 
     def test_the_language_error_names_the_filter_kind(self, bundle):
         conditions.arm_gate(SID)
@@ -170,8 +171,9 @@ class TestInventory:
         folder = bundle / ".claude" / "conditions"
         folder.mkdir(parents=True)
         (folder / "pre-write-broken.filter.yaml").write_text("mode: sometimes\n")
+        (folder / "pre-write-ok.filter.yaml").write_text("mode: finders\n")
         result = conditions.inventory()
-        assert result["conditions"] == []
+        assert [e["file"] for e in result["conditions"]] == ["pre-write-ok.filter.yaml"]
         assert result["invalid"] == [
             {
                 "path": str(folder / "pre-write-broken.filter.yaml"),
