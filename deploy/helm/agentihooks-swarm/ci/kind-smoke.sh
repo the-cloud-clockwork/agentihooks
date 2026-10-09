@@ -36,14 +36,18 @@ for tag in "$digest" "@$digest" "$(printf 'b%.0s' $(seq 40))"; do
     exit 1
   fi
 done
-docker build -q -t "$image" . >/dev/null
+docker build -q -t "$image" . >/dev/null &
+build=$!
 trap finish EXIT
 kind create cluster --name "$cluster" --wait 120s
+wait "$build"
 kind load docker-image "$image" --name "$cluster"
 helm install "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m
 helm test "$release" --logs --timeout 2m
 
 kubectl exec "$ledger_pod" -- env AGENTIHOOKS_DEPLOYMENT=local python -c "from scripts.swarm.store import SwarmConfig, connect; from scripts.swarm_ledger.new_ledger import create; create('$slug', {'title': 'Kind proof', 'phases': [{'title': 'Prove the Helm chart'}]}, 'swarm'); connect().create(SwarmConfig('$slug', '/data', 0, 0, state='paused')); print('ledger and swarm $slug registered, no lease bound')"
+kubectl rollout restart deployment "$release-controller"
+kubectl rollout status deployment "$release-controller" --timeout 2m
 hive="$(kubectl get deployment "$release-controller" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="SWARM_HIVE_ID")].value}')"
 if [[ -z $hive ]]; then
   printf 'the controller deployment sets no SWARM_HIVE_ID\n' >&2
@@ -57,13 +61,13 @@ expiry_of() { python3 -c 'import json, sys; print(json.loads(sys.argv[1]).get("e
 
 held=""
 first=""
-for _ in $(seq 60); do
+for _ in $(seq 180); do
   held="$(read_lease)" || held="{}"
   if [[ "$(owner_of "$held")" == "$hive" ]]; then
     first="$held"
     break
   fi
-  sleep 3
+  sleep 1
 done
 if [[ -z $first ]]; then
   printf 'the controller never took the lease for %s; last read: %s\n' "$slug" "$held" >&2
@@ -72,13 +76,13 @@ fi
 printf 'controller lease: %s\n' "$first"
 
 renewed=""
-for _ in $(seq 60); do
+for _ in $(seq 180); do
   held="$(read_lease)" || held="{}"
   if [[ "$(owner_of "$held")" == "$hive" && "$(expiry_of "$held")" -gt "$(expiry_of "$first")" ]]; then
     renewed="$held"
     break
   fi
-  sleep 3
+  sleep 1
 done
 if [[ -z $renewed ]]; then
   printf 'the controller never renewed the lease for %s; last read: %s\n' "$slug" "$held" >&2
@@ -95,12 +99,12 @@ printf 'controller restarts: 0\n'
 
 docker exec "$cluster-control-plane" pkill -STOP -f "agentihooks controller run"
 printf 'controller frozen; its lease must lapse and the liveness probe must restart it\n'
-for _ in $(seq 60); do
+for _ in $(seq 300); do
   restarts="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')"
   if [[ $restarts == 1 ]]; then
     break
   fi
-  sleep 5
+  sleep 1
 done
 if [[ $restarts != 1 ]]; then
   printf 'the liveness probe never restarted the frozen controller (restarts: %s)\n' "$restarts" >&2
@@ -108,13 +112,13 @@ if [[ $restarts != 1 ]]; then
 fi
 printf 'liveness probe restarted the frozen controller\n'
 retaken=""
-for _ in $(seq 60); do
+for _ in $(seq 180); do
   held="$(read_lease)" || held="{}"
   if [[ "$(owner_of "$held")" == "$hive" ]]; then
     retaken="$held"
     break
   fi
-  sleep 3
+  sleep 1
 done
 if [[ -z $retaken ]]; then
   printf 'the restarted controller never took the lease back; last read: %s\n' "$held" >&2
