@@ -24,13 +24,17 @@ def moved(saved: dict, inputs: dict, result: dict) -> bool:
     return abs(shown - now) >= MOVE_MINUTES
 
 
+def inputs_of(store, slug, runtime) -> dict:
+    observed = getattr(runtime, "quota_capacity", None) is not None
+    cached = ci_speed.get(store.redis, slug) or {}
+    return {"slots": slots(capacity.read(store, slug)) if observed else None, "ci_minutes": cached.get("minutes")}
+
+
 def refresh(slug, store, ledger, runtime, doc, now_ms) -> list[str]:
     writer = getattr(ledger, "time_left", None)
     if writer is None:
         return []
-    observed = getattr(runtime, "quota_capacity", None) is not None
-    cached = ci_speed.get(store.redis, slug) or {}
-    inputs = {"slots": slots(capacity.read(store, slug)) if observed else None, "ci_minutes": cached.get("minutes")}
+    inputs = inputs_of(store, slug, runtime)
     meta = doc.get("_meta", {})
     result = ledger_stats.calculate(doc, meta.get("events", []), now_ms, inputs)
     if moved(meta.get("time_left") or {}, inputs, result):
