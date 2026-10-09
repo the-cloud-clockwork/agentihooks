@@ -51,7 +51,7 @@
     "Replaying retained claim journal recovers coordination state. Loss of the authoritative journal is not reconstructed from a compatibility string claim."
   ],
   "reviews": {
-    "Standards": "Expiry finding corrected in tested commit; re-review pending.",
-    "Spec": "Original implementation has no open code findings; corrected commit and evidence review pending."
+    "Standards": "Expiry finding resolved at tested commit; five targeted regression tests passed; no open findings.",
+    "Spec": "Corrected commit and repeated fixture evidence satisfy acceptance and rollback obligations; no open findings. Production integration remains unverified."
   }
 }
