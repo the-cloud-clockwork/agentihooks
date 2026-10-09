@@ -506,9 +506,15 @@ jobs:
         with:
           path: |
             ~/.sonar/cache
-            ~/.sonar/js/node-runtime
             ${{ runner.tool_cache }}/sonar-scanner-cli
           key: sonar-${{ runner.os }}-${{ runner.arch }}-${{ env.SONAR_SCANNER_VERSION }}-${{ steps.proxy.outputs.version }}
+
+      # Its own entry, since a changed path list gives a cache a new version that only a dev push that scans can save.
+      - name: Restore the SonarJS Node runtime
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/js/node-runtime
+          key: sonar-node-${{ runner.os }}-${{ runner.arch }}-${{ steps.proxy.outputs.version }}
 
       # Sonar names a branch analysis after the ref, so a queue run would open a throwaway gh-readonly-queue branch.
       - name: Name the queued pull request
