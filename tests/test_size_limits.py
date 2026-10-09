@@ -297,8 +297,8 @@ def test_size_runs_in_lint_graded_by_the_base_with_the_pinned_ruff():
         'git fetch --no-tags origin dev\ngit worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD\n',
         'git fetch --no-tags origin "$GRADER"\ngit worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD\n',
     )
-    if "GRADER" in grader.get("env", {}):
-        assert grader["env"]["GRADER"] == "${{ needs.reuse.outputs.grader }}"
+    if 'origin "$GRADER"' in grader["run"]:
+        assert grader.get("env", {}).get("GRADER") == "${{ needs.reuse.outputs.grader }}"
     assert grade["if"] == "${{ !cancelled() }}"
     assert grade["run"] == (
         'if [[ -f "$RUNNER_TEMP/grader/scripts/size_limits.py" ]]; then\n'
