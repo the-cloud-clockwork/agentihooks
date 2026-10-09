@@ -4,8 +4,8 @@
   "integration_gate": "G1",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1899",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1942",
-  "tested_commit": "09798e586756b8f8b6d036adefaae6cac267ab57",
-  "status": "G1 command service fixture qualified; pull request checks pending",
+  "tested_commit": "fc37a9d50a4270286d55262b79a1e51014cdfb36",
+  "status": "G1 command service fixture qualified",
   "evidence_class": "isolated fakeredis and mocked command transports; no live terminal, Pod or UI rollout proof",
   "interfaces": [
     "Action: attach, detach, answer, drain, cancel and force-stop",
@@ -38,8 +38,9 @@
     "lint": "ruff check passed for changed Python files",
     "format": "ruff format --check passed for changed Python files",
     "limits": "ruff complexity, branches, arguments and statements passed; size gate: 84 units over a limit, 84 on the base allowlist, 0 errors",
-    "continuous_integration": "Required tests and mutation tracked on pull request 1942; pending at report publication.",
-    "mutation": "Initial run 37869940025 killed 289 mutants and exposed 27 survivors. Boundary tests strengthened; Standards ruled three equivalents in individual clearances. Final required mutation result is tracked on pull request 1942."
+    "continuous_integration": "Required full-suite, mutation and aggregate gate results are attached to pull request 1942. Package fixture qualification is isolated and mocked; production rollout is a later gate.",
+    "mutation": "Run 37870467912 on 5d133aa53c72ed187e2d484c5900b2a71a3012e7 passed: 313 killed, three equivalent survivors cleared by Standards, no unresolved failures. The grouping marker changes no command behavior; final required results are attached to pull request 1942.",
+    "fixture_grouping": "Full-suite failure 37870467912 showed a missing fakeredis group marker. Added the module marker; grouping and lazy import guards plus the command suite passed: 62 passed in 3.32 seconds."
   },
   "cases": {
     "a": "evidence/SV2-RUN-05/a-result.json",
