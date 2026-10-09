@@ -4,6 +4,8 @@ All secret-like test strings are assembled inside each test function so
 the source file itself does not match any detection pattern.
 """
 
+import json
+
 import pytest
 
 pytestmark = pytest.mark.unit
@@ -112,6 +114,40 @@ class TestScan:
 
         assert scan(f"x = {key}  # NOSECRET") == []
         assert scan(f"x = {key}  # NoSecret") == []
+
+
+@pytest.mark.parametrize("scheme", ["redis", "rediss"])
+@pytest.mark.parametrize("user", ["", "default"])
+@pytest.mark.parametrize("value", ["x", "synthetic" + "-credential"])
+def test_scan_redis_connection_credentials(scheme, user, value):
+    from hooks.secrets import scan
+
+    assert scan(f"{scheme}://{user}:{value}@localhost:6379", mode="strict") == ["db_url_creds"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "REDIS_PASSWORD=" + "x",
+        "PASSWORD=" + "synthetic.credential",
+        json.dumps({"REDIS_PASSWORD": "x"}),
+    ],
+)
+def test_memory_mode_detects_short_secret_assignments(text):
+    from hooks.secrets import redact, scan
+
+    assert "secret_assignment" in scan(text, mode="memory")
+    assert redact(text, mode="memory") != text
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["PASSWORD=$REDIS_PASSWORD", "PASSWORD=<placeholder>", "safe guidance", "PASSWORD=" + "\nunavailable guidance"],
+)
+def test_memory_mode_preserves_references_and_safe_text(text):
+    from hooks.secrets import redact
+
+    assert redact(text, mode="memory") == text
 
 
 class TestScanModes:
