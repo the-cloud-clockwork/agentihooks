@@ -357,7 +357,7 @@ def test_environment_and_catalog_accept_intent_coach():
 def test_an_unmoved_head_is_read_once_and_skips_the_full_view(tmp_path):
     url = DOC["tasks"][0]["pr_url"]
     Verdicts(SLUG, "intent-coach", tmp_path).write(
-        TASK, "fail", "missing behavior", 5, coach_rounds=1, head="original", url="old"
+        TASK, "fail", "missing behavior", 5, coach_rounds=1, head="original", url="old", phase="p8"
     )
     heads, views = [], []
     check = intent.Check(
@@ -380,6 +380,7 @@ def test_an_unmoved_head_is_read_once_and_skips_the_full_view(tmp_path):
         "coach_rounds": 1,
         "head": "original",
         "url": url,
+        "phase": "p8",
     }
 
 
@@ -458,3 +459,24 @@ def test_a_first_check_never_reads_the_head_alone(tmp_path):
     ).run(DOC)
     assert heads == []
     assert Verdicts(SLUG, "intent", tmp_path).read(TASK)["verdict"] == "pass"
+
+
+def test_a_task_moved_to_another_phase_is_judged_again_on_an_unmoved_head(tmp_path):
+    run_check(tmp_path, "original")
+    seen = []
+    moved = {**DOC, "tasks": [{**DOC["tasks"][0], "phase": "p1"}]}
+    intent.Check(
+        SLUG,
+        "coach",
+        NOW + 1,
+        Ledger(),
+        Mail(),
+        lambda url: {**PR, "head": "original"},
+        lambda state: seen.append(state["phase"]) or ("pass", "ok"),
+        home=tmp_path,
+        head=lambda url: "original",
+    ).run(moved)
+    assert seen == ["Other"]
+    record = Verdicts(SLUG, "intent", tmp_path).read(TASK)
+    assert (record["verdict"], record["phase"], record["coach_rounds"]) == ("pass", "p1", 0)
+    assert gate(tmp_path).allowed
