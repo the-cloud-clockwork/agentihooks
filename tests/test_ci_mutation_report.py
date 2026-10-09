@@ -139,9 +139,10 @@ def test_survivor_diff_of_a_long_function_shows_only_the_changed_lines():
     from scripts.ci_mutation.report import mutation_diff
 
     before = ["def f():", *["    same = 1"] * 210, "    return 2"]
-    after = ["def f():", *["    same = 1"] * 210, "    return 3"]
+    after = ["def f():", "    same = 2", *["    same = 1"] * 210, "    return 3"]
     assert mutation_diff("hooks/a.py", "\n".join(before), "\n".join(after), 5) == (
-        "--- hooks/a.py\n+++ mutant\n@@ line 215 @@\n     same = 1\n-    return 2\n+    return 3"
+        "--- hooks/a.py\n+++ mutant\n@@ line 5 @@\n def f():\n+    same = 2\n     same = 1\n"
+        "@@ line 215 @@\n     same = 1\n-    return 2\n+    return 3"
     )
 
 
