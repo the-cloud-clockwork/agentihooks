@@ -3,7 +3,7 @@
 import os
 from dataclasses import asdict, dataclass, replace
 
-from hooks.classifier import ClassifierUnavailable, decide, runner
+from hooks.classifier import ClassifierUnavailable, decide, definitions, runner
 from scripts.swarm import overlays
 from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm_ledger import ledger_close
@@ -69,7 +69,7 @@ def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
     params = {"id": task.get("id"), "title": task.get("title", "")}
     try:
         output = runner.run(PURPOSE, state(slug, task), params, decider=decide, environ=environ)
-    except ClassifierUnavailable as exc:
+    except (ClassifierUnavailable, definitions.DefinitionError) as exc:
         raise ProfileUnresolved(
             f"task {task.get('id')} profile classification is unavailable ({exc}): {_remedy(slug, task)}"
         ) from exc

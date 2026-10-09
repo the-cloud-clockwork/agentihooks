@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from hooks.classifier import ClassifierUnavailable, decide, runner
+from hooks.classifier import ClassifierUnavailable, decide, definitions, runner
 from scripts.swarm.effort_range import EFFORTS
 
 PURPOSE = "model-pick"
@@ -42,7 +42,7 @@ def pick(harness: str, lane: dict, task: dict, environ: dict) -> ModelPick:
             decider=decide,
             environ=environ,
         )
-    except ClassifierUnavailable:
+    except (ClassifierUnavailable, definitions.DefinitionError):
         return default
     result = output.raw
     answer = result.answers["effort"]
