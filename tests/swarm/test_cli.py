@@ -177,9 +177,14 @@ def test_done_waits_on_a_queued_pull_request_and_accepts_only_after_it_lands(env
         "at": 1000,
         "on": {"kind": "merge", "target": url},
     }
-    assert cli.waits.end_pass(store, "sw", ledger.rows, InboxStore(store.redis), ledger.pulls.get, 1000) == []
+    assert (
+        cli.waits.end_pass(store, "sw", ledger.rows, InboxStore(store.redis), ledger.pulls.get, 1000, ledger.pulls.get)
+        == []
+    )
     ledger.pulls[url] = PullRequest("MERGED", 2, 1, False)
-    ended = cli.waits.end_pass(store, "sw", ledger.rows, InboxStore(store.redis), ledger.pulls.get, 2000)
+    ended = cli.waits.end_pass(
+        store, "sw", ledger.rows, InboxStore(store.redis), ledger.pulls.get, 2000, ledger.pulls.get
+    )
     assert ended == [f"ended the wait of {name}: pull request {url}, now merged"]
     assert cli.idle.wait(store.redis, "sw", name) is None
     assert run("sw", "done") == 0

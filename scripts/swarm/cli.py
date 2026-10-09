@@ -226,7 +226,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
             )
             actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], view, now_ms())
             rows = {t["id"]: t for t in doc["tasks"]}
-            actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms())
+            actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms(), ledger_events.view)
             actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
             actions += skip_refused(priority_sweep.priority_pass, store, slug, doc, ledger, None, view)
             found = timing.call(
