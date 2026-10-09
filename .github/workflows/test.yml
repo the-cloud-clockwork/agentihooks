@@ -883,9 +883,12 @@ jobs:
         env:
           DISPATCHED: ${{ inputs.base }}
           QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
         run: |
           if [[ -n "$QUEUE_BASE" ]]; then
             base="$QUEUE_BASE"
+          elif [[ -n "$PUSH_BEFORE" ]]; then
+            base="$PUSH_BEFORE"
           else
             base=$(git rev-parse "${DISPATCHED:-HEAD^1}")
           fi

@@ -130,6 +130,25 @@ def test_coverage_ratchet_grades_a_merge_group_against_the_branch_it_queues_onto
     assert 'base="$QUEUE_BASE"' in base["run"]
 
 
+def test_coverage_ratchet_grades_a_batched_dev_push_against_the_previous_tip(tmp_path):
+    base = next(
+        step
+        for step in _workflow()["jobs"]["coverage-ratchet"]["steps"]
+        if step.get("name") == "Resolve the measured base tree"
+    )
+    assert base["env"]["PUSH_BEFORE"] == "${{ github.event_name == 'push' && github.event.before || '' }}"
+    git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    tips = []
+    for _ in range(3):
+        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "c"], check=True)
+        tips.append(subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip())
+    output = tmp_path / "output"
+    env = dict(os.environ, PUSH_BEFORE=tips[0], GITHUB_OUTPUT=str(output))
+    subprocess.run(["bash", "-e", "-c", base["run"]], cwd=tmp_path, env=env, check=True)
+    assert f"commit={tips[0]}" in output.read_text().splitlines()
+
+
 def test_test_count_refuses_a_base_without_its_grader(tmp_path):
     floor = _workflow()["jobs"]["test-count"]["steps"][-1]
     (tmp_path / "base").mkdir()
