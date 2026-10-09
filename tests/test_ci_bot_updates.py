@@ -86,6 +86,7 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     assert jobs["durations"]["outputs"] == {
         "key": "${{ steps.stored.outputs.cache-matched-key }}",
         "queued": "${{ steps.republished.outputs.queued }}",
+        "base": "${{ steps.base-run.outputs.sha }}",
     }
     assert jobs["durations"]["timeout-minutes"] == (
         "${{ (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch') && 4 || 2 }}"
