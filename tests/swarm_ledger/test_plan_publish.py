@@ -406,7 +406,8 @@ def test_publish_plan_refuses_a_multi_phase_plan_without_phase_headings(plan_led
         ),
         ("intro\n# Plan\n## First\n\n<!-- slice: two -->\n## Two\n", "p1", "First on line 3"),
         ("## First\nOne\n<!-- slice: two -->\n## Two\n", "p1", "First on line 1"),
-        ("# Plan\n## Build the page\n### First\nSteps\n### Second\nSteps\n", "p1", "First on line 3, Second on line 5"),
+        ("# Plan\n## Build the page\n### First\nSteps\n### Second\nSteps\n", "p1", "Build the page on line 2"),
+        ("# Plan\n## First\nOne\n", "p1", "First on line 2"),
         ("# Plan\n## Build\n### First\nOne\n", "p1", "First on line 3"),
     ],
 )
