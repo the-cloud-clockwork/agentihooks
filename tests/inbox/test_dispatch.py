@@ -215,6 +215,25 @@ def test_a_redirected_item_is_not_submitted_to_its_old_recipient(store, dispatch
     assert dispatcher.receipts.get(delivery.id).state == "reserved"
 
 
+def test_a_seat_handed_on_during_submit_is_not_submitted_to_its_old_occupant(server, store, dispatcher, monkeypatch):
+    store.seats.occupy("eng-1@crew", "bob", 1)
+    item = store.send("alice", "eng-1@crew", "hi")
+    [delivery] = dispatcher.reserve("bob", "bridge-1")
+    receipts = dispatcher.receipts
+    real = receipts._advance
+
+    def hand_on(*args):
+        if store.seats.occupant("eng-1@crew").occupant == "bob":
+            fresh(server).seats.occupy("eng-1@crew", "carol", 2)
+        return real(*args)
+
+    monkeypatch.setattr(receipts, "_advance", hand_on)
+    with pytest.raises(DispatchError) as refused:
+        receipts.submitting(delivery.id, "bridge-1")
+    assert str(refused.value) == f"message {item.id} is pending for eng-1@crew, not bob's to submit"
+    assert receipts.get(delivery.id).state == "reserved"
+
+
 def test_a_killed_bridge_lets_the_ledger_marks_through_again(store, dispatcher, clock):
     marks = SeenMarks(store.redis)
     event = {"rev": 3, "id": "c1"}
