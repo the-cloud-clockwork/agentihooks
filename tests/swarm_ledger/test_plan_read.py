@@ -5,6 +5,7 @@ import pytest
 
 from scripts.swarm_ledger import ledger_artifacts, plan_read
 from scripts.swarm_ledger import ledger_core as core
+from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
 
 PLAN = "".join(f"line {n}\n" for n in range(1, 41))
 
@@ -28,7 +29,7 @@ def slug(tmp_path, monkeypatch):
             {"id": "loose", "phase": "p2", "plan_lines": "4-5"},
         ],
     }
-    core.paths("chunks")[1].write_text(json.dumps(doc))
+    SQLiteLedgerRepository(tmp_path / DATABASE).import_document("chunks", {**doc, "_meta": {"rev": 1}})
     return "chunks"
 
 
@@ -71,7 +72,7 @@ def test_chunk_keeps_the_plan_lines_verbatim():
 
 
 def test_exact_is_the_range_without_margin_and_refuses_an_empty_one(slug):
-    doc = json.loads(core.paths(slug)[1].read_text())
+    doc = SQLiteLedgerRepository(core.LEDGER_DIR / DATABASE).read(slug, "phases", "artifacts")
     ref = doc["phases"][0]["plan_ref"]
     assert plan_read.exact(doc, ref, "15-17") == numbered(15, 17)
     with pytest.raises(ValueError) as caught:
@@ -106,10 +107,10 @@ def test_refused_for_a_missing_ledger(slug):
     assert refusal(["--task", "mid"], {"AGENTIHOOKS_SWARM": "nowhere"}) == "no ledger nowhere"
 
 
-def test_refused_for_an_invalid_slug_or_a_corrupt_ledger(slug):
+def test_refused_for_an_invalid_slug_or_a_ledger_file_that_is_not_stored(slug):
     assert refusal(["--task", "mid", "--slug", "../x"], {}) == "no ledger ../x"
-    core.paths(slug)[1].write_text("{")
-    assert refusal(["--task", "mid"], {"AGENTIHOOKS_SWARM": slug}) == "no ledger chunks"
+    core.paths("filed")[1].write_text(json.dumps({"tasks": [{"id": "mid"}]}))
+    assert refusal(["--task", "mid"], {"AGENTIHOOKS_SWARM": "filed"}) == "no ledger filed"
 
 
 def test_pointer_names_the_command_only_for_a_sliced_task():

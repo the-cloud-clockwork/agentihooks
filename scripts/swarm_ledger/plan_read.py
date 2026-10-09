@@ -7,7 +7,6 @@ The task defaults to AGENTIHOOKS_SWARM_TASK and the ledger to AGENTIHOOKS_SWARM.
 """
 
 import argparse
-import json
 import os
 import sys
 from importlib import import_module
@@ -95,10 +94,11 @@ def main(argv=None, environ=None) -> int:
     task_id = None if args.phase else args.task or env.get("AGENTIHOOKS_SWARM_TASK", "")
     if task_id == "":
         raise SystemExit("plan read needs a task: pass --task or run it inside a swarm task session")
-    try:
-        doc = json.loads(_ledger("ledger_core").paths(slug)[1].read_bytes())
-    except (OSError, ValueError):
-        raise SystemExit(f"no ledger {slug}") from None
+    from scripts.swarm_ledger.repository.sqlite import read_ledger
+
+    doc = read_ledger(_ledger("ledger_core").LEDGER_DIR, slug, "tasks", "phases", "artifacts")
+    if doc is None:
+        raise SystemExit(f"no ledger {slug}")
     try:
         sys.stdout.write(read(doc, slug, task_id, args.phase))
     except ValueError as error:
