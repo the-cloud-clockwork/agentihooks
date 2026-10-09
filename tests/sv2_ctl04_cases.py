@@ -65,6 +65,7 @@ def _a(patch, data):
     execution_id = rig.launch()
     rig.pods = Pods([pod(data["live"], execution_id), pod(data["managed_orphan"]), *map(pod, data["foreign"])])
     first = rig.restart()
+    at_restart = first.controller_orphans_by_class()
     plan = first.reconcile()
     second = rig.restart()
     again = second.reconcile()
@@ -77,7 +78,7 @@ def _a(patch, data):
         "matched_pods": len(again.matched),
         "deleted": [uid for _, uid in rig.pods.deleted],
         "duplicate_launches": rig.transport.creations,
-        "controller_orphans_by_class": first.controller_orphans_by_class(),
+        "controller_orphans_by_class": at_restart,
         "after_second_restart": second.controller_orphans_by_class(),
     }
 
