@@ -197,6 +197,7 @@ def test_help_names_every_command_and_option(monkeypatch, capsys):
         "Print a one-time join code, valid fifteen minutes",
         "Exchange a join code for credentials in hive.env",
         "Delete a member's ledger credential and Redis user",
+        "Write a new controller service credential to a private file, retiring the previous one",
         "Run the join endpoint",
         "Set name, ui, ephemeral, roles, prefer, max-agents as key=value",
         "Print a hive's record as JSON",
