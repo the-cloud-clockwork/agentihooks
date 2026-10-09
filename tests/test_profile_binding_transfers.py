@@ -152,7 +152,7 @@ def test_a_master_envelope_saved_at_max_starts_at_high_for_every_reason(launchin
 
 
 @pytest.mark.parametrize("reason", REASONS)
-def test_a_lane_handoff_keeps_its_exact_saved_effort_for_every_reason(launching, reason):
+def test_a_same_harness_lane_handoff_keeps_its_exact_saved_effort_for_every_reason(launching, reason):
     engine, config, task, saved, calls = launching
     saved.update(harness="claude", effort="max")
     task["handoff_envelope"]["reason"] = reason
