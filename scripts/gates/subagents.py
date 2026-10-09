@@ -36,8 +36,8 @@ class SubagentBudget:
         allowed, spent = budget.spend(who.task, counter, cap)
         if not allowed:
             return Decision.deny(refusal(who.swarm, who.task, counter, cap))
-        reader = call.tool_input.get("name") or call.tool_input.get("subagent_type")
-        if call.tool in LAUNCH_TOOLS and reader in READERS:
+        named = {call.tool_input.get("name"), call.tool_input.get("subagent_type")}
+        for reader in named.intersection(READERS) if call.tool in LAUNCH_TOOLS else ():
             budget.spend(who.task, reader, 1)
         reason = f"sub-agent {counter} {spent} of {cap} for task {who.task}"
         log.append(state.slug, log.Row.of(self.name, "count", who, call.tool, reason), state.home)

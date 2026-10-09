@@ -17,6 +17,7 @@ OPENS = (["pr", "create"], ["pr", "ready"])
 DRAFTS = frozenset({"--draft", "-d", "--undo"})
 NO_PUSH = frozenset({"--dry-run", "-n", "--delete", "-d"})
 VALUED = frozenset({"-C", "-c"})
+GH_VALUED = frozenset({"-R", "--repo"})
 PULL_REPO = re.compile(r"github\.com/([^/]+/[^/]+)/pull/\d+")
 MATCHED = re.compile(r"\bpush\b|\bpr\s+(?:create|ready)\b")
 
@@ -29,6 +30,12 @@ def _git_args(here, args):
     return here, args
 
 
+def _gh_args(args):
+    while args and args[0].startswith("-"):
+        args = args[2:] if args[0] in GH_VALUED else args[1:]
+    return args
+
+
 def actions(command, cwd):
     """Each pull request open and push the command runs, with the directory it runs in and its arguments."""
     here = Path(cwd or ".")
@@ -39,7 +46,7 @@ def actions(command, cwd):
         program, rest = PurePosixPath(words[index]).name, words[index + 1 :]
         if program == "cd" and rest:
             here = here / Path(rest[0]).expanduser()
-        elif program == "gh" and rest[:2] in OPENS and not DRAFTS.intersection(rest):
+        elif program == "gh" and _gh_args(rest)[:2] in OPENS and not DRAFTS.intersection(rest):
             yield "open", here, rest
         elif program == "git":
             where, args = _git_args(here, rest)
@@ -57,8 +64,11 @@ def unsaved(path):
     return "commits not on origin" if count(path, "HEAD", "--not", "--remotes=origin") else ""
 
 
-def repo_of(path):
-    found = GITHUB_RE.search(git(path, "remote", "get-url", "origin").stdout.strip())
+def repo_of(path, args):
+    """The repository a push writes: its remote argument as a URL or a remote name, origin when it names none."""
+    remote = next((arg for arg in args if not arg.startswith("-")), "origin")
+    url = remote if "/" in remote else git(path, "remote", "get-url", remote).stdout.strip()
+    found = GITHUB_RE.search(url)
     return f"{found.group(1)}/{found.group(2)}".lower() if found else ""
 
 
@@ -87,6 +97,13 @@ def push_refusal(slug, url):
     return (
         f"checks still run on {url} and none is red: a push now cancels them. Wait with agentihooks swarm {slug} wait "
         f"--on checks {url}, then push once they resolve, or as soon as a check goes red"
+    )
+
+
+def queue_refusal(slug, url):
+    return (
+        f"{url} waits in the merge queue: a push now drops it. Dequeue first with agentihooks swarm {slug} merge "
+        f"dequeue {url}, then push"
     )
 
 
@@ -120,15 +137,17 @@ class OnePush:
         found = PULL_REPO.search(task.get("pr_url") or "")
         if not found:
             return ""
-        repo = repo_of(where)
+        repo = repo_of(where, args)
         if repo and repo != found.group(1).lower():
             return ""
         if task.get("branch") and task["branch"] not in destinations(where, args):
             return ""
         pull = self.github()(task["pr_url"])
-        if pull is None or pull.state != "OPEN" or pull.resolved or pull.red:
+        if pull is None or pull.state != "OPEN" or pull.red:
             return ""
-        return push_refusal(who.swarm, task["pr_url"])
+        if pull.queued:
+            return queue_refusal(who.swarm, task["pr_url"])
+        return push_refusal(who.swarm, task["pr_url"]) if pull.running else ""
 
     def target(self):
         return self._target or os.environ.get("AGENTIHOOKS_TARGET") or "claude"
