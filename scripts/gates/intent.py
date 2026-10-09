@@ -327,7 +327,8 @@ def _verdict(state, answers, thresholds):
 
 
 def _verdicts(definition, state, params, answers):
-    verdict, reason = _verdict(state, answers, definition.thresholds)
+    thresholds = definition.thresholds if definition.name == PURPOSE else definitions.load(PURPOSE).thresholds
+    verdict, reason = _verdict(state, answers, thresholds)
     return {"verdict": verdict, "reason": reason}
 
 

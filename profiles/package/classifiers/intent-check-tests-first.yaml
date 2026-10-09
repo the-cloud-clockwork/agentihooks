@@ -44,9 +44,5 @@ questions:
     in the diff alter gate behaviour, including gate code, workflow configuration or executable graders within the tests directory?
   'true': The diff changes gate behaviour.
   'false': The diff only prepares compatible tests and changes no gate behaviour.
-thresholds:
-  fail: 0.3
-  reason: 0.5
-  weaken: 0.5
 rule:
   type: code

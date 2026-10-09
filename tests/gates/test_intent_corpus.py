@@ -5,6 +5,7 @@ import yaml
 
 from hooks.classifier import corpus, definitions, evaluation
 from hooks.classifier.decision_log import state_digest
+from hooks.classifier.result import Answer, DecisionResult
 from scripts.gates import intent, intent_calibration
 
 PHASE = (
@@ -134,16 +135,44 @@ def test_losing_a_control_is_not_a_calibration(raw, definition, tmp_path):
     assert result["calibrated"] is False
 
 
-def test_no_fewer_wrong_verdicts_is_not_a_calibration(raw, definition, tmp_path):
+def test_no_fewer_wrong_verdicts_is_not_a_calibration(raw, cases, definition, tmp_path):
+    replayed = {}
+    for item in evaluation.replay(definition, cases):
+        replayed.setdefault(item.case.name, []).append({"verdict": item.verdicts["verdict"]})
+    for case in raw["cases"]:
+        case["baseline"] = replayed[case["name"]]
+    result = intent_calibration.measure(corpus.load(definition, write(tmp_path, raw)), definition)
+    assert (result["before"]["wrong"], result["after"]["wrong"], result["calibrated"]) == (2, 2, False)
+
+
+def test_a_wrong_baseline_with_every_control_held_is_a_calibration(raw, definition, tmp_path):
     for case in raw["cases"]:
         case["baseline"] = [{"verdict": "fail" if case["expected"]["verdict"] == "pass" else "pass"}] * 3
         case["control"] = False
     result = intent_calibration.measure(corpus.load(definition, write(tmp_path, raw)), definition)
     assert (result["before"]["wrong"], result["after"]["wrong"], result["calibrated"]) == (57, 2, True)
-    for case in raw["cases"]:
-        case["baseline"] = [{"verdict": case["expected"]["verdict"]}] * 3
-    result = intent_calibration.measure(corpus.load(definition, write(tmp_path, raw)), definition)
-    assert (result["before"]["wrong"], result["after"]["wrong"], result["calibrated"]) == (0, 2, False)
+
+
+def answered(**values):
+    def decide(state, questions, purpose):
+        return DecisionResult({name: Answer("noul", noul=values.get(name, 0.9)) for name in questions}, "stub")
+
+    return decide
+
+
+@pytest.mark.parametrize(
+    "state",
+    [{}, {"task_part": "tests-first", "pull_request_diff": ""}],
+)
+def test_a_threshold_override_through_the_environment_changes_the_intent_verdict(state, monkeypatch):
+    decide = answered(usable=0.5, weakens=0.1, changes_gate_behavior=0.1)
+    assert intent.judge(state, decide=decide)[0] == "pass"
+    monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_INTENT_CHECK_FAIL", "0.6")
+    verdict, reason = intent.judge(state, decide=decide)
+    assert (verdict, reason.startswith("the phase can use this change at probability 0.50, under 0.6")) == (
+        "fail",
+        True,
+    )
 
 
 def tiny(after_control, after_case):
