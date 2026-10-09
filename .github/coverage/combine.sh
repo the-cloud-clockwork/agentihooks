@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "$1" != --downloaded ]]; then
+if [[ "${1:-}" != --downloaded ]]; then
     echo "::error::Usage: combine.sh --downloaded <shards>"
     exit 2
 fi

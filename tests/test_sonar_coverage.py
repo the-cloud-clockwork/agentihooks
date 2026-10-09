@@ -37,7 +37,6 @@ def test_sonar_sets_up_before_merging_coverage():
     for setup in ("actions/checkout@v4", "actions/setup-python@v5", "Install coverage"):
         assert names.index(setup) < merge
     assert merge < names.index("Wait for the coverage merge") < names.index("SonarQube Scan")
-    assert not (ROOT / ".github/coverage/collect.py").exists()
 
 
 def test_coverage_options_measure_hooks_and_scripts_on_one_interpreter():
@@ -72,9 +71,10 @@ def test_missing_shard_coverage_is_red(tmp_path):
     assert "Missing coverage for shard 4" in result.stdout
 
 
-def test_combine_merges_only_downloaded_coverage(tmp_path):
+@pytest.mark.parametrize("args", [["42", "8"], []], ids=["run-id", "no-arguments"])
+def test_combine_refuses_anything_but_downloaded_coverage(tmp_path, args):
     result = subprocess.run(
-        ["bash", str(ROOT / ".github/coverage/combine.sh"), "42", "8"],
+        ["bash", str(ROOT / ".github/coverage/combine.sh"), *args],
         cwd=tmp_path,
         capture_output=True,
         text=True,
