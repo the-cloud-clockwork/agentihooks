@@ -1317,6 +1317,45 @@ def test_a_parked_task_waits_for_its_blocker_and_then_takes_a_finish_claim_with_
     assert runtime.tasks[-1]["stack_base"] == []
 
 
+def test_a_parked_task_takes_the_free_slot_the_tick_after_its_blocker_is_done_ahead_of_fresh_work(store):
+    store.update("sw", max_eng=1)
+    ledger = FakeLedger(
+        [
+            {"id": "t1", "state": "pr", "branch": "engineer-a1b2c3-0001"},
+            {"id": "fresh"},
+            {"id": "t2", "depends_on": ["t1"], "parked_on": ["t1"], "branch": "engineer-a1b2c3-0002"},
+        ]
+    )
+    runtime = FakeRuntime()
+    ledger.rows["t1"].update(state="done", done=True)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["t2"] and ledger.rows["fresh"]["state"] == "open"
+
+
+def test_a_reopened_task_with_a_branch_is_claimed_before_fresh_work_even_when_its_territory_overlaps(store):
+    store.update("sw", max_eng=1)
+    ledger, runtime = FakeLedger([{"id": "t1", "territory": ["hooks"]}]), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    later = FakeLedger(
+        [
+            {"id": "fresh", "territory": ["docs"]},
+            {"id": "reopened", "branch": "engineer-a1b2c3-0003", "territory": ["hooks/x.py"]},
+        ]
+    )
+    ledger.rows.update(later.rows)
+    store.update("sw", max_eng=2)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime) == ["t1", "reopened"] and ledger.rows["fresh"]["state"] == "open"
+
+
+def test_a_fresh_task_of_a_higher_rank_still_goes_ahead_of_a_resumed_one(store):
+    store.update("sw", max_eng=1)
+    ledger = FakeLedger([{"id": "resumed", "branch": "engineer-a1b2c3-0004"}, {"id": "urgent", "rank": "urgent"}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["urgent"]
+
+
 @pytest.mark.parametrize(
     ("parked_on", "blocker_done", "lives"), [(["t1"], False, 0), ([], False, 1), (["t1"], True, 1)]
 )
