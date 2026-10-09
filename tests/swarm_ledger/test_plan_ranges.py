@@ -160,6 +160,12 @@ def test_anchors_are_read_inside_the_phase_range_or_from_a_stored_plan_link(publ
     assert plan_ranges.anchors(state, {"plan_url": ref["artifact"]}) == ["first", "second", "third"]
     for other in ({}, {"plan_url": "https://github.com/acme/app/issues/1"}):
         assert plan_ranges.anchors(state, other) == []
+    assert plan_ranges.anchors(state, {"plan_ref": {**ref, "lines": "4-6"}}) == ["first"]
+    assert plan_ranges.anchors(state, {"plan_ref": {**ref, "lines": "4-4"}}) == ["first"]
+    lead = ledger_artifacts.store(published, "lead.md", b"<!-- slice: lead -->\nLead\n")
+    doc = {"artifacts": [{"plan": True, "file": lead}]}
+    linked = {"plan_url": f"{ref['artifact'].rsplit('/', 1)[0]}/{lead['id']}"}
+    assert plan_ranges.anchors(doc, linked) == ["lead"]
 
 
 def test_slice_without_range_refused(plan_ledger):
