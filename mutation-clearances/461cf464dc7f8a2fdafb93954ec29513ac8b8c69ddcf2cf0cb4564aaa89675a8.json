@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/report.py:scripts.ci_mutation.report.x_mutation_diff__mutmut_9:d8e2c3fee39f881a89222e3d06b376b7d9de6f7edf0fc61320c2a69145893ff9": {
+    "reader": "Standards",
+    "reason": "SequenceMatcher reads autojunk only by truthiness, so None and False build the same matcher; no test can tell them apart."
+  }
+}

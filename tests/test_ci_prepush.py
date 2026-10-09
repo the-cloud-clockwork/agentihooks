@@ -20,7 +20,8 @@ def _commit(root, files, message):
 
 
 @pytest.fixture
-def repo(tmp_path):
+def repo(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", "true")
     root = tmp_path / "repo"
     root.mkdir()
     _git(root, "init", "-q", "-b", "dev")
@@ -125,6 +126,20 @@ def test_plan_grades_size_with_the_base_grader_and_runs_two_workers(repo, tmp_pa
     }
     assert (grade / "tests/SIZE_ALLOWLIST.json").read_text() == '{"base": {}}\n'
     assert (grade / "scripts/size_limits.py").read_text() == "GRADER = 1\n"
+
+
+@pytest.mark.parametrize("value", [None, "false", "0", "yes"])
+def test_plan_skips_local_tests_unless_true(repo, tmp_path, monkeypatch, value):
+    _commit(repo, {"scripts/beta.py": "B = 2\n"}, "change")
+    if value is None:
+        monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN")
+    else:
+        monkeypatch.setenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", value)
+    assert [name for name, _ in ci_prepush.plan(repo, "base", tmp_path / "grade")] == [
+        "ruff check",
+        "ruff format",
+        "size limits",
+    ]
 
 
 def test_plan_skips_tests_when_the_change_touches_none(repo, tmp_path):
