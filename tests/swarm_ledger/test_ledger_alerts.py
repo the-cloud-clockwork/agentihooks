@@ -579,7 +579,7 @@ def test_a_repeated_refusal_persists_its_new_deadline(monkeypatch):
 
 
 @pytest.mark.parametrize("refused", [False, True])
-def test_write_with_fifty_alerts_resolves_fewer_names_than_it_holds_alerts(inbox, monkeypatch, refused):
+def test_write_with_fifty_alerts_resolves_a_bounded_number_of_names(inbox, monkeypatch, refused):
     from scripts.swarm_ledger.api import mutations, resources
 
     make_ledger()
