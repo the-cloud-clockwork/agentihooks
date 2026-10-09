@@ -106,6 +106,25 @@ def phase_refusal(doc: dict, phase: dict) -> str:
     return ""
 
 
+def stale_refusal(phase: dict, fields: dict) -> str:
+    moving = phase.get("plan") and fields.get("plan", phase["plan"]) != phase["plan"]
+    if not moving or "plan_ref" in fields or not (phase.get("plan_ref") or phase.get("plan_url")):
+        return ""
+    return (
+        f"phase {phase['id']} moves to {fields['plan']} without a new plan_ref: "
+        "publish the plan for the phase to move it"
+    )
+
+
+def check_move(phase: dict, fields: dict) -> None:
+    if refusal := stale_refusal(phase, fields):
+        raise ValueError(refusal)
+
+
+def atomic(ops: list[dict]) -> bool:
+    return any(op["op"] == "plan_add" for op in ops)
+
+
 def task_refusal(doc: dict, task: dict) -> str:
     address = task.get("slice")
     if not address:
@@ -158,6 +177,10 @@ def moved(doc: dict, phase: dict) -> dict:
         return {}
     from scripts.swarm_ledger import plan_ranges
 
+    try:
+        names = plan_ranges.stored_anchors(doc, phase)
+    except ValueError as exc:
+        raise ValueError(f"phase {phase['id']} plan cannot be read: {exc}") from None
     fresh = {
         anchor: {
             "id": slice_id(plan["id"], anchor),
@@ -165,7 +188,7 @@ def moved(doc: dict, phase: dict) -> dict:
             "anchor": anchor,
             "lines": slice_lines(doc, phase, plan, anchor),
         }
-        for anchor in plan_ranges.anchors(doc, phase)
+        for anchor in names
     }
     slices = [row for row in doc["slices"] if row.get("phase") != address] + list(fresh.values())
     return {"slices": slices, "tasks": [_follow(task, held, fresh) for task in doc["tasks"]]}
