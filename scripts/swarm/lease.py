@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 from scripts.swarm.store import RedisStore, SwarmError
 
 TICK_MS = 60_000
+TICK_REFUSAL = "AGENTIHOOKS_CONTROLLER_TICK_SECONDS must be at least 1 second"
 EPOCH = ContextVar("controller_epoch", default=None)
 
 
@@ -17,10 +18,10 @@ def tick_ms() -> int:
         return TICK_MS
     try:
         ms = round(float(seconds) * 1000)
-    except (ValueError, OverflowError):
-        ms = 0
+    except (ValueError, OverflowError) as exc:
+        raise SwarmError(TICK_REFUSAL) from exc
     if ms < 1000:
-        raise SwarmError("AGENTIHOOKS_CONTROLLER_TICK_SECONDS must be at least 1 second")
+        raise SwarmError(TICK_REFUSAL)
     return ms
 
 
