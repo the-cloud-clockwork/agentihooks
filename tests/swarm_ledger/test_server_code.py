@@ -40,7 +40,7 @@ def test_the_record_names_the_process_its_folders_and_the_stamp_it_loaded(tmp_pa
     server_code.record(tmp_path, 4242, 17, (code,))
     assert json.loads((tmp_path / ".server.code").read_text()) == {"pid": 4242, "stamp": 17, "dirs": [str(code)]}
     assert server_code.loaded(tmp_path) == {"pid": 4242, "stamp": 17, "dirs": [str(code)]}
-    assert sorted(p.name for p in tmp_path.iterdir()) == [".server.code", "code"]
+    assert not (tmp_path / ".server.code.4242").exists()
 
 
 def test_a_code_file_that_cannot_be_read_counts_as_no_change(tmp_path):

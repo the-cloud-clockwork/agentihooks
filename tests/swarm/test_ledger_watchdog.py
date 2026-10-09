@@ -54,6 +54,8 @@ class Host(ledger_watchdog.Host):
 
     def kill(self, pid, sig):
         self.calls.append(("kill", pid, sig))
+        if not (self.proc / str(pid)).exists():
+            raise ProcessLookupError
         if sig == signal.SIGKILL or not self.survives:
             for name in ("status", "cmdline", "stat"):
                 (self.proc / str(pid) / name).unlink()
