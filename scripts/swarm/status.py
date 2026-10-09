@@ -24,7 +24,7 @@ from scripts.swarm import (
     snapshot,
     tick_master,
 )
-from scripts.swarm.health import activity, checks, verdicts
+from scripts.swarm.health import activity, checks, spawn_stall, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.naming import swarm_name
 from scripts.swarm.store import ASSIST, SwarmError
@@ -90,7 +90,8 @@ def findings(store, slug, config, tasks, events):
         + live_binding.findings(store, slug)
         + retire_watch.findings(store, slug)
         + drain_watch.findings(store, slug, limits, now_ms())
-        + launch_check.findings(store, slug),
+        + launch_check.findings(store, slug)
+        + spawn_stall.findings(store, slug),
         now_ms(),
         limits.cooldown_minutes * 60_000,
     )
