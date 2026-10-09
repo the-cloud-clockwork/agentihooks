@@ -31,6 +31,8 @@ class Supervisor:
         self.exits = {}
         self.reaped = set()
         self.stop = None
+        self.failure_class = None
+        self.phase = "startup"
         self.environment = {k: v for k, v in os.environ.items() if not k.startswith("HERDR_")}
         self.environment.update(
             HOME=str(launch.home),
@@ -85,7 +87,7 @@ class Supervisor:
             timeout=min(0.5, self.launch.budgets.startup),
             check=True,
         )
-        return json.loads(result.stdout)
+        return json.loads(result.stdout) if result.stdout.strip() else {}
 
     def ready(self, role: str, deadline: float) -> bool:
         while time.monotonic() < deadline and not self.stop:
@@ -118,8 +120,10 @@ class Supervisor:
                 return "termination" if self.stop else f"{role}_startup_failure"
         agent = native_command(self.launch.agent, self.launch.attempt, self.environment)
         command = [sys.executable, "-m", "scripts.swarm_v2.supervision_agent", *agent]
+        self.phase = "workspace_create"
         tab = self.herdr(["workspace", "create", "--cwd", str(self.launch.attempt), "--no-focus"])
         pane = tab["result"]["root_pane"]["pane_id"]
+        self.phase = "agent_launch"
         self.herdr(["pane", "run", pane, shlex.join(command)])
         if not self.ready("agent", deadline):
             return "termination" if self.stop else "agent_startup_failure"
@@ -170,6 +174,8 @@ class Supervisor:
         result = {
             **self.scope,
             "reason": reason,
+            "failure_class": self.failure_class,
+            "failure_stage": self.phase if self.failure_class else None,
             "signal": self.stop,
             "checkpoint_status": "complete" if identifier else "incomplete",
             "checkpoint_id": identifier,
@@ -194,7 +200,8 @@ class Supervisor:
             try:
                 try:
                     reason = self.start() or self.running()
-                except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+                except (OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
+                    self.failure_class = type(exc).__name__
                     reason = "supervisor_failure"
                 result = self.drain(reason)
                 print(json.dumps(result, sort_keys=True), flush=True)

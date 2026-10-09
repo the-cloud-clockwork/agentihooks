@@ -64,6 +64,7 @@ def terminal_disconnect(container, root):
     try:
         readable, _, _ = select.select([master], [], [], 8)
         assert readable and os.read(master, 65536)
+        time.sleep(0.2)
         assert viewer.poll() is None
         server = json.loads(subprocess.check_output([*herdr_argv(container, root), "status", "--json"], text=True))
         viewer.terminate()
@@ -101,6 +102,7 @@ def run_case(image, mode, output, kill=False):
         observed = ready(container)
         root = observed["root"]
         if kill:
+            start = time.monotonic()
             docker(
                 "exec",
                 container,
@@ -127,8 +129,8 @@ def run_case(image, mode, output, kill=False):
             )
             initial, final = json.loads(before), json.loads(after)
             assert len(initial) == 5 and all(final[k] > v for k, v in initial.items())
+            start = time.monotonic()
             docker("kill", "--signal", "TERM", container)
-        start = time.monotonic()
         code = int(docker("wait", container, timeout=12))
         elapsed = time.monotonic() - start
         stopped = state(container)
@@ -137,6 +139,9 @@ def run_case(image, mode, output, kill=False):
         target.mkdir()
         docker("cp", f"{container}:/home/worker/attempts", str(target))
         results = list(target.glob("attempts/*/run/supervision/*/result.json"))
+        launch = json.loads(next(target.glob("attempts/*/launch.json")).read_text())
+        bound = launch["quiesce_seconds"] + launch["checkpoint_seconds"] + 3 * launch["kill_seconds"] + 1
+        assert elapsed < bound
         if kill:
             assert code == 137 and not results
             result = {"checkpoint_status": "absent", "supervisor_child_exit_total": "unavailable after abrupt death"}
@@ -151,6 +156,7 @@ def run_case(image, mode, output, kill=False):
             "kill": kill,
             "exit_code": code,
             "elapsed_shutdown_seconds": round(elapsed, 3),
+            "shutdown_bound_seconds": bound,
             "container_process_tree_gone": True,
             "viewer_detached": not kill,
             "terminal_disconnect": terminal if not kill else None,

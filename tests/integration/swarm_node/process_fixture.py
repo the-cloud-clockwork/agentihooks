@@ -32,7 +32,8 @@ def herdr(args):
             client.connect(path)
             client.sendall(json.dumps(args).encode())
             result = json.loads(client.recv(65536))
-            print(json.dumps(result))
+            if args[:2] != ["pane", "run"] or "error" in result:
+                print(json.dumps(result))
             if "error" in result:
                 raise SystemExit(1)
 

@@ -299,3 +299,12 @@ def test_checkpoint_uses_the_exact_acknowledged_bytes(tmp_path, monkeypatch):
 
     monkeypatch.setattr(Path, "read_bytes", replace_after_read)
     assert checkpoint(tmp_path, receipt, scope) == "acknowledged"
+
+
+def test_successful_herdr_command_without_json_output_is_accepted(tmp_path, monkeypatch):
+    attempt, path, _ = launch_files(tmp_path)
+    supervisor = Supervisor(Launch.load(attempt, path))
+    monkeypatch.setattr(
+        subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout=b"", stderr=b"")
+    )
+    assert supervisor.herdr(["pane", "run", "fixture", "true"]) == {}
