@@ -21,7 +21,7 @@ def git(root, *args, input=None):
 
 
 @pytest.fixture
-def reuse_repo(tmp_path):
+def reuse_repo(tmp_path, request):
     root = tmp_path / "repo"
     root.mkdir()
     git(root, "init", "-b", "dev")
@@ -38,6 +38,9 @@ def reuse_repo(tmp_path):
             "gate-required": {"name": "Gate — Required", "needs": ["reuse", "unit", "lint", "queue-baseline"]},
         }
     }
+    if getattr(request, "param", None) == "dynamic":
+        workflow["jobs"]["mutation"] = {"strategy": {"matrix": {"shard": "${{ fromJSON(needs.plan.outputs.shards) }}"}}}
+        workflow["jobs"]["gate-required"]["needs"].append("mutation")
     (workflows / "test.yml").write_text(yaml.safe_dump(workflow))
     git(root, "add", ".github/workflows/test.yml")
     git(root, "commit", "-m", "base")
@@ -99,6 +102,8 @@ def full_source(reuse_repo, tmp_path):
     }
     names = ["reuse", "unit (3.11, 1)", "unit (3.12, 1)", "lint", "Gate — Required"]
     jobs = [{"id": 91 + n, "name": name, "conclusion": "success"} for n, name in enumerate(names)]
+    if "mutation" in yaml.safe_load((root / ".github/workflows/test.yml").read_text())["jobs"]:
+        jobs.extend([{"id": 98 + n, "name": f"mutation ({n})", "conclusion": "success"} for n in range(2)])
     jobs.append({"id": 97, "name": "queue-baseline", "conclusion": "skipped"})
     artifacts = [{"id": 42, "name": "required-tree-1", "expired": False}]
     artifacts.append({"id": 51, "name": "coverage-3.12-1", "expired": False})
@@ -179,3 +184,11 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
     workflow = yaml.safe_load((PROGRAM.parents[1] / ".github/workflows/test.yml").read_text())
     assert workflow["jobs"]["gate-required"]["steps"] == ci_reuse.gate_steps()
     assert workflow["jobs"]["reuse"] == ci_reuse.reuse_job()
+
+
+@pytest.mark.parametrize("reuse_repo", ["dynamic"], indirect=True)
+def test_a_full_pass_includes_every_dynamic_mutation_shard(full_source, tmp_path):
+    root, base, _, queue, env, _, _ = full_source
+    result = invoke(root, base, queue, "merge_group", tmp_path / "dynamic.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=true" in result.stdout
