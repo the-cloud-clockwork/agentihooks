@@ -187,6 +187,7 @@ def test_a_hung_unit_test_dumps_every_thread_stack_within_a_minute():
     timeout = int(re.search(r"-o faulthandler_timeout=(\d+)", command).group(1))
     assert slowest_test < timeout <= 60
     assert "no:faulthandler" not in command
+    assert "faulthandler_exit_on_timeout" not in command
 
 
 def test_tests_run_on_pull_requests_into_dev_and_main():
