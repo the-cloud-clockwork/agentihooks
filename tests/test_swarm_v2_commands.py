@@ -382,6 +382,25 @@ def test_package_cases_pass_on_the_isolated_fixture():
     assert case_c()["passed"]
 
 
+def test_recovery_report_captures_interrupted_operation_and_fences_old_result():
+    from tests.sv2_run05_cases import case_c
+
+    report = case_c()
+    assert report["intermediate_phase"] == "unknown"
+    assert report["recovered_phase"] == "applied"
+    assert report["replayed_identity_has_no_duplicate_effect"] is True
+    assert report["stale_request_keeps_newer_result"] is True
+
+
+def test_rejection_report_proves_expiry_with_a_fake_clock():
+    from tests.sv2_run05_cases import case_b
+
+    report = case_b()
+    assert report["expired_authority_refused"] is True
+    assert report["expiry_preserves_protected_state"] is True
+    assert report["fake_clock_ms"] == 100
+
+
 def test_each_authenticated_operator_is_identified_in_audit(fixture):
     store, agent, remote, local, service = fixture
     service.authenticate = lambda slug, credential: Principal(credential, Role.OPERATOR)
