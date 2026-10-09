@@ -24,22 +24,30 @@ def save(store, slug: str, state: dict) -> None:
 
 
 def eligible(store, slug: str, ledger, at: int, runtime) -> bool:
+    from scripts.swarm.tick import _ended
+
     config = store.config(slug)
     if config.state != "running":
         return False
     try:
-        _, ready = capacity.ready_work(slug, store, ledger.state(slug))
-        inputs = capacity.live_inputs(slug, store, ledger, dict(os.environ), at)
+        rows, ready = capacity.ready_work(slug, store, ledger.state(slug))
     except LedgerGone:
         return False
+    demand = {lane: len(tasks) for lane, tasks in ready.items()}
+    agents = [agent for agent in store.agents(slug) if not _ended(agent, rows)]
     requirements = None
     if hasattr(runtime, "quota_requirements"):
         prepared = {lane: [capacity._prepared(store, slug, task) for task in tasks] for lane, tasks in ready.items()}
         requirements = runtime.quota_requirements(config, prepared)
-    config, _ = capacity.autoscaled(config, inputs)
-    decision = capacity.calculate(
-        config, inputs.observations, inputs.agents, inputs.demand, requirements, warned=inputs.warned
-    )
+    if reader := getattr(runtime, "quota_capacity", None):
+        runtime.quota_previous(capacity.read(store, slug))
+        decision = reader(config, agents, at / 1000, demand, requirements, refresh=False)
+    else:
+        inputs = capacity.live_inputs(slug, store, ledger, dict(os.environ), at)
+        config, _ = capacity.autoscaled(config, inputs)
+        decision = capacity.calculate(
+            config, inputs.observations, inputs.agents, inputs.demand, requirements, warned=inputs.warned
+        )
     return any(decision["placements"].values())
 
 

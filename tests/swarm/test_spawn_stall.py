@@ -267,3 +267,48 @@ def test_lost_lease_prevents_failure_and_alarm_writes(stalled):
                 timing.BEFORE_STEP.reset(token)
     assert caught.value is error
     assert store.redis.get(store.key("sw", "tick-failure")) == before
+
+
+def test_quota_handoff_requires_an_account_other_than_its_predecessor(stalled, monkeypatch):
+    from scripts.swarm.runtime import HerdrRuntime, plugins
+
+    store, _, runtime, clock, _ = stalled
+    reader = HerdrRuntime()
+    runtime.quota_requirements = reader.quota_requirements
+    runtime.quota_capacity = reader.quota_capacity
+    runtime.quota_previous = reader.quota_previous
+    monkeypatch.setattr(plugins, "claude_only", lambda profile: False)
+    monkeypatch.setattr(
+        store,
+        "handoff_envelope",
+        lambda slug, task: {"reason": "quota", "launch": {"harness": "claude", "account": "acct"}},
+    )
+    tick_failure(stalled)
+    clock[0] += 600_000
+    tick_failure(stalled)
+    assert alarms(stalled) == []
+    assert InboxStore(store.redis).pending_mail("master@sw") == []
+
+
+def test_lost_controller_lease_blocks_final_alarm_delivery(stalled, monkeypatch):
+    from scripts.swarm import lease
+    from scripts.swarm.store import SwarmError
+
+    store, ledger, _, clock, _ = stalled
+    tick_failure(stalled)
+    before = store.redis.get(store.key("sw", "spawn-stall"))
+    failure = store.redis.get(store.key("sw", "tick-failure"))
+    clock[0] += 600_000
+
+    def takeover(*args):
+        store.redis.delete(store.key("sw", "control-owner"))
+        lease.acquire(store, "sw", "replacement")
+        raise RuntimeError("old tick failed after takeover")
+
+    monkeypatch.setattr(cli.phases, "phase_pass", takeover)
+    with pytest.raises(SwarmError):
+        cli.run_tick(store, "sw", ledger, stalled[2], FakeHerdr({}))
+    assert store.redis.get(store.key("sw", "spawn-stall")) == before
+    assert store.redis.get(store.key("sw", "tick-failure")) == failure
+    assert InboxStore(store.redis).pending_mail("master@sw") == []
+    assert ledger.notes == []
