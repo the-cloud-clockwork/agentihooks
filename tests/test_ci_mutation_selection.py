@@ -319,7 +319,6 @@ def test_selection_collects_one_stats_part_or_reuses_the_shared_stats(tmp_path, 
     from collections import defaultdict
 
     from scripts.ci_mutation.selection import run_selected
-    from scripts.ci_mutation.stats import load_parts
 
     monkeypatch.setenv("CI", "true")
     monkeypatch.chdir(tmp_path)
@@ -382,7 +381,12 @@ def test_selection_collects_one_stats_part_or_reuses_the_shared_stats(tmp_path, 
         assert done.value.code == 0
         assert config.source_paths == [Path("scripts/")]
         assert seen == ([] if mode == "empty" else [([["tests/test_1.py"], ["tests/test_4.py"]], tmp_path)])
-        assert load_parts(part.parent, "key") == ([] if mode == "empty" else [result], "")
+        assert json.loads(part.read_text()) == {
+            "key": "key",
+            "part": 1,
+            "parts": 3,
+            "results": [] if mode == "empty" else [result],
+        }
         assert saved == []
         raise SystemExit(7)
 
