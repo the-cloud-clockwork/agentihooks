@@ -19,7 +19,7 @@ def normalized(line: str) -> str:
 
 def executable(line: str) -> bool:
     text = line.strip()
-    return bool(text) and not text.startswith(("import ", "//", "/*", "*"))
+    return bool(text.strip("{}()[];,")) and not text.startswith(("import ", "//", "/*", "*"))
 
 
 def line_hits(script: str, functions: list[dict]) -> list[int | None]:
@@ -46,7 +46,7 @@ def line_hits(script: str, functions: list[dict]) -> list[int | None]:
 class Sources:
     def __init__(self, root: Path):
         self.files = {
-            path.relative_to(root).as_posix(): path.read_text(encoding="utf-8").splitlines()
+            path.relative_to(root).as_posix(): path.read_bytes().decode("utf-8").split("\n")
             for path in sorted(root.glob("scripts/**/*.js"))
         }
         self.lines = {name: [normalized(line) for line in lines] for name, lines in self.files.items()}
@@ -70,15 +70,13 @@ class Sources:
         lines = [normalized(line) for line in script.split("\n")]
         at = 0
         while at < len(lines):
-            best = max(
-                ((self.run_at(lines, at, name, start), name, start) for name, start in self.index.get(lines[at], ())),
-                default=(0, "", 0),
-            )
-            length, name, start = best
+            runs = [(self.run_at(lines, at, name, start), name, start) for name, start in self.index.get(lines[at], ())]
+            length = max((run[0] for run in runs), default=0)
             if length and sum(len(text) for text in lines[at : at + length]) >= MIN_MATCH_CHARS:
-                for offset in range(length):
-                    if hits[at + offset] is not None:
-                        self.hits[name][start + offset] += hits[at + offset]
+                for _, name, start in (run for run in runs if run[0] == length):
+                    for offset in range(length):
+                        if hits[at + offset] is not None:
+                            self.hits[name][start + offset] += hits[at + offset]
                 at += length
             else:
                 at += 1
@@ -105,19 +103,21 @@ def main() -> int:
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     captures = sorted(args.captures.rglob("capture-*.json"))
-    if not captures:
-        print(f"::error::No node or browser coverage captured under {args.captures}")
-        return 1
-    totals = {}
+    totals, kinds = {}, set()
     for capture in captures:
         for entry in json.loads(capture.read_text(encoding="utf-8"))["result"]:
+            kinds.add(capture.name.split("-")[1])
             stored = capture.parent / "sources" / f"{entry['source']}.js"
-            script = stored.read_text(encoding="utf-8")
+            script = stored.read_bytes().decode("utf-8")
             hits = line_hits(script, entry["functions"])
             summed = totals.setdefault(stored.name, (script, [None] * len(hits)))[1]
             for number, count in enumerate(hits):
                 if count is not None:
                     summed[number] = (summed[number] or 0) + count
+    missing = sorted({"browser", "node"} - kinds)
+    if missing:
+        print(f"::error::No {' or '.join(missing)} coverage recorded under {args.captures}")
+        return 1
     sources = Sources(args.root)
     for script, hits in totals.values():
         sources.attribute(script, hits)

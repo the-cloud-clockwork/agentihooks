@@ -104,7 +104,10 @@ for shard in range(1, 5):
     cov.stop()
     cov.save()
 (folder / 'js-coverage').mkdir()
-(folder / 'js-coverage' / 'capture-node-1.json').write_text('{"result": []}')
+(folder / 'js-coverage' / 'sources').mkdir(parents=True)
+(folder / 'js-coverage' / 'sources' / 's.js').write_text('void 0;\\n')
+for kind in ('node', 'browser'):
+    (folder / 'js-coverage' / f'capture-{kind}-1.json').write_text('{"result": [{"source": "s", "functions": []}]}')
 """
     subprocess.run(
         [sys.executable, "-c", generator, str(ROOT / ".github/coverage/coverage.ini")],

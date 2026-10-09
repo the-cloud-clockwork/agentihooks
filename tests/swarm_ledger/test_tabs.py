@@ -93,7 +93,7 @@ def test_swarm_contains_the_operational_blocks_and_nothing_overflows(tab, width)
     tab.get_by_role("tab", name="Swarm").click()
     for name in ["Capacity", "Agents", "Overlays", "Quota", "Doctor", "Health", "Handoff outcomes"]:
         assert tab.locator("#swarm").get_by_text(name, exact=True).count() == 1, name
-    for gone in ["Needs you", "Crew history", "Last restore"]:
+    for gone in ["Needs you", "Crew history", "Last restore", "Tasks"]:
         assert tab.locator("#swarm").get_by_text(gone, exact=True).count() == 0, gone
     assert tab.locator("#swarm #cap-eng").input_value() == "3"
     assert tab.locator("#swarm-alert").is_hidden()

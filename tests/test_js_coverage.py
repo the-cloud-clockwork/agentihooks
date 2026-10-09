@@ -9,8 +9,8 @@ import yaml
 
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
-PRELOAD = ROOT / ".github/coverage/node_capture.cjs"
-CONVERT = ROOT / ".github/coverage/js_lcov.py"
+PRELOAD = ROOT / "tests/node_capture.cjs"
+CONVERT = ROOT / "tests/js_lcov.py"
 
 PAGE = """import { helper } from "./dom.js";
 
@@ -71,6 +71,14 @@ def numbered(text):
     return {line: n for n, line in enumerate(PAGE.splitlines(), 1) if line.strip() == text}
 
 
+def stand_in(captures, kind):
+    """A recorded run of the other kind, since the report refuses captures missing either kind."""
+    (captures / "sources").mkdir(parents=True, exist_ok=True)
+    (captures / "sources" / "stand-in.js").write_text("void 0;\n")
+    entry = {"source": "stand-in", "functions": [{"ranges": [{"startOffset": 0, "endOffset": 7, "count": 1}]}]}
+    (captures / f"capture-{kind}-stand-in.json").write_text(json.dumps({"result": [entry]}))
+
+
 def test_a_node_eval_leaves_its_script_and_its_precise_coverage(tmp_path):
     script = "function a(x) { return x ? 1 : 2; }\nprocess.stdout.write(String(a(0)));"
     assert node(script, tmp_path) == "2"
@@ -98,6 +106,7 @@ def test_lines_a_test_ran_count_and_every_other_executable_line_counts_zero(tmp_
     )
     assert node(script, captures) == "3"
 
+    stand_in(captures, "browser")
     result = convert(tmp_path, captures, tmp_path / "lcov.info")
     assert result.returncode == 0, result.stdout + result.stderr
     hits = records(tmp_path / "lcov.info")["scripts/swarm_ledger/static/js/panel.js"]
@@ -121,19 +130,43 @@ def test_two_scripts_that_ran_the_same_line_add_their_counts(tmp_path):
     captures = tmp_path / "captures"
     for _ in range(2):
         node(extracted(PAGE, "total") + "\ntotal([1]);", captures)
+    stand_in(captures, "browser")
     assert convert(tmp_path, captures, tmp_path / "lcov.info").returncode == 0
     (line,) = numbered("return sum;").values()
     assert records(tmp_path / "lcov.info")["scripts/swarm_ledger/static/js/panel.js"][line] == 2
 
 
-def test_no_captured_node_run_is_red(tmp_path):
+@pytest.mark.parametrize(
+    "recorded, missing",
+    [([], "browser or node"), (["node"], "browser"), (["browser"], "node")],
+    ids=["nothing", "no-browser", "no-node"],
+)
+def test_a_report_missing_either_kind_of_recorded_run_is_red(tmp_path, recorded, missing):
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts/page.js").write_text("export const a = 1;\n")
-    (tmp_path / "captures").mkdir()
-    result = convert(tmp_path, tmp_path / "captures", tmp_path / "lcov.info")
+    captures = tmp_path / "captures"
+    captures.mkdir()
+    (captures / "capture-browser-empty.json").write_text('{"result": []}')
+    for kind in recorded:
+        stand_in(captures, kind)
+    result = convert(tmp_path, captures, tmp_path / "lcov.info")
     assert result.returncode != 0
-    assert "No node or browser coverage" in result.stdout
+    assert f"No {missing} coverage recorded" in result.stdout
     assert not (tmp_path / "lcov.info").exists()
+
+
+def test_code_two_page_files_share_counts_in_both(tmp_path):
+    for name in ("a", "b"):
+        page = tmp_path / f"scripts/swarm_ledger/static/js/{name}.js"
+        page.parent.mkdir(parents=True, exist_ok=True)
+        page.write_text(PAGE)
+    captures = tmp_path / "captures"
+    node(extracted(PAGE, "total") + "\ntotal([1]);", captures)
+    stand_in(captures, "browser")
+    assert convert(tmp_path, captures, tmp_path / "lcov.info").returncode == 0
+    (line,) = numbered("return sum;").values()
+    files = records(tmp_path / "lcov.info")
+    assert files["scripts/swarm_ledger/static/js/a.js"][line] == files["scripts/swarm_ledger/static/js/b.js"][line] == 1
 
 
 def test_the_coverage_shards_capture_node_runs_and_sonar_imports_the_report():
@@ -141,10 +174,12 @@ def test_the_coverage_shards_capture_node_runs_and_sonar_imports_the_report():
     steps = workflow["jobs"]["unit"]["steps"]
     run = next(step for step in steps if step.get("name") == "Run tests")
     assert "matrix.python-version == '3.12'" in run["env"]["NODE_OPTIONS"]
-    assert ".github/coverage/node_capture.cjs" in run["env"]["NODE_OPTIONS"]
+    assert "tests/node_capture.cjs" in run["env"]["NODE_OPTIONS"]
     assert "matrix.python-version == '3.12'" in run["env"]["JS_COVERAGE_DIR"]
     assert "-p tests.browser_coverage" in run["env"]["PYTEST_ADDOPTS"].split("||")[0]
-    assert run["env"]["PLAYWRIGHT_BROWSERS_PATH"] == "${{ github.workspace }}/.playwright"
+    assert run["env"]["PLAYWRIGHT_BROWSERS_PATH"] == (
+        "${{ matrix.python-version == '3.12' && format('{0}/.playwright', github.workspace) || '' }}"
+    )
     names = [step.get("name") for step in steps]
     browser = steps[names.index("Install the browser that page tests drive")]
     assert browser["uses"] == "./.github/actions/browser-cache"
@@ -188,6 +223,7 @@ def test_a_browser_page_leaves_the_scripts_it_ran_and_their_lines_count(tmp_path
         assert tab.evaluate("async () => (await import('/js/panel.js')).total([1, 2])") == 3
     assert list(captures.glob("capture-browser-*.json"))
 
+    stand_in(captures, "node")
     assert convert(tmp_path, captures, tmp_path / "lcov.info").returncode == 0
     hits = records(tmp_path / "lcov.info")["scripts/swarm_ledger/static/js/panel.js"]
     for text in ("let sum = 0;", "return sum;"):

@@ -59,16 +59,22 @@ def patches(folder: Path):
     page_close, context_close, browser_close = Page.close, BrowserContext.close, Browser.close
 
     def close_page(self, *args, **kwargs):
-        flush(folder, [self])
-        return page_close(self, *args, **kwargs)
+        try:
+            flush(folder, [self])
+        finally:
+            page_close(self, *args, **kwargs)
 
     def close_context(self, *args, **kwargs):
-        flush(folder, [page for page in WATCHED if page.context == self])
-        return context_close(self, *args, **kwargs)
+        try:
+            flush(folder, [page for page in WATCHED if page.context == self])
+        finally:
+            context_close(self, *args, **kwargs)
 
     def close_browser(self, *args, **kwargs):
-        flush(folder, [page for page in WATCHED if page.context.browser == self])
-        return browser_close(self, *args, **kwargs)
+        try:
+            flush(folder, [page for page in WATCHED if page.context.browser == self])
+        finally:
+            browser_close(self, *args, **kwargs)
 
     return [
         (Browser, "new_page", lambda self, *args, **kwargs: watch(browser_page(self, *args, **kwargs))),

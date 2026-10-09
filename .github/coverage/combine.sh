@@ -22,6 +22,6 @@ table=$(mktemp)
 python -m coverage report --rcfile="$config" > "$table" &
 table_pid=$!
 python -m coverage xml --rcfile="$config" -o coverage.xml
-python "$(dirname "$0")/js_lcov.py" --captures .coverage-shards --out lcov.info
+python "$(dirname "$0")/../../tests/js_lcov.py" --captures .coverage-shards --out lcov.info
 wait "$table_pid"
 cat "$table"
