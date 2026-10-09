@@ -681,7 +681,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
         handoff = store.handoff(slug, task["id"])
         if handoff:
             task["handoff"] = handoff
-        elif lives := store.earlier_lives(slug, task["id"]):
+        elif (lives := store.earlier_lives(slug, task["id"])) or task.get("branch"):
             task["reclaim"] = reclaim(config.repo, lives, task.get("branch") or "")
             store.put_reclaim(slug, name, task["reclaim"])
         task["stack_base"] = _stack_base(task, rows)

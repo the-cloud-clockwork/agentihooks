@@ -933,6 +933,13 @@ def test_a_first_life_has_no_reclaim_to_look_up(store, reclaims):
     assert store.reclaims("sw") == {}
 
 
+def test_a_reopened_task_with_a_branch_and_no_earlier_life_is_given_that_branch(store, reclaims):
+    ledger, runtime = FakeLedger([{"id": "t1", "branch": "feature-x"}]), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert reclaims == [("/repo", [], "feature-x")]
+    assert runtime.tasks[-1]["reclaim"] == RECLAIMED
+
+
 def test_a_handed_off_task_keeps_its_handoff_continuation_and_takes_no_reclaim(store, reclaims):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
