@@ -24,6 +24,7 @@ NDJSON record format:
 
 import json
 import os
+import re
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -82,6 +83,11 @@ FALSE_POSITIVE_PATTERNS = [
     "errors finding",
     "finding 0 errors",
 ]
+
+# Codex and Claude shell results carry no exit code.
+_ZERO_COUNT_RE = re.compile(
+    r"(?<![\w.])0 (?:errors?|failed|exceptions?|timeouts?|denied|refused|invalid|unauthorized|forbidden)\b"
+)
 
 # Their success responses echo file content, so any file mentioning "error"
 # or "not found" would read as a failure under string matching.
@@ -149,8 +155,9 @@ def _is_error(tool_result, strict=False):
         if fp in result_str:
             return False, ""
 
+    counted = _ZERO_COUNT_RE.sub("", result_str)
     for pattern in ERROR_PATTERNS:
-        if pattern in result_str:
+        if pattern in counted:
             return True, str(tool_result)[:200]
 
     return False, ""
