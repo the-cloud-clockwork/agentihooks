@@ -534,6 +534,14 @@ jobs:
           [[ -n "$branch" && "$branch" != *$'\n'* ]] || branch="pr-$number"
           echo "args=-Dsonar.pullrequest.key=$number -Dsonar.pullrequest.branch=$branch -Dsonar.pullrequest.base=${BASE_REF#refs/heads/}" >> "$GITHUB_OUTPUT"
 
+      # A first branch analysis has no new code baseline, so a dispatch graded as a branch drops every Delivery L2 condition.
+      - name: Name the dispatched branch as a pull request
+        id: dispatched
+        if: github.event_name == 'workflow_dispatch' && github.ref_name != 'dev'
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: echo "args=-Dsonar.pullrequest.key=dispatch-${REF_NAME//\//-} -Dsonar.pullrequest.branch=$REF_NAME -Dsonar.pullrequest.base=dev" >> "$GITHUB_OUTPUT"
+
       - name: Wait for the coverage merge
         if: always() && steps.current.outputs.superseded != 'true'
         timeout-minutes: 5
@@ -557,7 +565,7 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: http://127.0.0.1:9000
-          ARGS: ${{ steps.queued.outputs.args }}
+          ARGS: ${{ steps.queued.outputs.args || steps.dispatched.outputs.args }}
         run: |
           scanner="$RUNNER_TOOL_CACHE/sonar-scanner-cli/$SONAR_SCANNER_VERSION/linux-x64"
           if [[ ! -x "$scanner/bin/sonar-scanner" ]]; then
