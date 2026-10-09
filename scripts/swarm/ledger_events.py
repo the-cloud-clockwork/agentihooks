@@ -302,8 +302,9 @@ def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
     mail, github = Mail(inbox, store, slug), functools.cache(github)
     events = doc.get("_meta", {}).get("events", [])
     tasks = {t["id"]: t for t in doc.get("tasks", [])}
+    flagged = {f"followups/{f['id']}" for f in doc.get("followups", []) if f.get("needs_operator")}
     return (
-        _events(mail, new_events(store, slug, doc, "events-cursor"), tasks)
+        _events(mail, new_events(store, slug, doc, "events-cursor"), tasks, flagged)
         + _followups(mail, doc, events, ledger, now_ms)
         + _pull_requests(mail, tasks.values(), now_ms, github)
         + _settle_red_notices(mail, github)
@@ -386,9 +387,9 @@ def _by_agent(mail, event):
     return not (lane_of(by) == MASTER and mail.store.names.slug_of(by) == mail.slug)
 
 
-def _events(mail, events, tasks):
+def _events(mail, events, tasks, flagged):
     sent = []
-    for event in filter(lambda e: _by_agent(mail, e), events):
+    for event in filter(lambda e: _by_agent(mail, e) and e.get("target") not in flagged, events):
         text = _describe(mail.slug, event, tasks)
         if text:
             sent += mail.send(

@@ -97,7 +97,7 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_
             inbox.note(item.id, TO_MASTER, BY, f"raised to {master} as message {raised.id}", now_ms)
             actions.append(f"raised message {item.id} to {master}")
         elif step in (TO_MASTER, TO_OPERATOR):
-            if not post(inbox, item, lambda: ledger.followup(slug, _operator_text(item))):
+            if not post(inbox, item, lambda: ledger.followup(slug, _operator_text(item), needs_operator=True)):
                 actions.append(f"the ledger page refused message {item.id}, closed it")
                 continue
             inbox.note(item.id, TO_OPERATOR, BY, "shown to the operator on the ledger page", now_ms)
