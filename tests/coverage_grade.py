@@ -1,3 +1,4 @@
+import ast
 import difflib
 import functools
 import itertools
@@ -52,6 +53,27 @@ def line_map(old: str, new: str) -> dict[int, int]:
         return {n: n for n in range(1, len(old_lines) + 1)}
     matcher = difflib.SequenceMatcher(None, old_lines, new_lines)
     return {a + k + 1: b + k + 1 for a, b, size in matcher.get_matching_blocks() for k in range(size)}
+
+
+def _defined(source: str) -> set[str]:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    return {
+        node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+    }
+
+
+def pair_moves(gone: dict[str, str], added: dict[str, str]) -> dict[str, str]:
+    pairs = {}
+    for old_path, old in gone.items():
+        names = _defined(old)
+        scored = [(len(names & _defined(new)), len(line_map(old, new)), path) for path, new in added.items()]
+        shared, _, path = max(scored, default=(0, 0, ""))
+        if shared:
+            pairs[old_path] = path
+    return pairs
 
 
 def _lost(

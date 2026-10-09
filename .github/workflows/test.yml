@@ -172,6 +172,9 @@ jobs:
           BASE: ${{ inputs.base }}
         run: |
           sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/${BASE#origin/}" --jq .sha)
+          if [[ "$sha" == "$GITHUB_SHA" ]]; then
+            sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha" --jq '.parents[0].sha')
+          fi
           runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=dev&event=push&head_sha=$sha&per_page=20" --jq '.workflow_runs[].id')
           for run in $runs; do
             kept=" $(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
@@ -879,6 +882,7 @@ jobs:
             base="$QUEUE_BASE"
           else
             base=$(git rev-parse "${DISPATCHED:-HEAD^1}")
+            [[ "$base" != "$(git rev-parse HEAD)" ]] || base=$(git rev-parse HEAD^1)
           fi
           echo "commit=$base" >> "$GITHUB_OUTPUT"
           echo "tree=$(git rev-parse "$base^{tree}")" >> "$GITHUB_OUTPUT"

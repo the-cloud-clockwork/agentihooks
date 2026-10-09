@@ -130,6 +130,54 @@ def test_coverage_ratchet_grades_a_merge_group_against_the_branch_it_queues_onto
     assert 'base="$QUEUE_BASE"' in base["run"]
 
 
+def _step(job, name):
+    return next(step for step in _workflow()["jobs"][job]["steps"] if step.get("name") == name)
+
+
+@pytest.mark.parametrize(("dispatched", "graded"), [("HEAD", "HEAD^1"), ("", "HEAD^1"), ("HEAD^1", "HEAD^1")])
+def test_coverage_ratchet_never_grades_a_dispatched_head_against_itself(tmp_path, dispatched, graded):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _commit(repo, {"a": "1"})
+    _commit(repo, {"a": "2"})
+    output = tmp_path / "output"
+    output.write_text("")
+    env = dict(os.environ, DISPATCHED=dispatched, QUEUE_BASE="", GITHUB_OUTPUT=str(output))
+    step = _step("coverage-ratchet", "Resolve the measured base tree")
+    subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True)
+    assert f"commit={_git(repo, 'rev-parse', graded)}\n" in output.read_text()
+
+
+@pytest.mark.parametrize(("dispatched", "restored"), [("head", "parent"), ("other", "other")])
+def test_durations_restores_the_parent_baseline_when_the_dispatched_base_is_the_head(tmp_path, dispatched, restored):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "gh").write_text(
+        "#!/usr/bin/env bash\n"
+        'case "$2" in\n'
+        "  */commits/head) [[ $4 == .sha ]] && echo head || echo parent ;;\n"
+        "  */commits/*) echo other ;;\n"
+        '  */runs\\?*) echo "run-${2##*head_sha=}" | cut -d"&" -f1 ;;\n'
+        "  *) echo durations-merged coverage-baseline ;;\n"
+        "esac\n"
+    )
+    (bin_dir / "gh").chmod(0o755)
+    output = tmp_path / "output"
+    output.write_text("")
+    env = dict(
+        os.environ,
+        PATH=f"{bin_dir}:{os.environ['PATH']}",
+        BASE=dispatched,
+        GITHUB_SHA="head",
+        GITHUB_REPOSITORY="o/r",
+        GITHUB_OUTPUT=str(output),
+    )
+    step = _step("durations", "Find the dev push run of the dispatched base")
+    subprocess.run(["bash", "-e", "-c", step["run"]], cwd=tmp_path, env=env, check=True)
+    assert output.read_text() == f"id=run-{restored}\n"
+
+
 def test_test_count_refuses_a_base_without_its_grader(tmp_path):
     floor = _workflow()["jobs"]["test-count"]["steps"][-1]
     (tmp_path / "base").mkdir()
