@@ -6,6 +6,8 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_v2.runtime.commands import Action, Commands, Principal, Request, Role
 from scripts.swarm_v2.runtime.operations import Observation, Phase
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
 
 class Backend:
     backend = "kubernetes"
