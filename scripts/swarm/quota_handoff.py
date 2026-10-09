@@ -25,7 +25,7 @@ class Thresholds:
 
 
 def trigger(account: capacity.Account, thresholds: Thresholds) -> str:
-    if account.state == "UNKNOWN":
+    if account.kind == "api" or account.state == "UNKNOWN":
         return ""
     if account.week_left is not None and 100 - account.week_left >= thresholds.week:
         return "week"
@@ -70,6 +70,8 @@ def exclusion(account: capacity.Account, thresholds: Thresholds, predecessor: tu
         return "is the account handing off"
     if not capacity.free_seats(account):
         return "has no free seats"
+    if account.kind == "api":
+        return ""
     if account.state == "UNKNOWN" or (account.five_left is None and account.week_left is None):
         return "has no quota reading"
     if window := trigger(account, thresholds):
@@ -94,7 +96,9 @@ def successor(accounts: list[capacity.Account], allow_codex: bool, thresholds: T
             return min(
                 eligible,
                 key=lambda row: (
-                    -min(value for value in (row.five_left, row.week_left) if value is not None),
+                    -100
+                    if row.kind == "api"
+                    else -min(value for value in (row.five_left, row.week_left) if value is not None),
                     row.name,
                 ),
             )
