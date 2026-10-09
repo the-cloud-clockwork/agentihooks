@@ -75,7 +75,7 @@ def take(store, slug, name, runtime, now_ms, replace_live=False):
             store.drop_agent(slug, agent.name)
     account, validated = launch_of(pid)
     harness = harness_of(pid) or validated.get("harness", "")
-    model, effort = launch_model.read(harness, argv_of(pid))
+    model, effort = launch_model.read(harness, argv_of(pid)) if harness else ("", "")
     record = AgentRecord(
         name,
         MASTER,

@@ -333,6 +333,7 @@ def test_an_empty_saved_assignment_launches_from_the_swarm_config(up, monkeypatc
     store.redis.hset(store.key("sw", "launch-assignments"), MASTER, json.dumps({"profile": "", "harness": ""}))
     store.put_handoff("sw", MASTER, "# Handoff v2\n## Next\nGo on.\n")
     answers(monkeypatch)
+    monkeypatch.setattr(master_launch.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
     assert run("sw", "master", "up", "--new") == 0
     [(_, task)] = rt.masters
     launch = {"profile": "master", "harness": "claude", "model": "opus", "effort": "high"}

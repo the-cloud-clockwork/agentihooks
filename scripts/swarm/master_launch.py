@@ -122,8 +122,8 @@ def _resume(store, slug, runtime, at, previous):
 
 
 def fill(saved, config):
-    """A saved launch with its empty keys taken from the swarm config: master profile, affinity or rotation harness, frontier model."""
-    harness = saved.get("harness") or affinity.desired(config) or agent_choice.choose("", dict(os.environ))[0]
+    """A saved launch with its empty keys filled: master profile, affinity or open seat harness, frontier model."""
+    harness = saved.get("harness") or affinity.desired(config) or _open_seat()
     defaults = {"profile": _profile(config)}
     if harness:
         pick = model_pick.frontier(harness)
@@ -133,6 +133,11 @@ def fill(saved, config):
             "effort": effort_range.clamp(harness, pick.effort, effort_range.of(config)),
         }
     return {**defaults, **{key: value for key, value in saved.items() if value}}
+
+
+def _open_seat():
+    harness, reason = agent_choice.choose("", dict(os.environ))
+    return "" if reason == agent_choice.ALL_FULL else harness
 
 
 def _filled(task, config):

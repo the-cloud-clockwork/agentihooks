@@ -26,7 +26,20 @@ def codex_only(tmp_path, monkeypatch):
         monkeypatch.delenv(key)
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity, "_claude", lambda environ, now: [])
     monkeypatch.setattr(capacity, "_codex", lambda environ, now, refresh: [codex("cx"), codex("cy", sessions=1)])
+    monkeypatch.setattr(plugins, "claude_only", lambda profile: False)
+    return tmp_path
+
+
+@pytest.fixture
+def claude_only(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(
+        capacity, "_claude", lambda environ, now: [capacity.Account("claude", "cc", "OPEN", 0, 90, 90, 6)]
+    )
+    monkeypatch.setattr(capacity, "_codex", lambda environ, now, refresh: [])
     monkeypatch.setattr(plugins, "claude_only", lambda profile: False)
     return tmp_path
 
@@ -58,6 +71,15 @@ def test_a_codex_only_env_spawns_the_master_and_every_lane_on_codex(codex_only, 
     placed, argv = _spawned(codex_only, lanes, lane, rows)
     assert argv[argv.index("--agent") + 1] == "codex"
     assert placed.harness == "codex"
+
+
+@pytest.mark.parametrize("lane", LANES)
+@pytest.mark.parametrize("tick", [True, False])
+def test_a_claude_only_template_spawns_every_lane_on_claude(claude_only, lane, tick):
+    lanes = templates.lane_map(templates.load("claude-only", {}))
+    placed, argv = _spawned(claude_only, lanes, lane, capacity.accounts({}, 0.0) if tick else None)
+    assert argv[argv.index("--agent") + 1] == "claude"
+    assert placed.harness == "claude"
 
 
 def test_choose_names_the_harness_holding_an_account_when_every_seat_is_full(monkeypatch):
@@ -107,6 +129,11 @@ def test_fill_leaves_the_harness_empty_when_no_harness_has_an_account(monkeypatc
         "profile": "master",
         "account": "a9",
     }
+
+
+def test_fill_leaves_the_harness_empty_when_every_seat_is_full(monkeypatch):
+    monkeypatch.setattr(agent_choice, "choose", lambda requested, environ: ("codex", agent_choice.ALL_FULL))
+    assert master_launch.fill({}, SwarmConfig("sw", "/repo", 0, 0)) == {"profile": "master"}
 
 
 def test_fill_prefers_the_master_affinity_over_the_rotation(monkeypatch):

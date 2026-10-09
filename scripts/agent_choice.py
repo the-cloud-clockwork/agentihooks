@@ -38,7 +38,7 @@ def choose(requested: str, environ: dict[str, str]) -> tuple[str, str]:
     return (seat.harness, "rotation") if seat else (fallback(rows), ALL_FULL)
 
 
-def fallback(rows) -> str:
+def fallback(rows: list) -> str:
     """The harness holding one of ``rows``; empty when no harness holds an account."""
     held = {row.harness for row in rows}
     return next((agent for agent in AGENTS if agent in held), "")
