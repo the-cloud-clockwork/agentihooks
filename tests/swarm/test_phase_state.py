@@ -207,6 +207,24 @@ def test_phase_pass_reads_each_phase_s_tasks_from_the_ledger_hierarchy(store):
     assert Inbox.sent[0].endswith("all 2 tasks closed.") and Inbox.sent[1].endswith("reopened for t3.")
 
 
+def test_phase_pass_skips_when_the_hierarchy_read_fails(store):
+    import urllib.error
+
+    from scripts.swarm import phases
+
+    class Ledger:
+        def set_phase(self, slug, phase_id, done, status):
+            raise AssertionError("no phase may change without the hierarchy")
+
+        def hierarchy(self, slug):
+            raise urllib.error.HTTPError("http://ledger/hierarchy", 404, "Not Found", {}, None)
+
+    data = doc([{"id": "p1", "title": "Build"}], [{"id": "t1", "phase": "p1", "state": "done"}])
+    assert phases.phase_pass(None, store, "sw", data, Ledger()) == [
+        "phase pass skipped, the hierarchy read failed: HTTP Error 404: Not Found"
+    ]
+
+
 def test_the_ledger_client_reads_the_hierarchy_resource(monkeypatch):
     from scripts.swarm import ledger_client
 

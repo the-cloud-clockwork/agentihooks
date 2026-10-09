@@ -11,7 +11,11 @@ REOPENED = "A task that is not done landed in this phase, so the swarm reopened 
 
 def phase_pass(inbox, store, slug, doc, ledger):
     tasks = {t["id"]: t for t in doc.get("tasks", []) if not t.get("out_of_scope")}
-    under = phase_tasks(ledger.hierarchy(slug))
+    try:
+        under = phase_tasks(ledger.hierarchy(slug))
+    except OSError as exc:
+        # A ledger server not yet restarted onto the hierarchy resource answers 404; the next tick retries.
+        return [f"phase pass skipped, the hierarchy read failed: {exc}"]
     mail, actions = Mail(inbox, store, slug), []
     for phase in doc.get("phases", []):
         mine = [tasks[tid] for tid in under.get(phase["id"], []) if tid in tasks]

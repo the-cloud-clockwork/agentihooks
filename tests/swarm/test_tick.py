@@ -32,6 +32,21 @@ class FakeLedger:
             "followups": [],
         }
 
+    def hierarchy(self, slug):
+        tasks = self.tasks(slug)
+        return [
+            row
+            for phase in getattr(self, "phases", [])
+            for row in [
+                {"node": f"phases/{phase['id']}", "kind": "phase", "depth": 0},
+                *(
+                    {"node": f"tasks/{t['id']}", "kind": "task", "depth": 1}
+                    for t in tasks
+                    if t.get("phase") == phase["id"]
+                ),
+            ]
+        ]
+
     def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
         assert slug == "sw"
         row = self.rows[task_id]
