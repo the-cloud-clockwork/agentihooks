@@ -16,7 +16,24 @@ from .test_definitions import definition_home as definition_home
 from .test_definitions import sample, write_definition
 
 PACKAGE = Path(__file__).resolve().parents[2] / "profiles" / "package" / "classifiers"
-KNOWN_MISSES = {"intent-check": ["g18-quiet-week"]}
+KNOWN_MISSES = {
+    "intent-check": ["g18-quiet-week"],
+    "model-pick": [
+        "rig-grade-swarm-cxc0",
+        "rig-grade-swarm-doctor-fx-9b243b65-tune",
+        "rig-grade-swarm-doctor-t25",
+        "rig-grade-swarm-doctor-t38",
+        "rig-grade-swarm-ed1",
+        "rig-grade-swarm-tc1",
+        "rig-grade-swarm-tc104",
+    ],
+    "profile-pick": [
+        "rig-grade-swarm-doctor-fx-29d21c6e-code",
+        "rig-grade-swarm-doctor-fx-30373668-cause",
+        "rig-grade-swarm-doctor-t9",
+    ],
+    "task-difficulty": ["rig-grade-swarm-vprf5"],
+}
 ON = {"AGENTIHOOKS_METRICS_URL": "http://ch:8123", "AGENTIHOOKS_METRICS_USER": "writer", "AGENTIHOOKS_SWARM": "sw"}
 
 

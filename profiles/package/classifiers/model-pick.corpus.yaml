@@ -1,0 +1,483 @@
+version: 1
+notes: 'Seeded from the classifier decision log: each case state was rebuilt from its ledger and matched to a logged state
+  digest, and its samples are the answers logged for that digest. Expected verdicts were written by a reader that saw only
+  the state and the question, never the thresholds or the rule.'
+cases:
+- name: rig-grade-swarm-t58
+  state:
+    title: The master answers agent questions so they leave the operator's Priorities
+    description: 'Ledger answers are operator only, so when the master answers an agent''s question by comment, the question
+      stays unanswered and sits in the operator''s Priorities. Seam: a ledger answer command lets the master answer a question
+      at delegate and full autonomy, recorded as by the master, and the derived priority clears; workers still cannot answer.
+      Done when tests cover master answer accepted, worker answer refused and the priority cleared, and the pull request is
+      merged.'
+    kind: code
+    territory_size: 0
+  params:
+    levels:
+    - low
+    - medium
+    - high
+    - max
+  expected:
+    effort: high
+  samples:
+  - source: luna
+    latency_ms: 14996
+    answers:
+      effort:
+        type: score
+        score: 2.0
+        confidence: 0.9
+        probabilities:
+          '0': 0.0
+          '1': 0.05
+          '2': 0.9
+          '3': 0.05
+        legend:
+          '0': low
+          '1': medium
+          '2': high
+          '3': max
+  notes: state digest 9ab27e2cb7206f5a
+- name: rig-grade-swarm-cxc0
+  state:
+    title: Commit the Codex Channels plan into resources plans
+    description: 'Spec: section cxc0 of the decoupled swarm runtime plan, lines 419 to 431 of the plan artifact on this phase.
+      Read only those lines, ten lines of margin each side. Done when a sha256sum match of the source against the committed
+      body without the note, pasted, and the pull request merges.'
+    kind: code
+    territory_size: 1
+  params:
+    levels:
+    - low
+    - medium
+    - high
+    - max
+  expected:
+    effort: low
+  samples:
+  - source: haiku
+    latency_ms: 5058
+    answers:
+      effort:
+        type: score
+        score: 1.25
+        confidence: 0.5
+        probabilities:
+          '0': 0.15
+          '1': 0.5
+          '2': 0.3
+          '3': 0.05
+        legend:
+          '0': low
+          '1': medium
+          '2': high
+          '3': max
+  - source: haiku
+    latency_ms: 5682
+    answers:
+      effort:
+        type: score
+        score: 1.05
+        confidence: 0.5
+        probabilities:
+          '0': 0.25
+          '1': 0.5
+          '2': 0.2
+          '3': 0.05
+        legend:
+          '0': low
+          '1': medium
+          '2': high
+          '3': max
+  notes: state digest 3665c32f581a8043
+- name: rig-grade-swarm-doctor-fx-9b243b65-tune
+  state:
+    title: Move the number behind the task cost finding
+    description: 'Issue 1252. An agent launch after a merge that changes the profile render stamp re-renders the shared profile
+      home in place; every live session on it reloads, drops its thinking and writes its whole context to cache again (task
+      mp2 paid this twice, about six hundred eighty thousand tokens). Seams: (1) a launch with a new render stamp gets a fresh
+      profile home; (2) a home that live sessions run on is never rewritten; (3) old homes are removed once no live session
+      uses them. Red first. Measure whole context cache rewrites per live session across one merge, before and after; target
+      zero. The task t20 profile check failures after renders may share this cause: check them in the same proof.'
+    kind: code
+    territory_size: 0
+  params:
+    levels:
+    - low
+    - medium
+    - high
+    - max
+  expected:
+    effort: high
+  samples:
+  - source: luna
+    latency_ms: 6524
+    answers:
+      effort:
+        type: score
+        score: 2.7900000000000005
+        confidence: 0.8
+        probabilities:
+          '0': 0.0
+          '1': 0.01
+          '2': 0.19
+          '3': 0.8
+        legend:
+          '0': low
+          '1': medium
+          '2': high
+          '3': max
+  notes: state digest 79d0c2def5bd1ce7
+- name: rig-grade-swarm-vidn2
+  state:
+    title: Separate logical agents from execution attempts
+    description: 'Swarm v2 work package SV2-IDN-02, tier 1 of 8. Spec: read section SV2-IDN-02 of /home/iamroot/dev/tcc-ecosystem/agentihooks/Swarm-v2.md
+      (also Swarm-v2.md at the root of your agentihooks worktree) in full, fixture, boundary obligations, acceptance tests,
+      rollback and completion, plus sections 1 to 3. Repository: agentihooks. Integration gate: G1. Intended change: Keep
+      seat continuity while giving every replacement process an immutable execution incarnation. Required fixture: One seat
+      with three sequential attempts and two Pods sharing a human display label. Name SV2-IDN-02 in the pull request. antoncore
+      changes go through GitOps, never live patches. Priority: Anton compute first, because the operator''s workstation memory
+      is the bottleneck.'
+    kind: code
+    territory_size: 1
+  params:
+    levels:
+    - low
+    - medium
+    - high
+    - xhigh
+  expected:
+    effort: xhigh
+  samples:
+  - source: luna
+    latency_ms: 4846
+    answers:
+      effort:
+        type: score
+        score: 2.7
+        confidence: 0.75
+        probabilities:
+          '0': 0.01
+          '1': 0.03
+          '2': 0.21
+          '3': 0.75
+        legend:
+          '0': low
+          '1': medium
+          '2': high
+          '3': xhigh
+  notes: state digest a53cb64d4dd464ba
+- name: rig-grade-swarm-doctor-t14
+  state:
+    title: Measure non master replies to whole swarm chat lines after the fix is live
+    description: 'Once the whole swarm chat fix is live in the ledger server (restarted after task t13), count replies from
+      agents other than the master to whole swarm chat lines over thirty minutes, the same way as before. Before: eight replies
+      on two lines. Target zero, with the master answering each line once.'
+    kind: tune
+    territory_size: 0
+  params:
+    levels:
+    - low
+    - medium
+    - high
+    - xhigh
+  expected:
+    effort: low
+  samples:
+  - source: pplx-decider-v1-27b
+    latency_ms: 1481
+    answers:
+      effort:
+        type: score
+        score: 0.42825216055665755
+        confidence: 0.714498559628895
+        probabilities:
+          '0': 0.6258357009068525
+          '1': 0.32463397398543853
+          '2': 0.044972788751907605
+          '3': 0.004557536355801277
+        legend:
+          '0': low
+          '1': medium
+          '2': high
+          '3': xhigh
+  - source: luna
+    latency_ms: 15161
+    answers:
+      effort:
+        type: score
+        score: 0.05
+        confidence: 0.96
+        probabilities:
+          '0': 0.96
+          '1': 0.03
+          '2': 0.01
+          '3': 0.0
+        legend:
+          '0': low
+          '1': medium
+          '2': high
+          '3': max
+  notes: state digest ac2ce7b5cfe261e5
+- name: rig-grade-swarm-tc1
+  state:
+    title: Grouped local test runs across swarm and root tests keep swarm fixtures
+    description: 'From an engineer follow up: running the swarm tests and root tests in one local pytest run loses the swarm
+      fixtures, giving model classification failures and a missing scratch fixture. This reproduces on unchanged dev, and
+      separate runs pass. Seams: test collection and fixture scoping between the swarm tests folder and the root tests folder.
+      Done when one grouped run of the affected swarm and root test files passes locally with at most two workers, a red run
+      on dev is recorded first, and CI stays green. Do not run the full suite locally.'
+    kind: ci
+    territory_size: 0
+  params:
+    levels:
+    - low
+    - medium
+    - high
+    - xhigh
+  expected:
+    effort: high
+  samples:
+  - source: luna
+    latency_ms: 6098
+    answers:
+      effort:
+        type: score
+        score: 1.0
+        confidence: 1.0
+        probabilities:
+          '0': 0.0
+          '1': 1.0
+          '2': 0.0
+          '3': 0.0
+        legend:
+          '0': low
+          '1': medium
+          '2': high
+          '3': xhigh
+  notes: state digest 9d90cdbe140a28ad
+- name: rig-grade-swarm-doctor-t25
+  state:
+    title: Measure rewritten life stamps over a full hour of watched swarm startups
+    description: 'Parent: the Doctor fixes the system its watched swarm runs on, with proof. Pull request 1300 keeps an agent''s
+      life stamp fixed before startup telemetry reads it; it merged and reached the watched swarm''s main checkout by the
+      Doctor''s next pull. Before: twenty one of twenty one watched swarm startups had their life stamp rewritten. Count every
+      watched swarm startup in the first full hour after the pull, with the life count script in the telemetry code task''s
+      work folder, the same way as before. Target zero rewritten. Done when the count command and its output for before and
+      after are on the proof.'
+    kind: tune
+    territory_size: 0
+  params:
+    levels:
+    - low
+    - medium
+    - high
+    - max
+  expected:
+    effort: medium
+  samples:
+  - source: luna
+    latency_ms: 7060
+    answers:
+      effort:
+        type: score
+        score: 2.0
+        confidence: 1.0
+        probabilities:
+          '0': 0.0
+          '1': 0.0
+          '2': 1.0
+          '3': 0.0
+        legend:
+          '0': low
+          '1': medium
+          '2': high
+          '3': max
+  notes: state digest fb871e174812dba4
+- name: rig-grade-swarm-doctor-t38
+  state:
+    title: The red checks detector waits for a head to sit red with no push
+    description: 'Parent: the Doctor fixes the system its watched swarm runs on, with proof. The Doctor red checks detector
+      raised six findings today (pull requests 1286, 1333, 1353, 1390, 1408 and 1413) within minutes of a push; every one
+      was fixed by its engineer and merged, so each was judged noise. The swarm tick already tells an engineer when its pull
+      request sits red with no push for twenty minutes. Seams: (1) the detector reports a red head only after it has sat red
+      with no new push for the same twenty minutes the tick uses, read from the same setting; (2) a red head with a push since
+      resets; (3) a red head past the window is still reported. Red first. Number to move: red check findings on heads that
+      got a push and turned green within twenty minutes, replayed over today''s findings before and after; six before, target
+      zero, while a head left red past the window is still found.'
+    kind: code
+    territory_size: 0
+  params:
+    levels:
+    - low
+    - medium
+    - high
+    - max
+  expected:
+    effort: high
+  samples:
+  - source: haiku
+    latency_ms: 4257
+    answers:
+      effort:
+        type: score
+        score: 1.56
+        confidence: 0.44
+        probabilities:
+          '0': 0.04
+          '1': 0.44
+          '2': 0.44
+          '3': 0.08
+        legend:
+          '0': low
+          '1': medium
+          '2': high
+          '3': max
+  notes: state digest 0f4bd84eaecc604c
+- name: rig-grade-swarm-ed1
+  state:
+    title: Enforce determinism skill reaches every profile
+    description: 'Follow up: the new top doctrine rule names the enforce determinism skill, but the skill ships only in the
+      engineer kit, so ci, planner, qa and master agents read the rule without the tool. Seams: move the skill to the bundle
+      global Claude folder so every profile inherits it, and the role profile tests pin it in every role. Done when merged
+      in the bundle and a fresh ci session lists the skill.'
+    kind: code
+    territory_size: 0
+  params:
+    levels:
+    - low
+    - medium
+    - high
+    - max
+  expected:
+    effort: medium
+  samples:
+  - source: luna
+    latency_ms: 8151
+    answers:
+      effort:
+        type: score
+        score: 3.0
+        confidence: 1.0
+        probabilities:
+          '0': 0.0
+          '1': 0.0
+          '2': 0.0
+          '3': 1.0
+        legend:
+          '0': low
+          '1': medium
+          '2': high
+          '3': max
+  notes: state digest d32bba8bda0565d3
+- name: rig-grade-swarm-doctor-fx-8be892c4-cause
+  state:
+    title: Find the cause of the inbox no outcome finding
+    description: 'Doctor found 379 inbox items in the watched swarm closed done with no outcome named: 228 are notices the
+      swarm tick itself sends (red checks, a wait that ended, a pull request still open after merge), 151 are items from engineers,
+      ci agents, masters and the operator. Seams: the tick code that sends these notices (is each one a work item or for information
+      only), the msg close path that accepts a bare done, and the Doctor inbox no outcome detector. Show with evidence from
+      the inbox history which group is a sender bug (notices that should carry the information only flag) and which is a closer
+      lapse (a receiver that should name where the work went). Proof: root cause, evidence (item counts by sender and kind,
+      the code that sends each notice), and the fix or a filed task.'
+    kind: troubleshoot
+    territory_size: 0
+  params:
+    levels:
+    - low
+    - medium
+    - high
+    - xhigh
+  expected:
+    effort: xhigh
+  samples:
+  - source: luna
+    latency_ms: 4663
+    answers:
+      effort:
+        type: score
+        score: 3.0
+        confidence: 1.0
+        probabilities:
+          '0': 0.0
+          '1': 0.0
+          '2': 0.0
+          '3': 1.0
+        legend:
+          '0': low
+          '1': medium
+          '2': high
+          '3': xhigh
+  notes: state digest a6c1d6d8f56a8616
+- name: rig-grade-swarm-t64
+  state:
+    title: Quota transfer refusal text names the right direction
+    description: 'Profile QA found the quota transfer refusal message names the wrong direction of the transfer. Seam: the
+      refusal text names the source and target account as they are. Done when a test pins the message for both directions
+      and the pull request is merged. Evidence is on the profile QA task proof.'
+    kind: code
+    territory_size: 0
+  params:
+    levels:
+    - low
+    - medium
+    - high
+    - xhigh
+  expected:
+    effort: low
+  samples:
+  - source: luna
+    latency_ms: 6547
+    answers:
+      effort:
+        type: score
+        score: 0.12
+        confidence: 0.9
+        probabilities:
+          '0': 0.9
+          '1': 0.08
+          '2': 0.02
+          '3': 0.0
+        legend:
+          '0': low
+          '1': medium
+          '2': high
+          '3': xhigh
+  notes: state digest 35ef80246812c2db
+- name: rig-grade-swarm-tc104
+  state:
+    title: Unit test jobs carry a time limit
+    description: The unit test job has no time limit, so a hung shard can run six hours while every newer dev Sonar scan waits
+      behind it. Set a job time limit near twice the slowest measured shard so a hung shard fails fast. Done when the pull
+      request merges and the workflow shows the limit on every unit shard.
+    kind: code
+    territory_size: 0
+  params:
+    levels:
+    - low
+    - medium
+    - high
+    - max
+  expected:
+    effort: low
+  samples:
+  - source: haiku
+    latency_ms: 11271
+    answers:
+      effort:
+        type: score
+        score: 1.03
+        confidence: 0.6
+        probabilities:
+          '0': 0.2
+          '1': 0.6
+          '2': 0.17
+          '3': 0.03
+        legend:
+          '0': low
+          '1': medium
+          '2': high
+          '3': max
+  notes: state digest bcc7c04ca294ff60

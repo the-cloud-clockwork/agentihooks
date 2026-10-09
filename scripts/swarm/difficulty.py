@@ -4,7 +4,7 @@ import math
 import re
 from concurrent.futures import ThreadPoolExecutor
 
-from hooks.classifier import ClassifierError, decide, definitions, runner
+from hooks.classifier import ClassifierError, code_rules, decide, definitions, runner
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm_ledger import ledger_kinds
 
@@ -56,12 +56,24 @@ def classify(task: dict, doc: dict) -> dict:
         answer = output.raw.answers[QUESTION]
     except ClassifierError:
         return sized(FALLBACK, "default", 0.0)
+    choice, confidence = picked(output.definition, answer, output.thresholds)
+    return sized(choice, "classifier", confidence) if choice else sized(FALLBACK, "default", confidence)
+
+
+def picked(definition, answer, thresholds) -> tuple[str | None, float]:
     raw = answer.confidence
     confidence = min(max(raw, 0.0), 1.0) if _real(raw) else 0.0
-    options = {spec.name: spec.question for spec in output.definition.questions}[QUESTION].options
-    if confidence < output.thresholds["confidence"] or answer.choice not in options:
-        return sized(FALLBACK, "default", confidence)
-    return sized(answer.choice, "classifier", confidence)
+    options = {spec.name: spec.question for spec in definition.questions}[QUESTION].options
+    if confidence < thresholds["confidence"] or answer.choice not in options:
+        return None, confidence
+    return answer.choice, confidence
+
+
+def _verdicts(definition, state, params, answers):
+    return {"difficulty": picked(definition, answers[QUESTION], definition.thresholds)[0] or FALLBACK}
+
+
+RULE = code_rules.CodeRule(code_rules.asked, _verdicts, {"difficulty": ("S", "M", "L")}, {"difficulty": FALLBACK})
 
 
 def state(task: dict, doc: dict) -> dict:
