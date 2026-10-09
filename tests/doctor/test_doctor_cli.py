@@ -71,7 +71,9 @@ def state(slug):
 
 
 def pointers(slug):
-    return [c for c in state(slug)["chat"] if c["text"] == doctor.POINTER]
+    found = state(slug)
+    assert not [c for c in found["chat"] if c["text"] == doctor.POINTER]
+    return [n for n in found["notifications"] if n["text"] == doctor.POINTER]
 
 
 def test_start_refuses_without_a_linked_bundle_and_creates_nothing(env, monkeypatch, capsys):
@@ -448,7 +450,9 @@ def test_intervene_messages_the_watched_master_and_logs_on_both_ledgers(env, mon
     texts = [item.text for item in InboxStore(store.redis).inbox(f"master@{WATCHED}")]
     assert "The inbox fix is merged." in texts
     for slug in (WATCHED, DOCTOR):
-        assert any("sent a message to the watched swarm's master" in c["text"] for c in state(slug)["chat"])
+        found = state(slug)
+        assert any("sent a message to the watched swarm's master" in n["text"] for n in found["notifications"])
+        assert not any("sent a message" in c["text"] for c in found["chat"])
 
 
 @pytest.mark.parametrize("bounded,count", [(False, 2), (True, 2), (True, 0)])

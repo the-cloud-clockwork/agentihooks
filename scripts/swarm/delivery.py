@@ -53,7 +53,10 @@ def recipients(store, slug, to, sender):
     agents = [a for a in store.agents(slug) if a.name != sender and a.state != "finished"]
     if to in ("", "all"):
         return agents
-    return [a for a in agents if to in (a.lane, a.name)]
+    found = [a for a in agents if to in (a.lane, a.name, a.seat)]
+    if not found:
+        raise SwarmError(f"nobody in swarm {slug} answers to {to}")
+    return found
 
 
 def send(store, slug, text, sender, to, fyi=False):

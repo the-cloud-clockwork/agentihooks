@@ -14,7 +14,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 def setup():
     import fakeredis
 
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store = RedisStore(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True))
     store.create(SwarmConfig("proof", "/repo", max_eng=0, max_ci=0))
     name = store.names.next("proof", "master", at=1)
     master = AgentRecord(name, "master", "", seat="master@proof")
@@ -36,6 +36,19 @@ def close(setup, monkeypatch):
     return lambda: cli.cmd_close(store, Namespace(slug="proof", name="operator", now=True, note="Proof ended"))
 
 
+@pytest.mark.parametrize("params", [{}, {"host": "localhost", "port": 6379}])
+def test_setup_reads_no_key_another_fake_client_writes(setup, params):
+    import fakeredis
+
+    store, _, _ = setup
+    other = fakeredis.FakeRedis(decode_responses=True, **params)
+    other.set("stray", "1")
+    try:
+        assert store.redis.get("stray") is None
+    finally:
+        other.delete("stray")
+
+
 @pytest.mark.parametrize("action", ["stop", "close"])
 def test_terminal_notice_has_no_retired_master_recipient(setup, action):
     store, inbox, master = setup
@@ -44,10 +57,10 @@ def test_terminal_notice_has_no_retired_master_recipient(setup, action):
     history = inbox.history(old.id)
     store.drop_agent("proof", master.name)
     store.update("proof", state="stopped")
-    said = []
-    ledger = SimpleNamespace(say=lambda *args, **kwargs: said.append(args))
+    noted = []
+    ledger = SimpleNamespace(notify=lambda *args: noted.append(args))
     notify(store, Namespace(slug="proof", name="operator", now=True), ledger, master, action)
-    assert len(said) == 1
+    assert [args[0] for args in noted] == ["proof"]
     assert [item.id for item in inbox.inbox(master.seat)] == [old.id]
     assert inbox.history(old.id) == history
 
@@ -120,7 +133,11 @@ def test_a_resumable_master_keeps_mail_after_retirement(setup, monkeypatch, stat
 
     store, inbox, master = setup
     monkeypatch.setattr("scripts.inbox.addresses.get_active_sessions", lambda **kwargs: {})
+    monkeypatch.delenv("AGENTIHOOKS_INBOX_REDELIVER_S", raising=False)
+    clock = [1_000_000]
+    monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: clock[0])
     item = inbox.send("operator", master.seat, "Resume work")
+    clock[0] += 1
     if state != "pending":
         getattr(inbox, "deliver" if state == "delivered" else "read")(item.id, master.name)
     history = inbox.history(item.id)
@@ -207,7 +224,7 @@ def test_wake_rejects_a_session_whose_process_died(setup, monkeypatch):
 
 def test_control_notices_have_unique_nonempty_references(setup):
     store, inbox, master = setup
-    ledger = SimpleNamespace(say=lambda *args, **kwargs: None)
+    ledger = SimpleNamespace(notify=lambda *args: None)
     args = Namespace(slug="proof", name="operator", now=True)
     notify(store, args, ledger, master, "pause")
     notify(store, args, ledger, master, "pause")

@@ -52,7 +52,7 @@ PAGINATION = {
 }
 
 FIELDS = {
-    "add": "thread text by long attachments",
+    "add": "thread text by long attachments to reply_to",
     "edit": "thread text by",
     "delete": "thread by",
     "clear": "thread",
@@ -70,8 +70,9 @@ FIELDS = {
     "priority": "by item text",
     "priority_clear": "by target reason",
     "notification_clear": "target",
+    "notice": "by text",
     "task_add": "by task title lane phase description depends_on territory kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate",
-    "task_update": "by item fields if_state",
+    "task_update": "by item fields if_state if_plan_lines_missing",
     "task_rank": "item rank",
     "task_group": "by item members",
     "task_ungroup": "by item",
@@ -99,10 +100,12 @@ FIELDS = {
 }
 TYPES = {
     "long": {"type": "boolean"},
+    "to": {"const": "operator"},
     "needs_operator": {"type": "boolean"},
     "artifact": {"type": "boolean"},
     "release": {"type": "boolean"},
     "plan": {"type": "boolean"},
+    "if_plan_lines_missing": {"type": "boolean"},
     "rounds": {"type": "integer", "minimum": 0},
     "escalated": {"type": "boolean"},
     "rev": {"type": "integer", "minimum": 0},
@@ -196,7 +199,7 @@ def target(op: dict) -> str:
         return op.get("item", "phases")
     if kind.startswith("priority"):
         return "priorities"
-    if kind == "notification_clear":
+    if kind in ("notification_clear", "notice"):
         return "notifications"
     if kind.startswith("artifact_"):
         return "artifacts"

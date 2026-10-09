@@ -293,7 +293,7 @@ def test_say_addresses_and_strangers_are_refused(env, capsys):
     run("sw", "start")
     ledger.said.clear()
     assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "the docs task is merged", "--to", "ci") == 0
-    assert ledger.said == [("@ci the docs task is merged", "engineer@a1b2c3-0001")]
+    assert ledger.said == []
     [item] = InboxStore(store.redis).inbox("ci@a1b2c3-0001")
     assert (item.sender, item.text, item.state) == ("engineer@a1b2c3-0001", "the docs task is merged", "pending")
     assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "status for the page only") == 0
@@ -302,6 +302,65 @@ def test_say_addresses_and_strangers_are_refused(env, capsys):
 
     assert run("sw", "--as", "stranger", "say", "hello") == 1
     assert "not an agent" in capsys.readouterr().err
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "hello", "--to", "nobody") == 1
+    assert "nobody in swarm sw answers to nobody" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("to", ["engineer@a1b2c3-0001", "eng", "all"])
+def test_say_to_an_agent_a_lane_or_everyone_never_posts_to_chat(env, to, capsys):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    ledger.said.clear()
+    capsys.readouterr()
+    assert run("sw", "--as", "ci@a1b2c3-0001", "say", "the docs task is merged", "--to", to) == 0
+    assert ledger.said == []
+    assert [i.text for i in InboxStore(store.redis).inbox("engineer@a1b2c3-0001")] == ["the docs task is merged"]
+    assert "engineer@a1b2c3-0001" in json.loads(capsys.readouterr().out)["sent"]
+
+
+def test_say_to_the_operator_posts_to_chat_and_reaches_no_inbox(env, capsys):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    ledger.said.clear()
+    ledger.say = lambda slug, text, by=None: ledger.said.append((slug, text, by))
+    capsys.readouterr()
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "phase one is done", "--to", "operator") == 0
+    assert ledger.said == [("sw", "phase one is done", "engineer@a1b2c3-0001")]
+    assert InboxStore(store.redis).inbox("ci@a1b2c3-0001") == []
+    assert json.loads(capsys.readouterr().out) == {"posted": True}
+
+
+@pytest.mark.parametrize("flag, env_name", [("engineer@a1b2c3-0001", ""), ("", "engineer@a1b2c3-0001")])
+def test_send_message_comes_from_the_named_agent(env, capsys, monkeypatch, flag, env_name):
+    store, _, _ = env
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", env_name)
+    capsys.readouterr()
+    assert run("sw", *(["--as", flag] if flag else []), "send-message", "pause new work") == 0
+    [item] = InboxStore(store.redis).inbox("ci@a1b2c3-0001")
+    assert item.sender == "engineer@a1b2c3-0001"
+    assert "engineer@a1b2c3-0001" not in json.loads(capsys.readouterr().out)["sent"]
+
+
+def test_send_message_reaches_every_live_agent_through_the_inbox_and_never_chat(env, capsys, monkeypatch):
+    store, ledger, _ = env
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    ledger.said.clear()
+    capsys.readouterr()
+    assert run("sw", "send-message", "pause new work for a moment") == 0
+    assert ledger.said == []
+    live = sorted(a.name for a in store.agents("sw"))
+    inbox = InboxStore(store.redis)
+    for name in live:
+        [item] = inbox.inbox(name)
+        assert (item.sender, item.text) == ("operator", "pause new work for a moment")
+    assert sorted(json.loads(capsys.readouterr().out)["sent"]) == live and len(live) == 3
 
 
 def test_say_with_fyi_marks_each_item_as_needing_no_work(env):
@@ -2150,3 +2209,48 @@ def test_a_first_tick_that_dies_still_ends_the_extra_ticks(monkeypatch, capsys):
 
     with pytest.raises(SystemExit):
         _tick_all(monkeypatch, run_tick, ["fast", "slow"])
+
+
+def test_set_stores_the_scaling_settings_and_reports_them(env, capsys):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    assert run("sw", "set", "scaling=manual", "load-high=2.5", "load-low=0.5", "memory-per-agent=900") == 0
+    config = store.config("sw")
+    assert (config.scaling, config.load_high, config.load_low, config.memory_per_agent_mb) == ("manual", 2.5, 0.5, 900)
+    reported = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert [reported[key] for key in ("scaling", "load_high", "load_low", "memory_per_agent_mb")] == [
+        "manual",
+        2.5,
+        0.5,
+        900,
+    ]
+    assert run("sw", "scaling=auto") == 0
+    assert store.config("sw").scaling == "auto"
+
+
+@pytest.mark.parametrize(
+    ("pair", "reason"),
+    [
+        ("load-low=3", "load low must be above 0 and at most load high, and load high at most 10"),
+        ("load-high=x", "load-high takes a number, the one minute load per CPU"),
+        ("memory-per-agent=-1", "memory-per-agent takes a whole number of MB"),
+        ("scaling=sometimes", "scaling must be one of auto, manual"),
+    ],
+)
+def test_set_refuses_bad_scaling_settings(env, capsys, pair, reason):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    before = store.config("sw")
+    assert run("sw", "set", pair) == 1
+    assert capsys.readouterr().err.strip() == f"swarm: {reason}"
+    assert store.config("sw") == before
+
+
+def test_list_and_status_header_show_the_scaling_mode(env, capsys):
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "set", "scaling=manual")
+    capsys.readouterr()
+    run("list")
+    assert "\tscaling manual\t" in capsys.readouterr().out
+    run("sw", "status")
+    assert "  scaling manual  " in capsys.readouterr().out.splitlines()[0]

@@ -2071,6 +2071,7 @@ def test_known_hash_shaped_task_ids_keep_the_comment_exemption(live):
                 "id": "known-task-comment",
                 "thread": "chat",
                 "by": "api-reader",
+                "to": "operator",
                 "text": "The deadb33f task is covered",
             }
         ],

@@ -21,6 +21,11 @@ DEFAULT_URL = "redis://127.0.0.1:6379/0"
 MASTER = "master"
 AUTONOMY = ("manual", "assist", "delegate", "full")
 MANUAL, ASSIST, DELEGATE, FULL = AUTONOMY
+SCALING = ("auto", "manual")
+AUTO_SCALING, MANUAL_SCALING = SCALING
+DEFAULT_LOAD_HIGH, DEFAULT_LOAD_LOW = 1.5, 1.0
+DEFAULT_MEMORY_PER_AGENT_MB = 700
+MAX_LOAD = 10.0
 
 
 class SwarmError(RuntimeError):
@@ -46,6 +51,24 @@ class SwarmConfig:
     effort_min: str = effort_range.DEFAULT[0]
     effort_max: str = effort_range.DEFAULT[1]
     overlays: dict = field(default_factory=dict)
+    scaling: str = AUTO_SCALING
+    load_high: float = DEFAULT_LOAD_HIGH
+    load_low: float = DEFAULT_LOAD_LOW
+    memory_per_agent_mb: int = DEFAULT_MEMORY_PER_AGENT_MB
+
+
+def scaling_refusal(config):
+    if config.scaling not in SCALING:
+        return f"scaling must be one of {', '.join(SCALING)}"
+    if (
+        type(config.load_low) not in (int, float)
+        or type(config.load_high) not in (int, float)
+        or not 0 < config.load_low <= config.load_high <= MAX_LOAD
+    ):
+        return f"load low must be above 0 and at most load high, and load high at most {MAX_LOAD:g}"
+    if type(config.memory_per_agent_mb) is not int or config.memory_per_agent_mb <= 0:
+        return "memory per agent must be a whole number of MB above 0"
+    return ""
 
 
 @dataclass(frozen=True)
@@ -104,7 +127,7 @@ class RedisStore:
         return sorted(self.redis.smembers(f"{PREFIX}:index"))
 
     def create(self, config):
-        refused = effort_range.refusal((config.effort_min, config.effort_max), config.lanes)
+        refused = effort_range.refusal((config.effort_min, config.effort_max), config.lanes) or scaling_refusal(config)
         if refused:
             raise SwarmError(refused)
         if not self.redis.hsetnx(self.key(config.slug, "config"), "slug", config.slug):
@@ -135,6 +158,10 @@ class RedisStore:
             raw.get("effort_min") or effort_range.DEFAULT[0],
             raw.get("effort_max") or effort_range.DEFAULT[1],
             json.loads(raw.get("overlays") or "{}"),
+            raw.get("scaling") or AUTO_SCALING,
+            float(raw.get("load_high") or DEFAULT_LOAD_HIGH),
+            float(raw.get("load_low") or DEFAULT_LOAD_LOW),
+            int(raw.get("memory_per_agent_mb") or DEFAULT_MEMORY_PER_AGENT_MB),
         )
 
     def update(self, slug, **changes):
@@ -150,6 +177,8 @@ class RedisStore:
                 raise SwarmError(refused)
             low, high = (effort_range.level(edge) for edge in (config.effort_min, config.effort_max))
             config = replace(config, effort_min=low, effort_max=high)
+        if refused := scaling_refusal(config):
+            raise SwarmError(refused)
         self.redis.hset(self.key(slug, "config"), mapping=_fields(config))
         return config
 

@@ -68,12 +68,12 @@ export function renderNotifications() {
   $("notifs").replaceChildren(...firstPage("notifs", list, (n) => `notice-${n.id}`).map((n) => h("li", { class: "notif-row", id: `notice-${n.id}` },
     h("div", { class: "notif-meta" },
       h("span", { text: noticeTime(n.at) }),
-      h("a", { class: "prio-link", href: `#${noticeTarget(n.item)}`,
-        text: n.item === "chat" ? "#chat" : `#${n.item.split("/")[1]}`, on: { click: (ev) => jumpToNotice(ev, n.item) } }),
+      n.item ? h("a", { class: "prio-link", href: `#${noticeTarget(n.item)}`,
+        text: n.item === "chat" ? "#chat" : `#${n.item.split("/")[1]}`, on: { click: (ev) => jumpToNotice(ev, n.item) } }) : "",
       h("span", { text: n.label === "Reply" ? `Reply from ${n.by}` : n.label }),
       h("button", { class: "link danger", type: "button", text: "Clear", on: { click: () => clearNotification(n.id) } })),
-    h("div", { class: "notif-text", text: n.text, title: "Go to it",
-      on: { click: (ev) => { if (!getSelection().toString()) jumpToNotice(ev, n.item); } } }))),
+    h("div", { class: "notif-text", text: n.text, title: n.item ? "Go to it" : "",
+      on: { click: (ev) => { if (n.item && !getSelection().toString()) jumpToNotice(ev, n.item); } } }))),
     moreButton("notifs", list.length, "more notifications", renderNotifications) || "");
   if (!list.length) $("notifs").append(h("li", { class: "empty", text: "No notifications." }));
 }

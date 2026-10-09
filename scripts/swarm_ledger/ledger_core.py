@@ -533,6 +533,13 @@ def _screened(op):
     return filters.screen(LEDGER_WRITE, op["text"])
 
 
+def _check_chat_address(op, chat_add):
+    if ("to" in op or "reply_to" in op) and not chat_add:
+        raise ValueError("to and reply_to address only an agent chat message")
+    if op.get("to", "operator") != "operator" or not isinstance(op.get("reply_to", ""), str):
+        raise ValueError("an agent chat message goes to the operator or answers his line by its id")
+
+
 def check_op(op, task_ids=()):
     if not isinstance(op, dict) or op.get("op") not in (
         "add",
@@ -568,6 +575,7 @@ def check_op(op, task_ids=()):
     chat_add = op["op"] == "add" and op["thread"] == "chat" and "by" in op
     if "long" in op and not chat_add:
         raise ValueError("long is allowed only on an agent chat message")
+    _check_chat_address(op, chat_add)
     if "attachments" in op:
         import ledger_media
 

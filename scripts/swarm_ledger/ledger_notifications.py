@@ -1,18 +1,43 @@
 """Page notifications: the server derives them from what agents did; only the operator clears them."""
 
-OPS = ("notification_clear",)
+OPS = ("notification_clear", "notice")
 NEW_ITEM = {"questions": "New open question", "followups": "New follow-up"}
 REPLY_KINDS = {"comment added": "comments", "message added": "chat"}
 TEXT_KEPT = 280
+NOTICE = "Swarm notice"
 
 
 def check(op):
+    if op["op"] == "notice":
+        return check_notice(op)
     if set(op) != {"op", "id", "target"} or not isinstance(op["target"], str) or not op["target"]:
         raise ValueError("notification_clear is the operator's and takes only id and target: a notification id or all")
 
 
+def check_notice(op):
+    from ledger_core import AUTHOR_RE
+
+    if set(op) != {"op", "id", "by", "text"} or not isinstance(op["text"], str) or not op["text"].strip():
+        raise ValueError("notice takes only id, by and text, for the operator's notifications panel")
+    if not AUTHOR_RE.match(str(op["by"])) or op["by"] == "operator":
+        raise ValueError("a notice comes from the swarm or an agent; the operator talks in chat")
+
+
 def apply(doc, op, ctx):
     rows = doc.setdefault("notifications", [])
+    if op["op"] == "notice":
+        rows.append(
+            {
+                "id": f"nt-{ctx.rev}-{op['id']}",
+                "item": "",
+                "label": NOTICE,
+                "text": op["text"][:TEXT_KEPT],
+                "by": op["by"],
+                "at": ctx.at,
+            }
+        )
+        ctx.dirty = True
+        return True
     kept = [] if op["target"] == "all" else [r for r in rows if r["id"] != op["target"]]
     if len(kept) != len(rows):
         doc["notifications"] = kept

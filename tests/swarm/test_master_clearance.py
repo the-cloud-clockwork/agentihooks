@@ -37,6 +37,8 @@ def swarm(monkeypatch, tmp_path):
     ledger = FakeLedger([])
     ledger.said = []
     ledger.say = lambda slug, text, by=None: ledger.said.append((text, by) if slug == "demo" else (slug, text, by))
+    ledger.notes = []
+    ledger.notify = lambda slug, text: ledger.notes.append(text if slug == "demo" else (slug, text))
     ledger.summarize = ledger.mark_closed = ledger.reopen = lambda *args: None
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
@@ -80,7 +82,7 @@ def test_the_master_of_the_swarm_uses_each_control_and_the_ledger_records_it(swa
     store.update("demo", lanes={"master": {"agent": "claude"}})
     acting(monkeypatch, MASTER, "demo")
     assert cli.main(["demo", *argv]) == 0
-    assert ledger.said == [(record, "swarm")]
+    assert ledger.notes == [record]
 
 
 @pytest.mark.parametrize(
@@ -94,7 +96,7 @@ def test_an_agent_or_another_swarms_master_is_refused(swarm, monkeypatch, capsys
     assert cli.main(["demo", *FAMILIES[family][0]]) == 1
     assert capsys.readouterr().err == refused(name)
     assert changed(store) == before
-    assert ledger.said == []
+    assert ledger.notes == []
 
 
 @pytest.mark.parametrize("family", FAMILIES)
@@ -104,7 +106,7 @@ def test_the_operator_keeps_every_control_without_a_master_record(swarm, monkeyp
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
     assert cli.main(["demo", *FAMILIES[family][0]]) == 0
     assert changed(store) != before
-    assert [text for text, _ in ledger.said if text.startswith("master a1b2c3 0001")] == []
+    assert [text for text in ledger.notes if text.startswith("master a1b2c3 0001")] == []
 
 
 def test_a_hand_taken_master_without_a_swarm_pin_keeps_its_clearance(swarm, monkeypatch):
@@ -112,7 +114,7 @@ def test_a_hand_taken_master_without_a_swarm_pin_keeps_its_clearance(swarm, monk
     acting(monkeypatch, MASTER, "")
     assert cli.main(["demo", "pause"]) == 0
     assert store.config("demo").state == "paused"
-    assert ledger.said == [("master a1b2c3 0001 changed the swarm state with pause from running to paused.", "swarm")]
+    assert ledger.notes == ["master a1b2c3 0001 changed the swarm state with pause from running to paused."]
 
 
 def test_a_master_use_that_changes_nothing_is_still_recorded(swarm, monkeypatch):
@@ -120,7 +122,7 @@ def test_a_master_use_that_changes_nothing_is_still_recorded(swarm, monkeypatch)
     store.update("demo", state="paused")
     acting(monkeypatch, MASTER, "demo")
     assert cli.main(["demo", "pause"]) == 0
-    assert ledger.said == [("master a1b2c3 0001 changed the swarm state with pause from paused to paused.", "swarm")]
+    assert ledger.notes == ["master a1b2c3 0001 changed the swarm state with pause from paused to paused."]
 
 
 def test_a_lane_field_records_unset_and_keeps_an_equals_sign_in_its_value(swarm, monkeypatch):
@@ -128,7 +130,7 @@ def test_a_lane_field_records_unset_and_keeps_an_equals_sign_in_its_value(swarm,
     acting(monkeypatch, MASTER, "demo")
     assert cli.main(["demo", "set", "eng-role=fix=now"]) == 0
     assert store.config("demo").lanes["eng"]["role"] == "fix=now"
-    assert ledger.said == [("master a1b2c3 0001 changed eng role from unset to fix=now.", "swarm")]
+    assert ledger.notes == ["master a1b2c3 0001 changed eng role from unset to fix=now."]
 
 
 def refused(name):
@@ -152,7 +154,7 @@ def test_an_agent_that_drops_its_swarm_pin_is_still_refused_by_its_session_name(
     assert cli.main(["demo", *argv]) == 1
     assert capsys.readouterr().err == refused(ENGINEER)
     assert changed(store) == before
-    assert ledger.said == []
+    assert ledger.notes == []
 
 
 def test_the_master_stop_now_is_recorded_before_it_retires_the_master(swarm, monkeypatch):
@@ -161,9 +163,7 @@ def test_the_master_stop_now_is_recorded_before_it_retires_the_master(swarm, mon
     acting(monkeypatch, MASTER, "demo")
     with pytest.raises(SystemExit):
         cli.main(["demo", "stop", "--now"])
-    assert ledger.said == [
-        ("master a1b2c3 0001 changed the swarm state with stop now from running to stopping.", "swarm")
-    ]
+    assert ledger.notes == ["master a1b2c3 0001 changed the swarm state with stop now from running to stopping."]
 
 
 @pytest.mark.parametrize("argv,control", [(["stop", "--now"], "stop now"), (["close", "--now"], "close ledger")])
@@ -172,9 +172,9 @@ def test_a_master_stop_that_outlives_its_retirement_records_the_settled_state(sw
     acting(monkeypatch, MASTER, "demo")
     assert cli.main(["demo", *argv]) == 0
     assert store.config("demo").state == "stopped"
-    assert ledger.said[:2] == [
-        (f"master a1b2c3 0001 changed the swarm state with {control} from running to stopping.", "swarm"),
-        (f"master a1b2c3 0001 changed the swarm state with {control} from stopping to stopped.", "swarm"),
+    assert ledger.notes[:2] == [
+        f"master a1b2c3 0001 changed the swarm state with {control} from running to stopping.",
+        f"master a1b2c3 0001 changed the swarm state with {control} from stopping to stopped.",
     ]
 
 
