@@ -178,6 +178,44 @@ def test_durations_restores_the_parent_baseline_when_the_dispatched_base_is_the_
     assert output.read_text() == f"id=run-{restored}\n"
 
 
+def test_coverage_ratchet_restores_an_evicted_base_baseline_from_its_dev_push_run():
+    steps = _workflow()["jobs"]["coverage-ratchet"]["steps"]
+    names = [step.get("name") for step in steps]
+    cached = _step("coverage-ratchet", "Restore the exact coverage baseline")
+    mint = _step("coverage-ratchet", "Mint the tcc main ci App token")
+    find = _step("coverage-ratchet", "Find the dev push run that published the base baseline")
+    download = _step("coverage-ratchet", "Download the base baseline its dev push run published")
+    assert names.index(cached["name"]) < names.index(mint["name"]) < names.index(find["name"])
+    assert names.index(find["name"]) < names.index(download["name"]) < names.index("Hold every line the base ran")
+    assert mint["if"] == "steps.cached.outcome == 'success' && steps.cached.outputs.cache-hit != 'true'"
+    assert download["with"]["run-id"] == "${{ steps.base-run.outputs.id }}"
+    assert download["with"]["name"] == "coverage-baseline"
+
+
+@pytest.mark.parametrize(("kept", "found"), [("0 1", "id=run-2\n"), ("0 0", None)])
+def test_the_evicted_baseline_comes_from_the_first_dev_push_run_that_kept_it(tmp_path, kept, found):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    first, second = kept.split()
+    (bin_dir / "gh").write_text(
+        "#!/usr/bin/env bash\n"
+        'case "$2" in\n'
+        '  */runs\\?*) [[ $2 == *"head_sha=base"* ]] && printf "run-1\\nrun-2\\n" ;;\n'
+        f"  */run-1/*) echo {first} ;;\n"
+        f"  */run-2/*) echo {second} ;;\n"
+        "esac\n"
+    )
+    (bin_dir / "gh").chmod(0o755)
+    output = tmp_path / "output"
+    output.write_text("")
+    env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", BASE="base", GITHUB_REPOSITORY="o/r")
+    env["GITHUB_OUTPUT"] = str(output)
+    step = _step("coverage-ratchet", "Find the dev push run that published the base baseline")
+    result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert (result.returncode == 0) == (found is not None)
+    assert output.read_text() == (found or "")
+
+
 def test_test_count_refuses_a_base_without_its_grader(tmp_path):
     floor = _workflow()["jobs"]["test-count"]["steps"][-1]
     (tmp_path / "base").mkdir()
