@@ -72,6 +72,15 @@ class Home(unittest.TestCase):
                 self.assertIn('<p id="edited">BIN</p>', rendered_home(server, self.browser, "bin"))
         self.assertTrue(source.rstrip().endswith("</html>"))
 
+    def test_home_template_edit_leaves_the_page_version_current(self):
+        server.served_page.cache_clear()
+        try:
+            self.test_home_and_bin_render_from_the_home_html_source()
+            page = server.page_for("alpha-2026-01-01")
+            self.assertEqual(core.PAGE_RE.search(page).group(1), core.page_version())
+        finally:
+            server.served_page.cache_clear()
+
 
 if __name__ == "__main__":
     unittest.main()
