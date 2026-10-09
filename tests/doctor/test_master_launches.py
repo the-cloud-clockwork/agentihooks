@@ -64,7 +64,7 @@ def test_unchanged_failures_and_age_alone_change_nothing():
 def test_new_failed_attempts_grow_the_one_active_finding():
     record = outage()
     times = failure_times(record)
-    seen = [master_launches.findings(master_launches.as_of(record, t + master_launches.MATCH_MS)) for t in times]
+    seen = [master_launches.findings(master_launches.as_of(record, t)) for t in times]
     assert all(len(found) == 1 for found in seen)
     assert {found[0].id for found in seen} == {seen[0][0].id}
     assert [found[0].measure for found in seen] == list(range(1, 13))
