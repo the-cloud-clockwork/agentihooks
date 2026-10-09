@@ -100,7 +100,7 @@ def _reached_source(path: Path) -> str:
     return "\n".join(lines)
 
 
-def test_no_script_a_tests_workflow_step_runs_calls_the_api():
+def test_no_script_a_step_runs_calls_the_api():
     calls = _api_calls((step.get("run", ""), here) for _, step, here in _all_steps())
     assert sorted(str(path.relative_to(ROOT)) for path in calls) == [
         ".github/actions/browser-cache/select-artifacts.sh",
