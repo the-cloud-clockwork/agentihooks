@@ -197,6 +197,18 @@ def _flag_value(args: list[str], names: tuple[str, ...]) -> str:
     return ""
 
 
+def _handoff_agent(requested: str, environ: dict[str, str], agent_args: list[str]) -> str:
+    source = environ.get("AGENTIHOOKS_TARGET") or "claude"
+    target = requested or source
+    if _flag_value(agent_args, ("--route",)) == "api":
+        return target
+    if requested == "codex" or source == "codex":
+        raise ValueError(
+            f"unsupported quota transfer: {source.capitalize()} cannot transfer to a {(requested or 'claude').capitalize()} account"
+        )
+    return "claude"
+
+
 def model_effort(agent: str, agent_args: list[str], environ: dict[str, str]) -> tuple[str, str]:
     prefix = f"AGENTIHOOKS_{agent.upper()}"
     model = _flag_value(agent_args, ("--model", "-m")) or environ.get(f"{prefix}_MODEL") or MODEL_DEFAULTS[agent]
@@ -583,11 +595,11 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         active_env = _launch_environ(_with_predecessor(active_env, args.handoff), name, args.handoff)
         claude_args = args.claude_args[1:] if args.claude_args[:1] == ["--"] else args.claude_args
         exclude = ""
-        if args.handoff and (args.agent == "codex" or active_env.get("AGENTIHOOKS_TARGET") == "codex"):
-            source = (active_env.get("AGENTIHOOKS_TARGET") or "claude").capitalize()
-            target = (args.agent or "claude").capitalize()
-            raise ValueError(f"unsupported quota transfer: {source} cannot transfer to a {target} account")
-        agent, reason = ("claude", "handoff") if args.handoff else agent_choice.choose(args.agent, active_env)
+        agent, reason = (
+            (_handoff_agent(args.agent, active_env, claude_args), "handoff")
+            if args.handoff
+            else agent_choice.choose(args.agent, active_env)
+        )
         if args.handoff:
             from hooks.context.account_sessions import UNROUTED, environment_account
 
