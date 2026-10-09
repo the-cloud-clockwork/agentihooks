@@ -791,7 +791,7 @@ def autoscale_lines(config, decision):
 def cmd_autoscale(store, args):
     from scripts.swarm import capacity
 
-    config = store.config(args.slug) if args.slug in store.slugs() else SwarmConfig(args.slug, "")
+    config = store.config(args.slug) if args.slug in store.slugs() else SwarmConfig(args.slug, "", max_eng=0, max_ci=0)
     if args.fixture:
         inputs = capacity.fixture_inputs(json.loads(Path(args.fixture).read_text()))
     else:
