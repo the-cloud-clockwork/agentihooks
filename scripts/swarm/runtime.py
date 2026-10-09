@@ -79,8 +79,8 @@ def _model_args(agent, chosen, environ, bounds, preserve=False):
     return model_flags(agent, _set(chosen.get("model")) or model, effort)
 
 
-def preserves_effort(saved: dict, lane: str, quota_transfer: bool) -> bool:
-    return bool(saved) and (lane != MASTER or quota_transfer)
+def preserves_effort(recorded: bool, lane: str) -> bool:
+    return recorded and lane != MASTER
 
 
 def _lane_default(lane, agent, chosen):
@@ -524,7 +524,7 @@ class HerdrRuntime:
                     picked.__dict__,
                     environ,
                     effort_range.of(config),
-                    preserve=preserves_effort(saved, lane, quota_transfer),
+                    preserve=preserves_effort(bool(saved), lane),
                 ),
                 *mode,
             ],
@@ -563,7 +563,11 @@ class HerdrRuntime:
         )
         route = ["--route", agent.account] if agent.account else []
         model = _model_args(
-            agent.harness, picked.__dict__, dict(os.environ), effort_range.of(config), preserve=bool(agent.effort)
+            agent.harness,
+            picked.__dict__,
+            dict(os.environ),
+            effort_range.of(config),
+            preserve=preserves_effort(bool(agent.effort), agent.lane),
         )
         argv += ["--resume", agent.conversation_id, "--", *route, *model]
         placed = self._launch(config, agent.lane, agent.task, agent.name, argv)
