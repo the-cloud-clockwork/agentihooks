@@ -32,8 +32,9 @@ def check(fields):
             or not all(isinstance(v, str) for v in value.values())
         ):
             raise ValueError(f"{key} must be an object of strings with keys among {allowed}")
-    if any(fields.get("contract", {}).get(flag, "no") not in FLAG_VALUES for flag in CONTRACT_FLAGS):
-        raise ValueError(f"contract {', '.join(CONTRACT_FLAGS)} must be yes or no")
+    for flag in CONTRACT_FLAGS:
+        if fields.get("contract", {}).get(flag, "no") not in FLAG_VALUES:
+            raise ValueError(f"contract {flag} must be yes or no")
 
 
 def unmet(task):

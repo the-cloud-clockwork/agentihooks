@@ -64,4 +64,4 @@ def test_task_add_without_push_sends_no_push(monkeypatch):
 def test_task_add_help_names_the_push_contract(capsys):
     with pytest.raises(SystemExit):
         ledger.build_parser().parse_args(["--slug", "s", "task", "add", "--help"])
-    assert PUSH_HELP in " ".join(capsys.readouterr().out.split())
+    assert f" {PUSH_HELP} " in f" {' '.join(capsys.readouterr().out.split())} "
