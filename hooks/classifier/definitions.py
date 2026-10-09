@@ -14,7 +14,7 @@ from hooks.context import profile_chain
 
 NAME = re.compile(r"[a-z][a-z0-9_-]*\Z")
 VARIABLE = re.compile(r"[A-Z][A-Z0-9_]*\Z")
-QUESTION_FIELDS = {"name", "type", "instructions", "true", "false", "options", "levels", "each"}
+QUESTION_FIELDS = {"name", "type", "instructions", "true", "false", "options", "levels", "each", "key"}
 FIELDS = {"version", "purpose", "fallbacks", "questions", "thresholds", "environment", "rule"}
 
 
@@ -27,6 +27,7 @@ class QuestionSpec:
     name: str
     question: Question
     each: str | None = None
+    key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -98,7 +99,10 @@ def _question(raw: object) -> QuestionSpec:
     each = raw.get("each")
     if each is not None:
         each = _identifier(each, "each parameter")
-    return QuestionSpec(name, factories[kind](), each)
+    key = raw.get("key")
+    if key is not None:
+        key = _text(key, "question key")
+    return QuestionSpec(name, factories[kind](), each, key)
 
 
 def _questions(raw: object) -> tuple[QuestionSpec, ...]:
@@ -199,7 +203,7 @@ def _overrides(package: Definition, selected: Definition) -> None:
     if package.rule.type == "code" or selected.rule.type == "code":
 
         def keys(definition):
-            return {(item.name, item.each) for item in definition.questions}
+            return {(item.name, item.each, item.key) for item in definition.questions}
 
         if keys(package) != keys(selected):
             raise DefinitionError("code rule overrides must preserve package question keys")

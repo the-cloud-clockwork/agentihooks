@@ -148,7 +148,7 @@ def now_ms():
 
 @timing.instrument_tick
 def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
-    from scripts.swarm import command_runner, commands, controller, lease
+    from scripts.swarm import command_runner, commands, controller, incidents, lease
 
     ledger = ledger or LedgerClient()
     held = lease.acquire(store, slug, commands.hive_id())
@@ -169,7 +169,8 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         )
         from scripts.swarm.health import spawn_stall
 
-        restarted = timing.call(ledger_watchdog.watch, store, slug, ledger, runtime)
+        pressured = skip_refused(incidents.host_pressure, store, slug)
+        restarted = pressured + timing.call(ledger_watchdog.watch, store, slug, ledger, runtime)
         probed = restarted + timing.call(ledger_probe.observe, store, slug, ledger, runtime, now_ms())
         with spawn_stall.watch(store, slug, ledger, now_ms, runtime):
             controls = timing.call(command_runner.consume, store, slug)
