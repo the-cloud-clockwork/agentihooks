@@ -138,6 +138,61 @@ def test_items_go_to_the_master_seat_when_no_master_is_live(store):
     assert len(texts(store, MASTER_SEAT)) == 1
 
 
+def priority(item, text, by="sw-eng-1", pid=""):
+    return {"id": pid or f"p-{item}", "item": item, "text": text, "by": by, "at": 1_000}
+
+
+def with_priorities(*rows):
+    doc = recorded()
+    doc["priorities"] = list(rows)
+    return doc
+
+
+def test_a_new_priority_makes_one_master_item_naming_the_item_and_the_ask(store):
+    run(store, with_priorities())
+    run(store, with_priorities(priority("tasks/t1", "Blocked: the deploy key is missing", by="ledger")))
+    run(store, with_priorities(priority("tasks/t1", "Blocked: the deploy key is missing", by="ledger")))
+    (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
+    assert "tasks/t1" in item.text and "Blocked: the deploy key is missing" in item.text
+    assert "triage" in item.text.lower() and not item.fyi
+    assert texts(store, ENG_SEAT) == []
+
+
+def test_priorities_open_before_the_first_pass_make_no_item(store):
+    run(store, with_priorities(priority("questions/q1", "Answer: which port")))
+    run(store, with_priorities(priority("questions/q1", "Answer: which port")))
+    assert texts(store, MASTER_SEAT) == []
+
+
+def test_a_repeated_ask_on_the_same_item_makes_nothing_new(store):
+    run(store, with_priorities())
+    run(store, with_priorities(priority("followups/f1", "Decide: retries need a cap")))
+    run(store, with_priorities(priority("followups/f1", "Decide: retries need a cap now", pid="p-again")))
+    assert len(texts(store, MASTER_SEAT)) == 1
+
+
+def test_a_priority_raised_again_after_it_cleared_makes_a_new_item(store):
+    row = priority("tasks/t1", "Blocked: the deploy key is missing", by="ledger")
+    run(store, with_priorities())
+    run(store, with_priorities(row))
+    run(store, with_priorities())
+    run(store, with_priorities(row))
+    assert len(texts(store, MASTER_SEAT)) == 2
+
+
+def test_a_priority_the_master_added_makes_no_item(store):
+    run(store, with_priorities())
+    run(store, with_priorities(priority("phases/p1", "Approve the plan", by="sw-master-1")))
+    assert texts(store, MASTER_SEAT) == []
+
+
+def test_a_swarm_with_no_live_master_gets_no_priority_item(store):
+    store.drop_agent("sw", "sw-master-1")
+    run(store, with_priorities())
+    run(store, with_priorities(priority("tasks/t1", "Blocked: the deploy key is missing", by="ledger")))
+    assert texts(store, MASTER_SEAT) == []
+
+
 def open_followup(added_at, **fields):
     doc = recorded(
         [event(11, added_at, "sw-eng-1", "added", "followups/f1", "Retries need a cap")],
