@@ -13,6 +13,7 @@ from hooks.targets import capabilities
 
 STATE_DIR = AGENTIHOOKS_HOME / "ledger-decision"
 TASK_LIST_SIZE = 4
+STORED_PROBE = "title"
 TROUBLESHOOT_RE = re.compile(r"\b(?:troubleshoot|debug|investigat|refactor)\w*", re.IGNORECASE)
 DECLINE = "agentihooks ledger decline"
 
@@ -138,13 +139,12 @@ def _ledger_dir(env):
 
 
 def _named_ledger(payload, env):
+    from scripts.swarm_ledger.repository.sqlite import read_ledger, read_registry
+
     ledgers = _ledger_dir(env)
-    try:
-        binned = dict(json.loads((ledgers / ".bin.json").read_bytes()))
-    except (OSError, ValueError, TypeError):
-        binned = {}
+    binned = read_registry(ledgers, "bin")
     for slug in TOKEN_RE.findall(_plan_text(payload).lower()):
-        if slug not in binned and (ledgers / f"{slug}.json").is_file():
+        if slug not in binned and read_ledger(ledgers, slug, STORED_PROBE) is not None:
             return slug
     return ""
 

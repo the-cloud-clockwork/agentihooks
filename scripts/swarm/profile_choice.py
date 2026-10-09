@@ -1,11 +1,10 @@
 """The typed profile decision made before every swarm launch: explicit task profile, fixed lane, else the classifier."""
 
-import json
+import os
 from dataclasses import asdict, dataclass, replace
 
 from hooks.classifier import Choice, ClassifierUnavailable, decide
 from scripts.swarm import overlays
-from scripts.swarm.prompt import ledger_path
 from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm_ledger import ledger_close
 
@@ -136,11 +135,10 @@ def anchors(task: dict) -> tuple:
 
 
 def _ledger(slug: str) -> dict:
-    path = ledger_path(slug).expanduser()
-    try:
-        return json.loads(path.read_text())
-    except (OSError, ValueError):
-        return {}
+    from scripts.swarm_ledger.repository.folder import ledger_folder
+    from scripts.swarm_ledger.repository.sqlite import read_ledger
+
+    return read_ledger(ledger_folder(os.environ), slug, "overview", "phases") or {}
 
 
 def _remedy(slug: str, task: dict) -> str:

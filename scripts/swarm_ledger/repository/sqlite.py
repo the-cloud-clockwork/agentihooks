@@ -2,7 +2,7 @@ import json
 import secrets
 import sqlite3
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 from .events import append_events, read_events, write_events
@@ -30,6 +30,8 @@ STORED = "SELECT 1 FROM ledgers WHERE slug=?"
 GENERATION = "SELECT generation FROM ledgers WHERE slug=?"
 TOKEN = "SELECT token FROM ledgers WHERE slug=?"
 SUMMARIES = "SELECT summary FROM ledgers ORDER BY touched_at DESC, slug"
+SLUGS = "SELECT slug FROM ledgers ORDER BY slug"
+ROOT = "[]"
 REGISTRY_TABLE = "registry"
 UPDATE = "UPDATE ledgers SET revision=?, generation=?, summary=?, touched_at=? WHERE slug=?"
 INSERT = "INSERT INTO ledgers VALUES (?, ?, ?, ?, ?, ?)"
@@ -158,6 +160,53 @@ def read_ids(directory, slug: str, collection: str) -> tuple:
             return ()
     found = (json.loads(path)[1] for _, path in sorted(rows))
     return tuple(part[1] for part in found if part[0] == "id")
+
+
+def read_slugs(directory) -> list:
+    with read_only(directory) as connection:
+        if connection is None:
+            return []
+        try:
+            return [slug for (slug,) in connection.execute(SLUGS)]
+        except sqlite3.OperationalError:
+            return []
+
+
+def read_ledgers(directory, *keys: str) -> dict:
+    """One snapshot; a slug whose root row is missing is left out."""
+    parts = tuple(key_parts(key) for key in keys)
+    with read_only(directory) as connection:
+        if connection is None:
+            return {}
+        found = {}
+        try:
+            with connection:
+                connection.execute(BEGIN)
+                for (slug,) in connection.execute(SLUGS).fetchall():
+                    with suppress(Missing):
+                        found[slug] = read_partial(connection, slug, parts)
+        except sqlite3.OperationalError:
+            return {}
+        return found
+
+
+def read_document(directory, slug: str) -> dict | None:
+    """A whole stored ledger with its events, for explicit full reads such as a recall backfill."""
+    with read_only(directory) as connection:
+        if connection is None:
+            return None
+        try:
+            with connection:
+                connection.execute(BEGIN)
+                rows = read_rows(connection, slug)
+                if ROOT not in rows:
+                    return None
+                state = assemble(rows)
+                if "events" in state["_meta"]:
+                    state["_meta"]["events"] = read_events(connection, slug)
+                return state
+        except sqlite3.OperationalError:
+            return None
 
 
 def without_events(state: dict) -> dict:

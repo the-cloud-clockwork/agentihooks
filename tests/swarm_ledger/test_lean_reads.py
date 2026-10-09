@@ -101,6 +101,18 @@ def test_the_agent_client_read_leaves_out_seeds_and_work_folder_tails(served):
     assert state["_meta"]["rev"] > 0 and state["_meta"]["events"]
 
 
+def test_the_exported_document_stays_indented_and_keeps_text_as_written(tmp_path):
+    from scripts.swarm_ledger import storage_migration
+
+    make_ledger()
+    core.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m1", "text": "café ready"}])
+    out = tmp_path / "export.json"
+    storage_migration.export(SLUG, out)
+    text = out.read_text(encoding="utf-8")
+    assert text == json.dumps(json.loads(text), indent=2, ensure_ascii=False) + "\n"
+    assert "café ready" in text
+
+
 def test_an_agent_write_returns_the_agent_view_with_its_result(served):
     with_work_folder()
     state = ledger.call(SLUG, [{"op": "join", "id": "j1", "by": "eng"}])
