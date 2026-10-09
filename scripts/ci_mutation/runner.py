@@ -51,18 +51,21 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
         source = root / name
         if source.is_dir():
             shutil.copytree(source, work / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", work.name))
-    project = tomlkit.parse((root / "pyproject.toml").read_text())
-    readme = project.get("project", {}).get("readme")
-    readme = readme.get("file") if isinstance(readme, dict) else readme
-    root_files = [
-        name for name in (".test_durations", "Swarm-v2.md", readme) if isinstance(name, str) and (root / name).is_file()
-    ]
+    root_files = sorted(
+        path.name
+        for path in root.iterdir()
+        if path.is_file()
+        and not path.is_symlink()
+        and path.name != "pyproject.toml"
+        and (path.name == ".test_durations" or not path.name.startswith("."))
+    )
     for name in root_files:
         shutil.copy(root / name, work / name)
     pytest_args = ["-q", "-x", "-o", "addopts=", "-p", "pytest_asyncio.plugin"]
     # pytest would load the plugin from its own mutated copy, whose hooks raise in mutmut's forced fail run.
     if IDENTITY not in paths:
         pytest_args += ["-p", "scripts.ci_mutation.identity", *(f"--mutated-path={path}" for path in paths)]
+    project = tomlkit.parse((root / "pyproject.toml").read_text())
     project["tool"]["mutmut"] = {
         "source_paths": ["hooks/", "scripts/"],
         "only_mutate": paths,
