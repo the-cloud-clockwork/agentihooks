@@ -282,15 +282,17 @@ def test_head_lookup_uses_the_exact_command_and_strips_output():
 def test_remediation_at_the_question_thresholds():
     from tests.gates.test_intent import answer
 
+    THRESHOLDS = intent.definitions.load(intent.PURPOSE).thresholds
+
     state = {"task": "Status", "task_text": "Show controller", "phase": "Control", "phase_intent": "Workers see owners"}
     answers = {"delivers": answer(0.5), "reachable": answer(0.5), "weakens": answer(0.5)}
-    assert intent.remediation(state, answers) == (
+    assert intent.remediation(state, answers, THRESHOLDS) == (
         "What would meet intent: Deliver Status: Show controller. "
         "The phase must be able to use it for Control: Workers see owners. "
         "Preserve Control: Workers see owners while implementing Status: Show controller."
     )
     answers = {"delivers": answer(0.1), "reachable": answer(0.1), "weakens": answer(0.4)}
-    assert intent.remediation(state, answers) == (
+    assert intent.remediation(state, answers, THRESHOLDS) == (
         "What would meet intent: Deliver Status: Show controller. "
         "The phase must be able to use it for Control: Workers see owners. "
         "Implement the missing acceptance behavior described by Status: Show controller. "

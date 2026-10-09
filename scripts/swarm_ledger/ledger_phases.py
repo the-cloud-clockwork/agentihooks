@@ -181,11 +181,13 @@ def apply(doc: dict, op: dict, ctx) -> bool:
             from scripts.swarm_ledger import plan_ranges
 
             plan_ranges.check_phase_ref(doc, after)
-        if refusal := ledger_plans.phase_refusal(doc, after):
+        view = ledger_plans.moved(doc, after)
+        if refusal := ledger_plans.phase_refusal({**doc, **view}, after):
             raise ValueError(refusal)
     except ValueError as exc:
         ctx.refused.append(str(exc))
         return False
+    ledger_plans.settle(doc, view, op["by"], ctx)
     target = f"phases/{phase_id}"
     if phase is None:
         phases.append(after)
