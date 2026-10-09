@@ -219,7 +219,7 @@ def test_workspace_carries_the_package_readme_into_the_mutants_copy(tmp_path, re
 
     root = tmp_path / "repo"
     (root / "tests").mkdir(parents=True)
-    (root / "pyproject.toml").write_text(f"[project]\nreadme = {readme}\n")
+    (root / "pyproject.toml").write_text(f"[project]\nreadme = {readme}\n\n[tool.pytest.ini_options]\n")
     for name in ("README.md", ".env", "results.json"):
         (root / name).write_text(name)
     work = tmp_path / "work"
