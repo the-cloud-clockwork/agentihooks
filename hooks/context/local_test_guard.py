@@ -109,7 +109,9 @@ def check_local_tests(payload: dict) -> None:
     from hooks.hook_manager import BlockAction
 
     try:
-        runs_tests = any(_test_command(tokens) for tokens in commands(payload.get("tool_input", {}).get("command", "")))
+        tool_input = payload.get("tool_input", {})
+        command = tool_input.get("command") or tool_input.get("cmd") or ""
+        runs_tests = any(_test_command(tokens) for tokens in commands(command))
     except ValueError:
         raise BlockAction(_DENY) from None
     if runs_tests:
