@@ -274,6 +274,138 @@ def test_a_notice_the_ledger_refuses_is_dropped_so_later_notices_still_land(stor
     assert note.startswith("The ledger server answers fast again")
 
 
+def test_the_ledger_client_reads_the_metadata_resource(monkeypatch):
+    from scripts.swarm.ledger_client import LedgerClient
+
+    seen = []
+    monkeypatch.setattr(LedgerClient, "_resource", lambda self, slug, path: seen.append((slug, path)) or {"a": 1})
+    assert LedgerClient().metadata("sw") == {"a": 1} and seen == [("sw", "metadata")]
+
+
+def test_a_ledger_missing_either_probe_call_is_not_measured():
+    class ReadOnly(FakeLedger):
+        def metadata(self, slug):
+            return {}
+
+    class WriteOnly(FakeLedger):
+        def time_left(self, slug, slots, ci_minutes):
+            return None
+
+    assert ledger_probe.measure(ReadOnly([]), "sw", {}, Clock()) is None
+    assert ledger_probe.measure(WriteOnly([]), "sw", {}, Clock()) is None
+
+
+def test_the_probe_writes_the_inputs_the_time_left_pass_would_send(store, monkeypatch):
+    seen, runtime = [], FakeRuntime()
+    monkeypatch.setattr(
+        ledger_probe.time_left,
+        "inputs_of",
+        lambda s, slug, rt: seen.append((slug, rt)) or {"slots": 4, "ci_minutes": 2.5},
+    )
+    clock = Clock()
+    ledger = ProbedLedger(clock)
+    ledger_probe.observe(store, "sw", ledger, runtime, 1_000, clock=clock, facts=lambda: FACTS)
+    assert seen == [("sw", runtime)] and ledger.writes == [(4, 2.5)]
+
+
+def test_the_alert_state_is_kept_under_the_swarm_key(store):
+    clock = Clock()
+    ledger = ProbedLedger(clock, read_s=0.2)
+    observe(store, ledger, clock)
+    assert ledger_probe.state(store, "sw") == {"slow": 0, "fast": 1, "notices": []}
+    assert store.redis.get(store.key("sw", "ledger-slow")) == '{"slow": 0, "fast": 1, "notices": []}'
+    ledger.read_s = 6.0
+    observe(store, ledger, clock, at=2_000)
+    observe(store, ledger, clock, at=3_000)
+    assert ledger_probe.state(store, "sw") == {"slow": 2, "fast": 0, "alert": True, "raised_at": 3_000, "notices": []}
+    ledger.read_s = 0.2
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    assert ledger_probe.state(store, "sw") == {"slow": 0, "fast": 2, "alert": False, "raised_at": 3_000, "notices": []}
+
+
+def test_the_master_is_told_first_and_the_clear_is_for_its_awareness(store):
+    clock = Clock()
+    ledger = ProbedLedger(clock, read_s=6.0)
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    ledger.read_s = 0.2
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    items = InboxStore(store.redis).pending_items("master@sw")
+    assert [(i.sender, i.fyi) for i in items] == [("swarm", False), ("swarm", True)]
+    assert items[1].text == (
+        "The ledger server answers fast again: two swarm passes took read 0.2 seconds and write 0.1 seconds. "
+        "Idle and stale claim checks resume."
+    )
+
+
+def test_a_master_without_a_seat_gets_the_alert_at_its_name():
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
+    store.put_agent("sw", AgentRecord("master@a1b2c3-0001", "master", ""))
+    clock = Clock()
+    ledger = ProbedLedger(clock, read_s=6.0)
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    assert len(InboxStore(store.redis).pending_items("master@a1b2c3-0001")) == 1
+    assert InboxStore(store.redis).pending_items("master@sw") == []
+
+
+def test_notices_held_while_the_ledger_is_down_land_in_order(store):
+    clock = Clock()
+    ledger = ProbedLedger(clock, read_s=6.0)
+    ledger.notify_error = OSError("connection refused")
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    ledger.read_s = 0.2
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    held = ledger_probe.state(store, "sw")["notices"]
+    assert [n.split(":")[0] for n in held] == ["The ledger server is slow", "The ledger server answers fast again"]
+    ledger.notify_error = None
+    observe(store, ledger, clock)
+    assert ledger.notes == held and ledger_probe.state(store, "sw")["notices"] == []
+
+
+def test_a_dropped_notice_is_reported_on_stderr(store, capsys):
+    clock = Clock()
+    ledger = ProbedLedger(clock, read_s=6.0)
+    ledger.notify_error = LedgerRefused("ledger sw refused: not plain words")
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    captured = capsys.readouterr()
+    assert captured.err.endswith("ledger slow notice dropped: ledger sw refused: not plain words\n")
+    assert "dropped" not in captured.out
+
+
+def test_a_finding_with_a_verdict_returns_only_after_its_cooldown(store, monkeypatch):
+    from scripts.swarm import status
+    from scripts.swarm.health.findings import Finding
+
+    measure = {"n": 4}
+    monkeypatch.setattr(
+        status.health,
+        "findings",
+        lambda *a, **k: [Finding("ceremony", "engineer@a1b2c3-0002", "talk", (), "12 per outcome", measure["n"])],
+    )
+    for name in ("live_binding", "retire_watch", "launch_check", "spawn_stall", "drain_watch"):
+        monkeypatch.setattr(f"scripts.swarm.status.{name}.findings", lambda *a: [])
+    at = {"now": 10_000_000}
+    monkeypatch.setattr(status, "now_ms", lambda: at["now"])
+    [shown] = status.findings(store, "sw", store.config("sw"), [], [])
+    assert shown["seen_at"] == 10_000_000
+    status.verdict_store(store, "sw").judge(shown["id"], "early-real", "watching", "master", 10_000_000)
+    measure["n"] = 9
+    cooldown = status.health.limits().cooldown_minutes * 60_000
+    at["now"] = 10_000_000 + cooldown - 1
+    assert status.findings(store, "sw", store.config("sw"), [], []) == []
+    at["now"] = 10_000_000 + cooldown
+    assert [f["kind"] for f in status.findings(store, "sw", store.config("sw"), [], [])] == ["ceremony"]
+
+
 def raise_alert(store):
     clock = Clock()
     ledger = ProbedLedger(clock, read_s=6.0)

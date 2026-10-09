@@ -10,6 +10,7 @@ REPO = Path(__file__).resolve().parents[2]
 PROC = Path("/proc")
 SAMPLE_S = 0.5
 GIT_TIMEOUT_S = 5
+NO_DEV = {"newest": None, "merged_minutes": None}
 
 
 def folder(environ: dict) -> Path:
@@ -45,7 +46,7 @@ def server(
         return {"cpu": None, "started_minutes": None}
     return {
         "cpu": round((after - before) / hertz / SAMPLE_S * 100),
-        "started_minutes": int((uptime - start / hertz) // 60),
+        "started_minutes": int((uptime - start / hertz) / 60),
     }
 
 
@@ -55,15 +56,14 @@ def newest_on_dev(repo: Path = REPO, now: float | None = None) -> dict:
             ["git", "-C", str(repo), "log", "-1", "--format=%ct%x09%s", "origin/dev"],
             capture_output=True,
             text=True,
-            check=False,
             timeout=GIT_TIMEOUT_S,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return {"newest": None, "merged_minutes": None}
+        return dict(NO_DEV)
     stamp, _, subject = found.stdout.strip().partition("\t")
     if found.returncode or not stamp.isdigit():
-        return {"newest": None, "merged_minutes": None}
-    return {"newest": subject, "merged_minutes": int(((now or time.time()) - int(stamp)) // 60)}
+        return dict(NO_DEV)
+    return {"newest": subject, "merged_minutes": int(((now or time.time()) - int(stamp)) / 60)}
 
 
 def facts() -> dict:

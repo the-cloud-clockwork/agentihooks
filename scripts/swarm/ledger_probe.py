@@ -115,6 +115,13 @@ def _delivered(ledger, slug: str, text: str) -> bool:
     return True
 
 
+def _undelivered(ledger, slug: str, notices: list[str]) -> list[str]:
+    for n, notice in enumerate(notices):
+        if not _delivered(ledger, slug, notice):
+            return notices[n:]
+    return []
+
+
 def observe(
     store,
     slug: str,
@@ -131,20 +138,19 @@ def observe(
     slow = held.get("slow", 0) + 1 if sample.slow else 0
     fast = 0 if sample.slow else held.get("fast", 0) + 1
     held.update(slow=slow, fast=fast)
-    actions, text, mail = [], "", ""
+    actions, notices = [], held.get("notices", [])
     if not held.get("alert") and slow >= PASSES:
         text = _raised(sample, (facts or ledger_host.facts)())
-        mail = text + PAUSED
+        InboxStore(store.redis).send(SENDER, _master_address(store, slug), text + PAUSED)
+        notices = [*notices, for_operator(text)]
         held.update(alert=True, raised_at=now_ms)
         actions.append("raised the ledger slow alert")
     elif held.get("alert") and fast >= PASSES:
-        text = mail = CLEARED.format(took=sample.took())
-        held.update(alert=False, cleared_at=now_ms)
+        text = CLEARED.format(took=sample.took())
+        InboxStore(store.redis).send(SENDER, _master_address(store, slug), text, fyi=True)
+        notices = [*notices, for_operator(text)]
+        held.update(alert=False)
         actions.append("cleared the ledger slow alert")
-    if text:
-        InboxStore(store.redis).send(SENDER, _master_address(store, slug), mail, fyi=not held["alert"])
-        held["notices"] = [*held.get("notices", []), for_operator(text)]
-    while held.get("notices") and _delivered(ledger, slug, held["notices"][0]):
-        held["notices"] = held["notices"][1:]
+    held["notices"] = _undelivered(ledger, slug, notices)
     store.redis.set(_key(store, slug), json.dumps(held))
     return actions
