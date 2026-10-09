@@ -11,7 +11,7 @@ from scripts.inbox.store import CLOSED, InboxError
 from scripts.swarm import idle, mutation_wait
 from scripts.swarm.store import SwarmError
 
-KINDS = ("checks", "merge", "reply", "task")
+KINDS = ("checks", "merge", "reply", "task", "mutation")
 BARE_MAX_MINUTES = 60
 CHECKED_MINUTES = 12 * 60
 FRESH_MS = 5 * 60_000

@@ -155,3 +155,46 @@ def test_a_run_that_changes_its_identity_ends_red(preflight, field, value):
     preflight.run[field] = value
     held = {**waits.on("mutation", URL), "head": "first"}
     assert "run no longer matches" in waits.resolution(held, {}, None, None, None, False)
+
+
+@pytest.mark.parametrize("target", ["123", "https://github.com/org/repo/pull/1", URL + "/jobs/7"])
+def test_wait_declaration_rejects_an_invalid_run_target(target):
+    assert waits.target_problem("mutation", target, "t1", {}, None) == ("wait on mutation needs an Actions run url")
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("path", "tests.yml"), ("event", "pull_request"), ("head_sha", "")],
+)
+def test_cli_refuses_an_unrelated_or_unbound_run(env, preflight, field, value, capsys):  # noqa: F811
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    ledger.tasks = lambda slug: list(ledger.rows.values())
+    preflight.run[field] = value
+    assert run("sw", "--as", ME, "wait", "--on", "mutation", URL) == 1
+    assert "mutation" in capsys.readouterr().err
+    assert idle.wait(store.redis, "sw", ME) is None
+
+
+@pytest.mark.parametrize("conclusion,failed", [("failure", False), ("success", True), ("failure", True)])
+def test_a_failed_run_or_report_cannot_pass_without_named_survivors(preflight, conclusion, failed):
+    preflight.run["conclusion"] = conclusion
+    preflight.report["failed"] = failed
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == (
+        f"mutation preflight {URL}, now red; mutation failed without a named survivor"
+    )
+
+
+def test_report_read_failure_ends_red(preflight, monkeypatch):
+    original = subprocess.run
+
+    def api(args, **kwargs):
+        if args[-1].endswith("/zip"):
+            return subprocess.CompletedProcess(args, 0, b"unreadable")
+        return original(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", api)
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert "complete mutation report unavailable" in waits.resolution(held, {}, None, None, None, False)
