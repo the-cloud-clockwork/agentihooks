@@ -619,7 +619,7 @@ def test_each_gone_agent_is_settled_once_per_sweep(redis, monkeypatch):
 
 
 def seat_notice_taken(inbox, store, state):
-    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    store.create(SwarmConfig("sw", "/repo", 1, 0))
     store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
     item = inbox.send("swarm", "eng-1@sw", "intent check for task t1", ref="tasks/t1")
     inbox.deliver(item.id, "sw-eng-1")
