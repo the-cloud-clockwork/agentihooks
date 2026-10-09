@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from scripts.doctor.priming import TEMPLATE
@@ -239,3 +241,51 @@ def test_a_stopping_swarm_sends_no_alarm_while_its_master_pass_is_skipped(store)
     store.update("sw", state="stopping")
     assert master_alarm.run("sw", store, runtime, "") == []
     assert mail(store, DOCTOR_MASTER) == []
+
+
+def saved(store, state):  # noqa: F811
+    store.redis.set(store.key("sw", master_alarm.KEY), json.dumps(state))
+
+
+def test_the_error_is_empty_when_nothing_is_recorded(store):  # noqa: F811
+    assert master_alarm.error(store, "sw", -1) == ""
+
+
+@pytest.mark.parametrize(
+    ("state", "since", "expected"),
+    [
+        ({"error": BROKEN}, -1, BROKEN),
+        ({"error": BROKEN}, 0, ""),
+        ({"error": BROKEN, "at": 5}, 5, BROKEN),
+        ({"error": BROKEN, "at": 5}, 6, ""),
+    ],
+)
+def test_the_error_counts_only_when_recorded_at_or_after_since(store, state, since, expected):  # noqa: F811
+    saved(store, state)
+    assert master_alarm.error(store, "sw", since) == expected
+
+
+def agent(store, runtime, name, lane="eng", state="working"):  # noqa: F811
+    store.put_agent("sw", AgentRecord(name, lane, f"t-{name[-4:]}", state=state, seat=f"{lane}-{name[-1]}@sw"))
+    runtime.live.add(name)
+
+
+def test_a_finished_agent_is_not_told(store):  # noqa: F811
+    runtime = FakeRuntime()
+    agent(store, runtime, ENGINEER, state="finished")
+    master_alarm.failed(store, "sw", BROKEN, 1)
+    assert master_alarm.run("sw", store, runtime, "") == []
+    assert notices(store, ENGINEER) == []
+
+
+def test_the_doctor_is_told_once_across_later_agents(store):  # noqa: F811
+    doctored(store)
+    runtime = FakeRuntime()
+    master_alarm.failed(store, "sw", BROKEN, 1)
+    assert master_alarm.run("sw", store, runtime, "") == [
+        f"told the Doctor {DOCTOR} the master launch failed: {BROKEN}"
+    ]
+    for name in ("engineer@a1b2c3-0002", "engineer@a1b2c3-0003"):
+        agent(store, runtime, name)
+        assert master_alarm.run("sw", store, runtime, "") == [f"told {name} the master is down"]
+    assert len(mail(store, DOCTOR_MASTER)) == 1
