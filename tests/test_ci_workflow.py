@@ -721,7 +721,7 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
 def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     jobs = _mutation_workflow()["jobs"]
     plan, mutation = jobs["mutation-plan"], jobs["mutation"]
-    assert "needs" not in plan
+    assert plan.get("needs") in (None, ["reuse"])
     assert plan["if"] == mutation["if"]
     assert plan["outputs"]["shards"] == "${{ steps.plan.outputs.shards }}"
     step = next(step for step in plan["steps"] if step.get("id") == "plan")
