@@ -2,7 +2,6 @@ import json
 from dataclasses import asdict
 from types import SimpleNamespace
 
-import fakeredis
 import pytest
 
 from scripts.swarm import metrics_outbox, metrics_swarm
@@ -207,6 +206,8 @@ def test_unknown_claim_duration_is_not_invented():
 
 
 def test_record_pass_appends_through_outbox_and_deduplicates(tmp_path, monkeypatch):
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig(SLUG, ".", 0, 0))
     store.put_agent(SLUG, AgentRecord(**{**AGENT, "execution_id": ""}))
@@ -277,6 +278,8 @@ def test_held_spawns_count_ready_tasks_with_room_but_without_placements(monkeypa
 
 
 def test_done_task_is_observed_once_even_when_completion_precedes_the_tick(tmp_path, monkeypatch):
+    import fakeredis
+
     from scripts.swarm import metrics
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
