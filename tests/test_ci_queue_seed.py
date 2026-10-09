@@ -353,6 +353,13 @@ def test_pull_request_and_push_runs_keep_the_dev_cache_lookup(event):
     assert [s.get("name") for s in steps if _runs_on(s, event)] == ["Look up the base revision's dev durations"]
 
 
+_RUN_OF = 'split(":") as $p | {id: ($p[0] | tonumber), head_sha: ($p[1] // $sha), conclusion: ($p[2] // "success")}'
+_LISTED = (
+    '{workflow_runs: map(select(($q | contains("&status=success&") | not) or .conclusion == "success")'
+    ' | select(("&head_sha=" + .head_sha + "&") as $h | ($q | contains("&head_sha=") | not) or ($q | contains($h))))}'
+)
+
+
 @pytest.fixture
 def dispatch_lookup(tmp_path):
     find = _step(_jobs()["durations"]["steps"], "Find the dev push run of the dispatched base")
@@ -363,7 +370,8 @@ def dispatch_lookup(tmp_path):
         'printf "%s\\n" "$@" >> "$ARGS"\n'
         'case "$2" in\n'
         '  */commits/*) [[ -z "$FAIL_COMMIT" ]] || exit 1; body="{\\"sha\\": \\"$FAKE_SHA\\"}" ;;\n'
-        '  */runs\\?*) body=$(printf "%s\\n" $FAKE_RUNS | jq -s "{workflow_runs: map({id: .})}") ;;\n'
+        '  */runs\\?*) body=$(printf "%s\\n" $FAKE_RUNS | jq -R --arg sha "$FAKE_SHA" "$RUN_OF"'
+        ' | jq -s --arg q "&${2#*\\?}&" "$LISTED") ;;\n'
         '  */runs/*/artifacts*) run="${2#*/runs/}"; run="${run%%/*}"; v="KEPT_$run"; body="${!v:-[]}"'
         '; body="{\\"artifacts\\": $body}" ;;\n'
         "esac\n"
@@ -381,6 +389,8 @@ def dispatch_lookup(tmp_path):
             BASE=base,
             FAKE_SHA=sha,
             FAKE_RUNS=runs,
+            RUN_OF=_RUN_OF,
+            LISTED=_LISTED,
             FAIL_COMMIT=fail_commit,
             GITHUB_OUTPUT=str(output),
             GITHUB_REPOSITORY="the-cloud-clockwork/agentihooks",
@@ -398,24 +408,50 @@ def dispatch_lookup(tmp_path):
     return run
 
 
-def test_dispatch_restores_from_the_dev_push_run_on_the_pinned_base(dispatch_lookup):
+def test_dispatch_on_dev_restores_the_newest_passed_dev_push_run(dispatch_lookup):
     result, output, args = dispatch_lookup(
-        run111="durations-merged", run222="sonar-report durations-merged coverage-baseline"
+        runs=f"333:{'c' * 40}: 222:{'b' * 40}:success 111:{'a' * 40}:success",
+        run333="durations-merged coverage-baseline",
+        run222="sonar-report durations-merged coverage-baseline",
+        run111="durations-merged coverage-baseline",
     )
     assert result.returncode == 0, result.stderr
     assert output == "id=222\n"
-    assert "repos/the-cloud-clockwork/agentihooks/commits/dev" in args
+    assert not [arg for arg in args if "/commits/" in arg]
     assert (
         "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs"
-        "?branch=dev&event=push&head_sha=" + "c" * 40 + "&per_page=20"
+        "?branch=dev&event=push&status=success&per_page=20"
     ) in args
-    assert "c" * 40 in result.stdout
+    assert "222" in result.stdout
 
 
-def test_dispatch_resolves_a_pinned_commit_as_given(dispatch_lookup):
-    result, _, args = dispatch_lookup(base="d" * 40, run111="durations-merged coverage-baseline")
+def test_dispatch_on_a_pinned_commit_restores_its_passed_dev_push_run(dispatch_lookup):
+    pinned = "d" * 40
+    result, output, args = dispatch_lookup(
+        base=pinned,
+        sha=pinned,
+        runs=f"444:{pinned}: 111:{pinned}:success 222:{'b' * 40}:success",
+        run444="durations-merged coverage-baseline",
+        run111="durations-merged coverage-baseline",
+        run222="durations-merged coverage-baseline",
+    )
     assert result.returncode == 0, result.stderr
-    assert "repos/the-cloud-clockwork/agentihooks/commits/" + "d" * 40 in args
+    assert output == "id=111\n"
+    assert "repos/the-cloud-clockwork/agentihooks/commits/" + pinned in args
+    assert (
+        "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs"
+        "?branch=dev&event=push&status=success&head_sha=" + pinned + "&per_page=20"
+    ) in args
+
+
+@pytest.mark.parametrize("base", ["origin/dev", "d" * 40])
+def test_dispatch_is_red_when_only_an_unfinished_dev_push_run_kept_both(dispatch_lookup, base):
+    result, output, _ = dispatch_lookup(
+        base=base, sha="d" * 40, runs=f"333:{'d' * 40}:", run333="durations-merged coverage-baseline"
+    )
+    assert result.returncode != 0
+    assert "::error::" in result.stdout
+    assert output == ""
 
 
 @pytest.mark.parametrize(
@@ -436,7 +472,7 @@ def test_dispatch_is_red_when_no_dev_push_run_on_the_base_kept_both(dispatch_loo
 
 
 def test_dispatch_is_red_when_the_base_does_not_resolve(dispatch_lookup):
-    result, output, args = dispatch_lookup(fail_commit="1")
+    result, output, args = dispatch_lookup(base="d" * 40, fail_commit="1")
     assert result.returncode != 0
     assert output == ""
     assert not [arg for arg in args if "/runs" in arg]
