@@ -432,7 +432,7 @@ def _codex_config(installed: dict, operator: Path, out: Path, settings: dict) ->
 def _codex_skills(bundle: Path | None, dirs: list[tuple[str, Path]], stamp: dict) -> tuple[dict, dict]:
     enabled = [plugin for plugin, on in stamp["enabled_plugins"].items() if on]
     below = plugins.plugin_skills(enabled, claude_home(_global_env()) / "plugins")
-    return below, plugins.layer_skills(_roots(bundle, dirs), enabled)
+    return below, plugins.layer_skills(_roots(bundle, dirs))
 
 
 def render_codex(name: str, force: bool = False, overlays: Sequence[str] = ()) -> Path | None:
@@ -453,7 +453,7 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = ()) -
     current = {
         "render": stamp,
         "operator": hashlib.sha256(text.encode()).hexdigest(),
-        "skills": {name: str(path) for name, path in {**below, **above}.items()},
+        "skills": {skill: str(path) for skill, path in {**below, **above}.items()},
     }
     root = profile_dir(name, overlays)
     out = root / "codex"

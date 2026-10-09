@@ -591,23 +591,45 @@ def test_codex_render_of_frontend_links_each_plugin_replacement(world, tmp_path)
     assert "unlisted" not in linked and "gone" not in linked
 
 
-@pytest.mark.parametrize("role", ["engineer", "cicd", "planner", "master"])
+@pytest.mark.parametrize("role", ["engineer", "cicd", "planner", "master", "qa"])
 def test_codex_render_of_each_role_carries_its_replacements(world, tmp_path, role):
     from scripts.profiles import render
 
-    _write(world["bundle"] / "profiles" / role / "profile.yml", f"name: {role}\nextends: [rb-base]\n")
+    base = "package:qa" if role == "qa" else "rb-base"
+    _write(world["bundle"] / "profiles" / role / "profile.yml", f"name: {role}\nextends: [{base}]\n")
     plugin = _mattpocock(world["home"], tmp_path)
     _impeccable(world["home"])
 
     out = render.render_codex(role)
 
     linked = _codex_skills(out)
-    if role == "master":
+    if role in ("master", "qa"):
         assert "tdd" not in linked
         assert "playwright-cmd" in tomllib.loads((out / "config.toml").read_text())["mcp_servers"]
     else:
         assert linked["tdd"] == str(plugin / "skills" / "engineering" / "tdd")
     assert "impeccable" not in linked
+
+
+def test_a_profile_skill_keeps_its_name_over_the_fetched_codex_skill(world):
+    from scripts.profiles import render
+
+    front = _frontend(world)
+    _impeccable(world["home"])
+    _write(front / ".claude" / "skills" / "impeccable" / "SKILL.md", "---\nname: impeccable\n---\n")
+
+    out = render.render_codex("frontend")
+
+    assert _codex_skills(out)["impeccable"] == str(out.parent / "claude" / "skills" / "impeccable")
+
+
+def test_a_bundle_codex_skill_replaces_a_plugin_for_the_gate(world):
+    from scripts.profiles import plugins
+
+    _frontend(world)
+    _write(world["bundle"] / ".codex" / "skills" / "impeccable" / "SKILL.md", "---\nname: impeccable\n---\n")
+
+    assert plugins.claude_only("frontend") is False
 
 
 def test_codex_render_redoes_the_home_when_a_replacement_arrives(world):

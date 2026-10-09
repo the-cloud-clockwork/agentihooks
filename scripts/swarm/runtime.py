@@ -203,7 +203,8 @@ class HerdrRuntime:
         self._quota_accounts = capacity.accounts(dict(os.environ), now, refresh=placing)
         self._quota_held = {}
         accounts = self._quota_successor_accounts(requirements) if requirements else None
-        requirements = self._quota_preferring(requirements) if requirements else requirements
+        if requirements:
+            requirements = self._quota_preferring(requirements)
         warned = self._quota_warned()
         inputs = capacity.ScaleInputs(self._quota_accounts, agents, demand, self.host, self._quota_previous, warned)
         config, scaled = capacity.autoscaled(config, inputs)
@@ -263,8 +264,9 @@ class HerdrRuntime:
                 ):
                     options.append((saved["harness"],))
                 else:
-                    if (lane, len(options)) not in self._quota_handoffs and profile_choice.preferred(profile):
-                        self._quota_preferred[lane, len(options)] = profile_choice.preferred(profile)
+                    order = profile_choice.preferred(profile)
+                    if order and (lane, len(options)) not in self._quota_handoffs:
+                        self._quota_preferred[lane, len(options)] = order
                     options.append(_harnesses(config, lane))
             requirements[lane] = options
         return requirements

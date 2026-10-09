@@ -53,9 +53,8 @@ def _skill_dirs(folder: Path) -> dict[str, Path]:
     return {p.name: p for p in sorted(folder.iterdir()) if (p / "SKILL.md").is_file()} if folder.is_dir() else {}
 
 
-def layer_skills(roots: Iterable[Path], enabled: Iterable[str]) -> dict[str, Path]:
-    names = {name for plugin in enabled for name in CODEX_SKILLS.get(plugin, ())}
-    found = {name: path for name, path in _skill_dirs(fetched()).items() if name in names}
+def layer_skills(roots: Iterable[Path]) -> dict[str, Path]:
+    found: dict[str, Path] = {}
     for root in roots:
         found.update(_skill_dirs(root / ".codex" / "skills"))
     return found
@@ -82,14 +81,16 @@ def _installed(plugin: str, plugins_dir: Path) -> dict[str, Path]:
 
 
 def plugin_skills(enabled: Iterable[str], plugins_dir: Path) -> dict[str, Path]:
-    found: dict[str, Path] = {}
+    enabled = list(enabled)
+    names = {name for plugin in enabled for name in CODEX_SKILLS.get(plugin, ())}
+    found = {name: path for name, path in _skill_dirs(fetched()).items() if name in names}
     for plugin in enabled:
         if plugin in CODEX_PLUGIN_SKILLS:
             found.update(_installed(plugin, plugins_dir))
     return found
 
 
-def replaced(plugin: str, chain: list[str], layer: dict[str, Path], plugins_dir: Path) -> bool:
+def replaced(plugin: str, chain: list[str], available: dict[str, Path], plugins_dir: Path) -> bool:
     from scripts.profiles import browser
 
     if plugin == PLAYWRIGHT:
@@ -97,7 +98,7 @@ def replaced(plugin: str, chain: list[str], layer: dict[str, Path], plugins_dir:
     if plugin in CODEX_PLUGIN_SKILLS:
         return bool(_installed(plugin, plugins_dir))
     names = CODEX_SKILLS.get(plugin, ())
-    return bool(names) and all(name in layer for name in names)
+    return bool(names) and all(name in available for name in names)
 
 
 def claude_only(name: str) -> bool:
@@ -109,11 +110,13 @@ def claude_only(name: str) -> bool:
     resolved = _i._resolve_profile_chain(name)
     chain, roots = [n for n, _ in resolved], [root for _, root in resolved]
     plugins_dir = claude_home({k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}) / "plugins"
+    bundle = _i._get_bundle_path()
+    layer = layer_skills([*([bundle] if bundle else []), *roots])
     for root in roots:
         path = _i._native_layer_path(root, "claude", _i._NATIVE_SETTINGS_NAME)
         layered = (_i._load_native_layer(path).get("enabledPlugins") or {}) if path else {}
         enabled = [plugin for plugin, on in layered.items() if on]
-        layer = layer_skills(roots, enabled)
-        if any(not replaced(plugin, chain, layer, plugins_dir) for plugin in enabled):
+        available = {**plugin_skills(enabled, plugins_dir), **layer}
+        if any(not replaced(plugin, chain, available, plugins_dir) for plugin in enabled):
             return True
     return False
