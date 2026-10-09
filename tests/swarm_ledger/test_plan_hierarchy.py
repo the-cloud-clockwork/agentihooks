@@ -5,7 +5,7 @@ import pytest
 from scripts.swarm_ledger import ledger_artifacts, ledger_plans, ledger_tasks, new_ledger
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger.repository import rows
-from tests.swarm_ledger import legacy_page  # noqa: E402
+from tests.swarm_ledger import legacy_page
 
 SLUG = "plan-hierarchy"
 IDS = itertools.count()
@@ -166,6 +166,15 @@ def test_the_same_anchor_twice_in_one_plan_is_refused():
     assert rejected and "slice a.first already belongs to phases/p1" in refusal
 
 
+def test_a_phase_holding_slices_keeps_its_plan():
+    plans("a", "b")
+    link("p1", "plans/a")
+    run("slice_add", phase="phases/p1", anchor="first")
+    _, rejected, refusal = link("p1", "plans/b")
+    assert rejected and "phase p1 holds slices of another plan: a.first" in refusal
+    assert link("p1", "plans/a")[1] == []
+
+
 def test_a_slice_needs_a_phase_with_a_plan():
     _, rejected, refusal = run("slice_add", phase="phases/p1", anchor="first")
     assert rejected and "phase p1 has no plan: link it to a plan before adding a slice" in refusal
@@ -197,6 +206,9 @@ def test_legacy_plan_fields_are_checked_against_the_new_parents():
 @pytest.mark.parametrize(
     ("op", "error"),
     [
+        ({"op": "slice_add", "phase": "phases/p1"}, "slice_add needs phase and an anchor"),
+        ({"op": "slice_add", "phase": "phases/p1", "anchor": 5}, "slice_add needs phase and an anchor"),
+        ({"op": "plan_add", "title": "A"}, "plan_add needs plan, an id of letters, digits, _ and -"),
         (
             {"op": "plan_add", "plan": "a.b", "title": "Dotted"},
             "plan_add needs plan, an id of letters, digits, _ and -",

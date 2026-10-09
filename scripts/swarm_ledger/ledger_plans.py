@@ -19,12 +19,14 @@ def check(op: dict) -> None:
     if op["op"] == "slice_add":
         if set(op) - {"op", "id", "by", "phase", "anchor"}:
             raise ValueError("slice_add takes only phase anchor")
-        if not isinstance(op.get("phase"), str) or not ANCHOR_RE.fullmatch(str(op.get("anchor"))):
+        if not isinstance(op.get("phase"), str) or not isinstance(op.get("anchor"), str):
+            raise ValueError("slice_add needs phase and an anchor")
+        if not ANCHOR_RE.fullmatch(op["anchor"]):
             raise ValueError("slice_add needs phase and an anchor")
         return
     if set(op) - {"op", "id", "by", "plan", "title", *LINKS}:
         raise ValueError("plan_add takes only plan title artifact url")
-    if not PLAN_RE.fullmatch(str(op.get("plan"))):
+    if not isinstance(op.get("plan"), str) or not PLAN_RE.fullmatch(op["plan"]):
         raise ValueError("plan_add needs plan, an id of letters, digits, _ and -")
     if not isinstance(op.get("title"), str) or not op["title"].strip():
         raise ValueError("plan_add needs a title")
@@ -69,7 +71,8 @@ def find(doc: dict, address: str) -> dict:
 def parent_refusal(doc: dict, owner: str, address: object, kind: str) -> str:
     match = ADDRESS_RE.fullmatch(address) if isinstance(address, str) else None
     if match and match["ledger"]:
-        return f"{owner} names {address} on ledger {match['ledger']}: a parent lives on the same ledger, named as {kind}/<id>"
+        where = f"{owner} names {address} on ledger {match['ledger']}"
+        return f"{where}: a parent lives on the same ledger, named as {kind}/<id>"
     if match is None or match["kind"] != kind:
         return f"{owner} needs a {NOUNS[kind]} as its parent, not {address}"
     if not any(row.get("id") == match["id"] for row in doc.get(kind, [])):
@@ -88,6 +91,13 @@ def phase_refusal(doc: dict, phase: dict) -> str:
     owner = f"phase {phase['id']}"
     if refusal := parent_refusal(doc, owner, address, "plans"):
         return refusal
+    prefix = f"{address.split('/', 1)[1]}."
+    if stale := [
+        row["id"]
+        for row in doc.get("slices", [])
+        if row.get("phase") == f"phases/{phase['id']}" and not row["id"].startswith(prefix)
+    ]:
+        return f"{owner} holds slices of another plan: {', '.join(stale)}"
     plan = find(doc, address)
     links = {plan.get(key) for key in LINKS} - {"", None}
     legacy = (("plan_url", phase.get("plan_url")), ("plan_ref", (phase.get("plan_ref") or {}).get("artifact")))
@@ -105,10 +115,12 @@ def task_refusal(doc: dict, task: dict) -> str:
     if refusal := parent_refusal(doc, owner, address, "slices"):
         return refusal
     row = find(doc, address)
-    if row["phase"] != f"phases/{task.get('phase', '')}":
-        return f"{owner} is in phase {task.get('phase') or 'none'} but its slice {address} belongs to {row['phase']}"
-    if task.get("plan_slice") and task["plan_slice"] != row["anchor"]:
-        return f"{owner} plan_slice {task['plan_slice']} differs from its slice anchor {row['anchor']}"
+    if row.get("phase") != f"phases/{task.get('phase', '')}":
+        return (
+            f"{owner} is in phase {task.get('phase') or 'none'} but its slice {address} belongs to {row.get('phase')}"
+        )
+    if task.get("plan_slice") and task["plan_slice"] != row.get("anchor"):
+        return f"{owner} plan_slice {task['plan_slice']} differs from its slice anchor {row.get('anchor')}"
     if task.get("plan_lines") and row.get("lines") and task["plan_lines"] != row["lines"]:
         return f"{owner} plan_lines {task['plan_lines']} differ from its slice lines {row['lines']}"
     return ""

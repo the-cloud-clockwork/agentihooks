@@ -56,6 +56,7 @@ OBJECT_FIELDS = ("contract", "proof")
 URL_FIELDS = ("issue_url", "pr_url", "plan_url")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")
+PARENT_FIELDS = {"slice", "phase", "plan_slice", "plan_lines"}
 WORKER_LANES = ("eng", "ci")
 SWARM = "swarm"
 PROPOSE = 'propose the work with agentihooks ledger followup add "<plain words>" and the master decides'
@@ -525,6 +526,8 @@ def apply(doc, op, ctx):
 
 def _parent_refusal(doc: dict, op: dict) -> str:
     task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), None)
-    if task is None or (op.get("if_state") and task.get("state", "open") not in op["if_state"]):
+    if task is None or not PARENT_FIELDS & set(op["fields"]):
+        return ""
+    if op.get("if_state") and task.get("state", "open") not in op["if_state"]:
         return ""
     return ledger_plans.task_refusal(doc, {**task, **op["fields"]})
