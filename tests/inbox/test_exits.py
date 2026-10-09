@@ -820,13 +820,17 @@ def seat_mail(inbox, store, seat, sender="sender", text="contract\nsecond line")
 
 
 @pytest.mark.parametrize(("lane", "cap"), [("eng", 2), ("ci", 1), ("plan", 0)])
-@pytest.mark.parametrize("state", ["pending", "delivered", "read"])
+@pytest.mark.parametrize("state", ["pending", "delivered", "confirmed", "read"])
 def test_seat_mail_above_its_lane_cap_is_settled_and_its_sender_told(redis, lane, cap, state):
     inbox, store = InboxStore(redis), RedisStore(redis)
     store.create(SwarmConfig("sw", "/repo", 2, 1, max_plan=0))
     item, occupant = seat_mail(inbox, store, f"{lane}-3@sw")
-    if state != "pending":
-        getattr(inbox, "deliver" if state == "delivered" else "read")(item.id, occupant)
+    if state in ("delivered", "confirmed"):
+        inbox.deliver(item.id, occupant)
+    if state == "confirmed":
+        inbox.confirm(item.id, occupant)
+    if state == "read":
+        inbox.read(item.id, occupant)
     exits.sweep(inbox, "sw", store, dict)
     closed = inbox.get(item.id)
     assert (closed.address, closed.state) == (f"{lane}-3@sw", "cancelled")
