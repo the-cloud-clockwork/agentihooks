@@ -92,9 +92,11 @@ class Controller:
             return None
         occupants = self.store.execution_occupants(self.slug).values()
         journals = {agent.execution_id for agent in occupants if agent.runtime_backend == BACKEND}
-        plan = self.reconciler.plan(journals, self.pods.sync().pods())
+        records = {agent.execution_id for agent in self.store.execution_registry.records(self.slug)}
+        plan = self.reconciler.plan(journals, self.pods.sync().pods(), records - journals)
         for pod in plan.delete:
             self._delete_orphan(pod)
+        self._authority()
         self.store.redis.hset(self.store.key(self.slug, "controller-orphans"), mapping=plan.counts())
         return plan
 

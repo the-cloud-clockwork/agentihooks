@@ -405,7 +405,7 @@ class Pods:
     def __init__(self, pods):
         self.pods = {pod.uid: pod for pod in pods}
         self.deleted, self.events, self.expire, self.lists = [], [], False, 0
-        self.before_read = lambda: None
+        self.before_read, self.interrupt = lambda: None, None
 
     def list_pods(self, selector):
         self.lists += 1
@@ -415,6 +415,9 @@ class Pods:
         if self.expire:
             self.expire = False
             raise watch.CursorExpired(resource_version)
+        if self.interrupt:
+            failure, self.interrupt, self.events = self.interrupt, None, []
+            raise failure
         yield from self.events
         self.events = []
 
@@ -432,7 +435,7 @@ def managed(name, execution_id, uid=None):
 
 
 def observed(store, transport, grant, pods, cleanup=True):
-    view = watch.PodView(pods, watch.owner_for("fixture"))
+    view = watch.PodView(pods)
     return Controller(store, "fixture", [transport], lambda: grant["allowed"], pods=view, orphan_cleanup=cleanup)
 
 
@@ -470,6 +473,7 @@ def test_restart_converges_to_existing_pods_and_deletes_only_managed_orphans(fix
         "foreign": 1,
         "ambiguous": 0,
         "terminating": 0,
+        "superseded": 0,
     }
     again = restarted.reconcile()
     assert again.matched == {attempt.execution_id: "uid-live"}
@@ -560,10 +564,52 @@ def test_reconcile_requires_the_lease_and_reports_nothing_before(fixture):
 
 
 def test_controller_without_a_pod_view_reconciles_nothing(fixture):
-    _, (first, _), _, _, _ = fixture
+    store, (first, _), _, _, _ = fixture
     assert first.acquire()
     assert first.reconcile() is None
     assert first.controller_orphans_by_class() == dict.fromkeys(watch.CLASSES, 0)
+    assert not store.redis.exists(store.key("fixture", "controller-orphans"))
+
+
+def test_live_pod_of_a_superseded_generation_is_kept(fixture):
+    store, (first, _), transport, clock, grant = fixture
+    assert first.acquire()
+    prior = first.admit(agent(store))
+    current = first.admit(agent(store), prior.execution_id)
+    assert first.release()
+    pods = Pods([managed("eng-1", prior.execution_id, uid="uid-prior")])
+    clock[0] += lease.TTL_MS
+    restarted = observed(store, transport, grant, pods)
+    assert restarted.acquire()
+    plan = restarted.reconcile()
+    assert pods.deleted == []
+    assert plan.missing_pods == [current.execution_id]
+    assert restarted.controller_orphans_by_class()["superseded"] == 1
+
+
+@pytest.mark.parametrize("failure", (ConnectionError("watch reset"), TimeoutError("watch stalled")))
+def test_interrupted_watch_relists_and_converges(fixture, failure):
+    store, _, transport, _, grant = fixture
+    pods = Pods([])
+    controller = observed(store, transport, grant, pods)
+    assert controller.acquire()
+    pods.pods = {"uid-eng-2": managed("eng-2", "exec-orphan")}
+    pods.events, pods.interrupt = [("ADDED", managed("eng-2", "exec-orphan"), "5")], failure
+    controller.reconcile()
+    assert pods.lists == 2
+    assert pods.deleted == [("eng-2", "uid-eng-2")]
+
+
+def test_revoked_grant_refuses_reconcile_without_deleting(fixture):
+    store, _, transport, _, grant = fixture
+    pods = Pods([])
+    controller = observed(store, transport, grant, pods)
+    assert controller.acquire()
+    pods.pods = {"uid-eng-2": managed("eng-2", "exec-orphan")}
+    grant["allowed"] = False
+    with pytest.raises(SwarmError, match="^a scoped controller grant is required$"):
+        controller.reconcile()
+    assert pods.deleted == []
 
 
 @pytest.mark.parametrize("case", ("a", "b", "c"))

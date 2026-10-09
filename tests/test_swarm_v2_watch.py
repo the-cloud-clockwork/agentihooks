@@ -34,7 +34,7 @@ def fixture_pods():
         managed("eng-1-a", "exec-a"),
         managed("eng-2-orphan", "exec-orphan"),
         Pod("eng-2-orphan-copy", "uid-foreign", {"app": "eng"}),
-        Pod("eng-9-other", "uid-other", {**labels("someone-else", "exec-x")}),
+        Pod("eng-9-other", "uid-other", labels("someone-else", "exec-x")),
         Pod("eng-3-blank", "uid-blank", {watch.OWNER_LABEL: OWNER}),
     ]
 
@@ -49,7 +49,22 @@ def test_classification_separates_every_orphan_class():
     assert plan.missing_pods == ["exec-b"]
     assert [pod.name for pod in plan.delete] == ["eng-2-orphan"]
     assert sorted(pod.name for pod in plan.quarantine) == ["eng-2-orphan-copy", "eng-3-blank", "eng-9-other"]
-    assert plan.counts() == {"managed_orphan": 1, "missing_pod": 1, "foreign": 2, "ambiguous": 1, "terminating": 0}
+    assert plan.counts() == {
+        "managed_orphan": 1,
+        "missing_pod": 1,
+        "foreign": 2,
+        "ambiguous": 1,
+        "terminating": 0,
+        "superseded": 0,
+    }
+
+
+def test_superseded_generation_pod_is_kept_and_not_matched():
+    plan = Reconciler(OWNER, cleanup=True).plan({"exec-b"}, [managed("a", "exec-a")], {"exec-a"})
+    assert plan.delete == [] and plan.matched == {} and plan.quarantine == []
+    assert plan.missing_pods == ["exec-b"]
+    assert plan.counts()["superseded"] == 1
+    assert plan.counts()["managed_orphan"] == 0
 
 
 def test_foreign_lookalike_is_never_deleted_even_with_cleanup():
@@ -84,7 +99,7 @@ def test_terminating_pod_is_neither_matched_nor_relaunched_until_gone():
 
 def test_expired_cursor_relists_and_converges():
     source = Source(fixture_pods())
-    view = watch.PodView(source, OWNER)
+    view = watch.PodView(source)
     view.sync()
     source.pods.pop("uid-eng-2-orphan")
     source.version, source.expire = "20", True
@@ -96,7 +111,7 @@ def test_expired_cursor_relists_and_converges():
 
 def test_delayed_deletion_of_an_old_incarnation_keeps_the_new_one():
     source = Source([managed("a", "exec-a", uid="old")])
-    view = watch.PodView(source, OWNER)
+    view = watch.PodView(source)
     view.sync()
     source.events = [
         ("ADDED", managed("a", "exec-a", uid="new"), "11"),
@@ -107,10 +122,10 @@ def test_delayed_deletion_of_an_old_incarnation_keeps_the_new_one():
     assert view.resource_version == "12"
 
 
-def test_restart_converges_without_duplicate_launches():
+def test_restart_converges_to_the_same_plan():
     source = Source(fixture_pods())
     journals = {"exec-a", "exec-b"}
-    first = Reconciler(OWNER, cleanup=True).plan(journals, watch.PodView(source, OWNER).sync().pods())
-    second = Reconciler(OWNER, cleanup=True).plan(journals, watch.PodView(source, OWNER).sync().pods())
+    first = Reconciler(OWNER, cleanup=True).plan(journals, watch.PodView(source).sync().pods())
+    second = Reconciler(OWNER, cleanup=True).plan(journals, watch.PodView(source).sync().pods())
     assert first.missing_pods == second.missing_pods == ["exec-b"]
     assert first.matched == second.matched

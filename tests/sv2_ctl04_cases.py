@@ -2,8 +2,10 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts.swarm import lease
-from scripts.swarm.store import RedisStore, SwarmConfig
+from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2.controller import Controller
 from scripts.swarm_v2.kubernetes import watch
 from tests.test_swarm_v2_controller import Pods, Transport, agent
@@ -32,11 +34,13 @@ class Rig:
         self.store.create(SwarmConfig(data["swarm"], "agentihooks", 1, 0))
         self.clock = [1000]
         patch.setattr(lease, "now_ms", lambda store: self.clock[0])
-        self.transport, self.pods = Transport(), Pods(pods)
+        self.transport, self.pods, self.grant = Transport(), Pods(pods), {"allowed": True}
 
     def controller(self, cleanup=True):
-        view = watch.PodView(self.pods, watch.owner_for("fixture"))
-        return Controller(self.store, "fixture", [self.transport], lambda: True, pods=view, orphan_cleanup=cleanup)
+        view = watch.PodView(self.pods)
+        return Controller(
+            self.store, "fixture", [self.transport], lambda: self.grant["allowed"], pods=view, orphan_cleanup=cleanup
+        )
 
     def launch(self):
         launcher = Controller(self.store, "fixture", [self.transport], lambda: True)
@@ -79,26 +83,35 @@ def _a(patch, data):
 
 
 def _b(patch, data):
-    rig = Rig(patch, data, [*map(pod, data["foreign"]), *map(pod, data["ambiguous"])])
+    lookalikes = [pod(data["same_name_lookalike"]), *map(pod, data["foreign"])]
+    rig = Rig(patch, data, [*lookalikes, *map(pod, data["ambiguous"])])
     before = rig.protected()
     controller = rig.controller()
     assert controller.acquire()
     plan = controller.reconcile()
-    assert rig.pods.deleted == [] and plan.delete == []
-    assert rig.protected() == before
-    assert data["foreign"][0]["uid"] not in {p.uid for p in controller.pods.pods()}
-    quarantined = sorted(p.uid for p in plan.quarantine)
+    deleted_before = list(rig.pods.deleted)
+    unchanged = rig.protected() == before
+    unlabelled = {p.uid for p in lookalikes if watch.OWNER_LABEL not in p.labels}
+    listed = unlabelled & {p.uid for p in controller.pods.pods()}
+    assert deleted_before == [] and plan.delete == [] and unchanged and listed == set()
     corrected = pod({**data["ambiguous"][0], "execution_id": "exec-corrected"})
     rig.pods.pods[corrected.uid] = corrected
     rig.pods.events.append(("MODIFIED", corrected, "corrected"))
+    rig.grant["allowed"] = False
+    with pytest.raises(SwarmError) as refused:
+        controller.reconcile()
+    assert rig.pods.deleted == []
+    rig.grant["allowed"] = True
     fixed = controller.reconcile()
     assert rig.pods.deleted == [(corrected.name, corrected.uid)]
     assert [p.uid for p in fixed.delete] == [corrected.uid]
     return {
-        "deleted_before_correction": [],
-        "protected_state_unchanged": True,
-        "unlabelled_lookalikes_listed": 0,
-        "quarantined": quarantined,
+        "deleted_before_correction": [uid for _, uid in deleted_before],
+        "protected_state_unchanged": unchanged,
+        "unlabelled_lookalikes": sorted(unlabelled),
+        "unlabelled_lookalikes_listed": sorted(listed),
+        "quarantined": sorted(p.uid for p in plan.quarantine),
+        "revoked_grant_refusal": str(refused.value),
         "deleted_after_corrected_labels": [uid for _, uid in rig.pods.deleted],
         "controller_orphans_by_class": controller.controller_orphans_by_class(),
     }
@@ -120,6 +133,13 @@ def _c(patch, data):
     rig.pods.events += [("ADDED", new, "31"), ("DELETED", old, "32")]
     delayed = controller.reconcile()
     assert delayed.matched == {execution_id: new.uid} and delayed.delete == []
+    lost = pod({**data["late_orphan"], "uid": "uid-late-lost-ack"})
+    rig.pods.pods[lost.uid] = lost
+    rig.pods.events.append(("ADDED", lost, "33"))
+    rig.pods.interrupt = ConnectionError("watch reset")
+    interrupted = controller.reconcile()
+    assert rig.pods.lists == 3 and rig.pods.deleted[-1] == (lost.name, lost.uid)
+    assert interrupted.matched == {execution_id: new.uid}
     replayed = rig.restart().reconcile()
     assert replayed.matched == delayed.matched and replayed.missing_pods == []
     orphan = pod(data["managed_orphan"])
@@ -132,8 +152,10 @@ def _c(patch, data):
         "relists": rig.pods.lists,
         "deleted": [uid for _, uid in rig.pods.deleted],
         "matched_after_delayed_deletion": delayed.matched[execution_id] == new.uid,
+        "matched_after_restart": replayed.matched[execution_id] == new.uid,
         "duplicate_launches": rig.transport.creations,
-        "rollback": "orphan cleanup disabled; managed orphan kept while status matching continued",
+        "rollback_orphan_kept": orphan.uid in rig.pods.pods,
+        "rollback_still_matched": held.matched[execution_id] == new.uid,
         "controller_orphans_by_class": rollback.controller_orphans_by_class(),
     }
 

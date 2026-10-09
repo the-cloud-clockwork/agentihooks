@@ -6,7 +6,7 @@ from typing import Protocol
 OWNER_LABEL = "swarm.agentihooks.io/controller-owner"
 EXECUTION_LABEL = "swarm.agentihooks.io/execution-id"
 BACKEND = "kubernetes"
-CLASSES = ("managed_orphan", "missing_pod", "foreign", "ambiguous", "terminating")
+CLASSES = ("managed_orphan", "missing_pod", "foreign", "ambiguous", "terminating", "superseded")
 
 
 class CursorExpired(Exception):
@@ -42,11 +42,9 @@ def labels(owner: str, execution_id: str) -> dict:
 
 
 class PodView:
-    """Observed Pods keyed by uid, so a late event for an old incarnation never touches a newer one."""
-
-    def __init__(self, source: PodSource, owner: str) -> None:
+    def __init__(self, source: PodSource) -> None:
         self.source, self.selector = source, OWNER_LABEL
-        self.owner, self.resource_version, self.by_uid = owner, "", {}
+        self.resource_version, self.by_uid = "", {}
 
     def relist(self) -> None:
         pods, self.resource_version = self.source.list_pods(self.selector)
@@ -84,13 +82,11 @@ class Plan:
 
 
 class Reconciler:
-    """Pure decision step: deletes only Pods carrying this owner and a unique unjournaled execution id."""
-
     def __init__(self, owner: str, cleanup: bool) -> None:
         self.owner, self.cleanup = owner, cleanup
 
-    def plan(self, journals: Iterable[str], pods: Iterable[Pod]) -> Plan:
-        journals, plan, by_execution = set(journals), Plan(), {}
+    def plan(self, journals: Iterable[str], pods: Iterable[Pod], superseded: Iterable[str] = ()) -> Plan:
+        journals, superseded, plan, by_execution = set(journals), set(superseded), Plan(), {}
         for pod in pods:
             execution_id = pod.labels.get(EXECUTION_LABEL, "")
             if pod.labels.get(OWNER_LABEL) != self.owner:
@@ -102,12 +98,13 @@ class Reconciler:
             else:
                 by_execution.setdefault(execution_id, []).append(pod)
         for execution_id, group in sorted(by_execution.items()):
-            self._settle(plan, journals, execution_id, group)
+            self._settle(plan, (journals, superseded), execution_id, group)
         plan.missing_pods = sorted(journals - set(by_execution))
         plan.observed["missing_pod"] = len(plan.missing_pods)
         return plan
 
-    def _settle(self, plan: Plan, journals: set, execution_id: str, group: list[Pod]) -> None:
+    def _settle(self, plan: Plan, known: tuple[set, set], execution_id: str, group: list[Pod]) -> None:
+        journals, superseded = known
         live = [pod for pod in group if not pod.deleting]
         plan.observed["terminating"] += len(group) - len(live)
         if len(live) > 1:
@@ -115,6 +112,8 @@ class Reconciler:
             plan.quarantine.extend(live)
         elif live and execution_id in journals:
             plan.matched[execution_id] = live[0].uid
+        elif live and execution_id in superseded:
+            plan.observed["superseded"] += 1
         elif live:
             plan.observed["managed_orphan"] += 1
             if self.cleanup:

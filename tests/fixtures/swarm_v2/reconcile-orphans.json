@@ -7,9 +7,9 @@
   "incarnation": {"name": "eng-1", "uid": "uid-live-2"},
   "managed_orphan": {"name": "eng-2", "uid": "uid-orphan", "execution_id": "exec-orphan"},
   "late_orphan": {"name": "eng-4", "uid": "uid-late", "execution_id": "exec-late"},
+  "same_name_lookalike": {"name": "eng-2", "uid": "uid-lookalike-same-name", "labels": {"app": "eng-2"}},
   "foreign": [
     {"name": "eng-2-copy", "uid": "uid-lookalike", "labels": {"app": "eng-2"}},
-    {"name": "eng-2", "uid": "uid-lookalike-same-name", "labels": {"app": "eng-2"}},
     {"name": "eng-3", "uid": "uid-other-swarm", "owner": "agentihooks-swarm-other", "execution_id": "exec-x"}
   ],
   "ambiguous": [
