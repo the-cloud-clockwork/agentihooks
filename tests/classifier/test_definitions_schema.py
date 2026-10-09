@@ -163,3 +163,18 @@ def test_digest_is_sha256_of_the_effective_definition(definition_home):
     }
     expected = hashlib.sha256(json.dumps(canonical, sort_keys=True).encode()).hexdigest()
     assert load("sample").digest == expected
+
+
+@pytest.mark.parametrize("kind", [None, [], {}])
+@pytest.mark.parametrize("field", ["question", "rule"])
+def test_unknown_types_have_schema_errors(definition_home, kind, field):
+    raw = sample()
+    if field == "question":
+        raw["questions"][0]["type"] = kind
+    else:
+        raw["rule"]["type"] = kind
+    write_definition(definition_home, raw)
+    with pytest.raises(DefinitionError) as error:
+        load("sample")
+    prefix = "unknown question type" if field == "question" else "unknown verdict rule"
+    assert str(error.value) == f"{prefix}: {kind}"
