@@ -975,9 +975,20 @@ def cmd_pr(store, args):
 
 
 def cmd_merge(store, args):
-    if args.action != "state":
-        _worker(store, args)
-    print(json.dumps(merge_queue.operate(args.action, args.url)))
+    agent = _worker(store, args) if args.action != "state" else None
+    result = merge_queue.operate(args.action, args.url)
+    if result.get("waiting") == "checks":
+        at = now_ms()
+        idle.declare_wait(
+            store.redis,
+            args.slug,
+            agent.name,
+            at + waits.CHECKED_MINUTES * 60_000,
+            "dev changed grading inputs; branch updated",
+            at,
+            on=waits.on("checks", args.url),
+        )
+    print(json.dumps(result))
 
 
 def cmd_done(store, args):

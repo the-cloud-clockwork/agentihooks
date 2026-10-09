@@ -17,7 +17,8 @@ def runner(*responses):
 
     def run(command, **kwargs):
         calls.append((command, kwargs))
-        return subprocess.CompletedProcess(command, 0, json.dumps(next(pending)))
+        response = next(pending)
+        return subprocess.CompletedProcess(command, 0, response if isinstance(response, str) else json.dumps(response))
 
     return run, calls
 
@@ -42,6 +43,14 @@ def test_state_reports_an_open_pull_request_without_a_queue_entry():
 def test_queue_enqueues_the_observed_head_and_reports_the_queue_entry():
     run, calls = runner(
         {"data": {"resource": OPEN}},
+        {
+            "data": {
+                "resource": {"number": 12, "repository": {"nameWithOwner": "o/r", "ref": {"target": {"oid": "c" * 40}}}}
+            }
+        },
+        {"workflow_runs": [{"id": 21, "head_sha": "abc", "conclusion": "success"}]},
+        {"jobs": [{"id": 31, "name": "test-count (3.11)", "conclusion": "success"}]},
+        "2026-10-09T09:20:06Z   BASE: cccccccccccccccccccccccccccccccccccccccc\n",
         {"data": {"enqueuePullRequest": {"mergeQueueEntry": {"id": "MQ_one"}}}},
         {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY}}},
     )
@@ -52,13 +61,12 @@ def test_queue_enqueues_the_observed_head_and_reports_the_queue_entry():
         "queued": True,
         "entry": ENTRY,
     }
-    command, _ = calls[1]
+    command, _ = calls[5]
     assert command[:3] == ["gh", "api", "graphql"]
     assert "enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head})" in command[4]
     assert command[5:] == ["-f", "id=PR_one", "-f", "head=abc"]
-    assert (
-        calls[2][0] == calls[0][0] == ["gh", "api", "graphql", "-f", f"query={merge_queue.STATE}", "-f", f"url={URL}"]
-    )
+    assert calls[-1][0] == calls[0][0]
+    assert not any("compare/" in str(call[0]) for call in calls)
 
 
 @pytest.mark.parametrize(
@@ -87,10 +95,12 @@ def test_queue_refreshes_changed_grading_inputs_before_enqueueing(changed):
                     "name": "Tests",
                     "head_sha": "abc",
                     "conclusion": "success",
-                    "pull_requests": [{"number": 12, "base": {"sha": "checked"}}],
+                    "id": 21,
                 }
             ]
         },
+        {"jobs": [{"id": 31, "name": "test-count (3.11)", "conclusion": "success"}]},
+        "2026-10-09T09:20:06Z   BASE: cccccccccccccccccccccccccccccccccccccccc\n",
         {"files": [{"filename": changed}], "total_commits": 1},
         {"message": "Updating pull request branch."},
         {"data": {"resource": {**OPEN, "headRefOid": "updated"}}},
@@ -120,17 +130,77 @@ def test_queue_does_not_refresh_unrelated_dev_changes():
                     "name": "Tests",
                     "head_sha": "abc",
                     "conclusion": "success",
-                    "pull_requests": [{"number": 12, "base": {"sha": "checked"}}],
+                    "id": 21,
                 }
             ]
         },
+        {"jobs": [{"id": 31, "name": "test-count (3.11)", "conclusion": "success"}]},
+        "2026-10-09T09:20:06Z   BASE: cccccccccccccccccccccccccccccccccccccccc\n",
         {"files": [{"filename": "scripts/swarm/intent.py"}], "total_commits": 1},
         {"data": {"enqueuePullRequest": {"mergeQueueEntry": {"id": "MQ_one"}}}},
         {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY}}},
     )
     assert merge_queue.operate("queue", URL, run)["queued"] is True
-    assert any("repos/o/r/compare/checked...current" in call[0] for call in calls)
+    assert any("repos/o/r/compare/cccccccccccccccccccccccccccccccccccccccc...current" in call[0] for call in calls)
     assert not any("update-branch" in str(call[0]) for call in calls)
+
+
+@pytest.mark.parametrize("conclusion", [None, "failure", "cancelled"])
+def test_queue_waits_for_green_checks_on_the_current_head(conclusion):
+    run, calls = runner(
+        {"data": {"resource": OPEN}},
+        {
+            "data": {
+                "resource": {
+                    "number": 12,
+                    "repository": {"nameWithOwner": "o/r", "ref": {"target": {"oid": "current"}}},
+                }
+            }
+        },
+        {"workflow_runs": [{"id": 21, "head_sha": "abc", "conclusion": conclusion}]},
+    )
+    with pytest.raises(SwarmError, match="current pull request head must pass Tests"):
+        merge_queue.operate("queue", URL, run)
+    assert not any("update-branch" in str(call[0]) or "enqueuePullRequest(input:" in str(call[0]) for call in calls)
+
+
+@pytest.mark.parametrize("log", ["", "2026-10-09T09:20:06Z   BASE: origin/dev\n"])
+def test_queue_refuses_an_unknown_checked_base(log):
+    run, calls = runner(
+        {"data": {"resource": OPEN}},
+        {
+            "data": {
+                "resource": {
+                    "number": 12,
+                    "repository": {"nameWithOwner": "o/r", "ref": {"target": {"oid": "current"}}},
+                }
+            }
+        },
+        {"workflow_runs": [{"id": 21, "head_sha": "abc", "conclusion": "success"}]},
+        {"jobs": [{"id": 31, "name": "test-count (3.11)", "conclusion": "success"}]},
+        log,
+    )
+    with pytest.raises(SwarmError, match="cannot establish the base"):
+        merge_queue.operate("queue", URL, run)
+    assert not any("enqueuePullRequest(input:" in str(call[0]) for call in calls)
+
+
+def test_cli_registers_a_checks_wait_after_refreshing(monkeypatch, capsys):
+    store = swarm_of("eng")
+    store.redis = object()
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    monkeypatch.setattr(merge_queue, "operate", lambda action, url: {"queued": False, "waiting": "checks"})
+    monkeypatch.setattr(cli, "now_ms", lambda: 1000)
+    seen = []
+    monkeypatch.setattr(cli.idle, "declare_wait", lambda *args, **kwargs: seen.append((args, kwargs)))
+    assert cli.main(["sw", "merge", "queue", URL]) == 0
+    assert len(seen) == 1
+    args, kwargs = seen[0]
+    assert args[:3] == (store.redis, "sw", "engineer@a1b2c3-0001")
+    assert kwargs["on"] == {"kind": "checks", "target": URL}
+    assert args[3] > 1000
+    assert json.loads(capsys.readouterr().out)["waiting"] == "checks"
 
 
 def test_dequeue_removes_the_pull_request_then_reports_its_state():
