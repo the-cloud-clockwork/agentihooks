@@ -314,6 +314,106 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     assert error.value.code == 7
 
 
+@pytest.mark.parametrize("mode", ["collect", "reuse", "empty"])
+def test_selection_collects_one_stats_part_or_reuses_the_shared_stats(tmp_path, monkeypatch, mode):
+    from collections import defaultdict
+
+    from scripts.ci_mutation.selection import run_selected
+
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("os.sched_getaffinity", lambda pid: {0, 1})
+    selection = tmp_path / "lines.json"
+    selection.write_text(json.dumps({"scripts/sample.py": {"lines": [2], "tests": ["tests/test_sample.py"]}}))
+    data = SimpleNamespace(exit_code_by_key={} if mode == "empty" else {"m": None}, load=lambda: None)
+    config = SimpleNamespace(
+        source_paths=[Path("scripts/")],
+        pytest_add_cli_args_test_selection=["tests/test_c.py", "tests/test_a.py", "tests/test_b.py"],
+    )
+    engine = SimpleNamespace(tests_by_mangled_function_name=defaultdict(set), duration_by_test={}, stats_time=None)
+    result = {
+        "status": 0,
+        "tests": {"scripts.sample.x_f": ["tests/test_sample.py::t"], "scripts.other.x_g": ["tests/test_o.py::t"]},
+        "durations": {"tests/test_sample.py::t": 1},
+        "cpu": 2,
+    }
+    shared = tmp_path / "shared.json"
+    shared.write_text(json.dumps([result, {"status": 0, "tests": {}, "durations": {}, "cpu": 3}]))
+    part = tmp_path / "stats/part-1.json"
+    seen = []
+
+    test_runner = object()
+
+    def buckets(engine_runner, value, shards, work):
+        assert engine_runner is runner
+        assert value is test_runner
+        assert config.source_paths == [tmp_path / "mutants/scripts"]
+        seen.append((shards, work))
+        return [result]
+
+    def bucket_split(root, files, count):
+        assert (root, files, count) == (tmp_path, ["tests/test_b.py"], 2)
+        return [files]
+
+    class PytestRunner:
+        def run_tests(self, *, mutant_name, tests):
+            return 0
+
+    saved = []
+    runner = SimpleNamespace(
+        SourceFileMutationData=lambda *, path: data,
+        Config=SimpleNamespace(get=lambda: config),
+        PytestRunner=PytestRunner,
+        collect_source_file_mutation_data=lambda *, mutant_names: ([], {}),
+        mutmut=engine,
+        save_stats=lambda: saved.append(engine.stats_time),
+    )
+
+    def cli(args):
+        if mode == "reuse":
+            assert runner.collect_or_load_stats(test_runner) is None
+            assert seen == []
+            assert saved == [5]
+            assert engine.tests_by_mangled_function_name == {
+                "scripts.sample.x_f": {"tests/test_sample.py::t"},
+                "scripts.other.x_g": set(),
+            }
+            assert engine.duration_by_test == {"tests/test_sample.py::t": 1}
+            raise SystemExit(7)
+        with pytest.raises(SystemExit) as done:
+            runner.collect_or_load_stats(test_runner)
+        assert done.value.code == 0
+        assert config.source_paths == [Path("scripts/")]
+        assert seen == ([] if mode == "empty" else [([["tests/test_b.py"]], tmp_path)])
+        assert json.loads(part.read_text()) == {
+            "key": "key",
+            "part": 1,
+            "parts": 3,
+            "results": [] if mode == "empty" else [result],
+        }
+        assert saved == []
+        raise SystemExit(7)
+
+    runner.cli = cli
+    monkeypatch.setattr("scripts.ci_mutation.selection.run_stats_buckets", buckets)
+    monkeypatch.setattr("scripts.ci_mutation.selection.stats_shards", bucket_split)
+    monkeypatch.setitem(sys.modules, "mutmut", SimpleNamespace(__main__=runner))
+    monkeypatch.setitem(sys.modules, "mutmut.__main__", runner)
+    for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:
+        monkeypatch.setitem(sys.modules, name, sys.modules[name])
+    stats = ["reuse", str(shared)] if mode == "reuse" else ["collect", str(part), "key", "1", "3"]
+    with pytest.raises(SystemExit) as error:
+        run_selected(selection, (0, 1), *stats)
+    assert error.value.code == 7
+
+
+def test_selection_refuses_an_unknown_stats_mode_before_touching_mutmut():
+    from scripts.ci_mutation.selection import load_or_collect_stats
+
+    with pytest.raises(ValueError, match="^unknown mutation stats mode 'other'$"):
+        load_or_collect_stats(None, None, ["scripts/sample.py"], "other", ())
+
+
 def test_multiline_operator_on_changed_line_is_mutated_and_unchanged_tokens_are_excluded(tmp_path, monkeypatch):
     from mutmut.configuration import Config
     from mutmut.mutation.pragma_handling import PragmaParseError
@@ -406,6 +506,27 @@ def test_stats_shards_balance_by_duration_and_keep_xdist_groups_together(tmp_pat
         ["tests/test_a.py", "tests/test_e.py"],
         ["tests/test_c.py", "tests/test_f.py"],
     ]
+
+
+@pytest.mark.parametrize("total", [1, 2, 3, 6])
+def test_stats_parts_split_files_by_duration_across_runners_even_inside_an_xdist_group(tmp_path, total):
+    from scripts.ci_mutation.selection import part_files
+
+    (tmp_path / "tests").mkdir()
+    files = [f"tests/test_{name}.py" for name in "abcdef"]
+    for path in files:
+        (tmp_path / path).write_text("import pytest\n\npytestmark = pytest.mark.xdist_group('shared-port')\n")
+    seconds = {"a": 1, "b": 2, "c": 3, "d": 5, "e": 7, "f": 9}
+    (tmp_path / ".test_durations").write_text(
+        json.dumps({f"tests/test_{name}.py::t": value for name, value in seconds.items()} | {"tests/x.py::t": 50})
+    )
+    parts = [part_files(tmp_path, list(reversed(files)), (index, total)) for index in range(total)]
+    assert sorted(path for part in parts for path in part) == files
+    assert all(part == sorted(part) for part in parts)
+    loads = [sum(seconds[path[11]] for path in part) for part in parts]
+    expected = {1: [27], 2: [14, 13], 3: [9, 9, 9], 6: [9, 7, 5, 3, 2, 1]}[total]
+    assert loads == expected
+    assert part_files(tmp_path, files[:1], (2, 3)) == []
 
 
 def test_shard_stats_run_in_stats_mode_with_their_own_basetemp_and_record_everything(tmp_path, monkeypatch):
