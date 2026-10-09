@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/outcomes.py:scripts.swarm_v2.outcomes.x\u01c1Outcomes\u01c1_inherit__mutmut_17:a5a8661578b100f45084f101c8bf355af2714e0976310554a8f2e00f304bef4a": {
+    "reader": "Standards",
+    "reason": "The first journal entry is admission with an empty result. Omitting it preserves every persisted outcome."
+  }
+}
