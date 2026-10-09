@@ -90,20 +90,33 @@ def case_b():
         store, (former, replacement), transport, clock, _ = fixture.__wrapped__(patch)
         assert former.acquire()
         attempt = former.admit(agent(store))
+        candidate = agent(store)
         clock[0] += lease.TTL_MS
         assert replacement.acquire()
-        before = store.redis.hgetall(store.key("fixture", "runtime-operations"))
-        assert not former.renew()
+        assert former.ready and former.held is not None
+        keys = [store.key("fixture", kind) for kind in ("executions", "controller-intents", "runtime-operations")]
+        before = [store.redis.hgetall(key) for key in keys]
+        admission_refused = False
+        try:
+            former.admit(candidate)
+        except SwarmError as error:
+            assert str(error) == "the controller lease is stale"
+            admission_refused = True
         refused = False
         try:
             former.execute(request(attempt))
-        except SwarmError:
+        except SwarmError as error:
+            assert str(error) == "the controller lease is stale"
             refused = True
+        assert not former.renew()
         return {
-            "passed": refused
+            "passed": admission_refused
+            and refused
             and transport.creations == 0
-            and before == store.redis.hgetall(store.key("fixture", "runtime-operations")),
+            and before == [store.redis.hgetall(key) for key in keys],
+            "cached_admission_refused": admission_refused,
             "former_leader_refused": refused,
+            "protected_state_unchanged": before == [store.redis.hgetall(key) for key in keys],
             "external_creations": transport.creations,
             "controller_leader_changes_total": replacement.controller_leader_changes_total(),
         }
