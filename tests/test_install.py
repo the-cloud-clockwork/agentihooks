@@ -14,6 +14,30 @@ import install  # noqa: I001
 
 
 class TestClaudeRouting:
+    def test_cmd_claude_prints_the_selection_with_the_fable_window_it_routed_on(self, monkeypatch, capsys):
+        from scripts import claude_quota_balancer as balancer
+
+        decision = argparse.Namespace(account="WINNER")
+        seen = []
+        monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+        monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/claude")
+        monkeypatch.setattr(balancer, "select_credential", lambda *args, **kwargs: decision)
+        monkeypatch.setattr(balancer, "route_requires_fable", lambda *args, **kwargs: True)
+        monkeypatch.setattr(balancer, "launch_environment", lambda chosen, environ: {})
+        monkeypatch.setattr(install, "_write_route_report", lambda *args, **kwargs: None)
+        monkeypatch.setattr(
+            balancer, "format_selection", lambda chosen, fable: seen.append((chosen, fable)) or "picked"
+        )
+
+        def execvpe(executable, command, environ):
+            raise RuntimeError("exec intercepted")
+
+        monkeypatch.setattr(install.os, "execvpe", execvpe)
+        with pytest.raises(RuntimeError, match="exec intercepted"):
+            install.cmd_claude([])
+        assert seen == [(decision, True)]
+        assert capsys.readouterr().out == "picked\n"
+
     def test_cmd_claude_exports_winner_for_process_tree(self, monkeypatch):
         from scripts import claude_quota_balancer as balancer
 
@@ -182,6 +206,56 @@ class TestClaudeRouting:
             "--permission-mode",
             "plan",
         ]
+
+    def _api_launch(self, monkeypatch, argv):
+        observed = {}
+        monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+        monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/claude")
+        monkeypatch.setenv("AH_CC_TOKEN_0", "token-secret")
+        monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-secret")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "api-secret")
+
+        def execvpe(executable, command, environ):
+            observed.update(command=command, environ=dict(environ))
+            raise RuntimeError("exec intercepted")
+
+        monkeypatch.setattr(install.os, "execvpe", execvpe)
+        with pytest.raises(RuntimeError, match="exec intercepted"):
+            install.cmd_claude(argv)
+        return observed
+
+    def test_an_api_decision_launches_with_the_api_scrubber(self, monkeypatch, capsys, tmp_path):
+        from scripts import claude_quota_balancer as balancer
+
+        decision = balancer.RouteDecision(None, None, "cached", 2, 10**6, kind="api")
+        monkeypatch.setattr(balancer, "select_credential", lambda *args, **kwargs: decision)
+        monkeypatch.setattr(balancer, "route_requires_fable", lambda *args, **kwargs: False)
+        report = tmp_path / "route.report"
+        observed = self._api_launch(monkeypatch, ["--agentihooks-report", str(report), "--model", "opus"])
+        assert observed["command"] == ["/usr/bin/claude", "--dangerously-skip-permissions", "--model", "opus"]
+        assert observed["environ"]["ANTHROPIC_API_KEY"] == "api-secret"
+        assert observed["environ"]["AH_ROUTE_API"] == "1"
+        assert observed["environ"]["AGENTIHOOKS_ROUTE_ACCOUNT"] == "api"
+        assert "CLAUDE_CODE_OAUTH_TOKEN" not in observed["environ"]
+        assert "AH_CC_TOKEN_0" not in observed["environ"]
+        assert report.read_text() == "status=routed\naccount=api\nplacement=open\n"
+        out = capsys.readouterr()
+        assert out.out == "[agenti] account=api kind=api sessions=2/1000000 source=cached\n"
+        assert "secret" not in out.out + out.err
+
+    def test_route_api_forces_the_api_endpoint(self, monkeypatch, capsys):
+        from scripts import claude_quota_balancer as balancer
+
+        monkeypatch.setattr(
+            balancer,
+            "select_credential",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("automatic routing ran")),
+        )
+        observed = self._api_launch(monkeypatch, ["--route", "api"])
+        assert observed["environ"]["AH_ROUTE_API"] == "1"
+        assert observed["environ"]["AGENTIHOOKS_ROUTE_ACCOUNT"] == "api"
+        assert "CLAUDE_CODE_OAUTH_TOKEN" not in observed["environ"]
+        assert capsys.readouterr().out == "[agenti] account=api route=forced\n"
 
     @pytest.mark.parametrize("arguments", [["--route"], ["--route="], ["--route", "0", "--route=3"]])
     def test_cmd_claude_rejects_invalid_route_syntax(self, arguments, capsys):

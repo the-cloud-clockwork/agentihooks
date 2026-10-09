@@ -5,7 +5,7 @@ import sys
 
 
 def claude_environment(command: list[str]) -> dict[str, str]:
-    from hooks.context.account_sessions import sessions_by_account
+    from hooks.context.account_sessions import API_ACCOUNT, sessions_by_account
     from scripts import operator_env
     from scripts.claude_quota_balancer import RoutingError, route_requires_fable, select_credential
     from scripts.install import _load_claude_runtime_env
@@ -18,6 +18,7 @@ def claude_environment(command: list[str]) -> dict[str, str]:
             include_fable=route_requires_fable(command),
             claude_bin=shutil.which("claude") or "claude",
             sessions=sessions_by_account(),
+            exclude=[API_ACCOUNT],
         )
     except RoutingError as exc:
         print(f"skill-eval: {exc}", file=sys.stderr)

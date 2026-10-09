@@ -88,11 +88,22 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
     )
     assert base["run"] == 'git worktree add --detach "$RUNNER_TEMP/base" "$BASE"'
     assert floor["run"] == (
-        'grader="$RUNNER_TEMP/base"\n'
-        '[[ -f "$grader/tests/count_floor.py" ]] || grader="$GITHUB_WORKSPACE"\n'
-        'cd "$grader"\n'
+        'if [[ ! -f "$RUNNER_TEMP/base/tests/count_floor.py" ]]; then\n'
+        '  echo "::error::The base carries no tests/count_floor.py, so nothing trusted can grade."\n'
+        "  exit 1\n"
+        "fi\n"
+        'cd "$RUNNER_TEMP/base"\n'
         'python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
     )
+
+
+def test_test_count_refuses_a_base_without_its_grader(tmp_path):
+    floor = _workflow()["jobs"]["test-count"]["steps"][-1]
+    (tmp_path / "base").mkdir()
+    env = dict(os.environ, RUNNER_TEMP=str(tmp_path), GITHUB_WORKSPACE=str(tmp_path))
+    result = subprocess.run(["bash", "-e", "-c", floor["run"]], env=env, capture_output=True, text=True)
+    assert result.returncode == 1
+    assert "nothing trusted can grade" in result.stdout
 
 
 @pytest.mark.parametrize("unit", ["success", "failure", "skipped", "cancelled", "pending"])
