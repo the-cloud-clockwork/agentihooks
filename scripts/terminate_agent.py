@@ -63,13 +63,19 @@ def _main_thread(target: str, session_id: str, info: dict, records: dict[str, di
     return main_id, main_cwd
 
 
-def sessions(proc: Path = Path("/proc"), registry: dict[str, dict] | None = None) -> list[Session]:
+def sessions(
+    proc: Path = Path("/proc"), registry: dict[str, dict] | None = None, namespace: str | None = None
+) -> list[Session]:
+    from hooks.context.broadcast import foreign_session
+    from scripts.swarm_v2.runtime.process import local_namespace
+
     table = processes(proc)
     records = _registry() if registry is None else registry
+    here = local_namespace() if namespace is None else namespace
     result = []
     registered_pids = set()
     for session_id, info in records.items():
-        if info.get("status") not in {"alive", "handed_off"}:
+        if info.get("status") not in {"alive", "handed_off"} or foreign_session(info, here):
             continue
         try:
             pid = int(info.get("pid", 0))

@@ -723,6 +723,7 @@ def acknowledge_broadcast(session_id: str, message_id: str) -> bool:
 
 
 SESSION_MAX_AGE_SECONDS = 86400  # 24h retention for crash recovery
+SESSION_SUSPECT_SECONDS = 300
 
 
 def _now_iso() -> str:
@@ -790,6 +791,7 @@ def register_session(
             "model": model,
             "account": account,
             "project": identity.attributes() if identity else None,
+            "process_namespace": _local_namespace(),
         }
         _save_sessions(sessions)
 
@@ -863,6 +865,31 @@ def mark_session_closed(session_id: str) -> None:
         _save_sessions(sessions)
 
 
+def _local_namespace() -> str:
+    from scripts.swarm_v2.runtime.process import local_namespace
+
+    return local_namespace()
+
+
+def foreign_session(info: dict, namespace: str) -> bool:
+    """A record from another process namespace: its PID names nothing in this process table."""
+    recorded = info.get("process_namespace") or ""
+    return bool(recorded and namespace) and recorded != namespace
+
+
+def _mark_suspect(info: dict, now_dt: datetime) -> bool:
+    if info.get("status", "alive") not in ("alive", "handed_off"):
+        return False
+    try:
+        seen = _parse_iso(info.get("last_seen") or info.get("started_at") or "")
+    except ValueError:
+        return False
+    if (now_dt - seen).total_seconds() <= SESSION_SUSPECT_SECONDS:
+        return False
+    info["status"] = "suspect"
+    return True
+
+
 def heartbeat_sessions() -> dict:
     """Daemon tick: update last_seen for live PIDs, flip dead ones, prune 24h-old."""
     with _file_lock(_sessions_path()):
@@ -873,13 +900,19 @@ def _heartbeat_locked() -> dict:
     sessions = _load_sessions()
     now_dt = datetime.now(timezone.utc)
     now_iso = now_dt.isoformat().replace("+00:00", "Z")
-    summary = {"alive": 0, "flipped_dead": 0, "pruned": 0, "total": 0}
+    summary = {"alive": 0, "flipped_dead": 0, "pruned": 0, "suspect": 0, "total": 0}
     prune: list[str] = []
     changed = False
+    here = _local_namespace()
 
     for sid, info in list(sessions.items()):
         status = info.get("status", "alive")
         pid = info.get("pid", 0)
+        if foreign_session(info, here):
+            if _mark_suspect(info, now_dt):
+                summary["suspect"] += 1
+                changed = True
+            continue
 
         ts_str = info.get("last_seen") or info.get("started_at")
         if ts_str:
@@ -936,9 +969,10 @@ def get_active_sessions(cleanup: bool = False, include_all: bool = False) -> dic
         with _file_lock(_sessions_path()):
             sessions = _load_sessions()
             changed = False
+            here = _local_namespace()
             for sid, info in sessions.items():
                 pid = info.get("pid")
-                if not pid or info.get("status") in ("dead", "closed", "superseded"):
+                if not pid or info.get("status") in ("dead", "closed", "superseded") or foreign_session(info, here):
                     continue
                 try:
                     os.kill(pid, 0)
