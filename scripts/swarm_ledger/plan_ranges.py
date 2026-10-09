@@ -173,7 +173,11 @@ def anchors(doc: dict, phase: dict) -> list[str]:
         text = stored_text({"artifact": url, "lines": "1-1"}, doc)
     except ValueError:
         return []
-    start, end = bounds(ref["lines"]) if ref else (1, len(text.splitlines()))
+    return marked(text, ref["lines"] if ref else f"1-{len(text.splitlines())}")
+
+
+def marked(text: str, lines: str) -> list[str]:
+    start, end = bounds(lines)
     return [match[1] for n, _, line in sections(text) if start <= n <= end and (match := ANCHOR.fullmatch(line))]
 
 

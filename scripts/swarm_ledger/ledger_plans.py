@@ -132,6 +132,20 @@ def with_plan_slice(doc: dict, fields: dict) -> dict:
     return {**fields, "plan_slice": row["anchor"]}
 
 
+def with_slice(doc: dict, fields: dict) -> dict:
+    phase = next((p for p in doc.get("phases", []) if p.get("id") == fields.get("phase")), {})
+    if "slice" in fields or not fields.get("plan_slice") or not phase.get("plan"):
+        return fields
+    slice_id = f"{phase['plan'].split('/')[1]}.{fields['plan_slice']}"
+    if not any(row.get("id") == slice_id for row in doc.get("slices", [])):
+        return fields
+    return {**fields, "slice": f"slices/{slice_id}"}
+
+
+def plan_id(file_id: str) -> str:
+    return f"plan-{file_id[:12]}"
+
+
 def apply(doc: dict, op: dict, ctx) -> bool:
     if op["op"] == "plan_add":
         refusal = add_plan(doc, op, ctx)
