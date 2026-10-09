@@ -12,9 +12,17 @@ START = "agentihooks ledger serve --ensure"
 LOOPBACK = ("127.0.0.1", "localhost")
 
 
-def base() -> str:
-    host, port = address()
+def base(environ=os.environ) -> str:
+    if remote(environ):
+        if not environ.get("LEDGER_URL"):
+            raise SystemExit("a remote ledger client needs LEDGER_URL, the address of the hive ledger server")
+        return environ["LEDGER_URL"].rstrip("/")
+    host, port = address(environ)
     return f"http://{host}:{port}"
+
+
+def remote(environ=os.environ) -> bool:
+    return environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local"
 
 
 def shared_directory(environ=os.environ) -> bool:
