@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
-from hooks.classifier import decide, decision_log
+from hooks.classifier import code_rules, decide, decision_log
 from hooks.classifier.definitions import Definition, DefinitionError, QuestionSpec, load
 from hooks.classifier.questions import Choice, Question, YesNo, validate
 from hooks.classifier.result import Answer, DecisionResult
@@ -113,7 +113,9 @@ def run(
         with decision_log.record_context(definition=name):
             decision_log.append(name, state, None, 0, [decision_log.failure_record("definition", exc)])
         raise
-    questions = questions_for(definition, params)
+    rule = code_rules.rule_for(definition)
+    params = {} if params is None else params
+    questions = questions_for(definition, params) if rule is None else rule.questions(definition, state, params)
     options = {
         "purpose": definition.purpose,
         "harness": harness,
@@ -125,9 +127,10 @@ def run(
         options = {key: value for key, value in options.items() if value is not None}
     with decision_log.record_context(definition=definition.name, definition_digest=definition.digest):
         result = decider(state, questions, **options)
-    verdicts = (
-        {}
-        if definition.rule.type == "code"
-        else {key: _verdict(answer, definition) for key, answer in result.answers.items()}
-    )
+    if rule is not None:
+        verdicts = rule.verdicts(definition, state, params, result.answers)
+    elif definition.rule.type == "code":
+        verdicts = {}
+    else:
+        verdicts = {key: _verdict(answer, definition) for key, answer in result.answers.items()}
     return RunResult(verdicts, result, definition)
