@@ -10,7 +10,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from scripts.inbox.seats import seat_address
-from scripts.inbox.store import InboxStore
 from scripts.swarm import control_notifications, incidents, ledger_host, notice_text, time_left
 from scripts.swarm.ledger_client import LedgerGone, LedgerRefused
 from scripts.swarm.store import MASTER, SwarmError
@@ -135,9 +134,10 @@ def observe(
     if sample is None:
         return []
     incidents.step(store.redis, "ledger", sample.slow)
-    incidents.deliver(
-        store.redis, "ledger", _raised(sample, (facts or ledger_host.facts)()), CLEARED.format(took=sample.took())
-    )
+    active = store.redis.hget(incidents.key("ledger"), "active") == "1"
+    text = _raised(sample, (facts or ledger_host.facts)()) + PAUSED if active else CLEARED.format(took=sample.took())
+    incidents.mail(store.redis, "ledger", master_address(store, slug), text, not active)
+    incidents.deliver(store.redis, "ledger", "The ledger is slow or unavailable.", CLEARED.format(took=sample.took()))
     held = state(store, slug)
     slow = held.get("slow", 0) + 1 if sample.slow else 0
     fast = 0 if sample.slow else held.get("fast", 0) + 1
@@ -145,13 +145,13 @@ def observe(
     actions, notices = [], held.get("notices", [])
     if not held.get("alert") and slow >= PASSES:
         text = _raised(sample, (facts or ledger_host.facts)())
-        InboxStore(store.redis).send(SENDER, master_address(store, slug), text + PAUSED)
+        incidents.mail(store.redis, "ledger", master_address(store, slug), text + PAUSED)
         notices = [*notices, for_operator(text)]
         held.update(alert=True, raised_at=now_ms)
         actions.append("raised the ledger slow alert")
     elif held.get("alert") and fast >= PASSES:
         text = CLEARED.format(took=sample.took())
-        InboxStore(store.redis).send(SENDER, master_address(store, slug), text, fyi=True)
+        incidents.mail(store.redis, "ledger", master_address(store, slug), text, True)
         notices = [*notices, for_operator(text)]
         held.update(alert=False)
         actions.append("cleared the ledger slow alert")

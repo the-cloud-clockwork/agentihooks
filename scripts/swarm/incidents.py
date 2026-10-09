@@ -1,8 +1,6 @@
 import socket
 import sys
 
-from redis.exceptions import RedisError
-
 from scripts.inbox.store import InboxStore
 from scripts.swarm import push
 from scripts.swarm.store import PREFIX
@@ -22,6 +20,19 @@ if count >= 2 and ARGV[1] ~= tostring(active) then
     redis.call('RPUSH', KEYS[2], event)
 end
 return event
+"""
+
+
+MAIL = """
+local generation = tonumber(redis.call('HGET', KEYS[1], 'generation') or '0')
+local active = redis.call('HGET', KEYS[1], 'active') == '1'
+local field = ARGV[1]
+if field == 'raised' and not active then generation = generation + 1 end
+local value = tostring(generation)
+if field == 'resolved' and redis.call('HGET', KEYS[2], 'raised') ~= value then return 0 end
+if redis.call('HGET', KEYS[2], field) == value then return 0 end
+redis.call('HSET', KEYS[2], field, value)
+return 1
 """
 
 
@@ -49,18 +60,16 @@ def deliver(redis, kind: str, raised: str, resolved: str) -> None:
 
 def mail(redis, kind: str, address: str, text: str, resolved: bool = False) -> bool:
     root = key(kind)
-    generation = int(redis.hget(root, "generation") or 0)
-    raised_key = f"{root}:mail:{address}:{generation}"
-    if resolved and not redis.exists(raised_key):
-        return False
-    mail_key = f"{raised_key}:resolved" if resolved else raised_key
-    if not redis.set(mail_key, 1, nx=True, ex=86400):
+    field = "resolved" if resolved else "raised"
+    if not redis.eval(MAIL, 2, root, f"{root}:mail:{address}", field):
         return False
     InboxStore(redis).send("swarm", address, text, fyi=resolved)
     return True
 
 
 def host_pressure(store, slug: str) -> list[str]:
+    from redis.exceptions import RedisError
+
     from scripts.swarm import host_budget, ledger_probe
 
     try:

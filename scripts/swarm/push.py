@@ -1,10 +1,10 @@
 import os
 import sys
 
-import requests
-
 
 def send(channel: str, message: str) -> bool:
+    import requests
+
     url = os.environ.get("AGENTIHOOKS_PUSH_URL")
     token = os.environ.get("AGENTIHOOKS_PUSH_TOKEN")
     if not url or not token:

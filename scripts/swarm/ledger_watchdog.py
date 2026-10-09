@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import ledger_host, ledger_probe, time_left
+from scripts.swarm import incidents, ledger_host, ledger_probe, time_left
 from scripts.swarm.ledger_client import LedgerGone, LedgerRefused
 from scripts.swarm.store import PREFIX
 from scripts.swarm_ledger import server_code
@@ -207,8 +207,11 @@ def watch(store, slug: str, ledger, runtime, host: Host | None = None) -> list[s
         return []
     kind, reason = found
     if error := restart(host, pid, command):
+        text = DOWN_TEXT.format(why=reason, error=error)
+        incidents.step(store.redis, "ledger", True)
+        incidents.deliver(store.redis, "ledger", text, "The ledger answers fast again.")
         if store.redis.get(DOWN_KEY) != str(pid):
-            _mail(store, slug, DOWN_TEXT.format(why=reason, error=error))
+            incidents.mail(store.redis, "ledger", ledger_probe.master_address(store, slug), text)
             store.redis.set(DOWN_KEY, pid, px=DOWN_MS)
         return [f"the ledger server needed a restart because {reason}, and the restart failed: {error}"]
     store.redis.set(STARTED_KEY, str(ledger_host.server_pid(host.folder)))
