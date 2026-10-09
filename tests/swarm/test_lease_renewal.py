@@ -4,6 +4,8 @@ import pytest
 
 from scripts.swarm import controller, lease
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
+from tests.swarm.test_cli import env, run  # noqa: F401
+from tests.swarm.test_delivery import FakeHerdr
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
@@ -68,7 +70,7 @@ def test_renew_retries_a_conflicting_transaction(store, clock, monkeypatch):
         def commit():
             if conflicts:
                 conflicts.pop()
-                store.redis.set(store.key("sw", "control-owner"), store.redis.get(store.key("sw", "control-owner")))
+                store.redis.pexpire(store.key("sw", "control-owner"), lease.TTL_MS)
             return execute()
 
         pipe.execute = commit
@@ -87,13 +89,19 @@ def test_a_tick_slower_than_the_lease_keeps_writing(store, clock):
         store, "sw", held, SimpleNamespace(update_task=lambda *args: writes.append(args) or "accepted")
     )
     runtime = controller.FencedRuntime(
-        store, "sw", held, SimpleNamespace(has_capacity=lambda saved: True, spawn=lambda *args: "placed"), True
+        store,
+        "sw",
+        held,
+        SimpleNamespace(has_capacity=lambda saved: True, spawn=lambda *args: "placed", retire=lambda agent: True),
+        True,
     )
     for step in range(5):
         clock[0] += 120000
         assert ledger.update_task("sw", "t", {"step": step}) == "accepted"
     assert clock[0] - 1000 > lease.TTL_MS
     assert runtime.has_capacity(store.config("sw")) is True
+    clock[0] += 120000
+    assert runtime.retire("one") is True
     clock[0] += 120000
     assert runtime.spawn(store.config("sw"), "eng", "one", {"id": "t"}) == "placed"
     assert len(writes) == 5
@@ -106,7 +114,7 @@ def test_a_tick_whose_lease_was_stolen_stops(store, clock):
     writes, spawned = [], []
     ledger = controller.FencedLedger(store, "sw", held, SimpleNamespace(update_task=lambda *args: writes.append(args)))
     runtime = controller.FencedRuntime(
-        store, "sw", held, SimpleNamespace(spawn=lambda *args: spawned.append(args)), True
+        store, "sw", held, SimpleNamespace(spawn=lambda *args: spawned.append(args), retire=spawned.append), True
     )
     ledger.update_task("sw", "t", {"step": 0})
     clock[0] += lease.TTL_MS
@@ -114,6 +122,7 @@ def test_a_tick_whose_lease_was_stolen_stops(store, clock):
     for write in (
         lambda: ledger.update_task("sw", "t", {"step": 1}),
         lambda: runtime.spawn(store.config("sw"), "eng", "one", {"id": "t"}),
+        lambda: runtime.retire("one"),
     ):
         with pytest.raises(SwarmError) as error:
             write()
@@ -121,3 +130,22 @@ def test_a_tick_whose_lease_was_stolen_stops(store, clock):
     assert len(writes) == 1
     assert spawned == []
     assert lease.current(store, "sw") == stolen
+
+
+def test_run_tick_slower_than_the_lease_finishes(env, clock, monkeypatch):  # noqa: F811
+    from scripts.swarm import cli
+
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    started = clock[0]
+
+    def slow(*args):
+        clock[0] += 120000
+        return []
+
+    monkeypatch.setattr(cli.phase_planning, "planning_pass", slow)
+    monkeypatch.setattr(cli.wake, "wake_pass", slow)
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert clock[0] - started > lease.TTL_MS
+    assert lease.current(store, "sw").epoch == 1
+    assert store.redis.get(store.key("sw", "last-tick"))

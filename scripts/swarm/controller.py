@@ -32,7 +32,15 @@ class FencedRuntime:
         self.runtime, self.spawning = runtime, spawning
 
     def __getattr__(self, name):
-        return getattr(self.runtime, name)
+        value = getattr(self.runtime, name)
+        if not callable(value):
+            return value
+
+        def call(*args, **kwargs):
+            lease.renew(self.store, self.slug, self.held)
+            return value(*args, **kwargs)
+
+        return call
 
     def has_capacity(self, config) -> bool:
         lease.renew(self.store, self.slug, self.held)
