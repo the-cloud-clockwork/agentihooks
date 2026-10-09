@@ -60,32 +60,28 @@ def _git(root: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True, text=True).stdout
 
 
-def _show(root: Path, rev: str, path: str) -> str | None:
-    shown = subprocess.run(["git", "-C", str(root), "show", f"{rev}:{path}"], capture_output=True, text=True)
-    return shown.stdout if shown.returncode == 0 else None
-
-
 def load(root: Path, rev: str) -> tuple[dict[str, dict], dict]:
-    names = _git(root, "ls-tree", "--name-only", f"{rev}:{WORKFLOWS}").split()
+    tracked = _git(root, "ls-tree", "-r", "-z", "--name-only", rev, "--", ".github").split("\0")
     workflows = {
-        name: yaml.safe_load(_show(root, rev, f"{WORKFLOWS}/{name}")) or {}
-        for name in sorted(names)
-        if name.endswith((".yml", ".yaml"))
+        Path(path).name: yaml.safe_load(_git(root, "show", f"{rev}:{path}")) or {}
+        for path in tracked
+        if Path(path).parent == Path(WORKFLOWS) and path.endswith((".yml", ".yaml"))
     }
-    config = _show(root, rev, ci_wiring.CONFIG)
-    return workflows, json.loads(config) if config else {}
+    config = json.loads(_git(root, "show", f"{rev}:{ci_wiring.CONFIG}")) if ci_wiring.CONFIG in tracked else {}
+    return workflows, config
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=f"grade a head's {GATE} wiring with the protected branch's logic")
-    parser.add_argument("--root", type=Path, default=Path.cwd())
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", default=".")
     parser.add_argument("--head", required=True)
     parser.add_argument("--base", default="HEAD")
     args = parser.parse_args(argv)
-    merge_base = _git(args.root, "merge-base", args.base, args.head).strip()
-    base_workflows, _ = load(args.root, merge_base)
-    _, base_config = load(args.root, args.base)
-    head_workflows, head_config = load(args.root, args.head)
+    root = Path(args.root)
+    merge_base = _git(root, "merge-base", args.base, args.head).strip()
+    base_workflows, _ = load(root, merge_base)
+    _, base_config = load(root, args.base)
+    head_workflows, head_config = load(root, args.head)
     problems = grade(base_workflows, base_config, head_workflows, head_config, datetime.now(UTC).date())
     print(f"graded {args.head[:12]} against merge base {merge_base[:12]}: {len(problems)} protected gate problems")
     for problem in problems:

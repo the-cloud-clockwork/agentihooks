@@ -1,7 +1,7 @@
 import copy
 import json
 import subprocess
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -176,7 +176,7 @@ def test_main_grades_the_head_against_its_merge_base(repo, capsys):
     _commit(repo, {"test.yml": later}, {}, "dev moves on")
     assert gate_protected.main(["--root", str(repo), "--head", planted]) == 1
     out = capsys.readouterr().out
-    assert f"graded {planted[:12]} against merge base {base[:12]}" in out
+    assert out.splitlines()[0] == f"graded {planted[:12]} against merge base {base[:12]}: 2 protected gate problems"
     assert "::error::The head's Gate — Required drops the base need lint." in out
     assert "late" not in out
 
@@ -212,15 +212,39 @@ def test_main_reads_declarations_from_the_protected_tip(repo, capsys):
     assert gate_protected.main(["--root", str(repo), "--head", behind]) == 0
 
 
-def test_main_reads_yaml_workflows_only_and_runs_without_a_wiring_file(repo, monkeypatch, capsys):
+def test_main_reads_top_level_workflows_only_and_runs_without_a_wiring_file(repo, monkeypatch, capsys):
     _commit(repo, {"test.yaml": _workflow()}, {}, "base")
     (repo / ".github/gate-wiring.json").unlink()
     (repo / ".github/workflows/README.md").write_text("not a workflow\n")
+    (repo / ".github/workflows/empty.yml").write_text("")
+    nested = {True: {"pull_request": None}, "jobs": {"fake": {"name": "Gate — Required"}}}
+    (repo / ".github/workflows/old").mkdir()
+    (repo / ".github/workflows/old/gate.yml").write_text(yaml.safe_dump(nested, allow_unicode=True))
     _git(repo, "add", "-A", ".github")
-    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "readme")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "extras")
     monkeypatch.chdir(repo)
     assert gate_protected.main(["--head", "HEAD"]) == 0
     assert "0 protected gate problems" in capsys.readouterr().out
+
+
+def test_main_needs_a_head():
+    with pytest.raises(SystemExit):
+        gate_protected.main([])
+
+
+def test_main_grades_expiry_on_the_utc_date(repo, monkeypatch):
+    _commit(repo, {"test.yml": _workflow()}, {}, "base")
+    zones = []
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            zones.append(tz)
+            return datetime(2026, 10, 9, tzinfo=tz)
+
+    monkeypatch.setattr(gate_protected, "datetime", Clock)
+    assert gate_protected.main(["--root", str(repo), "--head", "HEAD"]) == 0
+    assert zones == [UTC]
 
 
 def test_main_refuses_an_unknown_head(repo):
