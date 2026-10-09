@@ -207,10 +207,17 @@ def test_memory_scans_nested_keys_and_multiline_values(tmp_path, entry):
         banner.assert_not_called()
 
 
-def test_memory_preserves_separate_safe_fields(tmp_path):
+@pytest.mark.parametrize("empty", ["", None])
+def test_memory_preserves_separate_safe_fields(tmp_path, empty):
     from hooks import tool_memory
 
-    entry = {"tool": "Bash", "error": "Error: unavailable", "input": "PASSWORD=", "session": "safe session"}
+    entry = {
+        "tool": "Bash",
+        "error": "Error: unavailable",
+        "input": "PASSWORD=",
+        "session": "safe session",
+        "metadata": {"PASSWORD": empty},
+    }
     memory = tmp_path / "memory.ndjson"
     with patch.object(tool_memory, "MEMORY_PATH", memory):
         tool_memory._append_entry(entry)
@@ -237,6 +244,30 @@ def test_transcript_preserves_safe_errors_after_credentials(tmp_path):
         entries = tool_memory._read_entries()
         assert len(entries) == 1
         assert entries[0]["error"] == "Error: unavailable"
+
+
+@pytest.mark.parametrize("value", [1234, 12.5, True])
+def test_memory_drops_scalar_credential_fields(tmp_path, value):
+    from hooks import tool_memory
+
+    entry = {"tool": "Bash", "error": "Error: unavailable", "metadata": {"PASSWORD": value}}
+    memory = tmp_path / "memory.ndjson"
+    with patch.object(tool_memory, "MEMORY_PATH", memory), patch("hooks.common.inject_banner") as banner:
+        tool_memory._append_entry(entry)
+        assert not memory.exists(), "scalar credential field was stored"
+        memory.write_text(json.dumps(entry) + "\n")
+        tool_memory.inject_memory()
+        banner.assert_not_called()
+
+
+def test_memory_preserves_guidance_after_empty_assignment(tmp_path):
+    from hooks import tool_memory
+
+    entry = {"tool": "Bash", "error": "PASSWORD=\nsafe guidance"}
+    memory = tmp_path / "memory.ndjson"
+    with patch.object(tool_memory, "MEMORY_PATH", memory):
+        tool_memory._append_entry(entry)
+        assert tool_memory._read_entries() == [entry]
 
 
 class TestIsErrorExplicitStatus:

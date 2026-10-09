@@ -163,12 +163,12 @@ def _contains_secret(value: object) -> bool:
         return any(
             _contains_secret(key)
             or _contains_secret(item)
-            or (isinstance(item, str) and _contains_secret(f"{key}={item}"))
+            or (isinstance(item, (str, int, float)) and _contains_secret(f"{key}={item}"))
             for key, item in value.items()
         )
     if isinstance(value, (list, tuple)):
         return any(_contains_secret(item) for item in value)
-    return isinstance(value, str) and redact(value, mode="memory") != value
+    return isinstance(value, str) and any(redact(line, mode="memory") != line for line in value.splitlines())
 
 
 # ---------------------------------------------------------------------------
