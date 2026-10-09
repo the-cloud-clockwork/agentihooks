@@ -521,7 +521,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 .sw-table td { padding: 6px 10px 6px 0; border-top: 1px solid var(--rule); color: var(--text); white-space: nowrap; }
 .sw-table th:last-child, .sw-table td:last-child { padding-right: 0; }
 .sw-table tbody tr:hover td { background: var(--hover); transition: background-color .15s cubic-bezier(.4, 0, .2, 1); }
-.sw-table .r, #agents-table td:nth-child(7), #quota-table td:nth-child(n+4):nth-child(-n+9) { text-align: right; }
+.sw-table .r, #agents-table td:nth-child(7), #quota-table td:nth-child(n+5):nth-child(-n+12) { text-align: right; }
 .sw-table a { color: inherit; text-decoration: none; }
 .sw-table a:hover, .sw-table a:focus-visible { color: var(--accent); }
 #agents-table th, #agents-table td { padding-right: 6px; }
@@ -542,6 +542,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 #health-table .hl-pick { field-sizing: content; }
 #health-table .hl-note { field-sizing: content; min-width: 8ch; max-width: 32ch; }
 #health-table .hl-note::placeholder { color: var(--muted); }
+.sw-fold { margin: 0; }
 .sw-fold > summary.sw-blockhead { display: flex; justify-content: flex-start; gap: 10px; }
 .sw-fold > summary .sw-count { margin-left: auto; }
 .sw-ovl-row { display: grid; grid-template-columns: 10ch minmax(0, 1fr); gap: var(--space-row); align-items: center; padding: 4px 0; border-top: 1px solid var(--rule); }

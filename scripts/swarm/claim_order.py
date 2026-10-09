@@ -1,4 +1,5 @@
-"""Claim order of ready tasks: rank, then a small task that clears work fast, then critical path depth.
+"""Claim order of ready tasks: rank, then a task resuming earlier work, then a small task that clears work fast,
+then critical path depth.
 
 Phase order is never used; ledger order breaks the remaining ties.
 """
@@ -11,9 +12,18 @@ def key(rows: dict):
     depth = depths(rows)
 
     def task_key(task):
-        return (ledger_rank.order(task), not _fast_clear(task, rows, waiting), -depth[task["id"]])
+        return (
+            ledger_rank.order(task),
+            not resumed(task),
+            not _fast_clear(task, rows, waiting),
+            -depth[task["id"]],
+        )
 
     return task_key
+
+
+def resumed(task: dict) -> bool:
+    return bool(task.get("branch") or task.get("pr_url") or task.get("parked_on"))
 
 
 def depths(rows: dict) -> dict[str, int]:
