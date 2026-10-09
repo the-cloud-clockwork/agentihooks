@@ -55,13 +55,13 @@ def _sliced_task(doc: dict, slug: str, task_id: str | None) -> dict:
     task = next((t for t in doc.get("tasks", []) if t.get("id") == task_id), None)
     if task is None:
         raise ValueError(f"no task {task_id} in ledger {slug}")
-    if not task.get("plan_lines"):
-        raise ValueError(f"task {task_id} has no plan lines")
     return task
 
 
 def read(doc: dict, slug: str, task_id: str | None, phase_id: str | None) -> str:
     task = {} if phase_id else _sliced_task(doc, slug, task_id)
+    if not phase_id and not task.get("plan_lines"):
+        return f"This task has no plan lines; its description is the whole spec.\n\n{task.get('description', '')}\n"
     from scripts.swarm_ledger import plan_packages
 
     phase_id = phase_id or task.get("phase")
