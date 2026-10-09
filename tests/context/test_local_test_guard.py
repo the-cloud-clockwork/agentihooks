@@ -1,5 +1,6 @@
 import pytest
 
+from hooks.context.shell_commands import commands
 from hooks.hook_manager import BlockAction
 
 pytestmark = pytest.mark.unit
@@ -9,6 +10,11 @@ RUNNERS = [
     "/venv/bin/pytest",
     "$V/pytest",
     "python -m pytest",
+    "python -mpytest",
+    "python -m coverage run -m pytest",
+    "python -c'import pytest; pytest.main()'",
+    "bash <<'EOF'\npytest\nEOF",
+    "python - <<'PY'\nimport pytest\npytest.main()\nPY",
     "python3 -I -m unittest discover",
     "uv run pytest",
     "uv run --project app python -m pytest",
@@ -70,6 +76,8 @@ WRAPPERS = [
     "nice --adjustment=10 {}",
     "env -i -u UNUSED FOO=bar {}",
     "FOO=bar {}",
+    "env -S '{}'",
+    "env --split-string='{}'",
     "command -- {}",
     "nohup {}",
     "timeout --foreground 30s sudo -n nice -n 5 env FOO=bar {}",
@@ -91,6 +99,7 @@ def test_wrapped_test_commands_are_blocked(wrapper, monkeypatch):
     from hooks.context.local_test_guard import check_local_tests
 
     monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    assert ["pytest", "-q"] in commands(wrapper.format("pytest -q"))
     with pytest.raises(BlockAction):
         check_local_tests({"tool_name": "Bash", "tool_input": {"command": wrapper.format("pytest -q")}})
 
@@ -150,6 +159,12 @@ def test_later_commands_and_substitutions_are_checked(monkeypatch):
     from hooks.context.local_test_guard import check_local_tests
 
     monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
-    for command in ["echo ok && pytest", "echo $(pytest)", "echo `pytest`", "if true; then pytest; fi"]:
+    for command in [
+        "echo ok && pytest",
+        "echo $(pytest)",
+        'echo "$(pytest)"',
+        "echo `pytest`",
+        "if true; then pytest; fi",
+    ]:
         with pytest.raises(BlockAction):
             check_local_tests({"tool_name": "Bash", "tool_input": {"command": command}})

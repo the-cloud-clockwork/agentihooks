@@ -1168,6 +1168,24 @@ def _plan_read_guard(payload: dict, tool_name: str) -> None:
         log("plan_read_guard failed", {"error": str(e)})
 
 
+def _check_shell_guards(payload: dict) -> None:
+    from hooks.context.local_test_guard import check_local_tests
+
+    check_local_tests(payload)
+    if payload.get("tool_name") != "Bash":
+        return
+    try:
+        from hooks.context.branch_guard import check_branch_guard, check_commit_on_main
+
+        check_branch_guard(payload)
+        check_commit_on_main(payload)
+    except BlockAction:
+        raise
+    except Exception as e:
+        log("branch_guard check failed", {"error": str(e)})
+        print(f"WARNING: branch_guard check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
+
+
 def on_pre_tool_use(payload: dict) -> None:
     """Handle PreToolUse event."""
     from hooks.config import SECRETS_MODE
@@ -1387,25 +1405,7 @@ def on_pre_tool_use(payload: dict) -> None:
         except Exception as e:
             log("version_guard check failed", {"error": str(e)})
 
-    # --- Branch guard: block git operations targeting main/master ---
-    if tool_name == "Bash":
-        try:
-            from hooks.context.branch_guard import (
-                check_branch_guard,
-                check_commit_on_main,
-            )
-
-            check_branch_guard(payload)
-            check_commit_on_main(payload)
-        except BlockAction:
-            raise
-        except Exception as e:
-            log("branch_guard check failed", {"error": str(e)})
-            print(
-                f"WARNING: branch_guard check failed ({e}) — guard bypassed",
-                file=sys.stderr,
-                flush=True,
-            )
+    _check_shell_guards(payload)
 
     # --- kubectl mutation guard: HARD FLOOR — block live-system state mutation ---
     if tool_name == "Bash":

@@ -8,7 +8,7 @@ _PREFIXES = frozenset({"if", "then", "else", "elif", "do", "while", "until", "!"
 _WRAPPERS = {
     "sudo": {"-u", "-g", "-h", "-p", "-C", "-T", "-R", "-D", "--user", "--group", "--host", "--prompt"},
     "nice": {"-n", "--adjustment"},
-    "env": {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"},
+    "env": {"-u", "--unset", "-C", "--chdir"},
     "timeout": {"-s", "--signal", "-k", "--kill-after"},
     "time": {"-f", "--format", "-o", "--output"},
     "exec": {"-a"},
@@ -31,6 +31,7 @@ _SHELL_FLAG = re.compile(r"^-[A-Za-z]*c[A-Za-z]*$")
 _HEREDOC = re.compile(r"<<-?\s*['\"]?(\w+)['\"]?.*?\n\1\b", re.DOTALL)
 _SINGLE_QUOTED = re.compile(r"'[^']*'")
 _BACKTICKS = re.compile(r"`([^`]+)`")
+_SUBSTITUTIONS = re.compile(r"\$\(([^()]*)\)")
 
 
 def _options(tokens: list[str], valued: set[str]) -> list[str]:
@@ -43,17 +44,25 @@ def _options(tokens: list[str], valued: set[str]) -> list[str]:
     return tokens
 
 
+def _env_split(tokens: list[str]) -> list[str]:
+    for index, token in enumerate(tokens):
+        if token in {"-S", "--split-string"} and index + 1 < len(tokens):
+            return tokens[:index] + shlex.split(tokens[index + 1]) + tokens[index + 2 :]
+        if token.startswith("--split-string="):
+            return tokens[:index] + shlex.split(token.split("=", 1)[1]) + tokens[index + 1 :]
+    return tokens
+
+
 def unwrap(tokens: list[str]) -> list[str]:
     while tokens:
         name = Path(tokens[0]).name
         if _ASSIGNMENT.match(tokens[0]) or name in _PREFIXES:
             tokens = tokens[1:]
         elif name in _WRAPPERS:
-            tokens = _options(tokens[1:], _WRAPPERS[name])
+            rest = _env_split(tokens[1:]) if name == "env" else tokens[1:]
+            tokens = _options(rest, _WRAPPERS[name])
             if name == "timeout":
                 tokens = tokens[1:]
-            if name == "env" and tokens and " " in tokens[0]:
-                tokens = shlex.split(tokens[0]) + tokens[1:]
         elif name in {"npx", "uvx"}:
             tokens = _options(tokens[1:], _LAUNCH_OPTIONS)
         elif name in _LAUNCHERS:
@@ -77,14 +86,28 @@ def _expand(tokens: list[str], depth: int) -> list[list[str]]:
     return [tokens]
 
 
+def _heredocs(command: str, depth: int) -> tuple[str, list[list[str]]]:
+    result = []
+    for match in _HEREDOC.finditer(command):
+        prefix = command[: match.start()].rsplit("\n", 1)[-1]
+        body = match[0].split("\n", 1)[1].rsplit("\n", 1)[0]
+        for tokens in commands(prefix, depth + 1):
+            name = Path(tokens[0]).name
+            if name in _SHELLS:
+                result.extend(commands(body, depth + 1))
+            elif re.fullmatch(r"python[\d.]*|pypy[\d.]*", name):
+                result.append([name, "-c", body])
+    return _HEREDOC.sub("", command), result
+
+
 def commands(command: str, depth: int = 0) -> list[list[str]]:
     if depth > 10:
         raise ValueError("Shell wrapper nesting exceeds ten levels")
-    command = _HEREDOC.sub("", command)
+    command, heredoc_commands = _heredocs(command, depth)
     lexer = shlex.shlex(command, posix=True, punctuation_chars=_SEPARATORS)
     lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
-    result, words = [], []
+    result, words = heredoc_commands, []
     for token in lexer:
         if token and not token.strip(_SEPARATORS):
             result.extend(_expand(words, depth))
@@ -92,6 +115,8 @@ def commands(command: str, depth: int = 0) -> list[list[str]]:
         else:
             words.append(token)
     result.extend(_expand(words, depth))
-    for match in _BACKTICKS.finditer(_SINGLE_QUOTED.sub("", command)):
-        result.extend(commands(match[1], depth + 1))
+    executable = _SINGLE_QUOTED.sub("", command)
+    for pattern in (_BACKTICKS, _SUBSTITUTIONS):
+        for match in pattern.finditer(executable):
+            result.extend(commands(match[1], depth + 1))
     return result

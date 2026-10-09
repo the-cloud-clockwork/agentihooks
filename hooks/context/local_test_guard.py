@@ -61,7 +61,7 @@ _BUILD_TOOLS = frozenset(
         "hatch",
     }
 )
-_TEST_TASK = re.compile(r"^(?:test|tests|check|coverage|mutation)(?:$|[:_.-])|^.*:test$")
+_TEST_TASK = re.compile(r"^(?:test|tests|coverage|mutation)(?:$|[:_.-])|^.*:test$")
 _PYTHON = re.compile(r"^(?:python[\d.]*|pypy[\d.]*)$")
 _PYTHON_TEST = re.compile(r"\b(?:pytest|unittest|tox|nox|mutmut|mutatest|mutpy)\b|scripts\.ci_mutation\b")
 _NODE_TEST = re.compile(r"\b(?:jest|vitest|mocha)\b|require\(['\"]node:test['\"]\)")
@@ -76,10 +76,12 @@ def local_tests_allowed() -> bool:
 
 
 def _python_test(args: list[str]) -> bool:
-    for flag in ("-m", "-c"):
-        if flag in args:
-            index = args.index(flag) + 1
-            return index < len(args) and bool(_PYTHON_TEST.search(args[index]))
+    for index, arg in enumerate(args):
+        if arg in {"-m", "-c"}:
+            if index + 1 < len(args) and _PYTHON_TEST.search(args[index + 1]):
+                return True
+        elif arg.startswith(("-m", "-c")) and _PYTHON_TEST.search(arg[2:]):
+            return True
     return any(Path(arg).name.startswith(("test_", "test-")) and arg.endswith(".py") for arg in args)
 
 

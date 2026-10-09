@@ -318,9 +318,6 @@ def check_branch_guard(payload: dict) -> None:
     Only checks the actual command portion — strips heredoc bodies and
     quoted commit messages to avoid false positives on message content.
     """
-    from hooks.context.local_test_guard import check_local_tests
-
-    check_local_tests(payload)
     tool_input = payload.get("tool_input", {})
     command = tool_input.get("command", "")
 
