@@ -188,11 +188,12 @@ def _overrides(package: Definition, selected: Definition) -> None:
             raise DefinitionError("code rule overrides must preserve package question keys")
 
 
-def _environment(definition: Definition) -> Definition:
+def _environment(definition: Definition, environ: dict | None = None) -> Definition:
+    environ = os.environ if environ is None else environ
     prefix = f"AGENTIHOOKS_CLASSIFIER_{definition.name.upper().replace('-', '_')}_"
     thresholds = dict(definition.thresholds)
     for key, value in thresholds.items():
-        raw = os.environ.get(prefix + key.upper().replace("-", "_"))
+        raw = environ.get(prefix + key.upper().replace("-", "_"))
         if raw is not None:
             try:
                 value = float(raw)
@@ -202,7 +203,7 @@ def _environment(definition: Definition) -> Definition:
     return replace(definition, thresholds=thresholds)
 
 
-def load(name: str) -> Definition:
+def load(name: str, *, environ: dict | None = None) -> Definition:
     name = _identifier(name, "classifier name")
     paths = _paths(name)
     existing = [path for path in paths if path.is_file()]
@@ -211,6 +212,6 @@ def load(name: str) -> Definition:
     definition = _read(name, existing[-1])
     if paths[0].is_file() and existing[-1] != paths[0]:
         _overrides(_read(name, paths[0]), definition)
-    definition = _environment(definition)
+    definition = _environment(definition, environ)
     digest = hashlib.sha256(json.dumps(asdict(definition), sort_keys=True).encode()).hexdigest()
     return replace(definition, digest=digest)

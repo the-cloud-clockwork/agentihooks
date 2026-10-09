@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 from hooks.classifier import decide, decision_log
@@ -78,11 +79,19 @@ def _verdict(answer: Answer, definition: Definition) -> object:
     return answer.choice if rule.type == "choice" else answer.score
 
 
-def run(name: str, state: object, params: dict | None = None, harness: str | None = None) -> RunResult:
-    definition = load(name)
+def run(
+    name: str,
+    state: object,
+    params: dict | None = None,
+    harness: str | None = None,
+    *,
+    decider: Callable[..., DecisionResult] | None = None,
+    environ: dict | None = None,
+) -> RunResult:
+    definition = load(name, environ=environ)
     questions = questions_for(definition, params)
     with decision_log.record_context(definition=definition.name, definition_digest=definition.digest):
-        result = decide(
+        result = (decide if decider is None else decider)(
             state,
             questions,
             purpose=definition.purpose,
