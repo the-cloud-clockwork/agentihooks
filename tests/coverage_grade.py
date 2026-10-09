@@ -82,11 +82,21 @@ def pair_moves(
     return pairs
 
 
+def _module_definitions(source: str) -> dict[str, ast.AST]:
+    pending = list(ast.parse(source).body)
+    defined = {}
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            defined[node.name] = node
+        else:
+            pending.extend(ast.iter_child_nodes(node))
+    return defined
+
+
 @functools.lru_cache(maxsize=512)
 def _split_map(old: str, new: str) -> dict[int, int]:
-    kinds = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
-    old_nodes = {node.name: node for node in ast.parse(old).body if isinstance(node, kinds)}
-    new_nodes = {node.name: node for node in ast.parse(new).body if isinstance(node, kinds)}
+    old_nodes, new_nodes = _module_definitions(old), _module_definitions(new)
     old_lines, new_lines = old.splitlines(), new.splitlines()
     mapped = {}
     for name in old_nodes.keys() & new_nodes.keys():

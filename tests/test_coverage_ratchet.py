@@ -174,6 +174,18 @@ def test_split_classes_keep_same_named_methods_with_their_own_class(missing):
     assert result.lost == ({} if missing is None else {"hooks/old.py": [3 if missing == "First" else 7]})
 
 
+def test_split_definitions_inside_module_conditionals_keep_their_coverage():
+    sources = {
+        "hooks/first.py": "if True:\n    def first():\n        return 1\n",
+        "hooks/second.py": "def second():\n    return 2\n",
+    }
+    old = "\n".join(sources.values())
+    base = _measure("b1", {"hooks/old.py": {1, 2, 3, 5, 6}}, {"hooks/old.py": old})
+    moved = ratchet.pair_moves({"hooks/old.py": old}, sources, sources.values())
+    result = ratchet.grade({"hooks/first.py": {1, 2}, "hooks/second.py": {1, 2}}, sources.get, iter([base]), moved)
+    assert result.lost == {"hooks/old.py": [3]}
+
+
 def test_a_line_older_runs_missed_after_an_even_older_run_covered_it_is_cleared():
     runs = [
         _measure("b1", {"hooks/a.py": {1, 2, 3}}, {"hooks/a.py": SOURCE}),
