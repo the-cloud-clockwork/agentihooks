@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -135,6 +136,7 @@ def full_source(reuse_repo, tmp_path):
         "#!/usr/bin/env python3\n"
         "import base64, json, os, sys\n"
         "from pathlib import Path\n"
+        "if sys.argv[1] != 'api': sys.exit(2)\n"
         "value = json.loads(Path(os.environ['REUSE_FIXTURE']).read_text())[sys.argv[2]]\n"
         "if 'binary' in value: sys.stdout.buffer.write(base64.b64decode(value['binary']))\n"
         "else: print(json.dumps(value))\n"
@@ -378,3 +380,23 @@ def test_missing_required_command_input_is_rejected(option, reuse_repo, tmp_path
         with pytest.raises(SystemExit) as caught:
             ci_reuse.main(args)
     assert caught.value.code == 2
+
+
+def test_cached_proof_commits_do_not_fetch_from_the_network(full_source, tmp_path):
+    root, base, _, queue, env, _, _ = full_source
+    real = shutil.which("git")
+    trace = tmp_path / "git-commands.jsonl"
+    wrapper = Path(env["PATH"].split(":")[0]) / "git"
+    wrapper.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        f"with Path({str(trace)!r}).open('a') as stream: stream.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        f"os.execv({real!r}, [{real!r}, *sys.argv[1:]])\n"
+    )
+    wrapper.chmod(0o755)
+    result = invoke(root, base, queue, "merge_group", tmp_path / "cached.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=true" in result.stdout
+    commands = [json.loads(line) for line in trace.read_text().splitlines()]
+    assert not any(command[0] == "fetch" for command in commands)
