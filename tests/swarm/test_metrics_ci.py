@@ -134,6 +134,7 @@ def test_a_stage_without_a_budget_or_a_started_job_records_zero():
     jobs = [
         {**_job(14, "custom", "00:40", "00:41", "01:00"), "started_at": None},
         _job(15, "custom (2)", "00:40", "02:00", "03:00", "skipped"),
+        _job(16, "custom (3)", "00:40", "00:40", "01:00"),
     ]
     (stage,) = metrics_ci.rows("sw", RUN, jobs, {})[metrics_ci.STAGES]
     assert (stage["stage"], stage["budget"], stage["pickup_s"]) == ("custom", 0, 0.0)
@@ -148,11 +149,12 @@ def spool(tmp_path, monkeypatch):
 
 def test_ship_appends_rows_to_the_outbox_and_flushes(spool, monkeypatch):
     sent = []
-    monkeypatch.setattr(metrics_outbox, "post", lambda sink, query, body: sent.append((query, body)) or True)
+    monkeypatch.setattr(metrics_outbox, "post", lambda sink, query, body: sent.append((query, body, sink.url)) or True)
     rows = metrics_ci.rows("sw", RUN, JOBS, {11: LOG})
     env = {metrics_outbox.URL_ENV: "http://ch", metrics_outbox.USER_ENV: "ins"}
     assert metrics_ci.ship(1_791_530_600_000, rows, env) == []
-    inserts = [body for query, body in sent if query.startswith("INSERT INTO swarm.ci_failures")]
+    assert {url for _, _, url in sent} == {"http://ch"}
+    inserts = [body for query, body, _ in sent if query.startswith("INSERT INTO swarm.ci_failures")]
     assert [json.loads(line)["test_id"] for line in inserts[0].decode().splitlines()] == [
         "tests/a_test.py::test_spool",
         "tests/b_test.py::test_key",

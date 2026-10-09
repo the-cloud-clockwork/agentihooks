@@ -54,9 +54,9 @@ def _base(slug, item, ts_ms, event_id):
     return {"event_id": event_id, "ledger": slug, "ts_ms": ts_ms, **path, "run_id": item["id"]}
 
 
-def _failures(log, job):
+def _failures(log):
     found = {}
-    for test in ci_read.test_results(log, job):
+    for test in ci_read.test_results(log):
         if test["outcome"] == "FAILED":
             test_id, _, message = test["nodeid"].partition(" - ")
             found[test_id] = message or found.get(test_id, "")
@@ -117,7 +117,7 @@ def rows(slug: str, item: dict, jobs: list[dict], logs: dict) -> dict:
         }
         for job in jobs
         if job.get("id") in logs
-        for test_id, message in _failures(logs[job["id"]], job["name"]).items()
+        for test_id, message in _failures(logs[job["id"]]).items()
     ]
     found = {RUNS: [run_row], STAGES: stage_rows, FAILURES: failure_rows}
     for table, table_rows in found.items():

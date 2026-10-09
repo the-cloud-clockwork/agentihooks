@@ -323,9 +323,11 @@ def test_with_the_sink_set_each_finished_pull_request_and_dev_push_run_is_metere
 def test_a_run_over_budget_reads_its_jobs_once_for_the_defect_and_the_rows(swarm, sink):
     store, config, ledger = swarm
     calls = []
-    defects.refresh("sw", config, store, ledger, NOW_MS, run=_gh(calls), environ=SINK)
+    actions = defects.refresh("sw", config, store, ledger, NOW_MS, run=_gh(calls), environ=SINK)
     assert _job_reads(calls).count("repos/{owner}/{repo}/actions/runs/1/jobs?per_page=100") == 1
-    assert len(ledger.added) == 1
+    assert actions == ["filed a ledger follow up for a pull request Tests run over fifteen minutes"]
+    pushes = [kwargs["cwd"] for command, kwargs in calls if "event=push" in command[2]]
+    assert pushes and set(pushes) == {"/repo"}
 
 
 def test_without_the_sink_no_push_runs_or_logs_are_read(swarm):
