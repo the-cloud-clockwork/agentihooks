@@ -336,4 +336,23 @@ def test_a_head_cannot_replace_the_protected_reuse_decision():
     head = copy.deepcopy(base)
     head["jobs"]["reuse"]["steps"] = [{"run": "echo reused=true"}]
     problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
-    assert any("reuse" in problem for problem in problems), problems
+    assert "The head changes the protected reuse job; the protected branch grades with its own." in problems
+
+
+def test_an_unchanged_protected_reuse_producer_stays_accepted():
+    base = _workflow()
+    base["jobs"]["reuse"] = {"runs-on": "ubuntu-latest", "steps": [{"run": "echo legacy"}]}
+    base["jobs"]["gate"]["needs"].append("reuse")
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": copy.deepcopy(base)}, {}, _TODAY) == []
+
+
+def test_removing_the_protected_reuse_producer_names_the_violation():
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["reuse"] = ci_reuse.reuse_job()
+    base["jobs"]["gate"]["needs"].append("reuse")
+    head = copy.deepcopy(base)
+    del head["jobs"]["reuse"]
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    assert "The head removes the protected reuse job." in problems

@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import zipfile
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import pytest
@@ -56,31 +57,33 @@ def reuse_repo(tmp_path, request):
 
 
 def invoke(root, base, head, event, output, env=None):
-    return subprocess.run(
-        [
-            sys.executable,
-            "-I",
-            str(PROGRAM),
-            "--base",
-            base,
-            "--head",
-            head,
-            "--event",
-            event,
-            "--repository",
-            "o/r",
-            "--run",
-            "7",
-            "--attempt",
-            "1",
-            "--record",
-            str(output),
-        ],
-        cwd=root,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    from scripts import ci_reuse
+
+    args = [
+        "--base",
+        base,
+        "--head",
+        head,
+        "--event",
+        event,
+        "--repository",
+        "o/r",
+        "--run",
+        "7",
+        "--attempt",
+        "1",
+        "--record",
+        str(output),
+    ]
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with pytest.MonkeyPatch.context() as patch:
+        patch.chdir(root)
+        patch.delenv("GITHUB_OUTPUT", raising=False)
+        for key, value in (env or {}).items():
+            patch.setenv(key, value)
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            code = ci_reuse.main(args)
+    return subprocess.CompletedProcess(args, code, stdout.getvalue(), stderr.getvalue())
 
 
 @pytest.fixture
@@ -279,3 +282,34 @@ def test_a_source_run_must_be_a_completed_successful_required_run(full_source, t
     result = invoke(root, base, queue, "merge_group", tmp_path / "run.json", env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "reused=false" in result.stdout
+
+
+def test_the_protected_script_runs_in_isolated_cli_mode(reuse_repo, tmp_path):
+    root, base, head, _ = reuse_repo
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            str(PROGRAM),
+            "--base",
+            base,
+            "--head",
+            head,
+            "--event",
+            "pull_request",
+            "--repository",
+            "o/r",
+            "--run",
+            "7",
+            "--attempt",
+            "1",
+            "--record",
+            str(tmp_path / "cli.json"),
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=false" in result.stdout
+    assert json.loads((tmp_path / "cli.json").read_text())["tree"] == git(root, "rev-parse", f"{head}^{{tree}}")
