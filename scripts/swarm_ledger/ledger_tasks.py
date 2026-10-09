@@ -218,7 +218,7 @@ def check_task(task):
 
 
 def _add(doc, op, ctx):
-    op = ledger_plans.with_plan_slice(doc, op)
+    op = ledger_plans.with_slice(doc, ledger_plans.with_plan_slice(doc, op))
     tasks = doc.setdefault("tasks", [])
     if taken := next((t for t in tasks if t["id"] == op["task"]), None):
         ctx.refused.append(
