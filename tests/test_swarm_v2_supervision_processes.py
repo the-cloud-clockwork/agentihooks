@@ -1,5 +1,6 @@
 import os
 import signal
+from pathlib import Path
 
 import pytest
 
@@ -21,6 +22,13 @@ def test_descendants_include_nested_children_without_foreign_processes():
 def test_living_excludes_exporter_tree_and_zombies(monkeypatch):
     table = {2: process(2, 1), 3: process(3, 2), 4: process(4, 1), 5: process(5, 4), 6: process(6, 1, state="Z")}
     monkeypatch.setattr(trees, "processes", lambda: table)
+    original = trees.descendants
+
+    def descendants(root, snapshot):
+        assert snapshot is table
+        return original(root, snapshot)
+
+    monkeypatch.setattr(trees, "descendants", descendants)
     assert trees.living(1, 4) == {2: table[2], 3: table[3]}
     assert trees.living(1) == {pid: table[pid] for pid in (2, 3, 4, 5)}
 
@@ -28,7 +36,12 @@ def test_living_excludes_exporter_tree_and_zombies(monkeypatch):
 def test_send_revalidates_pid_start_and_never_signals_reused_pid(monkeypatch):
     observed = {2: process(2, 1, 12), 3: process(3, 1, 13), 4: process(4, 1, 14)}
     current = {2: process(2, 1, 22), 3: process(3, 1, 13)}
-    monkeypatch.setattr(trees, "_process", lambda pid, path: current.get(pid))
+
+    def observed_process(pid, path):
+        assert path == Path("/proc")
+        return current.get(pid)
+
+    monkeypatch.setattr(trees, "_process", observed_process)
     signals = []
     monkeypatch.setattr(os, "kill", lambda pid, signum: signals.append((pid, signum)))
     trees.send(observed, signal.SIGTERM)
@@ -71,7 +84,12 @@ def test_cleanup_escalates_only_after_deadline(monkeypatch, remaining, expected)
     clock = [0.0]
     monkeypatch.setattr(trees.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(trees.time, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
-    monkeypatch.setattr(trees, "living", lambda root: child if remaining else {})
+
+    def living(root):
+        assert root == 1
+        return child if remaining else {}
+
+    monkeypatch.setattr(trees, "living", living)
     signals = []
     monkeypatch.setattr(trees, "send", lambda table, signum: signals.append((dict(table), signum)))
     observations = []
@@ -79,4 +97,4 @@ def test_cleanup_escalates_only_after_deadline(monkeypatch, remaining, expected)
     assert signals[0] == (child if remaining else {}, signal.SIGTERM)
     assert signals[-1] == (child if remaining else {}, signal.SIGKILL)
     assert observations
-    assert clock[0] >= 0.1 if remaining else clock[0] == 0
+    assert clock[0] == pytest.approx(0.1) if remaining else clock[0] == 0

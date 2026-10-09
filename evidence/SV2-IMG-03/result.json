@@ -295,7 +295,7 @@
   "code_evidence": {
     "issue_url": "https://github.com/the-cloud-clockwork/agentihooks/issues/2046",
     "branch_url": "https://github.com/the-cloud-clockwork/agentihooks/tree/engineer-323133-0786",
-    "pull_request_url": null,
+    "pull_request_url": "https://github.com/the-cloud-clockwork/agentihooks/pull/2095",
     "tested_commit": "26b904d9da9add638ab0a9e7fda355068c579cd7",
     "proof_commit": "26b904d9da9add638ab0a9e7fda355068c579cd7"
   },
