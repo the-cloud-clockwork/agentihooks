@@ -604,7 +604,7 @@ def test_write_with_fifty_alerts_resolves_fewer_names_than_it_holds_alerts(inbox
 
     resolved = []
 
-    def counted_name(name, *_):
+    def counted_name(name):
         resolved.append(name)
         return name
 
@@ -617,7 +617,7 @@ def test_write_with_fifty_alerts_resolves_fewer_names_than_it_holds_alerts(inbox
         guards = {"tasks": resources.resource_revision(state, "tasks")}
     reply = mutations.apply(ledger_server, SLUG, "", {"operation_id": "timed", "ops": [op], "guards": guards})
     assert reply["rejected"] == (["one"] if refused else [])
-    assert len(resolved) < len(state["alerts"]), resolved
+    assert len(resolved) <= (4 if refused else 2), resolved
 
 
 def test_operation_author_is_resolved_once_per_write(monkeypatch):
