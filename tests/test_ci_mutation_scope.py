@@ -76,6 +76,14 @@ def test_parent_relative_imports_and_prefixed_names_resolve_exactly(tmp_path):
     assert select_tests(tmp_path, Path("scripts/swarm/cli.py")) == ["tests/a/b/test_parent.py"]
 
 
+def test_a_helper_patching_the_module_by_name_selects_its_importers(tmp_path):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "patches.py").write_text('from unittest import mock\n\nquiet = mock.patch("scripts.swarm.cli.run")\n')
+    (tests / "test_patched.py").write_text("from tests.patches import quiet\n")
+    assert select_tests(tmp_path, Path("scripts/swarm/cli.py")) == ["tests/test_patched.py"]
+
+
 def test_a_rewritten_test_module_is_selected_again(tmp_path):
     tests = tmp_path / "tests"
     tests.mkdir()

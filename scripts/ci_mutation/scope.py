@@ -63,9 +63,7 @@ def select_tests(root: Path, source: Path) -> list[str]:
     reaching = {
         path
         for path, (text, imported) in modules.items()
-        if module in imported
-        or path.name.startswith("test_")
-        and (path.name == f"test_{source.stem}.py" or named.search(text))
+        if module in imported or named.search(text) or path.name == f"test_{source.stem}.py"
     }
     added = reaching
     while added:
