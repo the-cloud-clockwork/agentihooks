@@ -51,9 +51,16 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
         source = root / name
         if source.is_dir():
             shutil.copytree(source, work / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", work.name))
-    for name in (".test_durations", "Swarm-v2.md"):
-        if (root / name).is_file():
-            shutil.copy(root / name, work / name)
+    root_files = sorted(
+        path.name
+        for path in root.iterdir()
+        if path.is_file()
+        and not path.is_symlink()
+        and path.name != "pyproject.toml"
+        and (path.name == ".test_durations" or not path.name.startswith("."))
+    )
+    for name in root_files:
+        shutil.copy(root / name, work / name)
     pytest_args = ["-q", "-x", "-o", "addopts=", "-p", "pytest_asyncio.plugin"]
     # pytest would load the plugin from its own mutated copy, whose hooks raise in mutmut's forced fail run.
     if IDENTITY not in paths:
@@ -67,10 +74,9 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
             "docs/",
             ".github/",
             "evidence/",
-            "Swarm-v2.md",
             "docker/swarm-node/",
             ".agentihooks/conditions/",
-            ".test_durations",
+            *root_files,
         ],
         "pytest_add_cli_args_test_selection": tests,
         "pytest_add_cli_args": pytest_args,
