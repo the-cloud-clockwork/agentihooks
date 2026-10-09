@@ -297,6 +297,8 @@ def test_every_quota_reader_appends_the_api_row_of_its_harness(monkeypatch):
     monkeypatch.setattr(codex_router, "routing_pool", lambda environ: [])
     monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {})
     monkeypatch.setattr(agents_quota.time, "time", lambda: 42.0)
+    codex_nows = []
+    monkeypatch.setattr(agents_quota, "codex_rows", lambda pool, quotas, sessions, now: codex_nows.append(now) or [])
     assert [(row.agent, row.kind) for row in agents_quota._claude(False, 1.0)] == [("claude", "api")]
     assert [(row.agent, row.kind) for row in agents_quota._codex(5.0)] == [("codex", "api")]
     rows = agents_quota.page_quota(now=100.0)["rows"]
@@ -307,6 +309,7 @@ def test_every_quota_reader_appends_the_api_row_of_its_harness(monkeypatch):
         ("ClaudeApiSource", {"api": 1}, "claude", 100.0),
         ("CodexApiSource", {"api": 3}, "codex", 100.0),
     ]
+    assert codex_nows == [5.0, 100.0]
 
 
 def test_no_agent_rows_exit_one(monkeypatch, capsys):
