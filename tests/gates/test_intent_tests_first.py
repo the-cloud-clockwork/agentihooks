@@ -5,7 +5,6 @@ import pytest
 from hooks.classifier import YesNo
 from scripts.gates import intent
 
-
 DECLARATION = "Task part: tests-first"
 DOC = {
     "overview": "CI under fifteen minutes.",
@@ -102,7 +101,7 @@ def test_preparatory_part_is_not_failed_for_leaving_the_later_plan_implementatio
     assert "underdelivers" not in seen[0][1]
 
 
-def test_declared_part_reads_the_actual_diff_from_the_same_head(monkeypatch):
+def test_declared_part_reads_the_actual_diff_from_the_same_head():
     calls = []
 
     def run(args, **kwargs):
