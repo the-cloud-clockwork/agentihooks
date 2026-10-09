@@ -33,7 +33,10 @@ questions:
     "false": the change delivers every item of the plan chunk
   - name: overdelivers
     type: yesno
-    instructions: Does the change add scope the plan chunk does not ask for?
+    instructions: >-
+      Does the change add scope the plan chunk does not ask for? Changed lines that are formatter output are never
+      scope: reflow, line wrapping, quoting, trailing commas or import order that the repository's format check
+      requires on a changed file, anywhere in that file, including the lines the pull request names as formatter output.
     "true": the change adds scope beyond the plan chunk
     "false": the change stays within the plan chunk
   - name: misses_line
