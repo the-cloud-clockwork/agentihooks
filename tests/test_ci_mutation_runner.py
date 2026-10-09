@@ -211,24 +211,25 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
     assert (work / ".test_durations").read_text() == '{"tests/test_sample.py::t": 1.5}'
 
 
-def test_workspace_carries_every_root_file_into_the_mutants_copy(tmp_path):
+@pytest.mark.parametrize("readme", ['"README.md"', '{file = "README.md", content-type = "text/markdown"}'])
+def test_workspace_carries_the_package_readme_into_the_mutants_copy(tmp_path, readme):
     import tomllib
 
     from scripts.ci_mutation.runner import prepare_workspace
 
     root = tmp_path / "repo"
     (root / "tests").mkdir(parents=True)
-    (root / "pyproject.toml").write_text('[project]\nreadme = "README.md"\n')
-    for name in ("README.md", "LICENSE", ".env.example", "CHANGELOG.md"):
+    (root / "pyproject.toml").write_text(f"[project]\nreadme = {readme}\n")
+    for name in ("README.md", ".env", "results.json"):
         (root / name).write_text(name)
     work = tmp_path / "work"
     work.mkdir()
     prepare_workspace(root, work, ["scripts/other.py"], ["tests/test_ci_workflow.py"])
     also_copy = tomllib.loads((work / "pyproject.toml").read_text())["tool"]["mutmut"]["also_copy"]
-    for name in ("README.md", "LICENSE", ".env.example", "CHANGELOG.md"):
-        assert (work / name).read_text() == name
-        assert name in also_copy
-    assert "pyproject.toml" not in also_copy
+    assert (work / "README.md").read_text() == "README.md"
+    assert also_copy[-1] == "README.md"
+    assert not (work / ".env").exists()
+    assert not (work / "results.json").exists()
 
 
 def test_workspace_inside_a_copied_folder_is_not_copied_into_itself(tmp_path):
