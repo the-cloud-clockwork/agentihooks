@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__append__mutmut_8:5b05e57a5c25061629f5fc0964e67ed1f5c5b8022a54b3e511f21709b084c70c": {
+    "reader": "Standards",
+    "reason": "Only ASCII table and column identifier casing changes; SQLite resolves ENTRIES, SWARM, NAME, AT, WORDS and NORM to the same schema objects, with unchanged bound values."
+  }
+}

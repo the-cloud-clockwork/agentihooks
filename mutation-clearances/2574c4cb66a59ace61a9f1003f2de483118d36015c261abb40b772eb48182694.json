@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__migrate__mutmut_36:a16a85f005f292c719c722c168314d2e740fbc904c7e1dcf3d9e06495637fcec": {
+    "reader": "Standards",
+    "reason": "Only INSERT OR IGNORE and VALUES keyword casing changes; SQLite preserves identical deduplication and rowcount behavior for the unchanged bound legacy filename."
+  }
+}

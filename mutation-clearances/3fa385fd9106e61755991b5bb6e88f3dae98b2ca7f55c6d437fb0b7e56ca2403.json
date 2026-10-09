@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__append__mutmut_7:84735b5a0120e4b7d10e9629502f81f4ffd5475bd9e1c5e02aa86298ee7e8257": {
+    "reader": "Standards",
+    "reason": "Only the INSERT and VALUES keyword casing changes; SQLite parses these keywords identically, and all entry values remain bound parameters."
+  }
+}

@@ -155,5 +155,28 @@ class BinEndpoint(unittest.TestCase):
         self.assertEqual(self.post({"action": "nuke", "slug": "via-http"})[0], 400)
 
 
+def test_purge_removes_only_the_deleted_ledgers_operator_log(tmp_path, monkeypatch):
+    from hooks.context import operator_words
+
+    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
+    make_ledger("old-one")
+    make_ledger("other-one")
+    operator_words.heard_prompt(
+        "purged words", {"AGENTIHOOKS_AGENT_NAME": "master@a1-1", "AGENTIHOOKS_SWARM": "old-one"}, now=100
+    )
+    operator_words.heard_answer(
+        {"tool_name": "AskUserQuestion", "tool_input": {"answers": {"q": "kept words"}}},
+        {"AGENTIHOOKS_AGENT_NAME": "master@b2-1", "AGENTIHOOKS_SWARM": "other-one"},
+        now=100,
+    )
+    ledger_bin.delete("old-one", now=0)
+    assert operator_words.matching("master@a1-1", "purged words", within=None) == "purged words"
+    assert bin_storage.purge_expired(now=30 * DAY_MS + 1) == ["old-one"]
+    assert operator_words.matching("master@a1-1", "purged words", within=None) == ""
+    assert operator_words.recorded("master@a1-*") == []
+    assert operator_words.matching("master@b2-1", "kept words", within=None) == "kept words"
+    assert operator_words.recorded("master@b2-*") == ["master@b2-1"]
+
+
 if __name__ == "__main__":
     unittest.main()
