@@ -38,7 +38,7 @@ class SubagentBudget:
             return Decision.deny(refusal(who.swarm, who.task, counter, cap))
         reader = call.tool_input.get("name") or call.tool_input.get("subagent_type")
         if call.tool in LAUNCH_TOOLS and reader in READERS:
-            budget.spend(who.task, reader, cap)
+            budget.spend(who.task, reader, 1)
         reason = f"sub-agent {counter} {spent} of {cap} for task {who.task}"
         log.append(state.slug, log.Row.of(self.name, "count", who, call.tool, reason), state.home)
         return Decision()

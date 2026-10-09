@@ -3,13 +3,13 @@ not push while that pull request's checks run unless one is already red, since a
 
 import os
 import re
-import subprocess
 from pathlib import Path, PurePosixPath
 
 from scripts.gates.base import Decision
 from scripts.gates.budget import Budget
 from scripts.gates.identity import program_index, simple_commands
-from scripts.gates.subagents import READERS
+from scripts.gates.push_stop import GITHUB_RE, count, git
+from scripts.gates.subagents import READERS, SubagentBudget
 from scripts.swarm.naming import lane_of
 
 WORKERS = frozenset({"eng", "ci"})
@@ -18,21 +18,19 @@ DRAFTS = frozenset({"--draft", "-d", "--undo"})
 NO_PUSH = frozenset({"--dry-run", "-n", "--delete", "-d"})
 VALUED = frozenset({"-C", "-c"})
 PULL_REPO = re.compile(r"github\.com/([^/]+/[^/]+)/pull/\d+")
-REMOTE_REPO = re.compile(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$")
 MATCHED = re.compile(r"\bpush\b|\bpr\s+(?:create|ready)\b")
-GIT_TIMEOUT_S = 20
 
 
 def _git_args(here, args):
     while args and args[0].startswith("-"):
         if args[0] == "-C" and len(args) > 1:
-            here = here / os.path.expanduser(args[1])
+            here = here / Path(args[1]).expanduser()
         args = args[2:] if args[0] in VALUED else args[1:]
     return here, args
 
 
 def actions(command, cwd):
-    """Each pull request open and push the command runs, with the directory it runs in."""
+    """Each pull request open and push the command runs, with the directory it runs in and its arguments."""
     here = Path(cwd or ".")
     for words in simple_commands(command):
         index = program_index(words)
@@ -40,17 +38,13 @@ def actions(command, cwd):
             continue
         program, rest = PurePosixPath(words[index]).name, words[index + 1 :]
         if program == "cd" and rest:
-            here = here / os.path.expanduser(rest[0])
+            here = here / Path(rest[0]).expanduser()
         elif program == "gh" and rest[:2] in OPENS and not DRAFTS.intersection(rest):
-            yield "open", here
+            yield "open", here, rest
         elif program == "git":
             where, args = _git_args(here, rest)
             if args[:1] == ["push"] and not NO_PUSH.intersection(args):
-                yield "push", where
-
-
-def git(path, *args):
-    return subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True, timeout=GIT_TIMEOUT_S)
+                yield "push", where, args[1:]
 
 
 def unsaved(path):
@@ -60,19 +54,26 @@ def unsaved(path):
         return ""
     if status.stdout.strip():
         return "uncommitted changes"
-    ahead = git(path, "rev-list", "--count", "HEAD", "--not", "--remotes=origin")
-    return "commits not on origin" if ahead.returncode == 0 and ahead.stdout.strip() != "0" else ""
+    return "commits not on origin" if count(path, "HEAD", "--not", "--remotes=origin") else ""
 
 
 def repo_of(path):
-    found = REMOTE_REPO.search(git(path, "remote", "get-url", "origin").stdout.strip())
-    return found.group(1).lower() if found else ""
+    found = GITHUB_RE.search(git(path, "remote", "get-url", "origin").stdout.strip())
+    return f"{found.group(1)}/{found.group(2)}".lower() if found else ""
+
+
+def destinations(path, args):
+    """The branches a push writes: each refspec's destination, the current branch for HEAD or no refspec."""
+    current = git(path, "branch", "--show-current").stdout.strip()
+    specs = [arg for arg in args if not arg.startswith("-")][1:]
+    ends = [spec.lstrip("+").split(":")[-1].removeprefix("refs/heads/") for spec in specs] or [""]
+    return {current if end in ("", "HEAD") else end for end in ends}
 
 
 def open_refusal(slug, missing, held):
     owed = []
     if missing:
-        agents = "sub agent" if len(missing) == 1 else "sub agents"
+        agents = "sub-agent" if len(missing) == 1 else "sub-agents"
         owed.append(f"launch the {' and '.join(missing)} {agents} on the committed diff and close its findings")
     if held:
         owed.append(f"commit and push the {held}")
@@ -102,25 +103,27 @@ class OnePush:
     def decide(self, call, who, state):
         if not (who.pinned and who.task) or lane_of(who.name) not in WORKERS:
             return Decision()
-        for kind, where in actions(call.command, call.cwd):
-            reason = self.opening(who, state, where) if kind == "open" else self.pushing(who, where)
+        for kind, where, args in actions(call.command, call.cwd):
+            reason = self.opening(who, state, where) if kind == "open" else self.pushing(who, where, args)
             if reason:
                 return Decision.deny(reason)
         return Decision()
 
     def opening(self, who, state, where):
-        budget = Budget(state.slug, "subagents", state.home)
+        budget = Budget(state.slug, SubagentBudget.name, state.home)
         missing = [name for name in READERS if not budget.spent(who.task, name)] if self.target() == "claude" else []
         held = unsaved(where)
         return open_refusal(who.swarm, missing, held) if missing or held else ""
 
-    def pushing(self, who, where):
+    def pushing(self, who, where, args):
         task = next((t for t in self.ledger().tasks(who.swarm) if t.get("id") == who.task), None) or {}
         found = PULL_REPO.search(task.get("pr_url") or "")
         if not found:
             return ""
         repo = repo_of(where)
         if repo and repo != found.group(1).lower():
+            return ""
+        if task.get("branch") and task["branch"] not in destinations(where, args):
             return ""
         pull = self.github()(task["pr_url"])
         if pull is None or pull.state != "OPEN" or pull.resolved or pull.red:

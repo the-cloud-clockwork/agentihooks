@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from scripts.gates import Call, Gate, Who, entry
-from scripts.gates.one_push import OnePush, actions, open_refusal, push_refusal
+from scripts.gates.one_push import OnePush, actions, destinations, open_refusal, push_refusal
 from scripts.gates.subagents import SubagentBudget
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm.ledger_events import PullRequest
@@ -24,7 +24,7 @@ def git(path, *args):
 @pytest.fixture
 def tree(tmp_path):
     work = tmp_path / "work"
-    git(tmp_path, "init", "-q", str(work))
+    git(tmp_path, "init", "-q", "-b", "task", str(work))
     git(work, "remote", "add", "origin", "https://github.com/o/r.git")
     (work / "a.txt").write_text("a\n")
     git(work, "add", "a.txt")
@@ -44,19 +44,19 @@ def reviewed(tmp_path, *readers):
 
 
 class Ledger:
-    def __init__(self, pr_url=URL):
-        self.pr_url = pr_url
+    def __init__(self, pr_url=URL, branch="task"):
+        self.pr_url, self.branch = pr_url, branch
 
     def tasks(self, slug):
-        return [{"id": "t1", "pr_url": self.pr_url}]
+        return [{"id": "t1", "pr_url": self.pr_url, "branch": self.branch}]
 
 
 def pull(state="OPEN", red=False, resolved=False):
     return PullRequest(state=state, merged_at=None, pushed_at=None, red=red, resolved=resolved)
 
 
-def gate(found=None, pr_url=URL, target="claude"):
-    return OnePush(ledger=lambda: Ledger(pr_url), github=lambda url: found, target=target)
+def gate(found=None, pr_url=URL, target="claude", branch="task"):
+    return OnePush(ledger=lambda: Ledger(pr_url, branch), github=lambda url: found, target=target)
 
 
 def bash(command, cwd):
@@ -83,11 +83,17 @@ def test_it_matches_git_pushes_and_pull_request_opens_only():
 def test_actions_name_each_open_and_push_with_the_directory_it_runs_in():
     command = "cd /w && gh pr create --base dev; git -C sub push -u origin HEAD; gh pr ready 7"
     assert list(actions(command, "/home")) == [
-        ("open", Path("/w")),
-        ("push", Path("/w/sub")),
-        ("open", Path("/w")),
+        ("open", Path("/w"), ["pr", "create", "--base", "dev"]),
+        ("push", Path("/w/sub"), ["-u", "origin", "HEAD"]),
+        ("open", Path("/w"), ["pr", "ready", "7"]),
     ]
-    assert list(actions("git -c a=b push", "/x")) == [("push", Path("/x"))]
+    assert list(actions("git -c a=b push", "/x")) == [("push", Path("/x"), [])]
+
+
+def test_destinations_read_each_refspec_and_the_current_branch_for_head(tree):
+    assert destinations(tree, []) == {"task"}
+    assert destinations(tree, ["-u", "origin", "HEAD"]) == {"task"}
+    assert destinations(tree, ["origin", "+HEAD:refs/heads/wip/x", "other"]) == {"wip/x", "other"}
 
 
 @pytest.mark.parametrize(
@@ -164,6 +170,12 @@ def test_a_push_passes_with_no_pull_request_or_into_another_repo(tree, tmp_path)
     assert gate(pull(), pr_url=other).decide(bash("git push", tree), ME, state(tmp_path)).allowed
 
 
+def test_a_push_to_another_branch_passes_and_one_to_the_task_branch_is_held(tree, tmp_path):
+    assert gate(pull()).decide(bash("git push origin HEAD:wip/x", tree), ME, state(tmp_path)).allowed
+    assert not gate(pull()).decide(bash("git push origin task", tree), ME, state(tmp_path)).allowed
+    assert not gate(pull(), branch=None).decide(bash("git push origin HEAD:wip/x", tree), ME, state(tmp_path)).allowed
+
+
 def test_sessions_outside_a_worker_task_are_never_held(tree, tmp_path):
     for who in (
         Who(),
@@ -175,7 +187,7 @@ def test_sessions_outside_a_worker_task_are_never_held(tree, tmp_path):
 
 def test_the_refusals_name_what_is_owed_and_the_way_out():
     assert open_refusal("demo", ["spec-reader"], "commits not on origin") == (
-        "open the pull request once review closes, so one push carries it: launch the spec-reader sub agent on the "
+        "open the pull request once review closes, so one push carries it: launch the spec-reader sub-agent on the "
         "committed diff and close its findings; commit and push the commits not on origin. A draft pull request for "
         'a block stays allowed: gh pr create --draft, then agentihooks swarm demo block "<why>"'
     )
