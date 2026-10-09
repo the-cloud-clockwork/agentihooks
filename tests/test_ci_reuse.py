@@ -41,7 +41,18 @@ def reuse_repo(tmp_path, request):
             "gate-required": {"name": "Gate — Required", "needs": ["reuse", "unit", "lint", "queue-baseline"]},
         }
     }
-    if getattr(request, "param", None) == "dynamic":
+    mode = getattr(request, "param", None)
+    if mode == "exclude":
+        workflow["jobs"]["unit"]["strategy"]["matrix"]["exclude"] = [{"python-version": "3.11", "shard": 1}]
+    elif mode == "include":
+        workflow["jobs"]["unit"]["strategy"]["matrix"]["python-version"] = ["3.12"]
+        workflow["jobs"]["unit"]["strategy"]["matrix"]["include"] = [{"python-version": "3.11", "shard": 1}]
+    elif mode == "named":
+        workflow["jobs"]["unit"]["name"] = "Python checks"
+    elif mode == "helm":
+        workflow["jobs"]["helm-kind"] = {}
+        workflow["jobs"]["gate-required"]["needs"].insert(0, "helm-kind")
+    if mode == "dynamic":
         workflow["jobs"]["mutation"] = {"strategy": {"matrix": {"shard": "${{ fromJSON(needs.plan.outputs.shards) }}"}}}
         workflow["jobs"]["gate-required"]["needs"].append("mutation")
     (workflows / "test.yml").write_text(yaml.safe_dump(workflow))
@@ -106,7 +117,14 @@ def full_source(reuse_repo, tmp_path):
         "head_sha": head,
     }
     names = ["reuse", "unit (3.11, 1)", "unit (3.12, 1)", "lint", "Gate — Required"]
+    definition = yaml.safe_load((root / ".github/workflows/test.yml").read_text())["jobs"]
+    if "exclude" in definition["unit"]["strategy"]["matrix"]:
+        names.remove("unit (3.11, 1)")
+    if "name" in definition["unit"]:
+        names = [name.replace("unit (", "Python checks (") for name in names]
     jobs = [{"id": 91 + n, "name": name, "conclusion": "success"} for n, name in enumerate(names)]
+    if "helm-kind" in definition:
+        jobs.append({"id": 105, "name": "helm-kind", "conclusion": "skipped"})
     if "mutation" in yaml.safe_load((root / ".github/workflows/test.yml").read_text())["jobs"]:
         jobs.extend([{"id": 98 + n, "name": f"mutation ({n})", "conclusion": "success"} for n in range(2)])
     jobs.append({"id": 97, "name": "queue-baseline", "conclusion": "skipped"})
@@ -481,5 +499,36 @@ def test_canonical_proof_digest_ignores_dictionary_insertion_order(full_source, 
     reordered["inputs"] = dict(reversed(list(record["inputs"].items())))
     publish_record(env, responses, reordered)
     result = invoke(root, base, queue, "merge_group", tmp_path / "order.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=true" in result.stdout
+
+
+@pytest.mark.parametrize("reuse_repo", ["exclude", "include", "named", "helm"], indirect=True)
+def test_every_supported_required_job_layout_reuses_only_a_full_pass(full_source, tmp_path):
+    root, base, _, queue, env, _, _ = full_source
+    result = invoke(root, base, queue, "merge_group", tmp_path / "layout.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=true" in result.stdout
+
+
+@pytest.mark.parametrize("reuse_repo", ["helm"], indirect=True)
+def test_a_legitimate_skipped_proof_does_not_hide_a_later_failed_gate(full_source, tmp_path):
+    root, base, _, queue, env, responses, _ = full_source
+    jobs = responses["repos/o/r/actions/runs/7/attempts/1/jobs?per_page=100&page=1"]["jobs"]
+    next(job for job in jobs if job["name"] == "lint")["conclusion"] = "failure"
+    Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
+    result = invoke(root, base, queue, "merge_group", tmp_path / "later-failure.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=false" in result.stdout
+
+
+@pytest.mark.parametrize("reuse_repo", ["dynamic"], indirect=True)
+def test_one_successful_dynamic_shard_is_a_complete_required_matrix(full_source, tmp_path):
+    root, base, _, queue, env, responses, _ = full_source
+    body = responses["repos/o/r/actions/runs/7/attempts/1/jobs?per_page=100&page=1"]
+    body["jobs"] = [job for job in body["jobs"] if job["name"] != "mutation (1)"]
+    body["total_count"] = len(body["jobs"])
+    Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
+    result = invoke(root, base, queue, "merge_group", tmp_path / "one-shard.json", env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "reused=true" in result.stdout
