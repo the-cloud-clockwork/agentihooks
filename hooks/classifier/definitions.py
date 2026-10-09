@@ -89,7 +89,7 @@ def _question(raw: object) -> QuestionSpec:
         "choice": lambda: Choice(instructions, _options(raw.get("options"))),
         "score": lambda: Score(instructions, _levels(raw.get("levels"))),
     }
-    if kind not in factories:
+    if not isinstance(kind, str) or kind not in factories:
         raise DefinitionError(f"unknown question type: {kind}")
     name = _text(raw.get("name"), "question name")
     instructions = _text(raw.get("instructions"), "instructions")
@@ -131,7 +131,7 @@ def _rule(raw: object, questions: tuple[QuestionSpec, ...], thresholds: dict) ->
     raw = _mapping(raw, {"type", "threshold"}, "rule")
     kind = raw.get("type")
     kinds = {"yes": YesNo, "choice": Choice, "score": Score, "code": object}
-    if kind not in kinds:
+    if not isinstance(kind, str) or kind not in kinds:
         raise DefinitionError(f"unknown verdict rule: {kind}")
     if not all(isinstance(item.question, kinds[kind]) for item in questions):
         raise DefinitionError(f"rule {kind} does not match its questions")
