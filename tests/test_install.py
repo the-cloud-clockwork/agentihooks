@@ -339,8 +339,163 @@ class TestClaudeRouting:
 
         assert install.cmd_balance(include_fable=False, refresh=False, timeout=10) == 2
         lines = capsys.readouterr().out.splitlines()
-        assert lines[1].split()[:4] == ["codex", "default", "SIGNED_OUT", "0/?"]
-        assert lines[2].split()[:4] == ["codex", "alpha", "NORMAL", "2/6"]
+        assert lines[1].split()[:5] == ["codex", "default", "subscription", "SIGNED_OUT", "0/?"]
+        assert lines[2].split()[:5] == ["codex", "alpha", "subscription", "NORMAL", "2/6"]
+
+    def test_cmd_balance_lists_the_claude_api_slot_with_kind_weight_and_cap(self, monkeypatch, tmp_path, capsys):
+        from scripts import agents_quota
+        from scripts import claude_quota_balancer as balancer
+        from scripts.routing import place
+        from scripts.routing.settings import FileSettings
+
+        credential = balancer.Credential("AH_CC_TOKEN_ALPHA", "secret")
+        result = balancer.ProbeResult(
+            "ALPHA", "allowed", "NORMAL", 70, balancer.QuotaWindow(20), balancer.QuotaWindow(30)
+        )
+        store = FileSettings(tmp_path / "routing-settings.json")
+        store.set("claude-api-weight", 25, "operator", 1.0)
+        store.set("claude-api-max-sessions", 3, "operator", 1.0)
+        monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://gateway.example")
+        monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "gateway-secret")
+        monkeypatch.setattr(place, "_client", lambda environ: None)
+        monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+        monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/claude")
+        monkeypatch.setattr(balancer, "discover_credentials", lambda environ: [credential])
+        monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([result], "cached"))
+        monkeypatch.setattr(agents_quota, "codex_table", lambda: "codex table")
+        monkeypatch.setattr("hooks.context.account_sessions.sessions_by_account", lambda: {"ALPHA": 2, "api": 1})
+
+        assert install.cmd_balance(include_fable=False, refresh=False, timeout=10) == 0
+        lines = capsys.readouterr().out.splitlines()
+        assert lines[0].split() == [
+            "#",
+            "ACCOUNT",
+            "KIND",
+            "STATE",
+            "SESSIONS",
+            "WEIGHT",
+            "CAP",
+            "ROUTING",
+            "LEFT",
+            "5H",
+            "LEFT",
+            "5H",
+            "RESET",
+            "7D",
+            "LEFT",
+            "7D",
+            "RESET",
+        ]
+        assert lines[2].split() == [
+            "1",
+            "ALPHA",
+            "subscription",
+            "NORMAL",
+            "2/6",
+            "-",
+            "6",
+            "70%",
+            "80%",
+            "?",
+            "70%",
+            "?",
+        ]
+        assert lines[3].split() == [
+            "-",
+            "api",
+            "(gateway)",
+            "api",
+            "OPEN",
+            "1/3",
+            "25%",
+            "3",
+            "n/a",
+            "n/a",
+            "n/a",
+            "n/a",
+            "n/a",
+        ]
+        assert "api: 1 session(s)" not in lines
+
+    def test_balance_set_writes_through_the_store_and_prints_before_and_after(self, monkeypatch, tmp_path, capsys):
+        from scripts.routing.settings import FileSettings
+
+        store = FileSettings(tmp_path / "routing-settings.json")
+        monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@test")
+        monkeypatch.setattr(install, "_routing_settings", lambda: store)
+
+        assert install.cmd_balance_set(["claude-api-weight=30", "master-account-codex=alpha"], now=5.0) == 0
+        assert capsys.readouterr().out.splitlines() == [
+            "claude-api-weight: 0 -> 30",
+            "master-account-codex: unset -> alpha",
+        ]
+        assert store.get("claude-api-weight") == 30
+        assert store.history()[-1] == {
+            "key": "master-account-codex",
+            "value": "alpha",
+            "actor": "engineer@test",
+            "at": 5.0,
+        }
+        assert install.cmd_balance_set(["master-account-codex=none"], now=6.0) == 0
+        assert capsys.readouterr().out.splitlines() == ["master-account-codex: alpha -> unset"]
+
+        assert install.cmd_balance_settings() == 0
+        assert capsys.readouterr().out.splitlines() == [
+            "claude-api-weight=30",
+            "codex-api-weight=0",
+            "claude-api-max-sessions=unset",
+            "codex-api-max-sessions=unset",
+            "master-account-claude=unset",
+            "master-account-codex=unset",
+            "master-tier-claude=unset",
+            "master-tier-codex=unset",
+        ]
+
+    @pytest.mark.parametrize(
+        ("pairs", "reason"),
+        [
+            (["claude-api-weight=101"], "invalid value for claude-api-weight: 101"),
+            (["claude-api-weight=30.5"], "invalid value for claude-api-weight: 30.5"),
+            (["codex-api-max-sessions=-1"], "invalid value for codex-api-max-sessions: -1"),
+            (["nope=1"], "unknown routing setting nope"),
+            (["claude-api-weight"], "expected KEY=VALUE, got claude-api-weight"),
+        ],
+    )
+    def test_balance_set_refuses_an_invalid_pair_and_writes_nothing(self, monkeypatch, tmp_path, capsys, pairs, reason):
+        from scripts.routing.settings import FileSettings
+
+        store = FileSettings(tmp_path / "routing-settings.json")
+        monkeypatch.setattr(install, "_routing_settings", lambda: store)
+
+        assert install.cmd_balance_set(["codex-api-weight=40", *pairs], now=1.0) == 2
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err.strip() == f"agentihooks balance set: {reason}"
+        assert store.history() == []
+
+    def test_balance_set_and_settings_dispatch_from_the_cli(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(install, "cmd_balance_set", lambda pairs: calls.append(("set", pairs)) or 0)
+        monkeypatch.setattr(install, "cmd_balance_settings", lambda: calls.append(("settings",)) or 0)
+        for argv in (["balance", "set", "claude-api-weight=5", "codex-api-weight=6"], ["balance", "settings"]):
+            monkeypatch.setattr(install.sys, "argv", ["agentihooks", *argv])
+            with pytest.raises(SystemExit) as exit_info:
+                install.main()
+            assert exit_info.value.code == 0
+        assert calls == [("set", ["claude-api-weight=5", "codex-api-weight=6"]), ("settings",)]
+
+    def test_routing_settings_open_the_store_through_the_routing_client(self, monkeypatch, tmp_path):
+        from scripts.routing import place
+        from scripts.routing.settings import FileSettings
+
+        seen = []
+        monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+        monkeypatch.setattr(place, "_client", lambda environ: seen.append(environ) or None)
+        store = install._routing_settings()
+        assert isinstance(store, FileSettings)
+        assert store.path == tmp_path / "routing-settings.json"
+        assert seen == [install.os.environ]
 
     def test_cmd_balance_can_print_raw_account_metadata(self, monkeypatch, capsys):
         from scripts import claude_quota_balancer as balancer
