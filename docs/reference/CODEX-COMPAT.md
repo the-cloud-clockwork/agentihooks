@@ -202,7 +202,7 @@ of the render stamp, so a fetch that adds one re-renders the home.
 **Planner sandbox.** A swarm planner on Codex launches with
 `-c permissions.planner={extends=":read-only", network={enabled=true}, filesystem={…}}`
 and `-c default_permissions="planner"`. The filesystem grants write the ledger
-folder, `~/.agentihooks` and `~/scratchpad` only, so the repository stays read
+folder, `~/.agentihooks/swarm` and `~/scratchpad` only, so the repository stays read
 only while `agentihooks ledger` (which locks a file in the ledger folder) and
 Redis calls succeed. This overrides the role's `sandbox_mode = "danger-full-access"`
 for that launch only; every other role keeps it.
