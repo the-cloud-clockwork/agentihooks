@@ -354,10 +354,10 @@ def test_stored_durations_allow_new_tests_concentrated_in_one_shard(tmp_path, mo
             test_stored_durations_cover_the_collected_suite()
 
 
-def test_dev_push_refreshes_stored_durations_after_tests_pass():
+def test_dev_push_refreshes_stored_durations_unless_the_run_was_cancelled():
     job = _workflow()["jobs"]["refresh-durations"]
     assert job["needs"] == ["unit", "lint", "shard-check"]
-    assert job["if"] == "github.event_name == 'push'"
+    assert job["if"] == "${{ !cancelled() && github.event_name == 'push' }}"
     assert job["permissions"] == {"contents": "read"}
     steps = job["steps"]
     checkout = next(step for step in steps if step.get("uses") == "actions/checkout@v4")
@@ -442,6 +442,24 @@ def test_samples_refresh_refuses_a_run_that_kept_no_durations(tmp_path, monkeypa
     monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
     with pytest.raises(SystemExit, match="run 12 kept no durations"):
         refresh_durations.main(["--samples", str(samples), "--ci-run", "12", "--ci", "5"])
+
+
+def test_samples_refresh_keeps_earlier_durations_for_the_tests_of_a_failed_shard(tmp_path, monkeypatch):
+    samples = tmp_path / "samples"
+    for version in ("3.11", "3.12"):
+        for run, shard, durations in [
+            ("11", 1, {"t.py::a@g": 1.0}),
+            ("11", 2, {"t.py::b@g": 4.0, "t.py::gone@g": 5.0}),
+            ("12", 1, {"t.py::a@g": 3.0}),
+        ]:
+            path = samples / run / f"durations-{version}-{shard}"
+            path.mkdir(parents=True)
+            (path / "durations.json").write_text(json.dumps(durations))
+    monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a", "t.py::b"])
+    refresh_durations.main(["--samples", str(samples), "--ci-run", "12", "--ci", "5"])
+    for name in (".test_durations", ".test_durations-3.11", ".test_durations-3.12"):
+        assert json.loads((tmp_path / name).read_text()) == {"t.py::a": 2.0, "t.py::b": 4.0}
 
 
 def test_refreshed_durations_take_the_median_so_one_slow_run_does_not_move_a_test():

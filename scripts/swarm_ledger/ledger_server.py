@@ -62,7 +62,7 @@ ROOT = CODE_DIR.parents[1]
 LOGO = ROOT / "media" / "agentihooks-logo.png"
 CODE_DIRS = (
     CODE_DIR,
-    *(ROOT / "scripts" / name for name in ("inbox", "swarm", "handoff", "doctor", "gates")),
+    *(ROOT / "scripts" / name for name in ("inbox", "swarm", "handoff", "doctor", "gates", "hive")),
     ROOT / "hooks",
 )
 

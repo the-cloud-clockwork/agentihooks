@@ -176,15 +176,16 @@ class HerdrRuntime:
         warned = self._quota_warned()
         return [row for row in self._quota_accounts if (row.harness, row.name) not in warned]
 
-    def _quota_refusal(self, agent):
+    def _quota_refusal(self, agent, harnesses=None):
         from scripts.swarm.capacity import warning
 
+        harnesses = harnesses or (agent,)
         warnings = "; ".join(
             f"{harness} {name} {warning(window)}"
             for (harness, name), window in self._quota_warned().items()
-            if harness == agent
+            if harness in harnesses
         )
-        return f"no {agent} account has placeable quota seats" + (f": {warnings}" if warnings else "")
+        return f"no {' or '.join(harnesses)} account has placeable quota seats" + (f": {warnings}" if warnings else "")
 
     def quota_capacity(
         self,
@@ -285,7 +286,7 @@ class HerdrRuntime:
             return agent, reason
         if not fixed and eligible:
             return eligible[0], f"fallthrough: {agent} has no placeable quota seats"
-        raise SpawnError(self._quota_refusal(agent), "unavailable")
+        raise SpawnError(self._quota_refusal(agent, None if fixed else agent_choice.AGENTS), "unavailable")
 
     def _rotation(self, requested, environ):
         if requested or not hasattr(self, "_quota_accounts"):
