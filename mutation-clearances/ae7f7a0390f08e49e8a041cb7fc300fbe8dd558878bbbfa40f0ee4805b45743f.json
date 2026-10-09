@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/health/activity.py:scripts.swarm.health.activity.x_record__mutmut_2:37e5c0d80b474287b58b0b51c94604eb2efdb7e86004539a5772f4073ed29723": {
+    "reader": "standards-reader",
+    "reason": "Integer timestamps contain only ASCII digits and sign; default UTF-8 writes identical bytes."
+  }
+}

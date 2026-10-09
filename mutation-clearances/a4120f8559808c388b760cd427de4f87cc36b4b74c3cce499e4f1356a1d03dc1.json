@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/health/activity.py:scripts.swarm.health.activity.x_last_events__mutmut_12:a4900bc51eb118a7428e1cce862b010b70a410640e781f3522d4c231afc2534b": {
+    "reader": "standards-reader",
+    "reason": "Default UTF-8 reads producer-written integer ASCII into the identical integer."
+  }
+}
