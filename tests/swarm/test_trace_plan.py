@@ -537,6 +537,22 @@ def test_run_files_each_cut_piece_once_and_writes_the_verdict(ask, tmp_path):
     assert len(record["pieces"]) == 4 and len(rows(home)) == 1
 
 
+def test_run_saves_the_filed_cut_before_its_follow_up(ask, tmp_path):
+    from scripts.swarm.store import SwarmError
+
+    class Failing(Ledger):
+        def followup(self, slug, text):
+            raise SwarmError("ledger sw: connection reset")
+
+    folder, home = tmp_path / "t1", tmp_path / "home"
+    write_plan(folder)
+    ask(0.9, 0.8, 0.1)
+    with pytest.raises(SwarmError):
+        run(folder, Failing(), home)
+    saved = json.loads((folder / "plan-verdict.json").read_text())
+    assert saved["filed"] == ["a diesel generator | power/generator | it powers the light"]
+
+
 def test_run_on_an_unchanged_plan_asks_nothing_and_writes_nothing(ask, tmp_path):
     folder, home, ledger = tmp_path / "t1", tmp_path / "home", Ledger()
     write_plan(folder)

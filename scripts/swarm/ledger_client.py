@@ -129,7 +129,7 @@ class LedgerClient:
         return self._write(slug, _op("add_item", "swarm", list="followups", text=text), "item")
 
     def priority(self, slug, item, text):
-        self._write(slug, _op("priority", "swarm", item=item, text=text), "priority")
+        return self._write(slug, _op("priority", "swarm", item=item, text=text), "priority")
 
     def group_tasks(self, slug, lead, members):
         self._call(slug, [_op("task_group", "swarm", item=f"tasks/{lead}", members=list(members))])

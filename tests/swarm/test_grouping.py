@@ -312,6 +312,21 @@ def test_a_refused_group_write_goes_on_to_the_next_set(asked, store):
     assert store.redis.hget(store.key("sw", grouping.SEEN), "a,b") == "refused"
 
 
+def test_a_dropped_proposal_is_recorded_as_refused(asked, store):
+    asked(0.9)
+
+    class Dropping(GroupLedger):
+        def priority(self, slug, item, text):
+            super().priority(slug, item, text)
+            return False
+
+    ledger = Dropping([])
+    config = store.update("sw", autonomy="assist")
+    actions = grouping.group_pass("sw", config, store, ledger, doc(task("a"), task("b")))
+    assert actions == ["skipped grouping under task a: the ledger refused its write"]
+    assert store.redis.hget(store.key("sw", grouping.SEEN), "a,b") == "refused"
+
+
 def test_nothing_to_group_asks_nothing(asked, store):
     calls = asked()
     assert grouping.group_pass("sw", store.config("sw"), store, GroupLedger([]), doc(task("a"))) == []
