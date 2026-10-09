@@ -153,7 +153,9 @@ def test_committed_image_inputs_pin_base_and_keep_profiles_outside_home():
     inputs = root / "docker/swarm-node"
     lock = worker_image.load_lock(inputs / "versions.lock", "amd64")
     dockerfile = (inputs / "Dockerfile").read_text()
-    assert f"FROM {lock['base_image']}" in dockerfile
+    assert f"ARG BASE_IMAGE={lock['base_image']}" in dockerfile
+    assert "FROM ${BASE_IMAGE}" in dockerfile
+    assert '--base-image "$BASE_IMAGE"' in dockerfile
     assert "COPY profiles/ /opt/agentihooks/templates/" in dockerfile
     assert "USER 10001:10001" in dockerfile
     assert "DISABLE_AUTOUPDATER=1" in dockerfile
@@ -172,6 +174,16 @@ def test_committed_image_inputs_pin_base_and_keep_profiles_outside_home():
 def test_invalid_artifact_metadata_is_rejected(locked, field, value):
     path, lock, _ = locked
     lock["tools"]["herdr"][field] = value
+    path.write_text(json.dumps(lock))
+    with pytest.raises(ValueError) as error:
+        worker_image.load_lock(path, "amd64")
+    assert str(error.value) == "invalid artifact lock: herdr"
+
+
+@pytest.mark.parametrize("field", ["url", "version_output"])
+def test_declared_version_cannot_be_a_prefix_of_artifact_version(locked, field):
+    path, lock, _ = locked
+    lock["tools"]["herdr"][field] = lock["tools"]["herdr"][field].replace("1.2.3", "1.2.30")
     path.write_text(json.dumps(lock))
     with pytest.raises(ValueError) as error:
         worker_image.load_lock(path, "amd64")
@@ -261,6 +273,14 @@ def test_manifest_contains_observed_inventory_and_immutable_templates(locked, tm
     with pytest.raises(ValueError) as error:
         worker_image.report(path)
     assert str(error.value) == "installed inventory differs from build manifest"
+
+
+def test_build_rejects_selected_base_that_differs_from_lock(locked, monkeypatch):
+    path, _, _ = locked
+    monkeypatch.setattr("sys.argv", ["worker_image", "validate", "--lock", str(path), "--base-image", "python:latest"])
+    with pytest.raises(ValueError) as error:
+        worker_image.main()
+    assert str(error.value) == "base image differs from lock"
 
 
 @pytest.mark.parametrize("action", ["validate", "install", "manifest", "report", "shell-packages"])

@@ -1,4 +1,6 @@
-FROM python:3.12.12-slim-bookworm@sha256:2986c55feb36e6cae00fa1fefb454283e4b33f35e75ff8bdd123b134130be301
+ARG BASE_IMAGE=python:3.12.12-slim-bookworm@sha256:2986c55feb36e6cae00fa1fefb454283e4b33f35e75ff8bdd123b134130be301
+FROM ${BASE_IMAGE}
+ARG BASE_IMAGE
 ARG TARGETARCH
 ARG SOURCE_REVISION=unknown
 ENV PATH=/opt/venv/bin:$PATH \
@@ -9,7 +11,7 @@ ENV PATH=/opt/venv/bin:$PATH \
 WORKDIR /build
 COPY docker/swarm-node/versions.lock docker/swarm-node/requirements.lock /opt/swarm-node/
 COPY scripts/swarm_v2/worker_image.py /opt/swarm-node/worker_image.py
-RUN python /opt/swarm-node/worker_image.py validate --architecture "$TARGETARCH" \
+RUN python /opt/swarm-node/worker_image.py validate --architecture "$TARGETARCH" --base-image "$BASE_IMAGE" \
     && python -c 'import json; from pathlib import Path; s=json.loads(Path("/opt/swarm-node/versions.lock").read_text())["debian_snapshot"]; Path("/etc/apt/sources.list").write_text(f"deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/{s} bookworm main\ndeb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/{s} bookworm-security main\n")' \
     && rm /etc/apt/sources.list.d/debian.sources \
     && apt-get update \

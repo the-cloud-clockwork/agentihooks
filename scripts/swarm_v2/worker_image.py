@@ -21,8 +21,8 @@ def validate_artifact(name: str, artifact: dict) -> None:
         not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version)
         or not re.fullmatch(r"[a-f0-9]{64}", artifact.get("sha256") or "")
         or not artifact.get("url", "").startswith("https://")
-        or version not in artifact["url"]
-        or version not in artifact.get("version_output", "")
+        or version not in re.findall(r"[0-9]+\.[0-9]+\.[0-9]+", artifact["url"])
+        or re.findall(r"[0-9]+\.[0-9]+\.[0-9]+", artifact.get("version_output", "")) != [version]
     ):
         raise ValueError(f"invalid artifact lock: {name}")
 
@@ -129,9 +129,12 @@ def main() -> None:
     parser.add_argument("action", choices=("validate", "install", "manifest", "report", "shell-packages"))
     parser.add_argument("--lock", type=Path, default=Path("/opt/swarm-node/versions.lock"))
     parser.add_argument("--architecture", default="amd64")
+    parser.add_argument("--base-image")
     parser.add_argument("--source-revision", default="unknown")
     args = parser.parse_args()
     lock = load_lock(args.lock, args.architecture)
+    if args.base_image is not None and args.base_image != lock["base_image"]:
+        raise ValueError("base image differs from lock")
     if args.action == "install":
         install_tools(lock, Path("/usr/local/bin"))
     elif args.action == "manifest":
