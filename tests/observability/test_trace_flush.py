@@ -307,6 +307,7 @@ class Receiver(http.server.BaseHTTPRequestHandler):
     delay = 0.0
 
     def do_POST(self):
+        spans = type(self).spans
         body = self.rfile.read(int(self.headers["Content-Length"]))
         type(self).posts += 1
         time.sleep(type(self).delay)
@@ -315,7 +316,7 @@ class Receiver(http.server.BaseHTTPRequestHandler):
             for scope in resource.scope_spans:
                 for span in scope.spans:
                     attributes = {a.key: a.value for a in span.attributes}
-                    type(self).spans.append((span.name, attributes))
+                    spans.append((span.name, attributes))
         self.send_response(200)
         self.end_headers()
 
