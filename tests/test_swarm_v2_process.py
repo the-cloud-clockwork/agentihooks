@@ -1,5 +1,8 @@
+import faulthandler
 import os
 import signal
+import subprocess
+import threading
 from contextlib import contextmanager
 from dataclasses import replace
 
@@ -44,7 +47,7 @@ def record(namespace=ANTON, pid=PID, start=STARTED, execution="exe-1"):
 
 
 def children():
-    return {pid for pid, row in processes().items() if row.ppid == os.getpid()}
+    return {pid for pid, row in processes().items() if row.ppid == os.getpid() and row.state != "Z"}
 
 
 @contextmanager
@@ -54,13 +57,20 @@ def bounded(what, seconds=30):
 
     before = children()
     previous = signal.signal(signal.SIGALRM, expired)
-    signal.setitimer(signal.ITIMER_REAL, seconds)
+    # SIGALRM cannot interrupt a wait inside C code; the faulthandler dump ends the worker with every stack instead.
+    faulthandler.dump_traceback_later(seconds + 10, exit=True)
     try:
+        signal.setitimer(signal.ITIMER_REAL, seconds)
         yield
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
+        faulthandler.cancel_dump_traceback_later()
         signal.signal(signal.SIGALRM, previous)
-    assert children() <= before, f"{what} left child processes running"
+        left = children() - before
+        for pid in left:
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+    assert not left, f"{what} left child processes running"
 
 
 def test_the_local_namespace_is_the_boot_id_and_the_pid_namespace_link(tmp_path):
@@ -230,24 +240,34 @@ def test_a_qualified_execution_started_by_the_store_terminates_through_the_route
         assert ended == [(started.name, PID, (), STARTED)]
 
 
-def test_a_store_call_blocked_on_its_server_fails_within_its_bound_and_names_the_wait():
+def test_a_store_call_blocked_on_its_server_fails_within_its_bound():
     import fakeredis
 
     server = fakeredis.FakeServer()
     store = RedisStore(fakeredis.FakeRedis(server=server, decode_responses=True))
-    with server.lock, pytest.raises(pytest.fail.Exception, match="^store admission did not finish within 0.5 seconds$"):
-        with bounded("store admission", 0.5):
-            store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
+    server.lock.acquire()
+    release = threading.Timer(5, server.lock.release)
+    release.start()
+    try:
+        with pytest.raises(pytest.fail.Exception, match="^swarm create did not finish within 0.5 seconds$"):
+            with bounded("swarm create", 0.5):
+                store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
+    finally:
+        release.cancel()
+        if server.lock.locked():
+            server.lock.release()
 
 
 def test_the_bound_refuses_a_child_process_that_outlives_the_test():
-    import subprocess
-
-    with pytest.raises(AssertionError, match="a sleeper left child processes running"):
-        with bounded("a sleeper"):
-            child = subprocess.Popen(["sleep", "30"])
-    child.kill()
-    child.wait()
+    child = None
+    try:
+        with pytest.raises(AssertionError, match="a sleeper left child processes running"):
+            with bounded("a sleeper"):
+                child = subprocess.Popen(["sleep", "30"])
+    finally:
+        if child is not None:
+            child.kill()
+            child.wait()
 
 
 def test_the_routed_runtime_reports_why_the_router_refused(tmp_path, monkeypatch):
