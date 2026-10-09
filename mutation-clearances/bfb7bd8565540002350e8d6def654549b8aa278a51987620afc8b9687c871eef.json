@@ -1,0 +1,6 @@
+{
+  "scripts/ci_reuse.py:scripts.ci_reuse.x__proof__mutmut_14:0b020ca273988bfbd5fc925062f40c9d784836d13eb13ac71113232316744389": {
+    "reader": "Standards reviewer /root/standards_reader",
+    "reason": "diagnostic_only: Changing the ValueError message for oversized metadata leaves the same size rejection and caught exception type. The public fallback reports only the exception class and still requires full suites. Mutant change: +            raise ValueError(None) Independent review of CI run 37933418386 mutation diff; no local run."
+  }
+}

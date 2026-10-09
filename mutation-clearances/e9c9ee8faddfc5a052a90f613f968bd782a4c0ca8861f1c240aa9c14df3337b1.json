@@ -1,0 +1,6 @@
+{
+  "scripts/ci_reuse.py:scripts.ci_reuse.x__find__mutmut_166:50d0d93834ed21ea4e0fee40ffcdf0c461f92325058855722c7366b3225b320b": {
+    "reader": "Standards reviewer /root/standards_reader",
+    "reason": "equivalent: A candidate reaches the coverage subset check only after exactly one live required-tree metadata artifact was found. Its name is outside the coverage-only required set, so kept has an extra member. Therefore coverage <= kept and coverage < kept have identical truth values here. Mutant change: +        if not coverage < kept: Independent review of CI run 37933418386 mutation diff; no local run."
+  }
+}

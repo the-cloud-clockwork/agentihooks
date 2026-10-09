@@ -35,20 +35,28 @@ def _toplevel(cwd: Path) -> Path | None:
     return Path(result.stdout.strip()) if result.returncode == 0 else None
 
 
+def _path(word: str) -> str:
+    return os.path.expanduser(os.path.expandvars(word))
+
+
 def _unpassed(payload: dict) -> Path | None:
-    from hooks.context.branch_guard import _resolve_cwd
     from hooks.context.shell_commands import commands
     from scripts.ci_prepush import passed
 
-    command = payload["tool_input"].get("command") or payload["tool_input"].get("cmd")
+    tool_input = payload["tool_input"]
+    command = tool_input.get("command") or tool_input.get("cmd")
     if not command:
         return None
-    cwd = Path(_resolve_cwd(command, payload.get("cwd")))
+    cwd = Path(payload.get("cwd") or os.getcwd(), _path(tool_input.get("workdir") or ""))
     for tokens in commands(command):
+        if Path(tokens[0]).name == "cd":
+            target = cwd / _path(next((word for word in tokens[1:] if not word.startswith("-")), "~"))
+            cwd = target if os.path.isdir(target) else cwd
+            continue
         push = _push(tokens)
         if push is None or _exempt(push[1]):
             continue
-        root = _toplevel(cwd.joinpath(*(os.path.expanduser(os.path.expandvars(path)) for path in push[0])))
+        root = _toplevel(cwd.joinpath(*map(_path, push[0])))
         if root and (root / "scripts" / "ci_prepush" / "__init__.py").is_file() and not passed(root):
             return root
     return None

@@ -1,0 +1,19 @@
+{
+  "package": "SV2-CTL-05",
+  "tested_commit": "421f9da195884fd0f7210e42e15f7b133681b863",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37921616636",
+  "fixture_clock": "Fake Redis server time; expiry advances by 30001 milliseconds",
+  "independent_runs": 2,
+  "cleanup": "pytest isolated Redis and SQLite fixtures; no live resource mutations",
+  "mutation_scope": "Existing task coordination only; no EC2 instances selected",
+  "case": "T-SV2-CTL-05-A",
+  "test": "test_package_acceptance_cases_repeat_independently[positive]",
+  "job": 113791847355,
+  "output": "PASSED at 2026-10-09T11:14:32.0966939Z",
+  "current_generation": 2,
+  "ledger_done": true,
+  "provider_dispatches": 1,
+  "stale_ledger_changed": false,
+  "outcome_conflicts_total": 0
+}
