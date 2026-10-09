@@ -462,7 +462,7 @@ def test_restart_converges_to_existing_pods_and_deletes_only_managed_orphans(fix
             watch.Pod("eng-3", "uid-other", watch.labels("agentihooks-swarm-other", "exec-x")),
         ]
     )
-    clock[0] += lease.TTL_MS
+    clock[0] += lease.ttl_ms()
     restarted = observed(store, transport, grant, pods)
     assert restarted.acquire()
     assert pods.deleted == [("eng-2", "uid-eng-2")]
@@ -493,7 +493,7 @@ def test_journal_without_a_pod_is_reported_missing(fixture):
     store, (first, _), transport, clock, grant = fixture
     attempt = launched(store, first)
     restarted = observed(store, transport, grant, Pods([]))
-    clock[0] += lease.TTL_MS
+    clock[0] += lease.ttl_ms()
     assert restarted.acquire()
     assert restarted.reconcile().missing_pods == [attempt.execution_id]
     assert restarted.controller_orphans_by_class()["missing_pod"] == 1
@@ -530,7 +530,7 @@ def test_takeover_before_delete_refuses_the_delete(fixture):
     controller = observed(store, transport, grant, pods)
 
     def takeover():
-        clock[0] += lease.TTL_MS
+        clock[0] += lease.ttl_ms()
         assert second.acquire()
 
     pods.before_read = takeover
@@ -559,7 +559,7 @@ def test_takeover_during_delete_keeps_the_new_leader_counts(fixture):
     pods.pods = {"uid-eng-2": managed("eng-2", "exec-orphan")}
 
     def takeover():
-        clock[0] += lease.TTL_MS
+        clock[0] += lease.ttl_ms()
         assert second.acquire()
 
     pods.before_delete, pods.expire = takeover, True
@@ -573,7 +573,7 @@ def test_disabled_cleanup_keeps_orphans_while_matching_continues(fixture):
     store, (first, _), transport, clock, grant = fixture
     attempt = launched(store, first)
     pods = Pods([managed("eng-1", attempt.execution_id, uid="uid-live"), managed("eng-2", "exec-orphan")])
-    clock[0] += lease.TTL_MS
+    clock[0] += lease.ttl_ms()
     restarted = observed(store, transport, grant, pods, cleanup=False)
     assert restarted.acquire()
     assert pods.deleted == []
@@ -616,7 +616,7 @@ def test_live_pod_of_a_superseded_generation_is_kept(fixture):
     current = first.admit(agent(store), prior.execution_id)
     assert first.release()
     pods = Pods([managed("eng-1", prior.execution_id, uid="uid-prior")])
-    clock[0] += lease.TTL_MS
+    clock[0] += lease.ttl_ms()
     restarted = observed(store, transport, grant, pods)
     assert restarted.acquire()
     plan = restarted.reconcile()
