@@ -1,0 +1,6 @@
+apiVersion: v2
+name: agentihooks-swarm
+description: The agentihooks swarm runtime in distributed mode, a ledger, Redis and the lease holding controller
+type: application
+version: 0.1.0
+appVersion: dev

@@ -9,7 +9,6 @@ from .events import append_events, read_events, write_events
 from .rows import TABLES, assemble, diff, encode, flatten, read_rows, write_rows
 from .seeds import read_seeds, sync_values, write_seeds
 
-DATABASE = "ledgers.sqlite3"
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS registry (slug TEXT, path TEXT, value TEXT, PRIMARY KEY(slug,path));
 CREATE TABLE IF NOT EXISTS ledgers (slug TEXT PRIMARY KEY, revision INTEGER NOT NULL, generation INTEGER NOT NULL, token TEXT NOT NULL, summary TEXT NOT NULL, touched_at INTEGER NOT NULL);
@@ -20,19 +19,20 @@ CREATE TABLE IF NOT EXISTS events (slug TEXT, key TEXT, revision INTEGER, positi
 CREATE INDEX IF NOT EXISTS events_revision ON events(slug,revision);
 CREATE INDEX IF NOT EXISTS events_position ON events(slug,position);
 """
+DATABASE = "ledgers.sqlite3"
+BEGIN = "BEGIN"
+REGISTRY = "SELECT path,value FROM registry WHERE slug=?"
+PATH_END = "\x7f"
 PER_LEDGER = (*TABLES, "ledgers", "revisions", "seed_base", "seed_deltas", "events")
 GENERATION_SHIFT = 20
-BEGIN = "BEGIN"
 BEGIN_IMMEDIATE = "BEGIN IMMEDIATE"
 STORED = "SELECT 1 FROM ledgers WHERE slug=?"
 GENERATION = "SELECT generation FROM ledgers WHERE slug=?"
 TOKEN = "SELECT token FROM ledgers WHERE slug=?"
 SUMMARIES = "SELECT summary FROM ledgers ORDER BY touched_at DESC, slug"
-REGISTRY = "SELECT path,value FROM registry WHERE slug=?"
 REGISTRY_TABLE = "registry"
 UPDATE = "UPDATE ledgers SET revision=?, generation=?, summary=?, touched_at=? WHERE slug=?"
 INSERT = "INSERT INTO ledgers VALUES (?, ?, ?, ?, ?, ?)"
-PATH_END = "\x7f"
 SUMMARY_KEYS = ("slug", "title", "overview", "closed_at", "size", "open", "done", "updated_at")
 
 
