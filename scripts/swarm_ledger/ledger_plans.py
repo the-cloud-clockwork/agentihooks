@@ -154,8 +154,8 @@ def moved(doc: dict, phase: dict) -> dict:
     """The slices and tasks once phase moves to its plan: the phase's slices of an earlier plan give way to one per
     marker of the new range, and each of their tasks follows its anchor or loses its slice."""
     address = f"phases/{phase['id']}"
-    plan = next((row for row in doc.get("plans", []) if f"plans/{row['id']}" == phase.get("plan")), None)
-    held = {f"slices/{row['id']}": row["anchor"] for row in doc.get("slices", []) if row.get("phase") == address}
+    plan = next((row for row in doc["plans"] if f"plans/{row['id']}" == phase.get("plan")), None)
+    held = {f"slices/{row['id']}": row["anchor"] for row in doc["slices"] if row.get("phase") == address}
     if plan is None or all(name.startswith(f"slices/{plan['id']}.") for name in held):
         return {}
     from scripts.swarm_ledger import plan_ranges
@@ -169,8 +169,8 @@ def moved(doc: dict, phase: dict) -> dict:
         }
         for anchor in plan_ranges.anchors(doc, phase)
     }
-    slices = [row for row in doc.get("slices", []) if row.get("phase") != address] + list(fresh.values())
-    return {"slices": slices, "tasks": [_follow(task, held, fresh) for task in doc.get("tasks", [])]}
+    slices = [row for row in doc["slices"] if row.get("phase") != address] + list(fresh.values())
+    return {"slices": slices, "tasks": [_follow(task, held, fresh) for task in doc["tasks"]]}
 
 
 def _follow(task: dict, held: dict, fresh: dict) -> dict:
@@ -183,7 +183,7 @@ def _follow(task: dict, held: dict, fresh: dict) -> dict:
 
 
 def settle(doc: dict, view: dict, by: str, ctx) -> None:
-    before = {task["id"]: task.get("slice") for task in doc.get("tasks", [])}
+    before = {task["id"]: task.get("slice") for task in doc["tasks"]}
     doc.update(view)
     for task in view.get("tasks", []):
         if task.get("slice") != before[task["id"]]:
@@ -194,7 +194,7 @@ def settle(doc: dict, view: dict, by: str, ctx) -> None:
 def drop_unused(doc: dict, address: object, ctx) -> None:
     """Drop a plan this batch added once the update that would have named it is refused and no phase names it."""
     added = [event for event in ctx.events if event["kind"] == "added" and event["target"] == address]
-    if not added or any(phase.get("plan") == address for phase in doc.get("phases", [])):
+    if not added or any(phase.get("plan") == address for phase in doc["phases"]):
         return
     doc["plans"] = [row for row in doc["plans"] if f"plans/{row['id']}" != address]
     ctx.events[:] = [event for event in ctx.events if event not in added]

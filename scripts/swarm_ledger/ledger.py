@@ -459,7 +459,7 @@ def cmd_publish_plan(args):
         ]
     state = call(args.slug, ops)
     refused(state, ops)
-    tasks = ledger_plans.resliced(doc.get("tasks", []), state.get("tasks", []))
+    tasks = ledger_plans.resliced(doc["tasks"], state["tasks"])
     moved = {"tasks": tasks} if any(tasks.values()) else {}
     print(json.dumps({"plan_url": url, "published_to": where, "phases": phases, **moved}))
 

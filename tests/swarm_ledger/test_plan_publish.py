@@ -498,6 +498,23 @@ def test_publish_plan_exits_with_the_ledger_warnings(tmp_path, monkeypatch, stat
     assert titles == ["Plan for phases p1, p2"]
 
 
+def test_publish_plan_names_a_sent_op_the_ledger_refused_without_a_reason(tmp_path, monkeypatch):
+    plan = tmp_path / "plan.md"
+    plan.write_text("# Rollout\nfirst\n", encoding="utf-8")
+    stub_publish(monkeypatch, [])
+    phases = {"phases": [{"id": "p1", "title": "One"}]}
+    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: {"rejected": [ops[0]["id"]]} if ops else phases)
+    args = ledger.build_parser().parse_args(
+        ["--slug", "s", "--as", "planner", "publish-plan", str(plan), "--phase", "p1"]
+    )
+    with pytest.raises(SystemExit) as raised:
+        ledger.cmd_publish_plan(args)
+    assert raised.value.code == (
+        "plan_add on the ledger refused without a reason from the server: "
+        "check that the entry exists, that you may change it and that its text is not empty"
+    )
+
+
 def test_publish_plan_artifact_outside_a_swarm_task_names_no_task(plan_ledger, tmp_path, monkeypatch):
     core.sync(plan_ledger, ops=[{"op": "join", "id": "join-planner", "by": "planner", "role": "member"}])
     plan = tmp_path / "plan.md"
@@ -678,6 +695,11 @@ def test_republishing_a_revised_plan_moves_its_phases_and_reconciles_slices_and_
         "polish": [None, None, None],
         "ship": [f"slices/{new}.launch", "launch", "11-13"],
     }
+    assert [(e["by"], e["kind"], e["target"]) for e in state["_meta"]["events"] if e["kind"].startswith("slice ")] == [
+        ("planner", "slice changed", "tasks/build"),
+        ("planner", "slice cleared", "tasks/polish"),
+        ("planner", "slice changed", "tasks/ship"),
+    ]
     assert json.loads(capsys.readouterr().out) == {
         "plan_url": PLAN,
         "published_to": "issue",
