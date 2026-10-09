@@ -16,8 +16,8 @@ NO_HOOK = "the forced master launch reported no hook within two minutes"
 NO_LAUNCH = "no master launched"
 PROMPT = (
     "PROMOTED: swarm {slug} has had no live master for {minutes} minutes and the forced master launch failed: "
-    "{reason}. The exact launch error: {error}. You stay {name} on task {task}, but until a master binds your only "
-    "purpose is, in this order: "
+    "{reason}. The exact launch error: {error}. This replaces any master down notice you were sent. You stay {name} "
+    "on task {task}, but until a master binds your only purpose is, in this order: "
     "1. Bring the master back as soon as possible. The tick forces a new master launch every {minutes} minutes; read "
     "why it fails with agentihooks swarm {slug} status and journalctl --user -u agentihooks-swarm.service. "
     "2. Fix the causes of the outage right away in code: find where that error is raised and fix it through your own "
@@ -77,9 +77,11 @@ def run(slug, config, store, ledger, runtime, now_ms, launch) -> list[str]:
     launched = launch()
     actions = [FORCED.format(minutes=_shown(minutes)), *launched] if forcing else launched
     if config.state == "stopping":
+        master_alarm.clear(store, slug, back=False)
         return actions + _stop(slug, store, ledger, state, now_ms)
     if master := _bound(store, slug, runtime):
-        return actions + _hand_back(slug, store, ledger, state, master.name, now_ms)
+        back = master_alarm.clear(store, slug)
+        return actions + _hand_back(slug, store, ledger, state, master.name, now_ms) + back
     if not state:
         _save(store, slug, {"since": now_ms})
         return actions
@@ -151,7 +153,7 @@ def _promote(slug, store, ledger, runtime, state, minutes, now_ms):
             ledger.notify(slug, NOBODY_NOTICE.format(minutes=_shown(minutes)))
         return state, actions + ["no live engineer to promote"]
     agent, reason = engineers[0], state["failure"]
-    error = master_alarm.error(store, slug) or reason
+    error = master_alarm.error(store, slug, state.get("forced_at", state["since"])) or reason
     InboxStore(store.redis).send(SENDER, agent.name, prompt(slug, agent, reason, minutes, error))
     store.seats.note(agent.seat, "promoted", reason, now_ms)
     store.seats.note(agent.seat, "message", "the promoted prompt", now_ms)
@@ -167,7 +169,6 @@ def _promote(slug, store, ledger, runtime, state, minutes, now_ms):
 
 def _ending(slug, store, state):
     store.redis.delete(store.key(slug, KEY))
-    master_alarm.clear(store, slug)
     return _engineer(store, slug, state.get("promoted"))
 
 

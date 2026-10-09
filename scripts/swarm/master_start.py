@@ -48,12 +48,11 @@ def observe(slug: str, config: SwarmConfig, store: RedisStore, ledger: Ledger, r
         store.put_agent(slug, replace(agent, state="working"))
         store.clear_handoff(slug, MASTER)
         store.redis.delete(store.key(slug, "master-start"))
-        master_alarm.clear(store, slug)
         return []
     if pending.get("alerted") or at - pending["at"] < DEADLINE_MS:
         return []
     if agent:
-        master_alarm.failed(store, slug, NO_HOOK.format(name=agent.name))
+        master_alarm.failed(store, slug, NO_HOOK.format(name=agent.name), at)
     if agent and not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
         if not pending.get("retire_told"):
             save(store, slug, {**pending, "retire_told": True})

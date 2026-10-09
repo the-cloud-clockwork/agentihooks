@@ -81,7 +81,7 @@ def test_a_master_down_five_minutes_is_launched_first_and_no_engineer_is_promote
     ]
     assert [m.state for m in masters(store)] == ["working"]
     assert tick_master.read(store, "sw") == {}
-    assert mail(store, ENGINEER) == [("swarm", NOTICE)]
+    assert mail(store, ENGINEER) == [("swarm", NOTICE), ("swarm", master_alarm.BACK.format(slug="sw"))]
 
 
 def test_a_failed_forced_launch_promotes_one_live_engineer(store):  # noqa: F811
@@ -164,8 +164,9 @@ def test_the_promoted_prompt_states_the_purpose_in_order(store):  # noqa: F811
     agent = workers(store)[0]
     assert tick_master.prompt("sw", agent, "master spawn failed: boom", 5, "master spawn failed: boom") == (
         "PROMOTED: swarm sw has had no live master for 5 minutes and the forced master launch failed: "
-        "master spawn failed: boom. The exact launch error: master spawn failed: boom. You stay "
-        "engineer@a1b2c3-0001 on task t1, but until a master binds your only purpose is, in this order: "
+        "master spawn failed: boom. The exact launch error: master spawn failed: boom. This replaces any master down "
+        "notice you were sent. You stay engineer@a1b2c3-0001 on task t1, but until a master binds your only purpose "
+        "is, in this order: "
         "1. Bring the master back as soon as possible. The tick forces a new master launch every 5 minutes; read why "
         "it fails with agentihooks swarm sw status and journalctl --user -u agentihooks-swarm.service. "
         "2. Fix the causes of the outage right away in code: find where that error is raised and fix it through your "

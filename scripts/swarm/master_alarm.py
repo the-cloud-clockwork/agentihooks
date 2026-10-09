@@ -19,6 +19,7 @@ NOTICE = (
     "merge, put each question on the ledger with agentihooks ledger --slug {slug} --as {name} question add "
     '"<text>", and do not wait on master replies.'
 )
+BACK = "The master of swarm {slug} is live again and answers questions and replies as before."
 
 
 def read(store, slug) -> dict:
@@ -26,34 +27,46 @@ def read(store, slug) -> dict:
     return json.loads(raw) if raw else {}
 
 
-def error(store, slug) -> str:
-    return read(store, slug).get("error", "")
-
-
-def failed(store, slug, text) -> None:
-    _save(store, slug, {**read(store, slug), "error": text, "pending": True})
-
-
-def clear(store, slug) -> None:
-    store.redis.delete(store.key(slug, KEY))
-
-
-def run(slug, store, runtime) -> list[str]:
+def error(store, slug, since) -> str:
+    """The recorded launch error, only when it was recorded at or after since."""
     state = read(store, slug)
-    if not state.get("pending"):
+    return state.get("error", "") if state.get("at", -1) >= since else ""
+
+
+def failed(store, slug, text, at) -> None:
+    _save(store, slug, {**read(store, slug), "error": text, "at": at})
+
+
+def clear(store, slug, back=True) -> list[str]:
+    """back tells everyone the outage reached that the master is live again."""
+    state = read(store, slug)
+    if not state:
+        return []
+    store.redis.delete(store.key(slug, KEY))
+    if not back:
+        return []
+    inbox = InboxStore(store.redis)
+    told = [*state.get("told", []), *([seat_address(state["doctor"], MASTER)] if state.get("doctor") else [])]
+    for address in told:
+        inbox.send(SENDER, address, BACK.format(slug=slug))
+    return [f"told {address} the master is back" for address in told]
+
+
+def run(slug, store, runtime, promoted) -> list[str]:
+    """promoted names the engineer restoring the master, whose promoted prompt replaces this notice."""
+    state = read(store, slug)
+    if not state.get("error"):
         return []
     told, live = state.get("told", []), runtime.live_names()
     agents = sorted(
         a.name
         for a in store.agents(slug)
-        if a.lane != MASTER and a.state != "finished" and a.name in live and a.name not in told
+        if a.lane != MASTER and a.state != "finished" and a.name in live and a.name not in told and a.name != promoted
     )
     doctor = "" if state.get("doctor") else _doctor(store, slug)
-    _save(
-        store,
-        slug,
-        {**state, "pending": False, "doctor": state.get("doctor") or doctor, "told": sorted([*told, *agents])},
-    )
+    if not (agents or doctor):
+        return []
+    _save(store, slug, {**state, "doctor": state.get("doctor") or doctor, "told": sorted([*told, *agents])})
     inbox, actions = InboxStore(store.redis), []
     if doctor:
         inbox.send(SENDER, seat_address(doctor, MASTER), DOCTOR.format(slug=slug, error=state["error"]))
