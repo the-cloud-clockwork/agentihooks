@@ -92,7 +92,7 @@ def test_placement_spends_the_soonest_week_reset_first_only_above_the_handoff_ma
     soon = replace(account("soon"), week_resets_at=1000)
     late = replace(account("late"), week_resets_at=9000)
     edge = capacity.Account("claude", "edge", "OPEN", 0, 5, 90, 2, 10)
-    assert [seat.spend_before for seat in capacity.seats([soon, late, edge])] == [1000, 9000, None]
+    assert [seat.spend_before for seat in capacity.offered([soon, late, edge])] == [1000, 9000, None]
     config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=0, max_plan=0)
     result = capacity.calculate(config, [late, edge, soon], [])
     assert [slot["account"] for slot in result["placements"]["eng"]] == ["soon", "late"]
@@ -379,7 +379,7 @@ def test_codex_accounts_with_live_sessions_keep_their_own_quotas(monkeypatch):
     monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: pytest.fail("reached the real codex probe"))
     seen = capacity.accounts({}, 100)
     assert [(row.name, row.sessions, row.week_left, row.cap) for row in seen] == [("a", 1, 80, 6), ("b", 2, 80, None)]
-    assert [seat.account for seat in capacity.seats(seen)] == ["a"]
+    assert [(seat.account, seat.free) for seat in capacity.offered(seen)] == [("a", 5), ("b", 0)]
 
 
 def test_runtime_honors_reserved_harness_seats(tmp_path):
@@ -465,7 +465,19 @@ def test_finished_agents_do_not_reserve_capacity_and_reason_lists_all_restrictio
     assert decision["effective"] == {"eng": 2, "ci": 1, "plan": 0}
     assert decision["placeable"] == {"claude": 6, "codex": 0}
     assert decision["reason"] == "accounts are closed; Claude has 6 free seats and Codex has 0 free seats"
-    assert decision["accounts"] == [row.__dict__ for row in seen]
+    assert decision["accounts"] == [
+        {
+            "harness": "claude",
+            "name": name,
+            "state": state,
+            "sessions": 0,
+            "five_left": 90,
+            "week_left": 90,
+            "cap": cap,
+            "week_resets_at": None,
+        }
+        for name, state, cap in (("z", "CLOSED", 0), ("a", "OPEN", 3), ("b", "OPEN", 3))
+    ]
     placed_accounts = {name for lane in decision["placements"].values() for slot in lane for name in [slot["account"]]}
     assert placed_accounts == {"a", "b"}
     assert sum(decision["allocation"]["eng"].values()) == 2
@@ -1116,3 +1128,154 @@ def test_a_recycle_successor_leaves_its_warned_saved_account_or_refuses_naming_i
     with pytest.raises(SpawnError, match="^no claude account has placeable quota seats: claude w is at its week"):
         runtime.spawn(config, "plan", "planner@a1b2c3-0002", task)
     assert seen == []
+
+
+def api(harness="claude", weight=25, sessions=0, cap=10**6):
+    return capacity.Account(harness, "api", capacity._state(cap), sessions, None, None, cap, kind="api", weight=weight)
+
+
+def _api_policy(monkeypatch, weight=25, cap=10**6):
+    from scripts.routing import place
+
+    monkeypatch.setattr(capacity.place, "policy", lambda harness, environ: place.ApiPolicy(weight, cap))
+
+
+def test_live_api_sessions_count_on_the_api_row_only_and_keep_accounts_known(monkeypatch):
+    _api_policy(monkeypatch)
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"api": 2})
+    monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {"api": 1})
+    monkeypatch.setattr(capacity.codex_router.CodexAccountSource, "pool", lambda self, env: [])
+    env = {"ANTHROPIC_API_KEY": "fake", "OPENAI_API_KEY": "fake"}
+    rows = capacity.accounts(env, 100)
+    assert rows == [api(sessions=2), api("codex", sessions=1)]
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    assert "unknown" not in capacity.calculate(config, rows, [])["reason"]
+
+
+def test_live_api_sessions_without_an_api_endpoint_show_as_a_closed_api_row(monkeypatch):
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"api": 1})
+    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: [])
+    assert capacity.accounts({}, 100) == [
+        capacity.Account("claude", "api", "CLOSED", 1, None, None, 0, kind="api"),
+    ]
+
+
+def _api_share(weight, placed=8):
+    config = SwarmConfig("sw", "/repo", max_eng=placed, max_ci=0, max_plan=0)
+    rows = [account(name, cap=6) for name in ("a", "b", "c")] + [api(weight=weight)]
+    return [slot["account"] for slot in capacity.calculate(config, rows, [])["placements"]["eng"]]
+
+
+def test_api_at_weight_zero_takes_lane_seats_only_when_the_pool_is_full():
+    assert "api" not in _api_share(0)
+    config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=0, max_plan=0)
+    decision = capacity.calculate(config, [account("a", cap=1), api(weight=0)], [])
+    assert [slot["account"] for slot in decision["placements"]["eng"]] == ["a", "api"]
+
+
+def test_api_at_weight_twenty_five_takes_one_in_four_lane_seats():
+    assert _api_share(25).count("api") == 2
+
+
+def test_api_at_weight_one_hundred_takes_every_lane_seat():
+    assert _api_share(100) == ["api"] * 8
+
+
+def test_capacity_reason_counts_pool_seats_and_names_the_api_weight():
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    reason = capacity.calculate(config, [account("a"), api()], [])["reason"]
+    assert (
+        reason
+        == "accounts have quota; Claude has 3 free seats and Codex has 0 free seats; Claude api is open at weight 25"
+    )
+
+
+def test_a_closed_api_row_never_marks_the_accounts_restricted():
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    closed = capacity.Account("claude", "api", "CLOSED", 1, None, None, 0, kind="api")
+    assert capacity.calculate(config, [account("a"), closed], [])["reason"].startswith("accounts have quota;")
+
+
+def test_a_lane_restricted_to_some_accounts_splits_on_every_live_session():
+    offered = capacity.offered([account("a", cap=6, sessions=5), account("b", cap=6), api(sessions=1)])
+    assert capacity.pick(offered).account == "api"
+    assert capacity.pick(offered, lambda seat: seat.account in {"b", "api"}).account == "api"
+    assert capacity.pick(offered, lambda seat: seat.account == "b").account == "b"
+
+
+def test_an_observed_share_at_the_weight_still_sends_the_next_seat_to_the_api():
+    from scripts.swarm import quota_view
+
+    rows = [account("a", cap=6, sessions=3), api(sessions=1)]
+    decision = {"accounts": [capacity.record(row) for row in rows]}
+    assert quota_view.api_share(decision["accounts"][1], decision["accounts"]) == (25, 4)
+    assert capacity.pick(capacity.offered(rows)).account == "api"
+
+
+def test_accounts_ask_each_harness_api_side_with_the_environment_and_time(monkeypatch):
+    calls = []
+
+    def api_side(source, harness, environ, now):
+        calls.append((type(source).__name__, harness, environ, now))
+        return [], 0
+
+    monkeypatch.setattr(capacity.place, "api_side", api_side)
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: [])
+    capacity.accounts({"A": "1"}, 100)
+    assert calls == [
+        ("ClaudeApiSource", "claude", {"A": "1"}, 100),
+        ("CodexApiSource", "codex", {"A": "1"}, 100),
+    ]
+
+
+def test_allocation_honours_the_account_restriction_of_each_lane_seat():
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    rows = [account("a"), account("b", sessions=1)]
+    decision = capacity.calculate(config, rows, [], accounts={"eng": {0: {("claude", "b")}}})
+    assert decision["placements"]["eng"] == [{"index": 0, "harness": "claude", "account": "b"}]
+
+
+def test_reason_names_every_api_side_and_a_closed_one_without_a_weight():
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    closed = capacity.Account("codex", "api", "CLOSED", 1, None, None, 0, kind="api")
+    assert capacity.calculate(config, [account("a"), api(), closed], [])["reason"].endswith(
+        "; Claude api is open at weight 25; Codex api is closed"
+    )
+
+
+def test_an_account_at_its_quota_warning_never_takes_the_spawn_pick(tmp_path, monkeypatch):
+    runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, [account("w", left=5), account("b", sessions=1)])
+    assert runtime._quota_account("claude", None, None).name == "b"
+
+
+def test_sessions_on_full_accounts_weigh_in_the_api_share_of_a_spawn(tmp_path, monkeypatch):
+    rows = [account("full", cap=4, sessions=4), account("a", cap=6), api(sessions=1)]
+    runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, rows)
+    assert runtime._quota_account("claude", None, None).name == "api"
+    runtime._quota_accounts = rows[1:]
+    assert runtime._quota_account("claude", None, None).name == "a"
+
+
+def test_rotation_follows_the_api_split():
+    from scripts.swarm import runtime as module
+
+    runtime = module.HerdrRuntime(home=None, choose=lambda requested, env: ("claude", "priority"))
+    runtime._quota_accounts = [account("a", sessions=2, cap=6), account("cx", 6, 3, harness="codex"), api("codex", 0)]
+    assert runtime._rotation("", {}) == ("claude", "rotation")
+
+
+def test_an_api_account_round_trips_through_the_route_argument(tmp_path, monkeypatch):
+    runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, [account("a", cap=0), api(weight=0)])
+    runtime.spawn(config, "plan", "planner@a1b2c3-0001", {"id": "p", "title": "Plan"})
+    assert seen == [("p", "claude", "api")]
+    assert runtime._quota_accounts[-1].sessions == 1
+    agent = AgentRecord("planner@a1b2c3-0001", "plan", "p", harness="claude", account="api", profile="planner")
+    agent = replace(agent, conversation_id="c1")
+    seen.clear()
+    monkeypatch.setattr(runtime, "_holds", lambda pane, conversation: True)
+    runtime.resume(config, agent, "text")
+    assert seen == [("p", "claude", "api")]
