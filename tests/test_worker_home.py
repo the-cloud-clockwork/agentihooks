@@ -4,6 +4,7 @@ import shutil
 import sys
 import tomllib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -158,6 +159,78 @@ def test_profile_pointing_at_a_workstation_venv_fails_bootstrap(fixture):
     assert not (volume / "attempt-1").exists()
 
 
+@pytest.mark.parametrize(
+    ("command", "offending"),
+    [
+        (f"PYTHONPATH={sys.prefix}:/etc/shadow python -m hooks", "/etc/shadow"),
+        ("/usr/bin/env:/root/.ssh/id_rsa python -m hooks", "/root/.ssh/id_rsa"),
+        ("../../../../home/operator/.venv/bin/python -m hooks", "../../../../home/operator/.venv/bin/python"),
+        ("python -c 'import sys' https://brain.svc/x /etc/passwd", "/etc/passwd"),
+    ],
+)
+def test_hidden_or_relative_paths_in_a_hook_fail_bootstrap(fixture, command, offending):
+    templates, volume = fixture
+    settings = templates / "fixture-workstation" / ".claude" / "settings.overrides.json"
+    document = json.loads(settings.read_text())
+    document["hooks"]["SessionStart"][0]["hooks"][0]["command"] = command
+    settings.write_text(json.dumps(document))
+    with pytest.raises(worker_home.BootstrapError) as error:
+        worker_home.bootstrap(request(templates, volume, profiles={"claude": "fixture-workstation"}, accounts={}))
+    assert str(error.value) == f"claude hook command leaves the execution root: {offending}"
+    assert list(volume.iterdir()) == []
+
+
+def test_url_arguments_and_contained_relative_paths_are_admitted(fixture):
+    templates, volume = fixture
+    settings = templates / "fixture-workstation" / ".claude" / "settings.overrides.json"
+    document = json.loads(settings.read_text())
+    document["hooks"]["SessionStart"][0]["hooks"][0]["command"] = "python bin/probe.py https://brain.svc/x/y"
+    settings.write_text(json.dumps(document))
+    record = worker_home.bootstrap(request(templates, volume, profiles={"claude": "fixture-workstation"}, accounts={}))
+    assert record["profiles"] == {"claude": "fixture-workstation"}
+
+
+def test_render_child_environment_points_into_the_attempt(monkeypatch, tmp_path):
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setenv("PYTHONPATH", "/opt/code")
+    monkeypatch.setenv("AH_CC_TOKEN_POOL_A", "secret-value")
+    home = tmp_path / "homes" / "claude"
+    assert worker_home.child_environment(home, Path("/opt/venv/bin/python")) == {
+        "PATH": "/usr/bin:/bin",
+        "LANG": "C.UTF-8",
+        "PYTHONPATH": "/opt/code",
+        "HOME": str(home),
+        "AGENTIHOOKS_HOME": str(home / ".agentihooks"),
+        "AGENTIHOOKS_PYTHON": "/opt/venv/bin/python",
+        "AGENTIHOOKS_MCP_TRANSPORT": "stdio",
+    }
+    monkeypatch.delenv("PYTHONPATH")
+    assert "PYTHONPATH" not in worker_home.child_environment(home, Path("/opt/venv/bin/python"))
+
+
+def test_bootstrap_holds_an_exclusive_lock_on_the_volume(fixture, monkeypatch):
+    templates, volume = fixture
+    calls = []
+    monkeypatch.setattr(
+        worker_home.fcntl, "flock", lambda fd, operation: calls.append((os.readlink(f"/proc/self/fd/{fd}"), operation))
+    )
+    worker_home.bootstrap(request(templates, volume))
+    assert calls == [(str(volume), worker_home.fcntl.LOCK_EX)]
+
+
+def test_record_names_the_digest_of_each_selected_profile(fixture):
+    templates, volume = fixture
+    record = worker_home.bootstrap(request(templates, volume))
+    assert sorted(record["profile_digests"]) == ["fixture-claude", "fixture-codex"]
+    (templates / "fixture-claude" / "CLAUDE.md").write_text("# changed\n")
+    with pytest.raises(worker_home.BootstrapError) as error:
+        worker_home.bootstrap(request(templates, volume))
+    assert str(error.value) == "attempt attempt-1 was accepted from a different request"
+    other = worker_home.bootstrap(request(templates, volume, attempt="attempt-2"))
+    assert other["profile_digests"]["fixture-claude"] != record["profile_digests"]["fixture-claude"]
+    assert other["profile_digests"]["fixture-codex"] == record["profile_digests"]["fixture-codex"]
+
+
 def test_profile_link_escaping_its_template_fails_bootstrap(fixture, tmp_path):
     templates, volume = fixture
     outside = tmp_path / "outside"
@@ -200,9 +273,8 @@ def test_failed_render_removes_the_unstarted_attempt(fixture, monkeypatch):
     assert list(volume.iterdir()) == []
 
 
-class Mount:
-    def __init__(self, flags: int) -> None:
-        self.f_flag = flags
+def Mount(flags: int) -> SimpleNamespace:
+    return SimpleNamespace(f_flag=flags)
 
 
 @pytest.mark.parametrize(

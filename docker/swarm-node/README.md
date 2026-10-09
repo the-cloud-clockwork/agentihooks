@@ -31,16 +31,22 @@ the interpreter prefix or the agentihooks install fails bootstrap, as does a
 noexec home volume when Codex is requested, because its hook wrapper must
 execute. Rerunning an accepted request is a no-op, an interrupted one is
 rendered again from scratch, and a different request for an accepted attempt is
-refused. Rollback selects the prior profile templates for new attempts; existing
-attempt homes are kept for recovery. This image introduces no orchestration service or embedded database.
-The existing ledger service Dockerfile remains separate.
+refused. The execution record names the digest of each selected profile.
+Rollback selects the prior profile digest for new attempts; existing attempt
+homes are kept for recovery. Codex skips hooks it has not trusted, so the launch
+must trust them or pass `--dangerously-bypass-hook-trust`. This image introduces
+no orchestration service or embedded database. The existing ledger service
+Dockerfile remains separate.
 
 After committing inputs, `bash docker/swarm-node/smoke.sh OUTPUT_DIRECTORY`
 builds an archived clean context, starts two independent containers with network
 disabled, rejects three invalid locks, rebuilds without cache and starts the
 retained image again. It also bootstraps the fixture profiles in
 `fixtures/profiles` inside fresh containers, runs `claude mcp list`, `codex mcp
-list` and each SessionStart hook offline, and writes the SV2-IMG-02 evidence. The output contains the build manifest, software inventory,
-profile hashes and package evidence. Production deployment and new attempt image
-selection remain with antoncore GitOps. Rollback retains the previously qualified
-image for new attempts; active attempts and durable task state are unchanged.
+list`, `claude -p` and `codex exec` offline so their SessionStart hooks register
+the session, proves refusals, crash recovery and a profile rollback, and writes
+the SV2-IMG-02 evidence. The output contains the build manifest, software
+inventory, profile hashes and package evidence. Production deployment and new
+attempt image selection remain with antoncore GitOps. Rollback retains the
+previously qualified image for new attempts; active attempts and durable task
+state are unchanged.

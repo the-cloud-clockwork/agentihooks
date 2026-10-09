@@ -1,13 +1,16 @@
 import argparse
+import fcntl
 import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import time
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -16,7 +19,6 @@ RECORD = "execution.json"
 PENDING = ".bootstrap-pending"
 NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 VARIABLE = re.compile(r"[A-Z][A-Z0-9_]{0,127}")
-ABSOLUTE = re.compile(r"""(?:^|[\s'"=(;])(/[^\s'";)]*)""")
 SYSTEM_ROOTS = (Path("/usr/bin"), Path("/bin"), Path("/usr/local/bin"))
 
 
@@ -24,44 +26,32 @@ class BootstrapError(ValueError):
     pass
 
 
+@dataclass(frozen=True)
 class Request:
-    def __init__(
-        self,
-        root: Path,
-        attempt: str,
-        templates: Path,
-        profiles: dict[str, str],
-        interpreter: Path,
-        accounts: dict[str, str],
-        endpoints: dict[str, str],
-        uid: int,
-        gid: int,
-    ) -> None:
-        self.root = root
-        self.attempt = attempt
-        self.templates = templates
-        self.profiles = profiles
-        self.interpreter = interpreter
-        self.accounts = accounts
-        self.endpoints = endpoints
-        self.uid = uid
-        self.gid = gid
-
-    def document(self) -> dict:
-        return {
-            "attempt": self.attempt,
-            "profiles": self.profiles,
-            "interpreter": str(self.interpreter),
-            "accounts": self.accounts,
-            "endpoints": self.endpoints,
-            "uid": self.uid,
-            "gid": self.gid,
-        }
+    root: Path
+    attempt: str
+    templates: Path
+    profiles: dict[str, str]
+    interpreter: Path
+    accounts: dict[str, str]
+    endpoints: dict[str, str]
+    uid: int
+    gid: int
 
 
-def _validate(request: Request) -> None:
-    if not NAME.fullmatch(request.attempt):
-        raise BootstrapError(f"invalid attempt id: {request.attempt}")
+def _document(request: Request) -> dict:
+    return {
+        "attempt": request.attempt,
+        "profiles": request.profiles,
+        "interpreter": str(request.interpreter),
+        "accounts": request.accounts,
+        "endpoints": request.endpoints,
+        "uid": request.uid,
+        "gid": request.gid,
+    }
+
+
+def _check_profiles(request: Request) -> None:
     if not request.profiles:
         raise BootstrapError("no target profiles requested")
     for target, name in request.profiles.items():
@@ -72,11 +62,17 @@ def _validate(request: Request) -> None:
         source = request.templates / name
         if source.is_symlink() or not source.is_dir():
             raise BootstrapError(f"profile template not found: {name}")
+
+
+def _check_accounts(request: Request) -> None:
     for target, variable in request.accounts.items():
         if target not in request.profiles:
             raise BootstrapError(f"account reference for unrequested target: {target}")
         if not VARIABLE.fullmatch(variable):
             raise BootstrapError(f"invalid account reference for {target}")
+
+
+def _check_endpoints(request: Request) -> None:
     for key, url in request.endpoints.items():
         parts = urlsplit(url)
         if (
@@ -86,6 +82,14 @@ def _validate(request: Request) -> None:
             or "@" in parts.netloc
         ):
             raise BootstrapError(f"invalid service endpoint: {key}")
+
+
+def _validate(request: Request) -> None:
+    if not NAME.fullmatch(request.attempt):
+        raise BootstrapError(f"invalid attempt id: {request.attempt}")
+    _check_profiles(request)
+    _check_accounts(request)
+    _check_endpoints(request)
     if (os.geteuid(), os.getegid()) != (request.uid, request.gid):
         raise BootstrapError(f"bootstrap must run as {request.uid}:{request.gid}")
 
@@ -95,11 +99,19 @@ def _check_volume(request: Request) -> None:
         raise BootstrapError("execution root is mounted noexec, so the codex hook wrapper cannot run")
 
 
+def _environment() -> dict[str, str]:
+    env = {"PATH": os.environ.get("PATH", os.defpath), "LANG": "C.UTF-8"}
+    if os.environ.get("PYTHONPATH"):
+        env["PYTHONPATH"] = os.environ["PYTHONPATH"]
+    return env
+
+
 def interpreter_prefix(interpreter: Path) -> Path:
     try:
         done = subprocess.run(
             [str(interpreter), "-c", "import hooks, sys; print(sys.prefix)"],
             cwd="/",
+            env=_environment(),
             capture_output=True,
             text=True,
             timeout=30,
@@ -128,17 +140,23 @@ def _check_template(source: Path, name: str) -> None:
             raise BootstrapError(f"profile escapes its template: {name}")
 
 
-def _digest(request: Request) -> str:
-    digest = hashlib.sha256(json.dumps(request.document(), sort_keys=True).encode())
-    for name in sorted(set(request.profiles.values())):
-        source = request.templates / name
-        for path in sorted(source.rglob("*")):
-            digest.update(f"{path.relative_to(source)}\0".encode())
-            if path.is_symlink():
-                digest.update(os.readlink(path).encode())
-            elif path.is_file():
-                digest.update(path.read_bytes())
+def _tree_digest(source: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(source.rglob("*")):
+        digest.update(f"{path.relative_to(source)}\0".encode())
+        if path.is_symlink():
+            digest.update(os.readlink(path).encode())
+        elif path.is_file():
+            digest.update(path.read_bytes())
     return digest.hexdigest()
+
+
+def _profile_digests(request: Request) -> dict[str, str]:
+    return {name: _tree_digest(request.templates / name) for name in sorted(set(request.profiles.values()))}
+
+
+def _digest(request: Request, profiles: dict[str, str]) -> str:
+    return hashlib.sha256(json.dumps([_document(request), profiles], sort_keys=True).encode()).hexdigest()
 
 
 def child_command(attempt: Path, target: str) -> list[str]:
@@ -146,23 +164,19 @@ def child_command(attempt: Path, target: str) -> list[str]:
 
 
 def child_environment(home: Path, interpreter: Path) -> dict[str, str]:
-    env = {
+    return {
+        **_environment(),
         "HOME": str(home),
-        "PATH": os.environ.get("PATH", os.defpath),
-        "LANG": "C.UTF-8",
         "AGENTIHOOKS_HOME": str(home / ".agentihooks"),
         "AGENTIHOOKS_PYTHON": str(interpreter),
         "AGENTIHOOKS_MCP_TRANSPORT": "stdio",
     }
-    if os.environ.get("PYTHONPATH"):
-        env["PYTHONPATH"] = os.environ["PYTHONPATH"]
-    return env
 
 
 def render(attempt: Path, target: str) -> None:
-    pending = json.loads((attempt / PENDING).read_text())
+    pending = json.loads((attempt / PENDING).read_text(encoding="utf-8"))
     home = attempt / "homes" / target
-    with open(attempt / "run" / f"render-{target}.log", "w") as log:
+    with (attempt / "run" / f"render-{target}.log").open("w", encoding="utf-8") as log:
         done = subprocess.run(
             child_command(attempt, target),
             cwd=home,
@@ -180,7 +194,7 @@ def materialize(attempt: Path, target: str) -> None:
     from scripts.targets._common import _install_module
 
     _i = _install_module()
-    request = json.loads((attempt / PENDING).read_text())["request"]
+    request = json.loads((attempt / PENDING).read_text(encoding="utf-8"))["request"]
     name = request["profiles"][target]
     dirs = _i._resolve_profile_chain(name)
     if not dirs or dirs[0][0] != name:
@@ -209,9 +223,9 @@ def materialize(attempt: Path, target: str) -> None:
 
 
 def _claude_commands(home: Path) -> dict[str, list[str]]:
-    settings = json.loads((home / ".claude" / "settings.json").read_text())
+    settings = json.loads((home / ".claude" / "settings.json").read_text(encoding="utf-8"))
     hooks = [h.get("command", "") for groups in settings.get("hooks", {}).values() for g in groups for h in g["hooks"]]
-    servers = json.loads((home / ".claude.json").read_text()).get("mcpServers", {})
+    servers = json.loads((home / ".claude.json").read_text(encoding="utf-8")).get("mcpServers", {})
     return {
         "hook command": [*hooks, (settings.get("statusLine") or {}).get("command", "")],
         "MCP server": [_server_text(spec) for spec in servers.values()],
@@ -220,28 +234,42 @@ def _claude_commands(home: Path) -> dict[str, list[str]]:
 
 def _codex_commands(home: Path) -> dict[str, list[str]]:
     codex = home / ".codex"
-    config = tomllib.loads((codex / "config.toml").read_text())
-    hooks = json.loads((codex / "hooks.json").read_text())["hooks"]
-    wrapper = (codex / "agentihooks-hook.sh").read_text().splitlines()[1:]
+    config = tomllib.loads((codex / "config.toml").read_text(encoding="utf-8"))
+    hooks = json.loads((codex / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+    wrapper = (codex / "agentihooks-hook.sh").read_text(encoding="utf-8").splitlines()[1:]
     return {
         "hook command": [h["command"] for groups in hooks.values() for g in groups for h in g["hooks"]] + wrapper,
-        "notify command": [" ".join(config.get("notify", []))],
+        "notify command": [shlex.join(config.get("notify", []))],
         "MCP server": [_server_text(spec) for spec in config.get("mcp_servers", {}).values()],
     }
 
 
 def _server_text(spec: dict) -> str:
-    return " ".join([spec.get("command", ""), *spec.get("args", []), spec.get("cwd", "")])
+    return shlex.join([spec.get("command", ""), *spec.get("args", []), spec.get("cwd", "")])
+
+
+def _paths(text: str) -> list[str]:
+    try:
+        words = shlex.split(text)
+    except ValueError:
+        words = text.split()
+    pieces = [part for word in words if "://" not in word for item in word.split("=") for part in item.split(":")]
+    return [piece for piece in pieces if "/" in piece]
+
+
+def _leaves(path: str, roots: list[Path]) -> bool:
+    if path.startswith("/"):
+        return _escapes(Path(os.path.normpath(path)), roots)
+    return ".." in Path(path).parts
 
 
 def _check_home(attempt: Path, target: str, roots: list[Path], owner: tuple[int, int]) -> None:
     home = attempt / "homes" / target
     surfaces = _claude_commands(home) if target == "claude" else _codex_commands(home)
     for surface, texts in surfaces.items():
-        for text in texts:
-            for token in ABSOLUTE.findall(text):
-                if _escapes(Path(os.path.normpath(token)), roots):
-                    raise BootstrapError(f"{target} {surface} leaves the execution root: {token}")
+        for path in [p for text in texts for p in _paths(text)]:
+            if _leaves(path, roots):
+                raise BootstrapError(f"{target} {surface} leaves the execution root: {path}")
     for path in [home, *home.rglob("*")]:
         if path.is_symlink() and _escapes(path.resolve(), roots):
             raise BootstrapError(f"{target} link leaves the execution root: {path.resolve()}")
@@ -259,7 +287,7 @@ def _seed(attempt: Path, request: Request) -> None:
     for target in request.profiles:
         state = attempt / "homes" / target / ".agentihooks"
         state.mkdir(parents=True, mode=0o700)
-        (state / "state.json").write_text(json.dumps({"linked_profiles": linked}, indent=2) + "\n")
+        (state / "state.json").write_text(json.dumps({"linked_profiles": linked}, indent=2) + "\n", encoding="utf-8")
 
 
 def _accepted(attempt: Path, digest: str) -> dict | None:
@@ -267,7 +295,7 @@ def _accepted(attempt: Path, digest: str) -> dict | None:
         return None
     record = attempt / RECORD
     if record.is_file():
-        accepted = json.loads(record.read_text())
+        accepted = json.loads(record.read_text(encoding="utf-8"))
         if accepted["digest"] != digest:
             raise BootstrapError(f"attempt {attempt.name} was accepted from a different request")
         return {**accepted, "reused": True}
@@ -277,13 +305,24 @@ def _accepted(attempt: Path, digest: str) -> dict | None:
     return None
 
 
-def bootstrap(request: Request) -> dict:
-    _validate(request)
-    _check_volume(request)
-    for name in set(request.profiles.values()):
-        _check_template(request.templates / name, name)
-    roots = [request.root.resolve(), interpreter_prefix(request.interpreter), *code_roots(), *SYSTEM_ROOTS]
-    digest = _digest(request)
+def _record(request: Request, digest: str, profiles: dict[str, str], seconds: float) -> dict:
+    return {
+        "schema_version": 1,
+        "package": "SV2-IMG-02",
+        "attempt": request.attempt,
+        "digest": digest,
+        "profiles": request.profiles,
+        "profile_digests": profiles,
+        "accounts": request.accounts,
+        "endpoints": request.endpoints,
+        "interpreter": str(request.interpreter),
+        "homes": {target: f"homes/{target}" for target in request.profiles},
+        "worker_profile_materialization_seconds": round(seconds, 3),
+    }
+
+
+def _materialize_attempt(request: Request, profiles: dict[str, str], roots: list[Path]) -> dict:
+    digest = _digest(request, profiles)
     attempt = request.root / request.attempt
     accepted = _accepted(attempt, digest)
     if accepted is not None:
@@ -291,7 +330,8 @@ def bootstrap(request: Request) -> dict:
     started = time.monotonic()
     attempt.mkdir(mode=0o700)
     try:
-        (attempt / PENDING).write_text(json.dumps({"digest": digest, "request": request.document()}))
+        pending = {"digest": digest, "request": _document(request)}
+        (attempt / PENDING).write_text(json.dumps(pending), encoding="utf-8")
         for folder in ("run", "tmp"):
             (attempt / folder).mkdir(mode=0o700)
         _seed(attempt, request)
@@ -301,23 +341,27 @@ def bootstrap(request: Request) -> dict:
     except BootstrapError:
         shutil.rmtree(attempt)
         raise
-    record = {
-        "schema_version": 1,
-        "package": "SV2-IMG-02",
-        "attempt": request.attempt,
-        "digest": digest,
-        "profiles": request.profiles,
-        "accounts": request.accounts,
-        "endpoints": request.endpoints,
-        "interpreter": str(request.interpreter),
-        "homes": {target: f"homes/{target}" for target in request.profiles},
-        "worker_profile_materialization_seconds": round(time.monotonic() - started, 3),
-    }
+    record = _record(request, digest, profiles, time.monotonic() - started)
     staged = attempt / f"{RECORD}.tmp"
-    staged.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+    staged.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     staged.replace(attempt / RECORD)
     (attempt / PENDING).unlink()
     return {**record, "reused": False}
+
+
+def bootstrap(request: Request) -> dict:
+    _validate(request)
+    _check_volume(request)
+    for name in set(request.profiles.values()):
+        _check_template(request.templates / name, name)
+    roots = [request.root.resolve(), interpreter_prefix(request.interpreter), *code_roots(), *SYSTEM_ROOTS]
+    profiles = _profile_digests(request)
+    lock = os.open(request.root, os.O_RDONLY)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _materialize_attempt(request, profiles, roots)
+    finally:
+        os.close(lock)
 
 
 def _pairs(values: list[str], flag: str) -> dict[str, str]:

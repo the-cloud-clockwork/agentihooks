@@ -1,14 +1,12 @@
 import hashlib
 import json
 import os
-import subprocess
 import sys
 import tomllib
 from pathlib import Path
 
 from scripts.swarm_v2 import worker_home
 
-PAYLOAD = {"hook_event_name": "SessionStart", "session_id": "profile-probe", "cwd": "/home/worker", "source": "startup"}
 SERVERS = {"claude": ["agentihooks", "fixture-claude-mcp"], "codex": ["agentihooks", "fixture-codex-mcp"]}
 
 
@@ -34,41 +32,24 @@ def configuration(attempt: Path) -> dict:
     return json.loads(json.dumps(docs).replace(str(attempt), "<attempt>"))
 
 
-def run_hook(command: str, home: Path) -> list:
-    env = {**os.environ, "HOME": str(home)}
-    done = subprocess.run(
-        ["sh", "-c", command],
-        input=json.dumps(PAYLOAD),
-        text=True,
-        capture_output=True,
-        env=env,
-        cwd="/home/worker",
-        timeout=120,
-    )
-    return [done.returncode, "CONTEXT INJECTION" in done.stdout or "additionalContext" in done.stdout]
+def sessions(home: Path) -> dict:
+    registered = json.loads((home / ".agentihooks" / "active-sessions.json").read_text())
+    return {session: entry["cwd"] for session, entry in registered.items()}
 
 
 def positive(attempt: Path) -> dict:
     record = json.loads(Path("/tmp/record.json").read_text())
     docs = configuration(attempt)
-    claude_home, codex_home = attempt / "homes/claude", attempt / "homes/codex"
-    claude_hooks = [h["command"] for g in docs["claude"]["hooks"]["SessionStart"] for h in g["hooks"]]
-    codex_hooks = [h["command"] for g in docs["codex_hooks"]["hooks"]["SessionStart"] for h in g["hooks"]]
-    exits = {
-        "claude": [run_hook(c.replace("<attempt>", str(attempt)), claude_home) for c in claude_hooks],
-        "codex": [run_hook(c.replace("<attempt>", str(attempt)), codex_home) for c in codex_hooks],
-    }
+    loaded = {target: sessions(attempt / "homes" / target) for target in SERVERS}
     listed = {target: Path(f"/tmp/{target}-mcp.txt").read_text() for target in SERVERS}
     missing = {t: [s for s in names if s not in listed[t]] for t, names in SERVERS.items()}
-    assert record["reused"] is False and all(code == 0 for codes in exits.values() for code, _ in codes), exits
-    assert all(any(injected for _, injected in codes) for codes in exits.values()), exits
+    assert record["reused"] is False
+    assert all(list(found.values()) == ["/home/worker/work"] for found in loaded.values()), loaded
     assert not any(missing.values()), (missing, listed)
     return {
         "record": record,
-        "session_start_hook_exits": exits,
+        "cli_session_start_hook_registrations": {target: len(found) for target, found in loaded.items()},
         "cli_mcp_list": listed,
-        "claude_hook_commands": len(claude_hooks),
-        "codex_hook_commands": len(codex_hooks),
         "configuration": docs,
     }
 
@@ -82,6 +63,7 @@ def rejection(attempts: Path) -> dict:
         }
         for name in ("workstation", "interpreter")
     }
+    seconds = {name: round(int(Path(f"/tmp/{name}.ns").read_text()) / 1e9, 3) for name in result}
     assert result["workstation"] == {
         "exit": 1,
         "stderr": "ERROR: claude hook command leaves the execution root: /home/operator/dev/tcc-ecosystem/.venv/bin/python",
@@ -91,7 +73,31 @@ def rejection(attempts: Path) -> dict:
         "stderr": "ERROR: interpreter cannot run agentihooks: /home/operator/dev/tcc-ecosystem/.venv/bin/python",
     }, result
     assert before == after and sorted(p.name for p in attempts.iterdir()) == ["a0"]
-    return {"refusals": result, "protected_state_unchanged": True, "attempts": ["a0"]}
+    return {
+        "refusals": result,
+        "protected_state_unchanged": before == after,
+        "attempts": ["a0"],
+        "refused_bootstrap_seconds": seconds,
+    }
+
+
+def rollback(attempts: Path) -> dict:
+    v1, v2, restored = (json.loads(Path(f"/tmp/{n}.json").read_text()) for n in ("v1", "v2", "rollback"))
+    before = json.loads(Path("/tmp/before.json").read_text())
+    after = {path: entry for path, entry in snapshot(attempts).items() if not path.startswith("a3")}
+    assert v1["profile_digests"] != v2["profile_digests"]
+    assert restored["profile_digests"] == v1["profile_digests"]
+    assert configuration(attempts / "a3") == configuration(attempts / "a1")
+    assert before == after
+    return {
+        "selected_digests": {
+            "first": v1["profile_digests"],
+            "revised": v2["profile_digests"],
+            "rollback": restored["profile_digests"],
+        },
+        "rollback_configuration_equals_first": True,
+        "existing_homes_preserved": True,
+    }
 
 
 def crash(attempts: Path, attempt: str) -> None:
@@ -161,7 +167,13 @@ def main() -> None:
     else:
         print(
             json.dumps(
-                {"positive": positive, "rejection": rejection, "recovery": recovery, "noexec": noexec}[mode](path),
+                {
+                    "positive": positive,
+                    "rejection": rejection,
+                    "recovery": recovery,
+                    "rollback": rollback,
+                    "noexec": noexec,
+                }[mode](path),
                 sort_keys=True,
             )
         )
