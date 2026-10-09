@@ -109,3 +109,24 @@ def test_a_normalized_codex_push_records_the_outcome_through_the_hook(monkeypatc
     payload = normalize_payload({**raw, **shell("cd /w\ngit push -u origin HEAD")})
     hook_manager._swarm_outcome(payload)
     assert Progress(redis, "demo").read("engineer@abcdef-0001").outcome == "pushed"
+
+
+def test_the_outcome_connects_with_the_session_environment(monkeypatch):
+    import fakeredis
+
+    redis, seen = fakeredis.FakeRedis(decode_responses=True), []
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda env=None: seen.append(env) or redis)
+    assert swarm_heartbeat.outcome(shell("git push"), SWARM_ENV) is True
+    assert seen == [SWARM_ENV]
+
+
+def test_a_failed_outcome_record_is_logged_and_the_hook_goes_on(monkeypatch):
+    logged = []
+
+    def broken(payload):
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(swarm_heartbeat, "outcome", broken)
+    monkeypatch.setattr(hook_manager, "log", lambda *args: logged.append(args))
+    hook_manager._swarm_outcome(shell("git push"))
+    assert logged == [("swarm outcome record failed", {"error": "redis down"})]
