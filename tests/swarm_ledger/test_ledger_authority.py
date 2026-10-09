@@ -497,7 +497,6 @@ def _epoch_mutation_server(rejected):
         ledger_artifacts=SimpleNamespace(resolve=lambda *args: None),
         relay_to_inbox=lambda *args: None,
         doctor_phrase=lambda *args: None,
-        deliver_alerts=lambda *args: None,
     )
     op = {"op": "add", "id": "one", "by": "swarm", "thread": "chat", "text": "Write", "controller_epoch": 1}
     payload = {"operation_id": "one", "ops": [op], "guards": {"chat": resources.resource_revision(doc, "chat")}}

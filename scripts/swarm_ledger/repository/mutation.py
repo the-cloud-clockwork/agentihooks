@@ -15,18 +15,7 @@ def apply(slug, state, core, changes=None, ops=None, gate=None, created=False):
     meta["created_at"] = core.earliest(meta, ctx.at)
     rejected = core.apply_changes(doc, changes or [], ctx)
     ordered_ops = sorted(ops or [], key=lambda op: op["op"] == "stats_sync")
-    unowned = len(ctx.refused)
-    for op in ordered_ops:
-        start = len(ctx.refused)
-        if core.gated(gate, doc, op, ctx):
-            ledger_alerts.recovered(doc, op, ctx)
-        else:
-            rejected.append(op["id"])
-        doc.setdefault("alerts", [])
-        for text in ctx.refused[start:]:
-            ledger_alerts.raise_warning(
-                doc, ctx, (ledger_alerts.SYNC, text, ledger_alerts.writer(op), ledger_alerts.item(op)), []
-            )
+    rejected += [op["id"] for op in ordered_ops if not core.gated(gate, doc, op, ctx)]
     ledger_artifacts.sweep(slug, doc, ctx)
     ledger_media.attach_paths(slug, doc, ctx.events)
     ledger_priorities.derive(doc, ctx)
@@ -37,7 +26,7 @@ def apply(slug, state, core, changes=None, ops=None, gate=None, created=False):
     ledger_alerts.derive(
         doc,
         ctx,
-        [*((ledger_alerts.SIZE, w) for w in size), *((ledger_alerts.SYNC, w) for w in ctx.refused[:unowned])],
+        [*((ledger_alerts.SIZE, w) for w in size), *((ledger_alerts.SYNC, w) for w in ctx.refused)],
         meta.get("warnings") or [],
     )
     ctx.changed = bool(ctx.events or ctx.dirty or found != meta.get("warnings") or created)
