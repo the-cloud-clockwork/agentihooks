@@ -241,6 +241,7 @@ def test_queue_still_blocks_a_red_refreshed_head(conclusion):
     run, calls = refreshed_head_runner(conclusion, REFRESHED)
     with pytest.raises(SwarmError, match="^the current pull request head must pass Tests before queueing$"):
         merge_queue.operate("queue", URL, run)
+    assert not any("commits/" in str(call[0]) for call in calls)
     assert not any("enqueuePullRequest(input:" in str(call[0]) or "update-branch" in str(call[0]) for call in calls)
 
 
