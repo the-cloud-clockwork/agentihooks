@@ -261,8 +261,10 @@ jobs:
       - &install
         name: Install dependencies
         if: steps.venv.outputs.cache-hit != 'true'
+        env:
+          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
         run: |
-          uv venv --python "${{ steps.python.outputs.python-path }}" "$HOME/venv"
+          uv venv --python "$PYTHON_PATH" "$HOME/venv"
           uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - &use-venv
@@ -285,7 +287,9 @@ jobs:
           fail-on-cache-miss: true
 
       - name: Adopt latest dev durations
-        run: python -m tests.dev_durations ${{ matrix.python-version }} ~/dev-durations --hash durations.sha256
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256
 
       # NOT `-m unit`: only 439 of 999 tests carry that marker, so 560 —
       # including every ownership-scope test guarding what uninstall and prune
@@ -294,7 +298,8 @@ jobs:
         env:
           PYTHONUNBUFFERED: "1"
           PYTEST_ADDOPTS: ${{ matrix.python-version == '3.12' && format('--cov=hooks --cov=scripts --cov-report= --cov-config={0}/.github/coverage/coverage.ini', github.workspace) || '-p no:pytest_cov' }}
-        run: python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' tests/ -v -n auto --dist loadgroup --shard ${{ matrix.shard }}/${{ matrix.python-version == '3.12' && 8 || 4 }} --tb=short --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
+          SHARD: ${{ matrix.shard }}/${{ matrix.python-version == '3.12' && 8 || 4 }}
+        run: python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' tests/ -v -n auto --dist loadgroup --shard "$SHARD" --tb=short --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
 
       # Shards balance on these: per-test times here differ from a local run.
       - name: Upload durations
