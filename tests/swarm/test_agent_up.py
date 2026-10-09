@@ -172,6 +172,19 @@ def test_exit_refuses_an_operator_name_of_another_swarm(swarm):
     assert str(caught.value) == "planner@a1b2c3-0001 was not launched with agentihooks swarm other <profile> up"
 
 
+def test_the_tick_leaves_a_live_operator_agent_until_it_exits(swarm):
+    from scripts.swarm import tick
+    from tests.swarm.test_tick import FakeRuntime
+
+    rt = FakeRuntime()
+    name = agent_up.up(swarm, "sw", OperatorRuntime(), "planner", 1000).name
+    rt.live.add(name)
+    config = swarm.config("sw")
+    assert tick._strays("sw", config, swarm, rt) == []
+    agent_up.retire(swarm, "sw", name, 2000)
+    assert tick._strays("sw", config, swarm, rt) == [f"reaped stray {name}"]
+
+
 def _operator_launch(tmp_path, monkeypatch, **bounds):
     monkeypatch.delenv("AGENTIHOOKS_COMPACT_LIMIT", raising=False)
     seen = {}
@@ -227,9 +240,11 @@ def test_the_operator_launch_opens_claude_in_the_swarm_space_with_the_inbox_chan
 
 
 def test_the_operator_launch_starts_on_the_frontier_model_inside_the_swarm_effort_range(tmp_path, monkeypatch):
-    monkeypatch.setenv("AGENTIHOOKS_CLAUDE_EFFORT", "max")
+    from scripts.swarm import model_pick
+
+    monkeypatch.setattr(model_pick, "frontier", lambda harness: model_pick.ModelPick(f"{harness}-top", "max"))
     _, seen = _operator_launch(tmp_path, monkeypatch, effort_min="low", effort_max="medium")
-    assert seen["argv"][seen["argv"].index("--") + 1 :] == ["--model", "opus", "--effort", "medium"]
+    assert seen["argv"][seen["argv"].index("--") + 1 :] == ["--model", "claude-top", "--effort", "medium"]
 
 
 @pytest.mark.parametrize(("lane", "slug"), [("operator", ""), ("plan", "sw"), ("", "sw")])
@@ -252,18 +267,20 @@ def test_the_planner_prompt_plans_with_the_operator_then_registers_the_plan_and_
         "",
         "Plan with the operator here. Ask what you need, edit no code, and revise until he accepts the plan. On his "
         "accept, in this order:",
-        "1. Write the plan as markdown and its phases as JSON, the init-swarm content phases shape with planning "
-        "manual on each phase, in a folder from agentihooks scratch new.",
-        f"2. Append the phases: {led} plan phases <phases file>. Note the phase ids it prints.",
-        f"3. Publish the plan: {led} publish-plan <plan file> --phase <phase ids>. {prompt.PUBLISHED}, and links and "
+        "1. Write the plan as markdown, giving each phase its own heading whose text is exactly that phase's title, "
+        "and its phases as JSON, the init-swarm content phases shape with planning manual on each phase, in a folder "
+        "from agentihooks scratch new.",
+        f"2. Join the ledger crew: {led} join.",
+        f"3. Append the phases: {led} plan phases <phases file>. Note the phase ids it prints.",
+        f"4. Publish the plan: {led} publish-plan <plan file> --phase <phase ids>. {prompt.PUBLISHED}, and links and "
         "comments each phase.",
-        f"4. Add each phase's tasks: {led} task add - <title> --phase <id> --lane <eng or ci> --kind <kind> "
+        f"5. Add each phase's tasks: {led} task add - <title> --phase <id> --lane <eng or ci> --kind <kind> "
         '--description "<scope and Done when sentence>" --depends-on <ids> --territory <areas>. The ledger takes '
-        "tasks only in phases you appended.",
-        '5. Tell the master: agentihooks msg send master@sw "<the plan link, the phases and tasks you added, and that '
-        'they wait on its review>".',
-        "6. Tell the operator here what you registered, then end this session with agentihooks swarm sw --as "
-        "planner@a1b2c3-0001 exit.",
+        "tasks only in phases you appended, and each carries the plan link.",
+        '6. Tell the master: agentihooks msg send master@sw "<the plan link and the phase and task ids you added; '
+        'the phases wait on plan review before engineers claim them>".',
+        f"7. Leave the crew with {led} leave, tell the operator here what you registered, then end this session with "
+        "agentihooks swarm sw --as planner@a1b2c3-0001 exit.",
     ]
 
 
@@ -280,8 +297,8 @@ def test_another_role_works_with_the_operator_and_exits_when_he_says_so():
         "operator asks."
     )
     assert lines[4:] == [
-        "Work with the operator on what he asks in this pane, through a worktree and a pull request into dev for any "
-        "code change. Propose other work with agentihooks ledger --slug sw --as engineer@a1b2c3-0002 followup add "
-        '"<plain words>".',
+        "Work with the operator on what he asks in this pane. Make any code change in your own worktree (wt.sh new, "
+        "the worktree skill) and a pull request into dev. Never join the ledger crew or claim a task. Propose other "
+        'work with agentihooks ledger --slug sw --as engineer@a1b2c3-0002 followup add "<plain words>".',
         "When he says you are done, end this session with agentihooks swarm sw --as engineer@a1b2c3-0002 exit.",
     ]

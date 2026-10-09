@@ -88,6 +88,15 @@ def test_a_planner_without_a_plan_task_adds_tasks_to_a_phase_it_appended():
     assert_added(PLANNER, "p9")
 
 
+def test_a_task_added_to_an_appended_phase_carries_its_published_plan_link():
+    make_ledger()
+    append_phase(PLANNER)
+    link = {"plan_url": "https://example.com/plan/1"}
+    core.sync(SLUG, ops=[{"op": "phase_update", "id": "pub-p9", "by": PLANNER, "item": "phases/p9", "fields": link}])
+    state, _ = add(PLANNER, "p9")
+    assert next(t for t in state["tasks"] if t["id"] == "t9")["plan_url"] == "https://example.com/plan/1"
+
+
 def test_a_planner_without_a_plan_task_cannot_add_to_a_phase_another_appended():
     make_ledger()
     append_phase("master@abcdef-0001")

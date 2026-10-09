@@ -47,7 +47,7 @@ class WatchBudget:
 
     def decide(self, call, who, state):
         named = activity.NAME_RE.match(who.swarm) and activity.NAME_RE.match(who.name)
-        if not named or naming.lane_of(who.name) not in LANES:
+        if not named or naming.lane_of(who.name) not in LANES or who.lane == naming.OPERATOR:
             return Decision()
         if activity.REARM_RE.search(call.command) and not watcher_alive(who, self.ledger_dir):
             activity.mark_revived(who.swarm, who.name, self.root)
