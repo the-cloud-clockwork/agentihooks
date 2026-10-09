@@ -1,9 +1,11 @@
 """Bring a swarm master online from the operator's terminal: reopen the last master's own conversation or start a new one."""
 
 import json
+import os
 from dataclasses import dataclass, fields, replace
 from datetime import datetime, timezone
 
+from scripts import agent_choice
 from scripts.handoff import transfers
 from scripts.inbox.seats import seat_address
 from scripts.swarm import affinity, effort_range, launch_check, master_start, model_pick
@@ -120,15 +122,16 @@ def _resume(store, slug, runtime, at, previous):
 
 
 def fill(saved, config):
-    """A saved launch with its empty keys taken from the swarm config: master profile, affinity harness, frontier model."""
-    harness = saved.get("harness") or affinity.desired(config) or "claude"
-    pick = model_pick.frontier(harness)
-    defaults = {
-        "profile": _profile(config),
-        "harness": harness,
-        "model": pick.model,
-        "effort": effort_range.clamp(harness, pick.effort, effort_range.of(config)),
-    }
+    """A saved launch with its empty keys taken from the swarm config: master profile, affinity or rotation harness, frontier model."""
+    harness = saved.get("harness") or affinity.desired(config) or agent_choice.choose("", dict(os.environ))[0]
+    defaults = {"profile": _profile(config)}
+    if harness:
+        pick = model_pick.frontier(harness)
+        defaults |= {
+            "harness": harness,
+            "model": pick.model,
+            "effort": effort_range.clamp(harness, pick.effort, effort_range.of(config)),
+        }
     return {**defaults, **{key: value for key, value in saved.items() if value}}
 
 
