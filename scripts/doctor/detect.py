@@ -5,7 +5,19 @@ import re
 from dataclasses import asdict
 from functools import cache
 
-from scripts.doctor import ci, ci_read, handoffs, health, inbox, read, spawn_read, spawns, traces, traces_read
+from scripts.doctor import (
+    ci,
+    ci_read,
+    handoffs,
+    health,
+    inbox,
+    master_launches,
+    read,
+    spawn_read,
+    spawns,
+    traces,
+    traces_read,
+)
 from scripts.inbox import wake
 from scripts.inbox.store import InboxStore
 from scripts.swarm import status, timing
@@ -45,6 +57,7 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME):
         "inbox": lambda: _inbox(store, mail, slug, now_ms, env, items()),
         "handoff": lambda: handoffs.findings(read.handoffs(store, mail, home, slug, items())),
         "spawn": lambda: spawns.findings(spawn_read.records(store, slug, now_ms)),
+        "master launch": lambda: master_launches.findings(spawn_read.master_records(store, slug)),
         "startup": lambda: spawns.silent_starts(
             [asdict(a) for a in store.agents(slug)], activity.first_events(slug), now_ms
         ),
