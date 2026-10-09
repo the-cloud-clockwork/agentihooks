@@ -161,7 +161,6 @@ def test_an_invalid_replacement_slice_keeps_the_original_task():
     assert task(state) == before
 
 
-
 @pytest.mark.parametrize("destination_plan", [False, True])
 def test_phase_move_leaves_the_callers_fields_reusable(destination_plan):
     if destination_plan:
