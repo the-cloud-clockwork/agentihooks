@@ -83,6 +83,8 @@ def test_idle_master_with_work_wakes_at_twenty_minutes_and_retries(setup, source
     assert run(setup, START + 2 * WINDOW + 1) == woke(master.name)
     assert backstops(store) == [(SEAT, PROMPT)] * 2
     assert [item.state for item in open_backstops(store)] == ["pending"]
+    closed = [item.reason for item in InboxStore(store.redis).inbox(SEAT) if item.state == "done"]
+    assert closed == ["done: a newer backstop replaced it"]
     assert sent == []
 
 
