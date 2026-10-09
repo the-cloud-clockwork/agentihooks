@@ -92,7 +92,11 @@ def test_a_tick_slower_than_the_lease_keeps_writing(store, clock):
         store,
         "sw",
         held,
-        SimpleNamespace(has_capacity=lambda saved: True, spawn=lambda *args: "placed", retire=lambda agent: True),
+        SimpleNamespace(
+            has_capacity=lambda saved: True,
+            spawn=lambda *args: "placed",
+            retire=lambda agent, homes=None: (agent, homes),
+        ),
         True,
     )
     for step in range(5):
@@ -101,7 +105,7 @@ def test_a_tick_slower_than_the_lease_keeps_writing(store, clock):
     assert clock[0] - 1000 > lease.TTL_MS
     assert runtime.has_capacity(store.config("sw")) is True
     clock[0] += 120000
-    assert runtime.retire("one") is True
+    assert runtime.retire("one", homes=["home"]) == ("one", ["home"])
     clock[0] += 120000
     assert runtime.spawn(store.config("sw"), "eng", "one", {"id": "t"}) == "placed"
     assert len(writes) == 5
