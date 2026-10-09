@@ -185,6 +185,37 @@ def test_upgrade_uses_the_registered_swarm_for_modern_agent_names(tmp_path, monk
     assert operator_words.matching("master@abcdef-0001", "Registered old words", within=None) == ""
 
 
+def test_upgrade_retries_modern_names_after_the_registry_recovers(tmp_path, monkeypatch):
+    import json
+
+    import fakeredis
+
+    from hooks import _redis
+    from scripts.swarm.naming import NameRegistry
+
+    monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(_redis, "get_redis", lambda: None)
+    folder = tmp_path / "operator_words"
+    folder.mkdir()
+    path = folder / "master@abcdef-0001.json"
+    old = {"sessions": ["old"], "rows": [{"at": 100, "words": "Unresolved words"}]}
+    path.write_text(json.dumps(old))
+    assert operator_words.recorded("master@abcdef-*") == []
+    assert json.loads(path.read_text()) == old
+    assert operator_words.heard_prompt(
+        "New words", {"AGENTIHOOKS_AGENT_NAME": "master@abcdef-0001", "AGENTIHOOKS_SWARM": "demo"}, now=101
+    )
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    NameRegistry(redis).adopt("demo", "abcdef", "ledger", "repo")
+    monkeypatch.setattr(_redis, "get_redis", lambda: redis)
+    assert operator_words.matching("master@abcdef-0001", "Unresolved words", now=102) == "Unresolved words"
+    assert json.loads(path.read_text()) == {"sessions": ["old"]}
+    operator_words.forget("demo")
+    assert operator_words.recorded("master@abcdef-*") == []
+    assert operator_words.matching("master@abcdef-0001", "New words", within=None) == ""
+    assert operator_words.matching("master@abcdef-0001", "Unresolved words", within=None) == ""
+
+
 def test_upgrade_retry_keeps_one_copy_when_cleaning_the_old_file_failed(tmp_path, monkeypatch):
     import json
 

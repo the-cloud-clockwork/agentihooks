@@ -74,31 +74,37 @@ def _append(connection, swarm, name, at, words):
 
 def _legacy_swarm(name):
     from hooks._redis import get_redis
-    from scripts.swarm.naming import NameRegistry, legacy_slug
+    from scripts.swarm.naming import NameRegistry, legacy_slug, parse
 
     redis = get_redis()
-    return NameRegistry(redis).slug_of(name) if redis is not None else legacy_slug(name)
+    swarm = NameRegistry(redis).slug_of(name) if redis is not None else legacy_slug(name)
+    return None if not swarm and parse(name) else swarm
 
 
 def _migrate(connection):
     if connection.execute("SELECT 1 FROM legacy WHERE name = ''").fetchone():
         return
     clean = {}
+    pending = False
     with connection:
         connection.execute("BEGIN IMMEDIATE")
         for path in _dir().glob("*.json"):
             data = _load(path.stem)
             if not data["rows"]:
                 continue
+            swarm = _legacy_swarm(path.stem)
+            if swarm is None:
+                pending = True
+                continue
             clean[path.stem] = {"sessions": data["sessions"]}
             if connection.execute("INSERT OR IGNORE INTO legacy VALUES (?)", (path.name,)).rowcount:
-                swarm = _legacy_swarm(path.stem)
                 for row in data["rows"]:
                     _append(connection, swarm, path.stem, row["at"], row["words"])
     for name, data in clean.items():
         _save(name, data)
-    with connection:
-        connection.execute("INSERT OR IGNORE INTO legacy VALUES ('')")
+    if not pending:
+        with connection:
+            connection.execute("INSERT OR IGNORE INTO legacy VALUES ('')")
 
 
 def _line_match(connection: sqlite3.Connection, name: str, needle: str, since: float | None) -> tuple | None:
