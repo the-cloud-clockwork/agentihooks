@@ -488,6 +488,12 @@ class TestNativeShellOutcomes:
         assert self._count("prepush-ok") == 0
         assert inject.call_count == 0
 
+    @pytest.mark.parametrize("summary", ["Tests: 0 failed, 12 passed", "Found 0 errors", "1.0 errors"])
+    def test_only_a_zero_count_is_ignored(self, summary):
+        from hooks.tool_memory import _is_error
+
+        assert _is_error(summary)[0] is (summary == "1.0 errors")
+
     def test_successful_prepush_resets_a_real_failure(self):
         from hooks.context.retry_breaker import on_post_tool_result
 
