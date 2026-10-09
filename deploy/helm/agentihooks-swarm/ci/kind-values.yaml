@@ -4,10 +4,10 @@ image:
   pullPolicy: Never
 controller:
   livenessProbe:
-    initialDelaySeconds: 60
+    initialDelaySeconds: 10
     periodSeconds: 2
     timeoutSeconds: 5
     failureThreshold: 2
   terminationGracePeriodSeconds: 1
   env:
-    AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "10"
+    AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "2"

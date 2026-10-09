@@ -70,6 +70,16 @@ def test_cheap_gates_share_the_lint_job_and_each_grades_after_an_earlier_red():
     assert max(names.index(name) for name in setup) < min(names.index(name) for name in controls)
 
 
+def test_post_shard_graders_do_not_wait_on_each_other_and_the_gate_needs_each():
+    jobs = _workflow()["jobs"]
+    graders = {"shard-check", "coverage-ratchet", "sonar"}
+    for name in graders:
+        needs = jobs[name]["needs"]
+        assert "unit" in needs
+        assert not graders & set(needs), f"{name} waits on another post shard grader"
+    assert graders <= set(jobs["gate-required"]["needs"])
+
+
 def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel():
     job = _workflow()["jobs"]["semgrep"]
     assert "needs" not in job
