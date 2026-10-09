@@ -8,6 +8,6 @@ questions:
     "true": the write resolves what the priority asks
     "false": the priority still waits
 thresholds:
-  probability: 0.5
+  probability: 0.51
 rule:
   type: code

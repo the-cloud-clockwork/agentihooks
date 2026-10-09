@@ -9,6 +9,6 @@ questions:
     "true": one change surface, one review and one browser check cover every task
     "false": the tasks need separate changes, reviews or browser checks
 thresholds:
-  confidence: 0.6
+  confidence: 0.61
 rule:
   type: code

@@ -21,7 +21,7 @@ questions:
       split: Two or more unrelated public responsibilities bundled in one task that should become separate tasks.
       unresolved: The task does not say enough about the public behavior it changes to decide.
 thresholds:
-  confidence: 0.6
+  confidence: 0.61
 environment:
   confidence: AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE
 rule:
