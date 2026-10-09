@@ -15,6 +15,6 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install proof dependencies
-        run: python -m pip install pytest PyYAML
+        run: python -m pip install -e ".[dev,all]"
       - name: Exercise protected reuse command
         run: python -m pytest tests/test_ci_reuse.py -v --tb=short
