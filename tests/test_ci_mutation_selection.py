@@ -340,7 +340,7 @@ def test_multiline_operator_on_changed_line_is_mutated_and_unchanged_tokens_are_
 
 @pytest.mark.parametrize("total", [1, 2, 3, 7])
 def test_shards_split_every_mutant_name_exactly_once_and_evenly(total):
-    from scripts.ci_mutation.shards import shard_names
+    from scripts.ci_mutation.mutant_shards import shard_names
 
     names = [f"scripts.sample.x_f{n % 3}__mutmut_{n}" for n in range(1, 21)]
     shares = [shard_names(reversed(names), (index, total)) for index in range(total)]

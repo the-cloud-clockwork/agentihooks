@@ -35,6 +35,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "split",
             "kind-due",
             "helm-kind",
+            "mutation-plan",
         }
     )
     assert gate["if"] == "${{ always() }}"
@@ -467,7 +468,8 @@ def test_unit_and_lint_run_on_every_event_and_feed_the_required_gate():
 def test_mutation_runs_in_tests_beside_unit_and_lint():
     workflow = _workflow()
     job = workflow["jobs"]["mutation"]
-    assert "needs" not in job
+    assert job["needs"] == "mutation-plan"
+    assert "needs" not in workflow["jobs"]["mutation-plan"]
     assert (
         job["if"]
         == "${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}"

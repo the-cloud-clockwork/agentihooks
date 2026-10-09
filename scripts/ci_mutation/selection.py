@@ -10,8 +10,8 @@ from time import process_time
 
 from mutmut.utils.format_utils import get_mutant_name
 
+from scripts.ci_mutation.mutant_shards import shard_names
 from scripts.ci_mutation.report import mutation_lines
-from scripts.ci_mutation.shards import shard_names
 
 GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
 

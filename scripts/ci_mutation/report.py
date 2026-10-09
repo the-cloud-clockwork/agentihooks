@@ -8,7 +8,7 @@ from collections import Counter
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from scripts.ci_mutation.shards import shard_names
+from scripts.ci_mutation.mutant_shards import shard_names
 
 
 def parse_results(text: str) -> list[tuple[str, str]]:
