@@ -6,6 +6,8 @@ from scripts.routing.master_account import MasterAccount
 from scripts.routing.settings import FileSettings, RedisSettings
 from scripts.routing.slots import INTERACTIVE, SUBSCRIPTION
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
 ENV = {"AH_CC_TOKEN_luna": "t", "AH_CX_TOKEN_work": "t"}
 
 
@@ -57,7 +59,6 @@ def test_clear_removes_the_named_harnesses_only(store):
     assert master_account.declared(store, ENV) == {}
 
 
-@pytest.mark.xdist_group("fakeredis")
 def test_load_reads_the_store_the_routing_client_opens(monkeypatch):
     import fakeredis
 
