@@ -15,6 +15,18 @@ swarm's master. It names an unnamed session `master@<code>-<n>`, occupies the
 master seat, reopens a closed ledger, sets a stopped swarm running and prints
 the full master priming.
 
+## Plans versus standalone tasks
+
+- A full plan is a plan file a master or planner writes and publishes to the
+  artifacts; every task built from it carries its slice.
+- Follow ups, open questions, operator notes and orders the operator types or
+  gives are standalone tasks with no plan and no slice.
+- A standalone task that a master or planner expands because it grew wide
+  becomes a plan: write and publish the plan with slice markers, then add its
+  tasks with their slices.
+- Small self explanatory changes, such as a style tweak or a loose layout
+  change, stay standalone and never get a plan.
+
 ## Run
 
 Run it inside this session's own shell, never through another agent:

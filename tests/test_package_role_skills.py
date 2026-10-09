@@ -58,6 +58,34 @@ def test_planner_guidance_nests_task_headings_with_slice_anchors():
     ) in text
 
 
+@pytest.mark.parametrize(
+    "guidance",
+    [
+        ROLES / "master" / "CLAUDE.md",
+        ROLES / "planner" / "CLAUDE.md",
+        _skill("master"),
+        _skill("planner"),
+        ROLES.parent / "skills" / "init-swarm" / "SKILL.md",
+        ROLES.parent / "skills" / "take-master" / "SKILL.md",
+    ],
+)
+def test_plan_publishers_distinguish_full_plans_from_standalone_tasks(guidance):
+    text = " ".join(guidance.read_text().split())
+    rules = (
+        "A full plan is a plan file a master or planner writes and publishes "
+        "to the artifacts; every task built from it carries its slice.",
+        "Follow ups, open questions, operator notes and orders the operator "
+        "types or gives are standalone tasks with no plan and no slice.",
+        "A standalone task that a master or planner expands because it grew "
+        "wide becomes a plan: write and publish the plan with slice markers, "
+        "then add its tasks with their slices.",
+        "Small self explanatory changes, such as a style tweak or a loose "
+        "layout change, stay standalone and never get a plan.",
+    )
+
+    assert [rule for rule in rules if rule not in text] == []
+
+
 def _commands(text: str) -> list[str]:
     return [span for span in re.findall(r"`([^`\n]+)`", text) if span.startswith("agentihooks ")]
 
