@@ -94,21 +94,21 @@ function phaseSlices(phase) {
 
 function planGroups() {
   const known = new Set(doc.plans.map((p) => `plans/${p.id}`));
-  const groups = doc.plans.map((plan) => ({ plan, phases: doc.phases.filter((p) => p.plan === `plans/${plan.id}`) }));
+  const groups = doc.plans.map((plan) => ({ key: `plans/${plan.id}`, id: `item-plans-${plan.id}`, title: plan.title || plan.id,
+    phases: doc.phases.filter((p) => p.plan === `plans/${plan.id}`) }));
   const loose = doc.phases.filter((p) => !known.has(p.plan));
-  return loose.length ? [...groups, { plan: { id: "none", title: "Phases without a plan" }, phases: loose }] : groups;
+  return loose.length ? [...groups, { key: "unplanned", id: "phases-unplanned", title: "Phases without a plan", phases: loose }] : groups;
 }
 
-function planRow({ plan, phases }) {
-  const key = `plans/${plan.id}`;
+function planRow({ key, id, title, phases }) {
   const idOf = (p) => `item-phases-${p.id}`;
-  const fold = h("details", { class: "plan-fold" }, h("summary", {}, h("span", { class: "plan-title", text: plan.title || plan.id }),
+  const fold = h("details", { class: "plan-fold" }, h("summary", {}, h("span", { class: "plan-title", text: title }),
     h("span", { class: "plan-count", text: `${phases.length} ${phases.length === 1 ? "phase" : "phases"}` })));
   fold.open = !closedComments.has(`${key}/row`) || phases.some((p) => idOf(p) === wanted.id);
   fold.addEventListener("toggle", () => rememberComment(`${key}/row`, fold.open));
   lazy(fold, () => h("ol", { class: "plan-phases" }, ...firstPage(key, phases, idOf).map((p, i) => phaseRow(p, i + 1)),
     moreButton(key, phases.length, "more phases", render), phases.length ? null : h("li", { class: "empty", text: "None." })));
-  return h("li", { class: "plan", id: `item-plans-${plan.id}` }, fold);
+  return h("li", { class: "plan", id }, fold);
 }
 
 function phaseList() {
