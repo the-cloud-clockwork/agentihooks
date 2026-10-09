@@ -159,7 +159,9 @@ def test_the_scheduled_job_compares_the_newest_dev_runs_and_fails_on_any_differe
     triggers = workflow[True]
     assert triggers["schedule"]
     assert "workflow_dispatch" in triggers
-    assert sorted(triggers["pull_request"]["paths"]) == [
+    assert "pull_request" not in triggers
+    assert triggers["push"]["branches"] == ["dev"]
+    assert sorted(triggers["push"]["paths"]) == [
         ".github/workflows/coverage-stability.yml",
         "tests/coverage_grade.py",
         "tests/coverage_stability.py",
