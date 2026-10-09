@@ -1,25 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source_run="$1"
-shards="$2"
-if [[ "$source_run" != --downloaded ]]; then
-    if [[ "$GITHUB_EVENT_NAME" == push ]]; then
-        tree=$(git rev-parse 'HEAD^{tree}')
-        for attempt in 1 2 3 4; do
-            if passed_run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=tests-passed-$tree" \
-                --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_repository_id == .workflow_run.repository_id)] | first.workflow_run.id // empty'); then
-                break
-            fi
-            if (( attempt == 4 )); then
-                exit 1
-            fi
-            sleep $(( attempt * 5 ))
-        done
-        source_run="${passed_run:-$source_run}"
-    fi
-    python "$(dirname "$0")/collect.py" "$source_run" "$shards" .coverage-shards
+if [[ "${1:-}" != --downloaded ]]; then
+    echo "::error::Usage: combine.sh --downloaded <shards>"
+    exit 2
 fi
+shards="$2"
 
 reports=()
 config="$(dirname "$0")/coverage.ini"

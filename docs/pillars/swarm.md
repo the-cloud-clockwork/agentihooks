@@ -349,6 +349,11 @@ of the ledger page, which lists open tasks in claim order. The master, a planner
 engineer or CI agent is refused and proposes the change as a follow up. The queue rank is separate from the
 Priorities panel, which holds decisions waiting on the operator.
 
+A task filed under the wrong phase moves with `task set ID phase=P`. The master and a planner may move it; an
+engineer or CI agent is refused, and so is a phase the ledger does not hold. The move is stamped and recorded as a
+`task moved` event. Each intent verdict records the phase it was judged under, and a verdict from another phase is
+judged again on the next tick against the task's current phase.
+
 ## Redis
 
 Redis holds the swarm's runtime state, and the swarm refuses to run without it:

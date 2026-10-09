@@ -23,6 +23,19 @@ finish() {
 
 helm lint --strict "$chart"
 helm lint --strict "$chart" -f "$chart/ci/kind-values.yaml"
+digest="sha256:$(printf 'a%.0s' $(seq 64))"
+rendered="$(helm template "$release" "$chart" --set image.tag="dev@$digest")"
+if [[ $rendered != *":dev@$digest"* ]]; then
+  printf 'the chart did not render the image updater tag dev@%s\n' "$digest" >&2
+  exit 1
+fi
+for tag in "$digest" "@$digest" "$(printf 'b%.0s' $(seq 40))"; do
+  refusal="$(helm template "$release" "$chart" --set image.tag="$tag" 2>&1 >/dev/null || true)"
+  if [[ $refusal != *"must be a floating tag"* ]]; then
+    printf 'the chart did not refuse image.tag %s as a non floating tag: %s\n' "$tag" "$refusal" >&2
+    exit 1
+  fi
+done
 docker build -q -t "$image" . >/dev/null
 trap finish EXIT
 kind create cluster --name "$cluster" --wait 120s
