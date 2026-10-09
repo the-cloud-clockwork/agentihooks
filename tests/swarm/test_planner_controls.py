@@ -117,7 +117,7 @@ def test_empty_page_set_names_all_cap_fields():
         ledger_server.control_argv({"action": "set"})
     assert (
         str(caught.value) == "set needs max_eng, max_ci, max_plan, compact_limit, effort_min, effort_max, autonomy, "
-        "master_agent, overlays or gates"
+        "scaling, load_high, load_low, memory_per_agent_mb, master_agent, overlays or gates"
     )
 
 

@@ -74,7 +74,8 @@ class ChatOps(unittest.TestCase):
         )
 
     def test_an_added_chat_line_has_no_comments_thread(self):
-        state, _ = storage.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m-9", "by": "eng", "text": "hi"}])
+        state, _ = storage.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m-9", "text": "hi"}])
+        self.assertEqual(state["chat"][-1]["id"], "m-9")
         self.assertNotIn("comments", state["chat"][-1])
 
     def test_check_body_accepts_clear_without_text(self):

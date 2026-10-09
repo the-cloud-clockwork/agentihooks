@@ -81,6 +81,8 @@ def _parser() -> argparse.ArgumentParser:
     settings.add_argument("settings", nargs="*", metavar="key=value")
     sub.add_parser("show", help="Print a hive's record as JSON").add_argument("id")
     sub.add_parser("list", help="One line per hive with its liveness")
+    sub.add_parser("run", help="Publish hive telemetry every fifteen seconds")
+    sub.add_parser("install", help="Write and enable the hive user service")
     return parser
 
 
@@ -104,6 +106,14 @@ def _registry(args: argparse.Namespace) -> None:
         _list()
 
 
+def _daemon(command: str) -> int:
+    from scripts.hive import daemon
+
+    actions = {"run": lambda: daemon.run(redis_client()), "install": daemon.install}
+    result = actions[command]()
+    return 1 if result is False else 0
+
+
 def main(argv: list[str]) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -116,6 +126,8 @@ def main(argv: list[str]) -> int:
         elif args.command == "revoke":
             auth.revoke(redis_client(), args.id)
             print(f"revoked {args.id}")
+        elif args.command in ("run", "install"):
+            return _daemon(args.command)
         elif args.command == "controller":
             path = auth.write_controller_env(registry.home(), auth.issue_controller(redis_client()))
             print(f"issued a controller credential; it is in {path}")

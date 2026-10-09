@@ -17,6 +17,7 @@ from scripts.gates import intent_history, log
 from scripts.gates.base import Decision, Who
 from scripts.gates.identity import program_index, simple_commands
 from scripts.gates.verdicts import Verdicts
+from scripts.swarm import timing
 from scripts.swarm_ledger import plan_read
 
 NAME = "intent"
@@ -85,6 +86,10 @@ def mode_of(config):
 
 def _phase(doc, task):
     return next((p for p in doc["phases"] if p.get("id") == task.get("phase")), {})
+
+
+def _same_phase(record, task):
+    return record.get("phase") == task.get("phase")
 
 
 def section(doc, task):
@@ -356,7 +361,7 @@ class Check:
             if task.get("state") not in states or not task.get("pr_url"):
                 continue
             record = verdicts.read(task["id"])
-            if self.mode != "coach" and record and record["verdict"] != PENDING:
+            if self.mode != "coach" and record and record["verdict"] != PENDING and _same_phase(record, task):
                 continue
             tasks.append((task, record))
         with ThreadPoolExecutor(max_workers=2) as workers:
@@ -364,11 +369,12 @@ class Check:
                 (task, record, workers.submit(copy_context().run, self._judge, doc, task)) for task, record in tasks
             ]
             for task, record, future in pending:
-                if not record:
-                    verdicts.write(task["id"], PENDING, RUNNING, self.now_ms)
+                if not record or not _same_phase(record, task):
+                    verdicts.write(task["id"], PENDING, RUNNING, self.now_ms, phase=task.get("phase"))
                 judgment = future.result()
                 if judgment is not None:
                     actions += self._check(task, judgment, verdicts)
+                    timing.keep()
         return actions
 
     def _judge(self, doc, task):
@@ -379,6 +385,7 @@ class Check:
         if pr is None or (self.mode == "coach" and not pr.get("head")):
             return None
         previous = self._coaching().read(task["id"]) if self.mode == "coach" else None
+        previous = previous if previous and _same_phase(previous, task) else None
         if previous and previous["head"] == pr.get("head"):
             return _Judgment(pr, previous, None, None)
         state = intent_history.prepare(state_of(doc, task, pr))
@@ -405,7 +412,8 @@ class Check:
             },
             self.home,
         )
-        fields = {"coach_rounds": rounds, "head": head, "url": task["pr_url"]} if self.mode == "coach" else {}
+        coached = {"coach_rounds": rounds, "head": head, "url": task["pr_url"]} if self.mode == "coach" else {}
+        fields = {"phase": task.get("phase"), **coached}
         verdicts.write(task["id"], verdict, reason, self.now_ms, **fields)
         if self.mode == "coach":
             self._coaching().write(task["id"], verdict, reason, self.now_ms, **fields)
@@ -426,7 +434,12 @@ class Check:
         if self.mode != "coach" or self.head is None:
             return None
         previous = self._coaching().read(task["id"])
-        if not previous or not previous.get("head") or previous["head"] != self.head(task["pr_url"]):
+        if (
+            not previous
+            or not previous.get("head")
+            or not _same_phase(previous, task)
+            or previous["head"] != self.head(task["pr_url"])
+        ):
             return None
         return previous
 
@@ -439,6 +452,7 @@ class Check:
             coach_rounds=previous["coach_rounds"],
             head=previous["head"],
             url=task["pr_url"],
+            phase=task.get("phase"),
         )
 
     def _failed(self, task, who, reason, rounds=0):

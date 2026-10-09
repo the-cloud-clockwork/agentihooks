@@ -11,6 +11,7 @@ from scripts.inbox.seats import is_seat
 IMMUTABLE = ("execution_id", "generation", "name", "lane", "task", "seat", "started_at", "runtime_backend")
 WRITE_ATTEMPTS = 5
 EXECUTION_FIELDS = ("execution_id", "generation", "runtime_backend", "runtime_target")
+PROJECTION_OMITTED = (*EXECUTION_FIELDS, "hive")
 
 
 if TYPE_CHECKING:
@@ -60,6 +61,7 @@ class ExecutionRegistry:
             row = json.loads(raw)
             if name in latest:
                 row.update({field: latest[name][field] for field in EXECUTION_FIELDS})
+                row["hive"] = latest[name].get("hive", "")
             result.append(AgentRecord(**row))
         return result
 
@@ -224,12 +226,14 @@ def _check_binding(previous, current, refuse):
 
 
 def _has_identity(agent):
-    return bool(agent.execution_id or agent.generation or agent.runtime_backend != "local" or agent.runtime_target)
+    return bool(
+        agent.execution_id or agent.generation or agent.runtime_backend != "local" or agent.runtime_target or agent.hive
+    )
 
 
 def _write_projection(pipe, key, agent):
     pipe.hset(
         key,
         agent.name,
-        json.dumps({field: value for field, value in asdict(agent).items() if field not in EXECUTION_FIELDS}),
+        json.dumps({field: value for field, value in asdict(agent).items() if field not in PROJECTION_OMITTED}),
     )

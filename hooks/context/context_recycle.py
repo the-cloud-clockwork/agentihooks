@@ -65,7 +65,7 @@ def _gate_limit() -> int:
 
 def _swarm_of(environ) -> str:
     name = environ.get("AGENTIHOOKS_AGENT_NAME", "")
-    if not naming.lane_of(name):
+    if not naming.lane_of(name) or environ.get("AGENTIHOOKS_SWARM_LANE") == naming.OPERATOR:
         return ""
     return naming.legacy_slug(name) or environ.get("AGENTIHOOKS_SWARM", "")
 

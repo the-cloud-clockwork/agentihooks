@@ -319,6 +319,50 @@ def test_refusals_name_why_each_op_is_refused():
         assert authority.refusal("", {"op": "add"}) == ""
 
 
+LAUNCHED = "engineer@323133-0258"
+
+
+@pytest.fixture
+def launched():
+    import fakeredis
+
+    from scripts.swarm.naming import NameRegistry
+
+    client = fakeredis.FakeRedis(decode_responses=True)
+    client.hset(NameRegistry.key("name", LAUNCHED), mapping={"swarm": "sw", "operator": "frontend", "retired_at": 0})
+    with patch.object(authority.store, "redis_client", lambda: client):
+        yield
+
+
+def test_an_operator_launched_name_is_refused_an_item_claim(launched):
+    claim = {"op": "claim", "by": LAUNCHED, "item": "phases/p1"}
+    with patch.object(authority, "resolve_name", lambda name: name):
+        assert authority.refusal(LAUNCHED, claim) == f"{LAUNCHED} was launched with swarm profile up and claims no item"
+        assert authority.refusal(OTHER, {**claim, "by": OTHER}) == ""
+        assert authority.refusal(LAUNCHED, {**claim, "op": "join"}) == ""
+
+
+def test_the_claim_check_lets_the_claim_through_when_redis_is_down():
+    from redis import ConnectionError as Down
+
+    def down():
+        raise Down("no redis")
+
+    with patch.object(authority.store, "redis_client", down):
+        assert authority.claim_refusal(LAUNCHED) == ""
+
+
+def test_the_server_refuses_the_claim_of_an_operator_launched_name(crew, launched):
+    assert admin_put(crew, operation("join", by=LAUNCHED))[0] == 200
+    claim = operation("claim", by=LAUNCHED, item="phases/p1")
+    body = json.dumps({"ops": [claim]})
+    headers = {"Content-Type": "application/json", **agent_headers(crew, LAUNCHED)}
+    status, data, _ = send(crew, "PUT", f"/api/{SLUG}?view=agent", body, **headers)
+    reply = json.loads(data)
+    assert (status, reply["rejected"]) == (200, [claim["id"]])
+    assert f"{LAUNCHED} was launched with swarm profile up and claims no item" in reply["_meta"]["warnings"]
+
+
 def test_the_transport_selects_the_bound_credential_only_in_a_pinned_session(crew):
     with patch.dict(os.environ, {"AGENTIHOOKS_SWARM": "", "AGENTIHOOKS_AGENT_NAME": WORKER}):
         assert ledger.credentials(SLUG) == {"X-Ledger-Token": crew["admin"]}

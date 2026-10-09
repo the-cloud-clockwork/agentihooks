@@ -128,6 +128,14 @@ def test_clear_all_removes_every_plus(tab):
     assert settled(tab, []) == []
 
 
+def test_a_cleared_notification_stays_cleared_when_the_save_is_acknowledged(tab):
+    with tab.expect_response(lambda response: response.request.method == "PUT"):
+        tab.evaluate("""() => document.getElementById("notif-clear-all").click()""")
+    tab.wait_for_timeout(50)
+    assert marked(tab) == []
+    assert tab.evaluate("""() => document.getElementById("bell-badge").hidden""") is True
+
+
 def test_a_notification_from_a_page_update_adds_the_plus_live(tab, server):
     server["notifications"].append(notice("n5", "questions/q1", "on the question"))
     server["_meta"]["rev"] += 1

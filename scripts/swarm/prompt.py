@@ -185,6 +185,53 @@ def summary_lines(slug):
     ]
 
 
+def build_operator(slug, repo, name, role, profile):
+    led = f"agentihooks ledger --slug {slug} --as {name}"
+    leave = f"end this session with agentihooks swarm {slug} --as {name} exit."
+    planner = role == "planner"
+    lines = [
+        f"You are {name}, a {profile} profile agent the operator launched on swarm {slug} over the repo {repo} with "
+        f"agentihooks swarm {slug} {profile} up. You hold no task and no lane slot, and the swarm never nudges or "
+        "retires you. You answer to the operator in this pane: wait for his first message.",
+        f"The swarm ledger is {ledger_path(slug)}. Read it for context; change nothing on it "
+        + ("until the operator accepts a plan." if planner else "unless the operator asks."),
+        'Other sessions reach you as inbox messages: answer one with agentihooks msg reply <id> "<text>" and reach '
+        f'the master with agentihooks msg send master@{slug} "<text>".',
+        "",
+    ]
+    steps = operator_plan_steps(slug, led, leave) if planner else operator_work_steps(led, leave)
+    return "\n".join([*lines, *steps])
+
+
+def operator_work_steps(led, leave):
+    return [
+        "Work with the operator on what he asks in this pane. Make any code change in your own worktree (wt.sh new, "
+        "the worktree skill) and a pull request into dev. Never join the ledger crew or claim a task. Propose other "
+        f'work with {led} followup add "<plain words>".',
+        f"When he says you are done, {leave}",
+    ]
+
+
+def operator_plan_steps(slug, led, leave):
+    return [
+        "Plan with the operator here. Ask what you need, edit no code, and revise until he accepts the plan. On his "
+        "accept, in this order:",
+        "1. Write the plan as markdown, giving each phase its own heading whose text is exactly that phase's title, "
+        "and its phases as JSON, the init-swarm content phases shape with planning manual on each phase, in a folder "
+        "from agentihooks scratch new.",
+        f"2. Join the ledger crew: {led} join.",
+        f"3. Append the phases: {led} plan phases <phases file>. Note the phase ids it prints.",
+        f"4. Publish the plan: {led} publish-plan <plan file> --phase <phase ids>. {PUBLISHED}, and links and "
+        "comments each phase.",
+        f"5. Add each phase's tasks: {led} task add - <title> --phase <id> --lane <eng or ci> --kind <kind> "
+        '--description "<scope and Done when sentence>" --depends-on <ids> --territory <areas>. The ledger takes '
+        "tasks only in phases you appended, and each carries the plan link.",
+        f'6. Tell the master: agentihooks msg send master@{slug} "<the plan link and the phase and task ids you added; '
+        'the phases wait on plan review before engineers claim them>".',
+        f"7. Leave the crew with {led} leave, tell the operator here what you registered, then {leave}",
+    ]
+
+
 def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
     if lane == MASTER:
         return build_master(slug, repo, name, task, autonomy)

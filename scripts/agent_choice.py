@@ -33,7 +33,7 @@ def choose(requested: str, environ: dict[str, str]) -> tuple[str, str]:
         return requested, "requested"
     from scripts.swarm import capacity
 
-    seat = session_bands.pick(capacity.seats(capacity.accounts(dict(environ), time.time())))
+    seat = capacity.pick(capacity.offered(capacity.accounts(dict(environ), time.time())))
     return (seat.harness, "rotation") if seat else ("claude", ALL_FULL)
 
 

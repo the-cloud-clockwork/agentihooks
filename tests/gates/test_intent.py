@@ -7,6 +7,7 @@ import pytest
 from hooks.classifier import ClassifierUnavailable, YesNo
 from scripts.gates import Call, Gate, Who, entry, intent, intent_history
 from scripts.gates.verdicts import Verdicts
+from scripts.swarm import timing
 
 SLUG, ME, TASK = "demo", "engineer@1-1", "t1"
 WHO = Who(name=ME, swarm=SLUG, lane="eng", task=TASK)
@@ -424,7 +425,7 @@ class TestCheckPass:
     def test_a_fail_under_enforce_returns_the_task_to_its_agent(self, tmp_path):
         verdicts(tmp_path).write(TASK, "pending", "intent check running", NOW - 5)
         got = run_pass(tmp_path)
-        assert verdicts(tmp_path).read(TASK) == {"verdict": "fail", "reason": FAIL_REASON, "at": NOW}
+        assert verdicts(tmp_path).read(TASK) == {"verdict": "fail", "reason": FAIL_REASON, "at": NOW, "phase": "p8"}
         assert got.viewed == [URL]
         assert got.ledger.updates == [(SLUG, TASK, {"state": "claimed"}, "swarm")]
         assert got.ledger.comments == [(SLUG, TASK, FAIL_COMMENT, "swarm")]
@@ -454,6 +455,33 @@ class TestCheckPass:
         assert [(r["kind"], r["agent"], r["reason"]) for r in rows(tmp_path)] == [("observe", ME, FAIL_REASON)]
         assert got.actions == [f"task {TASK} intent check fail"]
 
+    def test_a_verdict_judged_under_another_phase_is_judged_again(self, tmp_path):
+        run_pass(tmp_path)
+        assert verdicts(tmp_path).read(TASK)["phase"] == "p8"
+        moved = {**DOC, "tasks": [{**DOC["tasks"][0], "phase": "p1"}]}
+        got = run_pass(tmp_path, usable=0.9, doc=moved)
+        assert got.viewed == [URL]
+        record = verdicts(tmp_path).read(TASK)
+        assert (record["verdict"], record["phase"]) == ("pass", "p1")
+
+    def test_a_verdict_under_the_same_phase_is_not_judged_again(self, tmp_path):
+        run_pass(tmp_path)
+        got = run_pass(tmp_path, usable=0.9)
+        assert (got.viewed, verdicts(tmp_path).read(TASK)["verdict"]) == ([], "fail")
+
+    def test_a_verdict_with_no_phase_is_judged_again(self, tmp_path):
+        verdicts(tmp_path).write(TASK, "fail", "old", NOW - 5)
+        got = run_pass(tmp_path, usable=0.9)
+        assert got.viewed == [URL]
+        assert verdicts(tmp_path).read(TASK)["verdict"] == "pass"
+
+    def test_a_fail_from_another_phase_stops_denying_while_it_is_judged_again(self, tmp_path):
+        verdicts(tmp_path).write(TASK, "fail", "old", NOW - 5, phase="p1")
+        check(tmp_path, view=lambda url: None).run(DOC)
+        assert verdicts(tmp_path).read(TASK)["verdict"] == "pending"
+        intent.Check(SLUG, "enforce", NOW + 60_000, Ledger(), Mail(), lambda url: None, None, home=tmp_path).run(DOC)
+        assert (verdicts(tmp_path).read(TASK)["verdict"], verdicts(tmp_path).read(TASK)["at"]) == ("pending", NOW)
+
     def test_off_skips_the_check(self, tmp_path):
         got = run_pass(tmp_path, mode="off")
         assert (got.actions, got.viewed, verdicts(tmp_path).read(TASK)) == ([], [], None)
@@ -464,13 +492,14 @@ class TestCheckPass:
             "verdict": "pass",
             "reason": "the phase can use it as delivered at probability 0.90",
             "at": NOW,
+            "phase": "p8",
         }
         assert (got.ledger.updates, got.mail.sent, rows(tmp_path)) == ([], [], [])
         assert got.actions == [f"task {TASK} intent check pass"]
 
     @pytest.mark.parametrize("verdict", ["pass", "fail", "unchecked"])
     def test_a_judged_task_is_not_asked_again(self, tmp_path, verdict):
-        verdicts(tmp_path).write(TASK, verdict, "done before", NOW - 5)
+        verdicts(tmp_path).write(TASK, verdict, "done before", NOW - 5, phase="p8")
         got = run_pass(tmp_path)
         assert (got.actions, got.viewed) == ([], [])
         assert verdicts(tmp_path).read(TASK)["at"] == NOW - 5
@@ -483,7 +512,12 @@ class TestCheckPass:
 
     def test_an_unreadable_pull_request_stays_pending(self, tmp_path):
         assert check(tmp_path, view=lambda url: None).run(DOC) == []
-        assert verdicts(tmp_path).read(TASK) == {"verdict": "pending", "reason": "intent check running", "at": NOW}
+        assert verdicts(tmp_path).read(TASK) == {
+            "verdict": "pending",
+            "reason": "intent check running",
+            "at": NOW,
+            "phase": "p8",
+        }
 
     def test_an_unanswered_classifier_writes_unchecked_and_counts_it(self, tmp_path):
         ledger, mail = Ledger(), Mail()
@@ -513,7 +547,7 @@ class TestCheckPass:
             {**base, "id": "c", "pr_url": "https://github.com/o/r/pull/404"},
             {**base, "id": "d"},
         ]
-        verdicts(tmp_path).write("b", "pass", "judged", NOW - 5)
+        verdicts(tmp_path).write("b", "pass", "judged", NOW - 5, phase="p8")
 
         def view(url):
             return None if url.endswith("/404") else PR
@@ -685,3 +719,23 @@ class TestPlanChunk:
             "misses_line_16",
             "misses_line_17",
         ]
+
+
+def test_the_pass_keeps_the_tick_after_each_judged_pull_request(tmp_path):
+    second = "https://github.com/o/r/pull/10"
+    doc = {**DOC, "tasks": [*DOC["tasks"], {**DOC["tasks"][0], "id": "t2", "pr_url": second}]}
+    order = []
+
+    def ask(state):
+        order.append("judge")
+        return intent.judge(state, classifier(0.9))
+
+    keeping = timing.BEFORE_STEP.set(lambda: order.append("keep"))
+    try:
+        check(tmp_path, view=lambda url: None if url == second else PR, ask=ask).run(doc)
+        assert order == ["judge", "keep"]
+        check(tmp_path / "again", ask=ask).run(doc)
+    finally:
+        timing.BEFORE_STEP.reset(keeping)
+    assert order[2] == "judge"
+    assert sorted(order[2:]) == ["judge", "judge", "keep", "keep"]

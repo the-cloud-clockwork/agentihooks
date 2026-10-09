@@ -19,7 +19,7 @@ class FencedLedger:
             return value
 
         def call(*args, **kwargs):
-            lease.require(self.store, self.slug, self.held)
+            lease.renew(self.store, self.slug, self.held)
             with lease.fencing(self.held.epoch):
                 return value(*args, **kwargs)
 
@@ -32,14 +32,22 @@ class FencedRuntime:
         self.runtime, self.spawning = runtime, spawning
 
     def __getattr__(self, name):
-        return getattr(self.runtime, name)
+        value = getattr(self.runtime, name)
+        if not callable(value):
+            return value
+
+        def call(*args, **kwargs):
+            lease.renew(self.store, self.slug, self.held)
+            return value(*args, **kwargs)
+
+        return call
 
     def has_capacity(self, config) -> bool:
-        lease.require(self.store, self.slug, self.held)
+        lease.renew(self.store, self.slug, self.held)
         return self.spawning and self.runtime.has_capacity(config)
 
     def spawn(self, config, lane, name, task):
-        lease.require(self.store, self.slug, self.held)
+        lease.renew(self.store, self.slug, self.held)
         if not self.spawning:
             raise SwarmError("controller spawning is disabled in this deployment mode")
         return self.runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
@@ -79,6 +87,25 @@ def release_tick_lock(store: RedisStore, slug: str, token: str) -> None:
             pipe.execute()
         except WatchError:
             return
+
+
+def keep_tick(store: RedisStore, slug: str, held: lease.Lease, token: str, ttl_ms: int) -> None:
+    from redis.exceptions import WatchError
+
+    lease.renew(store, slug, held)
+    key = store.key(slug, "tick-lock")
+    while True:
+        with store.redis.pipeline() as pipe:
+            try:
+                pipe.watch(key)
+                if pipe.get(key) != token:
+                    raise SwarmError("the tick lock is stale")
+                pipe.multi()
+                pipe.pexpire(key, ttl_ms)
+                pipe.execute()
+                return
+            except WatchError:
+                continue
 
 
 def run_once(store: RedisStore, ledger=None, runtime=None, messenger=None) -> dict:

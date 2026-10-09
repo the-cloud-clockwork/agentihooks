@@ -35,3 +35,13 @@ def test_a_member_note_is_stored_through_the_shared_entry():
     assert ledger_comments.agent_thread_op(thread, op, ctx, "notes/n2", "note") is True
     assert thread == [{"id": "n2", "by": "eng", "at": 42, "text": "Later", "comments": []}]
     assert ctx.events == [(("eng", "note added", "notes/n2"), {"id": "n2", "text": "Later"})]
+
+
+def test_an_operator_note_is_stored_through_the_shared_entry():
+    doc, ctx, stamps = {"notes": []}, context(), []
+    ctx.stamp = lambda *args: stamps.append(args)
+    op = {"op": "add", "id": "n3", "thread": "notes", "text": "Later"}
+    assert ledger_core.apply_op(doc, op, ctx) is True
+    assert doc["notes"] == [{"id": "n3", "by": "operator", "at": 42, "text": "Later", "comments": []}]
+    assert ctx.events == [(("operator", "note added", ""), {"id": "n3", "text": "Later"})]
+    assert stamps == [("notes", "operator")]

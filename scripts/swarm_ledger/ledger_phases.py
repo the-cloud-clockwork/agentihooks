@@ -138,6 +138,7 @@ def append(doc: dict, op: dict, ctx) -> bool:
             "done": False,
             **{k: entry[k] for k in FIELDS if k in entry},
             "planning": entry.get("planning", PLANNING_DEFAULT),
+            "added_by": op["by"],
             **({"review": dict(review)} if entry.get("planning") == "manual" else {}),
         }
         for entry in op["phases"]

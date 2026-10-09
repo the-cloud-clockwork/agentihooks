@@ -40,6 +40,7 @@ UPDATABLE = (
     "difficulty",
     "difficulty_source",
     "difficulty_confidence",
+    "phase",
 )
 BOOL_FIELDS = ("artifact",)
 DIFFICULTIES = ("S", "M", "L")
@@ -223,7 +224,8 @@ def _add(doc, op, ctx):
         return False
     if not _known(tasks, op.get("depends_on", [])):
         return False
-    if refusal := add_refusal(tasks, op):
+    appended = {p["id"] for p in doc.get("phases", []) if p.get("added_by") == op["by"]}
+    if refusal := add_refusal(tasks, op, appended):
         ctx.refused.append(refusal)
         return False
     task = {
@@ -265,7 +267,7 @@ def _add(doc, op, ctx):
     return True
 
 
-def add_refusal(tasks, op):
+def add_refusal(tasks, op, appended):
     from scripts.swarm.naming import lane_of
 
     by, lane = op["by"], lane_of(op["by"])
@@ -275,7 +277,7 @@ def add_refusal(tasks, op):
         return ""
     plans = [t for t in tasks if (t.get("claimed_by"), t.get("lane"), t.get("state")) == (by, "plan", "claimed")]
     if not plans:
-        return f"{by} holds no plan task and cannot add tasks: {PROPOSE}"
+        return "" if op.get("phase") in appended else f"{by} holds no plan task and cannot add tasks: {PROPOSE}"
     if plans[0].get("phase") != op.get("phase"):
         return f"{by} plans phase {plans[0].get('phase')} and cannot add a task outside it: {PROPOSE}"
     return ""
@@ -287,6 +289,16 @@ def rank_refusal(by, field="rank"):
     lane = lane_of(by)
     if lane in WORKER_LANES:
         return f"{by} works in the {lane} lane and cannot set a task {field}: {PROPOSE}"
+    return ""
+
+
+def update_refusal(doc, op):
+    for field in ("rank", "difficulty", "phase"):
+        if field in op["fields"] and (refusal := rank_refusal(op["by"], field)):
+            return refusal
+    phase = op["fields"].get("phase")
+    if phase is not None and phase not in {p["id"] for p in doc["phases"]}:
+        return f"phase {phase} is not on this ledger: name one of its phase ids"
     return ""
 
 
@@ -346,15 +358,12 @@ def _update(doc, op, ctx):
         return False
     if op.get("if_state") and task.get("state", "open") not in op["if_state"]:
         return True
+    if refusal := update_refusal(doc, op):
+        ctx.refused.append(refusal)
+        return False
     if "rank" in op["fields"]:
-        if refusal := rank_refusal(op["by"]):
-            ctx.refused.append(refusal)
-            return False
         op = {**op, "fields": {**op["fields"], "rank": ledger_rank.canonical(op["fields"]["rank"])}}
     if "difficulty" in op["fields"]:
-        if refusal := rank_refusal(op["by"], "difficulty"):
-            ctx.refused.append(refusal)
-            return False
         op = {**op, "fields": sized(op["fields"])}
     fields = _update_fields(task, op["fields"])
     after = {**task, **fields}
@@ -371,6 +380,8 @@ def _update(doc, op, ctx):
         from scripts.swarm_ledger import ledger_workspace
 
         ledger_workspace.rewrite(after)
+    if "phase" in changed:
+        ctx.record(op["by"], "task moved", op["item"], text=f"{task.get('phase') or 'no phase'} to {changed['phase']}")
     task.update(changed)
     if "state" in changed:
         task["done"] = changed["state"] == "done"
