@@ -1,5 +1,5 @@
 version: 1
-purpose: yes
+purpose: "yes"
 fallbacks: cli
 questions:
   - name: verdict
