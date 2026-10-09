@@ -4,7 +4,7 @@
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1939",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1968",
-  "tested_commit": "5971edbd2769e4d6de8be22c0ed6febf16fd16a6",
+  "tested_commit": "fc70937eab9de34710849a2e67733834b885bd96",
   "status": "service-fixture-qualified-awaiting-G3-integration",
   "evidence_class": "Isolated fake Redis; two independent controller processes over TCP for case A; fake server time and mocked Kubernetes transport for cases B and C; no live rollout proof.",
   "interfaces": [
