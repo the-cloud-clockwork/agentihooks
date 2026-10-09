@@ -227,10 +227,12 @@ class HerdrRuntime:
             requirements = self._quota_preferring(requirements)
         warned = self._quota_warned()
         inputs = capacity.ScaleInputs(self._quota_accounts, agents, demand, self.host, self._quota_previous, warned)
-        config, scaled = capacity.autoscaled(config, inputs)
+        host = capacity.host_room(config, inputs)
+        config, scaled = capacity.autoscaled(config, inputs, host)
         decision = capacity.calculate(
             config, self._quota_accounts, agents, demand, requirements, accounts, warned=warned
         )
+        decision["host"] = capacity.granted(host, self._quota_previous, int(now * 1000))
         if scaled:
             decision["autoscale"] = scaled
         for task, reason in self._quota_held.items():
@@ -247,7 +249,7 @@ class HerdrRuntime:
             decision["tasks"] = dict(self._quota_tasks)
         return decision
 
-    def host(self) -> host_budget.HostSample:
+    def host(self) -> host_budget.HostSample | None:
         return host_budget.read_host()
 
     def quota_previous(self, decision: dict) -> None:

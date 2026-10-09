@@ -1146,19 +1146,118 @@ def _scaling_runtime(tmp_path, monkeypatch, seen):
     return rt
 
 
-def test_a_manual_swarm_keeps_its_capacity_decision_unchanged(tmp_path, monkeypatch):
+def test_a_manual_swarm_keeps_its_caps_and_stores_the_host_decision(tmp_path, monkeypatch):
+    from scripts.swarm import host_budget
+
     seen = [account(cap=6), account("cx", harness="codex", cap=6)]
     rt = _scaling_runtime(tmp_path, monkeypatch, seen)
-    rt.host = lambda: pytest.fail("a manual swarm never reads the host")
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="manual")
     demand = {"eng": 4, "ci": 1, "plan": 0}
     previous = {
-        "autoscale": {"ceilings": {"eng": 9, "ci": 0, "plan": 0}, "pending_raise": {"target": None, "ticks": 0}}
+        "autoscale": {"ceilings": {"eng": 9, "ci": 0, "plan": 0}, "pending_raise": {"target": None, "ticks": 0}},
+        "host": {"room": 4},
     }
     rt.quota_previous(previous)
     decision = rt.quota_capacity(config, [], 100, demand)
-    expected = capacity.calculate(config, seen, [], demand, warned={})
+    room = host_budget.spawn_room(config, _roomy_host(), 4)
+    expected = {
+        **capacity.calculate(config, seen, [], demand, warned={}),
+        "host": {"room": room.room, "reason": room.reason, "limit": room.limit, "held": False, "granted_at": 100_000},
+    }
     assert json.dumps(decision, sort_keys=True) == json.dumps(expected, sort_keys=True)
+    assert "autoscale" not in decision
+
+
+def test_a_manual_swarm_with_an_unreadable_host_stores_host_unknown(tmp_path, monkeypatch):
+    rt = _scaling_runtime(tmp_path, monkeypatch, [account(cap=6)])
+    rt.host = lambda: None
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="manual")
+    decision = rt.quota_capacity(config, [], 100, {"eng": 1, "ci": 0, "plan": 0})
+    assert decision["host"] == {
+        "room": None,
+        "reason": "host unknown: the process files cannot be read, so spawns pass",
+        "limit": "unknown",
+        "held": False,
+        "last": None,
+        "granted_at": 100_000,
+    }
+
+
+def test_an_auto_swarm_reads_the_host_once_and_autoscales_on_the_stored_room(tmp_path, monkeypatch):
+    readings = [_roomy_host(), None]
+    rt = _scaling_runtime(tmp_path, monkeypatch, [account(cap=6)])
+    rt.host = lambda: readings.pop(0)
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="auto")
+    decision = rt.quota_capacity(config, [], 100, {"eng": 1, "ci": 0, "plan": 0})
+    assert readings == [None]
+    stored = {key: value for key, value in decision["host"].items() if key != "granted_at"}
+    assert decision["autoscale"]["host"] == stored
+    assert (stored["room"], stored["limit"]) == (46, "load")
+
+
+def test_the_stored_top_level_host_room_wins_over_the_autoscale_copy():
+    from scripts.swarm.host_budget import HostSample
+
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0)
+    inputs = capacity.ScaleInputs(
+        [],
+        [],
+        None,
+        lambda: HostSample(load1=10.0, cpus=8, available_mb=64_000, agents=1),
+        {"host": {"room": 5}, "autoscale": {"host": {"room": 7}}},
+    )
+    assert capacity.host_room(config, inputs)["room"] == 5
+
+
+def test_an_auto_swarm_with_an_unknown_host_scales_on_quota_alone():
+    from scripts.swarm import autoscale
+
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="auto")
+    inputs = capacity.fixture_inputs({**_readings(), "previous": {}})
+    inputs = capacity.ScaleInputs(inputs.observations, inputs.agents, inputs.demand, lambda: None, {})
+    _, decision = capacity.autoscaled(config, inputs)
+    free = capacity._placeable(capacity._open(inputs.observations, {}))
+    previous = {"ceilings": {"eng": 1, "ci": 0, "plan": 0}, "pending_raise": {"target": None, "ticks": 0}}
+    expected = autoscale.calculate(capacity._busy(inputs.agents), free, None, inputs.demand, previous)
+    assert decision["pending_raise"] == expected["pending_raise"] == {"target": 13, "ticks": 1}
+    assert (
+        decision["reason"]
+        == "Quota seats 10 (claude 6, codex 4); host room unknown; ceiling 1 of 13; raise held at tick 1 of 3."
+    )
+    assert decision["host"] == {
+        "room": None,
+        "reason": "host unknown: the process files cannot be read, so spawns pass",
+        "limit": "unknown",
+        "held": False,
+        "last": None,
+    }
+
+
+def test_an_unknown_tick_keeps_the_last_known_room_for_the_band_hold():
+    from scripts.swarm.host_budget import HostSample
+
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0)
+    unknown = capacity.ScaleInputs([], [], None, lambda: None, {"host": {"room": 4, "reason": "r", "limit": "load"}})
+    carried = capacity.host_room(config, unknown)
+    assert (carried["room"], carried["last"]) == (None, 4)
+
+    def band():
+        return HostSample(load1=10.0, cpus=8, available_mb=64_000, agents=2)
+
+    after = capacity.host_room(config, capacity.ScaleInputs([], [], None, band, {"host": carried}))
+    assert after == {"room": 4, "reason": after["reason"], "limit": "load", "held": True}
+    assert after["reason"] == "one minute load 1.25 per CPU is between the watermarks, the previous room of 4 holds"
+    again = capacity.ScaleInputs([], [], None, lambda: None, {"host": carried})
+    assert capacity.host_room(config, again)["last"] == 4
+
+
+def test_a_held_room_keeps_the_time_it_was_first_granted():
+    previous = {"host": {"room": 2, "granted_at": 1_000}}
+    held = {"room": 2, "reason": "r", "limit": "load", "held": True}
+    fresh = {**held, "held": False}
+    assert capacity.granted(held, previous, 61_000) == {**held, "granted_at": 1_000}
+    assert capacity.granted(fresh, previous, 61_000) == {**fresh, "granted_at": 61_000}
+    assert capacity.granted(held, {}, 61_000) == {**held, "granted_at": 61_000}
 
 
 def _scaling_tick(store, ledger, rt, now_ms):
@@ -1335,7 +1434,10 @@ def test_autoscaled_uses_the_swarm_watermarks_and_the_stored_state():
     previous = {"ceilings": {"eng": 2, "ci": 1, "plan": 0}, "pending_raise": {"target": 9, "ticks": 1}}
     free = capacity._placeable(capacity._open(inputs.observations, {}))
     expected = autoscale.calculate(capacity._busy(inputs.agents), free, room.room, inputs.demand, previous)
-    assert decision == {**expected, "host": {"room": room.room, "reason": room.reason}}
+    assert decision == {
+        **expected,
+        "host": {"room": room.room, "reason": room.reason, "limit": room.limit, "held": room.held},
+    }
     assert "below the low watermark" in room.reason
     caps = decision["ceilings"]
     assert (scaled.max_eng, scaled.max_ci, scaled.max_plan) == (caps["eng"], caps["ci"], caps["plan"])
@@ -1361,7 +1463,10 @@ def test_autoscaled_seeds_from_the_configured_caps_and_an_idle_raise():
     free = capacity._placeable(capacity._open(inputs.observations, {}))
     zero = {"eng": 0, "ci": 0, "plan": 0}
     expected = autoscale.calculate(capacity._busy(inputs.agents), free, room.room, zero, previous)
-    assert decision == {**expected, "host": {"room": room.room, "reason": room.reason}}
+    assert decision == {
+        **expected,
+        "host": {"room": room.room, "reason": room.reason, "limit": room.limit, "held": room.held},
+    }
 
 
 def test_autoscaled_passes_the_stored_host_room_on():
@@ -1459,7 +1564,7 @@ def test_quota_capacity_hands_autoscale_its_previous_state_and_warnings(tmp_path
     seen = []
     observed = [account(cap=6), account("warned", cap=6, left=1)]
     monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: observed)
-    monkeypatch.setattr(capacity, "autoscaled", lambda config, inputs: seen.append(inputs) or (config, None))
+    monkeypatch.setattr(capacity, "autoscaled", lambda config, inputs, host: seen.append(inputs) or (config, None))
     rt = module.HerdrRuntime(home=tmp_path)
     previous = {"autoscale": {"ceilings": {"eng": 2, "ci": 0, "plan": 0}}}
     rt.quota_previous(previous)
