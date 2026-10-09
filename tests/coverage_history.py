@@ -17,12 +17,16 @@ def git(*args: str, cwd: Path) -> str:
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout
 
 
-def renamed(repo: Path, base: str) -> dict[str, str]:
+def renamed(repo: Path, base: str) -> dict[str, str | tuple[str, ...]]:
     listed = git("diff", "--name-status", "-M", "--diff-filter=RAD", base, "HEAD", cwd=repo)
     moves, gone, added = {}, {}, {}
     for status, *paths in (line.split("\t") for line in listed.splitlines()):
         if status.startswith("R"):
             moves[paths[0]] = paths[1]
+            if paths[0].startswith(GRADED) and paths[0].endswith(".py"):
+                gone[paths[0]] = _show(repo, base)(paths[0])
+            if paths[1].startswith(GRADED) and paths[1].endswith(".py"):
+                added[paths[1]] = _show(repo, "HEAD")(paths[1])
         elif paths[0].startswith(GRADED) and paths[0].endswith(".py"):
             side, commit = (gone, base) if status == "D" else (added, "HEAD")
             side[paths[0]] = _show(repo, commit)(paths[0])
