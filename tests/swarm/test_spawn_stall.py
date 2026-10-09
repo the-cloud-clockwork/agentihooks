@@ -428,3 +428,13 @@ def test_autoscaling_with_no_host_room_offers_no_launch_seat(stalled, monkeypatc
     store.update("sw", scaling="auto")
     monkeypatch.setattr(host_budget, "read_host", lambda: host_budget.HostSample(100, 1, 0, 0))
     assert not spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
+
+
+def test_a_manual_swarm_held_by_the_host_is_not_a_spawn_stall(stalled, monkeypatch):
+    from scripts.swarm import host_budget
+
+    store, ledger, runtime, clock, _ = stalled
+    store.update("sw", scaling="manual")
+    assert spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
+    monkeypatch.setattr(host_budget, "read_host", lambda: host_budget.HostSample(100, 1, 0, 0))
+    assert not spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)

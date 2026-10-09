@@ -80,6 +80,7 @@ from scripts.swarm import (
     ledger_watchdog,
     master_launch,
     merge_queue,
+    metrics,
     naming,
     overlays,
     phase_planning,
@@ -106,7 +107,7 @@ from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.status import auto_snapshot, findings, status_report, task_counts, verdict_store
 from scripts.swarm.store import ASSIST, AUTO_SCALING, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, connect
-from scripts.swarm.tick import agent_status, primed, skip_refused, tick
+from scripts.swarm.tick import agent_status, primed, skip_refused, spawn_holds, tick
 from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, ledger_workspace, plan_shape
 from scripts.swarm_v2.runtime.routed import routed
 
@@ -234,6 +235,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
             actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms(), ledger_events.view)
             actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
             actions += skip_refused(priority_sweep.priority_pass, store, slug, doc, ledger, None, view)
+            actions += timing.call(metrics.record_pass, slug, now_ms(), len(actions))
             found = timing.call(
                 findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", [])
             )
@@ -759,7 +761,7 @@ def cmd_status(store, args):
         print(f"phase {phase_id}  {state}" + (f"  holds {', '.join(held)}" if held else ""))
     from scripts.swarm import capacity, quota_view
 
-    for line in quota_view.lines(capacity.read(store, args.slug), now_ms()):
+    for line in quota_view.lines(capacity.read(store, args.slug), now_ms()) + spawn_holds(store, args.slug):
         print(line)
     print(_snapshot_line(auto_snapshot(config)))
     print(_affinity_line(affinity.report(store, args.slug, config, agents)))
