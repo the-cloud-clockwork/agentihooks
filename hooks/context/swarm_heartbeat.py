@@ -64,18 +64,20 @@ def report(model, effort="", environ=None, redis=None, now_ms=None):
 
 
 def outcome(payload, environ=None, redis=None, now_ms=None):
-    """Record a push or an opened pull request as the worker's outcome on every harness; the ledger hook runs on Claude only."""
-    from scripts.gates.progress import Progress, outcome_of
-
+    """Record a push or an opened pull request as the pinned worker's outcome, on every harness."""
     env = os.environ if environ is None else environ
     slug, name = env.get("AGENTIHOOKS_SWARM"), env.get("AGENTIHOOKS_AGENT_NAME")
+    if not (slug and name):
+        return False
+    from scripts.gates.progress import Progress, outcome_of
+
     command = (payload.get("tool_input") or {}).get("command") if payload.get("tool_name") == "Bash" else None
     kind = outcome_of(command)
-    if not (slug and name and kind):
-        return ""
+    if not kind:
+        return False
     if redis is None:
         from scripts.swarm.store import redis_client
 
         redis = redis_client(env)
     Progress(redis, slug).outcome(name, kind, now_ms)
-    return kind
+    return True

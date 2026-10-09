@@ -64,7 +64,7 @@ def test_a_pinned_worker_push_or_opened_pull_request_records_its_outcome(command
     from scripts.gates.progress import Mark, Progress
 
     redis = fakeredis.FakeRedis(decode_responses=True)
-    assert swarm_heartbeat.outcome(shell(command), SWARM_ENV, redis, now_ms=77) == kind
+    assert swarm_heartbeat.outcome(shell(command), SWARM_ENV, redis, now_ms=77) is True
     assert Progress(redis, "demo").read("engineer@abcdef-0001") == Mark(77, kind, 0)
 
 
@@ -80,7 +80,7 @@ def test_other_calls_and_unpinned_sessions_record_nothing(payload, env):
     import fakeredis
 
     redis = fakeredis.FakeRedis(decode_responses=True)
-    assert swarm_heartbeat.outcome(payload, env, redis, now_ms=77) == ""
+    assert swarm_heartbeat.outcome(payload, env, redis, now_ms=77) is False
     assert redis.keys() == []
 
 
@@ -92,3 +92,20 @@ def test_post_tool_use_hands_every_harness_call_to_the_outcome_record(monkeypatc
     payload = {"hook_event_name": "PostToolUse", "session_id": "s1", "cwd": "/", "transcript_path": ""}
     hook_manager.on_post_tool_use({**payload, **shell("git push")})
     assert [p["tool_input"] for p in seen] == [{"command": "git push"}]
+
+
+def test_a_codex_push_payload_records_the_outcome_end_to_end(monkeypatch):
+    import fakeredis
+
+    from hooks.targets.normalizer import normalize_payload
+    from scripts.gates.progress import Progress
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    for key, value in SWARM_ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda env=None: redis)
+    raw = {"hook_event_name": "PostToolUse", "session_id": "s1", "cwd": "/", "tool_response": "ok"}
+    payload = normalize_payload({**raw, **shell("cd /w\ngit push -u origin HEAD")})
+    hook_manager._swarm_outcome(payload)
+    assert Progress(redis, "demo").read("engineer@abcdef-0001").outcome == "pushed"
