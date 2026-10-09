@@ -292,8 +292,8 @@ class HerdrRuntime:
 
         return [row for row in self._quota_open() if row.harness == harness and free_seats(row)]
 
-    def _quota_choice(self, agent, reason, fixed, lane):
-        if not hasattr(self, "_quota_accounts"):
+    def _quota_choice(self, agent, reason, fixed, lane, route_kind="subscription"):
+        if route_kind == "interactive" or not hasattr(self, "_quota_accounts"):
             return agent, reason
         allocation = getattr(self, "_quota_allocations", {}).get(lane)
         eligible = [h for h in agent_choice.AGENTS if self._quota_eligible(h) and (allocation is None or allocation[h])]
@@ -429,12 +429,13 @@ class HerdrRuntime:
             agent, reason = self._saved_choice(saved, profile, quota_transfer, environ)
         else:
             agent, reason = self._rotation(requested, environ)
-        if reason == agent_choice.ALL_FULL and not hasattr(self, "_quota_accounts"):
+        route_kind = saved.get("route_kind", task.get("route_kind", "subscription"))
+        if reason == agent_choice.ALL_FULL and not hasattr(self, "_quota_accounts") and route_kind != "interactive":
             raise SpawnError(reason, "unavailable")
         planned = getattr(self, "_quota_tasks", {}).get(task["id"])
         if planned and not (requested or saved or want):
             agent, reason = planned, "fallthrough: quota reservation"
-        agent, reason = self._quota_choice(agent, reason, bool(requested or saved or want), lane)
+        agent, reason = self._quota_choice(agent, reason, bool(requested or saved or want), lane, route_kind)
         if saved and agent != saved["harness"]:
             raise SpawnError("unsupported handoff: router substituted the original harness", "unsupported")
         task = {**task, "harness": agent}
@@ -463,7 +464,6 @@ class HerdrRuntime:
         else:
             picked = _lane_default(lane, agent, {} if quota_transfer else chosen)
         mode = PLAN_MODE if (lane, agent) == ("plan", "claude") else []
-        route_kind = saved.get("route_kind", task.get("route_kind", "subscription"))
         route = (
             ["--route", "interactive"]
             if route_kind == "interactive"

@@ -59,3 +59,38 @@ def test_spawn_preserves_explicit_interactive_route_kind(tmp_path, harness):
     passed = _passed(seen[0])
     assert passed[passed.index("--route") + 1] == "interactive"
     assert placed.route_kind == "interactive"
+
+
+@pytest.mark.parametrize("has_quota", [False, True])
+@pytest.mark.parametrize("kind", ["interactive", "subscription", "api"])
+def test_only_interactive_spawn_skips_subscription_quota(tmp_path, has_quota, kind):
+    from scripts import agent_choice
+
+    seen = []
+
+    def run(argv, **kwargs):
+        seen.append(argv)
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", agent_choice.ALL_FULL))
+    if has_quota:
+        runtime._quota_accounts = []
+    config = SimpleNamespace(
+        slug="proof",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={"master": {"agent": "claude"}},
+        autonomy="delegate",
+    )
+    task = {"id": "master", "title": "proof", "route_kind": kind}
+    if kind != "interactive":
+        from scripts.swarm.tick import SpawnError
+
+        with pytest.raises(SpawnError):
+            runtime.spawn(config, "master", "agent", task)
+        assert not seen
+        return
+    placed = runtime.spawn(config, "master", "agent", task)
+    assert placed.route_kind == "interactive"
+    assert _passed(seen[0])[:2] == ["--route", "interactive"]
