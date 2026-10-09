@@ -34,6 +34,7 @@ LIVE_PEAK_WRITES_PER_MINUTE = 29
 HEADROOM = 2
 TIMEOUT_S = 10.0
 SWEEPS = 2
+READS_PER_SECOND = 1.0
 WRITE_P95_S = 2.0
 CPU_CORES = 1.0
 CPU_WINDOW_S = 10
@@ -228,6 +229,25 @@ def client(api: ResourceClient, name: str, item: str, start: float, deadline: fl
             results["errors"].append(f"{name}: {type(exc).__name__}: {exc}")
 
 
+def reader(api: ResourceClient, items: list[str], start: float, deadline: float, results: dict) -> None:
+    """One agent polling its own task, phase and follow up, READS_PER_SECOND single resource reads a second."""
+    for n in itertools.count():
+        began = start + n / READS_PER_SECOND
+        time.sleep(max(0.0, began - time.monotonic()))
+        if began >= deadline:
+            return
+        try:
+            sent = time.monotonic()
+            api.request(SLUG, items[n % len(items)])
+            results["item_reads"].append(time.monotonic() - sent)
+        except Exception as exc:  # every failure is a red request, whatever raised it
+            results["errors"].append(f"{items[0]} reader: {type(exc).__name__}: {exc}")
+
+
+def single_items(n: int) -> list[str]:
+    return [f"tasks/t{n * (TASKS // CLIENTS)}", f"phases/p{n % PHASES}", f"followups/f-{n}"]
+
+
 def watcher(base: str, credentials: dict, deadline: float, results: dict) -> None:
     """The operator's page: one event stream held open through the load, as the live page holds it."""
     request = urllib.request.Request(
@@ -254,7 +274,7 @@ def sample_cpu(pid: int, deadline: float, results: dict) -> None:
 
 def load(port: int, token: str, pid: int, seconds: float) -> dict:
     base = f"http://127.0.0.1:{port}"
-    results = {"writes": [], "reads": [], "errors": [], "cpu": []}
+    results = {"writes": [], "reads": [], "item_reads": [], "errors": [], "cpu": []}
     apis = []
     for n in range(CLIENTS):
         name = f"ci@ab0000-{n:04d}"
@@ -267,6 +287,12 @@ def load(port: int, token: str, pid: int, seconds: float) -> dict:
     threads = [
         threading.Thread(target=client, args=(*entry, began + n * write_every() / CLIENTS, deadline, results))
         for n, entry in enumerate(apis)
+    ]
+    threads += [
+        threading.Thread(
+            target=reader, args=(api, single_items(n), began + n / CLIENTS / READS_PER_SECOND, deadline, results)
+        )
+        for n, (api, _, _) in enumerate(apis)
     ]
     threads.append(threading.Thread(target=watcher, args=(base, {"X-Ledger-Token": token}, deadline, results)))
     threads.append(threading.Thread(target=sample_cpu, args=(pid, deadline, results)))
@@ -293,6 +319,9 @@ def run(folder: Path) -> list[str]:
     writes, cores = results["writes"], busiest_window(results["cpu"])
     expected = CLIENTS * math.ceil(seconds / write_every())
     problems = verdict(writes, expected, cores, results["errors"])
+    item_reads, expected_reads = results["item_reads"], CLIENTS * math.ceil(seconds * READS_PER_SECOND)
+    if len(item_reads) < MIN_WRITES * expected_reads:
+        problems.append(f"{len(item_reads)} single resource reads completed of {expected_reads} expected")
     if "Exception in thread" in (server_log := log_path.read_text()):
         problems.append("a ledger server background thread died")
     if stale := unexpired(folder, core.now_ms()):
@@ -309,6 +338,8 @@ def run(folder: Path) -> list[str]:
                 "write_max_s": round(max(writes), 3) if writes else None,
                 "reads": len(results["reads"]),
                 "read_p95_s": round(p95(results["reads"]), 3) if results["reads"] else None,
+                "item_reads": len(item_reads),
+                "item_read_p95_s": round(p95(item_reads), 3) if item_reads else None,
                 "busiest_cores": None if cores is None else round(cores, 3),
                 "errors": len(results["errors"]),
                 "budget": {"write_p95_s": WRITE_P95_S, "cores": CPU_CORES},

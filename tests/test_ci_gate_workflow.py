@@ -54,6 +54,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "mutation-stats",
             "reuse",
             "queue-baseline",
+            "stage-budget",
         }
     )
     assert gate["if"] == "${{ always() }}"

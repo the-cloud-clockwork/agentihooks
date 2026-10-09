@@ -979,6 +979,9 @@ def cmd_pr(store, args):
 
 def cmd_merge(store, args):
     agent = _worker(store, args) if args.action != "state" else None
+    if agent is not None:
+        done_gate.require_local(store, args.slug, agent.task)
+        done_gate.require_target(store, args.slug, agent.task, args.url, LedgerClient().tasks(args.slug))
     result = merge_queue.operate(args.action, args.url)
     if result.get("waiting") == "checks":
         at = now_ms()
@@ -996,6 +999,7 @@ def cmd_merge(store, args):
 
 def cmd_done(store, args):
     agent = _worker(store, args)
+    done_gate.require_local(store, args.slug, agent.task)
     ledger = LedgerClient()
     row = next((t for t in ledger.tasks(args.slug) if t.get("id") == agent.task), {})
     proof = {key: getattr(args, f"proof_{key}") for key in ledger_kinds.PROOF_KEYS if getattr(args, f"proof_{key}")}
@@ -1138,6 +1142,8 @@ def cmd_wait(store, args):
             if pull is None or not pull.head:
                 raise SwarmError("cannot read the pull request head; retry the checks wait")
             held["head"] = pull.head
+        if held["kind"] == "mutation":
+            held["head"] = waits.mutation_wait.bind(held["target"])
     at = now_ms()
     until = at + (args.minutes or waits.CHECKED_MINUTES) * 60_000
     idle.declare_wait(store.redis, args.slug, agent.name, until, args.reason, at, on=held)
