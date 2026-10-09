@@ -1,4 +1,4 @@
-"""The operator's own words in an agent session, typed prompts and AskUserQuestion answers, the latest ROWS_KEPT.
+"""The operator's own words in an append only log, indexed by normalized line hashes.
 
 A relay to the ledger is accepted only when it quotes words recorded here for a master or planner of its swarm.
 """
@@ -48,7 +48,9 @@ def _store():
             "CREATE TABLE IF NOT EXISTS lines ("
             "name TEXT NOT NULL, hash TEXT NOT NULL, entry INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE);"
             "CREATE INDEX IF NOT EXISTS line_hash ON lines(name, hash);"
+            "CREATE TABLE IF NOT EXISTS legacy (name TEXT PRIMARY KEY);"
         )
+        _migrate(connection)
         with connection:
             yield connection
     finally:
@@ -57,6 +59,46 @@ def _store():
 
 def _hash(line: str) -> str:
     return hashlib.sha256(line.encode()).hexdigest()
+
+
+def _append(connection, swarm, name, at, words):
+    entry = connection.execute(
+        "INSERT INTO entries (swarm, name, at, words, norm) VALUES (?, ?, ?, ?, ?)",
+        (swarm, name, at, words, _norm(words)),
+    ).lastrowid
+    connection.executemany(
+        "INSERT INTO lines (name, hash, entry) VALUES (?, ?, ?)",
+        [(name, _hash(_norm(line)), entry) for line in words.splitlines()],
+    )
+
+
+def _legacy_swarm(name):
+    from hooks._redis import get_redis
+    from scripts.swarm.naming import NameRegistry, legacy_slug
+
+    redis = get_redis()
+    return NameRegistry(redis).slug_of(name) if redis is not None else legacy_slug(name)
+
+
+def _migrate(connection):
+    if connection.execute("SELECT 1 FROM legacy WHERE name = ''").fetchone():
+        return
+    clean = {}
+    with connection:
+        connection.execute("BEGIN IMMEDIATE")
+        for path in _dir().glob("*.json"):
+            data = _load(path.stem)
+            if not data["rows"]:
+                continue
+            clean[path.stem] = {"sessions": data["sessions"]}
+            if connection.execute("INSERT OR IGNORE INTO legacy VALUES (?)", (path.name,)).rowcount:
+                swarm = _legacy_swarm(path.stem)
+                for row in data["rows"]:
+                    _append(connection, swarm, path.stem, row["at"], row["words"])
+    for name, data in clean.items():
+        _save(name, data)
+    with connection:
+        connection.execute("INSERT OR IGNORE INTO legacy VALUES ('')")
 
 
 def _line_match(connection: sqlite3.Connection, name: str, needle: str, since: float | None) -> tuple | None:
@@ -101,14 +143,7 @@ def record(name: str, words: str, now: float | None = None, swarm: str = "") -> 
     if not (name and text):
         return False
     with _store() as connection:
-        entry = connection.execute(
-            "INSERT INTO entries (swarm, name, at, words, norm) VALUES (?, ?, ?, ?, ?)",
-            (swarm or "", name, now, text, _norm(text)),
-        ).lastrowid
-        connection.executemany(
-            "INSERT INTO lines (name, hash, entry) VALUES (?, ?, ?)",
-            [(name, _hash(_norm(line)), entry) for line in text.splitlines()],
-        )
+        _append(connection, swarm or "", name, now, text)
     return True
 
 
@@ -131,6 +166,8 @@ def matching(name: str, quote: str, now: float | None = None, within: float | No
 
 def _opening(name, session):
     """True once per session: the first prompt of a swarm agent is its launch or handoff prompt."""
+    with _store():
+        pass
     data = _load(name)
     if not session or session in data["sessions"]:
         return False

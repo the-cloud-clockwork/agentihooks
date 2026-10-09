@@ -138,6 +138,87 @@ def test_each_line_is_indexed_with_its_sha256_hash():
     assert operator_words._hash("ship it") == "bef4261f394bf71fd2b565cd76396ac9ed7953f9110c69ee49d7a82871238fbf"
 
 
+def test_retained_json_words_relay_after_upgrade_and_are_removed_on_forget(tmp_path, monkeypatch):
+    import json
+
+    from scripts.swarm_ledger import ledger_relay
+
+    monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path)
+    folder = tmp_path / "operator_words"
+    folder.mkdir()
+    path = folder / "demo-master-1.json"
+    path.write_text(json.dumps({"sessions": ["old-session"], "rows": [{"at": 100, "words": "Keep the old quote"}]}))
+    assert operator_words.recorded("demo-master-*") == ["demo-master-1"]
+    assert ledger_relay.verified("demo-master-1", "Keep the old quote") == "Keep the old quote"
+    assert json.loads(path.read_text()) == {"sessions": ["old-session"]}
+    assert not operator_words.heard_prompt(
+        "new words",
+        {"AGENTIHOOKS_AGENT_NAME": "demo-master-1", "AGENTIHOOKS_SWARM": "demo"},
+        now=101,
+        session="new-session",
+    )
+    assert ledger_relay.verified("demo-master-1", "Keep the old quote") == "Keep the old quote"
+    operator_words.forget("demo")
+    assert ledger_relay.verified("demo-master-1", "Keep the old quote") == ""
+    assert operator_words.recorded("demo-master-*") == []
+
+
+def test_upgrade_uses_the_registered_swarm_for_modern_agent_names(tmp_path, monkeypatch):
+    import json
+
+    import fakeredis
+
+    from hooks import _redis
+    from scripts.swarm.naming import NameRegistry
+
+    monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    NameRegistry(redis).adopt("demo", "abcdef", "ledger", "repo")
+    monkeypatch.setattr(_redis, "get_redis", lambda: redis)
+    folder = tmp_path / "operator_words"
+    folder.mkdir()
+    path = folder / "master@abcdef-0001.json"
+    path.write_text(json.dumps({"sessions": [], "rows": [{"at": 100, "words": "Registered old words"}]}))
+    assert operator_words.matching("master@abcdef-0001", "Registered old words", now=101) == "Registered old words"
+    assert json.loads(path.read_text()) == {"sessions": []}
+    operator_words.forget("demo")
+    assert operator_words.matching("master@abcdef-0001", "Registered old words", within=None) == ""
+
+
+def test_upgrade_retry_keeps_one_copy_when_cleaning_the_old_file_failed(tmp_path, monkeypatch):
+    import json
+
+    import pytest
+
+    monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path)
+    folder = tmp_path / "operator_words"
+    folder.mkdir()
+    path = folder / "demo-master-1.json"
+    path.write_text(json.dumps({"sessions": [], "rows": [{"at": 100, "words": "Once"}]}))
+    save = operator_words._save
+
+    def fail_save(name, data):
+        raise OSError("interrupted cleanup")
+
+    monkeypatch.setattr(operator_words, "_save", fail_save)
+    with pytest.raises(OSError, match="interrupted cleanup"):
+        operator_words.matching("demo-master-1", "Once", now=101)
+    monkeypatch.setattr(operator_words, "_save", save)
+    assert operator_words.matching("demo-master-1", "Once", now=101) == "Once"
+    with operator_words._store() as connection:
+        assert connection.execute("SELECT swarm, name, at, words, norm FROM entries").fetchall() == [
+            ("demo", "demo-master-1", 100.0, "Once", "once")
+        ]
+    assert json.loads(path.read_text()) == {"sessions": []}
+
+
+def test_whole_line_lookup_precedes_a_newer_substring_match():
+    operator_words.record("master@a1-1", "Ship it", now=100)
+    operator_words.record("master@a1-1", "Do not ship it", now=101)
+    assert operator_words.matching("master@a1-1", "ship it", now=102) == "Ship it"
+    assert operator_words.matching("master@a1-1", "ship", now=102) == "Do not ship it"
+
+
 def test_words_outside_the_window_are_kept_and_found_with_no_window():
     operator_words.heard_prompt("ship it", ENV, now=100)
     operator_words.record("master@a1-1", "hold it", now=LATER)
