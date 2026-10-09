@@ -405,7 +405,7 @@ class Pods:
     def __init__(self, pods):
         self.pods = {pod.uid: pod for pod in pods}
         self.deleted, self.events, self.expire, self.lists = [], [], False, 0
-        self.before_read, self.interrupt = lambda: None, None
+        self.before_read, self.before_delete, self.interrupt = lambda: None, lambda: None, None
 
     def list_pods(self, selector):
         self.lists += 1
@@ -426,6 +426,7 @@ class Pods:
         return next((pod for pod in self.pods.values() if pod.name == name), None)
 
     def delete_pod(self, name, uid):
+        self.before_delete()
         self.deleted.append((name, uid))
         self.events.append(("DELETED", self.pods.pop(uid), f"deleted-{uid}"))
 
@@ -529,6 +530,35 @@ def test_takeover_before_delete_refuses_the_delete(fixture):
         controller.acquire()
     assert pods.deleted == []
     assert not controller.ready
+
+
+def test_grant_revoked_between_read_and_delete_refuses_the_delete(fixture):
+    store, _, transport, _, grant = fixture
+    pods = Pods([managed("eng-2", "exec-orphan")])
+    controller = observed(store, transport, grant, pods)
+    pods.before_read = lambda: grant.update(allowed=False)
+    with pytest.raises(SwarmError, match="^a scoped controller grant is required$"):
+        controller.acquire()
+    assert pods.deleted == []
+
+
+def test_takeover_during_delete_keeps_the_new_leader_counts(fixture):
+    store, (_, second), transport, clock, grant = fixture
+    pods = Pods([])
+    controller = observed(store, transport, grant, pods)
+    assert controller.acquire()
+    counts = store.redis.hgetall(store.key("fixture", "controller-orphans"))
+    pods.pods = {"uid-eng-2": managed("eng-2", "exec-orphan")}
+
+    def takeover():
+        clock[0] += lease.TTL_MS
+        assert second.acquire()
+
+    pods.before_delete, pods.expire = takeover, True
+    with pytest.raises(SwarmError, match="^the controller lease is stale$"):
+        controller.reconcile()
+    assert pods.deleted == [("eng-2", "uid-eng-2")]
+    assert store.redis.hgetall(store.key("fixture", "controller-orphans")) == counts
 
 
 def test_disabled_cleanup_keeps_orphans_while_matching_continues(fixture):

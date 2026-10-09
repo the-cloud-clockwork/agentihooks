@@ -98,13 +98,12 @@ class Reconciler:
             else:
                 by_execution.setdefault(execution_id, []).append(pod)
         for execution_id, group in sorted(by_execution.items()):
-            self._settle(plan, (journals, superseded), execution_id, group)
+            self._settle(plan, journals, superseded, execution_id, group)
         plan.missing_pods = sorted(journals - set(by_execution))
         plan.observed["missing_pod"] = len(plan.missing_pods)
         return plan
 
-    def _settle(self, plan: Plan, known: tuple[set, set], execution_id: str, group: list[Pod]) -> None:
-        journals, superseded = known
+    def _settle(self, plan: Plan, journals: set, superseded: set, execution_id: str, group: list[Pod]) -> None:
         live = [pod for pod in group if not pod.deleting]
         plan.observed["terminating"] += len(group) - len(live)
         if len(live) > 1:
