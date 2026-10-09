@@ -50,9 +50,6 @@ jobs:
   worker-image:
     if: inputs.proof == 'worker-image'
     uses: ./.github/workflows/swarm-node-smoke.yml
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   swarm-image:
     if: inputs.proof == 'swarm-image'
@@ -61,16 +58,10 @@ jobs:
   brain-smoke:
     if: inputs.proof == 'brain-smoke'
     uses: ./.github/workflows/brain-smoke.yml
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   helm-kind:
     if: inputs.proof == 'helm-kind'
     uses: ./.github/workflows/helm-kind.yml
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   tests:
     if: github.event_name == 'push' || inputs.proof == 'tests'

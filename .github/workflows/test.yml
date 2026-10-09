@@ -28,9 +28,6 @@ permissions:
 jobs:
   worker-image:
     uses: ./.github/workflows/swarm-node-smoke.yml
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
   swarm-image:
     uses: ./.github/workflows/swarm-smoke.yml
   semgrep:
@@ -40,9 +37,6 @@ jobs:
 
   brain-smoke:
     uses: ./.github/workflows/brain-smoke.yml
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   ledger-load:
     uses: ./.github/workflows/ledger-load.yml
@@ -75,9 +69,6 @@ jobs:
     needs: kind-due
     if: ${{ needs.kind-due.outputs.due == 'true' }}
     uses: ./.github/workflows/helm-kind.yml
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   # Every shard restores this one key, or nothing when the lookup found none, so all shards of a run split alike.
   durations:

@@ -2,11 +2,6 @@ name: brain-smoke
 
 on:
   workflow_call:
-    secrets:
-      DOCKERHUB_USERNAME:
-        required: true
-      DOCKERHUB_TOKEN:
-        required: true
   workflow_dispatch:
 
 permissions:
@@ -19,9 +14,6 @@ jobs:
     services:
       otel-collector:
         image: otel/opentelemetry-collector-contrib:0.96.0
-        credentials:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
         ports:
           - 4318:4318
           - 4317:4317
