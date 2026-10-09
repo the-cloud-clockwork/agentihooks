@@ -1,0 +1,52 @@
+version: 1
+purpose: intent-check
+fallbacks: cli
+questions:
+- name: usable
+  type: yesno
+  instructions: Judge only the declared tests first part of this pull request. The task text and plan describe the later gate
+    change and remain context, not implementation required in this part. Read pull_request_diff as evidence. Can the phase
+    use these compatible preparatory tests before the later gate change?
+  'true': The tests first part is useful preparation.
+  'false': The tests first part is unusable preparation.
+- name: delivers
+  type: yesno
+  instructions: Judge only the declared tests first part of this pull request. The task text and plan describe the later gate
+    change and remain context, not implementation required in this part. Read pull_request_diff as evidence. Does this part
+    add or update tests for the task's old and new gate states?
+  'true': The preparatory tests deliver this part.
+  'false': The preparatory tests do not deliver this part.
+- name: reachable
+  type: yesno
+  instructions: Judge only the declared tests first part of this pull request. The task text and plan describe the later gate
+    change and remain context, not implementation required in this part. Read pull_request_diff as evidence. Can CI run the
+    preparatory tests before the later gate change?
+  'true': CI can run the preparatory tests now.
+  'false': CI cannot run the preparatory tests now.
+- name: weakens
+  type: yesno
+  instructions: Judge only the declared tests first part of this pull request. The task text and plan describe the later gate
+    change and remain context, not implementation required in this part. Read pull_request_diff as evidence. Does this preparatory
+    change weaken the phase's existing guarantees?
+  'true': The preparatory change weakens existing guarantees.
+  'false': The preparatory change preserves existing guarantees.
+- name: accepts_both_states
+  type: yesno
+  instructions: Judge only the declared tests first part of this pull request. The task text and plan describe the later gate
+    change and remain context, not implementation required in this part. Read pull_request_diff as evidence. Do the changed
+    tests accept both the old and new gate states required by the task?
+  'true': The tests accept both old and new gate states.
+  'false': The tests reject either the old or new gate state.
+- name: changes_gate_behavior
+  type: yesno
+  instructions: Judge only the declared tests first part of this pull request. The task text and plan describe the later gate
+    change and remain context, not implementation required in this part. Read pull_request_diff as evidence. Does any change
+    in the diff alter gate behaviour, including gate code, workflow configuration or executable graders within the tests directory?
+  'true': The diff changes gate behaviour.
+  'false': The diff only prepares compatible tests and changes no gate behaviour.
+thresholds:
+  fail: 0.3
+  reason: 0.5
+  weaken: 0.5
+rule:
+  type: code

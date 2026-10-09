@@ -7,12 +7,12 @@ from dataclasses import dataclass
 from hooks.classifier import definitions
 from hooks.classifier.api import DecisionsApiBackend
 from hooks.classifier.core import Backend
-from hooks.classifier.corpus import Case, CorpusError, load, path_for
+from hooks.classifier.corpus import Case, CorpusError, load, path_for, questions, rule_of
 from hooks.classifier.definitions import Definition
 from hooks.classifier.errors import BackendFailure, ClassifierRequestError
 from hooks.classifier.fallbacks import ClaudeCliBackend, CodexCliBackend
 from hooks.classifier.result import Answer, DecisionRequest
-from hooks.classifier.runner import _verdict, questions_for
+from hooks.classifier.runner import _verdict
 from hooks.classifier.settings import api_configured
 from hooks.classifier.settings import load as load_settings
 from scripts.swarm import metrics, metrics_outbox
@@ -55,7 +55,7 @@ def _matches(expected: object, verdict: object) -> bool:
     return verdict == expected
 
 
-def _score(cases: tuple[Case, ...], outcomes: list[Outcome]) -> dict:
+def score(cases: tuple[Case, ...], outcomes: list[Outcome]) -> dict:
     answered = [item for item in outcomes if item.verdicts is not None]
     wrong = {item.case.name for item in answered if item.outcome == "miss"}
     seen = {item.case.name for item in answered}
@@ -88,9 +88,9 @@ class Evaluation:
             "mode": self.mode,
             "cases": len(self.cases),
             "controls": sum(case.control for case in self.cases),
-            **_score(self.cases, list(self.outcomes)),
+            **score(self.cases, list(self.outcomes)),
             "backends": {
-                source: _score(self.cases, [item for item in self.outcomes if item.source == source])
+                source: score(self.cases, [item for item in self.outcomes if item.source == source])
                 for source in sources
             },
         }
@@ -117,15 +117,24 @@ class Evaluation:
         ]
 
 
-def _verdicts(definition: Definition, answers: dict[str, Answer]) -> dict:
+def _verdicts(definition: Definition, case: Case, answers: dict[str, Answer]) -> dict:
+    rule = rule_of(definition)
+    if rule is not None:
+        return rule.verdicts(definition, case.state, case.params, answers)
     return {key: _verdict(answer, definition) for key, answer in answers.items()}
 
 
 def replay(definition: Definition, cases: tuple[Case, ...]) -> tuple[Outcome, ...]:
     return tuple(
-        Outcome(case, sample.source, index, sample.latency_ms, _verdicts(definition, sample.answers))
+        Outcome(case, sample.source, index, sample.latency_ms, _verdicts(definition, case, sample.answers))
         for case in cases
         for index, sample in enumerate(case.samples)
+    )
+
+
+def baseline(cases: tuple[Case, ...]) -> tuple[Outcome, ...]:
+    return tuple(
+        Outcome(case, "baseline", index, 0, verdicts) for case in cases for index, verdicts in enumerate(case.baseline)
     )
 
 
@@ -142,8 +151,9 @@ def live_backends() -> list[Backend]:
 def _ask(backend: Backend, definition: Definition, case: Case) -> tuple[dict | None, int]:
     started = time.monotonic()
     try:
-        result = backend.decide(DecisionRequest(case.state, questions_for(definition, case.params)))
-        verdicts = _verdicts(definition, result.answers)
+        asked = questions(definition, rule_of(definition), case.state, case.params)
+        result = backend.decide(DecisionRequest(case.state, asked))
+        verdicts = _verdicts(definition, case, result.answers)
     except (BackendFailure, ClassifierRequestError):
         verdicts = None
     return verdicts, int((time.monotonic() - started) * 1000)
