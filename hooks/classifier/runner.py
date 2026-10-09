@@ -1,6 +1,6 @@
 from dataclasses import dataclass, replace
 
-from hooks.classifier import decide
+from hooks.classifier import decide, decision_log
 from hooks.classifier.definitions import Definition, DefinitionError, QuestionSpec, load
 from hooks.classifier.questions import Choice, Question, YesNo, validate
 from hooks.classifier.result import Answer, DecisionResult
@@ -81,13 +81,14 @@ def _verdict(answer: Answer, definition: Definition) -> object:
 def run(name: str, state: object, params: dict | None = None, harness: str | None = None) -> RunResult:
     definition = load(name)
     questions = questions_for(definition, params)
-    result = decide(
-        state,
-        questions,
-        purpose=definition.purpose,
-        harness=harness,
-        fallbacks=None if definition.fallbacks == "cli" else [],
-    )
+    with decision_log.record_context(definition=definition.name, definition_digest=definition.digest):
+        result = decide(
+            state,
+            questions,
+            purpose=definition.purpose,
+            harness=harness,
+            fallbacks=None if definition.fallbacks == "cli" else [],
+        )
     verdicts = (
         {}
         if definition.rule.type == "code"
