@@ -9,6 +9,7 @@ from scripts.swarm_ledger import ledger_kinds, plan_shape
 MIN_WORDS = 20
 DONE_WHEN_RE = re.compile(r"\bdone when\b", re.I)
 CODE_KINDS = ("code", "ci")
+RELEASE = "release-{}"
 
 
 @dataclass(frozen=True)
@@ -105,6 +106,7 @@ def _unlined(phase, doc):
         for t in doc["tasks"]
         if t.get("phase") == phase["id"]
         and ledger_kinds.kind(t) != "plan"
+        and t["id"] != RELEASE.format(phase["id"])
         and t.get("plan_url")
         and not t.get("plan_lines")
     ]

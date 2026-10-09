@@ -163,6 +163,7 @@ def test_every_phase_task_linking_the_plan_without_plan_lines_is_named():
     document = doc(task("a", plan_url=url), task("b", plan_url=url, plan_slice="b", plan_lines="3-4"))
     document["tasks"][0]["plan_url"] = url
     document["tasks"] += [task("c", plan_url=url), task("d", phase="p2", plan_url=url), task("e")]
+    document["tasks"].append(task("release-p1", kind="ops", plan_url=url))
     assert check(document) == [
         "Task a links the plan but has no plan lines.",
         "Task c links the plan but has no plan lines.",
