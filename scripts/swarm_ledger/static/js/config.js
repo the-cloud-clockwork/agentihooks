@@ -23,6 +23,7 @@ export const MEDIA_API = API.replace(`/api/${SLUG}`, `/api/media/${SLUG}`);
 export const API_V1 = API.replace(`/api/${SLUG}`, `/api/v1/ledgers/${SLUG}`);
 export const EVENTS_API = `${API_V1}/events`;
 export const LAYOUT_API = API.replace(`/api/${SLUG}`, "/api/layout");
+export const ROUTING_API = API.replace(`/api/${SLUG}`, "/api/v1/routing/settings");
 export const LAYOUT_KEY = "plan-ledger:swarm-layout";
 export const LAYOUT_LIMITS = { height: [48, 4000, 1], split: [15, 85, 10] };
 export const GRIP_STEPS = { height: { ArrowUp: -16, ArrowDown: 16 }, split: { ArrowLeft: -2, ArrowRight: 2 } };
