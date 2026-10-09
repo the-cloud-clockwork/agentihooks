@@ -337,7 +337,9 @@ def test_verified_outcome_completes_the_authoritative_ledger_once(fixture, tmp_p
             }
         ],
     }
-    repository.create_document(authority.slug, new_ledger.build_doc(content))
+    document = new_ledger.build_doc(content)
+    document["tasks"] = content["tasks"]
+    repository.create_document(authority.slug, document)
     row = repository.get_document(authority.slug)["tasks"][0]
     outcomes.read_task = lambda task_id: repository.get_document(authority.slug)["tasks"][0]
     proposal = replace(proposal, task_revision=revision(row))
