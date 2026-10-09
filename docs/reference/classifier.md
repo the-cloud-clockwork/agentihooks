@@ -196,8 +196,10 @@ the classifier. A master always launches on the frontier model at high effort fo
 its harness, whatever its lane or the environment names, and records `frontier`.
 Decisions use purpose `model-pick` in the classifier log.
 
-`AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE` defaults to 0.6. The effort answer's
-confidence must meet it; otherwise the lane keeps its launch defaults. An
+The `model-pick` definition's `confidence` threshold defaults to 0.6;
+`AGENTIHOOKS_CLASSIFIER_MODEL_PICK_CONFIDENCE` overrides it, and the older
+`AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE` still applies when that is unset. The
+effort answer's confidence must meet it; otherwise the lane keeps its launch defaults. An
 unavailable classifier also preserves those defaults.
 Agent records, swarm status and the page carry `model_source` and
 `model_confidence`; low confidence retains the attempted classifier's metadata,
