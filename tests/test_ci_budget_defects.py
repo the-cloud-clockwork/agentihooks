@@ -397,7 +397,7 @@ def test_dev_push_runs_that_cannot_be_read_leave_pull_request_runs_metered(swarm
 
 def test_a_run_whose_rows_break_their_table_is_skipped_and_the_rest_ship(swarm, sink, capsys, monkeypatch):
     store, config, ledger = swarm
-    monkeypatch.setitem(METERED_RUNS, 0, {**METERED_RUNS[0], "head_branch": None})
+    monkeypatch.setitem(METERED_RUNS[0], "head_branch", None)
     assert defects.refresh("sw", config, store, ledger, NOW_MS, run=_metered_gh([]), environ=SINK) == []
     assert "ci budget skipped metering one Tests run: ci_runs.branch must be String" in capsys.readouterr().err
     assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [22]
