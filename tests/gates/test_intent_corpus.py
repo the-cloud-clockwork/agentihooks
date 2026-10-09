@@ -64,10 +64,10 @@ def test_retained_cases_replay_the_exact_classifier_input(cases):
 
 def test_the_weakens_and_chunk_questions_lower_wrong_verdicts_and_keep_every_control(cases, definition):
     assert intent_calibration.measure(cases, definition) == {
-        "cases": 19,
+        "cases": 21,
         "controls": 10,
         "before": {
-            "samples": 57,
+            "samples": 63,
             "wrong": 15,
             "wrong_cases": [
                 "chunk-added",
@@ -80,7 +80,7 @@ def test_the_weakens_and_chunk_questions_lower_wrong_verdicts_and_keep_every_con
             "controls_rejected": CONTROLS_BEFORE,
         },
         "after": {
-            "samples": 57,
+            "samples": 63,
             "wrong": 2,
             "wrong_cases": ["g18-quiet-week"],
             "controls_rejected": sorted(
@@ -94,7 +94,7 @@ def test_the_weakens_and_chunk_questions_lower_wrong_verdicts_and_keep_every_con
 def test_the_eval_replay_gives_the_calibration_counts(definition):
     report = evaluation.evaluate(intent.PURPOSE).report()
     measured = intent_calibration.measure(corpus.load(definition, corpus.path_for(intent.PURPOSE)), definition)
-    assert (report["mode"], report["cases"], report["controls"], report["samples"]) == ("replay", 19, 10, 57)
+    assert (report["mode"], report["cases"], report["controls"], report["samples"]) == ("replay", 21, 10, 63)
     assert (report["wrong"], report["wrong_cases"]) == (measured["after"]["wrong"], measured["after"]["wrong_cases"])
     assert report["held_controls"] == measured["after"]["controls_rejected"]
 
@@ -124,6 +124,25 @@ def test_the_chunk_failures_quote_the_lines_missed_or_exceeded(cases, definition
     )
     assert missed.endswith(f". {deliver} {remove}")
     assert exceeded.endswith(f"the pull request merges.. The phase must be able to use it for {PHASE}. {remove}")
+
+
+def test_formatter_output_is_never_scope_in_the_overdelivers_question(cases):
+    named = {case.name: case for case in cases}
+    asked = intent.questions_for(named["formatter-reflow"].state)["overdelivers"].instructions
+    assert "Changed lines that are formatter output are never scope" in asked
+    assert "including the lines the pull request names as formatter output." in asked
+
+
+def test_formatter_reflow_and_deploy_proof_after_merge_pass_on_replay(cases, definition):
+    named = {case.name: case for case in cases}
+    guarded = ("formatter-reflow", "deploy-proof-after-merge")
+    assert {name: verdicts(definition, named[name]) for name in guarded} == {name: ["pass"] * 3 for name in guarded}
+    assert [named[name].control for name in guarded] == [False, False]
+    assert (
+        "Unrelated lines in `api.py` are reflowed by `ruff format` only."
+        in (named["formatter-reflow"].state["pull_request_body"])
+    )
+    assert "merging deploys nothing" in named["deploy-proof-after-merge"].state["pull_request_body"]
 
 
 def test_losing_a_control_is_not_a_calibration(raw, definition, tmp_path):
