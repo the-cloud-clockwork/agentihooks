@@ -74,5 +74,5 @@ def test_a_definition_that_fails_to_load_logs_its_refusal(definition_home):
         "sample",
         None,
     )
-    assert entry["state_digest"] == decision_log.state_digest({"value": 1})
+    assert (entry["state_digest"], entry["latency_ms"]) == (decision_log.state_digest({"value": 1}), 0)
     assert entry["failures"] == [{"model": "definition", "reason": "threshold yes must be between zero and one"}]

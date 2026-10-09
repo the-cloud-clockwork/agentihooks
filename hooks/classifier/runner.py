@@ -88,7 +88,12 @@ def run(
     decider: Callable[..., DecisionResult] | None = None,
     environ: dict | None = None,
 ) -> RunResult:
-    definition = load(name, environ=environ)
+    try:
+        definition = load(name, environ=environ)
+    except DefinitionError as exc:
+        with decision_log.record_context(definition=name):
+            decision_log.append(name, state, None, 0, [decision_log.failure_record("definition", exc)])
+        raise
     questions = questions_for(definition, params)
     options = {
         "purpose": definition.purpose,
