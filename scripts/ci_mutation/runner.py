@@ -14,6 +14,7 @@ import tomlkit
 from scripts.ci_mutation.clearances import load_clearances
 from scripts.ci_mutation.report import evaluate, survivor_text
 from scripts.ci_mutation.scope import select_tests
+from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
 
 IDENTITY = "scripts/ci_mutation/identity.py"
 
@@ -51,9 +52,16 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
         source = root / name
         if source.is_dir():
             shutil.copytree(source, work / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", work.name))
-    for name in (".test_durations", "Swarm-v2.md"):
-        if (root / name).is_file():
-            shutil.copy(root / name, work / name)
+    root_files = sorted(
+        path.name
+        for path in root.iterdir()
+        if path.is_file()
+        and not path.is_symlink()
+        and path.name != "pyproject.toml"
+        and (path.name == ".test_durations" or not path.name.startswith("."))
+    )
+    for name in root_files:
+        shutil.copy(root / name, work / name)
     pytest_args = ["-q", "-x", "-o", "addopts=", "-p", "pytest_asyncio.plugin"]
     # pytest would load the plugin from its own mutated copy, whose hooks raise in mutmut's forced fail run.
     if IDENTITY not in paths:
@@ -67,10 +75,9 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
             "docs/",
             ".github/",
             "evidence/",
-            "Swarm-v2.md",
             "docker/swarm-node/",
             ".agentihooks/conditions/",
-            ".test_durations",
+            *root_files,
         ],
         "pytest_add_cli_args_test_selection": tests,
         "pytest_add_cli_args": pytest_args,
@@ -84,6 +91,7 @@ def mutate_files(
     selected: dict[str, tuple[set[int], list[str]]],
     deadline: float,
     shard: tuple[int, int],
+    stats: SharedStats | None,
 ) -> tuple[dict[str, list[dict]], str]:
     tests = sorted({test for _, chosen in selected.values() for test in chosen})
     prepare_workspace(root, work, list(selected), tests)
@@ -93,8 +101,19 @@ def mutate_files(
     )
     log = work / "run.log"
     shard_args = [str(part) for part in shard]
+    stats_args = []
+    if stats:
+        key = stats_key(stats.head, selected)
+        if stats.part:
+            stats_args = ["collect", str(stats.folder / f"part-{stats.part[0]}.json"), key, *map(str, stats.part)]
+        else:
+            results, reason = load_parts(stats.folder, key)
+            if reason:
+                return {}, reason
+            (work / "shared-stats.json").write_text(json.dumps(results))
+            stats_args = ["reuse", str(work / "shared-stats.json")]
     status = run_process(
-        [sys.executable, "-m", "scripts.ci_mutation.selection", str(selection), *shard_args],
+        [sys.executable, "-m", "scripts.ci_mutation.selection", str(selection), *shard_args, *stats_args],
         work,
         deadline - time.monotonic(),
         log,
@@ -103,6 +122,8 @@ def mutate_files(
         return {}, "over budget"
     if status != 0:
         return {}, f"mutmut failed with exit {status}; see {log}"
+    if stats and stats.part:
+        return {path: [] for path in selected}, ""
     result_path = work / "results.json"
     status = run_process(
         [sys.executable, "-m", "scripts.ci_mutation.report", str(result_path), *shard_args, *selected],
@@ -118,7 +139,12 @@ def mutate_files(
 
 
 def run_gate(
-    root: Path, changes: dict[str, set[int]], output: Path, budget: float, shard: tuple[int, int] = (0, 1)
+    root: Path,
+    changes: dict[str, set[int]],
+    output: Path,
+    budget: float,
+    shard: tuple[int, int] = (0, 1),
+    stats: SharedStats | None = None,
 ) -> dict:
     output.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + budget
@@ -144,7 +170,9 @@ def run_gate(
             reasons.update(dict.fromkeys(group, "over budget"))
             continue
         work = Path(tempfile.mkdtemp(prefix=f"{index}-", dir=output))
-        results, reason = mutate_files(root, work, {path: selected[path] for path in group}, deadline, shard)
+        results, reason = mutate_files(
+            root, work, {path: selected[path] for path in group}, deadline, shard, stats and stats.group(index)
+        )
         if reason:
             reasons.update(dict.fromkeys(group, reason))
         else:
