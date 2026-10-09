@@ -15,14 +15,17 @@ from dataclasses import KW_ONLY, dataclass, field
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hooks.context.account_sessions import API_ACCOUNT
 from scripts import session_bands
 from scripts.claude_config import claude_home
 from scripts.routing import claude_api, envs, place
 from scripts.routing.envs import subscription_child
-from scripts.routing.slots import API, API_UNBOUNDED, SUBSCRIPTION, Slot
+from scripts.routing.slots import API, API_UNBOUNDED, INTERACTIVE, SUBSCRIPTION, Slot
+
+if TYPE_CHECKING:
+    from scripts.routing.master_account import MasterAccount
 
 TOKEN_PREFIX = "AH_CC_TOKEN_"
 HARNESS = "claude"
@@ -31,6 +34,7 @@ MAX_PROBE_WORKERS = 3
 CACHE_TTL_SECONDS = 60
 OPEN = "OPEN"
 NOT_APPLICABLE = "n/a"
+MASTERS_ONLY = "MASTERS"
 
 
 @dataclass(frozen=True)
@@ -855,6 +859,27 @@ def _api_line(slot: Slot, include_fable: bool, sessions: Mapping[str, int] | Non
     ]
 
 
+def _account_text(account: str, current: str, master: "MasterAccount | None") -> str:
+    text = f"{account} (current)" if current and account == current else account
+    return f"{text} {master.marker}" if master and master.slug == account else text
+
+
+def _interactive_line(
+    master: "MasterAccount", include_fable: bool, sessions: Mapping[str, int] | None, observed: bool
+) -> list[str]:
+    return [
+        "-",
+        f"{master.slug} {master.marker}",
+        INTERACTIVE,
+        MASTERS_ONLY,
+        *([f"{sessions.get(master.slug, 0)}/?"] if sessions is not None else []),
+        _weight_text(None),
+        "?",
+        *[NOT_APPLICABLE] * (7 if include_fable else 5),
+        *(["-"] if observed else []),
+    ]
+
+
 def render_table(
     results: list[ProbeResult],
     now: int | None = None,
@@ -863,6 +888,7 @@ def render_table(
     observed: Mapping[str, float] | None = None,
     sessions: Mapping[str, int] | None = None,
     api: Sequence[Slot] = (),
+    master: "MasterAccount | None" = None,
 ) -> str:
     timestamp = int(time.time()) if now is None else now
     headers = [
@@ -888,7 +914,7 @@ def render_table(
         cap = _cap_text(account_cap(result, timestamp, include_fable))
         row = [
             str(rank),
-            f"{result.account} (current)" if current and result.account == current else result.account,
+            _account_text(result.account, current, master),
             SUBSCRIPTION,
             result.state,
             *([f"{sessions.get(result.account, 0)}/{cap}"] if sessions is not None else []),
@@ -907,6 +933,10 @@ def render_table(
             row.append("?" if seen is None else _span(max(0, timestamp - int(seen))))
         rows.append(row)
     rows.extend(_api_line(slot, include_fable, sessions, observed is not None) for slot in api)
+    listed = {result.account for result in results}
+    interactive = master if master and master.kind == INTERACTIVE and master.slug not in listed else None
+    if interactive:
+        rows.append(_interactive_line(interactive, include_fable, sessions, observed is not None))
     widths = [max(len(headers[index]), *(len(row[index]) for row in rows)) for index in range(len(headers))]
     lines = ["  ".join(value.ljust(widths[index]) for index, value in enumerate(headers))]
     lines.append("  ".join("-" * width for width in widths))
@@ -915,6 +945,7 @@ def render_table(
     if errors:
         lines.extend(["", *errors])
     known = {result.account for result in results} | {slot.account for slot in api}
+    known |= {interactive.slug} if interactive else set()
     unlisted = {account: count for account, count in (sessions or {}).items() if account not in known}
     if unlisted:
         lines.extend(["", *(f"{account}: {count} session(s)" for account, count in sorted(unlisted.items()))])

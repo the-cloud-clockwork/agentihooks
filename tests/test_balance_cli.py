@@ -144,6 +144,86 @@ def test_the_balance_help_names_every_flag_and_subcommand(monkeypatch, capsys):
     assert (timeout, type(timeout)) == (7.0, float)
 
 
+def test_master_account_declares_both_harnesses_with_their_tiers(monkeypatch, tmp_path, capsys):
+    store = FileSettings(tmp_path / "routing-settings.json")
+    monkeypatch.setattr(balance_cli, "_routing_settings", lambda: store)
+    monkeypatch.setenv("AH_CC_TOKEN_luna", "t")
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+
+    assert balance_cli.cmd_balance_master_account(["claude=home", "tier=max", "codex=default"], now=1.0) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        f"store=file {store.path}",
+        "claude: home interactive MASTER max",
+        "codex: default interactive MASTER",
+    ]
+    assert store.get("master-account-claude") == "home"
+    assert store.get("master-tier-claude") == "max"
+    assert store.get("master-account-codex") == "default"
+    assert store.history()[-1]["actor"] == "operator"
+
+    assert balance_cli.cmd_balance_master_account(["claude=luna"], now=2.0) == 0
+    assert capsys.readouterr().out.splitlines()[1:] == [
+        "claude: luna subscription MASTER",
+        "codex: default interactive MASTER",
+    ]
+    assert store.get("master-tier-claude") is None
+
+
+@pytest.mark.parametrize(
+    ("tokens", "reason"),
+    [
+        (["codex=gone"], "unknown codex token slug gone: no AH_CX_TOKEN_gone is set"),
+        (["tier=max"], "tier=max must follow claude=<slug> or codex=<slug>"),
+        (["claude="], "claude= needs a slug"),
+        (["claude=a", "claude=b"], "claude is declared twice"),
+        (["claude=a", "tier="], "tier= needs a label"),
+        (["claude=a", "tier=x", "tier=y"], "claude has two tiers"),
+        (["gemini=a"], "expected claude=<slug>, codex=<slug|default> or tier=<label>, got gemini=a"),
+        ([], "name claude=<slug> or codex=<slug|default>, or pass --clear"),
+    ],
+)
+def test_master_account_refuses_a_bad_declaration_and_writes_nothing(monkeypatch, tmp_path, capsys, tokens, reason):
+    store = FileSettings(tmp_path / "routing-settings.json")
+    monkeypatch.setattr(balance_cli, "_routing_settings", lambda: store)
+
+    assert balance_cli.cmd_balance_master_account(tokens, now=1.0) == 2
+    captured = capsys.readouterr()
+    assert (captured.out, captured.err) == ("", f"agentihooks balance master-account: {reason}\n")
+    assert store.history() == []
+
+
+def test_master_account_clear_removes_every_harness_or_the_named_one(monkeypatch, tmp_path, capsys):
+    store = FileSettings(tmp_path / "routing-settings.json")
+    monkeypatch.setattr(balance_cli, "_routing_settings", lambda: store)
+    assert balance_cli.cmd_balance_master_account(["claude=home", "codex=default"], now=1.0) == 0
+    capsys.readouterr()
+
+    assert balance_cli.cmd_balance_master_account(["claude"], clear=True, now=2.0) == 0
+    assert capsys.readouterr().out.splitlines()[1:] == ["claude: unset", "codex: default interactive MASTER"]
+    assert balance_cli.cmd_balance_master_account([], clear=True, now=3.0) == 0
+    assert capsys.readouterr().out.splitlines()[1:] == ["claude: unset", "codex: unset"]
+    assert balance_cli.cmd_balance_master_account(["gemini"], clear=True, now=4.0) == 2
+    assert capsys.readouterr().err == "agentihooks balance master-account: --clear takes claude or codex, got gemini\n"
+
+
+def test_the_balance_parser_routes_master_account(monkeypatch):
+    parser = argparse.ArgumentParser()
+    balance_cli.add_parser(parser.add_subparsers(dest="command"))
+    args = parser.parse_args(["balance", "master-account", "claude=a", "tier=max", "codex=default"])
+    assert (args.balance_command, args.declaration, args.clear) == (
+        "master-account",
+        ["claude=a", "tier=max", "codex=default"],
+        False,
+    )
+    calls = []
+    monkeypatch.setattr(
+        balance_cli, "cmd_balance_master_account", lambda tokens, clear: calls.append((tokens, clear)) or 0
+    )
+    cleared = parser.parse_args(["balance", "master-account", "--clear"])
+    assert balance_cli.run(cleared, lambda **kwargs: 1) == 0
+    assert calls == [([], True)]
+
+
 def test_run_sends_set_and_settings_to_their_commands(monkeypatch):
     calls = []
     monkeypatch.setattr(balance_cli, "cmd_balance_set", lambda pairs: calls.append(("set", pairs)) or 4)

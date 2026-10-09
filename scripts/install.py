@@ -5686,13 +5686,14 @@ def cmd_balance(
         is_routable,
         render_table,
     )
-    from scripts.routing import place
+    from scripts.routing import master_account, place
     from scripts.routing.claude_api import ClaudeApiSource
 
     session_env = dict(os.environ)
     _load_claude_runtime_env()
     credentials = discover_credentials(os.environ)
     live = sessions_by_account()
+    master = master_account.load(os.environ).get("claude")
     if current:
         known = discover_credentials(session_env) + credentials
         session = identify_session_account(session_env, known, ancestor_oauth_token())
@@ -5719,6 +5720,7 @@ def cmd_balance(
                     current=session.account,
                     observed=observed,
                     sessions=live,
+                    master=master,
                 )
             )
         return 0 if session.account else 1
@@ -5749,7 +5751,7 @@ def cmd_balance(
     )
     api, weight = place.api_side(ClaudeApiSource(live), "claude", os.environ, time.time())
     api = [replace(slot, weight=weight) for slot in api]
-    print(render_table(results, include_fable=include_fable, sessions=live, api=api))
+    print(render_table(results, include_fable=include_fable, sessions=live, api=api, master=master))
     print(f"\nsource={source}")
     print(f"\n{codex_table()}")
     return 0 if any(is_routable(result) for result in results) else 1

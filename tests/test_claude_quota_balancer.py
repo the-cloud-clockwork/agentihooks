@@ -8,7 +8,7 @@ import pytest
 
 from scripts import claude_quota_balancer as balancer
 from scripts.routing import place
-from scripts.routing.slots import API, API_UNBOUNDED, SUBSCRIPTION
+from scripts.routing.slots import API, API_UNBOUNDED, INTERACTIVE, SUBSCRIPTION
 
 
 def _stream(account_usage: float, weekly_usage: float, fable_usage: float | None = None) -> str:
@@ -526,6 +526,34 @@ def test_table_shows_live_sessions_against_each_band_cap():
     assert " 0/0 " in rows["spent"]
     assert " 0/? " in rows["broken"]
     assert table.splitlines()[-1] == "unrouted: 2 session(s)"
+
+
+def test_table_marks_the_declared_master_row_with_its_tier():
+    from scripts.routing.master_account import MasterAccount
+
+    alpha = balancer.parse_probe("alpha", _stream(0.10, 0.20), 100)
+    beta = balancer.parse_probe("beta", _stream(0.10, 0.30), 100)
+
+    table = balancer.render_table([alpha, beta], now=0, master=MasterAccount("claude", "beta", "max", SUBSCRIPTION))
+    rows = {line.split()[1]: line for line in table.splitlines()[2:]}
+
+    assert rows["beta"].split()[1:4] == ["beta", "MASTER", "max"]
+    assert "MASTER" not in rows["alpha"]
+    assert len(table.splitlines()) == 4
+
+
+def test_a_tokenless_master_is_an_interactive_row_serving_masters_only():
+    from scripts.routing.master_account import MasterAccount
+
+    alpha = balancer.parse_probe("alpha", _stream(0.10, 0.20), 100)
+
+    table = balancer.render_table(
+        [alpha], now=0, sessions={"home": 1}, master=MasterAccount("claude", "home", "", INTERACTIVE)
+    )
+    lines = table.splitlines()
+
+    assert lines[3].split() == ["-", "home", "MASTER", "interactive", "MASTERS", "1/?", "-", "?", *["n/a"] * 5]
+    assert "session(s)" not in table
 
 
 def test_reserve_account_is_chosen_only_when_no_other_has_room(monkeypatch, tmp_path):

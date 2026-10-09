@@ -6,7 +6,7 @@ import pytest
 from scripts import agents_quota, codex_quota
 from scripts.claude_quota_balancer import ProbeResult, QuotaWindow
 from scripts.codex_router import CodexAccount
-from scripts.routing.slots import API, API_UNBOUNDED, Slot
+from scripts.routing.slots import API, API_UNBOUNDED, INTERACTIVE, SUBSCRIPTION, Slot
 
 
 def _event(ts: str, primary: dict | None, secondary: dict | None = None, plan: str = "pro") -> str:
@@ -272,6 +272,7 @@ def test_quota_json_lists_every_row(monkeypatch, capsys):
             "cap": None,
             "kind": "subscription",
             "weight": None,
+            "master": "",
         }
     ]
 
@@ -352,6 +353,73 @@ def test_page_quota_reads_the_balance_cache_and_codex_logs_without_probing(monke
     assert quota["rows"][1]["five_hour_left"] is None
     assert quota["rows"][0]["observed_at"] == 1.0
     assert quota["probed_at"] == 1.0
+
+
+def test_the_declared_masters_mark_their_rows_and_a_tokenless_claude_slug_gets_an_interactive_row():
+    from scripts.routing.master_account import MasterAccount
+
+    claude = ProbeResult("tccgma", "ok", "OK", 78.0, QuotaWindow(used=8.0), QuotaWindow(used=22.0))
+    rows = agents_quota.claude_rows([claude], {"tccgma": 2, "home": 1}, "cached", {}, now=1000)
+    rows += agents_quota.codex_rows([CodexAccount("default")], {}, {}, now=1000)
+    masters = {
+        "claude": MasterAccount("claude", "home", "max", INTERACTIVE),
+        "codex": MasterAccount("codex", "default", "", INTERACTIVE),
+    }
+
+    marked = agents_quota.with_masters(rows, masters, {"tccgma": 2, "home": 1})
+
+    assert [(row.agent, row.account, row.kind, row.state, row.sessions, row.master) for row in marked] == [
+        ("claude", "tccgma", "subscription", "OK", 2, ""),
+        ("claude", "home", "interactive", "MASTERS", 1, "MASTER max"),
+        ("codex", "default", "subscription", "UNKNOWN", 0, "MASTER"),
+    ]
+    table = agents_quota.render(marked, now=1000).splitlines()
+    assert table[2].split()[:5] == ["claude", "home", "MASTER", "max", "interactive"]
+    assert table[2].endswith("interactive login")
+    assert table[3].split()[:3] == ["codex", "default", "MASTER"]
+    subscription = {"claude": MasterAccount("claude", "tccgma", "", SUBSCRIPTION)}
+    assert [row.master for row in agents_quota.with_masters(rows, subscription, {})] == ["MASTER", ""]
+
+
+def test_every_quota_reader_marks_the_declared_masters(monkeypatch):
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer, codex_router, install
+    from scripts.routing.master_account import MasterAccount
+
+    agents_quota._page_cache.clear()
+    masters = {"claude": MasterAccount("claude", "home", "", INTERACTIVE)}
+    monkeypatch.setattr(
+        agents_quota, "_masters", lambda harness="": {k: v for k, v in masters.items() if harness in ("", k)}
+    )
+    monkeypatch.setattr(agents_quota, "api_rows", lambda source, harness, now: [])
+    monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+    monkeypatch.setattr(claude_quota_balancer, "discover_credentials", lambda environ: [])
+    monkeypatch.setattr(claude_quota_balancer, "cached_observations", lambda: [])
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"home": 1})
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(codex_router, "accounts", lambda environ: [CodexAccount("default")])
+    monkeypatch.setattr(codex_router, "routing_pool", lambda environ: [CodexAccount("default")])
+    monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {})
+    masters["codex"] = MasterAccount("codex", "default", "pro", INTERACTIVE)
+
+    assert [(row.account, row.master) for row in agents_quota._claude(False, 1.0)] == [("home", "MASTER")]
+    assert [(row.account, row.master) for row in agents_quota._codex(5.0)] == [("default", "MASTER pro")]
+    rows = agents_quota.page_quota(now=100.0)["rows"]
+    assert [(row["account"], row["kind"], row["master"]) for row in rows] == [
+        ("home", "interactive", "MASTER"),
+        ("default", "subscription", "MASTER pro"),
+    ]
+
+
+def test_masters_read_the_routing_settings_through_the_routing_client(monkeypatch, tmp_path):
+    from scripts.routing import place
+    from scripts.routing.settings import FileSettings
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setattr(place, "_client", lambda environ: None)
+    FileSettings(tmp_path / "routing-settings.json").set("master-account-claude", "home", "operator", 1.0)
+    assert agents_quota._masters()["claude"].slug == "home"
+    assert agents_quota._masters("codex") == {}
 
 
 def test_page_quota_refresh_probes_once_a_minute_and_drops_the_page_cache(monkeypatch):

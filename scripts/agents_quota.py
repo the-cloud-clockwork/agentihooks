@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from scripts import codex_router, session_bands
 from scripts.claude_quota_balancer import (
+    MASTERS_ONLY,
     NOT_APPLICABLE,
     OPEN,
     _cap_text,
@@ -20,9 +21,10 @@ from scripts.claude_quota_balancer import (
     _weight_text,
     account_cap,
 )
-from scripts.routing.slots import API, SUBSCRIPTION, Slot
+from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, Slot
 
 if TYPE_CHECKING:
+    from scripts.routing.master_account import MasterAccount
     from scripts.routing.slots import SlotSource
 
 PAGE_TTL_S = 60
@@ -47,6 +49,7 @@ class QuotaRow:
     cap: int | None = None
     kind: str = SUBSCRIPTION
     weight: int | None = None
+    master: str = ""
 
 
 def _left(used: float | None) -> float | None:
@@ -120,7 +123,7 @@ def render(rows: list[QuotaRow], now: int) -> str:
     table = [
         [
             row.agent,
-            row.account,
+            f"{row.account} {row.master}".rstrip(),
             row.kind,
             row.state,
             f"{row.sessions}/{_cap_text(row.cap)}",
@@ -169,6 +172,40 @@ def api_rows(source: "SlotSource", harness: str, now: float) -> list[QuotaRow]:
     return [api_row(replace(slot, weight=weight)) for slot in slots]
 
 
+def _masters(harness: str = "") -> dict[str, "MasterAccount"]:
+    from scripts.routing import master_account
+
+    return {name: master for name, master in master_account.load(os.environ).items() if harness in ("", name)}
+
+
+def _interactive_row(master: "MasterAccount", sessions: dict[str, int]) -> QuotaRow:
+    return QuotaRow(
+        agent=master.harness,
+        account=master.slug,
+        state=MASTERS_ONLY,
+        sessions=sessions.get(master.slug, 0),
+        five_hour_left=None,
+        seven_day_left=None,
+        seven_day_resets_at=None,
+        source="interactive login",
+        kind=INTERACTIVE,
+        master=master.marker,
+    )
+
+
+def with_masters(rows: list[QuotaRow], masters: dict[str, "MasterAccount"], sessions: dict[str, int]) -> list[QuotaRow]:
+    marked = []
+    for row in rows:
+        master = masters.get(row.agent)
+        declared = master is not None and row.kind != API and row.account == master.slug
+        marked.append(replace(row, master=master.marker) if declared else row)
+    claude = masters.get("claude")
+    if claude and claude.kind == INTERACTIVE and not any(row.master for row in marked if row.agent == "claude"):
+        index = next((i for i, row in enumerate(marked) if row.agent != "claude"), len(marked))
+        marked.insert(index, _interactive_row(claude, sessions))
+    return marked
+
+
 def _claude(refresh: bool, timeout: float) -> list[QuotaRow]:
     from hooks.context.account_sessions import sessions_by_account
     from scripts.claude_quota_balancer import cached_observations, collect_results, discover_credentials
@@ -185,7 +222,8 @@ def _claude(refresh: bool, timeout: float) -> list[QuotaRow]:
     else:
         results, source = [result for _, result in cached_observations()], "cached"
     observed = {result.account: at for at, result in cached_observations()}
-    return claude_rows(results, sessions, source, observed) + api_rows(ClaudeApiSource(sessions), "claude", time.time())
+    rows = claude_rows(results, sessions, source, observed) + api_rows(ClaudeApiSource(sessions), "claude", time.time())
+    return with_masters(rows, _masters("claude"), sessions)
 
 
 def _codex(now: float) -> list[QuotaRow]:
@@ -195,9 +233,8 @@ def _codex(now: float) -> list[QuotaRow]:
 
     pool = codex_router.accounts(os.environ)
     sessions = codex_sessions_by_account()
-    return codex_rows(pool, codex_router.quotas(pool, os.environ), sessions, now) + api_rows(
-        CodexApiSource(sessions), "codex", now
-    )
+    rows = codex_rows(pool, codex_router.quotas(pool, os.environ), sessions, now)
+    return with_masters(rows + api_rows(CodexApiSource(sessions), "codex", now), _masters("codex"), sessions)
 
 
 def codex_table() -> str:
@@ -220,6 +257,7 @@ def _page_quota(now: float) -> dict:
     claude += api_rows(ClaudeApiSource(live), "claude", now)
     rows = claude + codex_rows(pool, codex_router.quotas(pool, os.environ), codex_live, now)
     rows += api_rows(CodexApiSource(codex_live), "codex", now)
+    rows = with_masters(rows, _masters(), live)
     return {"probed_at": max(observed.values(), default=None), "rows": [asdict(row) for row in rows]}
 
 
