@@ -177,10 +177,6 @@ def moved(doc: dict, phase: dict) -> dict:
         return {}
     from scripts.swarm_ledger import plan_ranges
 
-    try:
-        names = plan_ranges.stored_anchors(doc, phase)
-    except ValueError as exc:
-        raise ValueError(f"phase {phase['id']} plan cannot be read: {exc}") from None
     fresh = {
         anchor: {
             "id": slice_id(plan["id"], anchor),
@@ -188,7 +184,7 @@ def moved(doc: dict, phase: dict) -> dict:
             "anchor": anchor,
             "lines": slice_lines(doc, phase, plan, anchor),
         }
-        for anchor in names
+        for anchor in plan_ranges.anchors(doc, phase)
     }
     slices = [row for row in doc["slices"] if row.get("phase") != address] + list(fresh.values())
     return {"slices": slices, "tasks": [_follow(task, held, fresh) for task in doc["tasks"]]}

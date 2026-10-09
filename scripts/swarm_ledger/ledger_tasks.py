@@ -296,7 +296,11 @@ def unsliced_refusal(doc: dict, task: dict, by: str) -> str:
     from scripts.swarm_ledger import plan_ranges
 
     phase = next((p for p in doc.get("phases", []) if p["id"] == task.get("phase")), {})
-    if names := plan_ranges.anchors(doc, phase):
+    try:
+        names = plan_ranges.anchors(doc, phase)
+    except ValueError as exc:
+        return str(exc)
+    if names:
         return (
             f"phase {phase['id']} has a plan with slice anchors: name the task's slice with --plan-slice "
             f"on task add or plan_slice= on task set, one of {', '.join(names)}"
