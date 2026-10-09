@@ -30,10 +30,9 @@ def cli_env(served, tmp_path):
     shim = tmp_path / "agentihooks"
     shim.write_text(f'#!/bin/sh\nshift\nexec "{sys.executable}" -m scripts.swarm_ledger.ledger "$@"\n')
     shim.chmod(0o755)
-    env = {k: v for k, v in os.environ.items() if not k.startswith("AGENTIHOOKS_")}
     return {
-        **env,
-        "PATH": f"{tmp_path}{os.pathsep}{env['PATH']}",
+        **os.environ,
+        "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
         "PYTHONPATH": str(ROOT),
         "LEDGER_PORT": str(served),
         "LEDGER_AUTOSTART": "0",
