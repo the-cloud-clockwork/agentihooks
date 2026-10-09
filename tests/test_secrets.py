@@ -141,7 +141,8 @@ def test_memory_mode_detects_short_secret_assignments(text):
 
 
 @pytest.mark.parametrize(
-    "text", ["PASSWORD=$REDIS_PASSWORD", "PASSWORD=<placeholder>", "safe guidance", "PASSWORD=" + "\nunavailable guidance"]
+    "text",
+    ["PASSWORD=$REDIS_PASSWORD", "PASSWORD=<placeholder>", "safe guidance", "PASSWORD=" + "\nunavailable guidance"],
 )
 def test_memory_mode_preserves_references_and_safe_text(text):
     from hooks.secrets import redact
