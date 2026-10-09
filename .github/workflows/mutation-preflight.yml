@@ -1,0 +1,86 @@
+name: Mutation preflight
+
+# A task branch pushed before its pull request opens learns its surviving
+# mutants here, so the pull request needs one Tests run instead of a red round.
+on:
+  push:
+    branches-ignore: [dev, main, "gh-readonly-queue/**", "wip/**"]
+
+concurrency:
+  group: mutation-preflight-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  pull-request:
+    if: ${{ !github.event.deleted }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      open: ${{ steps.open.outputs.open }}
+    steps:
+      - name: Skip when the branch already has an open pull request
+        id: open
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          count=$(gh api -X GET "repos/$GITHUB_REPOSITORY/pulls" -f state=open -f "head=$GITHUB_REPOSITORY_OWNER:$GITHUB_REF_NAME" --jq length)
+          if [[ $count == 0 ]]; then echo open=false; else echo open=true; fi >> "$GITHUB_OUTPUT"
+
+  mutation:
+    needs: pull-request
+    if: ${{ needs.pull-request.outputs.open == 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+
+      - name: Install dependencies
+        run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Select mutation tests before browser setup
+        id: selection
+        run: python -m scripts.ci_mutation.browser --base origin/dev
+
+      - name: Install the browser that page tests drive
+        id: browser
+        if: steps.selection.outputs.browser == 'true'
+        timeout-minutes: 2
+        uses: ./.github/actions/browser-cache
+
+      - name: Report browser setup failure
+        if: failure() && steps.browser.outcome == 'failure'
+        run: |
+          echo "::error::Chromium setup failed or exceeded its two minute timeout; mutation tests cannot run."
+          exit 1
+
+      - name: Mutate changed Python files
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: python -m scripts.ci_mutation --base origin/dev --budget 1080
+
+      - name: Upload complete mutation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-preflight-report
+          path: .mutation-gate/
+          include-hidden-files: true
+          retention-days: 7

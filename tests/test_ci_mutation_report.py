@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -88,6 +89,60 @@ def test_report_reads_real_mutmut_metadata_and_maps_original_lines(tmp_path, mon
     assert rows[0]["name"] == "hooks.sample.x_value__mutmut_1"
     assert rows[0]["fingerprint"] == "80996a57170fdd691ed692293a179b6df12c650a3696e9a30bb2da4e67353263"
     assert rows[1] == {"name": "hooks.sample.x_value__mutmut_2", "status": "killed", "lines": [], "fingerprint": ""}
+
+
+def test_report_keeps_the_unified_diff_of_every_unkilled_mutant(tmp_path, monkeypatch):
+    import json
+
+    from scripts.ci_mutation.report import collect_results
+
+    for name in ("hooks", "scripts", "mutants/hooks"):
+        (tmp_path / name).mkdir(parents=True)
+    (tmp_path / "hooks/sample.py").write_text("\n\ndef value():\n    first = 1\n    return 7\n")
+    (tmp_path / "setup.cfg").write_text("[mutmut]\nsource_paths=hooks/\n")
+    (tmp_path / "mutants/hooks/sample.py").write_text(
+        "def x_value__mutmut_orig():\n    first = 1\n    return 7\n\ndef x_value__mutmut_1():\n    first = 1\n    return 8\n"
+    )
+    meta = {"exit_code_by_key": {"hooks.sample.x_value__mutmut_1": 0}, "durations_by_key": {}}
+    (tmp_path / "mutants/hooks/sample.py.meta").write_text(json.dumps({**meta, "estimated_durations_by_key": {}}))
+    monkeypatch.chdir(tmp_path)
+    [row] = collect_results(Path("hooks/sample.py"))
+    assert row["diff"] == "--- hooks/sample.py\n+++ mutant\n@@ line 4 @@\n     first = 1\n-    return 7\n+    return 8"
+
+
+def test_survivor_text_prints_each_failure_with_its_diff_and_clearance_file():
+    from scripts.ci_mutation.report import survivor_text
+
+    rows = [
+        {
+            "name": "hooks.sample.x_f__mutmut_1",
+            "status": "survived",
+            "lines": [2],
+            "fingerprint": "abc",
+            "diff": "-a\n+b",
+        },
+        {"name": "hooks.sample.x_f__mutmut_2", "status": "no tests", "lines": [3, 4], "fingerprint": "d", "diff": "-c"},
+    ]
+    report = {"path": "hooks/sample.py", "failures": rows}
+    key = "hooks/sample.py:hooks.sample.x_f__mutmut_1:abc"
+    other = "hooks/sample.py:hooks.sample.x_f__mutmut_2:d"
+    digest = hashlib.sha256(key.encode()).hexdigest()
+    other_digest = hashlib.sha256(other.encode()).hexdigest()
+    assert survivor_text(report) == (
+        f"survived on lines 2: {key}\nclearance file: mutation-clearances/{digest}.json\n-a\n+b\n\n"
+        f"no tests on lines 3, 4: {other}\nclearance file: mutation-clearances/{other_digest}.json\n-c"
+    )
+    assert survivor_text({"path": "hooks/sample.py", "failures": []}) == ""
+
+
+def test_survivor_diff_of_a_long_function_shows_only_the_changed_lines():
+    from scripts.ci_mutation.report import mutation_diff
+
+    before = ["def f():", *["    same = 1"] * 210, "    return 2"]
+    after = ["def f():", *["    same = 1"] * 210, "    return 3"]
+    assert mutation_diff("hooks/a.py", "\n".join(before), "\n".join(after), 5) == (
+        "--- hooks/a.py\n+++ mutant\n@@ line 215 @@\n     same = 1\n-    return 2\n+    return 3"
+    )
 
 
 def test_parse_results_keeps_entries_after_blank_lines():

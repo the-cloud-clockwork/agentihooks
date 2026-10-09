@@ -8,6 +8,8 @@ from collections import Counter
 from difflib import SequenceMatcher
 from pathlib import Path
 
+from scripts.ci_mutation.clearances import clearance_path
+
 
 def parse_results(text: str) -> list[tuple[str, str]]:
     results = []
@@ -29,6 +31,19 @@ def mutation_lines(original: str, mutated: str, start: int) -> set[int]:
         if tag != "equal":
             lines.update(range(start + first, start + max(first + 1, last)))
     return lines
+
+
+def mutation_diff(path: str, original: str, mutated: str, start: int) -> str:
+    before = original.splitlines()
+    after = mutated.splitlines()
+    lines = [f"--- {path}", "+++ mutant"]
+    for group in SequenceMatcher(a=before, b=after, autojunk=False).get_grouped_opcodes(1):
+        lines.append(f"@@ line {start + group[0][1]} @@")
+        for tag, first, last, low, high in group:
+            lines += [f"{' ' if tag == 'equal' else '-'}{line}" for line in before[first:last]]
+            if tag != "equal":
+                lines += [f"+{line}" for line in after[low:high]]
+    return "\n".join(lines)
 
 
 def function_start(source: str, original: str, class_name: str | None) -> int:
@@ -65,6 +80,7 @@ def collect_results(path: Path) -> list[dict]:
             start = function_start(source, original, class_name)
             row["lines"] = sorted(mutation_lines(original, mutated, start))
             row["fingerprint"] = hashlib.sha256((original + "\0" + mutated).encode()).hexdigest()
+            row["diff"] = mutation_diff(path.as_posix(), original, mutated, start)
         rows.append(row)
     return rows
 
@@ -96,6 +112,16 @@ def evaluate(path: str, rows: list[dict], changed: set[int], cleared: dict) -> d
         else:
             report["failures"].append(row)
     return report
+
+
+def survivor_text(report: dict) -> str:
+    blocks = []
+    for row in report["failures"]:
+        key = f"{report['path']}:{row['name']}:{row['fingerprint']}"
+        lines = ", ".join(map(str, row["lines"]))
+        clearance = clearance_path(Path(), key).as_posix()
+        blocks.append(f"{row['status']} on lines {lines}: {key}\nclearance file: {clearance}\n{row['diff']}")
+    return "\n\n".join(blocks)
 
 
 if __name__ == "__main__":
