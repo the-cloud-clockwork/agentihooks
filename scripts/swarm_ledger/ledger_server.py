@@ -478,10 +478,8 @@ def deliver_alerts(slug, state):
         inbox = connect()
         live = [a for a in RedisStore(inbox.redis).agents(slug) if a.state != "finished"]
         master = operator_mail.master_address(slug, live)
-        from scripts.inbox.seats import seat_address
-
-        addresses = {a.name: seat_address(slug, a.seat) if a.seat else a.name for a in live}
-        alerts = [{**a, "target": addresses.get(inbox.names.resolve(a["target"]), master)} for a in state["alerts"]]
+        addresses = {a.name: a.seat or a.name for a in live}
+        alerts = [{**a, "target": addresses.get(inbox.names.resolve(a["target"]), "master")} for a in state["alerts"]]
         return ledger_alerts.deliver(inbox, slug, alerts, meta["rev"], master)
     except Exception as exc:  # the ledger write stands whatever the inbox does
         sys.stderr.write(f"alert delivery for {slug}: {exc}\n")

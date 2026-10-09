@@ -366,7 +366,7 @@ def test_versioned_write_delivers_alert_once(inbox):
     assert "phase id p1 is already taken" in items[0].text
 
 
-@pytest.mark.parametrize("seat", ["eng-1", ""])
+@pytest.mark.parametrize("seat", [seat_address(SLUG, "eng-1"), ""])
 def test_refusal_reaches_writer_seat_or_agent(inbox, seat):
     make_ledger()
     writer = "writer"
@@ -377,7 +377,7 @@ def test_refusal_reaches_writer_seat_or_agent(inbox, seat):
     )
     assert rejected == ["refusal"]
     ledger_server.deliver_alerts(SLUG, state)
-    address = seat_address(SLUG, seat) if seat else writer
+    address = seat or writer
     assert len(inbox.inbox(address)) == 1
     assert inbox.inbox("operator") == []
     assert state["alerts"][0]["writer"] == writer
@@ -463,3 +463,114 @@ def test_refusal_and_retry_share_a_resolved_writer(monkeypatch):
     assert state["alerts"][0]["writer"] == "writer"
     state, _ = sync([{"op": "phase_append", "id": "good", "by": "writer", "phases": [{"phase": "p2", "title": "New"}]}])
     assert state["alerts"][0]["state"] == "done"
+
+
+@pytest.mark.parametrize(
+    "shape, expected",
+    [
+        ({"op": "task_add", "task": "t1"}, "tasks/t1"),
+        ({"op": "task_update", "item": "tasks/t1"}, "tasks/t1"),
+        ({"op": "add", "thread": "notes"}, "notes"),
+        ({"op": "alert_claim", "target": "al-one"}, "al-one"),
+        ({"op": "phase_append"}, "phase_append"),
+    ],
+)
+def test_repository_refusal_preserves_item_and_recovery_event(monkeypatch, shape, expected):
+    from scripts.swarm_ledger.repository import mutation
+
+    state = make_ledger()
+    clock = [10000000]
+    monkeypatch.setattr(core, "now_ms", lambda: clock[0])
+    op = {**shape, "id": "bad", "by": "writer"}
+
+    def refuse(doc, op, ctx, apply_op):
+        ctx.refused.append("Write refused.")
+        return False
+
+    rejected, _ = mutation.apply(SLUG, state, core, ops=[op], gate=SimpleNamespace(apply=refuse))
+    assert rejected == ["bad"]
+    [alert] = state["alerts"]
+    assert (alert["writer"], alert["item"], alert["text"]) == ("writer", expected, "Write refused.")
+    clock[0] += 1
+    rejected, _ = mutation.apply(
+        SLUG, state, core, ops=[{**op, "id": "good"}], gate=SimpleNamespace(apply=lambda *args: True)
+    )
+    assert rejected == []
+    assert alert["state"] == "done"
+    assert alert["closed_at"] == 10000001
+    [event] = [e for e in state["_meta"]["events"] if e["kind"] == "alert closed"]
+    assert (event["by"], event["target"], event["text"]) == (
+        "writer",
+        f"alerts/{alert['id']}",
+        "The writer succeeded on the same item.",
+    )
+    mutation.apply(SLUG, state, core, ops=[{**op, "id": "again"}], gate=SimpleNamespace(apply=refuse))
+    assert [a["state"] for a in state["alerts"]] == ["done", "open"]
+
+
+def test_repository_recovery_tolerates_an_older_ledger_without_alerts():
+    from scripts.swarm_ledger.repository import mutation
+
+    state = make_ledger()
+    state.pop("alerts")
+    mutation.apply(SLUG, state, core, ops=[{"op": "join", "id": "joined", "by": "writer"}])
+    assert state["alerts"] == []
+
+
+def test_quiet_expiry_uses_original_time_for_an_older_refusal(monkeypatch):
+    from scripts.swarm_ledger.repository import mutation
+
+    state = make_ledger()
+    state, _ = sync(
+        [{"op": "phase_append", "id": "bad", "by": "writer", "phases": [{"phase": "p1", "title": "Taken"}]}]
+    )
+    alert = state["alerts"][0]
+    alert.pop("last_refused_at")
+    clock = alert["at"] + 3600000
+    monkeypatch.setattr(core, "now_ms", lambda: clock)
+    mutation.apply(SLUG, state, core)
+    assert alert["state"] == "done"
+    assert alert["closed_at"] == clock
+    assert alert["closed_by"] == "writer"
+
+
+def test_server_sweep_tolerates_an_older_ledger_without_alerts(monkeypatch):
+    state = make_ledger()
+    state.pop("alerts")
+    monkeypatch.setattr(ledger_server.repository, "get_document", lambda slug: state)
+    ledger_server.expire_alerts()
+    assert "alerts" not in state
+
+
+def test_same_refusal_text_has_distinct_writers_and_items():
+    from scripts.swarm_ledger.repository import mutation
+
+    state = make_ledger()
+
+    def refuse(doc, op, ctx, apply_op):
+        ctx.refused.append("Write refused.")
+        return False
+
+    ops = [
+        {"op": "task_update", "id": "one", "by": "writer", "item": "tasks/t1"},
+        {"op": "task_update", "id": "two", "by": "other", "item": "tasks/t1"},
+        {"op": "task_update", "id": "three", "by": "writer", "item": "tasks/t2"},
+    ]
+    mutation.apply(SLUG, state, core, ops=ops, gate=SimpleNamespace(apply=refuse))
+    assert len(state["alerts"]) == 3
+    mutation.apply(SLUG, state, core, ops=[{**ops[0], "id": "retry"}], gate=SimpleNamespace(apply=lambda *args: True))
+    assert [a["state"] for a in state["alerts"]] == ["done", "open", "open"]
+
+
+def test_a_repeated_refusal_persists_its_new_deadline(monkeypatch):
+    clock = [10000000]
+    monkeypatch.setattr(core, "now_ms", lambda: clock[0])
+    make_ledger()
+    op = {"op": "phase_append", "id": "bad", "by": "writer", "phases": [{"phase": "p1", "title": "Taken"}]}
+    state, _ = sync([op])
+    rev = state["_meta"]["rev"]
+    clock[0] += 1000
+    sync([op])
+    stored = ledger_server.repository.get_document(SLUG)
+    assert stored["alerts"][0]["last_refused_at"] == 10001000
+    assert stored["_meta"]["rev"] == rev + 1

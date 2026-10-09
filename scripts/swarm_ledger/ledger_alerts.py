@@ -57,7 +57,6 @@ def close_refusal(alert: dict, ctx: object, outcome: str) -> None:
     who = alert.get("writer") or SENDER
     alert.update(state=DONE, closed_by=who, closed_at=ctx.at, outcome=outcome)
     ctx.record(who, "alert closed", f"alerts/{alert['id']}", text=outcome)
-    ctx.dirty = True
 
 
 def recovered(doc: dict, op: dict, ctx: object) -> None:
