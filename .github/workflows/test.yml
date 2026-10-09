@@ -1004,8 +1004,8 @@ jobs:
           key: durations-samples-${{ github.sha }}
 
   coverage-baseline:
-    needs: [gate-required, sonar]
-    if: ${{ !cancelled() && github.event_name == 'push' && needs['gate-required'].result == 'success' && needs.sonar.result == 'success' }}
+    needs: [unit, gate-required]
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.unit.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
