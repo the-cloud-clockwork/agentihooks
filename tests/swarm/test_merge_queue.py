@@ -11,6 +11,9 @@ OPEN = {"id": "PR_one", "state": "OPEN", "headRefOid": "abc", "baseRefName": "de
 ENTRY = {"id": "MQ_one", "position": 2, "state": "AWAITING_CHECKS"}
 
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
+
 def runner(*responses):
     calls = []
     pending = iter(responses)
