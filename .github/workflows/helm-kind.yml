@@ -64,7 +64,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .kind-cache/cluster.tar
-          key: kind-cluster-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.KIND_NODE_IMAGE }}-${{ hashFiles('deploy/helm/agentihooks-swarm/**') }}
+          key: kind-cluster-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('deploy/helm/agentihooks-swarm/**') }}
       - name: Prepare cluster images
         env:
           CLUSTER_IMAGES_CACHE_HIT: ${{ steps.cluster-images.outputs.cache-hit }}
@@ -75,14 +75,8 @@ jobs:
           if [[ "$CLUSTER_IMAGES_CACHE_HIT" == true ]]; then
             docker load -i .kind-cache/cluster.tar
           else
-            dependencies=("$KIND_NODE_IMAGE")
-            for image in "${images[@]}"; do
-              if [[ $image != local/agentihooks-swarm:dev ]]; then
-                dependencies+=("$image")
-              fi
-            done
-            for image in "${dependencies[@]}"; do docker pull "$image"; done
-            docker save -o .kind-cache/cluster.tar "${dependencies[@]}"
+            for image in "${images[@]}"; do docker pull "$image"; done
+            docker save -o .kind-cache/cluster.tar "${images[@]}"
           fi
           printf 'KIND_DEPENDENCY_IMAGES=%s\n' "${images[*]}" >> "$GITHUB_ENV"
       - name: Lint, install and prove the chart in kind
