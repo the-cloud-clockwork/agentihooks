@@ -24,10 +24,15 @@ finish() {
 helm lint --strict "$chart"
 helm lint --strict "$chart" -f "$chart/ci/kind-values.yaml"
 digest="sha256:$(printf 'a%.0s' $(seq 64))"
-helm template "$release" "$chart" --set image.tag="dev@$digest" >/dev/null
+rendered="$(helm template "$release" "$chart" --set image.tag="dev@$digest")"
+if [[ $rendered != *":dev@$digest"* ]]; then
+  printf 'the chart did not render the image updater tag dev@%s\n' "$digest" >&2
+  exit 1
+fi
 for tag in "$digest" "@$digest" "$(printf 'b%.0s' $(seq 40))"; do
-  if helm template "$release" "$chart" --set image.tag="$tag" >/dev/null 2>&1; then
-    printf 'the chart rendered image.tag %s, which is not a floating tag\n' "$tag" >&2
+  refusal="$(helm template "$release" "$chart" --set image.tag="$tag" 2>&1 >/dev/null || true)"
+  if [[ $refusal != *"must be a floating tag"* ]]; then
+    printf 'the chart did not refuse image.tag %s as a non floating tag: %s\n' "$tag" "$refusal" >&2
     exit 1
   fi
 done
