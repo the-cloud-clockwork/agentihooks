@@ -79,7 +79,7 @@ def test_cli_refuses_a_shard_outside_its_matrix(tmp_path, monkeypatch, capsys, s
     with pytest.raises(SystemExit) as error:
         main()
     assert error.value.code == 2
-    assert f"--shard {shard} is outside 0 to" in capsys.readouterr().err
+    assert capsys.readouterr().err.endswith(f"error: --shard {shard} is outside 0 to {int(shards) - 1}\n")
 
 
 def test_browser_preflight_skips_test_only_changes(tmp_path, monkeypatch, capsys):

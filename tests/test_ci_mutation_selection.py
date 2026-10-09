@@ -203,7 +203,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     mutants = [(data, f"scripts.sample.x_f__mutmut_{n}", None) for n in range(1, 8)]
     runner = SimpleNamespace(
         collect_or_load_stats=None,
-        collect_source_file_mutation_data=lambda *, mutant_names: (mutants, "by path"),
+        collect_source_file_mutation_data=lambda *, mutant_names: (mutants, mutant_names),
         SourceFileMutationData=mutation_data,
         Config=SimpleNamespace(get=lambda: config),
         PytestRunner=PytestRunner,
@@ -262,7 +262,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
         assert runner.PytestRunner().run_tests(mutant_name=None, tests=[]) == 9
         assert runner.collect_or_load_stats(test_runner) is None
         assert collected == [True]
-        assert runner.collect_source_file_mutation_data(mutant_names=()) == ([mutants[1], mutants[4]], "by path")
+        assert runner.collect_source_file_mutation_data(mutant_names=("m",)) == ([mutants[1], mutants[4]], ("m",))
         assert config.source_paths == [Path("hooks/")]
         assert engine.tests_by_mangled_function_name == {
             "scripts.sample.x_f": {"tests/test_sample.py::test_slow"},

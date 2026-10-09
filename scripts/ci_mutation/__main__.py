@@ -21,7 +21,7 @@ def main() -> int:
     root = Path.cwd()
     changes = discover_changes(root, args.base, args.head)
     print(f"Changed Python files: {len(changes)}", flush=True)
-    print(f"Mutation shard: {args.shard + 1} of {args.shards}", flush=True)
+    print(f"Mutation shard: {args.shard + 1} of {args.shards}")
     report = run_gate(root, changes, args.output.resolve(), args.budget, (args.shard, args.shards))
     return int(report["failed"])
 
