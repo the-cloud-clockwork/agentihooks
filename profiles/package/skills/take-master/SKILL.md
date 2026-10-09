@@ -37,6 +37,12 @@ recaps, the learned notes, the ledger summary and the standing duties. Pass
 `--as <your master name>` on every `agentihooks swarm` and `agentihooks ledger`
 command it names.
 
+Every plan you publish carries one unique `<!-- slice: <id> -->` anchor naming
+each task immediately before its section. Publish it with
+`agentihooks ledger --slug <slug> --as <name> publish-plan <plan-file> --phase <phase-ids>`
+and add every task built from it with `--plan-slice <id>`, so its agent reads
+only its chunk.
+
 Completion criterion: the priming is printed, `agentihooks swarm <slug> status`
 lists this session's master name once, and its first ledger chat line follows
 the priming.

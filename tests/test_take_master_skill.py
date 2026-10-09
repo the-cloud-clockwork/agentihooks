@@ -32,5 +32,5 @@ def test_a_master_plan_carries_slice_anchors_and_every_task_its_slice():
     text = SKILL.read_text()
 
     assert "<!-- slice: <id> -->" in text
-    assert "agentihooks ledger --slug <slug> --as <name> publish-plan <plan file> --phase <phase ids>" in text
+    assert "agentihooks ledger --slug <slug> --as <name> publish-plan <plan-file> --phase <phase-ids>" in text
     assert "--plan-slice <id>" in text
