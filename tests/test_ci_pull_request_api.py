@@ -17,7 +17,7 @@ WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
 LOCAL_ONLY = {ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"}}
 TOKEN = re.compile(
     r"github\s*(\.\s*token|\[\s*['\"]token['\"]\s*\])"
-    r"|secrets\s*(\.|\[\s*['\"])\s*(github|gh)(_\w*|\w*(token|pat)\b)"
+    r"|secrets\s*(\.|\[\s*['\"])\s*(github|gh)(_\w*|\w*(token|pat)(?![a-z]))"
     r"|\$\{\{(?:(?!\}\})[\s\S])*?(?<![\w.'\"-])(secrets|github)\s*(\)|\}\})",
     re.IGNORECASE,
 )
@@ -293,6 +293,7 @@ def test_only_an_api_step_on_the_app_token_alone_stays_off_the_shared_quota(step
         {"env": {"GH_TOKEN": "${{ secrets.GHCR_TOKEN }}"}},
         {"with": {"token": "${{ secrets['GITHUBTOKEN'] }}"}},
         {"env": {"KEY": "${{ secrets.GH_API_KEY }}"}},
+        {"env": {"GH_TOKEN": "${{ secrets.GHCR_TOKEN_V2 }}"}},
     ],
     ids=[
         "gh-with-flags",
@@ -319,6 +320,7 @@ def test_only_an_api_step_on_the_app_token_alone_stays_off_the_shared_quota(step
         "ghcr-secret",
         "github-secret-without-separator",
         "gh-secret-not-named-token",
+        "ghcr-secret-with-suffix",
     ],
 )
 def test_each_way_of_reaching_the_api_is_an_offender(plant):
