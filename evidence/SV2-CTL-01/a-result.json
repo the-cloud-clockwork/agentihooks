@@ -1,0 +1,21 @@
+{
+  "tested_commit": "bea45dd7bdc3e2043385bed57a513a0c68f36238",
+  "evidence_class": "Isolated fake Redis; two independent controller processes over TCP for case A; fake server time and mocked Kubernetes transport for cases B and C; no live rollout proof.",
+  "passed": true,
+  "independent_fixtures": [
+    {
+      "passed": true,
+      "controller_processes": 2,
+      "admitted_generations": 1,
+      "controller_leader_changes_total": 1,
+      "intents": 1
+    },
+    {
+      "passed": true,
+      "controller_processes": 2,
+      "admitted_generations": 1,
+      "controller_leader_changes_total": 1,
+      "intents": 1
+    }
+  ]
+}
