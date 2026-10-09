@@ -224,7 +224,9 @@ def test_a_refused_launch_token_fetch_sends_both_headers_and_names_the_status():
         exits("unauthenticated: the ledger server refused the hive credential: 403"),
     ):
         ledger.launch_token(SLUG, WORKER)
-    client.assert_called_once_with("https://hub.example", {"X-Hive-Credential": CREDENTIAL, "X-Ledger-Agent": WORKER})
+    client.assert_called_once_with(
+        "https://hub.example", {"X-Hive-Credential": CREDENTIAL, "X-Ledger-Agent": WORKER}, ledger.REQUEST_TIMEOUT
+    )
     client.return_value.request.assert_called_once_with(SLUG, "agent-token", {})
 
 

@@ -107,6 +107,8 @@ from scripts.swarm_ledger.repository import repository
 BASE = "" if ledger_link.remote() else ledger_link.base()
 REMOTE_READ_ATTEMPTS = 3
 REMOTE_READ_PAUSE = 0.5
+REQUEST_TIMEOUT = 10
+CREDENTIAL_REFUSED = '"Missing or wrong ledger credential"'
 AUTH_FAILURES = collections.Counter()
 SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
 OBJECT_FORMS = {
@@ -148,14 +150,16 @@ def launch_token(slug, name):
             "a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential "
             "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL from agentihooks hive join"
         )
-    client = ResourceClient(base(), {"X-Hive-Credential": credential, "X-Ledger-Agent": name})
+    client = ResourceClient(base(), {"X-Hive-Credential": credential, "X-Ledger-Agent": name}, REQUEST_TIMEOUT)
     try:
         return client.request(slug, "agent-token", {})["data"]["token"]
     except urllib.error.HTTPError as exc:
+        if exc.code not in (401, 403):
+            raise
         raise unauthenticated(f"the ledger server refused the hive credential: {exc.code}") from None
 
 
-def request(slug, ops=None, service=False, timeout=10):
+def request(slug, ops=None, service=False, timeout=REQUEST_TIMEOUT):
     from scripts.swarm_ledger.api.client import ResourceClient
 
     client = ResourceClient(base(), credentials(slug, service), timeout)
@@ -165,23 +169,20 @@ def request(slug, ops=None, service=False, timeout=10):
 def resource(slug: str, path: str, service: bool = False, collection: bool = False) -> dict | list:
     from scripts.swarm_ledger.api.client import ResourceClient
 
-    client = ResourceClient(base(), credentials(slug, service))
-
     def read():
+        client = ResourceClient(base(), credentials(slug, service), REQUEST_TIMEOUT)
         return client.collection(slug, path) if collection else client.request(slug, path)["data"]
 
-    return retried(read) if ledger_link.remote() else read()
+    return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote() else read()
 
 
 def export(slug: str, service: bool = False) -> dict:
     from scripts.swarm_ledger.api.client import ResourceClient
 
-    client = ResourceClient(base(), credentials(slug, service))
-
     def read():
-        return client.request(slug, "export", {})["data"]
+        return ResourceClient(base(), credentials(slug, service), REQUEST_TIMEOUT).request(slug, "export", {})["data"]
 
-    return retried(read) if ledger_link.remote() else read()
+    return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote() else read()
 
 
 class Missing(SystemExit):
@@ -226,26 +227,32 @@ def call(slug, ops=None, service=False):
 def remote_call(slug, ops, service):
     deliver = functools.partial(request, slug, ops, service)
     try:
-        return retried(deliver) if ops is None else deliver()
+        return retried(deliver, REMOTE_READ_ATTEMPTS if ops is None else 1)
     except urllib.error.HTTPError as exc:
-        body = exc.read().decode(errors="replace")
-        if exc.code == 403 and "credential" in body:
-            AUTH_FAILURES["the ledger server refused the credential"] += 1
-        sys.exit(f"server refused: {exc.code} {body}")
+        sys.exit(f"server refused: {exc.code} {refusal_text(exc)}")
     except OSError as exc:
         sys.exit(f"ledger server not answering on {base()}: {exc}")
 
 
-def retried(read):
-    for attempt in range(1, REMOTE_READ_ATTEMPTS + 1):
+def retried(read, attempts):
+    for attempt in range(1, attempts + 1):
         try:
             return read()
-        except urllib.error.HTTPError:
-            raise
-        except OSError:
-            if attempt == REMOTE_READ_ATTEMPTS:
+        except urllib.error.HTTPError as exc:
+            if exc.code == 403 and CREDENTIAL_REFUSED in refusal_text(exc):
+                raise unauthenticated("the ledger server refused the credential") from None
+            if exc.code < 500 or attempt == attempts:
                 raise
-            time.sleep(REMOTE_READ_PAUSE * attempt)
+        except OSError:
+            if attempt == attempts:
+                raise
+        time.sleep(REMOTE_READ_PAUSE * attempt)
+
+
+def refusal_text(exc):
+    if not hasattr(exc, "ledger_text"):
+        exc.ledger_text = exc.read().decode(errors="replace")
+    return exc.ledger_text
 
 
 def op(kind, args, /, **fields):
