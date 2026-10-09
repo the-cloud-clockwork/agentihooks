@@ -209,16 +209,17 @@ def _environment(definition: Definition, environ: dict | None = None) -> Definit
     environ = os.environ if environ is None else environ
     prefix = f"AGENTIHOOKS_CLASSIFIER_{definition.name.upper().replace('-', '_')}_"
     thresholds = dict(definition.thresholds)
-    for key, value in thresholds.items():
+    for key in thresholds:
         raw = environ.get(prefix + key.upper().replace("-", "_"))
-        if raw is None and key in definition.environment:
+        legacy = raw is None and key in definition.environment
+        if legacy:
             raw = environ.get(definition.environment[key])
         if raw is not None:
             try:
                 value = float(raw)
             except ValueError as exc:
                 raise DefinitionError(f"threshold {key} must be between zero and one") from exc
-        thresholds[key] = _probability(value, key)
+            thresholds[key] = value if legacy else _probability(value, key)
     return replace(definition, thresholds=thresholds)
 
 
