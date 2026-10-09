@@ -4,7 +4,7 @@
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1939",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1968",
-  "tested_commit": "fc70937eab9de34710849a2e67733834b885bd96",
+  "tested_commit": "f13f73dc0c3f011859a791a77b3ec10fe2471805",
   "status": "service-fixture-qualified-awaiting-G3-integration",
   "evidence_class": "Isolated fake Redis; two independent controller processes over TCP for case A; fake server time and mocked Kubernetes transport for cases B and C; no live rollout proof.",
   "interfaces": [
@@ -28,7 +28,8 @@
   "validation": {
     "focused_tests": "Historical verification before added mutation tests: 226 passed in 6.84 seconds. Current source and fixture verification at ec049084c0309142e0087a69144d9c90cdad0755: 235 passed in 6.29 seconds across controller, journal, lease, renewal, execution identity and observation. Controller-only verification at fc70937e: 23 passed in 2.63 seconds.",
     "lint": "ruff check and ruff format check passed on changed Python files",
-    "limits": "84 units over limits, 84 base allowlist entries, zero errors"
+    "limits": "84 units over limits, 84 base allowlist entries, zero errors",
+    "controller_tests": "23 controller tests passed on source f13f73dc0c3f011859a791a77b3ec10fe2471805; all acceptance cases regenerated on this commit"
   },
   "cases": {
     "a": "evidence/SV2-CTL-01/a-result.json",

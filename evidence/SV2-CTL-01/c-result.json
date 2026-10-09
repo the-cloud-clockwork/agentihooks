@@ -1,8 +1,8 @@
 {
   "passed": true,
   "confirmed_operation": {
-    "operation_id": "op-bf0b85e05b1e5660a75d68e5979297e0",
-    "execution_id": "exe-04c736e6fc1547f5a6f382ea01f38d37",
+    "operation_id": "op-8fc1729a53a4540aaa344f5a88055935",
+    "execution_id": "exe-913d9f5b9c384075b5dc74b0707a6b60",
     "generation": 1,
     "action": "spawn",
     "backend": "kubernetes",
@@ -21,7 +21,7 @@
   "rollback_admission_refused": true,
   "retained_intents": [
     {
-      "execution_id": "exe-04c736e6fc1547f5a6f382ea01f38d37",
+      "execution_id": "exe-913d9f5b9c384075b5dc74b0707a6b60",
       "generation": 1,
       "controller_epoch": 1
     }
