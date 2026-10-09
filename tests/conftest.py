@@ -470,3 +470,18 @@ def sample_tool_use_event():
         "tool_name": "Write",
         "tool_input": {"file_path": "/tmp/test.txt", "content": "hello"},
     }
+
+
+@pytest.fixture(autouse=True)
+def _package_conditions_offline(tmp_path, monkeypatch):
+    from hooks.context import conditions
+
+    real_layers = conditions.layer_dirs
+
+    def isolated_layers(state, cwd=None):
+        layers, probed = real_layers(state, cwd)
+        return [
+            (source, tmp_path / "package-conditions" if source == "package" else path) for source, path in layers
+        ], probed
+
+    monkeypatch.setattr(conditions, "layer_dirs", isolated_layers)
