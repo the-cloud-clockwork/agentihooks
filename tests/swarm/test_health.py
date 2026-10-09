@@ -269,6 +269,9 @@ def test_busy_agent_with_stale_tool_activity_is_reported_stalled():
     assert [f.kind for f in found] == ["stalled"]
     assert found[0].subject == WORKER
     assert found[0].measure == 10
+    assert found[0].summary == "busy with no tool call for 10 minutes"
+    assert found[0].threshold == "10 minutes without a tool call"
+    assert found[0].evidence == ("pane working; task t1",)
 
 
 def test_stalled_busy_threshold_is_configurable_and_does_not_flag_other_panes():
@@ -283,6 +286,14 @@ def test_stalled_busy_threshold_is_configurable_and_does_not_flag_other_panes():
         {**busy, "pane_state": "waiting"},
     ):
         assert health.findings(ledger, [row], {}, limits) == []
+
+
+def test_fresh_agent_does_not_hide_a_stalled_agent_and_taskless_evidence_stays_named():
+    fresh = {**agent("fresh"), "pane_state": "working", "tool_quiet_minutes": 1}
+    busy = {"name": "busy", "pane_state": "working", "tool_quiet_minutes": 10}
+    found = health.stalled([fresh, busy], LIMITS)
+    assert [f.subject for f in found] == ["busy"]
+    assert found[0].evidence == ("pane working; task ",)
 
 
 def test_over_monitoring_names_the_agent_and_its_counts():

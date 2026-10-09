@@ -65,6 +65,7 @@ def test_busy_tool_stall_is_reported_until_a_new_tool_call_or_named_wait(monkeyp
 
     _watch_idle("sw", store, ledger, runtime, ledger.tasks("sw"), store.agents("sw")[0], at)
     assert store.redis.get(store.key("sw", "pane-state", name)) == "working"
+    assert 0 < store.redis.ttl(store.key("sw", "pane-state", name)) <= idle.BEAT_TTL_S
     found = findings(store, "sw", config, ledger.tasks("sw"), [])
     assert "stalled" in [f["kind"] for f in found]
     idle.declare_wait(store.redis, "sw", name, at + 60_000, "checks", at)
@@ -92,5 +93,23 @@ def test_stall_report_respects_actual_launch_and_startup_grace(monkeypatch, tmp_
     store.redis.set(store.key("sw", "pane-state", name), "working")
     rows = _health_rows(store, "sw", [worker], {}, at)
     assert health.stalled(rows, limits) == []
-    rows = _health_rows(store, "sw", [worker], {}, at + 3 * 60_000)
+    rows = _health_rows(store, "sw", [worker], {}, at + 2 * 60_000)
+    assert health.stalled(rows, limits) == []
+    rows = _health_rows(store, "sw", [worker], {name: 8}, at + 3 * 60_000 + 30_000)
     assert [f.kind for f in health.stalled(rows, limits)] == ["stalled"]
+    assert rows[0]["tool_quiet_minutes"] == 7
+    assert rows[0]["quiet_minutes"] == 8
+
+
+def test_unknown_start_and_tool_times_are_not_reported_as_a_stall(monkeypatch, tmp_path):
+    import fakeredis
+
+    from scripts.swarm.health import activity
+    from scripts.swarm.status import _health_rows
+    from scripts.swarm.store import AgentRecord
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    monkeypatch.setattr(activity, "default_root", lambda: tmp_path)
+    worker = AgentRecord("engineer@a1b2c3-0001", "eng", "t1")
+    rows = _health_rows(store, "sw", [worker], {}, 1_000_000)
+    assert rows[0]["tool_quiet_minutes"] is None
