@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from collections.abc import Mapping
 
 from scripts.swarm import metrics_ledger, metrics_outbox
 from scripts.swarm.ledger_client import LedgerClient
@@ -12,7 +13,7 @@ def tick_row(slug, now_ms, actions):
     return {"event_id": f"tick:{slug}:{now_ms}", "ledger": slug, "ts_ms": now_ms, **path, "actions": actions}
 
 
-def record_pass(slug, now_ms, actions, environ=os.environ):
+def record_pass(slug: str, now_ms: int, actions: int, environ: Mapping[str, str] = os.environ) -> list[str]:
     sink = metrics_outbox.settings(environ)
     if sink is None:
         return []
