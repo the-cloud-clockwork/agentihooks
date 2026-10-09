@@ -1,7 +1,7 @@
 {
   "package": "SV2-IMG-01",
-  "fixture": "aa72c593116e425da92221ae984a36fc",
-  "tested_commit": "5325b183b44f40dbd8824a36559aa3a426de5602",
+  "fixture": "b1affd46ef2a46999fdcd95098383928",
+  "tested_commit": "7df0c1375389b47957275ba249f96b5b68a7c998",
   "mocked": false,
   "startup_network": "none",
   "lock_sha256": "03586596a000bf36f9f6e0592c12e88ffa60c09c251bfb60afcef8e19c8451f7",

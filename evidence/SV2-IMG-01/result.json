@@ -1,7 +1,7 @@
 {
   "package": "SV2-IMG-01",
-  "fixture": "aa72c593116e425da92221ae984a36fc",
-  "tested_commit": "5325b183b44f40dbd8824a36559aa3a426de5602",
+  "fixture": "b1affd46ef2a46999fdcd95098383928",
+  "tested_commit": "7df0c1375389b47957275ba249f96b5b68a7c998",
   "mocked": false,
   "startup_network": "none",
   "lock_sha256": "03586596a000bf36f9f6e0592c12e88ffa60c09c251bfb60afcef8e19c8451f7",
@@ -14,12 +14,12 @@
   "production_rollout": "not exercised",
   "schema_version": 1,
   "integration_gate": "G2",
-  "implementation_status": "waiting for runtime prerequisite and pull request",
+  "implementation_status": "implemented; pull request checks pending",
   "code_evidence": {
-    "tested_commit": "5325b183b44f40dbd8824a36559aa3a426de5602",
-    "source_url": "https://github.com/the-cloud-clockwork/agentihooks/commit/5325b183b44f40dbd8824a36559aa3a426de5602",
+    "tested_commit": "7df0c1375389b47957275ba249f96b5b68a7c998",
+    "source_url": "https://github.com/the-cloud-clockwork/agentihooks/commit/7df0c1375389b47957275ba249f96b5b68a7c998",
     "issue_url": "https://github.com/the-cloud-clockwork/agentihooks/issues/1938",
-    "pull_request_url": null
+    "pull_request_url": "https://github.com/the-cloud-clockwork/agentihooks/pull/1972"
   },
   "interfaces": [
     "versions lock validation",
@@ -37,25 +37,25 @@
     "observed": "real isolated build and container outputs",
     "accepted": "fixtures A B C passed",
     "committed": "tested source commit recorded",
-    "externally_verified": "CI and production rollout not run"
+    "externally_verified": "CI pending; production rollout not run"
   },
   "checks": {
     "focused_pytest": "29 passed",
     "helper_coverage_percent": 99,
     "lint": "passed",
     "format": "passed",
-    "size_against_stacked_base": "84 known offenders, zero errors",
     "standards_review": "closed",
-    "spec_review": "closed"
+    "spec_review": "closed",
+    "size_against_dev": "84 known offenders, zero errors"
   },
   "limitations": [
     "Linux amd64 only",
     "Native profile materialization and main agent supervision belong to later IMG packages",
     "Production image publication and rollout remain with antoncore GitOps",
-    "Dependency SV2-RUN-05 remains open; CI full suite and mutation await the image pull request"
+    "CI full suite and mutation await the image pull request; production G2 integration remains separate"
   ],
   "local_compatibility": "private home and existing local runtime imports passed",
-  "previous_image_id": "sha256:662490c2a82d3b344af17673f153b7cbf58b2d70a74ae570de26d8669a9627ce",
-  "rebuilt_image_id": "sha256:36cf177c44abd8a7701fff592869fb6f78a813c92a7051d6bfadedefc39e7327",
+  "previous_image_id": "sha256:ad4063d8889f949429f1abc6158c243eec100bff28bd88a6e0204949bec6ee0b",
+  "rebuilt_image_id": "sha256:8a8aa8c6635ca8891a786e72b1719597de1a32563fb4a7897fb6cfe12cd330fa",
   "rollback": "retained previous fixture image started again after uncached rebuild; no production selection changed"
 }

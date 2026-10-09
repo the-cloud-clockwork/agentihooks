@@ -1,7 +1,7 @@
 {
   "package": "SV2-IMG-01",
-  "fixture": "aa72c593116e425da92221ae984a36fc",
-  "tested_commit": "5325b183b44f40dbd8824a36559aa3a426de5602",
+  "fixture": "b1affd46ef2a46999fdcd95098383928",
+  "tested_commit": "7df0c1375389b47957275ba249f96b5b68a7c998",
   "mocked": false,
   "startup_network": "none",
   "lock_sha256": "03586596a000bf36f9f6e0592c12e88ffa60c09c251bfb60afcef8e19c8451f7",
@@ -267,7 +267,7 @@
       "package/roles/cicd/.claude/conditions/pre-monitor+taskoutput+bashoutput+bash.gh+bash.sleep+bash.agentihooks-watch_budget.py": "f630dcd109647d648d445d6dec0f15d6f843a523c213ffffa19377b194aeffd3",
       "package/roles/cicd/.claude/conditions/stop-claim_stop.py": "e83110f5f5cc351980ea7f5cef011196e7ef2be5bfdf97a94217ef6a5b78b205",
       "package/roles/cicd/.claude/conditions/stop-push_stop.py": "541601f25d1ea4e29d54e34db867acd9dc65394ea83f002cea4c19628f8f25ed",
-      "package/roles/cicd/.claude/rules/cicd-role.md": "17a42c53da5019d3bc5173006da597dca3045f99f7ccc3aff60bcd9e35cdebd1",
+      "package/roles/cicd/.claude/rules/cicd-role.md": "6d9b8eabc04c3a7fded432e41b7810d0d93fd7d808e938f40ac8aeac13eede31",
       "package/roles/cicd/.claude/settings.overrides.json": "8d1dfaf8cfea3728f2e7814f7ed9cacdb501b53ffb020f47a3ea4a91ec192dc5",
       "package/roles/cicd/.claude/skills/swarm-ci/SKILL.md": "7935c20b93868edee4b831471031d8b14907d90c1e2c8e682d85335c5bb17720",
       "package/roles/cicd/.claude/skills/swarm-ci/evals/evals.json": "2eb6537477f9edf95eb5abfb44172a944a50fc41b3ce6b7a3859f33ba4113d64",
@@ -284,7 +284,7 @@
       "package/roles/engineer/.claude/conditions/pre-monitor+taskoutput+bashoutput+bash.gh+bash.sleep+bash.agentihooks-watch_budget.py": "f630dcd109647d648d445d6dec0f15d6f843a523c213ffffa19377b194aeffd3",
       "package/roles/engineer/.claude/conditions/stop-claim_stop.py": "e83110f5f5cc351980ea7f5cef011196e7ef2be5bfdf97a94217ef6a5b78b205",
       "package/roles/engineer/.claude/conditions/stop-push_stop.py": "541601f25d1ea4e29d54e34db867acd9dc65394ea83f002cea4c19628f8f25ed",
-      "package/roles/engineer/.claude/rules/engineer-role.md": "4ed5da34a97b8997d81fdd34ac25f7828742be6d1be4ec21def52a63c888a3f7",
+      "package/roles/engineer/.claude/rules/engineer-role.md": "da6fbdd7aa02fae1800e64db65101ef775e0ecd584ed6fb3c3b2121b7fca1d5d",
       "package/roles/engineer/.claude/settings.overrides.json": "9d3e0ac4160ab481fcb3844486b6a320a4b87bc1917c7e1aa96e593d5f24ca95",
       "package/roles/engineer/.claude/skills/swarm-engineer/SKILL.md": "ce342706d49a31c9d7faa667f5dbe7630948d77dd5f2c67aa9472c755b346bda",
       "package/roles/engineer/.claude/skills/swarm-engineer/evals/evals.json": "19842b9bd136011e394cfab99ceed52d8ff4c29428989330e50300b37e366232",
@@ -310,8 +310,8 @@
       "package/roles/planner/.claude/conditions/pre-mcp__serena-no_serena_writes.py": "1235828ae8796eff7012f984c3c7646ae8c6c05ac74c1a8b9baedfe90338a1c1",
       "package/roles/planner/.claude/rules/planner-role.md": "625eeb3864e9a12d51bfbcbe53548d96122ac44e9e9f86b6484687e344009f11",
       "package/roles/planner/.claude/settings.overrides.json": "4a25b36bf34c6eac6f4c2a86a089cef2b312e92577f337c96dbad1ae02bdd8c1",
-      "package/roles/planner/.claude/skills/swarm-planner/SKILL.md": "212a982705baf8ecef1e08620093a1516f946c7d342ced595cfebb5bcbd66358",
-      "package/roles/planner/.claude/skills/swarm-planner/evals/evals.json": "cfd7353293b1f5359c835285e0a96afca1d161f84fcde437119edb9699f83ce4",
+      "package/roles/planner/.claude/skills/swarm-planner/SKILL.md": "10a838ea9a6762bca9e4169a18d922385eeac13cb2193b7328fcd4f243089727",
+      "package/roles/planner/.claude/skills/swarm-planner/evals/evals.json": "b2b31a2a834f23a7cca298f82edab6b74239c736c20826e880c1ffb13d063aab",
       "package/roles/planner/.codex/config.overrides.toml": "3fe0d8ef15bfc03433b2ff4f14478ad1018aa9f12ebbe3a08acb7c780209f55a",
       "package/roles/planner/CLAUDE.md": "0fa24470f8c87342b73a30674647f1c46febbf2dcd764236fb216be34c5e4d72",
       "package/roles/planner/profile.yml": "b98e64813ab19a774614e91de8e9d00e4cfc350b471aad7ac45058cf3867cbc2",
@@ -355,7 +355,7 @@
       "package/skills/run-in-terminal/SKILL.md": "44d552dc71d08ea937fc4d21de0c90759338f24f2955b0c8b3d1bdd33e455c8b",
       "package/skills/run-in-terminal/scripts/01_check_interop.sh": "b898d78b852ddf416ac3cf0a0b574d617a83a893007d7c087615cdb2f86ace36",
       "package/skills/run-in-terminal/scripts/02_run_terminal.sh": "f12adafc38d037a8ef6f8ccd8429aa68a76cbb86d51f4eafee2a564b76d2f9a7",
-      "package/skills/swarm-ledger/SKILL.md": "bb5596cde8666539722f690a56fced761eac34489d2214e314f8f4ade6db11ff",
+      "package/skills/swarm-ledger/SKILL.md": "109be20f59a373cd8311deb6e7a618a8bbbb58343623f8b919c1f9ebee2147cd",
       "package/skills/swarm-maker/SKILL.md": "933d95e3be8859461fd5484a30e62c9166ff2ac6a4c3d91b157597e658182754",
       "package/skills/swarm-maker/evals/evals.json": "06f93ae639449eab54a121433c38e6fd42a045db05c19df4117df6804071f89c",
       "package/skills/take-master/SKILL.md": "d96943ab6226b61a6ee54d96263071d9b8fd3605f08359677e9665e0f2a86f93",
@@ -374,6 +374,6 @@
       "package/swarm-templates/doctor.json": "977642504a1b6bfd1968cacbe067cc23b5a61945adabe099be2cc62e413132c2"
     },
     "schema_version": 1,
-    "source_revision": "5325b183b44f40dbd8824a36559aa3a426de5602"
+    "source_revision": "7df0c1375389b47957275ba249f96b5b68a7c998"
   }
 }
