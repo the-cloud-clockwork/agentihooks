@@ -9,6 +9,8 @@ agentihooks swarm <id> close [--note TEXT] [--now]                 a live master
 agentihooks swarm <id> reopen                                     keep the summary and settings, start a fresh master
 agentihooks swarm <id> take-master [--replace]                    this session becomes the master and prints its priming
 agentihooks swarm <id> master up [--last | --new]                 from a terminal: bring back the last master's conversation or start a new one
+agentihooks swarm <id> <profile> up                               from a terminal: any role or overlay profile (planner, engineer, cicd, qa, frontend) in a pane for you, no task
+agentihooks swarm <id> agent-up <profile>                         the same launch in its parser form
 agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
 agentihooks swarm <id> snapshot | restore [--from FILE]           save the swarm's state to its folder (stop does too); restore the newest, paused
 agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
@@ -27,6 +29,7 @@ agentihooks swarm <id> culture set FILE | show                    the swarm's sh
 agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
 agentihooks swarm <id> issue URL | pr URL | branch | done [--pr URL] | block NOTE | handoff DOC [--recap FILE] [--reason R] | say TEXT [--to NAME|eng|ci]
 agentihooks swarm <id> learned TEXT [--maturity data|note|insight|canon]   (default note; canon only by the master)
+agentihooks swarm <id> exit              an agent launched with <profile> up ends its own session
 agentihooks swarm <id> park DOC          hold a stacked task on its pushed branch until its open dependencies merge
 agentihooks swarm <id> restack           rebase parked task work onto dev after its dependencies merge
 agentihooks swarm <id> wait MINUTES [--reason TEXT]                 the tick counts no idle tick while it holds
@@ -64,6 +67,7 @@ from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import (
     affinity,
+    agent_up,
     clearance,
     control_notifications,
     delivery,
@@ -98,7 +102,7 @@ from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.status import auto_snapshot, findings, status_report, task_counts, verdict_store
-from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, connect
+from scripts.swarm.store import ASSIST, AUTO_SCALING, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, connect
 from scripts.swarm.tick import agent_status, primed, skip_refused, tick
 from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, ledger_workspace, plan_shape
 from scripts.swarm_v2.runtime.routed import routed
@@ -510,6 +514,18 @@ def cmd_master(store, args):
     print(json.dumps(asdict(launched)))
 
 
+def cmd_agent_up(store, args):
+    launched = agent_up.up(store, args.slug, HerdrRuntime(), args.profile, now_ms())
+    print(json.dumps(asdict(launched)))
+
+
+def cmd_exit(store, args):
+    name = store.names.resolve(args.name or Who.from_env().name)
+    agent_up.retire(store, args.slug, name, now_ms())
+    print(json.dumps({"exited": name}), flush=True)
+    HerdrRuntime().reap_name(name)
+
+
 def gate_mode(key, value):
     value = modes.normalize(value)
     if value not in modes.supported(GATE_KEYS[key]):
@@ -755,6 +771,36 @@ def cmd_status(store, args):
         print(
             f"gate  {modes.label(row['kind'])}  {row.get('gate')}  {row.get('agent')}  {row.get('task')}  {row.get('reason')}"
         )
+
+
+def autoscale_lines(config, decision):
+    caps = decision["ceilings"]
+    pending = decision["pending_raise"]
+    lines = [f"scaling {config.scaling}, ceilings eng {caps['eng']}, ci {caps['ci']}, plan {caps['plan']}"]
+    if config.scaling != AUTO_SCALING:
+        lines.append(
+            f"manual scaling keeps the configured caps eng {config.max_eng}, ci {config.max_ci}, plan {config.max_plan}"
+        )
+    if pending["target"] is not None:
+        lines.append(f"pending raise to {pending['target']}, held {pending['ticks']} of 3 ticks")
+    lines.append(f"host room {decision['host']['room']}: {decision['host']['reason']}")
+    lines.append(decision["reason"])
+    return lines
+
+
+def cmd_autoscale(store, args):
+    from scripts.swarm import capacity
+
+    config = store.config(args.slug) if args.slug in store.slugs() else SwarmConfig(args.slug, "", max_eng=0, max_ci=0)
+    if args.fixture:
+        inputs = capacity.fixture_inputs(json.loads(Path(args.fixture).read_text()))
+    else:
+        inputs = capacity.live_inputs(args.slug, store, LedgerClient(), dict(os.environ), now_ms())
+    _, decision = capacity.autoscaled(replace(config, scaling=AUTO_SCALING), inputs)
+    if args.json:
+        print(json.dumps({"scaling": config.scaling, "applied": config.scaling == AUTO_SCALING, **decision}, indent=2))
+        return
+    print("\n".join(autoscale_lines(config, decision)))
 
 
 def cmd_names(store, args):
@@ -1294,9 +1340,14 @@ def build_parser():
     pick = master_up.add_mutually_exclusive_group()
     pick.add_argument("--last", dest="choice", action="store_const", const=master_launch.LAST, default="")
     pick.add_argument("--new", dest="choice", action="store_const", const=master_launch.NEW)
+    sub.add_parser("agent-up").add_argument("profile")
+    sub.add_parser("exit")
     sub.add_parser("set").add_argument("pairs", nargs="+")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
+    scale = sub.add_parser("autoscale")
+    scale.add_argument("--fixture", default="")
+    scale.add_argument("--json", action="store_true")
     sub.add_parser("controller").add_argument("action", nargs="?", choices=("release",), default=None)
     sub.add_parser("names").add_argument("--json", action="store_true")
     verdict = sub.add_parser("verdict")
@@ -1382,6 +1433,8 @@ def main(argv):
             "autonomy",
         ):
             argv = [argv[0], "set", *argv[1:]]
+        elif len(argv) == 3 and argv[2] == "up" and argv[1] != "master":
+            argv = [argv[0], "agent-up", argv[1]]
         args = build_parser().parse_args(argv)
         handler = globals()[f"cmd_{args.command.replace('-', '_')}"]
     who = Who.from_env()

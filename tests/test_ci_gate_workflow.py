@@ -22,7 +22,8 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
     assert (
         required
         <= set(gate["needs"])
-        <= required | {"swarm-image", "shard-check", "brain-smoke", "wiring", "size", "dependency-audit", "durations"}
+        <= required
+        | {"swarm-image", "shard-check", "brain-smoke", "wiring", "size", "dependency-audit", "durations", "helm-kind"}
     )
     assert gate["if"] == "${{ always() }}"
     assert jobs["unit"]["needs"] == ["durations"]

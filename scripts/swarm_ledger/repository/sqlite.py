@@ -17,6 +17,132 @@ CREATE TABLE IF NOT EXISTS seed_deltas (slug TEXT, revision TEXT, path TEXT, val
 CREATE TABLE IF NOT EXISTS events (slug TEXT, key TEXT, revision INTEGER, position INTEGER, value TEXT, PRIMARY KEY(slug,key));
 CREATE INDEX IF NOT EXISTS events_revision ON events(slug,revision);
 """
+DATABASE = "ledgers.sqlite3"
+BEGIN = "BEGIN"
+REGISTRY = "SELECT path,value FROM registry WHERE slug=?"
+PATH_END = "\x7f"
+
+
+class Missing(KeyError, ValueError):
+    pass
+
+
+def summarize(slug: str, state: dict) -> dict:
+    import ledger_bin
+    import ledger_close
+    import ledger_size
+
+    items = [i for i in state.get("tasks") or state.get("phases") or [] if not i.get("out_of_scope")]
+    done = sum(1 for i in items if i.get("done") is True)
+    meta = state.get("_meta", {})
+    return {
+        "slug": slug,
+        "title": state.get("title") or slug,
+        "overview": ledger_close.intro(state.get("overview") or ""),
+        "closed_at": state.get("closed_at"),
+        "size": ledger_size.size_of(state),
+        "open": len(items) - done,
+        "done": done,
+        "updated_at": meta.get("updated_at"),
+        "created_at": meta.get("created_at"),
+        "finished": ledger_bin.finished(state),
+    }
+
+
+def scope(parts: list) -> tuple[list, str]:
+    """The exact ancestor paths of `parts` and the prefix every descendant path starts with."""
+    return [encode(parts[:depth]) for depth in range(len(parts) + 1)], encode(parts)[:-1] + ","
+
+
+def read_partial(connection, slug: str, keys: tuple) -> dict:
+    """Rows under each key path only, assembled; `_meta.events` is filled from the events table."""
+    rows = {}
+    for parts in keys:
+        exact, prefix = scope(parts)
+        marks = ",".join("?" * len(exact))
+        for table in TABLES:
+            for path, parent, key, position, kind, value in connection.execute(
+                f"SELECT path, parent, key, position, kind, value FROM {table} "
+                f"WHERE slug=? AND (path IN ({marks}) OR (path > ? AND path < ?))",
+                (slug, *exact, prefix, prefix + PATH_END),
+            ):
+                rows[path] = (table, parent, key, position, kind, value)
+    if "[]" not in rows:
+        raise Missing(slug)
+    state = assemble(rows)
+    meta = state.get("_meta")
+    if isinstance(meta, dict) and "events" in meta:
+        meta["events"] = read_events(connection, slug)
+    return state
+
+
+def key_parts(key: str) -> list:
+    """`tasks`, `_meta.members` or `tasks/t1` as stored path parts."""
+    name, _, item = key.partition("/")
+    parts = name.split(".")
+    return [*parts, ["id", item, 0]] if item else parts
+
+
+@contextmanager
+def read_only(directory):
+    """A read only connection to the folder's database, or None when it holds none."""
+    path = Path(directory) / DATABASE
+    if not path.exists():
+        yield None
+        return
+    connection = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=5)
+    try:
+        yield connection
+    finally:
+        connection.close()
+
+
+def read_ledger(directory, slug: str, *keys: str) -> dict | None:
+    """Named parts of a stored ledger through a read only connection, for hooks; None when it is not stored."""
+    with read_only(directory) as connection:
+        if connection is None:
+            return None
+        try:
+            with connection:
+                connection.execute(BEGIN)
+                return read_partial(connection, slug, tuple(key_parts(key) for key in keys))
+        except (Missing, sqlite3.OperationalError):
+            return None
+
+
+def read_registry(directory, name: str) -> dict:
+    with read_only(directory) as connection:
+        if connection is None:
+            return {}
+        try:
+            return {key: json.loads(value) for key, value in connection.execute(REGISTRY, (name,))}
+        except sqlite3.OperationalError:
+            return {}
+
+
+def read_ids(directory, slug: str, collection: str) -> tuple:
+    """The ids of a stored collection in order, read from its row paths alone."""
+    parent = encode([collection])
+    with read_only(directory) as connection:
+        if connection is None:
+            return ()
+        try:
+            rows = [
+                row
+                for table in TABLES
+                for row in connection.execute(
+                    f"SELECT position, path FROM {table} WHERE slug=? AND parent=?", (slug, parent)
+                )
+            ]
+        except sqlite3.OperationalError:
+            return ()
+    found = (json.loads(path)[1] for _, path in sorted(rows))
+    return tuple(part[1] for part in found if part[0] == "id")
+
+
+def without_events(state: dict) -> dict:
+    """The document as its rows hold it: the event log lives in its own table."""
+    return {**state, "_meta": {key: value for key, value in state["_meta"].items() if key != "events"}}
 
 
 class SQLiteLedgerRepository:

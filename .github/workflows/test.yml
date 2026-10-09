@@ -36,6 +36,9 @@ jobs:
   brain-smoke:
     uses: ./.github/workflows/brain-smoke.yml
 
+  helm-kind:
+    uses: ./.github/workflows/helm-kind.yml
+
   wiring:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -207,6 +210,8 @@ jobs:
     timeout-minutes: 7
     permissions:
       contents: read
+    env:
+      CODEX_RELEASE: rust-v0.160.0
     strategy:
       fail-fast: false
       matrix:
@@ -270,6 +275,29 @@ jobs:
       - &use-venv
         name: Use the test environment
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
+
+      # tests.shards pins the live Codex test's file to shard 1; only the 3.12 shard 1 installs the CLI it runs.
+      - name: Restore the Codex CLI
+        id: codex
+        if: matrix.python-version == '3.12' && matrix.shard == 1
+        uses: actions/cache@v4
+        with:
+          path: ~/codex
+          key: codex-${{ runner.os }}-${{ env.CODEX_RELEASE }}
+
+      - name: Install the Codex CLI
+        if: steps.codex.outcome == 'success' && steps.codex.outputs.cache-hit != 'true'
+        run: |
+          set -o pipefail
+          mkdir -p ~/codex
+          curl -fsSL --retry 3 "https://github.com/openai/codex/releases/download/${CODEX_RELEASE}/codex-x86_64-unknown-linux-musl.zst" | zstd -dc > ~/codex/codex
+          chmod +x ~/codex/codex
+
+      - name: Use the Codex CLI
+        if: steps.codex.outcome == 'success'
+        run: |
+          echo "$HOME/codex" >> "$GITHUB_PATH"
+          echo "CODEX_CLI_REQUIRED=1" >> "$GITHUB_ENV"
 
       - name: Download the queued run's dev durations
         if: needs.durations.outputs.queued == 'true'
@@ -501,14 +529,36 @@ jobs:
           done
           exit 1
 
+      - name: Hold the Delivery L2 binding
+        if: steps.current.outputs.superseded != 'true'
+        env:
+          SONAR_READ_TOKEN: ${{ secrets.SONAR_READ_TOKEN }}
+        run: |
+          set -o pipefail
+          : "${SONAR_READ_TOKEN:?SONAR_READ_TOKEN is not set}"
+          bound=$(curl --fail --silent --show-error --max-time 10 \
+            -H "Authorization: Bearer $SONAR_READ_TOKEN" \
+            "http://127.0.0.1:9000/api/qualitygates/get_by_project?project=agentihooks" | jq -er .qualityGate.name)
+          if [[ "$bound" != 'Delivery L2' ]]; then
+            echo "::error::Project agentihooks is bound to $bound; required Delivery L2."
+            exit 1
+          fi
+          echo "Project agentihooks is bound to Delivery L2"
+
       - name: Restore Sonar downloads
         uses: actions/cache@v4
         with:
           path: |
             ~/.sonar/cache
-            ~/.sonar/js/node-runtime
             ${{ runner.tool_cache }}/sonar-scanner-cli
           key: sonar-${{ runner.os }}-${{ runner.arch }}-${{ env.SONAR_SCANNER_VERSION }}-${{ steps.proxy.outputs.version }}
+
+      # Its own entry, since a changed path list gives a cache a new version that only a dev push that scans can save.
+      - name: Restore the SonarJS Node runtime
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/js/node-runtime
+          key: sonar-node-${{ runner.os }}-${{ runner.arch }}-${{ steps.proxy.outputs.version }}
 
       # Sonar names a branch analysis after the ref, so a queue run would open a throwaway gh-readonly-queue branch.
       - name: Name the queued pull request
@@ -527,6 +577,14 @@ jobs:
           branch=$(awk -v head="$head" '$1 == head { sub("refs/heads/", "", $2); print $2 }' <<< "$heads")
           [[ -n "$branch" && "$branch" != *$'\n'* ]] || branch="pr-$number"
           echo "args=-Dsonar.pullrequest.key=$number -Dsonar.pullrequest.branch=$branch -Dsonar.pullrequest.base=${BASE_REF#refs/heads/}" >> "$GITHUB_OUTPUT"
+
+      # A first branch analysis has no new code baseline, so a dispatch graded as a branch drops every Delivery L2 condition.
+      - name: Name the dispatched branch as a pull request
+        id: dispatched
+        if: github.event_name == 'workflow_dispatch' && github.ref_name != 'dev'
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: echo "args=-Dsonar.pullrequest.key=dispatch-${REF_NAME//\//-} -Dsonar.pullrequest.branch=$REF_NAME -Dsonar.pullrequest.base=dev" >> "$GITHUB_OUTPUT"
 
       - name: Wait for the coverage merge
         if: always() && steps.current.outputs.superseded != 'true'
@@ -551,7 +609,7 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: http://127.0.0.1:9000
-          ARGS: ${{ steps.queued.outputs.args }}
+          ARGS: ${{ steps.queued.outputs.args || steps.dispatched.outputs.args }}
         run: |
           scanner="$RUNNER_TOOL_CACHE/sonar-scanner-cli/$SONAR_SCANNER_VERSION/linux-x64"
           if [[ ! -x "$scanner/bin/sonar-scanner" ]]; then
@@ -784,7 +842,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [durations, unit, shard-check, test-count, coverage-ratchet, size, lint, sonar, mutation, swarm-image, brain-smoke, wiring, semgrep, dependency-audit]
+    needs: [durations, unit, shard-check, test-count, coverage-ratchet, size, lint, sonar, mutation, swarm-image, brain-smoke, helm-kind, wiring, semgrep, dependency-audit]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

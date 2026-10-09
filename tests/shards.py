@@ -6,6 +6,7 @@ from pathlib import Path
 
 # Every xdist worker of a shard rewrites each file it collects, while stored durations split between workers; measured.
 SECONDS_PER_SOURCE_BYTE = 3e-6
+FIRST_SHARD_FILES = frozenset({"tests/routing/test_codex_api.py"})
 
 
 def discover_test_files(root: Path) -> list[str]:

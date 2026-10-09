@@ -2,6 +2,7 @@
 
 import hashlib
 import hmac
+import json
 import os
 import secrets
 from pathlib import Path
@@ -90,6 +91,26 @@ def _with_user(url: str, user: str, password: str) -> str:
 
 def ledger_member(redis: "Redis", credential: str) -> str | None:
     return redis.get(f"{PREFIX}:ledger:{_digest(credential)}")
+
+
+def issue_agent(redis: "Redis", member_id: str, slug: str, name: str) -> str:
+    token = f"hive.{member_id}.{secrets.token_urlsafe()}"
+    key = f"{PREFIX}:member:{member_id}"
+
+    def record(pipe):
+        if not pipe.exists(key):
+            raise HiveError("Hive membership was revoked")
+        pipe.multi()
+        pipe.hset(key, f"agent:{_digest(token)}", json.dumps([slug, name]))
+
+    redis.transaction(record, key)
+    return token
+
+
+def agent_member(redis: "Redis", token: str, slug: str, name: str) -> str | None:
+    member_id = token.removeprefix("hive.").partition(".")[0]
+    scope = redis.hget(f"{PREFIX}:member:{member_id}", f"agent:{_digest(token)}")
+    return member_id if scope == json.dumps([slug, name]) else None
 
 
 def issue_controller(redis: "Redis") -> str:

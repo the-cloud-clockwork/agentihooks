@@ -10,13 +10,14 @@ import uuid
 from dataclasses import replace
 from pathlib import Path
 
-from scripts import agent_choice, session_bands
+from scripts import agent_choice
 from scripts.handoff import envelope
 from scripts.init_agent import PREDECESSOR
 from scripts.profiles import binding, plugins
 from scripts.swarm import (
     affinity,
     effort_range,
+    host_budget,
     live_binding,
     model_pick,
     naming,
@@ -153,6 +154,7 @@ class HerdrRuntime:
         self._binding_pids = {}
         self.refusals = {}
         self.end, self.reap = reaper.retire, reaper.reap
+        self._quota_previous = {}
 
     def has_capacity(self, config):
         environ = dict(os.environ)
@@ -201,9 +203,14 @@ class HerdrRuntime:
         self._quota_accounts = capacity.accounts(dict(os.environ), now, refresh=placing)
         self._quota_held = {}
         accounts = self._quota_successor_accounts(requirements) if requirements else None
+        warned = self._quota_warned()
+        inputs = capacity.ScaleInputs(self._quota_accounts, agents, demand, self.host, self._quota_previous, warned)
+        config, scaled = capacity.autoscaled(config, inputs)
         decision = capacity.calculate(
-            config, self._quota_accounts, agents, demand, requirements, accounts, warned=self._quota_warned()
+            config, self._quota_accounts, agents, demand, requirements, accounts, warned=warned
         )
+        if scaled:
+            decision["autoscale"] = scaled
         for task, reason in self._quota_held.items():
             decision["reason"] += f"; quota handoff {task} waits: {reason}"
         self._quota_allocations = decision["allocation"]
@@ -217,6 +224,12 @@ class HerdrRuntime:
             self._quota_task_accounts = {task: slot["account"] for task, slot in slots.items()}
             decision["tasks"] = dict(self._quota_tasks)
         return decision
+
+    def host(self) -> host_budget.HostSample:
+        return host_budget.read_host()
+
+    def quota_previous(self, decision: dict) -> None:
+        self._quota_previous = decision
 
     def quota_requirements(self, config: SwarmConfig, ready: dict) -> dict:
         from scripts.swarm.capacity import _harnesses
@@ -291,9 +304,9 @@ class HerdrRuntime:
     def _rotation(self, requested, environ):
         if requested or not hasattr(self, "_quota_accounts"):
             return self.choose(requested, environ)
-        from scripts.swarm.capacity import seats
+        from scripts.swarm.capacity import offered, pick
 
-        seat = session_bands.pick(seats(self._quota_open()))
+        seat = pick(offered(self._quota_accounts, self._quota_warned()))
         return (seat.harness, "rotation") if seat else ("claude", agent_choice.ALL_FULL)
 
     def _quota_transfer(self, saved, profile, environ, lane, want, planned=None):
@@ -365,12 +378,13 @@ class HerdrRuntime:
         return (harness, getattr(self, "_quota_task_accounts", {}).get(task_id)) if harness else None
 
     def _quota_account(self, agent, preferred, excluded):
-        from scripts.swarm.capacity import seats
+        from scripts.swarm.capacity import offered, pick
 
         eligible = [row for row in self._quota_eligible(agent) if row.name != excluded]
         row = next((row for row in eligible if row.name == preferred), None)
         if row is None:
-            seat = session_bands.pick(seats(eligible))
+            rows = [row for row in self._quota_accounts if row.harness == agent]
+            seat = pick(offered(rows, {(row.harness, row.name) for row in rows if row not in eligible}))
             if seat is None:
                 raise SpawnError(self._quota_refusal(agent), "unavailable")
             row = next(row for row in eligible if row.name == seat.account)
@@ -515,6 +529,12 @@ class HerdrRuntime:
             profile_decision={**agent.profile_decision, **placed.profile_decision},
             overlays=agent.overlays,
         )
+
+    def operator(self, config, name, profile, text):
+        """Open a claude session for the operator in the swarm's space, bound to the swarm with no task or lane slot."""
+        argv = self._argv(config, name, "claude", text, f"{name}.md", profile)
+        model = _model_args("claude", model_pick.frontier("claude").__dict__, dict(os.environ), effort_range.of(config))
+        return self._launch(config, naming.OPERATOR, "", name, [*argv, "--", *model])
 
     def _holds(self, pane_id, conversation_id):
         for _ in range(RESUME_CHECKS):

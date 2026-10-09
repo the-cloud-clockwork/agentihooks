@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from scripts.hive import auth
+from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_ledger import ledger, ledger_hook, ledger_link
 from scripts.swarm_ledger import ledger_authority as authority
 from scripts.swarm_ledger.api import routes
@@ -39,6 +40,11 @@ def hive():
 
     redis = fakeredis.FakeRedis(decode_responses=True)
     redis.set(f"{auth.PREFIX}:ledger:{auth._digest(CREDENTIAL)}", "member-1")
+    redis.hset(f"{auth.PREFIX}:member:member-1", "ledger", auth._digest(CREDENTIAL))
+    store = RedisStore(redis)
+    store.names.adopt(SLUG, "323133", "", "")
+    redis.hset(store.names.key("name", WORKER), mapping={"swarm": SLUG, "code": "323133"})
+    store.start_execution(SLUG, AgentRecord(WORKER, "eng", "proof", seat=f"eng-1@{SLUG}", hive="member-1"))
     with patch("scripts.swarm.store.redis_client", return_value=redis):
         yield redis
 
@@ -87,7 +93,8 @@ def test_a_remote_client_never_reads_the_page_token():
 def test_the_server_derives_the_agent_token_for_a_hive_credential(live, hive):
     status, reply = token_reply(live, **{"X-Hive-Credential": CREDENTIAL, "X-Ledger-Agent": WORKER})
     assert status == 200
-    assert reply["data"] == {"agent": WORKER, "token": authority.agent_token(live["admin"], SLUG, WORKER)}
+    assert reply["data"]["agent"] == WORKER
+    assert authority.principal(live["admin"], SLUG, reply["data"]["token"], WORKER) == WORKER
 
 
 @pytest.mark.parametrize(
@@ -222,7 +229,8 @@ def test_the_agent_token_route_answers_or_names_what_is_missing():
     server = SimpleNamespace(
         authority=SimpleNamespace(
             hive_member=lambda credential: "member-1" if credential == CREDENTIAL else None,
-            agent_token=authority.agent_token,
+            hive_agent=lambda member, slug, name: (member, slug, name) == ("member-1", SLUG, WORKER),
+            hive_agent_token=lambda member, slug, name: "issued-token",
         ),
         core=SimpleNamespace(read_token=lambda page: f"admin-of-{page}"),
         repository=SimpleNamespace(read_page=lambda slug: slug),
@@ -236,6 +244,4 @@ def test_the_agent_token_route_answers_or_names_what_is_missing():
             routes.agent_token(SimpleNamespace(headers=headers), server, SLUG)
         assert (refused.value.status, refused.value.code, str(refused.value)) == (403, "forbidden", message)
     granted = SimpleNamespace(headers={"X-Hive-Credential": CREDENTIAL, "X-Ledger-Agent": WORKER})
-    assert routes.agent_token(granted, server, SLUG) == {
-        "data": {"agent": WORKER, "token": authority.agent_token(f"admin-of-{SLUG}", SLUG, WORKER)}
-    }
+    assert routes.agent_token(granted, server, SLUG) == {"data": {"agent": WORKER, "token": "issued-token"}}

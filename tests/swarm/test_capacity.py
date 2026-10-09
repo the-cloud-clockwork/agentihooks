@@ -92,7 +92,7 @@ def test_placement_spends_the_soonest_week_reset_first_only_above_the_handoff_ma
     soon = replace(account("soon"), week_resets_at=1000)
     late = replace(account("late"), week_resets_at=9000)
     edge = capacity.Account("claude", "edge", "OPEN", 0, 5, 90, 2, 10)
-    assert [seat.spend_before for seat in capacity.seats([soon, late, edge])] == [1000, 9000, None]
+    assert [seat.spend_before for seat in capacity.offered([soon, late, edge])] == [1000, 9000, None]
     config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=0, max_plan=0)
     result = capacity.calculate(config, [late, edge, soon], [])
     assert [slot["account"] for slot in result["placements"]["eng"]] == ["soon", "late"]
@@ -379,7 +379,7 @@ def test_codex_accounts_with_live_sessions_keep_their_own_quotas(monkeypatch):
     monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: pytest.fail("reached the real codex probe"))
     seen = capacity.accounts({}, 100)
     assert [(row.name, row.sessions, row.week_left, row.cap) for row in seen] == [("a", 1, 80, 6), ("b", 2, 80, None)]
-    assert [seat.account for seat in capacity.seats(seen)] == ["a"]
+    assert [(seat.account, seat.free) for seat in capacity.offered(seen)] == [("a", 5), ("b", 0)]
 
 
 def test_runtime_honors_reserved_harness_seats(tmp_path):
@@ -465,7 +465,19 @@ def test_finished_agents_do_not_reserve_capacity_and_reason_lists_all_restrictio
     assert decision["effective"] == {"eng": 2, "ci": 1, "plan": 0}
     assert decision["placeable"] == {"claude": 6, "codex": 0}
     assert decision["reason"] == "accounts are closed; Claude has 6 free seats and Codex has 0 free seats"
-    assert decision["accounts"] == [row.__dict__ for row in seen]
+    assert decision["accounts"] == [
+        {
+            "harness": "claude",
+            "name": name,
+            "state": state,
+            "sessions": 0,
+            "five_left": 90,
+            "week_left": 90,
+            "cap": cap,
+            "week_resets_at": None,
+        }
+        for name, state, cap in (("z", "CLOSED", 0), ("a", "OPEN", 3), ("b", "OPEN", 3))
+    ]
     placed_accounts = {name for lane in decision["placements"].values() for slot in lane for name in [slot["account"]]}
     assert placed_accounts == {"a", "b"}
     assert sum(decision["allocation"]["eng"].values()) == 2
@@ -1116,3 +1128,492 @@ def test_a_recycle_successor_leaves_its_warned_saved_account_or_refuses_naming_i
     with pytest.raises(SpawnError, match="^no claude account has placeable quota seats: claude w is at its week"):
         runtime.spawn(config, "plan", "planner@a1b2c3-0002", task)
     assert seen == []
+
+
+def _roomy_host():
+    from scripts.swarm.host_budget import HostSample
+
+    return HostSample(load1=0.5, cpus=8, available_mb=64_000, agents=2)
+
+
+def _scaling_runtime(tmp_path, monkeypatch, seen):
+    from scripts.swarm import runtime as module
+
+    monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: seen)
+    rt = module.HerdrRuntime(home=tmp_path)
+    rt.host = _roomy_host
+    return rt
+
+
+def test_a_manual_swarm_keeps_its_capacity_decision_unchanged(tmp_path, monkeypatch):
+    seen = [account(cap=6), account("cx", harness="codex", cap=6)]
+    rt = _scaling_runtime(tmp_path, monkeypatch, seen)
+    rt.host = lambda: pytest.fail("a manual swarm never reads the host")
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="manual")
+    demand = {"eng": 4, "ci": 1, "plan": 0}
+    previous = {
+        "autoscale": {"ceilings": {"eng": 9, "ci": 0, "plan": 0}, "pending_raise": {"target": None, "ticks": 0}}
+    }
+    rt.quota_previous(previous)
+    decision = rt.quota_capacity(config, [], 100, demand)
+    expected = capacity.calculate(config, seen, [], demand, warned={})
+    assert json.dumps(decision, sort_keys=True) == json.dumps(expected, sort_keys=True)
+
+
+def _scaling_tick(store, ledger, rt, now_ms):
+    capacity.apply("sw", store.config("sw"), store, ledger, rt, now_ms)
+    return capacity.read(store, "sw")
+
+
+def test_an_auto_swarm_with_quota_and_host_room_rises_above_its_configured_caps_after_a_held_raise(
+    tmp_path, monkeypatch
+):
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="auto"))
+    ledger = FakeLedger([{"id": f"e{n}"} for n in range(4)] + [{"id": "c", "lane": "ci"}])
+    ledger.comment = lambda slug, item, text, by: None
+    rt = _scaling_runtime(tmp_path, monkeypatch, [account(cap=6), account("cx", harness="codex", cap=6)])
+    first = _scaling_tick(store, ledger, rt, 1000)
+    assert sum(first["configured"].values()) == 1
+    assert first["autoscale"]["pending_raise"] == {"target": 12, "ticks": 1}
+    second = _scaling_tick(store, ledger, rt, 61_000)
+    assert second["autoscale"]["pending_raise"] == {"target": 12, "ticks": 2}
+    assert "raise held at tick 2 of 3" in second["autoscale"]["reason"]
+    third = _scaling_tick(store, ledger, rt, 121_000)
+    assert third["configured"] == {"eng": 2, "ci": 1, "plan": 0}
+    assert third["effective"] == {"eng": 2, "ci": 1, "plan": 0}
+    assert third["autoscale"]["host"]["room"] > 0
+    assert store.config("sw").max_eng == 1
+
+
+def test_an_auto_swarm_lowers_its_ceiling_at_once_when_quota_drains(tmp_path, monkeypatch):
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=4, max_ci=1, max_plan=0, scaling="auto"))
+    ledger = FakeLedger([{"id": f"e{n}"} for n in range(4)])
+    ledger.comment = lambda slug, item, text, by: None
+    rt = _scaling_runtime(tmp_path, monkeypatch, [account(cap=1)])
+    decision = _scaling_tick(store, ledger, rt, 1000)
+    assert decision["configured"] == {"eng": 1, "ci": 0, "plan": 0}
+    assert decision["autoscale"]["pending_raise"] == {"target": None, "ticks": 0}
+
+
+def test_an_auto_swarm_holds_its_previous_host_room_between_the_watermarks(tmp_path, monkeypatch):
+    from scripts.swarm.host_budget import HostSample
+
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="auto"))
+    ledger = FakeLedger([{"id": f"e{n}"} for n in range(4)])
+    ledger.comment = lambda slug, item, text, by: None
+    rt = _scaling_runtime(tmp_path, monkeypatch, [account(cap=6)])
+    first = _scaling_tick(store, ledger, rt, 1000)["autoscale"]["host"]["room"]
+    assert first > 0
+    rt.host = lambda: HostSample(load1=10.0, cpus=8, available_mb=64_000, agents=2)
+    second = _scaling_tick(store, ledger, rt, 61_000)["autoscale"]["host"]
+    assert second["room"] == first
+    assert "previous room" in second["reason"]
+
+
+def test_the_autoscale_command_reads_a_live_swarm_without_refreshing_quota(capsys, monkeypatch):
+    from scripts.swarm import cli, host_budget
+
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0))
+    stored = {"autoscale": {"ceilings": {"eng": 1, "ci": 0, "plan": 0}, "pending_raise": {"target": 12, "ticks": 2}}}
+    store.redis.set(store.key("sw", "quota-capacity"), json.dumps(stored))
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setattr(cli, "LedgerClient", lambda: FakeLedger([{"id": f"e{n}"} for n in range(4)]))
+    refreshes = []
+    observed = [account(cap=6), account("cx", harness="codex", cap=6)]
+    monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: refreshes.append(refresh) or observed)
+    monkeypatch.setattr(host_budget, "read_host", _roomy_host)
+    cli.main(["sw", "autoscale", "--json"])
+    printed = json.loads(capsys.readouterr().out)
+    assert refreshes == [False]
+    assert printed["ceilings"]["eng"] > 1
+    assert json.loads(store.redis.get(store.key("sw", "quota-capacity"))) == stored
+
+
+def test_the_autoscale_command_prints_the_decision_for_a_fixture(tmp_path, capsys, monkeypatch):
+    from scripts.swarm import cli
+
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0))
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    fixture = tmp_path / "readings.json"
+    fixture.write_text(
+        json.dumps(
+            {
+                "accounts": [account(cap=6).__dict__, account("cx", harness="codex", cap=6).__dict__],
+                "host": {"load1": 0.5, "cpus": 8, "available_mb": 64_000, "agents": 2},
+                "live": {"eng": 0, "ci": 0, "plan": 0},
+                "demand": {"eng": 4, "ci": 1, "plan": 0},
+                "previous": {
+                    "autoscale": {
+                        "ceilings": {"eng": 1, "ci": 0, "plan": 0},
+                        "pending_raise": {"target": 12, "ticks": 2},
+                    }
+                },
+            }
+        )
+    )
+    cli.main(["sw", "autoscale", "--fixture", str(fixture), "--json"])
+    printed = json.loads(capsys.readouterr().out)
+    assert (printed["scaling"], printed["applied"]) == ("auto", True)
+    assert printed["ceilings"] == {"plan": 0, "ci": 1, "eng": 2}
+    assert printed["host"]["room"] > 0
+    cli.main(["sw", "autoscale", "--fixture", str(fixture)])
+    text = capsys.readouterr().out
+    assert "scaling auto, ceilings eng 2, ci 1, plan 0" in text
+    assert "host room" in text
+    assert store.redis.get(store.key("sw", "quota-capacity")) is None
+
+
+def test_the_autoscale_command_previews_a_manual_swarm_without_applying_it(tmp_path, capsys, monkeypatch):
+    from scripts.swarm import cli
+
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="manual"))
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    fixture = tmp_path / "readings.json"
+    fixture.write_text(json.dumps(_readings()))
+    cli.main(["sw", "autoscale", "--fixture", str(fixture), "--json"])
+    printed = json.loads(capsys.readouterr().out)
+    assert (printed["scaling"], printed["applied"]) == ("manual", False)
+    assert printed["ceilings"] == {"eng": 2, "ci": 1, "plan": 0}
+    assert store.config("sw").scaling == "manual"
+    assert store.redis.get(store.key("sw", "quota-capacity")) is None
+
+
+def test_configured_reads_each_lane_cap_in_lane_order():
+    config = SwarmConfig("sw", "/repo", max_eng=3, max_ci=2, max_plan=1)
+    assert capacity._configured(config) == {"eng": 3, "ci": 2, "plan": 1}
+
+
+def _readings():
+    return {
+        "accounts": [account(cap=6).__dict__, account("cx", harness="codex", cap=4).__dict__],
+        "host": {"load1": 9.6, "cpus": 8, "available_mb": 5_000, "agents": 1},
+        "live": {"eng": 2, "ci": 1},
+        "demand": {"eng": 4, "ci": 1, "plan": 0},
+        "previous": {
+            "autoscale": {"ceilings": {"eng": 2, "ci": 1, "plan": 0}, "pending_raise": {"target": 9, "ticks": 1}}
+        },
+    }
+
+
+def test_fixture_inputs_carry_every_reading_and_default_the_optional_ones():
+    from scripts.swarm.host_budget import HostSample
+
+    readings = _readings()
+    inputs = capacity.fixture_inputs(readings)
+    assert inputs.observations == [account(cap=6), account("cx", harness="codex", cap=4)]
+    assert inputs.agents == [
+        AgentRecord("eng-0", "eng", ""),
+        AgentRecord("eng-1", "eng", ""),
+        AgentRecord("ci-0", "ci", ""),
+    ]
+    assert inputs.demand == {"eng": 4, "ci": 1, "plan": 0}
+    assert inputs.host() == HostSample(load1=9.6, cpus=8, available_mb=5_000, agents=1)
+    assert inputs.previous == readings["previous"]
+    assert inputs.warned == {}
+    bare = capacity.fixture_inputs({"accounts": [], "host": readings["host"]})
+    assert (bare.observations, bare.agents, bare.demand, bare.previous) == ([], [], None, {})
+
+
+def test_autoscaled_uses_the_swarm_watermarks_and_the_stored_state():
+    from scripts.swarm import autoscale, host_budget
+
+    config = SwarmConfig(
+        "sw", "/repo", max_eng=1, max_ci=0, max_plan=5, load_high=2.0, load_low=1.5, memory_per_agent_mb=1000
+    )
+    inputs = capacity.fixture_inputs(
+        {**_readings(), "host": {"load1": 0, "cpus": 8, "available_mb": 5000, "agents": 0}}
+    )
+    scaled, decision = capacity.autoscaled(config, inputs)
+    room = host_budget.room(inputs.host(), host_budget.Thresholds(2.0, 1.5, 1000), None)
+    previous = {"ceilings": {"eng": 2, "ci": 1, "plan": 0}, "pending_raise": {"target": 9, "ticks": 1}}
+    free = capacity._placeable(capacity._open(inputs.observations, {}))
+    expected = autoscale.calculate(capacity._busy(inputs.agents), free, room.room, inputs.demand, previous)
+    assert decision == {**expected, "host": {"room": room.room, "reason": room.reason}}
+    assert "below the low watermark" in room.reason
+    caps = decision["ceilings"]
+    assert (scaled.max_eng, scaled.max_ci, scaled.max_plan) == (caps["eng"], caps["ci"], caps["plan"])
+    assert (scaled.slug, scaled.load_high) == ("sw", 2.0)
+
+
+def test_autoscaled_seeds_from_the_configured_caps_and_an_idle_raise():
+    from scripts.swarm import autoscale, host_budget
+
+    config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=1, max_plan=0)
+    inputs = capacity.fixture_inputs(
+        {
+            **_readings(),
+            "previous": {},
+            "demand": None,
+            "live": {},
+            "host": {"load1": 0, "cpus": 8, "available_mb": 64000, "agents": 0},
+        }
+    )
+    _, decision = capacity.autoscaled(config, inputs)
+    room = host_budget.room(inputs.host(), host_budget.Thresholds(), None)
+    previous = {"ceilings": {"eng": 2, "ci": 1, "plan": 0}, "pending_raise": {"target": None, "ticks": 0}}
+    free = capacity._placeable(capacity._open(inputs.observations, {}))
+    zero = {"eng": 0, "ci": 0, "plan": 0}
+    expected = autoscale.calculate(capacity._busy(inputs.agents), free, room.room, zero, previous)
+    assert decision == {**expected, "host": {"room": room.room, "reason": room.reason}}
+
+
+def test_autoscaled_passes_the_stored_host_room_on():
+    readings = {
+        **_readings(),
+        "previous": {"autoscale": {"host": {"room": 7}}},
+        "host": {"load1": 10.0, "cpus": 8, "available_mb": 64_000, "agents": 1},
+    }
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0)
+    _, decision = capacity.autoscaled(config, capacity.fixture_inputs(readings))
+    assert decision["host"]["room"] == 7
+
+
+def test_live_inputs_read_quota_without_a_refresh_and_count_ready_demand(monkeypatch):
+    from scripts.swarm import host_budget
+
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0))
+    stored = {"autoscale": {"ceilings": {"eng": 1, "ci": 0, "plan": 0}}}
+    store.redis.set(store.key("sw", "quota-capacity"), json.dumps(stored))
+    store.put_agent("sw", AgentRecord("engineer@x-0001", "eng", "e0", state="working"))
+    ledger = FakeLedger([{"id": f"e{n}"} for n in range(3)] + [{"id": "c", "lane": "ci"}])
+    state = ledger.state
+    slugs = []
+    monkeypatch.setattr(ledger, "state", lambda slug: slugs.append(slug) or state(slug))
+    seen = []
+    observed = [account(cap=6), account("warned", cap=6, left=1)]
+    monkeypatch.setattr(
+        capacity, "accounts", lambda env, now, refresh=True: seen.append((env, now, refresh)) or observed
+    )
+    inputs = capacity.live_inputs("sw", store, ledger, {"X": "1"}, 5_000)
+    assert slugs == ["sw"]
+    assert seen == [({"X": "1"}, 5.0, False)]
+    assert inputs.observations == observed
+    assert [agent.name for agent in inputs.agents] == ["engineer@x-0001"]
+    assert inputs.demand == {"eng": 3, "ci": 1, "plan": 0}
+    assert inputs.host is host_budget.read_host
+    assert inputs.previous == stored
+    assert inputs.warned == {("claude", "warned"): "week"}
+
+
+def test_autoscale_lines_name_the_mode_the_raise_the_room_and_the_reason():
+    from scripts.swarm import cli
+
+    decision = {
+        "ceilings": {"eng": 4, "ci": 1, "plan": 0},
+        "pending_raise": {"target": 6, "ticks": 2},
+        "host": {"room": 3, "reason": "roomy"},
+        "reason": "quota allows six",
+    }
+    manual = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="manual")
+    assert cli.autoscale_lines(manual, decision) == [
+        "scaling manual, ceilings eng 4, ci 1, plan 0",
+        "manual scaling keeps the configured caps eng 1, ci 0, plan 0",
+        "pending raise to 6, held 2 of 3 ticks",
+        "host room 3: roomy",
+        "quota allows six",
+    ]
+    idle = {**decision, "pending_raise": {"target": None, "ticks": 0}}
+    assert cli.autoscale_lines(replace(manual, scaling="auto"), idle) == [
+        "scaling auto, ceilings eng 4, ci 1, plan 0",
+        "host room 3: roomy",
+        "quota allows six",
+    ]
+
+
+def test_the_autoscale_command_prints_exact_output_for_an_unknown_swarm(tmp_path, capsys, monkeypatch):
+    from scripts.swarm import cli
+
+    store = _store()
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    fixture = tmp_path / "readings.json"
+    unknown = SwarmConfig("new", "", max_eng=0, max_ci=0)
+    readings = {
+        **_readings(),
+        "previous": {},
+        "live": {},
+        "host": {"load1": 0, "cpus": 8, "available_mb": 64000, "agents": 0},
+    }
+    fixture.write_text(json.dumps(readings))
+    _, decision = capacity.autoscaled(unknown, capacity.fixture_inputs(readings))
+    cli.main(["new", "autoscale", "--fixture", str(fixture), "--json"])
+    expected = json.dumps({"scaling": "auto", "applied": True, **decision}, indent=2)
+    assert capsys.readouterr().out == expected + "\n"
+    cli.main(["new", "autoscale", "--fixture", str(fixture)])
+    lines = cli.autoscale_lines(unknown, decision)
+    assert capsys.readouterr().out == "\n".join(lines) + "\n"
+    parsed = cli.build_parser().parse_args(["new", "autoscale"])
+    assert (parsed.fixture, parsed.json) == ("", False)
+
+
+def test_quota_capacity_hands_autoscale_its_previous_state_and_warnings(tmp_path, monkeypatch):
+    from scripts.swarm import runtime as module
+
+    seen = []
+    observed = [account(cap=6), account("warned", cap=6, left=1)]
+    monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: observed)
+    monkeypatch.setattr(capacity, "autoscaled", lambda config, inputs: seen.append(inputs) or (config, None))
+    rt = module.HerdrRuntime(home=tmp_path)
+    previous = {"autoscale": {"ceilings": {"eng": 2, "ci": 0, "plan": 0}}}
+    rt.quota_previous(previous)
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    demand = {"eng": 1, "ci": 0, "plan": 0}
+    rt.quota_capacity(config, [], 100, demand)
+    assert seen == [capacity.ScaleInputs(observed, [], demand, rt.host, previous, {("claude", "warned"): "week"})]
+
+
+def api(harness="claude", weight=25, sessions=0, cap=10**6):
+    return capacity.Account(harness, "api", capacity._state(cap), sessions, None, None, cap, kind="api", weight=weight)
+
+
+def _api_policy(monkeypatch, weight=25, cap=10**6):
+    from scripts.routing import place
+
+    monkeypatch.setattr(capacity.place, "policy", lambda harness, environ: place.ApiPolicy(weight, cap))
+
+
+def test_live_api_sessions_count_on_the_api_row_only_and_keep_accounts_known(monkeypatch):
+    _api_policy(monkeypatch)
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"api": 2})
+    monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {"api": 1})
+    monkeypatch.setattr(capacity.codex_router.CodexAccountSource, "pool", lambda self, env: [])
+    env = {"ANTHROPIC_API_KEY": "fake", "OPENAI_API_KEY": "fake"}
+    rows = capacity.accounts(env, 100)
+    assert rows == [api(sessions=2), api("codex", sessions=1)]
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    assert "unknown" not in capacity.calculate(config, rows, [])["reason"]
+
+
+def test_live_api_sessions_without_an_api_endpoint_show_as_a_closed_api_row(monkeypatch):
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"api": 1})
+    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: [])
+    assert capacity.accounts({}, 100) == [
+        capacity.Account("claude", "api", "CLOSED", 1, None, None, 0, kind="api"),
+    ]
+
+
+def _api_share(weight, placed=8):
+    config = SwarmConfig("sw", "/repo", max_eng=placed, max_ci=0, max_plan=0)
+    rows = [account(name, cap=6) for name in ("a", "b", "c")] + [api(weight=weight)]
+    return [slot["account"] for slot in capacity.calculate(config, rows, [])["placements"]["eng"]]
+
+
+def test_api_at_weight_zero_takes_lane_seats_only_when_the_pool_is_full():
+    assert "api" not in _api_share(0)
+    config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=0, max_plan=0)
+    decision = capacity.calculate(config, [account("a", cap=1), api(weight=0)], [])
+    assert [slot["account"] for slot in decision["placements"]["eng"]] == ["a", "api"]
+
+
+def test_api_at_weight_twenty_five_takes_one_in_four_lane_seats():
+    assert _api_share(25).count("api") == 2
+
+
+def test_api_at_weight_one_hundred_takes_every_lane_seat():
+    assert _api_share(100) == ["api"] * 8
+
+
+def test_capacity_reason_counts_pool_seats_and_names_the_api_weight():
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    reason = capacity.calculate(config, [account("a"), api()], [])["reason"]
+    assert (
+        reason
+        == "accounts have quota; Claude has 3 free seats and Codex has 0 free seats; Claude api is open at weight 25"
+    )
+
+
+def test_a_closed_api_row_never_marks_the_accounts_restricted():
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    closed = capacity.Account("claude", "api", "CLOSED", 1, None, None, 0, kind="api")
+    assert capacity.calculate(config, [account("a"), closed], [])["reason"].startswith("accounts have quota;")
+
+
+def test_a_lane_restricted_to_some_accounts_splits_on_every_live_session():
+    offered = capacity.offered([account("a", cap=6, sessions=5), account("b", cap=6), api(sessions=1)])
+    assert capacity.pick(offered).account == "api"
+    assert capacity.pick(offered, lambda seat: seat.account in {"b", "api"}).account == "api"
+    assert capacity.pick(offered, lambda seat: seat.account == "b").account == "b"
+
+
+def test_an_observed_share_at_the_weight_still_sends_the_next_seat_to_the_api():
+    from scripts.swarm import quota_view
+
+    rows = [account("a", cap=6, sessions=3), api(sessions=1)]
+    decision = {"accounts": [capacity.record(row) for row in rows]}
+    assert quota_view.api_share(decision["accounts"][1], decision["accounts"]) == (25, 4)
+    assert capacity.pick(capacity.offered(rows)).account == "api"
+
+
+def test_accounts_ask_each_harness_api_side_with_the_environment_and_time(monkeypatch):
+    calls = []
+
+    def api_side(source, harness, environ, now):
+        calls.append((type(source).__name__, harness, environ, now))
+        return [], 0
+
+    monkeypatch.setattr(capacity.place, "api_side", api_side)
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: [])
+    capacity.accounts({"A": "1"}, 100)
+    assert calls == [
+        ("ClaudeApiSource", "claude", {"A": "1"}, 100),
+        ("CodexApiSource", "codex", {"A": "1"}, 100),
+    ]
+
+
+def test_allocation_honours_the_account_restriction_of_each_lane_seat():
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    rows = [account("a"), account("b", sessions=1)]
+    decision = capacity.calculate(config, rows, [], accounts={"eng": {0: {("claude", "b")}}})
+    assert decision["placements"]["eng"] == [{"index": 0, "harness": "claude", "account": "b"}]
+
+
+def test_reason_names_every_api_side_and_a_closed_one_without_a_weight():
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    closed = capacity.Account("codex", "api", "CLOSED", 1, None, None, 0, kind="api")
+    assert capacity.calculate(config, [account("a"), api(), closed], [])["reason"].endswith(
+        "; Claude api is open at weight 25; Codex api is closed"
+    )
+
+
+def test_an_account_at_its_quota_warning_never_takes_the_spawn_pick(tmp_path, monkeypatch):
+    runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, [account("w", left=5), account("b", sessions=1)])
+    assert runtime._quota_account("claude", None, None).name == "b"
+
+
+def test_sessions_on_full_accounts_weigh_in_the_api_share_of_a_spawn(tmp_path, monkeypatch):
+    rows = [account("full", cap=4, sessions=4), account("a", cap=6), api(sessions=1)]
+    runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, rows)
+    assert runtime._quota_account("claude", None, None).name == "api"
+    runtime._quota_accounts = rows[1:]
+    assert runtime._quota_account("claude", None, None).name == "a"
+
+
+def test_rotation_follows_the_api_split():
+    from scripts.swarm import runtime as module
+
+    runtime = module.HerdrRuntime(home=None, choose=lambda requested, env: ("claude", "priority"))
+    runtime._quota_accounts = [account("a", sessions=2, cap=6), account("cx", 6, 3, harness="codex"), api("codex", 0)]
+    assert runtime._rotation("", {}) == ("claude", "rotation")
+
+
+def test_an_api_account_round_trips_through_the_route_argument(tmp_path, monkeypatch):
+    runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, [account("a", cap=0), api(weight=0)])
+    runtime.spawn(config, "plan", "planner@a1b2c3-0001", {"id": "p", "title": "Plan"})
+    assert seen == [("p", "claude", "api")]
+    assert runtime._quota_accounts[-1].sessions == 1
+    agent = AgentRecord("planner@a1b2c3-0001", "plan", "p", harness="claude", account="api", profile="planner")
+    agent = replace(agent, conversation_id="c1")
+    seen.clear()
+    monkeypatch.setattr(runtime, "_holds", lambda pane, conversation: True)
+    runtime.resume(config, agent, "text")
+    assert seen == [("p", "claude", "api")]
