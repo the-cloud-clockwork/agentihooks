@@ -159,6 +159,7 @@ class Outcomes:
             if checked.get("dispatch") != dispatch or checked["phase"] != "unknown":
                 self._conflict()
             if not self.integration_enabled:
+                self._update(token, generation, pull, lambda previous: {**previous, "phase": "accepted"})
                 raise SwarmError("final integration is paused")
 
         try:

@@ -288,3 +288,25 @@ def test_verified_completion_never_regresses_to_an_old_queue_observation(fixture
     provider.pull = replace(provider.pull, state="OPEN", queue_id="late-queue-entry", merge_sha="")
     assert outcomes.integrate(token, proposal.generation) == verified
     assert authority.current(proposal.task_id).result["phase"] == "externally_verified"
+
+
+def test_pause_at_the_final_guard_keeps_the_proposal_retryable(fixture):
+    outcomes, authority, token, proposal, provider, *_ = fixture
+    from scripts.swarm.store import SwarmError
+
+    outcomes.propose(token, proposal)
+    original = provider.enqueue
+
+    def pause_before_guard(pull, operation_id, guard):
+        outcomes.integration_enabled = False
+        return original(pull, operation_id, guard)
+
+    provider.enqueue = pause_before_guard
+    with pytest.raises(SwarmError, match="paused"):
+        outcomes.integrate(token, proposal.generation)
+    assert authority.current(proposal.task_id).result["phase"] == "accepted"
+    assert provider.calls == []
+    outcomes.integration_enabled = True
+    provider.enqueue = original
+    assert outcomes.integrate(token, proposal.generation)["phase"] == "externally_verified"
+    assert len(provider.calls) == 1
