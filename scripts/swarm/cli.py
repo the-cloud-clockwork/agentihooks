@@ -75,6 +75,7 @@ from scripts.swarm import (
     idle,
     launch_check,
     ledger_events,
+    ledger_probe,
     master_launch,
     merge_queue,
     naming,
@@ -165,6 +166,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         )
         from scripts.swarm.health import spawn_stall
 
+        probed = timing.call(ledger_probe.observe, store, slug, ledger, runtime, now_ms())
         with spawn_stall.watch(store, slug, ledger, now_ms, runtime):
             controls = timing.call(command_runner.consume, store, slug)
             if timing.call(ledger.binned, slug):
@@ -240,7 +242,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
             taken = timing.call(snapshot.auto, store, slug, now_ms(), os.environ)
             store.redis.set(store.key(slug, "last-tick"), now_ms())
             timing.call(command_runner.publish, store, slug, timing.call(ledger.state, slug))
-            return controls + actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
+            return probed + controls + actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
     finally:
         timing.BEFORE_STEP.reset(keeping)
         controller.release_tick_lock(store, slug, token)
@@ -975,9 +977,20 @@ def cmd_pr(store, args):
 
 
 def cmd_merge(store, args):
-    if args.action != "state":
-        _worker(store, args)
-    print(json.dumps(merge_queue.operate(args.action, args.url)))
+    agent = _worker(store, args) if args.action != "state" else None
+    result = merge_queue.operate(args.action, args.url)
+    if result.get("waiting") == "checks":
+        at = now_ms()
+        idle.declare_wait(
+            store.redis,
+            args.slug,
+            agent.name,
+            at + waits.CHECKED_MINUTES * 60_000,
+            "dev changed grading inputs; branch updated",
+            at,
+            on={**waits.on("checks", args.url), "previous_head": result["previous_head"]},
+        )
+    print(json.dumps(result))
 
 
 def cmd_done(store, args):
@@ -1053,17 +1066,22 @@ def block_agent(store, slug, agent, note, ledger):
 def cmd_trace_plan(store, args):
     agent = _worker(store, args)
     ledger = LedgerClient()
-    state = trace_plan.intent(ledger.state(args.slug), agent.task)
+    doc = ledger.state(args.slug)
+    state = trace_plan.intent(doc, agent.task)
     who = Who(name=agent.name, swarm=args.slug, task=agent.task)
     folder = ledger_workspace.folder(args.slug, agent.task)
-    mode = modes.configured(trace_plan.GATE, store.config(args.slug).gates)
+    config = store.config(args.slug)
+    mode = modes.configured(trace_plan.GATE, config.gates)
     try:
         record, block = trace_plan.run(folder, state, ledger, who, mode)
     except ValueError as exc:
         raise SwarmError(str(exc)) from exc
     if block:
         block_agent(store, args.slug, agent, trace_plan.block_note(record), ledger)
-    print(json.dumps(trace_plan.report(agent.task, record, block)))
+    checked = None
+    if record["verdict"] != trace_plan.FAIL:
+        checked = intent.plan_check(args.slug, doc, agent.task, record, intent.mode_of(config), now_ms())
+    print(json.dumps({**trace_plan.report(agent.task, record, block), "intent": checked}))
 
 
 def cmd_wait_inbox(store, args, agent):
