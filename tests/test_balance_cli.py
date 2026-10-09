@@ -196,12 +196,14 @@ def test_the_master_account_help_names_its_arguments(monkeypatch, capsys):
         pages.append(capsys.readouterr().out)
     balance, master = pages
 
-    assert (
-        "Declare the account masters run on: claude=<slug> [tier=<label>] codex=<slug|default> [tier=<label>]"
-        in balance
+    def shows(text, page):
+        return re.search(rf"(?m)(?:^|\s){re.escape(text)}$", page) is not None
+
+    assert shows(
+        "Declare the account masters run on: claude=<slug> [tier=<label>] codex=<slug|default> [tier=<label>]", balance
     )
     assert "[HARNESS=SLUG|tier=LABEL ...]" in master
-    assert "Remove the declaration, of the named harnesses only" in master
+    assert shows("Remove the declaration, of the named harnesses only", master)
 
 
 @pytest.mark.parametrize(
