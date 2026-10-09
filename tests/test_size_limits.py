@@ -44,7 +44,7 @@ def test_the_grader_pins_the_ruff_the_tests_install():
 
 
 _INSTALL = re.compile(r"\b(?:pip3? install|pipx (?:install|run)|uv tool (?:install|run)|uvx)\b[^\n;&|]*")
-_RUFF_SPEC = re.compile(r"(?<![\w./-])['\"]?(ruff(?![\w-])[^\s'\"]*)")
+_RUFF_SPEC = re.compile(r"(?<![\w./-])['\"]?(ruff(?![\w-])[^\s'\"]*)", re.IGNORECASE)
 
 
 def _ruff_installs(steps: list) -> list[str]:
