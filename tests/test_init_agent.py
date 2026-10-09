@@ -40,6 +40,7 @@ def test_dry_run_preserves_claude_flags_and_keeps_prompt_out_of_launcher(monkeyp
     runtime = tmp_path / "runtime"
     _, profile_env = _profile(monkeypatch, tmp_path)
     prompt = "apostrophe ' quote \" semicolon ; and $(command)"
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
 
     monkeypatch.setattr(
         init_agent.shutil, "which", lambda name: "/usr/bin/agentihooks" if name == "agentihooks" else None
