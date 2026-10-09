@@ -1,7 +1,9 @@
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts.swarm import cli, merge_queue, waits
 from scripts.swarm.store import SwarmError
@@ -36,6 +38,8 @@ def runner(*responses):
                 "api",
                 "repos/o/r/actions/workflows/test.yml/runs?event=pull_request&head_sha=abc&per_page=1",
             ]
+        elif "artifacts" in response:
+            assert command == ["gh", "api", "repos/o/r/actions/runs/21/artifacts?per_page=100"]
         elif "jobs" in response:
             assert command == ["gh", "api", "repos/o/r/actions/runs/21/jobs?per_page=100"]
         elif "files" in response:
@@ -81,6 +85,7 @@ def test_queue_enqueues_the_observed_head_and_reports_the_queue_entry():
             }
         },
         {"workflow_runs": [{"id": 21, "head_sha": "abc", "conclusion": "success"}]},
+        {"artifacts": []},
         {"jobs": [{"id": 31, "name": "test-count (3.11)", "conclusion": "success"}]},
         "2026-10-09T09:20:05Z setup\n2026-10-09T09:20:06Z   BASE: cccccccccccccccccccccccccccccccccccccccc\n2026-10-09T09:20:07Z done\n",
         {"data": {"resource": {"repository": {"ref": {"target": {"oid": "c" * 40}}}}}},
@@ -94,7 +99,7 @@ def test_queue_enqueues_the_observed_head_and_reports_the_queue_entry():
         "queued": True,
         "entry": ENTRY,
     }
-    command, _ = calls[6]
+    command, _ = calls[7]
     assert command[:3] == ["gh", "api", "graphql"]
     assert "enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head})" in command[4]
     assert command[5:] == ["-f", "id=PR_one", "-f", "head=abc"]
@@ -134,6 +139,7 @@ def test_queue_refreshes_changed_grading_inputs_before_enqueueing(changed):
                 }
             ]
         },
+        {"artifacts": []},
         {"jobs": [{"id": 31, "name": "test-count (3.11)", "conclusion": "success"}]},
         "2026-10-09T09:20:05Z setup\n2026-10-09T09:20:06Z   BASE: cccccccccccccccccccccccccccccccccccccccc\n2026-10-09T09:20:07Z done\n",
         {"data": {"resource": {"repository": {"ref": {"target": {"oid": "current"}}}}}},
@@ -172,6 +178,7 @@ def test_queue_does_not_refresh_unrelated_dev_changes():
                 }
             ]
         },
+        {"artifacts": []},
         {"jobs": [{"id": 31, "name": "test-count (3.11)", "conclusion": "success"}]},
         "2026-10-09T09:20:05Z setup\n2026-10-09T09:20:06Z   BASE: cccccccccccccccccccccccccccccccccccccccc\n2026-10-09T09:20:07Z done\n",
         {"data": {"resource": {"repository": {"ref": {"target": {"oid": "current"}}}}}},
@@ -217,12 +224,93 @@ def test_queue_refuses_an_unknown_checked_base(log):
             }
         },
         {"workflow_runs": [{"id": 21, "head_sha": "abc", "conclusion": "success"}]},
+        {"artifacts": []},
         {"jobs": [{"id": 31, "name": "test-count (3.11)", "conclusion": "success"}]},
         log,
     )
     with pytest.raises(SwarmError, match="^cannot establish the base of the green checks$"):
         merge_queue.operate("queue", URL, run)
     assert not any("enqueuePullRequest(input:" in str(call[0]) for call in calls)
+
+
+def test_queue_reads_the_checked_base_from_its_artifact():
+    run, calls = runner(
+        {"data": {"resource": OPEN}},
+        {
+            "data": {
+                "resource": {"number": 12, "repository": {"nameWithOwner": "o/r", "ref": {"target": {"oid": "c" * 40}}}}
+            }
+        },
+        {"workflow_runs": [{"id": 21, "head_sha": "abc", "conclusion": "success"}]},
+        {"artifacts": [{"name": "coverage-ratchet"}, {"name": "checked-base-" + "c" * 40, "expired": True}]},
+        {"data": {"resource": {"repository": {"ref": {"target": {"oid": "c" * 40}}}}}},
+        {"data": {"enqueuePullRequest": {"mergeQueueEntry": {"id": "MQ_one"}}}},
+        {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY}}},
+    )
+    assert merge_queue.operate("queue", URL, run)["queued"] is True
+    assert not any(str(call[0][2]).endswith(("/logs", "jobs?per_page=100")) for call in calls)
+
+
+@pytest.mark.parametrize("name", ["checked-base-" + "c" * 39, "checked-base-" + "c" * 41, "x-checked-base-" + "c" * 40])
+def test_queue_falls_back_to_the_log_line_without_a_checked_base_artifact(name):
+    run, calls = runner(
+        {"data": {"resource": OPEN}},
+        {
+            "data": {
+                "resource": {"number": 12, "repository": {"nameWithOwner": "o/r", "ref": {"target": {"oid": "c" * 40}}}}
+            }
+        },
+        {"workflow_runs": [{"id": 21, "head_sha": "abc", "conclusion": "success"}]},
+        {"artifacts": [{"name": name}]},
+        {"jobs": [{"id": 31, "name": "test-count (3.11)", "conclusion": "success"}]},
+        "2026-10-09T09:20:06Z   BASE: cccccccccccccccccccccccccccccccccccccccc\n",
+        {"data": {"resource": {"repository": {"ref": {"target": {"oid": "c" * 40}}}}}},
+        {"data": {"enqueuePullRequest": {"mergeQueueEntry": {"id": "MQ_one"}}}},
+        {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY}}},
+    )
+    assert merge_queue.operate("queue", URL, run)["queued"] is True
+    assert calls[5][0] == ["gh", "api", "repos/o/r/actions/jobs/31/logs"]
+
+
+def test_queue_refuses_conflicting_checked_base_artifacts():
+    run, calls = runner(
+        {"data": {"resource": OPEN}},
+        {"data": {"resource": {"number": 12, "repository": {"nameWithOwner": "o/r"}}}},
+        {"workflow_runs": [{"id": 21, "head_sha": "abc", "conclusion": "success"}]},
+        {"artifacts": [{"name": "checked-base-" + "c" * 40}, {"name": "checked-base-" + "d" * 40}]},
+    )
+    with pytest.raises(SwarmError, match="^cannot establish the base of the green checks$"):
+        merge_queue.operate("queue", URL, run)
+    assert len(calls) == 4
+
+
+def test_tests_workflow_publishes_the_checked_base_it_grades_against(tmp_path):
+    workflow = Path(__file__).resolve().parents[2] / ".github/workflows/test.yml"
+    steps = yaml.safe_load(workflow.read_text())["jobs"]["test-count"]["steps"]
+    named = next(step for step in steps if step.get("id") == "checked-base")
+    upload = steps[steps.index(named) + 1]
+    checkout = steps[-2]
+    assert named["env"]["BASE"] == checkout["env"]["BASE"]
+    assert named["if"] == upload["if"] == "matrix.python-version == '3.11'"
+    assert upload["uses"] == "actions/upload-artifact@v4"
+    assert upload["with"] == {
+        "name": "${{ steps.checked-base.outputs.name }}",
+        "path": "${{ runner.temp }}/checked-base/base.txt",
+        "if-no-files-found": "error",
+        "overwrite": True,
+        "retention-days": 7,
+    }
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(repo)]
+    subprocess.run([*git, "init", "-q"], check=True)
+    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "base"], check=True)
+    base = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    output = tmp_path / "output"
+    env = {"PATH": "/usr/bin:/bin", "BASE": base[:12], "RUNNER_TEMP": str(tmp_path), "GITHUB_OUTPUT": str(output)}
+    subprocess.run(["bash", "-e", "-c", named["run"]], cwd=repo, env=env, check=True)
+    assert output.read_text().splitlines() == [f"name=checked-base-{base}"]
+    assert (tmp_path / "checked-base/base.txt").read_text() == f"{base}\n"
 
 
 def test_cli_registers_a_checks_wait_after_refreshing(monkeypatch, capsys):
@@ -270,6 +358,7 @@ def test_queue_refuses_dev_advancing_during_comparison():
             }
         },
         {"workflow_runs": [{"id": 21, "head_sha": "abc", "conclusion": "success"}]},
+        {"artifacts": []},
         {"jobs": [{"id": 31, "name": "test-count (3.11)", "conclusion": "success"}]},
         "2026-10-09T09:20:05Z setup\n2026-10-09T09:20:06Z   BASE: cccccccccccccccccccccccccccccccccccccccc\n2026-10-09T09:20:07Z done\n",
         {"data": {"resource": {"repository": {"ref": {"target": {"oid": "current"}}}}}},
@@ -294,6 +383,7 @@ def test_queue_requires_the_successful_provenance_job(jobs):
         {"data": {"resource": OPEN}},
         {"data": {"resource": {"number": 12, "repository": {"nameWithOwner": "o/r"}}}},
         {"workflow_runs": [{"id": 21, "head_sha": "abc", "conclusion": "success"}]},
+        {"artifacts": []},
         {"jobs": jobs},
     )
     with pytest.raises(SwarmError, match="^cannot establish the base of the green checks$"):
