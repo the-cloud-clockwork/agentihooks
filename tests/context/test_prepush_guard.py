@@ -127,9 +127,12 @@ def test_push_from_another_directory_resolves_the_repository(repo, tmp_path, mon
         "cd ../worktree && git push",
         "cd .. && git -C worktree push origin HEAD",
         "cd /nowhere-at-all; cd {worktree} && git push",
+        "cd -P {worktree} && git push",
+        "cd && cd worktree && git push",
     ],
 )
-def test_the_push_is_graded_in_the_folder_the_command_changes_into(repo, tmp_path, command):
+def test_the_push_is_graded_in_the_folder_the_command_changes_into(repo, tmp_path, monkeypatch, command):
+    monkeypatch.setenv("HOME", str(tmp_path))
     worktree = _init(tmp_path / "worktree")
     _stamp(worktree)
 
