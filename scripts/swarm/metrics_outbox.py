@@ -15,6 +15,10 @@ DATABASE = "swarm"
 DAY_MS = 24 * 60 * 60 * 1000
 BATCH = 1000
 TIMEOUT_S = 3
+LOCK_TIMEOUT_S = 10
+USER_HEADER = "X-ClickHouse-User"
+KEY_HEADER = "X-ClickHouse-Key"
+WAL = "PRAGMA journal_mode=WAL"
 NAME = re.compile(r"[a-z][a-z0-9_]*")
 BASE = (
     ("event_id", "String"),
@@ -108,7 +112,7 @@ class Table:
 
 
 def settings(environ):
-    url, user = environ.get(URL_ENV, "").rstrip("/"), environ.get(USER_ENV, "")
+    url, user = environ.get(URL_ENV, "").rstrip("/"), environ.get(USER_ENV)
     if not url or not user:
         return None
     return Settings(url, user, environ.get(PASSWORD_ENV, ""))
@@ -123,8 +127,7 @@ def post(sink, query, body):
         request = urllib.request.Request(
             f"{sink.url}/?{urllib.parse.urlencode({'query': query})}",
             data=body,
-            method="POST",
-            headers={"X-ClickHouse-User": sink.user, "X-ClickHouse-Key": sink.password},
+            headers={USER_HEADER: sink.user, KEY_HEADER: sink.password},
         )
         with urllib.request.urlopen(request, timeout=TIMEOUT_S) as reply:
             return reply.status == 200
@@ -138,8 +141,8 @@ class Outbox:
         self.sink = sink
         self.send = send or post
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(self.path, timeout=10)
-        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db = sqlite3.connect(self.path, timeout=LOCK_TIMEOUT_S)
+        self.db.execute(WAL)
         with self.db:
             for statement in SPOOL:
                 self.db.execute(statement)
