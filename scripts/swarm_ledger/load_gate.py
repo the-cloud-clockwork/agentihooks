@@ -44,7 +44,7 @@ WORDS = "the swarm keeps every task with its comments proof and the work that la
 
 
 def text(count: int) -> str:
-    return " ".join(itertools.islice(itertools.cycle(WORDS), count))
+    return " ".join(WORDS[n % len(WORDS)] for n in range(count))
 
 
 def comment(prefix: str, n: int, at: int) -> dict:
@@ -112,10 +112,11 @@ def size(doc: dict) -> int:
 
 def full_size(at: int) -> dict:
     short = size(document(at))
-    words = max(0, math.ceil((LEDGER_BYTES - short) / TASKS / (len(" ".join(WORDS)) / len(WORDS) + 1)))
-    while size(doc := document(at, text(words))) < LEDGER_BYTES:
-        words += 10
-    return doc
+    estimate = max(0, math.ceil((LEDGER_BYTES - short) / TASKS / (len(" ".join(WORDS)) / len(WORDS) + 1)))
+    for words in range(estimate, estimate + 1000, 10):
+        if size(doc := document(at, text(words))) >= LEDGER_BYTES:
+            return doc
+    raise ValueError(f"no padding within a thousand words reaches {LEDGER_BYTES} bytes")
 
 
 def store(folder: Path, doc: dict) -> str:
