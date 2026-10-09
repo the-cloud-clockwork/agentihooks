@@ -507,7 +507,8 @@ def apply(doc, op, ctx):
         t["id"] == op["item"].split("/")[1] and t.get("plan_lines") for t in doc.get("tasks", [])
     ):
         return True
-    op = {**op, "fields": dict(op["fields"])}
+    if "plan_slice" not in op["fields"]:
+        op = {**op, "fields": dict(op["fields"])}
     if not _set_slice(doc, op, ctx):
         return False
     return _update(doc, op, ctx)
