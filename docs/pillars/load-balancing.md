@@ -70,7 +70,7 @@ and its live sessions. Every source of credentials offers slots of one kind.
 | Kind | Harness | Account | Cap |
 |---|---|---|---|
 | `subscription` | Claude | each `AH_CC_TOKEN_<slug>` | its quota band (above) |
-| `subscription` | Codex | each `AH_CX_TOKEN_<slug>` | 6 with 5% or more of the week left, else none; needs a reading under fifteen minutes old |
+| `subscription` | Codex | each `AH_CX_TOKEN_<slug>` | 6 with 5% or more of the week left, else 0; needs a reading under fifteen minutes old |
 | `interactive` | Codex | the default `codex login`, named `default` | the same as a Codex token |
 | `api` | Claude or Codex | `api`, one per harness when an endpoint is configured | `<harness>-api-max-sessions`, unbounded when unset |
 
@@ -260,8 +260,8 @@ environment unchanged.
 
 Live sessions are counted from `/proc`: every interactive `claude` process (not
 `claude -p`) is attributed to `api` when it holds `AH_ROUTE_API`, else to the one
-`AH_CC_TOKEN_<slug>` name in its environment, or to `unrouted` when it has none. A session that handed its work
-off (below) no longer holds a slot.
+`AH_CC_TOKEN_<slug>` name in its environment, or to `unrouted` when it has none.
+A session that handed its work off (below) no longer holds a slot.
 
 ```text
 $ agentihooks balance
