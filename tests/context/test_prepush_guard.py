@@ -129,6 +129,8 @@ def test_push_from_another_directory_resolves_the_repository(repo, tmp_path, mon
         "cd /nowhere-at-all; cd {worktree} && git push",
         "cd -P {worktree} && git push",
         "cd && cd worktree && git push",
+        "cd {worktree}; cd missing; git push",
+        "pushd {worktree} && git push",
     ],
 )
 def test_the_push_is_graded_in_the_folder_the_command_changes_into(repo, tmp_path, monkeypatch, command):
@@ -149,8 +151,8 @@ def test_the_push_is_graded_in_the_folder_the_command_changes_into(repo, tmp_pat
 def test_the_push_is_graded_in_the_shell_tool_workdir(repo, tmp_path, workdir):
     worktree = _init(tmp_path / "worktree")
     _stamp(worktree)
-    payload = _bash("git push origin HEAD", repo)
-    payload["tool_input"]["workdir"] = workdir.format(worktree=worktree)
+    payload = _bash("", repo)
+    payload["tool_input"] = {"cmd": "git push origin HEAD", "workdir": workdir.format(worktree=worktree)}
 
     check_prepush(payload)
 
