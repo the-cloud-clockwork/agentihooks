@@ -39,6 +39,18 @@ def test_a_code_or_ci_task_closes_only_on_a_merged_pull_request(kind):
     )
 
 
+def test_distributed_outcomes_cannot_use_the_legacy_final_mutation_path(monkeypatch):
+    from scripts.swarm.store import SwarmError
+    from tests.sv2_ctl02_cases import build
+
+    state, authority, controller, clock, start = build(monkeypatch)
+    assert done_gate.require_local(state, authority.slug, "task") is None
+    _, token = start()
+    authority.admit(token, 30_000)
+    with pytest.raises(SwarmError, match="controller outcome"):
+        done_gate.require_local(state, authority.slug, "task")
+
+
 def test_a_task_without_a_kind_is_gated_as_code():
     assert done_gate.refusal({"id": "t1"}, "", github("MERGED")) == (
         "a code task is done only with its merged pull request: give --pr <url>"
