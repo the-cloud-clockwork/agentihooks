@@ -99,7 +99,7 @@ def _shard_files(config) -> frozenset[str]:
             for node, shard in config.stash[NODE_SHARDS].items():
                 owners.setdefault(node.split("::", 1)[0], set()).add(shard)
             config.stash[FILE_SHARDS] = {path: sorted(shards) for path, shards in owners.items()}
-            config.stash[FILE_SHARDS].update(dict.fromkeys(pinned, [0]))
+            config.stash[FILE_SHARDS].update({path: [0] for path in pinned})
             known = {node.split("::", 1)[0] for node in measured}
             files = {node.split("::", 1)[0] for node in parts[index - 1]} | (set(files) - known)
         else:

@@ -6,7 +6,6 @@ from pathlib import Path
 
 # Every xdist worker of a shard rewrites each file it collects, while stored durations split between workers; measured.
 SECONDS_PER_SOURCE_BYTE = 3e-6
-# Shard 1 is the one unit shard that installs the Codex CLI, so the live Codex test runs there.
 FIRST_SHARD_FILES = frozenset({"tests/routing/test_codex_api.py"})
 
 

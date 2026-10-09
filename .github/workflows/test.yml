@@ -276,7 +276,7 @@ jobs:
         name: Use the test environment
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
 
-      # tests.shards pins the live Codex test's file to shard 1, so only this one shard needs the CLI.
+      # tests.shards pins the live Codex test's file to shard 1; only the 3.12 shard 1 installs the CLI it runs.
       - name: Restore the Codex CLI
         id: codex
         if: matrix.python-version == '3.12' && matrix.shard == 1
@@ -288,6 +288,7 @@ jobs:
       - name: Install the Codex CLI
         if: steps.codex.outcome == 'success' && steps.codex.outputs.cache-hit != 'true'
         run: |
+          set -o pipefail
           mkdir -p ~/codex
           curl -fsSL --retry 3 "https://github.com/openai/codex/releases/download/${CODEX_RELEASE}/codex-x86_64-unknown-linux-musl.zst" | zstd -dc > ~/codex/codex
           chmod +x ~/codex/codex

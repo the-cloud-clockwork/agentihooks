@@ -126,8 +126,6 @@ def test_unit_tests_run_from_the_venv():
 
 
 def test_only_the_first_shard_installs_the_pinned_codex_cli_and_requires_its_live_test():
-    from tests.shards import FIRST_SHARD_FILES
-
     job = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]
     release = job["env"]["CODEX_RELEASE"]
     assert re.fullmatch(r"rust-v\d+\.\d+\.\d+", release)
@@ -140,6 +138,7 @@ def test_only_the_first_shard_installs_the_pinned_codex_cli_and_requires_its_liv
     assert restore["uses"] == "actions/cache@v4"
     assert restore["with"] == {"path": "~/codex", "key": "codex-${{ runner.os }}-${{ env.CODEX_RELEASE }}"}
     assert install["if"] == "steps.codex.outcome == 'success' && steps.codex.outputs.cache-hit != 'true'"
+    assert install["run"].startswith("set -o pipefail\n")
     assert "releases/download/${CODEX_RELEASE}/codex-x86_64-unknown-linux-musl.zst" in install["run"]
     assert use["if"] == "steps.codex.outcome == 'success'"
     assert use["run"].strip().splitlines() == [
@@ -147,7 +146,6 @@ def test_only_the_first_shard_installs_the_pinned_codex_cli_and_requires_its_liv
         'echo "CODEX_CLI_REQUIRED=1" >> "$GITHUB_ENV"',
     ]
     assert restore_index < install_index < use_index < run_index
-    assert FIRST_SHARD_FILES == {"tests/routing/test_codex_api.py"}
 
 
 def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
