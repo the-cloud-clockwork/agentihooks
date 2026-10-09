@@ -316,7 +316,7 @@ def test_only_the_canonical_reuse_protocol_is_an_allowed_transition(weakened):
     base = _workflow()
     base["jobs"]["gate-required"] = base["jobs"].pop("gate")
     head = copy.deepcopy(base)
-    head["jobs"]["reuse"] = {"runs-on": "ubuntu-latest"}
+    head["jobs"]["reuse"] = ci_reuse.reuse_job()
     head["jobs"]["queue-baseline"] = {"runs-on": "ubuntu-latest"}
     head["jobs"]["gate-required"]["needs"].extend(["reuse", "queue-baseline"])
     head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps()
@@ -324,3 +324,16 @@ def test_only_the_canonical_reuse_protocol_is_an_allowed_transition(weakened):
         head["jobs"]["gate-required"]["steps"][0]["run"] += "true\n"
     problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
     assert bool(problems) == weakened, problems
+
+
+def test_a_head_cannot_replace_the_protected_reuse_decision():
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["gate-required"] = base["jobs"].pop("gate")
+    base["jobs"]["reuse"] = ci_reuse.reuse_job()
+    base["jobs"]["gate-required"]["needs"].append("reuse")
+    head = copy.deepcopy(base)
+    head["jobs"]["reuse"]["steps"] = [{"run": "echo reused=true"}]
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    assert any("reuse" in problem for problem in problems), problems

@@ -29,6 +29,83 @@ def gate_steps() -> list[dict]:
     ]
 
 
+def reuse_job() -> dict:
+    return {
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 5,
+        "outputs": {
+            "reused": "${{ steps.decision.outputs.reused || 'false' }}",
+            "run": "${{ steps.decision.outputs.run }}",
+            "attempt": "${{ steps.decision.outputs.attempt }}",
+            "grader": "${{ steps.grader.outputs.sha }}",
+        },
+        "steps": [
+            {
+                "uses": "actions/checkout@v4",
+                "with": {
+                    "ref": "dev",
+                    "fetch-depth": 0,
+                    "persist-credentials": False,
+                },
+            },
+            {
+                "name": "Record the protected grader revision",
+                "id": "grader",
+                "run": 'echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"',
+            },
+            {
+                "uses": "actions/setup-python@v5",
+                "if": "hashFiles('scripts/ci_reuse.py') != ''",
+                "with": {
+                    "python-version": "3.12",
+                },
+            },
+            {
+                "name": "Install metadata dependencies",
+                "if": "hashFiles('scripts/ci_reuse.py') != ''",
+                "run": 'python -m pip install "pyyaml>=6.0"',
+            },
+            {
+                "name": "Mint the tcc main ci App token",
+                "id": "app-token",
+                "if": "github.event_name == 'merge_group' && hashFiles('scripts/ci_reuse.py') != ''",
+                "uses": "actions/create-github-app-token@v3.2.0",
+                "with": {
+                    "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
+                    "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
+                    "repositories": "${{ github.event.repository.name }}",
+                    "permission-actions": "read",
+                    "permission-contents": "read",
+                },
+            },
+            {
+                "name": "Decide from protected code and record the tested tree",
+                "id": "decision",
+                "env": {
+                    "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
+                    "BASE": "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}",
+                    "HEAD": "${{ github.sha }}",
+                    "EVENT": "${{ github.event_name }}",
+                    "RUN": "${{ github.run_id }}",
+                    "ATTEMPT": "${{ github.run_attempt }}",
+                },
+                "run": 'if [[ ! -f scripts/ci_reuse.py ]]; then\n  echo "reused=false" >> "$GITHUB_OUTPUT"\n  exit 0\nfi\npython -I scripts/ci_reuse.py --base "$BASE" --head "$HEAD" --event "$EVENT" \\\n  --repository "$GITHUB_REPOSITORY" --run "$RUN" --attempt "$ATTEMPT" \\\n  --record "$RUNNER_TEMP/provenance.json"\n',
+            },
+            {
+                "name": "Publish protected tested tree evidence",
+                "if": "steps.decision.outputs.recorded == 'true'",
+                "uses": "actions/upload-artifact@v4",
+                "with": {
+                    "name": "required-tree-${{ github.run_attempt }}",
+                    "path": "${{ runner.temp }}/provenance.json",
+                    "if-no-files-found": "error",
+                    "retention-days": 7,
+                },
+            },
+        ],
+    }
+
+
 def _git(*args):
     return subprocess.check_output(["git", *args], text=True).strip()
 
