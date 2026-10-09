@@ -98,7 +98,7 @@ def _url(phase: dict, task: dict) -> str:
 
 def _packaged(phase: dict, task: dict) -> bool:
     linked = _ledger("plan_packages").linked
-    return not phase.get("plan_ref") and bool(task) and linked(task.get("plan_slice", ""), _url(phase, task))
+    return not phase.get("plan_ref") and bool(task) and linked(str(task.get("plan_slice")), _url(phase, task))
 
 
 def _stored(doc: dict, phase: dict, task: dict) -> str:

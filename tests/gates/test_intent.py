@@ -758,6 +758,7 @@ TRACED = {
             "kept": True,
         },
         {"what": "a generator", "areas": ["power"], "why": "it lights the yard", "kept": False},
+        {"what": "cite the lines", "areas": ["docs"], "why": "the verdict names them", "kept": True},
     ],
 }
 UNOPENED = {**DOC, "tasks": [{**{k: v for k, v in DOC["tasks"][0].items() if k != "pr_url"}, "state": "claimed"}]}
@@ -785,7 +786,10 @@ class TestPlanCheck:
         checked = intent.plan_check(SLUG, UNOPENED, TASK, TRACED, "coach", NOW, home=tmp_path)
         assert checked == {"verdict": "pass", "reason": PLANNED_REASON}
         [state] = seen
-        assert state["pull_request_body"] == "- read the slice | scripts/gates/intent.py, docs | the judge needs it\n"
+        assert state["pull_request_body"] == (
+            "- read the slice | scripts/gates/intent.py, docs | the judge needs it\n"
+            "- cite the lines | docs | the verdict names them\n"
+        )
         assert state["changed_files"] == ["docs", "scripts/gates/intent.py"]
         assert verdicts(tmp_path).read(TASK) == {
             "verdict": "pass",

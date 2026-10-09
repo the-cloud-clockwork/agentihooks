@@ -118,6 +118,13 @@ def test_exact_prefers_the_phase_range_over_a_package_slice(slug, monkeypatch):
     assert plan_read.exact(doc, task) == numbered(15, 17)
 
 
+def test_exact_reads_the_task_plan_url_when_the_phase_has_no_range(slug):
+    doc = SQLiteLedgerRepository(core.LEDGER_DIR / DATABASE).read(slug, "phases", "artifacts")
+    artifact = doc["phases"][0].pop("plan_ref")["artifact"]
+    task = {"phase": doc["phases"][0]["id"], "plan_lines": "15-17", "plan_url": artifact}
+    assert plan_read.exact(doc, task) == numbered(15, 17)
+
+
 @pytest.mark.parametrize(
     "task",
     [{"phase": "nope", "plan_lines": "1-2"}, {"phase": "p9", "plan_lines": "1-2", "plan_url": ISSUE}],
