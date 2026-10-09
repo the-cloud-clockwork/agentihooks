@@ -85,6 +85,60 @@ def recent(repo: str, since_s: float, read: Callable) -> list[dict]:
         page += 1
 
 
+def _pending(slug, store, doc):
+    reported = store.key(slug, "delivery-budget-reported")
+    pending = {}
+    for task in reversed(doc["tasks"]):
+        url = task.get("pr_url") or ""
+        match = PULL_URL.fullmatch(url)
+        binding = f"{task['id']}:{url}"
+        if match and not store.redis.hexists(reported, binding):
+            pending[binding] = (match[1], int(match[2]), task)
+    return pending
+
+
+def _selection(slug, store, pending):
+    known = store.key(slug, "delivery-budget-known")
+    watching = store.key(slug, "delivery-budget-watching")
+    if not store.redis.exists(known):
+        store.redis.sadd(known, "initialized", *pending)
+    fresh = [binding for binding in pending if not store.redis.sismember(known, binding)]
+    live = [
+        binding
+        for binding, (_, _, task) in pending.items()
+        if task.get("state") == "pr" or store.redis.sismember(watching, binding)
+    ]
+    backlog = [binding for binding in pending if binding not in fresh and binding not in live]
+    offset_key = store.key(slug, "delivery-budget-offset")
+    offset = int(store.redis.get(offset_key) or 0)
+    offset = offset % len(backlog) if backlog else 0
+    batch = (backlog + backlog)[offset : offset + 8]
+    store.redis.set(offset_key, offset + len(batch))
+    return list(dict.fromkeys([*live, *fresh[:8], *batch]))
+
+
+def _record(slug, store, ledger, binding, task, repo, pull, read):
+    known = store.key(slug, "delivery-budget-known")
+    watching = store.key(slug, "delivery-budget-watching")
+    if not pull["merged_at"]:
+        store.redis.sadd(known, binding)
+        if pull.get("state") == "open":
+            store.redis.sadd(watching, binding)
+        else:
+            store.redis.srem(watching, binding)
+        return False
+    result = collect(repo, pull, read)
+    text = render(result)
+    saved = any(comment.get("text") == text for comment in task.get("comments", []))
+    if not saved and not ledger.delivery_budget(slug, task["id"], text):
+        store.redis.sadd(watching, binding)
+        return False
+    store.redis.hset(store.key(slug, "delivery-budget-reported"), binding, json.dumps(result))
+    store.redis.sadd(known, binding)
+    store.redis.srem(watching, binding)
+    return not saved
+
+
 def refresh(
     slug: str,
     config: SwarmConfig,
@@ -98,28 +152,16 @@ def refresh(
     if now_ms - int(store.redis.get(check_key) or 0) < REFRESH_MS:
         return []
     store.redis.set(check_key, now_ms)
-    cursor_key = store.key(slug, "delivery-budget-cursor")
-    since = (int(store.redis.get(cursor_key) or now_ms - ci_budget.RUN_BUDGET_S * 1000) - REFRESH_MS) / 1000
-    tasks = {}
-    for task in doc["tasks"]:
-        match = PULL_URL.fullmatch(task.get("pr_url") or "")
-        if match:
-            tasks.setdefault(match[1], {}).setdefault(int(match[2]), []).append(task)
+    pending = _pending(slug, store, doc)
+    selected = _selection(slug, store, pending)
     read = read or partial(api, config.repo)
     actions = []
-    try:
-        for repo, rows in tasks.items():
-            for pull in recent(repo, since, read):
-                if pull["number"] not in rows:
-                    continue
-                text = render(collect(repo, pull, read))
-                for task in rows[pull["number"]]:
-                    if any(comment.get("text") == text for comment in task.get("comments", [])):
-                        continue
-                    ledger.comment(slug, task["id"], text, "swarm")
-                    actions.append("recorded merged task delivery budget")
-    except defects.READ_ERRORS as exc:
-        defects._skipped("reading merged task delivery", exc)
-        return actions
-    store.redis.set(cursor_key, now_ms)
+    for binding in selected:
+        repo, number, task = pending[binding]
+        try:
+            pull = read(f"repos/{repo}/pulls/{number}", ".")[0]
+            if _record(slug, store, ledger, binding, task, repo, pull, read):
+                actions.append("recorded merged task delivery budget")
+        except defects.READ_ERRORS as exc:
+            defects._skipped("reading merged task delivery", exc)
     return actions

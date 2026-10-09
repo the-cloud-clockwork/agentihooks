@@ -39,7 +39,7 @@ def _evidence(head=True, queue=True):
         "updated_at": "2026-10-09T07:28:00Z",
     }
     data = {
-        "repos/owner/repo/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=1": [pull],
+        "repos/owner/repo/pulls/42": [pull],
         "repos/owner/repo/actions/workflows/test.yml/runs?event=pull_request&head_sha=final&per_page=100": [
             _run(10, "pull_request", "final"),
             _run(11, "push", "final"),
@@ -129,8 +129,9 @@ def test_tick_refresh_records_one_report_on_the_merged_task():
     def comment(slug, task_id, text, by):
         writes.append((slug, task_id, text, by))
         task["comments"].append({"text": text})
+        return True
 
-    ledger = SimpleNamespace(comment=comment)
+    ledger = SimpleNamespace(delivery_budget=comment)
     store = SimpleNamespace(redis=fakeredis.FakeRedis(), key=lambda slug, suffix: f"{slug}:{suffix}")
     config = SimpleNamespace(repo="unused")
     now = int(ci_budget.seconds("2026-10-09T07:30:00Z") * 1000)
@@ -193,22 +194,30 @@ def test_missing_completed_required_check_is_unknown(jobs):
     assert delivery.collect("owner/repo", pull, read)["head"] is None
 
 
-def test_recent_merge_reader_stops_after_old_updated_pages():
+def test_late_task_registration_and_refused_comment_are_retried():
     from scripts.ci_budget import delivery
 
-    pull, _, _, _ = _evidence()
-    first = [{**pull, "number": i} for i in range(100)]
-    second = [{**pull, "number": i + 100, "updated_at": "2026-10-09T07:00:00Z", "merged_at": None} for i in range(100)]
+    pull, _, read, _ = _evidence()
+    task = {"id": "t1", "state": "done", "pr_url": "https://github.com/owner/repo/pull/42", "comments": []}
+    doc = {"tasks": []}
     calls = []
+    accepted = [False, True]
 
-    def read(endpoint, field, **options):
-        calls.append((endpoint, field, options))
-        return first if endpoint.endswith("page=1") else second
+    def save(slug, task_id, text):
+        calls.append(text)
+        return accepted.pop(0)
 
-    assert delivery.recent("owner/repo", ci_budget.seconds("2026-10-09T07:15:00Z"), read) == first
+    store = SimpleNamespace(redis=fakeredis.FakeRedis(), key=lambda slug, suffix: f"{slug}:{suffix}")
+    config = SimpleNamespace(repo="unused")
+    ledger = SimpleNamespace(delivery_budget=save)
+    now = int(ci_budget.seconds("2026-10-09T07:30:00Z") * 1000)
+    assert delivery.refresh("crew", config, store, ledger, doc, now, read=read) == []
+    doc["tasks"].append(task)
+    assert delivery.refresh("crew", config, store, ledger, doc, now + 3_600_000, read=read) == []
+    assert len(calls) == 1
+    assert delivery.refresh("crew", config, store, ledger, doc, now + 3_660_000, read=read) == [
+        "recorded merged task delivery budget"
+    ]
     assert len(calls) == 2
-    assert calls[1] == (
-        "repos/owner/repo/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=2",
-        ".[]",
-        {"paginate": False},
-    )
+    assert delivery.refresh("crew", config, store, ledger, doc, now + 3_720_000, read=read) == []
+    assert len(calls) == 2
