@@ -112,7 +112,7 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
 def test_coverage_ratchet_grades_the_merged_shards_from_the_base_copy():
     jobs = _workflow()["jobs"]
     job = jobs["coverage-ratchet"]
-    assert job["needs"] == ["unit", "queue-baseline"]
+    assert job["needs"] == ["durations", "unit", "queue-baseline"]
     download = next(step for step in job["steps"] if step.get("name") == "Download shard coverage")
     assert download["with"]["pattern"] == "coverage-3.12-*"
     grade = next(step for step in job["steps"] if step.get("name") == "Hold every line the base ran")
@@ -127,7 +127,7 @@ def test_coverage_ratchet_grades_a_merge_group_against_the_branch_it_queues_onto
     job = _workflow()["jobs"]["coverage-ratchet"]
     base = next(step for step in job["steps"] if step.get("name") == "Resolve the measured base tree")
     assert base["env"]["QUEUE_BASE"] == "${{ github.event.merge_group.base_sha }}"
-    assert 'base="$QUEUE_BASE"' in base["run"]
+    assert '"${QUEUE_BASE:-' in base["run"]
 
 
 def _step(job, name):
@@ -135,16 +135,10 @@ def _step(job, name):
 
 
 @pytest.mark.parametrize(
-    ("dispatched", "ref", "graded"),
-    [
-        ("HEAD", "feature", "parent"),
-        ("", "feature", "parent"),
-        ("HEAD^1", "feature", "parent"),
-        ("origin/dev", "dev", "parent"),
-        ("origin/dev", "feature", "newer"),
-    ],
+    ("queue", "dispatched", "graded"),
+    [("", "", "parent"), ("", "parent", "parent"), ("newer", "", "newer")],
 )
-def test_coverage_ratchet_never_grades_a_dispatched_head_against_itself(tmp_path, dispatched, ref, graded):
+def test_coverage_ratchet_grades_against_the_base_its_baseline_was_restored_for(tmp_path, queue, dispatched, graded):
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")
@@ -153,12 +147,19 @@ def test_coverage_ratchet_never_grades_a_dispatched_head_against_itself(tmp_path
         "head": _commit(repo, {"a": "2"}),
         "newer": _commit(repo, {"a": "3"}),
     }
-    _git(repo, "update-ref", "refs/remotes/origin/dev", commits["newer"])
     _git(repo, "checkout", "-q", "--detach", commits["head"])
     output = tmp_path / "output"
     output.write_text("")
-    env = dict(os.environ, DISPATCHED=dispatched, QUEUE_BASE="", GITHUB_REF_NAME=ref, GITHUB_OUTPUT=str(output))
+    env = dict(
+        os.environ,
+        QUEUE_BASE=commits.get(queue, ""),
+        DISPATCHED_BASE=commits.get(dispatched, ""),
+        GITHUB_OUTPUT=str(output),
+    )
+    job = _workflow()["jobs"]["coverage-ratchet"]
+    assert job["needs"][0] == "durations"
     step = _step("coverage-ratchet", "Resolve the measured base tree")
+    assert step["env"]["DISPATCHED_BASE"] == "${{ needs.durations.outputs.base }}"
     subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True)
     assert f"commit={commits[graded]}\n" in output.read_text()
 
@@ -177,7 +178,7 @@ def test_durations_restores_the_parent_baseline_when_the_dispatched_base_is_the_
         'case "$2" in\n'
         "  */commits/head) [[ $4 == .sha ]] && echo head || echo parent ;;\n"
         "  */commits/*) echo other ;;\n"
-        '  */runs\\?*) echo "run-${2##*head_sha=}" | cut -d"&" -f1 ;;\n'
+        '  */runs\\?*) s="${2##*head_sha=}"; s="${s%%&*}"; echo "run-$s $s" ;;\n'
         "  *) echo durations-merged coverage-baseline ;;\n"
         "esac\n"
     )
@@ -195,7 +196,7 @@ def test_durations_restores_the_parent_baseline_when_the_dispatched_base_is_the_
     )
     step = _step("durations", "Find the dev push run of the dispatched base")
     subprocess.run(["bash", "-e", "-c", step["run"]], cwd=tmp_path, env=env, check=True)
-    assert output.read_text() == f"id=run-{restored}\n"
+    assert output.read_text() == f"id=run-{restored}\nsha={restored}\n"
 
 
 def test_coverage_ratchet_restores_an_evicted_base_baseline_from_its_dev_push_run():
