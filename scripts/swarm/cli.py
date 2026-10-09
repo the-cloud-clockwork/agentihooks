@@ -986,7 +986,7 @@ def cmd_merge(store, args):
             at + waits.CHECKED_MINUTES * 60_000,
             "dev changed grading inputs; branch updated",
             at,
-            on=waits.on("checks", args.url),
+            on={**waits.on("checks", args.url), "previous_head": result["previous_head"]},
         )
     print(json.dumps(result))
 

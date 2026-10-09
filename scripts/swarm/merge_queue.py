@@ -89,8 +89,8 @@ def checked_base(repo: str, head: str, run) -> str:
 def refresh(url: str, raw: dict, run) -> bool:
     pull = graphql(FRESHNESS, {"url": url}, run)["resource"]
     repo = pull["repository"]["nameWithOwner"]
-    current = pull["repository"]["ref"]["target"]["oid"]
     base = checked_base(repo, raw["headRefOid"], run)
+    current = graphql(FRESHNESS, {"url": url}, run)["resource"]["repository"]["ref"]["target"]["oid"]
     if base == current:
         return False
     files = rest(f"repos/{repo}/compare/{base}...{current}", run)["files"]
@@ -100,6 +100,9 @@ def refresh(url: str, raw: dict, run) -> bool:
         for key in ("filename", "previous_filename")
         for pattern in GRADING
     )
+    latest = graphql(FRESHNESS, {"url": url}, run)["resource"]["repository"]["ref"]["target"]["oid"]
+    if latest != current:
+        raise SwarmError("dev advanced during the grading comparison; retry queueing")
     if changed:
         rest(f"repos/{repo}/pulls/{pull['number']}/update-branch", run, {"expected_head_sha": raw["headRefOid"]})
     return changed
@@ -111,6 +114,7 @@ def operate(action: str, url: str, run=subprocess.run) -> dict:
         raise SwarmError("GitHub URL does not identify a pull request")
     if action != "state" and raw["baseRefName"] != "dev":
         raise SwarmError("swarm merge queue operations require a pull request into dev")
+    raw_head = raw["headRefOid"]
     waiting = False
     if action == "queue" and raw["mergeQueueEntry"] is None:
         waiting = refresh(url, raw, run)
@@ -126,5 +130,5 @@ def operate(action: str, url: str, run=subprocess.run) -> dict:
         "head": raw["headRefOid"],
         "queued": raw["mergeQueueEntry"] is not None,
         "entry": raw["mergeQueueEntry"],
-        **({"waiting": "checks"} if waiting else {}),
+        **({"waiting": "checks", "previous_head": raw_head} if waiting else {}),
     }

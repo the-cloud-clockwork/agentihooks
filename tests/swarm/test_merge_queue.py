@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from scripts.swarm import cli, merge_queue
+from scripts.swarm import cli, merge_queue, waits
 from scripts.swarm.store import SwarmError
 
 URL = "https://github.com/o/r/pull/7"
@@ -51,6 +51,7 @@ def test_queue_enqueues_the_observed_head_and_reports_the_queue_entry():
         {"workflow_runs": [{"id": 21, "head_sha": "abc", "conclusion": "success"}]},
         {"jobs": [{"id": 31, "name": "test-count (3.11)", "conclusion": "success"}]},
         "2026-10-09T09:20:06Z   BASE: cccccccccccccccccccccccccccccccccccccccc\n",
+        {"data": {"resource": {"repository": {"ref": {"target": {"oid": "c" * 40}}}}}},
         {"data": {"enqueuePullRequest": {"mergeQueueEntry": {"id": "MQ_one"}}}},
         {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY}}},
     )
@@ -61,7 +62,7 @@ def test_queue_enqueues_the_observed_head_and_reports_the_queue_entry():
         "queued": True,
         "entry": ENTRY,
     }
-    command, _ = calls[5]
+    command, _ = calls[6]
     assert command[:3] == ["gh", "api", "graphql"]
     assert "enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head})" in command[4]
     assert command[5:] == ["-f", "id=PR_one", "-f", "head=abc"]
@@ -101,7 +102,9 @@ def test_queue_refreshes_changed_grading_inputs_before_enqueueing(changed):
         },
         {"jobs": [{"id": 31, "name": "test-count (3.11)", "conclusion": "success"}]},
         "2026-10-09T09:20:06Z   BASE: cccccccccccccccccccccccccccccccccccccccc\n",
+        {"data": {"resource": {"repository": {"ref": {"target": {"oid": "current"}}}}}},
         {"files": [{"filename": changed}], "total_commits": 1},
+        {"data": {"resource": {"repository": {"ref": {"target": {"oid": "current"}}}}}},
         {"message": "Updating pull request branch."},
         {"data": {"resource": {**OPEN, "headRefOid": "updated"}}},
     )
@@ -136,7 +139,9 @@ def test_queue_does_not_refresh_unrelated_dev_changes():
         },
         {"jobs": [{"id": 31, "name": "test-count (3.11)", "conclusion": "success"}]},
         "2026-10-09T09:20:06Z   BASE: cccccccccccccccccccccccccccccccccccccccc\n",
+        {"data": {"resource": {"repository": {"ref": {"target": {"oid": "current"}}}}}},
         {"files": [{"filename": "scripts/swarm/intent.py"}], "total_commits": 1},
+        {"data": {"resource": {"repository": {"ref": {"target": {"oid": "current"}}}}}},
         {"data": {"enqueuePullRequest": {"mergeQueueEntry": {"id": "MQ_one"}}}},
         {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY}}},
     )
@@ -190,7 +195,9 @@ def test_cli_registers_a_checks_wait_after_refreshing(monkeypatch, capsys):
     store.redis = object()
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
-    monkeypatch.setattr(merge_queue, "operate", lambda action, url: {"queued": False, "waiting": "checks"})
+    monkeypatch.setattr(
+        merge_queue, "operate", lambda action, url: {"queued": False, "waiting": "checks", "previous_head": "old"}
+    )
     monkeypatch.setattr(cli, "now_ms", lambda: 1000)
     seen = []
     monkeypatch.setattr(cli.idle, "declare_wait", lambda *args, **kwargs: seen.append((args, kwargs)))
@@ -198,9 +205,44 @@ def test_cli_registers_a_checks_wait_after_refreshing(monkeypatch, capsys):
     assert len(seen) == 1
     args, kwargs = seen[0]
     assert args[:3] == (store.redis, "sw", "engineer@a1b2c3-0001")
-    assert kwargs["on"] == {"kind": "checks", "target": URL}
+    assert kwargs["on"] == {"kind": "checks", "target": URL, "previous_head": "old"}
     assert args[3] > 1000
     assert json.loads(capsys.readouterr().out)["waiting"] == "checks"
+
+
+def test_refresh_wait_does_not_resolve_the_old_green_head():
+    from types import SimpleNamespace
+
+    held = {"kind": "checks", "target": URL, "previous_head": "old"}
+    pull = SimpleNamespace(state="OPEN", head="old", resolved=True, red=False, unpassed_gate="")
+    assert waits.checks_resolution(held, lambda url: pull) == ""
+    assert waits.checks_resolution(held, lambda url: pull) == ""
+    pull.head = "updated"
+    pull.resolved = False
+    assert waits.checks_resolution(held, lambda url: pull) == ""
+    assert waits.checks_resolution(held, lambda url: pull) == ""
+    pull.resolved = True
+    assert waits.checks_resolution(held, lambda url: pull) == f"checks on {URL}, now green"
+
+
+def test_queue_refuses_dev_advancing_during_comparison():
+    run, calls = runner(
+        {"data": {"resource": OPEN}},
+        {
+            "data": {
+                "resource": {"number": 12, "repository": {"nameWithOwner": "o/r", "ref": {"target": {"oid": "c" * 40}}}}
+            }
+        },
+        {"workflow_runs": [{"id": 21, "head_sha": "abc", "conclusion": "success"}]},
+        {"jobs": [{"id": 31, "name": "test-count (3.11)", "conclusion": "success"}]},
+        "2026-10-09T09:20:06Z   BASE: cccccccccccccccccccccccccccccccccccccccc\n",
+        {"data": {"resource": {"repository": {"ref": {"target": {"oid": "current"}}}}}},
+        {"files": [{"filename": "scripts/swarm/intent.py"}]},
+        {"data": {"resource": {"repository": {"ref": {"target": {"oid": "newer"}}}}}},
+    )
+    with pytest.raises(SwarmError, match="dev advanced during the grading comparison"):
+        merge_queue.operate("queue", URL, run)
+    assert not any("enqueuePullRequest(input:" in str(call[0]) for call in calls)
 
 
 def test_dequeue_removes_the_pull_request_then_reports_its_state():
