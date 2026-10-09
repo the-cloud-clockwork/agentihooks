@@ -2,7 +2,7 @@
 
 import math
 
-from hooks.classifier import ClassifierError, decide, definitions, runner
+from hooks.classifier import ClassifierError, code_rules, decide, definitions, runner
 from scripts.inbox.store import InboxStore
 from scripts.swarm import difficulty
 from scripts.swarm.ledger_client import LedgerRefused
@@ -180,6 +180,14 @@ def _named(group):
 
 def _yes(noul, floor):
     return isinstance(noul, (int, float)) and not isinstance(noul, bool) and not math.isnan(noul) and noul >= floor
+
+
+def _verdicts(definition, state, params, answers):
+    floor = definition.thresholds["confidence"]
+    return {"group": all(_yes(answers[f"group_{i}"].noul, floor) for i in range(len(params["groups"])))}
+
+
+RULE = code_rules.CodeRule(code_rules.asked, _verdicts, {"group": (True, False)}, {"group": False})
 
 
 def __getattr__(name):

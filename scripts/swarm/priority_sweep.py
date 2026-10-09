@@ -11,7 +11,7 @@ master relay among them; an agent's write on it is never judged.
 import re
 from dataclasses import dataclass
 
-from hooks.classifier import ClassifierError, decide, runner
+from hooks.classifier import ClassifierError, code_rules, decide, runner
 from scripts.swarm import ledger_events
 
 PURPOSE = "priority-resolve"
@@ -158,6 +158,14 @@ def _judge(doc, row, write, judge):
         return None
     yes = output.raw.answers["resolves"].noul
     return yes if yes is not None and yes >= output.thresholds["probability"] else None
+
+
+def _verdicts(definition, state, params, answers):
+    yes = answers["resolves"].noul
+    return {"resolves": yes is not None and yes >= definition.thresholds["probability"]}
+
+
+RULE = code_rules.CodeRule(code_rules.asked, _verdicts, {"resolves": (True, False)}, {"resolves": False})
 
 
 def _resolve(ledger, slug, row, write, reason):

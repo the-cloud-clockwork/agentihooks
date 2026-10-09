@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
-from hooks.classifier import ClassifierError, decide, definitions, runner
+from hooks.classifier import ClassifierError, code_rules, decide, definitions, runner
 from scripts.gates import log as gate_log
 from scripts.swarm.slice_screen import ONE_PR, levels
 from scripts.swarm_ledger import ledger_comments
@@ -138,6 +138,16 @@ def failures(rows, size, too_big):
             f"the plan is sized {size['name']} at confidence {size['confidence']:.2f}, above one pull request"
         )
     return reasons
+
+
+def _verdicts(definition, state, params, answers):
+    off_intent = definition.thresholds["off_intent"]
+    rows = [{"kept": answers[f"piece_{piece['slot']}"].noul >= off_intent} for piece in params["pieces"]]
+    size = _size(answers["size"], levels(definition))
+    return {"verdict": FAIL if failures(rows, size, definition.thresholds["too_big_confidence"]) else PASS}
+
+
+RULE = code_rules.CodeRule(code_rules.asked, _verdicts, {"verdict": (PASS, FAIL)}, {"verdict": FAIL})
 
 
 def is_clearance(area: str) -> bool:
