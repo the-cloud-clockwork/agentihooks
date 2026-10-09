@@ -138,7 +138,7 @@ class RedisStore:
         self.redis.sadd(f"{PREFIX}:index", config.slug)
 
     def config(self, slug):
-        raw = self.redis.hgetall(self.key(slug, "config"))
+        raw = self.redis.hgetall(self.key(slug, "config"))  # mutation stats measurement
         if not raw:
             raise SwarmError(f"no swarm {slug}")
         return SwarmConfig(

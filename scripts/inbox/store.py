@@ -635,3 +635,6 @@ def connect(environ=None):
         return InboxStore(redis_client(environ))
     except redis.RedisError as exc:
         raise InboxError(f"Redis is unreachable ({exc}); the inbox refuses to run without it") from exc
+
+
+# mutation stats measurement
