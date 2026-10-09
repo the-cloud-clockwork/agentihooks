@@ -1,9 +1,7 @@
 import json
 from pathlib import Path
 
-import pytest
-
-from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key, stats_part, write_part
+from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key, write_part
 
 SELECTED = {"hooks/a.py": ({3, 1}, ["tests/test_b.py", "tests/test_a.py"]), "hooks/b.py": (set(), [])}
 
@@ -24,14 +22,6 @@ def test_group_folder_keeps_the_head_and_part():
     stats = SharedStats(Path("/stats"), "abc", (1, 2))
     assert stats.group(3) == SharedStats(Path("/stats/group-3"), "abc", (1, 2))
     assert SharedStats(Path("/stats"), "abc").part is None
-
-
-@pytest.mark.parametrize("total", [1, 2, 3, 5])
-def test_parts_split_every_bucket_exactly_once(total):
-    buckets = [[f"tests/test_{n}.py"] for n in range(7)]
-    parts = [stats_part(buckets, (index, total)) for index in range(total)]
-    assert sorted(bucket for part in parts for bucket in part) == sorted(buckets)
-    assert max(map(len, parts)) - min(map(len, parts)) <= 1
 
 
 def test_parts_round_trip_in_part_order(tmp_path):

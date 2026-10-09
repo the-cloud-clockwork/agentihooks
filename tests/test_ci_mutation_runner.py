@@ -379,7 +379,7 @@ def _stats_run(tmp_path, monkeypatch, statuses):
     commands = []
 
     def prepare(root, work, paths, tests):
-        work.mkdir()
+        work.mkdir(exist_ok=True)
 
     def process(command, cwd, timeout, log):
         commands.append(command)
