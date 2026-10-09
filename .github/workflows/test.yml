@@ -75,6 +75,9 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
+      - name: Plant stats collected for the previous commit
+        run: git checkout -q HEAD^
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
