@@ -25,6 +25,7 @@ RESPONSIBILITIES = {
         "than changing behavior."
     ),
 }
+HARNESS_ORDER = {"frontend": ("claude", "codex")}
 NOT_ONE = {
     "split": "Two or more unrelated public responsibilities bundled in one task that should become separate tasks.",
     "unresolved": "The task does not say enough about the public behavior it changes to decide.",
@@ -55,6 +56,10 @@ def installed(name: str) -> bool:
     from scripts.targets._common import _install_module
 
     return _install_module()._resolve_profile_dir(name) is not None
+
+
+def preferred(profile: str) -> tuple[str, ...]:
+    return HARNESS_ORDER.get(profile, ())
 
 
 def choose(

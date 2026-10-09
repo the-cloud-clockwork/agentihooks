@@ -508,6 +508,122 @@ def test_a_profile_whose_own_layers_enable_plugins_is_claude_only(world):
     assert plugins.claude_only("rb-role") is False
 
 
+def _mattpocock(home: Path, tmp_path: Path) -> Path:
+    plugin = tmp_path / "plugin-cache" / "mattpocock-skills" / "1.2.3"
+    for skill in ("engineering/tdd", "productivity/bundle-skill", "misc/unlisted"):
+        _write(plugin / "skills" / skill / "SKILL.md", f"---\nname: {Path(skill).name}\n---\n")
+    manifest = {"skills": ["./skills/engineering/tdd", "./skills/productivity/bundle-skill", "./skills/gone"]}
+    _write(plugin / ".claude-plugin" / "plugin.json", json.dumps(manifest))
+    installs = [
+        {"scope": "project", "installPath": str(tmp_path / "elsewhere")},
+        {"scope": "user", "installPath": str(plugin)},
+    ]
+    _write(home / ".claude" / "plugins" / "installed_plugins.json", json.dumps({"plugins": {MATTPOCOCK: installs}}))
+    return plugin
+
+
+def _frontend(world) -> Path:
+    front = world["bundle"] / "profiles" / "frontend"
+    _write(world["bundle"] / "profiles" / "engineer" / "profile.yml", "name: engineer\nextends: [rb-base]\n")
+    _write(front / "profile.yml", "name: frontend\nextends: [engineer]\n")
+    enabled = {"enabledPlugins": {"impeccable@impeccable": True, "frontend-design@claude-plugins-official": True}}
+    _write(front / ".claude" / "settings.overrides.json", json.dumps(enabled))
+    _write(front / ".codex" / "skills" / "frontend-design" / "SKILL.md", "---\nname: frontend-design\n---\n")
+    return front
+
+
+def _impeccable(home: Path) -> Path:
+    return _write(home / ".agentihooks" / "codex-skills" / "impeccable" / "SKILL.md", "---\nname: impeccable\n---\n")
+
+
+def test_a_frontend_chain_with_a_codex_replacement_for_each_plugin_mounts_on_codex(world, tmp_path):
+    from scripts.profiles import plugins
+
+    front = _frontend(world)
+    assert plugins.claude_only("frontend") is True
+    _impeccable(world["home"])
+    assert plugins.claude_only("frontend") is False
+    own = {"enabledPlugins": {"impeccable@impeccable": True, "own@m": True}}
+    _write(front / ".claude" / "settings.overrides.json", json.dumps(own))
+    assert plugins.claude_only("frontend") is True
+
+
+@pytest.mark.parametrize(("installed", "claude_only"), [(False, True), (True, False)])
+def test_a_layer_enabling_mattpocock_needs_the_installed_plugin_skills_for_codex(
+    world, tmp_path, installed, claude_only
+):
+    from scripts.profiles import plugins
+
+    kit = {"enabledPlugins": {MATTPOCOCK: True}}
+    _write(world["bundle"] / "profiles" / "rb-kit" / ".claude" / "settings.overrides.json", json.dumps(kit))
+    if installed:
+        _mattpocock(world["home"], tmp_path)
+    assert plugins.claude_only("rb-role") is claude_only
+
+
+@pytest.mark.parametrize(("role", "browser"), [("master", True), ("qa", True), ("rb-base", False)])
+def test_playwright_is_replaced_on_codex_only_where_the_swarm_browser_mounts(world, role, browser):
+    from scripts.profiles import plugins
+
+    profile = world["bundle"] / "profiles" / f"pw-{role}"
+    _write(profile / "profile.yml", f"name: pw-{role}\nextends: [{'package:' + role if role != 'rb-base' else role}]\n")
+    _write(profile / ".claude" / "settings.overrides.json", json.dumps({"enabledPlugins": {PLAYWRIGHT: True}}))
+    assert plugins.claude_only(f"pw-{role}") is not browser
+
+
+def _codex_skills(out: Path) -> dict[str, str]:
+    return {p.name: os.readlink(p) for p in (out / "skills").iterdir() if p.is_symlink()}
+
+
+def test_codex_render_of_frontend_links_each_plugin_replacement(world, tmp_path):
+    from scripts.profiles import render
+
+    front, impeccable = _frontend(world), _impeccable(world["home"]).parent
+    plugin = _mattpocock(world["home"], tmp_path)
+
+    out = render.render_codex("frontend")
+
+    linked = _codex_skills(out)
+    assert linked["frontend-design"] == str(front / ".codex" / "skills" / "frontend-design")
+    assert linked["impeccable"] == str(impeccable)
+    assert linked["tdd"] == str(plugin / "skills" / "engineering" / "tdd")
+    assert linked["bundle-skill"] == str(out.parent / "claude" / "skills" / "bundle-skill")
+    assert "unlisted" not in linked and "gone" not in linked
+
+
+@pytest.mark.parametrize("role", ["engineer", "cicd", "planner", "master"])
+def test_codex_render_of_each_role_carries_its_replacements(world, tmp_path, role):
+    from scripts.profiles import render
+
+    _write(world["bundle"] / "profiles" / role / "profile.yml", f"name: {role}\nextends: [rb-base]\n")
+    plugin = _mattpocock(world["home"], tmp_path)
+    _impeccable(world["home"])
+
+    out = render.render_codex(role)
+
+    linked = _codex_skills(out)
+    if role == "master":
+        assert "tdd" not in linked
+        assert "playwright-cmd" in tomllib.loads((out / "config.toml").read_text())["mcp_servers"]
+    else:
+        assert linked["tdd"] == str(plugin / "skills" / "engineering" / "tdd")
+    assert "impeccable" not in linked
+
+
+def test_codex_render_redoes_the_home_when_a_replacement_arrives(world):
+    from scripts.profiles import render
+
+    _frontend(world)
+    out = render.render_codex("frontend")
+    assert "impeccable" not in _codex_skills(out)
+    assert render.render_codex("frontend") is None
+    _impeccable(world["home"])
+
+    out = render.render_codex("frontend")
+
+    assert out is not None and "impeccable" in _codex_skills(out)
+
+
 def test_the_package_prefix_names_the_same_role(world, tmp_path, monkeypatch):
     from hooks.context import profile_chain
     from scripts.profiles import render
