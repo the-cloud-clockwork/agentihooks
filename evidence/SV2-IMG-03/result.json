@@ -1,7 +1,7 @@
 {
   "package": "SV2-IMG-03",
-  "tested_commit": "ae6687d588e4c34cd9964c1aa1da11b1262e70c1",
-  "proof_commit": "7f12be4bcedd54d58841bbeff7cb71e08183269b",
+  "tested_commit": "26b904d9da9add638ab0a9e7fda355068c579cd7",
+  "proof_commit": "26b904d9da9add638ab0a9e7fda355068c579cd7",
   "supported_versions": {
     "debian_packages": [
       "adduser=3.134",
@@ -232,39 +232,39 @@
   ],
   "rollback_rehearsal": {
     "selected_prior_image_for_new_attempt": true,
-    "new_attempt": "exe-790481be18404cf1b1ab965a8053f09c",
+    "new_attempt": "exe-b240665af562422a84dcb2540bce0ac5",
     "actor": "fixture operator",
-    "compatibility_agent_pid": 73,
+    "compatibility_agent_pid": 79,
     "active_ownership_before": {
       "pid": 7,
-      "start": "45325177",
-      "namespace": "pid:[4026532904]",
+      "start": "45650938",
+      "namespace": "pid:[4026532839]",
       "hashes": {
-        "execution.json": "210addfe16e095487e2a1384582497004a54c081bf09abd54a846f1574150861",
-        "registration.json": "8eb7543230d7154215a2d2a495eb089ef32672697eb83aa71e89a58f7b402aa7",
-        "homes/codex/.agentihooks/state.json": "663a4eb9d41d9a735435ad969cd94d1fbd7480b30705de6db83dfcac31a25a4b",
-        "homes/codex/.agentihooks/state.json.bak": "205fa322aef03953d34d8435e4e67001bf56b6e094fbc73ad6ca7ca9c63fbb9b",
+        "execution.json": "a21eb0a10252e466a979c82ea6d73edf2dd39974f7bfcbddaea84577092acd32",
+        "registration.json": "d274bcbcddda338dd76c9b3bf85d2bc42f9ad347536431a3b2e87e8b727d45d6",
+        "homes/codex/.agentihooks/state.json": "61783f4c47140c25cef4570736f8351a8d4e290ee73f79ef1cfa38753d1f05a9",
+        "homes/codex/.agentihooks/state.json.bak": "ec1dc4dd67bd9286e5deba4b942cf7f0dd79d4ecae9844299cc9c05e76ff7a59",
         "homes/codex/.codex/.agentihooks-managed.json": "c6d2a8d072bcc165e8b7efffc798ae1d2d6f4f4cc6e06b0eded80df83b533c46",
         "homes/codex/.codex/AGENTS.md": "7e8937537d87b13444539dc8b59a71971e8df2052724f4e492961f2534c057f7",
         "homes/codex/.codex/agentihooks-hook.sh": "1b878739a5eeb26f3732c2f8789b1a326235eab91d163e0eeb2606bc206d9249",
         "homes/codex/.codex/config.toml": "76d67a006f085b6ee91b60f9f41c26836606cbfd4aa6c380f9ec8fd4f2088128",
-        "homes/codex/.codex/hooks.json": "9c9fe9a67a93cb2d3428c1769cfd8d019915c55586ce7935b2574aeeec8523f7"
+        "homes/codex/.codex/hooks.json": "98e2c228cd8d0ee0b90ce2569f702a8e1b92b514dcce096cfc745d8155760eef"
       }
     },
     "active_ownership_after": {
       "pid": 7,
-      "start": "45325177",
-      "namespace": "pid:[4026532904]",
+      "start": "45650938",
+      "namespace": "pid:[4026532839]",
       "hashes": {
-        "execution.json": "210addfe16e095487e2a1384582497004a54c081bf09abd54a846f1574150861",
-        "registration.json": "8eb7543230d7154215a2d2a495eb089ef32672697eb83aa71e89a58f7b402aa7",
-        "homes/codex/.agentihooks/state.json": "663a4eb9d41d9a735435ad969cd94d1fbd7480b30705de6db83dfcac31a25a4b",
-        "homes/codex/.agentihooks/state.json.bak": "205fa322aef03953d34d8435e4e67001bf56b6e094fbc73ad6ca7ca9c63fbb9b",
+        "execution.json": "a21eb0a10252e466a979c82ea6d73edf2dd39974f7bfcbddaea84577092acd32",
+        "registration.json": "d274bcbcddda338dd76c9b3bf85d2bc42f9ad347536431a3b2e87e8b727d45d6",
+        "homes/codex/.agentihooks/state.json": "61783f4c47140c25cef4570736f8351a8d4e290ee73f79ef1cfa38753d1f05a9",
+        "homes/codex/.agentihooks/state.json.bak": "ec1dc4dd67bd9286e5deba4b942cf7f0dd79d4ecae9844299cc9c05e76ff7a59",
         "homes/codex/.codex/.agentihooks-managed.json": "c6d2a8d072bcc165e8b7efffc798ae1d2d6f4f4cc6e06b0eded80df83b533c46",
         "homes/codex/.codex/AGENTS.md": "7e8937537d87b13444539dc8b59a71971e8df2052724f4e492961f2534c057f7",
         "homes/codex/.codex/agentihooks-hook.sh": "1b878739a5eeb26f3732c2f8789b1a326235eab91d163e0eeb2606bc206d9249",
         "homes/codex/.codex/config.toml": "76d67a006f085b6ee91b60f9f41c26836606cbfd4aa6c380f9ec8fd4f2088128",
-        "homes/codex/.codex/hooks.json": "9c9fe9a67a93cb2d3428c1769cfd8d019915c55586ce7935b2574aeeec8523f7"
+        "homes/codex/.codex/hooks.json": "98e2c228cd8d0ee0b90ce2569f702a8e1b92b514dcce096cfc745d8155760eef"
       }
     },
     "existing_archive_preserved": true,
@@ -284,7 +284,7 @@
     "externally_verified": "production rollout and merge not run"
   },
   "integration_gate": "G2",
-  "implementation_status": "locally qualified; dependency closure and CI pending",
+  "implementation_status": "qualified on accepted dev; pull request CI pending",
   "interfaces": [
     "Launch.load attempt and launch specification",
     "Supervisor.run headless herdr and exporter readiness",
@@ -296,11 +296,11 @@
     "issue_url": "https://github.com/the-cloud-clockwork/agentihooks/issues/2046",
     "branch_url": "https://github.com/the-cloud-clockwork/agentihooks/tree/engineer-323133-0786",
     "pull_request_url": null,
-    "tested_commit": "ae6687d588e4c34cd9964c1aa1da11b1262e70c1",
-    "proof_commit": "7f12be4bcedd54d58841bbeff7cb71e08183269b"
+    "tested_commit": "26b904d9da9add638ab0a9e7fda355068c579cd7",
+    "proof_commit": "26b904d9da9add638ab0a9e7fda355068c579cd7"
   },
   "checks": {
-    "focused_pytest": "69 passed in 12.41 seconds",
+    "focused_pytest": "69 passed in 12.54 seconds after accepted dev merge, before the operator prohibited local tests",
     "lint": "passed",
     "format": "passed",
     "complexity": "passed",

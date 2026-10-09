@@ -1,7 +1,7 @@
 {
   "package": "SV2-IMG-03",
-  "tested_commit": "ae6687d588e4c34cd9964c1aa1da11b1262e70c1",
-  "proof_commit": "7f12be4bcedd54d58841bbeff7cb71e08183269b",
+  "tested_commit": "26b904d9da9add638ab0a9e7fda355068c579cd7",
+  "proof_commit": "26b904d9da9add638ab0a9e7fda355068c579cd7",
   "supported_versions": {
     "debian_packages": [
       "adduser=3.134",
@@ -230,7 +230,7 @@
       "mode": "complete",
       "kill": false,
       "exit_code": 0,
-      "elapsed_shutdown_seconds": 0.574,
+      "elapsed_shutdown_seconds": 0.644,
       "shutdown_bound_seconds": 6.8,
       "container_process_tree_gone": true,
       "viewer_detached": true,
@@ -267,7 +267,7 @@
             },
             "compatible": true,
             "endpoint_compatible": true,
-            "socket": "/home/worker/attempts/exe-0ba3a64b631e41bc9e4431f3045a8f85/homes/codex/.config/herdr/herdr.sock",
+            "socket": "/home/worker/attempts/exe-d439d33a16624db6a3695733a72d161b/homes/codex/.config/herdr/herdr.sock",
             "session": null,
             "restart_needed": false,
             "server_binary_stale": false
@@ -280,14 +280,14 @@
       },
       "result": {
         "authority": {
-          "execution_id": "exe-0ba3a64b631e41bc9e4431f3045a8f85",
+          "execution_id": "exe-d439d33a16624db6a3695733a72d161b",
           "generation": 1,
-          "grant_id": "lgr-24b0a934d5ba48a8930ab01a9cc39d1e",
+          "grant_id": "lgr-d0f3cf7392e244239ca7c0b8740070df",
           "seat_id": "eng-1",
           "swarm_id": "fixture",
           "task_id": "fixture"
         },
-        "checkpoint_id": "bb3bd3bf2cbc47f68f93b798f487d07c",
+        "checkpoint_id": "9b3803cb6e2a469296e091a09b453326",
         "checkpoint_status": "complete",
         "child_exits": {
           "agent": -15,
@@ -296,8 +296,8 @@
         },
         "failure_class": null,
         "failure_stage": null,
-        "incarnation": "bb3bd3bf2cbc47f68f93b798f487d07c",
-        "process_namespace": "pid:[4026532904]",
+        "incarnation": "9b3803cb6e2a469296e091a09b453326",
+        "process_namespace": "pid:[4026532839]",
         "quiescence": "clean",
         "reason": "termination",
         "signal": 15,
@@ -309,7 +309,7 @@
       "mode": "complete",
       "kill": false,
       "exit_code": 0,
-      "elapsed_shutdown_seconds": 0.55,
+      "elapsed_shutdown_seconds": 0.616,
       "shutdown_bound_seconds": 6.8,
       "container_process_tree_gone": true,
       "viewer_detached": true,
@@ -346,7 +346,7 @@
             },
             "compatible": true,
             "endpoint_compatible": true,
-            "socket": "/home/worker/attempts/exe-10c0492416de4941bd2a0b4d8600028c/homes/codex/.config/herdr/herdr.sock",
+            "socket": "/home/worker/attempts/exe-50c86322622e4b9cb486d61c65cd4983/homes/codex/.config/herdr/herdr.sock",
             "session": null,
             "restart_needed": false,
             "server_binary_stale": false
@@ -359,14 +359,14 @@
       },
       "result": {
         "authority": {
-          "execution_id": "exe-10c0492416de4941bd2a0b4d8600028c",
+          "execution_id": "exe-50c86322622e4b9cb486d61c65cd4983",
           "generation": 1,
-          "grant_id": "lgr-5e0062307bdf46069e351a91f8655eec",
+          "grant_id": "lgr-50169bcc204a409eaab6087f480aa361",
           "seat_id": "eng-1",
           "swarm_id": "fixture",
           "task_id": "fixture"
         },
-        "checkpoint_id": "ea2bf4c5f5404574a46f9b3a24fee87a",
+        "checkpoint_id": "dde908acab1c4d43a6d41693a02b18d0",
         "checkpoint_status": "complete",
         "child_exits": {
           "agent": -15,
@@ -375,8 +375,8 @@
         },
         "failure_class": null,
         "failure_stage": null,
-        "incarnation": "ea2bf4c5f5404574a46f9b3a24fee87a",
-        "process_namespace": "pid:[4026532904]",
+        "incarnation": "dde908acab1c4d43a6d41693a02b18d0",
+        "process_namespace": "pid:[4026532839]",
         "quiescence": "clean",
         "reason": "termination",
         "signal": 15,

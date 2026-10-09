@@ -1,7 +1,7 @@
 {
   "package": "SV2-IMG-03",
-  "tested_commit": "ae6687d588e4c34cd9964c1aa1da11b1262e70c1",
-  "proof_commit": "7f12be4bcedd54d58841bbeff7cb71e08183269b",
+  "tested_commit": "26b904d9da9add638ab0a9e7fda355068c579cd7",
+  "proof_commit": "26b904d9da9add638ab0a9e7fda355068c579cd7",
   "supported_versions": {
     "debian_packages": [
       "adduser=3.134",
@@ -230,7 +230,7 @@
       "mode": "complete",
       "kill": true,
       "exit_code": 137,
-      "elapsed_shutdown_seconds": 0.225,
+      "elapsed_shutdown_seconds": 0.26,
       "shutdown_bound_seconds": 6.8,
       "container_process_tree_gone": true,
       "viewer_detached": false,
