@@ -7,7 +7,7 @@ import pytest
 
 from scripts.swarm import metrics_swarm
 from scripts.swarm.host_budget import HostSample
-from scripts.swarm.metrics_outbox import Outbox, Sink
+from scripts.swarm.metrics_outbox import Outbox, Settings
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
 pytestmark = pytest.mark.unit
@@ -15,6 +15,8 @@ SLUG = "scratch"
 NOW = 1_800_000_000_000
 TASK = {
     "id": "t",
+    "state": "pr",
+    "lane": "eng",
     "phase": "p",
     "plan_url": "plan",
     "plan_slice": "slice",
@@ -94,7 +96,7 @@ def test_reclaimed_task_attributes_each_claim_to_its_own_life():
 def test_gate_denies_idle_and_reruns_keep_observed_time():
     gates = [
         {"at": NOW + 1, "gate": "build", "kind": "deny", "agent": "worker", "task": "t", "reason": "outside scope"},
-        {"at": NOW + 2, "gate": "idle", "kind": "count", "agent": "worker", "task": "t", "reason": "idle tick 1"},
+        {"at": NOW + 2, "gate": "idle-ticks", "kind": "count", "agent": "worker", "task": "t", "reason": "idle tick 1"},
         {
             "at": NOW + 3,
             "gate": "reruns",
@@ -144,6 +146,7 @@ def test_host_sample_and_quota_unknown_values_are_explicit():
             {"harness": "codex", "name": "a", "state": "UNKNOWN", "five_left": None, "week_left": 30.0, "sessions": 1}
         ],
     }
+    capacity["held_spawns"] = 2
     host = metrics_swarm.host_row(SLUG, NOW, HostSample(4.0, 2, 1024, 3), capacity)
     assert {key: host[key] for key in ("available_mb", "load_per_cpu", "live_agents", "held_spawns", "reason")} == {
         "available_mb": 1024,
@@ -168,42 +171,33 @@ def test_host_sample_and_quota_unknown_values_are_explicit():
     }
 
 
-def test_classifier_calls_only_belong_to_their_recorded_ledger():
+def test_classifier_calls_are_host_scoped_with_stable_source_ids():
     call = {
         "ts": "2027-01-15T08:00:00+00:00",
-        "ledger": SLUG,
-        "task": "t",
         "purpose": "intent",
         "source": "api",
         "latency_ms": 15,
         "answers": {"ready": {"value": True}},
         "state_digest": "digest",
     }
-    rows = metrics_swarm.classifier_rows(SLUG, doc(), [call, {**call, "ledger": "another"}, {**call, "ledger": ""}])
-    assert len(rows) == 1
-    assert_node(rows[0])
+    rows = metrics_swarm.classifier_rows([call, call], "machine")
+    assert len(rows) == 2
+    assert rows[0]["event_id"] != rows[1]["event_id"]
+    assert {key: rows[0][key] for key in ("ledger", "plan", "phase", "slice", "task", "host")} == {
+        "ledger": "host:machine",
+        "plan": "",
+        "phase": "",
+        "slice": "",
+        "task": "",
+        "host": "machine",
+    }
     assert {key: rows[0][key] for key in ("definition", "backend", "latency_ms", "verdict")} == {
         "definition": "intent",
         "backend": "api",
         "latency_ms": 15,
         "verdict": '{"ready": {"value": true}}',
     }
-
-
-def test_eval_rows_compute_accuracy_from_observed_comparisons():
-    report = {
-        "id": "eval",
-        "ledger": SLUG,
-        "at": NOW,
-        "definition": "intent",
-        "backend": "api",
-        "correct": 3,
-        "total": 4,
-    }
-    rows = metrics_swarm.eval_rows(SLUG, [report, {**report, "ledger": "another"}])
-    assert [(row["definition"], row["backend"], row["correct"], row["total"], row["accuracy"]) for row in rows] == [
-        ("intent", "api", 3, 4, 0.75)
-    ]
+    assert metrics_swarm.classifier_rows([call, call], "machine") == rows
 
 
 def test_unknown_claim_duration_is_not_invented():
@@ -214,14 +208,14 @@ def test_unknown_claim_duration_is_not_invented():
 
 def test_record_pass_appends_through_outbox_and_deduplicates(tmp_path, monkeypatch):
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    store.create(SwarmConfig(SLUG, "."))
+    store.create(SwarmConfig(SLUG, ".", 0, 0))
     store.put_agent(SLUG, AgentRecord(**{key: value for key, value in AGENT.items()}))
     state = doc([event("task claimed", NOW)])
     monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
     monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
     monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda: [])
-    monkeypatch.setattr(metrics_swarm, "read_evals", lambda: [])
-    box = Outbox(tmp_path / "outbox.db", Sink("http://sink", "", ""))
+    monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug: [])
+    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
     try:
         metrics_swarm.record_pass(box, SLUG, NOW, store, state, [], {})
         metrics_swarm.record_pass(box, SLUG, NOW, store, state, [], {})
@@ -240,6 +234,38 @@ def test_review_round_uses_stored_review_event():
     state = doc([event("review round", NOW + 2_000)])
     rows = metrics_swarm.delivery_rows(SLUG, state, [AGENT], {})
     assert [(row["kind"], row["ts_ms"]) for row in rows] == [("review_round", NOW + 2_000)]
+
+
+def test_reviews_reuse_the_existing_intent_snapshot(tmp_path, monkeypatch):
+    monkeypatch.setattr(metrics_swarm.gate_log, "gates_dir", lambda slug: tmp_path)
+    assert metrics_swarm.read_review_events(SLUG) == []
+    folder = tmp_path / "intent"
+    folder.mkdir()
+    state = {
+        "reviewer_findings": {
+            "reviews": [
+                {"id": "review", "submittedAt": "2027-01-15T08:00:00+00:00"},
+                {"id": "pending", "submittedAt": None},
+            ]
+        }
+    }
+    source = {"task": "t", "agent": "worker", "classifier_input": json.dumps({"state": state})}
+    (folder / "history.jsonl").write_text(json.dumps(source) + "\n")
+    events = metrics_swarm.read_review_events(SLUG)
+    assert events == [{"kind": "review round", "target": "tasks/t", "at": NOW, "by": "worker", "review_id": "review"}]
+    rows = metrics_swarm.delivery_rows(SLUG, doc(events), [AGENT], {})
+    assert len(rows) == 1
+    assert rows[0]["kind"] == "review_round"
+
+
+def test_held_spawns_count_ready_tasks_with_room_but_without_placements(monkeypatch):
+    ready = {lane: [] for lane in metrics_swarm.capacity.LANES}
+    ready["eng"] = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
+    monkeypatch.setattr(metrics_swarm.capacity, "ready_work", lambda *args: ({}, ready))
+    quota = {"configured": {"eng": 3}, "placements": {"eng": [{"index": 0}]}}
+    assert metrics_swarm._held_spawns(None, SLUG, doc(), quota, [AGENT]) == 1
+    assert metrics_swarm._held_spawns(None, SLUG, doc(), quota, []) == 2
+    assert metrics_swarm._held_spawns(None, SLUG, doc(), {}, [AGENT]) == 0
 
 
 def test_all_generated_rows_match_the_shared_outbox_schema():

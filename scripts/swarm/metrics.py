@@ -1,7 +1,7 @@
 import os
 import sqlite3
 
-from scripts.swarm import metrics_outbox
+from scripts.swarm import metrics_outbox, metrics_swarm
 
 TICKS = metrics_outbox.Table("ticks", (("actions", "Int64"),))
 
@@ -11,7 +11,7 @@ def tick_row(slug, now_ms, actions):
     return {"event_id": f"tick:{slug}:{now_ms}", "ledger": slug, "ts_ms": now_ms, **path, "actions": actions}
 
 
-def record_pass(slug, now_ms, actions, environ=os.environ):
+def record_pass(slug, now_ms, actions, environ=os.environ, swarm=None):
     sink = metrics_outbox.settings(environ)
     if sink is None:
         return []
@@ -19,9 +19,16 @@ def record_pass(slug, now_ms, actions, environ=os.environ):
         box = metrics_outbox.Outbox(metrics_outbox.spool_path(), sink)
         try:
             box.append(TICKS, [tick_row(slug, now_ms, actions)])
+            if swarm is not None:
+                pulls = {
+                    task["pr_url"]: swarm.view(task["pr_url"])
+                    for task in swarm.doc["tasks"]
+                    if task.get("pr_url") and task["state"] in ("pr", "claimed")
+                }
+                metrics_swarm.record_pass(box, slug, now_ms, swarm.store, swarm.doc, swarm.findings, pulls)
             box.flush(now_ms)
         finally:
             box.close()
-    except (sqlite3.Error, OSError) as exc:
+    except (sqlite3.Error, OSError, ValueError) as exc:
         return [f"metrics outbox failed: {exc}"]
     return []
