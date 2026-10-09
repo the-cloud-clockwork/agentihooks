@@ -2,9 +2,10 @@ import json
 
 import pytest
 
-from tests.swarm_ledger.test_swarm_layout import Page, browser, status
+from tests.swarm_ledger.test_swarm_layout import Page, status
+from tests.swarm_ledger.test_swarm_layout import browser as chromium_browser
 
-assert browser
+browser = chromium_browser
 
 SETTINGS = {"claude-api-weight": 25, "codex-api-weight": 0, "claude-api-max-sessions": 3}
 API_ROW = {
@@ -23,12 +24,16 @@ API_ROW = {
 
 class RoutingPage(Page):
     def __init__(self, browser, payload, width, settings, refusal=None):
-        self.settings, self.refusal, self.patches = dict(settings), refusal, []
+        self.settings, self.refusal, self.patches, self.reads = settings and dict(settings), refusal, [], 0
         super().__init__(browser, payload, width)
 
     def route(self, route, html):
         request = route.request
         if request.url.endswith("/api/v1/routing/settings"):
+            if request.method == "GET":
+                self.reads += 1
+                if self.settings is None:
+                    return route.fulfill(status=500, json={"error": {"code": "storage_error", "message": "x"}})
             if request.method == "PATCH":
                 body = json.loads(request.post_data)
                 self.patches.append((body, request.headers.get("x-ledger-token"), request.headers.get("x-ledger-slug")))
@@ -51,7 +56,7 @@ def routing_page(browser):
 
     def make(settings=SETTINGS, refusal=None, width=1920):
         page = RoutingPage(browser, payload(), width, settings, refusal)
-        page.tab.locator('#swarm-quota input[data-routing="claude-api-weight"]').wait_for(timeout=3000)
+        page.tab.locator('#swarm-quota input[data-routing="claude-api-weight"]:enabled').wait_for(timeout=3000)
         pages.append(page)
         return page
 
@@ -116,6 +121,29 @@ def test_a_value_that_is_not_a_whole_number_reaches_the_server_as_text_to_be_ref
     page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('Invalid value')")
     assert [body for body, _, _ in page.patches] == [{"claude-api-weight": "lots"}]
     assert dict((key, value) for key, value, _ in inputs(page))["claude-api-weight"] == "25"
+
+
+def test_a_whole_number_beyond_exact_integers_reaches_the_server_as_text(routing_page):
+    page = routing_page(refusal="Invalid value for claude-api-max-sessions")
+    cap = page.tab.locator('#swarm-quota input[data-routing="claude-api-max-sessions"]')
+    cap.fill("90071992547409931")
+    cap.press("Enter")
+    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('Invalid value')")
+    assert [body for body, _, _ in page.patches] == [{"claude-api-max-sessions": "90071992547409931"}]
+
+
+def test_unread_settings_leave_the_inputs_disabled_and_are_not_read_again_on_every_render(browser):
+    page = RoutingPage(browser, payload(), 1920, None)
+    try:
+        page.tab.locator("#quota-refresh").click()
+        page.tab.wait_for_timeout(300)
+        assert page.tab.eval_on_selector_all(
+            "#swarm-quota input[data-routing]", "els => els.map(e => [e.value, e.disabled])"
+        ) == [["", True], ["", True]]
+        assert page.reads == 1
+        assert page.errors == []
+    finally:
+        page.context.close()
 
 
 def test_a_refused_write_names_the_reason_and_restores_the_stored_value(routing_page):

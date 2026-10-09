@@ -198,16 +198,10 @@ function routingKey(q, field) {
   return `${q.harness}-api-${field === "cap" ? "max-sessions" : "weight"}`;
 }
 
-function routingValue(q, field) {
-  if (routing) return routing[routingKey(q, field)] ?? "";
-  const value = q[field];
-  return value == null || value >= 1e6 ? "" : value;
-}
-
 function routingInput(q, field) {
   const input = h("input", { class: "sw-num", type: "text", inputmode: "numeric", "data-routing": routingKey(q, field),
-    "aria-label": `${q.harness} api ${field}`, placeholder: field === "cap" ? "none" : "0" });
-  input.value = String(routingValue(q, field));
+    "aria-label": `${q.harness} api ${field}`, placeholder: field === "cap" ? "none" : "0", disabled: !routing });
+  input.value = routing ? String(routing[routingKey(q, field)] ?? "") : "";
   return field === "weight" ? h("span", { class: "sw-field" }, input, h("span", { class: "sw-unit", text: "%" })) : input;
 }
 
@@ -228,7 +222,7 @@ function renderQuota(sw, now, force) {
 
 export async function saveRouting(input) {
   const text = input.value.trim();
-  const value = text === "" ? null : /^-?\d+$/.test(text) ? Number(text) : text;
+  const value = text === "" ? null : /^-?\d+$/.test(text) && Number.isSafeInteger(Number(text)) ? Number(text) : text;
   showNote("pending", "routing");
   try {
     const resp = await writeRouting({ [input.dataset.routing]: value });

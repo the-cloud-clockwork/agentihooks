@@ -1,5 +1,6 @@
 import os
 import time
+from collections.abc import Callable
 from types import ModuleType
 
 from scripts.routing.settings import VALIDATORS, SettingsStore
@@ -44,7 +45,7 @@ def _write(settings: SettingsStore, payload: dict) -> None:
         settings.set(key, value, "operator", now)
 
 
-def settings(handler: object, server: ModuleType, read_body) -> dict:
+def settings(handler: object, server: ModuleType, read_body: Callable[[object, ModuleType], dict]) -> dict:
     if handler.command not in ("GET", "PATCH"):
         raise APIError(405, "method_not_allowed", "Use GET or PATCH")
     current = store()
