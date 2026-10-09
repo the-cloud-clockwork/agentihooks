@@ -1,7 +1,10 @@
+from unittest.mock import patch
+
 import pytest
 
 from hooks.classifier import definitions, runner
 from hooks.classifier.questions import Score, YesNo
+from hooks.context import profile_chain
 
 from .test_definitions import definition_home as definition_home
 from .test_definitions import sample, write_definition
@@ -89,3 +92,17 @@ def test_a_loaded_key_is_kept_on_the_question_spec(definition_home):
     definition = _load(definition_home, [{"name": "a", "type": "yesno", "key": "a_{n}", "instructions": "A?"}])
     assert definition.questions[0].key == "a_{n}"
     assert _load(definition_home, [{"name": "a", "type": "yesno", "instructions": "A?"}]).questions[0].key is None
+
+
+def test_a_code_rule_override_that_changes_a_question_key_is_refused(definition_home, tmp_path):
+    raw = sample()
+    raw["rule"] = {"type": "code"}
+    raw["questions"][0]["key"] = "accept_{n}"
+    write_definition(definition_home, raw)
+    bundle = tmp_path / "bundle"
+    raw["questions"][0]["key"] = "other_{n}"
+    write_definition(bundle / ".claude" / "classifiers", raw)
+    with patch.object(profile_chain, "read_state", return_value={"bundle": {"path": str(bundle)}}):
+        with pytest.raises(definitions.DefinitionError) as error:
+            definitions.load("sample", environ={})
+    assert str(error.value) == "code rule overrides must preserve package question keys"

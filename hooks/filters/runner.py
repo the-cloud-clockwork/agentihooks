@@ -246,6 +246,6 @@ def run(entry: dict, step: str, payload: dict) -> dict:
 
 def __getattr__(name):
     if name in ("TRUE", "FALSE"):
-        question = definitions.load(PURPOSE).questions[0].question
+        question = next(spec.question for spec in definitions.load(PURPOSE).questions if spec.name == "finding")
         return question.true if name == "TRUE" else question.false
     raise AttributeError(name)

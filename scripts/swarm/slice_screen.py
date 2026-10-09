@@ -43,19 +43,20 @@ def screen(phase, doc, confidence):
         ],
     }
     try:
-        result = runner.run(PURPOSE, state, {"tasks": mine}, decider=decide).raw
+        output = runner.run(PURPOSE, state, {"tasks": mine}, decider=decide)
     except ClassifierError:
         return Screen(reason="the classifier did not answer")
+    result = output.raw
     reason = "" if result.calibrated else f"the answer came from the fallback {result.source}"
-    return Screen(tuple(flags(result.answers, mine, confidence)), reason)
+    return Screen(tuple(flags(result.answers, mine, confidence, output.definition)), reason)
 
 
-def levels(definition):
+def levels(definition: definitions.Definition) -> list[str]:
     return next(spec.question.levels for spec in definition.questions if spec.name == "size")
 
 
-def flags(answers, mine, confidence):
-    definition = definitions.load(PURPOSE)
+def flags(answers, mine, confidence, definition=None):
+    definition = definition or definitions.load(PURPOSE)
     sizes, off_intent = levels(definition), definition.thresholds["off_intent"]
     found = []
     for i, task in enumerate(mine):

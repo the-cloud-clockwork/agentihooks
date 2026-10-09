@@ -1,3 +1,4 @@
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -153,7 +154,23 @@ def test_the_trace_plan_cut_rule_reads_its_thresholds_from_the_definition(packag
 
 def test_the_size_names_come_from_the_definition_levels(packaged):
     assert slice_screen.SIZES == trace_plan.SIZES == SIZES
+    assert slice_screen.SIZES[slice_screen.ONE_PR] == "one pull request"
     assert (filter_runner.TRUE, filter_runner.FALSE) == (
         "yes, the finding goes against the intent",
         "no, the finding is fine",
     )
+
+
+@pytest.mark.parametrize("module", [slice_screen, trace_plan, filter_runner])
+def test_an_unknown_module_attribute_is_still_missing(packaged, module):
+    assert hasattr(module, "NOPE") is False
+
+
+def test_slice_flags_use_the_definition_the_screen_asked_with(packaged):
+    answers = {"size_0": Answer("score", score=1.0, confidence=0.9), "serves_0": Answer("noul", noul=0.4)}
+    asked = definitions.load("phase-slice", environ={})
+    stricter = replace(asked, thresholds={"off_intent": 0.5})
+    assert slice_screen.flags(answers, [{"id": "t1"}], 0.7, asked) == []
+    assert slice_screen.flags(answers, [{"id": "t1"}], 0.7, stricter) == [
+        "Classifier: task t1 may be off intent, serves the phase at probability 0.40."
+    ]
