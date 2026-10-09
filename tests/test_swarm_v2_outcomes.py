@@ -285,7 +285,7 @@ def test_github_provider_refuses_a_changed_head_before_guard_or_enqueue():
     url = "https://github.com/example/repo/pull/1"
     raw = {"id": "PR_one", "url": url, "headRefOid": "changed", "baseRefName": "dev", "state": "OPEN"}
     provider = GitHubIntegration("example/repo", lambda query, variables: {"resource": raw})
-    with pytest.raises(SwarmError, match="outcome_conflict"):
+    with pytest.raises(SwarmError, match="^outcome_conflict$"):
         provider.enqueue(
             PullRequest(url, "PR_one", "tested-head", "dev", "OPEN"), "operation", lambda: pytest.fail("guard")
         )
@@ -742,7 +742,8 @@ def test_changed_committed_effect_cannot_reuse_its_ledger_receipt(monkeypatch, t
     assert doc == before
 
 
-def test_completion_refuses_an_operation_of_another_kind(monkeypatch, tmp_path):
+@pytest.mark.parametrize("field,value", [("op", "task_add"), ("item", "tasks/other"), ("by", "forged")])
+def test_completion_refuses_an_operation_of_another_kind(monkeypatch, tmp_path, field, value):
     from copy import deepcopy
 
     from scripts.swarm_ledger import ledger_tasks
@@ -756,13 +757,16 @@ def test_completion_refuses_an_operation_of_another_kind(monkeypatch, tmp_path):
     ctx = core.Context(doc.pop("_meta"), 0)
     operation = {
         "id": "wrong-kind",
-        "op": "task_add",
+        "op": "task_update",
         "item": f"tasks/{proposal.task_id}",
         "by": outcomes.authority.current(proposal.task_id).holder,
         "fields": {"state": "done", "pr_url": proposal.pr_url, "proof": proposal.proof},
     }
+    operation[field] = value
     before = deepcopy(doc)
-    assert not ledger_tasks.complete_outcome(doc, operation, ctx, result, operation["by"])
+    assert not ledger_tasks.complete_outcome(
+        doc, operation, ctx, result, outcomes.authority.current(proposal.task_id).holder
+    )
     assert ctx.refused == ["outcome identity conflict"]
     assert doc == before
 
@@ -1015,3 +1019,34 @@ def test_outcome_receipt_is_dirty_even_when_done_fields_are_already_present(monk
     assert ledger_tasks.complete_outcome(doc, operation, ctx, result, actor)
     assert ctx.dirty is True
     assert ctx.meta["outcomes"][proposal.task_id]["operation_id"] == result["operation_id"]
+
+
+def test_ledger_proof_contract_refusal_is_not_committed_as_an_outcome(monkeypatch, tmp_path):
+    from copy import deepcopy
+
+    from scripts.swarm_ledger import ledger_tasks
+    from scripts.swarm_ledger.api.resources import revision
+    from tests import sv2_ctl05_cases
+    from tests.swarm_ledger.test_tasks import core
+
+    outcomes, repository, token, proposal, *_ = sv2_ctl05_cases.build(monkeypatch, tmp_path)
+    outcomes.propose(token, proposal)
+    result = outcomes.integrate(token, proposal.generation)
+    doc = repository.get_document(outcomes.authority.slug)
+    ctx = core.Context(doc.pop("_meta"), 0)
+    actor = outcomes.authority.current(proposal.task_id).holder
+    doc["tasks"][0]["kind"] = "ops"
+    result["proposal"]["task_revision"] = revision(doc["tasks"][0])
+    operation = {
+        "id": "missing-command",
+        "op": "task_update",
+        "item": f"tasks/{proposal.task_id}",
+        "by": actor,
+        "fields": {"state": "done", "pr_url": proposal.pr_url, "proof": proposal.proof},
+    }
+    before = deepcopy(doc)
+    assert not ledger_tasks.complete_outcome(doc, operation, ctx, result, actor)
+    assert ctx.refused
+    assert "outcomes" not in ctx.meta
+    assert ctx.dirty is False
+    assert doc == before
