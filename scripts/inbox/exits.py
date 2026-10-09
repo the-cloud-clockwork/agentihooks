@@ -114,7 +114,8 @@ def notice_address(inbox: "InboxStore", sender: str) -> str:
 
 def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Callable[[], dict]") -> None:
     """live_rows reads the ledger's tasks at sweep time: a task closed after the tick's own read settles as closed."""
-    active = {agent.name for agent in store.agents(slug) if agent.state != "finished"}
+    live = [agent for agent in store.agents(slug) if agent.state != "finished"]
+    active = {agent.name for agent in live}
     tasks = {row.get("claimed_by"): row for row in live_rows().values()}
     seats = store.seats.agent_seats(slug)
     gone = [(name, seat) for name, seat in seats if name not in active]
@@ -130,6 +131,9 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
             _settle_gone(inbox, name, seat, tasks.get(name, {}).get("state"), outcomes[name])
     _settle_seat_notices(inbox, {seat for _, seat in seats if seat}, active)
     _settle_peer_mail(inbox, slug, store, active)
+    if slug in store.slugs():
+        empty = {seat for _, seat in seats} - {agent.seat for agent in live}
+        _settle_unfillable(inbox, store.config(slug), empty)
 
 
 def _settle_gone(inbox: "InboxStore", name: str, seat: str, state: str | None, outcome: dict) -> None:
@@ -194,6 +198,33 @@ def _settle_peer_mail(inbox: "InboxStore", slug: str, store: "RedisStore", activ
             exit_text = f"left its seat and task {item.task}"
             if inbox.withdraw(item.id, BY, f"cancelled: {owner} {exit_text} before closing it", agent.seat, owner):
                 inbox.send(BY, notice_address(inbox, item.sender), _told(item, owner, exit_text), fyi=True)
+
+
+def _settle_unfillable(inbox: "InboxStore", config, seats: set) -> None:
+    """Mail on a seat nobody holds that can get no successor: closed, its sender told."""
+    for seat in seats:
+        why = _no_successor(seat, config)
+        if not why:
+            continue
+        for item in inbox.open_items(seat):
+            reason = f"cancelled: {seat} can get no successor: {why}"
+            if inbox.withdraw(item.id, BY, reason, seat) and item.sender != BY:
+                text = (
+                    f"{seat} can get no successor: {why}, so your message {item.id}: "
+                    f"{item.text.splitlines()[0][:200]} is closed. "
+                    "Send it to whoever carries that work on if it still matters."
+                )
+                inbox.send(BY, notice_address(inbox, item.sender), text, fyi=True)
+
+
+def _no_successor(seat: str, config) -> str:
+    caps = {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan}
+    lane, _, slot = seat.partition("@")[0].rpartition("-")
+    if lane not in caps or not slot.isdigit():
+        return ""
+    if config.state == "stopped":
+        return "the swarm stopped"
+    return f"the {lane} lane cap is {caps[lane]}" if int(slot) > caps[lane] else ""
 
 
 def _owner(inbox, item, seat):
