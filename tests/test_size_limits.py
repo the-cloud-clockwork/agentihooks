@@ -1,6 +1,5 @@
 import os
 import re
-import shlex
 import subprocess
 import tomllib
 from pathlib import Path
@@ -44,17 +43,32 @@ def test_the_grader_pins_the_ruff_the_tests_install():
     assert f"ruff=={size_limits.RUFF_VERSION}" in dev
 
 
+_INSTALL = re.compile(r"\b(?:pip3? install|pipx (?:install|run)|uv tool (?:install|run)|uvx)\b[^\n;&|]*")
+_RUFF_SPEC = re.compile(r"(?<![\w./-])['\"]?(ruff(?![\w-])[^\s'\"]*)")
+
+
+def _ruff_installs(steps: list) -> list[str]:
+    specs = []
+    for step in steps:
+        if "ruff" in (step.get("uses") or ""):
+            specs.append(step["uses"])
+        run = (step.get("run") or "").replace("\\\n", " ")
+        for command in _INSTALL.findall(run):
+            specs += _RUFF_SPEC.findall(command)
+    return specs
+
+
 def test_every_workflow_installs_the_pinned_ruff():
+    pinned = f"ruff=={size_limits.RUFF_VERSION}"
     installs = {}
-    for workflow in sorted((_ROOT / ".github/workflows").glob("*.y*ml")):
-        for name, job in (yaml.safe_load(workflow.read_text()).get("jobs") or {}).items():
-            for step in job.get("steps", []):
-                for line in step.get("run", "").splitlines():
-                    if "pip install" in line and "ruff" in line:
-                        words = shlex.split(line)
-                        installs[f"{workflow.name}:{name}"] = [w for w in words if w.startswith("ruff")]
-    assert {"test.yml:lint", "test.yml:size"} <= installs.keys()
-    assert {job: specs for job, specs in installs.items() if specs != [f"ruff=={size_limits.RUFF_VERSION}"]} == {}
+    for path in sorted((_ROOT / ".github/workflows").glob("*.y*ml")):
+        for name, job in (yaml.safe_load(path.read_text()).get("jobs") or {}).items():
+            installs[f"{path.name}:{name}"] = _ruff_installs(job.get("steps") or [])
+    for path in sorted((_ROOT / ".github/actions").glob("*/action.y*ml")):
+        installs[path.parent.name] = _ruff_installs(yaml.safe_load(path.read_text()).get("runs", {}).get("steps") or [])
+    assert installs["test.yml:lint"] == installs["test.yml:size"] == [pinned]
+    offenders = {where: specs for where, specs in installs.items() if set(specs) - {pinned}}
+    assert not offenders
 
 
 def test_a_planted_eight_parameter_function_is_red(tmp_path, capsys):
