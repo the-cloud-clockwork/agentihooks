@@ -133,6 +133,8 @@ def saved(expected_rows, page=None, timeout=5.0):
         if set(current) == set(expected_rows) and (page is None or current == (page.stored() or {})):
             return current
         time.sleep(0.05)
+    if page is not None:
+        pytest.fail(f"server layout {layout.read()} never matched the page's {page.stored()}")
     return layout.read()
 
 
@@ -207,10 +209,11 @@ def test_a_pause_mid_drag_still_leaves_the_final_split_on_the_server(visit):
     page.tab.mouse.move(x, y)
     page.tab.mouse.down()
     page.tab.mouse.move(x - 40, y)
-    page.tab.wait_for_timeout(400)
+    midpoint = saved(("swarm-row-work",), page)
     page.tab.mouse.move(x - 80, y)
     page.tab.mouse.up()
-    assert saved(("swarm-row-work",), page) == page.stored()
+    final = saved(("swarm-row-work",), page)
+    assert final != midpoint
     share = page.share("swarm-row-work")
     page.open(SLUGS[1])
     assert page.share("swarm-row-work") == pytest.approx(share, abs=0.5)
