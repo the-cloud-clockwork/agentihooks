@@ -161,9 +161,11 @@ def test_the_size_names_come_from_the_definition_levels(packaged):
     )
 
 
-@pytest.mark.parametrize("module", [slice_screen, trace_plan, filter_runner])
 def test_an_unknown_module_attribute_is_still_missing(packaged, module):
     assert hasattr(module, "NOPE") is False
+    with pytest.raises(AttributeError) as error:
+        module.NOPE
+    assert str(error.value) == "NOPE"
 
 
 def test_slice_flags_use_the_definition_the_screen_asked_with(packaged):
