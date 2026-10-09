@@ -62,7 +62,7 @@ def seen(pid: int, proc: Path) -> dict | None:
         argv = [arg.decode(errors="replace") for arg in (root / "cmdline").read_bytes().split(b"\0") if arg]
     except OSError:
         return None
-    fields = dict(line.split(":", 1) for line in status.splitlines() if ":" in line)
+    fields = {key: value for key, _, value in (line.partition(":") for line in status.splitlines())}
     try:
         return {"threads": int(fields["Threads"]), "rss_kb": int(fields.get("VmRSS", "0").split()[0]), "argv": argv}
     except (KeyError, ValueError, IndexError):
@@ -77,10 +77,7 @@ def launch(pid: int, argv: list[str], proc: Path) -> list[str] | None:
     found = script(argv)
     if found is None:
         return None
-    try:
-        path = Path(found) if Path(found).is_absolute() else (proc / str(pid) / "cwd").resolve(strict=True) / found
-    except OSError:
-        return None
+    path = Path(found) if Path(found).is_absolute() else (proc / str(pid) / "cwd").resolve() / found
     return [argv[0], str(path)] if path.is_file() else None
 
 
@@ -214,7 +211,7 @@ def watch(store, slug: str, ledger, runtime, host: Host | None = None) -> list[s
             _mail(store, slug, DOWN_TEXT.format(why=reason, error=error))
             store.redis.set(DOWN_KEY, pid, px=DOWN_MS)
         return [f"the ledger server needed a restart because {reason}, and the restart failed: {error}"]
-    store.redis.set(STARTED_KEY, ledger_host.server_pid(host.folder) or "")
+    store.redis.set(STARTED_KEY, str(ledger_host.server_pid(host.folder)))
     return (
         _runaway(store, slug, ledger, reason) if kind == RUNAWAY else _stale(store, slug, ledger, runtime, host.clock)
     )

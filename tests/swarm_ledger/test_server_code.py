@@ -47,6 +47,17 @@ def test_a_code_file_that_cannot_be_read_counts_as_no_change(tmp_path):
     code = code_tree(tmp_path)
     (code / "broken.py").symlink_to(tmp_path / "missing.py")
     assert server_code.code_stamp((code,)) == 30
+    only = tmp_path / "only"
+    only.mkdir()
+    (only / "broken.py").symlink_to(tmp_path / "missing.py")
+    assert server_code.code_stamp((only,)) == 0
+
+
+def test_a_record_without_folders_is_current_while_its_stamp_is_zero(tmp_path):
+    (tmp_path / ".server.code").write_text('{"pid": 4242, "stamp": 0}')
+    assert not server_code.stale(tmp_path, 4242)
+    (tmp_path / ".server.code").write_text('{"pid": 4242, "stamp": 5}')
+    assert server_code.stale(tmp_path, 4242)
 
 
 def test_only_the_server_s_own_record_counts_as_recorded(tmp_path):

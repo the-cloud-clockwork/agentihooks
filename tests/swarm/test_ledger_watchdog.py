@@ -57,8 +57,8 @@ class Host(ledger_watchdog.Host):
         if not (self.proc / str(pid)).exists():
             raise ProcessLookupError
         if sig == signal.SIGKILL or not self.survives:
-            for name in ("status", "cmdline", "stat"):
-                (self.proc / str(pid) / name).unlink()
+            for entry in (self.proc / str(pid)).iterdir():
+                entry.unlink()
             (self.proc / str(pid)).rmdir()
 
     def sleep(self, seconds):
@@ -66,6 +66,7 @@ class Host(ledger_watchdog.Host):
         self.now += seconds
 
     def run(self, argv, **kw):
+        assert kw["capture_output"] is True
         self.calls.append(("run", argv, kw["env"]["LEDGER_DIR"], kw["timeout"], kw["check"], kw["text"]))
         (self.folder / ".server.pid").write_text("5151")
         return subprocess.CompletedProcess(argv, self.code, stdout="", stderr=self.stderr)
@@ -100,6 +101,18 @@ def test_the_server_threads_memory_and_command_come_from_proc(tmp_path):
         assert ledger_watchdog.seen(PID, tmp_path) is None
     (tmp_path / str(PID) / "status").write_text("Threads:\t9\n")
     assert ledger_watchdog.seen(PID, tmp_path) == {"threads": 9, "rss_kb": 0, "argv": argv}
+
+
+def test_a_command_line_that_is_not_utf8_is_read_with_replacement_characters(tmp_path):
+    plant(tmp_path, [PYTHON])
+    (tmp_path / str(PID) / "cmdline").write_bytes(b"/venv/bin/python3\0/repo/\xffledger_server.py\0")
+    assert ledger_watchdog.seen(PID, tmp_path)["argv"] == [PYTHON, "/repo/�ledger_server.py"]
+
+
+def test_a_status_value_holding_a_colon_still_reads(tmp_path):
+    plant(tmp_path, [PYTHON])
+    (tmp_path / str(PID) / "status").write_text("Name:\tledger:server\nThreads:\t12\nVmRSS:\t 400 kB\n")
+    assert ledger_watchdog.seen(PID, tmp_path) == {"threads": 12, "rss_kb": 400, "argv": [PYTHON]}
 
 
 def test_only_a_ledger_server_process_has_a_server_script():
@@ -288,6 +301,31 @@ def test_a_stale_server_is_restarted_and_three_fast_writes_alert_nobody(store, t
     assert host.calls[0] == ("kill", PID, signal.SIGTERM)
     assert len(ledger.writes) == 3 and master_mail(store) == [] and ledger.notes == []
     assert store.redis.get(ledger_watchdog.STARTED_KEY) == "5151"
+
+
+def test_a_server_started_with_a_relative_script_is_restarted_from_its_own_folder(store, tmp_path):
+    host = Host(tmp_path)
+    relative = [PYTHON, "scripts/swarm_ledger/ledger_server.py", "--serve"]
+    plant(host.proc, relative)
+    (host.proc / str(PID) / "cwd").symlink_to(tmp_path / "repo")
+    (host.folder / ".server.pid").write_text(str(PID))
+    assert ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host) != []
+    assert host.calls[-1][1] == [PYTHON, host.argv[1], "--ensure"]
+
+
+def test_the_writes_after_a_stale_restart_carry_this_swarm_s_inputs(store, tmp_path, monkeypatch):
+    host = Host(tmp_path)
+    plant(host.proc, host.argv)
+    (host.folder / ".server.pid").write_text(str(PID))
+    runtime, asked = FakeRuntime(), []
+    monkeypatch.setattr(
+        ledger_watchdog.time_left,
+        "inputs_of",
+        lambda s, slug, r: asked.append((s, slug, r)) or {"slots": 7, "ci_minutes": 3.0},
+    )
+    ledger = ProbedLedger(Clock())
+    ledger_watchdog.watch(store, "sw", ledger, runtime, host)
+    assert asked == [(store, "sw", runtime)] and ledger.writes == [(7, 3.0)] * 3
 
 
 def test_a_slow_write_after_a_stale_restart_alerts_the_master(store, tmp_path):
