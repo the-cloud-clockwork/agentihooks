@@ -1,0 +1,11 @@
+{
+  "package": "SV2-IMG-01",
+  "fixture": "aa72c593116e425da92221ae984a36fc",
+  "tested_commit": "5325b183b44f40dbd8824a36559aa3a426de5602",
+  "mocked": false,
+  "startup_network": "none",
+  "lock_sha256": "03586596a000bf36f9f6e0592c12e88ffa60c09c251bfb60afcef8e19c8451f7",
+  "uncached_rebuild_inventory_equal": true,
+  "retained_previous_image_started": true,
+  "worker_image_build_validation_failures": 0
+}
