@@ -712,7 +712,7 @@ def test_credential_parameters_have_readable_timing_identifiers():
 def test_mutation_job_runs_independently_and_keeps_its_evidence():
     spec = _mutation_workflow()
     job = spec["jobs"]["mutation"]
-    assert job["needs"] == "mutation-plan"
+    assert job["needs"] == ["mutation-plan", "mutation-stats"]
     assert job["timeout-minutes"] == 20
     steps = job["steps"]
     checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout"))
@@ -721,7 +721,9 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
     run = next(step for step in steps if step.get("name") == "Mutate changed Python files")
     assert run["env"]["BASE"] == "${{ github.event.pull_request.base.sha }}"
     assert (
-        run["run"] == 'python -m scripts.ci_mutation --base "$BASE" --budget 1080 --shard "$SHARD" --shards "$SHARDS"'
+        run["run"]
+        == 'python -m scripts.ci_mutation --base "$BASE" --budget 1080 --shard "$SHARD" --shards "$SHARDS"'
+        + " --stats .mutation-stats"
     )
     artifact = next(step for step in steps if step.get("uses", "").startswith("actions/upload-artifact"))
     assert artifact["if"] == "always()"
@@ -748,4 +750,43 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
         run = next(step for step in mutation["steps"] if step.get("name") == name)
         assert run["env"]["SHARD"] == "${{ matrix.shard }}"
         assert run["env"]["SHARDS"] == "${{ strategy.job-total }}"
-        assert run["run"].endswith('--budget 1080 --shard "$SHARD" --shards "$SHARDS"')
+        assert run["run"].endswith('--budget 1080 --shard "$SHARD" --shards "$SHARDS" --stats .mutation-stats')
+
+
+def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
+    jobs = _mutation_workflow()["jobs"]
+    plan, stats, mutation = jobs["mutation-plan"], jobs["mutation-stats"], jobs["mutation"]
+    assert plan["outputs"]["stats_parts"] == "${{ steps.plan.outputs.stats_parts }}"
+    assert stats["needs"] == "mutation-plan"
+    assert stats["if"] == mutation["if"]
+    assert stats["strategy"] == {
+        "fail-fast": False,
+        "matrix": {"part": "${{ fromJSON(needs.mutation-plan.outputs.stats_parts) }}"},
+    }
+    setup = [step for step in mutation["steps"] if not str(step.get("name", "")).startswith(("Mutate", "Upload"))]
+    setup = [step for step in setup if step.get("name") != "Download the shared mutation stats"]
+    assert stats["steps"][: len(setup)] == setup
+    collect = stats["steps"][len(setup)]
+    assert collect["env"]["BASE"] == "${{ github.event.pull_request.base.sha || inputs.base }}"
+    assert collect["env"]["PART"] == "${{ matrix.part }}"
+    assert collect["env"]["PARTS"] == "${{ strategy.job-total }}"
+    assert collect["run"] == (
+        'mkdir -p .mutation-stats && touch ".mutation-stats/collected-$PART" && python -m scripts.ci_mutation'
+        ' --base "$BASE" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"'
+    )
+    upload = stats["steps"][len(setup) + 1]
+    assert upload["uses"] == "actions/upload-artifact@v4"
+    assert upload["with"]["name"] == "mutation-stats-${{ matrix.part }}"
+    assert upload["with"]["path"] == ".mutation-stats/"
+    assert upload["with"]["include-hidden-files"] is True
+    assert upload["with"]["if-no-files-found"] == "error"
+    assert upload["with"]["overwrite"] is True
+    evidence = stats["steps"][len(setup) + 2]
+    assert evidence["if"] == "failure()"
+    assert evidence["with"]["name"] == "mutation-evidence-stats-${{ matrix.part }}"
+    assert evidence["with"]["overwrite"] is True
+    names = [step.get("name") for step in mutation["steps"]]
+    download = mutation["steps"][names.index("Download the shared mutation stats")]
+    assert names.index("Download the shared mutation stats") < names.index("Mutate changed Python files")
+    assert download["uses"] == "actions/download-artifact@v4"
+    assert download["with"] == {"pattern": "mutation-stats-*", "path": ".mutation-stats", "merge-multiple": True}

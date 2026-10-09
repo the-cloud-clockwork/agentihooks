@@ -987,7 +987,7 @@ jobs:
 
   # Reports only: it fails when it cannot read the run, never because a stage ran slow.
   stage-budget:
-    needs: [durations, split, unit, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load]
+    needs: [durations, split, unit, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 3
@@ -1018,7 +1018,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [durations, split, unit, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget]
+    needs: [durations, split, unit, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1030,7 +1030,7 @@ jobs:
           KIND: ${{ needs.kind-due.outputs.due }}
         run: |
           echo "$NEEDS"
-          if ! jq -e --arg mutation "$MUTATION" --arg kind "${KIND:-}" 'all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan") and .value.result == "skipped" and $mutation == "false") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false"))' <<< "$NEEDS"; then
+          if ! jq -e --arg mutation "$MUTATION" --arg kind "${KIND:-}" 'all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false"))' <<< "$NEEDS"; then
             echo "::error::Every required gate must succeed."
             exit 1
           fi
@@ -1270,6 +1270,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       shards: ${{ steps.plan.outputs.shards }}
+      stats_parts: ${{ steps.plan.outputs.stats_parts }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1295,8 +1296,84 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha || inputs.base }}
         run: python -m scripts.ci_mutation.plan --base "$BASE"
 
-  mutation:
+  mutation-stats:
     needs: mutation-plan
+    if: ${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        part: ${{ fromJSON(needs.mutation-plan.outputs.stats_parts) }}
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+
+      - name: Install dependencies
+        run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Select mutation tests before browser setup
+        id: selection
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || inputs.base }}
+        run: python -m scripts.ci_mutation.browser --base "$BASE"
+
+      - name: Install the browser that page tests drive
+        id: browser
+        if: steps.selection.outputs.browser == 'true'
+        timeout-minutes: 2
+        uses: ./.github/actions/browser-cache
+
+      - name: Report browser setup failure
+        if: failure() && steps.browser.outcome == 'failure'
+        run: |
+          echo "::error::Chromium setup failed or exceeded its two minute timeout; mutation tests cannot run."
+          exit 1
+
+      - name: Collect one stats part for every mutation shard
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || inputs.base }}
+          PYTHONUNBUFFERED: "1"
+          PART: ${{ matrix.part }}
+          PARTS: ${{ strategy.job-total }}
+        run: mkdir -p .mutation-stats && touch ".mutation-stats/collected-$PART" && python -m scripts.ci_mutation --base "$BASE" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"
+
+      - name: Upload mutation stats part
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-stats-${{ matrix.part }}
+          path: .mutation-stats/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+      - name: Upload stats evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-evidence-stats-${{ matrix.part }}
+          path: .mutation-gate/
+          include-hidden-files: true
+          retention-days: 7
+          overwrite: true
+
+  mutation:
+    needs: [mutation-plan, mutation-stats]
     if: ${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1343,6 +1420,13 @@ jobs:
           echo "::error::Chromium setup failed or exceeded its two minute timeout; mutation tests cannot run."
           exit 1
 
+      - name: Download the shared mutation stats
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mutation-stats-*
+          path: .mutation-stats
+          merge-multiple: true
+
       - name: Mutate changed Python files
         if: github.event_name == 'pull_request'
         env:
@@ -1350,7 +1434,7 @@ jobs:
           PYTHONUNBUFFERED: "1"
           SHARD: ${{ matrix.shard }}
           SHARDS: ${{ strategy.job-total }}
-        run: python -m scripts.ci_mutation --base "$BASE" --budget 1080 --shard "$SHARD" --shards "$SHARDS"
+        run: python -m scripts.ci_mutation --base "$BASE" --budget 1080 --shard "$SHARD" --shards "$SHARDS" --stats .mutation-stats
 
       - name: Mutate dispatched Python files
         if: github.event_name == 'workflow_dispatch'
@@ -1359,7 +1443,7 @@ jobs:
           PYTHONUNBUFFERED: "1"
           SHARD: ${{ matrix.shard }}
           SHARDS: ${{ strategy.job-total }}
-        run: python -m scripts.ci_mutation --base "$BASE" --budget 1080 --shard "$SHARD" --shards "$SHARDS"
+        run: python -m scripts.ci_mutation --base "$BASE" --budget 1080 --shard "$SHARD" --shards "$SHARDS" --stats .mutation-stats
 
       - name: Upload complete mutation evidence
         if: always()
