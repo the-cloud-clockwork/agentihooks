@@ -82,6 +82,27 @@ def _headings(entries: list[tuple[int, int, str]], phase: dict) -> list[tuple[in
     return [(n, level) for n, level, title in entries if level and title.casefold() == phase["title"].casefold()]
 
 
+def require_markers(text: str, ranges: dict[str, str]) -> None:
+    entries = sections(text)
+    missing = []
+    for lines in ranges.values():
+        start, end = bounds(lines)
+        inside = [(depth, line) for n, depth, line in entries if start <= n <= end and (depth or line.strip())]
+        levels = [depth for depth, _ in inside if depth]
+        if not levels:
+            continue
+        previous = ""
+        for depth, line in inside:
+            if depth == min(levels) + 1 and not ANCHOR.fullmatch(previous):
+                missing.append(line)
+            previous = line
+    if missing:
+        raise ValueError(
+            "plan task sections need a slice marker on the line before each heading, written as "
+            f"<!-- slice: name --> on its own line: {', '.join(missing)}"
+        )
+
+
 def slice_lines(text: str, name: str, phase_range: str) -> str:
     if not name:
         raise ValueError(f"slice anchor {name} is missing or repeated in its phase")
