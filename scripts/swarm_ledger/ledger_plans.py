@@ -136,14 +136,18 @@ def with_slice(doc: dict, fields: dict) -> dict:
     phase = next((p for p in doc.get("phases", []) if p.get("id") == fields.get("phase")), {})
     if "slice" in fields or not fields.get("plan_slice") or not phase.get("plan"):
         return fields
-    slice_id = f"{phase['plan'].split('/')[1]}.{fields['plan_slice']}"
-    if not any(row.get("id") == slice_id for row in doc.get("slices", [])):
+    named = slice_id(phase["plan"].split("/")[1], fields["plan_slice"])
+    if not any(row.get("id") == named for row in doc.get("slices", [])):
         return fields
-    return {**fields, "slice": f"slices/{slice_id}"}
+    return {**fields, "slice": f"slices/{named}"}
 
 
 def plan_id(file_id: str) -> str:
     return f"plan-{file_id[:12]}"
+
+
+def slice_id(plan: str, anchor: str) -> str:
+    return f"{plan}.{anchor}"
 
 
 def apply(doc: dict, op: dict, ctx) -> bool:
@@ -174,7 +178,7 @@ def add_slice(doc: dict, op: dict, ctx) -> str:
         return f"phase {phase['id']} has no plan: link it to a plan before adding a slice"
     plan = find(doc, phase["plan"])
     slices = doc.setdefault("slices", [])
-    row = {"id": f"{plan['id']}.{op['anchor']}", "phase": op["phase"], "anchor": op["anchor"]}
+    row = {"id": slice_id(plan["id"], op["anchor"]), "phase": op["phase"], "anchor": op["anchor"]}
     if existing := next((item for item in slices if item["id"] == row["id"]), None):
         return "" if existing["phase"] == row["phase"] else f"slice {row['id']} already belongs to {existing['phase']}"
     try:

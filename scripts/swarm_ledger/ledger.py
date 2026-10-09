@@ -435,8 +435,11 @@ def cmd_publish_plan(args):
         sys.exit(str(exc))
     ops = [op("plan_add", args, plan=stored["plan"], title=title, artifact=stored["url"], url=url)]
     for phase in phases:
-        fields = {"plan_url": url, "plan_ref": {"artifact": stored["url"], "lines": ranges[phase]}}
-        fields["plan"] = f"plans/{stored['plan']}"
+        fields = {
+            "plan_url": url,
+            "plan_ref": {"artifact": stored["url"], "lines": ranges[phase]},
+            "plan": f"plans/{stored['plan']}",
+        }
         ops.append(op("phase_update", args, item=f"phases/{phase}", fields=fields))
         note = (
             f"Plan published as a GitHub issue: {url}" if where == "issue" else f"Plan published on the ledger: {url}"
@@ -452,7 +455,7 @@ def cmd_publish_plan(args):
         )
         ops += [
             op("slice_add", args, phase=f"phases/{phase}", anchor=anchor)
-            for anchor in plan_ranges.marked(text, ranges[phase])
+            for anchor in plan_ranges.slice_anchors(text, ranges[phase])
         ]
     refused(call(args.slug, ops), ops)
     print(json.dumps({"plan_url": url, "published_to": where, "phases": phases}))
