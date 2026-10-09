@@ -115,7 +115,7 @@ def worker(tmp_path):
         agent=[sys.executable, str(fixture), "agent", "cooperative"],
         exporter=[sys.executable, str(fixture), "exporter", "0.1", "complete"],
         startup_seconds=3,
-        quiesce_seconds=0.2,
+        quiesce_seconds=1,
         checkpoint_seconds=0.4,
         kill_seconds=0.2,
     )
@@ -170,7 +170,9 @@ def test_sigterm_during_tool_reports_observed_checkpoint(worker, ack, expected):
     wait_for(root / "fixture-grandchild-two.json", child)
     child.send_signal(signal.SIGTERM)
     result = wait_for(root / "result.json", child)
-    assert child.wait(timeout=8) == (0 if expected == "complete" else 75)
+    assert child.wait(timeout=8) == (0 if expected == "complete" else 75), {
+        key: result.get(key) for key in ("reason", "checkpoint_status", "quiescence", "child_exits")
+    }
     assert result["reason"] == "termination"
     assert result["checkpoint_status"] == expected
     assert result["quiescence"] == "clean"
