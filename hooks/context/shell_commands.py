@@ -86,24 +86,22 @@ def _expand(tokens: list[str], depth: int) -> list[list[str]]:
 
 
 def _heredoc_marker(line: str, quote: str | None) -> tuple[int | None, str | None]:
-    index, escaped = 0, 0
-    while index < len(line):
-        character = line[index]
-        if character == "\\" and quote != "'":
-            index, escaped = index + 2, index + 2
-            continue
-        if quote is None and line.startswith("<<", index):
+    skip, escaped = False, 0
+    for index, character in enumerate(line):
+        if skip:
+            skip = False
+        elif character == "\\" and quote != "'":
+            skip, escaped = True, index + 2
+        elif quote is None and line.startswith("<<", index):
             return index, None
-        if quote is None and character == "#" and (index == 0 or (line[index - 1].isspace() and index != escaped)):
+        elif quote is None and character == "#" and (index == 0 or (line[index - 1].isspace() and index != escaped)):
             return index, None
-        if quote is None and line.startswith("$'", index):
-            quote, index = "$'", index + 2
-            continue
-        if quote and character == quote[-1]:
+        elif quote is None and line.startswith("$'", index):
+            skip, quote = True, "$'"
+        elif quote and character == quote[-1]:
             quote = None
         elif quote is None and character in {"'", '"'}:
             quote = character
-        index += 1
     return None, quote
 
 

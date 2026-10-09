@@ -214,6 +214,7 @@ def test_non_test_commands_pass(command, monkeypatch):
         "python3 -c'print(1)  # pytest'",
         "cat 'a\\' <<EOF\npytest\nEOF",
         "cat \\\\'x' <<EOF\npytest\nEOF",
+        "cat $'a' <<EOF\npytest\nEOF",
         "python3 -c \"'" + "\\\\" * 80 + '"',
         "echo \"don't\" # it's\ncat <<EOF\npytest\nEOF",
         "grep -n '^<<<<<<< \\|^=======\\|^>>>>>>> ' .github/workflows/test.yml",
