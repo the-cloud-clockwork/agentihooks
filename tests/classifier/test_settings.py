@@ -11,7 +11,7 @@ def _env(monkeypatch):
 
 def test_defaults():
     assert load() == Settings(
-        url="", models=("pplx-decider-v1-27b", "liquid-d1", "jev-1.13"), timeout_s=5.0, down_ttl_s=120.0
+        url="", models=("liquid-d1", "jev-1.13", "pplx-decider-v1-27b"), timeout_s=5.0, down_ttl_s=120.0
     )
 
 
@@ -27,7 +27,7 @@ def test_overrides(monkeypatch):
 
 def test_blank_model_list_keeps_the_default_order(monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_MODELS", " , ")
-    assert load().models == ("pplx-decider-v1-27b", "liquid-d1", "jev-1.13")
+    assert load().models == ("liquid-d1", "jev-1.13", "pplx-decider-v1-27b")
 
 
 @pytest.mark.parametrize(
