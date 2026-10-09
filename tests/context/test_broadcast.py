@@ -378,6 +378,120 @@ class TestSessionRegistry:
         assert sessions["sess-a"]["status"] == "alive"
         assert sessions["sess-b"]["status"] == "alive"
 
+    def test_a_registered_session_records_its_process_namespace(self, broadcast_dir):
+        from hooks.context.broadcast import _load_sessions, register_session
+
+        sessions_file = broadcast_dir / "active-sessions.json"
+        with (
+            patch("hooks.context.broadcast._sessions_path", return_value=sessions_file),
+            patch("hooks.context.broadcast._local_namespace", return_value="boot-here/pid:[1]"),
+        ):
+            register_session("sess-a", pid=11111, cwd="/tmp", model="opus")
+            sessions = _load_sessions()
+
+        assert sessions["sess-a"]["process_namespace"] == "boot-here/pid:[1]"
+
+    def test_the_local_namespace_comes_from_the_process_identity_module(self):
+        from hooks.context.broadcast import _local_namespace
+
+        with patch("scripts.swarm_v2.runtime.process.local_namespace", return_value="boot/pid:[9]"):
+            assert _local_namespace() == "boot/pid:[9]"
+
+    @pytest.mark.parametrize(
+        ("info", "namespace", "foreign"),
+        [
+            ({"process_namespace": "there"}, "here", True),
+            ({"process_namespace": "here"}, "here", False),
+            ({}, "here", False),
+            ({"process_namespace": None}, "here", False),
+            ({"process_namespace": "there"}, "", False),
+        ],
+    )
+    def test_only_a_record_from_another_known_namespace_is_foreign(self, info, namespace, foreign):
+        from hooks.context.broadcast import foreign_session
+
+        assert foreign_session(info, namespace) is foreign
+
+    def _sessions_at(self, sessions_file, ages):
+        from datetime import datetime, timedelta, timezone
+
+        from hooks.context.broadcast import _save_sessions
+
+        now = datetime.now(timezone.utc)
+        records = {}
+        for sid, (namespace, status, age) in ages.items():
+            record = {"status": status, "pid": 2**22 + 7, "process_namespace": namespace}
+            if age is not None:
+                record["last_seen"] = (now - timedelta(seconds=age)).isoformat()
+            records[sid] = record
+        with patch("hooks.context.broadcast._sessions_path", return_value=sessions_file):
+            _save_sessions(records)
+
+    def test_heartbeat_never_judges_a_foreign_pid_and_suspects_only_silent_foreign_records(self, broadcast_dir):
+        from hooks.context.broadcast import _load_sessions, heartbeat_sessions
+
+        sessions_file = broadcast_dir / "active-sessions.json"
+        self._sessions_at(
+            sessions_file,
+            {
+                "local": ("here", "alive", 10),
+                "remote-fresh": ("there", "alive", 290),
+                "remote-silent": ("there", "alive", 310),
+                "remote-handed-off": ("there", "handed_off", 310),
+                "remote-closed": ("there", "closed", 310),
+                "remote-old": ("there", "alive", 90000),
+                "remote-unstamped": ("there", "alive", None),
+            },
+        )
+        with (
+            patch("hooks.context.broadcast._sessions_path", return_value=sessions_file),
+            patch("hooks.context.broadcast._local_namespace", return_value="here"),
+        ):
+            summary = heartbeat_sessions()
+            sessions = _load_sessions()
+
+        assert summary == {"alive": 0, "flipped_dead": 1, "pruned": 0, "suspect": 3, "total": 7}
+        assert {sid: info["status"] for sid, info in sessions.items()} == {
+            "local": "dead",
+            "remote-fresh": "alive",
+            "remote-silent": "suspect",
+            "remote-handed-off": "suspect",
+            "remote-closed": "closed",
+            "remote-old": "suspect",
+            "remote-unstamped": "alive",
+        }
+
+    def test_heartbeat_leaves_a_quiet_foreign_registry_unwritten(self, broadcast_dir):
+        from hooks.context.broadcast import heartbeat_sessions
+
+        sessions_file = broadcast_dir / "active-sessions.json"
+        self._sessions_at(sessions_file, {"remote": ("there", "alive", 10)})
+        written = sessions_file.read_text()
+        with (
+            patch("hooks.context.broadcast._sessions_path", return_value=sessions_file),
+            patch("hooks.context.broadcast._local_namespace", return_value="here"),
+            patch("hooks.context.broadcast._save_sessions") as save,
+        ):
+            assert heartbeat_sessions()["suspect"] == 0
+
+        save.assert_not_called()
+        assert sessions_file.read_text() == written
+
+    def test_cleanup_marks_only_local_missing_pids_dead(self, broadcast_dir):
+        from hooks.context.broadcast import get_active_sessions
+
+        sessions_file = broadcast_dir / "active-sessions.json"
+        self._sessions_at(sessions_file, {"local": ("here", "alive", 10), "remote": ("there", "alive", 10)})
+        with (
+            patch("hooks.context.broadcast._sessions_path", return_value=sessions_file),
+            patch("hooks.context.broadcast._local_namespace", return_value="here"),
+        ):
+            active = get_active_sessions(cleanup=True)
+            everything = get_active_sessions(include_all=True)
+
+        assert list(active) == ["remote"]
+        assert everything["local"]["status"] == "dead"
+
     def test_stale_session_cleaned(self, broadcast_dir):
         from hooks.context.broadcast import _save_sessions, get_active_sessions
 
