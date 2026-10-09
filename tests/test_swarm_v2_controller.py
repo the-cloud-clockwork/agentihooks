@@ -99,7 +99,7 @@ def test_paused_former_leader_and_delayed_renewal_cannot_mutate(fixture):
     store, (first, second), transport, clock, _ = fixture
     assert first.acquire()
     attempt = first.admit(agent(store))
-    clock[0] += lease.TTL_MS
+    clock[0] += lease.ttl_ms()
     assert second.acquire()
     before = store.redis.hgetall(store.key("fixture", "runtime-operations"))
     assert not first.renew()
@@ -120,7 +120,7 @@ def test_replacement_reconciles_confirmed_effect_before_admission(fixture):
     transport.lose_ack = True
     interrupted = first.execute(request(attempt))
     assert interrupted.phase is Phase.UNKNOWN
-    clock[0] += lease.TTL_MS
+    clock[0] += lease.ttl_ms()
     assert second.acquire()
     assert store.operation_journal.get("fixture", interrupted.operation_id).phase is Phase.APPLIED
     replay = second.execute(request(attempt))
@@ -232,7 +232,7 @@ def test_takeover_during_journal_transaction_refuses_stale_write(fixture, monkey
         def interrupted():
             if once[0]:
                 once[0] = False
-                clock[0] += lease.TTL_MS
+                clock[0] += lease.ttl_ms()
                 assert second.acquire()
             return execute()
 
@@ -257,7 +257,7 @@ def test_takeover_after_observation_prevents_external_apply(fixture, monkeypatch
         result = observe(operation)
         if once[0]:
             once[0] = False
-            clock[0] += lease.TTL_MS
+            clock[0] += lease.ttl_ms()
             assert second.acquire()
         return result
 
@@ -287,7 +287,7 @@ def test_direct_registry_rejects_stale_epoch(fixture):
     store, (first, second), _, clock, _ = fixture
     assert first.acquire()
     candidate = agent(store)
-    clock[0] += lease.TTL_MS
+    clock[0] += lease.ttl_ms()
     assert second.acquire()
     with lease.fencing(first.held.epoch), pytest.raises(SwarmError) as refused:
         execution.ExecutionRegistry(store).start("fixture", candidate, "")
@@ -312,7 +312,7 @@ def test_direct_registry_conflict_at_commit_leaves_only_current_authority(fixtur
             if once[0]:
                 once[0] = False
                 if conflict == "leadership":
-                    clock[0] += lease.TTL_MS
+                    clock[0] += lease.ttl_ms()
                     assert second.acquire()
                 else:
                     execution.ExecutionRegistry(store).start("fixture", successor, "")

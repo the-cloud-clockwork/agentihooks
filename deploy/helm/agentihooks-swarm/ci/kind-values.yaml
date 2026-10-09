@@ -9,3 +9,5 @@ controller:
     timeoutSeconds: 5
     failureThreshold: 2
   terminationGracePeriodSeconds: 1
+  env:
+    AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "10"
