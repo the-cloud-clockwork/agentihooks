@@ -261,3 +261,22 @@ def test_an_attempt_without_a_readable_start_cannot_pass(preflight, stamp):
     preflight.run["run_started_at"] = stamp
     held = {**waits.on("mutation", URL), "head": "first"}
     assert "complete mutation report unavailable" in waits.resolution(held, {}, None, None, None, False)
+
+
+def test_utf8_json_is_parsed_without_process_locale_decoding(preflight, monkeypatch):
+    preflight.run["display_title"] = "café"
+    original = subprocess.run
+
+    def api(args, **kwargs):
+        if "/actions/runs/123" in args[-1] and "artifacts" not in args[-1]:
+            output = json.dumps(preflight.run, ensure_ascii=False).encode()
+            if kwargs.get("text"):
+                output = output.decode("ascii")
+            return subprocess.CompletedProcess(args, 0, output)
+        return original(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", api)
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == (
+        f"mutation preflight {URL}, now green; no failing mutants"
+    )

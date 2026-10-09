@@ -12,7 +12,7 @@ WORKFLOW = ".github/workflows/mutation-preflight.yml"
 
 
 def _api(endpoint, binary=False):
-    done = subprocess.run(["gh", "api", endpoint], capture_output=True, text=not binary, timeout=20)
+    done = subprocess.run(["gh", "api", endpoint], capture_output=True, timeout=20)
     if done.returncode:
         raise ValueError
     return done.stdout if binary else json.loads(done.stdout)
