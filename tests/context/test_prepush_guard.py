@@ -73,7 +73,27 @@ def test_push_without_a_passing_run_is_blocked(repo, command):
 
 @pytest.mark.parametrize(
     "prefix",
-    ["if", "then", "else", "elif", "do", "while", "until", "time", "exec", "nohup", "env", "command", "!", "{", "A=1"],
+    [
+        "if",
+        "then",
+        "else",
+        "elif",
+        "do",
+        "while",
+        "until",
+        "time",
+        "exec",
+        "nohup",
+        "env",
+        "command",
+        "!",
+        "{",
+        "A=1",
+        "timeout -s TERM -k 5s 30s",
+        "sudo -u worker",
+        "nice -n 10",
+        "env -u UNUSED A=1",
+    ],
 )
 def test_every_shell_prefix_is_looked_through(repo, prefix):
     with pytest.raises(BlockAction):
@@ -169,3 +189,10 @@ def test_pre_tool_use_runs_the_guard_on_bash(repo, monkeypatch):
 
     with pytest.raises(BlockAction, match="python -m scripts.ci_prepush"):
         hook_manager.on_pre_tool_use({"session_id": "session", **_bash("git push -u origin HEAD", repo)})
+
+
+def test_cmd_payloads_are_checked_for_pushes(repo):
+    payload = _bash("", repo)
+    payload["tool_input"] = {"cmd": "git push origin HEAD"}
+    with pytest.raises(BlockAction):
+        check_prepush(payload)
