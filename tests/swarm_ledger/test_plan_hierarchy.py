@@ -190,10 +190,9 @@ def test_legacy_plan_fields_are_checked_against_the_new_parents():
     plans("a")
     link("p1", "plans/a")
     run("slice_add", phase="phases/p1", anchor="first")
-    _, rejected, refusal = run(
-        "task_add", task="t1", title="Build", lane="eng", phase="p1", slice="slices/a.first", plan_slice="second"
-    )
-    assert rejected and "task t1 plan_slice second differs from its slice anchor first" in refusal
+    task = {"id": "t1", "phase": "p1", "slice": "slices/a.first", "plan_slice": "second"}
+    refusal = ledger_plans.task_refusal(core.sync(SLUG)[0], task)
+    assert refusal == "task t1 plan_slice second differs from its slice anchor first"
     assert run("plan_add", plan="b", title="Plan b", url="https://github.com/acme/app/issues/2")[1] == []
     _, rejected, refusal = run(
         "phase_update",
