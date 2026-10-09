@@ -261,8 +261,9 @@ def test_create_refuses_a_low_watermark_above_the_high_one(store):
 
 @pytest.mark.parametrize("memory", [0.5, True])
 def test_create_refuses_memory_that_cannot_round_trip(store, memory):
-    with pytest.raises(SwarmError, match="whole number"):
+    with pytest.raises(SwarmError) as caught:
         store.create(config(memory_per_agent_mb=memory))
+    assert str(caught.value) == "memory per agent must be a whole number of MB above 0"
     assert store.redis.hgetall(store.key("smoke", "config")) == {}
     assert store.slugs() == []
 
