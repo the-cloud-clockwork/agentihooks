@@ -36,7 +36,11 @@ def legacy():
 
 def repository(tmp_path):
     repo = store.SQLiteLedgerRepository(tmp_path / store.DATABASE)
-    assert repo.create(SLUG, legacy())
+    content = legacy()
+    assert repo.create(SLUG, content)
+    state = repo.export_document(SLUG)
+    state.update(phases=content["phases"], tasks=content["tasks"])
+    repo.import_document(SLUG, state, token=repo.token(SLUG), replace=True)
     return repo
 
 
@@ -84,3 +88,48 @@ def test_command_defaults_to_dry_run(tmp_path, monkeypatch, capsys):
     ledger.cmd_hierarchy(args)
     assert json.loads(capsys.readouterr().out)["applied"] is False
     assert repo.export_document(SLUG) == before
+
+
+def test_apply_preserves_each_phase_and_slice_range_with_zero_drift(tmp_path):
+    repo = repository(tmp_path)
+    before = repo.export_document(SLUG)
+    token = repo.token(SLUG)
+    report = hierarchy_backfill.backfill(repo, SLUG, "planner", apply=True)
+    assert report["applied"] is True
+    assert report["drift"]["drift"] == 0
+    after = repo.export_document(SLUG)
+    assert [task["phase"] for task in after["tasks"]] == ["p60"] * 7
+    assert [task["plan_lines"] for task in after["tasks"]] == [f"{i * 10}-{i * 10 + 3}" for i in range(1, 8)]
+    assert [task["plan_url"] for task in after["tasks"]] == [PHASE_URL] * 7
+    assert after["phases"][0]["plan"] == after["phases"][1]["plan"] == "plans/plan-aaaaaaaaaaaa"
+    assert after["phases"][2]["plan"] == after["phases"][3]["plan"]
+    assert len(after["plans"]) == 2
+    assert len(after["slices"]) == 7
+    assert repo.token(SLUG) == token
+    assert after["overview"] == before["overview"]
+    assert after["_meta"]["rev"] == before["_meta"]["rev"] + 1
+    assert repo.rebuild(SLUG)["drift"] == 0
+    repeated = hierarchy_backfill.backfill(repo, SLUG, "planner", apply=True)
+    assert repeated["conflicts"] == []
+    assert repeated["before"] == repeated["after"]
+    assert repo.export_document(SLUG) == after
+
+
+def test_unphased_tasks_get_one_reported_standalone_phase(tmp_path):
+    repo = repository(tmp_path)
+    doc = repo.export_document(SLUG)
+    doc["tasks"].extend([{"id": "loose1", "title": "Loose"}, {"id": "loose2", "title": "Loose again", "phase": ""}])
+    repo.import_document(SLUG, doc, token=repo.token(SLUG), replace=True)
+    dry = hierarchy_backfill.backfill(repo, SLUG, "planner")
+    assignments = [row for row in dry["conflicts"] if row["kind"] == "missing_phase"]
+    assert [row["item"] for row in assignments] == ["tasks/loose1", "tasks/loose2"]
+    assert len({row["after"] for row in assignments}) == 1
+    assert assignments[0]["after"].startswith("phases/standalone-")
+    assert dry["after"]["phases"] == 5
+    assert dry["after"]["tasks_in_phases"] == 9
+    assert repo.export_document(SLUG) == doc
+    report = hierarchy_backfill.backfill(repo, SLUG, "planner", apply=True)
+    assert report["drift"]["drift"] == 0
+    saved = repo.export_document(SLUG)
+    assert saved["tasks"][-1]["phase"] == saved["tasks"][-2]["phase"]
+    assert len(saved["plans"]) == 2
