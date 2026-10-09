@@ -292,7 +292,7 @@ def test_the_protected_grader_runs_only_from_the_base_on_pull_requests_into_dev(
 def test_the_protected_grader_never_executes_the_head():
     steps = _protected_workflow()["jobs"]["grade"]["steps"]
     checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout@"))
-    assert checkout["with"]["ref"] == "${{ github.event.pull_request.base.ref }}"
+    assert checkout["with"]["ref"] == "${{ github.base_ref }}"
     assert checkout["with"]["persist-credentials"] is False
     runs = "\n".join(step.get("run", "") for step in steps)
     assert "pip install" not in runs.replace('python -m pip install "pyyaml>=6.0"', "")
