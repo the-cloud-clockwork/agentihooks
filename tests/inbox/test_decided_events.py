@@ -11,7 +11,8 @@ pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 class Ledger:
     def __init__(self):
         self.doc = {"_meta": {"rev": 1, "events": []}, "followups": [], "questions": [], "tasks": []}
-        self.followups, self.priorities, self.now = [], [], 0
+        self.followups = []
+        self.now = 0
 
     def state(self, slug):
         return self.doc
@@ -26,7 +27,7 @@ class Ledger:
         meta["events"].append({**added, "target": f"followups/{row['id']}"})
 
     def priority(self, slug, item, text):
-        self.priorities.append(item)
+        pass
 
 
 class Herdr:
@@ -186,4 +187,4 @@ def test_an_unread_master_item_yields_one_follow_up_that_never_returns_to_the_ma
         wake(crew, ledger.now)
         event_pass(inbox, store, "sw", ledger.doc, ledger, ledger.now)
     assert len(ledger.followups) == 1
-    assert [i.id for i in inbox.pending()] == [item.id]
+    assert [i.id for i in inbox.inbox("master@sw")] == [item.id]
