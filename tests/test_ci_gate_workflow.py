@@ -144,7 +144,7 @@ def test_coverage_ratchet_grades_a_batched_dev_push_against_the_previous_tip(tmp
         subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "c"], check=True)
         tips.append(subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip())
     output = tmp_path / "output"
-    env = dict(os.environ, PUSH_BEFORE=tips[0], GITHUB_OUTPUT=str(output))
+    env = dict(os.environ, PUSH_BEFORE=tips[0], QUEUE_BASE="", DISPATCHED="", GITHUB_OUTPUT=str(output))
     subprocess.run(["bash", "-e", "-c", base["run"]], cwd=tmp_path, env=env, check=True)
     assert f"commit={tips[0]}" in output.read_text().splitlines()
 
