@@ -679,3 +679,16 @@ def test_a_plan_file_that_cannot_be_opened_reads_as_unreadable(monkeypatch):
     with pytest.raises(ValueError) as raised:
         plan_ranges.anchors({}, {"id": "p1", "plan_ref": {"artifact": MISSING, "lines": "1-2"}})
     assert str(raised.value) == "phase p1 plan cannot be read: gone"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://github.com/artifacts/app/issues/1",
+        "https://github.com/acme/artifacts/issues",
+        "http://127.0.0.1:8765/artifacts/plan.md",
+        "http://127.0.0.1:8765/ledgers/s/f.md",
+    ],
+)
+def test_a_plan_link_that_does_not_name_a_stored_artifact_reads_no_markers(url):
+    assert plan_ranges.anchors({}, {"id": "p1", "plan_url": url}) == []
