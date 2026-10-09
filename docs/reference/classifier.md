@@ -12,8 +12,10 @@ part of agentihooks that needs a cheap yes/no, a pick from options or a score us
 with its own `purpose`.
 
 The models are OpenRouter decision models served by LiteLLM on `POST /v1/decisions`:
-`pplx-decider-v1-27b` (262k context), `liquid-d1` and `jev-1.13` (32k each). They
-return no text, only probabilities from one forward pass.
+`liquid-d1` and `jev-1.13` (32k each) and `pplx-decider-v1-27b` (262k context). They
+return no text, only probabilities from one forward pass. `pplx-decider-v1-27b` comes
+last because OpenRouter lists it with no serving provider and answers it 404; it stays
+in the order for inputs too large for the 32k models.
 
 ## Calling it
 
@@ -90,7 +92,7 @@ method (the `Backend` protocol) that raises `BackendFailure` when it cannot answ
 |---|---|---|
 | `AGENTIHOOKS_CLASSIFIER_URL` | none | LiteLLM base address; `/v1/decisions` is appended. Unset means the API is not tried |
 | `AGENTIHOOKS_CLASSIFIER_LITELLM_KEY` | none | The LiteLLM key, read at call time and sent only in the Authorization header. Unset means the API is not tried |
-| `AGENTIHOOKS_CLASSIFIER_MODELS` | `pplx-decider-v1-27b,liquid-d1,jev-1.13` | Model order |
+| `AGENTIHOOKS_CLASSIFIER_MODELS` | `liquid-d1,jev-1.13,pplx-decider-v1-27b` | Model order |
 | `AGENTIHOOKS_CLASSIFIER_TIMEOUT_S` | `5` | Timeout per API call |
 | `AGENTIHOOKS_CLASSIFIER_DOWN_TTL_S` | `120` | How long a failed API stays marked down |
 | `AGENTIHOOKS_CLASSIFIER_FALLBACK_TIMEOUT_S` | `60` | Timeout per CLI fallback |

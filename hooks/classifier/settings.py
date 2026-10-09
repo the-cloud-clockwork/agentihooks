@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from hooks.classifier.api import KEY_VAR
 
-DEFAULT_MODELS = ("pplx-decider-v1-27b", "liquid-d1", "jev-1.13")
+DEFAULT_MODELS = ("liquid-d1", "jev-1.13", "pplx-decider-v1-27b")
 MODEL_CONTEXT_TOKENS = {
     "pplx-decider-v1-27b": 262_144,
     "liquid-d1": 32_768,
