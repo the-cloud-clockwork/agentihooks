@@ -135,6 +135,6 @@ class PodClient:
             return False
         if status == 409:
             raise PreconditionFailed(name)
-        if not 200 <= status < 300:
+        if status not in (202, 204):
             _answer(status, answer)
         return True

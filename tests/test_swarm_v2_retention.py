@@ -146,6 +146,15 @@ def test_retain_keeps_the_execution_record_archive_watermark_and_removal(attempt
     assert world.store.execution(SLUG, record.execution_id) == record
 
 
+def test_retain_reads_the_clock_of_its_own_store(attempt, monkeypatch):
+    world, record = attempt
+    entry = retention.finalize(world.store, SLUG, world.require, record.execution_id, "completed", 0, "ledger:one")
+    seen = []
+    monkeypatch.setattr(retention.lease, "now_ms", lambda store: seen.append(store) or 7)
+    assert retention.retain(world.store, SLUG, entry, {})["retained_at_ms"] == 7
+    assert seen and all(store is world.store for store in seen)
+
+
 def test_nothing_is_retained_before_cleanup(attempt):
     world, record = attempt
     assert retention.retained(world.store, SLUG, record.execution_id) is None

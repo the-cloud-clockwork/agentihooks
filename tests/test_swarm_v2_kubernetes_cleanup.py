@@ -172,6 +172,25 @@ def test_a_pinned_object_no_longer_selected_is_never_deleted(ready):
     assert f"swarm-{old.execution_id}" in world.api.objects
 
 
+def test_a_pinned_object_stripped_of_every_label_is_never_deleted(ready):
+    world, controller, old, _ = ready
+    del world.api.objects[f"swarm-{old.execution_id}"]["metadata"]["labels"]
+    _journal(world, old, [])
+    result = world.cleanup(controller).run(old.execution_id)
+    assert result.removed["pods"][0] == {"name": f"swarm-{old.execution_id}", "uid": "uid-1", "outcome": "unselected"}
+    assert [call for call in world.api.deletes if call[0] == "pods"] == []
+
+
+def test_not_final_and_waiting_results_name_their_execution(ready):
+    world, controller, _, replacement = ready
+    run = world.cleanup(controller).run
+    assert run(replacement.execution_id) == cleanup.Result(replacement.execution_id, "not_final")
+    retention.finalize(
+        world.store, cases.SLUG, controller.require, replacement.execution_id, "completed", 3, "ledger:r"
+    )
+    assert run(replacement.execution_id) == cleanup.Result(replacement.execution_id, "waiting_archive")
+
+
 def test_a_name_taken_over_between_listing_and_delete_is_recorded_replaced(ready, monkeypatch):
     world, controller, old, _ = ready
     name = f"swarm-{old.execution_id}"
