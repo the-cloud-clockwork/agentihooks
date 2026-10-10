@@ -348,20 +348,21 @@ def test_an_inbox_drain_accepted_by_the_server_stops_mutations_until_its_checkpo
 def test_an_inbox_command_waits_in_the_worker_state_while_the_endpoint_is_unreachable(home):
     ran = []
     handle(home, "deliver", control.encode(record()))
-    handle(home, "deliver", control.encode(record(command_id="cmd-" + "b" * 32, kind="drain", payload={})))
     waiting = worker(home, Transport(unreachable=True), ran)
     waiting.step()
-    assert ran == []
-    assert {key: entry["state"] for key, entry in waiting.records.items()} == {
-        COMMAND_ID: "received",
-        "cmd-" + "b" * 32: "received",
-    }
-    assert waiting.may_mutate()
+    assert (ran, waiting.records[COMMAND_ID]["state"], waiting.records[COMMAND_ID]["inbox"]) == ([], "received", True)
     assert list((home / "inbox").iterdir()) == []
     restarted = worker(home, Transport(), ran)
     restarted.step()
     assert ran == [record()["payload"]]
-    assert not restarted.may_mutate()
+
+
+def test_a_received_inbox_drain_stops_mutations_before_its_acknowledgement(home):
+    handle(home, "deliver", control.encode(record(kind="drain", payload={})))
+    waiting = worker(home, Transport(unreachable=True), [])
+    waiting.step()
+    assert waiting.records[COMMAND_ID]["state"] == "received"
+    assert not waiting.may_mutate()
 
 
 def test_an_unreadable_inbox_file_is_left_for_the_next_step(home, monkeypatch):

@@ -82,7 +82,8 @@ def _reply(out: bytes, record: dict) -> str | None:
         return None
     if not isinstance(reply, dict) or reply.get("state") not in REPLIES:
         return None
-    return reply["state"] if all(reply.get(name) == record[name] for name in IDENTITY) else None
+    names = IDENTITY[:1] if reply["state"] == "refused" else IDENTITY
+    return reply["state"] if all(reply.get(name) == record[name] for name in names) else None
 
 
 class KubernetesCommandTransport:

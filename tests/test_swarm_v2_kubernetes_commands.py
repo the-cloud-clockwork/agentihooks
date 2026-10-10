@@ -334,6 +334,15 @@ def test_fallback_passes_a_helper_refusal_through(world, agent):
     assert ambiguous(world) == {"status": 0, "deliver": 0}
 
 
+def test_a_refusal_needs_only_its_command_id_because_nothing_was_delivered(world, agent):
+    command = issued(world, agent)
+    foreign = reply({**command, "execution_id": "exe-other", "generation": 99}, "refused", code=2)
+    assert transport(world, Runner(foreign)).fallback(agent.execution_id, command["command_id"]) == "refused"
+    other = reply({**command, "command_id": "cmd-" + "9" * 32}, "refused", code=2)
+    assert transport(world, Runner(other)).fallback(agent.execution_id, command["command_id"]) == "ambiguous"
+    assert ambiguous(world) == {"status": 1, "deliver": 0}
+
+
 @pytest.mark.parametrize(
     "answer",
     [

@@ -42,8 +42,6 @@ def _entry(command: Mapping, state: str) -> dict:
 
 
 def _voided(record: dict) -> bool:
-    if record.get("inbox") and record["state"] == RECEIVED:
-        return True
     return record["state"] == REJECTED and record.get("refusal") == "expired" and record["outcome"] is None
 
 
@@ -120,7 +118,7 @@ class WorkerControl:
                 self._receive(command)
 
     def _collect(self, path: Path) -> None:
-        """An inbox command binds the worker only once the server accepts it, so a forged file never drains it."""
+        """An inbox command is saved before its acknowledgement and dropped if the server refuses it."""
         try:
             command = checked(json.loads(path.read_bytes()))
         except OSError:
