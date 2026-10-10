@@ -188,7 +188,7 @@ def test_done_from_the_dispatcher_seat_ends_it_without_a_pull_request_once_its_t
     assert run("sw", "done") == 1
     assert "dispatcher triggers are still open" in capsys.readouterr().err
     assert [a.state for a in store.agents("sw") if a.name == seat] == ["working"]
-    ledger.state = settled
+    ledger.state = lambda slug: {**settled(slug), "priorities": [] if slug == "sw" else [stale]}
     inbox = InboxStore(store.redis)
     item = inbox.send("master@a1b2c3-0001", seat, "one more look")
     assert run("sw", "done") == 0
