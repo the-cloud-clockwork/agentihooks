@@ -1,5 +1,5 @@
 {
-  "tested_commit": "35b1c3d5b2f454f1811f653e163b04f040a998a9",
+  "tested_commit": "9a3559bf45898708de1253f117a7bca45bede698",
   "evidence_class": "mocked Redis, fake lease clock, in process API server enforcing uid preconditions with a droppable delete response, in process attach and secret registries; no Kubernetes API server",
   "cases": [
     "T-SV2-KUB-04-A",

@@ -4,7 +4,7 @@
   "dependency": "SV2-KUB-03",
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2466",
-  "tested_commit": "35b1c3d5b2f454f1811f653e163b04f040a998a9",
+  "tested_commit": "9a3559bf45898708de1253f117a7bca45bede698",
   "status": "fixture-qualified-awaiting-ci",
   "evidence_class": "Mocked: fakeredis execution registry, heartbeat archive watermarks, attempt records and cleanup journal, a fake lease clock, an in process API server that enforces delete uid preconditions and can drop a delete response, and in process attach and secret registries; no Kubernetes API server, Service or live worker Pod was used.",
   "interfaces": [
@@ -14,7 +14,7 @@
     "execution_cleanup_backlog(store, slug) counts final attempts not yet retained by waiting_outcome, waiting_archive and ready",
     "scripts.swarm_v2.kubernetes.cleanup: Cleanup(store, slug, api, require, attach, secrets, enabled).run(execution_id) answers suspended, not_final, waiting_outcome, waiting_archive or done; it pins the attempt's Pods and Services by owner, execution and generation labels into cleanup-journal, reads each pinned object by name immediately before its delete and deletes only when the name still holds the pinned uid with those labels, with a uid precondition, then releases the attach registration and the attempt scoped secret references in that order; require runs before every read, delete, release and journal write",
     "each removed object is recorded deleted, absent (gone before any delete was sent), absent_after_send (gone after a delete was sent, including one whose answer or journal write was lost), replaced (the name holds another uid; nothing deleted) or unselected (same uid but its labels changed; nothing deleted); deleted means the API server accepted the delete, so a Pod in graceful termination may still be listed until it exits",
-    "scripts.swarm_v2.kubernetes.client: PodClient.list_services(selector), PodClient.read(kind, name) answering None on 404, and PodClient.delete(kind, name, uid) for pods and services only, sending DeleteOptions with a uid precondition; any 2xx answers True, 404 False, 409 raises PreconditionFailed"
+    "scripts.swarm_v2.kubernetes.client: PodClient.list_services(selector), PodClient.read(kind, name) answering None on 404, and PodClient.delete(kind, name, uid) for pods and services only, sending DeleteOptions with a uid precondition; 200, 201, 202 or 204 answers True, 404 False, 409 raises PreconditionFailed"
   ],
   "supported_versions": {
     "python": "3.11 and later",
@@ -25,7 +25,7 @@
   "authority": "finalize and every cleanup mutation call require, which the fixture binds to Controller.require: a scoped controller grant and the current controller lease. A stale controller or a revoked grant is refused before any write; case B shows it for both finalize and cleanup and case C for a pre-restart controller after the retained record exists. The generation and seat come from the execution registry, never from a label or a caller argument.",
   "authoritative_objects": "The execution registry, the final attempt record, the heartbeat archive watermark and the retained record are authoritative and are never deleted. The cleanup journal is transient and removed once the retained record is written. Pods, Services, attach registrations and attempt scoped secret references are transient runtime objects.",
   "states": {
-    "observed": "Cases A and C ran twice with identical records in proofs run 38073989793 and case B in proofs run 38074906285; the case code of A and C is unchanged since.",
+    "observed": "Cases A, B and C ran green with identical committed records in mutation preflight 38083122392 at 9a3559bf after the dev merge; earlier in proofs runs 38073989793 and 38074906285.",
     "accepted": "Cleanup removed only the old attempt's Pod and Service after its outcome reference and archive watermark were recorded; with the archive upload pending it waited in every case without any delete or retained record; the replacement Pod and Service survived, and a Pod recreated under the old name was recorded replaced and never deleted; an interrupted run resumed from its journal, recorded the Pod whose delete answer was lost as absent_after_send without a second delete, and released secrets once more.",
     "committed": "Code and fixture inputs are at tested_commit; manifest.json hashes them.",
     "externally_verified": "None: no live API server, Service or G3 deployment was exercised."
@@ -35,7 +35,7 @@
     "tests": "proofs run 38074996957 at e99584eb: 243 passed across the cleanup, retention, Kubernetes client, Kubernetes runtime, Kubernetes commands and controller modules, with every committed case record matching",
     "lint": "ruff check and ruff format passed through python -m scripts.ci_prepush",
     "review": "closed after three rounds of Standards and Spec readers; every finding fixed or ruled, rulings recorded on the pull request",
-    "mutation": "pending"
+    "mutation": "mutation preflight 38083122392 at 9a3559bf: every changed line mutant killed; preflight 38082843630 at 8c0ffb2a had left seven survivors, killed by exact assertions and a delete status rewrite"
   },
   "measurements": {
     "execution_cleanup_backlog": {
@@ -94,7 +94,7 @@
     "Pinning lists Pods and Services once; an object created for a final attempt after its journal was pinned is left for the orphan reconcile.",
     "The backlog is computed on demand from Redis and is not exported as telemetry yet."
   ],
-  "pull_request": "pending",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2480",
   "follow_ups": [],
   "invariants": {
     "INV-R07": "met in fixture: a stale controller cannot finalize, clean up or overwrite the retained record (cases B and C)",
