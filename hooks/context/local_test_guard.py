@@ -66,6 +66,7 @@ _PYTHON = re.compile(r"^(?:python[\d.]*|pypy[\d.]*)$")
 _PYTHON_TEST = re.compile(
     r"\b(?:pytest|unittest|tox|nox|mutmut|mutatest|mutpy)\b|scripts\.ci_mutation\b(?!\.clearances\b)"
 )
+_MUTATION_PATH = re.compile(r"(?:^|/)scripts/ci_mutation(?:/|$)")
 _NODE_TEST = re.compile(r"\b(?:jest|vitest|mocha)\b|node:test")
 _LITERAL = (
     r"(?P<module>\b(?:require|import)\s*\(\s*|\b(?:from|import)\s*)?"
@@ -105,7 +106,9 @@ def _python_test(args: list[str]) -> bool:
     if any(arg.startswith(("-m", "-c")) for arg in args):
         return False
     return any(
-        Path(arg).name in _RUNNERS or (Path(arg).name.startswith(("test_", "test-")) and arg.endswith(".py"))
+        Path(arg).name in _RUNNERS
+        or (Path(arg).name.startswith(("test_", "test-")) and arg.endswith(".py"))
+        or _MUTATION_PATH.search(Path(arg).as_posix())
         for arg in args
     )
 
