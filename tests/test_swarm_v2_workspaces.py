@@ -251,6 +251,7 @@ def test_a_recorded_generation_for_another_base_is_refused(world):
         ({"origin": "ssh://git:pass@host.example/o/r"}, CREDENTIAL),
         ({"origin": "user:secret@host.example:o/r"}, CREDENTIAL),
         ({"origin": "https://github.com/o/r?token=x"}, CREDENTIAL),
+        ({"origin": "https://github.com/o/r#token=x"}, CREDENTIAL),
         ({"base": "x..dev"}, "invalid base branch: x..dev"),
     ],
 )
