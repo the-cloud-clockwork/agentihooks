@@ -306,10 +306,18 @@ def _recovery(world):
     ]
     network.drop = set()
     world.drive(restarted, 2)
+    stale_drain = world.issue(agent, "drain", "drain-before-succession")["command_id"]
+    world.drive(restarted, 1)
     world.later(sv2_ldg02_cases.INPUTS["lease_ms"])
     old = world.issue(agent, "answer", "before-succession", {"text": PROMPTS[0]})
     world.worker(previous=agent.execution_id)
     superseded = world.say(agent, Action.ANSWER, "after-succession", PROMPTS[0])
+    restarted.checkpointed(INPUTS["checkpoint"])
+    stale_checkpoint = [
+        restarted.records[stale_drain]["state"],
+        restarted.records[stale_drain].get("refusal"),
+        world.queue.outcome(agent.execution_id, stale_drain)["state"],
+    ]
     return {
         "lost_delivery_reply": lost,
         "reconciled_by_id": reconciled,
@@ -325,6 +333,7 @@ def _recovery(world):
             superseded.status,
             superseded.detail,
         ],
+        "stale_checkpoint": stale_checkpoint,
         "reports": [
             [report["mode"], report["exit"], report["stderr"]] for report in worker_transport_reports(world.store, SLUG)
         ],
@@ -367,6 +376,7 @@ def _held(observed):
         found["stored_lost_issue_commands"] == 1,
         found["handlers_ran"],
         found["superseded"][:2] == ["stale", "refused"],
+        found["stale_checkpoint"] == ["rejected", "stale_generation", "accepted"],
         found["worker_transport_ambiguous_total"] == {"status": 0, "deliver": 1},
     ]
 

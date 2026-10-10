@@ -42,6 +42,8 @@ def _entry(command: Mapping, state: str) -> dict:
 
 
 def _voided(record: dict) -> bool:
+    if record.get("inbox") and record["state"] == RECEIVED:
+        return True
     return record["state"] == REJECTED and record.get("refusal") == "expired" and record["outcome"] is None
 
 
@@ -118,11 +120,22 @@ class WorkerControl:
                 self._receive(command)
 
     def _collect(self, path: Path) -> None:
-        """An inbox command is recorded only once the server accepts it, so a forged file never drains the worker."""
+        """An inbox command binds the worker only once the server accepts it, so a forged file never drains it."""
         try:
             command = checked(json.loads(path.read_bytes()))
+        except OSError:
+            return
         except ValueError:
             path.unlink()
+            return
+        command_id = command["command_id"]
+        known = command_id in self.records
+        if not known:
+            self.records[command_id] = {**_entry(command, RECEIVED), "inbox": True}
+            self._save()
+        path.unlink()
+        if not known:
+            self._advance(command_id)
             return
         command_id = command["command_id"]
         if command_id not in self.records:
@@ -180,6 +193,10 @@ class WorkerControl:
         except UNREACHABLE:
             return
         except CommandRefused as error:
+            if record.get("inbox") and record["state"] == RECEIVED:
+                del self.records[command_id]
+                self._save()
+                return
             record["refusal"] = error.error_class
             self._move(record, REJECTED)
 
@@ -258,16 +275,16 @@ def handle(mode: str, text: str, inbox: Path, state: Path, launch: Path, now_ms:
         owner = (identity["execution_id"], identity["generation"])
     except (OSError, ValueError, KeyError, TypeError):
         return 2, _refused(envelope, "the launch record is unreadable")
-    if (envelope["execution_id"], envelope["generation"]) != owner:
-        return 2, _refused(envelope, "the envelope names another execution")
     reply = {"command_id": envelope["command_id"], "execution_id": owner[0], "generation": owner[1]}
+    if (envelope["execution_id"], envelope["generation"]) != owner:
+        return 2, _refused(reply, "the envelope names another execution")
     held = status(envelope["command_id"], inbox, state)
     if mode == "status":
         return 0, {**reply, "state": held}
     if held != "absent":
         return 0, {**reply, "state": "known"}
     if now_ms >= envelope["expires_at_ms"]:
-        return 2, _refused(envelope, "the command expired")
+        return 2, _refused(reply, "the command expired")
     inbox.mkdir(parents=True, exist_ok=True)
     staged = inbox / f"{envelope['command_id']}.{os.getpid()}.tmp"
     with staged.open("wb") as stream:

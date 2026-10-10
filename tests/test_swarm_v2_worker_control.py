@@ -206,8 +206,7 @@ def test_a_command_is_refused_when_the_launch_record_is_unreadable(home, launch)
 @pytest.mark.parametrize("changes", [{"execution_id": "exe-" + "2" * 32}, {"generation": 3}, {"generation": 5}])
 def test_an_envelope_for_another_execution_or_generation_is_refused(home, mode, changes):
     envelope = record(**changes)
-    ids = {name: envelope[name] for name in ("command_id", "execution_id", "generation")}
-    assert handle(home, mode, control.encode(envelope)) == (2, refused("the envelope names another execution", ids))
+    assert handle(home, mode, control.encode(envelope)) == (2, refused("the envelope names another execution"))
     assert not (home / "inbox").exists()
 
 
@@ -300,6 +299,7 @@ def test_worker_control_records_an_inbox_command_only_after_the_server_accepts_i
         "payload": envelope["payload"],
         "state": "reported",
         "outcome": {"status": "succeeded"},
+        "inbox": True,
     }
 
 
@@ -310,7 +310,24 @@ def test_a_refused_inbox_drain_is_dropped_and_never_stops_mutations(home):
     assert refusing.records == {}
     assert refusing.may_mutate()
     assert list((home / "inbox").iterdir()) == []
-    assert not (home / "state.json").exists()
+    assert json.loads((home / "state.json").read_bytes()) == {}
+
+
+def test_a_drain_refused_after_its_acceptance_stays_binding(home):
+    handle(home, "deliver", control.encode(record(kind="drain", payload={})))
+
+    class LateRefusal(Transport):
+        def complete(self, command_id, outcome):
+            raise control.CommandRefused("revision_conflict", "refused")
+
+    draining = worker(home, LateRefusal(), [])
+    draining.step()
+    draining.checkpointed("refs/checkpoints/1")
+    assert (draining.records[COMMAND_ID]["state"], draining.records[COMMAND_ID]["refusal"]) == (
+        "rejected",
+        "revision_conflict",
+    )
+    assert not draining.may_mutate()
 
 
 def test_an_inbox_drain_accepted_by_the_server_stops_mutations_until_its_checkpoint(home):
@@ -328,16 +345,37 @@ def test_an_inbox_drain_accepted_by_the_server_stops_mutations_until_its_checkpo
     ]
 
 
-def test_an_inbox_command_waits_in_place_while_the_endpoint_is_unreachable(home):
+def test_an_inbox_command_waits_in_the_worker_state_while_the_endpoint_is_unreachable(home):
     ran = []
     handle(home, "deliver", control.encode(record()))
+    handle(home, "deliver", control.encode(record(command_id="cmd-" + "b" * 32, kind="drain", payload={})))
     waiting = worker(home, Transport(unreachable=True), ran)
     waiting.step()
-    assert (ran, waiting.records) == ([], {})
-    assert [path.name for path in (home / "inbox").iterdir()] == [f"{COMMAND_ID}.json"]
-    worker(home, Transport(), ran).step()
-    assert ran == [record()["payload"]]
+    assert ran == []
+    assert {key: entry["state"] for key, entry in waiting.records.items()} == {
+        COMMAND_ID: "received",
+        "cmd-" + "b" * 32: "received",
+    }
+    assert waiting.may_mutate()
     assert list((home / "inbox").iterdir()) == []
+    restarted = worker(home, Transport(), ran)
+    restarted.step()
+    assert ran == [record()["payload"]]
+    assert not restarted.may_mutate()
+
+
+def test_an_unreadable_inbox_file_is_left_for_the_next_step(home, monkeypatch):
+    transport = Transport()
+    handle(home, "deliver", control.encode(record()))
+
+    def unreadable(path):
+        raise PermissionError(str(path))
+
+    monkeypatch.setattr(control.Path, "read_bytes", unreadable)
+    blocked = control.WorkerControl(transport, home / "missing.json", {}, home / "inbox")
+    blocked.step()
+    assert (blocked.records, transport.calls) == ({}, [["poll"]])
+    assert [path.name for path in (home / "inbox").iterdir()] == [f"{COMMAND_ID}.json"]
 
 
 @pytest.mark.parametrize("content", ["[]", "{}", "not json", json.dumps({**record(), "payload": {"text": "other"}})])

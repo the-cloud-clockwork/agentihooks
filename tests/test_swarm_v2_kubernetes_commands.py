@@ -97,7 +97,12 @@ def test_the_transport_names_its_backend_helper_and_bounds():
 def test_sanitize_report_strips_escape_and_control_sequences_but_keeps_lines_and_tabs():
     raw = b"\x1b[31mred\x1b[0m \x1b]0;title\x07osc \x1b]2;t\x1b\\st \x1bDfe\x00\x07\x08\r\x0b\x0c\x7f\xc2\x9b2J a\tb\nc"
     assert sanitize_report(raw) == "red osc st fe a\tb\nc"
-    assert sanitize_report(b"a\x1f\xc2\x9fb\x1bZc\x1b_d\x1b@e\xc2\x9b1;2mf\x1b[?25lg") == "abcdefg"
+    assert sanitize_report(b"a\x1fb\x1bZc\x1b@d\xc2\x9b1;2me\x1b[?25lf") == "abcdef"
+    strings = (
+        b"g\x1bPq#1\x1b\\h\xc2\x9dtitle\x07i\xc2\x90dcs\xc2\x9cj\xc2\x9fapc\xc2\x9ck\x1b_pm\x1b\\l\xc2\x98sos\xc2\x9cm"
+    )
+    assert sanitize_report(strings) == "ghijklm"
+    assert sanitize_report(b"n\x1bXsos\x1b\\o\x1b^pm\x07p\xc2\x9epm\x07q\x1b]unterminated") == "nopq"
     assert sanitize_report(b"\xc2\xa0kept \xc2\xa1") == "\xa0kept \xa1"
 
 

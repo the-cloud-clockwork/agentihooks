@@ -17,12 +17,11 @@ from scripts.swarm_v2.kubernetes.runtime import GENERATION_LABEL
 from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL, OWNER_LABEL, owner_for
 from scripts.swarm_v2.runtime.commands import Action
 from scripts.swarm_v2.runtime.operations import Observation, Operation, Phase, digest
-from scripts.swarm_v2.worker.control import encode
+from scripts.swarm_v2.worker.control import MODES, encode
 
 HELPER = ("python", "-m", "scripts.swarm_v2.worker.control")
 CONTAINER = "agent"
 KINDS = {Action.ANSWER: "answer", Action.DRAIN: "drain", Action.CANCEL: "cancel"}
-MODES = ("status", "deliver")
 REPLIES = frozenset(("queued", "known", "absent", "refused"))
 IDENTITY = ("command_id", "execution_id", "generation")
 EXEC_TIMEOUT_SECONDS = 10
@@ -30,7 +29,11 @@ ENVELOPE_CHARS = 100_000
 RAW_BYTES = 65536
 REPORT_CHARS = 2048
 REPORTS_KEPT = 200
-_ESCAPES = re.compile(r"(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]")
+_ESCAPES = re.compile(
+    r"(?:\x1b[P\]X^_]|[\x90\x98\x9d-\x9f])[^\x07\x1b\x9c]*(?:\x07|\x1b\\|\x9c)?"
+    r"|(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]"
+    r"|\x1b[@-Z\\-_]"
+)
 _CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 
 
