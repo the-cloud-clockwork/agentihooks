@@ -4,8 +4,8 @@
   "evidence_class": "mocked: fakeredis execution registry, heartbeat archive watermarks, provider account slots, fence and recovery records, a fake lease clock, an in process API server whose Pods carry fixture statuses, an in process grant registry and an in process checkpoint list; no Kubernetes API server, node or worker Pod was used",
   "input_sha256": {
     "pod-failures.json": "13b5e8d94825f40ea87fada359454c47dee84fd4161945eebcdea4e235fff4b4",
-    "pod-launch.json": "dc9258de4781082cc2abb9a2048ff04db03da0a83ea144f96fe728847b34c809",
-    "pod-policy.json": "6f10e42c7c8461ea18fe3ae9f0c46001020bd50153665477b415076cf71099f5"
+    "pod-launch.json": "a3dd9f7083b76f91ac724de6fc3d05d0227424feda9caac8d1c8f50eeede87ae",
+    "pod-policy.json": "fe59695070f986ee8928dcfa9abff5d0a07372f6af03611733a4cdad34772acb"
   },
   "observed": {
     "attempts": [

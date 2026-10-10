@@ -9,8 +9,8 @@
   ],
   "inputs": {
     "tests/fixtures/swarm_v2/pod-failures.json": "13b5e8d94825f40ea87fada359454c47dee84fd4161945eebcdea4e235fff4b4",
-    "tests/fixtures/swarm_v2/pod-policy.json": "6f10e42c7c8461ea18fe3ae9f0c46001020bd50153665477b415076cf71099f5",
-    "tests/fixtures/swarm_v2/pod-launch.json": "dc9258de4781082cc2abb9a2048ff04db03da0a83ea144f96fe728847b34c809",
+    "tests/fixtures/swarm_v2/pod-policy.json": "fe59695070f986ee8928dcfa9abff5d0a07372f6af03611733a4cdad34772acb",
+    "tests/fixtures/swarm_v2/pod-launch.json": "a3dd9f7083b76f91ac724de6fc3d05d0227424feda9caac8d1c8f50eeede87ae",
     "tests/sv2_kub05_cases.py": "f68118d9321a22cb55c19b9c501aacae50a233c469f02074d7c6a51b2eb56e06",
     "tests/test_swarm_v2_kubernetes_failures.py": "f4a0a893d2f09a86e5252576914f82f0b4b44c31a4c4b32b6f1b72f707a7c393",
     "scripts/swarm_v2/kubernetes/failures.py": "601f16d233bac848160b2e648e03f90c734d25bfcc7f2e4c8a70bef35fc3282e"
