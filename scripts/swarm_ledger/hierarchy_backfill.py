@@ -9,7 +9,6 @@ from scripts.swarm_ledger import ledger_plans
 from scripts.swarm_ledger.repository import hierarchy, repository
 from scripts.swarm_ledger.repository import sqlite as store
 
-
 STANDALONE_DESCRIPTION = (
     "Tasks that belonged to no phase, moved here by the hierarchy backfill so every task sits under one plan."
 )
