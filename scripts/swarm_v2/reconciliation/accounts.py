@@ -60,6 +60,10 @@ def _shows_exit(seen: observe.Classification | None, source: str) -> bool:
     return entry["reading"] == observe.Reading.OK.value and entry["value"] in EXIT_VALUES[source]
 
 
+def exit_source(seen: observe.Classification) -> str | None:
+    return next((source for source in EXIT_VALUES if _shows_exit(seen, source)), None)
+
+
 def _no_grant(_token: str) -> None:
     return None
 

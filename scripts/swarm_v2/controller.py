@@ -5,6 +5,8 @@ from uuid import uuid4
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_v2.kubernetes.watch import BACKEND, CLASSES, Plan, Pod, PodView, Reconciler, owner_for
+from scripts.swarm_v2.reconciliation.accounts import AccountReconciler, Finding, exit_source
+from scripts.swarm_v2.runtime import observe
 from scripts.swarm_v2.runtime.operations import Observation, Operation, OperationRequest, Operations, OperationTransport
 
 
@@ -36,6 +38,7 @@ class Controller:
     ) -> None:
         self.store, self.slug, self.authorize = store, slug, authorize
         self.pods, self.reconciler = pods, Reconciler(owner_for(slug), orphan_cleanup)
+        self.accounts = AccountReconciler(store, slug)
         self.owner = f"controller-{uuid4().hex}"
         self.held = None
         self.ready = False
@@ -53,6 +56,7 @@ class Controller:
         with lease.fencing(self.held.epoch):
             self.operations.recover(self.slug)
         self.reconcile()
+        self.accounts.reconcile()
         self._authority()
         self.reconciled_epoch = self.held.epoch
         self.ready = True
@@ -69,6 +73,8 @@ class Controller:
             self.held = None
             return False
         self.ready = self.reconciled_epoch == self.held.epoch
+        if self.ready:
+            self.accounts.reconcile()
         return self.ready
 
     def _authorize(self) -> None:
@@ -105,6 +111,14 @@ class Controller:
             return
         self._authority()
         self.pods.source.delete_pod(pod.name, pod.uid)
+
+    def observe(
+        self, observer: observe.Observer, agent: AgentRecord, signals: Iterable[observe.Signal], now: float
+    ) -> Finding | None:
+        self._authority()
+        seen = observer.observe(self.slug, agent, signals, now)
+        source = exit_source(seen)
+        return None if source is None else self.accounts.exited(seen.execution_id, seen.generation, source)
 
     def admit(self, agent: AgentRecord, previous_execution_id: str = "") -> AgentRecord:
         self.require()

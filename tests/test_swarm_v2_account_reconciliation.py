@@ -546,3 +546,34 @@ def test_status_reports_the_reconciliation_and_releases_nothing(world, monkeypat
     }
     assert block["mode"] == "enforce"
     assert world.rows() == before
+
+
+@pytest.mark.parametrize(
+    ("sources", "expected"),
+    [
+        (("pod_failed",), "kubernetes"),
+        (("supervisor_exit",), "supervisor"),
+        (("supervisor_exit", "pod_failed"), "kubernetes"),
+        (("pod_running",), None),
+        (("pod_gone",), None),
+        (("pod_unreachable",), None),
+        ((), None),
+    ],
+)
+def test_the_exit_source_is_the_first_source_whose_reading_shows_an_exit(sources, expected):
+    found = {name: entry for case in sources for name, entry in INPUTS[case].items()}
+    values = INPUTS["lost_worker"]
+    seen = observe.Classification(
+        "exec-1",
+        1,
+        observe.State(values["state"]),
+        observe.Terminal(values["terminal"]),
+        observe.Failure(values["failure"]),
+        observe.Confidence(values["confidence"]),
+        1.0,
+        1.0,
+        1.0,
+        found,
+    )
+
+    assert reconciliation.exit_source(seen) == expected
