@@ -172,8 +172,17 @@ def test_a_dispatcher_seat_settling_without_a_decision_is_still_ceremony():
 def test_a_priority_cleared_with_a_reason_or_settled_twice_counts_once_per_item():
     events = [ev("comment edited", "phases/p1", by=DISPATCHER) for _ in range(24)]
     events += [cleared(DISPATCHER, 0, "the follow up was answered"), cleared(DISPATCHER, 0, "again")]
+    events.append({**cleared(DISPATCHER, 1), "reason": ""})
     assert [f["evidence"] for f in run({"tasks": [], "_meta": {"events": events}})] == [
-        ["26 ledger transitions", "1 outcome"]
+        ["27 ledger transitions", "1 outcome"]
+    ]
+
+
+def test_a_dispatcher_seat_is_graded_on_its_decisions_never_on_tasks_it_closed():
+    events = [ev("comment edited", "phases/p1", by=DISPATCHER) for _ in range(24)]
+    events.append(ev("task done", "tasks/t1", by=DISPATCHER))
+    assert [f["evidence"] for f in run({"tasks": [task("t1")], "_meta": {"events": events}})] == [
+        ["25 ledger transitions", "0 outcomes"]
     ]
 
 
