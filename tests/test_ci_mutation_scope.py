@@ -247,12 +247,14 @@ def test_resolved_bases_are_graded_without_looking_up_branches_again(tmp_path):
 
 
 PASSING = "import pytest\n\n\ndef test_a():\n    assert 1\n\n\ndef test_b():\n    assert 2\n"
+FIXTURED = PASSING + "\n\n@pytest.fixture\ndef thing():\n    return 1\n"
 
 
 @pytest.mark.parametrize(
     ("name", "old", "new", "expected"),
     [
         ("tests/test_x.py", PASSING, PASSING + "\n\ndef test_c():\n    assert 3\n", True),
+        ("tests/test_x.py", FIXTURED, FIXTURED + "\n\ndef test_c():\n    assert 3\n", True),
         ("tests/test_x.py", PASSING, PASSING + "\n\nasync def test_c():\n    assert 3\n", True),
         ("tests/test_x.py", PASSING, PASSING + "\n\nclass TestC:\n    def test_c(self):\n        assert 3\n", True),
         ("tests/test_x.py", PASSING, "import os\n" + PASSING, True),

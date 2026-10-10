@@ -89,15 +89,15 @@ def adds_only_tests(root: Path, base: str, head: str, name: str) -> bool:
     old, new = (blob(root, rev, name) for rev in (base, head))
     if new is None:
         return False
-    before = Counter(ast.dump(node) for node in ast.parse(old or "").body)
+    before = Counter(ast.dump(node) for node in ast.parse(old or b"").body)
     nodes = ast.parse(new).body
     after = Counter(ast.dump(node) for node in nodes)
     added = after - before
     return not before - after and all(is_test(node) for node in nodes if added[ast.dump(node)])
 
 
-def blob(root: Path, rev: str, name: str) -> str | None:
-    shown = subprocess.run(["git", "show", f"{rev}:{name}"], cwd=root, capture_output=True, text=True)
+def blob(root: Path, rev: str, name: str) -> bytes | None:
+    shown = subprocess.run(["git", "show", f"{rev}:{name}"], cwd=root, capture_output=True)
     return shown.stdout if shown.returncode == 0 else None
 
 
