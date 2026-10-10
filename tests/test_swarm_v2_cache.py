@@ -626,6 +626,21 @@ def test_reuse_off_attaches_without_a_seed_and_publishes_nothing(world):
     assert (seed / "a.whl").read_bytes() == b"x"
 
 
+def test_reuse_off_runs_an_attempt_as_the_local_path_does_with_only_its_private_scratch_layer_added(world):
+    (world.first.path("home") / ".credentials.json").write_text("fixture")
+    source = world.first.path("worktree") / "module.py"
+    source.write_text("edited = True\n")
+    off = replace(world.store, policy=replace(world.store.policy, enabled=False))
+    before = tree(world.first.root)
+    layer = cache.attach(off, world.first, key())
+    fill(layer, {"a.whl": b"x"})
+    assert layer.seed is None and cache.publish(off, world.first, layer) is None
+    after = tree(world.first.root)
+    assert {k: v for k, v in after.items() if k in before} == before
+    assert all(Path(k).is_relative_to("tmp/cache") for k in after.keys() - before.keys())
+    assert not world.store.policy.store.exists()
+
+
 def test_package_cases_pass_on_the_isolated_fixture():
     from tests.sv2_fsy03_cases import case_a, case_b, case_c
 
