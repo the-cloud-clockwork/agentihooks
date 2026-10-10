@@ -442,9 +442,9 @@ UNTRACED = Finding(
 def reading_traces(monkeypatch):
     reads, passes = [], []
 
-    def readers(*args, **kwargs):
-        found = READERS(*args, **kwargs)
-        passes.append(set(found))
+    def readers(store, ledger, slug, now_ms, **kwargs):
+        found = READERS(store, ledger, slug, now_ms, **kwargs)
+        passes.append(set(found) if isinstance(now_ms, int) else now_ms)
         return {"health": lambda: [STALE], **{name: found[name] for name in ("trace",) if name in found}}
 
     def client(environ):
