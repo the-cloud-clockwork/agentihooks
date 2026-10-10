@@ -2,30 +2,30 @@
   "case": "B",
   "fixture_manifest": {
     "images": {
-      "fixture": "agentihooks-health-fixture:a3e0e8fe2e2843a0afd3669ce88280cb",
-      "missing_binary": "agentihooks-health-missing-binary:a3e0e8fe2e2843a0afd3669ce88280cb"
+      "fixture": "agentihooks-health-fixture:4124c5a2340b4d1b8bac0c8adcc04735",
+      "missing_binary": "agentihooks-health-missing-binary:4124c5a2340b4d1b8bac0c8adcc04735"
     },
     "inputs": {
       "docker/swarm-node/Dockerfile": "f36e23bd81a2c2f85942cd79de53bee3010e6e3fe9c381fd8a43a5ca33a8c448",
       "docker/swarm-node/health.py": "d6c31ed7515d9cfa38f39eb618792daa165ce96b017a386fdbbeebdbe9b7f759",
-      "scripts/swarm_v2/worker_health.py": "2f0d5f3efce5edde339f5b590b3b9de53c81c9c0edb8ddf18061c49ed613bf0a",
+      "scripts/swarm_v2/worker_health.py": "f18c59f964c7086af1a689c5b936340ee57260d5adad505ef7af236a80888091",
       "tests/integration/swarm_node/Dockerfile": "bcadc5c1200814d143813c1476a30bf8997d49e9db7637d6f47428c2306a4630",
-      "tests/integration/swarm_node/health_proof.py": "d922e956f084687c87b5986ef4b47d2bd301706f069935e6d6f8abc9e686cd2b",
+      "tests/integration/swarm_node/health_proof.py": "165086842a3f58db41ecc34123c4acab6d5a69c7607fa8adda443fdf2817fc79",
       "tests/integration/swarm_node/run_health_proof.sh": "ff02a6e6d6a38ba1ded0ed4ea68b80412ce3a090fb354764063788d0e532ee29"
     },
-    "tested_commit": "be234e1c19366e90baac3b511b68e8463bb37399"
+    "tested_commit": "3dccc3b41307ed827e1c0beefa374010c81e8c7b"
   },
   "mocked": false,
   "network": "none; fixture brain on container loopback",
   "package": "SV2-IMG-04",
   "runs": [
     {
-      "container": "9eab4b9eb0345583faff19eba7ac95359bf1fc3e76d9d5ba707c3d1a2410008c",
+      "container": "f940d0a087effea8b4892220912c2b2d5d19cfc3bb6f40b39767228dd8ddb0dd",
       "probes": {
         "diagnose": {
           "exit_code": 0,
           "report": {
-            "attempt": "/home/worker/attempts/exe-05e09f2104474600b2c2118b0346ed4a",
+            "attempt": "/home/worker/attempts/exe-a9ffe34a40e6431a926aa175a90e08fa",
             "checks": {
               "agent": null,
               "binaries": "missing_binary:codex",
@@ -53,7 +53,7 @@
               "PYTHON_VERSION"
             ],
             "harness": "codex",
-            "incarnation": "cde947568ef54c84aad62e4839c439f1",
+            "incarnation": "55190ebd52a94f85a16953aa4041ccab",
             "mode": "diagnose",
             "status": "not_ready",
             "worker_startup_failure_reason": "missing_binary:codex"
@@ -63,7 +63,7 @@
         "readiness": {
           "exit_code": 1,
           "report": {
-            "attempt": "/home/worker/attempts/exe-05e09f2104474600b2c2118b0346ed4a",
+            "attempt": "/home/worker/attempts/exe-a9ffe34a40e6431a926aa175a90e08fa",
             "checks": {
               "agent": null,
               "binaries": "missing_binary:codex",
@@ -77,7 +77,7 @@
               "brain": "brain_unreachable"
             },
             "harness": "codex",
-            "incarnation": "cde947568ef54c84aad62e4839c439f1",
+            "incarnation": "55190ebd52a94f85a16953aa4041ccab",
             "mode": "readiness",
             "status": "not_ready",
             "worker_startup_failure_reason": "missing_binary:codex"
@@ -87,7 +87,7 @@
         "startup": {
           "exit_code": 1,
           "report": {
-            "attempt": "/home/worker/attempts/exe-05e09f2104474600b2c2118b0346ed4a",
+            "attempt": "/home/worker/attempts/exe-a9ffe34a40e6431a926aa175a90e08fa",
             "checks": {
               "binaries": "missing_binary:codex",
               "herdr": null,
@@ -100,7 +100,7 @@
               "brain": "brain_unreachable"
             },
             "harness": "codex",
-            "incarnation": "cde947568ef54c84aad62e4839c439f1",
+            "incarnation": "55190ebd52a94f85a16953aa4041ccab",
             "mode": "startup",
             "status": "not_ready",
             "worker_startup_failure_reason": "missing_binary:codex"
@@ -110,11 +110,11 @@
       }
     },
     {
-      "container": "28682057f52e8df355b0a310ea620349e8fd0e7d148b021b5f63ab9555892477",
+      "container": "a1adb4ebd8d8643a6cc449920dbcc88db0bb01df8273c345acc256fd6cab0cf3",
       "corrected": {
         "exit_code": 0,
         "report": {
-          "attempt": "/home/worker/attempts/exe-13746539b776467cb9d1e8f3e8ff8225",
+          "attempt": "/home/worker/attempts/exe-98dca41c40ba4fddb76fe5c1663c124b",
           "checks": {
             "agent": null,
             "binaries": null,
@@ -128,7 +128,7 @@
             "brain": "brain_unreachable"
           },
           "harness": "codex",
-          "incarnation": "edb9ecc83334487fadea4f6cabeab735",
+          "incarnation": "7a991771010144e58ff403694ce15c90",
           "mode": "readiness",
           "status": "degraded",
           "worker_startup_failure_reason": null
@@ -139,7 +139,7 @@
         "0000": {
           "exit_code": 1,
           "report": {
-            "attempt": "/home/worker/attempts/exe-13746539b776467cb9d1e8f3e8ff8225",
+            "attempt": "/home/worker/attempts/exe-98dca41c40ba4fddb76fe5c1663c124b",
             "checks": {
               "agent": null,
               "binaries": null,
@@ -153,7 +153,7 @@
               "brain": "brain_unreachable"
             },
             "harness": "codex",
-            "incarnation": "edb9ecc83334487fadea4f6cabeab735",
+            "incarnation": "7a991771010144e58ff403694ce15c90",
             "mode": "readiness",
             "status": "not_ready",
             "worker_startup_failure_reason": "home_unreadable"
@@ -163,7 +163,7 @@
         "0555": {
           "exit_code": 1,
           "report": {
-            "attempt": "/home/worker/attempts/exe-13746539b776467cb9d1e8f3e8ff8225",
+            "attempt": "/home/worker/attempts/exe-98dca41c40ba4fddb76fe5c1663c124b",
             "checks": {
               "agent": null,
               "binaries": null,
@@ -177,7 +177,7 @@
               "brain": "brain_unreachable"
             },
             "harness": "codex",
-            "incarnation": "edb9ecc83334487fadea4f6cabeab735",
+            "incarnation": "7a991771010144e58ff403694ce15c90",
             "mode": "readiness",
             "status": "not_ready",
             "worker_startup_failure_reason": "home_unwritable"
@@ -187,11 +187,11 @@
       },
       "protected": {
         "files": {
-          "/home/worker/attempts/exe-13746539b776467cb9d1e8f3e8ff8225/execution.json": "4bf39a157a477eea6c6f728a8be5cd8a5ec80a8d8decefd10a807dbd11af22e5",
-          "/home/worker/attempts/exe-13746539b776467cb9d1e8f3e8ff8225/launch.json": "a07ce3577bb804f7231b183953f73b56c9933f820aca009918d020ed1f85220c",
-          "/home/worker/attempts/exe-13746539b776467cb9d1e8f3e8ff8225/registration.json": "2d0880b74350fcdafc1c8be244b6c334ffbdf4439d102628b72fd101da506859",
-          "/home/worker/attempts/exe-13746539b776467cb9d1e8f3e8ff8225/run/supervision/edb9ecc83334487fadea4f6cabeab735/context.json": "798fd34fe13f2ff1a6acda63b2f8c243fced5681e1432508715fd3f32e6d49d3",
-          "/home/worker/attempts/exe-13746539b776467cb9d1e8f3e8ff8225/run/supervision/edb9ecc83334487fadea4f6cabeab735/running.json": "a96fb2b1e52d851c9a4453ec1e50eceeb8571b4924fe0a5a93904ca0bbb26272"
+          "/home/worker/attempts/exe-98dca41c40ba4fddb76fe5c1663c124b/execution.json": "75c8d49fe1c4b606919061e4dd6fdd3aeb8c20e1793a3e46d26ae034af3a7292",
+          "/home/worker/attempts/exe-98dca41c40ba4fddb76fe5c1663c124b/launch.json": "295e77a2836853deebe8e1e07be95ee0dfc7470acfc6a819959c0f3c4ddaaef3",
+          "/home/worker/attempts/exe-98dca41c40ba4fddb76fe5c1663c124b/registration.json": "a4142b2833d15125ffa0743ff34e4ecc3caabba0948b45655441caacb555aa33",
+          "/home/worker/attempts/exe-98dca41c40ba4fddb76fe5c1663c124b/run/supervision/7a991771010144e58ff403694ce15c90/context.json": "8c594c11f86c94ec339d5563b9482cd9e2b249274ddd1cbb2783d4ef7f462253",
+          "/home/worker/attempts/exe-98dca41c40ba4fddb76fe5c1663c124b/run/supervision/7a991771010144e58ff403694ce15c90/running.json": "ef08d787f634ea6d509014750ba3928537f41d29e386a32040978880dbd8acd2"
         },
         "home": [
           ".agentihooks/state.json",

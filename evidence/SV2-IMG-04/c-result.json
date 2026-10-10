@@ -2,29 +2,29 @@
   "case": "C",
   "fixture_manifest": {
     "images": {
-      "fixture": "agentihooks-health-fixture:a3e0e8fe2e2843a0afd3669ce88280cb",
-      "missing_binary": "agentihooks-health-missing-binary:a3e0e8fe2e2843a0afd3669ce88280cb"
+      "fixture": "agentihooks-health-fixture:4124c5a2340b4d1b8bac0c8adcc04735",
+      "missing_binary": "agentihooks-health-missing-binary:4124c5a2340b4d1b8bac0c8adcc04735"
     },
     "inputs": {
       "docker/swarm-node/Dockerfile": "f36e23bd81a2c2f85942cd79de53bee3010e6e3fe9c381fd8a43a5ca33a8c448",
       "docker/swarm-node/health.py": "d6c31ed7515d9cfa38f39eb618792daa165ce96b017a386fdbbeebdbe9b7f759",
-      "scripts/swarm_v2/worker_health.py": "2f0d5f3efce5edde339f5b590b3b9de53c81c9c0edb8ddf18061c49ed613bf0a",
+      "scripts/swarm_v2/worker_health.py": "f18c59f964c7086af1a689c5b936340ee57260d5adad505ef7af236a80888091",
       "tests/integration/swarm_node/Dockerfile": "bcadc5c1200814d143813c1476a30bf8997d49e9db7637d6f47428c2306a4630",
-      "tests/integration/swarm_node/health_proof.py": "d922e956f084687c87b5986ef4b47d2bd301706f069935e6d6f8abc9e686cd2b",
+      "tests/integration/swarm_node/health_proof.py": "165086842a3f58db41ecc34123c4acab6d5a69c7607fa8adda443fdf2817fc79",
       "tests/integration/swarm_node/run_health_proof.sh": "ff02a6e6d6a38ba1ded0ed4ea68b80412ce3a090fb354764063788d0e532ee29"
     },
-    "tested_commit": "be234e1c19366e90baac3b511b68e8463bb37399"
+    "tested_commit": "3dccc3b41307ed827e1c0beefa374010c81e8c7b"
   },
   "mocked": false,
   "network": "none; fixture brain on container loopback",
   "package": "SV2-IMG-04",
   "runs": [
     {
-      "container": "3c4c3c163b619c06cd837978331ce2cac544e1adf7611e03afb3c71c2c2d3c2f",
+      "container": "2634cb82d582f6d53ff0e237ec5ff57361aa2bd7b0d9813763012e889c4a9243",
       "outage": {
         "exit_code": 0,
         "report": {
-          "attempt": "/home/worker/attempts/exe-0cd10a5d570a4c99ba62bac93e66863a",
+          "attempt": "/home/worker/attempts/exe-431f84de8d3e4705ad72a4eb0dd4622f",
           "checks": {
             "agent": null,
             "binaries": null,
@@ -38,7 +38,7 @@
             "brain": "brain_unreachable"
           },
           "harness": "codex",
-          "incarnation": "9694c4600f164987a54bba1aab0dd111",
+          "incarnation": "cfa2f825b1a14c48a48cb815de5f5f21",
           "mode": "readiness",
           "status": "degraded",
           "worker_startup_failure_reason": null
@@ -47,11 +47,11 @@
       },
       "protected": {
         "files": {
-          "/home/worker/attempts/exe-0cd10a5d570a4c99ba62bac93e66863a/execution.json": "7d9d423c4d415b0eecca6b47c72331f4494253a15ec34c7b5ece48cc0e103b6c",
-          "/home/worker/attempts/exe-0cd10a5d570a4c99ba62bac93e66863a/launch.json": "ec8216429552ac8201f5eac234fe9d7c11aec291d6d839e250cc2d74e3775c0f",
-          "/home/worker/attempts/exe-0cd10a5d570a4c99ba62bac93e66863a/registration.json": "170c9097b8424103427b76efcf3c38ecbf6feb544bbad8b8ef2d07478d7c9e5e",
-          "/home/worker/attempts/exe-0cd10a5d570a4c99ba62bac93e66863a/run/supervision/9694c4600f164987a54bba1aab0dd111/context.json": "a71015c9a10022519d3f38b829c844415d8cd5da1f227ed2c4eff41b2a809539",
-          "/home/worker/attempts/exe-0cd10a5d570a4c99ba62bac93e66863a/run/supervision/9694c4600f164987a54bba1aab0dd111/running.json": "5da9fa87ef3233f4d5fcb67bda5d4e1c66d6415502ffc8231e4edcbe50a39ffe"
+          "/home/worker/attempts/exe-431f84de8d3e4705ad72a4eb0dd4622f/execution.json": "82eee5efea50845208c6cf648ef294d221b26bb2eaf07f93b7ebd7c2687588bd",
+          "/home/worker/attempts/exe-431f84de8d3e4705ad72a4eb0dd4622f/launch.json": "75a1981d3c8083cddc4aadac26394583e712e7e4e4d6a6847c9accf8fe80eaf2",
+          "/home/worker/attempts/exe-431f84de8d3e4705ad72a4eb0dd4622f/registration.json": "6554819be59eed77811ada849d1475495de4e896207e95729d25e07ad74f1ee7",
+          "/home/worker/attempts/exe-431f84de8d3e4705ad72a4eb0dd4622f/run/supervision/cfa2f825b1a14c48a48cb815de5f5f21/context.json": "4c957829c71f59f1410ad25bdc6aa53607a13869f84310038bb6e15881529aff",
+          "/home/worker/attempts/exe-431f84de8d3e4705ad72a4eb0dd4622f/run/supervision/cfa2f825b1a14c48a48cb815de5f5f21/running.json": "67fe686d521325e8ca2b1d8cd80dd7b4134ecd0e6a1fc1c8b8ed30e44bf3dda9"
         },
         "home": [
           ".agentihooks/state.json",
@@ -66,7 +66,7 @@
       "replay": {
         "exit_code": 0,
         "report": {
-          "attempt": "/home/worker/attempts/exe-0cd10a5d570a4c99ba62bac93e66863a",
+          "attempt": "/home/worker/attempts/exe-431f84de8d3e4705ad72a4eb0dd4622f",
           "checks": {
             "agent": null,
             "binaries": null,
@@ -80,7 +80,7 @@
             "brain": "ok"
           },
           "harness": "codex",
-          "incarnation": "9694c4600f164987a54bba1aab0dd111",
+          "incarnation": "cfa2f825b1a14c48a48cb815de5f5f21",
           "mode": "readiness",
           "status": "ready",
           "worker_startup_failure_reason": null
@@ -90,7 +90,7 @@
       "restored": {
         "exit_code": 0,
         "report": {
-          "attempt": "/home/worker/attempts/exe-0cd10a5d570a4c99ba62bac93e66863a",
+          "attempt": "/home/worker/attempts/exe-431f84de8d3e4705ad72a4eb0dd4622f",
           "checks": {
             "agent": null,
             "binaries": null,
@@ -104,7 +104,7 @@
             "brain": "ok"
           },
           "harness": "codex",
-          "incarnation": "9694c4600f164987a54bba1aab0dd111",
+          "incarnation": "cfa2f825b1a14c48a48cb815de5f5f21",
           "mode": "readiness",
           "status": "ready",
           "worker_startup_failure_reason": null
@@ -112,30 +112,30 @@
         "stderr": ""
       },
       "runtime_after": {
-        "agent_pid": 78,
-        "agent_start": 52242,
-        "attempt": "/home/worker/attempts/exe-0cd10a5d570a4c99ba62bac93e66863a",
+        "agent_pid": 66,
+        "agent_start": 15748,
+        "attempt": "/home/worker/attempts/exe-431f84de8d3e4705ad72a4eb0dd4622f",
         "container_restarts": 0,
-        "container_started_at": "2026-10-10T11:38:44.394893012Z",
-        "incarnation": "9694c4600f164987a54bba1aab0dd111",
+        "container_started_at": "2026-10-10T11:46:30.476136594Z",
+        "incarnation": "cfa2f825b1a14c48a48cb815de5f5f21",
         "supervisor_pid": 7
       },
       "runtime_before": {
-        "agent_pid": 78,
-        "agent_start": 52242,
-        "attempt": "/home/worker/attempts/exe-0cd10a5d570a4c99ba62bac93e66863a",
+        "agent_pid": 66,
+        "agent_start": 15748,
+        "attempt": "/home/worker/attempts/exe-431f84de8d3e4705ad72a4eb0dd4622f",
         "container_restarts": 0,
-        "container_started_at": "2026-10-10T11:38:44.394893012Z",
-        "incarnation": "9694c4600f164987a54bba1aab0dd111",
+        "container_started_at": "2026-10-10T11:46:30.476136594Z",
+        "incarnation": "cfa2f825b1a14c48a48cb815de5f5f21",
         "supervisor_pid": 7
       }
     },
     {
-      "container": "661c9ab64d276a2f79594e6f9a0a6e252a9cc6f90ed5ecfca4b65674e6fca5bd",
+      "container": "1bf0ed094c36889367e9e37bdea89a3825e7ce40da21b349d85ef2652dc1f325",
       "outage": {
         "exit_code": 0,
         "report": {
-          "attempt": "/home/worker/attempts/exe-73db5da9e3234b5abc8b2799c5a562fe",
+          "attempt": "/home/worker/attempts/exe-eb3b47d636504a96b3e12f04ebe4e116",
           "checks": {
             "agent": null,
             "binaries": null,
@@ -149,7 +149,7 @@
             "brain": "brain_unreachable"
           },
           "harness": "codex",
-          "incarnation": "15bb9d03025c47e4b8da7d3145ea43a6",
+          "incarnation": "f9e04ee5294e4d1480377ec762062d9b",
           "mode": "readiness",
           "status": "degraded",
           "worker_startup_failure_reason": null
@@ -158,11 +158,11 @@
       },
       "protected": {
         "files": {
-          "/home/worker/attempts/exe-73db5da9e3234b5abc8b2799c5a562fe/execution.json": "b847c6bdde54a6694204bde71a04f51371e1a44899a9dedff2f93f0361607769",
-          "/home/worker/attempts/exe-73db5da9e3234b5abc8b2799c5a562fe/launch.json": "bf8517ff8000458551b7f263ffb18cc296b73a4e948baf647b5a3188c6b95ed2",
-          "/home/worker/attempts/exe-73db5da9e3234b5abc8b2799c5a562fe/registration.json": "5adbce365a548dfd902c72ba07f87bb512c6c107ef938187bdb680a95f3ad42e",
-          "/home/worker/attempts/exe-73db5da9e3234b5abc8b2799c5a562fe/run/supervision/15bb9d03025c47e4b8da7d3145ea43a6/context.json": "eee9da04721969c7d122dfdf6fa6419585835b1c53d1d8dea22bc7838dce24d6",
-          "/home/worker/attempts/exe-73db5da9e3234b5abc8b2799c5a562fe/run/supervision/15bb9d03025c47e4b8da7d3145ea43a6/running.json": "fa0201266700ea445ff26b5c2b7040912ed6519109d134005f94139f7353cfe5"
+          "/home/worker/attempts/exe-eb3b47d636504a96b3e12f04ebe4e116/execution.json": "d76a25f3438f776de499324f774bc4a3b21aa52a5e7e6e90feac367ce54380ec",
+          "/home/worker/attempts/exe-eb3b47d636504a96b3e12f04ebe4e116/launch.json": "f18c7faac926728deae5eee03c6fb935ece016adf0039e70d9a90e7703b9413e",
+          "/home/worker/attempts/exe-eb3b47d636504a96b3e12f04ebe4e116/registration.json": "f9f7d0ca61df6893d1e8f2cc66a5d81b5740a0d1639dd6dd9bed3b95af3e4f18",
+          "/home/worker/attempts/exe-eb3b47d636504a96b3e12f04ebe4e116/run/supervision/f9e04ee5294e4d1480377ec762062d9b/context.json": "511257ce3ceb2b38dd99558177e1ee170242ff208a6745406ec80894fe69d81a",
+          "/home/worker/attempts/exe-eb3b47d636504a96b3e12f04ebe4e116/run/supervision/f9e04ee5294e4d1480377ec762062d9b/running.json": "01d008abaaf9b5a25eb887960d7ca54e66fbb021df0fcdfc63591c6d4956a111"
         },
         "home": [
           ".agentihooks/state.json",
@@ -177,7 +177,7 @@
       "replay": {
         "exit_code": 0,
         "report": {
-          "attempt": "/home/worker/attempts/exe-73db5da9e3234b5abc8b2799c5a562fe",
+          "attempt": "/home/worker/attempts/exe-eb3b47d636504a96b3e12f04ebe4e116",
           "checks": {
             "agent": null,
             "binaries": null,
@@ -191,7 +191,7 @@
             "brain": "ok"
           },
           "harness": "codex",
-          "incarnation": "15bb9d03025c47e4b8da7d3145ea43a6",
+          "incarnation": "f9e04ee5294e4d1480377ec762062d9b",
           "mode": "readiness",
           "status": "ready",
           "worker_startup_failure_reason": null
@@ -201,7 +201,7 @@
       "restored": {
         "exit_code": 0,
         "report": {
-          "attempt": "/home/worker/attempts/exe-73db5da9e3234b5abc8b2799c5a562fe",
+          "attempt": "/home/worker/attempts/exe-eb3b47d636504a96b3e12f04ebe4e116",
           "checks": {
             "agent": null,
             "binaries": null,
@@ -215,7 +215,7 @@
             "brain": "ok"
           },
           "harness": "codex",
-          "incarnation": "15bb9d03025c47e4b8da7d3145ea43a6",
+          "incarnation": "f9e04ee5294e4d1480377ec762062d9b",
           "mode": "readiness",
           "status": "ready",
           "worker_startup_failure_reason": null
@@ -223,21 +223,21 @@
         "stderr": ""
       },
       "runtime_after": {
-        "agent_pid": 78,
-        "agent_start": 52762,
-        "attempt": "/home/worker/attempts/exe-73db5da9e3234b5abc8b2799c5a562fe",
+        "agent_pid": 66,
+        "agent_start": 16060,
+        "attempt": "/home/worker/attempts/exe-eb3b47d636504a96b3e12f04ebe4e116",
         "container_restarts": 0,
-        "container_started_at": "2026-10-10T11:38:49.550863749Z",
-        "incarnation": "15bb9d03025c47e4b8da7d3145ea43a6",
+        "container_started_at": "2026-10-10T11:46:33.606021187Z",
+        "incarnation": "f9e04ee5294e4d1480377ec762062d9b",
         "supervisor_pid": 7
       },
       "runtime_before": {
-        "agent_pid": 78,
-        "agent_start": 52762,
-        "attempt": "/home/worker/attempts/exe-73db5da9e3234b5abc8b2799c5a562fe",
+        "agent_pid": 66,
+        "agent_start": 16060,
+        "attempt": "/home/worker/attempts/exe-eb3b47d636504a96b3e12f04ebe4e116",
         "container_restarts": 0,
-        "container_started_at": "2026-10-10T11:38:49.550863749Z",
-        "incarnation": "15bb9d03025c47e4b8da7d3145ea43a6",
+        "container_started_at": "2026-10-10T11:46:33.606021187Z",
+        "incarnation": "f9e04ee5294e4d1480377ec762062d9b",
         "supervisor_pid": 7
       }
     }
