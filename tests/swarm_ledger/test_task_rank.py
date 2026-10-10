@@ -173,11 +173,20 @@ def test_order_puts_each_rank_in_its_place(task, position):
     assert ledger_rank.order(task) == position
 
 
-def test_the_page_rank_op_refusal_names_its_shape():
+@pytest.mark.parametrize("by", ["", 7, None])
+def test_the_page_rank_op_refusal_names_its_shape(by):
     with pytest.raises(
-        ValueError, match=r"^task_rank is the operator's and takes only an id, an item tasks/<id> and a rank$"
+        ValueError, match=r"^task_rank takes an id, an item tasks/<id>, a rank and an optional author by$"
     ):
-        ledger_rank.check({"op": "task_rank", "id": "p", "item": "tasks/t1", "rank": "high", "by": MASTER})
+        ledger_rank.check({"op": "task_rank", "id": "p", "item": "tasks/t1", "rank": "high", "by": by})
+
+
+def test_the_rank_op_by_a_refused_author_changes_nothing_and_names_why():
+    doc, ctx = {"tasks": [{"id": "t1"}]}, FakeContext()
+    ctx.refused = []
+    assert ledger_rank.apply(doc, {**page_rank("high"), "by": ENGINEER}, ctx) is False
+    assert (doc["tasks"][0], ctx.stamps, ctx.events, ctx.dirty) == ({"id": "t1"}, [], [], False)
+    assert ctx.refused == [f"{ENGINEER} cannot set a task rank: {ledger_tasks.PROPOSE}"]
 
 
 class FakeContext:
