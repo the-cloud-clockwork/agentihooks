@@ -89,7 +89,6 @@ class ArtifactStore:
     def __init__(self, backend: Backend) -> None:
         self.backend = backend
         self.failures: Counter[str] = Counter()
-        self.readable: set[str] = set()
 
     def metrics(self) -> dict[str, dict[str, int]]:
         return {METRIC: dict(self.failures)}
@@ -112,21 +111,17 @@ class ArtifactStore:
 
     def stat(self, scope: Scope, ref: ArtifactRef) -> str:
         key = scope.key("objects", ref.sha256)
-        if self.backend.size(key) is not None and self._matches(key, ref):
-            return VERIFIED
-        self.readable.discard(key)
-        return ABSENT if self.backend.size(key) is None else CORRUPT
+        if self.backend.size(key) is None:
+            return ABSENT
+        return VERIFIED if self._matches(key, ref) else CORRUPT
 
     def get_range(self, scope: Scope, ref: ArtifactRef, start: int = 0, length: int | None = None) -> bytes:
         length = ref.size - start if length is None else length
         if start < 0 or length < 0 or start + length > ref.size:
             _refuse(f"range {start}+{length} is outside {ref.size} bytes")
-        key = scope.key("objects", ref.sha256)
-        if key not in self.readable:
-            if self.stat(scope, ref) != VERIFIED:
-                _refuse(f"artifact {ref.sha256} is not verified in {self.backend.kind}")
-            self.readable.add(key)
-        return self.backend.read(key, start, length)
+        if self.stat(scope, ref) != VERIFIED:
+            _refuse(f"artifact {ref.sha256} is not verified in {self.backend.kind}")
+        return self.backend.read(scope.key("objects", ref.sha256), start, length)
 
     def commit_manifest(self, scope: Scope, name: str, artifact_ids: Iterable[str]) -> dict:
         _identifier(name)
@@ -164,9 +159,7 @@ class ArtifactStore:
             return False
         for key in owned:
             self.backend.remove(key)
-        object_key = scope.key("objects", ref.sha256)
-        self.readable.discard(object_key)
-        self.backend.remove(object_key)
+        self.backend.remove(scope.key("objects", ref.sha256))
         return True
 
     def _generations(self, scope: Scope, name: str) -> list[int]:
@@ -202,7 +195,7 @@ class ArtifactStore:
         self.failures[self.backend.kind] += 1
         self.backend.remove(key)
         _refuse(
-            f"{self.backend.kind} acknowledged {ref.size} bytes for {key} but the stored object does not match {ref.sha256}"
+            f"{self.backend.kind} reported a successful write of {ref.size} bytes to {key} but the read back does not match {ref.sha256}"
         )
 
 

@@ -260,8 +260,8 @@ def test_truncated_upload_is_refused_counted_and_leaves_no_state(world):
     with pytest.raises(base.ArtifactError) as raised:
         world.store.put(world.scope, "a2", DATA)
     assert str(raised.value) == (
-        f"{world.kind} acknowledged {len(DATA)} bytes for {staging_key(DATA)} "
-        f"but the stored object does not match {sha(DATA)}"
+        f"{world.kind} reported a successful write of {len(DATA)} bytes to {staging_key(DATA)} "
+        f"but the read back does not match {sha(DATA)}"
     )
     assert {key: world.backend.read(key, 0, world.backend.size(key)) for key in world.keys()} == before
     assert world.store.recorded(world.scope, "a2") is None
@@ -283,8 +283,8 @@ def test_same_length_corruption_is_refused(world):
     with pytest.raises(base.ArtifactError) as raised:
         world.store.put(world.scope, "a1", DATA)
     assert str(raised.value) == (
-        f"{world.kind} acknowledged {len(DATA)} bytes for {staging_key(DATA)} "
-        f"but the stored object does not match {sha(DATA)}"
+        f"{world.kind} reported a successful write of {len(DATA)} bytes to {staging_key(DATA)} "
+        f"but the read back does not match {sha(DATA)}"
     )
     assert world.keys() == []
     assert world.store.metrics() == {base.METRIC: {world.kind: 1}}
@@ -303,7 +303,7 @@ def test_interrupted_upload_leaves_no_staging(world):
     assert world.keys() == []
 
 
-def test_ranges_reuse_one_verification_until_the_object_changes(world):
+def test_every_range_read_verifies_the_whole_object(world):
     ref = world.store.put(world.scope, "a1", DATA)
     reads = []
     real = world.backend.read
@@ -315,9 +315,8 @@ def test_ranges_reuse_one_verification_until_the_object_changes(world):
     world.backend.read = read
     world.store.get_range(world.scope, ref, 2, 3)
     world.store.get_range(world.scope, ref, 2, 3)
-    assert reads == [(0, len(DATA)), (2, 3), (2, 3)]
+    assert reads == [(0, len(DATA)), (2, 3), (0, len(DATA)), (2, 3)]
     world.backend.write(object_key(DATA), DATA[:-1] + b"X")
-    assert world.store.stat(world.scope, ref) == base.CORRUPT
     with pytest.raises(base.ArtifactError):
         world.store.get_range(world.scope, ref, 2, 3)
 
@@ -701,8 +700,8 @@ def test_truncated_copy_is_refused_and_removed(tmp_path):
     with pytest.raises(base.ArtifactError) as raised:
         world.store.put(world.scope, "a1", DATA)
     assert str(raised.value) == (
-        f"object-store acknowledged {len(DATA)} bytes for {object_key(DATA)} "
-        f"but the stored object does not match {sha(DATA)}"
+        f"object-store reported a successful write of {len(DATA)} bytes to {object_key(DATA)} "
+        f"but the read back does not match {sha(DATA)}"
     )
     assert world.keys() == []
     assert world.store.metrics() == {base.METRIC: {"object-store": 1}}
