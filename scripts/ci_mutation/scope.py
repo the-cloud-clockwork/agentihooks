@@ -60,18 +60,10 @@ def discover_changes(root: Path, base: str | list[str], head: str) -> dict[str, 
     weak = [weakened_tests(root, own, head) for own in bases[1:]]
     found = {}
     for name, lines in given.items():
-        kept = [lines if reads(root, name, tests) else changes.get(name) for changes, tests in zip(newer, weak)]
+        kept = [lines if tests else changes.get(name) for changes, tests in zip(newer, weak)]
         if None not in kept:
             found[name] = lines.intersection(*kept)
     return found
-
-
-def reads(root: Path, name: str, weakened: set[str]) -> bool:
-    if not weakened:
-        return False
-    if any(not is_test_file(path) or not (root / path).is_file() for path in weakened):
-        return True
-    return not weakened.isdisjoint(select_tests(root, Path(name)))
 
 
 def is_test_file(path: str) -> bool:
@@ -79,8 +71,9 @@ def is_test_file(path: str) -> bool:
 
 
 def weakened_tests(root: Path, base: str, head: str) -> set[str]:
-    names = subprocess.check_output(["git", "diff", "--name-only", "-z", base, head, "--", "tests"], cwd=root)
-    return {name for name in names.decode().split("\0") if name and not adds_only_tests(root, base, head, name)}
+    command = ["git", "diff", "--name-only", "--no-renames", "-z", base, head, "--", "tests"]
+    names = subprocess.check_output(command, cwd=root).decode().split("\0")
+    return {name for name in names if name and not adds_only_tests(root, base, head, name)}
 
 
 def adds_only_tests(root: Path, base: str, head: str, name: str) -> bool:
@@ -89,11 +82,16 @@ def adds_only_tests(root: Path, base: str, head: str, name: str) -> bool:
     old, new = (blob(root, rev, name) for rev in (base, head))
     if new is None:
         return False
-    before = Counter(ast.dump(node) for node in ast.parse(old or b"").body)
+    previous = ast.parse(old or b"").body
     nodes = ast.parse(new).body
+    before = Counter(ast.dump(node) for node in previous)
     after = Counter(ast.dump(node) for node in nodes)
     added = after - before
-    return not before - after and all(is_test(node) for node in nodes if added[ast.dump(node)])
+    taken = {bound for node in previous for bound in bindings(node)}
+    fresh = Counter(bound for node in nodes for bound in bindings(node)) - Counter(taken)
+    if before - after or any(bound in taken or count > 1 for bound, count in fresh.items()):
+        return False
+    return all(is_test(node) for node in nodes if added[ast.dump(node)])
 
 
 def blob(root: Path, rev: str, name: str) -> bytes | None:
@@ -105,8 +103,23 @@ def is_test(node: ast.stmt) -> bool:
     if isinstance(node, ast.Import | ast.ImportFrom):
         return True
     if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-        return node.name.startswith("test")
-    return isinstance(node, ast.ClassDef) and node.name.startswith("Test")
+        return node.name.startswith("test_") and marked(node)
+    if isinstance(node, ast.ClassDef):
+        methods = all(isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef) and is_test(item) for item in node.body)
+        return node.name.startswith("Test") and marked(node) and methods
+    return False
+
+
+def marked(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) -> bool:
+    return all(ast.unparse(mark).startswith("pytest.mark.") for mark in node.decorator_list)
+
+
+def bindings(node: ast.stmt) -> list[str]:
+    if isinstance(node, ast.Import | ast.ImportFrom):
+        return [alias.asname or alias.name.split(".")[0] for alias in node.names]
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        return [node.name]
+    return []
 
 
 def changes_since(root: Path, base: str, head: str) -> dict[str, set[int]]:

@@ -264,6 +264,50 @@ FIXTURED = PASSING + "\n\n@pytest.fixture\ndef thing():\n    return 1\n"
         ("tests/test_x.py", PASSING, PASSING + "\n\ndef helper():\n    return 3\n", False),
         ("tests/test_x.py", PASSING, PASSING + "\n\nclass Helper:\n    pass\n", False),
         ("tests/test_x.py", PASSING, PASSING + "\nx = 1\n", False),
+        ("tests/test_x.py", PASSING, PASSING + "\n\ndef test_a():\n    pass\n", False),
+        ("tests/test_x.py", PASSING, PASSING + "\nfrom os import path as pytest\n", False),
+        ("tests/test_x.py", "import os\n" + PASSING, "import os\nimport os.path\n" + PASSING, False),
+        ("tests/test_x.py", PASSING, PASSING + "\n\ndef test_c():\n    pass\n\n\ndef test_c():\n    pass\n", False),
+        (
+            "tests/test_x.py",
+            PASSING,
+            PASSING + "\n\n@pytest.fixture(autouse=True)\ndef test_patch():\n    pass\n",
+            False,
+        ),
+        ("tests/test_x.py", PASSING, PASSING + "\n\ndef testing():\n    pass\n", False),
+        (
+            "tests/test_x.py",
+            PASSING,
+            PASSING + "\n\n@pytest.mark.parametrize('x', [1])\ndef test_c(x):\n    assert x\n",
+            True,
+        ),
+        ("tests/test_x.py", PASSING, PASSING + "\n\n@pytest.mark.slow\ndef test_c():\n    assert 3\n", True),
+        (
+            "tests/test_x.py",
+            PASSING,
+            PASSING
+            + "\n\n@pytest.mark.slow\nclass TestC:\n    @pytest.mark.slow\n    def test_c(self):\n        assert 3\n",
+            True,
+        ),
+        (
+            "tests/test_x.py",
+            PASSING,
+            PASSING + "\n\nclass TestC:\n    patched = 1\n\n    def test_c(self):\n        assert 3\n",
+            False,
+        ),
+        ("tests/test_x.py", PASSING, PASSING + "\n\nclass TestC:\n    def helper(self):\n        return 3\n", False),
+        (
+            "tests/test_x.py",
+            PASSING,
+            PASSING + "\n\nclass TestC:\n    import os\n\n    def test_c(self):\n        assert 3\n",
+            False,
+        ),
+        (
+            "tests/test_x.py",
+            PASSING,
+            PASSING + "\n\n@stub\nclass TestC:\n    def test_c(self):\n        assert 3\n",
+            False,
+        ),
         ("tests/test_x.py", PASSING, PASSING.replace("def test_b():\n    assert 2\n", ""), False),
         ("tests/test_x.py", None, PASSING, True),
         ("tests/test_x.py", PASSING, None, False),
@@ -295,39 +339,17 @@ def test_weakened_tests_name_every_test_change_beyond_added_tests(tmp_path):
 
     git, commit = _repo(tmp_path)
     (tmp_path / "tests").mkdir()
-    for name in ("test_add.py", "test_skip.py"):
+    for name in ("test_add.py", "test_skip.py", "test_moved.py"):
         (tmp_path / "tests" / name).write_text(PASSING)
     git("add", "tests")
     base = commit("dev.py", "a = 1\n")
     (tmp_path / "tests" / "test_add.py").write_text(PASSING + "\n\ndef test_c():\n    assert 3\n")
     (tmp_path / "tests" / "test_skip.py").write_text(PASSING.replace("def test_a", "@pytest.mark.skip\ndef test_a"))
+    git("mv", "tests/test_moved.py", "tests/test_renamed.py")
+    (tmp_path / "tests" / "test_renamed.py").write_text(PASSING.replace("assert 2", "assert 2 or True"))
     git("add", "tests")
     commit("dev.py", "a = 2\n")
-    assert weakened_tests(tmp_path, base, "HEAD") == {"tests/test_skip.py"}
-
-
-@pytest.mark.parametrize(
-    ("weakened", "one", "two"),
-    [
-        (set(), False, False),
-        ({"tests/test_one.py"}, True, False),
-        ({"tests/conftest.py"}, True, True),
-        ({"tests/test_one.json"}, True, True),
-        ({"tests/test_gone.py"}, True, True),
-        ({"tests/conftest.py", "tests/test_one.py"}, True, True),
-    ],
-)
-def test_an_inherited_file_reads_weakened_tests_through_its_selected_tests_or_any_helper(tmp_path, weakened, one, two):
-    from scripts.ci_mutation.scope import reads
-
-    tests = tmp_path / "tests"
-    tests.mkdir()
-    (tests / "test_one.py").write_text("from hooks import one\n")
-    (tests / "test_two.py").write_text("from hooks import two\n")
-    (tests / "conftest.py").write_text("")
-    (tests / "test_one.json").write_text("{}\n")
-    assert reads(tmp_path, "hooks/one.py", weakened) is one
-    assert reads(tmp_path, "hooks/two.py", weakened) is two
+    assert weakened_tests(tmp_path, base, "HEAD") == {"tests/test_skip.py", "tests/test_moved.py"}
 
 
 @pytest.mark.parametrize(
@@ -335,6 +357,7 @@ def test_an_inherited_file_reads_weakened_tests_through_its_selected_tests_or_an
     [
         (lambda text: text + "\n\ndef test_more():\n    assert dev.d() == 1\n", False),
         (lambda text: text.replace("def test_d", "@pytest.mark.skip\ndef test_d"), True),
+        (lambda text: text.replace("from hooks import dev", "from tests import fakes as dev"), True),
         (None, True),
     ],
 )
