@@ -10,7 +10,7 @@ Package SV2-FSY-05. Shared storage is allowed; shared mutable runtime identity i
 | Read only configuration seed | Yes | Pod policy `mounts` entry with purpose `seed`, rendered read only |
 | Checkpoint and artifact storage | Yes, scoped | Purpose `artifact`, rendered writable with `subPath` set to the execution id |
 | Node cache store | Yes, read only into attempts | Purpose `cache`, rendered read only; only the store owner writes seeds |
-| Any host path at or inside an operator home (`/home/<user>`, `/root`, `/Users/<user>`, the WSL `/mnt/<drive>/Users/<user>`) or a parent of one (`/`, `/home`, `/Users`, `/mnt`, `/mnt/<drive>`) | Never, not even read only | Refused; a seed comes from a claim, NFS or a host path outside every home |
+| Any host path at or inside an operator home (`/home/<user>`, `/var/home/<user>`, `/root`, `/Users/<user>`, the WSL `/mnt/<drive>/Users/<user>`) or a parent of one (`/`, `/home`, `/var`, `/var/home`, `/Users`, `/mnt`, `/mnt/<drive>`) | Never, not even read only | Refused; a seed comes from a claim, NFS or a host path outside every home |
 
 `scripts.swarm_v2.kubernetes.storage.MountChecker` enforces the table on every rendered Pod. `PodTemplate.render`
 refuses a Pod that fails it with reason `storage`, and `python -m scripts.swarm_v2.kubernetes.storage <pod.json>`
@@ -24,6 +24,9 @@ checks any manifest. The checker reads the volumes themselves, never a purpose l
   otherwise it is refused as `unscoped_shared_write`. `subPathExpr` is not accepted as proof of scope.
 - A `hostPath` volume at an operator home is refused as `operator_home`, mounted or not, checked on every volume entry.
 - `shared_runtime_mount_rejections_total`, the package measurement named by the spec, counts every reason.
+
+The checker is lexical. A node host path that is a symlink into a home passes, because the kubelet follows it on the
+node; node layout and pod policy authors are trusted, and the checker does not resolve node paths.
 
 ## Node cache store
 

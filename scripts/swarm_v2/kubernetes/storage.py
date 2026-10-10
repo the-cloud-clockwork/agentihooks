@@ -15,8 +15,8 @@ PRIVATE_ROOTS = ("/home/worker/attempts", "/tmp", "/var/run/swarm")
 NATIVE = frozenset({".codex", ".claude", ".config", ".local", "herdr"})
 PRIVATE_KINDS = frozenset({"emptyDir", "configMap", "secret", "projected", "downwardAPI", "ephemeral"})
 SOURCE_READ_ONLY = frozenset({"persistentVolumeClaim", "nfs"})
-HOME = re.compile(r"(/(home|Users)/[^/]+|/root|/mnt/[a-zA-Z]/Users/[^/]+)(/.+)?")
-HOME_PARENTS = re.compile(r"/|/home|/Users|/mnt|/mnt/[a-zA-Z]|/mnt/[a-zA-Z]/Users")
+HOME = re.compile(r"(/(home|Users|var/home)/[^/]+|/root|/mnt/[a-zA-Z]/Users/[^/]+)(/.+)?")
+HOME_PARENTS = re.compile(r"/|/home|/Users|/var|/var/home|/mnt|/mnt/[a-zA-Z]|/mnt/[a-zA-Z]/Users")
 
 
 class StorageRefused(ValueError):

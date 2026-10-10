@@ -308,6 +308,9 @@ def test_init_containers_are_checked_like_the_agent(tmp_path):
         "/Users/op/x",
         "/root/x",
         "/mnt/c/Users/op/seed",
+        "/var/home/iamroot",
+        "/var/home",
+        "/var",
     ],
 )
 def test_the_operator_home_from_the_node_is_refused_even_read_only(tmp_path, path):
