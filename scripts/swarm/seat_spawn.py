@@ -1,5 +1,7 @@
 """Spawn one named seat of a swarm, the master or the dispatcher, behind the session slot and host checks."""
 
+from collections.abc import Callable
+
 from scripts.inbox.seats import seat_address
 from scripts.swarm.naming import TYPES
 from scripts.swarm.store import AgentRecord
@@ -22,7 +24,7 @@ def host_hold(slug: str, store, now_ms: int, what: str) -> str:
     return tick._hold(slug, store, f"holding the {what} spawn: {host}") if host else ""
 
 
-def place(slug: str, config, store, runtime, lane: str, now_ms: int, prepare):
+def place(slug: str, config, store, runtime, lane: str, now_ms: int, prepare: Callable[[AgentRecord], dict]):
     """Name, record and launch the lane's seat; prepare(record) returns the task its prompt is built from. A failure
     raises SeatFailed with the record still stored, so the caller settles what it began before dropping it."""
     from scripts.swarm import tick
