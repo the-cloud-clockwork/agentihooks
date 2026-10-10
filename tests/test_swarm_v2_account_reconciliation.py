@@ -546,3 +546,51 @@ def test_status_reports_the_reconciliation_and_releases_nothing(world, monkeypat
     }
     assert block["mode"] == "enforce"
     assert world.rows() == before
+
+
+def test_holds_names_only_the_exact_execution_and_generation_of_a_row(world):
+    world.running(TERMINAL)
+    lost = world.agents[TERMINAL]
+
+    assert world.reconciler.holds(lost.execution_id, lost.generation) is True
+    assert world.reconciler.holds(lost.execution_id, lost.generation + 1) is False
+    assert world.reconciler.holds("exec-other", lost.generation) is False
+    world.observed(lost, "lost_terminal", sources="supervisor_exit")
+    world.reconciler.exited(lost.execution_id, lost.generation, "supervisor")
+    assert world.reconciler.holds(lost.execution_id, lost.generation) is False
+
+
+@pytest.mark.parametrize(
+    ("sources", "expected"),
+    [
+        (("pod_failed",), "kubernetes"),
+        (("supervisor_exit",), "supervisor"),
+        (("supervisor_exit", "pod_failed"), "kubernetes"),
+        (("pod_running",), None),
+        (("pod_gone",), None),
+        (("pod_unreachable",), None),
+        (("pod_failed_forbidden",), None),
+        ((), None),
+    ],
+)
+def test_the_exit_source_is_the_first_source_whose_reading_shows_an_exit(sources, expected):
+    cases = {
+        **INPUTS,
+        "pod_failed_forbidden": {"kubernetes": {**INPUTS["pod_failed"]["kubernetes"], "reading": "forbidden"}},
+    }
+    found = {name: entry for case in sources for name, entry in cases[case].items()}
+    values = INPUTS["lost_worker"]
+    seen = observe.Classification(
+        "exec-1",
+        1,
+        observe.State(values["state"]),
+        observe.Terminal(values["terminal"]),
+        observe.Failure(values["failure"]),
+        observe.Confidence(values["confidence"]),
+        1.0,
+        1.0,
+        1.0,
+        found,
+    )
+
+    assert reconciliation.exit_source(seen) == expected

@@ -60,6 +60,10 @@ def _shows_exit(seen: observe.Classification | None, source: str) -> bool:
     return entry["reading"] == observe.Reading.OK.value and entry["value"] in EXIT_VALUES[source]
 
 
+def exit_source(seen: observe.Classification) -> str | None:
+    return next((source for source in EXIT_VALUES if _shows_exit(seen, source)), None)
+
+
 def _no_grant(_token: str) -> None:
     return None
 
@@ -87,6 +91,13 @@ class AccountReconciler:
             if found:
                 rows[account] = found
         return rows
+
+    def holds(self, execution_id: str, generation: int) -> bool:
+        return any(
+            (slot.execution_id, slot.generation) == (execution_id, generation)
+            for found in self._rows().values()
+            for slot in found.values()
+        )
 
     def _seat(self, name: str) -> str:
         return seat_holder(name).removeprefix(f"{self.slug}/")
