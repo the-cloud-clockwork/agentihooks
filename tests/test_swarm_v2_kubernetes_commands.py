@@ -239,7 +239,7 @@ def test_observe_refuses_a_stored_command_that_differs_from_the_operation(world,
     transport(world).apply_operation(operation(agent), payload)
     changed = operation(agent, payload={"command": "answer", "text": "other"})
     assert transport(world).observe_operation(changed) == Observation(Phase.REFUSED)
-    drained = operation(agent, "drain", {"command": "answer", "text": TEXT})
+    drained = operation(agent, "drain", {"command": "drain", "text": ""})
     assert transport(world).observe_operation(drained) == Observation(Phase.REFUSED)
     stale = operation(agent, generation=agent.generation + 1)
     assert transport(world).observe_operation(stale) == Observation(Phase.REFUSED)

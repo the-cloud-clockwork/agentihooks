@@ -171,7 +171,7 @@ def _positive(world):
         "issued_over_http": [[outcome.status, outcome.value.phase, outcome.value.result["state"]] for outcome in said],
         "http_payloads_intact": over_http == [["answer", {"text": text}] for text in PROMPTS],
         "http_payload_sha256": [sha(payload) for _, payload in over_http],
-        "fallback": [delivered, queued, world.ran[len(PROMPTS)] == ["answer", {"text": PROMPTS[2]}]],
+        "fallback": [delivered, len(queued), world.ran[len(PROMPTS)] == ["answer", {"text": PROMPTS[2]}]],
         "fallback_calls": world.helper.calls,
         "fallback_argv_bounded": bounded(world.helper.argvs),
         "drain": [drain.status, draining, stored["state"], stored["outcome"], worker.may_mutate()],
