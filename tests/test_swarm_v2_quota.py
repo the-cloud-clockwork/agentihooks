@@ -172,6 +172,16 @@ def test_an_undecodable_record_hides_no_other_account(world, monkeypatch):
     assert [probe.account for _, probe in quota.fleet_observations({quota.FLAG: "1"})] == [SPARE]
 
 
+@pytest.mark.parametrize(
+    "report",
+    [
+        None,
+        {"provider_status": "error", "observed_ms": 240000},
+        {**STALE_FULL, "five_used": None},
+        {**STALE_FULL, "week_used": None},
+        {**STALE_FULL, "provider_status": "error"},
+    ],
+)
 def test_missing_or_failed_quota_data_is_unknown_never_full(world, report):
     if report:
         world.publish(report)
