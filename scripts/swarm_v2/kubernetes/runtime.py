@@ -12,15 +12,9 @@ GENERATION_LABEL = f"{DOMAIN}/generation"
 SPEC_DIGEST = f"{DOMAIN}/spec-digest"
 OPERATION_DIGEST = f"{DOMAIN}/operation-digest"
 OUTCOMES = ("created", "adopted", "observed", "quarantined", "disabled")
-GUARDED = (
-    "serviceAccountName",
-    "automountServiceAccountToken",
-    "hostNetwork",
-    "hostPID",
-    "hostIPC",
-    "runtimeClassName",
-    "securityContext",
-)
+# The API server rewrites quantities into canonical form, so a matching Pod can show "1" for "1000m".
+QUANTITIES = frozenset(("resources", "sizeLimit"))
+FORBIDDEN = frozenset(("initContainers", "ephemeralContainers", "command", "envFrom"))
 
 
 @dataclass(frozen=True)
@@ -34,17 +28,17 @@ class PodStatus:
     deleting: bool
 
 
-def guarded(spec: dict) -> dict:
-    """Pod fields the template always sets explicitly, so the API server never defaults them."""
-    containers = spec.get("containers", [])
-    first = containers[0] if containers else {}
-    return {
-        **{key: spec.get(key) for key in GUARDED},
-        "containers": len(containers),
-        "image": first.get("image"),
-        "container_security": first.get("securityContext"),
-        "host_paths": [volume["name"] for volume in spec.get("volumes", []) if "hostPath" in volume],
-    }
+def covers(live: object, wanted: object) -> bool:
+    """Every value the template sets is unchanged on the live Pod; the API server may add defaults beside them."""
+    if isinstance(wanted, dict):
+        return (
+            isinstance(live, dict)
+            and not any(key in live for key in FORBIDDEN - wanted.keys())
+            and all(key in QUANTITIES or (key in live and covers(live[key], value)) for key, value in wanted.items())
+        )
+    if isinstance(wanted, list):
+        return isinstance(live, list) and len(live) == len(wanted) and all(map(covers, live, wanted))
+    return live == wanted
 
 
 def pod_status(pod: dict) -> PodStatus:
@@ -73,8 +67,7 @@ class KubernetesTransport:
         except ApiRefused:
             return Observation(Phase.UNKNOWN)
         if not pods:
-            # After an unanswered create, a missing Pod may have run and been deleted, so it proves no absence.
-            return Observation(Phase.UNKNOWN if operation.phase is Phase.UNKNOWN else Phase.ABSENT)
+            return Observation(Phase.ABSENT)
         return self._judge(operation, pods, "observed", None)
 
     def apply_operation(self, operation: Operation, payload: dict) -> Observation:
@@ -154,7 +147,7 @@ class KubernetesTransport:
             return ""
         if notes.get(SPEC_DIGEST) != rendered["metadata"]["annotations"][SPEC_DIGEST]:
             return "spec"
-        if guarded(pod.get("spec", {})) != guarded(rendered["spec"]):
+        if not covers(pod.get("spec"), rendered["spec"]):
             return "spec"
         return ""
 

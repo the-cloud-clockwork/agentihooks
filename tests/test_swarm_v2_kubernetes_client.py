@@ -1,5 +1,6 @@
 import io
 import json
+import ssl
 import urllib.error
 from http.client import IncompleteRead
 
@@ -134,6 +135,27 @@ def test_send_turns_a_truncated_success_body_into_a_connection_error(token):
     with pytest.raises(ConnectionError) as raised:
         KubeHttp("https://api.test", token, CONTEXT, RawOpener(response)).send("GET", "/p")
     assert str(raised.value) == "the API server answer is unreadable"
+
+
+def test_send_turns_a_tls_failure_while_reading_into_a_connection_error(token):
+    def broken():
+        raise ssl.SSLError("record layer failure")
+
+    response = Response(200, b"")
+    response.read = broken
+    with pytest.raises(ConnectionError) as raised:
+        KubeHttp("https://api.test", token, CONTEXT, RawOpener(response)).send("GET", "/p")
+    assert str(raised.value) == "the API server answer is unreadable"
+
+
+def test_send_lets_a_timeout_while_reading_through(token):
+    def slow():
+        raise TimeoutError("read timed out")
+
+    response = Response(200, b"")
+    response.read = slow
+    with pytest.raises(TimeoutError):
+        KubeHttp("https://api.test", token, CONTEXT, RawOpener(response)).send("GET", "/p")
 
 
 def test_send_returns_an_empty_body_for_a_truncated_http_error(token):
