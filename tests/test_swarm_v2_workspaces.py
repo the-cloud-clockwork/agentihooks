@@ -104,6 +104,8 @@ def test_origin_identity_keeps_a_port_and_reads_local_paths():
     assert workspaces.identity("file:///srv/git/repo.git") == "/srv/git/repo"
     assert workspaces.identity("ssh://host.example:0/a") == "host.example/a"
     assert workspaces.identity("https://github.com/org/BOX/") == "github.com/org/BOX"
+    assert workspaces.identity("host.example:/srv/repo.git") == "host.example/srv/repo"
+    assert workspaces.identity("host.example:/Xr/repo") == workspaces.identity("ssh://host.example/Xr/repo")
 
 
 @pytest.mark.parametrize(
@@ -248,6 +250,8 @@ def test_a_recorded_generation_for_another_base_is_refused(world):
         ({"origin": " https://user:pass@github.com/o/r"}, CREDENTIAL),
         ({"origin": "ssh://git:pass@host.example/o/r"}, CREDENTIAL),
         ({"origin": "user:secret@host.example:o/r"}, CREDENTIAL),
+        ({"origin": "https://github.com/o/r?token=x"}, CREDENTIAL),
+        ({"base": "x..dev"}, "invalid base branch: x..dev"),
     ],
 )
 def test_invalid_requests_are_refused_before_any_git_io(world, change, message):
@@ -445,6 +449,7 @@ def test_an_inherited_git_dir_does_not_redirect_preparation(world, monkeypatch):
         "GIT_COMMON_DIR": str(world.other),
         "GIT_INDEX_FILE": str(world.root / "missing" / "index"),
         "GIT_OBJECT_DIRECTORY": str(world.root / "missing" / "objects"),
+        "GIT_NAMESPACE": "elsewhere",
     }
     for key, value in inherited.items():
         monkeypatch.setenv(key, value)
@@ -482,6 +487,42 @@ def test_a_replay_restores_a_removed_worktree_at_its_branch_tip(world):
     replayed = workspaces.prepare(world.execution, world.request())
     assert replayed == first
     assert git("rev-parse", "HEAD", cwd=replayed.path) == tip
+
+
+def test_a_replay_restores_a_half_created_worktree_folder(world):
+    first = workspaces.prepare(world.execution, world.request())
+    shutil.rmtree(first.path)
+    first.path.mkdir()
+    workspaces.prepare(world.execution, world.request())
+    assert (first.path / ".git").is_file()
+    assert git("rev-parse", "HEAD", cwd=first.path) == world.head()
+
+
+def test_a_replay_with_a_newer_required_commit_is_refused_as_stale(world):
+    first = workspaces.prepare(world.execution, world.request())
+    newer = commit(world.work, "newer")
+    git("push", "-q", str(world.origin), "dev", cwd=world.work)
+    workspaces.prepare(world.execution, world.request("t2"))
+    with pytest.raises(workspaces.WorkspaceError) as refused:
+        workspaces.prepare(world.execution, world.request(minimum=newer))
+    assert str(refused.value) == f"base dev at {first.base_commit} does not contain {newer}; it is stale"
+
+
+def test_a_failed_branch_listing_starts_no_work(world, monkeypatch):
+    real = subprocess.run
+
+    def broken(command, **kwargs):
+        if "branch" in command:
+            return subprocess.CompletedProcess(command, 1, "", "")
+        return real(command, **kwargs)
+
+    monkeypatch.setattr(workspaces.subprocess, "run", broken)
+    with pytest.raises(workspaces.WorkspaceError) as refused:
+        workspaces.prepare(world.execution, world.request())
+    mirror = workspaces.mirror_path(world.execution, world.project)
+    assert str(refused.value) == f"branches of {mirror.name} could not be listed"
+    assert workspaces.recorded(world.execution, "t1") is None
+    assert not list(world.execution.path("worktree").iterdir())
 
 
 def test_an_interrupted_preparation_resumes_its_recorded_worktree(world, monkeypatch):
@@ -533,9 +574,8 @@ def test_git_runs_without_prompting_and_with_a_timeout(world, monkeypatch):
     monkeypatch.setattr(workspaces.subprocess, "run", spy)
     workspaces.prepare(world.execution, world.request())
     assert seen
-    assert {
-        (kw["env"]["GIT_TERMINAL_PROMPT"], kw["env"]["GIT_SSH_COMMAND"], kw["timeout"], kw["text"]) for kw in seen
-    } == {("0", "ssh -o BatchMode=yes", 600, True)}
+    assert {(kw["env"]["GIT_TERMINAL_PROMPT"], kw["timeout"], kw["text"]) for kw in seen} == {("0", 600, True)}
+    assert not any("GIT_SSH_COMMAND" in kw["env"] for kw in seen)
     assert all(kw["env"]["PATH"] == os.environ["PATH"] for kw in seen)
 
 

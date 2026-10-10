@@ -24,8 +24,7 @@ COMMIT = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 LOCK = ".prepare.lock"
 GIT_TIMEOUT = 600
 TRACKING = "+refs/heads/*:refs/remotes/origin/*"
-GIT_SCOPE = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY")
-BATCH_SSH = "ssh -o BatchMode=yes"
+GIT_SCOPE = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_NAMESPACE")
 
 
 class WorkspaceError(ValueError):
@@ -59,7 +58,7 @@ def identity(url: str) -> str:
     url = url.strip()
     found = None if "://" in url else SCP.fullmatch(url)
     try:
-        parts = urlsplit(f"ssh://{found[1]}/{found[2]}" if found else url)
+        parts = urlsplit(f"ssh://{found[1]}/{found[2].lstrip('/')}" if found else url)
         host = (parts.hostname or "") + (f":{parts.port}" if parts.port else "")
     except ValueError:
         raise WorkspaceError("unsupported origin") from None
@@ -87,7 +86,6 @@ def recorded(execution: Execution, task: str) -> dict | None:
 
 def _environ() -> dict[str, str]:
     environ = {key: value for key, value in os.environ.items() if key not in GIT_SCOPE}
-    environ.setdefault("GIT_SSH_COMMAND", BATCH_SSH)
     return {**environ, "GIT_TERMINAL_PROMPT": "0"}
 
 
@@ -113,7 +111,7 @@ def _check(request: Request) -> None:
         raise WorkspaceError(f"invalid task id: {request.task}")
     if request.generation < 1:
         raise WorkspaceError(f"invalid generation: {request.generation}")
-    if not BRANCH.fullmatch(request.base):
+    if not BRANCH.fullmatch(request.base) or ".." in request.base:
         raise WorkspaceError(f"invalid base branch: {request.base}")
     if request.minimum and not COMMIT.fullmatch(request.minimum):
         raise WorkspaceError(f"invalid required commit: {request.minimum}")
@@ -123,7 +121,7 @@ def _check(request: Request) -> None:
     parts = urlsplit(origin)
     userinfo, at, _ = origin.partition("@")
     scp_secret = bool(at) and "/" not in userinfo and ":" in userinfo
-    if parts.password or (parts.username and parts.scheme == "https") or scp_secret:
+    if parts.password or (parts.username and parts.scheme == "https") or parts.query or scp_secret:
         raise WorkspaceError("origin carries a credential; supply it through a credential helper")
 
 
@@ -170,14 +168,20 @@ def _base(mirror: Path, request: Request, project: str) -> str:
     if found.returncode:
         raise WorkspaceError(f"base {request.base} is missing from {project}")
     commit = found.stdout.strip()
-    if request.minimum and _git("merge-base", "--is-ancestor", request.minimum, commit, repo=mirror).returncode:
-        raise WorkspaceError(f"base {request.base} at {commit} does not contain {request.minimum}; it is stale")
+    _contains(mirror, request, commit)
     return commit
 
 
+def _contains(mirror: Path, request: Request, commit: str) -> None:
+    if request.minimum and _git("merge-base", "--is-ancestor", request.minimum, commit, repo=mirror).returncode:
+        raise WorkspaceError(f"base {request.base} at {commit} does not contain {request.minimum}; it is stale")
+
+
 def _branch(execution: Execution, mirror: Path, agent: str) -> str:
-    heads = _git("branch", "--format=%(refname:short)", repo=mirror).stdout.split()
-    taken = {path.name for path in execution.path("worktree").iterdir()} | set(heads)
+    listed = _git("branch", "--format=%(refname:short)", repo=mirror)
+    if listed.returncode:
+        raise WorkspaceError(f"branches of {mirror.name} could not be listed")
+    taken = {path.name for path in execution.path("worktree").iterdir()} | set(listed.stdout.split())
     return naming.worktree({"AGENTIHOOKS_AGENT_NAME": agent}, taken)
 
 
@@ -200,7 +204,7 @@ def _save(execution: Execution, workspace: Workspace) -> None:
 
 
 def _materialize(workspace: Workspace) -> None:
-    if workspace.path.is_dir():
+    if (workspace.path / ".git").is_file():
         return
     if not workspace.mirror.is_dir():
         raise WorkspaceError(f"task {workspace.task} generation {workspace.generation} lost its mirror")
@@ -224,6 +228,7 @@ def prepare(
         held = _replay(execution, request, project)
         if held is not None:
             _materialize(held)
+            _contains(held.mirror, request, held.base_commit)
             return held
         mirror = _mirror(execution, request, project, reuse)
         commit = _base(mirror, request, project)
