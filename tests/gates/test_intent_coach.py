@@ -25,12 +25,12 @@ def run_check(tmp_path, head, verdict="fail", reason="missing behavior"):
     return ledger, mail
 
 
-def gate(tmp_path, command="gh pr merge 9 --squash"):
+def gate(tmp_path, command="gh pr merge 9 --squash", merged=False):
     who = Who(name=ME, swarm=SLUG, task=TASK)
     state = Verdicts(SLUG, "intent", tmp_path)
     with (
         patch.object(intent, "pr_head", return_value=state.read(TASK).get("head")),
-        patch.object(intent, "pr_merged", return_value="done" in command),
+        patch.object(intent, "pr_merged", return_value=merged),
     ):
         return intent.IntentGate().decide(Call("Bash", {"command": command}), who, state, mode="coach")
 
@@ -58,7 +58,7 @@ def test_two_failed_fix_rounds_allow_merge_and_done_and_record_shortfall(tmp_pat
     assert "fix round 2 of 2" in mail.sent[0][2]
     assert not gate(tmp_path, command).allowed
     ledger, mail = run_check(tmp_path, "fix-two")
-    assert gate(tmp_path, command).allowed
+    assert gate(tmp_path, command, merged="done" in command).allowed
     assert ledger.updates == []
     assert mail.sent == [
         (
@@ -356,7 +356,7 @@ def test_a_failed_merged_pull_request_goes_to_the_master_not_back_to_its_enginee
     assert ledger.updates == []
     assert ledger.comments == [(SLUG, TASK, intent.MERGED_COMMENT, "swarm")]
     command = f"agentihooks swarm {SLUG} done --pr x"
-    assert gate(tmp_path, command).allowed
+    assert gate(tmp_path, command, merged=True).allowed
     assert rows(tmp_path)[-1]["reason"] == "merged with intent unmet on a merged pull request: missing behavior"
     assert not gate(tmp_path, "gh pr merge 9").allowed
 
