@@ -66,6 +66,7 @@ def test_explicit_lane_never_calls_classifier(monkeypatch):
     [
         ("claude", -1, "low"),
         ("claude", 0.49, "low"),
+        ("claude", 0.5, "low"),
         ("claude", 0.51, "max"),
         ("claude", 1.6, "max"),
         ("claude", 9, "max"),
