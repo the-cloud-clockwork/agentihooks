@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/accounts.py:scripts.swarm_v2.accounts.x\u01c1AccountCapacity\u01c1reconstruct__mutmut_12:a4ace2600e0b46a73be118ce44655289c125916e8af73e0429b4c5cc037c1473": {
+    "reader": "standards_reader",
+    "reason": "reconstruct__mutmut_12 replaces scan_iter(match=account_key(\"*\")) with scan_iter(match=None). Equivalent. The original pattern returns exactly the keys ROOT:accounts:K, named K by removeprefix. With match=None every key is returned; a non-account key J gives the name J and the hash ROOT:accounts:J. If that hash exists, the original pattern already returns it with the same name J, so the set of accounts holding data is unchanged, and the set union dedupes. If it is absent, J is not a confirmed account (confirmed accounts are already in the set), so wanted is empty; decide sees no slots, writes nothing and returns 0, so rebuilt is unchanged. The argument needs ROOT to contain no glob metacharacters (* ? [ ] \\). ROOT comes from AGENTIHOOKS_SWARM_KEY_PREFIX, so a prefix with those would break the original pattern too. The mutant costs a full keyspace SCAN and a WATCH per foreign key, a performance difference the tests do not measure. The code stays as written."
+  }
+}

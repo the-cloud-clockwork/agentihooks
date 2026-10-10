@@ -73,7 +73,7 @@ Rejected alternatives:
 
 Status: accepted.
 
-The swarm reconciliation controller and its ledger are the only authority that claims and dispatches coding tasks. Bounded backlogs are permitted for transcripts and changed content; a backlog never launches an agent. Any other component that carries coding tasks or launches agents is rejected unless operator_changes names that proposal id with the digest of its exact content, approved_by operator, the record revision it was approved at and a reason; a field on the proposal never approves it. Classification is by declaration: every proposal declares what it carries, whether it launches agents and the authoritative state it owns, and the Spec reader checks the declaration against that state.
+The swarm reconciliation controller and its ledger are the only authority that claims and dispatches coding tasks. Bounded backlogs are permitted for transcripts and changed content; a backlog never launches an agent. Any other component that carries coding tasks or launches agents is rejected unless operator_changes names that proposal id with the digest of its exact content, the approving operator, the record revision it was approved at, a reason and an Ed25519 signature from the operator transport. Only an approval that authenticated over that transport is signed, and the record is checked with the public key alone. A label in the record or a field on the proposal never approves it. Classification is by declaration: every proposal declares what it carries, whether it launches agents and the authoritative state it owns, and the Spec reader checks the declaration against that state.
 
 Why: Retain one swarm task model and one authority for task claims (plan section 1.2).
 

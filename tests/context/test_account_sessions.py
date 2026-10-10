@@ -2,7 +2,11 @@
 
 from unittest.mock import patch
 
+import pytest
+
 from hooks.context import account_sessions as acc
+
+pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 def _proc(root, pid, comm, ppid, argv, env):
@@ -96,6 +100,59 @@ def test_handed_off_sessions_free_their_slot(tmp_path):
         counts = acc.sessions_by_account(root)
 
     assert counts == {"alpha": 1, "beta": 2, acc.UNROUTED: 1}
+
+
+def test_fleet_slots_add_to_the_local_counts(tmp_path):
+    root = _tree(tmp_path)
+
+    with (
+        patch.object(acc, "handed_off_pids", return_value=set()),
+        patch.object(acc, "fleet_held", return_value={"alpha": 2, "gamma": 1}),
+    ):
+        counts = acc.sessions_by_account(root)
+
+    assert counts == {"alpha": 4, "beta": 2, "gamma": 1, acc.UNROUTED: 1}
+
+
+def test_fleet_slots_stay_out_while_distributed_launches_are_off():
+    with patch("hooks._redis.get_redis", side_effect=AssertionError("Redis read while local")):
+        assert acc.fleet_held({}) == {}
+        assert acc.fleet_held({"AGENTIHOOKS_RUNTIME_BACKEND": "local"}) == {}
+        assert (
+            acc.fleet_held({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes", "AGENTIHOOKS_RUNTIME_DISABLED": "kubernetes"})
+            == {}
+        )
+
+
+def test_fleet_slots_need_redis():
+    with patch("hooks._redis.get_redis", return_value=None):
+        assert acc.fleet_held({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}) == {}
+
+
+def test_fleet_slots_fail_open_when_redis_breaks_mid_read():
+    import fakeredis
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    with (
+        patch("hooks._redis.get_redis", return_value=redis),
+        patch.object(redis, "scan_iter", side_effect=RedisConnectionError("down")),
+    ):
+        assert acc.fleet_held({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}) == {}
+
+
+def test_fleet_slots_are_read_from_the_account_store():
+    import fakeredis
+
+    from scripts.swarm.keyspace import ROOT
+    from scripts.swarm_v2.accounts import RESERVED, Slot, encode
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    slot = Slot("alpha", "fleet/eng-1@fleet", "exe-1", 1, RESERVED, 10**15)
+    redis.hset(f"{ROOT}:accounts:alpha", slot.holder, encode(slot))
+
+    with patch("hooks._redis.get_redis", return_value=redis):
+        assert acc.fleet_held({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}) == {"alpha": 1}
 
 
 def test_session_account_reads_the_agent_process(tmp_path):

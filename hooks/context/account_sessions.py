@@ -171,6 +171,30 @@ def handed_off_pids() -> set[int]:
     }
 
 
+def fleet_held(environ: Mapping[str, str] | None = None) -> dict[str, int]:
+    """Account slots held across the fleet that this host's /proc cannot see; none while distributed launches are off."""
+    from scripts.swarm_v2.runtime.base import LOCAL, RuntimeRouter
+
+    if RuntimeRouter.from_environ((), os.environ if environ is None else environ).spawn_backend() == LOCAL:
+        return {}
+    from hooks._redis import get_redis
+
+    redis = get_redis()
+    if redis is None:
+        return {}
+    from redis.exceptions import RedisError
+
+    from scripts.swarm import lease
+    from scripts.swarm.store import RedisStore
+    from scripts.swarm_v2 import accounts
+
+    store = RedisStore(redis)
+    try:
+        return accounts.fleet_held(store, lease.now_ms(store))
+    except RedisError:
+        return {}
+
+
 def sessions_by_account(proc: Path = _PROC) -> dict[str, int]:
     """Live sessions per account; sessions that already handed off their work do not hold a slot."""
     try:
@@ -180,4 +204,6 @@ def sessions_by_account(proc: Path = _PROC) -> dict[str, int]:
     counts: dict[str, int] = {}
     for account in live_sessions(proc, skip).values():
         counts[account] = counts.get(account, 0) + 1
+    for account, held in fleet_held().items():
+        counts[account] = counts.get(account, 0) + held
     return counts
