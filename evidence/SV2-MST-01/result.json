@@ -37,8 +37,9 @@
     "data_safety": "Lowering the count only reassigns owners of removed seats; no inbox item or ledger record is deleted"
   },
   "remaining_limitations": [
-    "The tick does not yet launch or respawn masters in seats two and up; filed as a ledger follow up",
-    "Hive ownership is not delivered; a seat owns phases only; filed as a ledger follow up"
+    "The tick does not yet launch or respawn masters in seats two and up, so until that lands an item for seat two reaches the lead, exactly as a single master swarm today; ledger task t315 (tick launch and respawn of seats two and up, plus hive ownership) is stacked on this branch and consumes masters.seats, MasterSeats.owners and route",
+    "Hive ownership is not delivered here; a seat owns phases only; delivered by t315",
+    "The private masters channel and the posting of a rebalance on it are SV2-MST-02 (ledger task vmst2), stacked on this branch"
   ],
   "validation": {
     "red": "Focused proofs https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38069851670 on e9a23a41 failed only the three package case tests against placeholder records; their assertion output is the source of the observed records committed in 7f74ebd8. The earlier red tests only commit 59d0d32c was not observed in CI (branch guard refused the push); that gap stays named",
@@ -96,5 +97,10 @@
   },
   "deviations": [
     "Seam 3 says unaddressed chat stays with the lead; while the lead seat is empty the lowest numbered live master answers instead"
+  ],
+  "phase_use": [
+    "agentihooks swarm SLUG set masters=N records the seat count the tick reads to launch seats two and up (t315)",
+    "Operator mail, tick items, priorities, pull request notices and task health findings already route by phase owner, so once a master occupies seat two its phases' items reach it with no further change; ledger task t316 (task health findings to the phase owner) is delivered by this change",
+    "With no count set every swarm keeps one master at the existing address and routes as before (INV-R11), so nothing the phase already runs is weakened"
   ]
 }
