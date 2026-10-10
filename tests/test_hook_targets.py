@@ -414,6 +414,7 @@ class TestCodexRolloutResolverHardening:
             normalizer.normalize_payload({"hook_event_name": event, "session_id": "abc"})
         assert len(calls) == 4
 
+    @pytest.mark.wall_clock
     def test_deep_history_stays_fast(self, codex, tmp_path, monkeypatch):
         """Resolution must not scale with total session history."""
         import time

@@ -228,6 +228,7 @@ def test_wait_returns_nothing_after_its_timeout():
     assert events == [] and took >= 0.05
 
 
+@pytest.mark.wall_clock
 def test_wait_wakes_at_once_on_a_publish():
     hub = Hub()
     opened(hub)
@@ -238,6 +239,7 @@ def test_wait_wakes_at_once_on_a_publish():
     assert [at for at, *_ in events] == [1] and took < 1
 
 
+@pytest.mark.wall_clock
 def test_wait_answers_at_once_when_events_are_already_kept():
     hub = Hub()
     opened(hub)

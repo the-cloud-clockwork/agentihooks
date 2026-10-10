@@ -555,10 +555,26 @@ def test_shard_stats_run_in_stats_mode_with_their_own_basetemp_and_record_everyt
 
     output = tmp_path / "out.json"
     collect_shard_stats(SimpleNamespace(mutmut=engine), Runner(), ["tests/test_a.py"], output, "/scratch/base")
-    assert calls == [(["tests/test_a.py"], ["-q", "--basetemp=/scratch/base"], "stats", "1")]
+    assert calls == [(["tests/test_a.py"], ["-q", "-m", "not wall_clock", "--basetemp=/scratch/base"], "stats", "1")]
     result = json.loads(output.read_text())
     assert 0 <= result.pop("cpu") <= process_time()
     assert result == {"status": 4, "tests": {"m.x_f": ["a::t", "b::t"]}, "durations": {"a::t": 2.5}}
+
+
+def test_the_wall_clock_marker_is_registered_and_carried_by_every_budget_test():
+    import tomllib
+
+    root = Path(__file__).resolve().parents[1]
+    markers = tomllib.loads((root / "pyproject.toml").read_text())["tool"]["pytest"]["ini_options"]["markers"]
+    assert any(marker.startswith("wall_clock:") for marker in markers)
+    for path, test in [
+        ("tests/swarm_ledger/test_hook.py", "    def test_block_budget_then_allow("),
+        ("tests/test_hook_targets.py", "    def test_deep_history_stays_fast("),
+        ("tests/swarm_ledger/test_hub.py", "def test_wait_wakes_at_once_on_a_publish("),
+        ("tests/swarm_ledger/test_hub.py", "def test_wait_answers_at_once_when_events_are_already_kept("),
+    ]:
+        indent = test[: len(test) - len(test.lstrip())]
+        assert f"{indent}@pytest.mark.wall_clock\n{test}" in (root / path).read_text(), (path, test)
 
 
 def test_parallel_stats_merge_every_shard_and_fail_on_any_red_shard(tmp_path, capsys):

@@ -221,6 +221,7 @@ class Gate(unittest.TestCase):
         bash(f"python3 {SCRIPTS}/ledger.py --slug {SLUG} --as boss ack")
         self.assertIsNone(hook("Stop"))
 
+    @pytest.mark.wall_clock
     def test_block_budget_then_allow(self):
         ask("still there", 3)
         start = time.monotonic()
