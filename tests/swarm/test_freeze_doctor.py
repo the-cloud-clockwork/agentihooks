@@ -5,8 +5,8 @@ import pytest
 from scripts.doctor import loop, priming
 from scripts.swarm import capacity, freeze, metrics_swarm
 from scripts.swarm.host_budget import HostSample
-from scripts.swarm.metrics_outbox import Outbox, Settings
 from scripts.swarm.ledger_client import LedgerGone
+from scripts.swarm.metrics_outbox import Outbox, Settings
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_freeze import PHASES, PLANS, SLICES, FrozenLedger, record, spawned
