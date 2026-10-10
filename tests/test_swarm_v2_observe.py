@@ -1,3 +1,4 @@
+import json
 from dataclasses import asdict, replace
 
 import pytest
@@ -16,6 +17,7 @@ from scripts.swarm_v2.runtime.observe import (
     Terminal,
     Thresholds,
     classify,
+    rule,
 )
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
@@ -496,3 +498,165 @@ def test_contention_refusal_names_its_failure(fixture, monkeypatch):
     monkeypatch.setattr(store.redis, "pipeline", lambda: Contended(real(), left))
     with pytest.raises(ObservationRefused, match=r"^observation record kept changing; nothing recorded$"):
         observer.observe("fixture", agent, [beat(agent)], NOW)
+
+
+CAUTIOUS = replace(LIMITS, mode=Mode.CONSERVATIVE)
+
+
+@pytest.fixture
+def cautious():
+    store, agent = fresh_store()
+    return store, agent, Observer(store, "kubernetes", CAUTIOUS)
+
+
+def flagged(observer, agent, *signals):
+    seen = observer.observe("fixture", agent, signals or [beat(agent, 900.0), pod(agent)], NOW)
+    assert (seen.state, seen.needs_operator) == (State.SUSPECT, True)
+    return seen
+
+
+def test_a_lost_classification_is_recorded_with_its_reason_and_held(cautious):
+    store, agent, observer = cautious
+    flagged(observer, agent)
+    ruled = rule(store, "fixture", agent.execution_id, "lost", " pod gone in the console ", "operator", NOW + 10)
+    assert (ruled.state, ruled.needs_operator, ruled.classified_at) == (State.LOST, False, NOW + 10)
+    assert (ruled.ruling, ruled.ruling_reason, ruled.ruled_by, ruled.ruled_at) == (
+        "lost",
+        "pod gone in the console",
+        "operator",
+        NOW + 10,
+    )
+    assert observer.get("fixture", agent.execution_id) == ruled
+    assert observer.audit("fixture") == [ruled]
+    alive = [beat(agent, -20.0), pod(agent, age=-20.0), handshake(agent, -20.0)]
+    assert observer.observe("fixture", agent, alive, NOW + 20) == ruled
+
+
+def test_a_working_classification_holds_the_attempt_working_on_the_same_evidence(cautious):
+    store, agent, observer = cautious
+    suspect = flagged(observer, agent)
+    ruled = rule(store, "fixture", agent.execution_id, "working", "agent answered in its pane", "master@x-1", NOW + 10)
+    assert (ruled.state, ruled.needs_operator, ruled.suspect_since, ruled.failure) == (
+        State.WORKING,
+        False,
+        0.0,
+        suspect.failure,
+    )
+    later = observer.observe("fixture", agent, [], NOW + 5000)
+    assert (later.state, later.needs_operator, later.suspect_since) == (State.WORKING, False, 0.0)
+    assert (later.ruling, later.ruling_reason, later.ruled_by, later.ruled_at) == (
+        "working",
+        "agent answered in its pane",
+        "master@x-1",
+        NOW + 10,
+    )
+    assert observer.audit("fixture") == []
+
+
+def test_a_working_classification_also_covers_loss_proof_seen_before_it(cautious):
+    store, agent, observer = cautious
+    flagged(observer, agent, pod(agent, Reading.NOT_FOUND, ""))
+    rule(store, "fixture", agent.execution_id, "working", "pod was recreated by hand", "operator", NOW + 10)
+    later = observer.observe("fixture", agent, [], NOW + 5000)
+    assert (later.state, later.needs_operator, later.proof_since) == (State.WORKING, False, NOW)
+
+
+def test_new_loss_proof_after_a_working_classification_asks_the_operator_again(cautious):
+    store, agent, observer = cautious
+    flagged(observer, agent)
+    rule(store, "fixture", agent.execution_id, "working", "agent answered in its pane", "operator", NOW + 10)
+    gone = observer.observe("fixture", agent, [pod(agent, Reading.NOT_FOUND, "", age=-20.0)], NOW + 20)
+    assert (gone.state, gone.needs_operator, gone.proof_since, gone.suspect_since) == (
+        State.SUSPECT,
+        True,
+        NOW + 20,
+        NOW + 20,
+    )
+    assert (gone.ruling, gone.ruling_reason, gone.ruled_by, gone.ruled_at) == ("", "", "", 0.0)
+
+
+def test_a_working_classification_ends_when_the_attempt_recovers_on_its_own(cautious):
+    store, agent, observer = cautious
+    flagged(observer, agent)
+    rule(store, "fixture", agent.execution_id, "working", "agent answered in its pane", "operator", NOW + 10)
+    alive = observer.observe("fixture", agent, [beat(agent, -20.0), pod(agent, age=-20.0)], NOW + 20)
+    assert (alive.state, alive.ruling, alive.ruled_at) == (State.WORKING, "", 0.0)
+    again = observer.observe("fixture", agent, [], NOW + 2000)
+    assert (again.state, again.needs_operator) == (State.SUSPECT, True)
+
+
+@pytest.mark.parametrize(
+    ("ruling", "reason", "message", "error_class"),
+    [
+        ("working", "  ", "needs a reason", "invalid_request"),
+        ("gone", "why", "one of lost, working", "invalid_request"),
+        ("suspect", "why", "one of lost, working", "invalid_request"),
+    ],
+)
+def test_a_classification_refuses_a_bad_request(cautious, ruling, reason, message, error_class):
+    store, agent, observer = cautious
+    before = flagged(observer, agent)
+    with pytest.raises(ObservationRefused, match=message) as refused:
+        rule(store, "fixture", agent.execution_id, ruling, reason, "operator", NOW + 10)
+    assert (refused.value.error_class, refused.value.retryable) == (error_class, False)
+    assert observer.get("fixture", agent.execution_id) == before
+
+
+def test_a_classification_refuses_an_attempt_that_does_not_need_the_operator(cautious):
+    store, agent, observer = cautious
+    with pytest.raises(ObservationRefused, match="does not need an operator classification") as unknown:
+        rule(store, "fixture", agent.execution_id, "lost", "why", "operator", NOW)
+    assert (unknown.value.error_class, unknown.value.retryable) == ("not_suspect", False)
+    healthy = observer.observe("fixture", agent, [beat(agent), pod(agent)], NOW)
+    with pytest.raises(ObservationRefused, match="does not need an operator classification"):
+        rule(store, "fixture", agent.execution_id, "lost", "why", "operator", NOW + 10)
+    assert observer.get("fixture", agent.execution_id) == healthy
+    assert observer.audit("fixture") == []
+
+
+def classify_cli(monkeypatch, store, *argv):
+    from scripts.swarm import cli
+
+    for name in ("AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_TASK"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setattr(cli.time, "time", lambda: NOW + 10)
+    return cli.main(["fixture", *argv])
+
+
+@pytest.mark.parametrize("who", ["operator", "master"])
+def test_the_master_or_the_operator_classifies_through_the_swarm_command(cautious, monkeypatch, capsys, who):
+    store, agent, observer = cautious
+    flagged(observer, agent)
+    name = "operator"
+    if who == "master":
+        name = store.next_name("fixture", "master")
+        store.put_agent("fixture", AgentRecord(name, "master", ""))
+    args = ["--as", name, "classify", agent.execution_id, "lost", "--reason", "pod gone"]
+    assert classify_cli(monkeypatch, store, *args) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "execution_id": agent.execution_id,
+        "state": "lost",
+        "ruling": "lost",
+        "reason": "pod gone",
+        "by": name,
+    }
+    ruled = observer.get("fixture", agent.execution_id)
+    assert (ruled.state, ruled.ruled_by, ruled.ruled_at) == (State.LOST, name, NOW + 10)
+
+
+def test_a_lane_agent_may_not_classify_an_attempt(cautious, monkeypatch, capsys):
+    store, agent, observer = cautious
+    before = flagged(observer, agent)
+    assert agent.name in [found.name for found in store.agents("fixture")]
+    args = ["--as", agent.name, "classify", agent.execution_id, "working", "--reason", "fine"]
+    assert classify_cli(monkeypatch, store, *args) == 1
+    assert "only the master or the operator classifies an execution attempt" in capsys.readouterr().err
+    assert observer.get("fixture", agent.execution_id) == before
+
+
+def test_a_refused_classification_is_reported_by_the_swarm_command(cautious, monkeypatch, capsys):
+    store, agent, _ = cautious
+    args = ["--as", "operator", "classify", agent.execution_id, "lost", "--reason", "gone"]
+    assert classify_cli(monkeypatch, store, *args) == 1
+    assert "does not need an operator classification" in capsys.readouterr().err
