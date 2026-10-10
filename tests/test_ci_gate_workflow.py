@@ -98,7 +98,7 @@ def test_post_shard_graders_do_not_wait_on_each_other_and_the_gate_needs_each():
 
 def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel():
     job = _workflow()["jobs"]["semgrep"]
-    assert "needs" not in job
+    assert job.get("needs") in (None, ["reuse"])
     assert job["uses"] == "./.github/workflows/semgrep.yml"
     assert job["with"]["base"] == (
         "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
@@ -118,7 +118,12 @@ def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel(
         "yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag"
     ]
     assert all("if" not in step and "continue-on-error" not in step for step in scan["steps"])
-    assert not {"if", "continue-on-error"} & (set(scan) | set(job))
+    assert not {"if", "continue-on-error"} & set(scan)
+    assert "continue-on-error" not in job
+    assert job.get("if") in (
+        None,
+        "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+    )
 
 
 def test_no_workflow_run_script_embeds_an_expression_semgrep_cannot_parse():
@@ -525,7 +530,7 @@ def test_mutation_runs_in_tests_beside_unit_and_lint():
     job = workflow["jobs"]["mutation"]
     assert job["needs"] == ["mutation-plan", "mutation-stats"]
     assert workflow["jobs"]["mutation-stats"]["needs"] == "mutation-plan"
-    assert "needs" not in workflow["jobs"]["mutation-plan"]
+    assert workflow["jobs"]["mutation-plan"].get("needs") in (None, ["reuse"])
     assert (
         job["if"]
         == "${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}"
