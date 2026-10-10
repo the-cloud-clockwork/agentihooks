@@ -61,7 +61,7 @@ def test_only_the_registry_login_holds_a_credential(workflow):
 
 
 def test_builds_pass_only_the_source_revision(workflow):
-    builds = [step["run"] for step in steps(workflow) if "docker build" in step.get("run", "")]
+    builds = [step["run"] for step in steps(workflow) if re.search(r"docker build\b", step.get("run", ""))]
 
     assert builds
     for run in builds:
