@@ -114,9 +114,10 @@ class Supervisor:
     def start(self) -> str | None:
         deadline = time.monotonic() + self.launch.budgets.startup
         self.spawn("herdr", self.launch.herdr)
+        roles = ("herdr", "exporter") if self.launch.exporter else ("herdr",)
         if self.launch.exporter:
             self.spawn("exporter", self.launch.exporter)
-        for role in ("herdr", "exporter") if self.launch.exporter else ("herdr",):
+        for role in roles:
             if not self.ready(role, deadline):
                 return "termination" if self.stop else f"{role}_startup_failure"
         agent = native_command(self.launch.agent, self.launch.attempt, self.environment)

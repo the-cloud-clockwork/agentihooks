@@ -4,6 +4,8 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from redis.exceptions import RedisError
+
 from scripts.swarm.store import AgentRecord
 from scripts.swarm_v2.auth_context import GrantRefused, Registration
 from scripts.swarm_v2.broadcast_bridge import GRANT_NAME
@@ -64,7 +66,7 @@ class PodGrants:
     def hand(self, agent: AgentRecord, grant: str) -> bool:
         try:
             record = self.supervision.record(self.verify(grant))
-        except GrantRefused:
+        except (GrantRefused, RedisError):
             return False
         labels = {
             OWNER_LABEL: self.owner,

@@ -58,8 +58,10 @@ def test_a_launch_with_a_malformed_exporter_is_refused(tmp_path, value):
     spec["exporter"] = value
     path.write_text(json.dumps(spec))
 
-    with pytest.raises(LaunchRefused, match="invalid command"):
+    with pytest.raises(LaunchRefused) as refused:
         Launch.load(attempt, path)
+
+    assert str(refused.value) == "invalid command"
 
 
 @pytest.mark.parametrize("field,value", [("generation", 2), ("execution_id", "exe-" + "c" * 32), ("grant_id", "other")])

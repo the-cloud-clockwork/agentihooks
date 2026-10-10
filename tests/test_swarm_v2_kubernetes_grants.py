@@ -186,6 +186,19 @@ def test_a_grant_the_controller_did_not_issue_takes_no_config_map():
     assert (api.reads, api.created) == ([], [])
 
 
+def test_a_grant_the_store_cannot_check_takes_no_config_map():
+    from redis.exceptions import ConnectionError as RedisDown
+
+    def unreachable(token):
+        raise RedisDown("store unreachable")
+
+    api = Api(pod())
+
+    assert PodGrants(api, SLUG, unreachable, Supervision("claude", None)).hand(agent(), GRANT) is False
+
+    assert (api.reads, api.created) == ([], [])
+
+
 def test_a_missing_pod_takes_no_grant():
     api = Api(None)
 
