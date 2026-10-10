@@ -3566,115 +3566,116 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 419
+    latency_ms: 404
     answers:
       usable:
         type: noul
-        noul: 0.9099069962657176
+        noul: 0.867035752930664
       delivers:
         type: noul
-        noul: 0.9241418262465169
+        noul: 0.8872046086290859
       reachable:
         type: noul
-        noul: 0.8933094060543487
+        noul: 0.7772998560157665
       weakens:
         type: noul
-        noul: 0.00035697064833110394
+        noul: 0.0003353502328728204
       underdelivers:
         type: noul
-        noul: 0.3486451488696663
+        noul: 0.3775406828054583
       overdelivers:
         type: noul
-        noul: 0.10087860651125365
+        noul: 0.16451644651115205
       misses_line_245:
         type: noul
-        noul: 0.005911069162707768
+        noul: 0.011687257479339436
       misses_line_246:
         type: noul
-        noul: 0.0028009264988941925
+        noul: 0.002050743265455264
       misses_line_248:
         type: noul
-        noul: 0.005220126293252518
+        noul: 0.005554925279896276
       misses_line_249:
         type: noul
-        noul: 0.4687905969400343
+        noul: 0.651354837594613
   - source: liquid-d1
-    latency_ms: 356
+    latency_ms: 351
     answers:
       usable:
         type: noul
-        noul: 0.9099069962657176
+        noul: 0.867035752930664
       delivers:
         type: noul
-        noul: 0.9241418262465169
+        noul: 0.9324533079218341
       reachable:
         type: noul
-        noul: 0.8933094060543487
+        noul: 0.8175744806385543
       weakens:
         type: noul
-        noul: 0.00035697064833110394
+        noul: 0.0003353502328728204
       underdelivers:
         type: noul
-        noul: 0.3486451488696663
+        noul: 0.3775406828054583
       overdelivers:
         type: noul
-        noul: 0.08509904036636974
+        noul: 0.16451644651115205
       misses_line_245:
         type: noul
-        noul: 0.009125636614415974
+        noul: 0.011687257479339436
       misses_line_246:
         type: noul
-        noul: 0.004905406433098834
+        noul: 0.00040448146169324596
       misses_line_248:
         type: noul
-        noul: 0.005220126293252518
+        noul: 0.009125637658663857
       misses_line_249:
         type: noul
-        noul: 0.4687905969400343
+        noul: 0.46879062662624377
   - source: liquid-d1
-    latency_ms: 326
+    latency_ms: 301
     answers:
       usable:
         type: noul
-        noul: 0.9099069962657176
+        noul: 0.8175744673038221
       delivers:
         type: noul
-        noul: 0.9241418262465169
+        noul: 0.9046505299595163
       reachable:
         type: noul
-        noul: 0.8933094060543487
+        noul: 0.766293653760418
       weakens:
         type: noul
-        noul: 0.00035697064833110394
+        noul: 0.0006263340368550441
       underdelivers:
         type: noul
-        noul: 0.3486451488696663
+        noul: 0.2689414448079646
       overdelivers:
         type: noul
-        noul: 0.14033624229926062
+        noul: 0.1480471679601413
       misses_line_245:
         type: noul
-        noul: 0.009125636614415974
+        noul: 0.014063627353171185
       misses_line_246:
         type: noul
-        noul: 0.00027803086292037076
+        noul: 0.002050743265455264
       misses_line_248:
         type: noul
-        noul: 0.005220126293252518
+        noul: 0.005554925279896276
       misses_line_249:
         type: noul
-        noul: 0.4687905969400343
+        noul: 0.651354837594613
   baseline:
   - verdict: pass
   - verdict: pass
   - verdict: pass
   notes:
-    source: rig-grade-swarm intent history, task ax2, antoncore pull request 618 ready head, live verdict pass at 1791573714316;
-      its draft heads failed on overdelivers 0.60, which the master lifted as required formatter reflow (Doctor evidence on
-      issue 2285)
-    provenance: 'gate history exact masked classifier input; formatter output guard: the body names the reflowed lines; baseline
-      is the definition before the formatter clause, samples are the definition with it, both live on liquid-d1 (overdelivers
-      0.25 to 0.27 before, 0.09 to 0.14 after)'
+    source: rig-grade-swarm intent history, task ax2, antoncore pull request 618 ready head, live verdict pass at 1791573714316
+      (Doctor evidence on issue 2285). The draft heads before it were recorded failing on overdelivers 0.60; a live rerun
+      of those draft inputs no longer reproduces that overdelivers answer
+    provenance: 'gate history exact masked classifier input; a regression guard that does not discriminate the formatter clause:
+      the body names its reflowed lines and the head passes before and after (overdelivers 0.25 to 0.27 before, 0.15 to 0.16
+      after); baseline is three live runs of the definition before the formatter clause and samples are three live runs of
+      the definition with it, both on liquid-d1'
     labels:
       standards: 'pass. The task asks for "a push route on the notifications service mirroring its send notification tool
         and channels, behind a token", and the body delivers `POST /api/v1/push` mirroring "the MCP `send_notification` tool:
@@ -3818,104 +3819,104 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 568
+    latency_ms: 313
     answers:
       usable:
         type: noul
-        noul: 0.960361162033533
+        noul: 0.6513548646660542
       delivers:
         type: noul
-        noul: 0.9046505402422645
+        noul: 0.7549149868676283
       reachable:
         type: noul
-        noul: 0.9149009619539553
+        noul: 0.977022630759019
       weakens:
         type: noul
-        noul: 0.0007554055877378573
+        noul: 0.0020507438448753254
       underdelivers:
         type: noul
-        noul: 0.06754669864792355
+        noul: 0.13296424019782924
       overdelivers:
         type: noul
-        noul: 0.04742587452393617
+        noul: 0.025957352676742106
       misses_line_239:
         type: noul
-        noul: 0.0021827167455448562
+        noul: 0.0017007221078396608
       misses_line_240:
         type: noul
-        noul: 0.0006667023166896008
+        noul: 0.00013982208996946713
       misses_line_242:
         type: noul
-        noul: 0.05665242769705893
+        noul: 0.06008664091683042
       misses_line_243:
         type: noul
-        noul: 0.651354837594613
+        noul: 0.5621765008857981
   - source: liquid-d1
-    latency_ms: 421
+    latency_ms: 314
     answers:
       usable:
         type: noul
-        noul: 0.9770226304244968
+        noul: 0.6513548646660542
       delivers:
         type: noul
-        noul: 0.8519528132451416
+        noul: 0.7549149868676283
       reachable:
         type: noul
-        noul: 0.9241418158002492
+        noul: 0.977022630759019
       weakens:
         type: noul
-        noul: 0.0007554055877378573
+        noul: 0.0020507438448753254
       underdelivers:
         type: noul
-        noul: 0.0850990542883219
+        noul: 0.13296424019782924
       overdelivers:
         type: noul
-        noul: 0.037326884131416216
+        noul: 0.060086641758391915
       misses_line_239:
         type: noul
-        noul: 0.005220124997139505
+        noul: 0.004331502454351652
       misses_line_240:
         type: noul
-        noul: 0.0052201246295851276
+        noul: 0.00016865269745344814
       misses_line_242:
         type: noul
-        noul: 0.03732688895048618
+        noul: 0.06371499069622688
       misses_line_243:
         type: noul
-        noul: 0.6224593171945417
+        noul: 0.4073333856566001
   - source: liquid-d1
-    latency_ms: 337
+    latency_ms: 383
     answers:
       usable:
         type: noul
-        noul: 0.8740772220439509
+        noul: 0.9099070133672954
       delivers:
         type: noul
-        noul: 0.9046505402422645
+        noul: 0.7549149868676283
       reachable:
         type: noul
-        noul: 0.9149009619539553
+        noul: 0.977022630759019
       weakens:
         type: noul
-        noul: 0.0007554055877378573
+        noul: 0.0020507438448753254
       underdelivers:
         type: noul
-        noul: 0.06754669864792355
+        noul: 0.13296424019782924
       overdelivers:
         type: noul
-        noul: 0.04742587452393617
+        noul: 0.025957352676742106
       misses_line_239:
         type: noul
-        noul: 0.0021827167455448562
+        noul: 0.0017007221078396608
       misses_line_240:
         type: noul
-        noul: 0.00037998443975609074
+        noul: 0.0005527785154943807
       misses_line_242:
         type: noul
-        noul: 0.039638839100970026
+        noul: 0.017986208251325228
       misses_line_243:
         type: noul
-        noul: 0.592666571175409
+        noul: 0.3775406547908327
   baseline:
   - verdict: pass
   - verdict: pass
@@ -3923,9 +3924,11 @@ cases:
   notes:
     source: rig-grade-swarm intent history, task ax1, antoncore pull request 619, live verdict fail at 1791573458040 citing
       plan line 243 deployed proof and pass on the same input at 1791573522185 (Doctor evidence on issue 2285)
-    provenance: 'gate history exact masked classifier input; after merge proof guard: the same input as the ready head e50e0319
-      except the task text, which was later amended to add a right this head never claimed; baseline and samples are the definitions
-      before and after the formatter clause, both live on liquid-d1, pass three of three each as the Doctor replay found'
+    provenance: 'gate history exact masked classifier input; a regression guard for proof against a deployed service being
+      due after merge: the same input as the ready head e50e0319 except the task text, which was later amended to add a right
+      this head never claimed; it passes three of three before and after, as the Doctor replay found, and the clause does
+      not touch it, so baseline and sample answers nearly coincide; baseline is three live runs of the definition before the
+      formatter clause and samples are three live runs of the definition with it, both on liquid-d1'
     labels:
       standards: pass. The task text at this head asks for "a ClickHouse user that may only insert into and create tables
         in a swarm database, its password read from the stack environment that the operator fills through OpenBao", and the
@@ -3974,3 +3977,277 @@ cases:
       misses_line_240: 0.0052201246295851276
       misses_line_242: 0.03732688895048618
       misses_line_243: 0.6224593171945417
+- name: formatter-claim-added
+  state:
+    overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
+      Codex messaging, seats, intent, work beyond code, swarm health.'
+    phase: 'Plan chunks: agents read only their slice of the plan'
+    phase_intent: Operator top priority. Every planner plan is stored as a ledger artifact. Each phase points at its plan
+      and each task at a line range computed by code from slice anchors. Agents read only their range, ten lines of margin
+      each side, through one command, and a hook refuses whole plan reads from engineer and ci agents. The intent check judges
+      every pull request against its exact chunk and fails both underdelivery and overdelivery. Done when a proof swarm shows
+      the refused whole read, the chunk read, and a failed intent verdict on an overreaching pull request.
+    task: Hook refuses whole plan reads from engineer and ci agents
+    task_text: A pre tool use guard, active only for swarm sessions in the eng or ci lane, refuses any read, grep, shell command
+      or fetch that targets a plan artifact by its stored file or its artifact address, unless the requested lines fall inside
+      the task's range with ten lines of margin. The refusal names the plan read command. Master and planner lanes are exempt.
+      Model it on the credential guard dispatch and give it an off switch. Done when tests show a whole read refused, an in
+      range read allowed, the master allowed and a shell cat of the stored file refused, one live engineer session is refused
+      on a whole read, and the pull request merges.
+    pull_request_title: Refuse whole plan reads, add plan search, a refusal panel and a refusal digest
+    pull_request_body: 'Refuse whole plan reads from engineer and ci sessions.
+
+
+      - `hooks/context/plan_read_guard.py`: active only when `AGENTIHOOKS_SWARM` is set and the lane is eng or ci. It refuses
+      Read, Grep, Bash and WebFetch calls that target a `plan: true` artifact by its media path or its artifact URL, unless
+      the requested range falls within the task''s `plan_lines` with ten lines of margin. The refusal names `agentihooks plan
+      read`.
+
+      - Master and planner lanes pass.
+
+      - Dispatch follows `credential_guard`; wired in `hook_manager.on_pre_tool_use`; `PLAN_READ_GUARD_ENABLED=false` turns
+      it off.
+
+      - Tests: a whole Read refused, an in range Read allowed, the master allowed, a Bash `cat` of the media file refused,
+      a WebFetch of the artifact URL refused, the kill switch.
+
+      - Live: a spawned engineer on a scratch ledger was refused on a whole Read of its plan.
+
+      - Also: a new `agentihooks plan search <words>` command that greps every plan artifact on the ledger for any agent,
+      a ledger page panel listing every refused read with its agent and range, and a nightly job that mails the master a refusal
+      digest.
+
+
+      - The plan search command, the refusal panel and the refusal digest are formatter output: `ruff format` reflowed those
+      files, and CI''s format check requires it.
+
+      '
+    changed_files:
+    - hooks/context/plan_read_guard.py
+    - hooks/hook_manager.py
+    - tests/context/test_plan_read_guard.py
+    - scripts/swarm_ledger/plan_search.py
+    - scripts/swarm_ledger/ledger_page/refusals.js
+    - scripts/swarm_ledger/refusal_digest.py
+    - tests/swarm_ledger/test_plan_search.py
+    proof: {}
+    proof_notes: '- guard tests: whole Read refused, in range Read allowed, master allowed, Bash cat of media refused, WebFetch
+      of artifact URL refused, kill switch; 14 passed
+
+      - live engineer on scratch ledger refused on whole Read
+
+      - plan search, refusal panel and digest tests: 11 passed
+
+      '
+    plan_lines: 50-56
+    plan_chunk: '### A3. Whole-plan read guard (eng, depends A1)
+
+      - A PreToolUse guard is active only when `AGENTIHOOKS_SWARM` is set and the lane is eng or ci.
+
+      - It refuses any Read, Grep, Bash or fetch that targets a `plan: true` artifact, whether by media path or by artifact
+      URL, unless the requested range falls within the task''s `plan_lines` ±10.
+
+      - Its refusal names `agentihooks plan read`.
+
+      - Master and planner lanes are exempt.
+
+      - Modelled on `credential_guard` dispatch, wired in `hook_manager.on_pre_tool_use`, with a kill switch env var.
+
+      - Done when tests show a whole read refused, an in-range read allowed, the master allowed, and a Bash `cat` of the media
+      file refused, and when one live engineer session is refused on a whole read.
+
+      '
+  expected:
+    verdict: fail
+  control: true
+  samples:
+  - source: liquid-d1
+    latency_ms: 356
+    answers:
+      usable:
+        type: noul
+        noul: 0.9850429142850274
+      delivers:
+        type: noul
+        noul: 0.9783846659768267
+      reachable:
+        type: noul
+        noul: 0.9978172829948229
+      weakens:
+        type: noul
+        noul: 0.02931222905542399
+      underdelivers:
+        type: noul
+        noul: 0.02931223159932252
+      overdelivers:
+        type: noul
+        noul: 0.9525741288419872
+      misses_line_50:
+        type: noul
+        noul: 0.007121428798416025
+      misses_line_51:
+        type: noul
+        noul: 1.3845999096309213e-05
+      misses_line_52:
+        type: noul
+        noul: 3.763644662016875e-05
+      misses_line_53:
+        type: noul
+        noul: 7.183260700902734e-06
+      misses_line_54:
+        type: noul
+        noul: 3.535626200274942e-05
+      misses_line_55:
+        type: noul
+        noul: 3.1201913137454825e-05
+      misses_line_56:
+        type: noul
+        noul: 0.00015843624890396233
+  - source: liquid-d1
+    latency_ms: 332
+    answers:
+      usable:
+        type: noul
+        noul: 0.9850429142850274
+      delivers:
+        type: noul
+        noul: 0.9783846659768267
+      reachable:
+        type: noul
+        noul: 0.9978172829948229
+      weakens:
+        type: noul
+        noul: 0.02931222905542399
+      underdelivers:
+        type: noul
+        noul: 0.02931223159932252
+      overdelivers:
+        type: noul
+        noul: 0.9525741288419872
+      misses_line_50:
+        type: noul
+        noul: 0.003824482807260733
+      misses_line_51:
+        type: noul
+        noul: 7.411281059159697e-06
+      misses_line_52:
+        type: noul
+        noul: 3.763645573326168e-05
+      misses_line_53:
+        type: noul
+        noul: 1.0129989546876578e-05
+      misses_line_54:
+        type: noul
+        noul: 2.931153211734531e-05
+      misses_line_55:
+        type: noul
+        noul: 1.2219080185484713e-05
+      misses_line_56:
+        type: noul
+        noul: 0.00015843624890396233
+  - source: liquid-d1
+    latency_ms: 372
+    answers:
+      usable:
+        type: noul
+        noul: 0.9850429142850274
+      delivers:
+        type: noul
+        noul: 0.9808759591960624
+      reachable:
+        type: noul
+        noul: 0.9975273772660345
+      weakens:
+        type: noul
+        noul: 0.031143830534778462
+      underdelivers:
+        type: noul
+        noul: 0.03732688680867724
+      overdelivers:
+        type: noul
+        noul: 0.867035763237924
+      misses_line_50:
+        type: noul
+        noul: 0.007121428798416025
+      misses_line_51:
+        type: noul
+        noul: 7.411281059159697e-06
+      misses_line_52:
+        type: noul
+        noul: 2.7535688498905325e-05
+      misses_line_53:
+        type: noul
+        noul: 7.183260700902734e-06
+      misses_line_54:
+        type: noul
+        noul: 3.535626200274942e-05
+      misses_line_55:
+        type: noul
+        noul: 1.2219080185484713e-05
+      misses_line_56:
+        type: noul
+        noul: 0.000709670377965772
+  baseline:
+  - verdict: fail
+  - verdict: fail
+  - verdict: fail
+  notes:
+    source: synthetic
+    provenance: 'synthetic formatter claim control: the chunk-added state with one body line calling its added command, panel
+      and digest formatter output; added scope stays scope whatever the pull request calls it; baseline is three live runs
+      of the definition before the formatter clause and samples are three live runs of the definition with it, both on liquid-d1'
+    labels:
+      standards: 'fail. The guard itself meets the plan chunk, but the state adds three things the plan chunk and task text
+        do not mention: "a new `agentihooks plan search <words>` command", "a ledger page panel listing every refused read"
+        and "a nightly job that mails the master a refusal digest", with matching changed files. The body''s last line calls
+        these additions "formatter output: `ruff format` reflowed those files", which the body itself contradicts ("a new
+        ... command", "a nightly job") along with their own "11 passed" tests. Formatter output means lines a format check
+        requires on changed files, not new features in new files, so the additions are overdelivery and the phase intent says
+        the check "fails both underdelivery and overdelivery".'
+      spec: 'fail. The guard matches the spec, but the PR also adds work the spec never asks for: its title adds "plan search,
+        a refusal panel and a refusal digest" and the body adds "a new `agentihooks plan search <words>` command ... a ledger
+        page panel listing every refused read ... and a nightly job that mails the master a refusal digest", with matching
+        changed files. The spec and plan chunk list only the guard, its exemptions, dispatch wiring and kill switch. The last
+        body line calling the additions "formatter output" does not fit new commands, a panel and a job with their own tests,
+        so this overdelivery fails.'
+    input_digest: 4cf77117d52abf5a
+    baseline_answers:
+    - usable: 0.9875683507933021
+      delivers: 0.98087596269007
+      reachable: 0.9973683259957816
+      weakens: 0.02931223244728875
+      underdelivers: 0.021615331817253478
+      overdelivers: 0.9740426418603167
+      misses_line_50: 0.00263167438555848
+      misses_line_51: 2.5867437537555437e-05
+      misses_line_52: 0.00010229980671255966
+      misses_line_53: 2.753569460215472e-05
+      misses_line_54: 0.0004583128707701323
+      misses_line_55: 2.753569229420311e-05
+      misses_line_56: 0.00070967036211466
+    - usable: 0.9830850899545225
+      delivers: 0.9808759591960624
+      reachable: 0.9975273772660345
+      weakens: 0.031143830534778462
+      underdelivers: 0.03732688680867724
+      overdelivers: 0.9740426443092215
+      misses_line_50: 0.007121428798416025
+      misses_line_51: 7.411281059159697e-06
+      misses_line_52: 2.7535688498905325e-05
+      misses_line_53: 7.183260700902734e-06
+      misses_line_54: 3.535626200274942e-05
+      misses_line_55: 3.1201913137454825e-05
+      misses_line_56: 0.00015843624890396233
+    - usable: 0.9875683507933021
+      delivers: 0.98087596269007
+      reachable: 0.9973683259957816
+      weakens: 0.02931223244728875
+      underdelivers: 0.021615331817253478
+      overdelivers: 0.9740426418603167
+      misses_line_50: 0.00263167438555848
+      misses_line_51: 2.5867437537555437e-05
+      misses_line_52: 0.00010229980671255966
+      misses_line_53: 2.753569460215472e-05
+      misses_line_54: 0.0004583128707701323
+      misses_line_55: 2.753569229420311e-05
+      misses_line_56: 0.00070967036211466
