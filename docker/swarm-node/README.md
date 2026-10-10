@@ -44,7 +44,9 @@ same private folders: `homes` for writable CLI state, `run` for supervision and
 Unix sockets, `checkouts`, `worktrees`, `spool`, `tmp` for scratch, and
 `profiles` for profile seeds, which bootstrap seals read only. Each folder is
 created mode 0700 under the attempt, so two Pods use the same internal names
-without sharing a mutable file or socket. A path, profile link or archive member
+without sharing a mutable file or socket. `filesystem.environment` gives a
+process its `HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_RUNTIME_DIR` and
+`TMPDIR` inside those folders. A path, profile link or archive member
 that resolves outside its attempt root after symlink resolution is refused
 before any write and counted in `execution_path_validation_failures`. The
 execution record carries the layout as relative folder names only;

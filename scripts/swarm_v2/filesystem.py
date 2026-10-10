@@ -173,3 +173,16 @@ def socket(execution: Execution, name: str) -> Path:
     if len(str(path).encode()) > SOCKET_BYTES:
         _refuse(f"socket path exceeds {SOCKET_BYTES} bytes: {name}")
     return path
+
+
+def environment(execution: Execution, target: str) -> dict[str, str]:
+    if not SEGMENT.fullmatch(target):
+        _refuse(f"invalid home target: {target}")
+    home = execution.path("home") / target
+    return {
+        "HOME": str(home),
+        "CLAUDE_CONFIG_DIR": str(home / ".claude"),
+        "CODEX_HOME": str(home / ".codex"),
+        "XDG_RUNTIME_DIR": str(execution.path("runtime")),
+        "TMPDIR": str(execution.path("scratch")),
+    }
