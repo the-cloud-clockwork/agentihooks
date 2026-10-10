@@ -1,5 +1,5 @@
 {
-  "tested_commit": "9fbab46f0557436acc5ceeca5c31e08930879ba6",
+  "tested_commit": "0618061a5c410b38d306aebc66692b5aa705fe09",
   "evidence_class": "mocked Redis, fake lease clock, in process API server enforcing uid preconditions with a droppable delete response, in process attach and secret registries; no Kubernetes API server",
   "cases": [
     "T-SV2-KUB-04-A",
@@ -10,12 +10,12 @@
     "tests/fixtures/swarm_v2/cleanup-attempts.json": "39a4e5c1dc686133750138a012ddc2d2764666e2562588959752e670ab12d4ce",
     "tests/fixtures/swarm_v2/pod-policy.json": "6f10e42c7c8461ea18fe3ae9f0c46001020bd50153665477b415076cf71099f5",
     "tests/fixtures/swarm_v2/pod-launch.json": "dc9258de4781082cc2abb9a2048ff04db03da0a83ea144f96fe728847b34c809",
-    "tests/sv2_kub04_cases.py": "fde333b99d3ff14c90da28beba3da606c2233e46c1b8581c54808ad9436ff284",
-    "tests/test_swarm_v2_kubernetes_cleanup.py": "e7557182f3544a6d6943e086d6cb6363b4956dd3ba3797948e1c9723a31a614e",
-    "tests/test_swarm_v2_retention.py": "0e63e0cc48201582e28ae3cb91e40e3b914e7a408dd7795ed4ee84927c34674f",
-    "tests/test_swarm_v2_kubernetes_client.py": "5df6d202ee6d24154ef4ce9312c10e13cbd8c7c18727638fe7ff367de77e38a4",
-    "scripts/swarm_v2/kubernetes/cleanup.py": "0c411ee7343f510f623f9b0eb6f97efead3b7b27844599e2f50514d02b992935",
-    "scripts/swarm_v2/retention.py": "6942db284e351b85b9d3aaba2ffea60153af5448cca7a0fb51166a4689795e21",
-    "scripts/swarm_v2/kubernetes/client.py": "dc08f36437d6a5b119da9c26715a3da0e8ea487c8cc901a01bd8a5b8dbad288c"
+    "tests/sv2_kub04_cases.py": "76a3a638f4cb02becd483ab21c3642d58a7ded678694585a32c3789687080c53",
+    "tests/test_swarm_v2_kubernetes_cleanup.py": "d99b9c244c5cdf590f8df31c30638fefcc9bef2850a8ff1aa31373a428411f0e",
+    "tests/test_swarm_v2_retention.py": "01c2581201ecd7e9a6c5b30267e3afc49066d572cb4674a31930334a12faccba",
+    "tests/test_swarm_v2_kubernetes_client.py": "46e061d4827573cc7055f76aae466f9a170618f59807ae517d8e278073dba424",
+    "scripts/swarm_v2/kubernetes/cleanup.py": "d3620e122023036cfd4bd82319ecd413d47155ba2b24d15785c11ab1f2effed2",
+    "scripts/swarm_v2/retention.py": "ffe42ea081b243ae2dfe275a107cbac7ad8f7c3f9a623d17297b6731a77be1db",
+    "scripts/swarm_v2/kubernetes/client.py": "3a8f0ef4ab1775f04a7bf1416fdfe6034fe2d94336cb226fbc05e33360fc5c1a"
   }
 }
