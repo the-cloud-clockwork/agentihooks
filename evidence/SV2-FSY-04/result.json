@@ -1,0 +1,95 @@
+{
+  "package": "SV2-FSY-04",
+  "dependency": [
+    "SV2-FSY-03"
+  ],
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2420",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2460",
+  "tested_commit": "11d056e7ad80ae0bc50c683bfae65f9dc79c517c",
+  "status": "fixture-qualified",
+  "package_complete": false,
+  "mocked": true,
+  "evidence_class": "Mocked in CI: a local durable directory under pytest temporary roots and an in memory S3 shaped object store fake with injected truncated uploads, same length corruption and interrupted record writes. No real object store, no Pod and no live rollout proof.",
+  "interfaces": [
+    "scripts.swarm_v2.artifacts.base.ArtifactRef(sha256, size) and ArtifactRef.of(data): the immutable content reference",
+    "scripts.swarm_v2.artifacts.base.Scope.granted(registration): swarm, task, execution and generation taken from a launch Registration; durable keys live under swarm/task",
+    "scripts.swarm_v2.artifacts.base.Backend: write, size, read, move, remove, keys; the only operations a backend supplies",
+    "scripts.swarm_v2.artifacts.base.ArtifactStore(backend).put(scope, artifact_id, data) -> ArtifactRef: stage, read back and verify size and sha256 independently of the transport, then commit object and record",
+    "ArtifactStore.stat(scope, ref) -> verified, corrupt or absent, by reading the object back",
+    "ArtifactStore.get_range(scope, ref, start, length) -> bytes, only from a verified object",
+    "ArtifactStore.commit_manifest(scope, name, artifact_ids) -> manifest: verified artifacts only, fenced by generation",
+    "ArtifactStore.delete_if_unreferenced(scope, ref) -> bool: refuses objects any manifest or newer record references",
+    "ArtifactStore.metrics()['artifact_upload_verification_failures'] counted per backend kind",
+    "scripts.swarm_v2.artifacts.local.LocalBackend(root): durable directory, fsync of file and directory, every key contained under root",
+    "scripts.swarm_v2.artifacts.object_store.ObjectStoreBackend(client, bucket, prefix): S3 shaped client calls put_object, head_object, get_object with Range, copy_object, delete_object and list_objects_v2 bounded to PAGES pages; endpoint and credentials stay with the caller's client"
+  ],
+  "supported_backends": [
+    "local durable directory",
+    "S3 shaped object store through an injected client"
+  ],
+  "supported_versions": {
+    "python": "3.11 and 3.12 unit shards in the linked CI run",
+    "object_store": "the S3 API operation names above, exercised only through the in memory fake",
+    "filesystem": "POSIX rename and fsync on the ubuntu-latest CI runner"
+  },
+  "states": {
+    "observed": "Bytes a backend returns on read back of the staged upload",
+    "accepted": "A staged upload whose read back size and sha256 match the content reference",
+    "committed": "The object moved under objects/<sha256> and its record or manifest written and read back",
+    "externally_verified": "None; no worker path or real object store uses the package yet"
+  },
+  "validation": {
+    "red": [
+      "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059976739 on 25de5bf4: tests only commit, artifacts package missing at collection"
+    ],
+    "green": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38071102980 on 11d056e7ad80ae0bc50c683bfae65f9dc79c517c: every unit shard passed",
+    "mutation": "Branch preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38070916978 on 11d056e7ad80ae0bc50c683bfae65f9dc79c517c; earlier preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38061925768 graded base.py 318, local.py 79 and object_store.py 98 killed, 0 survived",
+    "review": "Standards and Spec readers ran three rounds and closed; overruled items recorded under remaining_limitations",
+    "local": "No local tests or mutation ran; lint, format and size passed in the pre push gate on every head"
+  },
+  "measurements": {
+    "artifact_upload_verification_failures": "refused uploads per backend kind; case B asserts exactly one per backend after an injected truncated upload, case A asserts none on success"
+  },
+  "rollback_rehearsal": {
+    "action": "existing object store objects left immutable; future manifest publication switched to the previous local adapter",
+    "result": true,
+    "tests": [
+      "tests/sv2_fsy04_cases.py case_c rollback_rehearsal"
+    ]
+  },
+  "scope": "One artifact contract over a local durable directory and an S3 shaped object store at the module interface; worker launch wiring and real object store configuration belong to later packages",
+  "remaining_limitations": [
+    "Every range read verifies the whole object first, so a small range of a large artifact costs a full read; a verified streaming read is a ledger follow up.",
+    "Records and manifests are written check then write without a conditional create. The highest generation manifest is authoritative and a stale lower generation overwrites nothing (INV-R07); same generation writers rely on one admitted owner per task generation (INV-R05).",
+    "Scope is publicly constructible; the first caller must derive it only from a LaunchAuthority verified Registration and state that in its wiring pull request.",
+    "Only the in memory object store fake was exercised; no real S3 compatible service was contacted.",
+    "No worker path calls the package yet."
+  ],
+  "cases": {
+    "T-SV2-FSY-04-A": {
+      "title": "successful behavior: an uploaded artifact can be verified and retrieved by its immutable content reference through either supported backend",
+      "passed": true,
+      "tests": 70,
+      "file": "a-result.json"
+    },
+    "T-SV2-FSY-04-B": {
+      "title": "rejection: a transport acknowledgement with mismatched content hash is not accepted as durability proof",
+      "passed": true,
+      "tests": 140,
+      "file": "b-result.json"
+    },
+    "T-SV2-FSY-04-C": {
+      "title": "recovery: retrying a completed upload with the same artifact ID returns the committed object without duplication",
+      "passed": true,
+      "tests": 34,
+      "file": "c-result.json"
+    }
+  },
+  "test_outputs": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38071102980",
+  "completion_evidence": "Fixture qualified only; the package is not complete until a worker path publishes through it and a rollout gate verifies it against a real backend.",
+  "fixture": "tests/test_swarm_v2_artifacts.py World(kind, root) and tests/sv2_fsy04_cases.py",
+  "compatibility": "No preceding artifact protocol exists; today durable output stays in the attempt's own files. The package writes nothing into an attempt's working files (case A attempt_files_untouched) and keeps every durable key under the granted swarm and task, so the local path runs unchanged until a caller opts in. Rollback to the previous adapter is rehearsed in case C.",
+  "phase_use": "Tier 3 workers keep attempt private homes from SV2-FSY-01 and SV2-FSY-02 and publish durable outputs through ArtifactStore with a Scope taken from their launch Registration, against either a node durable directory or the configured object store; the wiring that calls it belongs to a later package",
+  "authority": "The writable scope comes from Scope.granted(registration), never from an artifact id, manifest name or display label; ids and names must be identifiers and every key is contained under swarm/task"
+}
