@@ -2,6 +2,7 @@ import json
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from scripts.swarm_v2.api.commands import CommandsAPI
 from scripts.swarm_v2.api.executions import ExecutionsAPI
 from scripts.swarm_v2.api.tasks import TasksAPI
 from scripts.swarm_v2.auth_context import GrantRefused
@@ -13,14 +14,17 @@ JSON_CONTENT = ("Content-Type", "application/json")
 TOO_LARGE = ("invalid_request", "the request body is too large")
 NOT_JSON = ("invalid_request", "the request body is not JSON")
 TASK_PATHS = re.compile(r"/v2/(?:tasks|swarm)(?:/.*)?")
+COMMAND_PATHS = re.compile(r"/v2/executions/[^/]+/commands(?:/.*)?")
 
 
 class Routes:
-    def __init__(self, executions: ExecutionsAPI, tasks: TasksAPI) -> None:
-        self.executions, self.tasks = executions, tasks
+    def __init__(self, executions: ExecutionsAPI, tasks: TasksAPI, commands: CommandsAPI | None = None) -> None:
+        self.executions, self.tasks, self.commands = executions, tasks, commands
 
     def route(self, method: str, path: str, authorization: str, body: object) -> tuple[int, dict]:
         api = self.tasks if TASK_PATHS.fullmatch(path) else self.executions
+        if self.commands is not None and COMMAND_PATHS.fullmatch(path):
+            api = self.commands
         return api.route(method, path, authorization, body)
 
 
