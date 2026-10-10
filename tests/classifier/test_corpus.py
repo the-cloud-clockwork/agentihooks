@@ -454,14 +454,14 @@ def test_every_packaged_corpus_replays_clean(name):
     )
 
 
-def _purpose(path):
-    return yaml.safe_load(path.read_text())["purpose"]
-
-
-CLASSIFIERS = sorted(
-    path.stem for path in PACKAGE.glob("*.yaml") if ".corpus" not in path.name and _purpose(path) == path.stem
-)
+DEFINITIONS = sorted(path.stem for path in PACKAGE.glob("*.yaml") if ".corpus" not in path.name)
+NO_CORPUS = {"intent-check-tests-first": "the decision log holds no tests first intent decision to draw cases from"}
+CLASSIFIERS = [name for name in DEFINITIONS if name not in NO_CORPUS]
 GENERIC = ("choice", "score", "yes")
+
+
+def test_only_named_definitions_go_without_a_corpus():
+    assert [name for name in DEFINITIONS if not (PACKAGE / f"{name}.corpus.yaml").is_file()] == list(NO_CORPUS)
 
 
 @pytest.mark.parametrize("name", CLASSIFIERS)
