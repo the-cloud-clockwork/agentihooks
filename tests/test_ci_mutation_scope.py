@@ -417,7 +417,7 @@ def test_a_commit_is_graded_only_by_a_push_preflight_whose_mutation_job_passed(
 
     def run(command, **kwargs):
         calls.append((command, kwargs))
-        code, out = jobs[command[4].split("/")[4]] if len(calls) > 1 else runs
+        code, out = jobs[command[4].split("/")[5]] if len(calls) > 1 else runs
         return subprocess.CompletedProcess(command, code, out, "")
 
     monkeypatch.setattr(scope.subprocess, "run", run)
