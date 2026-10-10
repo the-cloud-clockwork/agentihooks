@@ -23,6 +23,36 @@ def _validate_channel(channel: str) -> str | None:
     return None
 
 
+def _publish(channel: str, message: str, severity: str, ttl_seconds: int) -> str:
+    from scripts.swarm_v2.masters_channel import CHANNEL_PREFIX, reserved
+
+    if reserved(channel):
+        slug = channel.removeprefix(CHANNEL_PREFIX)
+        return json.dumps(
+            {
+                "success": False,
+                "error": f"{channel} is a masters channel: master seats post with "
+                f"agentihooks swarm {slug} masters-channel say",
+            }
+        )
+    try:
+        from hooks.context.broadcast import create_broadcast
+
+        msg_id = create_broadcast(
+            message=message,
+            severity=severity,
+            ttl_seconds=ttl_seconds,
+            source="mcp-channel",
+            channel=channel,
+        )
+        if msg_id:
+            return json.dumps({"success": True, "message_id": msg_id, "channel": channel})
+        return json.dumps({"success": False, "error": "Empty message"})
+    except Exception as e:
+        log("MCP channel_publish failed", {"error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
+
+
 def register(mcp):
     @mcp.tool()
     def channel_publish(channel: str, message: str, severity: str = "info", ttl_seconds: int = 3600) -> str:
@@ -43,33 +73,7 @@ def register(mcp):
         Returns:
             JSON with success status and message_id.
         """
-        from scripts.swarm_v2.masters_channel import CHANNEL_PREFIX, reserved
-
-        if reserved(channel):
-            slug = channel.removeprefix(CHANNEL_PREFIX)
-            return json.dumps(
-                {
-                    "success": False,
-                    "error": f"{channel} is a masters channel: master seats post with "
-                    f"agentihooks swarm {slug} masters-channel say",
-                }
-            )
-        try:
-            from hooks.context.broadcast import create_broadcast
-
-            msg_id = create_broadcast(
-                message=message,
-                severity=severity,
-                ttl_seconds=ttl_seconds,
-                source="mcp-channel",
-                channel=channel,
-            )
-            if msg_id:
-                return json.dumps({"success": True, "message_id": msg_id, "channel": channel})
-            return json.dumps({"success": False, "error": "Empty message"})
-        except Exception as e:
-            log("MCP channel_publish failed", {"error": str(e)})
-            return json.dumps({"success": False, "error": str(e)})
+        return _publish(channel, message, severity, ttl_seconds)
 
     @mcp.tool()
     def channel_list() -> str:
