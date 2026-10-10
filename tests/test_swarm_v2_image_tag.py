@@ -1,3 +1,4 @@
+import http.client
 import io
 import json
 import urllib.error
@@ -98,14 +99,41 @@ def test_a_grant_answer_naming_no_token_retries_without_credentials():
     assert registry.requests[2][0].get_header("Authorization") is None
 
 
-def test_a_bearer_challenge_without_a_realm_is_refused_as_unreachable():
-    registry = Registry(_refused(401, WWW_Authenticate='Bearer service="ghcr.io"'))
+@pytest.mark.parametrize(
+    "challenge",
+    [
+        'Bearer service="ghcr.io"',
+        'Bearer realm="http://ghcr.io/token",service="ghcr.io"',
+        'Bearer realm="https://grants.example.net/token",service="ghcr.io"',
+    ],
+)
+def test_a_token_service_off_the_registry_https_host_is_refused_before_any_grant_request(challenge):
+    registry = Registry(_refused(401, WWW_Authenticate=challenge))
+
+    with pytest.raises(image_tag.ImageUnresolved) as refused:
+        image_tag.resolve(REPOSITORY, "dev", registry)
+
+    assert str(refused.value) == f"the registry for {REPOSITORY}:dev names a token service other than https://ghcr.io"
+    assert len(registry.requests) == 1
+
+
+def test_a_grant_answer_that_is_not_an_object_retries_without_credentials():
+    registry = Registry(_refused(401, WWW_Authenticate=CHALLENGE), Response(b"[]"), _refused(401))
+
+    with pytest.raises(image_tag.ImageUnresolved) as refused:
+        image_tag.resolve(REPOSITORY, "dev", registry)
+
+    assert str(refused.value) == f"the registry answered 401 for {REPOSITORY}:dev"
+    assert registry.requests[2][0].get_header("Authorization") is None
+
+
+def test_a_broken_registry_answer_is_refused_as_unreachable():
+    registry = Registry(http.client.IncompleteRead(b""))
 
     with pytest.raises(image_tag.ImageUnresolved) as refused:
         image_tag.resolve(REPOSITORY, "dev", registry)
 
     assert str(refused.value) == f"the registry for {REPOSITORY}:dev is unreachable"
-    assert len(registry.requests) == 1
 
 
 def test_a_missing_tag_is_refused_with_the_registry_answer():
@@ -178,6 +206,8 @@ def test_an_image_tag_is_accepted(tag):
     assert image_tag.is_tag(tag) is True
 
 
-@pytest.mark.parametrize("tag", ["", "dev@sha256:" + "1" * 64, "sha256:" + "1" * 64, ".dev", "-dev", "a" * 129, "dé"])
+@pytest.mark.parametrize(
+    "tag", ["", "dev@sha256:" + "1" * 64, "sha256:" + "1" * 64, "sha256-abc", "b" * 40, ".dev", "-dev", "a" * 129, "dé"]
+)
 def test_a_digest_or_malformed_tag_is_not_an_image_tag(tag):
     assert image_tag.is_tag(tag) is False

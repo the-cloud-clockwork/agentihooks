@@ -1,8 +1,8 @@
 controller:
   serviceAccountName: swarm-controller
   env:
-    # A reserved example domain: real provider accounts never live in git.
-    AGENTIHOOKS_LAUNCH_ACCOUNT: claude-fixture@example.com
+    # No account email lives in git; the runtime build reads the launch account as an opaque name.
+    AGENTIHOOKS_LAUNCH_ACCOUNT: kind-fixture
   workers:
     apiUrl: http://agentihooks-swarm-controller.default.svc:8780
     imageTag: dev
@@ -21,8 +21,7 @@ controller:
       image_repository: ghcr.io/the-cloud-clockwork/agentihooks-worker
       brain_url: http://brain-api.swarm-brain.svc:8080
       termination_grace_seconds: 60
-      provider_accounts:
-        - claude-fixture@example.com
+      provider_accounts: []
       profiles:
         general:
           limits:
