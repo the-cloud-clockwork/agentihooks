@@ -222,6 +222,13 @@ def test_a_question_is_no_trigger_even_once_it_is_gone():
     assert dispatch_seat.triggers(doc(priority("pr1", "questions/q1", "Decide it")), NOW) == []
 
 
+def test_triggers_read_a_ledger_without_questions_or_followups():
+    rows = [priority("pr1", "questions/q1", "Decide it"), priority("pr2", "followups/f1", "Approve the lane cap")]
+    assert dispatch_seat.triggers({"priorities": rows}, NOW) == [
+        {"id": "pr2", "item": "followups/f1", "text": "Approve the lane cap", "minutes": 15}
+    ]
+
+
 def test_no_seat_spawns_while_every_open_priority_waits_on_the_operator():
     store, runtime = swarm(), FakeRuntime()
     for minute in range(3):
@@ -413,13 +420,18 @@ def test_the_swarm_config_reaches_the_seat_spawn():
     assert runtime.configs == [config]
 
 
-@pytest.mark.parametrize("hold", ["sleeping", "paused"])
+def sleep(store):
+    store.redis.set(store.key(SLUG, "master-retired-tasks"), json.dumps([]))
+
+
+def pause(store):
+    store.update(SLUG, state="paused")
+
+
+@pytest.mark.parametrize("hold", [sleep, pause])
 def test_a_sleeping_or_paused_swarm_tick_spawns_no_dispatcher(hold):
     store, runtime = swarm(), FakeRuntime()
-    if hold == "sleeping":
-        store.redis.set(store.key(SLUG, "master-retired-tasks"), json.dumps([]))
-    else:
-        store.update(SLUG, state="paused")
+    hold(store)
     tick(SLUG, store, PriorityLedger([]), runtime, NOW)
     assert [lane for lane, _, _ in runtime.spawned if lane == dispatch_seat.LANE] == []
     assert seats(store) == []

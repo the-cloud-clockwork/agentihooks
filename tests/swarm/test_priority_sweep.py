@@ -340,6 +340,13 @@ def test_operator_only_covers_handed_rows_and_operator_decisions():
     assert priority_sweep.operator_only(approval, {"item": "tasks/t1", "by": "master@a1b2c3-0001"}) is True
 
 
+def test_a_priority_on_a_collection_the_ledger_lacks_counts_as_gone():
+    rows = [{"id": "pr1", "item": "followups/f1"}]
+    assert list(priority_sweep.sweep({}, rows, lambda url: None)) == [(rows[0], "its item is gone")]
+    assert priority_sweep.operator_only({}, {"item": "questions/q1"}) is True
+    assert priority_sweep.operator_only({}, {"item": "followups/f1"}) is False
+
+
 def test_a_master_relay_without_the_operators_words_never_clears_it(env):
     master = "master@sw-0001"
     core.sync(SLUG, ops=[{"op": "join", "id": "j-m", "by": master, "role": "orchestrator"}])
