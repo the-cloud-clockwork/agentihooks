@@ -460,8 +460,11 @@ def cmd_publish_plan(args):
             op("slice_add", args, phase=f"phases/{phase}", anchor=anchor)
             for anchor in plan_ranges.slice_anchors(text, ranges[phase])
         ]
-    refused(call(args.slug, ops), ops)
-    print(json.dumps({"plan_url": url, "published_to": where, "phases": phases}))
+    state = call(args.slug, ops)
+    refused(state, ops)
+    tasks = ledger_plans.resliced(doc["tasks"], state["tasks"])
+    reslice = {"tasks": tasks} if any(tasks.values()) else {}
+    print(json.dumps({"plan_url": url, "published_to": where, "phases": phases, **reslice}))
 
 
 def cmd_plan(args):
