@@ -137,6 +137,28 @@ def test_harnesses_keep_separate_readings(world):
     world.publish(EXHAUSTED)
     assert world.quota.reading(ACCOUNT, "codex").state == quota.UNKNOWN
     assert quota.latest_all(world.store.redis, "codex") == {}
+    world.publish(STALE_FULL, harness="codex")
+    assert world.quota.reading(ACCOUNT, "codex").routing_left == 90.0
+    assert world.quota.reading(ACCOUNT, HARNESS).routing_left == 0.0
+
+
+def test_stored_records_use_their_documented_keys(world):
+    world.publish(EXHAUSTED)
+    world.publish(STALE_FULL)
+    world.quota.admit(ACCOUNT, HARNESS)
+    assert sorted(world.stored()) == [
+        f"{ROOT}:quota-history:{HARNESS}:{ACCOUNT}",
+        f"{ROOT}:quota-stale",
+        f"{ROOT}:quota-waits:{HARNESS}:{ACCOUNT}",
+        f"{ROOT}:quota:{HARNESS}",
+    ]
+    assert world.stored()[f"{ROOT}:quota-stale"] == {f"{HARNESS}:{ACCOUNT}": "1"}
+
+
+def test_an_undecodable_record_hides_no_other_account(world):
+    world.publish(INPUTS["spare"], account=SPARE)
+    world.store.redis.hset(f"{ROOT}:quota:{HARNESS}", mapping={ACCOUNT: "{", "drifted": '{"unknown": 1}'})
+    assert list(quota.latest_all(world.store.redis, HARNESS)) == [SPARE]
 
 
 @pytest.mark.parametrize(
@@ -171,6 +193,7 @@ def test_a_rejected_provider_status_leaves_no_room(world):
     world.publish({**STALE_FULL, "provider_status": "rejected"})
     reading = world.quota.reading(ACCOUNT, HARNESS)
     assert (reading.state, reading.routing_left) == (quota.OBSERVED, 0.0)
+    assert world.quota.cap(ACCOUNT, HARNESS) == 0
     assert world.quota.admit(ACCOUNT, HARNESS).reason == "exhausted"
 
 
@@ -189,6 +212,7 @@ def test_a_passed_reset_restores_its_window(world):
         ("claude", {**STALE_FULL, "operator_budget": 40}),
         ("claude", {**STALE_FULL, "account": SPARE}),
         ("claude", {**STALE_FULL, "provider_status": CANARY}),
+        ("claude", {**STALE_FULL, "provider_status": [CANARY]}),
         ("claude", {**STALE_FULL, "five_used": CANARY}),
         ("claude", {**STALE_FULL, "five_used": True}),
         ("claude", {**STALE_FULL, "five_used": 100.5}),
@@ -215,7 +239,14 @@ def test_reports_outside_the_provider_schema_are_refused_without_writing_or_echo
     assert world.stored() == before
 
 
-@pytest.mark.parametrize("report", [{**STALE_FULL, "observed_ms": NOW + quota.SKEW_MS}, {**STALE_FULL, "five_used": 0}])
+@pytest.mark.parametrize(
+    "report",
+    [
+        {**STALE_FULL, "observed_ms": NOW + quota.SKEW_MS},
+        {**STALE_FULL, "five_used": 0},
+        {**STALE_FULL, "five_reset": 1},
+    ],
+)
 def test_reports_at_the_schema_limits_are_accepted(world, report):
     observation = world.publish(report)
     assert world.quota.latest(ACCOUNT, HARNESS) == observation
@@ -389,6 +420,21 @@ def test_fleet_observations_are_off_unless_enabled(world, monkeypatch):
     assert (observed_at, probe.account, probe.five_hour.used) == (600.0, ACCOUNT, 100.0)
     assert quota.fleet_observations(environ, "codex") == []
     assert environs == [environ, environ]
+
+
+def test_an_aged_fleet_observation_reaches_routing_as_unknown_never_full(world, monkeypatch):
+    from scripts import claude_quota_balancer as balancer
+
+    world.publish(STALE_FULL)
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda environ: world.store.redis)
+    monkeypatch.setattr(balancer, "cached_observations", lambda: [])
+    world.clock[0] = STALE_FULL["observed_ms"] + quota.FRESH_SECONDS * 1000
+    [(_, fresh)] = quota.fleet_observations({quota.FLAG: "1"})
+    assert fresh.five_hour == quota.QuotaWindow(0.0, 18000)
+    world.clock[0] += 1000
+    [(_, aged)] = quota.fleet_observations({quota.FLAG: "1"})
+    assert (aged.five_hour, aged.seven_day) == (quota.QuotaWindow(), quota.QuotaWindow())
+    assert qp._other_accounts({}, quota.fleet_observations({quota.FLAG: "1"})) == []
 
 
 def test_an_unreachable_fleet_store_falls_back_to_the_local_cache(monkeypatch):

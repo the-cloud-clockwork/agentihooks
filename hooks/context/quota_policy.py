@@ -17,6 +17,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from hooks.config import (
     AGENTIHOOKS_HOME,
@@ -26,6 +27,9 @@ from hooks.config import (
     QUOTA_RESERVE_ACCOUNTS,
     QUOTA_WAIT_MIN_WEEK_LEFT,
 )
+
+if TYPE_CHECKING:
+    from scripts.claude_quota_balancer import ProbeResult
 
 MIN_ROUTING_LEFT = 5.0
 PUSH_SIGNALS = ["keep pushing", "push to 100", "push until 100", "burn it to 100"]
@@ -156,7 +160,7 @@ def _session_windows(session_id: str) -> tuple[float, float, float | None, float
     )
 
 
-def _other_accounts(sessions: dict[str, int], fleet: Iterable[tuple[float, object]] = ()) -> list[Candidate]:
+def _other_accounts(sessions: dict[str, int], fleet: Iterable[tuple[float, "ProbeResult"]] = ()) -> list[Candidate]:
     from scripts import session_bands
     from scripts.claude_quota_balancer import cached_observations
 
