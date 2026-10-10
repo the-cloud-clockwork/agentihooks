@@ -15,7 +15,6 @@ RULES = {
     "model-pick": "scripts.swarm.model_pick:RULE",
     "phase-slice": "scripts.swarm.slice_screen:RULE",
     "priority-resolve": "scripts.swarm.priority_sweep:RULE",
-    "profile-pick": "scripts.swarm.profile_choice:RULE",
     "task-difficulty": "scripts.swarm.difficulty:RULE",
     "task-grouping": "scripts.swarm.grouping:RULE",
     "trace-plan": "scripts.swarm.trace_plan:RULE",

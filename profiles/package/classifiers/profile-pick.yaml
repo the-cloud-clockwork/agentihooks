@@ -16,8 +16,8 @@ questions:
         Backend or infrastructure behavior: services, APIs, command lines, hooks, runtimes, storage, deployment or
         CI plumbing, with no change to what a person sees or does in a product interface.
       qa: >-
-        Independent verification: stress testing or proving work that others built, producing evidence rather
-        than changing behavior.
+        Independent verification: stress testing or proving work that others built from evidence that needs no
+        push. A qa seat never edits code, pushes a branch or opens a pull request, so it cannot run a CI probe.
       split: Two or more unrelated public responsibilities bundled in one task that should become separate tasks.
       unresolved: The task does not say enough about the public behavior it changes to decide.
 thresholds:
@@ -25,4 +25,5 @@ thresholds:
 environment:
   confidence: AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE
 rule:
-  type: code
+  type: choice
+  threshold: confidence

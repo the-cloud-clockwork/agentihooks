@@ -2,7 +2,7 @@ import pytest
 
 from hooks.classifier import code_rules, definitions, runner
 from hooks.classifier.result import Answer
-from scripts.swarm import difficulty, grouping, model_pick, priority_sweep, profile_choice, slice_screen, trace_plan
+from scripts.swarm import difficulty, grouping, model_pick, priority_sweep, slice_screen, trace_plan
 from scripts.swarm_ledger import ledger_duplicates
 
 LEVELS = ["low", "medium", "high", "max"]
@@ -62,25 +62,6 @@ def test_model_pick_rejects_with_the_lane_default():
     assert model_pick.RULE.values == {
         "effort": ("lane default", "high", "low", "max", "medium", "xhigh"),
     }
-
-
-@pytest.mark.parametrize(
-    ("answer", "expected"),
-    [
-        (choice("engineer", 0.6), "engineer"),
-        (choice("frontend", 0.9), "frontend"),
-        (choice("engineer", 0.59), "lane default"),
-        (choice("engineer", None), "lane default"),
-        (choice("split", 0.9), "unresolved"),
-    ],
-)
-def test_profile_pick_names_the_responsibility_the_lane_default_or_unresolved(answer, expected):
-    assert verdicts(profile_choice, "profile-pick", {"responsibility": answer}) == {"profile": expected}
-
-
-def test_profile_pick_offers_every_responsibility_and_rejects_as_unresolved():
-    assert profile_choice.RULE.values == {"profile": ("frontend", "engineer", "qa", "lane default", "unresolved")}
-    assert profile_choice.RULE.rejections == {"profile": "unresolved"}
 
 
 PAIRS = {"pairs": [{"new": 0, "slot": 0}, {"new": 0, "slot": 1}]}

@@ -1,7 +1,8 @@
 version: 1
 notes: Seeded from the classifier decision log. Each case state was rebuilt from its ledger and matched to a state digest
   the decision log recorded before seeding; its samples are the answers logged for that digest. Expected verdicts were written
-  by a separate reader agent that saw only each case state and its question, never the thresholds or the rule.
+  by a separate reader agent that saw only each case state and its question, never the thresholds or the rule. The two ci
+  probe cases come from the qa profile fix and keep their own notes.
 cases:
 - name: rig-grade-swarm-doctor-t9
   state:
@@ -25,7 +26,7 @@ cases:
     id: t9
     title: A chat line to the whole swarm gets one answer, from the master
   expected:
-    profile: engineer
+    responsibility: engineer
   control: false
   samples:
   - source: luna
@@ -62,7 +63,7 @@ cases:
     id: fx-f0c1c467-code
     title: Move the number behind the inbox past window finding
   expected:
-    profile: engineer
+    responsibility: engineer
   control: false
   samples:
   - source: haiku
@@ -97,7 +98,7 @@ cases:
     id: t5
     title: Measure open wait ended notices after the settle fix
   expected:
-    profile: qa
+    responsibility: qa
   control: false
   samples:
   - source: luna
@@ -162,7 +163,7 @@ cases:
     id: fx-29d21c6e-code
     title: Move the number behind the telemetry stale finding
   expected:
-    profile: engineer
+    responsibility: engineer
   control: false
   samples:
   - source: liquid-d1
@@ -201,7 +202,7 @@ cases:
     id: t58
     title: Find what ends lane agents without a leave or handoff
   expected:
-    profile: engineer
+    responsibility: engineer
   control: false
   samples:
   - source: haiku
@@ -236,7 +237,7 @@ cases:
     id: t6
     title: Measure the watched swarm's Codex share after the router fix
   expected:
-    profile: qa
+    responsibility: qa
   control: false
   samples:
   - source: luna
@@ -312,7 +313,7 @@ cases:
     id: rt3
     title: A finished agent is always retired, its lane slot freed at once, and a failed retire is flagged
   expected:
-    profile: engineer
+    responsibility: engineer
   control: false
   samples:
   - source: luna
@@ -353,7 +354,7 @@ cases:
     id: t26
     title: Measure cache rewrites and profile check failures after the next render
   expected:
-    profile: qa
+    responsibility: qa
   control: false
   samples:
   - source: luna
@@ -393,7 +394,7 @@ cases:
     id: t74
     title: Find which required writes make fresh engineers trip the talk budget before any outcome
   expected:
-    profile: engineer
+    responsibility: engineer
   control: false
   samples:
   - source: haiku
@@ -431,7 +432,7 @@ cases:
     id: t24
     title: Measure ledger timeouts per hour after the local mutation worker cap
   expected:
-    profile: qa
+    responsibility: qa
   control: false
   samples:
   - source: luna
@@ -469,7 +470,7 @@ cases:
     id: fx-bc4622cf-code
     title: Move the number behind the flaky tests finding
   expected:
-    profile: engineer
+    responsibility: engineer
   control: false
   samples:
   - source: haiku
@@ -511,7 +512,7 @@ cases:
     id: fx-30373668-cause
     title: Find the cause of the flaky tests finding
   expected:
-    profile: engineer
+    responsibility: engineer
   control: false
   samples:
   - source: haiku
@@ -528,3 +529,123 @@ cases:
           split: 0.02
           unresolved: 0.05
   notes: state digest bdb21401c2a659b1
+- name: mutation_runner_forms_ci_probe
+  state:
+    task: t85
+    title: Local test guard blocks supported mutation runner forms
+    description: 'Parent: Doctor Fix verifies alleged enforcement gaps before changing the operator''s local run policy. The
+      clearance writer owner confirms that the supported workflow module runners are all refused. It only probed classification
+      of three alternative forms, and has not verified actual execution: a __main__ file path, running the ci_mutation module
+      from the scripts directory, and importlib importing a name built by joining strings. An import alone may be metadata
+      work rather than runner execution. These are hypotheses, not three confirmed escapes. Verify in CI whether each supported
+      environment form actually invokes mutation execution, and whether the unchanged guard refuses it. Do not run a probe,
+      test or mutation on this host. Preserve allowed metadata-only imports and clearance writes. If a real supported runner
+      escape is proven, file the exact input, evidence and smallest separate correction; if none is proven, close with that
+      evidence and change no code. Done when independent Standards review accepts the observed classification and execution
+      facts and any real correction is filed.'
+    kind: troubleshoot
+    territory:
+    - hooks/context
+    project_intent: The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
+      the system with proof and applies each fix to the running swarm. Its master and the master of the watched swarm keep
+      each other in sync through the inbox.
+    phase: p2
+    phase_intent: 'Fix: Each finding judged real becomes a task naming the number it must move, measured before and after.'
+  params:
+    id: t85
+    title: Local test guard blocks supported mutation runner forms
+  expected:
+    responsibility: engineer
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 228
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.9227264731119427
+  - source: jev-1.13
+    latency_ms: 290
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.99
+  - source: haiku
+    latency_ms: 6346
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.72
+  - source: luna
+    latency_ms: 5110
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.97
+- name: checkpoint_flake_ci_probe
+  state:
+    task: fx-30373668-cause
+    title: Find the cause of the flaky tests finding
+    description: 'Parent: Doctor Fix proves the cause of verified flaky CI before repair, preserving the watched operator
+      plan. Observed Tests run 37995813007 on head 9a3fb9c8e9ec7ea90c442866a1e62e1e02deaa5e: attempt one job 114041777986
+      failed Run tests in test_sigterm_during_tool_reports_observed_checkpoint[complete-complete]. child.wait(timeout=8) returned
+      75 instead of 0; report reason termination, checkpoint_status incomplete, quiescence clean, agent/exporter/herdr child
+      exits all -15. Attempt two job 114043338065 passed the same case. PR 2246 changes classifier code and is merged; its
+      files do not include this supervision case. Diagnose checkpoint acknowledgement, child readiness and termination timing
+      with controlled CI reproductions; these are hypotheses until proven. Preserve bounded shutdown and the complete versus
+      incomplete exit contract. This differs from the existing ledger watcher SIGTERM timeout. No local tests, mutation, live
+      service repointing or weakening assertions. Done when independent Standards review accepts causal evidence and files
+      the smallest correction on the paired code task.'
+    kind: troubleshoot
+    territory: []
+    project_intent: The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
+      the system with proof and applies each fix to the running swarm. Its master and the master of the watched swarm keep
+      each other in sync through the inbox.
+    phase: p2
+    phase_intent: 'Fix: Each finding judged real becomes a task naming the number it must move, measured before and after.'
+  params:
+    id: fx-30373668-cause
+    title: Find the cause of the flaky tests finding
+  expected:
+    responsibility: engineer
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 208
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.8111042701864835
+  - source: jev-1.13
+    latency_ms: 319
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.97
+  - source: pplx-decider-v1-27b
+    latency_ms: 301
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.7353447762834383
+  - source: haiku
+    latency_ms: 6742
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.82
+  - source: luna
+    latency_ms: 5365
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.98

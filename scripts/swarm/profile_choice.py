@@ -3,7 +3,7 @@
 import os
 from dataclasses import asdict, dataclass, replace
 
-from hooks.classifier import Answer, ClassifierUnavailable, code_rules, decide, definitions, runner
+from hooks.classifier import ClassifierUnavailable, decide, definitions, runner
 from scripts.swarm import overlays
 from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm_ledger import ledger_close
@@ -11,7 +11,6 @@ from scripts.swarm_ledger import ledger_close
 CLASSIFIED_LANE = "eng"
 PURPOSE = "profile-pick"
 RESPONSIBILITIES = ("frontend", "engineer", "qa")
-LANE_DEFAULT, UNRESOLVED = "lane default", "unresolved"
 HARNESS_ORDER = {"frontend": ("claude", "codex")}
 
 
@@ -53,6 +52,10 @@ def choose(
         decision = ProfileDecision(task["profile"], "task", "explicit task profile")
     elif lane != CLASSIFIED_LANE or pinned != DEFAULT_PROFILES[lane]:
         decision = ProfileDecision(pinned, "lane", f"{lane} lane")
+    elif needs_ci_push(task):
+        decision = ProfileDecision(
+            DEFAULT_PROFILES[CLASSIFIED_LANE], "proof contract", "proof needs a pushed CI run", anchors=anchors(task)
+        )
     else:
         decision = classify(slug, task, environ)
     if not installed(decision.profile):
@@ -66,6 +69,10 @@ def choose(
         raise ProfileUnresolved(f"task {task.get('id')} overlays are refused: {exc}") from exc
 
 
+def needs_ci_push(task: dict) -> bool:
+    return (task.get("contract") or {}).get("push") == "yes"
+
+
 def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
     params = {"id": task.get("id"), "title": task.get("title", "")}
     try:
@@ -76,12 +83,11 @@ def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
         ) from exc
     result, floor = output.raw, output.thresholds["confidence"]
     answer = result.answers["responsibility"]
-    confidence = _confidence(answer)
-    picked = outcome(answer, floor)
-    if picked == LANE_DEFAULT:
+    confidence = answer.confidence if answer.confidence is not None else 0.0
+    if output.verdicts["responsibility"] is None:
         return ProfileDecision(
             DEFAULT_PROFILES[CLASSIFIED_LANE],
-            LANE_DEFAULT,
+            "lane default",
             f"{CLASSIFIED_LANE} lane default: {result.source} answered {answer.choice} "
             f"with confidence {confidence:.2f}, below the floor {floor:.2f}",
             result.source,
@@ -89,7 +95,7 @@ def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
             result.calibrated,
             anchors(task),
         )
-    if picked == UNRESOLVED:
+    if answer.choice not in RESPONSIBILITIES:
         raise ProfileUnresolved(
             f"task {task.get('id')} profile is unresolved: {result.source} answered {answer.choice} with confidence "
             f"{confidence:.2f}, the floor is {floor:.2f}: {_remedy(slug, task)}"
@@ -97,28 +103,6 @@ def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
     return ProfileDecision(
         answer.choice, "classifier", answer.choice, result.source, answer.confidence, result.calibrated, anchors(task)
     )
-
-
-def _confidence(answer: Answer) -> float:
-    return answer.confidence if answer.confidence is not None else 0.0
-
-
-def outcome(answer: Answer, floor: float) -> str:
-    if _confidence(answer) < floor:
-        return LANE_DEFAULT
-    return answer.choice if answer.choice in RESPONSIBILITIES else UNRESOLVED
-
-
-def _verdicts(definition, state, params, answers):
-    return {"profile": outcome(answers["responsibility"], definition.thresholds["confidence"])}
-
-
-RULE = code_rules.CodeRule(
-    code_rules.asked,
-    _verdicts,
-    {"profile": (*RESPONSIBILITIES, LANE_DEFAULT, UNRESOLVED)},
-    {"profile": UNRESOLVED},
-)
 
 
 def state(slug: str, task: dict) -> dict:
