@@ -556,19 +556,30 @@ def test_an_ambiguous_spawn_whose_grant_is_not_handed_stays_ambiguous_and_keeps_
     assert launch.hand == Hand(False, "pod_missing", False)
     assert world.rows()[f"{SLUG}/{FIRST}"]["state"] == RESERVED
     assert world.hands() == {launch.agent.execution_id: {"handed": False, "reason": "pod_missing", "removed": False}}
+    assert world.grants.verify(SLUG, launch.grant).execution_id == launch.agent.execution_id
 
 
-def test_a_pod_left_behind_by_an_unhanded_launch_cannot_take_the_account(monkeypatch):
+def test_a_pod_left_behind_by_an_unhanded_launch_cannot_register_its_withdrawn_grant(monkeypatch):
     world = World(monkeypatch, homes=Homes(Hand(False, "config_map_unavailable", False)))
     launch = world.launch(FIRST)
 
-    with pytest.raises(SwarmError) as refused:
+    with pytest.raises(GrantRefused) as refused:
         world.launcher.registered(world.session(launch), launch.grant)
 
-    assert str(refused.value) == "reservation_expired"
-    [record] = world.fleet.records()
-    assert record.state == CLOSED
+    assert str(refused.value) == "launch grant was revoked"
+    assert world.grants.registration(SLUG, launch.agent.execution_id) is None
+    assert world.fleet.records() == []
     assert world.capacity.slots(ACCOUNT) == []
+
+
+def test_withdrawing_a_grant_revokes_it_once(world):
+    launch = world.launch(FIRST)
+
+    assert world.grants.withdraw(SLUG, launch.grant) is True
+    assert world.grants.withdraw(SLUG, launch.grant) is False
+    with pytest.raises(GrantRefused) as refused:
+        world.grants.verify(SLUG, launch.grant)
+    assert str(refused.value) == "launch grant was revoked"
 
 
 def test_a_launch_refused_on_a_full_account_hands_no_grant(world):
