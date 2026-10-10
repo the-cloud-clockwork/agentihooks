@@ -421,9 +421,8 @@ class _Cluster:
 def test_the_deployed_pass_fences_an_attempt_whose_node_was_deleted(world):
     grants, cluster = _Grants(), _Cluster(world)
     service = SimpleNamespace(controller=world.live, grants=grants)
-    digest = "sha256:" + "4b" * 32
-    recover = deployed.recovery_pass(service, SimpleNamespace(image_digest=digest), cluster)
-    assert recover.recovery.compatibility == digest
+    recover = deployed.recovery_pass(service, SimpleNamespace(image_tag="dev"), cluster)
+    assert recover.recovery.compatibility == "dev"
     recover.recovery.releases["account"].capacity.authorize("a-token")
     assert grants.verified == [(cases.SLUG, "a-token")]
     assert recover() == {world.old.execution_id: "working"}

@@ -171,5 +171,5 @@ def recovery_pass(service: "ControlService", workers: Workers, api: PodApi) -> R
 
     capacity = AccountCapacity(controller.store, slug, verify)
     releases = {"grant": GrantRelease(grants, slug), "account": AccountSlot(controller.store, slug, capacity)}
-    recovery = Recovery(controller.store, slug, controller, NoCheckpoints(), releases, workers.image_digest)
+    recovery = Recovery(controller.store, slug, controller, NoCheckpoints(), releases, workers.image_tag)
     return RecoveryPass(recovery, api, f"{OWNER_LABEL}={owner_for(slug)}")
