@@ -41,8 +41,9 @@ def installations(tmp_path, monkeypatch):
 def relay_key(scope: str = "") -> str:
     from hooks.observability import event_relay
 
-    middle = f"{scope}:" if scope else ""
-    return f"{event_relay.STREAM_KEY_PREFIX}:{middle}pos:eventrelay:{SESSION}"
+    if scope:
+        return f"{event_relay.STREAM_KEY_PREFIX}:{scope}:pos:eventrelay:{SESSION}"
+    return f"{event_relay.STREAM_KEY_PREFIX}:pos:eventrelay:{SESSION}"
 
 
 def test_two_installations_with_one_session_number_keep_separate_hook_state(redis, installations, tmp_path):
