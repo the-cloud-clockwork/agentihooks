@@ -3,6 +3,7 @@ import socket
 import threading
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 
@@ -330,3 +331,15 @@ def test_the_controller_loop_hosts_registration_and_heartbeats(tmp_path, monkeyp
     assert hosted[0].controller.owner == "hive-fixture"
     assert observe.stored(store, SLUG, agent.execution_id).sources["heartbeat"]["value"] == "working"
     assert lease.current(store, SLUG) is None
+
+
+@pytest.mark.parametrize("case", ["a", "b", "c"])
+def test_package_cases_match_their_committed_evidence(case):
+    from tests import sv2_git01_cases as cases
+
+    first, second = cases.run_case(case), cases.run_case(case)
+    assert first == second
+    assert first["state"] == "passed", json.dumps(first, indent=2, sort_keys=True)
+    path = Path(__file__).resolve().parents[1] / "evidence" / "SV2-GIT-01" / f"{case}-result.json"
+    committed = json.loads(path.read_text()) if path.exists() else None
+    assert committed == first, json.dumps(first, indent=2, sort_keys=True)
