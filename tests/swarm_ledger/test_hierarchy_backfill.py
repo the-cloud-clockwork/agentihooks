@@ -160,6 +160,9 @@ def test_the_standalone_phase_carries_every_phase_field_so_the_next_write_succee
     written, rejected = repo.apply_ops(SLUG, ops=[{"op": "add", "id": "m1", "thread": "chat", "text": "hello"}])
     assert rejected == []
     assert [m["id"] for m in written["chat"]] == ["m1"]
+    rerun = hierarchy_backfill.backfill(repo, SLUG, "planner", apply=True)
+    assert rerun["drift"]["drift"] == 0
+    assert [row for row in repo.export_document(SLUG)["phases"] if row["id"] == identifier] == [phase]
 
 
 def test_recorded_ledger_copy_reports_the_known_conflicts_then_has_zero_drift(tmp_path):
@@ -403,6 +406,8 @@ def test_preview_places_every_legacy_shape_and_reports_each_conflict_in_order():
     assert after["phases"][-1] == {
         "id": STANDALONE,
         "title": "Standalone",
+        "description": hierarchy_backfill.STANDALONE_DESCRIPTION,
+        "comments": [],
         "done": False,
         "plan": f"plans/{STANDALONE}",
     }
@@ -480,7 +485,16 @@ def test_preview_fills_collections_an_old_document_never_stored():
         "tasks": [{"id": "t1", "title": "", "phase": STANDALONE}],
         "plans": [{"id": STANDALONE, "title": "Standalone", "artifact": "", "url": ""}],
         "slices": [],
-        "phases": [{"id": STANDALONE, "title": "Standalone", "done": False, "plan": f"plans/{STANDALONE}"}],
+        "phases": [
+            {
+                "id": STANDALONE,
+                "title": "Standalone",
+                "description": hierarchy_backfill.STANDALONE_DESCRIPTION,
+                "comments": [],
+                "done": False,
+                "plan": f"plans/{STANDALONE}",
+            }
+        ],
     }
     assert report["before"] == {
         "plans": 0,
