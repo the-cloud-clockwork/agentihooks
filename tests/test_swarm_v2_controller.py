@@ -7,7 +7,17 @@ from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2.controller import Controller
 from scripts.swarm_v2.kubernetes import watch
+from scripts.swarm_v2.runtime import observe
 from scripts.swarm_v2.runtime.operations import Observation, OperationRequest, Phase
+from tests.test_swarm_v2_account_reconciliation import (
+    LOST_TERMINAL,
+    ORPHANED,
+    RETIRING,
+    SUCCESSOR,
+    TERMINAL,
+    TTL,
+    World,
+)
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
@@ -657,3 +667,89 @@ def test_reconcile_package_cases_pass_from_independent_state(case):
     first, second = sv2_ctl04_cases.run_case(case), sv2_ctl04_cases.run_case(case)
     assert first == second
     assert first["state"] == "passed"
+
+
+@pytest.fixture
+def accounts(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", "20")
+    world = World(monkeypatch)
+    world.scene()
+    return world
+
+
+def test_a_restarted_controller_reconciles_accounts_at_start_with_no_manual_step(accounts):
+    accounts.clock[0] += lease.ttl_ms()
+    assert sorted(accounts.rows()) == sorted([LOST_TERMINAL, RETIRING, ORPHANED, SUCCESSOR])
+    restarted = Controller(accounts.store, "fixture", [], lambda: True)
+
+    assert restarted.acquire()
+
+    assert sorted(accounts.rows()) == sorted([LOST_TERMINAL, RETIRING])
+    assert restarted.accounts.account_occupancy_discrepancies() == {"handoff_unconfirmed": 1}
+
+
+def test_each_renew_tick_reconciles_accounts(accounts):
+    controller = accounts.authority.controller
+    accounts.clock[0] += TTL
+
+    assert sorted(accounts.rows()) == sorted([LOST_TERMINAL, RETIRING, ORPHANED, SUCCESSOR])
+    assert controller.renew() is True
+    assert sorted(accounts.rows()) == sorted([LOST_TERMINAL, RETIRING])
+
+
+def test_a_refused_renew_tick_releases_nothing(accounts):
+    controller = accounts.authority.controller
+    accounts.clock[0] += lease.ttl_ms()
+    before = accounts.rows()
+
+    assert controller.renew() is False
+    assert accounts.rows() == before
+
+
+def exit_signal(agent, source, value, at):
+    return observe.Signal(source, observe.Reading.OK, at, agent.execution_id, agent.generation, value)
+
+
+@pytest.mark.parametrize(
+    ("source", "value"),
+    ((observe.Source.SUPERVISOR, observe.EXITED), (observe.Source.KUBERNETES, "Failed")),
+)
+def test_an_exit_observation_reaches_the_account_exit_call(accounts, source, value):
+    controller, lost = accounts.authority.controller, accounts.agents[TERMINAL]
+    observer = observe.Observer(accounts.store, "local", observe.Thresholds())
+    now = accounts.clock[0] / 1000
+
+    found = controller.observe(observer, lost, [exit_signal(lost, source, value, now)], now)
+
+    assert (found.kind, found.action, found.holder) == ("exited", "release", LOST_TERMINAL)
+    assert (found.execution_id, found.generation, found.evidence) == (lost.execution_id, lost.generation, source.value)
+    assert sorted(accounts.rows()) == sorted([RETIRING, ORPHANED, SUCCESSOR])
+    assert observer.get("fixture", lost.execution_id).sources[source.value]["value"] == value
+
+
+def test_an_observation_without_an_exit_frees_no_slot(accounts):
+    controller, lost = accounts.authority.controller, accounts.agents[TERMINAL]
+    observer = observe.Observer(accounts.store, "local", observe.Thresholds())
+    now = accounts.clock[0] / 1000
+    before = accounts.rows()
+
+    found = controller.observe(observer, lost, [exit_signal(lost, observe.Source.KUBERNETES, "Running", now)], now)
+
+    assert found is None
+    assert accounts.rows() == before
+    assert observer.get("fixture", lost.execution_id).sources["kubernetes"]["value"] == "Running"
+    assert controller.accounts.stale_exit_events() == 0
+
+
+def test_an_exit_observation_needs_the_controller_lease(accounts):
+    controller, lost = accounts.authority.controller, accounts.agents[TERMINAL]
+    observer = observe.Observer(accounts.store, "local", observe.Thresholds())
+    accounts.clock[0] += lease.ttl_ms()
+    now = accounts.clock[0] / 1000
+    before = accounts.rows()
+
+    with pytest.raises(SwarmError, match="^the controller lease is stale$"):
+        controller.observe(observer, lost, [exit_signal(lost, observe.Source.SUPERVISOR, observe.EXITED, now)], now)
+
+    assert accounts.rows() == before
+    assert observer.get("fixture", lost.execution_id) is None
