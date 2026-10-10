@@ -1,0 +1,254 @@
+{
+  "case": "C",
+  "fixture_manifest": {
+    "images": {
+      "fixture": "agentihooks-health-fixture:a3e0e8fe2e2843a0afd3669ce88280cb",
+      "missing_binary": "agentihooks-health-missing-binary:a3e0e8fe2e2843a0afd3669ce88280cb"
+    },
+    "inputs": {
+      "docker/swarm-node/Dockerfile": "f36e23bd81a2c2f85942cd79de53bee3010e6e3fe9c381fd8a43a5ca33a8c448",
+      "docker/swarm-node/health.py": "d6c31ed7515d9cfa38f39eb618792daa165ce96b017a386fdbbeebdbe9b7f759",
+      "scripts/swarm_v2/worker_health.py": "2f0d5f3efce5edde339f5b590b3b9de53c81c9c0edb8ddf18061c49ed613bf0a",
+      "tests/integration/swarm_node/Dockerfile": "bcadc5c1200814d143813c1476a30bf8997d49e9db7637d6f47428c2306a4630",
+      "tests/integration/swarm_node/health_proof.py": "d922e956f084687c87b5986ef4b47d2bd301706f069935e6d6f8abc9e686cd2b",
+      "tests/integration/swarm_node/run_health_proof.sh": "ff02a6e6d6a38ba1ded0ed4ea68b80412ce3a090fb354764063788d0e532ee29"
+    },
+    "tested_commit": "be234e1c19366e90baac3b511b68e8463bb37399"
+  },
+  "mocked": false,
+  "network": "none; fixture brain on container loopback",
+  "package": "SV2-IMG-04",
+  "runs": [
+    {
+      "container": "3c4c3c163b619c06cd837978331ce2cac544e1adf7611e03afb3c71c2c2d3c2f",
+      "outage": {
+        "exit_code": 0,
+        "report": {
+          "attempt": "/home/worker/attempts/exe-0cd10a5d570a4c99ba62bac93e66863a",
+          "checks": {
+            "agent": null,
+            "binaries": null,
+            "herdr": null,
+            "home": null,
+            "hook": null,
+            "runtime_paths": null,
+            "supervisor": null
+          },
+          "dependencies": {
+            "brain": "brain_unreachable"
+          },
+          "harness": "codex",
+          "incarnation": "9694c4600f164987a54bba1aab0dd111",
+          "mode": "readiness",
+          "status": "degraded",
+          "worker_startup_failure_reason": null
+        },
+        "stderr": ""
+      },
+      "protected": {
+        "files": {
+          "/home/worker/attempts/exe-0cd10a5d570a4c99ba62bac93e66863a/execution.json": "7d9d423c4d415b0eecca6b47c72331f4494253a15ec34c7b5ece48cc0e103b6c",
+          "/home/worker/attempts/exe-0cd10a5d570a4c99ba62bac93e66863a/launch.json": "ec8216429552ac8201f5eac234fe9d7c11aec291d6d839e250cc2d74e3775c0f",
+          "/home/worker/attempts/exe-0cd10a5d570a4c99ba62bac93e66863a/registration.json": "170c9097b8424103427b76efcf3c38ecbf6feb544bbad8b8ef2d07478d7c9e5e",
+          "/home/worker/attempts/exe-0cd10a5d570a4c99ba62bac93e66863a/run/supervision/9694c4600f164987a54bba1aab0dd111/context.json": "a71015c9a10022519d3f38b829c844415d8cd5da1f227ed2c4eff41b2a809539",
+          "/home/worker/attempts/exe-0cd10a5d570a4c99ba62bac93e66863a/run/supervision/9694c4600f164987a54bba1aab0dd111/running.json": "5da9fa87ef3233f4d5fcb67bda5d4e1c66d6415502ffc8231e4edcbe50a39ffe"
+        },
+        "home": [
+          ".agentihooks/state.json",
+          ".agentihooks/state.json.bak",
+          ".codex/.agentihooks-managed.json",
+          ".codex/AGENTS.md",
+          ".codex/agentihooks-hook.sh",
+          ".codex/config.toml",
+          ".codex/hooks.json"
+        ]
+      },
+      "replay": {
+        "exit_code": 0,
+        "report": {
+          "attempt": "/home/worker/attempts/exe-0cd10a5d570a4c99ba62bac93e66863a",
+          "checks": {
+            "agent": null,
+            "binaries": null,
+            "herdr": null,
+            "home": null,
+            "hook": null,
+            "runtime_paths": null,
+            "supervisor": null
+          },
+          "dependencies": {
+            "brain": "ok"
+          },
+          "harness": "codex",
+          "incarnation": "9694c4600f164987a54bba1aab0dd111",
+          "mode": "readiness",
+          "status": "ready",
+          "worker_startup_failure_reason": null
+        },
+        "stderr": ""
+      },
+      "restored": {
+        "exit_code": 0,
+        "report": {
+          "attempt": "/home/worker/attempts/exe-0cd10a5d570a4c99ba62bac93e66863a",
+          "checks": {
+            "agent": null,
+            "binaries": null,
+            "herdr": null,
+            "home": null,
+            "hook": null,
+            "runtime_paths": null,
+            "supervisor": null
+          },
+          "dependencies": {
+            "brain": "ok"
+          },
+          "harness": "codex",
+          "incarnation": "9694c4600f164987a54bba1aab0dd111",
+          "mode": "readiness",
+          "status": "ready",
+          "worker_startup_failure_reason": null
+        },
+        "stderr": ""
+      },
+      "runtime_after": {
+        "agent_pid": 78,
+        "agent_start": 52242,
+        "attempt": "/home/worker/attempts/exe-0cd10a5d570a4c99ba62bac93e66863a",
+        "container_restarts": 0,
+        "container_started_at": "2026-10-10T11:38:44.394893012Z",
+        "incarnation": "9694c4600f164987a54bba1aab0dd111",
+        "supervisor_pid": 7
+      },
+      "runtime_before": {
+        "agent_pid": 78,
+        "agent_start": 52242,
+        "attempt": "/home/worker/attempts/exe-0cd10a5d570a4c99ba62bac93e66863a",
+        "container_restarts": 0,
+        "container_started_at": "2026-10-10T11:38:44.394893012Z",
+        "incarnation": "9694c4600f164987a54bba1aab0dd111",
+        "supervisor_pid": 7
+      }
+    },
+    {
+      "container": "661c9ab64d276a2f79594e6f9a0a6e252a9cc6f90ed5ecfca4b65674e6fca5bd",
+      "outage": {
+        "exit_code": 0,
+        "report": {
+          "attempt": "/home/worker/attempts/exe-73db5da9e3234b5abc8b2799c5a562fe",
+          "checks": {
+            "agent": null,
+            "binaries": null,
+            "herdr": null,
+            "home": null,
+            "hook": null,
+            "runtime_paths": null,
+            "supervisor": null
+          },
+          "dependencies": {
+            "brain": "brain_unreachable"
+          },
+          "harness": "codex",
+          "incarnation": "15bb9d03025c47e4b8da7d3145ea43a6",
+          "mode": "readiness",
+          "status": "degraded",
+          "worker_startup_failure_reason": null
+        },
+        "stderr": ""
+      },
+      "protected": {
+        "files": {
+          "/home/worker/attempts/exe-73db5da9e3234b5abc8b2799c5a562fe/execution.json": "b847c6bdde54a6694204bde71a04f51371e1a44899a9dedff2f93f0361607769",
+          "/home/worker/attempts/exe-73db5da9e3234b5abc8b2799c5a562fe/launch.json": "bf8517ff8000458551b7f263ffb18cc296b73a4e948baf647b5a3188c6b95ed2",
+          "/home/worker/attempts/exe-73db5da9e3234b5abc8b2799c5a562fe/registration.json": "5adbce365a548dfd902c72ba07f87bb512c6c107ef938187bdb680a95f3ad42e",
+          "/home/worker/attempts/exe-73db5da9e3234b5abc8b2799c5a562fe/run/supervision/15bb9d03025c47e4b8da7d3145ea43a6/context.json": "eee9da04721969c7d122dfdf6fa6419585835b1c53d1d8dea22bc7838dce24d6",
+          "/home/worker/attempts/exe-73db5da9e3234b5abc8b2799c5a562fe/run/supervision/15bb9d03025c47e4b8da7d3145ea43a6/running.json": "fa0201266700ea445ff26b5c2b7040912ed6519109d134005f94139f7353cfe5"
+        },
+        "home": [
+          ".agentihooks/state.json",
+          ".agentihooks/state.json.bak",
+          ".codex/.agentihooks-managed.json",
+          ".codex/AGENTS.md",
+          ".codex/agentihooks-hook.sh",
+          ".codex/config.toml",
+          ".codex/hooks.json"
+        ]
+      },
+      "replay": {
+        "exit_code": 0,
+        "report": {
+          "attempt": "/home/worker/attempts/exe-73db5da9e3234b5abc8b2799c5a562fe",
+          "checks": {
+            "agent": null,
+            "binaries": null,
+            "herdr": null,
+            "home": null,
+            "hook": null,
+            "runtime_paths": null,
+            "supervisor": null
+          },
+          "dependencies": {
+            "brain": "ok"
+          },
+          "harness": "codex",
+          "incarnation": "15bb9d03025c47e4b8da7d3145ea43a6",
+          "mode": "readiness",
+          "status": "ready",
+          "worker_startup_failure_reason": null
+        },
+        "stderr": ""
+      },
+      "restored": {
+        "exit_code": 0,
+        "report": {
+          "attempt": "/home/worker/attempts/exe-73db5da9e3234b5abc8b2799c5a562fe",
+          "checks": {
+            "agent": null,
+            "binaries": null,
+            "herdr": null,
+            "home": null,
+            "hook": null,
+            "runtime_paths": null,
+            "supervisor": null
+          },
+          "dependencies": {
+            "brain": "ok"
+          },
+          "harness": "codex",
+          "incarnation": "15bb9d03025c47e4b8da7d3145ea43a6",
+          "mode": "readiness",
+          "status": "ready",
+          "worker_startup_failure_reason": null
+        },
+        "stderr": ""
+      },
+      "runtime_after": {
+        "agent_pid": 78,
+        "agent_start": 52762,
+        "attempt": "/home/worker/attempts/exe-73db5da9e3234b5abc8b2799c5a562fe",
+        "container_restarts": 0,
+        "container_started_at": "2026-10-10T11:38:49.550863749Z",
+        "incarnation": "15bb9d03025c47e4b8da7d3145ea43a6",
+        "supervisor_pid": 7
+      },
+      "runtime_before": {
+        "agent_pid": 78,
+        "agent_start": 52762,
+        "attempt": "/home/worker/attempts/exe-73db5da9e3234b5abc8b2799c5a562fe",
+        "container_restarts": 0,
+        "container_started_at": "2026-10-10T11:38:49.550863749Z",
+        "incarnation": "15bb9d03025c47e4b8da7d3145ea43a6",
+        "supervisor_pid": 7
+      }
+    }
+  ],
+  "status": "passed",
+  "worker_startup_failure_reason": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ]
+}

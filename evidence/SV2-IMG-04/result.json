@@ -1,0 +1,114 @@
+{
+  "cases": [
+    "A",
+    "B",
+    "C"
+  ],
+  "checks": {
+    "lint_format_size": "passed in the pre push gate",
+    "mutation_preflight": "passed on the tested commit; two header case mutants cleared as equivalent by the Standards reader",
+    "spec_review": "closed in round three; rollback rehearsal upheld as a deferred gap with a ledger follow up",
+    "standards_review": "closed in round three",
+    "unit_tests": "run in CI only; local test runs are disabled"
+  },
+  "code_evidence": {
+    "acceptance_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38049065751",
+    "branch_url": "https://github.com/the-cloud-clockwork/agentihooks/tree/engineer-323133-0919",
+    "issue_url": "https://github.com/the-cloud-clockwork/agentihooks/issues/2171",
+    "mutation_preflight_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38049065824",
+    "pull_request_url": "https://github.com/the-cloud-clockwork/agentihooks/pull/2379",
+    "tested_commit": "be234e1c19366e90baac3b511b68e8463bb37399"
+  },
+  "compatibility": "new local probe interface; no earlier probe protocol exists to compare",
+  "fixture_manifest": {
+    "images": {
+      "fixture": "agentihooks-health-fixture:a3e0e8fe2e2843a0afd3669ce88280cb",
+      "missing_binary": "agentihooks-health-missing-binary:a3e0e8fe2e2843a0afd3669ce88280cb"
+    },
+    "inputs": {
+      "docker/swarm-node/Dockerfile": "f36e23bd81a2c2f85942cd79de53bee3010e6e3fe9c381fd8a43a5ca33a8c448",
+      "docker/swarm-node/health.py": "d6c31ed7515d9cfa38f39eb618792daa165ce96b017a386fdbbeebdbe9b7f759",
+      "scripts/swarm_v2/worker_health.py": "2f0d5f3efce5edde339f5b590b3b9de53c81c9c0edb8ddf18061c49ed613bf0a",
+      "tests/integration/swarm_node/Dockerfile": "bcadc5c1200814d143813c1476a30bf8997d49e9db7637d6f47428c2306a4630",
+      "tests/integration/swarm_node/health_proof.py": "d922e956f084687c87b5986ef4b47d2bd301706f069935e6d6f8abc9e686cd2b",
+      "tests/integration/swarm_node/run_health_proof.sh": "ff02a6e6d6a38ba1ded0ed4ea68b80412ce3a090fb354764063788d0e532ee29"
+    },
+    "tested_commit": "be234e1c19366e90baac3b511b68e8463bb37399"
+  },
+  "implementation_status": "qualified in CI on the tested commit; merge pending",
+  "integration_gate": "G2",
+  "interfaces": [
+    "health.py liveness, startup, readiness and diagnose with exit 0, 1 and 64",
+    "worker_startup_failure_reason in every report",
+    "dependencies.brain: ok, unconfigured, brain_unreachable, brain_http_<status>"
+  ],
+  "limitations": [
+    "Only the codex harness runs in the container cases; claude is covered by unit tests",
+    "Linux amd64 only",
+    "Probe thresholds are not chosen here"
+  ],
+  "mocked": false,
+  "package": "SV2-IMG-04",
+  "production_rollout": "not exercised; probe wiring belongs to the Pod template and antoncore GitOps",
+  "proof_commit": "be234e1c19366e90baac3b511b68e8463bb37399",
+  "rollback_rehearsal": "deferred to the ledger follow up for the worker Pod template, not performed: probe wiring and thresholds live in that template, which is not built yet",
+  "state": {
+    "accepted": "fixture assertions passed",
+    "committed": "tested commit",
+    "externally_verified": "not run; production rollout belongs to antoncore",
+    "observed": "real isolated containers and real headless herdr"
+  },
+  "status": "passed",
+  "stubbed": [
+    "brain: fixture HTTP server on container loopback"
+  ],
+  "supported_versions": {
+    "harnesses": [
+      "claude",
+      "codex"
+    ],
+    "worker_image": {
+      "architectures": [
+        "amd64"
+      ],
+      "base_image": "public.ecr.aws/docker/library/python:3.12.12-slim-bookworm@sha256:2986c55feb36e6cae00fa1fefb454283e4b33f35e75ff8bdd123b134130be301",
+      "debian_snapshot": "20260301T000000Z",
+      "python": "3.12.12",
+      "requirements_sha256": "3276c12934510bd99b22f0f51c4f4094226e06fb431ecbf16bcc9dd5fdd9ea44",
+      "schema_version": 1,
+      "shell_packages": {
+        "bash": "5.2.15-2+b10",
+        "coreutils": "9.1-1",
+        "curl": "7.88.1-10+deb12u14",
+        "git": "1:2.39.5-0+deb12u3",
+        "jq": "1.6-2.1+deb12u1",
+        "openssh-client": "1:9.2p1-2+deb12u7",
+        "procps": "2:4.0.2-3",
+        "ripgrep": "13.0.0-4+b2",
+        "tini": "0.19.0-1+b3"
+      },
+      "tools": {
+        "claude": {
+          "sha256": "4503bfe11a6c7fcc1e0b39b5e0d347c04248f750b03b0977b3ad6b531fe6f358",
+          "url": "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/2.1.295/linux-x64/claude",
+          "version": "2.1.295",
+          "version_output": "2.1.295 (Claude Code)"
+        },
+        "codex": {
+          "member": "codex-x86_64-unknown-linux-musl",
+          "sha256": "8daf67f6261161aa5939d8d42a516032d760406216779d7ce6040f242140ff73",
+          "url": "https://github.com/openai/codex/releases/download/rust-v0.162.0/codex-x86_64-unknown-linux-musl.tar.gz",
+          "version": "0.162.0",
+          "version_output": "codex-cli 0.162.0"
+        },
+        "herdr": {
+          "sha256": "2a02fed16beb651ef006e1d43f048f652ca4dc58ad053cd2d44450563d5c54b7",
+          "url": "https://github.com/herdrdev/herdr/releases/download/v0.9.1/herdr-linux-x86_64",
+          "version": "0.9.1",
+          "version_output": "herdr 0.9.1"
+        }
+      }
+    }
+  },
+  "tested_commit": "be234e1c19366e90baac3b511b68e8463bb37399"
+}

@@ -1,0 +1,200 @@
+{
+  "case": "A",
+  "fixture_manifest": {
+    "images": {
+      "fixture": "agentihooks-health-fixture:a3e0e8fe2e2843a0afd3669ce88280cb",
+      "missing_binary": "agentihooks-health-missing-binary:a3e0e8fe2e2843a0afd3669ce88280cb"
+    },
+    "inputs": {
+      "docker/swarm-node/Dockerfile": "f36e23bd81a2c2f85942cd79de53bee3010e6e3fe9c381fd8a43a5ca33a8c448",
+      "docker/swarm-node/health.py": "d6c31ed7515d9cfa38f39eb618792daa165ce96b017a386fdbbeebdbe9b7f759",
+      "scripts/swarm_v2/worker_health.py": "2f0d5f3efce5edde339f5b590b3b9de53c81c9c0edb8ddf18061c49ed613bf0a",
+      "tests/integration/swarm_node/Dockerfile": "bcadc5c1200814d143813c1476a30bf8997d49e9db7637d6f47428c2306a4630",
+      "tests/integration/swarm_node/health_proof.py": "d922e956f084687c87b5986ef4b47d2bd301706f069935e6d6f8abc9e686cd2b",
+      "tests/integration/swarm_node/run_health_proof.sh": "ff02a6e6d6a38ba1ded0ed4ea68b80412ce3a090fb354764063788d0e532ee29"
+    },
+    "tested_commit": "be234e1c19366e90baac3b511b68e8463bb37399"
+  },
+  "mocked": false,
+  "network": "none; fixture brain on container loopback",
+  "package": "SV2-IMG-04",
+  "runs": [
+    {
+      "container": "ae11a331de3f4a01eec1dc3fef4ff30ec0cf6c227ce8ba36cdff65a946d89b9b",
+      "healthy": {
+        "exit_code": 0,
+        "report": {
+          "attempt": "/home/worker/attempts/exe-6f5b7886e82341249b01240e5d1387a6",
+          "checks": {
+            "agent": null,
+            "binaries": null,
+            "herdr": null,
+            "home": null,
+            "hook": null,
+            "runtime_paths": null,
+            "supervisor": null
+          },
+          "dependencies": {
+            "brain": "ok"
+          },
+          "harness": "codex",
+          "incarnation": "16f738a50966482ab3c553f561a7d163",
+          "mode": "readiness",
+          "status": "ready",
+          "worker_startup_failure_reason": null
+        },
+        "stderr": ""
+      },
+      "outage_liveness": {
+        "exit_code": 0,
+        "report": {
+          "attempt": "/home/worker/attempts/exe-6f5b7886e82341249b01240e5d1387a6",
+          "checks": {
+            "supervisor": null
+          },
+          "harness": "codex",
+          "incarnation": "16f738a50966482ab3c553f561a7d163",
+          "mode": "liveness",
+          "status": "live",
+          "worker_startup_failure_reason": null
+        },
+        "stderr": ""
+      },
+      "outage_readiness": {
+        "exit_code": 0,
+        "report": {
+          "attempt": "/home/worker/attempts/exe-6f5b7886e82341249b01240e5d1387a6",
+          "checks": {
+            "agent": null,
+            "binaries": null,
+            "herdr": null,
+            "home": null,
+            "hook": null,
+            "runtime_paths": null,
+            "supervisor": null
+          },
+          "dependencies": {
+            "brain": "brain_unreachable"
+          },
+          "harness": "codex",
+          "incarnation": "16f738a50966482ab3c553f561a7d163",
+          "mode": "readiness",
+          "status": "degraded",
+          "worker_startup_failure_reason": null
+        },
+        "stderr": ""
+      },
+      "runtime_after": {
+        "agent_pid": 77,
+        "agent_start": 50315,
+        "attempt": "/home/worker/attempts/exe-6f5b7886e82341249b01240e5d1387a6",
+        "container_restarts": 0,
+        "container_started_at": "2026-10-10T11:38:25.114591256Z",
+        "incarnation": "16f738a50966482ab3c553f561a7d163",
+        "supervisor_pid": 7
+      },
+      "runtime_before": {
+        "agent_pid": 77,
+        "agent_start": 50315,
+        "attempt": "/home/worker/attempts/exe-6f5b7886e82341249b01240e5d1387a6",
+        "container_restarts": 0,
+        "container_started_at": "2026-10-10T11:38:25.114591256Z",
+        "incarnation": "16f738a50966482ab3c553f561a7d163",
+        "supervisor_pid": 7
+      }
+    },
+    {
+      "container": "206274e39c78772867d8ab863670afb5f444fdded2fdae21755867f1e9230f6e",
+      "healthy": {
+        "exit_code": 0,
+        "report": {
+          "attempt": "/home/worker/attempts/exe-8049a97ece8340cd943644d329697cd0",
+          "checks": {
+            "agent": null,
+            "binaries": null,
+            "herdr": null,
+            "home": null,
+            "hook": null,
+            "runtime_paths": null,
+            "supervisor": null
+          },
+          "dependencies": {
+            "brain": "ok"
+          },
+          "harness": "codex",
+          "incarnation": "5a060c4299ff400188b8f82b982e51bd",
+          "mode": "readiness",
+          "status": "ready",
+          "worker_startup_failure_reason": null
+        },
+        "stderr": ""
+      },
+      "outage_liveness": {
+        "exit_code": 0,
+        "report": {
+          "attempt": "/home/worker/attempts/exe-8049a97ece8340cd943644d329697cd0",
+          "checks": {
+            "supervisor": null
+          },
+          "harness": "codex",
+          "incarnation": "5a060c4299ff400188b8f82b982e51bd",
+          "mode": "liveness",
+          "status": "live",
+          "worker_startup_failure_reason": null
+        },
+        "stderr": ""
+      },
+      "outage_readiness": {
+        "exit_code": 0,
+        "report": {
+          "attempt": "/home/worker/attempts/exe-8049a97ece8340cd943644d329697cd0",
+          "checks": {
+            "agent": null,
+            "binaries": null,
+            "herdr": null,
+            "home": null,
+            "hook": null,
+            "runtime_paths": null,
+            "supervisor": null
+          },
+          "dependencies": {
+            "brain": "brain_unreachable"
+          },
+          "harness": "codex",
+          "incarnation": "5a060c4299ff400188b8f82b982e51bd",
+          "mode": "readiness",
+          "status": "degraded",
+          "worker_startup_failure_reason": null
+        },
+        "stderr": ""
+      },
+      "runtime_after": {
+        "agent_pid": 78,
+        "agent_start": 50799,
+        "attempt": "/home/worker/attempts/exe-8049a97ece8340cd943644d329697cd0",
+        "container_restarts": 0,
+        "container_started_at": "2026-10-10T11:38:29.99697188Z",
+        "incarnation": "5a060c4299ff400188b8f82b982e51bd",
+        "supervisor_pid": 7
+      },
+      "runtime_before": {
+        "agent_pid": 78,
+        "agent_start": 50799,
+        "attempt": "/home/worker/attempts/exe-8049a97ece8340cd943644d329697cd0",
+        "container_restarts": 0,
+        "container_started_at": "2026-10-10T11:38:29.99697188Z",
+        "incarnation": "5a060c4299ff400188b8f82b982e51bd",
+        "supervisor_pid": 7
+      }
+    }
+  ],
+  "status": "passed",
+  "worker_startup_failure_reason": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ]
+}
