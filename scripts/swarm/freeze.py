@@ -15,25 +15,21 @@ SELECTORS = {"lane": lambda task: task.get("lane"), "kind": ledger_kinds.kind}
 def held(task: dict, doc: dict, graph: dict, fix_phase: str) -> bool:
     if task.get("state") != "open":
         return False
-    records = doc.get("freezes") or []
-    chain = ancestry(task, graph)
-    if any(r["verb"] == "freeze" and covers(r["target"], task, chain) for r in records):
-        return True
+    records, chain = doc.get("freezes") or [], ancestry(task, graph)
+    return frozen(task, records, chain) or unfocused(task, records, chain, fix_phase)
+
+
+def frozen(task: dict, records: list, chain: list) -> bool:
+    return any(r["verb"] == "freeze" and covers(r["target"], task, chain) for r in records)
+
+
+def unfocused(task: dict, records: list, chain: list, fix_phase: str) -> bool:
     focus = [r["target"] for r in records if r["verb"] == "focus"]
-    if not focus or exempt(task, fix_phase):
-        return False
-    return not any(covers(target, task, chain) for target in focus)
+    return bool(focus) and not exempt(task, fix_phase) and not any(covers(target, task, chain) for target in focus)
 
 
 def exempt(task: dict, fix_phase: str) -> bool:
     return task.get("rank") == "urgent" or bool(fix_phase) and task.get("phase") == fix_phase
-
-
-def holds(record: dict, task: dict, graph: dict, fix_phase: str) -> bool:
-    inside = covers(record["target"], task, ancestry(task, graph))
-    if record["verb"] == "freeze":
-        return inside
-    return not inside and not exempt(task, fix_phase)
 
 
 def ancestry(task: dict, graph: dict) -> list:
@@ -66,7 +62,13 @@ def notice(doc: dict, tasks: Iterable[dict], phase: str) -> str:
     if not waiting:
         return DRAINED
     records = doc.get("freezes") or []
-    holding = [name for r, name in zip(records, names(doc)) if any(holds(r, t, graph, phase) for t in waiting)]
+    chains = [(t, ancestry(t, graph)) for t in waiting]
+    focused_out = any(unfocused(t, records, chain, phase) for t, chain in chains)
+    holding = [
+        name
+        for r, name in zip(records, names(doc))
+        if (focused_out if r["verb"] == "focus" else any(covers(r["target"], t, chain) for t, chain in chains))
+    ]
     which = "1 open task is" if len(waiting) == 1 else f"{len(waiting)} open tasks are"
     return notice_text.plain(f"The swarm has no task it may start: {which} held by {_joined(holding)}")
 
