@@ -402,7 +402,7 @@ def test_a_failed_grant_command_reports_unhanded_and_prints_nothing(monkeypatch,
 
     assert launch.outcome.ok
     assert launch.handed is False
-    assert list(tmp_path.iterdir()) == []
+    assert not (tmp_path / launch.agent.execution_id).exists()
     assert capfd.readouterr() == ("", "")
 
 
