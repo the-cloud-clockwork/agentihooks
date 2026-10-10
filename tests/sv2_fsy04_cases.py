@@ -65,7 +65,7 @@ def _rejected(kind: str) -> dict:
             message = str(error)
         run = {
             "backend": kind,
-            "refused": message.startswith(f"{kind} acknowledged {len(DATA)} bytes"),
+            "refused": message.startswith(f"{kind} reported a successful write of {len(DATA)} bytes"),
             "protected_state_unchanged": _contents(world) == before,
             "committed_artifact_still_verified": world.store.stat(world.scope, committed) == base.VERIFIED,
             "no_record_for_refused_upload": world.store.recorded(world.scope, "a1") is None,
