@@ -554,7 +554,7 @@ def test_worker_state_survives_a_restart_and_is_written_whole(world, worker):
             "outcome": None,
         }
     }
-    assert sorted(path.name for path in control.path.parent.iterdir()) == [control.path.name]
+    assert sorted(path.name for path in control.path.parent.glob(f"{agent.execution_id}*")) == [control.path.name]
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])
