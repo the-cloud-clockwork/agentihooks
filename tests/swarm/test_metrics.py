@@ -5,7 +5,8 @@ from contextlib import closing
 import pytest
 
 from scripts.swarm import cli, metrics, metrics_outbox
-from scripts.swarm.store import RedisStore, SwarmConfig
+from scripts.swarm.ledger_client import LedgerGone
+from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from tests.inbox.test_wake import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
@@ -30,13 +31,13 @@ def sent(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def ledger_collector(monkeypatch):
+def real_ledger_record(monkeypatch):
     original = metrics.metrics_ledger.record
     monkeypatch.setattr(metrics.metrics_ledger, "record", lambda *args: None)
     return original
 
 
-def test_record_pass_collects_ledger_rows_before_flushing(spool, monkeypatch, ledger_collector):
+def test_record_pass_collects_ledger_rows_before_flushing(spool, monkeypatch, real_ledger_record):
     doc = {
         "_meta": {
             "rev": 1,
@@ -57,7 +58,7 @@ def test_record_pass_collects_ledger_rows_before_flushing(spool, monkeypatch, le
             return nodes
 
     monkeypatch.setattr(metrics, "LedgerClient", Ledger)
-    monkeypatch.setattr(metrics.metrics_ledger, "record", ledger_collector)
+    monkeypatch.setattr(metrics.metrics_ledger, "record", real_ledger_record)
     received = {}
 
     def send(sink, query, body):
@@ -77,9 +78,10 @@ def test_record_pass_collects_ledger_rows_before_flushing(spool, monkeypatch, le
     assert received["INSERT INTO swarm.ticks FORMAT JSONEachRow"][0]["actions"] == 3
 
 
-def test_an_unavailable_ledger_reports_the_error_and_still_flushes_ticks(spool, sent, monkeypatch):
+@pytest.mark.parametrize("error", [OSError, LedgerGone, SwarmError])
+def test_an_unavailable_ledger_reports_the_error_and_still_flushes_ticks(spool, sent, monkeypatch, error):
     def refused(*args):
-        raise OSError("ledger unavailable")
+        raise error("ledger unavailable")
 
     monkeypatch.setattr(metrics.metrics_ledger, "record", refused)
     assert metrics.record_pass("sw", NOW, 3, ON) == ["ledger metrics failed: ledger unavailable"]

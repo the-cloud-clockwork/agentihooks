@@ -5,6 +5,7 @@ from functools import partial
 
 from scripts.swarm import bottleneck, metrics_ledger, metrics_outbox, metrics_swarm
 from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm.store import SwarmError
 
 TICKS = metrics_outbox.Table("ticks", (("actions", "Int64"),))
 
@@ -41,7 +42,7 @@ def record(table, rows, now_ms, environ=os.environ, extra=None):
 def _ledger(slug, now_ms, errors, box):
     try:
         metrics_ledger.record(box, slug, now_ms, LedgerClient())
-    except OSError as exc:
+    except (OSError, SwarmError) as exc:
         errors.append(f"ledger metrics failed: {exc}")
 
 
@@ -60,4 +61,4 @@ def record_pass(
 ) -> list[str]:
     errors = []
     extra = partial(_pass, slug, now_ms, swarm, errors)
-    return record(TICKS, [tick_row(slug, now_ms, actions)], now_ms, environ, extra) or errors
+    return [*record(TICKS, [tick_row(slug, now_ms, actions)], now_ms, environ, extra), *errors]

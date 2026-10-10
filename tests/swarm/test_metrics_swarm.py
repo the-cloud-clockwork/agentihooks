@@ -370,6 +370,7 @@ def test_done_task_is_observed_once_even_when_completion_precedes_the_tick(tmp_p
     monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
     monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
     monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
+    monkeypatch.setattr(metrics.metrics_ledger, "record", lambda *args: None)
     spool = tmp_path / "outbox.db"
     monkeypatch.setattr(metrics_outbox, "spool_path", lambda: spool)
     monkeypatch.setattr(
