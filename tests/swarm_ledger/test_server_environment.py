@@ -276,8 +276,7 @@ def test_a_failed_request_names_its_error_and_the_server_log(tmp_path):
     [("swarm.example.com", "https://swarm.example.com"), ("swarm.lan", "http://swarm.lan")],
 )
 def test_a_listed_host_and_origin_are_served(hosted, tmp_path, host, origin):
-    with ledger_guard.reserve_port() as hold:
-        status, body = served(hold.getsockname()[1], "/api/v1/ledgers", host, origin, tmp_path / "server.log")
+    status, body = served(hosted, "/api/v1/ledgers", host, origin, tmp_path / "server.log")
     assert status == 200
     assert json.loads(body)["data"] == []
 
