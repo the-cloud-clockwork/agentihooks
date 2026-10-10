@@ -1,3 +1,4 @@
+import json
 import tempfile
 from pathlib import Path
 
@@ -73,6 +74,9 @@ def _rejected(kind: str) -> dict:
         }
         corrected = world.store.put(world.scope, "a1", DATA)
         run["corrected_by_new_request"] = world.store.get_range(world.scope, corrected) == DATA
+        world.flip = 1
+        run["same_length_hash_mismatch_refused"] = _refused(lambda: world.store.put(world.scope, "a3", DATA[::-1]))
+        run["hash_mismatch_left_no_record"] = world.store.recorded(world.scope, "a3") is None
         run["passed"] = all(run[name] for name in run if name != "backend")
         run["message"] = message
         run[base.METRIC] = world.store.metrics()[base.METRIC]
@@ -89,10 +93,10 @@ def case_b():
     }
 
 
-def _refused(call) -> bool:
+def _refused(call, error: type[Exception] = base.ArtifactError) -> bool:
     try:
         call()
-    except base.ArtifactError:
+    except error:
         return True
     return False
 
@@ -100,13 +104,31 @@ def _refused(call) -> bool:
 def _recovered(kind: str) -> dict:
     with tempfile.TemporaryDirectory() as root:
         world = World(kind, Path(root))
-        ref = world.store.put(world.scope, "a1", DATA)
+        real = world.backend.write
+
+        def interrupted(key: str, data: bytes) -> None:
+            if data != DATA:
+                raise OSError("record upload interrupted")
+            real(key, data)
+
+        world.backend.write = interrupted
+        interruption = _refused(lambda: world.store.put(world.scope, "a1", DATA), OSError)
+        world.backend.write = real
+        survived = {
+            "object_verified": world.store.stat(world.scope, base.ArtifactRef.of(DATA)) == base.VERIFIED,
+            "record_absent": world.store.recorded(world.scope, "a1") is None,
+            "staging_absent": not [key for key in world.backend.keys("") if "/staging/" in key],
+        }
         restarted = _restarted(world, Path(root))
+        ref = restarted.put(world.scope, "a1", DATA)
         before = _contents(world)
         newer = base.Scope.granted(registration(execution="e3", generation=3))
         restarted.commit_manifest(newer, "outputs", ["a1"])
         run = {
             "backend": kind,
+            "interrupted_at_record_upload": interruption,
+            "after_interruption": survived,
+            "restart_completes_the_upload": restarted.recorded(world.scope, "a1") == ref,
             "retry_returns_committed_object": restarted.put(world.scope, "a1", DATA) == ref,
             "retry_added_no_object": {k: v for k, v in _contents(world).items() if "/manifests/" not in k} == before,
             "other_content_under_same_id_refused": _refused(lambda: restarted.put(world.scope, "a1", OTHER)),
@@ -117,7 +139,7 @@ def _recovered(kind: str) -> dict:
         world.backend.remove(f"s1/t1/objects/{ref.sha256}")
         run["lost_object_reported_absent"] = restarted.stat(world.scope, ref) == base.ABSENT
         run["lost_object_republished_from_matching_content"] = restarted.put(world.scope, "a1", DATA) == ref
-        run["passed"] = all(run[name] for name in run if name != "backend")
+        run["passed"] = all(all(v.values()) if isinstance(v, dict) else v for k, v in run.items() if k != "backend")
         return run
 
 
@@ -127,15 +149,20 @@ def _rollback() -> dict:
         ref = world.store.put(world.scope, "a1", DATA)
         world.store.commit_manifest(world.scope, "outputs", ["a1"])
         published = dict(world.fake.objects)
+        writes = world.fake.calls["put_object"] + world.fake.calls["copy_object"] + world.fake.calls["delete_object"]
         previous = base.ArtifactStore(local.LocalBackend(Path(root) / "previous"))
         newer = base.Scope.granted(registration(execution="e3", generation=3))
-        previous.put(newer, "a1", DATA)
+        previous.put(newer, "a1", world.store.get_range(world.scope, ref))
         manifest = previous.commit_manifest(newer, "outputs", ["a1"])
+        key = "s1/t1/manifests/outputs/3.json"
+        stored = json.loads(previous.backend.read(key, 0, previous.backend.size(key)))
+        after = world.fake.calls["put_object"] + world.fake.calls["copy_object"] + world.fake.calls["delete_object"]
         return {
             "action": "future manifest publication switched from the object store to the previous local adapter",
             "existing_objects_immutable": world.fake.objects == published,
+            "no_object_store_writes_after_switch": after == writes,
             "existing_reference_still_verified": world.store.stat(world.scope, ref) == base.VERIFIED,
-            "previous_adapter_published": manifest["generation"] == 3,
+            "previous_adapter_holds_the_manifest": stored == manifest and manifest["generation"] == 3,
         }
 
 
