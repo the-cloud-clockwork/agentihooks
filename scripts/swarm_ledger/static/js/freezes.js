@@ -29,7 +29,8 @@ export function ancestors(d, key) {
   if (list === "tasks") {
     const task = byId(d.tasks, id);
     if (!task) return [key];
-    const up = [...(task.slice ? ancestors(d, task.slice) : []), ...(task.phase ? ancestors(d, `phases/${task.phase}`) : [])];
+    const up = [...(task.merged_into ? ancestors(d, `tasks/${task.merged_into}`) : []), ...(task.slice ? ancestors(d, task.slice) : []),
+      ...(task.phase ? ancestors(d, `phases/${task.phase}`) : [])];
     return [key, ...new Set(up)];
   }
   return [key];

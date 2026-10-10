@@ -29,9 +29,15 @@ DOC = {
         phase("p1", "plans/hier", "Plan hierarchy"),
         phase("p2", "plans/v2", "Tier 1"),
         phase("p3", "plans/v2", "Tier 2"),
+        {**phase("p4", "plans/v2", "Old tier"), "out_of_scope": True},
     ],
     "slices": [{"id": "hier.hy-page", "phase": "phases/p1", "anchor": "hy-page", "lines": "1-4"}],
-    "tasks": [task("t1", "p1", slice_id="slices/hier.hy-page"), task("t2", "p2"), task("t3", "p1", lane="ci")],
+    "tasks": [
+        task("t1", "p1", slice_id="slices/hier.hy-page"),
+        task("t2", "p2"),
+        task("t3", "p1", lane="ci"),
+        {**task("t5", "p3"), "merged_into": "t1"},
+    ],
 }
 
 
@@ -221,6 +227,16 @@ def test_end_focus_in_the_swarm_panel_sends_the_clear(page):
     tab.wait_for_function("() => document.querySelectorAll('#swarm-freezes tr').length === 2")
 
 
+def test_the_freezes_block_folds_and_remembers_it_after_a_reload(page):
+    tab, _ = page
+    open_swarm(tab)
+    tab.locator("#freeze-fold > summary h3").click()
+    tab.wait_for_function("() => Object.values(localStorage).some((v) => v.includes('\"freeze-fold\":false'))")
+    tab.reload()
+    loaded(tab)
+    assert tab.eval_on_selector("#freeze-fold", "d => d.open") is False
+
+
 def test_the_swarm_panel_says_when_nothing_is_frozen(page):
     tab, _ = page
     open_swarm(tab)
@@ -252,3 +268,29 @@ def test_the_snowflake_colour_is_a_palette_token_without_glow(page):
     )
     assert style["token"]
     assert (style["shadow"], style["filter"]) == ("none", "none")
+
+
+@pytest.mark.parametrize("page", [[freeze("tasks/t1")]], indirect=True)
+def test_freezing_a_group_lead_holds_its_members(page):
+    tab, _ = page
+    assert row_state(tab, "#item-tasks-t5")["frozen"] is True
+    assert row_state(tab, "#item-tasks-t2")["frozen"] is False
+
+
+@pytest.mark.parametrize("page", [[freeze("phases/p4")]], indirect=True)
+def test_an_out_of_scope_item_that_carries_a_freeze_keeps_its_unfreeze(page):
+    tab, sent = page
+    assert freeze_text(tab, "#item-phases-p4") == "unfreeze"
+    tab.click("#item-phases-p4 .freeze")
+    assert sent_ops(tab, sent, "freeze_clear") == [{"op": "freeze_clear", "target": "phases/p4"}]
+    tab.wait_for_function("() => document.querySelector('#item-phases-p4 .freeze') === null")
+
+
+@pytest.mark.parametrize("page", [[freeze("lane:ci", verb="focus")]], indirect=True)
+def test_a_lane_focus_holds_tasks_outside_the_lane_and_no_phase(page):
+    tab, _ = page
+    assert row_state(tab, "#item-tasks-t1")["held"] is True
+    assert row_state(tab, "#item-tasks-t3")["held"] is False
+    for selector in ("#item-phases-p1", "#item-phases-p2"):
+        assert row_state(tab, selector)["held"] is False
+    assert tab.locator("#item-plans-v2 > .snowflake").count() == 0

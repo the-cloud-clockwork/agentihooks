@@ -37,9 +37,9 @@ export function verdictButton(item, verdict, cls, text, off) {
 }
 
 function itemActions(key, item) {
-  const off = frozen(doc, key);
-  if (item.done || item.out_of_scope) return h("div", { class: "item-actions" }, scopeDot(key, item, off));
-  const freeze = ["phases", "tasks"].includes(key.split("/")[0]) ? freezeButton(key) : null;
+  const off = frozen(doc, key), freezable = ["phases", "tasks"].includes(key.split("/")[0]);
+  if (item.done || item.out_of_scope) return h("div", { class: "item-actions" }, freezable && ownFreeze(doc, key) ? freezeButton(key) : null, scopeDot(key, item, off));
+  const freeze = freezable ? freezeButton(key) : null;
   return h("div", { class: "item-actions" }, verdictButton(key, "approved", "approve", "Approve", off), verdictButton(key, "denied", "deny", "Deny", off), freeze, scopeDot(key, item, off));
 }
 
@@ -124,7 +124,7 @@ function planGroups() {
 
 function planActions(key, plan) {
   if (!plan) return null;
-  return h("span", { class: "item-actions plan-actions" }, plan.out_of_scope ? null : freezeButton(key), scopeDot(key, plan, frozen(doc, key)));
+  return h("span", { class: "item-actions plan-actions" }, plan.out_of_scope && !ownFreeze(doc, key) ? null : freezeButton(key), scopeDot(key, plan, frozen(doc, key)));
 }
 
 function planRow({ key, id, title, phases, plan }) {

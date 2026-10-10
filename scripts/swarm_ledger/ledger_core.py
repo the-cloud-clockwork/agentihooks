@@ -445,7 +445,7 @@ def apply_changes(doc, changes, ctx):
             set_state(item, parts[2], value)
             ctx.stamp(change["path"], "operator")
             ctx.record("operator", state_event(parts[2], value), "/".join(parts[:2]))
-            if parts[2] == "out_of_scope" and "comments" in item:
+            if parts[2] == "out_of_scope" and parts[0] != "plans":
                 note = "Out of scope." if value else "Back in scope."
                 item["comments"].append(
                     {"id": f"scope-{ctx.rev}-{parts[1]}", "by": "operator", "at": ctx.at, "text": note}
