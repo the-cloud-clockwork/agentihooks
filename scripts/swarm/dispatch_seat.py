@@ -10,7 +10,7 @@ import json
 from dataclasses import replace
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import bottleneck, dev_red, lane_split, seat_spawn
+from scripts.swarm import bottleneck, dev_red, lane_split, lifetime, seat_spawn
 from scripts.swarm.store import DISPATCH, FULL
 
 LANE = DISPATCH
@@ -65,7 +65,8 @@ def open_triggers(slug: str, config, store, doc: dict, now_ms: int, sleeping: bo
 
 
 def refusal(slug: str, config, store, doc: dict, now_ms: int) -> str:
-    found = open_triggers(slug, config, store, doc, now_ms)
+    sleeping = lifetime.sleeping(slug, store, {task["id"]: task for task in doc.get("tasks", [])})
+    found = open_triggers(slug, config, store, doc, now_ms, sleeping)
     return REFUSED.format(lines="\n".join(line(trigger) for trigger in found)) if found else ""
 
 
