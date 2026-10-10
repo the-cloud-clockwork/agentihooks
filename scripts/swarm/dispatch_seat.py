@@ -1,10 +1,10 @@
 """The dispatcher's own LLM seat, `dispatcher@<slug>`, woken only on triggers the deterministic passes could not settle.
 
-At full autonomy a trigger wakes the live seat through its inbox or spawns it through the seat spawn helper; below
-full, or once every trigger closes, the seat is marked finished and the reap pass retires it. A trigger is a priority
-the sweep left unresolved for fifteen minutes and no dispatcher seat handed to the operator by raising it again under
-its own name, a bottleneck no lane rule covers held for the lane split's ticks, or a red dev holding blocked tasks,
-where a freeze or focus may be worth proposing.
+At full autonomy a trigger wakes the live seat through its inbox or, unless the swarm is paused, spawns it through the
+seat spawn helper; below full, or once every trigger closes, the seat is marked finished and the reap pass retires it.
+A trigger is a priority the sweep left unresolved for fifteen minutes that waits on no operator decision and that no
+dispatcher seat handed to the operator by raising it again under its own name, a bottleneck no lane rule covers held
+for the lane split's ticks, or a red dev holding blocked tasks, where a freeze or focus may be worth proposing.
 """
 
 import json
@@ -20,6 +20,7 @@ SENDER = "swarm"
 STALE_MS = 15 * 60 * 1000
 SENT = "dispatch-sent"
 ENDED_STATES = ("stopping", "stopped")
+PAUSED = "paused"
 REFUSED = "dispatcher triggers are still open; settle them, or the tick ends your seat once they close:\n{lines}"
 WAKE = "New dispatcher triggers in swarm {slug}:\n{lines}\nSettle each one, then tell the master what you did."
 LINES = {
@@ -34,7 +35,7 @@ def triggers(doc: dict, now_ms: int) -> list[dict]:
     return [
         {"id": row["id"], "item": row["item"], "text": row["text"], "minutes": (now_ms - row["at"]) // 60_000}
         for row in doc.get("priorities", [])
-        if now_ms - row["at"] >= STALE_MS and not priority_sweep.handed(row)
+        if now_ms - row["at"] >= STALE_MS and not priority_sweep.operator_only(doc, row)
     ]
 
 
@@ -79,6 +80,8 @@ def run(slug: str, config, store, runtime, doc: dict, now_ms: int, sleeping: boo
         return [_end(slug, store, seat) for seat in seats]
     if seats:
         return _wake(slug, store, seats[0], found)
+    if config.state == PAUSED:
+        return []
     if refused := seat_spawn.no_slot(config, runtime, SEAT) or seat_spawn.host_hold(slug, store, now_ms, SEAT):
         return [refused]
     return _spawn(slug, config, store, runtime, found, now_ms)
