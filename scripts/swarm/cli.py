@@ -21,6 +21,7 @@ agentihooks swarm <id> set master-agent=claude|codex              master affinit
 agentihooks swarm <id> save-template NAME                         write this swarm's lanes, caps and compact limit as a template
 agentihooks swarm <id> send-message TEXT                          message to every live agent's inbox
 agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]     master or operator judges a health finding
+agentihooks swarm <id> classify EXECUTION lost|working --reason TEXT  master or operator classifies a suspect execution attempt
 agentihooks swarm <id> lift AGENT GATE                            operator or master lets one agent past a gate for one hour
 agentihooks swarm <id> freeze | focus | unfreeze TARGET [--reason TEXT] [--quote WORDS]   operator, or master with his words
 agentihooks swarm <id> learned                                    list every seat's learned notes with seat and number
@@ -902,15 +903,43 @@ def cmd_rename(store, args):
         raise SwarmError("; ".join(failed))
 
 
-def cmd_verdict(store, args):
+def _master_or_operator(store, args, message):
     store.config(args.slug)
     name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
+    if name in ("", "operator"):
+        return "operator"
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
-    if agent is not None and agent.lane != MASTER:
-        raise SwarmError("only the master or the operator gives a finding a verdict")
-    verdict = verdict_store(store, args.slug).judge(args.finding, args.verdict, args.note, name or "operator", now_ms())
+    if agent is None or agent.lane != MASTER:
+        raise SwarmError(message)
+    return name
+
+
+def cmd_verdict(store, args):
+    by = _master_or_operator(store, args, "only the master or the operator gives a finding a verdict")
+    verdict = verdict_store(store, args.slug).judge(args.finding, args.verdict, args.note, by, now_ms())
     minutes = health.limits().cooldown_minutes
     print(json.dumps({"finding": args.finding, "verdict": verdict["value"], "hidden_minutes": minutes}))
+
+
+def cmd_classify(store, args):
+    from scripts.swarm_v2.runtime import observe
+
+    by = _master_or_operator(store, args, "only the master or the operator classifies an execution attempt")
+    try:
+        ruled = observe.rule(store, args.slug, args.execution_id, args.ruling, args.reason, by, time.time())
+    except observe.ObservationRefused as exc:
+        raise SwarmError(str(exc)) from exc
+    print(
+        json.dumps(
+            {
+                "execution_id": ruled.execution_id,
+                "state": ruled.state.value,
+                "ruling": ruled.ruling,
+                "reason": ruled.ruling_reason,
+                "by": ruled.ruled_by,
+            }
+        )
+    )
 
 
 def cmd_lift(store, args):
@@ -1463,6 +1492,10 @@ def build_parser():
     verdict.add_argument("finding")
     verdict.add_argument("verdict")
     verdict.add_argument("--note", default="")
+    classify = sub.add_parser("classify")
+    classify.add_argument("execution_id")
+    classify.add_argument("ruling", choices=("lost", "working"))
+    classify.add_argument("--reason", required=True)
     sub.add_parser("send-message").add_argument("text")
     lift = sub.add_parser("lift")
     lift.add_argument("agent")

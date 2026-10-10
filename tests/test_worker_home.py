@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm_v2 import worker_home
+from scripts.swarm_v2 import filesystem, worker_home
 
 WORKSTATION_PYTHON = "/home/operator/dev/tcc-ecosystem/.venv/bin/python"
 ENDPOINTS = {"AGENTIHOOKS_LEDGER_URL": "http://ledger.swarm.svc:8765", "BRAIN_URL": "https://brain.swarm.svc"}
@@ -134,6 +134,39 @@ def test_bootstrap_renders_both_targets_into_separate_homes(fixture):
     codex_text = "".join(p.read_text() for p in codex_home.rglob("*") if p.is_file() and p.suffix in (".toml", ".json"))
     assert str(codex_home) not in claude_text and str(claude_home) not in codex_text
     assert "AH_CC_TOKEN_POOL_A" not in claude_text + codex_text
+
+
+def test_bootstrap_allocates_the_layout_seals_seeds_and_records_relative_paths(fixture):
+    templates, volume = fixture
+    record = worker_home.bootstrap(request(templates, volume))
+    attempt = volume / "attempt-1"
+    layout = filesystem.load()
+    assert record["layout"] == filesystem.mapping(layout)
+    assert json.loads((attempt / worker_home.RECORD).read_text())["layout"] == filesystem.mapping(layout)
+    assert all((attempt / folder).is_dir() for folder in layout.roots.values())
+    seeds = [p for p in (attempt / "profiles").rglob("*") if not p.is_symlink()]
+    assert seeds and not any(p.lstat().st_mode & 0o222 for p in seeds)
+    assert (attempt / "homes" / "claude").stat().st_mode & 0o200
+
+
+def test_a_template_link_that_leaves_the_seed_copy_fails_bootstrap_and_removes_the_attempt(fixture):
+    templates, volume = fixture
+    profile = templates / "fixture-claude"
+    (profile / "persona.md").symlink_to(profile / "CLAUDE.md")
+    with pytest.raises(worker_home.BootstrapError) as error:
+        worker_home.bootstrap(request(templates, volume))
+    copy = volume / "attempt-1" / "profiles" / "fixture-claude" / "persona.md"
+    assert str(error.value) == f"path resolves outside its execution root: {copy}"
+    assert not (volume / "attempt-1").exists()
+
+
+def test_a_missing_layout_fails_bootstrap_and_leaves_no_attempt(fixture, monkeypatch):
+    templates, volume = fixture
+    monkeypatch.setattr(filesystem, "LAYOUTS", (volume / "layout.json",))
+    with pytest.raises(worker_home.BootstrapError) as error:
+        worker_home.bootstrap(request(templates, volume))
+    assert str(error.value) == "no layout file is installed, so new launches stop"
+    assert list(volume.iterdir()) == []
 
 
 def comparable(volume: Path) -> dict:

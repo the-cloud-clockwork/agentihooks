@@ -29,7 +29,9 @@
       "restart_loaded_the_last_committed_revision": true,
       "rollback": {
         "exit": 0,
-        "restored_the_backup": true
+        "restarted_writer_held_the_lease": true,
+        "restored_the_backup": true,
+        "writer_started_on_the_restored_backup": true
       },
       "snapshot_exit": 0
     },

@@ -147,7 +147,7 @@ class FleetRegistry:
         for _ in range(WRITE_ATTEMPTS):
             with self.store.redis.pipeline() as pipe:
                 try:
-                    pipe.watch(self.sessions)
+                    pipe.watch(self.sessions, self.seats)
                     rows = pipe.hgetall(self.sessions)
                     changed = {}
                     for key, raw in rows.items():
@@ -184,6 +184,9 @@ class FleetRegistry:
         def beat(record: Session) -> Session:
             if record.state not in (LIVE, SUSPECT):
                 raise SwarmError("session_ended")
+            held = self.seat(record.seat)
+            if held and (held["execution_id"], held["generation"]) != (record.execution_id, record.generation):
+                raise SwarmError("stale_generation")
             return replace(record, state=LIVE, heartbeat_ms=self.clock())
 
         return self._one(scope, session_id, token, beat)
