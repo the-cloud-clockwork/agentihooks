@@ -633,7 +633,7 @@ def test_apply_repairs_drifted_hierarchy_rows_with_one_reported_event(tmp_path):
     assert repaired["repaired"]["missing_nodes"] == [node]
     assert repaired["repaired"]["drift"] == 1
     assert repaired["drift"]["drift"] == 0
-    assert repaired["conflicts"] == []
+    assert [row["kind"] for row in repaired["conflicts"]] == ["task_plan_link"] * 7
     saved = repo.export_document(SLUG)["_meta"]["events"]
     assert len(saved) == events + 1
     assert (saved[-1]["by"], saved[-1]["kind"], saved[-1]["target"]) == ("repairer", "backfilled", "hierarchy")
