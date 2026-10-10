@@ -384,7 +384,8 @@ printf 'a worker Pod read its launch grant from its launch ConfigMap and registe
 kubectl delete pod "$worker_pod" --wait --timeout 1m
 collected=""
 for _ in $(seq 60); do
-  if [[ -z "$(kubectl get configmap "$worker_pod-launch" --ignore-not-found -o name)" ]]; then
+  remaining="$(kubectl get configmap "$worker_pod-launch" --ignore-not-found -o name)"
+  if [[ -z $remaining ]]; then
     collected=yes
     break
   fi
