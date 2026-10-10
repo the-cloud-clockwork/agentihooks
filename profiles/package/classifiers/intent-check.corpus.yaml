@@ -3513,7 +3513,7 @@ cases:
     pull_request_body: "Closes #616\n\nAdds `POST /api/v1/push` to the notifications REST API, mirroring the MCP `send_notification`\
       \ tool: the same ntfy channels (`critical`, `alerts`, `deploys`, `system`) with their default priority and tags, optional\
       \ `title`, `priority` and `tags` overrides. It sits under `/api/`, so the existing Bearer [REDACTED] (`NOTIFICATIONS_API_KEY`)\
-      \ guards it. An unknown channel is refused with 422; an ntfy failure answers 502.\n\n```bash\ncurl -X POST https://email.homeofanton.com/api/v1/push\
+      \ guards it. An unknown channel is refused with 422; an ntfy failure answers 502.\n\n```bash\ncurl -X POST https://notifications.example.com/api/v1/push\
       \ \\\n  -H \"Authorization: Bearer [REDACTED] \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"message\": \"\
       host pressure\", \"title\": \"swarm\", \"channel\": \"alerts\"}'\n```\n\nUnrelated lines in `api.py` are reflowed by\
       \ `ruff format` only. CI Validate's `Python lint (ruff)` runs `ruff format --check` over every changed Python file in\
@@ -3566,104 +3566,104 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 404
-    answers:
-      usable:
-        type: noul
-        noul: 0.867035752930664
-      delivers:
-        type: noul
-        noul: 0.8872046086290859
-      reachable:
-        type: noul
-        noul: 0.7772998560157665
-      weakens:
-        type: noul
-        noul: 0.0003353502328728204
-      underdelivers:
-        type: noul
-        noul: 0.3775406828054583
-      overdelivers:
-        type: noul
-        noul: 0.16451644651115205
-      misses_line_245:
-        type: noul
-        noul: 0.011687257479339436
-      misses_line_246:
-        type: noul
-        noul: 0.002050743265455264
-      misses_line_248:
-        type: noul
-        noul: 0.005554925279896276
-      misses_line_249:
-        type: noul
-        noul: 0.651354837594613
-  - source: liquid-d1
-    latency_ms: 351
-    answers:
-      usable:
-        type: noul
-        noul: 0.867035752930664
-      delivers:
-        type: noul
-        noul: 0.9324533079218341
-      reachable:
-        type: noul
-        noul: 0.8175744806385543
-      weakens:
-        type: noul
-        noul: 0.0003353502328728204
-      underdelivers:
-        type: noul
-        noul: 0.3775406828054583
-      overdelivers:
-        type: noul
-        noul: 0.16451644651115205
-      misses_line_245:
-        type: noul
-        noul: 0.011687257479339436
-      misses_line_246:
-        type: noul
-        noul: 0.00040448146169324596
-      misses_line_248:
-        type: noul
-        noul: 0.009125637658663857
-      misses_line_249:
-        type: noul
-        noul: 0.46879062662624377
-  - source: liquid-d1
-    latency_ms: 301
+    latency_ms: 328
     answers:
       usable:
         type: noul
         noul: 0.8175744673038221
       delivers:
         type: noul
-        noul: 0.9046505299595163
+        noul: 0.8438950947024555
       reachable:
         type: noul
-        noul: 0.766293653760418
+        noul: 0.817574471748733
       weakens:
         type: noul
-        noul: 0.0006263340368550441
+        noul: 0.00026119040275271617
       underdelivers:
         type: noul
-        noul: 0.2689414448079646
+        noul: 0.32082130082460697
       overdelivers:
         type: noul
-        noul: 0.1480471679601413
+        noul: 0.05033063544642759
       misses_line_245:
         type: noul
-        noul: 0.014063627353171185
+        noul: 0.014957085824744773
       misses_line_246:
         type: noul
-        noul: 0.002050743265455264
+        noul: 0.0004305570909441722
       misses_line_248:
         type: noul
-        noul: 0.005554925279896276
+        noul: 0.0033766128831950342
       misses_line_249:
         type: noul
-        noul: 0.651354837594613
+        noul: 0.5312093733737563
+  - source: liquid-d1
+    latency_ms: 378
+    answers:
+      usable:
+        type: noul
+        noul: 0.9149009665946055
+      delivers:
+        type: noul
+        noul: 0.8438950947024555
+      reachable:
+        type: noul
+        noul: 0.7772998611746911
+      weakens:
+        type: noul
+        noul: 0.00013135174520379197
+      underdelivers:
+        type: noul
+        noul: 0.2942149845400438
+      overdelivers:
+        type: noul
+        noul: 0.037326881454155386
+      misses_line_245:
+        type: noul
+        noul: 0.014957085824744773
+      misses_line_246:
+        type: noul
+        noul: 0.0004305570909441722
+      misses_line_248:
+        type: noul
+        noul: 0.0033766128831950342
+      misses_line_249:
+        type: noul
+        noul: 0.5312093733737563
+  - source: liquid-d1
+    latency_ms: 379
+    answers:
+      usable:
+        type: noul
+        noul: 0.9149009665946055
+      delivers:
+        type: noul
+        noul: 0.8438950947024555
+      reachable:
+        type: noul
+        noul: 0.817574471748733
+      weakens:
+        type: noul
+        noul: 0.00026119040275271617
+      underdelivers:
+        type: noul
+        noul: 0.32082130082460697
+      overdelivers:
+        type: noul
+        noul: 0.04468087281684414
+      misses_line_245:
+        type: noul
+        noul: 0.007121427138967083
+      misses_line_246:
+        type: noul
+        noul: 1.0129989867639126e-05
+      misses_line_248:
+        type: noul
+        noul: 0.0012448433391414138
+      misses_line_249:
+        type: noul
+        noul: 0.5312093733737563
   baseline:
   - verdict: pass
   - verdict: pass
@@ -3672,56 +3672,56 @@ cases:
     source: rig-grade-swarm intent history, task ax2, antoncore pull request 618 ready head, live verdict pass at 1791573714316
       (Doctor evidence on issue 2285). The draft heads before it were recorded failing on overdelivers 0.60; a live rerun
       of those draft inputs no longer reproduces that overdelivers answer
-    provenance: 'gate history exact masked classifier input; a regression guard that does not discriminate the formatter clause:
-      the body names its reflowed lines and the head passes before and after (overdelivers 0.25 to 0.27 before, 0.15 to 0.16
-      after); baseline is three live runs of the definition before the formatter clause and samples are three live runs of
-      the definition with it, both on liquid-d1'
+    provenance: 'gate history classifier input with internal names masked (a domain, the secret store and a stack name); a
+      regression guard that does not discriminate the formatter clause: the body names its reflowed lines and the head passes
+      before and after (overdelivers 0.14 before, 0.04 to 0.05 after); baseline is three live runs of the definition before
+      the formatter clause and samples are three live runs of the definition with it, both on liquid-d1'
     labels:
       standards: 'pass. The task asks for "a push route on the notifications service mirroring its send notification tool
         and channels, behind a token", and the body delivers `POST /api/v1/push` mirroring "the MCP `send_notification` tool:
         the same ntfy channels", guarded by the existing Bearer token. The plan chunk''s seam "proven against the deployed
-        service" can exist only after merge (CI Manifesto section 2), and the body says the deployed proof follows. The body
-        names "Unrelated lines in `api.py` are reflowed by `ruff format` only", required by the CI format check, so those
-        lines are formatter output, not added scope. Proof notes show the red run on the test only head and the green run
-        with 11 route tests passing.'
+        service" can exist only after merge (the CI doctrine), and the body says the deployed proof follows. The body names
+        "Unrelated lines in `api.py` are reflowed by `ruff format` only", required by the CI format check, so those lines
+        are formatter output, not added scope. Proof notes show the red run on the test only head and the green run with 11
+        route tests passing.'
       spec: 'pass. The spec asks for "a push route on the notifications service mirroring its send notification tool and channels,
         behind a token", and the PR adds `POST /api/v1/push` "mirroring the MCP `send_notification` tool" under the existing
         Bearer token. The token seam is "proven against the deployed service", which can only be shown after deploy, and the
         PR says the deployed proof follows, so it is due after merge. The ready head proof is CI: a red run on the test only
         head and a green run where "test_push_route.py 11 passed". The changed files add nothing beyond the ask, and the `ruff
         format` reflow of unrelated lines is justified in the body as needed to pass the CI format check.'
-    input_digest: 10ac3ed74418153b
+    input_digest: 22641f19c6c2976c
     baseline_answers:
-    - usable: 0.8740772450055544
-      delivers: 0.9046505376715775
-      reachable: 0.8596637289374471
-      weakens: 0.00016865283062645158
-      underdelivers: 0.40733341443526055
-      overdelivers: 0.2689414330889798
-      misses_line_245: 0.005911069162707768
-      misses_line_246: 0.0028009264988941925
-      misses_line_248: 0.004905406724049583
-      misses_line_249: 0.5
-    - usable: 0.8740772450055544
-      delivers: 0.9046505376715775
-      reachable: 0.8596637289374471
-      weakens: 0.00016865283062645158
-      underdelivers: 0.40733341443526055
-      overdelivers: 0.2689414330889798
-      misses_line_245: 0.005911069162707768
-      misses_line_246: 0.0028009264988941925
-      misses_line_248: 0.004905406724049583
-      misses_line_249: 0.5
-    - usable: 0.9099069962657176
-      delivers: 0.9241418262465169
-      reachable: 0.8933094060543487
-      weakens: 0.00035697064833110394
-      underdelivers: 0.3486451488696663
-      overdelivers: 0.24508501864634827
-      misses_line_245: 0.009125636614415974
-      misses_line_246: 0.0008559007227604626
-      misses_line_248: 0.005220126293252518
-      misses_line_249: 0.4687905969400343
+    - usable: 0.8991213718636752
+      delivers: 0.8438950947024555
+      reachable: 0.7772998611746911
+      weakens: 0.00013135174520379197
+      underdelivers: 0.2942149845400438
+      overdelivers: 0.14033624229926062
+      misses_line_245: 0.014957085824744773
+      misses_line_246: 0.0004305570909441722
+      misses_line_248: 0.0033766128831950342
+      misses_line_249: 0.5312093733737563
+    - usable: 0.8175744673038221
+      delivers: 0.8438950947024555
+      reachable: 0.7772998611746911
+      weakens: 0.00013135174520379197
+      underdelivers: 0.2942149845400438
+      overdelivers: 0.14033624229926062
+      misses_line_245: 0.014957085824744773
+      misses_line_246: 0.0004305570909441722
+      misses_line_248: 0.0033766128831950342
+      misses_line_249: 0.5312093733737563
+    - usable: 0.8807970748488297
+      delivers: 0.8438950947024555
+      reachable: 0.7772998611746911
+      weakens: 0.00013135174520379197
+      underdelivers: 0.2942149845400438
+      overdelivers: 0.14033624229926062
+      misses_line_245: 0.014957085824744773
+      misses_line_246: 0.0004305570909441722
+      misses_line_248: 0.0033766128831950342
+      misses_line_249: 0.5312093733737563
 - name: deploy-proof-after-merge
   state:
     overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
@@ -3732,22 +3732,22 @@ cases:
     task: Insert only ClickHouse user for the swarm
     task_text: 'Parent: Supporting infrastructure in antoncore, approved by the operator for this plan. In the antoncore repository,
       a ClickHouse user that may only insert into and create tables in a swarm database, its password read from the stack
-      environment that the operator fills through OpenBao. Seams: it inserts into the swarm database and cannot read or drop
-      anything else, proven by command output against the deployed service. Pull request into antoncore dev. Details in your
-      plan chunk.'
+      environment that the operator fills through the secret store. Seams: it inserts into the swarm database and cannot read
+      or drop anything else, proven by command output against the deployed service. Pull request into antoncore dev. Details
+      in your plan chunk.'
     pull_request_title: Add insert only ClickHouse user for the swarm
     pull_request_body: 'Closes #617
 
 
-      - `stacks/data-plane/stack.yml` adds a `post_deploy` hook; `secrets.env` is the same path the convention default already
+      - `stacks/data-store/stack.yml` adds a `post_deploy` hook; `secrets.env` is the same path the convention default already
       used.
 
       - `clickhouse-swarm-user.sh` reconciles database `swarm` and user `swarm_writer` (sha256 password from `CLICKHOUSE_SWARM_PASSWORD`),
       granted `INSERT, CREATE TABLE ON swarm.*` only. Credentials travel in a curl config on a file descriptor, never in process
       args; the statement goes in the request body.
 
-      - data-plane stays `.manual`: merging deploys nothing. The proof runs after the operator fills `CLICKHOUSE_SWARM_PASSWORD`
-      in OpenBao and dispatches the data-plane deploy.
+      - data-store stays `.manual`: merging deploys nothing. The proof runs after the operator fills `CLICKHOUSE_SWARM_PASSWORD`
+      in the secret store and dispatches the data-store deploy.
 
 
       Red before the change, against the deployed `dataplane_clickhouse` (24.1.8.22):
@@ -3778,22 +3778,22 @@ cases:
 
       **Task ax1, Insert only ClickHouse user for the swarm:** Parent: Supporting infrastructure in antoncore, approved by
       the operator for this plan. In the antoncore repository, a ClickHouse user that may only insert into and create tables
-      in a swarm database, its password read from the stack environment that the operator fills through OpenBao. Seams: it
-      inserts into the swarm database and cannot read or drop anything else, proven by command output against the deployed
-      service. Pull request into antoncore dev. Details in your plan chunk.
+      in a swarm database, its password read from the stack environment that the operator fills through the secret store.
+      Seams: it inserts into the swarm database and cannot read or drop anything else, proven by command output against the
+      deployed service. Pull request into antoncore dev. Details in your plan chunk.
 
       <!-- /agentihooks intent -->'
     changed_files:
-    - stacks/data-plane/README.md
-    - stacks/data-plane/clickhouse-swarm-user.sh
-    - stacks/data-plane/pre-deploy.sh
-    - stacks/data-plane/stack.yml
+    - stacks/data-store/README.md
+    - stacks/data-store/clickhouse-swarm-user.sh
+    - stacks/data-store/pre-deploy.sh
+    - stacks/data-store/stack.yml
     proof: {}
     proof_notes: '- RED before change, deployed dataplane_clickhouse (24.1.8.22): `curl -H ''X-ClickHouse-User: swarm_writer''
       --data-binary ''SELECT 1'' http://127.0.0.1:8123/` -> `Code: 516 ... swarm_writer: Authentication failed: password is
       incorrect, or there is no user with such name. (AUTHENTICATION_FAILED)`
 
-      - shellcheck -S warning -e SC1091 stacks/data-plane/clickhouse-swarm-user.sh -> clean
+      - shellcheck -S warning -e SC1091 stacks/data-store/clickhouse-swarm-user.sh -> clean
 
       '
     reviewer_findings:
@@ -3807,8 +3807,8 @@ cases:
 
 
       A ClickHouse user limited to inserting into and creating tables in a swarm database, its password read from the stack''s
-      environment (stored in OpenBao by the operator through a pane, never typed in chat). Grafana keeps reading with its
-      existing datasource.
+      environment (stored in the secret store by the operator through a pane, never typed in chat). Grafana keeps reading
+      with its existing datasource.
 
       Seams: the user can insert into the swarm database and cannot read or drop anything else; proven by command output against
       the deployed service.
@@ -3819,104 +3819,104 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 313
+    latency_ms: 302
     answers:
       usable:
         type: noul
-        noul: 0.6513548646660542
+        noul: 0.9706877675527112
       delivers:
         type: noul
-        noul: 0.7549149868676283
+        noul: 0.8519528132451416
       reachable:
         type: noul
-        noul: 0.977022630759019
+        noul: 0.9740426418603167
       weakens:
         type: noul
-        noul: 0.0020507438448753254
+        noul: 0.0002611903813520866
       underdelivers:
         type: noul
-        noul: 0.13296424019782924
+        noul: 0.10669059962643358
       overdelivers:
         type: noul
-        noul: 0.025957352676742106
+        noul: 0.014957087251783064
       misses_line_239:
         type: noul
-        noul: 0.0017007221078396608
+        noul: 0.0008559007195747131
       misses_line_240:
         type: noul
-        noul: 0.00013982208996946713
+        noul: 0.0005884087835056779
       misses_line_242:
         type: noul
-        noul: 0.06008664091683042
+        noul: 0.05033063580254644
       misses_line_243:
         type: noul
-        noul: 0.5621765008857981
+        noul: 0.32082130082460697
   - source: liquid-d1
-    latency_ms: 314
+    latency_ms: 487
     answers:
       usable:
         type: noul
-        noul: 0.6513548646660542
+        noul: 0.939913354875362
       delivers:
         type: noul
-        noul: 0.7549149868676283
+        noul: 0.8519528019683106
       reachable:
         type: noul
-        noul: 0.977022630759019
+        noul: 0.9740426409184302
       weakens:
         type: noul
-        noul: 0.0020507438448753254
+        noul: 0.0002611903813520866
       underdelivers:
         type: noul
-        noul: 0.13296424019782924
+        noul: 0.11279540031810142
       overdelivers:
         type: noul
-        noul: 0.060086641758391915
+        noul: 0.006289902881991031
       misses_line_239:
         type: noul
-        noul: 0.004331502454351652
+        noul: 0.003376611842674885
       misses_line_240:
         type: noul
-        noul: 0.00016865269745344814
+        noul: 0.0005884086914961277
       misses_line_242:
         type: noul
-        noul: 0.06371499069622688
+        noul: 0.042087733923223715
       misses_line_243:
         type: noul
-        noul: 0.4073333856566001
+        noul: 0.32082130082460697
   - source: liquid-d1
-    latency_ms: 383
+    latency_ms: 384
     answers:
       usable:
         type: noul
-        noul: 0.9099070133672954
+        noul: 0.9706877675527112
       delivers:
         type: noul
-        noul: 0.7549149868676283
+        noul: 0.8519528019683106
       reachable:
         type: noul
-        noul: 0.977022630759019
+        noul: 0.9740426409184302
       weakens:
         type: noul
-        noul: 0.0020507438448753254
+        noul: 0.0002611903813520866
       underdelivers:
         type: noul
-        noul: 0.13296424019782924
+        noul: 0.11279540031810142
       overdelivers:
         type: noul
-        noul: 0.025957352676742106
+        noul: 0.010986945868982466
       misses_line_239:
         type: noul
-        noul: 0.0017007221078396608
+        noul: 0.006692850329902297
       misses_line_240:
         type: noul
-        noul: 0.0005527785154943807
+        noul: 0.00023050667649229873
       misses_line_242:
         type: noul
-        noul: 0.017986208251325228
+        noul: 0.039638843638982
       misses_line_243:
         type: noul
-        noul: 0.3775406547908327
+        noul: 0.7310585551920353
   baseline:
   - verdict: pass
   - verdict: pass
@@ -3924,59 +3924,60 @@ cases:
   notes:
     source: rig-grade-swarm intent history, task ax1, antoncore pull request 619, live verdict fail at 1791573458040 citing
       plan line 243 deployed proof and pass on the same input at 1791573522185 (Doctor evidence on issue 2285)
-    provenance: 'gate history exact masked classifier input; a regression guard for proof against a deployed service being
-      due after merge: the same input as the ready head e50e0319 except the task text, which was later amended to add a right
-      this head never claimed; it passes three of three before and after, as the Doctor replay found, and the clause does
-      not touch it, so baseline and sample answers nearly coincide; baseline is three live runs of the definition before the
-      formatter clause and samples are three live runs of the definition with it, both on liquid-d1'
+    provenance: 'gate history classifier input with internal names masked (a domain, the secret store and a stack name); a
+      regression guard for proof against a deployed service being due after merge: the same input as the ready head e50e0319
+      except the task text, which was later amended to add a right this head never claimed; it passes three of three before
+      and after, as the Doctor replay found, and the clause does not touch it, so baseline and sample answers nearly coincide;
+      baseline is three live runs of the definition before the formatter clause and samples are three live runs of the definition
+      with it, both on liquid-d1'
     labels:
       standards: pass. The task text at this head asks for "a ClickHouse user that may only insert into and create tables
-        in a swarm database, its password read from the stack environment that the operator fills through OpenBao", and the
-        body grants `swarm_writer` "`INSERT, CREATE TABLE ON swarm.*` only" with the password from `CLICKHOUSE_SWARM_PASSWORD`.
+        in a swarm database, its password read from the stack environment that the operator fills through the secret store",
+        and the body grants `swarm_writer` "`INSERT, CREATE TABLE ON swarm.*` only" with the password from `CLICKHOUSE_SWARM_PASSWORD`.
         The changed files are the wiring for that user and add no scope beyond the plan chunk. The seam "proven by command
-        output against the deployed service" can only exist after merge (CI Manifesto section 2), and the body says "merging
-        deploys nothing. The proof runs after the operator fills `CLICKHOUSE_SWARM_PASSWORD` in OpenBao and dispatches the
-        data-plane deploy." The red `AUTHENTICATION_FAILED` output and the clean shellcheck are the evidence a head before
+        output against the deployed service" can only exist after merge (the CI doctrine), and the body says "merging deploys
+        nothing. The proof runs after the operator fills `CLICKHOUSE_SWARM_PASSWORD` in the secret store and dispatches the
+        data-store deploy." The red `AUTHENTICATION_FAILED` output and the clean shellcheck are the evidence a head before
         merge can give.
       spec: 'pass. The task text at 19:17:38 asks for "a ClickHouse user that may only insert into and create tables in a
         swarm database", and the PR delivers `swarm_writer` on database `swarm`, "granted `INSERT, CREATE TABLE ON swarm.*`
         only", with the password from `CLICKHOUSE_SWARM_PASSWORD`. The seam "cannot read or drop anything else, proven by
-        command output against the deployed service" can only be proven after deploy, and the PR says "data-plane stays `.manual`:
+        command output against the deployed service" can only be proven after deploy, and the PR says "data-store stays `.manual`:
         merging deploys nothing", so that proof is due after merge. The ready head proof is the red `AUTHENTICATION_FAILED`
         output against the deployed `dataplane_clickhouse` and a clean shellcheck. The changed files add no scope beyond the
         ask.'
-    input_digest: 28d450059a20c72b
+    input_digest: dbfc956c32912a78
     baseline_answers:
-    - usable: 0.9770226304244968
+    - usable: 0.9399133481428692
       delivers: 0.8519528132451416
-      reachable: 0.9241418158002492
-      weakens: 0.0007554055877378573
-      underdelivers: 0.0850990542883219
-      overdelivers: 0.035144844379618526
-      misses_line_239: 0.005220124997139505
-      misses_line_240: 0.0052201246295851276
-      misses_line_242: 0.03732688895048618
-      misses_line_243: 0.6224593171945417
-    - usable: 0.8740772220439509
-      delivers: 0.9046505402422645
-      reachable: 0.9149009619539553
-      weakens: 0.0007554055877378573
-      underdelivers: 0.06754669864792355
-      overdelivers: 0.03308597505175204
-      misses_line_239: 0.0021827167455448562
-      misses_line_240: 0.0006667023166896008
-      misses_line_242: 0.039638839100970026
-      misses_line_243: 0.592666571175409
-    - usable: 0.9770226304244968
+      reachable: 0.9740426418603167
+      weakens: 0.0002611903813520866
+      underdelivers: 0.10669059962643358
+      overdelivers: 0.017986212067650338
+      misses_line_239: 0.0008559007195747131
+      misses_line_240: 0.0005884087835056779
+      misses_line_242: 0.05033063580254644
+      misses_line_243: 0.45326184801538616
+    - usable: 0.9706877675527112
+      delivers: 0.8519528019683106
+      reachable: 0.9740426409184302
+      weakens: 0.0002611903813520866
+      underdelivers: 0.11279540031810142
+      overdelivers: 0.010986940525640651
+      misses_line_239: 0.003376611842674885
+      misses_line_240: 0.0005884086914961277
+      misses_line_242: 0.042087733923223715
+      misses_line_243: 0.32082130082460697
+    - usable: 0.9399133481428692
       delivers: 0.8519528132451416
-      reachable: 0.9241418158002492
-      weakens: 0.0007554055877378573
-      underdelivers: 0.0850990542883219
-      overdelivers: 0.035144844379618526
-      misses_line_239: 0.005220124997139505
-      misses_line_240: 0.0052201246295851276
-      misses_line_242: 0.03732688895048618
-      misses_line_243: 0.6224593171945417
+      reachable: 0.9740426418603167
+      weakens: 0.0002611903813520866
+      underdelivers: 0.10669059962643358
+      overdelivers: 0.017986212067650338
+      misses_line_239: 0.0008559007195747131
+      misses_line_240: 0.0005884087835056779
+      misses_line_242: 0.05033063580254644
+      misses_line_243: 0.45326184801538616
 - name: formatter-claim-added
   state:
     overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
