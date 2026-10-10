@@ -246,16 +246,43 @@ def test_resolved_bases_are_graded_without_looking_up_branches_again(tmp_path):
     assert discover_changes(tmp_path, [earlier], "HEAD") == {"hooks/two.py": {1, 2}}
 
 
+@pytest.mark.parametrize(("edit", "counted"), [("    assert f() == 1\n    assert f()\n", True), ("    f()\n", False)])
+def test_an_earlier_branch_counts_only_while_the_head_keeps_every_test_line_it_was_graded_with(tmp_path, edit, counted):
+    from scripts.ci_mutation.scope import own_bases
+
+    git, commit = _repo(tmp_path)
+    base = commit("dev.py", "a = 1\n")
+    git("checkout", "-q", "-b", "branch")
+    (tmp_path / "tests").mkdir()
+    test = tmp_path / "tests" / "test_one.py"
+    test.write_text("def test_f():\n    assert f() == 1\n")
+    git("add", "tests/test_one.py")
+    earlier = commit("one.py", "def f():\n    return 1\n")
+    git("update-ref", "refs/remotes/origin/earlier", earlier)
+    test.write_text("def test_f():\n" + edit)
+    (tmp_path / "tests" / "test_two.py").write_text("def test_g():\n    assert g() == 2\n")
+    git("add", "tests/test_one.py", "tests/test_two.py")
+    commit("two.py", "def g():\n    return 2\n")
+    asked = []
+
+    def graded(sha):
+        asked.append(sha)
+        return True
+
+    assert own_bases(tmp_path, base, "HEAD", graded) == sorted([base, earlier] if counted else [base])
+    assert asked == ([earlier] if counted else [])
+
+
 @pytest.mark.parametrize(
     ("answers", "expected"),
     [
-        ([(0, "1\n")], True),
-        ([(0, "0\n"), (0, "2\n")], True),
-        ([(0, "0\n"), (0, "\n")], False),
-        ([(1, "5\n"), (1, "5\n")], False),
+        ({"mutation": (0, "11\n")}, True),
+        ({"mutation": (0, ""), "Gate — Required": (0, "5\n6\n"), "mutation (0)": (0, "6\n")}, True),
+        ({"mutation": (0, ""), "Gate — Required": (0, "5\n"), "mutation (0)": (0, "7\n")}, False),
+        ({"mutation": (1, "9\n"), "Gate — Required": (0, "5\n"), "mutation (0)": (1, "5\n")}, False),
     ],
 )
-def test_a_commit_is_graded_only_by_a_green_gate_or_push_preflight_check(monkeypatch, answers, expected):
+def test_a_commit_is_graded_only_by_a_green_preflight_or_a_green_gate_whose_run_mutated(monkeypatch, answers, expected):
     import subprocess
 
     from scripts.ci_mutation import scope
@@ -264,13 +291,13 @@ def test_a_commit_is_graded_only_by_a_green_gate_or_push_preflight_check(monkeyp
     calls = []
 
     def run(command, **kwargs):
+        check = command[6].removeprefix("check_name=")
         calls.append((command, kwargs))
-        code, out = answers[len(calls) - 1]
+        code, out = answers[check]
         return subprocess.CompletedProcess(command, code, out, "")
 
     monkeypatch.setattr(scope.subprocess, "run", run)
     assert scope.graded_green("abc") is expected
-    checks = ["Gate — Required", "mutation"][: len(answers)]
     assert calls == [
         (
             [
@@ -284,9 +311,9 @@ def test_a_commit_is_graded_only_by_a_green_gate_or_push_preflight_check(monkeyp
                 "-f",
                 "status=completed",
                 "--jq",
-                '[.check_runs[] | select(.conclusion == "success")] | length',
+                '.check_runs[] | select(.conclusion == "success") | .check_suite.id',
             ],
             {"capture_output": True, "text": True},
         )
-        for check in checks
+        for check in answers
     ]

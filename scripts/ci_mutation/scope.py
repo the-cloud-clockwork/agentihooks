@@ -6,9 +6,6 @@ from functools import cache
 from pathlib import Path
 
 INTEGRATION = "refs/remotes/origin/dev"
-# A pushed commit counts as an earlier base only once one of these graded it green: the pull request gate or the push
-# preflight.
-GRADED = ("Gate — Required", "mutation")
 
 
 def changed_lines(diff: str) -> set[int]:
@@ -24,18 +21,22 @@ def own_bases(root: Path, base: str, head: str, graded=lambda sha: False) -> lis
     def git(*args: str) -> str:
         return subprocess.check_output(["git", *args], cwd=root).decode().strip()
 
+    def keeps_tests(sha: str) -> bool:
+        counts = git("diff", "--numstat", sha, head, "--", "tests").splitlines()
+        return all(line.split("\t")[1] == "0" for line in counts)
+
     tip = git("rev-parse", head)
     bases = {git("merge-base", base, head)}
     if git("for-each-ref", INTEGRATION):
         bases.add(git("merge-base", INTEGRATION, head))
     unmerged = [f"--no-merged={own}" for own in bases]
     pushed = git("for-each-ref", "--merged", head, *unmerged, "--format=%(objectname)", "refs/remotes/origin").split()
-    bases.update(sha for sha in set(pushed) - {tip} if graded(sha))
+    bases.update(sha for sha in set(pushed) - {tip} if keeps_tests(sha) and graded(sha))
     return sorted(bases)
 
 
 def graded_green(sha: str) -> bool:
-    for check in GRADED:
+    def suites(check: str) -> set[str]:
         found = subprocess.run(
             [
                 "gh",
@@ -48,14 +49,14 @@ def graded_green(sha: str) -> bool:
                 "-f",
                 "status=completed",
                 "--jq",
-                '[.check_runs[] | select(.conclusion == "success")] | length',
+                '.check_runs[] | select(.conclusion == "success") | .check_suite.id',
             ],
             capture_output=True,
             text=True,
         )
-        if found.returncode == 0 and found.stdout.strip() not in ("", "0"):
-            return True
-    return False
+        return set(found.stdout.split()) if found.returncode == 0 else set()
+
+    return bool(suites("mutation") or suites("Gate — Required") & suites("mutation (0)"))
 
 
 def discover_changes(root: Path, base: str | list[str], head: str) -> dict[str, set[int]]:
