@@ -74,13 +74,13 @@ def test_a_stale_full_report_after_a_newer_exhausted_one_keeps_the_exhausted_rea
     newest = world.publish(EXHAUSTED)
     kept = world.publish(STALE_FULL)
     assert kept == newest == world.quota.latest(ACCOUNT, HARNESS)
-    assert (newest.account, newest.harness, newest.five_used, newest.observed_ms) == (ACCOUNT, HARNESS, 100.0, 600000)
+    assert (newest.account, newest.harness, newest.five_used, newest.observed_ms) == (ACCOUNT, HARNESS, 100.0, 240000)
     reading = world.quota.reading(ACCOUNT, HARNESS)
-    assert (reading.state, reading.routing_left, reading.age_seconds) == (quota.OBSERVED, 0.0, 60.0)
+    assert (reading.state, reading.routing_left, reading.age_seconds) == (quota.OBSERVED, 0.0, 30.0)
     assert world.quota.cap(ACCOUNT, HARNESS) == 0
-    assert world.quota.quota_observation_age_seconds(ACCOUNT, HARNESS) == 60.0
+    assert world.quota.quota_observation_age_seconds(ACCOUNT, HARNESS) == 30.0
     assert world.quota.stale_reports(ACCOUNT, HARNESS) == 1
-    assert [entry.observed_ms for entry in world.quota.history(ACCOUNT, HARNESS)] == [600000]
+    assert [entry.observed_ms for entry in world.quota.history(ACCOUNT, HARNESS)] == [240000]
 
 
 def test_the_source_execution_and_account_come_from_the_grant(world):
@@ -98,7 +98,7 @@ def test_a_newer_report_replaces_an_older_one(world):
     world.publish(STALE_FULL)
     newest = world.publish(EXHAUSTED)
     assert world.quota.latest(ACCOUNT, HARNESS) == newest
-    assert [entry.observed_ms for entry in world.quota.history(ACCOUNT, HARNESS)] == [600000, 300000]
+    assert [entry.observed_ms for entry in world.quota.history(ACCOUNT, HARNESS)] == [240000, 120000]
     assert world.quota.stale_reports(ACCOUNT, HARNESS) == 0
 
 
@@ -108,8 +108,8 @@ def test_routing_uses_the_newest_fleet_observation_over_a_stale_local_cache(worl
     world.publish(EXHAUSTED)
     world.publish(STALE_FULL)
     world.publish(INPUTS["spare"], account=SPARE)
-    stale_local = replace(world.quota.latest(ACCOUNT, HARNESS), five_used=0.0, observed_ms=300000).probe()
-    monkeypatch.setattr(balancer, "cached_observations", lambda: [(300.0, stale_local)])
+    stale_local = replace(world.quota.latest(ACCOUNT, HARNESS), five_used=0.0, observed_ms=120000).probe()
+    monkeypatch.setattr(balancer, "cached_observations", lambda: [(120.0, stale_local)])
     fleet = quota.latest_all(world.store.redis, HARNESS)
     others = qp._other_accounts({}, [(found.observed_ms / 1000, found.probe()) for found in fleet.values()])
     assert {c.account: c.five_used for c in others} == {ACCOUNT: 100.0, SPARE: 20.0}
@@ -165,7 +165,7 @@ def test_an_undecodable_record_hides_no_other_account(world):
     "report",
     [
         None,
-        {"provider_status": "error", "observed_ms": 600000},
+        {"provider_status": "error", "observed_ms": 240000},
         {**STALE_FULL, "five_used": None},
         {**STALE_FULL, "week_used": None},
         {**STALE_FULL, "provider_status": "error"},
@@ -198,9 +198,9 @@ def test_a_rejected_provider_status_leaves_no_room(world):
 
 
 def test_a_passed_reset_restores_its_window(world):
-    world.publish({**EXHAUSTED, "five_reset": 600})
+    world.publish({**EXHAUSTED, "five_reset": 250})
     assert world.quota.reading(ACCOUNT, HARNESS).routing_left == 38.0
-    world.publish({**EXHAUSTED, "observed_ms": 610000, "five_reset": 660, "week_reset": 660})
+    world.publish({**EXHAUSTED, "observed_ms": 250000, "five_reset": 270, "week_reset": 270})
     assert world.quota.reading(ACCOUNT, HARNESS).routing_left == 100.0
 
 
@@ -285,13 +285,13 @@ def test_an_exhausted_account_hands_off_to_its_configured_account(world):
 def test_a_handoff_target_needs_the_minimum_room(world):
     world.publish({**INPUTS["spare"], "five_used": 100 - quota.MIN_ROUTING_LEFT}, account=SPARE)
     assert world.quota.admit(SPARE, HARNESS).action == quota.ADMIT
-    world.publish({**INPUTS["spare"], "observed_ms": 500001, "five_used": 95.5}, account=SPARE)
+    world.publish({**INPUTS["spare"], "observed_ms": 200001, "five_used": 95.5}, account=SPARE)
     assert world.quota.admit(ACCOUNT, HARNESS, SPARE).action == quota.WAIT
 
 
 def test_a_provider_outage_waits_a_bounded_time_without_new_starts(world):
     world.publish(EXHAUSTED)
-    world.publish({**EXHAUSTED, "provider_status": "error", "observed_ms": 650000, "five_used": None})
+    world.publish({**EXHAUSTED, "provider_status": "error", "observed_ms": 260000, "five_used": None})
     first = world.quota.admit(ACCOUNT, HARNESS, SPARE)
     assert first == quota.Admission(quota.WAIT, ACCOUNT, NOW + quota.WAIT_MS, "unknown")
     world.clock[0] += 1000
@@ -300,7 +300,7 @@ def test_a_provider_outage_waits_a_bounded_time_without_new_starts(world):
     assert world.quota.admit(ACCOUNT, HARNESS) == first
     world.clock[0] = first.until_ms
     assert world.quota.admit(ACCOUNT, HARNESS).until_ms == first.until_ms + quota.WAIT_MS
-    assert [entry.observed_ms for entry in world.quota.history(ACCOUNT, HARNESS)] == [650000, 600000]
+    assert [entry.observed_ms for entry in world.quota.history(ACCOUNT, HARNESS)] == [260000, 240000]
 
 
 def test_waits_are_kept_per_account_and_harness(world):
@@ -417,7 +417,7 @@ def test_fleet_observations_are_off_unless_enabled(world, monkeypatch):
     assert quota.fleet_observations({quota.FLAG: "yes"}) == []
     environ = {quota.FLAG: "1"}
     [(observed_at, probe)] = quota.fleet_observations(environ)
-    assert (observed_at, probe.account, probe.five_hour.used) == (600.0, ACCOUNT, 100.0)
+    assert (observed_at, probe.account, probe.five_hour.used) == (240.0, ACCOUNT, 100.0)
     assert quota.fleet_observations(environ, "codex") == []
     assert environs == [environ, environ]
 

@@ -6,7 +6,7 @@
   "harness": "claude",
   "handoff_account": "spare",
   "exhausted": {
-    "observed_ms": 600000,
+    "observed_ms": 240000,
     "provider_status": "allowed_warning",
     "five_used": 100.0,
     "week_used": 62.0,
@@ -14,7 +14,7 @@
     "week_reset": 600000
   },
   "stale_full": {
-    "observed_ms": 300000,
+    "observed_ms": 120000,
     "provider_status": "allowed",
     "five_used": 0.0,
     "week_used": 10.0,
@@ -22,13 +22,13 @@
     "week_reset": 600000
   },
   "spare": {
-    "observed_ms": 500000,
+    "observed_ms": 200000,
     "provider_status": "allowed",
     "five_used": 20.0,
     "week_used": 30.0,
     "five_reset": 18000,
     "week_reset": 600000
   },
-  "clock_ms": 660000,
+  "clock_ms": 270000,
   "grant": "Signed fixture launch grant, validated on every request; never a deployed credential"
 }
