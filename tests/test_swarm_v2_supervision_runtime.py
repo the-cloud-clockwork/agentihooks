@@ -115,6 +115,27 @@ def test_spawn_uses_private_environment_and_independent_session(supervisor, monk
     assert supervisor.environment["CLAUDE_CONFIG_DIR"] == str(supervisor.launch.home / ".claude")
 
 
+def test_the_mounted_account_token_reaches_the_agent_as_the_claude_oauth_token(tmp_path, monkeypatch):
+    for name in list(os.environ):
+        if name.startswith("AH_CC_TOKEN_") or name == "CLAUDE_CODE_OAUTH_TOKEN":
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("AH_CC_TOKEN_claude_fixtureatexample_com", "value-one")
+    (tmp_path / "homes" / "claude").mkdir(parents=True)
+    execution = filesystem.Execution(tmp_path, filesystem.load())
+    launch = Launch(
+        execution,
+        {"execution_id": "admitted"},
+        "claude",
+        ("tool",),
+        ("exporter",),
+        ("herdr", "server"),
+        Budgets(2, 1, 1, 1),
+    )
+    owner = runtime.Supervisor(launch)
+    assert owner.environment["CLAUDE_CODE_OAUTH_TOKEN"] == "value-one"
+    assert owner.environment["AH_CC_TOKEN_claude_fixtureatexample_com"] == "value-one"
+
+
 @pytest.mark.parametrize("role", ["agent", "exporter"])
 def test_ready_requires_bound_receipt(supervisor, monkeypatch, role):
     monkeypatch.setattr(supervisor, "observe", lambda: None)
