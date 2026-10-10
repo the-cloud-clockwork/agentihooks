@@ -1,0 +1,71 @@
+{
+  "case": "T-SV2-KUB-01-C",
+  "state": "passed",
+  "evidence_class": "mocked: pure rendering; schema validity from kind server side dry run",
+  "input_sha256": {
+    "pod-policy.json": "6f10e42c7c8461ea18fe3ae9f0c46001020bd50153665477b415076cf71099f5",
+    "pod-launch.json": "dc9258de4781082cc2abb9a2048ff04db03da0a83ea144f96fe728847b34c809",
+    "pod-rendered.json": "3dc1c2af852679bbf1ec12c7c0156a25d91747c3f8ec06a093ea3d1b4abd3672"
+  },
+  "observed": {
+    "first_digest": "sha256:42764d7bb3627033384bfa323c30ede93a7064f79fc75a0609cebea854595da2",
+    "restarted_digest": "sha256:42764d7bb3627033384bfa323c30ede93a7064f79fc75a0609cebea854595da2",
+    "same_digest": true,
+    "probe_rollback": {
+      "changed": [
+        "spec.containers[0].livenessProbe",
+        "spec.containers[0].readinessProbe",
+        "spec.containers[0].startupProbe"
+      ],
+      "image_unchanged": true,
+      "broken_liveness": {
+        "exec": {
+          "command": [
+            "python",
+            "/opt/swarm-node/health.py",
+            "liveness",
+            "--attempt",
+            "/home/worker/attempts/exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+            "--harness",
+            "claude",
+            "--herdr-timeout",
+            "0.001",
+            "--brain-timeout",
+            "2"
+          ]
+        },
+        "initialDelaySeconds": 0,
+        "periodSeconds": 15,
+        "timeoutSeconds": 6,
+        "failureThreshold": 1
+      },
+      "reverted_liveness": {
+        "exec": {
+          "command": [
+            "python",
+            "/opt/swarm-node/health.py",
+            "liveness",
+            "--attempt",
+            "/home/worker/attempts/exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+            "--harness",
+            "claude",
+            "--herdr-timeout",
+            "2",
+            "--brain-timeout",
+            "2"
+          ]
+        },
+        "initialDelaySeconds": 0,
+        "periodSeconds": 15,
+        "timeoutSeconds": 6,
+        "failureThreshold": 4
+      }
+    },
+    "template_rollback": {
+      "existing_version": "kub01-v2",
+      "new_launch_version": "kub01-v1",
+      "image_unchanged": true
+    }
+  },
+  "independent_runs": 2
+}

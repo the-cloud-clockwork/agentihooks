@@ -1,0 +1,87 @@
+{
+  "case": "T-SV2-KUB-01-A",
+  "state": "passed",
+  "evidence_class": "mocked: pure rendering; schema validity from kind server side dry run",
+  "input_sha256": {
+    "pod-policy.json": "6f10e42c7c8461ea18fe3ae9f0c46001020bd50153665477b415076cf71099f5",
+    "pod-launch.json": "dc9258de4781082cc2abb9a2048ff04db03da0a83ea144f96fe728847b34c809",
+    "pod-rendered.json": "3dc1c2af852679bbf1ec12c7c0156a25d91747c3f8ec06a093ea3d1b4abd3672"
+  },
+  "observed": {
+    "fixture": {
+      "name": "swarm-exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+      "labels": {
+        "app.kubernetes.io/managed-by": "agentihooks",
+        "app.kubernetes.io/component": "swarm-execution",
+        "swarm.agentihooks.io/controller-owner": "agentihooks-swarm-fixture",
+        "swarm.agentihooks.io/execution-id": "exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+        "swarm.agentihooks.io/generation": "3",
+        "swarm.agentihooks.io/swarm": "rig-grade-swarm",
+        "swarm.agentihooks.io/task": "vkub1",
+        "swarm.agentihooks.io/template-version": "kub01-v2"
+      },
+      "restart_policy": "Never",
+      "automount_token": false,
+      "resources": {
+        "requests": {
+          "cpu": "1500m",
+          "memory": "3072Mi",
+          "ephemeral-storage": "10240Mi"
+        },
+        "limits": {
+          "cpu": "2000m",
+          "memory": "4096Mi",
+          "ephemeral-storage": "10240Mi"
+        }
+      },
+      "node_selector": {
+        "anton.io/pool": "general"
+      },
+      "secrets": [
+        "swarm-claude-fixture"
+      ],
+      "host_paths": [],
+      "privileged": false
+    },
+    "fixture_digest": "sha256:42764d7bb3627033384bfa323c30ede93a7064f79fc75a0609cebea854595da2",
+    "matches_kind_validated_golden": true,
+    "second_fixture": {
+      "name": "swarm-exe-a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "labels": {
+        "app.kubernetes.io/managed-by": "agentihooks",
+        "app.kubernetes.io/component": "swarm-execution",
+        "swarm.agentihooks.io/controller-owner": "agentihooks-swarm-fixture",
+        "swarm.agentihooks.io/execution-id": "exe-a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "swarm.agentihooks.io/generation": "1",
+        "swarm.agentihooks.io/swarm": "rig-grade-swarm",
+        "swarm.agentihooks.io/task": "vkub2",
+        "swarm.agentihooks.io/template-version": "kub01-v2"
+      },
+      "restart_policy": "Never",
+      "automount_token": false,
+      "resources": {
+        "requests": {
+          "cpu": "1000m",
+          "memory": "2048Mi",
+          "ephemeral-storage": "10240Mi"
+        },
+        "limits": {
+          "cpu": "2000m",
+          "memory": "4096Mi",
+          "ephemeral-storage": "10240Mi"
+        }
+      },
+      "node_selector": {
+        "anton.io/pool": "general"
+      },
+      "secrets": [
+        "swarm-codex-fixture"
+      ],
+      "host_paths": [],
+      "privileged": false
+    },
+    "second_fixture_digest": "sha256:70ee073a908bd9ccda584cc349528d29f663005b436beb266f08c353fd196454",
+    "pod_spec_validation_failures_total": {}
+  },
+  "independent_runs": 2
+}

@@ -1,0 +1,49 @@
+{
+  "case": "T-SV2-KUB-01-B",
+  "state": "passed",
+  "evidence_class": "mocked: pure rendering; schema validity from kind server side dry run",
+  "input_sha256": {
+    "pod-policy.json": "6f10e42c7c8461ea18fe3ae9f0c46001020bd50153665477b415076cf71099f5",
+    "pod-launch.json": "dc9258de4781082cc2abb9a2048ff04db03da0a83ea144f96fe728847b34c809",
+    "pod-rendered.json": "3dc1c2af852679bbf1ec12c7c0156a25d91747c3f8ec06a093ea3d1b4abd3672"
+  },
+  "observed": {
+    "refusals": {
+      "unknown fields": [
+        "fields",
+        "launch has unknown fields: host_mounts, privileged, secrets"
+      ],
+      "yaml in task id": [
+        "identity",
+        "launch task_id is not a valid value"
+      ],
+      "unapproved credential": [
+        "credential",
+        "launch credential_ref is not an approved credential"
+      ],
+      "unapproved profile": [
+        "profile",
+        "launch profile is not an approved resource profile"
+      ],
+      "resources over the profile": [
+        "resources",
+        "launch resources exceed the general profile limits"
+      ],
+      "image by tag": [
+        "image",
+        "launch image_digest must be a sha256 digest"
+      ]
+    },
+    "policy_unchanged": true,
+    "payload_fragments_in_pod": [],
+    "pod_spec_validation_failures_total": {
+      "fields": 1,
+      "identity": 1,
+      "credential": 1,
+      "profile": 1,
+      "resources": 1,
+      "image": 1
+    }
+  },
+  "independent_runs": 2
+}
