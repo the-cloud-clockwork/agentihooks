@@ -29,6 +29,7 @@ from scripts.swarm import (
     control_notifications,
     dev_red,
     difficulty,
+    dispatch_seat,
     dispatcher,
     freeze,
     grouping,
@@ -44,6 +45,7 @@ from scripts.swarm import (
     phase_state,
     reaper,
     retire_watch,
+    seat_spawn,
     session_model,
     tick_master,
     time_left,
@@ -206,6 +208,7 @@ def tick(slug, store, ledger, runtime, now_ms):
             actions += skip_refused(lane_split.step, slug, config, store, doc, now_ms)
             if config.state == "running":
                 actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
+        actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
     actions += timing.call(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))
     timing.call(_conversations, slug, store, runtime)
     timing.call(_session_models, slug, store)
@@ -971,16 +974,13 @@ def _master(slug, config, store, runtime, now_ms):
         return []
     if any(m.name in runtime.live_names() for m in masters):
         return ["the old master is still running, waiting for it to end before starting the next"]
-    if not runtime.has_capacity(config):
+    if refused := seat_spawn.no_slot(config, runtime, MASTER):
         store.redis.hset(MASTER_WAITING, slug, now_ms)
-        return ["no session slot for the master, waiting"]
-    if host := _host_full(slug, store, now_ms):
-        return [_hold(slug, store, f"holding the master spawn: {host}")]
-    name = store.next_name(slug, MASTER, now_ms)
-    record = AgentRecord(name, MASTER, MASTER, started_at=now_ms, state="starting", seat=seat_address(slug, MASTER))
-    store.put_agent(slug, record)
-    try:
-        store.seats.occupy(record.seat, name, now_ms)
+        return [refused]
+    if held := seat_spawn.host_hold(slug, store, now_ms, MASTER):
+        return [held]
+
+    def prepare(record):
         transfer = transfers.attach(store, slug, record)
         task = (
             {**pending["task"], "transfer": transfer}
@@ -992,12 +992,16 @@ def _master(slug, config, store, runtime, now_ms):
                 {"id": MASTER, "handoff": store.handoff(slug, MASTER), "peer": store.peer(slug), "transfer": transfer},
             )
         )
-        master_start.begin(store, slug, name, task, now_ms)
+        master_start.begin(store, slug, record.name, task, now_ms)
         affinity.handed_off(store, slug)
-        placed = runtime.spawn(config, MASTER, name, task)
-    except Exception as exc:
+        return task
+
+    try:
+        record, placed = seat_spawn.place(slug, config, store, runtime, MASTER, now_ms, prepare)
+    except seat_spawn.SeatFailed as spawn_failure:
+        exc, record = spawn_failure.error, spawn_failure.record
         transfers.failed(store, slug, record)
-        store.drop_agent(slug, name)
+        store.drop_agent(slug, record.name)
         affinity.failed(store, slug, str(exc))
         master_alarm.failed(store, slug, f"master spawn failed: {exc}", now_ms)
         failed = master_start.read(store, slug)
@@ -1005,7 +1009,6 @@ def _master(slug, config, store, runtime, now_ms):
             master_start.save(store, slug, {**failed, "name": "", "retry": True})
         return [f"master spawn failed: {exc}"]
     affinity.placed(store, slug, placed.harness)
-    _spend_host(store, name, now_ms)
     record = placed_record(record, placed)
     reported = runtime.reported(record)
     store.put_agent(slug, replace(record, state="working" if reported else "starting"))
@@ -1014,7 +1017,7 @@ def _master(slug, config, store, runtime, now_ms):
         store.redis.delete(store.key(slug, "master-start"))
         store.clear_handoff(slug, MASTER)
     store.redis.hdel(store.key(slug, "launch-assignments"), MASTER)
-    return [f"spawned master {name}"]
+    return [f"spawned master {record.name}"]
 
 
 def _retire_master(slug, store, runtime, master, now_ms):
