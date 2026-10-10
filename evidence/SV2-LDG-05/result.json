@@ -6,8 +6,8 @@
   "dependents": [],
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2423",
-  "pull_request": "pending",
-  "tested_commit": "pending",
+  "pull_request": "pending: opened after SV2-LDG-04 (pull request 2422) merges, because this branch is stacked on it",
+  "tested_commit": "83bad96f54bf",
   "status": "mocked-acceptance-qualified",
   "package_complete": false,
   "evidence_class": "Signed fixture launch grants from LaunchAuthority, fakeredis, the fixture server clock and a fixture network that drops requests, loses responses and repeats a poll response; no live rollout. Live G3 qualification is separate.",
@@ -54,11 +54,11 @@
     "worker_command_ack_lag_seconds keeps the newest 1000 samples per swarm, without per kind labels"
   ],
   "validation": {
-    "red": "pending",
-    "ci_run": "pending",
-    "unit": "pending",
-    "mutation": "pending",
-    "review": "pending",
+    "red": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38061355585 on the tests only commit de1d8c07: 6 failed and 22 errors, every new test failing on the missing scripts.swarm_v2.api.commands and scripts.swarm_v2.worker modules or the missing evidence files, while the 119 neighbouring executions and tasks API tests passed",
+    "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063154992",
+    "unit": "Focused proofs run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063154992 on the tested commit passed every test in tests/test_swarm_v2_worker_commands.py, tests/test_swarm_v2_executions_api.py and tests/test_swarm_v2_tasks_api.py; each package case ran twice on independent fixtures. The full suite runs on the pull request",
+    "mutation": "Mutation preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063154843 on the tested commit: scripts/swarm_v2/api/commands.py 602 killed, scripts/swarm_v2/worker/control.py 312 killed, scripts/swarm_v2/api/server.py 5 killed, no survivors and no clearances; the earlier run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38062160738 left 17 survivors that tests now kill",
+    "review": "Standards reader closed eight findings after one fix round; Spec reader closed nine findings and four wording notes after three rounds",
     "local": "No local tests or mutation ran; static prepush passed on every commit"
   },
   "measurements": {
