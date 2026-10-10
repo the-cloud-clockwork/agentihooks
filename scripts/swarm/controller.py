@@ -4,9 +4,13 @@ import os
 import sys
 import time
 import uuid
+from typing import TYPE_CHECKING
 
 from scripts.swarm import lease
 from scripts.swarm.store import RedisStore, SwarmError, connect
+
+if TYPE_CHECKING:
+    from scripts.swarm_v2.control_service import ControlService
 
 
 class FencedLedger:
@@ -108,10 +112,20 @@ def keep_tick(store: RedisStore, slug: str, held: lease.Lease, token: str, ttl_m
                 continue
 
 
-def run_once(store: RedisStore, ledger=None, runtime=None, messenger=None) -> dict:
+def run_once(store: RedisStore, ledger=None, runtime=None, messenger=None, runtimes: dict | None = None) -> dict:
     from scripts.swarm.cli import run_tick
 
-    return {slug: run_tick(store, slug, ledger, runtime, messenger, scheduled=True) for slug in store.slugs()}
+    runtimes = runtimes or {}
+    return {
+        slug: run_tick(store, slug, ledger, runtimes.get(slug, runtime), messenger, scheduled=True)
+        for slug in store.slugs()
+    }
+
+
+def tick_once(store: RedisStore, service: "ControlService | None") -> dict:
+    if service is None or service.runtime is None:
+        return run_once(store)
+    return run_once(store, runtimes={service.controller.slug: service.runtime})
 
 
 def main(argv: list[str]) -> int:
@@ -129,7 +143,7 @@ def main(argv: list[str]) -> int:
     try:
         service = control_service.host(os.environ, store, commands.hive_id())
         while True:
-            for slug, actions in run_once(store).items():
+            for slug, actions in tick_once(store, service).items():
                 for action in actions:
                     print(f"{slug}: {action}", flush=True)
             if service is not None:
