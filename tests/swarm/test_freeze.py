@@ -136,6 +136,23 @@ def test_names_say_each_freeze_in_plain_words():
     ]
 
 
+def test_selector_values_and_node_ids_keep_every_later_separator():
+    assert freeze.covers("lane:x:y", {"lane": "x:y"}, [])
+    assert freeze.covers("tasks/a:b", {"id": "a:b"}, ["tasks/a:b"])
+    assert not freeze.covers("lane:", {}, [])
+    found = doc(record("lane:x:y"), record("tasks/x/y"), record("groups/g1"))
+    assert freeze.names(found) == [
+        "the freeze on the x:y lane",
+        "the freeze on task x/y",
+        "the freeze on groups g1",
+    ]
+
+
+def test_only_a_doctor_swarm_has_a_fix_phase():
+    assert freeze.fix_phase(SwarmConfig("sw", "/repo")) == ""
+    assert freeze.fix_phase(SwarmConfig("sw", "/repo", template=priming.TEMPLATE)) == loop.FIX_PHASE
+
+
 def test_the_drain_notice_counts_held_work_and_names_only_the_freezes_holding_it():
     one = doc(record("plans/a"), record("plans/b"), tasks=[task()])
     assert freeze.notice(one, one["tasks"], "") == (
@@ -165,6 +182,13 @@ def test_the_drain_notice_counts_held_work_and_names_only_the_freezes_holding_it
     inside = doc(record("plans/a", "focus"), record("phases/p1"), tasks=[task()])
     assert freeze.notice(inside, inside["tasks"], "") == (
         "The swarm has no task it may start: 1 open task is held by the freeze on phase Build"
+    )
+
+
+def test_the_drain_notice_names_a_lane_freeze_holding_work():
+    row = task()
+    assert freeze.notice(doc(record("lane:eng"), tasks=[row]), [row], "") == (
+        "The swarm has no task it may start: 1 open task is held by the freeze on the eng lane"
     )
 
 
