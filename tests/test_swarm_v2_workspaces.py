@@ -407,3 +407,9 @@ def test_git_runs_without_prompting_and_with_a_timeout(world, monkeypatch):
     assert seen
     assert {(kw["env"]["GIT_TERMINAL_PROMPT"], kw["timeout"], kw["text"]) for kw in seen} == {("0", 600, True)}
     assert all(kw["env"]["PATH"] == os.environ["PATH"] for kw in seen)
+
+
+def test_package_cases_pass_on_the_isolated_fixture():
+    from tests.sv2_fsy02_cases import case_a, case_b, case_c
+
+    assert [case()["passed"] for case in (case_a, case_b, case_c)] == [True, True, True]
