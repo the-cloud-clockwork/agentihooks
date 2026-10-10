@@ -253,6 +253,14 @@ def test_the_local_cache_evicts_the_oldest_fleet_entries_before_local_ones_at_th
     hb._save_broadcasts([{"id": f"local-{n}", "message": "Local note", "severity": "info"} for n in (1, 2, 3)])
     assert hb.cache_fleet_broadcasts(entries[:1]) == 0
     assert [m["id"] for m in hb.list_broadcasts()] == ["local-2", "local-3"]
+    monkeypatch.setattr(hb, "BROADCAST_MAX_MESSAGES", 4)
+    hb._save_broadcasts([{"id": "local-1", "message": "Local note", "severity": "info"}])
+    assert hb.cache_fleet_broadcasts(entries[:2]) == 2
+    assert [m["id"] for m in hb.list_broadcasts()] == [
+        "local-1",
+        "fixture:agent-note:1:s-local",
+        "fixture:fleet-followup:1:s-local",
+    ]
 
 
 def test_b_a_personal_brain_message_or_another_fleets_warning_never_matches_on_the_channel_name(world):
