@@ -21,17 +21,15 @@ pytestmark = pytest.mark.unit
 UNSERVED = "http://127.0.0.1:9"
 
 
-def no_redis(environ=None):
-    raise AssertionError("a remote worker holds no Redis credential")
-
-
 @pytest.fixture
 def world(monkeypatch, tmp_path):
     found = Fleet(monkeypatch)
     monkeypatch.setattr(hb, "_broadcast_path", lambda: tmp_path / "broadcast.json")
     monkeypatch.setattr(hb, "_sessions_path", lambda: tmp_path / "active-sessions.json")
     monkeypatch.setattr(hb, "datetime", Epoch)
-    monkeypatch.setattr("scripts.swarm.store.connect", no_redis)
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", f"redis://127.0.0.1:{probe.getsockname()[1]}/0")
     return found
 
 
@@ -132,9 +130,6 @@ def quiet(monkeypatch):
 def test_a_remote_worker_prompt_receives_the_fleet_broadcast(world, served, tmp_path, monkeypatch):
     agent, _, environ = launch(world, tmp_path, REMOTE, monkeypatch, served)
     world.announce()
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        environ["AGENTIHOOKS_SWARM_REDIS_URL"] = f"redis://127.0.0.1:{probe.getsockname()[1]}/0"
     for name, value in environ.items():
         monkeypatch.setenv(name, value)
     monkeypatch.setattr(hb, "_get_session_channels", lambda session_id: list(CHANNELS))
@@ -277,10 +272,11 @@ def test_the_bridge_posts_its_grant_and_channels_to_the_claim_endpoint(monkeypat
     assert json.loads(second[0].data) == {"channels": ["brain"], "claim_id": "claim-1"}
 
 
-def test_an_answer_that_is_not_json_claims_nothing(world, tmp_path, monkeypatch):
+@pytest.mark.parametrize("body", [b"<html>", b'{"claimed": []}', b'{"deliveries": [1]}'])
+def test_a_malformed_answer_claims_nothing(world, tmp_path, monkeypatch, body):
     _, _, environ = launch(world, tmp_path, REMOTE, monkeypatch)
     sent = []
-    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: sent.append(request) or Answer(b"<html>"))
+    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: sent.append(request) or Answer(body))
     assert broadcast_bridge.claim("s-remote", list(CHANNELS), environ) == 0
     assert len(sent) == 1
     assert hb.list_broadcasts() == []

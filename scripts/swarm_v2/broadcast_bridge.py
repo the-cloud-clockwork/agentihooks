@@ -20,7 +20,7 @@ API_URL = "AGENTIHOOKS_SWARM_API_URL"
 CLAIM_PATH = "/v2/broadcasts/claim"
 TIMEOUT_SECONDS = 5
 CLAIM_ATTEMPTS = 2
-JSON_CONTENT = {"Content-Type": "application/json"}
+JSON_HEADERS = {"Content-Type": "application/json"}
 AUTHORIZATION = "Authorization"
 
 
@@ -55,7 +55,7 @@ class RemoteFleet:
 
         body = {"channels": channels, **({"claim_id": claim_id} if claim_id else {})}
         request = Request(
-            self.url, data=json.dumps(body).encode(), headers={**JSON_CONTENT, AUTHORIZATION: f"Bearer {token}"}
+            self.url, data=json.dumps(body).encode(), headers={**JSON_HEADERS, AUTHORIZATION: f"Bearer {token}"}
         )
         with urlopen(request, timeout=TIMEOUT_SECONDS) as answer:
             found = json.loads(answer.read())["deliveries"]
@@ -75,7 +75,7 @@ def claim(session_id: str, channels: list[str], environ: Mapping[str, str]) -> i
     for _ in range(CLAIM_ATTEMPTS):
         try:
             return sync_local(fleet, read_grant(environ), session_id, channels, environ, claim_id)
-        except (HTTPError, ValueError):
+        except (HTTPError, ValueError, KeyError, TypeError):
             return 0
         except OSError:
             continue
