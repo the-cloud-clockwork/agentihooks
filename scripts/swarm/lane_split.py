@@ -1,10 +1,12 @@
 """Manual scaling moves the stored caps; auto scaling moves the stored lane shift that `autoscale.calculate` applies."""
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 
 from scripts.gates import log as gate_log
-from scripts.swarm import bottleneck
+from scripts.swarm import bottleneck, capacity, dispatcher
 from scripts.swarm.store import AUTO_SCALING, DELEGATE, FULL, RedisStore, SwarmConfig
 
 KEY = "lane-split"
@@ -82,7 +84,7 @@ def _record(slug: str, named: str, caps: dict, move: tuple, lanes: Lanes, now_ms
     return text
 
 
-def lane_pass(slug: str, config: SwarmConfig, store: RedisStore, lanes: Lanes, now_ms: int) -> list[str]:
+def lane_pass(slug: str, config: SwarmConfig, store: RedisStore, read: Callable[[], Lanes], now_ms: int) -> list[str]:
     if config.autonomy not in (DELEGATE, FULL):
         return []
     key = store.key(slug, KEY)
@@ -97,9 +99,28 @@ def lane_pass(slug: str, config: SwarmConfig, store: RedisStore, lanes: Lanes, n
         return []
     giver, taker = move
     caps, shift = _capacity(config, store, slug)
+    lanes = read()
     reason = refusal(caps, giver, taker, lanes)
     if reason:
         return [HELD.format(named=current["named"], ticks=TICKS, reason=reason)]
     caps = {giver: caps[giver] - 1, taker: caps[taker] + 1}
     _apply(slug, config, store, caps, shift + (1 if taker == "ci" else -1))
     return [_record(slug, current["named"], caps, move, lanes, now_ms)]
+
+
+def _lanes(slug: str, store: RedisStore, doc: dict) -> Lanes:
+    from scripts.swarm.tick import _ended
+
+    rows, ready = capacity.ready_work(slug, store, doc)
+    live = capacity._busy([agent for agent in store.agents(slug) if not _ended(agent, rows)])
+    room = (capacity.read(store, slug).get("host") or {}).get("room")
+    return Lanes({lane: len(tasks) for lane, tasks in ready.items()}, live, room)
+
+
+def step(slug: str, config: SwarmConfig, store: RedisStore, doc: dict, now_ms: int) -> list[str]:
+    from scripts.swarm import metrics
+
+    found = lane_pass(slug, config, store, partial(_lanes, slug, store, doc), now_ms)
+    moved = [dispatcher.Action(RULE, "apply", text, {}) for text in found if text.startswith("Moved")]
+    shipped = [dispatcher.dispatch_row(slug, index, action, now_ms) for index, action in enumerate(moved)]
+    return found + (metrics.record(dispatcher.TABLE, shipped, now_ms) if shipped else [])

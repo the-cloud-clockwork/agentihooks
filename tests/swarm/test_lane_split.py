@@ -37,13 +37,23 @@ def ticks(store, named, count, lanes=READY, start=0):
     actions = []
     for n in range(count):
         report(store, named, NOW + (start + n) * 60_000)
-        actions += lane_split.lane_pass(SLUG, store.config(SLUG), store, lanes, NOW + (start + n) * 60_000)
+        actions += lane_split.lane_pass(SLUG, store.config(SLUG), store, lambda: lanes, NOW + (start + n) * 60_000)
     return actions
 
 
 def caps(store):
     config = store.config(SLUG)
     return config.max_eng, config.max_ci
+
+
+def unread():
+    raise AssertionError("the lanes are read only when a move is due")
+
+
+def test_ticks_before_a_move_is_due_never_read_the_lanes(store, home):
+    for n in range(2):
+        report(store, "ci", NOW + n * 60_000)
+        assert lane_split.lane_pass(SLUG, store.config(SLUG), store, unread, NOW + n * 60_000) == []
 
 
 def test_a_ci_bottleneck_held_three_ticks_moves_one_seat_from_engineers_to_ci(store, home):
@@ -78,7 +88,7 @@ def test_one_or_two_ticks_move_nothing(store, home):
 def test_a_repeated_report_is_not_a_new_tick(store, home):
     report(store, "ci", NOW)
     for _ in range(5):
-        assert lane_split.lane_pass(SLUG, store.config(SLUG), store, READY, NOW) == []
+        assert lane_split.lane_pass(SLUG, store.config(SLUG), store, unread, NOW) == []
     assert caps(store) == (4, 1)
 
 
@@ -181,13 +191,13 @@ def test_full_autonomy_moves_like_delegate(store, home):
 
 
 def test_no_report_moves_nothing(store, home):
-    assert lane_split.lane_pass(SLUG, store.config(SLUG), store, READY, NOW) == []
+    assert lane_split.lane_pass(SLUG, store.config(SLUG), store, unread, NOW) == []
 
 
 def test_a_report_that_disappears_moves_nothing(store, home):
     ticks(store, "ci", 2)
     store.redis.delete(store.key(SLUG, "bottleneck"))
-    assert lane_split.lane_pass(SLUG, store.config(SLUG), store, READY, NOW + 600_000) == []
+    assert lane_split.lane_pass(SLUG, store.config(SLUG), store, unread, NOW + 600_000) == []
     assert caps(store) == (4, 1)
 
 
@@ -315,3 +325,69 @@ def test_autoscaled_passes_the_stored_lane_shift(monkeypatch):
     scaled, _ = capacity.autoscaled(config, capacity.ScaleInputs([], [], None, lambda: None, {}))
     assert seen == [-2]
     assert (scaled.max_eng, scaled.max_ci) == (1, 1)
+
+
+@pytest.fixture
+def shipped(monkeypatch):
+    from scripts.swarm import metrics
+
+    rows = []
+    monkeypatch.setattr(metrics, "record", lambda table, found, now_ms: rows.append((table, found, now_ms)) or [])
+    return rows
+
+
+def steps(store, monkeypatch, tasks):
+    ready = {"eng": [{"id": "r1"}], "ci": [{"id": "r2"}, {"id": "r3"}], "plan": []}
+    monkeypatch.setattr(capacity, "ready_work", lambda slug, saved, doc: (tasks, ready))
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps({"host": {"room": 4}}))
+    actions = []
+    for n in range(3):
+        report(store, "ci", NOW + n * 60_000)
+        actions += lane_split.step(SLUG, store.config(SLUG), store, {"tasks": []}, NOW + n * 60_000)
+    return actions
+
+
+def test_the_tick_step_moves_a_seat_and_ships_one_dispatch_row(store, home, shipped, monkeypatch):
+    from scripts.swarm import dispatcher
+
+    actions = steps(store, monkeypatch, {})
+    assert caps(store) == (3, 2)
+    ((table, rows, at),) = shipped
+    assert (table, at) == (dispatcher.TABLE, NOW + 120_000)
+    assert [(r["rule"], r["mode"], r["action"], r["task"]) for r in rows] == [("lane-split", "apply", actions[0], "")]
+
+
+def test_the_tick_step_counts_working_agents_as_live(store, home, shipped, monkeypatch):
+    from scripts.swarm.store import AgentRecord
+
+    store.update(SLUG, max_ci=4)
+    for name, task_id in (("ci@x-1", "t2"), ("ci@x-2", "t3")):
+        store.put_agent(SLUG, AgentRecord(name, "ci", task_id))
+    working = {"t2": {"id": "t2", "state": "claimed"}, "t3": {"id": "t3", "state": "claimed"}}
+    steps(store, monkeypatch, working)
+    assert caps(store) == (3, 5)
+
+
+def test_the_tick_step_skips_ended_agents_reads_host_room_and_ships_nothing_for_a_hold(
+    store, home, shipped, monkeypatch
+):
+    from scripts.swarm.store import AgentRecord
+
+    store.update(SLUG, max_ci=4)
+    for name, task_id in (("ci@x-1", "t2"), ("ci@x-2", "t3")):
+        store.put_agent(SLUG, AgentRecord(name, "ci", task_id))
+    ended = {"t2": {"id": "t2", "state": "done"}, "t3": {"id": "t3", "state": "done"}}
+    assert steps(store, monkeypatch, ended) == [
+        lane_split.HELD.format(named="ci", ticks=3, reason="the ci lane would pass host room 4")
+    ]
+    assert (caps(store), shipped) == ((4, 4), [])
+
+
+def test_the_tick_runs_the_lane_split_after_the_rank_step_and_before_spawns():
+    import inspect
+
+    from scripts.swarm import tick
+
+    placing = inspect.getsource(tick.tick)
+    placing = placing[placing.index("with PLACING:") :]
+    assert placing.index("dispatcher.rank_pass") < placing.index("lane_split.step") < placing.index("_spawn,")
