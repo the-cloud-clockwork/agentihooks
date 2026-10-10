@@ -267,6 +267,7 @@ def _operator_cli(tmp_path, monkeypatch, *, agent=None, signing=SIGNING_HEX):
     inventory = tmp_path / "inventory.json"
     inventory.write_text(json.dumps(_inventory()))
     monkeypatch.setattr(architecture, "_page_credential", {SLUG: "page-credential"}.get)
+    monkeypatch.setattr("hooks.context.broadcast.session_name", lambda pid: "")
     monkeypatch.delenv("SWARM_ARCHITECTURE_PUBLIC_KEY", raising=False)
     if signing is None:
         monkeypatch.delenv("SWARM_ARCHITECTURE_SIGNING_KEY", raising=False)
@@ -287,7 +288,9 @@ def _operator_cli(tmp_path, monkeypatch, *, agent=None, signing=SIGNING_HEX):
 def test_the_cli_approves_for_the_operator_through_the_page_credential(tmp_path, monkeypatch, capsys):
     path, markdown, argv = _operator_cli(tmp_path, monkeypatch)
     assert architecture.main(argv) == 0
-    change = json.loads(capsys.readouterr().out)
+    out = capsys.readouterr().out
+    change = json.loads(out)
+    assert out == json.dumps(change, indent=2) + "\n"
     assert architecture.load_record(path)["operator_changes"] == [change]
     assert change["approved_by"] == "operator"
     assert change["key_id"] == architecture.key_id(KEY)
@@ -357,6 +360,14 @@ def test_the_cli_approves_with_a_matching_verify_key(tmp_path, monkeypatch, caps
 def test_the_signing_key_is_the_private_key_from_the_environment():
     signer = architecture.signing_key({"SWARM_ARCHITECTURE_SIGNING_KEY": SIGNING_HEX})
     assert architecture.key_id(signer.public_key()) == architecture.key_id(KEY)
+
+
+def test_the_page_credential_comes_from_the_ledger_repository(monkeypatch):
+    from scripts.swarm_ledger.repository import repository
+
+    monkeypatch.setattr(repository, "token", {SLUG: "page-credential"}.get)
+    assert architecture._page_credential(SLUG) == "page-credential"
+    assert architecture._page_credential("other") is None
 
 
 def test_an_operator_rollback_drops_an_approved_dispatcher(tmp_path):

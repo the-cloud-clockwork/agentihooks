@@ -33,6 +33,8 @@ def test_the_page_credential_authenticates_as_the_operator():
         (SLUG, PAGE + "x"),
         (SLUG, PAGE[:-1]),
         (SLUG, None),
+        (SLUG, 7),
+        (SLUG, PAGE.encode()),
         (SLUG, "pagé"),
         ("other", PAGE),
         ("other", ""),

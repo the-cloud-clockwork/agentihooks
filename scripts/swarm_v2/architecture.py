@@ -420,8 +420,8 @@ def verify_key(environ: Mapping[str, str]) -> Ed25519PublicKey | None:
 
 def signing_key(environ: Mapping[str, str]) -> Ed25519PrivateKey:
     try:
-        return Ed25519PrivateKey.from_private_bytes(bytes.fromhex(environ.get(SIGNING_ENV, "")))
-    except ValueError:
+        return Ed25519PrivateKey.from_private_bytes(bytes.fromhex(environ[SIGNING_ENV]))
+    except (KeyError, ValueError):
         raise ArchitectureError(f"{SIGNING_ENV} must be a hex Ed25519 private key") from None
 
 
