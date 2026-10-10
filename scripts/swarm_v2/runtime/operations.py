@@ -57,6 +57,7 @@ class Operation:
     phase: Phase = Phase.ACCEPTED
     result: dict = field(default_factory=dict)
     controller_epoch: int | None = None
+    attempted: bool = False
 
 
 @dataclass(frozen=True)
@@ -130,7 +131,7 @@ class OperationJournal:
             if not raw:
                 return expected
             previous = _decode(raw)
-            if replace(previous, phase=Phase.ACCEPTED, result={}) != replace(
+            if replace(previous, phase=Phase.ACCEPTED, result={}, attempted=False) != replace(
                 expected, controller_epoch=previous.controller_epoch
             ):
                 raise OperationConflict(_ERRORS["payload"])
@@ -138,7 +139,7 @@ class OperationJournal:
 
         return self._write(slug, create)
 
-    def settle(self, slug: str, operation: Operation, observation: Observation) -> Operation:
+    def settle(self, slug: str, operation: Operation, observation: Observation, attempted: bool = False) -> Operation:
         def update(pipe):
             agent = self._current(slug, operation.execution_id, operation.generation, pipe)
             if agent.runtime_backend != operation.backend or agent.runtime_target != operation.target:
@@ -147,12 +148,15 @@ class OperationJournal:
             if not raw:
                 raise OperationConflict(_ERRORS["missing"])
             current = _decode(raw)
-            if replace(current, phase=Phase.ACCEPTED, result={}) != replace(operation, phase=Phase.ACCEPTED, result={}):
+            settled = {"phase": Phase.ACCEPTED, "result": {}, "attempted": False}
+            if replace(current, **settled) != replace(operation, **settled):
                 raise OperationConflict(_ERRORS["identity"])
             if current.phase is Phase.APPLIED:
                 return current
             phase = Phase.ACCEPTED if observation.phase is Phase.ABSENT else observation.phase
-            return replace(current, phase=phase, result=observation.result if phase is Phase.APPLIED else {})
+            result = observation.result if phase is Phase.APPLIED else {}
+            sent = (current.attempted or attempted) and phase in (Phase.UNKNOWN, Phase.APPLIED)
+            return replace(current, phase=phase, result=result, attempted=sent)
 
         return self._write(slug, update)
 
@@ -207,7 +211,7 @@ class Operations:
         observed = self._observe(transport, operation)
         if observed.phase is not Phase.ABSENT or not self.dispatch_enabled:
             return self.journal.settle(slug, operation, observed)
-        operation = self.journal.settle(slug, operation, Observation(Phase.UNKNOWN))
+        operation = self.journal.settle(slug, operation, Observation(Phase.UNKNOWN), attempted=True)
         try:
             observed = transport.apply_operation(operation, request.payload)
         except (TimeoutError, ConnectionError):

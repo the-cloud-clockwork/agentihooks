@@ -359,6 +359,70 @@ def test_an_unanswered_observation_is_retried_with_one_create():
     assert world.api.create_calls == 1
 
 
+def test_a_sent_create_with_no_pod_left_is_unknown_and_an_unsent_one_absent():
+    sender = transport()
+    sent = Operation("op-1", EXECUTION, 3, "spawn", "kubernetes", DIGEST, {}, Phase.UNKNOWN, attempted=True)
+    assert sender.observe_operation(sent) == Observation(Phase.UNKNOWN)
+    assert sender.observe_operation(operation()) == Observation(Phase.ABSENT)
+
+
+def lost(world):
+    controller, _ = world.controller()
+    assert controller.acquire()
+    attempt = world.admit(controller)
+    request = world.request(controller, attempt)
+    world.api.drop_next_response = True
+    first = controller.execute(request)
+    return controller, request, first
+
+
+def test_a_pod_reaped_after_a_lost_response_is_never_created_again():
+    world = cases.World()
+    with world.clocked():
+        controller, request, first = lost(world)
+        assert world.store.operation_journal.get(cases.SLUG, first.operation_id).attempted is True
+        world.api.objects.clear()
+        retried = controller.execute(request)
+    assert (first.phase, retried.phase) == (Phase.UNKNOWN, Phase.UNKNOWN)
+    assert world.api.create_calls == 1
+
+
+def test_a_held_create_is_not_marked_sent_and_runs_once_creation_returns():
+    world = cases.World()
+    with world.clocked():
+        held, _ = world.controller(creation_enabled=False)
+        assert held.acquire()
+        attempt = world.admit(held)
+        first = held.execute(world.request(held, attempt))
+        world.clock[0] += cases.lease.ttl_ms()
+        enabled, _ = world.controller()
+        assert enabled.acquire()
+        created = enabled.execute(world.request(enabled, attempt))
+    assert (first.phase, first.attempted) == (Phase.ACCEPTED, False)
+    assert (created.phase, world.api.create_calls) == (Phase.APPLIED, 1)
+
+
+def test_a_refused_create_clears_the_sent_mark():
+    world = cases.World()
+    with world.clocked():
+        controller, _ = world.controller()
+        assert controller.acquire()
+        attempt = world.admit(controller)
+        world.api.put(
+            {"metadata": {"name": f"swarm-{attempt.execution_id}", "namespace": world.api.namespace, "labels": {}}}
+        )
+        refused = controller.execute(world.request(controller, attempt))
+    assert (refused.phase, refused.attempted) == (Phase.REFUSED, False)
+
+
+def test_a_sent_mark_survives_the_prepare_of_a_retry():
+    world = cases.World()
+    with world.clocked():
+        controller, request, first = lost(world)
+        again = world.store.operation_journal.prepare(cases.SLUG, request)
+    assert (again.operation_id, again.attempted, again.phase) == (first.operation_id, True, Phase.UNKNOWN)
+
+
 def test_a_created_pod_is_matched_by_the_controller_reconcile():
     world = cases.World()
     with world.clocked():
