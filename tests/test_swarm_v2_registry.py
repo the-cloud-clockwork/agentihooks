@@ -556,6 +556,20 @@ def test_a_seat_taken_meanwhile_fences_the_retried_heartbeat(world, monkeypatch)
     assert world.fleet.records() == [registered]
 
 
+def test_a_record_replaced_meanwhile_fences_the_retried_heartbeat(world, monkeypatch):
+    anton, token = world.start(seat="eng-1@fixture")
+    registered = world.fleet.register(session("anton", anton), token)
+    newer = replace(registered, generation=anton.generation + 1)
+    sessions = world.store.key(SLUG, "fleet-sessions")
+    intruder = Intruder(world.store.redis, lambda r: r.hset(sessions, registered.key(), registry.encode(newer)))
+    monkeypatch.setattr(world.store, "redis", intruder)
+    world.clock[0] += 5
+
+    with pytest.raises(SwarmError, match="^stale_generation$"):
+        world.fleet.heartbeat(scope("anton"), registered.session_id, token)
+    assert world.fleet.records() == [newer]
+
+
 def test_a_session_written_meanwhile_fences_the_retried_registration(world, monkeypatch):
     anton, token = world.start(seat="eng-1@fixture")
     world.authority.authorize(token)
