@@ -387,9 +387,21 @@ def test_inherited_lines_are_regraded_once_the_branch_weakens_the_tests_that_sel
 
 
 @pytest.mark.parametrize(
-    ("answer", "expected"), [((0, "1\n"), True), ((0, "0\n"), False), ((0, ""), False), ((1, "5\n"), False)]
+    ("runs", "jobs", "asked", "expected"),
+    [
+        ((0, "7\n"), {"7": (0, "1\n")}, ["7"], True),
+        ((0, "7\n8\n"), {"7": (0, "0\n"), "8": (0, "1\n")}, ["7", "8"], True),
+        ((0, "7\n8\n"), {"7": (0, "2\n"), "8": (0, "0\n")}, ["7"], True),
+        ((0, "7\n"), {"7": (0, "0\n")}, ["7"], False),
+        ((0, "7\n"), {"7": (0, "")}, ["7"], False),
+        ((0, "7\n"), {"7": (1, "1\n")}, ["7"], False),
+        ((1, "7\n"), {"7": (0, "1\n")}, [], False),
+        ((0, ""), {}, [], False),
+    ],
 )
-def test_a_commit_is_graded_only_by_a_green_push_preflight_mutation_check(monkeypatch, answer, expected):
+def test_a_commit_is_graded_only_by_a_push_preflight_whose_mutation_job_passed(
+    monkeypatch, runs, jobs, asked, expected
+):
     import subprocess
 
     from scripts.ci_mutation import scope
@@ -399,25 +411,22 @@ def test_a_commit_is_graded_only_by_a_green_push_preflight_mutation_check(monkey
 
     def run(command, **kwargs):
         calls.append((command, kwargs))
-        return subprocess.CompletedProcess(command, answer[0], answer[1], "")
+        code, out = jobs[command[4].split("/")[4]] if len(calls) > 1 else runs
+        return subprocess.CompletedProcess(command, code, out, "")
 
     monkeypatch.setattr(scope.subprocess, "run", run)
     assert scope.graded_green("abc") is expected
-    assert calls == [
-        (
-            [
-                "gh",
-                "api",
-                "-X",
-                "GET",
-                "repos/owner/repo/commits/abc/check-runs",
-                "-f",
-                "check_name=mutation",
-                "-f",
-                "status=completed",
-                "--jq",
-                '[.check_runs[] | select(.conclusion == "success")] | length',
-            ],
-            {"capture_output": True, "text": True},
-        )
+    api = ["gh", "api", "-X", "GET"]
+    green = '[.jobs[] | select(.name == "mutation" and .conclusion == "success")] | length'
+    listed = [
+        *api,
+        "repos/owner/repo/actions/workflows/mutation-preflight.yml/runs",
+        "-f",
+        "head_sha=abc",
+        "-f",
+        "event=push",
+        "--jq",
+        ".workflow_runs[].id",
     ]
+    expected_calls = [listed] + [[*api, f"repos/owner/repo/actions/runs/{run}/jobs", "--jq", green] for run in asked]
+    assert calls == [(command, {"capture_output": True, "text": True}) for command in expected_calls]

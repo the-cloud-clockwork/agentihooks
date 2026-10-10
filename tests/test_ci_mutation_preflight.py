@@ -22,7 +22,7 @@ def test_preflight_runs_on_task_branch_pushes_only():
         }
     else:
         assert workflow["concurrency"] == {"group": "mutation-preflight-${{ github.ref }}", "cancel-in-progress": True}
-    assert workflow["permissions"] == {"contents": "read", "pull-requests": "read", "checks": "read"}
+    assert workflow["permissions"] == {"contents": "read", "pull-requests": "read", "actions": "read"}
 
 
 def test_preflight_skips_a_branch_with_an_open_pull_request():

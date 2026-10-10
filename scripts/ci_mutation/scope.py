@@ -7,6 +7,7 @@ from functools import cache
 from pathlib import Path
 
 INTEGRATION = "refs/remotes/origin/dev"
+PREFLIGHT = "actions/workflows/mutation-preflight.yml/runs"
 
 
 def changed_lines(diff: str) -> set[int]:
@@ -34,24 +35,14 @@ def own_bases(root: Path, base: str, head: str, graded=lambda sha: False) -> lis
 
 
 def graded_green(sha: str) -> bool:
-    found = subprocess.run(
-        [
-            "gh",
-            "api",
-            "-X",
-            "GET",
-            f"repos/{os.environ['GITHUB_REPOSITORY']}/commits/{sha}/check-runs",
-            "-f",
-            "check_name=mutation",
-            "-f",
-            "status=completed",
-            "--jq",
-            '[.check_runs[] | select(.conclusion == "success")] | length',
-        ],
-        capture_output=True,
-        text=True,
-    )
-    return found.returncode == 0 and found.stdout.strip() not in ("", "0")
+    def api(path: str, *query: str) -> str:
+        command = ["gh", "api", "-X", "GET", f"repos/{os.environ['GITHUB_REPOSITORY']}/{path}", *query]
+        found = subprocess.run(command, capture_output=True, text=True)
+        return found.stdout if found.returncode == 0 else ""
+
+    runs = api(PREFLIGHT, "-f", f"head_sha={sha}", "-f", "event=push", "--jq", ".workflow_runs[].id")
+    green = '[.jobs[] | select(.name == "mutation" and .conclusion == "success")] | length'
+    return any(api(f"actions/runs/{run}/jobs", "--jq", green).strip() not in ("", "0") for run in runs.split())
 
 
 def discover_changes(root: Path, base: str | list[str], head: str) -> dict[str, set[int]]:

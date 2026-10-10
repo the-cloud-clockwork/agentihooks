@@ -741,9 +741,20 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     assert step["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE"'
     assert step["env"] == {
         "BASE": "${{ github.event.pull_request.base.sha || inputs.base }}",
-        "GH_TOKEN": "${{ github.token }}",
+        "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
     }
-    assert plan["permissions"] == {"contents": "read", "checks": "read"}
+    names = [item.get("id") for item in plan["steps"]]
+    mint = plan["steps"][names.index("app-token")]
+    assert names.index("app-token") < names.index("plan")
+    assert "if" not in mint
+    assert mint["uses"] == "actions/create-github-app-token@v3.2.0"
+    assert mint["with"] == {
+        "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
+        "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
+        "repositories": "${{ github.event.repository.name }}",
+        "permission-actions": "read",
+    }
+    assert "permissions" not in plan
     assert plan["outputs"]["bases"] == "${{ steps.plan.outputs.bases }}"
     for job in (mutation, jobs["mutation-stats"]):
         select = next(step for step in job["steps"] if step.get("id") == "selection")
