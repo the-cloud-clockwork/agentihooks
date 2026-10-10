@@ -14,6 +14,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 
+from scripts.swarm_v2.kubernetes.storage import MountChecker, StorageRefused, normal
 from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL, OWNER_LABEL
 
 SCHEMA = Path(__file__).resolve().parents[3] / "docs" / "swarm-v2" / "schemas" / "pod-policy.json"
@@ -114,6 +115,10 @@ def load_policy(path: str | Path) -> dict:
             raise PodSpecRefused(
                 f"{name} probe timeout_seconds must exceed the herdr and brain timeouts together", "policy"
             )
+    mounts = policy.get("mounts", [])
+    for field, key in (("name", str), ("mount_path", normal)):
+        if len({key(mount[field]) for mount in mounts}) < len(mounts):
+            raise PodSpecRefused(f"pod policy mounts repeat a {field}", "policy")
     return policy
 
 
@@ -214,6 +219,31 @@ def _resources(launch: AdmittedLaunch, limits: dict) -> dict:
     }
 
 
+def _read_only(mount: dict) -> bool:
+    return mount["purpose"] != "artifact"
+
+
+def _shared_volume(mount: dict) -> dict:
+    source = mount["source"]
+    if "claim" in source:
+        return {"persistentVolumeClaim": {"claimName": source["claim"], "readOnly": _read_only(mount)}}
+    if "host_path" in source:
+        return {"hostPath": {"path": source["host_path"], "type": "Directory"}}
+    return {"nfs": {**source["nfs"], "readOnly": _read_only(mount)}}
+
+
+def _shared_volumes(policy: dict) -> list[dict]:
+    return [{"name": f"shared-{mount['name']}", **_shared_volume(mount)} for mount in policy.get("mounts", [])]
+
+
+def _shared_mounts(policy: dict, launch: AdmittedLaunch) -> list[dict]:
+    mounts = []
+    for mount in policy.get("mounts", []):
+        at = {"name": f"shared-{mount['name']}", "mountPath": mount["mount_path"], "readOnly": _read_only(mount)}
+        mounts.append(at if _read_only(mount) else at | {"subPath": launch.execution_id})
+    return mounts
+
+
 def _container(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
     container = {
         "name": "agent",
@@ -238,6 +268,7 @@ def _container(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
             {"name": "tmp", "mountPath": "/tmp"},  # NOSONAR: a Pod-private emptyDir, never the host /tmp
             {"name": "launch", "mountPath": LAUNCH_DIR, "readOnly": True},
             {"name": "credential", "mountPath": CREDENTIAL_DIR, "readOnly": True},
+            *_shared_mounts(policy, launch),
         ],
     }
     for mode in PROBES:
@@ -287,6 +318,7 @@ def _spec(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
                     "defaultMode": 0o400,
                 },
             },
+            *_shared_volumes(policy),
         ],
         "runtimeClassName": policy["runtime_class_name"],
     }
@@ -297,6 +329,7 @@ class PodTemplate:
     def __init__(self, policy: dict) -> None:
         self.policy = policy
         self.failures = Counter()
+        self.storage = MountChecker()
 
     def render(self, record: object) -> Rendered:
         try:
@@ -313,10 +346,18 @@ class PodTemplate:
             "metadata": _metadata(self.policy, launch, payload),
             "spec": _spec(self.policy, launch, profile),
         }
+        try:
+            self.storage.check(pod)
+        except StorageRefused as refused:
+            self.failures["storage"] += 1
+            raise PodSpecRefused(str(refused), "storage") from None
         return Rendered(pod, canonical_digest(pod))
 
     def pod_spec_validation_failures_total(self) -> dict[str, int]:
         return dict(self.failures)
+
+    def shared_runtime_mount_rejections_total(self) -> dict[str, int]:
+        return self.storage.shared_runtime_mount_rejections_total()
 
 
 def main(argv: list[str] | None = None) -> int:

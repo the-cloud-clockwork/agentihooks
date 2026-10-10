@@ -53,12 +53,18 @@ class Key:
         return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+def mounted_read_only(path: Path) -> bool:
+    found = next(folder for folder in (path, *path.parents) if folder.exists())
+    return bool(os.statvfs(found).f_flag & os.ST_RDONLY)
+
+
 @dataclass(frozen=True)
 class Store:
     policy: Policy
     scope: str
     clock: Callable[[], float] = time.time
     usage: Callable[[Path], object] = shutil.disk_usage
+    read_only: Callable[[Path], bool] = mounted_read_only
 
 
 @dataclass(frozen=True)
@@ -147,17 +153,26 @@ def _matches(store: Store, key: Key, entry: Path) -> bool:
         return False
 
 
-def _verified(store: Store, key: Key) -> Path | None:
+def _seen(store: Store, key: Key) -> Path | None:
     entry = store.policy.store / key.digest()
     if not entry.exists() and not entry.is_symlink():
         return None
     if not _matches(store, key, entry):
         METRICS["cache_corruption_total"] += 1
-        _drop(entry)
+        return None
+    return entry / CONTENT
+
+
+def _verified(store: Store, key: Key) -> Path | None:
+    entry = store.policy.store / key.digest()
+    seed = _seen(store, key)
+    if seed is None:
+        if entry.exists() or entry.is_symlink():
+            _drop(entry)
         return None
     now = store.clock()
     os.utime(entry, (now, now))
-    return entry / CONTENT
+    return seed
 
 
 @contextmanager
@@ -184,7 +199,9 @@ def attach(store: Store, execution: Execution, key: Key) -> Layer:
     writable = layers / key.digest()
     writable.mkdir(mode=0o700, exist_ok=True)
     seed = None
-    if store.policy.enabled:
+    if store.policy.enabled and store.read_only(store.policy.store):
+        seed = _seen(store, key)
+    elif store.policy.enabled:
         with _locked(store):
             seed = _verified(store, key)
     METRICS["cache_hits" if seed else "cache_misses"] += 1
@@ -238,6 +255,8 @@ def _write(store: Store, layer: Layer, entry: Path) -> None:
 def publish(store: Store, execution: Execution, layer: Layer) -> Path | None:
     if not store.policy.enabled:
         return None
+    if store.read_only(store.policy.store):
+        raise CacheError("the cache store is mounted read only into this attempt, so only its owner writes seeds")
     filesystem.contain(execution.path("scratch") / "cache", layer.writable)
     _check(store, layer.key, (store.scope,))
     files = _manifest(layer.writable, store.policy, layer.key.kind)
