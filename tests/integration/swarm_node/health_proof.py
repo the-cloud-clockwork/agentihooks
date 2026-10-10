@@ -302,9 +302,8 @@ def main():
             "committed": "tested commit",
             "externally_verified": "not run; production rollout belongs to antoncore",
         },
-        "rollback_rehearsal": "named gap: probe wiring and thresholds live in the Pod template, which is not "
-        "built yet; the image runs health.py only when a probe calls it, so removing the probe leaves the image "
-        "unchanged",
+        "rollback_rehearsal": "deferred to the ledger follow up for the worker Pod template, not performed: probe "
+        "wiring and thresholds live in that template, which is not built yet",
         "limitations": [
             "Only the codex harness runs in the container cases; claude is covered by unit tests",
             "Linux amd64 only",
