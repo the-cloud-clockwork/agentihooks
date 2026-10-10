@@ -503,7 +503,7 @@ def test_render_runs_the_child_in_the_target_home_with_its_environment(tmp_path,
     fields = "{'cwd': os.getcwd(), 'home': os.environ['HOME'], 'python': os.environ['AGENTIHOOKS_PYTHON']}"
     probe = f"import json, os; print(json.dumps({fields}))"
     monkeypatch.setattr(worker_home, "child_command", lambda path, target: [sys.executable, "-c", probe])
-    REAL_RENDER(attempt, "codex")
+    REAL_RENDER(filesystem.Execution(attempt, filesystem.load()), "codex")
     home = str(attempt / "homes" / "codex")
     logged = json.loads((attempt / "run" / "render-codex.log").read_text())
     assert logged == {"cwd": home, "home": home, "python": "/opt/venv/bin/python"}

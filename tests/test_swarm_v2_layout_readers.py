@@ -47,7 +47,7 @@ def named_folders(source: str, folders: set[str]) -> list[str]:
             head, slash, _ = part.value.partition("/")
             if head in folders and (slash or not joined):
                 found.append(f"{node.lineno}: {part.value}")
-    return found
+    return sorted(found)
 
 
 def test_the_guard_catches_a_reader_naming_a_layout_folder():
