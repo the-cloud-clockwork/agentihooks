@@ -13,7 +13,7 @@ Package SV2-FSY-05. Shared storage is allowed; shared mutable runtime identity i
 | The operator home from the node (`/`, `/home`, `/home/<user>`, `/root`, `/Users/<user>`) | Never, not even read only | Refused |
 
 `scripts.swarm_v2.kubernetes.storage.MountChecker` enforces the table on every rendered Pod. `PodTemplate.render`
-refuses a Pod that fails it with reason `storage`, and `python -m scripts.swarm_v2.kubernetes.storage check <pod.json>`
+refuses a Pod that fails it with reason `storage`, and `python -m scripts.swarm_v2.kubernetes.storage <pod.json>`
 checks any manifest. The checker reads the volumes themselves, never a purpose label:
 
 - `emptyDir`, `configMap`, `secret`, `projected`, `downwardAPI` and `ephemeral` volumes are private.

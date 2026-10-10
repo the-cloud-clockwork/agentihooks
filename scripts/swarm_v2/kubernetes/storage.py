@@ -40,17 +40,18 @@ def _source(volume: dict) -> tuple[str | None, dict]:
 
 def _operator_home(volume: dict) -> bool:
     kind, source = _source(volume)
-    return kind == "hostPath" and OPERATOR_HOME.fullmatch(posixpath.normpath(source.get("path", ""))) is not None
+    return kind == "hostPath" and OPERATOR_HOME.fullmatch(posixpath.normpath(source["path"])) is not None
 
 
 def _scoped(mount: dict, execution: str | None) -> bool:
-    sub_path = mount.get("subPath", "")
-    return bool(execution) and ".." not in sub_path.split("/") and _within(sub_path, execution)
+    if not execution or "subPath" not in mount:
+        return False
+    sub_path = mount["subPath"]
+    return ".." not in sub_path.split("/") and _within(sub_path, execution)
 
 
 def _containers(pod: dict) -> list[dict]:
-    spec = pod.get("spec", {})
-    return [*spec.get("initContainers", []), *spec.get("containers", [])]
+    return [*pod["spec"].get("initContainers", []), *pod["spec"]["containers"]]
 
 
 class MountChecker:
@@ -72,7 +73,7 @@ class MountChecker:
             self._refuse(f"{where} without a subPath of its execution", "unscoped_shared_write")
 
     def check(self, pod: dict) -> None:
-        volumes = {volume["name"]: volume for volume in pod.get("spec", {}).get("volumes", [])}
+        volumes = {volume["name"]: volume for volume in pod["spec"].get("volumes", [])}
         for name, volume in volumes.items():
             if _operator_home(volume):
                 self._refuse(
@@ -80,7 +81,7 @@ class MountChecker:
                     "give workers private homes and a read only seed instead",
                     "operator_home",
                 )
-        execution = pod.get("metadata", {}).get("labels", {}).get(EXECUTION_LABEL)
+        execution = pod["metadata"].get("labels", {}).get(EXECUTION_LABEL)
         for container in _containers(pod):
             for mount in container.get("volumeMounts", []):
                 self._check_mount(container["name"], mount, volumes.get(mount["name"], {}), execution)
@@ -91,7 +92,6 @@ class MountChecker:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m scripts.swarm_v2.kubernetes.storage")
-    parser.add_argument("action", choices=("check",))
     parser.add_argument("pod")
     try:
         args = parser.parse_args(argv)

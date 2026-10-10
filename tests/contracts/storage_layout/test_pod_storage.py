@@ -369,13 +369,13 @@ def test_the_policy_refuses_a_malformed_mount(tmp_path, change):
 def test_the_checker_command_passes_a_safe_pod_and_refuses_an_unsafe_one(tmp_path, capsys):
     safe = tmp_path / "safe.json"
     safe.write_text(json.dumps(safe_pod(tmp_path)))
-    assert storage.main(["check", str(safe)]) == 0
+    assert storage.main([str(safe)]) == 0
     unsafe = tmp_path / "unsafe.json"
     codex = {"name": "codex", "mountPath": "/home/worker/.codex"}
     unsafe.write_text(
         json.dumps(add(safe_pod(tmp_path), {"name": "codex", "nfs": {"server": "n", "path": "/c"}}, codex))
     )
-    assert storage.main(["check", str(unsafe)]) == 1
+    assert storage.main([str(unsafe)]) == 1
     assert capsys.readouterr().err == (
         "container agent mounts shared volume codex writable at /home/worker/.codex, "
         "over a native runtime root that stays private to the attempt\n"
@@ -383,10 +383,42 @@ def test_the_checker_command_passes_a_safe_pod_and_refuses_an_unsafe_one(tmp_pat
 
 
 def test_the_checker_command_refuses_an_unreadable_file(tmp_path, capsys):
-    assert storage.main(["check", str(tmp_path / "absent.json")]) == 1
+    assert storage.main([str(tmp_path / "absent.json")]) == 1
     assert capsys.readouterr().err == f"{tmp_path / 'absent.json'} is not a readable JSON file\n"
 
 
-def test_the_checker_command_reports_usage_errors():
+def test_the_checker_command_reports_usage_errors(capsys):
     assert storage.main([]) == 64
+    assert capsys.readouterr().err.startswith("usage: python -m scripts.swarm_v2.kubernetes.storage [-h] pod\n")
     assert storage.main(["--help"]) == 0
+
+
+def test_the_checker_command_names_a_file_that_is_not_json(tmp_path, capsys):
+    broken = tmp_path / "broken.json"
+    broken.write_text("{")
+    assert storage.main([str(broken)]) == 1
+    assert capsys.readouterr().err == f"{broken} is not a readable JSON file\n"
+
+
+def test_a_pod_without_volumes_mounts_or_labels_passes():
+    MountChecker().check({"metadata": {}, "spec": {"containers": [{"name": "agent"}]}})
+
+
+def test_a_pod_without_labels_has_no_scoped_write():
+    pod = {
+        "metadata": {},
+        "spec": {
+            "volumes": [{"name": "x", "persistentVolumeClaim": {"claimName": "x"}}],
+            "containers": [{"name": "agent", "volumeMounts": [{"name": "x", "mountPath": "/x", "subPath": "x"}]}],
+        },
+    }
+    assert refused(pod).reason == "unscoped_shared_write"
+
+
+def test_every_refused_render_is_counted(tmp_path):
+    template = PodTemplate(load(tmp_path, policy(SEED, OPERATOR_HOME)))
+    for _ in range(2):
+        with pytest.raises(PodSpecRefused):
+            template.render(launch())
+    assert template.pod_spec_validation_failures_total() == {"storage": 2}
+    assert template.shared_runtime_mount_rejections_total() == {"operator_home": 2}

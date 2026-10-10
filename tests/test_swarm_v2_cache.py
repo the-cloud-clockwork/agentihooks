@@ -697,8 +697,10 @@ def test_a_read_only_store_that_is_absent_misses_without_creating_it(world):
 
 
 def test_reuse_off_publishes_nothing_even_from_a_read_only_store(world):
+    published(world, key(), {"a.whl": b"x"})
     store = replace(read_only(world), policy=replace(world.store.policy, enabled=False))
     layer = cache.attach(store, world.first, key())
+    assert layer.seed is None
     assert cache.publish(store, world.first, layer) is None
 
 
