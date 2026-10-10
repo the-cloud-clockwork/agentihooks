@@ -7,7 +7,7 @@ import pytest
 from scripts.doctor import cli as doctor
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli as swarm_cli
-from scripts.swarm import prompt
+from scripts.swarm import controller, prompt
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.status import status_report
@@ -434,6 +434,56 @@ def test_the_swarm_tick_closes_a_quiet_doctor_with_its_note(env, monkeypatch):
     assert store.agents(DOCTOR) == [] and store.config(DOCTOR).state == "stopped"
     assert (store.peer(WATCHED), store.peer(DOCTOR)) == ("", "")
     assert not any("no new finding" in action for action in tick(store, rt))
+
+
+READERS = doctor.detect.readers
+UNTRACED = Finding(
+    "untraced session", "watch-eng-2", "working session with no Langfuse trace", ("agent watch-eng-2",), "a trace", 1
+)
+
+
+def reading_traces(monkeypatch):
+    reads, passes = [], []
+
+    def readers(store, ledger, slug, now_ms, **kwargs):
+        found = READERS(store, ledger, slug, now_ms, **kwargs)
+        passes.append(set(found) if isinstance(now_ms, int) else now_ms)
+        return {"health": lambda: [STALE], **{name: found[name] for name in ("trace",) if name in found}}
+
+    def client(environ):
+        reads.append(environ)
+        return lambda path, params: {}
+
+    monkeypatch.setattr(doctor.detect, "readers", readers)
+    monkeypatch.setattr(doctor.detect.traces_read, "client", client)
+    monkeypatch.setattr(doctor.detect.traces_read, "record", lambda *args: {})
+    monkeypatch.setattr(doctor.detect.traces, "findings", lambda data, limits: [UNTRACED])
+    return reads, passes
+
+
+def sent(store):
+    return "\n".join(item.text for item in InboxStore(store.redis).inbox(f"master@{DOCTOR}"))
+
+
+@pytest.mark.parametrize(
+    "scheduled",
+    [
+        lambda store, rt: swarm_cli._tick_one(store, DOCTOR),
+        lambda store, rt: controller.run_once(store, FileLedger(), rt, FakeHerdr({})),
+    ],
+    ids=["timer", "controller"],
+)
+def test_a_doctor_start_leaves_the_first_telemetry_pass_to_the_scheduled_tick(env, monkeypatch, scheduled):
+    store, rt, _ = env
+    reads, passes = reading_traces(monkeypatch)
+    every = {"health", "inbox", "handoff", "spawn", "master launch", "startup", "ci", "trace"}
+    assert doctor.main([WATCHED, "start"]) == 0
+    assert reads == [] and passes == [every - {"trace"}]
+    assert STALE.id in sent(store) and UNTRACED.id not in sent(store)
+    doctor.loop.reset(store, DOCTOR)
+    scheduled(store, rt)
+    assert len(reads) == 1 and passes[1:] == [every]
+    assert UNTRACED.id in sent(store)
 
 
 def test_intervene_refuses_a_forbidden_action_and_logs_nothing(env, capsys):

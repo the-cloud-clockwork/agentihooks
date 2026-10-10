@@ -212,3 +212,14 @@ def test_doctor_detectors_share_one_mail_snapshot_per_pass(monkeypatch, tmp_path
     assert second["handoff"]() == []
     assert second["inbox"]() == []
     assert reads == ["sw", "sw"]
+
+
+def test_a_pass_without_telemetry_drops_only_the_trace_reader():
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    every = set(detect.readers(store, None, "sw", 1_000, environ={}))
+    assert "trace" in every
+    assert set(detect.readers(store, None, "sw", 1_000, environ={}, telemetry=False)) == every - {"trace"}
