@@ -113,6 +113,7 @@ def test_the_shipped_policy_turns_reuse_on_and_keeps_credentials_and_session_dat
         ".env",
         ".env.local",
         ".env.production",
+        "prod.env.local",
         "state.sqlite",
         "history.db",
         "s.jsonl",
@@ -324,10 +325,13 @@ def test_a_dangling_link_in_place_of_an_entry_blocks_publish_until_attach_discar
     assert cache.METRICS["cache_corruption_total"] == 1
     entry.symlink_to(world.tmp / "gone")
     fill(layer, {"a.whl": b"x"})
-    assert cache.publish(world.store, world.first, layer) == entry / "content"
+    with pytest.raises(cache.CacheError) as error:
+        cache.publish(world.store, world.first, layer)
+    assert str(error.value) == "the cache entry for this key holds other content and is not replaced"
     assert entry.is_symlink()
     assert cache.attach(world.store, world.second, key()).seed is None
     assert cache.METRICS["cache_corruption_total"] == 2
+    assert cache.publish(world.store, world.first, layer) == entry / "content"
 
 
 def test_publish_waits_for_the_store_lock_even_against_a_shared_holder(world):
@@ -413,12 +417,34 @@ def test_publish_refuses_a_layer_outside_the_attempt_scratch_root(world):
     assert entries(world.store) == []
 
 
-def test_publish_never_replaces_an_existing_entry(world):
+def test_publish_never_replaces_an_existing_entry_and_says_when_content_differs(world):
     seed = published(world, key(), {"a.whl": b"first"})
     layer = cache.attach(world.store, world.second, key())
     fill(layer, {"a.whl": b"second"})
-    assert cache.publish(world.store, world.second, layer) == seed
+    with pytest.raises(cache.CacheError) as error:
+        cache.publish(world.store, world.second, layer)
+    assert str(error.value) == "the cache entry for this key holds other content and is not replaced"
     assert (seed / "a.whl").read_bytes() == b"first"
+    (layer.writable / "a.whl").write_bytes(b"first")
+    assert cache.publish(world.store, world.second, layer) == seed
+
+
+def test_a_failure_after_staging_keeps_every_victim_and_leaves_no_staging(world, monkeypatch):
+    kept = published(world, key(lock="1" * 64), {"a.whl": b"x" * 100})
+    small = replace(world.store, policy=replace(world.store.policy, max_bytes=150))
+    layer = cache.attach(small, world.first, key())
+    fill(layer, {"a.whl": b"x" * 100})
+
+    def refused(path, times):
+        raise OSError(errno.EPERM, os.strerror(errno.EPERM))
+
+    monkeypatch.setattr(cache.os, "utime", refused)
+    with pytest.raises(cache.CacheError) as error:
+        cache.publish(small, world.first, layer)
+    assert str(error.value) == f"the cache entry could not be written: {os.strerror(errno.EPERM)}"
+    assert kept.exists()
+    assert entries(world.store) == [key(lock="1" * 64).digest()]
+    assert not list(world.store.policy.store.glob(".staging-*"))
 
 
 def test_an_untrusted_project_publishes_only_into_its_own_scope(world):

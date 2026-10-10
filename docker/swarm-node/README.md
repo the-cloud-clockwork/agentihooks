@@ -51,7 +51,6 @@ execution record carries the layout as relative folder names only;
 `filesystem.restore` recreates an attempt under a new base from that record and
 refuses absolute paths or an unknown layout version, which stops new launches
 while the readers for earlier versions stay in place.
-
 Rollback selects the prior profile digest for new attempts; existing attempt
 homes are kept for recovery. The supervisor pins both native config homes to
 the selected private home, marks the admitted attempt trusted for Claude, and
@@ -69,13 +68,18 @@ gives each attempt a writable layer under its own `tmp/cache` and, on a hit, the
 path of a sealed read-only seed in the node store. `publish` copies a writable
 layer into the store as a new seed: it refuses links, special files, the
 excluded credential and session database names, and executables in kinds that
-may not hold them; it never replaces an existing entry, and it evicts least
+may not hold them; it never replaces an existing entry and refuses one whose
+recorded files differ, and it evicts least
 recently used entries only when that fits the byte budget and the free-space
 reserve, otherwise nothing changes. An entry whose recorded key or file
 manifest no longer matches is discarded on its next attach and counted in
 `cache_corruption_total`; `cache_hit_rate` is the share of attaches that found a
-seed. Setting `enabled` to false turns reuse off: attaches return no seed,
-publishes write nothing, and no workspace, home or archive is touched.
+seed. Setting `enabled` to false turns reuse off in the module: attaches return
+no seed, publishes write nothing, and no workspace, home or archive is touched.
+No worker launch path calls the module yet, and the granted scope is passed in
+by the caller. Seeds are sealed by file mode only and every attach re-verifies
+their recorded hashes; a store owned by another user or mounted read only into
+attempts is the deployment's job (SV2-FSY-05).
 
 The SV2-IMG-03 launch JSON has schema version one, `authority`, `harness`,
 `agent` and `exporter` argument vectors. Authority must exactly match a
