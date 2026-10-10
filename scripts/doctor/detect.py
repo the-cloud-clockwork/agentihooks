@@ -42,7 +42,7 @@ def _inbox(store, mail, slug, now_ms, env, items):
     return inbox.findings(items, now_ms, wake.window_ms(env), read.inbox_receivers(store, mail, slug, items))
 
 
-def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME):
+def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetry=True):
     env = os.environ if environ is None else environ
     mail = InboxStore(store.redis)
 
@@ -50,7 +50,7 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME):
     def items():
         return read.inbox_items(mail, slug)
 
-    return {
+    found = {
         "health": lambda: health.findings(
             read.health_records(store.redis, slug), now_ms, reported=reported(store, ledger, slug)
         ),
@@ -73,6 +73,7 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME):
             traces.Limits.from_env(env),
         ),
     }
+    return found if telemetry else {name: read for name, read in found.items() if name != "trace"}
 
 
 def collect(found_by):

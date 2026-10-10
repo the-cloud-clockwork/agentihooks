@@ -148,7 +148,7 @@ def now_ms():
 
 
 @timing.instrument_tick
-def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
+def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=False):
     from scripts.swarm import command_runner, commands, controller, incidents, lease
 
     ledger = ledger or LedgerClient()
@@ -209,7 +209,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
             if store.config(slug).template == "doctor":
                 from scripts.doctor import cli as doctor
 
-                actions += skip_refused(doctor.timer, store, slug, now_ms())
+                actions += skip_refused(doctor.timer, store, slug, now_ms(), scheduled)
             herdr = messenger or delivery.HerdrMessenger()
             timing.call(delivery.migrate_outbox, store, slug, inbox)
             agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
@@ -272,7 +272,7 @@ def cmd_list(store, args):
 
 def _tick_one(store, slug):
     try:
-        for action in run_tick(store, slug):
+        for action in run_tick(store, slug, scheduled=True):
             timing.emit(sys.stdout, f"{slug}: {action}")
     except Exception as exc:
         timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")

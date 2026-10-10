@@ -5,6 +5,7 @@ import re
 import sqlite3
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -153,6 +154,20 @@ class Outbox:
         with self.db:
             self.db.execute(REMEMBER, (table.name, table.ddl(), table.widen()))
             self.db.executemany(APPEND, [(table.name, row["event_id"], row["ts_ms"], json.dumps(row)) for row in rows])
+
+    def append_many(
+        self, batches: list[tuple[Table, list[dict]]], checkpoint: Callable[[sqlite3.Connection], None]
+    ) -> None:
+        for table, rows in batches:
+            for row in rows:
+                table.check(row)
+        with self.db:
+            for table, rows in batches:
+                self.db.execute(REMEMBER, (table.name, table.ddl(), table.widen()))
+                self.db.executemany(
+                    APPEND, [(table.name, row["event_id"], row["ts_ms"], json.dumps(row)) for row in rows]
+                )
+            checkpoint(self.db)
 
     def flush(self, now_ms):
         shipped = 0

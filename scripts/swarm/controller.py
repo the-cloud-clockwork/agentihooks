@@ -111,7 +111,7 @@ def keep_tick(store: RedisStore, slug: str, held: lease.Lease, token: str, ttl_m
 def run_once(store: RedisStore, ledger=None, runtime=None, messenger=None) -> dict:
     from scripts.swarm.cli import run_tick
 
-    return {slug: run_tick(store, slug, ledger, runtime, messenger) for slug in store.slugs()}
+    return {slug: run_tick(store, slug, ledger, runtime, messenger, scheduled=True) for slug in store.slugs()}
 
 
 def main(argv: list[str]) -> int:

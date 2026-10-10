@@ -2199,7 +2199,8 @@ def _tick_all(monkeypatch, run_tick, slugs, tick_seconds=0.05):
     monkeypatch.setattr(herdr_gc, "run", lambda environ, now, apply: swept.append((environ, now, apply)) or ["swept"])
     counts = {}
 
-    def bounded(store, slug):
+    def bounded(store, slug, scheduled):
+        assert scheduled
         counts[slug] = counts.get(slug, 0) + 1
         if counts[slug] > 10:
             pytest.fail(f"{slug} ticked more than ten times in one pass")
