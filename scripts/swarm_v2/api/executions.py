@@ -21,6 +21,7 @@ HEARTBEAT_LOCK_MS = 5_000
 WRITE_ATTEMPTS = 5
 REGISTER = "/v2/executions/register"
 HEARTBEAT = re.compile(r"/v2/executions/([^/]+)/heartbeat")
+CREDENTIAL = re.compile(r"/v2/executions/([^/]+)/credential")
 STATUS = {
     "invalid_request": 400,
     "unauthenticated": 401,
@@ -58,16 +59,31 @@ class ExecutionsAPI:
     def route(self, method: str, path: str, authorization: str, body: object) -> tuple[int, dict]:
         token = authorization.removeprefix("Bearer ") if authorization.startswith("Bearer ") else ""
         subject = HEARTBEAT.fullmatch(path)
+        renewal = CREDENTIAL.fullmatch(path)
         try:
             if (method, path) == ("POST", REGISTER):
                 return 200, self.register(token, body)
             if method == "PUT" and subject:
                 return 200, self.heartbeat(subject[1], token, body)
+            if method == "POST" and renewal:
+                return 200, self.credential(renewal[1], token)
         except GrantRefused as error:
             return STATUS[error.error_class], error.detail()
         except RedisError:
             return 503, GrantRefused("dependency_unavailable", "the execution store is unavailable").detail()
         return 404, GrantRefused("invalid_request", "no such execution endpoint").detail()
+
+    def credential(self, execution_id: str, token: str) -> dict:
+        registration = self.grants.bound(self.slug, token)
+        if execution_id != registration.execution_id:
+            raise GrantRefused("forbidden_scope", "credential renewal names another execution")
+        renewed, expires_at = self.grants.renew(self.slug, token)
+        return {
+            "execution_id": execution_id,
+            "grant_id": registration.grant_id,
+            "credential": renewed,
+            "expires_at": expires_at,
+        }
 
     def register(self, token: str, body: object) -> dict:
         registration = self.grants.register(self.slug, token, body)
