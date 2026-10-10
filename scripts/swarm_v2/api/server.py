@@ -20,13 +20,19 @@ COMMAND_PATHS = re.compile(r"/v2/executions/[^/]+/commands(?:/.*)?")
 
 
 class Routes:
-    def __init__(self, executions: ExecutionsAPI, tasks: TasksAPI, commands: CommandsAPI | None = None) -> None:
-        self.executions, self.tasks, self.commands = executions, tasks, commands
-        self.broadcasts = BroadcastsAPI(executions.grants, executions.store, executions.slug)
+    def __init__(
+        self,
+        executions: ExecutionsAPI,
+        tasks: TasksAPI,
+        commands: CommandsAPI | None = None,
+        broadcasts: BroadcastsAPI | None = None,
+    ) -> None:
+        self.executions, self.tasks, self.commands, self.broadcasts = executions, tasks, commands, broadcasts
 
     def route(self, method: str, path: str, authorization: str, body: object) -> tuple[int, dict]:
         api = self.tasks if TASK_PATHS.fullmatch(path) else self.executions
-        api = self.broadcasts if BROADCAST_PATHS.fullmatch(path) else api
+        if self.broadcasts is not None and BROADCAST_PATHS.fullmatch(path):
+            api = self.broadcasts
         if self.commands is not None and COMMAND_PATHS.fullmatch(path):
             api = self.commands
         return api.route(method, path, authorization, body)

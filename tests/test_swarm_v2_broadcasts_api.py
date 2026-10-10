@@ -246,7 +246,7 @@ def test_the_worker_api_never_publishes_as_the_operator(world):
 def served(world):
     from scripts.swarm_v2.api.server import Routes, serve
 
-    server = serve(Routes(world.api, None), "127.0.0.1", 0)
+    server = serve(Routes(world.api, None, broadcasts=world.broadcasts), "127.0.0.1", 0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     yield server.server_address[1]
@@ -290,7 +290,11 @@ def test_only_broadcast_paths_reach_the_broadcast_api(world):
     from scripts.swarm_v2.api.server import Routes
 
     _, token = world.worker()
-    routes = Routes(world.api, None)
+    routes = Routes(world.api, None, broadcasts=world.broadcasts)
+    assert Routes(world.api, None).route("POST", CLAIM, f"Bearer {token}", {}) == (
+        404,
+        detail("invalid_request", "no such execution endpoint"),
+    )
     assert routes.route("POST", "/v2/broadcastsX", f"Bearer {token}", {}) == (
         404,
         detail("invalid_request", "no such execution endpoint"),

@@ -37,7 +37,7 @@ def world(monkeypatch, tmp_path):
 def served(world):
     from scripts.swarm_v2.api.server import Routes, serve
 
-    server = serve(Routes(world.api, None), "127.0.0.1", 0)
+    server = serve(Routes(world.api, None, broadcasts=world.broadcasts), "127.0.0.1", 0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     yield f"http://127.0.0.1:{server.server_address[1]}/"
