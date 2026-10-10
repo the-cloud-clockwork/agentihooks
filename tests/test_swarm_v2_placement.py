@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm.store import MASTER, SwarmError
+from scripts.swarm.store import MASTER, AgentRecord, SwarmError
 from scripts.swarm.tick import Placed, SpawnError
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 from scripts.swarm_v2.kubernetes.watch import BACKEND
@@ -11,6 +11,7 @@ from scripts.swarm_v2.runtime.base import (
     Capability,
     Outcome,
     Placement,
+    Recovery,
     RuntimeRouter,
     SpawnRequest,
     Status,
@@ -166,6 +167,19 @@ def test_the_kubernetes_runtime_refuses_a_spawn_without_an_admitted_execution(ta
 def test_the_kubernetes_runtime_refuses_when_the_controller_refuses(error):
     outcome = KubernetesRuntime(Controller(error=error).execute, launch).spawn(admitted())
     assert outcome == Outcome("spawn", Status.REFUSED, BACKEND, None, str(error))
+
+
+def test_the_kubernetes_runtime_answers_every_other_operation_unsupported():
+    runtime, agent = KubernetesRuntime(Controller().execute, launch), AgentRecord("e1", "eng", "t1")
+    calls = {
+        "observe": lambda: runtime.observe(agent),
+        "command": lambda: runtime.command(agent, "go"),
+        "drain": lambda: runtime.drain(agent),
+        "terminate": lambda: runtime.terminate(agent, ("/home",)),
+        "recover": lambda: runtime.recover(agent, Recovery.RESUME, CONFIG, "go"),
+    }
+    for operation, call in calls.items():
+        assert call() == Outcome(operation, Status.UNSUPPORTED, BACKEND, None, f"kubernetes lacks {operation}")
 
 
 def test_the_tick_raises_a_refused_kubernetes_spawn_as_a_spawn_error():
