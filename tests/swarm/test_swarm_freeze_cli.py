@@ -109,6 +109,17 @@ def test_a_finished_dispatcher_is_refused(swarm, monkeypatch, capsys):
     )
 
 
+def test_the_dispatcher_of_another_swarm_is_refused(swarm, monkeypatch, capsys):
+    store, ledger = swarm
+    store.update("demo", autonomy="full")
+    acting(monkeypatch, DISPATCHER, "other")
+    assert cli.main(["demo", "focus", "plans/a"]) == 1
+    assert ledger.freezes == []
+    assert capsys.readouterr().err == (
+        f"swarm: only the operator or the master of swarm demo uses its swarm controls, and {DISPATCHER} is neither\n"
+    )
+
+
 @pytest.mark.parametrize("name", [ENGINEER, CI, PLANNER])
 @pytest.mark.parametrize("verb", ["freeze", "focus", "unfreeze"])
 def test_every_lane_agent_at_full_autonomy_is_still_refused(swarm, monkeypatch, capsys, name, verb):
