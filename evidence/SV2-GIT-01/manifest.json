@@ -1,0 +1,16 @@
+{
+  "tested_commit": "f65eea0158a095866491a154df033ad117ae649c",
+  "evidence_class": "mocked fakeredis store, labelled node fixtures and the chart affinity for cases A to C; the worker registration and heartbeat ran live against a deployed controller in a kind cluster",
+  "inputs": {
+    "tests/fixtures/swarm_v2/control-nodes.json": "cbed4bac3bbb847e4b34f45648459eab9fa18653103d923d31ec579ee1766ed3",
+    "deploy/helm/agentihooks-swarm/values.yaml": "255413e121fbfb13a872f4901a2d35d4326b1737979942a0198cc97963fe5b6a",
+    "deploy/helm/agentihooks-swarm/templates/controller.yaml": "de27fec4a494f81f5260ced633ad00442b3f84bddf80f8744a253fea48087aec",
+    "deploy/helm/agentihooks-swarm/templates/networkpolicy.yaml": "d367f42c22e7e93cdcc29f5f994c99fbdd335d0f5fe22b327107a0d6d85b7c5e",
+    "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh": "cde42a5a29411bac5f1ea8ef740e92bb3b8d3f23eb0ea20d63a11843c2ffb66b",
+    "Dockerfile": "69ca8e5b5dbd28d108a551583816570e76eab1ab0912b24a3b59fd745debca1d",
+    "scripts/swarm_v2/control_service.py": "ccaca48dcbae8feb580523ce5f262d45eb7eac36b979ad450516a66413c65a0e",
+    "scripts/swarm/controller.py": "3488f42d0cf1319a5da73d4c814501ed2d33cb7c658575c2dbff6632d53b9879",
+    "tests/sv2_git01_cases.py": "c9e4228e0b110bd3ef96842104bbb77028864b1e576daf69478a6d0a790d67bd",
+    "tests/test_swarm_v2_control_service.py": "7c5f9d1df997ce660f0ebde8503443494a115bdfcb0683c5a65a0d3b72920b57"
+  }
+}

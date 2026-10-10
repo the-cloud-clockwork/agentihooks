@@ -1,0 +1,44 @@
+{
+  "package": "SV2-GIT-01",
+  "integration_gate": "G12",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2456",
+  "repositories": ["agentihooks", "antoncore"],
+  "tested_commit": "f65eea0158a095866491a154df033ad117ae649c",
+  "status": "fixture-qualified; live API enablement on anton-prod waits for gate G12",
+  "evidence_class": "Mocked for cases A to C: a fakeredis store shared by both controller processes, labelled node fixtures taken from the anton-prod node list and the antoncore ec2-arc-runners node labels, and the chart's controller affinity. Live in kind: proofs run 38075551228 deployed the chart with the control API on, registered one worker and heartbeated it through the controller API Service, and saw the controller tick observe it working.",
+  "interfaces": [
+    "scripts.swarm_v2.control_service.ControlService(store, slug, key, authorize, transports, owner) builds the v2 Controller, LaunchAuthority, TaskAuthority and ExecutionsAPI for one swarm; owner sets the lease owner so the hive tick and the v2 controller share one lease",
+    "ControlService.start acquires the controller, recovering the operation journal and running the account reconcile; tick renews it, acquires it again after a lapsed lease, and sends each kubernetes occupant's latest accepted heartbeat through Controller.observe; stop shuts the API down and releases the lease",
+    "control_service.host(environ, store, owner) is off without AGENTIHOOKS_CONTROL_API_PORT; with it, it needs AGENTIHOOKS_CONTROL_SWARM, a numeric port, the launch signing key named by AGENTIHOOKS_LAUNCH_SIGNING_KEY_ID and AGENTIHOOKS_LAUNCH_SIGNING_KEY_FILE, and authorizes with the hive controller credential AGENTIHOOKS_CONTROLLER_CREDENTIAL before it binds the port",
+    "agentihooks controller run hosts the control service when configured, ticks it after each hive tick and stops it on exit",
+    "Chart agentihooks-swarm: controller.affinity requires nodes without anton.io/capacity-type and tolerates no EC2 taint; controller.api adds the controller API Service, container port, NetworkPolicy and the read only signing key mount, and refuses to render without a swarm or a key",
+    "The swarm image ships docs/swarm-v2/schemas beside the installed package, which the executions API and the Pod template load",
+    "antoncore: the agentihooks-swarm overlay pins the same durable affinity, prepares controller.api off, and a Password generator, an IfNotExists PushSecret and an ExternalSecret produce the agentihooks-swarm-launch-signing Secret from OpenBao k8s/agentihooks-swarm launch_signing_key"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "contracts": "heartbeat and launch grant schema 2.1 from docs/swarm-v2/schemas",
+    "kubernetes": "kind v1.37 in the chart proof; anton-prod k3s v1.33 for placement labels",
+    "compatibility": "Without AGENTIHOOKS_CONTROL_API_PORT the controller loop runs exactly as before; the chart default keeps controller.api off"
+  },
+  "measurements": {
+    "swarm_control_restart_recovery_seconds": "60.0 in cases A and C: one controller tick after restart observes both remote attempts working; ticks times the 60 second tick interval, an upper bound, not a wall clock measure"
+  },
+  "authority": "The controller acts only while the hive controller credential digest matches Redis; case B shows a forged credential refused with no lease taken and no occupant changed. A rival controller owner cannot take a live lease in case C. Workers authenticate with launch grants signed by the mounted key.",
+  "states": {
+    "observed": "Cases A, B and C each ran twice with identical records in proofs run 38075925337 at tested_commit. The control service tests passed in proofs run 38075336803. The kind proof 38075551228 printed register 200, heartbeat 200, observed working.",
+    "accepted": "Placement admits the four on premises nodes and refuses all four EC2 pools, including an untainted Spot node with 32 free cores. A graceful restart keeps both task claims and observes both attempts working; a crash restart under the same owner keeps the lease epoch, replays heartbeats identically and refuses older heartbeats as revision conflicts.",
+    "committed": "Code and fixtures at tested_commit; manifest.json hashes them.",
+    "externally_verified": "Not on anton-prod: the control API stays off there until gate G12."
+  },
+  "limitations": [
+    "The anton-prod controller does not hold the rig-grade-swarm lease today; the workstation hive does, so enabling the API on anton-prod serves nothing until the swarm moves there",
+    "The control service serves the executions API only; the tasks API needs a ledger repository the deployed process does not build yet",
+    "Heartbeats are the only runtime observation source sent through the controller; Kubernetes Pod observations join when the deployed process builds the Kubernetes runtime"
+  ],
+  "rollback": {
+    "action": "Revert the antoncore overlay commit, or set controller.api.enabled false, with distributed admission paused; the hive tick keeps running unchanged",
+    "rehearsal": "git revert of the antoncore overlay commit on a throwaway checkout applied cleanly; helm template of the chart with the reverted overlay rendered no controller API and no signing key objects",
+    "data_safety": "The OpenBao launch_signing_key property and the task claims in Redis are authoritative and are kept; the PushSecret deletion policy is None"
+  }
+}
