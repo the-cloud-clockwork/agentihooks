@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from contextlib import closing
 
@@ -26,6 +27,63 @@ def sent(monkeypatch):
     calls = []
     monkeypatch.setattr(metrics_outbox, "post", lambda sink, query, body: calls.append((sink, query, body)) or True)
     return calls
+
+
+@pytest.fixture(autouse=True)
+def ledger_collector(monkeypatch):
+    original = metrics.metrics_ledger.record
+    monkeypatch.setattr(metrics.metrics_ledger, "record", lambda *args: None)
+    return original
+
+
+def test_record_pass_collects_ledger_rows_before_flushing(spool, monkeypatch, ledger_collector):
+    doc = {
+        "_meta": {
+            "rev": 1,
+            "events": [{"rev": 1, "at": NOW - 100, "kind": "task claimed", "target": "tasks/t", "by": "worker"}],
+        },
+        "tasks": [{"id": "t", "lane": "ci", "state": "claimed"}],
+        "time_left_minutes": 14,
+    }
+    nodes = [{"node": "tasks/t", "kind": "task", "parent": None, "state": "claimed", "depth": 0}]
+
+    class Ledger:
+        def state(self, slug):
+            assert slug == "sw"
+            return doc
+
+        def hierarchy(self, slug):
+            assert slug == "sw"
+            return nodes
+
+    monkeypatch.setattr(metrics, "LedgerClient", Ledger)
+    monkeypatch.setattr(metrics.metrics_ledger, "record", ledger_collector)
+    received = {}
+
+    def send(sink, query, body):
+        if query.startswith("INSERT"):
+            received[query] = [json.loads(line) for line in body.splitlines()]
+        return True
+
+    monkeypatch.setattr(metrics_outbox, "post", send)
+    assert metrics.record_pass("sw", NOW, 3, ON) == []
+    assert received["INSERT INTO swarm.ledger_events FORMAT JSONEachRow"][0]["task"] == "tasks/t"
+    assert received["INSERT INTO swarm.ledger_events FORMAT JSONEachRow"][0]["ts_ms"] == NOW - 100
+    snapshots = received["INSERT INTO swarm.ledger_snapshots FORMAT JSONEachRow"]
+    assert any(
+        row["measure"] == "tasks" and row["lane"] == "ci" and row["state"] == "claimed" and row["value"] == 1
+        for row in snapshots
+    )
+    assert received["INSERT INTO swarm.ticks FORMAT JSONEachRow"][0]["actions"] == 3
+
+
+def test_an_unavailable_ledger_reports_the_error_and_still_flushes_ticks(spool, sent, monkeypatch):
+    def refused(*args):
+        raise OSError("ledger unavailable")
+
+    monkeypatch.setattr(metrics.metrics_ledger, "record", refused)
+    assert metrics.record_pass("sw", NOW, 3, ON) == ["ledger metrics failed: ledger unavailable"]
+    assert sent[-1][1] == "INSERT INTO swarm.ticks FORMAT JSONEachRow"
 
 
 def test_record_pass_is_off_without_settings(spool, sent):

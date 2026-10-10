@@ -1,8 +1,10 @@
 import os
 import sqlite3
+from collections.abc import Mapping
 from functools import partial
 
-from scripts.swarm import bottleneck, metrics_outbox, metrics_swarm
+from scripts.swarm import bottleneck, metrics_ledger, metrics_outbox, metrics_swarm
+from scripts.swarm.ledger_client import LedgerClient
 
 TICKS = metrics_outbox.Table("ticks", (("actions", "Int64"),))
 
@@ -36,6 +38,26 @@ def record(table, rows, now_ms, environ=os.environ, extra=None):
     return []
 
 
-def record_pass(slug, now_ms, actions, environ=os.environ, swarm=None):
-    extra = None if swarm is None else partial(_collect, slug, now_ms, swarm)
-    return record(TICKS, [tick_row(slug, now_ms, actions)], now_ms, environ, extra)
+def _ledger(slug, now_ms, errors, box):
+    try:
+        metrics_ledger.record(box, slug, now_ms, LedgerClient())
+    except OSError as exc:
+        errors.append(f"ledger metrics failed: {exc}")
+
+
+def _pass(slug, now_ms, swarm, errors, box):
+    if swarm is not None:
+        _collect(slug, now_ms, swarm, box)
+    _ledger(slug, now_ms, errors, box)
+
+
+def record_pass(
+    slug: str,
+    now_ms: int,
+    actions: int,
+    environ: Mapping[str, str] = os.environ,
+    swarm: metrics_swarm.TickInput | None = None,
+) -> list[str]:
+    errors = []
+    extra = partial(_pass, slug, now_ms, swarm, errors)
+    return record(TICKS, [tick_row(slug, now_ms, actions)], now_ms, environ, extra) or errors
