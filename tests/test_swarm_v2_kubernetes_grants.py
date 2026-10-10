@@ -20,6 +20,7 @@ OWNER = "agentihooks-swarm-fixture"
 NAMESPACE = "swarm-pod-proof"
 GRANT = "sv2.grant-fixture"
 GRANT_ID = "lgr-" + "7" * 32
+CONTROL = "http://controller.swarm.invalid:8780"
 AUTHORITY = {
     "execution_id": EXECUTION,
     "generation": 3,
@@ -35,6 +36,7 @@ RECORD = {
     "authority": AUTHORITY,
     "harness": "claude",
     "agent": ["claude"],
+    "control_url": CONTROL,
 }
 LABELS = {
     "swarm.agentihooks.io/controller-owner": OWNER,
@@ -98,7 +100,7 @@ def verify(token: str) -> Registration:
 
 
 def grants(api, exporter=None) -> PodGrants:
-    return PodGrants(api, SLUG, verify, Supervision("claude", exporter))
+    return PodGrants(api, SLUG, verify, Supervision("claude", exporter, CONTROL))
 
 
 def material(record=None, **changes) -> dict:
@@ -194,7 +196,7 @@ def test_a_grant_the_store_cannot_check_takes_no_config_map():
 
     api = Api(pod())
 
-    assert PodGrants(api, SLUG, unreachable, Supervision("claude", None)).hand(agent(), GRANT) is False
+    assert PodGrants(api, SLUG, unreachable, Supervision("claude", None, CONTROL)).hand(agent(), GRANT) is False
 
     assert (api.reads, api.created) == ([], [])
 
