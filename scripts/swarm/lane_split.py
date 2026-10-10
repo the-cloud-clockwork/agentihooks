@@ -46,7 +46,7 @@ def refusal(caps: dict, giver: str, taker: str, lanes: Lanes) -> str:
     return ""
 
 
-def _caps(config, store, slug: str) -> tuple[dict, int]:
+def _capacity(config, store, slug: str) -> tuple[dict, int]:
     if config.scaling == AUTO_SCALING:
         stored = json.loads(store.redis.get(store.key(slug, "quota-capacity")) or "{}").get("autoscale") or {}
         ceilings = stored.get("ceilings")
@@ -55,13 +55,17 @@ def _caps(config, store, slug: str) -> tuple[dict, int]:
     return {"eng": config.max_eng, "ci": config.max_ci}, config.lane_shift
 
 
-def _apply(slug: str, config, store, move: tuple, shift: int) -> None:
-    giver, taker = move
-    if config.scaling == AUTO_SCALING:
-        store.update(slug, lane_shift=shift + (1 if taker == "ci" else -1))
+def _apply(slug: str, config, store, caps: dict, shift: int) -> None:
+    if config.scaling != AUTO_SCALING:
+        store.update(slug, max_eng=caps["eng"], max_ci=caps["ci"])
         return
-    caps = {"eng": config.max_eng, "ci": config.max_ci}
-    store.update(slug, **{f"max_{giver}": caps[giver] - 1, f"max_{taker}": caps[taker] + 1})
+    store.update(slug, lane_shift=shift)
+    key = store.key(slug, "quota-capacity")
+    saved = json.loads(store.redis.get(key) or "{}")
+    stored = saved.get("autoscale") or {}
+    if stored.get("ceilings"):
+        saved["autoscale"] = {**stored, "ceilings": {**stored["ceilings"], **caps}, "shift": shift}
+        store.redis.set(key, json.dumps(saved))
 
 
 def _record(slug: str, named: str, caps: dict, move: tuple, lanes: Lanes, now_ms: int) -> str:
@@ -88,9 +92,10 @@ def lane_pass(slug: str, config: SwarmConfig, store: RedisStore, lanes: Lanes, n
     if not due:
         return []
     giver, taker = move
-    caps, shift = _caps(config, store, slug)
+    caps, shift = _capacity(config, store, slug)
     reason = refusal(caps, giver, taker, lanes)
     if reason:
         return [HELD.format(named=current["named"], ticks=TICKS, reason=reason)]
-    _apply(slug, config, store, move, shift)
-    return [_record(slug, current["named"], {giver: caps[giver] - 1, taker: caps[taker] + 1}, move, lanes, now_ms)]
+    caps = {giver: caps[giver] - 1, taker: caps[taker] + 1}
+    _apply(slug, config, store, caps, shift + (1 if taker == "ci" else -1))
+    return [_record(slug, current["named"], caps, move, lanes, now_ms)]
