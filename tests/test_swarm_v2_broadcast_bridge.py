@@ -263,12 +263,12 @@ def test_the_bridge_posts_its_grant_and_channels_to_the_claim_endpoint(monkeypat
         "urllib.request.urlopen",
         lambda request, timeout: sent.append((request, timeout)) or Answer(b'{"deliveries": []}'),
     )
-    fleet = broadcast_bridge.RemoteFleet("https://swarm.invalid/")
+    fleet = broadcast_bridge.RemoteFleet("https://swarm.invalid/apiX/")
     assert fleet.claim("v2.grant.sig", ["amygdala"]) == []
     assert fleet.claim("v2.grant.sig", ["brain"], "claim-1") == []
     first, second = sent
     assert (first[0].full_url, first[0].get_method(), first[1]) == (
-        "https://swarm.invalid/v2/broadcasts/claim",
+        "https://swarm.invalid/apiX/v2/broadcasts/claim",
         "POST",
         5,
     )

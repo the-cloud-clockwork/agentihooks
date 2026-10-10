@@ -54,7 +54,7 @@ class BroadcastsAPI:
     def claim(self, token: str, body: object) -> dict:
         if not isinstance(body, Mapping) or "channels" not in body or not set(body) <= FIELDS:
             raise GrantRefused("invalid_request", "the request carries channels and an optional claim_id")
-        channels, claim_id = body["channels"], body.get("claim_id", "")
+        channels, claim_id = body["channels"], body.get("claim_id") or ""
         if not isinstance(channels, list) or not all(isinstance(channel, str) for channel in channels):
             raise GrantRefused("invalid_request", "channels must be a list of channel names")
         if "claim_id" in body and not (isinstance(claim_id, str) and NAME.fullmatch(claim_id)):

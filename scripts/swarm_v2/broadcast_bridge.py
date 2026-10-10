@@ -20,6 +20,8 @@ API_URL = "AGENTIHOOKS_SWARM_API_URL"
 CLAIM_PATH = "/v2/broadcasts/claim"
 TIMEOUT_SECONDS = 5
 CLAIM_ATTEMPTS = 2
+JSON_CONTENT = {"Content-Type": "application/json"}
+AUTHORIZATION = "Authorization"
 
 
 def grant_path(attempt: Path) -> Path:
@@ -52,8 +54,9 @@ class RemoteFleet:
         from scripts.swarm_v2.broadcasts import _delivery
 
         body = {"channels": channels, **({"claim_id": claim_id} if claim_id else {})}
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-        request = Request(self.url, data=json.dumps(body).encode(), headers=headers, method="POST")
+        request = Request(
+            self.url, data=json.dumps(body).encode(), headers={**JSON_CONTENT, AUTHORIZATION: f"Bearer {token}"}
+        )
         with urlopen(request, timeout=TIMEOUT_SECONDS) as answer:
             found = json.loads(answer.read())["deliveries"]
         return [_delivery(delivery) for delivery in found]

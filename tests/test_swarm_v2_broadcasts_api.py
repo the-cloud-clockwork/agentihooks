@@ -9,7 +9,7 @@ import pytest
 from scripts.swarm.store import SwarmError
 from scripts.swarm_v2.auth_context import LaunchAuthority, LaunchKey
 from tests.sv2_ldg02_cases import SLUG, World
-from tests.test_swarm_v2_broadcasts import CHANNELS, OPERATOR, REMOTE, WARNING
+from tests.test_swarm_v2_broadcasts import CHANNELS, FOLLOWUP, OPERATOR, REMOTE, WARNING
 
 pytestmark = pytest.mark.unit
 
@@ -82,7 +82,10 @@ def test_a_claim_id_replays_the_first_answer(world):
     first = world.claim(token, {"channels": CHANNELS, "claim_id": "claim-1"})
     assert first[0] == 200
     assert len(first[1]["deliveries"]) == 1
+    world.announce(FOLLOWUP)
     assert world.claim(token, {"channels": CHANNELS, "claim_id": "claim-1"}) == first
+    fresh = world.claim(token, {"channels": CHANNELS, "claim_id": "claim-2"})
+    assert [d["broadcast"]["broadcast_id"] for d in fresh[1]["deliveries"]] == ["fleet-followup", "fleet-warning"]
 
 
 def test_a_claim_on_other_channels_receives_nothing(world):
