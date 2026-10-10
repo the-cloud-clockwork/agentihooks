@@ -165,7 +165,7 @@ def test_a_pinned_object_no_longer_selected_is_never_deleted(ready):
     _journal(world, old, [])
     result = world.cleanup(controller).run(old.execution_id)
     assert result.removed["pods"] == [
-        {"name": f"swarm-{old.execution_id}", "uid": "uid-1", "outcome": "absent"},
+        {"name": f"swarm-{old.execution_id}", "uid": "uid-1", "outcome": "unselected"},
         {"name": "swarm-extra", "uid": "uid-5", "outcome": "absent"},
     ]
     assert [call for call in world.api.deletes if call[0] == "pods"] == []

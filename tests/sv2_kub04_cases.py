@@ -57,6 +57,9 @@ class ApiServer(kub02.ApiServer):
         finally:
             self.objects = objects
 
+    def read(self, kind: str, name: str) -> dict | None:
+        return copy.deepcopy((self.objects if kind == "pods" else self.services).get(name))
+
     def delete(self, kind: str, name: str, uid: str) -> bool:
         self.deletes.append((kind, name, uid))
         table = self.objects if kind == "pods" else self.services
@@ -382,7 +385,7 @@ def _rejection() -> tuple[dict, bool]:
         observed["resumed"] == "done",
         observed["removed"]
         == {
-            "pods": [{"name": "swarm-<old>", "uid": "uid-1", "outcome": "absent_after_send"}],
+            "pods": [{"name": "swarm-<old>", "uid": "uid-1", "outcome": "replaced"}],
             "services": [{"name": "swarm-attach-<old>", "uid": "uid-2", "outcome": "deleted"}],
         },
         observed["deletes"] == [["pods", "swarm-<old>", "uid-1"], ["services", "swarm-attach-<old>", "uid-2"]],

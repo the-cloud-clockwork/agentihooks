@@ -357,3 +357,20 @@ def test_list_services_selects_by_label():
     transport = Http((200, {"items": [{"metadata": {"name": "s"}}]}))
     assert PodClient(transport, "ns").list_services("owner=x") == [{"metadata": {"name": "s"}}]
     assert transport.calls == [("GET", "/api/v1/namespaces/ns/services?labelSelector=owner%3Dx", None)]
+
+
+@pytest.mark.parametrize("kind", ["pods", "services"])
+def test_read_gets_the_named_object_and_answers_none_when_absent(kind):
+    transport = Http((200, {"metadata": {"uid": "u1"}}), (404, {"reason": "NotFound"}))
+    client_ = PodClient(transport, "ns")
+    assert client_.read(kind, "swarm-a") == {"metadata": {"uid": "u1"}}
+    assert client_.read(kind, "gone") is None
+    assert transport.calls == [
+        ("GET", f"/api/v1/namespaces/ns/{kind}/swarm-a", None),
+        ("GET", f"/api/v1/namespaces/ns/{kind}/gone", None),
+    ]
+
+
+def test_read_raises_on_a_refused_answer():
+    with pytest.raises(ApiRefused):
+        PodClient(Http((403, {"reason": "Forbidden"})), "ns").read("services", "swarm-a")

@@ -22,6 +22,8 @@ class CleanupApi(Protocol):
 
     def list_services(self, selector: str) -> list[dict]: ...
 
+    def read(self, kind: str, name: str) -> dict | None: ...
+
     def delete(self, kind: str, name: str, uid: str) -> bool: ...
 
 
@@ -104,21 +106,25 @@ class Cleanup:
             self.require()
             self.releases[step].release(journal["execution_id"])
             return
-        listing = self.api.list_pods if step == "pods" else self.api.list_services
-        live = {
-            item["metadata"]["uid"] for item in listing(self._selector(journal["execution_id"], journal["generation"]))
-        }
         settled = {item["uid"] for item in journal["removed"][step]}
         for pinned in journal["pinned"][step]:
             if pinned["uid"] not in settled:
-                journal["removed"][step].append({**pinned, "outcome": self._remove(step, pinned, live, journal)})
+                journal["removed"][step].append({**pinned, "outcome": self._remove(step, pinned, journal)})
                 self._save(journal)
 
-    def _remove(self, kind: str, pinned: dict, live: set, journal: dict) -> str:
+    def _remove(self, kind: str, pinned: dict, journal: dict) -> str:
+        self.require()
         resent = pinned["uid"] in journal["sent"]
         gone = "absent_after_send" if resent else "absent"
-        if pinned["uid"] not in live:
+        current = self.api.read(kind, pinned["name"])
+        if current is None:
             return gone
+        if current["metadata"]["uid"] != pinned["uid"]:
+            return "replaced"
+        labels = current["metadata"].get("labels", {})
+        expected = self._labels(journal["execution_id"], journal["generation"])
+        if {key: labels.get(key) for key in expected} != expected:
+            return "unselected"
         if not resent:
             journal["sent"].append(pinned["uid"])
             self._save(journal)
@@ -128,8 +134,11 @@ class Cleanup:
         except PreconditionFailed:
             return "replaced"
 
+    def _labels(self, execution_id: str, generation: int) -> dict:
+        return {OWNER_LABEL: self.owner, EXECUTION_LABEL: execution_id, GENERATION_LABEL: str(generation)}
+
     def _selector(self, execution_id: str, generation: int) -> str:
-        return f"{OWNER_LABEL}={self.owner},{EXECUTION_LABEL}={execution_id},{GENERATION_LABEL}={generation}"
+        return ",".join(f"{key}={value}" for key, value in self._labels(execution_id, generation).items())
 
     def _save(self, journal: dict) -> None:
         self.require()

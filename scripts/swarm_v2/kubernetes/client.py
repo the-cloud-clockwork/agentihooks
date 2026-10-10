@@ -122,6 +122,10 @@ class PodClient:
         query = urllib.parse.urlencode({"labelSelector": selector})
         return _answer(*self.http.send("GET", f"{self._path(kind='services')}?{query}"))["items"]
 
+    def read(self, kind: str, name: str) -> dict | None:
+        status, answer = self.http.send("GET", self._path(name, kind))
+        return None if status == 404 else _answer(status, answer)
+
     def delete(self, kind: str, name: str, uid: str) -> bool:
         """False when the name is gone; PreconditionFailed when the name now holds another object."""
         if kind not in DELETABLE:
