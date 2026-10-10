@@ -69,6 +69,8 @@ controller:
               - key: anton.io/capacity-type
                 operator: DoesNotExist
   tolerations: []
+  # Required with workers: the Kubernetes runtime creates worker Pods with this account's token.
+  serviceAccountName: ""
   # Worker registration and heartbeat API, served by the controller process for one swarm.
   api:
     enabled: false
@@ -80,6 +82,18 @@ controller:
       secretKey: signing-key
     # Peers beyond the release, such as worker Pods in their own namespace.
     ingressFrom: []
+  # Kubernetes runtime settings, rendered once apiUrl is set and read while the API is on. The worker
+  # image stays on a floating tag; the controller resolves its digest at each launch. No launch account
+  # lives here: approved accounts come from the shared account secret.
+  workers:
+    apiUrl: ""
+    imageTag: dev
+    profile: ""
+    cap: 1
+    projects: []
+    brain: ""
+    # The Pod policy, docs/swarm-v2/schemas/pod-policy.json; its owner is agentihooks-swarm-<api.swarm>.
+    podPolicy: {}
   livenessProbe:
     initialDelaySeconds: 60
     periodSeconds: 10

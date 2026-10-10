@@ -53,6 +53,34 @@ if [[ $refusal != *"controller.api.signingKey needs keyId and secretName"* ]]; t
   printf 'the chart did not refuse a control API without a signing key: %s\n' "$refusal" >&2
   exit 1
 fi
+api=(
+  --set controller.api.enabled=true
+  --set controller.api.swarm="$slug"
+  --set controller.api.signingKey.keyId=kind-launch
+  --set controller.api.signingKey.secretName=swarm-launch-signing
+)
+workers=(-f "$chart/ci/kind-workers.yaml")
+helm template "$release" "$chart" "${workers[@]}" "${api[@]}" | python3 tests/chart_workers.py "$chart/ci/kind-workers.yaml"
+refuse_workers() {
+  local expected=$1 refusal
+  shift
+  refusal="$(helm template "$release" "$chart" "${workers[@]}" "${api[@]}" "$@" 2>&1 >/dev/null || true)"
+  if [[ $refusal != *"$expected"* ]]; then
+    printf 'the chart did not refuse worker settings %s with "%s": %s\n' "$*" "$expected" "$refusal" >&2
+    exit 1
+  fi
+}
+for tag in "dev@$digest" "$digest" "$(printf 'b%.0s' $(seq 40))"; do
+  refuse_workers "controller.workers.imageTag must be a floating tag" --set controller.workers.imageTag="$tag"
+done
+for setting in profile brain; do
+  refuse_workers "controller.workers.$setting is required" --set controller.workers."$setting"=
+done
+refuse_workers "controller.workers.cap must be a whole number above zero" --set controller.workers.cap=0
+refuse_workers "controller.workers.projects names no project" --set 'controller.workers.projects=null'
+refuse_workers "controller.workers.podPolicy is required" --set 'controller.workers.podPolicy=null'
+refuse_workers "controller.serviceAccountName is required" --set controller.serviceAccountName=
+printf 'the chart refused every incomplete or pinned worker setting\n'
 docker build -q -t "$image" . >/dev/null &
 build=$!
 trap finish EXIT
@@ -148,12 +176,23 @@ signing_key="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
 printf '%s' "$signing_key" | kubectl create secret generic swarm-launch-signing --dry-run=client -o yaml \
   --from-file=signing-key=/dev/stdin | kubectl apply -f -
 unset signing_key
-helm upgrade "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m \
-  --set controller.api.enabled=true \
-  --set controller.api.swarm="$slug" \
-  --set controller.api.signingKey.keyId=kind-launch \
-  --set controller.api.signingKey.secretName=swarm-launch-signing
+kubectl create serviceaccount swarm-controller
+kubectl create role swarm-controller --namespace swarm-pod-proof --verb=create,delete,get,list,watch --resource=pods
+kubectl create rolebinding swarm-controller --namespace swarm-pod-proof --role=swarm-controller \
+  --serviceaccount=default:swarm-controller
+helm upgrade "$release" "$chart" -f "$chart/ci/kind-values.yaml" "${workers[@]}" "${api[@]}" --wait --timeout 5m
 kubectl rollout status deployment "$release-controller" --timeout 2m
+built=""
+for _ in $(seq 60); do
+  built="$(kubectl logs "deployment/$release-controller" -c controller | grep -F "controller: built the Kubernetes runtime for $slug" || true)"
+  [[ -n $built ]] && break
+  sleep 1
+done
+if [[ -z $built ]]; then
+  printf 'the deployed controller never logged that it built the Kubernetes runtime for %s\n' "$slug" >&2
+  exit 1
+fi
+printf 'the deployed controller built the Kubernetes runtime: %s\n' "$built"
 registered="$(kubectl exec -i "deployment/$release-controller" -c controller -- env CONTROL_URL="http://$release-controller:8780" SLUG="$slug" python - <<'EOF'
 import json, os, time, urllib.request
 from pathlib import Path
