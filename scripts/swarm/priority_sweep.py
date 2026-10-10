@@ -91,7 +91,7 @@ def _stale(item, github):
 
 def _item(doc, path):
     name, item_id = _split(path)
-    return next((i for i in doc[name] if i["id"] == item_id), {})
+    return next((i for i in doc.get(name, []) if i["id"] == item_id), {})
 
 
 def _split(path):
@@ -112,7 +112,11 @@ def _writes(doc, rows, events):
 
 
 def _counts(doc, row, write):
-    return write.by == OPERATOR or not (handed(row) or _operator_decides(row["item"], _item(doc, row["item"])))
+    return write.by == OPERATOR or not operator_only(doc, row)
+
+
+def operator_only(doc, row):
+    return handed(row) or _operator_decides(row["item"], _item(doc, row["item"]))
 
 
 def handed(row):

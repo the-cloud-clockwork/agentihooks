@@ -180,7 +180,7 @@ def test_done_from_the_dispatcher_seat_ends_it_without_a_pull_request_once_its_t
     seat = "dispatcher@a1b2c3-0001"
     store.put_agent("sw", AgentRecord(seat, "dispatch", "dispatcher", seat="dispatcher@sw"))
     monkeypatch.setattr(cli.ledger_events, "view", lambda url: pytest.fail("a pull request was read"))
-    stale = {"id": "pr1", "item": "questions/q1", "text": "Pick the release day", "at": 0}
+    stale = {"id": "pr1", "item": "tasks/t5", "text": "Pick the release day", "at": 0}
     handed = {"id": "pr2", "item": "followups/f1", "text": "Rotate the registry token", "at": 0, "by": seat}
     settled = ledger.state
     ledger.state = lambda slug: {**settled(slug), "priorities": [stale, handed]}
@@ -1854,8 +1854,12 @@ def test_a_master_verdict_hides_the_finding_from_status(env, capsys, monkeypatch
     _idle_finding(env, monkeypatch, tmp_path)
     [found] = _findings(capsys)
     assert (found["id"], found["verdict"]) == ("idle-with-claim/engineer@a1b2c3-0001", None)
+    monkeypatch.setattr(cli, "now_ms", lambda: 1_234)
     assert run("sw", "--as", "master@a1b2c3-0001", "verdict", found["id"], "false-positive", "--note", "on checks") == 0
     assert json.loads(capsys.readouterr().out)["verdict"] == "false-positive"
+    kept = cli.verdict_store(env[0], "sw")
+    verdict = json.loads(kept.redis.hget(kept.key, found["id"]))["verdict"]
+    assert (verdict["note"], verdict["by"], verdict["at"]) == ("on checks", "master@a1b2c3-0001", 1_234)
     assert _findings(capsys) == []
 
 
@@ -1863,7 +1867,9 @@ def test_the_operator_may_give_a_verdict_and_a_worker_may_not(env, capsys, monke
     _idle_finding(env, monkeypatch, tmp_path)
     _findings(capsys)
     assert run("sw", "--as", "engineer@a1b2c3-0001", "verdict", "idle-with-claim/engineer@a1b2c3-0001", "resolved") == 1
-    assert "only the master or the operator" in capsys.readouterr().err
+    assert capsys.readouterr().err == "swarm: only the master or the operator gives a finding a verdict\n"
+    assert run("sw", "--as", "master@a1b2c3-0009", "verdict", "idle-with-claim/engineer@a1b2c3-0001", "resolved") == 1
+    assert capsys.readouterr().err == "swarm: only the master or the operator gives a finding a verdict\n"
     assert run("sw", "--as", "operator", "verdict", "idle-with-claim/engineer@a1b2c3-0001", "resolved") == 0
 
 
