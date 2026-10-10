@@ -11,7 +11,9 @@ from typing import NoReturn, Protocol
 from scripts.swarm_v2.auth_context import IDENTIFIER, Registration
 
 METRIC = "artifact_upload_verification_failures"
-UNGRANTED = "an artifact store takes its scope only from a launch grant token the launch authority verified"
+UNGRANTED = (
+    "an artifact store takes its scope only from the registration its authorization returns for a launch grant token"
+)
 CHUNK = 1 << 20
 ABSENT = "absent"
 CORRUPT = "corrupt"
