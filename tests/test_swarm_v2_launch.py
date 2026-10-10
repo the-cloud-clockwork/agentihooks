@@ -503,6 +503,7 @@ def test_a_launch_whose_grant_is_not_handed_ends_and_names_the_reason(monkeypatc
     assert launch.outcome == Outcome("spawn", Status.REFUSED, BACKEND, None, f"launch grant not handed: {hand.reason}")
     assert launch.hand == hand
     assert world.rows() == {}
+    world.homes.hand_result = HANDED
     assert world.launch(SECOND).outcome.ok
 
 
