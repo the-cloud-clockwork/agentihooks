@@ -12,6 +12,7 @@ import pytest
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2.auth_context import (
     MAX_TTL_SECONDS,
+    WRITE_ATTEMPTS,
     GrantRefused,
     LaunchAuthority,
     LaunchKey,
@@ -852,8 +853,8 @@ def test_a_registered_credential_renews_bound_to_its_registration(store, authori
     clock.now += 200
     assert authority.bound("fixture", renewed) == authority.registration("fixture", execution.execution_id)
     assert refusal(authority.bound, token) == ("unauthenticated", "launch grant has expired")
-    assert audit_of(store, token) == {**audit_of(store, token), "state": "registered", "expires_at": expires_at}
-    assert audit_of(store, token)["renewals"] == 1
+    audit = audit_of(store, token)
+    assert (audit["state"], audit["expires_at"], audit["renewals"]) == ("registered", expires_at, 1)
     again, _ = authority.renew("fixture", renewed)
     assert audit_of(store, again)["renewals"] == 2
     assert renewed.split(".")[1] not in json.dumps(store.redis.hgetall(store.key("fixture", "launch-grants")))
@@ -883,7 +884,9 @@ def test_revoking_a_registration_refuses_every_credential_bound_to_it(store, aut
     assert refusal(authority.register, renewed, body(execution)) == ("unauthenticated", "launch grant was revoked")
     assert audit_of(store, token)["state"] == "revoked"
     assert authority.registration("fixture", execution.execution_id).grant_id == claims_of(token)["grant_id"]
+    revoked = audit_of(store, token)
     assert authority.revoke("fixture", execution.execution_id) is False
+    assert audit_of(store, token) == revoked
     assert authority.revoke("fixture", "missing") is False
 
 
@@ -907,16 +910,38 @@ def test_a_grant_rewrite_that_keeps_racing_is_unavailable(store, authority, exec
     from redis.exceptions import WatchError
 
     token = registered(authority, execution)
+    before = audit_of(store, token)
 
     def always_raced(pipe):
         raise WatchError("raced")
 
-    hook_pipelines(store, monkeypatch, always_raced)
+    _, calls = hook_pipelines(store, monkeypatch, always_raced)
     assert refusal(authority.renew, token) == (
         "dependency_unavailable",
         "launch grants kept changing; the credential was not renewed",
     )
+    assert len(calls) == WRITE_ATTEMPTS
     assert refusal(authority.revoke, execution.execution_id) == (
         "dependency_unavailable",
         "launch grants kept changing; the registration was not revoked",
     )
+    assert len(calls) == 2 * WRITE_ATTEMPTS
+    assert audit_of(store, token) == before
+
+
+def test_a_grant_rewrite_retries_after_a_race_until_it_commits(store, authority, execution, monkeypatch):
+    from redis.exceptions import WatchError
+
+    token = registered(authority, execution)
+    raced = []
+
+    def raced_until_last(pipe):
+        if len(raced) < WRITE_ATTEMPTS - 1:
+            raced.append(True)
+            raise WatchError("raced")
+        return pipe.execute()
+
+    _, calls = hook_pipelines(store, monkeypatch, raced_until_last)
+    renewed, _ = authority.renew("fixture", token)
+    assert len(calls) == WRITE_ATTEMPTS
+    assert audit_of(store, renewed)["renewals"] == 1
