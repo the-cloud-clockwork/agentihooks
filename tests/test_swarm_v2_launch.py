@@ -10,7 +10,7 @@ from scripts.swarm_v2.accounts import OCCUPIED, RESERVED, AccountCapacity, Slot
 from scripts.swarm_v2.auth_context import GrantRefused, LaunchAuthority, LaunchKey
 from scripts.swarm_v2.controller import Controller
 from scripts.swarm_v2.launch import DistributedLaunch, Launch, LaunchTerms
-from scripts.swarm_v2.registry import LIVE, FleetRegistry, Scope, Session
+from scripts.swarm_v2.registry import CLOSED, LIVE, FleetRegistry, Scope, Session
 from scripts.swarm_v2.runtime.base import Capability, Outcome, RuntimeRouter, SpawnRequest, Status
 
 pytestmark = pytest.mark.unit
@@ -195,6 +195,37 @@ def test_a_second_simultaneous_launch_on_a_full_account_is_refused(monkeypatch):
     assert world.capacity.account_reservation_conflicts_total() == 1
 
 
+def test_a_refused_spawn_releases_even_after_its_grant_was_revoked(monkeypatch):
+    world = World(monkeypatch, runtime=Remote(Status.REFUSED, during=lambda _: world.grants.disable(SLUG)))
+
+    launch = world.launch(FIRST)
+
+    assert launch.outcome.status is Status.REFUSED
+    assert world.rows() == {}
+
+
+def test_exit_of_the_stored_execution_releases_its_slot(world):
+    launch = world.launch(FIRST)
+    stored = world.store.execution(SLUG, launch.agent.execution_id)
+
+    assert stored.account == ACCOUNT
+    assert world.launcher.exited(stored).holder == f"{SLUG}/{FIRST}"
+    assert world.rows() == {}
+
+
+def test_a_registration_after_the_reservation_expired_closes_its_session(world):
+    launch = world.launch(FIRST)
+    world.clock[0] += TTL
+
+    with pytest.raises(SwarmError) as refused:
+        world.launcher.registered(world.session(launch), launch.grant)
+
+    assert str(refused.value) == "reservation_expired"
+    [record] = world.fleet.records()
+    assert record.state == CLOSED
+    assert world.capacity.slots(ACCOUNT) == []
+
+
 @pytest.mark.parametrize("status", [Status.REFUSED, Status.UNAVAILABLE, Status.UNSUPPORTED])
 def test_a_spawn_that_did_not_launch_releases_its_reservation(monkeypatch, status):
     world = World(monkeypatch, runtime=Remote(status))
@@ -242,6 +273,18 @@ def test_a_stale_exit_cannot_free_the_slot_its_replacement_holds(world):
     assert before[f"{SLUG}/{FIRST}"]["execution_id"] == replacement.agent.execution_id
 
 
+@pytest.mark.parametrize("change", [{"generation": 2}, {"execution_id": "exe-other"}])
+def test_an_exit_must_match_both_the_execution_and_the_generation(world, change):
+    launch = world.launch(FIRST)
+    before = world.rows()
+
+    with pytest.raises(SwarmError) as refused:
+        world.launcher.exited(replace(launch.agent, **change))
+
+    assert str(refused.value) == "stale_generation"
+    assert world.rows() == before
+
+
 def test_verify_refuses_a_grant_this_controller_never_issued(world):
     launch = world.launch(FIRST)
     world.store.redis.delete(world.store.key(SLUG, "launch-grants"))
@@ -250,6 +293,8 @@ def test_verify_refuses_a_grant_this_controller_never_issued(world):
         world.grants.verify(SLUG, launch.grant)
 
     assert str(refused.value) == "launch grant was not issued by this controller"
+    assert world.grants.registration(SLUG, launch.agent.execution_id) is None
+    assert world.fleet.records() == []
 
 
 def test_verify_refuses_a_revoked_grant(world):
@@ -261,6 +306,17 @@ def test_verify_refuses_a_revoked_grant(world):
 
     assert str(refused.value) == "launch grant was revoked"
     assert world.grants.registration(SLUG, launch.agent.execution_id) is None
+    assert world.fleet.records() == []
+
+
+def test_verify_refuses_the_grant_of_a_superseded_execution(world):
+    old = world.launch(FIRST)
+    world.launch(FIRST, previous=old.agent.execution_id)
+
+    with pytest.raises(GrantRefused) as refused:
+        world.grants.verify(SLUG, old.grant)
+
+    assert str(refused.value) == "launch grant is for a superseded execution"
 
 
 def test_verify_returns_the_grant_identity_unregistered(world):
