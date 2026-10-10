@@ -198,9 +198,10 @@ def _mirror(execution: Execution, request: Request, project: str, reuse: bool) -
 def _save(execution: Execution, workspace: Workspace) -> None:
     record = _record_path(execution, workspace.task)
     record.parent.mkdir(mode=0o700, exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", dir=record.parent, delete=False) as staging:
-        staging.write(json.dumps({**asdict(workspace), "path": str(workspace.path), "mirror": str(workspace.mirror)}))
-    Path(staging.name).replace(record)
+    handle, staging = tempfile.mkstemp(dir=record.parent)
+    with os.fdopen(handle, "w") as written:
+        written.write(json.dumps({**asdict(workspace), "path": str(workspace.path), "mirror": str(workspace.mirror)}))
+    Path(staging).replace(record)
 
 
 def _materialize(workspace: Workspace) -> None:
@@ -209,9 +210,8 @@ def _materialize(workspace: Workspace) -> None:
     if not workspace.mirror.is_dir():
         raise WorkspaceError(f"task {workspace.task} generation {workspace.generation} lost its mirror")
     _git("worktree", "prune", repo=workspace.mirror)
-    if _git("rev-parse", f"refs/heads/{workspace.branch}", repo=workspace.mirror).returncode:
-        _git("branch", workspace.branch, workspace.base_commit, repo=workspace.mirror)
-    if _git("worktree", "add", str(workspace.path), workspace.branch, repo=workspace.mirror).returncode:
+    _git("branch", workspace.branch, workspace.base_commit, repo=workspace.mirror)
+    if _git("worktree", "add", str(workspace.path), repo=workspace.mirror).returncode:
         raise WorkspaceError(f"worktree {workspace.branch} could not be created")
 
 

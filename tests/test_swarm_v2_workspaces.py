@@ -642,6 +642,19 @@ def test_the_clone_is_staged_beside_the_mirror(world, monkeypatch):
     assert staged == [world.execution.path("checkout")]
 
 
+def test_the_record_is_staged_beside_it(world, monkeypatch):
+    staged = []
+    real = tempfile.mkstemp
+
+    def spy(**kwargs):
+        staged.append(kwargs["dir"])
+        return real(**kwargs)
+
+    monkeypatch.setattr(workspaces.tempfile, "mkstemp", spy)
+    workspaces.prepare(world.execution, world.request())
+    assert staged == [world.execution.path("spool") / "workspaces"] * 2
+
+
 def test_preparation_holds_an_exclusive_lock(world, monkeypatch):
     held = []
     real = workspaces.fcntl.flock
