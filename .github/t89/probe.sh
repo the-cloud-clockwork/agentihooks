@@ -17,7 +17,7 @@ failed=0
 for round in $(seq "$rounds"); do
   if ! python -m pytest -q -p no:cacheprovider "$selector" > "round-$round.log" 2>&1; then
     failed=$((failed + 1))
-    grep -E "AssertionError|assert |FAILED" "round-$round.log" | head -5
+    grep -E "^E " "round-$round.log" | head -3
   fi
   tail -1 "round-$round.log"
 done
