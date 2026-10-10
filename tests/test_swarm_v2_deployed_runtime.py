@@ -25,6 +25,7 @@ SEAT = f"eng-1@{SLUG}"
 API_URL = "http://swarm-api.agentihooks-swarm.svc:8780"
 IMAGE = "sha256:" + "4b" * 32
 PROJECT = "github.com/the-cloud-clockwork/agentihooks"
+ACCOUNT = "claude-fixture@example.com"
 POLICY = Path(__file__).parent / "fixtures" / "swarm_v2" / "pod-policy.json"
 
 
@@ -75,7 +76,7 @@ def _workers(tmp_path, **changes):
         deployed.POLICY_ENV: str(_policy(tmp_path)),
         deployed.IMAGE_ENV: IMAGE,
         deployed.PROFILE_ENV: "general",
-        deployed.ACCOUNT_ENV: "claude-fixture",
+        deployed.ACCOUNT_ENV: ACCOUNT,
         deployed.CAP_ENV: "2",
         deployed.PROJECTS_ENV: f" {PROJECT} ,",
         deployed.BRAIN_ENV: "swarm",
@@ -147,7 +148,7 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
     )
     workers = runtime.launch.keywords["target"].__self__
     assert runtime.launch.keywords == {
-        "terms": LaunchTerms("claude-fixture", 2, 300_000, (PROJECT,), "swarm", API_URL),
+        "terms": LaunchTerms(ACCOUNT, 2, 300_000, (PROJECT,), "swarm", API_URL),
         "target": workers.target,
     }
     assert store.config(SLUG).api_url == API_URL
@@ -186,7 +187,7 @@ def test_the_launch_record_names_the_admitted_execution_and_the_worker_settings(
         "profile": "general",
         "memory_mib": 4096,
         "cpu_millis": 2000,
-        "provider_account": "claude-fixture",
+        "provider_account": ACCOUNT,
         "task_payload": {"task_id": "t1", "lane": "eng", "name": "engineer-1", "endpoints": {"api_url": API_URL}},
     }
 
