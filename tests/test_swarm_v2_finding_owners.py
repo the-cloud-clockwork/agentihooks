@@ -59,7 +59,7 @@ def test_a_finding_on_an_agent_holding_a_task_reaches_the_master_owning_that_tas
 def test_a_finding_on_a_finished_agent_still_holding_a_task_reaches_the_master_owning_its_phase(swarm):
     store, inbox = swarm
     ledger_events.findings_pass(inbox, store, SLUG, [finding("idle with claim", "sw-eng-done")], DOC)
-    assert len(texts(inbox, SECOND)) == 1
+    assert ["idle with claim" in text for text in texts(inbox, SECOND)] == [True]
     assert texts(inbox, LEAD) == []
 
 
