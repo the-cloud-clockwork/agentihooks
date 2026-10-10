@@ -4,6 +4,7 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from scripts.swarm.store import AgentRecord, SwarmError
+from scripts.swarm_v2 import image_tag
 from scripts.swarm_v2.accounts import AccountCapacity
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 from scripts.swarm_v2.kubernetes.client import KubeHttp, PodApi, PodClient
@@ -20,13 +21,13 @@ if TYPE_CHECKING:
 
 API_URL_ENV = "AGENTIHOOKS_CONTROL_API_URL"
 POLICY_ENV = "AGENTIHOOKS_POD_POLICY_FILE"
-IMAGE_ENV = "AGENTIHOOKS_WORKER_IMAGE_DIGEST"
+IMAGE_TAG_ENV = "AGENTIHOOKS_WORKER_IMAGE_TAG"
 PROFILE_ENV = "AGENTIHOOKS_WORKER_PROFILE"
 ACCOUNT_ENV = "AGENTIHOOKS_LAUNCH_ACCOUNT"
 CAP_ENV = "AGENTIHOOKS_LAUNCH_CAP"
 PROJECTS_ENV = "AGENTIHOOKS_LAUNCH_PROJECTS"
 BRAIN_ENV = "AGENTIHOOKS_LAUNCH_BRAIN"
-REQUIRED = (POLICY_ENV, IMAGE_ENV, PROFILE_ENV, ACCOUNT_ENV, CAP_ENV, PROJECTS_ENV, BRAIN_ENV)
+REQUIRED = (POLICY_ENV, IMAGE_TAG_ENV, PROFILE_ENV, ACCOUNT_ENV, CAP_ENV, PROJECTS_ENV, BRAIN_ENV)
 RESERVATION_MS = 300_000
 HARNESS = "claude"
 
@@ -64,7 +65,7 @@ def _policy(path: str, slug: str) -> dict:
 class Workers:
     terms: LaunchTerms
     policy: dict
-    image_digest: str
+    image_tag: str
     profile: str
 
     @classmethod
@@ -77,6 +78,8 @@ class Workers:
         cap = environ[CAP_ENV]
         if not (cap.isascii() and cap.isdigit()) or int(cap) < 1:
             raise WorkerSettingsRefused(f"{CAP_ENV} must be a whole number above zero")
+        if not image_tag.is_tag(environ[IMAGE_TAG_ENV]):
+            raise WorkerSettingsRefused(f"{IMAGE_TAG_ENV} must be an image tag, never a digest")
         policy, profile = _policy(environ[POLICY_ENV], slug), environ[PROFILE_ENV]
         if profile not in policy["profiles"]:
             raise WorkerSettingsRefused(f"the Pod policy has no {profile} profile")
@@ -84,7 +87,7 @@ class Workers:
         if not projects:
             raise WorkerSettingsRefused(f"{PROJECTS_ENV} names no project")
         terms = LaunchTerms(environ[ACCOUNT_ENV], int(cap), RESERVATION_MS, projects, environ[BRAIN_ENV], api_url)
-        return cls(terms, policy, environ[IMAGE_ENV], profile)
+        return cls(terms, policy, environ[IMAGE_TAG_ENV], profile)
 
     def launch(self, request: SpawnRequest) -> dict:
         task, limits = request.task, self.policy["profiles"][self.profile]["limits"]
@@ -96,7 +99,7 @@ class Workers:
             "controller_epoch": task["controller_epoch"],
             "project_id": self.terms.project_ids[0],
             "harness": HARNESS,
-            "image_digest": self.image_digest,
+            "image_digest": image_tag.resolve(self.policy["image_repository"], self.image_tag),
             "profile": self.profile,
             "memory_mib": limits["memory_mib"],
             "cpu_millis": limits["cpu_millis"],

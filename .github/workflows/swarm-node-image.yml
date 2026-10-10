@@ -98,6 +98,11 @@ jobs:
           out="$RUNNER_TEMP/worker-image-attestation/candidate"
           bash docker/swarm-node/publish.sh "$CANDIDATE" "$REPOSITORY" "$GITHUB_SHA" "$out"
           jq -r '"digest: \(.digest)  promoted: \(.promoted)  replayed: \(.replayed)"' "$out/promoted.json" >> "$GITHUB_STEP_SUMMARY"
+      - name: Move the floating dev tag to the published digest
+        if: (github.event_name == 'push' || inputs.publish) && github.ref == 'refs/heads/dev'
+        run: |
+          digest="$(jq -r .digest "$RUNNER_TEMP/worker-image-attestation/candidate/promoted.json")"
+          docker buildx imagetools create --tag "$REPOSITORY:dev" "$REPOSITORY@$digest"
       - name: Upload the attestation
         if: always()
         uses: actions/upload-artifact@v4

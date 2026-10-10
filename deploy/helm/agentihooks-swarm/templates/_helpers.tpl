@@ -89,6 +89,10 @@ envFrom:
 
 {{- define "swarm.podSecurity" -}}
 automountServiceAccountToken: false
+{{ include "swarm.podSecurityContext" . }}
+{{- end -}}
+
+{{- define "swarm.podSecurityContext" -}}
 securityContext:
   runAsNonRoot: true
   runAsUser: 10001
