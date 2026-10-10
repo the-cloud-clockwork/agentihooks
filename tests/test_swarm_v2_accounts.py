@@ -166,7 +166,8 @@ def test_simultaneous_launch_threads_take_one_slot(world):
     for thread in threads:
         thread.join()
 
-    assert sorted(outcomes, key=lambda outcome: outcome != "account_full")[0] == "account_full"
+    assert outcomes.count("account_full") == 1
+    assert {outcome for outcome in outcomes if outcome != "account_full"} < {f"{SLUG}/{FIRST}", f"{SLUG}/{SECOND}"}
     assert len(world.holders()) == CAP
     assert world.capacity.account_reservation_conflicts_total() == 1
 

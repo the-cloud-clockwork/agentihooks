@@ -201,8 +201,9 @@ class AccountCapacity:
             found = registration(record.execution_id) if record.state != CLOSED and record.execution_id else None
             if found is None or found.swarm_id != self.slug or not self._owns(record, found):
                 continue
-            slot = Slot(found.account, self._holder(record.seat), record.execution_id, record.generation, OCCUPIED)
-            confirmed.setdefault(found.account, {})[slot.holder] = replace(slot, session=record.key())
+            holder = self._holder(record.seat)
+            slot = Slot(found.account, holder, record.execution_id, record.generation, OCCUPIED, 0, record.key())
+            confirmed.setdefault(found.account, {})[holder] = slot
         return confirmed
 
     def reconstruct(
@@ -217,7 +218,7 @@ class AccountCapacity:
         for account in sorted(stored | set(confirmed)):
             wanted = confirmed.get(account, {})
 
-            def decide(pipe, slots, now, wanted=wanted):
+            def decide(pipe, slots, now):
                 dropped = [
                     name
                     for name, slot in slots.items()
