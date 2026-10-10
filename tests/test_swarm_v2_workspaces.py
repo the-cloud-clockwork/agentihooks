@@ -250,6 +250,7 @@ def test_a_recorded_generation_for_another_base_is_refused(world):
         ({"origin": " https://user:pass@github.com/o/r"}, CREDENTIAL),
         ({"origin": "ssh://git:pass@host.example/o/r"}, CREDENTIAL),
         ({"origin": "user:secret@host.example:o/r"}, CREDENTIAL),
+        ({"origin": "user:secret@host.example:o/a@b"}, CREDENTIAL),
         ({"origin": "https://github.com/o/r?token=x"}, CREDENTIAL),
         ({"origin": "https://github.com/o/r#token=x"}, CREDENTIAL),
         ({"base": "x..dev"}, "invalid base branch: x..dev"),
@@ -390,7 +391,8 @@ def test_scp_origin_without_a_user_is_read():
 
 
 @pytest.mark.parametrize(
-    ("project", "slug"), [("host/@@", "repo"), ("host/org/-My.Repox-.", "my.repox"), ("host/My--Repo", "my--repo")]
+    ("project", "slug"),
+    [("", "repo"), ("host/@@", "-"), ("host/org/-My.Repox-.", "-my.repox-."), ("host/My--Repo", "my--repo")],
 )
 def test_the_mirror_folder_name_is_a_clean_slug_and_a_digest(world, project, slug):
     digest = hashlib.sha256(project.encode()).hexdigest()[:16]
@@ -507,6 +509,11 @@ def test_a_replay_with_a_newer_required_commit_is_refused_as_stale(world):
     with pytest.raises(workspaces.WorkspaceError) as refused:
         workspaces.prepare(world.execution, world.request(minimum=newer))
     assert str(refused.value) == f"base dev at {first.base_commit} does not contain {newer}; it is stale"
+
+
+def test_a_replay_whose_base_holds_the_required_commit_returns_the_workspace(world):
+    first = workspaces.prepare(world.execution, world.request())
+    assert workspaces.prepare(world.execution, world.request(minimum=first.base_commit)) == first
 
 
 def test_a_failed_branch_listing_starts_no_work(world, monkeypatch):

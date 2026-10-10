@@ -69,7 +69,7 @@ def identity(url: str) -> str:
 
 
 def mirror_path(execution: Execution, project: str, reuse: bool = True) -> Path:
-    slug = re.sub(r"[^a-z0-9._-]+", "-", PurePosixPath(project).name.lower()).strip("-.") or "repo"
+    slug = re.sub(r"[^a-z0-9._-]+", "-", PurePosixPath(project).name.lower()) or "repo"
     digest = hashlib.sha256(project.encode()).hexdigest()[:16]
     suffix = "" if reuse else f"-{uuid.uuid4().hex[:8]}"
     return execution.path("checkout") / f"{slug}-{digest}{suffix}.git"
@@ -178,7 +178,7 @@ def _contains(mirror: Path, request: Request, commit: str) -> None:
 
 
 def _branch(execution: Execution, mirror: Path, agent: str) -> str:
-    listed = _git("branch", "--format=%(refname:short)", repo=mirror)
+    listed = _git("branch", repo=mirror)
     if listed.returncode:
         raise WorkspaceError(f"branches of {mirror.name} could not be listed")
     taken = {path.name for path in execution.path("worktree").iterdir()} | set(listed.stdout.split())
@@ -198,9 +198,9 @@ def _mirror(execution: Execution, request: Request, project: str, reuse: bool) -
 def _save(execution: Execution, workspace: Workspace) -> None:
     record = _record_path(execution, workspace.task)
     record.parent.mkdir(mode=0o700, exist_ok=True)
-    staging = record.with_suffix(".partial")
-    staging.write_text(json.dumps({**asdict(workspace), "path": str(workspace.path), "mirror": str(workspace.mirror)}))
-    staging.replace(record)
+    with tempfile.NamedTemporaryFile("w", dir=record.parent, delete=False) as staging:
+        staging.write(json.dumps({**asdict(workspace), "path": str(workspace.path), "mirror": str(workspace.mirror)}))
+    Path(staging.name).replace(record)
 
 
 def _materialize(workspace: Workspace) -> None:
@@ -209,12 +209,9 @@ def _materialize(workspace: Workspace) -> None:
     if not workspace.mirror.is_dir():
         raise WorkspaceError(f"task {workspace.task} generation {workspace.generation} lost its mirror")
     _git("worktree", "prune", repo=workspace.mirror)
-    held = _git("rev-parse", f"refs/heads/{workspace.branch}", repo=workspace.mirror)
-    if held.returncode == 0:
-        target = [str(workspace.path), workspace.branch]
-    else:
-        target = ["-b", workspace.branch, str(workspace.path), workspace.base_commit]
-    if _git("worktree", "add", *target, repo=workspace.mirror).returncode:
+    if _git("rev-parse", f"refs/heads/{workspace.branch}", repo=workspace.mirror).returncode:
+        _git("branch", workspace.branch, workspace.base_commit, repo=workspace.mirror)
+    if _git("worktree", "add", str(workspace.path), workspace.branch, repo=workspace.mirror).returncode:
         raise WorkspaceError(f"worktree {workspace.branch} could not be created")
 
 
