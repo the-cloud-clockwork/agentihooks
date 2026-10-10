@@ -97,6 +97,21 @@ def isolated_server(tmp_path, monkeypatch):
     return tmp_path
 
 
+def test_occupied_unresponsive_port_gives_up_without_starting(isolated_server, monkeypatch):
+    monkeypatch.setattr(server, "SERVER_WAIT", 0.15)
+    with socket.socket() as held:
+        held.bind(("127.0.0.1", 0))
+        monkeypatch.setattr(server, "PORT", held.getsockname()[1])
+        monkeypatch.setattr(server, "BASE", f"http://127.0.0.1:{server.PORT}")
+        with (
+            patch.object(server.subprocess, "Popen") as start,
+            pytest.raises(SystemExit, match="did not answer"),
+        ):
+            server.ensure()
+        start.assert_not_called()
+
+
+@pytest.mark.wall_clock
 def test_occupied_unresponsive_port_times_out_without_starting(isolated_server, monkeypatch):
     monkeypatch.setattr(server, "SERVER_WAIT", 0.15)
     with socket.socket() as held:
