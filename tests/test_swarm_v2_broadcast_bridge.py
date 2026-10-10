@@ -78,10 +78,11 @@ def test_a_rewritten_grant_replaces_the_previous_one(tmp_path):
 
 def test_the_grant_is_staged_beside_its_file_and_never_in_the_shared_temporary_folder(tmp_path, monkeypatch):
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "absent"))
-    path = tmp_path / "launch-grant"
+    path = tmp_path / "run" / "launch-grant"
+    path.parent.mkdir()
     broadcast_bridge.store_grant(path, "v2.staged.grant")
     assert path.read_bytes() == b"v2.staged.grant"
-    assert [p.name for p in tmp_path.iterdir()] == ["launch-grant"]
+    assert [p.name for p in path.parent.iterdir()] == ["launch-grant"]
 
 
 def test_a_grant_file_left_open_to_others_is_replaced_privately(tmp_path):
