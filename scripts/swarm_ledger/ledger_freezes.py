@@ -68,7 +68,7 @@ def under(doc: dict, target: str) -> set:
     below = {}
     for node, (_, link, _) in project(doc)[0].items():
         below.setdefault(link, []).append(node)
-    for task in doc["tasks"]:
+    for task in doc.get("tasks", []):
         below.setdefault(f"tasks/{task['id']}", []).extend(f"tasks/{m}" for m in task.get("group_members", []))
     found = [target]
     for parent in found:
@@ -80,7 +80,7 @@ def _set(doc, op, ctx, by, words):
     target = op["target"]
     if not selector(target) and target not in project(doc)[0]:
         return False
-    rows = doc["freezes"]
+    rows = doc.setdefault("freezes", [])
     if any(row["verb"] == op["verb"] and row["target"] == target for row in rows):
         return True
     row = {"id": op["id"], "verb": op["verb"], "target": target, "by": by, "at": ctx.at, "reason": op.get("reason", "")}
@@ -93,7 +93,7 @@ def _set(doc, op, ctx, by, words):
 def _clear(doc, op, ctx, by):
     target = op["target"]
     held = under(doc, target)
-    rows = doc["freezes"]
+    rows = doc.get("freezes", [])
     gone = [row for row in rows if row["target"] in held]
     if gone:
         doc["freezes"] = [row for row in rows if row["target"] not in held]

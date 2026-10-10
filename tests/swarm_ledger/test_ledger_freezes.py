@@ -283,6 +283,44 @@ def test_the_live_dispatcher_at_full_autonomy_freezes_focuses_and_unfreezes_unde
     assert state["_meta"]["stamps"]["freezes"]["by"] == DISPATCHER
 
 
+def stored_without_freezes():
+    state = core.sync(SLUG)[0]
+    meta = state.pop("_meta")
+    del state["freezes"]
+    return state, core.Context(meta, 1791605100000, SLUG)
+
+
+@pytest.mark.parametrize("verb", ["freeze", "focus"])
+def test_the_first_freeze_on_a_ledger_without_a_freezes_collection_creates_it(verb):
+    state, ctx = stored_without_freezes()
+    op = {"op": "freeze_set", "id": "first", "verb": verb, "target": "plans/a"}
+    assert ledger_freezes.apply(state, op, ctx) is True
+    assert state["freezes"] == [
+        {"id": "first", "verb": verb, "target": "plans/a", "by": "operator", "at": 1791605100000, "reason": ""}
+    ]
+
+
+def test_the_server_path_stores_the_first_focus_on_a_ledger_saved_without_freezes():
+    from scripts.swarm_ledger.repository import repository
+
+    stored = repository.bound(core)
+    state = stored.get_document(SLUG)
+    del state["freezes"]
+    stored.import_document(SLUG, state, replace=True)
+    assert "freezes" not in stored.get_document(SLUG)
+    state, rejected = freeze("plans/a", verb="focus")
+    assert rejected == []
+    assert [(row["verb"], row["target"], row["by"]) for row in state["freezes"]] == [("focus", "plans/a", "operator")]
+    assert [(row["verb"], row["target"]) for row in stored.get_document(SLUG)["freezes"]] == [("focus", "plans/a")]
+
+
+def test_an_unfreeze_on_a_ledger_without_freezes_or_tasks_clears_nothing():
+    state, ctx = stored_without_freezes()
+    del state["tasks"]
+    assert ledger_freezes.apply(state, {"op": "freeze_clear", "id": "first", "target": "plans/a"}, ctx) is True
+    assert ctx.events == []
+
+
 def test_an_alias_is_judged_by_the_live_name_it_resolves_to(monkeypatch):
     aliases = {"retired-dispatcher": DISPATCHER, "retired-engineer": ENGINEER}
     monkeypatch.setattr(ledger_freezes, "resolve_name", lambda name: aliases.get(name, name))
