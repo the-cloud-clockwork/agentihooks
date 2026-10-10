@@ -20,7 +20,6 @@ EXPIRES_MS = 301_000
 class Fleet(World):
     def __init__(self, monkeypatch):
         from scripts.swarm_v2.api.broadcasts import BroadcastsAPI
-
         from scripts.swarm_v2.broadcasts import FleetBroadcasts
 
         super().__init__(monkeypatch)
@@ -153,10 +152,11 @@ def test_a_grant_counts_until_the_second_it_expires(world):
     assert world.claim(token, {"channels": CHANNELS}) == (401, detail("unauthenticated", "launch grant has expired"))
 
 
-def test_a_claim_without_a_bearer_credential_is_unauthenticated(world):
+@pytest.mark.parametrize("prefix", ["", "Bearer", "Token "])
+def test_a_claim_without_a_bearer_credential_is_unauthenticated(world, prefix):
     _, token = world.worker()
     world.announce()
-    status, refusal = world.broadcasts.route("POST", CLAIM, token, {"channels": CHANNELS})
+    status, refusal = world.broadcasts.route("POST", CLAIM, f"{prefix}{token}", {"channels": CHANNELS})
     assert (status, refusal) == (401, detail("unauthenticated", "a bearer credential is required"))
     assert world.deliveries() == []
 
@@ -200,6 +200,7 @@ def test_an_unrouted_method_or_path_is_no_broadcast_endpoint(world, method, path
             "fleet broadcasts kept changing; nothing was claimed",
         ),
         ("distribution_disabled", 503, "dependency_unavailable", "fleet broadcasts kept changing; nothing was claimed"),
+        ("forbidden_scope", 403, "forbidden_scope", "the launch grant is outside this swarm"),
     ],
 )
 def test_a_fleet_refusal_keeps_its_swarm_api_class(world, monkeypatch, raised, status, error_class, message):
@@ -236,7 +237,6 @@ def test_the_worker_api_never_publishes_as_the_operator(world):
         "forbidden_scope",
         "workers never publish as the operator",
     )
-    assert world.broadcasts.fleet.slug == SLUG
 
 
 @pytest.fixture
@@ -271,4 +271,28 @@ def test_the_served_api_carries_broadcast_claims_beside_executions(world, served
     assert send(served, "POST", CLAIM, foreign(world, token), {"channels": CHANNELS}) == (
         403,
         detail("forbidden_scope", "launch grant belongs to another swarm"),
+    )
+
+
+def test_an_empty_bearer_credential_is_unauthenticated(world):
+    world.announce()
+    assert world.broadcasts.route("POST", CLAIM, "Bearer ", {"channels": CHANNELS}) == (
+        401,
+        detail("unauthenticated", "a bearer credential is required"),
+    )
+    assert world.deliveries() == []
+
+
+def test_only_broadcast_paths_reach_the_broadcast_api(world):
+    from scripts.swarm_v2.api.server import Routes
+
+    _, token = world.worker()
+    routes = Routes(world.api, None)
+    assert routes.route("POST", "/v2/broadcastsX", f"Bearer {token}", {}) == (
+        404,
+        detail("invalid_request", "no such execution endpoint"),
+    )
+    assert routes.route("POST", "/v2/broadcasts/other", f"Bearer {token}", {}) == (
+        404,
+        detail("invalid_request", "no such broadcast endpoint"),
     )

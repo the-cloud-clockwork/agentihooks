@@ -1,7 +1,7 @@
 """A worker's prompt hook claims its fleet broadcasts with the launch grant its launch left in the attempt's private run
-folder. The hook environment names only the grant file: the settings writer drops credential shaped literals, and a
-token in settings would outlive its execution. Swarm modules load only once a grant file is named, because the hook runs
-on every prompt of every session."""
+folder. The hook environment names only the grant file and the swarm API address: the settings writer drops credential
+shaped literals, and a token in settings would outlive its execution. Swarm modules load only once both are named,
+because the hook runs on every prompt of every session."""
 
 import json
 import os
@@ -60,8 +60,10 @@ class RemoteFleet:
 def claim(session_id: str, channels: list[str], environ: Mapping[str, str]) -> int:
     if not environ.get(GRANT_FILE) or not environ.get(API_URL):
         return 0
-    from scripts.swarm_v2.broadcasts import sync_local
+    from scripts.swarm_v2.broadcasts import FLAG, sync_local
 
+    if environ.get(FLAG) != "1":
+        return 0
     try:
         return sync_local(RemoteFleet(environ[API_URL]), read_grant(environ), session_id, channels, environ)
     except (OSError, ValueError):

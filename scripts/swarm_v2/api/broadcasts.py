@@ -18,7 +18,10 @@ STATUS = {
     "stale_generation": 409,
     "dependency_unavailable": 503,
 }
-FLEET_REFUSALS = {"stale_generation": ("stale_generation", "a newer attempt of this seat already claimed")}
+FLEET_REFUSALS = {
+    "stale_generation": ("stale_generation", "a newer attempt of this seat already claimed"),
+    "forbidden_scope": ("forbidden_scope", "the launch grant is outside this swarm"),
+}
 UNAVAILABLE = ("dependency_unavailable", "fleet broadcasts kept changing; nothing was claimed")
 
 
@@ -33,9 +36,9 @@ class BroadcastsAPI:
         self.fleet = FleetBroadcasts(store, slug, lambda token: grants.bound(slug, token), no_operator)
 
     def route(self, method: str, path: str, authorization: str, body: object) -> tuple[int, dict]:
-        if not authorization.startswith(BEARER):
-            return 401, GrantRefused("unauthenticated", "a bearer credential is required").detail()
         token = authorization.removeprefix(BEARER)
+        if not authorization.startswith(BEARER) or not token:
+            return 401, GrantRefused("unauthenticated", "a bearer credential is required").detail()
         try:
             if (method, path) == ("POST", CLAIM):
                 return 200, self.claim(token, body)

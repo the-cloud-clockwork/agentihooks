@@ -131,6 +131,9 @@ def quiet(monkeypatch):
 def test_a_remote_worker_prompt_receives_the_fleet_broadcast(world, served, tmp_path, monkeypatch):
     agent, _, environ = launch(world, tmp_path, REMOTE, monkeypatch, served)
     world.announce()
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        environ["AGENTIHOOKS_SWARM_REDIS_URL"] = f"redis://127.0.0.1:{probe.getsockname()[1]}/0"
     for name, value in environ.items():
         monkeypatch.setenv(name, value)
     monkeypatch.setattr(hb, "_get_session_channels", lambda session_id: list(CHANNELS))
@@ -183,10 +186,15 @@ def test_the_bridge_claims_nothing_while_the_fleet_path_is_off_or_a_setting_is_m
 ):
     _, _, environ = launch(world, tmp_path, LOCAL, monkeypatch, served)
     world.announce()
-    off = {broadcasts.FLAG: "0"}
-    for missing in (broadcast_bridge.GRANT_FILE, broadcast_bridge.API_URL, broadcasts.FLAG):
-        assert broadcast_bridge.claim("s-local", list(CHANNELS), {**environ, missing: ""}) == 0
-    assert broadcast_bridge.claim("s-local", list(CHANNELS), {**environ, **off}) == 0
+    assert broadcast_bridge.API_URL == "AGENTIHOOKS_SWARM_API_URL"
+    read, post = Mock(), Mock()
+    with monkeypatch.context() as stubbed:
+        stubbed.setattr(broadcast_bridge, "read_grant", read)
+        stubbed.setattr("urllib.request.urlopen", post)
+        for missing in (broadcast_bridge.GRANT_FILE, broadcast_bridge.API_URL, broadcasts.FLAG):
+            assert broadcast_bridge.claim("s-local", list(CHANNELS), {**environ, missing: ""}) == 0
+        assert broadcast_bridge.claim("s-local", list(CHANNELS), {**environ, broadcasts.FLAG: "0"}) == 0
+    assert (read.call_count, post.call_count) == (0, 0)
     absent = {**environ, broadcast_bridge.GRANT_FILE: str(tmp_path / "absent")}
     assert broadcast_bridge.claim("s-local", list(CHANNELS), absent) == 0
     assert world.deliveries() == []
