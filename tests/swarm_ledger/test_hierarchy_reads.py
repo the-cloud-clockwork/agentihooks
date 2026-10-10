@@ -115,8 +115,9 @@ def test_dependents_follow_the_requires_links_downstream(repo):
 
 @pytest.mark.parametrize("read", sorted(hierarchy.READS))
 def test_an_unknown_node_is_refused(repo, read):
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError) as caught:
         repo.nodes(SLUG, read, "tasks/nope")
+    assert caught.value.args == ("tasks/nope",)
 
 
 def test_cycles_in_parents_and_dependencies_end(tmp_path):
