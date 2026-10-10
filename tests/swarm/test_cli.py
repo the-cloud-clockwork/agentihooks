@@ -180,7 +180,7 @@ def test_done_from_the_dispatcher_seat_ends_it_without_a_pull_request_once_its_t
     seat = "dispatcher@a1b2c3-0001"
     store.put_agent("sw", AgentRecord(seat, "dispatch", "dispatcher", seat="dispatcher@sw"))
     monkeypatch.setattr(cli.ledger_events, "view", lambda url: pytest.fail("a pull request was read"))
-    stale = {"id": "pr1", "item": "questions/q1", "text": "Pick the release day", "at": 0}
+    stale = {"id": "pr1", "item": "tasks/t5", "text": "Pick the release day", "at": 0}
     handed = {"id": "pr2", "item": "followups/f1", "text": "Rotate the registry token", "at": 0, "by": seat}
     settled = ledger.state
     ledger.state = lambda slug: {**settled(slug), "priorities": [stale, handed]}

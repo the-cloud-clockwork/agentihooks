@@ -331,6 +331,14 @@ def test_a_priority_a_dispatcher_handed_to_the_operator_counts_only_his_writes(b
     assert priority_sweep._counts(doc, row, priority_sweep.Write("operator", "comment", path, "x")) is True
 
 
+def test_operator_only_reads_a_ledger_missing_the_items_collection():
+    assert priority_sweep.operator_only({}, {"item": "questions/q1"}) is True
+    assert priority_sweep.operator_only({}, {"item": "followups/f1"}) is False
+    assert priority_sweep.operator_only({}, {"item": "tasks/t1", "by": "dispatcher@a1b2c3-0001"}) is True
+    approval = {"tasks": [{"id": "t1", "awaiting": "approval"}]}
+    assert priority_sweep.operator_only(approval, {"item": "tasks/t1", "by": "master@a1b2c3-0001"}) is True
+
+
 def test_a_master_relay_without_the_operators_words_never_clears_it(env):
     master = "master@sw-0001"
     core.sync(SLUG, ops=[{"op": "join", "id": "j-m", "by": master, "role": "orchestrator"}])

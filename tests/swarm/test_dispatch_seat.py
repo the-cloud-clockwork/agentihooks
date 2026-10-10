@@ -20,7 +20,7 @@ MINUTE = 60_000
 ROLE = Path(__file__).resolve().parents[2] / "profiles" / "package" / "roles" / "dispatcher"
 
 
-def priority(row_id="pr1", item="questions/q1", text="Pick the release day", age=15 * MINUTE):
+def priority(row_id="pr1", item="tasks/t5", text="Pick the release day", age=15 * MINUTE):
     return {"id": row_id, "item": item, "text": text, "at": NOW - age}
 
 
@@ -55,7 +55,7 @@ def test_an_unresolved_priority_at_full_autonomy_spawns_one_seat_whose_prompt_na
     assert seat.seat == seat_address(SLUG, "dispatcher") == f"dispatcher@{SLUG}"
     text = prompt.build(SLUG, "/repo", dispatch_seat.LANE, seat.name, runtime.tasks[0], autonomy="full")
     assert text.startswith(f"You are {seat.name}, the dispatcher of swarm {SLUG}")
-    assert "questions/q1" in text and "Pick the release day" in text and "15 minutes" in text
+    assert "tasks/t5" in text and "Pick the release day" in text and "15 minutes" in text
     assert run(store, runtime, doc(priority()), NOW + MINUTE) == []
     assert len(runtime.spawned) == 1
 
@@ -83,7 +83,7 @@ def test_a_live_seat_is_woken_once_by_inbox_for_each_new_trigger():
     assert actions == [f"woke {seat.name} with 1 new trigger"]
     [item] = InboxStore(store.redis).inbox(f"dispatcher@{SLUG}")
     assert InboxStore(store.redis).inbox(seat.name) == []
-    assert item.sender == "swarm" and "followups/f1" in item.text and "questions/q1" not in item.text
+    assert item.sender == "swarm" and "followups/f1" in item.text and "tasks/t5" not in item.text
     assert run(store, runtime, doc(priority(), later), NOW + 2 * MINUTE) == []
     assert len(runtime.spawned) == 1
 
@@ -105,7 +105,7 @@ def test_done_from_the_seat_is_refused_while_a_trigger_is_open_and_names_it():
     refused = dispatch_seat.refusal(SLUG, store.config(SLUG), store, doc(priority()), NOW)
     assert refused == (
         "dispatcher triggers are still open; settle them, or the tick ends your seat once they close:\n"
-        "- The priority on questions/q1 is unresolved after 15 minutes: Pick the release day"
+        "- The priority on tasks/t5 is unresolved after 15 minutes: Pick the release day"
     )
 
 
@@ -116,7 +116,7 @@ def test_done_from_the_seat_names_every_open_trigger_one_per_line():
     dev_red.hold(store.redis, SLUG, "t9", 77)
     found = {**doc(priority()), "tasks": [{"id": "t9", "state": "blocked"}]}
     assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, found, NOW).splitlines()[1:] == [
-        "- The priority on questions/q1 is unresolved after 15 minutes: Pick the release day",
+        "- The priority on tasks/t5 is unresolved after 15 minutes: Pick the release day",
         "- Dev Tests run 77 is red and holds these blocked tasks: t9. Propose a freeze or a focus to the master if one "
         "would help.",
     ]
@@ -186,6 +186,78 @@ def test_the_tick_spawns_the_seat_at_full_autonomy_only():
         assert sum(lane == dispatch_seat.LANE for lane, _, _ in runtime.spawned) == spawned
 
 
+OPERATOR_ONLY = {
+    "questions/q1": {},
+    "tasks/t1": {"state": "pr", "awaiting": "approval"},
+    "followups/f1": {"needs_operator": True},
+    "phases/p1": {"review": {"escalated": True}},
+}
+
+
+def operator_only_doc(*extra):
+    rows = [priority(f"pr{n}", path, f"Decide {n}") for n, path in enumerate(OPERATOR_ONLY)]
+    items = {path.split("/")[0]: [{"id": path.split("/")[1], **item}] for path, item in OPERATOR_ONLY.items()}
+    return {**doc(*rows, *extra), **{name: found for name, found in items.items() if name != "questions"}}
+
+
+@pytest.mark.parametrize("path", list(OPERATOR_ONLY))
+def test_a_priority_only_the_operator_can_settle_is_no_trigger(path):
+    name, item_id = path.split("/")
+    found = {**doc(priority("pr1", path, "Decide it")), name: [{"id": item_id, **OPERATOR_ONLY[path]}]}
+    assert dispatch_seat.triggers(found, NOW) == []
+    assert dispatch_seat.triggers({**found, name: [{"id": item_id}]}, NOW) == (
+        [] if name == "questions" else [{"id": "pr1", "item": path, "text": "Decide it", "minutes": 15}]
+    )
+
+
+def test_no_seat_spawns_while_every_open_priority_waits_on_the_operator():
+    store, runtime = swarm(), FakeRuntime()
+    for minute in range(3):
+        assert run(store, runtime, operator_only_doc(), NOW + minute * MINUTE) == []
+    assert runtime.spawned == [] and seats(store) == []
+    unsettled = priority("pr9", "tasks/t9", "Unblock the deploy")
+    [action] = run(store, runtime, operator_only_doc(unsettled), NOW)
+    [seat] = seats(store)
+    assert action == f"spawned dispatcher {seat.name} for 1 trigger"
+    assert runtime.tasks[0]["triggers"] == [
+        {"id": "pr9", "item": "tasks/t9", "text": "Unblock the deploy", "minutes": 15}
+    ]
+
+
+def test_no_seat_spawns_while_the_swarm_is_paused_and_one_spawns_once_it_runs():
+    store, runtime = swarm(), FakeRuntime()
+    store.update(SLUG, state="paused")
+    for minute in range(3):
+        assert run(store, runtime, doc(priority()), NOW + minute * MINUTE) == []
+    assert runtime.spawned == [] and seats(store) == []
+    store.update(SLUG, state="running")
+    [action] = run(store, runtime, doc(priority()), NOW + 3 * MINUTE)
+    [seat] = seats(store)
+    assert action == f"spawned dispatcher {seat.name} for 1 trigger"
+
+
+def test_a_live_seat_is_still_woken_while_the_swarm_is_paused():
+    store, runtime = swarm(), FakeRuntime()
+    run(store, runtime, doc(priority()))
+    [seat] = seats(store)
+    store.update(SLUG, state="paused")
+    later = priority("pr2", "followups/f2", "Approve the lane cap", age=20 * MINUTE)
+    assert run(store, runtime, doc(priority(), later), NOW + MINUTE) == [f"woke {seat.name} with 1 new trigger"]
+    assert len(runtime.spawned) == 1
+
+
+def test_the_tick_spawns_no_seat_while_the_swarm_is_paused():
+    class Ledger(FakeLedger):
+        def state(self, slug):
+            return {**super().state(slug), "priorities": [priority()]}
+
+    store, runtime = swarm(), FakeRuntime()
+    store.update(SLUG, state="paused")
+    tick(SLUG, store, Ledger([]), runtime, NOW)
+    assert [lane for lane, _, _ in runtime.spawned if lane == dispatch_seat.LANE] == []
+    assert seats(store) == []
+
+
 def test_the_seat_spawn_helper_names_records_and_places_a_seat():
     store, runtime = swarm(), FakeRuntime()
     record, placed = seat_spawn.place(
@@ -212,7 +284,7 @@ LED = f"agentihooks ledger --slug {SLUG} --as {NAME}"
 PROMPT = f"""You are {NAME}, the dispatcher of swarm {SLUG}, working beside its master in the repo /repo. \
 The swarm runs at full autonomy.
 The tick woke you because its deterministic passes could not settle these triggers:
-- The priority on questions/q1 is unresolved after 15 minutes: Pick the release day
+- The priority on tasks/t5 is unresolved after 15 minutes: Pick the release day
 Your seat dispatcher@{SLUG} has no history yet: no handoff document, no recap and no learned notes.
 
 Before anything else, run once: {LED} join. Then read the ledger with agentihooks ledger --slug {SLUG} show and \
@@ -231,7 +303,7 @@ When every trigger is closed, run {LED} leave, then agentihooks swarm {SLUG} don
 session.
 Write ledger comments and messages in plain words: no ids, paths, hashes or dashes.
 """
-TRIGGER_LINE = "- The priority on questions/q1 is unresolved after 15 minutes: Pick the release day\n"
+TRIGGER_LINE = "- The priority on tasks/t5 is unresolved after 15 minutes: Pick the release day\n"
 
 
 def test_the_dispatcher_prompt_is_built_from_its_triggers_and_seat():
@@ -246,8 +318,8 @@ def test_triggers_read_only_stale_priorities_and_tolerate_a_ledger_without_any()
     assert dispatch_seat.triggers({}, NOW) == []
     rows = [priority(), priority("pr2", age=30 * MINUTE + 59_999), priority("pr3", age=MINUTE)]
     assert dispatch_seat.triggers(doc(*rows), NOW) == [
-        {"id": "pr1", "item": "questions/q1", "text": "Pick the release day", "minutes": 15},
-        {"id": "pr2", "item": "questions/q1", "text": "Pick the release day", "minutes": 30},
+        {"id": "pr1", "item": "tasks/t5", "text": "Pick the release day", "minutes": 15},
+        {"id": "pr2", "item": "tasks/t5", "text": "Pick the release day", "minutes": 30},
     ]
 
 
