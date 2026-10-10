@@ -11,6 +11,7 @@ from tests.swarm.test_tick import FakeLedger
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
 MASTER, ENGINEER = "master@c4d5e6-0001", "engineer@c4d5e6-0002"
+DISPATCHER, CI, PLANNER = "dispatcher@c4d5e6-0003", "ci@c4d5e6-0004", "planner@c4d5e6-0005"
 
 
 @pytest.fixture
@@ -21,6 +22,9 @@ def swarm(monkeypatch):
     store.create(SwarmConfig("demo", "/repo", state="running", max_eng=2, max_ci=1))
     store.put_agent("demo", AgentRecord(MASTER, "master", "master", seat="master@demo"))
     store.put_agent("demo", AgentRecord(ENGINEER, "eng", "t1"))
+    store.put_agent("demo", AgentRecord(DISPATCHER, "dispatch", "dispatcher", seat="dispatcher@demo"))
+    store.put_agent("demo", AgentRecord(CI, "ci", "t2"))
+    store.put_agent("demo", AgentRecord(PLANNER, "plan", "t3"))
     ledger = FakeLedger([])
     ledger.freezes = []
     ledger.freeze = lambda slug, verb, target, **fields: ledger.freezes.append((slug, verb, target, fields))
@@ -68,6 +72,54 @@ def test_an_engineers_freeze_command_is_refused(swarm, monkeypatch, capsys):
     assert cli.main(["demo", "freeze", "plans/a", "--quote", "freeze it"]) == 1
     assert ledger.freezes == []
     assert "is neither" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("verb", ["freeze", "focus", "unfreeze"])
+def test_the_dispatcher_at_full_autonomy_writes_each_verb_as_the_dispatcher(swarm, monkeypatch, capsys, verb):
+    store, ledger = swarm
+    store.update("demo", autonomy="full")
+    acting(monkeypatch, DISPATCHER, "demo")
+    assert cli.main(["demo", verb, "plans/a", "--reason", "ship first"]) == 0
+    assert ledger.freezes == [("demo", verb, "plans/a", {"by": "dispatcher", "reason": "ship first", "quote": ""})]
+    assert json.loads(capsys.readouterr().out) == {verb: "plans/a", "by": "dispatcher"}
+
+
+@pytest.mark.parametrize("autonomy", ["manual", "assist", "delegate"])
+@pytest.mark.parametrize("verb", ["freeze", "focus", "unfreeze"])
+def test_the_dispatcher_below_full_autonomy_is_refused(swarm, monkeypatch, capsys, autonomy, verb):
+    store, ledger = swarm
+    store.update("demo", autonomy=autonomy)
+    acting(monkeypatch, DISPATCHER, "demo")
+    assert cli.main(["demo", verb, "plans/a", "--quote", "freeze it"]) == 1
+    assert ledger.freezes == []
+    assert capsys.readouterr().err == (
+        f"swarm: the dispatcher of swarm demo writes freezes only at full autonomy, and its autonomy is {autonomy}\n"
+    )
+
+
+def test_a_finished_dispatcher_is_refused(swarm, monkeypatch, capsys):
+    store, ledger = swarm
+    store.update("demo", autonomy="full")
+    store.put_agent("demo", AgentRecord(DISPATCHER, "dispatch", "dispatcher", state="finished"))
+    acting(monkeypatch, DISPATCHER, "demo")
+    assert cli.main(["demo", "focus", "plans/a"]) == 1
+    assert ledger.freezes == []
+    assert capsys.readouterr().err == (
+        f"swarm: only the operator or the master of swarm demo uses its swarm controls, and {DISPATCHER} is neither\n"
+    )
+
+
+@pytest.mark.parametrize("name", [ENGINEER, CI, PLANNER])
+@pytest.mark.parametrize("verb", ["freeze", "focus", "unfreeze"])
+def test_every_lane_agent_at_full_autonomy_is_still_refused(swarm, monkeypatch, capsys, name, verb):
+    store, ledger = swarm
+    store.update("demo", autonomy="full")
+    acting(monkeypatch, name, "demo")
+    assert cli.main(["demo", verb, "plans/a", "--quote", "freeze it"]) == 1
+    assert ledger.freezes == []
+    assert capsys.readouterr().err == (
+        f"swarm: only the operator or the master of swarm demo uses its swarm controls, and {name} is neither\n"
+    )
 
 
 @pytest.mark.parametrize(
