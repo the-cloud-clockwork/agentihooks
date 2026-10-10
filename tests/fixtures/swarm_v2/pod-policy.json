@@ -8,7 +8,7 @@
   "image_repository": "ghcr.io/the-cloud-clockwork/agentihooks-worker",
   "brain_url": "http://brain-api.swarm-brain.svc:8080",
   "termination_grace_seconds": 60,
-  "provider_accounts": ["claude-fixture", "codex-fixture"],
+  "provider_accounts": ["claude-fixture@example.com", "codex-fixture@example.com"],
   "profiles": {
     "general": {
       "limits": {"memory_mib": 4096, "cpu_millis": 2000, "ephemeral_mib": 10240},

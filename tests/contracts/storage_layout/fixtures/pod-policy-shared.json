@@ -9,8 +9,8 @@
   "brain_url": "http://brain-api.swarm-brain.svc:8080",
   "termination_grace_seconds": 60,
   "provider_accounts": [
-    "claude-fixture",
-    "codex-fixture"
+    "claude-fixture@example.com",
+    "codex-fixture@example.com"
   ],
   "profiles": {
     "general": {

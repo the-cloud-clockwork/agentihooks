@@ -14,7 +14,7 @@ EVIDENCE_CLASS = (
 HOSTILE = {
     "unknown fields": {"privileged": True, "host_mounts": ["/"], "secrets": ["cluster-admin-token"]},
     "yaml in task id": {"task_id": "vkub1\nspec:\n  hostNetwork: true"},
-    "unapproved provider account": {"provider_account": "cluster-admin-token"},
+    "unapproved provider account": {"provider_account": "cluster-admin@token.io"},
     "unapproved profile": {"profile": "research"},
     "resources over the profile": {"memory_mib": 65536},
     "image by tag": {"image_digest": "latest"},
@@ -67,7 +67,7 @@ def second() -> dict:
         harness="codex",
         memory_mib=2048,
         cpu_millis=1000,
-        provider_account="codex-fixture",
+        provider_account="codex-fixture@example.com",
         task_payload={"prompt": "A second independent task."},
     )
     return doc
@@ -86,6 +86,7 @@ def _summary(pod: dict) -> dict:
         "resources": container["resources"],
         "node_selector": body["nodeSelector"],
         "secrets": [v["secret"]["secretName"] for v in body["volumes"] if "secret" in v],
+        "secret_keys": [e["valueFrom"]["secretKeyRef"] for e in container["env"] if "valueFrom" in e],
         "host_paths": [v["name"] for v in body["volumes"] if "hostPath" in v],
         "privileged": container["securityContext"]["privileged"],
     }
