@@ -5,6 +5,7 @@ from redis.exceptions import RedisError
 
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger.api.resources import revision
+from scripts.swarm_ledger.ledger_comments import OUTCOMES as WORKER_OUTCOMES
 from scripts.swarm_ledger.repository import LedgerRepository
 from scripts.swarm_v2.auth_context import IDENTIFIER, GrantRefused, LaunchAuthority, Registration
 from scripts.swarm_v2.authority import TaskAuthority
@@ -33,7 +34,6 @@ REVISION = re.compile(r"[0-9a-f]{64}")
 TASK = re.compile(r"/v2/tasks/([^/]+)")
 COMMENTS = re.compile(r"/v2/tasks/([^/]+)/(?:progress|comments)")
 OUTCOMES = re.compile(r"/v2/tasks/([^/]+)/outcomes")
-WORKER_OUTCOMES = ("done", "blocked")
 CONTROLS = re.compile(r"/v2/swarm(/.*)?")
 STATUS = {
     "invalid_request": 400,
@@ -135,7 +135,7 @@ class TasksAPI:
         if not isinstance(proof, str) or not proof.strip():
             raise GrantRefused("invalid_request", "proof must be a non empty string")
         text = f"Outcome proposal: {request['outcome']}. {proof}"
-        op = {"op": "add", "thread": f"tasks/{task_id}/comments", "text": text}
+        op = {"op": "add", "thread": f"tasks/{task_id}/comments", "text": text, "outcome": request["outcome"]}
         return self._write(scope, request, op, request["expected_revision"])
 
     def _scope(self, token: str, task_id: str) -> Registration:
