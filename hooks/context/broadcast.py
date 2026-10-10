@@ -530,10 +530,8 @@ def cache_fleet_broadcasts(entries: list[dict]) -> int:
     with _file_lock(_broadcast_path()):
         msgs = _read_broadcasts()
         held = {m["id"] for m in msgs}
-        newest: dict[tuple[str, str, str], int] = {}
-        for m in [*msgs, *entries]:
-            if "fleet" in m:
-                newest[name(m)] = max(newest.get(name(m), 0), m["fleet"]["revision"])
+        tagged = sorted((m for m in [*msgs, *entries] if "fleet" in m), key=lambda m: m["fleet"]["revision"])
+        newest = {name(m): m["fleet"]["revision"] for m in tagged}
         kept = [m for m in msgs if "fleet" not in m or m["fleet"]["revision"] == newest[name(m)]]
         added = [
             {**entry, "content_hash": _msg_hash(entry)}

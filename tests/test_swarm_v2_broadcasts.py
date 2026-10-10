@@ -706,3 +706,82 @@ def test_an_older_generation_is_fenced_once_its_successor_claims_with_nothing_to
     assert ids(world.fleet.claim(new, CHANNELS)) == ["fleet-followup"]
     assert world.fleet.claim(new, CHANNELS) == world.fleet.claim(new, CHANNELS)
     assert world.store.redis.hget(world.fleet.key("broadcast-generations"), LOCAL) == "2"
+
+
+def test_the_local_cache_takes_the_broadcast_file_lock(tmp_path, monkeypatch):
+    path = tmp_path / "broadcast.json"
+    monkeypatch.setattr(hb, "_broadcast_path", lambda: path)
+    locked, real = [], hb._file_lock
+    monkeypatch.setattr(hb, "_file_lock", lambda target: locked.append(target) or real(target))
+    assert hb.cache_fleet_broadcasts([]) == 0
+    assert locked == [path]
+
+
+def test_a_draft_may_carry_only_the_required_fields_or_every_field(world):
+    local = world.token(LOCAL)
+    bare = {name: NOTE[name] for name in ("message", "severity", "ttl_seconds")}
+    assert refusal(world.fleet.publish, local, bare) == "forbidden_scope"
+    full = {**WARNING, "project_id": PROJECT, "target_role": "eng", "policy": "once"}
+    assert set(full) == broadcasts.DRAFT
+    assert world.announce(full).policy == "once"
+    assert world.announce({k: v for k, v in FOLLOWUP.items() if k != "broadcast_id"}).broadcast_id.startswith("bc-")
+
+
+def test_the_default_clock_is_the_redis_server_clock(world):
+    from scripts.swarm import lease
+
+    fleet = broadcasts.FleetBroadcasts(world.store, SLUG, world.authority.authorize, world.operator)
+    before = lease.now_ms(world.store)
+    published = fleet.publish_operator(OPERATOR, dict(WARNING))
+    assert before <= published.published_ms <= lease.now_ms(world.store)
+
+
+def test_a_claim_with_nothing_new_at_the_admitted_generation_writes_nothing(world):
+    local = world.token(LOCAL)
+    assert world.fleet.claim(local, CHANNELS) == []
+    assert world.store.redis.hget(world.fleet.key("broadcast-generations"), LOCAL) == "1"
+    commits = []
+    counting = world.broadcasts(Racing(world.store, lambda: commits.append(1)))
+    assert counting.claim(local, CHANNELS) == []
+    assert commits == []
+
+
+def test_a_broadcast_published_during_a_claim_is_delivered_on_the_retry(world):
+    local = world.token(LOCAL)
+    world.announce(WARNING)
+    raced = []
+
+    def race():
+        if not raced:
+            raced.append(world.announce(FOLLOWUP))
+
+    found = world.broadcasts(Racing(world.store, race)).claim(local, CHANNELS)
+    assert ids(found) == ["fleet-followup", "fleet-warning"]
+
+
+def test_a_successor_claim_racing_an_older_attempt_fences_it_on_the_retry(world):
+    world.token(LOCAL)
+    new = world.token(LOCAL, previous=world.agents[LOCAL].execution_id)
+
+    def older(store=None):
+        return world.broadcasts(store, authorize=lambda token: replace(world.authority.authorize(token), generation=1))
+
+    def successor():
+        if world.store.redis.hget(world.fleet.key("broadcast-generations"), LOCAL) == "1":
+            world.fleet.claim(new, [])
+
+    world.announce(FOLLOWUP)
+    assert ids(older().claim(new, CHANNELS)) == ["fleet-followup"]
+    assert refusal(older(Racing(world.store, successor)).acknowledge, new, "fleet-followup", 1) == "stale_generation"
+    assert world.fleet.delivery(LOCAL, "fleet-followup")["acked"] is False
+    world.store.redis.hset(world.fleet.key("broadcast-generations"), LOCAL, 1)
+    world.fleet.publish(new, dict(NOTE))
+    assert refusal(older(Racing(world.store, successor)).claim, new, CHANNELS) == "stale_generation"
+    assert world.fleet.delivery(LOCAL, "agent-note") is None
+
+
+def test_counters_and_switches_start_clear(world):
+    assert world.fleet.duplicate_acknowledgements(LOCAL) == 0
+    assert world.fleet.frozen() is False
+    world.fleet.freeze()
+    assert world.store.redis.get(world.fleet.key("broadcasts-frozen")) == "1"
