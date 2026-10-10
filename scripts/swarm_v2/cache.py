@@ -153,19 +153,26 @@ def _matches(store: Store, key: Key, entry: Path) -> bool:
         return False
 
 
-def _verified(store: Store, key: Key, owned: bool = True) -> Path | None:
+def _seen(store: Store, key: Key) -> Path | None:
     entry = store.policy.store / key.digest()
     if not entry.exists() and not entry.is_symlink():
         return None
     if not _matches(store, key, entry):
         METRICS["cache_corruption_total"] += 1
-        if owned:
+        return None
+    return entry / CONTENT
+
+
+def _verified(store: Store, key: Key) -> Path | None:
+    entry = store.policy.store / key.digest()
+    seed = _seen(store, key)
+    if seed is None:
+        if entry.exists() or entry.is_symlink():
             _drop(entry)
         return None
-    if owned:
-        now = store.clock()
-        os.utime(entry, (now, now))
-    return entry / CONTENT
+    now = store.clock()
+    os.utime(entry, (now, now))
+    return seed
 
 
 @contextmanager
@@ -193,7 +200,7 @@ def attach(store: Store, execution: Execution, key: Key) -> Layer:
     writable.mkdir(mode=0o700, exist_ok=True)
     seed = None
     if store.policy.enabled and store.read_only(store.policy.store):
-        seed = _verified(store, key, owned=False)
+        seed = _seen(store, key)
     elif store.policy.enabled:
         with _locked(store):
             seed = _verified(store, key)
