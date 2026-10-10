@@ -14,6 +14,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 
+from scripts.swarm_v2.kubernetes.storage import MountChecker, StorageRefused
 from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL, OWNER_LABEL
 
 SCHEMA = Path(__file__).resolve().parents[3] / "docs" / "swarm-v2" / "schemas" / "pod-policy.json"
@@ -214,6 +215,26 @@ def _resources(launch: AdmittedLaunch, limits: dict) -> dict:
     }
 
 
+def _shared_volume(mount: dict) -> dict:
+    read_only = mount["purpose"] != "artifact"
+    source = mount["source"]
+    if "claim" in source:
+        return {"persistentVolumeClaim": {"claimName": source["claim"], "readOnly": read_only}}
+    if "host_path" in source:
+        return {"hostPath": {"path": source["host_path"], "type": "Directory"}}
+    return {"nfs": {**source["nfs"], "readOnly": read_only}}
+
+
+def _shared(policy: dict, launch: AdmittedLaunch) -> tuple[list[dict], list[dict]]:
+    volumes, mounts = [], []
+    for mount in policy.get("mounts", []):
+        name = f"shared-{mount['name']}"
+        volumes.append({"name": name, **_shared_volume(mount)})
+        at = {"name": name, "mountPath": mount["mount_path"], "readOnly": mount["purpose"] != "artifact"}
+        mounts.append(at | ({"subPath": launch.execution_id} if mount["purpose"] == "artifact" else {}))
+    return volumes, mounts
+
+
 def _container(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
     container = {
         "name": "agent",
@@ -238,6 +259,7 @@ def _container(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
             {"name": "tmp", "mountPath": "/tmp"},  # NOSONAR: a Pod-private emptyDir, never the host /tmp
             {"name": "launch", "mountPath": LAUNCH_DIR, "readOnly": True},
             {"name": "credential", "mountPath": CREDENTIAL_DIR, "readOnly": True},
+            *_shared(policy, launch)[1],
         ],
     }
     for mode in PROBES:
@@ -287,6 +309,7 @@ def _spec(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
                     "defaultMode": 0o400,
                 },
             },
+            *_shared(policy, launch)[0],
         ],
     }
     if "runtime_class_name" in policy:
@@ -298,6 +321,7 @@ class PodTemplate:
     def __init__(self, policy: dict) -> None:
         self.policy = policy
         self.failures = Counter()
+        self.storage = MountChecker()
 
     def render(self, record: object) -> Rendered:
         try:
@@ -314,10 +338,18 @@ class PodTemplate:
             "metadata": _metadata(self.policy, launch, payload),
             "spec": _spec(self.policy, launch, profile),
         }
+        try:
+            self.storage.check(pod)
+        except StorageRefused as refused:
+            self.failures["storage"] += 1
+            raise PodSpecRefused(str(refused), "storage") from None
         return Rendered(pod, canonical_digest(pod))
 
     def pod_spec_validation_failures_total(self) -> dict[str, int]:
         return dict(self.failures)
+
+    def shared_runtime_mount_rejections_total(self) -> dict[str, int]:
+        return self.storage.shared_runtime_mount_rejections_total()
 
 
 def main(argv: list[str] | None = None) -> int:

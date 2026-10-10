@@ -3,10 +3,10 @@ import json
 from pathlib import Path
 
 import pytest
-from scripts.swarm_v2.kubernetes.storage import MountChecker, StorageRefused
 
 from scripts.swarm_v2.kubernetes import storage
 from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, PodTemplate, load_policy
+from scripts.swarm_v2.kubernetes.storage import MountChecker, StorageRefused
 
 pytestmark = pytest.mark.unit
 

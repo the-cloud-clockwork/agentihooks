@@ -1,10 +1,10 @@
 from pathlib import Path
 
 import pytest
-from scripts.swarm_v2.artifacts.publication import PAUSED, PUBLISHED, Publication
 
 from scripts.swarm_v2.artifacts import base, publication
 from scripts.swarm_v2.artifacts.local import LocalBackend
+from scripts.swarm_v2.artifacts.publication import PAUSED, PUBLISHED, Publication
 
 pytestmark = pytest.mark.unit
 
@@ -123,3 +123,9 @@ def test_a_failure_without_a_message_is_named_by_its_type(world):
     assert result.reason == (
         "artifact storage is unavailable (TimeoutError), so publication is paused and the attempt keeps its files"
     )
+
+
+def test_package_cases_pass_on_the_isolated_fixture():
+    from tests.contracts.storage_layout.cases import case_a, case_b, case_c
+
+    assert [case()["passed"] for case in (case_a, case_b, case_c)] == [True, True, True]
