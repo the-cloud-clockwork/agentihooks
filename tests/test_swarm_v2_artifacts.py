@@ -224,12 +224,12 @@ def test_malformed_reference_is_refused(digest, size):
 
 def test_store_takes_its_scope_from_the_verified_registration(tmp_path):
     authorize = Authority(registration(task="t9", execution="e7", generation=4))
-    store = base.ArtifactStore(local.LocalBackend(tmp_path), authorize, "grant")
+    store = base.ArtifactStore(local.LocalBackend(tmp_path / "durable"), authorize, "grant")
     assert authorize.tokens == ["grant"]
     assert store.scope == base.Scope("s1", "t9", "e7", 4)
     assert store.scope.key("objects", "x") == "s1/t9/objects/x"
     ref = store.put("a1", DATA)
-    assert store.backend.keys("") == ["s1/t9/artifacts/a1.json", f"s1/t9/objects/{ref.sha256}"]
+    assert store.backend.keys("s1/") == ["s1/t9/artifacts/a1.json", f"s1/t9/objects/{ref.sha256}"]
 
 
 @pytest.mark.parametrize(

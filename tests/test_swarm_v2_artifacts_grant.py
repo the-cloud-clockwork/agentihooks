@@ -19,7 +19,7 @@ class Grants:
         self.store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
         self.store.create(SwarmConfig(SLUG, "agentihooks", 1, 0))
         self.authority = self.signer(b"k" * 32)
-        record = AgentRecord(self.store.next_name(SLUG, "eng"), "eng", "t1", seat="eng-1", started_at=123)
+        record = AgentRecord(self.store.next_name(SLUG, "eng"), "eng", "t1", seat=f"eng-1@{SLUG}", started_at=123)
         self.execution = self.store.start_execution(SLUG, record, "")
 
     def signer(self, secret: bytes) -> LaunchAuthority:
@@ -45,11 +45,11 @@ def grants():
 def test_store_takes_the_scope_of_a_registered_launch_grant(grants, tmp_path):
     token = grants.issue()
     grants.register(token)
-    store = base.ArtifactStore(local.LocalBackend(tmp_path), grants.bound, token)
+    store = base.ArtifactStore(local.LocalBackend(tmp_path / "durable"), grants.bound, token)
     execution = grants.execution
     assert store.scope == base.Scope(SLUG, "t1", execution.execution_id, execution.generation)
     ref = store.put("a1", DATA)
-    assert store.backend.keys("") == ["fixture/t1/artifacts/a1.json", f"fixture/t1/objects/{ref.sha256}"]
+    assert store.backend.keys("fixture/") == ["fixture/t1/artifacts/a1.json", f"fixture/t1/objects/{ref.sha256}"]
 
 
 def test_hand_built_scope_is_refused_by_the_store(grants, tmp_path):
