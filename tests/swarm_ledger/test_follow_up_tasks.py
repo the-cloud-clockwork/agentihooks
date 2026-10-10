@@ -198,6 +198,7 @@ def test_task_set_unmarking_a_follow_up_keeps_its_slice(sliced):
 
 def test_task_set_unmarking_a_follow_up_still_computes_a_named_slice(sliced, monkeypatch):
     asked = []
+    sliced["tasks"][0]["plan_lines"] = ""
     monkeypatch.setattr(plan_ranges, "task_slice", lambda doc, phase, name, url: asked.append((name, url)) or "3-5")
     assert ledger_tasks.apply(sliced, task_set({"follow_up": False, "plan_slice": "first"}), update_ctx()) is True
     assert asked == [("first", SLICED["plan_url"])]
@@ -211,7 +212,8 @@ def test_the_coach_fingerprint_changes_when_task_set_marks_a_follow_up(sliced, m
     unsliced = {"overview": sliced["overview"], "phases": sliced["phases"], "tasks": []}
     described = {key: SLICED[key] for key in ("id", "title", "description", "phase")}
     after = intent._fingerprint(sliced, sliced["tasks"][0])
-    assert (after != before, after) == (True, intent._fingerprint(unsliced, described))
+    assert after != before
+    assert after == intent._fingerprint(unsliced, described)
 
 
 @pytest.mark.parametrize(("value", "expected"), [("yes", True), ("no", False)])
