@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from hooks.proc import _process
+from scripts.swarm_v2 import filesystem
 from scripts.swarm_v2.supervision_protocol import matches, read
 
 MODES = ("startup", "liveness", "readiness", "diagnose")
@@ -35,13 +36,13 @@ class Probe:
     brain_timeout: float = BRAIN_TIMEOUT
 
 
-def private_home(attempt: Path, harness: str) -> Path | None:
-    homes = read(attempt / "execution.json").get("homes")
+def private_home(execution: filesystem.Execution, harness: str) -> Path | None:
+    homes = read(execution.root / "execution.json").get("homes")
     relative = homes.get(harness) if isinstance(homes, dict) else None
     if not isinstance(relative, str):
         return None
-    home = (attempt / relative).resolve()
-    return home if home.is_relative_to(attempt.resolve() / "homes") and home.is_dir() else None
+    home = (execution.root / relative).resolve()
+    return home if home.is_relative_to(execution.path("home").resolve()) and home.is_dir() else None
 
 
 def writable(path: Path) -> bool:
@@ -60,10 +61,10 @@ def home_failure(home: Path | None) -> str | None:
     return None if writable(home) else "home_unwritable"
 
 
-def runtime_failure(attempt: Path) -> str | None:
-    for name in ("run", "tmp"):
-        if not writable(attempt / name):
-            return f"runtime_path_unwritable:{name}"
+def runtime_failure(execution: filesystem.Execution) -> str | None:
+    for path in (execution.path("runtime"), execution.path("scratch")):
+        if not writable(path):
+            return f"runtime_path_unwritable:{path.name}"
     return None
 
 
@@ -140,25 +141,21 @@ def alive(scope: dict) -> bool:
         return False
 
 
-def incarnation(attempt: Path) -> tuple[Path, dict] | None:
-    contexts = sorted((attempt / "run" / "supervision").glob("*/context.json"), key=lambda p: p.stat().st_mtime_ns)
+def incarnation(execution: filesystem.Execution) -> tuple[Path, dict] | None:
+    contexts = sorted(
+        (execution.path("runtime") / "supervision").glob("*/context.json"), key=lambda p: p.stat().st_mtime_ns
+    )
     if not contexts:
         return None
     scope = read(contexts[-1])
     return (contexts[-1].parent, scope) if alive(scope) and not (contexts[-1].parent / "result.json").exists() else None
 
 
-def herdr_failure(probe: Probe, home: Path | None, root: Path | None) -> str | None:
+def herdr_failure(probe: Probe, execution: filesystem.Execution, home: Path | None, root: Path | None) -> str | None:
     if home is None or root is None:
         return "herdr_unavailable"
     environment = {k: v for k, v in probe.environ.items() if not k.startswith("HERDR_")}
-    environment.update(
-        HOME=str(home),
-        CODEX_HOME=str(home / ".codex"),
-        CLAUDE_CONFIG_DIR=str(home / ".claude"),
-        XDG_RUNTIME_DIR=str(probe.attempt / "tmp"),
-        HERDR_CONFIG_PATH=str(root / "herdr.toml"),
-    )
+    environment.update(filesystem.environment(execution, probe.harness), HERDR_CONFIG_PATH=str(root / "herdr.toml"))
     try:
         result = subprocess.run(
             ["herdr", "workspace", "list"],
@@ -194,18 +191,18 @@ def brain_state(environ: dict, timeout: float) -> str:
         return "brain_unreachable"
 
 
-def local_checks(probe: Probe, mode: str, found: tuple[Path, dict] | None) -> dict:
+def local_checks(probe: Probe, execution: filesystem.Execution, mode: str, found: tuple[Path, dict] | None) -> dict:
     root, scope = found or (None, {})
     if mode == "liveness":
         return {"supervisor": None if found else "supervisor_absent"}
-    home = private_home(probe.attempt, probe.harness)
+    home = private_home(execution, probe.harness)
     checks = {
         "binaries": binary_failure(probe.harness, probe.environ),
         "home": home_failure(home),
-        "runtime_paths": runtime_failure(probe.attempt),
+        "runtime_paths": runtime_failure(execution),
         "hook": hook_failure(home, probe.harness, probe.environ),
         "supervisor": None if found else "supervisor_absent",
-        "herdr": herdr_failure(probe, home, root),
+        "herdr": herdr_failure(probe, execution, home, root),
     }
     if mode != "startup":
         checks["agent"] = agent_failure(root, scope)
@@ -213,8 +210,9 @@ def local_checks(probe: Probe, mode: str, found: tuple[Path, dict] | None) -> di
 
 
 def evaluate(probe: Probe, mode: str) -> dict:
-    found = incarnation(probe.attempt)
-    checks = local_checks(probe, mode, found)
+    execution = filesystem.recorded(probe.attempt, read(probe.attempt / "execution.json"))
+    found = incarnation(execution)
+    checks = local_checks(probe, execution, mode, found)
     reason = next((value for value in checks.values() if value), None)
     report = {
         "mode": mode,

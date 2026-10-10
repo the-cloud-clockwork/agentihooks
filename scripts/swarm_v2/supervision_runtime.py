@@ -11,6 +11,7 @@ from pathlib import Path
 from types import FrameType
 
 from hooks.proc import _process
+from scripts.swarm_v2 import filesystem
 from scripts.swarm_v2 import supervision_processes as trees
 from scripts.swarm_v2.supervision import Launch, LaunchRefused
 from scripts.swarm_v2.supervision_agent import native_command
@@ -20,7 +21,7 @@ from scripts.swarm_v2.supervision_protocol import checkpoint, matches, read, wri
 class Supervisor:
     def __init__(self, launch: Launch):
         self.launch = launch
-        self.root = launch.attempt / "run" / "supervision" / uuid.uuid4().hex
+        self.root = launch.execution.path("runtime") / "supervision" / uuid.uuid4().hex
         self.scope = {
             "authority": launch.authority,
             "incarnation": self.root.name,
@@ -35,10 +36,7 @@ class Supervisor:
         self.phase = "startup"
         self.environment = {k: v for k, v in os.environ.items() if not k.startswith("HERDR_")}
         self.environment.update(
-            HOME=str(launch.home),
-            CODEX_HOME=str(launch.home / ".codex"),
-            CLAUDE_CONFIG_DIR=str(launch.home / ".claude"),
-            XDG_RUNTIME_DIR=str(launch.attempt / "tmp"),
+            filesystem.environment(launch.execution, launch.harness),
             HERDR_CONFIG_PATH=str(self.root / "herdr.toml"),
             SWARM_SUPERVISION_DIR=str(self.root),
         )
