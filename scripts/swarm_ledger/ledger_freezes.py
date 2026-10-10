@@ -64,17 +64,15 @@ def author(op, ctx) -> tuple[str, str] | None:
 
 
 def under(doc: dict, target: str) -> set:
-    nodes, _ = project(doc)
-    members = {f"tasks/{t['id']}": [f"tasks/{m}" for m in t.get("group_members", [])] for t in doc["tasks"]}
-    found, frontier = {target}, [target]
-    while frontier:
-        parent = frontier.pop()
-        below = [node for node, (_, link, _) in nodes.items() if link == parent] + members.get(parent, [])
-        for node in below:
-            if node not in found:
-                found.add(node)
-                frontier.append(node)
-    return found
+    below = {}
+    for node, (_, link, _) in project(doc)[0].items():
+        below.setdefault(link, []).append(node)
+    for task in doc["tasks"]:
+        below.setdefault(f"tasks/{task['id']}", []).extend(f"tasks/{m}" for m in task.get("group_members", []))
+    found = [target]
+    for parent in found:
+        found += [node for node in below.get(parent, []) if node not in found]
+    return set(found)
 
 
 def _set(doc, op, ctx, by, words):
