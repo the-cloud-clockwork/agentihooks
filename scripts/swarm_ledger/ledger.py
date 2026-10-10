@@ -47,9 +47,11 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   time-left DURATION                 record remaining time, e.g. "3h 20m"
   claim ITEM                          take ownership of an item's operator events
   task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS] [--gain N] [--profile NAME]
-           [--kind K] [--must M --check C --judge J] [--scaffold] [--artifact] [--rank R] [--difficulty D]
+           [--kind K] [--must M --check C --judge J] [--push] [--scaffold] [--artifact] [--rank R] [--difficulty D]
                                       add a swarm task; IDS and AREAS are comma separated; K is code (default), ci,
                                       ops, troubleshoot, tune or research; M, C, J form its proof contract;
+                                      --push marks a proof that needs a pushed branch and a CI run, so the task
+                                      always gets the engineer profile, never qa;
                                       --scaffold creates its work folder (steering, progress, proof) in the same call;
                                       --artifact marks a file the operator asked for, so the task may publish it;
                                       R is the queue rank, urgent, high, normal (default) or low, next meaning
@@ -61,7 +63,8 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       phase moves it to another phase, from the master or a planner;
                                       plan_slice computes its plan lines from the published plan;
                                       proof.KEY=VALUE and contract.KEY=VALUE pairs form one object, e.g.
-                                      proof.command=C proof.output=O
+                                      proof.command=C proof.output=O; contract pairs update only the keys they
+                                      name, e.g. contract.push=yes
   plan-backfill                       compute missing plan lines for linked unfinished tasks; list missing slices
   prompt                              print the join paragraph for a launch prompt
   url                                 print the ledger page link for the operator (no --as needed)
@@ -114,7 +117,7 @@ AUTH_FAILURES = collections.Counter()
 SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
 OBJECT_FORMS = {
     "proof": (ledger_kinds.PROOF_KEYS, "proof.evidence=E proof.output=O"),
-    "contract": (ledger_kinds.CONTRACT_KEYS, "contract.must=M contract.check=C"),
+    "contract": (ledger_kinds.CONTRACT_KEYS + ledger_kinds.CONTRACT_FLAGS, "contract.must=M contract.check=C"),
 }
 
 
@@ -462,8 +465,11 @@ def cmd_publish_plan(args):
             op("slice_add", args, phase=f"phases/{phase}", anchor=anchor)
             for anchor in plan_ranges.slice_anchors(text, ranges[phase])
         ]
-    refused(call(args.slug, ops), ops)
-    print(json.dumps({"plan_url": url, "published_to": where, "phases": phases}))
+    state = call(args.slug, ops)
+    refused(state, ops)
+    tasks = ledger_plans.resliced(doc["tasks"], state["tasks"])
+    reslice = {"tasks": tasks} if any(tasks.values()) else {}
+    print(json.dumps({"plan_url": url, "published_to": where, "phases": phases, **reslice}))
 
 
 def cmd_plan(args):
@@ -659,11 +665,10 @@ def cmd_task(args):
         }
         if args.gain is not None:
             lists["gain"] = args.gain
-        contract = {k: getattr(args, k) for k in ("must", "check", "judge") if getattr(args, k)}
+        contract = {k: getattr(args, k) for k in ("must", "check", "judge", "push") if getattr(args, k)}
         if contract:
             lists["contract"] = contract
-        if args.artifact:
-            lists["artifact"] = True
+        lists.update((key, True) for key in ("artifact", "follow_up") if getattr(args, key))
         options = (
             ("kind", args.kind),
             ("profile", args.profile),
@@ -845,6 +850,13 @@ def build_parser():
     task.add_argument("--check", default="", help="contract: how it is checked")
     task.add_argument("--judge", default="", help="contract: who judges it")
     task.add_argument(
+        "--push",
+        action="store_const",
+        const="yes",
+        default="",
+        help="contract: the proof needs a pushed branch and a CI run, so never qa",
+    )
+    task.add_argument(
         "--scaffold", action="store_true", help="create the task's work folder now and store it as its workspace"
     )
     task.add_argument("--artifact", action="store_true", help="the operator asked this task for a file to review")
@@ -852,6 +864,9 @@ def build_parser():
     task.add_argument("--overlays", help="comma separated overlays this task's agent wears, at most three")
     task.add_argument("--rank", help="queue rank: urgent, high, normal (default) or low; next means urgent")
     task.add_argument("--plan-slice", default="", help="task slice anchor; computes its plan lines")
+    task.add_argument(
+        "--follow-up", action="store_true", help="a follow up task: no slice in a sliced phase, judged by its text"
+    )
     task.add_argument("--plan", default="", help="link to the published plan; default the phase's plan link")
     task.add_argument("--difficulty", choices=ledger_tasks.DIFFICULTIES, help="task size: S, M or L")
     task.add_argument(

@@ -155,6 +155,7 @@ def test_digest_is_sha256_of_the_effective_definition(definition_home):
                 "name": "accept",
                 "question": {"instructions": "Accept?", "true": "Yes", "false": "No", "type": "noul"},
                 "each": None,
+                "key": None,
             }
         ],
         "thresholds": {"yes": 0.6},

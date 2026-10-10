@@ -1,4 +1,3 @@
-import math
 from unittest.mock import patch
 
 import pytest
@@ -30,8 +29,8 @@ RESPONSIBILITY = {
         "CI plumbing, with no change to what a person sees or does in a product interface."
     ),
     "qa": (
-        "Independent verification: stress testing or proving work that others built, producing evidence rather "
-        "than changing behavior."
+        "Independent verification: stress testing or proving work that others built from evidence that needs no "
+        "push. A qa seat never edits code, pushes a branch or opens a pull request, so it cannot run a CI probe."
     ),
     "split": "Two or more unrelated public responsibilities bundled in one task that should become separate tasks.",
     "unresolved": "The task does not say enough about the public behavior it changes to decide.",
@@ -107,7 +106,12 @@ def packaged(tmp_path, monkeypatch):
 @pytest.mark.parametrize(("name", "params", "thresholds", "questions"), CASES)
 def test_tick_definitions_reproduce_the_call_site_prompts(packaged, name, params, thresholds, questions):
     definition = definitions.load(name, environ={})
-    assert (definition.purpose, definition.fallbacks, definition.rule.type) == (name, "cli", "code")
+    rule = ("choice", "confidence") if name == "profile-pick" else ("code", None)
+    assert (definition.purpose, definition.fallbacks, definition.rule.type, definition.rule.threshold) == (
+        name,
+        "cli",
+        *rule,
+    )
     assert definition.thresholds == thresholds
     assert runner.questions_for(definition, params) == questions
 
@@ -130,10 +134,10 @@ def test_legacy_threshold_variables_yield_to_the_classifier_variable(packaged, n
     assert definitions.load(name, environ={legacy: "0.75"}).thresholds == {"confidence": 0.75}
     assert definitions.load(name, environ={legacy: "0.75", current: "0.7"}).thresholds == {"confidence": 0.7}
     assert definitions.load(name, environ={current: "0.65"}).thresholds == {"confidence": 0.65}
-    assert definitions.load(name, environ={legacy: "1.5"}).thresholds == {"confidence": 1.5}
-    assert math.isnan(definitions.load(name, environ={legacy: "nan"}).thresholds["confidence"])
-    with pytest.raises(definitions.DefinitionError, match="threshold confidence must be between zero and one"):
-        definitions.load(name, environ={legacy: "much"})
+    for malformed in ("1.5", "nan", "much"):
+        with pytest.raises(definitions.DefinitionError) as error:
+            definitions.load(name, environ={legacy: malformed})
+        assert str(error.value) == "threshold confidence must be between zero and one"
     with pytest.raises(definitions.DefinitionError, match="threshold confidence must be between zero and one"):
         definitions.load(name, environ={legacy: "0.5", current: "1.5"})
 

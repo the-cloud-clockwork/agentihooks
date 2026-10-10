@@ -1164,7 +1164,8 @@ jobs:
   # A later queue entry's base is the earlier entry's merge commit, so the run that measured it may still be finishing.
   queue-baseline:
     needs: [unit]
-    if: github.event_name == 'merge_group'
+    # The record step refuses a missing 3.12 shard, so a run red only on another shard still publishes what later entries wait on.
+    if: ${{ !cancelled() && github.event_name == 'merge_group' }}
     runs-on: ubuntu-latest
     timeout-minutes: 13
     permissions:
@@ -1198,6 +1199,12 @@ jobs:
           retention-days: 7
           overwrite: true
 
+      - name: Stop when this run's unit shards failed
+        if: needs.unit.result != 'success'
+        run: |
+          echo "::error::A unit shard failed; this run published its 3.12 baseline for later queue entries and grades nothing."
+          exit 1
+
       - name: Mint the tcc main ci App token
         id: app-token
         uses: actions/create-github-app-token@v3.2.0
@@ -1218,8 +1225,11 @@ jobs:
           wait="${WAIT_SECONDS:-600}"
           deadline=$((SECONDS + wait))
           while true; do
-            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$BASE_SHA&per_page=20" --jq '.workflow_runs[].id')
-            for run in $runs; do
+            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$BASE_SHA&per_page=20" --jq '.workflow_runs[] | "\(.id) \(.status)"')
+            running=0
+            while read -r run status; do
+              [[ -n "$run" ]] || continue
+              [[ "$status" == completed ]] || running=1
               kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=coverage-baseline" --jq '[.artifacts[] | select(.expired | not)] | length')
               if [[ "$kept" -gt 0 ]]; then
                 echo "Restoring the coverage baseline of base $BASE_SHA tree $tree from run $run"
@@ -1227,7 +1237,11 @@ jobs:
                 echo "tree=$tree" >> "$GITHUB_OUTPUT"
                 exit 0
               fi
-            done
+            done <<< "$runs"
+            if [[ -n "$runs" && "$running" == 0 ]]; then
+              echo "::error::Every Tests run on base $BASE_SHA finished without a coverage baseline, so the queue entry it measured failed and this group is superseded."
+              exit 1
+            fi
             if (( SECONDS >= deadline )); then
               echo "::error::No run kept a coverage baseline for base $BASE_SHA within $wait seconds."
               exit 1

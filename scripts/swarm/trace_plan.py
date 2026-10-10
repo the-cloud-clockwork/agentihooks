@@ -13,18 +13,15 @@ import time
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
-from hooks.classifier import ClassifierError, Score, YesNo, decide
+from hooks.classifier import ClassifierError, decide, definitions, runner
 from scripts.gates import log as gate_log
-from scripts.swarm.slice_screen import OFF_INTENT, ONE_PR, SIZES
+from scripts.swarm.slice_screen import ONE_PR, levels
 from scripts.swarm_ledger import ledger_comments
 
 PLAN = "plan.md"
 VERDICT = "plan-verdict.json"
 PURPOSE = "trace-plan"
 FORMAT = "one piece per line: - what | area, area | why"
-NEEDED = "the task needs it"
-ELSEWHERE = "it serves something else"
-TOO_BIG_CONFIDENCE = 0.7
 MAX_PIECES = 100
 RETURNS = 1
 PASS, FAIL, UNCHECKED = "pass", "fail", "unchecked"
@@ -100,9 +97,9 @@ def intent(doc, task_id):
     }
 
 
-def _row(piece, probability):
+def _row(piece, probability, off_intent):
     ruling = all(is_clearance(area) for area in piece.areas)
-    kept = ruling or probability is None or probability >= OFF_INTENT
+    kept = ruling or probability is None or probability >= off_intent
     return {"what": piece.what, "areas": list(piece.areas), "why": piece.why, "probability": probability, "kept": kept}
 
 
@@ -119,33 +116,24 @@ def _known(previous, pieces):
     return list(rows)
 
 
-def questions(fresh, start, sized):
-    asked = {
-        f"piece_{start + i}": YesNo(
-            f"Is piece {start + i + 1}, {piece.what}, needed to deliver the task?", true=NEEDED, false=ELSEWHERE
-        )
-        for i, piece in enumerate(fresh)
+def _params(fresh, start, sized):
+    return {
+        "pieces": [{"slot": start + i, "number": start + i + 1, "what": piece.what} for i, piece in enumerate(fresh)],
+        "sized": [{}] if sized else [],
     }
-    if sized:
-        asked["size"] = Score(
-            "How much source work is the plan? Judge only pieces with nonempty areas; "
-            "test only pieces and the shared mutation clearance file are supporting proof, not additional scope.",
-            SIZES,
-        )
-    return asked
 
 
-def _size(answer):
+def _size(answer, sizes):
     level = round(answer.score)
-    return {"level": level, "name": SIZES[level], "confidence": answer.confidence}
+    return {"level": level, "name": sizes[level], "confidence": answer.confidence}
 
 
-def failures(rows, size):
+def failures(rows, size, too_big):
     reasons = []
     cut = sum(1 for row in rows if not row["kept"])
     if cut * 2 > len(rows):
         reasons.append(f"{cut} of {len(rows)} pieces are off the task intent, more than half")
-    if size["level"] > ONE_PR and size["confidence"] >= TOO_BIG_CONFIDENCE:
+    if size["level"] > ONE_PR and size["confidence"] >= too_big:
         reasons.append(
             f"the plan is sized {size['name']} at confidence {size['confidence']:.2f}, above one pull request"
         )
@@ -176,15 +164,19 @@ def trace(pieces, state, previous, now_ms=None):
         "at": int(time.time() * 1000) if now_ms is None else now_ms,
     }
     try:
-        result = decide({**state, "pieces": wire}, questions(fresh, start, not known), purpose=PURPOSE)
+        output = runner.run(PURPOSE, {**state, "pieces": wire}, _params(fresh, start, not known), decider=decide)
     except ClassifierError:
-        rows = known + [_row(piece, None) for piece in fresh]
+        rows = known + [_row(piece, None, None) for piece in fresh]
         return _record(UNCHECKED, rows, previous.get("size") if known else None, [NO_ANSWER], "", False, base)
-    rows = known + [_row(piece, result.answers[f"piece_{start + i}"].noul) for i, piece in enumerate(fresh)]
+    result, thresholds = output.raw, output.thresholds
+    rows = known + [
+        _row(piece, result.answers[f"piece_{start + i}"].noul, thresholds["off_intent"])
+        for i, piece in enumerate(fresh)
+    ]
     if known:
         return _record(PASS, rows, previous.get("size"), [], result.source, result.calibrated, base)
-    size = _size(result.answers["size"])
-    reasons = failures(rows, size)
+    size = _size(result.answers["size"], levels(output.definition))
+    reasons = failures(rows, size, thresholds["too_big_confidence"])
     verdict = FAIL if reasons else PASS
     base["failures"] += verdict == FAIL
     return _record(verdict, rows, size, reasons, result.source, result.calibrated, base)
@@ -277,3 +269,9 @@ def report(task_id, record, block):
         "reasons": record["reasons"],
         "next": step,
     }
+
+
+def __getattr__(name):
+    if name == "SIZES":
+        return levels(definitions.load(PURPOSE))
+    raise AttributeError(name)

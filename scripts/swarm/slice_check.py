@@ -109,4 +109,5 @@ def _unlined(phase, doc):
         and t["id"] != RELEASE.format(phase["id"])
         and t.get("plan_url")
         and not t.get("plan_lines")
+        and not t.get("follow_up")
     ]

@@ -1,8 +1,9 @@
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
-from hooks.classifier import decide, decision_log
+from hooks.classifier import code_rules, decide, decision_log
 from hooks.classifier.definitions import Definition, DefinitionError, QuestionSpec, load
+from hooks.classifier.errors import ClassifierInputError
 from hooks.classifier.questions import Choice, Question, YesNo, validate
 from hooks.classifier.result import Answer, DecisionResult
 
@@ -43,16 +44,35 @@ def _question(question: Question, params: dict) -> Question:
     return replace(question, instructions=instructions, levels=[_format(text, params) for text in question.levels])
 
 
-def _expanded(spec: QuestionSpec, params: dict) -> dict[str, Question]:
-    if spec.each is None:
-        return {spec.name: _question(spec.question, params)}
-    items = params.get(spec.each)
+def _named(spec: QuestionSpec, params: dict, default: str) -> str:
+    return default if spec.key is None else _format(spec.key, params)
+
+
+def _expanded(group: list[QuestionSpec], params: dict) -> list[tuple[str, Question]]:
+    each = group[0].each
+    if each is None:
+        return [(_named(group[0], params, group[0].name), _question(group[0].question, params))]
+    items = params.get(each)
     if not isinstance(items, list):
-        raise DefinitionError(f"each parameter {spec.each} must be a list")
-    return {
-        f"{spec.name}_{index}": _question(spec.question, {**params, "item": item, "index": index})
-        for index, item in enumerate(items)
-    }
+        raise DefinitionError(f"each parameter {each} must be a list")
+    expanded = []
+    for index, item in enumerate(items):
+        scope = {**params, "item": item, "index": index}
+        expanded += [(_named(spec, scope, f"{spec.name}_{index}"), _question(spec.question, scope)) for spec in group]
+    return expanded
+
+
+def _groups(specs: tuple[QuestionSpec, ...]) -> list[list[QuestionSpec]]:
+    groups, lists = [], {}
+    for spec in specs:
+        if spec.each is None:
+            groups.append([spec])
+        elif spec.each in lists:
+            lists[spec.each].append(spec)
+        else:
+            lists[spec.each] = [spec]
+            groups.append(lists[spec.each])
+    return groups
 
 
 def questions_for(definition: Definition, params: dict | None = None) -> dict[str, Question]:
@@ -60,12 +80,15 @@ def questions_for(definition: Definition, params: dict | None = None) -> dict[st
     if not isinstance(params, dict):
         raise DefinitionError("classifier parameters must be a mapping")
     questions = {}
-    for spec in definition.questions:
-        expanded = _expanded(spec, params)
-        if questions.keys() & expanded.keys():
-            raise DefinitionError("expanded question names must be unique")
-        questions.update(expanded)
-    validate(questions)
+    for group in _groups(definition.questions):
+        for name, question in _expanded(group, params):
+            if name in questions:
+                raise DefinitionError("expanded question names must be unique")
+            questions[name] = question
+    try:
+        validate(questions)
+    except ClassifierInputError as exc:
+        raise DefinitionError(str(exc)) from exc
     return questions
 
 
@@ -90,11 +113,13 @@ def run(
 ) -> RunResult:
     try:
         definition = load(name, environ=environ)
+        rule = code_rules.rule_for(definition)
+        params = {} if params is None else params
+        questions = questions_for(definition, params) if rule is None else rule.questions(definition, state, params)
     except DefinitionError as exc:
         with decision_log.record_context(definition=name):
             decision_log.append(name, state, None, 0, [decision_log.failure_record("definition", exc)])
         raise
-    questions = questions_for(definition, params)
     options = {
         "purpose": definition.purpose,
         "harness": harness,
@@ -106,9 +131,10 @@ def run(
         options = {key: value for key, value in options.items() if value is not None}
     with decision_log.record_context(definition=definition.name, definition_digest=definition.digest):
         result = decider(state, questions, **options)
-    verdicts = (
-        {}
-        if definition.rule.type == "code"
-        else {key: _verdict(answer, definition) for key, answer in result.answers.items()}
-    )
+    if rule is not None:
+        verdicts = rule.verdicts(definition, state, params, result.answers)
+    elif definition.rule.type == "code":
+        verdicts = {}
+    else:
+        verdicts = {key: _verdict(answer, definition) for key, answer in result.answers.items()}
     return RunResult(verdicts, result, definition)
