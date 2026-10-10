@@ -141,8 +141,9 @@ private headless herdr server and reads its status and socket API schema, then
 launches `claude -p` and `codex exec` from fixture profiles and counts the
 sessions their SessionStart hooks registered. `scripts.swarm_v2.image_attestation`
 qualifies each target against the image manifest's pinned version and the
-accepted herdr contract (protocol 22, the detached server daemon and health check
-capabilities, and every socket method the runtime calls) and reports
+accepted herdr contract of the local herdr 0.9.1 runtime path (protocol 22,
+endpoint protocol generation one and the health check capability, and every
+socket method the runtime calls) and reports
 `worker_image_qualified_targets`. Any refused target, or a manifest naming another
 commit, leaves the image unpromotable and nothing is pushed. The same job builds
 an incompatible herdr fixture and requires its refusal, and qualifies the
@@ -152,10 +153,15 @@ Only a qualified image is pushed, under the immutable tag `sha-<commit>`, after
 the registry login, which holds the workflow token; build arguments carry only
 the source revision. `docker/swarm-node/publish.sh` confirms the registry config
 digest equals the tested image before recording the digest. An existing commit
-tag is never pushed again: a rerun records the accepted digest as a replay. The
+tag is never pushed again: a rerun records it as a replay only when it holds the
+tested image, and a registry that cannot say whether the tag exists stops the
+run with nothing pushed. The
 `swarm-worker-image-attestation` artifact holds the probe output and the
-attestation with digest, version manifest, test report and provenance naming the
-commit and run. `diffcheck/` proof branches publish only to the
+attestation with the registry digest, which is the immutable digest reference
+`agentihooks-worker@sha256:...`, the version manifest, the protocol compatibility
+manifest, the test report and provenance naming the commit and run. Publication
+runs only from dev or a proof branch; a dispatch elsewhere qualifies without
+pushing. `diffcheck/` proof branches publish only to the
 `agentihooks-worker-proof` repository. Rollback points deployment at the last
 accepted digest without rebuilding or retagging it; deployment selection belongs
 to antoncore GitOps.

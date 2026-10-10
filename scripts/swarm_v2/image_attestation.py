@@ -1,5 +1,3 @@
-"""SV2-IMG-05: qualify a worker image's pinned targets and build the release attestation that alone promotes its digest."""
-
 import argparse
 import json
 import os
@@ -8,9 +6,11 @@ import sys
 from pathlib import Path
 
 PACKAGE = "SV2-IMG-05"
+SCHEMA_VERSION = 1
 TARGETS = ("herdr", "claude", "codex")
 HERDR_PROTOCOL = 22
-HERDR_CAPABILITIES = ("detached_server_daemon", "health_check")
+HERDR_CAPABILITIES = {"endpoint_protocol_generation": 1, "health_check": True}
+HERDR_BASELINE = "local herdr 0.9.1 runtime path"
 HERDR_METHODS = frozenset(
     {
         "agent.get",
@@ -50,13 +50,20 @@ class Refused(ValueError):
     pass
 
 
+def capability_refusals(capabilities: dict) -> list[str]:
+    return [
+        f"herdr server lacks {name}={value}"
+        for name, value in HERDR_CAPABILITIES.items()
+        if type(capabilities.get(name)) is not type(value) or capabilities.get(name) != value
+    ]
+
+
 def herdr_refusals(observed: dict) -> list[str]:
     status, schema = observed.get("status") or {}, observed.get("schema") or {}
     refusals = [] if status.get("running") is True else ["herdr headless server did not run"]
     if status.get("protocol") != HERDR_PROTOCOL or schema.get("protocol") != HERDR_PROTOCOL:
         refusals.append(f"herdr protocol is not {HERDR_PROTOCOL}")
-    capabilities = status.get("capabilities") or {}
-    refusals += [f"herdr server lacks {name}" for name in HERDR_CAPABILITIES if capabilities.get(name) is not True]
+    refusals += capability_refusals(status.get("capabilities") or {})
     missing = sorted(HERDR_METHODS - set(schema.get("methods") or ()))
     if missing:
         refusals.append("herdr socket API lacks " + ", ".join(missing))
@@ -71,7 +78,7 @@ def harness_refusals(name: str, observed: dict) -> list[str]:
 
 def target_report(name: str, pinned: str, observed: dict) -> dict:
     found = observed.get("version")
-    refusals = [] if found == pinned else [f"{name} version {found!r} is not pinned {pinned}"]
+    refusals = [] if pinned and found == pinned else [f"{name} version {found!r} is not pinned {pinned!r}"]
     refusals += herdr_refusals(observed) if name == "herdr" else harness_refusals(name, observed)
     return {"pinned": pinned, "observed": found, "qualified": not refusals, "refusals": refusals}
 
@@ -90,8 +97,9 @@ def qualify(manifest: dict, observed: dict) -> dict:
 
 def compatibility(manifest: dict) -> dict:
     return {
+        "baseline": HERDR_BASELINE,
         "herdr_protocol": HERDR_PROTOCOL,
-        "herdr_server_capabilities": list(HERDR_CAPABILITIES),
+        "herdr_server_capabilities": dict(HERDR_CAPABILITIES),
         "herdr_methods": sorted(HERDR_METHODS),
         "targets": manifest["observed"]["tools"],
     }
@@ -112,7 +120,7 @@ def attest(probe: dict, image_id: str, origin: dict) -> dict:
     if not DIGEST.fullmatch(image_id):
         refusals.append("tested image id is not a sha256 digest")
     return {
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
         "package": PACKAGE,
         "image_id": image_id,
         "digest": None,
@@ -127,31 +135,28 @@ def attest(probe: dict, image_id: str, origin: dict) -> dict:
     }
 
 
-def _accepted(attestation: dict, digest: str) -> None:
+def promote(attestation: dict, digest: str, config: str, tags: list[str], replayed: bool = False) -> dict:
     if not attestation["promotable"]:
         raise Refused("unqualified image: " + "; ".join(attestation["refusals"]))
     if not DIGEST.fullmatch(digest):
         raise Refused("registry digest is not a sha256 digest")
-
-
-def promote(attestation: dict, digest: str, config: str, tags: list[str]) -> dict:
-    _accepted(attestation, digest)
     if config != attestation["image_id"]:
-        raise Refused("pushed image is not the tested image")
-    return attestation | {"digest": digest, "tags": list(tags), "promoted": True, "replayed": False}
+        raise Refused("registry image is not the tested image")
+    return attestation | {
+        "digest": digest,
+        "config": config,
+        "tags": list(tags),
+        "promoted": not replayed,
+        "replayed": replayed,
+    }
 
 
-def replay(attestation: dict, digest: str, tags: list[str]) -> dict:
-    _accepted(attestation, digest)
-    return attestation | {"digest": digest, "tags": list(tags), "promoted": False, "replayed": True}
-
-
-def _write(path: Path, body: dict) -> None:
-    path.write_text(json.dumps(body, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+def _write(path: str, body: dict) -> None:
+    Path(path).write_text(json.dumps(body, indent=2, sort_keys=True) + "\n")
 
 
 def _attest(args: argparse.Namespace) -> int:
-    probe = json.loads(args.probe.read_text(encoding="utf-8"))
+    probe = json.loads(Path(args.probe).read_bytes())
     made = attest(probe, args.image_id, provenance(args.commit, os.environ))
     _write(args.output, made)
     verdict = "promotable" if made["promotable"] else "refused: " + "; ".join(made["refusals"])
@@ -160,35 +165,28 @@ def _attest(args: argparse.Namespace) -> int:
 
 
 def _promote(args: argparse.Namespace) -> int:
-    made = json.loads(args.attestation.read_text(encoding="utf-8"))
+    made = json.loads(Path(args.attestation).read_bytes())
     try:
-        if args.existing:
-            done, verb = replay(made, args.digest, args.tag), "kept accepted"
-        else:
-            done, verb = promote(made, args.digest, args.config, args.tag), "promoted"
+        done = promote(made, args.digest, args.config, args.tag, args.existing)
     except Refused as refused:
         print(refused, file=sys.stderr)
         return 1
     _write(args.output, done)
-    print(f"{PACKAGE} {verb} {args.digest}")
+    print(f"{PACKAGE} {'kept accepted' if args.existing else 'promoted'} {args.digest}")
     return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m scripts.swarm_v2.image_attestation")
+    parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
     made = commands.add_parser("attest")
-    made.add_argument("--probe", type=Path, required=True)
-    made.add_argument("--image-id", required=True)
-    made.add_argument("--commit", required=True)
-    made.add_argument("--output", type=Path, required=True)
+    for name in ("probe", "image_id", "commit", "output"):
+        made.add_argument(name)
     pushed = commands.add_parser("promote")
-    pushed.add_argument("--attestation", type=Path, required=True)
-    pushed.add_argument("--digest", required=True)
-    pushed.add_argument("--config", required=True)
+    for name in ("attestation", "digest", "config", "output"):
+        pushed.add_argument(name)
     pushed.add_argument("--tag", action="append", default=[])
     pushed.add_argument("--existing", action="store_true")
-    pushed.add_argument("--output", type=Path, required=True)
     return parser
 
 

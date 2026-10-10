@@ -19,17 +19,19 @@ config_of() {
 }
 
 promote() {
-    python3 -m scripts.swarm_v2.image_attestation promote --attestation "$output/attestation.json" \
-        --tag "$tag" --output "$output/promoted.json" "$@"
+    python3 -m scripts.swarm_v2.image_attestation promote "$output/attestation.json" \
+        "$1" "$(config_of "$repository@$1")" "$output/promoted.json" --tag "$tag" "${@:2}"
 }
 
-if docker buildx imagetools inspect "$tag" > "$output/existing.log" 2>&1; then
-    digest="$(docker buildx imagetools inspect --format '{{json .Manifest}}' "$tag" | jq -r .digest)"
-    promote --digest "$digest" --config "$(config_of "$tag")" --existing
+if docker buildx imagetools inspect --format '{{json .Manifest}}' "$tag" > "$output/existing.json" 2> "$output/existing.log"; then
+    promote "$(jq -r .digest "$output/existing.json")" --existing
     exit 0
+fi
+if ! grep -qi "not found" "$output/existing.log"; then
+    echo "cannot tell whether $tag exists; nothing pushed" >&2
+    exit 1
 fi
 docker tag "$candidate" "$tag"
 docker push "$tag" > "$output/push.log"
 reference="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$tag" | grep "^$repository@")"
-digest="${reference#*@}"
-promote --digest "$digest" --config "$(config_of "$repository@$digest")"
+promote "${reference#*@}"

@@ -2,6 +2,7 @@ import copy
 import json
 
 import pytest
+
 import scripts.swarm_v2.image_attestation as attestation
 
 pytestmark = pytest.mark.unit
@@ -10,48 +11,76 @@ IMAGE_ID = "sha256:" + "1" * 64
 DIGEST = "sha256:" + "2" * 64
 TOOLS = {"herdr": "herdr 0.9.1", "claude": "2.1.295 (Claude Code)", "codex": "codex-cli 0.162.0"}
 MANIFEST = {"source_revision": COMMIT, "observed": {"tools": TOOLS}}
+RUNTIME_METHODS = [
+    "agent.get",
+    "agent.list",
+    "agent.prompt",
+    "agent.rename",
+    "pane.close",
+    "pane.list",
+    "pane.process_info",
+    "pane.read",
+    "pane.send_keys",
+    "pane.send_text",
+    "pane.split",
+    "pane.wait_for_output",
+    "server.stop",
+    "tab.close",
+    "tab.create",
+    "tab.list",
+    "workspace.close",
+    "workspace.create",
+    "workspace.list",
+]
 STATUS = {
     "running": True,
     "version": "0.9.1",
     "protocol": 22,
-    "capabilities": {"live_handoff": True, "detached_server_daemon": True, "health_check": True},
+    "capabilities": {"detached_server_daemon": False, "endpoint_protocol_generation": 1, "health_check": True},
 }
 VALID = {
     "manifest": MANIFEST,
     "observed": {
-        "herdr": {
-            "version": "herdr 0.9.1",
-            "status": STATUS,
-            "schema": {"protocol": 22, "methods": sorted(attestation.HERDR_METHODS | {"ping"})},
-        },
+        "herdr": {"version": "herdr 0.9.1", "status": STATUS, "schema": {"protocol": 22, "methods": RUNTIME_METHODS}},
         "claude": {"version": "2.1.295 (Claude Code)", "hook_registrations": 1},
         "codex": {"version": "codex-cli 0.162.0", "hook_registrations": 1},
     },
 }
 ORIGIN = {"commit": COMMIT, "repository": "the-cloud-clockwork/agentihooks", "run_id": "7"}
+INCOMPATIBLE_REFUSALS = ["herdr protocol is not 22", "herdr server lacks health_check=True"]
+PROVENANCE_ENVIRON = {
+    "GITHUB_REPOSITORY": "o/r",
+    "GITHUB_WORKFLOW_REF": "o/r/.github/workflows/swarm-node-image.yml@refs/heads/dev",
+    "GITHUB_RUN_ID": "9",
+    "GITHUB_RUN_ATTEMPT": "2",
+    "GITHUB_REF": "refs/heads/dev",
+    "RUNNER_ENVIRONMENT": "github-hosted",
+}
 
 
 def incompatible():
     probe = copy.deepcopy(VALID)
     status = probe["observed"]["herdr"]["status"]
     status["protocol"] = 21
-    status["capabilities"]["detached_server_daemon"] = False
+    status["capabilities"]["health_check"] = False
     return probe
+
+
+def test_the_runtime_method_contract_is_the_accepted_list():
+    assert sorted(attestation.HERDR_METHODS) == RUNTIME_METHODS
 
 
 def test_the_valid_image_qualifies_every_target():
     report = attestation.qualify(MANIFEST, VALID["observed"])
 
-    assert report["promotable"] is True
-    assert report["worker_image_qualified_targets"] == 3
-    assert {name: target["qualified"] for name, target in report["targets"].items()} == dict.fromkeys(
-        attestation.TARGETS, True
-    )
-    assert report["targets"]["claude"] == {
-        "pinned": "2.1.295 (Claude Code)",
-        "observed": "2.1.295 (Claude Code)",
-        "qualified": True,
-        "refusals": [],
+    assert report == {
+        "package": "SV2-IMG-05",
+        "targets": {
+            name: {"pinned": version, "observed": version, "qualified": True, "refusals": []}
+            for name, version in TOOLS.items()
+        },
+        "worker_image_qualified_targets": 3,
+        "promotable": True,
     }
 
 
@@ -60,10 +89,7 @@ def test_incompatible_herdr_server_capabilities_fail_only_the_herdr_target():
 
     assert report["promotable"] is False
     assert report["worker_image_qualified_targets"] == 2
-    assert report["targets"]["herdr"]["refusals"] == [
-        "herdr protocol is not 22",
-        "herdr server lacks detached_server_daemon",
-    ]
+    assert report["targets"]["herdr"]["refusals"] == INCOMPATIBLE_REFUSALS
     assert report["targets"]["codex"]["qualified"] is True
 
 
@@ -71,15 +97,27 @@ def test_incompatible_herdr_server_capabilities_fail_only_the_herdr_target():
     ("change", "refusal"),
     [
         (lambda h: h["status"].update(running=False), "herdr headless server did not run"),
+        (lambda h: h["status"].update(running="yes"), "herdr headless server did not run"),
         (lambda h: h["schema"].update(protocol=23), "herdr protocol is not 22"),
-        (lambda h: h["status"]["capabilities"].pop("health_check"), "herdr server lacks health_check"),
-        (lambda h: h["status"]["capabilities"].update(health_check="yes"), "herdr server lacks health_check"),
+        (lambda h: h["status"]["capabilities"].pop("health_check"), "herdr server lacks health_check=True"),
+        (lambda h: h["status"]["capabilities"].update(health_check="yes"), "herdr server lacks health_check=True"),
+        (lambda h: h["status"]["capabilities"].update(health_check=1), "herdr server lacks health_check=True"),
         (
-            lambda h: h["schema"].update(methods=sorted(set(h["schema"]["methods"]) - {"pane.read", "agent.list"})),
+            lambda h: h["status"]["capabilities"].update(endpoint_protocol_generation=2),
+            "herdr server lacks endpoint_protocol_generation=1",
+        ),
+        (
+            lambda h: h["status"]["capabilities"].update(endpoint_protocol_generation=True),
+            "herdr server lacks endpoint_protocol_generation=1",
+        ),
+        (lambda h: h["status"].pop("capabilities"), "herdr server lacks endpoint_protocol_generation=1"),
+        (
+            lambda h: h["schema"].update(methods=[m for m in RUNTIME_METHODS if m not in ("pane.read", "agent.list")]),
             "herdr socket API lacks agent.list, pane.read",
         ),
         (lambda h: h.pop("schema"), "herdr protocol is not 22"),
-        (lambda h: h.update(version="herdr 0.9.2"), "herdr version 'herdr 0.9.2' is not pinned herdr 0.9.1"),
+        (lambda h: h.pop("status"), "herdr headless server did not run"),
+        (lambda h: h.update(version="herdr 0.9.2"), "herdr version 'herdr 0.9.2' is not pinned 'herdr 0.9.1'"),
     ],
 )
 def test_each_herdr_incompatibility_names_its_refusal(change, refusal):
@@ -89,7 +127,17 @@ def test_each_herdr_incompatibility_names_its_refusal(change, refusal):
     report = attestation.qualify(MANIFEST, observed)
 
     assert refusal in report["targets"]["herdr"]["refusals"]
+    assert report["targets"]["herdr"]["qualified"] is False
     assert report["promotable"] is False
+
+
+def test_a_schema_without_methods_lacks_every_runtime_method():
+    observed = copy.deepcopy(VALID["observed"])
+    del observed["herdr"]["schema"]["methods"]
+
+    refusals = attestation.qualify(MANIFEST, observed)["targets"]["herdr"]["refusals"]
+
+    assert refusals == ["herdr socket API lacks " + ", ".join(RUNTIME_METHODS)]
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
@@ -103,33 +151,65 @@ def test_a_harness_without_session_start_hook_delivery_is_refused(target):
     assert report["worker_image_qualified_targets"] == 2
 
 
+def test_a_harness_with_two_registrations_qualifies():
+    observed = copy.deepcopy(VALID["observed"])
+    observed["claude"]["hook_registrations"] = 2
+
+    assert attestation.qualify(MANIFEST, observed)["targets"]["claude"]["qualified"] is True
+
+
 def test_a_missing_target_is_refused_and_not_counted():
     observed = copy.deepcopy(VALID["observed"])
     del observed["codex"]
 
     report = attestation.qualify(MANIFEST, observed)
 
-    assert report["targets"]["codex"]["qualified"] is False
-    assert "codex headless launch delivered no SessionStart hook" in report["targets"]["codex"]["refusals"]
+    assert report["targets"]["codex"] == {
+        "pinned": "codex-cli 0.162.0",
+        "observed": None,
+        "qualified": False,
+        "refusals": [
+            "codex version None is not pinned 'codex-cli 0.162.0'",
+            "codex headless launch delivered no SessionStart hook",
+        ],
+    }
     assert report["worker_image_qualified_targets"] == 2
+
+
+def test_a_target_without_a_pin_never_qualifies():
+    manifest = {"observed": {"tools": {"herdr": "herdr 0.9.1", "claude": "2.1.295 (Claude Code)"}}}
+    observed = copy.deepcopy(VALID["observed"])
+    observed["codex"]["version"] = ""
+
+    report = attestation.qualify(manifest, observed)
+
+    assert report["targets"]["codex"]["refusals"] == ["codex version '' is not pinned ''"]
+    assert report["promotable"] is False
 
 
 def test_the_release_artifact_names_digest_manifest_report_and_commit_provenance():
     made = attestation.attest(VALID, IMAGE_ID, ORIGIN)
 
-    assert made["package"] == "SV2-IMG-05"
-    assert made["promotable"] is True and made["promoted"] is False
-    assert made["image_id"] == IMAGE_ID and made["digest"] is None
-    assert made["manifest"] == MANIFEST
-    assert made["report"] == attestation.qualify(MANIFEST, VALID["observed"])
-    assert made["provenance"] == ORIGIN
-    assert made["compatibility"] == {
-        "herdr_protocol": 22,
-        "herdr_server_capabilities": ["detached_server_daemon", "health_check"],
-        "herdr_methods": sorted(attestation.HERDR_METHODS),
-        "targets": TOOLS,
+    assert made == {
+        "schema_version": 1,
+        "package": "SV2-IMG-05",
+        "image_id": IMAGE_ID,
+        "digest": None,
+        "tags": [],
+        "promotable": True,
+        "promoted": False,
+        "refusals": [],
+        "manifest": MANIFEST,
+        "report": attestation.qualify(MANIFEST, VALID["observed"]),
+        "compatibility": {
+            "baseline": "local herdr 0.9.1 runtime path",
+            "herdr_protocol": 22,
+            "herdr_server_capabilities": {"endpoint_protocol_generation": 1, "health_check": True},
+            "herdr_methods": RUNTIME_METHODS,
+            "targets": TOOLS,
+        },
+        "provenance": ORIGIN,
     }
-    assert made["refusals"] == []
 
 
 def test_a_manifest_from_another_commit_is_not_promotable():
@@ -142,8 +222,9 @@ def test_a_manifest_from_another_commit_is_not_promotable():
     assert made["refusals"] == ["image manifest names another commit"]
 
 
-def test_a_malformed_tested_image_id_is_not_promotable():
-    made = attestation.attest(VALID, "1" * 64, ORIGIN)
+@pytest.mark.parametrize("image_id", ["1" * 64, "sha256:" + "1" * 63, "sha256:" + "G" * 64, IMAGE_ID + "0"])
+def test_a_malformed_tested_image_id_is_not_promotable(image_id):
+    made = attestation.attest(VALID, image_id, ORIGIN)
 
     assert made["refusals"] == ["tested image id is not a sha256 digest"]
 
@@ -152,66 +233,57 @@ def test_attest_carries_every_target_refusal():
     made = attestation.attest(incompatible(), IMAGE_ID, ORIGIN)
 
     assert made["promotable"] is False
-    assert made["refusals"] == ["herdr protocol is not 22", "herdr server lacks detached_server_daemon"]
+    assert made["refusals"] == INCOMPATIBLE_REFUSALS
 
 
-def test_promotion_records_the_registry_digest_and_tags():
+@pytest.mark.parametrize("replayed", [False, True])
+def test_promotion_records_the_registry_digest_and_tags(replayed):
     made = attestation.attest(VALID, IMAGE_ID, ORIGIN)
-    tags = ["ghcr.io/o/worker:sha-" + COMMIT]
+    tags = ("ghcr.io/o/worker:sha-" + COMMIT,)
 
-    promoted = attestation.promote(made, DIGEST, IMAGE_ID, tags)
+    promoted = attestation.promote(made, DIGEST, IMAGE_ID, tags, replayed)
 
-    assert promoted == made | {"digest": DIGEST, "tags": tags, "promoted": True, "replayed": False}
+    assert promoted == made | {
+        "digest": DIGEST,
+        "config": IMAGE_ID,
+        "tags": list(tags),
+        "promoted": not replayed,
+        "replayed": replayed,
+    }
     assert made["digest"] is None
+
+
+def test_promotion_defaults_to_a_new_publication():
+    made = attestation.attest(VALID, IMAGE_ID, ORIGIN)
+
+    assert attestation.promote(made, DIGEST, IMAGE_ID, [])["promoted"] is True
 
 
 def test_an_unqualified_image_is_never_promoted():
     made = attestation.attest(incompatible(), IMAGE_ID, ORIGIN)
 
-    with pytest.raises(attestation.Refused, match="unqualified image: herdr protocol is not 22; herdr server lacks"):
+    with pytest.raises(attestation.Refused, match="^unqualified image: " + "; ".join(INCOMPATIBLE_REFUSALS) + "$"):
         attestation.promote(made, DIGEST, IMAGE_ID, [])
 
 
-def test_a_pushed_image_other_than_the_tested_one_is_refused():
+@pytest.mark.parametrize("replayed", [False, True])
+def test_a_registry_image_other_than_the_tested_one_is_refused(replayed):
     made = attestation.attest(VALID, IMAGE_ID, ORIGIN)
 
-    with pytest.raises(attestation.Refused, match="pushed image is not the tested image"):
-        attestation.promote(made, DIGEST, "sha256:" + "3" * 64, [])
+    with pytest.raises(attestation.Refused, match="^registry image is not the tested image$"):
+        attestation.promote(made, DIGEST, "sha256:" + "3" * 64, [], replayed)
 
 
-def test_a_malformed_registry_digest_is_refused():
+@pytest.mark.parametrize("digest", ["latest", "sha256:x", DIGEST + "0"])
+def test_a_malformed_registry_digest_is_refused(digest):
     made = attestation.attest(VALID, IMAGE_ID, ORIGIN)
 
-    with pytest.raises(attestation.Refused, match="registry digest is not a sha256 digest"):
-        attestation.promote(made, "latest", IMAGE_ID, [])
-
-
-def test_a_replay_keeps_the_accepted_digest_without_retagging():
-    made = attestation.attest(VALID, IMAGE_ID, ORIGIN)
-
-    replayed = attestation.replay(made, DIGEST, ["t"])
-
-    assert replayed == made | {"digest": DIGEST, "tags": ["t"], "promoted": False, "replayed": True}
-
-
-def test_a_replay_of_an_unqualified_build_is_still_refused():
-    made = attestation.attest(incompatible(), IMAGE_ID, ORIGIN)
-
-    with pytest.raises(attestation.Refused, match="unqualified image"):
-        attestation.replay(made, DIGEST, ["t"])
+    with pytest.raises(attestation.Refused, match="^registry digest is not a sha256 digest$"):
+        attestation.promote(made, digest, IMAGE_ID, [])
 
 
 def test_provenance_names_the_commit_and_the_run():
-    environ = {
-        "GITHUB_REPOSITORY": "o/r",
-        "GITHUB_WORKFLOW_REF": "o/r/.github/workflows/swarm-node-image.yml@refs/heads/dev",
-        "GITHUB_RUN_ID": "9",
-        "GITHUB_RUN_ATTEMPT": "2",
-        "GITHUB_REF": "refs/heads/dev",
-        "RUNNER_ENVIRONMENT": "github-hosted",
-    }
-
-    assert attestation.provenance(COMMIT, environ) == {
+    assert attestation.provenance(COMMIT, PROVENANCE_ENVIRON) == {
         "commit": COMMIT,
         "repository": "o/r",
         "workflow": "o/r/.github/workflows/swarm-node-image.yml@refs/heads/dev",
@@ -220,30 +292,31 @@ def test_provenance_names_the_commit_and_the_run():
         "ref": "refs/heads/dev",
         "runner": "github-hosted",
     }
-    assert attestation.provenance(COMMIT, {})["run_id"] == ""
+    assert attestation.provenance(COMMIT, {}) == {"commit": COMMIT} | dict.fromkeys(attestation.PROVENANCE, "")
 
 
-@pytest.mark.parametrize("commit", ["abc", "A" * 40, "a" * 41])
+@pytest.mark.parametrize("commit", ["abc", "A" * 40, "a" * 41, "g" * 40])
 def test_provenance_needs_a_full_commit(commit):
-    with pytest.raises(attestation.Refused, match="provenance needs a full agentihooks commit"):
+    with pytest.raises(attestation.Refused, match="^provenance needs a full agentihooks commit$"):
         attestation.provenance(commit, {})
 
 
 def _cli(tmp_path, monkeypatch, probe):
+    for name, value in PROVENANCE_ENVIRON.items():
+        monkeypatch.setenv(name, value)
     (tmp_path / "probe.json").write_text(json.dumps(probe))
-    monkeypatch.setattr(attestation.os, "environ", {"GITHUB_RUN_ID": "5"})
     output = tmp_path / "attestation.json"
-    argv = ["attest", "--probe", str(tmp_path / "probe.json"), "--image-id", IMAGE_ID, "--commit", COMMIT]
-    return attestation.main([*argv, "--output", str(output)]), output
+    code = attestation.main(["attest", str(tmp_path / "probe.json"), IMAGE_ID, COMMIT, str(output)])
+    return code, output
 
 
 def test_cli_attest_writes_the_artifact_and_exits_zero_when_promotable(tmp_path, monkeypatch, capsys):
     code, output = _cli(tmp_path, monkeypatch, VALID)
 
-    written = json.loads(output.read_text())
+    expected = attestation.attest(VALID, IMAGE_ID, attestation.provenance(COMMIT, PROVENANCE_ENVIRON))
     assert code == 0
-    assert written["promotable"] is True and written["provenance"]["run_id"] == "5"
-    assert capsys.readouterr().out.strip() == "qualified 3 of 3 targets; promotable"
+    assert output.read_text() == json.dumps(expected, indent=2, sort_keys=True) + "\n"
+    assert capsys.readouterr().out == "qualified 3 of 3 targets; promotable\n"
 
 
 def test_cli_attest_writes_the_rejection_and_exits_one(tmp_path, monkeypatch, capsys):
@@ -251,25 +324,31 @@ def test_cli_attest_writes_the_rejection_and_exits_one(tmp_path, monkeypatch, ca
 
     assert code == 1
     assert json.loads(output.read_text())["report"]["worker_image_qualified_targets"] == 2
-    assert capsys.readouterr().out.strip() == (
-        "qualified 2 of 3 targets; refused: herdr protocol is not 22; herdr server lacks detached_server_daemon"
-    )
+    assert capsys.readouterr().out == "qualified 2 of 3 targets; refused: " + "; ".join(INCOMPATIBLE_REFUSALS) + "\n"
 
 
 def _promote(tmp_path, monkeypatch, probe, *extra):
     _, made = _cli(tmp_path, monkeypatch, probe)
     output = tmp_path / "promoted.json"
-    argv = ["promote", "--attestation", str(made), "--digest", DIGEST, "--config", IMAGE_ID, "--tag", "x:sha-1"]
-    return attestation.main([*argv, "--tag", "x:sha-2", *extra, "--output", str(output)]), output
+    return attestation.main(["promote", str(made), DIGEST, IMAGE_ID, str(output), *extra]), output
 
 
 def test_cli_promote_writes_the_promoted_artifact(tmp_path, monkeypatch, capsys):
-    code, output = _promote(tmp_path, monkeypatch, VALID)
+    code, output = _promote(tmp_path, monkeypatch, VALID, "--tag", "x:sha-1", "--tag", "x:sha-2")
 
     written = json.loads(output.read_text())
     assert code == 0
-    assert (written["digest"], written["tags"], written["promoted"]) == (DIGEST, ["x:sha-1", "x:sha-2"], True)
-    assert capsys.readouterr().out.strip().endswith(f"promoted {DIGEST}")
+    assert (written["digest"], written["config"], written["tags"]) == (DIGEST, IMAGE_ID, ["x:sha-1", "x:sha-2"])
+    assert (written["promoted"], written["replayed"]) == (True, False)
+    assert output.read_text().endswith("}\n") and output.read_text().startswith('{\n  "compatibility"')
+    assert capsys.readouterr().out.endswith(f"SV2-IMG-05 promoted {DIGEST}\n")
+
+
+def test_cli_promote_without_tags_records_none(tmp_path, monkeypatch):
+    code, output = _promote(tmp_path, monkeypatch, VALID)
+
+    assert code == 0
+    assert json.loads(output.read_text())["tags"] == []
 
 
 def test_cli_promote_records_a_replay(tmp_path, monkeypatch, capsys):
@@ -278,7 +357,7 @@ def test_cli_promote_records_a_replay(tmp_path, monkeypatch, capsys):
     written = json.loads(output.read_text())
     assert code == 0
     assert (written["promoted"], written["replayed"], written["digest"]) == (False, True, DIGEST)
-    assert capsys.readouterr().out.strip().endswith(f"kept accepted {DIGEST}")
+    assert capsys.readouterr().out.endswith(f"SV2-IMG-05 kept accepted {DIGEST}\n")
 
 
 def test_cli_promote_refuses_and_writes_nothing(tmp_path, monkeypatch, capsys):
@@ -286,4 +365,9 @@ def test_cli_promote_refuses_and_writes_nothing(tmp_path, monkeypatch, capsys):
 
     assert code == 1
     assert not output.exists()
-    assert "unqualified image" in capsys.readouterr().err
+    assert capsys.readouterr().err == "unqualified image: " + "; ".join(INCOMPATIBLE_REFUSALS) + "\n"
+
+
+def test_cli_needs_a_command():
+    with pytest.raises(SystemExit):
+        attestation.main([])

@@ -1,25 +1,32 @@
-"""SV2-IMG-05 in-image smoke: headless herdr server capabilities and offline harness SessionStart hook delivery."""
-
-import argparse
 import json
 import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from scripts.swarm_v2.worker_home import Request, bootstrap
 
 MANIFEST = Path("/opt/swarm-node/manifest.json")
+TEMPLATES = Path("/opt/probe/profiles")
+ROOT = Path("/home/worker/attempts")
 INTERPRETER = Path("/opt/venv/bin/python")
 ATTEMPT = "image-probe"
 PROFILES = {"claude": "fixture-claude", "codex": "fixture-codex"}
 ACCOUNTS = {"claude": "AH_CC_TOKEN_FIXTURE", "codex": "AH_CX_TOKEN_FIXTURE"}
 ENDPOINTS = {"AGENTIHOOKS_LEDGER_URL": "http://ledger.swarm.invalid:8765"}
+OFFLINE = {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
 LAUNCHES = {
     "claude": (["claude", "-p", "hello"], 60),
     "codex": (["codex", "exec", "--skip-git-repo-check", "--dangerously-bypass-hook-trust", "hello"], 20),
 }
+HERDR_SERVER = ["herdr", "server"]
+HERDR_STATUS = ["herdr", "status", "server", "--json"]
+HERDR_SCHEMA = ["herdr", "api", "schema", "--json"]
+COMMAND_SECONDS = 30
+STATUS_SECONDS = 10
+STOP_SECONDS = 10
 STARTUP_SECONDS = 20.0
 POLL_SECONDS = 0.2
 
@@ -31,7 +38,7 @@ def run(command: list[str], environ: dict, timeout: float, cwd: Path | None = No
 
 
 def version(name: str, environ: dict) -> str:
-    return run([name, "--version"], environ, 30).stdout.strip()
+    return run([name, "--version"], environ, COMMAND_SECONDS).stdout.strip()
 
 
 def methods(schema: dict) -> list[str]:
@@ -39,12 +46,14 @@ def methods(schema: dict) -> list[str]:
     return sorted(request["properties"]["method"]["const"] for request in requests)
 
 
-def server_status(environ: dict, clock=time.monotonic, sleep=time.sleep) -> dict:
+def server_status(
+    environ: dict, clock: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep
+) -> dict:
     deadline = clock() + STARTUP_SECONDS
     while True:
         try:
-            status = json.loads(run(["herdr", "status", "server", "--json"], environ, 10).stdout)
-        except ValueError:
+            status = json.loads(run(HERDR_STATUS, environ, STATUS_SECONDS).stdout)
+        except (ValueError, subprocess.TimeoutExpired):
             status = {}
         if status.get("running") or clock() >= deadline:
             return status
@@ -52,34 +61,34 @@ def server_status(environ: dict, clock=time.monotonic, sleep=time.sleep) -> dict
 
 
 def herdr(root: Path, environ: dict) -> dict:
-    (root / "tmp").mkdir(mode=0o700, parents=True, exist_ok=True)
+    (root / "tmp").mkdir(mode=0o700, parents=True)
     environ = environ | {
         "HOME": str(root),
         "XDG_RUNTIME_DIR": str(root / "tmp"),
         "HERDR_CONFIG_PATH": str(root / "herdr.toml"),
     }
     devnull = subprocess.DEVNULL
-    server = subprocess.Popen(["herdr", "server"], env=environ, stdin=devnull, stdout=devnull, stderr=devnull)
+    server = subprocess.Popen(HERDR_SERVER, env=environ, stdin=devnull, stdout=devnull, stderr=devnull)
     try:
         status = server_status(environ)
-        schema = json.loads(run(["herdr", "api", "schema", "--json"], environ, 30).stdout or "{}")
+        schema = json.loads(run(HERDR_SCHEMA, environ, COMMAND_SECONDS).stdout or "{}")
     finally:
         server.terminate()
-        server.wait(timeout=10)
+        server.wait(timeout=STOP_SECONDS)
     found = {"protocol": schema.get("protocol"), "methods": methods(schema)}
-    return {"version": version("herdr", environ), "status": status, "schema": found}
+    return {"version": version(HERDR_SERVER[0], environ), "status": status, "schema": found}
 
 
 def registrations(home: Path) -> int:
     try:
-        return len(json.loads((home / ".agentihooks" / "active-sessions.json").read_text(encoding="utf-8")))
+        return len(json.loads((home / ".agentihooks" / "active-sessions.json").read_bytes()))
     except (OSError, ValueError):
         return 0
 
 
 def harness(name: str, attempt: Path, environ: dict) -> dict:
     home, work = attempt / "homes" / name, attempt / "work"
-    run(["git", "init", "-q", str(work)], environ, 30)
+    run(["git", "init", "-q", str(work)], environ, COMMAND_SECONDS)
     environ = environ | {"HOME": str(home)}
     command, timeout = LAUNCHES[name]
     try:
@@ -90,22 +99,16 @@ def harness(name: str, attempt: Path, environ: dict) -> dict:
 
 
 def probe(templates: Path, root: Path, environ: dict) -> dict:
-    root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    request = Request(root, ATTEMPT, templates, PROFILES, INTERPRETER, ACCOUNTS, ENDPOINTS, os.getuid(), os.getgid())
-    bootstrap(request)
-    base = {key: value for key, value in environ.items() if not key.startswith("HERDR_")}
-    base["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+    root.mkdir(mode=0o700, exist_ok=True)
+    bootstrap(Request(root, ATTEMPT, templates, PROFILES, INTERPRETER, ACCOUNTS, ENDPOINTS, os.getuid(), os.getgid()))
+    base = {key: value for key, value in environ.items() if not key.startswith("HERDR_")} | OFFLINE
     observed = {"herdr": herdr(root / "herdr", base)}
     observed |= {name: harness(name, root / ATTEMPT, base) for name in PROFILES}
-    return {"manifest": json.loads(MANIFEST.read_text(encoding="utf-8")), "observed": observed}
+    return {"manifest": json.loads(MANIFEST.read_bytes()), "observed": observed}
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m scripts.swarm_v2.image_probe")
-    parser.add_argument("--templates", type=Path, default=Path("/opt/probe/profiles"))
-    parser.add_argument("--root", type=Path, default=Path("/home/worker/attempts"))
-    args = parser.parse_args(argv)
-    print(json.dumps(probe(args.templates, args.root, dict(os.environ)), sort_keys=True))
+def main() -> int:
+    print(json.dumps(probe(TEMPLATES, ROOT, dict(os.environ)), sort_keys=True))
     return 0
 
 
