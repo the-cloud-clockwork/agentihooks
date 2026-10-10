@@ -6,6 +6,7 @@ import re
 import signal
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,8 +25,9 @@ SETTLED = "a later stop passed with the work committed, on origin and recorded"
 PUSHED = "pushed"
 GITHUB_RE = re.compile(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$")
 GIT_TIMEOUT_S = 60
-# Two seconds under the Stop condition's kill: a gate still running at the kill lets the stop through unpushed.
-GATE_TIMEOUT_S = CONDITIONS_TIMEOUT_SEC - 2
+# Measured: a GitHub push takes up to 2.3 s, the ledger write after it 0.52 s and the hook's startup 0.23 s.
+RESERVE_S = 3.5
+FLOOR_S = 1.0
 PREPUSH = Path("scripts") / "ci_prepush" / "__init__.py"
 GATE_FAILED = (
     "The pre push gate failed in {path}, so the stop hook did not push it. "
@@ -33,6 +35,10 @@ GATE_FAILED = (
 )
 GATE_SLOW = (
     "The pre push gate did not finish in {seconds:g} s in {path}, so the stop hook did not push it. "
+    "Run python -m scripts.ci_prepush there and commit."
+)
+GATE_LATE = (
+    "The stop hook had too little time left to run the pre push gate in {path}, so it did not push it. "
     "Run python -m scripts.ci_prepush there and commit."
 )
 
@@ -75,7 +81,7 @@ def trees(root, name):
     return [tree for tree in found if tree is not None]
 
 
-def gate_refusal(tree):
+def gate_refusal(tree, seconds):
     """Why the pre push gate keeps HEAD off origin, or None: a repo without one passes, a stamped HEAD is not rerun."""
     if not (tree.path / PREPUSH).is_file():
         return None
@@ -83,6 +89,8 @@ def gate_refusal(tree):
 
     if passed(tree.path):
         return None
+    if seconds < FLOOR_S:
+        return GATE_LATE.format(path=tree.path)
     gate = subprocess.Popen(
         [sys.executable, "-m", "scripts.ci_prepush"],
         cwd=tree.path,
@@ -91,11 +99,11 @@ def gate_refusal(tree):
         start_new_session=True,
     )
     try:
-        code = gate.wait(GATE_TIMEOUT_S)
+        code = gate.wait(seconds)
     except subprocess.TimeoutExpired:
         os.killpg(gate.pid, signal.SIGKILL)
         gate.wait()
-        return GATE_SLOW.format(path=tree.path, seconds=GATE_TIMEOUT_S)
+        return GATE_SLOW.format(path=tree.path, seconds=round(seconds, 1))
     return None if code == 0 else GATE_FAILED.format(path=tree.path)
 
 
@@ -148,13 +156,14 @@ class PushStop:
     name = "push-stop"
     default_mode = "enforce"
 
-    def __init__(self, connect=None, ledger=None, root=None, now=None):
-        self._connect, self._ledger, self._root, self._now = connect, ledger, root, now
+    def __init__(self, connect=None, ledger=None, root=None, now=None, clock=None):
+        self._connect, self._ledger, self._root, self._now, self._clock = connect, ledger, root, now, clock
 
     def matches(self, call):
         return not call.tool
 
     def decide(self, call, who, state):
+        deadline = self.clock() + CONDITIONS_TIMEOUT_SEC
         if not (who.pinned and who.task) or lane_of(who.name) not in WORKERS:
             return Decision()
         ledger = self.ledger()
@@ -164,7 +173,7 @@ class PushStop:
             return Decision()
         store, owed, failed = self.connect(), False, []
         for tree in trees(self.root(), who.name):
-            if tree.unpushed and (refused := gate_refusal(tree)):
+            if tree.unpushed and (refused := gate_refusal(tree, deadline - self.clock() - RESERVE_S)):
                 failed.append(refused)
             elif tree.unpushed and push(tree):
                 self.record(store, ledger, who, tree)
@@ -238,3 +247,6 @@ class PushStop:
         import time
 
         return int(time.time() * 1000)
+
+    def clock(self):
+        return self._clock() if self._clock else time.monotonic()
