@@ -61,7 +61,7 @@ def reused_issue(path: str, repo: str, run=subprocess.run) -> str:
     if issue := next((issue for issue in found if issue["state"] == "OPEN"), None):
         return issue["url"]
     issue = next(
-        (issue for issue in found if issue["comments"][-1:] and issue["comments"][-1]["body"] == REFUSED_NOTE), None
+        (issue for issue in found if issue["comments"] and issue["comments"][-1]["body"] == REFUSED_NOTE), None
     )
     if issue is None:
         return ""

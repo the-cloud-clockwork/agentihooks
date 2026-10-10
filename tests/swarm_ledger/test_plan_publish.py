@@ -857,12 +857,19 @@ def test_a_refused_republish_keeps_the_issue_its_published_plan_links(plan_ledge
     assert len(core.sync(plan_ledger)[0]["artifacts"]) == 1
 
 
-def test_a_refused_publish_keeps_an_issue_a_plan_entry_links(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "doc",
+    [
+        {"phases": [{"id": "p1", "title": "One"}], "plans": [{"id": "plan-old", "url": PLAN}]},
+        {"phases": [{"id": "p1", "title": "One", "plan_url": PLAN}]},
+    ],
+    ids=["plan entry", "phase"],
+)
+def test_a_refused_publish_keeps_an_issue_a_plan_entry_or_phase_links(tmp_path, monkeypatch, doc):
     plan = tmp_path / "plan.md"
     plan.write_text("# Rollout\nfirst\n", encoding="utf-8")
     closed = []
     stub_publish(monkeypatch, closed)
-    doc = {"phases": [{"id": "p1", "title": "One"}], "plans": [{"id": "plan-old", "url": PLAN}]}
     refused = {"rejected": ["x"], "_meta": {"warnings": ["phase refused"]}}
     monkeypatch.setattr(ledger, "call", lambda slug, ops=None: refused if ops else doc)
     args = ledger.build_parser().parse_args(
