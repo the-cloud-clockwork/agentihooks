@@ -202,6 +202,8 @@ def test_only_a_pushed_commit_inside_the_head_and_graded_green_counts_as_an_earl
     git("checkout", "-q", "-b", "fork")
     git("update-ref", "refs/remotes/origin/fork", commit("fork.py", "def h():\n    return 3\n"))
     git("checkout", "-q", "branch")
+    commit("mid.py", "def m():\n    return 4\n")
+    git("branch", "local")
     commit("two.py", "def g():\n    return 2\n")
     git("update-ref", "refs/remotes/origin/branch", "HEAD")
     asked = []
@@ -213,7 +215,7 @@ def test_only_a_pushed_commit_inside_the_head_and_graded_green_counts_as_an_earl
     bases = own_bases(tmp_path, base, "HEAD", graded)
     assert asked == [first]
     assert bases == sorted([base, first] if green else [base])
-    own = {"hooks/two.py": {1, 2}} | ({} if green else {"hooks/one.py": {1, 2}})
+    own = {"hooks/mid.py": {1, 2}, "hooks/two.py": {1, 2}} | ({} if green else {"hooks/one.py": {1, 2}})
     assert discover_changes(tmp_path, bases, "HEAD") == own
 
 
