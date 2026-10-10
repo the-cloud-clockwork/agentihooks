@@ -398,7 +398,7 @@ def test_an_exit_of_the_current_generation_frees_only_its_own_row(world):
 @pytest.mark.parametrize(
     ("sources", "source", "generation", "released"),
     [
-        ("pod_gone", "kubernetes", None, True),
+        ("pod_gone", "kubernetes", None, False),
         ("pod_failed", "kubernetes", None, True),
         ("supervisor_exit", "supervisor", None, True),
         ("pod_unreachable", "kubernetes", None, False),

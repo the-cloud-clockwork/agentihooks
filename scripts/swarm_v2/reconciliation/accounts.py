@@ -57,8 +57,6 @@ def _shows_exit(seen: observe.Classification | None, source: str) -> bool:
     entry = seen.sources.get(source) if seen is not None else None
     if entry is None:
         return False
-    if source == observe.Source.KUBERNETES.value and entry["reading"] == observe.Reading.NOT_FOUND.value:
-        return True
     return entry["reading"] == observe.Reading.OK.value and entry["value"] in EXIT_VALUES[source]
 
 
