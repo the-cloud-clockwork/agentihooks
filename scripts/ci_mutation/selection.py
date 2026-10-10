@@ -106,8 +106,6 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
     ]
     start = process_time()
     status = test_runner.run_stats(tests=tests)
-    # pytest exits 5 when the marker deselects every test in the bucket.
-    status = 0 if status == 5 else status
     tests_by_function = {name: sorted(names) for name, names in runner.mutmut.tests_by_mangled_function_name.items()}
     output.write_text(
         json.dumps(

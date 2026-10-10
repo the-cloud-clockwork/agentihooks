@@ -1,3 +1,4 @@
+import ast
 import json
 import os
 import shutil
@@ -562,33 +563,64 @@ def test_shard_stats_run_in_stats_mode_with_their_own_basetemp_and_record_everyt
     assert result == {"status": 4, "tests": {"m.x_f": ["a::t", "b::t"]}, "durations": {"a::t": 2.5}}
 
 
-def test_a_bucket_whose_every_test_carries_the_marker_counts_as_collected(tmp_path, monkeypatch):
-    from scripts.ci_mutation.selection import collect_shard_stats
+WALL_CLOCK_SPLITS = {
+    "tests/swarm_ledger/test_hook.py": [("test_four_stops_answer_within_two_seconds", "test_block_budget_then_allow")],
+    "tests/test_hook_targets.py": [("test_deep_history_stays_fast", "test_deep_history_resolves_the_newest_rollout")],
+    "tests/swarm_ledger/test_hub.py": [
+        ("test_wait_wakes_at_once_on_a_publish", "test_wait_wakes_on_a_publish"),
+        ("test_wait_answers_at_once_when_events_are_already_kept", "test_wait_answers_when_events_are_already_kept"),
+    ],
+    "tests/gates/test_prompts.py": [
+        (
+            "test_inline_scripts_read_a_long_option_word_in_linear_time",
+            "test_inline_scripts_find_no_script_in_a_long_option_word",
+        )
+    ],
+    "tests/swarm/test_store.py": [
+        (
+            "test_an_unreachable_redis_is_refused_within_a_second",
+            "test_an_unreachable_redis_is_refused_with_a_clear_error",
+        ),
+        ("test_the_suite_swarm_redis_is_refused_at_once", "test_the_suite_swarm_redis_is_refused"),
+    ],
+    "tests/swarm_ledger/test_server_teardown.py": [
+        ("test_the_test_server_stops_without_waiting_half_a_second", "test_the_test_server_starts_and_stops")
+    ],
+    "tests/swarm_ledger/test_server_ensure.py": [
+        (
+            "test_occupied_unresponsive_port_times_out_without_starting",
+            "test_occupied_unresponsive_port_gives_up_without_starting",
+        )
+    ],
+    "tests/observability/test_trace_flush.py": [
+        ("test_an_attempt_is_killed_within_seconds_of_its_timeout", "test_an_attempt_is_killed_at_its_timeout"),
+        ("test_slow_endpoint_is_bounded_per_attempt", "test_slow_endpoint_is_retried_later"),
+    ],
+    "tests/hive/test_cli.py": [
+        ("test_a_stalled_tls_client_is_dropped_after_the_request_timeout", "test_a_stalled_tls_client_is_dropped")
+    ],
+    "tests/swarm/test_cli.py": [
+        (
+            "test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs",
+            "test_a_quick_swarm_keeps_ticking_while_a_slow_one_runs",
+        )
+    ],
+}
 
-    monkeypatch.setenv("MUTANT_UNDER_TEST", os.environ.get("MUTANT_UNDER_TEST", ""))
-    monkeypatch.setenv("PY_IGNORE_IMPORTMISMATCH", "0")
-    engine = SimpleNamespace(tests_by_mangled_function_name={}, duration_by_test={})
-    runner = SimpleNamespace(_pytest_add_cli_args=[], run_stats=lambda *, tests: 5)
-    output = tmp_path / "out.json"
-    collect_shard_stats(SimpleNamespace(mutmut=engine), runner, ["tests/test_a.py"], output, str(tmp_path))
-    assert json.loads(output.read_text())["status"] == 0
 
-
-def test_the_wall_clock_marker_is_registered_on_the_budget_tests():
+@pytest.mark.parametrize("path", sorted(WALL_CLOCK_SPLITS))
+def test_only_the_timing_half_of_each_budget_test_carries_the_wall_clock_marker(path):
     root = Path(__file__).resolve().parents[1]
     markers = tomllib.loads((root / "pyproject.toml").read_text())["tool"]["pytest"]["ini_options"]["markers"]
     assert any(marker.startswith("wall_clock:") for marker in markers)
-    for path, test in [
-        (
-            "tests/swarm_ledger/test_hook.py",
-            "    @pytest.mark.wall_clock\n    def test_four_stops_answer_within_two_seconds(",
-        ),
-        ("tests/test_hook_targets.py", "    @pytest.mark.wall_clock\n    def test_deep_history_stays_fast("),
-        ("tests/swarm_ledger/test_hub.py", "@pytest.mark.wall_clock\ndef test_wait_wakes_at_once_on_a_publish("),
-        ("tests/swarm_ledger/test_hub.py", "@pytest.mark.wall_clock\ndef test_wait_answers_at_once_when_events_"),
-        ("tests/gates/test_prompts.py", "@pytest.mark.wall_clock\ndef test_inline_scripts_read_a_long_option_"),
-    ]:
-        assert test in (root / path).read_text(), (path, test)
+    decorators = {
+        node.name: {ast.unparse(decorator) for decorator in node.decorator_list}
+        for node in ast.walk(ast.parse((root / path).read_text()))
+        if isinstance(node, ast.FunctionDef)
+    }
+    for timed, functional in WALL_CLOCK_SPLITS[path]:
+        assert "pytest.mark.wall_clock" in decorators[timed], timed
+        assert "pytest.mark.wall_clock" not in decorators[functional], functional
 
 
 def test_parallel_stats_merge_every_shard_and_fail_on_any_red_shard(tmp_path, capsys):

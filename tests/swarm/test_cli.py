@@ -2285,7 +2285,7 @@ def test_no_swarms_still_sweeps_herdr(monkeypatch, capsys):
     assert capsys.readouterr().out.splitlines() == ["herdr: swept"]
 
 
-def test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs(monkeypatch, capsys):
+def quick_beside_slow(monkeypatch, capsys):
     import threading
     import time
 
@@ -2305,11 +2305,20 @@ def test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs(monkeypatch, capsy
         return [f"tick {ticks[slug]}"]
 
     _tick_all(monkeypatch, run_tick, ["slow", "fast"], tick_seconds=0.5)
+    return ticks, starts, capsys.readouterr().out.splitlines()
+
+
+def test_a_quick_swarm_keeps_ticking_while_a_slow_one_runs(monkeypatch, capsys):
+    ticks, _, out = quick_beside_slow(monkeypatch, capsys)
     assert ticks == {"fast": 3, "slow": 1}
-    assert all(0.45 <= later - earlier < 0.9 for earlier, later in zip(starts, starts[1:]))
-    out = capsys.readouterr().out.splitlines()
     assert sorted(out[:-1]) == ["fast: tick 1", "fast: tick 2", "fast: tick 3", "slow: tick 1"]
     assert out[-1] == "herdr: swept"
+
+
+@pytest.mark.wall_clock
+def test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs(monkeypatch, capsys):
+    _, starts, _ = quick_beside_slow(monkeypatch, capsys)
+    assert all(0.45 <= later - earlier < 0.9 for earlier, later in zip(starts, starts[1:]))
 
 
 def test_swarms_that_finish_together_tick_once(monkeypatch, capsys):
