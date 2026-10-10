@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/image_tag.py:scripts.swarm_v2.image_tag.x__grant__mutmut_11:88853d19573498f660c9b3c7f1812dcfe493e3ad97f6608373223df7233a26e2": {
+    "reader": "standards_reader",
+    "reason": "A missing realm defaults to XXXX instead of an empty string; urlsplit gives an empty scheme and no hostname for both, so the same token service refusal fires before any request."
+  }
+}
