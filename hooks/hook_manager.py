@@ -969,6 +969,13 @@ def on_user_prompt_submit(payload: dict) -> None:
 
     if BROADCAST_ENABLED:
         try:
+            from hooks.context.broadcast import _get_session_channels
+            from scripts.swarm_v2 import broadcast_bridge
+
+            broadcast_bridge.claim(session_id, _get_session_channels(session_id), os.environ)
+        except Exception as e:
+            log("fleet broadcast claim failed", {"error": str(e)})
+        try:
             from hooks.context.broadcast import check_and_inject_broadcasts
 
             check_and_inject_broadcasts(session_id)

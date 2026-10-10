@@ -11,7 +11,7 @@ from hooks import config, hook_manager
 from hooks.context import broadcast as hb
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2 import broadcast_bridge, broadcasts, worker_home
-from tests.test_swarm_v2_broadcasts import CHANNELS, LOCAL, REMOTE, SLUG, WARNING, World
+from tests.test_swarm_v2_broadcasts import CHANNELS, LOCAL, PUBLISH_MS, REMOTE, SLUG, WARNING, Epoch, World
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
@@ -19,8 +19,10 @@ pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 @pytest.fixture
 def world(monkeypatch, tmp_path):
     found = World(monkeypatch)
-    found.clock[0] = 1000
+    found.clock[0] = PUBLISH_MS
     monkeypatch.setattr(hb, "_broadcast_path", lambda: tmp_path / "broadcast.json")
+    monkeypatch.setattr(hb, "_sessions_path", lambda: tmp_path / "active-sessions.json")
+    monkeypatch.setattr(hb, "datetime", Epoch)
     monkeypatch.setattr(broadcast_bridge, "connect", lambda environ: RedisStore(found.store.redis))
     return found
 
