@@ -362,6 +362,7 @@ def test_preview_places_every_legacy_shape_and_reports_each_conflict_in_order():
         ("missing_phase", "tasks/t15", "", f"phases/{STANDALONE}"),
         ("phase_plan_link", "phases/p1", U1, KEPT),
         ("phase_plan_link", "phases/p5", U1, NEW),
+        ("plan_collision", "phases/p6", "plans/plan-cccccccccccc", "plans/plan-cccccccccccc-3e8a5e5522a1"),
         ("phase_plan", "phases/p2", "plans/kept", "plans/plan-9c18a4c47d37"),
         ("task_plan_link", "tasks/t2", BAD, KEPT),
         ("slice_collision", "tasks/t3", "slices/kept.s1", "phases/p1"),
@@ -377,6 +378,7 @@ def test_preview_places_every_legacy_shape_and_reports_each_conflict_in_order():
         ("task_slice", "tasks/t18", "slices/custom", "slices/kept.s9"),
     ]
     assert report["applied"] is False
+    assert report["refused"] == "phase p1 holds slices of another plan: custom, custom2"
     assert report["before"] == {
         "plans": 4,
         "phases": 11,
@@ -385,7 +387,7 @@ def test_preview_places_every_legacy_shape_and_reports_each_conflict_in_order():
         "nodes": 39,
         "dependencies": 0,
         "phases_in_plans": 5,
-        "tasks_in_phases": 18,
+        "tasks_in_phases": 17,
         "tasks_in_slices": 7,
     }
     assert report["after"] == {
@@ -396,7 +398,7 @@ def test_preview_places_every_legacy_shape_and_reports_each_conflict_in_order():
         "nodes": 50,
         "dependencies": 0,
         "phases_in_plans": 12,
-        "tasks_in_phases": 20,
+        "tasks_in_phases": 19,
         "tasks_in_slices": 12,
     }
 
@@ -451,6 +453,7 @@ def test_preview_fills_collections_an_old_document_never_stored():
             "tasks_in_slices": 0,
         },
         "conflicts": [],
+        "refused": "",
     }
 
 
@@ -483,7 +486,7 @@ def test_dry_run_compares_the_stored_rows_and_apply_refuses_a_task_without_its_p
             "nodes": 3,
             "dependencies": 1,
             "phases_in_plans": 0,
-            "tasks_in_phases": 2,
+            "tasks_in_phases": 1,
             "tasks_in_slices": 0,
         },
         "after": {
@@ -494,10 +497,11 @@ def test_dry_run_compares_the_stored_rows_and_apply_refuses_a_task_without_its_p
             "nodes": 4,
             "dependencies": 1,
             "phases_in_plans": 1,
-            "tasks_in_phases": 2,
+            "tasks_in_phases": 1,
             "tasks_in_slices": 0,
         },
         "conflicts": [{"kind": "missing_phase", "item": "tasks/t1", "before": "ghost", "after": None}],
+        "refused": "",
         "drift": {
             "missing_nodes": [],
             "extra_nodes": [],
@@ -513,6 +517,27 @@ def test_dry_run_compares_the_stored_rows_and_apply_refuses_a_task_without_its_p
     assert str(refused.value) == json.dumps(dry, sort_keys=True)
     assert repo.export_document(SLUG) == before
     assert repo.token(SLUG) == token
+
+
+def test_dry_run_reports_and_apply_refuses_a_moved_phase_that_keeps_another_plans_slices(tmp_path):
+    repo = repository(tmp_path)
+    doc = repo.export_document(SLUG)
+    doc["plans"] = [{"id": "kept", "title": "Kept"}]
+    doc["phases"] = [{"id": "p2", "title": "Moves", "plan": "plans/kept", "plan_url": MOVED}]
+    doc["slices"] = [{"id": "kept.x", "phase": "phases/p2", "anchor": "x"}]
+    doc["tasks"] = []
+    repo.import_document(SLUG, doc, token=repo.token(SLUG), replace=True)
+    before = repo.export_document(SLUG)
+    dry = hierarchy_backfill.backfill(repo, SLUG, "planner")
+    assert dry["refused"] == "phase p2 holds slices of another plan: kept.x"
+    assert dry["conflicts"] == [
+        {"kind": "phase_plan", "item": "phases/p2", "before": "plans/kept", "after": "plans/plan-9c18a4c47d37"}
+    ]
+    del dry["drift"]
+    with pytest.raises(ValueError) as refused:
+        hierarchy_backfill.backfill(repo, SLUG, "planner", apply=True)
+    assert str(refused.value) == json.dumps(dry, sort_keys=True)
+    assert repo.export_document(SLUG) == before
 
 
 def test_apply_records_one_backfill_event_at_the_write_time(tmp_path, monkeypatch):

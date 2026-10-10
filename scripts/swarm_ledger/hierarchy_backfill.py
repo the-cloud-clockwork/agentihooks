@@ -20,17 +20,18 @@ def conflict(rows: list, kind: str, item: str, before: object, after: object) ->
 
 def counts(doc: dict) -> dict:
     nodes, dependencies = hierarchy.project(doc)
+    phases = {row["id"] for row in doc.get("phases", [])}
     return {
         **{key: len(doc.get(key, [])) for key in ("plans", "phases", "slices", "tasks")},
         "nodes": len(nodes),
         "dependencies": len(dependencies),
         "phases_in_plans": sum(bool(row.get("plan")) for row in doc.get("phases", [])),
-        "tasks_in_phases": sum(bool(row.get("phase")) for row in doc.get("tasks", [])),
+        "tasks_in_phases": sum(row.get("phase") in phases for row in doc.get("tasks", [])),
         "tasks_in_slices": sum(bool(row.get("slice")) for row in doc.get("tasks", [])),
     }
 
 
-def phase_plan(doc: dict, phase: dict, slug: str) -> dict:
+def phase_plan(doc: dict, phase: dict, slug: str, conflicts: list) -> dict:
     plans = doc["plans"]
     artifact = (phase.get("plan_ref") or {}).get("artifact", "")
     url = phase.get("plan_url", "")
@@ -57,7 +58,8 @@ def phase_plan(doc: dict, phase: dict, slug: str) -> dict:
         return standalone
     plan = {"id": identifier, "title": phase["title"] if identity else "Standalone", "artifact": artifact, "url": url}
     if any(row["id"] == identifier for row in plans):
-        plan["id"] = f"{identifier}-{digest(identity or slug)}"
+        plan["id"] = f"{identifier}-{digest(identity)}"
+        conflict(conflicts, "plan_collision", f"phases/{phase['id']}", f"plans/{identifier}", f"plans/{plan['id']}")
     plans.append(plan)
     return plan
 
@@ -65,7 +67,7 @@ def phase_plan(doc: dict, phase: dict, slug: str) -> dict:
 def assign_phases(doc: dict, slug: str, conflicts: list) -> None:
     ordered = sorted(doc["phases"], key=lambda row: not bool((row.get("plan_ref") or {}).get("artifact")))
     for phase in ordered:
-        plan = phase_plan(doc, phase, slug)
+        plan = phase_plan(doc, phase, slug, conflicts)
         address = f"plans/{plan['id']}"
         if phase.get("plan") and phase["plan"] != address:
             conflict(conflicts, "phase_plan", f"phases/{phase['id']}", phase["plan"], address)
@@ -146,7 +148,11 @@ def preview(doc: dict, slug: str) -> tuple[dict, dict]:
     assign_unphased(after, slug, conflicts)
     assign_phases(after, slug, conflicts)
     assign_tasks(after, conflicts)
-    report = {"applied": False, "before": counts(doc), "after": counts(after), "conflicts": conflicts}
+    report = {"applied": False, "before": counts(doc), "after": counts(after), "conflicts": conflicts, "refused": ""}
+    try:
+        ledger_plans.validate(after)
+    except ValueError as refused:
+        report["refused"] = str(refused)
     return after, report
 
 
@@ -155,8 +161,9 @@ def commit(repo: store.SQLiteLedgerRepository, slug: str, by: str) -> dict:
         connection.execute(store.BEGIN_IMMEDIATE)
         entry = repo._entry(connection, slug)
         after, report = preview(entry.state, slug)
-        ledger_plans.validate(after)
-        if any(row["kind"] == "missing_phase" and row["after"] is None for row in report["conflicts"]):
+        if report["refused"] or any(
+            row["kind"] == "missing_phase" and row["after"] is None for row in report["conflicts"]
+        ):
             raise ValueError(json.dumps(report, sort_keys=True))
         if after != entry.state:
             meta = after["_meta"]
