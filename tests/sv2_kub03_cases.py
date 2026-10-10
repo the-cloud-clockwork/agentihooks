@@ -104,7 +104,10 @@ class World(sv2_ldg05_cases.World):
         )
 
     def start(self, seat=sv2_ldg02_cases.INPUTS["seat"], task=sv2_ldg02_cases.INPUTS["task"], previous=""):
-        record = AgentRecord(self.store.next_name(SLUG, "eng"), "eng", task, seat=seat, runtime_backend=BACKEND)
+        target = {"pod_namespace": INPUTS["namespace"], "pod_name": "swarm-pending"}
+        record = AgentRecord(
+            self.store.next_name(SLUG, "eng"), "eng", task, seat=seat, runtime_backend=BACKEND, runtime_target=target
+        )
         agent = self.controller.admit(record, previous)
         token = self.grants.issue(
             SLUG,
