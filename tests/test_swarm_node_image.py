@@ -211,7 +211,13 @@ def test_committed_image_inputs_pin_base_and_keep_profiles_outside_home():
     assert "DISABLE_AUTOUPDATER=1" in dockerfile
     assert "--require-hashes" in dockerfile
     assert "--require-hashes -d /downloads/pip -r /opt/swarm-node/requirements.lock" in dockerfile
-    assert '--architecture "$TARGETARCH" --cache /downloads/tools\n\nFROM ${BASE_IMAGE} AS worker\n' in dockerfile
+    assert (
+        'worker_image.py download --architecture "$TARGETARCH" --cache /downloads/tools\n\nFROM ${BASE_IMAGE} AS worker\n'
+        in dockerfile
+    )
+    assert 'worker_image.py install --architecture "$TARGETARCH" --cache /downloads/tools\nCOPY pyproject' in dockerfile
+    smoke = (inputs / "smoke.sh").read_text()
+    assert "docker build --no-cache-filter worker --platform" in smoke
     assert "--mount=type=bind,from=downloads,source=/downloads,target=/downloads" in dockerfile
     assert "--no-index --find-links /downloads/pip --require-hashes" in dockerfile
     assert dockerfile.endswith('CMD ["python", "/opt/swarm-node/worker_image.py", "report"]\n')
