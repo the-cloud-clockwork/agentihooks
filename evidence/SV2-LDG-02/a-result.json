@@ -1,0 +1,40 @@
+{
+  "case": "T-SV2-LDG-02-A",
+  "independent_runs": 2,
+  "observed": {
+    "case": "T-SV2-LDG-02-A",
+    "evidence_class": "mocked Redis and server clock; signed fixture grants; no external runtime",
+    "input_sha256": "23a672c8a2243a860add3a69d90458928c2a0c9e6e776874a210994a8f2bd048",
+    "observed": {
+      "heartbeat": [
+        200,
+        {
+          "archive_watermark": 12,
+          "command_watermark": 0,
+          "controller_epoch": 1,
+          "lease_deadline": "1970-01-01T00:00:01.140Z",
+          "lease_deadline_ms": 1140,
+          "renewal_sequence": 5,
+          "schema_version": "2.1",
+          "task_generation": 1,
+          "task_id": "task"
+        }
+      ],
+      "registered": [
+        200,
+        {
+          "archive_watermark": 0,
+          "command_watermark": 0,
+          "controller_epoch": 1,
+          "lease_deadline": "1970-01-01T00:00:01.100Z",
+          "lease_deadline_ms": 1100,
+          "registered_at": "1970-01-01T00:00:01Z",
+          "schema_version": "2.1",
+          "task_generation": 1,
+          "task_id": "task"
+        }
+      ]
+    },
+    "state": "passed"
+  }
+}
