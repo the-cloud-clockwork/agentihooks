@@ -62,7 +62,7 @@ def main() -> int:
     parser.add_argument("--bases")
     args = parser.parse_args()
     root = Path.cwd()
-    changes = discover_changes(root, args.bases.split(",") if args.bases else args.base, "HEAD")
+    changes = discover_changes(root, args.bases.split(",") if args.bases is not None else args.base, "HEAD")
     tests = sorted({test for path in changes for test in select_tests(root, Path(path))})
     browser = str(needs_browser(root, tests)).lower()
     print(f"Selected mutation tests: {len(tests)}\nBrowser required: {browser}")

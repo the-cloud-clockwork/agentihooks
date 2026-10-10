@@ -22,7 +22,7 @@ def test_preflight_runs_on_task_branch_pushes_only():
         }
     else:
         assert workflow["concurrency"] == {"group": "mutation-preflight-${{ github.ref }}", "cancel-in-progress": True}
-    assert workflow["permissions"] == {"contents": "read", "pull-requests": "read"}
+    assert workflow["permissions"] == {"contents": "read", "pull-requests": "read", "checks": "read"}
 
 
 def test_preflight_skips_a_branch_with_an_open_pull_request():
@@ -56,13 +56,16 @@ def test_preflight_mutates_against_dev_with_the_pull_request_budget():
     names = [step.get("name") for step in steps]
     select = steps[names.index("Select mutation tests before browser setup")]
     mutate = steps[names.index("Mutate changed Python files")]
-    if "workflow_call" in workflow[True]:
-        assert job["env"]["BASE"] == "${{ inputs.base || 'origin/dev' }}"
-        assert select["run"] == 'python -m scripts.ci_mutation.browser --base "$BASE"'
-        assert mutate["run"] == 'python -m scripts.ci_mutation --base "$BASE" --budget 1080'
-    else:
-        assert select["run"] == "python -m scripts.ci_mutation.browser --base origin/dev"
-        assert mutate["run"] == "python -m scripts.ci_mutation --base origin/dev --budget 1080"
+    plan = steps[names.index("Resolve the branch's own mutation bases")]
+    assert job["env"]["BASE"] == "${{ inputs.base || 'origin/dev' }}"
+    assert plan["id"] == "plan"
+    assert plan["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    assert plan["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE"'
+    assert names.index("Resolve the branch's own mutation bases") < names.index(select["name"])
+    for step in (select, mutate):
+        assert step["env"]["BASES"] == "${{ steps.plan.outputs.bases }}"
+    assert select["run"] == "python -m scripts.ci_mutation." + 'browser --bases "$BASES"'
+    assert mutate["run"] == 'python -m scripts.ci_mutation --bases "$BASES" --budget 1080'
     assert names.index("Install the browser that page tests drive") < names.index("Mutate changed Python files")
     assert steps[-1]["if"] == "always()"
     assert steps[-1]["with"]["name"] == "mutation-preflight-report"

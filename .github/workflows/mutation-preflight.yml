@@ -16,6 +16,7 @@ concurrency:
 permissions:
   contents: read
   pull-requests: read
+  checks: read
 
 jobs:
   pull-request:
@@ -59,9 +60,17 @@ jobs:
       - name: Install dependencies
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
+      - name: Resolve the branch's own mutation bases
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m scripts.ci_mutation.plan --base "$BASE"
+
       - name: Select mutation tests before browser setup
         id: selection
-        run: python -m scripts.ci_mutation.browser --base "$BASE"
+        env:
+          BASES: ${{ steps.plan.outputs.bases }}
+        run: python -m scripts.ci_mutation.browser --bases "$BASES"
 
       - name: Install the browser that page tests drive
         id: browser
@@ -77,8 +86,9 @@ jobs:
 
       - name: Mutate changed Python files
         env:
+          BASES: ${{ steps.plan.outputs.bases }}
           PYTHONUNBUFFERED: "1"
-        run: python -m scripts.ci_mutation --base "$BASE" --budget 1080
+        run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080
 
       - name: Upload complete mutation evidence
         if: always()

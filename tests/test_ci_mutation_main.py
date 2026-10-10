@@ -181,8 +181,9 @@ def test_browser_preflight_skips_test_only_changes(tmp_path, monkeypatch, capsys
     assert "Selected mutation tests: 0" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(("given", "bases"), [("earlier,merged", ["earlier", "merged"]), ("", [""])])
 @pytest.mark.parametrize("entry", ["gate", "browser"])
-def test_resolved_bases_from_the_plan_are_graded_as_given(tmp_path, monkeypatch, entry):
+def test_resolved_bases_from_the_plan_are_graded_as_given(tmp_path, monkeypatch, entry, given, bases):
     from scripts.ci_mutation import __main__ as gate
     from scripts.ci_mutation import browser
 
@@ -199,9 +200,9 @@ def test_resolved_bases_from_the_plan_are_graded_as_given(tmp_path, monkeypatch,
 
     monkeypatch.setattr(module, "discover_changes", discover)
     monkeypatch.setattr(gate, "run_gate", lambda *args: {"failed": False})
-    monkeypatch.setattr("sys.argv", [entry, "--bases", "earlier,merged"])
+    monkeypatch.setattr("sys.argv", [entry, "--bases", given])
     assert module.main() == 0
-    assert calls == [(tmp_path, ["earlier", "merged"], "HEAD")]
+    assert calls == [(tmp_path, bases, "HEAD")]
 
 
 def test_browser_preflight_uses_mutation_test_selection(tmp_path, monkeypatch, capsys):

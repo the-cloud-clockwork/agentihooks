@@ -1281,6 +1281,9 @@ jobs:
   mutation-plan:
     if: ${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
     timeout-minutes: 5
     outputs:
       shards: ${{ steps.plan.outputs.shards }}
@@ -1309,6 +1312,7 @@ jobs:
         id: plan
         env:
           BASE: ${{ github.event.pull_request.base.sha || inputs.base }}
+          GH_TOKEN: ${{ github.token }}
         run: python -m scripts.ci_mutation.plan --base "$BASE"
 
   mutation-stats:

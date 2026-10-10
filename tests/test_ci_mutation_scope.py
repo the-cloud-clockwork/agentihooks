@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from scripts.ci_mutation.scope import changed_lines, select_tests
 
 
@@ -129,11 +131,8 @@ def test_diff_discovers_only_changed_source_python_files(tmp_path):
     assert discover_changes(tmp_path, base, "HEAD") == {"hooks/new.py": {1, 2}, "scripts/space name.py": {1, 2}}
 
 
-def _repo(tmp_path, monkeypatch):
+def _repo(tmp_path):
     import subprocess
-
-    monkeypatch.delenv("GITHUB_HEAD_REF", raising=False)
-    monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
 
     def git(*args):
         return subprocess.check_output(["git", *args], cwd=tmp_path).decode().strip()
@@ -152,10 +151,10 @@ def _repo(tmp_path, monkeypatch):
     return git, commit
 
 
-def test_a_branch_refreshed_with_dev_grades_only_its_own_lines_against_a_pinned_older_base(tmp_path, monkeypatch):
+def test_a_branch_refreshed_with_dev_grades_only_its_own_lines_against_a_pinned_older_base(tmp_path):
     from scripts.ci_mutation.scope import discover_changes
 
-    git, commit = _repo(tmp_path, monkeypatch)
+    git, commit = _repo(tmp_path)
     pinned = commit("dev.py", "a = 1\n")
     git("checkout", "-q", "-b", "branch")
     commit("own.py", "def f():\n    return 1\n")
@@ -167,10 +166,10 @@ def test_a_branch_refreshed_with_dev_grades_only_its_own_lines_against_a_pinned_
     assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/own.py": {1, 2}}
 
 
-def test_a_stacked_branch_grades_only_its_own_lines_after_a_dev_refresh(tmp_path, monkeypatch):
+def test_a_stacked_branch_grades_only_its_own_lines_once_the_earlier_branch_was_graded_green(tmp_path):
     from scripts.ci_mutation.scope import discover_changes, own_bases
 
-    git, commit = _repo(tmp_path, monkeypatch)
+    git, commit = _repo(tmp_path)
     pinned = commit("dev.py", "a = 1\n")
     git("checkout", "-q", "-b", "earlier")
     earlier = commit("earlier.py", "def e():\n    return 1\n")
@@ -184,32 +183,108 @@ def test_a_stacked_branch_grades_only_its_own_lines_after_a_dev_refresh(tmp_path
     merged_dev = git("rev-parse", "HEAD")
     git("checkout", "-q", "stacked")
     git("merge", "-q", "--no-edit", "dev")
-    assert own_bases(tmp_path, pinned, "HEAD") == sorted([earlier, merged_dev])
-    assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/own.py": {1, 2}, "hooks/earlier.py": {2}}
+    bases = own_bases(tmp_path, pinned, "HEAD", [earlier].__contains__)
+    assert bases == sorted([pinned, earlier, merged_dev])
+    assert discover_changes(tmp_path, bases, "HEAD") == {"hooks/own.py": {1, 2}, "hooks/earlier.py": {2}}
+    assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/own.py": {1, 2}, "hooks/earlier.py": {1, 2}}
 
 
-def test_copies_of_the_branch_itself_never_count_as_an_earlier_branch(tmp_path, monkeypatch):
-    from scripts.ci_mutation.scope import discover_changes
+@pytest.mark.parametrize("green", [False, True])
+def test_only_a_pushed_commit_inside_the_head_and_graded_green_counts_as_an_earlier_base(tmp_path, green):
+    from scripts.ci_mutation.scope import discover_changes, own_bases
 
-    git, commit = _repo(tmp_path, monkeypatch)
+    git, commit = _repo(tmp_path)
     base = commit("dev.py", "a = 1\n")
     git("update-ref", "refs/remotes/origin/dev", "HEAD")
     git("checkout", "-q", "-b", "branch")
     first = commit("one.py", "def f():\n    return 1\n")
-    for ref in ("branch", "diffcheck/branch-red", "wip/branch", "gh-readonly-queue/dev/pr-1", "main"):
-        git("update-ref", f"refs/remotes/origin/{ref}", first)
+    git("update-ref", "refs/remotes/origin/sibling", first)
+    git("checkout", "-q", "-b", "fork")
+    git("update-ref", "refs/remotes/origin/fork", commit("fork.py", "def h():\n    return 3\n"))
+    git("checkout", "-q", "branch")
     commit("two.py", "def g():\n    return 2\n")
-    monkeypatch.setenv("GITHUB_REF_NAME", "branch")
-    assert discover_changes(tmp_path, base, "HEAD") == {"hooks/one.py": {1, 2}, "hooks/two.py": {1, 2}}
+    git("update-ref", "refs/remotes/origin/branch", "HEAD")
+    asked = []
+
+    def graded(sha):
+        asked.append(sha)
+        return green
+
+    bases = own_bases(tmp_path, base, "HEAD", graded)
+    assert asked == [first]
+    assert bases == sorted([base, first] if green else [base])
+    own = {"hooks/two.py": {1, 2}} | ({} if green else {"hooks/one.py": {1, 2}})
+    assert discover_changes(tmp_path, bases, "HEAD") == own
 
 
-def test_resolved_bases_are_graded_without_looking_up_branches_again(tmp_path, monkeypatch):
+def test_a_line_left_as_the_given_base_had_it_is_never_graded(tmp_path):
     from scripts.ci_mutation.scope import discover_changes
 
-    git, commit = _repo(tmp_path, monkeypatch)
-    base = commit("dev.py", "a = 1\n")
+    git, commit = _repo(tmp_path)
+    pinned = commit("kept.py", "def k():\n    return 1\n")
+    git("checkout", "-q", "-b", "branch")
+    commit("own.py", "def f():\n    return 1\n")
+    git("checkout", "-q", "dev")
+    commit("kept.py", "def k():\n    return 2\n")
+    git("update-ref", "refs/remotes/origin/dev", "HEAD")
+    git("checkout", "-q", "branch")
+    git("merge", "-q", "--no-edit", "dev")
+    commit("kept.py", "def k():\n    return 1\n")
+    assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/own.py": {1, 2}}
+
+
+def test_resolved_bases_are_graded_without_looking_up_branches_again(tmp_path):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path)
+    commit("dev.py", "a = 1\n")
     git("checkout", "-q", "-b", "branch")
     earlier = commit("one.py", "def f():\n    return 1\n")
     commit("two.py", "def g():\n    return 2\n")
-    git("update-ref", "refs/remotes/origin/earlier", earlier)
-    assert discover_changes(tmp_path, [base], "HEAD") == {"hooks/one.py": {1, 2}, "hooks/two.py": {1, 2}}
+    assert discover_changes(tmp_path, [earlier], "HEAD") == {"hooks/two.py": {1, 2}}
+
+
+@pytest.mark.parametrize(
+    ("answers", "expected"),
+    [
+        ([(0, "1\n")], True),
+        ([(0, "0\n"), (0, "2\n")], True),
+        ([(0, "0\n"), (0, "\n")], False),
+        ([(1, "5\n"), (1, "5\n")], False),
+    ],
+)
+def test_a_commit_is_graded_only_by_a_green_gate_or_push_preflight_check(monkeypatch, answers, expected):
+    import subprocess
+
+    from scripts.ci_mutation import scope
+
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        code, out = answers[len(calls) - 1]
+        return subprocess.CompletedProcess(command, code, out, "")
+
+    monkeypatch.setattr(scope.subprocess, "run", run)
+    assert scope.graded_green("abc") is expected
+    checks = ["Gate — Required", "mutation"][: len(answers)]
+    assert calls == [
+        (
+            [
+                "gh",
+                "api",
+                "-X",
+                "GET",
+                "repos/owner/repo/commits/abc/check-runs",
+                "-f",
+                f"check_name={check}",
+                "-f",
+                "status=completed",
+                "--jq",
+                '[.check_runs[] | select(.conclusion == "success")] | length',
+            ],
+            {"capture_output": True, "text": True},
+        )
+        for check in checks
+    ]

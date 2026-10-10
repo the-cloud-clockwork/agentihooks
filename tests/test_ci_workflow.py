@@ -739,7 +739,11 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     assert plan["outputs"]["shards"] == "${{ steps.plan.outputs.shards }}"
     step = next(step for step in plan["steps"] if step.get("id") == "plan")
     assert step["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE"'
-    assert step["env"]["BASE"] == "${{ github.event.pull_request.base.sha || inputs.base }}"
+    assert step["env"] == {
+        "BASE": "${{ github.event.pull_request.base.sha || inputs.base }}",
+        "GH_TOKEN": "${{ github.token }}",
+    }
+    assert plan["permissions"] == {"contents": "read", "checks": "read"}
     assert plan["outputs"]["bases"] == "${{ steps.plan.outputs.bases }}"
     for job in (mutation, jobs["mutation-stats"]):
         select = next(step for step in job["steps"] if step.get("id") == "selection")
@@ -755,7 +759,11 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
         run = next(step for step in mutation["steps"] if step.get("name") == name)
         assert run["env"]["SHARD"] == "${{ matrix.shard }}"
         assert run["env"]["SHARDS"] == "${{ strategy.job-total }}"
-        assert run["run"].endswith('--budget 1080 --shard "$SHARD" --shards "$SHARDS" --stats .mutation-stats')
+        assert run["env"]["BASES"] == "${{ needs.mutation-plan.outputs.bases }}"
+        assert run["run"] == (
+            'python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard "$SHARD" --shards "$SHARDS"'
+            " --stats .mutation-stats"
+        )
 
 
 def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():

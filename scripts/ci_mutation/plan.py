@@ -4,7 +4,7 @@ import math
 import os
 from pathlib import Path
 
-from scripts.ci_mutation.scope import discover_changes, own_bases, select_tests
+from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests
 from scripts.ci_mutation.selection import changed_mutations
 
 # Fitted on Tests runs 37890680008 and 37877992114: a mutant costs a pytest start plus a few covering tests.
@@ -55,7 +55,7 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=10)
     args = parser.parse_args()
     root = Path.cwd()
-    bases = own_bases(root, args.base, args.head)
+    bases = own_bases(root, args.base, args.head, graded_green)
     print(f"Mutation bases: {' '.join(bases)}")
     seconds, mutants, stats = estimate(root, discover_changes(root, bases, args.head))
     count = shard_count(seconds, mutants, args.target, args.limit)

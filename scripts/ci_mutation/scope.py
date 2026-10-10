@@ -6,7 +6,9 @@ from functools import cache
 from pathlib import Path
 
 INTEGRATION = "refs/remotes/origin/dev"
-NOT_EARLIER = ("diffcheck/", "wip/", "gh-readonly-queue/")
+# A pushed commit counts as an earlier base only once one of these graded it green: the pull request gate or the push
+# preflight.
+GRADED = ("Gate — Required", "mutation")
 
 
 def changed_lines(diff: str) -> set[int]:
@@ -18,21 +20,42 @@ def changed_lines(diff: str) -> set[int]:
     return lines
 
 
-def own_bases(root: Path, base: str, head: str) -> list[str]:
+def own_bases(root: Path, base: str, head: str, graded=lambda sha: False) -> list[str]:
     def git(*args: str) -> str:
         return subprocess.check_output(["git", *args], cwd=root).decode().strip()
 
     tip = git("rev-parse", head)
-    candidates = {git("merge-base", base, head)}
+    bases = {git("merge-base", base, head)}
     if git("for-each-ref", INTEGRATION):
-        candidates.add(git("merge-base", INTEGRATION, head))
-    branch = os.environ.get("GITHUB_HEAD_REF") or os.environ.get("GITHUB_REF_NAME", "")
-    pushed = git("for-each-ref", "--merged", head, "--format=%(objectname) %(refname:lstrip=3)", "refs/remotes/origin")
-    for line in pushed.splitlines():
-        sha, name = line.split(" ", 1)
-        if sha != tip and name not in {"HEAD", "dev", "main", branch} and not name.startswith(NOT_EARLIER):
-            candidates.add(sha)
-    return sorted(git("merge-base", "--independent", *candidates).split())
+        bases.add(git("merge-base", INTEGRATION, head))
+    unmerged = [f"--no-merged={own}" for own in bases]
+    pushed = git("for-each-ref", "--merged", head, *unmerged, "--format=%(objectname)", "refs/remotes/origin").split()
+    bases.update(sha for sha in set(pushed) - {tip} if graded(sha))
+    return sorted(bases)
+
+
+def graded_green(sha: str) -> bool:
+    for check in GRADED:
+        found = subprocess.run(
+            [
+                "gh",
+                "api",
+                "-X",
+                "GET",
+                f"repos/{os.environ['GITHUB_REPOSITORY']}/commits/{sha}/check-runs",
+                "-f",
+                f"check_name={check}",
+                "-f",
+                "status=completed",
+                "--jq",
+                '[.check_runs[] | select(.conclusion == "success")] | length',
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if found.returncode == 0 and found.stdout.strip() not in ("", "0"):
+            return True
+    return False
 
 
 def discover_changes(root: Path, base: str | list[str], head: str) -> dict[str, set[int]]:
