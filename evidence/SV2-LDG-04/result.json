@@ -4,7 +4,7 @@
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2381",
   "pull_request": null,
-  "tested_commit": "b468544e5650e8203ca17eeaf947ea95327394f9",
+  "tested_commit": "12ca9210461bcc4a9e03fbf13365ec52acc31ab5",
   "status": "mocked-acceptance-qualified",
   "package_complete": false,
   "evidence_class": "Two real ledger server processes sharing one SQLite ledger folder, the ledger_writer command as a third process, no Redis fixture. Live G3 qualification is separate.",
@@ -31,8 +31,7 @@
   },
   "validation": {
     "red": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38050366503 failed collecting the new test module (ImportError: ledger_writer) on the tests-only commit 99a85be7",
-    "mutation_preflight": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38051681587 on b468544e: ledger_writer 241 killed 0 survived, ledger_server 5 killed; the run is red only on 13 survivors in scripts/swarm_v2/api/tasks.py lines owned by SV2-LDG-03",
-    "package_cases": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38050961542 clean run passed all three cases twice from independent folders against the committed evidence",
+    "mutation_preflight": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38052346742 on 12ca9210: ledger_writer 242 killed 0 survived, ledger_server 5 killed, all three package cases passed twice in the clean run; the run is red only on 13 survivors in scripts/swarm_v2/api/tasks.py lines owned by SV2-LDG-03",
     "local": "No local tests or mutation ran; static prepush passed; helm template refused ledger.replicas=2 locally"
   },
   "measurements": {
