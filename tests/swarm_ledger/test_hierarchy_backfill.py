@@ -1,4 +1,5 @@
 import json
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -148,13 +149,42 @@ def test_recorded_ledger_copy_reports_the_known_conflicts_then_has_zero_drift(tm
     report = hierarchy_backfill.backfill(repo, SLUG, "planner")
     mismatches = {row["item"] for row in report["conflicts"] if row["kind"] == "task_plan_link"}
     assert {f"tasks/as{i}" for i in range(1, 8)} <= mismatches
-    assert report["before"]["phases"] == 75
-    assert report["before"]["tasks"] == 1233
+    issues = "https://github.com/the-cloud-clockwork/agentihooks/issues"
+    assert [
+        (row["item"], row["before"], row["after"])
+        for row in report["conflicts"]
+        if row["item"] in {f"tasks/as{i}" for i in range(1, 8)}
+    ] == [(f"tasks/as{i}", f"{issues}/1866", f"{issues}/1877") for i in range(1, 8)]
+    assert Counter(row["kind"] for row in report["conflicts"]) == {"missing_phase": 41, "task_plan_link": 14}
+    assert report["refused"] == ""
+    assert report["before"] == {
+        "plans": 0,
+        "phases": 75,
+        "slices": 0,
+        "tasks": 1233,
+        "nodes": 1308,
+        "dependencies": 1195,
+        "phases_in_plans": 0,
+        "tasks_in_phases": 1192,
+        "tasks_in_slices": 0,
+    }
+    assert report["after"] == {
+        "plans": 19,
+        "phases": 76,
+        "slices": 251,
+        "tasks": 1233,
+        "nodes": 1579,
+        "dependencies": 1195,
+        "phases_in_plans": 76,
+        "tasks_in_phases": 1233,
+        "tasks_in_slices": 262,
+    }
     assert repo.export_document(SLUG) == before
     result = hierarchy_backfill.backfill(repo, SLUG, "planner", apply=True)
     saved = repo.export_document(SLUG)
     phases = {row["id"] for row in saved["phases"]}
-    assert all(task["phase"] in phases for task in saved["tasks"])
+    assert all(isinstance(task["phase"], str) and task["phase"] in phases for task in saved["tasks"])
+    assert all(row["plan"].startswith("plans/") for row in saved["phases"])
     assert len(saved["tasks"]) == 1233
     assert len(saved["phases"]) == 76
     assert result["drift"]["drift"] == 0
