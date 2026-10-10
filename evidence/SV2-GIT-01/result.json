@@ -54,5 +54,14 @@
     "SV2-KUB-02": "accepted: merged in agentihooks pull request 2461",
     "SV2-SEC-01": "accepted: merged in antoncore pull request 631",
     "SV2-LDG-05": "accepted: merged in agentihooks pull request 2436"
+  },
+  "plan_obligations": {
+    "owned_paths": "The plan names k8s/charts/swarm-control and k8s/argocd/apps/swarm-control.yaml as candidates. Step 1 says to follow existing long-lived service chart conventions, so the control deployment extends the existing agentihooks-swarm chart (controller and ledger) and its ArgoCD Application k8s/argocd/apps/agentihooks-swarm.yaml through the antoncore overlay k8s/values-overlays/agentihooks-swarm/values.yaml. A second chart would deploy a second controller against the same lease.",
+    "image_digest": "Master ruling for this task: no image digest pin in any deployment config, per the CI manifesto no hash pins rule. Both the chart and the antoncore overlay reference the floating dev tag with pullPolicy Always, and ArgoCD Image Updater tracks the digest. A resolved digest appears only as rollout evidence.",
+    "protocol_versions": "The required protocol versions ship inside the image: docs/swarm-v2/schemas, including compatibility.json, is copied beside the installed package, so the heartbeat and launch grant schema 2.1 travel with the image revision the image updater deploys.",
+    "durable_state_and_credentials": "The ledger keeps its persistent volume; the controller authorizes with the scoped hive controller credential and mounts the launch signing key read only from the agentihooks-swarm-launch-signing Secret.",
+    "placement": "Required node affinity excludes every node labelled anton.io/capacity-type, with no EC2 tolerations, for the controller and the ledger; case B shows an untainted Spot node with 32 free cores refused.",
+    "compatibility": "Compared with the preceding accepted path (the hive controller loop without the v2 API): without AGENTIHOOKS_CONTROL_API_PORT the controller loop runs exactly as before, proven by test_the_controller_loop_runs_as_before_without_an_api_port; the chart default keeps controller.api off; heartbeat and launch grant contracts stay at schema 2.1 with no field changed.",
+    "live_evidence": "Cases A, B and C are mocked and labelled mocked in their records. The worker registration and heartbeat ran live against the controller deployed by the chart in kind (kind-proof.txt). Live evidence on anton-prod is due at rollout gate G12, where controller.api is turned on; until then externally_verified stays false."
   }
 }
