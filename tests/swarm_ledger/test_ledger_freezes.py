@@ -249,18 +249,18 @@ def test_an_author_who_never_joined_is_refused_without_error():
 
 
 def test_the_dispatcher_writes_freezes_only_at_full_autonomy(monkeypatch):
-    state, rejected = freeze("plans/a", by=ledger_freezes.DISPATCHER)
+    state, rejected = freeze("plans/a", by=DISPATCHER)
     assert rejected and state["freezes"] == []
     asked = []
     monkeypatch.setattr(ledger_freezes, "autonomy", lambda slug: asked.append(slug) or "full")
-    state, rejected = freeze("plans/a", by=ledger_freezes.DISPATCHER)
+    state, rejected = freeze("plans/a", by=DISPATCHER)
     assert rejected == []
     row = state["freezes"][0]
     assert row == {
         "id": row["id"],
         "verb": "freeze",
         "target": "plans/a",
-        "by": "dispatcher",
+        "by": DISPATCHER,
         "at": row["at"],
         "reason": "",
     }
@@ -292,7 +292,7 @@ def test_the_live_dispatcher_below_full_autonomy_writes_no_freeze(monkeypatch, a
         state, rejected = write("freeze_clear", by=DISPATCHER, target="plans/a")
     else:
         state, rejected = freeze("plans/b", verb=verb, by=DISPATCHER)
-    assert rejected
+    assert [op.rsplit("-", 1)[0] for op in rejected] == ["freeze_clear" if verb == "unfreeze" else "freeze_set"]
     assert [(row["target"], row["by"]) for row in state["freezes"]] == [("plans/a", "operator")]
 
 
@@ -305,7 +305,7 @@ def test_other_lanes_at_full_autonomy_write_no_freeze_without_the_operators_word
         state, rejected = write("freeze_clear", by=name, target="plans/a")
     else:
         state, rejected = freeze("plans/b", verb=verb, by=name)
-    assert rejected
+    assert [op.rsplit("-", 1)[0] for op in rejected] == ["freeze_clear" if verb == "unfreeze" else "freeze_set"]
     assert [(row["target"], row["by"]) for row in state["freezes"]] == [("plans/a", "operator")]
 
 
