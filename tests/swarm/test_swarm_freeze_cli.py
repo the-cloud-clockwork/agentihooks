@@ -2,7 +2,8 @@ import json
 
 import pytest
 
-from scripts.swarm import cli, naming
+from scripts.gates import Who
+from scripts.swarm import clearance, cli, naming
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from tests.swarm.test_cli import env, run  # noqa: F401
@@ -110,6 +111,13 @@ def test_a_finished_dispatcher_is_refused(swarm, monkeypatch, capsys):
     assert capsys.readouterr().err == (
         f"swarm: only the operator or the master of swarm demo uses its swarm controls, and {DISPATCHER} is neither\n"
     )
+
+
+def test_the_freeze_writer_of_a_full_autonomy_dispatcher_is_the_dispatcher_author(swarm, monkeypatch):
+    store, _ = swarm
+    store.update("demo", autonomy="full")
+    acting(monkeypatch, DISPATCHER, "demo")
+    assert clearance.freezer(store, "demo", Who.from_env()) == "dispatcher"
 
 
 def test_the_dispatcher_pinned_by_its_swarm_name_writes_at_full_autonomy(swarm, monkeypatch):
