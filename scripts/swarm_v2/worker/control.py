@@ -136,20 +136,6 @@ class WorkerControl:
         path.unlink()
         if not known:
             self._advance(command_id)
-            return
-        command_id = command["command_id"]
-        if command_id not in self.records:
-            try:
-                self.transport.ack(command_id, command["payload_digest"])
-            except UNREACHABLE:
-                return
-            except CommandRefused:
-                path.unlink()
-                return
-            self.records[command_id] = _entry(command, ACCEPTED)
-            self._save()
-            self._advance(command_id)
-        path.unlink()
 
     def checkpointed(self, checkpoint: str) -> None:
         for command_id, record in self.records.items():
