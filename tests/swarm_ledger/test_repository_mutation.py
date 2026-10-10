@@ -12,8 +12,9 @@ from scripts.swarm_ledger.repository import mutation
 
 
 class Context:
-    def __init__(self, meta, at):
+    def __init__(self, meta, at, slug):
         self.at, self.rev, self.events, self.dirty, self.refused = at, meta["rev"] + 1, [], False, []
+        self.slug = slug
 
 
 def domain(calls, chat_kept=2, events_kept=2):
@@ -83,6 +84,7 @@ def test_apply_folds_changes_and_ops_in_order_and_records_the_change(derived):
     assert doc["chat"] == [4, 5]
     assert doc["_meta"] is meta
     assert ctx.changed is True
+    assert ctx.slug == "demo"
     assert meta == {
         "rev": 5,
         "events": ["a", "s"],
@@ -130,8 +132,8 @@ def test_each_kind_of_change_alone_moves_the_revision(derived, changes, ops, doc
 
 
 class StampedContext(Context):
-    def __init__(self, meta, at):
-        super().__init__(meta, at)
+    def __init__(self, meta, at, slug):
+        super().__init__(meta, at, slug)
         self.stamps, self.dropped = meta["stamps"], []
 
 

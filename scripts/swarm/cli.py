@@ -22,6 +22,7 @@ agentihooks swarm <id> save-template NAME                         write this swa
 agentihooks swarm <id> send-message TEXT                          message to every live agent's inbox
 agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]     master or operator judges a health finding
 agentihooks swarm <id> lift AGENT GATE                            operator or master lets one agent past a gate for one hour
+agentihooks swarm <id> freeze | focus | unfreeze TARGET [--reason TEXT] [--quote WORDS]   operator, or master with his words
 agentihooks swarm <id> learned                                    list every seat's learned notes with seat and number
 agentihooks swarm <id> promote SEAT NUMBER insight|canon --reason TEXT   raise a learned note; canon only by master or operator
 agentihooks swarm <id> retire SEAT NUMBER --reason TEXT           master or operator retires a learned note from every later prompt
@@ -769,8 +770,10 @@ def cmd_status(store, args):
     for phase_id, state, held in phase_state.report(doc):
         print(f"phase {phase_id}  {state}" + (f"  holds {', '.join(held)}" if held else ""))
     from scripts.swarm import capacity, quota_view
+    from scripts.swarm_ledger import ledger_freezes
 
-    for line in quota_view.lines(capacity.read(store, args.slug), now_ms()) + spawn_holds(store, args.slug):
+    quota = quota_view.lines(capacity.read(store, args.slug), now_ms())
+    for line in ledger_freezes.lines(doc) + quota + spawn_holds(store, args.slug):
         print(line)
     print(bottleneck.line(bottleneck.read(store, args.slug), now_ms()))
     print(_snapshot_line(auto_snapshot(config)))
@@ -800,6 +803,18 @@ def cmd_status(store, args):
         print(
             f"gate  {modes.label(row['kind'])}  {row.get('gate')}  {row.get('agent')}  {row.get('task')}  {row.get('reason')}"
         )
+
+
+def cmd_freeze(store, args):
+    writer = clearance.holder(store, args.slug, Who.from_env())
+    by = None if writer == clearance.OPERATOR else writer
+    if by and not args.quote:
+        raise SwarmError("the master writes freezes only with the operator's words: pass them with --quote")
+    LedgerClient().freeze(args.slug, args.command, args.target, by=by, reason=args.reason, quote=args.quote)
+    print(json.dumps({args.command: args.target, "by": writer}))
+
+
+cmd_focus = cmd_unfreeze = cmd_freeze
 
 
 def autoscale_lines(config, decision):
@@ -1413,6 +1428,11 @@ def build_parser():
     sub.add_parser("set").add_argument("pairs", nargs="+")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
+    for verb in ("freeze", "focus", "unfreeze"):
+        frozen = sub.add_parser(verb)
+        frozen.add_argument("target")
+        frozen.add_argument("--reason", default="")
+        frozen.add_argument("--quote", default="")
     scale = sub.add_parser("autoscale")
     scale.add_argument("--fixture", default="")
     scale.add_argument("--json", action="store_true")
