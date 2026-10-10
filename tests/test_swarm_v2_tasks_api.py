@@ -496,3 +496,130 @@ def test_the_manifest_names_the_hash_of_every_case_input():
         for path in ["tests/fixtures/swarm_v2/task-revision.json"]
     }
     assert manifest["cases"] == ["T-SV2-LDG-03-A", "T-SV2-LDG-03-B", "T-SV2-LDG-03-C"]
+
+
+def test_the_package_record_carries_its_completion_evidence():
+    record = json.loads((EVIDENCE / "result.json").read_text(encoding="utf-8"))
+    assert (record["package"], record["package_complete"]) == ("SV2-LDG-03", False)
+    assert set(record["states"]) == {"observed", "accepted", "committed", "externally_verified"}
+    for name in ("interfaces", "supported_versions", "authoritative_objects", "remaining_limitations", "validation"):
+        assert record[name], name
+    assert record["cases"] == {
+        **{case: f"evidence/SV2-LDG-03/{case}-result.json" for case in "abc"},
+        "manifest": "evidence/SV2-LDG-03/manifest.json",
+    }
+    assert set(record["measurements"]["ledger_revision_conflicts_total"]) == {"a", "b", "c"}
+    path, name = record["rollback_rehearsal"]["test"].split("::")
+    assert path == "tests/test_swarm_v2_tasks_api.py"
+    assert f"\ndef {name}(" in Path(__file__).read_text(encoding="utf-8")
+
+
+def propose(world, token, operation_id, expected, outcome="done", proof="Pull request merged", generation=1):
+    body = {
+        "operation_id": operation_id,
+        "task_generation": generation,
+        "expected_revision": expected,
+        "outcome": outcome,
+        "proof": proof,
+    }
+    return world.call("POST", "/v2/tasks/task/outcomes", token, body)
+
+
+def test_a_comment_replay_is_acknowledged_once(world, worker):
+    agent, token = worker
+    body = {"operation_id": "comment-1", "task_generation": 1, "text": "Asking about the second slice"}
+    first = world.call("POST", "/v2/tasks/task/comments", token, body)
+    ledger = world.document()
+    assert world.call("POST", "/v2/tasks/task/comments", token, body) == first
+    assert first[0] == 200
+    assert world.document() == ledger
+    assert [(entry["by"], entry["text"]) for entry in world.task()["comments"]] == [
+        (agent.name, "Asking about the second slice")
+    ]
+
+
+def test_an_outcome_proposal_needs_the_current_revision_and_lands_once(world, worker):
+    agent, token = worker
+    old = world.read(token)[1]["revision"]
+    world.operator({"description": "Build the second specification"})
+    ledger = world.document()
+    status, reply = propose(world, token, "outcome-1", old)
+    current = spec_revision(world.task())
+    assert (status, reply["error_class"], reply["current_revision"]) == (409, "revision_conflict", current)
+    assert world.document() == ledger
+    assert ledger_revision_conflicts_total(world.store, "fixture") == 1
+    first = propose(world, token, "outcome-2", current)
+    assert first[0] == 200
+    assert first[1]["revision"] == current
+    proposed = world.document()
+    assert propose(world, token, "outcome-2", current) == first
+    assert world.document() == proposed
+    status, reply = propose(world, token, "outcome-2", current, proof="Another proof")
+    assert (status, reply["error_class"]) == (409, "operation_conflict")
+    task = world.task()
+    assert (task["done"], task["state"]) == (False, "claimed")
+    assert [(entry["by"], entry["text"]) for entry in task["comments"]] == [
+        (agent.name, "Outcome proposal: done. Pull request merged")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("outcome", "proof", "message"),
+    [
+        ("merged", "Pull request merged", "outcome must be done or blocked"),
+        ("done", " ", "proof must be a non empty string"),
+        ("done", 7, "proof must be a non empty string"),
+    ],
+)
+def test_an_outcome_proposal_names_a_worker_outcome_and_its_proof(world, worker, outcome, proof, message):
+    _, token = worker
+    current = world.read(token)[1]["revision"]
+    ledger = world.document()
+    status, reply = propose(world, token, "outcome-1", current, outcome, proof)
+    assert (status, reply) == (400, detail("invalid_request", message, "outcome-1"))
+    assert world.document() == ledger
+
+
+@pytest.fixture
+def served(world):
+    import threading
+
+    from scripts.swarm_v2.api.server import Routes, serve
+
+    server = serve(Routes(world.api, world.tasks_api), "127.0.0.1", 0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield server.server_address[1]
+    server.shutdown()
+    server.server_close()
+
+
+def send(port, method, path, token, body=None):
+    import http.client
+
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    data = b"" if body is None else json.dumps(body).encode()
+    connection.request(method, path, body=data, headers={"Authorization": f"Bearer {token}"})
+    response = connection.getresponse()
+    raw = response.read()
+    connection.close()
+    return response.status, json.loads(raw)
+
+
+def test_the_served_api_carries_task_reads_and_writes_beside_executions(world, served):
+    agent, token = world.start()
+    registration = {"execution_id": agent.execution_id, "generation": 1}
+    assert send(served, "POST", "/v2/executions/register", token, registration)[0] == 200
+    world.operator({"state": "claimed", "claimed_by": agent.name})
+    status, read = send(served, "GET", "/v2/tasks/task", token)
+    assert (status, read["revision"]) == (200, spec_revision(world.task()))
+    world.operator({"description": "Build the second specification"})
+    fields = {"state": "pr", "pr_url": PR}
+    stale = {"operation_id": "update-1", "task_generation": 1, "expected_revision": read["revision"], "fields": fields}
+    assert send(served, "PATCH", "/v2/tasks/task", token, stale)[1]["error_class"] == "revision_conflict"
+    fresh = {**stale, "operation_id": "update-2", "expected_revision": spec_revision(world.task())}
+    assert send(served, "PATCH", "/v2/tasks/task", token, fresh)[0] == 200
+    progress = {"operation_id": "progress-1", "task_generation": 1, "text": "Building the first slice"}
+    assert send(served, "POST", "/v2/tasks/task/progress", token, progress)[0] == 200
+    assert send(served, "PATCH", "/v2/swarm/config", token, {"max_eng_agents": 99})[0] == 403
+    assert (world.task()["state"], world.task()["pr_url"]) == ("pr", PR)
