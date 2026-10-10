@@ -123,6 +123,7 @@ from scripts.swarm.store import (
 )
 from scripts.swarm.tick import agent_status, primed, skip_refused, spawn_holds, tick
 from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, ledger_workspace, plan_shape
+from scripts.swarm_v2 import masters
 from scripts.swarm_v2.runtime.routed import routed
 
 SETTABLE = {
@@ -634,9 +635,17 @@ def scaling_value(key, value):
         raise SwarmError(f"{key} takes a number, the one minute load per CPU") from None
 
 
+def _set_masters(store, slug, pairs):
+    """The master seat count lives beside the swarm config, so it is taken out of the pairs and stored first."""
+    counts = [masters.count_of(pair.partition("=")[2]) for pair in pairs if pair.partition("=")[0] == "masters"]
+    for count in counts:
+        masters.MasterSeats(store.redis).set_count(slug, count)
+    return [pair for pair in pairs if pair.partition("=")[0] != "masters"]
+
+
 def cmd_set(store, args):
     changes, lanes = {}, {key: dict(value) for key, value in store.config(args.slug).lanes.items()}
-    for pair in args.pairs:
+    for pair in _set_masters(store, args.slug, args.pairs):
         key, _, value = pair.partition("=")
         if key in LANE_KEYS:
             lane, field = LANE_KEYS[key]
@@ -665,7 +674,7 @@ def cmd_set(store, args):
             continue
         if key not in SETTABLE or not value.isdigit():
             raise SwarmError(
-                f"set takes {', '.join(SETTABLE)}=<whole number>, autonomy={'|'.join(AUTONOMY)}, "
+                f"set takes {', '.join(SETTABLE)}=<whole number>, autonomy={'|'.join(AUTONOMY)}, masters=N, "
                 f"effort-min=E, effort-max=E, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB "
                 f"or {', '.join(LANE_KEYS)}=<value>"
             )
@@ -695,6 +704,7 @@ def cmd_set(store, args):
                 "load_low": config.load_low,
                 "memory_per_agent_mb": config.memory_per_agent_mb,
                 "master_affinity": {"desired": affinity.desired(config) or "auto", "order": master},
+                "masters": masters.MasterSeats(store.redis).count(args.slug),
             }
         )
     )

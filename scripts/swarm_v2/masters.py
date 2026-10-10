@@ -3,10 +3,8 @@
 import json
 
 from scripts.inbox.seats import seat_address
-from scripts.swarm.keyspace import ROOT
-from scripts.swarm.store import MASTER, SwarmError
+from scripts.swarm.store import MASTER, PREFIX, SwarmError
 
-PREFIX = f"{ROOT}:masters"
 DEFAULT_COUNT = 1
 SAVE_ATTEMPTS = 5
 
@@ -25,17 +23,35 @@ def seats(slug: str, count: int) -> list[str]:
     return [seat_address(slug, seat(index)) for index in range(1, count + 1)]
 
 
+def live_seats(live: list) -> list[str]:
+    return [a.seat or a.name for a in live if a.lane == MASTER]
+
+
 def assign(phases: list[str], seat_list: list[str], previous: dict[str, str]) -> dict[str, str]:
-    """Each phase keeps a seat that still exists; an unowned phase, in ledger order, goes to the seat owning fewest."""
+    """A phase keeps a seat that still exists; an unowned phase, in ledger order, goes to the seat owning fewest. Then
+    the last phase of the busiest seat moves to the idlest until loads differ by at most one, so an added seat shares."""
     owners = {p: previous[p] for p in phases if previous.get(p) in seat_list}
-    load = {s: 0 for s in seat_list}
-    for owner in owners.values():
-        load[owner] += 1
+    rank = {s: i for i, s in enumerate(seat_list)}
     for phase in phases:
         if phase not in owners:
-            owners[phase] = min(seat_list, key=lambda s: (load[s], seat_list.index(s)))
-            load[owners[phase]] += 1
-    return {p: owners[p] for p in phases}
+            owners[phase] = min(seat_list, key=lambda s: (_load(owners, s), rank[s]))
+    while True:
+        busiest = max(seat_list, key=lambda s: (_load(owners, s), -rank[s]))
+        idlest = min(seat_list, key=lambda s: (_load(owners, s), rank[s]))
+        if _load(owners, busiest) - _load(owners, idlest) <= 1:
+            return {p: owners[p] for p in phases}
+        owners[[p for p in phases if owners[p] == busiest][-1]] = idlest
+
+
+def _load(owners: dict[str, str], seat_id: str) -> int:
+    return sum(owner == seat_id for owner in owners.values())
+
+
+def count_of(text: str) -> int:
+    if not text.isdigit():
+        raise MasterError(f"masters takes a whole number of master seats, not {text!r}")
+    seats("", int(text))
+    return int(text)
 
 
 def owner_of(target: str, doc: dict, owners: dict[str, str]) -> str:
@@ -54,11 +70,11 @@ def route(target: str, doc: dict, owners: dict[str, str], live: list[str], lead:
 
 
 class MasterSeats:
-    def __init__(self, redis):
+    def __init__(self, redis) -> None:
         self.redis = redis
 
     def key(self, slug: str) -> str:
-        return f"{PREFIX}:{slug}"
+        return f"{PREFIX}:{slug}:masters"
 
     def set_count(self, slug: str, count: int) -> None:
         seats(slug, count)
