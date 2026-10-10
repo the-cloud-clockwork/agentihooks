@@ -34,59 +34,145 @@ AUTHORITY = {
 }
 
 
+ACCESSORS = {"get", "pop", "setdefault"}
+PATH_CALLS = {
+    "Path",
+    "PurePath",
+    "join",
+    "joinpath",
+    "copytree",
+    "copy",
+    "copy2",
+    "copyfile",
+    "move",
+    "rmtree",
+    "mkdir",
+    "makedirs",
+    "mkdtemp",
+    "mkstemp",
+    "glob",
+    "rglob",
+    "iglob",
+    "open",
+    "chdir",
+    "listdir",
+    "scandir",
+    "walk",
+    "exists",
+    "isdir",
+    "is_dir",
+    "relative_to",
+}
+PATH_KEYWORDS = {"dir", "cwd", "path", "root"}
+WRAPPERS = {"sorted", "list", "tuple", "set", "reversed", "enumerate"}
+
+
 def named_folders(source: str, folders: set[str]) -> list[str]:
     tree = ast.parse(source)
-    names, sequences = folder_bindings(tree, folders)
+    bound = folder_bindings(tree, folders)
     found = set()
     for node in ast.walk(tree):
-        bound = sequences if isinstance(node, (ast.For, ast.comprehension)) else names
-        for part in path_parts(node):
-            if isinstance(part, (ast.Name, ast.Attribute)) and ast.unparse(part) in bound:
-                found.add(f"{part.lineno}: {ast.unparse(part)}")
-            elif isinstance(part, ast.Constant) and isinstance(part.value, str):
-                head, slash, _ = part.value.partition("/")
-                if head in folders and (slash or not isinstance(node, (ast.JoinedStr, ast.Constant))):
+        for part, kind in path_parts(node):
+            if isinstance(part, ast.Constant):
+                literal = isinstance(node, (ast.JoinedStr, ast.Constant))
+                if is_folder(part, folders) and ("/" in part.value or not literal):
                     found.add(f"{part.lineno}: {part.value}")
+            elif is_bound(part, kind, bound):
+                found.add(f"{part.lineno}: {ast.unparse(part)}")
     return sorted(found)
 
 
-def path_parts(node: ast.AST) -> list[ast.AST]:
+def path_parts(node: ast.AST) -> list[tuple[ast.AST, str]]:
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
-        return [node.left, node.right]
+        return [(node.left, "name"), (node.right, "name")]
     if isinstance(node, ast.JoinedStr) and node.values:
         head = node.values[0]
-        return [head.value if isinstance(head, ast.FormattedValue) else head]
-    if isinstance(node, ast.Tuple):
-        return node.elts
+        return [(head.value if isinstance(head, ast.FormattedValue) else head, "name")]
+    if isinstance(node, ast.Tuple) and isinstance(node.ctx, ast.Load):
+        return [(element, "name") for element in node.elts]
     if isinstance(node, (ast.For, ast.comprehension)):
-        return node.iter.elts if isinstance(node.iter, (ast.List, ast.Set)) else [node.iter]
-    if isinstance(node, ast.Call) and ast.unparse(node.func).rpartition(".")[2] not in ("get", "pop", "setdefault"):
-        return node.args + [keyword.value for keyword in node.keywords]
+        if isinstance(node.iter, (ast.List, ast.Set)):
+            return [(element, "name") for element in node.iter.elts]
+        return [(unwrapped(node.iter), "sequence")]
+    if isinstance(node, ast.Call):
+        return call_parts(node)
     if isinstance(node, ast.Constant) and isinstance(node.value, str) and "/" in node.value:
-        return [node]
+        return [(node, "name")]
     return []
 
 
-def folder_bindings(tree: ast.AST, folders: set[str]) -> tuple[set[str], set[str]]:
-    names, sequences = set(), set()
+def call_parts(node: ast.Call) -> list[tuple[ast.AST, str]]:
+    callee = ast.unparse(node.func).rpartition(".")[2]
+    args = node.args[1:] if callee in ACCESSORS else node.args if callee in PATH_CALLS else []
+    args = args + [keyword.value for keyword in node.keywords if keyword.arg in PATH_KEYWORDS]
+    return [(unwrapped(arg.value), "sequence") if isinstance(arg, ast.Starred) else (arg, "name") for arg in args]
+
+
+def unwrapped(node: ast.AST) -> ast.AST:
+    while isinstance(node, ast.Call) and ast.unparse(node.func) in WRAPPERS and node.args:
+        node = node.args[0]
+    return node
+
+
+def folder_bindings(tree: ast.AST, folders: set[str]) -> dict[str, set[str]]:
+    pairs = list(bindings(tree))
+    bound = {"name": set(), "sequence": set(), "mapping": set()}
+    while True:
+        before = sum(map(len, bound.values()))
+        for target, value in pairs:
+            kind = folder_kind(value, folders, bound)
+            if kind:
+                bound[kind].add(target)
+        if sum(map(len, bound.values())) == before:
+            return bound
+
+
+def bindings(tree: ast.AST):
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
-            pairs = [(target, node.value) for target in node.targets]
-        elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)):
-            pairs = [(node.target, node.value)]
+            for target in node.targets:
+                yield from unpacked(target, node.value)
+        elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and node.value:
+            yield ast.unparse(node.target), node.value
         elif isinstance(node, ast.arguments):
             positional = node.posonlyargs + node.args
-            pairs = list(zip(positional[len(positional) - len(node.defaults) :], node.defaults))
-            pairs += list(zip(node.kwonlyargs, node.kw_defaults))
-        else:
-            continue
-        for target, value in pairs:
-            name = target.arg if isinstance(target, ast.arg) else ast.unparse(target)
-            if is_folder(value, folders):
-                names.add(name)
-            elif isinstance(value, (ast.List, ast.Tuple, ast.Set)) and any(is_folder(e, folders) for e in value.elts):
-                sequences.add(name)
-    return names, sequences
+            defaults = zip(positional[len(positional) - len(node.defaults) :], node.defaults)
+            for arg, default in [*defaults, *zip(node.kwonlyargs, node.kw_defaults)]:
+                if default:
+                    yield arg.arg, default
+
+
+def unpacked(target: ast.AST, value: ast.AST):
+    sequences = (ast.Tuple, ast.List)
+    if isinstance(target, sequences) and isinstance(value, sequences) and len(target.elts) == len(value.elts):
+        for element, item in zip(target.elts, value.elts):
+            yield from unpacked(element, item)
+    else:
+        yield ast.unparse(target), value
+
+
+def folder_kind(value: ast.AST, folders: set[str], bound: dict[str, set[str]]) -> str | None:
+    if isinstance(value, ast.IfExp):
+        return folder_kind(value.body, folders, bound) or folder_kind(value.orelse, folders, bound)
+    if isinstance(value, ast.BoolOp):
+        return next(filter(None, (folder_kind(item, folders, bound) for item in value.values)), None)
+    if is_folder(value, folders):
+        return "name"
+    if isinstance(value, (ast.Name, ast.Attribute, ast.Subscript)):
+        return next((kind for kind in bound if is_bound(value, kind, bound)), None)
+    items = value.elts if isinstance(value, (ast.List, ast.Tuple, ast.Set)) else []
+    if any(folder_kind(item, folders, bound) == "name" for item in items):
+        return "sequence"
+    entries = value.values if isinstance(value, ast.Dict) else []
+    if any(folder_kind(entry, folders, bound) == "name" for entry in entries):
+        return "mapping"
+    return None
+
+
+def is_bound(part: ast.AST, kind: str, bound: dict[str, set[str]]) -> bool:
+    if isinstance(part, ast.Subscript) and kind == "name" and ast.unparse(part.value) in bound["mapping"]:
+        return True
+    return isinstance(part, (ast.Name, ast.Attribute, ast.Subscript)) and ast.unparse(part) in bound[kind]
 
 
 def is_folder(node: ast.AST | None, folders: set[str]) -> bool:
@@ -156,6 +242,49 @@ def test_the_guard_catches_a_folder_name_passed_through_a_variable():
         "6: base",
         "8: self.where",
         "9: name",
+    ]
+
+
+def test_the_guard_follows_aliases_wrappers_and_fallbacks_but_not_keys_or_subcommands():
+    folders = {"homes", "run", "tmp"}
+    source = (
+        'x = "tmp"\n'
+        "y = x\n"
+        "a = root / y\n"
+        'p, q = ["homes", "run"]\n'
+        "b = root / p\n"
+        'DEFAULT = "tmp"\n'
+        "def f(root, sub=DEFAULT): return root / sub\n"
+        'FOLDERS = ["run", "tmp"]\n'
+        "for d in sorted(FOLDERS): pass\n"
+        "c = os.path.join(root, *FOLDERS)\n"
+        'e = root / os.environ.get("X", "tmp")\n'
+        'g = "homes" if flag else "work"\n'
+        "h = root / g\n"
+        'i = os.environ.get("X") or "run"\n'
+        "j = Path(i)\n"
+        'ROOTS = {"runtime": "run"}\n'
+        'k = root / ROOTS["runtime"]\n'
+        'cfg["f"] = "tmp"\n'
+        'm = root / cfg["f"]\n'
+        'key = "homes"\n'
+        "load(record, key)\n"
+        'verb = "run"\n'
+        "herdr(verb)\n"
+        'herdr("run")\n'
+        'n = record.get("homes", {})\n'
+    )
+    assert named_folders(source, folders) == [
+        "10: FOLDERS",
+        "11: tmp",
+        "13: g",
+        "15: i",
+        "17: ROOTS['runtime']",
+        "19: cfg['f']",
+        "3: y",
+        "5: p",
+        "7: sub",
+        "9: FOLDERS",
     ]
 
 
