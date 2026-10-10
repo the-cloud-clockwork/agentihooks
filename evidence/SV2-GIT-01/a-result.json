@@ -2,8 +2,7 @@
   "case": "T-SV2-GIT-01-A",
   "evidence_class": "mocked: fakeredis store shared by both controller processes with its own clock, the chart's controller affinity evaluated against labelled node fixtures; recovery seconds count controller ticks times the tick interval; no Kubernetes scheduler, autoscaler or EC2 call was made",
   "input_sha256": {
-    "deploy/helm/agentihooks-swarm/values.yaml": "170faadd74c409a8c99f71d6699a09926f50dfb02ec7fdecde67833cdb002709",
-    "tests/fixtures/swarm_v2/control-nodes.json": "cbed4bac3bbb847e4b34f45648459eab9fa18653103d923d31ec579ee1766ed3"
+    "tests/fixtures/swarm_v2/control-nodes.json": "b8d05e926dd1722cc6cfa084886dd583d2735676f9bf63c82e415300e4a00dca"
   },
   "observed": {
     "independent_runs_agree": true,
