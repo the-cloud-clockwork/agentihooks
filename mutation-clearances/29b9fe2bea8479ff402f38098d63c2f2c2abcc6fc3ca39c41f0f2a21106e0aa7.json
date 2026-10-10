@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/hierarchy_backfill.py:scripts.swarm_ledger.hierarchy_backfill.x_stored__mutmut_5:de4af17b052984f79f3391483661e2bfd6e041a2e31b82665dece0ff58201d3b": {
+    "reader": "Standards reader for PR 2308",
+    "reason": "SQLite keywords, identifiers and sqlite_master are case-insensitive, and the 'table' literal is unchanged, so the mutant query returns the same names. The same probe returned ['t2', 'work_nodes'] for both the uppercase and lowercase queries."
+  }
+}

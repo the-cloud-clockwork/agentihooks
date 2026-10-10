@@ -62,6 +62,45 @@ def box(tmp_path, sink):
     opened.close()
 
 
+def test_batch_rows_and_checkpoint_commit_together(box):
+    box.db.execute("CREATE TABLE checkpoint (revision INTEGER)")
+    first = row("first")
+    second = row("second", ts_ms=NOW + 1)
+    other = Table("other", TASKS.columns)
+    box.append_many(
+        [(TASKS, [first]), (other, [second])],
+        lambda connection: connection.execute("INSERT INTO checkpoint VALUES (8)"),
+    )
+    assert box.recent(TASKS.name, NOW) == [first]
+    assert box.recent("other", NOW) == [second]
+    assert box.db.execute("SELECT revision FROM checkpoint").fetchall() == [(8,)]
+
+
+def test_batch_rows_roll_back_when_checkpoint_fails(box):
+    box.db.execute("CREATE TABLE checkpoint (revision INTEGER)")
+
+    def failed(connection):
+        connection.execute("INSERT INTO checkpoint VALUES (8)")
+        raise OSError("checkpoint failed")
+
+    with pytest.raises(OSError, match="checkpoint failed"):
+        box.append_many([(TASKS, [row("first")]), (Table("other", TASKS.columns), [row("second")])], failed)
+    assert box.recent(TASKS.name, NOW) == []
+    assert box.recent("other", NOW) == []
+    assert box.db.execute("SELECT revision FROM checkpoint").fetchall() == []
+
+
+def test_a_malformed_batch_writes_no_rows_or_checkpoint(box):
+    called = []
+    with pytest.raises(ValueError):
+        box.append_many(
+            [(TASKS, [row("valid")]), (Table("other", TASKS.columns), [row("bad", ts_ms=False)])],
+            lambda connection: called.append(connection),
+        )
+    assert box.recent(TASKS.name, NOW) == []
+    assert called == []
+
+
 def test_rows_written_while_the_sink_is_down_arrive_once_after_it_returns(box, sink):
     sink.up = False
     box.append(TASKS, [row("e1"), row("e2")])
