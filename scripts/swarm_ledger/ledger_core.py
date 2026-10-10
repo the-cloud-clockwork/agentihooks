@@ -366,7 +366,7 @@ def warnings(doc):
     if words > 200:
         found.append(f"overview has {words} words, limit 200")
     for phase in doc["phases"]:
-        if len(phase["description"].split()) > 100:
+        if "description" in phase and len(phase["description"].split()) > 100:
             found.append(f"phase {phase['id']} description has {len(phase['description'].split())} words, limit 100")
     return found
 

@@ -320,7 +320,7 @@ def cmd_show(args):
 
 
 def cmd_tree(args):
-    for row in resource(args.slug, f"hierarchy/subtree/{args.node}" if args.node else "hierarchy"):
+    for row in resource(args.slug, f"hierarchy/subtree/{args.node}" if args.node else "hierarchy", collection=True):
         print(f"{'  ' * row['depth']}{row['node']}  {row['state']}")
 
 
@@ -661,6 +661,12 @@ def cmd_plan_backfill(args):
     plan_backfill.run(args)
 
 
+def cmd_hierarchy(args) -> None:
+    from scripts.swarm_ledger import hierarchy_backfill
+
+    hierarchy_backfill.run(args)
+
+
 def cmd_task(args):
     if args.action == "add":
         if args.id == "-":
@@ -790,6 +796,8 @@ def build_parser():
     artifact.add_argument("--request", help="id of the operator chat line or comment that asked for the file")
     sub.add_parser("artifact-purge")
     sub.add_parser("plan-backfill", help="compute missing plan lines for linked unfinished tasks")
+    hierarchy = sub.add_parser("hierarchy").add_subparsers(dest="action", required=True)
+    hierarchy.add_parser("backfill").add_argument("--apply", action="store_true")
     phase = sub.add_parser("phase")
     phase.add_argument("id")
     phase.add_argument("state")
@@ -900,7 +908,7 @@ def main():
     if text := refusal(args.name, Who.from_env()):
         sys.exit(f"agentihooks ledger: {text}")
     args.name = resolve_name(args.name) if args.name else args.name
-    if not args.slug or not (args.name or args.command in ("url", "show", "tree")):
+    if not args.slug or not (args.name or args.command in ("url", "show", "tree", "hierarchy")):
         sys.exit("--slug and --as are required")
     globals()[f"cmd_{args.command.replace('-', '_')}"](args)
 

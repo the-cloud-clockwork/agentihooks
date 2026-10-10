@@ -63,7 +63,7 @@ def dispatch(handler: object, server: ModuleType) -> dict | None:
 def ledger_read(server: ModuleType, slug: str, path: str, query: dict) -> dict:
     parts = path.split("/")
     if parts[0] == "hierarchy":
-        return resources.hierarchy_read(server.repository, slug, path)
+        return resources.hierarchy_read(server.repository, slug, path, query)
     if parts[0] in resources.COLLECTIONS and len(parts) in (2, 3):
         return resources.read(server.repository.read(slug, "/".join(parts[:2])), path, query)
     return resources.read(server.repository.get_document(slug), path, query)
