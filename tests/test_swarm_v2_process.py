@@ -391,6 +391,17 @@ def test_a_local_launch_that_cannot_read_its_process_identity_is_refused_and_lea
     assert store.execution_identity_conflicts_total("sw") == 0
 
 
+def test_a_local_launch_admitted_by_the_local_runtime_is_retired_through_the_tick_runtime(tmp_path, monkeypatch):
+    with bounded("the admitted launch retire"):
+        store = launch_store()
+        local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+        started = local.admit(store, "sw", launched(store))
+        tick_runtime = RoutedRuntime(local.herdr, RuntimeRouter([local]))
+        assert tick_runtime.retire(store.execution("sw", started.execution_id), ("/scratch/t1",))
+        assert ended == [(started.name, PID, ("/scratch/t1",), STARTED)]
+        assert tick_runtime.refused == {}
+
+
 @pytest.fixture
 def remote_swarm():
     import fakeredis
