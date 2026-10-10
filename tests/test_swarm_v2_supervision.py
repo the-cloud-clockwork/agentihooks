@@ -44,6 +44,24 @@ def test_launch_binds_registered_authority_and_private_home(tmp_path):
     assert launch.herdr == ("herdr", "server")
 
 
+def test_a_launch_without_an_exporter_loads_with_none(tmp_path):
+    attempt, path, spec = launch_files(tmp_path)
+    del spec["exporter"]
+    path.write_text(json.dumps(spec))
+
+    assert Launch.load(attempt, path).exporter is None
+
+
+@pytest.mark.parametrize("value", [None, [], [""], ["ok", 1], "exporter", ["a\0b"]])
+def test_a_launch_with_a_malformed_exporter_is_refused(tmp_path, value):
+    attempt, path, spec = launch_files(tmp_path)
+    spec["exporter"] = value
+    path.write_text(json.dumps(spec))
+
+    with pytest.raises(LaunchRefused, match="invalid command"):
+        Launch.load(attempt, path)
+
+
 @pytest.mark.parametrize("field,value", [("generation", 2), ("execution_id", "exe-" + "c" * 32), ("grant_id", "other")])
 def test_launch_refuses_authority_changes_before_creating_runtime(tmp_path, field, value):
     attempt, path, spec = launch_files(tmp_path)
