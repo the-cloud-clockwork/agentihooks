@@ -22,6 +22,7 @@ Exit code is always 0 — must never crash the Claude session.
 
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +31,8 @@ STREAM_KEY_PREFIX = os.environ.get("REDIS_KEY_PREFIX", "agenticore")
 STREAM_MAXLEN = 2000
 STREAM_TTL_SEC = 3600
 POSITION_TTL_SEC = 3600
+
+INSTALLATION_ID = re.compile(r"inst-[0-9a-f]{32}")
 
 EVENT_TYPES = {"thinking", "tool_use", "tool_result", "assistant_text", "done"}
 
@@ -48,15 +51,19 @@ def _home() -> Path:
 
 def _installation_id() -> str:
     try:
-        return json.loads((_home() / "installation.json").read_text())["installation_id"]
+        value = json.loads((_home() / "installation.json").read_text())["installation_id"]
+        return value if INSTALLATION_ID.fullmatch(value) else ""
     except (OSError, ValueError, KeyError, TypeError):
         return ""
 
 
+def _legacy_position_key(session_id: str) -> str:
+    return f"{STREAM_KEY_PREFIX}:pos:eventrelay:{session_id}"
+
+
 def _position_key(session_id: str) -> str:
     scope = _installation_id()
-    middle = f"{scope}:" if scope else ""
-    return f"{STREAM_KEY_PREFIX}:{middle}pos:eventrelay:{session_id}"
+    return f"{STREAM_KEY_PREFIX}:{scope}:pos:eventrelay:{session_id}" if scope else _legacy_position_key(session_id)
 
 
 def _position_file(session_id: str) -> Path:
@@ -83,6 +90,8 @@ def _load_position(session_id: str) -> int:
     if r is not None:
         try:
             v = r.get(_position_key(session_id))
+            if v is None:
+                v = r.get(_legacy_position_key(session_id))
             if v is not None:
                 return int(v)
         except Exception:
