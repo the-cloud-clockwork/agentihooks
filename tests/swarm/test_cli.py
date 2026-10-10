@@ -1868,6 +1868,8 @@ def test_the_operator_may_give_a_verdict_and_a_worker_may_not(env, capsys, monke
     _findings(capsys)
     assert run("sw", "--as", "engineer@a1b2c3-0001", "verdict", "idle-with-claim/engineer@a1b2c3-0001", "resolved") == 1
     assert capsys.readouterr().err == "swarm: only the master or the operator gives a finding a verdict\n"
+    assert run("sw", "--as", "master@a1b2c3-0009", "verdict", "idle-with-claim/engineer@a1b2c3-0001", "resolved") == 1
+    assert capsys.readouterr().err == "swarm: only the master or the operator gives a finding a verdict\n"
     assert run("sw", "--as", "operator", "verdict", "idle-with-claim/engineer@a1b2c3-0001", "resolved") == 0
 
 

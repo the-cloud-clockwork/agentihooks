@@ -672,11 +672,13 @@ def test_the_master_or_the_operator_classifies_through_the_swarm_command(cautiou
     assert (ruled.state, ruled.ruled_by, ruled.ruled_at) == (State.LOST, by, NOW + 10)
 
 
-def test_a_lane_agent_may_not_classify_an_attempt(cautious, monkeypatch, capsys):
+@pytest.mark.parametrize("registered", [True, False])
+def test_only_a_registered_master_or_the_operator_may_classify(cautious, monkeypatch, capsys, registered):
     store, agent, observer = cautious
     before = flagged(observer, agent)
-    assert agent.name in [found.name for found in store.agents("fixture")]
-    args = ["--as", agent.name, "classify", agent.execution_id, "working", "--reason", "fine"]
+    name = agent.name if registered else "master@unregistered-0001"
+    assert (name in [found.name for found in store.agents("fixture")]) is registered
+    args = ["--as", name, "classify", agent.execution_id, "working", "--reason", "fine"]
     assert classify_cli(monkeypatch, store, *args) == 1
     assert capsys.readouterr().err == "swarm: only the master or the operator classifies an execution attempt\n"
     assert observer.get("fixture", agent.execution_id) == before

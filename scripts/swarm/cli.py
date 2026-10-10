@@ -906,10 +906,12 @@ def cmd_rename(store, args):
 def _master_or_operator(store, args, message):
     store.config(args.slug)
     name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
+    if name in ("", "operator"):
+        return "operator"
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
-    if agent is not None and agent.lane != MASTER:
+    if agent is None or agent.lane != MASTER:
         raise SwarmError(message)
-    return name or "operator"
+    return name
 
 
 def cmd_verdict(store, args):
