@@ -31,7 +31,9 @@ SHOWN = ("id", *SPEC_FIELDS, *WORKER_FIELDS, "claimed_by")
 RECEIPTS = "task_operations"
 REVISION = re.compile(r"[0-9a-f]{64}")
 TASK = re.compile(r"/v2/tasks/([^/]+)")
-PROGRESS = re.compile(r"/v2/tasks/([^/]+)/progress")
+PROGRESS = re.compile(r"/v2/tasks/([^/]+)/(?:progress|comments)")
+OUTCOMES = re.compile(r"/v2/tasks/([^/]+)/outcomes")
+WORKER_OUTCOMES = ("done", "blocked")
 CONTROLS = re.compile(r"/v2/swarm(/.*)?")
 STATUS = {
     "invalid_request": 400,
@@ -81,6 +83,8 @@ class TasksAPI:
                 return 200, self.update(token, subject[1], body)
             if (subject := PROGRESS.fullmatch(path)) and method == "POST":
                 return 200, self.progress(token, subject[1], body)
+            if (subject := OUTCOMES.fullmatch(path)) and method == "POST":
+                return 200, self.propose(token, subject[1], body)
         except GrantRefused as error:
             if isinstance(body, Mapping):
                 error.operation_id = _operation_id(body.get("operation_id"))
@@ -101,8 +105,7 @@ class TasksAPI:
     def update(self, token: str, task_id: str, body: object) -> dict:
         scope = self._writable(token, task_id)
         request = _request(body, ("operation_id", "task_generation", "expected_revision", "fields"))
-        if not isinstance(request["expected_revision"], str) or not REVISION.fullmatch(request["expected_revision"]):
-            raise GrantRefused("invalid_request", "expected_revision must be a task revision from a read")
+        _expected_revision(request)
         fields = request["fields"]
         if not isinstance(fields, Mapping) or not fields:
             raise GrantRefused("invalid_request", "fields must name at least one worker field")
@@ -121,6 +124,19 @@ class TasksAPI:
             raise GrantRefused("invalid_request", "text must be a non empty string")
         op = {"op": "add", "thread": f"tasks/{task_id}/comments", "text": text}
         return self._write(scope, request, op, None)
+
+    def propose(self, token: str, task_id: str, body: object) -> dict:
+        scope = self._writable(token, task_id)
+        request = _request(body, ("operation_id", "task_generation", "expected_revision", "outcome", "proof"))
+        _expected_revision(request)
+        if request["outcome"] not in WORKER_OUTCOMES:
+            raise GrantRefused("invalid_request", "outcome must be done or blocked")
+        proof = request["proof"]
+        if not isinstance(proof, str) or not proof.strip():
+            raise GrantRefused("invalid_request", "proof must be a non empty string")
+        text = f"Outcome proposal: {request['outcome']}. {proof}"
+        op = {"op": "add", "thread": f"tasks/{task_id}/comments", "text": text}
+        return self._write(scope, request, op, request["expected_revision"])
 
     def _scope(self, token: str, task_id: str) -> Registration:
         registration = self.grants.bound(self.slug, token)
@@ -231,6 +247,11 @@ def _request(body: object, names: tuple[str, ...]) -> dict:
     if not isinstance(body["operation_id"], str) or not IDENTIFIER.fullmatch(body["operation_id"]):
         raise GrantRefused("invalid_request", "operation_id must be an identifier")
     return dict(body)
+
+
+def _expected_revision(request: dict) -> None:
+    if not isinstance(request["expected_revision"], str) or not REVISION.fullmatch(request["expected_revision"]):
+        raise GrantRefused("invalid_request", "expected_revision must be a task revision from a read")
 
 
 def _operation_id(value: object) -> str:
