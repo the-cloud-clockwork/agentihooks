@@ -105,5 +105,8 @@
     "wan": "not measured; run the same command from a cloud worker against the on-prem mount at the rollout gate"
   },
   "failure_evidence": "tests/contracts/storage_layout/fixtures holds the smallest Pod for each refusal (shared-codex-home-pod, operator-home-pod, writable-node-cache-pod) beside safe-pod rendered from pod-policy-shared; the cases use no random seed",
-  "rollout_safety": "SWARM_ARTIFACT_PUBLISHING=off disables only artifact publication; a pod policy without mounts keeps the qualified private Pod; the storage checker itself has no off switch"
+  "rollout_safety": "SWARM_ARTIFACT_PUBLISHING=off disables only artifact publication; a pod policy without mounts keeps the qualified private Pod; the storage checker itself has no off switch",
+  "production_path": "KubernetesTransport.apply_operation renders through PodTemplate and its storage checker; an operator home policy answers REFUSED with no create sent, a safe policy creates a Pod with a read only seed and cache and an artifact mount scoped to the execution id (tests.contracts.storage_layout.test_entrypoint)",
+  "authority": "Publication scope comes from the registration the launch grant authorization returns; a store whose authorization answers with a seat or task label is refused with the ungranted error; the artifact subPath is the launch execution id, never a Pod label",
+  "data_safety": "Authoritative: committed artifact objects and records, node cache seeds, attempt worktrees. Disposable: attempt private home and tmp volumes and the benchmark's own subfolder. Tested: rollback with publishing off leaves the artifact store byte for byte unchanged and a committed artifact verified; the benchmark leaves pre existing records in its mount unchanged"
 }

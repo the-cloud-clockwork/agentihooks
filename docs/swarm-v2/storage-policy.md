@@ -48,6 +48,24 @@ A pod policy without `mounts` renders the private Pod of SV2-KUB-01. Committed a
 not delete them as caches. The rehearsal (pause, resume, attempt files unchanged) runs in CI in the storage layout
 contract tests.
 
+## Authority
+
+Publication scope comes only from the launch grant: the artifact store is built from the registration its authorization
+returns for the attempt's grant token, and a store whose authorization answers with anything else, such as a seat or
+task label, is refused. The artifact mount is scoped by `subPath` to the launch's execution id, never to a Pod label.
+
+## Data safety before rollback
+
+Authoritative objects, never deleted as caches: committed artifact objects and their records in the artifact store,
+seeds published by the node cache owner, and every attempt worktree. Disposable: an attempt's private home and tmp
+volumes, and the benchmark's own subfolder. Rollback pauses publication and leaves the artifact store unchanged; the
+benchmark removes only the subfolder it created.
+
+## Production path
+
+`KubernetesTransport.apply_operation`, the controller's Pod create path, renders through `PodTemplate`, which runs the
+storage checker. A refused policy answers `REFUSED` and sends no create to the API server.
+
 ## Reproducing a refusal
 
 The storage layout contract fixtures hold the smallest Pods that reproduce each refusal: a shared writable Codex home,
