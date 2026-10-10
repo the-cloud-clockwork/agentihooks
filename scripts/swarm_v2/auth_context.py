@@ -17,6 +17,7 @@ from hooks.context.project_sessions import SessionGrant
 from scripts.swarm.store import SwarmError
 
 if TYPE_CHECKING:
+    from redis import Redis
     from redis.client import Pipeline
 
     from scripts.swarm.store import AgentRecord, RedisStore
@@ -246,15 +247,25 @@ class LaunchAuthority:
             slug, "dependency_unavailable", "launch registrations kept changing; registration was not committed"
         )
 
-    def admit(self, pipe: Pipeline, slug: str, claims: dict) -> Registration:
-        grants = self.store.key(slug, "launch-grants")
-        registrations = self.store.key(slug, "launch-registrations")
-        raw = pipe.hget(grants, claims["grant_id"])
+    def issued(self, reader: Redis | Pipeline, slug: str, claims: dict) -> dict:
+        raw = reader.hget(self.store.key(slug, "launch-grants"), claims["grant_id"])
         if not raw:
             self.refuse(slug, "unauthenticated", "launch grant was not issued by this controller")
         audit = json.loads(raw)
         if audit["state"] == "revoked":
             self.refuse(slug, "unauthenticated", "launch grant was revoked")
+        return audit
+
+    def verify(self, slug: str, token: str) -> Registration:
+        """Checks the grant without registering it and without judging currency; issue and register judge that."""
+        claims = self._verify(slug, token)
+        self.issued(self.redis, slug, claims)
+        return _registration(claims, "")
+
+    def admit(self, pipe: Pipeline, slug: str, claims: dict) -> Registration:
+        grants = self.store.key(slug, "launch-grants")
+        registrations = self.store.key(slug, "launch-registrations")
+        audit = self.issued(pipe, slug, claims)
         occupants = self.store.execution_occupants(slug).values()
         if (claims["execution_id"], claims["generation"]) not in {(a.execution_id, a.generation) for a in occupants}:
             self.refuse(slug, "stale_generation", "launch grant is for a superseded execution")
@@ -266,9 +277,7 @@ class LaunchAuthority:
             return registration
         if pipe.exists(self.store.key(slug, "launch-grants-disabled")):
             self.refuse(slug, "forbidden_scope", "launch grants are disabled for this swarm")
-        registration = Registration(
-            **{name: claims[name] for name in (*BOUND, *AUDIT)}, registered_at=_timestamp(int(self.clock()))
-        )
+        registration = _registration(claims, _timestamp(int(self.clock())))
         pipe.multi()
         pipe.hset(registrations, claims["execution_id"], json.dumps(asdict(registration)))
         pipe.hset(grants, claims["grant_id"], json.dumps({**audit, "state": "registered"}))
@@ -311,6 +320,10 @@ class LaunchAuthority:
 
     def enable(self, slug: str) -> None:
         self.redis.delete(self.store.key(slug, "launch-grants-disabled"))
+
+
+def _registration(claims: dict, registered_at: str) -> Registration:
+    return Registration(**{name: claims[name] for name in (*BOUND, *AUDIT)}, registered_at=registered_at)
 
 
 def _identifier(value: object) -> bool:

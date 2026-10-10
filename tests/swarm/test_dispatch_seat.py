@@ -20,12 +20,12 @@ MINUTE = 60_000
 ROLE = Path(__file__).resolve().parents[2] / "profiles" / "package" / "roles" / "dispatcher"
 
 
-def priority(row_id="pr1", item="questions/q1", text="Pick the release day", age=15 * MINUTE):
+def priority(row_id="pr1", item="tasks/t5", text="Pick the release day", age=15 * MINUTE):
     return {"id": row_id, "item": item, "text": text, "at": NOW - age}
 
 
 def doc(*rows):
-    return {"tasks": [], "phases": [], "priorities": list(rows)}
+    return {"tasks": [], "phases": [], "questions": [], "followups": [], "priorities": list(rows)}
 
 
 def swarm(autonomy="full"):
@@ -55,7 +55,7 @@ def test_an_unresolved_priority_at_full_autonomy_spawns_one_seat_whose_prompt_na
     assert seat.seat == seat_address(SLUG, "dispatcher") == f"dispatcher@{SLUG}"
     text = prompt.build(SLUG, "/repo", dispatch_seat.LANE, seat.name, runtime.tasks[0], autonomy="full")
     assert text.startswith(f"You are {seat.name}, the dispatcher of swarm {SLUG}")
-    assert "questions/q1" in text and "Pick the release day" in text and "15 minutes" in text
+    assert "tasks/t5" in text and "Pick the release day" in text and "15 minutes" in text
     assert run(store, runtime, doc(priority()), NOW + MINUTE) == []
     assert len(runtime.spawned) == 1
 
@@ -83,7 +83,7 @@ def test_a_live_seat_is_woken_once_by_inbox_for_each_new_trigger():
     assert actions == [f"woke {seat.name} with 1 new trigger"]
     [item] = InboxStore(store.redis).inbox(f"dispatcher@{SLUG}")
     assert InboxStore(store.redis).inbox(seat.name) == []
-    assert item.sender == "swarm" and "followups/f1" in item.text and "questions/q1" not in item.text
+    assert item.sender == "swarm" and "followups/f1" in item.text and "tasks/t5" not in item.text
     assert run(store, runtime, doc(priority(), later), NOW + 2 * MINUTE) == []
     assert len(runtime.spawned) == 1
 
@@ -105,7 +105,7 @@ def test_done_from_the_seat_is_refused_while_a_trigger_is_open_and_names_it():
     refused = dispatch_seat.refusal(SLUG, store.config(SLUG), store, doc(priority()), NOW)
     assert refused == (
         "dispatcher triggers are still open; settle them, or the tick ends your seat once they close:\n"
-        "- The priority on questions/q1 is unresolved after 15 minutes: Pick the release day"
+        "- The priority on tasks/t5 is unresolved after 15 minutes: Pick the release day"
     )
 
 
@@ -116,7 +116,7 @@ def test_done_from_the_seat_names_every_open_trigger_one_per_line():
     dev_red.hold(store.redis, SLUG, "t9", 77)
     found = {**doc(priority()), "tasks": [{"id": "t9", "state": "blocked"}]}
     assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, found, NOW).splitlines()[1:] == [
-        "- The priority on questions/q1 is unresolved after 15 minutes: Pick the release day",
+        "- The priority on tasks/t5 is unresolved after 15 minutes: Pick the release day",
         "- Dev Tests run 77 is red and holds these blocked tasks: t9. Propose a freeze or a focus to the master if one "
         "would help.",
     ]
@@ -175,15 +175,94 @@ def test_a_failed_spawn_leaves_no_seat_record():
     assert seats(store) == []
 
 
-def test_the_tick_spawns_the_seat_at_full_autonomy_only():
-    class Ledger(FakeLedger):
-        def state(self, slug):
-            return {**super().state(slug), "priorities": [priority()]}
+class PriorityLedger(FakeLedger):
+    def state(self, slug):
+        return {**super().state(slug), "priorities": [priority()]}
 
+
+def test_the_tick_spawns_the_seat_at_full_autonomy_only():
     for autonomy, spawned in (("full", 1), ("delegate", 0)):
         store, runtime = swarm(autonomy), FakeRuntime()
-        tick(SLUG, store, Ledger([]), runtime, NOW)
+        tick(SLUG, store, PriorityLedger([]), runtime, NOW)
         assert sum(lane == dispatch_seat.LANE for lane, _, _ in runtime.spawned) == spawned
+
+
+OPERATOR_ONLY = {
+    "questions/q1": {},
+    "tasks/t1": {"state": "pr", "awaiting": "approval"},
+    "followups/f1": {"needs_operator": True},
+    "phases/p1": {"review": {"escalated": True}},
+}
+
+
+def operator_only_doc(*extra):
+    rows = [priority(f"pr{n}", path, f"Decide {n}") for n, path in enumerate(OPERATOR_ONLY)]
+    found = doc(*rows, *extra)
+    found["tasks"] = [{"id": "t1", **OPERATOR_ONLY["tasks/t1"]}]
+    found["followups"] = [{"id": "f1", **OPERATOR_ONLY["followups/f1"]}]
+    found["phases"] = [{"id": "p1", **OPERATOR_ONLY["phases/p1"]}]
+    return found
+
+
+@pytest.mark.parametrize("path", list(OPERATOR_ONLY))
+def test_a_priority_only_the_operator_can_settle_is_no_trigger(path):
+    name, item_id = path.split("/")
+    found = {**doc(priority("pr1", path, "Decide it")), name: [{"id": item_id, **OPERATOR_ONLY[path]}]}
+    assert dispatch_seat.triggers(found, NOW) == []
+
+
+@pytest.mark.parametrize("path", ["tasks/t1", "followups/f1", "phases/p1"])
+def test_the_same_item_without_an_operator_decision_is_a_trigger(path):
+    name, item_id = path.split("/")
+    found = {**doc(priority("pr1", path, "Decide it")), name: [{"id": item_id}]}
+    assert dispatch_seat.triggers(found, NOW) == [{"id": "pr1", "item": path, "text": "Decide it", "minutes": 15}]
+
+
+def test_a_question_is_no_trigger_even_once_it_is_gone():
+    assert dispatch_seat.triggers(doc(priority("pr1", "questions/q1", "Decide it")), NOW) == []
+
+
+def test_triggers_read_a_ledger_without_questions_or_followups():
+    rows = [priority("pr1", "questions/q1", "Decide it"), priority("pr2", "followups/f1", "Approve the lane cap")]
+    assert dispatch_seat.triggers({"priorities": rows}, NOW) == [
+        {"id": "pr2", "item": "followups/f1", "text": "Approve the lane cap", "minutes": 15}
+    ]
+
+
+def test_no_seat_spawns_while_every_open_priority_waits_on_the_operator():
+    store, runtime = swarm(), FakeRuntime()
+    for minute in range(3):
+        assert run(store, runtime, operator_only_doc(), NOW + minute * MINUTE) == []
+    assert runtime.spawned == [] and seats(store) == []
+    unsettled = priority("pr9", "tasks/t9", "Unblock the deploy")
+    [action] = run(store, runtime, operator_only_doc(unsettled), NOW)
+    [seat] = seats(store)
+    assert action == f"spawned dispatcher {seat.name} for 1 trigger"
+    assert runtime.tasks[0]["triggers"] == [
+        {"id": "pr9", "item": "tasks/t9", "text": "Unblock the deploy", "minutes": 15}
+    ]
+
+
+def test_no_seat_spawns_while_the_swarm_is_paused_and_one_spawns_once_it_runs():
+    store, runtime = swarm(), FakeRuntime()
+    store.update(SLUG, state="paused")
+    for minute in range(3):
+        assert run(store, runtime, doc(priority()), NOW + minute * MINUTE) == []
+    assert runtime.spawned == [] and seats(store) == []
+    store.update(SLUG, state="running")
+    [action] = run(store, runtime, doc(priority()), NOW + 3 * MINUTE)
+    [seat] = seats(store)
+    assert action == f"spawned dispatcher {seat.name} for 1 trigger"
+
+
+def test_a_live_seat_is_still_woken_while_the_swarm_is_paused():
+    store, runtime = swarm(), FakeRuntime()
+    run(store, runtime, doc(priority()))
+    [seat] = seats(store)
+    store.update(SLUG, state="paused")
+    later = priority("pr2", "followups/f2", "Approve the lane cap", age=20 * MINUTE)
+    assert run(store, runtime, doc(priority(), later), NOW + MINUTE) == [f"woke {seat.name} with 1 new trigger"]
+    assert len(runtime.spawned) == 1
 
 
 def test_the_seat_spawn_helper_names_records_and_places_a_seat():
@@ -212,7 +291,7 @@ LED = f"agentihooks ledger --slug {SLUG} --as {NAME}"
 PROMPT = f"""You are {NAME}, the dispatcher of swarm {SLUG}, working beside its master in the repo /repo. \
 The swarm runs at full autonomy.
 The tick woke you because its deterministic passes could not settle these triggers:
-- The priority on questions/q1 is unresolved after 15 minutes: Pick the release day
+- The priority on tasks/t5 is unresolved after 15 minutes: Pick the release day
 Your seat dispatcher@{SLUG} has no history yet: no handoff document, no recap and no learned notes.
 
 Before anything else, run once: {LED} join. Then read the ledger with agentihooks ledger --slug {SLUG} show and \
@@ -231,7 +310,7 @@ When every trigger is closed, run {LED} leave, then agentihooks swarm {SLUG} don
 session.
 Write ledger comments and messages in plain words: no ids, paths, hashes or dashes.
 """
-TRIGGER_LINE = "- The priority on questions/q1 is unresolved after 15 minutes: Pick the release day\n"
+TRIGGER_LINE = "- The priority on tasks/t5 is unresolved after 15 minutes: Pick the release day\n"
 
 
 def test_the_dispatcher_prompt_is_built_from_its_triggers_and_seat():
@@ -246,8 +325,8 @@ def test_triggers_read_only_stale_priorities_and_tolerate_a_ledger_without_any()
     assert dispatch_seat.triggers({}, NOW) == []
     rows = [priority(), priority("pr2", age=30 * MINUTE + 59_999), priority("pr3", age=MINUTE)]
     assert dispatch_seat.triggers(doc(*rows), NOW) == [
-        {"id": "pr1", "item": "questions/q1", "text": "Pick the release day", "minutes": 15},
-        {"id": "pr2", "item": "questions/q1", "text": "Pick the release day", "minutes": 30},
+        {"id": "pr1", "item": "tasks/t5", "text": "Pick the release day", "minutes": 15},
+        {"id": "pr2", "item": "tasks/t5", "text": "Pick the release day", "minutes": 30},
     ]
 
 
@@ -366,7 +445,7 @@ def test_triggers_a_departed_seat_left_open_spawn_no_seat_and_a_new_trigger_does
     actions = run(store, runtime, crew(doc(priority(), later), joined=gone), NOW + 3 * MINUTE)
     assert actions == ["spawned dispatcher dispatcher@a1b2c3-0002 for 2 triggers"]
     assert runtime.tasks[-1]["triggers"] == [
-        {"id": "pr1", "item": "questions/q1", "text": "Pick the release day", "minutes": 18},
+        {"id": "pr1", "item": "tasks/t5", "text": "Pick the release day", "minutes": 18},
         {"id": "pr2", "item": "followups/f1", "text": "Approve the lane cap", "minutes": 18},
     ]
     run(store, runtime, doc(), NOW + 4 * MINUTE)
@@ -435,15 +514,21 @@ def test_the_swarm_config_reaches_the_seat_spawn():
     assert runtime.configs == [config]
 
 
-def test_a_sleeping_swarm_tick_spawns_no_dispatcher():
-    class Ledger(FakeLedger):
-        def state(self, slug):
-            return {**super().state(slug), "priorities": [priority()]}
-
-    store, runtime = swarm(), FakeRuntime()
+def sleep(store):
     store.redis.set(store.key(SLUG, "master-retired-tasks"), json.dumps([]))
-    tick(SLUG, store, Ledger([]), runtime, NOW)
+
+
+def pause(store):
+    store.update(SLUG, state="paused")
+
+
+@pytest.mark.parametrize("hold", [sleep, pause], ids=["sleeping", "paused"])
+def test_a_sleeping_or_paused_swarm_tick_spawns_no_dispatcher(hold):
+    store, runtime = swarm(), FakeRuntime()
+    hold(store)
+    tick(SLUG, store, PriorityLedger([]), runtime, NOW)
     assert [lane for lane, _, _ in runtime.spawned if lane == dispatch_seat.LANE] == []
+    assert seats(store) == []
 
 
 REPORT = {
