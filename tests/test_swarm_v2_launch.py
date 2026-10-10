@@ -8,13 +8,13 @@ import pytest
 
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
-from scripts.swarm.tick import Placed
+from scripts.swarm.tick import Placed, SpawnError
 from scripts.swarm_v2 import broadcast_bridge
 from scripts.swarm_v2 import launch as launch_module
 from scripts.swarm_v2.accounts import OCCUPIED, RESERVED, AccountCapacity, Slot
 from scripts.swarm_v2.auth_context import GrantRefused, LaunchAuthority, LaunchKey
 from scripts.swarm_v2.controller import Controller
-from scripts.swarm_v2.launch import DistributedLaunch, Launch, LaunchTerms, WorkerHomeCommand
+from scripts.swarm_v2.launch import HANDED, HANDS, DistributedLaunch, Hand, Launch, LaunchTerms, WorkerHomeCommand
 from scripts.swarm_v2.registry import CLOSED, LIVE, FleetRegistry, Scope, Session
 from scripts.swarm_v2.runtime.base import Capability, Outcome, Placement, RuntimeRouter, SpawnRequest, Status
 from scripts.swarm_v2.runtime.routed import routed
@@ -48,12 +48,12 @@ class Remote:
 
 
 class Homes:
-    def __init__(self, handed=True):
-        self.handed, self.calls = handed, []
+    def __init__(self, hand=HANDED):
+        self.hand_result, self.calls = hand, []
 
     def hand(self, agent, grant):
         self.calls.append((agent.execution_id, grant))
-        return self.handed
+        return self.hand_result
 
 
 class World:
@@ -98,6 +98,9 @@ class World:
         return {
             holder: json.loads(raw) for holder, raw in self.store.redis.hgetall(f"{ROOT}:accounts:{ACCOUNT}").items()
         }
+
+    def hands(self):
+        return {key: json.loads(raw) for key, raw in self.store.redis.hgetall(self.store.key(SLUG, HANDS)).items()}
 
 
 @pytest.fixture
@@ -399,7 +402,7 @@ def test_a_launch_writes_its_grant_through_the_worker_home_grant_command_without
 
     launch = world.launch(FIRST)
 
-    assert launch.handed is True
+    assert launch.hand == Hand(True, "handed", False)
     attempt = tmp_path / launch.agent.execution_id
     assert broadcast_bridge.grant_path(attempt).read_text() == launch.grant
     assert capfd.readouterr() == ("", "")
@@ -410,8 +413,10 @@ def test_a_failed_grant_command_reports_unhanded_and_prints_nothing(monkeypatch,
 
     launch = world.launch(FIRST)
 
-    assert launch.outcome.ok
-    assert launch.handed is False
+    assert launch.outcome == Outcome(
+        "spawn", Status.REFUSED, BACKEND, None, "launch grant not handed: grant_command_failed"
+    )
+    assert launch.hand == Hand(False, "grant_command_failed", False)
     assert not (tmp_path / launch.agent.execution_id).exists()
     assert capfd.readouterr() == ("", "")
 
@@ -437,11 +442,11 @@ def test_the_grant_goes_on_standard_input_never_in_the_command(monkeypatch, tmp_
         str(tmp_path / launch.agent.execution_id),
     ]
     assert options == {"input": launch.grant, "capture_output": True, "text": True, "timeout": 30}
-    assert launch.handed is True
+    assert launch.hand == HANDED
 
 
-@pytest.mark.parametrize("failure", [1, None])
-def test_a_grant_command_that_fails_or_times_out_reports_unhanded(monkeypatch, tmp_path, failure):
+@pytest.mark.parametrize(("failure", "reason"), [(1, "grant_command_failed"), (None, "grant_command_unavailable")])
+def test_a_grant_command_that_fails_or_times_out_reports_unhanded(monkeypatch, tmp_path, failure, reason):
     def run(command, **options):
         if failure is None:
             raise subprocess.TimeoutExpired(command, options["timeout"])
@@ -450,18 +455,20 @@ def test_a_grant_command_that_fails_or_times_out_reports_unhanded(monkeypatch, t
     monkeypatch.setattr(launch_module.subprocess, "run", run)
     world = World(monkeypatch, homes=WorkerHomeCommand(tmp_path))
 
-    assert world.launch(FIRST).handed is False
+    assert world.launch(FIRST).hand == Hand(False, reason, False)
 
 
-def test_a_grant_command_that_cannot_start_reports_unhanded_and_keeps_the_slot(monkeypatch, tmp_path):
+def test_a_grant_command_that_cannot_start_ends_the_launch_and_frees_the_slot(monkeypatch, tmp_path):
     monkeypatch.setattr(launch_module.sys, "executable", str(tmp_path / "missing-python"))
     world = World(monkeypatch, homes=WorkerHomeCommand(tmp_path))
 
     launch = world.launch(FIRST)
 
-    assert launch.outcome.ok
-    assert launch.handed is False
-    assert world.rows()[f"{SLUG}/{FIRST}"]["state"] == RESERVED
+    assert launch.outcome == Outcome(
+        "spawn", Status.REFUSED, BACKEND, None, "launch grant not handed: grant_command_unavailable"
+    )
+    assert launch.hand == Hand(False, "grant_command_unavailable", False)
+    assert world.rows() == {}
 
 
 def test_a_launch_never_shows_its_grant_when_printed(world):
@@ -475,13 +482,43 @@ def test_a_launched_worker_is_handed_its_own_grant(world):
     launch = world.launch(FIRST)
 
     assert world.homes.calls == [(launch.agent.execution_id, launch.grant)]
-    assert launch.handed is True
+    assert launch.hand == HANDED
+    assert launch.outcome == Outcome("spawn", Status.OK, BACKEND, f"placed-{launch.agent.name}")
 
 
 def test_the_launch_reports_what_the_worker_home_answered(monkeypatch):
-    world = World(monkeypatch, homes=Homes(handed=False))
+    world = World(monkeypatch, homes=Homes(Hand(False, "pod_missing", False)))
 
-    assert world.launch(FIRST).handed is False
+    assert world.launch(FIRST).hand == Hand(False, "pod_missing", False)
+
+
+@pytest.mark.parametrize(
+    "hand", [Hand(False, "pod_missing", False), Hand(False, "config_map_refused", True)], ids=["missing", "refused"]
+)
+def test_a_launch_whose_grant_is_not_handed_ends_and_names_the_reason(monkeypatch, hand):
+    world = World(monkeypatch, homes=Homes(hand))
+
+    launch = world.launch(FIRST)
+
+    assert launch.outcome == Outcome("spawn", Status.REFUSED, BACKEND, None, f"launch grant not handed: {hand.reason}")
+    assert launch.hand == hand
+    assert world.rows() == {}
+    assert world.launch(SECOND).outcome.ok
+
+
+@pytest.mark.parametrize(
+    "hand",
+    [HANDED, Hand(False, "pod_missing", False), Hand(False, "config_map_refused", True)],
+    ids=["handed", "missing", "refused"],
+)
+def test_every_hand_is_recorded_under_its_execution(monkeypatch, hand):
+    world = World(monkeypatch, homes=Homes(hand))
+
+    launch = world.launch(FIRST)
+
+    assert world.hands() == {
+        launch.agent.execution_id: {"handed": hand.handed, "reason": hand.reason, "removed": hand.removed}
+    }
 
 
 @pytest.mark.parametrize("status", [Status.REFUSED, Status.UNAVAILABLE, Status.UNSUPPORTED])
@@ -491,7 +528,8 @@ def test_a_spawn_that_did_not_launch_hands_no_grant(monkeypatch, status):
     launch = world.launch(FIRST)
 
     assert world.homes.calls == []
-    assert launch.handed is False
+    assert launch.hand is None
+    assert world.hands() == {}
     assert launch.agent.seat == FIRST
     assert world.grants.verify(SLUG, launch.grant).execution_id == launch.agent.execution_id
     assert launch.slot == Slot(ACCOUNT, f"{SLUG}/{FIRST}", launch.agent.execution_id, 1, RESERVED, 1000 + TTL)
@@ -503,7 +541,8 @@ def test_an_ambiguous_spawn_still_hands_its_grant(monkeypatch):
     launch = world.launch(FIRST)
 
     assert world.homes.calls == [(launch.agent.execution_id, launch.grant)]
-    assert launch.handed is True
+    assert launch.hand == HANDED
+    assert launch.outcome.status is Status.AMBIGUOUS
 
 
 def test_a_launch_refused_on_a_full_account_hands_no_grant(world):
@@ -512,7 +551,7 @@ def test_a_launch_refused_on_a_full_account_hands_no_grant(world):
     refused = world.launch(SECOND)
 
     assert refused.outcome.detail == "account_full"
-    assert refused.handed is False
+    assert refused.hand is None
     assert len(world.homes.calls) == 1
 
 
@@ -582,3 +621,26 @@ def test_the_tick_runtime_launches_placed_spawns_with_the_swarm_api_address(worl
     [sent] = world.runtime.requests
     assert (sent.name, sent.task["endpoints"]) == (name, {broadcast_bridge.API_URL: OTHER_API})
     assert herdr.spawned == ["m1"]
+
+
+def test_a_tick_spawn_whose_grant_is_not_handed_fails_with_the_reason_and_records_it(monkeypatch):
+    world = World(monkeypatch, homes=Homes(Hand(False, "config_map_refused", True)))
+    name = world.store.next_name(SLUG, "eng")
+    runtime = routed(
+        {},
+        Herdr(),
+        kubernetes=world.runtime,
+        launch=partial(world.launcher.from_tick, terms=world.terms, target=pod_target),
+    )
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+
+    with pytest.raises(SpawnError) as failed:
+        runtime.spawn(config, "eng", name, {"id": "task", "seat": FIRST})
+
+    assert str(failed.value) == "launch grant not handed: config_map_refused"
+    assert failed.value.status == Status.REFUSED
+    [sent] = world.runtime.requests
+    assert world.hands() == {
+        sent.task["execution_id"]: {"handed": False, "reason": "config_map_refused", "removed": True}
+    }
+    assert world.rows() == {}

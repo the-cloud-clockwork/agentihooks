@@ -9,9 +9,11 @@ from scripts.hive import auth as hive_auth
 from scripts.swarm import controller as loop
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
+from scripts.swarm.tick import SpawnError
 from scripts.swarm_v2 import deployed, image_tag
 from scripts.swarm_v2.auth_context import GrantRefused
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
+from scripts.swarm_v2.kubernetes.client import ApiRefused
 from scripts.swarm_v2.kubernetes.grants import PodGrants
 from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, load_policy
 from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL, owner_for
@@ -416,7 +418,7 @@ def test_a_kubernetes_launch_puts_its_grant_in_the_pod_launch_material_and_recor
     finally:
         service.stop()
 
-    assert launch.handed is True
+    assert launch.hand.handed is True
     execution = launch.agent.execution_id
     [pod] = pods.created
     assert pod["metadata"]["name"] == f"swarm-{execution}"
@@ -439,6 +441,60 @@ def test_a_kubernetes_launch_puts_its_grant_in_the_pod_launch_material_and_recor
         }
     ]
     assert claims.execution_id == execution
+
+
+class HandPods(Pods):
+    def __init__(self, namespace, refuse, lose):
+        super().__init__(namespace)
+        self.refuse, self.lose, self.deleted = refuse, lose, []
+
+    def read_pod(self, name):
+        return None if self.lose else super().read_pod(name)
+
+    def create_config_map(self, body):
+        if self.refuse:
+            raise ApiRefused(403, "Forbidden")
+        return super().create_config_map(body)
+
+    def delete(self, kind, name, uid):
+        self.deleted.append((kind, name, uid))
+        return True
+
+
+@pytest.mark.parametrize(
+    ("refuse", "lose", "hand"),
+    [
+        (False, False, {"handed": True, "reason": "handed", "removed": False}),
+        (False, True, {"handed": False, "reason": "pod_missing", "removed": False}),
+        (True, False, {"handed": False, "reason": "config_map_refused", "removed": True}),
+    ],
+    ids=["handed", "missing", "refused"],
+)
+def test_a_tick_launch_records_whether_its_grant_reached_the_pod(tmp_path, monkeypatch, refuse, lose, hand):
+    store = _store()
+    pods = HandPods("swarm-pod-proof", refuse, lose)
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: pods)
+    service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    try:
+        task = {"id": "t1", "seat": SEAT, "controller_epoch": service.controller.held.epoch}
+        name = store.next_name(SLUG, "eng")
+        try:
+            placed, failure = service.runtime.spawn(store.config(SLUG), "eng", name, task), None
+        except SpawnError as error:
+            placed, failure = None, error
+    finally:
+        service.stop()
+
+    [pod] = pods.created
+    execution = pod["metadata"]["labels"][EXECUTION_LABEL]
+    hands = store.redis.hgetall(store.key(SLUG, "launch-grant-hands"))
+    assert {key: json.loads(raw) for key, raw in hands.items()} == {execution: hand}
+    assert pods.deleted == ([("pods", f"swarm-{execution}", "uid-1")] if refuse else [])
+    if hand["handed"]:
+        assert (placed.placement, failure) == (BACKEND, None)
+    else:
+        assert placed is None
+        assert (str(failure), failure.status) == (f"launch grant not handed: {hand['reason']}", "refused")
 
 
 def test_the_pod_api_talks_to_the_in_cluster_server_in_the_policy_namespace(monkeypatch):
