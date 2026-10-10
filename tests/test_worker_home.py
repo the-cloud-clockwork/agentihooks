@@ -750,7 +750,7 @@ def test_render_log_holds_stderr_and_the_child_gets_its_attempt_and_target(tmp_p
         return [sys.executable, "-c", "import sys; print('out'); sys.stdout.flush(); print('err', file=sys.stderr)"]
 
     monkeypatch.setattr(worker_home, "child_command", command)
-    REAL_RENDER(attempt, "claude")
+    REAL_RENDER(filesystem.Execution(attempt, filesystem.load()), "claude")
     assert seen == [(attempt, "claude")]
     assert (attempt / "run" / "render-claude.log").read_text() == "out\nerr\n"
 
