@@ -3,17 +3,47 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from redis.exceptions import RedisError
-
-from scripts.swarm.store import SwarmError
-from scripts.swarm_ledger.api.resources import revision
-from scripts.swarm_v2.api.tasks import SPEC_FIELDS, TasksAPI, ledger_revision_conflicts_total, spec_revision
-from scripts.swarm_v2.auth_context import GrantRefused
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-LDG-03"
 PR = "https://github.com/the-cloud-clockwork/agentihooks/pull/1"
+
+
+def TasksAPI(*args, **kwargs):
+    from scripts.swarm_v2.api.tasks import TasksAPI as api
+
+    return api(*args, **kwargs)
+
+
+def spec_revision(task):
+    from scripts.swarm_v2.api.tasks import spec_revision as compute
+
+    return compute(task)
+
+
+def ledger_revision_conflicts_total(store, slug):
+    from scripts.swarm_v2.api.tasks import ledger_revision_conflicts_total as total
+
+    return total(store, slug)
+
+
+def revision(value):
+    from scripts.swarm_ledger.api.resources import revision as compute
+
+    return compute(value)
+
+
+def refused_class():
+    from scripts.swarm_v2.auth_context import GrantRefused
+
+    return GrantRefused
+
+
+def swarm_error(message):
+    from scripts.swarm.store import SwarmError
+
+    return SwarmError(message)
 
 
 @pytest.fixture
@@ -34,6 +64,8 @@ def detail(error_class, message, operation_id="unknown", **extra):
 
 
 def test_spec_revision_covers_only_execution_relevant_fields():
+    from scripts.swarm_v2.api.tasks import SPEC_FIELDS
+
     task = {name: f"{name} value" for name in SPEC_FIELDS}
     base = spec_revision(task)
     assert spec_revision({**task, "state": "pr", "pr_url": PR, "comments": [{"id": "c"}], "rank": "high"}) == base
@@ -258,11 +290,11 @@ def test_the_gate_refuses_a_write_the_ledger_rejects(world, worker):
     gate = WorkerGate(world.tasks_api, scope, request, {"op": "task_update", "item": "tasks/task"}, None)
     context = SimpleNamespace(meta={}, rev=9, dirty=False)
     doc = {"tasks": [world.task()]}
-    with pytest.raises(GrantRefused) as refused:
+    with pytest.raises(refused_class()) as refused:
         gate.apply(doc, {**gate.op, "fields": {"state": "pr"}}, context, lambda *_: False)
     assert (refused.value.error_class, str(refused.value)) == ("invalid_request", "the ledger refused this write")
     assert (context.meta, context.dirty) == ({"task_operations": {}}, False)
-    with pytest.raises(GrantRefused) as missing:
+    with pytest.raises(refused_class()) as missing:
         gate.apply({"tasks": []}, {**gate.op, "fields": {"state": "pr"}}, context, lambda *_: True)
     assert (missing.value.error_class, str(missing.value)) == ("invalid_request", "the task is not on the ledger")
     assert gate.op["id"] == "w-" + revision(["fixture", "task", "update-1"])[:16]
@@ -293,7 +325,7 @@ def test_the_gate_accepts_and_records_a_write_then_accepts_its_replay(world, wor
     assert (replay.ack, context.dirty) == (ack, False)
     other = WorkerGate(world.tasks_api, scope, request, op, "0" * 64)
     assert other.digest != gate.digest
-    with pytest.raises(GrantRefused) as reused:
+    with pytest.raises(refused_class()) as reused:
         other.apply({"tasks": [task]}, other.op, context, lambda *_: True)
     assert str(reused.value) == "the operation ID was already used for different content"
 
@@ -404,6 +436,8 @@ def test_transport_errors_answer_with_their_class(world, worker):
         404,
         detail("invalid_request", "no such task endpoint"),
     )
+    from redis.exceptions import RedisError
+
     with patch.object(world.tasks, "current", side_effect=RedisError("down")):
         assert world.progress(token, "progress-1", "Building") == (
             503,
@@ -414,7 +448,7 @@ def test_transport_errors_answer_with_their_class(world, worker):
 def test_a_claim_lost_during_the_write_rolls_the_write_back(world, worker):
     _, token = worker
     ledger = world.document()
-    checks = iter([None, SwarmError("stale_generation")])
+    checks = iter([None, swarm_error("stale_generation")])
 
     def holder(*_):
         if (outcome := next(checks)) is not None:
@@ -430,7 +464,7 @@ def test_a_claim_lost_during_the_write_rolls_the_write_back(world, worker):
 
 def test_an_unknown_authority_refusal_keeps_its_cause_private(world, worker):
     _, token = worker
-    with patch.object(world.tasks, "_holder", side_effect=SwarmError("journal_conflict")):
+    with patch.object(world.tasks, "_holder", side_effect=swarm_error("journal_conflict")):
         assert world.progress(token, "progress-1", "Building") == (
             503,
             detail("dependency_unavailable", "the task authority could not confirm the claim", "progress-1"),
