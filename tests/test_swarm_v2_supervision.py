@@ -160,6 +160,17 @@ def runtime_directory(attempt, child):
     raise AssertionError("supervisor did not create a launch context")
 
 
+def assert_stale_acknowledgement_rejected(attempt, root, budget):
+    receipt = root / "exporter.checkpoint.json"
+    assert receipt.exists(), "no acknowledgement reached the supervisor before its checkpoint wait ended"
+    landed = receipt.stat().st_mtime - (root / "quiesced.json").stat().st_mtime
+    assert landed < budget, f"acknowledgement landed {landed:.3f} s after quiesce, past the {budget} s wait"
+    acknowledgement = json.loads(receipt.read_text())
+    scope = json.loads((root / "context.json").read_text())
+    assert checkpoint(attempt, acknowledgement, scope) is None
+    assert checkpoint(attempt, {**acknowledgement, "incarnation": scope["incarnation"]}, scope) == root.name
+
+
 @pytest.mark.parametrize("ack,expected", [("complete", "complete"), ("stale", "incomplete"), ("missing", "incomplete")])
 def test_sigterm_during_tool_reports_observed_checkpoint(worker, ack, expected):
     start, attempt, spec = worker
@@ -177,6 +188,8 @@ def test_sigterm_during_tool_reports_observed_checkpoint(worker, ack, expected):
     assert result["checkpoint_status"] == expected
     assert result["quiescence"] == "clean"
     assert result["supervisor_child_exit_total"] >= 2
+    if ack == "stale":
+        assert_stale_acknowledgement_rejected(attempt, root, spec["checkpoint_seconds"])
 
 
 def test_exporter_readiness_precedes_agent_launch(worker):
