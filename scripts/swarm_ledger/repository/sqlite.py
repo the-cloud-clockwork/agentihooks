@@ -6,7 +6,7 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 
 from . import hierarchy
-from .events import append_events, read_events, write_events
+from .events import append_events, read_events, trim_events, write_events
 from .rows import TABLES, assemble, diff, encode, flatten, read_rows, write_rows
 from .seeds import read_seeds, sync_values, write_seeds
 
@@ -354,7 +354,10 @@ class SQLiteLedgerRepository:
         before, after = diff(*(without_events(document) for document in (entry.state, state)))
         write_rows(connection, slug, before, after)
         hierarchy.sync(connection, slug, state)
-        append_events(connection, slug, events, self.domain.EVENTS_KEPT)
+        kept = len(state["_meta"].get("events", []))
+        append_events(connection, slug, events, max(kept, len(events)))
+        if not events and "events" in state["_meta"]:
+            trim_events(connection, slug, kept)
         generation = entry.generation + 1
         connection.execute(
             UPDATE,

@@ -5,6 +5,8 @@ import ledger_notifications
 import ledger_plans
 import ledger_priorities
 
+from .events import retained
+
 
 def apply(slug, state, core, changes=None, ops=None, gate=None, created=False):
     """Fold checkbox changes and ops into the stored state in place; returns (rejected ids, the context)."""
@@ -51,7 +53,11 @@ def apply(slug, state, core, changes=None, ops=None, gate=None, created=False):
     ctx.changed = bool(ctx.events or ctx.dirty or found != meta.get("warnings") or created)
     if ctx.changed:
         meta.update(rev=ctx.rev, updated_at=ctx.at, warnings=found)
-        meta["events"] = (meta["events"] + ctx.events)[-core.EVENTS_KEPT :]
+        log = meta["events"] + ctx.events
+        start = retained(log, meta.get("events_ack"), core.EVENTS_KEPT, core.EVENTS_CEILING)
+        if start:
+            meta["events_trimmed"] = max(meta.get("events_trimmed", 0), log[start - 1].get("rev", 0))
+        meta["events"] = log[start:]
     state["_meta"] = meta
     return rejected, ctx
 
