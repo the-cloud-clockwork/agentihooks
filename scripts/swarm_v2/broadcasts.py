@@ -62,7 +62,7 @@ class Delivery:
 
 
 def encode(broadcast: Broadcast) -> str:
-    return json.dumps(asdict(broadcast), sort_keys=True)
+    return json.dumps(asdict(broadcast))
 
 
 def decode(raw: str) -> Broadcast:
@@ -74,12 +74,12 @@ def _delivery(found: dict) -> Delivery:
 
 
 def role_of(seat: str) -> str:
-    return seat.split("@", 1)[0].rsplit("-", 1)[0]
+    return re.sub(r"-\d+$", "", seat.partition("@")[0])
 
 
 def owner_of(author: str) -> str:
     """Any operator may revise an operator broadcast; an agent's broadcast belongs to its seat across generations."""
-    return "operator" if author.startswith("operator:") else author.split("/", 1)[0]
+    return "operator" if author.startswith("operator:") else author.partition("/")[0]
 
 
 def _content(fields: dict) -> tuple:
@@ -87,12 +87,14 @@ def _content(fields: dict) -> tuple:
     return tuple(fields[name] for name in names)
 
 
-def _name(value: object, empty: bool = True) -> str:
-    if value == "" and empty:
-        return ""
+def _name(value: object) -> str:
     if not isinstance(value, str) or not NAME.fullmatch(value):
         raise SwarmError("invalid_request")
     return value
+
+
+def _optional(value: object) -> str:
+    return "" if value == "" else _name(value)
 
 
 def _draft(draft: object) -> dict:
@@ -108,9 +110,9 @@ def _draft(draft: object) -> dict:
     if policy not in (ONCE, UNTIL_ACK) or not isinstance(project, str):
         raise SwarmError("invalid_request")
     return {
-        "broadcast_id": _name(draft.get("broadcast_id", "")),
-        "channel": _name(draft.get("channel", "")),
-        "target_role": _name(draft.get("target_role", "")),
+        "broadcast_id": _optional(draft.get("broadcast_id", "")),
+        "channel": _optional(draft.get("channel", "")),
+        "target_role": _optional(draft.get("target_role", "")),
         "brain_id": draft.get("brain_id"),
         "project_id": project,
         "severity": severity,
@@ -174,16 +176,16 @@ class FleetBroadcasts:
 
     def publish_operator(self, token: str, draft: object, operation_id: str = "") -> Broadcast:
         fields = _draft(draft)
-        launch_grant = isinstance(token, str) and token.split(".", 1)[0] == TOKEN_PREFIX
+        launch_grant = isinstance(token, str) and token.partition(".")[0] == TOKEN_PREFIX
         name = self.operator(token) if token and not launch_grant else None
         if not isinstance(name, str) or not name:
             raise SwarmError("unauthenticated")
-        fields["brain_id"] = _name(fields["brain_id"], empty=False)
+        fields["brain_id"] = _name(fields["brain_id"])
         return self._commit(fields, f"operator:{name}", operation_id)
 
     def _commit(self, fields: dict, author: str, operation_id: str) -> Broadcast:
         if operation_id:
-            _name(operation_id, empty=False)
+            _name(operation_id)
         canonical, operations, frozen = (
             self.key("broadcasts"),
             self.key("broadcast-operations"),
@@ -249,7 +251,7 @@ class FleetBroadcasts:
         time per seat. Retrying with the same claim id returns the first answer without a second effect."""
         grant = self._grant(token)
         if claim_id:
-            _name(claim_id, empty=False)
+            _name(claim_id)
         seat, now = grant.seat_id, self.clock()
         records, claims = self.key("broadcast-deliveries", seat), self.key("broadcast-claims")
 
