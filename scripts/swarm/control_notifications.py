@@ -6,6 +6,7 @@ from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore
+from scripts.swarm_v2 import masters
 
 CONTROL_REF = "swarm-control:"
 CONTROLS = {
@@ -22,7 +23,7 @@ CONTROLS = {
 
 
 def master(store: RedisStore, slug: str) -> AgentRecord | None:
-    return next((a for a in store.agents(slug) if a.lane == MASTER and a.state != "finished"), None)
+    return next((a for a in store.agents(slug) if masters.is_lead(slug, a) and a.state != "finished"), None)
 
 
 def notify(

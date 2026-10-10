@@ -10,7 +10,7 @@ import json
 from dataclasses import replace
 
 from scripts.inbox.seats import seat_address
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import seat_spawn
 from scripts.swarm.store import MASTER
 from scripts.swarm_v2 import masters
@@ -21,6 +21,7 @@ PER_HIVE = "hive"
 RULE = "per"
 BELOW = "below"
 RETIRING = "retiring"
+RETIRE_SECONDS = "retire-seconds"
 SENDER = "swarm"
 HOLD_MS = 10 * 60_000
 ENDED = ("stopping", "stopped")
@@ -77,7 +78,9 @@ def run(slug: str, config, store, runtime, doc: dict, now_ms: int) -> list[str]:
 
 def _resize(slug, store, doc, agents, count, want, now_ms):
     key = masters.MasterSeats(store.redis).key(slug)
+    retiring = json.loads(store.redis.hget(key, RETIRING) or "{}")
     if want >= count:
+        _withdraw_asks(store, retiring)
         store.redis.hdel(key, BELOW, RETIRING)
         return _recount(slug, store, doc, agents, count, want, now_ms) if want > count else []
     below = int(store.redis.hget(key, BELOW) or 0)
@@ -86,12 +89,11 @@ def _resize(slug, store, doc, agents, count, want, now_ms):
     if now_ms - (below or now_ms) < HOLD_MS:
         return []
     occupied = {a.seat: a for a in agents if a.lane == MASTER}
-    retiring = json.loads(store.redis.hget(key, RETIRING) or "{}")
     actions = _ask(slug, store, occupied, retiring, range(count, want, -1), want, now_ms)
     keep = max([want] + [i for i in range(want + 1, count + 1) if _address(slug, i) in occupied])
     for index in range(count, keep, -1):
         address = _address(slug, index)
-        actions.append(_retire(slug, store, address, retiring.pop(address, [now_ms, ""]), now_ms))
+        actions.append(_retire(slug, store, address, retiring.pop(address, None), now_ms))
     store.redis.hset(key, RETIRING, json.dumps(retiring))
     return actions + (_recount(slug, store, doc, agents, count, keep, now_ms) if keep < count else [])
 
@@ -113,18 +115,39 @@ def _ask(slug, store, occupied, retiring, indexes, want, now_ms):
 
 
 def _retire(slug, store, address, asked, now_ms):
+    """asked is [ask time, ask item id] when the seat's master was asked to hand off, else None."""
     inbox, lead, seat_name = InboxStore(store.redis), _address(slug, 1), address.removesuffix(f"@{slug}")
-    asked_at, ask_id = asked
+    ask_id = asked[1] if asked else ""
     text = store.handoff(slug, seat_name)
     if text:
         inbox.send(SENDER, lead, HANDED.format(address=address, slug=slug) + text)
         store.clear_handoff(slug, seat_name)
-    for item in inbox.pending_items(address):
+    for item in inbox.inbox(address):
+        if item.state in CLOSED:
+            continue
         if item.id == ask_id:
             inbox.withdraw(item.id, SENDER, f"master seat {address} retired")
         else:
             inbox.redirect(item.id, SENDER, lead, f"master seat {address} retired")
-    return f"retired master seat {address} after {(now_ms - asked_at) // 1000} seconds"
+    if not asked:
+        return f"closed empty master seat {address}"
+    seconds = (now_ms - asked[0]) // 1000
+    store.redis.rpush(f"{masters.MasterSeats(store.redis).key(slug)}:{RETIRE_SECONDS}", seconds)
+    return f"retired master seat {address} after {seconds} seconds"
+
+
+def _withdraw_asks(store, retiring):
+    inbox = InboxStore(store.redis)
+    for address, (_, ask_id) in retiring.items():
+        inbox.withdraw(ask_id, SENDER, f"the swarm grew again, so seat {address} stays", expected_address=address)
+
+
+def measurements(redis, slug: str) -> dict:
+    key = masters.MasterSeats(redis).key(slug)
+    return {
+        "master_seat_count": masters.MasterSeats(redis).count(slug),
+        "master_retire_seconds": [int(s) for s in redis.lrange(f"{key}:{RETIRE_SECONDS}", 0, -1)],
+    }
 
 
 def _recount(slug, store, doc, agents, before, after, now_ms):

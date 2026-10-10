@@ -5,6 +5,7 @@ import json
 from scripts import agent_choice
 from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm.store import MASTER
+from scripts.swarm_v2 import masters
 
 ORDER = (
     "The operator set the master affinity to {to}; you run on {current}. Finish the step you are on, then hand off "
@@ -30,7 +31,7 @@ def pending(store, slug):
 
 
 def live_master(store, slug):
-    return next((a for a in store.agents(slug) if a.lane == MASTER and a.state != "finished"), None)
+    return next((a for a in store.agents(slug) if masters.is_lead(slug, a) and a.state != "finished"), None)
 
 
 def _withdraw(store, slug):
@@ -85,5 +86,5 @@ def placed(store, slug, harness):
 
 
 def report(store, slug, config, agents):
-    live = next((a for a in agents if a.lane == MASTER and a.state != "finished"), None)
+    live = next((a for a in agents if masters.is_lead(slug, a) and a.state != "finished"), None)
     return {"desired": desired(config) or "auto", "live": live.harness if live else "", "order": pending(store, slug)}
