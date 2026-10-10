@@ -77,11 +77,43 @@ function phaseRow(item, n) {
   box.addEventListener("change", () => toggle(key, box.checked, "done"));
   const fold = h("details", { class: "phase-fold" },
     h("summary", {}, h("span", { class: "item-title", text: item.title }), h("span", { class: "phase-state", text: phaseLabel(item, doc) })),
-    item.description ? h("p", { class: "desc", text: item.description }) : null, phaseReview(item));
+    item.description ? h("p", { class: "desc", text: item.description }) : null, phaseSlices(item), phaseReview(item));
   fold.open = !closedComments.has(`${key}/row`);
   fold.addEventListener("toggle", () => rememberComment(`${key}/row`, fold.open));
   const row = h("div", { class: "row" }, box, h("span", { class: "num", text: `${n}.` }), h("div", {}, fold), itemActions(key, item));
   return h("li", { class: itemClass(item), id: `item-phases-${item.id}` }, row, commentsView(key, item.comments));
+}
+
+function phaseSlices(phase) {
+  const rows = doc.slices.filter((s) => s.phase === `phases/${phase.id}`);
+  if (!rows.length) return null;
+  const count = (s) => doc.tasks.filter((t) => !t.deleted && t.slice === `slices/${s.id}`).length;
+  return h("div", { class: "phase-slices" }, h("span", { class: "phase-slices-label", text: "slices" }),
+    ...rows.map((s) => h("span", { class: "slice", text: `${s.anchor} ${count(s)}` })));
+}
+
+function planGroups() {
+  const known = new Set(doc.plans.map((p) => `plans/${p.id}`));
+  const groups = doc.plans.map((plan) => ({ key: `plans/${plan.id}`, id: `item-plans-${plan.id}`, title: plan.title || plan.id,
+    phases: doc.phases.filter((p) => p.plan === `plans/${plan.id}`) }));
+  const loose = doc.phases.filter((p) => !known.has(p.plan));
+  return loose.length ? [...groups, { key: "unplanned", id: "phases-unplanned", title: "Phases without a plan", phases: loose }] : groups;
+}
+
+function planRow({ key, id, title, phases }) {
+  const idOf = (p) => `item-phases-${p.id}`;
+  const fold = h("details", { class: "plan-fold" }, h("summary", {}, h("span", { class: "plan-title", text: title }),
+    h("span", { class: "plan-count", text: `${phases.length} ${phases.length === 1 ? "phase" : "phases"}` })));
+  fold.open = !closedComments.has(`${key}/row`) || phases.some((p) => idOf(p) === wanted.id);
+  fold.addEventListener("toggle", () => rememberComment(`${key}/row`, fold.open));
+  lazy(fold, () => h("ol", { class: "plan-phases" }, ...firstPage(key, phases, idOf).map((p, i) => phaseRow(p, i + 1)),
+    moreButton(key, phases.length, "more phases", render), phases.length ? null : h("li", { class: "empty", text: "None." })));
+  return h("li", { class: "plan", id }, fold);
+}
+
+function phaseList() {
+  if (!doc.plans.length) return listInto("phases", doc.phases, (p, i) => phaseRow(p, i + 1));
+  if (sectionOpen("phases")) $("phases").replaceChildren(...planGroups().map(planRow));
 }
 
 function questionRow(item, n) {
@@ -206,7 +238,7 @@ export function render(focusKey) {
   $("sources-count").textContent = headCount([[doc.sources.length]]);
   listInto("sources", doc.sources.map((s, n) => ({ id: n, text: s })), (s) => h("li", { id: `item-sources-${s.id}`, text: s.text }));
   $("phases-count").textContent = stateCounts("phases", { open: "open", done: "done" });
-  listInto("phases", doc.phases, (p, i) => phaseRow(p, i + 1));
+  phaseList();
   $("tasks-count").textContent = taskCounts(doc.tasks);
   groupedWork("tasks", doc.tasks, (t) => taskRow(t, doc.tasks));
   $("questions-count").textContent = stateCounts("questions", { open: "open", done: "answered" });
