@@ -268,9 +268,10 @@ def tick_view(inbox: object, store: object, slug: str, doc: dict) -> Callable[[s
 class Mail:
     def __init__(self, inbox, store, slug, doc=None):
         self.inbox, self.store, self.slug, self.doc = inbox, store, slug, doc or {}
-        live = [a for a in store.agents(slug) if a.state != "finished"]
+        agents = store.agents(slug)
+        live = [a for a in agents if a.state != "finished"]
         self.seats = {a.name: a.seat or a.name for a in live}
-        self.held = {a.name: a.task for a in live}
+        self.held = {a.name: a.task for a in agents}
         self.has_master = any(a.lane == MASTER for a in live)
         self.master = operator_mail.master_address(slug, live)
         self.masters = masters.live_seats(live)
@@ -391,11 +392,12 @@ def findings_pass(inbox, store, slug, shown, doc=None):
 
 
 def _about(mail, found):
-    """The task a finding is about: its subject, or the task its subject agent holds; empty sends it to the lead."""
     subject = found.get("subject", "")
-    task = subject if found["kind"] in TASK_FINDINGS else ""
-    task = mail.held.get(subject, "") if found["kind"] in HELD_FINDINGS else task
-    return f"tasks/{task}" if task else ""
+    if found["kind"] in TASK_FINDINGS:
+        return f"tasks/{subject}"
+    if found["kind"] in HELD_FINDINGS and mail.held.get(subject):
+        return f"tasks/{mail.held[subject]}"
+    return ""
 
 
 def new_events(store, slug, doc, cursor_name):
