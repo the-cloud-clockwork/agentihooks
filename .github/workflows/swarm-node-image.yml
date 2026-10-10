@@ -3,14 +3,6 @@ name: Swarm worker image
 on:
   push:
     branches: [dev, 'diffcheck/**']
-    paths:
-      - docker/swarm-node/**
-      - hooks/**
-      - profiles/**
-      - scripts/**
-      - pyproject.toml
-      - tests/contracts/image_manifest/**
-      - .github/workflows/swarm-node-image.yml
   workflow_dispatch:
     inputs:
       publish:
