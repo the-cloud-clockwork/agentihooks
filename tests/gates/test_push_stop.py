@@ -759,8 +759,8 @@ def test_under_a_slow_push_a_later_worktree_without_a_gate_is_not_pushed_past_th
     rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
     second_tree_with_work(rig)
     rig.commit()
-    slow_origin(rig, 2)
-    timeout = RESERVE_S + 1
+    slow_origin(rig, 3)
+    timeout = RESERVE_S + 2
     monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", timeout)
     started = time.monotonic()
     decision = rig.stop(started=started)
@@ -768,7 +768,7 @@ def test_under_a_slow_push_a_later_worktree_without_a_gate_is_not_pushed_past_th
     assert git(rig.seed, "ls-remote", str(rig.origin), f"refs/heads/{BRANCH}-2")
     assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {PUSH_LATE.format(path=rig.tree)}")
     assert rig.remote_head() == ""
-    assert 2 <= took <= timeout
+    assert 3 <= took <= timeout
 
 
 def test_a_pre_push_gate_killed_by_a_signal_keeps_the_branch_off_origin(rig):
