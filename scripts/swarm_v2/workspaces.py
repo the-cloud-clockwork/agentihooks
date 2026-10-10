@@ -24,7 +24,7 @@ COMMIT = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 LOCK = ".prepare.lock"
 GIT_TIMEOUT = 600
 TRACKING = "+refs/heads/*:refs/remotes/origin/*"
-GIT_SCOPE = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")
+GIT_SCOPE = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY")
 BATCH_SSH = "ssh -o BatchMode=yes"
 
 
@@ -119,8 +119,11 @@ def _check(request: Request) -> None:
         raise WorkspaceError(f"invalid required commit: {request.minimum}")
     if naming.parse(request.agent) is None:
         raise WorkspaceError(f"invalid agent: {request.agent}")
-    parts = urlsplit(request.origin.strip())
-    if parts.password or (parts.username and parts.scheme == "https"):
+    origin = request.origin.strip()
+    parts = urlsplit(origin)
+    userinfo, at, _ = origin.partition("@")
+    scp_secret = bool(at) and "/" not in userinfo and ":" in userinfo
+    if parts.password or (parts.username and parts.scheme == "https") or scp_secret:
         raise WorkspaceError("origin carries a credential; supply it through a credential helper")
 
 
