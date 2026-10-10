@@ -5,13 +5,14 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from scripts.handoff import transfers
-from scripts.swarm import reaper
+from scripts.swarm import master_alarm, reaper
 from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
 
 if TYPE_CHECKING:
     from scripts.swarm.tick import Ledger, Runtime
 
 DEADLINE_MS = 2 * 60 * 1000
+NO_HOOK = "master {name} reported no hook within two minutes of its launch"
 
 
 def read(store: RedisStore, slug: str) -> dict:
@@ -50,12 +51,14 @@ def observe(slug: str, config: SwarmConfig, store: RedisStore, ledger: Ledger, r
         return []
     if pending.get("alerted") or at - pending["at"] < DEADLINE_MS:
         return []
+    if agent:
+        master_alarm.failed(store, slug, NO_HOOK.format(name=agent.name), at)
     if agent and not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
         if not pending.get("retire_told"):
+            save(store, slug, {**pending, "retire_told": True})
             ledger.notify(
                 slug, "The master reported no hook and its launch could not be retired. Operator action is required."
             )
-            save(store, slug, {**pending, "retire_told": True})
         return [f"could not retire unreported master {agent.name}, retrying next tick"]
     if agent:
         transfers.failed(store, slug, agent)
@@ -63,9 +66,9 @@ def observe(slug: str, config: SwarmConfig, store: RedisStore, ledger: Ledger, r
     if pending["attempt"] == 1 and not pending.get("retry"):
         save(store, slug, {**pending, "name": "", "retry": True, "at": at})
         return [f"lost {agent.name}"] if agent else ["master launch failed, retrying once"]
+    save(store, slug, {**pending, "alerted": True})
     ledger.notify(
         slug,
         "The master reported no hook within two minutes on either launch. Automatic retry is exhausted; operator action is required. The original handoff is retained.",
     )
-    save(store, slug, {**pending, "alerted": True})
     return ["master startup failed twice, raised to the operator"]

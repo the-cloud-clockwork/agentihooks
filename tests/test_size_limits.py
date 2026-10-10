@@ -1,3 +1,4 @@
+import os
 import re
 import subprocess
 import tomllib
@@ -42,6 +43,34 @@ def test_the_grader_pins_the_ruff_the_tests_install():
     assert f"ruff=={size_limits.RUFF_VERSION}" in dev
 
 
+_INSTALL = re.compile(r"\b(?:pip3? install|pipx (?:install|run)|uv tool (?:install|run)|uvx)\b[^\n;&|]*")
+_RUFF_SPEC = re.compile(r"(?<![\w./-])['\"]?(ruff(?![\w-])[^\s'\"]*)", re.IGNORECASE)
+
+
+def _ruff_installs(steps: list) -> list[str]:
+    specs = []
+    for step in steps:
+        if "ruff" in (step.get("uses") or ""):
+            specs.append(step["uses"])
+        run = (step.get("run") or "").replace("\\\n", " ")
+        for command in _INSTALL.findall(run):
+            specs += _RUFF_SPEC.findall(command)
+    return specs
+
+
+def test_every_workflow_installs_the_pinned_ruff():
+    pinned = f"ruff=={size_limits.RUFF_VERSION}"
+    installs = {}
+    for path in sorted((_ROOT / ".github/workflows").glob("*.y*ml")):
+        for name, job in (yaml.safe_load(path.read_text()).get("jobs") or {}).items():
+            installs[f"{path.name}:{name}"] = _ruff_installs(job.get("steps") or [])
+    for path in sorted((_ROOT / ".github/actions").glob("*/action.y*ml")):
+        installs[path.parent.name] = _ruff_installs(yaml.safe_load(path.read_text()).get("runs", {}).get("steps") or [])
+    assert installs["test.yml:lint"] == [pinned]
+    offenders = {where: specs for where, specs in installs.items() if set(specs) - {pinned}}
+    assert not offenders
+
+
 def test_a_planted_eight_parameter_function_is_red(tmp_path, capsys):
     base = _recorded(tmp_path / "base", {"pkg/mod.py": SEVEN_PARAMETERS})
     head = _recorded(tmp_path / "head", {"pkg/mod.py": EIGHT_PARAMETERS})
@@ -79,10 +108,12 @@ def test_a_python_script_without_an_extension_is_graded(tmp_path):
 
 
 def test_a_tracked_file_missing_from_the_tree_is_red(tmp_path, capsys):
-    head = _recorded(tmp_path, {"mod.py": SEVEN_PARAMETERS, "gone.py": SEVEN_PARAMETERS})
+    base = _recorded(tmp_path / "base", {"mod.py": SEVEN_PARAMETERS})
+    head = _recorded(tmp_path / "head", {"mod.py": SEVEN_PARAMETERS, "gone.py": SEVEN_PARAMETERS})
     (head / "gone.py").unlink()
-    assert size_limits.main(["--bootstrap", "--head", str(head)]) == 1
-    assert "gone.py" in capsys.readouterr().out
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert "gone.py" in out
 
 
 def test_config_and_noqa_in_the_graded_tree_hide_nothing(tmp_path):
@@ -144,14 +175,12 @@ def test_a_pull_request_cannot_allowlist_its_own_offender(tmp_path, capsys):
     assert _grade(base, head, capsys)[0] == 1
 
 
-def test_a_base_without_an_allowlist_is_red_unless_bootstrapping(tmp_path, capsys):
+def test_a_base_without_an_allowlist_is_red(tmp_path, capsys):
     base = _tree(tmp_path / "base", {"mod.py": SEVEN_PARAMETERS})
     head = _recorded(tmp_path / "head", {"mod.py": EIGHT_PARAMETERS})
     code, out = _grade(base, head, capsys)
     assert code == 1
     assert "the base has no tests/SIZE_ALLOWLIST.json" in out
-    assert size_limits.main(["--bootstrap", "--head", str(head)]) == 0
-    assert "Bootstrap: the head's own tests/SIZE_ALLOWLIST.json stands in" in capsys.readouterr().out
 
 
 def _function(name: str, lines: int) -> str:
@@ -189,12 +218,16 @@ def test_the_head_defaults_to_the_working_directory(tmp_path, monkeypatch):
     assert size_limits.load(tree) == {"mod.py::planted": {"PLR0913": 8}}
 
 
-def test_grading_without_a_base_or_bootstrap_is_refused(tmp_path, capsys):
+def test_grading_without_a_base_is_refused(tmp_path, capsys):
     with pytest.raises(SystemExit):
         size_limits.main(["--head", str(tmp_path)])
-    assert capsys.readouterr().err.endswith(
-        ": error: grading needs --base, or --bootstrap where the base predates the gate\n"
-    )
+    assert capsys.readouterr().err.endswith(": error: grading needs --base\n")
+
+
+def test_the_retired_bootstrap_flag_is_refused(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        size_limits.main(["--bootstrap", "--head", str(tmp_path)])
+    assert capsys.readouterr().err.endswith(": error: unrecognized arguments: --bootstrap\n")
 
 
 def test_a_tree_outside_git_or_without_python_cannot_be_graded(tmp_path):
@@ -249,25 +282,37 @@ def test_the_grader_refuses_another_ruff_version(tmp_path, capsys, monkeypatch, 
     assert f"needs ruff {size_limits.RUFF_VERSION}, found {shown}, so it cannot grade" in capsys.readouterr().out
 
 
-def test_size_runs_beside_unit_graded_by_the_base_with_the_pinned_ruff():
+def test_size_runs_in_lint_graded_by_the_base_with_the_pinned_ruff():
     jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
-    job = jobs["size"]
+    job = jobs["lint"]
+    assert "size" not in jobs
     assert "needs" not in job
-    assert "size" in jobs["gate-required"]["needs"]
-    install, base, grader, grade = job["steps"][-4:]
+    assert "lint" in jobs["gate-required"]["needs"]
+    steps = {step.get("name"): step for step in job["steps"]}
+    install, base = steps["Install ruff"], steps["Check out the base revision"]
+    grader, grade = steps["Check out the protected grader"], steps["Hold the size and complexity limits"]
     assert install["run"] == f"python -m pip install ruff=={size_limits.RUFF_VERSION}"
     assert base["run"] == 'git worktree add --detach "$RUNNER_TEMP/base" "$BASE"'
     assert grader["run"] == (
         'git fetch --no-tags origin dev\ngit worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD\n'
     )
+    assert grade["if"] == "${{ !cancelled() }}"
     assert grade["run"] == (
         'if [[ -f "$RUNNER_TEMP/grader/scripts/size_limits.py" ]]; then\n'
         '  cd "$RUNNER_TEMP/grader"\n'
         '  python -m scripts.size_limits --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
-        'elif [[ -z "$(git -C "$RUNNER_TEMP/grader" log -1 --format=%H -- scripts/size_limits.py)" ]]; then\n'
-        '  python -m scripts.size_limits --bootstrap --head "$GITHUB_WORKSPACE"\n'
         "else\n"
-        '  echo "::error::dev once carried scripts/size_limits.py and no longer does, so nothing trusted can grade."\n'
+        '  echo "::error::dev carries no scripts/size_limits.py, so nothing trusted can grade."\n'
         "  exit 1\n"
         "fi\n"
     )
+
+
+def test_size_refuses_a_dev_without_its_grader(tmp_path):
+    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    grade = next(step for step in steps if step.get("name") == "Hold the size and complexity limits")
+    (tmp_path / "grader").mkdir()
+    env = dict(os.environ, RUNNER_TEMP=str(tmp_path), GITHUB_WORKSPACE=str(tmp_path))
+    result = subprocess.run(["bash", "-e", "-c", grade["run"]], env=env, capture_output=True, text=True)
+    assert result.returncode == 1
+    assert "dev carries no scripts/size_limits.py, so nothing trusted can grade." in result.stdout

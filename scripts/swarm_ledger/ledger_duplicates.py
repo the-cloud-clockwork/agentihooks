@@ -3,17 +3,18 @@
 Code shortlists candidates by word overlap; the classifier only confirms each new item and candidate pair.
 """
 
+import json
 import math
 import re
+import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
-from hooks.classifier import ClassifierError, YesNo, decide
+from hooks.classifier import ClassifierError, code_rules, decide, runner
 from scripts.swarm_ledger import ledger_rank
 
 PURPOSE = "ledger-duplicate"
 SHORTLIST = 4
-YES = 0.6
 UNCHECKED = "unchecked"
 LISTS = {"task": "tasks", "followup": "followups", "phase": "phases"}
 WORD = re.compile(r"[a-z0-9]+")
@@ -21,9 +22,6 @@ STOP = frozenset(
     "the and for with that this from into when then than are was were has have not but its their them they who "
     "what which each every one all any can will should must does task follow phase add new".split()
 )
-SAME = "Does new item {new} ask for the same change as {kind} {id} titled {title}?"
-TRUE = "the new item asks for the same change as the existing item"
-FALSE = "the new item asks for a different change"
 
 
 @dataclass(frozen=True)
@@ -47,16 +45,17 @@ def find(doc: dict, kind: str, items: list[dict], judge: Callable | None = None)
     shortlists = [shortlist(item, pool) for item in items]
     if not any(shortlists):
         return [None] * len(items)
-    questions = {
-        _name(i, j): YesNo(SAME.format(new=i, kind=c[0], id=c[1]["id"], title=_title(c[1])), true=TRUE, false=FALSE)
+    pairs = [
+        {"new": i, "slot": j, "kind": c[0], "id": c[1]["id"], "title": _title(c[1])}
         for i, found in enumerate(shortlists)
         for j, c in enumerate(found)
-    }
+    ]
     try:
-        answers = (judge or decide)(_state(items, shortlists), questions, purpose=PURPOSE).answers
+        output = runner.run(PURPOSE, _state(items, shortlists), {"pairs": pairs}, decider=judge or decide)
     except ClassifierError:
         return [UNCHECKED if found else None for found in shortlists]
-    return [_best(doc, i, found, answers) for i, found in enumerate(shortlists)]
+    floor = output.thresholds["same"]
+    return [_best(doc, i, found, output.raw.answers, floor) for i, found in enumerate(shortlists)]
 
 
 def shortlist(item: dict, pool: list[tuple[str, dict]]) -> list[tuple[str, dict]]:
@@ -98,17 +97,17 @@ def _state(items, shortlists):
     }
 
 
-def _best(doc, i, found, answers):
+def _best(doc, i, found, answers, floor):
     yes = [(answers[_name(i, j)].noul, c) for j, c in enumerate(found)]
-    yes = [(p, c) for p, c in yes if _yes(p)]
+    yes = [(p, c) for p, c in yes if _yes(p, floor)]
     if not yes:
         return None
     probability, (kind, item) = max(yes, key=lambda y: y[0])
     return _match(doc, kind, item, probability)
 
 
-def _yes(noul):
-    return isinstance(noul, (int, float)) and not isinstance(noul, bool) and noul > YES
+def _yes(noul, floor):
+    return isinstance(noul, (int, float)) and not isinstance(noul, bool) and noul > floor
 
 
 def _match(doc, kind, item, probability):
@@ -131,3 +130,21 @@ def _title(item):
 
 def _name(i, j):
     return f"new_{i}_existing_{j}"
+
+
+def _verdicts(definition, state, params, answers):
+    floor = definition.thresholds["same"]
+    return {"duplicate": any(_yes(answers[_name(p["new"], p["slot"])].noul, floor) for p in params["pairs"])}
+
+
+RULE = code_rules.CodeRule(code_rules.asked, _verdicts, {"duplicate": (True, False)}, {"duplicate": False})
+
+
+def main() -> None:
+    request = json.load(sys.stdin)
+    found = find(request["doc"], request["kind"], request["items"])
+    print(json.dumps([asdict(match) if isinstance(match, Match) else match for match in found]))
+
+
+if __name__ == "__main__":
+    main()

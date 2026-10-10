@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__migrate__mutmut_10:5502c1a9d006d56c3f164ee8b9917380f28cbf0e9692edea7dec8e20e66d8c0c": {
+    "reader": "Standards",
+    "reason": "Only BEGIN IMMEDIATE keyword casing changes; SQLite starts the same immediate transaction with the same locking semantics."
+  }
+}

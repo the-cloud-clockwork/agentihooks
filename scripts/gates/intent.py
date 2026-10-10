@@ -1,19 +1,25 @@
 """The intent check: the tick asks the classifier whether the phase can use a task's pull request as delivered, and the
 intent gate refuses merge and done while that answer is fail, or pending for under two minutes."""
 
+import hashlib
 import json
 import re
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
-from hooks.classifier import ClassifierError, YesNo, decide
+from hooks.classifier import ClassifierError, code_rules, decide, definitions, runner
+from hooks.classifier.questions import MAX_QUESTIONS
 from scripts.gates import intent_history, log
 from scripts.gates.base import Decision, Who
 from scripts.gates.identity import program_index, simple_commands
 from scripts.gates.verdicts import Verdicts
+from scripts.swarm import timing
+from scripts.swarm_ledger import plan_read
 
 NAME = "intent"
 PURPOSE = "intent-check"
@@ -21,41 +27,24 @@ MODES = ("enforce", "observe", "off", "coach")
 DEFAULT_MODE = "observe"
 PENDING, PASS, FAIL, UNCHECKED = "pending", "pass", "fail", "unchecked"
 RUNNING = "intent check running"
-FAIL_LINE = 0.3
-REASON_LINE = 0.5
-WEAKEN_LINE = 0.5
 GRACE_MS = 2 * 60_000
 GH_TIMEOUT_SEC = 20
 PROOF_CHARS = 4000
 FAIL_COMMENT = "The intent check failed. The engineer has the verdict and the fix steps in the inbox."
 SHORTFALL_COMMENT = "Intent remains unmet after two fix rounds. The master must review this shortfall in the gate log."
+MERGED_COMMENT = "Intent remains unmet on a merged pull request. The master must review this shortfall in the gate log."
+DRAFT = "draft pull request, judged once ready for review"
 START, END = "<!-- agentihooks intent -->", "<!-- /agentihooks intent -->"
+MERGE_QUEUE = ["merge", "queue"]
 PULL = re.compile(r"github\.com/([^/]+)/([^/]+)/pull/(\d+)")
 SECTION = re.compile(f"{re.escape(START)}.*?{re.escape(END)}", re.S)
-QUESTIONS = {
-    "usable": YesNo(
-        "Can the phase use this change as delivered, given the project overview, the phase intent and the task?",
-        true="the phase can use it as delivered",
-        false="the phase cannot use it as delivered",
-    ),
-    "delivers": YesNo(
-        "Does the change deliver what the task text asks for?",
-        true="it delivers the task text",
-        false="part of the task text is missing",
-    ),
-    "reachable": YesNo(
-        "Can the people or agents the phase serves reach the change through something it ships, such as a command, "
-        "a hook, a page or a call site?",
-        true="something in the change reaches it",
-        false="nothing in the change reaches it",
-    ),
-    "weakens": YesNo(
-        "Does the change turn off, loosen, weaken or bypass anything the phase builds, such as a gate default, a "
-        "threshold, a check, a published record or a review step?",
-        true="the change weakens what the phase builds",
-        false="the change weakens nothing the phase builds",
-    ),
-}
+TESTS_FIRST = f"{PURPOSE}-tests-first"
+BASE_QUESTIONS = ("usable", "delivers", "reachable", "weakens")
+CHUNK_QUESTIONS = ("underdelivers", "overdelivers")
+TESTS_FIRST_GUIDANCE = (
+    "What would meet intent: Accept both old and new gate states in the preparatory tests "
+    "without changing gate behaviour. Deliver the gate implementation in the later pull request."
+)
 REASONS = {
     "delivers": "the change may not deliver what the task text asks",
     "reachable": "nothing in the change may let the phase reach it",
@@ -67,8 +56,24 @@ def mode_of(config):
     return chosen if chosen in MODES else DEFAULT_MODE
 
 
+def _tests_first(body: str) -> bool:
+    return "Task part: tests-first" in body.splitlines()
+
+
+def _pr_diff(url: str, run) -> str | None:
+    try:
+        patch = _gh(["gh", "pr", "diff", url], run)
+        return patch.stdout if patch.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def _phase(doc, task):
     return next((p for p in doc["phases"] if p.get("id") == task.get("phase")), {})
+
+
+def _same_phase(record, task):
+    return record.get("phase") == task.get("phase")
 
 
 def section(doc, task):
@@ -112,7 +117,12 @@ def stamp(slug, task_id, url, doc, mode, now_ms, home=None):
     body = task is not None and stamp_body(url, doc, task)
     if mode == "off":
         return {"verdict": "off", "body": body}
-    Verdicts(slug, NAME, home).write(task_id, PENDING, RUNNING, now_ms)
+    verdicts = Verdicts(slug, NAME, home)
+    planned = verdicts.read(task_id)
+    if task is not None and planned and planned.get("planned") and planned["verdict"] == PASS:
+        if _same_phase(planned, task):
+            return {"verdict": PASS, "body": body}
+    verdicts.write(task_id, PENDING, RUNNING, now_ms)
     return {"verdict": PENDING, "body": body}
 
 
@@ -145,7 +155,7 @@ def pr_view(url, run=subprocess.run):
     if not before:
         return None
     try:
-        done = _gh(["gh", "pr", "view", url, "--json", "title,body,files,reviews,comments"], run)
+        done = _gh(["gh", "pr", "view", url, "--json", "title,body,files,reviews,comments,isDraft,state"], run)
         raw = json.loads(done.stdout) if done.returncode == 0 else None
         if raw is None:
             return None
@@ -154,6 +164,9 @@ def pr_view(url, run=subprocess.run):
         comments = _gh(["gh", "api", "--paginate", "--jq", ".[] | @json", path], run)
         if comments.returncode:
             return None
+        diff = {}
+        if _tests_first(body):
+            diff = {"diff": _pr_diff(url, run)}
         head = pr_head(url, run)
         if not head or head != before:
             return None
@@ -162,6 +175,9 @@ def pr_view(url, run=subprocess.run):
             "title": title,
             "body": body,
             "files": files,
+            "draft": bool(raw.get("isDraft")),
+            "merged": raw.get("state") == "MERGED",
+            **diff,
             "reviewer_findings": {
                 "reviews": raw.get("reviews", []),
                 "comments": raw.get("comments", []),
@@ -179,6 +195,16 @@ def _proof_notes(task, proof_chars):
         return ""
 
 
+def _plan_chunk(doc, task):
+    if not task.get("plan_lines") or task.get("follow_up"):
+        return {}
+    try:
+        text = plan_read.exact(doc, task)
+    except (ValueError, OSError):
+        text = None
+    return {"plan_lines": task["plan_lines"], "plan_chunk": text}
+
+
 def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
     phase = _phase(doc, task)
     return {
@@ -193,40 +219,140 @@ def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
         "proof": task.get("proof") or {},
         "proof_notes": _proof_notes(task, proof_chars),
         "reviewer_findings": pr.get("reviewer_findings", {}),
+        **({"task_part": "tests-first", "pull_request_diff": pr.get("diff")} if _tests_first(pr["body"]) else {}),
+        **_plan_chunk(doc, task),
     }
 
 
-def remediation(state: dict, answers: dict) -> str:
-    if not state.get("task_text"):
-        return ""
-    task = f"{state['task']}: {state['task_text']}"
-    phase = f"{state['phase']}: {state['phase_intent']}"
-    steps = [f"Deliver {task}. The phase must be able to use it for {phase}."]
-    if answers["delivers"].noul < REASON_LINE:
-        steps.append(f"Implement the missing acceptance behavior described by {task}.")
-    if answers["reachable"].noul < REASON_LINE:
-        steps.append(f"Wire the production entrypoint for {state['task']} and prove an invocation delivers {phase}.")
-    if answers["weakens"].noul >= WEAKEN_LINE:
-        steps.append(f"Preserve {phase} while implementing {task}.")
-    return "What would meet intent: " + " ".join(steps)
+def _rows(state):
+    if state.get("task_part") == "tests-first":
+        return []
+    text = state.get("plan_chunk")
+    return plan_read.numbered(text, state["plan_lines"]) if isinstance(text, str) else []
+
+
+def _definition(state):
+    return TESTS_FIRST if state.get("task_part") == "tests-first" else PURPOSE
+
+
+def _questions(definition, state, params):
+    if state.get("task_part") == "tests-first":
+        return runner.questions_for(definition)
+    rows = _rows(state)
+    fits = len(BASE_QUESTIONS) + len(CHUNK_QUESTIONS) + len(rows) <= MAX_QUESTIONS
+    asked = runner.questions_for(definition, {**params, "rows": [list(row) for row in rows] if fits else []})
+    if not rows:
+        return {key: asked[key] for key in BASE_QUESTIONS}
+    lines = {f"misses_line_{number}": asked[f"misses_line_{index}"] for index, (number, _) in enumerate(rows) if fits}
+    return {**{key: asked[key] for key in (*BASE_QUESTIONS, *CHUNK_QUESTIONS)}, **lines}
+
+
+def questions_for(state):
+    return _questions(definitions.load(_definition(state)), state, {})
+
+
+def _quoted(rows):
+    return ", ".join(f'line {number} "{row}"' for number, row in rows)
+
+
+def _chunk_reasons(state, answers, thresholds):
+    if not _rows(state):
+        return []
+    lines, under, over = state["plan_lines"], answers["underdelivers"].noul, answers["overdelivers"].noul
+    reasons = []
+    if under >= thresholds["chunk"]:
+        reasons.append(f"the change may leave out something plan lines {lines} ask for, at probability {under:.2f}")
+    if over >= thresholds["chunk"]:
+        reasons.append(f"the change may add scope plan lines {lines} do not ask for, at probability {over:.2f}")
+    return reasons
+
+
+def _chunk_steps(state, answers, thresholds):
+    rows, lines, steps = _rows(state), state.get("plan_lines"), []
+    if not rows:
+        return steps
+    line = thresholds["chunk"]
+    if answers["underdelivers"].noul >= line:
+        named = [(n, row) for n, row in rows if f"misses_line_{n}" in answers]
+        missed = [(n, row) for n, row in named if answers[f"misses_line_{n}"].noul >= line]
+        if missed:
+            steps.append(f"Deliver what plan lines {lines} ask for and the change leaves out: {_quoted(missed)}.")
+        else:
+            steps.append(
+                f"Deliver what plan lines {lines} ask for. No single line was named, so check each: {_quoted(rows)}."
+            )
+    if answers["overdelivers"].noul >= line:
+        steps.append(f"Remove the scope beyond plan lines {lines}, which ask only for {_quoted(rows)}.")
+    return steps
+
+
+def remediation(state: dict, answers: dict, thresholds: dict) -> str:
+    if state.get("task_part") == "tests-first":
+        return TESTS_FIRST_GUIDANCE
+    steps = []
+    if state.get("task_text"):
+        task = f"{state['task']}: {state['task_text']}"
+        phase = f"{state['phase']}: {state['phase_intent']}"
+        steps.append(f"Deliver {task}. The phase must be able to use it for {phase}.")
+        if answers["delivers"].noul < thresholds["reason"]:
+            steps.append(f"Implement the missing acceptance behavior described by {task}.")
+        if answers["reachable"].noul < thresholds["reason"]:
+            steps.append(
+                f"Wire the production entrypoint for {state['task']} and prove an invocation delivers {phase}."
+            )
+        if answers["weakens"].noul >= thresholds["weaken"]:
+            steps.append(f"Preserve {phase} while implementing {task}.")
+    steps += _chunk_steps(state, answers, thresholds)
+    return "What would meet intent: " + " ".join(steps) if steps else ""
+
+
+def _verdict(state, answers, thresholds):
+    if state.get("task_part") == "tests-first":
+        faults = []
+        if answers["accepts_both_states"].noul < thresholds["reason"]:
+            faults.append("the preparatory tests may not accept both old and new gate states")
+        if answers["changes_gate_behavior"].noul >= thresholds["weaken"]:
+            faults.append("the tests first part may change gate behaviour")
+        if faults:
+            return FAIL, "; ".join([*faults, TESTS_FIRST_GUIDANCE])
+    usable, weakens, fail = answers["usable"].noul, answers["weakens"].noul, thresholds["fail"]
+    chunk = _chunk_reasons(state, answers, thresholds)
+    if usable >= fail and weakens < thresholds["weaken"] and not chunk:
+        cited = f", judged against plan lines {state['plan_lines']}" if _rows(state) else ""
+        return PASS, f"the phase can use it as delivered at probability {usable:.2f}{cited}"
+    lead = f"the phase can use this change at probability {usable:.2f}"
+    reasons = [text for key, text in REASONS.items() if answers[key].noul < thresholds["reason"]]
+    if weakens >= thresholds["weaken"]:
+        reasons.append(f"the change may weaken what the phase builds, at probability {weakens:.2f}")
+    reasons += chunk
+    guidance = remediation(state, answers, thresholds)
+    if guidance:
+        reasons.append(guidance)
+    return FAIL, "; ".join([f"{lead}, under {fail}" if usable < fail else lead, *reasons])
+
+
+def _verdicts(definition, state, params, answers):
+    thresholds = definition.thresholds if definition.name == PURPOSE else definitions.load(PURPOSE).thresholds
+    verdict, reason = _verdict(state, answers, thresholds)
+    return {"verdict": verdict, "reason": reason}
+
+
+RULE = code_rules.CodeRule(_questions, _verdicts, {"verdict": (PASS, FAIL, UNCHECKED)}, {"verdict": FAIL})
 
 
 def judge(state, decide=decide):
+    preparatory = state.get("task_part") == "tests-first"
+    if preparatory and not isinstance(state.get("pull_request_diff"), str):
+        return FAIL, "the tests first part requires a complete pull request diff to judge gate behaviour"
+    if not preparatory and state.get("plan_lines") and not isinstance(state.get("plan_chunk"), str):
+        return UNCHECKED, f"the plan chunk for lines {state['plan_lines']} could not be read"
     try:
-        answers = decide(state, QUESTIONS, purpose=PURPOSE).answers
+        verdicts = runner.run(_definition(state), state, decider=decide).verdicts
+    except definitions.DefinitionError as exc:
+        return FAIL, f"the intent definition is invalid: {exc}"
     except ClassifierError:
         return UNCHECKED, "the classifier did not answer"
-    usable, weakens = answers["usable"].noul, answers["weakens"].noul
-    if usable >= FAIL_LINE and weakens < WEAKEN_LINE:
-        return PASS, f"the phase can use it as delivered at probability {usable:.2f}"
-    lead = f"the phase can use this change at probability {usable:.2f}"
-    reasons = [text for key, text in REASONS.items() if answers[key].noul < REASON_LINE]
-    if weakens >= WEAKEN_LINE:
-        reasons.append(f"the change may weaken what the phase builds, at probability {weakens:.2f}")
-    guidance = remediation(state, answers)
-    if guidance:
-        reasons.append(guidance)
-    return FAIL, "; ".join([f"{lead}, under {FAIL_LINE}" if usable < FAIL_LINE else lead, *reasons])
+    return verdicts["verdict"], verdicts["reason"]
 
 
 def fix_steps(slug: str) -> str:
@@ -235,6 +361,65 @@ def fix_steps(slug: str) -> str:
         "add evidence that the phase can use it as delivered, commit and push the fix, "
         f"then run agentihooks swarm {slug} pr <url> for a new check."
     )
+
+
+def _fail_kind(mode):
+    return "deny" if mode == "enforce" else "observe"
+
+
+def _remember(slug, task, now_ms, state, answer, home):
+    verdict, reason = answer
+    record = {
+        "task": task["id"],
+        "agent": task.get("claimed_by", ""),
+        "at": now_ms,
+        "purpose": PURPOSE,
+        "verdict": verdict,
+        "reason": reason,
+        "classifier_input": intent_history.request(state, questions_for(state)),
+    }
+    intent_history.append(slug, record, home)
+
+
+def plan_check(slug, doc, task_id, traced, mode, now_ms, home=None):
+    task = next((t for t in doc["tasks"] if t.get("id") == task_id), None)
+    if mode == "off" or task is None or task.get("pr_url"):
+        return None
+    verdicts = Verdicts(slug, NAME, home)
+    previous = verdicts.read(task_id)
+    if previous and previous.get("planned") == traced["plan_hash"] and _same_phase(previous, task):
+        return {"verdict": previous["verdict"], "reason": previous["reason"]}
+    kept = [row for row in traced["pieces"] if row["kept"]]
+    plan = {
+        "title": f"Traced plan for task {task_id}",
+        "body": "".join(f"- {row['what']} | {', '.join(row['areas'])} | {row['why']}\n" for row in kept),
+        "files": sorted({area for row in kept for area in row["areas"]}),
+    }
+    state = intent_history.prepare(state_of(doc, task, plan))
+    verdict, reason = judge(state)
+    _remember(slug, task, now_ms, state, (verdict, reason), home)
+    verdicts.write(task_id, verdict, reason, now_ms, phase=task.get("phase"), planned=traced["plan_hash"])
+    who = Who(name=task.get("claimed_by", ""), task=task_id)
+    if verdict == UNCHECKED:
+        log.append(slug, log.Row.of(NAME, "count", who, reason=reason), home)
+    elif verdict == FAIL:
+        log.append(slug, log.Row.of(NAME, _fail_kind(mode), who, reason=reason), home)
+    return {"verdict": verdict, "reason": reason}
+
+
+def _fingerprint(doc, task):
+    phase = _phase(doc, task)
+    judged = [task.get("title"), task.get("description"), phase.get("title"), phase.get("description")]
+    return hashlib.sha256(json.dumps([*judged, _plan_chunk(doc, task)]).encode()).hexdigest()
+
+
+@dataclass(frozen=True)
+class _Judgment:
+    pr: dict | None
+    previous: dict | None
+    state: dict | None
+    answer: tuple[str, str] | None
+    inputs: str | None = None
 
 
 @dataclass(frozen=True)
@@ -252,56 +437,74 @@ class Check:
     def run(self, doc):
         if self.mode == "off":
             return []
-        verdicts, actions = Verdicts(self.slug, NAME, self.home), []
+        verdicts, actions, tasks = Verdicts(self.slug, NAME, self.home), [], []
         for task in doc["tasks"]:
             states = ("pr", "claimed") if self.mode == "coach" else ("pr",)
             if task.get("state") not in states or not task.get("pr_url"):
                 continue
-            record = verdicts.read(task["id"]) or verdicts.write(task["id"], PENDING, RUNNING, self.now_ms)
-            if self.mode != "coach" and record["verdict"] != PENDING:
+            record = verdicts.read(task["id"])
+            judged = record and record["verdict"] != PENDING and not record.get("planned")
+            moved = self.mode != "coach" and judged and record.get("inputs") != _fingerprint(doc, task)
+            if self.mode != "coach" and judged and _same_phase(record, task) and not moved:
                 continue
-            if self._keep_if_unmoved(task, verdicts):
-                continue
-            pr = self.view(task["pr_url"])
-            if pr is not None:
-                actions += self._check(doc, task, pr, verdicts)
+            tasks.append((task, record, moved))
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            pending = [
+                (task, record, moved, workers.submit(copy_context().run, self._judge, doc, task))
+                for task, record, moved in tasks
+            ]
+            for task, record, moved, future in pending:
+                if not record or not _same_phase(record, task) or moved:
+                    verdicts.write(task["id"], PENDING, RUNNING, self.now_ms, phase=task.get("phase"))
+                judgment = future.result()
+                if judgment is not None:
+                    actions += self._check(task, judgment, verdicts)
+                    timing.keep()
         return actions
 
-    def _check(self, doc, task, pr, verdicts):
-        coaching = self._coaching()
-        previous = coaching.read(task["id"]) if self.mode == "coach" else None
-        head = pr.get("head")
-        if self.mode == "coach" and not head:
+    def _judge(self, doc, task):
+        inputs = _fingerprint(doc, task)
+        previous = self._unmoved(task, inputs)
+        if previous:
+            return _Judgment(None, previous, None, None)
+        pr = self.view(task["pr_url"])
+        if pr is None or (self.mode == "coach" and not pr.get("head")):
+            return None
+        if pr.get("draft"):
+            return _Judgment(pr, None, None, None)
+        previous = self._coaching().read(task["id"]) if self.mode == "coach" else None
+        previous = previous if previous and _same_phase(previous, task) else None
+        if previous and previous["head"] == pr.get("head") and previous.get("inputs") == inputs:
+            return _Judgment(pr, previous, None, None)
+        state = intent_history.prepare(state_of(doc, task, pr))
+        if state.get("task_part") == "tests-first":
+            state["pull_request_diff"] = intent_history.masked(pr.get("diff"))
+        return _Judgment(pr, previous, state, self.ask(state), inputs)
+
+    def _check(self, task, judgment, verdicts):
+        previous, pr = judgment.previous, judgment.pr
+        if judgment.state is None and previous is None:
+            verdicts.write(task["id"], PENDING, DRAFT, self.now_ms, phase=task.get("phase"))
             return []
-        if previous and previous["head"] == head:
+        if judgment.state is None:
             self._keep(task, previous, verdicts)
             return []
-        rounds = min(previous["coach_rounds"] + (previous["verdict"] == FAIL), 2) if previous else 0
-        state = intent_history.prepare(state_of(doc, task, pr))
-        verdict, reason = self.ask(state)
-        intent_history.append(
-            self.slug,
-            {
-                "task": task["id"],
-                "agent": task.get("claimed_by", ""),
-                "at": self.now_ms,
-                "purpose": PURPOSE,
-                "verdict": verdict,
-                "reason": reason,
-                "classifier_input": intent_history.request(state, QUESTIONS),
-            },
-            self.home,
-        )
-        fields = {"coach_rounds": rounds, "head": head, "url": task["pr_url"]} if self.mode == "coach" else {}
+        state, (verdict, reason) = judgment.state, judgment.answer
+        head = pr.get("head")
+        fixed = bool(previous) and previous["verdict"] == FAIL and previous["head"] != head
+        rounds = min(previous["coach_rounds"] + fixed, 2) if previous else 0
+        _remember(self.slug, task, self.now_ms, state, judgment.answer, self.home)
+        coached = {"coach_rounds": rounds, "head": head, "url": task["pr_url"]} if self.mode == "coach" else {}
+        fields = {"phase": task.get("phase"), **coached, "inputs": judgment.inputs}
         verdicts.write(task["id"], verdict, reason, self.now_ms, **fields)
         if self.mode == "coach":
-            coaching.write(task["id"], verdict, reason, self.now_ms, **fields)
+            self._coaching().write(task["id"], verdict, reason, self.now_ms, **fields)
         who = Who(name=task.get("claimed_by", ""), task=task["id"])
         actions = [f"task {task['id']} intent check {verdict}"]
         if verdict == UNCHECKED:
             log.append(self.slug, log.Row.of(NAME, "count", who, reason=reason), self.home)
         elif verdict == FAIL:
-            actions += self._failed(task, who, reason, rounds)
+            actions += self._failed(task, who, reason, rounds, pr.get("merged"))
         elif self.mode == "coach" and task.get("state") == "claimed":
             self.ledger.update_task(self.slug, task["id"], {"state": "pr"})
         return actions
@@ -309,14 +512,19 @@ class Check:
     def _coaching(self):
         return Verdicts(self.slug, "intent-coach", self.home)
 
-    def _keep_if_unmoved(self, task, verdicts):
+    def _unmoved(self, task, inputs):
         if self.mode != "coach" or self.head is None:
-            return False
+            return None
         previous = self._coaching().read(task["id"])
-        if not previous or not previous.get("head") or previous["head"] != self.head(task["pr_url"]):
-            return False
-        self._keep(task, previous, verdicts)
-        return True
+        if (
+            not previous
+            or not previous.get("head")
+            or not _same_phase(previous, task)
+            or previous.get("inputs") != inputs
+            or previous["head"] != self.head(task["pr_url"])
+        ):
+            return None
+        return previous
 
     def _keep(self, task, previous, verdicts):
         verdicts.write(
@@ -327,18 +535,20 @@ class Check:
             coach_rounds=previous["coach_rounds"],
             head=previous["head"],
             url=task["pr_url"],
+            phase=task.get("phase"),
         )
 
-    def _failed(self, task, who, reason, rounds=0):
-        kind = "deny" if self.mode == "enforce" else "observe"
-        log.append(self.slug, log.Row.of(NAME, kind, who, reason=reason), self.home)
-        if self.mode == "coach" and rounds >= 2:
-            text = f"Intent remains unmet after two fix rounds: {reason}. The master must review this shortfall."
+    def _failed(self, task, who, reason, rounds=0, merged=False):
+        log.append(self.slug, log.Row.of(NAME, _fail_kind(self.mode), who, reason=reason), self.home)
+        if self.mode == "coach" and (rounds >= 2 or merged):
+            unmet = "on a merged pull request" if merged else "after two fix rounds"
+            text = f"Intent remains unmet {unmet}: {reason}. The master must review this shortfall."
             key, ref = f"intent-shortfall:{task['id']}:{self.now_ms}", f"tasks/{task['id']}"
             told = self.mail.send(key, self.mail.master, text, ref=ref)
-            self.ledger.comment(self.slug, task["id"], SHORTFALL_COMMENT, by="swarm")
             if task.get("state") == "claimed":
                 self.ledger.update_task(self.slug, task["id"], {"state": "pr"})
+            comment = MERGED_COMMENT if merged else SHORTFALL_COMMENT
+            self.ledger.comment(self.slug, task["id"], comment, by="swarm")
             return told
         if self.mode not in ("enforce", "coach"):
             return []
@@ -359,7 +569,7 @@ def _gated(words):
     program, rest = PurePosixPath(words[index]).name, words[index + 1 :]
     if program == "gh":
         return rest[:2] == ["pr", "merge"]
-    return program == "agentihooks" and rest[:1] == ["swarm"] and rest[2:3] == ["done"]
+    return program == "agentihooks" and rest[:1] == ["swarm"] and (rest[2:3] == ["done"] or rest[2:4] == MERGE_QUEUE)
 
 
 class IntentGate:
@@ -383,17 +593,22 @@ class IntentGate:
                 state.write(who.task, PENDING, RUNNING, int(self.clock() * 1000))
                 return Decision.deny("Intent must be checked on the new head. Wait for the tick to rerun the check.")
         if verdict == FAIL:
-            if mode == "coach" and record.get("coach_rounds", 0) >= 2:
-                outcome = "merged" if pr_merged(record["url"]) else "merge permitted"
-                reason = f"{outcome} with intent unmet after two fix rounds: {record['reason']}"
+            rounds = record.get("coach_rounds", 0)
+            merged = mode == "coach" and bool(record.get("url")) and pr_merged(record["url"])
+            if mode == "coach" and (rounds >= 2 or merged):
+                outcome = "merged" if merged else "merge permitted"
+                unmet = "after two fix rounds" if rounds >= 2 else "on a merged pull request"
+                reason = f"{outcome} with intent unmet {unmet}: {record['reason']}"
                 log.append(state.slug, log.Row.of(NAME, "count", who, call.tool, reason), state.home)
                 return Decision()
             text = f"intent check failed for task {who.task}: {record['reason']}. {fix_steps(who.swarm)}"
             if mode == "coach":
-                text += f" Run fix round {record.get('coach_rounds', 0) + 1} of 2."
+                text += f" Run fix round {rounds + 1} of 2."
             return Decision.deny(text)
         if verdict != PENDING:
             return Decision()
+        if record["reason"] == DRAFT:
+            return Decision.deny(f"intent for task {who.task} is judged once its pull request is ready for review")
         waited = int(self.clock() * 1000) - record["at"]
         if waited < GRACE_MS:
             return Decision.deny(

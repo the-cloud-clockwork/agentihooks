@@ -49,6 +49,22 @@ def test_no_decision_says_capacity_was_not_observed():
     assert quota_view.lines({}, 0) == ["quota capacity has not been observed"]
 
 
+def test_the_host_room_follows_the_quota_head_line():
+    host = {"room": 3, "reason": "2100 MB available memory fits 3 at 700 MB each", "limit": "memory"}
+    lines = quota_view.lines({**DECISION, "accounts": [], "host": host}, 1_000_000)
+    assert lines[1:] == ["host room 3: 2100 MB available memory fits 3 at 700 MB each"]
+    assert len(quota_view.lines({**DECISION, "accounts": []}, 1_000_000)) == 1
+
+
+def test_an_unknown_host_room_reads_unknown():
+    host = {"room": None, "reason": "host unknown: the process files cannot be read, so spawns pass"}
+    assert (
+        quota_view.host_line(host)
+        == "host room unknown: host unknown: the process files cannot be read, so spawns pass"
+    )
+    assert quota_view.host_line({"room": 0, "reason": "full"}) == "host room 0: full"
+
+
 def test_routing_left_is_the_lower_window_or_none_when_either_is_unknown():
     assert quota_view.routing_left(row("a", five=30.0, week=70.0)) == 30.0
     assert quota_view.routing_left(row("a", five=90.0, week=12.0)) == 12.0
@@ -67,3 +83,30 @@ def test_the_page_reads_each_account_routing_and_the_lane_order():
             {**row("main", "UNKNOWN", 0, None, None, "codex"), "routing": None},
         ],
     }
+
+
+def api_row(harness="claude", sessions=1, weight=25, state="OPEN"):
+    return {**row("api", state, sessions, None, None, harness), "kind": "api", "weight": weight}
+
+
+API_DECISION = {
+    **DECISION,
+    "accounts": [row("alpha", sessions=2), row("beta", sessions=1), api_row(), api_row("codex", 0, None, "CLOSED")],
+}
+
+
+def test_each_api_line_shows_its_harness_share_against_its_weight():
+    assert quota_view.lines(API_DECISION, 1_000_000)[3:] == [
+        "quota account claude api  open  api share 25% of 4 sessions against weight 25%  sessions 1",
+        "quota account codex api  closed  api share 0% of 0 sessions against no weight  sessions 0",
+    ]
+
+
+def test_the_page_carries_each_api_share():
+    accounts = quota_view.page(API_DECISION)["accounts"]
+    assert [account.get("share") for account in accounts] == [None, None, 25, 0]
+
+
+def test_the_api_share_rounds_the_api_percent_of_its_harness_sessions():
+    rows = [row("a", sessions=1), api_row(sessions=3), row("cx", sessions=5, harness="codex")]
+    assert quota_view.api_share(rows[1], rows) == (75, 4)

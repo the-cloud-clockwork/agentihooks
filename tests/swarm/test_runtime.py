@@ -1,11 +1,12 @@
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from scripts.swarm.reaper import Outcome
-from scripts.swarm.runtime import PLAN_MODE, HerdrRuntime
-from scripts.swarm.store import AgentRecord
+from scripts.swarm.runtime import PLAN_MODE, HerdrRuntime, codex_plan_mode
+from scripts.swarm.store import AgentRecord, SwarmConfig
 from tests.swarm.profile_fixture import validated
 
 
@@ -400,6 +401,52 @@ def test_only_a_claude_planner_starts_in_plan_mode(tmp_path, lane, agent):
     assert "--permission-mode" not in _passed(_spawn_seen(tmp_path, {lane: {"agent": agent}}, lane=lane)["argv"])
 
 
+def test_a_codex_planner_starts_with_a_read_only_repo_and_network(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", "/h")
+    monkeypatch.setenv("LEDGER_DIR", "/l")
+    passed = _passed(_spawn_seen(tmp_path, {"plan": {"agent": "codex"}}, lane="plan")["argv"])
+    assert passed[-4:] == [
+        "-c",
+        'permissions.planner={extends=":read-only", network={enabled=true}, '
+        'filesystem={"/l"="write", "/h/.agentihooks/swarm"="write", "/h/scratchpad"="write"}}',
+        "-c",
+        'default_permissions="planner"',
+    ]
+
+
+def _grants(ledger, home):
+    return (
+        'permissions.planner={extends=":read-only", network={enabled=true}, '
+        f'filesystem={{"{ledger}"="write", "{home}/.agentihooks/swarm"="write", "{home}/scratchpad"="write"}}}}'
+    )
+
+
+@pytest.mark.parametrize(
+    ("environ", "ledger", "home"),
+    [
+        ({"HOME": "/x"}, "/x/development-ledger", "/x"),
+        ({"HOME": "/x", "LEDGER_DIR": "~/led"}, "/h/led", "/x"),
+        ({}, "/p/development-ledger", "/p"),
+        ({"HOME": ""}, "/p/development-ledger", "/p"),
+    ],
+)
+def test_a_codex_planner_writes_its_ledger_home_and_scratchpad(monkeypatch, environ, ledger, home):
+    monkeypatch.setenv("HOME", "/h")
+    monkeypatch.setattr(Path, "home", lambda: Path("/p"))
+    assert codex_plan_mode(environ) == ["-c", _grants(ledger, home), "-c", 'default_permissions="planner"']
+
+
+def test_a_codex_planner_quotes_each_granted_path():
+    assert codex_plan_mode({"HOME": '/q"x'})[1] == _grants('/q\\"x/development-ledger', '/q\\"x')
+
+
+@pytest.mark.parametrize(("lane", "agent"), [("eng", "codex"), ("ci", "codex"), ("plan", "claude")])
+def test_only_a_codex_planner_starts_read_only(tmp_path, lane, agent):
+    passed = _passed(_spawn_seen(tmp_path, {lane: {"agent": agent}}, lane=lane)["argv"])
+    assert 'default_permissions="planner"' not in passed
+    assert not any(arg.startswith("permissions.planner=") for arg in passed)
+
+
 def test_an_auto_lane_falls_back_to_the_automatic_choice(tmp_path):
     seen = _spawn_seen(tmp_path, {"eng": {"agent": "auto", "model": "auto", "effort": "auto"}})
     assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "opus", "--effort", "high"]
@@ -621,7 +668,7 @@ def test_a_resume_herdr_never_shows_in_its_conversation_is_closed_and_fails(tmp_
     homes = scratch("t1")
     runtime, config, agent, seen = _resuming(tmp_path, "someone-else")
     ended = []
-    runtime.end = lambda name, pid, homes: ended.append((name, pid, homes)) or Outcome()
+    runtime.end = lambda name, pid, homes, start=0: ended.append((name, pid, homes)) or Outcome()
     with pytest.raises(SpawnError, match="conversation c0ffee") as error:
         runtime.resume(config, agent, "you were restored")
     assert error.value.status == "ambiguous"
@@ -707,7 +754,11 @@ def _launched(tmp_path, monkeypatch, lane, task, lanes=None, harness="claude", e
         }
     runtime.spawn(config, lane, "agent@a1b2c3-0001", task)
     passed = _passed(seen["argv"])
-    return passed[:-2] if passed[-2:] == PLAN_MODE else passed
+    if passed[-2:] == PLAN_MODE:
+        return passed[:-2]
+    if passed[-2:] == ["-c", 'default_permissions="planner"'] and passed[-3].startswith("permissions.planner="):
+        return passed[:-4]
+    return passed
 
 
 def test_spawn_records_launch_preparation_and_waited_subprocess_cost(tmp_path, monkeypatch, capsys):
@@ -932,7 +983,6 @@ def test_a_claude_resume_asks_init_agent_for_the_inbox_channel(tmp_path, harness
 
 
 def test_has_capacity_asks_the_rotation_with_this_environment(tmp_path):
-    import os
 
     from scripts import agent_choice
 
@@ -946,7 +996,6 @@ def test_has_capacity_asks_the_rotation_with_this_environment(tmp_path):
 
 
 def test_quota_capacity_reads_this_environment_and_hands_demand_on(tmp_path, monkeypatch):
-    import os
 
     from scripts.swarm import capacity
 
@@ -957,14 +1006,15 @@ def test_quota_capacity_reads_this_environment_and_hands_demand_on(tmp_path, mon
     monkeypatch.setattr(
         capacity,
         "calculate",
-        lambda config, rows, agents, demand, requirements: (
+        lambda config, rows, agents, demand, requirements, accounts, warned: (
             seen.update(demand=demand) or {"allocation": {}, "placements": {}}
         ),
     )
     runtime = HerdrRuntime(home=tmp_path)
-    runtime.quota_capacity(None, [], 5.0, {"eng": 1})
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, scaling="manual")
+    runtime.quota_capacity(config, [], 5.0, {"eng": 1})
     assert seen == {"environ": dict(os.environ), "now": 5.0, "refresh": True, "demand": {"eng": 1}}
-    runtime.quota_capacity(None, [], 5.0, {"eng": 0})
+    runtime.quota_capacity(config, [], 5.0, {"eng": 0})
     assert seen["refresh"] is False
 
 
@@ -984,7 +1034,7 @@ def test_rotation_picks_the_fewest_session_seat_or_asks_choose(tmp_path):
     assert runtime._rotation("", {}) == ("codex", "rotation")
     assert runtime._rotation("claude", {}) == ("codex", "requested")
     runtime._quota_accounts = [capacity.Account("codex", "cx", "CLOSED", 0, 90, 90, 0)]
-    assert runtime._rotation("", {}) == ("claude", agent_choice.ALL_FULL)
+    assert runtime._rotation("", {}) == ("codex", agent_choice.ALL_FULL)
     assert calls == ["", "claude"]
 
 
@@ -1043,7 +1093,7 @@ def test_handoff_account_selection_preserves_run_options(tmp_path, harness, mode
     }
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda requested, environ: (requested, "requested"))
     runtime._quota_accounts = [
-        capacity.Account(harness, "old", "OPEN", 0, 5, 90, 2),
+        capacity.Account(harness, "old", "OPEN", 0, 30, 90, 2),
         capacity.Account(harness, "fresh", "OPEN", 1, 90, 90, 6),
     ]
     config = SimpleNamespace(
@@ -1093,7 +1143,9 @@ def test_quota_handoff_without_another_account_keeps_the_handoff(tmp_path, harne
         "handoff": "saved handoff",
         "handoff_envelope": {"reason": "quota", "seat": "eng-2@sw", "launch": saved},
     }
-    with pytest.raises(SpawnError, match="no .* account has placeable quota seats") as error:
+    with pytest.raises(
+        SpawnError, match=f"^no claude or codex account can take the quota handoff from {harness} account old: "
+    ) as error:
         runtime.spawn(config, "eng", "engineer@a1b2c3-0001", task)
     assert error.value.status == "unavailable"
     assert task["handoff"] == "saved handoff"

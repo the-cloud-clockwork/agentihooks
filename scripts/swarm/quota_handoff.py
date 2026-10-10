@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from scripts.inbox.store import InboxStore
@@ -24,7 +25,7 @@ class Thresholds:
 
 
 def trigger(account: capacity.Account, thresholds: Thresholds) -> str:
-    if account.state == "UNKNOWN":
+    if account.kind == "api" or account.state == "UNKNOWN":
         return ""
     if account.week_left is not None and 100 - account.week_left >= thresholds.week:
         return "week"
@@ -64,22 +65,42 @@ def warn(slug: str, store: RedisStore, environ: dict) -> list[str]:
     return actions
 
 
-def successor(accounts: list[capacity.Account], allow_codex: bool, thresholds: Thresholds) -> capacity.Account | None:
-    for harness in ("claude", "codex") if allow_codex else ("claude",):
-        eligible = [
-            row
-            for row in accounts
-            if row.harness == harness
-            and capacity.free_seats(row)
-            and row.state != "UNKNOWN"
-            and (row.five_left is not None or row.week_left is not None)
-            and not trigger(row, thresholds)
-        ]
+def exclusion(account: capacity.Account, thresholds: Thresholds, predecessor: tuple | None = None) -> str:
+    if (account.harness, account.name) == predecessor:
+        return "is the account handing off"
+    if not capacity.free_seats(account):
+        return "has no free seats"
+    if account.kind == "api":
+        return ""
+    if account.state == "UNKNOWN" or (account.five_left is None and account.week_left is None):
+        return "has no quota reading"
+    if window := trigger(account, thresholds):
+        return capacity.warning(window)
+    return ""
+
+
+def refusal(
+    predecessor: tuple, harnesses: tuple, accounts: list[capacity.Account], reason: Callable[[capacity.Account], str]
+) -> str:
+    reasons = "; ".join(f"{row.harness} {row.name} {reason(row)}" for row in accounts)
+    return (
+        f"no {' or '.join(harnesses)} account can take the quota handoff from {predecessor[0]} account "
+        f"{predecessor[1]}: {reasons or 'no accounts were observed'}"
+    )
+
+
+def successor(
+    accounts: list[capacity.Account], harnesses: tuple[str, ...], thresholds: Thresholds
+) -> capacity.Account | None:
+    for harness in harnesses:
+        eligible = [row for row in accounts if row.harness == harness and not exclusion(row, thresholds)]
         if eligible:
             return min(
                 eligible,
                 key=lambda row: (
-                    -min(value for value in (row.five_left, row.week_left) if value is not None),
+                    -100
+                    if row.kind == "api"
+                    else -min(value for value in (row.five_left, row.week_left) if value is not None),
                     row.name,
                 ),
             )

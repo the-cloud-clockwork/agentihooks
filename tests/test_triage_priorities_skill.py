@@ -11,6 +11,12 @@ SLUG = "demo-2026-01-01"
 FAKE = r"""#!/usr/bin/env python3
 import json, os, sys
 args = sys.argv[1:]
+if args[3:] == ["show"]:
+    path = os.path.join(os.environ["LEDGER_DIR"], args[2] + ".json")
+    if not os.path.exists(path):
+        sys.exit(f"ledger {args[2]} does not exist")
+    print(os.environ.get("FAKE_SHOW") or open(path).read())
+    sys.exit(0)
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(json.dumps(args) + "\n")
 command = args[5] if len(args) > 5 else ""
@@ -200,10 +206,25 @@ def test_list_clears_resolved_priorities_when_asked(env):
     ]
 
 
-def test_list_reports_a_missing_ledger_with_the_folder_it_read(env):
+def test_list_reports_a_missing_ledger_with_what_the_ledger_command_said(env):
     result = run(env, "list_priorities.py", "nope")
     assert result.returncode == 2
-    assert env["LEDGER_DIR"] in result.stderr
+    assert "ledger nope does not exist" in result.stderr
+    assert "agentihooks ledger list" in result.stderr
+
+
+def test_list_refuses_a_ledger_read_that_is_not_json(env):
+    result = run({**env, "FAKE_SHOW": "server busy"}, "list_priorities.py", SLUG)
+    assert result.returncode == 2
+    assert result.stderr.startswith(f"cannot read ledger {SLUG}: ")
+    assert "Traceback" not in result.stderr
+
+
+def test_list_reports_a_missing_agentihooks_command_without_a_traceback(env):
+    result = run({**env, "PATH": ""}, "list_priorities.py", SLUG)
+    assert result.returncode == 2
+    assert result.stderr.startswith(f"cannot read ledger {SLUG}: ")
+    assert "Traceback" not in result.stderr
 
 
 def write_plan(tmp_path, entries):
@@ -409,3 +430,16 @@ def test_apply_reports_a_clear_that_left_the_priority_listed(env, tmp_path):
             "error": "applied, but clearing its priority failed: server refused",
         }
     ]
+
+
+REFUSED_ROUND = (
+    "   Never write the prompts as chat text. When `AskUserQuestion` is refused because the operator is not present, "
+    "say only one short line, type operator on to answer the questions here, or leave them in Priorities; "
+    "keep every priority and end the run. Done when that one line is sent and every priority is still listed."
+)
+
+
+def test_a_refused_round_sends_one_operator_on_line_and_keeps_every_priority():
+    body = (SCRIPTS.parent / "SKILL.md").read_text()
+
+    assert [line for line in body.splitlines() if "type operator on" in line] == [REFUSED_ROUND]

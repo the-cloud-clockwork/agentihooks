@@ -5,11 +5,14 @@ Whichever path shows a write first marks it; the others skip it, so each write r
 
 import os
 
+from scripts.inbox.store import MOVE_ATTEMPTS, InboxError, now_ms, owner_key, redelivery_ms
 from scripts.swarm.keyspace import ROOT
+from scripts.swarm.naming import NameRegistry
 
 PREFIX = f"{ROOT}:inbox:seen"
 TTL_S = 30 * 24 * 3600
 SEEN_ON_LEDGER = "already shown through the ledger"
+UNSETTLED = "returned to pending: its seen mark kept changing"
 
 
 def write_ref(slug, event):
@@ -20,19 +23,33 @@ class SeenMarks:
     def __init__(self, redis):
         self.redis = redis
 
-    def key(self, name):
+    @staticmethod
+    def key(name):
         return f"{PREFIX}:{name}"
 
     def mark(self, name, ref):
-        """True when this call is the first to show the write to name."""
-        with self.redis.pipeline() as pipe:
-            pipe.sadd(self.key(name), ref)
-            pipe.expire(self.key(name), TTL_S)
-            added, _ = pipe.execute()
-        return added == 1
+        """True when this call is the first to show the write to name; False while a delivery owner holds name."""
+        from redis.exceptions import WatchError
+
+        for _ in range(MOVE_ATTEMPTS):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(NameRegistry.key("alias", name))
+                    resolved = NameRegistry(pipe).resolve(name)
+                    pipe.watch(owner_key(resolved))
+                    if pipe.get(owner_key(resolved)) is not None:
+                        return False
+                    pipe.multi()
+                    pipe.sadd(self.key(resolved), ref)
+                    pipe.expire(self.key(resolved), TTL_S)
+                    added, _ = pipe.execute()
+                    return added == 1
+                except WatchError:
+                    continue
+        raise InboxError(f"the delivery owner of {name} changed meanwhile; run it again")
 
     def seen(self, name, ref):
-        return bool(self.redis.sismember(self.key(name), ref))
+        return bool(self.redis.sismember(self.key(NameRegistry(self.redis).resolve(name)), ref))
 
 
 def marks_for(slug, environ=None):
@@ -60,11 +77,25 @@ def first_showing(marks, name, slug, events):
 
 def claim(store, me):
     """Deliver each item pending for me, its seat and aliases included; a ledger write already shown closes instead."""
+    store.redeliver(now_ms(), redelivery_ms())
     marks = SeenMarks(store.redis)
     shown = []
     for item in filter(None, (store.deliver(item.id, me) for item in store.pending_mail(me))):
-        if item.ref and not marks.mark(me, item.ref):
+        try:
+            elsewhere = item.ref and _shown_elsewhere(marks, store, item, me)
+        except InboxError:
+            store.requeue(item.id, me, UNSETTLED)
+            continue
+        if elsewhere:
             store.close(item.id, me, "done", SEEN_ON_LEDGER)
         else:
             shown.append(item)
     return shown
+
+
+def _shown_elsewhere(marks, store, item, me):
+    return not marks.mark(me, item.ref) and not _delivered_before(store, item.id, me)
+
+
+def _delivered_before(store, item_id, me):
+    return sum(e.get("state") == "delivered" and e.get("by") == me for e in store.history(item_id)) > 1

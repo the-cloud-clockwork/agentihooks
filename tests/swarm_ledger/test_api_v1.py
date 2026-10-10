@@ -22,10 +22,11 @@ _talk_init = server.talk.Budget.__init__
 
 @pytest.fixture
 def live(authority_live):
+    from tests.swarm_ledger import legacy_page
     from tests.swarm_ledger.test_ledger_authority import core, new_ledger
 
     content = {"title": "Authority", "phases": [{"title": "Proof", "description": "word " * 101}]}
-    page = new_ledger.render(new_ledger.build_doc(content), SLUG, authority_live["port"])
+    page = legacy_page.render(new_ledger.build_doc(content), SLUG, authority_live["port"])
     html, document = core.paths(SLUG)
     html.write_text(page)
     document.unlink(missing_ok=True)
@@ -615,7 +616,7 @@ def test_control_actions_validate_before_domain_execution(live):
 
 def test_item_revision_uses_canonical_utf8_content(live, monkeypatch):
     document = {"tasks": [{"title": "Café", "id": "t1"}], "_meta": {"rev": 1}}
-    monkeypatch.setattr(server.repository, "get_document", lambda slug, **kwargs: document)
+    monkeypatch.setattr(server.repository, "read", lambda slug, *keys: document)
     assert request(live, "GET", "tasks/t1") == (
         200,
         {
@@ -760,13 +761,16 @@ def test_put_operations_and_options_keep_the_versioned_transport(live):
         response = conn.getresponse()
         assert response.status == 204
         assert response.getheader("Access-Control-Allow-Origin") == "null"
-        assert response.getheader("Access-Control-Allow-Methods") == "GET, PUT, POST"
-        assert response.getheader("Access-Control-Allow-Headers") == "Content-Type, X-Ledger-Token, X-Ledger-Agent"
+        assert response.getheader("Access-Control-Allow-Methods") == "GET, PUT, POST, PATCH"
+        assert (
+            response.getheader("Access-Control-Allow-Headers")
+            == "Content-Type, X-Ledger-Token, X-Ledger-Agent, X-Ledger-Slug"
+        )
         assert response.getheader("Access-Control-Allow-Private-Network") == "true"
         assert [row for row in response.getheaders() if row[0].lower().startswith("access-control")] == [
             ("Access-Control-Allow-Origin", "null"),
-            ("Access-Control-Allow-Methods", "GET, PUT, POST"),
-            ("Access-Control-Allow-Headers", "Content-Type, X-Ledger-Token, X-Ledger-Agent"),
+            ("Access-Control-Allow-Methods", "GET, PUT, POST, PATCH"),
+            ("Access-Control-Allow-Headers", "Content-Type, X-Ledger-Token, X-Ledger-Agent, X-Ledger-Slug"),
             ("Access-Control-Allow-Private-Network", "true"),
         ]
         assert response.read() == b""
@@ -1210,7 +1214,11 @@ def test_sdk_preserves_explicit_stale_revision(live):
         client.mutate(SLUG, [operation])
     assert error.value.code == 409
     assert json.loads(error.value.read()) == {
-        "error": {"code": "revision_conflict", "message": "Resource changed since the expected revision"}
+        "error": {
+            "code": "revision_conflict",
+            "message": "Resource changed since the expected revision",
+            "details": {"path": "chat"},
+        }
     }
     assert operation["expected_revision"] == stale
     assert not any(row["id"] == "stale-explicit" for row in client.collection(SLUG, "chat"))
@@ -1229,7 +1237,7 @@ def test_composite_status_preserves_member_events_and_crew(live, capsys):
     state = ledger.request(SLUG, service=True)
     member = state["_meta"]["members"]["api-reader"]
     assert member["role"] == "member"
-    assert member["handled_rev"] == 0
+    assert member["handled_rev"] == 1
     assert member["claims"] == []
     assert "id" not in member
     assert "revision" not in member
@@ -1241,7 +1249,7 @@ def test_composite_status_preserves_member_events_and_crew(live, capsys):
     [crew] = state["_meta"]["crew"]
     assert crew["name"] == "api-reader"
     assert crew["role"] == "member"
-    assert crew["handled_rev"] == 0
+    assert crew["handled_rev"] == 1
     ledger.cmd_status(SimpleNamespace(slug=SLUG, name="api-reader"))
     status = json.loads(capsys.readouterr().out)
     assert status["crew"] == state["_meta"]["crew"]
@@ -1417,6 +1425,7 @@ def test_mutations_enforce_the_ledger_talk_budget(live, monkeypatch):
     store.update(SLUG, gates={"talk": "enforce"})
     worker = "engineer@323133-0440"
     marks = progress.Progress(redis, SLUG)
+    marks.outcome(worker, "pushed", 1)
     for _ in range(talk.BUDGET):
         marks.talk(worker)
 
@@ -1500,7 +1509,13 @@ def test_metadata_guard_changes_only_with_its_content(live):
     }
     assert request(live, "POST", "operations", payload) == (
         409,
-        {"error": {"code": "revision_conflict", "message": "Resource changed since the expected revision"}},
+        {
+            "error": {
+                "code": "revision_conflict",
+                "message": "Resource changed since the expected revision",
+                "details": {"path": "metadata"},
+            }
+        },
     )
     assert request(live, "GET", "metadata")[1]["data"]["title"] == "Changed"
 
@@ -1928,7 +1943,7 @@ def test_latest_thousand_operation_receipts_remain_retry_safe(live):
     guard = request(live, "GET", "metadata")[1]["revision"]
     payload = {"operation_id": "latest", "ops": [operation("latest")], "guards": {"metadata": guard}}
     assert request(live, "POST", "operations", payload)[0] == 200
-    saved = server.repository.get_document(SLUG, reconcile=False)["_meta"]["api_operations"]
+    saved = server.repository.get_document(SLUG)["_meta"]["api_operations"]
     assert len(saved) == 1000
     assert "0" not in saved
     assert "1" in saved
@@ -2070,6 +2085,7 @@ def test_known_hash_shaped_task_ids_keep_the_comment_exemption(live):
                 "id": "known-task-comment",
                 "thread": "chat",
                 "by": "api-reader",
+                "to": "operator",
                 "text": "The deadb33f task is covered",
             }
         ],
@@ -2214,12 +2230,16 @@ def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeyp
         must="",
         check="",
         judge="",
+        push="",
         kind="",
         artifact=False,
+        follow_up=False,
         profile="",
         rank="",
         difficulty=None,
         plan="",
+        plan_slice="",
+        not_duplicate="",
         scaffold=False,
         description="",
         phase="",
@@ -2419,7 +2439,8 @@ def test_repository_optional_collections_have_empty_http_resources(live, monkeyp
     from scripts.swarm_ledger.api.resources import revision
 
     document = {"_meta": {}, "questions": [{"id": "q1"}]}
-    monkeypatch.setattr(server.repository, "get_document", lambda slug, reconcile=True: document)
+    monkeypatch.setattr(server.repository, "get_document", lambda slug: document)
+    monkeypatch.setattr(server.repository, "read", lambda slug, *keys: document)
     assert request(live, "GET", path) == (
         200,
         {"data": [], "revision": revision([]), "next_cursor": None},
@@ -2430,11 +2451,9 @@ def test_optional_repository_fields_preserve_forbidden_details(live, monkeypatch
     from tests.swarm_ledger.test_ledger_authority import authority
 
     document = {"_meta": {}}
-    reads = []
 
-    def read(slug, reconcile=True):
+    def read(slug):
         assert slug == SLUG
-        reads.append(reconcile)
         return document
 
     monkeypatch.setattr(server.repository, "get_document", read)
@@ -2456,14 +2475,13 @@ def test_optional_repository_fields_preserve_forbidden_details(live, monkeypatch
             }
         },
     )
-    assert reads == [False]
     assert document == {"_meta": {}}
 
 
 def test_optional_repository_fields_preserve_success_acknowledgment(live, monkeypatch):
     from unittest.mock import Mock
 
-    monkeypatch.setattr(server.repository, "get_document", lambda slug, reconcile=True: {"_meta": {}})
+    monkeypatch.setattr(server.repository, "get_document", lambda slug: {"_meta": {}})
     apply = Mock(return_value=({"_meta": {"rev": 3}}, []))
     monkeypatch.setattr(server.repository, "apply_ops", apply)
     monkeypatch.setattr(server, "relay_to_inbox", Mock())
@@ -2668,6 +2686,6 @@ def test_ack_succeeds_while_members_change_between_every_read_and_write(live, ca
     ):
         ledger.cmd_ack(SimpleNamespace(slug=SLUG, name="api-reader", rev=None))
     acked = json.loads(capsys.readouterr().out)["acked"]
-    members = server.repository.get_document(SLUG, reconcile=False)["_meta"]["members"]
+    members = server.repository.get_document(SLUG)["_meta"]["members"]
     assert members["api-reader"]["handled_rev"] == acked
     assert "busy-0" in members

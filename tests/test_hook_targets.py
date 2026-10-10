@@ -414,12 +414,7 @@ class TestCodexRolloutResolverHardening:
             normalizer.normalize_payload({"hook_event_name": event, "session_id": "abc"})
         assert len(calls) == 4
 
-    def test_deep_history_stays_fast(self, codex, tmp_path, monkeypatch):
-        """Resolution must not scale with total session history."""
-        import time
-
-        from hooks.targets.normalizer import codex_rollout_path
-
+    def deep_history(self, tmp_path, monkeypatch):
         monkeypatch.setenv("CODEX_HOME", str(tmp_path))
         sessions = tmp_path / "sessions"
         for month in range(1, 9):  # 8 months of history
@@ -430,7 +425,24 @@ class TestCodexRolloutResolverHardening:
                     (d / f"rollout-2026-{month:02d}-{day:02d}T00-00-{n:02d}-old{month}{day}{n}.jsonl").touch()
         sid = "019fed99-aaaa-bbbb-cccc-ddddeeeeffff"
         newest = sessions / "2026" / "08" / "28"
-        (newest / f"rollout-2026-08-28T12-00-00-{sid}.jsonl").write_text("{}\n")
+        rollout = newest / f"rollout-2026-08-28T12-00-00-{sid}.jsonl"
+        rollout.write_text("{}\n")
+        return sid, rollout
+
+    def test_deep_history_resolves_the_newest_rollout(self, codex, tmp_path, monkeypatch):
+        from hooks.targets.normalizer import codex_rollout_path
+
+        sid, rollout = self.deep_history(tmp_path, monkeypatch)
+        assert codex_rollout_path(sid) == str(rollout)
+
+    @pytest.mark.wall_clock
+    def test_deep_history_stays_fast(self, codex, tmp_path, monkeypatch):
+        """Resolution must not scale with total session history."""
+        import time
+
+        from hooks.targets.normalizer import codex_rollout_path
+
+        sid, _ = self.deep_history(tmp_path, monkeypatch)
         start = time.perf_counter()
         for _ in range(20):
             assert codex_rollout_path(sid)

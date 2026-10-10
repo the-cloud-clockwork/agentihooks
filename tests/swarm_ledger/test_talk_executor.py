@@ -17,6 +17,8 @@ sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
+from tests.swarm_ledger import legacy_page  # noqa: E402
+
 SLUG, ENG, SID = "talkexec-2026-01-01", "engineer@abcdef-0001", "sid-talk"
 BUDGET = 10
 
@@ -41,7 +43,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
     monkeypatch.setattr(core, "LEDGER_DIR", ledgers)
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
     html_path, _ = core.paths(SLUG)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     core.sync(SLUG)
     (tmp_path / "home" / ".agentihooks").mkdir(parents=True)
     env = {
@@ -104,6 +106,9 @@ def rig(tmp_path, monkeypatch, ledger_port):
 
 
 def say_budget(rig):
+    from scripts.gates.progress import Progress
+
+    Progress(rig.redis, SLUG).outcome(ENG, "pushed", 1)
     for n in range(BUDGET):
         said = rig.cli("say", f"step {n} landed")
         assert said.returncode == 0, said.stderr

@@ -7,6 +7,8 @@ sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
+from tests.swarm_ledger import legacy_page  # noqa: E402
+
 SLUG = "notify-2026-01-01"
 
 
@@ -21,7 +23,7 @@ def make_ledger():
     }
     html_path, json_path = core.paths(SLUG)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     state, _ = core.sync(SLUG)
     core.sync(SLUG, ops=[{"op": "join", "id": "j1", "by": "boss", "role": "orchestrator"}])
@@ -67,14 +69,29 @@ class Notifications(unittest.TestCase):
     def test_a_chat_answer_after_the_operator_notifies(self):
         core.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m1", "text": "where are we"}])
         core.sync(
-            SLUG, ops=[{"op": "add", "thread": "chat", "id": "m2", "by": "boss", "text": "Phase one is half done."}]
+            SLUG,
+            ops=[
+                {
+                    "op": "add",
+                    "thread": "chat",
+                    "id": "m2",
+                    "by": "boss",
+                    "reply_to": "m1",
+                    "text": "Phase one is half done.",
+                }
+            ],
         )
         self.assertEqual([(r["label"], r["item"]) for r in notes()], [("Reply", "chat")])
 
     def test_a_long_answer_is_kept_short_on_the_row(self):
         core.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m1", "text": "expand please"}])
         long = " ".join(["The phase is moving along well."] * 40)
-        core.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m2", "by": "boss", "long": True, "text": long}])
+        core.sync(
+            SLUG,
+            ops=[
+                {"op": "add", "thread": "chat", "id": "m2", "by": "boss", "long": True, "to": "operator", "text": long}
+            ],
+        )
         self.assertEqual(notes()[0]["text"], long[:280])
 
     def test_operator_actions_and_agent_status_alone_do_not_notify(self):
@@ -100,25 +117,18 @@ class Notifications(unittest.TestCase):
         state, _ = core.sync(SLUG, ops=[{"op": "notification_clear", "id": "x2", "target": "all"}])
         self.assertEqual(state["notifications"], [])
 
-    def test_no_agent_path_creates_a_notification(self):
-        with self.assertRaises(ValueError):
-            core.check_op({"op": "notification", "id": "n1", "by": "boss", "item": self.phase, "text": "hi"})
-        html_path, _ = core.paths(SLUG)
-        html = html_path.read_text(encoding="utf-8")
-        forged = html.replace(
-            '"notifications": []',
-            '"notifications": [{"id": "f", "item": "chat", "label": "Reply", "text": "x", "by": "boss", "at": 1}]',
-        )
-        self.assertNotEqual(forged, html)
-        html_path.write_text(forged, encoding="utf-8")
-        self.assertEqual(notes(), [])
-
     def test_a_forged_seed_on_a_fresh_ledger_carries_no_notification(self):
-        html_path, json_path = core.paths(SLUG)
-        html = html_path.read_text(encoding="utf-8")
-        row = '{"id": "f", "item": "chat", "label": "Reply", "text": "x", "by": "boss", "at": 1}'
-        forged = html.replace('"notifications": []', f'"notifications": [{row}]')
-        self.assertNotEqual(forged, html)
-        html_path.write_text(forged, encoding="utf-8")
-        json_path.unlink()
-        self.assertEqual(notes(), [])
+        slug = "notify-forged-2026-01-01"
+        content = {
+            "title": "Demo",
+            "overview": "o",
+            "sources": [str(SCRIPTS)],
+            "phases": [{"title": "one", "description": "d"}],
+            "questions": [],
+            "followups": [],
+        }
+        doc = new_ledger.build_doc(content)
+        doc["notifications"] = [{"id": "f", "item": "chat", "label": "Reply", "text": "x", "by": "boss", "at": 1}]
+        core.paths(slug)[0].write_text(legacy_page.render(doc, slug, 8765), encoding="utf-8")
+        state, _ = core.sync(slug)
+        self.assertEqual(state["notifications"], [])

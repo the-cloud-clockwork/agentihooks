@@ -86,14 +86,15 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
     install_index, install = _unit_step_index(lambda s: s.get("name") == "Install dependencies")
     assert uv["with"]["enable-cache"] is False
     assert uv_index < install_index
+    assert install["env"] == {"PYTHON_PATH": "${{ steps.python.outputs.python-path }}"}
     assert install["run"].strip().splitlines() == [
-        'uv venv --python "${{ steps.python.outputs.python-path }}" "$HOME/venv"',
+        'uv venv --python "$PYTHON_PATH" "$HOME/venv"',
         'uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"',
     ]
 
 
 def test_unit_restores_one_venv_per_interpreter_and_dependency_files():
-    _, cache = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/cache@"))
+    _, cache = _unit_step_index(lambda s: s.get("id") == "venv")
     _, python = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/setup-python"))
     key = cache["with"]["key"]
     assert cache["with"]["path"] == "~/venv"
@@ -107,21 +108,44 @@ def test_unit_restores_one_venv_per_interpreter_and_dependency_files():
 
 
 def test_a_restored_venv_skips_uv_and_the_install():
-    _, cache = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/cache@"))
+    _, cache = _unit_step_index(lambda s: s.get("id") == "venv")
     hit = f"steps.{cache['id']}.outputs.cache-hit != 'true'"
     for predicate in (
         lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"),
         lambda s: s.get("name") == "Install dependencies",
     ):
         _, step = _unit_step_index(predicate)
-        assert step["if"] == f"steps.lookup.outputs.skip != 'true' && {hit}"
+        assert step["if"] == hit
 
 
 def test_unit_tests_run_from_the_venv():
-    path_index, path = _unit_step_index(lambda s: "GITHUB_PATH" in s.get("run", ""))
+    path_index, path = _unit_step_index(lambda s: s.get("name") == "Use the test environment")
     run_index, _ = _unit_step_index(lambda s: s.get("name") == "Run tests")
     assert path["run"].strip() == 'echo "$HOME/venv/bin" >> "$GITHUB_PATH"'
     assert path_index < run_index
+
+
+def test_only_the_first_shard_installs_the_pinned_codex_cli_and_requires_its_live_test():
+    job = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]
+    release = job["env"]["CODEX_RELEASE"]
+    assert re.fullmatch(r"rust-v\d+\.\d+\.\d+", release)
+    only = "matrix.python-version == '3.12' && matrix.shard == 1"
+    restore_index, restore = _unit_step_index(lambda s: s.get("id") == "codex")
+    install_index, install = _unit_step_index(lambda s: s.get("name") == "Install the Codex CLI")
+    use_index, use = _unit_step_index(lambda s: s.get("name") == "Use the Codex CLI")
+    run_index, _ = _unit_step_index(lambda s: s.get("name") == "Run tests")
+    assert restore["if"] == only
+    assert restore["uses"] == "actions/cache@v4"
+    assert restore["with"] == {"path": "~/codex", "key": "codex-${{ runner.os }}-${{ env.CODEX_RELEASE }}"}
+    assert install["if"] == "steps.codex.outcome == 'success' && steps.codex.outputs.cache-hit != 'true'"
+    assert install["run"].startswith("set -o pipefail\n")
+    assert "releases/download/${CODEX_RELEASE}/codex-x86_64-unknown-linux-musl.zst" in install["run"]
+    assert use["if"] == "steps.codex.outcome == 'success'"
+    assert use["run"].strip().splitlines() == [
+        'echo "$HOME/codex" >> "$GITHUB_PATH"',
+        'echo "CODEX_CLI_REQUIRED=1" >> "$GITHUB_ENV"',
+    ]
+    assert restore_index < install_index < use_index < run_index
 
 
 def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
@@ -131,8 +155,10 @@ def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
 
 def test_unit_matrix_runs_one_shard_per_split():
     command = _pytest_command()
-    split = r"--shard \$\{\{ matrix\.shard \}\}/\$\{\{ matrix\.python-version == '3\.12' && (\d+) \|\| (\d+) \}\}"
-    coverage_shards, plain_shards = (int(count) for count in re.search(split, command).groups())
+    assert '--shard "$SHARD"' in command
+    _, step = _unit_step_index(lambda s: s.get("name") == "Run tests")
+    split = r"^\$\{\{ matrix\.shard \}\}/\$\{\{ matrix\.python-version == '3\.12' && (\d+) \|\| (\d+) \}\}$"
+    coverage_shards, plain_shards = (int(count) for count in re.search(split, step["env"]["SHARD"]).groups())
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     matrix = workflow["jobs"]["unit"]["strategy"]["matrix"]
     excluded = {(entry["python-version"], entry["shard"]) for entry in matrix.get("exclude", [])}
@@ -143,7 +169,7 @@ def test_unit_matrix_runs_one_shard_per_split():
         )
     assert coverage_shards > plain_shards > 1
     merge = next(step for step in workflow["jobs"]["sonar"]["steps"] if step.get("name") == "Merge shard coverage")
-    assert merge["run"].split()[-1] == str(coverage_shards)
+    assert re.search(r"combine\.sh --downloaded (\d+) ", merge["run"]).group(1) == str(coverage_shards)
     assert "--splits" not in command
 
 
@@ -151,6 +177,17 @@ def test_a_hung_unit_shard_fails_near_twice_the_slowest_shard():
     slowest_shard_minutes = 186 / 60
     timeout = _workflow()["jobs"]["unit"]["timeout-minutes"]
     assert 2 * slowest_shard_minutes <= timeout <= 3 * slowest_shard_minutes
+
+
+def test_a_hung_unit_test_dumps_every_thread_stack_within_a_minute():
+    command = _pytest_command()
+    slowest_test = max(
+        max(json.loads((_ROOT / name).read_text()).values()) for name in (".test_durations", ".test_durations-3.12")
+    )
+    timeout = int(re.search(r"-o faulthandler_timeout=(\d+)", command).group(1))
+    assert slowest_test < timeout <= 60
+    assert "no:faulthandler" not in command
+    assert "faulthandler_exit_on_timeout" not in command
 
 
 def test_tests_run_on_pull_requests_into_dev_and_main():
@@ -274,9 +311,9 @@ def test_lint_and_equivalence_browser_setup_uses_the_working_mirror():
     install = _browser_install(lint)
     if "run" in install:
         mirror = next(step for step in lint if step.get("name") == "Use the Ubuntu archive for browser dependencies")
-        assert mirror["if"] == "steps.lookup.outputs.skip != 'true'"
+        assert "if" not in mirror
     else:
-        assert install["if"] == "steps.lookup.outputs.skip != 'true' && steps.artifacts.outputs.browser == 'true'"
+        assert install["if"] == "${{ !cancelled() && steps.artifacts.outputs.browser == 'true' }}"
 
 
 def test_equivalence_runs_storage_then_page_replays_each_group_at_once():
@@ -306,150 +343,21 @@ def _workflow() -> dict:
     return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
 
 
-def _lookup_step(job: str = "unit") -> dict:
-    return _workflow()["jobs"][job]["steps"][0]
-
-
-def _artifact(expired=False, fork=False) -> dict:
-    return {"expired": expired, "workflow_run": {"repository_id": 1, "head_repository_id": 2 if fork else 1}}
-
-
-def _run_gate(tmp_path, listing: dict | None) -> str:
-    step = _lookup_step()
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    fixture = tmp_path / "listing.json"
-    fixture.write_text(json.dumps(listing))
-    fake_gh = bin_dir / "gh"
-    fake_gh.write_text(
-        "#!/usr/bin/env bash\n"
-        f'[ "{listing is None}" = True ] && exit 1\n'
-        'while [ $# -gt 0 ]; do [ "$1" = --jq ] && f="$2"; shift; done\n'
-        f'jq -r "$f" "{fixture}"\n'
-    )
-    fake_gh.chmod(0o755)
-    out = tmp_path / "out"
-    out.touch()
-    env = {
-        "PATH": f"{bin_dir}:{os.environ['PATH']}",
-        "GITHUB_OUTPUT": str(out),
-        "GITHUB_REPOSITORY": "o/r",
-        **{k: "abc123" for k in step.get("env", {})},
-    }
-    subprocess.run(["bash", "-e", "-c", step["run"]], env=env, check=True)
-    return out.read_text()
-
-
-@pytest.mark.parametrize(
-    ("listing", "skip"),
-    [
-        ({"artifacts": [_artifact()]}, "true"),
-        ({"artifacts": [_artifact(expired=True)]}, "false"),
-        ({"artifacts": [_artifact(fork=True)]}, "false"),
-        ({"artifacts": []}, "false"),
-        (None, "false"),
-    ],
-)
-def test_gate_skips_only_for_a_live_same_repo_pass_of_the_tree(tmp_path, listing, skip):
-    assert _run_gate(tmp_path, listing) == f"skip={skip}\n"
-
-
-def test_no_separate_gate_job_delays_the_shards():
+def test_shards_wait_only_on_the_durations_lookup():
     jobs = _workflow()["jobs"]
     assert "already-tested" not in jobs
-    assert "needs" not in jobs["unit"]
-    assert "needs" not in jobs["lint"]
+    assert jobs["split"]["needs"] in (["durations"], ["durations", "reuse"])
+    assert jobs["unit"]["needs"] in (["split"], ["split", "reuse"])
+    assert jobs["lint"].get("needs") in (None, ["reuse"])
 
 
-@pytest.mark.parametrize("job", ["unit", "lint"])
-def test_each_job_looks_up_the_pushed_tree_first(job):
-    spec = _workflow()["jobs"][job]
-    assert spec["permissions"] == {"contents": "read", "actions": "read"}
-    step = _lookup_step(job)
-    assert step == _lookup_step("unit")
-    assert step["id"] == "lookup"
-    assert step["if"] == "github.event_name == 'push'"
-    assert step["env"]["TREE"] == "${{ github.event.head_commit.tree_id }}"
-    assert "name=tests-passed-$TREE" in step["run"]
-
-
-@pytest.mark.parametrize("job", ["unit", "lint"])
-def test_every_later_step_skips_when_the_tree_already_passed(job):
-    later = _workflow()["jobs"][job]["steps"][1:]
-    assert later
-    assert all(s.get("if", "").startswith("steps.lookup.outputs.skip != 'true'") for s in later), later
-
-
-def test_pull_requests_record_the_tested_tree_after_unit_and_lint_pass():
-    job = _workflow()["jobs"]["record-pass"]
-    assert job["needs"] == ["unit", "lint", "shard-check", "test-count"]
-    assert job["if"] == (
-        "${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group')"
-        " && needs.unit.result == 'success' && needs.lint.result == 'success'"
-        " && needs.shard-check.result == 'success' && needs.test-count.result == 'success' }}"
-    )
-    tree, upload = job["steps"]
-    assert tree["env"]["GH_TOKEN"] == "${{ github.token }}"
-    assert "git/commits/$GITHUB_SHA" in tree["run"]
-    assert upload["uses"].startswith("actions/upload-artifact@")
-    assert upload["with"]["name"] == "tests-passed-${{ steps.tree.outputs.sha }}"
-
-
-def _fake_github(tmp_path, tested_tree, artifact):
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    store = tmp_path / "artifacts"
-    store.mkdir()
-    listing = tmp_path / "listing.json"
-    listing.write_text(json.dumps({"artifacts": [artifact]}))
-    commit = tmp_path / "commit.json"
-    commit.write_text(json.dumps({"sha": "merge-sha", "tree": {"sha": tested_tree}}))
-    (bin_dir / "gh").write_text(
-        "#!/usr/bin/env bash\n"
-        'path="$2"; while [ $# -gt 0 ]; do [ "$1" = --jq ] && f="$2"; shift; done\n'
-        'case "$path" in\n'
-        f'  */git/commits/merge-sha) jq -r "$f" "{commit}" ;;\n'
-        f'  *artifacts\\?name=*) [ -e "{store}/${{path#*name=}}" ] || exit 1; jq -r "$f" "{listing}" ;;\n'
-        "  *) exit 1 ;;\n"
-        "esac\n"
-    )
-    (bin_dir / "gh").chmod(0o755)
-    return {"PATH": f"{bin_dir}:{os.environ['PATH']}", "GITHUB_REPOSITORY": "o/r", "STORE": str(store)}
-
-
-def _record_pass(tmp_path, env):
-    tree, upload = _workflow()["jobs"]["record-pass"]["steps"]
-    out = tmp_path / "record-out"
-    subprocess.run(
-        ["bash", "-e", "-c", tree["run"]],
-        env={**env, "GITHUB_SHA": "merge-sha", "GITHUB_OUTPUT": str(out)},
-        cwd=tmp_path,
-        check=True,
-    )
-    sha = dict(line.split("=", 1) for line in out.read_text().split())["sha"]
-    name = upload["with"]["name"].replace("${{ steps.tree.outputs.sha }}", sha)
-    (Path(env["STORE"]) / name).touch()
-
-
-def _dev_push_lookup(tmp_path, env, pushed_tree):
-    out = tmp_path / "lookup-out"
-    subprocess.run(
-        ["bash", "-e", "-c", _lookup_step()["run"]],
-        env={**env, "TREE": pushed_tree, "GH_TOKEN": "t", "GITHUB_OUTPUT": str(out)},
-        check=True,
-    )
-    return out.read_text()
-
-
-@pytest.mark.parametrize(
-    ("pushed_tree", "artifact", "skip"),
-    [("a1b2c3", _artifact(), "true"), ("d4e5f6", _artifact(), "false"), ("a1b2c3", _artifact(fork=True), "false")],
-    ids=["tree-the-pull-request-tested", "tree-after-dev-moved", "tree-a-fork-tested"],
-)
-def test_dev_push_reuses_only_the_tree_its_pull_request_recorded(tmp_path, pushed_tree, artifact, skip):
-    env = _fake_github(tmp_path, "a1b2c3", artifact)
-    _record_pass(tmp_path, env)
-    assert _dev_push_lookup(tmp_path, env, pushed_tree) == f"skip={skip}\n"
+def test_unit_shards_check_out_full_history_without_old_file_contents():
+    _, checkout = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/checkout"))
+    assert {key: value for key, value in checkout["with"].items() if key != "ref"} == {
+        "fetch-depth": 0,
+        "filter": "blob:none",
+    }
+    assert checkout["with"].get("ref") in (None, "${{ github.sha }}")
 
 
 def test_unit_pins_an_exact_uv_version():
@@ -493,55 +401,112 @@ def test_stored_durations_allow_new_tests_concentrated_in_one_shard(tmp_path, mo
             test_stored_durations_cover_the_collected_suite()
 
 
-def test_dev_push_refreshes_stored_durations_after_tests_pass():
+def test_dev_push_refreshes_stored_durations_unless_the_run_was_cancelled():
     job = _workflow()["jobs"]["refresh-durations"]
-    assert job["needs"] == ["unit", "lint"]
-    assert job["if"] == "github.event_name == 'push'"
-    assert job["permissions"] == {"contents": "read", "actions": "read"}
+    assert job["needs"] == ["unit", "lint", "shard-check"]
+    assert job["if"] == "${{ !cancelled() && github.event_name == 'push' }}"
+    assert job["permissions"] == {"contents": "read"}
     steps = job["steps"]
     checkout = next(step for step in steps if step.get("uses") == "actions/checkout@v4")
     assert checkout["with"]["ref"] == "${{ github.sha }}"
-    command = next(step["run"] for step in steps if step.get("name") == "Refresh measured durations")
-    assert 'python -m tests.refresh_durations --ci-run "${source_run:-$GITHUB_RUN_ID}" --ci 5' in command
-    assert "tests-passed-$TREE" in command
-    assert "git commit" not in command
-    assert "git push" not in command
+    restore = next(step for step in steps if step.get("name") == "Restore recent shard durations")
+    download = next(step for step in steps if step.get("name") == "Download this run's shard durations")
+    refresh = next(step for step in steps if step.get("name") == "Refresh measured durations")
+    save = next(step for step in steps if step.get("name") == "Save recent shard durations")
+    assert steps.index(restore) < steps.index(download) < steps.index(refresh) < steps.index(save)
+    assert restore["uses"].startswith("actions/cache/restore@")
+    assert restore["with"] == {
+        "path": "~/durations-samples",
+        "key": "durations-samples-${{ github.sha }}",
+        "restore-keys": "durations-samples-",
+    }
+    assert download["uses"].startswith("actions/download-artifact@")
+    assert download["with"] == {"pattern": "durations-3.*", "path": "~/durations-samples/${{ github.run_id }}"}
+    assert (
+        refresh["run"]
+        == 'python -m tests.refresh_durations --samples ~/durations-samples --ci-run "$GITHUB_RUN_ID" --ci 5\ntest -s .test_durations\n'
+    )
+    assert "env" not in refresh
+    assert save["uses"].startswith("actions/cache/save@")
+    assert save["with"] == {"path": "~/durations-samples", "key": "durations-samples-${{ github.sha }}"}
 
 
-@pytest.mark.parametrize("source", ["42", ""])
-def test_duration_refresh_never_replays_old_measurements_onto_new_dev(tmp_path, source):
-    command = next(
-        step["run"]
-        for step in _workflow()["jobs"]["refresh-durations"]["steps"]
-        if step.get("name") == "Refresh measured durations"
-    )
-    tools = tmp_path / "bin"
-    tools.mkdir()
-    for name, script in {
-        "gh": '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%s\\n" "$SOURCE_RUN"\n',
-        "python": '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%s\\n" "$*" >> calls\necho measured > .test_durations\n',
-    }.items():
-        path = tools / name
-        path.write_text(script)
-        path.chmod(0o755)
-    result = subprocess.run(
-        ["bash", "-euo", "pipefail", "-c", command],
-        cwd=tmp_path,
-        env={
-            **os.environ,
-            "PATH": f"{tools}:{os.environ['PATH']}",
-            "SOURCE_RUN": source,
-            "GITHUB_RUN_ID": "43",
-            "GITHUB_REPOSITORY": "owner/repo",
-            "TREE": "tree",
-        },
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, result.stderr
-    assert (tmp_path / "calls").read_text() == f"-m tests.refresh_durations --ci-run {source or '43'} --ci 5\n"
-    assert "git push" not in command
-    assert (tmp_path / ".test_durations").read_text() == "measured\n"
+def _sample(folder: Path, run: str, seconds: float) -> None:
+    for version in ("3.11", "3.12"):
+        path = folder / run / f"durations-{version}-1"
+        path.mkdir(parents=True)
+        (path / "durations.json").write_text(json.dumps({"t.py::a@g": seconds}))
+
+
+def test_samples_refresh_keeps_the_newest_runs_and_never_calls_github(tmp_path, monkeypatch):
+    samples = tmp_path / "samples"
+    for run, seconds in [("8", 9.0), ("9", 9.0), ("10", 1.0), ("11", 2.0), ("12", 3.0)]:
+        _sample(samples, run, seconds)
+
+    def offline(*args):
+        raise AssertionError("the samples refresh reached GitHub")
+
+    monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
+    monkeypatch.setattr(refresh_durations, "ci_run_ids", offline)
+    monkeypatch.setattr(refresh_durations, "ci_download", offline)
+    refresh_durations.main(["--samples", str(samples), "--ci-run", "12", "--ci", "3"])
+    assert sorted(path.name for path in samples.iterdir()) == ["10", "11", "12"]
+    assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 2.0}
+
+
+def test_samples_refresh_keeps_a_rerun_older_than_the_newest_runs(tmp_path, monkeypatch):
+    samples = tmp_path / "samples"
+    for run, seconds in [("5", 4.0), ("10", 1.0), ("11", 2.0), ("12", 3.0)]:
+        _sample(samples, run, seconds)
+    monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
+    refresh_durations.main(["--samples", str(samples), "--ci-run", "5", "--ci", "3"])
+    assert sorted(path.name for path in samples.iterdir()) == ["11", "12", "5"]
+    assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 3.0}
+
+
+def test_samples_under_the_run_limit_are_all_kept(tmp_path):
+    samples = tmp_path / "samples"
+    for run in ("3", "20", "100"):
+        (samples / run).mkdir(parents=True)
+    refresh_durations.keep_newest(samples, 5, "100")
+    assert sorted(path.name for path in samples.iterdir()) == ["100", "20", "3"]
+
+
+def test_a_foreign_folder_among_the_samples_never_fails_the_pruning(tmp_path):
+    samples = tmp_path / "samples"
+    for run in ("notes", "1", "2", "3"):
+        (samples / run).mkdir(parents=True)
+    refresh_durations.keep_newest(samples, 2, "3")
+    assert sorted(path.name for path in samples.iterdir()) == ["2", "3", "notes"]
+
+
+def test_samples_refresh_refuses_a_run_that_kept_no_durations(tmp_path, monkeypatch):
+    samples = tmp_path / "samples"
+    _sample(samples, "11", 1.0)
+    monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
+    with pytest.raises(SystemExit, match="run 12 kept no durations"):
+        refresh_durations.main(["--samples", str(samples), "--ci-run", "12", "--ci", "5"])
+
+
+def test_samples_refresh_keeps_earlier_durations_for_the_tests_of_a_failed_shard(tmp_path, monkeypatch):
+    samples = tmp_path / "samples"
+    for version in ("3.11", "3.12"):
+        for run, shard, durations in [
+            ("11", 1, {"t.py::a@g": 1.0}),
+            ("11", 2, {"t.py::b@g": 4.0, "t.py::gone@g": 5.0}),
+            ("12", 1, {"t.py::a@g": 3.0}),
+        ]:
+            path = samples / run / f"durations-{version}-{shard}"
+            path.mkdir(parents=True)
+            (path / "durations.json").write_text(json.dumps(durations))
+    monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a", "t.py::b"])
+    refresh_durations.main(["--samples", str(samples), "--ci-run", "12", "--ci", "5"])
+    for name in (".test_durations", ".test_durations-3.11", ".test_durations-3.12"):
+        assert json.loads((tmp_path / name).read_text()) == {"t.py::a": 2.0, "t.py::b": 4.0}
 
 
 def test_refreshed_durations_take_the_median_so_one_slow_run_does_not_move_a_test():
@@ -559,10 +524,23 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
     upload_index, upload = _unit_step_index(lambda s: s.get("name") == "Upload durations")
     run_index, _ = _unit_step_index(lambda s: s.get("name") == "Run tests")
     assert upload_index == run_index + 1
-    assert upload["if"] == "steps.lookup.outputs.skip != 'true'"
+    assert "if" not in upload
     assert upload["uses"].startswith("actions/upload-artifact@")
     assert upload["with"]["name"] == "durations-${{ matrix.python-version }}-${{ matrix.shard }}"
-    assert upload["with"]["path"] == "durations.json"
+    assert upload["with"]["path"].split() == ["durations.json", "durations.sha256"]
+
+
+def test_every_shard_records_the_hash_of_the_durations_it_splits_on():
+    jobs = _workflow()["jobs"]
+    adopt = next(s for s in jobs["split"]["steps"] if s.get("name") == "Adopt latest dev durations")
+    upload = next(s for s in jobs["split"]["steps"] if s.get("name") == "Upload the chosen durations")
+    assert " --hash durations.sha256 " in adopt["run"]
+    assert upload["with"]["path"].split() == [".test_durations", "durations.sha256"]
+    assert upload["with"]["include-hidden-files"] is True
+    _, download = _unit_step_index(lambda s: s.get("name") == "Download the durations this run splits on")
+    assert download["with"] == {"name": upload["with"]["name"]}
+    _, store = _unit_step_index(lambda s: s.get("name") == "Upload durations")
+    assert "durations.sha256" in store["with"]["path"].split()
 
 
 def test_ci_samples_are_one_per_shard_file_without_the_xdist_group_suffix(tmp_path):
@@ -734,7 +712,7 @@ def test_credential_parameters_have_readable_timing_identifiers():
 def test_mutation_job_runs_independently_and_keeps_its_evidence():
     spec = _mutation_workflow()
     job = spec["jobs"]["mutation"]
-    assert "needs" not in job
+    assert job["needs"] == ["mutation-plan", "mutation-stats"]
     assert job["timeout-minutes"] == 20
     steps = job["steps"]
     checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout"))
@@ -742,7 +720,73 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
     assert checkout["with"]["ref"] == "${{ github.event.pull_request.head.sha }}"
     run = next(step for step in steps if step.get("name") == "Mutate changed Python files")
     assert run["env"]["BASE"] == "${{ github.event.pull_request.base.sha }}"
-    assert run["run"] == 'python -m scripts.ci_mutation --base "$BASE" --budget 1080'
+    assert (
+        run["run"]
+        == 'python -m scripts.ci_mutation --base "$BASE" --budget 1080 --shard "$SHARD" --shards "$SHARDS"'
+        + " --stats .mutation-stats"
+    )
     artifact = next(step for step in steps if step.get("uses", "").startswith("actions/upload-artifact"))
     assert artifact["if"] == "always()"
     assert artifact["with"]["include-hidden-files"] is True
+    assert artifact["with"]["name"] == "mutation-report-${{ matrix.shard }}"
+
+
+def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
+    jobs = _mutation_workflow()["jobs"]
+    plan, mutation = jobs["mutation-plan"], jobs["mutation"]
+    assert "needs" not in plan
+    assert plan["if"] == mutation["if"]
+    assert plan["outputs"]["shards"] == "${{ steps.plan.outputs.shards }}"
+    step = next(step for step in plan["steps"] if step.get("id") == "plan")
+    assert step["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE"'
+    assert step["env"]["BASE"] == "${{ github.event.pull_request.base.sha || inputs.base }}"
+    checkout = next(step for step in plan["steps"] if step.get("uses", "").startswith("actions/checkout"))
+    assert checkout["with"] == {"fetch-depth": 0, "ref": "${{ github.event.pull_request.head.sha }}"}
+    assert mutation["strategy"] == {
+        "fail-fast": False,
+        "matrix": {"shard": "${{ fromJSON(needs.mutation-plan.outputs.shards) }}"},
+    }
+    for name in ("Mutate changed Python files", "Mutate dispatched Python files"):
+        run = next(step for step in mutation["steps"] if step.get("name") == name)
+        assert run["env"]["SHARD"] == "${{ matrix.shard }}"
+        assert run["env"]["SHARDS"] == "${{ strategy.job-total }}"
+        assert run["run"].endswith('--budget 1080 --shard "$SHARD" --shards "$SHARDS" --stats .mutation-stats')
+
+
+def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
+    jobs = _mutation_workflow()["jobs"]
+    plan, stats, mutation = jobs["mutation-plan"], jobs["mutation-stats"], jobs["mutation"]
+    assert plan["outputs"]["stats_parts"] == "${{ steps.plan.outputs.stats_parts }}"
+    assert stats["needs"] == "mutation-plan"
+    assert stats["if"] == mutation["if"]
+    assert stats["strategy"] == {
+        "fail-fast": False,
+        "matrix": {"part": "${{ fromJSON(needs.mutation-plan.outputs.stats_parts) }}"},
+    }
+    setup = [step for step in mutation["steps"] if not str(step.get("name", "")).startswith(("Mutate", "Upload"))]
+    setup = [step for step in setup if step.get("name") != "Download the shared mutation stats"]
+    assert stats["steps"][: len(setup)] == setup
+    collect = stats["steps"][len(setup)]
+    assert collect["env"]["BASE"] == "${{ github.event.pull_request.base.sha || inputs.base }}"
+    assert collect["env"]["PART"] == "${{ matrix.part }}"
+    assert collect["env"]["PARTS"] == "${{ strategy.job-total }}"
+    assert collect["run"] == (
+        'mkdir -p .mutation-stats && touch ".mutation-stats/collected-$PART" && python -m scripts.ci_mutation'
+        ' --base "$BASE" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"'
+    )
+    upload = stats["steps"][len(setup) + 1]
+    assert upload["uses"] == "actions/upload-artifact@v4"
+    assert upload["with"]["name"] == "mutation-stats-${{ matrix.part }}"
+    assert upload["with"]["path"] == ".mutation-stats/"
+    assert upload["with"]["include-hidden-files"] is True
+    assert upload["with"]["if-no-files-found"] == "error"
+    assert upload["with"]["overwrite"] is True
+    evidence = stats["steps"][len(setup) + 2]
+    assert evidence["if"] == "failure()"
+    assert evidence["with"]["name"] == "mutation-evidence-stats-${{ matrix.part }}"
+    assert evidence["with"]["overwrite"] is True
+    names = [step.get("name") for step in mutation["steps"]]
+    download = mutation["steps"][names.index("Download the shared mutation stats")]
+    assert names.index("Download the shared mutation stats") < names.index("Mutate changed Python files")
+    assert download["uses"] == "actions/download-artifact@v4"
+    assert download["with"] == {"pattern": "mutation-stats-*", "path": ".mutation-stats", "merge-multiple": True}

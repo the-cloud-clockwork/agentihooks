@@ -1,0 +1,9 @@
+{
+  "enabledPlugins": {"fixture@market": true},
+  "env": {"FIXTURE_PROFILE": "fixture-workstation"},
+  "hooks": {
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "/home/operator/dev/tcc-ecosystem/.venv/bin/python -m hooks"}]}
+    ]
+  }
+}

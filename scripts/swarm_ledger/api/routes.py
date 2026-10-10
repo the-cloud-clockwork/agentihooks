@@ -4,6 +4,8 @@ import re
 from types import ModuleType
 from urllib.parse import parse_qs, urlsplit
 
+from scripts.hive.auth import HiveError
+
 from . import resources, schemas
 from .errors import APIError
 
@@ -34,12 +36,16 @@ def dispatch(handler: object, server: ModuleType) -> dict | None:
     slug, path = parts[1], "/".join(parts[2:]) or "metadata"
     if not server.core.SLUG_RE.fullmatch(slug) or not handler.exists(slug):
         raise APIError(404, "ledger_missing", "No such ledger")
+    if path == "agent-token" and handler.command == "POST":
+        return agent_token(handler, server, slug)
     principal = server.authority.principal(
-        server.core.read_token(server.repository.read_page(slug)),
+        server.repository.token(slug),
         slug,
         handler.headers.get("X-Ledger-Token"),
         handler.headers.get("X-Ledger-Agent"),
     )
+    if principal is None and server.authority.controller(handler.headers.get("X-Controller-Credential")):
+        principal = ""
     if principal is None:
         raise APIError(403, "forbidden", "Missing or wrong ledger credential")
     if handler.command == "GET":
@@ -50,8 +56,33 @@ def dispatch(handler: object, server: ModuleType) -> dict | None:
             return resources.swarm_read(server.swarm_status(slug), path, query)
         if WORKSPACE_RE.fullmatch(path):
             return workspace(server, slug, path.split("/")[1])
-        return resources.read(server.repository.get_document(slug), path, query)
+        return ledger_read(server, slug, path, query)
     return ledger_operation(handler, server, slug, path, principal)
+
+
+def ledger_read(server: ModuleType, slug: str, path: str, query: dict) -> dict:
+    parts = path.split("/")
+    if parts[0] == "hierarchy":
+        return resources.hierarchy_read(server.repository, slug, path, query)
+    if parts[0] in resources.COLLECTIONS and len(parts) in (2, 3):
+        return resources.read(server.repository.read(slug, "/".join(parts[:2])), path, query)
+    return resources.read(server.repository.get_document(slug), path, query)
+
+
+def agent_token(handler: object, server: ModuleType, slug: str) -> dict:
+    agent = handler.headers.get("X-Ledger-Agent")
+    if not agent:
+        raise APIError(403, "forbidden", "An agent token names its agent in X-Ledger-Agent")
+    member = server.authority.hive_member(handler.headers.get("X-Hive-Credential"))
+    if member is None:
+        raise APIError(403, "forbidden", "Missing or wrong hive credential")
+    if not server.authority.hive_agent(member, slug, agent):
+        raise APIError(403, "forbidden", "Agent is not placed on this member's hive")
+    try:
+        token = server.authority.hive_agent_token(member, slug, agent)
+    except HiveError as exc:
+        raise APIError(403, "forbidden", str(exc)) from exc
+    return {"data": {"agent": agent, "token": token}}
 
 
 def events(handler: object, server: ModuleType, slug: str) -> None:
@@ -72,8 +103,10 @@ def workspace(server: ModuleType, slug: str, task_id: str) -> dict:
 
 
 def global_resource(handler: object, server: ModuleType, parts: list) -> dict:
-    from . import admin
+    from . import admin, routing
 
+    if parts == ["routing", "settings"]:
+        return routing.settings(handler, server, body)
     if parts == ["layout"]:
         return admin.layout(handler, server, None if handler.command == "GET" else body(handler, server))
     if handler.command == "GET" and parts[0] in ("ledgers", "bin"):

@@ -4,6 +4,7 @@ import pytest
 
 from scripts.swarm_ledger import ledger, ledger_phase_cli, ledger_phases, new_ledger
 from scripts.swarm_ledger import ledger_core as core
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "plan-phases-proof"
 
@@ -16,7 +17,7 @@ def phase_ledger_dir(ledger_dir, monkeypatch):
 def make_ledger():
     content = {"title": "Demo", "phases": [{"title": "First"}]}
     html, state = core.paths(SLUG)
-    html.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765))
+    html.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765))
     state.unlink(missing_ok=True)
     return core.sync(SLUG)[0]
 
@@ -74,6 +75,20 @@ def test_a_plan_phase_is_appended_auto_unless_it_names_manual_and_only_manual_wa
         ("master", "added", "phases/p2", "Second"),
         ("master", "added", "phases/p3", "Third"),
     ]
+
+
+def test_an_appended_phase_records_its_author_for_task_adds():
+    make_ledger()
+    op = {
+        "op": "phase_append",
+        "id": "append-by",
+        "by": "planner@abcdef-0001",
+        "phases": [{"phase": "p2", "title": "x"}],
+    }
+    state, rejected = core.sync(SLUG, ops=[op])
+    assert rejected == []
+    added = next(p for p in state["phases"] if p["id"] == "p2")
+    assert added["added_by"] == "planner@abcdef-0001"
 
 
 def test_a_taken_phase_id_refuses_the_whole_plan_and_changes_nothing():

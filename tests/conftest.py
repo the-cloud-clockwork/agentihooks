@@ -13,8 +13,13 @@ from unittest.mock import patch
 
 import pytest
 
+for _redis_name in list(os.environ):
+    if "REDIS" in _redis_name.upper():
+        os.environ.pop(_redis_name)
+
 from tests import installer_isolation, ledger_guard, redis_key_guard, swarm_v2_isolation
 from tests.shards import (
+    FIRST_SHARD_FILES,
     assign_files,
     assign_nodes,
     discover_test_files,
@@ -80,7 +85,9 @@ def _shard_files(config) -> frozenset[str]:
     if SHARD_FILES not in config.stash:
         index, shards = (int(part) for part in config.getoption("shard").split("/"))
         durations = json.loads((config.rootpath / ".test_durations").read_text())
-        files = discover_test_files(config.rootpath)
+        discovered = discover_test_files(config.rootpath)
+        pinned = FIRST_SHARD_FILES.intersection(discovered)
+        files = [path for path in discovered if path not in pinned]
         workers = (
             getattr(config, "workerinput", {}).get("workercount")
             or getattr(getattr(config, "option", None), "numprocesses", None)
@@ -96,11 +103,12 @@ def _shard_files(config) -> frozenset[str]:
             for node, shard in config.stash[NODE_SHARDS].items():
                 owners.setdefault(node.split("::", 1)[0], set()).add(shard)
             config.stash[FILE_SHARDS] = {path: sorted(shards) for path, shards in owners.items()}
+            config.stash[FILE_SHARDS].update({path: [0] for path in pinned})
             known = {node.split("::", 1)[0] for node in measured}
             files = {node.split("::", 1)[0] for node in parts[index - 1]} | (set(files) - known)
         else:
             files = assign_files(durations, files, shards, source_sizes(config.rootpath, files))[index - 1]
-        config.stash[SHARD_FILES] = frozenset(files)
+        config.stash[SHARD_FILES] = frozenset(files) | (pinned if index == 1 else frozenset())
     return config.stash[SHARD_FILES]
 
 
@@ -424,12 +432,14 @@ def _task_grouping_offline(monkeypatch):
 @pytest.fixture(autouse=True)
 def _ledger_duplicates_offline(monkeypatch):
     from hooks.classifier import ClassifierUnavailable
-    from scripts.swarm_ledger import ledger_duplicates
+    from scripts.swarm_ledger import ledger_duplicates, ledger_task_duplicates
 
     def unavailable(*args, **kwargs):
         raise ClassifierUnavailable("classifier disabled in unit tests")
 
     monkeypatch.setattr(ledger_duplicates, "decide", unavailable)
+    child = (sys.executable, "-m", "tests.swarm_ledger.duplicate_child", '[[], "unavailable", 0]')
+    monkeypatch.setattr(ledger_task_duplicates, "CHILD", child)
 
 
 @pytest.fixture
@@ -468,3 +478,18 @@ def sample_tool_use_event():
         "tool_name": "Write",
         "tool_input": {"file_path": "/tmp/test.txt", "content": "hello"},
     }
+
+
+@pytest.fixture(autouse=True)
+def _package_conditions_offline(tmp_path, monkeypatch):
+    from hooks.context import conditions
+
+    real_layers = conditions.layer_dirs
+
+    def isolated_layers(state, cwd=None):
+        layers, probed = real_layers(state, cwd)
+        return [
+            (source, tmp_path / "package-conditions" if source == "package" else path) for source, path in layers
+        ], probed
+
+    monkeypatch.setattr(conditions, "layer_dirs", isolated_layers)

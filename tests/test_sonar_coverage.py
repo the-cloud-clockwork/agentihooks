@@ -1,9 +1,11 @@
 import importlib.util
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import threading
+import time
 import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -21,30 +23,22 @@ def test_sonar_uses_all_shards_without_running_tests_again():
     workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
     jobs = workflow["jobs"]
     scan = jobs["sonar"]
-    assert "needs" not in scan
+    assert scan["needs"] == ["unit"]
     merge = next(step for step in scan["steps"] if step.get("name") == "Merge shard coverage")
     assert "pytest" not in merge["run"]
     assert "combine.sh" in merge["run"]
-    assert merge["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert "env" not in merge
     assert "sonar" in jobs["gate-required"]["needs"]
     assert not (ROOT / ".github/workflows/sonar-scan.yml").exists()
 
 
-def test_sonar_setup_overlaps_the_shards_and_only_the_analysis_waits_for_coverage():
+def test_sonar_sets_up_before_merging_coverage():
     steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["sonar"]["steps"]
     names = [step.get("name") or step.get("uses") for step in steps]
     merge = names.index("Merge shard coverage")
-    for setup in (
-        "actions/checkout@v4",
-        "actions/setup-python@v5",
-        "Install coverage",
-        "Start Cloudflare Access proxy",
-    ):
+    for setup in ("actions/checkout@v4", "actions/setup-python@v5", "Install coverage"):
         assert names.index(setup) < merge
-    assert names.index("Restore Sonar downloads") < merge < names.index("SonarQube Scan")
-    combine = (ROOT / ".github/coverage/combine.sh").read_text()
-    assert "collect.py" in combine
-    assert "gh run download" not in combine
+    assert merge < names.index("Wait for the coverage merge") < names.index("SonarQube Scan")
 
 
 def test_coverage_options_measure_hooks_and_scripts_on_one_interpreter():
@@ -79,40 +73,16 @@ def test_missing_shard_coverage_is_red(tmp_path):
     assert "Missing coverage for shard 4" in result.stdout
 
 
-def _stub_combine(tmp_path, collect_body):
-    folder = tmp_path / ".github/coverage"
-    folder.mkdir(parents=True)
-    for name in ("combine.sh", "coverage.ini"):
-        (folder / name).write_text((ROOT / ".github/coverage" / name).read_text())
-    (folder / "collect.py").write_text(f"import sys\nprint('collect', *sys.argv[1:])\n{collect_body}\n")
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    (bin_dir / "gh").write_text("#!/usr/bin/env bash\necho 555\n")
-    (bin_dir / "gh").chmod(0o755)
-    (bin_dir / "python").symlink_to(sys.executable)
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    subprocess.run(
-        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "t"],
-        cwd=tmp_path,
-        check=True,
-    )
-    return folder / "combine.sh", dict(
-        os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", GITHUB_REPOSITORY="owner/repo"
-    )
-
-
-@pytest.mark.parametrize(("event", "source"), [("push", "555"), ("pull_request", "42")])
-def test_combine_collects_from_the_passed_run_on_push_and_this_run_otherwise(tmp_path, event, source):
-    script, env = _stub_combine(tmp_path, "sys.exit(3)")
+@pytest.mark.parametrize("args", [["42", "8"], []], ids=["run-id", "no-arguments"])
+def test_combine_refuses_anything_but_downloaded_coverage(tmp_path, args):
     result = subprocess.run(
-        ["bash", str(script), "42", "8"],
+        ["bash", str(ROOT / ".github/coverage/combine.sh"), *args],
         cwd=tmp_path,
-        env=dict(env, GITHUB_EVENT_NAME=event),
         capture_output=True,
         text=True,
     )
-    assert f"collect {source} 8 .coverage-shards" in result.stdout
-    assert result.returncode != 0
+    assert result.returncode == 2
+    assert "::error::Usage: combine.sh --downloaded <shards>" in result.stdout
     assert not (tmp_path / "coverage.xml").exists()
 
 
@@ -135,6 +105,11 @@ for shard in range(1, 5):
         runpy.run_path(f'{package}/part_{shard}.py')
     cov.stop()
     cov.save()
+(folder / 'js-coverage').mkdir()
+(folder / 'js-coverage' / 'sources').mkdir(parents=True)
+(folder / 'js-coverage' / 'sources' / 's.js').write_text('void 0;\\n')
+for kind in ('node', 'browser'):
+    (folder / 'js-coverage' / f'capture-{kind}-1.json').write_text('{"result": [{"source": "s", "functions": [{"ranges": [{"startOffset": 0, "endOffset": 7, "count": 1}]}]}]}')
 """
     subprocess.run(
         [sys.executable, "-c", generator, str(ROOT / ".github/coverage/coverage.ini")],
@@ -156,6 +131,83 @@ for shard in range(1, 5):
         f"{package}/part_{shard}.py" for package in ("hooks", "scripts") for shard in range(1, 5)
     }
     assert all(int(line.attrib["hits"]) > 0 for line in report.findall(".//line"))
+    assert (tmp_path / "lcov.info").exists()
+
+
+_RENDEZVOUS = """
+import sys
+import time
+from pathlib import Path
+
+def meet(mine, theirs, failure):
+    Path(mine).touch()
+    deadline = time.monotonic() + 5
+    while not Path(theirs).exists():
+        if time.monotonic() > deadline:
+            sys.exit(failure)
+        time.sleep(0.05)
+"""
+
+
+def _stubbed_combine_tree(tmp_path, lcov_exit=0, xml_exit=0, lcov_late=0):
+    shutil.copytree(ROOT / ".github/coverage", tmp_path / ".github/coverage")
+    for shard in range(1, 3):
+        report = tmp_path / ".coverage-shards" / f"coverage-3.12-{shard}" / ".coverage"
+        report.parent.mkdir(parents=True)
+        report.write_text("data")
+    (tmp_path / "coverage").mkdir()
+    (tmp_path / "coverage/__init__.py").write_text("")
+    (tmp_path / "coverage/__main__.py").write_text(
+        _RENDEZVOUS
+        + f"""
+if sys.argv[1] == "xml":
+    meet("xml.started", "lcov.started", "the JS conversion never ran beside the XML")
+    if {xml_exit}:
+        sys.exit({xml_exit})
+    Path("coverage.xml").write_text("<coverage/>")
+elif sys.argv[1] == "report":
+    print("TOTAL")
+"""
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/js_lcov.py").write_text(
+        _RENDEZVOUS
+        + f"""
+meet("lcov.started", "xml.started", "the XML never ran beside the JS conversion")
+time.sleep({lcov_late})
+Path("lcov.info").write_text("")
+sys.exit({lcov_exit})
+"""
+    )
+    return subprocess.run(
+        ["bash", str(tmp_path / ".github/coverage/combine.sh"), "--downloaded", "2"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def test_the_js_conversion_runs_beside_the_python_coverage_xml(tmp_path):
+    result = _stubbed_combine_tree(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "coverage.xml").exists()
+    assert (tmp_path / "lcov.info").exists()
+    assert "TOTAL" in result.stdout
+
+
+def test_a_failed_js_conversion_fails_the_merge(tmp_path):
+    result = _stubbed_combine_tree(tmp_path, lcov_exit=3)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert (tmp_path / "coverage.xml").exists()
+
+
+def test_a_failed_python_xml_fails_the_merge_and_stops_the_js_conversion(tmp_path):
+    result = _stubbed_combine_tree(tmp_path, xml_exit=4, lcov_late=2)
+    assert result.returncode == 4, result.stdout + result.stderr
+    assert not (tmp_path / "coverage.xml").exists()
+    time.sleep(3)
+    assert not (tmp_path / "lcov.info").exists()
 
 
 def test_coverage_options_do_not_reach_nested_test_runners(tmp_path):

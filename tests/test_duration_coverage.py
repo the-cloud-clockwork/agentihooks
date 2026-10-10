@@ -47,7 +47,9 @@ def test_publication_refuses_incomplete_maps_before_writing_any_file(tmp_path, m
     monkeypatch.setattr(
         refresh_durations,
         "ci_medians",
-        lambda folder, version, source: dict(list(complete.items())[:89]) if version == incomplete else complete,
+        lambda folder, version, source, collected: (
+            dict(list(complete.items())[:89]) if version == incomplete else complete
+        ),
     )
     with pytest.raises(ValueError, match="11 of 100 tests have no stored duration"):
         refresh_durations.main(["--ci-run", "42"])
@@ -77,7 +79,7 @@ def test_recorded_incomplete_durations_are_refused(tmp_path, monkeypatch, capsys
         monkeypatch.setattr(
             refresh_durations,
             "ci_medians",
-            lambda folder, version, source: incomplete if version == "3.12" else complete,
+            lambda folder, version, source, collected: incomplete if version == "3.12" else complete,
         )
         with pytest.raises(ValueError, match="1440 of 12891 tests have no stored duration"):
             refresh_durations.main(["--ci-run", str(record["producer_run"])])
@@ -116,7 +118,7 @@ def test_failed_collection_never_replaces_durations(tmp_path, monkeypatch, seam)
     else:
         monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
         monkeypatch.setattr(refresh_durations, "ci_download", lambda runs, folder: None)
-        monkeypatch.setattr(refresh_durations, "ci_medians", lambda folder, version, source: {"a": 1.0})
+        monkeypatch.setattr(refresh_durations, "ci_medians", lambda folder, version, source, collected: {"a": 1.0})
         with pytest.raises(RuntimeError, match="collection failed"):
             refresh_durations.main(["--ci-run", "42"])
     assert (tmp_path / ".test_durations").read_text() == saved
@@ -143,3 +145,53 @@ def test_empty_collection_is_refused(tmp_path, monkeypatch):
     )
     with pytest.raises(RuntimeError, match="No tests collected"):
         duration_coverage.collected_tests(tmp_path)
+
+
+def test_collection_splits_the_suite_across_processes_without_assertion_rewriting(tmp_path, monkeypatch):
+    from tests import duration_coverage
+
+    (tmp_path / "tests/sub").mkdir(parents=True)
+    files = ["tests/sub/test_c.py", "tests/test_a.py", "tests/test_b.py"]
+    for path in files:
+        (tmp_path / path).write_text("")
+    calls = []
+
+    def collect(args, **kwargs):
+        options = args[args.index("--collect-only") :]
+        assert args[3] == "tests/"
+        assert options[:5] == ["--collect-only", "-q", "--assert=plain", "-p", "no:cacheprovider"]
+        kept = [path for path in files if f"--ignore={path}" not in args]
+        calls.append(kept)
+        output = "".join(f"{path}::test_{i}\n" for path in kept for i in (1, 2))
+        return subprocess.CompletedProcess(args, 0 if kept != ["tests/test_a.py"] else 5, output, "")
+
+    monkeypatch.setattr(duration_coverage.os, "cpu_count", lambda: 2)
+    monkeypatch.setattr(duration_coverage.subprocess, "run", collect)
+    assert duration_coverage.collected_tests(tmp_path) == [f"{path}::test_{i}" for path in files for i in (1, 2)]
+    assert sorted(calls) == [["tests/sub/test_c.py", "tests/test_b.py"], ["tests/test_a.py"]]
+
+
+def test_a_failed_collection_process_fails_the_whole_collection(tmp_path, monkeypatch):
+    from tests import duration_coverage
+
+    (tmp_path / "tests").mkdir()
+    for path in ("tests/test_a.py", "tests/test_b.py"):
+        (tmp_path / path).write_text("")
+
+    def collect(args, **kwargs):
+        failed = "--ignore=tests/test_a.py" in args
+        return subprocess.CompletedProcess(args, int(failed), "" if failed else "tests/test_a.py::t\n", "broken b")
+
+    monkeypatch.setattr(duration_coverage.os, "cpu_count", lambda: 2)
+    monkeypatch.setattr(duration_coverage.subprocess, "run", collect)
+    with pytest.raises(RuntimeError, match="broken b"):
+        duration_coverage.collected_tests(tmp_path)
+
+
+def test_adoption_writes_the_collection_it_checked(tmp_path, monkeypatch):
+    complete = _suite(tmp_path, 3)
+    (tmp_path / ".test_durations").write_text(json.dumps(complete))
+    monkeypatch.setattr(dev_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(dev_durations, "collected_tests", lambda root: list(complete))
+    dev_durations.main(["3.12", str(tmp_path / "missing"), "--collected", str(tmp_path / "collected.json")])
+    assert json.loads((tmp_path / "collected.json").read_text()) == list(complete)

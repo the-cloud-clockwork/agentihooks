@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/worker_image.py:scripts.swarm_v2.worker_image.x_report__mutmut_8:5f3ba165742946300de2ffc30f990b97eefe7f2ae5fff1b48eb98849b74e3975": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "UTF-8 and utf-8 resolve to the same Python codec and produce identical bytes and decoded text. Ruling on CI run 37875940883."
+  }
+}

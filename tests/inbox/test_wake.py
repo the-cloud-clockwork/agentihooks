@@ -27,10 +27,11 @@ class FakeHerdr:
 
 class FakeLedger:
     def __init__(self):
-        self.followups = []
+        self.followups, self.flagged = [], []
 
-    def followup(self, slug, text):
+    def followup(self, slug, text, needs_operator=False):
         self.followups.append((slug, text))
+        self.flagged.append(needs_operator)
 
 
 AGENTS = [
@@ -93,6 +94,25 @@ def test_a_pane_that_is_not_idle_is_never_typed_into_and_escalates_after_one_win
     assert events(inbox, item.id) == ["escalated_master", "escalated_operator"] and len(ledger.followups) == 1
 
 
+@pytest.mark.parametrize("sender", ["swarm", "sw-eng-2"])
+def test_actionable_notices_escalate_without_typing_into_a_busy_pane(inbox, sender):
+    item = inbox.send(sender, "sw-eng-1", "finish the task")
+    herdr, ledger = FakeHerdr({"p1": "working"}), FakeLedger()
+    run(inbox, herdr, ledger, sent_at(item) + W - 1)
+    assert events(inbox, item.id) == []
+    run(inbox, herdr, ledger, sent_at(item) + W)
+    assert events(inbox, item.id) == ["escalated_master"]
+    (raised,) = inbox.inbox(MASTER_NAME)
+    assert raised.fyi is False
+    [note] = [e for e in inbox.history(item.id) if e.get("event") == "escalated_master"]
+    assert (note["by"], note["reason"]) == ("swarm", f"raised to {raised.address} as message {raised.id}")
+    run(inbox, herdr, ledger, sent_at(item) + 2 * W)
+    assert events(inbox, item.id) == ["escalated_master", "escalated_operator"]
+    assert events(inbox, raised.id) == []
+    assert len(ledger.followups) == 1
+    assert herdr.prompts == []
+
+
 ORIGINAL_SENT = 1791220997780
 ORIGINAL_AGE = 540_000
 
@@ -111,7 +131,7 @@ ORIGINAL_AGE = 540_000
 def test_the_original_overdue_item_replayed_at_nine_minutes(pane, step):
     from types import SimpleNamespace
 
-    item = SimpleNamespace(state="pending", sender="sw-eng-2", fyi=False)
+    item = SimpleNamespace(state="pending", sender="sw-eng-2", fyi=False, ref="")
     history = [{"state": "pending", "by": "sw-eng-2", "reason": "", "at": ORIGINAL_SENT}]
     assert wake.decide(item, pane, history, ORIGINAL_SENT + ORIGINAL_AGE, W) == step
 
@@ -187,10 +207,10 @@ def test_a_refused_operator_notification_closes_that_item_and_the_pass_goes_on(i
     )
 
     class StrictLedger(FakeLedger):
-        def followup(self, slug, text):
+        def followup(self, slug, text, needs_operator=False):
             if "first" in text:
                 raise SwarmError("ledger sw refused: item refused: date '2026-10-05'")
-            super().followup(slug, text)
+            super().followup(slug, text, needs_operator)
 
     first = inbox.send("sw-eng-2", "sw-eng-1", "first message")
     second = inbox.send("sw-eng-2", "sw-eng-1", "second message")
@@ -216,10 +236,11 @@ def test_counts_survive_a_fresh_store_connection(server, inbox):
     assert events(fresh(server), item.id)[-1] == "escalated_master"
 
 
-def test_a_delivered_or_closed_item_is_never_woken(inbox):
+def test_a_confirmed_or_closed_item_is_never_woken(inbox):
     delivered = inbox.send(MASTER_NAME, "sw-eng-1", "one")
     closed = inbox.send(MASTER_NAME, "sw-eng-1", "two")
     inbox.deliver(delivered.id, "sw-eng-1")
+    inbox.confirm(delivered.id, "sw-eng-1")
     inbox.close(closed.id, "sw-eng-1", "done", "handled the request")
     herdr, ledger = FakeHerdr({"p1": "idle"}), FakeLedger()
     for n in range(8):
@@ -249,6 +270,15 @@ def test_an_item_for_the_master_skips_straight_to_the_operator(inbox):
         run(inbox, herdr, ledger, t + n * W)
     assert herdr.prompts == [] and len(inbox.inbox(MASTER_NAME)) == 1 and len(ledger.followups) == 1
     assert events(inbox, item.id) == ["escalated_operator"]
+
+
+@pytest.mark.parametrize("address", ["sw-eng-1", MASTER_NAME])
+def test_the_operator_follow_up_is_flagged_for_the_operator(inbox, address):
+    item = inbox.send("sw-eng-2", address, "check the plan")
+    herdr, ledger = FakeHerdr({"p1": "working", "pm": "idle"}), FakeLedger()
+    for n in range(6):
+        run(inbox, herdr, ledger, sent_at(item) + n * W)
+    assert len(ledger.followups) == 1 and ledger.flagged == [True]
 
 
 @pytest.mark.parametrize("harness", ["", "claude", "codex"])
@@ -404,3 +434,11 @@ def test_a_pane_the_operator_prompted_inside_the_quiet_window_is_left_alone(inbo
 def test_the_quiet_window_comes_from_the_environment():
     assert wake.quiet_ms({}) == wake.DEFAULT_QUIET_S * 1000
     assert wake.quiet_ms({wake.QUIET_ENV: "30"}) == 30_000
+
+
+def test_the_raised_master_item_reads_back_from_its_escalation_note():
+    note = wake.raised_note("master@sw", "abc123def456")
+    assert note == "raised to master@sw as message abc123def456"
+    assert wake.raised_id({"event": wake.TO_MASTER, "reason": note}) == "abc123def456"
+    assert wake.raised_id({"event": wake.WOKEN, "reason": note}) == ""
+    assert wake.raised_id({"state": "pending", "reason": note}) == ""

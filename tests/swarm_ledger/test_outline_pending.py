@@ -103,6 +103,14 @@ def clear(tab, text):
     tab.wait_for_timeout(50)
 
 
+def settled(tab, expected):
+    for _ in range(60):
+        if sorted(marked(tab)) == expected:
+            break
+        tab.wait_for_timeout(100)
+    return sorted(marked(tab))
+
+
 def test_a_pending_notification_puts_the_plus_on_its_item_only(tab):
     assert sorted(marked(tab)) == ["item-phases-p2", "sec-followups"]
 
@@ -111,14 +119,21 @@ def test_an_item_keeps_the_plus_until_its_last_notification_is_cleared(tab):
     clear(tab, "first on the follow up")
     assert sorted(marked(tab)) == ["item-phases-p2", "sec-followups"]
     clear(tab, "second on the follow up")
-    assert marked(tab) == ["item-phases-p2"]
+    assert settled(tab, ["item-phases-p2"]) == ["item-phases-p2"]
 
 
 def test_clear_all_removes_every_plus(tab):
     assert marked(tab)
     tab.evaluate("""() => document.getElementById("notif-clear-all").click()""")
+    assert settled(tab, []) == []
+
+
+def test_a_cleared_notification_stays_cleared_when_the_save_is_acknowledged(tab):
+    with tab.expect_response(lambda response: response.request.method == "PUT"):
+        tab.evaluate("""() => document.getElementById("notif-clear-all").click()""")
     tab.wait_for_timeout(50)
     assert marked(tab) == []
+    assert tab.evaluate("""() => document.getElementById("bell-badge").hidden""") is True
 
 
 def test_a_notification_from_a_page_update_adds_the_plus_live(tab, server):

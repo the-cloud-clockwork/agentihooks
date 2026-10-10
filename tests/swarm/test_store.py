@@ -167,7 +167,7 @@ def test_no_redis_refuses():
         RedisStore(None)
 
 
-def test_an_unreachable_redis_is_refused_with_a_clear_error():
+def refused_unreachable_redis():
     from scripts.swarm.store import connect
 
     with socket.socket() as closed:
@@ -175,16 +175,34 @@ def test_an_unreachable_redis_is_refused_with_a_clear_error():
         start = time.monotonic()
         with pytest.raises(SwarmError, match="refuses to run"):
             connect({"AGENTIHOOKS_SWARM_REDIS_URL": f"redis://127.0.0.1:{closed.getsockname()[1]}/0"})
-    assert time.monotonic() - start < 1
+    return time.monotonic() - start
 
 
-def test_the_suite_swarm_redis_is_refused_at_once():
+def refused_suite_redis():
     from scripts.swarm.store import connect
 
     start = time.monotonic()
     with pytest.raises(SwarmError, match="refuses to run"):
         connect()
-    assert time.monotonic() - start < 1
+    return time.monotonic() - start
+
+
+def test_an_unreachable_redis_is_refused_with_a_clear_error():
+    refused_unreachable_redis()
+
+
+@pytest.mark.wall_clock
+def test_an_unreachable_redis_is_refused_within_a_second():
+    assert refused_unreachable_redis() < 1
+
+
+def test_the_suite_swarm_redis_is_refused():
+    refused_suite_redis()
+
+
+@pytest.mark.wall_clock
+def test_the_suite_swarm_redis_is_refused_at_once():
+    assert refused_suite_redis() < 1
 
 
 def test_one_redis_for_every_caller_whatever_redis_url_says():
@@ -215,3 +233,71 @@ def test_links_round_trip_and_an_old_config_reads_as_none(store):
     assert store.config("smoke").links == links
     store.redis.hdel(store.key("smoke", "config"), "links")
     assert store.config("smoke").links == []
+
+
+def test_scaling_settings_round_trip_and_an_old_config_reads_the_defaults(store):
+    from scripts.swarm.store import DEFAULT_LOAD_HIGH, DEFAULT_LOAD_LOW, DEFAULT_MEMORY_PER_AGENT_MB
+
+    store.create(config(scaling="manual", load_high=1.5, load_low=0.5, memory_per_agent_mb=900))
+    read = store.config("smoke")
+    assert (read.scaling, read.load_high, read.load_low, read.memory_per_agent_mb) == ("manual", 1.5, 0.5, 900)
+    store.redis.hdel(store.key("smoke", "config"), "scaling", "load_high", "load_low", "memory_per_agent_mb")
+    read = store.config("smoke")
+    assert (read.scaling, read.load_high, read.load_low, read.memory_per_agent_mb) == (
+        "auto",
+        DEFAULT_LOAD_HIGH,
+        DEFAULT_LOAD_LOW,
+        DEFAULT_MEMORY_PER_AGENT_MB,
+    )
+    assert DEFAULT_LOAD_LOW < DEFAULT_LOAD_HIGH
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"load_low": 2.0, "load_high": 1.0},
+        {"load_low": 5.0},
+        {"scaling": "sometimes"},
+        {"memory_per_agent_mb": 0},
+        {"memory_per_agent_mb": 0.5},
+        {"memory_per_agent_mb": True},
+        {"load_high": 0.0, "load_low": 0.0},
+        {"load_low": True},
+        {"load_high": True},
+        {"load_high": "2"},
+    ],
+)
+def test_update_refuses_bad_scaling_settings_and_keeps_the_stored_ones(store, changes):
+    store.create(config())
+    before = store.config("smoke")
+    with pytest.raises(SwarmError):
+        store.update("smoke", **changes)
+    assert store.config("smoke") == before
+
+
+def test_create_refuses_a_low_watermark_above_the_high_one(store):
+    with pytest.raises(SwarmError, match="load low"):
+        store.create(config(load_low=2.0, load_high=1.0))
+
+
+@pytest.mark.parametrize("memory", [0.5, True])
+def test_create_refuses_memory_that_cannot_round_trip(store, memory):
+    with pytest.raises(SwarmError) as caught:
+        store.create(config(memory_per_agent_mb=memory))
+    assert str(caught.value) == "memory per agent must be a whole number of MB above 0"
+    assert store.redis.hgetall(store.key("smoke", "config")) == {}
+    assert store.slugs() == []
+
+
+def test_scaling_boundaries_round_trip_and_manual_preserves_lane_caps(store):
+    store.create(config())
+    stored = store.update("smoke", scaling="manual", load_low=10, load_high=10, memory_per_agent_mb=1)
+    assert store.config("smoke") == stored
+    assert (stored.max_eng, stored.max_ci, stored.max_plan) == (2, 1, 1)
+
+
+def test_scaling_update_explains_the_allowed_modes(store):
+    store.create(config())
+    with pytest.raises(SwarmError) as caught:
+        store.update("smoke", scaling="sometimes")
+    assert str(caught.value) == "scaling must be one of auto, manual"

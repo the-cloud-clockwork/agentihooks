@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 import pytest
@@ -293,6 +294,19 @@ def test_inline_scripts_read_each_shell_c_form():
     text = "bash x.sh -c 'e'; bash -c 'a' -c 'f'; sh +x -ec 'b'; zsh -o pipefail -c 'c'; ls -c 'd'; bash -c"
     assert list(inline_scripts(text)) == ["a", "b", "c", ""]
     assert list(inline_scripts("bash -o")) == []
+
+
+def test_inline_scripts_find_no_script_in_a_long_option_word():
+    assert list(inline_scripts("bash -" + "c" * 50_000 + "1 x")) == []
+    assert list(inline_scripts("bash -" + "o" * 50_000 + "1 x")) == []
+
+
+@pytest.mark.wall_clock
+def test_inline_scripts_read_a_long_option_word_in_linear_time():
+    started = time.perf_counter()
+    list(inline_scripts("bash -" + "c" * 50_000 + "1 x"))
+    list(inline_scripts("bash -" + "o" * 50_000 + "1 x"))
+    assert time.perf_counter() - started < 1
 
 
 def test_variable_programs_skip_keywords_and_assignments():

@@ -10,14 +10,16 @@ from time import process_time
 
 from mutmut.utils.format_utils import get_mutant_name
 
+from scripts.ci_mutation.mutant_shards import shard_names
 from scripts.ci_mutation.report import mutation_lines
+from scripts.ci_mutation.stats import write_part
 
 GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
 
 
-def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str, list[str]]:
+def changed_mutations(filename: str, source: str, changed: set[int]) -> tuple[object, list]:
     from libcst.metadata import MetadataWrapper, WhitespaceInclusivePositionProvider
-    from mutmut.mutation.file_mutation import combine_mutations_to_source, create_mutations
+    from mutmut.mutation.file_mutation import create_mutations
 
     module, mutations, _, _ = create_mutations(filename, source)
     positions = MetadataWrapper(module, unsafe_skip_copy=True).resolve(WhitespaceInclusivePositionProvider)
@@ -33,6 +35,13 @@ def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str
         )
         if changed.intersection(lines):
             selected.append(mutation)
+    return module, selected
+
+
+def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str, list[str]]:
+    from mutmut.mutation.file_mutation import combine_mutations_to_source
+
+    module, selected = changed_mutations(filename, source, changed)
     code, names = combine_mutations_to_source(module, selected)
     return code, list(names)
 
@@ -46,13 +55,28 @@ def keep_selected_tests(stats: dict[str, set[str]], tests_by_prefix: dict[str, s
     return kept
 
 
-def stats_shards(root: Path, files: list[str], count: int) -> list[list[str]]:
+def file_seconds(root: Path, files: list[str]) -> dict[str, float]:
     durations = root / ".test_durations"
     durations = json.loads(durations.read_text()) if durations.exists() else {}
     seconds = dict.fromkeys(files, 0.01)
     for nodeid, duration in durations.items():
         if (path := nodeid.partition("::")[0]) in seconds:
             seconds[path] += duration
+    return seconds
+
+
+def part_files(root: Path, files: list[str], part: tuple[int, int]) -> list[str]:
+    # Each part runs on its own runner, so an xdist group may span parts; stats_shards keeps it whole within one.
+    index, total = part
+    seconds = file_seconds(root, files)
+    parts = [[] for _ in range(total)]
+    for path in sorted(files, key=lambda path: (-seconds[path], path)):
+        min(parts, key=lambda chosen: sum(seconds[path] for path in chosen)).append(path)
+    return sorted(parts[index])
+
+
+def stats_shards(root: Path, files: list[str], count: int) -> list[list[str]]:
+    seconds = file_seconds(root, files)
     # Files that share an xdist group never run concurrently in CI, so they share a shard here.
     units = []
     for path in files:
@@ -73,7 +97,13 @@ def stats_shards(root: Path, files: list[str], count: int) -> list[list[str]]:
 def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, basetemp: str) -> None:
     os.environ["MUTANT_UNDER_TEST"] = "stats"
     os.environ["PY_IGNORE_IMPORTMISMATCH"] = "1"
-    test_runner._pytest_add_cli_args = [*test_runner._pytest_add_cli_args, f"--basetemp={basetemp}"]
+    # Stats tracing slows every test, so a wall clock bound only holds in the unit shards.
+    test_runner._pytest_add_cli_args = [
+        *test_runner._pytest_add_cli_args,
+        "-m",
+        "not wall_clock",
+        f"--basetemp={basetemp}",
+    ]
     start = process_time()
     status = test_runner.run_stats(tests=tests)
     tests_by_function = {name: sorted(names) for name, names in runner.mutmut.tests_by_mangled_function_name.items()}
@@ -89,7 +119,7 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
     )
 
 
-def collect_parallel_stats(runner, test_runner, shards: list[list[str]], work: Path) -> None:
+def run_stats_buckets(runner, test_runner, shards: list[list[str]], work: Path) -> list[dict]:
     context = multiprocessing.get_context("fork")
     processes = []
     for index, tests in enumerate(shards):
@@ -105,6 +135,10 @@ def collect_parallel_stats(runner, test_runner, shards: list[list[str]], work: P
     if failed := [result["status"] for result in results if result["status"] != 0]:
         print(f"failed to collect stats. runner returned {failed}", flush=True)
         raise SystemExit(1)
+    return results
+
+
+def apply_stats(runner, results: list[dict]) -> None:
     for result in results:
         for function, tests in result["tests"].items():
             runner.mutmut.tests_by_mangled_function_name[function].update(tests)
@@ -116,11 +150,57 @@ def collect_parallel_stats(runner, test_runner, shards: list[list[str]], work: P
     runner.save_stats()
 
 
+def collect_parallel_stats(runner, test_runner, shards: list[list[str]], work: Path) -> None:
+    apply_stats(runner, run_stats_buckets(runner, test_runner, shards, work))
+
+
 def worker_count(requested: int) -> int:
     return requested if os.environ.get("CI") else min(requested, 2)
 
 
-def run_selected(selection: Path) -> None:
+def shard_collector(collect, shard: tuple[int, int]):
+    def collect_shard_mutants(*, mutant_names):
+        mutants, by_path = collect(mutant_names=mutant_names)
+        owned = shard_names([key for _, key, _ in mutants], shard)
+        return [mutant for mutant in mutants if mutant[1] in owned], by_path
+
+    return collect_shard_mutants
+
+
+def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stats: tuple[str, ...]) -> None:
+    if mode not in ("", "collect", "reuse"):
+        raise ValueError(f"unknown mutation stats mode {mode!r}")
+    for path in paths:
+        data = runner.SourceFileMutationData(path=Path(path))
+        data.load()
+        if data.exit_code_by_key:
+            break
+    else:
+        if mode == "collect":
+            write_part(Path(stats[0]), stats[1], (int(stats[2]), int(stats[3])), [])
+        raise SystemExit(0)
+    if mode == "reuse":
+        apply_stats(runner, json.loads(Path(stats[0]).read_text()))
+        return
+    # mutmut resolves source paths against the working directory on every hit; tests may change it.
+    config = runner.Config.get()
+    relative = config.source_paths
+    config.source_paths = [(Path("mutants") / path).resolve() for path in relative]
+    workers = worker_count(len(os.sched_getaffinity(0)))
+    try:
+        if mode == "collect":
+            output, key, index, total = Path(stats[0]), stats[1], int(stats[2]), int(stats[3])
+            files = part_files(Path.cwd(), config.pytest_add_cli_args_test_selection, (index, total))
+            buckets = stats_shards(Path.cwd(), files, workers) if files else []
+            write_part(output, key, (index, total), run_stats_buckets(runner, test_runner, buckets, Path.cwd()))
+            raise SystemExit(0)
+        shards = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, workers)
+        collect_parallel_stats(runner, test_runner, shards, Path.cwd())
+    finally:
+        config.source_paths = relative
+
+
+def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats: str) -> None:
     from mutmut import __main__ as runner
 
     if not os.environ.get("CI"):
@@ -169,24 +249,7 @@ def run_selected(selection: Path) -> None:
         return names
 
     def collect_selected_stats(test_runner):
-        for path in changes:
-            data = runner.SourceFileMutationData(path=Path(path))
-            data.load()
-            if data.exit_code_by_key:
-                break
-        else:
-            raise SystemExit(0)
-        # mutmut resolves source paths against the working directory on every hit; tests may change it.
-        config = runner.Config.get()
-        relative = config.source_paths
-        config.source_paths = [(Path("mutants") / path).resolve() for path in relative]
-        shards = stats_shards(
-            Path.cwd(), config.pytest_add_cli_args_test_selection, worker_count(len(os.sched_getaffinity(0)))
-        )
-        try:
-            collect_parallel_stats(runner, test_runner, shards, Path.cwd())
-        finally:
-            config.source_paths = relative
+        load_or_collect_stats(runner, test_runner, list(changes), mode, stats)
         related.update(keep_selected_tests(runner.mutmut.tests_by_mangled_function_name, tests_by_prefix))
 
     run_tests = runner.PytestRunner.run_tests
@@ -205,6 +268,8 @@ def run_selected(selection: Path) -> None:
         return run_tests(self, mutant_name=mutant_name, tests=tests)
 
     runner.collect_or_load_stats = collect_selected_stats
+    # Every shard generates the same mutants, so names and clearance keys match an unsharded run; each runs its share.
+    runner.collect_source_file_mutation_data = shard_collector(runner.collect_source_file_mutation_data, shard)
     # The forced fail control passes no tests and would otherwise rerun every selected module.
     runner.PytestRunner.run_tests = run_related_tests
     # mutmut 3.6.0 writes one copy of a whole function per selected mutant.
@@ -215,4 +280,4 @@ def run_selected(selection: Path) -> None:
 
 
 if __name__ == "__main__":
-    run_selected(Path(sys.argv[1]))
+    run_selected(Path(sys.argv[1]), (int(sys.argv[2]), int(sys.argv[3])), *sys.argv[4:])

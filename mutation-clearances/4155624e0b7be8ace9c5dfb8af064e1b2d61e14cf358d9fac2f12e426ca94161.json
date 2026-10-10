@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/worker_image.py:scripts.swarm_v2.worker_image.x_validate_artifact__mutmut_8:7ce37a7ae228a970564349d7caca11fd01406a65d2adfc2a762845d16ec14cf4": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Missing metadata still fails the same fullmatch, HTTPS prefix or numeric output checks and raises the identical invalid artifact lock ValueError; empty and XXXX defaults admit no additional input. Ruling on CI run 37875940883."
+  }
+}

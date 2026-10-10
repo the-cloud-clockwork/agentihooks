@@ -1,3 +1,5 @@
+import pytest
+
 from scripts.swarm import claim_order
 
 
@@ -66,16 +68,31 @@ def test_a_dependency_missing_from_the_ledger_still_blocks_the_dependent():
     assert ordered(ledger)[:2] == ["big", "c1"]
 
 
-def test_key_is_rank_then_the_fast_clear_exception_then_depth():
+def test_key_is_rank_then_resumed_work_then_the_fast_clear_exception_then_depth():
     ledger = rows(
         {"id": "a", "rank": "high", "difficulty": "S", "phase": "p1"},
         {"id": "b", "depends_on": ["a"], "phase": "p1"},
         {"id": "c", "rank": "low", "difficulty": "M", "phase": "p2"},
     )
     key = claim_order.key(ledger)
-    assert key(ledger["a"]) == (1, False, -1)
-    assert key(ledger["b"]) == (2, True, 0)
-    assert key(ledger["c"]) == (3, True, 0)
+    assert key(ledger["a"]) == (1, True, False, -1)
+    assert key(ledger["b"]) == (2, True, True, 0)
+    assert key(ledger["c"]) == (3, True, True, 0)
+
+
+@pytest.mark.parametrize(
+    "work", [{"branch": "engineer-a1b2c3-0001"}, {"pr_url": "https://example.test/pull/1"}, {"parked_on": ["gone"]}]
+)
+def test_a_task_carrying_earlier_work_goes_ahead_of_fresh_tasks_of_its_rank_only(work):
+    ledger = rows(
+        {"id": "small", "difficulty": "S", "phase": "p1"},
+        {"id": "deep"},
+        {"id": "w", "depends_on": ["deep"], "rank": "low"},
+        {"id": "resumed", **work},
+        {"id": "urgent", "rank": "urgent"},
+    )
+    assert claim_order.resumed(ledger["resumed"]) and not claim_order.resumed(ledger["deep"])
+    assert ordered(ledger)[:4] == ["urgent", "resumed", "small", "deep"]
 
 
 def test_rank_orders_before_depth_and_the_exception():

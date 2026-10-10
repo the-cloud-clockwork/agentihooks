@@ -429,6 +429,12 @@ def _codex_config(installed: dict, operator: Path, out: Path, settings: dict) ->
     return doc
 
 
+def _codex_skills(bundle: Path | None, dirs: list[tuple[str, Path]], stamp: dict) -> tuple[dict, dict]:
+    enabled = [plugin for plugin, on in stamp["enabled_plugins"].items() if on]
+    below = plugins.plugin_skills(enabled, claude_home(_global_env()) / "plugins")
+    return below, plugins.layer_skills(_roots(bundle, dirs))
+
+
 def render_codex(name: str, force: bool = False, overlays: Sequence[str] = ()) -> Path | None:
     import tomlkit
 
@@ -442,7 +448,13 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = ()) -
     config = operator / "config.toml"
     text = config.read_text() if config.exists() else ""
     installed = tomllib.loads(text)
-    current = {"render": _stamp(bundle, dirs), "operator": hashlib.sha256(text.encode()).hexdigest()}
+    stamp = _stamp(bundle, dirs)
+    below, above = _codex_skills(bundle, dirs, stamp)
+    current = {
+        "render": stamp,
+        "operator": hashlib.sha256(text.encode()).hexdigest(),
+        "skills": {skill: str(path) for skill, path in {**below, **above}.items()},
+    }
     root = profile_dir(name, overlays)
     out = root / "codex"
     if (
@@ -468,7 +480,7 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = ()) -
         _atomic_write(agents, codex_master.persona((claude / "CLAUDE.md").read_text()))
     else:
         _link(out / "AGENTS.md", claude / "CLAUDE.md")
-    _relink(out / "skills", {p.name: p for p in sorted((claude / "skills").iterdir())})
+    _relink(out / "skills", {**below, **{p.name: p for p in sorted((claude / "skills").iterdir())}, **above})
     _link_commands(out / "skills", claude / "commands")
     for item in CODEX_STATE:
         _link(out / item, operator / item)

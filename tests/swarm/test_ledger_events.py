@@ -114,6 +114,28 @@ def test_a_replay_of_the_same_ledger_makes_no_item(store):
     assert len(texts(store, MASTER_SEAT)) == 4
 
 
+def test_a_follow_up_already_flagged_for_the_operator_sends_the_master_no_notice(store):
+    run(store, recorded())
+    flagged = event(11, 100_000, "swarm", "added", "followups/f1", "A message to master@sw is still unread")
+    unflagged = event(12, 100_000, "swarm", "added", "followups/f2", "Retries need a cap")
+    rows = [
+        {"id": "f1", "text": flagged["text"], "comments": [], "done": False, "needs_operator": True},
+        {"id": "f2", "text": unflagged["text"], "comments": [], "done": False},
+    ]
+    run(store, recorded([flagged, unflagged], followups=rows))
+    (notice,) = texts(store, MASTER_SEAT)
+    assert "Retries need a cap" in notice
+
+
+def test_a_ledger_without_follow_ups_still_sends_its_notices(store):
+    run(store, recorded())
+    doc = recorded(AGENT_EVENTS[2:3])
+    del doc["followups"]
+    run(store, doc)
+    (notice,) = texts(store, MASTER_SEAT)
+    assert "Build the thing" in notice
+
+
 def test_the_cursor_is_kept_per_swarm(store):
     store.create(SwarmConfig("other", "/repo", max_eng=1, max_ci=0))
     run(store, recorded())
@@ -136,6 +158,129 @@ def test_items_go_to_the_master_seat_when_no_master_is_live(store):
     run(store, recorded())
     run(store, recorded(AGENT_EVENTS[:1]))
     assert len(texts(store, MASTER_SEAT)) == 1
+
+
+def priority(item, text, by="sw-eng-1", pid=""):
+    return {"id": pid or f"p-{item}", "item": item, "text": text, "by": by, "at": 1_000}
+
+
+def with_priorities(*rows):
+    doc = recorded()
+    doc["priorities"] = list(rows)
+    return doc
+
+
+def test_a_new_priority_makes_one_master_item_naming_the_item_and_the_ask(store):
+    run(store, with_priorities())
+    actions = run(store, with_priorities(priority("tasks/t1", "Blocked: the deploy key is missing", by="ledger")))
+    run(store, with_priorities(priority("tasks/t1", "Blocked: the deploy key is missing", by="ledger")))
+    (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
+    assert item.text == (
+        "New priority on ledger sw for tasks/t1: Blocked: the deploy key is missing\n"
+        "Triage it: resolve it if the call is yours, else leave it for the operator."
+    )
+    assert item.ref == "sw:priority:tasks/t1" and not item.fyi
+    assert actions == [f"told {MASTER_SEAT}: priority tasks/t1"]
+    assert store.redis.smembers(store.key("sw", "priorities-sent")) == {"tasks/t1"}
+    assert texts(store, ENG_SEAT) == []
+
+
+def test_a_priority_on_a_follow_up_the_swarm_raised_for_the_operator_sends_the_master_no_notice(store):
+    raised = event(11, 100_000, "swarm", "added", "followups/f1", "A message to master@sw is still unread")
+    flagged = event(12, 100_000, "sw-eng-1", "added", "followups/f2", "Pick the release date")
+    doc = recorded(
+        [raised, flagged],
+        followups=[
+            {"id": "f1", "text": raised["text"], "comments": [], "done": False, "needs_operator": True},
+            {"id": "f2", "text": flagged["text"], "comments": [], "done": False, "needs_operator": True},
+        ],
+    )
+    run(store, dict(doc, priorities=[]))
+    doc["priorities"] = [priority(f"followups/{n}", "Decide: it", by="ledger") for n in ("f1", "f2")]
+    run(store, doc)
+    doc["_meta"]["events"] = [e for e in doc["_meta"]["events"] if e["target"] != "followups/f1"]
+    run(store, doc)
+    assert [i.ref for i in InboxStore(store.redis).inbox(MASTER_SEAT)] == ["sw:priority:followups/f2"]
+
+
+def test_priorities_open_before_the_first_pass_are_not_announced_and_later_ones_are(store):
+    run(store, with_priorities(priority("questions/q1", "Answer: which port")))
+    run(store, with_priorities(priority("questions/q1", "Answer: which port"), priority("tasks/t1", "Blocked: no key")))
+    (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
+    assert "tasks/t1" in item.text and "questions/q1" not in item.text
+
+
+def test_the_first_pass_mark_does_not_expire(store):
+    run(store, with_priorities())
+    assert store.redis.get(store.key("sw", "priorities-seeded")) == "1"
+    assert store.redis.ttl(store.key("sw", "priorities-seeded")) == -1
+
+
+def test_a_repeated_ask_on_the_same_item_makes_nothing_new(store):
+    run(store, with_priorities())
+    run(store, with_priorities(priority("followups/f1", "Decide: retries need a cap")))
+    run(store, with_priorities(priority("followups/f1", "Decide: retries need a cap now", pid="p-again")))
+    assert len(texts(store, MASTER_SEAT)) == 1
+
+
+def test_a_priority_raised_again_after_it_cleared_makes_a_new_item(store):
+    row = priority("tasks/t1", "Blocked: the deploy key is missing", by="ledger")
+    run(store, with_priorities())
+    run(store, with_priorities(row))
+    run(store, with_priorities())
+    run(store, with_priorities(row))
+    assert len(texts(store, MASTER_SEAT)) == 2
+
+
+def test_a_priority_the_master_added_is_not_announced_beside_an_agent_ask(store):
+    run(store, with_priorities())
+    run(store, with_priorities(priority("phases/p1", "Approve the plan", by="sw-master-1"), priority("tasks/t1", "Go")))
+    (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
+    assert "tasks/t1" in item.text and "phases/p1" not in item.text
+
+
+def test_an_agent_ask_replacing_the_master_priority_on_its_item_makes_one_item(store):
+    run(store, with_priorities())
+    run(store, with_priorities(priority("phases/p1", "Approve the plan", by="sw-master-1")))
+    run(store, with_priorities(priority("phases/p1", "Approve the plan now", pid="p-agent")))
+    (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
+    assert "Approve the plan now" in item.text
+
+
+def test_a_priority_added_by_another_swarm_master_makes_an_item(store):
+    run(store, with_priorities())
+    run(store, with_priorities(priority("tasks/t1", "Look at this", by="other-master-1")))
+    assert len(texts(store, MASTER_SEAT)) == 1
+
+
+def test_a_priority_the_swarm_raised_after_its_own_ask_makes_no_item(store):
+    run(store, with_priorities())
+    run(store, with_priorities(priority("followups/f1", "Open half an hour", by="swarm"), priority("tasks/t1", "Go")))
+    (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
+    assert "tasks/t1" in item.text and "followups/f1" not in item.text
+
+
+def test_a_swarm_with_no_live_master_gets_no_priority_item_until_a_master_returns(store):
+    run(store, with_priorities())
+    store.drop_agent("sw", "sw-master-1")
+    row = priority("tasks/t1", "Blocked: the deploy key is missing", by="ledger")
+    run(store, with_priorities(row))
+    assert texts(store, MASTER_SEAT) == []
+    store.put_agent("sw", AgentRecord("sw-master-2", MASTER, MASTER, seat=MASTER_SEAT))
+    run(store, with_priorities(row))
+    assert len(texts(store, MASTER_SEAT)) == 1
+
+
+def test_a_priority_cleared_during_a_master_gap_is_announced_when_raised_again(store):
+    row = priority("tasks/t1", "Blocked: the deploy key is missing", by="ledger")
+    run(store, with_priorities())
+    run(store, with_priorities(row))
+    store.drop_agent("sw", "sw-master-1")
+    run(store, with_priorities())
+    run(store, with_priorities(row))
+    store.put_agent("sw", AgentRecord("sw-master-2", MASTER, MASTER, seat=MASTER_SEAT))
+    run(store, with_priorities(row))
+    assert len(texts(store, MASTER_SEAT)) == 2
 
 
 def open_followup(added_at, **fields):
@@ -225,6 +370,25 @@ def test_red_checks_with_no_push_for_twenty_minutes_go_to_its_engineer(store):
     told = run(store, in_pr(), now_ms=pushed.pushed_at + 20 * MINUTE, github=lambda url: pushed)
     assert f"told {ENG_SEAT}: https://github.com/o/r/pull/9:red:pushed" in told
     assert len(texts(store, ENG_SEAT)) == 2
+
+
+@pytest.mark.parametrize(("gate", "notices"), [("SUCCESS", 0), ("FAILURE", 1)])
+def test_a_red_job_beside_the_required_gate_is_noticed_only_when_the_gate_failed(store, gate, notices):
+    rollup = [
+        {"name": "record pass", "conclusion": "FAILURE", "completedAt": "2026-10-07T17:00:01Z"},
+        {"name": GATE, "conclusion": gate},
+    ]
+    raw = {
+        "state": "OPEN",
+        "gated": True,
+        "commits": [{"committedDate": "2026-10-07T17:00:00Z"}],
+        "statusCheckRollup": rollup,
+        "checkSuites": [FINISHED_RUN],
+    }
+    pull = ledger_events.pull_request(raw)
+    run(store, recorded())
+    run(store, in_pr(), now_ms=pull.red_at + 20 * MINUTE, github=lambda url: pull)
+    assert len(texts(store, ENG_SEAT)) == notices
 
 
 def test_a_red_notice_adds_to_the_notices_of_earlier_pull_requests(store):
@@ -603,6 +767,20 @@ def test_a_failed_gate_resolves_red(suites, conclusion):
     assert pull.resolved is True
     assert pull.red is True
     assert pull.failed == (GATE,)
+
+
+@pytest.mark.parametrize(
+    ("gated", "gate", "passed"), [(True, "SUCCESS", True), (True, "FAILURE", False), (False, "SUCCESS", False)]
+)
+def test_the_view_records_whether_the_required_gate_passed_beside_a_red_job(gated, gate, passed):
+    rollup = [{"name": "record pass", "conclusion": "FAILURE"}, {"name": GATE, "conclusion": gate}]
+    raw = {"state": "OPEN", "gated": gated, "statusCheckRollup": rollup, "checkSuites": [FINISHED_RUN]}
+    pull = ledger_events.pull_request(raw)
+    assert (pull.red, pull.resolved, pull.gate_passed) == (True, True, passed)
+    raw["statusCheckRollup"] = [rollup[0], {"context": GATE, "state": gate}]
+    assert ledger_events.pull_request(raw).gate_passed is passed
+    raw["statusCheckRollup"] = rollup + [{"name": GATE, "conclusion": "SUCCESS"}]
+    assert ledger_events.pull_request(raw).gate_passed is passed
 
 
 def test_a_failed_check_beside_a_pending_gate_resolves_red_once_runs_finish():

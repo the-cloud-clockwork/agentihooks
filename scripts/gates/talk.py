@@ -95,7 +95,10 @@ class Budget:
             return done
         if self._exempt(doc, by, ctx):
             return apply(doc, op, ctx)
-        count = progress.read(by).talk
+        mark = progress.read(by)
+        if not mark.outcome_at:
+            return apply(doc, op, ctx)
+        count = mark.talk
         if count >= BUDGET:
             reason = refusal(by, count, self.slug)
             kind = "deny" if mode == "enforce" else "observe"
@@ -109,10 +112,13 @@ class Budget:
         return done
 
     def _exempt(self, doc, by, ctx):
+        from scripts.swarm.naming import NameRegistry
+
         return (
             owes(ctx.meta, by, doc["tasks"])
             or lifted(ctx.meta, by, ctx.at)
             or agent_lifted(self.slug, by, NAME, self.home, ctx.at / 1000)
+            or bool(NameRegistry(self._redis).entry(by).get("operator"))
         )
 
     def _marks(self):

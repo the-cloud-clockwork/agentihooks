@@ -77,20 +77,113 @@ def test_the_tick_returns_a_failed_task_to_its_agent_under_enforce(started, monk
     assert any(item.text.startswith("The intent check failed") and item.ref == "tasks/t1" for item in items)
 
 
-def test_the_coach_tick_reads_only_the_head_of_an_unchanged_pull_request(started, monkeypatch):
+def test_the_tick_reads_each_pull_request_once_for_all_its_passes(started, monkeypatch):
+    from scripts.gates import progress
+    from scripts.swarm import done_gate, ledger_events, priority_sweep, waits
+
+    store, _, _ = started
+    seen = {}
+
+    def capture(name, index):
+        def run(*args):
+            seen[name] = args[index]
+            args[index](URL)
+            return []
+
+        return run
+
+    monkeypatch.setattr(ledger_events, "event_pass", capture("events", 6))
+    monkeypatch.setattr(done_gate, "recheck_pass", capture("recheck", 5))
+    monkeypatch.setattr(progress, "checks_pass", capture("checks", 3))
+    monkeypatch.setattr(waits, "end_pass", capture("waits", 4))
+    monkeypatch.setattr(priority_sweep, "priority_pass", capture("priority", 5))
+    reads = []
+    monkeypatch.setattr(ledger_events, "view", lambda url: reads.append(url))
+    cli.run_tick(store, "sw")
+    assert sorted(seen) == ["checks", "events", "priority", "recheck", "waits"]
+    assert reads == [URL]
+    store.redis.delete(store.key("sw", "tick-lock"))
+    cli.run_tick(store, "sw")
+    assert reads == [URL, URL]
+
+
+def fingerprint(ledger):
+    doc = ledger.state("sw")
+    return intent._fingerprint(doc, next(task for task in doc["tasks"] if task["id"] == "t1"))
+
+
+def test_the_tick_batches_active_tasks_and_red_notices_then_refreshes_the_next_tick(started, monkeypatch):
+    from scripts.gates.verdicts import Verdicts
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events
+
+    store, ledger, _ = started
+    store.update("sw", gates={"intent": "coach"})
+    ledger.rows["t1"].update(state="pr", pr_url=URL, claimed_by=ME)
+    other = "https://github.com/another/repo/pull/2"
+    notice = InboxStore(store.redis).send("swarm", "eng-1@sw", "red checks")
+    store.redis.hset(store.key("sw", "red-notices"), notice.id, other)
+    Verdicts("sw", "intent-coach").write(
+        "t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1", inputs=fingerprint(ledger)
+    )
+    batches, heads = [], []
+
+    def batch(urls, cache=None):
+        assert cache is store.redis
+        batches.append(set(urls))
+        head = "h1" if len(batches) == 1 else "h2"
+        return {url: ledger_events.PullRequest("OPEN", None, None, False, head=head) for url in urls}
+
+    monkeypatch.setattr(ledger_events, "views", batch, raising=False)
+    monkeypatch.setattr(ledger_events, "view", lambda url: pytest.fail("individual remote read"))
+    monkeypatch.setattr(intent, "pr_view", lambda url: heads.append(url))
+    cli.run_tick(store, "sw")
+    assert heads == []
+    cli.run_tick(store, "sw")
+    assert batches == [{URL, other}, {URL, other}]
+    assert heads == [URL]
+
+
+def test_the_coach_tick_keeps_an_unchanged_head_from_the_ticks_pull_request_read(started, monkeypatch):
     from scripts.gates.verdicts import Verdicts
 
     store, ledger, _ = started
     store.update("sw", gates={"intent": "coach"})
     ledger.rows["t1"].update(state="pr", pr_url=URL, claimed_by=ME)
-    Verdicts("sw", "intent-coach").write("t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL)
-    heads, views = [], []
-    monkeypatch.setattr(intent, "pr_head", lambda url: heads.append(url) or "h1")
+    Verdicts("sw", "intent-coach").write(
+        "t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1", inputs=fingerprint(ledger)
+    )
+    from scripts.swarm import ledger_events
+
+    reads, views = [], []
+    pull = ledger_events.PullRequest("OPEN", None, None, False, head="h1")
+    monkeypatch.setattr(ledger_events, "view", lambda url: reads.append(url) or pull)
+    monkeypatch.setattr(intent, "pr_head", lambda url: pytest.fail("a second head read"))
     monkeypatch.setattr(intent, "pr_view", lambda url: views.append(url))
     actions = cli.run_tick(store, "sw")
-    assert (heads, views) == ([URL], [])
+    assert (reads, views) == ([URL], [])
     assert not any("intent check" in action for action in actions)
     assert Verdicts("sw", "intent").read("t1")["head"] == "h1"
+
+
+@pytest.mark.parametrize("head", [None, ""])
+def test_the_coach_tick_reads_the_whole_pull_request_when_the_ticks_read_has_no_head(started, monkeypatch, head):
+    from scripts.gates.verdicts import Verdicts
+    from scripts.swarm import ledger_events
+
+    store, ledger, _ = started
+    store.update("sw", gates={"intent": "coach"})
+    ledger.rows["t1"].update(state="pr", pr_url=URL, claimed_by=ME)
+    Verdicts("sw", "intent-coach").write(
+        "t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1", inputs=fingerprint(ledger)
+    )
+    pull = None if head is None else ledger_events.PullRequest("OPEN", None, None, False, head=head)
+    monkeypatch.setattr(ledger_events, "view", lambda url: pull)
+    views = []
+    monkeypatch.setattr(intent, "pr_view", lambda url: views.append(url))
+    cli.run_tick(store, "sw")
+    assert views == [URL]
+    assert Verdicts("sw", "intent").read("t1")["verdict"] != "pass"
 
 
 def test_a_refused_ledger_write_after_the_tick_step_leaves_the_rest_running(started, monkeypatch, capsys):
@@ -136,4 +229,10 @@ def test_the_tick_stamps_its_own_time_on_the_verdict(started, monkeypatch):
     monkeypatch.setattr(intent, "judge", lambda state: ("pass", "ok"))
     monkeypatch.setattr(cli, "now_ms", lambda: 777)
     cli.run_tick(store, "sw")
-    assert Verdicts("sw", "intent").read("t1") == {"verdict": "pass", "reason": "ok", "at": 777}
+    assert Verdicts("sw", "intent").read("t1") == {
+        "verdict": "pass",
+        "reason": "ok",
+        "at": 777,
+        "phase": "p1",
+        "inputs": intent._fingerprint({"phases": ledger.phases}, ledger.rows["t1"]),
+    }

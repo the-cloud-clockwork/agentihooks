@@ -62,8 +62,7 @@ def test_a_named_session_confirms_and_writes_as_its_new_master(taker, monkeypatc
     ledger.main()
     assert writes[0]["by"] == name
     assert writes[0]["text"] == "Master confirmed"
-    monkeypatch.setattr(ledger.repository, "read_page", lambda slug: {})
-    monkeypatch.setattr(ledger.core, "read_token", lambda page: "fixture")
+    monkeypatch.setattr(ledger.repository, "token", lambda slug: "fixture")
     assert ledger.credentials("sw")["X-Ledger-Agent"] == name
     assert run("sw", "take-master") == 0
     assert [agent.name for agent in store.agents("sw")] == [name]

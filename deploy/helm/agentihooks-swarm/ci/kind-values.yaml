@@ -1,0 +1,16 @@
+image:
+  repository: local/agentihooks-swarm
+  tag: dev
+  pullPolicy: Never
+redis:
+  image:
+    repository: mirror.gcr.io/library/redis
+controller:
+  livenessProbe:
+    initialDelaySeconds: 10
+    periodSeconds: 2
+    timeoutSeconds: 5
+    failureThreshold: 2
+  terminationGracePeriodSeconds: 1
+  env:
+    AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "2"

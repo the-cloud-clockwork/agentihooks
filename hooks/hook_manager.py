@@ -698,6 +698,7 @@ def on_user_prompt_submit(payload: dict) -> None:
 
     session_id = payload.get("session_id", "")
     log("User prompt submitted", {"session_id": session_id})
+    _confirm_inbox(session_id)
     _swarm_heartbeat("working", payload.get("prompt", ""))
     typed = _operator_words(payload)
     _operator_mode(payload, typed)
@@ -1008,6 +1009,15 @@ def _inject_inbox(session_id: str, cwd: str = "") -> None:
         inject_context(context, also_log=False, skip_compression=True)
 
 
+def _confirm_inbox(session_id: str) -> None:
+    try:
+        from hooks.context.inbox_delivery import confirm_shown
+
+        confirm_shown(session_id)
+    except Exception as e:
+        log("inbox confirmation failed", {"error": str(e)})
+
+
 def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None = None) -> None:
     try:
         from hooks.context.swarm_heartbeat import beat, heard, report
@@ -1019,6 +1029,15 @@ def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None
             report(payload.get("model", ""))
     except Exception as e:
         log("swarm heartbeat failed", {"error": str(e)})
+
+
+def _swarm_outcome(payload: dict) -> None:
+    try:
+        from hooks.context.swarm_heartbeat import outcome
+
+        outcome(payload)
+    except Exception as e:
+        log("swarm outcome record failed", {"error": str(e)})
 
 
 def _operator_words(payload: dict) -> bool:
@@ -1106,6 +1125,74 @@ def _wait_nudge_blocks(payload: dict) -> list[str]:
         log("swarm wait nudge failed", {"error": str(e)})
         return []
     return [context] if context else []
+
+
+def _credential_guard(payload: dict, tool_name: str) -> tuple[dict, str] | None:
+    _credential_rewrite: tuple[dict, str] | None = None
+    try:
+        from hooks.config import CREDENTIAL_GUARD_ENABLED
+
+        if CREDENTIAL_GUARD_ENABLED:
+            from hooks.context.credential_guard import evaluate as _credential_evaluate
+            from hooks.targets import current_target as _current_target
+
+            _verdict = _credential_evaluate(
+                payload,
+                allow_rewrite=_current_target() == "claude" and payload.get("permission_mode") == "bypassPermissions",
+            )
+            if _verdict.block:
+                otel.emit_event(
+                    "agentihooks.guardrail.credential_read_blocked",
+                    {"session.id": payload.get("session_id", ""), "tool_name": tool_name},
+                )
+                raise BlockAction(_verdict.block)
+            if _verdict.rewrite:
+                _credential_rewrite = (_verdict.rewrite, _verdict.note or "")
+    except BlockAction:
+        raise
+    except Exception as e:  # NOSONAR — a guard that crashes must not crash the hook, unless a credential is in play
+        if _near_credential(payload.get("tool_input") or {}):
+            raise BlockAction(
+                f"BLOCKED: credential guard internal error near a credential path — refusing ({e})."
+            ) from e
+        log("credential_guard failed", {"error": str(e)})
+        print(f"WARNING: credential_guard check failed ({e}) — guard bypassed", file=sys.stderr)
+    return _credential_rewrite
+
+
+def _plan_read_guard(payload: dict, tool_name: str) -> None:
+    try:
+        from hooks.context.plan_read_guard import check as _plan_read_check
+
+        _plan_refusal = _plan_read_check(payload)
+        if _plan_refusal:
+            otel.emit_event(
+                "agentihooks.guardrail.plan_read_blocked",
+                {"session.id": payload.get("session_id", ""), "tool_name": tool_name},
+            )
+            raise BlockAction(_plan_refusal)
+    except BlockAction:
+        raise
+    except Exception as e:
+        log("plan_read_guard failed", {"error": str(e)})
+
+
+def _check_shell_guards(payload: dict) -> None:
+    from hooks.context.local_test_guard import check_local_tests
+
+    check_local_tests(payload)
+    if payload.get("tool_name") != "Bash":
+        return
+    try:
+        from hooks.context.branch_guard import check_branch_guard, check_commit_on_main
+
+        check_branch_guard(payload)
+        check_commit_on_main(payload)
+    except BlockAction:
+        raise
+    except Exception as e:
+        log("branch_guard check failed", {"error": str(e)})
+        print(f"WARNING: branch_guard check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
 
 
 def on_pre_tool_use(payload: dict) -> None:
@@ -1327,25 +1414,7 @@ def on_pre_tool_use(payload: dict) -> None:
         except Exception as e:
             log("version_guard check failed", {"error": str(e)})
 
-    # --- Branch guard: block git operations targeting main/master ---
-    if tool_name == "Bash":
-        try:
-            from hooks.context.branch_guard import (
-                check_branch_guard,
-                check_commit_on_main,
-            )
-
-            check_branch_guard(payload)
-            check_commit_on_main(payload)
-        except BlockAction:
-            raise
-        except Exception as e:
-            log("branch_guard check failed", {"error": str(e)})
-            print(
-                f"WARNING: branch_guard check failed ({e}) — guard bypassed",
-                file=sys.stderr,
-                flush=True,
-            )
+    _check_shell_guards(payload)
 
     # --- kubectl mutation guard: HARD FLOOR — block live-system state mutation ---
     if tool_name == "Bash":
@@ -1422,35 +1491,8 @@ def on_pre_tool_use(payload: dict) -> None:
     # protection at all. Reading is the exposure — a value reaching the
     # transcript has to be rotated, not deleted — so this blocks rather than
     # redacts, and bypass mode does not lift it.
-    _credential_rewrite: tuple[dict, str] | None = None
-    try:
-        from hooks.config import CREDENTIAL_GUARD_ENABLED
-
-        if CREDENTIAL_GUARD_ENABLED:
-            from hooks.context.credential_guard import evaluate as _credential_evaluate
-            from hooks.targets import current_target as _current_target
-
-            _verdict = _credential_evaluate(
-                payload,
-                allow_rewrite=_current_target() == "claude" and payload.get("permission_mode") == "bypassPermissions",
-            )
-            if _verdict.block:
-                otel.emit_event(
-                    "agentihooks.guardrail.credential_read_blocked",
-                    {"session.id": payload.get("session_id", ""), "tool_name": tool_name},
-                )
-                raise BlockAction(_verdict.block)
-            if _verdict.rewrite:
-                _credential_rewrite = (_verdict.rewrite, _verdict.note or "")
-    except BlockAction:
-        raise
-    except Exception as e:  # NOSONAR — a guard that crashes must not crash the hook, unless a credential is in play
-        if _near_credential(payload.get("tool_input") or {}):
-            raise BlockAction(
-                f"BLOCKED: credential guard internal error near a credential path — refusing ({e})."
-            ) from e
-        log("credential_guard failed", {"error": str(e)})
-        print(f"WARNING: credential_guard check failed ({e}) — guard bypassed", file=sys.stderr)
+    _credential_rewrite = _credential_guard(payload, tool_name)
+    _plan_read_guard(payload, tool_name)
 
     # File read deduplication
     if tool_name == "Read":
@@ -1741,7 +1783,7 @@ def on_post_tool_use(payload: dict) -> None:
     log(f"Post tool use: {tool_name}", {"tool": tool_name})
     _trace_session_id = payload.get("session_id", "")
     _operator_words(payload)
-
+    _swarm_outcome(payload)
     _conditions = None
     try:
         from hooks.context.conditions import post_effect
@@ -2056,6 +2098,7 @@ def on_stop(payload: dict) -> None:
 
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
+    _confirm_inbox(session_id)
 
     # Parse transcript to get metrics (Claude Code doesn't include these in hook payload)
     metrics = parse_transcript_metrics(transcript_path) if transcript_path else {}

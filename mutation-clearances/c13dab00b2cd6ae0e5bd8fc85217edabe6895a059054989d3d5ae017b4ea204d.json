@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/ledger_events.py:scripts.swarm.ledger_events.x__graphql__mutmut_41:6001919adfc3e9a84e72f55000fb3786554c24bb23aa2853934b4003a15c51f6": {
+    "reader": "Standards reader",
+    "reason": "An errored alias value of empty string or None raises TypeError in workflow identity extraction. Both are excluded from workflow queries and return None from public views, preserving unknown results."
+  }
+}

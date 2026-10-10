@@ -11,6 +11,7 @@ import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
+from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_page import chromium, rendered_home  # noqa: E402
 
 LEDGERS = {"alpha-2026-01-01": ("Alpha plan", "Alpha overview"), "beta-2026-01-02": ("Beta <plan>", "Beta overview")}
@@ -30,7 +31,7 @@ class Home(unittest.TestCase):
                 "followups": [],
             }
             html_path, _ = core.paths(slug)
-            html_path.write_text(new_ledger.render(new_ledger.build_doc(content), slug, 8765), encoding="utf-8")
+            html_path.write_text(legacy_page.render(new_ledger.build_doc(content), slug, 8765), encoding="utf-8")
         cls.browsers = contextlib.ExitStack()
         cls.browser = cls.browsers.enter_context(chromium())
 
@@ -61,15 +62,28 @@ class Home(unittest.TestCase):
 
     def test_home_and_bin_render_from_the_home_html_source(self):
         source = core.HOME.read_text(encoding="utf-8")
-        with tempfile.TemporaryDirectory() as tmp:
-            edited = Path(tmp) / "home.html"
-            edited.write_text(
-                source.replace("</title>", '</title><p id="edited">__HOME_HEADING__</p>'), encoding="utf-8"
-            )
-            with mock.patch.object(core, "HOME", edited):
-                self.assertIn('<p id="edited">HOME</p>', rendered_home(server, self.browser, "home"))
-                self.assertIn('<p id="edited">BIN</p>', rendered_home(server, self.browser, "bin"))
+        server.served_page.cache_clear()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                edited = Path(tmp) / "home.html"
+                edited.write_text(
+                    source.replace("</title>", '</title><p id="edited">__HOME_HEADING__</p>'), encoding="utf-8"
+                )
+                with mock.patch.object(core, "HOME", edited):
+                    self.assertIn('<p id="edited">HOME</p>', rendered_home(server, self.browser, "home"))
+                    self.assertIn('<p id="edited">BIN</p>', rendered_home(server, self.browser, "bin"))
+        finally:
+            server.served_page.cache_clear()
         self.assertTrue(source.rstrip().endswith("</html>"))
+
+    def test_home_template_edit_leaves_the_page_version_current(self):
+        server.served_page.cache_clear()
+        try:
+            self.test_home_and_bin_render_from_the_home_html_source()
+            page = server.page_for("alpha-2026-01-01")
+            self.assertEqual(core.PAGE_RE.search(page).group(1), core.page_version())
+        finally:
+            server.served_page.cache_clear()
 
 
 if __name__ == "__main__":

@@ -162,6 +162,9 @@ def test_execution_metadata_schema(store, agent):
         ({"runtime_target": {"server_id": 1}}, "runtime target identity must be a string"),
         ({"runtime_target": {"pid": 0}}, "runtime PID must be a positive integer"),
         ({"runtime_target": {"pid": True}}, "runtime PID must be a positive integer"),
+        ({"runtime_target": {"pid": 7, "pid_start": 0}}, "runtime PID start time must be a positive integer"),
+        ({"runtime_target": {"pid": 7, "pid_start": "777"}}, "runtime PID start time must be a positive integer"),
+        ({"runtime_target": {"pid": 7, "pid_start": True}}, "runtime PID start time must be a positive integer"),
         ({"execution_id": "exe-forged"}, "new execution identity and generation must be allocated by the store"),
         ({"generation": 9}, "new execution identity and generation must be allocated by the store"),
         ({"name": "engineer@ffffff-9999"}, "execution requires a registered canonical agent name"),
@@ -174,6 +177,11 @@ def test_invalid_admission_is_contained(store, agent, changes, message):
     assert str(error.value) == message
     assert protected(store) == before
     assert store.execution_identity_conflicts_total("fixture") == 1
+
+
+def test_a_local_target_names_its_process_by_namespace_pid_and_start_time(store, agent):
+    target = {"process_namespace": "boot/pid:[1]", "pid": 7, "pid_start": 1}
+    assert store.start_execution("fixture", replace(agent, runtime_target=target)).runtime_target == target
 
 
 @pytest.mark.parametrize(
@@ -416,10 +424,27 @@ def test_agent_projection_is_compatible_with_the_preceding_strict_reader(store, 
     assert store.agents("fixture") == [current]
 
 
+def test_hive_ownership_survives_execution_updates_without_changing_the_legacy_projection(store, agent):
+    current = store.start_execution("fixture", replace(agent, hive="member-one"))
+    assert store.agents("fixture")[0].hive == "member-one"
+    assert "hive" not in json.loads(store.redis.hget(store.key("fixture", "agents"), current.name))
+    store.put_agent("fixture", replace(current, idle_ticks=2))
+    assert store.agents("fixture")[0].hive == "member-one"
+
+
+def test_execution_records_saved_before_hive_ownership_load_with_an_empty_hive(store, agent):
+    current = store.start_execution("fixture", agent)
+    raw = json.loads(store.redis.hget(store.key("fixture", "executions"), current.execution_id))
+    raw.pop("hive")
+    store.redis.hset(store.key("fixture", "executions"), current.execution_id, json.dumps(raw))
+    assert store.agents("fixture")[0].hive == ""
+
+
 @pytest.mark.parametrize(
     "changes",
     [
         {"execution_id": "exe-unadmitted"},
+        {"hive": "member-one"},
         {"generation": 1},
         {"runtime_target": {"pid": 1}},
         {"runtime_backend": "unsupported"},

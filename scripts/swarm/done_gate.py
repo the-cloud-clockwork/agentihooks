@@ -12,6 +12,10 @@ WORKERS = ("eng", "ci")
 MERGED = "MERGED"
 RECHECK_MS = 24 * 60 * 60_000
 SEEN_TTL_S = 2 * 24 * 3600
+REOPENED = (
+    "Reopened by the swarm: its pull request {url} is {state}, not merged. "
+    "A code task is done only when its pull request merges."
+)
 
 
 def refusal(task, url, github):
@@ -27,6 +31,24 @@ def refusal(task, url, github):
     if found.state != MERGED:
         return f"pull request {url} is {found.state.lower()}, not merged; merge it, then run swarm done again"
     return ""
+
+
+def require_local(store: object, slug: str, task_id: str) -> None:
+    from scripts.swarm.store import SwarmError
+
+    if store.redis.exists(store.key(slug, "task-authority", task_id), store.key(slug, "claim-journal", task_id)):
+        raise SwarmError("distributed final mutations require the controller outcome path")
+
+
+def require_target(store: object, slug: str, task_id: str, url: str, tasks: list[dict]) -> None:
+    from scripts.swarm.store import SwarmError
+
+    own = next((task for task in tasks if task["id"] == task_id), {})
+    if own.get("pr_url") != url:
+        raise SwarmError("final integration must target this task's recorded pull request")
+    for task in tasks:
+        if task.get("pr_url") == url:
+            require_local(store, slug, task["id"])
 
 
 def recheck_pass(store, slug, doc, ledger, now_ms, github):
@@ -48,10 +70,7 @@ def recheck_pass(store, slug, doc, ledger, now_ms, github):
             continue
         state = found.state.lower()
         ledger.update_task(slug, task_id, {"state": "open", "claimed_by": ""})
-        text = (
-            f"Reopened by the swarm: its pull request {url} is {state}, not merged. "
-            "A code task is done only when its pull request merges."
-        )
+        text = REOPENED.format(url=url, state=state)
         ledger.comment(slug, task_id, text, by="swarm")
         actions.append(f"task {task_id} reopened, its pull request is {state}")
     return actions

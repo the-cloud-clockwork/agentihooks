@@ -2,7 +2,6 @@ import contextlib
 import io
 import sys
 import unittest
-from unittest import mock
 
 from scripts.swarm_ledger import run
 
@@ -41,11 +40,6 @@ class Entry(unittest.TestCase):
                 code, text = help_of([word])
                 self.assertEqual(code, 0)
                 self.assertIn(marker, text)
-
-    def test_upgrade_rerenders_a_ledger_page(self):
-        with mock.patch("new_ledger.upgrade", return_value=0) as upgrade:
-            self.assertEqual(run(["upgrade", "demo-2026-01-01"]), 0)
-        upgrade.assert_called_once_with("demo-2026-01-01")
 
     def test_the_caller_keeps_its_argv(self):
         before = list(sys.argv)

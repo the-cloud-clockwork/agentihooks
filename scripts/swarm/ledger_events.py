@@ -9,6 +9,7 @@ import functools
 import json
 import re
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -16,7 +17,7 @@ from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxError
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
-from scripts.swarm.store import MASTER
+from scripts.swarm.store import MASTER, PREFIX
 
 MINUTE_MS = 60_000
 FOLLOWUP_RAISE_MS = 15 * MINUTE_MS
@@ -58,6 +59,7 @@ class PullRequest:
     red_at: int | None = None
     unpassed_gate: str = ""
     queued: bool = False
+    gate_passed: bool = False
 
 
 def iso_ms(text):
@@ -97,6 +99,7 @@ def pull_request(raw):
         min(reds, default=None),
         unpassed_gate,
         raw.get("mergeQueueEntry") is not None,
+        bool(raw.get("gated")) and set(_gate(checks, results)) == {"SUCCESS"},
     )
 
 
@@ -108,7 +111,7 @@ def red_window(pushed_at, red_at, now_ms):
 def _unpassed_gate(gated, checks, results, running):
     if not gated or running or any(result in PENDING for result in results):
         return ""
-    gate = [result for check, result in zip(checks, results) if (check.get("name") or check.get("context")) == GATE]
+    gate = _gate(checks, results)
     return GATE if all(result == "SKIPPED" for result in gate) else ""
 
 
@@ -117,10 +120,14 @@ def _resolved(gated, checks, results, running):
         return True
     if not gated:
         return not running and "SUCCESS" in results and all(result in PASSED for result in results)
-    gate = [result for check, result in zip(checks, results) if (check.get("name") or check.get("context")) == GATE]
+    gate = _gate(checks, results)
     if any(result in FINAL_RED for result in gate):
         return True
     return "SUCCESS" in gate and not running and not any(result in PENDING for result in results)
+
+
+def _gate(checks, results):
+    return [result for check, result in zip(checks, results) if (check.get("name") or check.get("context")) == GATE]
 
 
 def declares_gate(tree):
@@ -139,7 +146,14 @@ def view(url, run=subprocess.run):
         )
         if done.returncode != 0:
             return None
-        raw = json.loads(done.stdout)["data"]["resource"]
+        return _view_resource(json.loads(done.stdout)["data"]["resource"])
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _view_resource(raw, gated=None):
+    try:
+        raw = dict(raw)
         commits = [node["commit"] for node in raw["commits"]["nodes"]]
         rollup = (commits[-1].get("statusCheckRollup") or {}) if commits else {}
         contexts = rollup.get("contexts") or {}
@@ -149,10 +163,102 @@ def view(url, run=subprocess.run):
         raw["commits"] = commits
         raw["statusCheckRollup"] = contexts.get("nodes") or []
         raw["checkSuites"] = list(suites["nodes"])
-        raw["gated"] = bool(commits) and declares_gate(commits[-1].get("file"))
+        raw["gated"] = gated if gated is not None else bool(commits) and declares_gate(commits[-1].get("file"))
         return pull_request(raw)
-    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError):
         return None
+
+
+def views(
+    urls: list[str], run: Callable = subprocess.run, cache: object | None = None
+) -> dict[str, PullRequest | None]:
+    urls = list(dict.fromkeys(urls))
+    found = dict.fromkeys(urls)
+    selection = PULL_QUERY.partition("{")[2][:-1].replace(
+        'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}}',
+        'file(path:".github/workflows"){object{id}}',
+    )
+    for start in range(0, len(urls), 20):
+        batch = urls[start : start + 20]
+        fields = [f"p{i}:" + selection.replace("$url", json.dumps(url)) for i, url in enumerate(batch)]
+        data = _graphql("{" + " ".join(fields) + "}", run)
+        gates = _workflow_gates(data, run, cache)
+        for i, url in enumerate(batch):
+            raw = data.get(f"p{i}")
+            gated = gates.get(_workflow_id(raw))
+            found[url] = _view_resource(raw, gated) if gated is not None else None
+    return found
+
+
+def _graphql(query, run):
+    try:
+        done = run(
+            ["gh", "api", "graphql", "-f", f"query={query}"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        result = json.loads(done.stdout)
+        errors = result.get("errors", [])
+        if done.returncode and not errors:
+            return {}
+        data = result["data"]
+        if not isinstance(data, dict):
+            return {}
+        for error in errors:
+            path = error.get("path")
+            if not path:
+                return {}
+            data[path[0]] = None
+        return data
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return {}
+
+
+def _workflow_id(raw):
+    try:
+        commits = raw["commits"]["nodes"]
+        tree = commits[-1]["commit"]["file"] if commits else None
+        return tree["object"]["id"] if tree is not None else None
+    except (KeyError, TypeError):
+        return ""
+
+
+def _workflow_gates(data, run, cache):
+    trees = {_workflow_id(raw) for raw in data.values()} - {None, ""}
+    gates = {None: False, "": None, **dict.fromkeys(trees)}
+    pending = []
+    for tree in sorted(trees):
+        saved = cache.get(f"{PREFIX}:workflow-gate:{tree}") if cache is not None else None
+        if saved in ("0", "1"):
+            gates[tree] = saved == "1"
+        else:
+            pending.append(tree)
+    if pending:
+        query = "{nodes(ids:" + json.dumps(pending) + "){id ...on Tree{entries{object{...on Blob{text}}}}}}"
+        for node in _graphql(query, run).get("nodes") or []:
+            if node is None or "entries" not in node:
+                continue
+            tree = node["id"]
+            gates[tree] = declares_gate({"object": node})
+            if cache is not None:
+                cache.set(f"{PREFIX}:workflow-gate:{tree}", int(gates[tree]), ex=SENT_TTL_S)
+    return gates
+
+
+def tick_view(inbox: object, store: object, slug: str, doc: dict) -> Callable[[str], PullRequest | None]:
+    urls = [
+        task["pr_url"] for task in doc.get("tasks", []) if task.get("state") in ("pr", "claimed") and task.get("pr_url")
+    ]
+    notices = store.redis.hgetall(store.key(slug, "red-notices"))
+    urls += [url for item_id, url in notices.items() if _open(inbox, item_id)]
+    snapshots = views(urls, cache=store.redis)
+
+    @functools.cache
+    def lookup(url):
+        return snapshots[url] if url in snapshots else view(url)
+
+    return lookup
 
 
 class Mail:
@@ -161,6 +267,7 @@ class Mail:
         live = [a for a in store.agents(slug) if a.state != "finished"]
         self.seats = {a.name: a.seat or a.name for a in live}
         boss = next((a for a in live if a.lane == MASTER), None)
+        self.has_master = boss is not None
         self.master = self.seats[boss.name] if boss else seat_address(slug, MASTER)
 
     def once(self, key, act):
@@ -195,12 +302,20 @@ def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
     mail, github = Mail(inbox, store, slug), functools.cache(github)
     events = doc.get("_meta", {}).get("events", [])
     tasks = {t["id"]: t for t in doc.get("tasks", [])}
+    raised = _raised_for_operator(doc, events)
     return (
-        _events(mail, new_events(store, slug, doc, "events-cursor"), tasks)
+        _events(mail, new_events(store, slug, doc, "events-cursor"), tasks, raised)
         + _followups(mail, doc, events, ledger, now_ms)
         + _pull_requests(mail, tasks.values(), now_ms, github)
         + _settle_red_notices(mail, github)
+        + _priorities(mail, doc, raised)
     )
+
+
+def _raised_for_operator(doc, events):
+    """Follow-ups the swarm itself added for the operator: a master notice about one would escalate into another."""
+    added = {e.get("target") for e in events if e.get("kind") == "added" and e.get("by") == SENDER}
+    return {f"followups/{f['id']}" for f in doc.get("followups", []) if f.get("needs_operator")} & added
 
 
 def _settle_red_notices(mail, github):
@@ -251,6 +366,8 @@ def _settled(found):
 def findings_pass(inbox, store, slug, shown):
     mail, sent = Mail(inbox, store, slug), []
     for found in shown:
+        if found["kind"] == "spawn stall":
+            continue
         judged = (found.get("verdict") or {}).get("at", 0)
         text = (
             f"New health finding on swarm {slug}: {found['summary']} ({found['kind']}). Give it a verdict: "
@@ -276,9 +393,9 @@ def _by_agent(mail, event):
     return not (lane_of(by) == MASTER and mail.store.names.slug_of(by) == mail.slug)
 
 
-def _events(mail, events, tasks):
+def _events(mail, events, tasks, raised):
     sent = []
-    for event in filter(lambda e: _by_agent(mail, e), events):
+    for event in filter(lambda e: _by_agent(mail, e) and e.get("target") not in raised, events):
         text = _describe(mail.slug, event, tasks)
         if text:
             sent += mail.send(
@@ -335,6 +452,32 @@ def _followups(mail, doc, events, ledger, now_ms):
     return sent
 
 
+def _priorities(mail, doc, raised):
+    key = mail.store.key(mail.slug, "priorities-sent")
+    rows = {p["item"]: p for p in doc.get("priorities", [])}
+    seen = mail.store.redis.smembers(key)
+    gone = seen - rows.keys()
+    if gone:
+        mail.store.redis.srem(key, *gone)
+    if not mail.has_master:
+        return []
+    marker = mail.store.key(mail.slug, "priorities-seeded")
+    seeding, sent = not mail.store.redis.exists(marker), []
+    for item, row in rows.items():
+        if item in seen or row.get("by") == SENDER or not _by_agent(mail, row):
+            continue
+        if not seeding and item not in raised:
+            text = (
+                f"New priority on ledger {mail.slug} for {item}: {row['text']}\n"
+                "Triage it: resolve it if the call is yours, else leave it for the operator."
+            )
+            mail.inbox.send(SENDER, mail.master, text, ref=f"{mail.slug}:priority:{item}")
+            sent.append(f"told {mail.master}: priority {item}")
+        mail.store.redis.sadd(key, item)
+    mail.store.redis.set(marker, 1)
+    return sent
+
+
 def _pull_requests(mail, tasks, now_ms, github):
     sent = []
     for task in tasks:
@@ -361,6 +504,7 @@ def _pull_requests(mail, tasks, now_ms, github):
             sent += mail.send(f"{url}:closed", mail.engineer(task), text)
         elif (
             found.red
+            and not found.gate_passed
             and (not found.unpassed_gate or found.failed)
             and red_window(found.pushed_at, found.red_at, now_ms) is not None
         ):

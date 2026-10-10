@@ -3,10 +3,13 @@ uncommitted changes, a push origin refused, or pushed work with no pull request 
 
 import os
 import re
+import signal
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from hooks.config import CONDITIONS_TIMEOUT_SEC
 from scripts.gates.base import Decision
 from scripts.swarm.naming import lane_of, plain
 from scripts.swarm_ledger import ledger_kinds
@@ -21,6 +24,17 @@ SETTLED = "a later stop passed with the work committed, on origin and recorded"
 PUSHED = "pushed"
 GITHUB_RE = re.compile(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$")
 GIT_TIMEOUT_S = 60
+# Two seconds under the Stop condition's kill: a gate still running at the kill lets the stop through unpushed.
+GATE_TIMEOUT_S = CONDITIONS_TIMEOUT_SEC - 2
+PREPUSH = Path("scripts") / "ci_prepush" / "__init__.py"
+GATE_FAILED = (
+    "The pre push gate failed in {path}, so the stop hook did not push it. "
+    "Run python -m scripts.ci_prepush there, fix what fails and commit."
+)
+GATE_SLOW = (
+    "The pre push gate did not finish in {seconds:g} s in {path}, so the stop hook did not push it. "
+    "Run python -m scripts.ci_prepush there and commit."
+)
 
 
 @dataclass(frozen=True)
@@ -59,6 +73,30 @@ def trees(root, name):
     own = re.compile(rf"{re.escape(plain(name))}(?:-\d+)?")
     found = (inspect(path, own) for path in sorted(Path(root).glob("*/*")) if own.fullmatch(path.name))
     return [tree for tree in found if tree is not None]
+
+
+def gate_refusal(tree):
+    """Why the pre push gate keeps HEAD off origin, or None: a repo without one passes, a stamped HEAD is not rerun."""
+    if not (tree.path / PREPUSH).is_file():
+        return None
+    from scripts.ci_prepush import passed
+
+    if passed(tree.path):
+        return None
+    gate = subprocess.Popen(
+        [sys.executable, "-m", "scripts.ci_prepush"],
+        cwd=tree.path,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        code = gate.wait(GATE_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        os.killpg(gate.pid, signal.SIGKILL)
+        gate.wait()
+        return GATE_SLOW.format(path=tree.path, seconds=GATE_TIMEOUT_S)
+    return None if code == 0 else GATE_FAILED.format(path=tree.path)
 
 
 def push(tree):
@@ -124,9 +162,11 @@ class PushStop:
         task = next((t for t in doc["tasks"] if t.get("id") == who.task), None) if doc else {}
         if task is None or ledger_kinds.kind(task) == "plan":
             return Decision()
-        store, owed = self.connect(), False
+        store, owed, failed = self.connect(), False, []
         for tree in trees(self.root(), who.name):
-            if tree.unpushed and push(tree):
+            if tree.unpushed and (refused := gate_refusal(tree)):
+                failed.append(refused)
+            elif tree.unpushed and push(tree):
                 self.record(store, ledger, who, tree)
             owed = owed or tree.dirty or (tree.unpushed and not self.on_origin(tree))
             owed = owed or (doc and tree.own and not task.get("pr_url") and self.unrecorded(store, doc, who))
@@ -134,7 +174,7 @@ class PushStop:
             self.settle(store, who)
             return Decision()
         self.notify(store, who)
-        return Decision.deny(TEMPLATE)
+        return Decision.deny(" ".join([TEMPLATE, *failed]))
 
     def on_origin(self, tree):
         return count(tree.path, "HEAD", "--not", "--remotes=origin") == 0
@@ -153,11 +193,11 @@ class PushStop:
 
         remote = git(tree.path, "remote", "get-url", "origin").stdout.strip()
         head = git(tree.path, "rev-parse", "HEAD").stdout.strip()
+        Progress(store.redis, who.swarm).outcome(who.name, PUSHED, self.now())
         try:
             ledger.comment(who.swarm, who.task, record_text(remote, tree.branch, head), by=SENDER)
         except SwarmError:
             pass
-        Progress(store.redis, who.swarm).outcome(who.name, PUSHED, self.now())
 
     def notify(self, store, who):
         from scripts.inbox.store import CLOSED, InboxStore

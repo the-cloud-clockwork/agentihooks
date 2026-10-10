@@ -40,6 +40,7 @@ class FakeRuntime:
             request.lane,
             request.task["id"],
             pane_id=f"{self.backend}:{request.name}",
+            execution_id=f"exe-{request.name}" if self.backend == REMOTE else "",
             runtime_backend=self.backend,
             runtime_target={"endpoint": PRIVATE} if self.backend == REMOTE else {},
         )
@@ -113,7 +114,7 @@ def herdr_runtime(tmp_path, monkeypatch, panes=None, run=None):
         return {}
 
     runtime = HerdrRuntime(home=tmp_path, run=run or started, herdr=herdr, choose=lambda *_: ("claude", "open"))
-    runtime.end = lambda name, pid, homes: reaper.Outcome()
+    runtime.end = lambda name, pid, homes, start=0: reaper.Outcome()
     return runtime, calls
 
 
@@ -220,7 +221,7 @@ OPERATIONS = [
 def test_each_operation_needs_its_own_capability(operation, need, call):
     lacking = FakeRuntime(REMOTE, set(Capability) - {need})
     router = RuntimeRouter([lacking], REMOTE)
-    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", runtime_backend=REMOTE)
+    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", execution_id="exe-1", runtime_backend=REMOTE)
     assert call(router, agent) == Outcome(operation, Status.UNSUPPORTED, REMOTE, detail=f"kubernetes lacks {need}")
     assert lacking.calls == []
     assert router.failures == {(REMOTE, operation): 1}
@@ -230,7 +231,7 @@ def test_each_operation_needs_its_own_capability(operation, need, call):
 def test_each_operation_runs_on_a_backend_holding_its_capability(operation, need, call):
     full = FakeRuntime(REMOTE, set(Capability))
     router = RuntimeRouter([full], REMOTE)
-    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", runtime_backend=REMOTE)
+    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", execution_id="exe-1", runtime_backend=REMOTE)
     assert call(router, agent).status is Status.OK
     assert len(full.calls) == 1
     assert router.capability_failures_total() == 0
@@ -404,7 +405,7 @@ def test_local_drain_is_unsupported():
 
 def test_a_refused_retirement_carries_the_herdr_refusal(tmp_path, monkeypatch):
     herdr, _ = herdr_runtime(tmp_path, monkeypatch)
-    herdr.end = lambda name, pid, homes: reaper.Outcome(process=42, refusal="shared process group")
+    herdr.end = lambda name, pid, homes, start=0: reaper.Outcome(process=42, refusal="shared process group")
     agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w1:p1")
     outcome = LocalHerdrRuntime(herdr).terminate(agent, homes=("/scratch",))
     refusal = {"process": 42, "refusal": "shared process group"}

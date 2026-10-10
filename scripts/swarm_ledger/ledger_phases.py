@@ -1,7 +1,9 @@
 import re
 
+from scripts.swarm_ledger import ledger_plans
+
 OPS = ("phase_add", "phase_update", "phase_review", "phase_append")
-FIELDS = ("title", "description", "depends_on", "planning", "release", "plan_url")
+FIELDS = ("title", "description", "depends_on", "planning", "release", "plan_url", "plan_ref", "plan")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 ID_RE = re.compile(r"^[A-Za-z][\w.-]{0,63}$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
@@ -12,7 +14,11 @@ PLANNING_DEFAULT = "auto"
 
 
 def check_fields(fields: dict) -> None:
-    for key in ("title", "description"):
+    from scripts.swarm_ledger import plan_ranges
+
+    if "plan_ref" in fields:
+        plan_ranges.check_ref(fields["plan_ref"])
+    for key in ("title", "description", "plan"):
         if key in fields and not isinstance(fields[key], str):
             raise ValueError(f"{key} must be a string")
     if "depends_on" in fields and (
@@ -48,25 +54,6 @@ def _visit(phase: str, graph: dict, chain: list[str], visited: set) -> None:
     for dependency in graph[phase]:
         _visit(dependency, graph, [*chain, phase], visited)
     visited.add(phase)
-
-
-def seed_graph_valid(phases: list[dict], base: list[dict], seed: list[dict], ctx) -> bool:
-    previous = {phase["id"]: phase for phase in base}
-    candidate = {phase["id"]: phase.copy() for phase in phases}
-    for phase in seed:
-        phase_id = phase["id"]
-        if phase_id not in candidate and phase_id not in previous:
-            candidate[phase_id] = phase.copy()
-        elif phase_id in candidate:
-            for key in FIELDS:
-                if key in phase and phase.get(key) != previous.get(phase_id, {}).get(key):
-                    candidate[phase_id][key] = phase[key]
-    try:
-        validate(list(candidate.values()))
-    except ValueError as exc:
-        ctx.refused.append(str(exc))
-        return False
-    return True
 
 
 def check(op: dict) -> None:
@@ -153,12 +140,15 @@ def append(doc: dict, op: dict, ctx) -> bool:
             "done": False,
             **{k: entry[k] for k in FIELDS if k in entry},
             "planning": entry.get("planning", PLANNING_DEFAULT),
+            "added_by": op["by"],
             **({"review": dict(review)} if entry.get("planning") == "manual" else {}),
         }
         for entry in op["phases"]
     ]
     try:
         validate(doc["phases"] + added)
+        for refusal in filter(None, (ledger_plans.phase_refusal(doc, phase) for phase in added)):
+            raise ValueError(refusal)
     except ValueError as exc:
         ctx.refused.append(str(exc))
         return False
@@ -187,9 +177,18 @@ def apply(doc: dict, op: dict, ctx) -> bool:
     after = {**(phase or {"id": phase_id, "description": "", "done": False, "comments": []}), **fields}
     try:
         validate([after if p["id"] == phase_id else p for p in phases] + ([after] if phase is None else []))
+        ledger_plans.check_move(phase or {}, fields)
+        if "plan_ref" in fields:
+            from scripts.swarm_ledger import plan_ranges
+
+            plan_ranges.check_phase_ref(doc, after)
+        view = ledger_plans.moved(doc, after)
+        if refusal := ledger_plans.phase_refusal({**doc, **view}, after):
+            raise ValueError(refusal)
     except ValueError as exc:
         ctx.refused.append(str(exc))
         return False
+    ledger_plans.settle(doc, view, op["by"], ctx)
     target = f"phases/{phase_id}"
     if phase is None:
         phases.append(after)

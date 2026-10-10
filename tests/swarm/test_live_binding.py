@@ -840,7 +840,7 @@ def test_retirement_uses_the_same_process_the_verifier_checked(monkeypatch):
     ended = []
     agent = AgentRecord("engineer", "eng", "one", harness="claude")
     runtime = HerdrRuntime(run=lambda argv, **kwargs: pytest.fail("retire never runs terminate-agent"))
-    runtime.end = lambda name, pid, homes: ended.append((name, pid, homes)) or Outcome((pid,))
+    runtime.end = lambda name, pid, homes, start=0: ended.append((name, pid, homes)) or Outcome((pid,))
     runtime.bindings([agent])
     assert runtime.retire(agent) is True
     assert ended == [("engineer", "11", [])]
@@ -867,6 +867,159 @@ def test_unbound_absent_process_has_no_live_report(monkeypatch):
 
     monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
     assert HerdrRuntime().bindings([AgentRecord("engineer", "eng", "one")]) == {}
+
+
+@pytest.mark.parametrize(
+    "status, session_id, expected",
+    [
+        ("alive", "current", {"pid": 22, "rebound": 22}),
+        ("unregistered", "current", {"process": False}),
+        ("alive", "other", {"process": False}),
+    ],
+)
+def test_a_session_resumed_under_a_new_process_rebinds_by_name_and_conversation(
+    monkeypatch, status, session_id, expected
+):
+    from types import SimpleNamespace
+
+    from scripts import terminate_agent
+    from scripts.swarm.runtime import HerdrRuntime
+
+    resumed = SimpleNamespace(
+        name="engineer",
+        target="claude",
+        status=status,
+        session_id=session_id,
+        process=SimpleNamespace(pid=22, start_time=3),
+    )
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [resumed])
+    monkeypatch.setattr(live_binding, "read", lambda agent, pid: {"pid": pid})
+    agent = AgentRecord(
+        "engineer",
+        "eng",
+        "one",
+        harness="claude",
+        conversation_id="current",
+        profile_decision={"validation": {"pid": 99}},
+    )
+    assert HerdrRuntime().bindings([agent]) == {"engineer": expected}
+
+
+@pytest.mark.parametrize(
+    "validation, read, expected",
+    [
+        ({"pid": 22}, {"pid": 22}, {"pid": 22}),
+        ({}, {"pid": 22}, {"pid": 22}),
+        ({"pid": 99}, {"process": False}, {"process": False}),
+    ],
+)
+def test_bindings_report_a_rebound_only_for_a_live_process_other_than_the_validated_one(
+    monkeypatch, validation, read, expected
+):
+    from types import SimpleNamespace
+
+    from scripts import terminate_agent
+    from scripts.swarm.runtime import HerdrRuntime
+
+    session = SimpleNamespace(
+        name="engineer",
+        target="claude",
+        status="alive",
+        session_id="current",
+        process=SimpleNamespace(pid=22, start_time=3),
+    )
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [session])
+    monkeypatch.setattr(live_binding, "read", lambda agent, pid: dict(read))
+    agent = AgentRecord(
+        "engineer",
+        "eng",
+        "one",
+        harness="claude",
+        conversation_id="current",
+        profile_decision={"validation": validation},
+    )
+    assert HerdrRuntime().bindings([agent]) == {"engineer": expected}
+
+
+@pytest.mark.parametrize("panes", [{}, {"w1:p9": "conv", "w1:p8": "conv"}, {"w1:p9": "other"}])
+def test_tick_holds_a_resumed_agent_until_one_pane_holds_its_conversation(ticking, panes):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    old = next(a for a in store.agents("sw") if a.lane == "eng")
+    old = replace(old, conversation_id="conv", profile_decision={"validation": {"pid": 99}})
+    twin = replace(old, name=f"{old.name}-twin")
+    store.put_agent("sw", old)
+    store.put_agent("sw", twin)
+    runtime.conversation_ids = panes
+    runtime.bindings = lambda agents: {
+        a.name: {**live_binding.assignment(a), "hooks": True, **({"rebound": 1234} if a.lane == "eng" else {})}
+        for a in agents
+    }
+    actions = tick("sw", store, ledger, runtime, 200)
+    now = next(a for a in store.agents("sw") if a.name == old.name)
+    assert now.profile_decision["validation"]["pid"] == 99
+    assert now.pane_id == old.pane_id
+    assert not runtime.killed
+    assert {f"held {a.name} until one pane holds its resumed process 1234" for a in (old, twin)} <= set(actions)
+
+
+@pytest.mark.parametrize(
+    "decision, expected",
+    [
+        ({"profile": "engineer"}, {"profile": "engineer", "validation": {"pid": 7}}),
+        ({"validation": {"pid": 1, "canary": "c"}}, {"validation": {"pid": 7, "canary": "c"}}),
+    ],
+)
+def test_rebind_keeps_the_launch_decision_and_moves_only_the_validated_process(ticking, decision, expected):
+    from scripts.swarm.tick import _rebind
+
+    store, runtime, _ = ticking
+    runtime.conversation_ids = {"w1:p9": "conv", "w1:p8": "other"}
+    agent = AgentRecord("engineer", "eng", "one", conversation_id="conv", profile_decision=decision)
+    rebound = _rebind("sw", store, runtime, agent, 7)
+    assert (rebound.pane_id, rebound.profile_decision) == ("w1:p9", expected)
+
+
+def test_a_validated_agent_rebinds_to_its_earliest_resumed_session():
+    from types import SimpleNamespace
+
+    def session(pid, start):
+        return SimpleNamespace(
+            name="engineer",
+            target="claude",
+            status="alive",
+            session_id="conv",
+            process=SimpleNamespace(pid=pid, start_time=start),
+        )
+
+    agent = AgentRecord("engineer", "eng", "one", conversation_id="conv", profile_decision={"validation": {"pid": 99}})
+    assert live_binding.bound_session(agent, [session(31, 9), session(32, 4), session(33, 6)]).process.pid == 32
+
+
+def test_tick_keeps_a_resumed_agent_and_records_its_new_process_and_pane(ticking):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    old = next(a for a in store.agents("sw") if a.lane == "eng")
+    old = replace(
+        old, conversation_id="conv", profile_decision={"profile": "engineer", "validation": {"pid": 99, "canary": "c"}}
+    )
+    store.put_agent("sw", old)
+    runtime.conversation_ids = {"w1:p9": "conv", "w1:p8": "other"}
+    runtime.bindings = lambda agents: {
+        a.name: {**live_binding.assignment(a), "hooks": True, **({"rebound": 1234} if a.name == old.name else {})}
+        for a in agents
+    }
+    actions = tick("sw", store, ledger, runtime, 200)
+    now = next(a for a in store.agents("sw") if a.name == old.name)
+    assert now.profile_decision == {"profile": "engineer", "validation": {"pid": 1234, "canary": "c"}}
+    assert now.pane_id == "w1:p9"
+    assert not runtime.killed
+    assert ledger.rows["one"]["claimed_by"] == old.name
+    assert f"rebound {old.name} to its resumed process 1234 in pane w1:p9" in actions
 
 
 @pytest.mark.parametrize("proof_harness, proof_status", [("claude", "unregistered"), ("codex", "alive")])

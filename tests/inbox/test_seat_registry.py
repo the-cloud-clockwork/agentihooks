@@ -101,8 +101,27 @@ def test_exits_reads_every_recorded_exit_at_once(seats, monkeypatch):
     monkeypatch.setattr(seats.redis, "get", lambda key: pytest.fail(f"a read per exit: {key}"))
     monkeypatch.setattr(seats.redis, "mget", lambda keys: mget(keys) if keys else pytest.fail("an empty MGET"))
     assert seats.exits(["rig-eng-1", "rig-eng-2"]) == {
-        "rig-eng-1": {"seat": "eng-1@rig", "reason": "exited"},
+        "rig-eng-1": {"seat": "eng-1@rig", "reason": "exited", "generation": 0},
         "rig-eng-2": {},
     }
     assert seats.exits([]) == {}
     assert seats.agent_seats("nobody") == []
+
+
+def test_the_first_exit_of_an_occupancy_stands_and_a_new_occupancy_records_its_own(seats):
+    seats.occupy("eng-1@rig", "rig-eng-1", 1)
+    seats.record_exit("rig-eng-1", "eng-1@rig", "stopped")
+    seats.record_exit("rig-eng-1", "", "exited")
+    assert seats.exit_of("rig-eng-1") == {"seat": "eng-1@rig", "reason": "stopped", "generation": 1}
+    seats.occupy("eng-1@rig", "rig-eng-1", 2)
+    seats.record_exit("rig-eng-1", "", "finished its task and exited")
+    assert seats.exit_of("rig-eng-1") == {"seat": "", "reason": "finished its task and exited", "generation": 2}
+
+
+def test_a_life_has_left_its_seat_only_for_the_occupancy_it_exited(seats):
+    seats.occupy("eng-1@rig", "rig-eng-1", 1)
+    assert not seats.left("rig-eng-1", "eng-1@rig")
+    seats.record_exit("rig-eng-1", "eng-1@rig", "stopped")
+    assert seats.left("rig-eng-1", "eng-1@rig")
+    seats.occupy("eng-1@rig", "rig-eng-1", 2)
+    assert not seats.left("rig-eng-1", "eng-1@rig")

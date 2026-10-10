@@ -15,6 +15,7 @@ class FakeLedger:
         }
         self.notes = []
         self.swarm_sized = []
+        self.ranks, self.comments = [], []
 
     def tasks(self, slug):
         return list(self.rows.values())
@@ -32,6 +33,26 @@ class FakeLedger:
             "followups": [],
         }
 
+    def hierarchy(self, slug):
+        tasks = self.tasks(slug)
+        return [
+            row
+            for phase in getattr(self, "phases", [])
+            for row in [
+                {"node": f"phases/{phase['id']}", "kind": "phase", "depth": 0, "state": "open"},
+                *(
+                    {
+                        "node": f"tasks/{t['id']}",
+                        "kind": "task",
+                        "depth": 1,
+                        "state": "out_of_scope" if t.get("out_of_scope") else t["state"],
+                    }
+                    for t in tasks
+                    if t.get("phase") == phase["id"]
+                ),
+            ]
+        ]
+
     def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
         assert slug == "sw"
         row = self.rows[task_id]
@@ -48,6 +69,13 @@ class FakeLedger:
 
     def binned(self, slug):
         return slug in getattr(self, "bin", set())
+
+    def rank_task(self, slug, task_id, rank, by, if_unranked=False):
+        self.ranks.append((task_id, rank, by))
+        return {"id": task_id, "rank": rank}
+
+    def comment(self, slug, task_id, text, by):
+        self.comments.append((task_id, text, by))
 
 
 class FakeRuntime:
@@ -291,6 +319,43 @@ def test_a_task_whose_launch_failed_takes_only_a_slot_left_over(store):
     assert [task for _, _, task in runtime.spawned] == ["t2", "t3"]
 
 
+def test_rank_precedes_launch_failures_when_selecting_a_lane_task(store):
+    store.update("sw", max_eng=1)
+    ledger = FakeLedger(
+        [
+            {"id": "normal"},
+            {"id": "high", "rank": "high"},
+            {"id": "urgent", "rank": "urgent"},
+        ]
+    )
+    store.note_launch_failure("sw", "urgent", "canary timeout")
+    store.note_launch_failure("sw", "high", "canary timeout")
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["urgent"]
+    store.update("sw", max_eng=2)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime) == ["urgent", "high"]
+
+
+@pytest.mark.parametrize(
+    ("error", "failure"),
+    [
+        (SpawnError("no claude account has placeable quota seats", "unavailable"), ""),
+        (SpawnError("profile canary timeout", "refused"), "profile canary timeout"),
+        (OSError("worktree timer"), "worktree timer"),
+    ],
+)
+def test_quota_seat_refusal_does_not_mark_a_task_launch_failure(store, error, failure):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime(crash=error)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert store.launch_failure("sw", "t1") == failure
+    assert ledger.rows["t1"]["state"] == "open"
+    assert store.claimant("sw", "t1") is None
+    assert store.claims("sw", "t1") == 0
+    assert [(row["state"], row["error"]) for row in store.launches("sw")] == [("failed", str(error))]
+
+
 def test_a_launch_is_pending_while_the_runtime_spawns_it(store):
     ledger, runtime, seen = tasks(("t1", "eng")), FakeRuntime(), []
     spawn = runtime.spawn
@@ -525,6 +590,26 @@ def test_a_claimed_task_without_an_agent_is_reopened(store):
     assert ledger.rows["t1"]["state"] == "open"
     assert ledger.rows["t1"]["claimed_by"] == ""
     assert "task t1 had no agent, reopened" in actions
+
+
+def test_a_task_blocked_on_dev_red_is_reopened_once_dev_tests_passes(store, monkeypatch):
+    from scripts.swarm import dev_red
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    ledger.comments = []
+    ledger.comment = lambda slug, task, text, by: ledger.comments.append((task, text, by))
+    store.update("sw", state="paused")
+    ledger.rows["t1"].update(state="blocked", claimed_by="engineer@a1b2c3-0009")
+    dev_red.hold(store.redis, "sw", "t1", 41)
+    read = []
+    monkeypatch.setattr(
+        dev_red, "latest", lambda repo, run=None: read.append(repo) or {"id": 42, "conclusion": "success"}
+    )
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert read == ["/repo"]
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
+    assert ("t1", dev_red.REOPENED, "swarm") in ledger.comments
+    assert "task t1 reopened, dev Tests passed after the red run that blocked it" in actions
 
 
 def test_a_task_held_by_a_known_agent_is_not_reopened_as_an_orphan(store):
@@ -896,6 +981,13 @@ def test_a_first_life_has_no_reclaim_to_look_up(store, reclaims):
     assert store.reclaims("sw") == {}
 
 
+def test_a_reopened_task_with_a_branch_and_no_earlier_life_is_given_that_branch(store, reclaims):
+    ledger, runtime = FakeLedger([{"id": "t1", "branch": "feature-x"}]), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert reclaims == [("/repo", [], "feature-x")]
+    assert runtime.tasks[-1]["reclaim"] == RECLAIMED
+
+
 def test_a_handed_off_task_keeps_its_handoff_continuation_and_takes_no_reclaim(store, reclaims):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -961,6 +1053,16 @@ def test_account_reads_and_spawns_hold_the_placement_lock_and_the_rest_does_not(
     tick("sw", store, tasks(("t1", "eng")), runtime, 1)
     assert held == [("sweep", False), ("quota", True), ("master", True), ("eng", True)]
     assert not tick_module.PLACING.locked()
+
+
+def test_the_tick_hands_the_ci_budget_pass_its_ledger(store, monkeypatch):
+    from scripts.ci_budget import defects
+
+    seen = []
+    monkeypatch.setattr(defects, "refresh", lambda *args: seen.append(args) or [])
+    ledger = tasks(("t1", "eng"))
+    tick("sw", store, ledger, FakeRuntime(), 1)
+    assert [(args[0], args[3], args[4]) for args in seen] == [("sw", ledger, 1)]
 
 
 def test_an_operator_write_to_a_stopped_swarm_starts_its_master_and_no_engineers(store):
@@ -1280,6 +1382,54 @@ def test_a_parked_task_waits_for_its_blocker_and_then_takes_a_finish_claim_with_
     assert runtime.tasks[-1]["stack_base"] == []
 
 
+def test_a_parked_task_takes_the_free_slot_the_tick_after_its_blocker_is_done_ahead_of_fresh_work(store):
+    store.update("sw", max_eng=1)
+    ledger = FakeLedger(
+        [
+            {"id": "t1", "state": "pr", "branch": "engineer-a1b2c3-0001"},
+            {"id": "fresh"},
+            {"id": "t2", "depends_on": ["t1"], "parked_on": ["t1"], "branch": "engineer-a1b2c3-0002"},
+        ]
+    )
+    runtime = FakeRuntime()
+    ledger.rows["t1"].update(state="done", done=True)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["t2"] and ledger.rows["fresh"]["state"] == "open"
+
+
+def test_a_reopened_task_with_a_branch_is_claimed_before_fresh_work_even_when_its_territory_overlaps(store):
+    store.update("sw", max_eng=1)
+    ledger, runtime = FakeLedger([{"id": "t1", "territory": ["hooks"]}]), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    later = FakeLedger(
+        [
+            {"id": "fresh", "territory": ["docs"]},
+            {"id": "reopened", "branch": "engineer-a1b2c3-0003", "territory": ["hooks/x.py"]},
+        ]
+    )
+    ledger.rows.update(later.rows)
+    store.update("sw", max_eng=2)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime) == ["t1", "reopened"] and ledger.rows["fresh"]["state"] == "open"
+
+
+def test_a_fresh_task_of_a_higher_rank_still_goes_ahead_of_a_resumed_one(store):
+    store.update("sw", max_eng=1)
+    ledger = FakeLedger([{"id": "resumed", "branch": "engineer-a1b2c3-0004"}, {"id": "urgent", "rank": "urgent"}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["urgent"]
+
+
+def test_a_resumed_task_whose_launch_failed_takes_only_a_slot_left_over(store):
+    store.update("sw", max_eng=1)
+    ledger = FakeLedger([{"id": "resumed", "branch": "engineer-a1b2c3-0005"}, {"id": "fresh"}])
+    store.note_launch_failure("sw", "resumed", "canary timeout")
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["fresh"]
+
+
 @pytest.mark.parametrize(
     ("parked_on", "blocker_done", "lives"), [(["t1"], False, 0), ([], False, 1), (["t1"], True, 1)]
 )
@@ -1403,7 +1553,7 @@ def test_an_urgent_task_wins_a_shared_territory_over_an_earlier_normal_one(store
     assert spawned_ids(runtime) == ["t2", "t1"]
 
 
-def test_a_non_overlapping_task_is_claimed_ahead_of_a_higher_ranked_overlapping_one(store):
+def test_an_urgent_overlapping_task_is_claimed_ahead_of_lower_ranked_clear_work(store):
     store.update("sw", max_eng=1)
     ledger = FakeLedger([{"id": "t1", "territory": ["hooks"]}])
     runtime = FakeRuntime()
@@ -1412,7 +1562,7 @@ def test_a_non_overlapping_task_is_claimed_ahead_of_a_higher_ranked_overlapping_
     ledger.rows["t3"] = {**ledger.rows["t2"], "id": "t3", "rank": "low", "territory": ["docs"]}
     store.update("sw", max_eng=2)
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert spawned_ids(runtime) == ["t1", "t3"]
+    assert spawned_ids(runtime) == ["t1", "t2"]
 
 
 def test_equal_ranks_keep_ledger_order_and_ranks_order_the_rest(store):
@@ -1437,7 +1587,7 @@ def test_claims_follow_rank_then_the_small_fast_clear_task_then_critical_path_de
     ledger = FakeLedger(
         [
             {"id": "shallow", "phase": "p1"},
-            {"id": "deep", "phase": "p2"},
+            {"id": "deep", "rank": "normal", "phase": "p2"},
             {"id": "w1", "depends_on": ["deep"], "rank": "low", "phase": "p2"},
             {"id": "w2", "depends_on": ["w1"], "rank": "low", "phase": "p2"},
             {"id": "small", "difficulty": "S", "phase": "p3"},

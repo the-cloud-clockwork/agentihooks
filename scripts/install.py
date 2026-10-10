@@ -91,8 +91,10 @@ from urllib.request import url2pathname
 
 import yaml
 
+from scripts import balance_cli
 from scripts.claude_config import claude_home
 from scripts.claude_config import claude_json as claude_json_path
+from scripts.cli_delegates import delegated_cli
 from scripts.cli_parser import ArgumentParser
 from scripts.targets import DEFAULT_TARGET, SUPPORTED_TARGETS, get_adapter, resolve_target
 from scripts.targets._common import LEGACY_MCP_SERVER_NAMES, MCP_SERVER_NAME
@@ -5576,8 +5578,8 @@ def _claude_command(claude_bin: str, extra_args: list[str]) -> list[str]:
 def cmd_claude(extra_args: list[str]) -> None:
     """Route to the healthiest Claude account, then replace this process with Claude.
 
-    The account with a free place under its session band and the fewest live sessions
-    wins; --route forces one account.
+    The api endpoint or the account with a free place under its session band and the
+    fewest live sessions wins, split by the api weight; --route forces one account or api.
     """
     import fcntl
 
@@ -5585,9 +5587,9 @@ def cmd_claude(extra_args: list[str]) -> None:
     from scripts.claude_quota_balancer import (
         RoutingError,
         _cache_path,
-        credential_for_slug,
-        discover_credentials,
+        forced,
         format_selection,
+        launch_environment,
         render_table,
         route_requires_fable,
         select_credential,
@@ -5621,17 +5623,17 @@ def cmd_claude(extra_args: list[str]) -> None:
     route_lock = route_lock_path.open("a+", encoding="utf-8")
     fcntl.flock(route_lock, fcntl.LOCK_EX)
     try:
-        if route:
-            selected_credential = credential_for_slug(discover_credentials(os.environ), route)
-        else:
-            decision = select_credential(
+        decision = (
+            forced(os.environ, route)
+            if route
+            else select_credential(
                 os.environ,
                 include_fable=include_fable,
                 claude_bin=claude_bin,
                 sessions=sessions_by_account(),
                 exclude=excluded,
             )
-            selected_credential = decision.credential
+        )
     except RoutingError as exc:
         if fallback_bare and not route:
             print(f"[agenti] router unavailable ({exc}); launching bare Claude", file=sys.stderr, flush=True)
@@ -5647,24 +5649,16 @@ def cmd_claude(extra_args: list[str]) -> None:
     _write_route_report(
         report,
         status="routed",
-        account=selected_credential.account,
+        account=decision.account,
         placement="forced" if route else "open",
     )
-
-    os.environ.pop("ANTHROPIC_API_KEY", None)
-    for name in [name for name in os.environ if name.startswith("AH_CC_TOKEN_")]:
-        if name != selected_credential.env_name:
-            os.environ.pop(name, None)
-    os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = selected_credential.token
-    os.environ["AGENTIHOOKS_ROUTE_ACCOUNT"] = selected_credential.account
     print(
-        f"[agenti] account={selected_credential.account} route=forced"
-        if route
-        else format_selection(decision, include_fable),
+        f"[agenti] account={decision.account} route=forced" if route else format_selection(decision, include_fable),
         flush=True,
     )
     cmd = _claude_command(claude_bin, extra_args)
-    os.execvpe(claude_bin, cmd, os.environ)
+    # nosemgrep: python.lang.security.audit.dangerous-os-exec-tainted-env-args.dangerous-os-exec-tainted-env-args
+    os.execvpe(claude_bin, cmd, launch_environment(decision, os.environ))
 
 
 def cmd_balance(
@@ -5675,8 +5669,11 @@ def cmd_balance(
     show_account_metadata: str = "",
     current: bool = False,
 ) -> int:
+    import time
+    from dataclasses import replace
+
     from hooks.context.account_sessions import sessions_by_account
-    from scripts.agents_quota import codex_table
+    from scripts.agents_quota import codex_table, tokenless_table
     from scripts.claude_quota_balancer import (
         RoutingError,
         ancestor_oauth_token,
@@ -5689,6 +5686,8 @@ def cmd_balance(
         is_routable,
         render_table,
     )
+    from scripts.routing import master_account, place
+    from scripts.routing.claude_api import ClaudeApiSource
 
     session_env = dict(os.environ)
     _load_claude_runtime_env()
@@ -5717,14 +5716,14 @@ def cmd_balance(
                 render_table(
                     list(rows.values()),
                     include_fable=include_fable,
-                    current=session.account,
                     observed=observed,
                     sessions=live,
+                    marks=master_account.row_marks(session.account),
                 )
             )
         return 0 if session.account else 1
     if not credentials:
-        print(codex_table())
+        print(tokenless_table(master_account.row_marks().master, live))
         print("agentihooks: no non-empty AH_CC_TOKEN_* variables found", file=sys.stderr)
         return 2
     if show_account_metadata:
@@ -5748,7 +5747,9 @@ def cmd_balance(
         timeout=timeout,
         claude_bin=shutil.which("claude") or "claude",
     )
-    print(render_table(results, include_fable=include_fable, sessions=live))
+    api, weight = place.api_side(ClaudeApiSource(live), "claude", os.environ, time.time())
+    api = [replace(slot, weight=weight) for slot in api]
+    print(render_table(results, include_fable=include_fable, sessions=live, api=api, marks=master_account.row_marks()))
     print(f"\nsource={source}")
     print(f"\n{codex_table()}")
     return 0 if any(is_routable(result) for result in results) else 1
@@ -6425,22 +6426,17 @@ def main() -> None:
         from scripts.swarm_ledger import run as ledger_run
 
         raise SystemExit(ledger_run(_argv[1:]))
-    if _argv and _argv[0] == "swarm":
-        from scripts.swarm.cli import main as swarm_main
+    if _argv and _argv[0] in ("swarm", "controller"):
+        from scripts.swarm import cli, controller
 
-        raise SystemExit(swarm_main(_argv[1:]))
+        raise SystemExit({"swarm": cli.main, "controller": controller.main}[_argv[0]](_argv[1:]))
     if _crew_doctor(_argv):
         from scripts.doctor.cli import main as doctor_main
 
         raise SystemExit(doctor_main(_argv[1:]))
-    if _argv and _argv[0] == "msg":
-        from scripts.inbox.cli import main as msg_main
-
-        raise SystemExit(msg_main(_argv[1:]))
-    if _argv and _argv[0] == "trace":
-        from scripts.trace_cli import main as trace_main
-
-        raise SystemExit(trace_main(_argv[1:]))
+    _delegated = delegated_cli(_argv)
+    if _delegated:
+        raise SystemExit(_delegated(_argv[1:]))
     if _argv and _argv[0] == "classify":
         from hooks.classifier import cli as classifier_cli
 
@@ -6453,21 +6449,13 @@ def main() -> None:
         from scripts.select_profile import dispatch
 
         raise SystemExit(dispatch(_argv))
-    if _argv and _argv[0] == "deps":
-        from scripts.deps_preflight import main as deps_main
-
-        raise SystemExit(deps_main(_argv[1:]))
-    if _argv and _argv[0] == "quota":
-        from scripts.agents_quota import main as quota_main
-
-        raise SystemExit(quota_main(_argv[1:]))
     if _argv and _argv[0] == "skill":
         from scripts.skill_eval import main as skill_eval_main
 
         if _argv[1:2] != ["eval"]:
             raise SystemExit("usage: agentihooks skill eval [--agent {claude,codex}] -- <command>")
-
-        raise SystemExit(skill_eval_main(_argv[2:]))
+        skill_eval_main(_argv[2:])
+        return
     if _argv and _argv[0] == "manifestos":
         from scripts.profiles.manifestos import main as manifestos_main
 
@@ -6630,11 +6618,13 @@ def main() -> None:
         help="Swarm of agents over a swarm ledger: <id> create|start|pause|stop|set|status|send-message, list, tick",
     )
     sub.add_parser("msg", help="Durable messages between sessions: send|inbox|read|close")
+    sub.add_parser("recall", help="Recall archive of ledgers and swarms: reindex")
+    sub.add_parser("plan", help="Read only your task's plan chunk: read [--task ID] [--phase ID]")
     sub.add_parser(
         "trace", help="Directives a session received and the layer behind each; --wrong records a correction"
     )
     sub.add_parser("classify", help="Ask the decision models typed questions: --state FILE --questions FILE")
-    sub.add_parser("classifier", help="Decision classifier records: stats [--purpose P]")
+    sub.add_parser("classifier", help="Decision classifier records: stats [--purpose P], eval NAME [--live N]")
     sub.add_parser(
         "profile",
         help="Render a profile into its own home: render NAME --target claude|codex|copilot [--force] [--out DIR [--bundle DIR]]",
@@ -6642,22 +6632,7 @@ def main() -> None:
     sub.add_parser("deps", help="Check or install the bundle's dev-environment dependencies: check|ensure")
     sub.add_parser("overlay", help="Overlay profiles in the linked bundle: new NAME --wears ROLES | check NAME")
 
-    balance_p = sub.add_parser("balance", help="Probe and rank Claude OAuth accounts without launching workload")
-    balance_p.add_argument("--dry-run", action="store_true", help="Report routing state without launching Claude")
-    balance_p.add_argument("--fable", action="store_true", help="Include the separate Fable weekly quota")
-    balance_p.add_argument(
-        "--show-account-metadata",
-        metavar="SLUG",
-        default="",
-        help="Print every JSON event returned by a fresh probe for AH_CC_TOKEN_<SLUG>",
-    )
-    balance_p.add_argument("--refresh", action="store_true", help="Ignore the 60-second quota cache")
-    balance_p.add_argument(
-        "--current",
-        action="store_true",
-        help="Name the account this Claude session runs on; other accounts come from the quota cache",
-    )
-    balance_p.add_argument("--timeout", type=float, default=60, help="Per-account probe timeout in seconds")
+    balance_cli.add_parser(sub)
 
     ign_p = sub.add_parser("ignore", help="Create a .claudeignore in the current directory")
     ign_p.add_argument(
@@ -6977,15 +6952,7 @@ notes:
             extra = []
         cmd_claude(extra)
     elif args.command == "balance":
-        sys.exit(
-            cmd_balance(
-                include_fable=args.fable,
-                refresh=args.refresh,
-                timeout=args.timeout,
-                show_account_metadata=args.show_account_metadata,
-                current=args.current,
-            )
-        )
+        sys.exit(balance_cli.run(args, cmd_balance))
     elif args.command == "lint-claude":
         sys.path.insert(0, str(AGENTIHOOKS_ROOT))
         from scripts.claude_linter import format_report, lint_report

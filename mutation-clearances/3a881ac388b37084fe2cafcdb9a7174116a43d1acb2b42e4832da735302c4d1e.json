@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x_judge__mutmut_25:ba64f806a1108ab8e9518d7079fd0b3ed4c87ab4238bfdc44c53294e2d6175be": {
+    "reader": "standards_reader",
+    "reason": "Changes only capitalization in the operator-facing message 'the preparatory tests may not accept both old and new gate states'. The named shortfall and action remain present, with the same verdict and branch condition; exact typography is not part of the behavior contract."
+  }
+}

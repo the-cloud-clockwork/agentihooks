@@ -44,6 +44,27 @@ def test_role_renders_with_its_role_file_and_no_bundle(world, role):
     assert not (ROLES / role / ".claude" / ".mcp.json").exists()
 
 
+QUESTIONS_RULE = (
+    "Never write operator questions as plain chat text: ask them with the question tool, and when it is refused "
+    "say only one short line, type operator on to answer the questions here, or leave them in Priorities."
+)
+QUESTIONS_COMMAND = (
+    "- Operator questions: the question tool, never chat text; refused, one short line, type operator on to answer "
+    'the questions here, or `agentihooks ledger --slug <slug> --as <name> priority add <item> "<the ask>"`.'
+)
+
+
+@pytest.mark.parametrize("role", ALL_ROLES)
+def test_only_the_rendered_master_home_carries_the_operator_questions_rule(world, role):
+    from scripts.profiles import render
+
+    world["install"]._save_state({})
+    persona = (render.render_claude(role) / "CLAUDE.md").read_text()
+
+    found = [line for line in persona.splitlines() if "type operator on" in line]
+    assert found == ([f"- {QUESTIONS_RULE}", QUESTIONS_COMMAND] if role == "master" else [])
+
+
 @pytest.mark.parametrize("role", ALL_ROLES)
 def test_guard_conditions_load_for_master_planner_and_qa_only(world, monkeypatch, role):
     from hooks.context import conditions

@@ -1,6 +1,7 @@
 import argparse
 import json
 import re
+import shutil
 import statistics
 import subprocess
 import sys
@@ -37,6 +38,15 @@ def ci_download(run_ids: list[str], folder: Path) -> None:
         _gh(["run", "download", run, "--dir", str(folder / run)])
 
 
+def keep_newest(folder: Path, limit: int, keep: str | None = None) -> None:
+    runs = sorted(
+        (path for path in folder.iterdir() if path.is_dir() and path.name.isdecimal() and path.name != keep),
+        key=lambda path: int(path.name),
+    )
+    for path in runs[: max(len(runs) - limit + (keep is not None), 0)]:
+        shutil.rmtree(path)
+
+
 def ci_samples(folder: Path, version: str = "*", run: str = "*") -> list[dict[str, float]]:
     samples = []
     for path in sorted(folder.glob(f"{run}/durations-{version}-*/durations.json")):
@@ -45,14 +55,15 @@ def ci_samples(folder: Path, version: str = "*", run: str = "*") -> list[dict[st
     return samples
 
 
-def ci_medians(folder: Path, version: str, source: str | None) -> dict[str, float]:
+def ci_medians(folder: Path, version: str, source: str | None, collected: list[str]) -> dict[str, float]:
     measured = median_durations(ci_samples(folder, version))
     if not source:
         return measured
     current = set().union(*ci_samples(folder, version, source))
     if not current:
         raise SystemExit(f"run {source} kept no durations for Python {version}")
-    return {nodeid: seconds for nodeid, seconds in measured.items() if nodeid in current}
+    kept = current.union(collected)
+    return {nodeid: seconds for nodeid, seconds in measured.items() if nodeid in kept}
 
 
 def local_samples(folder: Path) -> list[dict[str, float]]:
@@ -71,20 +82,27 @@ def main(argv: list[str] | None = None) -> None:
         "--ci", type=int, default=0, metavar="RUNS", help="take the durations CI kept from its last RUNS runs"
     )
     parser.add_argument("--ci-run", help="take the durations of the tests this complete CI run measured")
+    parser.add_argument(
+        "--samples", type=Path, help="read run folders from here instead of GitHub, keeping only the newest RUNS"
+    )
     args = parser.parse_args(argv)
     candidates = {}
+    collected = collected_tests(_ROOT)
     with tempfile.TemporaryDirectory() as tmp:
         if args.ci or args.ci_run:
-            run_ids = [args.ci_run] if args.ci_run else []
-            run_ids = list(dict.fromkeys([*run_ids, *(ci_run_ids(args.ci) if args.ci else [])]))[: args.ci or 1]
-            ci_download(run_ids, Path(tmp))
+            folder = args.samples or Path(tmp)
+            if args.samples:
+                keep_newest(folder, args.ci or 1, args.ci_run)
+            else:
+                run_ids = [args.ci_run] if args.ci_run else []
+                run_ids = list(dict.fromkeys([*run_ids, *(ci_run_ids(args.ci) if args.ci else [])]))[: args.ci or 1]
+                ci_download(run_ids, folder)
             for version in ("3.11", "3.12"):
-                candidates[f".test_durations-{version}"] = ci_medians(Path(tmp), version, args.ci_run)
-            merged = ci_medians(Path(tmp), "*", args.ci_run)
+                candidates[f".test_durations-{version}"] = ci_medians(folder, version, args.ci_run, collected)
+            merged = ci_medians(folder, "*", args.ci_run, collected)
         else:
             merged = median_durations(local_samples(Path(tmp)))
     candidates[".test_durations"] = merged
-    collected = collected_tests(_ROOT)
     for durations in candidates.values():
         validate_coverage(durations, collected)
     for name, durations in candidates.items():

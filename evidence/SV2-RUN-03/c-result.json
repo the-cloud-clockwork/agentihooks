@@ -1,0 +1,23 @@
+{
+  "tested_commit": "05f3c81b8c3e9488408994d490cdc145e7796878",
+  "evidence_class": "mocked transport and isolated fakeredis; no live runtime or rollout proof",
+  "passed": true,
+  "independent_fixtures": [
+    {
+      "passed": true,
+      "snapshot_journal_retained": true,
+      "observed_effects": 1,
+      "stale_replay_refused": true,
+      "rollback_dispatch_disabled": true,
+      "runtime_ambiguous_operations": 0
+    },
+    {
+      "passed": true,
+      "snapshot_journal_retained": true,
+      "observed_effects": 1,
+      "stale_replay_refused": true,
+      "rollback_dispatch_disabled": true,
+      "runtime_ambiguous_operations": 0
+    }
+  ]
+}

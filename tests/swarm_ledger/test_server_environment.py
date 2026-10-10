@@ -111,11 +111,11 @@ def test_the_seed_watcher_reloads_code_only_when_asked(monkeypatch, value, calls
     monkeypatch.setattr(server, "code_stamp", lambda: 42)
     monkeypatch.setattr(server, "reload_if_changed", Mock())
     monkeypatch.setattr(server.ledger_bin, "tidy", Mock())
-    monkeypatch.setattr(server.repository, "pages", lambda: [])
+    monkeypatch.setattr(server, "bin_closed_without_swarm", Mock())
     monkeypatch.setattr(server, "sample_streams", Mock())
     monkeypatch.setattr(server.time, "sleep", Mock(side_effect=Stop))
     with pytest.raises(Stop):
-        server.watch_seeds()
+        server.watch_ledgers()
     assert server.reload_if_changed.call_args_list == calls
 
 
@@ -127,7 +127,7 @@ def test_the_workstation_server_reloads_code_unless_told_not_to(monkeypatch, tmp
         monkeypatch.setenv("SWARM_RELOAD", value)
     monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
     monkeypatch.setattr(server, "LOGFILE", tmp_path / ".server.log")
-    monkeypatch.setattr(server, "serving_dir", Mock(side_effect=[None, str(tmp_path)]))
+    monkeypatch.setattr(server.ledger_link, "serving", Mock(side_effect=[None, str(tmp_path)]))
     monkeypatch.setattr(server, "port_held", lambda: False)
     monkeypatch.setattr(server, "server_process_alive", lambda: False)
     monkeypatch.setattr(server.subprocess, "Popen", Mock())
@@ -237,25 +237,44 @@ def test_a_server_whose_port_another_server_holds_is_never_taken_for_its_own(tmp
                 pass
 
 
-def request(port, path, host, origin=None):
+def fetch(port, path, host, origin=None):
     headers = {"Host": host, **({"Origin": origin} if origin else {})}
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     try:
         conn.request("GET", path, headers=headers)
         response = conn.getresponse()
         return response.status, response.read()
-    except OSError:
-        return None, b""
     finally:
         conn.close()
+
+
+def request(port, path, host, origin=None):
+    try:
+        return fetch(port, path, host, origin)
+    except OSError:
+        return None, b""
+
+
+def served(port, path, host, origin, log):
+    try:
+        return fetch(port, path, host, origin)
+    except (OSError, http.client.HTTPException) as error:
+        pytest.fail(f"{type(error).__name__}: {error}\nledger server log:\n{log.read_text()}")
+
+
+def test_a_failed_request_names_its_error_and_the_server_log(tmp_path, ledger_port):
+    log = tmp_path / "server.log"
+    log.write_text("ledger server said this\n")
+    with pytest.raises(pytest.fail.Exception, match=r"(?s)ConnectionRefusedError: .*ledger server said this"):
+        served(ledger_port, "/api/v1/ledgers", "swarm.lan", "http://swarm.lan", log)
 
 
 @pytest.mark.parametrize(
     ("host", "origin"),
     [("swarm.example.com", "https://swarm.example.com"), ("swarm.lan", "http://swarm.lan")],
 )
-def test_a_listed_host_and_origin_are_served(hosted, host, origin):
-    status, body = request(hosted, "/api/v1/ledgers", host, origin)
+def test_a_listed_host_and_origin_are_served(hosted, tmp_path, host, origin):
+    status, body = served(hosted, "/api/v1/ledgers", host, origin, tmp_path / "server.log")
     assert status == 200
     assert json.loads(body)["data"] == []
 

@@ -38,6 +38,10 @@ def _minutes(environ, name, default):
     return int(environ.get(name) or default)
 
 
+def interval_minutes(environ):
+    return _minutes(environ, INTERVAL_ENV, INTERVAL_MINUTES)
+
+
 def reset(store, doctor):
     store.redis.delete(_timer_key(store, doctor))
 
@@ -84,7 +88,7 @@ def run(store, doctor, now_ms, collect, close, environ=None):
     key, actions = _timer_key(store, doctor), []
     timer = {k: int(v) for k, v in store.redis.hgetall(key).items()}
     timer["gap"] = max(timer.get("gap", 0), now_ms - timer.get("tick", now_ms))
-    interval = _minutes(env, INTERVAL_ENV, INTERVAL_MINUTES) * MINUTE_MS
+    interval = interval_minutes(env) * MINUTE_MS
     if "last" not in timer or now_ms - timer["last"] + timer["gap"] > interval:
         found, actions = collect(watched)
         new = record(store, doctor, found, now_ms, limits(env).cooldown_minutes * MINUTE_MS)

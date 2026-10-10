@@ -1,0 +1,56 @@
+{
+  "tested_commit": "1fda038ec3f7aa89770c66d407427b01883820ea",
+  "evidence_class": "mocked Redis, fake clock and fake Pod source; no Kubernetes, autoscaler or EC2 calls",
+  "case": "T-SV2-CTL-04-C",
+  "passed": true,
+  "independent_runs": [
+    {
+      "case": "T-SV2-CTL-04-C",
+      "state": "passed",
+      "evidence_class": "mocked Redis, fake clock and fake Pod source; no Kubernetes, autoscaler or EC2 call",
+      "input_sha256": "a0e09d77cc72f6a9a1b471dfe6acc6d6b1d0a335f64ca0e68f50c6a04a402e53",
+      "relists": 5,
+      "deleted": [
+        "uid-late",
+        "uid-late-lost-ack"
+      ],
+      "matched_after_delayed_deletion": true,
+      "matched_after_restart": true,
+      "duplicate_launches": 0,
+      "rollback_orphan_kept": true,
+      "rollback_still_matched": true,
+      "controller_orphans_by_class": {
+        "managed_orphan": 1,
+        "missing_pod": 0,
+        "foreign": 0,
+        "ambiguous": 0,
+        "terminating": 0,
+        "superseded": 0
+      }
+    },
+    {
+      "case": "T-SV2-CTL-04-C",
+      "state": "passed",
+      "evidence_class": "mocked Redis, fake clock and fake Pod source; no Kubernetes, autoscaler or EC2 call",
+      "input_sha256": "a0e09d77cc72f6a9a1b471dfe6acc6d6b1d0a335f64ca0e68f50c6a04a402e53",
+      "relists": 5,
+      "deleted": [
+        "uid-late",
+        "uid-late-lost-ack"
+      ],
+      "matched_after_delayed_deletion": true,
+      "matched_after_restart": true,
+      "duplicate_launches": 0,
+      "rollback_orphan_kept": true,
+      "rollback_still_matched": true,
+      "controller_orphans_by_class": {
+        "managed_orphan": 1,
+        "missing_pod": 0,
+        "foreign": 0,
+        "ambiguous": 0,
+        "terminating": 0,
+        "superseded": 0
+      }
+    }
+  ]
+}

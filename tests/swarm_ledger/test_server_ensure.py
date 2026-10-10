@@ -3,9 +3,11 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
 
@@ -56,24 +58,24 @@ def test_client_waits_for_a_reloading_server_without_starting_another(
         child = subprocess.Popen([sys.executable, str(script)], env=env, stdout=log, stderr=log)
         try:
             deadline = time.monotonic() + 5
-            while server.serving_dir() is None:
+            while server.ledger_link.serving(url=base) is None:
                 assert time.monotonic() < deadline
                 time.sleep(0.01)
             (tmp_path / "reload").touch()
             while not (tmp_path / "reloading").exists():
                 assert time.monotonic() < deadline
                 time.sleep(0.01)
-            urlopen = server.urllib.request.urlopen
+            urlopen = server.ledger_link.urllib.request.urlopen
 
             def impatient(request, timeout):
                 return urlopen(request, timeout=min(timeout, 0.05))
 
-            with patch.object(server.urllib.request, "urlopen", side_effect=impatient):
-                assert server.serving_dir() is None
+            with patch.object(server.ledger_link.urllib.request, "urlopen", side_effect=impatient):
+                assert server.ledger_link.serving(url=base) is None
                 with patch.object(server.subprocess, "Popen") as start:
                     server.ensure()
                     start.assert_not_called()
-            assert server.serving_dir() == str(tmp_path)
+            assert server.ledger_link.serving(url=base) == str(tmp_path)
             assert child.poll() is None
         finally:
             child.terminate()
@@ -95,6 +97,21 @@ def isolated_server(tmp_path, monkeypatch):
     return tmp_path
 
 
+def test_occupied_unresponsive_port_gives_up_without_starting(isolated_server, monkeypatch):
+    monkeypatch.setattr(server, "SERVER_WAIT", 0.15)
+    with socket.socket() as held:
+        held.bind(("127.0.0.1", 0))
+        monkeypatch.setattr(server, "PORT", held.getsockname()[1])
+        monkeypatch.setattr(server, "BASE", f"http://127.0.0.1:{server.PORT}")
+        with (
+            patch.object(server.subprocess, "Popen") as start,
+            pytest.raises(SystemExit, match="did not answer"),
+        ):
+            server.ensure()
+        start.assert_not_called()
+
+
+@pytest.mark.wall_clock
 def test_occupied_unresponsive_port_times_out_without_starting(isolated_server, monkeypatch):
     monkeypatch.setattr(server, "SERVER_WAIT", 0.15)
     with socket.socket() as held:
@@ -119,10 +136,43 @@ def test_occupied_unresponsive_port_times_out_without_starting(isolated_server, 
         start.assert_not_called()
 
 
+def test_a_listening_silent_port_waits_out_the_deadline_without_starting(isolated_server, monkeypatch):
+    monkeypatch.setattr(server, "SERVER_WAIT", 0.15)
+    with socket.socket() as silent:
+        silent.bind(("127.0.0.1", 0))
+        silent.listen()
+        monkeypatch.setattr(server, "PORT", silent.getsockname()[1])
+        monkeypatch.setattr(server, "BASE", f"http://127.0.0.1:{server.PORT}")
+        probe = server.ledger_link.serving
+
+        def bounded(timeout=1, url=None):
+            assert 0 < timeout <= 1
+            return probe(timeout, url)
+
+        with (
+            patch.object(server.ledger_link, "serving", side_effect=bounded),
+            patch.object(server.time, "monotonic", side_effect=[0, 0.05, 1]),
+            patch.object(server.time, "sleep"),
+            patch.object(server, "port_held", wraps=server.port_held) as held,
+            patch.object(server.subprocess, "Popen") as start,
+            pytest.raises(SystemExit) as refused,
+        ):
+            server.ensure()
+    assert str(refused.value) == f"ledger server did not answer on {server.BASE}; see {server.LOGFILE}"
+    held.assert_called_once_with()
+    start.assert_not_called()
+
+
 @pytest.mark.parametrize(
     "pid", [None, "invalid", "999999999", str(os.getpid())], ids=["missing", "invalid", "stale", "unrelated"]
 )
 def test_free_port_starts_once_and_waits_for_readiness(isolated_server, monkeypatch, pid, capsys):
+    now = 100.0
+
+    def advance(seconds):
+        nonlocal now
+        now += seconds
+
     with socket.socket() as spare:
         spare.bind(("127.0.0.1", 0))
         port = spare.getsockname()[1]
@@ -130,10 +180,19 @@ def test_free_port_starts_once_and_waits_for_readiness(isolated_server, monkeypa
     if pid is not None:
         server.PIDFILE.write_text(pid)
     with (
-        patch.object(server, "serving_dir", side_effect=[None, None, str(isolated_server)]),
+        patch.object(server.ledger_link, "serving", side_effect=[None, None, str(isolated_server)]) as serving,
         patch.object(server.subprocess, "Popen") as start,
+        patch.object(server.time, "monotonic", side_effect=lambda: now),
+        patch.object(server.time, "sleep", side_effect=advance) as sleep,
     ):
         server.ensure()
+    assert sleep.call_args_list == [call(0.1), call(0.1)]
+    assert now == pytest.approx(100.2)
+    assert serving.call_args_list == [
+        call(url=server.BASE),
+        call(timeout=0.5, url=server.BASE),
+        call(timeout=pytest.approx(0.4), url=server.BASE),
+    ]
     start.assert_called_once()
     assert start.call_args.args[0][-1] == "--serve"
     options = start.call_args.kwargs
@@ -146,7 +205,7 @@ def test_free_port_starts_once_and_waits_for_readiness(isolated_server, monkeypa
 
 def test_recovered_server_serving_another_folder_is_refused(isolated_server):
     with (
-        patch.object(server, "serving_dir", side_effect=[None, "/another/ledger"]),
+        patch.object(server.ledger_link, "serving", side_effect=[None, "/another/ledger"]),
         patch.object(server, "port_held", return_value=True),
         patch.object(server.subprocess, "Popen") as start,
         pytest.raises(SystemExit, match="already serves /another/ledger"),
@@ -157,7 +216,7 @@ def test_recovered_server_serving_another_folder_is_refused(isolated_server):
 
 def test_healthy_server_needs_no_start(isolated_server, capsys):
     with (
-        patch.object(server, "serving_dir", return_value=str(isolated_server)),
+        patch.object(server.ledger_link, "serving", return_value=str(isolated_server)),
         patch.object(server.subprocess, "Popen") as start,
     ):
         server.ensure()
@@ -169,7 +228,7 @@ def test_bind_errors_other_than_occupied_are_reported(isolated_server):
     import errno
 
     with (
-        patch.object(server, "serving_dir", return_value=None),
+        patch.object(server.ledger_link, "serving", return_value=None),
         patch.object(server.socket, "socket") as probe,
         patch.object(server.subprocess, "Popen") as start,
         pytest.raises(PermissionError),
@@ -185,7 +244,7 @@ def test_start_creates_missing_parent_folders(isolated_server, monkeypatch):
     monkeypatch.setattr(server, "PIDFILE", folder / ".server.pid")
     monkeypatch.setattr(server, "LOGFILE", folder / ".server.log")
     with (
-        patch.object(server, "serving_dir", side_effect=[None, str(folder)]),
+        patch.object(server.ledger_link, "serving", side_effect=[None, str(folder)]),
         patch.object(server.subprocess, "Popen") as start,
     ):
         server.ensure()
@@ -195,7 +254,7 @@ def test_start_creates_missing_parent_folders(isolated_server, monkeypatch):
 
 def test_deadline_is_enforced_at_exact_expiry(isolated_server):
     with (
-        patch.object(server, "serving_dir", return_value=None),
+        patch.object(server.ledger_link, "serving", return_value=None),
         patch.object(server.time, "monotonic", side_effect=[100, 100.5]),
         patch.object(server.subprocess, "Popen") as start,
         pytest.raises(SystemExit, match="did not answer"),
@@ -205,18 +264,47 @@ def test_deadline_is_enforced_at_exact_expiry(isolated_server):
 
 
 def test_health_requests_use_short_timeouts(isolated_server):
-    with patch.object(server.urllib.request, "urlopen") as health:
-        health.return_value.__enter__.return_value.read.return_value = b'{"dir": "/ready"}'
-        assert server.serving_dir() == "/ready"
+    with patch.object(server.ledger_link.urllib.request, "urlopen") as health:
+        health.return_value.__enter__.return_value.read.return_value = f'{{"dir": "{isolated_server}"}}'.encode()
+        server.ensure()
         health.assert_called_once_with(f"{server.BASE}/healthz", timeout=1)
     with (
         patch.object(server.time, "monotonic", return_value=100),
         patch.object(server, "SERVER_WAIT", 5),
-        patch.object(server, "serving_dir", side_effect=[None, str(isolated_server)]) as ready,
+        patch.object(server.ledger_link, "serving", side_effect=[None, str(isolated_server)]) as ready,
         patch.object(server.subprocess, "Popen"),
     ):
         server.ensure()
-    assert ready.call_args.kwargs["timeout"] == 1
+    assert ready.call_args_list == [call(url=server.BASE), call(timeout=1, url=server.BASE)]
+
+
+def test_a_port_answering_an_error_is_refused_without_waiting(isolated_server, monkeypatch):
+    class Refusing(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(404)
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Refusing)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    monkeypatch.setattr(server, "BASE", f"http://127.0.0.1:{httpd.server_address[1]}")
+    try:
+        with (
+            patch.object(server.time, "sleep") as wait,
+            patch.object(server.subprocess, "Popen") as start,
+            pytest.raises(SystemExit) as refused,
+        ):
+            server.ensure()
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+    assert str(refused.value) == (
+        f"{server.BASE} already serves no ledger folder, not {isolated_server}; stop that ledger server first"
+    )
+    wait.assert_not_called()
+    start.assert_not_called()
 
 
 @pytest.mark.parametrize("unreadable", [False, True])
@@ -225,7 +313,7 @@ def test_live_reexec_with_an_empty_command_line_waits(isolated_server, unreadabl
     with (
         patch.object(server, "port_held", return_value=False),
         patch.object(Path, "read_bytes", return_value=b"", side_effect=OSError() if unreadable else None),
-        patch.object(server, "serving_dir", side_effect=[None, str(isolated_server)]),
+        patch.object(server.ledger_link, "serving", side_effect=[None, str(isolated_server)]),
         patch.object(server.subprocess, "Popen") as start,
     ):
         server.ensure()
@@ -239,7 +327,7 @@ def test_reload_without_linux_process_files_does_not_start_another(isolated_serv
         patch.object(server.sys, "platform", platform),
         patch.object(server, "port_held", return_value=False),
         patch.object(Path, "read_bytes", side_effect=FileNotFoundError()) as process_files,
-        patch.object(server, "serving_dir", side_effect=[None, str(isolated_server)]),
+        patch.object(server.ledger_link, "serving", side_effect=[None, str(isolated_server)]),
         patch.object(server.subprocess, "Popen") as start,
     ):
         server.ensure()

@@ -132,6 +132,78 @@ def test_an_open_pull_request_without_green_checks_is_still_ceremony():
     assert [f["evidence"] for f in run(ledger)] == [["25 ledger transitions", "0 outcomes"]]
 
 
+DISPATCHER = "dispatcher@323133-0001"
+ENGINEER = "engineer@323133-0002"
+
+
+def settled(by, items=24, decided=True):
+    events = []
+    for n in range(items):
+        target = f"followups/f{n}"
+        events += [ev("comment added", target, by=by)] if decided else [ev("comment edited", "phases/p1", by=by)]
+        events.append(ev("checked", target, by=by))
+    return events
+
+
+def cleared(by, n):
+    return ev("priority cleared", f"followups/c{n}", by=by)
+
+
+def test_a_dispatcher_seat_is_credited_with_each_priority_it_settles_with_a_decision():
+    events = settled(DISPATCHER) + [cleared(DISPATCHER, n) for n in range(5)]
+    assert run({"tasks": [], "_meta": {"events": events}}) == []
+
+
+def test_the_dispatcher_seat_that_settled_twenty_four_priorities_no_longer_trips_ceremony():
+    events = [ev("joined", by=DISPATCHER), *settled(DISPATCHER)]
+    events += [ev("comment added", f"tasks/t{n}", by=DISPATCHER) for n in range(2)]
+    events += [cleared(DISPATCHER, n) for n in range(5)] + [ev("left", by=DISPATCHER)]
+    moves = [e for e in events if e["kind"] not in health.NOT_TRANSITIONS]
+    assert (len(moves), health._decided(events)[DISPATCHER]) == (55, 24)
+    assert run({"tasks": [], "_meta": {"events": events}}) == []
+
+
+def test_an_engineer_seat_with_the_same_settles_is_still_ceremony():
+    events = settled(ENGINEER) + [cleared(ENGINEER, n) for n in range(5)]
+    assert [(f["subject"], f["evidence"]) for f in run({"tasks": [], "_meta": {"events": events}})] == [
+        (ENGINEER, ["53 ledger transitions", "0 outcomes"])
+    ]
+
+
+def test_a_dispatcher_seat_settling_without_a_decision_is_still_ceremony():
+    events = settled(DISPATCHER, decided=False) + [cleared(DISPATCHER, n) for n in range(5)]
+    assert [(f["subject"], f["evidence"]) for f in run({"tasks": [], "_meta": {"events": events}})] == [
+        (DISPATCHER, ["53 ledger transitions", "0 outcomes"])
+    ]
+
+
+def test_a_priority_cleared_after_the_seat_comment_counts_once_per_item():
+    events = [ev("comment edited", "phases/p1", by=DISPATCHER) for _ in range(22)]
+    events += [ev("comment added", "followups/c0", by=DISPATCHER), cleared(DISPATCHER, 0)]
+    events += [cleared(DISPATCHER, 0), cleared(DISPATCHER, 1)]
+    assert [f["evidence"] for f in run({"tasks": [], "_meta": {"events": events}})] == [
+        ["26 ledger transitions", "1 outcome"]
+    ]
+
+
+def test_a_dispatcher_seat_counts_a_closed_task_as_a_second_outcome():
+    events = [ev("comment edited", "phases/p1", by=DISPATCHER) for _ in range(24)]
+    events += [ev("comment added", "followups/f0", by=DISPATCHER), ev("checked", "followups/f0", by=DISPATCHER)]
+    events.append(ev("task done", "tasks/t1", by=DISPATCHER))
+    assert [f["evidence"] for f in run({"tasks": [task("t1")], "_meta": {"events": events}})] == [
+        ["27 ledger transitions", "2 outcomes"]
+    ]
+
+
+def test_a_comment_by_another_agent_is_not_the_dispatcher_decision():
+    events = [ev("comment added", f"followups/f{n}", by=ENGINEER) for n in range(3)]
+    events += [ev("checked", f"followups/f{n}", by=DISPATCHER) for n in range(3)]
+    events += [ev("comment edited", "phases/p1", by=DISPATCHER) for _ in range(20)]
+    assert [(f["subject"], f["evidence"]) for f in run({"tasks": [], "_meta": {"events": events}})] == [
+        (DISPATCHER, ["23 ledger transitions", "0 outcomes"])
+    ]
+
+
 def test_scope_inflation_lists_each_task_by_title_with_its_gain():
     events = [ev("added", f"tasks/q{n}") for n in range(3)]
     tasks = [
@@ -260,6 +332,40 @@ def test_a_claim_quiet_under_the_limit_or_unmeasured_is_not_stale():
     ledger = {"tasks": [task("t1", state="claimed", pr_url="")], "_meta": {"events": []}}
     assert run(ledger, [{**agent(), "quiet_minutes": 29}]) == []
     assert run(ledger, [agent()]) == []
+
+
+def test_busy_agent_with_stale_tool_activity_is_reported_stalled():
+    ledger = {"tasks": [task("t1", state="claimed")]}
+    busy = {**agent(), "pane_state": "working", "tool_quiet_minutes": 10}
+    found = health.findings(ledger, [busy], {}, LIMITS)
+    assert [f.kind for f in found] == ["stalled"]
+    assert found[0].subject == WORKER
+    assert found[0].measure == 10
+    assert found[0].summary == "busy with no tool call for 10 minutes"
+    assert found[0].threshold == "10 minutes without a tool call"
+    assert found[0].evidence == ("pane working; task t1",)
+
+
+def test_stalled_busy_threshold_is_configurable_and_does_not_flag_other_panes():
+    limits = health.limits({"AGENTIHOOKS_HEALTH_STALLED_MINUTES": "4"})
+    ledger = {"tasks": [task("t1", state="claimed")]}
+    busy = {**agent(), "pane_state": "working", "tool_quiet_minutes": 4}
+    assert [f.kind for f in health.findings(ledger, [busy], {}, limits)] == ["stalled"]
+    for row in (
+        {**busy, "tool_quiet_minutes": 3},
+        {**busy, "tool_quiet_minutes": None},
+        {**busy, "pane_state": "idle"},
+        {**busy, "pane_state": "waiting"},
+    ):
+        assert health.findings(ledger, [row], {}, limits) == []
+
+
+def test_fresh_agent_does_not_hide_a_stalled_agent_and_taskless_evidence_stays_named():
+    fresh = {**agent("fresh"), "pane_state": "working", "tool_quiet_minutes": 1}
+    busy = {"name": "busy", "pane_state": "working", "tool_quiet_minutes": 10}
+    found = health.stalled([fresh, busy], LIMITS)
+    assert [f.subject for f in found] == ["busy"]
+    assert found[0].evidence == ("pane working; task ",)
 
 
 def test_over_monitoring_names_the_agent_and_its_counts():

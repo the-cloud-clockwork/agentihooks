@@ -3,6 +3,7 @@
 import json
 import time
 from dataclasses import asdict, dataclass, field, replace
+from typing import TYPE_CHECKING
 
 from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
 from scripts.inbox.store import InboxStore
@@ -11,12 +12,21 @@ from scripts.swarm.execution import ExecutionRegistry
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.naming import NameRegistry
 
+if TYPE_CHECKING:
+    from scripts.swarm_v2.runtime.operations import OperationJournal
+
 PREFIX = f"{ROOT}:swarm"
 STATES = ("running", "paused", "stopping", "stopped", "drained")
 DEFAULT_URL = "redis://127.0.0.1:6379/0"
 MASTER = "master"
+DISPATCH = "dispatch"
 AUTONOMY = ("manual", "assist", "delegate", "full")
 MANUAL, ASSIST, DELEGATE, FULL = AUTONOMY
+SCALING = ("auto", "manual")
+AUTO_SCALING, MANUAL_SCALING = SCALING
+DEFAULT_LOAD_HIGH, DEFAULT_LOAD_LOW = 1.5, 1.0
+DEFAULT_MEMORY_PER_AGENT_MB = 700
+MAX_LOAD = 10.0
 
 
 class SwarmError(RuntimeError):
@@ -42,6 +52,25 @@ class SwarmConfig:
     effort_min: str = effort_range.DEFAULT[0]
     effort_max: str = effort_range.DEFAULT[1]
     overlays: dict = field(default_factory=dict)
+    scaling: str = AUTO_SCALING
+    load_high: float = DEFAULT_LOAD_HIGH
+    load_low: float = DEFAULT_LOAD_LOW
+    memory_per_agent_mb: int = DEFAULT_MEMORY_PER_AGENT_MB
+    lane_shift: int = 0
+
+
+def scaling_refusal(config):
+    if config.scaling not in SCALING:
+        return f"scaling must be one of {', '.join(SCALING)}"
+    if (
+        type(config.load_low) not in (int, float)
+        or type(config.load_high) not in (int, float)
+        or not 0 < config.load_low <= config.load_high <= MAX_LOAD
+    ):
+        return f"load low must be above 0 and at most load high, and load high at most {MAX_LOAD:g}"
+    if type(config.memory_per_agent_mb) is not int or config.memory_per_agent_mb <= 0:
+        return "memory per agent must be a whole number of MB above 0"
+    return ""
 
 
 @dataclass(frozen=True)
@@ -74,6 +103,7 @@ class AgentRecord:
     runtime_backend: str = "local"
     runtime_target: dict = field(default_factory=dict)
     launch_timings: dict = field(default_factory=dict)
+    hive: str = ""
 
 
 class RedisStore:
@@ -90,11 +120,17 @@ class RedisStore:
     def key(self, slug, *parts):
         return ":".join((PREFIX, slug, *parts))
 
+    @property
+    def operation_journal(self) -> "OperationJournal":
+        from scripts.swarm_v2.runtime.operations import OperationJournal
+
+        return OperationJournal(self)
+
     def slugs(self):
         return sorted(self.redis.smembers(f"{PREFIX}:index"))
 
     def create(self, config):
-        refused = effort_range.refusal((config.effort_min, config.effort_max), config.lanes)
+        refused = effort_range.refusal((config.effort_min, config.effort_max), config.lanes) or scaling_refusal(config)
         if refused:
             raise SwarmError(refused)
         if not self.redis.hsetnx(self.key(config.slug, "config"), "slug", config.slug):
@@ -125,6 +161,11 @@ class RedisStore:
             raw.get("effort_min") or effort_range.DEFAULT[0],
             raw.get("effort_max") or effort_range.DEFAULT[1],
             json.loads(raw.get("overlays") or "{}"),
+            raw.get("scaling") or AUTO_SCALING,
+            float(raw.get("load_high") or DEFAULT_LOAD_HIGH),
+            float(raw.get("load_low") or DEFAULT_LOAD_LOW),
+            int(raw.get("memory_per_agent_mb") or DEFAULT_MEMORY_PER_AGENT_MB),
+            int(raw.get("lane_shift") or 0),
         )
 
     def update(self, slug, **changes):
@@ -140,35 +181,54 @@ class RedisStore:
                 raise SwarmError(refused)
             low, high = (effort_range.level(edge) for edge in (config.effort_min, config.effort_max))
             config = replace(config, effort_min=low, effort_max=high)
+        if refused := scaling_refusal(config):
+            raise SwarmError(refused)
         self.redis.hset(self.key(slug, "config"), mapping=_fields(config))
         return config
 
-    def claim(self, slug, task, agent, lease_ms):
-        return bool(self.redis.set(self.key(slug, "claim", task), agent, nx=True, px=lease_ms))
+    def claim(self, slug: str, task: str, agent: str, lease_ms: int) -> bool:
+        return self._if_holder(
+            self.key(slug, "claim", task),
+            None,
+            lambda pipe, key: pipe.set(key, agent, nx=True, px=lease_ms),
+            self._claim_guards(slug, task),
+        )
 
     def claimant(self, slug, task):
         return self.redis.get(self.key(slug, "claim", task))
 
-    def refresh(self, slug, task, agent, lease_ms):
-        return self._if_holder(self.key(slug, "claim", task), agent, lambda pipe, key: pipe.pexpire(key, lease_ms))
+    def refresh(self, slug: str, task: str, agent: str, lease_ms: int) -> bool:
+        return self._if_holder(
+            self.key(slug, "claim", task),
+            agent,
+            lambda pipe, key: pipe.pexpire(key, lease_ms),
+            self._claim_guards(slug, task),
+        )
 
-    def release(self, slug, task, agent):
-        return self._if_holder(self.key(slug, "claim", task), agent, lambda pipe, key: pipe.delete(key))
+    def release(self, slug: str, task: str, agent: str) -> bool:
+        return self._if_holder(
+            self.key(slug, "claim", task),
+            agent,
+            lambda pipe, key: pipe.delete(key),
+            self._claim_guards(slug, task),
+        )
 
-    def _if_holder(self, key, agent, action):
+    def _if_holder(self, key, agent, action, guards=()):
         from redis.exceptions import WatchError
 
         with self.redis.pipeline() as pipe:
             try:
-                pipe.watch(key)
-                if pipe.get(key) != agent:
+                pipe.watch(key, *guards)
+                if any(pipe.exists(guard) for guard in guards) or pipe.get(key) != agent:
                     return False
                 pipe.multi()
                 action(pipe, key)
-                pipe.execute()
-                return True
+                return bool(pipe.execute()[0])
             except WatchError:
                 return False
+
+    def _claim_guards(self, slug, task):
+        return self.key(slug, "task-authority", task), self.key(slug, "claim-journal", task)
 
     def put_handoff(self, slug, task, text, seat="", envelope=None):
         with self.redis.pipeline() as pipe:
@@ -396,6 +456,8 @@ def _dump(redis, keys):
 
 
 def redis_url(environ):
+    if environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local" and environ.get("AGENTIHOOKS_HIVE_REDIS_URL"):
+        return environ["AGENTIHOOKS_HIVE_REDIS_URL"]
     return environ.get("AGENTIHOOKS_SWARM_REDIS_URL") or DEFAULT_URL
 
 

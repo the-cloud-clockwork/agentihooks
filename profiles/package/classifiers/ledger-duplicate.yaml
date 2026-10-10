@@ -1,0 +1,15 @@
+version: 1
+purpose: ledger-duplicate
+fallbacks: cli
+questions:
+  - name: same
+    type: yesno
+    each: pairs
+    key: "new_{item[new]}_existing_{item[slot]}"
+    instructions: "Does new item {item[new]} ask for the same change as {item[kind]} {item[id]} titled {item[title]}?"
+    "true": the new item asks for the same change as the existing item
+    "false": the new item asks for a different change
+thresholds:
+  same: 0.6
+rule:
+  type: code

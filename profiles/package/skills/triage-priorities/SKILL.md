@@ -5,7 +5,7 @@ description: Triages a swarm ledger's Priorities with the operator in the master
 
 # Triage Priorities
 
-The master runs this from its own pane, and the operator decides here; never send the operator to the page or to another pane. `SLUG` is the master's ledger. The scripts need `agentihooks ledger relay` (agentihooks with the relay command). They read the ledger file and write through `agentihooks ledger` as this session's agent name. Run them by full path in every call, because shell variables you set do not survive between calls. `CLAUDE_CONFIG_DIR` is set by the session itself: it names the master's rendered profile home, and is unset in the operator's own home:
+The master runs this from its own pane, and the operator decides here; never send the operator to the page or to another pane. `SLUG` is the master's ledger. The scripts need `agentihooks ledger relay` (agentihooks with the relay command). They read the ledger through `agentihooks ledger show` and write through `agentihooks ledger` as this session's agent name. Run them by full path in every call, because shell variables you set do not survive between calls. `CLAUDE_CONFIG_DIR` is set by the session itself: it names the master's rendered profile home, and is unset in the operator's own home:
 
 ```
 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/skills/triage-priorities/scripts/list_priorities.py
@@ -22,6 +22,7 @@ The master runs this from its own pane, and the operator decides here; never sen
    - question: the ask in plain words, from `ask`, `item_text` and the latest `recent` lines;
    - header: the entry's `group`;
    - options: two or three decisions whose labels name the item, unique in the round ("Approve the queue merge", "Hold the queue merge"), then **Later**.
+   Never write the prompts as chat text. When `AskUserQuestion` is refused because the operator is not present, say only one short line, type operator on to answer the questions here, or leave them in Priorities; keep every priority and end the run. Done when that one line is sent and every priority is still listed.
    Done when the operator has decided every prompt.
 
 4. **Write the plan.** Write `plan-N.json` (N counts the rounds) in the noted folder: one entry per priority of the round, mapped by the table. `quote` is the operator's exact words from this round: the option label picked, or the text typed in its place. Done when every decision of the round has one entry.

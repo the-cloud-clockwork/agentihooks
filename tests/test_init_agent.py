@@ -40,6 +40,7 @@ def test_dry_run_preserves_claude_flags_and_keeps_prompt_out_of_launcher(monkeyp
     runtime = tmp_path / "runtime"
     _, profile_env = _profile(monkeypatch, tmp_path)
     prompt = "apostrophe ' quote \" semicolon ; and $(command)"
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
 
     monkeypatch.setattr(
         init_agent.shutil, "which", lambda name: "/usr/bin/agentihooks" if name == "agentihooks" else None
@@ -326,6 +327,14 @@ def test_handoff_refuses_changed_effort_policy_before_terminal_launch(monkeypatc
         capsys.readouterr().err
         == "agentihooks init-agent: unsupported quota transfer: saved effort is outside the current swarm range\n"
     )
+
+
+def test_a_master_handoff_launches_at_the_nearest_effort_inside_the_swarm_range(monkeypatch, tmp_path, capsys):
+    env = {"AGENTIHOOKS_SWARM_LANE": "master", "AGENTIHOOKS_SWARM_EFFORT_RANGE": "high:high"}
+    assert _handoff(monkeypatch, tmp_path, None, extra=["--dry-run"], env_extra=env) == 0
+    assert "effort=high\n" in capsys.readouterr().out
+    launcher = next((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.sh"))
+    assert "--model opus --effort high" in launcher.read_text()
 
 
 def test_handoff_needs_a_handoff_document(monkeypatch, tmp_path, capsys):
@@ -892,6 +901,18 @@ def test_a_channel_dry_run_writes_the_negotiation_pin_into_its_launcher(monkeypa
     assert "export MCP_PROTOCOL_NEGOTIATION=legacy" in lines
 
 
+def test_a_hand_launch_with_no_account_launches_bare_claude_with_its_channel(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("", "every account is full"))
+    monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, directory, title, environ: ("linux", ["t"]))
+    argv = ["--dir", str(tmp_path), "--inbox-channel", "--dry-run"]
+    assert init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt")}) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert "agent=claude" in out
+    launcher = next(x for x in out if x.startswith("launcher="))
+    lines = Path(launcher.split("=", 1)[1]).read_text().splitlines()
+    assert "export MCP_PROTOCOL_NEGOTIATION=legacy" in lines
+
+
 def _codex_hooks(home, first):
     ours = {"hooks": [{"type": "command", "command": str(home / "agentihooks-hook.sh")}]}
     herdr = {"hooks": [{"command": "bash herdr-agent-state.sh session", "timeout": 10, "type": "command"}]}
@@ -926,3 +947,61 @@ def test_a_codex_launch_restores_the_approved_hook_order_before_codex_starts(
     assert field in capsys.readouterr().out.splitlines()
     assert seen["first"] == ours
     assert first == "herdr" or path.stat().st_mtime_ns == untouched
+
+
+@pytest.mark.parametrize("source,target", [(None, "claude"), ("claude", "claude"), ("codex", "codex")])
+@pytest.mark.parametrize("route", [["--route", "api"], ["--route=api"]])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_api_handoff_launches_the_requested_harness(monkeypatch, tmp_path, capsys, source, target, route, explicit):
+    binding, profile_env = _profile(monkeypatch, tmp_path, target)
+    original = {
+        **profile_env,
+        "AGENTIHOOKS_RUN_MODEL": "opus" if target == "claude" else "gpt-6.1-sol",
+        "AGENTIHOOKS_RUN_EFFORT": "medium",
+    }
+    monkeypatch.setattr(binding, "process", lambda: (123, target, original, "alpha"))
+    monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
+    monkeypatch.setattr(init_agent.operator_env, "fill", lambda env: None)
+    result = init_agent.main(
+        [
+            "--dir",
+            str(tmp_path),
+            "--name",
+            "api-handoff",
+            *(["--agent", target] if explicit else []),
+            "--prompt",
+            "saved task",
+            "--handoff",
+            "--dry-run",
+            "--",
+            *route,
+        ],
+        {
+            "HOME": str(tmp_path),
+            "XDG_RUNTIME_DIR": str(tmp_path / "runtime"),
+            **({"AGENTIHOOKS_TARGET": source} if source else {}),
+            **profile_env,
+        },
+    )
+    assert result == 0
+    report = capsys.readouterr().out
+    assert f"agent={target}\n" in report
+    assert "agent_reason=handoff\n" in report
+    launcher = next(line.split("=", 1)[1] for line in report.splitlines() if line.startswith("launcher="))
+    command = Path(launcher).read_text()
+    assert f" {target} " in command
+    assert "--route" in command
+    assert "api" in command
+
+
+@pytest.mark.parametrize("extra", [[], ["--", "--route", "token"], ["--", "--route-timeout", "api"]])
+def test_codex_subscription_handoff_remains_unsupported(monkeypatch, tmp_path, capsys, extra):
+    monkeypatch.setattr(init_agent.operator_env, "fill", lambda env: None)
+    assert (
+        init_agent.main(
+            ["--dir", str(tmp_path), "--handoff", "--prompt", "saved task", "--dry-run", *extra],
+            {"HOME": str(tmp_path), "AGENTIHOOKS_TARGET": "codex"},
+        )
+        == 2
+    )
+    assert "unsupported quota transfer" in capsys.readouterr().err

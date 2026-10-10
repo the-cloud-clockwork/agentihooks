@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import ledger_state, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import ledger_state, loaded, serve_modules, shell_html
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -58,6 +58,7 @@ def tab(browser, request):
     serve_modules(context, ledger_state(DOC))
     page = context.new_page()
     page.goto(URL)
+    loaded(page)
     page.set_default_timeout(1500)
     yield page
     context.close()
@@ -93,7 +94,7 @@ def test_an_open_panel_follows_its_icon_when_the_page_resizes_or_the_strip_scrol
     start = bell.bounding_box()["y"]
     tab.set_viewport_size({"width": {1440: 390, 390: 1440}[tab.viewport_size["width"]], "height": 320})
     moved = bell.bounding_box()["y"]
-    assert moved != start
+    assert moved == pytest.approx(start, abs=0.5)
     tab.wait_for_function(beside)
     assert strip.evaluate("el => el.scrollHeight > el.clientHeight")
     strip.evaluate("el => { el.scrollTop = 40; }")

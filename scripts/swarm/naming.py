@@ -16,19 +16,21 @@ from pathlib import Path
 from scripts.swarm.keyspace import ROOT
 
 PREFIX = f"{ROOT}:names"
-TYPES = {"master": "master", "eng": "engineer", "ci": "ci", "plan": "planner"}
+TYPES = {"master": "master", "eng": "engineer", "ci": "ci", "plan": "planner", "dispatch": "dispatcher"}
 LANES = {kind: lane for lane, kind in TYPES.items()}
-NAME_RE = re.compile(r"(master|engineer|ci|planner)@([0-9a-f]{6})-(\d{4})")
+OPERATOR = "operator"
+_KINDS = "|".join(TYPES.values())
+NAME_RE = re.compile(rf"({_KINDS})@([0-9a-f]{{6}})-(\d{{4}})")
 LEGACY_RE = re.compile(r"(.+)-(eng|ci|master)-\d+")
 CODE_RE = re.compile(r"[0-9a-f]{6}")
 SWARM_RE = re.compile(r"swarm@([0-9a-f]{6})")
 MINT_ATTEMPTS = 20
-_BASE = r"(?:(?:master|engineer|ci|planner)-[0-9a-f]{6}-\d{4}|session-[0-9a-f]{8})"
+_BASE = rf"(?:(?:{_KINDS})-[0-9a-f]{{6}}-\d{{4}}|session-[0-9a-f]{{8}})"
 _REPO = r"[a-z0-9][a-z0-9._-]*"
 PROOF_RE = re.compile(r"proof-[0-9a-f]{6}-[a-z0-9]+-\d+")
 PATTERNS = {
     "agent": NAME_RE,
-    "pane": re.compile(r"(?:master|engineer|ci|planner)-[0-9a-f]{6}-\d{4}"),
+    "pane": re.compile(rf"(?:{_KINDS})-[0-9a-f]{{6}}-\d{{4}}"),
     "space": re.compile(rf"{_REPO}-[0-9a-f]{{6}}|{PROOF_RE.pattern}"),
     "worktree": re.compile(rf"{_BASE}(?:-\d+)?"),
     "tmp": re.compile(rf"{_BASE}-tmp-\d+"),
@@ -204,6 +206,13 @@ def resolve_name(name):
     return NameRegistry(redis).resolve(name) if redis is not None else name
 
 
+def resolve_names(names):
+    from hooks._redis import get_redis
+
+    redis = get_redis()
+    return NameRegistry(redis).resolve_many(names) if redis is not None else {name: name for name in names}
+
+
 def addresses(name):
     from hooks._redis import get_redis
 
@@ -233,6 +242,18 @@ class NameRegistry:
         except RedisError as exc:
             logging.getLogger(__name__).warning("alias lookup failed for %s: %s", name, exc)
             return name
+
+    def resolve_many(self, names):
+        from redis.exceptions import RedisError
+
+        if not names:
+            return {}
+        try:
+            found = self.redis.mget([self.key("alias", name) for name in names])
+        except RedisError as exc:
+            logging.getLogger(__name__).warning("alias lookup failed for %d names: %s", len(names), exc)
+            return {name: name for name in names}
+        return {name: alias or name for name, alias in zip(names, found)}
 
     def alias(self, old, new):
         from redis.exceptions import WatchError

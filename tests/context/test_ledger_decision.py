@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -6,6 +7,8 @@ import pytest
 import hooks.context.ledger_decision as decision
 from hooks import hook_manager
 from hooks.targets.emitter import flush
+from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
+from tests.swarm_ledger import legacy_page
 
 ROOT = Path(__file__).resolve().parents[2]
 RECORDED = json.loads((ROOT / "tests" / "fixtures" / "ledger_decision_payloads.json").read_text(encoding="utf-8"))
@@ -231,7 +234,13 @@ def test_an_unbound_plan_still_directs_init_swarm(isolated, capsys, monkeypatch)
 
 
 def ledger(isolated, slug):
-    (isolated / f"{slug}.json").write_text("{}", encoding="utf-8")
+    legacy_page.store(isolated, slug, {})
+
+
+def bin_registry(isolated, entries):
+    repo = SQLiteLedgerRepository(isolated / DATABASE)
+    with repo.connect() as connection, connection:
+        repo.save_registry(connection, "bin", entries)
 
 
 def plan_accept(text, plan_file=None):
@@ -290,7 +299,7 @@ def test_a_plan_naming_no_existing_ledger_gets_the_swarm_directive(isolated, tex
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
     ledger(isolated, "demo")
     ledger(isolated, "binned")
-    (isolated / ".bin.json").write_text(json.dumps({"binned": 1}), encoding="utf-8")
+    bin_registry(isolated, {"binned": 1})
     assert decision.directive(plan_accept(text, isolated / "missing.md")) == decision.SWARM_DIRECTIVE
 
 
@@ -302,11 +311,11 @@ def test_a_plan_without_text_names_no_ledger(isolated, monkeypatch):
     assert decision.directive(payload) == decision.SWARM_DIRECTIVE
 
 
-@pytest.mark.parametrize("content", ["not json", "[1]"])
-def test_an_unreadable_bin_hides_no_ledger(isolated, content, monkeypatch):
+def test_an_unreadable_bin_hides_no_ledger(isolated, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
     ledger(isolated, "binned")
-    (isolated / ".bin.json").write_text(content, encoding="utf-8")
+    with sqlite3.connect(isolated / DATABASE) as connection:
+        connection.execute("DROP TABLE registry")
     assert "names the existing ledger binned" in decision.directive(plan_accept("Revive the binned ledger."))
 
 

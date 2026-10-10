@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from hooks.config import AGENTIHOOKS_HOME
+from scripts.swarm_ledger import plan_read
 
 STATE_DIR = AGENTIHOOKS_HOME / "swarm-refocus"
 DEFAULT_EVERY = 40
@@ -25,6 +26,7 @@ def build_block(ledger, task_id, cap):
         f"Plan: {_clip(ledger.get('overview', ''), share)}\n"
         f"Phase: {phase.get('title', '')}: {_clip(phase.get('description', ''), share)}\n"
         f"Your task {task_id}: {task.get('title', '')}\n"
+        + (f"{plan_read.pointer(task)}\n" if task.get("plan_lines") else "")
     )
     return _clip(head + task.get("description", ""), cap)
 
@@ -55,7 +57,7 @@ def refocus_context(session_id, event, environ=None):
     binding = _binding(env)
     if not (binding and session_id):
         return ""
-    ledger = _read_json(_ledger_dir(env) / f"{binding[0]}.json")
+    ledger = _read_ledger(_ledger_dir(env), *binding)
     block = (
         build_block(ledger, binding[1], _int(env, "AGENTIHOOKS_REFOCUS_MAX_CHARS", DEFAULT_MAX_CHARS)) if ledger else ""
     )
@@ -100,6 +102,13 @@ def _int(env, name, default):
 
 def _clip(text, limit):
     return text if len(text) <= limit else text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _read_ledger(folder, slug, task_id):
+    from scripts.swarm_ledger.repository.sqlite import read_ledger
+
+    focus = ("priorities",) if task_id == "master" else (f"tasks/{task_id}",)
+    return read_ledger(folder, slug, "title", "overview", "phases", *focus)
 
 
 def _read_json(path):

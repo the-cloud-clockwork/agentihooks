@@ -1,0 +1,30 @@
+{
+  "schema_version": "2.0",
+  "package": "SV2-CTL-03",
+  "swarm": "fixture",
+  "cluster": {"remote_nodes": 0, "running_attempts": 0},
+  "clock_ms": 1000,
+  "pending_ttl_ms": 300000,
+  "caps": {"global": 3, "swarm": 3},
+  "provider_slots": 6,
+  "templates": [
+    {"name": "general", "memory_mib": 16384, "cpu_millis": 4000},
+    {"name": "compute", "memory_mib": 8192, "cpu_millis": 8000}
+  ],
+  "default_resources": {"memory_mib": 4096, "cpu_millis": 1000},
+  "tasks": [
+    {"id": "t01"},
+    {"id": "t02"},
+    {"id": "t03"},
+    {"id": "t04", "resources": {"memory_mib": 65536}},
+    {"id": "t05"},
+    {"id": "t06"},
+    {"id": "t07"},
+    {"id": "t08"},
+    {"id": "t09"},
+    {"id": "t10"}
+  ],
+  "impossible": "t04",
+  "grant": "Controller fixture grant from the SV2-CTL-01 lease; never a deployed credential",
+  "cases": ["a", "b", "c"]
+}

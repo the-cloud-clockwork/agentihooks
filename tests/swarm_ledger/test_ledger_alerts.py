@@ -15,7 +15,7 @@ from scripts.inbox.seats import seat_address  # noqa: E402
 from scripts.inbox.store import InboxStore  # noqa: E402
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig  # noqa: E402
 from scripts.swarm_ledger import ledger, ledger_server  # noqa: E402
-from scripts.swarm_ledger.repository.file import sync as file_sync  # noqa: E402
+from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_page import page_source  # noqa: E402
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -26,7 +26,7 @@ SIZE_TEXT = "phase {} description has 120 words, limit 100"
 
 
 def sync(ops=None):
-    return file_sync(SLUG, ops=ops, core=core)
+    return core.sync(SLUG, ops=ops)
 
 
 def make_ledger(description="d"):
@@ -38,7 +38,7 @@ def make_ledger(description="d"):
     }
     html_path, json_path = core.paths(SLUG)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     state, _ = sync()
     return state
@@ -74,11 +74,11 @@ def test_a_ledger_without_warnings_raises_no_alert():
     assert make_ledger()["alerts"] == []
 
 
-def test_a_sync_refusal_becomes_an_alert_for_the_operator():
+def test_a_sync_refusal_becomes_an_alert_for_the_writer():
     make_ledger()
     state = refuse_a_plan()
     [alert] = state["alerts"]
-    assert (alert["source"], alert["target"], alert["state"]) == ("sync", "operator", "open")
+    assert (alert["source"], alert["target"], alert["state"]) == ("sync", "master", "open")
     assert alert["text"] in state["_meta"]["warnings"]
 
 
@@ -138,11 +138,11 @@ def test_each_new_alert_reaches_its_target_inbox_once(inbox):
     assert item.sender == ledger_alerts.SENDER
 
 
-def test_an_operator_alert_reaches_the_operator_inbox(inbox):
+def test_a_refusal_without_a_live_writer_reaches_the_master_inbox(inbox):
     make_ledger()
     state = refuse_a_plan()
     ledger_server.deliver_alerts(SLUG, state)
-    [item] = inbox.inbox("operator")
+    [item] = inbox.inbox(seat_address(SLUG, MASTER))
     assert state["alerts"][0]["text"] in item.text
 
 
@@ -345,5 +345,346 @@ def test_the_server_reply_delivers_new_alerts(inbox):
     handler.send = lambda code, body, ctype: None
     taken = {"op": "phase_append", "id": "plan", "by": "master", "phases": [{"phase": "p1", "title": "Taken"}]}
     handler.reply_state(SLUG, ops=[taken])
-    [item] = inbox.inbox("operator")
+    [item] = inbox.inbox(seat_address(SLUG, MASTER))
     assert "phase id p1 is already taken" in item.text
+
+
+def test_versioned_write_delivers_alert_once(inbox):
+    from scripts.swarm_ledger.api import mutations, resources
+
+    state = make_ledger()
+    op = {"op": "phase_append", "id": "plan", "by": "master", "phases": [{"phase": "p1", "title": "Taken"}]}
+    payload = {
+        "operation_id": "refused-plan",
+        "ops": [op],
+        "guards": {"phases": resources.resource_revision(state, "phases")},
+    }
+    mutations.apply(ledger_server, SLUG, "", payload)
+    mutations.apply(ledger_server, SLUG, "", payload)
+    items = inbox.inbox("master") + inbox.inbox(seat_address(SLUG, MASTER)) + inbox.inbox("operator")
+    assert len(items) == 1
+    assert "phase id p1 is already taken" in items[0].text
+
+
+@pytest.mark.parametrize("seat", [seat_address(SLUG, "eng-1"), ""])
+def test_refusal_reaches_writer_seat_or_agent(inbox, seat):
+    make_ledger()
+    writer = "writer"
+    store = RedisStore(inbox.redis)
+    store.put_agent(SLUG, AgentRecord(name=writer, lane="eng", task="", seat=seat, state="working"))
+    state, rejected = sync(
+        [{"op": "phase_append", "id": "refusal", "by": writer, "phases": [{"phase": "p1", "title": "Taken"}]}]
+    )
+    assert rejected == ["refusal"]
+    ledger_server.deliver_alerts(SLUG, state)
+    address = seat or writer
+    assert len(inbox.inbox(address)) == 1
+    assert inbox.inbox("operator") == []
+    assert state["alerts"][0]["writer"] == writer
+
+
+@pytest.mark.parametrize("finished", [False, True])
+def test_missing_or_finished_writer_falls_back_to_master(inbox, finished):
+    make_ledger()
+    if finished:
+        RedisStore(inbox.redis).put_agent(
+            SLUG, AgentRecord(name="writer", lane="eng", task="", state="finished", seat="eng-1")
+        )
+    state, _ = sync(
+        [{"op": "phase_append", "id": "refusal", "by": "writer", "phases": [{"phase": "p1", "title": "Taken"}]}]
+    )
+    ledger_server.deliver_alerts(SLUG, state)
+    assert len(inbox.inbox(seat_address(SLUG, MASTER))) == 1
+    assert inbox.inbox("writer") == []
+    assert inbox.inbox("operator") == []
+
+
+def test_successful_retry_closes_only_same_writer_and_item():
+    make_ledger()
+    refused = {"op": "phase_append", "id": "refusal", "by": "writer", "phases": [{"phase": "p1", "title": "Taken"}]}
+    state, _ = sync([refused])
+    alert_id = state["alerts"][0]["id"]
+    sync([{"op": "phase_append", "id": "other", "by": "other", "phases": [{"phase": "p2", "title": "Second"}]}])
+    state, _ = sync(
+        [{"op": "phase_append", "id": "retry", "by": "writer", "phases": [{"phase": "p3", "title": "Third"}]}]
+    )
+    alert = next(a for a in state["alerts"] if a["id"] == alert_id)
+    assert alert["state"] == "done"
+    assert alert["outcome"] == "The writer succeeded on the same item."
+    assert alert["closed_by"] == "writer"
+    assert any(e["kind"] == "alert closed" for e in state["_meta"]["events"])
+
+
+def test_refusal_expires_one_hour_after_last_repeat(monkeypatch):
+    make_ledger()
+    clock = [10000000]
+    monkeypatch.setattr(core, "now_ms", lambda: clock[0])
+    op = {"op": "phase_append", "id": "refusal", "by": "writer", "phases": [{"phase": "p1", "title": "Taken"}]}
+    state, _ = sync([op])
+    alert_id = state["alerts"][0]["id"]
+    clock[0] += 3599999
+    state, _ = sync([op])
+    assert len(state["alerts"]) == 1
+    clock[0] += 3599999
+    state, _ = sync()
+    assert state["alerts"][0]["state"] == "open"
+    clock[0] += 1
+    state, _ = sync()
+    alert = next(a for a in state["alerts"] if a["id"] == alert_id)
+    assert alert["state"] == "done"
+    assert alert["outcome"] == "No repeat refusal for one hour."
+
+
+def test_server_sweep_expires_refusals_without_a_new_write(monkeypatch):
+    make_ledger()
+    state = refuse_a_plan()
+    monkeypatch.setattr(core, "now_ms", lambda: state["alerts"][0]["at"] + 3600000)
+    ledger_server.expire_alerts()
+    state = ledger_server.repository.get_document(SLUG)
+    assert state["alerts"][0]["state"] == "done"
+    assert state["alerts"][0]["outcome"] == "No repeat refusal for one hour."
+
+
+def test_successful_retry_in_one_batch_closes_new_refusal():
+    make_ledger()
+    state, _ = sync(
+        [
+            {"op": "phase_append", "id": "bad", "by": "writer", "phases": [{"phase": "p1", "title": "Taken"}]},
+            {"op": "phase_append", "id": "good", "by": "writer", "phases": [{"phase": "p2", "title": "New"}]},
+        ]
+    )
+    assert state["alerts"][0]["state"] == "done"
+
+
+def test_refusal_and_retry_share_a_resolved_writer(monkeypatch):
+    monkeypatch.setattr("scripts.swarm.naming.resolve_name", lambda name: "writer" if name == "alias" else name)
+    make_ledger()
+    state, _ = sync([{"op": "phase_append", "id": "bad", "by": "alias", "phases": [{"phase": "p1", "title": "Taken"}]}])
+    assert state["alerts"][0]["writer"] == "writer"
+    state, _ = sync([{"op": "phase_append", "id": "good", "by": "writer", "phases": [{"phase": "p2", "title": "New"}]}])
+    assert state["alerts"][0]["state"] == "done"
+
+
+@pytest.mark.parametrize(
+    "shape, expected",
+    [
+        ({"op": "task_add", "task": "t1"}, "tasks/t1"),
+        ({"op": "task_update", "item": "tasks/t1"}, "tasks/t1"),
+        ({"op": "add", "thread": "notes"}, "notes"),
+        ({"op": "alert_claim", "target": "al-one"}, "al-one"),
+        ({"op": "phase_append"}, "phase_append"),
+    ],
+)
+def test_repository_refusal_preserves_item_and_recovery_event(monkeypatch, shape, expected):
+    from scripts.swarm_ledger.repository import mutation
+
+    state = make_ledger()
+    clock = [10000000]
+    monkeypatch.setattr(core, "now_ms", lambda: clock[0])
+    op = {**shape, "id": "bad", "by": "writer"}
+
+    def refuse(doc, op, ctx, apply_op):
+        ctx.refused.append("Write refused.")
+        return False
+
+    rejected, _ = mutation.apply(SLUG, state, core, ops=[op], gate=SimpleNamespace(apply=refuse))
+    assert rejected == ["bad"]
+    [alert] = state["alerts"]
+    assert (alert["writer"], alert["item"], alert["text"]) == ("writer", expected, "Write refused.")
+    clock[0] += 1
+    rejected, _ = mutation.apply(
+        SLUG, state, core, ops=[{**op, "id": "good"}], gate=SimpleNamespace(apply=lambda *args: True)
+    )
+    assert rejected == []
+    assert alert["state"] == "done"
+    assert alert["closed_at"] == 10000001
+    [event] = [e for e in state["_meta"]["events"] if e["kind"] == "alert closed"]
+    assert (event["by"], event["target"], event["text"]) == (
+        "writer",
+        f"alerts/{alert['id']}",
+        "The writer succeeded on the same item.",
+    )
+    mutation.apply(SLUG, state, core, ops=[{**op, "id": "again"}], gate=SimpleNamespace(apply=refuse))
+    assert [a["state"] for a in state["alerts"]] == ["done", "open"]
+
+
+def test_repository_recovery_tolerates_an_older_ledger_without_alerts():
+    from scripts.swarm_ledger.repository import mutation
+
+    state = make_ledger()
+    state.pop("alerts")
+    expected_keys = {*state, "alerts"}
+    mutation.apply(SLUG, state, core, ops=[{"op": "join", "id": "joined", "by": "writer"}])
+    assert state["alerts"] == []
+    assert set(state) == expected_keys
+
+
+def test_quiet_expiry_uses_original_time_for_an_older_refusal(monkeypatch):
+    from scripts.swarm_ledger.repository import mutation
+
+    state = make_ledger()
+    state, _ = sync(
+        [{"op": "phase_append", "id": "bad", "by": "writer", "phases": [{"phase": "p1", "title": "Taken"}]}]
+    )
+    alert = state["alerts"][0]
+    alert.pop("last_refused_at")
+    clock = alert["at"] + 3600000
+    monkeypatch.setattr(core, "now_ms", lambda: clock)
+    mutation.apply(SLUG, state, core)
+    assert alert["state"] == "done"
+    assert alert["closed_at"] == clock
+    assert alert["closed_by"] == "writer"
+
+
+def test_server_sweep_tolerates_an_older_ledger_without_alerts(monkeypatch):
+    state = make_ledger()
+    state.pop("alerts")
+    monkeypatch.setattr(ledger_server.repository, "read", lambda slug, *keys: state)
+    ledger_server.expire_alerts()
+    assert "alerts" not in state
+
+
+def test_same_refusal_text_has_distinct_writers_and_items():
+    from scripts.swarm_ledger.repository import mutation
+
+    state = make_ledger()
+
+    def refuse(doc, op, ctx, apply_op):
+        ctx.refused.append("Write refused.")
+        return False
+
+    ops = [
+        {"op": "task_update", "id": "one", "by": "writer", "item": "tasks/t1"},
+        {"op": "task_update", "id": "two", "by": "other", "item": "tasks/t1"},
+        {"op": "task_update", "id": "three", "by": "writer", "item": "tasks/t2"},
+    ]
+    mutation.apply(SLUG, state, core, ops=ops, gate=SimpleNamespace(apply=refuse))
+    assert len(state["alerts"]) == 3
+    mutation.apply(SLUG, state, core, ops=[{**ops[0], "id": "retry"}], gate=SimpleNamespace(apply=lambda *args: True))
+    assert [a["state"] for a in state["alerts"]] == ["done", "open", "open"]
+
+
+def test_a_repeated_refusal_persists_its_new_deadline(monkeypatch):
+    clock = [10000000]
+    monkeypatch.setattr(core, "now_ms", lambda: clock[0])
+    make_ledger()
+    op = {"op": "phase_append", "id": "bad", "by": "writer", "phases": [{"phase": "p1", "title": "Taken"}]}
+    state, _ = sync([op])
+    rev = state["_meta"]["rev"]
+    clock[0] += 1000
+    sync([op])
+    stored = ledger_server.repository.get_document(SLUG)
+    assert stored["alerts"][0]["last_refused_at"] == 10001000
+    assert stored["_meta"]["rev"] == rev + 1
+
+
+@pytest.mark.parametrize("refused", [False, True])
+def test_write_with_fifty_alerts_resolves_a_bounded_number_of_names(inbox, monkeypatch, refused):
+    from scripts.swarm_ledger.api import mutations, resources
+
+    make_ledger()
+    state, _ = sync([{"op": "join", "id": "joined", "by": "writer"}])
+    if refused:
+        state, _ = sync(
+            [{"op": "task_add", "id": "seed", "by": "swarm", "task": "t1", "title": "Proof", "lane": "eng"}]
+        )
+    state["alerts"] = [
+        {
+            "id": f"old-{n}",
+            "text": f"Earlier refusal {n}",
+            "source": "sync",
+            "target": "operator",
+            "state": "open",
+            "at": core.now_ms(),
+            "rev": state["_meta"]["rev"],
+        }
+        for n in range(50)
+    ]
+    ledger_server.repository.import_document(SLUG, state, replace=True)
+
+    resolved = []
+
+    def counted_name(name):
+        resolved.append(name)
+        return name
+
+    monkeypatch.setattr("scripts.swarm.naming.resolve_name", counted_name)
+    monkeypatch.setattr(inbox.names, "resolve", counted_name)
+    op = {"op": "ack", "id": "one", "by": "writer", "rev": state["_meta"]["rev"]}
+    guards = {}
+    if refused:
+        op = {"op": "task_add", "id": "one", "by": "writer", "task": "t1", "title": "Proof", "lane": "eng"}
+        guards = {"tasks": resources.resource_revision(state, "tasks")}
+    reply = mutations.apply(ledger_server, SLUG, "", {"operation_id": "timed", "ops": [op], "guards": guards})
+    assert reply["rejected"] == (["one"] if refused else [])
+    assert len(resolved) <= (4 if refused else 2), resolved
+
+
+def test_operation_author_is_resolved_once_per_write(monkeypatch):
+    make_ledger()
+    calls = []
+
+    def resolve(name):
+        calls.append(name)
+        return "writer" if name == "alias" else name
+
+    monkeypatch.setattr("scripts.swarm.naming.resolve_name", resolve)
+    state, _ = sync(
+        [
+            {"op": "join", "id": "joined", "by": "alias"},
+            {"op": "ack", "id": "acknowledged", "by": "writer", "rev": 1},
+        ]
+    )
+    assert calls == ["alias"]
+    assert "writer" in state["_meta"]["members"]
+    sync([{"op": "ack", "id": "again", "by": "writer", "rev": 1}])
+    assert calls == ["alias", "writer"]
+
+
+def test_alias_operation_stores_the_canonical_author(monkeypatch):
+    from scripts.swarm_ledger import ledger_core
+
+    state = make_ledger()
+    ctx = ledger_core.Context(state["_meta"], ledger_core.now_ms())
+    monkeypatch.setattr("scripts.swarm.naming.resolve_name", lambda name: "writer" if name == "alias" else name)
+    assert ledger_core.apply_op(state, {"op": "join", "id": "joined", "by": "alias"}, ctx)
+    assert "writer" in ctx.meta["members"]
+    assert "alias" not in ctx.meta["members"]
+
+
+def test_stale_and_claimed_alerts_do_not_need_an_inbox(monkeypatch, capsys):
+    def unavailable():
+        raise OSError("offline")
+
+    monkeypatch.setattr("scripts.inbox.store.connect", unavailable)
+    state = {
+        "_meta": {"rev": 2},
+        "alerts": [
+            {"id": "old", "rev": 1, "state": "open", "target": "master"},
+            {"id": "claimed", "rev": 2, "state": "claimed", "target": "master"},
+        ],
+    }
+    assert ledger_server.deliver_alerts(SLUG, state) == []
+    assert capsys.readouterr().err == ""
+
+
+def test_expiry_waits_one_scan_interval_after_startup(monkeypatch):
+    make_ledger()
+    state = refuse_a_plan()
+    monkeypatch.setattr(core, "now_ms", lambda: state["alerts"][0]["at"] + 3600000)
+    monkeypatch.setenv("SWARM_RELOAD", "0")
+    sleeps = []
+
+    def tick(interval):
+        sleeps.append(interval)
+        alert = ledger_server.repository.read(SLUG, "alerts")["alerts"][0]
+        if len(sleeps) < 16:
+            assert alert["state"] == "open"
+        else:
+            assert alert["state"] == "done"
+            raise InterruptedError("scan observed")
+
+    monkeypatch.setattr(ledger_server.time, "sleep", tick)
+    with pytest.raises(InterruptedError, match="scan observed"):
+        ledger_server.watch_ledgers(interval=0)
+    assert len(sleeps) == 16

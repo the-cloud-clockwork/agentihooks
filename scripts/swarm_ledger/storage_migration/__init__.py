@@ -1,33 +1,36 @@
+"""Ledger interchange: lossless JSON export and import, and the one time import of pre SQLite ledger files."""
+
+import functools
 import json
 from pathlib import Path
 
-from scripts.swarm_ledger.repository.file import core, load_state
-from scripts.swarm_ledger.repository.shadow import storage_lock
-from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
+from scripts.swarm_ledger.repository import legacy, repository
+
+EXPORT_JSON = functools.partial(json.dumps, indent=2, ensure_ascii=False)
 
 
-def import_directory(directory: Path, database: Path | None = None) -> list:
-    directory = Path(directory)
-    repository = SQLiteLedgerRepository(database or directory / "ledger-shadow.sqlite3")
-    registries = {}
-    imported = []
-    with storage_lock(directory):
-        for name, filename in (("bin", ".bin.json"), ("restored", ".bin-restored.json")):
-            path = directory / filename
-            registries[name] = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-            repository.import_registry(name, registries[name])
-        for page in sorted(directory.glob("*.html")):
-            path = page.with_suffix(".json")
-            seed = None if path.exists() else core.parse_seed(page.read_text(encoding="utf-8"))
-            document, meta, created = load_state(path, seed, core)
-            if created:
-                meta["updated_at"] = page.stat().st_mtime_ns // 1_000_000
-            repository.import_document(
-                path.stem,
-                {**document, "_meta": meta},
-                registries["bin"].get(path.stem),
-                registries["restored"].get(path.stem),
-            )
-            imported.append(path.stem)
-        repository.apply_lifecycle(directory, registries)
-    return imported
+def export(slug: str, out: Path | None = None) -> dict:
+    """The complete stored document; written to `out` when given, else returned."""
+    state = repository.export_document(slug)
+    if out is not None:
+        Path(out).write_bytes((EXPORT_JSON(state) + "\n").encode())
+    return state
+
+
+def load(path: Path, slug: str | None = None, replace: bool = False) -> str:
+    """Store an exported document; refuses an existing ledger unless replacing."""
+    path = Path(path)
+    slug = slug or path.stem
+    if not legacy.core.SLUG_RE.match(slug):
+        raise ValueError(f"invalid slug: {slug!r}")
+    state = legacy.core.loads(path.read_bytes())
+    if not isinstance(state, dict) or not isinstance(state.get("_meta"), dict) or "rev" not in state["_meta"]:
+        raise ValueError(f"{path} is not an exported ledger document")
+    repository.import_document(slug, state, replace=replace)
+    return slug
+
+
+def cutover() -> list:
+    """Import every ledger file still in the ledger folder, after its verified backup; the slugs now stored."""
+    legacy.adopt(repository)
+    return sorted(summary["slug"] for summary in repository.list_summaries())

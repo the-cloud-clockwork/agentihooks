@@ -1,5 +1,6 @@
 from collections.abc import Iterable
-from dataclasses import dataclass
+
+from scripts.routing.slots import Slot
 
 FRESH_SECONDS = 15 * 60
 WEEK_FLOOR = 5.0
@@ -8,17 +9,7 @@ TOP_BAND = FIVE_HOUR_BANDS[0][1]
 HANDOFF_FIVE = 5.0
 
 
-@dataclass(frozen=True)
-class Seat:
-    harness: str
-    account: str
-    cap: int
-    sessions: int
-    spend_before: float | None = None
-
-    @property
-    def free(self) -> int:
-        return max(0, self.cap - self.sessions)
+Seat = Slot
 
 
 def left(used: float | None, resets_at: int | None, now: float) -> float | None:

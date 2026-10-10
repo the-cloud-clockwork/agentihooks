@@ -6,10 +6,11 @@ import pytest
 
 from scripts.handoff import transfers
 from scripts.inbox.store import InboxStore
-from scripts.swarm import affinity, launch_check, master_launch, master_start, runtime
+from scripts.swarm import affinity, capacity, launch_check, master_launch, master_start, runtime
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, SwarmError
 from scripts.swarm.tick import Placed, SpawnError
+from tests.swarm.test_capacity import account
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_tick import FakeRuntime
 
@@ -332,6 +333,7 @@ def test_an_empty_saved_assignment_launches_from_the_swarm_config(up, monkeypatc
     store.redis.hset(store.key("sw", "launch-assignments"), MASTER, json.dumps({"profile": "", "harness": ""}))
     store.put_handoff("sw", MASTER, "# Handoff v2\n## Next\nGo on.\n")
     answers(monkeypatch)
+    monkeypatch.setattr(master_launch.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
     assert run("sw", "master", "up", "--new") == 0
     [(_, task)] = rt.masters
     launch = {"profile": "master", "harness": "claude", "model": "opus", "effort": "high"}
@@ -514,7 +516,10 @@ def test_the_refusals_read_exactly(up, monkeypatch, capsys):
     assert capsys.readouterr().err.strip() == "swarm: no master started"
 
 
-def test_fill_takes_every_empty_key_from_a_bare_config():
+def test_fill_takes_every_empty_key_from_a_bare_config(monkeypatch):
+    from scripts import agent_choice
+
+    monkeypatch.setattr(agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
     bare = SwarmConfig("sw", "/repo", 0, 0)
     assert master_launch.fill({}, bare) == {"profile": "master", "harness": "claude", "model": "opus", "effort": "high"}
 
@@ -522,6 +527,21 @@ def test_fill_takes_every_empty_key_from_a_bare_config():
 def test_fill_keeps_a_saved_harness_and_picks_its_frontier_model():
     config = SwarmConfig("sw", "/repo", 0, 0, lanes={MASTER: {"agent": "claude"}})
     assert master_launch.fill({"harness": "codex"}, config)["model"] == "gpt-6.1-sol"
+
+
+def test_fill_leaves_a_saved_launch_on_an_unknown_harness_unclamped():
+    saved = {"harness": "copilot", "model": "gpt-x", "effort": "max"}
+    assert master_launch.fill(saved, SwarmConfig("sw", "/repo", 0, 0)) == {"profile": "master", **saved}
+
+
+def test_a_master_saved_on_an_unknown_harness_is_refused_cleanly(tmp_path):
+    config = SwarmConfig("sw", "/repo", 0, 0)
+    launch = {"harness": "copilot", "model": "gpt-x", "effort": "max"}
+    task = {"id": MASTER, "handoff": "continue", "handoff_envelope": {"reason": "recycle", "launch": launch}}
+    engine = runtime.HerdrRuntime(home=tmp_path, run=lambda *a, **k: pytest.fail("an unknown harness launched"))
+    with pytest.raises(SpawnError) as error:
+        engine.spawn(config, MASTER, "master@a1b2c3-0001", master_launch._filled(task, config))
+    assert (str(error.value), error.value.status) == ("unsupported handoff harness: copilot", "unsupported")
 
 
 def test_a_partial_handoff_launch_keeps_its_values_and_the_envelope():
@@ -567,7 +587,7 @@ def test_a_resumed_master_without_launch_facts_keeps_its_own(up):
     assert store.seats.history("master@sw")[-1]["at"] == AT
     assert rt.configs == ["sw"]
     text = rt.resumed[0][4]
-    assert f"agentihooks swarm sw master up as {name}" in text and str(master_launch.ledger_path("sw")) in text
+    assert f"agentihooks swarm sw master up as {name}" in text and master_launch.ledger_source("sw") in text
     assert launched == master_launch.Launched(name, "w2:m4", "master@sw", master_launch.LAST)
 
 
@@ -695,3 +715,66 @@ def test_the_master_command_needs_its_up_action():
     assert (parsed.action, parsed.choice) == ("up", "")
     with pytest.raises(SystemExit):
         cli.build_parser().parse_args(["sw", "master"])
+
+
+def test_a_new_master_reads_quota_before_it_is_placed(up, monkeypatch):
+    store, _, rt = up
+    order = []
+    monkeypatch.setattr(
+        rt, "quota_capacity", lambda config, agents, now: order.append(("quota", config.slug, now)), raising=False
+    )
+    monkeypatch.setattr(rt, "quota_spent", lambda counter: order.append(("spent", counter(AT))), raising=False)
+    store.redis.zadd(tick_module.HOST_SPENDS, {"now": AT, "later": AT + 1})
+    spawn = rt.spawn
+    monkeypatch.setattr(rt, "spawn", lambda *args: order.append("spawn") or spawn(*args))
+    direct(store, rt, master_launch.NEW)
+    assert order == [("spent", 1), ("quota", "sw", AT / 1000), "spawn"]
+
+
+def quota_master(monkeypatch, tmp_path, observed):
+    monkeypatch.setattr(capacity, "accounts", lambda environ, now, refresh=True: observed)
+    rt = runtime.HerdrRuntime(
+        home=tmp_path / "home", choose=lambda requested, environ: (requested or "claude", "priority")
+    )
+    monkeypatch.setattr(
+        runtime.profile_choice,
+        "choose",
+        lambda slug, lane, chosen, task, environ, overlays=None: runtime.profile_choice.ProfileDecision(
+            "master", "task", "explicit"
+        ),
+    )
+    monkeypatch.setattr(rt, "live_names", set)
+    monkeypatch.setattr(rt, "reported", lambda agent: True)
+    routes = []
+
+    def launch(cfg, lane, task, name, argv, **kwargs):
+        route = argv[argv.index("--route") + 1] if "--route" in argv else ""
+        routes.append(route)
+        return runtime.Placed("pane", argv[argv.index("--agent") + 1], route)
+
+    monkeypatch.setattr(rt, "_launch", launch)
+    return rt, routes
+
+
+def test_a_new_master_leaves_a_warned_account_or_refuses_naming_it(up, monkeypatch, tmp_path):
+    store, _, _ = up
+    rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5), account("ok")])
+    direct(store, rt, master_launch.NEW)
+    assert routes == ["ok"]
+    rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5)])
+    refusal = "no claude or codex account has placeable quota seats: claude w is at its week quota warning"
+    with pytest.raises(SwarmError, match=f"^the new master could not start: {refusal}$"):
+        direct(store, rt, master_launch.NEW)
+    assert routes == []
+
+
+def test_a_new_master_free_to_pick_its_harness_refuses_naming_every_warned_account(up, monkeypatch, tmp_path):
+    store, _, _ = up
+    rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5), account("cw", harness="codex", left=5)])
+    warned = "claude w is at its week quota warning; codex cw is at its week quota warning"
+    with pytest.raises(
+        SwarmError,
+        match=f"^the new master could not start: no claude or codex account has placeable quota seats: {warned}$",
+    ):
+        direct(store, rt, master_launch.NEW)
+    assert routes == []

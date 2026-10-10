@@ -26,10 +26,12 @@ agentihooks ledger watch …                             # the Monitor feed
 agentihooks ledger --slug <slug> --as <name> <command> # the agent CLI
 ```
 
-A ledger `<slug>` is two files in `~/development-ledger/` (`$LEDGER_DIR`):
-`<slug>.html` (the page, with the agent-editable seed) and `<slug>.json` (the
-state plus `_meta`). The local server (`$LEDGER_PORT`, default 8765) serves the
-page, stores the operator's edits and folds agent edits of the HTML into the JSON.
+A ledger `<slug>` is a record in the SQLite database `ledgers.sqlite3` in
+`~/development-ledger/` (`$LEDGER_DIR`); no per ledger JSON or HTML file is
+written. The local server (`$LEDGER_PORT`, default 8765) serves the page shell,
+stores every operator and agent edit in that record and streams changes to open
+pages. `agentihooks ledger storage export <slug>` writes the whole ledger as JSON
+on request, and `storage import <file> --slug <slug>` loads one back losslessly.
 
 Use it for a plan with several phases worked across sessions; a single-step task
 needs no ledger.
@@ -59,7 +61,7 @@ names and every source path exists.
 
 ### A2. Build the ledger
 
-<!-- DETERMINISTIC: validate limits, types and sources, write <slug>.html + <slug>.json -->
+<!-- DETERMINISTIC: validate limits, types and sources, store the ledger record -->
 ```bash
 agentihooks ledger new --content <content.json> --plan <plan-file> [--size small|swarm] [--as <name>]
 ```
@@ -203,10 +205,10 @@ Writing for the operator (the server enforces it):
   shows a yellow "out of scope" dot and disables the item; the operator clicks the dot to bring it
   back, which adds a "Back in scope." comment and an operator event.
 
-Each command is attributed to your name. Titles, descriptions, overview and sources are edited in
-the HTML seed: the `<script id="ledger-data" type="application/json">` block of
-`~/development-ledger/<slug>.html`, with Edit, keeping its `_rev`; the server merges within
-2 seconds. Items are closed by checking them, never deleted. Done when `status` shows your change.
+Each command is attributed to your name. There is no seed to edit: phase titles and descriptions
+change with `phase set <id> title=<text> description=<text>`, follow-up and question text with
+`retext`, task fields with `task set`; the ledger title and overview are set at creation and by the
+operator. Items are closed by checking them, never deleted. Done when `status` shows your change.
 
 ### B4. The gate
 
@@ -238,7 +240,7 @@ process runs between ticks.
 3. `agentihooks swarm <slug> start`: scales up at once; `pause` stops new spawns, `stop` drains, `stop --now`
    kills every agent and reopens its task. Change caps with `agentihooks swarm <slug> max-eng-agents=3`.
 4. `agentihooks swarm <slug> status` and `agentihooks swarm list` show agents, tasks and state.
-5. Talk to the swarm from the page chat or `agentihooks swarm <slug> send-message "@eng <text>"`; idle agents
+5. Talk to the swarm from the page chat, or reach every live agent's inbox with `agentihooks swarm <slug> send-message "<text>"`; idle agents
    get it in their pane at once, busy ones when their turn ends.
 
 Agents are told their task in their opening prompt and close it with `agentihooks swarm <slug> issue|pr|done|block|say`.
@@ -294,8 +296,8 @@ Every change to `template.html` keeps these:
   like the `#id` link (selecting text to copy does not). The panel is 600px wide. The server raises a notification for a new follow-up,
   a new open question, or an agent comment or chat message that answers the operator. A row stays
   until the operator clears it; no agent op or seed edit can create or clear one.
-- A design change ships in the template and is rolled onto every existing
-  ledger with `agentihooks ledger new --upgrade <slug>`.
+- A design change ships in the page shell and static assets; every ledger serves it on the next
+  page load.
 
 ## How saving works
 
@@ -309,13 +311,14 @@ Every change to `template.html` keeps these:
   `_meta.created_at`, the ledger's earliest recorded timestamp.
 - Chat is the `chat` thread (last 500 messages); each send is one event, so
   it reaches the orchestrator through the inbox (or a watch, outside a swarm) within seconds.
-- The page polls the server every 2 s and redraws agent changes, keeping the
+- The page follows the server's event stream and redraws agent changes, keeping the
   cursor and any message not yet sent. Original sources are collapsed by
   default.
-- The server re-renders a ledger page from the current template whenever its
-  embedded version differs, keeping its token and content, and an open page
-  reloads itself once idle. `agentihooks ledger new --upgrade <slug>` does the same by hand;
-  older ledgers' string comments, answers and notes become entries on the first sync.
+- A save answers with a short acknowledgment (applied and refused op ids, the revision, warnings);
+  the page takes the new state from its event stream.
+- A `<slug>.json` or `<slug>.html` left in the ledger folder is imported into the record once, after
+  a verified copy to `.imported/`, then removed; `agentihooks ledger storage cutover` imports every
+  such file at once.
 - With the server down the page keeps edits in localStorage, shows "server
   offline", and sends them when the server answers again.
 - Every API call carries the page's ledger token and a local Host header;
@@ -329,8 +332,9 @@ hosted service) can serve the same page; the rules stay in `ledger_core.sync` an
 | Call | Body and reply |
 |---|---|
 | `GET /<slug>` | the page |
-| `GET /api/<slug>` | the state: plan fields, `chat`, `notes`, `priorities`, `notifications`, and `_meta` (rev, events, crew, page_version) |
-| `PUT /api/<slug>` | `{"changes": [...], "ops": [...]}`: checkbox changes with their base, and ops (`add`, `edit`, `delete`, `clear`, `sync`, `stats_sync`, `priority_clear`, `notification_clear`, agent ops carrying `by`); the reply is the new state |
+| `GET /api/v1/ledgers/<slug>/events` | the event stream: a snapshot of the ledger and swarm, then patches |
+| `PUT /api/<slug>` | `{"changes": [...], "ops": [...]}`: checkbox changes with their base, and ops (`add`, `edit`, `delete`, `clear`, `sync`, `stats_sync`, `priority_clear`, `notification_clear`, agent ops carrying `by`); the reply is `{"applied", "rejected", "_meta": {"rev", "warnings"}}` |
+| `GET /api/<slug>` | retired: answers 410 and names the v1 resource |
 | `GET /healthz` | `{"dir": "<ledger dir>"}` |
 
 Every `/api/` call carries `X-Ledger-Token` (the page's `ledger-token` meta). A new kind of op is a module
@@ -343,8 +347,9 @@ In agentihooks `scripts/swarm_ledger/`; `agentihooks ledger` dispatches to them 
 
 | Script | Purpose | Idempotent |
 |---|---|---|
-| `new_ledger.py` | Validate content, render `template.html` with a fresh token, write HTML + JSON | Yes (existing ledger untouched) |
-| `ledger_server.py` | `--ensure` / `--serve` / `--stop` the local server; merges page saves and HTML seed edits | Yes |
+| `new_ledger.py` | Validate content and store the new ledger record with a fresh token | Yes (existing ledger untouched) |
+| `ledger_server.py` | `--ensure` / `--serve` / `--stop` the local server; applies page saves and streams changes | Yes |
+| `storage_migration/` | `agentihooks ledger storage export`, `import` and `cutover`: lossless JSON interchange | Import refuses an existing slug without `--replace` |
 | `watch_ledger.py` | Monitor feed: operator changes, seed errors and word-limit warnings, replayable with `--since-rev` | Yes (read-only) |
 | `ledger.py` | Agent CLI: join, status, events, ack, say, comment, phase, followup, scope, retext, edit, delete, audit, time-left, claim, prompt | No (writes are attributed ops) |
 | `ledger_notifications.py` | Notifications derived from agent events each sync; `notification_clear` for the operator (library) | — |
@@ -354,5 +359,6 @@ In agentihooks `scripts/swarm_ledger/`; `agentihooks ledger` dispatches to them 
 | `ledger_gate.py` | Routing of operator events to crew members (library) | — |
 | `ledger_agent_ops.py` | Server-side agent ops: join, ack, claim, set, add_item (library) | — |
 | `chat_ledger.py` | Post a chat message as an agent through the running server | No (each call adds a message) |
-| `ledger_core.py` | Seed parse/write, flatten, three-way merge, the `sync` both paths use | — (library) |
+| `ledger_core.py` | Validation, flatten, checkbox merge, the `sync` facade over the repository | — (library) |
+| `repository/` | `SQLiteLedgerRepository`: row diff writes, events, summaries, token, bin registry, legacy import | — (library) |
 | `template.html` | The page: HTML + CSS + vanilla JS, no external requests | — |

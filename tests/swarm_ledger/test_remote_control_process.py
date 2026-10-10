@@ -1,4 +1,5 @@
 import argparse
+import itertools
 import json
 import os
 import subprocess
@@ -7,6 +8,7 @@ import threading
 import time
 import urllib.request
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -31,7 +33,7 @@ new_ledger.create('sw', {'title': 'Remote controls', 'overview': 'Control the ow
 server = ThreadingHTTPServer(('127.0.0.1', 0), ledger_server.Handler)
 ledger_server.ALLOWED_HOSTS.add(f'127.0.0.1:{server.server_address[1]}')
 ledger_server.ALLOWED_ORIGINS.add(f'http://127.0.0.1:{server.server_address[1]}')
-token = ledger_core.read_token(ledger_core.paths('sw')[0].read_text())
+token = ledger_server.repository.token('sw')
 Path(sys.argv[3]).write_text(json.dumps({'port': server.server_address[1], 'token': token, 'host': f'127.0.0.1:{ledger_server.PORT}'}))
 def sample():
     while True:
@@ -40,6 +42,25 @@ def sample():
 threading.Thread(target=sample, daemon=True).start()
 server.serve_forever()
 """
+
+
+def wait_ready(ready, process, deadline):
+    while process.poll() is None and time.monotonic() < deadline:
+        try:
+            return json.loads(ready.read_text())
+        except (FileNotFoundError, json.JSONDecodeError):
+            time.sleep(0.02)
+    return None
+
+
+def test_readiness_wait_returns_only_a_complete_reply(tmp_path):
+    ready = tmp_path / "ready.json"
+    writes = itertools.chain(["", '{"port": '], itertools.repeat('{"port": 1}'))
+
+    def poll():
+        ready.write_text(next(writes))
+
+    assert wait_ready(ready, SimpleNamespace(poll=poll), time.monotonic() + 5) == {"port": 1}
 
 
 @pytest.fixture
@@ -63,11 +84,8 @@ def remote_server(tmp_path, monkeypatch):
         [sys.executable, "-c", BOOT, str(ROOT), str(tmp_path / "ledger"), str(ready)], env=env, stdout=log, stderr=log
     )
     try:
-        deadline = time.monotonic() + 10
-        while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
-            time.sleep(0.02)
-        assert ready.exists(), (tmp_path / "server.log").read_text()
-        found = json.loads(ready.read_text())
+        found = wait_ready(ready, process, time.monotonic() + 10)
+        assert found, (tmp_path / "server.log").read_text()
 
         def request(method, body=None):
             headers = {"Host": found["host"], "X-Ledger-Token": found["token"], "Content-Type": "application/json"}

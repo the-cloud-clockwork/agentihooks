@@ -86,6 +86,188 @@ class TestHookManager:
         assert issubclass(BlockAction, Exception)
 
 
+@pytest.fixture
+def brain_dispatch(monkeypatch):
+    from unittest.mock import Mock
+
+    from hooks import config, hook_manager
+
+    for flag in ("MEMORY_AUTO_SAVE", "CONTEXT_AUDIT_ENABLED", "VOICE_ENABLED"):
+        monkeypatch.setattr(config, flag, False)
+    monkeypatch.setattr(hook_manager, "_request_trace_flush", Mock())
+    monkeypatch.setattr(hook_manager, "parse_transcript_metrics", Mock(return_value={}))
+    monkeypatch.setattr("hooks.tool_memory.scan_transcript", Mock())
+    monkeypatch.setattr("hooks.lifecycle.refresh.on_stop", Mock(return_value=False))
+    monkeypatch.setattr("hooks.lifecycle.handoff_close.on_stop", Mock(return_value=False))
+    monkeypatch.setattr(hook_manager.otel, "get_tracer", Mock(return_value=None))
+    fork = Mock()
+    monkeypatch.setattr("hooks._async.fork_and_call", fork)
+    return fork
+
+
+@pytest.mark.parametrize("event, task_name", [("Stop", "brain_writer"), ("SubagentStop", "brain_writer_subagent")])
+@pytest.mark.parametrize(
+    "transcript_path, last_message", [("transcript.jsonl", ""), ("", "marker"), ("transcript.jsonl", "marker")]
+)
+def test_brain_writer_dispatch(event, task_name, transcript_path, last_message, brain_dispatch, monkeypatch):
+    from unittest.mock import call
+
+    from hooks.context.brain_writer_hook import write_markers
+    from hooks.hook_manager import EVENT_HANDLERS
+
+    monkeypatch.setattr("hooks.config.BRAIN_WRITER_ENABLED", True)
+    payload = {
+        "session_id": "session",
+        "transcript_path": transcript_path,
+        "last_assistant_message": last_message,
+    }
+    if event == "SubagentStop":
+        payload.update(agent_id="agent", agent_transcript_path=transcript_path)
+    EVENT_HANDLERS[event](payload)
+
+    assert [c for c in brain_dispatch.call_args_list if c.args[0] is write_markers] == [
+        call(
+            write_markers,
+            "agent" if event == "SubagentStop" else "session",
+            transcript_path,
+            last_message=last_message,
+            timeout_sec=60,
+            task_name=task_name,
+        )
+    ]
+
+
+@pytest.mark.parametrize("event", ["Stop", "SubagentStop"])
+@pytest.mark.parametrize(
+    "enabled, transcript_path, last_message", [(False, "transcript.jsonl", "marker"), (True, "", "")]
+)
+def test_brain_writer_skips_dispatch(event, enabled, transcript_path, last_message, brain_dispatch, monkeypatch):
+    from hooks.context.brain_writer_hook import write_markers
+    from hooks.hook_manager import EVENT_HANDLERS
+
+    monkeypatch.setattr("hooks.config.BRAIN_WRITER_ENABLED", enabled)
+    EVENT_HANDLERS[event](
+        {"session_id": "session", "transcript_path": transcript_path, "last_assistant_message": last_message}
+    )
+
+    assert not any(c.args[0] is write_markers for c in brain_dispatch.call_args_list)
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_brain_reader_session_start_dispatch(enabled, brain_dispatch, monkeypatch, tmp_path):
+    from unittest.mock import Mock
+
+    from hooks import config
+    from hooks.hook_manager import EVENT_HANDLERS
+
+    monkeypatch.setattr(config, "BRAIN_ENABLED", enabled)
+    for flag in (
+        "PROJECT_BRIDGE_ENABLED",
+        "MCP_SESSION_ID_BANNER_ENABLED",
+        "MCP_HYGIENE_ENABLED",
+        "EFFORT_POLICY_ENABLED",
+        "AGENTIHOOKS_FORCE_DEV_BRANCH",
+        "CI_MANIFESTO_ENABLED",
+        "BROADCAST_ENABLED",
+    ):
+        monkeypatch.setattr(config, flag, False)
+    monkeypatch.setattr("hooks.lifecycle.guard.session_event", Mock())
+    monkeypatch.setattr("hooks.lifecycle.deps_kick.kick", Mock())
+    monkeypatch.setattr("hooks.context.injection_trace.record_session_start", Mock())
+    monkeypatch.setattr("hooks.context.enforcement.get_session_start_enforcements", Mock(return_value=""))
+    monkeypatch.setattr("hooks.context.voice_output.cleanup_stale_flags", Mock(return_value=0))
+    inject = Mock()
+    monkeypatch.setattr("hooks.context.brain_adapter.inject_on_session_start", inject)
+    EVENT_HANDLERS["SessionStart"]({"session_id": "session", "cwd": str(tmp_path)})
+
+    if enabled:
+        inject.assert_called_once_with("session", str(tmp_path))
+    else:
+        inject.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "enabled, count, claim", [(True, 7, True), (True, 7, False), (True, 0, True), (False, 7, True)]
+)
+def test_brain_reader_pretool_dispatch(enabled, count, claim, monkeypatch):
+    from unittest.mock import Mock
+
+    from hooks import config, hook_manager
+    from hooks.targets import emitter
+
+    monkeypatch.setattr(config, "BRAIN_ENABLED", enabled)
+    monkeypatch.setattr(config, "SECRETS_MODE", "off")
+    for flag in (
+        "QUOTA_POLICY_ENABLED",
+        "QUOTA_USAGE_INJECTION_ENABLED",
+        "BROADCAST_ENABLED",
+        "ENFORCEMENT_INJECTION_ENABLED",
+        "RETRY_BREAKER_ENABLED",
+    ):
+        monkeypatch.setattr(config, flag, False)
+    monkeypatch.setattr("hooks.context.enforcement.increment_and_get_count", Mock(return_value=count))
+    monkeypatch.setattr("hooks.targets.capabilities.can_inject_context", Mock(return_value=claim))
+    monkeypatch.setattr("hooks.context.context_recycle.directive", Mock(return_value=None))
+    monkeypatch.setattr("hooks.lifecycle.guard.pretool", Mock(return_value=None))
+    monkeypatch.setattr("hooks.tool_memory.inject_memory", Mock())
+    for name in ("_inbox_blocks", "_refocus_blocks", "_wait_nudge_blocks"):
+        monkeypatch.setattr(hook_manager, name, Mock(return_value=[]))
+    refresh = Mock(return_value="brain refresh")
+    monkeypatch.setattr("hooks.context.brain_adapter.maybe_refresh_on_tool_call", refresh)
+    buffer = Mock()
+    monkeypatch.setattr(emitter, "buffer_context", buffer)
+
+    hook_manager.on_pre_tool_use({"session_id": "session", "tool_name": "Unknown", "tool_input": {}})
+
+    if enabled and count:
+        refresh.assert_called_once_with("session", count, claim_delivery=claim)
+    else:
+        refresh.assert_not_called()
+    if enabled and count and claim:
+        buffer.assert_called_once_with("brain refresh")
+    else:
+        buffer.assert_not_called()
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_amygdala_user_prompt_dispatch(enabled, monkeypatch):
+    from unittest.mock import Mock
+
+    from hooks import config, hook_manager
+
+    monkeypatch.setattr(config, "AMYGDALA_ENABLED", enabled)
+    monkeypatch.setattr(config, "SECRETS_MODE", "off")
+    for flag in (
+        "QUOTA_POLICY_ENABLED",
+        "QUOTA_USAGE_INJECTION_ENABLED",
+        "CI_MANIFESTO_ENABLED",
+        "VOICE_ENABLED",
+        "CONTROLS_BYPASS_ENABLED",
+        "BROADCAST_ENABLED",
+    ):
+        monkeypatch.setattr(config, flag, False)
+    for name in (
+        "_confirm_inbox",
+        "_swarm_heartbeat",
+        "_operator_mode",
+        "_request_trace_flush",
+        "_inject_refocus",
+        "_inject_ledger_decision",
+    ):
+        monkeypatch.setattr(hook_manager, name, Mock())
+    monkeypatch.setattr("hooks.context.rules_refresh.maybe_inject", Mock())
+    monkeypatch.setattr("hooks.context.enforcement.get_user_prompt_enforcements", Mock(return_value=""))
+    check = Mock()
+    monkeypatch.setattr("hooks.context.amygdala_hook.check_amygdala", check)
+
+    hook_manager.on_user_prompt_submit({"session_id": "session", "prompt": "", "cwd": ""})
+
+    if enabled:
+        check.assert_called_once_with("session")
+    else:
+        check.assert_not_called()
+
+
 class TestBlockActionIntegration:
     """Integration tests: BlockAction propagates through main() with exit 2."""
 

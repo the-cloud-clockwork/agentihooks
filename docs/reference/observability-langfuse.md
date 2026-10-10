@@ -216,7 +216,13 @@ The Doctor's `trace` detector (`scripts/doctor/traces_read.py`, active bindings 
 same Langfuse public API with `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` and
 `LANGFUSE_HOST` (default `https://langfuse.homeofanton.com`). The swarm tick runs
 it with the other detectors every `AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES` (10); it
-is the one monitor of trace freshness.
+is the one monitor of trace freshness. Among ticks, only `swarm tick`, the
+command the timer unit runs, and the controller loop run it. A tick another swarm
+command runs inline (`start`, `reopen`, `pause`, `stop`, `set`, `restore`, and so
+`doctor start` and rig doctor) runs every other detector and leaves telemetry to
+the next scheduled pass, because the calling terminal may export keys for another
+project under the same names. `swarm tick` run by hand and `doctor measure` read
+with the caller's keys, so run them where those keys open the swarm's project.
 
 ### Active telemetry
 

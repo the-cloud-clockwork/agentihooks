@@ -1,14 +1,16 @@
 """Bring a swarm master online from the operator's terminal: reopen the last master's own conversation or start a new one."""
 
 import json
+import os
 from dataclasses import dataclass, fields, replace
 from datetime import datetime, timezone
 
+from scripts import agent_choice
 from scripts.handoff import transfers
 from scripts.inbox.seats import seat_address
-from scripts.swarm import affinity, effort_range, launch_check, master_start, model_pick
+from scripts.swarm import affinity, capacity, effort_range, launch_check, master_start, model_pick
 from scripts.swarm.resume import blocker
-from scripts.swarm.snapshot import ledger_path
+from scripts.swarm.snapshot import ledger_source
 from scripts.swarm.store import MASTER, AgentRecord, SwarmError
 from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm.tick import placed_record, primed
@@ -25,7 +27,7 @@ OFFER = "Start a new master instead? [y/N] "
 NONE_RECORDED = "no earlier master is recorded"
 RESUMED = (
     "The operator brought you back with agentihooks swarm {slug} master up as {name}, the master of this swarm. "
-    "Time passed and other agents may have moved the work. Before acting, re-read the ledger {ledger} and your "
+    "Time passed and other agents may have moved the work. Before acting, re-read the ledger with {ledger} and your "
     "inbox, then continue as master."
 )
 RECORD_FIELDS = {f.name for f in fields(AgentRecord)}
@@ -102,7 +104,7 @@ def _resume(store, slug, runtime, at, previous):
     config = store.ensure_code(slug)
     seat = seat_address(slug, MASTER)
     agent = replace(previous.agent, task=MASTER, seat=seat, profile=previous.agent.profile or _profile(config))
-    text = RESUMED.format(slug=slug, name=agent.name, ledger=ledger_path(slug))
+    text = RESUMED.format(slug=slug, name=agent.name, ledger=ledger_source(slug))
     placed = runtime.resume(config, agent, text)
     store.seats.occupy(seat, agent.name, at)
     record = replace(
@@ -120,16 +122,22 @@ def _resume(store, slug, runtime, at, previous):
 
 
 def fill(saved, config):
-    """A saved launch with its empty keys taken from the swarm config: master profile, affinity harness, frontier model."""
-    harness = saved.get("harness") or affinity.desired(config) or "claude"
-    pick = model_pick.frontier(harness)
-    defaults = {
-        "profile": _profile(config),
-        "harness": harness,
-        "model": pick.model,
-        "effort": effort_range.clamp(harness, pick.effort, effort_range.of(config)),
-    }
+    """A saved launch with its empty keys filled: master profile, affinity or open seat harness, frontier model."""
+    harness = saved.get("harness") or affinity.desired(config) or _open_seat()
+    defaults = {"profile": _profile(config)}
+    if harness in effort_range.EFFORTS:
+        pick = model_pick.frontier(harness)
+        defaults |= {
+            "harness": harness,
+            "model": pick.model,
+            "effort": effort_range.clamp(harness, pick.effort, effort_range.of(config)),
+        }
     return {**defaults, **{key: value for key, value in saved.items() if value}}
+
+
+def _open_seat():
+    harness, reason = agent_choice.choose("", dict(os.environ))
+    return "" if reason == agent_choice.ALL_FULL else harness
 
 
 def _filled(task, config):
@@ -154,6 +162,9 @@ def _new(store, slug, runtime, at):
         task = _filled(primed(store, slug, record.seat, task), config)
         master_start.begin(store, slug, name, task, at)
         affinity.handed_off(store, slug)
+        capacity.feed_spent(runtime, store, at)
+        if reader := getattr(runtime, "quota_capacity", None):
+            reader(config, store.agents(slug), at / 1000)
         placed = runtime.spawn(config, MASTER, name, task)
     except Exception as exc:
         transfers.failed(store, slug, record)

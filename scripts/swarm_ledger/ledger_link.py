@@ -1,5 +1,6 @@
 """The ledger page link handed to the operator, from the ledger server's configured host and port."""
 
+import http.client
 import json
 import os
 import urllib.error
@@ -11,9 +12,17 @@ START = "agentihooks ledger serve --ensure"
 LOOPBACK = ("127.0.0.1", "localhost")
 
 
-def base() -> str:
-    host, port = address()
+def base(environ=os.environ) -> str:
+    if remote(environ):
+        if not environ.get("LEDGER_URL"):
+            raise SystemExit("a remote ledger client needs LEDGER_URL, the address of the hive ledger server")
+        return environ["LEDGER_URL"].rstrip("/")
+    host, port = address(environ)
     return f"http://{host}:{port}"
+
+
+def remote(environ=os.environ) -> bool:
+    return environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local"
 
 
 def shared_directory(environ=os.environ) -> bool:
@@ -62,11 +71,13 @@ def folder(environ=os.environ) -> Path:
     return Path(environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 
 
-def serving(timeout: float = 1) -> str | None:
+def serving(timeout: float = 1, url: str | None = None) -> str | None:
     try:
-        with urllib.request.urlopen(f"{base()}/healthz", timeout=timeout) as resp:
+        with urllib.request.urlopen(f"{url or base()}/healthz", timeout=timeout) as resp:
             body = json.loads(resp.read())
-    except (urllib.error.HTTPError, ValueError):
+    except http.client.RemoteDisconnected:
+        return None
+    except (urllib.error.HTTPError, http.client.HTTPException, ValueError):
         return ""
     except OSError:
         return None

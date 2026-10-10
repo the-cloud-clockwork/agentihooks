@@ -57,7 +57,7 @@ def test_classify_prints_the_result_json(monkeypatch, files, capsys):
     state, questions = files
     assert cli.classify_main(["--state", str(state), "--questions", str(questions), "--purpose", "smoke"]) == 0
     out = json.loads(capsys.readouterr().out)
-    assert out["source"] == "pplx-decider-v1-27b"
+    assert out["source"] == "liquid-d1"
     assert out["calibrated"] is True
     assert out["answers"]["tier"]["choice"] == "small"
     assert out["answers"]["trivial"] == {"type": "noul", "noul": 0.74}
@@ -81,7 +81,7 @@ def test_classify_input_error_exits_2(files, capsys):
 
 
 def test_classify_caller_bug_exits_2(monkeypatch, files, capsys):
-    monkeypatch.setattr(api, "urlopen", FakeUrlopen({"pplx-decider-v1-27b": http_error(400, "invalid_union")}))
+    monkeypatch.setattr(api, "urlopen", FakeUrlopen({"liquid-d1": http_error(400, "invalid_union")}))
     state, questions = files
     assert cli.classify_main(["--state", str(state), "--questions", str(questions)]) == 2
     assert "invalid_union" in capsys.readouterr().err
@@ -155,7 +155,7 @@ def test_agentihooks_help_lists_both_commands(monkeypatch, capsys):
     out = " ".join(capsys.readouterr().out.split())
     for text in (
         "classify Ask the decision models typed questions: --state FILE --questions FILE",
-        "classifier Decision classifier records: stats [--purpose P]",
+        "classifier Decision classifier records: stats [--purpose P], eval NAME [--live N]",
     ):
         assert re.search(rf"(^|\s){re.escape(text)}($|\s)", out), text
 

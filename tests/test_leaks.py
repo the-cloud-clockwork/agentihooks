@@ -39,10 +39,9 @@ def test_leak_run_is_scheduled_and_checks_out_dev():
     assert checkout["with"]["ref"] == "${{ github.event_name == 'schedule' && 'dev' || '' }}"
 
 
-def test_leak_run_checks_itself_on_pull_requests_that_change_it():
-    pull_request = _workflow()[True]["pull_request"]
-    assert pull_request["branches"] == ["dev"]
-    assert sorted(pull_request["paths"]) == [".github/workflows/test-leaks.yml", "tests/leaks.py"]
+def test_leak_run_never_runs_on_pull_requests():
+    triggers = _workflow()[True]
+    assert set(triggers) == {"schedule", "workflow_dispatch"}
 
 
 def test_leak_run_covers_file_order_and_random_order_side_by_side():
@@ -71,9 +70,8 @@ def test_leak_run_runs_the_whole_suite_in_one_process(tmp_path, seed, order_flag
 def test_a_red_run_names_its_pairs_and_keeps_them_for_the_follow_up_job():
     pairs = _step("pairs")
     assert pairs["if"] == "failure() && steps.suite.outcome == 'failure'"
-    assert pairs["run"] == (
-        'python -m tests.leaks pairs run.jsonl leaks-${{ matrix.order }}.json | tee -a "$GITHUB_STEP_SUMMARY"'
-    )
+    assert pairs["env"] == {"ORDER": "${{ matrix.order }}"}
+    assert pairs["run"] == 'python -m tests.leaks pairs run.jsonl "leaks-$ORDER.json" | tee -a "$GITHUB_STEP_SUMMARY"'
     keep = _step("keep")
     assert keep["if"] == pairs["if"]
     assert keep["uses"].startswith("actions/upload-artifact@")
@@ -81,12 +79,12 @@ def test_a_red_run_names_its_pairs_and_keeps_them_for_the_follow_up_job():
     assert keep["with"]["path"] == "leaks-${{ matrix.order }}.json"
 
 
-def test_follow_ups_open_once_per_run_and_only_outside_pull_requests():
+def test_follow_ups_open_once_per_run_and_only_for_dev():
     jobs = _workflow()["jobs"]
     assert jobs["one-process"]["permissions"] == {"contents": "read"}
     followup = jobs["followup"]
     assert followup["needs"] == "one-process"
-    assert followup["if"] == "${{ failure() && github.event_name != 'pull_request' }}"
+    assert followup["if"] == "${{ failure() && (github.event_name == 'schedule' || github.ref == 'refs/heads/dev') }}"
     assert followup["permissions"] == {"contents": "read", "issues": "write"}
     steps = followup["steps"]
     checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout"))

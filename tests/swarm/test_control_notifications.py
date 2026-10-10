@@ -23,6 +23,7 @@ def controls(monkeypatch):
     ledger = FakeLedger([])
     ledger.said = []
     ledger.say = lambda slug, text, by=None: ledger.said.append((text, by))
+    ledger.notify = lambda slug, text: ledger.notes.append((slug, text))
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     monkeypatch.setattr(cli, "run_tick", lambda *args: [])
@@ -36,7 +37,9 @@ def controls(monkeypatch):
 def test_stop_now_notice_does_not_restart_the_swarm_on_the_next_tick(controls, monkeypatch):
     store, ledger, master = controls
     runtime = FakeRuntime()
-    monkeypatch.setattr(cli, "run_tick", lambda store, slug=None: tick(slug or "demo", store, ledger, runtime, 1))
+    monkeypatch.setattr(
+        cli, "run_tick", lambda store, slug=None, scheduled=False: tick(slug or "demo", store, ledger, runtime, 1)
+    )
     assert cli.main(["demo", "stop", "--now"]) == 0
     assert store.config("demo").state == "stopped"
     assert cli.main(["tick"]) == 0
@@ -53,7 +56,7 @@ def test_external_pause_tells_the_master_once_with_the_resulting_state(controls)
     assert items[0].sender == "operator"
     assert items[0].fyi
     assert items[0].text == "The operator paused the swarm from the command line. The swarm is paused."
-    assert ledger.said == [(items[0].text, "swarm")]
+    assert ledger.said == [] and ledger.notes == []
 
 
 @pytest.mark.parametrize("explicit", [False, True])
@@ -65,8 +68,9 @@ def test_the_masters_own_pause_sends_it_nothing(controls, monkeypatch, explicit)
     assert cli.main(argv) == 0
     assert store.config("demo").state == "paused"
     assert InboxStore(store.redis).mailbox(master.name) == []
-    record = ("demo master 1 changed the swarm state with pause from running to paused.", "swarm")
-    assert ledger.said == ([] if explicit else [record])
+    record = "demo master 1 changed the swarm state with pause from running to paused."
+    assert ledger.said == []
+    assert ledger.notes == ([] if explicit else [("demo", record)])
 
 
 def test_a_master_without_a_seat_receives_the_notification_by_name(controls):
@@ -76,7 +80,7 @@ def test_a_master_without_a_seat_receives_the_notification_by_name(controls):
     items = InboxStore(store.redis).inbox(master.name)
     assert len(items) == 1
     assert items[0].fyi
-    assert ledger.said == [(items[0].text, "swarm")]
+    assert ledger.said == []
 
 
 def test_failed_cli_settings_send_nothing(controls):

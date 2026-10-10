@@ -299,3 +299,130 @@ def test_record_runs_the_history_budget_on_its_own_clock(tmp_path):
         "s", [], [], 1000, Langfuse([_trace_row("a", "u")]), home=tmp_path, budget=budget, clock=_ticks(2)
     )
     assert data["reader"]["historical"]["covered"] == 0
+
+
+LOCAL = {
+    "generated_bytes": 10,
+    "accepted_bytes": 10,
+    "oldest_unaccepted": 0,
+    "pending": 0,
+    "overflow": 0,
+    "accepted": 103,
+    "accepted_at": 0,
+    "exporter_alive": True,
+    "requested_at": 0,
+}
+
+
+class Project:
+    def __init__(self, name, traces=(), listed=True):
+        self.name, self.traces, self.listed = name, list(traces), listed
+
+    def __call__(self, path, params):
+        if path == "projects":
+            assert params == {}
+            if self.name is None:
+                raise ConnectionError("refused")
+            return {"data": [{"id": "p", "name": self.name}]}
+        if path == "traces":
+            tags = params["tags"] if isinstance(params["tags"], list) else [params["tags"]]
+            rows = [t for t in self.traces if set(tags) <= set(t["tags"])] if self.listed or len(tags) > 1 else []
+            return _page(rows if params["page"] == 1 else [], params["page"], 1)
+        return _page([], params["page"], 1)
+
+
+def _working(name, session):
+    return {"name": name, "state": "working", "task": "t1", "started_at": 5, "conversation_id": session}
+
+
+def _tagged(agent, session):
+    return {"id": f"tr-{agent}", "sessionId": session, "tags": ["swarm:s", f"agent:{agent}"], "updatedAt": "u"}
+
+
+HISTORICAL = [{"id": "t0", "claimed_by": "s-eng-0", "state": "done"}]
+WORKING = [_working("s-eng-1", "c1"), _working("s-ci-1", "c2")]
+
+
+def test_an_empty_project_while_exporters_report_accepted_observations_is_a_reader_failure(tmp_path, monkeypatch):
+    from scripts.doctor import registry, traces
+
+    monkeypatch.setattr(registry, "progress", lambda session_id, harness: dict(LOCAL))
+    data = traces_read.record("s", HISTORICAL, WORKING, 10**9, Project("antoncore"), home=tmp_path)
+    assert data["reader"]["failures"] == [
+        "Langfuse project antoncore holds no trace tagged swarm:s while the exporters of s-eng-1, s-ci-1 "
+        "report accepted exports: the reader's keys may belong to another project"
+    ]
+    assert [b["read"] for b in data["active"]] == [False, False]
+    assert data["reader"]["active"] == {"bindings": 2, "read": 0}
+    assert (data["reader"]["historical"]["listed"], data["reader"]["historical"]["complete"]) == (False, False)
+    assert [f.kind for f in traces.findings(data, traces.Limits())] == ["trace reader unavailable"]
+
+
+def test_an_unreadable_project_name_still_names_the_empty_read(tmp_path, monkeypatch):
+    from scripts.doctor import registry
+
+    monkeypatch.setattr(registry, "progress", lambda session_id, harness: dict(LOCAL))
+    data = traces_read.record("s", [], WORKING[:1], 10**9, Project(None), home=tmp_path)
+    assert data["reader"]["failures"][0].startswith(
+        "Langfuse project unknown (ConnectionError) holds no trace tagged swarm:s"
+    )
+
+
+def test_an_empty_project_with_no_accepted_observations_is_judged_as_read(tmp_path, monkeypatch):
+    from scripts.doctor import registry, traces
+
+    monkeypatch.setattr(registry, "progress", lambda session_id, harness: None)
+    data = traces_read.record("s", HISTORICAL, WORKING[:1], 10**9, Project("agent-swarm"), home=tmp_path)
+    assert data["reader"]["failures"] == []
+    kinds = sorted(f.kind for f in traces.findings(data, traces.Limits()))
+    assert kinds == ["telemetry never exported", "untraced session", "untraced session"]
+
+
+def test_genuine_missing_and_unattributed_traces_stay_detected_in_the_swarm_project(tmp_path, monkeypatch):
+    from scripts.doctor import registry, traces
+
+    monkeypatch.setattr(registry, "progress", lambda session_id, harness: dict(LOCAL))
+    project = Project("agent-swarm", [_tagged("s-eng-1", "c1")])
+    data = traces_read.record("s", HISTORICAL, WORKING, 10**9, project, home=tmp_path)
+    assert data["reader"]["failures"] == []
+    found = traces.findings(data, traces.Limits())
+    assert [f.subject for f in found if f.kind == "untraced session"] == ["s-ci-1", "s-eng-0"]
+    assert [f.subject for f in found if f.kind == "telemetry misattributed"] == ["s-ci-1.5.unattributed"]
+
+
+def test_working_agents_without_traces_in_a_project_that_holds_the_swarm_stay_misattributed(tmp_path, monkeypatch):
+    from scripts.doctor import registry, traces
+
+    monkeypatch.setattr(registry, "progress", lambda session_id, harness: dict(LOCAL))
+    project = Project("agent-swarm", [_tagged("s-eng-0", "c0")])
+    data = traces_read.record("s", HISTORICAL, WORKING, 10**9, project, home=tmp_path)
+    assert data["reader"]["failures"] == []
+    found = traces.findings(data, traces.Limits())
+    assert sorted(f.subject for f in found if f.kind == "telemetry misattributed") == [
+        "s-ci-1.5.unattributed",
+        "s-eng-1.5.unattributed",
+    ]
+
+
+def test_a_failed_listing_with_accepted_exports_is_one_listing_failure(tmp_path, monkeypatch):
+    from scripts.doctor import registry
+
+    monkeypatch.setattr(registry, "progress", lambda session_id, harness: dict(LOCAL))
+
+    def listing_down(path, params):
+        if path == "traces" and isinstance(params["tags"], str):
+            raise ConnectionError("refused")
+        return Project("antoncore")(path, params)
+
+    data = traces_read.record("s", [], WORKING[:1], 10**9, listing_down, home=tmp_path)
+    assert data["reader"]["failures"] == ["trace listing failed: ConnectionError: refused"]
+
+
+def test_a_binding_trace_missing_from_an_empty_listing_is_not_an_empty_project(tmp_path, monkeypatch):
+    from scripts.doctor import registry
+
+    monkeypatch.setattr(registry, "progress", lambda session_id, harness: dict(LOCAL))
+    project = Project("agent-swarm", [_tagged("s-eng-1", "c1")], listed=False)
+    data = traces_read.record("s", [], WORKING[:1], 10**9, project, home=tmp_path)
+    assert data["reader"]["failures"] == []
+    assert data["active"][0]["read"] is True

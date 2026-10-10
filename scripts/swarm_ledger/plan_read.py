@@ -1,0 +1,152 @@
+"""agentihooks plan read: the task's plan chunk with ten lines of margin on each side.
+
+agentihooks plan read [--task ID] [--phase ID] [--slug SLUG]
+
+The task defaults to AGENTIHOOKS_SWARM_TASK and the ledger to AGENTIHOOKS_SWARM.
+--phase prints the phase's whole plan range with the same margin.
+"""
+
+import argparse
+import os
+import re
+import sys
+from importlib import import_module
+
+from scripts.swarm_ledger import HERE
+
+COMMAND = "agentihooks plan read"
+MARGIN = 10
+LINK = re.compile(r"\]\(#([\w.-]+)\)")
+ANCHOR = re.compile(r'<a id="[\w.-]+"></a>')
+
+
+def _ledger(name: str):
+    # ledger_core imports its siblings by bare name; loading it lazily keeps it out of hook processes.
+    if str(HERE) not in sys.path:
+        sys.path.insert(0, str(HERE))
+    return import_module(f"scripts.swarm_ledger.{name}")
+
+
+def chunk(text: str, lines: str, margin: int = MARGIN) -> str:
+    start, end = _ledger("plan_ranges").bounds(lines)
+    rows = text.splitlines()
+    return "".join(f"{row}\n" for row in rows[max(1, start - margin) - 1 : min(len(rows), end + margin)])
+
+
+def exact(doc: dict, task: dict) -> str:
+    phase = _phase(doc, task.get("phase")) or {}
+    source = _ledger("plan_packages").text() if _packaged(phase, task) else _stored(doc, phase, task)
+    text = chunk(source, task["plan_lines"], margin=0)
+    if not text.strip():
+        raise ValueError(f"plan lines {task['plan_lines']} hold no text")
+    return text
+
+
+def numbered(text: str, lines: str) -> list[tuple[int, str]]:
+    start = _ledger("plan_ranges").bounds(lines)[0]
+    return [(number, row.strip()) for number, row in enumerate(text.splitlines(), start) if row.strip()]
+
+
+def section(source: str, anchor: str) -> str:
+    entries = [entry for entry in _ledger("plan_ranges").sections(source) if entry[1] or entry[2].strip()]
+    tag = f'<a id="{anchor}"></a>'
+    heading = next(
+        (i + 1 for i, (_, d, line) in enumerate(entries[:-1]) if not d and line.strip() == tag and entries[i + 1][1]),
+        None,
+    )
+    if heading is None:
+        return ""
+    first, depth, _ = entries[heading]
+    stop = next((n - 1 for n, d, _ in entries[heading + 1 :] if 0 < d <= depth), None)
+    rows = source.splitlines()[first - 1 : stop]
+    while rows and (not rows[-1].strip() or ANCHOR.fullmatch(rows[-1].strip())):
+        rows.pop()
+    return "".join(f"{row}\n" for row in rows)
+
+
+def linked(source: str, lines: str) -> str:
+    start, end = _ledger("plan_ranges").bounds(lines)
+    rows = source.splitlines()[start - 1 : end]
+    tags = {row.strip() for row in rows}
+    anchors = dict.fromkeys(a for row in rows for a in LINK.findall(row) if f'<a id="{a}"></a>' not in tags)
+    return "".join(f"\n{case}" for anchor in anchors if (case := section(source, anchor)))
+
+
+def pointer(task: dict) -> str:
+    if not task.get("plan_lines"):
+        return ""
+    return (
+        f"Plan: run {COMMAND} to read only your slice of the plan, lines {task['plan_lines']} "
+        f"with ten lines of margin each side; add --phase {task.get('phase')} for the whole phase."
+    )
+
+
+def _sliced_task(doc: dict, slug: str, task_id: str | None) -> dict:
+    task = next((t for t in doc.get("tasks", []) if t.get("id") == task_id), None)
+    if task is None:
+        raise ValueError(f"no task {task_id} in ledger {slug}")
+    return task
+
+
+def _phase(doc: dict, phase_id: str | None) -> dict | None:
+    return next((p for p in doc.get("phases", []) if p.get("id") == phase_id), None)
+
+
+def _url(phase: dict, task: dict) -> str:
+    return task.get("plan_url") or phase.get("plan_url") or ""
+
+
+def _packaged(phase: dict, task: dict) -> bool:
+    linked = _ledger("plan_packages").linked
+    return not phase.get("plan_ref") and bool(task) and linked(str(task.get("plan_slice")), _url(phase, task))
+
+
+def _stored(doc: dict, phase: dict, task: dict) -> str:
+    ref = phase.get("plan_ref")
+    if not ref and task and _url(phase, task):
+        ref = {"artifact": _url(phase, task), "lines": task["plan_lines"]}
+    if not ref:
+        raise ValueError(f"phase {phase.get('id')} has no plan range")
+    return _ledger("plan_ranges").stored_text(ref, doc)
+
+
+def read(doc: dict, slug: str, task_id: str | None, phase_id: str | None) -> str:
+    task = {} if phase_id else _sliced_task(doc, slug, task_id)
+    if not phase_id and not task.get("plan_lines"):
+        return f"This task has no plan lines; its description is the whole spec.\n\n{task.get('description', '')}\n"
+    phase_id = phase_id or task.get("phase")
+    phase = _phase(doc, phase_id)
+    if phase is None:
+        raise ValueError(f"no phase {phase_id} in ledger {slug}")
+    if _packaged(phase, task):
+        return _ledger("plan_packages").read(task["plan_lines"])
+    source = _stored(doc, phase, task)
+    lines = task.get("plan_lines") or phase["plan_ref"]["lines"]
+    return chunk(source, lines) + (linked(source, lines) if task else "")
+
+
+def main(argv=None, environ=None) -> int:
+    env = os.environ if environ is None else environ
+    parser = argparse.ArgumentParser(prog="agentihooks plan", description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+    reader = sub.add_parser("read", help="print the task's plan chunk with ten lines of margin on each side")
+    reader.add_argument("--task", help="task id; defaults to AGENTIHOOKS_SWARM_TASK")
+    reader.add_argument("--phase", help="print this phase's whole plan range instead")
+    reader.add_argument("--slug", help="ledger slug; defaults to AGENTIHOOKS_SWARM")
+    args = parser.parse_args(argv)
+    slug = args.slug or env.get("AGENTIHOOKS_SWARM")
+    if not slug:
+        raise SystemExit("plan read needs a swarm: pass --slug or run it inside a swarm session")
+    task_id = None if args.phase else args.task or env.get("AGENTIHOOKS_SWARM_TASK", "")
+    if task_id == "":
+        raise SystemExit("plan read needs a task: pass --task or run it inside a swarm task session")
+    from scripts.swarm_ledger.repository.sqlite import read_ledger
+
+    doc = read_ledger(_ledger("ledger_core").LEDGER_DIR, slug, "tasks", "phases", "artifacts")
+    if doc is None:
+        raise SystemExit(f"no ledger {slug}")
+    try:
+        sys.stdout.write(read(doc, slug, task_id, args.phase))
+    except ValueError as error:
+        raise SystemExit(str(error)) from None
+    return 0

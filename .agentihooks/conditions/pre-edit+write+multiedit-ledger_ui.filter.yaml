@@ -1,0 +1,13 @@
+paths:
+  - 'scripts/swarm/capacity.py'
+  - '**/scripts/swarm/capacity.py'
+  - 'scripts/swarm_ledger/**'
+  - '**/scripts/swarm_ledger/**'
+finders:
+  - script: string_literals
+  - script: explanation_tail
+mode: both
+action: send-back
+intent: >-
+  User-facing text states the value or state its label names. It never explains
+  why, how it was computed, or adds detail nobody asked for.

@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__line_match__mutmut_13:d2145f637097c94c11ea918e372c070d73d6e30d8df32243753420e88ee79e45": {
+    "reader": "Standards",
+    "reason": "Only ASCII ENTRIES and ID identifier casing changes; SQLite orders by the same entry id with the unchanged DESC and LIMIT 1 clauses."
+  }
+}

@@ -14,8 +14,11 @@ from scripts.handoff import transfers
 from scripts.inbox.store import InboxStore
 from scripts.swarm import (
     affinity,
+    bottleneck,
     drain_watch,
+    idle,
     launch_check,
+    ledger_probe,
     live_binding,
     overlays,
     quota_view,
@@ -23,14 +26,17 @@ from scripts.swarm import (
     snapshot,
     tick_master,
 )
-from scripts.swarm.health import activity, checks, verdicts
+from scripts.swarm.health import activity, checks, spawn_stall, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.naming import swarm_name
 from scripts.swarm.store import ASSIST, SwarmError
-from scripts.swarm.tick import agent_status
+from scripts.swarm.tick import STARTUP_GRACE_MS, agent_status
 from scripts.swarm_ledger import plan_shape
+from scripts.swarm_v2.runtime import observe
 
 DEFAULT_COMPACT_LIMIT = 600
+UNCLASSIFIED = "unclassified"
+PAUSED_WHILE_SLOW = ("idle with claim", "stale claim")
 
 
 def now_ms():
@@ -68,8 +74,8 @@ def findings(store, slug, config, tasks, events):
         ),
     ]
     quiet = quiet_gate.quiet_minutes(store.redis, slug, agents, {t["id"]: t for t in tasks}, now_ms())
-    rows = [{**a.__dict__, "quiet_minutes": quiet.get(a.name)} for a in agents]
-    return verdict_store(store, slug).visible(
+    rows = _health_rows(store, slug, agents, quiet, now_ms())
+    found = (
         health.findings(
             {"tasks": tasks, "_meta": {"events": events}},
             rows,
@@ -87,15 +93,38 @@ def findings(store, slug, config, tasks, events):
         + live_binding.findings(store, slug)
         + retire_watch.findings(store, slug)
         + drain_watch.findings(store, slug, limits, now_ms())
-        + launch_check.findings(store, slug),
-        now_ms(),
-        limits.cooldown_minutes * 60_000,
+        + launch_check.findings(store, slug)
+        + spawn_stall.findings(store, slug)
     )
+    if ledger_probe.holding(store, slug):
+        found = [f for f in found if f.kind not in PAUSED_WHILE_SLOW]
+    return verdict_store(store, slug).visible(found, now_ms(), limits.cooldown_minutes * 60_000)
+
+
+def _health_rows(store, slug, agents, quiet, at):
+    latest = activity.last_events(slug)
+    rows = []
+    for agent in agents:
+        started = launch_check.session_started_at(agent)
+        last = latest.get(agent.name)
+        minutes = (at - max(last, started)) // health.MINUTE_MS if last is not None else None
+        if at - started <= STARTUP_GRACE_MS or quiet_gate.declared_wait(store.redis, slug, agent.name, at):
+            minutes = None
+        rows.append(
+            {
+                **agent.__dict__,
+                "quiet_minutes": quiet.get(agent.name),
+                "tool_quiet_minutes": minutes,
+                "pane_state": store.redis.get(store.key(slug, "pane-state", agent.name)),
+            }
+        )
+    return rows
 
 
 def talk_since_outcome(store, slug, rows):
     marks = progress.Progress(store.redis, slug)
-    return {row["name"]: marks.read(row["name"]).talk for row in rows if row.get("lane") in WORKER_LANES}
+    held = {row["name"]: marks.read(row["name"]) for row in rows if row.get("lane") in WORKER_LANES}
+    return {name: mark.talk if mark.outcome_at else 0 for name, mark in held.items()}
 
 
 def compact_limit(config):
@@ -159,6 +188,27 @@ def shape_report(tasks: list[dict], max_eng: int) -> dict:
         return {"error": str(exc)}
 
 
+def observation(store, slug, agent):
+    found = observe.stored(store, slug, agent.execution_id) if agent.execution_id else None
+    if found:
+        return {
+            "state": found.state.value,
+            "terminal": found.terminal.value,
+            "failure": found.failure.value,
+            "confidence": found.confidence.value,
+            "needs_operator": found.needs_operator,
+            "observed_at": found.observed_at,
+            "confirmed_at": found.confirmed_at,
+            "sources": found.sources,
+        }
+    beat = idle.heartbeat(store.redis, slug, agent.name)
+    if not beat:
+        return {"state": UNCLASSIFIED, "observed_at": None, "sources": {}}
+    at = beat["at"] / 1000
+    heartbeat = {"reading": observe.Reading.OK.value, "observed_at": at, "value": beat["state"]}
+    return {"state": UNCLASSIFIED, "observed_at": at, "sources": {observe.Source.HEARTBEAT.value: heartbeat}}
+
+
 def status_report(store, slug, state):
     from scripts.swarm import capacity
 
@@ -180,6 +230,7 @@ def status_report(store, slug, state):
                 "status": agent_status(a),
                 "promoted": a.name == promotion.get("promoted"),
                 "state_since": int(store.redis.hget(store.key(slug, "state-since"), a.name) or 0),
+                "observation": observation(store, slug, a),
                 "gates": active.get(a.name, []),
                 "inbox": [
                     {"text": item.text, "sender": item.sender, "state": item.state}
@@ -205,6 +256,7 @@ def status_report(store, slug, state):
         "doctor": doctor_report(store, slug),
         "quota": page_quota(),
         "quota_capacity": quota_view.page(capacity.read(store, slug)),
+        "bottleneck": bottleneck.read(store, slug),
         "gates": [{**row, "kind": modes.label(row["kind"])} for row in gate_log.decisions(slug)],
         "gate_modes": {name: modes.label(mode) for name, mode in catalog.current(config.gates).items()},
         "master_affinity": affinity.report(store, slug, config, store.agents(slug)),

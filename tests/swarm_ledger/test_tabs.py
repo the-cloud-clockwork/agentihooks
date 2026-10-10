@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import fulfill_events, is_events, ledger_state, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import fulfill_events, is_events, ledger_state, loaded, serve_modules, shell_html
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -44,6 +44,7 @@ def tab(browser):
     page = context.new_page()
     page.on("pageerror", lambda error: print(str(error)))
     page.goto(URL)
+    loaded(page)
     yield page
     context.close()
 
@@ -68,8 +69,10 @@ def test_tab_choice_hash_keyboard_and_scroll_positions_survive_switches(tab):
     assert not tab.locator("#ledger").is_visible()
     assert tab.url.endswith("#swarm")
     tab.reload()
+    loaded(tab)
     assert tab.locator("#swarm").is_visible()
     tab.goto(URL)
+    loaded(tab)
     assert tab.locator("#swarm").is_visible()
     tab.goto(URL + "#ledger")
     assert tab.locator("#ledger").is_visible()
@@ -91,9 +94,9 @@ def test_tab_choice_hash_keyboard_and_scroll_positions_survive_switches(tab):
 def test_swarm_contains_the_operational_blocks_and_nothing_overflows(tab, width):
     tab.set_viewport_size({"width": width, "height": 844})
     tab.get_by_role("tab", name="Swarm").click()
-    for name in ["Capacity", "Agents", "Tasks", "Quota", "Doctor", "Health", "Handoff outcomes"]:
+    for name in ["Capacity", "Agents", "Overlays", "Quota", "Doctor", "Health", "Handoff outcomes"]:
         assert tab.locator("#swarm").get_by_text(name, exact=True).count() == 1, name
-    for gone in ["Needs you", "Crew history", "Last restore"]:
+    for gone in ["Needs you", "Crew history", "Last restore", "Tasks"]:
         assert tab.locator("#swarm").get_by_text(gone, exact=True).count() == 0, gone
     assert tab.locator("#swarm #cap-eng").input_value() == "3"
     assert tab.locator("#swarm-alert").is_hidden()
@@ -126,9 +129,11 @@ def test_global_comment_choice_survives_reload_and_the_next_click_collapses(tab)
     }
     tab.route("**/api/**", lambda route: fulfill_events(route, doc, SWARM))
     tab.reload()
+    loaded(tab)
     tab.locator("#comments-all").click()
     assert tab.locator("#comments-all").text_content() == "Hide all comments"
     tab.reload()
+    loaded(tab)
     assert tab.locator("#comments-all").text_content() == "Hide all comments"
     tab.locator("#comments-all").click()
     assert tab.locator("#comments-all").text_content() == "Show all comments"

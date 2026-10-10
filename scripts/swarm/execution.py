@@ -11,6 +11,7 @@ from scripts.inbox.seats import is_seat
 IMMUTABLE = ("execution_id", "generation", "name", "lane", "task", "seat", "started_at", "runtime_backend")
 WRITE_ATTEMPTS = 5
 EXECUTION_FIELDS = ("execution_id", "generation", "runtime_backend", "runtime_target")
+PROJECTION_OMITTED = (*EXECUTION_FIELDS, "hive")
 
 
 if TYPE_CHECKING:
@@ -60,6 +61,7 @@ class ExecutionRegistry:
             row = json.loads(raw)
             if name in latest:
                 row.update({field: latest[name][field] for field in EXECUTION_FIELDS})
+                row["hive"] = latest[name].get("hive", "")
             result.append(AgentRecord(**row))
         return result
 
@@ -123,7 +125,12 @@ class ExecutionRegistry:
         for _ in range(WRITE_ATTEMPTS):
             with self.redis.pipeline() as pipe:
                 try:
-                    pipe.watch(key)
+                    from scripts.swarm import lease
+
+                    pipe.watch(key, self.store.key(slug, "control-owner"))
+                    epoch = lease.EPOCH.get()
+                    if epoch is not None:
+                        lease.require_epoch(self.store, slug, epoch)
                     previous = self.occupants(slug, pipe).get(agent.seat)
                     if (previous.execution_id if previous else "") != previous_execution_id:
                         self.conflict(slug, "replacement does not match the current execution")
@@ -138,6 +145,13 @@ class ExecutionRegistry:
                         self.conflict(slug, "execution identity already exists")
                     pipe.multi()
                     self.write(pipe, slug, current)
+                    if epoch is not None:
+                        intent = {
+                            "execution_id": current.execution_id,
+                            "generation": current.generation,
+                            "controller_epoch": epoch,
+                        }
+                        pipe.hset(self.store.key(slug, "controller-intents"), current.execution_id, json.dumps(intent))
                     if previous and previous.name != current.name:
                         pipe.hdel(self.store.key(slug, "agents"), previous.name)
                     pipe.execute()
@@ -196,7 +210,7 @@ def _validate_target(backend, target, refuse):
     allowed = (
         {"pod_namespace", "pod_name", "pod_uid"}
         if backend == "kubernetes"
-        else {"server_id", "process_namespace", "pid"}
+        else {"server_id", "process_namespace", "pid", "pid_start"}
     )
     if set(target) - allowed:
         refuse("unsupported runtime target identity field")
@@ -208,6 +222,9 @@ def _validate_target(backend, target, refuse):
         if field == "pid":
             if type(value) is not int or value < 1:
                 refuse("runtime PID must be a positive integer")
+        elif field == "pid_start":
+            if type(value) is not int or value < 1:
+                refuse("runtime PID start time must be a positive integer")
         elif not isinstance(value, str):
             refuse("runtime target identity must be a string")
 
@@ -221,12 +238,14 @@ def _check_binding(previous, current, refuse):
 
 
 def _has_identity(agent):
-    return bool(agent.execution_id or agent.generation or agent.runtime_backend != "local" or agent.runtime_target)
+    return bool(
+        agent.execution_id or agent.generation or agent.runtime_backend != "local" or agent.runtime_target or agent.hive
+    )
 
 
 def _write_projection(pipe, key, agent):
     pipe.hset(
         key,
         agent.name,
-        json.dumps({field: value for field, value in asdict(agent).items() if field not in EXECUTION_FIELDS}),
+        json.dumps({field: value for field, value in asdict(agent).items() if field not in PROJECTION_OMITTED}),
     )

@@ -134,7 +134,7 @@ def test_a_stale_non_gate_is_red():
         ("${{\n  github.event_name == 'push'\n}}", False),
         ("always()", True),
         ("${{ always() }}", True),
-        ('github.event_name == "push"', True),
+        ('github.event_name == "push"', False),
         (None, True),
     ],
 )
@@ -143,6 +143,40 @@ def test_a_conjunct_that_skips_the_pull_request_event_takes_a_job_off_the_path(c
     assert ci_wiring.on_pull_requests(job) is runs
     expected = ["test.yml/extra runs on pull requests but is not a need of Gate — Required."] if runs else []
     assert _check({"test.yml": _gate_workflow(extra=job)}, {}) == expected
+
+
+@pytest.mark.parametrize("quote", ["'", '"'])
+@pytest.mark.parametrize("reversed_operands", [False, True])
+@pytest.mark.parametrize(
+    ("operator", "event", "runs"),
+    [
+        ("==", "push", False),
+        ("==", "schedule", False),
+        ("==", "workflow_dispatch", False),
+        ("==", "pull_request", True),
+        ("==", "pull_request_target", True),
+        ("==", "merge_group", True),
+        ("!=", "push", True),
+        ("!=", "pull_request", False),
+        ("!=", "pull_request_target", True),
+        ("!=", "merge_group", True),
+    ],
+)
+def test_event_comparisons_use_either_quote_style_and_operand_order(quote, reversed_operands, operator, event, runs):
+    literal = f"{quote}{event}{quote}"
+    left, right = (literal, "github.event_name") if reversed_operands else ("github.event_name", literal)
+    job = {"if": f"${{{{ always() && {left} {operator} {right} }}}}"}
+    assert ci_wiring.on_pull_requests(job) is runs
+    expected = ["test.yml/extra runs on pull requests but is not a need of Gate — Required."] if runs else []
+    assert _check({"test.yml": _gate_workflow(extra=job)}, {}) == expected
+
+
+@pytest.mark.parametrize(
+    "condition",
+    ["github.event_name == 'push\"", "\"push' == github.event_name"],
+)
+def test_mismatched_event_quotes_keep_the_job_on_the_pull_request_path(condition):
+    assert ci_wiring.on_pull_requests({"if": condition}) is True
 
 
 @pytest.mark.parametrize("field", ["reason", "owner", "expires"])
@@ -259,9 +293,12 @@ def test_triggers_reads_every_form():
     assert ci_wiring.triggers({}) == {}
 
 
-def test_the_tests_workflow_runs_wiring_and_brain_smoke_as_parallel_gate_needs():
+def test_the_tests_workflow_runs_wiring_in_lint_and_brain_smoke_as_gate_needs():
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     needs = set(workflow["jobs"]["gate-required"]["needs"])
-    assert {"wiring", "brain-smoke"} <= needs
-    assert workflow["jobs"]["wiring"]["steps"][-1]["run"] == "python -m scripts.ci_wiring"
-    assert "needs" not in workflow["jobs"]["wiring"]
+    assert {"lint", "brain-smoke"} <= needs
+    assert "wiring" not in workflow["jobs"]
+    lint = workflow["jobs"]["lint"]
+    check = next(step for step in lint["steps"] if step.get("run") == "python -m scripts.ci_wiring")
+    assert check["if"] == "${{ !cancelled() }}"
+    assert "needs" not in lint

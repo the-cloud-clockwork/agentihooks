@@ -33,8 +33,19 @@ def choose(requested: str, environ: dict[str, str]) -> tuple[str, str]:
         return requested, "requested"
     from scripts.swarm import capacity
 
-    seat = session_bands.pick(capacity.seats(capacity.accounts(dict(environ), time.time())))
-    return (seat.harness, "rotation") if seat else ("claude", ALL_FULL)
+    rows = capacity.accounts(dict(environ), time.time())
+    seat = capacity.pick(capacity.offered(rows))
+    return (seat.harness, "rotation") if seat else (fallback(rows), ALL_FULL)
+
+
+def fallback(rows: list) -> str:
+    """The harness holding one of ``rows``; empty when no harness holds an account."""
+    held = {row.harness for row in rows}
+    return next((agent for agent in AGENTS if agent in held), "")
+
+
+def preferring(agent: str, among: tuple[str, ...] = AGENTS) -> tuple[str, ...]:
+    return tuple(sorted(among, key=lambda found: found != agent))
 
 
 def choice_kind(reason: str) -> str:

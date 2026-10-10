@@ -9,12 +9,14 @@ Reference: docs/hooks/conditions.md.
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import re
 import signal
 import subprocess
 import sys
+import threading
 import time
 import zlib
 from dataclasses import dataclass, field
@@ -25,7 +27,10 @@ from hooks.context import injection_trace, profile_chain, quarantine, tool_match
 
 STEPS = {"pre": "PreToolUse", "post": "PostToolUse", "stop": "Stop"}
 _RUNNERS = {".sh": ["bash"], ".bash": ["bash"], ".py": [sys.executable]}
-_INDEX_VERSION = 1
+FILTER_SUFFIX = ".filter.yaml"
+JUDGE, LEDGER_WRITE, INBOX_SEND = "judge", "ledger_write", "inbox_send"
+SYNTHETIC_TOOLS = (JUDGE, LEDGER_WRITE, INBOX_SEND)
+_INDEX_VERSION = 2
 _FRESH_NS = 2_000_000_000
 _CODE_ROOT = Path(__file__).resolve().parents[2]
 _UNSET = object()
@@ -107,7 +112,7 @@ def layer_dirs(state: dict, cwd: str | Path | None = None) -> tuple[list[tuple[s
     bundle = profile_chain.bundle_path(state)
     profile_csv = profile_chain.active_profile(state)
     linked = profile_chain.linked_profiles(state)
-    layers: list[tuple[str, Path]] = []
+    layers: list[tuple[str, Path]] = [("package", profile_chain.BUILT_IN_PROFILES / "package" / "conditions")]
     if bundle is not None:
         layers.append(("bundle", bundle / ".claude" / "conditions"))
     for name, profile_dir in profile_chain.profile_dirs(bundle, profile_csv, linked):
@@ -335,8 +340,27 @@ def _kill_group(proc: subprocess.Popen) -> None:
         pass
 
 
+def _run_filter(entry: dict, step: str, payload: dict, timeout: float) -> dict:
+    from hooks.filters import runner
+
+    box: dict = {}
+
+    def work() -> None:
+        try:
+            box["run"] = runner.run(entry, step, payload)
+        except Exception as error:
+            box["run"] = {"error": f"filter crashed: {error}"}
+
+    thread = threading.Thread(target=work, daemon=True)
+    thread.start()
+    thread.join(timeout)
+    return box.get("run") or {"error": f"timed out after {timeout:g}s"}
+
+
 def execute(entry: dict, step: str, payload: dict, timeout: float) -> dict:
     """Run one condition; never raises."""
+    if entry["file"].lower().endswith(FILTER_SUFFIX):
+        return _run_filter(entry, step, payload, timeout)
     cmd = _command(entry)
     if cmd is None:
         return {"error": "no runner for the extension and the file is not executable"}
@@ -609,10 +633,10 @@ _DETERMINER = rf"(?:{_ARTICLE}|new|another|one)"
 _NOT_A_NAME = (
     r"(?:about|after|and|are|at|before|by|for|from|how|if|in|into|is|of|on|or|to|what|when|where|which|who|why|with)"
 )
+_NAMED = rf"\s+(?:up\s+)?(?:{_DETERMINER}\s+)*(?:(?!(?:{_ARTICLE}|{_NOT_A_NAME})\b)[\w'\"`./-]+\s+){{0,4}}"
 _SIGNAL = re.compile(
-    r"\b(?:set|add|create|make|write|put|install|remove|clear|delete|drop|update|change|edit|replace|fix)"
-    rf"\s+(?:up\s+)?(?:{_DETERMINER}\s+)*"
-    rf"(?:(?!(?:{_ARTICLE}|{_NOT_A_NAME})\b)[\w'\"`./-]+\s+){{0,4}}conditions?\b",
+    r"\b(?:(?:set|add|create|make|write|put|install|remove|clear|delete|drop|update|change|edit|replace|fix)"
+    rf"{_NAMED}conditions?|(?:set|add|create|update|remove){_NAMED}(?:filters?|classifiers?))\b",
     re.IGNORECASE,
 )
 _CONDITION_TOOL = re.compile(r"(?:agentihooks|hooks[-_]utils).*condition_(?:set|clear)$", re.IGNORECASE)
@@ -904,8 +928,56 @@ def write_guard(tool_name: str, tool_input: dict | None, session_id: str, cwd: s
 # Inventory, creation and removal (MCP tools and the CLI)
 # ---------------------------------------------------------------------------
 
-_LANGUAGES = {"bash": (".sh", "#!/usr/bin/env bash\n"), "python": (".py", "#!/usr/bin/env python3\n")}
+_LANGUAGES = {
+    "bash": (".sh", "#!/usr/bin/env bash\n", 0o755),
+    "python": (".py", "#!/usr/bin/env python3\n", 0o755),
+    "filter": (FILTER_SUFFIX, "", 0o644),
+}
 _SCOPES = ("global", "profile", "directory")
+
+
+def _check_filter(script: str, run_async: bool) -> None:
+    import yaml
+
+    from hooks.filters import schema
+
+    if run_async:
+        raise ConditionError("a filter runs in process and cannot be async")
+    try:
+        schema.parse(yaml.safe_load(script))
+    except yaml.YAMLError:
+        raise ConditionError("invalid filter: the body is not YAML") from None
+    except schema.FilterSchemaError as error:
+        raise ConditionError(f"invalid filter: {error}") from None
+
+
+def _with_filter_settings(entries: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Each filter entry with its mode, action and max_rounds; filters whose body fails the schema go to invalid."""
+    from hooks.filters import schema
+
+    kept: list[dict] = []
+    invalid: list[dict] = []
+    for entry in entries:
+        if entry["file"].lower().endswith(FILTER_SUFFIX):
+            try:
+                spec = schema.load(entry["path"])
+            except ValueError as error:
+                invalid.append({"path": entry["path"], "source": entry["source"], "error": str(error)})
+                continue
+            entry = {**entry, "filter": {"mode": spec.mode, "action": spec.action, "max_rounds": spec.max_rounds}}
+        kept.append(entry)
+    return kept, invalid
+
+
+def misspelled(entry: dict) -> dict | None:
+    for alt in tool_matcher.parse(entry["matcher"]).alternatives:
+        if alt.kind != "tool" or alt.value in SYNTHETIC_TOOLS:
+            continue
+        close = difflib.get_close_matches(alt.value, SYNTHETIC_TOOLS, cutoff=0.8)
+        if close:
+            error = f"unknown tool {alt.value!r}: did you mean the synthetic tool {close[0]!r}?"
+            return {"path": entry["path"], "source": entry["source"], "error": error}
+    return None
 
 
 def inventory(cwd: str | Path | None = None) -> dict:
@@ -913,6 +985,8 @@ def inventory(cwd: str | Path | None = None) -> dict:
     layers, _probed = layer_dirs(state, cwd)
     _kept, untrusted = _trusted_layers(layers, state)
     entries, invalid = scan_layers([(s, d) for s, d in layers if str(d) not in untrusted])
+    entries, broken = _with_filter_settings(entries)
+    invalid += broken + [found for found in map(misspelled, entries) if found]
     described = []
     for source, directory in layers:
         described.append(
@@ -924,7 +998,7 @@ def inventory(cwd: str | Path | None = None) -> dict:
                 "untrusted_owner": untrusted.get(str(directory)),
             }
         )
-    return {"layers": described, "conditions": entries, "invalid": invalid}
+    return {"layers": described, "conditions": entries, "invalid": invalid, "synthetic_tools": list(SYNTHETIC_TOOLS)}
 
 
 def target_dir(scope: str, profile: str = "", cwd: str | Path | None = None) -> tuple[str, Path]:
@@ -972,7 +1046,9 @@ def create_condition(
         raise ConditionError("name may use letters, digits and '_' only")
     if not (script or "").strip():
         raise ConditionError("script is empty")
-    ext, shebang = _LANGUAGES[language]
+    if language == "filter":
+        _check_filter(script, run_async)
+    ext, shebang, mode = _LANGUAGES[language]
     head = step if step == "stop" and matcher in ("", "any") else f"{step}-{matcher}"
     filename = f"{head}-{name}{'.async' if run_async else ''}{ext}"
     try:
@@ -987,7 +1063,7 @@ def create_condition(
     body = script if script.startswith("#!") else shebang + script
     tmp = path.with_name(f".{filename}.{os.getpid()}.tmp")
     tmp.write_text(body if body.endswith("\n") else body + "\n")
-    tmp.chmod(0o755)
+    tmp.chmod(mode)
     os.replace(tmp, path)
     return {"path": str(path), "layer": layer, "file": filename, "step": meta["step"], "matcher": meta["matcher"]}
 

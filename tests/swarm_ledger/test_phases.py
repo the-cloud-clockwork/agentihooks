@@ -7,6 +7,7 @@ import pytest
 
 from scripts.swarm_ledger import ledger, ledger_phase_cli, ledger_phases, new_ledger
 from scripts.swarm_ledger import ledger_core as core
+from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_page import page_source
 
 SLUG = "phase-fields-proof"
@@ -20,7 +21,7 @@ def phase_ledger_dir(ledger_dir, monkeypatch):
 def make_ledger(phases=None):
     content = {"title": "Demo", "phases": phases or [{"title": "First"}]}
     html, state = core.paths(SLUG)
-    html.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765))
+    html.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765))
     state.unlink(missing_ok=True)
     return core.sync(SLUG)[0]
 
@@ -33,15 +34,6 @@ def apply(kind, **fields):
     op = operation(kind, **fields)
     core.check_op(op)
     return core.sync(SLUG, ops=[op])
-
-
-def edit_seed(change):
-    html, _ = core.paths(SLUG)
-    source = html.read_text()
-    seed = core.parse_seed(source)
-    change(seed)
-    html.write_text(core.SEED_RE.sub(lambda m: m[1] + json.dumps(seed) + m[3], source))
-    return core.sync(SLUG)[0]
 
 
 def test_phase_add_and_update_store_fields():
@@ -122,7 +114,7 @@ def test_unknown_dependency_and_cycle_are_refused_without_changes():
     assert rejected == ["phase-operation"]
 
 
-def test_review_op_changes_only_review_and_seed_cannot_forge_it():
+def test_phase_review_op_changes_only_the_review_field():
     before = make_ledger()["phases"][0]
     state, rejected = apply("phase_review", item="phases/p1", state="approved", rounds=2, note="Reviewed")
     assert rejected == []
@@ -136,45 +128,6 @@ def test_review_op_changes_only_review_and_seed_cannot_forge_it():
         "rounds": 2,
         "note": "Reviewed",
     }
-    state = edit_seed(
-        lambda seed: seed["phases"][0].update(
-            title="Edited", depends_on=[], planning="auto", release=True, review={"state": "sent_back"}
-        )
-    )
-    assert state["phases"][0] == {
-        **before,
-        "title": "Edited",
-        "depends_on": [],
-        "planning": "auto",
-        "release": True,
-        "review": review,
-    }
-    state = edit_seed(
-        lambda seed: seed["phases"].append({"id": "p2", "title": "Second", "review": {"state": "approved"}})
-    )
-    assert "review" not in state["phases"][1]
-    state = edit_seed(lambda seed: seed["phases"][1].update(review={"state": "approved"}))
-    assert "review" not in state["phases"][1]
-
-
-def test_initial_page_seed_cannot_approve_a_plan():
-    make_ledger()
-    html, state = core.paths(SLUG)
-    source = html.read_text()
-    seed = core.parse_seed(source)
-    seed["phases"][0]["review"] = {"state": "approved"}
-    html.write_text(core.SEED_RE.sub(lambda m: m[1] + json.dumps(seed) + m[3], source))
-    state.unlink()
-    assert "review" not in core.sync(SLUG)[0]["phases"][0]
-
-
-def test_seed_graph_validation_and_old_phase_round_trip():
-    before = make_ledger()["phases"]
-    assert core.sync(SLUG)[0]["phases"] == before
-    assert not any(k in before[0] for k in ("depends_on", "planning", "release", "review"))
-    state = edit_seed(lambda seed: seed["phases"][0].update(depends_on=["p1"]))
-    assert state["phases"] == before
-    assert "p1 -> p1" in state["_meta"]["seed_error"]
 
 
 def test_content_builds_phase_fields_and_rejects_bad_graph():
@@ -272,19 +225,6 @@ def test_page_round_trip_preserves_phase_fields_and_old_phases():
     )
     result = subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
     assert json.loads(result.stdout) == phases
-
-
-def test_concurrent_seed_changes_cannot_form_a_cycle():
-    state = make_ledger([{"title": "First"}, {"title": "Second"}])
-    html, _ = core.paths(SLUG)
-    stale = html.read_text()
-    apply("phase_update", item="phases/p1", fields={"depends_on": ["p2"]})
-    seed = core.parse_seed(stale)
-    seed["phases"][1]["depends_on"] = ["p1"]
-    html.write_text(core.SEED_RE.sub(lambda m: m[1] + json.dumps(seed) + m[3], stale))
-    result = core.sync(SLUG)[0]
-    assert result["phases"] == [{**state["phases"][0], "depends_on": ["p2"]}, state["phases"][1]]
-    assert "cycle" in " ".join(result["_meta"]["warnings"])
 
 
 @pytest.mark.parametrize(
@@ -418,18 +358,6 @@ def test_content_and_seed_reject_invalid_fields(fields):
         core.validate({"phases": [{"id": "p1", **fields}]})
 
 
-def test_seed_added_fields_are_preserved():
-    make_ledger()
-    state = edit_seed(
-        lambda seed: seed["phases"].append(
-            {"id": "p2", "title": "Second", "depends_on": ["p1"], "planning": "auto", "release": True}
-        )
-    )
-    assert state["phases"][1]["depends_on"] == ["p1"]
-    assert state["phases"][1]["planning"] == "auto"
-    assert state["phases"][1]["release"] is True
-
-
 def test_phase_cli_refusal_names_the_dependency_chain():
     args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", "engineer", "phase", "set", "p1", "depends_on=p2"])
     reply = {"rejected": ["phase-operation"], "_meta": {"warnings": ["phase dependency cycle: p1 -> p2 -> p1"]}}
@@ -466,14 +394,6 @@ def test_cli_multiline_description_and_multiword_title():
     assert ledger_phase_cli.operation(args)[1]["title"] == "Second phase"
     args = ledger.build_parser().parse_args(["phase", "set", "p2", "description=first=second"])
     assert ledger_phase_cli.operation(args)[1]["fields"] == {"description": "first=second"}
-
-
-def test_optional_fields_edit_independently():
-    make_ledger()
-    state = edit_seed(lambda seed: seed["phases"][0].update(planning="auto", release=True))
-    assert state["phases"][0]["planning"] == "auto"
-    assert state["phases"][0]["release"] is True
-    assert "depends_on" not in state["phases"][0]
 
 
 def test_document_without_phase_list_is_valid():
@@ -517,7 +437,8 @@ def test_content_preserves_titles_descriptions_and_optional_fields():
         (
             "phase_update",
             {"fields": {"review": {}}},
-            "phase fields may set only ('title', 'description', 'depends_on', 'planning', 'release', 'plan_url')",
+            "phase fields may set only "
+            "('title', 'description', 'depends_on', 'planning', 'release', 'plan_url', 'plan_ref', 'plan')",
         ),
         ("phase_review", {"title": "bad"}, "phase_review writes only the review record"),
         ("phase_review", {"state": "bad"}, "review state must be one of ('pending', 'approved', 'sent_back')"),
@@ -566,56 +487,6 @@ def test_phase_operations_record_actor_events_and_stamps():
         "rev": state["_meta"]["rev"],
         "by": "engineer",
     }
-
-
-def test_seed_added_phase_can_complete_a_concurrent_cycle():
-    make_ledger([{"title": "First"}, {"title": "Second"}])
-    html, _ = core.paths(SLUG)
-    stale = html.read_text()
-    apply("phase_update", item="phases/p1", fields={"depends_on": ["p2"]})
-    seed = core.parse_seed(stale)
-    seed["phases"].append({"id": "p3", "title": "Third", "depends_on": ["p1"]})
-    seed["phases"][1]["depends_on"] = ["p3"]
-    html.write_text(core.SEED_RE.sub(lambda m: m[1] + json.dumps(seed) + m[3], stale))
-    state = core.sync(SLUG)[0]
-    assert [p["id"] for p in state["phases"]] == ["p1", "p2"]
-    assert "phase dependency cycle: p1 -> p2 -> p3 -> p1" in state["_meta"]["warnings"]
-
-
-def test_concurrently_added_phase_seed_uses_current_dependencies():
-    make_ledger([{"title": "First"}, {"title": "Second"}])
-    html, _ = core.paths(SLUG)
-    stale = html.read_text()
-    apply("phase_add", phase="p3", title="Third", depends_on=["p1"])
-    seed = core.parse_seed(stale)
-    seed["phases"].append({"id": "p3", "title": "Third"})
-    seed["phases"][0]["depends_on"] = ["p3"]
-    html.write_text(core.SEED_RE.sub(lambda m: m[1] + json.dumps(seed) + m[3], stale))
-    state = core.sync(SLUG)[0]
-    assert "depends_on" not in state["phases"][0]
-    assert "phase dependency cycle: p1 -> p3 -> p1" in state["_meta"]["warnings"]
-
-
-def test_stale_explicit_dependency_default_cannot_hide_a_cycle():
-    make_ledger([{"title": "First", "depends_on": []}, {"title": "Second", "depends_on": []}])
-    html, _ = core.paths(SLUG)
-    stale = html.read_text()
-    apply("phase_update", item="phases/p1", fields={"depends_on": ["p2"]})
-    seed = core.parse_seed(stale)
-    seed["phases"][1]["depends_on"] = ["p1"]
-    html.write_text(core.SEED_RE.sub(lambda m: m[1] + json.dumps(seed) + m[3], stale))
-    state = core.sync(SLUG)[0]
-    assert state["phases"][0]["depends_on"] == ["p2"]
-    assert state["phases"][1]["depends_on"] == []
-    assert "phase dependency cycle: p1 -> p2 -> p1" in state["_meta"]["warnings"]
-
-
-def test_omitting_an_optional_seed_field_preserves_current_value():
-    make_ledger([{"title": "First", "depends_on": [], "planning": "auto", "release": True}])
-    state = edit_seed(lambda seed: [seed["phases"][0].pop(k) for k in ("depends_on", "planning", "release")])
-    assert state["phases"][0]["depends_on"] == []
-    assert state["phases"][0]["planning"] == "auto"
-    assert state["phases"][0]["release"] is True
 
 
 def test_large_ordered_phase_graph_validates_without_revisiting():

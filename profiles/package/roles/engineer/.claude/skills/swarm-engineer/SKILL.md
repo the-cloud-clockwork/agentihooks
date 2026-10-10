@@ -95,6 +95,8 @@ Stop after `done`; the swarm closes the session.
 When you cannot finish (a missing secret, a decision only the operator can
 make, another task first): push the branch, open a draft pull request, then
 `agentihooks swarm <slug> block "<plain words naming the blocker>"` and stop.
+When red dev Tests is the blocker, add `--dev-red`: the swarm reopens the task
+once a later dev Tests run passes.
 A question for the master without stopping:
 `agentihooks ledger --slug <slug> --as <name> question add "<text>"`.
 

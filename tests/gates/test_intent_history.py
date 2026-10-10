@@ -50,7 +50,7 @@ def test_each_verdict_replays_the_exact_request_and_original_findings(tmp_path, 
     pr = pull_request()
 
     def ask(state):
-        seen.append(json.dumps(DecisionRequest(state, intent.QUESTIONS).wire()).encode())
+        seen.append(json.dumps(DecisionRequest(state, intent.questions_for(state)).wire()).encode())
         return verdict, "original result"
 
     check = intent.Check("proof", "observe", 123, None, None, lambda url: pr, ask, tmp_path)
@@ -156,7 +156,7 @@ def test_pull_request_findings_include_original_reviews_and_inline_comments():
         "comments": [discussion],
         "inline": [inline, {**inline, "line": 9}],
     }
-    assert calls[0][-1] == "title,body,files,reviews,comments"
+    assert calls[0][-1] == "title,body,files,reviews,comments,isDraft,state"
     assert calls[1] == ["gh", "api", "--paginate", "--jq", ".[] | @json", "repos/o/r/pulls/1/comments"]
 
 
@@ -269,3 +269,12 @@ def test_findings_limit_preserves_exact_boundary_and_truncates_the_next_byte():
     over = intent_history.prepare({"reviewer_findings": exact + "a"})["reviewer_findings"]
     assert over == {"truncated": True, "json_prefix": json.dumps(exact + "a")[:16352]}
     assert len(json.dumps(over)) <= 32768
+
+
+def test_plan_chunk_limit_matches_the_findings_limit():
+    from scripts.gates import intent_history
+
+    exact = "a" * 32766
+    assert intent_history.prepare({"plan_chunk": exact})["plan_chunk"] == exact
+    over = intent_history.prepare({"plan_chunk": exact + "a"})["plan_chunk"]
+    assert over == {"truncated": True, "json_prefix": json.dumps(exact + "a")[:16352]}

@@ -2,15 +2,14 @@
 
 import json
 import os
-from pathlib import Path
 
 from scripts.doctor import priming
 from scripts.handoff.check import section
 from scripts.inbox.seats import MATURITIES
 from scripts.swarm import naming, plan_review
 from scripts.swarm.health.verdicts import VERDICTS
-from scripts.swarm.store import ASSIST, DELEGATE, FULL, MANUAL, MASTER
-from scripts.swarm_ledger import ledger_close, ledger_kinds
+from scripts.swarm.store import ASSIST, DELEGATE, DISPATCH, FULL, MANUAL, MASTER
+from scripts.swarm_ledger import ledger_close, ledger_kinds, plan_read
 
 CLOSES = "The swarm then closes this session; stop working."
 OVERLAP_LINE = (
@@ -51,10 +50,8 @@ LANE_ROLE = {
 }
 
 
-def ledger_path(slug: str) -> Path:
-    directory = os.environ.get("LEDGER_DIR")
-    root = Path(directory).expanduser() if directory else Path("~/development-ledger")
-    return root / f"{slug}.json"
+def ledger_read(slug: str) -> str:
+    return f"agentihooks ledger --slug {slug} show"
 
 
 def build_master(slug, repo, name, task, autonomy=DELEGATE):
@@ -77,7 +74,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         *priming_lines(task),
         *summary,
         "",
-        f"Before anything else, read the ledger {ledger_path(slug)} in full: every task and its state, "
+        f"Before anything else, read the ledger in full with {ledger_read(slug)}: every task and its state, "
         "the operator's notes, answers, comments and chat.",
         f"Run once: {led} join --role orchestrator. {INBOX_LINE} Act on every OPERATOR line, then run {led} ack.",
         "",
@@ -174,10 +171,10 @@ def peer_lines(peer):
 
 
 def summary_lines(slug):
-    path = ledger_path(slug).expanduser()
-    if not path.exists():
-        return []
-    overview = json.loads(path.read_text(encoding="utf-8")).get("overview", "")
+    from scripts.swarm_ledger.repository.folder import ledger_folder
+    from scripts.swarm_ledger.repository.sqlite import read_ledger
+
+    overview = str((read_ledger(ledger_folder(os.environ), slug, "overview") or {}).get("overview"))
     _, marker, summary = overview.partition(ledger_close.MARK)
     if not marker:
         return []
@@ -188,9 +185,87 @@ def summary_lines(slug):
     ]
 
 
+def build_operator(slug, repo, name, role, profile):
+    led = f"agentihooks ledger --slug {slug} --as {name}"
+    leave = f"end this session with agentihooks swarm {slug} --as {name} exit."
+    planner = role == "planner"
+    lines = [
+        f"You are {name}, a {profile} profile agent the operator launched on swarm {slug} over the repo {repo} with "
+        f"agentihooks swarm {slug} {profile} up. You hold no task and no lane slot, and the swarm never nudges or "
+        "retires you. You answer to the operator in this pane: wait for his first message.",
+        f"Read the swarm ledger with {ledger_read(slug)} for context; change nothing on it "
+        + ("until the operator accepts a plan." if planner else "unless the operator asks."),
+        'Other sessions reach you as inbox messages: answer one with agentihooks msg reply <id> "<text>" and reach '
+        f'the master with agentihooks msg send master@{slug} "<text>".',
+        "",
+    ]
+    steps = operator_plan_steps(slug, led, leave) if planner else operator_work_steps(led, leave)
+    return "\n".join([*lines, *steps])
+
+
+def operator_work_steps(led, leave):
+    return [
+        "Work with the operator on what he asks in this pane. Make any code change in your own worktree (wt.sh new, "
+        "the worktree skill) and a pull request into dev. Never join the ledger crew or claim a task. Propose other "
+        f'work with {led} followup add "<plain words>".',
+        f"When he says you are done, {leave}",
+    ]
+
+
+def operator_plan_steps(slug, led, leave):
+    return [
+        "Plan with the operator here. Ask what you need, edit no code, and revise until he accepts the plan. On his "
+        "accept, in this order:",
+        "1. Write the plan as markdown, giving each phase its own heading whose text is exactly that phase's title, "
+        "and its phases as JSON, the init-swarm content phases shape with planning manual on each phase, in a folder "
+        "from agentihooks scratch new.",
+        f"2. Join the ledger crew: {led} join.",
+        f"3. Append the phases: {led} plan phases <phases file>. Note the phase ids it prints.",
+        f"4. Publish the plan: {led} publish-plan <plan file> --phase <phase ids>. {PUBLISHED}, and links and "
+        "comments each phase.",
+        f"5. Add each phase's tasks: {led} task add - <title> --phase <id> --lane <eng or ci> --kind <kind> "
+        '--description "<scope and Done when sentence>" --depends-on <ids> --territory <areas>. The ledger takes '
+        "tasks only in phases you appended, and each carries the plan link.",
+        f'6. Tell the master: agentihooks msg send master@{slug} "<the plan link and the phase and task ids you added; '
+        'the phases wait on plan review before engineers claim them>".',
+        f"7. Leave the crew with {led} leave, tell the operator here what you registered, then {leave}",
+    ]
+
+
+def build_dispatcher(slug: str, repo: str, name: str, task: dict, autonomy: str = DELEGATE) -> str:
+    from scripts.swarm import dispatch_seat
+
+    me = f"agentihooks swarm {slug}"
+    led = f"agentihooks ledger --slug {slug} --as {name}"
+    lines = [
+        f"You are {name}, the dispatcher of swarm {slug}, working beside its master in the repo {repo}. "
+        f"The swarm runs at {autonomy} autonomy.",
+        "The tick woke you because its deterministic passes could not settle these triggers:",
+        *(dispatch_seat.line(trigger) for trigger in task.get("triggers", [])),
+        *priming_lines(task),
+        "",
+        f"Before anything else, run once: {led} join. Then read the ledger with {ledger_read(slug)} and each trigger's "
+        "item in it.",
+        "Settle each trigger within the swarm's autonomy with the agentihooks commands, the classifiers and read only sub "
+        f'agents: comment on its item with {led} comment <item> "<text>", close a decided follow up, rank a task, and '
+        f"clear the priority once it is resolved with {led} priority clear <priority id>.",
+        "A decision only the operator can make goes to the master; never ask the operator yourself. You never edit "
+        "code or config files, commit, merge or claim a task.",
+        f'After each trigger, tell the master what you did: agentihooks msg send {MASTER}@{slug} "<plain words>".',
+        'New triggers arrive as inbox messages: answer one with agentihooks msg reply <id> "<text>", or close it with '
+        'agentihooks msg close <id> done "<where the work went>".',
+        f'While you wait on a trigger, declare it: {me} wait 30 --reason "<what you wait on>".',
+        f"When every trigger is closed, run {led} leave, then {me} done and stop: the swarm ends your session.",
+        "Write ledger comments and messages in plain words: no ids, paths, hashes or dashes.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
     if lane == MASTER:
         return build_master(slug, repo, name, task, autonomy)
+    if lane == DISPATCH:
+        return build_dispatcher(slug, repo, name, task, autonomy)
     me = f"agentihooks swarm {slug}"
     led = f"agentihooks ledger --slug {slug} --as {name}"
     phase = task.get("phase") or "<phase id>"
@@ -200,6 +275,8 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
     ]
     if task.get("description"):
         lines.append(task["description"])
+    if task.get("plan_lines"):
+        lines.append(plan_read.pointer(task))
     lines += contract_lines(task.get("contract") or {})
     lines += workspace_lines(task)
     lines += group_lines(task)
@@ -218,7 +295,7 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         f"You are a member of the ledger crew. Before anything else, run once: {led} join. {INBOX_LINE} "
         f"Act on every OPERATOR line about your work, then run {led} ack.",
         "",
-        f"Then read the ledger {ledger_path(slug)} in full: every task and its state, "
+        f"Then read the ledger in full with {ledger_read(slug)}: every task and its state, "
         "the operator's notes, answers and comments. It is your starting point; take only your own task.",
         "Page chat is for the master: act on a chat line only when it starts with @ and your name.",
         f'Keep the ledger current as you go: {led} comment phases/{phase} "<what you did>" when your work lands, '

@@ -1,121 +1,105 @@
-import json
+from contextlib import contextmanager
 
 import ledger_bin as domain
 import ledger_core as core
 import ledger_media
-import ledger_size
+
+from hooks.context import operator_words
+
+from .sqlite import BEGIN_IMMEDIATE, read_registry
+
+
+def _repository():
+    from . import legacy, repository
+
+    legacy.adopt_bin(repository)
+    return repository
+
+
+@contextmanager
+def _transaction():
+    repository = _repository()
+    with domain.LOCK, repository.connect() as connection, connection:
+        connection.execute(BEGIN_IMMEDIATE)
+        yield repository, connection
+
+
+def _registry(name):
+    return read_registry(_repository().directory, name)
 
 
 def restored():
-    try:
-        found = json.loads(domain.restored_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return {k: v for k, v in found.items() if isinstance(v, int)} if isinstance(found, dict) else {}
-
-
-def registries():
-    found = {}
-    for name, path in (("bin", domain.bin_path()), ("restored", domain.restored_path())):
-        try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            value = {}
-        found[name] = value if isinstance(value, dict) else {}
-    return found
+    return {k: v for k, v in _registry("restored").items() if isinstance(v, int)}
 
 
 def entries():
-    try:
-        found = json.loads(domain.bin_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return {k: v for k, v in found.items() if isinstance(v, int)} if isinstance(found, dict) else {}
+    return {k: v for k, v in _registry("bin").items() if isinstance(v, int)}
 
 
-def _save(found):
-    core.atomic_write(domain.bin_path(), json.dumps(found, indent=1, sort_keys=True))
+def registries():
+    return {"bin": _registry("bin"), "restored": _registry("restored")}
 
 
 def delete(slug, now=None):
-    from .shadow import persist_lifecycle, storage_lock
-
-    with domain.LOCK, storage_lock(core.LEDGER_DIR):
-        found = entries()
+    with _transaction() as (repository, connection):
+        found = repository.registry("bin", connection)
         found.setdefault(slug, core.now_ms() if now is None else now)
-        _save(found)
-        persist_lifecycle(core.LEDGER_DIR)
+        repository.save_registry(connection, "bin", found)
 
 
 def restore(slug, now=None):
-    from .shadow import persist_lifecycle, storage_lock
-
-    with domain.LOCK, storage_lock(core.LEDGER_DIR):
-        found = entries()
+    with _transaction() as (repository, connection):
+        found = repository.registry("bin", connection)
         if found.pop(slug, None) is None:
             return False
-        _save(found)
-        marks = restored()
+        repository.save_registry(connection, "bin", found)
+        marks = repository.registry("restored", connection)
         marks[slug] = core.now_ms() if now is None else now
-        core.atomic_write(domain.restored_path(), json.dumps(marks, indent=1, sort_keys=True))
-        persist_lifecycle(core.LEDGER_DIR)
+        repository.save_registry(connection, "restored", marks)
         return True
 
 
 def bin_closed(slug, closed_at, now=None):
-    from .shadow import persist_lifecycle, storage_lock
-
-    with domain.LOCK, storage_lock(core.LEDGER_DIR):
-        found, marks = entries(), restored()
+    with _transaction() as (repository, connection):
+        found, marks = repository.registry("bin", connection), repository.registry("restored", connection)
         if slug in found or (slug in marks and marks[slug] >= closed_at):
             return False
         found[slug] = core.now_ms() if now is None else now
-        _save(found)
-        persist_lifecycle(core.LEDGER_DIR)
+        repository.save_registry(connection, "bin", found)
         return True
 
 
 def purge_expired(now=None):
-    from .shadow import persist_lifecycle, storage_lock
-
     now = core.now_ms() if now is None else now
-    with domain.LOCK, storage_lock(core.LEDGER_DIR):
-        found = entries()
-        expired = sorted(slug for slug, at in found.items() if now - at > domain.KEEP_DAYS * domain.DAY_MS)
+    with _transaction() as (repository, connection):
+        found = repository.registry("bin", connection)
+        expired = sorted(
+            slug for slug, at in found.items() if isinstance(at, int) and now - at > domain.KEEP_DAYS * domain.DAY_MS
+        )
         for slug in expired:
-            for path in core.paths(slug):
-                path.unlink(missing_ok=True)
-            ledger_media.purge(slug)
+            repository.purge(slug, connection)
             del found[slug]
         if expired:
-            _save(found)
-        persist_lifecycle(core.LEDGER_DIR, expired)
+            repository.save_registry(connection, "bin", found)
+    for slug in expired:
+        ledger_media.purge(slug)
+        operator_words.forget(slug)
     return expired
 
 
 def auto_bin(now=None):
-    from .shadow import persist_lifecycle, storage_lock
-
     now = core.now_ms() if now is None else now
-    binned = []
-    with domain.LOCK, core.LOCK, storage_lock(core.LEDGER_DIR):
-        found, marks = entries(), restored()
-        for html_path in sorted(core.LEDGER_DIR.glob("*.html")):
-            slug, json_path = html_path.stem, core.paths(html_path.stem)[1]
-            if slug in found:
-                continue
-            try:
-                state = json.loads(json_path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            if (
-                isinstance(state, dict)
-                and ledger_size.size_of(state) == "small"
-                and domain.due(state, now, marks.get(slug))
-            ):
-                found[slug] = now
-                binned.append(slug)
+    with _transaction() as (repository, connection):
+        found, marks = repository.registry("bin", connection), repository.registry("restored", connection)
+        binned = [
+            s["slug"]
+            for s in repository.summaries(connection)
+            if s["slug"] not in found
+            and s["size"] == "small"
+            and domain.idle_due(s["finished"], s["updated_at"] or s["created_at"] or 0, now, marks.get(s["slug"]))
+        ]
+        for slug in binned:
+            found[slug] = now
         if binned:
-            _save(found)
-            persist_lifecycle(core.LEDGER_DIR)
-    return binned
+            repository.save_registry(connection, "bin", found)
+    return sorted(binned)

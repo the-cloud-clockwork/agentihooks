@@ -2,6 +2,8 @@ import pytest
 
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger import ledger_kinds, ledger_tasks, new_ledger
+from tests.swarm_ledger import legacy_page  # noqa: E402
+from tests.swarm_ledger.plan_slices import anchored
 
 PLAN = "https://github.com/acme/app/issues/1"
 
@@ -15,7 +17,7 @@ def plan_ledger(tmp_path, monkeypatch):
     html, json_path = core.paths("plan-proof")
     json_path.unlink(missing_ok=True)
     html.parent.mkdir(parents=True, exist_ok=True)
-    html.write_text(new_ledger.render(new_ledger.build_doc(content), "plan-proof", 8765))
+    html.write_text(legacy_page.render(new_ledger.build_doc(content), "plan-proof", 8765))
     core.sync("plan-proof")
     return "plan-proof"
 
@@ -44,7 +46,8 @@ def update(slug, **fields):
 def test_plan_requires_slice_and_stores_valid_phase_tasks(plan_ledger):
     assert ledger_kinds.unmet({"kind": "plan"}) == ["slice"]
     add(plan_ledger, "plan", lane="plan", kind="plan")
-    add(plan_ledger, "build", plan_url=PLAN)
+    anchored(plan_ledger, "build")
+    add(plan_ledger, "build", plan_url=PLAN, plan_slice="build")
     state, _ = update(plan_ledger, state="done")
     assert state["tasks"][0]["state"] == "open"
     state, _ = update(plan_ledger, state="done", proof={"slice": " build "})
@@ -133,14 +136,31 @@ def test_task_command_lane_defaults_and_choices():
 
 def test_a_plan_accepts_multiple_phase_tasks_and_open_updates(plan_ledger):
     add(plan_ledger, "plan", lane="plan", kind="plan")
-    add(plan_ledger, "first", plan_url=PLAN)
-    add(plan_ledger, "second", lane="ci", kind="ci", plan_url=PLAN)
+    anchored(plan_ledger, "first", "second")
+    add(plan_ledger, "first", plan_url=PLAN, plan_slice="first")
+    add(plan_ledger, "second", lane="ci", kind="ci", plan_url=PLAN, plan_slice="second")
     state, rejected = update(plan_ledger, state="claimed")
     assert rejected == []
     assert state["tasks"][0]["state"] == "claimed"
     state, rejected = update(plan_ledger, state="done", proof={"slice": "first, second"})
     assert rejected == []
     assert state["tasks"][0]["state"] == "done"
+
+
+def test_a_slice_without_its_anchor_or_range_is_refused_by_name(plan_ledger):
+    add(plan_ledger, "second", plan_url=PLAN)
+    add(plan_ledger, "third", plan_url=PLAN)
+    anchored(plan_ledger, "first")
+    state, rejected = add(plan_ledger, "lost", plan_slice="lost")
+    assert rejected == ["add-lost"]
+    assert state["_meta"]["warnings"] == ["slice anchor lost is missing or repeated in its phase"]
+    assert [t["id"] for t in state["tasks"]] == ["second", "third"]
+    add(plan_ledger, "plan", lane="plan", kind="plan")
+    add(plan_ledger, "first", plan_url=PLAN, plan_slice="first")
+    state, rejected = update(plan_ledger, state="done", proof={"slice": "first, second, third"})
+    assert rejected == ["finish-plan"]
+    assert next(t for t in state["tasks"] if t["id"] == "plan")["state"] == "open"
+    assert state["_meta"]["warnings"] == ["tasks/plan slice tasks lack valid plan ranges or anchors: second, third"]
 
 
 def test_ordinary_tasks_can_still_finish(plan_ledger):

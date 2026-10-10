@@ -1,22 +1,26 @@
 """Swarm agents as herdr panes: spawn through init-agent, find live ones by name, retire by the process recorded at
 spawn."""
 
+import json
 import os
 import shutil
 import subprocess
 import sys
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from scripts import agent_choice, session_bands
+from scripts import agent_choice
 from scripts.handoff import envelope
 from scripts.init_agent import PREDECESSOR
 from scripts.profiles import binding, plugins
 from scripts.swarm import (
     affinity,
+    capacity,
     effort_range,
+    host_budget,
     live_binding,
     model_pick,
     naming,
@@ -28,7 +32,7 @@ from scripts.swarm import (
     timing,
 )
 from scripts.swarm.pane import PaneObservation, selection_prompt, typed_input
-from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
+from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, connect
 from scripts.swarm.tick import Placed, SpawnError
 
 SWARM_HOME = Path.home() / ".agentihooks" / "swarm"
@@ -38,6 +42,20 @@ STARTED_ROUTES = ("routed", "bare", "direct")
 AUTO = "auto"
 PICKED_LANES = ("eng", "ci")
 PLAN_MODE = ["--permission-mode", "plan"]
+
+
+def codex_plan_mode(environ):
+    home = Path(environ.get("HOME") or Path.home())
+    ledger = Path(environ.get("LEDGER_DIR") or home / "development-ledger").expanduser()
+    grants = ", ".join(
+        f'{json.dumps(str(root))}="write"' for root in (ledger, home / ".agentihooks" / "swarm", home / "scratchpad")
+    )
+    return [
+        "-c",
+        f'permissions.planner={{extends=":read-only", network={{enabled=true}}, filesystem={{{grants}}}}}',
+        "-c",
+        'default_permissions="planner"',
+    ]
 
 
 def _bin():
@@ -58,9 +76,13 @@ def _model_args(agent, chosen, environ, bounds, preserve=False):
     model, effort = model_effort(agent, [], environ)
     saved = _set(chosen.get("effort")) or effort
     effort = effort_range.clamp(agent, saved, bounds)
-    if preserve and effort != saved:
+    if preserve and effort_range.rank(effort) != effort_range.rank(saved):
         raise SpawnError("unsupported transfer: saved effort is outside the current swarm range", "unsupported")
     return model_flags(agent, _set(chosen.get("model")) or model, effort)
+
+
+def preserves_effort(recorded: bool, lane: str) -> bool:
+    return recorded and lane != MASTER
 
 
 def _lane_default(lane, agent, chosen):
@@ -153,14 +175,41 @@ class HerdrRuntime:
         self._binding_pids = {}
         self.refusals = {}
         self.end, self.reap = reaper.retire, reaper.reap
+        self._quota_previous = {}
+        self._host_spent = capacity.no_spawns
 
     def has_capacity(self, config):
         environ = dict(os.environ)
         if hasattr(self, "_quota_accounts"):
             from scripts.swarm.capacity import free_seats
 
-            return any(free_seats(row) for row in self._quota_accounts)
+            return any(free_seats(row) for row in self._quota_open())
         return self.choose("", environ)[1] != agent_choice.ALL_FULL
+
+    def _quota_warned(self):
+        from scripts.swarm import quota_handoff
+
+        thresholds = quota_handoff.Thresholds.from_env(dict(os.environ))
+        return {
+            (row.harness, row.name): window
+            for row in self._quota_accounts
+            if (window := quota_handoff.trigger(row, thresholds))
+        }
+
+    def _quota_open(self):
+        warned = self._quota_warned()
+        return [row for row in self._quota_accounts if (row.harness, row.name) not in warned]
+
+    def _quota_refusal(self, agent, harnesses=None):
+        from scripts.swarm.capacity import warning
+
+        harnesses = harnesses or (agent,)
+        warnings = "; ".join(
+            f"{harness} {name} {warning(window)}"
+            for (harness, name), window in self._quota_warned().items()
+            if harness in harnesses
+        )
+        return f"no {' or '.join(harnesses)} account has placeable quota seats" + (f": {warnings}" if warnings else "")
 
     def quota_capacity(
         self,
@@ -169,12 +218,31 @@ class HerdrRuntime:
         now: float,
         demand: dict | None = None,
         requirements: dict | None = None,
+        refresh: bool = True,
     ) -> dict:
         from scripts.swarm import capacity
 
         placing = demand is None or any(demand.values())
-        self._quota_accounts = capacity.accounts(dict(os.environ), now, refresh=placing)
-        decision = capacity.calculate(config, self._quota_accounts, agents, demand, requirements)
+        self._quota_accounts = capacity.accounts(dict(os.environ), now, refresh=placing and refresh)
+        self._quota_held = {}
+        accounts = self._quota_successor_accounts(requirements) if requirements else None
+        if requirements:
+            requirements = self._quota_preferring(requirements)
+        warned = self._quota_warned()
+        previous = self._quota_previous
+        inputs = capacity.ScaleInputs(
+            self._quota_accounts, agents, demand, self.host, previous, warned, self._host_spent, int(now * 1000)
+        )
+        host = capacity.granted(capacity.host_room(config, inputs), previous, inputs.now_ms)
+        config, scaled = capacity.autoscaled(config, inputs, host)
+        decision = capacity.calculate(
+            config, self._quota_accounts, agents, demand, requirements, accounts, warned=warned
+        )
+        decision["host"] = host
+        if scaled:
+            decision["autoscale"] = scaled
+        for task, reason in self._quota_held.items():
+            decision["reason"] += f"; quota handoff {task} waits: {reason}"
         self._quota_allocations = decision["allocation"]
         if hasattr(self, "_quota_ready_ids"):
             slots = {
@@ -187,16 +255,29 @@ class HerdrRuntime:
             decision["tasks"] = dict(self._quota_tasks)
         return decision
 
+    def host(self) -> host_budget.HostSample | None:
+        return host_budget.read_host()
+
+    def quota_previous(self, decision: dict) -> None:
+        self._quota_previous = decision
+
+    def quota_spent(self, counter: Callable[[int], int]) -> None:
+        self._host_spent = counter
+
     def quota_requirements(self, config: SwarmConfig, ready: dict) -> dict:
         from scripts.swarm.capacity import _harnesses
 
         self._quota_ready_ids = {lane: [task["id"] for task in tasks] for lane, tasks in ready.items()}
+        self._quota_handoffs = {}
+        self._quota_preferred = {}
         requirements = {}
         for lane, tasks in ready.items():
             options = []
             for task in tasks:
                 chosen = config.lanes.get(lane, {})
                 saved = task.get("launch_assignment") or (task.get("handoff_envelope") or {}).get("launch") or {}
+                if (task.get("handoff_envelope") or {}).get("reason") == "quota" and saved.get("harness"):
+                    self._quota_handoffs[lane, len(options)] = (saved["harness"], saved.get("account"))
                 profile = (
                     saved.get("profile")
                     or task.get("profile")
@@ -204,24 +285,63 @@ class HerdrRuntime:
                     or profile_choice.DEFAULT_PROFILES[lane]
                 )
                 requested = _set(chosen.get("agent"))
-                if plugins.claude_only(profile):
-                    options.append(("claude",))
-                elif requested:
+                if requested:
                     options.append((requested,))
+                elif plugins.claude_only(profile):
+                    options.append(("claude",))
                 elif (
                     saved.get("harness") in agent_choice.AGENTS
                     and (task.get("handoff_envelope") or {}).get("reason") != "quota"
                 ):
                     options.append((saved["harness"],))
                 else:
+                    order = profile_choice.preferred(profile)
+                    if order and (lane, len(options)) not in self._quota_handoffs:
+                        self._quota_preferred[lane, len(options)] = order
                     options.append(_harnesses(config, lane))
             requirements[lane] = options
         return requirements
 
+    def _quota_successor_accounts(self, requirements):
+        from scripts.swarm import quota_handoff
+
+        thresholds = quota_handoff.Thresholds.from_env(dict(os.environ))
+        accounts = {}
+        for (lane, index), predecessor in getattr(self, "_quota_handoffs", {}).items():
+            harnesses = requirements[lane][index]
+            rows = [row for row in self._quota_accounts if row.harness in harnesses]
+
+            def reason(row):
+                return quota_handoff.exclusion(row, thresholds, predecessor)
+
+            eligible = [row for row in rows if not reason(row)]
+            first = next(
+                (h for h in agent_choice.preferring(predecessor[0]) if any(row.harness == h for row in eligible)), None
+            )
+            accounts.setdefault(lane, {})[index] = {(row.harness, row.name) for row in eligible if row.harness == first}
+            if first is None:
+                task = self._quota_ready_ids[lane][index]
+                self._quota_held[task] = quota_handoff.refusal(predecessor, harnesses, rows, reason)
+        return accounts
+
+    def _quota_preferring(self, requirements):
+        from scripts.swarm.capacity import free_seats
+
+        room = {h: sum(free_seats(row) for row in self._quota_open() if row.harness == h) for h in agent_choice.AGENTS}
+        for choice in (choice for options in requirements.values() for choice in options if len(choice) == 1):
+            room[choice[0]] -= 1
+        narrowed = {lane: list(options) for lane, options in requirements.items()}
+        for (lane, index), order in getattr(self, "_quota_preferred", {}).items():
+            first = next((h for h in order if h in narrowed[lane][index] and room[h] > 0), None)
+            if first:
+                narrowed[lane][index] = (first,)
+                room[first] -= 1
+        return narrowed
+
     def _quota_eligible(self, harness):
         from scripts.swarm.capacity import free_seats
 
-        return [row for row in self._quota_accounts if row.harness == harness and free_seats(row)]
+        return [row for row in self._quota_open() if row.harness == harness and free_seats(row)]
 
     def _quota_choice(self, agent, reason, fixed, lane):
         if not hasattr(self, "_quota_accounts"):
@@ -232,38 +352,55 @@ class HerdrRuntime:
             return agent, reason
         if not fixed and eligible:
             return eligible[0], f"fallthrough: {agent} has no placeable quota seats"
-        raise SpawnError(f"no {agent} account has placeable quota seats", "unavailable")
+        raise SpawnError(self._quota_refusal(agent, None if fixed else agent_choice.AGENTS), "unavailable")
 
-    def _rotation(self, requested, environ):
+    def _rotation(self, requested, environ, prefer=()):
         if requested or not hasattr(self, "_quota_accounts"):
             return self.choose(requested, environ)
-        from scripts.swarm.capacity import seats
+        from scripts.swarm.capacity import offered, pick
 
-        seat = session_bands.pick(seats(self._quota_accounts))
-        return (seat.harness, "rotation") if seat else ("claude", agent_choice.ALL_FULL)
+        seats = offered(self._quota_accounts, self._quota_warned())
+        seat = next(filter(None, (pick(seats, lambda s, h=h: s.harness == h) for h in prefer)), None) or pick(seats)
+        return (
+            (seat.harness, "rotation") if seat else (agent_choice.fallback(self._quota_accounts), agent_choice.ALL_FULL)
+        )
 
-    def _quota_transfer(self, saved, profile, environ, lane, want):
+    def _quota_transfer(self, saved, profile, environ, lane, want, planned=None):
         from scripts.swarm import quota_handoff
 
+        thresholds = quota_handoff.Thresholds.from_env(environ)
         allocation = getattr(self, "_quota_allocations", {}).get(lane)
-        account = quota_handoff.successor(
-            [
-                row
-                for row in self._quota_accounts
-                if (allocation is None or allocation[row.harness])
-                and (row.harness, row.name) != (saved["harness"], saved.get("account"))
-                and (not want or row.harness == want)
-            ],
-            not plugins.claude_only(profile),
-            quota_handoff.Thresholds.from_env(environ),
+        predecessor = (saved["harness"], saved.get("account"))
+        harnesses = (want,) if want else ("claude", "codex") if not plugins.claude_only(profile) else ("claude",)
+
+        def blocked(row):
+            if row.harness not in harnesses:
+                return f"is not a {harnesses[0]} account"
+            if allocation is not None and not allocation[row.harness]:
+                return f"has no seat in the {lane} allocation"
+            return quota_handoff.exclusion(row, thresholds, predecessor)
+
+        candidates = [row for row in self._quota_accounts if not blocked(row)]
+        preferred = [row for row in candidates if planned and row.harness == planned[0]]
+        order = agent_choice.preferring(saved["harness"])
+        account = (
+            next((row for row in preferred if row.name == planned[1]), None)
+            or quota_handoff.successor(preferred, order, thresholds)
+            or quota_handoff.successor(candidates, order, thresholds)
         )
         if account is None:
-            raise SpawnError(f"no {saved['harness']} account has placeable quota seats", "unavailable")
+            raise SpawnError(
+                quota_handoff.refusal(predecessor, harnesses, self._quota_accounts, blocked), "unavailable"
+            )
         return {
             **saved,
             "harness": account.harness,
             "account": account.name,
-            **({"model": ""} if account.harness != saved["harness"] else {}),
+            **(
+                {"model": "", "effort": effort_range.named(account.harness, saved["effort"])}
+                if account.harness != saved["harness"]
+                else {}
+            ),
         }
 
     def _saved_choice(self, saved, profile, quota_transfer, environ):
@@ -297,15 +434,20 @@ class HerdrRuntime:
         planned = getattr(self, "_quota_tasks", {}).get(task_id)
         return getattr(self, "_quota_task_accounts", {}).get(task_id) if planned == agent else None
 
+    def _planned_slot(self, task_id):
+        harness = getattr(self, "_quota_tasks", {}).get(task_id)
+        return (harness, getattr(self, "_quota_task_accounts", {}).get(task_id)) if harness else None
+
     def _quota_account(self, agent, preferred, excluded):
-        from scripts.swarm.capacity import seats
+        from scripts.swarm.capacity import offered, pick
 
         eligible = [row for row in self._quota_eligible(agent) if row.name != excluded]
         row = next((row for row in eligible if row.name == preferred), None)
         if row is None:
-            seat = session_bands.pick(seats(eligible))
+            rows = [row for row in self._quota_accounts if row.harness == agent]
+            seat = pick(offered(rows, {(row.harness, row.name) for row in rows if row not in eligible}))
             if seat is None:
-                raise SpawnError(f"no {agent} account has placeable quota seats", "unavailable")
+                raise SpawnError(self._quota_refusal(agent), "unavailable")
             row = next(row for row in eligible if row.name == seat.account)
         return row
 
@@ -330,9 +472,7 @@ class HerdrRuntime:
             raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}", "unsupported")
         quota_transfer = (task.get("handoff_envelope") or {}).get("reason") == "quota"
         saved = (
-            self._quota_transfer(
-                saved, profile, environ, lane, want or getattr(self, "_quota_tasks", {}).get(task["id"])
-            )
+            self._quota_transfer(saved, profile, environ, lane, want, self._planned_slot(task["id"]))
             if saved and quota_transfer
             else saved
         )
@@ -344,7 +484,7 @@ class HerdrRuntime:
             requested = saved["harness"]
             agent, reason = self._saved_choice(saved, profile, quota_transfer, environ)
         else:
-            agent, reason = self._rotation(requested, environ)
+            agent, reason = self._rotation(requested, environ, profile_choice.preferred(profile))
         if reason == agent_choice.ALL_FULL and not hasattr(self, "_quota_accounts"):
             raise SpawnError(reason, "unavailable")
         planned = getattr(self, "_quota_tasks", {}).get(task["id"])
@@ -378,7 +518,8 @@ class HerdrRuntime:
             picked = timing.call(model_pick.pick, agent, {} if quota_transfer else chosen, task, environ)
         else:
             picked = _lane_default(lane, agent, {} if quota_transfer else chosen)
-        mode = PLAN_MODE if (lane, agent) == ("plan", "claude") else []
+        picked = replace(picked, effort=saved["effort"]) if saved else picked
+        mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
         route = ["--route", saved["account"]] if saved.get("account") else []
         account = None
         if hasattr(self, "_quota_accounts"):
@@ -394,10 +535,17 @@ class HerdrRuntime:
                 *argv,
                 "--",
                 *route,
-                *_model_args(agent, picked.__dict__, environ, effort_range.of(config), preserve=bool(saved)),
+                *_model_args(
+                    agent,
+                    picked.__dict__,
+                    environ,
+                    effort_range.of(config),
+                    preserve=preserves_effort(bool(saved), lane),
+                ),
                 *mode,
             ],
             predecessor=_predecessor(task),
+            controller_epoch=task.get("controller_epoch"),
         )
         self._reserve_account(account, lane, agent)
         return replace(
@@ -413,6 +561,8 @@ class HerdrRuntime:
         """Reopen the agent's own conversation in a new pane of the same name; SpawnError unless herdr shows it there."""
         if not agent.profile:
             raise SpawnError("unsupported resume: original profile is missing", "unsupported")
+        if agent.harness not in effort_range.EFFORTS:
+            raise SpawnError(f"unsupported resume harness: {agent.harness}", "unsupported")
         argv = self._argv(
             config,
             agent.name,
@@ -431,7 +581,11 @@ class HerdrRuntime:
         )
         route = ["--route", agent.account] if agent.account else []
         model = _model_args(
-            agent.harness, picked.__dict__, dict(os.environ), effort_range.of(config), preserve=bool(agent.effort)
+            agent.harness,
+            picked.__dict__,
+            dict(os.environ),
+            effort_range.of(config),
+            preserve=preserves_effort(bool(agent.effort), agent.lane),
         )
         argv += ["--resume", agent.conversation_id, "--", *route, *model]
         placed = self._launch(config, agent.lane, agent.task, agent.name, argv)
@@ -449,6 +603,12 @@ class HerdrRuntime:
             profile_decision={**agent.profile_decision, **placed.profile_decision},
             overlays=agent.overlays,
         )
+
+    def operator(self, config, name, profile, text):
+        """Open a claude session for the operator in the swarm's space, bound to the swarm with no task or lane slot."""
+        argv = self._argv(config, name, "claude", text, f"{name}.md", profile)
+        model = _model_args("claude", model_pick.frontier("claude").__dict__, dict(os.environ), effort_range.of(config))
+        return self._launch(config, naming.OPERATOR, "", name, [*argv, "--", *model])
 
     def _holds(self, pane_id, conversation_id):
         for _ in range(RESUME_CHECKS):
@@ -477,7 +637,11 @@ class HerdrRuntime:
         argv += [arg for overlay in worn for arg in ("--overlay", overlay)]
         return [*argv, "--profile", profile, "--prompt-file", str(path)]
 
-    def _launch(self, config, lane, task_id, name, argv, predecessor=None):
+    def _launch(self, config, lane, task_id, name, argv, predecessor=None, controller_epoch=None):
+        if controller_epoch is not None:
+            from scripts.swarm import lease
+
+            lease.require_epoch(connect(), config.slug, controller_epoch)
         agent = argv[argv.index("--agent") + 1]
         launched_at = int(time.time() * 1000)
         load_at_launch = list(os.getloadavg())
@@ -555,11 +719,16 @@ class HerdrRuntime:
         items, facts = sessions(), {}
         self._binding_pids = {}
         for agent in agents:
+            if agent.runtime_backend != "local":
+                continue
             session = live_binding.bound_session(agent, items)
+            validated = agent.profile_decision.get("validation", {}).get("pid")
             if session is not None:
                 facts[agent.name] = live_binding.read(agent, session.process.pid)
                 self._binding_pids[agent.name] = str(session.process.pid)
-            elif agent.profile_decision.get("validation", {}).get("pid"):
+                if validated and validated != session.process.pid and facts[agent.name].get("process") is not False:
+                    facts[agent.name]["rebound"] = session.process.pid
+            elif validated:
                 facts[agent.name] = {"process": False}
                 self._binding_pids[agent.name] = None
         return facts
@@ -580,7 +749,10 @@ class HerdrRuntime:
         """End the launch process recorded at spawn with its group and every process from the task's scratch homes,
         then close the pane; the agent's name alone never selects a process."""
         pid = agent.profile_decision.get("validation", {}).get("pid") or self._binding_pids.get(agent.name)
-        outcome = self.end(agent.name, pid, list(homes))
+        return self.retire_process(agent, pid, homes)
+
+    def retire_process(self, agent, pid, homes=(), start=0):
+        outcome = self.end(agent.name, pid, list(homes), start)
         if outcome.refusal:
             self.refusals[agent.name] = {"process": outcome.process, "refusal": outcome.refusal}
             return False
@@ -636,7 +808,7 @@ class HerdrRuntime:
         try:
             capture = self.herdr(["pane", "read", found["pane_id"], "--source", "visible", "--format", "ansi"])
         except Exception:
-            return PaneObservation(state)
+            return PaneObservation("unknown" if agent.lane == MASTER else state)
         text = capture.get("text", "")
         title = selection_prompt(text)
         if title or state == "blocked":

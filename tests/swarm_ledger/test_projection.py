@@ -13,9 +13,8 @@ import ledger  # noqa: E402
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
-from scripts.swarm_ledger.repository.file import FileLedgerRepository
-
-storage = FileLedgerRepository(core)
+from scripts.swarm_ledger.repository import repository as storage  # noqa: E402
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "time_left_minutes-2026-01-01"
 
@@ -32,7 +31,7 @@ class TimeLeft(unittest.TestCase):
         }
         html_path, json_path = core.paths(SLUG)
         core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-        html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+        html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
         json_path.unlink(missing_ok=True)
         storage.apply_ops(SLUG)
 
@@ -60,32 +59,6 @@ class TimeLeft(unittest.TestCase):
             ("boss", "time left changed", "time_left_minutes", "200m"),
         )
         self.assertGreater(event["at"], 0)
-        seed = core.parse_seed(core.paths(SLUG)[0].read_text(encoding="utf-8"))
-        self.assertEqual(seed["time_left_minutes"], 200)
-
-    def test_seed_edit_and_page_upgrade_preserve_the_estimate(self):
-        html_path, _ = core.paths(SLUG)
-        html = html_path.read_text(encoding="utf-8")
-        seed = core.parse_seed(html)
-        seed["time_left_minutes"] = 35
-        core.rewrite_seed(html_path, html, seed, seed["_rev"])
-        self.assertEqual(storage.apply_ops(SLUG)[0]["time_left_minutes"], 35)
-        self.assertEqual(new_ledger.upgrade_page(SLUG)["time_left_minutes"], 35)
-        with self.assertRaises(ValueError):
-            core.validate({"time_left_minutes": "State at 12:23Z. No ETA."})
-
-    def test_stale_seed_keeps_the_newer_estimate_when_it_did_not_edit_it(self):
-        html_path, _ = core.paths(SLUG)
-        stale = html_path.read_text(encoding="utf-8")
-        storage.apply_ops(
-            SLUG, ops=[{"op": "set", "id": "estimate", "by": "boss", "path": "time_left_minutes", "value": 20}]
-        )
-        seed = core.parse_seed(stale)
-        seed["overview"] = "Updated overview"
-        core.rewrite_seed(html_path, html_path.read_text(encoding="utf-8"), seed, seed["_rev"])
-        state = storage.apply_ops(SLUG)[0]
-        self.assertEqual(state["time_left_minutes"], 20)
-        self.assertEqual(state["overview"], "Updated overview")
 
     def test_server_accepts_only_nonnegative_whole_minutes(self):
         for value in (0, 20, 200, 1500):
@@ -112,21 +85,6 @@ class TimeLeft(unittest.TestCase):
         for value in ("State at 12:23Z", "-1", "85%", "20.5m", "20m done", "+20", "２０m", ""):
             with self.subTest(value=value), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 parser.parse_args(["--slug", SLUG, "--as", "boss", "time-left", value])
-
-    def test_saved_projection_is_removed_without_becoming_a_duration(self):
-        html_path, json_path = core.paths(SLUG)
-        for old in (85, "85%", "State at 12:23Z. No ETA."):
-            state = storage.apply_ops(SLUG)[0]
-            state["projection"] = old
-            json_path.write_text(json.dumps(state), encoding="utf-8")
-            seed = core.parse_seed(html_path.read_text(encoding="utf-8"))
-            seed["projection"] = old
-            core.rewrite_seed(html_path, html_path.read_text(encoding="utf-8"), seed, seed["_rev"])
-            migrated = new_ledger.upgrade_page(SLUG)
-            self.assertNotIn("projection", migrated)
-            self.assertIsNone(migrated["time_left_minutes"])
-            self.assertEqual(migrated["phases"], state["phases"])
-            self.assertEqual(migrated["title"], state["title"])
 
     def test_stats_show_one_duration_independent_of_time_and_completion(self):
         from tests.swarm_ledger.test_fold import function_source

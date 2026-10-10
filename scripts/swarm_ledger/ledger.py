@@ -32,6 +32,7 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   edit chat|ITEM ENTRY TEXT           rewrite an entry (yours; the orchestrator: any agent's)
   delete chat|ITEM ENTRY...           delete entries (yours; the orchestrator: any agent's)
   audit                               list every agent text the filter refuses, the cleanup worklist
+  show                                print the whole ledger as JSON: every task, note, answer and comment (no --as needed)
   priority add ITEM TEXT              ask the operator: only what blocks on his answer, at most 20 words; ITEM may
                                       be phases/<id>, questions/<id>, followups/<id> or tasks/<id>. Unanswered
                                       questions, blocked tasks, merge approvals and flagged follow-ups show on their own
@@ -39,16 +40,18 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   alert list | claim ID | close ID OUTCOME
                                       list open alerts, claim one, or close it done saying what was done
   relay ITEM TEXT --quote WORDS       post the operator's decision from this pane as his answer to questions/<id>
-                                      or his comment on another item; WORDS must be in an operator prompt or
-                                      AskUserQuestion answer this session recorded in the last hour
+                                      or his comment on another item; WORDS, of any length, must be in an operator
+                                      prompt or AskUserQuestion answer any master or planner of this swarm recorded
   answer ITEM TEXT                    the master answers questions/<id> as itself at delegate or full autonomy,
                                       which clears it from Priorities; members cannot answer
   time-left DURATION                 record remaining time, e.g. "3h 20m"
   claim ITEM                          take ownership of an item's operator events
   task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS] [--gain N] [--profile NAME]
-           [--kind K] [--must M --check C --judge J] [--scaffold] [--artifact] [--rank R] [--difficulty D]
+           [--kind K] [--must M --check C --judge J] [--push] [--scaffold] [--artifact] [--rank R] [--difficulty D]
                                       add a swarm task; IDS and AREAS are comma separated; K is code (default), ci,
                                       ops, troubleshoot, tune or research; M, C, J form its proof contract;
+                                      --push marks a proof that needs a pushed branch and a CI run, so the task
+                                      always gets the engineer profile, never qa;
                                       --scaffold creates its work folder (steering, progress, proof) in the same call;
                                       --artifact marks a file the operator asked for, so the task may publish it;
                                       R is the queue rank, urgent, high, normal (default) or low, next meaning
@@ -56,9 +59,15 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       critical path; only the master, a planner or the operator sets it;
                                       D is the task size, S, M or L, recorded as the operator's choice
   task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on, territory, kind, rank,
-                                      difficulty (S, M or L) or artifact (yes or no) of a task;
+                                      difficulty (S, M or L), artifact (yes or no) or plan_slice of a task;
+                                      phase moves it to another phase, from the master or a planner;
+                                      plan_slice computes its plan lines from the published plan;
+                                      follow_up=yes marks it a follow up and clears its slice and plan lines,
+                                      refused while the same write names a plan_slice or slice;
                                       proof.KEY=VALUE and contract.KEY=VALUE pairs form one object, e.g.
-                                      proof.command=C proof.output=O
+                                      proof.command=C proof.output=O; contract pairs update only the keys they
+                                      name, e.g. contract.push=yes
+  plan-backfill                       compute missing plan lines for linked unfinished tasks; list missing slices
   prompt                              print the join paragraph for a launch prompt
   url                                 print the ledger page link for the operator (no --as needed)
 
@@ -71,10 +80,14 @@ LEDGER_AUTOSTART=0 (never start a server on a failed request).
 """
 
 import argparse
+import collections
+import functools
+import itertools
 import json
 import os
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -94,49 +107,110 @@ import ledger_workspace  # noqa: E402
 import watch_ledger  # noqa: E402
 
 from scripts.gates.base import Who
-from scripts.swarm_ledger import ledger_phases
+from scripts.swarm_ledger import ledger_phases, ledger_plans, ledger_task_duplicates
 from scripts.swarm_ledger.repository import repository
 
-BASE = ledger_link.base()
+BASE = "" if ledger_link.remote() else ledger_link.base()
+REMOTE_READ_ATTEMPTS = 3
+REMOTE_READ_PAUSE = 0.5
+REQUEST_TIMEOUT = 10
+CREDENTIAL_REFUSED = '"Missing or wrong ledger credential"'
+AUTH_FAILURES = collections.Counter()
+SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
 OBJECT_FORMS = {
     "proof": (ledger_kinds.PROOF_KEYS, "proof.evidence=E proof.output=O"),
-    "contract": (ledger_kinds.CONTRACT_KEYS, "contract.must=M contract.check=C"),
+    "contract": (ledger_kinds.CONTRACT_KEYS + ledger_kinds.CONTRACT_FLAGS, "contract.must=M contract.check=C"),
 }
 
 
+def base():
+    return BASE or ledger_link.base()
+
+
 def credentials(slug, service=False):
-    token = core.read_token(repository.read_page(slug)) or ""
     who = Who.from_env()
+    if ledger_link.remote():
+        controller = os.environ.get("AGENTIHOOKS_CONTROLLER_CREDENTIAL")
+        if controller and not who.pinned:
+            return {"X-Controller-Credential": controller}
+        if service:
+            sys.exit("a remote ledger client cannot make service writes; the operator credential stays on its host")
+        if not who.pinned:
+            raise unauthenticated(
+                "a remote ledger client needs a pinned agent identity; the operator credential stays on its host"
+            )
+        token = os.environ.get("AGENTIHOOKS_LEDGER_AGENT_TOKEN") or launch_token(slug, who.name)
+        return {"X-Ledger-Token": token, "X-Ledger-Agent": who.name}
+    token = repository.token(slug) or ""
     if service or not who.pinned:
         return {"X-Ledger-Token": token}
     return {"X-Ledger-Token": authority.agent_token(token, slug, who.name), "X-Ledger-Agent": who.name}
 
 
-def request(slug, ops=None, service=False, timeout=10):
+def launch_token(slug, name):
     from scripts.swarm_ledger.api.client import ResourceClient
 
-    client = ResourceClient(BASE, credentials(slug, service), timeout)
+    credential = os.environ.get("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL")
+    if not credential:
+        raise unauthenticated(
+            "a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential "
+            "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL from agentihooks hive join"
+        )
+    client = ResourceClient(base(), {"X-Hive-Credential": credential, "X-Ledger-Agent": name}, REQUEST_TIMEOUT)
+    try:
+        return client.request(slug, "agent-token", {})["data"]["token"]
+    except urllib.error.HTTPError as exc:
+        if exc.code not in (401, 403):
+            raise
+        raise unauthenticated(f"the ledger server refused the hive credential: {exc.code}") from None
+
+
+def request(slug, ops=None, service=False, timeout=REQUEST_TIMEOUT):
+    from scripts.swarm_ledger.api.client import ResourceClient
+
+    client = ResourceClient(base(), credentials(slug, service), timeout)
     return client.snapshot(slug) if ops is None else client.mutate(slug, ops)
 
 
 def resource(slug: str, path: str, service: bool = False, collection: bool = False) -> dict | list:
     from scripts.swarm_ledger.api.client import ResourceClient
 
-    client = ResourceClient(BASE, credentials(slug, service))
-    return client.collection(slug, path) if collection else client.request(slug, path)["data"]
+    def read():
+        client = ResourceClient(base(), credentials(slug, service), REQUEST_TIMEOUT)
+        return client.collection(slug, path) if collection else client.request(slug, path)["data"]
+
+    return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote() else read()
 
 
 def export(slug: str, service: bool = False) -> dict:
     from scripts.swarm_ledger.api.client import ResourceClient
 
-    return ResourceClient(BASE, credentials(slug, service)).request(slug, "export", {})["data"]
+    def read():
+        return ResourceClient(base(), credentials(slug, service), REQUEST_TIMEOUT).request(slug, "export", {})["data"]
+
+    return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote() else read()
 
 
 class Missing(SystemExit):
     pass
 
 
+class Unauthenticated(SystemExit):
+    pass
+
+
+def unauthenticated(reason):
+    AUTH_FAILURES[reason] += 1
+    return Unauthenticated(f"unauthenticated: {reason}")
+
+
+def ledger_remote_auth_failures_total() -> int:
+    return sum(AUTH_FAILURES.values())
+
+
 def call(slug, ops=None, service=False):
+    if ledger_link.remote():
+        return remote_call(slug, ops, service)
     try:
         return request(slug, ops, service)
     except urllib.error.HTTPError as exc:
@@ -153,7 +227,38 @@ def call(slug, ops=None, service=False):
     except urllib.error.HTTPError as exc:
         sys.exit(f"server refused: {exc.code} {exc.read().decode(errors='replace')}")
     except OSError as exc:
-        sys.exit(f"ledger server not answering on {BASE}: {exc}")
+        sys.exit(f"ledger server not answering on {base()}: {exc}")
+
+
+def remote_call(slug, ops, service):
+    deliver = functools.partial(request, slug, ops, service)
+    try:
+        return retried(deliver, REMOTE_READ_ATTEMPTS if ops is None else 1)
+    except urllib.error.HTTPError as exc:
+        sys.exit(f"server refused: {exc.code} {refusal_text(exc)}")
+    except OSError as exc:
+        sys.exit(f"ledger server not answering on {base()}: {exc}")
+
+
+def retried(read, attempts):
+    for attempt in itertools.count(1):
+        try:
+            return read()
+        except urllib.error.HTTPError as exc:
+            if exc.code == 403 and CREDENTIAL_REFUSED in refusal_text(exc):
+                raise unauthenticated("the ledger server refused the credential") from None
+            if exc.code < 500 or attempt >= attempts:
+                raise
+        except OSError:
+            if attempt >= attempts:
+                raise
+        time.sleep(REMOTE_READ_PAUSE * attempt)
+
+
+def refusal_text(exc):
+    if not hasattr(exc, "ledger_text"):
+        exc.ledger_text = exc.read().decode(errors="replace")
+    return exc.ledger_text
 
 
 def op(kind, args, /, **fields):
@@ -185,6 +290,9 @@ def send(args, kind, /, **fields):
     ops = [op(kind, args, **fields)]
     state = call(args.slug, ops)
     refused(state, ops)
+    for warning in state.get("_meta", {}).get("warnings", []):
+        if warning.startswith(ledger_task_duplicates.UNCHECKED_PREFIX):
+            print(warning, file=sys.stderr)
     return state
 
 
@@ -205,6 +313,15 @@ def cmd_leave(args):
 def cmd_events(args):
     for event in mine(call(args.slug), args.name):
         print(watch_ledger.line(event))
+
+
+def cmd_show(args):
+    print(SHOW_JSON(call(args.slug)))
+
+
+def cmd_tree(args):
+    for row in resource(args.slug, f"hierarchy/subtree/{args.node}" if args.node else "hierarchy", collection=True):
+        print(f"{'  ' * row['depth']}{row['node']}  {row['state']}")
 
 
 def cmd_status(args):
@@ -230,7 +347,14 @@ def cmd_ack(args):
 
 def cmd_say(args):
     text = (sys.stdin.read() if args.text == "-" else args.text).strip()
-    op = {"op": "add", "thread": "chat", "id": f"m-{uuid.uuid4().hex[:10]}", "text": text, "by": args.name}
+    op = {
+        "op": "add",
+        "thread": "chat",
+        "id": f"m-{uuid.uuid4().hex[:10]}",
+        "text": text,
+        "by": args.name,
+        "to": "operator",
+    }
     if args.long:
         op["long"] = True
     posted(call(args.slug, [op]), [op])
@@ -252,7 +376,7 @@ def upload_artifact(slug: str, name: str, path: str, request: dict) -> dict:
 
 def upload(slug: str, name: str, path: str, route: str, extra: dict) -> dict:
     req = urllib.request.Request(
-        f"{BASE}/api/v1/ledgers/{slug}/uploads/{route}",
+        f"{base()}/api/v1/ledgers/{slug}/uploads/{route}",
         data=Path(path).read_bytes(),
         headers={
             **credentials(slug),
@@ -288,25 +412,46 @@ def cmd_artifact(args):
 
 
 def cmd_publish_plan(args):
+    from scripts.swarm_ledger import plan_ranges
+
     phases = comma_list(args.phase)
     if not phases:
         sys.exit("publish-plan needs --phase with the ids of the phases the plan fills")
-    title = args.title or ledger_publish.title_of(Path(args.path).read_text(encoding="utf-8"), phases)
+    text = Path(args.path).read_text(encoding="utf-8")
+    doc = call(args.slug)
+    selected = [phase for phase in doc["phases"] if phase["id"] in phases]
+    if {phase["id"] for phase in selected} != set(phases):
+        sys.exit("publish-plan names an unknown phase")
+    try:
+        ranges = plan_ranges.phase_lines(text, selected)
+        plan_ranges.require_markers(text, ranges)
+    except ValueError as exc:
+        sys.exit(str(exc))
+    title = args.title or ledger_publish.title_of(text, phases)
+    stored = {}
 
     def artifact(path, title):
         task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
         file = upload_artifact(args.slug, args.name, path, {"task": task, "title": title, "plan": True})
-        send(args, "artifact_add", task=task, title=title, file=file, plan=True)
-        return f"{BASE}/artifacts/{args.slug}/{file['id']}"
+        stored["add"] = op("artifact_add", args, task=task, title=title, file=file, plan=True)
+        stored["url"] = f"{base()}/artifacts/{args.slug}/{file['id']}"
+        stored["plan"] = ledger_plans.plan_id(file["id"])
+        return stored["url"]
 
     try:
-        url, where = ledger_publish.publish(args.path, title, args.repo, artifact)
+        issue_title = ", ".join(phase["title"] for phase in selected)
+        url, where = ledger_publish.publish(args.path, title, args.repo, artifact, issue_title=issue_title)
     except ledger_publish.PublishError as exc:
         sys.exit(str(exc))
-    ops = []
+    ops = [stored["add"], op("plan_add", args, plan=stored["plan"], title=title, artifact=stored["url"], url=url)]
     for phase in phases:
-        ops.append(op("phase_update", args, item=f"phases/{phase}", fields={"plan_url": url}))
-        text = (
+        fields = {
+            "plan_url": url,
+            "plan_ref": {"artifact": stored["url"], "lines": ranges[phase]},
+            "plan": f"plans/{stored['plan']}",
+        }
+        ops.append(op("phase_update", args, item=f"phases/{phase}", fields=fields))
+        note = (
             f"Plan published as a GitHub issue: {url}" if where == "issue" else f"Plan published on the ledger: {url}"
         )
         ops.append(
@@ -314,12 +459,25 @@ def cmd_publish_plan(args):
                 "op": "add",
                 "thread": f"phases/{phase}/comments",
                 "id": f"c-{uuid.uuid4().hex[:10]}",
-                "text": text,
+                "text": note,
                 "by": args.name,
             }
         )
-    refused(call(args.slug, ops), ops)
-    print(json.dumps({"plan_url": url, "published_to": where, "phases": phases}))
+        ops += [
+            op("slice_add", args, phase=f"phases/{phase}", anchor=anchor)
+            for anchor in plan_ranges.slice_anchors(text, ranges[phase])
+        ]
+    state = call(args.slug, ops)
+    linked = {row.get("url") for row in doc.get("plans", [])} | {phase.get("plan_url") for phase in doc["phases"]}
+    if state.get("rejected") and where == "issue" and url not in linked:
+        try:
+            ledger_publish.close_issue(url)
+        except ledger_publish.PublishError as exc:
+            print(exc, file=sys.stderr)
+    refused(state, ops)
+    tasks = ledger_plans.resliced(doc["tasks"], state["tasks"])
+    reslice = {"tasks": tasks} if any(tasks.values()) else {}
+    print(json.dumps({"plan_url": url, "published_to": where, "phases": phases, **reslice}))
 
 
 def cmd_plan(args):
@@ -414,7 +572,7 @@ def cmd_relay(args):
 
     if not ledger_relay.verified(args.name, args.quote):
         sys.exit(
-            "relay refused: the quote is not in an operator prompt or answer this session recorded in the last hour"
+            "relay refused: the quote is not in an operator prompt or answer any master or planner of this swarm recorded"
         )
     send(args, "relay", item=args.item, text=args.text, quote=args.quote)
     print(json.dumps({"relayed": True, "item": args.item}))
@@ -497,6 +655,18 @@ def cmd_claim(args):
     print(json.dumps({"claimed": args.item}))
 
 
+def cmd_plan_backfill(args):
+    from scripts.swarm_ledger import plan_backfill
+
+    plan_backfill.run(args)
+
+
+def cmd_hierarchy(args) -> None:
+    from scripts.swarm_ledger import hierarchy_backfill
+
+    hierarchy_backfill.run(args)
+
+
 def cmd_task(args):
     if args.action == "add":
         if args.id == "-":
@@ -509,21 +679,20 @@ def cmd_task(args):
         }
         if args.gain is not None:
             lists["gain"] = args.gain
-        contract = {k: getattr(args, k) for k in ("must", "check", "judge") if getattr(args, k)}
+        contract = {k: getattr(args, k) for k in ("must", "check", "judge", "push") if getattr(args, k)}
         if contract:
             lists["contract"] = contract
-        if args.kind:
-            lists["kind"] = args.kind
-        if args.artifact:
-            lists["artifact"] = True
-        if args.profile:
-            lists["profile"] = args.profile
-        if args.rank:
-            lists["rank"] = args.rank
-        if args.difficulty:
-            lists["difficulty"] = args.difficulty
-        if args.plan:
-            lists["plan_url"] = args.plan
+        lists.update((key, True) for key in ("artifact", "follow_up") if getattr(args, key))
+        options = (
+            ("kind", args.kind),
+            ("profile", args.profile),
+            ("rank", args.rank),
+            ("difficulty", args.difficulty),
+            ("plan_url", args.plan),
+            ("not_duplicate", args.not_duplicate),
+            ("plan_slice", args.plan_slice),
+        )
+        lists.update((key, value) for key, value in options if value)
         if args.scaffold:
             task = {"id": args.id, "title": title, "description": args.description, "phase": args.phase, **lists}
             doc = call(args.slug) if args.kind == "plan" else None
@@ -550,10 +719,10 @@ def cmd_task(args):
     for key in ("depends_on", "territory", "overlays"):
         if key in fields:
             fields[key] = comma_list(fields[key])
-    if "artifact" in fields:
-        if fields["artifact"] not in ("yes", "no"):
-            sys.exit("task set takes artifact=yes or artifact=no")
-        fields["artifact"] = fields["artifact"] == "yes"
+    for key in [key for key in ("artifact", "follow_up") if key in fields]:
+        if fields[key] not in ("yes", "no"):
+            sys.exit(f"task set takes {key}=yes or {key}=no")
+        fields[key] = fields[key] == "yes"
     if "difficulty_confidence" in fields:
         try:
             fields["difficulty_confidence"] = float(fields["difficulty_confidence"])
@@ -626,6 +795,9 @@ def build_parser():
     artifact.add_argument("--task", help="task id; default AGENTIHOOKS_SWARM_TASK, empty for none")
     artifact.add_argument("--request", help="id of the operator chat line or comment that asked for the file")
     sub.add_parser("artifact-purge")
+    sub.add_parser("plan-backfill", help="compute missing plan lines for linked unfinished tasks")
+    hierarchy = sub.add_parser("hierarchy").add_subparsers(dest="action", required=True)
+    hierarchy.add_parser("backfill").add_argument("--apply", action="store_true")
     phase = sub.add_parser("phase")
     phase.add_argument("id")
     phase.add_argument("state")
@@ -654,6 +826,10 @@ def build_parser():
     delete.add_argument("target")
     delete.add_argument("entries", nargs="+")
     sub.add_parser("audit")
+    sub.add_parser("show")
+    sub.add_parser("tree", help="print a plan, phase, slice or task and everything under it, with states").add_argument(
+        "node", nargs="?", help="plans/<id>, phases/<id>, slices/<id> or tasks/<id>; default the whole ledger"
+    )
     priority = sub.add_parser("priority")
     priority.add_argument("action", choices=["add", "clear"])
     priority.add_argument("values", nargs="*")
@@ -690,14 +866,28 @@ def build_parser():
     task.add_argument("--check", default="", help="contract: how it is checked")
     task.add_argument("--judge", default="", help="contract: who judges it")
     task.add_argument(
+        "--push",
+        action="store_const",
+        const="yes",
+        default="",
+        help="contract: the proof needs a pushed branch and a CI run, so never qa",
+    )
+    task.add_argument(
         "--scaffold", action="store_true", help="create the task's work folder now and store it as its workspace"
     )
     task.add_argument("--artifact", action="store_true", help="the operator asked this task for a file to review")
     task.add_argument("--profile")
     task.add_argument("--overlays", help="comma separated overlays this task's agent wears, at most three")
     task.add_argument("--rank", help="queue rank: urgent, high, normal (default) or low; next means urgent")
+    task.add_argument("--plan-slice", default="", help="task slice anchor; computes its plan lines")
+    task.add_argument(
+        "--follow-up", action="store_true", help="a follow up task: no slice in a sliced phase, judged by its text"
+    )
     task.add_argument("--plan", default="", help="link to the published plan; default the phase's plan link")
     task.add_argument("--difficulty", choices=ledger_tasks.DIFFICULTIES, help="task size: S, M or L")
+    task.add_argument(
+        "--not-duplicate", default="", help="why the task differs from the one it resembles; skips the duplicate check"
+    )
     publish = sub.add_parser("publish-plan")
     publish.add_argument("path")
     publish.add_argument("--phase", required=True, help="comma separated ids of the phases the plan fills")
@@ -718,7 +908,7 @@ def main():
     if text := refusal(args.name, Who.from_env()):
         sys.exit(f"agentihooks ledger: {text}")
     args.name = resolve_name(args.name) if args.name else args.name
-    if not args.slug or not (args.name or args.command == "url"):
+    if not args.slug or not (args.name or args.command in ("url", "show", "tree", "hierarchy")):
         sys.exit("--slug and --as are required")
     globals()[f"cmd_{args.command.replace('-', '_')}"](args)
 

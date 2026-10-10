@@ -168,6 +168,7 @@ operator home:
 |---|---|
 | `AGENTS.md` | `../claude/CLAUDE.md` (persona and rules) |
 | `skills/<name>` | `../claude/skills/<name>` |
+| `skills/<replacement>` | the Codex replacement of a Claude plugin the chain enables: the installed plugin's own skills, a skill fetched into `~/.agentihooks/codex-skills/`, or a chain layer's `.codex/skills/<name>`. A Claude skill of the same name wins over a plugin or fetched skill; a chain layer skill wins over both |
 | `skills/<command>/SKILL.md` | hardlink to each Claude command with frontmatter, invoked as `$<command>`; a skill of the same name wins |
 | `auth.json`, `sessions`, `history.jsonl`, `session_index.jsonl`, `hooks.json` | the operator `~/.codex` |
 | `config.toml` | generated: the profile's native settings, `sqlite_home` = operator home, the operator's hook trust rekeyed to this home's `hooks.json`, the operator's `[mcp_servers]` limited to the profile's servers, and `~/.agents/skills` switched off |
@@ -191,6 +192,20 @@ is left alone with a warning.
 **Permission translation.** `permissions.defaultMode: bypassPermissions` →
 `approval_policy = "never"`, `sandbox_mode = "danger-full-access"`; anything else
 → `"on-request"` / `"workspace-write"`.
+
+**Plugins.** Codex has no Claude plugins. A profile whose own chain layers enable
+a plugin with no Codex replacement is Claude only, and the swarm never spawns it
+on Codex; each replacement and the swarm rule are listed in
+[the swarm pillar](../pillars/swarm.md#templates). The replacement paths are part
+of the render stamp, so a fetch that adds one re-renders the home.
+
+**Planner sandbox.** A swarm planner on Codex launches with
+`-c permissions.planner={extends=":read-only", network={enabled=true}, filesystem={…}}`
+and `-c default_permissions="planner"`. The filesystem grants write the ledger
+folder, `~/.agentihooks/swarm` and `~/scratchpad` only, so the repository stays read
+only while `agentihooks ledger` (which locks a file in the ledger folder) and
+Redis calls succeed. This overrides the role's `sandbox_mode = "danger-full-access"`
+for that launch only; every other role keeps it.
 
 **Degrades.** Codex has no command-backed statusline (upstream openai/codex
 #20140), so `tui.status_line` gets the closest built-in items and the `ah:`

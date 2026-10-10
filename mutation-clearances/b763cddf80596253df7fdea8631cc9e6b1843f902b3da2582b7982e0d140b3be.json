@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__append__mutmut_16:26ad03cf24fd05043f7da2e24062e6fd197211e289009198f4991d7a31647e99": {
+    "reader": "Standards",
+    "reason": "Only ASCII LINES, NAME, HASH and ENTRY identifier casing changes; SQLite resolves the same schema objects and inserts unchanged bound values."
+  }
+}

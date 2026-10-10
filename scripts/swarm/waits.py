@@ -8,12 +8,13 @@ import json
 import re
 
 from scripts.inbox.store import CLOSED, InboxError
-from scripts.swarm import idle
+from scripts.swarm import idle, mutation_wait
 from scripts.swarm.store import SwarmError
 
-KINDS = ("checks", "merge", "reply", "task")
+KINDS = ("checks", "merge", "reply", "task", "mutation")
 BARE_MAX_MINUTES = 60
 CHECKED_MINUTES = 12 * 60
+FRESH_MS = 5 * 60_000
 TASK_ENDS = ("done", "blocked")
 SENDER = "swarm"
 PULL_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
@@ -33,7 +34,7 @@ def checks_resolution(held, github):
         return ""
     if pull.state != "OPEN":
         return f"pull request {target}, now {pull.state.lower()}"
-    if not pull.head:
+    if not pull.head or held.get("previous_head") == pull.head:
         return ""
     if held.get("head") != pull.head:
         held["head"] = pull.head
@@ -73,6 +74,8 @@ def target_problem(kind, target, mine, rows, get):
     """Why the target cannot be waited on, or '' when the tick can check it."""
     if kind in ("checks", "merge"):
         return "" if PULL_URL.fullmatch(target) else f"wait on {kind} needs a pull request url, not {target}"
+    if kind == "mutation":
+        return "" if mutation_wait.RUN_URL.fullmatch(target) else "wait on mutation needs an Actions run url"
     if kind == "task":
         if target == mine:
             return f"task {target} is your own task"
@@ -87,18 +90,33 @@ def target_problem(kind, target, mine, rows, get):
     return ""
 
 
-def resolution(held, rows, inbox, github):
+def merge_resolution(held, github, reread, fresh):
+    target = held["target"]
+    pull = github(target)
+    if pull is not None and pull.state == "OPEN" and not pull.queued:
+        pull = reread(target)
+    if pull is None:
+        return ""
+    if pull.state == "MERGED":
+        return f"pull request {target}, now merged"
+    if pull.state == "OPEN":
+        if pull.queued:
+            held["queued"] = True
+            return ""
+        if not pull.resolved or (fresh and not held.get("queued")):
+            return ""
+    return f"pull request {target}, now red; left the merge queue without merging; fix it and queue it again"
+
+
+def resolution(held, rows, inbox, github, reread, fresh):
     """What ended the wait, in plain words, or '' while it still holds."""
     kind, target = held["kind"], held["target"]
+    if kind == "mutation":
+        return mutation_wait.resolution(held)
     if kind == "checks":
         return checks_resolution(held, github)
     if kind == "merge":
-        pull = github(target)
-        if pull is None or (pull.state == "OPEN" and pull.queued):
-            return ""
-        if pull.state == "MERGED":
-            return f"pull request {target}, now merged"
-        return f"pull request {target}, now red; left the merge queue without merging; fix it and queue it again"
+        return merge_resolution(held, github, reread, fresh)
     if kind == "task":
         if target not in rows:
             return f"task {target}, gone from the ledger"
@@ -111,16 +129,15 @@ def resolution(held, rows, inbox, github):
     return f"message {target}, now {item.state}" if item.state in CLOSED else ""
 
 
-def end_pass(store, slug, rows, inbox, github, now_ms):
+def end_pass(store, slug, rows, inbox, github, now_ms, reread):
     ended = []
     for agent in store.agents(slug):
         held = idle.wait(store.redis, slug, agent.name)
         if agent.state == "finished" or not (held and held.get("on")):
             continue
         previous = json.dumps(held)
-        head = held["on"].get("head")
-        outcome = resolution(held["on"], rows, inbox, github)
-        if (outcome or held["on"].get("head") != head) and not _save_wait(
+        outcome = resolution(held["on"], rows, inbox, github, reread, now_ms - held["at"] < FRESH_MS)
+        if (outcome or json.dumps(held) != previous) and not _save_wait(
             store.redis, slug, agent.name, previous, held, outcome, now_ms
         ):
             continue

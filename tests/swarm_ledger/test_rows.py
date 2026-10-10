@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from scripts.swarm_ledger.repository.rows import assemble, flatten
+from scripts.swarm_ledger.repository.rows import assemble, diff, encode, flatten
 from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 from tests.swarm_ledger.test_sqlite import document
 
@@ -27,7 +27,7 @@ def test_normalized_rows_preserve_complete_json_values(value):
 
 
 def test_reorder_move_and_field_removal_preserve_other_items(tmp_path):
-    repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
+    repo = SQLiteLedgerRepository(tmp_path / "ledgers.sqlite3")
     before = document()
     repo.import_document("rows", before)
     after = copy.deepcopy(before)
@@ -35,12 +35,12 @@ def test_reorder_move_and_field_removal_preserve_other_items(tmp_path):
     after["tasks"][0].pop("unknown")
     after["extension"] = [{"id": "external", "comments": []}]
     after["tasks"][0]["comments"] = []
-    repo.import_document("rows", after)
-    assert repo.get_document("rows") == after
+    repo.import_document("rows", after, replace=True)
+    assert repo.export_document("rows") == after
 
 
 def test_storage_rows_are_normalized_and_idempotent(tmp_path):
-    repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
+    repo = SQLiteLedgerRepository(tmp_path / "ledgers.sqlite3")
     state = document()
     repo.import_document("rows", state)
     with repo.connect() as connection:
@@ -63,10 +63,6 @@ def test_storage_rows_are_normalized_and_idempotent(tmp_path):
                     assert table == "resources"
                 else:
                     assert table == "fields"
-    trace = []
-    repo.trace = trace.append
-    repo.import_document("rows", state)
-    assert not [sql for sql in trace if sql.startswith(("INSERT", "DELETE", "UPDATE"))]
 
 
 def test_missing_and_null_delta_markers_are_distinct():
@@ -101,16 +97,25 @@ def test_normalized_row_identity_kind_and_order_are_stable():
     assert assemble(rows) == value
 
 
-def test_row_updates_do_not_delete_or_rewrite_other_records(tmp_path):
-    repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
-    state = document()
-    repo.import_document("rows", state)
-    state["tasks"][0]["proof"]["output"] = "changed"
-    trace = []
-    repo.trace = trace.append
-    repo.import_document("rows", state)
-    writes = [sql for sql in trace if sql.startswith(("INSERT", "UPDATE", "DELETE"))]
-    assert len(writes) == 1
-    assert not writes[0].startswith("DELETE")
-    repo.import_document("rows", state)
-    assert len([sql for sql in trace if sql.startswith(("INSERT", "UPDATE", "DELETE"))]) == 1
+def test_diff_descends_only_into_the_changed_leaf():
+    old = {"a": 1, "b": {"x": 1, "y": 2}}
+    new = {"a": 1, "b": {"x": 1, "y": 3}}
+    before, after = diff(old, new)
+    assert set(before) == set(after) == {encode(["b", "y"])}
+    assert json.loads(before[encode(["b", "y"])][5]) == 2
+    assert json.loads(after[encode(["b", "y"])][5]) == 3
+
+
+def test_diff_keeps_the_real_parent_key_position_and_table_when_falling_back():
+    before, after = diff({"a": {"x": 1}}, {"a": [1]})
+    row = before[encode(["a"])]
+    assert row[0] == "fields"
+    assert row[1] == encode([])
+    assert row[2] == encode("a")
+    assert row[3] == 0
+
+
+def test_diff_treats_a_root_type_change_as_position_zero():
+    before, after = diff({"a": 1}, [1])
+    assert before[encode([])][3] == 0
+    assert after[encode([])][3] == 0

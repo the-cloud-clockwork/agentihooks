@@ -20,6 +20,7 @@ import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 SLUG = "swarm-panel-2026-01-01"
@@ -56,10 +57,10 @@ class SwarmPanel(unittest.TestCase):
         content = {"title": "Demo", "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
         html_path, json_path = core.paths(SLUG)
         core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-        html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+        html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
         json_path.unlink(missing_ok=True)
         core.sync(SLUG)
-        cls.token = core.read_token(html_path.read_text(encoding="utf-8"))
+        cls.token = legacy_page.stored_token(html_path)
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         cls.port = cls.httpd.server_address[1]
         threading.Thread(target=cls.httpd.serve_forever, args=(0.01,), daemon=True).start()

@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "swarm.fullname" . }}-controller
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "swarm.selector" (dict "root" . "component" "controller") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "swarm.labels" . | nindent 8 }}
+        app.kubernetes.io/component: controller
+    spec:
+      {{- include "swarm.podSecurity" . | nindent 6 }}
+      terminationGracePeriodSeconds: {{ .Values.controller.terminationGracePeriodSeconds | default 30 }}
+      initContainers:
+        - name: wait
+          image: {{ include "swarm.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "swarm.containerSecurity" . | nindent 10 }}
+          command:
+            - python
+            - -c
+            - |
+              import os, time, urllib.request
+              from scripts.swarm.store import redis_client
+              for _ in range(120):
+                  try:
+                      redis_client()
+                      urllib.request.urlopen(os.environ["LEDGER_URL"] + "/healthz", timeout=2).read()
+                      break
+                  except Exception as exc:
+                      print(f"waiting for Redis and the ledger: {exc}", flush=True)
+                      time.sleep(2)
+              else:
+                  raise SystemExit("Redis or the ledger never came up")
+          env:
+            {{- include "swarm.env" . | nindent 12 }}
+          {{- include "swarm.envFrom" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.probe.resources | nindent 12 }}
+      containers:
+        - name: controller
+          image: {{ include "swarm.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "swarm.containerSecurity" . | nindent 10 }}
+          command:
+            - sh
+            - -c
+            - >-
+              agentihooks hive controller >/dev/null
+              && . "$AGENTIHOOKS_HOME/controller/credential.env"
+              && export AGENTIHOOKS_CONTROLLER_CREDENTIAL
+              && exec agentihooks controller run
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - >-
+                  from scripts.swarm import lease; from scripts.swarm.store import connect;
+                  store = connect(); stale = [slug for slug in store.slugs() if not lease.current(store, slug)];
+                  assert not stale, f"no live controller lease for {stale}"
+            {{- toYaml .Values.controller.livenessProbe | nindent 12 }}
+          env:
+            {{- include "swarm.env" . | nindent 12 }}
+            - name: AGENTIHOOKS_HOME
+              value: /run/agentihooks
+            {{- include "swarm.extraEnv" .Values.controller.env | nindent 12 }}
+          {{- include "swarm.envFrom" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.controller.resources | nindent 12 }}
+          volumeMounts:
+            - name: home
+              mountPath: /run/agentihooks
+      volumes:
+        - name: home
+          emptyDir:
+            medium: Memory

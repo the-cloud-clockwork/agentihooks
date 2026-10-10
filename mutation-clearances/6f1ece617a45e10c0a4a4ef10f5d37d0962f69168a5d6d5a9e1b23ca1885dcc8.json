@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__migrate__mutmut_4:a87c470d8a9a163a0c6bea745f4b2320826afb532ac0b456cc9a70eb81260b96": {
+    "reader": "Standards",
+    "reason": "Only ASCII LEGACY and NAME identifier casing changes; SQLite queries the same completion-marker row with the unchanged empty-string sentinel."
+  }
+}

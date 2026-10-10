@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "fixture-claude-mcp": {"command": "python", "args": ["-m", "hooks.mcp"]}
+  }
+}

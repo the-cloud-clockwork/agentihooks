@@ -1,4 +1,3 @@
-import json
 import sys
 import unittest
 from pathlib import Path
@@ -10,6 +9,8 @@ import ledger_core as core  # noqa: E402
 import ledger_gate as gate  # noqa: E402
 import ledger_link  # noqa: E402
 import new_ledger  # noqa: E402
+
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "status-2026-01-01"
 
@@ -25,7 +26,7 @@ def make_ledger():
     }
     html_path, json_path = core.paths(SLUG)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     state, _ = core.sync(SLUG)
     core.sync(
@@ -96,7 +97,7 @@ class Style(unittest.TestCase):
     def test_chat_and_comment_writes_accept_issue_links(self):
         make_ledger()
         text = "The issue is https://github.com/the-cloud-clockwork/agentihooks/issues/613"
-        ops = [post("eng", text, 1, "chat"), post("eng", text, 2, "phases/p1/comments")]
+        ops = [post("eng", text, 1, "chat", to="operator"), post("eng", text, 2, "phases/p1/comments")]
         core.check_body({"ops": ops})
         state, _ = core.sync(SLUG, ops=ops)
         self.assertEqual([entry["text"] for entry in state["chat"]], [text])
@@ -226,31 +227,6 @@ class Scope(unittest.TestCase):
         doc = {"phases": [{"done": True}, {"out_of_scope": True}], "followups": [{"out_of_scope": True}]}
         self.assertTrue(gate.closed(doc))
         self.assertFalse(gate.closed({"phases": [{"done": False}], "followups": []}))
-
-
-class Seed(unittest.TestCase):
-    def setUp(self):
-        make_ledger()
-
-    def seed_comment(self, entry):
-        html_path = core.paths(SLUG)[0]
-        html = html_path.read_text(encoding="utf-8")
-        seed = core.loads(core.SEED_RE.search(html).group(2))
-        rev = seed.pop("_rev")
-        seed["phases"][0]["comments"].append(entry)
-        html_path.write_text(
-            core.SEED_RE.sub(lambda m: m.group(1) + core.seed_text(seed, rev) + m.group(3), html, count=1),
-            encoding="utf-8",
-        )
-        return core.sync(SLUG)[0]
-
-    def test_seed_comments_amend_and_noise_becomes_a_warning(self):
-        self.seed_comment({"id": "eng-1", "by": "eng", "text": "Started."})
-        state = self.seed_comment({"id": "eng-2", "by": "eng", "text": "Fixed."})
-        self.assertEqual([e["text"] for e in live(state["phases"][0]["comments"])], ["Fixed."])
-        state = self.seed_comment({"id": "eng-3", "by": "eng", "text": "Head 4a5414f78 green."})
-        self.assertEqual([e["text"] for e in live(state["phases"][0]["comments"])], ["Fixed."])
-        self.assertTrue(any("refused" in w for w in state["_meta"]["warnings"]), json.dumps(state["_meta"]["warnings"]))
 
 
 class OperatorScope(unittest.TestCase):

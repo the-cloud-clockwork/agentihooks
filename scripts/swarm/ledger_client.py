@@ -4,6 +4,7 @@ import sys
 import uuid
 from pathlib import Path
 
+from scripts.swarm import notice_text
 from scripts.swarm.store import SwarmError
 
 LEDGER_DIR = Path(__file__).resolve().parents[1] / "swarm_ledger"
@@ -31,6 +32,10 @@ class LedgerClient:
         self.service = service
 
     def _call(self, slug, ops=None):
+        from scripts.swarm import lease
+
+        if ops is not None and (epoch := lease.EPOCH.get()) is not None:
+            ops = [{**op, "controller_epoch": epoch} for op in ops]
         service = self.service or all(op.get("by") in SERVICE_AUTHORS for op in ops or ())
         ledger = _ledger()
         try:
@@ -51,6 +56,9 @@ class LedgerClient:
     def state(self, slug):
         return self._call(slug)
 
+    def metadata(self, slug):
+        return self._resource(slug, "metadata")
+
     def tasks(self, slug):
         return self._resource(slug, "tasks", collection=True)
 
@@ -59,6 +67,9 @@ class LedgerClient:
 
     def chat(self, slug):
         return self._resource(slug, "chat", collection=True)
+
+    def hierarchy(self, slug):
+        return self._resource(slug, "hierarchy", collection=True)
 
     def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
         guard = {"if_state": list(if_state)} if if_state else {}
@@ -71,8 +82,23 @@ class LedgerClient:
     def add_task(self, slug, fields, by):
         self._call(slug, [{**_op("task_add", by), **fields}])
 
+    def _notice(self, slug, op, kind):
+        op = {**op, "text": notice_text.plain(op["text"], kind)}
+        try:
+            self._call(slug, [op])
+        except LedgerRefused as exc:
+            print(f"swarm notice dropped, the ledger refused it: {exc}", file=sys.stderr)
+            return False
+        return True
+
+    def _write(self, slug, op, kind="comment"):
+        if op.get("by") == "swarm":
+            return self._notice(slug, op, kind)
+        else:
+            self._call(slug, [op])
+
     def comment(self, slug, task_id, text, by):
-        self._call(slug, [_op("add", by, thread=f"tasks/{task_id}/comments", text=text)])
+        self._write(slug, _op("add", by, thread=f"tasks/{task_id}/comments", text=text))
 
     def capacity_comment(self, slug: str, task_id: str, text: str, at: int) -> None:
         self.comment(slug, task_id, text, by="swarm")
@@ -80,11 +106,14 @@ class LedgerClient:
     def time_left(self, slug: str, slots: int, ci_minutes: float | None) -> None:
         self._call(slug, [_op("time_left", "swarm", slots=slots, ci_minutes=ci_minutes)])
 
+    def ack_events(self, slug: str, revision: int) -> None:
+        self._call(slug, [_op("events_ack", "swarm", rev=revision)])
+
     def set_phase(self, slug, phase_id, done, status):
         self._call(slug, [_op("set", "swarm", path=f"phases/{phase_id}/done", value=done, status=status)])
 
     def comment_phase(self, slug, phase_id, text, by):
-        self._call(slug, [_op("add", by, thread=f"phases/{phase_id}/comments", text=text)])
+        self._write(slug, _op("add", by, thread=f"phases/{phase_id}/comments", text=text))
 
     def review_phase(self, slug, phase_id, state, by="swarm", note="", override=None):
         fields = {"item": f"phases/{phase_id}", "state": state, **({"note": note} if note else {})}
@@ -93,22 +122,34 @@ class LedgerClient:
         self._call(slug, [_op("phase_review", by, **fields)])
 
     def say(self, slug, text, by=None):
-        op = _op("add", by, thread="chat", text=text)
+        op = _op("add", by, thread="chat", text=text, to="operator")
         if by is None:
             op.pop("by")
+            op.pop("to")
         self._call(slug, [op])
 
     def relay(self, slug, text, by):
-        LedgerClient(service=True)._call(slug, [_op("add", by, thread="chat", text=text)])
+        LedgerClient(service=True)._call(slug, [_op("add", by, thread="chat", text=text, to="operator")])
 
     def notify(self, slug, text):
-        self.say(slug, text, by="swarm")
+        self._call(slug, [_op("notice", "swarm", text=text)])
 
-    def followup(self, slug, text):
-        self._call(slug, [_op("add_item", "swarm", list="followups", text=text)])
+    def followup(self, slug, text, needs_operator=False):
+        flag = {"needs_operator": True} if needs_operator else {}
+        return self._write(slug, _op("add_item", "swarm", list="followups", text=text, **flag), "item")
 
     def priority(self, slug, item, text):
-        self._call(slug, [_op("priority", "swarm", item=item, text=text)])
+        return self._write(slug, _op("priority", "swarm", item=item, text=text), "priority")
+
+    def freeze(self, slug, verb, target, by=None, reason="", quote=""):
+        fields = {"target": target, **({"reason": reason} if reason else {}), **({"quote": quote} if quote else {})}
+        if verb == "unfreeze":
+            op = _op("freeze_clear", by, **fields)
+        else:
+            op = _op("freeze_set", by, verb=verb, **fields)
+        if by is None:
+            op.pop("by")
+        self._call(slug, [op])
 
     def group_tasks(self, slug, lead, members):
         self._call(slug, [_op("task_group", "swarm", item=f"tasks/{lead}", members=list(members))])
@@ -116,11 +157,15 @@ class LedgerClient:
     def ungroup_tasks(self, slug, lead):
         self._call(slug, [_op("task_ungroup", "swarm", item=f"tasks/{lead}")])
 
+    def rank_task(self, slug, task_id, rank, by, if_unranked=False):
+        guard = {"if_unranked": True} if if_unranked else {}
+        self._call(slug, [_op("task_rank", by, item=f"tasks/{task_id}", rank=rank, **guard)])
+
     def clear_priority(self, slug, priority_id, reason):
         self._call(slug, [_op("priority_clear", "swarm", target=priority_id, reason=reason)])
 
     def comment_item(self, slug, item, text):
-        self._call(slug, [_op("add", "swarm", thread=f"{item}/comments", text=text)])
+        self._write(slug, _op("add", "swarm", thread=f"{item}/comments", text=text))
 
     def mark_done(self, slug, item):
         self._call(slug, [_op("set", "swarm", path=f"{item}/done", value=True)])

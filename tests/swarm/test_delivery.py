@@ -78,6 +78,14 @@ def test_addressing_by_all_lane_and_name_skips_the_sender(store):
     assert names("sw-ci-1") == ["sw-ci-1"]
 
 
+def test_an_address_nobody_answers_to_is_refused_by_name(store):
+    from scripts.swarm.store import SwarmError
+
+    with pytest.raises(SwarmError) as refused:
+        delivery.recipients(store, "sw", "nobody", "sw-ci-1")
+    assert str(refused.value) == "nobody in swarm sw answers to nobody"
+
+
 def test_send_leaves_one_pending_inbox_item_per_recipient_from_the_real_sender(store):
     assert delivery.send(store, "sw", "merge the docs first", sender="sw-ci-1", to="eng") == ["sw-eng-1", "sw-eng-2"]
     for name in ("sw-eng-1", "sw-eng-2"):
@@ -141,6 +149,26 @@ def test_messages_left_in_the_old_outbox_move_into_the_inbox(store):
     assert inbox(store, "sw-ci-1") == [("operator", "rerun the job", "pending")]
     assert inbox(store, "sw-eng-1") == [("swarm", "no prefix here", "pending")]
     assert not store.redis.exists(outbox)
+
+
+def test_a_dropped_swarm_notice_closes_the_item_and_tells_its_sender(store):
+    box = InboxStore(store.redis)
+    item = box.send("sw-eng-1", "operator", "the docs are merged")
+    assert delivery.post(box, item, lambda: False) is False
+    closed = box.get(item.id)
+    assert (closed.state, closed.reason) == (
+        "cancelled",
+        "cancelled: refused by the ledger page: the swarm notice was dropped",
+    )
+    [notice] = box.pending_items("sw-eng-1")
+    assert notice.text == delivery.REFUSED.format(id=item.id, reason="the swarm notice was dropped")
+
+
+def test_a_shown_item_stays_open_for_its_caller(store):
+    box = InboxStore(store.redis)
+    item = box.send("sw-eng-1", "operator", "the docs are merged")
+    assert delivery.post(box, item, lambda: None) is True
+    assert box.get(item.id).state == "pending"
 
 
 def test_an_outbox_entry_stays_when_moving_it_fails(store):

@@ -1,17 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source_run="$1"
-shards="$2"
-if [[ "$source_run" != --downloaded ]]; then
-    if [[ "$GITHUB_EVENT_NAME" == push ]]; then
-        tree=$(git rev-parse 'HEAD^{tree}')
-        passed_run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=tests-passed-$tree" \
-            --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_repository_id == .workflow_run.repository_id)] | first.workflow_run.id // empty')
-        source_run="${passed_run:-$source_run}"
-    fi
-    python "$(dirname "$0")/collect.py" "$source_run" "$shards" .coverage-shards
+if [[ "${1:-}" != --downloaded ]]; then
+    echo "::error::Usage: combine.sh --downloaded <shards>"
+    exit 2
 fi
+shards="$2"
 
 reports=()
 config="$(dirname "$0")/coverage.ini"
@@ -23,6 +17,10 @@ for ((shard=1; shard<=shards; shard++)); do
     fi
     reports+=("$report")
 done
+trap 'kill "${lcov_pid:-}" "${table_pid:-}" 2> /dev/null || true' EXIT
+lcov_log=$(mktemp)
+python "$(dirname "$0")/../../tests/js_lcov.py" --captures .coverage-shards --out lcov.info > "$lcov_log" 2>&1 &
+lcov_pid=$!
 python -m coverage combine --rcfile="$config" --keep "${reports[@]}"
 table=$(mktemp)
 python -m coverage report --rcfile="$config" > "$table" &
@@ -30,3 +28,7 @@ table_pid=$!
 python -m coverage xml --rcfile="$config" -o coverage.xml
 wait "$table_pid"
 cat "$table"
+lcov_status=0
+wait "$lcov_pid" || lcov_status=$?
+cat "$lcov_log"
+exit "$lcov_status"

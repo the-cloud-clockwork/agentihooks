@@ -9,6 +9,7 @@ from dataclasses import replace
 from scripts.inbox import addresses
 from scripts.inbox.seats import is_seat
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
+from scripts.inbox.store import redelivery_ms
 from scripts.swarm import idle
 from scripts.swarm.delivery import READY, post
 from scripts.swarm.store import MASTER
@@ -55,8 +56,18 @@ def decide(item, pane, history, now_ms, window):
     wakes = steps.count(WOKEN)
     if pane in READY and wakes < MAX_WAKES and (wakes == 0 or due):
         return WOKEN
-    # The swarm only sends escalations; the item each one raises keeps its own ladder to the operator.
-    return TO_MASTER if due and item.sender != BY and not item.fyi else None
+    return (
+        TO_MASTER if due and not item.ref.startswith(("inbox-escalation:", "spawn-stall:")) and not item.fyi else None
+    )
+
+
+def raised_note(master: str, raised_id: str) -> str:
+    return f"raised to {master} as message {raised_id}"
+
+
+def raised_id(entry: dict) -> str:
+    """The master item a history entry raised, '' for any other entry."""
+    return entry["reason"].rpartition(" ")[2] if entry.get("event") == TO_MASTER else ""
 
 
 def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_QUIET_S * 1000):
@@ -66,7 +77,8 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_
     master = (boss.seat or boss.name) if boss else ""
     marks = SeenMarks(inbox.redis)
     statuses, prompted = {}, set()
-    actions = addresses.settle_unresolved(inbox, names, inbox.pending(), now_ms, window)
+    actions = [f"redelivered message {item.id}" for item in inbox.redeliver(now_ms, redelivery_ms())]
+    actions += addresses.settle_unresolved(inbox, names, inbox.pending(), now_ms, window)
     doc = None
     for item in inbox.pending():
         item = replace(item, address=inbox.names.resolve(item.address), sender=inbox.names.resolve(item.sender))
@@ -90,11 +102,11 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_
             if inbox.note(item.id, WOKEN, BY, f"prompted {receiver} to read its inbox", now_ms, held):
                 actions.append(f"woke {receiver} for message {item.id}")
         elif step == TO_MASTER and master and receiver != boss.name:
-            raised = inbox.send(BY, master, _master_text(item))
-            inbox.note(item.id, TO_MASTER, BY, f"raised to {master} as message {raised.id}", now_ms)
+            raised = inbox.send(BY, master, _master_text(item), ref=f"inbox-escalation:{item.id}")
+            inbox.note(item.id, TO_MASTER, BY, raised_note(master, raised.id), now_ms)
             actions.append(f"raised message {item.id} to {master}")
         elif step in (TO_MASTER, TO_OPERATOR):
-            if not post(inbox, item, lambda: ledger.followup(slug, _operator_text(item))):
+            if not post(inbox, item, lambda: ledger.followup(slug, _operator_text(item), needs_operator=True)):
                 actions.append(f"the ledger page refused message {item.id}, closed it")
                 continue
             inbox.note(item.id, TO_OPERATOR, BY, "shown to the operator on the ledger page", now_ms)

@@ -1,14 +1,17 @@
 from types import ModuleType
 
+from scripts.swarm_ledger import ledger_task_duplicates
+
 from . import resources, schemas
 from .errors import APIError
 
 
 class GuardedOperations:
-    def __init__(self, payload: dict, budget: object, core: ModuleType) -> None:
+    def __init__(self, payload: dict, budget: object, core: ModuleType, fence=None) -> None:
         self.payload = payload
         self.budget = budget
         self.core = core
+        self.fence = fence
         self.checked = False
         self.results = {}
         self.digest = resources.revision({"ops": payload["ops"], "changes": payload.get("changes", [])})
@@ -32,10 +35,20 @@ class GuardedOperations:
                 raise APIError(428, "revision_required", "Every changed resource needs an expected revision")
             actual = resources.resource_revision({**doc, "_meta": ctx.meta}, path)
             if expected != actual:
-                raise APIError(409, "revision_conflict", "Resource changed since the expected revision")
+                raise APIError(409, "revision_conflict", "Resource changed since the expected revision", {"path": path})
         self.checked = True
 
+    def check_controller(self, op: dict) -> None:
+        from scripts.swarm.store import SwarmError
+
+        if "controller_epoch" in op:
+            try:
+                self.fence(op["controller_epoch"])
+            except SwarmError as exc:
+                raise APIError(409, "stale_controller", str(exc)) from None
+
     def apply(self, doc: dict, op: dict, ctx: object, apply_op: object) -> bool:
+        self.check_controller(op)
         if not self.checked:
             self.check(doc, ctx)
         if op["id"] in self.results:
@@ -44,6 +57,7 @@ class GuardedOperations:
         accepted = (
             not self.core.apply_changes(doc, changes, ctx) if changes else self.budget.apply(doc, op, ctx, apply_op)
         )
+        self.check_controller(op)
         self.results[op["id"]] = bool(accepted)
         receipts = ctx.meta.setdefault("api_operations", {})
         receipts[self.payload["operation_id"]] = {"digest": self.digest, "results": dict(self.results)}
@@ -54,7 +68,7 @@ class GuardedOperations:
 
 
 def apply(server: ModuleType, slug: str, principal: str, payload: dict) -> dict:
-    doc = server.repository.get_document(slug, reconcile=False)
+    doc = server.repository.get_document(slug)
     operations = schemas.check_operations(payload, server.core, tuple(t["id"] for t in doc.get("tasks", [])))
     refusals = [reason for op in operations if (reason := server.authority.refusal(principal, op))]
     if principal and payload.get("changes"):
@@ -68,10 +82,17 @@ def apply(server: ModuleType, slug: str, principal: str, payload: dict) -> dict:
         raise APIError(403, "forbidden", "Caller cannot perform this operation as its author", details)
     server.ledger_media.resolve(slug, operations)
     server.ledger_artifacts.resolve(slug, operations)
-    gate = GuardedOperations(payload, server.talk.Budget(slug), server.core)
+    screen = ledger_task_duplicates.screen(doc, operations)
+    gate = ledger_task_duplicates.Gate(
+        screen,
+        GuardedOperations(
+            payload, server.talk.Budget(slug), server.core, lambda epoch: server.authority.fence(slug, epoch)
+        ),
+    )
     state, rejected = server.repository.apply_ops(slug, ops=operations, gate=gate)
     server.relay_to_inbox(slug, state)
     server.doctor_phrase(slug, state)
+    server.deliver_alerts(slug, state)
     tasks = {op["item"].split("/")[1] for op in operations if op["op"] == "task_update"}
     rows = [resources.project(row) for row in state.get("tasks", []) if row["id"] in tasks]
     reply = {
@@ -80,7 +101,9 @@ def apply(server: ModuleType, slug: str, principal: str, payload: dict) -> dict:
         "rejected": rejected,
         "_meta": {
             "rev": state["_meta"]["rev"],
-            "warnings": [warning[:1000] for warning in state["_meta"].get("warnings", [])[:20]],
+            "warnings": [
+                warning[:1000] for warning in [*state["_meta"].get("warnings", [])[:20], *screen.warnings.values()]
+            ],
         },
     }
     return bounded_ack(reply)

@@ -17,6 +17,7 @@ import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
+from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.test_swarm_panel import STATUS, function_source  # noqa: E402
 
 SLUG = "doctor-controls"
@@ -32,7 +33,7 @@ class DoctorControls(unittest.TestCase):
     def setUpClass(cls):
         content = {"title": "Demo", "overview": "o", "phases": [{"title": "One", "description": "d"}]}
         new_ledger.create(SLUG, content)
-        cls.token = core.read_token(core.paths(SLUG)[0].read_text(encoding="utf-8"))
+        cls.token = legacy_page.stored_token(core.paths(SLUG)[0])
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         cls.port = cls.httpd.server_address[1]
         threading.Thread(target=cls.httpd.serve_forever, args=(0.01,), daemon=True).start()
