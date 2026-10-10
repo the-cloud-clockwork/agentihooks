@@ -1,0 +1,160 @@
+{
+  "package": "SV2-KUB-01",
+  "integration_gate": "G3",
+  "status": "passed",
+  "cases": {
+    "T-SV2-KUB-01-A": {
+      "state": "passed",
+      "record": "evidence/SV2-KUB-01/a-result.json"
+    },
+    "T-SV2-KUB-01-B": {
+      "state": "passed",
+      "record": "evidence/SV2-KUB-01/b-result.json"
+    },
+    "T-SV2-KUB-01-C": {
+      "state": "passed",
+      "record": "evidence/SV2-KUB-01/c-result.json"
+    }
+  },
+  "mocked": true,
+  "state": {
+    "observed": "in process renders of the fixture launches; the kind job created both golden Pods by strict server side dry run",
+    "accepted": "case assertions and unit tests passed in CI on the tested commit",
+    "committed": "tested commit on the pull request branch",
+    "externally_verified": "not run; a live Pod on Anton belongs to SV2-KUB-02 and the G3 rollout"
+  },
+  "interfaces": [
+    "scripts.swarm_v2.kubernetes.spec.load_policy(path) validates a Pod policy against docs/swarm-v2/schemas/pod-policy.json",
+    "PodTemplate(policy).render(admitted_launch) returns the Pod and its canonical sha256 digest, or raises PodSpecRefused with a reason",
+    "PodTemplate.pod_spec_validation_failures_total() counts refusals per reason",
+    "python -m scripts.swarm_v2.kubernetes.spec render|digest --policy --launch",
+    "label swarm.agentihooks.io/provider-account and Secret swarm-account-<account> key token, matching antoncore admission policy swarm-worker-provider-account"
+  ],
+  "supported_versions": {
+    "pod_policy_schema": 1,
+    "template_version": "kub01-v2",
+    "harnesses": [
+      "claude",
+      "codex"
+    ]
+  },
+  "compatibility": "No earlier execution Pod protocol exists: this renderer is the first Kubernetes execution object and was never merged before. The local herdr runtime is unchanged and keeps reading AH_CC_TOKEN_<slug> from the operator environment. The renderer's admitted launch record names the account provider_account; launch.json credential_ref is untouched.",
+  "code_evidence": {
+    "issue_url": "https://github.com/the-cloud-clockwork/agentihooks/issues/2425",
+    "pull_request_url": "https://github.com/the-cloud-clockwork/agentihooks/pull/2443",
+    "tested_commit": "f659fa9c2c1a78e2fb3b7286004789ab642a09e8",
+    "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38065955378",
+    "tests_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38066783021",
+    "mutation_preflight_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38066779623",
+    "kind_job": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38066783021/job/114256176988",
+    "kind_dry_run": [
+      "namespace/swarm-pod-proof created",
+      "serviceaccount/swarm-worker created",
+      "pod/swarm-exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0 created (server dry run)",
+      "pod/swarm-exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0 created (server dry run)",
+      "rendered execution Pods passed server side strict validation"
+    ]
+  },
+  "fixture_manifest": "evidence/SV2-KUB-01/manifest.json",
+  "limitations": [
+    "Ephemeral storage is a fixed allotment per resource profile, not per launch",
+    "The spec digest covers the whole rendered manifest",
+    "The template version is a label over one renderer; restoring an older version means rendering with that policy",
+    "Stale attempt ownership, create idempotence and durability belong to SV2-KUB-02",
+    "The task payload digest is unkeyed sha256",
+    "The schema file is read from the repository tree, not from the installed wheel",
+    "No worker reads the mounted provider token file yet; the file mount is the antoncore delivery contract",
+    "The Firecracker RuntimeClass is optional policy input; SV2-SEC-06 makes it mandatory"
+  ],
+  "rollback_rehearsal": {
+    "action": "revert only the probe settings while the image stays; restore the previous template version for new launches while existing Pods keep their version annotations",
+    "evidence_class": "render level",
+    "record": "evidence/SV2-KUB-01/c-result.json",
+    "observed": {
+      "first_digest": "sha256:0ba1f7e02e4a1106be45c713168171fe80206f3cfa48905f4b5e7740b5e242a3",
+      "restarted_digest": "sha256:0ba1f7e02e4a1106be45c713168171fe80206f3cfa48905f4b5e7740b5e242a3",
+      "same_digest": true,
+      "probe_rollback": {
+        "evidence_class": "render level: the wrong and reverted Pods differ only in their probes",
+        "changed": [
+          "spec.containers[0].livenessProbe",
+          "spec.containers[0].readinessProbe",
+          "spec.containers[0].startupProbe"
+        ],
+        "image_unchanged": true,
+        "broken_matches_golden": true,
+        "broken_liveness": {
+          "exec": {
+            "command": [
+              "python",
+              "/opt/swarm-node/health.py",
+              "liveness",
+              "--attempt",
+              "/home/worker/attempts/exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+              "--harness",
+              "claude",
+              "--herdr-timeout",
+              "0.001",
+              "--brain-timeout",
+              "2"
+            ]
+          },
+          "initialDelaySeconds": 0,
+          "periodSeconds": 15,
+          "timeoutSeconds": 6,
+          "failureThreshold": 1
+        },
+        "reverted_liveness": {
+          "exec": {
+            "command": [
+              "python",
+              "/opt/swarm-node/health.py",
+              "liveness",
+              "--attempt",
+              "/home/worker/attempts/exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+              "--harness",
+              "claude",
+              "--herdr-timeout",
+              "2",
+              "--brain-timeout",
+              "2"
+            ]
+          },
+          "initialDelaySeconds": 0,
+          "periodSeconds": 15,
+          "timeoutSeconds": 6,
+          "failureThreshold": 4
+        }
+      },
+      "template_rollback": {
+        "existing_version": "kub01-v2",
+        "new_launch_version": "kub01-v1",
+        "image_unchanged": true
+      }
+    },
+    "image_level_rehearsal": "evidence/SV2-IMG-04/result.json rollback_rehearsal, unchanged"
+  },
+  "checks": {
+    "lint_format_size": "passed in the pre push gate on every commit",
+    "unit_tests": "run in CI only; local test runs are disabled",
+    "mutation_preflight": "passed on the tested commit",
+    "standards_review": "round one findings fixed; the task sub agent budget closed further rounds",
+    "spec_review": "round one findings fixed or recorded here; the task sub agent budget closed further rounds",
+    "sonar": "one python:S5443 hotspot on the Pod-private /tmp emptyDir mountPath, reviewed SAFE on the pull request analysis; coverage on new code 99.1"
+  },
+  "scope": {
+    "scripts/swarm_v2/kubernetes/spec.py": "owned path candidate; implementation sequence steps 1 to 4; rejection and recovery contracts; pod_spec_validation_failures_total",
+    "docs/swarm-v2/schemas/pod-policy.json": "owned path candidate; approved requests, limits, node constraints and secret references",
+    "provider account label and swarm-account Secret": "task instruction folded in by the master; the secret reference half of implementation step 2",
+    "tests/fixtures/swarm_v2/pod-*.json, tests/test_swarm_v2_kubernetes_spec.py": "required fixture: malicious payload with YAML fragments on a valid general profile",
+    "tests/sv2_kub01_cases.py, evidence/SV2-KUB-01/*": "cases T-SV2-KUB-01-A, B and C and the evidence record",
+    "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh": "output contract: the rendered Pod validates against Kubernetes schema on a real API server",
+    "docker/swarm-node/README.md": "task instruction: the probes package rollback, this template now holds the probe wiring and thresholds",
+    "mutation-clearances/<hash>.json": "the Standards reader's ruling on one equivalent mutant, required by the mutation gate"
+  },
+  "phase_use": [
+    "SV2-KUB-02 creates Pods through PodTemplate.render and load_policy from this renderer",
+    "SV2-SEC-06 stacks on this renderer and makes runtime_class_name required for the Firecracker RuntimeClass",
+    "SV2-SEC-02 (antoncore pull request 634, merged) admits only execution Pods carrying swarm.agentihooks.io/provider-account and referencing only Secret swarm-account-<label> key token, which is exactly what the golden Pod carries; helm-kind job 114256176988 accepted it by strict server side dry run"
+  ]
+}
