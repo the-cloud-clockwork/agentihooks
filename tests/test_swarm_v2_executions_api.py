@@ -154,6 +154,8 @@ def test_a_heartbeat_renews_its_own_lease_from_server_time_only(world, worker):
     assert record["resources"] == resources
     assert (record["renewal_sequence"], record["state"], record["observed_at"]) == (5, "working", body["observed_at"])
     assert (record["archive_watermark"], record["accepted_at_ms"], record["ack"]) == (12, 1040, ack)
+    marker = world.store.key("fixture", "heartbeat-sequence", agent.execution_id)
+    assert fence_of(world, marker) == {"sequence": 5, "digest": record["digest"]}
 
 
 def test_a_forged_url_subject_cannot_touch_another_execution(world, worker):
