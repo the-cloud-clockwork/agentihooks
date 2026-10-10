@@ -220,7 +220,8 @@ KEPT = "http://h/a/kept.md"
 NEW = "http://h/b/dddddddddddd.md"
 TAKEN = "http://other/x/cccccccccccc.md"
 SAME_STEM = "http://other/y/cccccccccccc.md"
-U1, U2, U3, MOVED, BAD = (f"https://github.com/o/r/issues/{n}" for n in (1, 2, 3, 4, 9))
+U1, U2, U3, MOVED, BAD, TWIN_URL = (f"https://github.com/o/r/issues/{n}" for n in (1, 2, 3, 4, 9, 7))
+TWIN = "http://h/t/twin.md"
 
 
 def branches():
@@ -230,6 +231,8 @@ def branches():
             {"id": "plan-cccccccccccc", "title": "Taken", "artifact": TAKEN, "url": ""},
             {"id": "kept2", "title": "Kept two", "artifact": "", "url": U2},
             {"id": "kept3", "title": "Kept three", "artifact": "", "url": U3},
+            {"id": "twin-a", "title": "Twin A", "artifact": TWIN, "url": TWIN_URL},
+            {"id": "twin-b", "title": "Twin B", "artifact": TWIN, "url": TWIN_URL},
         ],
         "slices": [
             {"id": "plan-dddddddddddd.s1.p5.t8", "phase": "phases/p5", "anchor": "s1", "lines": "1-2"},
@@ -255,6 +258,14 @@ def branches():
             {"id": "p9", "title": "Url found", "plan_url": U2},
             {"id": "p10", "title": "Url plan", "plan": "plans/kept3"},
             {"id": "p11", "title": "Artifact plan", "plan": "plans/kept"},
+            {
+                "id": "p12",
+                "title": "Twin artifact",
+                "plan": "plans/twin-b",
+                "plan_ref": {"artifact": TWIN},
+                "plan_url": TWIN,
+            },
+            {"id": "p13", "title": "Twin url", "plan": "plans/twin-b", "plan_url": TWIN_URL},
         ],
         "tasks": [
             {"id": "t1", "title": "", "phase": "p1", "plan_url": KEPT, "plan_slice": "s1", "plan_lines": "1-2"},
@@ -327,6 +338,8 @@ def test_preview_places_every_legacy_shape_and_reports_each_conflict_in_order():
         ("p9", "plans/kept2", U2),
         ("p10", "plans/kept3", None),
         ("p11", "plans/kept", None),
+        ("p12", "plans/twin-b", TWIN),
+        ("p13", "plans/twin-b", TWIN_URL),
         (STANDALONE, f"plans/{STANDALONE}", None),
     ]
     assert after["phases"][-1] == {
@@ -380,24 +393,24 @@ def test_preview_places_every_legacy_shape_and_reports_each_conflict_in_order():
     assert report["applied"] is False
     assert report["refused"] == "tasks/t13 names phases/ghost, which does not exist"
     assert report["before"] == {
-        "plans": 4,
-        "phases": 11,
+        "plans": 6,
+        "phases": 13,
         "slices": 4,
         "tasks": 20,
-        "nodes": 39,
+        "nodes": 43,
         "dependencies": 0,
-        "phases_in_plans": 5,
+        "phases_in_plans": 7,
         "tasks_in_phases": 17,
         "tasks_in_slices": 7,
     }
     assert report["after"] == {
-        "plans": 8,
-        "phases": 12,
+        "plans": 10,
+        "phases": 14,
         "slices": 10,
         "tasks": 20,
-        "nodes": 50,
+        "nodes": 54,
         "dependencies": 0,
-        "phases_in_plans": 12,
+        "phases_in_plans": 14,
         "tasks_in_phases": 19,
         "tasks_in_slices": 12,
     }

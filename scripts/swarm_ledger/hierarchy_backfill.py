@@ -225,7 +225,7 @@ def run(args) -> None:
 
     if ledger_link.remote():
         raise SystemExit("hierarchy backfill must run on the local ledger host")
-    by = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
+    by = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME")
     if args.apply and not by:
         raise SystemExit("--as is required to apply the hierarchy backfill")
     print(json.dumps(backfill(repository, args.slug, by, args.apply), sort_keys=True))
