@@ -248,6 +248,43 @@ def test_a_contained_archive_extracts_into_its_destination(tmp_path, world, layo
     assert list(execution.path("scratch").iterdir()) == []
 
 
+def two_members(tmp_path: Path) -> Path:
+    return archive(tmp_path, [{"name": "a.txt", "type": "file"}, {"name": "b.txt", "type": "file"}])
+
+
+def test_the_archive_caps_bound_members_and_expanded_bytes():
+    assert (filesystem.ARCHIVE_MEMBERS, filesystem.ARCHIVE_BYTES) == (100_000, 8 * 2**30)
+
+
+@pytest.mark.parametrize(("members", "size"), [(1, 100), (2, 9)])
+def test_an_archive_past_its_member_or_size_cap_is_refused_before_any_write(
+    tmp_path, world, layout, monkeypatch, members, size
+):
+    bases, _ = world
+    execution = filesystem.allocate(bases[0], ATTEMPT, layout)
+    bundle = two_members(tmp_path)
+    monkeypatch.setattr(filesystem, "ARCHIVE_MEMBERS", members)
+    monkeypatch.setattr(filesystem, "ARCHIVE_BYTES", size)
+    before, count = snapshot(execution.root), failures()
+    with pytest.raises(filesystem.LayoutError) as error:
+        filesystem.extract(execution, bundle, execution.path("checkout") / "task")
+    assert str(error.value) == f"archive exceeds {members} members or {size} bytes: {bundle.name}"
+    assert snapshot(execution.root) == before
+    assert failures() == count + 1
+
+
+def test_an_archive_at_its_member_and_size_cap_extracts(tmp_path, world, layout, monkeypatch):
+    bases, _ = world
+    execution = filesystem.allocate(bases[0], ATTEMPT, layout)
+    monkeypatch.setattr(filesystem, "ARCHIVE_MEMBERS", 2)
+    monkeypatch.setattr(filesystem, "ARCHIVE_BYTES", 10)
+    destination = execution.path("checkout") / "task"
+    count = failures()
+    assert filesystem.extract(execution, two_members(tmp_path), destination) == destination.resolve()
+    assert sorted(p.name for p in destination.iterdir()) == ["a.txt", "b.txt"]
+    assert failures() == count
+
+
 @pytest.mark.parametrize("case", sorted(FIXTURE["archive_escapes"]))
 def test_an_archive_that_resolves_outside_its_root_is_refused_before_any_write(tmp_path, world, layout, case):
     bases, outside = world
