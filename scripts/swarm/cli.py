@@ -254,7 +254,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             found = timing.call(
                 findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", [])
             )
-            actions += skip_refused(ledger_events.findings_pass, inbox, store, slug, found)
+            actions += skip_refused(ledger_events.findings_pass, inbox, store, slug, found, doc)
             actions += timing.call(
                 metrics.record_pass,
                 slug,
