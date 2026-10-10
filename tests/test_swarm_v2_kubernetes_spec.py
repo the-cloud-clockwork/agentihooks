@@ -165,7 +165,6 @@ def test_the_worker_is_hardened_and_never_mounts_a_service_account_token():
         "readOnlyRootFilesystem": True,
         "capabilities": {"drop": ["ALL"]},
     }
-    assert body["runtimeClassName"] == "kata-fc"
 
 
 def test_a_policy_without_a_runtime_class_is_refused_before_any_pod_renders(tmp_path):
@@ -180,6 +179,7 @@ def test_a_policy_without_a_runtime_class_is_refused_before_any_pod_renders(tmp_
 
 
 def test_the_policy_runtime_class_reaches_the_pod():
+    assert render()[1].pod["spec"]["runtimeClassName"] == "kata-fc"
     policy = load_policy(POLICY)
     policy["runtime_class_name"] = "kata-qemu"
     _, rendered = render(policy=policy)
