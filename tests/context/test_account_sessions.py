@@ -2,7 +2,11 @@
 
 from unittest.mock import patch
 
+import pytest
+
 from hooks.context import account_sessions as acc
+
+pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 def _proc(root, pid, comm, ppid, argv, env):
@@ -122,6 +126,18 @@ def test_fleet_slots_stay_out_while_distributed_launches_are_off():
 
 def test_fleet_slots_need_redis():
     with patch("hooks._redis.get_redis", return_value=None):
+        assert acc.fleet_held({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}) == {}
+
+
+def test_fleet_slots_fail_open_when_redis_breaks_mid_read():
+    import fakeredis
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    with (
+        patch("hooks._redis.get_redis", return_value=redis),
+        patch.object(redis, "scan_iter", side_effect=RedisConnectionError("down")),
+    ):
         assert acc.fleet_held({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}) == {}
 
 

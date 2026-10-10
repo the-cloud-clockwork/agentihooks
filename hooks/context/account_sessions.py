@@ -182,12 +182,17 @@ def fleet_held(environ: Mapping[str, str] | None = None) -> dict[str, int]:
     redis = get_redis()
     if redis is None:
         return {}
+    from redis.exceptions import RedisError
+
     from scripts.swarm import lease
     from scripts.swarm.store import RedisStore
     from scripts.swarm_v2 import accounts
 
     store = RedisStore(redis)
-    return accounts.fleet_held(store, lease.now_ms(store))
+    try:
+        return accounts.fleet_held(store, lease.now_ms(store))
+    except RedisError:
+        return {}
 
 
 def sessions_by_account(proc: Path = _PROC) -> dict[str, int]:
