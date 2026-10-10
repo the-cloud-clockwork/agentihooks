@@ -14,10 +14,17 @@ EVENTS = {WORKFLOW: "push", PROOFS: "workflow_dispatch"}
 UNREADABLE = (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError)
 
 
+class Unreachable(ValueError):
+    pass
+
+
 def _api(endpoint, binary=False):
-    done = subprocess.run(["gh", "api", endpoint], capture_output=True, timeout=20)
+    try:
+        done = subprocess.run(["gh", "api", endpoint], capture_output=True, timeout=20)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise Unreachable from error
     if done.returncode:
-        raise ValueError
+        raise Unreachable
     return done.stdout if binary else json.loads(done.stdout)
 
 
@@ -112,6 +119,8 @@ def resolution(held: dict) -> str:
         ]
         failures.extend(f"{row['path']}: {row['reason']}" for row in report["not_mutated"])
         failed = report["failed"]
+    except Unreachable:
+        return ""
     except (*UNREADABLE, StopIteration, zipfile.BadZipFile):
         return f"{outcome}, now red; complete mutation report unavailable; mutation may have been skipped"
     if not covered:

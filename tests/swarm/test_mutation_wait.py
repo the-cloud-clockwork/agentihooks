@@ -420,7 +420,39 @@ def test_a_completed_run_with_an_unreadable_branch_ends_red(unreadable):
     )
 
 
-def test_an_unreadable_merge_base_ends_red(unreadable):
+def test_an_unreachable_merge_base_keeps_the_wait(unreadable):
     unreadable.endpoint = "/compare/"
     held = {**waits.on("mutation", URL), "head": "first"}
-    assert "now red; complete mutation report unavailable" in waits.resolution(held, {}, None, None, None, False)
+    assert waits.resolution(held, {}, None, None, None, False) == ""
+
+
+@pytest.mark.parametrize("endpoint", ["artifacts?", "/zip"])
+def test_a_failed_report_download_keeps_the_wait_for_the_next_tick(tick, preflight, monkeypatch, endpoint):  # noqa: F811
+    original = subprocess.run
+
+    def api(args, **kwargs):
+        if endpoint in args[-1]:
+            return subprocess.CompletedProcess(args, 1, b"")
+        return original(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", api)
+    held = {**waits.on("mutation", URL), "head": "first"}
+    idle.declare_wait(tick.store.redis, "sw", ME, 10_000_000, "", 1, on=held)
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME)["on"] == held
+    monkeypatch.setattr(subprocess, "run", original)
+    assert tick.end() == [f"ended the wait of {ME}: mutation preflight {URL}, now green; no failing mutants"]
+
+
+@pytest.mark.parametrize("error", [subprocess.TimeoutExpired(["gh"], 20), OSError("reset")])
+def test_a_timed_out_report_download_keeps_the_wait(preflight, monkeypatch, error):
+    original = subprocess.run
+
+    def api(args, **kwargs):
+        if args[-1].endswith("/zip"):
+            raise error
+        return original(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", api)
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == ""
