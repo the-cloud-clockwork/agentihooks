@@ -319,6 +319,7 @@ def test_reconstruct_skips_records_without_a_matching_registration(world):
 
     assert world.capacity.reconstruct(world.fleet, lambda _: None) == {}
     assert world.capacity.reconstruct(world.fleet, lambda _: replace(grant, generation=9)) == {}
+    assert world.capacity.reconstruct(world.fleet, lambda _: replace(grant, swarm_id="elsewhere")) == {}
     world.fleet.close(MACHINE, world.session(HELD).session_id, token)
     assert world.capacity.reconstruct(world.fleet, lambda _: grant) == {}
     assert world.capacity.slots(ACCOUNT) == []
@@ -343,7 +344,7 @@ def test_reconstruct_confirms_a_reserved_record_and_keeps_a_newer_reservation(wo
     assert world.store.redis.hgetall(f"{ROOT}:accounts:other") == {}
 
 
-@pytest.mark.parametrize(("cap", "ttl"), [(-1, TTL), (True, TTL), (CAP, 0), (CAP, 1.5), (CAP, False)])
+@pytest.mark.parametrize(("cap", "ttl"), [(-1, TTL), (True, TTL), (CAP, 0), (CAP, 1.5), (CAP, False), (CAP, 900_001)])
 def test_invalid_caps_and_lifetimes_are_refused(world, cap, ttl):
     token = world.launch(FIRST)
 
@@ -383,3 +384,100 @@ def test_a_slot_round_trips_through_its_stored_document():
     slot = Slot(ACCOUNT, f"{SLUG}/{FIRST}", "exe-1", 3, OCCUPIED, 0, "abc")
 
     assert accounts.decode(accounts.encode(slot)) == slot
+
+
+@pytest.mark.parametrize("ttl", [1, 900_000])
+def test_reservation_lifetimes_are_bounded_by_the_grant_lifetime(world, ttl):
+    slot = world.capacity.reserve(world.launch(FIRST), CAP, ttl)
+
+    assert slot.expires_ms == 1000 + ttl
+
+
+def test_a_freeze_landing_mid_reservation_refuses_it(world):
+    token = world.launch(FIRST)
+    racing = world.controller(Racing(world.store, world.capacity.freeze))
+
+    assert refusal(racing.reserve, token, CAP, TTL) == "reservations_frozen"
+    assert world.rows() == {}
+
+
+def test_a_registry_close_landing_mid_occupancy_refuses_it(world):
+    token = world.launch(FIRST)
+    world.capacity.reserve(token, CAP, TTL)
+    session = world.session(FIRST)
+    world.fleet.register(session, token)
+    racing = world.controller(Racing(world.store, lambda: world.fleet.close(MACHINE, session.session_id, token)))
+
+    assert refusal(racing.occupy, token, MACHINE, session.session_id) == "unregistered"
+    assert world.capacity.slots(ACCOUNT)[0].state == RESERVED
+
+
+def test_an_occupancy_stops_counting_when_its_record_closes_or_disappears(world):
+    held = world.running(HELD)
+    first = world.running(FIRST)
+    second = world.launch(SECOND)
+    assert refusal(world.capacity.reserve, second, CAP, TTL) == "account_full"
+
+    world.fleet.close(MACHINE, world.session(HELD).session_id, world.tokens[HELD])
+    assert world.capacity.slots(ACCOUNT) == [first]
+    world.store.redis.hdel(world.store.key(SLUG, "fleet-sessions"), first.session)
+    assert world.capacity.slots(ACCOUNT) == []
+
+    taken = world.capacity.reserve(second, CAP, TTL)
+    assert sorted(world.rows()) == [taken.holder]
+    assert held.holder not in world.rows()
+
+
+def test_a_suspect_occupancy_keeps_counting(world):
+    held = world.running(HELD)
+    world.clock[0] += 10 * 90_000
+    assert world.fleet.sweep() == 1
+
+    assert world.capacity.slots(ACCOUNT) == [held]
+
+
+class Ambiguous(Racing):
+    """The commit lands but the reply is lost, as when the transport drops after Redis applied the write."""
+
+    def __init__(self, store):
+        super().__init__(store, None)
+        self.lost = True
+
+    def pipeline(self):
+        pipe = self.store.redis.pipeline()
+        real = pipe.execute
+
+        def execute():
+            result = real()
+            if self.lost:
+                self.lost = False
+                raise ConnectionError("reply lost")
+            return result
+
+        pipe.execute = execute
+        return pipe
+
+
+def test_a_reservation_retried_after_a_lost_reply_or_restart_has_one_effect(world):
+    token = world.launch(FIRST)
+    with pytest.raises(ConnectionError):
+        world.controller(Ambiguous(world.store)).reserve(token, CAP, TTL)
+    committed = world.rows()
+
+    restarted = world.controller()
+    replayed = restarted.reserve(token, CAP, TTL)
+
+    assert world.rows() == committed
+    assert accounts.decode(committed[replayed.holder]) == replayed
+    assert restarted.slots(ACCOUNT) == [replayed]
+
+
+@pytest.mark.parametrize("unconfirmed_first", [True, False])
+def test_reconstruct_skips_unconfirmed_records_in_any_order(world, unconfirmed_first):
+    for seat in (SECOND, HELD) if unconfirmed_first else (HELD, SECOND):
+        world.launch(seat)
+        world.fleet.register(world.session(seat), world.tokens[seat])
+    grant = world.authority.authorize(world.tokens[HELD])
+
+    assert world.capacity.reconstruct(world.fleet, {grant.execution_id: grant}.get) == {ACCOUNT: 1}
+    assert [slot.holder for slot in world.capacity.slots(ACCOUNT)] == [f"{SLUG}/{HELD}"]
