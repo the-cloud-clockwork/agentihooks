@@ -81,6 +81,83 @@ class EventsCap(unittest.TestCase):
         self.assertEqual(state["_meta"]["created_at"], 1000)
 
 
+def signal_state(pid):
+    proc_dir = Path("/proc") / str(pid)
+    try:
+        status = (proc_dir / "status").read_text()
+        wchan = (proc_dir / "wchan").read_text()
+    except OSError as exc:
+        return f"unreadable: {exc}"
+    fields = [
+        line
+        for line in status.splitlines()
+        if line.startswith(("State", "SigQ", "SigPnd", "ShdPnd", "SigBlk", "SigIgn", "SigCgt"))
+    ]
+    return "\n".join([*fields, f"wchan: {wchan}"])
+
+
+def stop_or_report_stack(proc, stderr, timeout):
+    proc.send_signal(signal.SIGTERM)
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        state = signal_state(proc.pid)
+        proc.send_signal(signal.SIGABRT)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        stderr.seek(0)
+        stack = stderr.read().decode(errors="replace")
+        raise AssertionError(
+            f"child did not exit within {timeout}s of SIGTERM\n"
+            f"signal state before abort:\n{state}\n"
+            f"exit code after SIGABRT: {proc.returncode}\n"
+            f"stderr with faulthandler stack:\n{stack}"
+        ) from None
+
+
+class StopOrReportStack(unittest.TestCase):
+    def setUp(self):
+        core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
+
+    def test_a_child_that_blocks_sigterm_fails_with_its_stack_and_signal_state(self):
+        ready = core.LEDGER_DIR / "hang.ready"
+        ready.unlink(missing_ok=True)
+        code = (
+            "import signal, sys, time\n"
+            "signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})\n"
+            "def hang():\n"
+            "    open(sys.argv[1], 'w').close()\n"
+            "    time.sleep(60)\n"
+            "hang()\n"
+        )
+        with open(core.LEDGER_DIR / "hang.stderr", "w+b") as stderr:
+            proc = subprocess.Popen(
+                [sys.executable, "-X", "faulthandler", "-c", code, str(ready)], stdout=subprocess.DEVNULL, stderr=stderr
+            )
+            try:
+                for _ in range(50):
+                    if ready.exists():
+                        break
+                    time.sleep(0.1)
+                self.assertTrue(ready.exists())
+                with self.assertRaises(AssertionError) as caught:
+                    stop_or_report_stack(proc, stderr, timeout=0.5)
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait()
+        message = str(caught.exception)
+        self.assertIn("within 0.5s of SIGTERM", message)
+        self.assertIn("Fatal Python error: Aborted", message)
+        self.assertIn("in hang", message)
+        self.assertIn(f"exit code after SIGABRT: {-signal.SIGABRT}", message)
+        self.assertRegex(message, r"SigBlk:\s+0*4000\n")
+        self.assertRegex(message, r"ShdPnd:\s+0*4000\n")
+
+
 class Watch(unittest.TestCase):
     def setUp(self):
         make_ledger()
@@ -88,23 +165,30 @@ class Watch(unittest.TestCase):
     def test_watcher_removes_its_beat_file_on_sigterm(self):
         beat = core.watch_path(SLUG, "watcher")
         env = {**os.environ, "LEDGER_DIR": str(core.LEDGER_DIR), "LEDGER_PORT": "9"}
-        proc = subprocess.Popen(
-            [sys.executable, str(SCRIPTS / "watch_ledger.py"), SLUG, "--as", "watcher", "--interval", "0.1"],
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        try:
-            for _ in range(50):
-                if beat.exists():
-                    break
-                time.sleep(0.1)
-            self.assertTrue(beat.exists())
-            proc.send_signal(signal.SIGTERM)
-            proc.wait(timeout=5)
-        finally:
-            if proc.poll() is None:
-                proc.kill()
+        command = [
+            sys.executable,
+            "-X",
+            "faulthandler",
+            str(SCRIPTS / "watch_ledger.py"),
+            SLUG,
+            "--as",
+            "watcher",
+            "--interval",
+            "0.1",
+        ]
+        with open(core.LEDGER_DIR / "watcher.stderr", "w+b") as stderr:
+            proc = subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL, stderr=stderr)
+            try:
+                for _ in range(50):
+                    if beat.exists():
+                        break
+                    time.sleep(0.1)
+                self.assertTrue(beat.exists())
+                stop_or_report_stack(proc, stderr, timeout=5)
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait()
         self.assertFalse(beat.exists())
 
 
