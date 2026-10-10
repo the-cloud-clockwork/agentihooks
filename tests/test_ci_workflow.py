@@ -744,7 +744,7 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     for job in (mutation, jobs["mutation-stats"]):
         select = next(step for step in job["steps"] if step.get("id") == "selection")
         assert select["env"] == {"BASES": "${{ needs.mutation-plan.outputs.bases }}"}
-        assert select["run"] == 'python -m scripts.ci_mutation.browser --bases "$BASES"'
+        assert select["run"] == "python -m scripts.ci_mutation." + 'browser --bases "$BASES"'
     checkout = next(step for step in plan["steps"] if step.get("uses", "").startswith("actions/checkout"))
     assert checkout["with"] == {"fetch-depth": 0, "ref": "${{ github.event.pull_request.head.sha }}"}
     assert mutation["strategy"] == {
