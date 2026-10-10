@@ -20,9 +20,20 @@ def held(task: dict, doc: dict, graph: dict, fix_phase: str) -> bool:
     if any(r["verb"] == "freeze" and covers(r["target"], task, chain) for r in records):
         return True
     focus = [r["target"] for r in records if r["verb"] == "focus"]
-    if not focus or task.get("rank") == "urgent" or (fix_phase and task.get("phase") == fix_phase):
+    if not focus or exempt(task, fix_phase):
         return False
     return not any(covers(target, task, chain) for target in focus)
+
+
+def exempt(task: dict, fix_phase: str) -> bool:
+    return task.get("rank") == "urgent" or bool(fix_phase) and task.get("phase") == fix_phase
+
+
+def holds(record: dict, task: dict, graph: dict, fix_phase: str) -> bool:
+    inside = covers(record["target"], task, ancestry(task, graph))
+    if record["verb"] == "freeze":
+        return inside
+    return not inside and not exempt(task, fix_phase)
 
 
 def ancestry(task: dict, graph: dict) -> list:
@@ -55,11 +66,7 @@ def notice(doc: dict, tasks: Iterable[dict], phase: str) -> str:
     if not waiting:
         return DRAINED
     records = doc.get("freezes") or []
-    holding = [
-        name
-        for r, name in zip(records, names(doc))
-        if any(covers(r["target"], t, ancestry(t, graph)) == (r["verb"] == "freeze") for t in waiting)
-    ]
+    holding = [name for r, name in zip(records, names(doc)) if any(holds(r, t, graph, phase) for t in waiting)]
     which = "1 open task is" if len(waiting) == 1 else f"{len(waiting)} open tasks are"
     return notice_text.plain(f"The swarm has no task it may start: {which} held by {_joined(holding)}")
 
