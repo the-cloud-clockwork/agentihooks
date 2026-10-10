@@ -612,6 +612,16 @@ def test_the_command_line_refuses_unreadable_inputs(tmp_path, capsys):
     assert captured.err == f"{broken} is not a readable JSON file\n"
 
 
+def test_an_unreadable_policy_is_refused_as_input(tmp_path):
+    missing = tmp_path / "missing.json"
+    with pytest.raises(PodSpecRefused) as refused:
+        load_policy(missing)
+    assert str(refused.value) == f"{missing} is not a readable JSON file"
+    assert refused.value.reason == "input"
+    assert refused.value.__cause__ is None
+    assert refused.value.__suppress_context__ is True
+
+
 def test_the_command_line_digest_action_prints_the_spec_digest(capsys):
     assert spec.main(["digest", "--policy", str(POLICY), "--launch", str(LAUNCH)]) == 0
     assert capsys.readouterr().out == render()[1].digest + "\n"
