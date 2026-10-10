@@ -5,7 +5,10 @@ from unittest.mock import patch
 import pytest
 from redis.exceptions import RedisError
 
-from scripts.swarm_v2.api.tasks import SPEC_FIELDS, TasksAPI, revision_conflicts_total, spec_revision
+from scripts.swarm.store import SwarmError
+from scripts.swarm_ledger.api.resources import revision
+from scripts.swarm_v2.api.tasks import SPEC_FIELDS, TasksAPI, ledger_revision_conflicts_total, spec_revision
+from scripts.swarm_v2.auth_context import GrantRefused
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
@@ -78,7 +81,7 @@ def test_a_stale_specification_is_refused_and_a_refreshed_retry_lands(world, wor
         ),
     )
     assert world.document() == ledger
-    assert revision_conflicts_total(world.store, "fixture") == 1
+    assert ledger_revision_conflicts_total(world.store, "fixture") == 1
     status, ack = world.update(token, "update-2", current, {"state": "pr", "pr_url": PR})
     assert status == 200
     assert ack == {
@@ -88,7 +91,7 @@ def test_a_stale_specification_is_refused_and_a_refreshed_retry_lands(world, wor
         "ledger_revision": world.document()["_meta"]["rev"],
     }
     assert (world.task()["state"], world.task()["pr_url"]) == ("pr", PR)
-    assert revision_conflicts_total(world.store, "fixture") == 1
+    assert ledger_revision_conflicts_total(world.store, "fixture") == 1
 
 
 def test_worker_updates_and_progress_leave_the_specification_revision_unchanged(world, worker):
@@ -167,7 +170,7 @@ def test_a_progress_replay_is_acknowledged_once_and_never_rewinds_a_newer_line(w
     first = world.progress(token, "progress-1", "Building the first slice")
     world.progress(token, "progress-2", "Building the second slice")
     ledger = world.document()
-    restarted = TasksAPI(world.grants, world.tasks, world.ledger)
+    restarted = TasksAPI(world.grants, world.tasks, world.reopened())
     assert world.progress(token, "progress-1", "Building the first slice", api=restarted) == first
     assert world.document() == ledger
     assert [entry["text"] for entry in world.task()["comments"]] == ["Building the second slice"]
@@ -203,15 +206,75 @@ def test_a_replaced_worker_cannot_write_after_its_claim(world, worker):
         409,
         detail("stale_generation", "the task generation is no longer current", "progress-1"),
     )
-    assert world.update(token, "update-1", current, {"state": "pr"}, generation=2)[1]["error_class"] == (
-        "stale_generation"
+    assert world.update(token, "update-1", current, {"state": "pr"}) == (
+        409,
+        detail("stale_generation", "the task generation is no longer current", "update-1"),
     )
     assert world.document() == ledger
 
 
+def test_another_generation_replays_nothing_and_a_new_generation_starts_fresh_receipts(world, worker):
+    agent, token = worker
+    first = world.progress(token, "progress-1", "Building the first slice")
+    world.clock[0] += 101
+    _, successor = world.worker(previous=agent.execution_id)
+    assert world.progress(token, "progress-1", "Building the first slice")[1]["error_class"] == "stale_generation"
+    status, ack = world.progress(successor, "progress-1", "Building the first slice", generation=2)
+    assert (status, ack["ledger_revision"] > first[1]["ledger_revision"]) == (200, True)
+    assert list(world.document()["_meta"]["task_operations"]["task"]["operations"]) == ["progress-1"]
+    assert world.document()["_meta"]["task_operations"]["task"]["generation"] == 2
+
+
+def test_operation_ids_are_scoped_to_their_task(world, worker):
+    _, token = worker
+    _, other = world.worker("eng-2@fixture", "other")
+    assert world.progress(token, "progress-1", "Building the first slice")[0] == 200
+    body = {"operation_id": "progress-1", "task_generation": 1, "text": "Building the other slice"}
+    assert world.call("POST", "/v2/tasks/other/progress", other, body)[0] == 200
+    assert world.task("other")["comments"][0]["text"] == "Building the other slice"
+
+
+def test_a_missing_or_malformed_expected_revision_is_refused(world, worker):
+    _, token = worker
+    world.operator({"description": "Build the second specification"})
+    ledger = world.document()
+    for expected in (None, "", "A" * 64, "0" * 63, 7):
+        assert world.update(token, "update-1", expected, {"state": "pr"}) == (
+            400,
+            detail("invalid_request", "expected_revision must be a task revision from a read", "update-1"),
+        )
+    assert world.document() == ledger
+    assert ledger_revision_conflicts_total(world.store, "fixture") == 0
+
+
+def test_the_gate_refuses_a_write_the_ledger_rejects(world, worker):
+    from types import SimpleNamespace
+
+    from scripts.swarm_v2.api.tasks import WorkerGate
+
+    agent, token = worker
+    scope = world.grants.bound("fixture", token)
+    request = {"operation_id": "update-1", "task_generation": 1}
+    gate = WorkerGate(world.tasks_api, scope, request, {"op": "task_update", "item": "tasks/task"}, None)
+    context = SimpleNamespace(meta={}, rev=9, dirty=False)
+    doc = {"tasks": [world.task()]}
+    with pytest.raises(GrantRefused) as refused:
+        gate.apply(doc, {**gate.op, "fields": {"state": "pr"}}, context, lambda *_: False)
+    assert (refused.value.error_class, str(refused.value)) == ("invalid_request", "the ledger refused this write")
+    assert (context.meta, context.dirty) == ({"task_operations": {}}, False)
+    with pytest.raises(GrantRefused) as missing:
+        gate.apply({"tasks": []}, {**gate.op, "fields": {"state": "pr"}}, context, lambda *_: True)
+    assert (missing.value.error_class, str(missing.value)) == ("invalid_request", "the task is not on the ledger")
+    assert gate.op["id"] == "w-" + revision(["fixture", "task", "update-1"])[:16]
+    assert agent.name == world.task()["claimed_by"]
+
+
 def test_a_wrong_generation_is_stale(world, worker):
     _, token = worker
-    assert world.progress(token, "progress-1", "Building", generation=2)[:1] == (409,)
+    assert world.progress(token, "progress-1", "Building", generation=2) == (
+        409,
+        detail("stale_generation", "the task generation is no longer current", "progress-1"),
+    )
     assert world.progress(token, "progress-1", "Building", generation=0) == (
         400,
         detail("invalid_request", "task_generation must be a positive integer", "progress-1"),
@@ -225,15 +288,21 @@ def test_disabled_writes_answer_read_only_conflicts_and_reads_still_work(world, 
     ledger = world.document()
     assert world.call("GET", "/v2/tasks/task", token, api=paused)[0] == 200
     expected = detail(
-        "revision_conflict",
+        "read_only",
         "task writes are read only; refresh and retry later",
         "update-1",
         task_id="task",
         current_revision=current,
     )
     assert world.update(token, "update-1", current, {"state": "pr"}, api=paused) == (409, expected)
+    assert world.update(token, "update-1", None, {"rank": "high"}, api=paused) == (409, expected)
     assert world.progress(token, "update-1", "Building", api=paused) == (409, expected)
+    assert world.call("POST", "/v2/tasks/task/progress", token, {"operation_id": "update-1"}, api=paused) == (
+        409,
+        expected,
+    )
     assert world.document() == ledger
+    assert ledger_revision_conflicts_total(world.store, "fixture") == 0
     assert TasksAPI(world.grants, world.tasks, world.ledger).writes_enabled is True
 
 
@@ -252,7 +321,8 @@ def test_disabled_writes_answer_read_only_conflicts_and_reads_still_work(world, 
         ({"operation_id": "p", "task_generation": 1, "text": 3}, "text must be a non empty string", "p"),
         (
             {"operation_id": "p", "task_generation": 1, "text": "Edited tasks.py"},
-            "progress refused: file name or path 'tasks.py'",
+            "the ledger refused this write: comment refused, write plain words for the operator (what was done, "
+            "or why it was skipped): file name or path 'tasks.py'",
             "p",
         ),
     ],
@@ -279,10 +349,12 @@ def test_an_update_names_at_least_one_worker_field(world, worker, fields):
 def test_a_ledger_refusal_is_invalid(world, worker):
     _, token = worker
     current = world.read(token)[1]["revision"]
+    ledger = world.document()
     assert world.update(token, "update-1", current, {"pr_url": "not a link"}) == (
         400,
-        detail("invalid_request", "the ledger refused this write", "update-1"),
+        detail("invalid_request", "the ledger refused this write: pr_url must be an http or https link", "update-1"),
     )
+    assert world.document() == ledger
 
 
 def test_a_task_missing_from_the_ledger_is_invalid(world, worker):
@@ -309,12 +381,30 @@ def test_transport_errors_answer_with_their_class(world, worker):
         )
 
 
-def test_receipts_keep_only_the_newest_thousand(world, worker, monkeypatch):
+def test_a_claim_lost_during_the_write_rolls_the_write_back(world, worker):
     _, token = worker
-    monkeypatch.setattr("scripts.swarm_v2.api.tasks.KEPT_RECEIPTS", 2)
-    for index in range(3):
-        assert world.progress(token, f"progress-{index}", f"Building slice {'abc'[index]}")[0] == 200
-    assert list(world.document()["_meta"]["task_operations"]) == ["progress-1", "progress-2"]
+    ledger = world.document()
+    checks = iter([None, SwarmError("stale_generation")])
+
+    def holder(*_):
+        if (outcome := next(checks)) is not None:
+            raise outcome
+
+    with patch.object(world.tasks, "_holder", side_effect=holder):
+        assert world.progress(token, "progress-1", "Building the first slice") == (
+            409,
+            detail("stale_generation", "the task generation is no longer current", "progress-1"),
+        )
+    assert world.document() == ledger
+
+
+def test_an_unknown_authority_refusal_keeps_its_cause_private(world, worker):
+    _, token = worker
+    with patch.object(world.tasks, "_holder", side_effect=SwarmError("journal_conflict")):
+        assert world.progress(token, "progress-1", "Building") == (
+            503,
+            detail("dependency_unavailable", "the task authority could not confirm the claim", "progress-1"),
+        )
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])
@@ -326,7 +416,7 @@ def test_package_cases_match_their_committed_evidence(case, tmp_path):
     second_folder.mkdir()
     first, second = run_case(case, first_folder), run_case(case, second_folder)
     assert first == second
-    committed = json.loads((EVIDENCE / f"{case}-result.json").read_text())
+    committed = json.loads((EVIDENCE / f"{case}-result.json").read_text(encoding="utf-8"))
     assert committed == {"case": f"T-SV2-LDG-03-{case.upper()}", "independent_runs": 2, "observed": first}, json.dumps(
         first, indent=2, sort_keys=True
     )
