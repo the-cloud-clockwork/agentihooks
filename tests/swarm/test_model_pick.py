@@ -213,13 +213,15 @@ def test_a_configured_confidence_floor_keeps_the_default_below_it(monkeypatch):
     assert (picked.model, picked.effort, picked.confidence) == ("auto", "max", 0.7)
 
 
-def test_a_legacy_floor_outside_zero_to_one_keeps_its_old_effect(monkeypatch):
-    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: decision(score=3, confidence=0.9))
+def test_a_legacy_floor_outside_zero_to_one_is_refused_and_keeps_the_lane_default(monkeypatch, tmp_path):
+    from hooks import config
+
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("picked with a malformed floor"))
     lane = {"model": "auto", "effort": "auto"}
-    picked = model_pick.pick("claude", lane, {}, {"AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE": "1.5"})
-    assert picked == model_pick.ModelPick("auto", "auto", "pplx-decider-v1-27b", 0.9)
-    picked = model_pick.pick("claude", lane, {}, {"AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE": "nan"})
-    assert picked == model_pick.ModelPick("auto", "max", "pplx-decider-v1-27b", 0.9)
+    for value in ("1.5", "nan"):
+        picked = model_pick.pick("claude", lane, {}, {"AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE": value})
+        assert picked == model_pick.ModelPick("auto", "auto")
 
 
 def test_a_refused_definition_keeps_the_lane_default(monkeypatch, tmp_path):

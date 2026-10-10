@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import ledger_state, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import ledger_state, loaded, serve_modules, shell_html
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -72,7 +72,7 @@ def tab(browser, request):
     page = context.new_page()
     page.goto(URL)
     page.set_default_timeout(2000)
-    page.wait_for_function("document.getElementById('status').textContent !== 'loading'")
+    loaded(page)
     page.sent = sent
     yield page
     context.close()
@@ -124,6 +124,6 @@ def test_the_panel_fold_is_remembered_after_a_reload(tab):
             ['alert-fold'] === false"""
     )
     tab.reload()
-    tab.wait_for_function("document.getElementById('status').textContent !== 'loading'")
+    loaded(tab)
     tab.locator("#alert-fab").click()
     assert tab.locator("#alert-fold").evaluate("el => el.open") is False

@@ -608,6 +608,13 @@ class TestPlanChunk:
         planned["tasks"][0].pop("plan_lines")
         assert intent.state_of(planned, planned["tasks"][0], PR) == intent.state_of(DOC, DOC["tasks"][0], PR)
 
+    def test_a_follow_up_task_is_graded_by_its_description_alone(self, planned):
+        planned["tasks"][0]["follow_up"] = True
+        state = intent.state_of(planned, planned["tasks"][0], PR)
+        assert state == intent.state_of(DOC, DOC["tasks"][0], PR)
+        assert state["task_text"] == planned["tasks"][0]["description"]
+        assert list(intent.questions_for(state)) == BASE_QUESTIONS
+
     @pytest.mark.parametrize(
         "change",
         [
