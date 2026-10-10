@@ -3,8 +3,8 @@
   "state": "passed",
   "evidence_class": "mocked: in process rendering; Kubernetes schema validity comes from the kind job's strict server side dry run of the committed golden Pods, recorded with its run id in result.json",
   "input_sha256": {
-    "pod-policy.json": "1175b5ab4e357d41136248b0f1eb3210ae35288e3f0fd81a23c1a3b1aa3c0ab1",
-    "pod-launch.json": "9c36536cd0ed2586e42b4aa9cca002ad62b6bfffd52ee0a7030cded88a75c06d",
+    "pod-policy.json": "f8a7cb319094b100d5f09a4e6a6ea5b794c6011cec6443a280f6dc3d1be40085",
+    "pod-launch.json": "8d1964999c9d4fc4e3bfd4f8aea2938da30b825411e1e5a12f4ea7e432261908",
     "pod-rendered.json": "68922fc8475919b9da88e471672fd93d8daeb6b24069769be2ea108a3d06bec3",
     "pod-rendered-wrong-probes.json": "24c8efcfbe9cd9417a062701e7888a0cdf8e519d7ec2b237d96abb4917c8f132"
   },
