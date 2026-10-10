@@ -252,6 +252,13 @@ def test_scaling_settings_round_trip_and_an_old_config_reads_the_defaults(store)
     assert DEFAULT_LOAD_LOW < DEFAULT_LOAD_HIGH
 
 
+def test_the_api_address_round_trips_and_an_old_config_reads_it_empty(store):
+    store.create(config(api_url="https://swarm.example.test:8443"))
+    assert store.config("smoke").api_url == "https://swarm.example.test:8443"
+    store.redis.hdel(store.key("smoke", "config"), "api_url")
+    assert store.config("smoke").api_url == ""
+
+
 @pytest.mark.parametrize(
     "changes",
     [

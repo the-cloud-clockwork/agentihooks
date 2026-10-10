@@ -2,8 +2,8 @@
   "case": "T-SV2-KUB-02-A",
   "evidence_class": "mocked: fakeredis journal and execution registry, a fake lease clock and an in process API server that applies a create, drops its response and then answers AlreadyExists; no Kubernetes API server was called",
   "input_sha256": {
-    "pod-launch.json": "8d1964999c9d4fc4e3bfd4f8aea2938da30b825411e1e5a12f4ea7e432261908",
-    "pod-policy.json": "f8a7cb319094b100d5f09a4e6a6ea5b794c6011cec6443a280f6dc3d1be40085"
+    "pod-launch.json": "a3dd9f7083b76f91ac724de6fc3d05d0227424feda9caac8d1c8f50eeede87ae",
+    "pod-policy.json": "fe59695070f986ee8928dcfa9abff5d0a07372f6af03611733a4cdad34772acb"
   },
   "observed": {
     "fixture": {
@@ -50,7 +50,7 @@
       "pods_in_namespace": 1,
       "retry_phase": "applied"
     },
-    "second_fixture_input_sha256": "3d98591fd3e2185fdec4cfb2c7bb6a8eea9691e6ca9c60eca4449aa1f462b092"
+    "second_fixture_input_sha256": "646d13749add51a5af1e3c465119cdfeadf63f53b5cde9eae6e449fb5db8f703"
   },
   "state": "passed"
 }

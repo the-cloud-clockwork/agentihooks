@@ -14,20 +14,22 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 
+from scripts.account_names import secret_key, token_env
+from scripts.swarm_v2.kubernetes.storage import MountChecker, StorageRefused, normal
 from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL, OWNER_LABEL
 
 SCHEMA = Path(__file__).resolve().parents[3] / "docs" / "swarm-v2" / "schemas" / "pod-policy.json"
 DOMAIN = "swarm.agentihooks.io"
 ATTEMPTS = "/home/worker/attempts"
 LAUNCH_DIR = "/var/run/swarm/launch"
-CREDENTIAL_DIR = "/var/run/swarm/credential"
+ACCOUNTS_OBJECT = "swarm-claude-creds"
 WORKER_ID = 10001
 TMP_MIB = 1024
 PROBES = ("startup", "readiness", "liveness")
 HARNESSES = ("claude", "codex")
 LABEL_VALUE = re.compile(r"[A-Za-z0-9]([A-Za-z0-9._-]{0,61}[A-Za-z0-9])?")
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,127}")
-ACCOUNT = re.compile(r"[a-z0-9]([a-z0-9-]{0,46}[a-z0-9])?")
+ACCOUNT = re.compile(r"(?=.{3,62}\Z)[A-Za-z0-9]([A-Za-z0-9._+-]*[A-Za-z0-9])?@[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?")
 PROJECT = re.compile(r"github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+|local:[A-Za-z0-9._-]+|unknown")
 IDENTITY = {
     "execution_id": re.compile(r"exe-[0-9a-f]{32}"),
@@ -107,6 +109,11 @@ def load_policy(path: str | Path) -> dict:
     error = best_match(Draft202012Validator(json.loads(SCHEMA.read_text())).iter_errors(policy))
     if error is not None:
         raise PodSpecRefused(f"pod policy is invalid at {_where(error.absolute_path)}: {error.message}", "policy")
+    if not all(ACCOUNT.fullmatch(account) for account in policy["provider_accounts"]):
+        raise PodSpecRefused("pod policy provider_accounts must each be one account email", "policy")
+    keys = [secret_key(account) for account in policy["provider_accounts"]]
+    if len(set(keys)) != len(keys):
+        raise PodSpecRefused("pod policy provider_accounts must name distinct secret keys", "policy")
     probes = policy["probes"]
     budget = probes["herdr_timeout_seconds"] + probes["brain_timeout_seconds"]
     for name in PROBES:
@@ -114,6 +121,10 @@ def load_policy(path: str | Path) -> dict:
             raise PodSpecRefused(
                 f"{name} probe timeout_seconds must exceed the herdr and brain timeouts together", "policy"
             )
+    mounts = policy.get("mounts", [])
+    for field, key in (("name", str), ("mount_path", normal)):
+        if len({key(mount[field]) for mount in mounts}) < len(mounts):
+            raise PodSpecRefused(f"pod policy mounts repeat a {field}", "policy")
     return policy
 
 
@@ -143,7 +154,7 @@ def _profile(policy: dict, launch: AdmittedLaunch) -> dict:
         raise PodSpecRefused("launch resources must be positive integers", "resources")
     if launch.memory_mib > limits["memory_mib"] or launch.cpu_millis > limits["cpu_millis"]:
         raise PodSpecRefused(f"launch resources exceed the {launch.profile} profile limits", "resources")
-    if launch.provider_account not in policy["provider_accounts"]:
+    if launch.provider_account.lower() not in {account.lower() for account in policy["provider_accounts"]}:
         raise PodSpecRefused("launch provider_account is not an approved provider account", "account")
     return policy["profiles"][launch.profile]
 
@@ -171,7 +182,7 @@ def _metadata(policy: dict, launch: AdmittedLaunch, payload: str) -> dict:
             f"{DOMAIN}/swarm": launch.swarm_id,
             f"{DOMAIN}/task": launch.task_id,
             f"{DOMAIN}/template-version": version,
-            f"{DOMAIN}/provider-account": launch.provider_account,
+            f"{DOMAIN}/provider-account": secret_key(launch.provider_account),
         },
         "annotations": {
             f"{DOMAIN}/seat": launch.seat_id,
@@ -214,6 +225,36 @@ def _resources(launch: AdmittedLaunch, limits: dict) -> dict:
     }
 
 
+def _token(launch: AdmittedLaunch) -> dict:
+    ref = {"name": ACCOUNTS_OBJECT, "key": secret_key(launch.provider_account)}
+    return {"name": token_env(launch.provider_account), "valueFrom": {"secretKeyRef": ref}}
+
+
+def _read_only(mount: dict) -> bool:
+    return mount["purpose"] != "artifact"
+
+
+def _shared_volume(mount: dict) -> dict:
+    source = mount["source"]
+    if "claim" in source:
+        return {"persistentVolumeClaim": {"claimName": source["claim"], "readOnly": _read_only(mount)}}
+    if "host_path" in source:
+        return {"hostPath": {"path": source["host_path"], "type": "Directory"}}
+    return {"nfs": {**source["nfs"], "readOnly": _read_only(mount)}}
+
+
+def _shared_volumes(policy: dict) -> list[dict]:
+    return [{"name": f"shared-{mount['name']}", **_shared_volume(mount)} for mount in policy.get("mounts", [])]
+
+
+def _shared_mounts(policy: dict, launch: AdmittedLaunch) -> list[dict]:
+    mounts = []
+    for mount in policy.get("mounts", []):
+        at = {"name": f"shared-{mount['name']}", "mountPath": mount["mount_path"], "readOnly": _read_only(mount)}
+        mounts.append(at if _read_only(mount) else at | {"subPath": launch.execution_id})
+    return mounts
+
+
 def _container(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
     container = {
         "name": "agent",
@@ -225,7 +266,8 @@ def _container(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
             f"{ATTEMPTS}/{launch.execution_id}",
             f"{LAUNCH_DIR}/launch.json",
         ],
-        "env": [{"name": "BRAIN_URL", "value": policy["brain_url"]}] if "brain_url" in policy else [],
+        "env": [_token(launch)]
+        + ([{"name": "BRAIN_URL", "value": policy["brain_url"]}] if "brain_url" in policy else []),
         "resources": _resources(launch, profile["limits"]),
         "securityContext": {
             "allowPrivilegeEscalation": False,
@@ -237,7 +279,7 @@ def _container(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
             {"name": "home", "mountPath": "/home/worker"},
             {"name": "tmp", "mountPath": "/tmp"},  # NOSONAR: a Pod-private emptyDir, never the host /tmp
             {"name": "launch", "mountPath": LAUNCH_DIR, "readOnly": True},
-            {"name": "credential", "mountPath": CREDENTIAL_DIR, "readOnly": True},
+            *_shared_mounts(policy, launch),
         ],
     }
     for mode in PROBES:
@@ -279,18 +321,10 @@ def _spec(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
             {"name": "home", "emptyDir": {"sizeLimit": f"{profile['limits']['ephemeral_mib'] - TMP_MIB}Mi"}},
             {"name": "tmp", "emptyDir": {"sizeLimit": f"{TMP_MIB}Mi"}},
             {"name": "launch", "configMap": {"name": f"swarm-{launch.execution_id}-launch", "defaultMode": 0o444}},
-            {
-                "name": "credential",
-                "secret": {
-                    "secretName": f"swarm-account-{launch.provider_account}",
-                    "items": [{"key": "token", "path": "token"}],
-                    "defaultMode": 0o400,
-                },
-            },
+            *_shared_volumes(policy),
         ],
+        "runtimeClassName": policy["runtime_class_name"],
     }
-    if "runtime_class_name" in policy:
-        body["runtimeClassName"] = policy["runtime_class_name"]
     return body
 
 
@@ -298,6 +332,7 @@ class PodTemplate:
     def __init__(self, policy: dict) -> None:
         self.policy = policy
         self.failures = Counter()
+        self.storage = MountChecker()
 
     def render(self, record: object) -> Rendered:
         try:
@@ -314,10 +349,18 @@ class PodTemplate:
             "metadata": _metadata(self.policy, launch, payload),
             "spec": _spec(self.policy, launch, profile),
         }
+        try:
+            self.storage.check(pod)
+        except StorageRefused as refused:
+            self.failures["storage"] += 1
+            raise PodSpecRefused(str(refused), "storage") from None
         return Rendered(pod, canonical_digest(pod))
 
     def pod_spec_validation_failures_total(self) -> dict[str, int]:
         return dict(self.failures)
+
+    def shared_runtime_mount_rejections_total(self) -> dict[str, int]:
+        return self.storage.shared_runtime_mount_rejections_total()
 
 
 def main(argv: list[str] | None = None) -> int:

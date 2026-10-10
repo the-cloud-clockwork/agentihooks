@@ -1,15 +1,15 @@
 {
-  "tested_commit": "f659fa9c2c1a78e2fb3b7286004789ab642a09e8",
+  "tested_commit": "e9f046bf450a353cca9f783b7771b1999cb7e3fd",
   "evidence_class": "mocked in process rendering for the cases; Kubernetes schema validity observed by the kind job's strict server side dry run",
   "inputs": {
-    "scripts/swarm_v2/kubernetes/spec.py": "15fce1b0ab515a4a607b70bb889cc927a36dd6a9f2cc0a32b17dd5ef5cfe4e5f",
-    "docs/swarm-v2/schemas/pod-policy.json": "becf40b5b21bcfcda1d1dcf5c6f47443ed275e8ffdd892bba8af9cd422066480",
-    "tests/fixtures/swarm_v2/pod-policy.json": "f8a7cb319094b100d5f09a4e6a6ea5b794c6011cec6443a280f6dc3d1be40085",
+    "scripts/swarm_v2/kubernetes/spec.py": "d52edde01d9a0e0c95f2087296b25f76c8c3bea7cb0b2263f9193838946cc0cc",
+    "docs/swarm-v2/schemas/pod-policy.json": "ff1fe4d47a18047e7c7f404dbc88fd593917d4fa98b21a6490aac76b4702ec4c",
+    "tests/fixtures/swarm_v2/pod-policy.json": "cac05e3a549966cf63b9c00183883ec7087b814eb91fc785dad689df9e66723b",
     "tests/fixtures/swarm_v2/pod-launch.json": "8d1964999c9d4fc4e3bfd4f8aea2938da30b825411e1e5a12f4ea7e432261908",
-    "tests/fixtures/swarm_v2/pod-rendered.json": "68922fc8475919b9da88e471672fd93d8daeb6b24069769be2ea108a3d06bec3",
-    "tests/fixtures/swarm_v2/pod-rendered-wrong-probes.json": "24c8efcfbe9cd9417a062701e7888a0cdf8e519d7ec2b237d96abb4917c8f132",
+    "tests/fixtures/swarm_v2/pod-rendered.json": "8dc5ffd81a7f1d5dd956a604a3ac4eb11acab0680deee20b1f97998a34330a35",
+    "tests/fixtures/swarm_v2/pod-rendered-wrong-probes.json": "c85a1a11dea0969dc2560337fa59e1c3749e100f51c78f809b135cd822c6daa0",
     "tests/sv2_kub01_cases.py": "8c89c52887d57f03ca2839436923c45c09d8e1116cd0f86d1f173c547eb3ad17",
-    "tests/test_swarm_v2_kubernetes_spec.py": "74d4b5770bcbe209e2f58039e46338d7d840f293ccccb5406ccc00791688b48b",
-    "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh": "b29b199a253d67da2afcff0a14ef035040250002eff635aed5b4697f564df20b"
+    "tests/test_swarm_v2_kubernetes_spec.py": "861da6125ad5b75ebacc8fcb663feed043f9f533617581671b6b58668895a03d",
+    "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh": "b7910e334bc92b964de83824b11cdebf4c0046231ba3db6140a3d9018e7c72a8"
   }
 }

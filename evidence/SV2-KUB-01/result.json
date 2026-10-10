@@ -42,18 +42,25 @@
   "code_evidence": {
     "issue_url": "https://github.com/the-cloud-clockwork/agentihooks/issues/2425",
     "pull_request_url": "https://github.com/the-cloud-clockwork/agentihooks/pull/2443",
-    "tested_commit": "f659fa9c2c1a78e2fb3b7286004789ab642a09e8",
+    "tested_commit": "e9f046bf450a353cca9f783b7771b1999cb7e3fd",
     "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38065955378",
-    "tests_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38066783021",
-    "mutation_preflight_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38066779623",
-    "kind_job": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38066783021/job/114256176988",
+    "tests_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38071760772",
+    "mutation_preflight_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38071626691",
+    "kind_job": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38071760772/job/114270448511",
     "kind_dry_run": [
       "namespace/swarm-pod-proof created",
       "serviceaccount/swarm-worker created",
+      "runtimeclass.node.k8s.io/kata-fc created",
       "pod/swarm-exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0 created (server dry run)",
       "pod/swarm-exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0 created (server dry run)",
       "rendered execution Pods passed server side strict validation"
-    ]
+    ],
+    "amended_by": {
+      "package": "SV2-SEC-06",
+      "issue_url": "https://github.com/the-cloud-clockwork/agentihooks/issues/2444",
+      "pull_request_url": "https://github.com/the-cloud-clockwork/agentihooks/pull/2463",
+      "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38067702782"
+    }
   },
   "fixture_manifest": "evidence/SV2-KUB-01/manifest.json",
   "limitations": [

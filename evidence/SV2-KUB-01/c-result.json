@@ -3,14 +3,14 @@
   "state": "passed",
   "evidence_class": "mocked: in process rendering; Kubernetes schema validity comes from the kind job's strict server side dry run of the committed golden Pods, recorded with its run id in result.json",
   "input_sha256": {
-    "pod-policy.json": "f8a7cb319094b100d5f09a4e6a6ea5b794c6011cec6443a280f6dc3d1be40085",
-    "pod-launch.json": "8d1964999c9d4fc4e3bfd4f8aea2938da30b825411e1e5a12f4ea7e432261908",
-    "pod-rendered.json": "68922fc8475919b9da88e471672fd93d8daeb6b24069769be2ea108a3d06bec3",
-    "pod-rendered-wrong-probes.json": "24c8efcfbe9cd9417a062701e7888a0cdf8e519d7ec2b237d96abb4917c8f132"
+    "pod-policy.json": "fe59695070f986ee8928dcfa9abff5d0a07372f6af03611733a4cdad34772acb",
+    "pod-launch.json": "a3dd9f7083b76f91ac724de6fc3d05d0227424feda9caac8d1c8f50eeede87ae",
+    "pod-rendered.json": "6db732d6d34b9873cb8eaeb6e8143fb01e0722c404de12250beaf49b5932bda0",
+    "pod-rendered-wrong-probes.json": "94631ea9668d46e6344aede03b750c04f38d37930c0e7fc61959d3a0636e9a42"
   },
   "observed": {
-    "first_digest": "sha256:0ba1f7e02e4a1106be45c713168171fe80206f3cfa48905f4b5e7740b5e242a3",
-    "restarted_digest": "sha256:0ba1f7e02e4a1106be45c713168171fe80206f3cfa48905f4b5e7740b5e242a3",
+    "first_digest": "sha256:103b600c2a0fff44fbc7839b602194eb6dfcfda17a5206dc1a10d0055d72564a",
+    "restarted_digest": "sha256:103b600c2a0fff44fbc7839b602194eb6dfcfda17a5206dc1a10d0055d72564a",
     "same_digest": true,
     "probe_rollback": {
       "evidence_class": "render level: the wrong and reverted Pods differ only in their probes",
