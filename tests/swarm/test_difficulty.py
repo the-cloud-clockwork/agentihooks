@@ -324,3 +324,23 @@ def test_written_sizes_pass_the_ledger_task_check(fields):
     from scripts.swarm_ledger import ledger
 
     ledger.ledger_tasks.check({"op": "task_update", "by": "swarm", "item": "tasks/t1", "fields": dict(fields)})
+
+
+def test_difficulty_confidence_is_read_from_its_definition(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_TASK_DIFFICULTY_CONFIDENCE", "0.7")
+    assert difficulty.MIN_CONFIDENCE == 0.7
+    with pytest.raises(AttributeError) as missing:
+        difficulty.ABSENT
+    assert missing.value.args == ("ABSENT",)
+
+
+def test_a_refused_definition_is_logged_before_the_default_size(monkeypatch, tmp_path):
+    from hooks import config
+    from hooks.classifier import decision_log
+
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_TASK_DIFFICULTY_CONFIDENCE", "1.5")
+    monkeypatch.setattr(difficulty, "decide", lambda *a, **k: pytest.fail("sized without a definition"))
+    assert difficulty.classify({"id": "t1", "title": "Size me"}, {}) == difficulty.sized("M", "default", 0.0)
+    [entry] = decision_log.read("task-difficulty")
+    assert entry["failures"] == [{"model": "definition", "reason": "threshold confidence must be between zero and one"}]

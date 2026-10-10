@@ -1425,6 +1425,7 @@ def test_mutations_enforce_the_ledger_talk_budget(live, monkeypatch):
     store.update(SLUG, gates={"talk": "enforce"})
     worker = "engineer@323133-0440"
     marks = progress.Progress(redis, SLUG)
+    marks.outcome(worker, "pushed", 1)
     for _ in range(talk.BUDGET):
         marks.talk(worker)
 
@@ -2229,8 +2230,10 @@ def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeyp
         must="",
         check="",
         judge="",
+        push="",
         kind="",
         artifact=False,
+        follow_up=False,
         profile="",
         rank="",
         difficulty=None,

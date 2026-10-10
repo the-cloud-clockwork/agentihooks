@@ -65,6 +65,19 @@ def test_the_spawn_reader_reads_the_watched_swarm_at_the_pass_time(monkeypatch):
     assert seen == [(store, "sw", 42)]
 
 
+def test_the_master_launch_reader_reads_the_watched_swarm(monkeypatch):
+    from scripts.doctor import master_launches, spawn_read
+
+    seen = []
+    monkeypatch.setattr(spawn_read, "master_records", lambda store, slug: seen.append((store, slug)) or "rec")
+    monkeypatch.setattr(master_launches, "findings", lambda record: [STALE] if record == "rec" else [])
+    import fakeredis
+
+    store = SimpleNamespace(redis=fakeredis.FakeRedis(decode_responses=True))
+    assert detect.readers(store, None, "sw", 42, environ={})["master launch"]() == [STALE]
+    assert seen == [(store, "sw")]
+
+
 def test_the_inbox_reader_holds_delivered_mail_to_its_receiver_and_leaves_out_outside_sessions():
     import fakeredis
 
@@ -199,3 +212,14 @@ def test_doctor_detectors_share_one_mail_snapshot_per_pass(monkeypatch, tmp_path
     assert second["handoff"]() == []
     assert second["inbox"]() == []
     assert reads == ["sw", "sw"]
+
+
+def test_a_pass_without_telemetry_drops_only_the_trace_reader():
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    every = set(detect.readers(store, None, "sw", 1_000, environ={}))
+    assert "trace" in every
+    assert set(detect.readers(store, None, "sw", 1_000, environ={}, telemetry=False)) == every - {"trace"}

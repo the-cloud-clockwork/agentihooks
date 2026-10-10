@@ -5,7 +5,6 @@ import json
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 import time
@@ -13,6 +12,8 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
+
+from scripts.swarm_v2 import filesystem
 
 TARGETS = ("claude", "codex")
 RECORD = "execution.json"
@@ -187,24 +188,25 @@ def child_environment(home: Path, interpreter: Path) -> dict[str, str]:
     }
 
 
-def render(attempt: Path, target: str) -> None:
-    pending = json.loads(_text(attempt / PENDING))
-    home = attempt / "homes" / target
+def render(execution: filesystem.Execution, target: str) -> None:
+    pending = json.loads(_text(execution.root / PENDING))
+    home = execution.path("home") / target
     done = subprocess.run(
-        child_command(attempt, target),
+        child_command(execution.root, target),
         cwd=home,
         env=child_environment(home, Path(pending["request"]["interpreter"])),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
     )
-    _write(attempt / "run" / f"render-{target}.log", done.stdout)
+    _write(execution.path("runtime") / f"render-{target}.log", done.stdout)
     if done.returncode:
         raise BootstrapError(f"{target} render failed with exit {done.returncode}")
 
 
 def materialize(attempt: Path, target: str) -> None:
     from scripts.profiles.render import _is_doc, _settings
+    from scripts.swarm_v2 import broadcast_bridge
     from scripts.targets import get_adapter
     from scripts.targets._common import _install_module
 
@@ -216,7 +218,9 @@ def materialize(attempt: Path, target: str) -> None:
         raise BootstrapError(f"profile did not resolve in the execution scope: {name}")
     adapter = get_adapter(target)
     native = _settings(target, None, dirs)
-    native.setdefault("_agentihooks", {}).setdefault("env", {}).update(request["endpoints"])
+    native.setdefault("_agentihooks", {}).setdefault("env", {}).update(
+        {**request["endpoints"], broadcast_bridge.GRANT_FILE: str(broadcast_bridge.grant_path(attempt))}
+    )
     adapter.write_settings(native)
     for subdir, keep in (
         ("skills", _i._skill_dir_filter()),
@@ -307,8 +311,7 @@ def _leaves(path: str, roots: list[Path]) -> bool:
     return ".." in Path(path).parts
 
 
-def _check_home(attempt: Path, target: str, roots: list[Path], owner: tuple[int, int]) -> None:
-    home = attempt / "homes" / target
+def _check_home(home: Path, target: str, roots: list[Path], owner: tuple[int, int]) -> None:
     surfaces = _claude_surfaces(home) if target == "claude" else _codex_surfaces(home)
     for surface, texts in surfaces.items():
         for path in [p for text in texts for p in _paths(text)]:
@@ -322,14 +325,13 @@ def _check_home(attempt: Path, target: str, roots: list[Path], owner: tuple[int,
             raise BootstrapError(f"{target} home holds a file not owned by {owner[0]}:{owner[1]}")
 
 
-def _seed(attempt: Path, request: Request) -> None:
+def _seed(execution: filesystem.Execution, request: Request) -> None:
     linked = []
     for name in sorted(set(request.profiles.values())):
-        copy = attempt / "profiles" / name
-        shutil.copytree(request.templates / name, copy, symlinks=True)
+        copy = filesystem.seed(execution, request.templates / name, name)
         linked.append({"name": name, "path": str(copy)})
     for target in request.profiles:
-        state = attempt / "homes" / target / ".agentihooks"
+        state = execution.path("home") / target / ".agentihooks"
         state.mkdir(parents=True, mode=0o700)
         _write(state / "state.json", _json({"linked_profiles": linked}))
 
@@ -345,11 +347,11 @@ def _accepted(attempt: Path, digest: str) -> dict | None:
         return {**accepted, "reused": True}
     if not (attempt / PENDING).is_file():
         raise BootstrapError(f"{attempt.name} holds files bootstrap did not write")
-    shutil.rmtree(attempt)
+    filesystem.remove(attempt)
     return None
 
 
-def _record(request: Request, digest: str, profiles: dict[str, str], seconds: float) -> dict:
+def _record(request: Request, digest: str, profiles: dict[str, str], seconds: float, layout: filesystem.Layout) -> dict:
     return {
         "schema_version": 1,
         "package": "SV2-IMG-02",
@@ -360,8 +362,9 @@ def _record(request: Request, digest: str, profiles: dict[str, str], seconds: fl
         "accounts": request.accounts,
         "endpoints": request.endpoints,
         "interpreter": str(request.interpreter),
-        "homes": {target: f"homes/{target}" for target in request.profiles},
+        "homes": {target: f"{layout.roots['home']}/{target}" for target in request.profiles},
         "worker_profile_materialization_seconds": round(seconds, 3),
+        "layout": filesystem.mapping(layout),
     }
 
 
@@ -374,17 +377,17 @@ def _materialize_attempt(request: Request, profiles: dict[str, str], roots: list
     started = time.monotonic()
     attempt.mkdir(mode=0o700)
     try:
+        layout = filesystem.load()
         _write(attempt / PENDING, _json({"request": _document(request)}))
-        for folder in ("run", "tmp"):
-            (attempt / folder).mkdir(mode=0o700)
-        _seed(attempt, request)
+        execution = filesystem.allocate(request.root, request.attempt, layout)
+        _seed(execution, request)
         for target in request.profiles:
-            render(attempt, target)
-            _check_home(attempt, target, roots, (request.uid, request.gid))
-    except BootstrapError:
-        shutil.rmtree(attempt)
-        raise
-    record = _record(request, digest, profiles, time.monotonic() - started)
+            render(execution, target)
+            _check_home(execution.path("home") / target, target, roots, (request.uid, request.gid))
+    except (BootstrapError, filesystem.LayoutError) as error:
+        filesystem.remove(attempt)
+        raise BootstrapError(str(error)) from error
+    record = _record(request, digest, profiles, time.monotonic() - started, layout)
     staged = attempt / f"{RECORD}.tmp"
     _write(staged, _json(record))
     staged.replace(attempt / RECORD)
@@ -433,7 +436,16 @@ def build_parser() -> argparse.ArgumentParser:
     child = commands.add_parser("render")
     child.add_argument("attempt", type=Path)
     child.add_argument("target", choices=TARGETS)
+    commands.add_parser("grant").add_argument("attempt", type=Path)
     return parser
+
+
+def store_grant(attempt: Path, text: str) -> None:
+    from scripts.swarm_v2 import broadcast_bridge
+
+    if not text.strip():
+        raise BootstrapError("no launch grant on standard input")
+    broadcast_bridge.store_grant(broadcast_bridge.grant_path(attempt), text)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -441,6 +453,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "render":
             materialize(args.attempt, args.target)
+            return 0
+        if args.command == "grant":
+            store_grant(args.attempt, sys.stdin.read())
             return 0
         request = Request(
             root=args.root,

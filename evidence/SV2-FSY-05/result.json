@@ -1,0 +1,112 @@
+{
+  "package": "SV2-FSY-05",
+  "dependency": [
+    "SV2-FSY-04"
+  ],
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2465",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2472",
+  "tested_commit": "6a13b96fa4e52183965b2af1d213ac5822dd0944",
+  "status": "fixture-qualified",
+  "package_complete": false,
+  "mocked": true,
+  "evidence_class": "Mocked in CI: rendered Pod manifests checked without a cluster, a cache store whose read only mount is simulated through the store's mount probe, and a local artifact directory replaced by a file to model lost shared storage. No NFS, no Pod and no live rollout proof.",
+  "interfaces": [
+    "scripts.swarm_v2.kubernetes.storage.MountChecker().check(pod): refuses shared_runtime, unscoped_shared_write and operator_home with StorageRefused(message, reason); shared_runtime_mount_rejections_total() counts every reason",
+    "python -m scripts.swarm_v2.kubernetes.storage <pod.json>: exit 0 when the Pod passes, 1 with the refusal, an unreadable file or a non Pod document on stderr, 64 on usage errors",
+    "Pod policy mounts (docs/swarm-v2/schemas/pod-policy.json): seed, artifact and cache with a claim, host_path or nfs source; load_policy refuses repeated names or normalised paths",
+    "scripts.swarm_v2.kubernetes.spec.PodTemplate.render: seed and cache render read only, artifact renders writable with subPath set to the execution id; a Pod failing the checker is refused with reason storage; shared_runtime_mount_rejections_total() on the template",
+    "scripts.swarm_v2.cache.Store.read_only (default mounted_read_only, the statvfs read only flag of the nearest existing folder): attach on a read only store writes nothing, publish from it is refused",
+    "scripts.swarm_v2.artifacts.publication.publish(store, artifact_id, source) -> Publication(published|paused, ref, reason): the ArtifactStore is bound to its owner from a launch grant at construction; an OSError from the artifact backend pauses publication and leaves the attempt files untouched",
+    "scripts.swarm_v2.artifacts.publication.SWITCH (SWARM_ARTIFACT_PUBLISHING=off): pauses artifact publication alone, the attempt keeps its files; any other value publishes",
+    "python -m scripts.swarm_v2.artifacts.benchmark <folder> --sizes <MiB,...> --rounds N: put throughput per size through the artifact adapter in a fresh subfolder, then a loss probe on that subfolder (paused, source intact, published after restore); removes only its subfolder"
+  ],
+  "supported_versions": {
+    "python": "3.11 and 3.12 unit shards in the linked CI run",
+    "kubernetes": "Pod v1 volume and volumeMount fields: persistentVolumeClaim, nfs and hostPath sources, readOnly, subPath; subPathExpr is not accepted as scope",
+    "filesystem": "POSIX statvfs ST_RDONLY on the ubuntu CI runner"
+  },
+  "states": {
+    "observed": "Rendered Pod manifests, store trees before and after attach and publish, attempt worktree snapshots before and after a lost backend",
+    "accepted": "A Pod that passes MountChecker; a seed read from a read only store; a paused publication that left the worktree unchanged",
+    "committed": "An artifact put through the artifact store after the backend returns, once, with the same reference on replay",
+    "externally_verified": "None; no cluster, NFS export or node cache owner uses the package yet"
+  },
+  "validation": {
+    "red": [
+      "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38073494779 on 38997c46: tests only commit, ModuleNotFoundError for scripts.swarm_v2.kubernetes.storage and scripts.swarm_v2.artifacts.publication"
+    ],
+    "green": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38075950364 on 6a13b96fa4e52183965b2af1d213ac5822dd0944: every unit shard on 3.11 and 3.12, test-count and the mutation shards passed; sonar failed only on one unreviewed python:S5443 hotspot, reviewed SAFE afterwards",
+    "mutation": "Branch preflight on every pushed head; 27 survivors on d0ba29e3 killed by 32f17171 and 478b8965; the PR mutation shard survivor in normal killed by 4430c6c7",
+    "review": "Spec reader closed with no findings; Standards reader ran three rounds and closed, its last two held items fixed or documented in b39ccb42",
+    "local": "No local tests or mutation ran; lint, format and size passed in the pre push gate on every head"
+  },
+  "measurements": {
+    "shared_runtime_mount_rejections_total": {
+      "a": {
+        "observed_per_run": {
+          "shared_runtime": 1
+        },
+        "condition": "a safe deployment passes, then the same Pod with a shared writable Codex home is refused, on two independent fixtures",
+        "dimensions": {
+          "fixture": "sv2-fsy-05"
+        },
+        "passed": true
+      },
+      "b": {
+        "observed": {
+          "operator_home": 1
+        },
+        "pod_spec_validation_failures_total": {
+          "storage": 1
+        },
+        "condition": "a pod policy mounting the operator home into every worker is refused by the template, the policy is unchanged and no host path is disclosed",
+        "dimensions": {
+          "fixture": "sv2-fsy-05"
+        },
+        "passed": true
+      },
+      "c": {
+        "observed": {},
+        "condition": "lost artifact storage pauses publication; no mount is checked",
+        "dimensions": {
+          "fixture": "sv2-fsy-05"
+        },
+        "passed": true
+      }
+    }
+  },
+  "acceptance": {
+    "T-SV2-FSY-05-A": "tests.contracts.storage_layout.cases.case_a, asserted by test_package_cases_pass_on_the_isolated_fixture in the green run",
+    "T-SV2-FSY-05-B": "tests.contracts.storage_layout.cases.case_b, including the node cache seed write refused with the store tree unchanged",
+    "T-SV2-FSY-05-C": "tests.contracts.storage_layout.cases.case_c: paused on loss, worktree intact, one commit after restore, identical replay"
+  },
+  "case_outputs": "a-result.json, b-result.json and c-result.json are not committed: evidence/SV2-FSY-05/generate_case_results.py executes the case code, and test code runs only in CI on this fleet. The case results are asserted in the green run above.",
+  "rollback": "Rehearsed in CI by test_rollback_rehearsal_pauses_then_resumes_publication_with_the_attempt_intact: publishing switched off pauses with the attempt files unchanged, switched back on publishes once. Not rehearsed on a live cluster.",
+  "remaining_limitations": [
+    "The cloud to on-prem artifact throughput and WAN failure benchmark has a command and a local disk figure only; the WAN run is a rollout gate measurement",
+    "The node cache owner process that publishes seeds into the read only store is named in docs/swarm-v2/storage-policy.md, not built",
+    "Eviction on a store that attempts only read falls back to publish order",
+    "The checker is lexical; a node host path that is a symlink into a home passes, node layout and policy authors are trusted"
+  ],
+  "benchmark": {
+    "command": "python -m scripts.swarm_v2.artifacts.benchmark <task work folder>/bench --sizes 1,8 --rounds 2",
+    "where": "local WSL disk on the operator workstation, not the cloud to on-prem WAN path",
+    "throughput_mib_per_s": {
+      "1": 43.3,
+      "8": 174.6
+    },
+    "loss": {
+      "while_lost": "paused",
+      "reason": "artifact storage is unavailable (Not a directory)",
+      "source_intact": true,
+      "after_restore": "published"
+    },
+    "wan": "not measured; run the same command from a cloud worker against the on-prem mount at the rollout gate"
+  },
+  "failure_evidence": "tests/contracts/storage_layout/fixtures holds the smallest Pod for each refusal (shared-codex-home-pod, operator-home-pod, writable-node-cache-pod) beside safe-pod rendered from pod-policy-shared; the cases use no random seed",
+  "rollout_safety": "SWARM_ARTIFACT_PUBLISHING=off disables only artifact publication; a pod policy without mounts keeps the qualified private Pod; the storage checker itself has no off switch",
+  "production_path": "KubernetesTransport.apply_operation renders through PodTemplate and its storage checker; an operator home policy answers REFUSED with no create sent, a safe policy creates a Pod with a read only seed and cache and an artifact mount scoped to the execution id (tests.contracts.storage_layout.test_entrypoint)",
+  "authority": "Publication scope comes from the registration the launch grant authorization returns; a store whose authorization answers with a seat or task label is refused with the ungranted error; the artifact subPath is the launch execution id, never a Pod label",
+  "data_safety": "Authoritative: committed artifact objects and records, node cache seeds, attempt worktrees. Disposable: attempt private home and tmp volumes and the benchmark's own subfolder. Tested: rollback with publishing off leaves the artifact store byte for byte unchanged and a committed artifact verified; the benchmark leaves pre existing records in its mount unchanged"
+}

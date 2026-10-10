@@ -4,23 +4,22 @@ The sweep clears an agent's priority whose item is done, out of scope, merged or
 chat line on an item that carries a priority asks the classifier whether that write resolves what the priority
 asks. A yes clears it, closes a follow-up, records an operator comment on a question as its answer and notes the
 reason on the item; a no or a silent classifier leaves it. A priority that waits on an operator decision, a question,
-a merge approval, a follow-up flagged for him or an escalated plan, counts only the operator's writes, a verified
-master relay among them; an agent's write on it is never judged.
+a merge approval, a follow-up flagged for him or an escalated plan, and one a dispatcher seat handed to him by raising
+it under its own name, counts only the operator's writes, a verified master relay among them; an agent's write on it is
+never judged.
 """
 
 import re
 from dataclasses import dataclass
 
-from hooks.classifier import ClassifierError, YesNo, decide
-from scripts.swarm import ledger_events
+from hooks.classifier import ClassifierError, code_rules, decide, runner
+from scripts.swarm import ledger_events, naming
 
 PURPOSE = "priority-resolve"
+DISPATCHER = "dispatcher"
 CURSOR = "priority-cursor"
 PATH = re.compile(r"([a-z]+)/([^/]+)")
-RESOLVES = "the write resolves what the priority asks"
-WAITS = "the priority still waits"
 CLEARED = "Priority cleared by the swarm: {reason}."
-YES = 0.5
 OPERATOR = "operator"
 SELF = ("swarm", "ledger")
 WRITES = {
@@ -58,7 +57,7 @@ def priority_pass(store, slug, doc, ledger, judge=None, github=None):
             continue
         judged.add((row["id"], write.text))
         yes = _judge(doc, row, write, judge)
-        if yes is not None and yes >= YES:
+        if yes is not None:
             reason = (
                 f"the classifier judged that the {write.kind} from {write.who} resolves it, at probability {yes:.2f}"
             )
@@ -92,7 +91,7 @@ def _stale(item, github):
 
 def _item(doc, path):
     name, item_id = _split(path)
-    return next((i for i in doc[name] if i["id"] == item_id), {})
+    return next((i for i in doc.get(name, []) if i["id"] == item_id), {})
 
 
 def _split(path):
@@ -113,7 +112,16 @@ def _writes(doc, rows, events):
 
 
 def _counts(doc, row, write):
-    return write.by == OPERATOR or not _operator_decides(row["item"], _item(doc, row["item"]))
+    return write.by == OPERATOR or not operator_only(doc, row)
+
+
+def operator_only(doc, row):
+    return handed(row) or _operator_decides(row["item"], _item(doc, row["item"]))
+
+
+def handed(row):
+    found = naming.parse(row.get("by"))
+    return found is not None and found.kind == DISPATCHER
 
 
 def _operator_decides(path, item):
@@ -154,15 +162,24 @@ def _judge(doc, row, write, judge):
         "priority": row["text"],
         "write": {"by": write.who, "kind": write.kind, "text": write.text},
     }
-    question = YesNo(
-        f"Does this {write.kind} on {subject} resolve what its priority asks: {row['text']}",
-        true=RESOLVES,
-        false=WAITS,
-    )
+    params = {"kind": write.kind, "subject": subject, "priority": row["text"]}
     try:
-        return judge(state, {"resolves": question}, purpose=PURPOSE).answers["resolves"].noul
+        output = runner.run(PURPOSE, state, params, decider=judge)
     except ClassifierError:
         return None
+    return _probable(output.raw.answers, output.thresholds["probability"])
+
+
+def _probable(answers, threshold) -> float | None:
+    yes = answers["resolves"].noul
+    return yes if yes is not None and yes >= threshold else None
+
+
+def _verdicts(definition, state, params, answers):
+    return {"resolves": _probable(answers, definition.thresholds["probability"]) is not None}
+
+
+RULE = code_rules.CodeRule(code_rules.asked, _verdicts, {"resolves": (True, False)}, {"resolves": False})
 
 
 def _resolve(ledger, slug, row, write, reason):

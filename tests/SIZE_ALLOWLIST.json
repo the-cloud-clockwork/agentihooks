@@ -65,8 +65,8 @@
   "PLR0912": 22
  },
  "hooks/hook_manager.py::on_user_prompt_submit": {
-  "C901": 45,
-  "PLR0912": 45
+  "C901": 44,
+  "PLR0912": 44
  },
  "hooks/hook_manager.py::parse_transcript_metrics": {
   "C901": 17,
@@ -141,9 +141,6 @@
  },
  "scripts/ci_mutation/runner.py::run_gate": {
   "PLR0912": 14
- },
- "scripts/ci_mutation/selection.py::run_selected": {
-  "C901": 14
  },
  "scripts/claude_quota_balancer.py::collect_results": {
   "PLR0913": 8
@@ -260,8 +257,8 @@
   "PLR0913": 8
  },
  "scripts/swarm_ledger/ledger.py::cmd_task": {
-  "C901": 17,
-  "PLR0912": 16
+  "C901": 16,
+  "PLR0912": 15
  },
  "scripts/swarm_ledger/ledger_agent_ops.py::check": {
   "C901": 17,

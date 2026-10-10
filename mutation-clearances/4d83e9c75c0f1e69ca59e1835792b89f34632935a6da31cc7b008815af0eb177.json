@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x_judge__mutmut_24:fa7371e2d04bfb12fdb4caf356ad96de1f3a408c54c4f6e66054d5a4ac9ea38f": {
+    "reader": "standards_reader",
+    "reason": "Changes only nonsemantic XX padding in the operator-facing message 'the preparatory tests may not accept both old and new gate states'. The named shortfall and action remain present, with the same verdict and branch condition; exact typography is not part of the behavior contract."
+  }
+}

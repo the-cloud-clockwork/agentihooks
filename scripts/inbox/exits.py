@@ -1,6 +1,7 @@
 """Mail left pending for a swarm agent that exits: moved to its seat when the work goes on, else withdrawn and its
 sender told."""
 
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -11,6 +12,7 @@ if TYPE_CHECKING:
 
 BY = "swarm"
 UNKNOWN_OWNER = "the agent it was sent to is unknown, so no branch was checked"
+LANE_SEAT = re.compile(r"(eng|ci|plan)-(\d+)@.+")
 
 
 def settle(inbox, name, seat, exit_text):
@@ -114,7 +116,8 @@ def notice_address(inbox: "InboxStore", sender: str) -> str:
 
 def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Callable[[], dict]") -> None:
     """live_rows reads the ledger's tasks at sweep time: a task closed after the tick's own read settles as closed."""
-    active = {agent.name for agent in store.agents(slug) if agent.state != "finished"}
+    live = [agent for agent in store.agents(slug) if agent.state != "finished"]
+    active = {agent.name for agent in live}
     tasks = {row.get("claimed_by"): row for row in live_rows().values()}
     seats = store.seats.agent_seats(slug)
     gone = [(name, seat) for name, seat in seats if name not in active]
@@ -130,6 +133,9 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
             _settle_gone(inbox, name, seat, tasks.get(name, {}).get("state"), outcomes[name])
     _settle_seat_notices(inbox, {seat for _, seat in seats if seat}, active)
     _settle_peer_mail(inbox, slug, store, active)
+    if slug in store.slugs():
+        empty = {seat for _, seat in seats} - {agent.seat for agent in live}
+        _settle_unfillable(inbox, store.config(slug), empty)
 
 
 def _settle_gone(inbox: "InboxStore", name: str, seat: str, state: str | None, outcome: dict) -> None:
@@ -194,6 +200,44 @@ def _settle_peer_mail(inbox: "InboxStore", slug: str, store: "RedisStore", activ
             exit_text = f"left its seat and task {item.task}"
             if inbox.withdraw(item.id, BY, f"cancelled: {owner} {exit_text} before closing it", agent.seat, owner):
                 inbox.send(BY, notice_address(inbox, item.sender), _told(item, owner, exit_text), fyi=True)
+
+
+def _settle_unfillable(inbox: "InboxStore", config, seats: set) -> None:
+    for seat in sorted(seats):
+        why = _no_successor(seat, config)
+        if not why:
+            continue
+        for item in inbox.open_items(seat):
+            reason = f"cancelled: {seat} can get no successor: {why}"
+            if not inbox.withdraw(item.id, BY, reason, seat):
+                continue
+            _withdraw_escalations(inbox, item.id, seat)
+            if item.sender != BY:
+                text = (
+                    f"{seat} can get no successor: {why}, so your message {item.id}: "
+                    f"{item.text.splitlines()[0][:200]} is closed. "
+                    "Send it to whoever carries that work on if it still matters."
+                )
+                inbox.send(BY, notice_address(inbox, item.sender), text, fyi=True)
+
+
+def _withdraw_escalations(inbox: "InboxStore", item_id: str, seat: str) -> None:
+    from scripts.inbox.wake import raised_id
+
+    for entry in inbox.history(item_id):
+        if raised := raised_id(entry):
+            inbox.withdraw(raised, BY, f"cancelled: message {item_id} is closed, {seat} can get no successor")
+
+
+def _no_successor(seat: str, config) -> str:
+    found = LANE_SEAT.fullmatch(seat)
+    if not found:
+        return ""
+    if config.state == "stopped":
+        return "the swarm stopped"
+    lane = found.group(1)
+    cap = {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan}[lane]
+    return f"the {lane} lane cap is {cap}" if int(found.group(2)) > cap else ""
 
 
 def _owner(inbox, item, seat):

@@ -106,6 +106,9 @@ def rig(tmp_path, monkeypatch, ledger_port):
 
 
 def say_budget(rig):
+    from scripts.gates.progress import Progress
+
+    Progress(rig.redis, SLUG).outcome(ENG, "pushed", 1)
     for n in range(BUDGET):
         said = rig.cli("say", f"step {n} landed")
         assert said.returncode == 0, said.stderr

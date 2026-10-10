@@ -88,7 +88,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
   redis:
-    image: redis:7
+    image: mirror.gcr.io/library/redis:7
     command: [bash, /compose/start.sh]
     ports:
       - "${SWARM_BIND:-127.0.0.1}:${SWARM_REDIS_PORT:-6379}:6379"

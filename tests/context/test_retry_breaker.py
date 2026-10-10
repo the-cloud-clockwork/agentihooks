@@ -442,3 +442,82 @@ class TestHardBlockHalfOpen:
             on_post_tool_result({**payload, "tool_response": {"is_error": True, "content": "ENOENT"}})
         with pytest.raises(BlockAction):
             check_hard_block(payload)
+
+
+_PREPUSH_PASSED = (
+    "ci_prepush: ruff check\nAll checks passed!\nci_prepush: ruff format\n1331 files already formatted\n"
+    "ci_prepush: size limits\n83 units over a limit, 83 on the base allowlist, 0 errors\n"
+    "ci_prepush: every cheap gate passed on e737709622ef; push it."
+)
+_PREPUSH_FAILED = (
+    "ci_prepush: ruff check\nAll checks passed!\nci_prepush: ruff format\n1331 files already formatted\n"
+    "ci_prepush: size limits\n84 units over a limit, 83 on the base allowlist, 1 errors\n"
+    "ci_prepush: size limits failed; fix them, commit and run again before pushing."
+)
+
+
+class TestNativeShellOutcomes:
+    """Codex sends shell output as a bare string and Claude as a dict, neither with an exit code."""
+
+    _COMMAND = "python -m scripts.ci_prepush"
+
+    def _payload(self, response, session_id):
+        return {
+            "tool_name": "Bash",
+            "tool_input": {"command": self._COMMAND},
+            "tool_response": response,
+            "session_id": session_id,
+        }
+
+    def _count(self, session_id):
+        from hooks.context.retry_breaker import _get_state
+
+        return _get_state(session_id, "bash:python")["count"]
+
+    @pytest.mark.parametrize(
+        "response",
+        [_PREPUSH_PASSED, {"stdout": _PREPUSH_PASSED, "stderr": "", "interrupted": False, "isImage": False}],
+        ids=["codex-string", "claude-dict"],
+    )
+    def test_successful_prepush_never_counts(self, response):
+        from hooks.context.retry_breaker import on_post_tool_result
+
+        with patch.object(_breaker_mod, "_inject_breaker_message") as inject:
+            for _ in range(5):
+                on_post_tool_result(self._payload(response, "prepush-ok"))
+        assert self._count("prepush-ok") == 0
+        assert inject.call_count == 0
+
+    @pytest.mark.parametrize(
+        "summary",
+        ["Tests: 0 failed, 12 passed", "Found 0 errors", "0 exceptions, 0 timeouts, 0 denied", "1.0 errors"],
+    )
+    def test_only_a_zero_count_is_ignored(self, summary):
+        from hooks.tool_memory import _is_error
+
+        assert _is_error(summary)[0] is (summary == "1.0 errors")
+
+    def test_successful_prepush_resets_a_real_failure(self):
+        from hooks.context.retry_breaker import on_post_tool_result
+
+        on_post_tool_result(self._payload(_PREPUSH_FAILED, "prepush-reset"))
+        on_post_tool_result(self._payload(_PREPUSH_FAILED, "prepush-reset"))
+        assert self._count("prepush-reset") == 2
+        on_post_tool_result(self._payload(_PREPUSH_PASSED, "prepush-reset"))
+        assert self._count("prepush-reset") == 0
+
+    def test_failing_prepush_still_reaches_research_and_hard_stop(self):
+        from hooks.config import RETRY_BREAKER_HARD_MAX, RETRY_BREAKER_MAX
+        from hooks.context.retry_breaker import check_hard_block, on_post_tool_result
+        from hooks.hook_manager import BlockAction
+
+        payload = self._payload(_PREPUSH_FAILED, "prepush-fail")
+        with patch.object(_breaker_mod, "_inject_breaker_message") as inject:
+            for _ in range(RETRY_BREAKER_MAX):
+                on_post_tool_result(payload)
+            assert inject.call_count == 1
+            for _ in range(RETRY_BREAKER_HARD_MAX - RETRY_BREAKER_MAX):
+                on_post_tool_result(payload)
+        assert self._count("prepush-fail") == RETRY_BREAKER_HARD_MAX
+        with pytest.raises(BlockAction):
+            check_hard_block(payload)

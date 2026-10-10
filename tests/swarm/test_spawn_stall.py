@@ -2,7 +2,7 @@ import pytest
 
 from scripts.inbox import store as inbox_store
 from scripts.inbox.store import InboxStore
-from scripts.swarm import capacity, cli, status
+from scripts.swarm import capacity, cli, status, tick
 from scripts.swarm.health import spawn_stall
 from scripts.swarm.store import AgentRecord, SwarmConfig
 from tests.swarm.test_cli import env as env
@@ -356,8 +356,13 @@ def test_capacity_reader_receives_demand_clock_and_previous_state_without_refres
         return {"placements": {"eng": [{"harness": "claude", "account": "acct"}]}}
 
     runtime.quota_capacity = reader
+    counters = []
+    runtime.quota_spent = counters.append
+    store.redis.zadd(tick.HOST_SPENDS, {"now": clock[0], "later": clock[0] + 1})
     assert spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
     assert received == [previous]
+    (counter,) = counters
+    assert counter(clock[0]) == 1
 
 
 def test_a_missing_ledger_has_no_claimable_work(stalled, monkeypatch):
@@ -427,4 +432,51 @@ def test_autoscaling_with_no_host_room_offers_no_launch_seat(stalled, monkeypatc
     store, ledger, runtime, clock, _ = stalled
     store.update("sw", scaling="auto")
     monkeypatch.setattr(host_budget, "read_host", lambda: host_budget.HostSample(100, 1, 0, 0))
+    assert not spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
+
+
+def test_a_manual_swarm_held_by_the_host_is_not_a_spawn_stall(stalled, monkeypatch):
+    from scripts.swarm import host_budget
+
+    store, ledger, runtime, clock, _ = stalled
+    store.update("sw", scaling="manual")
+    assert spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
+    monkeypatch.setattr(host_budget, "read_host", lambda: host_budget.HostSample(100, 1, 0, 0))
+    assert not spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
+
+
+def test_an_auto_swarm_held_between_the_watermarks_scales_from_its_first_grant(stalled, monkeypatch):
+    import json
+
+    from scripts.swarm import host_budget
+
+    store, ledger, runtime, clock, _ = stalled
+    store.update("sw", scaling="auto")
+    granted = {"room": 2, "reason": "r", "limit": "load", "held": False, "granted_at": clock[0] - 60_000}
+    store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"host": granted}))
+    store.redis.zadd(tick.HOST_SPENDS, {"first": clock[0] - 59_000})
+    monkeypatch.setattr(host_budget, "read_host", lambda: host_budget.HostSample(10.0, 8, 64_000, 2))
+    seen = []
+    autoscaled = capacity.autoscaled
+    monkeypatch.setattr(
+        capacity,
+        "autoscaled",
+        lambda config, inputs, host: (
+            seen.append((host["granted_at"], capacity.unspent(host, inputs.spent))) or autoscaled(config, inputs, host)
+        ),
+    )
+    spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
+    assert seen == [(clock[0] - 60_000, 1)]
+
+
+def test_a_doctor_held_by_the_watched_focus_is_not_a_spawn_stall(stalled, monkeypatch):
+    from scripts.doctor import priming
+
+    store, ledger, runtime, clock, _ = stalled
+    store.update("sw", template=priming.TEMPLATE)
+    store.set_peer("sw", "watched")
+    own, watched = ledger.state, {"tasks": [], "freezes": []}
+    monkeypatch.setattr(ledger, "state", lambda slug: own(slug) if slug == "sw" else watched)
+    assert spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
+    watched["freezes"] = [{"verb": "focus", "target": "lane:ci"}]
     assert not spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)

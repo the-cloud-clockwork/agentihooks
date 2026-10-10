@@ -4,7 +4,7 @@ import math
 import os
 from pathlib import Path
 
-from scripts.ci_mutation.scope import discover_changes, select_tests
+from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests
 from scripts.ci_mutation.selection import changed_mutations
 
 # Fitted on Tests runs 37890680008 and 37877992114: a mutant costs a pytest start plus a few covering tests.
@@ -38,10 +38,12 @@ def estimate(root: Path, changes: dict[str, set[int]]) -> tuple[float, int, floa
     return seconds, mutants, stats
 
 
-def shard_count(seconds: float, mutants: int, stats: float, target: float, limit: int) -> int:
-    # Every shard repeats the stats run over all selected tests before mutating its share.
-    capacity = max(WORKERS * target - stats, WORKERS * target / 2)
-    return max(1, min(limit, mutants, math.ceil(seconds / capacity)))
+def shard_count(seconds: float, mutants: int, target: float, limit: int) -> int:
+    return max(1, min(limit, mutants, math.ceil(seconds / (WORKERS * target))))
+
+
+def stats_part_count(stats: float, target: float, limit: int) -> int:
+    return max(1, min(limit, math.ceil(stats / (WORKERS * target))))
 
 
 def main() -> int:
@@ -49,16 +51,22 @@ def main() -> int:
     parser.add_argument("--base", default="origin/dev")
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--target", type=float, default=240)
+    parser.add_argument("--stats-target", type=float, default=90)
     parser.add_argument("--limit", type=int, default=10)
     args = parser.parse_args()
     root = Path.cwd()
-    seconds, mutants, stats = estimate(root, discover_changes(root, args.base, args.head))
-    count = shard_count(seconds, mutants, stats, args.target, args.limit)
+    bases = own_bases(root, args.base, args.head, graded_green)
+    print(f"Mutation bases: {' '.join(bases)}")
+    seconds, mutants, stats = estimate(root, discover_changes(root, bases, args.head))
+    count = shard_count(seconds, mutants, args.target, args.limit)
+    parts = stats_part_count(stats, args.stats_target, args.limit)
     print(f"Changed line mutants: {mutants}\nEstimated mutation seconds: {seconds:.0f}, stats seconds: {stats:.0f}")
-    print(f"Mutation shards: {count}")
+    print(f"Mutation shards: {count}\nStats parts: {parts}")
     if output := os.environ.get("GITHUB_OUTPUT"):
         with Path(output).open("a") as stream:
             stream.write(f"shards={json.dumps(list(range(count)))}\n")
+            stream.write(f"stats_parts={json.dumps(list(range(parts)))}\n")
+            stream.write(f"bases={','.join(bases)}\n")
     return 0
 
 

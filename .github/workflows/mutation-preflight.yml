@@ -1,20 +1,26 @@
 name: Mutation preflight
 
 on:
+  workflow_call:
+    inputs:
+      base:
+        type: string
+        required: true
   push:
     branches-ignore: [dev, main, "gh-readonly-queue/**", "wip/**"]
 
 concurrency:
-  group: mutation-preflight-${{ github.ref }}
-  cancel-in-progress: true
+  group: mutation-preflight-${{ github.event_name == 'push' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 permissions:
   contents: read
   pull-requests: read
+  actions: read
 
 jobs:
   pull-request:
-    if: ${{ !github.event.deleted }}
+    if: ${{ github.event_name == 'push' && !github.event.deleted }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
@@ -30,15 +36,21 @@ jobs:
 
   mutation:
     needs: pull-request
-    if: ${{ needs.pull-request.outputs.open == 'false' }}
+    if: ${{ !cancelled() && (github.event_name != 'push' || needs.pull-request.outputs.open == 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
+      BASE: ${{ inputs.base || 'origin/dev' }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Record the revisions the report grades
+        run: |
+          mkdir -p .mutation-gate
+          printf '{"base": "%s", "head": "%s"}\n' "$(git merge-base "$BASE" HEAD)" "$(git rev-parse HEAD)" > .mutation-gate/scope.json
 
       - uses: actions/setup-python@v5
         with:
@@ -53,9 +65,17 @@ jobs:
       - name: Install dependencies
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
+      - name: Resolve the branch's own mutation bases
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m scripts.ci_mutation.plan --base "$BASE"
+
       - name: Select mutation tests before browser setup
         id: selection
-        run: python -m scripts.ci_mutation.browser --base origin/dev
+        env:
+          BASES: ${{ steps.plan.outputs.bases }}
+        run: python -m scripts.ci_mutation.browser --bases "$BASES"
 
       - name: Install the browser that page tests drive
         id: browser
@@ -71,8 +91,9 @@ jobs:
 
       - name: Mutate changed Python files
         env:
+          BASES: ${{ steps.plan.outputs.bases }}
           PYTHONUNBUFFERED: "1"
-        run: python -m scripts.ci_mutation --base origin/dev --budget 1080
+        run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080
 
       - name: Upload complete mutation evidence
         if: always()

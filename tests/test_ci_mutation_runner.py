@@ -95,8 +95,9 @@ def test_every_group_reached_after_the_deadline_is_reported_over_budget(tmp_path
 def test_a_failed_group_names_its_reason_for_every_file_and_later_groups_still_run(tmp_path, monkeypatch):
     calls = []
 
-    def mutate(root, work, selected, deadline, shard):
+    def mutate(root, work, selected, deadline, shard, stats):
         assert shard == (0, 1)
+        assert stats is None
         calls.append(list(selected))
         if "hooks/sample.py" in selected:
             return {}, "mutmut failed with exit 1"
@@ -301,7 +302,7 @@ def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monk
     monkeypatch.setattr("scripts.ci_mutation.runner.prepare_workspace", prepare)
     monkeypatch.setattr("scripts.ci_mutation.runner.run_process", process)
     monkeypatch.setattr("scripts.ci_mutation.runner.time.monotonic", lambda: 10)
-    rows, error = mutate_files(tmp_path, tmp_path / "work", selected, 20, (1, 4))
+    rows, error = mutate_files(tmp_path, tmp_path / "work", selected, 20, (1, 4), None)
     expected = reason
     if reason.startswith("mutmut failed"):
         expected += f"; see {tmp_path / 'work/run.log'}"
@@ -354,8 +355,9 @@ def test_gate_persists_full_mutation_evidence_and_respects_reader_clearance(
         "diff": "-    return 1\n+    return 2",
     }
 
-    def mutate(root, work, selected, deadline, shard):
+    def mutate(root, work, selected, deadline, shard, stats):
         assert shard == (2, 3)
+        assert stats is None
         assert root == tmp_path
         assert work.parent == tmp_path / "output"
         assert work.name.startswith("0-")
@@ -395,3 +397,96 @@ def test_gate_persists_full_mutation_evidence_and_respects_reader_clearance(
         assert survivors.endswith("\n-    return 1\n+    return 2\n")
     else:
         assert survivors == ""
+
+
+def _stats_run(tmp_path, monkeypatch, statuses):
+    commands = []
+
+    def prepare(root, work, paths, tests):
+        work.mkdir(exist_ok=True)
+
+    def process(command, cwd, timeout, log):
+        commands.append(command)
+        if len(commands) == 2:
+            (cwd / "results.json").write_text('{"hooks/sample.py": [{"status": "killed"}]}')
+        return statuses[len(commands) - 1]
+
+    monkeypatch.setattr("scripts.ci_mutation.runner.prepare_workspace", prepare)
+    monkeypatch.setattr("scripts.ci_mutation.runner.run_process", process)
+    monkeypatch.setattr("scripts.ci_mutation.runner.time.monotonic", lambda: 10)
+    return commands
+
+
+def test_a_stats_part_collects_once_and_skips_the_report(tmp_path, monkeypatch):
+    from scripts.ci_mutation.runner import mutate_files
+    from scripts.ci_mutation.stats import SharedStats, stats_key
+
+    commands = _stats_run(tmp_path, monkeypatch, [0])
+    selected = {"hooks/sample.py": ({2}, ["tests/test_sample.py"])}
+    stats = SharedStats(tmp_path / "stats", "abc", (1, 3))
+    rows, error = mutate_files(tmp_path, tmp_path / "work", selected, 20, (0, 1), stats)
+    assert (rows, error) == ({"hooks/sample.py": []}, "")
+    assert commands == [
+        [
+            sys.executable,
+            "-m",
+            "scripts.ci_mutation.selection",
+            str(tmp_path / "work/changed-lines.json"),
+            "0",
+            "1",
+            "collect",
+            str(tmp_path / "stats/part-1.json"),
+            stats_key("abc", selected),
+            "1",
+            "3",
+        ]
+    ]
+
+
+def test_a_shard_mutates_with_every_matching_stats_part(tmp_path, monkeypatch):
+    import json
+
+    from scripts.ci_mutation.runner import mutate_files
+    from scripts.ci_mutation.stats import SharedStats, stats_key, write_part
+
+    commands = _stats_run(tmp_path, monkeypatch, [0, 0])
+    selected = {"hooks/sample.py": ({2}, ["tests/test_sample.py"])}
+    key = stats_key("abc", selected)
+    write_part(tmp_path / "stats/part-0.json", key, (0, 2), [{"tests": {"f": ["t1"]}, "durations": {}, "cpu": 1}])
+    write_part(tmp_path / "stats/part-1.json", key, (1, 2), [{"tests": {"g": ["t2"]}, "durations": {}, "cpu": 2}])
+    stats = SharedStats(tmp_path / "stats", "abc")
+    rows, error = mutate_files(tmp_path, tmp_path / "work", selected, 20, (2, 4), stats)
+    assert (rows, error) == ({"hooks/sample.py": [{"status": "killed"}]}, "")
+    assert commands[0][-4:] == ["2", "4", "reuse", str(tmp_path / "work/shared-stats.json")]
+    assert json.loads((tmp_path / "work/shared-stats.json").read_text()) == [
+        {"tests": {"f": ["t1"]}, "durations": {}, "cpu": 1},
+        {"tests": {"g": ["t2"]}, "durations": {}, "cpu": 2},
+    ]
+    assert commands[1][3:6] == [str(tmp_path / "work/results.json"), "2", "4"]
+
+
+@pytest.mark.parametrize(
+    ("head", "parts", "reason"),
+    [
+        ("abc", [], "mutation stats missing"),
+        ("other", [0], "mutation stats stale"),
+        ("abc", [1], "mutation stats missing"),
+    ],
+)
+def test_a_shard_with_missing_or_stale_stats_fails_before_mutating(tmp_path, monkeypatch, capsys, head, parts, reason):
+    from scripts.ci_mutation.stats import SharedStats, stats_key, write_part
+
+    commands = _stats_run(tmp_path, monkeypatch, [0, 0])
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "hooks/sample.py").write_text("def f():\n    return 1\n")
+    (tmp_path / "tests/test_sample.py").write_text("from hooks.sample import f\n")
+    key = stats_key(head, {"hooks/sample.py": ({2}, ["tests/test_sample.py"])})
+    for part in parts:
+        write_part(tmp_path / f"stats/group-0/part-{part}.json", key, (part, 2), [])
+    stats = SharedStats(tmp_path / "stats", "abc")
+    report = run_gate(tmp_path, {"hooks/sample.py": {2}}, tmp_path / "output", 60, (0, 1), stats)
+    assert report["failed"]
+    assert report["not_mutated"][0]["reason"].startswith(reason)
+    assert commands == []
+    assert f"hooks/sample.py: not mutated, {reason}" in capsys.readouterr().out

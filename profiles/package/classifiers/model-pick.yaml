@@ -1,0 +1,20 @@
+version: 1
+purpose: model-pick
+fallbacks: cli
+questions:
+  - name: effort
+    type: score
+    instructions: >-
+      Which reasoning effort does a coding agent need to finish this task? Most tasks are {floor}: the task names
+      what to change and how to check it, even with several seams, a red test first or a before and after
+      measurement. {levels[3]} is only for a task that must first find an unknown cause across several components,
+      or that redesigns a core concept of the system.
+    levels:
+      - "{floor}: the task names what to change and how to check it"
+      - "{levels[3]}: an unknown cause to find across several components, or a redesign of a core concept"
+thresholds:
+  confidence: 0.6
+environment:
+  confidence: AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE
+rule:
+  type: code

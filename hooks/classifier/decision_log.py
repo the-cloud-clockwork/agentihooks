@@ -5,11 +5,47 @@ import json
 import math
 import os
 from collections import Counter
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterator
 
 from hooks import config
 from hooks.classifier.result import DecisionResult
+
+
+@dataclass(frozen=True)
+class RecordMetadata:
+    definition: str | None = None
+    definition_digest: str | None = None
+    expected: object = None
+
+
+_METADATA = ContextVar("classifier_record_metadata", default=RecordMetadata())
+_UNSET = object()
+
+
+@contextmanager
+def record_context(
+    *,
+    definition: str | None = None,
+    definition_digest: str | None = None,
+    expected: object = _UNSET,
+) -> Iterator[None]:
+    fields = {}
+    if definition is not None:
+        fields["definition"] = definition
+    if definition_digest is not None:
+        fields["definition_digest"] = definition_digest
+    if expected is not _UNSET:
+        fields["expected"] = expected
+    token = _METADATA.set(replace(_METADATA.get(), **fields))
+    try:
+        yield
+    finally:
+        _METADATA.reset(token)
 
 
 def log_path() -> Path:
@@ -46,6 +82,7 @@ def append(
         "state_digest": state_digest(state),
         "failures": failures or [],
         "api_down_cached": api_down_cached,
+        **asdict(_METADATA.get()),
     }
     path = log_path()
     path.parent.mkdir(parents=True, exist_ok=True)

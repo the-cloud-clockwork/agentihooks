@@ -184,6 +184,14 @@ def test_set_refuses_an_unordered_or_unknown_range(env, pairs):  # noqa: F811
     assert (config.effort_min, config.effort_max) == ("medium", "high")
 
 
+@pytest.mark.parametrize(
+    "harness,effort,named",
+    [("codex", "max", "xhigh"), ("claude", "xhigh", "max"), ("codex", "medium", "medium"), ("codex", "turbo", "turbo")],
+)
+def test_an_effort_is_named_for_a_harness_by_its_rank(harness, effort, named):
+    assert effort_range.named(harness, effort) == named
+
+
 def test_a_codex_name_sets_the_range_on_the_shared_scale(env):  # noqa: F811
     store, _, _ = env
     assert cli.EFFORT_KEYS == {"effort-min": "effort_min", "effort-max": "effort_max"}
@@ -286,7 +294,7 @@ def test_set_names_every_key_it_takes_and_every_level(env, capsys):  # noqa: F81
     assert "set takes max-eng-agents, max-ci-agents, " in err
     assert (
         "autonomy=manual|assist|delegate|full, effort-min=E, effort-max=E, scaling=auto|manual, "
-        "load-high=N, load-low=N, memory-per-agent=MB or eng-role, "
+        "load-high=N, load-low=N, memory-per-agent=MB, api-url=URL or eng-role, "
     ) in err
     assert run("sw", "set", "effort-min=huge") == 1
     assert "one of low, medium, high, max, Codex xhigh standing for max" in capsys.readouterr().err

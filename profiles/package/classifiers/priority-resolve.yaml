@@ -1,0 +1,13 @@
+version: 1
+purpose: priority-resolve
+fallbacks: cli
+questions:
+  - name: resolves
+    type: yesno
+    instructions: "Does this {kind} on {subject} resolve what its priority asks: {priority}"
+    "true": the write resolves what the priority asks
+    "false": the priority still waits
+thresholds:
+  probability: 0.5
+rule:
+  type: code

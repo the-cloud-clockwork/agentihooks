@@ -5,7 +5,8 @@ import threading
 from contextlib import contextmanager, suppress
 from pathlib import Path
 
-from .events import append_events, read_events, write_events
+from . import hierarchy
+from .events import append_events, read_events, trim_events, write_events
 from .rows import TABLES, assemble, diff, encode, flatten, read_rows, write_rows
 from .seeds import read_seeds, sync_values, write_seeds
 
@@ -114,6 +115,7 @@ def read_only(directory):
         return
     connection = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=5)
     try:
+        connection.execute("PRAGMA foreign_keys=ON")
         yield connection
     finally:
         connection.close()
@@ -223,6 +225,7 @@ class SQLiteLedgerRepository:
         self.trace = None
         self._ready = set()
         self._cache = {}
+        self._loads = {}
         self._guard = threading.Lock()
 
     @property
@@ -246,7 +249,7 @@ class SQLiteLedgerRepository:
         if domain is self.domain or self._path is not None:
             return self
         twin = SQLiteLedgerRepository(domain=domain)
-        twin._cache, twin._ready, twin._guard = self._cache, self._ready, self._guard
+        twin._cache, twin._loads, twin._ready, twin._guard = self._cache, self._loads, self._ready, self._guard
         return twin
 
     @contextmanager
@@ -255,9 +258,11 @@ class SQLiteLedgerRepository:
         path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(path, timeout=30)
         try:
+            connection.execute("PRAGMA foreign_keys=ON")
             if path not in self._ready:
                 connection.execute("PRAGMA journal_mode=WAL")
                 connection.executescript(SCHEMA)
+                connection.executescript(hierarchy.SCHEMA)
                 for table in TABLES:
                     connection.execute(
                         f"CREATE TABLE IF NOT EXISTS {table} (slug TEXT, path TEXT, parent TEXT, key TEXT, "
@@ -281,11 +286,17 @@ class SQLiteLedgerRepository:
         cached = self._cache.get(self._key(slug))
         if cached is not None and cached.generation >= row[0]:
             return cached
-        state = assemble(read_rows(connection, slug))
-        if "events" in state["_meta"]:
-            state["_meta"]["events"] = read_events(connection, slug)
-        entry = Entry(row[0], encode(state), state)
-        self._remember(slug, entry)
+        with self._guard:
+            loading = self._loads.setdefault(self._key(slug), threading.Lock())
+        with loading:
+            cached = self._cache.get(self._key(slug))
+            if cached is not None and cached.generation >= row[0]:
+                return cached
+            state = assemble(read_rows(connection, slug))
+            if "events" in state["_meta"]:
+                state["_meta"]["events"] = read_events(connection, slug)
+            entry = Entry(row[0], encode(state), state)
+            self._remember(slug, entry)
         return entry
 
     def _remember(self, slug: str, entry: Entry) -> None:
@@ -342,7 +353,11 @@ class SQLiteLedgerRepository:
     def _write(self, connection, slug: str, entry: Entry, state: dict, events: list) -> Entry:
         before, after = diff(*(without_events(document) for document in (entry.state, state)))
         write_rows(connection, slug, before, after)
-        append_events(connection, slug, events, self.domain.EVENTS_KEPT)
+        hierarchy.sync(connection, slug, state)
+        kept = len(state["_meta"].get("events", []))
+        append_events(connection, slug, events, kept)
+        if not events and "events" in state["_meta"]:
+            trim_events(connection, slug, kept)
         generation = entry.generation + 1
         connection.execute(
             UPDATE,
@@ -374,6 +389,7 @@ class SQLiteLedgerRepository:
                 now,
             ),
         )
+        hierarchy.sync(connection, slug, state)
         self._cache.pop(self._key(slug), None)
 
     def create_document(
@@ -418,6 +434,19 @@ class SQLiteLedgerRepository:
         with self.connect() as connection, connection:
             connection.execute(BEGIN)
             return self._export(connection, slug)
+
+    def rebuild(self, slug: str) -> dict:
+        self._adopt(slug)
+        with self.domain.LOCK, self.connect() as connection, connection:
+            connection.execute(BEGIN_IMMEDIATE)
+            return hierarchy.rebuild(connection, slug, self._entry(connection, slug).state)
+
+    def nodes(self, slug: str, read: str, node: str | None = None) -> list:
+        """Hierarchy rows: `children`, `ancestors`, `subtree` or `dependents` of a node, or of the ledger root."""
+        self._adopt(slug)
+        with self.connect() as connection, connection:
+            connection.execute(BEGIN)
+            return hierarchy.read(connection, slug, read, node)
 
     def events_since(self, slug: str, revision: int) -> list:
         self._adopt(slug)

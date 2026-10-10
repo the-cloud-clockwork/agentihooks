@@ -1,19 +1,32 @@
 import argparse
+import hashlib
 import json
+import os
+import re
 import sys
 from collections import Counter
+from collections.abc import Callable, Mapping
 from functools import partial
 from pathlib import Path
 
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+from scripts.gates.base import Who
+from scripts.swarm_v2 import operator_auth
 from scripts.swarm_v2.records import _replayed as _replay
 from scripts.swarm_v2.records import _write, digest
+from scripts.swarm_v2.runtime.commands import Principal, Role
 
 SCHEMA = "swarm-v2-architecture/1"
 INVENTORY_SCHEMA = "swarm-v2-design-inventory/1"
 ROLES = ("code_owner", "state_owner", "deployment_owner")
 KINDS = frozenset({"dispatcher", "backlog", "service", "worker_component"})
 CODING_TASKS = "coding_tasks"
-OPERATOR = "operator"
+SIGNED = ("proposal", "sha256", "approved_by", "revision", "reason", "key_id")
+KEY_ENV = "SWARM_ARCHITECTURE_PUBLIC_KEY"
+SIGNING_ENV = "SWARM_ARCHITECTURE_SIGNING_KEY"
 CARRIES = ("changed_content", CODING_TASKS, "none", "transcripts")
 DECLARE = (
     f"a proposal must declare carries as one of {', '.join(CARRIES)}, launches_agents as true or false,"
@@ -61,16 +74,81 @@ def dispatches(component: dict) -> bool:
     )
 
 
-def approved(record: dict, proposal: dict) -> bool:
-    return any(
-        c["proposal"] == proposal["id"] and c["sha256"] == digest(proposal) and c["approved_by"] == OPERATOR
-        for c in record["operator_changes"]
-    )
+def _signed(change: dict) -> bytes:
+    return json.dumps({"schema": SCHEMA, **{name: change.get(name) for name in SIGNED}}, sort_keys=True).encode()
 
 
-def authorities(record: dict) -> list[str]:
-    changed = {c["proposal"] for c in record["operator_changes"]}
+def key_id(key: Ed25519PublicKey) -> str:
+    return hashlib.sha256(key.public_bytes(Encoding.Raw, PublicFormat.Raw)).hexdigest()[:16]
+
+
+def _authentic(key: Ed25519PublicKey | None, change: dict) -> bool:
+    signature = change.get("signature")
+    if key is None or change.get("key_id") != key_id(key) or not isinstance(signature, str):
+        return False
+    if not re.fullmatch(r"[0-9a-f]{128}", signature):
+        return False
+    try:
+        key.verify(bytes.fromhex(signature), _signed(change))
+    except (InvalidSignature, ValueError):
+        return False
+    return True
+
+
+def _changes(record: dict, key: Ed25519PublicKey | None) -> list[dict]:
+    return [c for c in record["operator_changes"] if _authentic(key, c)]
+
+
+def approved(record: dict, proposal: dict, key: Ed25519PublicKey | None = None) -> bool:
+    return any(c["proposal"] == proposal["id"] and c["sha256"] == digest(proposal) for c in _changes(record, key))
+
+
+def authorities(record: dict, key: Ed25519PublicKey | None = None) -> list[str]:
+    changed = {c["proposal"] for c in _changes(record, key)}
     return [c["name"] for c in record["components"] if dispatches(c) and c.get("proposal") not in changed]
+
+
+def _authenticated(slug: str, credential: str, authenticate: Callable[[str, str], Principal | None]) -> Principal:
+    principal = authenticate(slug, credential)
+    if (
+        not isinstance(principal, Principal)
+        or principal.role is not Role.OPERATOR
+        or not isinstance(principal.name, str)
+        or not principal.name
+    ):
+        raise ArchitectureError("authenticated operator required for an architecture change")
+    return principal
+
+
+def approve(
+    path: Path | str,
+    proposal: dict,
+    reason: str,
+    *,
+    slug: str,
+    credential: str,
+    authenticate: Callable[[str, str], Principal | None],
+    signer: Ed25519PrivateKey,
+) -> dict:
+    principal = _authenticated(slug, credential, authenticate)
+    record = load_record(path)
+    sha256 = digest(proposal)
+    key = signer.public_key()
+    done = next((c for c in _changes(record, key) if c["proposal"] == proposal["id"] and c["sha256"] == sha256), None)
+    if done:
+        return done
+    change = {
+        "proposal": proposal["id"],
+        "sha256": sha256,
+        "approved_by": principal.name,
+        "revision": record["revision"],
+        "reason": reason,
+        "key_id": key_id(key),
+    }
+    change["signature"] = signer.sign(_signed(change)).hex()
+    record["operator_changes"].append(change)
+    _write(path, record)
+    return change
 
 
 def _declared(proposal: dict) -> bool:
@@ -102,7 +180,7 @@ def _conflict(record: dict, proposal: dict, repeated: set[str]) -> str:
     return ""
 
 
-def _verdict(record: dict, proposal: dict, repeated: set[str]) -> tuple[str, str]:
+def _verdict(record: dict, proposal: dict, repeated: set[str], key: Ed25519PublicKey | None = None) -> tuple[str, str]:
     kind = proposal.get("kind")
     role = missing_owner(record, proposal)
     if kind not in KINDS:
@@ -113,8 +191,8 @@ def _verdict(record: dict, proposal: dict, repeated: set[str]) -> tuple[str, str
         return "rejected", f"{role} must name exactly one owner from the record"
     if _excluded(record, proposal):
         return "rejected", f"the worker image excludes {proposal['name']} (AD-06)"
-    if dispatches(proposal) and not approved(record, proposal):
-        return "rejected", f"inserts another coding-task queue beside {', '.join(authorities(record))} (AD-05)"
+    if dispatches(proposal) and not approved(record, proposal, key):
+        return "rejected", f"inserts another coding-task queue beside {', '.join(authorities(record, key))} (AD-05)"
     if kind == "backlog" and not (proposal.get("bounded") is True and proposal["carries"] in record["backlog_carries"]):
         return "rejected", f"a backlog must be bounded and carry one of {', '.join(record['backlog_carries'])} (AD-05)"
     if kind == "worker_component" and proposal["name"].casefold() not in {
@@ -134,7 +212,7 @@ def _repeated(proposals: list[dict]) -> set[str]:
     }
 
 
-def review(record: dict, inventory: dict) -> dict:
+def review(record: dict, inventory: dict, key: Ed25519PublicKey | None = None) -> dict:
     repeated = _repeated(inventory["proposals"])
     result = {
         "operation": inventory["operation"],
@@ -144,7 +222,7 @@ def review(record: dict, inventory: dict) -> dict:
         "unresolved": [],
     }
     for proposal in inventory["proposals"]:
-        outcome, reason = _verdict(record, proposal, repeated)
+        outcome, reason = _verdict(record, proposal, repeated, key)
         if outcome == "accepted":
             result["accepted"].append(proposal["id"])
         else:
@@ -153,7 +231,7 @@ def review(record: dict, inventory: dict) -> dict:
     return {**result, "unowned": unowned, "measurements": {"architecture_unowned_components": len(unowned)}}
 
 
-def check(record: dict) -> list[str]:
+def check(record: dict, key: Ed25519PublicKey | None = None) -> list[str]:
     components = record["components"]
     errors = [
         f"{c['name']}: {missing_owner(record, c)} must name exactly one owner from the record"
@@ -163,7 +241,7 @@ def check(record: dict) -> list[str]:
     names = [c["name"] for c in components]
     errors += [f"{n} is recorded more than once" for n in dict.fromkeys(n for n in names if names.count(n) > 1)]
     errors += [f"{c['name']} is excluded from the worker image" for c in components if _excluded(record, c)]
-    count = len(authorities(record))
+    count = len(authorities(record, key))
     if count != 1:
         errors.append(f"expected one coding-task authority, found {count}")
     return errors
@@ -180,7 +258,7 @@ def _commit(path: Path | str, record: dict, operation: str, sha256: str, result:
     return result
 
 
-def apply_inventory(path: Path | str, inventory: dict) -> dict:
+def apply_inventory(path: Path | str, inventory: dict, key: Ed25519PublicKey | None = None) -> dict:
     record = load_record(path)
     operation, sha256 = inventory["operation"], digest(inventory)
     done = _replayed(record, operation, sha256)
@@ -190,7 +268,7 @@ def apply_inventory(path: Path | str, inventory: dict) -> dict:
         raise ArchitectureError(
             f"inventory is based on revision {inventory['base_revision']}; the record is at revision {record['revision']}"
         )
-    result = review(record, inventory)
+    result = review(record, inventory, key)
     revision = record["revision"] + 1
     proposals = {p["id"]: p for p in inventory["proposals"]}
     for pid in result["accepted"]:
@@ -207,7 +285,16 @@ def _accepted_at(record: dict, revision: int) -> list[dict]:
     return list(next(o["components"] for o in record["operations"] if o["revision"] == revision))
 
 
-def rollback(path: Path | str, to_revision: int, operation: str) -> dict:
+def rollback(
+    path: Path | str,
+    to_revision: int,
+    operation: str,
+    *,
+    slug: str,
+    credential: str,
+    authenticate: Callable[[str, str], Principal | None],
+) -> dict:
+    _authenticated(slug, credential, authenticate)
     record = load_record(path)
     sha256 = digest({"rollback_to": to_revision})
     done = _replayed(record, operation, sha256)
@@ -239,7 +326,7 @@ def rollback(path: Path | str, to_revision: int, operation: str) -> dict:
     return _commit(path, record, operation, sha256, result)
 
 
-def render(record: dict) -> str:
+def render(record: dict, key: Ed25519PublicKey | None = None) -> str:
     lines = [
         "# Swarm v2 architecture decisions",
         "",
@@ -260,55 +347,105 @@ def render(record: dict) -> str:
         lines += ["", f"## {d['id']}: {d['title']}", "", f"Status: {d['status']}.", "", d["decision"], ""]
         lines += [f"Why: {d['rationale']}", "", "Rejected alternatives:", ""]
         lines += [f"- {a['alternative']}: {a['reason']}" for a in d["rejected_alternatives"]]
-    for title, key in (
+    for title, field in (
         ("Permitted worker image components", "worker_permitted"),
         ("Worker image exclusions", "worker_excluded"),
     ):
-        lines += ["", f"## {title}", "", *[f"- {name}" for name in record[key]]]
+        lines += ["", f"## {title}", "", *[f"- {name}" for name in record[field]]]
     lines.append("")
     changes = [
         f"{c['proposal']} by {c['approved_by']} at revision {c['revision']} ({c['reason']})"
-        for c in record["operator_changes"]
+        for c in _changes(record, key)
     ]
     lines.append(f"Operator architecture changes: {', '.join(changes) or 'none'}.")
-    for title, key in (("Unresolved decisions", "unresolved"), ("Rejected proposals", "rejected")):
-        entries = [f"- {e['name']} (`{e['id']}`, revision {e['revision']}): {e['reason']}" for e in record[key]]
+    for title, field in (("Unresolved decisions", "unresolved"), ("Rejected proposals", "rejected")):
+        entries = [f"- {e['name']} (`{e['id']}`, revision {e['revision']}): {e['reason']}" for e in record[field]]
         lines += ["", f"## {title}", "", *(entries or ["None."])]
     return "\n".join(lines) + "\n"
 
 
-def _run(args) -> int:
+def _run(args, key: Ed25519PublicKey | None) -> int:
     if args.command == "check":
-        errors = check(load_record(args.record))
+        errors = check(load_record(args.record), key)
         print("\n".join(errors) or "ok")
         return 1 if errors else 0
     if args.command == "review":
-        print(json.dumps(review(load_record(args.record), load_inventory(args.inventory)), indent=2))
+        print(json.dumps(review(load_record(args.record), load_inventory(args.inventory), key), indent=2))
         return 0
     if args.command == "record":
-        print(json.dumps(apply_inventory(args.record, load_inventory(args.inventory)), indent=2))
+        print(json.dumps(apply_inventory(args.record, load_inventory(args.inventory), key), indent=2))
+    elif args.command == "approve":
+        key = _cli_approve(args, key)
     elif args.command == "rollback":
-        print(json.dumps(rollback(args.record, args.to, args.operation), indent=2))
-    Path(args.markdown).write_text(render(load_record(args.record)))
+        print(json.dumps(rollback(args.record, args.to, args.operation, **_operator_transport(args.slug)), indent=2))
+    Path(args.markdown).write_text(render(load_record(args.record), key))
     return 0
+
+
+def _page_credential(slug: str) -> str | None:
+    from scripts.swarm_ledger.repository import repository
+
+    return repository.token(slug)
+
+
+def _operator_transport(slug: str) -> dict:
+    return {
+        "slug": slug,
+        "credential": operator_auth.credential(slug, _page_credential, Who.from_env()),
+        "authenticate": operator_auth.authenticator(_page_credential),
+    }
+
+
+def _cli_approve(args, key: Ed25519PublicKey | None) -> Ed25519PublicKey:
+    signer = signing_key(os.environ)
+    if key is not None and key_id(key) != key_id(signer.public_key()):
+        raise ArchitectureError(f"{SIGNING_ENV} does not match {KEY_ENV}")
+    proposal = next((p for p in load_inventory(args.inventory)["proposals"] if p["id"] == args.proposal), None)
+    if proposal is None:
+        raise ArchitectureError(f"{args.inventory} has no proposal {args.proposal}")
+    change = approve(args.record, proposal, args.reason, signer=signer, **_operator_transport(args.slug))
+    print(json.dumps(change, indent=2))
+    return signer.public_key()
+
+
+def verify_key(environ: Mapping[str, str]) -> Ed25519PublicKey | None:
+    raw = environ.get(KEY_ENV)
+    if not raw:
+        return None
+    try:
+        return Ed25519PublicKey.from_public_bytes(bytes.fromhex(raw))
+    except ValueError:
+        raise ArchitectureError(f"{KEY_ENV} must be a hex Ed25519 public key") from None
+
+
+def signing_key(environ: Mapping[str, str]) -> Ed25519PrivateKey:
+    try:
+        return Ed25519PrivateKey.from_private_bytes(bytes.fromhex(environ[SIGNING_ENV]))
+    except (KeyError, ValueError):
+        raise ArchitectureError(f"{SIGNING_ENV} must be a hex Ed25519 private key") from None
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m scripts.swarm_v2.architecture")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("review", "record", "rollback", "render", "check"):
+    for name in ("review", "record", "approve", "rollback", "render", "check"):
         command = commands.add_parser(name)
         command.add_argument("--record", default=RECORD)
-        if name in ("review", "record"):
+        if name in ("review", "record", "approve"):
             command.add_argument("--inventory", required=True)
-        if name in ("record", "rollback", "render"):
+        if name in ("record", "approve", "rollback", "render"):
             command.add_argument("--markdown", default=MARKDOWN)
+        if name == "approve":
+            command.add_argument("--proposal", required=True)
+            command.add_argument("--reason", required=True)
         if name == "rollback":
             command.add_argument("--to", type=int, required=True)
             command.add_argument("--operation", required=True)
+        if name in ("approve", "rollback"):
+            command.add_argument("--slug", required=True)
     args = parser.parse_args(argv)
     try:
-        return _run(args)
+        return _run(args, verify_key(os.environ))
     except ArchitectureError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

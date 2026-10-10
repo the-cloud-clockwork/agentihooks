@@ -14,6 +14,7 @@ from scripts.handoff import transfers
 from scripts.inbox.store import InboxStore
 from scripts.swarm import (
     affinity,
+    bottleneck,
     drain_watch,
     idle,
     launch_check,
@@ -31,6 +32,7 @@ from scripts.swarm.naming import swarm_name
 from scripts.swarm.store import ASSIST, SwarmError
 from scripts.swarm.tick import STARTUP_GRACE_MS, agent_status
 from scripts.swarm_ledger import plan_shape
+from scripts.swarm_v2.reconciliation import accounts as account_reconciliation
 from scripts.swarm_v2.runtime import observe
 
 DEFAULT_COMPACT_LIMIT = 600
@@ -122,7 +124,8 @@ def _health_rows(store, slug, agents, quiet, at):
 
 def talk_since_outcome(store, slug, rows):
     marks = progress.Progress(store.redis, slug)
-    return {row["name"]: marks.read(row["name"]).talk for row in rows if row.get("lane") in WORKER_LANES}
+    held = {row["name"]: marks.read(row["name"]) for row in rows if row.get("lane") in WORKER_LANES}
+    return {name: mark.talk if mark.outcome_at else 0 for name, mark in held.items()}
 
 
 def compact_limit(config):
@@ -186,6 +189,10 @@ def shape_report(tasks: list[dict], max_eng: int) -> dict:
         return {"error": str(exc)}
 
 
+def _ruling(found):
+    return {"state": found.ruling, "reason": found.ruling_reason, "by": found.ruled_by, "at": found.ruled_at}
+
+
 def observation(store, slug, agent):
     found = observe.stored(store, slug, agent.execution_id) if agent.execution_id else None
     if found:
@@ -198,6 +205,7 @@ def observation(store, slug, agent):
             "observed_at": found.observed_at,
             "confirmed_at": found.confirmed_at,
             "sources": found.sources,
+            **({"ruling": _ruling(found)} if found.ruling else {}),
         }
     beat = idle.heartbeat(store.redis, slug, agent.name)
     if not beat:
@@ -254,6 +262,8 @@ def status_report(store, slug, state):
         "doctor": doctor_report(store, slug),
         "quota": page_quota(),
         "quota_capacity": quota_view.page(capacity.read(store, slug)),
+        "account_reconciliation": account_reconciliation.page(store, slug),
+        "bottleneck": bottleneck.read(store, slug),
         "gates": [{**row, "kind": modes.label(row["kind"])} for row in gate_log.decisions(slug)],
         "gate_modes": {name: modes.label(mode) for name, mode in catalog.current(config.gates).items()},
         "master_affinity": affinity.report(store, slug, config, store.agents(slug)),

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.swarm_ledger.ledger_page import loaded
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 from tests.swarm_ledger.test_swarm_layout import NOW_MS, status
 
@@ -64,11 +65,13 @@ class Tab:
 
     def open(self, slug):
         self.tab.goto(f"{self.base}/{slug}#swarm")
+        loaded(self.tab)
         self.tab.locator("#swarm-overlays .sw-ovl-row").first.wait_for(timeout=5000)
         self.tab.wait_for_function("() => document.documentElement.dataset.layout === 'ready'", timeout=5000)
 
     def reload(self):
         self.tab.reload()
+        loaded(self.tab)
         self.tab.locator("#swarm-overlays .sw-ovl-row").first.wait_for(timeout=5000)
         self.tab.wait_for_function("() => document.documentElement.dataset.layout === 'ready'", timeout=5000)
 

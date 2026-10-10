@@ -1,4 +1,5 @@
 import fcntl
+import http.client
 import http.server
 import json
 import os
@@ -9,6 +10,7 @@ import time
 
 import pytest
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans, ScopeSpans, Span
 
 from hooks.observability import agent_trace, otel, trace_flush
 
@@ -283,14 +285,22 @@ def test_codex_transcript_is_resolved_when_the_hook_had_none(home, monkeypatch):
     assert trace_flush._transcript("s", {"target": "claude"}) == ""
 
 
-def test_an_attempt_is_killed_at_its_timeout(tmp_path, monkeypatch, capsys):
+def slow_attempt(tmp_path, monkeypatch):
     slow = tmp_path / "slow"
     slow.write_text("#!/bin/sh\nsleep 30\n")
     slow.chmod(0o755)
     monkeypatch.setattr(trace_flush.sys, "executable", str(slow))
     started = time.monotonic()
-    assert trace_flush.attempt("s", "/t", 0.5, "interval") is False
-    assert time.monotonic() - started < 5
+    return trace_flush.attempt("s", "/t", 0.5, "interval"), time.monotonic() - started
+
+
+@pytest.mark.wall_clock
+def test_an_attempt_is_killed_within_seconds_of_its_timeout(tmp_path, monkeypatch):
+    assert slow_attempt(tmp_path, monkeypatch)[1] < 5
+
+
+def test_an_attempt_is_killed_at_its_timeout(tmp_path, monkeypatch, capsys):
+    assert slow_attempt(tmp_path, monkeypatch)[0] is False
     assert capsys.readouterr().err == "trace_flush s: attempt timed out after 0.5s\n"
     quick = tmp_path / "quick"
     quick.write_text(f'#!/bin/sh\ntest "${trace_flush.TRIGGER_ENV}" = interval\n')
@@ -305,6 +315,7 @@ class Receiver(http.server.BaseHTTPRequestHandler):
     delay = 0.0
 
     def do_POST(self):
+        spans = type(self).spans
         body = self.rfile.read(int(self.headers["Content-Length"]))
         type(self).posts += 1
         time.sleep(type(self).delay)
@@ -313,7 +324,7 @@ class Receiver(http.server.BaseHTTPRequestHandler):
             for scope in resource.scope_spans:
                 for span in scope.spans:
                     attributes = {a.key: a.value for a in span.attributes}
-                    type(self).spans.append((span.name, attributes))
+                    spans.append((span.name, attributes))
         self.send_response(200)
         self.end_headers()
 
@@ -387,6 +398,23 @@ def _wait(predicate, seconds):
     return False
 
 
+def test_a_late_post_lands_in_the_spans_current_when_it_arrived(receiver):
+    Receiver.delay = 5.0
+    body = ExportTraceServiceRequest(
+        resource_spans=[ResourceSpans(scope_spans=[ScopeSpans(spans=[Span(name="late")])])]
+    ).SerializeToString()
+    earlier = Receiver.spans
+    connection = http.client.HTTPConnection("127.0.0.1", receiver.server_port, timeout=15)
+    post = threading.Thread(target=lambda: (connection.request("POST", "/", body), connection.getresponse().read()))
+    post.start()
+    assert _wait(lambda: Receiver.posts == 1, 5), "late POST never reached the receiver"
+    Receiver.spans = []
+    post.join(15)
+    connection.close()
+    assert Receiver.spans == []
+    assert earlier == [("late", {})]
+
+
 def test_live_exporter_ships_an_open_turn_and_the_rest_after_the_owner_is_killed(live_export, tmp_path):
     transcript = tmp_path / "t.jsonl"
     records = _records()
@@ -412,16 +440,24 @@ def test_live_exporter_ships_an_open_turn_and_the_rest_after_the_owner_is_killed
     assert final["agentihooks.export.trigger"].string_value == "final"
 
 
-def test_slow_endpoint_is_bounded_per_attempt_and_retried_later(live_export, tmp_path):
+def slow_drain(live_export, tmp_path):
     Receiver.delay = 30.0
     transcript = tmp_path / "t.jsonl"
     transcript.write_text("".join(json.dumps(r) + "\n" for r in _records()))
     _request("session", transcript, owner=live_export.pid)
     started = time.monotonic()
-    assert (
-        trace_flush._drain("session", str(transcript), trace_flush.Budget(1, 8, 1), trace_flush.attempt, "x") is False
-    )
-    assert time.monotonic() - started < 8 + 4
+    drained = trace_flush._drain("session", str(transcript), trace_flush.Budget(1, 8, 1), trace_flush.attempt, "x")
+    return transcript, drained, time.monotonic() - started
+
+
+@pytest.mark.wall_clock
+def test_slow_endpoint_is_bounded_per_attempt(live_export, tmp_path):
+    assert slow_drain(live_export, tmp_path)[2] < 8 + 4
+
+
+def test_slow_endpoint_is_retried_later(live_export, tmp_path):
+    transcript, drained, _ = slow_drain(live_export, tmp_path)
+    assert drained is False
     assert Receiver.posts, "the attempt never reached the endpoint"
     assert agent_trace._cursor("session")["pending"]
     Receiver.delay = 0.0

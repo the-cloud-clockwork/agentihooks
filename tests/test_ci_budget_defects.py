@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.ci_budget import defects
+from scripts.swarm import metrics_outbox
 from scripts.swarm.store import PREFIX
 from scripts.swarm_ledger import ledger_comments
 
@@ -126,7 +127,7 @@ def test_github_is_read_from_the_repository_over_the_window(swarm):
         "repos/{owner}/{repo}/actions/runs/1/jobs?per_page=100",
         "--paginate",
         "--jq",
-        defects.JOBS_JQ,
+        ".jobs[] | {id, name, created_at, started_at, completed_at, conclusion, html_url} | @json",
     ]
     assert kwargs == {"cwd": "/repo", "capture_output": True, "text": True, "check": True, "timeout": 60}
 
@@ -234,3 +235,180 @@ def test_one_run_whose_jobs_cannot_be_read_does_not_hide_the_others(swarm, capsy
 
 def test_a_run_without_a_finished_gate_is_no_defect():
     assert defects.defect(RUNS[0], JOBS[1][:2]) is None
+
+
+SINK = {metrics_outbox.URL_ENV: "http://ch", metrics_outbox.USER_ENV: "ins"}
+FAILED_LOG = "2026-10-09T07:09:00.1Z FAILED tests/a_test.py::test_spool - AssertionError: assert '/tmp/p-3/x' == 'y'"
+
+
+def _metered_run(run_id, event, branch, conclusion, updated):
+    return {
+        **_run(run_id, "00:30", updated, conclusion, branch),
+        "event": event,
+        "created_at": "2026-10-09T07:00:00Z",
+        "run_attempt": 1,
+        "head_sha": f"sha{run_id}",
+    }
+
+
+METERED_RUNS = [
+    _metered_run(21, "pull_request", "eng-1", "failure", "12:00"),
+    _metered_run(22, "push", "dev", "success", "08:00"),
+    _metered_run(23, "push", "eng-2", "success", "08:00"),
+]
+METERED_JOBS = {
+    21: [
+        {**_job("unit (3.12, 1)", "00:40", "09:30", 21), "id": 211, "conclusion": "failure"},
+        {**_job("Gate — Required", "10:00", "10:30", 21), "id": 212, "conclusion": "failure"},
+    ],
+    22: [{**_job("Gate — Required", "07:00", "07:30", 22), "id": 221}],
+}
+
+
+def _metered_gh(calls):
+    def run(command, **kwargs):
+        endpoint = command[2]
+        calls.append(endpoint)
+        if endpoint.endswith("/logs"):
+            return subprocess.CompletedProcess(command, 0, FAILED_LOG, "")
+        if "/jobs" in endpoint:
+            run_id = int(endpoint.split("/runs/")[1].split("/")[0])
+            return subprocess.CompletedProcess(command, 0, "\n".join(json.dumps(j) for j in METERED_JOBS[run_id]), "")
+        event = endpoint.split("event=")[1].split("&")[0]
+        status = endpoint.split("status=")[1].split("&")[0]
+        lines = [json.dumps(r) for r in METERED_RUNS if r["event"] == event and r["conclusion"] == status]
+        return subprocess.CompletedProcess(command, 0, "\n".join(lines), "")
+
+    return run
+
+
+@pytest.fixture
+def sink(tmp_path, monkeypatch):
+    sent = []
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: tmp_path / "outbox.sqlite")
+    monkeypatch.setattr(metrics_outbox, "post", lambda s, query, body: sent.append((query, body)) or True)
+    return sent
+
+
+def _inserted(sent, table):
+    return [
+        json.loads(line)
+        for query, body in sent
+        if query == f"INSERT INTO swarm.{table} FORMAT JSONEachRow"
+        for line in body.decode().splitlines()
+    ]
+
+
+def test_with_the_sink_set_each_finished_pull_request_and_dev_push_run_is_metered_once(swarm, sink):
+    store, config, ledger = swarm
+    calls = []
+    assert defects.refresh("sw", config, store, ledger, NOW_MS, run=_metered_gh(calls), environ=SINK) == []
+    assert [(r["run_id"], r["event"], r["run_s"]) for r in _inserted(sink, "ci_runs")] == [
+        (22, "push", 420.0),
+        (21, "pull_request", 600.0),
+    ]
+    stages = [(r["run_id"], r["stage"]) for r in _inserted(sink, "ci_stages")]
+    assert sorted(stages) == [(21, "gate-required"), (21, "unit"), (22, "gate-required")]
+    (failure,) = _inserted(sink, "ci_failures")
+    assert (failure["test_id"], failure["job"]) == ("tests/a_test.py::test_spool", "unit (3.12, 1)")
+    assert [c for c in calls if c.endswith("/logs")] == ["repos/{owner}/{repo}/actions/jobs/211/logs"]
+    assert store.redis.exists(defects.key("sw", "metered", "21", "1"), defects.key("sw", "metered", "22", "1")) == 2
+    assert 0 < store.redis.ttl(defects.key("sw", "metered", "21", "1")) <= defects.SEEN_TTL_S
+
+    reads = len(calls)
+    defects.refresh("sw", config, store, ledger, NOW_MS + defects.REFRESH_MS, run=_metered_gh(calls), environ=SINK)
+    assert [c for c in calls[reads:] if "/jobs" in c] == []
+
+
+def test_a_run_over_budget_reads_its_jobs_once_for_the_defect_and_the_rows(swarm, sink):
+    store, config, ledger = swarm
+    calls = []
+    actions = defects.refresh("sw", config, store, ledger, NOW_MS, run=_gh(calls), environ=SINK)
+    assert _job_reads(calls).count("repos/{owner}/{repo}/actions/runs/1/jobs?per_page=100") == 1
+    assert actions == ["filed a ledger follow up for a pull request Tests run over fifteen minutes"]
+    pushes = [kwargs["cwd"] for command, kwargs in calls if "event=push" in command[2]]
+    assert pushes and set(pushes) == {"/repo"}
+
+
+def test_without_the_sink_no_push_runs_or_logs_are_read(swarm):
+    store, config, ledger = swarm
+    calls = []
+    defects.refresh("sw", config, store, ledger, NOW_MS, run=_metered_gh(calls), environ={})
+    assert [c for c in calls if "event=push" in c or c.endswith("/logs") or "/runs/22/" in c] == []
+    assert not store.redis.keys(defects.key("sw", "metered", "*"))
+
+
+def test_a_run_whose_log_cannot_be_read_is_metered_on_a_later_pass(swarm, sink, capsys):
+    store, config, ledger = swarm
+    healthy = _metered_gh([])
+
+    def broken(command, **kwargs):
+        if command[2].endswith("/logs"):
+            raise subprocess.CalledProcessError(1, command, stderr="HTTP 502")
+        return healthy(command, **kwargs)
+
+    defects.refresh("sw", config, store, ledger, NOW_MS, run=broken, environ=SINK)
+    assert "ci budget skipped metering one Tests run: HTTP 502" in capsys.readouterr().err
+    assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [22]
+    defects.refresh("sw", config, store, ledger, NOW_MS + defects.REFRESH_MS, run=healthy, environ=SINK)
+    assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [22, 21]
+
+
+def test_rows_the_outbox_cannot_take_leave_their_runs_unmetered(swarm, monkeypatch, tmp_path):
+    store, config, ledger = swarm
+    blocker = tmp_path / "file"
+    blocker.write_text("")
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: blocker / "outbox.sqlite")
+    actions = defects.refresh("sw", config, store, ledger, NOW_MS, run=_metered_gh([]), environ=SINK)
+    assert len(actions) == 1 and actions[0].startswith("metrics outbox failed:")
+    assert not store.redis.keys(defects.key("sw", "metered", "*"))
+
+
+def test_a_failed_job_log_is_read_from_the_repository(swarm, sink):
+    store, config, ledger = swarm
+    seen = []
+    healthy = _metered_gh([])
+
+    def run(command, **kwargs):
+        if command[2].endswith("/logs"):
+            seen.append((command, kwargs))
+        return healthy(command, **kwargs)
+
+    defects.refresh("sw", config, store, ledger, NOW_MS, run=run, environ=SINK)
+    assert seen == [
+        (
+            ["gh", "api", "repos/{owner}/{repo}/actions/jobs/211/logs"],
+            {"cwd": "/repo", "capture_output": True, "text": True, "check": True, "timeout": 60},
+        )
+    ]
+
+
+def test_dev_push_runs_that_cannot_be_read_leave_pull_request_runs_metered(swarm, sink, capsys):
+    store, config, ledger = swarm
+    healthy = _metered_gh([])
+
+    def run(command, **kwargs):
+        if "event=push" in command[2]:
+            raise subprocess.CalledProcessError(1, command, stderr="HTTP 503")
+        return healthy(command, **kwargs)
+
+    defects.refresh("sw", config, store, ledger, NOW_MS, run=run, environ=SINK)
+    assert "ci budget skipped reading dev push Tests runs: HTTP 503" in capsys.readouterr().err
+    assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [21]
+
+
+def test_a_run_whose_rows_break_their_table_is_skipped_and_the_rest_ship(swarm, sink, capsys, monkeypatch):
+    store, config, ledger = swarm
+    monkeypatch.setitem(METERED_RUNS[0], "head_branch", None)
+    assert defects.refresh("sw", config, store, ledger, NOW_MS, run=_metered_gh([]), environ=SINK) == []
+    assert "ci budget skipped metering one Tests run: ci_runs.branch must be String" in capsys.readouterr().err
+    assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [22]
+
+
+def test_each_pass_meters_at_most_a_batch_of_runs(swarm, sink, monkeypatch):
+    store, config, ledger = swarm
+    monkeypatch.setattr(defects, "METER_BATCH", 1)
+    defects.refresh("sw", config, store, ledger, NOW_MS, run=_metered_gh([]), environ=SINK)
+    assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [21]
+    defects.refresh("sw", config, store, ledger, NOW_MS + defects.REFRESH_MS, run=_metered_gh([]), environ=SINK)
+    assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [21, 22]

@@ -68,6 +68,9 @@ class LedgerClient:
     def chat(self, slug):
         return self._resource(slug, "chat", collection=True)
 
+    def hierarchy(self, slug):
+        return self._resource(slug, "hierarchy", collection=True)
+
     def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
         guard = {"if_state": list(if_state)} if if_state else {}
         state = self._call(slug, [_op("task_update", by, item=f"tasks/{task_id}", fields=fields, **guard)])
@@ -103,6 +106,9 @@ class LedgerClient:
     def time_left(self, slug: str, slots: int, ci_minutes: float | None) -> None:
         self._call(slug, [_op("time_left", "swarm", slots=slots, ci_minutes=ci_minutes)])
 
+    def ack_events(self, slug: str, revision: int) -> None:
+        self._call(slug, [_op("events_ack", "swarm", rev=revision)])
+
     def set_phase(self, slug, phase_id, done, status):
         self._call(slug, [_op("set", "swarm", path=f"phases/{phase_id}/done", value=done, status=status)])
 
@@ -128,17 +134,32 @@ class LedgerClient:
     def notify(self, slug, text):
         self._call(slug, [_op("notice", "swarm", text=text)])
 
-    def followup(self, slug, text):
-        return self._write(slug, _op("add_item", "swarm", list="followups", text=text), "item")
+    def followup(self, slug, text, needs_operator=False):
+        flag = {"needs_operator": True} if needs_operator else {}
+        return self._write(slug, _op("add_item", "swarm", list="followups", text=text, **flag), "item")
 
     def priority(self, slug, item, text):
         return self._write(slug, _op("priority", "swarm", item=item, text=text), "priority")
+
+    def freeze(self, slug, verb, target, by=None, reason="", quote=""):
+        fields = {"target": target, **({"reason": reason} if reason else {}), **({"quote": quote} if quote else {})}
+        if verb == "unfreeze":
+            op = _op("freeze_clear", by, **fields)
+        else:
+            op = _op("freeze_set", by, verb=verb, **fields)
+        if by is None:
+            op.pop("by")
+        self._call(slug, [op])
 
     def group_tasks(self, slug, lead, members):
         self._call(slug, [_op("task_group", "swarm", item=f"tasks/{lead}", members=list(members))])
 
     def ungroup_tasks(self, slug, lead):
         self._call(slug, [_op("task_ungroup", "swarm", item=f"tasks/{lead}")])
+
+    def rank_task(self, slug, task_id, rank, by, if_unranked=False):
+        guard = {"if_unranked": True} if if_unranked else {}
+        self._call(slug, [_op("task_rank", by, item=f"tasks/{task_id}", rank=rank, **guard)])
 
     def clear_priority(self, slug, priority_id, reason):
         self._call(slug, [_op("priority_clear", "swarm", target=priority_id, reason=reason)])

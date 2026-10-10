@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/supervision_protocol.py:scripts.swarm_v2.supervision_protocol.x_write__mutmut_4:fda150b87f8ad770fb62dc648b18967af9085839ad9217c12fb679586c5780e0": {
+    "reader": "standards-reader",
+    "reason": "The temporary file suffix changes from .pending to .PENDING, retaining a distinct sibling pathname for every existing write caller. Both variants write, flush and fsync identical sorted JSON bytes, atomically replace the same final path, and fsync the same parent directory. Consumers read only the named final receipts and manifests, and exporter hashes the final manifest; after successful commit no temporary filename is returned or retained. Uncommitted temporary filenames are outside the durable receipt interface."
+  }
+}
