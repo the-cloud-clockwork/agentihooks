@@ -104,7 +104,7 @@ def test_creation_is_enabled_by_default():
 
 def test_a_launch_the_template_refuses_is_refused_without_a_call():
     sender = transport()
-    hostile = {**cases.launch(), "credential_ref": "cluster-admin-token"}
+    hostile = {**cases.launch(), "provider_account": "cluster-admin-token"}
     assert sender.apply_operation(operation(), hostile) == Observation(Phase.REFUSED)
     assert sender.api.create_calls == 0
 
