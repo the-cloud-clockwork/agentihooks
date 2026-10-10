@@ -98,7 +98,13 @@ def test_a_worker_registers_over_http_and_its_heartbeat_reaches_the_api(tmp_path
     service = ControlService(store, SLUG, launch_key(_environ(tmp_path)), lambda: True)
     assert service.start()
     agent = service.controller.admit(AgentRecord(store.next_name(SLUG, "eng"), "eng", "t1", seat=f"eng-1@{SLUG}"), "")
-    token = service.grants.issue(SLUG, agent.execution_id, project_ids=["p"], brain_id="swarm", account="fixture")
+    token = service.grants.issue(
+        SLUG,
+        agent.execution_id,
+        project_ids=["github.com/the-cloud-clockwork/agentihooks"],
+        brain_id="swarm",
+        account="fixture",
+    )
     server = service.serve("127.0.0.1", 0)
     base = f"http://127.0.0.1:{server.server_address[1]}"
     try:
