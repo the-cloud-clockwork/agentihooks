@@ -1,5 +1,3 @@
-"""One account email names its Kubernetes secret key and its AH_CC_TOKEN_ environment variable."""
-
 import re
 
 TOKEN_PREFIX = "AH_CC_TOKEN_"
