@@ -164,7 +164,7 @@ def runtime_directory(attempt, child):
 def test_sigterm_during_tool_reports_observed_checkpoint(worker, ack, expected):
     start, attempt, spec = worker
     exporter = [*spec["exporter"][:-1], ack]
-    child = start(exporter=exporter)
+    child = start(exporter=exporter, checkpoint_seconds=5 if ack == "complete" else 0.4)
     root = runtime_directory(attempt, child)
     wait_for(root / "running.json", child)
     wait_for(root / "fixture-grandchild-two.json", child)
