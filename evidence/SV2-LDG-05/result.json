@@ -6,8 +6,8 @@
   "dependents": [],
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2423",
-  "pull_request": "pending",
-  "tested_commit": "pending",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2436",
+  "tested_commit": "83bad96f54bf",
   "status": "mocked-acceptance-qualified",
   "package_complete": false,
   "evidence_class": "Signed fixture launch grants from LaunchAuthority, fakeredis, the fixture server clock and a fixture network that drops requests, loses responses and repeats a poll response; no live rollout. Live G3 qualification is separate.",
@@ -54,11 +54,11 @@
     "worker_command_ack_lag_seconds keeps the newest 1000 samples per swarm, without per kind labels"
   ],
   "validation": {
-    "red": "pending",
-    "ci_run": "pending",
-    "unit": "pending",
-    "mutation": "pending",
-    "review": "pending",
+    "red": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38061355585 on the tests only commit de1d8c07: 6 failed and 22 errors, every new test failing on the missing scripts.swarm_v2.api.commands and scripts.swarm_v2.worker modules or the missing evidence files, while the 119 neighbouring executions and tasks API tests passed",
+    "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063154992",
+    "unit": "Focused proofs run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063154992 on the tested commit passed every test in tests/test_swarm_v2_worker_commands.py, tests/test_swarm_v2_executions_api.py and tests/test_swarm_v2_tasks_api.py; each package case ran twice on independent fixtures. The full suite runs on the pull request",
+    "mutation": "Mutation preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063154843 on the tested commit: scripts/swarm_v2/api/commands.py 602 killed, scripts/swarm_v2/worker/control.py 312 killed, scripts/swarm_v2/api/server.py 5 killed, no survivors and no clearances; the earlier run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38062160738 left 17 survivors that tests now kill",
+    "review": "Standards reader closed eight findings after one fix round; Spec reader closed nine findings and four wording notes after three rounds",
     "local": "No local tests or mutation ran; static prepush passed on every commit"
   },
   "measurements": {
@@ -84,5 +84,75 @@
     "Expiry is derived on read from the stored issue time; an unacknowledged command past its expiry is never delivered or accepted, while an accepted command may still report its outcome after expiry",
     "An answer delivered while a drain holds is acknowledged and reported not_run instead of run, because new instructions would start new work; cancel and stop still run because they only end work",
     "A drain stops holding only when the server refused its acknowledgement as expired and no checkpoint was taken; a refusal for a superseded execution or a refused completion keeps the hold"
-  ]
+  ],
+  "obligations": {
+    "input_preparation": {
+      "met_by": "tests/sv2_ldg05_cases.py builds the fixture from delayed delivery (30 ms of a 50 ms expiry), a duplicated poll response replayed by the fixture network, and a drain whose acknowledgement the network drops",
+      "tests": [
+        "tests/test_swarm_v2_worker_commands.py::test_package_cases_match_their_committed_evidence"
+      ]
+    },
+    "output_contract": {
+      "met_by": "WorkerControl stops mutations on receiving a drain and reports its checkpoint as a separate completion after acceptance",
+      "tests": [
+        "tests/test_swarm_v2_worker_commands.py::test_a_drain_stops_mutations_before_its_acknowledgement_is_confirmed",
+        "tests/test_swarm_v2_worker_commands.py::test_a_checkpoint_taken_before_the_drain_ack_lands_completes_after_it"
+      ]
+    },
+    "rejection_contract": {
+      "met_by": "An expired command is never delivered or accepted, and a superseded execution cannot poll or be issued commands, so an expired answer or stop never reaches a new conversation",
+      "tests": [
+        "tests/test_swarm_v2_worker_commands.py::test_an_expired_command_is_never_accepted",
+        "tests/test_swarm_v2_worker_commands.py::test_an_expired_unacknowledged_command_cannot_be_completed",
+        "tests/test_swarm_v2_worker_commands.py::test_package_cases_match_their_committed_evidence"
+      ]
+    },
+    "recovery_contract": {
+      "met_by": "Acknowledgement and completion are idempotent per command id; the worker state file records what ran, so a lost response returns the stored outcome without a rerun",
+      "tests": [
+        "tests/test_swarm_v2_worker_commands.py::test_ack_records_receipt_once_and_replays_the_stored_acceptance",
+        "tests/test_swarm_v2_worker_commands.py::test_commands_run_only_after_acceptance_and_never_twice",
+        "tests/test_swarm_v2_worker_commands.py::test_a_command_interrupted_while_running_is_reported_not_rerun"
+      ]
+    },
+    "mutation_scope": {
+      "met_by": "Command state lives only in the worker-commands Redis hash per execution; no ledger document is opened or written",
+      "tests": [
+        "tests/test_swarm_v2_worker_commands.py::test_issue_validates_kind_payload_key_and_expiry_before_writing"
+      ]
+    },
+    "compatibility": {
+      "met_by": "With the command API configured, the preceding execution endpoints answer byte for byte as before; without it, command paths answer the preceding 404. The local terminal command path in scripts.swarm_v2.runtime.commands is untouched",
+      "tests": [
+        "tests/test_swarm_v2_worker_commands.py::test_adding_the_command_api_leaves_the_preceding_execution_protocol_unchanged",
+        "tests/test_swarm_v2_worker_commands.py::test_routes_send_command_paths_to_the_command_api"
+      ]
+    },
+    "authority": {
+      "met_by": "Every worker endpoint derives the execution and generation from the signed launch grant bound to its registration (LaunchAuthority.bound), never from the path, body or a display label; a path naming another execution is forbidden_scope. Issuing is the controller's in-process call and is fenced to the current occupant of the seat",
+      "tests": [
+        "tests/test_swarm_v2_worker_commands.py::test_endpoints_refuse_missing_credentials_other_executions_and_unknown_paths",
+        "tests/test_swarm_v2_worker_commands.py::test_issue_validates_kind_payload_key_and_expiry_before_writing"
+      ]
+    },
+    "state": {
+      "met_by": "The states block of this record separates observed, accepted, committed and externally verified; the store keeps accepted_at_ms and completed_at_ms as separate fields",
+      "tests": [
+        "tests/test_swarm_v2_worker_commands.py::test_completion_is_separate_from_acceptance_and_validated_per_kind",
+        "tests/test_swarm_v2_worker_commands.py::test_the_package_record_carries_its_completion_evidence"
+      ]
+    },
+    "data_safety": {
+      "met_by": "The authoritative_objects block names the worker-commands hash and the worker state file as authoritative; rollback deletes nothing and reissuing a key returns the stored command",
+      "tests": [
+        "tests/test_swarm_v2_worker_commands.py::test_rollback_stops_issuing_disabled_kinds_while_existing_commands_finish"
+      ]
+    },
+    "completion_evidence": {
+      "met_by": "interfaces, supported_versions, validation (test outputs), remaining_limitations and rollback_rehearsal blocks of this record",
+      "tests": [
+        "tests/test_swarm_v2_worker_commands.py::test_the_package_record_carries_its_completion_evidence"
+      ]
+    }
+  }
 }
