@@ -25,7 +25,7 @@ SETTLED = "a later stop passed with the work committed, on origin and recorded"
 PUSHED = "pushed"
 GITHUB_RE = re.compile(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$")
 GIT_TIMEOUT_S = 60
-# Measured: a GitHub push takes up to 2.3 s, the ledger write after it 0.52 s and the hook's startup 0.23 s.
+# Measured: a GitHub push takes up to 2.3 s and the ledger write after it up to 0.52 s.
 RESERVE_S = 3.5
 FLOOR_S = 1.0
 PREPUSH = Path("scripts") / "ci_prepush" / "__init__.py"
@@ -81,7 +81,7 @@ def trees(root, name):
     return [tree for tree in found if tree is not None]
 
 
-def gate_refusal(tree, seconds):
+def gate_refusal(tree, left):
     """Why the pre push gate keeps HEAD off origin, or None: a repo without one passes, a stamped HEAD is not rerun."""
     if not (tree.path / PREPUSH).is_file():
         return None
@@ -89,6 +89,7 @@ def gate_refusal(tree, seconds):
 
     if passed(tree.path):
         return None
+    seconds = left()
     if seconds < FLOOR_S:
         return GATE_LATE.format(path=tree.path)
     gate = subprocess.Popen(
@@ -158,12 +159,13 @@ class PushStop:
 
     def __init__(self, connect=None, ledger=None, root=None, now=None, clock=None):
         self._connect, self._ledger, self._root, self._now, self._clock = connect, ledger, root, now, clock
+        # The hook process builds its gates on import, so this is when the Stop condition started.
+        self.started = self.clock()
 
     def matches(self, call):
         return not call.tool
 
     def decide(self, call, who, state):
-        deadline = self.clock() + CONDITIONS_TIMEOUT_SEC
         if not (who.pinned and who.task) or lane_of(who.name) not in WORKERS:
             return Decision()
         ledger = self.ledger()
@@ -173,7 +175,7 @@ class PushStop:
             return Decision()
         store, owed, failed = self.connect(), False, []
         for tree in trees(self.root(), who.name):
-            if tree.unpushed and (refused := gate_refusal(tree, deadline - self.clock() - RESERVE_S)):
+            if tree.unpushed and (refused := gate_refusal(tree, self.left)):
                 failed.append(refused)
             elif tree.unpushed and push(tree):
                 self.record(store, ledger, who, tree)
@@ -244,9 +246,11 @@ class PushStop:
     def now(self):
         if self._now:
             return self._now()
-        import time
-
         return int(time.time() * 1000)
 
     def clock(self):
         return self._clock() if self._clock else time.monotonic()
+
+    def left(self):
+        """Seconds a pre push gate may run: the Stop condition's time left after the reserve."""
+        return self.started + CONDITIONS_TIMEOUT_SEC - self.clock() - RESERVE_S

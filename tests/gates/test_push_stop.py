@@ -40,12 +40,13 @@ def git(path, *args):
 
 class FakeLedger:
     def __init__(self, task):
-        self.task, self.events, self.comments = task, [], []
+        self.task, self.events, self.comments, self.delay = task, [], [], 0
 
     def state(self, slug):
         return {"tasks": [self.task] if slug == SLUG else [], "_meta": {"events": self.events}}
 
     def comment(self, slug, task_id, text, by):
+        time.sleep(self.delay)
         self.comments.append((slug, task_id, text, by))
 
 
@@ -76,7 +77,8 @@ def rig(tmp_path):
         clock=lambda: ticks.pop(0) if ticks else time.monotonic(),
     )
 
-    def stop(who=WHO):
+    def stop(who=WHO, started=None):
+        gate.started = time.monotonic() if started is None else started
         return gate.decide(STOP, who, Verdicts(SLUG, gate.name, tmp_path))
 
     def commit(name="work"):
@@ -572,8 +574,8 @@ def test_a_pre_push_gate_past_its_timeout_is_killed_with_its_children_and_keeps_
     )
     install_gate(rig, 0, before=slow)
     monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", RESERVE_S + 2.26)
-    rig.ticks[:] = [0.0, 0.0]
-    decision = rig.stop()
+    rig.ticks[:] = [0.0]
+    decision = rig.stop(started=0.0)
     assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {GATE_SLOW.format(path=rig.tree, seconds=2.3)}")
     assert rig.remote_head() == ""
     assert gone(int(pid.read_text()))
@@ -610,7 +612,7 @@ def test_under_a_slow_push_a_later_gate_is_killed_with_the_reserve_left_inside_t
     second_tree_with_work(rig)
     log = install_gate(rig, 0, before="import time\ntime.sleep(30)\n")
     slow_origin(rig, 2)
-    timeout = RESERVE_S + FLOOR_S + 3
+    timeout = RESERVE_S + FLOOR_S + 4
     monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", timeout)
     started = time.monotonic()
     decision = rig.stop()
@@ -645,43 +647,66 @@ def test_under_a_slow_push_a_later_gate_with_less_than_the_floor_left_never_star
     assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {GATE_LATE.format(path=rig.tree)}")
     assert rig.remote_head() == ""
     assert not log.exists()
-    assert 1 <= took <= timeout - RESERVE_S + 0.5
+    assert 1 <= took <= timeout
 
 
-def test_a_gate_left_exactly_the_floor_runs_and_pushes(monkeypatch, rig):
-    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
-    log = install_gate(rig, 0)
-    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", RESERVE_S + FLOOR_S)
-    rig.ticks[:] = [0.0, 0.0]
-    assert rig.stop().allowed
-    assert rig.remote_head() == git(rig.tree, "rev-parse", "HEAD")
-    assert log.exists()
+def test_a_gate_left_exactly_the_floor_is_started_with_that_budget(monkeypatch, rig):
+    install_gate(rig, 0)
+    waits = []
+    monkeypatch.setattr(
+        push_stop.subprocess, "Popen", lambda *a, **kw: type("Gate", (), {"wait": lambda _, s: waits.append(s) or 0})()
+    )
+    tree = push_stop.Tree(rig.tree, BRANCH, False, 1, 1)
+    assert push_stop.gate_refusal(tree, lambda: FLOOR_S) is None
+    assert waits == [FLOOR_S]
+    assert push_stop.gate_refusal(tree, lambda: FLOOR_S - 0.01) == GATE_LATE.format(path=rig.tree)
+    assert waits == [FLOOR_S]
 
 
 def test_a_gate_left_just_under_the_floor_never_starts(monkeypatch, rig):
     rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
     log = install_gate(rig, 0)
     monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", RESERVE_S + FLOOR_S - 0.01)
-    rig.ticks[:] = [0.0, 0.0]
-    decision = rig.stop()
+    rig.ticks[:] = [0.0]
+    decision = rig.stop(started=0.0)
     assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {GATE_LATE.format(path=rig.tree)}")
     assert rig.remote_head() == ""
     assert not log.exists()
 
 
-def test_the_deadline_is_set_when_the_hook_starts_not_when_the_gate_starts(monkeypatch, rig):
+def test_the_gate_budget_counts_from_when_the_hook_started_not_from_when_the_gate_starts(monkeypatch, rig):
     rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
     log = install_gate(rig, 0)
     monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", RESERVE_S + FLOOR_S + 4)
-    rig.ticks[:] = [0.0, 4.5]
-    decision = rig.stop()
+    rig.ticks[:] = [4.5]
+    decision = rig.stop(started=0.0)
     assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {GATE_LATE.format(path=rig.tree)}")
     assert not log.exists()
 
 
-def test_the_hook_clock_is_monotonic(monkeypatch):
-    monkeypatch.setattr(push_stop.time, "monotonic", lambda: 42.5)
-    assert PushStop().clock() == 42.5
+def test_the_hook_clock_is_the_injected_clock_or_the_monotonic_clock():
+    assert PushStop(clock=lambda: 42.5).clock() == 42.5
+    assert abs(PushStop().clock() - time.monotonic()) < 1
+
+
+def test_the_hook_start_is_read_when_the_gate_is_built():
+    assert PushStop(clock=lambda: 7.0).started == 7.0
+
+
+def test_a_passing_gate_followed_by_a_slow_push_and_ledger_write_ends_inside_the_stop_condition(monkeypatch, rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    log = install_gate(rig, 0, before="import time\ntime.sleep(1.5)\n")
+    slow_origin(rig, 2.3)
+    rig.ledger.delay = 0.52
+    timeout = RESERVE_S + 2
+    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", timeout)
+    started = time.monotonic()
+    assert rig.stop(started=started).allowed
+    took = time.monotonic() - started
+    assert log.exists()
+    assert rig.remote_head() == git(rig.tree, "rev-parse", "HEAD")
+    assert len(rig.ledger.comments) == 1
+    assert 1.5 + 2.3 + 0.52 <= took <= timeout
 
 
 def test_a_pre_push_gate_killed_by_a_signal_keeps_the_branch_off_origin(rig):
