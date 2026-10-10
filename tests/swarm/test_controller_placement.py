@@ -117,6 +117,8 @@ def test_local_controller_spawns_every_lane(store):
     runtime = controller.FencedRuntime(store, "sw", held, inner, "local")
     config = store.config("sw")
     assert runtime.has_capacity(config) is True
+    inner.full = True
+    assert runtime.has_capacity(config) is False
     assert runtime.placement_refusal(config, "plan", {"id": "t"}) == ""
     runtime.spawn(config, "plan", "one", {"id": "t"})
     assert inner.spawned == [("plan", "one", "t")]

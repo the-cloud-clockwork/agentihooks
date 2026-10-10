@@ -67,11 +67,11 @@ class FencedRuntime:
             return refused
         if self.deployment == LOCAL:
             return ""
-        router = self.runtime.router
-        wanted = router.placement.backend_for(SpawnRequest(config, lane, "", task))
+        request, router = SpawnRequest(config, lane, "", task), self.runtime.router
+        wanted = router.placed_backend(request)
         if wanted == WORKSTATION_BACKEND:
             return WORKSTATION.format(lane=lane)
-        return DISABLED.format(backend=wanted) if wanted in router.disabled else ""
+        return DISABLED.format(backend=wanted) if router.spawn_backend(request) != wanted else ""
 
     def has_capacity(self, config) -> bool:
         lease.renew(self.store, self.slug, self.held)

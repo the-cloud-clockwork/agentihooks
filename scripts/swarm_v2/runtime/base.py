@@ -125,10 +125,13 @@ class RuntimeRouter:
         disabled = [name.strip() for name in environ.get(DISABLED_VARIABLE, "").split(",") if name.strip()]
         return cls(runtimes, environ.get(BACKEND_VARIABLE) or LOCAL, disabled, placement)
 
-    def spawn_backend(self, request: SpawnRequest | None = None) -> str:
-        wanted = self.default
+    def placed_backend(self, request: SpawnRequest | None = None) -> str:
         if self.placement is not None and request is not None:
-            wanted = self.placement.backend_for(request)
+            return self.placement.backend_for(request)
+        return self.default
+
+    def spawn_backend(self, request: SpawnRequest | None = None) -> str:
+        wanted = self.placed_backend(request)
         return LOCAL if wanted in self.disabled else wanted
 
     def spawn(self, request: SpawnRequest, needs: Iterable[Capability] = ()) -> Outcome:
