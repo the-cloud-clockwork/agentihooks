@@ -63,12 +63,15 @@ def base(slug: str, ts_ms: int, identity: str, path: dict) -> dict:
     return {"event_id": identity, "ledger": slug, "ts_ms": ts_ms, **EMPTY_PATH, **path}
 
 
-def event_row(slug: str, event: dict, path: dict, catch_up: bool, ordinal: int) -> dict:
-    payload = json.dumps(event, sort_keys=True)
-    identity = hashlib.sha256(payload.encode()).hexdigest()
+def event_identity(slug: str, event: dict, ordinal: int) -> str:
+    digest = hashlib.sha256(json.dumps(event, sort_keys=True).encode()).hexdigest()
+    return f"ledger:{slug}:{ordinal}:{digest}"
+
+
+def event_row(slug: str, event: dict, path: dict, catch_up: bool, identity: str) -> dict:
     state = event["kind"].removeprefix("task ")
     return {
-        **base(slug, event["at"], f"ledger:{slug}:{ordinal}:{identity}", path),
+        **base(slug, event["at"], identity, path),
         "revision": event["rev"],
         "kind": event["kind"],
         "by": event["by"],
@@ -78,7 +81,7 @@ def event_row(slug: str, event: dict, path: dict, catch_up: bool, ordinal: int) 
         "catch_up": int(catch_up),
         "first_missed": 0,
         "last_missed": 0,
-        "payload": payload,
+        "payload": json.dumps(event, sort_keys=True),
     }
 
 
@@ -87,13 +90,14 @@ def event_rows(slug: str, events: list, known: dict, cursor: int | None, now_ms:
     if events and cursor is not None and events[0]["rev"] > cursor + 1:
         first, last = cursor + 1, events[0]["rev"] - 1
         gap = {"rev": last, "at": now_ms, "by": "metrics", "kind": "history gap", "target": ""}
-        row = event_row(slug, gap, {}, False, 0)
-        rows.append({**row, "event_id": f"gap:{slug}:{first}:{last}", "first_missed": first, "last_missed": last})
+        row = event_row(slug, gap, {}, False, f"gap:{slug}:{first}:{last}")
+        rows.append({**row, "first_missed": first, "last_missed": last})
     for event in events:
         ordinal = positions[event["rev"]]
         positions[event["rev"]] += 1
         if cursor is None or event["rev"] > cursor:
-            rows.append(event_row(slug, event, known.get(event["target"], {}), cursor is None, ordinal))
+            identity = event_identity(slug, event, ordinal)
+            rows.append(event_row(slug, event, known.get(event["target"], {}), cursor is None, identity))
     return rows
 
 
