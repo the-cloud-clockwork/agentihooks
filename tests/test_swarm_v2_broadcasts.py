@@ -493,3 +493,92 @@ def test_records_round_trip_and_seats_name_their_role(world):
         "until_ack",
         WARNING["message"],
     )
+
+
+def test_b_a_broadcast_id_stays_with_its_owner_and_brain(world):
+    local, remote = world.token(LOCAL), world.token(REMOTE)
+    world.announce({**WARNING, "project_id": PROJECT})
+    world.fleet.publish(local, dict(NOTE))
+    before = snapshot(world)
+    assert refusal(world.fleet.publish, local, {**NOTE, "broadcast_id": "fleet-warning", "severity": "alert"}) == (
+        "forbidden_scope"
+    )
+    assert refusal(world.fleet.publish, remote, {**NOTE, "message": "Overwritten."}) == "forbidden_scope"
+    assert refusal(world.announce, {**NOTE, "brain_id": "swarm"}) == "forbidden_scope"
+    assert refusal(world.announce, {**WARNING, "brain_id": "personal"}) == "forbidden_scope"
+    assert snapshot(world) == before
+    successor = world.token(LOCAL, previous=world.agents[LOCAL].execution_id)
+    revised = world.fleet.publish(successor, {**NOTE, "message": "The registry schema settled."})
+    assert (revised.revision, revised.author) == (2, f"{LOCAL}/{world.agents[LOCAL].execution_id}")
+    assert [broadcasts.owner_of(author) for author in ("operator:a", "eng-1@x/exe-1", "eng-1@x")] == [
+        "operator",
+        "eng-1@x",
+        "eng-1@x",
+    ]
+
+
+def test_b_an_operation_id_replays_only_for_its_own_publisher(world):
+    local = world.token(LOCAL)
+    announced = world.announce(WARNING, "op-1")
+    mine = world.fleet.publish(local, dict(NOTE), "op-1")
+    assert (mine.broadcast_id, mine.message) == ("agent-note", NOTE["message"])
+    assert world.fleet.publish(local, {**NOTE, "message": "Retried with other text."}, "op-1") == mine
+    assert world.announce(FOLLOWUP, "op-1") == announced
+    assert sorted(world.store.redis.hkeys(world.fleet.key("broadcast-operations"))) == [
+        f"{LOCAL}:op-1",
+        "operator:op-1",
+    ]
+
+
+def test_b_a_launch_grant_is_not_an_operator_credential(world):
+    local = world.token(LOCAL)
+    before = snapshot(world)
+    assert refusal(world.fleet.publish_operator, local, dict(WARNING)) == "unauthenticated"
+    assert snapshot(world) == before
+
+
+def test_c_a_delivered_unacknowledged_warning_replays_to_the_next_generation_and_fences_the_old_one(world):
+    world.token(LOCAL)
+    world.announce(FOLLOWUP)
+    world.announce({**NOTE, "brain_id": "swarm"})
+    old_view = world.broadcasts(authorize=lambda token: replace(world.authority.authorize(token), generation=1))
+    first = world.token(LOCAL, previous=world.agents[LOCAL].execution_id)
+    world.clock[0] = PUBLISH_MS
+    assert ids(old_view.claim(first, CHANNELS)) == ["agent-note", "fleet-followup"]
+    new = world.token(LOCAL, previous=world.agents[LOCAL].execution_id)
+    world.clock[0] = CLAIM_MS
+    replay = world.fleet.claim(new, CHANNELS)
+    assert ids(replay) == ["fleet-followup"]
+    assert (replay[0].delivered_ms, replay[0].lag_seconds) == (PUBLISH_MS, 0.0)
+    assert world.fleet.delivery(LOCAL, "fleet-followup") == {
+        "revision": 1,
+        "delivered_ms": PUBLISH_MS,
+        "acked": False,
+        "execution_id": world.agents[LOCAL].execution_id,
+        "generation": 3,
+    }
+    before = snapshot(world)
+    stale = world.broadcasts(authorize=lambda token: replace(world.authority.authorize(token), generation=2))
+    assert refusal(stale.acknowledge, new, "fleet-followup", 1) == "stale_generation"
+    assert snapshot(world) == before
+    assert world.fleet.acknowledge(new, "fleet-followup", 1) is True
+
+
+def test_the_local_bridge_claims_into_the_cache_only_while_the_fleet_path_is_on(world, tmp_path, monkeypatch):
+    path = tmp_path / "broadcast.json"
+    monkeypatch.setattr(hb, "_broadcast_path", lambda: path)
+    local = world.token(LOCAL)
+    world.announce(WARNING)
+    before = snapshot(world)
+    assert broadcasts.sync_local(world.fleet, local, CHANNELS, {}) == 0
+    assert broadcasts.sync_local(world.fleet, local, CHANNELS, {broadcasts.FLAG: "0"}) == 0
+    assert snapshot(world) == before and hb.list_broadcasts() == []
+    assert broadcasts.sync_local(world.fleet, local, CHANNELS, {broadcasts.FLAG: "1"}, "claim-1") == 1
+    assert json.loads(world.store.redis.hget(world.fleet.key("broadcast-claims"), LOCAL))["claim_id"] == "claim-1"
+    cached = hb.list_broadcasts()
+    assert [m["id"] for m in cached] == ["fixture:fleet-warning:1"]
+    assert broadcasts.acknowledge_local(world.fleet, local, cached[0]) is True
+    assert broadcasts.acknowledge_local(world.fleet, local, cached[0]) is False
+    for entry in ({"id": "local-1"}, {**cached[0], "fleet": {**cached[0]["fleet"], "swarm": "other"}}):
+        assert refusal(broadcasts.acknowledge_local, world.fleet, local, entry) == "forbidden_scope"
+    assert broadcasts.sync_local(world.fleet, local, CHANNELS, {broadcasts.FLAG: "1"}) == 0
