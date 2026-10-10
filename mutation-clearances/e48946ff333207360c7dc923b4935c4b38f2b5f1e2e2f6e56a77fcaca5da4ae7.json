@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/artifacts/base.py:scripts.swarm_v2.artifacts.base.x\u01c1ArtifactStore\u01c1stream__mutmut_12:ff08a1da8c7592dc06a9346a2b4c579d45237445cd46c66a802e78edc449076e": {
+    "reader": "standards_reader",
+    "reason": "held is a local that is never returned or yielded without a guard. Its initial value is read only by the two truthiness checks: if held: at the top of the loop body, which sees the initial value on the first iteration only, and if held: after the loop, which sees it only when ref.size == 0. b\"\" and None are both falsy, so both checks take the same branch for either value. Every other read of held follows held = self.backend.read(...) in the same iteration. No observable output can differ, so no test can kill this mutant."
+  }
+}
