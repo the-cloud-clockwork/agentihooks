@@ -16,7 +16,8 @@
     "snapshot(database, target): SQLite backup API copy into a hidden temporary beside the target, integrity checked, renamed into place",
     "restore(backup, directory): verifies the backup, takes the writer lease, writes the backup over ledgers.sqlite3 through the backup API",
     "python -m scripts.swarm_v2.ledger_writer [--dir] snapshot|restore|holder",
-    "Chart agentihooks-swarm: ledger.replicas other than 1 fails helm template; kind-smoke.sh checks the refusal"
+    "Chart agentihooks-swarm: ledger.replicas other than 1 fails helm template; kind-smoke.sh checks the refusal",
+    "Authority: the writer derives actor and scope from the credential (ledger token = operator role, hive or agent token = bound agent, ledger_authority.principal); a display label without a token is answered 403 and changes nothing (T-SV2-LDG-04-A)"
   ],
   "supported_versions": {
     "python": "3.11 and 3.12 as run by the mutation preflight",
@@ -25,7 +26,7 @@
   },
   "states": {
     "observed": "Second server exit code, its log line naming the holder, health probe on its port, ledger revision and chat read read-only from SQLite",
-    "accepted": "First server answers 200 with the operation applied; a replay of the same operation id after restart is answered applied without a second entry",
+    "accepted": "First server answers 200 with the operation applied; a write carrying only a display label is answered 403 and leaves the ledger unchanged; a replay of the same operation id after restart is answered applied without a second entry",
     "committed": "Chat entries and revision in the authoritative SQLite ledger after kill and restart; restored backup equals the committed state",
     "externally_verified": "Not claimed; live G3 evidence is required at the rollout gate"
   },
@@ -44,7 +45,7 @@
   },
   "rollback_rehearsal": {
     "action": "Stop the writer, restore a verified snapshot with the ledger_writer restore command under the writer lease, start the preceding writer",
-    "evidence": "T-SV2-LDG-04-C restores the snapshot taken after the accepted write over a newer state and reads back the committed state; T-SV2-LDG-04-B shows restore refused while a writer serves",
+    "evidence": "T-SV2-LDG-04-C restores the snapshot taken after the accepted write over a newer state, starts a writer on the restored folder, and records that it holds the lease and serves the committed state; T-SV2-LDG-04-B shows restore refused while a writer serves",
     "authoritative_objects": "ledgers.sqlite3 with its page tokens; the writer lease file is coordination state the kernel releases. Rollback deletes neither."
   },
   "failure_evidence": "Run 38050459957 failed one unit test because tmp_path holds a _home folder from test isolation; fixed by giving the snapshot test its own folder.",

@@ -8,6 +8,10 @@
       "chat": [
         "Written by the one active writer"
       ],
+      "display_label_without_token": {
+        "reason": "missing or wrong ledger token",
+        "status": 403
+      },
       "first_server_held_the_lease": true,
       "first_server_write": {
         "applied": [
@@ -16,6 +20,7 @@
         "rejected": [],
         "status": 200
       },
+      "ledger_unchanged_by_label": true,
       "ledger_unchanged_by_second": true,
       "ledger_writer_conflicts_total": 1,
       "revision_advanced_by_first": true,

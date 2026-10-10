@@ -9,6 +9,6 @@
   "cleanup": "pytest tmp_path folders and the reserved ports only; every server process is terminated or killed and reaped",
   "mutation_scope": "Chat writes on the fixture ledger only; the first server is the single writer of its SQLite file",
   "inputs": {
-    "tests/sv2_ldg04_cases.py": "8655a70e80fffa1e3c33a8846956a15db3005cf621881d2bab614a30b32465de"
+    "tests/sv2_ldg04_cases.py": "79fa76ff363757b0620be0f7bec3cd36839c40f077521bf1acb7ef571b6796af"
   }
 }
