@@ -53,6 +53,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from hooks.context import injection_trace, quarantine
 from scripts.doctor import priming
@@ -141,6 +142,9 @@ SCALING_KEYS = {
     "load-low": "load_low",
     "memory-per-agent": "memory_per_agent_mb",
 }
+ADDRESS_KEYS = {"api-url": "api_url"}
+NO_API_ADDRESS = "api-url takes an http or https address with a host and no credentials"
+CONFIG_KEYS = {**SCALING_KEYS, **ADDRESS_KEYS}
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 GATE_MODES = modes.MODES
 RETIRES_MASTER = frozenset({"stop now", "close ledger"})
@@ -581,7 +585,7 @@ def setting(config, key):
     if key in LANE_KEYS:
         lane, field = LANE_KEYS[key]
         return config.lanes.get(lane, {}).get(field) or "unset"
-    return getattr(config, {**SETTABLE, **EFFORT_KEYS, **SCALING_KEYS}.get(key, key))
+    return getattr(config, {**SETTABLE, **EFFORT_KEYS, **CONFIG_KEYS}.get(key, key))
 
 
 def lifecycle_control(args):
@@ -599,7 +603,7 @@ def control_readings(store, args):
         return {
             key: setting(config, key)
             for key in keys
-            if key in (*SETTABLE, *LANE_KEYS, *EFFORT_KEYS, *SCALING_KEYS, *GATE_KEYS, "autonomy")
+            if key in (*SETTABLE, *LANE_KEYS, *EFFORT_KEYS, *CONFIG_KEYS, *GATE_KEYS, "autonomy")
         }
     if args.command == "lift":
         lifted = lift.agent_lifted(args.slug, args.agent, args.gate)
@@ -635,6 +639,21 @@ def scaling_value(key, value):
         raise SwarmError(f"{key} takes a number, the one minute load per CPU") from None
 
 
+def api_address(value):
+    try:
+        parts = urlsplit(value)
+        host = parts.hostname
+    except ValueError:
+        raise SwarmError(NO_API_ADDRESS) from None
+    if value and (parts.scheme not in ("http", "https") or not host or "@" in parts.netloc):
+        raise SwarmError(NO_API_ADDRESS)
+    return value
+
+
+def config_value(key, value):
+    return api_address(value) if key in ADDRESS_KEYS else scaling_value(key, value)
+
+
 def _split_master_pairs(pairs):
     """The master seat count lives beside the swarm config: checked with the other pairs, stored after them."""
     split = [(pair, *pair.partition("=")) for pair in pairs]
@@ -663,8 +682,8 @@ def cmd_set(store, args):
         if key in EFFORT_KEYS:
             changes[EFFORT_KEYS[key]] = value
             continue
-        if key in SCALING_KEYS:
-            changes[SCALING_KEYS[key]] = scaling_value(key, value)
+        if key in CONFIG_KEYS:
+            changes[CONFIG_KEYS[key]] = config_value(key, value)
             continue
         if key in GATE_KEYS:
             changes["gates"] = {**store.config(args.slug).gates, **gate_mode(key, value)}
@@ -680,7 +699,7 @@ def cmd_set(store, args):
         if key not in SETTABLE or not value.isdigit():
             raise SwarmError(
                 f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, autonomy={'|'.join(AUTONOMY)}, "
-                f"effort-min=E, effort-max=E, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB "
+                f"effort-min=E, effort-max=E, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, api-url=URL "
                 f"or {', '.join(LANE_KEYS)}=<value>"
             )
         changes[SETTABLE[key]] = int(value)
@@ -709,6 +728,7 @@ def cmd_set(store, args):
                 "load_high": config.load_high,
                 "load_low": config.load_low,
                 "memory_per_agent_mb": config.memory_per_agent_mb,
+                "api_url": config.api_url,
                 "master_affinity": {"desired": affinity.desired(config) or "auto", "order": master},
                 "masters": masters.MasterSeats(store.redis).count(args.slug),
             }

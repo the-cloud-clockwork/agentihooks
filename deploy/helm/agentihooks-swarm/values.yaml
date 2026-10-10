@@ -14,6 +14,14 @@ externalSecrets: []
 
 ledger:
   replicas: 1
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: anton.io/capacity-type
+                operator: DoesNotExist
+  tolerations: []
   port: 8765
   publicUrl: ""
   persistence:
@@ -52,6 +60,26 @@ redis:
       ephemeral-storage: 256Mi
 
 controller:
+  # Durable capacity only: EC2 nodes carry anton.io/capacity-type and the autoscaler may remove them.
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: anton.io/capacity-type
+                operator: DoesNotExist
+  tolerations: []
+  # Worker registration and heartbeat API, served by the controller process for one swarm.
+  api:
+    enabled: false
+    port: 8780
+    swarm: ""
+    signingKey:
+      keyId: ""
+      secretName: ""
+      secretKey: signing-key
+    # Peers beyond the release, such as worker Pods in their own namespace.
+    ingressFrom: []
   livenessProbe:
     initialDelaySeconds: 60
     periodSeconds: 10

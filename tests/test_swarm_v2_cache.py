@@ -645,3 +645,81 @@ def test_package_cases_pass_on_the_isolated_fixture():
     from tests.sv2_fsy03_cases import case_a, case_b, case_c
 
     assert [case()["passed"] for case in (case_a, case_b, case_c)] == [True, True, True]
+
+
+def stamped(root: Path) -> dict[str, tuple]:
+    return {
+        str(p.relative_to(root)): (p.lstat().st_mode, p.lstat().st_mtime_ns, p.read_bytes() if p.is_file() else None)
+        for p in sorted(root.rglob("*"))
+    }
+
+
+def read_only(world) -> cache.Store:
+    return replace(world.store, read_only=lambda path: path == world.store.policy.store)
+
+
+def test_an_attempt_on_a_read_only_store_reads_a_seed_without_writing_the_store(world):
+    seed = published(world, key(), {"wheels/pkg.whl": b"wheel"})
+    before = stamped(world.store.policy.store)
+    layer = cache.attach(read_only(world), world.second, key())
+    assert layer.seed == seed
+    assert tree(seed) == {"wheels": None, "wheels/pkg.whl": b"wheel"}
+    assert stamped(world.store.policy.store) == before
+    assert cache.METRICS == {"cache_hits": 1, "cache_misses": 1, "cache_corruption_total": 0}
+
+
+def test_an_attempt_cannot_write_a_seed_into_a_read_only_store(world):
+    published(world, key(), {"a.whl": b"owner"})
+    before = stamped(world.store.policy.store)
+    layer = cache.attach(read_only(world), world.second, key(lock="b" * 64))
+    fill(layer, {"a.whl": b"attempt"})
+    with pytest.raises(cache.CacheError) as error:
+        cache.publish(read_only(world), world.second, layer)
+    assert str(error.value) == "the cache store is mounted read only into this attempt, so only its owner writes seeds"
+    assert stamped(world.store.policy.store) == before
+    assert entries(world.store) == [key().digest()]
+
+
+def test_a_read_only_store_counts_a_corrupt_entry_as_a_miss_and_leaves_it_for_the_owner(world):
+    seed = published(world, key(), {"a.whl": b"x"})
+    seed.chmod(0o700)
+    (seed / "a.whl").chmod(0o600)
+    (seed / "a.whl").write_bytes(b"y")
+    before = stamped(world.store.policy.store)
+    assert cache.attach(read_only(world), world.second, key()).seed is None
+    assert stamped(world.store.policy.store) == before
+    assert cache.METRICS == {"cache_hits": 0, "cache_misses": 2, "cache_corruption_total": 1}
+
+
+def test_a_read_only_store_that_is_absent_misses_without_creating_it(world):
+    layer = cache.attach(read_only(world), world.first, key())
+    assert layer.seed is None and not world.store.policy.store.exists()
+
+
+def test_reuse_off_publishes_nothing_even_from_a_read_only_store(world):
+    published(world, key(), {"a.whl": b"x"})
+    store = replace(read_only(world), policy=replace(world.store.policy, enabled=False))
+    layer = cache.attach(store, world.first, key())
+    assert layer.seed is None
+    assert cache.publish(store, world.first, layer) is None
+
+
+def test_a_store_reads_its_mount_flags_by_default():
+    assert cache.Store(cache.load(POLICY_FILE), SCOPE).read_only is cache.mounted_read_only
+
+
+def test_mounted_read_only_reads_the_flag_of_the_nearest_existing_folder(tmp_path, monkeypatch):
+    seen = []
+
+    def statvfs(path):
+        seen.append(Path(path))
+        return SimpleNamespace(f_flag=os.ST_RDONLY | os.ST_NOSUID)
+
+    monkeypatch.setattr(cache.os, "statvfs", statvfs)
+    assert cache.mounted_read_only(tmp_path / "absent" / "store") is True
+    assert seen == [tmp_path]
+
+
+def test_mounted_read_only_is_false_on_a_writable_mount(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache.os, "statvfs", lambda path: SimpleNamespace(f_flag=os.ST_NOSUID))
+    assert cache.mounted_read_only(tmp_path) is False
