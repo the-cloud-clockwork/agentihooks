@@ -61,7 +61,7 @@ class World:
         self.capacity.reserve(token, CAP, TTL)
         return self.confirm(agent, token)
 
-    def observed(self, agent, case, generation=None):
+    def observed(self, agent, case, generation=None, sources=None):
         values = INPUTS[case]
         seen = observe.Classification(
             agent.execution_id,
@@ -73,7 +73,7 @@ class World:
             1.0,
             1.0,
             1.0,
-            {},
+            INPUTS[sources] if sources else {},
         )
         self.store.redis.hset(self.store.key(SLUG, "observations"), agent.execution_id, json.dumps(asdict(seen)))
 
@@ -173,7 +173,7 @@ def test_b_a_terminal_failure_alone_frees_no_slot_and_admits_no_duplicate(world)
     lost = world.agents[TERMINAL]
     before = world.rows()
 
-    for source in ("terminal", "heartbeat", "provider", "ssh", ""):
+    for source in ("terminal", "heartbeat", "provider", "ssh", "", "kubernetes", "supervisor"):
         assert refusal(world.reconciler.exited, lost.execution_id, lost.generation, source) == "insufficient_evidence"
     kept = world.reconciler.reconcile()
     _, duplicate = world.launch(TERMINAL)
@@ -306,6 +306,7 @@ def test_c_a_restarted_controller_reconciles_expiry_and_occupancy_without_readin
     assert kinds(second) == {RETIRING: ("handoff_unconfirmed", "keep"), LOST_TERMINAL: ("terminal_loss", "keep")}
     assert world.rows() == after
 
+    world.observed(predecessor, "lost_worker", sources="supervisor_exit")
     exited = restarted.exited(predecessor.execution_id, predecessor.generation, "supervisor")
     replay = restarted.exited(predecessor.execution_id, predecessor.generation, "supervisor")
 
@@ -340,6 +341,7 @@ def test_a_delayed_exit_of_a_replaced_generation_never_frees_the_newer_slot(worl
 def test_an_exit_of_the_current_generation_frees_only_its_own_row(world):
     world.scene()
     lost = world.agents[TERMINAL]
+    world.observed(lost, "lost_worker", sources="pod_failed")
     before = world.rows()
 
     found = world.reconciler.exited(lost.execution_id, lost.generation, "kubernetes")
@@ -347,6 +349,34 @@ def test_an_exit_of_the_current_generation_frees_only_its_own_row(world):
     assert (found.kind, found.action, found.account, found.holder) == ("exited", "release", ACCOUNT, LOST_TERMINAL)
     assert (found.execution_id, found.generation, found.evidence) == (lost.execution_id, 1, "kubernetes")
     assert world.rows() == {name: raw for name, raw in before.items() if name != LOST_TERMINAL}
+
+
+@pytest.mark.parametrize(
+    ("sources", "source", "generation", "released"),
+    [
+        ("pod_gone", "kubernetes", None, True),
+        ("pod_failed", "kubernetes", None, True),
+        ("supervisor_exit", "supervisor", None, True),
+        ("pod_unreachable", "kubernetes", None, False),
+        ("pod_running", "kubernetes", None, False),
+        ("supervisor_exit", "kubernetes", None, False),
+        ("pod_failed", "supervisor", None, False),
+        ("pod_failed", "kubernetes", 7, False),
+    ],
+)
+def test_an_exit_releases_only_on_its_stored_observation(world, sources, source, generation, released):
+    world.running(TERMINAL)
+    lost = world.agents[TERMINAL]
+    world.observed(lost, "lost_terminal", generation, sources)
+    before = world.rows()
+
+    if released:
+        assert world.reconciler.exited(lost.execution_id, lost.generation, source).action == "release"
+        assert world.rows() == {}
+    else:
+        assert refusal(world.reconciler.exited, lost.execution_id, lost.generation, source) == "insufficient_evidence"
+        assert world.rows() == before
+    assert world.reconciler.stale_exit_events() == 0
 
 
 def test_observe_only_mode_reports_releases_and_frees_nothing(world):
@@ -358,6 +388,7 @@ def test_observe_only_mode_reports_releases_and_frees_nothing(world):
 
     found = observer.reconcile()
     lost = world.agents[TERMINAL]
+    world.observed(lost, "lost_worker", sources="supervisor_exit")
     exited = observer.exited(lost.execution_id, lost.generation, "supervisor")
 
     assert kinds(found) == {

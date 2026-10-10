@@ -26,7 +26,7 @@ from scripts.swarm_v2.runtime.base import LOCAL
 
 MODE = "AGENTIHOOKS_ACCOUNT_RECONCILE"
 ENFORCE, OBSERVE_ONLY = "enforce", "observe"
-EXIT_SOURCES = frozenset((observe.Source.KUBERNETES.value, observe.Source.SUPERVISOR.value))
+EXIT_VALUES = {observe.Source.KUBERNETES.value: observe.ENDED, observe.Source.SUPERVISOR.value: {observe.EXITED}}
 RELEASE, KEEP, HELD_BACK = "release", "keep", "observe_only"
 EXPIRED, ENDED_SESSION = "expired_reservation", "ended_session"
 ORPHAN_RESERVATION, ORPHAN_OCCUPANCY = "orphan_reservation", "orphan_occupancy"
@@ -51,6 +51,15 @@ class Finding:
 
 def _evidence(seen: observe.Classification) -> str:
     return f"{seen.state.value}/{seen.failure.value}"
+
+
+def _shows_exit(seen: observe.Classification | None, source: str) -> bool:
+    entry = seen.sources.get(source) if seen is not None else None
+    if entry is None:
+        return False
+    if source == observe.Source.KUBERNETES.value and entry["reading"] == observe.Reading.NOT_FOUND.value:
+        return True
+    return entry["reading"] == observe.Reading.OK.value and entry["value"] in EXIT_VALUES[source]
 
 
 def _no_grant(_token: str) -> None:
@@ -189,12 +198,15 @@ class AccountReconciler:
         return found
 
     def exited(self, execution_id: str, generation: int, source: str) -> Finding:
-        """A runtime exit frees only the row of that exact execution and generation; terminal loss is no exit."""
-        if source not in EXIT_SOURCES:
+        """A runtime exit frees only the row of that exact execution and generation, and only when the stored
+        observation of that generation shows the exit; terminal loss is no exit."""
+        if source not in EXIT_VALUES:
             raise SwarmError("insufficient_evidence")
         for account, found in sorted(self._rows().items()):
             for name, slot in found.items():
                 if (slot.execution_id, slot.generation) == (execution_id, generation):
+                    if not _shows_exit(self._observed(slot), source):
+                        raise SwarmError("insufficient_evidence")
                     return self._release(
                         Finding(EXITED, RELEASE, account, name, execution_id, generation, source), slot
                     )

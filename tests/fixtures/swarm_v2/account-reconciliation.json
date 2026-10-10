@@ -13,5 +13,10 @@
   "lost_worker": {"state": "lost", "terminal": "unobserved", "failure": "worker_loss", "confidence": "partial"},
   "suspect_worker": {"state": "suspect", "terminal": "unobserved", "failure": "worker_loss", "confidence": "uncertain"},
   "waiting_worker": {"state": "waiting_quota", "terminal": "reachable", "failure": "provider_wait", "confidence": "confirmed"},
+  "supervisor_exit": {"supervisor": {"reading": "ok", "observed_at": 1.0, "value": "exited"}},
+  "pod_failed": {"kubernetes": {"reading": "ok", "observed_at": 1.0, "value": "Failed"}},
+  "pod_gone": {"kubernetes": {"reading": "not_found", "observed_at": 1.0, "value": ""}},
+  "pod_unreachable": {"kubernetes": {"reading": "unreachable", "observed_at": 1.0, "value": ""}},
+  "pod_running": {"kubernetes": {"reading": "ok", "observed_at": 1.0, "value": "Running"}},
   "grant": "Signed fixture launch grant, validated on every request; never a deployed credential"
 }
