@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 import scripts.swarm_v2.image_probe as image_probe
+from scripts.swarm_v2 import filesystem
 
 pytestmark = pytest.mark.unit
 STATUS = {"running": True, "protocol": 22, "capabilities": {"health_check": True}}
@@ -177,26 +178,31 @@ def test_herdr_runs_a_private_headless_server_and_reads_its_capabilities(tmp_pat
         }
     )
     monkeypatch.setattr(image_probe, "run", commands)
-    root = tmp_path / "attempts" / "herdr"
+    execution = filesystem.allocate(tmp_path, "herdr", filesystem.load())
+    root = tmp_path / "herdr"
 
-    observed = image_probe.herdr(root, {"PATH": "/bin"})
+    observed = image_probe.herdr(execution, {"PATH": "/bin"})
 
     assert observed == {
         "version": "herdr 0.9.1",
         "status": STATUS,
         "schema": {"protocol": 22, "methods": ["ping", "workspace.list"]},
     }
+    home = root / "homes" / "herdr"
     environ = {
         "PATH": "/bin",
-        "HOME": str(root),
-        "XDG_RUNTIME_DIR": str(root / "tmp"),
+        "HOME": str(home),
+        "CLAUDE_CONFIG_DIR": str(home / ".claude"),
+        "CODEX_HOME": str(home / ".codex"),
+        "XDG_RUNTIME_DIR": str(root / "run"),
+        "TMPDIR": str(root / "tmp"),
         "HERDR_CONFIG_PATH": str(root / "herdr.toml"),
     }
     devnull = subprocess.DEVNULL
     assert server.started == [
         (["herdr", "server"], {"env": environ, "stdin": devnull, "stdout": devnull, "stderr": devnull})
     ]
-    assert (root / "tmp").stat().st_mode & 0o777 == 0o700
+    assert home.stat().st_mode & 0o777 == 0o700
     assert server.terminated and server.waited == 10
     assert [(call["command"], call["timeout"]) for call in commands.calls] == [
         (["herdr", "status", "server", "--json"], 10),
@@ -211,7 +217,7 @@ def test_herdr_stops_its_server_when_the_schema_read_fails(tmp_path, monkeypatch
     monkeypatch.setattr(image_probe, "run", commands)
 
     with pytest.raises(OSError):
-        image_probe.herdr(tmp_path / "herdr", {})
+        image_probe.herdr(filesystem.allocate(tmp_path, "herdr", filesystem.load()), {})
 
     assert server.terminated and server.waited == 10
 
@@ -220,7 +226,10 @@ def test_herdr_without_a_schema_reports_no_methods(tmp_path, monkeypatch, server
     commands = Commands({"status server --json": done(json.dumps(STATUS)), "api schema --json": done("")})
     monkeypatch.setattr(image_probe, "run", commands)
 
-    assert image_probe.herdr(tmp_path / "herdr", {})["schema"] == {"protocol": None, "methods": []}
+    assert image_probe.herdr(filesystem.allocate(tmp_path, "herdr", filesystem.load()), {})["schema"] == {
+        "protocol": None,
+        "methods": [],
+    }
 
 
 def write_sessions(home: Path, count: int):
@@ -257,10 +266,12 @@ def test_harness_launches_headless_in_a_git_work_folder(tmp_path, monkeypatch, n
     commands = Commands({"--version": done("v 1\n")})
     monkeypatch.setattr(image_probe, "run", commands)
 
-    observed = image_probe.harness(name, tmp_path, {"PATH": "/bin"})
+    execution = filesystem.Execution(tmp_path, filesystem.load())
+    observed = image_probe.harness(name, execution, {"PATH": "/bin"})
 
     assert observed == {"version": "v 1", "hook_registrations": 1}
-    launched = {"PATH": "/bin", "HOME": str(home)}
+    launched = {"PATH": "/bin"} | filesystem.environment(execution, name)
+    assert launched["HOME"] == str(home)
     assert commands.calls == [
         {
             "command": ["git", "init", "-q", str(tmp_path / "work")],
@@ -278,15 +289,22 @@ def test_a_harness_launch_timeout_still_reports_its_hooks(tmp_path, monkeypatch)
     timeout = subprocess.TimeoutExpired(["claude"], 60)
     monkeypatch.setattr(image_probe, "run", Commands({"-p hello": timeout, "--version": done("c\n")}))
 
-    assert image_probe.harness("claude", tmp_path, {}) == {"version": "c", "hook_registrations": 1}
+    assert image_probe.harness("claude", filesystem.Execution(tmp_path, filesystem.load()), {}) == {
+        "version": "c",
+        "hook_registrations": 1,
+    }
 
 
 def test_probe_bootstraps_an_attempt_and_observes_every_target(tmp_path, monkeypatch):
     requests, launched = [], []
-    monkeypatch.setattr(image_probe, "bootstrap", requests.append)
-    monkeypatch.setattr(image_probe, "herdr", lambda root, environ: {"root": str(root), "environ": environ})
+    monkeypatch.setattr(image_probe, "bootstrap", lambda request: requests.append(request) or {})
     monkeypatch.setattr(
-        image_probe, "harness", lambda name, attempt, environ: launched.append((name, attempt, environ)) or name
+        image_probe, "herdr", lambda execution, environ: {"root": str(execution.root), "environ": environ}
+    )
+    monkeypatch.setattr(
+        image_probe,
+        "harness",
+        lambda name, execution, environ: launched.append((name, execution.root, environ)) or name,
     )
     manifest = tmp_path / "manifest.json"
     manifest.write_text('{"source_revision": "x"}')
@@ -316,7 +334,7 @@ def test_probe_bootstraps_an_attempt_and_observes_every_target(tmp_path, monkeyp
 
 
 def test_probe_creates_a_private_attempt_root(tmp_path, monkeypatch):
-    monkeypatch.setattr(image_probe, "bootstrap", lambda request: None)
+    monkeypatch.setattr(image_probe, "bootstrap", lambda request: {})
     monkeypatch.setattr(image_probe, "herdr", lambda root, environ: {})
     monkeypatch.setattr(image_probe, "harness", lambda name, attempt, environ: {})
     manifest = tmp_path / "manifest.json"

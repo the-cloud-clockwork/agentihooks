@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from scripts.swarm_v2 import filesystem
 from scripts.swarm_v2.worker_home import Request, bootstrap
 
 MANIFEST = Path("/opt/swarm-node/manifest.json")
@@ -69,13 +70,11 @@ def server_status(
         sleep(POLL_SECONDS)
 
 
-def herdr(root: Path, environ: dict) -> dict:
-    (root / "tmp").mkdir(mode=0o700, parents=True)
-    environ = environ | {
-        "HOME": str(root),
-        "XDG_RUNTIME_DIR": str(root / "tmp"),
-        "HERDR_CONFIG_PATH": str(root / "herdr.toml"),
-    }
+def herdr(execution: filesystem.Execution, environ: dict) -> dict:
+    environ = (
+        environ | filesystem.environment(execution, "herdr") | {"HERDR_CONFIG_PATH": str(execution.root / "herdr.toml")}
+    )
+    Path(environ["HOME"]).mkdir(mode=0o700)
     devnull = subprocess.DEVNULL
     server = subprocess.Popen(HERDR_SERVER, env=environ, stdin=devnull, stdout=devnull, stderr=devnull)
     try:
@@ -95,10 +94,10 @@ def registrations(home: Path) -> int:
         return 0
 
 
-def harness(name: str, attempt: Path, environ: dict) -> dict:
-    home, work = attempt / "homes" / name, attempt / "work"
+def harness(name: str, execution: filesystem.Execution, environ: dict) -> dict:
+    home, work = execution.path("home") / name, execution.root / "work"
     run(["git", "init", "-q", str(work)], environ, COMMAND_SECONDS)
-    environ = environ | {"HOME": str(home)}
+    environ = environ | filesystem.environment(execution, name)
     command, timeout = LAUNCHES[name]
     try:
         run(command, environ, timeout, cwd=work)
@@ -109,10 +108,13 @@ def harness(name: str, attempt: Path, environ: dict) -> dict:
 
 def probe(templates: Path, root: Path, environ: dict) -> dict:
     root.mkdir(mode=0o700, exist_ok=True)
-    bootstrap(Request(root, ATTEMPT, templates, PROFILES, INTERPRETER, ACCOUNTS, ENDPOINTS, os.getuid(), os.getgid()))
+    record = bootstrap(
+        Request(root, ATTEMPT, templates, PROFILES, INTERPRETER, ACCOUNTS, ENDPOINTS, os.getuid(), os.getgid())
+    )
+    execution = filesystem.recorded(root / ATTEMPT, record)
     base = {key: value for key, value in environ.items() if not key.startswith("HERDR_")} | OFFLINE
-    observed = {"herdr": herdr(root / "herdr", base)}
-    observed |= {name: harness(name, root / ATTEMPT, base) for name in PROFILES}
+    observed = {"herdr": herdr(filesystem.allocate(root, "herdr", execution.layout), base)}
+    observed |= {name: harness(name, execution, base) for name in PROFILES}
     return {"manifest": json.loads(MANIFEST.read_bytes()), "observed": observed}
 
 

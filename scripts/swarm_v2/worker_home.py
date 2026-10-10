@@ -188,18 +188,18 @@ def child_environment(home: Path, interpreter: Path) -> dict[str, str]:
     }
 
 
-def render(attempt: Path, target: str) -> None:
-    pending = json.loads(_text(attempt / PENDING))
-    home = attempt / "homes" / target
+def render(execution: filesystem.Execution, target: str) -> None:
+    pending = json.loads(_text(execution.root / PENDING))
+    home = execution.path("home") / target
     done = subprocess.run(
-        child_command(attempt, target),
+        child_command(execution.root, target),
         cwd=home,
         env=child_environment(home, Path(pending["request"]["interpreter"])),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
     )
-    _write(attempt / "run" / f"render-{target}.log", done.stdout)
+    _write(execution.path("runtime") / f"render-{target}.log", done.stdout)
     if done.returncode:
         raise BootstrapError(f"{target} render failed with exit {done.returncode}")
 
@@ -308,8 +308,7 @@ def _leaves(path: str, roots: list[Path]) -> bool:
     return ".." in Path(path).parts
 
 
-def _check_home(attempt: Path, target: str, roots: list[Path], owner: tuple[int, int]) -> None:
-    home = attempt / "homes" / target
+def _check_home(home: Path, target: str, roots: list[Path], owner: tuple[int, int]) -> None:
     surfaces = _claude_surfaces(home) if target == "claude" else _codex_surfaces(home)
     for surface, texts in surfaces.items():
         for path in [p for text in texts for p in _paths(text)]:
@@ -349,7 +348,7 @@ def _accepted(attempt: Path, digest: str) -> dict | None:
     return None
 
 
-def _record(request: Request, digest: str, profiles: dict[str, str], seconds: float) -> dict:
+def _record(request: Request, digest: str, profiles: dict[str, str], seconds: float, layout: filesystem.Layout) -> dict:
     return {
         "schema_version": 1,
         "package": "SV2-IMG-02",
@@ -360,8 +359,9 @@ def _record(request: Request, digest: str, profiles: dict[str, str], seconds: fl
         "accounts": request.accounts,
         "endpoints": request.endpoints,
         "interpreter": str(request.interpreter),
-        "homes": {target: f"homes/{target}" for target in request.profiles},
+        "homes": {target: f"{layout.roots['home']}/{target}" for target in request.profiles},
         "worker_profile_materialization_seconds": round(seconds, 3),
+        "layout": filesystem.mapping(layout),
     }
 
 
@@ -379,12 +379,12 @@ def _materialize_attempt(request: Request, profiles: dict[str, str], roots: list
         execution = filesystem.allocate(request.root, request.attempt, layout)
         _seed(execution, request)
         for target in request.profiles:
-            render(attempt, target)
-            _check_home(attempt, target, roots, (request.uid, request.gid))
+            render(execution, target)
+            _check_home(execution.path("home") / target, target, roots, (request.uid, request.gid))
     except (BootstrapError, filesystem.LayoutError) as error:
         filesystem.remove(attempt)
         raise BootstrapError(str(error)) from error
-    record = _record(request, digest, profiles, time.monotonic() - started) | {"layout": filesystem.mapping(layout)}
+    record = _record(request, digest, profiles, time.monotonic() - started, layout)
     staged = attempt / f"{RECORD}.tmp"
     _write(staged, _json(record))
     staged.replace(attempt / RECORD)
