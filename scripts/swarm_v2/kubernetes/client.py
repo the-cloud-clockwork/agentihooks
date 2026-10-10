@@ -111,8 +111,7 @@ class PodClient:
         return _answer(status, answer)
 
     def read_pod(self, name: str) -> dict | None:
-        status, answer = self.http.send("GET", self._path(name))
-        return None if status == 404 else _answer(status, answer)
+        return self.read("pods", name)
 
     def list_pods(self, selector: str) -> list[dict]:
         query = urllib.parse.urlencode({"labelSelector": selector})

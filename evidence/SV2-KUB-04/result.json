@@ -13,7 +13,7 @@
     "retain(store, slug, final, removed) keeps the execution record, the final record, the archive watermark and the removed object uids in attempt-retained after runtime deletion; retained reads it back",
     "execution_cleanup_backlog(store, slug) counts final attempts not yet retained by waiting_outcome, waiting_archive and ready",
     "scripts.swarm_v2.kubernetes.cleanup: Cleanup(store, slug, api, require, attach, secrets, enabled).run(execution_id) answers suspended, not_final, waiting_outcome, waiting_archive or done; it pins the attempt's Pods and Services by owner, execution and generation labels into cleanup-journal, reads each pinned object by name immediately before its delete and deletes only when the name still holds the pinned uid with those labels, with a uid precondition, then releases the attach registration and the attempt scoped secret references in that order; require runs before every read, delete, release and journal write",
-    "each removed object is recorded deleted, absent (gone before any delete was sent), absent_after_send (gone after a delete was sent, including one whose answer or journal write was lost), replaced (the name holds another uid; nothing deleted) or unselected (same uid but its labels changed; nothing deleted)",
+    "each removed object is recorded deleted, absent (gone before any delete was sent), absent_after_send (gone after a delete was sent, including one whose answer or journal write was lost), replaced (the name holds another uid; nothing deleted) or unselected (same uid but its labels changed; nothing deleted); deleted means the API server accepted the delete, so a Pod in graceful termination may still be listed until it exits",
     "scripts.swarm_v2.kubernetes.client: PodClient.list_services(selector), PodClient.read(kind, name) answering None on 404, and PodClient.delete(kind, name, uid) for pods and services only, sending DeleteOptions with a uid precondition; any 2xx answers True, 404 False, 409 raises PreconditionFailed"
   ],
   "supported_versions": {
@@ -32,9 +32,9 @@
   },
   "validation": {
     "red": "proofs run 38073336208 on the tests only commit b57a0c35: collection fails on the missing retention module, the missing cleanup module and the missing PreconditionFailed",
-    "tests": "proofs run 38074906285 at 35b1c3d5: 143 passed across the cleanup, retention, Kubernetes client and Kubernetes runtime modules; only the case B comparison failed because its committed record predated the read before delete change, and its printed record has state passed",
+    "tests": "proofs run 38074996957 at e99584eb: 243 passed across the cleanup, retention, Kubernetes client, Kubernetes runtime, Kubernetes commands and controller modules, with every committed case record matching",
     "lint": "ruff check and ruff format passed through python -m scripts.ci_prepush",
-    "review": "rounds one and two: Standards and Spec readers; findings fixed or ruled as recorded on the pull request",
+    "review": "closed after three rounds of Standards and Spec readers; every finding fixed or ruled, rulings recorded on the pull request",
     "mutation": "pending"
   },
   "measurements": {
@@ -98,7 +98,7 @@
   "follow_ups": [],
   "invariants": {
     "INV-R07": "met in fixture: a stale controller cannot finalize, clean up or overwrite the retained record (cases B and C)",
-    "INV-R10": "met in fixture: deletion requires the current lease, a uid pinned by owner, execution and generation labels, a read by name immediately before the delete showing the same uid and labels, and a uid precondition on the delete",
+    "INV-R10": "met in fixture: deletion requires the current lease, a uid pinned by owner, execution and generation labels, a read by name before the delete showing the same uid and labels, and a uid precondition on the delete; a label change between that read and the delete (one journal write and one authority check apart) is not caught, but the uid precondition still prevents deleting any other object",
     "INV-M04": "not met by this package: the archive gate reads the server accepted heartbeat archive watermark, which the worker reports; it becomes a durable archive acknowledgement only when the transcript archive package supplies one"
   }
 }
