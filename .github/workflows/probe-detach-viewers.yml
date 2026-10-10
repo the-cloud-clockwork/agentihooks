@@ -1,0 +1,94 @@
+name: Probe detach viewers
+
+on:
+  push:
+    branches: [wip/engineer-d44a5a-0249-probe]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {leg: natural, stress: none, patch: none, count: "400"}
+          - {leg: io, stress: io, patch: none, count: "300"}
+          - {leg: cpu, stress: cpu, patch: none, count: "300"}
+          - {leg: io-nofsync, stress: io, patch: nofsync, count: "300"}
+          - {leg: slow-control, stress: none, patch: slow, count: "20"}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          pip install uv
+          uv venv "$HOME/venv"
+          uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" pytest-repeat
+          echo "$HOME/venv/bin" >> "$GITHUB_PATH"
+      - name: Place the probe and patch the fixture
+        env:
+          PATCH: ${{ matrix.patch }}
+        run: |
+          cp .github/probes/test_detach_probe.py tests/test_detach_probe.py
+          python - <<'PY'
+          import os, pathlib
+          path = pathlib.Path("tests/integration/swarm_node/process_fixture.py")
+          text = path.read_text()
+          patch = os.environ["PATCH"]
+          if patch == "nofsync":
+              quick = (
+                  "def quick(path, document):\n"
+                  "    temporary = path.with_suffix('.quick')\n"
+                  "    temporary.write_text(json.dumps(document))\n"
+                  "    temporary.replace(path)\n\n\n"
+              )
+              text = text.replace('write(root / f"heartbeat-{role}.json"', 'quick(root / f"heartbeat-{role}.json"')
+              text = text.replace('write(root / "heartbeat-exporter.json"', 'quick(root / "heartbeat-exporter.json"')
+              text = text.replace("def main():", quick + "def main():")
+          elif patch == "slow":
+              text = text.replace("time.sleep(0.02)", "time.sleep(0.5)")
+          path.write_text(text)
+          PY
+          git log --oneline -1
+          git diff --stat
+          grep -n -E "quick|heartbeat|sleep" tests/integration/swarm_node/process_fixture.py
+      - name: Run the leg
+        continue-on-error: true
+        env:
+          STRESS: ${{ matrix.stress }}
+          COUNT: ${{ matrix.count }}
+        run: |
+          export PROBE_DIAG="$GITHUB_WORKSPACE/diag.jsonl"
+          if [[ "$STRESS" == io ]]; then for i in 1 2 3 4; do (while :; do dd if=/dev/zero of="$RUNNER_TEMP/stress$i" bs=1M count=64 conv=fsync status=none; done) & done; fi
+          if [[ "$STRESS" == cpu ]]; then for i in 1 2 3 4 5 6 7 8; do (while :; do :; done) & done; fi
+          python -m pytest tests/test_detach_probe.py --count "$COUNT" -n 4 -q --tb=no -p no:pytest_cov -p no:anyio -o faulthandler_timeout=60 2>&1 | tail -8
+      - name: Summary
+        if: always()
+        env:
+          LEG: ${{ matrix.leg }}
+        run: |
+          python - <<'PY'
+          import collections, json, os
+          path = os.path.join(os.environ["GITHUB_WORKSPACE"], "diag.jsonl")
+          rows = [json.loads(line) for line in open(path)] if os.path.exists(path) else []
+          leg = os.environ["LEG"]
+          failed = [row for row in rows if row["stalled"]]
+          roles = collections.Counter(role for row in failed for role in row["stalled"])
+          print("PROBE", leg, "runs", len(rows), "failed", len(failed), "stalled roles", dict(roles))
+          def q(values, p):
+              values = sorted(values)
+              return round(values[min(len(values) - 1, int(p * len(values)))], 4) if values else None
+          for key in ("viewer_s", "window_s"):
+              values = [row[key] for row in rows]
+              print("PROBE", leg, key, "p50", q(values, 0.5), "p99", q(values, 0.99), "max", q(values, 1.0))
+          ages = [age for row in rows for age in row["age_after_s"].values()]
+          print("PROBE", leg, "heartbeat age at after read p50", q(ages, 0.5), "p99", q(ages, 0.99), "max", q(ages, 1.0))
+          for row in failed[:15]:
+              print("PROBE", leg, "FAIL", json.dumps(row))
+          PY
