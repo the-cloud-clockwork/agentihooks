@@ -1,0 +1,68 @@
+{
+  "package": "SV2-FSY-01",
+  "dependency": [
+    "SV2-IMG-05",
+    "SV2-IDN-05"
+  ],
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2407",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2413",
+  "tested_commit": "9698d0aacfa190b7d538aa9b8cdd1a66d29df0df",
+  "status": "fixture-qualified",
+  "package_complete": false,
+  "evidence_class": "Local isolated fixture in CI: two execution bases under pytest tmp_path, symlink, relative path and archive escape fixtures; nothing mocked except one extractor stub for the post extraction link check. Not live rollout proof.",
+  "interfaces": [
+    "docker/swarm-node/layout.json, copied to /opt/swarm-node/layout.json: layout_version 1, roots home=homes, runtime=run, checkout=checkouts, worktree=worktrees, spool=spool, scratch=tmp, seed=profiles, immutable [seed]",
+    "scripts.swarm_v2.filesystem: load, parse (READERS by layout_version), mapping, allocate, contain, seed, seal, remove, extract, socket, environment, restore, FAILURES[execution_path_validation_failures]",
+    "scripts.swarm_v2.worker_home bootstrap: allocates every layout root, seeds profiles through filesystem.seed, removes a failed attempt through filesystem.remove, writes the relative layout mapping into execution.json"
+  ],
+  "supported_versions": {
+    "layout_version": [
+      1
+    ],
+    "python": "3.11 and 3.12 unit shards in the linked CI run",
+    "unsupported": "any other layout_version or a missing layout file refuses and stops new launches"
+  },
+  "states": {
+    "observed": "Folder modes, sockets bound in each attempt, file contents and counter values inside pytest tmp_path",
+    "accepted": "A layout document a reader in READERS parses, and a path that resolves inside its execution root",
+    "committed": "execution.json written by worker_home bootstrap with the relative layout mapping",
+    "externally_verified": "None; no Pod runs this layout yet"
+  },
+  "validation": {
+    "red": [
+      "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38056154386 on 3ae78d25: filesystem module missing at collection",
+      "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38057997482 on 290bf369: environment missing, 4 of 4 new cases red",
+      "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38058124567 on 84e6be68: mutable seed sealed and raw LayoutError from bootstrap, 2 failed 145 passed",
+      "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38058979640 on 3bee8164: archive caps missing, 4 failed 51 passed"
+    ],
+    "green": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059486223 on 9698d0aa: every unit shard and both mutation shards passed",
+    "mutation": "filesystem.py 126 killed, worker_home.py 23 killed, no survivors, in https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059486223; restacked head preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38057464883 killed 206 and 46",
+    "sonar": "One python:S5042 hotspot on tarfile.open in filesystem.extract; the code now iterates every member and refuses past ARCHIVE_MEMBERS or ARCHIVE_BYTES before any write; hotspot marked REVIEWED FIXED with that justification",
+    "review": "Standards and Spec readers closed in round two; one held Standards finding (symlink check race in allocate) ruled rejected by the Spec reader; the archive cap change came after review closed and the task's reader budget was spent",
+    "local": "No local tests or mutation ran; lint, format and size passed in the pre push gate on every pushed head"
+  },
+  "measurements": {
+    "execution_path_validation_failures": "Each refusal test asserts the counter rose by exactly one; success tests assert no change",
+    "dimension": "Process local counter read in each test"
+  },
+  "rollback_rehearsal": {
+    "action": "An unknown layout_version or a missing layout file refuses with a message saying new launches stop; readers for earlier versions stay in READERS",
+    "tests": [
+      "tests/test_swarm_v2_filesystem.py::test_a_record_naming_an_old_node_path_or_unknown_version_stops_the_launch",
+      "tests/test_worker_home.py::test_a_missing_layout_fails_bootstrap_and_leaves_no_attempt"
+    ],
+    "data_safety": "Restore never deletes an existing attempt; allocate keeps existing contents; a failed bootstrap removes only the attempt it created"
+  },
+  "remaining_limitations": [
+    "The supervisor, health probe, image probe and worker home render still name the homes, run and tmp folders directly; a ledger follow up moves them onto the layout and filesystem.environment",
+    "Nothing calls filesystem.restore, extract or socket in a live launch yet; checkpoint restore and repository preparation packages consume them",
+    "Isolation between attempts relies on separate Pods; processes of the same uid inside one Pod are not separated by folder modes"
+  ],
+  "cases": {
+    "a": "evidence/SV2-FSY-01/a-result.json",
+    "b": "evidence/SV2-FSY-01/b-result.json",
+    "c": "evidence/SV2-FSY-01/c-result.json",
+    "manifest": "evidence/SV2-FSY-01/manifest.json"
+  }
+}
