@@ -7,7 +7,7 @@
   "integration_gate": "G10",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2426",
   "pull_request": null,
-  "tested_commit": "e9a23a414b8a",
+  "tested_commit": "7fa7b333b3a4",
   "status": "mocked-acceptance-qualified",
   "package_complete": false,
   "evidence_class": "fakeredis swarm store and inbox, a fixture ledger document with four phases and two master seats; no live swarm. Live G10 qualification is separate.",
@@ -41,9 +41,11 @@
     "Hive ownership is not delivered; a seat owns phases only; filed as a ledger follow up"
   ],
   "validation": {
-    "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38069851670",
-    "unit": "Focused proofs https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38069851670 on the tested commit: every master seats and ledger events test passed, 166 passed; the three package case tests ran each case twice on independent fakeredis servers and failed only because the committed case records were placeholders, whose observed records this commit holds",
-    "mutation": "Mutation preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063779158 on the restacked parent left 47 survivors in masters, ledger events and the swarm command; dead defaults were removed and exact tests added in 6e2e86d4",
+    "red": "Focused proofs https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38069851670 on e9a23a41 failed only the three package case tests against placeholder records; their assertion output is the source of the observed records committed in 7f74ebd8. The earlier red tests only commit 59d0d32c was not observed in CI (branch guard refused the push); that gap stays named",
+    "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38071191398",
+    "unit": "Focused proofs https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38071191398 on the tested commit passed every test in tests/test_swarm_v2_master_seats.py and tests/swarm/test_ledger_events.py, including the three package cases, each run twice and judged against the spec checks. The full suite runs on the pull request",
+    "mutation": "Mutation preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38071191334 on the tested commit: green, no survivors and no timeouts in scripts/swarm_v2/masters.py, scripts/swarm/ledger_events.py, scripts/swarm/operator_mail.py and scripts/swarm/cli.py. Earlier runs https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063779158 (47 survivors) and https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38069936774 (two rebalance loop timeouts) are fixed by tests and the bounded loop",
+    "review": "Standards and Spec readers closed three earlier rounds; on the survivor and evidence commits the Standards reader closed six findings, the Spec reader closed four, and the held rebalance finding was upheld by the Standards reader and filed as a ledger follow up",
     "local": "No local tests or mutation ran; static prepush passed on every commit"
   },
   "measurements": {},
@@ -55,8 +57,9 @@
   },
   "decisions": [
     "Seat one keeps the existing master address so a single master swarm routes exactly as before",
-    "Owners stay put unless a seat is added, because owners must not change under running work",
-    "An item whose owner seat has no live master goes to the lead; with the lead seat empty the lowest numbered live master answers"
+    "Owners stay put unless a seat is added; an added seat takes the busiest seats' last phases up to an even share so scaling the count gives the new seat work",
+    "An item whose owner seat has no live master goes to the lead; with the lead seat empty the lowest numbered live master answers, so no item is stranded",
+    "owner_of reads a task's phase through one id to phase map; ledger task ids are refused when duplicated, so the Standards reader cleared the map as equivalent to the first match it replaced"
   ],
   "obligations": {
     "input_preparation": {
@@ -90,5 +93,9 @@
     "mutation_scope": {
       "met_by": "Only the masters hash and inbox items change; the ledger document is never written"
     }
-  }
+  },
+  "deviations": [
+    "Seam 2 says a phase keeps its owner while that seat exists; raising the master count moves owned phases to the new seat. Upheld as a Spec finding and filed as a ledger follow up for the operator to amend seam 2 or drop the move",
+    "Seam 3 says unaddressed chat stays with the lead; while the lead seat is empty the lowest numbered live master answers instead"
+  ]
 }
