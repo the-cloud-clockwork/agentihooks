@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "package": "SV2-FSY-03",
+  "policy_version": 1,
+  "enabled": true,
+  "store": "/home/worker/cache",
+  "max_bytes": 21474836480,
+  "reserve_bytes": 2147483648,
+  "kinds": {
+    "pip": false,
+    "uv": false,
+    "npm": false,
+    "toolchain": true
+  },
+  "excluded": [
+    ".credentials.json",
+    "auth.json",
+    ".netrc",
+    ".npmrc",
+    ".pypirc",
+    ".pgpass",
+    ".git-credentials",
+    ".env",
+    "*.env",
+    "*.sqlite",
+    "*.sqlite3",
+    "*.db",
+    "*-wal",
+    "*-shm",
+    "*-journal",
+    "*.jsonl"
+  ]
+}
