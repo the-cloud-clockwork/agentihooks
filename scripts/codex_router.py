@@ -42,7 +42,11 @@ CHATGPT_BASE_URL = "https://chatgpt.com/backend-api/codex"
 OPENAI_AUTH_CLAIM = "https://api.openai.com/auth"
 AGENT_IDENTITY_CLAIM = "agent_runtime_id"
 API_KEY_PREFIX = "sk-"
-DEFAULT_KIND, API_KIND, CHATGPT_OAUTH, CODEX_ACCESS_TOKEN = "default", "api", "chatgpt-oauth", "codex-access-token"
+PERSONAL_TOKEN_PREFIX = "at-"
+DEFAULT_KIND = "default"
+API_KIND = "api"
+OAUTH_KIND = "chatgpt-oauth"
+ACCESS_TOKEN_KIND = "codex-access-token"
 
 
 @dataclass(frozen=True)
@@ -72,7 +76,7 @@ def _claims(token: str) -> dict:
     if len(parts) != 3:
         return {}
     with contextlib.suppress(ValueError):
-        claims = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
+        claims = json.loads(base64.urlsafe_b64decode(parts[1] + "=="))
         if isinstance(claims, dict):
             return claims
     return {}
@@ -90,23 +94,33 @@ def credential_kind(account: CodexAccount, environ: Mapping[str, str]) -> str:
         return API_KIND
     if not account.is_token:
         return DEFAULT_KIND
-    token = environ.get(account.env_name, "")
+    token = environ.get(account.env_name)
     if not token:
         raise RoutingError(f"Codex account '{account.name}' has no token in {account.env_name}")
+    if token.startswith(PERSONAL_TOKEN_PREFIX):
+        return ACCESS_TOKEN_KIND
     if token.startswith(API_KEY_PREFIX):
         raise RoutingError(
             f"{account.env_name} holds an api key; put it in CODEX_API_KEY and route {API_ACCOUNT} instead"
         )
     claims = _claims(token)
     if AGENT_IDENTITY_CLAIM in claims or OPENAI_AUTH_CLAIM not in claims:
-        return CODEX_ACCESS_TOKEN
+        return ACCESS_TOKEN_KIND
     if not _chatgpt_account_id(claims):
         raise RoutingError(f"{account.env_name} holds a ChatGPT token with no chatgpt_account_id claim")
-    return CHATGPT_OAUTH
+    return OAUTH_KIND
 
 
 def credential(account: CodexAccount, environ: Mapping[str, str]) -> CodexAccount:
-    return replace(account, bearer=True) if credential_kind(account, environ) == CHATGPT_OAUTH else account
+    return replace(account, bearer=True) if credential_kind(account, environ) == OAUTH_KIND else account
+
+
+def usable(account: CodexAccount, environ: Mapping[str, str]) -> bool:
+    try:
+        credential_kind(account, environ)
+    except RoutingError:
+        return False
+    return True
 
 
 def bearer_overrides() -> list[str]:
@@ -251,7 +265,7 @@ class CodexAccountSource:
         return () if self.run is None else (self.run,)
 
     def pool(self, environ: Mapping[str, str]) -> list[CodexAccount]:
-        return routing_pool(environ, *self._run())
+        return [account for account in routing_pool(environ, *self._run()) if usable(account, environ)]
 
     def readings(
         self, pool: list[CodexAccount], environ: Mapping[str, str], now: float
@@ -379,7 +393,7 @@ def _route(environ: Mapping[str, str], route: str, run: Callable) -> tuple[Codex
     if route == API_ACCOUNT:
         return api_account(environ), "forced", sessions.get(API_ACCOUNT, 0), "?"
     source = CodexAccountSource(run, refresh=not route)
-    pool = source.pool(environ)
+    pool = routing_pool(environ, run) if route else source.pool(environ)
     now = time.time()
     found = source.readings(pool, environ, now)
     account, placement, seat = select(pool, found, sessions, now, route, environ)

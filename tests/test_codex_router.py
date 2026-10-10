@@ -464,6 +464,8 @@ def _jwt(claims, payload=None):
 OAUTH = _jwt({"iss": "https://auth.openai.com", "https://api.openai.com/auth": {"chatgpt_account_id": "acct-1"}})
 OAUTH_TWO = _jwt({"https://api.openai.com/auth": {"chatgpt_account_id": "acct-2", "chatgpt_plan_type": "pro"}})
 AGENT = _jwt({"iss": "https://chatgpt.com/codex-backend/agent-identity", "agent_runtime_id": "rt-1", "account_id": "a"})
+DASHED = _jwt({"https://api.openai.com/auth": {"chatgpt_account_id": "acct-1"}, "n": ">>>"})
+UNDERSCORED = _jwt({"https://api.openai.com/auth": {"chatgpt_account_id": "acct-1"}, "n": "???"})
 AGENT_WITH_AUTH = _jwt({"agent_runtime_id": "rt-2", "https://api.openai.com/auth": {"chatgpt_account_id": "acct-3"}})
 OAUTH_ENV = {
     "HOME": "/home/u",
@@ -487,6 +489,11 @@ def _token(name):
     [
         (OAUTH, "chatgpt-oauth"),
         (OAUTH_TWO, "chatgpt-oauth"),
+        (DASHED, "chatgpt-oauth"),
+        (UNDERSCORED, "chatgpt-oauth"),
+        ("at-" + OAUTH, "codex-access-token"),
+        ("skill-token", "codex-access-token"),
+        (_jwt(None, b"5"), "codex-access-token"),
         (AGENT, "codex-access-token"),
         (AGENT_WITH_AUTH, "codex-access-token"),
         ("at-personal", "codex-access-token"),
@@ -500,6 +507,11 @@ def _token(name):
 )
 def test_the_selected_token_alone_is_classified_by_its_claims(value, kind):
     assert router.credential_kind(_token("alpha"), {"AH_CX_TOKEN_alpha": value}) == kind
+
+
+def test_the_claims_are_read_with_the_url_safe_alphabet():
+    assert "-" in DASHED.split(".")[1]
+    assert "_" in UNDERSCORED.split(".")[1]
 
 
 def test_the_default_login_and_the_api_account_need_no_token_to_classify():
@@ -521,6 +533,16 @@ def test_the_default_login_and_the_api_account_need_no_token_to_classify():
             "AH_CX_TOKEN_keyed holds an api key; put it in CODEX_API_KEY and route api instead",
         ),
         ("bare", OAUTH_ENV, "AH_CX_TOKEN_bare holds a ChatGPT token with no chatgpt_account_id claim"),
+        (
+            "alpha",
+            {"AH_CX_TOKEN_alpha": "sk-abc"},
+            "AH_CX_TOKEN_alpha holds an api key; put it in CODEX_API_KEY and route api instead",
+        ),
+        (
+            "alpha",
+            {"AH_CX_TOKEN_alpha": _jwt({"https://api.openai.com/auth": "acct-1"})},
+            "AH_CX_TOKEN_alpha holds a ChatGPT token with no chatgpt_account_id claim",
+        ),
         (
             "alpha",
             {"AH_CX_TOKEN_alpha": _jwt({"https://api.openai.com/auth": {"chatgpt_account_id": 7}})},
@@ -655,6 +677,27 @@ def test_an_open_route_to_a_chatgpt_account_runs_the_bearer_provider(monkeypatch
     assert rc == 0 and report.read_text() == "status=routed\naccount=alpha\nplacement=open\n"
     assert seen["cmd"] == ["/usr/bin/codex", "--no-daemon", *router.bearer_overrides(), "-m", "o3"]
     assert seen["env"]["AGENTIHOOKS_CHATGPT_ACCOUNT_ID"] == "acct-1"
+
+
+def test_an_open_route_never_places_an_account_whose_credential_is_refused(monkeypatch, tmp_path):
+    environ = {"HOME": "/home/u", "AH_CX_TOKEN_alpha": OAUTH, "AH_CX_TOKEN_keyed": "sk-proj-value"}
+    quotas = {"default": _quota(97.0), "alpha": _quota(50.0), "keyed": _quota(1.0)}
+    rc, seen, report = _launch(monkeypatch, tmp_path, environ, ["-m", "o3"], quotas)
+    assert rc == 0 and report.read_text() == "status=routed\naccount=alpha\nplacement=open\n"
+    pool = router.CodexAccountSource(_status(0)).pool(environ)
+    assert [account.name for account in pool] == ["default", "alpha"]
+    assert [router.usable(account, OAUTH_ENV) for account in map(_token, ("alpha", "keyed", "bare", "ghost"))] == [
+        True,
+        False,
+        False,
+        False,
+    ]
+
+
+def test_a_chatgpt_account_stays_a_subscription_seat():
+    pool = [_token("alpha")]
+    seats = router.CodexAccountSource().offer(pool, {"alpha": _quota(10.0)}, NOW)
+    assert [(seat.account, seat.kind) for seat in seats] == [("alpha", "subscription")]
 
 
 def test_an_unsupported_credential_refuses_the_launch_and_reports_it(monkeypatch, tmp_path, capsys):
