@@ -2,6 +2,8 @@ import json
 
 import pytest
 
+from scripts.gates import intent
+from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import cli, idle, waits
 from scripts.swarm.ledger_events import PullRequest
@@ -1061,3 +1063,69 @@ def test_a_dead_gate_keeps_waiting_while_its_workflow_run_is_active(tick, rollup
     assert tick.end() == []
     assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "checks", "target": URL, "head": "second"}
     assert tick.told() == []
+
+
+OTHER = "https://github.com/o/r/pull/8"
+
+
+def test_a_wait_on_intent_names_its_own_tasks_pull_request(started, capsys):
+    store, ledger = started
+    ledger.rows["t1"]["pr_url"] = URL
+    assert run("sw", "--as", ME, "wait", "--on", "intent", URL) == 0
+    assert held(store)["on"] == {"kind": "intent", "target": URL, "task": "t1"}
+    assert held(store)["until"] == 1_000 + waits.CHECKED_MINUTES * 60_000
+    capsys.readouterr()
+    assert run("sw", "--as", ME, "wait", "--on", "intent", OTHER) == 1
+    assert f"wait on intent needs the pull request of your task t1, not {OTHER}" in capsys.readouterr().err
+
+
+def test_target_problem_takes_intent_only_on_the_own_tasks_pull_request():
+    rows = {"t1": {"id": "t1", "pr_url": URL}, "t2": {"id": "t2", "pr_url": OTHER}}
+    assert waits.target_problem("intent", URL, "t1", rows, None) == ""
+    refused = f"wait on intent needs the pull request of your task t1, not {OTHER}"
+    assert waits.target_problem("intent", OTHER, "t1", rows, None) == refused
+    assert waits.target_problem("intent", OTHER, "t1", {}, None) == refused
+
+
+def hold_intent(tick):
+    idle.declare_wait(tick.store.redis, "sw", ME, 10_000_000, "", 1, on={"kind": "intent", "target": URL, "task": "t1"})
+
+
+def intent_record(verdict, reason, **fields):
+    Verdicts("sw", "intent").write("t1", verdict, reason, 4_000, **fields)
+
+
+@pytest.mark.parametrize("reason", [None, intent.RUNNING, intent.DRAFT])
+def test_an_intent_wait_holds_while_no_verdict_or_a_pending_one_stands(tick, reason):
+    hold_intent(tick)
+    tick.pulls[URL] = PullRequest("OPEN", None, 1, False, head="first")
+    if reason:
+        intent_record("pending", reason)
+    assert tick.end() == []
+    assert held(tick.store)["on"]["kind"] == "intent"
+    assert tick.told() == []
+
+
+@pytest.mark.parametrize("verdict", ["pass", "fail", "unchecked"])
+def test_the_tick_ends_an_intent_wait_on_its_verdict_and_tells_the_reason(tick, verdict):
+    hold_intent(tick)
+    intent_record(verdict, "the phase can use it")
+    outcome = f"the intent verdict on {URL}, now {verdict}: the phase can use it"
+    assert tick.end() == [f"ended the wait of {ME}: {outcome}"]
+    assert held(tick.store) is None
+    assert tick.told() == [
+        f"Your wait on {outcome} has ended. Pick task t1 back up: agentihooks swarm sw done, block, "
+        "or wait on the next thing."
+    ]
+    assert waits.notice_task(tick.inbox.inbox("eng-1@sw")[0]) == "t1"
+
+
+def test_an_intent_wait_holds_on_a_verdict_judged_on_another_head(tick):
+    hold_intent(tick)
+    intent_record("pass", "fine", head="old", url=URL)
+    tick.pulls[URL] = PullRequest("OPEN", None, 1, False, head="new")
+    assert tick.end() == []
+    tick.pulls[URL] = None
+    assert tick.end() == []
+    tick.pulls[URL] = PullRequest("OPEN", None, 1, False, head="old")
+    assert tick.end() == [f"ended the wait of {ME}: the intent verdict on {URL}, now pass: fine"]

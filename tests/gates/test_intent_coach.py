@@ -256,7 +256,11 @@ def test_a_draft_is_not_judged_and_holds_merge_until_its_ready_head_is_judged(tm
         mode="coach",
     )
     assert not held.allowed
-    assert held.reason == f"intent for task {TASK} is judged once its pull request is ready for review"
+    assert held.reason == (
+        f"intent for task {TASK} is judged once its pull request is ready for review. Mark the pull request ready "
+        "with gh pr ready <pull request url> if it is a draft, then wait for the verdict: "
+        f"agentihooks swarm {SLUG} wait --on intent <pull request url>"
+    )
     coach(tmp_path, {**PR, "head": "ready", "draft": False}, asked, ledger=ledger, mail=mail).run(DOC)
     assert len(asked) == 1
     assert "fix round 1 of 2" in mail.sent[0][2]
@@ -623,3 +627,17 @@ def test_a_task_moved_to_another_phase_is_judged_again_on_an_unmoved_head(tmp_pa
     record = Verdicts(SLUG, "intent", tmp_path).read(TASK)
     assert (record["verdict"], record["phase"], record["coach_rounds"]) == ("pass", "p1", 0)
     assert gate(tmp_path).allowed
+
+
+@pytest.mark.parametrize("mode", ["enforce", "coach"])
+def test_judging_a_task_held_as_a_draft_shows_the_running_record_meanwhile(tmp_path, mode):
+    seen = []
+    Verdicts(SLUG, "intent", tmp_path).write(TASK, "pending", intent.DRAFT, NOW - 60_000, phase="p8")
+
+    def ask(state):
+        seen.append(Verdicts(SLUG, "intent", tmp_path).read(TASK))
+        return "pass", "the phase can use it"
+
+    intent.Check(SLUG, mode, NOW, Ledger(), Mail(), lambda url: {**PR, "head": "ready"}, ask, home=tmp_path).run(DOC)
+    assert seen == [{"verdict": "pending", "reason": intent.RUNNING, "at": NOW, "phase": "p8"}]
+    assert Verdicts(SLUG, "intent", tmp_path).read(TASK)["verdict"] == "pass"
