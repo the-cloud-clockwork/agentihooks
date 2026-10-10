@@ -1,4 +1,5 @@
 import json
+from unittest import mock
 
 import pytest
 
@@ -146,7 +147,7 @@ def test_retain_keeps_the_execution_record_archive_watermark_and_removal(attempt
     assert world.store.execution(SLUG, record.execution_id) == record
 
 
-def test_retain_reads_the_clock_of_its_own_store(attempt, monkeypatch):
+def test_retain_reads_the_clock_of_its_own_store(attempt):
     world, record = attempt
     entry = retention.finalize(world.store, SLUG, world.require, record.execution_id, "completed", 0, "ledger:one")
     seen = []
@@ -155,8 +156,8 @@ def test_retain_reads_the_clock_of_its_own_store(attempt, monkeypatch):
         seen.append(store)
         return 7
 
-    monkeypatch.setattr(retention.lease, "now_ms", clock)
-    assert retention.retain(world.store, SLUG, entry, {})["retained_at_ms"] == 7
+    with mock.patch.object(retention.lease, "now_ms", clock):
+        assert retention.retain(world.store, SLUG, entry, {})["retained_at_ms"] == 7
     assert seen and all(store is world.store for store in seen)
 
 

@@ -12,7 +12,7 @@
     "tests/fixtures/swarm_v2/pod-launch.json": "a3dd9f7083b76f91ac724de6fc3d05d0227424feda9caac8d1c8f50eeede87ae",
     "tests/sv2_kub04_cases.py": "60e9e7a6c0a3570e55ce7f4ad12a134c8db17f1d765544de3dd92d7db6ffd9f0",
     "tests/test_swarm_v2_kubernetes_cleanup.py": "ceb4736a6f60afa1a036a7871e26e4a80e514ccb80f46323860cd3c118d6c521",
-    "tests/test_swarm_v2_retention.py": "65c2c39391cfb1033a74f739bf5bcbb2ed66037f5c0d88db26a95913996cef15",
+    "tests/test_swarm_v2_retention.py": "59d78e580ff85e9de3d382ad8b790ef4c249e352f2fcde8c78accefbf75853f3",
     "tests/test_swarm_v2_kubernetes_client.py": "6cf1fa2d68b53f6dd79bc4218c3d17a80f51ef3d5bdb385f3072fd23ae9bce48",
     "scripts/swarm_v2/kubernetes/cleanup.py": "8c817a95c823de52d52e5335d1d30a1a8d3418a29a30eddf874d7747e1d6f3c3",
     "scripts/swarm_v2/retention.py": "ffe42ea081b243ae2dfe275a107cbac7ad8f7c3f9a623d17297b6731a77be1db",
