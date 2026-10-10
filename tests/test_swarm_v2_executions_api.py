@@ -260,7 +260,8 @@ def test_a_newer_heartbeat_committed_during_renewal_wins(world, worker, monkeypa
     def racing(*args):
         claim = renew(*args)
         if not raced:
-            raced.append(world.put(agent.execution_id, token, world.beat(agent, 9)))
+            raced.append(None)
+            raced[0] = world.put(agent.execution_id, token, world.beat(agent, 9))
         return claim
 
     monkeypatch.setattr(world.tasks, "renew", racing)
@@ -278,7 +279,8 @@ def test_the_same_heartbeat_committed_during_renewal_is_returned(world, worker, 
     def racing(*args):
         claim = renew(*args)
         if not raced:
-            raced.append(world.put(agent.execution_id, token, world.beat(agent, 8)))
+            raced.append(None)
+            raced[0] = world.put(agent.execution_id, token, world.beat(agent, 8))
         return claim
 
     monkeypatch.setattr(world.tasks, "renew", racing)
