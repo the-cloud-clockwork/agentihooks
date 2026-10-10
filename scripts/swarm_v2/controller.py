@@ -5,7 +5,6 @@ from uuid import uuid4
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_v2.kubernetes.watch import BACKEND, CLASSES, Plan, Pod, PodView, Reconciler, owner_for
-from scripts.swarm_v2.reconciliation.accounts import AccountReconciler
 from scripts.swarm_v2.runtime.operations import Observation, Operation, OperationRequest, Operations, OperationTransport
 
 
@@ -43,7 +42,6 @@ class Controller:
         self.reconciled_epoch = None
         self.admission_enabled = admission_enabled
         self.operations = Operations(store, [FencedTransport(transport, self.require) for transport in transports])
-        self.accounts = AccountReconciler(store, slug)
 
     def acquire(self) -> bool:
         self.ready = False
@@ -90,7 +88,6 @@ class Controller:
 
     def reconcile(self) -> Plan | None:
         self._authority()
-        self.accounts.reconcile()
         if self.pods is None:
             return None
         occupants = self.store.execution_occupants(self.slug).values()
