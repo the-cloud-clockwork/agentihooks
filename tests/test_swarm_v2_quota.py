@@ -155,10 +155,19 @@ def test_stored_records_use_their_documented_keys(world):
     assert world.stored()[f"{ROOT}:quota-stale"] == {f"{HARNESS}:{ACCOUNT}": "1"}
 
 
-def test_an_undecodable_record_hides_no_other_account(world):
+def test_an_undecodable_record_hides_no_other_account(world, monkeypatch):
     world.publish(INPUTS["spare"], account=SPARE)
-    world.store.redis.hset(f"{ROOT}:quota:{HARNESS}", mapping={ACCOUNT: "{", "drifted": '{"unknown": 1}'})
+    good = json.loads(world.store.redis.hget(f"{ROOT}:quota:{HARNESS}", SPARE))
+    drifted = {
+        ACCOUNT: "{",
+        "unknown-field": json.dumps({**good, "unknown": 1}),
+        "string-time": json.dumps({**good, "observed_ms": "x"}),
+        "string-window": json.dumps({**good, "five_used": "x"}),
+    }
+    world.store.redis.hset(f"{ROOT}:quota:{HARNESS}", mapping=drifted)
     assert list(quota.latest_all(world.store.redis, HARNESS)) == [SPARE]
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda environ: world.store.redis)
+    assert [probe.account for _, probe in quota.fleet_observations({quota.FLAG: "1"})] == [SPARE]
 
 
 @pytest.mark.parametrize(
