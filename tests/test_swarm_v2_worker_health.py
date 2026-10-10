@@ -574,7 +574,10 @@ def test_cli_defaults_to_the_process_arguments_and_environment(tmp_path, capsys,
     monkeypatch.delenv("BRAIN_URL", raising=False)
     monkeypatch.setattr("sys.argv", ["health.py", "readiness", "--attempt", str(attempt), "--harness", "codex"])
     assert main() == 0
-    assert json.loads(capsys.readouterr().out)["status"] == "ready"
+    out = capsys.readouterr().out
+    result = json.loads(out)
+    assert (result["mode"], result["status"]) == ("readiness", "ready")
+    assert out == json.dumps(result, sort_keys=True) + "\n"
 
 
 def test_cli_exit_codes_follow_status(tmp_path, capsys, monkeypatch):
