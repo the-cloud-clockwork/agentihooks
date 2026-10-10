@@ -210,7 +210,7 @@ def local_checks(probe: Probe, execution: filesystem.Execution, mode: str, found
 
 
 def evaluate(probe: Probe, mode: str) -> dict:
-    execution = filesystem.recorded(probe.attempt, read(probe.attempt / "execution.json"))
+    execution = filesystem.recorded(probe.attempt.resolve(), read(probe.attempt / "execution.json"))
     found = incarnation(execution)
     checks = local_checks(probe, execution, mode, found)
     reason = next((value for value in checks.values() if value), None)

@@ -43,7 +43,7 @@ def named_folders(source: str, folders: set[str]) -> list[str]:
             parts, joined = [node.values[0]], True
         elif isinstance(node, ast.Tuple):
             parts, joined = node.elts, False
-        elif isinstance(node, ast.Call) and ast.unparse(node.func) in ("Path", "os.path.join"):
+        elif isinstance(node, ast.Call) and ast.unparse(node.func).rpartition(".")[2] in ("Path", "join", "joinpath"):
             parts, joined = node.args, False
         else:
             continue
@@ -68,8 +68,10 @@ def test_the_guard_catches_a_reader_naming_a_layout_folder():
         'h = Path(a, "tmp")\n'
         'i = os.path.join(a, "homes/x")\n'
         'j = record.get("homes")\n'
+        'k = a.joinpath("run", "x")\n'
     )
     assert named_folders(source, folders) == [
+        "11: run",
         "1: homes",
         "2: run/",
         "3: tmp/x",
@@ -168,6 +170,18 @@ def test_health_probe_report_follows_the_recorded_layout(tmp_path):
     checks = worker_health.evaluate(worker_health.Probe(attempt, "codex", {"PATH": ""}), "startup")["checks"]
     assert checks["home"] is None
     assert checks["runtime_paths"] is None
+
+
+def test_health_probe_resolves_a_linked_attempt_like_the_supervisor(tmp_path, monkeypatch):
+    attempt = moved_attempt(tmp_path)
+    linked = tmp_path / "linked"
+    linked.symlink_to(attempt)
+    seen = []
+    monkeypatch.setattr(
+        worker_health, "herdr_failure", lambda probe, execution, home, root: seen.append(execution.root)
+    )
+    worker_health.evaluate(worker_health.Probe(linked, "codex", {"PATH": ""}), "startup")
+    assert seen == [attempt.resolve()]
 
 
 def test_image_probe_launches_each_harness_in_the_layout_home(tmp_path, monkeypatch):
