@@ -19,6 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 POLICY_FILE = ROOT / "docker" / "swarm-node" / "cache-policy.json"
 LAYOUT_FILE = ROOT / "docker" / "swarm-node" / "layout.json"
 GIB = 1 << 30
+SCOPE = "github.com/org/repo"
+UNTRUSTED = "github.com/untrusted/repo"
 
 
 class Clock:
@@ -34,27 +36,21 @@ def free(amount: int):
     return lambda path: SimpleNamespace(total=amount, used=0, free=amount)
 
 
-@pytest.fixture(autouse=True)
-def metrics(monkeypatch):
-    monkeypatch.setattr(cache, "METRICS", {"cache_hits": 0, "cache_misses": 0, "cache_corruption_total": 0})
-
-
-@pytest.fixture
-def world(tmp_path):
-    base = tmp_path / "attempts"
+def build(root: Path) -> SimpleNamespace:
+    cache.METRICS.update(dict.fromkeys(cache.METRICS, 0))
+    base = root / "attempts"
     base.mkdir()
     layout = filesystem.load(LAYOUT_FILE)
-    policy = replace(cache.load(POLICY_FILE), store=tmp_path / "cache")
-    store = cache.Store(policy, clock=Clock(), usage=free(100 * GIB))
+    policy = replace(cache.load(POLICY_FILE), store=root / "cache")
     return SimpleNamespace(
-        tmp=tmp_path,
-        store=store,
+        tmp=root,
+        store=cache.Store(policy, SCOPE, clock=Clock(), usage=free(100 * GIB)),
         first=filesystem.allocate(base, "attempt-1", layout),
         second=filesystem.allocate(base, "attempt-2", layout),
     )
 
 
-def key(kind="pip", lock="a" * 64, scope="github.com/org/repo", toolchain="python-3.12") -> cache.Key:
+def key(kind="pip", lock="a" * 64, scope=SCOPE, toolchain="python-3.12") -> cache.Key:
     return cache.Key(kind=kind, toolchain=toolchain, lock=lock, platform="linux-amd64", scope=scope)
 
 
@@ -71,7 +67,7 @@ def tree(root: Path) -> dict[str, bytes | None]:
     return {
         str(p.relative_to(root)): (p.read_bytes() if p.is_file() else None)
         for p in sorted(root.rglob("*"))
-        if not p.name.startswith(".lock")
+        if p.name != ".lock"
     }
 
 
@@ -79,10 +75,25 @@ def entries(store: cache.Store) -> list[str]:
     return sorted(p.name for p in store.policy.store.iterdir() if not p.name.startswith("."))
 
 
-def published(world, cache_key: cache.Key, files: dict[str, bytes], executable=()) -> Path:
-    layer = cache.attach(world.store, world.first, cache_key)
+def publish_as(store: cache.Store, execution, cache_key: cache.Key, files: dict, executable=()) -> Path:
+    layer = cache.attach(store, execution, cache_key)
     fill(layer, files, executable)
-    return cache.publish(world.store, world.first, layer)
+    return cache.publish(store, execution, layer)
+
+
+def published(world, cache_key: cache.Key, files: dict[str, bytes], executable=()) -> Path:
+    store = replace(world.store, scope=cache_key.scope)
+    return publish_as(store, world.first, cache_key, files, executable)
+
+
+@pytest.fixture
+def world(tmp_path):
+    return build(tmp_path)
+
+
+@pytest.fixture(autouse=True)
+def metrics(monkeypatch):
+    monkeypatch.setattr(cache, "METRICS", {"cache_hits": 0, "cache_misses": 0, "cache_corruption_total": 0})
 
 
 def test_the_shipped_policy_turns_reuse_on_and_keeps_credentials_and_session_databases_out():
@@ -94,10 +105,14 @@ def test_the_shipped_policy_turns_reuse_on_and_keeps_credentials_and_session_dat
     assert policy.max_bytes == 20 * GIB
     assert policy.reserve_bytes == 2 * GIB
     assert policy.kinds == {"pip": False, "uv": False, "npm": False, "toolchain": True}
+    assert policy.shared == ("trusted",)
     for name in (
         ".credentials.json",
         "auth.json",
         ".git-credentials",
+        ".env",
+        ".env.local",
+        ".env.production",
         "state.sqlite",
         "history.db",
         "s.jsonl",
@@ -116,11 +131,18 @@ def test_load_reads_the_installed_policy_when_no_path_is_given(monkeypatch, tmp_
     assert str(error.value) == "no cache policy is installed, so cache reuse stays off"
 
 
+def test_load_reads_an_explicit_path_instead_of_the_installed_policy(tmp_path):
+    other = tmp_path / "other.json"
+    other.write_text(json.dumps({**json.loads(POLICY_FILE.read_text()), "max_bytes": 7}))
+    assert cache.load(other).max_bytes == 7
+
+
 @pytest.mark.parametrize(
     ("change", "message"),
     [
         ({"policy_version": 2}, "cache policy version 2 has no reader"),
         ({"kinds": {}}, "cache policy must name each kind with whether it may hold executables"),
+        ({"kinds": ["pip"]}, "cache policy must name each kind with whether it may hold executables"),
         ({"kinds": {"pip": "no"}}, "cache policy must name each kind with whether it may hold executables"),
         ({"kinds": {"Bad Kind": False}}, "cache policy must name each kind with whether it may hold executables"),
         ({"max_bytes": 0}, "cache policy byte limits must be positive integers"),
@@ -128,9 +150,10 @@ def test_load_reads_the_installed_policy_when_no_path_is_given(monkeypatch, tmp_
         ({"max_bytes": "1"}, "cache policy byte limits must be positive integers"),
         ({"max_bytes": True}, "cache policy byte limits must be positive integers"),
         ({"store": "relative/cache"}, "cache policy store must be an absolute path"),
-        ({"excluded": "x"}, "cache policy excluded patterns must be a list of names"),
-        ({"excluded": [1]}, "cache policy excluded patterns must be a list of names"),
-        ({"kinds": ["pip"]}, "cache policy must name each kind with whether it may hold executables"),
+        ({"excluded": "x"}, "cache policy excluded patterns and shared scopes must be lists of names"),
+        ({"excluded": [1]}, "cache policy excluded patterns and shared scopes must be lists of names"),
+        ({"shared": "trusted"}, "cache policy excluded patterns and shared scopes must be lists of names"),
+        ({"shared": [None]}, "cache policy excluded patterns and shared scopes must be lists of names"),
         ({"enabled": "yes"}, "cache policy enabled must be true or false"),
     ],
 )
@@ -149,7 +172,7 @@ def test_parse_accepts_the_smallest_limits_and_reuse_off():
 
 
 def test_a_store_defaults_to_the_wall_clock_and_the_real_disk_and_the_image_policy_path():
-    store = cache.Store(cache.load(POLICY_FILE))
+    store = cache.Store(cache.load(POLICY_FILE), SCOPE)
     assert store.clock is time.time
     assert store.usage is shutil.disk_usage
     assert cache.POLICIES == (POLICY_FILE, Path("/opt/swarm-node/cache-policy.json"))
@@ -175,14 +198,33 @@ def test_lock_digest_is_the_sha256_of_the_lock_file(tmp_path):
     assert cache.lock_digest(lock) == hashlib.sha256(b"pinned\n").hexdigest()
 
 
-def test_attach_refuses_an_unknown_kind_or_an_incomplete_key(world):
+def test_attach_refuses_an_unknown_kind(world):
     with pytest.raises(cache.CacheError) as error:
         cache.attach(world.store, world.first, key(kind="cargo"))
     assert str(error.value) == "cache kind cargo is not in the policy"
-    with pytest.raises(cache.CacheError) as error:
-        cache.attach(world.store, world.first, key(scope=""))
-    assert str(error.value) == "a cache key needs its toolchain, lock, platform and scope"
     assert not (world.first.path("scratch") / "cache").exists()
+
+
+@pytest.mark.parametrize("field", ["toolchain", "lock", "platform", "scope"])
+def test_attach_refuses_a_key_missing_any_field(world, field):
+    with pytest.raises(cache.CacheError) as error:
+        cache.attach(world.store, world.first, replace(key(), **{field: ""}))
+    assert str(error.value) == "a cache key needs its toolchain, lock, platform and scope"
+
+
+def test_an_attempt_reads_its_own_and_shared_scopes_and_publishes_only_its_own(world):
+    with pytest.raises(cache.CacheError) as error:
+        cache.attach(world.store, world.first, key(scope="github.com/other/repo"))
+    assert str(error.value) == "cache scope github.com/other/repo is not granted to this attempt"
+    seed = published(world, key(kind="toolchain", scope="trusted"), {"bin/node": b"trusted"}, ("bin/node",))
+    shared = cache.attach(world.store, world.second, key(kind="toolchain", scope="trusted"))
+    assert shared.seed == seed
+    fill(shared, {"bin/node": b"poisoned"}, ("bin/node",))
+    filesystem.remove(seed.parent)
+    with pytest.raises(cache.CacheError) as error:
+        cache.publish(world.store, world.second, shared)
+    assert str(error.value) == "cache scope trusted is not granted to this attempt"
+    assert entries(world.store) == []
 
 
 def test_a_miss_gives_an_empty_private_writable_layer_and_counts_a_miss(world):
@@ -192,13 +234,13 @@ def test_a_miss_gives_an_empty_private_writable_layer_and_counts_a_miss(world):
     assert layer.writable.stat().st_mode & 0o777 == 0o700
     assert (layer.writable.parent).stat().st_mode & 0o777 == 0o700
     assert cache.METRICS == {"cache_hits": 0, "cache_misses": 1, "cache_corruption_total": 0}
-    assert cache.hit_rate() == 0.0
+    assert cache.cache_hit_rate() == 0.0
 
 
-def test_hit_rate_is_zero_before_any_attach_and_the_share_of_hits_after():
-    assert cache.hit_rate() == 0.0
+def test_cache_hit_rate_is_zero_before_any_attach_and_the_share_of_hits_after():
+    assert cache.cache_hit_rate() == 0.0
     cache.METRICS.update(cache_hits=3, cache_misses=1)
-    assert cache.hit_rate() == 0.75
+    assert cache.cache_hit_rate() == 0.75
 
 
 def test_two_compatible_attempts_reuse_one_sealed_seed_while_homes_stay_private(world):
@@ -212,13 +254,13 @@ def test_two_compatible_attempts_reuse_one_sealed_seed_while_homes_stay_private(
     assert not any(p.stat().st_mode & 0o222 for p in [seed, *seed.rglob("*")])
     assert not list(world.second.path("home").iterdir())
     assert cache.METRICS == {"cache_hits": 1, "cache_misses": 1, "cache_corruption_total": 0}
-    assert cache.hit_rate() == 0.5
+    assert cache.cache_hit_rate() == 0.5
 
 
 def test_publish_records_the_key_the_manifest_and_the_size(world):
     published(world, key(kind="toolchain"), {"bin/tool": b"#!/bin/sh\n", "lib/a": b"abc"}, executable=("bin/tool",))
-    record = json.loads((world.store.policy.store / key(kind="toolchain").digest() / "entry.json").read_text())
-    assert record == {
+    entry = world.store.policy.store / key(kind="toolchain").digest()
+    assert json.loads((entry / "entry.json").read_text()) == {
         "key": asdict(key(kind="toolchain")),
         "files": {
             "bin/tool": [hashlib.sha256(b"#!/bin/sh\n").hexdigest(), True],
@@ -226,7 +268,7 @@ def test_publish_records_the_key_the_manifest_and_the_size(world):
         },
         "bytes": 13,
     }
-    assert (world.store.policy.store / key(kind="toolchain").digest()).stat().st_mtime == world.store.clock.now
+    assert entry.stat().st_mtime == world.store.clock.now
     assert world.store.policy.store.stat().st_mode & 0o777 == 0o700
 
 
@@ -254,6 +296,25 @@ def test_content_that_turns_unsafe_while_copying_is_refused_and_staging_removed(
     assert list(world.store.policy.store.iterdir()) == [world.store.policy.store / ".lock"]
 
 
+def test_a_link_swapped_in_after_the_check_is_copied_as_a_link_and_refused(world, monkeypatch):
+    secret = world.first.path("home") / "token"
+    secret.write_text("secret-value")
+    layer = cache.attach(world.store, world.first, key())
+    fill(layer, {"a.whl": b"x"})
+    copy = shutil.copytree
+
+    def swapping(source, target, **kwargs):
+        (Path(source) / "a.whl").unlink()
+        (Path(source) / "a.whl").symlink_to(secret)
+        copy(source, target, **kwargs)
+
+    monkeypatch.setattr(cache.shutil, "copytree", swapping)
+    with pytest.raises(cache.CacheError) as error:
+        cache.publish(world.store, world.first, layer)
+    assert str(error.value) == "the cache entry could not be written: cache content holds a link: a.whl"
+    assert entries(world.store) == []
+
+
 def test_a_dangling_link_in_place_of_an_entry_blocks_publish_until_attach_discards_it(world):
     world.store.policy.store.mkdir(mode=0o700)
     entry = world.store.policy.store / key().digest()
@@ -267,12 +328,12 @@ def test_a_dangling_link_in_place_of_an_entry_blocks_publish_until_attach_discar
     assert entry.is_symlink()
 
 
-def test_publish_waits_for_the_store_lock(world):
+def test_publish_waits_for_the_store_lock_even_against_a_shared_holder(world):
     layer = cache.attach(world.store, world.first, key())
     fill(layer, {"a.whl": b"x"})
     result = []
     with open(world.store.policy.store / ".lock", "a") as handle:
-        cache.fcntl.flock(handle, cache.fcntl.LOCK_EX)
+        cache.fcntl.flock(handle, cache.fcntl.LOCK_SH)
         worker = threading.Thread(target=lambda: result.append(cache.publish(world.store, world.first, layer)))
         worker.start()
         worker.join(timeout=0.5)
@@ -358,21 +419,19 @@ def test_publish_never_replaces_an_existing_entry(world):
     assert (seed / "a.whl").read_bytes() == b"first"
 
 
-def test_an_untrusted_scope_cannot_replace_a_trusted_toolchain(world):
+def test_an_untrusted_project_publishes_only_into_its_own_scope(world):
     trusted = key(kind="toolchain", scope="trusted")
     seed = published(world, trusted, {"bin/node": b"trusted"}, executable=("bin/node",))
     before = tree(world.store.policy.store)
-    poisoned = key(kind="toolchain", scope="github.com/untrusted/repo")
-    layer = cache.attach(world.store, world.second, poisoned)
-    fill(layer, {"bin/node": b"poisoned"}, executable=("bin/node",))
-    cache.publish(world.store, world.second, layer)
+    untrusted = replace(world.store, scope=UNTRUSTED)
+    publish_as(untrusted, world.second, key(kind="toolchain", scope=UNTRUSTED), {"bin/node": b"bad"}, ("bin/node",))
     assert cache.attach(world.store, world.first, trusted).seed == seed
     assert (seed / "bin" / "node").read_bytes() == b"trusted"
     assert {k: v for k, v in tree(world.store.policy.store).items() if k in before} == before
 
 
 def test_an_entry_moved_under_another_key_is_discarded_by_its_recorded_key(world):
-    poisoned = key(kind="toolchain", scope="github.com/untrusted/repo")
+    poisoned = key(kind="toolchain", scope=UNTRUSTED)
     published(world, poisoned, {"bin/node": b"poisoned"}, executable=("bin/node",))
     trusted = key(kind="toolchain", scope="trusted")
     root = world.store.policy.store
@@ -436,6 +495,15 @@ def test_a_full_disk_refuses_publish_without_evicting_or_writing(world):
     assert (layer.writable / "b.whl").read_bytes() == b"y" * 300
 
 
+def test_eviction_frees_disk_room_when_the_reserve_would_be_crossed(world):
+    old = published(world, key(lock="1" * 64), {"a.whl": b"x" * 100})
+    tight = replace(world.store, usage=free(world.store.policy.reserve_bytes + 200))
+    layer = cache.attach(tight, world.second, key(lock="2" * 64))
+    fill(layer, {"b.whl": b"y" * 300})
+    assert cache.publish(tight, world.second, layer).exists()
+    assert not old.exists()
+
+
 def test_publish_fits_exactly_at_the_reserve(world):
     full = replace(world.store, usage=free(world.store.policy.reserve_bytes + 300))
     layer = cache.attach(full, world.first, key())
@@ -445,15 +513,16 @@ def test_publish_fits_exactly_at_the_reserve(world):
 
 def test_eviction_removes_least_recently_used_entries_only_as_far_as_needed(world):
     small = replace(world.store, policy=replace(world.store.policy, max_bytes=300))
-    oldest = published(world, key(lock="1" * 64), {"w/a.whl": b"x" * 100})
-    middle = published(world, key(lock="2" * 64), {"w/a.whl": b"x" * 100})
-    newest = published(world, key(lock="3" * 64), {"w/a.whl": b"x" * 100})
-    cache.attach(small, world.second, key(lock="1" * 64))
+    first = published(world, key(lock="1" * 64), {"w/a.whl": b"x" * 100})
+    second = published(world, key(lock="2" * 64), {"w/a.whl": b"x" * 100})
+    third = published(world, key(lock="3" * 64), {"w/a.whl": b"x" * 100})
+    for seed, used in ((first, 300), (second, 100), (third, 200)):
+        os.utime(seed.parent, (world.store.clock.now + used,) * 2)
     layer = cache.attach(small, world.second, key(lock="4" * 64))
     fill(layer, {"w/a.whl": b"x" * 100})
     cache.publish(small, world.second, layer)
-    assert not middle.exists()
-    assert oldest.exists() and newest.exists()
+    assert not second.exists()
+    assert first.exists() and third.exists()
     assert len(entries(world.store)) == 3
 
 
@@ -476,9 +545,11 @@ def test_an_entry_larger_than_the_budget_is_refused_with_nothing_evicted(world):
     assert kept.exists()
 
 
-def test_a_write_failure_leaves_no_staging_and_no_entry(world, monkeypatch):
-    layer = cache.attach(world.store, world.first, key())
-    fill(layer, {"a.whl": b"x"})
+def test_a_write_failure_leaves_no_staging_no_entry_and_evicts_nothing(world, monkeypatch):
+    kept = published(world, key(lock="1" * 64), {"a.whl": b"x" * 100})
+    small = replace(world.store, policy=replace(world.store.policy, max_bytes=150))
+    layer = cache.attach(small, world.first, key())
+    fill(layer, {"a.whl": b"x" * 100})
 
     def no_space(source, target, **kwargs):
         Path(target).mkdir(parents=True)
@@ -486,10 +557,12 @@ def test_a_write_failure_leaves_no_staging_and_no_entry(world, monkeypatch):
 
     monkeypatch.setattr(cache.shutil, "copytree", no_space)
     with pytest.raises(cache.CacheError) as error:
-        cache.publish(world.store, world.first, layer)
+        cache.publish(small, world.first, layer)
     assert str(error.value) == f"the cache entry could not be written: {os.strerror(errno.ENOSPC)}"
-    assert list(world.store.policy.store.iterdir()) == [world.store.policy.store / ".lock"]
-    assert (layer.writable / "a.whl").read_bytes() == b"x"
+    assert entries(world.store) == [key(lock="1" * 64).digest()]
+    assert not list(world.store.policy.store.glob(".staging-*"))
+    assert kept.exists()
+    assert (layer.writable / "a.whl").read_bytes() == b"x" * 100
 
 
 def test_publish_clears_staging_left_by_an_interrupted_publish(world):
