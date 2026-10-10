@@ -288,11 +288,12 @@ def test_disabled_writes_answer_read_only_conflicts_and_reads_still_work(world, 
     ledger = world.document()
     assert world.call("GET", "/v2/tasks/task", token, api=paused)[0] == 200
     expected = detail(
-        "read_only",
+        "revision_conflict",
         "task writes are read only; refresh and retry later",
         "update-1",
         task_id="task",
         current_revision=current,
+        read_only=True,
     )
     assert world.update(token, "update-1", current, {"state": "pr"}, api=paused) == (409, expected)
     assert world.update(token, "update-1", None, {"rank": "high"}, api=paused) == (409, expected)
@@ -420,3 +421,15 @@ def test_package_cases_match_their_committed_evidence(case, tmp_path):
     assert committed == {"case": f"T-SV2-LDG-03-{case.upper()}", "independent_runs": 2, "observed": first}, json.dumps(
         first, indent=2, sort_keys=True
     )
+
+
+def test_the_manifest_names_the_hash_of_every_case_input():
+    import hashlib
+
+    manifest = json.loads((EVIDENCE / "manifest.json").read_text(encoding="utf-8"))
+    root = Path(__file__).parents[1]
+    assert manifest["inputs"] == {
+        path: hashlib.sha256((root / path).read_bytes()).hexdigest()
+        for path in ["tests/fixtures/swarm_v2/task-revision.json"]
+    }
+    assert manifest["cases"] == ["T-SV2-LDG-03-A", "T-SV2-LDG-03-B", "T-SV2-LDG-03-C"]

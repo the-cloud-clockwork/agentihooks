@@ -20,7 +20,7 @@
         "read": 200,
         "write": [
           409,
-          "read_only",
+          "revision_conflict",
           "new_request",
           true
         ]
