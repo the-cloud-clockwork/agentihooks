@@ -146,7 +146,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions = []
     if config.state != "stopped" or _woken(slug, config, store, ledger):
         actions = skip_refused(_recover_master, slug, config, store, runtime, now_ms)
-    doc = timing.call(ledger.state, slug)
+    doc = freeze.watched(slug, store, ledger, timing.call(ledger.state, slug))
     rows = {t["id"]: t for t in doc["tasks"]}
     timing.call(
         exits.sweep,

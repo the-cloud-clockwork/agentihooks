@@ -4,19 +4,40 @@ from collections.abc import Iterable
 
 from scripts.doctor import loop, priming
 from scripts.swarm import notice_text
-from scripts.swarm.store import SwarmConfig
+from scripts.swarm.store import SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_kinds
 from scripts.swarm_ledger.repository import hierarchy
 
 DRAINED = "The swarm has no task left to start"
 SELECTORS = {"lane": lambda task: task.get("lane"), "kind": ledger_kinds.kind}
+WATCHED = "watched_focus"
 
 
 def held(task: dict, doc: dict, graph: dict, fix_phase: str) -> bool:
     if task.get("state") != "open":
         return False
     records, chain = doc.get("freezes") or [], ancestry(task, graph)
-    return frozen(task, records, chain) or unfocused(task, records, chain, fix_phase)
+    return (
+        frozen(task, records, chain)
+        or unfocused(task, records, chain, fix_phase)
+        or outside_watched(task, doc, fix_phase)
+    )
+
+
+def outside_watched(task: dict, doc: dict, fix_phase: str) -> bool:
+    return bool(doc.get(WATCHED)) and not exempt(task, fix_phase)
+
+
+def watched(slug: str, store, ledger, doc: dict) -> dict:
+    peer = store.peer(slug) if fix_phase(store.config(slug)) else ""
+    if not peer:
+        return doc
+    try:
+        peer_doc = ledger.state(peer)
+    except SwarmError:
+        return doc
+    focus = [r["target"] for r in peer_doc.get("freezes") or [] if r["verb"] == "focus"]
+    return {**doc, WATCHED: [f"the focus on {_named(peer_doc, target)} in the watched swarm" for target in focus]}
 
 
 def frozen(task: dict, records: list, chain: list) -> bool:
@@ -69,6 +90,8 @@ def notice(doc: dict, tasks: Iterable[dict], phase: str) -> str:
         for r, name in zip(records, names(doc))
         if (focused_out if r["verb"] == "focus" else any(covers(r["target"], t, chain) for t, chain in chains))
     ]
+    if any(outside_watched(t, doc, phase) for t in waiting):
+        holding += doc[WATCHED]
     which = "1 open task is" if len(waiting) == 1 else f"{len(waiting)} open tasks are"
     return notice_text.plain(f"The swarm has no task it may start: {which} held by {_joined(holding)}")
 
