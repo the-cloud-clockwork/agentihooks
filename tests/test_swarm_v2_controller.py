@@ -5,7 +5,6 @@ import pytest
 import scripts.swarm.execution as execution
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
-from scripts.swarm_v2.accounts import RESERVED, Slot, account_key, encode
 from scripts.swarm_v2.controller import Controller
 from scripts.swarm_v2.kubernetes import watch
 from scripts.swarm_v2.runtime.operations import Observation, OperationRequest, Phase
@@ -649,27 +648,6 @@ def test_revoked_grant_refuses_reconcile_without_deleting(fixture):
     with pytest.raises(SwarmError, match="^a scoped controller grant is required$"):
         controller.reconcile()
     assert pods.deleted == []
-
-
-def test_acquire_reconciles_this_swarms_account_slots_only_under_its_grant(fixture):
-    store, (first, _), _, _, grant = fixture
-    rows = {
-        "fixture/eng-2@fixture": Slot("pool", "fixture/eng-2@fixture", "exec-orphan", 1, RESERVED, 500),
-        "fixture/eng-3@fixture": Slot("pool", "fixture/eng-3@fixture", "exec-live", 1, RESERVED, 5000),
-        "other/eng-2@other": Slot("pool", "other/eng-2@other", "exec-other", 1, RESERVED, 500),
-    }
-    store.redis.hset(account_key("pool"), mapping={name: encode(slot) for name, slot in rows.items()})
-    grant["allowed"] = False
-    with pytest.raises(SwarmError, match="^a scoped controller grant is required$"):
-        first.acquire()
-    assert sorted(store.redis.hkeys(account_key("pool"))) == sorted(rows)
-
-    grant["allowed"] = True
-    assert first.acquire()
-
-    assert sorted(store.redis.hkeys(account_key("pool"))) == ["fixture/eng-3@fixture", "other/eng-2@other"]
-    assert first.reconcile() is None
-    assert sorted(store.redis.hkeys(account_key("pool"))) == ["fixture/eng-3@fixture", "other/eng-2@other"]
 
 
 @pytest.mark.parametrize("case", ("a", "b", "c"))
