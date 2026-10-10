@@ -5,7 +5,7 @@ local broadcast file only caches what a seat claimed; it is never the fleet auth
 import json
 import re
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 
@@ -83,6 +83,11 @@ def _delivery(found: dict) -> Delivery:
 
 def role_of(seat: str) -> str:
     return seat.split("@", 1)[0].rsplit("-", 1)[0]
+
+
+def owner_of(author: str) -> str:
+    """Any operator may revise an operator broadcast; an agent's broadcast belongs to its seat across generations."""
+    return "operator" if author.startswith("operator:") else author.split("/", 1)[0]
 
 
 def _name(value: object, empty: bool = True) -> str:
@@ -188,15 +193,18 @@ class FleetBroadcasts:
         )
         now = self.clock()
         ttl = fields.pop("ttl_seconds")
+        operation = f"{owner_of(author)}:{operation_id}"
 
         def decide(pipe):
             if pipe.exists(frozen):
                 raise SwarmError("distribution_disabled")
-            done = pipe.hget(operations, operation_id) if operation_id else None
+            done = pipe.hget(operations, operation) if operation_id else None
             if done:
                 return None, decode(done)
             raw = pipe.hget(canonical, fields["broadcast_id"])
             stored = decode(raw) if raw else None
+            if stored and (owner_of(stored.author) != owner_of(author) or stored.brain_id != fields["brain_id"]):
+                raise SwarmError("forbidden_scope")
             built = Broadcast(
                 revision=stored.revision + 1 if stored else 1,
                 fleet=self.slug,
@@ -212,7 +220,7 @@ class FleetBroadcasts:
                 pipe.hset(canonical, built.broadcast_id, encode(built))
                 pipe.rpush(self.key("broadcast-history"), encode(built))
                 if operation_id:
-                    pipe.hset(operations, operation_id, encode(built))
+                    pipe.hset(operations, operation, encode(built))
 
             return writes, built
 
@@ -255,10 +263,10 @@ class FleetBroadcasts:
                     continue
                 first = record["delivered_ms"] if same else now
                 found.append(Delivery(broadcast, first, (first - broadcast.published_ms) / 1000))
-                if not same:
+                if not same or record["generation"] != grant.generation:
                     changed[broadcast.broadcast_id] = {
                         "revision": broadcast.revision,
-                        "delivered_ms": now,
+                        "delivered_ms": first,
                         "acked": False,
                         "execution_id": grant.execution_id,
                         "generation": grant.generation,
@@ -276,7 +284,7 @@ class FleetBroadcasts:
         return self._transact([records, claims, self.key("broadcasts")], decide)
 
     def acknowledge(self, token: str, broadcast_id: str, revision: int) -> bool:
-        """False for a duplicate acknowledgement, which changes nothing but is counted."""
+        """False for a duplicate acknowledgement, which leaves the delivery record unchanged and is only counted."""
         grant = self._grant(token)
         records = self.key("broadcast-deliveries", grant.seat_id)
 
@@ -349,3 +357,22 @@ def local_entry(delivery: Delivery) -> dict:
     if broadcast.channel:
         entry["channel"] = broadcast.channel
     return entry
+
+
+def sync_local(
+    fleet: FleetBroadcasts, token: str, channels: list[str], environ: Mapping[str, str], claim_id: str = ""
+) -> int:
+    """Claim this seat's fleet broadcasts into the local broadcast file; nothing while the fleet path is off."""
+    if environ.get(FLAG) != "1":
+        return 0
+    from hooks.context.broadcast import cache_fleet_broadcasts
+
+    return cache_fleet_broadcasts([local_entry(delivery) for delivery in fleet.claim(token, channels, claim_id)])
+
+
+def acknowledge_local(fleet: FleetBroadcasts, token: str, entry: dict) -> bool:
+    """Carry a local acknowledgement of a cached fleet entry back to the fleet."""
+    tag = entry.get("fleet")
+    if not tag or tag["swarm"] != fleet.slug:
+        raise SwarmError("forbidden_scope")
+    return fleet.acknowledge(token, tag["broadcast_id"], tag["revision"])
