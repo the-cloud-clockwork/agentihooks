@@ -12,6 +12,7 @@ import pytest
 
 from scripts.swarm_ledger import ledger_link
 from scripts.swarm_ledger import ledger_server as server
+from tests import ledger_guard
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -237,25 +238,43 @@ def test_a_server_whose_port_another_server_holds_is_never_taken_for_its_own(tmp
                 pass
 
 
-def request(port, path, host, origin=None):
+def fetch(port, path, host, origin=None):
     headers = {"Host": host, **({"Origin": origin} if origin else {})}
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     try:
         conn.request("GET", path, headers=headers)
         response = conn.getresponse()
         return response.status, response.read()
-    except OSError:
-        return None, b""
     finally:
         conn.close()
+
+
+def request(port, path, host, origin=None):
+    try:
+        return fetch(port, path, host, origin)
+    except OSError:
+        return None, b""
+
+
+def served(port, path, host, origin, log):
+    return request(port, path, host, origin)
+
+
+def test_a_failed_request_names_its_error_and_the_server_log(tmp_path):
+    log = tmp_path / "server.log"
+    log.write_text("ledger server said this\n")
+    with ledger_guard.reserve_port() as hold:
+        with pytest.raises(pytest.fail.Exception, match=r"(?s)ConnectionRefusedError: .*ledger server said this"):
+            served(hold.getsockname()[1], "/api/v1/ledgers", "swarm.lan", "http://swarm.lan", log)
 
 
 @pytest.mark.parametrize(
     ("host", "origin"),
     [("swarm.example.com", "https://swarm.example.com"), ("swarm.lan", "http://swarm.lan")],
 )
-def test_a_listed_host_and_origin_are_served(hosted, host, origin):
-    status, body = request(hosted, "/api/v1/ledgers", host, origin)
+def test_a_listed_host_and_origin_are_served(hosted, tmp_path, host, origin):
+    with ledger_guard.reserve_port() as hold:
+        status, body = served(hold.getsockname()[1], "/api/v1/ledgers", host, origin, tmp_path / "server.log")
     assert status == 200
     assert json.loads(body)["data"] == []
 
