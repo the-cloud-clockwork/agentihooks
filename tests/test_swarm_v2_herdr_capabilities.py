@@ -309,7 +309,7 @@ def test_the_qualify_command_reports_an_unreachable_machine(monkeypatch, capsys)
 def test_the_qualify_command_needs_a_target_and_an_incarnation(monkeypatch, capsys, argv):
     runner, seen = _command(monkeypatch, cases.fixture()["server"])
     assert capabilities.main(argv, {}) == 2
-    assert capsys.readouterr() == ("", capabilities.USAGE + "\n")
+    assert capsys.readouterr() == ("", "usage: python -m scripts.swarm_v2.herdr.capabilities TARGET INCARNATION\n")
     assert (seen, runner.commands) == ([], [])
 
 

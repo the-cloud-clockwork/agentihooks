@@ -4,6 +4,7 @@ set -euo pipefail
 proof_root="${1:?work directory required}"
 proof_port="${HERDR_PROOF_PORT:-22488}"
 proof_herdr="${HERDR_PROOF_BINARY:-$(command -v herdr)}"
+proof_python="${HERDR_PROOF_PYTHON:-python3}"
 proof_repo="$(git rev-parse --show-toplevel)"
 proof_lock="$proof_repo/docker/swarm-node/versions.lock"
 proof_user="$(id -un)"
@@ -67,6 +68,10 @@ remote() {
 client() {
     env -i HOME="$proof_root/client" USER="$proof_user" PATH="$proof_root/client/bin:$remote_path" TERM=dumb \
         herdr "$@" < /dev/null
+}
+qualify() {
+    env -i HOME="$proof_root/client" USER="$proof_user" PATH="$proof_root/client/bin:$remote_path" TERM=dumb \
+        PYTHONPATH="$proof_repo" "$proof_python" -m scripts.swarm_v2.herdr.capabilities "$@" < /dev/null
 }
 
 sshd_pid=""
@@ -157,6 +162,7 @@ member_pid="$server_pid"
 step member_status 0 remote herdr status server --json
 step member_machine_add 1 client machine add --label hdr01 "$target"
 step member_machine_list 0 client machine list --json
+step member_qualify 2 qualify hdr01 attempt-member
 check member_kept "pid=$member_pid servers=$(servers)" "$([[ "$(servers)" == "$member_pid " ]] && echo yes || echo no)"
 saved="$(client machine list --json 2>&1 | tr -d ' \n')"
 check member_not_saved "machines=$saved" "$([[ "$saved" == "[]" ]] && echo yes || echo no)"
@@ -169,6 +175,7 @@ step remote_status_local 0 remote herdr status server --json
 step machine_add 0 client machine add --label hdr01 "$target"
 step machine_list 0 client machine list --json
 step forwarded_status 0 client --machine hdr01 status server --json
+step qualify_compatible 0 qualify hdr01 attempt-first
 step workspace_create 0 client --machine hdr01 workspace create --label "hdr01-$proof_nonce" \
     --cwd "$proof_root/remote" --no-focus
 
@@ -216,12 +223,14 @@ wait "$first_pid" 2>/dev/null || true
 server_pid=""
 step stopped_workspace_list 1 client --machine hdr01 workspace list
 step stopped_status 1 client --machine hdr01 status server --json
+step stopped_qualify 2 qualify hdr01 attempt-first
 check stopped_remote_servers "servers=$(servers)" "$([[ -z "$(servers)" ]] && echo yes || echo no)"
 check stopped_client_socket "sockets=$(sockets)" "$([[ -z "$(sockets)" ]] && echo yes || echo no)"
 
 start_server second leader
 check new_incarnation "pid=$server_pid previous=$first_pid" "$([[ "$server_pid" != "$first_pid" ]] && echo yes || echo no)"
 step restarted_status 0 client --machine hdr01 status server --json
+step restarted_qualify 0 qualify hdr01 attempt-second
 step restarted_workspace_list 0 client --machine hdr01 workspace list
 check member_server_gone "member=$member_pid" "$(kill -0 "$member_pid" 2>/dev/null && echo no || echo yes)"
 echo "results: $results failures: $failures"
