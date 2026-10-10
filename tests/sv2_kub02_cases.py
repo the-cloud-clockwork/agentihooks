@@ -85,7 +85,7 @@ class Source:
         return [self._pod(raw) for raw in self.api.list_pods(selector)], "1"
 
     def watch_pods(self, selector, resource_version):
-        return iter(())
+        raise watch.CursorExpired()
 
     def read_pod(self, name):
         raw = self.api.read_pod(name)

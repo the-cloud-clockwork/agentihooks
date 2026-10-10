@@ -1,7 +1,7 @@
-import http.client
 import io
 import json
 import urllib.error
+from http.client import IncompleteRead
 
 import pytest
 
@@ -118,7 +118,7 @@ class RawOpener(Opener):
 
 class Truncated:
     def read(self):
-        raise http.client.IncompleteRead(b"{")
+        raise IncompleteRead(b"{")
 
 
 def test_send_turns_an_unreadable_success_body_into_a_connection_error(token):
