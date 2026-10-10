@@ -61,7 +61,7 @@ def test_a_ci_bottleneck_held_three_ticks_moves_one_seat_from_engineers_to_ci(st
     assert row["reason"] == actions[0] + " Host room 4."
     assert row["task"] == ""
     assert actions[0].startswith(
-        "Moved one seat from the eng lane to the ci lane after the bottleneck report named ci 3"
+        "Moved one seat from the eng lane to the ci lane after the bottleneck report named ci 3 ticks"
     )
     assert actions[0].endswith("running: engineers 3, CI 2, sum 5.")
     assert json.loads(store.redis.get(store.key(SLUG, "lane-split")))["ticks"] == 0
@@ -208,16 +208,24 @@ def test_auto_scaling_moves_the_stored_shift_against_the_last_ceilings(store, ho
     assert store.config(SLUG).lane_shift == 1
     assert caps(store) == (4, 1)
     assert actions == [lane_split.MOVED.format(giver="eng", taker="ci", named="ci", ticks=3, eng=3, ci=2, total=5)]
-    moved = {"plan": 1, "ci": 2, "eng": 3}
-    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps({"autoscale": {"ceilings": moved}}))
+    moved = {"ceilings": {"plan": 1, "ci": 2, "eng": 3}, "shift": 1}
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps({"autoscale": moved}))
     ticks(store, "engineering", 3, start=3)
     assert store.config(SLUG).lane_shift == 0
 
 
+def test_auto_scaling_moves_from_the_shift_calculate_achieved(store, home):
+    store.update(SLUG, scaling="auto", lane_shift=3)
+    clamped = {"ceilings": {"plan": 1, "ci": 2, "eng": 3}, "shift": 1}
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps({"autoscale": clamped}))
+    ticks(store, "engineering", 3)
+    assert store.config(SLUG).lane_shift == 0
+
+
 def test_auto_scaling_without_ceilings_reads_the_stored_caps(store, home):
-    store.update(SLUG, scaling="auto")
+    store.update(SLUG, scaling="auto", lane_shift=2)
     ticks(store, "engineering", 3, lane_split.Lanes(ready={"eng": 3, "ci": 0}, live={"eng": 1, "ci": 0}, room=4))
-    assert store.config(SLUG).lane_shift == -1
+    assert store.config(SLUG).lane_shift == 1
 
 
 def test_shift_moves_ceilings_and_keeps_the_sum():
@@ -233,6 +241,7 @@ def test_shift_moves_ceilings_and_keeps_the_sum():
     assert wide["ceilings"] == {"plan": 0, "ci": 5, "eng": 1}
     assert sum(wide["ceilings"].values()) == sum(plain["ceilings"].values())
     assert wide["reason"].endswith("; lane shift 1 from eng to ci.")
+    assert (wide["shift"], "shift" in plain) == (1, False)
 
 
 def test_a_shift_back_moves_ci_ceilings_to_engineers():
@@ -240,6 +249,7 @@ def test_a_shift_back_moves_ci_ceilings_to_engineers():
     decision = calculate({"eng": 1, "ci": 1}, {"claude": 4}, 10, {"eng": 3, "ci": 3}, previous, shift=-2)
     assert decision["ceilings"] == {"plan": 0, "ci": 2, "eng": 4}
     assert decision["reason"].endswith("; lane shift 2 from ci to eng.")
+    assert decision["shift"] == -2
 
 
 def test_a_shift_keeps_live_agents_and_one_seat_for_ready_work():
@@ -250,6 +260,7 @@ def test_a_shift_keeps_live_agents_and_one_seat_for_ready_work():
     assert ready["ceilings"]["eng"] == 1
     idle = calculate({"eng": 0, "ci": 0}, {"claude": 4}, 10, {"eng": 0, "ci": 3}, previous, shift=9)
     assert idle["ceilings"]["eng"] == 0
+    assert (live["shift"], ready["shift"], idle["shift"]) == (0, 0, 1)
 
 
 def test_no_shift_leaves_the_decision_unchanged():

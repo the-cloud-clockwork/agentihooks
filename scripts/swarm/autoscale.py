@@ -1,4 +1,4 @@
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 
 class PendingRaise(TypedDict):
@@ -10,15 +10,16 @@ class Decision(TypedDict):
     ceilings: dict[str, int]
     pending_raise: PendingRaise
     reason: str
+    shift: NotRequired[int]
 
 
-def _shifted(ceilings: dict[str, int], live: dict[str, int], demand: dict[str, int], shift: int) -> str:
+def _shifted(ceilings: dict[str, int], live: dict[str, int], demand: dict[str, int], shift: int) -> int:
     giver, taker = ("eng", "ci") if shift > 0 else ("ci", "eng")
     floor = max(live.get(giver, 0), 1 if demand.get(giver, 0) else 0)
     moved = min(abs(shift), max(0, ceilings[giver] - floor))
     ceilings[giver] -= moved
     ceilings[taker] += moved
-    return f"{moved} from {giver} to {taker}" if moved else ""
+    return moved if shift > 0 else -moved
 
 
 def calculate(
@@ -62,9 +63,12 @@ def calculate(
             else "; raise held by the two seat per tick limit"
         )
     if moved:
-        reason += f"; lane shift {moved}"
-    return {
+        reason += f"; lane shift {abs(moved)} from {'eng to ci' if moved > 0 else 'ci to eng'}"
+    decision: Decision = {
         "ceilings": ceilings,
         "pending_raise": pending,
         "reason": reason + ".",
     }
+    if shift:
+        decision["shift"] = moved
+    return decision

@@ -46,18 +46,19 @@ def refusal(caps: dict, giver: str, taker: str, lanes: Lanes) -> str:
     return ""
 
 
-def _caps(config, store, slug: str) -> dict:
+def _caps(config, store, slug: str) -> tuple[dict, int]:
     if config.scaling == AUTO_SCALING:
-        stored = json.loads(store.redis.get(store.key(slug, "quota-capacity")) or "{}")
-        ceilings = (stored.get("autoscale") or {}).get("ceilings")
+        stored = json.loads(store.redis.get(store.key(slug, "quota-capacity")) or "{}").get("autoscale") or {}
+        ceilings = stored.get("ceilings")
         if ceilings:
-            return {"eng": ceilings["eng"], "ci": ceilings["ci"]}
-    return {"eng": config.max_eng, "ci": config.max_ci}
+            return {"eng": ceilings["eng"], "ci": ceilings["ci"]}, stored.get("shift", 0)
+    return {"eng": config.max_eng, "ci": config.max_ci}, config.lane_shift
 
 
-def _apply(slug: str, config, store, giver: str, taker: str) -> None:
+def _apply(slug: str, config, store, move: tuple, shift: int) -> None:
+    giver, taker = move
     if config.scaling == AUTO_SCALING:
-        store.update(slug, lane_shift=config.lane_shift + (1 if taker == "ci" else -1))
+        store.update(slug, lane_shift=shift + (1 if taker == "ci" else -1))
         return
     caps = {"eng": config.max_eng, "ci": config.max_ci}
     store.update(slug, **{f"max_{giver}": caps[giver] - 1, f"max_{taker}": caps[taker] + 1})
@@ -87,9 +88,9 @@ def lane_pass(slug: str, config: SwarmConfig, store: RedisStore, lanes: Lanes, n
     if not due:
         return []
     giver, taker = move
-    caps = _caps(config, store, slug)
+    caps, shift = _caps(config, store, slug)
     reason = refusal(caps, giver, taker, lanes)
     if reason:
         return [HELD.format(named=current["named"], ticks=TICKS, reason=reason)]
-    _apply(slug, config, store, giver, taker)
+    _apply(slug, config, store, move, shift)
     return [_record(slug, current["named"], {giver: caps[giver] - 1, taker: caps[taker] + 1}, move, lanes, now_ms)]
