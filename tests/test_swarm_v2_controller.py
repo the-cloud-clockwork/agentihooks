@@ -746,10 +746,10 @@ def test_an_exit_observation_needs_the_controller_lease(accounts):
     observer = observe.Observer(accounts.store, "local", observe.Thresholds())
     accounts.clock[0] += lease.ttl_ms()
     now = accounts.clock[0] / 1000
-    before = accounts.rows()
+    before, seen = accounts.rows(), observer.get("fixture", lost.execution_id)
 
     with pytest.raises(SwarmError, match="^the controller lease is stale$"):
         controller.observe(observer, lost, [exit_signal(lost, observe.Source.SUPERVISOR, observe.EXITED, now)], now)
 
     assert accounts.rows() == before
-    assert observer.get("fixture", lost.execution_id) is None
+    assert observer.get("fixture", lost.execution_id) == seen

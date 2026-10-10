@@ -6,7 +6,7 @@ from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_v2.kubernetes.watch import BACKEND, CLASSES, Plan, Pod, PodView, Reconciler, owner_for
 from scripts.swarm_v2.reconciliation.accounts import AccountReconciler, Finding, exit_source
-from scripts.swarm_v2.runtime import observe
+from scripts.swarm_v2.runtime.observe import Observer, Signal
 from scripts.swarm_v2.runtime.operations import Observation, Operation, OperationRequest, Operations, OperationTransport
 
 
@@ -112,9 +112,7 @@ class Controller:
         self._authority()
         self.pods.source.delete_pod(pod.name, pod.uid)
 
-    def observe(
-        self, observer: observe.Observer, agent: AgentRecord, signals: Iterable[observe.Signal], now: float
-    ) -> Finding | None:
+    def observe(self, observer: Observer, agent: AgentRecord, signals: Iterable[Signal], now: float) -> Finding | None:
         self._authority()
         seen = observer.observe(self.slug, agent, signals, now)
         source = exit_source(seen)
