@@ -257,7 +257,10 @@ def request(port, path, host, origin=None):
 
 
 def served(port, path, host, origin, log):
-    return request(port, path, host, origin)
+    try:
+        return fetch(port, path, host, origin)
+    except OSError as error:
+        pytest.fail(f"{type(error).__name__}: {error}\nledger server log:\n{log.read_text()}")
 
 
 def test_a_failed_request_names_its_error_and_the_server_log(tmp_path):
