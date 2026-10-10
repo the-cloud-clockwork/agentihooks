@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow == 'Helm chart in kind' && format('hosted-lane-{0}', (endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a' || (endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b' || 'c') || format('helm-kind-{0}', github.run_id) }}
+  queue: ${{ github.workflow == 'Helm chart in kind' && 'max' || 'single' }}
+
 jobs:
   kind:
     runs-on: ubuntu-latest

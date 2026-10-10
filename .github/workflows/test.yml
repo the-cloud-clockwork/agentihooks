@@ -19,7 +19,8 @@ on:
         default: origin/dev
 
 concurrency:
-  group: tests-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  group: ${{ github.event_name == 'workflow_dispatch' && format('hosted-lane-{0}', (endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a' || (endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b' || 'c') || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}
+  queue: ${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:

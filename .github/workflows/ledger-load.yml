@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow == 'Ledger server load' && format('hosted-lane-{0}', (endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a' || (endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b' || 'c') || format('ledger-load-{0}', github.run_id) }}
+  queue: ${{ github.workflow == 'Ledger server load' && 'max' || 'single' }}
+
 jobs:
   load:
     runs-on: ubuntu-latest

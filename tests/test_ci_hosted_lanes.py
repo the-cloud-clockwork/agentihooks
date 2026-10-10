@@ -64,11 +64,8 @@ def test_worker_image_queues_branch_runs_on_the_lanes_and_keeps_dev_pushes_uncap
 
 def test_branch_mutation_queues_on_the_lanes_and_called_mutation_keeps_a_per_run_group():
     workflow = _workflow("mutation-preflight.yml")
-    branch = "github.event_name == 'push' && github.ref != 'refs/heads/dev'"
-    assert workflow["jobs"]["mutation"]["concurrency"] == {
-        "group": f"${{{{ {branch} && {LANE} || format('mutation-preflight-job-{{0}}', github.run_id) }}}}",
-        "queue": f"${{{{ {branch} && 'max' || 'single' }}}}",
-    }
+    assert set(workflow[True]) == {"push", "workflow_call"}
+    assert workflow["jobs"]["mutation"]["concurrency"] == _direct(workflow, "mutation-preflight-job")
     assert "mutation-preflight-job-" not in workflow["concurrency"]["group"]
 
 
