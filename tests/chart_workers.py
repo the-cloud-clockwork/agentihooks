@@ -43,6 +43,8 @@ def policy_problems(documents: list, workers: dict, volume: dict) -> list[str]:
         if volume.get("configMap", {}).get("name") != workers["podPolicyConfigMap"]:
             problems.append("the pod policy volume does not name controller.workers.podPolicyConfigMap")
         return problems
+    if len(charted) != 1:
+        return ["the chart rendered no pod policy ConfigMap for controller.workers.podPolicy"]
     [config_map] = charted
     problems = []
     if json.loads(config_map["data"]["pod-policy.json"]) != workers["podPolicy"]:

@@ -185,8 +185,9 @@ kubectl create serviceaccount swarm-controller
 kubectl create role swarm-controller --namespace swarm-pod-proof --verb=create,delete,get,list,watch --resource=pods
 kubectl create rolebinding swarm-controller --namespace swarm-pod-proof --role=swarm-controller \
   --serviceaccount=default:swarm-controller
-python3 -c 'import json, sys, yaml; print(json.dumps(yaml.safe_load(open(sys.argv[1]))["controller"]["workers"]["podPolicy"]))' \
-  "$chart/ci/kind-workers.yaml" | kubectl create configmap swarm-pod-policy --from-file=pod-policy.json=/dev/stdin
+python3 -c 'import json, pathlib, sys, yaml; print(json.dumps(yaml.safe_load(pathlib.Path(sys.argv[1]).read_text())["controller"]["workers"]["podPolicy"]))' \
+  "$chart/ci/kind-workers.yaml" | kubectl create configmap swarm-pod-policy --from-file=pod-policy.json=/dev/stdin \
+  --dry-run=client -o yaml | kubectl apply -f -
 helm upgrade "$release" "$chart" -f "$chart/ci/kind-values.yaml" "${workers[@]}" "${policy_map[@]}" "${api[@]}" \
   --wait --timeout 5m
 kubectl rollout status deployment "$release-controller" --timeout 2m
