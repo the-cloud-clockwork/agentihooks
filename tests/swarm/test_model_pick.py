@@ -96,10 +96,12 @@ def test_an_effort_answer_only_raises_the_default_effort(monkeypatch, harness, s
     assert model_pick.pick(harness, {"model": "auto", "effort": "auto"}, {}, {}).effort == expected
 
 
-def test_a_configured_default_effort_is_the_floor(monkeypatch):
-    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: decision(score=2))
-    picked = model_pick.pick("claude", {"model": "auto", "effort": "auto"}, {}, {"AGENTIHOOKS_CLAUDE_EFFORT": "max"})
-    assert (picked.model, picked.effort) == ("auto", "max")
+@pytest.mark.parametrize(("harness", "top"), [("claude", "max"), ("codex", "xhigh")])
+def test_a_default_effort_at_the_top_launches_it_without_asking(monkeypatch, harness, top):
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("a top default asked the classifier"))
+    lane = {"model": "auto", "effort": "auto"}
+    picked = model_pick.pick(harness, lane, {}, {f"AGENTIHOOKS_{harness.upper()}_EFFORT": top})
+    assert (picked.model, picked.effort, picked.source, picked.confidence) == ("auto", top, "lane-default", None)
 
 
 def test_a_default_effort_the_classifier_cannot_rank_is_kept_without_asking(monkeypatch):

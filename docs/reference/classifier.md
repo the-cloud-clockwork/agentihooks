@@ -188,7 +188,10 @@ description, kind and territory size. The answer only raises effort above the
 launch default (`high` unless `AGENTIHOOKS_CLAUDE_EFFORT` or
 `AGENTIHOOKS_CODEX_EFFORT` names another): Claude launches high or max, Codex high
 or xhigh. The question offers two levels, the launch default and the harness's top
-effort, because every answer at or below the default launches the default. A launch default outside those levels is kept without asking. The
+effort, because every answer at or below the default launches the default; a lower
+default such as `low` therefore launches low or the top, never a level between. A
+default at the top launches without asking, and a launch default outside those levels
+is kept without asking. The
 classifier never picks a model: a lane model of `auto` launches the harness
 default, opus for Claude and gpt-6.1-sol for Codex unless
 `AGENTIHOOKS_CLAUDE_MODEL` or `AGENTIHOOKS_CODEX_MODEL` names another. Explicit

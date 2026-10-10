@@ -28,6 +28,8 @@ def pick(harness: str, lane: dict, task: dict, environ: dict) -> ModelPick:
     floor = model_effort(harness, [], environ)[1]
     if default.effort != "auto" or floor not in levels:
         return default
+    if floor == levels[-1]:
+        return ModelPick(default.model, floor)
     try:
         output = runner.run(
             PURPOSE,

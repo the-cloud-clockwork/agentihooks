@@ -2,8 +2,7 @@ version: 1
 notes: Cases seeded from the classifier decision log. Each case state was rebuilt from its ledger and matched to a state digest
   the decision log recorded before seeding. Expected verdicts were written by a separate reader agent that saw only each case
   state and its question, never the thresholds or the rule. Model pick expectations are the reader's level raised to the lane
-  floor, as the call site raises them. Samples are one live answer per backend to the two level question, recorded when the
-  question replaced the four level one.
+  floor, as the call site raises them. Samples are one live answer per backend to the two level question.
 cases:
 - name: rig-grade-swarm-t58
   state:

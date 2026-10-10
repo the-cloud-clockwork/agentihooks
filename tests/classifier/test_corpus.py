@@ -476,7 +476,7 @@ def test_model_pick_expects_each_reader_level_raised_to_the_floor():
         assert case.expected == {"effort": levels[max(levels.index(reader), levels.index(floor))]}
 
 
-def test_model_pick_replay_holds_ten_of_twelve_cases_on_the_default_backend():
+def test_model_pick_replay_holds_ten_of_twelve_cases_overall_and_on_the_default_backend():
     report = evaluation.evaluate("model-pick").report()
     default = report["backends"][settings.DEFAULT_MODELS[0]]
     assert (report["cases"], default["samples"]) == (12, 12)

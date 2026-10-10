@@ -130,7 +130,7 @@ def test_tick_definitions_reproduce_the_call_site_prompts(packaged, name, params
 @pytest.mark.parametrize("harness", sorted(EFFORTS))
 def test_model_pick_asks_between_the_floor_and_the_top_harness_effort(packaged, harness):
     levels = list(EFFORTS[harness])
-    for floor in levels:
+    for floor in levels[:-1]:
         questions = runner.questions_for(definitions.load("model-pick", environ={}), {"levels": levels, "floor": floor})
         assert [text.split(":")[0] for text in questions["effort"].levels] == [floor, levels[-1]]
 
