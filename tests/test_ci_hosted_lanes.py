@@ -32,10 +32,10 @@ LANE_USERS = {
 }
 EXCLUDED = {
     "coverage-stability.yml": "a manual dispatch runs one short job that only reads dev run data",
-    "pages.yml": "a rare manual docs build; only main deploys",
+    "pages.yml": "a rare manual docs build and deploy; the github-pages environment decides which branches deploy",
     "publish-pypi.yml": "operator release path from main",
     "release.yml": "operator release path; a dry run tags and pushes nothing",
-    "swarm-image.yml": "its jobs run only on a dev push",
+    "swarm-image.yml": "a manual dispatch runs no job; its jobs are gated to a dev push",
 }
 CALLERS = ("test.yml", "proofs.yml")
 REQUIRED = ("pull_request", "merge_group", "pull_request_target")
@@ -195,14 +195,13 @@ def test_direct_dispatches_and_branch_pushes_queue_on_a_lane():
     }
 
 
-@pytest.mark.parametrize("event", ["push", "workflow_dispatch"])
-def test_dev_worker_image_runs_stay_uncapped_because_they_publish_the_deploy_image(event):
+def test_only_the_dev_push_worker_image_build_stays_uncapped_because_it_publishes_the_deploy_image(event):
     github = {"event_name": event, "ref": "refs/heads/dev", "workflow": "Swarm worker image", "run_id": 1000}
-    assert _resolve(_block("swarm-node-image.yml"), **github) == {
-        "group": "swarm-node-image-refs/heads/dev",
-        "queue": "single",
-        "cancel-in-progress": False,
-    }
+    resolved = _resolve(_block("swarm-node-image.yml"), **github)
+    if event == "push":
+        assert resolved == {"group": "swarm-node-image-refs/heads/dev", "queue": "single", "cancel-in-progress": False}
+    else:
+        assert resolved == {"group": "hosted-lane-a", "queue": "max", "cancel-in-progress": False}
 
 
 def test_lane_titles_match_the_workflow_names():
