@@ -42,7 +42,7 @@ class DistributedLaunch:
         self.fleet, self.router = fleet, router
         self.slug = capacity.slug
 
-    def spawn(self, request: SpawnRequest, agent: AgentRecord, terms: LaunchTerms, previous: str = "") -> Launch:
+    def spawn(self, request: SpawnRequest, agent: AgentRecord, terms: LaunchTerms, previous: str) -> Launch:
         admitted = self.controller.admit(replace(agent, account=terms.account), previous)
         grant = self.grants.issue(
             self.slug,
