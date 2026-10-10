@@ -9,13 +9,13 @@ from dataclasses import asdict, dataclass, replace
 from scripts.swarm import lease
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import RedisStore, SwarmError
-from scripts.swarm_v2.auth_context import Registration
+from scripts.swarm_v2.auth_context import MAX_TTL_SECONDS, Registration
 from scripts.swarm_v2.registry import CLOSED, LIVE, FleetRegistry, Scope, session_key
 from scripts.swarm_v2.registry import decode as decode_session
 
 RESERVED, OCCUPIED, ENDED = "reserved", "occupied", "ended"
 WRITE_ATTEMPTS = 5
-MAX_RESERVATION_MS = 900_000
+MAX_RESERVATION_MS = MAX_TTL_SECONDS * 1000
 FROZEN = f"{ROOT}:accounts-frozen"
 CONFLICTS = f"{ROOT}:account-reservation-conflicts"
 
@@ -153,6 +153,8 @@ class AccountCapacity:
                 if held.session != key:
                     raise SwarmError("registration_conflict")
                 return [], [], held
+            if held and held.state == ENDED:
+                raise SwarmError("unregistered")
             if held is None or not held.counts(now):
                 raise SwarmError("reservation_expired")
             raw = pipe.hget(self.sessions, key)

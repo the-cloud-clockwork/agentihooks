@@ -10,6 +10,7 @@ from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import SwarmError
 from scripts.swarm_v2 import accounts
 from scripts.swarm_v2.accounts import OCCUPIED, RESERVED, AccountCapacity, Slot
+from scripts.swarm_v2.auth_context import MAX_TTL_SECONDS
 from scripts.swarm_v2.registry import FleetRegistry, Scope, Session
 from tests.sv2_ctl02_cases import build
 
@@ -392,6 +393,15 @@ def test_reservation_lifetimes_are_bounded_by_the_grant_lifetime(world, ttl):
     slot = world.capacity.reserve(world.launch(FIRST), CAP, ttl)
 
     assert slot.expires_ms == 1000 + ttl
+    assert accounts.MAX_RESERVATION_MS == MAX_TTL_SECONDS * 1000 == 900_000
+
+
+def test_occupying_again_after_the_record_closed_is_unregistered(world):
+    held = world.running(HELD)
+    world.fleet.close(MACHINE, world.session(HELD).session_id, world.tokens[HELD])
+
+    assert refusal(world.capacity.occupy, world.tokens[HELD], MACHINE, world.session(HELD).session_id) == "unregistered"
+    assert accounts.decode(world.rows()[held.holder]) == held
 
 
 def test_a_freeze_landing_mid_reservation_refuses_it(world):
