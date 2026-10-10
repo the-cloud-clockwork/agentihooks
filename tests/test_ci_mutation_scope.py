@@ -263,6 +263,7 @@ def test_an_earlier_branch_counts_only_while_the_head_keeps_every_test_line_it_w
     (tmp_path / "tests" / "test_two.py").write_text("def test_g():\n    assert g() == 2\n")
     git("add", "tests/test_one.py", "tests/test_two.py")
     commit("two.py", "def g():\n    return 2\n")
+    test.write_text("def test_f():\n")
     asked = []
 
     def graded(sha):

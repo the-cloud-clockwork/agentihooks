@@ -22,8 +22,7 @@ def own_bases(root: Path, base: str, head: str, graded=lambda sha: False) -> lis
         return subprocess.check_output(["git", *args], cwd=root).decode().strip()
 
     def keeps_tests(sha: str) -> bool:
-        counts = git("diff", "--numstat", sha, head, "--", "tests").splitlines()
-        return all(line.split("\t")[1] == "0" for line in counts)
+        return "deletion" not in git("diff", "--shortstat", sha, head, "--", "tests")
 
     tip = git("rev-parse", head)
     bases = {git("merge-base", base, head)}
