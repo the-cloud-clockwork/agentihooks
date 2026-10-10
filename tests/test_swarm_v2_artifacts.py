@@ -179,6 +179,7 @@ def test_published_names_are_stable():
     assert (base.ABSENT, base.CORRUPT, base.VERIFIED) == ("absent", "corrupt", "verified")
     assert base.CHUNK == 1 << 20
     assert local.TEMPORARY == ".partial-"
+    assert object_store.PAGES == 10_000
     assert (local.LocalBackend.kind, object_store.ObjectStoreBackend.kind) == KINDS
 
 
@@ -624,6 +625,16 @@ def test_object_store_keys_follow_every_page_and_drop_the_prefix():
         {"Bucket": "bucket", "Prefix": "swarm/p/", "ContinuationToken": "2"},
     ]
     assert backend.keys("none/") == []
+
+
+def test_object_store_listing_is_bounded(monkeypatch):
+    monkeypatch.setattr(object_store, "PAGES", 1)
+    _, backend = object_backend(FakeObjectStore(page_size=2))
+    for key in ("p/a", "p/b", "p/c"):
+        backend.write(key, b"x")
+    with pytest.raises(base.ArtifactError) as raised:
+        backend.keys("p/")
+    assert str(raised.value) == "listing p/ did not finish within 1 pages"
 
 
 def test_truncated_copy_is_refused_and_removed(tmp_path):
