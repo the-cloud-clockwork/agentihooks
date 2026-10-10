@@ -1,0 +1,84 @@
+{
+  "about": "Marker idempotency key vectors shared by agentihooks and agentibrain-kernel; keep both copies identical.",
+  "vectors": [
+    {
+      "name": "recorded key is replayed",
+      "session_id": "sess-vector",
+      "type": "milestone",
+      "content": "shipped the thing",
+      "repeat": 1,
+      "recorded": "5f0c2a9e41b7d36c8e01f4a2b9d7c653",
+      "key": "5f0c2a9e41b7d36c8e01f4a2b9d7c653"
+    },
+    {
+      "name": "no recorded key falls back to the legacy key",
+      "session_id": "sess-vector",
+      "type": "milestone",
+      "content": "shipped the thing",
+      "repeat": 1,
+      "key": "39313391845b5a228f7524a4c72455e3"
+    },
+    {
+      "name": "null recorded key falls back to the legacy key",
+      "session_id": "sess-vector",
+      "type": "milestone",
+      "content": "shipped the thing",
+      "repeat": 1,
+      "recorded": null,
+      "key": "39313391845b5a228f7524a4c72455e3"
+    },
+    {
+      "name": "uppercase recorded key falls back to the legacy key",
+      "session_id": "sess-vector",
+      "type": "milestone",
+      "content": "shipped the thing",
+      "repeat": 1,
+      "recorded": "5F0C2A9E41B7D36C8E01F4A2B9D7C653",
+      "key": "39313391845b5a228f7524a4c72455e3"
+    },
+    {
+      "name": "short recorded key falls back to the legacy key",
+      "session_id": "sess-vector",
+      "type": "milestone",
+      "content": "shipped the thing",
+      "repeat": 1,
+      "recorded": "5f0c2a9e41b7d36c8e01f4a2b9d7c65",
+      "key": "39313391845b5a228f7524a4c72455e3"
+    },
+    {
+      "name": "long recorded key falls back to the legacy key",
+      "session_id": "sess-vector",
+      "type": "milestone",
+      "content": "shipped the thing",
+      "repeat": 1,
+      "recorded": "5f0c2a9e41b7d36c8e01f4a2b9d7c6530",
+      "key": "39313391845b5a228f7524a4c72455e3"
+    },
+    {
+      "name": "dashed uuid recorded key falls back to the legacy key",
+      "session_id": "sess-vector",
+      "type": "milestone",
+      "content": "shipped the thing",
+      "repeat": 1,
+      "recorded": "5f0c2a9e-41b7-d36c-8e01-f4a2b9d7c653",
+      "key": "39313391845b5a228f7524a4c72455e3"
+    },
+    {
+      "name": "numeric recorded key falls back to the legacy key",
+      "session_id": "sess-vector",
+      "type": "milestone",
+      "content": "shipped the thing",
+      "repeat": 1,
+      "recorded": 12345678901234567890123456789012,
+      "key": "39313391845b5a228f7524a4c72455e3"
+    },
+    {
+      "name": "legacy key hashes content cut at 4096 characters",
+      "session_id": "sess-vector",
+      "type": "lesson",
+      "content": "x",
+      "repeat": 5000,
+      "key": "8bb0552dfc0a5a89b00da5e1a7ea9977"
+    }
+  ]
+}
