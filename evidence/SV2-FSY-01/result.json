@@ -52,7 +52,19 @@
       "tests/test_swarm_v2_filesystem.py::test_a_record_naming_an_old_node_path_or_unknown_version_stops_the_launch",
       "tests/test_worker_home.py::test_a_missing_layout_fails_bootstrap_and_leaves_no_attempt"
     ],
-    "data_safety": "Restore never deletes an existing attempt; allocate keeps existing contents; a failed bootstrap removes only the attempt it created"
+    "data_safety": "Restore never deletes an existing attempt; allocate keeps existing contents; a failed bootstrap removes only the attempt it created",
+    "observed": {
+      "run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059486223",
+      "outcomes": [
+        "tests/test_worker_home.py::test_a_missing_layout_fails_bootstrap_and_leaves_no_attempt unit (3.12, 6) job 114234977154: PASSED at 2026-10-10T14:29:42.9535332Z",
+        "tests/test_worker_home.py::test_a_missing_layout_fails_bootstrap_and_leaves_no_attempt unit (3.11, 2) job 114234977205: PASSED at 2026-10-10T14:29:19.3391157Z",
+        "tests/test_swarm_v2_filesystem.py::test_a_record_naming_an_old_node_path_or_unknown_version_stops_the_launch[change0-layout unit (3.11, 4) job 114234977195: PASSED at 2026-10-10T14:28:55.0405683Z",
+        "tests/test_swarm_v2_filesystem.py::test_a_record_naming_an_old_node_path_or_unknown_version_stops_the_launch[change0-layout unit (3.12, 4) job 114234977242: PASSED at 2026-10-10T14:30:45.3644304Z",
+        "tests/test_swarm_v2_filesystem.py::test_a_record_naming_an_old_node_path_or_unknown_version_stops_the_launch[change1-layout unit (3.11, 3) job 114234977140: PASSED at 2026-10-10T14:29:25.4901065Z",
+        "tests/test_swarm_v2_filesystem.py::test_a_record_naming_an_old_node_path_or_unknown_version_stops_the_launch[change1-layout unit (3.12, 7) job 114234977280: PASSED at 2026-10-10T14:29:31.6458566Z"
+      ],
+      "result": "A record with layout_version 2 refused with 'layout version 2 has no reader, so new launches stop'; a record naming an old node's absolute home path refused with 'layout root home must be one relative folder name'; both left the new base empty and raised the counter by one; bootstrap with no layout file refused with 'no layout file is installed, so new launches stop' and left the volume empty"
+    }
   },
   "scope": {
     "plan": "Swarm-v2.md SV2-FSY-01, plan lines 3678-3726",
@@ -78,5 +90,18 @@
     "b": "evidence/SV2-FSY-01/b-result.json",
     "c": "evidence/SV2-FSY-01/c-result.json",
     "manifest": "evidence/SV2-FSY-01/manifest.json"
+  },
+  "test_outputs": {
+    "T-SV2-FSY-01-A": "28 of 28 test runs PASSED across the 3.11 and 3.12 shards of https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059486223",
+    "T-SV2-FSY-01-B": "80 of 80 test runs PASSED across the 3.11 and 3.12 shards of https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059486223",
+    "T-SV2-FSY-01-C": "8 of 8 test runs PASSED across the 3.11 and 3.12 shards of https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059486223"
+  },
+  "completion_evidence": {
+    "line": "3722: record implemented interfaces, supported versions, test outputs, remaining limitations, and the rollback rehearsal",
+    "implemented_interfaces": "interfaces",
+    "supported_versions": "supported_versions",
+    "test_outputs": "test_outputs, with every per test outcome in the a, b and c case files",
+    "remaining_limitations": "remaining_limitations",
+    "rollback_rehearsal": "rollback_rehearsal, with observed outcomes"
   }
 }
