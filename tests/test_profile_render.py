@@ -157,6 +157,23 @@ def test_swarm_roles_render_only_the_task_browser(world, role, target):
     assert not settings["enabledPlugins"].get("playwright@claude-plugins-official", False)
 
 
+def test_codex_engineer_home_lists_the_serena_opt_in_tools(world):
+    from scripts.profiles import render
+
+    root = world["bundle"] / "profiles" / "engineer"
+    router = "http://127.0.0.1:8643/mcp"
+    _write(root / "profile.yml", "name: engineer\nextends: [package:engineer]\n")
+    _write(root / ".claude" / ".mcp.json", json.dumps({"mcpServers": {"serena": {"type": "http", "url": router}}}))
+    _write(
+        root / ".codex" / "mcp.overrides.toml",
+        f'[mcpServers.serena]\ntype = "http"\nurl = "{router}?tools=read_file,search_for_pattern"\n',
+    )
+    claude = json.loads((render.render("claude", "engineer") / ".claude.json").read_text())["mcpServers"]
+    codex = tomllib.loads((render.render("codex", "engineer") / "config.toml").read_text())["mcp_servers"]
+    assert codex["serena"]["url"] == f"{router}?tools=read_file,search_for_pattern"
+    assert claude["serena"]["url"] == router
+
+
 @pytest.mark.parametrize("target", ["claude", "codex"])
 def test_a_role_overlay_keeps_the_logged_in_extension_browser(world, target):
     from scripts.profiles import render
