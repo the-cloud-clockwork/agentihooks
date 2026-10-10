@@ -43,6 +43,17 @@ def register(mcp):
         Returns:
             JSON with success status and message_id.
         """
+        from scripts.swarm_v2.masters_channel import CHANNEL_PREFIX, reserved
+
+        if reserved(channel):
+            slug = channel.removeprefix(CHANNEL_PREFIX)
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": f"{channel} is a masters channel: master seats post with "
+                    f"agentihooks swarm {slug} masters-channel say",
+                }
+            )
         try:
             from hooks.context.broadcast import create_broadcast
 
