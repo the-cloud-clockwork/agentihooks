@@ -105,9 +105,8 @@ class ExecutionsAPI:
             replay = _order(self._record(self.store.redis, execution_id), body["renewal_sequence"], fingerprint)
             if replay:
                 return replay
-            fence = RenewalFence(
-                self.store.key(self.slug, "heartbeat-sequence", execution_id), body["renewal_sequence"]
-            )
+            marker = self.store.key(self.slug, "heartbeat-sequence", execution_id)
+            fence = RenewalFence(marker, body["renewal_sequence"], fingerprint)
             claim = _task(lambda: self.tasks.renew(token, body["authority"]["task_generation"], self.lease_ms, fence))
             return self._commit(claim, body, fingerprint)
 

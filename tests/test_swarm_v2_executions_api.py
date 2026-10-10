@@ -154,6 +154,8 @@ def test_a_heartbeat_renews_its_own_lease_from_server_time_only(world, worker):
     assert record["resources"] == resources
     assert (record["renewal_sequence"], record["state"], record["observed_at"]) == (5, "working", body["observed_at"])
     assert (record["archive_watermark"], record["accepted_at_ms"], record["ack"]) == (12, 1040, ack)
+    marker = world.store.key("fixture", "heartbeat-sequence", agent.execution_id)
+    assert fence_of(world, marker) == {"sequence": 5, "digest": record["digest"]}
 
 
 def test_a_forged_url_subject_cannot_touch_another_execution(world, worker):
@@ -345,7 +347,7 @@ def test_a_heartbeat_after_an_expired_lock_cannot_move_the_sequence_backward(wor
     assert stored(world, agent)["renewal_sequence"] == 9
 
 
-def test_the_same_heartbeat_sent_twice_after_an_expired_lock_renews_once(world, worker, monkeypatch):
+def test_the_same_heartbeat_sent_twice_after_an_expired_lock_is_recorded_once(world, worker, monkeypatch):
     agent, token = worker
     lock = world.store.key("fixture", "heartbeat-lock", agent.execution_id)
 
@@ -355,8 +357,7 @@ def test_the_same_heartbeat_sent_twice_after_an_expired_lock_renews_once(world, 
 
     seen = during_renewal(world, monkeypatch, after_expiry)
     status, ack = world.put(agent.execution_id, token, world.beat(agent, 8))
-    assert (seen[0][0], seen[0][1]["error_class"]) == (409, "revision_conflict")
-    assert (status, stored(world, agent)["ack"]) == (200, ack)
+    assert seen[0] == (status, ack) == (200, stored(world, agent)["ack"])
 
 
 def test_a_heartbeat_never_releases_a_lock_another_heartbeat_holds(world, worker, monkeypatch):
@@ -405,6 +406,10 @@ def test_a_heartbeat_commit_that_keeps_conflicting_writes_nothing(world, worker,
     assert refusal["message"] == "heartbeats kept changing; the heartbeat was not recorded"
     assert len(attempts) == 5
     assert stored(world, agent) is None
+    monkeypatch.setattr(world.store.redis, "pipeline", real)
+    world.clock[0] += 10
+    status, ack = world.put(agent.execution_id, token, world.beat(agent, 1))
+    assert (status, ack["lease_deadline_ms"], stored(world, agent)["ack"]) == (200, 1110, ack)
 
 
 def test_the_command_watermark_counts_this_execution_commands(world, worker):
@@ -525,8 +530,9 @@ def test_each_refusal_names_its_cause(world, worker):
     assert message(agent.execution_id, token, world.beat(agent, 4)) == (
         "heartbeat renewal sequence is not newer than the accepted one"
     )
+    leaderless = world.beat(agent, 6)
     world.controller.held = None
-    assert message(agent.execution_id, token, world.beat(agent, 6)) == "the controller lease is absent"
+    assert message(agent.execution_id, token, leaderless) == "the controller lease is absent"
 
 
 def test_a_repeated_registration_reports_the_accepted_archive_watermark(world, worker):
@@ -558,21 +564,43 @@ def test_server_deadlines_render_as_utc_with_milliseconds():
     assert _timestamp(7) == "1970-01-01T00:00:00.007Z"
 
 
-def test_a_fenced_renewal_refuses_a_sequence_that_is_not_newer(world, worker):
+def test_server_deadlines_render_as_utc_on_a_host_in_another_timezone(monkeypatch):
+    import time
+
+    from scripts.swarm_v2.api.executions import _timestamp
+
+    monkeypatch.setenv("TZ", "Asia/Kolkata")
+    time.tzset()
+    try:
+        assert _timestamp(1_791_630_892_123) == "2026-10-10T11:14:52.123Z"
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
+def fence_of(world, fence):
+    return json.loads(world.store.redis.get(fence))
+
+
+def test_a_fenced_renewal_refuses_an_older_or_altered_sequence_and_admits_its_own_retry(world, worker):
     _, token = worker
     fence = world.store.key("fixture", "fence-probe")
     world.clock[0] += 5
-    claim = world.tasks.renew(token, 1, 100, RenewalFence(fence, 5))
+    claim = world.tasks.renew(token, 1, 100, RenewalFence(fence, 5, "a"))
     world.clock[0] += 10
-    with pytest.raises(SwarmError) as error:
-        world.tasks.renew(token, 1, 100, RenewalFence(fence, 5))
-    assert str(error.value) == "out_of_order"
-    assert (world.tasks.current("task"), world.store.redis.get(fence)) == (claim, "5")
-    renewed = world.tasks.renew(token, 1, 100, RenewalFence(fence, 6))
-    assert (renewed.lease_deadline_ms, world.store.redis.get(fence)) == (1115, "6")
+    for sequence, digest in ((5, "b"), (4, "a")):
+        with pytest.raises(SwarmError) as error:
+            world.tasks.renew(token, 1, 100, RenewalFence(fence, sequence, digest))
+        assert str(error.value) == "out_of_order"
+    assert (world.tasks.current("task"), fence_of(world, fence)) == (claim, {"sequence": 5, "digest": "a"})
+    retried = world.tasks.renew(token, 1, 100, RenewalFence(fence, 5, "a"))
+    assert (retried.lease_deadline_ms, fence_of(world, fence)) == (1115, {"sequence": 5, "digest": "a"})
     world.clock[0] += 1
-    assert world.tasks.renew(token, 1, 100).lease_deadline_ms == 1116
-    assert world.store.redis.get(fence) == "6"
+    renewed = world.tasks.renew(token, 1, 100, RenewalFence(fence, 6, "c"))
+    assert (renewed.lease_deadline_ms, fence_of(world, fence)) == (1116, {"sequence": 6, "digest": "c"})
+    world.clock[0] += 1
+    assert world.tasks.renew(token, 1, 100).lease_deadline_ms == 1117
+    assert fence_of(world, fence) == {"sequence": 6, "digest": "c"}
 
 
 def test_a_fenced_renewal_at_an_unchanged_deadline_still_advances_its_fence(world, worker):
@@ -582,8 +610,8 @@ def test_a_fenced_renewal_at_an_unchanged_deadline_still_advances_its_fence(worl
     journal = world.tasks.journal("task")
     assert world.tasks.renew(token, 1, 100) == claim
     assert world.tasks.journal("task") == journal
-    assert world.tasks.renew(token, 1, 100, RenewalFence(fence, 0)) == claim
-    assert world.store.redis.get(fence) == "0"
+    assert world.tasks.renew(token, 1, 100, RenewalFence(fence, 0, "a")) == claim
+    assert fence_of(world, fence) == {"sequence": 0, "digest": "a"}
     assert [row["event"] for row in world.tasks.journal("task")] == ["admitted", "renewed"]
 
 
