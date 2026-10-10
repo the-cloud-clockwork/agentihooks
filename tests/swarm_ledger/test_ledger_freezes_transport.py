@@ -45,21 +45,24 @@ def test_the_live_dispatcher_credential_freezes_focuses_and_unfreezes_at_full_au
     assert freezes() == [("focus", "kind:code", DISPATCHER)]
 
 
+def refused_verbs(name):
+    assert core.sync(SLUG, ops=[operation("freeze_set", verb="freeze", target="lane:eng")])[1] == []
+    with pinned(name):
+        ops = [
+            operation("freeze_set", by=name, verb="freeze", target="lane:ci"),
+            operation("freeze_set", by=name, verb="focus", target="kind:code"),
+            operation("freeze_clear", by=name, target="lane:eng"),
+        ]
+        assert ledger.request(SLUG, ops)["rejected"] == [op["id"] for op in ops]
+    assert freezes() == [("freeze", "lane:eng", "operator")]
+
+
 @pytest.mark.parametrize("autonomy", ["manual", "assist", "delegate"])
 def test_the_live_dispatcher_credential_below_full_autonomy_is_refused(swarm, autonomy):
     swarm.update(SLUG, autonomy=autonomy)
-    with pinned(DISPATCHER):
-        ops = [
-            operation("freeze_set", by=DISPATCHER, verb="freeze", target="lane:ci"),
-            operation("freeze_set", by=DISPATCHER, verb="focus", target="kind:code"),
-        ]
-        assert ledger.request(SLUG, ops)["rejected"] == [op["id"] for op in ops]
-    assert freezes() == []
+    refused_verbs(DISPATCHER)
 
 
 def test_an_engineer_credential_at_full_autonomy_is_refused(swarm):
     swarm.update(SLUG, autonomy="full")
-    with pinned(ENGINEER):
-        op = operation("freeze_set", by=ENGINEER, verb="focus", target="kind:code")
-        assert ledger.request(SLUG, [op])["rejected"] == [op["id"]]
-    assert freezes() == []
+    refused_verbs(ENGINEER)
