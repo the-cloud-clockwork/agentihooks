@@ -160,11 +160,11 @@ def runtime_directory(attempt, child):
     raise AssertionError("supervisor did not create a launch context")
 
 
-def assert_stale_acknowledgement_rejected(attempt, root, budget):
+def assert_stale_acknowledgement_rejected(attempt, root, checkpoint_seconds):
     receipt = root / "exporter.checkpoint.json"
-    assert receipt.exists(), "no acknowledgement reached the supervisor before its checkpoint wait ended"
+    assert receipt.exists(), "no acknowledgement was written before the checkpoint wait ended"
     landed = receipt.stat().st_mtime - (root / "quiesced.json").stat().st_mtime
-    assert landed < budget, f"acknowledgement landed {landed:.3f} s after quiesce, past the {budget} s wait"
+    assert landed < checkpoint_seconds, f"acknowledgement landed {landed:.3f} s after quiesce, past the wait"
     acknowledgement = json.loads(receipt.read_text())
     scope = json.loads((root / "context.json").read_text())
     assert checkpoint(attempt, acknowledgement, scope) is None
