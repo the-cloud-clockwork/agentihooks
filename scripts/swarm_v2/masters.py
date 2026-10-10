@@ -54,7 +54,7 @@ def assign(phases: list[str], seat_list: list[str], previous: dict[str, str], kn
             owners[phase] = min(seat_list, key=lambda s: (_load(owners, s), rank[s]))
     share = len(phases) // len(seat_list)
     for added in [s for s in seat_list if s not in known]:
-        while _load(owners, added) < share:
+        for _ in range(share - _load(owners, added)):
             busiest = max(seat_list, key=lambda s: (_load(owners, s), -rank[s]))
             owners[[p for p in phases if owners[p] == busiest][-1]] = added
     return {p: owners[p] for p in phases}

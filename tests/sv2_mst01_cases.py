@@ -1,5 +1,6 @@
 import hashlib
 import json
+from collections import Counter
 from pathlib import Path
 
 from scripts.inbox.store import InboxStore
@@ -98,11 +99,29 @@ def _recovery(world):
     }
 
 
+SPEC = {
+    "a": lambda o: (
+        set(Counter(o["owners"].values()).values()) == {2}
+        and o["after_task_comment"] == {masters.seats(SLUG, 3)[1]: 1, **{a: 0 for a in masters.seats(SLUG, 3)[::2]}}
+        and o["after_unaddressed_chat"][masters.seats(SLUG, 1)[0]] == 1
+    ),
+    "b": lambda o: (
+        o["after_comment_on_empty_owner_seat"][masters.seats(SLUG, 1)[0]] == 1
+        and None not in (o["count_zero"], o["count_text"])
+        and o["count_kept"] == INPUTS["master_count"]
+    ),
+    "c": lambda o: (
+        o["moved"] == [p for p, s in o["owners_with_three_seats"].items() if s == masters.seats(SLUG, 3)[2]]
+        and o["owners_after_restart"] == o["owners_after_removing_seat_three"]
+    ),
+}
+
+
 def run_case(case):
     observed = {"a": _positive, "b": _rejection, "c": _recovery}[case](World())
     return {
         "case": f"T-SV2-MST-01-{case.upper()}",
-        "state": "passed",
+        "state": "passed" if SPEC[case](observed) else "failed",
         "evidence_class": EVIDENCE_CLASS,
         "input_sha256": hashlib.sha256(FIXTURE.read_bytes()).hexdigest(),
         "observed": observed,

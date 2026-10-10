@@ -11,6 +11,7 @@ from scripts.swarm_v2 import masters
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
+EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-MST-01"
 SLUG = "sw"
 LEAD = f"master@{SLUG}"
 SECOND = f"master-2@{SLUG}"
@@ -430,9 +431,6 @@ def test_a_merged_pull_request_left_open_reports_both_notices(swarm):
     ]
 
 
-EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-MST-01"
-
-
 @pytest.mark.parametrize("case", ["a", "b", "c"])
 def test_package_cases_match_their_committed_evidence(case):
     from tests.sv2_mst01_cases import run_case
@@ -441,7 +439,7 @@ def test_package_cases_match_their_committed_evidence(case):
     assert first == second
     committed = json.loads((EVIDENCE / f"{case}-result.json").read_text(encoding="utf-8"))
     assert committed == {"case": f"T-SV2-MST-01-{case.upper()}", "independent_runs": 2, "observed": first}, json.dumps(
-        first, sort_keys=True
+        first, indent=2, sort_keys=True
     )
 
 
@@ -455,3 +453,43 @@ def test_the_manifest_names_the_hash_of_every_case_input():
         for path in ["tests/fixtures/swarm_v2/master-seats.json"]
     }
     assert manifest["cases"] == ["T-SV2-MST-01-A", "T-SV2-MST-01-B", "T-SV2-MST-01-C"]
+
+
+def test_the_package_record_carries_its_completion_evidence():
+    record = json.loads((EVIDENCE / "result.json").read_text(encoding="utf-8"))
+    assert (record["package"], record["package_complete"], record["integration_gate"]) == ("SV2-MST-01", False, "G10")
+    assert set(record["states"]) == {"observed", "committed", "externally_verified"}
+    for name in ("interfaces", "supported_versions", "authoritative_objects", "remaining_limitations", "validation"):
+        assert record[name], name
+    assert record["cases"] == {
+        **{case: f"evidence/SV2-MST-01/{case}-result.json" for case in "abc"},
+        "manifest": "evidence/SV2-MST-01/manifest.json",
+    }
+    path, name = record["rollback_rehearsal"]["test"].split("::")
+    assert path == "tests/test_swarm_v2_master_seats.py"
+    assert f"\ndef {name}(" in Path(__file__).read_text(encoding="utf-8")
+
+
+def test_every_boundary_obligation_names_tests_that_exist():
+    record = json.loads((EVIDENCE / "result.json").read_text(encoding="utf-8"))
+    assert set(record["obligations"]) == {
+        "input_preparation",
+        "output_contract",
+        "rejection_contract",
+        "recovery_contract",
+        "mutation_scope",
+    }
+    source = Path(__file__).read_text(encoding="utf-8")
+    for name, obligation in record["obligations"].items():
+        assert obligation["met_by"], name
+        for test in obligation.get("tests", []):
+            path, function = test.split("::")
+            assert path == "tests/test_swarm_v2_master_seats.py"
+            assert f"\ndef {function}(" in source, test
+
+
+def test_an_added_seat_that_took_a_new_phase_takes_only_what_its_share_still_lacks():
+    third = f"master-3@{SLUG}"
+    previous = {"p1": LEAD, "p2": LEAD, "p3": SECOND}
+    owners = masters.assign(PHASES, [LEAD, SECOND, third], previous, [LEAD, SECOND])
+    assert owners == {"p1": LEAD, "p2": LEAD, "p3": SECOND, "p4": third}

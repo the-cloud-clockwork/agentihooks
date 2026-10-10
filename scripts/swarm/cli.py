@@ -635,7 +635,7 @@ def scaling_value(key, value):
         raise SwarmError(f"{key} takes a number, the one minute load per CPU") from None
 
 
-def _master_counts(pairs):
+def _split_master_pairs(pairs):
     """The master seat count lives beside the swarm config: checked with the other pairs, stored after them."""
     split = [(pair, *pair.partition("=")) for pair in pairs]
     counts = [masters.count_of(value) for _, key, _, value in split if key == "masters"]
@@ -649,7 +649,7 @@ def _store_master_counts(store, slug, counts):
 
 def cmd_set(store, args):
     changes, lanes = {}, {key: dict(value) for key, value in store.config(args.slug).lanes.items()}
-    counts, pairs = _master_counts(args.pairs)
+    counts, pairs = _split_master_pairs(args.pairs)
     for pair in pairs:
         key, _, value = pair.partition("=")
         if key in LANE_KEYS:
