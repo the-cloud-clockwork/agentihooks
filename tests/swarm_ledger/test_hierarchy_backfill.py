@@ -141,6 +141,27 @@ def test_unphased_tasks_get_one_reported_standalone_phase(tmp_path):
     assert len(saved["plans"]) == 2
 
 
+def test_the_standalone_phase_carries_every_phase_field_so_the_next_write_succeeds(tmp_path):
+    repo = repository(tmp_path)
+    doc = repo.export_document(SLUG)
+    doc["tasks"].append({"id": "loose1", "title": "Loose"})
+    repo.import_document(SLUG, doc, token=repo.token(SLUG), replace=True)
+    hierarchy_backfill.backfill(repo, SLUG, "planner", apply=True)
+    identifier = f"standalone-{hierarchy_backfill.digest(SLUG)}"
+    (phase,) = [row for row in repo.export_document(SLUG)["phases"] if row["id"] == identifier]
+    assert phase == {
+        "id": identifier,
+        "title": "Standalone",
+        "description": "Tasks that belonged to no phase, moved here by the hierarchy backfill so every task sits under one plan.",
+        "comments": [],
+        "done": False,
+        "plan": f"plans/{identifier}",
+    }
+    written, rejected = repo.apply_ops(SLUG, ops=[{"op": "add", "id": "m1", "thread": "chat", "text": "hello"}])
+    assert rejected == []
+    assert [m["id"] for m in written["chat"]] == ["m1"]
+
+
 def test_recorded_ledger_copy_reports_the_known_conflicts_then_has_zero_drift(tmp_path):
     repo = repository(tmp_path)
     doc = repo.export_document(SLUG)
