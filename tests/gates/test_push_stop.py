@@ -580,3 +580,88 @@ def test_a_pushed_head_with_dirty_files_never_runs_the_gate(rig):
     decision = rig.stop()
     assert (decision.allowed, decision.reason) == (False, TEMPLATE)
     assert not log.exists()
+
+
+def refuse_the_push(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    other = rig.root / "other"
+    git(rig.seed, "worktree", "add", "-b", "elsewhere", str(other), "origin/dev")
+    (other / "theirs").write_text("theirs")
+    git(other, "add", "theirs")
+    git(other, "commit", "-m", "theirs")
+    git(other, "push", "origin", f"HEAD:refs/heads/{BRANCH}")
+    rig.commit()
+    return git(other, "rev-parse", "HEAD")
+
+
+def wait_on(rig, on, at=NOW, until=NOW + 60_000):
+    from scripts.swarm import idle
+
+    idle.declare_wait(rig.store.redis, SLUG, ME, until, "waiting", at, on=on)
+
+
+def with_task(rig, state):
+    rig.ledger.state = lambda slug: {
+        "tasks": [rig.ledger.task, {"id": "t2", "state": state}],
+        "_meta": {"events": rig.ledger.events},
+    }
+
+
+@pytest.mark.parametrize("state", ["open", "claimed", "pr"])
+def test_a_checked_wait_on_an_open_task_lets_a_refused_push_stop(rig, state):
+    theirs = refuse_the_push(rig)
+    with_task(rig, state)
+    wait_on(rig, {"kind": "task", "target": "t2"})
+    assert rig.stop().allowed
+    assert rig.remote_head() == theirs
+    assert rig.inbox() == []
+
+
+def test_a_checked_wait_on_an_open_task_lets_an_unpushed_commit_stop(rig, monkeypatch):
+    monkeypatch.setattr(push_stop, "push", lambda tree: False)
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    rig.commit()
+    with_task(rig, "claimed")
+    wait_on(rig, {"kind": "task", "target": "t2"})
+    assert rig.stop().allowed
+    assert rig.remote_head() == ""
+
+
+def test_an_unpushed_commit_with_no_wait_is_refused(rig):
+    refuse_the_push(rig)
+    with_task(rig, "claimed")
+    assert rig.stop().reason == TEMPLATE
+
+
+@pytest.mark.parametrize("state", ["done", "blocked"])
+def test_a_wait_on_a_finished_task_still_refuses_the_stop(rig, state):
+    refuse_the_push(rig)
+    with_task(rig, state)
+    wait_on(rig, {"kind": "task", "target": "t2"})
+    assert rig.stop().reason == TEMPLATE
+    assert rig.inbox() == [TEMPLATE]
+
+
+@pytest.mark.parametrize(
+    "on",
+    [None, {"kind": "checks", "target": "https://github.com/o/r/pull/7"}, {"kind": "task", "target": "t9"}],
+)
+def test_a_bare_wait_another_kind_or_a_missing_task_still_refuses_the_stop(rig, on):
+    refuse_the_push(rig)
+    with_task(rig, "claimed")
+    wait_on(rig, on)
+    assert rig.stop().reason == TEMPLATE
+
+
+def test_a_wait_that_has_ended_still_refuses_the_stop(rig):
+    refuse_the_push(rig)
+    with_task(rig, "claimed")
+    wait_on(rig, {"kind": "task", "target": "t2"}, at=NOW - 120_000, until=NOW)
+    assert rig.stop().reason == TEMPLATE
+
+
+def test_a_wait_during_a_ledger_outage_still_refuses_the_stop(rig):
+    rig.gate._ledger = lambda: DownLedger({})
+    (rig.tree / "new").write_text("new\n")
+    wait_on(rig, {"kind": "task", "target": "t2"})
+    assert rig.stop().reason == TEMPLATE
