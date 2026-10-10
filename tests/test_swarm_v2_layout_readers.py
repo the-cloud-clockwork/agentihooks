@@ -139,15 +139,9 @@ def test_health_probe_reads_the_home_runtime_and_scratch_the_layout_names(tmp_pa
     assert seen["HERDR_CONFIG_PATH"] == str(root / "herdr.toml")
 
 
-def test_health_probe_report_follows_the_recorded_layout(tmp_path, monkeypatch):
+def test_health_probe_report_follows_the_recorded_layout(tmp_path):
     attempt = moved_attempt(tmp_path)
-    monkeypatch.setattr(worker_health, "incarnation", lambda execution: None)
-    checks = worker_health.local_checks(
-        worker_health.Probe(attempt, "codex", {"PATH": ""}),
-        filesystem.recorded(attempt, json.loads((attempt / "execution.json").read_text())),
-        "startup",
-        None,
-    )
+    checks = worker_health.evaluate(worker_health.Probe(attempt, "codex", {"PATH": ""}), "startup")["checks"]
     assert checks["home"] is None
     assert checks["runtime_paths"] is None
 
