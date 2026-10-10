@@ -6,7 +6,7 @@
     "evidence_class": "mocked Redis and server clock; SQLite fixture ledger; signed fixture grants",
     "input_sha256": "d398bb2096487a5e0fe517c41511bc1e409b3e90578ca17c1bb24f17c8b92683",
     "observed": {
-      "ledger_revision_conflicts_total": 1,
+      "ledger_revision_conflicts_total": 0,
       "replayed": [
         200,
         true

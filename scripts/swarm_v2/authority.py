@@ -22,7 +22,7 @@ local expected = cjson.decode(ARGV[4])
 if leader.owner ~= expected.owner or leader.epoch ~= expected.epoch or leader.expires_at <= now then
     return 'controller_stale'
 end
-if ARGV[3] ~= 'replayed' and tonumber(ARGV[7]) <= now then return 'worker_expired' end
+if ARGV[7] ~= '' and tonumber(ARGV[7]) <= now then return 'worker_expired' end
 if (redis.call('GET', KEYS[1]) or '') ~= ARGV[2] then return 'stale_generation' end
 local current = cjson.decode(ARGV[1])
 if ARGV[3] == 'admitted' and current.lease_deadline_ms <= now then return 'stale_generation' end
@@ -31,8 +31,15 @@ if ARGV[3] ~= 'admitted' and ARGV[3] ~= 'replayed' then
     if previous.state ~= 'active' or previous.lease_deadline_ms <= now then return 'stale_generation' end
 end
 if ARGV[8] ~= '' then
-    if tonumber(redis.call('GET', KEYS[5]) or '-1') >= tonumber(ARGV[8]) then return 'out_of_order' end
-    redis.call('SET', KEYS[5], ARGV[8])
+    local sequence = tonumber(ARGV[8])
+    local seen = redis.call('GET', KEYS[5])
+    if seen then
+        local fence = cjson.decode(seen)
+        if fence.sequence > sequence or (fence.sequence == sequence and fence.digest ~= ARGV[9]) then
+            return 'out_of_order'
+        end
+    end
+    redis.call('SET', KEYS[5], cjson.encode({sequence = sequence, digest = ARGV[9]}))
 end
 redis.call('SET', KEYS[1], ARGV[1])
 if ARGV[5] ~= '' then redis.call('RPUSH', KEYS[2], ARGV[5]) end
@@ -62,6 +69,7 @@ class TaskClaim:
 class RenewalFence:
     key: str
     sequence: int
+    digest: str
 
 
 class TaskAuthority:
@@ -268,7 +276,7 @@ class TaskAuthority:
         current: TaskClaim,
         previous: TaskClaim | None,
         event: str,
-        worker_deadline_ms: int = 0,
+        worker_deadline_ms: int | str = "",
         fence: RenewalFence | None = None,
     ) -> None:
         task = current.task_id
@@ -296,7 +304,7 @@ class TaskAuthority:
             json.dumps({"event": "fenced", "claim": asdict(fenced)}) if fenced else "",
             json.dumps({"event": event, "claim": asdict(current)}) if event != "replayed" else "",
             worker_deadline_ms,
-            fence.sequence if fence else "",
+            *((fence.sequence, fence.digest) if fence else ("",)),
         )
         result = pipe.execute()[0]
         if result == "worker_expired":

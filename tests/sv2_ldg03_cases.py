@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
-from scripts.swarm_v2.api.tasks import TasksAPI, revision_conflicts_total
+from scripts.swarm_v2.api.tasks import TasksAPI, ledger_revision_conflicts_total
 from tests import sv2_ldg02_cases
 
 FIXTURE = Path(__file__).parent / "fixtures/swarm_v2/task-revision.json"
@@ -21,7 +21,8 @@ class World(sv2_ldg02_cases.World):
         from tests.swarm_ledger.test_tasks import core, new_ledger
 
         super().__init__(monkeypatch)
-        self.ledger = SQLiteLedgerRepository(folder / "ledger.sqlite", core)
+        self.folder, self.core = folder, core
+        self.ledger = self.reopened()
         content = {
             "title": "Task revision fixture",
             "overview": "Stale workers never overwrite a newer specification",
@@ -37,6 +38,9 @@ class World(sv2_ldg02_cases.World):
         self.ledger.create_document(SLUG, document, meta)
         self.tasks_api = TasksAPI(self.grants, self.tasks, self.ledger)
         self.edits = 0
+
+    def reopened(self):
+        return SQLiteLedgerRepository(self.folder / "ledger.sqlite", self.core)
 
     def worker(self, seat=sv2_ldg02_cases.INPUTS["seat"], task=TASK, previous=""):
         agent, token = self.start(seat, task, previous)
@@ -99,7 +103,7 @@ def _positive(world):
         "task": {name: task.get(name) for name in ("description", "state", "pr_url", "claimed_by")}
         | {"claimed_by": task["claimed_by"] == agent.name},
         "comments": [entry["text"] for entry in task["comments"]],
-        "ledger_revision_conflicts_total": revision_conflicts_total(world.store, SLUG),
+        "ledger_revision_conflicts_total": ledger_revision_conflicts_total(world.store, SLUG),
     }
 
 
@@ -120,7 +124,7 @@ def _rejection(world):
         "operator_fields": fields,
         "global_caps": refusal(caps),
         "other_task_read": [*refusal(other), sorted(other[1])],
-        "ledger_revision_conflicts_total": revision_conflicts_total(world.store, SLUG),
+        "ledger_revision_conflicts_total": ledger_revision_conflicts_total(world.store, SLUG),
     }
 
 
@@ -129,7 +133,7 @@ def _recovery(world):
     first = world.progress(token, "progress-1", INPUTS["progress"][0])
     second = world.progress(token, "progress-2", INPUTS["progress"][1])
     ledger = copy.deepcopy(world.document())
-    restarted = TasksAPI(world.grants, world.tasks, world.ledger)
+    restarted = TasksAPI(world.grants, world.tasks, world.reopened())
     replayed = world.progress(token, "progress-1", INPUTS["progress"][0], api=restarted)
     reused = world.progress(token, "progress-1", INPUTS["progress"][1], api=restarted)
     assert replayed == first
@@ -153,7 +157,7 @@ def _recovery(world):
             "read": read_only[0],
             "write": [*refusal(blocked), blocked[1]["current_revision"] == current],
         },
-        "ledger_revision_conflicts_total": revision_conflicts_total(world.store, SLUG),
+        "ledger_revision_conflicts_total": ledger_revision_conflicts_total(world.store, SLUG),
     }
 
 
