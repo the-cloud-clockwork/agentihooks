@@ -8,6 +8,7 @@ from scripts.swarm.store import PREFIX
 from scripts.swarm_v2.masters import MasterError, MasterSeats, seats
 
 CHANNEL_PREFIX = "masters."
+SWARM = "swarm"
 
 
 @dataclass(frozen=True)
@@ -46,9 +47,14 @@ class MastersChannel:
     def post(self, slug: str, name: str, text: str, at: float) -> Post:
         if not text.strip():
             raise MasterError("a masters channel post needs text")
-        held = self.member(slug, name)
-        number = self.redis.incr(f"{self.key(slug)}:count")
-        entry = Post(number, held, name, text, at)
+        return self._append(slug, self.member(slug, name), name, text, at)
+
+    def announce(self, slug: str, text: str, at: float) -> Post:
+        """A post by the swarm tick itself, which holds no seat."""
+        return self._append(slug, SWARM, SWARM, text, at)
+
+    def _append(self, slug: str, seat: str, by: str, text: str, at: float) -> Post:
+        entry = Post(self.redis.incr(f"{self.key(slug)}:count"), seat, by, text, at)
         self.redis.rpush(self.key(slug), json.dumps(asdict(entry)))
         return entry
 

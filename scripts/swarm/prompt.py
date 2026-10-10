@@ -10,6 +10,7 @@ from scripts.swarm import naming, plan_review
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.store import ASSIST, DELEGATE, DISPATCH, FULL, MANUAL, MASTER
 from scripts.swarm_ledger import ledger_close, ledger_kinds, plan_read
+from scripts.swarm_v2 import masters
 
 CLOSES = "The swarm then closes this session; stop working."
 OVERLAP_LINE = (
@@ -69,6 +70,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         "You troubleshoot with read only diagnostics, plan with the operator and configure the swarm, the ledger "
         "and the operator's environment with him through the agentihooks commands and tools. You never edit code or config "
         "files in a repository, commit, merge or claim a task: engineers do that.",
+        *masters.seat_lines(slug, task),
     ]
     lines += [
         *priming_lines(task),

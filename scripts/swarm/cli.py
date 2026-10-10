@@ -123,7 +123,7 @@ from scripts.swarm.store import (
 )
 from scripts.swarm.tick import agent_status, primed, skip_refused, spawn_holds, tick
 from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, ledger_workspace, plan_shape
-from scripts.swarm_v2 import masters
+from scripts.swarm_v2 import master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
 
 SETTABLE = {
@@ -647,9 +647,22 @@ def _store_master_counts(store, slug, counts):
         masters.MasterSeats(store.redis).set_count(slug, count)
 
 
+def _master_rules(pairs):
+    """The rule the master count follows, checked with the other pairs and stored after them like the count."""
+    split = [(pair, *pair.partition("=")) for pair in pairs]
+    rules = [master_scale.rule_of(value) for _, key, _, value in split if key == "master-per"]
+    return rules, [pair for pair, key, _, _ in split if key != "master-per"]
+
+
+def _store_master_rules(store, slug, rules):
+    for rule in rules:
+        master_scale.set_rule(store.redis, slug, rule)
+
+
 def cmd_set(store, args):
     changes, lanes = {}, {key: dict(value) for key, value in store.config(args.slug).lanes.items()}
     counts, pairs = _master_counts(args.pairs)
+    rules, pairs = _master_rules(pairs)
     for pair in pairs:
         key, _, value = pair.partition("=")
         if key in LANE_KEYS:
@@ -679,13 +692,14 @@ def cmd_set(store, args):
             continue
         if key not in SETTABLE or not value.isdigit():
             raise SwarmError(
-                f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, autonomy={'|'.join(AUTONOMY)}, "
+                f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, master-per=N|hive|off, autonomy={'|'.join(AUTONOMY)}, "
                 f"effort-min=E, effort-max=E, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB "
                 f"or {', '.join(LANE_KEYS)}=<value>"
             )
         changes[SETTABLE[key]] = int(value)
     config = store.update(args.slug, **changes)
     _store_master_counts(store, args.slug, counts)
+    _store_master_rules(store, args.slug, rules)
     asked = any(pair.startswith("master-agent=") for pair in args.pairs)
     master = affinity.order(store, args.slug, now_ms()) if asked else affinity.pending(store, args.slug)
     if config.state == "running":
@@ -711,6 +725,7 @@ def cmd_set(store, args):
                 "memory_per_agent_mb": config.memory_per_agent_mb,
                 "master_affinity": {"desired": affinity.desired(config) or "auto", "order": master},
                 "masters": masters.MasterSeats(store.redis).count(args.slug),
+                "master_per": master_scale.rule(store.redis, args.slug) or master_scale.OFF,
             }
         )
     )

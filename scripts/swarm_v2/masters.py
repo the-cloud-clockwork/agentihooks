@@ -88,6 +88,22 @@ def route(target: str, doc: dict, owners: Callable[[], dict[str, str]], live: li
     return owner if owner in live else lead
 
 
+def seat_lines(slug: str, task: dict) -> list[str]:
+    """Opening prompt lines for a master in seat two or later; the lead seat gets none."""
+    if task.get("id", MASTER) == MASTER:
+        return []
+    swarm = f"agentihooks swarm {slug}"
+    return [
+        f"You hold master seat {task['seat']}, one of {task['masters']} masters of swarm {slug}. The lead seat "
+        f"{seat_address(slug, MASTER)} answers the operator and his chat; you act on the inbox items for the phases "
+        f"you own: {', '.join(task.get('phases', [])) or 'none yet'}.",
+        f"The tick assigns phases by code and posts every change on the masters channel. Read it with {swarm} "
+        f'masters-channel read and coordinate with the other masters with {swarm} masters-channel say "<text>".',
+        f"When the swarm shrinks the tick asks you to retire: write your Handoff v2 for the lead master, run {swarm} "
+        "handoff <doc> and stop.",
+    ]
+
+
 class MasterSeats:
     def __init__(self, redis) -> None:
         self.redis = redis
