@@ -571,6 +571,76 @@ class TestCheckPass:
         assert [verdicts(tmp_path).read(t)["verdict"] for t in "bcd"] == ["pass", "pending", "pass"]
 
 
+def counted_pass(tmp_path, mode, doc, asked, verdict="fail"):
+    def ask(state):
+        asked.append(state)
+        return verdict, "judged"
+
+    viewed = []
+    check(tmp_path, mode, lambda url: viewed.append(url) or PR, ask).run(doc)
+    return viewed
+
+
+def changed(**fields):
+    return {**DOC, "tasks": [{**DOC["tasks"][0], **fields}]}
+
+
+@pytest.mark.parametrize("mode", ["enforce", "observe"])
+class TestJudgedInputs:
+    def test_a_verdict_carries_the_judged_inputs_fingerprint(self, tmp_path, mode):
+        counted_pass(tmp_path, mode, DOC, [])
+        assert verdicts(tmp_path).read(TASK)["inputs"] == intent._fingerprint(DOC, DOC["tasks"][0])
+
+    @pytest.mark.parametrize(
+        "change", [{"description": "Refuse merge and done on a failed check."}, {"title": "Intent gate"}]
+    )
+    def test_a_corrected_task_on_the_same_pull_request_is_judged_again(self, tmp_path, mode, change):
+        asked = []
+        counted_pass(tmp_path, mode, DOC, asked)
+        counted_pass(tmp_path, mode, DOC, asked)
+        assert len(asked) == 1
+        corrected = changed(**change)
+        assert counted_pass(tmp_path, mode, corrected, asked, "pass") == [URL]
+        assert len(asked) == 2
+        record = verdicts(tmp_path).read(TASK)
+        assert (record["verdict"], record["inputs"]) == ("pass", intent._fingerprint(corrected, corrected["tasks"][0]))
+
+    def test_a_changed_plan_slice_is_judged_again(self, tmp_path, mode, monkeypatch):
+        asked, plan = [], {"text": "line one"}
+        monkeypatch.setattr(intent.plan_read, "exact", lambda doc, task: plan["text"])
+        sliced = changed(plan_lines="1-1")
+        counted_pass(tmp_path, mode, sliced, asked)
+        counted_pass(tmp_path, mode, sliced, asked)
+        assert len(asked) == 1
+        plan["text"] = "line one corrected"
+        counted_pass(tmp_path, mode, sliced, asked)
+        assert len(asked) == 2
+        assert asked[-1]["plan_chunk"] == "line one corrected"
+
+    def test_a_follow_up_mark_is_judged_again(self, tmp_path, mode, monkeypatch):
+        asked = []
+        monkeypatch.setattr(intent.plan_read, "exact", lambda doc, task: "line one")
+        counted_pass(tmp_path, mode, changed(plan_lines="1-1"), asked)
+        counted_pass(tmp_path, mode, changed(plan_lines="1-1", follow_up=True), asked)
+        assert len(asked) == 2
+        assert "plan_chunk" not in asked[-1]
+
+    def test_an_unchanged_task_reuses_its_verdict_without_a_read_or_a_call(self, tmp_path, mode):
+        asked = []
+        counted_pass(tmp_path, mode, DOC, asked)
+        before = verdicts(tmp_path).read(TASK)
+        assert counted_pass(tmp_path, mode, DOC, asked, "pass") == []
+        assert (len(asked), verdicts(tmp_path).read(TASK)) == (1, before)
+
+    def test_a_record_without_a_fingerprint_is_judged_once(self, tmp_path, mode):
+        verdicts(tmp_path).write(TASK, "pass", "judged before fingerprints", NOW - 5, phase="p8")
+        asked = []
+        counted_pass(tmp_path, mode, DOC, asked)
+        counted_pass(tmp_path, mode, DOC, asked)
+        assert len(asked) == 1
+        assert verdicts(tmp_path).read(TASK)["inputs"] == intent._fingerprint(DOC, DOC["tasks"][0])
+
+
 class TestModeOf:
     @pytest.mark.parametrize(
         "value,expected",
