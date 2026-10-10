@@ -11,6 +11,8 @@ pytestmark = pytest.mark.unit
 
 COMMAND_ID = "cmd-" + "a" * 32
 EXECUTION = {"execution_id": "exe-" + "1" * 32, "generation": 4}
+IDENTITY = {"command_id": COMMAND_ID, **EXECUTION}
+NO_IDENTITY = {"command_id": "", "execution_id": "", "generation": 0}
 
 
 def record(**changes):
@@ -31,27 +33,32 @@ def raw(envelope):
     return base64.urlsafe_b64encode(json.dumps(envelope).encode()).decode()
 
 
+def refused(reason, ids=IDENTITY):
+    return {**ids, "state": "refused", "reason": reason}
+
+
 @pytest.fixture
 def home(tmp_path):
     (tmp_path / "launch.json").write_text(json.dumps(EXECUTION))
     return tmp_path
 
 
-def deliver(home, text, now_ms=4000):
-    return control.deliver(text, home / "inbox", home / "state.json", home / "launch.json", now_ms)
+def handle(home, mode, text, now_ms=4000):
+    return control.handle(mode, text, home / "inbox", home / "state.json", home / "launch.json", now_ms)
 
 
 def run_main(home, capsys, args, now_ms=4000):
     code = control.main(
         args, inbox=home / "inbox", state=home / "state.json", launch=home / "launch.json", clock=lambda: now_ms / 1000
     )
-    return code, json.loads(capsys.readouterr().out)
+    return code, capsys.readouterr().out
 
 
-def test_the_helper_paths_and_envelope_fields_are_fixed():
+def test_the_helper_paths_modes_and_envelope_fields_are_fixed():
     assert str(control.INBOX) == "/home/worker/commands/inbox"
     assert str(control.STATE) == "/home/worker/commands/state.json"
     assert str(control.LAUNCH) == "/var/run/swarm/launch/launch.json"
+    assert control.MODES == ("status", "deliver")
     assert control.ENVELOPE == (
         "command_id",
         "execution_id",
@@ -61,7 +68,7 @@ def test_the_helper_paths_and_envelope_fields_are_fixed():
         "payload_digest",
         "expires_at_ms",
     )
-    assert control.USAGE == "usage: deliver ENVELOPE | status COMMAND_ID"
+    assert control.USAGE == "usage: status ENVELOPE | deliver ENVELOPE"
 
 
 def test_encode_keeps_only_the_envelope_fields_as_url_safe_canonical_json():
@@ -69,13 +76,26 @@ def test_encode_keeps_only_the_envelope_fields_as_url_safe_canonical_json():
     text = control.encode({**envelope, "state": "issued", "issued_at_ms": 1})
     canonical = json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode()
     assert text == base64.urlsafe_b64encode(canonical).decode()
-    assert set(text) <= set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_=")
     assert control.decode(text) == envelope
+
+
+def test_decode_reads_url_safe_characters_and_padding():
+    envelope = record(payload={"text": "\n>>>???~~~ü" * 5})
+    text = control.encode(envelope)
+    assert {"-", "_"} & set(text)
+    assert control.decode(text) == envelope
+    assert control.decode(raw(record())) == record()
 
 
 @pytest.mark.parametrize(
     "text, message",
     [
+        ("ab+/", "the envelope is not url safe base64"),
+        ("YWJj!", "the envelope is not url safe base64"),
+        ("é", "the envelope is not url safe base64"),
+        ("YWJj\n", "the envelope is not url safe base64"),
+        ("YWJj===", "the envelope is not url safe base64"),
+        ("", "the envelope is not url safe base64"),
         (raw([1]), "the envelope fields are wrong"),
         (raw({k: v for k, v in record().items() if k != "kind"}), "the envelope fields are wrong"),
         (raw({**record(), "extra": 1}), "the envelope fields are wrong"),
@@ -95,8 +115,8 @@ def test_decode_refuses_any_envelope_that_is_not_exactly_the_issued_command(text
     assert str(caught.value) == message
 
 
-@pytest.mark.parametrize("text", ["!!!!", "é", "YWJj!", "ab+/"])
-def test_decode_refuses_text_outside_the_url_safe_alphabet(text):
+@pytest.mark.parametrize("text", ["YWJ", "YWJjZA", "_w=="])
+def test_decode_refuses_bad_padding_and_bytes_that_are_not_json(text):
     with pytest.raises(ValueError):
         control.decode(text)
 
@@ -115,15 +135,34 @@ def test_status_reads_the_inbox_before_the_worker_state(home):
 
 def test_deliver_queues_the_envelope_once_and_leaves_no_staged_file(home):
     envelope = record()
-    assert deliver(home, control.encode(envelope)) == (0, {"command_id": COMMAND_ID, "state": "queued"})
+    assert handle(home, "deliver", control.encode(envelope)) == (0, {**IDENTITY, "state": "queued"})
     assert json.loads((home / "inbox" / f"{COMMAND_ID}.json").read_bytes()) == envelope
-    assert deliver(home, control.encode(envelope)) == (0, {"command_id": COMMAND_ID, "state": "known"})
+    assert handle(home, "deliver", control.encode(envelope)) == (0, {**IDENTITY, "state": "known"})
     assert sorted(path.name for path in (home / "inbox").iterdir()) == [f"{COMMAND_ID}.json"]
+
+
+def test_deliver_creates_a_missing_inbox_tree(tmp_path):
+    (tmp_path / "launch.json").write_text(json.dumps(EXECUTION))
+    inbox = tmp_path / "commands" / "inbox"
+    state, launch = tmp_path / "state.json", tmp_path / "launch.json"
+    assert control.handle("deliver", control.encode(record()), inbox, state, launch, 0) == (
+        0,
+        {**IDENTITY, "state": "queued"},
+    )
+    assert (inbox / f"{COMMAND_ID}.json").exists()
+
+
+def test_status_answers_for_the_envelope_without_writing(home):
+    envelope = control.encode(record())
+    assert handle(home, "status", envelope) == (0, {**IDENTITY, "state": "absent"})
+    assert not (home / "inbox").exists()
+    handle(home, "deliver", envelope)
+    assert handle(home, "status", envelope, now_ms=9000) == (0, {**IDENTITY, "state": "queued"})
 
 
 def test_deliver_answers_known_when_the_worker_already_holds_the_command(home):
     (home / "state.json").write_text(json.dumps({COMMAND_ID: {}}))
-    assert deliver(home, control.encode(record())) == (0, {"command_id": COMMAND_ID, "state": "known"})
+    assert handle(home, "deliver", control.encode(record()), now_ms=9000) == (0, {**IDENTITY, "state": "known"})
     assert not (home / "inbox").exists()
 
 
@@ -131,123 +170,94 @@ def test_deliver_answers_known_when_another_delivery_wins_the_link(home, monkeyp
     (home / "inbox").mkdir()
     (home / "inbox" / f"{COMMAND_ID}.json").write_text("{}")
     monkeypatch.setattr(control, "status", lambda command_id, inbox, state: "absent")
-    assert deliver(home, control.encode(record())) == (0, {"command_id": COMMAND_ID, "state": "known"})
+    assert handle(home, "deliver", control.encode(record())) == (0, {**IDENTITY, "state": "known"})
     assert sorted(path.name for path in (home / "inbox").iterdir()) == [f"{COMMAND_ID}.json"]
     assert (home / "inbox" / f"{COMMAND_ID}.json").read_text() == "{}"
 
 
-def test_deliver_refuses_a_malformed_envelope_without_a_command_id(home):
-    assert deliver(home, "not base64!") == (
-        2,
-        {"command_id": "", "state": "refused", "reason": "the envelope is malformed"},
-    )
-    assert deliver(home, raw({**record(), "payload": ["x"]})) == (
-        2,
-        {"command_id": "", "state": "refused", "reason": "the envelope is malformed"},
-    )
+def test_each_delivery_stages_under_its_own_process_name(home, monkeypatch):
+    staged = []
+    link = control.os.link
+    monkeypatch.setattr(control.os, "getpid", lambda: 4242)
+    monkeypatch.setattr(control.os, "link", lambda source, target: staged.append(source.name) or link(source, target))
+    handle(home, "deliver", control.encode(record()))
+    assert staged == [f"{COMMAND_ID}.4242.tmp"]
+
+
+@pytest.mark.parametrize("mode", ["status", "deliver"])
+def test_a_malformed_envelope_is_refused_with_its_reason(home, mode):
+    assert handle(home, mode, "not base64!") == (2, refused("the envelope is not url safe base64", NO_IDENTITY))
+    tampered = raw({**record(), "payload": {"text": "other"}})
+    assert handle(home, mode, tampered) == (2, refused("the payload digest does not match", NO_IDENTITY))
     assert not (home / "inbox").exists()
 
 
 @pytest.mark.parametrize("launch", [None, "not json", "[]", json.dumps({"execution_id": "x"})])
-def test_deliver_refuses_when_the_launch_record_is_unreadable(home, launch):
+def test_a_command_is_refused_when_the_launch_record_is_unreadable(home, launch):
     if launch is None:
         (home / "launch.json").unlink()
     else:
         (home / "launch.json").write_text(launch)
-    assert deliver(home, control.encode(record())) == (
-        2,
-        {"command_id": COMMAND_ID, "state": "refused", "reason": "the launch record is unreadable"},
-    )
+    assert handle(home, "deliver", control.encode(record())) == (2, refused("the launch record is unreadable"))
     assert not (home / "inbox").exists()
 
 
+@pytest.mark.parametrize("mode", ["status", "deliver"])
 @pytest.mark.parametrize("changes", [{"execution_id": "exe-" + "2" * 32}, {"generation": 3}, {"generation": 5}])
-def test_deliver_refuses_an_envelope_for_another_execution_or_generation(home, changes):
-    assert deliver(home, control.encode(record(**changes))) == (
-        2,
-        {"command_id": COMMAND_ID, "state": "refused", "reason": "the envelope names another execution"},
-    )
+def test_an_envelope_for_another_execution_or_generation_is_refused(home, mode, changes):
+    envelope = record(**changes)
+    ids = {name: envelope[name] for name in ("command_id", "execution_id", "generation")}
+    assert handle(home, mode, control.encode(envelope)) == (2, refused("the envelope names another execution", ids))
     assert not (home / "inbox").exists()
 
 
-def test_deliver_refuses_from_the_expiry_onward(home):
+def test_deliver_refuses_a_new_command_from_its_expiry_onward(home):
     envelope = control.encode(record())
-    assert deliver(home, envelope, now_ms=5000) == (
-        2,
-        {"command_id": COMMAND_ID, "state": "refused", "reason": "the command expired"},
-    )
+    assert handle(home, "deliver", envelope, now_ms=5000) == (2, refused("the command expired"))
     assert not (home / "inbox").exists()
-    assert deliver(home, envelope, now_ms=4999) == (0, {"command_id": COMMAND_ID, "state": "queued"})
+    assert handle(home, "deliver", envelope, now_ms=4999) == (0, {**IDENTITY, "state": "queued"})
 
 
-def test_main_runs_deliver_and_status_and_prints_one_sorted_json_line(home, capsys):
+def test_main_prints_one_sorted_json_line_and_uses_the_clock_in_milliseconds(home, capsys):
     envelope = control.encode(record())
-    assert run_main(home, capsys, ["status", COMMAND_ID]) == (0, {"command_id": COMMAND_ID, "state": "absent"})
-    code = control.main(
-        ["deliver", envelope],
-        inbox=home / "inbox",
-        state=home / "state.json",
-        launch=home / "launch.json",
-        clock=lambda: 4.999,
-    )
-    assert (code, capsys.readouterr().out) == (0, json.dumps({"command_id": COMMAND_ID, "state": "queued"}) + "\n")
-    assert run_main(home, capsys, ["status", COMMAND_ID]) == (0, {"command_id": COMMAND_ID, "state": "queued"})
-    assert run_main(home, capsys, ["deliver", envelope]) == (0, {"command_id": COMMAND_ID, "state": "known"})
-
-
-def test_main_passes_the_clock_in_milliseconds(home, capsys):
-    assert run_main(home, capsys, ["deliver", control.encode(record())], now_ms=5000) == (
+    expected = refused("the command expired")
+    assert run_main(home, capsys, ["deliver", envelope], now_ms=5000) == (
         2,
-        {"command_id": COMMAND_ID, "reason": "the command expired", "state": "refused"},
+        json.dumps(dict(sorted(expected.items()))) + "\n",
     )
+    assert run_main(home, capsys, ["deliver", envelope], now_ms=4999)[0] == 0
+    code, out = run_main(home, capsys, ["status", envelope])
+    assert (code, json.loads(out)) == (0, {**IDENTITY, "state": "queued"})
 
 
 @pytest.mark.parametrize(
     "args",
-    [[], ["status"], ["deliver"], ["status", COMMAND_ID, "extra"], ["sh", "-c"], ["exec", COMMAND_ID]],
+    [[], ["status"], ["deliver"], ["status", "x", "extra"], ["sh", "-c"], ["exec", "x"], ["STATUS", "x"]],
 )
 def test_main_refuses_anything_but_one_mode_and_one_argument(home, capsys, args):
-    assert run_main(home, capsys, args) == (
-        2,
-        {"command_id": "", "reason": "usage: deliver ENVELOPE | status COMMAND_ID", "state": "refused"},
-    )
+    code, out = run_main(home, capsys, args)
+    assert (code, json.loads(out)) == (2, refused("usage: status ENVELOPE | deliver ENVELOPE", NO_IDENTITY))
 
 
-@pytest.mark.parametrize("command_id", ["cmd-short", "$(id)", COMMAND_ID + "x", "../" + COMMAND_ID])
-def test_main_refuses_a_malformed_status_id(home, capsys, command_id):
-    assert run_main(home, capsys, ["status", command_id]) == (
-        2,
-        {"command_id": "", "reason": "the command id is malformed", "state": "refused"},
-    )
-
-
-def test_main_reads_sys_argv_by_default(monkeypatch, capsys):
-    monkeypatch.setattr(sys, "argv", ["control", "status", COMMAND_ID])
-    monkeypatch.setattr(control, "status", lambda command_id, inbox, state: "absent")
-    assert control.main() == 0
-    assert json.loads(capsys.readouterr().out) == {"command_id": COMMAND_ID, "state": "absent"}
-
-
-def test_main_defaults_to_the_fixed_helper_paths(monkeypatch, capsys):
+def test_main_reads_sys_argv_by_default(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["control", "status", "x"])
     seen = []
-    monkeypatch.setattr(control, "status", lambda command_id, inbox, state: seen.append((inbox, state)) or "absent")
-    monkeypatch.setattr(
-        control,
-        "deliver",
-        lambda text, inbox, state, launch, now_ms: seen.append((inbox, state, launch, now_ms)) or (0, {}),
-    )
+    monkeypatch.setattr(control, "handle", lambda *args: seen.append(args[:2]) or (0, {}))
+    assert control.main() == 0
+    assert seen == [("status", "x")]
+
+
+def test_main_defaults_to_the_fixed_helper_paths_and_wall_clock(monkeypatch):
+    seen = []
+    monkeypatch.setattr(control, "handle", lambda *args: seen.append(args) or (0, {}))
     monkeypatch.setattr(control.time, "time", lambda: 12.5)
-    control.main(["status", COMMAND_ID])
     control.main(["deliver", "x"])
-    assert seen == [
-        (control.INBOX, control.STATE),
-        (control.INBOX, control.STATE, control.LAUNCH, 12500),
-    ]
+    assert seen == [("deliver", "x", control.INBOX, control.STATE, control.LAUNCH, 12500)]
 
 
 class Transport:
-    def __init__(self):
-        self.calls = []
+    def __init__(self, refuse=None, unreachable=False):
+        self.calls, self.refuse, self.unreachable = [], refuse, unreachable
 
     def poll(self):
         self.calls.append(["poll"])
@@ -255,6 +265,10 @@ class Transport:
 
     def ack(self, command_id, payload_digest):
         self.calls.append(["ack", command_id, payload_digest])
+        if self.unreachable:
+            raise ConnectionError("down")
+        if self.refuse:
+            raise control.CommandRefused(self.refuse, "refused")
         return {}
 
     def complete(self, command_id, outcome):
@@ -262,70 +276,102 @@ class Transport:
         return {}
 
 
-def test_worker_control_takes_inbox_commands_and_still_acknowledges_before_running(home):
+def worker(home, transport, ran):
+    handlers = {"answer": lambda payload: ran.append(payload) or {"status": "succeeded"}}
+    return control.WorkerControl(transport, home / "state.json", handlers, home / "inbox")
+
+
+def test_worker_control_records_an_inbox_command_only_after_the_server_accepts_it(home):
     transport, ran = Transport(), []
-    inbox = home / "inbox"
     envelope = record()
-    assert deliver(home, control.encode(envelope))[0] == 0
-    (inbox / "note.json").write_text("{}")
-    worker = control.WorkerControl(
-        transport,
-        home / "state.json",
-        {"answer": lambda payload: ran.append(payload) or {"status": "succeeded"}},
-        inbox,
-    )
-    worker.step()
+    handle(home, "deliver", control.encode(envelope))
+    (home / "inbox" / "note.json").write_text("{}")
+    worker(home, transport, ran).step()
     assert ran == [envelope["payload"]]
     assert transport.calls == [
         ["ack", COMMAND_ID, envelope["payload_digest"]],
         ["complete", COMMAND_ID, {"status": "succeeded"}],
         ["poll"],
     ]
-    assert sorted(path.name for path in inbox.iterdir()) == ["note.json"]
-    assert json.loads((home / "state.json").read_bytes())[COMMAND_ID]["state"] == "reported"
+    assert sorted(path.name for path in (home / "inbox").iterdir()) == ["note.json"]
+    assert json.loads((home / "state.json").read_bytes())[COMMAND_ID] == {
+        "kind": "answer",
+        "payload_digest": envelope["payload_digest"],
+        "payload": envelope["payload"],
+        "state": "reported",
+        "outcome": {"status": "succeeded"},
+    }
 
 
-def test_worker_control_waits_for_acknowledgement_when_the_endpoint_is_unreachable(home):
-    class Unreachable(Transport):
-        def ack(self, command_id, payload_digest):
-            raise ConnectionError("down")
+def test_a_refused_inbox_drain_is_dropped_and_never_stops_mutations(home):
+    handle(home, "deliver", control.encode(record(kind="drain", payload={})))
+    refusing = worker(home, Transport(refuse="not_found"), [])
+    refusing.step()
+    assert refusing.records == {}
+    assert refusing.may_mutate()
+    assert list((home / "inbox").iterdir()) == []
+    assert not (home / "state.json").exists()
 
+
+def test_an_inbox_drain_accepted_by_the_server_stops_mutations_until_its_checkpoint(home):
+    handle(home, "deliver", control.encode(record(kind="drain", payload={})))
+    transport = Transport()
+    draining = worker(home, transport, [])
+    draining.step()
+    assert not draining.may_mutate()
+    assert draining.records[COMMAND_ID]["state"] == "accepted"
+    draining.checkpointed("refs/checkpoints/1")
+    assert transport.calls[-1] == [
+        "complete",
+        COMMAND_ID,
+        {"status": "checkpointed", "checkpoint": "refs/checkpoints/1"},
+    ]
+
+
+def test_an_inbox_command_waits_in_place_while_the_endpoint_is_unreachable(home):
     ran = []
-    deliver(home, control.encode(record()))
-    worker = control.WorkerControl(Unreachable(), home / "state.json", {"answer": ran.append}, home / "inbox")
-    worker.step()
-    assert ran == []
-    assert worker.records[COMMAND_ID]["state"] == "received"
+    handle(home, "deliver", control.encode(record()))
+    waiting = worker(home, Transport(unreachable=True), ran)
+    waiting.step()
+    assert (ran, waiting.records) == ([], {})
+    assert [path.name for path in (home / "inbox").iterdir()] == [f"{COMMAND_ID}.json"]
+    worker(home, Transport(), ran).step()
+    assert ran == [record()["payload"]]
     assert list((home / "inbox").iterdir()) == []
 
 
-def test_worker_control_drops_a_known_or_forged_inbox_command_without_running_it(home):
+@pytest.mark.parametrize("content", ["[]", "{}", "not json", json.dumps({**record(), "payload": {"text": "other"}})])
+def test_a_malformed_or_forged_inbox_file_is_dropped_without_blocking_the_poll(home, content):
     transport, ran = Transport(), []
-    inbox = home / "inbox"
-    inbox.mkdir()
-    forged = {**record(command_id="cmd-" + "f" * 32), "payload": {"text": "other"}}
-    (inbox / f"{forged['command_id']}.json").write_text(json.dumps(forged))
+    (home / "inbox").mkdir()
+    (home / "inbox" / f"{COMMAND_ID}.json").write_text(content)
+    worker(home, transport, ran).step()
+    assert (ran, transport.calls) == ([], [["poll"]])
+    assert list((home / "inbox").iterdir()) == []
+
+
+def test_a_known_inbox_command_is_dropped_without_a_second_run(home):
+    transport, ran = Transport(), []
+    (home / "inbox").mkdir()
     (home / "state.json").write_text(json.dumps({}))
-    worker = control.WorkerControl(transport, home / "state.json", {"answer": ran.append}, inbox)
-    worker.records[COMMAND_ID] = {
+    known = worker(home, transport, ran)
+    known.records[COMMAND_ID] = {
         "kind": "answer",
         "state": "reported",
         "outcome": {},
         "payload": {},
         "payload_digest": "",
     }
-    (inbox / f"{COMMAND_ID}.json").write_text(json.dumps(record()))
-    worker.step()
-    assert ran == []
-    assert transport.calls == [["poll"]]
-    assert list(inbox.iterdir()) == []
-    assert sorted(worker.records) == [COMMAND_ID]
+    (home / "inbox" / f"{COMMAND_ID}.json").write_text(json.dumps(record()))
+    known.step()
+    assert (ran, transport.calls) == ([], [["poll"]])
+    assert list((home / "inbox").iterdir()) == []
 
 
 def test_worker_control_without_an_inbox_only_polls(home, monkeypatch):
     transport = Transport()
-    worker = control.WorkerControl(transport, home / "state.json", {})
-    assert worker.inbox is None
+    polling = control.WorkerControl(transport, home / "state.json", {})
+    assert polling.inbox is None
     monkeypatch.setattr(control.Path, "glob", lambda *args: pytest.fail("no inbox to read"))
-    worker.step()
+    polling.step()
     assert transport.calls == [["poll"]]

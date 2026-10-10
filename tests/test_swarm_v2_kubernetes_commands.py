@@ -20,6 +20,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-KUB-03"
 TEXT = "$(rm -rf /) `id` \"q\" 'q'\nnext line ü"
 SECRET = "ghp" + "_" + "Ab1" * 12
+REPLACEMENT = chr(0xFFFD)
 
 
 @pytest.fixture
@@ -47,8 +48,9 @@ class Runner:
         return reply
 
 
-def reply(command_id, state, code=0):
-    return code, json.dumps({"command_id": command_id, "state": state}).encode(), b""
+def reply(record, state, code=0, **changes):
+    ids = {name: record[name] for name in ("command_id", "execution_id", "generation")}
+    return code, json.dumps({**ids, "state": state, **changes}).encode(), b""
 
 
 def operation(agent, action="command", payload=None, generation=None, key="op-key"):
@@ -86,16 +88,24 @@ def test_the_transport_names_its_backend_helper_and_bounds():
     assert commands.HELPER == ("python", "-m", "scripts.swarm_v2.worker.control")
     assert commands.CONTAINER == "agent"
     assert commands.MODES == ("status", "deliver")
+    assert commands.IDENTITY == ("command_id", "execution_id", "generation")
+    assert commands.REPLIES == frozenset(("queued", "known", "absent", "refused"))
     assert (commands.EXEC_TIMEOUT_SECONDS, commands.REPORT_CHARS, commands.REPORTS_KEPT) == (10, 2048, 200)
+    assert (commands.ENVELOPE_CHARS, commands.RAW_BYTES) == (100_000, 65536)
 
 
 def test_sanitize_report_strips_escape_and_control_sequences_but_keeps_lines_and_tabs():
     raw = b"\x1b[31mred\x1b[0m \x1b]0;title\x07osc \x1b]2;t\x1b\\st \x1bDfe\x00\x07\x08\r\x0b\x0c\x7f\xc2\x9b2J a\tb\nc"
-    assert sanitize_report(raw) == "red osc st fe2J a\tb\nc"
+    assert sanitize_report(raw) == "red osc st fe a\tb\nc"
+    assert sanitize_report(b"a\x1f\xc2\x9fb\x1bZc\x1b_d\x1b@e\xc2\x9b1;2mf\x1b[?25lg") == "abcdefg"
+    assert sanitize_report(b"\xc2\xa0kept \xc2\xa1") == "\xa0kept \xa1"
 
 
 def test_sanitize_report_replaces_invalid_utf8_and_redacts_secrets():
-    assert sanitize_report(b"ok \xff " + f"token {SECRET} end".encode()) == "ok � token [REDACTED:github_token] end"
+    expected = f"ok {REPLACEMENT} token [REDACTED:github_token] end"
+    assert sanitize_report(b"ok \xff " + f"token {SECRET} end".encode()) == expected
+    bearer = "Bea" + "rer " + "z9" * 12
+    assert sanitize_report(f"auth {bearer} end".encode()) == "auth [REDACTED:bearer_value] end"
 
 
 def test_sanitize_report_bounds_its_length_after_redaction():
@@ -104,6 +114,11 @@ def test_sanitize_report_bounds_its_length_after_redaction():
     assert sanitize_report(exact + b"y") == exact.decode() + "[truncated]"
     padded = SECRET.encode() + b" " + b"z" * (commands.REPORT_CHARS - 28)
     assert sanitize_report(padded) == "[REDACTED:github_token] " + "z" * (commands.REPORT_CHARS - 28)
+
+
+def test_sanitize_report_withholds_an_oversized_output_whole():
+    assert sanitize_report(b"x" * commands.RAW_BYTES) == "x" * commands.REPORT_CHARS + "[truncated]"
+    assert sanitize_report(b"x" * (commands.RAW_BYTES + 1)) == f"[{commands.RAW_BYTES + 1} bytes withheld]"
 
 
 def test_the_metrics_start_at_zero_for_every_helper_mode(world):
@@ -269,14 +284,32 @@ def test_fallback_does_nothing_when_disabled_absent_or_no_longer_issued(world, a
     assert runner.calls == []
 
 
-def test_fallback_asks_the_status_first_then_delivers_the_encoded_record(world, agent):
+def test_fallback_never_reaches_a_superseded_execution(world, agent):
+    command, runner = issued(world, agent), Runner()
+    world.start(previous=agent.execution_id)
+    assert transport(world, runner).fallback(agent.execution_id, command["command_id"]) == "stale"
+    assert runner.calls == []
+
+
+def test_fallback_leaves_an_oversized_envelope_to_the_endpoint(world, agent, monkeypatch):
     command = issued(world, agent)
-    runner = Runner(reply(command["command_id"], "absent"), reply(command["command_id"], "queued"))
+    monkeypatch.setattr(commands, "ENVELOPE_CHARS", len(encode(command)) - 1)
+    runner = Runner()
+    assert transport(world, runner).fallback(agent.execution_id, command["command_id"]) == "too_large"
+    assert runner.calls == []
+    monkeypatch.setattr(commands, "ENVELOPE_CHARS", len(encode(command)))
+    runner = Runner(reply(command, "known"))
+    assert transport(world, runner).fallback(agent.execution_id, command["command_id"]) == "known"
+
+
+def test_fallback_asks_the_status_first_then_delivers_the_same_envelope(world, agent):
+    command = issued(world, agent)
+    runner = Runner(reply(command, "absent"), reply(command, "queued"))
     assert transport(world, runner).fallback(agent.execution_id, command["command_id"]) == "queued"
-    pod, namespace = f"swarm-{agent.execution_id}", world.pods.namespace
+    pod, namespace, envelope = f"swarm-{agent.execution_id}", world.pods.namespace, encode(command)
     assert runner.calls == [
-        [namespace, pod, [*commands.HELPER, "status", command["command_id"]]],
-        [namespace, pod, [*commands.HELPER, "deliver", encode(command)]],
+        [namespace, pod, [*commands.HELPER, "status", envelope]],
+        [namespace, pod, [*commands.HELPER, "deliver", envelope]],
     ]
     assert ambiguous(world) == {"status": 0, "deliver": 0}
 
@@ -284,14 +317,14 @@ def test_fallback_asks_the_status_first_then_delivers_the_encoded_record(world, 
 @pytest.mark.parametrize("state", ["queued", "known"])
 def test_fallback_never_redelivers_a_command_the_worker_already_holds(world, agent, state):
     command = issued(world, agent)
-    runner = Runner(reply(command["command_id"], state))
+    runner = Runner(reply(command, state))
     assert transport(world, runner).fallback(agent.execution_id, command["command_id"]) == state
     assert [call[2][3] for call in runner.calls] == ["status"]
 
 
 def test_fallback_passes_a_helper_refusal_through(world, agent):
     command = issued(world, agent)
-    runner = Runner(reply(command["command_id"], "absent"), reply(command["command_id"], "refused", code=2))
+    runner = Runner(reply(command, "absent"), reply(command, "refused", code=2, reason="the command expired"))
     assert transport(world, runner).fallback(agent.execution_id, command["command_id"]) == "refused"
     assert ambiguous(world) == {"status": 0, "deliver": 0}
 
@@ -299,12 +332,14 @@ def test_fallback_passes_a_helper_refusal_through(world, agent):
 @pytest.mark.parametrize(
     "answer",
     [
-        TimeoutError("lost"),
-        ConnectionError("dropped"),
-        (0, b"not json", b""),
-        (0, b"[]", b""),
-        (0, json.dumps({"command_id": "cmd-" + "9" * 32, "state": "queued"}).encode(), b""),
-        (0, json.dumps({"state": "queued"}).encode(), b""),
+        "timeout",
+        "dropped",
+        "not json",
+        "list",
+        "other command",
+        "other execution",
+        "other generation",
+        "state only",
         "unknown state",
         "refused with success",
         "queued with failure",
@@ -312,13 +347,20 @@ def test_fallback_passes_a_helper_refusal_through(world, agent):
 )
 def test_fallback_counts_any_unsure_status_reply_and_delivers_nothing(world, agent, answer):
     command = issued(world, agent)
-    if answer == "unknown state":
-        answer = reply(command["command_id"], "running")
-    elif answer == "refused with success":
-        answer = reply(command["command_id"], "refused")
-    elif answer == "queued with failure":
-        answer = reply(command["command_id"], "queued", code=1)
-    runner = Runner(answer)
+    answers = {
+        "timeout": TimeoutError("lost"),
+        "dropped": ConnectionError("dropped"),
+        "not json": (0, b"not json", b""),
+        "list": (0, b"[]", b""),
+        "other command": reply({**command, "command_id": "cmd-" + "9" * 32}, "queued"),
+        "other execution": reply({**command, "execution_id": "exe-other"}, "queued"),
+        "other generation": reply({**command, "generation": command["generation"] + 1}, "queued"),
+        "state only": (0, json.dumps({"state": "queued"}).encode(), b""),
+        "unknown state": reply(command, "running"),
+        "refused with success": reply(command, "refused"),
+        "queued with failure": reply(command, "queued", code=1),
+    }
+    runner = Runner(answers[answer])
     assert transport(world, runner).fallback(agent.execution_id, command["command_id"]) == "ambiguous"
     assert ambiguous(world) == {"status": 1, "deliver": 0}
     assert len(runner.calls) == 1
@@ -326,18 +368,12 @@ def test_fallback_counts_any_unsure_status_reply_and_delivers_nothing(world, age
 
 def test_fallback_counts_a_lost_delivery_reply_and_reports_it(world, agent):
     command = issued(world, agent)
-    runner = Runner(reply(command["command_id"], "absent"), TimeoutError("lost"))
+    runner = Runner(reply(command, "absent"), TimeoutError("lost"))
     assert transport(world, runner).fallback(agent.execution_id, command["command_id"]) == "ambiguous"
     assert ambiguous(world) == {"status": 0, "deliver": 1}
     base = {"execution_id": agent.execution_id, "generation": agent.generation, "command_id": command["command_id"]}
     assert reports(world) == [
-        {
-            **base,
-            "mode": "status",
-            "exit": 0,
-            "stdout": reply(command["command_id"], "absent")[1].decode(),
-            "stderr": "",
-        },
+        {**base, "mode": "status", "exit": 0, "stdout": reply(command, "absent")[1].decode(), "stderr": ""},
         {**base, "mode": "deliver", "exit": None, "stdout": "", "stderr": ""},
     ]
 
@@ -349,18 +385,15 @@ def test_fallback_sanitizes_helper_output_before_storing_it(world, agent):
     [report] = reports(world)
     assert report["stdout"] == "garbage [REDACTED:github_token]"
     assert report["stderr"] == "trace\n" + "e" * (commands.REPORT_CHARS - 6) + "[truncated]"
-    assert SECRET not in json.dumps(
-        world.store.redis.lrange(world.store.key(world.queue.slug, "worker-transport-reports"), 0, -1)
-    )
+    stored = world.store.redis.lrange(world.store.key(world.queue.slug, "worker-transport-reports"), 0, -1)
+    assert SECRET not in json.dumps(stored)
 
 
 def test_fallback_keeps_only_the_newest_reports(world, agent, monkeypatch):
     monkeypatch.setattr(commands, "REPORTS_KEPT", 2)
     for n in range(3):
         command = issued(world, agent, f"k{n}")
-        transport(world, Runner(reply(command["command_id"], "known"))).fallback(
-            agent.execution_id, command["command_id"]
-        )
+        transport(world, Runner(reply(command, "known"))).fallback(agent.execution_id, command["command_id"])
     assert [report["command_id"] for report in reports(world)] == [
         world.queue.command_id(agent.execution_id, key) for key in ("k1", "k2")
     ]
@@ -396,14 +429,22 @@ def test_fallback_refuses_a_missing_unlabelled_or_deleting_pod(world, agent):
 
 
 @pytest.mark.parametrize("error", [ApiRefused(403, "Forbidden"), ConnectionError("down"), TimeoutError("slow")])
-def test_fallback_refuses_when_the_pod_cannot_be_read(world, agent, monkeypatch, error):
+def test_fallback_is_unavailable_when_the_pod_cannot_be_read(world, agent, monkeypatch, error):
     command, runner = issued(world, agent), Runner()
 
     def unreadable(name):
         raise error
 
     monkeypatch.setattr(world.pods, "read_pod", unreadable)
-    assert transport(world, runner).fallback(agent.execution_id, command["command_id"]) == "refused"
+    assert transport(world, runner).fallback(agent.execution_id, command["command_id"]) == "unavailable"
+    assert runner.calls == []
+    assert world.queue.outcome(agent.execution_id, command["command_id"])["state"] == "issued"
+
+
+def test_fallback_is_unavailable_while_the_store_is_down(world, agent, monkeypatch):
+    command, runner = issued(world, agent), Runner()
+    monkeypatch.setattr(world.queue, "outcome", lambda *args: (_ for _ in ()).throw(RedisError("down")))
+    assert transport(world, runner).fallback(agent.execution_id, command["command_id"]) == "unavailable"
     assert runner.calls == []
 
 
@@ -411,7 +452,7 @@ def test_fallback_reads_the_pod_named_after_the_execution(world, agent, monkeypa
     command, names = issued(world, agent), []
     read = world.pods.read_pod
     monkeypatch.setattr(world.pods, "read_pod", lambda name: names.append(name) or read(name))
-    transport(world, Runner(reply(command["command_id"], "known"))).fallback(agent.execution_id, command["command_id"])
+    transport(world, Runner(reply(command, "known"))).fallback(agent.execution_id, command["command_id"])
     assert names == [f"swarm-{agent.execution_id}"]
 
 
@@ -436,6 +477,7 @@ def test_package_cases_match_their_committed_evidence(case, tmp_path):
     second_folder.mkdir()
     first, second = run_case(case, first_folder), run_case(case, second_folder)
     assert first == second
+    assert first["state"] == "passed", json.dumps(first, indent=2, sort_keys=True, ensure_ascii=False)
     path = EVIDENCE / f"{case}-result.json"
     record = {"case": f"T-SV2-KUB-03-{case.upper()}", "independent_runs": 2, "observed": first}
     assert path.exists(), json.dumps(record, indent=2, sort_keys=True, ensure_ascii=False)
@@ -450,10 +492,8 @@ def test_the_manifest_names_the_hash_of_every_case_input():
     manifest = json.loads((EVIDENCE / "manifest.json").read_text(encoding="utf-8"))
     root = Path(__file__).parents[1]
     assert manifest["cases"] == ["T-SV2-KUB-03-A", "T-SV2-KUB-03-B", "T-SV2-KUB-03-C"]
-    assert (
-        manifest["inputs"]["tests/fixtures/swarm_v2/worker-command-prompts.json"]
-        == hashlib.sha256((root / "tests/fixtures/swarm_v2/worker-command-prompts.json").read_bytes()).hexdigest()
-    )
+    fixture = "tests/fixtures/swarm_v2/worker-command-prompts.json"
+    assert manifest["inputs"][fixture] == hashlib.sha256((root / fixture).read_bytes()).hexdigest()
 
 
 def test_the_package_record_carries_its_completion_evidence():
@@ -470,3 +510,5 @@ def test_the_package_record_carries_its_completion_evidence():
     path, name = record["rollback_rehearsal"]["test"].split("::")
     assert path == "tests/test_swarm_v2_kubernetes_commands.py"
     assert f"\ndef {name}(" in Path(__file__).read_text(encoding="utf-8")
+    rejection = json.loads((EVIDENCE / "b-result.json").read_text(encoding="utf-8"))
+    assert rejection["observed"]["observed"]["rollback"] == ["disabled", True]
