@@ -104,7 +104,7 @@ def test_apply_preserves_each_phase_and_slice_range_with_zero_drift(tmp_path):
     after = repo.export_document(SLUG)
     assert [task["phase"] for task in after["tasks"]] == ["p60"] * 7
     assert [task["plan_lines"] for task in after["tasks"]] == [f"{i * 10}-{i * 10 + 3}" for i in range(1, 8)]
-    assert [task["plan_url"] for task in after["tasks"]] == [PHASE_URL] * 7
+    assert [task["plan_url"] for task in after["tasks"]] == [TASK_URL] * 7
     assert after["phases"][0]["plan"] == after["phases"][1]["plan"] == "plans/plan-aaaaaaaaaaaa"
     assert after["phases"][2]["plan"] == after["phases"][3]["plan"]
     assert len(after["plans"]) == 2
@@ -114,7 +114,9 @@ def test_apply_preserves_each_phase_and_slice_range_with_zero_drift(tmp_path):
     assert after["_meta"]["rev"] == before["_meta"]["rev"] + 1
     assert repo.rebuild(SLUG)["drift"] == 0
     repeated = hierarchy_backfill.backfill(repo, SLUG, "planner", apply=True)
-    assert repeated["conflicts"] == []
+    assert repeated["conflicts"] == [
+        {"kind": "task_plan_link", "item": f"tasks/as{i}", "before": TASK_URL, "after": PHASE_URL} for i in range(1, 8)
+    ]
     assert repeated["before"] == repeated["after"]
     assert repo.export_document(SLUG) == after
 
@@ -189,7 +191,12 @@ def test_recorded_ledger_copy_reports_the_known_conflicts_then_has_zero_drift(tm
     assert len(saved["phases"]) == 76
     assert result["drift"]["drift"] == 0
     assert repo.rebuild(SLUG)["drift"] == 0
-    assert hierarchy_backfill.backfill(repo, SLUG, "planner", apply=True)["conflicts"] == []
+    assert [(task["id"], task.get("plan_url")) for task in saved["tasks"]] == [
+        (task["id"], task.get("plan_url")) for task in before["tasks"]
+    ]
+    repeated = hierarchy_backfill.backfill(repo, SLUG, "planner", apply=True)
+    assert Counter(row["kind"] for row in repeated["conflicts"]) == {"task_plan_link": 14}
+    assert repo.export_document(SLUG) == saved
 
 
 def test_dry_run_on_an_old_database_does_not_create_hierarchy_tables(tmp_path):
@@ -380,7 +387,7 @@ def test_preview_places_every_legacy_shape_and_reports_each_conflict_in_order():
     }
     assert [(row["id"], row["phase"], row.get("slice"), row.get("plan_url")) for row in after["tasks"]] == [
         ("t1", "p1", "slices/kept.s1", KEPT),
-        ("t2", "p1", "slices/kept.s1", KEPT),
+        ("t2", "p1", "slices/kept.s1", BAD),
         ("t3", "p1", "slices/kept.s1.p1.t3", None),
         ("t4", "p1", "slices/kept.s1", None),
         ("t5", "p1", None, None),
@@ -388,9 +395,9 @@ def test_preview_places_every_legacy_shape_and_reports_each_conflict_in_order():
         ("t7", "p4", "slices/plan-dddddddddddd.s1", None),
         ("t8", "p5", "slices/plan-dddddddddddd.s1.p5.t8", None),
         ("t9", "p5", "slices/plan-dddddddddddd.s1.p5.t9", None),
-        ("t10", "p7", None, ""),
-        ("t11", "p10", None, U3),
-        ("t12", "p11", None, KEPT),
+        ("t10", "p7", None, BAD),
+        ("t11", "p10", None, BAD),
+        ("t12", "p11", None, BAD),
         ("t13", "ghost", None, None),
         ("t14", STANDALONE, None, None),
         ("t15", STANDALONE, None, None),

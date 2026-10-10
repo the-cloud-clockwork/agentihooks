@@ -124,7 +124,6 @@ def assign_tasks(doc: dict, conflicts: list) -> None:
         if task.get("plan_url") and task["plan_url"] not in links:
             target = phase.get("plan_url") or plan.get("artifact") or plan.get("url") or ""
             conflict(conflicts, "task_plan_link", f"tasks/{task['id']}", task["plan_url"], target)
-            task["plan_url"] = target
         task_slice(doc, phase, task, conflicts)
 
 
