@@ -552,7 +552,7 @@ def test_a_seat_taken_meanwhile_fences_the_retried_heartbeat(world, monkeypatch)
     world.clock[0] += 5
 
     with pytest.raises(SwarmError, match="^stale_generation$"):
-        world.beat("anton")
+        world.fleet.heartbeat(scope("anton"), registered.session_id, token)
     assert world.fleet.records() == [registered]
 
 
