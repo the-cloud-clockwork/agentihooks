@@ -17,6 +17,8 @@ from hooks.serena_router.binding import (
 from hooks.serena_router.pool import BackendError, Pool
 
 ACTIVATE = "activate_project"
+# Claude covers these with its own tools; a client lists them by naming them in the endpoint's `tools` query.
+OPT_IN = frozenset({"read_file", "search_for_pattern"})
 
 UNBOUND = (
     "No project is active for this session. The router may have restarted. "
@@ -30,6 +32,11 @@ def _text(message: str, *, error: bool = False) -> CallToolResult:
 
 def edit_tools(tools: list[Tool]) -> frozenset[str]:
     return frozenset(t.name for t in tools if not (t.annotations and t.annotations.readOnlyHint))
+
+
+def listed(tools: list[Tool], values: list[str]) -> list[Tool]:
+    named = {name for value in values for name in value.split(",")}
+    return [t for t in tools if t.name not in OPT_IN - named]
 
 
 async def activate(pool: Pool, binding: Binding, project: str) -> CallToolResult:
@@ -85,7 +92,8 @@ def build_server(pool: Pool, tools: list[Tool]) -> Server:
 
     @server.list_tools()
     async def _list_tools() -> list[Tool]:
-        return tools
+        request = server.request_context.request
+        return listed(tools, request.query_params.getlist("tools") if request else [])
 
     @server.call_tool(validate_input=False)
     async def _call_tool(name: str, arguments: dict | None) -> CallToolResult:

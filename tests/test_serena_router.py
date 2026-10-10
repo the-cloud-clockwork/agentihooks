@@ -243,8 +243,8 @@ def test_listed_ignores_names_outside_the_opt_in_set():
     from hooks.serena_router.server import listed
 
     tools = [Tool(name=name, inputSchema={"type": "object"}) for name in ("find_symbol", "read_file", "mystery")]
-    assert [t.name for t in listed(tools, "")] == ["find_symbol", "mystery"]
-    assert [t.name for t in listed(tools, "read_file,mystery,")] == ["find_symbol", "read_file", "mystery"]
+    assert [t.name for t in listed(tools, [])] == ["find_symbol", "mystery"]
+    assert [t.name for t in listed(tools, ["mystery,", "read_file"])] == ["find_symbol", "read_file", "mystery"]
 
 
 def test_fake_backend_imports_only_the_standard_library():
