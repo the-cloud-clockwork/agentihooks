@@ -4,6 +4,7 @@ import shlex
 import signal
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -222,6 +223,36 @@ def test_start_reports_termination_during_handshake(supervisor, monkeypatch):
     supervisor.stop = signal.SIGTERM
     monkeypatch.setattr(supervisor, "spawn", lambda *_: None)
     assert supervisor.start() == "termination"
+
+
+def test_start_without_an_exporter_launches_the_agent_after_herdr_alone(supervisor, monkeypatch):
+    supervisor.launch = replace(supervisor.launch, exporter=None)
+    calls = []
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: 0)
+    monkeypatch.setattr(supervisor, "spawn", lambda role, command: calls.append(("spawn", role, command)))
+    monkeypatch.setattr(supervisor, "ready", lambda role, deadline: calls.append(("ready", role, deadline)) or True)
+    monkeypatch.setattr(runtime, "native_command", Mock(return_value=supervisor.launch.agent))
+    monkeypatch.setattr(supervisor, "herdr", Mock(return_value={"result": {"root_pane": {"pane_id": "pane"}}}))
+
+    assert supervisor.start() is None
+
+    assert calls == [("spawn", "herdr", ("herdr", "server")), ("ready", "herdr", 2), ("ready", "agent", 2)]
+    assert "exporter" not in supervisor.children
+
+
+def test_drain_without_an_exporter_waits_for_no_checkpoint_and_reports_it_incomplete(supervisor, monkeypatch):
+    supervisor.launch = replace(supervisor.launch, exporter=None)
+    monkeypatch.setattr(supervisor, "quiesce", lambda: True)
+    checkpoint, wait = Mock(return_value="checkpoint"), Mock()
+    monkeypatch.setattr(runtime, "checkpoint", checkpoint)
+    monkeypatch.setattr(supervisor, "wait", wait)
+    monkeypatch.setattr(runtime.trees, "cleanup", Mock())
+
+    result = supervisor.drain("agent_completed")
+
+    assert (result["checkpoint_status"], result["checkpoint_id"]) == ("incomplete", None)
+    checkpoint.assert_not_called()
+    wait.assert_not_called()
 
 
 @pytest.mark.parametrize(

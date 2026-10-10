@@ -560,9 +560,10 @@ def test_unplaceable_first_task_does_not_block_other_ready_work(monkeypatch, tmp
 
     store.redis.set(store.key("sw", "quota-capacity"), dumps(decision))
     rows = ledger.rows
-    assert [(lane, task["id"]) for lane, task in _spawn_order("sw", config, store, [], rows, ledger.state("sw"))] == [
-        ("eng", "auto")
-    ]
+    assert [
+        (lane, task["id"])
+        for lane, task in _spawn_order("sw", config, store, [], rows, ledger.state("sw"), FakeRuntime())
+    ] == [("eng", "auto")]
 
 
 def test_runtime_preserves_flexible_first_then_fixed_task_reservations(monkeypatch, tmp_path):
@@ -990,7 +991,7 @@ def test_legacy_effective_caps_still_limit_spawns_when_task_mapping_is_absent():
     store.create(config)
     ledger = FakeLedger([{"id": "e"}])
     store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"effective": {"eng": 0, "ci": 0, "plan": 0}}))
-    assert _spawn_order("sw", config, store, [], ledger.rows, ledger.state("sw")) == []
+    assert _spawn_order("sw", config, store, [], ledger.rows, ledger.state("sw"), FakeRuntime()) == []
 
 
 def test_lane_harness_pin_wins_over_a_saved_different_harness(tmp_path, monkeypatch):

@@ -6,6 +6,9 @@ from pathlib import Path
 
 from scripts.swarm_v2 import filesystem
 
+SCHEMA_VERSION = 1
+AUTHORITY = ("execution_id", "generation", "task_id", "seat_id", "swarm_id", "grant_id")
+
 
 class LaunchRefused(ValueError):
     pass
@@ -31,8 +34,7 @@ def _deadline(value: object) -> float:
 def _authority(value: object) -> dict:
     if not isinstance(value, dict):
         raise LaunchRefused("invalid authority")
-    required = ("execution_id", "generation", "task_id", "seat_id", "swarm_id", "grant_id")
-    if any(k not in value for k in required):
+    if any(k not in value for k in AUTHORITY):
         raise LaunchRefused("missing authority")
     if not re.fullmatch(r"exe-[0-9a-f]{32}", str(value["execution_id"])):
         raise LaunchRefused("invalid authority")
@@ -60,7 +62,7 @@ class Launch:
     authority: dict
     harness: str
     agent: tuple[str, ...]
-    exporter: tuple[str, ...]
+    exporter: tuple[str, ...] | None
     herdr: tuple[str, ...]
     budgets: Budgets
 
@@ -77,7 +79,7 @@ class Launch:
         spec = json.loads(path.read_text())
         record = json.loads((attempt / "execution.json").read_text())
         registered = _authority(json.loads((attempt / "registration.json").read_text()))
-        if not isinstance(spec, dict) or spec.get("schema_version") != 1:
+        if not isinstance(spec, dict) or spec.get("schema_version") != SCHEMA_VERSION:
             raise LaunchRefused("unsupported launch")
         authority = _authority(spec.get("authority"))
         if authority != registered or record["attempt"] != authority["execution_id"]:
@@ -100,7 +102,7 @@ class Launch:
             authority,
             harness,
             _command(spec.get("agent")),
-            _command(spec.get("exporter")),
+            _command(spec["exporter"]) if "exporter" in spec else None,
             _command(spec.get("herdr", ["herdr", "server"])),
             budgets,
         )

@@ -184,7 +184,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             slug,
             held,
             runtime or routed(herdr=HerdrRuntime()),
-            os.environ.get("AGENTIHOOKS_DEPLOYMENT", "local") == "local",
+            os.environ.get("AGENTIHOOKS_DEPLOYMENT", controller.LOCAL),
         )
         from scripts.swarm.health import spawn_stall
 
