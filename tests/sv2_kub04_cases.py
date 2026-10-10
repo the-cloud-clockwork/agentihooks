@@ -348,10 +348,10 @@ def _recovery() -> tuple[dict, bool]:
         retention.finalize(world.store, SLUG, old.execution_id, fx["state"], fx["transcript_end"], fx["outcome_ref"])
         world.acknowledge(old.execution_id, fx["transcript_end"])
         suspended = world.cleanup(controller, enabled=False).run(old.execution_id).state
-        retained_while_suspended = sorted(world.api.objects) == [
+        retained_while_suspended = set(world.api.objects) == {
             f"swarm-{old.execution_id}",
             f"swarm-{replacement.execution_id}",
-        ]
+        }
         backlog_suspended = retention.execution_cleanup_backlog(world.store, SLUG)
         world.api.drop_next_delete = True
         crashes = []
