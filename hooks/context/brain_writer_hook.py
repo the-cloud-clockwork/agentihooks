@@ -179,8 +179,9 @@ def _marker_key(marker: dict, session_id: str, scope: dict, content: str) -> str
     from hooks.context.brain_adapter import brain_id
     from scripts.swarm_v2 import keyspace
 
-    if keyspace.MARKER_KEY.fullmatch(str(marker.get("idempotency_key"))):
-        return marker["idempotency_key"]
+    recorded = marker.get("idempotency_key")
+    if isinstance(recorded, str) and keyspace.MARKER_KEY.fullmatch(recorded):
+        return recorded
     record = keyspace.installation(Path(AGENTIHOOKS_HOME))
     if not keyspace.current(marker.get("at"), record):
         return keyspace.legacy_marker_key(session_id, marker["type"], content)
