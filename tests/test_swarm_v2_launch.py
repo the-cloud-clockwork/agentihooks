@@ -414,13 +414,13 @@ def test_the_grant_goes_on_standard_input_never_in_the_command(monkeypatch, tmp_
         return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr(launch_module.subprocess, "run", run)
-    world = World(monkeypatch, homes=WorkerHomeCommand(tmp_path, "/opt/venv/bin/python"))
+    world = World(monkeypatch, homes=WorkerHomeCommand(tmp_path))
 
     launch = world.launch(FIRST)
 
     [(command, options)] = seen
     assert command == [
-        "/opt/venv/bin/python",
+        sys.executable,
         "-m",
         "scripts.swarm_v2.worker_home",
         "grant",
@@ -428,10 +428,6 @@ def test_the_grant_goes_on_standard_input_never_in_the_command(monkeypatch, tmp_
     ]
     assert options == {"input": launch.grant, "capture_output": True, "text": True, "timeout": 30}
     assert launch.handed is True
-
-
-def test_the_grant_command_runs_the_controller_interpreter_by_default(tmp_path):
-    assert WorkerHomeCommand(tmp_path).python == sys.executable
 
 
 @pytest.mark.parametrize("failure", [1, None])
@@ -448,7 +444,8 @@ def test_a_grant_command_that_fails_or_times_out_reports_unhanded(monkeypatch, t
 
 
 def test_a_grant_command_that_cannot_start_reports_unhanded_and_keeps_the_slot(monkeypatch, tmp_path):
-    world = World(monkeypatch, homes=WorkerHomeCommand(tmp_path, str(tmp_path / "missing-python")))
+    monkeypatch.setattr(launch_module.sys, "executable", str(tmp_path / "missing-python"))
+    world = World(monkeypatch, homes=WorkerHomeCommand(tmp_path))
 
     launch = world.launch(FIRST)
 
