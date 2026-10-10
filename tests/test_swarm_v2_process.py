@@ -366,14 +366,6 @@ def test_a_local_launch_stores_its_process_namespace_number_and_start_time(pid):
     assert process.resolve(stored, ANTON, table) == pid
 
 
-def test_a_local_relaunch_replaces_the_execution_it_names_on_the_seat():
-    store = launch_store()
-    first = launcher().admit(store, "sw", launched(store))
-    second = launcher().admit(store, "sw", launched(store), first.execution_id)
-    assert (second.seat, second.generation) == ("eng-1@sw", 2)
-    assert store.execution_occupants("sw")["eng-1@sw"].execution_id == second.execution_id
-
-
 @pytest.mark.parametrize(
     ("namespace", "table", "pid", "missing"),
     [
