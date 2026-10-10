@@ -63,5 +63,11 @@
     "placement": "Required node affinity excludes every node labelled anton.io/capacity-type, with no EC2 tolerations, for the controller and the ledger; case B shows an untainted Spot node with 32 free cores refused.",
     "compatibility": "Compared with the preceding accepted path (the hive controller loop without the v2 API): without AGENTIHOOKS_CONTROL_API_PORT the controller loop runs exactly as before, proven by test_the_controller_loop_runs_as_before_without_an_api_port; the chart default keeps controller.api off; heartbeat and launch grant contracts stay at schema 2.1 with no field changed.",
     "live_evidence": "Cases A, B and C are mocked and labelled mocked in their records. The worker registration and heartbeat ran live against the controller deployed by the chart in kind (kind-proof.txt). Live evidence on anton-prod is due at rollout gate G12, where controller.api is turned on; until then externally_verified stays false."
+  },
+  "task_scope": {
+    "worker_api": "Task text: wire the worker registration and heartbeat server into the controller process with its scoped controller credential and the launch signing key, and prove one worker registers and heartbeats against the deployed controller. Delivered by control_service.host, the controller run wiring, the chart signing key mount and kind-proof.txt.",
+    "controller_lifecycle": "Task text, folded in by the master: the deployed process acquires the swarm v2 controller, renews it each tick, runs its start and tick account reconcile and sends runtime observations through it. Delivered by ControlService.start, tick and observe.",
+    "image": "Task text, master ruling: no image digest pin; floating dev tag with pullPolicy Always tracked by the image updater.",
+    "schemas_in_image": "Required by the deployed controller, which loads docs/swarm-v2/schemas at start; kind proof 38075338716 crashed without them."
   }
 }
