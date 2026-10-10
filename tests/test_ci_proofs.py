@@ -2,6 +2,8 @@ from pathlib import Path
 
 import yaml
 
+from tests.test_ci_hosted_lanes import LANE
+
 _ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -13,8 +15,7 @@ def test_proofs_dispatch_cannot_satisfy_required_tests():
     workflow = _workflow()
     assert set(workflow[True]) == {"workflow_dispatch", "push"}
     assert workflow[True]["push"] == {"branches": ["diffcheck/**"], "paths": [".github/workflows/proofs.yml"]}
-    assert workflow["concurrency"]["queue"] == "max"
-    assert workflow["concurrency"]["cancel-in-progress"] is False
+    assert workflow["concurrency"] == {"group": f"${{{{ {LANE} }}}}", "queue": "max", "cancel-in-progress": False}
     assert workflow["permissions"] == {"contents": "read", "pull-requests": "read", "actions": "read"}
     inputs = workflow[True]["workflow_dispatch"]["inputs"]
     assert inputs["proof"]["type"] == "choice"

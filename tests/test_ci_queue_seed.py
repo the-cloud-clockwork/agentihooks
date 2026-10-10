@@ -267,6 +267,12 @@ def test_the_base_run_is_any_tests_run_on_the_base_commit_that_kept_a_baseline(b
     assert "tree-of-base" in result.stdout
 
 
+def test_the_base_run_ignores_dispatched_runs_that_wait_on_a_hosted_lane(base_run):
+    result, _, args = base_run()
+    assert result.returncode == 0, result.stderr
+    assert '.workflow_runs[] | select(.event != "workflow_dispatch") | "\\(.id) \\(.status)"' in args
+
+
 def test_the_base_run_waits_for_an_earlier_queue_entry_to_publish(base_run):
     result, output, _ = base_run(after=5)
     assert result.returncode == 0, result.stderr
