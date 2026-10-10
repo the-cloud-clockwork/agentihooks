@@ -524,6 +524,20 @@ def test_a_seat_taken_meanwhile_fences_the_retried_registration(world, monkeypat
     assert world.fleet.seat("eng-1@fixture")["execution_id"] == "exe-newer"
 
 
+def test_a_seat_taken_meanwhile_fences_the_retried_heartbeat(world, monkeypatch):
+    anton, token = world.start(seat="eng-1@fixture")
+    registered = world.fleet.register(session("anton", anton), token)
+    newer = json.dumps({"execution_id": "exe-newer", "generation": anton.generation + 1, "session": "x"})
+    seats = world.store.key(SLUG, "fleet-seats")
+    intruder = Intruder(world.store.redis, lambda r: r.hset(seats, "eng-1@fixture", newer))
+    monkeypatch.setattr(world.store, "redis", intruder)
+    world.clock[0] += 5
+
+    with pytest.raises(SwarmError, match="^stale_generation$"):
+        world.beat("anton")
+    assert world.fleet.records() == [registered]
+
+
 def test_a_session_written_meanwhile_fences_the_retried_registration(world, monkeypatch):
     anton, token = world.start(seat="eng-1@fixture")
     world.authority.authorize(token)
