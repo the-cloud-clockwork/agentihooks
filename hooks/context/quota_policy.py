@@ -13,9 +13,11 @@ session count per account. Outcomes:
 
 import os
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from hooks.config import (
     AGENTIHOOKS_HOME,
@@ -25,6 +27,9 @@ from hooks.config import (
     QUOTA_RESERVE_ACCOUNTS,
     QUOTA_WAIT_MIN_WEEK_LEFT,
 )
+
+if TYPE_CHECKING:
+    from scripts.claude_quota_balancer import ProbeResult
 
 MIN_ROUTING_LEFT = 5.0
 PUSH_SIGNALS = ["keep pushing", "push to 100", "push until 100", "burn it to 100"]
@@ -155,13 +160,13 @@ def _session_windows(session_id: str) -> tuple[float, float, float | None, float
     )
 
 
-def _other_accounts(sessions: dict[str, int]) -> list[Candidate]:
+def _other_accounts(sessions: dict[str, int], fleet: Iterable[tuple[float, "ProbeResult"]] = ()) -> list[Candidate]:
     from scripts import session_bands
     from scripts.claude_quota_balancer import cached_observations
 
     now = time.time()
     newest = {}
-    for observed_at, result in cached_observations():
+    for observed_at, result in [*cached_observations(), *fleet]:
         if observed_at >= newest.get(result.account, (observed_at,))[0]:
             newest[result.account] = (observed_at, result)
     candidates = []
@@ -190,6 +195,7 @@ def _api_accounts(sessions: dict[str, int]) -> list[Candidate]:
 
 def evaluate(session_id: str) -> Decision | None:
     from hooks.context.account_sessions import agent_pid, session_account, sessions_by_account
+    from scripts.swarm_v2.quota import fleet_observations
 
     if os.environ.get("AH_ROUTE_API"):
         return None
@@ -206,7 +212,7 @@ def evaluate(session_id: str) -> Decision | None:
         week_used=week_used,
         five_reset=five_reset,
         week_reset=week_reset,
-        others=_other_accounts(sessions) + _api_accounts(sessions),
+        others=_other_accounts(sessions, fleet_observations(os.environ)) + _api_accounts(sessions),
         push=push_active(session_id),
     )
 
