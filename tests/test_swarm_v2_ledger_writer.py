@@ -141,12 +141,13 @@ def test_a_snapshot_accepts_text_paths(tmp_path):
 
 
 def test_a_failed_snapshot_keeps_the_previous_copy_and_leaves_no_partial_file(tmp_path):
-    target = tmp_path / "copy.sqlite3"
+    target = tmp_path / "backups" / "copy.sqlite3"
+    target.parent.mkdir()
     database(target, "previous").close()
     with pytest.raises(sqlite3.OperationalError):
         ledger_writer.snapshot(tmp_path / "missing.sqlite3", target)
     assert texts(target) == ["previous"]
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["copy.sqlite3"]
+    assert sorted(path.name for path in target.parent.iterdir()) == ["copy.sqlite3"]
 
 
 def test_an_unverified_snapshot_is_never_renamed_into_place(tmp_path, monkeypatch):
