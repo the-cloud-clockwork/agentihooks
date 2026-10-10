@@ -78,13 +78,13 @@ def test_an_engineers_freeze_command_is_refused(swarm, monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("verb", ["freeze", "focus", "unfreeze"])
-def test_the_dispatcher_at_full_autonomy_writes_each_verb_as_the_dispatcher(swarm, monkeypatch, capsys, verb):
+def test_the_dispatcher_at_full_autonomy_writes_each_verb_under_its_own_name(swarm, monkeypatch, capsys, verb):
     store, ledger = swarm
     store.update("demo", autonomy="full")
     acting(monkeypatch, DISPATCHER, "demo")
     assert cli.main(["demo", verb, "plans/a", "--reason", "ship first"]) == 0
-    assert ledger.freezes == [("demo", verb, "plans/a", {"by": "dispatcher", "reason": "ship first", "quote": ""})]
-    assert json.loads(capsys.readouterr().out) == {verb: "plans/a", "by": "dispatcher"}
+    assert ledger.freezes == [("demo", verb, "plans/a", {"by": DISPATCHER, "reason": "ship first", "quote": ""})]
+    assert json.loads(capsys.readouterr().out) == {verb: "plans/a", "by": DISPATCHER}
 
 
 @pytest.mark.parametrize("autonomy", ["manual", "assist", "delegate"])
@@ -113,11 +113,11 @@ def test_a_finished_dispatcher_is_refused(swarm, monkeypatch, capsys):
     )
 
 
-def test_the_freeze_writer_of_a_full_autonomy_dispatcher_is_the_dispatcher_author(swarm, monkeypatch):
+def test_the_freeze_writer_of_a_full_autonomy_dispatcher_is_its_live_agent_name(swarm, monkeypatch):
     store, _ = swarm
     store.update("demo", autonomy="full")
     acting(monkeypatch, DISPATCHER, "demo")
-    assert clearance.freezer(store, "demo", Who.from_env()) == "dispatcher"
+    assert clearance.freezer(store, "demo", Who.from_env()) == DISPATCHER
 
 
 def test_the_dispatcher_pinned_by_its_swarm_name_writes_at_full_autonomy(swarm, monkeypatch):
@@ -125,7 +125,7 @@ def test_the_dispatcher_pinned_by_its_swarm_name_writes_at_full_autonomy(swarm, 
     store.update("demo", autonomy="full")
     acting(monkeypatch, DISPATCHER, naming.swarm_name(store.ensure_code("demo").code))
     assert cli.main(["demo", "focus", "plans/a"]) == 0
-    assert ledger.freezes == [("demo", "focus", "plans/a", {"by": "dispatcher", "reason": "", "quote": ""})]
+    assert ledger.freezes == [("demo", "focus", "plans/a", {"by": DISPATCHER, "reason": "", "quote": ""})]
 
 
 def test_the_dispatcher_of_another_swarm_is_refused(swarm, monkeypatch, capsys):

@@ -3,6 +3,7 @@
 import re
 import time
 
+from scripts.swarm.naming import lane_of, resolve_name
 from scripts.swarm_ledger.ledger_kinds import KINDS
 from scripts.swarm_ledger.ledger_tasks import LANES
 from scripts.swarm_ledger.repository.hierarchy import project
@@ -12,7 +13,7 @@ VERBS = ("freeze", "focus")
 NODE_RE = re.compile(r"^(plans|phases|slices|tasks)/[^/\s]+$")
 SELECTORS = frozenset({*(f"lane:{lane}" for lane in LANES), *(f"kind:{kind}" for kind in KINDS)})
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
-DISPATCHER = "dispatcher"
+DISPATCH = "dispatch"
 FULL = "full"
 FIELDS = {"freeze_set": ("verb", "target", "reason", "quote"), "freeze_clear": ("target", "reason", "quote")}
 EVENTS = {"freeze": "frozen", "focus": "focused"}
@@ -56,7 +57,7 @@ def author(op, ctx) -> tuple[str, str] | None:
     by = op.get("by")
     if by is None:
         return "operator", op.get("quote")
-    if by == DISPATCHER:
+    if lane_of(resolve_name(by)) == DISPATCH:
         return (by, "") if autonomy(ctx.slug) == FULL else None
     master = ctx.meta["members"].get(by, {}).get("role") == "orchestrator"
     words = ledger_relay.verified(by, op["quote"]) if master and op.get("quote") else ""

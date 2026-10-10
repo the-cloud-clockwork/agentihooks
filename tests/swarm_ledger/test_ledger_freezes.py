@@ -12,6 +12,7 @@ from tests.swarm_ledger import legacy_page
 SLUG = "freeze-records"
 IDS = itertools.count()
 MASTER, ENGINEER, STRANGER = "master@f2e3d4-0001", "engineer@f2e3d4-0002", "master@f2e3d4-0009"
+DISPATCHER, CI, PLANNER = "dispatcher@f2e3d4-0003", "ci@f2e3d4-0004", "planner@f2e3d4-0005"
 WORDS = "Freeze the swarm v2 plan while we ship the hierarchy"
 
 
@@ -248,22 +249,74 @@ def test_an_author_who_never_joined_is_refused_without_error():
 
 
 def test_the_dispatcher_writes_freezes_only_at_full_autonomy(monkeypatch):
-    state, rejected = freeze("plans/a", by=ledger_freezes.DISPATCHER)
+    state, rejected = freeze("plans/a", by=DISPATCHER)
     assert rejected and state["freezes"] == []
     asked = []
     monkeypatch.setattr(ledger_freezes, "autonomy", lambda slug: asked.append(slug) or "full")
-    state, rejected = freeze("plans/a", by=ledger_freezes.DISPATCHER)
+    state, rejected = freeze("plans/a", by=DISPATCHER)
     assert rejected == []
     row = state["freezes"][0]
     assert row == {
         "id": row["id"],
         "verb": "freeze",
         "target": "plans/a",
-        "by": "dispatcher",
+        "by": DISPATCHER,
         "at": row["at"],
         "reason": "",
     }
     assert asked == [SLUG]
+
+
+def test_the_live_dispatcher_at_full_autonomy_freezes_focuses_and_unfreezes_under_its_name(monkeypatch):
+    monkeypatch.setattr(ledger_freezes, "autonomy", lambda slug: "full")
+    assert freeze("plans/a", by=DISPATCHER)[1] == []
+    state, rejected = freeze("plans/b", verb="focus", by=DISPATCHER, reason="ship b")
+    assert rejected == []
+    assert [(row["verb"], row["target"], row["by"], row["reason"]) for row in state["freezes"]] == [
+        ("freeze", "plans/a", DISPATCHER, ""),
+        ("focus", "plans/b", DISPATCHER, "ship b"),
+    ]
+    state, rejected = write("freeze_clear", by=DISPATCHER, target="plans/a")
+    assert rejected == []
+    assert [row["target"] for row in state["freezes"]] == ["plans/b"]
+    assert event_of(state)["by"] == DISPATCHER
+    assert state["_meta"]["stamps"]["freezes"]["by"] == DISPATCHER
+
+
+def test_an_alias_is_judged_by_the_live_name_it_resolves_to(monkeypatch):
+    aliases = {"retired-dispatcher": DISPATCHER, "retired-engineer": ENGINEER}
+    monkeypatch.setattr(ledger_freezes, "resolve_name", lambda name: aliases.get(name, name))
+    monkeypatch.setattr(ledger_freezes, "autonomy", lambda slug: "full")
+    assert freeze("plans/a", by="retired-dispatcher")[1] == []
+    state, rejected = freeze("plans/b", by="retired-engineer")
+    assert [op.rsplit("-", 1)[0] for op in rejected] == ["freeze_set"]
+    assert [(row["target"], row["by"]) for row in state["freezes"]] == [("plans/a", "retired-dispatcher")]
+
+
+@pytest.mark.parametrize("autonomy", ["", "manual", "assist", "delegate"])
+@pytest.mark.parametrize("verb", ["freeze", "focus", "unfreeze"])
+def test_the_live_dispatcher_below_full_autonomy_writes_no_freeze(monkeypatch, autonomy, verb):
+    freeze("plans/a")
+    monkeypatch.setattr(ledger_freezes, "autonomy", lambda slug: autonomy)
+    if verb == "unfreeze":
+        state, rejected = write("freeze_clear", by=DISPATCHER, target="plans/a")
+    else:
+        state, rejected = freeze("plans/b", verb=verb, by=DISPATCHER)
+    assert [op.rsplit("-", 1)[0] for op in rejected] == ["freeze_clear" if verb == "unfreeze" else "freeze_set"]
+    assert [(row["target"], row["by"]) for row in state["freezes"]] == [("plans/a", "operator")]
+
+
+@pytest.mark.parametrize("name", [ENGINEER, CI, PLANNER, MASTER])
+@pytest.mark.parametrize("verb", ["freeze", "focus", "unfreeze"])
+def test_other_lanes_at_full_autonomy_write_no_freeze_without_the_operators_words(monkeypatch, name, verb):
+    freeze("plans/a")
+    monkeypatch.setattr(ledger_freezes, "autonomy", lambda slug: "full")
+    if verb == "unfreeze":
+        state, rejected = write("freeze_clear", by=name, target="plans/a")
+    else:
+        state, rejected = freeze("plans/b", verb=verb, by=name)
+    assert [op.rsplit("-", 1)[0] for op in rejected] == ["freeze_clear" if verb == "unfreeze" else "freeze_set"]
+    assert [(row["target"], row["by"]) for row in state["freezes"]] == [("plans/a", "operator")]
 
 
 def test_lines_name_each_active_freeze_for_swarm_status():
