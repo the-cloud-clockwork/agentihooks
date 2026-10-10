@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/image_tag.py:scripts.swarm_v2.image_tag.x__head__mutmut_31:f1a60a89d592c39c113cb1603063c2623055b9f9a461b65f48240eeb91c5f94a": {
+    "reader": "standards_reader",
+    "reason": "A missing digest header becomes XXXX instead of an empty string; both fail the sha256 fullmatch and raise the same no sha256 digest refusal."
+  }
+}

@@ -61,7 +61,7 @@ def test_only_the_registry_login_holds_a_credential(workflow):
 
 
 def test_builds_pass_only_the_source_revision(workflow):
-    builds = [step["run"] for step in steps(workflow) if "docker build" in step.get("run", "")]
+    builds = [step["run"] for step in steps(workflow) if re.search(r"docker build\b", step.get("run", ""))]
 
     assert builds
     for run in builds:
@@ -94,6 +94,18 @@ def test_publication_runs_only_on_dev_pushes_or_an_explicit_dispatch(workflow):
 
     assert named(workflow, "Log in to the registry")["if"] == gate
     assert named(workflow, "Publish the qualified candidate")["if"] == gate
+
+
+def test_only_dev_moves_the_floating_dev_tag_to_the_published_digest(workflow):
+    names = [step.get("name") for step in steps(workflow)]
+    move = named(workflow, "Move the floating dev tag to the published digest")
+
+    assert move["if"] == "(github.event_name == 'push' || inputs.publish) && github.ref == 'refs/heads/dev'"
+    assert move["run"].splitlines() == [
+        'digest="$(jq -r .digest "$RUNNER_TEMP/worker-image-attestation/candidate/promoted.json")"',
+        'docker buildx imagetools create --tag "$REPOSITORY:dev" "$REPOSITORY@$digest"',
+    ]
+    assert names.index("Publish the qualified candidate") < names.index(move["name"])
 
 
 def test_the_attestation_is_uploaded_even_after_a_failure(workflow):

@@ -153,4 +153,10 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
     except BaseException:
         service.stop()
         raise
+    if workers is not None:
+        print(
+            f"controller: built the Kubernetes runtime for {slug}: workers in {workers.policy['namespace']} "
+            f"run {workers.policy['image_repository']}:{workers.image_tag} with profile {workers.profile}",
+            flush=True,
+        )
     return service

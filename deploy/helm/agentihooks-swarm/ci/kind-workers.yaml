@@ -1,0 +1,51 @@
+controller:
+  serviceAccountName: swarm-controller
+  env:
+    # No account email lives in git; the runtime build reads the launch account as an opaque name.
+    AGENTIHOOKS_LAUNCH_ACCOUNT: kind-fixture
+  workers:
+    apiUrl: http://agentihooks-swarm-controller.default.svc:8780
+    imageTag: dev
+    profile: general
+    cap: 2
+    projects:
+      - github.com/the-cloud-clockwork/agentihooks
+    brain: swarm
+    podPolicy:
+      schema_version: 1
+      template_version: kub01-v2
+      namespace: swarm-pod-proof
+      owner: agentihooks-swarm-kind-proof
+      service_account: swarm-worker
+      runtime_class_name: kata-fc
+      image_repository: ghcr.io/the-cloud-clockwork/agentihooks-worker
+      brain_url: http://brain-api.swarm-brain.svc:8080
+      termination_grace_seconds: 60
+      provider_accounts: []
+      profiles:
+        general:
+          limits:
+            memory_mib: 4096
+            cpu_millis: 2000
+            ephemeral_mib: 10240
+          node_selector: {}
+          tolerations: []
+          excluded_nodes: {}
+      probes:
+        herdr_timeout_seconds: 2
+        brain_timeout_seconds: 2
+        startup:
+          initial_delay_seconds: 0
+          period_seconds: 5
+          timeout_seconds: 6
+          failure_threshold: 24
+        readiness:
+          initial_delay_seconds: 0
+          period_seconds: 10
+          timeout_seconds: 6
+          failure_threshold: 3
+        liveness:
+          initial_delay_seconds: 0
+          period_seconds: 15
+          timeout_seconds: 6
+          failure_threshold: 4

@@ -9,7 +9,7 @@ from scripts.hive import auth as hive_auth
 from scripts.swarm import controller as loop
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
-from scripts.swarm_v2 import deployed
+from scripts.swarm_v2 import deployed, image_tag
 from scripts.swarm_v2.auth_context import GrantRefused
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 from scripts.swarm_v2.kubernetes.grants import PodGrants
@@ -25,6 +25,7 @@ SLUG = "control-fixture"
 SEAT = f"eng-1@{SLUG}"
 API_URL = "http://swarm-api.agentihooks-swarm.svc:8780"
 IMAGE = "sha256:" + "4b" * 32
+REPOSITORY = "ghcr.io/the-cloud-clockwork/agentihooks-worker"
 PROJECT = "github.com/the-cloud-clockwork/agentihooks"
 ACCOUNT = "claude-fixture@example.com"
 POLICY = Path(__file__).parent / "fixtures" / "swarm_v2" / "pod-policy.json"
@@ -76,11 +77,23 @@ def _policy(tmp_path, owner=owner_for(SLUG)):
     return path
 
 
+@pytest.fixture(autouse=True)
+def registry(monkeypatch):
+    asked, digests = [], [IMAGE]
+
+    def resolve(repository, tag):
+        asked.append((repository, tag))
+        return digests[min(len(asked), len(digests)) - 1]
+
+    monkeypatch.setattr(image_tag, "resolve", resolve)
+    return asked, digests
+
+
 def _workers(tmp_path, **changes):
     environ = {
         deployed.API_URL_ENV: API_URL,
         deployed.POLICY_ENV: str(_policy(tmp_path)),
-        deployed.IMAGE_ENV: IMAGE,
+        deployed.IMAGE_TAG_ENV: "dev",
         deployed.PROFILE_ENV: "general",
         deployed.ACCOUNT_ENV: ACCOUNT,
         deployed.CAP_ENV: "2",
@@ -169,7 +182,96 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
     assert lease.current(store, SLUG) is None
 
 
-def test_the_launch_record_names_the_admitted_execution_and_the_worker_settings(tmp_path):
+def _task(execution="1"):
+    return {
+        "id": "t1",
+        "seat": SEAT,
+        "controller_epoch": 4,
+        "execution_id": "exe-" + execution * 32,
+        "generation": 1,
+        "endpoints": {"api_url": API_URL},
+    }
+
+
+def test_each_launch_resolves_the_worker_image_tag_to_its_current_digest(tmp_path, registry):
+    asked, digests = registry
+    moved = "sha256:" + "5c" * 32
+    digests.append(moved)
+    workers = deployed.Workers.from_environ(_workers(tmp_path, **{deployed.IMAGE_TAG_ENV: "sha-e04f98f3f"}), SLUG)
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=API_URL)
+
+    first = workers.launch(SpawnRequest(config, "eng", "engineer-1", _task("1")))
+    second = workers.launch(SpawnRequest(config, "eng", "engineer-2", _task("2")))
+
+    assert (first["image_digest"], second["image_digest"]) == (IMAGE, moved)
+    assert asked == [(REPOSITORY, "sha-e04f98f3f"), (REPOSITORY, "sha-e04f98f3f")]
+
+
+@pytest.mark.parametrize("tag", ["sha256:" + "4b" * 32, "dev@sha256:" + "4b" * 32, "-dev"])
+def test_a_worker_image_tag_that_is_a_digest_or_malformed_is_refused(tmp_path, tag):
+    with pytest.raises(SwarmError) as refused:
+        deployed.Workers.from_environ(_workers(tmp_path, **{deployed.IMAGE_TAG_ENV: tag}), SLUG)
+
+    assert str(refused.value) == f"{deployed.IMAGE_TAG_ENV} must be an image tag, never a digest"
+
+
+def test_a_worker_image_the_registry_cannot_resolve_refuses_the_spawn_before_any_create(tmp_path, monkeypatch):
+    def unresolved(repository, tag):
+        raise image_tag.ImageUnresolved(f"the registry answered 404 for {repository}:{tag}")
+
+    monkeypatch.setattr(image_tag, "resolve", unresolved)
+    workers, created = deployed.Workers.from_environ(_workers(tmp_path), SLUG), []
+    runtime = KubernetesRuntime(created.append, workers.launch)
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=API_URL)
+
+    outcome = runtime.spawn(SpawnRequest(config, "eng", "engineer-1", _task()))
+
+    assert (outcome.status.value, outcome.backend, outcome.detail) == (
+        "refused",
+        BACKEND,
+        f"the registry answered 404 for {REPOSITORY}:dev",
+    )
+    assert created == []
+
+
+def test_the_start_logs_that_it_built_the_kubernetes_runtime(tmp_path, monkeypatch, capsys):
+    store = _store()
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: Pods(namespace))
+
+    service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    try:
+        assert capsys.readouterr().out == (
+            f"controller: built the Kubernetes runtime for {SLUG}: workers in swarm-pod-proof "
+            f"run {REPOSITORY}:dev with profile general\n"
+        )
+    finally:
+        service.stop()
+
+
+def test_the_runtime_line_is_flushed_so_the_container_log_shows_it_at_once(tmp_path, monkeypatch):
+    store, printed = _store(), []
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: Pods(namespace))
+    monkeypatch.setattr(_cs(), "print", lambda *args, **kwargs: printed.append(kwargs), raising=False)
+
+    service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    try:
+        assert printed == [{"flush": True}]
+    finally:
+        service.stop()
+
+
+def test_a_start_without_an_api_address_logs_no_kubernetes_runtime(tmp_path, capsys):
+    store = _store()
+    environ = _environ(tmp_path, store, **{deployed.API_URL_ENV: None, deployed.POLICY_ENV: None})
+
+    service = _cs().host(environ, store, "hive-fixture")
+    try:
+        assert capsys.readouterr().out == ""
+    finally:
+        service.stop()
+
+
+def test_the_launch_record_names_the_admitted_execution_and_the_worker_settings(tmp_path, registry):
     workers = deployed.Workers.from_environ(_workers(tmp_path), SLUG)
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=API_URL)
     task = {
@@ -198,6 +300,7 @@ def test_the_launch_record_names_the_admitted_execution_and_the_worker_settings(
         "provider_account": ACCOUNT,
         "task_payload": {"task_id": "t1", "lane": "eng", "name": "engineer-1", "endpoints": {"api_url": API_URL}},
     }
+    assert registry[0] == [(REPOSITORY, "dev")]
 
 
 def test_the_start_runs_as_before_without_an_api_address(tmp_path):
@@ -233,12 +336,12 @@ def test_the_tick_runtime_takes_its_disabled_backends_from_the_control_service_s
 
 def test_a_missing_worker_setting_refuses_the_start_and_names_each_one(tmp_path):
     store = _store()
-    environ = _environ(tmp_path, store, **{deployed.IMAGE_ENV: None, deployed.BRAIN_ENV: None})
+    environ = _environ(tmp_path, store, **{deployed.IMAGE_TAG_ENV: None, deployed.BRAIN_ENV: None})
 
     with pytest.raises(SwarmError) as refused:
         _cs().host(environ, store, "hive-fixture")
 
-    assert str(refused.value) == f"the Kubernetes runtime needs {deployed.IMAGE_ENV}, {deployed.BRAIN_ENV}"
+    assert str(refused.value) == f"the Kubernetes runtime needs {deployed.IMAGE_TAG_ENV}, {deployed.BRAIN_ENV}"
     assert lease.current(store, SLUG) is None
 
 

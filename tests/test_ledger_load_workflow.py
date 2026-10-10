@@ -14,10 +14,10 @@ def test_the_ledger_load_gate_runs_beside_the_shards_with_redis_inside_the_budge
     assert {key: value for key, value in job.items() if key not in {"needs", "if"}} == {
         "uses": "./.github/workflows/ledger-load.yml"
     }
-    assert job.get("needs") in (None, ["reuse"])
-    assert job.get("if") in (
-        None,
-        "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+    assert job["needs"] == ["reuse"]
+    assert (
+        job["if"]
+        == "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}"
     )
     load = yaml.safe_load((WORKFLOWS / "ledger-load.yml").read_text())["jobs"]["load"]
     assert "redis" in load["services"]

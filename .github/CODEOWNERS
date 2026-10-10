@@ -2,6 +2,7 @@
 /.semgrep/ @nestorcolt
 /scripts/ci_mutation/ @nestorcolt
 /scripts/ci_*.py @nestorcolt
+/scripts/ci_reuse_job.yml @nestorcolt
 /scripts/gates/ @nestorcolt
 /scripts/gate_* @nestorcolt
 /scripts/size_limits.py @nestorcolt

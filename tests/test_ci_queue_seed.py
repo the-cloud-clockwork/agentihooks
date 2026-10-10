@@ -88,7 +88,7 @@ def test_queue_runs_publish_their_own_baseline_before_sonar_and_the_gate():
     record = _step(steps, "Record this run's coverage baseline")
     upload = _step(steps, "Publish this run's coverage baseline")
     find = _step(steps, "Find the run that measured the base tree")
-    assert jobs["queue-baseline"]["needs"] in (["unit"], ["unit", "reuse"])
+    assert jobs["queue-baseline"]["needs"] == ["unit", "reuse"]
     assert download["with"] == {"pattern": "coverage-3.12-*", "path": ".coverage-shards"}
     assert record["run"] == (
         "python -m tests.coverage_baseline --shards 8 --head-shards .coverage-shards"
@@ -109,11 +109,8 @@ def test_the_queue_baseline_holds_the_exact_base_tree_on_the_app_token():
     download = _step(steps, "Download the base tree's coverage baseline")
     hold = _step(steps, "Hold the base tree")
     upload = _step(steps, "Publish the base tree's coverage baseline")
-    assert job["needs"] in (["unit"], ["unit", "reuse"])
-    assert job["if"] in (
-        "${{ !cancelled() && github.event_name == 'merge_group' }}",
-        "${{ !cancelled() && github.event_name == 'merge_group' && (needs.unit.result == 'success' || needs.reuse.outputs.reused == 'true') }}",
-    )
+    assert job["needs"] == ["unit", "reuse"]
+    assert job["if"] == "${{ !cancelled() && github.event_name == 'merge_group' }}"
     assert job["permissions"] == {"contents": "read"}
     assert mint["id"] == "app-token"
     assert mint["with"]["permission-actions"] == mint["with"]["permission-contents"] == "read"
@@ -313,10 +310,7 @@ def test_a_failed_queue_run_publishes_its_baseline_then_stops_red():
     mint = _step(steps, "Mint the tcc main ci App token")
     assert "!cancelled()" in job["if"]
     assert "if" not in upload
-    assert stop["if"] in (
-        "needs.unit.result != 'success'",
-        "needs.unit.result != 'success' && needs.reuse.outputs.reused != 'true'",
-    )
+    assert stop["if"] == "needs.unit.result != 'success' && needs.reuse.outputs.reused != 'true'"
     assert steps.index(upload) < steps.index(stop) < steps.index(mint)
     result = subprocess.run(["bash", "-e", "-c", stop["run"]], capture_output=True, text=True)
     assert result.returncode != 0

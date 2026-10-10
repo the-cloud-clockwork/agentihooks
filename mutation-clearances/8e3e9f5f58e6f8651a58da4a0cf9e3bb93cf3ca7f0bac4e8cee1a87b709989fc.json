@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/image_tag.py:scripts.swarm_v2.image_tag.x_resolve__mutmut_8:5cee4bb8eaabf8a125c0c0a1dab94dfcab5e747e9a3c741f5ebf50fb5f8cde99": {
+    "reader": "standards_reader",
+    "reason": "The first request passes None instead of an empty grant; _head only adds Authorization when the grant is truthy, so both send no credentials."
+  }
+}

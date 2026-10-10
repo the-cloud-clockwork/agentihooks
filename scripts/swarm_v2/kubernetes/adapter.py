@@ -23,8 +23,8 @@ class KubernetesRuntime:
         execution_id, generation = request.task.get("execution_id"), request.task.get("generation")
         if not execution_id or not generation:
             return Outcome(SPAWN, Status.REFUSED, BACKEND, detail=Unqualified.NO_EXECUTION.value)
-        payload = {**self.launch(request), "execution_id": execution_id, "generation": generation}
         try:
+            payload = {**self.launch(request), "execution_id": execution_id, "generation": generation}
             operation = self.execute(OperationRequest(execution_id, generation, SPAWN, payload, CREATE))
         except (SwarmError, OperationConflict) as error:
             return Outcome(SPAWN, Status.REFUSED, BACKEND, detail=str(error))
