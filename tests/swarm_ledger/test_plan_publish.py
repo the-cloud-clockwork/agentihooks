@@ -722,8 +722,33 @@ def test_a_refused_publish_leaves_no_plan_entry(plan_ledger, tmp_path, monkeypat
     assert [e["target"] for e in state["_meta"]["events"] if e["target"].startswith("plans/")] == []
 
 
+def test_a_publish_with_one_phase_refused_changes_no_phase_slice_plan_or_task(plan_ledger, tmp_path, monkeypatch):
+    _, old = published(plan_ledger, tmp_path, monkeypatch)
+    add(plan_ledger, "build", plan_slice="first")
+    before = core.sync(plan_ledger)[0]
+    refusal = ledger_plans.phase_refusal
+    monkeypatch.setattr(
+        ledger_plans,
+        "phase_refusal",
+        lambda doc, phase: "phase p2 refused" if phase["id"] == "p2" else refusal(doc, phase),
+    )
+    plan = tmp_path / "plan.md"
+    plan.write_text(REVISED, encoding="utf-8")
+    revised = ledger_artifacts.store(plan_ledger, "plan.md", plan.read_bytes())
+    monkeypatch.setattr(ledger, "upload_artifact", lambda *a: revised)
+    with pytest.raises(SystemExit) as raised:
+        cli(monkeypatch, plan_ledger, "publish-plan", str(plan), "--phase", "p1,p2")
+    assert raised.value.code == "phase p2 refused"
+    after = core.sync(plan_ledger)[0]
+    keys = ("plans", "phases", "slices", "tasks")
+    assert [after[key] for key in keys] == [before[key] for key in keys]
+    assert [row["id"] for row in after["plans"]] == [old]
+    new = f"plans/{ledger_plans.plan_id(revised['id'])}"
+    assert [e for e in after["_meta"]["events"] if e["target"] == new] == []
+
+
 def test_anchors_of_an_empty_stored_plan_are_none(monkeypatch):
     from scripts.swarm_ledger import plan_ranges
 
     monkeypatch.setattr(plan_ranges, "stored_text", lambda ref, doc: "")
-    assert plan_ranges.anchors({}, {"plan_url": PLAN}) == []
+    assert plan_ranges.anchors({}, {"plan_url": "http://127.0.0.1:8765/artifacts/s/f.md"}) == []

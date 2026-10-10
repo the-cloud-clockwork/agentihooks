@@ -1,8 +1,9 @@
+import copy
 import itertools
 
 import pytest
 
-from scripts.swarm_ledger import ledger_artifacts, ledger_phases, ledger_plans, ledger_tasks, new_ledger
+from scripts.swarm_ledger import ledger_artifacts, ledger_phases, ledger_plans, ledger_tasks, new_ledger, plan_ranges
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger.api import schemas
 from scripts.swarm_ledger.repository import rows
@@ -483,7 +484,7 @@ def test_a_batch_whose_phase_update_is_rejected_before_it_applies_keeps_no_plan_
         {"op": "phase_update", "id": "move-p9", "by": "planner", "item": "phases/p9", "fields": {"plan": "plans/c"}},
     ]
     state, rejected = core.sync(SLUG, ops=ops)
-    assert rejected == ["move-p9"]
+    assert rejected == ["add-c", "move-p9"]
     assert state["plans"] == []
     assert [e for e in state["_meta"]["events"] if e["target"] == "plans/c"] == []
 
@@ -533,3 +534,161 @@ def test_settle_records_each_task_whose_slice_changed_or_cleared():
     ledger_plans.settle(doc, view, "planner", ctx)
     assert (doc["tasks"], doc["slices"]) == (view["tasks"], [])
     assert ctx.events == [("planner", "slice changed", "tasks/a", {}), ("planner", "slice cleared", "tasks/b", {})]
+
+
+ISSUE = "https://github.com/acme/app/issues/12"
+REF = {"artifact": "http://127.0.0.1:8765/artifacts/s/f.md", "lines": "1-9"}
+
+
+def held():
+    plans("a", "b")
+    link("p1", "plans/a")
+    run("slice_add", phase="phases/p1", anchor="first")
+    run("task_add", task="t1", title="Build", lane="eng", phase="p1", slice="slices/a.first")
+    return core.sync(SLUG)[0]
+
+
+def unchanged(before, after):
+    keys = ("plans", "phases", "slices", "tasks")
+    return [after[key] for key in keys] == [before[key] for key in keys]
+
+
+def test_a_batch_that_adds_a_plan_commits_none_of_its_ops_when_one_is_refused():
+    ops = [
+        {"op": "plan_add", "id": "add-c", "by": "planner", "plan": "c", "title": "Plan c"},
+        {"op": "phase_update", "id": "move-p1", "by": "planner", "item": "phases/p1", "fields": {"plan": "plans/c"}},
+        {"op": "phase_update", "id": "move-p2", "by": "planner", "item": "phases/p2", "fields": {"plan": "plans/x"}},
+    ]
+    state, rejected = core.sync(SLUG, ops=ops)
+    assert rejected == ["add-c", "move-p1", "move-p2"]
+    assert (state["plans"], [phase.get("plan") for phase in state["phases"]]) == ([], [None, None])
+    assert [e for e in state["_meta"]["events"] if e["target"] in ("plans/c", "phases/p1")] == []
+    assert [alert["text"] for alert in state["alerts"]] == ["phase p2 names an unknown plan plans/x"]
+
+
+def test_a_batch_without_a_plan_keeps_the_ops_that_were_accepted():
+    plans("c")
+    ops = [
+        {"op": "phase_update", "id": "move-p1", "by": "planner", "item": "phases/p1", "fields": {"plan": "plans/c"}},
+        {"op": "phase_update", "id": "move-p2", "by": "planner", "item": "phases/p2", "fields": {"plan": "plans/x"}},
+    ]
+    state, rejected = core.sync(SLUG, ops=ops)
+    assert rejected == ["move-p2"]
+    assert [phase.get("plan") for phase in state["phases"]] == ["plans/c", None]
+
+
+STALE = "phase p1 moves to plans/b without a new plan_ref: publish the plan for the phase to move it"
+
+
+@pytest.mark.parametrize("reference", [{"plan_url": ISSUE}, {"plan_ref": REF}])
+def test_stale_refusal_names_a_plan_change_without_a_new_plan_ref(reference):
+    phase = {"id": "p1", "plan": "plans/a", **reference}
+    assert ledger_plans.stale_refusal(phase, {"plan": "plans/b"}) == STALE
+    with pytest.raises(ValueError) as raised:
+        ledger_plans.check_move(phase, {"plan": "plans/b"})
+    assert str(raised.value) == STALE
+    assert ledger_plans.check_move(phase, {"plan": "plans/a"}) is None
+
+
+def test_a_plan_change_without_a_new_plan_url_link_is_refused_and_changes_nothing():
+    held()
+    run("phase_update", item="phases/p1", fields={"plan_url": ISSUE})
+    before = core.sync(SLUG)[0]
+    state, rejected, refusal = link("p1", "plans/b")
+    assert (len(rejected), refusal) == (1, [STALE])
+    assert unchanged(before, state)
+
+
+def test_a_plan_change_without_a_new_plan_ref_is_refused_and_changes_nothing():
+    file = ledger_artifacts.store(SLUG, "plan.md", PLAN.encode())
+    artifact = f"http://127.0.0.1:8765/artifacts/{SLUG}/{file['id']}"
+    run("join", role="member")
+    run("artifact_add", task="", title="Plan", file=file, plan=True)
+    run("plan_add", plan="a", title="Plan", artifact=artifact)
+    plans("b")
+    fields = {"plan": "plans/a", "plan_ref": {"artifact": artifact, "lines": "3-9"}}
+    assert run("phase_update", item="phases/p1", fields=fields)[1] == []
+    assert run("slice_add", phase="phases/p1", anchor="first")[1] == []
+    before = core.sync(SLUG)[0]
+    assert before["slices"] == [{"id": "a.first", "phase": "phases/p1", "anchor": "first", "lines": "4-6"}]
+    state, rejected, refusal = link("p1", "plans/b")
+    assert (len(rejected), refusal) == (1, [STALE])
+    assert unchanged(before, state)
+
+
+@pytest.mark.parametrize(
+    ("phase", "fields"),
+    [
+        ({"id": "p1", "plan": "plans/a", "plan_ref": REF}, {"plan": "plans/b", "plan_ref": REF}),
+        ({"id": "p1", "plan": "plans/a"}, {"plan": "plans/b"}),
+        ({"id": "p1", "plan": "plans/a", "plan_url": ISSUE}, {"plan": "plans/a"}),
+        ({"id": "p1", "plan": "plans/a", "plan_url": ISSUE}, {"title": "Build"}),
+        ({"id": "p1", "plan_url": ISSUE}, {"plan": "plans/b"}),
+        ({}, {"plan": "plans/b"}),
+    ],
+)
+def test_a_new_plan_ref_a_kept_plan_or_a_first_plan_link_is_not_stale(phase, fields):
+    assert ledger_plans.stale_refusal(phase, fields) == ""
+
+
+MISSING = f"http://127.0.0.1:8765/artifacts/{SLUG}/missing.md"
+UNREADABLE = "phase p1 plan cannot be read: plan artifact is missing or is not marked as a plan"
+
+
+def test_moving_a_phase_onto_a_plan_that_cannot_be_read_is_refused_and_keeps_its_slices():
+    before = held()
+    state, rejected, refusal = run("phase_update", item="phases/p1", fields={"plan": "plans/b", "plan_url": MISSING})
+    assert (len(rejected), refusal) == (1, [UNREADABLE])
+    assert unchanged(before, state)
+    assert state["tasks"][0]["slice"] == "slices/a.first"
+
+
+def test_moving_a_phase_onto_a_plan_linked_outside_the_ledger_clears_its_slices():
+    held()
+    state, rejected, _ = run("phase_update", item="phases/p1", fields={"plan": "plans/b", "plan_url": ISSUE})
+    assert rejected == []
+    assert (state["phases"][0]["plan"], state["slices"]) == ("plans/b", [])
+    assert "slice" not in state["tasks"][0]
+
+
+def test_a_task_added_to_a_phase_whose_plan_cannot_be_read_is_refused():
+    run("phase_update", item="phases/p1", fields={"plan_url": MISSING})
+    state, rejected, refusal = run("task_add", task="t1", title="Build", lane="eng", phase="p1")
+    assert (len(rejected), refusal) == (1, [UNREADABLE])
+    assert state["tasks"] == []
+
+
+def test_moved_raises_for_an_unreadable_plan_and_leaves_the_document_alone():
+    doc = {
+        "plans": [{"id": "b"}],
+        "slices": [{"id": "a.x", "phase": "phases/p1", "anchor": "x"}],
+        "tasks": [{"id": "t1", "slice": "slices/a.x"}],
+    }
+    kept = copy.deepcopy(doc)
+    with pytest.raises(ValueError) as raised:
+        ledger_plans.moved(doc, {"id": "p1", "plan": "plans/b", "plan_url": MISSING})
+    assert str(raised.value) == UNREADABLE
+    assert doc == kept
+
+
+def test_a_plan_file_that_cannot_be_opened_reads_as_unreadable(monkeypatch):
+    def gone(ref, doc):
+        raise OSError("gone")
+
+    monkeypatch.setattr(plan_ranges, "stored_text", gone)
+    with pytest.raises(ValueError) as raised:
+        plan_ranges.anchors({}, {"id": "p1", "plan_ref": {"artifact": MISSING, "lines": "1-2"}})
+    assert str(raised.value) == "phase p1 plan cannot be read: gone"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://github.com/artifacts/app/issues/1",
+        "https://github.com/acme/artifacts/issues",
+        "http://127.0.0.1:8765/artifacts/plan.md",
+        "http://127.0.0.1:8765/ledgers/s/f.md",
+    ],
+)
+def test_a_plan_link_that_does_not_name_a_stored_artifact_reads_no_markers(url):
+    assert plan_ranges.anchors({}, {"id": "p1", "plan_url": url}) == []

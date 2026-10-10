@@ -106,6 +106,25 @@ def phase_refusal(doc: dict, phase: dict) -> str:
     return ""
 
 
+def stale_refusal(phase: dict, fields: dict) -> str:
+    moving = phase.get("plan") and fields.get("plan", phase["plan"]) != phase["plan"]
+    if not moving or "plan_ref" in fields or not (phase.get("plan_ref") or phase.get("plan_url")):
+        return ""
+    return (
+        f"phase {phase['id']} moves to {fields['plan']} without a new plan_ref: "
+        "publish the plan for the phase to move it"
+    )
+
+
+def check_move(phase: dict, fields: dict) -> None:
+    if refusal := stale_refusal(phase, fields):
+        raise ValueError(refusal)
+
+
+def atomic(ops: list[dict]) -> bool:
+    return any(op["op"] == "plan_add" for op in ops)
+
+
 def task_refusal(doc: dict, task: dict) -> str:
     address = task.get("slice")
     if not address:
