@@ -26,9 +26,9 @@ def _seated(store, slug, who, lane):
     return here and any(a.lane == lane and a.state != "finished" and a.name == name for a in store.agents(slug))
 
 
-def freezer(store, slug, who, environ=None):
+def freezer(store, slug, who):
     if not _seated(store, slug, who, DISPATCH):
-        return holder(store, slug, who, environ)
+        return holder(store, slug, who)
     autonomy = store.config(slug).autonomy
     if autonomy != FULL:
         raise SwarmError(
