@@ -545,3 +545,11 @@ def test_the_policy_compares_mount_names_exactly(tmp_path):
         "artifacts",
         "node-cache",
     ]
+
+
+@pytest.mark.parametrize(
+    "path, expected",
+    [("//home//worker/", "/home/worker"), ("///tmp", "/tmp"), ("X/y", "/X/y"), ("/a/../b", "/b"), ("", "/")],
+)
+def test_normal_makes_a_path_absolute_with_one_leading_slash(path, expected):
+    assert storage.normal(path) == expected
