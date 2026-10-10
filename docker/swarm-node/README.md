@@ -143,8 +143,9 @@ never values. Every report names `worker_startup_failure_reason`, the first
 failing local check. Probes leave nothing behind in the attempt.
 `--herdr-timeout` and `--brain-timeout` (seconds, default 2) are the probe
 thresholds; a wrong value is reverted in the probe arguments alone, with no new
-image and no agent restart. Probe wiring and
-thresholds live in the Pod template under antoncore GitOps and roll back
+image and no agent restart. The SV2-KUB-01 Pod template
+(`scripts.swarm_v2.kubernetes.spec`) wires the probes; their thresholds come from
+its Pod policy document, which antoncore GitOps supplies, and roll back
 independently of the image. `tests/integration/swarm_node/run_health_proof.sh`
 proves the probes against isolated containers with real headless herdr.
 
