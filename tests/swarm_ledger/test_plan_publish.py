@@ -839,7 +839,8 @@ def test_a_retry_after_a_refused_publish_reopens_its_issue(plan_ledger, tmp_path
     refusing.on = False
     cli(monkeypatch, plan_ledger, "publish-plan", str(tmp_path / "plan.md"), "--phase", "p1,p2")
     assert issues.states() == ["OPEN"]
-    assert verbs(issues) == ["list", "create", "comment", "close", "list", "reopen"]
+    assert verbs(issues) == ["list", "create", "comment", "close", "list", "reopen", "comment"]
+    assert issues.rows[0]["comments"][-1] == {"body": ledger_publish.REOPENED_NOTE}
     state = core.sync(plan_ledger)[0]
     assert [phase["plan_url"] for phase in state["phases"]] == [PLAN, PLAN]
     assert [(row["plan"], row["by"]) for row in state["artifacts"]] == [(True, "planner")]
@@ -894,7 +895,10 @@ def test_publish_reopens_an_issue_a_refused_publish_closed():
     issues.rows = [{"url": PLAN, "state": "CLOSED", "body": f"Plan\n\n{stored}", "comments": comments}]
     published = ledger_publish.publish("plan.md", "Plan", "", lambda *a: stored, issues.run, issue_title="Plan")
     assert published == (PLAN, "issue")
-    assert issues.calls[-1] == ["gh", "issue", "reopen", PLAN]
+    assert issues.calls[-2:] == [
+        ["gh", "issue", "reopen", PLAN],
+        ["gh", "issue", "comment", PLAN, "--body", ledger_publish.REOPENED_NOTE],
+    ]
     assert issues.states() == ["OPEN"]
 
 

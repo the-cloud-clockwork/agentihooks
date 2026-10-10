@@ -7,6 +7,7 @@ import subprocess
 HEADING_RE = re.compile(r"^#\s+(.+)$", re.M)
 NO_REPO = ("not a git repository", "point to a known GitHub host")
 REFUSED_NOTE = "The ledger refused this plan publish, so its issue is closed until the same plan is published again."
+REOPENED_NOTE = "The same plan was published again, so this issue is open again."
 
 
 class PublishError(RuntimeError):
@@ -65,6 +66,7 @@ def reused_issue(path: str, repo: str, run=subprocess.run) -> str:
     if issue is None:
         return ""
     gh_issue(["gh", "issue", "reopen", issue["url"]], run)
+    gh_issue(["gh", "issue", "comment", issue["url"], "--body", REOPENED_NOTE], run)
     return issue["url"]
 
 
