@@ -272,7 +272,7 @@ def test_the_bridge_posts_its_grant_and_channels_to_the_claim_endpoint(monkeypat
         "POST",
         5,
     )
-    assert first[0].header_items() == [("Authorization", "Bearer v2.grant.sig"), ("Content-type", "application/json")]
+    assert dict(first[0].header_items()) == {"Authorization": "Bearer v2.grant.sig", "Content-type": "application/json"}
     assert json.loads(first[0].data) == {"channels": ["amygdala"]}
     assert json.loads(second[0].data) == {"channels": ["brain"], "claim_id": "claim-1"}
 
