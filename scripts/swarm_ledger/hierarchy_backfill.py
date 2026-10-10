@@ -63,7 +63,7 @@ def phase_plan(doc: dict, phase: dict, slug: str) -> dict:
 
 
 def assign_phases(doc: dict, slug: str, conflicts: list) -> None:
-    ordered = sorted(doc.get("phases", []), key=lambda row: not bool((row.get("plan_ref") or {}).get("artifact")))
+    ordered = sorted(doc["phases"], key=lambda row: not bool((row.get("plan_ref") or {}).get("artifact")))
     for phase in ordered:
         plan = phase_plan(doc, phase, slug)
         address = f"plans/{plan['id']}"
@@ -110,7 +110,7 @@ def task_slice(doc: dict, phase: dict, task: dict, conflicts: list) -> None:
 
 
 def assign_tasks(doc: dict, conflicts: list) -> None:
-    phases = {row["id"]: row for row in doc.get("phases", [])}
+    phases = {row["id"]: row for row in doc["phases"]}
     plans = {f"plans/{row['id']}": row for row in doc["plans"]}
     for task in doc.get("tasks", []):
         phase = phases.get(task.get("phase"))
@@ -164,13 +164,11 @@ def commit(repo: store.SQLiteLedgerRepository, slug: str, by: str) -> dict:
             ctx.record(by, "backfilled", "hierarchy")
             meta.update(rev=ctx.rev, updated_at=ctx.at)
             meta["events"] = (meta["events"] + ctx.events)[-repo.domain.EVENTS_KEPT :]
-            written = repo._write(connection, slug, entry, after, ctx.events)
+            repo._write(connection, slug, entry, after, ctx.events)
         else:
-            written = entry
             hierarchy.sync(connection, slug, after)
         report["applied"] = True
         report["drift"] = hierarchy.drift(hierarchy.stored(connection, slug), hierarchy.project(after))
-    repo._remember(slug, written)
     return report
 
 
