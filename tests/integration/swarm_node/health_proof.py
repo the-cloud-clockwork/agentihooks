@@ -3,7 +3,6 @@ import hashlib
 import json
 import subprocess
 import time
-import uuid
 from pathlib import Path
 
 from supervision_proof import docker, ready
@@ -261,7 +260,7 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
-    private = uuid.uuid4().hex
+    private = hashlib.sha256(f"SV2-IMG-04 {args.tested_commit}".encode()).hexdigest()[:32]
     fixture = manifest(args.tested_commit, {"fixture": args.image, "missing_binary": args.missing_binary_image})
     case = "A"
     try:
@@ -272,7 +271,13 @@ def main():
         case = "C"
         record(args.output, "c-result.json", case, [recovery_run(args.image, private) for _ in range(2)], fixture)
     except Exception as exc:
-        failure = {"package": "SV2-IMG-04", "case": case, "error": repr(exc)[:2000], "fixture_manifest": fixture}
+        failure = {
+            "package": "SV2-IMG-04",
+            "case": case,
+            "error": repr(exc)[:2000],
+            "seed": private,
+            "fixture_manifest": fixture,
+        }
         (args.output / "failure.json").write_text(json.dumps(failure, indent=2, sort_keys=True) + "\n")
         raise
     versions = json.loads((Path(__file__).resolve().parents[3] / "docker/swarm-node/versions.lock").read_text())

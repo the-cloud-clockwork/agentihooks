@@ -357,6 +357,20 @@ def test_shell_hook_commands_resolve_each_program(tmp_path):
     assert report(attempt, environ, "startup")["checks"]["hook"] is None
 
 
+def test_relative_hook_program_resolves_against_its_cd_folder(tmp_path, monkeypatch):
+    attempt, _, environ = fixture(tmp_path)
+    executable(tmp_path / "bin" / "local-hook", "#!/bin/sh\n")
+    executable(tmp_path / "local-hook", "#!/bin/sh\n")
+    monkeypatch.chdir(tmp_path)
+    hook_commands(attempt, ["cd bin && ./local-hook"])
+    assert report(attempt, environ, "startup")["checks"]["hook"] is None
+    monkeypatch.setenv("HOME", str(tmp_path))
+    hook_commands(attempt, ["cd ~/bin && ./local-hook", "~/bin/local-hook start"])
+    assert report(attempt, environ, "startup")["checks"]["hook"] is None
+    hook_commands(attempt, ["cd {tmp_path}/attempt && ./local-hook".format(tmp_path=tmp_path)])
+    assert report(attempt, environ, "startup")["checks"]["hook"] == "hook_uncallable"
+
+
 @pytest.mark.parametrize(
     "command",
     ["cd {tmp}/absent && hook", "cd {tmp} {tmp} && hook", "cd && hook", "hook && absent-hook", "FIXTURE=1", "hook &&"],

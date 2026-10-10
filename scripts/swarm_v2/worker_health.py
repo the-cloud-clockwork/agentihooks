@@ -92,11 +92,21 @@ def command_segments(command: str) -> list[list[str]]:
     return segments
 
 
-def segment_callable(words: list[str], path: str) -> bool:
-    words = list(itertools.dropwhile(ASSIGNMENT.fullmatch, words))
-    if words[:1] == ["cd"]:
-        return len(words) == 2 and Path(words[1]).is_dir()
-    return bool(words) and shutil.which(words[0], path=path) is not None
+def segments_callable(segments: list[list[str]], path: str) -> bool:
+    directory = Path.cwd()
+    for words in segments:
+        words = list(itertools.dropwhile(ASSIGNMENT.fullmatch, words))
+        if not words:
+            return False
+        if words[0] == "cd":
+            if len(words) != 2 or not (directory / Path(words[1]).expanduser()).is_dir():
+                return False
+            directory = directory / Path(words[1]).expanduser()
+            continue
+        program = str(directory / Path(words[0]).expanduser()) if "/" in words[0] else words[0]
+        if shutil.which(program, path=path) is None:
+            return False
+    return True
 
 
 def hook_failure(home: Path | None, harness: str, environ: dict) -> str | None:
@@ -110,7 +120,7 @@ def hook_failure(home: Path | None, harness: str, environ: dict) -> str | None:
             return "hook_invalid"
         if segments == [[]]:
             return "hook_invalid"
-        if not all(segment_callable(words, environ.get("PATH", "")) for words in segments):
+        if not segments_callable(segments, environ.get("PATH", "")):
             return "hook_uncallable"
     return None
 
