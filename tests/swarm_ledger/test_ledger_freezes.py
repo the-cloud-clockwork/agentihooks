@@ -182,7 +182,8 @@ def test_unfreezing_a_plan_clears_freezes_on_its_phases_slices_and_tasks():
         "reason": "hierarchy shipped",
     }
     assert state["_meta"]["events"][-1]["id"].startswith("freeze_clear-")
-    assert state["_meta"]["stamps"]["freezes"]["by"] == "operator"
+    stamp = state["_meta"]["stamps"]["freezes"]
+    assert (stamp["by"], stamp["rev"]) == ("operator", state["_meta"]["rev"])
 
 
 def test_a_task_group_lead_holds_its_members_under_it():

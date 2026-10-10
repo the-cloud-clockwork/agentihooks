@@ -1,5 +1,4 @@
 import pytest
-from redis import RedisError
 
 from scripts.swarm import store as swarm_store
 from scripts.swarm.store import RedisStore, SwarmConfig
@@ -28,6 +27,8 @@ def test_autonomy_of_a_ledger_without_a_swarm_is_empty(swarms):
 
 
 def test_autonomy_is_empty_when_redis_fails(monkeypatch):
+    from redis import RedisError
+
     def down():
         raise RedisError("down")
 

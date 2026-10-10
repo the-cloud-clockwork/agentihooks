@@ -93,7 +93,7 @@ def _set(doc, op, ctx, by, words):
 
 def _clear(doc, op, ctx, by):
     target = op["target"]
-    held = {target} if selector(target) else under(doc, target)
+    held = under(doc, target)
     rows = doc["freezes"]
     gone = [row for row in rows if row["target"] in held]
     if gone:
