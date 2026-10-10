@@ -4,7 +4,7 @@
     "T-SV2-HDR-01-B",
     "T-SV2-HDR-01-C"
   ],
-  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38091370544",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38095455426",
   "evidence_class": "mocked cases replay status and schema replies captured from the pinned herdr 0.9.1 binary; the live proof ran that binary behind a private localhost sshd on the operator workstation",
   "inputs": {
     "evidence/SV2-HDR-01/live-proof.jsonl": "e8e9f39db480209cacbb38b90f36a0b870fadc21e07d1c59ea75a2b548f8f261",
@@ -14,6 +14,6 @@
     "tests/sv2_hdr01_cases.py": "b6d3d7b2ef43aafe538393bba26bb7c88362685ebc1674e48b0851f36423f705",
     "tests/test_swarm_v2_herdr_capabilities.py": "73a7421adb9a3342cc25d0bedcf959ffde522d4097bb19df997b658ff0791c73"
   },
-  "mutation_preflight": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38091422015",
-  "tested_commit": "b81bd919cd87f0c07053dfdd3405db29fa9a81db"
+  "mutation_preflight": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38095455426",
+  "tested_commit": "73f37597c8efe1b69475cc5cb9c5ba7552e32933"
 }
