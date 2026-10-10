@@ -100,6 +100,21 @@ def test_the_seat_ends_when_its_triggers_close_or_autonomy_drops():
     assert run(store, runtime, doc(priority()), NOW + MINUTE)[0].startswith("ended dispatcher")
 
 
+def test_done_from_the_seat_is_refused_while_a_trigger_is_open_and_names_it():
+    store = swarm()
+    refused = dispatch_seat.refusal(SLUG, store.config(SLUG), store, doc(priority()), NOW)
+    assert refused == (
+        "dispatcher triggers are still open; settle them, or the tick ends your seat once they close:\n"
+        "- The priority on questions/q1 is unresolved after 15 minutes: Pick the release day"
+    )
+
+
+@pytest.mark.parametrize("autonomy, age", [("full", 15 * MINUTE - 1), ("delegate", 15 * MINUTE)])
+def test_done_from_the_seat_passes_once_no_trigger_is_open(autonomy, age):
+    store = swarm(autonomy)
+    assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, doc(priority(age=age)), NOW) == ""
+
+
 def test_no_session_slot_holds_the_spawn():
     store, runtime = swarm(), FakeRuntime(full=True)
     assert run(store, runtime, doc(priority())) == ["no session slot for the dispatcher, waiting"]
