@@ -769,13 +769,11 @@ def cmd_status(store, args):
     print(plan_shape.report(tasks, config.max_eng)["summary"])
     for phase_id, state, held in phase_state.report(doc):
         print(f"phase {phase_id}  {state}" + (f"  holds {', '.join(held)}" if held else ""))
+    from scripts.swarm import capacity, quota_view
     from scripts.swarm_ledger import ledger_freezes
 
-    for line in ledger_freezes.lines(doc):
-        print(line)
-    from scripts.swarm import capacity, quota_view
-
-    for line in quota_view.lines(capacity.read(store, args.slug), now_ms()) + spawn_holds(store, args.slug):
+    quota = quota_view.lines(capacity.read(store, args.slug), now_ms())
+    for line in ledger_freezes.lines(doc) + quota + spawn_holds(store, args.slug):
         print(line)
     print(bottleneck.line(bottleneck.read(store, args.slug), now_ms()))
     print(_snapshot_line(auto_snapshot(config)))
