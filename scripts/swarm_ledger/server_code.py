@@ -8,6 +8,7 @@ ROOT = CODE_DIR.parents[1]
 CODE_DIRS = (
     CODE_DIR,
     *(ROOT / "scripts" / name for name in ("inbox", "swarm", "handoff", "doctor", "gates", "hive")),
+    ROOT / "scripts" / "swarm_v2" / "runtime",
     ROOT / "hooks",
 )
 SUFFIXES = (".py", ".html", ".js", ".css")
