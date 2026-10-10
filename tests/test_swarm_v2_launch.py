@@ -190,6 +190,7 @@ def test_a_second_simultaneous_launch_on_a_full_account_is_refused(monkeypatch):
     [refused] = second
     assert refused.outcome == Outcome("spawn", Status.REFUSED, BACKEND, detail="account_full")
     assert refused.slot is None
+    assert world.grants.verify(SLUG, refused.grant).execution_id == refused.agent.execution_id
     assert [request.name for request in world.runtime.requests] == [first.agent.name]
     assert list(world.rows()) == [f"{SLUG}/{FIRST}"]
     assert world.capacity.account_reservation_conflicts_total() == 1
