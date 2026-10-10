@@ -16,7 +16,7 @@ finish() {
     kubectl get pods -o wide || true
     kubectl logs "${controller[@]}" --tail 100 || true
     kubectl logs "${controller[@]}" --previous --tail 100 || true
-    kubectl get pods "${controller[@]}" -o jsonpath='{range .items[*].status.containerStatuses[*]}{.name} last state {.lastState}{"\n"}{end}' || true
+    kubectl get pods "${controller[@]}" -o jsonpath='{range .items[*].status.initContainerStatuses[*]}{.name} last state {.lastState}{"\n"}{end}{range .items[*].status.containerStatuses[*]}{.name} last state {.lastState}{"\n"}{end}' || true
     kubectl logs "$ledger_pod" --tail 100 || true
   fi
   kind delete cluster --name "$cluster" || true
