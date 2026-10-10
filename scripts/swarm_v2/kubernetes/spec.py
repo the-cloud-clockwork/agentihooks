@@ -64,14 +64,14 @@ class AdmittedLaunch:
     task_payload: object
 
     @classmethod
-    def from_record(cls, record: object) -> "AdmittedLaunch | PodSpecRefused":
+    def from_record(cls, record: object) -> "AdmittedLaunch":
         if not isinstance(record, Mapping):
-            return PodSpecRefused("launch must be a JSON object", "fields")
+            raise PodSpecRefused("launch must be a JSON object", "fields")
         names = [f.name for f in fields(cls)]
         if extra := sorted(set(record) - set(names)):
-            return PodSpecRefused(f"launch has unknown fields: {', '.join(extra)}", "fields")
+            raise PodSpecRefused(f"launch has unknown fields: {', '.join(extra)}", "fields")
         if missing := [name for name in names if name not in record]:
-            return PodSpecRefused(f"launch is missing fields: {', '.join(missing)}", "fields")
+            raise PodSpecRefused(f"launch is missing fields: {', '.join(missing)}", "fields")
         return cls(**{name: record[name] for name in names})
 
 
@@ -82,23 +82,26 @@ class Rendered:
 
 
 def _canonical(value: object) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
 
 
 def canonical_digest(value: object) -> str:
     return "sha256:" + hashlib.sha256(_canonical(value)).hexdigest()
 
 
-def payload_digest(payload: object) -> str:
-    return canonical_digest(payload)
+def _read(path: str | Path) -> object:
+    try:
+        return json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        raise PodSpecRefused(f"{path} is not a readable JSON file", "input") from None
 
 
 def _where(path) -> str:
     return "/".join(str(part) for part in path) or "the document root"
 
 
-def load_policy(path: Path) -> dict:
-    policy = json.loads(Path(path).read_text())
+def load_policy(path: str | Path) -> dict:
+    policy = _read(path)
     error = best_match(Draft202012Validator(json.loads(SCHEMA.read_text())).iter_errors(policy))
     if error is not None:
         raise PodSpecRefused(f"pod policy is invalid at {_where(error.absolute_path)}: {error.message}", "policy")
@@ -147,7 +150,7 @@ def _payload(launch: AdmittedLaunch) -> str:
     if not isinstance(launch.task_payload, Mapping):
         raise PodSpecRefused("launch task_payload must be a JSON object", "payload")
     try:
-        return payload_digest(launch.task_payload)
+        return canonical_digest(launch.task_payload)
     except (TypeError, ValueError):
         raise PodSpecRefused("launch task_payload must be a JSON object", "payload") from None
 
@@ -270,7 +273,7 @@ def _spec(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
         **_placement(profile),
         "containers": [_container(policy, launch, profile)],
         "volumes": [
-            {"name": "home", "emptyDir": {"sizeLimit": f"{profile['limits']['ephemeral_mib']}Mi"}},
+            {"name": "home", "emptyDir": {"sizeLimit": f"{profile['limits']['ephemeral_mib'] - TMP_MIB}Mi"}},
             {"name": "tmp", "emptyDir": {"sizeLimit": f"{TMP_MIB}Mi"}},
             {"name": "launch", "configMap": {"name": f"swarm-{launch.execution_id}-launch", "defaultMode": 0o444}},
             {"name": "credential", "secret": {"secretName": launch.credential_ref, "defaultMode": 0o400}},
@@ -286,10 +289,9 @@ class PodTemplate:
         self.policy = policy
         self.failures = Counter()
 
-    def render(self, launch: "AdmittedLaunch | PodSpecRefused") -> Rendered:
+    def render(self, record: object) -> Rendered:
         try:
-            if isinstance(launch, PodSpecRefused):
-                raise launch
+            launch = AdmittedLaunch.from_record(record)
             _identity(launch)
             profile = _profile(self.policy, launch)
             payload = _payload(launch)
@@ -308,41 +310,17 @@ class PodTemplate:
         return dict(self.failures)
 
 
-def _differences(left: object, right: object, path: str) -> list[str]:
-    if isinstance(left, dict) and isinstance(right, dict):
-        found = []
-        for key in sorted(set(left) | set(right)):
-            found += _differences(left.get(key), right.get(key), f"{path}.{key}" if path else key)
-        return found
-    if isinstance(left, list) and isinstance(right, list) and len(left) == len(right):
-        found = []
-        for index, (a, b) in enumerate(zip(left, right, strict=True)):
-            found += _differences(a, b, f"{path}[{index}]")
-        return found
-    return [] if left == right else [path]
-
-
-def probe_only_difference(before: dict, after: dict) -> list[str] | None:
-    """The differing probe paths when only probes differ; None when anything else changed."""
-    probes = {f"spec.containers[0].{mode}Probe" for mode in PROBES}
-    changed = sorted(
-        {next((p for p in probes if path.startswith(p)), path) for path in _differences(before, after, "")}
-    )
-    return changed if set(changed) <= probes else None
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m scripts.swarm_v2.kubernetes.spec")
     parser.add_argument("action", choices=("render", "digest"))
-    parser.add_argument("--policy", required=True, type=Path)
-    parser.add_argument("--launch", required=True, type=Path)
+    parser.add_argument("--policy", required=True)
+    parser.add_argument("--launch", required=True)
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return 0 if exc.code == 0 else 64
     try:
-        template = PodTemplate(load_policy(args.policy))
-        rendered = template.render(AdmittedLaunch.from_record(json.loads(args.launch.read_text())))
+        rendered = PodTemplate(load_policy(args.policy)).render(_read(args.launch))
     except PodSpecRefused as refused:
         print(refused, file=sys.stderr)
         return 1

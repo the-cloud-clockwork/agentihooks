@@ -50,7 +50,8 @@ kind create cluster --name "$cluster" --image "$KIND_NODE_IMAGE" --wait 120s
 kubectl create namespace swarm-pod-proof
 kubectl create serviceaccount swarm-worker --namespace swarm-pod-proof
 kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/pod-rendered.json
-printf 'rendered execution Pod passed server side strict validation\n'
+kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/pod-rendered-wrong-probes.json
+printf 'rendered execution Pods passed server side strict validation\n'
 wait "$build"
 kind load docker-image "$image" --name "$cluster"
 helm install "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m

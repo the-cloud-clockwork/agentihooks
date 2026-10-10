@@ -1,11 +1,12 @@
 {
   "case": "T-SV2-KUB-01-A",
   "state": "passed",
-  "evidence_class": "mocked: pure rendering; schema validity from kind server side dry run",
+  "evidence_class": "mocked: in process rendering; Kubernetes schema validity comes from the kind job's strict server side dry run of the committed golden Pods, recorded with its run id in result.json",
   "input_sha256": {
     "pod-policy.json": "6f10e42c7c8461ea18fe3ae9f0c46001020bd50153665477b415076cf71099f5",
     "pod-launch.json": "dc9258de4781082cc2abb9a2048ff04db03da0a83ea144f96fe728847b34c809",
-    "pod-rendered.json": "3dc1c2af852679bbf1ec12c7c0156a25d91747c3f8ec06a093ea3d1b4abd3672"
+    "pod-rendered.json": "a50787a1f9d90540ada874c745b31de2bd01915593da7189f7f48fcecfdff205",
+    "pod-rendered-wrong-probes.json": "fec706d02fa08d5f7f461a27e7734c2b3ce704bcc0a8fd10b37d8b417d2f1f07"
   },
   "observed": {
     "fixture": {
@@ -20,6 +21,8 @@
         "swarm.agentihooks.io/task": "vkub1",
         "swarm.agentihooks.io/template-version": "kub01-v2"
       },
+      "harness": "claude",
+      "probe_harness": "claude",
       "restart_policy": "Never",
       "automount_token": false,
       "resources": {
@@ -43,8 +46,8 @@
       "host_paths": [],
       "privileged": false
     },
-    "fixture_digest": "sha256:42764d7bb3627033384bfa323c30ede93a7064f79fc75a0609cebea854595da2",
-    "matches_kind_validated_golden": true,
+    "fixture_digest": "sha256:1e4461297d7acaf4812cd859cc62b7fcce8eebe1764dfb0e26a9cfe8280cf38a",
+    "matches_golden_pod": true,
     "second_fixture": {
       "name": "swarm-exe-a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
       "labels": {
@@ -57,6 +60,8 @@
         "swarm.agentihooks.io/task": "vkub2",
         "swarm.agentihooks.io/template-version": "kub01-v2"
       },
+      "harness": "codex",
+      "probe_harness": "codex",
       "restart_policy": "Never",
       "automount_token": false,
       "resources": {
@@ -80,8 +85,7 @@
       "host_paths": [],
       "privileged": false
     },
-    "second_fixture_digest": "sha256:70ee073a908bd9ccda584cc349528d29f663005b436beb266f08c353fd196454",
+    "second_fixture_digest": "sha256:caa02fd21f0e0ad90301246df8bb77fe49185377d3e09bf132983193f4648b34",
     "pod_spec_validation_failures_total": {}
-  },
-  "independent_runs": 2
+  }
 }

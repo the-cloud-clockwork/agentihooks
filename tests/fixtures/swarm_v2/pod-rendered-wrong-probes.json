@@ -74,12 +74,12 @@
               "--harness",
               "claude",
               "--herdr-timeout",
-              "2",
+              "0.001",
               "--brain-timeout",
               "2"
             ]
           },
-          "failureThreshold": 4,
+          "failureThreshold": 1,
           "initialDelaySeconds": 0,
           "periodSeconds": 15,
           "timeoutSeconds": 6
@@ -96,7 +96,7 @@
               "--harness",
               "claude",
               "--herdr-timeout",
-              "2",
+              "0.001",
               "--brain-timeout",
               "2"
             ]
@@ -139,7 +139,7 @@
               "--harness",
               "claude",
               "--herdr-timeout",
-              "2",
+              "0.001",
               "--brain-timeout",
               "2"
             ]

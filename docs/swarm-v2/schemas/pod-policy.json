@@ -47,7 +47,7 @@
       "properties": {
         "memory_mib": {"type": "integer", "minimum": 64, "maximum": 262144},
         "cpu_millis": {"type": "integer", "minimum": 100, "maximum": 64000},
-        "ephemeral_mib": {"type": "integer", "minimum": 256, "maximum": 204800}
+        "ephemeral_mib": {"type": "integer", "minimum": 2048, "maximum": 204800}
       }
     },
     "toleration": {
@@ -59,7 +59,9 @@
         "operator": {"enum": ["Equal", "Exists"]},
         "value": {"$ref": "#/$defs/label_value"},
         "effect": {"enum": ["NoSchedule", "PreferNoSchedule", "NoExecute"]}
-      }
+      },
+      "if": {"properties": {"operator": {"const": "Exists"}}},
+      "then": {"not": {"required": ["value"]}}
     },
     "profile": {
       "type": "object",
