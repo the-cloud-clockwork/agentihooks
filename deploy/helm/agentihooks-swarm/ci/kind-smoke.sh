@@ -130,6 +130,11 @@ printf 'controller restarted by its liveness probe and holds the lease again: %s
 
 before="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')"
 host="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].metadata.name}')"
+calm="$(kubectl exec "$ledger_pod" -- python -c "from scripts.swarm.store import PREFIX, connect; print(connect().redis.hget(f'{PREFIX}:host:$host:incident:pressure', 'active') or '0')")"
+if [[ $calm != "0" ]]; then
+  printf 'the host pressure alert was already active before the simulated pressure\n' >&2
+  exit 1
+fi
 kubectl exec "$ledger_pod" -- python -c "from scripts.swarm.store import connect; connect().update('$slug', memory_per_agent_mb=10**9); print('simulated host pressure: one agent now needs more memory than the node has')"
 alert=""
 for _ in $(seq 120); do
