@@ -1,6 +1,8 @@
 {
   "package": "SV2-ACC-03",
-  "dependency": ["SV2-ACC-02"],
+  "dependency": [
+    "SV2-ACC-02"
+  ],
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2382",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2408",
@@ -8,8 +10,9 @@
   "status": "mocked-acceptance-qualified",
   "package_complete": false,
   "evidence_class": "Scoped fixture launch grants from LaunchAuthority, fakeredis, fixture clock; no live rollout. Live G3 qualification is separate.",
+  "failure_fixture": "tests/fixtures/swarm_v2/quota-observations.json with the racing store wrapper in tests/test_swarm_v2_quota.py (Racing runs a concurrent newer publish, or a WatchError on every attempt, between read and commit)",
   "interfaces": [
-    "scripts.swarm_v2.quota.QuotaObservations.publish: grant-only; account, execution and generation come from the validated launch grant; reports outside the provider window schema raise invalid_request and write nothing; an older or replayed report returns the stored newer observation and counts as stale",
+    "scripts.swarm_v2.quota.QuotaObservations.publish: grant-only; account, execution and generation come from the validated launch grant; reports outside the provider window schema raise invalid_request and write nothing; an older report returns the stored newer observation and increments the stale counter; an identical replay returns the stored observation and counts nothing",
     "QuotaObservations.latest, history, stale_reports, quota_observation_age_seconds",
     "QuotaObservations.reading and cap: unknown for absent, failed, partial or older than 900 s readings; cap 0 when unknown or without room",
     "QuotaObservations.admit: admit, handoff to a configured account with at least 5 percent routing left, or one bounded 300 s wait per account and harness",
@@ -25,14 +28,18 @@
   "states": {
     "observed": "Provider window reports from a grant holder and the local router cache",
     "accepted": "A report whose grant validates for this swarm and whose fields match the provider window schema",
-    "committed": "Redis WATCH/MULTI transaction on the quota, quota-history, quota-stale and quota-waits keys",
+    "committed": "Redis WATCH/MULTI transaction on the quota and quota-history keys (publish) and the quota-waits key (admit); the quota-stale counter is a separate HINCRBY after the transaction",
     "externally_verified": "None; no live launch publishes observations yet"
   },
   "recovery_contract": {
     "obligation": "A provider outage leads to bounded wait or configured handoff without repeated unbounded agent starts",
     "case": "T-SV2-ACC-03-C, evidence/SV2-ACC-03/c-result.json",
     "test": "tests/test_swarm_v2_quota.py::test_a_provider_outage_waits_a_bounded_time_without_new_starts",
-    "result": "An error report makes the reading unknown; admit returns one 300 s wait that repeated calls do not extend, hands off when the configured account has room, and the newer exhausted observation survives an owner restart and a stale replay"
+    "result": "An error report makes the reading unknown and admit returns one 300 s wait that repeated admits inside the window return unchanged, with history keeping both observations; the related tests show the handoff to a configured account with room and that the newer exhausted observation survives an owner restart and a stale replay",
+    "related_tests": [
+      "tests/test_swarm_v2_quota.py::test_an_exhausted_account_hands_off_to_its_configured_account",
+      "tests/test_swarm_v2_quota.py::test_recovery_replays_one_effect_and_keeps_the_newer_result"
+    ]
   },
   "validation": {
     "red": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38050367889 on the tests-only commit fafd35c3 failed: the quota module did not exist",
@@ -47,8 +54,16 @@
   },
   "measurements": {
     "quota_observation_age_seconds": {
-      "a": [30.0, 30.0],
-      "b": {"absent": null, "failed_at_240000_ms": 30.0, "partial_or_failed_at_120000_ms": 150.0, "aged": 900.001},
+      "a": [
+        30.0,
+        30.0
+      ],
+      "b": {
+        "absent": null,
+        "failed_at_240000_ms": 30.0,
+        "partial_or_failed_at_120000_ms": 150.0,
+        "aged": 900.001
+      },
       "c": 10.0
     },
     "dimension": "Each test has its own fakeredis swarm built from quota-observations.json at fixture clock 270000 ms; account fixture, harness claude"
@@ -64,13 +79,14 @@
     "test": "tests/test_swarm_v2_quota.py::test_fleet_observations_are_off_unless_enabled",
     "job": 114222011794,
     "output": "PASSED at 2026-10-10T13:21:10.8691929Z",
-    "data_safety": "Recorded quota observations and history stay stored untouched while the switch is off and are read again when it is on; they are authoritative and never deleted as caches"
+    "data_safety": "Turning the switch off changes only what fleet_observations returns; no code path deletes quota or quota-history keys, and the test reads the stored exhausted observation again once the switch is 1. The records are authoritative and never deleted as caches"
   },
   "remaining_limitations": [
     "admit and cap have no production caller yet; the distributed launch path that also calls AccountCapacity.reserve is a later package",
     "No live launch publishes observations yet; the publisher wiring belongs to the worker and controller packages",
     "quota_observation_age_seconds is collected as evidence only; no metric exporter emits it",
     "quota_policy reads only the claude harness",
-    "The freshness limit of 900 s is the session band constant; a provider with slower reporting reads unknown"
+    "The freshness limit of 900 s is the session band constant; a provider with slower reporting reads unknown",
+    "The quota-stale counter is incremented after the publish transaction, so a crash between the two loses one count; the counter is evidence only and never routes work"
   ]
 }

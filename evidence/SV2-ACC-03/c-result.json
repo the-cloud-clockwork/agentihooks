@@ -1,10 +1,12 @@
 {
   "package": "SV2-ACC-03",
   "case": "T-SV2-ACC-03-C",
+  "title": "recovery and replay: a provider outage leads to bounded wait or configured handoff",
   "tested_commit": "37077bcf8d769d611e63bbdb62df8d284371d6cd",
   "evidence_class": "mocked",
   "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38054947948",
   "fixture": "tests/fixtures/swarm_v2/quota-observations.json: the exhausted observation is accepted, then a provider error report at 260000 ms, an owner restart, a replay, a concurrent publish and a store that keeps failing",
+  "fixture_clock": "build() patches time.time to the fixture clock; QuotaObservations reads the same list",
   "tests": [
     {
       "test": "tests/test_swarm_v2_quota.py::test_a_provider_outage_waits_a_bounded_time_without_new_starts",
@@ -43,12 +45,15 @@
     }
   ],
   "recovery_boundary": "provider outage (error report), owner restart (a new QuotaObservations over the same store), Redis transaction conflict (WatchError) and a store that fails every write",
-  "outage": "admit returns one wait until clock plus 300 s; repeated admits inside the window return the same wait and write nothing new; only after it passes does a new wait start; no admit is returned while the reading is unknown",
+  "outage": "admit returns one wait until clock plus 300 s; repeated admits inside the window return the same wait; only once it passes does a new wait start; admit never admits while the reading is unknown",
   "replay_assertion": "republishing the same report returns the stored observation, history stays at one entry and the stale counter stays 0",
   "ownership_assertion": "after restart a stale full report returns the newer exhausted observation and counts one stale report; a concurrent newer publish wins the retry over an older one",
   "dependency_loss": "after 5 failed attempts publish and admit raise dependency_unavailable and nothing is stored; an unreachable fleet store yields no fleet observations so routing falls back to the local cache",
   "durability": "history keeps the newest 50 observations per account and harness; waits are kept per account and harness; nothing was lost across restart",
   "cleanup": "fakeredis per test; no live resource mutations",
-  "quota_observation_age_seconds": {"value": 10.0, "dimension": "account fixture, harness claude, error observation at 260000 ms against the fixture clock 270000 ms"},
+  "quota_observation_age_seconds": {
+    "value": 10.0,
+    "dimension": "account fixture, harness claude, error observation at 260000 ms against the fixture clock 270000 ms"
+  },
   "passed": true
 }

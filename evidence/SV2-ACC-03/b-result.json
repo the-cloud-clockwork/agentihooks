@@ -1,10 +1,12 @@
 {
   "package": "SV2-ACC-03",
   "case": "T-SV2-ACC-03-B",
+  "title": "rejection and containment: missing quota data is labelled unknown rather than full capacity",
   "tested_commit": "37077bcf8d769d611e63bbdb62df8d284371d6cd",
   "evidence_class": "mocked",
   "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38054947948",
   "fixture": "tests/fixtures/swarm_v2/quota-observations.json plus absent, failed, partial, aged and out-of-schema reports, a leak canary string and grants of another swarm",
+  "fixture_clock": "build() patches time.time to the fixture clock; QuotaObservations reads the same list; the aged case moves it to observed_ms plus 900001 ms",
   "tests": [
     {
       "test": "tests/test_swarm_v2_quota.py::test_missing_or_failed_quota_data_is_unknown_never_full[None]",
@@ -79,7 +81,7 @@
     "failed_at_240000_ms": 30.0,
     "partial_or_failed_at_120000_ms": 150.0,
     "aged": 900.001,
-    "dimension": "account fixture, harness claude, fixture clock; the age is reported even when the reading is unknown"
+    "dimension": "account fixture, harness claude; fixture clock 270000 ms except the aged case, whose clock is the stale full observation at 120000 ms plus 900001 ms (1020001 ms); the age is reported even when the reading is unknown"
   },
   "passed": true
 }

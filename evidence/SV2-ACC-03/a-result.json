@@ -1,6 +1,7 @@
 {
   "package": "SV2-ACC-03",
   "case": "T-SV2-ACC-03-A",
+  "title": "successful behavior: the fleet routes on the newest valid observation for the selected account",
   "tested_commit": "37077bcf8d769d611e63bbdb62df8d284371d6cd",
   "evidence_class": "mocked",
   "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38054947948",
@@ -58,6 +59,10 @@
   },
   "boundary": "The controller-side Redis records are the authoritative fleet reading; the local router cache is merged as supporting evidence and loses to a newer fleet observation",
   "cleanup": "fakeredis per test; no live resource mutations",
-  "quota_observation_age_seconds": {"first": 30.0, "second": 30.0, "dimension": "account fixture, harness claude, fixture clock 270000 ms against the exhausted observation at 240000 ms"},
+  "quota_observation_age_seconds": {
+    "first": 30.0,
+    "second": 30.0,
+    "dimension": "account fixture, harness claude, fixture clock 270000 ms against the exhausted observation at 240000 ms"
+  },
   "passed": true
 }
