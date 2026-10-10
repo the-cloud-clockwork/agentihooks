@@ -59,6 +59,12 @@ def test_a_ci_bottleneck_held_three_ticks_moves_one_seat_from_engineers_to_ci(st
         NOW + 120_000,
     )
     assert row["reason"] == actions[0] + " Host room 4."
+    assert row["task"] == ""
+    assert actions[0].startswith(
+        "Moved one seat from the eng lane to the ci lane after the bottleneck report named ci 3"
+    )
+    assert actions[0].endswith("running: engineers 3, CI 2, sum 5.")
+    assert json.loads(store.redis.get(store.key(SLUG, "lane-split")))["ticks"] == 0
 
 
 def test_one_or_two_ticks_move_nothing(store, home):
@@ -109,7 +115,13 @@ def test_a_lane_with_ready_work_keeps_its_last_seat(store, home):
     store.update(SLUG, max_eng=1, max_ci=1)
     actions = ticks(store, "ci", 3)
     assert caps(store) == (1, 1)
-    assert actions == [lane_split.HELD.format(named="ci", reason="the eng lane keeps its last seat for ready work")]
+    assert actions == [
+        lane_split.HELD.format(named="ci", ticks=3, reason="the eng lane keeps its last seat for ready work")
+    ]
+    assert actions[0] == (
+        "Lane split held after the bottleneck report named ci 3 ticks running:"
+        " the eng lane keeps its last seat for ready work."
+    )
     assert gate_log.recent(SLUG, None, home) == []
 
 
@@ -120,7 +132,7 @@ def test_a_lane_without_ready_work_gives_its_last_seat(store, home):
     assert caps(store) == (0, 2)
     store.update(SLUG, max_eng=0, max_ci=2)
     assert ticks(store, "ci", 3, idle, start=3) == [
-        lane_split.HELD.format(named="ci", reason="the eng lane has no seat to give")
+        lane_split.HELD.format(named="ci", ticks=3, reason="the eng lane has no seat to give")
     ]
 
 
@@ -129,7 +141,7 @@ def test_the_giving_lane_keeps_a_seat_for_each_live_agent(store, home):
     actions = ticks(store, "ci", 3, busy)
     assert caps(store) == (4, 1)
     assert actions == [
-        lane_split.HELD.format(named="ci", reason="the eng lane keeps a seat for each of its 4 live agents")
+        lane_split.HELD.format(named="ci", ticks=3, reason="the eng lane keeps a seat for each of its 4 live agents")
     ]
     fewer = lane_split.Lanes(ready={"eng": 0, "ci": 2}, live={"eng": 3, "ci": 1}, room=4)
     ticks(store, "ci", 3, fewer, start=3)
@@ -140,7 +152,7 @@ def test_the_receiving_lane_never_passes_host_room(store, home):
     tight = lane_split.Lanes(ready={"eng": 3, "ci": 2}, live={"eng": 1, "ci": 1}, room=0)
     actions = ticks(store, "ci", 3, tight)
     assert caps(store) == (4, 1)
-    assert actions == [lane_split.HELD.format(named="ci", reason="the ci lane would pass host room 0")]
+    assert actions == [lane_split.HELD.format(named="ci", ticks=3, reason="the ci lane would pass host room 0")]
     unknown = lane_split.Lanes(ready={"eng": 3, "ci": 2}, live={"eng": 1, "ci": 1}, room=None)
     ticks(store, "ci", 3, unknown, start=3)
     assert caps(store) == (3, 2)
@@ -172,6 +184,22 @@ def test_no_report_moves_nothing(store, home):
     assert lane_split.lane_pass(SLUG, store.config(SLUG), store, READY, NOW) == []
 
 
+def test_a_report_that_disappears_moves_nothing(store, home):
+    ticks(store, "ci", 2)
+    store.redis.delete(store.key(SLUG, "bottleneck"))
+    assert lane_split.lane_pass(SLUG, store.config(SLUG), store, READY, NOW + 600_000) == []
+    assert caps(store) == (4, 1)
+
+
+def test_a_last_seat_with_live_agents_but_no_ready_work_is_held_by_its_live_agent(store, home):
+    store.update(SLUG, max_eng=1, max_ci=1)
+    working = lane_split.Lanes(ready={"eng": 0, "ci": 2}, live={"eng": 1, "ci": 1}, room=4)
+    assert ticks(store, "ci", 3, working) == [
+        lane_split.HELD.format(named="ci", ticks=3, reason="the eng lane keeps a seat for each of its 1 live agents")
+    ]
+    assert caps(store) == (1, 1)
+
+
 def test_auto_scaling_moves_the_stored_shift_against_the_last_ceilings(store, home):
     store.update(SLUG, scaling="auto")
     ceilings = {"plan": 1, "ci": 1, "eng": 4}
@@ -196,6 +224,7 @@ def test_shift_moves_ceilings_and_keeps_the_sum():
     base = calculate({"eng": 1, "ci": 1}, {"claude": 4}, 10, {"eng": 3, "ci": 3})
     shifted = calculate({"eng": 1, "ci": 1}, {"claude": 4}, 10, {"eng": 3, "ci": 3}, shift=1)
     assert base["ceilings"] == {"plan": 0, "ci": 1, "eng": 1}
+    assert "lane shift" not in base["reason"] + shifted["reason"]
     assert shifted["ceilings"] == base["ceilings"]
     previous = {"ceilings": {"plan": 0, "ci": 1, "eng": 5}, "pending_raise": {"target": None, "ticks": 0}}
     wide = calculate({"eng": 1, "ci": 1}, {"claude": 4}, 10, {"eng": 3, "ci": 3}, previous, shift=2)

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from scripts.gates import log as gate_log
 from scripts.swarm import bottleneck
-from scripts.swarm.store import AUTO_SCALING, DELEGATE, FULL
+from scripts.swarm.store import AUTO_SCALING, DELEGATE, FULL, RedisStore, SwarmConfig
 
 KEY = "lane-split"
 TICKS = 3
@@ -16,7 +16,7 @@ MOVED = (
     "Moved one seat from the {giver} lane to the {taker} lane after the bottleneck report named {named} {ticks} ticks"
     " running: engineers {eng}, CI {ci}, sum {total}."
 )
-HELD = "Lane split held after the bottleneck report named {named} three ticks running: {reason}."
+HELD = "Lane split held after the bottleneck report named {named} {ticks} ticks running: {reason}."
 
 
 @dataclass(frozen=True)
@@ -63,7 +63,17 @@ def _apply(slug: str, config, store, giver: str, taker: str) -> None:
     store.update(slug, **{f"max_{giver}": caps[giver] - 1, f"max_{taker}": caps[taker] + 1})
 
 
-def lane_pass(slug: str, config, store, lanes: Lanes, now_ms: int) -> list[str]:
+def _record(slug: str, named: str, caps: dict, move: tuple, lanes: Lanes, now_ms: int) -> str:
+    giver, taker = move
+    text = MOVED.format(
+        giver=giver, taker=taker, named=named, ticks=TICKS, eng=caps["eng"], ci=caps["ci"], total=sum(caps.values())
+    )
+    room = "unknown" if lanes.room is None else lanes.room
+    gate_log.append(slug, gate_log.Row(now_ms, AUTHOR, "apply", AUTHOR, "", RULE, f"{text} Host room {room}."))
+    return text
+
+
+def lane_pass(slug: str, config: SwarmConfig, store: RedisStore, lanes: Lanes, now_ms: int) -> list[str]:
     if config.autonomy not in (DELEGATE, FULL):
         return []
     key = store.key(slug, KEY)
@@ -72,26 +82,14 @@ def lane_pass(slug: str, config, store, lanes: Lanes, now_ms: int) -> list[str]:
     if current is previous:
         return []
     move = MOVES.get(current["named"])
-    if move is None or current["ticks"] < TICKS:
-        store.redis.set(key, json.dumps(current))
+    due = move is not None and current["ticks"] >= TICKS
+    store.redis.set(key, json.dumps({**current, "ticks": 0} if due else current))
+    if not due:
         return []
-    store.redis.set(key, json.dumps({**current, "ticks": 0}))
     giver, taker = move
     caps = _caps(config, store, slug)
     reason = refusal(caps, giver, taker, lanes)
     if reason:
-        return [HELD.format(named=current["named"], reason=reason)]
+        return [HELD.format(named=current["named"], ticks=TICKS, reason=reason)]
     _apply(slug, config, store, giver, taker)
-    caps = {giver: caps[giver] - 1, taker: caps[taker] + 1}
-    text = MOVED.format(
-        giver=giver,
-        taker=taker,
-        named=current["named"],
-        ticks=TICKS,
-        eng=caps["eng"],
-        ci=caps["ci"],
-        total=sum(caps.values()),
-    )
-    room = "unknown" if lanes.room is None else lanes.room
-    gate_log.append(slug, gate_log.Row(now_ms, AUTHOR, "apply", AUTHOR, "", RULE, f"{text} Host room {room}."))
-    return [text]
+    return [_record(slug, current["named"], {giver: caps[giver] - 1, taker: caps[taker] + 1}, move, lanes, now_ms)]
