@@ -13,6 +13,8 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
+from scripts.gates.base import Who
+from scripts.swarm_v2 import operator_auth
 from scripts.swarm_v2.records import _replayed as _replay
 from scripts.swarm_v2.records import _write, digest
 from scripts.swarm_v2.runtime.commands import Principal, Role
@@ -24,6 +26,7 @@ KINDS = frozenset({"dispatcher", "backlog", "service", "worker_component"})
 CODING_TASKS = "coding_tasks"
 SIGNED = ("proposal", "sha256", "approved_by", "revision", "reason", "key_id")
 KEY_ENV = "SWARM_ARCHITECTURE_PUBLIC_KEY"
+SIGNING_ENV = "SWARM_ARCHITECTURE_SIGNING_KEY"
 CARRIES = ("changed_content", CODING_TASKS, "none", "transcripts")
 DECLARE = (
     f"a proposal must declare carries as one of {', '.join(CARRIES)}, launches_agents as true or false,"
@@ -105,6 +108,18 @@ def authorities(record: dict, key: Ed25519PublicKey | None = None) -> list[str]:
     return [c["name"] for c in record["components"] if dispatches(c) and c.get("proposal") not in changed]
 
 
+def _authenticated(slug: str, credential: str, authenticate: Callable[[str, str], Principal | None]) -> Principal:
+    principal = authenticate(slug, credential)
+    if (
+        not isinstance(principal, Principal)
+        or principal.role is not Role.OPERATOR
+        or not isinstance(principal.name, str)
+        or not principal.name
+    ):
+        raise ArchitectureError("authenticated operator required for an architecture change")
+    return principal
+
+
 def approve(
     path: Path | str,
     proposal: dict,
@@ -115,14 +130,7 @@ def approve(
     authenticate: Callable[[str, str], Principal | None],
     signer: Ed25519PrivateKey,
 ) -> dict:
-    principal = authenticate(slug, credential)
-    if (
-        not isinstance(principal, Principal)
-        or principal.role is not Role.OPERATOR
-        or not isinstance(principal.name, str)
-        or not principal.name
-    ):
-        raise ArchitectureError("authenticated operator required for an architecture change")
+    principal = _authenticated(slug, credential, authenticate)
     record = load_record(path)
     sha256 = digest(proposal)
     key = signer.public_key()
@@ -277,7 +285,16 @@ def _accepted_at(record: dict, revision: int) -> list[dict]:
     return list(next(o["components"] for o in record["operations"] if o["revision"] == revision))
 
 
-def rollback(path: Path | str, to_revision: int, operation: str) -> dict:
+def rollback(
+    path: Path | str,
+    to_revision: int,
+    operation: str,
+    *,
+    slug: str,
+    credential: str,
+    authenticate: Callable[[str, str], Principal | None],
+) -> dict:
+    _authenticated(slug, credential, authenticate)
     record = load_record(path)
     sha256 = digest({"rollback_to": to_revision})
     done = _replayed(record, operation, sha256)
@@ -357,10 +374,38 @@ def _run(args, key: Ed25519PublicKey | None) -> int:
         return 0
     if args.command == "record":
         print(json.dumps(apply_inventory(args.record, load_inventory(args.inventory), key), indent=2))
+    elif args.command == "approve":
+        key = _cli_approve(args, key)
     elif args.command == "rollback":
-        print(json.dumps(rollback(args.record, args.to, args.operation), indent=2))
+        print(json.dumps(rollback(args.record, args.to, args.operation, **_operator_transport(args.slug)), indent=2))
     Path(args.markdown).write_text(render(load_record(args.record), key))
     return 0
+
+
+def _page_credential(slug: str) -> str | None:
+    from scripts.swarm_ledger.repository import repository
+
+    return repository.token(slug)
+
+
+def _operator_transport(slug: str) -> dict:
+    return {
+        "slug": slug,
+        "credential": operator_auth.credential(slug, _page_credential, Who.from_env()),
+        "authenticate": operator_auth.authenticator(_page_credential),
+    }
+
+
+def _cli_approve(args, key: Ed25519PublicKey | None) -> Ed25519PublicKey:
+    signer = signing_key(os.environ)
+    if key is not None and key_id(key) != key_id(signer.public_key()):
+        raise ArchitectureError(f"{SIGNING_ENV} does not match {KEY_ENV}")
+    proposal = next((p for p in load_inventory(args.inventory)["proposals"] if p["id"] == args.proposal), None)
+    if proposal is None:
+        raise ArchitectureError(f"{args.inventory} has no proposal {args.proposal}")
+    change = approve(args.record, proposal, args.reason, signer=signer, **_operator_transport(args.slug))
+    print(json.dumps(change, indent=2))
+    return signer.public_key()
 
 
 def verify_key(environ: Mapping[str, str]) -> Ed25519PublicKey | None:
@@ -373,19 +418,31 @@ def verify_key(environ: Mapping[str, str]) -> Ed25519PublicKey | None:
         raise ArchitectureError(f"{KEY_ENV} must be a hex Ed25519 public key") from None
 
 
+def signing_key(environ: Mapping[str, str]) -> Ed25519PrivateKey:
+    try:
+        return Ed25519PrivateKey.from_private_bytes(bytes.fromhex(environ[SIGNING_ENV]))
+    except (KeyError, ValueError):
+        raise ArchitectureError(f"{SIGNING_ENV} must be a hex Ed25519 private key") from None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m scripts.swarm_v2.architecture")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("review", "record", "rollback", "render", "check"):
+    for name in ("review", "record", "approve", "rollback", "render", "check"):
         command = commands.add_parser(name)
         command.add_argument("--record", default=RECORD)
-        if name in ("review", "record"):
+        if name in ("review", "record", "approve"):
             command.add_argument("--inventory", required=True)
-        if name in ("record", "rollback", "render"):
+        if name in ("record", "approve", "rollback", "render"):
             command.add_argument("--markdown", default=MARKDOWN)
+        if name == "approve":
+            command.add_argument("--proposal", required=True)
+            command.add_argument("--reason", required=True)
         if name == "rollback":
             command.add_argument("--to", type=int, required=True)
             command.add_argument("--operation", required=True)
+        if name in ("approve", "rollback"):
+            command.add_argument("--slug", required=True)
     args = parser.parse_args(argv)
     try:
         return _run(args, verify_key(os.environ))
