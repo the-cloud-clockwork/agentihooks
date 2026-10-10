@@ -106,6 +106,9 @@ class LedgerClient:
     def time_left(self, slug: str, slots: int, ci_minutes: float | None) -> None:
         self._call(slug, [_op("time_left", "swarm", slots=slots, ci_minutes=ci_minutes)])
 
+    def ack_events(self, slug: str, revision: int) -> None:
+        self._call(slug, [_op("events_ack", "swarm", rev=revision)])
+
     def set_phase(self, slug, phase_id, done, status):
         self._call(slug, [_op("set", "swarm", path=f"phases/{phase_id}/done", value=done, status=status)])
 

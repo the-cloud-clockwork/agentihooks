@@ -85,10 +85,10 @@ def event_row(slug: str, event: dict, path: dict, catch_up: bool, identity: str)
     }
 
 
-def event_rows(slug: str, events: list, known: dict, cursor: int | None, now_ms: int) -> list:
+def event_rows(slug: str, events: list, known: dict, cursor: int | None, now_ms: int, lost: int | None) -> list:
     rows, positions = [], Counter()
-    if events and cursor is not None and events[0]["rev"] > cursor + 1:
-        first, last = cursor + 1, events[0]["rev"] - 1
+    if cursor is not None and lost is not None and lost > cursor:
+        first, last = cursor + 1, lost
         gap = {"rev": last, "at": now_ms, "by": "metrics", "kind": "history gap", "target": ""}
         row = event_row(slug, gap, {}, False, f"gap:{slug}:{first}:{last}")
         rows.append({**row, "first_missed": first, "last_missed": last})
@@ -185,7 +185,7 @@ def record(box: metrics_outbox.Outbox, slug: str, now_ms: int, ledger: LedgerCli
     for event in events:
         if event["kind"] == "added":
             births.setdefault(event["target"], event["at"])
-    batches = [(EVENTS, event_rows(slug, events, known, cursor, now_ms))]
+    batches = [(EVENTS, event_rows(slug, events, known, cursor, now_ms, doc["_meta"].get("events_trimmed")))]
     if snapshot is None or now_ms - snapshot >= SNAPSHOT_MS:
         batches.append((SNAPSHOTS, snapshot_rows(slug, now_ms, doc, nodes, current, births)))
         snapshot = now_ms
@@ -196,3 +196,6 @@ def record(box: metrics_outbox.Outbox, slug: str, now_ms: int, ledger: LedgerCli
         connection.execute(SAVE_CHECKPOINT, (slug, doc["_meta"]["rev"], snapshot))
 
     box.append_many(batches, checkpoint)
+    acknowledged = doc["_meta"].get("events_ack")
+    if any(acknowledged is None or event["rev"] > acknowledged for event in events):
+        ledger.ack_events(slug, doc["_meta"]["rev"])
