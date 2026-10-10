@@ -1,12 +1,12 @@
 """The dispatcher's own LLM seat, `dispatcher@<slug>`, woken only on triggers the deterministic passes could not settle.
 
-At full autonomy a trigger wakes the live seat through its inbox or spawns it through the seat spawn helper; below
-full, once every trigger closes, or once the seat left the ledger, the seat is marked finished and the reap pass retires
-it. Triggers that a departed seat had received spawn no new seat; a new trigger spawns one primed with every open
-trigger. A trigger is a priority
-the sweep left unresolved for fifteen minutes and no dispatcher seat handed to the operator by raising it again under
-its own name, a bottleneck no lane rule covers held for the lane split's ticks, or a red dev holding blocked tasks,
-where a freeze or focus may be worth proposing.
+At full autonomy a trigger wakes the live seat through its inbox or, unless the swarm is paused, spawns it through the
+seat spawn helper; below full, once every trigger closes, or once the seat left the ledger, the seat is marked finished
+and the reap pass retires it. Triggers that a departed seat had received spawn no new seat; a new trigger spawns one
+primed with every open trigger. A trigger is a priority the sweep left unresolved for fifteen minutes, a bottleneck no
+lane rule covers held for the lane split's ticks, or a red dev holding blocked tasks, where a freeze or focus may be
+worth proposing. A priority that waits on an operator decision, or that a dispatcher seat handed to him by raising it
+again under its own name, is no trigger.
 """
 
 import json
@@ -25,6 +25,7 @@ LEFT = "dispatch-left"
 CLOSED = "its triggers closed"
 DEPARTED = "it left the ledger"
 ENDED_STATES = ("stopping", "stopped")
+PAUSED = "paused"
 REFUSED = "dispatcher triggers are still open; settle them, or the tick ends your seat once they close:\n{lines}"
 WAKE = "New dispatcher triggers in swarm {slug}:\n{lines}\nSettle each one, then tell the master what you did."
 LINES = {
@@ -39,7 +40,7 @@ def triggers(doc: dict, now_ms: int) -> list[dict]:
     return [
         {"id": row["id"], "item": row["item"], "text": row["text"], "minutes": (now_ms - row["at"]) // 60_000}
         for row in doc.get("priorities", [])
-        if now_ms - row["at"] >= STALE_MS and not priority_sweep.handed(row)
+        if now_ms - row["at"] >= STALE_MS and not priority_sweep.operator_only(doc, row)
     ]
 
 
@@ -92,7 +93,7 @@ def run(slug: str, config, store, runtime, doc: dict, now_ms: int, sleeping: boo
     held = store.redis.smembers(store.key(slug, LEFT))
     if closed := held - {trigger["id"] for trigger in found}:
         store.redis.srem(store.key(slug, LEFT), *closed)
-    if all(trigger["id"] in held for trigger in found):
+    if config.state == PAUSED or all(trigger["id"] in held for trigger in found):
         return []
     if refused := seat_spawn.no_slot(config, runtime, SEAT) or seat_spawn.host_hold(slug, store, now_ms, SEAT):
         return [refused]
