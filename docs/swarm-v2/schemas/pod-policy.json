@@ -39,7 +39,7 @@
   },
   "$defs": {
     "dns_label": {"type": "string", "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"},
-    "account": {"$ref": "#/$defs/dns_label", "maxLength": 48, "description": "An admitted provider account. Pods carry it as the swarm.agentihooks.io/provider-account label and mount only Secret swarm-account-<account> key token; antoncore's swarm-worker-provider-account admission policy caps it at 48 characters."},
+    "account": {"type": "string", "maxLength": 62, "pattern": "^[A-Za-z0-9]([A-Za-z0-9._+-]*[A-Za-z0-9])?@[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$", "description": "An admitted provider account email, matched case blind. Pods carry its lower cased key (the at sign as at, every other symbol a dash) as the swarm.agentihooks.io/provider-account label and read only that key of Secret swarm-claude-creds as AH_CC_TOKEN_ plus the key with underscores; 62 characters keep the key within a 63 character label."},
     "label_value": {"type": "string", "pattern": "^[A-Za-z0-9]([A-Za-z0-9._-]{0,61}[A-Za-z0-9])?$"},
     "label_key": {"type": "string", "pattern": "^([a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?/)?[A-Za-z0-9]([A-Za-z0-9._-]{0,61}[A-Za-z0-9])?$"},
     "quantity": {
