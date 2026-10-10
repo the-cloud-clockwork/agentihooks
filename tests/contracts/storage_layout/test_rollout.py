@@ -7,7 +7,8 @@ from scripts.swarm_v2.artifacts import base, benchmark, publication
 from scripts.swarm_v2.artifacts.local import LocalBackend
 from scripts.swarm_v2.kubernetes import storage
 from scripts.swarm_v2.kubernetes.spec import PodTemplate, load_policy
-from tests.contracts.storage_layout.test_publication import DATA, SCOPE
+from tests.contracts.storage_layout.test_publication import DATA
+from tests.test_swarm_v2_artifacts import bound
 from tests.test_swarm_v2_cache import stamped
 
 pytestmark = pytest.mark.unit
@@ -43,8 +44,8 @@ def test_switching_publishing_off_pauses_without_touching_the_backend(tmp_path):
     (tmp_path / "attempt.bin").write_bytes(DATA)
     shared = tmp_path / "shared"
     shared.mkdir()
-    store = base.ArtifactStore(LocalBackend(shared))
-    off = publication.publish(store, SCOPE, "ckpt-1", tmp_path / "attempt.bin", {publication.SWITCH: "off"})
+    store = bound(LocalBackend(shared))
+    off = publication.publish(store, "ckpt-1", tmp_path / "attempt.bin", {publication.SWITCH: "off"})
     assert off == publication.Publication(
         publication.PAUSED,
         None,
@@ -56,8 +57,8 @@ def test_switching_publishing_off_pauses_without_touching_the_backend(tmp_path):
 @pytest.mark.parametrize("value", ["on", "", "OFF", "0"])
 def test_only_the_word_off_switches_publishing_off(tmp_path, value):
     (tmp_path / "attempt.bin").write_bytes(DATA)
-    store = base.ArtifactStore(LocalBackend(tmp_path / "shared"))
-    result = publication.publish(store, SCOPE, "ckpt-1", tmp_path / "attempt.bin", {publication.SWITCH: value})
+    store = bound(LocalBackend(tmp_path / "shared"))
+    result = publication.publish(store, "ckpt-1", tmp_path / "attempt.bin", {publication.SWITCH: value})
     assert result.state == publication.PUBLISHED
 
 
@@ -66,9 +67,9 @@ def test_rollback_rehearsal_pauses_then_resumes_publication_with_the_attempt_int
     attempt.mkdir()
     (attempt / "diff.patch").write_bytes(DATA)
     before = stamped(attempt)
-    store = base.ArtifactStore(LocalBackend(tmp_path / "shared"))
-    paused = publication.publish(store, SCOPE, "ckpt-1", attempt / "diff.patch", {publication.SWITCH: "off"})
-    resumed = publication.publish(store, SCOPE, "ckpt-1", attempt / "diff.patch", {})
+    store = bound(LocalBackend(tmp_path / "shared"))
+    paused = publication.publish(store, "ckpt-1", attempt / "diff.patch", {publication.SWITCH: "off"})
+    resumed = publication.publish(store, "ckpt-1", attempt / "diff.patch", {})
     assert (paused.state, resumed.state) == (publication.PAUSED, publication.PUBLISHED)
     assert resumed.ref == base.ArtifactRef.of(DATA)
     assert stamped(attempt) == before
@@ -99,9 +100,10 @@ def test_the_benchmark_reports_throughput_and_loss_and_removes_its_folder(tmp_pa
 
 
 def test_the_benchmark_writes_each_round_as_its_own_artifact(tmp_path):
-    store = base.ArtifactStore(LocalBackend(tmp_path))
+    store = benchmark.bench_store(tmp_path)
     benchmark.throughput(store, [1], 3, Clock())
-    assert [store.recorded(benchmark.SCOPE, f"bench-1-{n}").size for n in range(3)] == [benchmark.MIB] * 3
+    assert [store.recorded(f"bench-1-{n}").size for n in range(3)] == [benchmark.MIB] * 3
+    assert store.scope == base.Scope("benchmark", "artifact-throughput", "bench", 1)
 
 
 def test_the_benchmark_command_prints_its_report(tmp_path, capsys):

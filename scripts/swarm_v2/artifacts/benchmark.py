@@ -13,9 +13,28 @@ from pathlib import Path
 
 from scripts.swarm_v2.artifacts import base, publication
 from scripts.swarm_v2.artifacts.local import LocalBackend
+from scripts.swarm_v2.auth_context import Registration
 
 MIB = 1 << 20
-SCOPE = base.Scope("benchmark", "artifact-throughput", "bench", 1)
+BENCH = Registration(
+    grant_id="benchmark",
+    swarm_id="benchmark",
+    execution_id="bench",
+    generation=1,
+    seat_id="benchmark",
+    task_id="artifact-throughput",
+    account="none",
+    brain_id="none",
+    project_ids=[],
+    issuer="benchmark",
+    audience="benchmark",
+    key_id="none",
+    registered_at="1970-01-01T00:00:00Z",
+)
+
+
+def bench_store(folder: Path) -> base.ArtifactStore:
+    return base.ArtifactStore(LocalBackend(folder), lambda token: BENCH, "benchmark")
 
 
 def throughput(store: base.ArtifactStore, sizes_mib: list[int], rounds: int, clock: Callable[[], float]) -> list[dict]:
@@ -25,7 +44,7 @@ def throughput(store: base.ArtifactStore, sizes_mib: list[int], rounds: int, clo
         for n in range(rounds):
             data = os.urandom(size * MIB)
             start = clock()
-            store.put(SCOPE, f"bench-{size}-{n}", data)
+            store.put(f"bench-{size}-{n}", data)
             spent += clock() - start
         rows.append({"size_mib": size, "rounds": rounds, "seconds": spent, "mib_per_s": size * rounds / spent})
     return rows
@@ -37,11 +56,11 @@ def loss(store: base.ArtifactStore, folder: Path, source: Path) -> dict:
     folder.rename(aside)
     folder.write_text("unmounted")
     try:
-        paused = publication.publish(store, SCOPE, "bench-loss", source, {})
+        paused = publication.publish(store, "bench-loss", source, {})
     finally:
         folder.unlink()
         aside.rename(folder)
-    resumed = publication.publish(store, SCOPE, "bench-loss", source, {})
+    resumed = publication.publish(store, "bench-loss", source, {})
     return {
         "while_lost": paused.state,
         "reason": paused.reason,
@@ -54,7 +73,7 @@ def run(root: Path, sizes_mib: list[int], rounds: int, clock: Callable[[], float
     folder = root / f"bench-{uuid.uuid4().hex}"
     folder.mkdir()
     try:
-        store = base.ArtifactStore(LocalBackend(folder))
+        store = bench_store(folder)
         rows = throughput(store, sizes_mib, rounds, clock)
         with tempfile.TemporaryDirectory() as attempt:
             source = Path(attempt) / "checkpoint.bin"

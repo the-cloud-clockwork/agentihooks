@@ -3,7 +3,7 @@ import tempfile
 from pathlib import Path
 
 from scripts.swarm_v2 import cache
-from scripts.swarm_v2.artifacts import base, publication
+from scripts.swarm_v2.artifacts import publication
 from scripts.swarm_v2.artifacts.local import LocalBackend
 from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, PodTemplate
 from scripts.swarm_v2.kubernetes.storage import MountChecker, StorageRefused
@@ -18,7 +18,8 @@ from tests.contracts.storage_layout.test_pod_storage import (
     policy,
     safe_pod,
 )
-from tests.contracts.storage_layout.test_publication import DATA, SCOPE, lose, restore
+from tests.contracts.storage_layout.test_publication import DATA, lose, restore
+from tests.test_swarm_v2_artifacts import bound
 from tests.test_swarm_v2_cache import build, fill, key, published, read_only, stamped
 
 DIMENSIONS = {"fixture": "sv2-fsy-05"}
@@ -118,15 +119,15 @@ def case_c() -> dict:
         worktree.mkdir()
         shared.mkdir()
         (worktree / "diff.patch").write_bytes(DATA)
-        store = base.ArtifactStore(LocalBackend(shared))
+        store = bound(LocalBackend(shared))
         before = stamped(worktree)
         lost = lose(shared)
-        paused = publication.publish(store, SCOPE, "ckpt-1", worktree / "diff.patch")
+        paused = publication.publish(store, "ckpt-1", worktree / "diff.patch")
         worktree_intact = stamped(worktree) == before
         restore(shared, lost)
-        first = publication.publish(store, SCOPE, "ckpt-1", worktree / "diff.patch")
+        first = publication.publish(store, "ckpt-1", worktree / "diff.patch")
         keys = store.backend.keys("")
-        replay = publication.publish(store, SCOPE, "ckpt-1", worktree / "diff.patch")
+        replay = publication.publish(store, "ckpt-1", worktree / "diff.patch")
         run = {
             "publication_paused_on_loss": paused.state == publication.PAUSED and paused.ref is None,
             "worktree_intact_after_loss": worktree_intact,

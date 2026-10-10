@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from scripts.swarm_v2.artifacts.base import ArtifactRef, ArtifactStore, Scope
+from scripts.swarm_v2.artifacts.base import ArtifactRef, ArtifactStore
 
 PUBLISHED = "published"
 PAUSED = "paused"
@@ -20,13 +20,13 @@ class Publication:
 
 
 def publish(
-    store: ArtifactStore, scope: Scope, artifact_id: str, source: Path, environ: Mapping[str, str] = os.environ
+    store: ArtifactStore, artifact_id: str, source: Path, environ: Mapping[str, str] = os.environ
 ) -> Publication:
     data = source.read_bytes()
     if environ.get(SWITCH) == "off":
         return Publication(PAUSED, None, f"{SWITCH} is off, so publication is paused and the attempt keeps its files")
     try:
-        return Publication(PUBLISHED, store.put(scope, artifact_id, data), "")
+        return Publication(PUBLISHED, store.put(artifact_id, data), "")
     except OSError as error:
         cause = error.strerror or type(error).__name__
         reason = f"artifact storage is unavailable ({cause}), so publication is paused and the attempt keeps its files"
