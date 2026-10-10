@@ -6,9 +6,9 @@
     "agentihooks",
     "antoncore"
   ],
-  "tested_commit": "f763bba1dda1ca0951fd1ee94f21522e0e42ab66",
+  "tested_commit": "39cfef6ab556b49d59a84ff8a710c65640bf4eef",
   "status": "fixture-qualified; live API enablement on anton-prod waits for gate G12",
-  "evidence_class": "Mocked for cases A to C: a fakeredis store shared by both controller processes, labelled node fixtures taken from the anton-prod node list and the antoncore ec2-arc-runners node labels, and the chart controller placement pinned to the fixture by a chart test. Live in kind: Proofs run 38076629815 at agentihooks 98f6c79ab2b311749629e97d39811a1b858f1b42 deployed the chart with the control API on, registered one worker and heartbeated it through the controller API Service, saw the controller tick observe it working, and saw the kube-scheduler hold the controller Pending on a node labelled as Spot capacity; output in kind-proof.txt.",
+  "evidence_class": "Mocked for cases A to C: a fakeredis store shared by both controller processes, labelled node fixtures taken from the anton-prod node list and the antoncore ec2-arc-runners node labels, and the chart controller placement pinned to the fixture by a chart test. Live in kind: Proofs run 38076980770 at agentihooks 30afd472be87e5659206b5d122d31457f42873b0 deployed the chart with the control API on, registered one worker and heartbeated it through the controller API Service, saw the controller tick observe it working, and saw the kube-scheduler hold the controller Pending on a node labelled as Spot capacity; output in kind-proof.txt.",
   "interfaces": [
     "scripts.swarm_v2.control_service.ControlService(store, slug, key, authorize, transports, owner) builds the v2 Controller, LaunchAuthority, TaskAuthority and ExecutionsAPI for one swarm; owner sets the lease owner so the hive tick and the v2 controller share one lease",
     "ControlService.start acquires the controller, recovering the operation journal and running the account reconcile; tick renews it, acquires it again after a lapsed lease, and sends each kubernetes occupant's latest accepted heartbeat through Controller.observe; stop shuts the API down and releases the lease",
@@ -26,11 +26,11 @@
     "image": "floating :dev tag; ArgoCD Image Updater pins the deployed digest with its digest strategy, so no digest is written to git (CI Manifesto no hash pins)"
   },
   "measurements": {
-    "swarm_control_restart_recovery_seconds": "60.0 in cases A and C with dimensions swarm, tick_seconds 60, attempts 2, ticks 1: one controller tick after restart observes both remote attempts working; ticks times the tick interval, an upper bound, not a wall clock measure"
+    "swarm_control_restart_recovery_seconds": "60.0 in cases A and C with dimensions swarm, tick_seconds 60, attempts 2, ticks 1: one controller tick after restart observes both remote attempts working; ticks times the tick interval, an upper bound, not a wall clock measure; live in kind Proofs run 38076980770: 4.4 seconds from durable capacity returning to the control API ready"
   },
   "authority": "The controller acts only while the hive controller credential digest matches Redis; case B shows a forged credential refused with no lease taken and no occupant changed. A rival controller owner cannot take a live lease in case C. Workers authenticate with launch grants signed by the mounted key.",
   "states": {
-    "observed": "Cases A, B and C each ran twice with identical records in Proofs run 38076627332 and matched the committed records in Proofs run 38076739374 at tested_commit (34 passed). Kind Proofs run 38076629815 printed register 200, heartbeat 200, observed working, and the controller held Pending on reclaimable capacity for node affinity.",
+    "observed": "Cases A, B and C each ran twice with identical records in Proofs run 38076627332 and matched the committed records in Proofs run 38076739374 at f763bba1d (34 passed). Kind Proofs run 38076980770 printed register 200, heartbeat 200, observed working, and the controller held Pending on reclaimable capacity for node affinity. It measured swarm_control_restart_recovery_seconds=4.4 from durable capacity returning to the control API ready.",
     "accepted": "Placement admits the four on premises nodes and refuses all four EC2 pools, including an untainted Spot node with 32 free cores. A graceful restart keeps both task claims and observes both attempts working; a crash restart under the same owner keeps the lease epoch, replays heartbeats identically and refuses older heartbeats as revision conflicts. A forged controller credential is refused with no lease taken, and a new valid request then takes the lease.",
     "committed": "Code and fixtures at tested_commit; manifest.json hashes them.",
     "externally_verified": "Not on anton-prod: the control API stays off there until gate G12."
@@ -48,7 +48,7 @@
   },
   "antoncore": {
     "pull_request": "https://github.com/the-cloud-clockwork/antoncore/pull/648",
-    "tested_commit": "1c8aa8e39a3252c48b32430a69185ce7b0a2a3fc"
+    "tested_commit": "7da7542d73a7f856a7ec053a1f42ce6263bc8978"
   },
   "dependencies": {
     "SV2-KUB-02": "accepted: merged in agentihooks pull request 2461",
