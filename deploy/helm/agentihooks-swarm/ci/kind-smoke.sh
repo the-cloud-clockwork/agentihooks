@@ -293,7 +293,10 @@ token_file = Path(tempfile.mkdtemp()) / "token"
 token_file.write_text(access["token"])
 server = f"https://{env['KUBERNETES_SERVICE_HOST']}:{env['KUBERNETES_SERVICE_PORT']}"
 api = PodClient(KubeHttp(server, token_file, ssl.create_default_context(cadata=access["ca"])), "default")
-record = AgentRecord(store.next_name(slug, "eng"), "eng", "kind-grant", seat=f"eng-2@{slug}", runtime_backend=BACKEND)
+target = {"pod_namespace": "default", "pod_name": "swarm-kind-grant"}
+record = AgentRecord(
+    store.next_name(slug, "eng"), "eng", "kind-grant", seat=f"eng-2@{slug}", runtime_backend=BACKEND, runtime_target=target
+)
 agent = probe.controller.admit(record, "")
 grant = probe.grants.issue(
     slug, agent.execution_id, project_ids=["github.com/the-cloud-clockwork/agentihooks"], brain_id="swarm", account="kind"
