@@ -35,23 +35,27 @@ AUTHORITY = {
 
 
 def named_folders(source: str, folders: set[str]) -> list[str]:
-    found = []
+    found = set()
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
-            parts, joined = [node.right], False
+            parts = [node.right]
         elif isinstance(node, ast.JoinedStr) and node.values:
-            parts, joined = [node.values[0]], True
+            parts = [node.values[0]]
         elif isinstance(node, ast.Tuple):
-            parts, joined = node.elts, False
+            parts = node.elts
+        elif isinstance(node, (ast.For, ast.comprehension)) and isinstance(node.iter, (ast.List, ast.Set)):
+            parts = node.iter.elts
         elif isinstance(node, ast.Call) and ast.unparse(node.func).rpartition(".")[2] in ("Path", "join", "joinpath"):
-            parts, joined = node.args, False
+            parts = node.args
+        elif isinstance(node, ast.Constant):
+            parts = [node] if isinstance(node.value, str) and "/" in node.value else []
         else:
             continue
         for part in parts:
             if isinstance(part, ast.Constant) and isinstance(part.value, str):
                 head, slash, _ = part.value.partition("/")
-                if head in folders and (slash or not joined):
-                    found.append(f"{node.lineno}: {part.value}")
+                if head in folders and (slash or not isinstance(node, (ast.JoinedStr, ast.Constant))):
+                    found.add(f"{part.lineno}: {part.value}")
     return sorted(found)
 
 
@@ -69,9 +73,14 @@ def test_the_guard_catches_a_reader_naming_a_layout_folder():
         'i = os.path.join(a, "homes/x")\n'
         'j = record.get("homes")\n'
         'k = a.joinpath("run", "x")\n'
+        'for n in ["run", "tmp"]: pass\n'
+        'm = r.glob("homes/*")\n'
     )
     assert named_folders(source, folders) == [
         "11: run",
+        "12: run",
+        "12: tmp",
+        "13: homes/*",
         "1: homes",
         "2: run/",
         "3: tmp/x",
@@ -193,7 +202,9 @@ def test_image_probe_launches_each_harness_in_the_layout_home(tmp_path, monkeypa
     )
     execution = filesystem.Execution(tmp_path, filesystem.parse(MOVED))
     image_probe.harness("claude", execution, {"PATH": "/bin"})
-    assert calls[1] == {"PATH": "/bin", "HOME": str(tmp_path / "h" / "claude")}
+    assert calls[1] == {"PATH": "/bin"} | filesystem.environment(execution, "claude")
+    assert calls[1]["HOME"] == str(tmp_path / "h" / "claude")
+    assert calls[1]["XDG_RUNTIME_DIR"] == str(tmp_path / "r")
 
 
 def test_image_probe_runs_herdr_in_a_layout_execution(tmp_path, monkeypatch):

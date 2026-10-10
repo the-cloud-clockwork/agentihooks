@@ -97,7 +97,7 @@ def registrations(home: Path) -> int:
 def harness(name: str, execution: filesystem.Execution, environ: dict) -> dict:
     home, work = execution.path("home") / name, execution.root / "work"
     run(["git", "init", "-q", str(work)], environ, COMMAND_SECONDS)
-    environ = environ | {"HOME": str(home)}
+    environ = environ | filesystem.environment(execution, name)
     command, timeout = LAUNCHES[name]
     try:
         run(command, environ, timeout, cwd=work)

@@ -266,10 +266,12 @@ def test_harness_launches_headless_in_a_git_work_folder(tmp_path, monkeypatch, n
     commands = Commands({"--version": done("v 1\n")})
     monkeypatch.setattr(image_probe, "run", commands)
 
-    observed = image_probe.harness(name, filesystem.Execution(tmp_path, filesystem.load()), {"PATH": "/bin"})
+    execution = filesystem.Execution(tmp_path, filesystem.load())
+    observed = image_probe.harness(name, execution, {"PATH": "/bin"})
 
     assert observed == {"version": "v 1", "hook_registrations": 1}
-    launched = {"PATH": "/bin", "HOME": str(home)}
+    launched = {"PATH": "/bin"} | filesystem.environment(execution, name)
+    assert launched["HOME"] == str(home)
     assert commands.calls == [
         {
             "command": ["git", "init", "-q", str(tmp_path / "work")],
