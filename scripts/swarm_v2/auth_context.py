@@ -256,19 +256,23 @@ class LaunchAuthority:
             self.refuse(slug, "unauthenticated", "launch grant was revoked")
         return audit
 
+    def current(self, slug: str, claims: dict) -> None:
+        occupants = self.store.execution_occupants(slug).values()
+        if (claims["execution_id"], claims["generation"]) not in {(a.execution_id, a.generation) for a in occupants}:
+            self.refuse(slug, "stale_generation", "launch grant is for a superseded execution")
+
     def verify(self, slug: str, token: str) -> Registration:
-        """The grant's identity, checked without registering it; the worker's own registration confirms it."""
+        """Checks the grant without registering it; only the worker's own registration confirms it."""
         claims = self._verify(slug, token)
         self.issued(self.redis, slug, claims)
+        self.current(slug, claims)
         return _registration(claims, "")
 
     def admit(self, pipe: Pipeline, slug: str, claims: dict) -> Registration:
         grants = self.store.key(slug, "launch-grants")
         registrations = self.store.key(slug, "launch-registrations")
         audit = self.issued(pipe, slug, claims)
-        occupants = self.store.execution_occupants(slug).values()
-        if (claims["execution_id"], claims["generation"]) not in {(a.execution_id, a.generation) for a in occupants}:
-            self.refuse(slug, "stale_generation", "launch grant is for a superseded execution")
+        self.current(slug, claims)
         existing = pipe.hget(registrations, claims["execution_id"])
         if existing:
             registration = Registration(**json.loads(existing))

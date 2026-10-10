@@ -190,8 +190,7 @@ class AccountCapacity:
         return self.end(grant.account, grant.seat_id, grant.execution_id, grant.generation)
 
     def end(self, account: str, seat: str, execution_id: str, generation: int) -> Slot | None:
-        """The controller's release on an execution's exit, keyed by the identity it admitted; no grant, so an expired
-        one never strands the slot."""
+        """Releases the slot held by exactly this execution and generation; takes no grant."""
         holder = self._holder(seat)
 
         def decide(pipe, slots, now):

@@ -1,6 +1,4 @@
-"""Distributed spawn: the controller admits the execution, issues its launch grant and reserves the account slot before
-the runtime launches anything; the worker's registration turns the reservation into occupancy and its exit releases it.
-The capacity and registry authorize with LaunchAuthority.verify, so only the worker's registration confirms a grant."""
+"""The capacity and registry given here must authorize with LaunchAuthority.verify, never register."""
 
 from dataclasses import dataclass, replace
 
@@ -45,7 +43,7 @@ class DistributedLaunch:
         self.slug = capacity.slug
 
     def spawn(self, request: SpawnRequest, agent: AgentRecord, terms: LaunchTerms, previous: str = "") -> Launch:
-        admitted = replace(self.controller.admit(agent, previous), account=terms.account)
+        admitted = self.controller.admit(replace(agent, account=terms.account), previous)
         grant = self.grants.issue(
             self.slug,
             admitted.execution_id,
@@ -61,14 +59,18 @@ class DistributedLaunch:
         identity = {"launch_grant": grant, "execution_id": admitted.execution_id, "generation": admitted.generation}
         outcome = self.router.spawn(replace(request, task={**request.task, **identity}))
         if outcome.status in NOT_LAUNCHED:
-            self.capacity.release(grant)
+            self.exited(admitted)
         return Launch(admitted, grant, slot, outcome)
 
     def registered(self, session: Session, grant: str) -> Slot:
         body = {"execution_id": session.execution_id, "generation": session.generation}
         self.grants.register(self.slug, grant, body)
         record = self.fleet.register(session, grant)
-        return self.capacity.occupy(grant, record.scope, record.session_id)
+        try:
+            return self.capacity.occupy(grant, record.scope, record.session_id)
+        except SwarmError:
+            self.fleet.close(record.scope, record.session_id, grant)
+            raise
 
     def exited(self, agent: AgentRecord) -> Slot | None:
         return self.capacity.end(agent.account, agent.seat, agent.execution_id, agent.generation)
