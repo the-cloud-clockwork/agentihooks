@@ -14,5 +14,5 @@ docker run --rm --network none --read-only \
     "$image" python -m scripts.swarm_v2.image_probe > "$output/probe.json" 2> "$output/probe.log"
 image_id="$(docker image inspect --format '{{.Id}}' "$image")"
 cd "$repo"
-python3 -m scripts.swarm_v2.image_attestation attest --probe "$output/probe.json" \
-    --image-id "$image_id" --commit "$commit" --output "$output/attestation.json"
+python3 -m scripts.swarm_v2.image_attestation attest "$output/probe.json" "$image_id" "$commit" \
+    "$output/attestation.json"
