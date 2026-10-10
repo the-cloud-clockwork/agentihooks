@@ -1,4 +1,6 @@
+import json
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -7,6 +9,9 @@ from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2.controller import Controller
 from scripts.swarm_v2.kubernetes import watch
+from scripts.swarm_v2.reconciliation import accounts as reconciliation
+from scripts.swarm_v2.reconciliation.accounts import AccountReconciler
+from scripts.swarm_v2.runtime import observe
 from scripts.swarm_v2.runtime.operations import Observation, OperationRequest, Phase
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
@@ -657,3 +662,177 @@ def test_reconcile_package_cases_pass_from_independent_state(case):
     first, second = sv2_ctl04_cases.run_case(case), sv2_ctl04_cases.run_case(case)
     assert first == second
     assert first["state"] == "passed"
+
+
+RECONCILE = json.loads((Path(__file__).parent / "fixtures/swarm_v2/account-reconciliation.json").read_text())
+TTL, TERMINAL = RECONCILE["ttl_ms"], RECONCILE["terminal_seat"]
+LOST_TERMINAL, ORPHANED, SUCCESSOR = (
+    f"fixture/{RECONCILE[seat]}" for seat in ("terminal_seat", "orphan_seat", "handoff_seat")
+)
+RETIRING = f"{SUCCESSOR}#1"
+
+
+@pytest.fixture
+def accounts(monkeypatch):
+    from tests.test_swarm_v2_account_reconciliation import World
+
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", "20")
+    world = World(monkeypatch)
+    world.scene()
+    return world
+
+
+def test_a_restarted_controller_reconciles_accounts_at_start_with_no_manual_step(accounts):
+    accounts.clock[0] += lease.ttl_ms()
+    assert sorted(accounts.rows()) == sorted([LOST_TERMINAL, RETIRING, ORPHANED, SUCCESSOR])
+    restarted = Controller(accounts.store, "fixture", [], lambda: True)
+
+    assert restarted.acquire()
+
+    assert sorted(accounts.rows()) == sorted([LOST_TERMINAL, RETIRING])
+    assert restarted.accounts.account_occupancy_discrepancies() == {"handoff_unconfirmed": 1}
+
+
+def test_each_renew_tick_reconciles_accounts(accounts):
+    controller = accounts.authority.controller
+    accounts.clock[0] += TTL
+
+    assert sorted(accounts.rows()) == sorted([LOST_TERMINAL, RETIRING, ORPHANED, SUCCESSOR])
+    assert controller.renew() is True
+    assert sorted(accounts.rows()) == sorted([LOST_TERMINAL, RETIRING])
+
+
+def test_a_renew_tick_of_an_unreconciled_epoch_releases_nothing_and_stays_closed(accounts):
+    controller = accounts.authority.controller
+    controller.reconciled_epoch = None
+    accounts.clock[0] += TTL
+    before = accounts.rows()
+
+    assert controller.renew() is False
+    assert controller.ready is False
+    assert accounts.rows() == before
+
+
+def test_a_renew_tick_whose_account_reconcile_fails_leaves_admission_closed(accounts, monkeypatch):
+    controller = accounts.authority.controller
+
+    def unavailable():
+        raise SwarmError("dependency_unavailable")
+
+    monkeypatch.setattr(controller.accounts, "reconcile", unavailable)
+
+    with pytest.raises(SwarmError, match="^dependency_unavailable$"):
+        controller.renew()
+    assert controller.ready is False
+
+
+def test_a_refused_renew_tick_releases_nothing(accounts):
+    controller = accounts.authority.controller
+    accounts.clock[0] += lease.ttl_ms()
+    before = accounts.rows()
+
+    assert controller.renew() is False
+    assert accounts.rows() == before
+
+
+def exit_signal(agent, source, value, at):
+    return observe.Signal(source, observe.Reading.OK, at, agent.execution_id, agent.generation, value)
+
+
+@pytest.mark.parametrize(
+    ("source", "value"),
+    (
+        (observe.Source.SUPERVISOR, observe.EXITED),
+        (observe.Source.KUBERNETES, "Failed"),
+        (observe.Source.KUBERNETES, "Succeeded"),
+    ),
+)
+def test_an_exit_observation_reaches_the_account_exit_call(accounts, source, value):
+    controller, lost = accounts.authority.controller, accounts.agents[TERMINAL]
+    observer = observe.Observer(accounts.store, "local", observe.Thresholds())
+    now = accounts.clock[0] / 1000
+
+    found = controller.observe(observer, lost, [exit_signal(lost, source, value, now)], now)
+
+    assert (found.kind, found.action, found.holder) == ("exited", "release", LOST_TERMINAL)
+    assert (found.execution_id, found.generation, found.evidence) == (lost.execution_id, lost.generation, source.value)
+    assert sorted(accounts.rows()) == sorted([RETIRING, ORPHANED, SUCCESSOR])
+    assert observer.get("fixture", lost.execution_id).sources[source.value]["value"] == value
+
+
+@pytest.mark.parametrize("stored", (True, False))
+def test_a_repeated_exit_observation_reaches_the_exit_call_once(accounts, stored):
+    controller, lost = accounts.authority.controller, accounts.agents[TERMINAL]
+    observer = observe.Observer(accounts.store, "local", observe.Thresholds())
+    if not stored:
+        accounts.store.redis.hdel(accounts.store.key("fixture", "observations"), lost.execution_id)
+    now = accounts.clock[0] / 1000
+    signal = exit_signal(lost, observe.Source.SUPERVISOR, observe.EXITED, now)
+
+    first = controller.observe(observer, lost, [signal], now)
+    again = controller.observe(observer, lost, [signal], now + 1)
+
+    assert (first.kind, first.action) == ("exited", "release")
+    assert again is None
+    assert controller.accounts.stale_exit_events() == 0
+    assert sorted(accounts.rows()) == sorted([RETIRING, ORPHANED, SUCCESSOR])
+
+
+def test_an_exit_whose_release_was_held_back_is_released_on_a_later_observation(accounts):
+    controller, lost = accounts.authority.controller, accounts.agents[TERMINAL]
+    observer = observe.Observer(accounts.store, "local", observe.Thresholds())
+    now = accounts.clock[0] / 1000
+    signal = exit_signal(lost, observe.Source.SUPERVISOR, observe.EXITED, now)
+    controller.accounts = AccountReconciler(accounts.store, "fixture", environ={reconciliation.MODE: "observe"})
+
+    held = controller.observe(observer, lost, [signal], now)
+    assert (held.kind, held.action) == ("exited", "observe_only")
+    assert LOST_TERMINAL in accounts.rows()
+
+    controller.accounts = AccountReconciler(accounts.store, "fixture", environ={})
+    retried = controller.observe(observer, lost, [signal], now + 1)
+
+    assert (retried.kind, retried.action, retried.holder) == ("exited", "release", LOST_TERMINAL)
+    assert LOST_TERMINAL not in accounts.rows()
+    assert controller.accounts.stale_exit_events() == 0
+
+
+def test_a_second_source_reporting_the_same_exit_is_not_a_stale_exit(accounts):
+    controller, lost = accounts.authority.controller, accounts.agents[TERMINAL]
+    observer = observe.Observer(accounts.store, "local", observe.Thresholds())
+    now = accounts.clock[0] / 1000
+
+    first = controller.observe(observer, lost, [exit_signal(lost, observe.Source.SUPERVISOR, observe.EXITED, now)], now)
+    later = controller.observe(observer, lost, [exit_signal(lost, observe.Source.KUBERNETES, "Failed", now)], now)
+
+    assert (first.kind, first.evidence) == ("exited", "supervisor")
+    assert later is None
+    assert controller.accounts.stale_exit_events() == 0
+
+
+def test_an_observation_without_an_exit_frees_no_slot(accounts):
+    controller, lost = accounts.authority.controller, accounts.agents[TERMINAL]
+    observer = observe.Observer(accounts.store, "local", observe.Thresholds())
+    now = accounts.clock[0] / 1000
+    before = accounts.rows()
+
+    found = controller.observe(observer, lost, [exit_signal(lost, observe.Source.KUBERNETES, "Running", now)], now)
+
+    assert found is None
+    assert accounts.rows() == before
+    assert observer.get("fixture", lost.execution_id).sources["kubernetes"]["value"] == "Running"
+    assert controller.accounts.stale_exit_events() == 0
+
+
+def test_an_exit_observation_needs_the_controller_lease(accounts):
+    controller, lost = accounts.authority.controller, accounts.agents[TERMINAL]
+    observer = observe.Observer(accounts.store, "local", observe.Thresholds())
+    accounts.clock[0] += lease.ttl_ms()
+    now = accounts.clock[0] / 1000
+    before, seen = accounts.rows(), observer.get("fixture", lost.execution_id)
+
+    with pytest.raises(SwarmError, match="^the controller lease is stale$"):
+        controller.observe(observer, lost, [exit_signal(lost, observe.Source.SUPERVISOR, observe.EXITED, now)], now)
+
+    assert accounts.rows() == before
+    assert observer.get("fixture", lost.execution_id) == seen
