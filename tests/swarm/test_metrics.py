@@ -177,7 +177,7 @@ def test_a_swarm_pass_names_the_bottleneck_after_its_rows_and_ships_it(spool, se
         ),
     )
     tasks = [{"id": "t1", "state": "open"}]
-    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": tasks}, [], lambda url: None)
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": tasks}, [], lambda url: None, None)
     assert metrics.record_pass("sw", NOW, 0, ON, swarm) == []
     assert order == ["rows", ("bottleneck", "sw", NOW, tasks)]
     assert bottleneck.read(store, "sw")["bottleneck"] == ""
@@ -193,7 +193,7 @@ def test_ledger_rows_are_collected_before_a_failing_swarm_collector(spool, sent,
 
     monkeypatch.setattr(metrics.metrics_ledger, "record", lambda box, slug, now_ms, ledger: order.append("ledger"))
     monkeypatch.setattr(metrics.metrics_swarm, "pull_rows", broken)
-    swarm = metrics.metrics_swarm.TickInput(None, {"tasks": []}, [], lambda url: None)
+    swarm = metrics.metrics_swarm.TickInput(None, {"tasks": []}, [], lambda url: None, None)
     assert metrics.record_pass("sw", NOW, 0, ON, swarm) == ["metrics outbox failed: bad swarm row"]
     assert order == ["ledger", "swarm"]
 
@@ -207,6 +207,6 @@ def test_a_ledger_without_tasks_still_names_the_bottleneck(spool, sent, monkeypa
     store.create(SwarmConfig("sw", "/repo", 0, 0))
     monkeypatch.setattr(metrics.metrics_swarm, "pull_rows", lambda box, now_ms, swarm: {})
     monkeypatch.setattr(metrics.metrics_swarm, "record_pass", lambda *args: None)
-    swarm = metrics.metrics_swarm.TickInput(store, {}, [], lambda url: None)
+    swarm = metrics.metrics_swarm.TickInput(store, {}, [], lambda url: None, None)
     assert metrics.record_pass("sw", NOW, 0, ON, swarm) == []
     assert bottleneck.read(store, "sw")["bottleneck"] == ""
