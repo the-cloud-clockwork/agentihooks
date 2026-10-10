@@ -434,6 +434,11 @@ def test_cli_probe_thresholds_are_arguments(tmp_path, capsys, monkeypatch, brain
     assert (code, json.loads(out.out)["status"]) == (0, "ready")
 
 
+def test_cli_probe_thresholds_default_to_two_seconds():
+    args = worker_health.build_parser().parse_args(["startup", "--attempt", "a", "--harness", "codex"])
+    assert (args.herdr_timeout, args.brain_timeout) == (2.0, 2.0)
+
+
 def test_herdr_probe_reads_no_input_and_is_bounded(tmp_path, monkeypatch):
     attempt, _, environ = fixture(tmp_path)
     seen = []
