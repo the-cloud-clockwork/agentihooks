@@ -29,6 +29,7 @@ from scripts.swarm import (
     control_notifications,
     dev_red,
     difficulty,
+    freeze,
     grouping,
     launch_check,
     ledger_probe,
@@ -53,6 +54,7 @@ from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
+from scripts.swarm_ledger.repository import hierarchy
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
@@ -577,6 +579,7 @@ def _reopen(slug, ledger, rows, task_id):
 def _claimable(slug, store, rows, doc, lane):
     awaiting = {a.task for a in store.agents(slug) if a.state == "awaiting-decision"}
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
+    graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(store.config(slug))
     clear, overlapping = [], []
     for t in sorted(rows.values(), key=claim_order.key(rows)):
         if (
@@ -587,6 +590,7 @@ def _claimable(slug, store, rows, doc, lane):
             and not t.get("merged_into")
             and store.claimant(slug, t["id"]) is None
             and phase_state.admits(t, doc)
+            and not freeze.held(t, doc, graph, fix)
             and _unblocked(t, rows)
         ):
             mine = t.get("territory") or []
@@ -1033,5 +1037,5 @@ def _settle(slug, config, store, ledger, rows, doc):
     store.update(slug, state="drained")
     blocked = sum(1 for t in rows.values() if t.get("state") == "blocked" and not t.get("out_of_scope"))
     waiting = {0: "", 1: ", one blocked task waits for you"}.get(blocked, f", {blocked} blocked tasks wait for you")
-    ledger.notify(slug, "The swarm has no task left to start" + waiting)
+    ledger.notify(slug, freeze.notice(doc, rows.values(), freeze.fix_phase(config)) + waiting)
     return ["drained"]
