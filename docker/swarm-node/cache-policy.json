@@ -22,6 +22,8 @@
     ".git-credentials",
     ".env",
     "*.env",
+    ".env.*",
+    "*.env.*",
     "*.sqlite",
     "*.sqlite3",
     "*.db",
@@ -29,5 +31,8 @@
     "*-shm",
     "*-journal",
     "*.jsonl"
+  ],
+  "shared": [
+    "trusted"
   ]
 }

@@ -37,6 +37,7 @@ class Policy:
     reserve_bytes: int
     kinds: dict[str, bool]
     excluded: tuple[str, ...]
+    shared: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -55,8 +56,9 @@ class Key:
 @dataclass(frozen=True)
 class Store:
     policy: Policy
+    scope: str
     clock: Callable[[], float] = time.time
-    usage: Callable = shutil.disk_usage
+    usage: Callable[[Path], object] = shutil.disk_usage
 
 
 @dataclass(frozen=True)
@@ -82,12 +84,12 @@ def parse(document: dict) -> Policy:
     store = Path(str(document.get("store")))
     if not store.is_absolute():
         raise CacheError("cache policy store must be an absolute path")
-    excluded = document.get("excluded")
-    if not isinstance(excluded, list) or not all(isinstance(pattern, str) for pattern in excluded):
-        raise CacheError("cache policy excluded patterns must be a list of names")
+    names = (document.get("excluded"), document.get("shared"))
+    if not all(isinstance(found, list) and all(isinstance(name, str) for name in found) for found in names):
+        raise CacheError("cache policy excluded patterns and shared scopes must be lists of names")
     if not isinstance(document.get("enabled"), bool):
         raise CacheError("cache policy enabled must be true or false")
-    return Policy(document["enabled"], store, *limits, dict(kinds), tuple(excluded))
+    return Policy(document["enabled"], store, *limits, dict(kinds), *map(tuple, names))
 
 
 def load(path: Path | None = None) -> Policy:
@@ -105,7 +107,7 @@ def lock_digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def hit_rate() -> float:
+def cache_hit_rate() -> float:
     looked = METRICS["cache_hits"] + METRICS["cache_misses"]
     return METRICS["cache_hits"] / looked if looked else 0.0
 
@@ -136,17 +138,20 @@ def _drop(path: Path) -> None:
         filesystem.remove(path)
 
 
+def _matches(store: Store, key: Key, entry: Path) -> bool:
+    try:
+        record = json.loads((entry / ENTRY).read_text())
+        files = _manifest(entry / CONTENT, store.policy, key.kind)
+        return not entry.is_symlink() and record["key"] == asdict(key) and record["files"] == files
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
 def _verified(store: Store, key: Key) -> Path | None:
     entry = store.policy.store / key.digest()
     if not entry.exists() and not entry.is_symlink():
         return None
-    try:
-        record = json.loads((entry / ENTRY).read_text())
-        sound = not entry.is_symlink() and record["key"] == asdict(key)
-        sound = sound and record["files"] == _manifest(entry / CONTENT, store.policy, key.kind)
-    except (OSError, ValueError, KeyError, TypeError):
-        sound = False
-    if not sound:
+    if not _matches(store, key, entry):
         METRICS["cache_corruption_total"] += 1
         _drop(entry)
         return None
@@ -163,15 +168,17 @@ def _locked(store: Store):
         yield
 
 
-def _check(policy: Policy, key: Key) -> None:
-    if key.kind not in policy.kinds:
+def _check(store: Store, key: Key, scopes: tuple[str, ...]) -> None:
+    if key.kind not in store.policy.kinds:
         raise CacheError(f"cache kind {key.kind} is not in the policy")
     if not all(asdict(key).values()):
         raise CacheError("a cache key needs its toolchain, lock, platform and scope")
+    if key.scope not in scopes:
+        raise CacheError(f"cache scope {key.scope} is not granted to this attempt")
 
 
 def attach(store: Store, execution: Execution, key: Key) -> Layer:
-    _check(store.policy, key)
+    _check(store, key, (store.scope, *store.policy.shared))
     layers = execution.path("scratch") / "cache"
     layers.mkdir(mode=0o700, exist_ok=True)
     writable = layers / key.digest()
@@ -184,44 +191,39 @@ def attach(store: Store, execution: Execution, key: Key) -> Layer:
     return Layer(key, seed, writable)
 
 
-def _bytes(tree: Path, files: dict) -> int:
-    return sum((tree / name).stat().st_size for name in files)
-
-
-def _size(entry: Path) -> int:
-    return sum(path.lstat().st_size for path in (entry / CONTENT).rglob("*") if path.is_file())
+def _size(tree: Path) -> int:
+    return sum(path.lstat().st_size for path in tree.rglob("*") if path.is_file())
 
 
 def _fits(policy: Policy, total: int, free: int, size: int) -> bool:
     return total + size <= policy.max_bytes and free - size >= policy.reserve_bytes
 
 
-def _make_room(store: Store, size: int) -> None:
+def _victims(store: Store, size: int) -> list[Path]:
     held = sorted(
         (path for path in store.policy.store.iterdir() if not path.name.startswith(".")),
         key=lambda path: path.lstat().st_mtime,
     )
-    total = sum(_size(path) for path in held)
+    total = sum(_size(path / CONTENT) for path in held)
     free = store.usage(store.policy.store).free
-    evicted = []
+    victims = []
     while held and not _fits(store.policy, total, free, size):
         oldest = held.pop(0)
-        freed = _size(oldest)
+        freed = _size(oldest / CONTENT)
         total, free = total - freed, free + freed
-        evicted.append(oldest)
+        victims.append(oldest)
     if not _fits(store.policy, total, free, size):
         raise CacheError(f"the cache store lacks room for {size} bytes, so nothing was evicted or written")
-    for path in evicted:
-        _drop(path)
+    return victims
 
 
 def _write(store: Store, layer: Layer, entry: Path) -> None:
     staging = store.policy.store / f"{STAGING}{uuid.uuid4().hex}"
     staging.mkdir()
     try:
-        shutil.copytree(layer.writable, staging / CONTENT)
+        shutil.copytree(layer.writable, staging / CONTENT, symlinks=True)
         files = _manifest(staging / CONTENT, store.policy, layer.key.kind)
-        record = {"key": asdict(layer.key), "files": files, "bytes": _bytes(staging / CONTENT, files)}
+        record = {"key": asdict(layer.key), "files": files, "bytes": _size(staging / CONTENT)}
         (staging / ENTRY).write_text(json.dumps(record))
         filesystem.seal(staging)
         now = store.clock()
@@ -237,13 +239,18 @@ def publish(store: Store, execution: Execution, layer: Layer) -> Path | None:
     if not store.policy.enabled:
         return None
     filesystem.contain(execution.path("scratch") / "cache", layer.writable)
-    _check(store.policy, layer.key)
-    size = _bytes(layer.writable, _manifest(layer.writable, store.policy, layer.key.kind))
+    _check(store, layer.key, (store.scope,))
+    files = _manifest(layer.writable, store.policy, layer.key.kind)
     entry = store.policy.store / layer.key.digest()
     with _locked(store):
         for stale in store.policy.store.glob(f"{STAGING}*"):
             filesystem.remove(stale)
-        if not entry.exists() and not entry.is_symlink():
-            _make_room(store, size)
-            _write(store, layer, entry)
+        if _verified(store, layer.key) is not None:
+            if json.loads((entry / ENTRY).read_text())["files"] != files:
+                raise CacheError("the cache entry for this key holds other content and is not replaced")
+            return entry / CONTENT
+        victims = _victims(store, _size(layer.writable))
+        _write(store, layer, entry)
+        for path in victims:
+            _drop(path)
     return entry / CONTENT
