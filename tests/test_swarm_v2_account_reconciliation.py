@@ -311,6 +311,11 @@ def test_c_a_restarted_controller_reconciles_expiry_and_occupancy_without_readin
     assert (replay.kind, replay.action, replay.holder) == ("stale_exit", "keep", "")
     assert sorted(world.rows()) == [LOST_TERMINAL]
     assert restarted.stale_exit_events() == 1
+    assert restarted.account_occupancy_discrepancies() == {"handoff_unconfirmed": 1}
+
+    settled = restarted.reconcile()
+
+    assert kinds(settled) == {LOST_TERMINAL: ("terminal_loss", "keep")}
     assert restarted.account_occupancy_discrepancies() == {}
 
 
