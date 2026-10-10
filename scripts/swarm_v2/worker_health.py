@@ -31,6 +31,8 @@ class Probe:
     attempt: Path
     harness: str
     environ: dict
+    herdr_timeout: float = HERDR_TIMEOUT
+    brain_timeout: float = BRAIN_TIMEOUT
 
 
 def private_home(attempt: Path, harness: str) -> Path | None:
@@ -163,7 +165,7 @@ def herdr_failure(probe: Probe, home: Path | None, root: Path | None) -> str | N
             env=environment,
             stdin=subprocess.DEVNULL,
             capture_output=True,
-            timeout=HERDR_TIMEOUT,
+            timeout=probe.herdr_timeout,
             check=True,
         )
         answer = json.loads(result.stdout)
@@ -177,14 +179,14 @@ def agent_failure(root: Path | None, scope: dict) -> str | None:
     return None if matches(running, scope) and running.get("status") == "running" else "agent_not_running"
 
 
-def brain_state(environ: dict) -> str:
+def brain_state(environ: dict, timeout: float) -> str:
     url = environ.get("BRAIN_URL", "").strip().rstrip("/")
     if not url:
         return "unconfigured"
     token = environ.get("BRAIN_HTTP_TOKEN") or environ.get("KB_ROUTER_TOKEN")
     try:
         request = urllib.request.Request(f"{url}/health", headers={"Authorization": f"Bearer {token}"} if token else {})
-        with urllib.request.urlopen(request, timeout=BRAIN_TIMEOUT):
+        with urllib.request.urlopen(request, timeout=timeout):
             return "ok"
     except urllib.error.HTTPError as exc:
         return f"brain_http_{exc.code}"
@@ -224,7 +226,7 @@ def evaluate(probe: Probe, mode: str) -> dict:
     }
     if mode == "liveness":
         return {**report, "status": "not_live" if reason else "live"}
-    dependencies = {"brain": brain_state(probe.environ)}
+    dependencies = {"brain": brain_state(probe.environ, probe.brain_timeout)}
     degraded = any(state not in ("ok", "unconfigured") for state in dependencies.values())
     report.update(dependencies=dependencies, status="not_ready" if reason else "degraded" if degraded else "ready")
     if mode == "diagnose":
@@ -237,6 +239,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("mode", choices=MODES)
     parser.add_argument("--attempt", required=True, type=Path)
     parser.add_argument("--harness", required=True, choices=HARNESSES)
+    parser.add_argument("--herdr-timeout", type=float, default=HERDR_TIMEOUT)
+    parser.add_argument("--brain-timeout", type=float, default=BRAIN_TIMEOUT)
     return parser
 
 
@@ -245,7 +249,9 @@ def main(argv: list[str] | None = None, environ: dict | None = None) -> int:
         args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
     except SystemExit as exc:
         return 0 if exc.code == 0 else 64
-    report = evaluate(Probe(args.attempt, args.harness, dict(os.environ) if environ is None else environ), args.mode)
+    environ = dict(os.environ) if environ is None else environ
+    probe = Probe(args.attempt, args.harness, environ, args.herdr_timeout, args.brain_timeout)
+    report = evaluate(probe, args.mode)
     print(json.dumps(report, sort_keys=True))
     return 0 if args.mode == "diagnose" or report["status"] in ("live", "ready", "degraded") else 1
 

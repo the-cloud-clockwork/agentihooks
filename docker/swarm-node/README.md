@@ -121,7 +121,10 @@ answer `/health` reports `degraded` under `dependencies` with exit zero; local
 failures report `not_ready` with exit one. `diagnose` prints the full report
 for a failed bootstrap with exit zero and lists environment variable names,
 never values. Every report names `worker_startup_failure_reason`, the first
-failing local check. Probes leave nothing behind in the attempt. Probe wiring and
+failing local check. Probes leave nothing behind in the attempt.
+`--herdr-timeout` and `--brain-timeout` (seconds, default 2) are the probe
+thresholds; a wrong value is reverted in the probe arguments alone, with no new
+image and no agent restart. Probe wiring and
 thresholds live in the Pod template under antoncore GitOps and roll back
 independently of the image. `tests/integration/swarm_node/run_health_proof.sh`
 proves the probes against isolated containers with real headless herdr.

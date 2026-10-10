@@ -63,7 +63,7 @@ def python(container, code, *args):
     return json.loads(docker("exec", container, "python", "-c", code, *args))
 
 
-def probe(container, attempt, mode):
+def probe(container, attempt, mode, *configuration):
     done = subprocess.run(
         [
             "docker",
@@ -76,6 +76,7 @@ def probe(container, attempt, mode):
             attempt,
             "--harness",
             "codex",
+            *configuration,
         ],
         capture_output=True,
         text=True,
@@ -215,6 +216,32 @@ def recovery_run(image, private):
         remove(container)
 
 
+def rollback_run(image, private):
+    container = start(image, private)
+    try:
+        root = ready(container)["root"]
+        before = runtime(container, root)
+        attempt = before["attempt"]
+        wrong = probe(container, attempt, "startup", "--herdr-timeout", "0.000001")
+        expect(wrong, 1, "not_ready", "herdr_unavailable")
+        reverted = probe(container, attempt, "startup")
+        expect(reverted, 0, "degraded", None, "brain_unreachable")
+        after = runtime(container, root)
+        assert after == before, (before, after)
+        return {
+            "container": container,
+            "image": image,
+            "wrong_configuration": ["--herdr-timeout", "0.000001"],
+            "wrong_threshold": wrong,
+            "reverted_configuration": [],
+            "reverted": reverted,
+            "runtime_before": before,
+            "runtime_after": after,
+        }
+    finally:
+        remove(container)
+
+
 def reasons(value):
     if isinstance(value, dict):
         found = [value["worker_startup_failure_reason"]] if "worker_startup_failure_reason" in value else []
@@ -270,6 +297,8 @@ def main():
         record(args.output, "b-result.json", case, rejections, fixture)
         case = "C"
         record(args.output, "c-result.json", case, [recovery_run(args.image, private) for _ in range(2)], fixture)
+        case = "rollback"
+        rehearsal = rollback_run(args.image, private)
     except Exception as exc:
         failure = {
             "package": "SV2-IMG-04",
@@ -302,8 +331,11 @@ def main():
             "committed": "tested commit",
             "externally_verified": "not run; production rollout belongs to antoncore",
         },
-        "rollback_rehearsal": "deferred to the ledger follow up for the worker Pod template, not performed: probe "
-        "wiring and thresholds live in that template, which is not built yet",
+        "rollback_rehearsal": {
+            "action": "revert the probe threshold arguments while the image and the running agent stay",
+            "observed": rehearsal,
+            "pod_template": "the same revert in the worker Pod template is a ledger follow up; it is not built yet",
+        },
         "limitations": [
             "Only the codex harness runs in the container cases; claude is covered by unit tests",
             "Linux amd64 only",

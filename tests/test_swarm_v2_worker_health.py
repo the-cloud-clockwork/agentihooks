@@ -58,9 +58,11 @@ def fixture(tmp_path, harness="codex"):
 
 class Brain(BaseHTTPRequestHandler):
     status = 200
+    delay = 0.0
     seen = []
 
     def do_GET(self):
+        time.sleep(Brain.delay)
         Brain.seen.append((self.path, self.headers.get("Authorization")))
         self.send_response(Brain.status)
         self.end_headers()
@@ -72,6 +74,7 @@ class Brain(BaseHTTPRequestHandler):
 @pytest.fixture
 def brain():
     Brain.status = 200
+    Brain.delay = 0.0
     Brain.seen = []
     server = HTTPServer(("127.0.0.1", 0), Brain)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -407,8 +410,26 @@ def test_herdr_protocol_answer_must_be_an_object(tmp_path, output):
 def test_hung_herdr_is_bounded(tmp_path, monkeypatch):
     attempt, _, environ = fixture(tmp_path)
     executable(tmp_path / "bin" / "herdr", "#!/bin/sh\nexec sleep 5\n")
-    monkeypatch.setattr(worker_health, "HERDR_TIMEOUT", 0.2)
-    assert report(attempt, environ, "startup")["checks"]["herdr"] == "herdr_unavailable"
+    assert evaluate(Probe(attempt, "codex", environ, herdr_timeout=0.2), "startup")["checks"]["herdr"] == (
+        "herdr_unavailable"
+    )
+
+
+def test_cli_probe_thresholds_are_arguments(tmp_path, capsys, monkeypatch, brain):
+    attempt, _, environ = fixture(tmp_path)
+    executable(tmp_path / "bin" / "herdr", "#!/bin/sh\nsleep 0.6\necho '{}'\n")
+    Brain.delay = 0.6
+    environ["BRAIN_URL"] = f"http://127.0.0.1:{brain.server_address[1]}"
+    base = ["startup", "--attempt", str(attempt), "--harness", "codex"]
+    code, out = run_main([*base, "--herdr-timeout", "0.2", "--brain-timeout", "0.2"], capsys, monkeypatch, environ)
+    tight = json.loads(out.out)
+    assert (code, tight["checks"]["herdr"], tight["dependencies"]) == (
+        1,
+        "herdr_unavailable",
+        {"brain": "brain_unreachable"},
+    )
+    code, out = run_main(base, capsys, monkeypatch, environ)
+    assert (code, json.loads(out.out)["status"]) == (0, "ready")
 
 
 def test_herdr_probe_reads_no_input_and_is_bounded(tmp_path, monkeypatch):
