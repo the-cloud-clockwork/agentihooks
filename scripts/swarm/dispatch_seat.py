@@ -10,9 +10,9 @@ from dataclasses import replace
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import seat_spawn
-from scripts.swarm.store import FULL
+from scripts.swarm.store import DISPATCH, FULL
 
-LANE = "dispatch"
+LANE = DISPATCH
 SEAT = "dispatcher"
 SENDER = "swarm"
 STALE_MS = 15 * 60 * 1000
