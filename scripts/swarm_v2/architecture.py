@@ -2,6 +2,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 from collections import Counter
 from collections.abc import Callable, Mapping
@@ -81,6 +82,8 @@ def key_id(key: Ed25519PublicKey) -> str:
 def _authentic(key: Ed25519PublicKey | None, change: dict) -> bool:
     signature = change.get("signature")
     if key is None or change.get("key_id") != key_id(key) or not isinstance(signature, str):
+        return False
+    if not re.fullmatch(r"[0-9a-f]{128}", signature):
         return False
     try:
         key.verify(bytes.fromhex(signature), _signed(change))
@@ -306,7 +309,7 @@ def rollback(path: Path | str, to_revision: int, operation: str) -> dict:
     return _commit(path, record, operation, sha256, result)
 
 
-def render(record: dict, signing: Ed25519PublicKey | None = None) -> str:
+def render(record: dict, key: Ed25519PublicKey | None = None) -> str:
     lines = [
         "# Swarm v2 architecture decisions",
         "",
@@ -327,19 +330,19 @@ def render(record: dict, signing: Ed25519PublicKey | None = None) -> str:
         lines += ["", f"## {d['id']}: {d['title']}", "", f"Status: {d['status']}.", "", d["decision"], ""]
         lines += [f"Why: {d['rationale']}", "", "Rejected alternatives:", ""]
         lines += [f"- {a['alternative']}: {a['reason']}" for a in d["rejected_alternatives"]]
-    for title, key in (
+    for title, field in (
         ("Permitted worker image components", "worker_permitted"),
         ("Worker image exclusions", "worker_excluded"),
     ):
-        lines += ["", f"## {title}", "", *[f"- {name}" for name in record[key]]]
+        lines += ["", f"## {title}", "", *[f"- {name}" for name in record[field]]]
     lines.append("")
     changes = [
         f"{c['proposal']} by {c['approved_by']} at revision {c['revision']} ({c['reason']})"
-        for c in _changes(record, signing)
+        for c in _changes(record, key)
     ]
     lines.append(f"Operator architecture changes: {', '.join(changes) or 'none'}.")
-    for title, key in (("Unresolved decisions", "unresolved"), ("Rejected proposals", "rejected")):
-        entries = [f"- {e['name']} (`{e['id']}`, revision {e['revision']}): {e['reason']}" for e in record[key]]
+    for title, field in (("Unresolved decisions", "unresolved"), ("Rejected proposals", "rejected")):
+        entries = [f"- {e['name']} (`{e['id']}`, revision {e['revision']}): {e['reason']}" for e in record[field]]
         lines += ["", f"## {title}", "", *(entries or ["None."])]
     return "\n".join(lines) + "\n"
 

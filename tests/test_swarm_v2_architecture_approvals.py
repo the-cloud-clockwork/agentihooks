@@ -102,6 +102,7 @@ def test_a_forged_operator_label_is_refused(tmp_path):
         {"key_id": "0" * 16},
         {"signature": None},
         {"signature": "zz"},
+        {"signature": "UPPER"},
     ],
 )
 def test_a_signed_change_with_any_edited_field_is_refused(tmp_path, tamper):
@@ -113,7 +114,7 @@ def test_a_signed_change_with_any_edited_field_is_refused(tmp_path, tamper):
     assert architecture.approved(record, _dispatcher(), KEY) is False
 
 
-def test_a_signed_change_admits_nothing_without_the_signing_key(tmp_path):
+def test_a_signed_change_admits_nothing_without_the_verify_key(tmp_path):
     path = _record(tmp_path)
     _approve(path, _dispatcher())
     record = architecture.load_record(path)
@@ -229,7 +230,7 @@ def test_a_malformed_public_key_is_refused_by_name(raw):
     assert str(caught.value) == "SWARM_ARCHITECTURE_PUBLIC_KEY must be a hex Ed25519 public key"
 
 
-def test_the_cli_counts_an_approval_only_with_the_signing_key(tmp_path, monkeypatch, capsys):
+def test_the_cli_counts_an_approval_only_with_the_verify_key(tmp_path, monkeypatch, capsys):
     path = _record(tmp_path)
     markdown = tmp_path / "decisions.md"
     _approve(path, _dispatcher())
