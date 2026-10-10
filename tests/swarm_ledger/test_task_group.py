@@ -245,15 +245,16 @@ def with_ungroup(monkeypatch):
     monkeypatch.setitem(core.EXTENSION_OPS, "task_ungroup", ledger_groups)
 
 
-def test_ungroup_clears_the_lead_and_every_member_pointing_at_it(with_ungroup):
+@pytest.mark.parametrize("by", [MASTER, DISPATCHER])
+def test_ungroup_clears_the_lead_and_every_member_pointing_at_it(with_ungroup, by):
     group("t1", ["t2", "t3"])
-    state, rejected = ungroup("t1", by=MASTER)
+    state, rejected = ungroup("t1", by=by)
     found = rows(state)
     assert rejected == []
     assert "group_members" not in found["t1"]
     assert "merged_into" not in found["t2"] and "merged_into" not in found["t3"]
     event = state["_meta"]["events"][-1]
-    assert (event["by"], event["kind"], event["target"], event["text"]) == (MASTER, "ungrouped", "tasks/t1", "t2, t3")
+    assert (event["by"], event["kind"], event["target"], event["text"]) == (by, "ungrouped", "tasks/t1", "t2, t3")
     stamps = state["_meta"]["stamps"]
     assert [stamps[f"tasks/{t}"]["by"] for t in ("t1/group_members", "t2/merged_into", "t3/merged_into")] == [
         MASTER
