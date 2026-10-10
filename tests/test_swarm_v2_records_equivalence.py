@@ -6,15 +6,21 @@ from pathlib import Path
 import pytest
 
 from scripts.swarm_v2 import architecture, records, validate_plan
+from scripts.swarm_v2.runtime.commands import Principal, Role
 
 ROOT = Path(__file__).resolve().parents[1]
+OPERATOR = {
+    "slug": "rig",
+    "credential": "page",
+    "authenticate": lambda slug, credential: Principal("nestor", Role.OPERATOR),
+}
 
 
 def _observe(module, path, calls):
     outputs = []
-    for function, arguments in calls:
+    for function, arguments, *keywords in calls:
         try:
-            result = getattr(module, function)(*arguments)
+            result = getattr(module, function)(*arguments, **dict(*keywords))
         except ValueError as error:
             result = {"error": type(error).__name__, "message": str(error)}
         outputs.append(
@@ -39,8 +45,8 @@ def _replay(module, name, path):
             ("apply_inventory", (path, change)),
             ("apply_inventory", (path, dict(reversed(list(change.items()))))),
             ("apply_inventory", (path, changed)),
-            ("rollback", (path, change["base_revision"], "rollback")),
-            ("rollback", (path, change["base_revision"], "rollback")),
+            ("rollback", (path, change["base_revision"], "rollback"), OPERATOR),
+            ("rollback", (path, change["base_revision"], "rollback"), OPERATOR),
         ]
     else:
         plan = module.load_plan(ROOT / "Swarm-v2.md")
