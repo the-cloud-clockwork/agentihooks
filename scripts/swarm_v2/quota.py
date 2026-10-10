@@ -3,8 +3,10 @@ grant so the account and source execution come from the grant. A stale report ne
 missing, failed or aged reading is unknown, never full capacity. Infrastructure and operator budgets stay out."""
 
 import json
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING
 
 from scripts import session_bands
 from scripts.claude_quota_balancer import ProbeResult, QuotaWindow
@@ -12,6 +14,9 @@ from scripts.swarm import lease
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2.auth_context import Registration
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 FLAG = "AGENTIHOOKS_FLEET_QUOTA"
 HARNESSES = frozenset({"claude", "codex"})
@@ -42,8 +47,8 @@ class Observation:
     five_reset: float | None = None
     week_reset: float | None = None
 
-    def probe(self) -> ProbeResult:
-        failed = self.provider_status == "error"
+    def probe(self, known: bool = True) -> ProbeResult:
+        failed = not known or self.provider_status == "error"
         five = QuotaWindow() if failed else QuotaWindow(self.five_used, self.five_reset)
         week = QuotaWindow() if failed else QuotaWindow(self.week_used, self.week_reset)
         return ProbeResult(self.account, self.provider_status, "FLEET", None, five, week)
@@ -88,8 +93,15 @@ def wait_key(account: str, harness: str) -> str:
     return f"{ROOT}:quota-waits:{harness}:{account}"
 
 
-def latest_all(redis, harness: str) -> dict[str, Observation]:
-    return {account: decode(raw) for account, raw in redis.hgetall(latest_key(harness)).items()}
+def latest_all(redis: "Redis", harness: str) -> dict[str, Observation]:
+    """Entries that no longer decode are skipped so one drifted record cannot hide every other account."""
+    found = {}
+    for account, raw in redis.hgetall(latest_key(harness)).items():
+        try:
+            found[account] = decode(raw)
+        except (ValueError, TypeError):
+            continue
+    return found
 
 
 def _number(value: object, low: float, high: float) -> bool:
@@ -214,7 +226,6 @@ class QuotaObservations:
         return reading.state == OBSERVED and reading.routing_left >= MIN_ROUTING_LEFT
 
     def admit(self, account: str, harness: str, handoff: str = "") -> Admission:
-        """Admit only on a fresh reading with room; otherwise a configured handoff or one bounded shared wait."""
         if self._room(account, harness):
             return Admission(ADMIT, account)
         reason = "unknown" if self.reading(account, harness).state == UNKNOWN else "exhausted"
@@ -244,4 +255,8 @@ def fleet_observations(environ: Mapping[str, str], harness: str = "claude") -> l
         found = latest_all(redis_client(environ), harness)
     except RedisError:
         return []
-    return [(observation.observed_ms / 1000, observation.probe()) for observation in found.values()]
+    now = time.time()
+    return [
+        (observed.observed_ms / 1000, observed.probe(session_bands.fresh(observed.observed_ms / 1000, now)))
+        for observed in found.values()
+    ]

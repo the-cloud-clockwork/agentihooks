@@ -163,6 +163,20 @@ def test_a_newer_fleet_observation_outranks_the_local_cache(monkeypatch):
     assert kept.five_used == 0.0
 
 
+def test_a_fleet_observation_wins_a_tie_with_the_local_cache(monkeypatch):
+    from scripts import claude_quota_balancer as balancer
+
+    def beta(five_used):
+        return balancer.ProbeResult(
+            "beta", "allowed", "NORMAL", 70.0, balancer.QuotaWindow(five_used, None), balancer.QuotaWindow(30.0, None)
+        )
+
+    observed = time.time()
+    monkeypatch.setattr(balancer, "cached_observations", lambda: [(observed, beta(0.0))])
+    [found] = qp._other_accounts({}, [(observed, beta(100.0))])
+    assert found.five_used == 100.0
+
+
 def test_evaluate_reads_fleet_observations_from_its_environment(monkeypatch):
     seen = []
     monkeypatch.delenv("AH_ROUTE_API", raising=False)
