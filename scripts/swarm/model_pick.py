@@ -28,6 +28,8 @@ def pick(harness: str, lane: dict, task: dict, environ: dict) -> ModelPick:
     floor = model_effort(harness, [], environ)[1]
     if default.effort != "auto" or floor not in levels:
         return default
+    if floor == levels[-1]:
+        return ModelPick(default.model, floor)
     try:
         output = runner.run(
             PURPOSE,
@@ -53,7 +55,7 @@ def pick(harness: str, lane: dict, task: dict, environ: dict) -> ModelPick:
 def effort(answer: Answer, levels: list, floor: str, confidence: float) -> str | None:
     if answer.confidence < confidence:
         return None
-    return levels[max(levels.index(floor), round(max(0, min(3, answer.score))))]
+    return levels[-1] if answer.score > 0.5 else floor
 
 
 def _verdicts(definition, state, params, answers):

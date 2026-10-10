@@ -108,18 +108,26 @@ def cert(tmp_path):
     return str(tmp_path / "cert.pem"), str(tmp_path / "key.pem")
 
 
-def test_a_stalled_tls_client_is_dropped_after_the_request_timeout(admin, cert, monkeypatch):
+def stalled_tls_client(admin, cert, monkeypatch):
     monkeypatch.setattr(server, "REQUEST_TIMEOUT_S", 0.5)
     httpd = server.make_server(admin, PUBLIC, "localhost", 0, cert)
     port = _serve(httpd)
     try:
         with socket.create_connection(("localhost", port), timeout=5) as stalled:
             started = time.monotonic()
-            assert stalled.recv(1) == b""
-            assert time.monotonic() - started < 3
+            return stalled.recv(1), time.monotonic() - started
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+def test_a_stalled_tls_client_is_dropped(admin, cert, monkeypatch):
+    assert stalled_tls_client(admin, cert, monkeypatch)[0] == b""
+
+
+@pytest.mark.wall_clock
+def test_a_stalled_tls_client_is_dropped_after_the_request_timeout(admin, cert, monkeypatch):
+    assert stalled_tls_client(admin, cert, monkeypatch)[1] < 3
 
 
 def test_an_https_join_completes_the_tls_handshake(admin, cert, tmp_path, monkeypatch, capsys):

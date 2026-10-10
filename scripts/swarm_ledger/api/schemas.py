@@ -73,7 +73,7 @@ FIELDS = {
     "notice": "by text",
     "task_add": "by task title lane phase description depends_on territory kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate slice follow_up",
     "task_update": "by item fields if_state if_plan_lines_missing",
-    "task_rank": "item rank",
+    "task_rank": "by item rank if_unranked",
     "task_group": "by item members",
     "task_ungroup": "by item",
     "title_set": "text",
@@ -130,7 +130,7 @@ TYPES = {
     "phases": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
     "attachments": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
 }
-KIND_TYPES = {"artifact_add": {"plan": {"type": "boolean"}}}
+KIND_TYPES = {"artifact_add": {"plan": {"type": "boolean"}}, "task_rank": {"if_unranked": {"type": "boolean"}}}
 for _field in ("depends_on", "territory", "if_state", "members"):
     TYPES[_field] = {"type": "array", "maxItems": 100, "items": {"type": "string", "maxLength": 2000}}
 

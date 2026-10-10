@@ -1,8 +1,8 @@
 version: 1
-notes: Seeded from the classifier decision log. Each case state was rebuilt from its ledger and matched to a state digest
-  the decision log recorded before seeding; its samples are the answers logged for that digest. Expected verdicts were written
-  by a separate reader agent that saw only each case state and its question, never the thresholds or the rule. Model pick
-  expectations are the reader's level raised to the lane floor, as the call site raises them.
+notes: Cases seeded from the classifier decision log. Each case state was rebuilt from its ledger and matched to a state digest
+  the decision log recorded before seeding. Expected verdicts were written by a separate reader agent that saw only each case
+  state and its question, never the thresholds or the rule. Model pick expectations are the reader's level raised to the lane
+  floor, as the call site raises them. Samples are one live answer per backend to the two level question.
 cases:
 - name: rig-grade-swarm-t58
   state:
@@ -25,23 +25,71 @@ cases:
     effort: high
   control: false
   samples:
-  - source: luna
-    latency_ms: 14996
+  - source: liquid-d1
+    latency_ms: 379
     answers:
       effort:
         type: score
-        score: 2.0
-        confidence: 0.9
+        score: 0.0017007222390815137
+        confidence: 0.9965985555218371
         probabilities:
-          '0': 0.0
-          '1': 0.05
-          '2': 0.9
-          '3': 0.05
+          '0': 0.9982992777609185
+          '1': 0.0017007222390815137
         legend:
-          '0': low
-          '1': medium
-          '2': high
-          '3': max
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: jev-1.13
+    latency_ms: 317
+    answers:
+      effort:
+        type: score
+        score: 0.0
+        confidence: 1.0
+        probabilities:
+          '0': 1.0
+          '1': 0.0
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: pplx-decider-v1-27b
+    latency_ms: 264
+    answers:
+      effort:
+        type: score
+        score: 0.010160063206853748
+        confidence: 0.9796798735862925
+        probabilities:
+          '0': 0.9898399367931463
+          '1': 0.010160063206853748
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: haiku
+    latency_ms: 8087
+    answers:
+      effort:
+        type: score
+        score: 0.05
+        confidence: 0.95
+        probabilities:
+          '0': 0.95
+          '1': 0.05
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: luna
+    latency_ms: 4393
+    answers:
+      effort:
+        type: score
+        score: 0.02
+        confidence: 0.98
+        probabilities:
+          '0': 0.98
+          '1': 0.02
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
   notes:
     state_digest: 9ab27e2cb7206f5a
     reader_level: high
@@ -65,40 +113,71 @@ cases:
     effort: high
   control: false
   samples:
-  - source: haiku
-    latency_ms: 5058
+  - source: liquid-d1
+    latency_ms: 229
     answers:
       effort:
         type: score
-        score: 1.25
-        confidence: 0.5
+        score: 0.005911068505999277
+        confidence: 0.9881778629880016
         probabilities:
-          '0': 0.15
-          '1': 0.5
-          '2': 0.3
-          '3': 0.05
+          '0': 0.9940889314940008
+          '1': 0.005911068505999277
         legend:
-          '0': low
-          '1': medium
-          '2': high
-          '3': max
-  - source: haiku
-    latency_ms: 5682
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: jev-1.13
+    latency_ms: 321
     answers:
       effort:
         type: score
-        score: 1.05
-        confidence: 0.5
+        score: 0.01
+        confidence: 0.98
         probabilities:
-          '0': 0.25
-          '1': 0.5
-          '2': 0.2
-          '3': 0.05
+          '0': 0.99
+          '1': 0.01
         legend:
-          '0': low
-          '1': medium
-          '2': high
-          '3': max
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: pplx-decider-v1-27b
+    latency_ms: 252
+    answers:
+      effort:
+        type: score
+        score: 0.0027874332901078503
+        confidence: 0.9944251334197843
+        probabilities:
+          '0': 0.9972125667098921
+          '1': 0.0027874332901078503
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: haiku
+    latency_ms: 5347
+    answers:
+      effort:
+        type: score
+        score: 0.07
+        confidence: 0.93
+        probabilities:
+          '0': 0.93
+          '1': 0.07
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: luna
+    latency_ms: 4716
+    answers:
+      effort:
+        type: score
+        score: 0.02
+        confidence: 0.98
+        probabilities:
+          '0': 0.98
+          '1': 0.02
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
   notes:
     state_digest: 3665c32f581a8043
     reader_level: low
@@ -125,23 +204,71 @@ cases:
     effort: high
   control: false
   samples:
-  - source: luna
-    latency_ms: 6524
+  - source: liquid-d1
+    latency_ms: 229
     answers:
       effort:
         type: score
-        score: 2.7900000000000005
+        score: 0.012431651676429884
+        confidence: 0.9751366966471404
+        probabilities:
+          '0': 0.9875683483235702
+          '1': 0.012431651676429884
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: jev-1.13
+    latency_ms: 757
+    answers:
+      effort:
+        type: score
+        score: 0.09
+        confidence: 0.82
+        probabilities:
+          '0': 0.91
+          '1': 0.09
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: pplx-decider-v1-27b
+    latency_ms: 588
+    answers:
+      effort:
+        type: score
+        score: 0.02686476872403489
+        confidence: 0.9462704625519303
+        probabilities:
+          '0': 0.9731352312759652
+          '1': 0.02686476872403489
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: haiku
+    latency_ms: 6062
+    answers:
+      effort:
+        type: score
+        score: 0.2
         confidence: 0.8
         probabilities:
-          '0': 0.0
-          '1': 0.01
-          '2': 0.19
-          '3': 0.8
+          '0': 0.8
+          '1': 0.2
         legend:
-          '0': low
-          '1': medium
-          '2': high
-          '3': max
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: luna
+    latency_ms: 14386
+    answers:
+      effort:
+        type: score
+        score: 0.06
+        confidence: 0.94
+        probabilities:
+          '0': 0.94
+          '1': 0.06
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
   notes:
     state_digest: 79d0c2def5bd1ce7
     reader_level: high
@@ -169,23 +296,71 @@ cases:
     effort: xhigh
   control: false
   samples:
-  - source: luna
-    latency_ms: 4846
+  - source: liquid-d1
+    latency_ms: 234
     answers:
       effort:
         type: score
-        score: 2.7
-        confidence: 0.75
+        score: 0.021615333077779054
+        confidence: 0.9567693338444418
         probabilities:
-          '0': 0.01
-          '1': 0.03
-          '2': 0.21
-          '3': 0.75
+          '0': 0.9783846669222209
+          '1': 0.021615333077779054
         legend:
-          '0': low
-          '1': medium
-          '2': high
-          '3': xhigh
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: jev-1.13
+    latency_ms: 296
+    answers:
+      effort:
+        type: score
+        score: 0.44
+        confidence: 0.12
+        probabilities:
+          '0': 0.56
+          '1': 0.44
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: pplx-decider-v1-27b
+    latency_ms: 260
+    answers:
+      effort:
+        type: score
+        score: 0.13950635094429395
+        confidence: 0.720987298111412
+        probabilities:
+          '0': 0.8604936490557061
+          '1': 0.13950635094429395
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: haiku
+    latency_ms: 5846
+    answers:
+      effort:
+        type: score
+        score: 0.1
+        confidence: 0.9
+        probabilities:
+          '0': 0.9
+          '1': 0.1
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: luna
+    latency_ms: 18651
+    answers:
+      effort:
+        type: score
+        score: 0.05
+        confidence: 0.95
+        probabilities:
+          '0': 0.95
+          '1': 0.05
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
   notes:
     state_digest: a53cb64d4dd464ba
     reader_level: xhigh
@@ -209,40 +384,71 @@ cases:
     effort: high
   control: false
   samples:
-  - source: pplx-decider-v1-27b
-    latency_ms: 1481
+  - source: liquid-d1
+    latency_ms: 227
     answers:
       effort:
         type: score
-        score: 0.42825216055665755
-        confidence: 0.714498559628895
+        score: 0.01322282311331546
+        confidence: 0.9735543537733693
         probabilities:
-          '0': 0.6258357009068525
-          '1': 0.32463397398543853
-          '2': 0.044972788751907605
-          '3': 0.004557536355801277
+          '0': 0.9867771768866846
+          '1': 0.01322282311331546
         legend:
-          '0': low
-          '1': medium
-          '2': high
-          '3': xhigh
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: jev-1.13
+    latency_ms: 282
+    answers:
+      effort:
+        type: score
+        score: 0.02
+        confidence: 0.96
+        probabilities:
+          '0': 0.98
+          '1': 0.02
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: pplx-decider-v1-27b
+    latency_ms: 266
+    answers:
+      effort:
+        type: score
+        score: 0.003512080895693861
+        confidence: 0.9929758382086122
+        probabilities:
+          '0': 0.996487919104306
+          '1': 0.003512080895693861
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: haiku
+    latency_ms: 15025
+    answers:
+      effort:
+        type: score
+        score: 0.1
+        confidence: 0.9
+        probabilities:
+          '0': 0.9
+          '1': 0.1
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
   - source: luna
-    latency_ms: 15161
+    latency_ms: 4331
     answers:
       effort:
         type: score
         score: 0.05
-        confidence: 0.96
+        confidence: 0.95
         probabilities:
-          '0': 0.96
-          '1': 0.03
-          '2': 0.01
-          '3': 0.0
+          '0': 0.95
+          '1': 0.05
         legend:
-          '0': low
-          '1': medium
-          '2': high
-          '3': max
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
   notes:
     state_digest: ac2ce7b5cfe261e5
     reader_level: low
@@ -268,23 +474,71 @@ cases:
     effort: high
   control: false
   samples:
-  - source: luna
-    latency_ms: 6098
+  - source: liquid-d1
+    latency_ms: 220
     answers:
       effort:
         type: score
-        score: 1.0
-        confidence: 1.0
+        score: 0.1329642333263228
+        confidence: 0.7340715333473546
         probabilities:
-          '0': 0.0
-          '1': 1.0
-          '2': 0.0
-          '3': 0.0
+          '0': 0.8670357666736773
+          '1': 0.1329642333263228
         legend:
-          '0': low
-          '1': medium
-          '2': high
-          '3': xhigh
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: jev-1.13
+    latency_ms: 277
+    answers:
+      effort:
+        type: score
+        score: 0.73
+        confidence: 0.46
+        probabilities:
+          '0': 0.27
+          '1': 0.73
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: pplx-decider-v1-27b
+    latency_ms: 254
+    answers:
+      effort:
+        type: score
+        score: 0.21175520438836018
+        confidence: 0.5764895912232797
+        probabilities:
+          '0': 0.7882447956116397
+          '1': 0.21175520438836018
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: haiku
+    latency_ms: 7929
+    answers:
+      effort:
+        type: score
+        score: 0.4
+        confidence: 0.6
+        probabilities:
+          '0': 0.6
+          '1': 0.4
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: luna
+    latency_ms: 14083
+    answers:
+      effort:
+        type: score
+        score: 0.02
+        confidence: 0.98
+        probabilities:
+          '0': 0.98
+          '1': 0.02
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
   notes:
     state_digest: 9d90cdbe140a28ad
     reader_level: high
@@ -311,23 +565,71 @@ cases:
     effort: high
   control: false
   samples:
-  - source: luna
-    latency_ms: 7060
+  - source: liquid-d1
+    latency_ms: 222
     answers:
       effort:
         type: score
-        score: 2.0
-        confidence: 1.0
+        score: 0.010328151605433544
+        confidence: 0.9793436967891327
         probabilities:
-          '0': 0.0
-          '1': 0.0
-          '2': 1.0
-          '3': 0.0
+          '0': 0.9896718483945663
+          '1': 0.010328151605433544
         legend:
-          '0': low
-          '1': medium
-          '2': high
-          '3': max
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: jev-1.13
+    latency_ms: 281
+    answers:
+      effort:
+        type: score
+        score: 0.01
+        confidence: 0.98
+        probabilities:
+          '0': 0.99
+          '1': 0.01
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: pplx-decider-v1-27b
+    latency_ms: 270
+    answers:
+      effort:
+        type: score
+        score: 0.0033403561012858053
+        confidence: 0.9933192877974284
+        probabilities:
+          '0': 0.9966596438987143
+          '1': 0.0033403561012858053
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: haiku
+    latency_ms: 5906
+    answers:
+      effort:
+        type: score
+        score: 0.1
+        confidence: 0.9
+        probabilities:
+          '0': 0.9
+          '1': 0.1
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: luna
+    latency_ms: 5916
+    answers:
+      effort:
+        type: score
+        score: 0.02
+        confidence: 0.98
+        probabilities:
+          '0': 0.98
+          '1': 0.02
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
   notes:
     state_digest: fb871e174812dba4
     reader_level: medium
@@ -356,23 +658,71 @@ cases:
     effort: high
   control: false
   samples:
-  - source: haiku
-    latency_ms: 4257
+  - source: liquid-d1
+    latency_ms: 220
     answers:
       effort:
         type: score
-        score: 1.56
-        confidence: 0.44
+        score: 0.0006263340042096389
+        confidence: 0.9987473319915805
         probabilities:
-          '0': 0.04
-          '1': 0.44
-          '2': 0.44
-          '3': 0.08
+          '0': 0.9993736659957903
+          '1': 0.0006263340042096389
         legend:
-          '0': low
-          '1': medium
-          '2': high
-          '3': max
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: jev-1.13
+    latency_ms: 289
+    answers:
+      effort:
+        type: score
+        score: 0.01
+        confidence: 0.98
+        probabilities:
+          '0': 0.99
+          '1': 0.01
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: pplx-decider-v1-27b
+    latency_ms: 256
+    answers:
+      effort:
+        type: score
+        score: 0.007973551857422661
+        confidence: 0.9840528962851547
+        probabilities:
+          '0': 0.9920264481425773
+          '1': 0.007973551857422661
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: haiku
+    latency_ms: 5241
+    answers:
+      effort:
+        type: score
+        score: 0.12
+        confidence: 0.88
+        probabilities:
+          '0': 0.88
+          '1': 0.12
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: luna
+    latency_ms: 4323
+    answers:
+      effort:
+        type: score
+        score: 0.03
+        confidence: 0.97
+        probabilities:
+          '0': 0.97
+          '1': 0.03
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
   notes:
     state_digest: 0f4bd84eaecc604c
     reader_level: high
@@ -397,23 +747,71 @@ cases:
     effort: high
   control: false
   samples:
-  - source: luna
-    latency_ms: 8151
+  - source: liquid-d1
+    latency_ms: 280
     answers:
       effort:
         type: score
-        score: 3.0
+        score: 0.0013250222151015146
+        confidence: 0.9973499555697969
+        probabilities:
+          '0': 0.9986749777848984
+          '1': 0.0013250222151015146
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: jev-1.13
+    latency_ms: 283
+    answers:
+      effort:
+        type: score
+        score: 0.0
         confidence: 1.0
         probabilities:
-          '0': 0.0
+          '0': 1.0
           '1': 0.0
-          '2': 0.0
-          '3': 1.0
         legend:
-          '0': low
-          '1': medium
-          '2': high
-          '3': max
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: pplx-decider-v1-27b
+    latency_ms: 270
+    answers:
+      effort:
+        type: score
+        score: 0.0031501954961636438
+        confidence: 0.9936996090076727
+        probabilities:
+          '0': 0.9968498045038364
+          '1': 0.0031501954961636438
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: haiku
+    latency_ms: 6845
+    answers:
+      effort:
+        type: score
+        score: 0.1
+        confidence: 0.9
+        probabilities:
+          '0': 0.9
+          '1': 0.1
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: luna
+    latency_ms: 50628
+    answers:
+      effort:
+        type: score
+        score: 0.02
+        confidence: 0.98
+        probabilities:
+          '0': 0.98
+          '1': 0.02
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
   notes:
     state_digest: d32bba8bda0565d3
     reader_level: medium
@@ -441,23 +839,71 @@ cases:
     effort: xhigh
   control: false
   samples:
-  - source: luna
-    latency_ms: 4663
+  - source: liquid-d1
+    latency_ms: 219
     answers:
       effort:
         type: score
-        score: 3.0
-        confidence: 1.0
+        score: 0.8740772318846387
+        confidence: 0.7481544637692774
         probabilities:
-          '0': 0.0
-          '1': 0.0
-          '2': 0.0
-          '3': 1.0
+          '0': 0.1259227681153614
+          '1': 0.8740772318846387
         legend:
-          '0': low
-          '1': medium
-          '2': high
-          '3': xhigh
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: jev-1.13
+    latency_ms: 283
+    answers:
+      effort:
+        type: score
+        score: 0.99
+        confidence: 0.98
+        probabilities:
+          '0': 0.01
+          '1': 0.99
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: pplx-decider-v1-27b
+    latency_ms: 254
+    answers:
+      effort:
+        type: score
+        score: 0.8906398686407034
+        confidence: 0.7812797372814069
+        probabilities:
+          '0': 0.10936013135929655
+          '1': 0.8906398686407034
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: haiku
+    latency_ms: 7583
+    answers:
+      effort:
+        type: score
+        score: 0.65
+        confidence: 0.65
+        probabilities:
+          '0': 0.35
+          '1': 0.65
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: luna
+    latency_ms: 14107
+    answers:
+      effort:
+        type: score
+        score: 0.95
+        confidence: 0.95
+        probabilities:
+          '0': 0.05
+          '1': 0.95
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
   notes:
     state_digest: a6c1d6d8f56a8616
     reader_level: xhigh
@@ -481,23 +927,71 @@ cases:
     effort: high
   control: false
   samples:
-  - source: luna
-    latency_ms: 6547
+  - source: liquid-d1
+    latency_ms: 233
     answers:
       effort:
         type: score
-        score: 0.12
-        confidence: 0.9
+        score: 0.004070137534687356
+        confidence: 0.9918597249306256
         probabilities:
-          '0': 0.9
-          '1': 0.08
-          '2': 0.02
-          '3': 0.0
+          '0': 0.9959298624653128
+          '1': 0.004070137534687356
         legend:
-          '0': low
-          '1': medium
-          '2': high
-          '3': xhigh
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: jev-1.13
+    latency_ms: 327
+    answers:
+      effort:
+        type: score
+        score: 0.0
+        confidence: 1.0
+        probabilities:
+          '0': 1.0
+          '1': 0.0
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: pplx-decider-v1-27b
+    latency_ms: 315
+    answers:
+      effort:
+        type: score
+        score: 0.004786394445332337
+        confidence: 0.9904272111093353
+        probabilities:
+          '0': 0.9952136055546676
+          '1': 0.004786394445332337
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: haiku
+    latency_ms: 5583
+    answers:
+      effort:
+        type: score
+        score: 0.05
+        confidence: 0.95
+        probabilities:
+          '0': 0.95
+          '1': 0.05
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: luna
+    latency_ms: 4565
+    answers:
+      effort:
+        type: score
+        score: 0.02
+        confidence: 0.98
+        probabilities:
+          '0': 0.98
+          '1': 0.02
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
   notes:
     state_digest: 35ef80246812c2db
     reader_level: low
@@ -521,23 +1015,71 @@ cases:
     effort: high
   control: false
   samples:
-  - source: haiku
-    latency_ms: 11271
+  - source: liquid-d1
+    latency_ms: 224
     answers:
       effort:
         type: score
-        score: 1.03
-        confidence: 0.6
+        score: 0.004609571615310557
+        confidence: 0.990780856769379
         probabilities:
-          '0': 0.2
-          '1': 0.6
-          '2': 0.17
-          '3': 0.03
+          '0': 0.9953904283846895
+          '1': 0.004609571615310557
         legend:
-          '0': low
-          '1': medium
-          '2': high
-          '3': max
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: jev-1.13
+    latency_ms: 284
+    answers:
+      effort:
+        type: score
+        score: 0.0
+        confidence: 1.0
+        probabilities:
+          '0': 1.0
+          '1': 0.0
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: pplx-decider-v1-27b
+    latency_ms: 253
+    answers:
+      effort:
+        type: score
+        score: 0.00833767969556772
+        confidence: 0.9833246406088646
+        probabilities:
+          '0': 0.9916623203044324
+          '1': 0.00833767969556772
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: haiku
+    latency_ms: 6176
+    answers:
+      effort:
+        type: score
+        score: 0.05
+        confidence: 0.95
+        probabilities:
+          '0': 0.95
+          '1': 0.05
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+  - source: luna
+    latency_ms: 14371
+    answers:
+      effort:
+        type: score
+        score: 0.02
+        confidence: 0.98
+        probabilities:
+          '0': 0.98
+          '1': 0.02
+        legend:
+          '0': 'high: the task names what to change and how to check it'
+          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
   notes:
     state_digest: bcc7c04ca294ff60
     reader_level: low
