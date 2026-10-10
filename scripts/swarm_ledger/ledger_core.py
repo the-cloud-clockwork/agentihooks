@@ -37,7 +37,7 @@ import ledger_title
 import ledger_verdict
 import orjson
 
-from scripts.swarm_ledger import ledger_groups, ledger_phases, ledger_plans, ledger_rank
+from scripts.swarm_ledger import ledger_freezes, ledger_groups, ledger_phases, ledger_plans, ledger_rank
 
 LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,120}$")
@@ -114,6 +114,7 @@ EXTENSION_OPS = {
         ledger_verdict,
         ledger_alerts,
         ledger_time_left,
+        ledger_freezes,
         ledger_events_ack,
     )
     for name in module.OPS
@@ -197,6 +198,7 @@ def normalize(doc):
     doc.setdefault("tasks", [])
     doc.setdefault("plans", [])
     doc.setdefault("slices", [])
+    doc.setdefault("freezes", [])
     for name in THREADS:
         for item in doc.get(name, []) if isinstance(doc.get(name), list) else []:
             if not isinstance(item, dict):
@@ -378,11 +380,12 @@ def size_warning(text):
 class Context:
     """One sync's clock, rev, stamps and event log."""
 
-    def __init__(self, meta, at):
+    def __init__(self, meta, at, slug=""):
         self.at, self.rev = at, meta["rev"] + 1
         self.stamps, self.events = meta["stamps"], []
         self.meta, self.dirty, self.refused, self.dropped = meta, False, [], []
         self.names = {}
+        self.slug = slug
 
     def author(self, name: str) -> str:
         if name not in self.names:
