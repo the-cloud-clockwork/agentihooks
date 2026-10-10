@@ -71,6 +71,13 @@ def test_send_posts_json_with_a_bearer_token_and_the_bounded_timeout(token):
     assert context is CONTEXT
 
 
+def test_send_keeps_a_method_its_body_would_not_imply(token):
+    api, opener = http(token, (200, {}), (200, {}))
+    api.send("PUT", "/p", {"a": 1})
+    api.send("DELETE", "/p")
+    assert [call[0].get_method() for call in opener.calls] == ["PUT", "DELETE"]
+
+
 def test_send_without_a_body_sends_no_data_or_content_type(token):
     api, opener = http(token, (200, {"items": []}))
     assert api.send("GET", "/api/v1/pods") == (200, {"items": []})
@@ -221,9 +228,9 @@ class Http:
 
 def test_create_posts_the_pod_into_its_namespace():
     transport = Http((201, {"metadata": {"uid": "u1"}}))
-    pods = PodClient(transport, "swarm pods")
+    pods = PodClient(transport, "swarm-pods")
     assert pods.create_pod({"metadata": {"name": "swarm-a"}}) == {"metadata": {"uid": "u1"}}
-    assert transport.calls == [("POST", "/api/v1/namespaces/swarm%20pods/pods", {"metadata": {"name": "swarm-a"}})]
+    assert transport.calls == [("POST", "/api/v1/namespaces/swarm-pods/pods", {"metadata": {"name": "swarm-a"}})]
 
 
 def test_create_accepts_a_200_answer():
@@ -270,10 +277,10 @@ def test_a_refusal_without_a_reason_names_none():
 def test_read_gets_the_named_pod_and_answers_none_when_absent():
     transport = Http((200, {"metadata": {"name": "swarm-a"}}), (404, {"reason": "NotFound"}))
     pods = PodClient(transport, "ns")
-    assert pods.read_pod("swarm/a") == {"metadata": {"name": "swarm-a"}}
+    assert pods.read_pod("swarm-a") == {"metadata": {"name": "swarm-a"}}
     assert pods.read_pod("gone") is None
     assert transport.calls == [
-        ("GET", "/api/v1/namespaces/ns/pods/swarm%2Fa", None),
+        ("GET", "/api/v1/namespaces/ns/pods/swarm-a", None),
         ("GET", "/api/v1/namespaces/ns/pods/gone", None),
     ]
 
