@@ -16,6 +16,7 @@ from scripts.swarm_v2.runtime.base import Outcome, RuntimeRouter, SpawnRequest, 
 
 NOT_LAUNCHED = (Status.REFUSED, Status.UNAVAILABLE, Status.UNSUPPORTED)
 GRANT_SECONDS = 30
+NO_API_URL = "the swarm config has no API address"
 
 
 class WorkerHomes(Protocol):
@@ -80,7 +81,7 @@ class DistributedLaunch:
             brain_id=terms.brain_id,
             account=terms.account,
         )
-        backend = self.router.spawn_backend()
+        backend = self.router.spawn_backend(request)
         try:
             slot = self.capacity.reserve(grant, terms.cap, terms.ttl_ms)
         except SwarmError as error:
@@ -96,6 +97,13 @@ class DistributedLaunch:
             self.exited(admitted)
             return Launch(admitted, grant, slot, outcome)
         return Launch(admitted, grant, slot, outcome, self.homes.hand(admitted, grant))
+
+    def from_tick(self, request: SpawnRequest, terms: LaunchTerms) -> Outcome:
+        api_url = request.config.api_url
+        if not api_url:
+            return Outcome("spawn", Status.REFUSED, self.router.spawn_backend(request), detail=NO_API_URL)
+        agent = AgentRecord(request.name, request.lane, request.task["id"], seat=request.task.get("seat", ""))
+        return self.spawn(request, agent, replace(terms, api_url=api_url), "").outcome
 
     def registered(self, session: Session, grant: str) -> Slot:
         body = {"execution_id": session.execution_id, "generation": session.generation}
