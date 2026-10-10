@@ -148,6 +148,7 @@ class StopOrReportStack(unittest.TestCase):
             finally:
                 if proc.poll() is None:
                     proc.kill()
+                    proc.wait()
         message = str(caught.exception)
         self.assertIn("within 0.5s of SIGTERM", message)
         self.assertIn("Fatal Python error: Aborted", message)
@@ -187,6 +188,7 @@ class Watch(unittest.TestCase):
             finally:
                 if proc.poll() is None:
                     proc.kill()
+                    proc.wait()
         self.assertFalse(beat.exists())
 
 
