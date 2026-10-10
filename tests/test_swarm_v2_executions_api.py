@@ -525,8 +525,9 @@ def test_each_refusal_names_its_cause(world, worker):
     assert message(agent.execution_id, token, world.beat(agent, 4)) == (
         "heartbeat renewal sequence is not newer than the accepted one"
     )
+    leaderless = world.beat(agent, 6)
     world.controller.held = None
-    assert message(agent.execution_id, token, world.beat(agent, 6)) == "the controller lease is absent"
+    assert message(agent.execution_id, token, leaderless) == "the controller lease is absent"
 
 
 def test_a_repeated_registration_reports_the_accepted_archive_watermark(world, worker):
