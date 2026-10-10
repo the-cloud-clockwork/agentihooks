@@ -238,21 +238,21 @@ def test_the_local_cache_keeps_only_the_newest_fleet_revision_and_leaves_local_e
     assert saves == []
 
 
-def test_the_local_cache_keeps_the_newest_entries_within_the_message_cap(world, tmp_path, monkeypatch):
+def test_the_local_cache_evicts_the_oldest_fleet_entries_before_local_ones_at_the_cap(world, tmp_path, monkeypatch):
     path = tmp_path / "broadcast.json"
     monkeypatch.setattr(hb, "_broadcast_path", lambda: path)
     monkeypatch.setattr(hb, "BROADCAST_MAX_MESSAGES", 2)
-    hb._save_broadcasts([{"id": "local-1", "message": "Local note", "severity": "info"}])
+    hb._save_broadcasts([{"id": "local-1", "message": "Local note", "severity": "critical", "persistent": True}])
     local = world.token(LOCAL)
     world.announce(WARNING)
     world.announce(FOLLOWUP)
     world.fleet.publish(local, dict(NOTE))
     entries = [broadcasts.local_entry(d, "s-local") for d in world.fleet.claim(local, CHANNELS)]
-    assert hb.cache_fleet_broadcasts(entries) == 2
-    assert [m["id"] for m in hb.list_broadcasts()] == [
-        "fixture:fleet-followup:1:s-local",
-        "fixture:fleet-warning:1:s-local",
-    ]
+    assert hb.cache_fleet_broadcasts(entries) == 1
+    assert [m["id"] for m in hb.list_broadcasts()] == ["local-1", "fixture:fleet-warning:1:s-local"]
+    hb._save_broadcasts([{"id": f"local-{n}", "message": "Local note", "severity": "info"} for n in (1, 2, 3)])
+    assert hb.cache_fleet_broadcasts(entries[:1]) == 0
+    assert [m["id"] for m in hb.list_broadcasts()] == ["local-2", "local-3"]
 
 
 def test_b_a_personal_brain_message_or_another_fleets_warning_never_matches_on_the_channel_name(world):
@@ -266,7 +266,7 @@ def test_b_a_personal_brain_message_or_another_fleets_warning_never_matches_on_t
     assert refusal(other.publish, local, dict(NOTE)) == "forbidden_scope"
     assert snapshot(world) == before
     assert world.fleet.claim(local, ["*"]) == []
-    assert snapshot(world) == before
+    assert not world.store.redis.exists(world.fleet.key("broadcast-deliveries", LOCAL))
     assert world.fleet.delivery(LOCAL, "personal-note") is None
     assert world.fleet.broadcast_delivery_lag_seconds(LOCAL, "personal-note") is None
     assert world.fleet.current("other-warning") is None
@@ -554,6 +554,8 @@ def test_b_an_operation_id_replays_only_for_its_own_publisher(world):
     mine = world.fleet.publish(local, dict(NOTE), "op-1")
     assert (mine.broadcast_id, mine.message) == ("agent-note", NOTE["message"])
     assert world.fleet.publish(local, {**NOTE, "broadcast_id": ""}, "op-1") == mine
+    assert world.fleet.publish(local, {**NOTE, "broadcast_id": "agent-note"}, "op-1") == mine
+    assert refusal(world.fleet.publish, local, {**NOTE, "broadcast_id": "other-note"}, "op-1") == "invalid_request"
     assert refusal(world.fleet.publish, local, {**NOTE, "message": "Retried with other text."}, "op-1") == (
         "invalid_request"
     )
@@ -567,9 +569,13 @@ def test_b_an_operation_id_replays_only_for_its_own_publisher(world):
 
 def test_b_a_launch_grant_is_not_an_operator_credential(world):
     local = world.token(LOCAL)
+    seen = []
+    trusting = world.broadcasts(operator=lambda token: seen.append(token) or "operator")
     before = snapshot(world)
-    assert refusal(world.fleet.publish_operator, local, dict(WARNING)) == "unauthenticated"
-    assert snapshot(world) == before
+    assert refusal(trusting.publish_operator, local, dict(WARNING)) == "unauthenticated"
+    assert snapshot(world) == before and seen == []
+    assert trusting.publish_operator("v2x.not-a-grant", dict(WARNING)).author == "operator:operator"
+    assert seen == ["v2x.not-a-grant"]
 
 
 def test_c_a_delivered_unacknowledged_warning_replays_to_the_next_generation_and_fences_the_old_one(world):
@@ -669,3 +675,26 @@ def test_a_canonical_record_from_another_fleet_is_never_delivered(world):
     foreign = replace(world.announce(WARNING), fleet="other", broadcast_id="planted")
     world.store.redis.hset(world.fleet.key("broadcasts"), "planted", broadcasts.encode(foreign))
     assert ids(world.fleet.claim(local, CHANNELS)) == ["fleet-warning"]
+
+
+def test_a_changed_lifetime_on_unchanged_content_is_a_new_revision(world):
+    first = world.announce(WARNING)
+    assert world.announce(WARNING) == first
+    longer = world.announce({**WARNING, "ttl_seconds": 3600})
+    assert (longer.revision, longer.expires_ms) == (2, PUBLISH_MS + 3600 * 1000)
+
+
+def test_an_older_generation_is_fenced_once_its_successor_claims_with_nothing_to_deliver(world):
+    world.token(LOCAL)
+    new = world.token(LOCAL, previous=world.agents[LOCAL].execution_id)
+    assert world.fleet.claim(new, CHANNELS) == []
+    assert world.store.redis.hget(world.fleet.key("broadcast-generations"), LOCAL) == "2"
+    world.announce(FOLLOWUP)
+    older = world.broadcasts(authorize=lambda token: replace(world.authority.authorize(token), generation=1))
+    before = snapshot(world)
+    assert refusal(older.claim, new, CHANNELS) == "stale_generation"
+    assert refusal(older.claim, new, CHANNELS, "claim-1") == "stale_generation"
+    assert snapshot(world) == before
+    assert ids(world.fleet.claim(new, CHANNELS)) == ["fleet-followup"]
+    assert world.fleet.claim(new, CHANNELS) == world.fleet.claim(new, CHANNELS)
+    assert world.store.redis.hget(world.fleet.key("broadcast-generations"), LOCAL) == "2"

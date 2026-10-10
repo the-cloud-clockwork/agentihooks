@@ -542,7 +542,10 @@ def cache_fleet_broadcasts(entries: list[dict]) -> int:
         ]
         if not added and len(kept) == len(msgs):
             return 0
-        saved = (kept + added)[-BROADCAST_MAX_MESSAGES:]
+        saved = kept + added
+        fleet_ids = [m["id"] for m in saved if "fleet" in m]
+        evicted = set(fleet_ids[: max(len(saved) - BROADCAST_MAX_MESSAGES, 0)])
+        saved = [m for m in saved if m["id"] not in evicted][-BROADCAST_MAX_MESSAGES:]
         _save_broadcasts(saved)
         fresh = {m["id"] for m in added}
         return sum(1 for m in saved if m["id"] in fresh)
