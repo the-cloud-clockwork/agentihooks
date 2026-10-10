@@ -11,7 +11,7 @@ def check(op):
 
 def apply(doc, op, ctx):
     revision = min(op["rev"], ctx.meta["rev"])
-    if "events_ack" not in ctx.meta or revision > ctx.meta["events_ack"]:
+    if revision > ctx.meta.get("events_ack", -1):
         ctx.meta["events_ack"] = revision
         ctx.dirty = True
     return True

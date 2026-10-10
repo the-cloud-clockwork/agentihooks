@@ -162,6 +162,15 @@ def test_retained_drops_only_a_prefix_bounded_by_the_ceiling():
     assert events.retained(rows, 0, 2, 5) == 1
     assert events.retained(rows[:2], 0, 2, 5) == 0
     assert events.retained(rows, 5, 2, 9) == 4
+    assert events.retained([{}, {"rev": 3}], 0, 0, 9) == 1
+
+
+def test_a_trim_at_an_event_without_a_revision_marks_revision_zero(repo):
+    state, _ = write(repo, 1, 2, 3, 4)
+    state["_meta"]["events"][0] = {"kind": "legacy"}
+    rejected, _ = mutation.apply("ledger", state, repo.domain, ops=[chat(5)])
+    assert rejected == []
+    assert state["_meta"]["events_trimmed"] == 0
 
 
 def test_a_mutation_trims_acknowledged_events_and_marks_the_highest_trimmed(repo):

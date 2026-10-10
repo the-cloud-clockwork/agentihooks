@@ -56,7 +56,7 @@ def apply(slug, state, core, changes=None, ops=None, gate=None, created=False):
         log = meta["events"] + ctx.events
         start = retained(log, meta.get("events_ack"), core.EVENTS_KEPT, core.EVENTS_CEILING)
         if start:
-            meta["events_trimmed"] = log[start - 1]["rev"]
+            meta["events_trimmed"] = log[start - 1].get("rev", 0)
         meta["events"] = log[start:]
     state["_meta"] = meta
     return rejected, ctx
