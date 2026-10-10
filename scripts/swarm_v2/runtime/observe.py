@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Iterable, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from enum import StrEnum
 from typing import Any
 
@@ -73,6 +73,11 @@ class Mode(StrEnum):
     CONSERVATIVE = "conservative"
 
 
+class Ruling(StrEnum):
+    LOST = "lost"
+    WORKING = "working"
+
+
 class ObservationRefused(ValueError):
     def __init__(self, message: str, error_class: str, retryable: bool = False):
         super().__init__(message)
@@ -117,6 +122,10 @@ class Classification:
     proof_since: float = 0.0
     needs_operator: bool = False
     recovered: bool = False
+    ruling: str = ""
+    ruling_reason: str = ""
+    ruled_by: str = ""
+    ruled_at: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -207,6 +216,24 @@ def _settled(state: State, kept: Classification | None, thresholds: Thresholds, 
     return state
 
 
+def _ruled(kept: Classification | None, seen: Classification) -> Classification:
+    """A working ruling covers the evidence it was given, so loss proof seen after it asks again."""
+    if kept is None or kept.ruling != Ruling.WORKING or seen.state not in (State.SUSPECT, State.LOST):
+        return seen
+    if seen.proof_since > kept.ruled_at:
+        return seen
+    return replace(
+        seen,
+        state=State.WORKING,
+        suspect_since=0.0,
+        needs_operator=False,
+        ruling=kept.ruling,
+        ruling_reason=kept.ruling_reason,
+        ruled_by=kept.ruled_by,
+        ruled_at=kept.ruled_at,
+    )
+
+
 def classify(
     execution_id: str,
     generation: int,
@@ -231,7 +258,7 @@ def classify(
     state = _settled(state, kept, thresholds, now)
     was_suspect = kept is not None and kept.state is State.SUSPECT
     confirmed = [found.observed_at for found in latest.values() if found.reading is Reading.OK]
-    return Classification(
+    seen = Classification(
         execution_id,
         generation,
         state,
@@ -251,6 +278,7 @@ def classify(
         thresholds.mode is Mode.CONSERVATIVE and state is State.SUSPECT,
         was_suspect and state in ALIVE,
     )
+    return _ruled(kept, seen)
 
 
 def _decode(raw: str | None) -> Classification | None:
@@ -275,6 +303,45 @@ def _key(store: Any, slug: str, kind: str = "observations") -> str:
 
 def stored(store: Any, slug: str, execution_id: str) -> Classification | None:
     return _decode(store.redis.hget(_key(store, slug), execution_id))
+
+
+def rule(store: Any, slug: str, execution_id: str, ruling: str, reason: str, by: str, now: float) -> Classification:
+    from redis.exceptions import WatchError
+
+    if not reason.strip():
+        raise ObservationRefused("a classification needs a reason", "invalid_request")
+    if ruling not in set(Ruling):
+        raise ObservationRefused("a classification is one of lost, working", "invalid_request")
+    chosen, key = Ruling(ruling), _key(store, slug)
+    for _ in range(WRITE_ATTEMPTS):
+        with store.redis.pipeline() as pipe:
+            try:
+                pipe.watch(key)
+                prior = _decode(pipe.hget(key, execution_id))
+                if prior is None or not prior.needs_operator:
+                    raise ObservationRefused(
+                        "execution attempt does not need an operator classification", "not_suspect"
+                    )
+                ruled = replace(
+                    prior,
+                    state=State(chosen.value),
+                    classified_at=now,
+                    suspect_since=prior.suspect_since if chosen is Ruling.LOST else 0.0,
+                    needs_operator=False,
+                    ruling=chosen.value,
+                    ruling_reason=reason.strip(),
+                    ruled_by=by,
+                    ruled_at=now,
+                )
+                pipe.multi()
+                pipe.hset(key, execution_id, json.dumps(asdict(ruled)))
+                if chosen is Ruling.LOST:
+                    pipe.rpush(_key(store, slug, "observation-audit"), json.dumps(asdict(ruled)))
+                pipe.execute()
+                return ruled
+            except WatchError:
+                continue
+    raise ObservationRefused("observation record kept changing; nothing recorded", "revision_conflict", True)
 
 
 class Observer:
