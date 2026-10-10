@@ -99,22 +99,27 @@ def _recovery(world):
     }
 
 
-SPEC = {
-    "a": lambda o: (
-        set(Counter(o["owners"].values()).values()) == {2}
-        and o["after_task_comment"] == {masters.seats(SLUG, 3)[1]: 1, **{a: 0 for a in masters.seats(SLUG, 3)[::2]}}
-        and o["after_unaddressed_chat"][masters.seats(SLUG, 1)[0]] == 1
-    ),
-    "b": lambda o: (
-        o["after_comment_on_empty_owner_seat"][masters.seats(SLUG, 1)[0]] == 1
-        and None not in (o["count_zero"], o["count_text"])
-        and o["count_kept"] == INPUTS["master_count"]
-    ),
-    "c": lambda o: (
-        o["moved"] == [p for p, s in o["owners_with_three_seats"].items() if s == masters.seats(SLUG, 3)[2]]
-        and o["owners_after_restart"] == o["owners_after_removing_seat_three"]
-    ),
-}
+LEAD, SECOND, THIRD = masters.seats(SLUG, 3)
+
+
+def _meets_positive(o):
+    split = set(Counter(o["owners"].values()).values()) == {2}
+    to_owner = o["after_task_comment"] == {LEAD: 0, SECOND: 1, THIRD: 0}
+    return split and to_owner and o["after_unaddressed_chat"] == {LEAD: 1, SECOND: 1, THIRD: 0}
+
+
+def _meets_rejection(o):
+    to_lead = o["after_comment_on_empty_owner_seat"] == {LEAD: 1, SECOND: 0, THIRD: 0}
+    refused = None not in (o["count_zero"], o["count_text"])
+    return to_lead and refused and o["count_kept"] == INPUTS["master_count"]
+
+
+def _meets_recovery(o):
+    moved = o["moved"] == [p for p, s in o["owners_with_three_seats"].items() if s == THIRD]
+    return moved and o["owners_after_restart"] == o["owners_after_removing_seat_three"]
+
+
+SPEC = {"a": _meets_positive, "b": _meets_rejection, "c": _meets_recovery}
 
 
 def run_case(case):
