@@ -9,7 +9,7 @@ from scripts.swarm.pane import PaneObservation
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import MASTER, AgentRecord
 from scripts.swarm.tick import Placed, SpawnError
-from scripts.swarm_v2.runtime.base import Recovery, RuntimeRouter, SpawnRequest, Unqualified
+from scripts.swarm_v2.runtime.base import Placement, Recovery, Runtime, RuntimeRouter, SpawnRequest, Unqualified
 from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 
 
@@ -55,7 +55,11 @@ class RoutedRuntime:
         return outcome.value
 
 
-def routed(environ: Mapping[str, str] | None = None, herdr: HerdrRuntime | None = None) -> RoutedRuntime:
+def routed(
+    environ: Mapping[str, str] | None = None, herdr: HerdrRuntime | None = None, kubernetes: Runtime | None = None
+) -> RoutedRuntime:
     herdr = HerdrRuntime() if herdr is None else herdr
-    router = RuntimeRouter.from_environ([LocalHerdrRuntime(herdr)], os.environ if environ is None else environ)
+    runtimes = [LocalHerdrRuntime(herdr), *([kubernetes] if kubernetes else [])]
+    placement = Placement(kubernetes.backend) if kubernetes else None
+    router = RuntimeRouter.from_environ(runtimes, os.environ if environ is None else environ, placement)
     return RoutedRuntime(herdr, router)
