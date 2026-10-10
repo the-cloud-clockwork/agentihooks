@@ -223,21 +223,17 @@ def _settled(state: State, kept: Classification | None, thresholds: Thresholds, 
     return state
 
 
-def _loss_at(sources: dict[str, dict[str, Any]]) -> float:
-    return max(
-        (
-            entry["observed_at"]
-            for name, entry in sources.items()
-            if _lost(Source(name), Reading(entry["reading"]), entry["value"])
-        ),
-        default=0.0,
+def _lost_after(sources: dict[str, dict[str, Any]], at: float) -> bool:
+    return any(
+        entry["observed_at"] > at and _lost(Source(name), Reading(entry["reading"]), entry["value"])
+        for name, entry in sources.items()
     )
 
 
 def _ruled(kept: Classification | None, seen: Classification) -> Classification:
     if kept is None or kept.ruling != Ruling.WORKING or seen.state not in (State.SUSPECT, State.LOST):
         return seen
-    if _loss_at(seen.sources) > kept.ruled_at:
+    if _lost_after(seen.sources, kept.ruled_at):
         return seen
     return replace(
         seen,
@@ -338,7 +334,7 @@ def _write(
                     return prior
                 pipe.multi()
                 pipe.hset(key, execution_id, json.dumps(asdict(seen)))
-                if seen.state is State.LOST and (prior is None or prior.state is not State.LOST):
+                if seen.state is State.LOST:
                     pipe.rpush(_key(store, slug, "observation-audit"), json.dumps(asdict(seen)))
                 pipe.execute()
                 return seen
