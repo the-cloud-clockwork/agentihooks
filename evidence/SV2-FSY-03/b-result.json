@@ -1,0 +1,240 @@
+{
+  "package": "SV2-FSY-03",
+  "case": "T-SV2-FSY-03-B",
+  "title": "rejection: a cache from an untrusted project cannot replace executable toolchain content in another scope",
+  "tested_commit": "7f65a6b31b437bdf07ddca272d6b78a7690fad62",
+  "evidence_class": "local isolated fixture in CI: real files in pytest temporary execution roots laid out by SV2-FSY-01 and a temporary cache store; fake clock and fake disk usage; monkeypatched copy and write failures only in named failure tests; not live rollout proof",
+  "mocked": false,
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38067630237",
+  "passed": true,
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_a_link_swapped_in_after_the_check_is_copied_as_a_link_and_refused",
+      "job": "114259054713",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:32:31.3750136Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_content_that_turns_unsafe_while_copying_is_refused_and_staging_removed",
+      "job": "114259054713",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:32:31.3812586Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_a_mismatched_dependency_lock_misses_instead_of_reusing",
+      "job": "114259054713",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:32:31.4163076Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_refuses_an_executable_in_a_dependency_kind",
+      "job": "114259054713",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:32:31.4323477Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_any_execute_bit_counts_as_an_executable[1]",
+      "job": "114259054713",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:32:31.4524916Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_any_execute_bit_counts_as_an_executable[8]",
+      "job": "114259054713",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:32:31.4823571Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_refuses_a_layer_outside_the_attempt_scratch_root",
+      "job": "114259054713",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:32:31.4893480Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_refuses_links_and_special_files",
+      "job": "114259054713",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:32:31.5042533Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_never_replaces_an_existing_entry_and_says_when_content_differs",
+      "job": "114259054713",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:32:31.5322630Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_an_untrusted_project_publishes_only_into_its_own_scope",
+      "job": "114259054713",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:32:31.5849932Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_an_entry_moved_under_another_key_is_discarded_by_its_recorded_key",
+      "job": "114259054713",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:32:31.6525621Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_a_full_disk_refuses_publish_without_evicting_or_writing",
+      "job": "114259054713",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:32:31.7638280Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_fits_exactly_at_the_reserve",
+      "job": "114259054713",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:32:31.7912663Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_eviction_frees_disk_room_when_the_reserve_would_be_crossed",
+      "job": "114259054713",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:32:31.7983110Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_an_entry_that_fills_the_budget_exactly_evicts_nothing",
+      "job": "114259054713",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:32:31.8202084Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_an_entry_larger_than_the_budget_is_refused_with_nothing_evicted",
+      "job": "114259054713",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:32:31.8423384Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_eviction_removes_least_recently_used_entries_only_as_far_as_needed",
+      "job": "114259054713",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:32:31.8948884Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_any_execute_bit_counts_as_an_executable[64]",
+      "job": "114259054713",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:32:31.9969678Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_package_cases_pass_on_the_isolated_fixture",
+      "job": "114259054713",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:32:32.1595404Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_content_that_turns_unsafe_while_copying_is_refused_and_staging_removed",
+      "job": "114259054762",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:32:02.3229680Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_a_mismatched_dependency_lock_misses_instead_of_reusing",
+      "job": "114259054762",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:32:02.3890313Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_a_link_swapped_in_after_the_check_is_copied_as_a_link_and_refused",
+      "job": "114259054762",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:32:02.3959801Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_refuses_an_executable_in_a_dependency_kind",
+      "job": "114259054762",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:32:02.4370009Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_refuses_links_and_special_files",
+      "job": "114259054762",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:32:02.4840412Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_any_execute_bit_counts_as_an_executable[8]",
+      "job": "114259054762",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:32:02.4865488Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_never_replaces_an_existing_entry_and_says_when_content_differs",
+      "job": "114259054762",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:32:02.5288082Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_any_execute_bit_counts_as_an_executable[1]",
+      "job": "114259054762",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:32:02.5385006Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_an_entry_moved_under_another_key_is_discarded_by_its_recorded_key",
+      "job": "114259054762",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:32:02.5733239Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_an_untrusted_project_publishes_only_into_its_own_scope",
+      "job": "114259054762",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:32:02.6281726Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_a_full_disk_refuses_publish_without_evicting_or_writing",
+      "job": "114259054762",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:32:02.8639225Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_eviction_frees_disk_room_when_the_reserve_would_be_crossed",
+      "job": "114259054762",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:32:02.8734645Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_an_entry_that_fills_the_budget_exactly_evicts_nothing",
+      "job": "114259054762",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:32:02.9529587Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_eviction_removes_least_recently_used_entries_only_as_far_as_needed",
+      "job": "114259054762",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:32:02.9649422Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_any_execute_bit_counts_as_an_executable[64]",
+      "job": "114259054762",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:32:02.9954249Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_fits_exactly_at_the_reserve",
+      "job": "114259054762",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:32:03.0401963Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_refuses_a_layer_outside_the_attempt_scratch_root",
+      "job": "114259054762",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:32:03.0459780Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_an_entry_larger_than_the_budget_is_refused_with_nothing_evicted",
+      "job": "114259054762",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:32:03.0771496Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_package_cases_pass_on_the_isolated_fixture",
+      "job": "114259054762",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:32:03.4429682Z"
+    }
+  ]
+}

@@ -1,0 +1,89 @@
+{
+  "package": "SV2-FSY-03",
+  "dependency": [
+    "SV2-FSY-02"
+  ],
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2418",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2446",
+  "tested_commit": "7f65a6b31b437bdf07ddca272d6b78a7690fad62",
+  "status": "fixture-qualified",
+  "package_complete": false,
+  "evidence_class": "Local isolated fixture in CI: real files in pytest temporary execution roots laid out by SV2-FSY-01 and a temporary cache store with the shipped policy; fake clock and fake disk usage; trusted toolchain entry, poisoned executable entry, full disk and mismatched dependency lock. Nothing mocked except monkeypatched copy and write failures in named failure tests. Not live rollout proof.",
+  "interfaces": [
+    "scripts.swarm_v2.cache.Key(kind, toolchain, lock, platform, scope).digest(): one entry name per full key",
+    "scripts.swarm_v2.cache.lock_digest(path): sha256 of a dependency lock file, the lock field of a key",
+    "scripts.swarm_v2.cache.load(path) -> Policy: enabled, store, kinds, executable kinds, excluded names, byte budget, free space reserve and shared scope from docker/swarm-node/cache-policy.json",
+    "scripts.swarm_v2.cache.Store(policy, scope, clock, usage): a store bound to the attempt's granted scope",
+    "scripts.swarm_v2.cache.attach(store, execution, key) -> Layer(key, seed, writable): a private writable layer under the attempt's tmp/cache and, on a hit, a sealed read only seed; unsound entries discarded",
+    "scripts.swarm_v2.cache.publish(store, execution, layer) -> seed path or None: copies a writable layer in as a new seed within budget and reserve; CacheError for every refusal",
+    "scripts.swarm_v2.cache.cache_hit_rate() and METRICS['cache_corruption_total']"
+  ],
+  "supported_versions": {
+    "policy_version": [
+      1
+    ],
+    "layout_version": [
+      1
+    ],
+    "python": "3.11 and 3.12 unit shards in the linked CI run",
+    "filesystem": "POSIX rename, chmod and flock on the ubuntu-latest CI runner"
+  },
+  "states": {
+    "observed": "Entries, records and modes inside the pytest temporary cache store and execution roots",
+    "accepted": "An entry whose recorded key and file manifest match the requested key and its files",
+    "committed": "A seed renamed into place under its key digest after staging, sealed read only",
+    "externally_verified": "None; no worker launch path calls the module yet"
+  },
+  "validation": {
+    "red": [
+      "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38058634806 on c98891da: tests only commit, cache module missing at collection"
+    ],
+    "green": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38067630237 on 7f65a6b31b437bdf07ddca272d6b78a7690fad62: every unit shard passed",
+    "mutation": "Branch preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38067627041 succeeded on 7f65a6b31b437bdf07ddca272d6b78a7690fad62; earlier preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059851797 graded cache.py 387 killed, 0 survived",
+    "review": "Standards and Spec readers ran three rounds and closed; held items recorded under remaining_limitations",
+    "local": "No local tests or mutation ran; lint, format and size passed in the pre push gate on every head"
+  },
+  "measurements": {
+    "cache_hit_rate": "share of attaches that found a seed; case A asserts reuse by the second attempt",
+    "cache_corruption_total": "count of entries discarded on attach; case C asserts exactly one after damage"
+  },
+  "rollback_rehearsal": {
+    "action": "policy enabled false: attach returns no seed, publish writes nothing, store, workspace, home and archive untouched",
+    "tests": [
+      "tests/test_swarm_v2_cache.py::test_reuse_off_attaches_without_a_seed_and_publishes_nothing",
+      "tests/sv2_fsy03_cases.py case_c rollback checks"
+    ]
+  },
+  "scope": "Cache keys, private writable layers, sealed seeds, bounded disk use and corrupt entry recovery at the module interface; worker launch wiring belongs to later packages",
+  "remaining_limitations": [
+    "The granted scope is passed in by the caller, so the toolchain rejection holds at this interface only.",
+    "No worker launch path calls the module yet.",
+    "Seeds are sealed by file mode only; a seed edited after an attach runs unverified for that holder until the next attach discards it. An owner separated or read only store mount is a ledger follow up."
+  ],
+  "cases": {
+    "T-SV2-FSY-03-A": {
+      "title": "successful behavior: two compatible tasks reuse a dependency cache while keeping native conversations and credentials separate",
+      "passed": true,
+      "tests": 78,
+      "file": "a-result.json"
+    },
+    "T-SV2-FSY-03-B": {
+      "title": "rejection: a cache from an untrusted project cannot replace executable toolchain content in another scope",
+      "passed": true,
+      "tests": 38,
+      "file": "b-result.json"
+    },
+    "T-SV2-FSY-03-C": {
+      "title": "recovery: corrupt cache content is discarded and rebuilt without deleting the task's source changes",
+      "passed": true,
+      "tests": 30,
+      "file": "c-result.json"
+    }
+  },
+  "test_outputs": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38067630237",
+  "completion_evidence": "Fixture qualified only; the package is not complete until a worker launch path uses the module and a rollout gate verifies it live.",
+  "fixture": "tests/test_swarm_v2_cache.py build() and tests/sv2_fsy03_cases.py",
+  "compatibility": "No preceding cache protocol exists; with reuse off every attempt behaves as the local path does today, a fresh layer with no seed",
+  "authority": "The writable scope comes from the Store's granted scope, never from a key field or display label"
+}
