@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Protocol
 
 from scripts.swarm.store import AgentRecord, SwarmError
+from scripts.swarm_v2 import broadcast_bridge
 from scripts.swarm_v2.accounts import AccountCapacity, Slot
 from scripts.swarm_v2.auth_context import LaunchAuthority
 from scripts.swarm_v2.controller import Controller
@@ -44,6 +45,7 @@ class LaunchTerms:
     ttl_ms: int
     project_ids: tuple[str, ...]
     brain_id: str
+    api_url: str
 
 
 @dataclass(frozen=True)
@@ -83,7 +85,12 @@ class DistributedLaunch:
             slot = self.capacity.reserve(grant, terms.cap, terms.ttl_ms)
         except SwarmError as error:
             return Launch(admitted, grant, None, Outcome("spawn", Status.REFUSED, backend, detail=str(error)))
-        identity = {"launch_grant": grant, "execution_id": admitted.execution_id, "generation": admitted.generation}
+        identity = {
+            "launch_grant": grant,
+            "execution_id": admitted.execution_id,
+            "generation": admitted.generation,
+            "endpoints": {broadcast_bridge.API_URL: terms.api_url},
+        }
         outcome = self.router.spawn(replace(request, task={**request.task, **identity}))
         if outcome.status in NOT_LAUNCHED:
             self.exited(admitted)
