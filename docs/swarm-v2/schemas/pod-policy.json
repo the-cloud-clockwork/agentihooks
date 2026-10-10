@@ -4,7 +4,7 @@
   "title": "Approved execution Pod policy",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "template_version", "namespace", "owner", "service_account", "image_repository", "termination_grace_seconds", "provider_accounts", "profiles", "probes"],
+  "required": ["schema_version", "template_version", "namespace", "owner", "service_account", "runtime_class_name", "image_repository", "termination_grace_seconds", "provider_accounts", "profiles", "probes"],
   "properties": {
     "schema_version": {"const": 1},
     "template_version": {"$ref": "#/$defs/label_value"},

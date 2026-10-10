@@ -180,6 +180,7 @@
       "anton.io/pool": "general"
     },
     "restartPolicy": "Never",
+    "runtimeClassName": "kata-fc",
     "securityContext": {
       "fsGroup": 10001,
       "runAsGroup": 10001,
