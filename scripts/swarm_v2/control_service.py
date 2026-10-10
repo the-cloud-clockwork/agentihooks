@@ -106,12 +106,14 @@ class ControlService:
 
     def serve(self, host: str, port: int) -> ThreadingHTTPServer:
         self.server = serve(self.executions, host, port)
-        threading.Thread(target=self.server.serve_forever, name=THREAD, daemon=True).start()
+        self.thread = threading.Thread(target=self.server.serve_forever, name=THREAD, daemon=True)
+        self.thread.start()
         return self.server
 
     def stop(self) -> None:
         if self.server is not None:
-            self.server.shutdown()
+            if self.thread.is_alive():
+                self.server.shutdown()
             self.server.server_close()
         if self.controller.held is not None:
             self.controller.release()

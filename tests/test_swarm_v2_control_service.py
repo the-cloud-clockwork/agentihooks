@@ -192,6 +192,9 @@ def test_the_api_thread_is_a_named_daemon(tmp_path):
     finally:
         service.stop()
 
+    service.thread.join(5)
+    assert service.thread.is_alive() is False
+
 
 def test_stop_releases_the_lease_so_a_restart_takes_it_at_once(tmp_path):
     store = _store()
