@@ -318,10 +318,9 @@ from scripts.swarm import commands
 from scripts.swarm.store import AgentRecord, connect
 from scripts.swarm_v2 import control_service
 from scripts.swarm_v2.kubernetes.client import KubeHttp, PodClient
-from scripts.swarm_v2.broadcast_bridge import GRANT_NAME
 from scripts.swarm_v2.kubernetes.grants import PodGrants, Supervision
 from scripts.swarm_v2.kubernetes.runtime import GENERATION_LABEL
-from scripts.swarm_v2.kubernetes.spec import LAUNCH_DIR, LAUNCH_RECORD, launch_volume, pod_name
+from scripts.swarm_v2.kubernetes.spec import ATTEMPTS, LAUNCH_DIR, LAUNCH_RECORD, launch_volume, pod_name
 from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL, OWNER_LABEL, owner_for
 
 access = json.load(sys.stdin)
@@ -351,65 +350,12 @@ agent = probe.controller.admit(record, "")
 grant = probe.grants.issue(
     slug, agent.execution_id, project_ids=["github.com/the-cloud-clockwork/agentihooks"], brain_id="swarm", account="kind"
 )
-worker = f"""
-import json, os, sys, tempfile, time, urllib.error, urllib.request
-from pathlib import Path
-from scripts.swarm_v2 import supervision_runtime
-from scripts.swarm_v2.supervision import Launch
-path = "{LAUNCH_DIR}/{GRANT_NAME}"
-record = Path("{LAUNCH_DIR}/{LAUNCH_RECORD}")
-grant = open(path).read().strip()
-registered = {{}}
-body = json.dumps({{"execution_id": os.environ["EXECUTION_ID"], "generation": int(os.environ["GENERATION"])}}).encode()
-headers = {{"Authorization": "Bearer " + grant, "Content-Type": "application/json"}}
-request = urllib.request.Request(os.environ["CONTROL_URL"] + "/v2/executions/register", body, headers, method="POST")
-for attempt in range(10):
-    try:
-        with urllib.request.urlopen(request, timeout=10) as answer:
-            status, registered = answer.status, json.loads(answer.read())
-        break
-    except urllib.error.HTTPError as error:
-        status = error.code
-        print(json.dumps({{"register": status, "attempt": attempt, "answer": error.read().decode()}}), flush=True)
-        if status != 503:
-            break
-        time.sleep(2)
-print(json.dumps({{"register": status, "uid": os.getuid(), "path": path, "mode": oct(os.stat(path).st_mode & 0o777)}}, sort_keys=True))
-if status != 200:
-    sys.exit(1)
-attempt = Path(tempfile.mkdtemp()) / os.environ["EXECUTION_ID"]
-(attempt / "homes" / "claude").mkdir(parents=True)
-roots = {{"home": "homes", "runtime": "run", "checkout": "checkouts", "worktree": "worktrees", "spool": "spool", "scratch": "tmp", "seed": "profiles"}}
-layout = {{"layout_version": 1, "roots": roots, "immutable": ["seed"]}}
-execution = {{"attempt": os.environ["EXECUTION_ID"], "homes": {{"claude": "homes/claude"}}, "layout": layout}}
-(attempt / "execution.json").write_text(json.dumps(execution))
-authority = {{
-    "execution_id": registered["execution_id"],
-    "generation": int(os.environ["GENERATION"]),
-    "task_id": registered["task_id"],
-    "seat_id": os.environ["SEAT"],
-    "swarm_id": os.environ["SLUG"],
-    "grant_id": registered["grant_id"],
-}}
-(attempt / "registration.json").write_text(json.dumps(authority))
-launch = Launch.load(attempt, record)
-loaded = {{"loaded": launch.authority == authority, "harness": launch.harness, "agent": list(launch.agent), "exporter": launch.exporter}}
-print(json.dumps({{"supervisor_record": loaded, "authority": authority}}, sort_keys=True), flush=True)
-print(json.dumps({{"supervisor_exit": supervision_runtime.main([str(attempt), str(record)])}}), flush=True)
-"""
 name = pod_name(agent.execution_id)
 labels = {
     OWNER_LABEL: owner_for(slug),
     EXECUTION_LABEL: agent.execution_id,
     GENERATION_LABEL: str(agent.generation),
     "app.kubernetes.io/instance": env["RELEASE"],
-}
-variables = {
-    "CONTROL_URL": env["CONTROL_URL"],
-    "EXECUTION_ID": agent.execution_id,
-    "GENERATION": str(agent.generation),
-    "SEAT": agent.seat,
-    "SLUG": slug,
 }
 api.create_pod({
     "apiVersion": "v1",
@@ -423,14 +369,13 @@ api.create_pod({
             "name": "worker",
             "image": env["IMAGE"],
             "imagePullPolicy": "Never",
-            "command": ["python", "-c", worker],
-            "env": [{"name": key, "value": value} for key, value in variables.items()],
+            "args": ["python", "/opt/swarm-node/supervisor.py", f"{ATTEMPTS}/{agent.execution_id}", f"{LAUNCH_DIR}/{LAUNCH_RECORD}"],
             "volumeMounts": [{"name": "launch", "mountPath": LAUNCH_DIR, "readOnly": True}],
         }],
         "volumes": [launch_volume(agent.execution_id)],
     },
 })
-handed = PodGrants(api, slug, lambda token: probe.grants.verify(slug, token), Supervision("claude", None)).hand(agent, grant)
+handed = PodGrants(api, slug, lambda token: probe.grants.verify(slug, token), Supervision("claude", None, env["CONTROL_URL"])).hand(agent, grant)
 scratch.cleanup()
 print(json.dumps({"pod": name, "handed": handed}, sort_keys=True))
 EOF
@@ -459,23 +404,25 @@ if [[ $owner != "Pod/$worker_pod immutable=true" ]]; then
   printf 'the launch ConfigMap is not an immutable object owned by its Pod: %s\n' "$owner" >&2
   exit 1
 fi
-kubectl wait pod "$worker_pod" --for=jsonpath='{.status.phase}'=Succeeded --timeout 2m || {
+phase=""
+for _ in $(seq 120); do
+  phase="$(kubectl get pod "$worker_pod" -o jsonpath='{.status.phase}')"
+  [[ $phase == Succeeded || $phase == Failed ]] && break
+  sleep 1
+done
+supervised="$(kubectl logs "$worker_pod" || true)"
+exit_code="$(kubectl get pod "$worker_pod" -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}')"
+if [[ $phase != Succeeded && $phase != Failed ]] || [[ $exit_code == 64 || $supervised == *"refused"* ]]; then
   kubectl describe pod "$worker_pod"
-  kubectl logs "$worker_pod" || true
-  exit 1
-}
-read_grant="$(kubectl logs "$worker_pod")"
-if [[ $read_grant != *'"register": 200'* || $read_grant != *'"uid": 10001'* ]]; then
-  printf 'the worker did not read its launch grant and register: %s\n' "$read_grant" >&2
+  printf 'the worker Pod start step did not hand a prepared attempt to its supervisor (phase %s, exit %s): %s\n' "$phase" "$exit_code" "$supervised" >&2
   exit 1
 fi
-printf 'a worker Pod read its launch grant from its launch ConfigMap and registered: %s\n' "$read_grant"
-supervised='"supervisor_record": {"agent": ["claude"], "exporter": null, "harness": "claude", "loaded": true}'
-if [[ $read_grant != *"$supervised"* || $read_grant != *'"failure_stage": "startup"'* || $read_grant != *'"supervisor_exit": 70'* ]]; then
-  printf 'the worker supervisor did not load the launch record against the registered authority: %s\n' "$read_grant" >&2
+execution="${worker_pod#swarm-}"
+if [[ $supervised != *'"execution_id": "'"$execution"'"'* || $supervised != *'"supervisor_pid":'* ]]; then
+  printf 'the worker supervisor did not run against the registered authority: %s\n' "$supervised" >&2
   exit 1
 fi
-printf 'the worker supervisor loaded the launch record from its launch ConfigMap and stopped only at herdr startup: %s\n' "$read_grant"
+printf 'the worker Pod start step registered, prepared its attempt and started its supervisor without refusal (exit %s): %s\n' "$exit_code" "$supervised"
 kubectl delete pod "$worker_pod" --wait --timeout 1m
 collected=""
 for _ in $(seq 60); do

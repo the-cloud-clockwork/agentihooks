@@ -18,6 +18,7 @@ from scripts.swarm_v2.supervision import AUTHORITY, SCHEMA_VERSION
 class Supervision:
     harness: str
     exporter: tuple[str, ...] | None
+    control_url: str
 
     def record(self, registration: Registration) -> str:
         record = {
@@ -27,6 +28,7 @@ class Supervision:
             "authority": {name: getattr(registration, name) for name in AUTHORITY},
             "harness": self.harness,
             "agent": [self.harness],
+            "control_url": self.control_url,
         }
         if self.exporter:
             record["exporter"] = list(self.exporter)

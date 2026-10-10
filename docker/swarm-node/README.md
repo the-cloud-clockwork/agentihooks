@@ -21,6 +21,14 @@ are owned by root and read only to the worker user.
 The default command verifies and reports installed inventory without a network.
 Every command runs under Tini as PID one, which reaps children. Production
 execution supplies `python /opt/swarm-node/supervisor.py ATTEMPT LAUNCH_JSON`.
+That entry first prepares the attempt under a private umask: it reads the
+launch record and the launch grant beside it, registers with the control API
+the record names, bootstraps the attempt for the record's harness from the
+`default` template and writes `registration.json` from the authority the
+answer confirmed. A missing or malformed record or grant, a refused
+registration or an answer naming another execution, task or grant exits
+sixty four before the attempt is touched; a failed bootstrap exits sixty four
+too. The supervisor never starts after a refusal.
 The supervisor owns a headless herdr server, an exporter and one main agent in
 a herdr pane. Viewers can attach and detach without owning those processes.
 
