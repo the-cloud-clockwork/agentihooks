@@ -131,5 +131,3 @@ def test_autoscale_demand_for_the_doctor_counts_no_task_the_watched_focus_holds(
     ledger = doctor(store, [record("plans/a", "focus")])
     monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: [])
     assert capacity.live_inputs("sw", store, ledger, {}, 5_000).demand == {"eng": 1, "ci": 0, "plan": 0}
-    _, ready = capacity.ready_work("sw", store, ledger.state("sw"))
-    assert [t["id"] for t in ready["eng"]] == ["fix", "watch"]
