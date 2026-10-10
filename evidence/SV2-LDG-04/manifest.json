@@ -1,0 +1,14 @@
+{
+  "package": "SV2-LDG-04",
+  "tested_commit": "b468544e5650e8203ca17eeaf947ea95327394f9",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38051681587",
+  "fixture": "Two ledger server subprocesses sharing one tmp_path ledger folder on two reserved ports; a seeded SQLite ledger; the ledger_writer command as a third process",
+  "fixture_clock": "No expiry or lease timing: the flock lease has no clock; waits are bounded health polls of at most 20 s",
+  "independent_runs": 2,
+  "cleanup": "pytest tmp_path folders and the reserved ports only; every server process is terminated or killed and reaped",
+  "mutation_scope": "Chat writes on the fixture ledger only; the first server is the single writer of its SQLite file",
+  "inputs": {
+    "tests/sv2_ldg04_cases.py": "8655a70e80fffa1e3c33a8846956a15db3005cf621881d2bab614a30b32465de"
+  }
+}

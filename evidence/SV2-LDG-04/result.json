@@ -1,0 +1,58 @@
+{
+  "package": "SV2-LDG-04",
+  "dependency": "SV2-LDG-03",
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2381",
+  "pull_request": null,
+  "tested_commit": "b468544e5650e8203ca17eeaf947ea95327394f9",
+  "status": "mocked-acceptance-qualified",
+  "package_complete": false,
+  "evidence_class": "Two real ledger server processes sharing one SQLite ledger folder, the ledger_writer command as a third process, no Redis fixture. Live G3 qualification is separate.",
+  "interfaces": [
+    "scripts.swarm_v2.ledger_writer.WriterLease(directory).acquire(claimant): non-blocking exclusive flock on <ledger dir>/.ledger-writer.lock held for the process lifetime, holder recorded as {pid, host, started_at}",
+    "WriterConflict names the folder and holder: 'ledger folder <dir> already has an active writer, pid <pid> on <host>; a second writer is refused'",
+    "conflicts_total(directory) reads ledger_writer_conflicts_total from .ledger-writer-conflicts.jsonl, one line per refusal",
+    "ledger_server.serve acquires the lease before legacy adoption, threads or port binding and exits non-zero on WriterConflict",
+    "snapshot(database, target): SQLite backup API copy into a hidden temporary beside the target, integrity checked, renamed into place",
+    "restore(backup, directory): verifies the backup, takes the writer lease, writes the backup over ledgers.sqlite3 through the backup API",
+    "python -m scripts.swarm_v2.ledger_writer [--dir] snapshot|restore|holder",
+    "Chart agentihooks-swarm: ledger.replicas other than 1 fails helm template; kind-smoke.sh checks the refusal"
+  ],
+  "supported_versions": {
+    "python": "3.11 and 3.12 as run by the mutation preflight",
+    "storage": "SQLite ledger repository (ledgers.sqlite3, WAL) on a local or ReadWriteOnce volume",
+    "compatibility": "The local workstation server keeps its folder and port; a second server on the same folder now exits instead of sharing it"
+  },
+  "states": {
+    "observed": "Second server exit code, its log line naming the holder, health probe on its port, ledger revision and chat read read-only from SQLite",
+    "accepted": "First server answers 200 with the operation applied; a replay of the same operation id after restart is answered applied without a second entry",
+    "committed": "Chat entries and revision in the authoritative SQLite ledger after kill and restart; restored backup equals the committed state",
+    "externally_verified": "Not claimed; live G3 evidence is required at the rollout gate"
+  },
+  "validation": {
+    "red": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38050366503 failed collecting the new test module (ImportError: ledger_writer) on the tests-only commit 99a85be7",
+    "mutation_preflight": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38051681587 on b468544e: ledger_writer 241 killed 0 survived, ledger_server 5 killed; the run is red only on 13 survivors in scripts/swarm_v2/api/tasks.py lines owned by SV2-LDG-03",
+    "package_cases": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38050961542 clean run passed all three cases twice from independent folders against the committed evidence",
+    "local": "No local tests or mutation ran; static prepush passed; helm template refused ledger.replicas=2 locally"
+  },
+  "measurements": {
+    "ledger_writer_conflicts_total": {
+      "success": 1,
+      "rejection": 2,
+      "recovery": 0
+    },
+    "dimension": "Per fixture ledger folder"
+  },
+  "rollback_rehearsal": {
+    "action": "Stop the writer, restore a verified snapshot with the ledger_writer restore command under the writer lease, start the preceding writer",
+    "evidence": "T-SV2-LDG-04-C restores the snapshot taken after the accepted write over a newer state and reads back the committed state; T-SV2-LDG-04-B shows restore refused while a writer serves",
+    "authoritative_objects": "ledgers.sqlite3 with its page tokens; the writer lease file is coordination state the kernel releases. Rollback deletes neither."
+  },
+  "failure_evidence": "Run 38050459957 failed one unit test because tmp_path holds a _home folder from test isolation; fixed by giving the snapshot test its own folder.",
+  "remaining_limitations": [
+    "flock does not coordinate writers across NFS or other shared network filesystems; the doc forbids such a folder",
+    "Command line tools that open the repository directly stay secondary writers serialized by SQLite BEGIN IMMEDIATE",
+    "The conflict counter is a file in the ledger folder and has no exporter",
+    "Live G3 deployment evidence is required at the rollout gate; these are mocked fixtures"
+  ]
+}
