@@ -399,9 +399,10 @@ def test_observe_only_mode_reports_releases_and_frees_nothing(world):
     assert (exited.kind, exited.action) == ("exited", "observe_only")
     assert world.rows() == before
 
-    world.reconciler.reconcile()
+    enforced = world.reconciler.reconcile()
 
-    assert sorted(world.rows()) == sorted([LOST_TERMINAL, SUCCESSOR])
+    assert kinds(enforced)[LOST_TERMINAL] == ("orphan_occupancy", "release")
+    assert sorted(world.rows()) == [SUCCESSOR]
 
 
 def test_a_row_that_changed_after_judgement_is_kept(world):
