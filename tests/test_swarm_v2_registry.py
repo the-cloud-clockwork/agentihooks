@@ -272,7 +272,7 @@ def test_a_superseded_worker_cannot_beat_beside_its_replacement_but_closes_its_o
     old_grant = world.authority.authorize(old_token)
     registered = world.fleet.register(replace(session("anton", old), session_id="sess-old"), old_token)
     new, new_token = world.start(seat="eng-1@fixture", previous=old.execution_id)
-    world.fleet.register(replace(session("anton", new), session_id="sess-new"), new_token)
+    current = world.fleet.register(replace(session("anton", new), session_id="sess-new"), new_token)
     fenced = FleetRegistry(world.store, SLUG, lambda _: old_grant, lambda: world.clock[0])
     before = world.rows()
     world.clock[0] += 5
@@ -282,9 +282,27 @@ def test_a_superseded_worker_cannot_beat_beside_its_replacement_but_closes_its_o
     assert world.rows() == before
 
     assert fenced.close(scope("anton"), "sess-old", old_token) == replace(registered, state=CLOSED)
+    sessions, seats = world.rows()
+    assert (sessions[current.key()], seats) == (before[0][current.key()], before[1])
     assert world.states() == {"sess-old": CLOSED, "sess-new": LIVE}
-    assert world.fleet.seat("eng-1@fixture")["execution_id"] == new.execution_id
     assert world.fleet.heartbeat(scope("anton"), "sess-new", new_token).heartbeat_ms == world.clock[0]
+
+
+def test_a_superseded_worker_turned_suspect_cannot_beat_back_to_live(world):
+    old, old_token = world.start(seat="eng-1@fixture")
+    old_grant = world.authority.authorize(old_token)
+    world.fleet.register(replace(session("anton", old), session_id="sess-old"), old_token)
+    new, new_token = world.start(seat="eng-1@fixture", previous=old.execution_id)
+    world.fleet.register(replace(session("anton", new), session_id="sess-new"), new_token)
+    fenced = FleetRegistry(world.store, SLUG, lambda _: old_grant, lambda: world.clock[0])
+    world.clock[0] += INPUTS["stale_after_ms"] + 1
+    assert world.fleet.sweep() == 2
+    before = world.rows()
+
+    with pytest.raises(SwarmError, match="^stale_generation$"):
+        fenced.heartbeat(scope("anton"), "sess-old", old_token)
+    assert world.rows() == before
+    assert world.states() == {"sess-old": SUSPECT, "sess-new": SUSPECT}
 
 
 def test_a_record_replaced_after_its_grant_check_is_not_beaten(world, monkeypatch):
