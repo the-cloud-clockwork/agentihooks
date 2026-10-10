@@ -62,6 +62,15 @@ PATH_CALLS = {
     "isdir",
     "is_dir",
     "relative_to",
+    "rename",
+    "replace",
+    "symlink",
+    "symlink_to",
+    "remove",
+    "unlink",
+    "rmdir",
+    "stat",
+    "touch",
 }
 PATH_KEYWORDS = {"dir", "cwd", "path", "root"}
 WRAPPERS = {"sorted", "list", "tuple", "set", "reversed", "enumerate"}
@@ -103,7 +112,10 @@ def path_parts(node: ast.AST) -> list[tuple[ast.AST, str]]:
 
 def call_parts(node: ast.Call) -> list[tuple[ast.AST, str]]:
     callee = ast.unparse(node.func).rpartition(".")[2]
-    args = node.args[1:] if callee in ACCESSORS else node.args if callee in PATH_CALLS else []
+    if callee in ACCESSORS:
+        args = node.args[1:]
+    else:
+        args = node.args if callee in PATH_CALLS else []
     args = args + [keyword.value for keyword in node.keywords if keyword.arg in PATH_KEYWORDS]
     return [(unwrapped(arg.value), "sequence") if isinstance(arg, ast.Starred) else (arg, "name") for arg in args]
 
@@ -170,8 +182,10 @@ def folder_kind(value: ast.AST, folders: set[str], bound: dict[str, set[str]]) -
 
 
 def is_bound(part: ast.AST, kind: str, bound: dict[str, set[str]]) -> bool:
-    if isinstance(part, ast.Subscript) and kind == "name" and ast.unparse(part.value) in bound["mapping"]:
+    if kind == "name" and isinstance(part, ast.Subscript) and ast.unparse(part.value) in bound["mapping"]:
         return True
+    if kind == "name" and isinstance(part, ast.Call) and isinstance(part.func, ast.Attribute):
+        return part.func.attr in ACCESSORS and ast.unparse(part.func.value) in bound["mapping"]
     return isinstance(part, (ast.Name, ast.Attribute, ast.Subscript)) and ast.unparse(part) in bound[kind]
 
 
@@ -273,6 +287,8 @@ def test_the_guard_follows_aliases_wrappers_and_fallbacks_but_not_keys_or_subcom
         "herdr(verb)\n"
         'herdr("run")\n'
         'n = record.get("homes", {})\n'
+        'os.rename(src, "tmp")\n'
+        'o = root / ROOTS.get("runtime")\n'
     )
     assert named_folders(source, folders) == [
         "10: FOLDERS",
@@ -281,6 +297,8 @@ def test_the_guard_follows_aliases_wrappers_and_fallbacks_but_not_keys_or_subcom
         "15: i",
         "17: ROOTS['runtime']",
         "19: cfg['f']",
+        "26: tmp",
+        "27: ROOTS.get('runtime')",
         "3: y",
         "5: p",
         "7: sub",
