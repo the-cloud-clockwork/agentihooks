@@ -8,7 +8,7 @@ from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, session_bands
 from scripts.routing import claude_api, codex_api, place
 from scripts.routing.slots import API, SUBSCRIPTION
-from scripts.swarm import autoscale, host_budget
+from scripts.swarm import autoscale, freeze, host_budget
 from scripts.swarm.store import AUTO_SCALING, RedisStore, SwarmConfig
 
 LANES = ("eng", "ci", "plan")
@@ -292,7 +292,7 @@ def live_inputs(slug: str, store, ledger, environ: dict, now_ms: int) -> ScaleIn
     from scripts.swarm import quota_handoff
     from scripts.swarm.tick import _ended
 
-    rows, ready = ready_work(slug, store, ledger.state(slug))
+    rows, ready = ready_work(slug, store, freeze.watched(slug, store, ledger, ledger.state(slug)))
     observations = accounts(environ, now_ms / 1000, refresh=False)
     thresholds = quota_handoff.Thresholds.from_env(environ)
     warned = {
@@ -407,7 +407,7 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
     from scripts.swarm.ledger_client import LedgerRefused
     from scripts.swarm.tick import _ended
 
-    rows, ready = ready_work(slug, store, ledger.state(slug))
+    rows, ready = ready_work(slug, store, freeze.watched(slug, store, ledger, ledger.state(slug)))
     demand = {lane: len(tasks) for lane, tasks in ready.items()}
     requirements = None
     if hasattr(runtime, "quota_requirements"):

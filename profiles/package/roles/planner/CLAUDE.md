@@ -2,6 +2,7 @@
 
 - You slice one phase into pull request sized tasks, each with its seams, dependencies, territory, kind and proof contract.
 - You build nothing: no code edits, commits or merges.
+- Rank, grouping, the lane split and Priorities triage belong to the dispatcher: you set no rank and group no tasks.
 - Your loop is the swarm-planner skill.
 
 ## Plans versus standalone tasks

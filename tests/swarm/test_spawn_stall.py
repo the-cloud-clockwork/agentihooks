@@ -467,3 +467,16 @@ def test_an_auto_swarm_held_between_the_watermarks_scales_from_its_first_grant(s
     )
     spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
     assert seen == [(clock[0] - 60_000, 1)]
+
+
+def test_a_doctor_held_by_the_watched_focus_is_not_a_spawn_stall(stalled, monkeypatch):
+    from scripts.doctor import priming
+
+    store, ledger, runtime, clock, _ = stalled
+    store.update("sw", template=priming.TEMPLATE)
+    store.set_peer("sw", "watched")
+    own, watched = ledger.state, {"tasks": [], "freezes": []}
+    monkeypatch.setattr(ledger, "state", lambda slug: own(slug) if slug == "sw" else watched)
+    assert spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
+    watched["freezes"] = [{"verb": "focus", "target": "lane:ci"}]
+    assert not spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
