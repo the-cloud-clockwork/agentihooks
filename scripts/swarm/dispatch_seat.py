@@ -2,14 +2,15 @@
 
 At full autonomy a trigger wakes the live seat through its inbox or spawns it through the seat spawn helper; below
 full, or once every trigger closes, the seat is marked finished and the reap pass retires it. A trigger is a priority
-the sweep left unresolved for fifteen minutes.
+the sweep left unresolved for fifteen minutes, a bottleneck no lane rule covers held for the lane split's ticks, or a
+red dev holding blocked tasks, where a freeze or focus may be worth proposing.
 """
 
 import json
 from dataclasses import replace
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import seat_spawn
+from scripts.swarm import bottleneck, dev_red, lane_split, seat_spawn
 from scripts.swarm.store import DISPATCH, FULL
 
 LANE = DISPATCH
@@ -19,6 +20,12 @@ STALE_MS = 15 * 60 * 1000
 SENT = "dispatch-sent"
 ENDED_STATES = ("stopping", "stopped")
 WAKE = "New dispatcher triggers in swarm {slug}:\n{lines}\nSettle each one, then tell the master what you did."
+LINES = {
+    "priority": "- The priority on {item} is unresolved after {minutes} minutes: {text}",
+    "bottleneck": "- The bottleneck report named the same share {ticks} ticks running and no lane rule covers it: {text}",
+    "freeze": "- Dev Tests run {run} is red and holds these blocked tasks: {text}. Propose a freeze or a focus to the "
+    "master if one would help.",
+}
 
 
 def triggers(doc: dict, now_ms: int) -> list[dict]:
@@ -29,14 +36,32 @@ def triggers(doc: dict, now_ms: int) -> list[dict]:
     ]
 
 
+def uncovered(store, slug: str, now_ms: int) -> list[dict]:
+    held = json.loads(store.redis.get(store.key(slug, lane_split.KEY)) or "{}")
+    named = held.get("named")
+    if not named or named in lane_split.MOVES or held["ticks"] < lane_split.TICKS:
+        return []
+    text = bottleneck.line(bottleneck.read(store, slug), now_ms)
+    return [{"id": f"bottleneck:{named}", "kind": "bottleneck", "ticks": held["ticks"], "text": text}]
+
+
+def red_dev(store, slug: str, doc: dict) -> list[dict]:
+    held = store.redis.hgetall(dev_red.key(slug))
+    blocked = sorted(t["id"] for t in doc.get("tasks", []) if t["id"] in held and t.get("state") == "blocked")
+    if not blocked:
+        return []
+    run_id = max(int(held[task_id]) for task_id in blocked)
+    return [{"id": f"dev-red:{run_id}", "kind": "freeze", "run": run_id, "text": ", ".join(blocked)}]
+
+
 def line(trigger: dict) -> str:
-    return f"- The priority on {trigger['item']} is unresolved after {trigger['minutes']} minutes: {trigger['text']}"
+    return LINES[trigger.get("kind", "priority")].format(**trigger)
 
 
 def run(slug: str, config, store, runtime, doc: dict, now_ms: int, sleeping: bool = False) -> list[str]:
     seats = [a for a in store.agents(slug) if a.lane == LANE and a.state != "finished"]
     active = config.autonomy == FULL and config.state not in ENDED_STATES and not sleeping
-    found = triggers(doc, now_ms) if active else []
+    found = triggers(doc, now_ms) + uncovered(store, slug, now_ms) + red_dev(store, slug, doc) if active else []
     if not found:
         store.redis.delete(store.key(slug, SENT))
         return [_end(slug, store, seat) for seat in seats]

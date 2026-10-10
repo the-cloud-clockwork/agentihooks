@@ -285,3 +285,80 @@ def test_a_sleeping_swarm_tick_spawns_no_dispatcher():
     store.redis.set(store.key(SLUG, "master-retired-tasks"), json.dumps([]))
     tick(SLUG, store, Ledger([]), runtime, NOW)
     assert [lane for lane, _, _ in runtime.spawned if lane == dispatch_seat.LANE] == []
+
+
+REPORT = {
+    "bottleneck": "review",
+    "window_hours": 4,
+    "total": 7200.0,
+    "seconds": {"engineering": 1800.0, "ci": 1800.0, "review": 3600.0, "host": 0.0, "quota": 0.0},
+    "at": NOW - 5 * MINUTE,
+}
+
+
+def held(store, named="review", ticks=3):
+    from scripts.swarm import bottleneck, lane_split
+
+    store.redis.set(store.key(SLUG, bottleneck.KEY), json.dumps({**REPORT, "bottleneck": named}))
+    store.redis.set(store.key(SLUG, lane_split.KEY), json.dumps({"named": named, "ticks": ticks, "at": REPORT["at"]}))
+
+
+def test_a_bottleneck_no_lane_rule_covers_spawns_a_seat_naming_it():
+    from scripts.swarm import bottleneck
+
+    store, runtime = swarm(), FakeRuntime()
+    held(store)
+    assert run(store, runtime, doc()) == [f"spawned dispatcher {NAME} for 1 trigger"]
+    [trigger] = runtime.tasks[0]["triggers"]
+    report = bottleneck.line(REPORT, NOW)
+    assert trigger == {"id": "bottleneck:review", "kind": "bottleneck", "ticks": 3, "text": report}
+    text = prompt.build(SLUG, "/repo", dispatch_seat.LANE, NAME, runtime.tasks[0], autonomy="full")
+    assert (
+        f"- The bottleneck report named the same share 3 ticks running and no lane rule covers it: {report}\n" in text
+    )
+    assert report.startswith("bottleneck review and queue: 50 percent")
+
+
+@pytest.mark.parametrize(("named", "ticks"), [("review", 2), ("ci", 3), ("engineering", 4), ("", 3)])
+def test_a_short_or_covered_bottleneck_is_no_trigger(named, ticks):
+    store = swarm()
+    held(store, named, ticks)
+    assert dispatch_seat.uncovered(store, SLUG, NOW) == []
+    assert dispatch_seat.uncovered(swarm(), SLUG, NOW) == []
+
+
+def test_a_red_dev_holding_blocked_tasks_asks_for_a_freeze_or_focus():
+    from scripts.swarm import dev_red
+
+    store, runtime = swarm(), FakeRuntime()
+    for task_id, run_id in (("t2", 41), ("t1", 42), ("t3", 43)):
+        dev_red.hold(store.redis, SLUG, task_id, run_id)
+    tasks = [{"id": "t2", "state": "blocked"}, {"id": "t1", "state": "blocked"}, {"id": "t3", "state": "open"}]
+    found = {**doc(), "tasks": tasks}
+    assert dispatch_seat.red_dev(store, SLUG, found) == [
+        {"id": "dev-red:42", "kind": "freeze", "run": 42, "text": "t1, t2"}
+    ]
+    assert run(store, runtime, found) == [f"spawned dispatcher {NAME} for 1 trigger"]
+    text = prompt.build(SLUG, "/repo", dispatch_seat.LANE, NAME, runtime.tasks[0], autonomy="full")
+    assert (
+        "- Dev Tests run 42 is red and holds these blocked tasks: t1, t2. Propose a freeze or a focus to the master "
+        "if one would help.\n" in text
+    )
+    assert dispatch_seat.red_dev(store, SLUG, {**doc(), "tasks": tasks[2:]}) == []
+    assert dispatch_seat.red_dev(swarm(), SLUG, found) == []
+
+
+def test_every_trigger_kind_wakes_the_live_seat_once_and_closes_with_its_signal():
+    from scripts.swarm import dev_red
+
+    store, runtime = swarm(), FakeRuntime()
+    run(store, runtime, doc(priority()))
+    held(store)
+    dev_red.hold(store.redis, SLUG, "t1", 42)
+    found = {**doc(priority()), "tasks": [{"id": "t1", "state": "blocked"}]}
+    assert run(store, runtime, found, NOW + MINUTE) == [f"woke {NAME} with 2 new triggers"]
+    [item] = InboxStore(store.redis).inbox(f"dispatcher@{SLUG}")
+    assert "no lane rule covers it" in item.text and "Dev Tests run 42 is red" in item.text
+    assert run(store, runtime, found, NOW + 2 * MINUTE) == []
+    store.update(SLUG, autonomy="delegate")
+    assert run(store, runtime, found, NOW + 3 * MINUTE) == [f"ended dispatcher {NAME}: its triggers closed"]
