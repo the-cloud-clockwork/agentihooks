@@ -5,7 +5,7 @@
   "integration_gate": "G3",
   "integration_gate_status": "G3 fixture-qualified: dependency SV2-KUB-03 merged into dev in #2473 and SV2-KUB-02 before it; the cases run against the KUB-02 controller, Pod template and lease; live evidence is due at the G3 rollout, when the controller loop of SV2-KUB-05 drives Cleanup.run on Anton",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2466",
-  "tested_commit": "9a3559bf45898708de1253f117a7bca45bede698",
+  "tested_commit": "d246b7ba84890a0a292c96d3a32732268e092820",
   "status": "fixture-qualified-awaiting-ci",
   "evidence_class": "Mocked: fakeredis execution registry, heartbeat archive watermarks, attempt records and cleanup journal, a fake lease clock, an in process API server that enforces delete uid preconditions and can drop a delete response, and in process attach and secret registries; no Kubernetes API server, Service or live worker Pod was used.",
   "interfaces": [
@@ -26,17 +26,17 @@
   "authority": "finalize and every cleanup mutation call require, which the fixture binds to Controller.require: a scoped controller grant and the current controller lease. A stale controller or a revoked grant is refused before any write; case B shows it for both finalize and cleanup and case C for a pre-restart controller after the retained record exists. The generation and seat come from the execution registry, never from a label or a caller argument.",
   "authoritative_objects": "The execution registry, the final attempt record, the heartbeat archive watermark and the retained record are authoritative and are never deleted. The cleanup journal is transient and removed once the retained record is written. Pods, Services, attach registrations and attempt scoped secret references are transient runtime objects.",
   "states": {
-    "observed": "Cases A and C ran twice with identical records in proofs run 38073989793 and case B in proofs run 38074906285 before the dev merge; after it the mutation preflight clean run at 9a3559bf passed the case record test for A, B and C.",
+    "observed": "Cases A, B and C matched their committed records in pull request Tests run 38084172710 at d246b7ba; before the dev merge in proofs runs 38073989793 and 38074906285.",
     "accepted": "Cleanup removed only the old attempt's Pod and Service after its outcome reference and archive watermark were recorded; with the archive upload pending it waited in every case without any delete or retained record; the replacement Pod and Service survived, and a Pod recreated under the old name was recorded replaced and never deleted; an interrupted run resumed from its journal, recorded the Pod whose delete answer was lost as absent_after_send without a second delete, and released secrets once more.",
     "committed": "Code and fixture inputs are at tested_commit; manifest.json hashes them.",
     "externally_verified": "None: no live API server, Service or G3 deployment was exercised."
   },
   "validation": {
     "red": "proofs run 38073336208 on the tests only commit b57a0c35: collection fails on the missing retention module, the missing cleanup module and the missing PreconditionFailed",
-    "tests": "proofs run 38074996957 at e99584eb, before the dev merge: 243 passed across the cleanup, retention, Kubernetes client, runtime, commands and controller modules with every committed case record matching; at tested_commit the pull request Tests run grades the same modules, and the mutation preflight clean run executes the case tests before mutating",
+    "tests": "pull request Tests run 38084172710 at d246b7ba: every unit shard green on the merge with dev, including the cleanup, retention and Kubernetes client modules and the committed case record test for A, B and C; before the dev merge, proofs run 38074996957 at e99584eb passed 243 across the same modules",
     "lint": "ruff check and ruff format passed through python -m scripts.ci_prepush",
     "review": "closed after three rounds of Standards and Spec readers; every finding fixed or ruled, rulings recorded on the pull request",
-    "mutation": "mutation preflight 38083122392 at 9a3559bf: every changed line mutant killed; preflight 38082843630 at 8c0ffb2a had left seven survivors, killed by exact assertions and a delete status rewrite"
+    "mutation": "mutation preflight 38084169947 at d246b7ba and 38083122392 at 9a3559bf: every changed line mutant killed; preflight 38082843630 at 8c0ffb2a had left seven survivors, killed by exact assertions and a delete status rewrite"
   },
   "measurements": {
     "execution_cleanup_backlog": {
