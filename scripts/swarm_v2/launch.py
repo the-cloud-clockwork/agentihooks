@@ -2,7 +2,7 @@
 
 import subprocess
 import sys
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -23,7 +23,7 @@ class WorkerHomes(Protocol):
 
 @dataclass(frozen=True)
 class WorkerHomeCommand:
-    """The grant travels on standard input and the output is captured: an argument shows in the process table."""
+    """The grant must never reach argv: the process table shows it."""
 
     root: Path
     python: str = sys.executable
@@ -50,7 +50,7 @@ class LaunchTerms:
 @dataclass(frozen=True)
 class Launch:
     agent: AgentRecord
-    grant: str
+    grant: str = field(repr=False)
     slot: Slot | None
     outcome: Outcome
     handed: bool = False

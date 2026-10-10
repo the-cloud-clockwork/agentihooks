@@ -457,6 +457,13 @@ def test_a_grant_command_that_cannot_start_reports_unhanded_and_keeps_the_slot(m
     assert world.rows()[f"{SLUG}/{FIRST}"]["state"] == RESERVED
 
 
+def test_a_launch_never_shows_its_grant_when_printed(world):
+    launch = world.launch(FIRST)
+
+    assert launch.grant not in repr(launch)
+    assert launch.agent.execution_id in repr(launch)
+
+
 def test_a_launched_worker_is_handed_its_own_grant(world):
     launch = world.launch(FIRST)
 
