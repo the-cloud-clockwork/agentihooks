@@ -3,6 +3,7 @@
   "package_complete": false,
   "dependency": "SV2-KUB-03",
   "integration_gate": "G3",
+  "integration_gate_status": "G3 fixture-qualified: dependency SV2-KUB-03 merged into dev in #2473 and SV2-KUB-02 before it; the cases run against the KUB-02 controller, Pod template and lease; live evidence is due at the G3 rollout, when the controller loop of SV2-KUB-05 drives Cleanup.run on Anton",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2466",
   "tested_commit": "9a3559bf45898708de1253f117a7bca45bede698",
   "status": "fixture-qualified-awaiting-ci",
@@ -86,6 +87,7 @@
     "test": "tests/test_swarm_v2_kubernetes_cleanup.py::test_suspended_cleanup_reads_nothing_and_needs_no_controller",
     "proof": "Case C starts suspended with both Pods retained and the attempt counted ready, then re-enabled cleanup finishes from its journal."
   },
+  "rollout_safety": "Cleanup is a new path only: no existing caller constructs it, so the local runtime and the Kubernetes Pod creation, orphan reconcile and command transport keep their last qualified behavior; Cleanup(enabled=False) disables only this path and retains every Pod and Service, and the attempt-finals, attempt-retained and cleanup-journal hashes are new keys that no earlier path reads",
   "remaining_limitations": [
     "Nothing calls finalize or Cleanup.run yet: the controller loop and the worker completion path must record final attempts and drive cleanup when they land; the execution registry carries agent state, not attempt state, so the final record is the attempt's terminal state.",
     "The archive gate trusts the heartbeat archive watermark until the transcript archive package supplies a durable acknowledgement, so INV-M04 is not met by this package.",
