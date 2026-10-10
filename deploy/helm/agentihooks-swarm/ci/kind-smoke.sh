@@ -127,4 +127,32 @@ if [[ -z $retaken ]]; then
   exit 1
 fi
 printf 'controller restarted by its liveness probe and holds the lease again: %s\n' "$retaken"
+
+before="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')"
+host="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].metadata.name}')"
+calm="$(kubectl exec "$ledger_pod" -- python -c "from scripts.swarm.store import PREFIX, connect; print(connect().redis.hget(f'{PREFIX}:host:$host:incident:pressure', 'active') or '0')")"
+if [[ $calm != "0" ]]; then
+  printf 'the host pressure alert was already active before the simulated pressure\n' >&2
+  exit 1
+fi
+kubectl exec "$ledger_pod" -- python -c "from scripts.swarm.store import connect; connect().update('$slug', memory_per_agent_mb=10**9); print('simulated host pressure: one agent now needs more memory than the node has')"
+alert=""
+for _ in $(seq 120); do
+  alert="$(kubectl exec "$ledger_pod" -- python -c "import json; from scripts.swarm.store import PREFIX, connect; root = f'{PREFIX}:host:$host:incident:pressure'; redis = connect().redis; print(json.dumps({'incident': redis.hgetall(root), 'mailed': {k: redis.hgetall(k) for k in redis.scan_iter(root + ':mail:*')}}, sort_keys=True))")" || alert=""
+  if [[ $alert == *'"active": "1"'* && $alert == *'"raised": "1"'* ]]; then
+    break
+  fi
+  alert=""
+  sleep 1
+done
+if [[ -z $alert ]]; then
+  printf 'the controller never sent the host pressure alert\n' >&2
+  exit 1
+fi
+after="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')"
+if [[ $after != "$before" ]]; then
+  printf 'the controller restarted while sending the host pressure alert (%s then %s)\n' "$before" "$after" >&2
+  exit 1
+fi
+printf 'controller sent the host pressure alert without a restart: %s\n' "$alert"
 printf 'Helm chart kind proof passed\n'
