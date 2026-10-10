@@ -210,6 +210,9 @@ def test_committed_image_inputs_pin_base_and_keep_profiles_outside_home():
     assert "USER 10001:10001" in dockerfile
     assert "DISABLE_AUTOUPDATER=1" in dockerfile
     assert "--require-hashes" in dockerfile
+    assert "--mount=type=cache,target=/var/cache/swarm-node " in dockerfile
+    assert "--cache-dir /var/cache/swarm-node/pip " in dockerfile
+    assert '--architecture "$TARGETARCH" --cache /var/cache/swarm-node/tools\n' in dockerfile
 
 
 @pytest.mark.parametrize(
