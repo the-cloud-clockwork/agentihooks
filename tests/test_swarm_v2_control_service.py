@@ -1,13 +1,20 @@
 import json
+import socket
+import threading
 import urllib.error
 import urllib.request
 
-import fakeredis
 import pytest
 
-from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+from scripts.hive import auth as hive_auth
+from scripts.swarm import lease
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2 import control_service
 from scripts.swarm_v2.control_service import ControlService, launch_key
+from scripts.swarm_v2.kubernetes.watch import BACKEND
+from scripts.swarm_v2.runtime import observe
+
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
 SLUG = "control-fixture"
 SECRET = b"k" * 32
@@ -20,6 +27,8 @@ def _environ(tmp_path, secret=SECRET, key_id="launch-1"):
 
 
 def _store():
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig(SLUG, "agentihooks", 2, 0))
     return store
@@ -54,11 +63,27 @@ def test_launch_key_refuses_a_missing_setting(tmp_path, drop):
         launch_key(environ)
 
 
+def test_launch_key_names_every_missing_setting():
+    with pytest.raises(control_service.ControlError) as refused:
+        launch_key({})
+
+    assert str(refused.value) == (
+        "the launch signing key needs AGENTIHOOKS_LAUNCH_SIGNING_KEY_ID, AGENTIHOOKS_LAUNCH_SIGNING_KEY_FILE"
+    )
+
+
 def test_launch_key_refuses_a_short_key_without_echoing_it(tmp_path):
     with pytest.raises(control_service.ControlError) as refused:
         launch_key(_environ(tmp_path, secret=b"short-secret-value"))
 
-    assert "short-secret-value" not in str(refused.value)
+    assert str(refused.value) == "signing key must be at least 32 bytes"
+
+
+def test_launch_key_refuses_a_key_id_that_is_not_an_identifier(tmp_path):
+    with pytest.raises(control_service.ControlError) as refused:
+        launch_key(_environ(tmp_path, key_id="not an id"))
+
+    assert str(refused.value) == "signing key ID must be an identifier"
 
 
 def test_launch_key_refuses_an_unreadable_file(tmp_path):
@@ -96,11 +121,9 @@ def test_a_second_service_cannot_take_a_held_controller(tmp_path):
     assert second.tick() is False
 
 
-def test_a_worker_registers_over_http_and_its_heartbeat_reaches_the_api(tmp_path):
-    store = _store()
-    service = ControlService(store, SLUG, launch_key(_environ(tmp_path)), lambda: True)
-    assert service.start()
-    agent = service.controller.admit(AgentRecord(store.next_name(SLUG, "eng"), "eng", "t1", seat=f"eng-1@{SLUG}"), "")
+def _admitted(service, store, seat="eng-1@" + SLUG, task="t1"):
+    record = AgentRecord(store.next_name(SLUG, "eng"), "eng", task, seat=seat, runtime_backend=BACKEND)
+    agent = service.controller.admit(record, "")
     token = service.grants.issue(
         SLUG,
         agent.execution_id,
@@ -108,20 +131,193 @@ def test_a_worker_registers_over_http_and_its_heartbeat_reaches_the_api(tmp_path
         brain_id="swarm",
         account="fixture",
     )
-    server = service.serve("127.0.0.1", 0)
-    base = f"http://127.0.0.1:{server.server_address[1]}"
-    try:
-        status, body = _post(
-            f"{base}/v2/executions/register",
-            token,
-            {"execution_id": agent.execution_id, "generation": agent.generation},
-        )
-        refused, detail = _post(f"{base}/v2/executions/{agent.execution_id}/heartbeat", token, {}, "PUT")
-    finally:
-        server.shutdown()
-        server.server_close()
+    return agent, token
 
-    assert status == 200
-    assert body["execution_id"] == agent.execution_id
-    assert refused != 404
-    assert "error" in json.dumps(detail)
+
+def _beat(service, agent, sequence=1):
+    return {
+        "schema_version": "2.1",
+        "operation_id": f"heartbeat-{sequence}",
+        "authority": {
+            "execution_id": agent.execution_id,
+            "task_id": agent.task,
+            "task_generation": 1,
+            "controller_epoch": service.controller.held.epoch,
+            "owner_identity": agent.name,
+        },
+        "renewal_sequence": sequence,
+        "state": "working",
+        "observed_at": "2026-10-10T18:00:00Z",
+    }
+
+
+def _register_and_beat(base, service, agent, token):
+    registered = _post(
+        f"{base}/v2/executions/register", token, {"execution_id": agent.execution_id, "generation": agent.generation}
+    )
+    beat = _post(f"{base}/v2/executions/{agent.execution_id}/heartbeat", token, _beat(service, agent), "PUT")
+    return registered, beat
+
+
+def test_a_worker_registers_and_heartbeats_over_http(tmp_path):
+    store = _store()
+    service = ControlService(store, SLUG, launch_key(_environ(tmp_path)), lambda: True)
+    assert service.start()
+    agent, token = _admitted(service, store)
+    server = service.serve("127.0.0.1", 0)
+    try:
+        (status, body), (beat_status, ack) = _register_and_beat(
+            f"http://127.0.0.1:{server.server_address[1]}", service, agent, token
+        )
+    finally:
+        service.stop()
+
+    assert (status, body["execution_id"]) == (200, agent.execution_id)
+    assert (beat_status, ack["renewal_sequence"], ack["execution_id"]) == (200, 1, agent.execution_id)
+
+
+def test_the_api_thread_is_a_named_daemon(tmp_path):
+    service = ControlService(_store(), SLUG, launch_key(_environ(tmp_path)), lambda: True)
+    service.serve("127.0.0.1", 0)
+    try:
+        threads = [thread for thread in threading.enumerate() if thread.name == control_service.THREAD]
+        assert [thread.daemon for thread in threads] == [True]
+    finally:
+        service.stop()
+
+
+def test_stop_releases_the_lease_so_a_restart_takes_it_at_once(tmp_path):
+    store = _store()
+    key = launch_key(_environ(tmp_path))
+    first = ControlService(store, SLUG, key, lambda: True)
+    assert first.start()
+
+    first.stop()
+
+    assert lease.current(store, SLUG) is None
+    assert ControlService(store, SLUG, key, lambda: True).start() is True
+
+
+def test_the_service_shares_the_lease_with_the_hive_tick(tmp_path):
+    store = _store()
+    service = ControlService(store, SLUG, launch_key(_environ(tmp_path)), lambda: True, owner="hive-fixture")
+    assert service.start()
+
+    tick_lease = lease.acquire(store, SLUG, "hive-fixture")
+
+    assert (tick_lease.owner, tick_lease.epoch) == ("hive-fixture", service.controller.held.epoch)
+    assert service.tick() is True
+
+
+def test_a_tick_takes_the_controller_again_after_its_lease_lapsed(tmp_path):
+    store = _store()
+    service = ControlService(store, SLUG, launch_key(_environ(tmp_path)), lambda: True)
+    assert service.start()
+    epoch = service.controller.held.epoch
+    store.redis.delete(store.key(SLUG, "control-owner"))
+
+    assert service.tick() is True
+    assert (service.controller.held.epoch, service.controller.ready) == (epoch + 1, True)
+
+
+def test_a_tick_sends_each_remote_heartbeat_through_the_controller(tmp_path):
+    store = _store()
+    service = ControlService(store, SLUG, launch_key(_environ(tmp_path)), lambda: True)
+    assert service.start()
+    beating, token = _admitted(service, store)
+    silent, _ = _admitted(service, store, seat=f"eng-2@{SLUG}", task="t2")
+    local = service.controller.admit(AgentRecord(store.next_name(SLUG, "eng"), "eng", "t3", seat=f"eng-3@{SLUG}"), "")
+    service.executions.register(token, {"execution_id": beating.execution_id, "generation": beating.generation})
+    service.executions.heartbeat(beating.execution_id, token, _beat(service, beating))
+    accepted = json.loads(store.redis.hget(store.key(SLUG, "heartbeats"), beating.execution_id))["accepted_at_ms"]
+
+    assert service.tick(now=accepted / 1000 + 1) is True
+
+    seen = observe.stored(store, SLUG, beating.execution_id)
+    assert seen.sources == {
+        "heartbeat": {"reading": "ok", "observed_at": accepted / 1000, "value": "working"},
+    }
+    assert seen.state.value == "working"
+    assert observe.stored(store, SLUG, silent.execution_id).sources == {}
+    assert observe.stored(store, SLUG, local.execution_id) is None
+
+
+def test_hosting_is_off_without_an_api_port(tmp_path):
+    assert control_service.host(_environ(tmp_path), _store(), "hive-fixture") is None
+
+
+def test_hosting_needs_the_swarm_it_serves(tmp_path):
+    environ = {**_environ(tmp_path), control_service.PORT_ENV: "0"}
+
+    with pytest.raises(control_service.ControlError) as refused:
+        control_service.host(environ, _store(), "hive-fixture")
+
+    assert str(refused.value) == "the control API needs AGENTIHOOKS_CONTROL_SWARM"
+
+
+def test_hosting_refuses_a_port_that_is_not_a_number(tmp_path):
+    environ = {**_environ(tmp_path), control_service.PORT_ENV: "eighty", control_service.SWARM_ENV: SLUG}
+
+    with pytest.raises(control_service.ControlError) as refused:
+        control_service.host(environ, _store(), "hive-fixture")
+
+    assert str(refused.value) == "AGENTIHOOKS_CONTROL_API_PORT must be a port number"
+
+
+def test_hosting_refuses_a_controller_credential_the_hive_did_not_issue(tmp_path):
+    store = _store()
+    hive_auth.issue_controller(store.redis)
+    environ = {
+        **_environ(tmp_path),
+        control_service.PORT_ENV: "0",
+        control_service.SWARM_ENV: SLUG,
+        control_service.CREDENTIAL_ENV: "forged",
+    }
+
+    with pytest.raises(SwarmError, match="scoped controller grant"):
+        control_service.host(environ, store, "hive-fixture")
+
+    assert lease.current(store, SLUG) is None
+
+
+def _free_port():
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def test_the_controller_loop_hosts_registration_and_heartbeats(tmp_path, monkeypatch):
+    from scripts.swarm import controller as loop
+
+    store = _store()
+    port = _free_port()
+    environ = {
+        **_environ(tmp_path),
+        control_service.PORT_ENV: str(port),
+        control_service.SWARM_ENV: SLUG,
+        control_service.CREDENTIAL_ENV: hive_auth.issue_controller(store.redis),
+        "SWARM_HIVE_ID": "hive-fixture",
+    }
+    for name, value in environ.items():
+        monkeypatch.setenv(name, value)
+    hosted, seen = [], []
+    real_host = control_service.host
+    monkeypatch.setattr(control_service, "host", lambda *args: hosted.append(real_host(*args)) or hosted[0])
+    monkeypatch.setattr(loop, "connect", lambda: store)
+    monkeypatch.setattr("scripts.operator_env.fill", lambda env: None)
+
+    def tick(given):
+        service = hosted[0]
+        agent, token = _admitted(service, given)
+        seen.append((agent, _register_and_beat(f"http://127.0.0.1:{port}", service, agent, token)))
+        return {SLUG: ["ticked"]}
+
+    monkeypatch.setattr(loop, "run_once", tick)
+
+    assert loop.main(["run", "--once"]) == 0
+
+    agent, ((status, _), (beat_status, ack)) = seen[0]
+    assert (status, beat_status, ack["controller_epoch"]) == (200, 200, 1)
+    assert hosted[0].controller.owner == "hive-fixture"
+    assert observe.stored(store, SLUG, agent.execution_id).sources["heartbeat"]["value"] == "working"
+    assert lease.current(store, SLUG) is None
