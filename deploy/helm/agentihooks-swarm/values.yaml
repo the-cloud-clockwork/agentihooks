@@ -61,6 +61,15 @@ controller:
               - key: anton.io/capacity-type
                 operator: DoesNotExist
   tolerations: []
+  # Worker registration and heartbeat API, served by the controller process for one swarm.
+  api:
+    enabled: false
+    port: 8780
+    swarm: ""
+    signingKey:
+      keyId: ""
+      secretName: ""
+      secretKey: signing-key
   livenessProbe:
     initialDelaySeconds: 60
     periodSeconds: 10

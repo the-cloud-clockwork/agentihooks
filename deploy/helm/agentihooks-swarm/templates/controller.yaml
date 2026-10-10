@@ -1,3 +1,28 @@
+{{- $api := .Values.controller.api }}
+{{- if $api.enabled }}
+{{- if not $api.swarm }}
+{{- fail "controller.api.swarm must name the swarm the control API serves" }}
+{{- end }}
+{{- if not (and $api.signingKey.keyId $api.signingKey.secretName) }}
+{{- fail "controller.api.signingKey needs keyId and secretName: workers verify launch grants with that key" }}
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "swarm.fullname" . }}-controller
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "swarm.selector" (dict "root" . "component" "controller") | nindent 4 }}
+  ports:
+    - name: api
+      port: {{ $api.port }}
+      targetPort: api
+---
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -67,6 +92,11 @@ spec:
               && . "$AGENTIHOOKS_HOME/controller/credential.env"
               && export AGENTIHOOKS_CONTROLLER_CREDENTIAL
               && exec agentihooks controller run
+          {{- if $api.enabled }}
+          ports:
+            - name: api
+              containerPort: {{ $api.port }}
+          {{- end }}
           livenessProbe:
             exec:
               command:
@@ -81,6 +111,16 @@ spec:
             {{- include "swarm.env" . | nindent 12 }}
             - name: AGENTIHOOKS_HOME
               value: /run/agentihooks
+            {{- if $api.enabled }}
+            - name: AGENTIHOOKS_CONTROL_API_PORT
+              value: {{ $api.port | quote }}
+            - name: AGENTIHOOKS_CONTROL_SWARM
+              value: {{ $api.swarm | quote }}
+            - name: AGENTIHOOKS_LAUNCH_SIGNING_KEY_ID
+              value: {{ $api.signingKey.keyId | quote }}
+            - name: AGENTIHOOKS_LAUNCH_SIGNING_KEY_FILE
+              value: /run/secrets/launch-signing/{{ $api.signingKey.secretKey }}
+            {{- end }}
             {{- include "swarm.extraEnv" .Values.controller.env | nindent 12 }}
           {{- include "swarm.envFrom" . | nindent 10 }}
           resources:
@@ -88,7 +128,18 @@ spec:
           volumeMounts:
             - name: home
               mountPath: /run/agentihooks
+            {{- if $api.enabled }}
+            - name: launch-signing
+              mountPath: /run/secrets/launch-signing
+              readOnly: true
+            {{- end }}
       volumes:
         - name: home
           emptyDir:
             medium: Memory
+        {{- if $api.enabled }}
+        - name: launch-signing
+          secret:
+            secretName: {{ $api.signingKey.secretName }}
+            defaultMode: 0400
+        {{- end }}
