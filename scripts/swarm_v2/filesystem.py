@@ -112,6 +112,10 @@ def restore(base: Path, attempt: str, recorded: dict) -> Execution:
     return allocate(base, attempt, parse(recorded))
 
 
+def recorded(root: Path, record: dict) -> Execution:
+    return Execution(root, parse(record["layout"]) if "layout" in record else load())
+
+
 def _links(tree: Path, inside: Path) -> None:
     for path in [tree, *tree.rglob("*")]:
         if path.is_symlink():

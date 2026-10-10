@@ -30,8 +30,9 @@ def inprocess(monkeypatch):
 
     import scripts.install as package_install
 
-    def render(attempt: Path, target: str) -> None:
-        home = attempt / "homes" / target
+    def render(execution: filesystem.Execution, target: str) -> None:
+        attempt = execution.root
+        home = execution.path("home") / target
         state = home / ".agentihooks"
         paths = {
             "CLAUDE_HOME": home / ".claude",
@@ -264,7 +265,7 @@ def codex_home(attempt: Path, config: str = "", wrapper: str = "", command: str 
 
 def check(attempt: Path, target: str) -> None:
     roots = [attempt.resolve(), Path(sys.prefix).resolve(), *worker_home.SYSTEM_ROOTS]
-    worker_home._check_home(attempt, target, roots, (os.geteuid(), os.getegid()))
+    worker_home._check_home(attempt / "homes" / target, target, roots, (os.geteuid(), os.getegid()))
 
 
 def hook(command: str) -> dict:
@@ -474,10 +475,10 @@ def test_rendered_link_escaping_the_execution_root_fails_bootstrap(fixture, tmp_
     outside.mkdir()
     render = worker_home.render
 
-    def plant(attempt, target):
-        render(attempt, target)
+    def plant(execution, target):
+        render(execution, target)
         if target == "codex":
-            (attempt / "homes" / "codex" / "escape").symlink_to(outside)
+            (execution.path("home") / "codex" / "escape").symlink_to(outside)
 
     monkeypatch.setattr(worker_home, "render", plant)
     with pytest.raises(worker_home.BootstrapError) as error:
@@ -514,7 +515,7 @@ def test_render_runs_the_child_in_the_target_home_with_its_environment(tmp_path,
     fields = "{'cwd': os.getcwd(), 'home': os.environ['HOME'], 'python': os.environ['AGENTIHOOKS_PYTHON']}"
     probe = f"import json, os; print(json.dumps({fields}))"
     monkeypatch.setattr(worker_home, "child_command", lambda path, target: [sys.executable, "-c", probe])
-    REAL_RENDER(attempt, "codex")
+    REAL_RENDER(filesystem.Execution(attempt, filesystem.load()), "codex")
     home = str(attempt / "homes" / "codex")
     logged = json.loads((attempt / "run" / "render-codex.log").read_text())
     assert logged == {"cwd": home, "home": home, "python": "/opt/venv/bin/python"}
@@ -592,8 +593,8 @@ def test_interrupted_bootstrap_restarts_without_duplicate_entries(fixture, tmp_p
     worker_home.bootstrap(request(templates, clean))
     render = worker_home.render
 
-    def crash(attempt, target):
-        render(attempt, target)
+    def crash(execution, target):
+        render(execution, target)
         if target == "codex":
             raise KeyboardInterrupt
 
@@ -685,7 +686,8 @@ def test_request_document_and_record_hold_exact_fields(fixture):
         "gid": os.getegid(),
     }
     assert worker_home._document(req) == document
-    assert worker_home._record(req, "abc", {"fixture-claude": "d1"}, 1.23456) == {
+    layout = filesystem.load()
+    assert worker_home._record(req, "abc", {"fixture-claude": "d1"}, 1.23456, layout) == {
         "schema_version": 1,
         "package": "SV2-IMG-02",
         "attempt": "attempt-1",
@@ -697,6 +699,7 @@ def test_request_document_and_record_hold_exact_fields(fixture):
         "interpreter": sys.executable,
         "homes": {"claude": "homes/claude", "codex": "homes/codex"},
         "worker_profile_materialization_seconds": 1.235,
+        "layout": filesystem.mapping(layout),
     }
 
 
@@ -759,7 +762,7 @@ def test_render_log_holds_stderr_and_the_child_gets_its_attempt_and_target(tmp_p
         return [sys.executable, "-c", "import sys; print('out'); sys.stdout.flush(); print('err', file=sys.stderr)"]
 
     monkeypatch.setattr(worker_home, "child_command", command)
-    REAL_RENDER(attempt, "claude")
+    REAL_RENDER(filesystem.Execution(attempt, filesystem.load()), "claude")
     assert seen == [(attempt, "claude")]
     assert (attempt / "run" / "render-claude.log").read_text() == "out\nerr\n"
 
@@ -842,7 +845,7 @@ def test_owner_refusal_names_the_expected_uid_and_gid(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "lstat", lambda path: SimpleNamespace(st_uid=5, st_gid=7, st_mode=0o100644))
     roots = [tmp_path.resolve()]
     with pytest.raises(worker_home.BootstrapError) as error:
-        worker_home._check_home(tmp_path, "claude", roots, (5, 8))
+        worker_home._check_home(tmp_path / "homes" / "claude", "claude", roots, (5, 8))
     assert str(error.value) == "claude home holds a file not owned by 5:8"
 
 
