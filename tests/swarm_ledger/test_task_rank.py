@@ -82,7 +82,8 @@ def test_the_operator_ranks_a_task_from_the_page():
 @pytest.mark.parametrize(
     "bad",
     [
-        {"op": "task_rank", "id": "p", "item": "tasks/t1", "rank": "high", "by": MASTER},
+        {"op": "task_rank", "id": "p", "item": "tasks/t1", "rank": "high", "by": MASTER, "extra": 1},
+        {"op": "task_rank", "id": "p", "item": "tasks/t1", "rank": "high", "by": ""},
         {"op": "task_rank", "id": "p", "item": "phases/p1", "rank": "high"},
         {"op": "task_rank", "id": "p", "item": "tasks/t1"},
     ],
@@ -90,6 +91,44 @@ def test_the_operator_ranks_a_task_from_the_page():
 def test_the_page_rank_op_is_the_operators_and_names_a_task(bad):
     with pytest.raises(ValueError):
         core.check_op(bad)
+
+
+@pytest.mark.parametrize("by", [MASTER, "dispatcher", "planner@abcdef-0003", "operator", "swarm"])
+def test_task_rank_takes_an_allowed_author_and_records_it(by):
+    op = {"op": "task_rank", "id": "auth-1", "item": "tasks/t1", "rank": "high", "by": by}
+    core.check_op(op)
+    state, rejected = core.sync(SLUG, ops=[op])
+    assert (rejected, rank_of(state)) == ([], "high")
+    assert (state["_meta"]["events"][-1]["by"], state["_meta"]["stamps"]["tasks/t1/rank"]["by"]) == (by, by)
+
+
+@pytest.mark.parametrize("by", [ENGINEER, "ci@abcdef-0004", "session-0a1b2c3d", "someone"])
+def test_task_rank_refuses_an_author_outside_the_allowlist(by):
+    op = {"op": "task_rank", "id": "auth-2", "item": "tasks/t1", "rank": "urgent", "by": by}
+    core.check_op(op)
+    state, rejected = core.sync(SLUG, ops=[op])
+    assert rejected == ["auth-2"] and rank_of(state) is None
+    assert state["_meta"]["warnings"][0] == f"{by} cannot set a task rank: {ledger_tasks.PROPOSE}"
+
+
+@pytest.mark.parametrize("by", ["session-0a1b2c3d", "someone"])
+def test_a_task_update_rank_outside_the_allowlist_is_refused(by):
+    state, rejected = update(by, "high")
+    assert rejected == ["rank-1"] and rank_of(state) is None
+    assert state["_meta"]["warnings"][0] == f"{by} cannot set a task rank: {ledger_tasks.PROPOSE}"
+
+
+@pytest.mark.parametrize("by", ["dispatcher", "planner@abcdef-0003", "swarm"])
+def test_a_task_update_rank_by_an_allowed_author_applies(by):
+    state, rejected = update(by, "high")
+    assert (rejected, rank_of(state)) == ([], "high")
+
+
+def test_a_difficulty_change_keeps_the_worker_lane_refusal_only():
+    assert ledger_tasks.rank_refusal(ENGINEER, "difficulty") == (
+        f"{ENGINEER} works in the eng lane and cannot set a task difficulty: {ledger_tasks.PROPOSE}"
+    )
+    assert ledger_tasks.rank_refusal("someone", "difficulty") == ""
 
 
 def test_ranking_an_unknown_task_is_rejected():
