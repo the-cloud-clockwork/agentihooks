@@ -42,6 +42,7 @@ UPDATABLE = (
     "difficulty_confidence",
     "phase",
     "slice",
+    "follow_up",
 )
 BOOL_FIELDS = ("artifact", "follow_up")
 DIFFICULTIES = ("S", "M", "L")
@@ -508,6 +509,16 @@ def _move_plan(doc: dict, task: dict, fields: dict, phase: dict) -> None:
         fields.setdefault("slice", "")
 
 
+def _follow_up(op: dict, ctx) -> bool:
+    fields = op["fields"]
+    if fields.get("plan_slice") or fields.get("slice"):
+        task_id = op["item"].split("/")[1]
+        ctx.refused.append(f"task {task_id} is a follow up and names no slice: drop plan_slice or follow_up")
+        return False
+    fields.update(plan_slice="", plan_lines="", slice="")
+    return True
+
+
 def _set_slice(doc: dict, op: dict, ctx) -> bool:
     fields = op["fields"]
     supplied_slice = "plan_slice" in fields
@@ -518,6 +529,8 @@ def _set_slice(doc: dict, op: dict, ctx) -> bool:
     target = fields.get("phase", task.get("phase"))
     phase = next((p for p in doc.get("phases", []) if p["id"] == target), {})
     _move_plan(doc, task, fields, phase)
+    if fields.get("follow_up"):
+        return _follow_up(op, ctx)
     if not supplied_slice:
         return True
     from scripts.swarm_ledger import plan_ranges
