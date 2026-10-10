@@ -51,15 +51,7 @@ class Broadcast:
     expires_ms: int
 
     def content(self) -> tuple:
-        return (
-            self.brain_id,
-            self.project_id,
-            self.target_role,
-            self.channel,
-            self.severity,
-            self.policy,
-            self.message,
-        )
+        return _content(asdict(self))
 
 
 @dataclass(frozen=True)
@@ -88,6 +80,11 @@ def role_of(seat: str) -> str:
 def owner_of(author: str) -> str:
     """Any operator may revise an operator broadcast; an agent's broadcast belongs to its seat across generations."""
     return "operator" if author.startswith("operator:") else author.split("/", 1)[0]
+
+
+def _content(fields: dict) -> tuple:
+    names = ("brain_id", "project_id", "target_role", "channel", "severity", "policy", "message")
+    return tuple(fields[name] for name in names)
 
 
 def _name(value: object, empty: bool = True) -> str:
@@ -200,7 +197,10 @@ class FleetBroadcasts:
                 raise SwarmError("distribution_disabled")
             done = pipe.hget(operations, operation) if operation_id else None
             if done:
-                return None, decode(done)
+                replayed = decode(done)
+                if replayed.content() != _content(fields) or replayed.expires_ms - replayed.published_ms != ttl * 1000:
+                    raise SwarmError("invalid_request")
+                return None, replayed
             raw = pipe.hget(canonical, fields["broadcast_id"])
             stored = decode(raw) if raw else None
             if stored and (owner_of(stored.author) != owner_of(author) or stored.brain_id != fields["brain_id"]):
@@ -213,7 +213,8 @@ class FleetBroadcasts:
                 expires_ms=now + ttl * 1000,
                 **fields,
             )
-            if stored and stored.content() == built.content() and now < stored.expires_ms:
+            unchanged = stored and stored.expires_ms - stored.published_ms == ttl * 1000
+            if unchanged and stored.content() == built.content() and now < stored.expires_ms:
                 return None, stored
 
             def writes(pipe):
@@ -339,11 +340,11 @@ def _iso(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000, timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def local_entry(delivery: Delivery) -> dict:
-    """The local broadcast file shape of a claimed fleet revision, tagged so the file reads as a cache of the fleet."""
+def local_entry(delivery: Delivery, session_id: str) -> dict:
+    """The local broadcast file shape of a revision claimed for one session; the hook delivers it to that session only."""
     broadcast = delivery.broadcast
     entry = {
-        "id": f"{broadcast.fleet}:{broadcast.broadcast_id}:{broadcast.revision}",
+        "id": f"{broadcast.fleet}:{broadcast.broadcast_id}:{broadcast.revision}:{session_id}",
         "message": broadcast.message,
         "severity": broadcast.severity,
         "persistent": broadcast.policy == UNTIL_ACK,
@@ -352,7 +353,15 @@ def local_entry(delivery: Delivery) -> dict:
         "ttl_seconds": (broadcast.expires_ms - broadcast.published_ms) // 1000,
         "expires_at": _iso(broadcast.expires_ms),
         "delivered_to": [],
-        "fleet": {"swarm": broadcast.fleet, "broadcast_id": broadcast.broadcast_id, "revision": broadcast.revision},
+        "fleet": {
+            "swarm": broadcast.fleet,
+            "broadcast_id": broadcast.broadcast_id,
+            "revision": broadcast.revision,
+            "session": session_id,
+            "brain_id": broadcast.brain_id,
+            "project_id": broadcast.project_id,
+            "target_role": broadcast.target_role,
+        },
     }
     if broadcast.channel:
         entry["channel"] = broadcast.channel
@@ -360,14 +369,20 @@ def local_entry(delivery: Delivery) -> dict:
 
 
 def sync_local(
-    fleet: FleetBroadcasts, token: str, channels: list[str], environ: Mapping[str, str], claim_id: str = ""
+    fleet: FleetBroadcasts,
+    token: str,
+    session_id: str,
+    channels: list[str],
+    environ: Mapping[str, str],
+    claim_id: str = "",
 ) -> int:
     """Claim this seat's fleet broadcasts into the local broadcast file; nothing while the fleet path is off."""
     if environ.get(FLAG) != "1":
         return 0
     from hooks.context.broadcast import cache_fleet_broadcasts
 
-    return cache_fleet_broadcasts([local_entry(delivery) for delivery in fleet.claim(token, channels, claim_id)])
+    found = fleet.claim(token, channels, claim_id)
+    return cache_fleet_broadcasts([local_entry(delivery, session_id) for delivery in found])
 
 
 def acknowledge_local(fleet: FleetBroadcasts, token: str, entry: dict) -> bool:

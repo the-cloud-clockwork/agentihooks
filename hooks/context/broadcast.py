@@ -521,16 +521,16 @@ def reconcile_channel_broadcasts(channel: str, desired: list[dict]) -> dict:
 
 
 def cache_fleet_broadcasts(entries: list[dict]) -> int:
-    """Cache claimed fleet revisions in the local file; only the newest revision of each fleet broadcast stays, and
-    entries without a ``fleet`` tag are left alone because the file is authoritative only for local broadcasts."""
+    """Cache fleet revisions claimed for one session each, keeping only the newest revision per session; entries
+    without a ``fleet`` tag are local broadcasts and stay untouched. Returns how many new entries the file kept."""
 
-    def name(m: dict) -> tuple[str, str]:
-        return m["fleet"]["swarm"], m["fleet"]["broadcast_id"]
+    def name(m: dict) -> tuple[str, str, str]:
+        return m["fleet"]["swarm"], m["fleet"]["broadcast_id"], m["fleet"]["session"]
 
     with _file_lock(_broadcast_path()):
         msgs = _read_broadcasts()
         held = {m["id"] for m in msgs}
-        newest: dict[tuple[str, str], int] = {}
+        newest: dict[tuple[str, str, str], int] = {}
         for m in [*msgs, *entries]:
             if "fleet" in m:
                 newest[name(m)] = max(newest.get(name(m), 0), m["fleet"]["revision"])
@@ -540,9 +540,12 @@ def cache_fleet_broadcasts(entries: list[dict]) -> int:
             for entry in entries
             if entry["id"] not in held and entry["fleet"]["revision"] == newest[name(entry)]
         ]
-        if added or len(kept) != len(msgs):
-            _save_broadcasts((kept + added)[-BROADCAST_MAX_MESSAGES:])
-        return len(added)
+        if not added and len(kept) == len(msgs):
+            return 0
+        saved = (kept + added)[-BROADCAST_MAX_MESSAGES:]
+        _save_broadcasts(saved)
+        fresh = {m["id"] for m in added}
+        return sum(1 for m in saved if m["id"] in fresh)
 
 
 def find_broadcast_by_content_hash(content_hash: str, channel: str | None = None) -> dict | None:
@@ -591,6 +594,7 @@ def clear_broadcasts(message_id: str | None = None, channel: str | None = None) 
 
 
 def _admitted(session_id: str, msgs: list[dict]) -> list[dict]:
+    msgs = [m for m in msgs if "fleet" not in m or m["fleet"]["session"] == session_id]
     return quarantine.keep(
         session_id,
         "broadcast",

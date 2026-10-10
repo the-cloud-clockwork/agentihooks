@@ -1,5 +1,6 @@
 import json
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -165,14 +166,18 @@ def test_claimed_fleet_revisions_land_in_the_local_cache_in_the_hook_format(worl
     monkeypatch.setattr(hb, "_broadcast_path", lambda: path)
     hb._save_broadcasts([{"id": "local-1", "message": "Local note", "severity": "info"}])
     local = world.token(LOCAL)
-    world.announce(WARNING)
+    world.announce({**WARNING, "project_id": PROJECT, "target_role": "eng"})
     world.fleet.publish(local, dict(NOTE))
-    entries = [broadcasts.local_entry(d) for d in world.fleet.claim(local, CHANNELS)]
+    entries = [broadcasts.local_entry(d, "s-local") for d in world.fleet.claim(local, CHANNELS)]
     assert hb.cache_fleet_broadcasts(entries) == 2
     cached = hb.list_broadcasts()
-    assert [m["id"] for m in cached] == ["local-1", "fixture:agent-note:1", "fixture:fleet-warning:1"]
+    assert [m["id"] for m in cached] == [
+        "local-1",
+        "fixture:agent-note:1:s-local",
+        "fixture:fleet-warning:1:s-local",
+    ]
     warning = {
-        "id": "fixture:fleet-warning:1",
+        "id": "fixture:fleet-warning:1:s-local",
         "message": WARNING["message"],
         "severity": "critical",
         "persistent": True,
@@ -181,10 +186,19 @@ def test_claimed_fleet_revisions_land_in_the_local_cache_in_the_hook_format(worl
         "ttl_seconds": 600,
         "expires_at": "1970-01-01T00:10:01Z",
         "delivered_to": [],
-        "fleet": {"swarm": SLUG, "broadcast_id": "fleet-warning", "revision": 1},
+        "fleet": {
+            "swarm": SLUG,
+            "broadcast_id": "fleet-warning",
+            "revision": 1,
+            "session": "s-local",
+            "brain_id": "swarm",
+            "project_id": PROJECT,
+            "target_role": "eng",
+        },
         "channel": "amygdala",
     }
     assert cached[2] == {**warning, "content_hash": hb._msg_hash(warning)}
+    assert type(cached[2]["ttl_seconds"]) is int
     assert cached[1]["persistent"] is False and cached[1]["channel"] == "brain"
     assert hb._message_matches_channel(cached[2], ["amygdala"])
     assert not hb._message_matches_channel(cached[2], ["brain"])
@@ -197,17 +211,26 @@ def test_the_local_cache_keeps_only_the_newest_fleet_revision_and_leaves_local_e
     hb._save_broadcasts([local_note])
     local = world.token(LOCAL)
     world.announce({**WARNING, "channel": ""})
-    first = [broadcasts.local_entry(d) for d in world.fleet.claim(local, CHANNELS)]
+    first = [broadcasts.local_entry(d, "s-local") for d in world.fleet.claim(local, CHANNELS)]
     assert "channel" not in first[0]
     world.announce({**WARNING, "channel": "", "message": "Merges into dev are open again."})
-    second = [broadcasts.local_entry(d) for d in world.fleet.claim(local, CHANNELS)]
+    second = [broadcasts.local_entry(d, "s-local") for d in world.fleet.claim(local, CHANNELS)]
+    other_session = [broadcasts.local_entry(d, "s-other") for d in world.fleet.claim(local, CHANNELS)]
     assert hb.cache_fleet_broadcasts(second) == 1
     assert hb.cache_fleet_broadcasts(first) == 0
-    assert [m["id"] for m in hb.list_broadcasts()] == ["local-1", "fixture:fleet-warning:2"]
+    assert [m["id"] for m in hb.list_broadcasts()] == ["local-1", "fixture:fleet-warning:2:s-local"]
     hb._save_broadcasts([local_note])
     assert hb.cache_fleet_broadcasts(first) == 1
     assert hb.cache_fleet_broadcasts(second + first) == 1
-    assert [m["id"] for m in hb.list_broadcasts()] == ["local-1", "fixture:fleet-warning:2"]
+    assert hb.cache_fleet_broadcasts(other_session) == 1
+    assert [m["id"] for m in hb.list_broadcasts()] == [
+        "local-1",
+        "fixture:fleet-warning:2:s-local",
+        "fixture:fleet-warning:2:s-other",
+    ]
+    hb._save_broadcasts([local_note, *first, *second])
+    assert hb.cache_fleet_broadcasts(second) == 0
+    assert [m["id"] for m in hb.list_broadcasts()] == ["local-1", "fixture:fleet-warning:2:s-local"]
     saves = []
     monkeypatch.setattr(hb, "_save_broadcasts", saves.append)
     assert hb.cache_fleet_broadcasts(second) == 0
@@ -222,10 +245,14 @@ def test_the_local_cache_keeps_the_newest_entries_within_the_message_cap(world, 
     hb._save_broadcasts([{"id": "local-1", "message": "Local note", "severity": "info"}])
     local = world.token(LOCAL)
     world.announce(WARNING)
+    world.announce(FOLLOWUP)
     world.fleet.publish(local, dict(NOTE))
-    entries = [broadcasts.local_entry(d) for d in world.fleet.claim(local, CHANNELS)]
+    entries = [broadcasts.local_entry(d, "s-local") for d in world.fleet.claim(local, CHANNELS)]
     assert hb.cache_fleet_broadcasts(entries) == 2
-    assert [m["id"] for m in hb.list_broadcasts()] == ["fixture:agent-note:1", "fixture:fleet-warning:1"]
+    assert [m["id"] for m in hb.list_broadcasts()] == [
+        "fixture:fleet-followup:1:s-local",
+        "fixture:fleet-warning:1:s-local",
+    ]
 
 
 def test_b_a_personal_brain_message_or_another_fleets_warning_never_matches_on_the_channel_name(world):
@@ -378,7 +405,11 @@ def test_c_a_reconnecting_worker_replays_unexpired_undelivered_messages_without_
     assert world.fleet.delivery(LOCAL, "fleet-warning")["generation"] == 1
     revised = world.announce({**WARNING, "message": "Merges into dev are open again."}, "op-1")
     assert revised.revision == 2
-    assert world.announce({**WARNING, "message": "Something else entirely."}, "op-1") == revised
+    assert world.announce({**WARNING, "message": "Merges into dev are open again."}, "op-1") == revised
+    assert refusal(world.announce, {**WARNING, "message": "Something else entirely."}, "op-1") == "invalid_request"
+    assert refusal(world.announce, {**WARNING, "message": revised.message, "ttl_seconds": 60}, "op-1") == (
+        "invalid_request"
+    )
     assert world.announce({**WARNING, "message": "Merges into dev are open again."}) == revised
     assert [b.revision for b in world.fleet.history() if b.broadcast_id == "fleet-warning"] == [1, 2]
     assert world.fleet.broadcast_delivery_lag_seconds(LOCAL, "fleet-warning") is None
@@ -522,8 +553,12 @@ def test_b_an_operation_id_replays_only_for_its_own_publisher(world):
     announced = world.announce(WARNING, "op-1")
     mine = world.fleet.publish(local, dict(NOTE), "op-1")
     assert (mine.broadcast_id, mine.message) == ("agent-note", NOTE["message"])
-    assert world.fleet.publish(local, {**NOTE, "message": "Retried with other text."}, "op-1") == mine
-    assert world.announce(FOLLOWUP, "op-1") == announced
+    assert world.fleet.publish(local, {**NOTE, "broadcast_id": ""}, "op-1") == mine
+    assert refusal(world.fleet.publish, local, {**NOTE, "message": "Retried with other text."}, "op-1") == (
+        "invalid_request"
+    )
+    assert world.announce(WARNING, "op-1") == announced
+    assert refusal(world.announce, FOLLOWUP, "op-1") == "invalid_request"
     assert sorted(world.store.redis.hkeys(world.fleet.key("broadcast-operations"))) == [
         f"{LOCAL}:op-1",
         "operator:op-1",
@@ -570,15 +605,67 @@ def test_the_local_bridge_claims_into_the_cache_only_while_the_fleet_path_is_on(
     local = world.token(LOCAL)
     world.announce(WARNING)
     before = snapshot(world)
-    assert broadcasts.sync_local(world.fleet, local, CHANNELS, {}) == 0
-    assert broadcasts.sync_local(world.fleet, local, CHANNELS, {broadcasts.FLAG: "0"}) == 0
+    assert broadcasts.sync_local(world.fleet, local, "s-local", CHANNELS, {}) == 0
+    assert broadcasts.sync_local(world.fleet, local, "s-local", CHANNELS, {broadcasts.FLAG: "0"}) == 0
     assert snapshot(world) == before and hb.list_broadcasts() == []
-    assert broadcasts.sync_local(world.fleet, local, CHANNELS, {broadcasts.FLAG: "1"}, "claim-1") == 1
+    assert broadcasts.sync_local(world.fleet, local, "s-local", CHANNELS, {broadcasts.FLAG: "1"}, "claim-1") == 1
     assert json.loads(world.store.redis.hget(world.fleet.key("broadcast-claims"), LOCAL))["claim_id"] == "claim-1"
     cached = hb.list_broadcasts()
-    assert [m["id"] for m in cached] == ["fixture:fleet-warning:1"]
+    assert [m["id"] for m in cached] == ["fixture:fleet-warning:1:s-local"]
     assert broadcasts.acknowledge_local(world.fleet, local, cached[0]) is True
     assert broadcasts.acknowledge_local(world.fleet, local, cached[0]) is False
     for entry in ({"id": "local-1"}, {**cached[0], "fleet": {**cached[0]["fleet"], "swarm": "other"}}):
         assert refusal(broadcasts.acknowledge_local, world.fleet, local, entry) == "forbidden_scope"
-    assert broadcasts.sync_local(world.fleet, local, CHANNELS, {broadcasts.FLAG: "1"}) == 0
+    assert broadcasts.sync_local(world.fleet, local, "s-local", CHANNELS, {broadcasts.FLAG: "1"}) == 0
+
+
+class Epoch(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(1970, 1, 1, 0, 1, 1, tzinfo=timezone.utc)
+
+
+def test_a_cached_fleet_revision_reaches_only_the_session_it_was_claimed_for(world, tmp_path, monkeypatch):
+    monkeypatch.setattr(hb, "_broadcast_path", lambda: tmp_path / "broadcast.json")
+    monkeypatch.setattr(hb, "_sessions_path", lambda: tmp_path / "active-sessions.json")
+    monkeypatch.setattr(hb, "_get_session_channels", lambda session_id: list(CHANNELS))
+    monkeypatch.setattr(hb, "datetime", Epoch)
+    monkeypatch.setattr(hb.quarantine, "mode", lambda: "off")
+    local, remote = world.token(LOCAL), world.token(REMOTE)
+    world.announce(WARNING)
+    world.announce({**FOLLOWUP, "target_role": "ci"})
+    world.announce(PERSONAL)
+    remote_fleet = world.broadcasts(RedisStore(world.store.redis))
+    flag = {broadcasts.FLAG: "1"}
+    assert broadcasts.sync_local(world.fleet, local, "s-local", CHANNELS, flag) == 1
+    assert broadcasts.sync_local(remote_fleet, remote, "s-remote", CHANNELS, flag) == 1
+    hb._save_broadcasts([*hb.list_broadcasts(), {"id": "local-1", "message": "Local note", "severity": "info"}])
+    assert [m["id"] for m in hb.get_pending_broadcasts("s-local")] == ["fixture:fleet-warning:1:s-local", "local-1"]
+    assert [m["id"] for m in hb.get_critical_broadcasts("s-remote")] == ["fixture:fleet-warning:1:s-remote"]
+    assert [m["id"] for m in hb.get_unseen_broadcasts("s-personal")] == ["local-1"]
+    assert hb.get_critical_broadcasts("s-personal") == []
+
+
+def test_draft_constants_and_name_rules_hold_their_published_values(world):
+    assert (broadcasts.MAX_MESSAGE, broadcasts.MAX_TTL_SECONDS, broadcasts.WRITE_ATTEMPTS) == (8192, 86400, 5)
+    assert broadcasts.POLICIES == {
+        "nuclear": "until_ack",
+        "critical": "until_ack",
+        "alert": "until_ack",
+        "warning": "until_ack",
+        "info": "once",
+        "resolved": "once",
+    }
+    assert broadcasts.OPERATOR_ONLY == {"nuclear", "critical"}
+    assert broadcasts.role_of("swarm-buildout-ci-12@x") == "swarm-buildout-ci"
+    assert world.announce({**WARNING, "broadcast_id": "a._-" + "b" * 60}).broadcast_id == "a._-" + "b" * 60
+    assert refusal(world.announce, {**WARNING, "broadcast_id": "a" * 65}) == "invalid_request"
+    assert refusal(world.announce, {**WARNING, "broadcast_id": "-a"}) == "invalid_request"
+    assert world.announce({**WARNING, "broadcast_id": "trimmed", "message": "Freeze. \n"}).message == "Freeze."
+
+
+def test_a_canonical_record_from_another_fleet_is_never_delivered(world):
+    local = world.token(LOCAL)
+    foreign = replace(world.announce(WARNING), fleet="other", broadcast_id="planted")
+    world.store.redis.hset(world.fleet.key("broadcasts"), "planted", broadcasts.encode(foreign))
+    assert ids(world.fleet.claim(local, CHANNELS)) == ["fleet-warning"]
