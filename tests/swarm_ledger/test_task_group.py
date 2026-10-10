@@ -9,6 +9,8 @@ from tests.swarm_ledger import legacy_page
 SLUG = "taskgroup-2026-01-01"
 MASTER = "master@abcdef-0001"
 ENGINEER = "engineer@abcdef-0002"
+PLANNER = "planner@abcdef-0003"
+DISPATCHER = "dispatcher@abcdef-0005"
 
 
 def task(task_id, **fields):
@@ -150,10 +152,11 @@ def test_tasks_that_qualify_have_no_refusal():
     assert ledger_groups.refusal([task("a", difficulty="M")], {}) == ""
 
 
-def test_a_lane_agent_cannot_group_tasks():
-    state, rejected = group("t1", ["t2"], by=ENGINEER)
-    assert rejected == ["group-1"]
-    assert state["_meta"]["warnings"][-1].endswith(f"{ENGINEER} works in the eng lane and cannot set a task group")
+@pytest.mark.parametrize(("by", "lane"), [(ENGINEER, "eng"), (PLANNER, "plan")])
+def test_a_lane_agent_cannot_group_tasks(by, lane):
+    state, rejected = group("t1", ["t2"], by=by)
+    assert rejected == ["group-1"] and "merged_into" not in rows(state)["t2"]
+    assert state["_meta"]["warnings"][-1] == f"{by} works in the {lane} lane and cannot set a task group"
 
 
 def test_a_member_that_depends_on_the_lead_is_refused_by_the_ledger():
@@ -165,8 +168,9 @@ def test_a_member_that_depends_on_the_lead_is_refused_by_the_ledger():
     assert state["_meta"]["warnings"][-1].endswith("tasks/t1 cannot lead this group: task t8 depends on task t1")
 
 
-def test_the_master_groups_tasks():
-    state, rejected = group("t1", ["t2"], by=MASTER)
+@pytest.mark.parametrize("by", [MASTER, DISPATCHER, "dispatcher"])
+def test_the_master_and_the_dispatcher_group_tasks(by):
+    state, rejected = group("t1", ["t2"], by=by)
     assert rejected == [] and rows(state)["t2"]["merged_into"] == "t1"
 
 
@@ -284,11 +288,12 @@ def test_ungroup_of_a_task_without_a_group_changes_nothing(with_ungroup):
     assert rejected == ["ungroup-2"]
 
 
-def test_a_lane_agent_cannot_ungroup_tasks(with_ungroup):
+@pytest.mark.parametrize(("by", "lane"), [(ENGINEER, "eng"), (PLANNER, "plan")])
+def test_a_lane_agent_cannot_ungroup_tasks(with_ungroup, by, lane):
     group("t1", ["t2"])
-    state, rejected = ungroup("t1", by=ENGINEER)
+    state, rejected = ungroup("t1", by=by)
     assert rejected == ["ungroup-1"]
-    assert state["_meta"]["warnings"][-1] == f"{ENGINEER} works in the eng lane and cannot release a task group"
+    assert state["_meta"]["warnings"][-1] == f"{by} works in the {lane} lane and cannot release a task group"
     assert rows(state)["t2"]["merged_into"] == "t1"
 
 
