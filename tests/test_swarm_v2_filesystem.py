@@ -255,6 +255,26 @@ def test_an_archive_that_resolves_outside_its_root_is_refused_before_any_write(t
     assert failures() == count + 1
 
 
+def test_a_link_the_extractor_leaves_outside_the_root_is_refused_and_staging_removed(
+    tmp_path, world, layout, monkeypatch
+):
+    bases, outside = world
+    execution = filesystem.allocate(bases[0], ATTEMPT, layout)
+    bundle = archive(tmp_path, [{"name": "a.txt", "type": "file"}])
+
+    def leak(self, path, filter):
+        (Path(path) / "leak").symlink_to(outside)
+
+    monkeypatch.setattr(tarfile.TarFile, "extractall", leak)
+    before, count = snapshot(execution.root), failures()
+    with pytest.raises(filesystem.LayoutError) as error:
+        filesystem.extract(execution, bundle, execution.path("checkout") / "task")
+    assert str(error.value).startswith("path resolves outside its execution root: ")
+    assert str(error.value).endswith("/leak")
+    assert snapshot(execution.root) == before
+    assert failures() == count + 1
+
+
 def test_extraction_outside_the_root_or_over_existing_files_is_refused(tmp_path, world, layout):
     bases, outside = world
     execution = filesystem.allocate(bases[0], ATTEMPT, layout)
