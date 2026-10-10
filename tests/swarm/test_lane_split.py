@@ -217,11 +217,13 @@ def test_auto_scaling_moves_the_stored_shift_against_the_last_ceilings(store, ho
 def test_two_auto_moves_before_the_next_autoscale_run_both_count(store, home):
     store.update(SLUG, scaling="auto")
     stored = {"plan": 1, "ci": 1, "eng": 4}
-    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps({"other": 7, "autoscale": {"ceilings": stored}}))
+    store.redis.set(
+        store.key(SLUG, "quota-capacity"), json.dumps({"other": 7, "autoscale": {"ceilings": stored, "reason": "r"}})
+    )
     ticks(store, "ci", 6)
     assert store.config(SLUG).lane_shift == 2
     saved = json.loads(store.redis.get(store.key(SLUG, "quota-capacity")))
-    assert saved == {"other": 7, "autoscale": {"ceilings": {"plan": 1, "ci": 3, "eng": 2}, "shift": 2}}
+    assert saved == {"other": 7, "autoscale": {"ceilings": {"plan": 1, "ci": 3, "eng": 2}, "reason": "r", "shift": 2}}
 
 
 def test_auto_scaling_moves_from_the_shift_calculate_achieved(store, home):

@@ -55,17 +55,21 @@ def _capacity(config, store, slug: str) -> tuple[dict, int]:
     return {"eng": config.max_eng, "ci": config.max_ci}, config.lane_shift
 
 
-def _apply(slug: str, config, store, caps: dict, shift: int) -> None:
-    if config.scaling != AUTO_SCALING:
-        store.update(slug, max_eng=caps["eng"], max_ci=caps["ci"])
-        return
-    store.update(slug, lane_shift=shift)
+def _write_record(slug: str, store, caps: dict, shift: int) -> None:
     key = store.key(slug, "quota-capacity")
     saved = json.loads(store.redis.get(key) or "{}")
     stored = saved.get("autoscale") or {}
     if stored.get("ceilings"):
         saved["autoscale"] = {**stored, "ceilings": {**stored["ceilings"], **caps}, "shift": shift}
         store.redis.set(key, json.dumps(saved))
+
+
+def _apply(slug: str, config, store, caps: dict, shift: int) -> None:
+    if config.scaling != AUTO_SCALING:
+        store.update(slug, max_eng=caps["eng"], max_ci=caps["ci"])
+        return
+    store.update(slug, lane_shift=shift)
+    _write_record(slug, store, caps, shift)
 
 
 def _record(slug: str, named: str, caps: dict, move: tuple, lanes: Lanes, now_ms: int) -> str:
