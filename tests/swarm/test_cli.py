@@ -2483,7 +2483,14 @@ def test_set_stores_the_swarm_api_address_and_clears_it(env, capsys):
 
 
 @pytest.mark.parametrize(
-    "value", ["ftp://swarm.example.test", "https://", "swarm.example.test", "https://operator@swarm.example.test"]
+    "value",
+    [
+        "ftp://swarm.example.test",
+        "https://",
+        "swarm.example.test",
+        "https://operator@swarm.example.test",
+        "https://[::1",
+    ],
 )
 def test_set_refuses_an_api_address_that_is_not_a_plain_web_address(env, capsys, value):
     store, _, _ = env

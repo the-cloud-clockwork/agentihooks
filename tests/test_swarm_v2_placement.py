@@ -19,6 +19,8 @@ from scripts.swarm_v2.runtime.base import (
 from scripts.swarm_v2.runtime.operations import Operation, OperationConflict, OperationRequest, Phase
 from scripts.swarm_v2.runtime.routed import routed
 
+pytestmark = pytest.mark.unit
+
 CONFIG = SimpleNamespace(slug="sw")
 
 
@@ -121,9 +123,7 @@ def test_the_kubernetes_runtime_spawns_one_journaled_create_for_the_admitted_exe
     outcome = runtime.spawn(admitted())
     payload = {"task_id": "t1", "harness": "codex", "profile": "general", "execution_id": "exe-1", "generation": 2}
     assert controller.requests == [OperationRequest("exe-1", 2, "spawn", payload, "create")]
-    assert outcome == Outcome(
-        "spawn", Status.OK, BACKEND, Placed("", "codex", placement=BACKEND, profile="general"), "op-1"
-    )
+    assert outcome == Outcome("spawn", Status.OK, BACKEND, Placed("", "codex", placement=BACKEND, profile="general"))
     assert runtime.backend == BACKEND
     assert runtime.capabilities == frozenset({Capability.SPAWN})
 

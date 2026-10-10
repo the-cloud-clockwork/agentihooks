@@ -78,7 +78,7 @@ def routed(
     if kubernetes is not None and launch is None:
         raise ValueError(NO_LAUNCH)
     herdr = HerdrRuntime() if herdr is None else herdr
-    runtimes = [LocalHerdrRuntime(herdr), *([kubernetes] if kubernetes else [])]
-    placement = Placement(kubernetes.backend) if kubernetes else None
+    runtimes = [LocalHerdrRuntime(herdr)] + ([kubernetes] if kubernetes is not None else [])
+    placement = Placement(kubernetes.backend) if kubernetes is not None else None
     router = RuntimeRouter.from_environ(runtimes, os.environ if environ is None else environ, placement)
     return RoutedRuntime(herdr, router, launch)

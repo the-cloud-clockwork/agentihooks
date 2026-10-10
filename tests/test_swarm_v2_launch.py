@@ -28,6 +28,7 @@ TTL = 30000
 PROJECT = "github.com/the-cloud-clockwork/agentihooks"
 FIRST, SECOND = "eng-1@fixture", "eng-2@fixture"
 API = "http://swarm-api.agentihooks-swarm.svc:8780"
+OTHER_API = "https://swarm.example.test:8443"
 MACHINE = Scope(BACKEND, "pod-0000000000000000000000000000c003", "boot-worker/pid:[4026531836]")
 
 
@@ -509,9 +510,6 @@ def test_a_launch_refused_on_a_full_account_hands_no_grant(world):
     assert refused.outcome.detail == "account_full"
     assert refused.handed is False
     assert len(world.homes.calls) == 1
-
-
-OTHER_API = "https://swarm.example.test:8443"
 
 
 def test_a_refused_launch_names_the_backend_its_spawn_was_placed_on(monkeypatch):

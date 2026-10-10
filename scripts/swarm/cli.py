@@ -638,8 +638,12 @@ def scaling_value(key, value):
 
 
 def api_address(value):
-    parts = urlsplit(value)
-    if value and (parts.scheme not in ("http", "https") or not parts.hostname or "@" in parts.netloc):
+    try:
+        parts = urlsplit(value)
+        usable = parts.scheme in ("http", "https") and bool(parts.hostname) and "@" not in parts.netloc
+    except ValueError:
+        usable = False
+    if value and not usable:
         raise SwarmError("api-url takes an http or https address with a host and no credentials")
     return value
 
@@ -708,6 +712,7 @@ def cmd_set(store, args):
                 "load_high": config.load_high,
                 "load_low": config.load_low,
                 "memory_per_agent_mb": config.memory_per_agent_mb,
+                "api_url": config.api_url,
                 "master_affinity": {"desired": affinity.desired(config) or "auto", "order": master},
             }
         )

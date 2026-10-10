@@ -33,7 +33,7 @@ class KubernetesRuntime:
             detail = f"spawn operation {operation.operation_id} is {operation.phase.value}"
             return Outcome(SPAWN, status, BACKEND, detail=detail)
         placed = Placed("", payload["harness"], placement=BACKEND, profile=payload["profile"])
-        return Outcome(SPAWN, Status.OK, BACKEND, placed, operation.operation_id)
+        return Outcome(SPAWN, Status.OK, BACKEND, placed)
 
     def observe(self, agent: AgentRecord) -> Outcome:
         return self._unsupported("observe")
