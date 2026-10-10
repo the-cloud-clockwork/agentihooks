@@ -177,6 +177,7 @@ def apply(doc: dict, op: dict, ctx) -> bool:
     after = {**(phase or {"id": phase_id, "description": "", "done": False, "comments": []}), **fields}
     try:
         validate([after if p["id"] == phase_id else p for p in phases] + ([after] if phase is None else []))
+        ledger_plans.check_move(phase or {}, fields)
         if "plan_ref" in fields:
             from scripts.swarm_ledger import plan_ranges
 
