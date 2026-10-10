@@ -818,7 +818,7 @@ def test_a_refused_publish_closes_its_issue_and_leaves_no_artifact(plan_ledger, 
     Refusing(monkeypatch)
     with pytest.raises(SystemExit) as raised:
         published(plan_ledger, tmp_path, monkeypatch, issues)
-    assert raised.value.code == "phase refused"
+    assert raised.value.code.startswith("phase refused; ")
     assert issues.states() == ["CLOSED"]
     assert issues.calls[-2:] == [
         ["gh", "issue", "comment", PLAN, "--body", ledger_publish.REFUSED_NOTE],
