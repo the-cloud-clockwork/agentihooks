@@ -103,7 +103,7 @@ def _positive(world):
         "task": {name: task.get(name) for name in ("description", "state", "pr_url", "claimed_by")}
         | {"claimed_by": task["claimed_by"] == agent.name},
         "comments": [entry["text"] for entry in task["comments"]],
-        "ledger_ledger_revision_conflicts_total": ledger_revision_conflicts_total(world.store, SLUG),
+        "ledger_revision_conflicts_total": ledger_revision_conflicts_total(world.store, SLUG),
     }
 
 
@@ -124,7 +124,7 @@ def _rejection(world):
         "operator_fields": fields,
         "global_caps": refusal(caps),
         "other_task_read": [*refusal(other), sorted(other[1])],
-        "ledger_ledger_revision_conflicts_total": ledger_revision_conflicts_total(world.store, SLUG),
+        "ledger_revision_conflicts_total": ledger_revision_conflicts_total(world.store, SLUG),
     }
 
 
@@ -157,7 +157,7 @@ def _recovery(world):
             "read": read_only[0],
             "write": [*refusal(blocked), blocked[1]["current_revision"] == current],
         },
-        "ledger_ledger_revision_conflicts_total": ledger_revision_conflicts_total(world.store, SLUG),
+        "ledger_revision_conflicts_total": ledger_revision_conflicts_total(world.store, SLUG),
     }
 
 
