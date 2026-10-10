@@ -66,6 +66,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "swarm.fullname" . }}-controller
+  {{- if and $workers.apiUrl $workers.podPolicyConfigMap }}
+  annotations:
+    configmap.reloader.stakater.com/reload: {{ $workers.podPolicyConfigMap | quote }}
+  {{- end }}
   labels:
     {{- include "swarm.labels" . | nindent 4 }}
     app.kubernetes.io/component: controller

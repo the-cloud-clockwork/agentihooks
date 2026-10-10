@@ -59,7 +59,8 @@ def main(values_paths: list[str], rendered: str) -> list[str]:
     values = values["controller"]
     workers = values["workers"]
     documents = [d for d in yaml.safe_load_all(rendered) if d]
-    pod = find(documents, "Deployment", "-controller")["spec"]["template"]
+    deployment = find(documents, "Deployment", "-controller")
+    pod = deployment["spec"]["template"]
     container = next(c for c in pod["spec"]["containers"] if c["name"] == "controller")
     env = {e["name"]: e.get("value") for e in container["env"]}
     problems = [
@@ -81,6 +82,9 @@ def main(values_paths: list[str], rendered: str) -> list[str]:
     rolled = bool(pod["metadata"].get("annotations", {}).get("checksum/pod-policy"))
     if rolled != ("podPolicy" in workers):
         problems.append("only an inline pod policy rolls the controller through its checksum")
+    reload = deployment["metadata"].get("annotations", {}).get("configmap.reloader.stakater.com/reload")
+    if reload != workers.get("podPolicyConfigMap"):
+        problems.append("a change to controller.workers.podPolicyConfigMap would not reload the controller")
     return problems
 
 
