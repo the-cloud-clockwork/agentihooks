@@ -3,7 +3,9 @@ import re
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 
-from redis.exceptions import WatchError
+from redis import Redis
+from redis.client import Pipeline
+from redis.exceptions import RedisError, WatchError
 
 from scripts.swarm import lease
 from scripts.swarm.store import RedisStore, SwarmError
@@ -24,7 +26,11 @@ STATUS = {
     "revision_conflict": 409,
     "dependency_unavailable": 503,
 }
-TASK_REFUSALS = {"stale_generation": "stale_generation", "claim_held": "stale_generation"}
+TASK_REFUSALS = {
+    "stale_generation": "stale_generation",
+    "claim_held": "stale_generation",
+    "worker credential has expired": "unauthenticated",
+}
 
 
 def heartbeat_rejections(store: RedisStore, slug: str) -> dict[str, int]:
@@ -56,15 +62,13 @@ class ExecutionsAPI:
                 return 200, self.heartbeat(subject[1], token, body)
         except GrantRefused as error:
             return STATUS[error.error_class], error.detail()
+        except RedisError:
+            return 503, GrantRefused("dependency_unavailable", "the execution store is unavailable").detail()
         return 404, GrantRefused("invalid_request", "no such execution endpoint").detail()
 
-    def register(self, token: str, body: object, operation_id: str = "") -> dict:
-        try:
-            registration = self.grants.register(self.slug, token, body)
-            claim = _task(lambda: self.tasks.admit(token, self.lease_ms))
-        except GrantRefused as error:
-            error.operation_id = _operation_id(operation_id)
-            raise
+    def register(self, token: str, body: object) -> dict:
+        registration = self.grants.register(self.slug, token, body)
+        claim = _task(lambda: self.tasks.admit(token, self.lease_ms))
         record = self._record(self.store.redis, registration.execution_id)
         return {
             **self._ack(claim, record["archive_watermark"] if record else 0),
@@ -136,7 +140,7 @@ class ExecutionsAPI:
                     continue
         raise GrantRefused("dependency_unavailable", "heartbeats kept changing; the heartbeat was not recorded")
 
-    def _record(self, reader: object, execution_id: str) -> dict | None:
+    def _record(self, reader: Redis | Pipeline, execution_id: str) -> dict | None:
         raw = reader.hget(self.store.key(self.slug, "heartbeats"), execution_id)
         return json.loads(raw) if raw else None
 

@@ -4,7 +4,6 @@ from pathlib import Path
 import pytest
 
 from scripts.swarm_v2.api.executions import ExecutionsAPI, heartbeat_rejections, heartbeat_rejections_total
-from scripts.swarm_v2.auth_context import GrantRefused
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
@@ -72,11 +71,38 @@ def test_registration_while_another_execution_holds_the_task_is_stale(world, wor
     assert world.tasks.current("task") == claim
 
 
-def test_registration_refusal_echoes_an_identifier_operation_id(world):
+def test_a_worker_credential_expired_by_server_time_is_unauthenticated(world):
+    api = ExecutionsAPI(world.grants, world.tasks, 600_000)
     agent, token = world.start()
-    with pytest.raises(GrantRefused) as error:
-        world.api.register("", {"execution_id": agent.execution_id, "generation": 1}, "register-7")
-    assert error.value.detail()["operation_id"] == "register-7"
+    path = f"/v2/executions/{agent.execution_id}/heartbeat"
+    assert (
+        api.route(
+            "POST", "/v2/executions/register", f"Bearer {token}", {"execution_id": agent.execution_id, "generation": 1}
+        )[0]
+        == 200
+    )
+    for now in (150_000, 301_000):
+        world.clock[0] = now
+        assert world.controller.renew()
+    world.grants.clock = lambda: 300.0
+    claim = world.tasks.current("task")
+    status, refusal = api.route("PUT", path, f"Bearer {token}", world.beat(agent, 1))
+    assert (status, refusal["error_class"]) == (401, "unauthenticated")
+    assert world.tasks.current("task") == claim
+    assert stored(world, agent) is None
+
+
+def test_an_unavailable_store_is_reported_as_a_dependency_failure(world, worker, monkeypatch):
+    from redis.exceptions import ConnectionError as StoreLost
+
+    agent, token = worker
+
+    def lost(*args):
+        raise StoreLost("fixture store lost")
+
+    monkeypatch.setattr(world.store.redis, "hget", lost)
+    status, refusal = world.put(agent.execution_id, token, world.beat(agent, 1))
+    assert (status, refusal["error_class"], refusal["retry"]) == (503, "dependency_unavailable", "same_request")
 
 
 def test_a_heartbeat_before_registration_is_unauthenticated(world):
