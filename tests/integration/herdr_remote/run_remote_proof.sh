@@ -227,6 +227,13 @@ step stopped_qualify 2 qualify hdr01 attempt-first
 check stopped_remote_servers "servers=$(servers)" "$([[ -z "$(servers)" ]] && echo yes || echo no)"
 check stopped_client_socket "sockets=$(sockets)" "$([[ -z "$(sockets)" ]] && echo yes || echo no)"
 
+start_server saved-member foreground
+saved_member_pid="$server_pid"
+step saved_member_qualify 1 qualify hdr01 attempt-saved-member
+kill "$saved_member_pid"
+wait "$saved_member_pid" 2>/dev/null || true
+server_pid=""
+
 start_server second leader
 check new_incarnation "pid=$server_pid previous=$first_pid" "$([[ "$server_pid" != "$first_pid" ]] && echo yes || echo no)"
 step restarted_status 0 client --machine hdr01 status server --json
