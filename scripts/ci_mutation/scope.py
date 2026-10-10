@@ -1,5 +1,4 @@
 import ast
-import os
 import re
 import subprocess
 from collections import Counter
@@ -36,7 +35,7 @@ def own_bases(root: Path, base: str, head: str, graded=lambda sha: False) -> lis
 
 def graded_green(sha: str) -> bool:
     def api(path: str, *query: str) -> str:
-        command = ["gh", "api", "-X", "GET", f"repos/{os.environ['GITHUB_REPOSITORY']}/{path}", *query]
+        command = ["gh", "api", "-X", "GET", f"repos/{{owner}}/{{repo}}/{path}", *query]
         found = subprocess.run(command, capture_output=True, text=True)
         return found.stdout if found.returncode == 0 else ""
 

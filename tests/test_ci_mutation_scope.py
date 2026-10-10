@@ -412,7 +412,6 @@ def test_a_commit_is_graded_only_by_a_push_preflight_whose_mutation_job_passed(
 
     from scripts.ci_mutation import scope
 
-    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
     calls = []
 
     def run(command, **kwargs):
@@ -426,7 +425,7 @@ def test_a_commit_is_graded_only_by_a_push_preflight_whose_mutation_job_passed(
     green = '[.jobs[] | select(.name == "mutation" and .conclusion == "success")] | length'
     listed = [
         *api,
-        "repos/owner/repo/actions/workflows/mutation-preflight.yml/runs",
+        "repos/{owner}/{repo}/actions/workflows/mutation-preflight.yml/runs",
         "-f",
         "head_sha=abc",
         "-f",
@@ -434,5 +433,7 @@ def test_a_commit_is_graded_only_by_a_push_preflight_whose_mutation_job_passed(
         "--jq",
         ".workflow_runs[].id",
     ]
-    expected_calls = [listed] + [[*api, f"repos/owner/repo/actions/runs/{run}/jobs", "--jq", green] for run in asked]
+    expected_calls = [listed] + [
+        [*api, f"repos/{{owner}}/{{repo}}/actions/runs/{run}/jobs", "--jq", green] for run in asked
+    ]
     assert calls == [(command, {"capture_output": True, "text": True}) for command in expected_calls]
