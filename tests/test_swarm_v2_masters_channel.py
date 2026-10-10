@@ -131,3 +131,39 @@ def test_channel_publish_refuses_a_masters_channel(monkeypatch):
     }
     assert published == []
     assert json.loads(tools["channel_publish"]("brain", "hello"))["success"] is True
+
+
+def test_swarm_masters_channel_command_lets_masters_talk_and_refuses_the_engineer(monkeypatch, capsys):
+    import fakeredis
+
+    from scripts.gates import Who
+    from scripts.swarm import cli
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    store = RedisStore(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True))
+    store.create(SwarmConfig(SLUG, "/repo", 1, 1))
+    masters.MasterSeats(store.redis).set_count(SLUG, 2)
+    for seat, name in ((LEAD, "sw-master-1"), (SECOND, "sw-master-2"), (ENG, "sw-eng-1")):
+        store.seats.occupy(seat, name, 1)
+    monkeypatch.setattr(cli, "connect", lambda: store)
+
+    def act(name, *argv):
+        monkeypatch.setattr(Who, "from_env", classmethod(lambda cls, environ=None: cls(name=name)))
+        code = cli.main([SLUG, "masters-channel", *argv])
+        return code, capsys.readouterr()
+
+    code, said = act("sw-master-1", "say", "split the phases")
+    assert code == 0
+    assert json.loads(said.out)["seat"] == LEAD
+    code, read = act("sw-master-2", "read")
+    assert (code, [p["text"] for p in json.loads(read.out)]) == (0, ["split the phases"])
+    assert json.loads(act("sw-master-2", "read")[1].out) == []
+    assert [p["by"] for p in json.loads(act("sw-master-2", "read", "--all")[1].out)] == ["sw-master-1"]
+
+    for argv in (("say", "me too"), ("read", "--all")):
+        code, refused = act("sw-eng-1", *argv)
+        assert code != 0
+        assert refused.out == ""
+        assert refused.err.splitlines()[-1] == (
+            f"swarm: only master seats of {SLUG} read and write its masters channel; sw-eng-1 holds {ENG}"
+        )
