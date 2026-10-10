@@ -1,7 +1,10 @@
 """Whether a freeze or a focus on the ledger holds an open task back from a claim, and the drain notice naming them."""
 
+from collections.abc import Iterable
+
 from scripts.doctor import loop, priming
 from scripts.swarm import notice_text
+from scripts.swarm.store import SwarmConfig
 from scripts.swarm_ledger import ledger_kinds
 from scripts.swarm_ledger.repository import hierarchy
 
@@ -38,7 +41,7 @@ def covers(target: str, task: dict, chain: list) -> bool:
     return target in chain
 
 
-def fix_phase(config) -> str:
+def fix_phase(config: SwarmConfig) -> str:
     return loop.FIX_PHASE if config.template == priming.TEMPLATE else ""
 
 
@@ -46,7 +49,7 @@ def names(doc: dict) -> list:
     return [f"the {r['verb']} on {_named(doc, r['target'])}" for r in doc.get("freezes") or []]
 
 
-def notice(doc: dict, tasks, phase: str) -> str:
+def notice(doc: dict, tasks: Iterable[dict], phase: str) -> str:
     graph = hierarchy.project(doc)[0]
     waiting = [t for t in tasks if not t.get("out_of_scope") and held(t, doc, graph, phase)]
     if not waiting:

@@ -94,8 +94,24 @@ def test_a_cycle_in_the_parent_links_ends_the_walk():
         "phases/p1": ("phase", "plans/a", 0),
         "plans/a": ("plan", "phases/p1", 0),
     }
+    assert freeze.ancestry(row, graph) == ["tasks/t1", "phases/p1", "plans/a"]
     assert freeze.held(row, doc(record("plans/a")), graph, "")
     assert not freeze.held(row, doc(record("plans/b")), graph, "")
+
+
+def test_the_walk_climbs_to_the_root_and_stops_at_the_chain_bound():
+    found = doc(tasks=[task(slice="slices/a.first")])
+    assert freeze.ancestry(found["tasks"][0], hierarchy.project(found)[0]) == [
+        "tasks/t1",
+        "slices/a.first",
+        "phases/p1",
+        "plans/a",
+    ]
+    assert freeze.ancestry({"id": "t1"}, {}) == ["tasks/t1"]
+    graph = {f"phases/n{i}": ("phase", f"phases/n{i + 1}", 0) for i in range(1, 80)}
+    chain = freeze.ancestry(task(phase="n1"), graph)
+    assert len(chain) == hierarchy.CHAIN
+    assert chain[-1] == f"phases/n{hierarchy.CHAIN - 1}"
 
 
 def test_names_say_each_freeze_in_plain_words():
@@ -104,6 +120,7 @@ def test_names_say_each_freeze_in_plain_words():
         record("phases/p2", "focus"),
         record("slices/a.first"),
         record("tasks/t9"),
+        record("tasks/t8", "focus"),
         record("lane:ci", "focus"),
         record("kind:research"),
         tasks=[task("t9", title="Wire the page")],
@@ -113,6 +130,7 @@ def test_names_say_each_freeze_in_plain_words():
         "the focus on phase Ship",
         "the freeze on slice a.first",
         "the freeze on task Wire the page",
+        "the focus on task t8",
         "the focus on the ci lane",
         "the freeze on research tasks",
     ]
@@ -221,6 +239,20 @@ def test_only_held_work_drains_with_a_notice_naming_the_freezes_and_unfreezing_r
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert store.config("sw").state == "running"
     assert spawned(runtime) == ["t1"]
+
+
+def test_a_doctor_drain_counts_no_fix_task_as_held(store):
+    store.update("sw", template=priming.TEMPLATE)
+    ledger = FrozenLedger(
+        [
+            {"id": "cause", "phase": loop.FIX_PHASE, "state": "blocked"},
+            {"id": "fix", "phase": loop.FIX_PHASE, "depends_on": ["cause"]},
+        ],
+        record("lane:ci", "focus"),
+    )
+    tick("sw", store, ledger, FakeRuntime(), now_ms=1_000)
+    assert store.config("sw").state == "drained"
+    assert ledger.notes == ["The swarm has no task left to start, one blocked task waits for you"]
 
 
 def test_a_drain_with_nothing_held_keeps_the_plain_notice(store):
