@@ -172,7 +172,10 @@ candidate twice in independent containers. Before the registry login it builds a
 fixture carrying a build-time generated GitHub app token, requires
 `docker/swarm-node/scan.sh` to refuse it, then scans the candidate. The scan runs
 Trivy's secret scanner over every image layer and the image config, fails on any
-finding and fails when the scanner cannot finish.
+finding and fails when the scanner cannot finish. The one exception is a
+`jwt-token` match in an installed Python package's `dist-info/METADATA`, where
+package descriptions quote example tokens; it is recorded in
+`package-examples.txt`, and any other rule in that file still fails.
 
 Only a qualified image is pushed, under the immutable tag `sha-<commit>`, after
 the registry login, which holds the workflow token; build arguments carry only

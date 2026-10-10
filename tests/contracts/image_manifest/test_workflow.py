@@ -232,25 +232,33 @@ def test_scan_reads_every_layer_and_the_image_config_for_secrets(tmp_path):
 
     assert done.returncode == 0, done.stderr
     assert "--scanners secret --image-config-scanners secret --exit-code 1" in log
-    assert "/trivy-secret.yaml:/etc/trivy-secret.yaml:ro" in log and "--secret-config /etc/trivy-secret.yaml" in log
     assert log.rstrip().endswith("candidate:x")
     assert "no credentials found in candidate:x" in done.stdout
 
 
-def test_the_scan_allows_only_published_python_package_descriptions():
-    config = yaml.safe_load((ROOT / "docker/swarm-node/trivy-secret.yaml").read_text())
-    [rule] = config.pop("allow-rules")
-    path = re.compile(rule["path"])
+METADATA = "opt/venv/lib/python3.12/site-packages/pyjwt-2.15.1.dist-info/METADATA"
 
-    assert config == {} and set(rule) == {"id", "description", "path"}
-    assert path.search("/opt/venv/lib/python3.12/site-packages/pyjwt-2.15.1.dist-info/METADATA")
-    for other in (
-        "/opt/agentihooks/.build-token",
-        "/root/.git-credentials",
-        "/opt/venv/lib/python3.12/site-packages/pyjwt-2.15.1.dist-info/METADATA.bak",
-        "/opt/venv/lib/python3.12/site-packages/jwt/api_jwt.py",
-    ):
-        assert not path.search(other)
+
+def secrets_report(*found):
+    return json.dumps({"Results": [{"Target": target, "Secrets": [{"RuleID": rule}]} for rule, target in found]})
+
+
+def test_scan_passes_only_a_jwt_example_in_python_package_metadata(tmp_path):
+    done, _ = scan(tmp_path, 1, secrets_report(("jwt-token", METADATA)))
+
+    assert done.returncode == 0, done.stderr
+    assert (tmp_path / "out/package-examples.txt").read_text() == f"jwt-token {METADATA}\n"
+
+
+@pytest.mark.parametrize(
+    "found",
+    [("github-app-token", METADATA), ("jwt-token", "opt/agentihooks/settings.json"), ("jwt-token", METADATA + ".bak")],
+)
+def test_scan_refuses_any_other_finding_beside_a_package_example(tmp_path, found):
+    done, _ = scan(tmp_path, 1, secrets_report(found, ("jwt-token", METADATA)))
+
+    assert done.returncode == 1
+    assert (tmp_path / "out/findings.txt").read_text() == "{} {}\n".format(*found)
 
 
 def test_scan_refuses_an_image_holding_a_credential(tmp_path):
