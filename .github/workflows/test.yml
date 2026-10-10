@@ -76,7 +76,7 @@ jobs:
           evidence="$RUNNER_TEMP/evidence"
           actions="repos/$GITHUB_REPOSITORY/actions"
           mkdir -p "$evidence"
-          if ! gh api "$actions/workflows/test.yml/runs?event=pull_request&status=success&per_page=20" > "$evidence/runs.json"; then
+          if ! gh api "$actions/workflows/test.yml/runs?event=pull_request&status=success&per_page=100" > "$evidence/runs.json"; then
             rm -f "$evidence/runs.json"
             exit 0
           fi

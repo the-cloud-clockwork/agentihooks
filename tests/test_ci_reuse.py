@@ -17,7 +17,7 @@ pytestmark = pytest.mark.unit
 PROGRAM = Path(__file__).resolve().parents[1] / "scripts/ci_reuse.py"
 FETCH = "Fetch the evidence of recent passed runs"
 QUEUE_REF = "refs/heads/gh-readonly-queue/dev/pr-5-0123abcd"
-RUNS = "repos/o/r/actions/workflows/test.yml/runs?event=pull_request&status=success&per_page=20"
+RUNS = "repos/o/r/actions/workflows/test.yml/runs?event=pull_request&status=success&per_page=100"
 JOBS = "repos/o/r/actions/runs/7/attempts/1/jobs?per_page=100"
 ARTIFACTS = "repos/o/r/actions/runs/7/artifacts?per_page=100"
 
