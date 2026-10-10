@@ -1,6 +1,7 @@
 import contextlib
 import json
 import os
+import shutil
 import subprocess
 import threading
 import time
@@ -15,6 +16,7 @@ from scripts.swarm_v2.supervision_protocol import write
 from scripts.swarm_v2.worker_health import Probe, evaluate, main
 
 SAMPLE = "-".join(("fixture", "bearer"))
+SLEEP = shutil.which("sleep")
 HEALTHY_HERDR = """#!/bin/sh
 printf '%s\\n' "$*" "$HOME" "$XDG_RUNTIME_DIR" "$HERDR_CONFIG_PATH" "$CODEX_HOME" "$CLAUDE_CONFIG_DIR" "${HERDR_SOCKET:-}" > "$PROBE_LOG"
 echo '{"result": []}'
@@ -409,7 +411,7 @@ def test_herdr_protocol_answer_must_be_an_object(tmp_path, output):
 
 def test_hung_herdr_is_bounded(tmp_path, monkeypatch):
     attempt, _, environ = fixture(tmp_path)
-    executable(tmp_path / "bin" / "herdr", "#!/bin/sh\nexec sleep 5\n")
+    executable(tmp_path / "bin" / "herdr", f"#!/bin/sh\nexec {SLEEP} 5\n")
     assert evaluate(Probe(attempt, "codex", environ, herdr_timeout=0.2), "startup")["checks"]["herdr"] == (
         "herdr_unavailable"
     )
@@ -417,7 +419,7 @@ def test_hung_herdr_is_bounded(tmp_path, monkeypatch):
 
 def test_cli_probe_thresholds_are_arguments(tmp_path, capsys, monkeypatch, brain):
     attempt, _, environ = fixture(tmp_path)
-    executable(tmp_path / "bin" / "herdr", "#!/bin/sh\nsleep 0.6\necho '{}'\n")
+    executable(tmp_path / "bin" / "herdr", f"#!/bin/sh\n{SLEEP} 0.6\necho '{{}}'\n")
     Brain.delay = 0.6
     environ["BRAIN_URL"] = f"http://127.0.0.1:{brain.server_address[1]}"
     base = ["startup", "--attempt", str(attempt), "--harness", "codex"]
