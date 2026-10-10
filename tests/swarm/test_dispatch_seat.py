@@ -371,6 +371,17 @@ def test_triggers_a_departed_seat_left_open_spawn_no_seat_and_a_new_trigger_does
     assert not store.redis.exists(store.key(SLUG, dispatch_seat.LEFT))
 
 
+def test_a_trigger_that_opened_after_the_last_wake_spawns_a_seat_once_the_departed_seat_ends():
+    store, runtime = swarm(), FakeRuntime()
+    run(store, runtime, doc(priority()))
+    later = priority("pr2", "followups/f1", "Approve the lane cap")
+    gone = crew(doc(priority(), later), joined={NAME: [NOW + 10_000]})
+    assert run(store, runtime, gone, NOW + MINUTE) == [f"ended dispatcher {NAME}: it left the ledger"]
+    assert store.redis.smembers(store.key(SLUG, dispatch_seat.LEFT)) == {"pr1"}
+    assert run(store, runtime, gone, NOW + 2 * MINUTE) == ["spawned dispatcher dispatcher@a1b2c3-0002 for 1 trigger"]
+    assert [t["id"] for t in runtime.tasks[-1]["triggers"]] == ["pr2"]
+
+
 def test_the_tick_retires_the_process_of_a_seat_that_left_the_ledger_within_two_ticks():
     class Ledger(FakeLedger):
         def state(self, slug):
