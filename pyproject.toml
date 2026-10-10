@@ -122,7 +122,10 @@ Issues = "https://github.com/The-Cloud-Clockwork/agentihooks/issues"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["unit: Unit tests"]
+markers = [
+    "unit: Unit tests",
+    "wall_clock: asserts an elapsed real time bound; the mutation stats pass deselects it",
+]
 asyncio_mode = "auto"
 
 [tool.mutmut]
