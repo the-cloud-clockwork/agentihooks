@@ -331,6 +331,36 @@ def test_a_focused_proof_run_ends_red_once_the_branch_moves_past_it(preflight):
     )
 
 
+@pytest.fixture
+def unreadable_branch(preflight, monkeypatch):
+    original = subprocess.run
+
+    def api(args, **kwargs):
+        if "/branches/" in args[-1]:
+            return subprocess.CompletedProcess(args, 1, b"")
+        return original(args, **kwargs)
+
+    _focused_proof(preflight)
+    monkeypatch.setattr(subprocess, "run", api)
+
+
+def test_cli_refuses_a_focused_proof_run_whose_branch_is_unreadable(env, unreadable_branch, capsys):  # noqa: F811
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    ledger.tasks = lambda slug: list(ledger.rows.values())
+    assert cli.main(["sw", "--as", ME, "wait", "--on", "mutation", URL]) == 1
+    assert capsys.readouterr().err.endswith("swarm: cannot read the proof branch head; retry the mutation wait\n")
+    assert idle.wait(store.redis, "sw", ME) is None
+
+
+def test_a_completed_focused_proof_run_with_an_unreadable_branch_ends_red(unreadable_branch):
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == (
+        f"mutation preflight {URL}, now red; the proof branch head is unreadable"
+    )
+
+
 def test_a_proofs_push_run_is_not_a_focused_mutation_proof(preflight):
     preflight.run["path"] = ".github/workflows/proofs.yml"
     held = {**waits.on("mutation", URL), "head": "first"}

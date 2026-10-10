@@ -93,7 +93,7 @@ def resolution(held: dict) -> str:
         if _stale(target, run):
             return f"{outcome}, now red; the branch moved past the proof head"
     except UNREADABLE:
-        return ""
+        return f"{outcome}, now red; the proof branch head is unreadable"
     if run.get("conclusion") != "success" and run.get("conclusion") != "failure":
         return f"{outcome}, now red; run {run.get('conclusion')}"
     try:
@@ -105,15 +105,7 @@ def resolution(held: dict) -> str:
         ]
         failures.extend(f"{row['path']}: {row['reason']}" for row in report["not_mutated"])
         failed = report["failed"]
-    except (
-        OSError,
-        subprocess.SubprocessError,
-        ValueError,
-        KeyError,
-        TypeError,
-        StopIteration,
-        zipfile.BadZipFile,
-    ):
+    except (*UNREADABLE, StopIteration, zipfile.BadZipFile):
         return f"{outcome}, now red; complete mutation report unavailable; mutation may have been skipped"
     if run["conclusion"] == "success" and not failed and not failures:
         return f"{outcome}, now green; no failing mutants"
