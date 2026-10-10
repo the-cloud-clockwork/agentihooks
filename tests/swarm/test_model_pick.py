@@ -66,8 +66,8 @@ def test_explicit_lane_never_calls_classifier(monkeypatch):
     [
         ("claude", -1, "low"),
         ("claude", 0.49, "low"),
-        ("claude", 0.51, "medium"),
-        ("claude", 1.6, "high"),
+        ("claude", 0.51, "max"),
+        ("claude", 1.6, "max"),
         ("claude", 9, "max"),
         ("codex", 9, "xhigh"),
     ],
@@ -83,10 +83,11 @@ def test_effort_rounds_and_clamps_without_changing_fixed_model(monkeypatch, harn
     "harness,score,expected",
     [
         ("claude", -1, "high"),
-        ("claude", 1.6, "high"),
+        ("claude", 0.4, "high"),
+        ("claude", 0.6, "max"),
         ("claude", 2.6, "max"),
         ("codex", 0, "high"),
-        ("codex", 3, "xhigh"),
+        ("codex", 1, "xhigh"),
     ],
 )
 def test_an_effort_answer_only_raises_the_default_effort(monkeypatch, harness, score, expected):
@@ -188,8 +189,11 @@ def test_only_an_auto_effort_asks_the_classifier(monkeypatch):
     assert (picked.model, picked.effort) == ("fixed", "max")
     assert set(calls[0][1]) == {"effort"}
     assert calls[0][0] == {"title": "", "description": "", "kind": "code", "territory_size": 0}
-    assert calls[0][1]["effort"].levels == ["low", "medium", "high", "max"]
-    assert calls[0][1]["effort"].instructions == "How much reasoning does this task need?"
+    assert calls[0][1]["effort"].levels == [
+        "high: the task names what to change and how to check it",
+        "max: an unknown cause to find across several components, or a redesign of a core concept",
+    ]
+    assert calls[0][1]["effort"].instructions.startswith("Which reasoning effort does a coding agent need")
     assert set(model_pick.pick("claude", {"model": "auto", "effort": "high"}, {}, {}).__dict__) == {
         "model",
         "effort",

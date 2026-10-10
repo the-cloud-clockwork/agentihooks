@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from hooks.classifier import cli, corpus, definitions, evaluation
+from hooks.classifier import cli, corpus, definitions, evaluation, settings
 from hooks.classifier.errors import BackendFailure
 from hooks.classifier.result import Answer, DecisionResult
 from scripts.swarm import metrics_outbox
@@ -19,12 +19,7 @@ PACKAGE = Path(__file__).resolve().parents[2] / "profiles" / "package" / "classi
 KNOWN_MISSES = {
     "filter": ["home-3"],
     "intent-check": ["g18-quiet-week", "lifted-t201", "lifted-t205"],
-    "model-pick": [
-        "rig-grade-swarm-cxc0",
-        "rig-grade-swarm-doctor-fx-9b243b65-tune",
-        "rig-grade-swarm-doctor-t38",
-        "rig-grade-swarm-ed1",
-    ],
+    "model-pick": ["rig-grade-swarm-tc1", "rig-grade-swarm-vidn2"],
     "profile-pick": [
         "rig-grade-swarm-doctor-fx-29d21c6e-code",
         "rig-grade-swarm-doctor-fx-30373668-cause",
@@ -479,6 +474,14 @@ def test_model_pick_expects_each_reader_level_raised_to_the_floor():
         levels, reader, floor = case.params["levels"], case.notes["reader_level"], case.notes["floor"]
         assert floor == case.params["floor"]
         assert case.expected == {"effort": levels[max(levels.index(reader), levels.index(floor))]}
+
+
+def test_model_pick_replay_holds_ten_of_twelve_cases_on_the_default_backend():
+    report = evaluation.evaluate("model-pick").report()
+    default = report["backends"][settings.DEFAULT_MODELS[0]]
+    assert (report["cases"], default["samples"]) == (12, 12)
+    assert report["cases"] - len(report["wrong_cases"]) >= 10
+    assert default["samples"] - default["wrong"] >= 10
 
 
 def test_profile_pick_replay_scores_both_ci_proof_troubleshoot_tasks_as_engineer():
