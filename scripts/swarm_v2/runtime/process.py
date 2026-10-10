@@ -22,7 +22,7 @@ def local_namespace(boot_id: Path = BOOT_ID, pid_namespace: Path = PID_NAMESPACE
 
 
 def launch_target(pid: object, namespace: str, table: Mapping[int, Process]) -> dict:
-    number = pid if type(pid) is int and pid > 0 else 0
+    number = max(pid, 0) if type(pid) is int else 0
     found = table.get(number)
     target = {"process_namespace": namespace, "pid": number, "pid_start": found.start_time if found else 0}
     missing = [LAUNCH_LABELS[field] for field in IDENTITY if not target[field]]
