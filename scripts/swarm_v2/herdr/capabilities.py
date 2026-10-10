@@ -111,7 +111,7 @@ def _json(run: Callable[[list[str]], subprocess.CompletedProcess], command: list
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise Unreachable(f"{label}: {type(exc).__name__}") from exc
     if done.returncode != 0:
-        raise Unreachable(f"{label}: {(done.stderr or done.stdout).strip()[:200]}")
+        raise Unreachable(f"{label}: exit {done.returncode}")
     try:
         document = json.loads(done.stdout)
     except ValueError as exc:

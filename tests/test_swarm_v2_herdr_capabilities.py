@@ -210,10 +210,19 @@ def test_an_unreachable_machine_raises_and_caches_nothing():
     runner = cases.Runner(cases.fixture()["server"])
     runner.server = None
     gate = Qualifier(capabilities.machine_probe(runner))
-    with pytest.raises(Unreachable, match=r"^herdr --machine worker-fixture status: unexpected command$"):
+    with pytest.raises(Unreachable, match=r"^herdr --machine worker-fixture status: exit 2$"):
         gate.require(cases.TARGET, "i", "pane_read")
     assert gate.verdicts == {}
     assert runner.commands == [["herdr", "--machine", cases.TARGET, "status", "server", "--json"]]
+
+
+def test_an_unreachable_reply_never_repeats_remote_output():
+    def run(command):
+        return subprocess.CompletedProcess(command, 255, "remote stdout text", "remote stderr text")
+
+    with pytest.raises(Unreachable) as refused:
+        capabilities.machine_probe(run)("t")
+    assert str(refused.value) == "herdr --machine t status: exit 255"
 
 
 def test_an_unreadable_reply_is_unreachable():
