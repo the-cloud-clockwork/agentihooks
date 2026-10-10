@@ -58,7 +58,7 @@ def notice(doc: dict, tasks: Iterable[dict], phase: str) -> str:
     holding = [
         name
         for r, name in zip(records, names(doc))
-        if r["verb"] == "focus" or any(covers(r["target"], t, ancestry(t, graph)) for t in waiting)
+        if any(covers(r["target"], t, ancestry(t, graph)) == (r["verb"] == "freeze") for t in waiting)
     ]
     which = "1 open task is" if len(waiting) == 1 else f"{len(waiting)} open tasks are"
     return notice_text.plain(f"The swarm has no task it may start: {which} held by {_joined(holding)}")
