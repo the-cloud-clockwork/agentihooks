@@ -47,6 +47,21 @@ def test_drain_key_matches_live_post_key(tmp_path, http_ok):
     assert http_ok[0][1] == live_key
 
 
+@pytest.mark.parametrize(
+    ("folders", "expected"),
+    [({"cwd": "/w", "project": "/p"}, "/w"), ({"project": "/p"}, "/p"), ({}, "")],
+)
+def test_drain_resolves_scope_from_the_recorded_folder(tmp_path, http_ok, monkeypatch, folders, expected):
+    import hooks.context.brain_writer_hook as hook
+
+    (tmp_path / "a.json").write_text(json.dumps({**MARKER, "session_id": "sess-1", **folders}))
+    seen = []
+    monkeypatch.setattr(hook, "_marker_request", lambda marker, session_id, cwd: seen.append(cwd) or ({}, "k"))
+
+    assert _drain_outbox(str(tmp_path)) == 1
+    assert seen == [expected]
+
+
 def test_drain_survives_file_vanishing_after_post(tmp_path, monkeypatch):
     """A concurrent drain unlinking the file first must not raise."""
     _write_to_outbox([MARKER], "sess-1", str(tmp_path))
