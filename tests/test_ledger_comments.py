@@ -6,6 +6,7 @@ pytestmark = pytest.mark.unit
 
 LEDGER = Path(__file__).parents[1] / "scripts" / "swarm_ledger"
 AGENT = "engineer@1-1"
+REFUSED = "^outcome rides only on an agent add to a comment thread, as done or blocked, without attachments$"
 
 
 class Context:
@@ -61,11 +62,34 @@ def test_an_outcome_gets_its_own_entry_and_later_progress_never_amends_it(commen
 
 def test_a_replayed_outcome_entry_is_not_added_twice(comments):
     thread, ctx = [], Context()
-    post(comments, thread, ctx, "o1", "Outcome proposal: done. Pull request merged", "done")
-    post(comments, thread, ctx, "o1", "Outcome proposal: done. Pull request merged", "done")
-    assert shown(thread) == [("o1", "Outcome proposal: done. Pull request merged", "done")]
-    assert len(ctx.records) == 1
+    text = "Outcome proposal: done. Pull request merged"
+    post(comments, thread, ctx, "o1", text, "done")
+    post(comments, thread, ctx, "o1", text, "done")
+    assert thread == [{"id": "o1", "by": AGENT, "at": 5, "text": text, "outcome": "done"}]
+    assert ctx.records == [(AGENT, "comment added", "tasks/t", {"id": "o1", "text": text})]
     assert ctx.meta["members"][AGENT]["last_seen"] == 5
+
+
+def test_a_progress_line_marks_its_author_seen(comments):
+    thread, ctx = [], Context()
+    post(comments, thread, ctx, "p1", "Building the first slice")
+    assert ctx.meta["members"][AGENT]["last_seen"] == 5
+
+
+@pytest.mark.parametrize(
+    ("entry", "by", "allowed"),
+    [
+        ({"by": AGENT, "text": "Building"}, AGENT, True),
+        ({"by": AGENT, "text": "Building"}, "master@1-1", True),
+        ({"by": AGENT, "text": "Building"}, "engineer@2-2", False),
+        ({"by": "operator", "text": "Hold"}, "master@1-1", False),
+        ({"by": AGENT, "text": "", "deleted": True}, AGENT, False),
+        ({"by": AGENT, "text": "Merged", "outcome": "done"}, AGENT, False),
+    ],
+)
+def test_who_may_change_an_entry(comments, entry, by, allowed):
+    members = {AGENT: {}, "master@1-1": {"role": "orchestrator"}}
+    assert comments.can_change(entry, by, members) is allowed
 
 
 def test_an_agent_comment_add_with_an_outcome_takes_its_own_entry(comments):
@@ -82,6 +106,7 @@ def test_an_agent_comment_add_with_an_outcome_takes_its_own_entry(comments):
         ("o1", "Outcome proposal: done. Pull request merged", "done"),
         ("p2", "Watching the merge queue", None),
     ]
+    assert {target for _, _, target, _ in ctx.records} == {"tasks/t"}
 
 
 @pytest.mark.parametrize("outcome", ["done", "blocked"])
@@ -105,7 +130,7 @@ def test_an_op_without_an_outcome_is_accepted(comments):
     ],
 )
 def test_an_outcome_rides_only_on_an_agent_comment_add(comments, op):
-    with pytest.raises(ValueError, match="as done or blocked, without attachments"):
+    with pytest.raises(ValueError, match=REFUSED):
         comments.check_outcome(op)
 
 
@@ -131,7 +156,7 @@ def test_no_agent_edits_or_deletes_an_outcome_entry(comments, change):
 def test_the_ledger_op_check_refuses_a_misplaced_outcome(comments, op):
     from scripts.swarm_ledger import ledger_core
 
-    with pytest.raises(ValueError, match="as done or blocked, without attachments"):
+    with pytest.raises(ValueError, match=REFUSED):
         ledger_core.check_op({**op, "id": "o1", "text": "Pull request merged", "outcome": "done"})
 
 
