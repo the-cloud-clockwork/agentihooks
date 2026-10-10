@@ -320,6 +320,13 @@ REFUSALS = [
         "payload",
     ),
     (
+        "not a number payload",
+        lambda d: d.update(task_payload={"x": float("nan")}),
+        "launch task_payload must be a JSON object",
+        "payload",
+    ),
+    ("numeric image", lambda d: d.update(image_digest=5), "launch image_digest must be a sha256 digest", "image"),
+    (
         "numeric execution id",
         lambda d: d.update(execution_id=5),
         "launch execution_id is not a valid value",
@@ -497,6 +504,11 @@ POLICY_REFUSALS = [
         "unbounded grace",
         lambda d: d.update(termination_grace_seconds=901),
         "pod policy is invalid at termination_grace_seconds: 901 is greater than the maximum of 900",
+    ),
+    (
+        "disk below the tmp allotment",
+        lambda d: d["profiles"]["general"]["limits"].update(ephemeral_mib=2047),
+        "pod policy is invalid at profiles/general/limits/ephemeral_mib: 2047 is less than the minimum of 2048",
     ),
     (
         "short readiness timeout",
