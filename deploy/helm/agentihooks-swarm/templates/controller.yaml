@@ -16,12 +16,16 @@
 {{- if not $workers.projects }}
 {{- fail "controller.workers.projects names no project" }}
 {{- end }}
-{{- if not $workers.podPolicy }}
-{{- fail "controller.workers.podPolicy is required for the Kubernetes runtime" }}
+{{- if and $workers.podPolicy $workers.podPolicyConfigMap }}
+{{- fail "set controller.workers.podPolicy or podPolicyConfigMap, not both" }}
+{{- end }}
+{{- if not (or $workers.podPolicy $workers.podPolicyConfigMap) }}
+{{- fail "controller.workers.podPolicy or podPolicyConfigMap is required for the Kubernetes runtime" }}
 {{- end }}
 {{- if not .Values.controller.serviceAccountName }}
 {{- fail "controller.serviceAccountName is required: the Kubernetes runtime creates worker Pods with its token" }}
 {{- end }}
+{{- if $workers.podPolicy }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -32,6 +36,7 @@ metadata:
 data:
   pod-policy.json: {{ toJson $workers.podPolicy | quote }}
 ---
+{{- end }}
 {{- end }}
 {{- if $api.enabled }}
 {{- if not $api.swarm }}
@@ -61,6 +66,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "swarm.fullname" . }}-controller
+  {{- if and $workers.apiUrl $workers.podPolicyConfigMap }}
+  annotations:
+    configmap.reloader.stakater.com/reload: {{ $workers.podPolicyConfigMap | quote }}
+  {{- end }}
   labels:
     {{- include "swarm.labels" . | nindent 4 }}
     app.kubernetes.io/component: controller
@@ -76,7 +85,7 @@ spec:
       labels:
         {{- include "swarm.labels" . | nindent 8 }}
         app.kubernetes.io/component: controller
-      {{- if $workers.apiUrl }}
+      {{- if and $workers.apiUrl $workers.podPolicy }}
       annotations:
         checksum/pod-policy: {{ toJson $workers.podPolicy | sha256sum }}
       {{- end }}
@@ -213,5 +222,5 @@ spec:
         {{- if $workers.apiUrl }}
         - name: pod-policy
           configMap:
-            name: {{ include "swarm.fullname" . }}-pod-policy
+            name: {{ $workers.podPolicyConfigMap | default (printf "%s-pod-policy" (include "swarm.fullname" .)) | quote }}
         {{- end }}
