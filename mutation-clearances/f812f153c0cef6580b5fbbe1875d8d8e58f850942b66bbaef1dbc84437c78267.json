@@ -1,6 +1,6 @@
 {
   "scripts/swarm_ledger/ledger_events_ack.py:scripts.swarm_ledger.ledger_events_ack.x_apply__mutmut_18:1ea72cee984797662a5b03c4b34dd247a3caa37f3a3b12261bcc094a112113eb": {
     "reader": "standards_reader",
-    "reason": "Changes the absent-acknowledgement default from -1 to -2. check() rejects a negative rev and the head revision is at least 0, so the clamped revision is always at least 0 and compares greater than either default; events_ack and dirty are identical for every accepted op."
+    "reason": "Changes the absent-acknowledgement default from -1 to -2. Given check() runs on the op before apply, it rejects a negative rev and the head revision is at least 0, so the clamped revision is always at least 0 and compares greater than either default; events_ack and dirty are identical for every checked op."
   }
 }
