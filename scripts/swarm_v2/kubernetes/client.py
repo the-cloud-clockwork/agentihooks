@@ -96,8 +96,8 @@ class PodClient:
         self.http, self.namespace = http, namespace
 
     def _path(self, name: str = "") -> str:
-        path = f"/api/v1/namespaces/{urllib.parse.quote(self.namespace, safe='')}/pods"
-        return f"{path}/{urllib.parse.quote(name, safe='')}" if name else path
+        path = f"/api/v1/namespaces/{self.namespace}/pods"
+        return f"{path}/{name}" if name else path
 
     def create_pod(self, body: dict) -> dict:
         status, answer = self.http.send("POST", self._path(), body)
