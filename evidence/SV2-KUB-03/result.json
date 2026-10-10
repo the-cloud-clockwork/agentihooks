@@ -4,7 +4,7 @@
   "dependency": "SV2-KUB-02",
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2459",
-  "tested_commit": "3bb302912e7843c40d03b30edd6e77c14ed6983a",
+  "tested_commit": "c0fab8414b7123fa2bd44e737cc83581ea879c6e",
   "status": "fixture-qualified-awaiting-ci",
   "evidence_class": "Mocked: fakeredis command queue, operation journal and execution registry, a fake server clock, a fixture network between worker and API, and an in process run of the worker helper standing in for kubectl exec; no Kubernetes API server, kubelet exec or live worker Pod was used.",
   "interfaces": [
@@ -15,8 +15,8 @@
     "sanitize_report withholds output over 65536 bytes whole, removes ESC and C1 escape sequences and other control characters except newline and tab, replaces invalid UTF-8, redacts secrets with the strict hooks.secrets patterns and bounds each report to 2048 characters before helper stdout and stderr are stored in worker-transport-reports",
     "worker_transport_ambiguous_total(store, slug) counts helper calls per mode (status, deliver) whose reply was lost or did not match its exit code, command id, execution id and generation; it is a Redis hash per swarm, not yet an exported metric",
     "scripts.swarm_v2.worker.control: encode and decode carry the command id, execution id, generation, kind, payload, payload digest and expiry as one URL safe base64 JSON argument; decode refuses wrong fields, a malformed command id, non integer generation or expiry and a payload digest mismatch",
-    "main(argv) is the only helper a controller may exec: status ENVELOPE answers queued, known or absent and deliver ENVELOPE queues a new, unexpired envelope into the worker inbox through a per process staging file and an exclusive link; both refuse an envelope for another execution or generation of this Pod's launch record, and anything else is refused with exit 2 and one sorted JSON line carrying the reason",
-    "WorkerControl(transport, state_path, handlers, inbox) acknowledges an inbox envelope over the authenticated endpoint before recording it, keeps it in place while the endpoint is unreachable and drops it when the server refuses it or it is malformed, so the fallback never bypasses server acceptance, expiry or the run once rule",
+    "main(argv) is the only helper a controller may exec: status ENVELOPE answers queued, known or absent and deliver ENVELOPE queues a new, unexpired envelope into the worker inbox through a per process staging file and an exclusive link; both refuse an envelope for another execution or generation of this Pod's launch record, and every reply carries the command id with the Pod's own execution id and generation, and anything else is refused with exit 2 and one sorted JSON line carrying the reason",
+    "WorkerControl(transport, state_path, handlers, inbox) saves an inbox envelope as a received record marked inbox before acknowledging it over the authenticated endpoint, drops it when the server refuses that acknowledgement, and does not let it stop mutations until the server accepts it, so the fallback never bypasses server acceptance, expiry or the run once rule",
     "scripts.swarm_v2.api.commands: CommandQueue.command_id(execution_id, key) names the id issue uses"
   ],
   "supported_versions": {
@@ -28,8 +28,8 @@
   "authority": "The actor comes from Commands, which accepts only an authenticated operator or the current master incarnation, and the command queue issues only to the current occupant generation of the seat; a forged credential is refused before any write in case B. The fallback execs only into a Pod whose owner label is owner_for(slug) and whose execution and generation labels match the stored command; the helper refuses an envelope for another execution or generation of its own launch record. Kubernetes RBAC for pods/exec in the worker namespace bounds who can run the helper at all.",
   "authoritative_objects": "The worker command queue in Redis and the runtime operation journal are authoritative; the worker state file holds the worker's own run record. Helper reports, the ambiguity counts and the inbox files are observational or transient and may be dropped.",
   "states": {
-    "observed": "Cases A, B and C each ran twice with identical records and every case check held in proofs run 38073125527 at tested_commit.",
-    "accepted": "Answers from the fixture reach the worker handler with the exact structured payload over HTTP and over the fallback helper; a drain over the fallback and a drain over HTTP each put their worker in no new mutations mode and complete on its checkpoint. Shell metacharacters stay message content and every helper argv is the fixed helper, a mode and one URL safe envelope. Refused envelopes for another execution or generation, a tampered payload and an expired command leave the inbox empty, and a corrected new request is delivered. A lost delivery reply is reconciled by a status probe with no second delivery, a worker restart after a lost completion reports without rerunning, a lost issue reply is reconciled by command id with one stored command, and a superseded execution is answered stale.",
+    "observed": "Cases A, B and C each ran twice with identical records and every case check held in proofs run 38073606119; the later commit only removes an unreachable leftover in the inbox collector, confirmed by the run named in validation.",
+    "accepted": "Answers from the fixture reach the worker handler with the exact structured payload over HTTP and over the fallback helper; a drain over the fallback and a drain over HTTP each put their worker in no new mutations mode and complete on its checkpoint. Shell metacharacters stay message content and every helper argv is the fixed helper, a mode and one URL safe envelope. Refused envelopes for another execution or generation, a tampered payload and an expired command leave the inbox empty, and a corrected new request is delivered. A lost delivery reply is reconciled by a status probe with no second delivery, a worker restart after a lost completion reports without rerunning, a lost issue reply is reconciled by command id with one stored command, a superseded execution is answered stale, and its worker's checkpoint after succession is refused so the server keeps the drain accepted.",
     "committed": "Code and fixture inputs are at tested_commit; manifest.json hashes them.",
     "externally_verified": "None: no live API server, exec or G3 deployment was exercised."
   },
@@ -37,7 +37,7 @@
     "red": "proofs run 38071702796 on the tests only commit f78dc848: collection of the Kubernetes command tests fails on the missing module and every new worker control test fails on the missing helper functions",
     "tests": "proofs run 38073125527 at tested_commit: 274 passed across the Kubernetes commands, worker control, worker commands, runtime commands and Kubernetes runtime modules; only the case records, then regenerated, differed",
     "lint": "ruff check and ruff format passed through python -m scripts.ci_prepush",
-    "review": "Round one: Spec reader eleven findings, Standards reader thirteen; all fixed or answered in the round one commit (status carries the envelope, ack before record for inbox commands, unique staging, C1 escapes, oversized output withheld, stale and unavailable fallback outcomes, cases assert their checks).",
+    "review": "Round one: Spec reader eleven findings, Standards reader thirteen, all fixed or answered. Round two: fixed inbox records saved before acknowledgement and dropped on refusal, helper refusals carrying the Pod identity, C1 and ESC string sequences, the visible U+009B escape in the fixture, a superseded worker's refused checkpoint, and the shared MODES constant. Held with reasons: the rollback switch stays a constructor flag like SV2-KUB-02, the uncapped exec capture is a recorded limitation, and a pod read without metadata cannot come from the API server.",
     "mutation": "pending"
   },
   "measurements": {
@@ -74,7 +74,6 @@
     "The Pod name is derived from the execution id by the SV2-KUB-01 naming rule rather than read from the execution registry, whose runtime target still carries a placeholder.",
     "Helper reports and ambiguity counts are kept in Redis per swarm and not exported as telemetry yet.",
     "KubectlExec captures the whole helper output before sanitize_report withholds anything over 65536 bytes; the read itself is bounded only by the exec timeout.",
-    "If a worker loses its state file while an inbox file it already acknowledged remains, the command can run again; both live in the same Pod home volume.",
     "The controller host needs kubectl and a pods/exec grant for the fallback; neither ships with this package."
   ],
   "pull_request": "pending",

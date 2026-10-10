@@ -15,7 +15,7 @@
       true
     ],
     "evidence_class": "mocked Redis and server clock; fixture network; in process helper exec; no Kubernetes calls",
-    "input_sha256": "896370c48ac21c79969cc90d1edd9d4bbe279005314a7d61d64a81149d25c1a8",
+    "input_sha256": "a72d5c962385abf18d1df7a6fe17443cde4a010a28faeb385c56443a442b8554",
     "observed": {
       "corrected_request": [
         "queued",
