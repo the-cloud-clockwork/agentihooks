@@ -63,7 +63,7 @@ class KubeHttp:
             request.add_header("Content-Type", "application/json")
         try:
             with self.opener(request, timeout=TIMEOUT_SECONDS, context=self.context) as response:
-                return response.status, json.loads(response.read())
+                status, raw = response.status, response.read()
         except urllib.error.HTTPError as error:
             try:
                 return error.code, json.loads(error.read())
@@ -71,7 +71,13 @@ class KubeHttp:
                 return error.code, {}
         except urllib.error.URLError as error:
             raise ConnectionError(str(error.reason)) from None
-        except (ValueError, http.client.HTTPException):
+        except TimeoutError:
+            raise
+        except (OSError, http.client.HTTPException):
+            raise ConnectionError("the API server answer is unreadable") from None
+        try:
+            return status, json.loads(raw)
+        except ValueError:
             raise ConnectionError("the API server answer is unreadable") from None
 
 
