@@ -177,7 +177,7 @@ def test_a_priority_cleared_after_the_seat_comment_counts_once_per_item():
     ]
 
 
-def test_a_dispatcher_seat_keeps_the_credit_for_a_task_it_closed():
+def test_a_dispatcher_seat_counts_a_closed_task_as_a_second_outcome():
     events = [ev("comment edited", "phases/p1", by=DISPATCHER) for _ in range(24)]
     events += [ev("comment added", "followups/f0", by=DISPATCHER), ev("checked", "followups/f0", by=DISPATCHER)]
     events.append(ev("task done", "tasks/t1", by=DISPATCHER))
