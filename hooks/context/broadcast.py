@@ -520,6 +520,31 @@ def reconcile_channel_broadcasts(channel: str, desired: list[dict]) -> dict:
     }
 
 
+def cache_fleet_broadcasts(entries: list[dict]) -> int:
+    """Cache claimed fleet revisions in the local file; only the newest revision of each fleet broadcast stays, and
+    entries without a ``fleet`` tag are left alone because the file is authoritative only for local broadcasts."""
+
+    def name(m: dict) -> tuple[str, str]:
+        return m["fleet"]["swarm"], m["fleet"]["broadcast_id"]
+
+    with _file_lock(_broadcast_path()):
+        msgs = _read_broadcasts()
+        held = {m["id"] for m in msgs}
+        newest: dict[tuple[str, str], int] = {}
+        for m in [*msgs, *entries]:
+            if "fleet" in m:
+                newest[name(m)] = max(newest.get(name(m), 0), m["fleet"]["revision"])
+        kept = [m for m in msgs if "fleet" not in m or m["fleet"]["revision"] == newest[name(m)]]
+        added = [
+            {**entry, "content_hash": _msg_hash(entry)}
+            for entry in entries
+            if entry["id"] not in held and entry["fleet"]["revision"] == newest[name(entry)]
+        ]
+        if added or len(kept) != len(msgs):
+            _save_broadcasts((kept + added)[-BROADCAST_MAX_MESSAGES:])
+        return len(added)
+
+
 def find_broadcast_by_content_hash(content_hash: str, channel: str | None = None) -> dict | None:
     """Return the most recent broadcast matching content_hash + channel, else None."""
     if not content_hash:
