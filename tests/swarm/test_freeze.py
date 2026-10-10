@@ -75,8 +75,9 @@ def test_a_task_inside_any_focus_is_free(target):
 
 def test_an_urgent_task_and_a_doctor_fix_pass_a_focus():
     assert not held(task(rank="urgent"), record("plans/b", "focus"))
-    assert not held(task(phase=loop.FIX_PHASE), record("plans/b", "focus"), fix_phase=loop.FIX_PHASE)
-    assert held(task(phase=loop.FIX_PHASE), record("plans/b", "focus"))
+    assert not held(task(phase=loop.FIX_PHASE), record("lane:ci", "focus"), fix_phase=loop.FIX_PHASE)
+    assert held(task(phase=loop.FIX_PHASE), record("lane:ci", "focus"))
+    assert held(task(phase=loop.FIX_PHASE), record("lane:ci", "focus"), fix_phase="p7")
     assert held(task(rank="high"), record("plans/b", "focus"))
 
 
@@ -115,6 +116,20 @@ def test_names_say_each_freeze_in_plain_words():
         "the focus on the ci lane",
         "the freeze on research tasks",
     ]
+
+
+def test_the_drain_notice_counts_held_work_and_names_only_the_freezes_holding_it():
+    one = doc(record("plans/a"), record("plans/b"), tasks=[task()])
+    assert freeze.notice(one, one["tasks"], "") == (
+        "The swarm has no task it may start: 1 open task is held by the freeze on plan Swarm v2"
+    )
+    rows = [task(), task("t2", phase="p2"), task("t3", out_of_scope=True), task("t4", state="claimed")]
+    two = doc(record("plans/a"), record("plans/b"), record("lane:ci", "focus"), tasks=rows)
+    assert freeze.notice(two, rows, "") == (
+        "The swarm has no task it may start: 2 open tasks are held by the freeze on plan Swarm v2, "
+        "the freeze on plan Ledger polish and the focus on the ci lane"
+    )
+    assert freeze.notice(doc(record("plans/b"), tasks=[task()]), [task()], "") == freeze.DRAINED
 
 
 class FrozenLedger(FakeLedger):
@@ -172,12 +187,15 @@ def test_a_claimed_task_under_a_new_freeze_keeps_its_agent(store):
     ledger.rows["t1"]["state"] = "pr"
     tick("sw", store, ledger, runtime, now_ms=3_000)
     assert runtime.killed == [] and ledger.rows["t1"]["state"] == "pr"
+    ledger.rows["t1"]["state"] = "done"
+    tick("sw", store, ledger, runtime, now_ms=4_000)
+    assert spawned(runtime) == ["t1"] and ledger.rows["t1"]["state"] == "done"
 
 
 def test_a_doctor_swarm_claims_its_fix_task_under_a_focus(store):
     store.update("sw", template=priming.TEMPLATE)
     ledger = FrozenLedger(
-        [{"id": "fix", "phase": loop.FIX_PHASE}, {"id": "watch", "phase": "p1"}], record("plans/b", "focus")
+        [{"id": "fix", "phase": loop.FIX_PHASE}, {"id": "watch", "phase": "p1"}], record("lane:ci", "focus")
     )
     _, ready = capacity.ready_work("sw", store, ledger.state("sw"))
     assert [t["id"] for t in ready["eng"]] == ["fix"]

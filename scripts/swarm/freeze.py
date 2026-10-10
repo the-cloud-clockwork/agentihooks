@@ -9,7 +9,7 @@ DRAINED = "The swarm has no task left to start"
 SELECTORS = {"lane": lambda task: task.get("lane"), "kind": ledger_kinds.kind}
 
 
-def held(task: dict, doc: dict, graph: dict, fix_phase: str = "") -> bool:
+def held(task: dict, doc: dict, graph: dict, fix_phase: str) -> bool:
     if task.get("state") != "open":
         return False
     records = doc.get("freezes") or []
@@ -46,13 +46,19 @@ def names(doc: dict) -> list:
     return [f"the {r['verb']} on {_named(doc, r['target'])}" for r in doc.get("freezes") or []]
 
 
-def notice(doc: dict, tasks, phase: str = "") -> str:
+def notice(doc: dict, tasks, phase: str) -> str:
     graph = hierarchy.project(doc)[0]
-    count = sum(1 for t in tasks if not t.get("out_of_scope") and held(t, doc, graph, phase))
-    if not count:
+    waiting = [t for t in tasks if not t.get("out_of_scope") and held(t, doc, graph, phase)]
+    if not waiting:
         return DRAINED
-    which = "1 open task is" if count == 1 else f"{count} open tasks are"
-    return notice_text.plain(f"The swarm has no task it may start: {which} held by {_joined(names(doc))}")
+    records = doc.get("freezes") or []
+    holding = [
+        name
+        for r, name in zip(records, names(doc))
+        if r["verb"] == "focus" or any(covers(r["target"], t, ancestry(t, graph)) for t in waiting)
+    ]
+    which = "1 open task is" if len(waiting) == 1 else f"{len(waiting)} open tasks are"
+    return notice_text.plain(f"The swarm has no task it may start: {which} held by {_joined(holding)}")
 
 
 def _named(doc: dict, target: str) -> str:
