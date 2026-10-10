@@ -3,9 +3,9 @@ import json
 from pathlib import Path
 
 import pytest
+
 from scripts.swarm_v2.api.commands import CommandQueue, CommandsAPI, worker_command_ack_lag_seconds
 from scripts.swarm_v2.worker.control import RouteTransport, WorkerControl
-
 from tests import sv2_ldg02_cases
 
 FIXTURE = Path(__file__).parent / "fixtures/swarm_v2/worker-commands.json"
