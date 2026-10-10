@@ -352,7 +352,13 @@ def test_shell_hook_commands_resolve_each_program(tmp_path):
     attempt, _, environ = fixture(tmp_path)
     (tmp_path / "a+b").mkdir()
     hook_commands(
-        attempt, [f"cd {tmp_path}/a+b && hook -m hooks", "FIXTURE=1 OTHER=2 hook start", "hook | hook; hook || hook"]
+        attempt,
+        [
+            f"cd {tmp_path}/a+b && hook -m hooks",
+            "FIXTURE=1 OTHER=2 hook start",
+            f'"{tmp_path}/bin/hook" --event start',
+            "hook | hook; hook || hook",
+        ],
     )
     assert report(attempt, environ, "startup")["checks"]["hook"] is None
 
