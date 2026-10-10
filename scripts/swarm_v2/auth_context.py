@@ -293,10 +293,58 @@ class LaunchAuthority:
         registration = self.registration(slug, claims["execution_id"])
         if registration is None or registration.grant_id != claims["grant_id"]:
             self.refuse(slug, "unauthenticated", "launch grant is not registered")
+        if self._audit(self.redis, slug, registration.grant_id)["state"] == "revoked":
+            self.refuse(slug, "unauthenticated", "launch grant was revoked")
         occupants = self.store.execution_occupants(slug).values()
         if (claims["execution_id"], claims["generation"]) not in {(a.execution_id, a.generation) for a in occupants}:
             self.refuse(slug, "stale_generation", "launch grant is for a superseded execution")
         return registration
+
+    def renew(self, slug: str, token: str) -> tuple[str, str]:
+        registration = self.bound(slug, token)
+        now = int(self.clock())
+        claims = {name: getattr(registration, name) for name in (*BOUND, *AUDIT)}
+        claims.update(schema_version=SCHEMA_VERSION, issued_at=_timestamp(now), expires_at=_timestamp(now + self.ttl))
+
+        def extend(audit: dict) -> dict:
+            if audit["state"] == "revoked":
+                self.refuse(slug, "unauthenticated", "launch grant was revoked")
+            return {**audit, "expires_at": claims["expires_at"], "renewals": audit.get("renewals", 0) + 1}
+
+        self._rewrite(slug, registration.grant_id, extend, "the credential was not renewed")
+        return self.sign(claims), claims["expires_at"]
+
+    def revoke(self, slug: str, execution_id: str) -> bool:
+        registration = self.registration(slug, execution_id)
+        if registration is None:
+            return False
+
+        def revoked(audit: dict) -> dict | None:
+            return None if audit["state"] == "revoked" else {**audit, "state": "revoked"}
+
+        return self._rewrite(slug, registration.grant_id, revoked, "the registration was not revoked") is not None
+
+    def _audit(self, reader: Redis | Pipeline, slug: str, grant_id: str) -> dict:
+        return json.loads(reader.hget(self.store.key(slug, "launch-grants"), grant_id))
+
+    def _rewrite(self, slug: str, grant_id: str, change: Callable[[dict], dict | None], failure: str) -> dict | None:
+        from redis.exceptions import WatchError
+
+        key = self.store.key(slug, "launch-grants")
+        for _ in range(WRITE_ATTEMPTS):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(key)
+                    audit = change(self._audit(pipe, slug, grant_id))
+                    if audit is None:
+                        return None
+                    pipe.multi()
+                    pipe.hset(key, grant_id, json.dumps(audit))
+                    pipe.execute()
+                    return audit
+                except WatchError:
+                    continue
+        self.refuse(slug, "dependency_unavailable", f"launch grants kept changing; {failure}")
 
     def disable(self, slug: str) -> list[str]:
         from redis.exceptions import WatchError
