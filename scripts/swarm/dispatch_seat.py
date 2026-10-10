@@ -59,13 +59,13 @@ def line(trigger: dict) -> str:
     return LINES[trigger.get("kind", "priority")].format(**trigger)
 
 
-def open_triggers(slug: str, config, store, doc: dict, now_ms: int, sleeping: bool = False) -> list[dict]:
+def open_triggers(slug: str, config, store, doc: dict, now_ms: int, sleeping: bool) -> list[dict]:
     active = config.autonomy == FULL and config.state not in ENDED_STATES and not sleeping
     return triggers(doc, now_ms) + uncovered(store, slug, now_ms) + red_dev(store, slug, doc) if active else []
 
 
 def refusal(slug: str, config, store, doc: dict, now_ms: int) -> str:
-    sleeping = lifetime.sleeping(slug, store, {task["id"]: task for task in doc.get("tasks", [])})
+    sleeping = lifetime.sleeping(slug, store, {task["id"]: task for task in doc["tasks"]})
     found = open_triggers(slug, config, store, doc, now_ms, sleeping)
     return REFUSED.format(lines="\n".join(line(trigger) for trigger in found)) if found else ""
 
