@@ -104,7 +104,7 @@
   "PLR0912": 26
  },
  "hooks/mcp/channels.py::register": {
-  "C901": 18
+  "C901": 16
  },
  "hooks/mcp/conditions.py::register.condition_set": {
   "PLR0913": 11
