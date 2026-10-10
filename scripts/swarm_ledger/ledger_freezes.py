@@ -68,7 +68,7 @@ def under(doc: dict, target: str) -> set:
     below = {}
     for node, (_, link, _) in project(doc)[0].items():
         below.setdefault(link, []).append(node)
-    for task in doc["tasks"]:
+    for task in doc.get("tasks", []):
         below.setdefault(f"tasks/{task['id']}", []).extend(f"tasks/{m}" for m in task.get("group_members", []))
     found = [target]
     for parent in found:

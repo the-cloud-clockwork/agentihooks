@@ -314,8 +314,9 @@ def test_the_server_path_stores_the_first_focus_on_a_ledger_saved_without_freeze
     assert [(row["verb"], row["target"]) for row in stored.get_document(SLUG)["freezes"]] == [("focus", "plans/a")]
 
 
-def test_an_unfreeze_on_a_ledger_without_a_freezes_collection_clears_nothing():
+def test_an_unfreeze_on_a_ledger_without_freezes_or_tasks_clears_nothing():
     state, ctx = stored_without_freezes()
+    del state["tasks"]
     assert ledger_freezes.apply(state, {"op": "freeze_clear", "id": "first", "target": "plans/a"}, ctx) is True
     assert ctx.events == []
 
