@@ -2230,6 +2230,7 @@ def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeyp
         must="",
         check="",
         judge="",
+        push="",
         kind="",
         artifact=False,
         follow_up=False,

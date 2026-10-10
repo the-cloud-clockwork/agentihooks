@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from hooks.classifier import cli, corpus, evaluation
+from hooks.classifier import cli, corpus, definitions, evaluation
 from hooks.classifier.errors import BackendFailure
 from hooks.classifier.result import Answer, DecisionResult
 from scripts.swarm import metrics_outbox
@@ -427,6 +427,18 @@ def test_every_packaged_corpus_replays_clean(name):
         for item in yaml.safe_load((PACKAGE / f"{name}.corpus.yaml").read_text())["cases"]
         if item["control"] and item["name"] not in known
     )
+
+
+def test_profile_pick_replay_scores_both_ci_proof_troubleshoot_tasks_as_engineer():
+    names = ["checkpoint_flake_ci_probe", "mutation_runner_forms_ci_probe"]
+    loaded = corpus.load(definitions.load("profile-pick"), corpus.path_for("profile-pick"))
+    cases = {item.name: item for item in loaded}
+    assert [(cases[name].state["kind"], cases[name].expected) for name in names] == [
+        ("troubleshoot", {"responsibility": "engineer"})
+    ] * 2
+    outcomes = [item for item in evaluation.evaluate("profile-pick").outcomes if item.case.name in names]
+    assert {item.case.name for item in outcomes} == set(names)
+    assert [item.outcome for item in outcomes] == ["hit"] * len(outcomes)
 
 
 def one_line(text):
