@@ -2,11 +2,11 @@
 
 from scripts.swarm.store import AgentRecord
 from scripts.swarm_v2.broadcast_bridge import GRANT_NAME
+from scripts.swarm_v2.hand import HANDED, Hand
 from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused, PodApi, PreconditionFailed
 from scripts.swarm_v2.kubernetes.runtime import GENERATION_LABEL
 from scripts.swarm_v2.kubernetes.spec import launch_name, pod_name
 from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL, OWNER_LABEL, owner_for
-from scripts.swarm_v2.launch import HANDED, Hand
 
 
 def _owned(pod: dict, labels: dict[str, str]) -> bool:
@@ -63,6 +63,7 @@ class PodGrants:
     def _remove(self, pod: dict) -> bool:
         metadata = pod["metadata"]
         try:
-            return self.api.delete("pods", metadata["name"], metadata["uid"])
+            self.api.delete("pods", metadata["name"], metadata["uid"])
         except (PreconditionFailed, ApiRefused, OSError):
             return False
+        return True

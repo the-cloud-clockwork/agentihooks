@@ -13,6 +13,7 @@ from scripts.swarm_v2 import broadcast_bridge
 from scripts.swarm_v2.accounts import AccountCapacity, Slot
 from scripts.swarm_v2.auth_context import LaunchAuthority
 from scripts.swarm_v2.controller import Controller
+from scripts.swarm_v2.hand import HANDED, Hand
 from scripts.swarm_v2.registry import FleetRegistry, Session
 from scripts.swarm_v2.runtime.base import Outcome, RuntimeRouter, SpawnRequest, Status
 
@@ -22,16 +23,6 @@ NO_API_URL = "the swarm config has no API address"
 NOT_HANDED = "launch grant not handed: "
 HANDS = "launch-grant-hands"
 Target = Callable[[SpawnRequest], dict]
-
-
-@dataclass(frozen=True)
-class Hand:
-    handed: bool
-    reason: str
-    removed: bool = False
-
-
-HANDED = Hand(True, "handed")
 
 
 class WorkerHomes(Protocol):
@@ -114,7 +105,7 @@ class DistributedLaunch:
         hand = self.homes.hand(admitted, grant)
         store = self.controller.store
         store.redis.hset(store.key(self.slug, HANDS), admitted.execution_id, json.dumps(asdict(hand)))
-        if hand.handed:
+        if hand.handed or outcome.status is Status.AMBIGUOUS:
             return Launch(admitted, grant, slot, outcome, hand)
         self.exited(admitted)
         return Launch(

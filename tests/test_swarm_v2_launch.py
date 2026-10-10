@@ -14,7 +14,8 @@ from scripts.swarm_v2 import launch as launch_module
 from scripts.swarm_v2.accounts import OCCUPIED, RESERVED, AccountCapacity, Slot
 from scripts.swarm_v2.auth_context import GrantRefused, LaunchAuthority, LaunchKey
 from scripts.swarm_v2.controller import Controller
-from scripts.swarm_v2.launch import HANDED, HANDS, DistributedLaunch, Hand, Launch, LaunchTerms, WorkerHomeCommand
+from scripts.swarm_v2.hand import HANDED, Hand
+from scripts.swarm_v2.launch import HANDS, DistributedLaunch, Launch, LaunchTerms, WorkerHomeCommand
 from scripts.swarm_v2.registry import CLOSED, LIVE, FleetRegistry, Scope, Session
 from scripts.swarm_v2.runtime.base import Capability, Outcome, Placement, RuntimeRouter, SpawnRequest, Status
 from scripts.swarm_v2.runtime.routed import routed
@@ -544,6 +545,30 @@ def test_an_ambiguous_spawn_still_hands_its_grant(monkeypatch):
     assert world.homes.calls == [(launch.agent.execution_id, launch.grant)]
     assert launch.hand == HANDED
     assert launch.outcome.status is Status.AMBIGUOUS
+
+
+def test_an_ambiguous_spawn_whose_grant_is_not_handed_stays_ambiguous_and_keeps_its_slot(monkeypatch):
+    world = World(monkeypatch, runtime=Remote(Status.AMBIGUOUS), homes=Homes(Hand(False, "pod_missing", False)))
+
+    launch = world.launch(FIRST)
+
+    assert launch.outcome == Outcome("spawn", Status.AMBIGUOUS, BACKEND, None)
+    assert launch.hand == Hand(False, "pod_missing", False)
+    assert world.rows()[f"{SLUG}/{FIRST}"]["state"] == RESERVED
+    assert world.hands() == {launch.agent.execution_id: {"handed": False, "reason": "pod_missing", "removed": False}}
+
+
+def test_a_pod_left_behind_by_an_unhanded_launch_cannot_take_the_account(monkeypatch):
+    world = World(monkeypatch, homes=Homes(Hand(False, "config_map_unavailable", False)))
+    launch = world.launch(FIRST)
+
+    with pytest.raises(SwarmError) as refused:
+        world.launcher.registered(world.session(launch), launch.grant)
+
+    assert str(refused.value) == "reservation_expired"
+    [record] = world.fleet.records()
+    assert record.state == CLOSED
+    assert world.capacity.slots(ACCOUNT) == []
 
 
 def test_a_launch_refused_on_a_full_account_hands_no_grant(world):

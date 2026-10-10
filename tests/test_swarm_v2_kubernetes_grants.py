@@ -2,10 +2,10 @@ import pytest
 
 from scripts.swarm.store import AgentRecord
 from scripts.swarm_v2.broadcast_bridge import GRANT_NAME
+from scripts.swarm_v2.hand import Hand
 from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused, PreconditionFailed
 from scripts.swarm_v2.kubernetes.grants import PodGrants
 from scripts.swarm_v2.kubernetes.spec import LAUNCH_DIR, PodTemplate, launch_name
-from scripts.swarm_v2.launch import Hand
 from tests import sv2_kub02_cases as cases
 
 pytestmark = pytest.mark.unit
@@ -171,9 +171,15 @@ def test_a_config_map_that_exists_or_is_refused_removes_its_pod_and_names_why(fa
     assert api.deleted == [("pods", POD, "uid-1")]
 
 
+def test_a_pod_already_gone_after_a_refused_config_map_counts_as_removed():
+    api = Api(pod(), create_failure=ApiRefused(403, "Forbidden"), delete_answer=False)
+
+    assert PodGrants(api, SLUG).hand(agent(), GRANT) == Hand(False, "config_map_refused", True)
+    assert api.deleted == [("pods", POD, "uid-1")]
+
+
 @pytest.mark.parametrize(
-    "answer",
-    [False, PreconditionFailed(POD), ApiRefused(403, "Forbidden"), ConnectionError("API server answered 503")],
+    "answer", [PreconditionFailed(POD), ApiRefused(403, "Forbidden"), ConnectionError("API server answered 503")]
 )
 def test_a_pod_that_cannot_be_removed_after_a_refused_config_map_says_so(answer):
     api = Api(pod(), create_failure=ApiRefused(403, "Forbidden"), delete_answer=answer)
