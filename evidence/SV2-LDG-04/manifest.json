@@ -1,8 +1,8 @@
 {
   "package": "SV2-LDG-04",
-  "tested_commit": "12ca9210461bcc4a9e03fbf13365ec52acc31ab5",
+  "tested_commit": "49c2c0fd1fd5",
   "evidence_class": "mocked: real ledger server processes on a fixture folder, not a live deployment",
-  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38052346742",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38060322090",
   "fixture": "Two ledger server subprocesses sharing one tmp_path ledger folder on two reserved ports; a seeded SQLite ledger; the ledger_writer command as a third process",
   "fixture_clock": "No expiry or lease timing: the flock lease has no clock; waits are bounded health polls of at most 20 s",
   "independent_runs": 2,

@@ -3,10 +3,10 @@
   "dependency": "SV2-LDG-03",
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2381",
-  "pull_request": null,
-  "tested_commit": "12ca9210461bcc4a9e03fbf13365ec52acc31ab5",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2422",
+  "tested_commit": "49c2c0fd1fd5",
   "status": "mocked-acceptance-qualified",
-  "package_complete": false,
+  "package_complete": true,
   "evidence_class": "Two real ledger server processes sharing one SQLite ledger folder, the ledger_writer command as a third process, no Redis fixture. Live G3 qualification is separate.",
   "interfaces": [
     "scripts.swarm_v2.ledger_writer.WriterLease(directory).acquire(claimant): non-blocking exclusive flock on <ledger dir>/.ledger-writer.lock held for the process lifetime, holder recorded as {pid, host, started_at}",
@@ -31,7 +31,7 @@
   },
   "validation": {
     "red": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38050366503 failed collecting the new test module (ImportError: ledger_writer) on the tests-only commit 99a85be7",
-    "mutation_preflight": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38052346742 on 12ca9210: ledger_writer 242 killed 0 survived, ledger_server 5 killed, all three package cases passed twice in the clean run; the run is red only on 13 survivors in scripts/swarm_v2/api/tasks.py lines owned by SV2-LDG-03",
+    "mutation_preflight": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38060322090 on 49c2c0fd, restacked onto dev after SV2-LDG-03 merged: success; ledger_writer 242 killed 0 survived, ledger_server 5 killed",
     "local": "No local tests or mutation ran; static prepush passed; helm template refused ledger.replicas=2 locally"
   },
   "measurements": {
