@@ -439,7 +439,13 @@ class TestCheckPass:
     def test_a_fail_under_enforce_returns_the_task_to_its_agent(self, tmp_path):
         verdicts(tmp_path).write(TASK, "pending", "intent check running", NOW - 5)
         got = run_pass(tmp_path)
-        assert verdicts(tmp_path).read(TASK) == {"verdict": "fail", "reason": FAIL_REASON, "at": NOW, "phase": "p8"}
+        assert verdicts(tmp_path).read(TASK) == {
+            "verdict": "fail",
+            "reason": FAIL_REASON,
+            "at": NOW,
+            "phase": "p8",
+            "inputs": intent._fingerprint(DOC, DOC["tasks"][0]),
+        }
         assert got.viewed == [URL]
         assert got.ledger.updates == [(SLUG, TASK, {"state": "claimed"}, "swarm")]
         assert got.ledger.comments == [(SLUG, TASK, FAIL_COMMENT, "swarm")]
@@ -507,13 +513,15 @@ class TestCheckPass:
             "reason": "the phase can use it as delivered at probability 0.90",
             "at": NOW,
             "phase": "p8",
+            "inputs": intent._fingerprint(DOC, DOC["tasks"][0]),
         }
         assert (got.ledger.updates, got.mail.sent, rows(tmp_path)) == ([], [], [])
         assert got.actions == [f"task {TASK} intent check pass"]
 
     @pytest.mark.parametrize("verdict", ["pass", "fail", "unchecked"])
     def test_a_judged_task_is_not_asked_again(self, tmp_path, verdict):
-        verdicts(tmp_path).write(TASK, verdict, "done before", NOW - 5, phase="p8")
+        inputs = intent._fingerprint(DOC, DOC["tasks"][0])
+        verdicts(tmp_path).write(TASK, verdict, "done before", NOW - 5, phase="p8", inputs=inputs)
         got = run_pass(tmp_path)
         assert (got.actions, got.viewed) == ([], [])
         assert verdicts(tmp_path).read(TASK)["at"] == NOW - 5
@@ -561,7 +569,7 @@ class TestCheckPass:
             {**base, "id": "c", "pr_url": "https://github.com/o/r/pull/404"},
             {**base, "id": "d"},
         ]
-        verdicts(tmp_path).write("b", "pass", "judged", NOW - 5, phase="p8")
+        verdicts(tmp_path).write("b", "pass", "judged", NOW - 5, phase="p8", inputs=intent._fingerprint(DOC, base))
 
         def view(url):
             return None if url.endswith("/404") else PR
@@ -569,6 +577,86 @@ class TestCheckPass:
         actions = check(tmp_path, "observe", view=view, ask=lambda s: ("pass", "ok")).run({**DOC, "tasks": tasks})
         assert actions == ["task d intent check pass"]
         assert [verdicts(tmp_path).read(t)["verdict"] for t in "bcd"] == ["pass", "pending", "pass"]
+
+
+def counted_pass(tmp_path, mode, doc, asked, verdict="fail"):
+    def ask(state):
+        asked.append(state)
+        return verdict, "judged"
+
+    viewed = []
+    check(tmp_path, mode, lambda url: viewed.append(url) or PR, ask).run(doc)
+    return viewed
+
+
+def changed(**fields):
+    return {**DOC, "tasks": [{**DOC["tasks"][0], **fields}]}
+
+
+@pytest.mark.parametrize("mode", ["enforce", "observe"])
+class TestJudgedInputs:
+    def test_a_verdict_carries_the_judged_inputs_fingerprint(self, tmp_path, mode):
+        counted_pass(tmp_path, mode, DOC, [])
+        assert verdicts(tmp_path).read(TASK)["inputs"] == intent._fingerprint(DOC, DOC["tasks"][0])
+
+    @pytest.mark.parametrize(
+        "change", [{"description": "Refuse merge and done on a failed check."}, {"title": "Intent gate"}]
+    )
+    def test_a_corrected_task_on_the_same_pull_request_is_judged_again(self, tmp_path, mode, change):
+        asked = []
+        counted_pass(tmp_path, mode, DOC, asked)
+        counted_pass(tmp_path, mode, DOC, asked)
+        assert len(asked) == 1
+        corrected = changed(**change)
+        assert counted_pass(tmp_path, mode, corrected, asked, "pass") == [URL]
+        assert len(asked) == 2
+        record = verdicts(tmp_path).read(TASK)
+        assert (record["verdict"], record["inputs"]) == ("pass", intent._fingerprint(corrected, corrected["tasks"][0]))
+
+    def test_a_changed_plan_slice_is_judged_again(self, tmp_path, mode, monkeypatch):
+        asked, plan = [], {"text": "line one"}
+        monkeypatch.setattr(intent.plan_read, "exact", lambda doc, task: plan["text"])
+        sliced = changed(plan_lines="1-1")
+        counted_pass(tmp_path, mode, sliced, asked)
+        counted_pass(tmp_path, mode, sliced, asked)
+        assert len(asked) == 1
+        plan["text"] = "line one corrected"
+        counted_pass(tmp_path, mode, sliced, asked)
+        assert len(asked) == 2
+        assert asked[-1]["plan_chunk"] == "line one corrected"
+
+    def test_a_follow_up_mark_is_judged_again(self, tmp_path, mode, monkeypatch):
+        asked = []
+        monkeypatch.setattr(intent.plan_read, "exact", lambda doc, task: "line one")
+        counted_pass(tmp_path, mode, changed(plan_lines="1-1"), asked)
+        counted_pass(tmp_path, mode, changed(plan_lines="1-1", follow_up=True), asked)
+        assert len(asked) == 2
+        assert "plan_chunk" not in asked[-1]
+
+    def test_an_unchanged_task_reuses_its_verdict_without_a_read_or_a_call(self, tmp_path, mode):
+        asked = []
+        counted_pass(tmp_path, mode, DOC, asked)
+        before = verdicts(tmp_path).read(TASK)
+        assert counted_pass(tmp_path, mode, DOC, asked, "pass") == []
+        assert (len(asked), verdicts(tmp_path).read(TASK)) == (1, before)
+
+    def test_a_record_without_a_fingerprint_is_judged_once(self, tmp_path, mode):
+        verdicts(tmp_path).write(TASK, "pass", "judged before fingerprints", NOW - 5, phase="p8")
+        asked = []
+        counted_pass(tmp_path, mode, DOC, asked)
+        counted_pass(tmp_path, mode, DOC, asked)
+        assert len(asked) == 1
+        assert verdicts(tmp_path).read(TASK)["inputs"] == intent._fingerprint(DOC, DOC["tasks"][0])
+
+    def test_a_verdict_on_changed_inputs_stops_standing_while_it_is_judged_again(self, tmp_path, mode):
+        counted_pass(tmp_path, mode, DOC, [], "pass")
+        check(tmp_path, mode, view=lambda url: None).run(changed(title="Intent gate"))
+        assert verdicts(tmp_path).read(TASK) == {
+            "verdict": "pending",
+            "reason": "intent check running",
+            "at": NOW,
+            "phase": "p8",
+        }
 
 
 class TestModeOf:
