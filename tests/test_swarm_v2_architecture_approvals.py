@@ -157,3 +157,84 @@ def test_a_forged_change_never_removes_a_recorded_authority(tmp_path):
     ]
     assert architecture.authorities(record, KEY) == [controller["name"], "Second dispatcher"]
     assert architecture.check(record, KEY) == ["expected one coding-task authority, found 2"]
+
+
+def test_a_label_copy_of_an_authentic_approval_keeps_the_dispatcher_an_authority(tmp_path):
+    path = _record(tmp_path)
+    change = _approve(path, _dispatcher())
+    architecture.apply_inventory(path, _inventory(), key=KEY)
+    record = architecture.load_record(path)
+    record["operator_changes"] = [{k: v for k, v in change.items() if k not in ("signature", "key_id")}]
+    assert architecture.authorities(record, KEY) == ["Swarm reconciliation controller", _dispatcher()["name"]]
+    assert architecture.check(record, KEY) == ["expected one coding-task authority, found 2"]
+
+
+def test_a_non_ascii_signature_is_refused_without_an_error(tmp_path):
+    path = _record(tmp_path)
+    change = _approve(path, _dispatcher())
+    record = architecture.load_record(path)
+    record["operator_changes"] = [{**change, "signature": "é" * 64}]
+    assert architecture.approved(record, _dispatcher(), KEY) is False
+
+
+def test_a_principal_with_a_non_string_name_writes_nothing(tmp_path):
+    path = _record(tmp_path)
+    before = path.read_text()
+    with pytest.raises(architecture.ArchitectureError, match="authenticated operator required"):
+        _approve(path, _dispatcher(), authenticate=lambda slug, credential: Principal(7, Role.OPERATOR))
+    assert path.read_text() == before
+
+
+def test_render_lists_only_authentic_approvals(tmp_path):
+    path = _record(tmp_path)
+    _approve(path, _dispatcher())
+    record = architecture.load_record(path)
+    record["operator_changes"].append({**record["operator_changes"][0], "proposal": "forged", "signature": "x"})
+    line = "\nOperator architecture changes: duplicate-dispatcher by nestor at revision 1 (operator moves dispatch).\n"
+    assert line in architecture.render(record, KEY)
+    assert "\nOperator architecture changes: none.\n" in architecture.render(record)
+
+
+@pytest.mark.parametrize(
+    "environ",
+    [{}, {"SWARM_ARCHITECTURE_KEY_ID": "architecture-1"}, {"SWARM_ARCHITECTURE_KEY": "k" * 32}],
+)
+def test_no_signing_key_without_both_variables(environ):
+    assert architecture.signing_key(environ) is None
+
+
+def test_the_signing_key_comes_from_the_environment():
+    key = architecture.signing_key({"SWARM_ARCHITECTURE_KEY_ID": "architecture-1", "SWARM_ARCHITECTURE_KEY": "k" * 32})
+    assert key == KEY
+
+
+def test_a_short_signing_key_is_refused_by_name():
+    environ = {"SWARM_ARCHITECTURE_KEY_ID": "architecture-1", "SWARM_ARCHITECTURE_KEY": "short"}
+    with pytest.raises(architecture.ArchitectureError, match="^SWARM_ARCHITECTURE_KEY: signing key must be at least"):
+        architecture.signing_key(environ)
+
+
+def test_the_cli_counts_an_approval_only_with_the_signing_key(tmp_path, monkeypatch, capsys):
+    path = _record(tmp_path)
+    markdown = tmp_path / "decisions.md"
+    _approve(path, _dispatcher())
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text(json.dumps(_inventory()))
+    monkeypatch.setenv("SWARM_ARCHITECTURE_KEY_ID", "architecture-1")
+    monkeypatch.setenv("SWARM_ARCHITECTURE_KEY", "k" * 32)
+    args = ["--record", str(path), "--inventory", str(inventory), "--markdown", str(markdown)]
+    assert architecture.main(["record", *args]) == 0
+    assert json.loads(capsys.readouterr().out)["accepted"] == ["duplicate-dispatcher", "embedding-backlog"]
+    assert "duplicate-dispatcher by nestor" in markdown.read_text()
+    assert architecture.main(["check", "--record", str(path)]) == 0
+    assert capsys.readouterr().out == "ok\n"
+    monkeypatch.delenv("SWARM_ARCHITECTURE_KEY")
+    assert architecture.main(["check", "--record", str(path)]) == 1
+    assert capsys.readouterr().out == "expected one coding-task authority, found 2\n"
+
+
+def test_the_cli_reports_a_short_signing_key_without_a_traceback(monkeypatch, capsys):
+    monkeypatch.setenv("SWARM_ARCHITECTURE_KEY_ID", "architecture-1")
+    monkeypatch.setenv("SWARM_ARCHITECTURE_KEY", "short")
+    assert architecture.main(["check", "--record", str(RECORD)]) == 2
+    assert capsys.readouterr().err.startswith("error: SWARM_ARCHITECTURE_KEY: signing key must be at least")

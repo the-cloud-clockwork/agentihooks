@@ -176,11 +176,13 @@ def test_render_lists_components_decisions_and_open_items(tmp_path):
 def test_render_names_operator_changes_and_unresolved_entries():
     record = architecture.load_record(RECORD)
     record["operator_changes"] = [
-        {"proposal": "a", "sha256": "1", "approved_by": "operator", "revision": 1, "reason": "first"},
-        {"proposal": "b", "sha256": "2", "approved_by": "operator", "revision": 4, "reason": "second"},
+        _signed({"proposal": "a", "sha256": "1", "approved_by": "operator", "revision": 1, "reason": "first"}),
+        {"proposal": "forged", "sha256": "3", "approved_by": "operator", "revision": 2, "reason": "label only"},
+        _signed({"proposal": "b", "sha256": "2", "approved_by": "operator", "revision": 4, "reason": "second"}),
     ]
     record["unresolved"] = [{"id": "x", "name": "X", "reason": "why", "revision": 3}]
-    text = architecture.render(record)
+    assert "\nOperator architecture changes: none.\n" in architecture.render(record)
+    text = architecture.render(record, KEY)
     assert (
         "\nOperator architecture changes: a by operator at revision 1 (first), b by operator at revision 4 (second).\n"
         in text

@@ -2,9 +2,10 @@ import argparse
 import hashlib
 import hmac
 import json
+import os
 import sys
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from functools import partial
 from pathlib import Path
 
@@ -19,6 +20,8 @@ ROLES = ("code_owner", "state_owner", "deployment_owner")
 KINDS = frozenset({"dispatcher", "backlog", "service", "worker_component"})
 CODING_TASKS = "coding_tasks"
 SIGNED = ("proposal", "sha256", "approved_by", "revision", "reason", "key_id")
+KEY_ID_ENV = "SWARM_ARCHITECTURE_KEY_ID"
+KEY_ENV = "SWARM_ARCHITECTURE_KEY"
 CARRIES = ("changed_content", CODING_TASKS, "none", "transcripts")
 DECLARE = (
     f"a proposal must declare carries as one of {', '.join(CARRIES)}, launches_agents as true or false,"
@@ -67,7 +70,7 @@ def dispatches(component: dict) -> bool:
 
 
 def _signature(key: LaunchKey, change: dict) -> str:
-    signed = json.dumps({name: change.get(name) for name in SIGNED}, sort_keys=True).encode()
+    signed = json.dumps({"schema": SCHEMA, **{name: change.get(name) for name in SIGNED}}, sort_keys=True).encode()
     return hmac.new(key.secret, signed, hashlib.sha256).hexdigest()
 
 
@@ -77,7 +80,7 @@ def _authentic(key: LaunchKey | None, change: dict) -> bool:
         key is not None
         and change.get("key_id") == key.key_id
         and isinstance(signature, str)
-        and hmac.compare_digest(signature, _signature(key, change))
+        and hmac.compare_digest(signature.encode(), _signature(key, change).encode())
     )
 
 
@@ -105,7 +108,12 @@ def approve(
     key: LaunchKey,
 ) -> dict:
     principal = authenticate(slug, credential)
-    if not isinstance(principal, Principal) or principal.role is not Role.OPERATOR or not principal.name:
+    if (
+        not isinstance(principal, Principal)
+        or principal.role is not Role.OPERATOR
+        or not isinstance(principal.name, str)
+        or not principal.name
+    ):
         raise ArchitectureError("authenticated operator required for an architecture change")
     record = load_record(path)
     sha256 = digest(proposal)
@@ -292,7 +300,7 @@ def rollback(path: Path | str, to_revision: int, operation: str) -> dict:
     return _commit(path, record, operation, sha256, result)
 
 
-def render(record: dict) -> str:
+def render(record: dict, signing: LaunchKey | None = None) -> str:
     lines = [
         "# Swarm v2 architecture decisions",
         "",
@@ -321,7 +329,7 @@ def render(record: dict) -> str:
     lines.append("")
     changes = [
         f"{c['proposal']} by {c['approved_by']} at revision {c['revision']} ({c['reason']})"
-        for c in record["operator_changes"]
+        for c in _changes(record, signing)
     ]
     lines.append(f"Operator architecture changes: {', '.join(changes) or 'none'}.")
     for title, key in (("Unresolved decisions", "unresolved"), ("Rejected proposals", "rejected")):
@@ -330,20 +338,30 @@ def render(record: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _run(args) -> int:
+def _run(args, key: LaunchKey | None) -> int:
     if args.command == "check":
-        errors = check(load_record(args.record))
+        errors = check(load_record(args.record), key)
         print("\n".join(errors) or "ok")
         return 1 if errors else 0
     if args.command == "review":
-        print(json.dumps(review(load_record(args.record), load_inventory(args.inventory)), indent=2))
+        print(json.dumps(review(load_record(args.record), load_inventory(args.inventory), key), indent=2))
         return 0
     if args.command == "record":
-        print(json.dumps(apply_inventory(args.record, load_inventory(args.inventory)), indent=2))
+        print(json.dumps(apply_inventory(args.record, load_inventory(args.inventory), key), indent=2))
     elif args.command == "rollback":
         print(json.dumps(rollback(args.record, args.to, args.operation), indent=2))
-    Path(args.markdown).write_text(render(load_record(args.record)))
+    Path(args.markdown).write_text(render(load_record(args.record), key))
     return 0
+
+
+def signing_key(environ: Mapping[str, str]) -> LaunchKey | None:
+    key_id, secret = environ.get(KEY_ID_ENV), environ.get(KEY_ENV)
+    if not key_id or not secret:
+        return None
+    try:
+        return LaunchKey(key_id, secret.encode())
+    except ValueError as exc:
+        raise ArchitectureError(f"{KEY_ENV}: {exc}") from None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -361,7 +379,7 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--operation", required=True)
     args = parser.parse_args(argv)
     try:
-        return _run(args)
+        return _run(args, signing_key(os.environ))
     except ArchitectureError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
