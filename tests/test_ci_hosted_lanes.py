@@ -31,15 +31,15 @@ LANE_USERS = {
     *DIRECT,
 }
 EXCLUDED = {
-    "coverage-stability.yml": "one short job that reads dev run data",
-    "pages.yml": "publishes docs from main",
-    "publish-pypi.yml": "release path",
-    "release.yml": "release path",
+    "coverage-stability.yml": "a manual dispatch runs one short job that only reads dev run data",
+    "pages.yml": "a rare manual docs build; only main deploys",
+    "publish-pypi.yml": "operator release path from main",
+    "release.yml": "operator release path; a dry run tags and pushes nothing",
     "swarm-image.yml": "its jobs run only on a dev push",
 }
-EVENTS = ("pull_request", "merge_group", "push", "workflow_dispatch", "schedule")
+CALLERS = ("test.yml", "proofs.yml")
+REQUIRED = ("pull_request", "merge_group", "pull_request_target")
 REFS = ("refs/heads/dev", "refs/heads/diffcheck/plant", "refs/heads/task-branch")
-CALLERS = ("Tests", "Proofs")
 
 
 class _Context(dict):
@@ -68,44 +68,62 @@ def _blocks():
     for path in sorted(_WORKFLOWS.glob("*.yml")):
         workflow = yaml.safe_load(path.read_text())
         if "concurrency" in workflow:
-            yield path.name, workflow["name"], workflow["concurrency"]
+            yield path.name, workflow["concurrency"]
         for key, job in workflow.get("jobs", {}).items():
             if isinstance(job, dict) and "concurrency" in job:
-                yield f"{path.name}:{key}", workflow["name"], job["concurrency"]
+                yield f"{path.name}:{key}", job["concurrency"]
 
 
 def _block(where):
-    return next(block for name, _, block in _blocks() if name == where)
+    return next(block for name, block in _blocks() if name == where)
 
 
 def _resolve(block, **github):
     return {key: _evaluate(block.get(key), **github) for key in ("group", "queue", "cancel-in-progress")}
 
 
-def _contexts(title):
-    for event, ref, workflow, run_id in product(EVENTS, REFS, (title, *CALLERS), range(1000, 1010)):
-        yield {"event_name": event, "ref": ref, "workflow": workflow, "run_id": run_id}
+def _triggered(events):
+    for event, spec in events.items():
+        if event == "workflow_call":
+            continue
+        spec = spec if event == "push" and spec else {}
+        refs = [f"refs/heads/{b.replace('**', 'plant')}" for b in spec.get("branches", [])] or [
+            ref for ref in REFS if ref.removeprefix("refs/heads/") not in spec.get("branches-ignore", [])
+        ]
+        for ref in refs:
+            yield event, ref
+
+
+def _contexts(where):
+    workflow = _workflow(where.split(":")[0])
+    runners = [(workflow["name"], workflow[True])]
+    if "workflow_call" in workflow[True]:
+        runners += [(_workflow(caller)["name"], _workflow(caller)[True]) for caller in CALLERS]
+    for title, events in runners:
+        for (event, ref), run_id in product(_triggered(events), range(1000, 1010)):
+            yield {"event_name": event, "ref": ref, "workflow": title, "run_id": run_id}
 
 
 def _is_lane(group):
     return str(group).startswith("hosted-lane-")
 
 
+def _open(events):
+    push = events.get("push") or {}
+    return "workflow_dispatch" in events or ("push" in events and push.get("branches") != ["dev"])
+
+
 def test_every_non_required_trigger_is_on_a_lane_or_excluded_with_a_reason():
-    open_triggers = set()
-    for path in sorted(_WORKFLOWS.glob("*.yml")):
-        events = yaml.safe_load(path.read_text())[True]
-        push = events.get("push") or {}
-        if "workflow_dispatch" in events or ("push" in events and push.get("branches") != ["dev"]):
-            open_triggers.add(path.name)
+    open_triggers = {path.name for path in _WORKFLOWS.glob("*.yml") if _open(yaml.safe_load(path.read_text())[True])}
     users = {where.split(":")[0] for where in LANE_USERS}
     assert not users & set(EXCLUDED)
+    assert set(EXCLUDED) <= open_triggers
     assert open_triggers <= users | set(EXCLUDED)
-    assert {where for where, _, block in _blocks() if "hosted-lane" in str(block["group"])} == LANE_USERS
+    assert {where for where, block in _blocks() if "hosted-lane" in str(block["group"])} == LANE_USERS
 
 
 def test_every_lane_user_names_the_same_three_lanes():
-    for where, _, block in _blocks():
+    for where, block in _blocks():
         if "hosted-lane" in str(block["group"]):
             assert str(block["group"]).count("hosted-lane") == 1, where
             assert LANE in block["group"], where
@@ -113,8 +131,8 @@ def test_every_lane_user_names_the_same_three_lanes():
 
 def test_a_run_on_a_lane_queues_and_is_never_cancelled():
     seen = set()
-    for where, title, block in _blocks():
-        for github in _contexts(title):
+    for where, block in _blocks():
+        for github in _contexts(where):
             resolved = _resolve(block, **github)
             if _is_lane(resolved["group"]):
                 seen.add(where)
@@ -125,22 +143,23 @@ def test_a_run_on_a_lane_queues_and_is_never_cancelled():
     assert seen == LANE_USERS
 
 
+def test_no_required_run_or_its_callee_ever_reaches_a_lane():
+    checked = 0
+    for where, block in _blocks():
+        for github in _contexts(where):
+            if github["event_name"] in REQUIRED or (github["event_name"], github["ref"]) == ("push", "refs/heads/dev"):
+                checked += 1
+                assert not _is_lane(_resolve(block, **github)["group"]), (where, github)
+    assert checked
+
+
 def test_the_run_id_last_digit_spreads_runs_over_three_lanes():
     block = _block("proofs.yml")
     lanes = [_resolve(block, run_id=run_id)["group"] for run_id in range(1000, 1010)]
     assert lanes == ["hosted-lane-a"] * 3 + ["hosted-lane-b"] * 3 + ["hosted-lane-c"] * 4
 
 
-@pytest.mark.parametrize("event", ["pull_request", "merge_group", "push"])
-def test_required_runs_and_their_callees_never_reach_a_lane(event):
-    github = {"event_name": event, "ref": "refs/heads/dev", "workflow": "Tests", "run_id": 1000}
-    assert not _is_lane(_resolve(_block("test.yml"), **github)["group"])
-    for name, (_, own) in DIRECT.items():
-        assert _resolve(_block(name), **github)["group"] == f"{own}-1000"
-    assert not _is_lane(_resolve(_block("swarm-node-image.yml"), **github)["group"])
-
-
-@pytest.mark.parametrize("caller", CALLERS)
+@pytest.mark.parametrize("caller", ["Tests", "Proofs"])
 def test_a_called_workflow_never_waits_on_its_callers_lane(caller):
     github = {
         "event_name": "workflow_dispatch",
@@ -173,6 +192,16 @@ def test_direct_dispatches_and_branch_pushes_queue_on_a_lane():
         "group": "test-leaks-refs/heads/dev",
         "queue": "single",
         "cancel-in-progress": True,
+    }
+
+
+@pytest.mark.parametrize("event", ["push", "workflow_dispatch"])
+def test_dev_worker_image_runs_stay_uncapped_because_they_publish_the_deploy_image(event):
+    github = {"event_name": event, "ref": "refs/heads/dev", "workflow": "Swarm worker image", "run_id": 1000}
+    assert _resolve(_block("swarm-node-image.yml"), **github) == {
+        "group": "swarm-node-image-refs/heads/dev",
+        "queue": "single",
+        "cancel-in-progress": False,
     }
 
 

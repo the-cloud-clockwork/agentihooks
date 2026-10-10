@@ -219,7 +219,10 @@ def base_run(tmp_path):
         'printf "%s\\n" "$@" >> "$ARGS"\n'
         'case "$2" in\n'
         '  */commits/*) printf "tree-of-base" ;;\n'
-        '  */runs\\?head_sha=*) [[ -z "$FAIL_RUNS" ]] || exit 1; for r in $FAKE_RUNS; do echo "$r $FAKE_STATUS"; done ;;\n'
+        '  */runs\\?head_sha=*) [[ -z "$FAIL_RUNS" ]] || exit 1; for r in $FAKE_RUNS; do e=pull_request; s=$FAKE_STATUS;'
+        ' [[ " $FAKE_DISPATCH " == *" $r "* ]] && { e=workflow_dispatch; s=in_progress; };'
+        ' jq -n --argjson id "$r" --arg s "$s" --arg e "$e" \'{id: $id, status: $s, event: $e}\'; done'
+        " | jq -s '{workflow_runs: .}' | jq -r \"$4\" ;;\n"
         '  */artifacts*) n=$(cat "$POLLS"); echo $((n + 1)) > "$POLLS"; '
         '[[ "$2" == *"/$FAKE_KEPT_BY/"* && $n -ge $FAKE_AFTER ]] && printf 1 || printf 0 ;;\n'
         "esac\n"
@@ -228,7 +231,7 @@ def base_run(tmp_path):
     (tools / "sleep").write_text("#!/usr/bin/env bash\ntrue\n")
     (tools / "sleep").chmod(0o755)
 
-    def run(runs="111 222", kept_by="222", after=0, wait="600", fail_runs="", status="in_progress"):
+    def run(runs="111 222", kept_by="222", after=0, wait="600", fail_runs="", status="in_progress", dispatch=""):
         output = tmp_path / "output"
         output.write_text("")
         polls = tmp_path / "polls"
@@ -243,6 +246,7 @@ def base_run(tmp_path):
             FAKE_AFTER=str(after),
             FAIL_RUNS=fail_runs,
             FAKE_STATUS=status,
+            FAKE_DISPATCH=dispatch,
             WAIT_SECONDS=wait,
             BASE_SHA="b" * 40,
             GITHUB_OUTPUT=str(output),
@@ -268,9 +272,10 @@ def test_the_base_run_is_any_tests_run_on_the_base_commit_that_kept_a_baseline(b
 
 
 def test_the_base_run_ignores_dispatched_runs_that_wait_on_a_hosted_lane(base_run):
-    result, _, args = base_run()
-    assert result.returncode == 0, result.stderr
-    assert '.workflow_runs[] | select(.event != "workflow_dispatch") | "\\(.id) \\(.status)"' in args
+    result, output, _ = base_run(dispatch="111", kept_by="333", status="completed", wait="5")
+    assert result.returncode != 0
+    assert "finished without a coverage baseline" in result.stdout
+    assert output == ""
 
 
 def test_the_base_run_waits_for_an_earlier_queue_entry_to_publish(base_run):
