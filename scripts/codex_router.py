@@ -394,12 +394,15 @@ def _report(path: str, **fields: str) -> None:
         _write_route_report(path, **fields)
 
 
-def _route(environ: Mapping[str, str], route: str, run: Callable) -> tuple[CodexAccount, str, int, str]:
+def _route(
+    environ: Mapping[str, str], route: str, run: Callable, exclude: str = ""
+) -> tuple[CodexAccount, str, int, str]:
     sessions = codex_sessions_by_account()
     if route == API_ACCOUNT:
         return api_account(environ), "forced", sessions.get(API_ACCOUNT, 0), "?"
     source = CodexAccountSource(run, refresh=not route)
     pool = routing_pool(environ, run) if route else source.pool(environ)
+    pool = [account for account in pool if route or account.name != exclude]
     now = time.time()
     found = source.readings(pool, environ, now)
     account, placement, seat = select(pool, found, sessions, now, route, environ)
@@ -415,13 +418,14 @@ def main(
     active = dict(os.environ if environ is None else environ)
     report, args = _take(argv, "--agentihooks-report")
     route, args = _take(args, "--route")
+    exclude, args = _take(args, "--agentihooks-exclude")
     lock_path = Path(active.get("HOME", str(Path.home()))) / ".agentihooks" / "codex-route.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     # Held until exec: the descriptor is close-on-exec, so the next launch counts this one as a live session.
     lock = lock_path.open("a+", encoding="utf-8")
     fcntl.flock(lock, fcntl.LOCK_EX)
     try:
-        account, placement, live, cap = _route(active, route, run)
+        account, placement, live, cap = _route(active, route, run, exclude)
         account = credential(account, active)
     except RoutingError as exc:
         print(f"agentihooks codex: {exc}", file=sys.stderr)

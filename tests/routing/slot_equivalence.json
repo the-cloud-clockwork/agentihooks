@@ -5,6 +5,7 @@
         {
           "cap": 6,
           "five_left": 90.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "ALPHA",
           "sessions": 3,
@@ -15,6 +16,7 @@
         {
           "cap": 4,
           "five_left": 50.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "BRAVO",
           "sessions": 1,
@@ -25,6 +27,7 @@
         {
           "cap": 0,
           "five_left": 4.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "CHARLIE",
           "sessions": 0,
@@ -35,6 +38,7 @@
         {
           "cap": 6,
           "five_left": 75.0,
+          "five_resets_at": 1900000600,
           "harness": "claude",
           "name": "DELTA",
           "sessions": 0,
@@ -45,6 +49,7 @@
         {
           "cap": 0,
           "five_left": 90.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "ECHO",
           "sessions": 0,
@@ -55,6 +60,7 @@
         {
           "cap": null,
           "five_left": null,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "FOXTROT",
           "sessions": 0,
@@ -65,6 +71,7 @@
         {
           "cap": 6,
           "five_left": 75.0,
+          "five_resets_at": 1900000600,
           "harness": "claude",
           "name": "GOLF",
           "sessions": 0,
@@ -75,6 +82,7 @@
         {
           "cap": 0,
           "five_left": 90.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "HOTEL",
           "sessions": 0,
@@ -85,6 +93,7 @@
         {
           "cap": null,
           "five_left": null,
+          "five_resets_at": null,
           "harness": "claude",
           "name": "ZULU",
           "sessions": 2,
@@ -95,6 +104,7 @@
         {
           "cap": 6,
           "five_left": 80.0,
+          "five_resets_at": 1900001000,
           "harness": "codex",
           "name": "default",
           "sessions": 1,
@@ -105,6 +115,7 @@
         {
           "cap": 6,
           "five_left": 3.0,
+          "five_resets_at": 1900001000,
           "harness": "codex",
           "name": "alpha",
           "sessions": 0,
@@ -115,6 +126,7 @@
         {
           "cap": 6,
           "five_left": null,
+          "five_resets_at": null,
           "harness": "codex",
           "name": "beta",
           "sessions": 2,
@@ -125,6 +137,7 @@
         {
           "cap": 0,
           "five_left": 60.0,
+          "five_resets_at": null,
           "harness": "codex",
           "name": "delta",
           "sessions": 0,
@@ -135,6 +148,7 @@
         {
           "cap": null,
           "five_left": 95.0,
+          "five_resets_at": null,
           "harness": "codex",
           "name": "gamma",
           "sessions": 0,
@@ -145,6 +159,7 @@
         {
           "cap": null,
           "five_left": null,
+          "five_resets_at": null,
           "harness": "codex",
           "name": "omega",
           "sessions": 1,
@@ -221,6 +236,7 @@
         {
           "cap": 6,
           "five_left": 90.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "ALPHA",
           "sessions": 0,
@@ -231,6 +247,7 @@
         {
           "cap": 4,
           "five_left": 50.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "BRAVO",
           "sessions": 0,
@@ -241,6 +258,7 @@
         {
           "cap": 0,
           "five_left": 4.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "CHARLIE",
           "sessions": 0,
@@ -251,6 +269,7 @@
         {
           "cap": 6,
           "five_left": 75.0,
+          "five_resets_at": 1900000600,
           "harness": "claude",
           "name": "DELTA",
           "sessions": 0,
@@ -261,6 +280,7 @@
         {
           "cap": 0,
           "five_left": 90.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "ECHO",
           "sessions": 0,
@@ -271,6 +291,7 @@
         {
           "cap": null,
           "five_left": null,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "FOXTROT",
           "sessions": 0,
@@ -281,6 +302,7 @@
         {
           "cap": 6,
           "five_left": 75.0,
+          "five_resets_at": 1900000600,
           "harness": "claude",
           "name": "GOLF",
           "sessions": 0,
@@ -291,6 +313,7 @@
         {
           "cap": 0,
           "five_left": 90.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "HOTEL",
           "sessions": 0,
@@ -301,6 +324,7 @@
         {
           "cap": 6,
           "five_left": 80.0,
+          "five_resets_at": 1900001000,
           "harness": "codex",
           "name": "default",
           "sessions": 0,
@@ -412,6 +436,7 @@
         {
           "cap": 6,
           "five_left": 90.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "ALPHA",
           "sessions": 0,
@@ -422,6 +447,7 @@
         {
           "cap": 4,
           "five_left": 50.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "BRAVO",
           "sessions": 0,
@@ -432,6 +458,7 @@
         {
           "cap": 0,
           "five_left": 4.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "CHARLIE",
           "sessions": 0,
@@ -442,6 +469,7 @@
         {
           "cap": 6,
           "five_left": 75.0,
+          "five_resets_at": 1900000600,
           "harness": "claude",
           "name": "DELTA",
           "sessions": 0,
@@ -452,6 +480,7 @@
         {
           "cap": 0,
           "five_left": 90.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "ECHO",
           "sessions": 0,
@@ -462,6 +491,7 @@
         {
           "cap": null,
           "five_left": null,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "FOXTROT",
           "sessions": 0,
@@ -472,6 +502,7 @@
         {
           "cap": 6,
           "five_left": 75.0,
+          "five_resets_at": 1900000600,
           "harness": "claude",
           "name": "GOLF",
           "sessions": 0,
@@ -482,6 +513,7 @@
         {
           "cap": 0,
           "five_left": 90.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "HOTEL",
           "sessions": 0,
@@ -492,6 +524,7 @@
         {
           "cap": 6,
           "five_left": 80.0,
+          "five_resets_at": 1900001000,
           "harness": "codex",
           "name": "default",
           "sessions": 0,
@@ -502,6 +535,7 @@
         {
           "cap": 6,
           "five_left": 3.0,
+          "five_resets_at": 1900001000,
           "harness": "codex",
           "name": "alpha",
           "sessions": 0,
@@ -512,6 +546,7 @@
         {
           "cap": 6,
           "five_left": null,
+          "five_resets_at": null,
           "harness": "codex",
           "name": "beta",
           "sessions": 0,
@@ -522,6 +557,7 @@
         {
           "cap": 0,
           "five_left": 60.0,
+          "five_resets_at": null,
           "harness": "codex",
           "name": "delta",
           "sessions": 0,
@@ -532,6 +568,7 @@
         {
           "cap": null,
           "five_left": 95.0,
+          "five_resets_at": null,
           "harness": "codex",
           "name": "gamma",
           "sessions": 0,
@@ -607,6 +644,7 @@
         {
           "cap": 6,
           "five_left": 90.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "ALPHA",
           "sessions": 0,
@@ -617,6 +655,7 @@
         {
           "cap": 4,
           "five_left": 50.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "BRAVO",
           "sessions": 0,
@@ -627,6 +666,7 @@
         {
           "cap": 0,
           "five_left": 4.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "CHARLIE",
           "sessions": 0,
@@ -637,6 +677,7 @@
         {
           "cap": 6,
           "five_left": 75.0,
+          "five_resets_at": 1900000600,
           "harness": "claude",
           "name": "DELTA",
           "sessions": 0,
@@ -647,6 +688,7 @@
         {
           "cap": 0,
           "five_left": 90.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "ECHO",
           "sessions": 0,
@@ -657,6 +699,7 @@
         {
           "cap": null,
           "five_left": null,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "FOXTROT",
           "sessions": 0,
@@ -667,6 +710,7 @@
         {
           "cap": 6,
           "five_left": 75.0,
+          "five_resets_at": 1900000600,
           "harness": "claude",
           "name": "GOLF",
           "sessions": 0,
@@ -677,6 +721,7 @@
         {
           "cap": 0,
           "five_left": 90.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "HOTEL",
           "sessions": 0,
@@ -687,6 +732,7 @@
         {
           "cap": 6,
           "five_left": 80.0,
+          "five_resets_at": 1900001000,
           "harness": "codex",
           "name": "default",
           "sessions": 0,
@@ -697,6 +743,7 @@
         {
           "cap": 6,
           "five_left": 3.0,
+          "five_resets_at": 1900001000,
           "harness": "codex",
           "name": "alpha",
           "sessions": 0,
@@ -707,6 +754,7 @@
         {
           "cap": 6,
           "five_left": null,
+          "five_resets_at": null,
           "harness": "codex",
           "name": "beta",
           "sessions": 0,
@@ -717,6 +765,7 @@
         {
           "cap": 0,
           "five_left": 60.0,
+          "five_resets_at": null,
           "harness": "codex",
           "name": "delta",
           "sessions": 0,
@@ -727,6 +776,7 @@
         {
           "cap": null,
           "five_left": 95.0,
+          "five_resets_at": null,
           "harness": "codex",
           "name": "gamma",
           "sessions": 0,
@@ -823,6 +873,7 @@
         {
           "cap": 6,
           "five_left": 90.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "ALPHA",
           "sessions": 0,
@@ -833,6 +884,7 @@
         {
           "cap": 4,
           "five_left": 50.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "BRAVO",
           "sessions": 0,
@@ -843,6 +895,7 @@
         {
           "cap": 0,
           "five_left": 4.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "CHARLIE",
           "sessions": 0,
@@ -853,6 +906,7 @@
         {
           "cap": 6,
           "five_left": 75.0,
+          "five_resets_at": 1900000600,
           "harness": "claude",
           "name": "DELTA",
           "sessions": 0,
@@ -863,6 +917,7 @@
         {
           "cap": 0,
           "five_left": 90.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "ECHO",
           "sessions": 0,
@@ -873,6 +928,7 @@
         {
           "cap": null,
           "five_left": null,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "FOXTROT",
           "sessions": 0,
@@ -883,6 +939,7 @@
         {
           "cap": 6,
           "five_left": 75.0,
+          "five_resets_at": 1900000600,
           "harness": "claude",
           "name": "GOLF",
           "sessions": 0,
@@ -893,6 +950,7 @@
         {
           "cap": 0,
           "five_left": 90.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "HOTEL",
           "sessions": 0,
@@ -903,6 +961,7 @@
         {
           "cap": 6,
           "five_left": 80.0,
+          "five_resets_at": 1900001000,
           "harness": "codex",
           "name": "default",
           "sessions": 0,
@@ -913,6 +972,7 @@
         {
           "cap": 6,
           "five_left": 3.0,
+          "five_resets_at": 1900001000,
           "harness": "codex",
           "name": "alpha",
           "sessions": 0,
@@ -923,6 +983,7 @@
         {
           "cap": 6,
           "five_left": null,
+          "five_resets_at": null,
           "harness": "codex",
           "name": "beta",
           "sessions": 0,
@@ -933,6 +994,7 @@
         {
           "cap": 0,
           "five_left": 60.0,
+          "five_resets_at": null,
           "harness": "codex",
           "name": "delta",
           "sessions": 0,
@@ -943,6 +1005,7 @@
         {
           "cap": null,
           "five_left": 95.0,
+          "five_resets_at": null,
           "harness": "codex",
           "name": "gamma",
           "sessions": 0,
@@ -1019,6 +1082,7 @@
         {
           "cap": 6,
           "five_left": 90.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "ALPHA",
           "sessions": 0,
@@ -1029,6 +1093,7 @@
         {
           "cap": 4,
           "five_left": 50.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "BRAVO",
           "sessions": 0,
@@ -1039,6 +1104,7 @@
         {
           "cap": 0,
           "five_left": 4.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "CHARLIE",
           "sessions": 0,
@@ -1049,6 +1115,7 @@
         {
           "cap": 6,
           "five_left": 75.0,
+          "five_resets_at": 1900000600,
           "harness": "claude",
           "name": "DELTA",
           "sessions": 0,
@@ -1059,6 +1126,7 @@
         {
           "cap": 0,
           "five_left": 90.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "ECHO",
           "sessions": 0,
@@ -1069,6 +1137,7 @@
         {
           "cap": null,
           "five_left": null,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "FOXTROT",
           "sessions": 0,
@@ -1079,6 +1148,7 @@
         {
           "cap": 6,
           "five_left": 75.0,
+          "five_resets_at": 1900000600,
           "harness": "claude",
           "name": "GOLF",
           "sessions": 0,
@@ -1089,6 +1159,7 @@
         {
           "cap": 0,
           "five_left": 90.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "HOTEL",
           "sessions": 0,
@@ -1099,6 +1170,7 @@
         {
           "cap": 6,
           "five_left": 80.0,
+          "five_resets_at": 1900001000,
           "harness": "codex",
           "name": "default",
           "sessions": 0,
@@ -1109,6 +1181,7 @@
         {
           "cap": 6,
           "five_left": 3.0,
+          "five_resets_at": 1900001000,
           "harness": "codex",
           "name": "alpha",
           "sessions": 0,
@@ -1119,6 +1192,7 @@
         {
           "cap": 6,
           "five_left": null,
+          "five_resets_at": null,
           "harness": "codex",
           "name": "beta",
           "sessions": 0,
@@ -1129,6 +1203,7 @@
         {
           "cap": 0,
           "five_left": 60.0,
+          "five_resets_at": null,
           "harness": "codex",
           "name": "delta",
           "sessions": 0,
@@ -1139,6 +1214,7 @@
         {
           "cap": null,
           "five_left": 95.0,
+          "five_resets_at": null,
           "harness": "codex",
           "name": "gamma",
           "sessions": 0,
@@ -1215,6 +1291,7 @@
         {
           "cap": 6,
           "five_left": 90.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "ALPHA",
           "sessions": 0,
@@ -1225,6 +1302,7 @@
         {
           "cap": 4,
           "five_left": 50.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "BRAVO",
           "sessions": 0,
@@ -1235,6 +1313,7 @@
         {
           "cap": 0,
           "five_left": 4.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "CHARLIE",
           "sessions": 0,
@@ -1245,6 +1324,7 @@
         {
           "cap": 6,
           "five_left": 75.0,
+          "five_resets_at": 1900000600,
           "harness": "claude",
           "name": "DELTA",
           "sessions": 0,
@@ -1255,6 +1335,7 @@
         {
           "cap": 0,
           "five_left": 90.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "ECHO",
           "sessions": 0,
@@ -1265,6 +1346,7 @@
         {
           "cap": null,
           "five_left": null,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "FOXTROT",
           "sessions": 0,
@@ -1275,6 +1357,7 @@
         {
           "cap": 6,
           "five_left": 75.0,
+          "five_resets_at": 1900000600,
           "harness": "claude",
           "name": "GOLF",
           "sessions": 0,
@@ -1285,6 +1368,7 @@
         {
           "cap": 0,
           "five_left": 90.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "HOTEL",
           "sessions": 0,
@@ -1295,6 +1379,7 @@
         {
           "cap": 6,
           "five_left": 80.0,
+          "five_resets_at": 1900001000,
           "harness": "codex",
           "name": "default",
           "sessions": 0,
@@ -1305,6 +1390,7 @@
         {
           "cap": 6,
           "five_left": 3.0,
+          "five_resets_at": 1900001000,
           "harness": "codex",
           "name": "alpha",
           "sessions": 0,
@@ -1315,6 +1401,7 @@
         {
           "cap": 6,
           "five_left": null,
+          "five_resets_at": null,
           "harness": "codex",
           "name": "beta",
           "sessions": 0,
@@ -1325,6 +1412,7 @@
         {
           "cap": 0,
           "five_left": 60.0,
+          "five_resets_at": null,
           "harness": "codex",
           "name": "delta",
           "sessions": 0,
@@ -1335,6 +1423,7 @@
         {
           "cap": null,
           "five_left": 95.0,
+          "five_resets_at": null,
           "harness": "codex",
           "name": "gamma",
           "sessions": 0,

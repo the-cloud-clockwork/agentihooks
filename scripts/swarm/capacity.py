@@ -27,6 +27,7 @@ class Account:
     week_resets_at: int | None = None
     kind: str = SUBSCRIPTION
     weight: int | None = None
+    five_resets_at: int | None = None
 
 
 def _left(window: balancer.QuotaWindow, now: float) -> float | None:
@@ -48,8 +49,19 @@ def _claude(environ: dict, now: float) -> list[Account]:
         cap = tokens.cap(result, now) if session_bands.fresh(at, now) else None
         five, week = _left(result.five_hour, now), _left(result.seven_day, now)
         reset = session_bands.upcoming(result.seven_day.resets_at, now)
+        five_reset = session_bands.upcoming(result.five_hour.resets_at, now)
         rows.append(
-            Account("claude", result.account, _state(cap), counts.get(result.account, 0), five, week, cap, reset)
+            Account(
+                "claude",
+                result.account,
+                _state(cap),
+                counts.get(result.account, 0),
+                five,
+                week,
+                cap,
+                reset,
+                five_resets_at=five_reset,
+            )
         )
     rows += [
         Account("claude", name, "UNKNOWN", count, None, None)
@@ -89,7 +101,9 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
         five = _left(quota.five_hour, now) if quota else None
         week = _left(quota.seven_day, now) if quota else None
         reset = session_bands.upcoming(quota.seven_day.resets_at, now) if quota else None
-        rows.append(Account("codex", account.name, _state(cap), counts.get(account.name, 0), five, week, cap, reset))
+        five_reset = session_bands.upcoming(quota.five_hour.resets_at, now) if quota else None
+        row = Account("codex", account.name, _state(cap), counts.get(account.name, 0), five, week, cap, reset)
+        rows.append(replace(row, five_resets_at=five_reset))
     return rows + _api(codex_api.CodexApiSource(counts), "codex", environ, now)
 
 

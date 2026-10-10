@@ -11,6 +11,7 @@ session count per account. Outcomes:
 - push: the operator said "keep pushing"; continue to 100%.
 """
 
+import fcntl
 import os
 import time
 from collections.abc import Iterable
@@ -25,7 +26,10 @@ from hooks.config import (
     QUOTA_HANDOFF_MIN_LEFT,
     QUOTA_HANDOFF_WEEK_PCT,
     QUOTA_RESERVE_ACCOUNTS,
+    QUOTA_USAGE_STALE_SEC,
     QUOTA_WAIT_MIN_WEEK_LEFT,
+    QUOTA_WARN_5H_PCT,
+    QUOTA_WARN_WEEK_PCT,
 )
 
 if TYPE_CHECKING:
@@ -34,6 +38,7 @@ if TYPE_CHECKING:
 MIN_ROUTING_LEFT = 5.0
 PUSH_SIGNALS = ["keep pushing", "push to 100", "push until 100", "burn it to 100"]
 WAIT_TOOLS = frozenset({"CronCreate", "CronList", "CronDelete"})
+RESET_TOLERANCE_S = 600
 
 
 @dataclass(frozen=True)
@@ -140,7 +145,25 @@ def decide(
 # ---------------------------------------------------------------------------
 
 
+def _codex_windows(session_id: str) -> tuple[float, float, float | None, float | None] | None:
+    from scripts.codex_quota import session_quota
+
+    quota = session_quota(dict(os.environ), session_id) if session_id else None
+    now = time.time()
+    if quota is None or quota.seven_day.used is None or now - quota.observed_at > QUOTA_USAGE_STALE_SEC:
+        return None
+    five, week = quota.five_hour, quota.seven_day
+    return (
+        _effective(five.used or 0.0, five.resets_at, now),
+        _effective(week.used, week.resets_at, now),
+        five.resets_at,
+        week.resets_at,
+    )
+
+
 def _session_windows(session_id: str) -> tuple[float, float, float | None, float | None] | None:
+    if os.environ.get("AGENTIHOOKS_TARGET") == "codex":
+        return _codex_windows(session_id)
     from hooks.context.quota_usage import _load_native
 
     limits = _load_native(session_id) or {}
@@ -181,6 +204,34 @@ def _other_accounts(sessions: dict[str, int], fleet: Iterable[tuple[float, "Prob
     return candidates
 
 
+def _codex_accounts() -> list[Candidate]:
+    from hooks.context.account_sessions import (
+        API_ACCOUNT,
+        CODEX_DEFAULT,
+        CODEX_TOKEN_PREFIX,
+        codex_sessions_by_account,
+    )
+    from scripts import codex_router
+
+    environ = dict(os.environ)
+    sessions = codex_sessions_by_account()
+    names = {account.name for account in codex_router.token_accounts(environ)} | set(sessions)
+    pool = [codex_router.CodexAccount(CODEX_DEFAULT)] + [
+        codex_router.CodexAccount(name, f"{CODEX_TOKEN_PREFIX}{name}")
+        for name in sorted(names - {CODEX_DEFAULT, API_ACCOUNT})
+    ]
+    now = time.time()
+    candidates = []
+    for name, quota in codex_router.quotas(pool, environ).items():
+        if quota is None or quota.seven_day.used is None:
+            continue
+        five = _effective(quota.five_hour.used or 0.0, quota.five_hour.resets_at, now)
+        week = _effective(quota.seven_day.used, quota.seven_day.resets_at, now)
+        cap = codex_router.account_cap(quota, now)
+        candidates.append(Candidate(name, five, week, sessions.get(name, 0), quota.observed_at, cap))
+    return candidates
+
+
 def _api_accounts(sessions: dict[str, int]) -> list[Candidate]:
     from hooks.context.account_sessions import codex_sessions_by_account
     from scripts.routing import claude_api, codex_api, place
@@ -206,13 +257,18 @@ def evaluate(session_id: str) -> Decision | None:
     if five_used < QUOTA_HANDOFF_5H_PCT and week_used < QUOTA_HANDOFF_WEEK_PCT:
         return None
     sessions = sessions_by_account()
+    subscriptions = (
+        _codex_accounts()
+        if os.environ.get("AGENTIHOOKS_TARGET") == "codex"
+        else _other_accounts(sessions, fleet_observations(os.environ))
+    )
     return decide(
         account=session_account(agent_pid()),
         five_used=five_used,
         week_used=week_used,
         five_reset=five_reset,
         week_reset=week_reset,
-        others=_other_accounts(sessions, fleet_observations(os.environ)) + _api_accounts(sessions),
+        others=subscriptions + _api_accounts(sessions),
         push=push_active(session_id),
     )
 
@@ -302,8 +358,11 @@ def render(d: Decision, session_id: str, cwd: str) -> str:
     if d.action == "handoff" and d.target:
         t = d.target
         age = max(0, int(time.time() - t.observed_at)) // 60
+        harness = os.environ.get("AGENTIHOOKS_TARGET", "claude")
         route = " -- --route api" if t.account == "api" else ""
-        agent = f" --agent {os.environ.get('AGENTIHOOKS_TARGET', 'claude')}" if route else ""
+        resume = f" --resume {session_id}" if harness == "codex" and not route else ""
+        agent = f" --agent {harness}" if route or resume else ""
+        kept = "The new session resumes this conversation on that account. " if resume else ""
         status = (
             f"Api slot: {t.sessions}/{t.cap} sessions; subscription windows do not apply. "
             if route
@@ -317,11 +376,11 @@ def render(d: Decision, session_id: str, cwd: str) -> str:
         return (
             f"QUOTA HANDOFF REQUIRED — {head}\n"
             f"Policy decision (deterministic): move this task to another account now. "
-            f"{status}\n"
+            f"{status}{kept}\n"
             f"1. Write the handoff document to {doc}: goal, done so far (commits, PRs, evidence), "
             f"in progress, exact next steps, repo/worktree/branch, open risks, the operator's standing "
             f"instructions.\n"
-            f'2. Run: agentihooks init-agent --handoff{agent} --dir "{cwd}" --name "{name}" --prompt-file "{doc}"{route}\n'
+            f'2. Run: agentihooks init-agent --handoff{agent} --dir "{cwd}" --name "{name}" --prompt-file "{doc}"{resume}{route}\n'
             f"3. handoff=done: tell the operator which account and terminal took over, then stop; "
             f"this terminal closes when you stop. "
             f"handoff=failed: stop and report the failure to the operator."
@@ -339,9 +398,10 @@ def render(d: Decision, session_id: str, cwd: str) -> str:
             f"Every other tool is blocked until the window resets."
         )
     reset = d.week_reset if d.trigger == "week" else d.five_reset
+    prefix = "AH_CX_TOKEN_" if os.environ.get("AGENTIHOOKS_TARGET") == "codex" else "AH_CC_TOKEN_"
     return (
         f"QUOTA STOP — {head} Resets {_when(reset)}. No other account has room: {_others_text(d)}.\n"
-        f"Stop working and tell the operator to add another AH_CC_TOKEN_<slug> account, or to say "
+        f"Stop working and tell the operator to add another {prefix}<slug> account, or to say "
         f'"keep pushing" to continue on this account until 100%. Every tool is blocked.'
     )
 
@@ -375,7 +435,62 @@ def pretool(session_id: str, tool_name: str, cwd: str) -> tuple[str | None, str 
 def prompt_context(session_id: str, cwd: str) -> str | None:
     d = evaluate(session_id)
     if d is None:
-        return None
+        return early_warning(session_id)
     if d.action == "push":
         return f"QUOTA PUSH — {_trigger_text(d)}; the operator said to keep pushing on this account until 100%."
     return render(d, session_id, cwd)
+
+
+# ---------------------------------------------------------------------------
+# Early warning: Codex sessions outside a swarm, once per account, window and reset
+# ---------------------------------------------------------------------------
+
+
+def _claim_warning(account: str, window: str, reset: float | None) -> bool:
+    safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in f"{account}-{window}")
+    path = AGENTIHOOKS_HOME / "quota_policy" / "warned" / f"codex-{safe}"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        handle.seek(0)
+        seen = handle.read().strip()
+        current = reset or 0.0
+        if seen and abs(float(seen) - current) < RESET_TOLERANCE_S:
+            return False
+        handle.truncate(0)
+        handle.write(str(current))
+    return True
+
+
+def _warning_text(account: str, window: str, used: float, reset: float | None, hard: float) -> str:
+    return (
+        f"QUOTA WARNING — Codex account {account} has {_pct(100 - used)} of its {window} quota left "
+        f"({_pct(used)} used); it resets {_when(reset)}. Tell the operator now. Nothing is blocked: at {hard:g}% "
+        f"used the quota policy moves this conversation to another account with a handoff that resumes it."
+    )
+
+
+def early_warning(session_id: str) -> str | None:
+    from hooks.context.account_sessions import API_ACCOUNT, agent_pid, session_account
+
+    if os.environ.get("AGENTIHOOKS_TARGET") != "codex" or os.environ.get("AGENTIHOOKS_SWARM"):
+        return None
+    windows = None if os.environ.get("AH_ROUTE_API") else _session_windows(session_id)
+    if windows is None:
+        return None
+    five_used, week_used, five_reset, week_reset = windows
+    crossed = [
+        (window, used, reset, hard)
+        for window, used, reset, warn, hard in (
+            ("7-day", week_used, week_reset, QUOTA_WARN_WEEK_PCT, QUOTA_HANDOFF_WEEK_PCT),
+            ("5-hour", five_used, five_reset, QUOTA_WARN_5H_PCT, QUOTA_HANDOFF_5H_PCT),
+        )
+        if warn <= used < hard
+    ]
+    if not crossed:
+        return None
+    account = session_account(agent_pid())
+    if account == API_ACCOUNT:
+        return None
+    texts = [_warning_text(account, *row) for row in crossed if _claim_warning(account, row[0], row[2])]
+    return "\n".join(texts) or None
