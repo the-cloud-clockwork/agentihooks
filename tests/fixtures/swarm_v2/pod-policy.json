@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "template_version": "kub01-v2",
+  "namespace": "swarm-pod-proof",
+  "owner": "agentihooks-swarm-fixture",
+  "service_account": "swarm-worker",
+  "image_repository": "ghcr.io/the-cloud-clockwork/agentihooks-worker",
+  "brain_url": "http://brain-api.swarm-brain.svc:8080",
+  "termination_grace_seconds": 60,
+  "provider_accounts": ["claude-fixture", "codex-fixture"],
+  "profiles": {
+    "general": {
+      "limits": {"memory_mib": 4096, "cpu_millis": 2000, "ephemeral_mib": 10240},
+      "node_selector": {"anton.io/pool": "general"},
+      "tolerations": [{"key": "anton.io/spot", "operator": "Exists", "effect": "NoSchedule"}],
+      "excluded_nodes": {"anton.io/pool": ["research"]}
+    }
+  },
+  "probes": {
+    "herdr_timeout_seconds": 2,
+    "brain_timeout_seconds": 2,
+    "startup": {"initial_delay_seconds": 0, "period_seconds": 5, "timeout_seconds": 6, "failure_threshold": 24},
+    "readiness": {"initial_delay_seconds": 0, "period_seconds": 10, "timeout_seconds": 6, "failure_threshold": 3},
+    "liveness": {"initial_delay_seconds": 0, "period_seconds": 15, "timeout_seconds": 6, "failure_threshold": 4}
+  }
+}
