@@ -234,6 +234,15 @@ def test_the_tick_reopens_a_done_task_whose_pull_request_closed_unmerged(env, mo
     assert ledger.comments[-1][0::2] == ("t2", "swarm")
 
 
+def test_the_tick_hands_the_metrics_pass_its_ledger(env, monkeypatch):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    seen = []
+    monkeypatch.setattr(cli.metrics, "record_pass", lambda *args: seen.append(args[-1].ledger.state("sw")) or [])
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert [state["tasks"] for state in seen] == [ledger.state("sw")["tasks"]]
+
+
 @pytest.mark.parametrize("dependencies", [None, [], ["done"]])
 def test_block_comments_parks_and_finishes(env, dependencies, capsys):
     from scripts.swarm import idle

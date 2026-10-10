@@ -1,9 +1,10 @@
 import json
+from urllib.error import URLError
 
 import pytest
 
 from scripts.doctor import loop, priming
-from scripts.swarm import capacity, freeze, metrics_swarm
+from scripts.swarm import capacity, freeze, metrics, metrics_outbox, metrics_swarm
 from scripts.swarm.host_budget import HostSample
 from scripts.swarm.ledger_client import LedgerGone
 from scripts.swarm.metrics_outbox import Outbox, Settings
@@ -144,9 +145,19 @@ def test_the_held_spawns_gauge_counts_no_doctor_task_the_watched_focus_holds(sto
     monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
     monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
     monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
-    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
+    monkeypatch.setattr(metrics.metrics_ledger, "record", lambda *args: None)
+    spool = tmp_path / "outbox.db"
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: spool)
+    monkeypatch.setattr(
+        metrics_outbox.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(URLError("sink down")),
+    )
+    configured = {"AGENTIHOOKS_METRICS_URL": "http://sink", "AGENTIHOOKS_METRICS_USER": "test"}
+    snapshot = metrics_swarm.TickInput(store, ledger.state("sw"), [], lambda url: None, ledger)
+    assert metrics.record_pass("sw", 1_000, 0, configured, snapshot) == []
+    box = Outbox(spool, Settings("http://sink", "", ""))
     try:
-        metrics_swarm.record_pass(box, "sw", 1_000, store, ledger.state("sw"), [], {}, ledger)
         [row] = box.recent("host_samples", 1_000)
     finally:
         box.close()

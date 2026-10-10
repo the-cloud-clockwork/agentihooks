@@ -61,6 +61,7 @@ class TickInput:
     doc: dict
     findings: list
     view: Callable[[str], object]
+    ledger: object = None
 
 
 @dataclass(frozen=True)

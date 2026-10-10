@@ -248,7 +248,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                 now_ms(),
                 len(actions),
                 os.environ,
-                metrics.metrics_swarm.TickInput(store, doc, found, view),
+                metrics.metrics_swarm.TickInput(store, doc, found, view, ledger),
             )
             window = wake.window_ms(os.environ)
             actions += skip_refused(
