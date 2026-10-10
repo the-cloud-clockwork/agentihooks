@@ -47,8 +47,9 @@ def test_difficulty_without_a_confidence_falls_back():
 @pytest.mark.parametrize(
     ("answer", "params", "expected"),
     [
-        (score(2.2, 0.6), {"levels": LEVELS, "floor": "low"}, "high"),
-        (score(0, 0.9), {"levels": LEVELS, "floor": "low"}, "low"),
+        (score(0.6, 0.6), {"levels": LEVELS, "floor": "low"}, "max"),
+        (score(0.4, 0.9), {"levels": LEVELS, "floor": "low"}, "low"),
+        (score(2.2, 0.9), {"levels": LEVELS, "floor": "medium"}, "max"),
         (score(0, 0.9), {"levels": LEVELS, "floor": "high"}, "high"),
         (score(3, 0.59), {"levels": LEVELS, "floor": "low"}, "lane default"),
     ],

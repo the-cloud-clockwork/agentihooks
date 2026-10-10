@@ -77,9 +77,20 @@ CASES = [
     ),
     (
         "model-pick",
-        {"levels": ["low", "medium", "high", "xhigh"]},
+        {"levels": ["low", "medium", "high", "xhigh"], "floor": "high"},
         {"confidence": 0.6},
-        {"effort": Score("How much reasoning does this task need?", ["low", "medium", "high", "xhigh"])},
+        {
+            "effort": Score(
+                "Which reasoning effort does a coding agent need to finish this task? Most tasks are high: the task "
+                "names what to change and how to check it, even with several seams, a red test first or a before and "
+                "after measurement. xhigh is only for a task that must first find an unknown cause across several "
+                "components, or that redesigns a core concept of the system.",
+                [
+                    "high: the task names what to change and how to check it",
+                    "xhigh: an unknown cause to find across several components, or a redesign of a core concept",
+                ],
+            )
+        },
     ),
     (
         "priority-resolve",
@@ -117,9 +128,11 @@ def test_tick_definitions_reproduce_the_call_site_prompts(packaged, name, params
 
 
 @pytest.mark.parametrize("harness", sorted(EFFORTS))
-def test_model_pick_levels_cover_every_harness_effort(packaged, harness):
-    questions = runner.questions_for(definitions.load("model-pick", environ={}), {"levels": list(EFFORTS[harness])})
-    assert questions["effort"].levels == list(EFFORTS[harness])
+def test_model_pick_asks_between_the_floor_and_the_top_harness_effort(packaged, harness):
+    levels = list(EFFORTS[harness])
+    for floor in levels[:-1]:
+        questions = runner.questions_for(definitions.load("model-pick", environ={}), {"levels": levels, "floor": floor})
+        assert [text.split(":")[0] for text in questions["effort"].levels] == [floor, levels[-1]]
 
 
 @pytest.mark.parametrize(
