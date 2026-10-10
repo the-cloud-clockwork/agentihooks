@@ -17,7 +17,7 @@
     "Pod policy mounts (docs/swarm-v2/schemas/pod-policy.json): seed, artifact and cache with a claim, host_path or nfs source; load_policy refuses repeated names or normalised paths",
     "scripts.swarm_v2.kubernetes.spec.PodTemplate.render: seed and cache render read only, artifact renders writable with subPath set to the execution id; a Pod failing the checker is refused with reason storage; shared_runtime_mount_rejections_total() on the template",
     "scripts.swarm_v2.cache.Store.read_only (default mounted_read_only, the statvfs read only flag of the nearest existing folder): attach on a read only store writes nothing, publish from it is refused",
-    "scripts.swarm_v2.artifacts.publication.publish(store, scope, artifact_id, source) -> Publication(published|paused, ref, reason): an OSError from the artifact backend pauses publication and leaves the attempt files untouched",
+    "scripts.swarm_v2.artifacts.publication.publish(store, artifact_id, source) -> Publication(published|paused, ref, reason): the ArtifactStore is bound to its owner from a launch grant at construction; an OSError from the artifact backend pauses publication and leaves the attempt files untouched",
     "scripts.swarm_v2.artifacts.publication.SWITCH (SWARM_ARTIFACT_PUBLISHING=off): pauses artifact publication alone, the attempt keeps its files; any other value publishes",
     "python -m scripts.swarm_v2.artifacts.benchmark <folder> --sizes <MiB,...> --rounds N: put throughput per size through the artifact adapter in a fresh subfolder, then a loss probe on that subfolder (paused, source intact, published after restore); removes only its subfolder"
   ],

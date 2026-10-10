@@ -34,7 +34,7 @@ BENCH = Registration(
 
 
 def bench_store(folder: Path) -> base.ArtifactStore:
-    return base.ArtifactStore(LocalBackend(folder), lambda token: BENCH, "benchmark")
+    return base.ArtifactStore(LocalBackend(folder), lambda token: BENCH, BENCH.grant_id)
 
 
 def throughput(store: base.ArtifactStore, sizes_mib: list[int], rounds: int, clock: Callable[[], float]) -> list[dict]:

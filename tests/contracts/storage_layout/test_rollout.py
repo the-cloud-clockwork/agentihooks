@@ -107,9 +107,11 @@ def test_the_benchmark_writes_each_round_as_its_own_artifact(tmp_path):
 
 
 def test_the_benchmark_command_prints_its_report(tmp_path, capsys):
-    assert benchmark.main([str(tmp_path), "--sizes", "1", "--rounds", "1"]) == 0
-    report = json.loads(capsys.readouterr().out)
-    assert [row["size_mib"] for row in report["throughput"]] == [1]
+    assert benchmark.main([str(tmp_path), "--sizes", "1"]) == 0
+    out = capsys.readouterr().out
+    report = json.loads(out)
+    assert out == json.dumps(report, indent=2) + "\n"
+    assert [(row["size_mib"], row["rounds"]) for row in report["throughput"]] == [(1, 3)]
     assert report["loss"]["after_restore"] == "published"
 
 
@@ -121,3 +123,36 @@ def test_the_benchmark_command_refuses_a_missing_folder_and_bad_sizes(tmp_path, 
     assert benchmark.main([]) == 64
     assert capsys.readouterr().err.startswith("usage: python -m scripts.swarm_v2.artifacts.benchmark")
     assert benchmark.main(["--help"]) == 0
+    assert "--sizes SIZES comma separated artifact sizes in MiB" in " ".join(capsys.readouterr().out.split())
+
+
+def test_the_benchmark_loss_probe_replaces_its_folder_with_a_file_and_publishes_one_checkpoint(tmp_path, monkeypatch):
+    real = publication.publish
+    calls = []
+
+    def spy(store, artifact_id, source, *rest):
+        entries = {p.name: p.read_text() if p.is_file() else "folder" for p in mount.iterdir()}
+        calls.append((artifact_id, source.name, rest, entries))
+        return real(store, artifact_id, source, *rest)
+
+    mount = tmp_path / "mount"
+    mount.mkdir()
+    monkeypatch.setenv(publication.SWITCH, "off")
+    monkeypatch.setattr(publication, "publish", spy)
+    report = benchmark.run(mount, [1], 1, Clock())
+    assert (report["loss"]["while_lost"], report["loss"]["after_restore"]) == ("paused", "published")
+    assert report["loss"]["reason"].startswith("artifact storage is unavailable (")
+    (folder,) = {name for _, _, _, entries in calls for name in entries if not name.endswith(".lost")}
+    assert calls == [
+        ("bench-loss", "checkpoint.bin", ({},), {folder: "unmounted", folder + ".lost": "folder"}),
+        ("bench-loss", "checkpoint.bin", ({},), {folder: "folder"}),
+    ]
+
+
+def test_the_benchmark_loss_probe_keeps_the_checkpoint_under_its_own_name(tmp_path):
+    folder = tmp_path / "mount"
+    folder.mkdir()
+    store = benchmark.bench_store(folder)
+    (tmp_path / "attempt.bin").write_bytes(DATA)
+    benchmark.loss(store, folder, tmp_path / "attempt.bin")
+    assert store.recorded("bench-loss").size == len(DATA)
