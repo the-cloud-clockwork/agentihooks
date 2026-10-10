@@ -110,7 +110,8 @@ Historical supervisor image rollback must be requalified when such an image
 exists. Production rollout remains with antoncore GitOps.
 
 After committing inputs, `bash docker/swarm-node/smoke.sh OUTPUT_DIRECTORY`
-builds an archived clean context, starts two independent containers with network
+builds an archived clean context, scans the built image for credentials with
+`docker/swarm-node/scan.sh`, starts two independent containers with network
 disabled, rejects three invalid locks, rebuilds the worker stage without cache and starts
 the retained image again. The rebuild reuses the pip wheels and tool binaries of the
 `downloads` stage, each checked against its locked sha256 before use. It
@@ -167,7 +168,11 @@ the socket methods cover. Qualification reports
 `worker_image_qualified_targets`. Any refused target, or a manifest naming another
 commit, leaves the image unpromotable and nothing is pushed. The same job builds
 an incompatible herdr fixture and requires its refusal, and qualifies the
-candidate twice in independent containers.
+candidate twice in independent containers. Before the registry login it builds a
+fixture carrying a build-time generated GitHub app token, requires
+`docker/swarm-node/scan.sh` to refuse it, then scans the candidate. The scan runs
+Trivy's secret scanner over every image layer and the image config, fails on any
+finding and fails when the scanner cannot finish.
 
 Only a qualified image is pushed, under the immutable tag `sha-<commit>`, after
 the registry login, which holds the workflow token; build arguments carry only

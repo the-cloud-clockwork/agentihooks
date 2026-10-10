@@ -17,7 +17,8 @@ if [[ ! -s "$output/secrets.json" ]]; then
 fi
 python3 - "$output/secrets.json" > "$output/findings.txt" <<'PY'
 import json, sys
-for result in json.load(open(sys.argv[1])).get("Results") or []:
+from pathlib import Path
+for result in json.loads(Path(sys.argv[1]).read_text()).get("Results") or []:
     for secret in result.get("Secrets") or []:
         print(secret["RuleID"], result["Target"])
 PY

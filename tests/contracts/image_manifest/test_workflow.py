@@ -244,7 +244,11 @@ def test_scan_refuses_an_image_holding_a_credential(tmp_path):
     assert (tmp_path / "out/findings.txt").read_text() == "github-app-token opt/agentihooks/.build-token\n"
 
 
-@pytest.mark.parametrize(("status", "report"), [(1, ""), (2, CLEAN)], ids=["no-report", "scanner-error"])
+@pytest.mark.parametrize(
+    ("status", "report"),
+    [(1, ""), (2, CLEAN), (1, CLEAN)],
+    ids=["no-report", "scanner-error", "exit-without-findings"],
+)
 def test_scan_is_red_when_the_scanner_cannot_finish(tmp_path, status, report):
     done, _ = scan(tmp_path, status, report)
 
