@@ -20,6 +20,7 @@ ENV PATH=/opt/venv/bin:$PATH \
 RUN groupadd --gid 10001 swarm && useradd --uid 10001 --gid swarm --create-home swarm && mkdir /data && chown swarm:swarm /data
 COPY --from=build /opt/venv /opt/venv
 COPY media/agentihooks-logo.png /opt/venv/lib/python3.12/site-packages/media/agentihooks-logo.png
+COPY docs/swarm-v2/schemas/ /opt/venv/lib/python3.12/site-packages/docs/swarm-v2/schemas/
 USER 10001:10001
 VOLUME /data
 EXPOSE 8765
