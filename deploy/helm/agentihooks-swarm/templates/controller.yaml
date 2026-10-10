@@ -96,6 +96,10 @@ spec:
           ports:
             - name: api
               containerPort: {{ $api.port }}
+          readinessProbe:
+            tcpSocket:
+              port: api
+            periodSeconds: 2
           {{- end }}
           livenessProbe:
             exec:

@@ -2,8 +2,6 @@ import hashlib
 import json
 from pathlib import Path
 
-import yaml
-
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2 import control_service
@@ -13,8 +11,7 @@ from scripts.swarm_v2.runtime import observe
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "swarm_v2"
-VALUES = ROOT / "deploy" / "helm" / "agentihooks-swarm" / "values.yaml"
-INPUTS = ("tests/fixtures/swarm_v2/control-nodes.json", "deploy/helm/agentihooks-swarm/values.yaml")
+INPUTS = ("tests/fixtures/swarm_v2/control-nodes.json",)
 SLUG = "control-fixture"
 OWNER = "hive-anton"
 KEY = LaunchKey("launch-1", b"k" * 32)
@@ -46,8 +43,7 @@ def nodes() -> dict:
 
 
 def controller_placement() -> dict:
-    values = yaml.safe_load(VALUES.read_text())["controller"]
-    return {"affinity": values["affinity"], "tolerations": values["tolerations"]}
+    return nodes()["placement"]
 
 
 def _matches(expression: dict, labels: dict) -> bool:
