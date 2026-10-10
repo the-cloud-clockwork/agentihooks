@@ -184,6 +184,23 @@ def test_a_refusal_leaves_out_the_ledger_size_warnings():
     assert stop.value.code == REASON
 
 
+def test_a_phase_without_a_description_raises_no_size_warning():
+    from scripts.swarm_ledger import ledger_core
+
+    doc = {
+        "overview": "word " * 201,
+        "phases": [
+            {"id": "p1"},
+            {"id": "p2", "description": "word " * 101},
+            {"id": "p3", "description": "word " * 100},
+        ],
+    }
+    assert ledger_core.warnings(doc) == [
+        "overview has 201 words, limit 200",
+        "phase p2 description has 101 words, limit 100",
+    ]
+
+
 @pytest.mark.parametrize(
     ("value", "form"),
     [

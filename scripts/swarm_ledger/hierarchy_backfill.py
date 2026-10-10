@@ -9,6 +9,10 @@ from scripts.swarm_ledger import ledger_plans
 from scripts.swarm_ledger.repository import hierarchy, repository
 from scripts.swarm_ledger.repository import sqlite as store
 
+STANDALONE_DESCRIPTION = (
+    "Tasks that belonged to no phase, moved here by the hierarchy backfill so every task sits under one plan."
+)
+
 
 def digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()[:12]
@@ -134,7 +138,15 @@ def assign_unphased(doc: dict, slug: str, conflicts: list) -> None:
         if task.get("phase"):
             continue
         if not any(row["id"] == identifier for row in phases):
-            phases.append({"id": identifier, "title": "Standalone", "done": False})
+            phases.append(
+                {
+                    "id": identifier,
+                    "title": "Standalone",
+                    "description": STANDALONE_DESCRIPTION,
+                    "comments": [],
+                    "done": False,
+                }
+            )
         conflict(conflicts, "missing_phase", f"tasks/{task['id']}", task.get("phase"), f"phases/{identifier}")
         task["phase"] = identifier
 
