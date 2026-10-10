@@ -108,7 +108,17 @@ from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.status import auto_snapshot, findings, status_report, task_counts, verdict_store
-from scripts.swarm.store import ASSIST, AUTO_SCALING, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, connect
+from scripts.swarm.store import (
+    ASSIST,
+    AUTO_SCALING,
+    AUTONOMY,
+    DELEGATE,
+    DISPATCH,
+    MASTER,
+    SwarmConfig,
+    SwarmError,
+    connect,
+)
 from scripts.swarm.tick import agent_status, primed, skip_refused, spawn_holds, tick
 from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, ledger_workspace, plan_shape
 from scripts.swarm_v2.runtime.routed import routed
@@ -808,7 +818,7 @@ def cmd_status(store, args):
 def cmd_freeze(store, args):
     writer = clearance.freezer(store, args.slug, Who.from_env())
     by = None if writer == clearance.OPERATOR else writer
-    if by not in (None, clearance.DISPATCHER) and not args.quote:
+    if by and naming.lane_of(by) != DISPATCH and not args.quote:
         raise SwarmError("the master writes freezes only with the operator's words: pass them with --quote")
     LedgerClient().freeze(args.slug, args.command, args.target, by=by, reason=args.reason, quote=args.quote)
     print(json.dumps({args.command: args.target, "by": writer}))

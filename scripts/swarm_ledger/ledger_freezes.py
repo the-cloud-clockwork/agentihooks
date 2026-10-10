@@ -3,6 +3,8 @@
 import re
 import time
 
+from scripts.swarm.naming import lane_of, resolve_name
+from scripts.swarm.store import DISPATCH
 from scripts.swarm_ledger.ledger_kinds import KINDS
 from scripts.swarm_ledger.ledger_tasks import LANES
 from scripts.swarm_ledger.repository.hierarchy import project
@@ -56,7 +58,7 @@ def author(op, ctx) -> tuple[str, str] | None:
     by = op.get("by")
     if by is None:
         return "operator", op.get("quote")
-    if by == DISPATCHER:
+    if by == DISPATCHER or lane_of(resolve_name(by)) == DISPATCH:
         return (by, "") if autonomy(ctx.slug) == FULL else None
     master = ctx.meta["members"].get(by, {}).get("role") == "orchestrator"
     words = ledger_relay.verified(by, op["quote"]) if master and op.get("quote") else ""

@@ -5,7 +5,6 @@ import os
 from scripts.swarm.store import DISPATCH, FULL, MASTER, SwarmError
 
 OPERATOR = "operator"
-DISPATCHER = "dispatcher"
 COMMANDS = frozenset({"start", "pause", "stop", "close", "reopen", "set", "lift"})
 
 
@@ -34,7 +33,7 @@ def freezer(store, slug, who):
         raise SwarmError(
             f"the dispatcher of swarm {slug} writes freezes only at full autonomy, and its autonomy is {autonomy}"
         )
-    return DISPATCHER
+    return store.names.resolve(who.name)
 
 
 def record(ledger, slug, name, before, after):
