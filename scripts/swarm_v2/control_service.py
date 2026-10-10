@@ -8,6 +8,7 @@ from pathlib import Path
 from scripts.hive import auth as hive_auth
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
+from scripts.swarm_v2 import deployed
 from scripts.swarm_v2.api.executions import ExecutionsAPI
 from scripts.swarm_v2.api.server import serve
 from scripts.swarm_v2.auth_context import LaunchAuthority, LaunchKey
@@ -75,6 +76,8 @@ class ControlService:
         self.executions = ExecutionsAPI(self.grants, self.tasks)
         self.server: ThreadingHTTPServer | None = None
         self.listen: tuple[str, int] | None = None
+        self.runtime = None
+        self.api_url = ""
 
     def start(self) -> bool:
         if not self.controller.acquire():
@@ -103,6 +106,8 @@ class ControlService:
     def _open(self) -> None:
         if self.listen is not None and self.server is None:
             self.serve(*self.listen)
+            if self.api_url:
+                self.controller.store.update(self.controller.slug, api_url=self.api_url)
 
     def serve(self, host: str, port: int) -> ThreadingHTTPServer:
         self.server = serve(self.executions, host, port)
@@ -129,10 +134,20 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
     if not port.isdigit() or not 0 < int(port) <= MAX_PORT:
         raise ControlError(f"{PORT_ENV} must be a port number")
     credential = environ.get(CREDENTIAL_ENV)
+    workers = deployed.Workers.from_environ(environ, slug)
+    transports = () if workers is None else (workers.transport(environ, slug),)
     service = ControlService(
-        store, slug, launch_key(environ), lambda: hive_auth.controller(store.redis, credential), owner=owner
+        store,
+        slug,
+        launch_key(environ),
+        lambda: hive_auth.controller(store.redis, credential),
+        transports,
+        owner=owner,
     )
     service.listen = (HOST, int(port))
+    if workers is not None:
+        service.api_url = workers.terms.api_url
+        service.runtime = deployed.tick_runtime(service, workers, environ)
     try:
         service.start()
     except BaseException:

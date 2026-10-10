@@ -105,6 +105,10 @@ def world(monkeypatch):
     return World(monkeypatch)
 
 
+def pod_target(request):
+    return {"pod_namespace": "workers", "pod_name": f"swarm-{request.task['id']}"}
+
+
 def test_a_launch_reserves_its_slot_before_the_runtime_is_called(monkeypatch):
     seen = []
     world = World(monkeypatch, runtime=Remote(during=lambda request: seen.append(world.rows())))
@@ -526,20 +530,21 @@ def test_a_tick_spawn_hands_the_worker_the_api_address_of_its_swarm_config(world
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
     request = SpawnRequest(config, "eng", name, {"id": "task", "seat": FIRST})
 
-    outcome = world.launcher.from_tick(request, replace(world.terms, api_url=""))
+    outcome = world.launcher.from_tick(request, replace(world.terms, api_url=""), pod_target)
 
     assert outcome == Outcome("spawn", Status.OK, BACKEND, f"placed-{name}")
     [sent] = world.runtime.requests
     assert sent.task["endpoints"] == {broadcast_bridge.API_URL: OTHER_API}
     agent = world.store.execution(SLUG, sent.task["execution_id"])
     assert (agent.name, agent.lane, agent.task, agent.seat, agent.account) == (name, "eng", "task", FIRST, ACCOUNT)
+    assert (agent.runtime_backend, agent.runtime_target) == (BACKEND, pod_target(request))
 
 
 def test_a_tick_spawn_without_a_swarm_api_address_is_refused_before_admission(world):
     request = SpawnRequest(SwarmConfig(SLUG, "agentihooks", 2, 0), "eng", "e1", {"id": "task", "seat": FIRST})
     world.launcher.router = RuntimeRouter([world.runtime], placement=Placement(BACKEND))
 
-    outcome = world.launcher.from_tick(request, world.terms)
+    outcome = world.launcher.from_tick(request, world.terms, pod_target)
 
     assert outcome == Outcome("spawn", Status.REFUSED, BACKEND, None, "the swarm config has no API address")
     assert world.runtime.requests == []
@@ -563,7 +568,12 @@ class Herdr:
 
 def test_the_tick_runtime_launches_placed_spawns_with_the_swarm_api_address(world):
     herdr, name = Herdr(), world.store.next_name(SLUG, "eng")
-    runtime = routed({}, herdr, kubernetes=world.runtime, launch=partial(world.launcher.from_tick, terms=world.terms))
+    runtime = routed(
+        {},
+        herdr,
+        kubernetes=world.runtime,
+        launch=partial(world.launcher.from_tick, terms=world.terms, target=pod_target),
+    )
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
 
     assert runtime.spawn(config, "eng", name, {"id": "task", "seat": FIRST}) == f"placed-{name}"
