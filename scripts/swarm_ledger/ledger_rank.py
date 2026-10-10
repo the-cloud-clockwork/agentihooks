@@ -50,7 +50,8 @@ def apply(doc, op, ctx):
         return False
     rank = canonical(op["rank"])
     if op.get("if_unranked") and "rank" in task:
-        return True
+        ctx.refused.append(f"task {task_id} already has rank {task['rank']}")
+        return False
     if task.get("rank") != rank:
         task["rank"] = rank
         ctx.stamp(f"{op['item']}/rank", by)

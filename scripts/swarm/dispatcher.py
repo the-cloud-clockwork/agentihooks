@@ -6,6 +6,7 @@ comment on the task.
 """
 
 from dataclasses import dataclass
+from functools import partial
 
 from scripts.gates import log as gate_log
 from scripts.inbox.store import InboxStore
@@ -21,6 +22,8 @@ RANK = "high"
 LANES = {"engineering": "eng", "ci": "ci"}
 LEVERAGE, GROUPING, PRIORITIES = "leverage-rank", "grouping", "priority-sweep"
 SKIPPED = "skipped "
+WINDOW = (None, "high", "urgent")
+UNCOMMENTED = "; the ledger refused its comment"
 TABLE = metrics_outbox.Table("dispatch_actions", (("rule", "String"), ("mode", "String"), ("action", "String")))
 RAISED = "The dispatcher raised this task to high rank because it unblocks {work}."
 PROPOSED = "The dispatcher proposed high rank for this task to the master because it unblocks {work}."
@@ -75,43 +78,46 @@ def ordered(doc: dict, named: str, scores: dict | None = None) -> list[str]:
 def rank_pass(slug, config, store, ledger, doc, now_ms):
     scores, known = leverage(doc), {t["id"]: t for t in doc.get("tasks", [])}
     named = bottleneck.read(store, slug).get("bottleneck", "")
-    top = [known[task_id] for task_id in ordered(doc, named, scores)[:TOP]]
-    unranked = [(task, _work(scores[task["id"]])) for task in top if "rank" not in task]
+    window = [known[task_id] for task_id in ordered(doc, named, scores) if known[task_id].get("rank") in WINDOW]
+    unranked = [(task, _work(scores[task["id"]])) for task in window[:TOP] if "rank" not in task]
     if config.autonomy in APPLIES:
-        done = [action for task, work in unranked if (action := _raise(slug, ledger, task, work))]
+        step = partial(_raise, slug, ledger)
     else:
-        mail = Mail(InboxStore(store.redis), store, slug)
-        done = [action for task, work in unranked if (action := _propose(slug, ledger, mail, task, work))]
-    return [action.text for action in done] + log(slug, done, now_ms)
+        step = partial(_propose, slug, ledger, Mail(InboxStore(store.redis), store, slug))
+    done = []
+    try:
+        for task, work in unranked:
+            if action := step(task, work):
+                done.append(action)
+    finally:
+        errors = log(slug, done, now_ms)
+    return [action.text for action in done] + errors
 
 
 def _raise(slug, ledger, task, work):
     try:
-        stored = ledger.rank_task(slug, task["id"], RANK, AUTHOR, if_unranked=True)
+        ledger.rank_task(slug, task["id"], RANK, AUTHOR, if_unranked=True)
     except LedgerRefused:
         return None
-    if stored.get("rank") != RANK:
-        return None
     task["rank"] = RANK
-    _comment(slug, ledger, task, RAISED.format(work=work))
-    return Action(LEVERAGE, "apply", f"ranked task {task['id']} high: it unblocks {work}", task)
+    text = f"ranked task {task['id']} high: it unblocks {work}"
+    return Action(LEVERAGE, "apply", text + _comment(slug, ledger, task, RAISED.format(work=work)), task)
 
 
 def _comment(slug, ledger, task, text):
     try:
         ledger.comment(slug, task["id"], text, AUTHOR)
     except LedgerRefused:
-        pass
+        return UNCOMMENTED
+    return ""
 
 
 def _propose(slug, ledger, mail, task, work):
     text = PROPOSE.format(slug=slug, task=task["id"], title=task.get("title", ""), work=work)
     if not mail.send(f"dispatch-rank:{task['id']}", mail.master, text):
         return None
-    _comment(slug, ledger, task, PROPOSED.format(work=work))
-    return Action(
-        LEVERAGE, "propose", f"proposed rank high for task {task['id']} to the master: it unblocks {work}", task
-    )
+    said = f"proposed rank high for task {task['id']} to the master: it unblocks {work}"
+    return Action(LEVERAGE, "propose", said + _comment(slug, ledger, task, PROPOSED.format(work=work)), task)
 
 
 def group(slug, config, store, ledger, doc, now_ms):

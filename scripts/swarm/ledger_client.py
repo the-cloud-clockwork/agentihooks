@@ -149,8 +149,7 @@ class LedgerClient:
 
     def rank_task(self, slug, task_id, rank, by, if_unranked=False):
         guard = {"if_unranked": True} if if_unranked else {}
-        state = self._call(slug, [_op("task_rank", by, item=f"tasks/{task_id}", rank=rank, **guard)])
-        return next((t for t in state.get("tasks", []) if t["id"] == task_id), {})
+        self._call(slug, [_op("task_rank", by, item=f"tasks/{task_id}", rank=rank, **guard)])
 
     def clear_priority(self, slug, priority_id, reason):
         self._call(slug, [_op("priority_clear", "swarm", target=priority_id, reason=reason)])

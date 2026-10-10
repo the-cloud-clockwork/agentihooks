@@ -182,19 +182,35 @@ def test_the_page_rank_op_refusal_names_its_shape(extra):
     )
 
 
-@pytest.mark.parametrize(
-    ("task", "after", "changed"), [({"id": "t1", "rank": "low"}, "low", False), ({"id": "t1"}, "high", True)]
-)
-def test_an_if_unranked_rank_only_lands_on_a_task_nobody_ranked(task, after, changed):
-    doc, ctx = {"tasks": [task]}, FakeContext()
+def test_an_if_unranked_rank_lands_on_a_task_nobody_ranked():
+    doc, ctx = {"tasks": [{"id": "t1"}]}, FakeContext()
     op = {**page_rank("high"), "by": "dispatcher", "if_unranked": True}
     ledger_rank.check(op)
     assert ledger_rank.apply(doc, op, ctx) is True
-    assert (doc["tasks"][0]["rank"], ctx.dirty, ctx.stamps) == (
-        after,
-        changed,
-        [("tasks/t1/rank", "dispatcher")] if changed else [],
+    assert (doc["tasks"][0], ctx.dirty, ctx.stamps) == (
+        {"id": "t1", "rank": "high"},
+        True,
+        [("tasks/t1/rank", "dispatcher")],
     )
+
+
+@pytest.mark.parametrize("held", ["low", "high"])
+def test_an_if_unranked_rank_on_a_ranked_task_is_refused_and_names_the_rank(held):
+    op = {"op": "task_rank", "id": "g-1", "item": "tasks/t1", "rank": "low", "by": MASTER}
+    core.sync(SLUG, ops=[{**op, "rank": held}])
+    guarded = {
+        "op": "task_rank",
+        "id": "g-2",
+        "item": "tasks/t1",
+        "rank": "high",
+        "by": "dispatcher",
+        "if_unranked": True,
+    }
+    core.check_op(guarded)
+    state, rejected = core.sync(SLUG, ops=[guarded])
+    assert (rejected, rank_of(state)) == (["g-2"], held)
+    assert state["_meta"]["warnings"][0] == f"task t1 already has rank {held}"
+    assert state["_meta"]["stamps"]["tasks/t1/rank"]["by"] == MASTER
 
 
 def test_the_rank_op_by_a_refused_author_changes_nothing_and_names_why():

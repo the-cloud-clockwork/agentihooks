@@ -7,7 +7,7 @@ from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm import dispatcher, grouping, metrics, priority_sweep
 from scripts.swarm.ledger_client import LedgerRefused
-from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
+from scripts.swarm.store import MASTER, RedisStore, SwarmConfig, SwarmError
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -33,16 +33,17 @@ def doc(tasks, phases=None, **extra):
 
 
 class Ledger:
-    def __init__(self, stored=None, refused=()):
+    def __init__(self, stored=None, refused=(), broken=()):
         self.ranks, self.comments = [], []
-        self.stored, self.refused = stored or {}, set(refused)
+        self.stored, self.refused, self.broken = stored or {}, set(refused), set(broken)
 
     def rank_task(self, slug, task_id, rank, by, if_unranked=False):
         assert slug == SLUG and if_unranked is True
-        if task_id in self.refused:
+        if task_id in self.broken:
+            raise SwarmError(f"ledger {slug}: server not answering")
+        if task_id in self.refused or task_id in self.stored:
             raise LedgerRefused(f"ledger {slug} refused")
         self.ranks.append((task_id, rank, by))
-        return {"id": task_id, "rank": self.stored.get(task_id, rank)}
 
     def comment(self, slug, task_id, text, by):
         assert slug == SLUG
@@ -115,14 +116,15 @@ def test_ordered_uses_the_scores_it_is_given():
 
 
 @pytest.mark.parametrize(
-    ("target", "first"),
-    [("phases/p1", "y"), ("plans/pl", "y"), ("lane:ci", "y"), ("kind:ops", "y"), ("tasks/x", "x"), ("lane:plan", "x")],
+    "target", ["phases/p1", "plans/pl", "lane:ci", "kind:ops", "tasks/y", "tasks/x", "lane:eng", "kind:code"]
 )
-def test_focus_on_an_ancestor_or_a_selector_covers_its_tasks(target, first):
-    tasks = [task("x", phase=""), task("y", lane="ci", kind="ops"), task("w", phase="", depends_on=["x", "y"])]
+def test_focus_on_an_ancestor_or_a_selector_lifts_its_task_above_ledger_order(target):
+    x, y = task("x", phase=""), task("y", lane="ci", kind="ops")
+    focused, other = (x, y) if target in ("tasks/x", "lane:eng", "kind:code") else (y, x)
+    tasks = [other, focused, task("w", phase="", depends_on=["x", "y"])]
     phases = [{"id": "p1", "depends_on": [], "plan": "plans/pl"}]
     found = doc(tasks, phases=phases, plans=[{"id": "pl"}], freezes=[{"verb": "focus", "target": target}])
-    assert dispatcher.ordered(found, "")[0] == first
+    assert dispatcher.ordered(found, "") == [focused["id"], other["id"]]
 
 
 def test_below_delegate_a_high_leverage_task_yields_one_master_proposal_and_no_rank(store, home, shipped):
@@ -204,15 +206,42 @@ def test_a_refused_rank_write_skips_that_task_and_a_refused_comment_still_logs(s
     store.update(SLUG, autonomy="delegate")
     ledger = Ledger(refused={"a", "comment:b"})
     actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, doc(chain()), NOW)
-    assert actions == ["ranked task b high: it unblocks 2 open tasks", "ranked task c high: it unblocks 1 open task"]
+    assert actions == [
+        "ranked task b high: it unblocks 2 open tasks; the ledger refused its comment",
+        "ranked task c high: it unblocks 1 open task",
+    ]
     assert ledger.comments == [("c", dispatcher.RAISED.format(work="1 open task"), "dispatcher")]
+    assert [r["reason"] for r in gate_log.recent(SLUG, None, home)] == actions
+
+
+def test_a_failing_ledger_still_logs_the_ranks_that_landed_before_it(store, home, shipped):
+    store.update(SLUG, autonomy="delegate")
+    ledger = Ledger(broken={"b"})
+    with pytest.raises(SwarmError):
+        dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, doc(chain()), NOW)
+    assert ledger.ranks == [("a", "high", "dispatcher")]
+    assert [r["task"] for r in gate_log.recent(SLUG, None, home)] == ["a"]
+    assert [r["task"] for _, rows, _ in shipped for r in rows] == ["a"]
+
+
+def test_an_operator_low_rank_gives_up_its_place_in_the_window(store, home, shipped):
+    store.update(SLUG, autonomy="delegate")
+    tasks = [task(f"t{i}", phase="") for i in range(4)]
+    tasks.append(task("w", phase="", depends_on=["t0", "t1", "t2", "t3"]))
+    tasks.append(task("v", phase="", depends_on=["t0"]))
+    tasks[0]["rank"], tasks[1]["rank"] = "low", "high"
+    ledger = Ledger()
+    dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, doc(tasks, phases=[]), NOW)
+    assert [r[0] for r in ledger.ranks] == ["t2", "t3"]
 
 
 def test_a_refused_proposal_comment_still_logs_the_proposal(store, home, shipped):
     store.update(SLUG, autonomy="manual")
     ledger = Ledger(refused={"comment:a"})
     actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, doc(chain()), NOW)
-    assert actions[0] == "proposed rank high for task a to the master: it unblocks 3 open tasks"
+    assert actions[0] == (
+        "proposed rank high for task a to the master: it unblocks 3 open tasks; the ledger refused its comment"
+    )
     assert [c[0] for c in ledger.comments] == ["b", "c"]
 
 
@@ -304,10 +333,9 @@ def test_the_ledger_client_ranks_a_task_as_its_author(monkeypatch):
     from scripts.swarm.ledger_client import LedgerClient
 
     sent = []
-    state = {"tasks": [{"id": "z"}, {"id": "a", "rank": "high"}]}
-    monkeypatch.setattr(LedgerClient, "_call", lambda self, slug, ops=None: sent.append((slug, ops)) or state)
-    assert LedgerClient().rank_task(SLUG, "a", "high", "dispatcher", if_unranked=True) == state["tasks"][1]
-    assert LedgerClient().rank_task(SLUG, "q", "low", "master@abcdef-0001") == {}
+    monkeypatch.setattr(LedgerClient, "_call", lambda self, slug, ops=None: sent.append((slug, ops)) or {})
+    assert LedgerClient().rank_task(SLUG, "a", "high", "dispatcher", if_unranked=True) is None
+    LedgerClient().rank_task(SLUG, "q", "low", "master@abcdef-0001")
     ((_, (guarded,)), (slug, (plain,))) = sent
     assert slug == SLUG
     assert {k: guarded[k] for k in ("op", "by", "item", "rank", "if_unranked")} == {
