@@ -212,9 +212,6 @@ class AccountCapacity:
         holder = self._holder(seat)
 
         def decide(pipe, slots, now):
-            own = slots.get(retiring(holder, grant.generation))
-            if own is not None and self._owns(own, grant):
-                return [], [own.holder], own
             held = slots.get(holder)
             if held is None:
                 return [], [], None

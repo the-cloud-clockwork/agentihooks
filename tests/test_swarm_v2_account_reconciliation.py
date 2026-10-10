@@ -435,18 +435,18 @@ def test_other_swarms_rows_are_never_judged(world):
     assert "elsewhere/eng-2@elsewhere" in world.rows()
 
 
-def test_a_predecessor_releases_its_own_retiring_row_and_nothing_newer(world):
+def test_a_superseded_predecessor_cannot_release_its_retiring_row_or_the_newer_slot(world):
     world.running(HANDOFF)
     old = world.tokens[HANDOFF]
     _, token = world.launch(HANDOFF)
     world.capacity.reserve(token, CAP, TTL)
+    before = world.rows()
 
-    released = world.capacity.release(old)
+    with pytest.raises(SwarmError):
+        world.capacity.release(old)
 
-    assert (released.holder, released.generation, released.state) == (RETIRING, 1, OCCUPIED)
-    assert sorted(world.rows()) == [SUCCESSOR]
-    assert refusal(world.capacity.release, old) == "stale_generation"
-    assert sorted(world.rows()) == [SUCCESSOR]
+    assert sorted(before) == sorted([RETIRING, SUCCESSOR])
+    assert world.rows() == before
 
 
 def test_a_replacement_of_a_closed_occupancy_takes_the_seat_slot(world):
