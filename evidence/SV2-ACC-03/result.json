@@ -1,0 +1,76 @@
+{
+  "package": "SV2-ACC-03",
+  "dependency": ["SV2-ACC-02"],
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2382",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2408",
+  "tested_commit": "37077bcf8d769d611e63bbdb62df8d284371d6cd",
+  "status": "mocked-acceptance-qualified",
+  "package_complete": false,
+  "evidence_class": "Scoped fixture launch grants from LaunchAuthority, fakeredis, fixture clock; no live rollout. Live G3 qualification is separate.",
+  "interfaces": [
+    "scripts.swarm_v2.quota.QuotaObservations.publish: grant-only; account, execution and generation come from the validated launch grant; reports outside the provider window schema raise invalid_request and write nothing; an older or replayed report returns the stored newer observation and counts as stale",
+    "QuotaObservations.latest, history, stale_reports, quota_observation_age_seconds",
+    "QuotaObservations.reading and cap: unknown for absent, failed, partial or older than 900 s readings; cap 0 when unknown or without room",
+    "QuotaObservations.admit: admit, handoff to a configured account with at least 5 percent routing left, or one bounded 300 s wait per account and harness",
+    "scripts.swarm_v2.quota.latest_all and fleet_observations: the newest observation per account, aged ones with empty windows, drifted records skipped, empty unless AGENTIHOOKS_FLEET_QUOTA=1 or when the store is unreachable",
+    "hooks.context.quota_policy._other_accounts(sessions, fleet): merges fleet observations with the local router cache, newest per account, the fleet wins a tie; evaluate passes fleet_observations(os.environ); decide is unchanged"
+  ],
+  "supported_versions": {
+    "python": "3.11 and 3.12 unit shards passed in the linked CI run",
+    "coordination": "SV2-CTL launch grants (LaunchAuthority), Redis WATCH/MULTI on the quota keys under the swarm root",
+    "harnesses": "claude and codex observations are stored separately; quota_policy reads the claude harness",
+    "compatibility": "With AGENTIHOOKS_FLEET_QUOTA unset, quota_policy reads only the local router cache, the preceding behaviour"
+  },
+  "states": {
+    "observed": "Provider window reports from a grant holder and the local router cache",
+    "accepted": "A report whose grant validates for this swarm and whose fields match the provider window schema",
+    "committed": "Redis WATCH/MULTI transaction on the quota, quota-history, quota-stale and quota-waits keys",
+    "externally_verified": "None; no live launch publishes observations yet"
+  },
+  "recovery_contract": {
+    "obligation": "A provider outage leads to bounded wait or configured handoff without repeated unbounded agent starts",
+    "case": "T-SV2-ACC-03-C, evidence/SV2-ACC-03/c-result.json",
+    "test": "tests/test_swarm_v2_quota.py::test_a_provider_outage_waits_a_bounded_time_without_new_starts",
+    "result": "An error report makes the reading unknown; admit returns one 300 s wait that repeated calls do not extend, hands off when the configured account has room, and the newer exhausted observation survives an owner restart and a stale replay"
+  },
+  "validation": {
+    "red": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38050367889 on the tests-only commit fafd35c3 failed: the quota module did not exist",
+    "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38054947948",
+    "unit": "All Python unit shards on 3.11 and 3.12 passed; 131 quota and quota policy test ids, 252 PASSED rows, none failed; case A ran twice on independent fixtures",
+    "lint": "CI lint passed",
+    "coverage": "CI coverage ratchet passed",
+    "mutation": "Mutation preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38054941544 passed on 37077bcf: quota.py 403 killed, quota_policy.py 9 killed, no survivors",
+    "sonar": "CI sonar passed",
+    "review": "Standards reader closed after two rounds, Spec reader after three",
+    "local": "No local tests or mutation ran; static prepush passed on 37077bcf"
+  },
+  "measurements": {
+    "quota_observation_age_seconds": {
+      "a": [30.0, 30.0],
+      "b": {"absent": null, "failed_at_240000_ms": 30.0, "partial_or_failed_at_120000_ms": 150.0, "aged": 900.001},
+      "c": 10.0
+    },
+    "dimension": "Each test has its own fakeredis swarm built from quota-observations.json at fixture clock 270000 ms; account fixture, harness claude"
+  },
+  "cases": {
+    "a": "evidence/SV2-ACC-03/a-result.json",
+    "b": "evidence/SV2-ACC-03/b-result.json",
+    "c": "evidence/SV2-ACC-03/c-result.json",
+    "manifest": "evidence/SV2-ACC-03/manifest.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Unset AGENTIHOOKS_FLEET_QUOTA: fleet_observations returns nothing and quota_policy routes on the local router cache alone; QuotaObservations.admit stays conservative, never admitting on unknown data",
+    "test": "tests/test_swarm_v2_quota.py::test_fleet_observations_are_off_unless_enabled",
+    "job": 114222011794,
+    "output": "PASSED at 2026-10-10T13:21:10.8691929Z",
+    "data_safety": "Recorded quota observations and history stay stored untouched while the switch is off and are read again when it is on; they are authoritative and never deleted as caches"
+  },
+  "remaining_limitations": [
+    "admit and cap have no production caller yet; the distributed launch path that also calls AccountCapacity.reserve is a later package",
+    "No live launch publishes observations yet; the publisher wiring belongs to the worker and controller packages",
+    "quota_observation_age_seconds is collected as evidence only; no metric exporter emits it",
+    "quota_policy reads only the claude harness",
+    "The freshness limit of 900 s is the session band constant; a provider with slower reporting reads unknown"
+  ]
+}

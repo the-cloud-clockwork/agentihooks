@@ -1,0 +1,63 @@
+{
+  "package": "SV2-ACC-03",
+  "case": "T-SV2-ACC-03-A",
+  "tested_commit": "37077bcf8d769d611e63bbdb62df8d284371d6cd",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38054947948",
+  "fixture": "tests/fixtures/swarm_v2/quota-observations.json: account fixture on harness claude reports exhausted (five_used 100, observed 240000 ms), then a stale full report (five_used 0, observed 120000 ms) arrives; account spare holds room; fixture clock 270000 ms",
+  "fixture_clock": "build() patches time.time to the fixture clock; QuotaObservations reads the same list; launch grants are issued at the build clock inside their 300 s lifetime",
+  "independent_runs": 2,
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_quota.py::test_a_stale_full_report_after_a_newer_exhausted_one_keeps_the_exhausted_reading[first]",
+      "job": 114222011902,
+      "output": "PASSED at 2026-10-10T13:21:33.5639592Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_quota.py::test_a_stale_full_report_after_a_newer_exhausted_one_keeps_the_exhausted_reading[second]",
+      "job": 114222011902,
+      "output": "PASSED at 2026-10-10T13:21:33.3929538Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_quota.py::test_routing_uses_the_newest_fleet_observation_over_a_stale_local_cache",
+      "job": 114222011842,
+      "output": "PASSED at 2026-10-10T13:21:47.3053305Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_quota.py::test_the_source_execution_and_account_come_from_the_grant",
+      "job": 114222011842,
+      "output": "PASSED at 2026-10-10T13:21:47.3270039Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_quota.py::test_many_machines_reporting_one_account_stay_one_reading",
+      "job": 114222011846,
+      "output": "PASSED at 2026-10-10T13:20:43.7459816Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_quota.py::test_an_exhausted_account_hands_off_to_its_configured_account",
+      "job": 114222011902,
+      "output": "PASSED at 2026-10-10T13:21:33.7769688Z"
+    },
+    {
+      "test": "tests/context/test_quota_policy.py::test_a_newer_fleet_observation_outranks_the_local_cache",
+      "job": 114222011842,
+      "output": "PASSED at 2026-10-10T13:21:03.8903552Z"
+    },
+    {
+      "test": "tests/context/test_quota_policy.py::test_a_fleet_observation_wins_a_tie_with_the_local_cache",
+      "job": 114222011846,
+      "output": "PASSED at 2026-10-10T13:20:00.1131830Z"
+    }
+  ],
+  "state_assertions": {
+    "store": "latest(fixture, claude) equals the exhausted observation; history holds only observed_ms 240000; quota-stale counts 1 for claude:fixture",
+    "reading": "Reading(fixture, claude, observed, age 30.0 s, routing_left 0.0, five_left 0.0, week_left 38.0); cap 0",
+    "grant": "account, execution_id and generation of the stored observation equal the validated launch grant",
+    "routing": "quota_policy._other_accounts over fleet observations and a stale local cache entry reports fixture at five_used 100 and spare at 20; decide hands off to spare with the unchanged policy",
+    "fleet": "three machines reporting spare leave one reading, the newest"
+  },
+  "boundary": "The controller-side Redis records are the authoritative fleet reading; the local router cache is merged as supporting evidence and loses to a newer fleet observation",
+  "cleanup": "fakeredis per test; no live resource mutations",
+  "quota_observation_age_seconds": {"first": 30.0, "second": 30.0, "dimension": "account fixture, harness claude, fixture clock 270000 ms against the exhausted observation at 240000 ms"},
+  "passed": true
+}
