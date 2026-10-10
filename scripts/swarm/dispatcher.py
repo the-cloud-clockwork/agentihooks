@@ -13,6 +13,7 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import bottleneck, grouping, metrics_outbox, priority_sweep
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.ledger_events import Mail
+from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger.repository import hierarchy
 
 AUTHOR = "dispatcher"
@@ -23,7 +24,7 @@ LANES = {"engineering": "eng", "ci": "ci"}
 LEVERAGE, GROUPING, PRIORITIES = "leverage-rank", "grouping", "priority-sweep"
 SKIPPED = "skipped "
 WINDOW = (None, "high", "urgent")
-UNCOMMENTED = "; the ledger refused its comment"
+UNCOMMENTED = "; the ledger did not take its comment"
 TABLE = metrics_outbox.Table("dispatch_actions", (("rule", "String"), ("mode", "String"), ("action", "String")))
 RAISED = "The dispatcher raised this task to high rank because it unblocks {work}."
 PROPOSED = "The dispatcher proposed high rank for this task to the master because it unblocks {work}."
@@ -107,7 +108,7 @@ def _raise(slug, ledger, task, work):
 def _comment(slug, ledger, task, text):
     try:
         ledger.comment(slug, task["id"], text, AUTHOR)
-    except LedgerRefused:
+    except SwarmError:
         return UNCOMMENTED
     return ""
 

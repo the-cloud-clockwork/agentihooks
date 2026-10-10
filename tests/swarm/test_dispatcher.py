@@ -47,6 +47,8 @@ class Ledger:
 
     def comment(self, slug, task_id, text, by):
         assert slug == SLUG
+        if f"comment:{task_id}" in self.broken:
+            raise SwarmError(f"ledger {slug}: server not answering")
         if f"comment:{task_id}" in self.refused:
             raise LedgerRefused(f"ledger {slug} refused")
         self.comments.append((task_id, text, by))
@@ -207,7 +209,7 @@ def test_a_refused_rank_write_skips_that_task_and_a_refused_comment_still_logs(s
     ledger = Ledger(refused={"a", "comment:b"})
     actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, doc(chain()), NOW)
     assert actions == [
-        "ranked task b high: it unblocks 2 open tasks; the ledger refused its comment",
+        "ranked task b high: it unblocks 2 open tasks; the ledger did not take its comment",
         "ranked task c high: it unblocks 1 open task",
     ]
     assert ledger.comments == [("c", dispatcher.RAISED.format(work="1 open task"), "dispatcher")]
@@ -222,6 +224,14 @@ def test_a_failing_ledger_still_logs_the_ranks_that_landed_before_it(store, home
     assert ledger.ranks == [("a", "high", "dispatcher")]
     assert [r["task"] for r in gate_log.recent(SLUG, None, home)] == ["a"]
     assert [r["task"] for _, rows, _ in shipped for r in rows] == ["a"]
+
+
+def test_a_failing_comment_after_a_landed_rank_still_logs_that_rank(store, home, shipped):
+    store.update(SLUG, autonomy="delegate")
+    ledger = Ledger(broken={"comment:a"})
+    actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, doc(chain()), NOW)
+    assert actions[0] == "ranked task a high: it unblocks 3 open tasks; the ledger did not take its comment"
+    assert [r["task"] for r in gate_log.recent(SLUG, None, home)] == ["a", "b", "c"]
 
 
 def test_an_operator_low_rank_gives_up_its_place_in_the_window(store, home, shipped):
@@ -240,7 +250,7 @@ def test_a_refused_proposal_comment_still_logs_the_proposal(store, home, shipped
     ledger = Ledger(refused={"comment:a"})
     actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, doc(chain()), NOW)
     assert actions[0] == (
-        "proposed rank high for task a to the master: it unblocks 3 open tasks; the ledger refused its comment"
+        "proposed rank high for task a to the master: it unblocks 3 open tasks; the ledger did not take its comment"
     )
     assert [c[0] for c in ledger.comments] == ["b", "c"]
 
