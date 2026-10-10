@@ -3,6 +3,7 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
@@ -104,6 +105,21 @@ def put(port: int, operation: str, text: str) -> dict:
     return {"status": response.status, "applied": reply["applied"], "rejected": reply["rejected"]}
 
 
+def labelled(port: int) -> dict:
+    body = json.dumps({"ops": [{"op": "add", "id": "a-label", "thread": "chat", "text": "Claimed by a label"}]})
+    message = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/{SLUG}",
+        data=body.encode(),
+        headers={"Host": f"127.0.0.1:{port}", "X-Ledger-Agent": "operator", "Content-Type": "application/json"},
+        method="PUT",
+    )
+    try:
+        with urllib.request.urlopen(message, timeout=10) as response:
+            return {"status": response.status, "reason": ""}
+    except urllib.error.HTTPError as refusal:
+        return {"status": refusal.code, "reason": refusal.read().decode()}
+
+
 def tool(*args: str) -> dict:
     done = subprocess.run(
         [sys.executable, "-m", "scripts.swarm_v2.ledger_writer", *args],
@@ -124,12 +140,16 @@ def _positive(base: Path, ports: list) -> dict:
         before = stored(folder)
         second = refused(base / "second", folder, ports[1], first.pid)
         between = stored(folder)
+        label = labelled(ports[0])
+        unlabelled = stored(folder)
         write = put(ports[0], "a-1", "Written by the one active writer")
         after = stored(folder)
     return {
         "first_server_held_the_lease": held,
         "second_server": second,
         "ledger_unchanged_by_second": before == between,
+        "display_label_without_token": label,
+        "ledger_unchanged_by_label": unlabelled == between,
         "first_server_write": write,
         "revision_advanced_by_first": after["rev"] > between["rev"],
         "chat": after["chat"],
@@ -184,6 +204,9 @@ def _recovery(base: Path, ports: list) -> dict:
         newer = stored(folder)
     restore = tool("--dir", str(folder), "restore", str(backup))
     restored = stored(folder)
+    with server(base / "rolled-back", folder, ports[0]) as rolled_back:
+        promoted = stored(folder)
+        promoted_holds = ledger_writer.holder(folder).get("pid") == rolled_back.pid
     return {
         "accepted": accepted,
         "snapshot_exit": snapshot["exit"],
@@ -192,7 +215,12 @@ def _recovery(base: Path, ports: list) -> dict:
         "replay": replay,
         "replay_added_nothing": replayed["chat"] == committed["chat"],
         "chat_after_the_new_write": newer["chat"],
-        "rollback": {"exit": restore["exit"], "restored_the_backup": restored == committed},
+        "rollback": {
+            "exit": restore["exit"],
+            "restored_the_backup": restored == committed,
+            "writer_started_on_the_restored_backup": promoted == committed,
+            "restarted_writer_held_the_lease": promoted_holds,
+        },
         "ledger_writer_conflicts_total": ledger_writer.conflicts_total(folder),
     }
 

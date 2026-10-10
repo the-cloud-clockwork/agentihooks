@@ -267,6 +267,44 @@ def test_a_superseded_attempt_cannot_beat_its_successor_record(world):
     assert world.rows() == before
 
 
+def test_a_superseded_worker_cannot_beat_beside_its_replacement_but_closes_its_own_record(world):
+    old, old_token = world.start(seat="eng-1@fixture")
+    old_grant = world.authority.authorize(old_token)
+    registered = world.fleet.register(replace(session("anton", old), session_id="sess-old"), old_token)
+    new, new_token = world.start(seat="eng-1@fixture", previous=old.execution_id)
+    current = world.fleet.register(replace(session("anton", new), session_id="sess-new"), new_token)
+    fenced = FleetRegistry(world.store, SLUG, lambda _: old_grant, lambda: world.clock[0])
+    before = world.rows()
+    world.clock[0] += 5
+
+    with pytest.raises(SwarmError, match="^stale_generation$"):
+        fenced.heartbeat(scope("anton"), "sess-old", old_token)
+    assert world.rows() == before
+
+    assert fenced.close(scope("anton"), "sess-old", old_token) == replace(registered, state=CLOSED)
+    sessions, seats = world.rows()
+    assert (sessions[current.key()], seats) == (before[0][current.key()], before[1])
+    assert world.states() == {"sess-old": CLOSED, "sess-new": LIVE}
+    assert world.fleet.heartbeat(scope("anton"), "sess-new", new_token).heartbeat_ms == world.clock[0]
+
+
+def test_a_superseded_worker_turned_suspect_cannot_beat_back_to_live(world):
+    old, old_token = world.start(seat="eng-1@fixture")
+    old_grant = world.authority.authorize(old_token)
+    world.fleet.register(replace(session("anton", old), session_id="sess-old"), old_token)
+    new, new_token = world.start(seat="eng-1@fixture", previous=old.execution_id)
+    world.fleet.register(replace(session("anton", new), session_id="sess-new"), new_token)
+    fenced = FleetRegistry(world.store, SLUG, lambda _: old_grant, lambda: world.clock[0])
+    world.clock[0] += INPUTS["stale_after_ms"] + 1
+    assert world.fleet.sweep() == 2
+    before = world.rows()
+
+    with pytest.raises(SwarmError, match="^stale_generation$"):
+        fenced.heartbeat(scope("anton"), "sess-old", old_token)
+    assert world.rows() == before
+    assert world.states() == {"sess-old": SUSPECT, "sess-new": SUSPECT}
+
+
 def test_a_record_replaced_after_its_grant_check_is_not_beaten(world, monkeypatch):
     local, _, _ = world.two_machines()
     newer = replace(local, generation=local.generation + 1)
@@ -502,6 +540,34 @@ def test_a_seat_taken_meanwhile_fences_the_retried_registration(world, monkeypat
     with pytest.raises(SwarmError, match="^stale_generation$"):
         world.fleet.register(replace(session("anton", anton), session_id="sess-two"), token)
     assert world.fleet.seat("eng-1@fixture")["execution_id"] == "exe-newer"
+
+
+def test_a_seat_taken_meanwhile_fences_the_retried_heartbeat(world, monkeypatch):
+    anton, token = world.start(seat="eng-1@fixture")
+    registered = world.fleet.register(session("anton", anton), token)
+    newer = json.dumps({"execution_id": "exe-newer", "generation": anton.generation + 1, "session": "x"})
+    seats = world.store.key(SLUG, "fleet-seats")
+    intruder = Intruder(world.store.redis, lambda r: r.hset(seats, "eng-1@fixture", newer))
+    monkeypatch.setattr(world.store, "redis", intruder)
+    world.clock[0] += 5
+
+    with pytest.raises(SwarmError, match="^stale_generation$"):
+        world.fleet.heartbeat(scope("anton"), registered.session_id, token)
+    assert world.fleet.records() == [registered]
+
+
+def test_a_record_replaced_meanwhile_fences_the_retried_heartbeat(world, monkeypatch):
+    anton, token = world.start(seat="eng-1@fixture")
+    registered = world.fleet.register(session("anton", anton), token)
+    newer = replace(registered, generation=anton.generation + 1)
+    sessions = world.store.key(SLUG, "fleet-sessions")
+    intruder = Intruder(world.store.redis, lambda r: r.hset(sessions, registered.key(), registry.encode(newer)))
+    monkeypatch.setattr(world.store, "redis", intruder)
+    world.clock[0] += 5
+
+    with pytest.raises(SwarmError, match="^stale_generation$"):
+        world.fleet.heartbeat(scope("anton"), registered.session_id, token)
+    assert world.fleet.records() == [newer]
 
 
 def test_a_session_written_meanwhile_fences_the_retried_registration(world, monkeypatch):

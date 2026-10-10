@@ -1,22 +1,24 @@
 {
   "package": "SV2-LDG-05",
-  "dependency": ["SV2-LDG-04"],
+  "dependency": [
+    "SV2-LDG-04"
+  ],
   "dependents": [],
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2423",
-  "pull_request": "pending",
-  "tested_commit": "pending",
+  "pull_request": "pending: opened after SV2-LDG-04 (pull request 2422) merges, because this branch is stacked on it",
+  "tested_commit": "83bad96f54bf",
   "status": "mocked-acceptance-qualified",
   "package_complete": false,
   "evidence_class": "Signed fixture launch grants from LaunchAuthority, fakeredis, the fixture server clock and a fixture network that drops requests, loses responses and repeats a poll response; no live rollout. Live G3 qualification is separate.",
   "interfaces": [
     "CommandQueue.issue(execution_id, generation, kind, payload, key, expires_in_ms): the controller issues drain, cancel, answer or stop to the current occupant of a seat; the command id is derived from the swarm, execution and key and never changes, the payload digest covers kind and payload, the same key with the same payload returns the stored command and another payload is revision_conflict; a superseded execution is stale_generation",
     "CommandQueue.outcome(execution_id, command_id): issued, accepted, completed or expired, with accepted_at_ms, completed_at_ms and the reported outcome as separate stored fields",
-    "GET /v2/executions/<id>/commands: the credential's own unexpired, uncompleted commands, oldest first, at most poll_limit; a poll sooner than poll_interval_ms is rate_limited with retry same_request",
+    "GET /v2/executions/<id>/commands: the credential's own commands that are issued and unexpired or accepted and not yet completed, oldest first, at most poll_limit; an accepted command stays deliverable after its expiry so a worker can still report it; a poll sooner than poll_interval_ms, or one that loses a concurrent stamp, is rate_limited with retry same_request",
     "POST /v2/executions/<id>/commands/<command>/ack: receipt with the payload digest; idempotent, an expired command is refused with expired and never accepted",
-    "POST /v2/executions/<id>/commands/<command>/complete: the outcome after acceptance, checkpointed with a checkpoint reference or failed for drain, succeeded or failed otherwise; idempotent for the same outcome, another outcome is revision_conflict",
+    "POST /v2/executions/<id>/commands/<command>/complete: the outcome after acceptance, checkpointed with a checkpoint reference or failed for drain, succeeded, failed or not_run otherwise; idempotent for the same outcome, another outcome is revision_conflict; an unacknowledged command past expiry is expired",
     "scripts.swarm_v2.api.server.Routes(executions, tasks, commands): command paths go to the command endpoints when they are configured",
-    "WorkerControl(transport, state_path, handlers): polls, deduplicates by command id, checks the payload digest, stops mutations on a drain before its acknowledgement is confirmed, runs other commands only after the server accepted them, reports drain checkpoint completion separately and keeps unsent acknowledgements and completions in its state file",
+    "WorkerControl(transport, state_path, handlers): polls, deduplicates by command id, checks the payload digest, stops mutations on a drain before its acknowledgement is confirmed and keeps them stopped unless the server voids an unacknowledged drain by expiry before any checkpoint, refuses answers while draining (not_run) but still runs cancel and stop, runs commands only after the server accepted them, reports a handler error as failed, reports drain checkpoint completion separately and keeps unsent acknowledgements and completions in an fsynced state file",
     "RouteTransport(execution_id, send): the worker side of the endpoints; same_request refusals become ConnectionError for a later retry, other refusals CommandRefused",
     "worker_command_ack_lag_seconds(store, slug): acceptance minus issue time per accepted command"
   ],
@@ -45,22 +47,29 @@
   "remaining_limitations": [
     "No production process starts the v2 HTTP server or a worker control loop yet; the kind switch is a constructor argument until a deployment package adds an operator control",
     "Command records for an execution are kept after it ends; retention is not yet bounded",
-    "A worker whose state file is lost reports an already accepted command as failed rather than rerunning it; a drain stays in force",
-    "A poll from a superseded execution raises CommandRefused to the worker loop's caller; acting on it belongs to the worker entrypoint package"
+    "A worker whose state file is lost reports an already accepted command as not_run rather than rerunning it; a drain stays in force",
+    "A poll refused for a superseded execution raises CommandRefused to the worker loop's caller; acting on it belongs to the worker entrypoint package",
+    "may_mutate is a predicate for the agent runtime; wiring it into the agent's tool calls belongs to the worker entrypoint package",
+    "The state file is fsynced before its rename, but the folder is not fsynced after it",
+    "worker_command_ack_lag_seconds keeps the newest 1000 samples per swarm, without per kind labels"
   ],
   "validation": {
-    "red": "pending",
-    "ci_run": "pending",
-    "unit": "pending",
-    "mutation": "pending",
-    "review": "pending",
+    "red": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38061355585 on the tests only commit de1d8c07: 6 failed and 22 errors, every new test failing on the missing scripts.swarm_v2.api.commands and scripts.swarm_v2.worker modules or the missing evidence files, while the 119 neighbouring executions and tasks API tests passed",
+    "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063154992",
+    "unit": "Focused proofs run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063154992 on the tested commit passed every test in tests/test_swarm_v2_worker_commands.py, tests/test_swarm_v2_executions_api.py and tests/test_swarm_v2_tasks_api.py; each package case ran twice on independent fixtures. The full suite runs on the pull request",
+    "mutation": "Mutation preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063154843 on the tested commit: scripts/swarm_v2/api/commands.py 602 killed, scripts/swarm_v2/worker/control.py 312 killed, scripts/swarm_v2/api/server.py 5 killed, no survivors and no clearances; the earlier run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38062160738 left 17 survivors that tests now kill",
+    "review": "Standards reader closed eight findings after one fix round; Spec reader closed nine findings and four wording notes after three rounds",
     "local": "No local tests or mutation ran; static prepush passed on every commit"
   },
   "measurements": {
     "worker_command_ack_lag_seconds": {
-      "a": [0.04],
+      "a": [
+        0.04
+      ],
       "b": [],
-      "c": [0.0]
+      "c": [
+        0.0
+      ]
     }
   },
   "cases": {
@@ -70,8 +79,10 @@
     "manifest": "evidence/SV2-LDG-05/manifest.json"
   },
   "decisions": [
-    "A worker enters no new mutations mode when it receives a drain, before the server confirmed the acknowledgement: stopping early is safe and a dropped acknowledgement must not let mutations continue; a drain the server refuses lifts it unless another drain holds",
-    "Answer, cancel and stop run only after the server accepted them, so an expired command is never run and a retried acknowledgement returns the stored acceptance without a second run",
-    "Expiry is derived on read from the stored issue time; an unacknowledged command past its expiry is never delivered or accepted, while an accepted command may still report its outcome after expiry"
+    "A worker enters no new mutations mode when it receives a drain, before the server confirmed the acknowledgement: stopping early is safe and a dropped acknowledgement must not let mutations continue",
+    "Every command is acknowledged before the worker acts on it, so an expired command is never acted on and a retried acknowledgement returns the stored acceptance without a second run; cancel and stop then run, and an answer runs unless a drain holds, in which case it is reported not_run",
+    "Expiry is derived on read from the stored issue time; an unacknowledged command past its expiry is never delivered or accepted, while an accepted command may still report its outcome after expiry",
+    "An answer delivered while a drain holds is acknowledged and reported not_run instead of run, because new instructions would start new work; cancel and stop still run because they only end work",
+    "A drain stops holding only when the server refused its acknowledgement as expired and no checkpoint was taken; a refusal for a superseded execution or a refused completion keeps the hold"
   ]
 }

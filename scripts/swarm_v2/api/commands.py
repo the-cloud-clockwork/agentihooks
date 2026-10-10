@@ -14,11 +14,12 @@ from scripts.swarm_v2.runtime.operations import digest
 
 KINDS = frozenset(("drain", "cancel", "answer", "stop"))
 OUTCOMES = {"drain": frozenset(("checkpointed", "failed"))}
-SETTLED = frozenset(("succeeded", "failed"))
+SETTLED = frozenset(("succeeded", "failed", "not_run"))
 MAX_EXPIRY_MS = 900_000
 DEFAULT_POLL_INTERVAL_MS = 1000
 DEFAULT_POLL_LIMIT = 10
 WRITE_ATTEMPTS = 5
+ACK_LAG_SAMPLES = 1000
 ISSUED, ACCEPTED, COMPLETED, EXPIRED = "issued", "accepted", "completed", "expired"
 POLL = re.compile(r"/v2/executions/([^/]+)/commands")
 ACTION = re.compile(r"/v2/executions/([^/]+)/commands/([^/]+)/(ack|complete)")
@@ -133,6 +134,8 @@ class CommandQueue:
                 if record["outcome"] == outcome:
                     return record, None
                 raise GrantRefused("revision_conflict", "the command already completed with another outcome")
+            if _view(record, now)["state"] == EXPIRED:
+                raise GrantRefused("expired", "the command expired before it was acknowledged")
             if record["state"] != ACCEPTED:
                 raise GrantRefused("revision_conflict", "the command was not acknowledged")
             return {**record, "state": COMPLETED, "completed_at_ms": now, "outcome": outcome}, None
@@ -151,7 +154,9 @@ class CommandQueue:
                     pipe.multi()
                     pipe.hset(key, command_id, json.dumps(record))
                     if lag is not None:
-                        pipe.rpush(self.store.key(self.slug, "worker-command-ack-lag"), lag)
+                        samples = self.store.key(self.slug, "worker-command-ack-lag")
+                        pipe.rpush(samples, lag)
+                        pipe.ltrim(samples, -ACK_LAG_SAMPLES, -1)
                     pipe.execute()
                     return _view(record, now)
                 except WatchError:
@@ -202,20 +207,32 @@ class CommandsAPI:
 
     def poll(self, execution_id: str, token: str) -> dict:
         self._own(execution_id, token)
-        store = self.queue.store
-        key = store.key(self.queue.slug, "worker-command-polls")
-        now = lease.now_ms(store)
-        last = store.redis.hget(key, execution_id)
-        if last is not None and now - int(last) < self.poll_interval_ms:
-            error = GrantRefused("rate_limited", f"poll again in {int(last) + self.poll_interval_ms - now} ms")
-            error.retry = "same_request"
-            raise error
-        store.redis.hset(key, execution_id, now)
+        self._stamp(execution_id)
         return {
             "execution_id": execution_id,
             "commands": self.queue.pending(execution_id, self.poll_limit),
             "poll_interval_ms": self.poll_interval_ms,
         }
+
+    def _stamp(self, execution_id: str) -> None:
+        store = self.queue.store
+        key = store.key(self.queue.slug, "worker-command-polls")
+        with store.redis.pipeline() as pipe:
+            try:
+                pipe.watch(key)
+                now = lease.now_ms(store)
+                last = pipe.hget(key, execution_id)
+                wait = 0 if last is None else int(last) + self.poll_interval_ms - now
+                if wait <= 0:
+                    pipe.multi()
+                    pipe.hset(key, execution_id, now)
+                    pipe.execute()
+                    return
+            except WatchError:
+                wait = self.poll_interval_ms
+        error = GrantRefused("rate_limited", f"poll again in {wait} ms")
+        error.retry = "same_request"
+        raise error
 
     def act(self, execution_id: str, command_id: str, action: str, token: str, body: object) -> dict:
         self._own(execution_id, token)

@@ -25,37 +25,44 @@
         [
           "GET",
           "commands",
-          200
+          200,
+          1
         ],
         [
           "POST",
           "ack",
-          200
+          200,
+          null
         ],
         [
           "POST",
           "ack",
-          200
+          200,
+          null
         ],
         [
           "POST",
           "complete",
-          200
+          200,
+          null
         ],
         [
           "GET",
           "commands",
-          200
+          200,
+          0
         ],
         [
           "POST",
           "complete",
-          200
+          200,
+          null
         ],
         [
           "GET",
           "commands",
-          200
+          200,
+          0
         ]
       ],
       "conflicting_replay": [

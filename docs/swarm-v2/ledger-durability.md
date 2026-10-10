@@ -36,6 +36,15 @@ process. The interface is `scripts.swarm_v2.ledger_writer`.
   their transactions with the server's, and none holds state across transactions. Remote workers never
   open the folder; they write through the API.
 
+## Authority
+
+- The one writer takes the actor and scope of every write from its credential: the ledger token is the
+  operator role, and a hive or agent token names a bound agent through `ledger_authority.principal`. A
+  display label alone (`X-Ledger-Agent` with no token) is answered 403 `missing or wrong ledger token`
+  and changes nothing; T-SV2-LDG-04-A records it.
+- The `ledger_writer` command acts with the file permissions of the ledger folder and the writer lease;
+  it never reads a label to decide what it may do.
+
 ## Chart
 
 `ledger.replicas` in the `agentihooks-swarm` chart must be 1. Any other value fails `helm template`
@@ -68,3 +77,6 @@ once (SV2-LDG-01, SV2-LDG-03).
    takes no lease; the chart still runs one replica.
 5. The database, its page tokens and the Redis swarm state are authoritative objects; none of them is
    deleted as a cache.
+
+T-SV2-LDG-04-C rehearses this: it restores a verified snapshot over a newer state, starts a writer on
+the restored folder, and records that the writer holds the lease and serves the committed state.
