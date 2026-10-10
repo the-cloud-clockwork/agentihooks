@@ -27,8 +27,15 @@ def test_the_token_variable_keeps_the_balancer_prefix():
     assert account_names.TOKEN_PREFIX == "AH_CC_TOKEN_"
 
 
-def test_the_one_mounted_token_becomes_the_claude_oauth_token():
-    environ = {"AH_CC_TOKEN_aatb": "value-one", "PATH": "/bin"}
+@pytest.mark.parametrize(
+    "environ",
+    [
+        {"AH_CC_TOKEN_aatb": "value-one", "PATH": "/bin"},
+        {"AH_CC_TOKEN_aatb": "value-one", "AH_CX_TOKEN_aatb": "value-two"},
+        {"AH_CC_TOKEN_a": "", "AH_CC_TOKEN_b": "value-one"},
+    ],
+)
+def test_the_one_mounted_token_becomes_the_claude_oauth_token(environ):
     assert account_names.oauth_env(environ) == {"CLAUDE_CODE_OAUTH_TOKEN": "value-one"}
 
 
