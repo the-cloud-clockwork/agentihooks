@@ -168,8 +168,8 @@ def test_codex_engineer_home_lists_the_serena_opt_in_tools(world):
         root / ".codex" / "mcp.overrides.toml",
         f'[mcpServers.serena]\ntype = "http"\nurl = "{router}?tools=read_file,search_for_pattern"\n',
     )
-    codex = tomllib.loads((render.render("codex", "engineer") / "config.toml").read_text())["mcp_servers"]
     claude = json.loads((render.render("claude", "engineer") / ".claude.json").read_text())["mcpServers"]
+    codex = tomllib.loads((render.render("codex", "engineer") / "config.toml").read_text())["mcp_servers"]
     assert codex["serena"]["url"] == f"{router}?tools=read_file,search_for_pattern"
     assert claude["serena"]["url"] == router
 
