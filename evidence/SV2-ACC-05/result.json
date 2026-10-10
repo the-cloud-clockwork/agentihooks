@@ -1,0 +1,79 @@
+{
+  "package": "SV2-ACC-05",
+  "dependency": [
+    "SV2-ACC-04"
+  ],
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2411",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2432",
+  "tested_commit": "5b2c70a3bd120abda0676c302fe122ca77a5a88b",
+  "status": "mocked-acceptance-qualified",
+  "package_complete": false,
+  "evidence_class": "Scoped fixture launch grants from LaunchAuthority, fakeredis, fixture clock, stored runtime observations; no live rollout. Live G3 qualification is separate.",
+  "failure_fixture": "tests/fixtures/swarm_v2/account-reconciliation.json with the World scene in tests/test_swarm_v2_account_reconciliation.py",
+  "interfaces": [
+    "scripts.swarm_v2.reconciliation.accounts.AccountReconciler.report(): read-only findings for this swarm's account rows and live fleet sessions",
+    "AccountReconciler.reconcile(): releases only expired reservations, ended sessions, lost classifications of the row's own generation and retiring rows whose successor occupancy is confirmed; every other case is kept and reported; writes account_occupancy_discrepancies per swarm",
+    "AccountReconciler.exited(execution_id, generation, source): releases only on the stored supervisor exit or a Kubernetes Succeeded or Failed phase of that exact generation; other sources are insufficient_evidence; a replaced generation is stale_exit",
+    "AccountReconciler.account_occupancy_discrepancies, account_occupancy_discrepancies_total, stale_exit_events",
+    "scripts.swarm_v2.reconciliation.accounts.page(store, slug) and the account_reconciliation block of scripts.swarm.status.status_report",
+    "scripts.swarm_v2.accounts.AccountCapacity.reserve keeps a replaced generation's live occupancy as a retiring row; reconstruct seats the newest live record per seat and older live ones as retiring rows; AccountCapacity.rows, drop; retiring, seat_holder, stored_accounts"
+  ],
+  "supported_versions": {
+    "python": "3.11 and 3.12 unit shards passed in the linked CI run",
+    "coordination": "SV2-CTL launch grants, execution generations, SV2-ACC-01 fleet registry records, SV2-ACC-02 account rows, SV2-KUB runtime observations",
+    "compatibility": "AGENTIHOOKS_ACCOUNT_RECONCILE=observe reports releases as observe_only and frees nothing; local-backend sessions are not reported as unaccounted"
+  },
+  "states": {
+    "observed": "Account rows, registry records, fleet session records and stored runtime observations",
+    "accepted": "A finding whose classification names release evidence for the row's own execution and generation",
+    "committed": "AccountCapacity.drop removes only rows byte-equal to the judged ones in a Redis WATCH/MULTI transaction",
+    "externally_verified": "None; no controller calls reconcile in a live launch yet"
+  },
+  "validation": {
+    "red": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38057707883 on the tests-only commit ea440cd6 failed test_a_handoff_releases_the_old_slot_only_after_the_successor_occupies against a stub reconciler",
+    "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064120800",
+    "unit": "All Python unit shards on 3.11 and 3.12 passed; 35 reconciliation test ids, PASSED on both versions, none failed",
+    "mutation": "Mutation preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063317309 passed on the restacked head 5432ede2; before the restack run 38060144315 killed 63 in accounts.py, 286 in reconciliation/accounts.py and 6 in status.py with no survivors",
+    "review": "Standards and Spec readers closed after three rounds; the missing controller caller is a ledger follow-up",
+    "local": "No local tests or mutation ran; static prepush passed on every pushed head"
+  },
+  "measurements": {
+    "account_occupancy_discrepancies": {
+      "a": [
+        {
+          "handoff_unconfirmed": 1,
+          "orphan_reservation": 1
+        },
+        {
+          "orphan_reservation": 1
+        }
+      ],
+      "b": {
+        "handoff_unconfirmed": 1,
+        "orphan_occupancy": 1,
+        "orphan_reservation": 1
+      },
+      "c": {}
+    },
+    "dimension": "Each test has its own fakeredis store built from account-reconciliation.json; counts are per swarm and kind"
+  },
+  "rollback_rehearsal": {
+    "action": "AGENTIHOOKS_ACCOUNT_RECONCILE=observe: reconcile and exited report every release as observe_only and free nothing, so caps stay conservative; unsetting it lets the next enforcing pass release",
+    "test": "tests/test_swarm_v2_account_reconciliation.py::test_observe_only_mode_reports_releases_and_frees_nothing",
+    "job": 114248338034,
+    "output": "PASSED at 2026-10-10T15:38:35.8066934Z",
+    "data_safety": "Account rows, registry records and session records are authoritative; observe mode deletes nothing and the reconciler never writes registry or session state"
+  },
+  "remaining_limitations": [
+    "No production caller runs reconcile or exited yet; calling them at controller start and on the tick is a ledger follow-up. The package stays incomplete until that path runs",
+    "account_occupancy_discrepancies is stored in Redis and shown in status; no metric exporter emits it",
+    "A missing Pod waits for the lost classification rather than freeing a slot from one not found reading"
+  ],
+  "cases": {
+    "a": "evidence/SV2-ACC-05/a-result.json",
+    "b": "evidence/SV2-ACC-05/b-result.json",
+    "c": "evidence/SV2-ACC-05/c-result.json",
+    "manifest": "evidence/SV2-ACC-05/manifest.json"
+  }
+}
