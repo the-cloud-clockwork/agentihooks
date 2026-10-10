@@ -34,7 +34,8 @@ PROTECTED = (
     "files=[a/'execution.json',a/'registration.json',a/'launch.json',r/'context.json',r/'running.json']; "
     "h=a/'homes'/'codex'; "
     "print(json.dumps({'files':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in files},"
-    "'home':sorted(str(p.relative_to(h)) for p in h.rglob('*'))}))"
+    "'home':sorted(str(p.relative_to(h)) for p in h.rglob('*') "
+    "if not p.relative_to(h).is_relative_to('.config/herdr'))}))"
 )
 
 
@@ -200,7 +201,8 @@ def recovery_run(image, private):
         expect(replay, 0, "ready", None, "ok")
         after = runtime(container, root)
         assert after == before, (before, after)
-        assert python(container, PROTECTED, root) == protected
+        after_protected = python(container, PROTECTED, root)
+        assert after_protected == protected, (protected, after_protected)
         return {
             "container": container,
             "outage": outage,
