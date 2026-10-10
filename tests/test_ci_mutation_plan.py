@@ -97,14 +97,23 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr("scripts.ci_mutation.plan.discover_changes", discover)
     monkeypatch.setattr(
+        "scripts.ci_mutation.plan.own_bases",
+        lambda root, base, head, graded: (
+            ["earlier", "merged"]
+            if (root, base, head, graded) == (tmp_path, "base", "HEAD", plan.graded_green)
+            else None
+        ),
+    )
+    monkeypatch.setattr(
         "scripts.ci_mutation.plan.estimate",
         lambda root, changes: (1601.4, 50, 1201) if (root, changes) == (tmp_path, {"scripts/sample.py": {2}}) else None,
     )
     monkeypatch.setattr("sys.argv", [*__import__("sys").argv, "--stats-target", "100"])
     assert plan.main() == 0
-    assert calls == [(tmp_path, "base", "HEAD")]
-    assert output.read_text() == "shards=[0, 1, 2, 3]\nstats_parts=[0, 1, 2, 3]\n"
+    assert calls == [(tmp_path, ["earlier", "merged"], "HEAD")]
+    assert output.read_text() == "shards=[0, 1, 2, 3]\nstats_parts=[0, 1, 2, 3]\nbases=earlier,merged\n"
     assert capsys.readouterr().out == (
+        "Mutation bases: earlier merged\n"
         "Changed line mutants: 50\nEstimated mutation seconds: 1601, stats seconds: 1201\n"
         "Mutation shards: 4\nStats parts: 4\n"
     )
@@ -132,7 +141,8 @@ def test_main_defaults_to_origin_dev_a_four_minute_target_and_ten_shards(
         return {}
 
     monkeypatch.setattr("scripts.ci_mutation.plan.discover_changes", discover)
+    monkeypatch.setattr("scripts.ci_mutation.plan.own_bases", lambda root, base, head, graded: [f"{base}@{head}"])
     monkeypatch.setattr("scripts.ci_mutation.plan.estimate", lambda root, changes: estimated)
     assert plan.main() == 0
-    assert calls == [(tmp_path, "origin/dev", "HEAD")]
-    assert output.read_text() == f"shards={shards}\nstats_parts={parts}\n"
+    assert calls == [(tmp_path, ["origin/dev@HEAD"], "HEAD")]
+    assert output.read_text() == f"shards={shards}\nstats_parts={parts}\nbases=origin/dev@HEAD\n"
