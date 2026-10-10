@@ -304,14 +304,23 @@ grant = probe.grants.issue(
     slug, agent.execution_id, project_ids=["github.com/the-cloud-clockwork/agentihooks"], brain_id="swarm", account="kind"
 )
 worker = f"""
-import json, os, urllib.request
+import json, os, time, urllib.error, urllib.request
 path = "{LAUNCH_DIR}/{GRANT_NAME}"
 grant = open(path).read().strip()
 body = json.dumps({{"execution_id": os.environ["EXECUTION_ID"], "generation": int(os.environ["GENERATION"])}}).encode()
 headers = {{"Authorization": "Bearer " + grant, "Content-Type": "application/json"}}
 request = urllib.request.Request(os.environ["CONTROL_URL"] + "/v2/executions/register", body, headers, method="POST")
-with urllib.request.urlopen(request, timeout=10) as answer:
-    status = answer.status
+for attempt in range(10):
+    try:
+        with urllib.request.urlopen(request, timeout=10) as answer:
+            status = answer.status
+        break
+    except urllib.error.HTTPError as error:
+        status = error.code
+        print(json.dumps({{"register": status, "attempt": attempt, "answer": error.read().decode()}}), flush=True)
+        if status != 503:
+            break
+        time.sleep(2)
 print(json.dumps({{"register": status, "uid": os.getuid(), "path": path, "mode": oct(os.stat(path).st_mode & 0o777)}}, sort_keys=True))
 """
 name = pod_name(agent.execution_id)
