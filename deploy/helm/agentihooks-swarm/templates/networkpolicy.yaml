@@ -67,6 +67,9 @@ spec:
         {{- with .Values.networkPolicy.ingressFrom }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        {{- with .Values.controller.api.ingressFrom }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       ports:
         - port: api
 {{- end }}

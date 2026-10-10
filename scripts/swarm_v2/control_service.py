@@ -1,12 +1,12 @@
 import json
 import os
 import threading
-import time
 from collections.abc import Callable, Iterable, Mapping
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from scripts.hive import auth as hive_auth
+from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_v2.api.executions import ExecutionsAPI
 from scripts.swarm_v2.api.server import serve
@@ -23,7 +23,8 @@ KEY_FILE_ENV = "AGENTIHOOKS_LAUNCH_SIGNING_KEY_FILE"
 PORT_ENV = "AGENTIHOOKS_CONTROL_API_PORT"
 SWARM_ENV = "AGENTIHOOKS_CONTROL_SWARM"
 CREDENTIAL_ENV = "AGENTIHOOKS_CONTROLLER_CREDENTIAL"
-HOST = "0.0.0.0"  # noqa: S104  # NOSONAR: the API is a cluster Service; every route checks a signed grant
+HOST = "0.0.0.0"
+MAX_PORT = 65535
 THREAD = "swarm-v2-api"
 ISSUER = "controller"
 AUDIENCE = "workers"
@@ -73,14 +74,20 @@ class ControlService:
         self.tasks = TaskAuthority(store, self.controller, lambda token: self.grants.bound(slug, token))
         self.executions = ExecutionsAPI(self.grants, self.tasks)
         self.server: ThreadingHTTPServer | None = None
+        self.listen: tuple[str, int] | None = None
 
     def start(self) -> bool:
-        return self.controller.acquire()
+        if not self.controller.acquire():
+            return False
+        self._open()
+        return True
 
     def tick(self, now: float | None = None) -> bool:
         if not (self.controller.renew() or self.controller.acquire()):
             return False
-        self.observe(time.time() if now is None else now)
+        self._open()
+        store = self.controller.store
+        self.observe(lease.now_ms(store) / 1000 if now is None else now)
         return True
 
     def observe(self, now: float) -> list[Finding]:
@@ -92,6 +99,10 @@ class ControlService:
             for agent in remote
         ]
         return [finding for finding in found if finding is not None]
+
+    def _open(self) -> None:
+        if self.listen is not None and self.server is None:
+            self.serve(*self.listen)
 
     def serve(self, host: str, port: int) -> ThreadingHTTPServer:
         self.server = serve(self.executions, host, port)
@@ -113,12 +124,16 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
     slug = environ.get(SWARM_ENV)
     if not slug:
         raise ControlError(f"the control API needs {SWARM_ENV}")
-    if not port.isdigit():
+    if not port.isdigit() or not 0 < int(port) <= MAX_PORT:
         raise ControlError(f"{PORT_ENV} must be a port number")
     credential = environ.get(CREDENTIAL_ENV) or ""
     service = ControlService(
         store, slug, launch_key(environ), lambda: hive_auth.controller(store.redis, credential), owner=owner
     )
-    service.start()
-    service.serve(HOST, int(port))
+    service.listen = (HOST, int(port))
+    try:
+        service.start()
+    except BaseException:
+        service.stop()
+        raise
     return service

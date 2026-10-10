@@ -143,7 +143,8 @@ if [[ -z $retaken ]]; then
 fi
 printf 'controller restarted by its liveness probe and holds the lease again: %s\n' "$retaken"
 
-kubectl create secret generic swarm-launch-signing --from-literal=signing-key="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+kubectl create secret generic swarm-launch-signing --dry-run=client -o yaml \
+  --from-file=signing-key=<(python3 -c 'import secrets; print(secrets.token_hex(32))') | kubectl apply -f -
 helm upgrade "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m \
   --set controller.api.enabled=true \
   --set controller.api.swarm="$slug" \
@@ -226,6 +227,24 @@ if [[ $registered != *'"heartbeat": 200'* || $registered != *'"register": 200'* 
   exit 1
 fi
 printf 'a worker registered and heartbeated against the deployed controller API: %s\n' "$registered"
+
+node="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')"
+kubectl label node "$node" anton.io/capacity-type=spot --overwrite
+kubectl rollout restart deployment "$release-controller"
+placement=""
+for _ in $(seq 60); do
+  placement="$(kubectl get events --field-selector reason=FailedScheduling -o jsonpath='{range .items[*]}{.involvedObject.name} {.message}{"\n"}{end}' | grep "$release-controller" || true)"
+  [[ $placement == *"node affinity"* ]] && break
+  sleep 1
+done
+pending="$(kubectl get pods "${controller[@]}" --field-selector status.phase=Pending -o name)"
+if [[ $placement != *"node affinity"* || -z $pending ]]; then
+  printf 'the controller was not held off a node labelled as reclaimable capacity: %s\n' "$placement" >&2
+  exit 1
+fi
+printf 'controller held Pending on reclaimable capacity: %s\n' "$(tail -1 <<< "$placement")"
+kubectl label node "$node" anton.io/capacity-type-
+kubectl rollout status deployment "$release-controller" --timeout 2m
 
 before="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')"
 host="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].metadata.name}')"

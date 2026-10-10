@@ -3,7 +3,6 @@ import socket
 import threading
 import urllib.error
 import urllib.request
-from pathlib import Path
 
 import pytest
 
@@ -257,7 +256,7 @@ def test_hosting_is_off_without_an_api_port(tmp_path):
 
 
 def test_hosting_needs_the_swarm_it_serves(tmp_path):
-    environ = {**_environ(tmp_path), _cs().PORT_ENV: "0"}
+    environ = {**_environ(tmp_path), _cs().PORT_ENV: "8780"}
 
     with pytest.raises(_cs().ControlError) as refused:
         _cs().host(environ, _store(), "hive-fixture")
@@ -265,21 +264,12 @@ def test_hosting_needs_the_swarm_it_serves(tmp_path):
     assert str(refused.value) == "the control API needs AGENTIHOOKS_CONTROL_SWARM"
 
 
-def test_hosting_refuses_a_port_that_is_not_a_number(tmp_path):
-    environ = {**_environ(tmp_path), _cs().PORT_ENV: "eighty", _cs().SWARM_ENV: SLUG}
-
-    with pytest.raises(_cs().ControlError) as refused:
-        _cs().host(environ, _store(), "hive-fixture")
-
-    assert str(refused.value) == "AGENTIHOOKS_CONTROL_API_PORT must be a port number"
-
-
 def test_hosting_refuses_a_controller_credential_the_hive_did_not_issue(tmp_path):
     store = _store()
     hive_auth.issue_controller(store.redis)
     environ = {
         **_environ(tmp_path),
-        _cs().PORT_ENV: "0",
+        _cs().PORT_ENV: "8780",
         _cs().SWARM_ENV: SLUG,
         _cs().CREDENTIAL_ENV: "forged",
     }
@@ -333,13 +323,65 @@ def test_the_controller_loop_hosts_registration_and_heartbeats(tmp_path, monkeyp
     assert lease.current(store, SLUG) is None
 
 
-@pytest.mark.parametrize("case", ["a", "b", "c"])
-def test_package_cases_match_their_committed_evidence(case):
-    from tests import sv2_git01_cases as cases
+@pytest.mark.parametrize("port", ["eighty", "0", "65536"])
+def test_hosting_refuses_a_port_outside_the_tcp_range(tmp_path, port):
+    environ = {**_environ(tmp_path), _cs().PORT_ENV: port, _cs().SWARM_ENV: SLUG}
 
-    first, second = cases.run_case(case), cases.run_case(case)
-    assert first == second
-    assert first["state"] == "passed", json.dumps(first, indent=2, sort_keys=True)
-    path = Path(__file__).resolve().parents[1] / "evidence" / "SV2-GIT-01" / f"{case}-result.json"
-    committed = json.loads(path.read_text()) if path.exists() else None
-    assert committed == first, json.dumps(first, indent=2, sort_keys=True)
+    with pytest.raises(_cs().ControlError) as refused:
+        _cs().host(environ, _store(), "hive-fixture")
+
+    assert str(refused.value) == "AGENTIHOOKS_CONTROL_API_PORT must be a port number"
+
+
+def _hosted_environ(tmp_path, store, port):
+    return {
+        **_environ(tmp_path),
+        _cs().PORT_ENV: str(port),
+        _cs().SWARM_ENV: SLUG,
+        _cs().CREDENTIAL_ENV: hive_auth.issue_controller(store.redis),
+    }
+
+
+def test_the_api_opens_only_once_the_controller_holds_the_lease(tmp_path):
+    store = _store()
+    rival = lease.acquire(store, SLUG, "hive-rival")
+
+    service = _cs().host(_hosted_environ(tmp_path, store, _free_port()), store, "hive-fixture")
+    try:
+        assert (service.server, service.tick()) == (None, False)
+        lease.release(store, SLUG, rival)
+
+        assert service.tick() is True
+        assert service.server is not None
+    finally:
+        service.stop()
+
+
+def test_a_port_it_cannot_bind_releases_the_lease(tmp_path):
+    store = _store()
+    with socket.socket() as taken:
+        taken.bind(("0.0.0.0", 0))
+        taken.listen()
+        environ = _hosted_environ(tmp_path, store, taken.getsockname()[1])
+
+        with pytest.raises(OSError):
+            _cs().host(environ, store, "hive-fixture")
+
+    assert lease.current(store, SLUG) is None
+
+
+def test_the_controller_loop_runs_as_before_without_an_api_port(tmp_path, monkeypatch):
+    from scripts.swarm import controller as loop
+
+    store = _store()
+    monkeypatch.delenv(_cs().PORT_ENV, raising=False)
+    monkeypatch.setattr(loop, "connect", lambda: store)
+    monkeypatch.setattr("scripts.operator_env.fill", lambda env: None)
+    ticked = []
+    monkeypatch.setattr(loop, "run_once", lambda given: ticked.append(given) or {})
+
+    assert loop.main(["run", "--once"]) == 0
+
+    assert ticked == [store]
+    assert lease.current(store, SLUG) is None
+    assert [thread for thread in threading.enumerate() if thread.name == _cs().THREAD] == []

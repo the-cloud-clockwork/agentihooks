@@ -7,7 +7,7 @@ import yaml
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2 import control_service
-from scripts.swarm_v2.auth_context import LaunchKey
+from scripts.swarm_v2.auth_context import GrantRefused, LaunchKey
 from scripts.swarm_v2.kubernetes.watch import BACKEND
 from scripts.swarm_v2.runtime import observe
 
@@ -131,13 +131,17 @@ def _observed(store, agents) -> dict:
     return {agent.task: observe.stored(store, SLUG, agent.execution_id).state.value for agent in agents}
 
 
-def _recovery_seconds(service, agents) -> float | None:
-    """Ticks until every attempt is observed working, times the tick interval: deterministic, an upper bound."""
+def _recovery_seconds(service, agents) -> dict:
+    tick_s = lease.tick_ms() / 1000
     for ticks in range(1, 4):
         service.tick()
         if set(_observed(service.controller.store, agents).values()) == {"working"}:
-            return ticks * lease.tick_ms() / 1000
-    return None
+            return {
+                "value": ticks * tick_s,
+                "bound": "controller ticks until every attempt is observed working, times the tick interval",
+                "dimensions": {"swarm": SLUG, "tick_seconds": tick_s, "attempts": len(agents), "ticks": ticks},
+            }
+    return {"value": None, "dimensions": {"swarm": SLUG, "tick_seconds": tick_s, "attempts": len(agents)}}
 
 
 def _two_attempts(world: World):
@@ -198,16 +202,19 @@ def _rejection() -> tuple[dict, bool]:
     except SwarmError as error:
         refusal = str(error)
     after = {"lease": lease.current(store, SLUG), "occupants": len(store.execution_occupants(SLUG))}
+    valid = world.service().start()
     observed = {
         "placement": reclaimable,
         "forged_credential_refusal": refusal,
         "protected_state_unchanged": before == after,
         "refusal_discloses_no_key": KEY.secret.decode() not in refusal,
+        "new_valid_request_took_lease": valid,
     }
     passed = (
         not any(p["schedulable"] or p["affinity_admits"] for p in reclaimable.values())
         and refusal == "a scoped controller grant is required"
         and before == after
+        and valid
     )
     return observed, passed
 
@@ -232,8 +239,8 @@ def _recovery() -> tuple[dict, bool]:
         try:
             second.executions.heartbeat(agent.execution_id, token, older)
             stale[agent.task] = "accepted"
-        except Exception as error:
-            stale[agent.task] = getattr(error, "error_class", type(error).__name__)
+        except GrantRefused as error:
+            stale[agent.task] = error.error_class
     store = second.controller.store
     observed = {
         "restarted": restarted,

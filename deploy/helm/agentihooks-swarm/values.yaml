@@ -14,6 +14,14 @@ externalSecrets: []
 
 ledger:
   replicas: 1
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: anton.io/capacity-type
+                operator: DoesNotExist
+  tolerations: []
   port: 8765
   publicUrl: ""
   persistence:
@@ -70,6 +78,8 @@ controller:
       keyId: ""
       secretName: ""
       secretKey: signing-key
+    # Peers beyond the release, such as worker Pods in their own namespace.
+    ingressFrom: []
   livenessProbe:
     initialDelaySeconds: 60
     periodSeconds: 10
