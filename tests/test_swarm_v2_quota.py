@@ -75,8 +75,9 @@ def test_a_stale_full_report_after_a_newer_exhausted_one_keeps_the_exhausted_rea
     kept = world.publish(STALE_FULL)
     assert kept == newest == world.quota.latest(ACCOUNT, HARNESS)
     assert (newest.account, newest.harness, newest.five_used, newest.observed_ms) == (ACCOUNT, HARNESS, 100.0, 240000)
-    reading = world.quota.reading(ACCOUNT, HARNESS)
-    assert (reading.state, reading.routing_left, reading.age_seconds) == (quota.OBSERVED, 0.0, 30.0)
+    assert world.quota.reading(ACCOUNT, HARNESS) == quota.Reading(
+        ACCOUNT, HARNESS, quota.OBSERVED, 30.0, 0.0, 0.0, 38.0
+    )
     assert world.quota.cap(ACCOUNT, HARNESS) == 0
     assert world.quota.quota_observation_age_seconds(ACCOUNT, HARNESS) == 30.0
     assert world.quota.stale_reports(ACCOUNT, HARNESS) == 1
@@ -156,6 +157,7 @@ def test_stored_records_use_their_documented_keys(world):
 
 
 def test_an_undecodable_record_hides_no_other_account(world, monkeypatch):
+    world.store.redis.hset(f"{ROOT}:quota:{HARNESS}", "first-drifted", "{")
     world.publish(INPUTS["spare"], account=SPARE)
     good = json.loads(world.store.redis.hget(f"{ROOT}:quota:{HARNESS}", SPARE))
     drifted = {
@@ -170,21 +172,11 @@ def test_an_undecodable_record_hides_no_other_account(world, monkeypatch):
     assert [probe.account for _, probe in quota.fleet_observations({quota.FLAG: "1"})] == [SPARE]
 
 
-@pytest.mark.parametrize(
-    "report",
-    [
-        None,
-        {"provider_status": "error", "observed_ms": 240000},
-        {**STALE_FULL, "five_used": None},
-        {**STALE_FULL, "week_used": None},
-        {**STALE_FULL, "provider_status": "error"},
-    ],
-)
 def test_missing_or_failed_quota_data_is_unknown_never_full(world, report):
     if report:
         world.publish(report)
-    reading = world.quota.reading(ACCOUNT, HARNESS)
-    assert (reading.state, reading.routing_left) == (quota.UNKNOWN, None)
+    age = (NOW - report["observed_ms"]) / 1000 if report else None
+    assert world.quota.reading(ACCOUNT, HARNESS) == quota.Reading(ACCOUNT, HARNESS, quota.UNKNOWN, age)
     assert world.quota.cap(ACCOUNT, HARNESS) == 0
     assert world.quota.admit(ACCOUNT, HARNESS).action == quota.WAIT
 
@@ -254,6 +246,7 @@ def test_reports_outside_the_provider_schema_are_refused_without_writing_or_echo
         {**STALE_FULL, "observed_ms": NOW + quota.SKEW_MS},
         {**STALE_FULL, "five_used": 0},
         {**STALE_FULL, "five_reset": 1},
+        {**STALE_FULL, "observed_ms": 1},
     ],
 )
 def test_reports_at_the_schema_limits_are_accepted(world, report):

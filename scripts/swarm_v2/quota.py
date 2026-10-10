@@ -120,9 +120,7 @@ def _report(report: object, now: int) -> dict:
         raise SwarmError("invalid_request")
     used = (report.get("five_used"), report.get("week_used"))
     resets = (report.get("five_reset"), report.get("week_reset"))
-    if not all(_number(value, 0, 100) for value in used) or not all(
-        _number(value, 1, float("inf")) for value in resets
-    ):
+    if not all(_number(value, 0, 100) for value in used) or not all(_number(value, 1, math.inf) for value in resets):
         raise SwarmError("invalid_request")
     return {field: report.get(field) for field in REPORT_FIELDS}
 
@@ -227,7 +225,7 @@ class QuotaObservations:
         reading = self.reading(account, harness)
         return reading.state == OBSERVED and reading.routing_left >= MIN_ROUTING_LEFT
 
-    def admit(self, account: str, harness: str, handoff: str = "") -> Admission:
+    def admit(self, account: str, harness: str, handoff: str | None = None) -> Admission:
         if self._room(account, harness):
             return Admission(ADMIT, account)
         reason = "unknown" if self.reading(account, harness).state == UNKNOWN else "exhausted"
@@ -236,9 +234,9 @@ class QuotaObservations:
         key, now = wait_key(account, harness), self.clock()
 
         def decide(pipe):
-            until = int(pipe.get(key) or 0)
-            if until > now:
-                return None, until
+            stored = pipe.get(key)
+            if stored and int(stored) > now:
+                return None, int(stored)
             until = now + WAIT_MS
             return (lambda pipe: pipe.set(key, until)), until
 
