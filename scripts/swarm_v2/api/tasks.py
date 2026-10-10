@@ -29,7 +29,7 @@ WORKER_STATES = ("claimed", "blocked", "pr")
 WORKER_FIELDS = ("state", "issue_url", "pr_url", "branch", "branch_repo")
 SHOWN = ("id", *SPEC_FIELDS, *WORKER_FIELDS, "claimed_by")
 RECEIPTS = "task_operations"
-KEPT_RECEIPTS = 1000
+REVISION = re.compile(r"[0-9a-f]{64}")
 TASK = re.compile(r"/v2/tasks/([^/]+)")
 PROGRESS = re.compile(r"/v2/tasks/([^/]+)/progress")
 CONTROLS = re.compile(r"/v2/swarm(/.*)?")
@@ -40,6 +40,7 @@ STATUS = {
     "stale_generation": 409,
     "revision_conflict": 409,
     "operation_conflict": 409,
+    "read_only": 409,
     "dependency_unavailable": 503,
 }
 CLAIM_REFUSALS = {
@@ -53,7 +54,7 @@ def spec_revision(task: Mapping) -> str:
     return revision({name: task.get(name) for name in SPEC_FIELDS})
 
 
-def revision_conflicts_total(store, slug: str) -> int:
+def ledger_revision_conflicts_total(store, slug: str) -> int:
     return int(store.redis.get(store.key(slug, "ledger-revision-conflicts")) or 0)
 
 
@@ -99,8 +100,10 @@ class TasksAPI:
         }
 
     def update(self, token: str, task_id: str, body: object) -> dict:
-        scope = self._scope(token, task_id)
+        scope = self._writable(token, task_id)
         request = _request(body, ("operation_id", "task_generation", "expected_revision", "fields"))
+        if not isinstance(request["expected_revision"], str) or not REVISION.fullmatch(request["expected_revision"]):
+            raise GrantRefused("invalid_request", "expected_revision must be a task revision from a read")
         fields = request["fields"]
         if not isinstance(fields, Mapping) or not fields:
             raise GrantRefused("invalid_request", "fields must name at least one worker field")
@@ -112,15 +115,11 @@ class TasksAPI:
         return self._write(scope, request, op, request["expected_revision"])
 
     def progress(self, token: str, task_id: str, body: object) -> dict:
-        scope = self._scope(token, task_id)
+        scope = self._writable(token, task_id)
         request = _request(body, ("operation_id", "task_generation", "text"))
         text = request["text"]
         if not isinstance(text, str) or not text.strip():
             raise GrantRefused("invalid_request", "text must be a non empty string")
-        from scripts.swarm_ledger import ledger_comments
-
-        if found := ledger_comments.problems(text, "comment"):
-            raise GrantRefused("invalid_request", f"progress refused: {'; '.join(found)}")
         op = {"op": "add", "thread": f"tasks/{task_id}/comments", "text": text}
         return self._write(scope, request, op, None)
 
@@ -130,6 +129,12 @@ class TasksAPI:
             raise GrantRefused("forbidden_scope", "the credential is scoped to another task")
         return registration
 
+    def _writable(self, token: str, task_id: str) -> Registration:
+        scope = self._scope(token, task_id)
+        if not self.writes_enabled:
+            raise ReadOnly(task_id, spec_revision(self._task(task_id)))
+        return scope
+
     def _task(self, task_id: str) -> dict:
         task = self.ledger.read(self.slug, f"tasks/{task_id}").get("tasks", [])
         if not task:
@@ -137,35 +142,40 @@ class TasksAPI:
         return task[0]
 
     def _write(self, scope: Registration, request: dict, op: dict, expected: str | None) -> dict:
-        if not self.writes_enabled:
-            raise self._conflict(self._task(scope.task_id), "task writes are read only; refresh and retry later")
         gate = WorkerGate(self, scope, request, op, expected)
-        _, rejected = self.ledger.apply_ops(self.slug, ops=[gate.op], gate=gate)
-        if rejected:
-            raise GrantRefused("invalid_request", "the ledger refused this write")
-        return gate.ack or gate.replayed
+        self.ledger.apply_ops(self.slug, ops=[gate.op], gate=gate)
+        return gate.ack
 
     def _hold(self, scope: Registration, generation: object) -> str:
         try:
             claim = self.tasks.current(scope.task_id)
             self.tasks._holder(scope, generation, claim)
         except SwarmError as error:
-            error_class, message = CLAIM_REFUSALS.get(str(error), ("dependency_unavailable", str(error)))
+            error_class, message = CLAIM_REFUSALS.get(
+                str(error), ("dependency_unavailable", "the task authority could not confirm the claim")
+            )
             raise GrantRefused(error_class, message) from error
         return claim.holder
 
-    def _conflict(self, task: Mapping, message: str) -> GrantRefused:
+    def _conflict(self, task: Mapping) -> GrantRefused:
         self.store.redis.incr(self.store.key(self.slug, "ledger-revision-conflicts"))
-        return RevisionConflict(message, task["id"], spec_revision(task))
+        return RevisionConflict(
+            "revision_conflict", "the task specification changed; refresh and retry", task["id"], spec_revision(task)
+        )
 
 
 class RevisionConflict(GrantRefused):
-    def __init__(self, message: str, task_id: str, current: str) -> None:
-        super().__init__("revision_conflict", message)
+    def __init__(self, error_class: str, message: str, task_id: str, current: str) -> None:
+        super().__init__(error_class, message)
         self.task_id, self.current = task_id, current
 
     def detail(self) -> dict:
         return {**super().detail(), "task_id": self.task_id, "current_revision": self.current}
+
+
+class ReadOnly(RevisionConflict):
+    def __init__(self, task_id: str, current: str) -> None:
+        super().__init__("read_only", "task writes are read only; refresh and retry later", task_id, current)
 
 
 class WorkerGate:
@@ -173,33 +183,43 @@ class WorkerGate:
         self.api, self.scope, self.request, self.expected = api, scope, request, expected
         self.digest = revision({"op": op, "expected_revision": expected})
         self.op = {**op, "id": f"w-{revision([api.slug, scope.task_id, request['operation_id']])[:16]}"}
-        self.ack, self.replayed = None, None
+        self.ack = None
 
     def apply(self, doc: dict, op: dict, ctx: object, apply_op) -> bool:
-        receipts = ctx.meta.setdefault(RECEIPTS, {})
-        known = receipts.get(self.request["operation_id"])
+        generation = self.request["task_generation"]
+        holder = self.api._hold(self.scope, generation)
+        receipts = ctx.meta.setdefault(RECEIPTS, {}).get(self.scope.task_id)
+        if receipts is None or receipts["generation"] != generation:
+            receipts = {"generation": generation, "operations": {}}
+        known = receipts["operations"].get(self.request["operation_id"])
         if known is not None:
             if known["digest"] != self.digest:
                 raise GrantRefused("operation_conflict", "the operation ID was already used for different content")
-            self.replayed = known["ack"]
+            self.ack = known["ack"]
             return True
-        holder = self.api._hold(self.scope, self.request["task_generation"])
         task = next((row for row in doc.get("tasks", []) if row["id"] == self.scope.task_id), None)
         if task is None:
             raise GrantRefused("invalid_request", "the task is not on the ledger")
         if self.expected is not None and spec_revision(task) != self.expected:
-            raise self.api._conflict(task, "the task specification changed; refresh and retry")
-        if not apply_op(doc, {**op, "by": holder}, ctx):
-            return False
+            raise self.api._conflict(task)
+        import ledger_core
+
+        write = {**op, "by": holder}
+        try:
+            ledger_core.check_op(write)
+        except ValueError as error:
+            raise GrantRefused("invalid_request", f"the ledger refused this write: {error}") from error
+        if not apply_op(doc, write, ctx):
+            raise GrantRefused("invalid_request", "the ledger refused this write")
+        self.api._hold(self.scope, generation)
         self.ack = {
             "task_id": self.scope.task_id,
             "operation_id": self.request["operation_id"],
             "revision": spec_revision(task),
             "ledger_revision": ctx.rev,
         }
-        receipts[self.request["operation_id"]] = {"digest": self.digest, "ack": self.ack}
-        while len(receipts) > KEPT_RECEIPTS:
-            del receipts[next(iter(receipts))]
+        receipts["operations"][self.request["operation_id"]] = {"digest": self.digest, "ack": self.ack}
+        ctx.meta[RECEIPTS][self.scope.task_id] = receipts
         ctx.dirty = True
         return True
 
