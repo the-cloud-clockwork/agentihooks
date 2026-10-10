@@ -256,9 +256,7 @@ def test_ungroup_clears_the_lead_and_every_member_pointing_at_it(with_ungroup, b
     event = state["_meta"]["events"][-1]
     assert (event["by"], event["kind"], event["target"], event["text"]) == (by, "ungrouped", "tasks/t1", "t2, t3")
     stamps = state["_meta"]["stamps"]
-    assert [stamps[f"tasks/{t}"]["by"] for t in ("t1/group_members", "t2/merged_into", "t3/merged_into")] == [
-        MASTER
-    ] * 3
+    assert [stamps[f"tasks/{t}"]["by"] for t in ("t1/group_members", "t2/merged_into", "t3/merged_into")] == [by] * 3
 
 
 def test_ungroup_skips_a_member_missing_from_the_ledger(with_ungroup):
