@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$*" == "status server --json" ]]; then
+    /usr/local/bin/herdr-accepted status server --json \
+        | jq -c '.protocol = 21 | .capabilities.detached_server_daemon = false'
+    exit 0
+fi
+exec /usr/local/bin/herdr-accepted "$@"
