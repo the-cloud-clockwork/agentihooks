@@ -1,6 +1,7 @@
 import json
 from dataclasses import replace
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -340,16 +341,16 @@ def test_the_replacement_starts_on_a_pending_pod_whatever_the_old_target(world):
     assert replacement.runtime_target == {"pod_namespace": world.api.namespace, "pod_name": "swarm-pending"}
 
 
-def test_recovery_reads_the_clock_of_its_own_store(world, monkeypatch):
+def test_recovery_reads_the_clock_of_its_own_store(world):
     def clock(store):
         assert store.redis.time()
         return world.clock[0]
 
-    monkeypatch.setattr(failures.lease, "now_ms", clock)
     recovery = world.recovery(world.live)
     world.show(world.old, "image_pull")
-    assert world.reconcile(recovery) == {world.old.execution_id: "pulling"}
-    recovery.handle(world.old.execution_id, "image_pull")
+    with mock.patch.object(failures.lease, "now_ms", clock):
+        assert world.reconcile(recovery) == {world.old.execution_id: "pulling"}
+        recovery.handle(world.old.execution_id, "image_pull")
     assert recovery.fence(world.old.execution_id)["fenced_at_ms"] == world.clock[0]
 
 
