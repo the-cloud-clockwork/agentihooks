@@ -377,12 +377,12 @@ def size_warning(text):
 class Context:
     """One sync's clock, rev, stamps and event log."""
 
-    def __init__(self, meta, at):
+    def __init__(self, meta, at, slug=""):
         self.at, self.rev = at, meta["rev"] + 1
         self.stamps, self.events = meta["stamps"], []
         self.meta, self.dirty, self.refused, self.dropped = meta, False, [], []
         self.names = {}
-        self.slug = ""
+        self.slug = slug
 
     def author(self, name: str) -> str:
         if name not in self.names:

@@ -56,7 +56,7 @@ def author(op, ctx) -> tuple[str, str] | None:
     """(writer, the operator's quoted words) when the op may write freezes, else None."""
     by = op.get("by")
     if by is None:
-        return "operator", ""
+        return "operator", op.get("quote", "")
     if by == DISPATCHER:
         return (by, "") if autonomy(ctx.slug) == FULL else None
     master = ctx.meta["members"].get(by, {}).get("role") == "orchestrator"

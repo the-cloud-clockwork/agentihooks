@@ -86,6 +86,12 @@ def test_freezes_are_a_ledger_collection_with_verb_target_author_time_and_reason
     assert targets(state) == [("freeze", "plans/a"), ("focus", "plans/b")]
 
 
+def test_an_operator_quote_is_kept_on_the_record():
+    state, rejected = freeze("phases/p2", quote="hold ship")
+    assert rejected == []
+    assert state["freezes"][0]["quote"] == "hold ship"
+
+
 def test_setting_the_same_verb_on_the_same_target_twice_keeps_one_record():
     freeze("phases/p1")
     state, rejected = freeze("phases/p1")
@@ -204,11 +210,12 @@ def test_lines_name_each_active_freeze_for_swarm_status():
     assert ledger_freezes.lines({}) == []
     freeze("plans/a", reason="Ship the hierarchy first")
     state, _ = freeze("lane:ci", verb="focus")
-    first, second = ledger_freezes.lines(state)
-    assert first.startswith("freeze  plans/a  by operator  at ")
-    assert first.endswith("  Ship the hierarchy first")
-    assert second.startswith("focus  lane:ci  by operator  at ")
-    assert second.endswith("Z")
+    for row, at in zip(state["freezes"], (0, 1791605100000)):
+        row["at"] = at
+    assert ledger_freezes.lines(state) == [
+        "freeze  plans/a  by operator  at 1970-01-01T00:00Z  Ship the hierarchy first",
+        "focus  lane:ci  by operator  at 2026-10-10T04:05Z",
+    ]
 
 
 def test_the_api_takes_freeze_ops_against_the_freezes_collection():
