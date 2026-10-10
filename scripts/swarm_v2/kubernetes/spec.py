@@ -1,0 +1,354 @@
+"""Render an admitted launch into one bounded execution Pod; the task payload reaches the Pod only as a digest."""
+
+import argparse
+import copy
+import hashlib
+import json
+import re
+import sys
+from collections import Counter
+from collections.abc import Mapping
+from dataclasses import dataclass, fields
+from pathlib import Path
+
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import best_match
+
+from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL, OWNER_LABEL
+
+SCHEMA = Path(__file__).resolve().parents[3] / "docs" / "swarm-v2" / "schemas" / "pod-policy.json"
+DOMAIN = "swarm.agentihooks.io"
+ATTEMPTS = "/home/worker/attempts"
+LAUNCH_DIR = "/var/run/swarm/launch"
+CREDENTIAL_DIR = "/var/run/swarm/credential"
+WORKER_ID = 10001
+TMP_MIB = 1024
+PROBES = ("startup", "readiness", "liveness")
+HARNESSES = ("claude", "codex")
+LABEL_VALUE = re.compile(r"[A-Za-z0-9]([A-Za-z0-9._-]{0,61}[A-Za-z0-9])?")
+IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,127}")
+PROJECT = re.compile(r"github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+|local:[A-Za-z0-9._-]+|unknown")
+IDENTITY = {
+    "execution_id": re.compile(r"exe-[0-9a-f]{32}"),
+    "task_id": LABEL_VALUE,
+    "swarm_id": LABEL_VALUE,
+    "seat_id": IDENTIFIER,
+    "grant_ref": IDENTIFIER,
+    "project_id": PROJECT,
+}
+COUNTS = ("generation", "controller_epoch")
+
+
+class PodSpecRefused(ValueError):
+    def __init__(self, message: str, reason: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+@dataclass(frozen=True)
+class AdmittedLaunch:
+    execution_id: str
+    generation: int
+    task_id: str
+    swarm_id: str
+    seat_id: str
+    grant_ref: str
+    controller_epoch: int
+    project_id: str
+    harness: str
+    image_digest: str
+    profile: str
+    memory_mib: int
+    cpu_millis: int
+    credential_ref: str
+    task_payload: object
+
+    @classmethod
+    def from_record(cls, record: object) -> "AdmittedLaunch | PodSpecRefused":
+        if not isinstance(record, Mapping):
+            return PodSpecRefused("launch must be a JSON object", "fields")
+        names = [f.name for f in fields(cls)]
+        if extra := sorted(set(record) - set(names)):
+            return PodSpecRefused(f"launch has unknown fields: {', '.join(extra)}", "fields")
+        if missing := [name for name in names if name not in record]:
+            return PodSpecRefused(f"launch is missing fields: {', '.join(missing)}", "fields")
+        return cls(**{name: record[name] for name in names})
+
+
+@dataclass(frozen=True)
+class Rendered:
+    pod: dict
+    digest: str
+
+
+def _canonical(value: object) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+
+
+def canonical_digest(value: object) -> str:
+    return "sha256:" + hashlib.sha256(_canonical(value)).hexdigest()
+
+
+def payload_digest(payload: object) -> str:
+    return canonical_digest(payload)
+
+
+def _where(path) -> str:
+    return "/".join(str(part) for part in path) or "the document root"
+
+
+def load_policy(path: Path) -> dict:
+    policy = json.loads(Path(path).read_text())
+    error = best_match(Draft202012Validator(json.loads(SCHEMA.read_text())).iter_errors(policy))
+    if error is not None:
+        raise PodSpecRefused(f"pod policy is invalid at {_where(error.absolute_path)}: {error.message}", "policy")
+    probes = policy["probes"]
+    budget = probes["herdr_timeout_seconds"] + probes["brain_timeout_seconds"]
+    for name in PROBES:
+        if probes[name]["timeout_seconds"] <= budget:
+            raise PodSpecRefused(
+                f"{name} probe timeout_seconds must exceed the herdr and brain timeouts together", "policy"
+            )
+    return policy
+
+
+def _count(value: object) -> bool:
+    return type(value) is int and value >= 1
+
+
+def _identity(launch: AdmittedLaunch) -> None:
+    for name, pattern in IDENTITY.items():
+        value = getattr(launch, name)
+        if not isinstance(value, str) or not pattern.fullmatch(value):
+            raise PodSpecRefused(f"launch {name} is not a valid value", "identity")
+    for name in COUNTS:
+        if not _count(getattr(launch, name)):
+            raise PodSpecRefused(f"launch {name} is not a valid value", "identity")
+    if launch.harness not in HARNESSES:
+        raise PodSpecRefused("launch harness must be claude or codex", "harness")
+    if not isinstance(launch.image_digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", launch.image_digest):
+        raise PodSpecRefused("launch image_digest must be a sha256 digest", "image")
+
+
+def _profile(policy: dict, launch: AdmittedLaunch) -> dict:
+    if not isinstance(launch.profile, str) or launch.profile not in policy["profiles"]:
+        raise PodSpecRefused("launch profile is not an approved resource profile", "profile")
+    limits = policy["profiles"][launch.profile]["limits"]
+    if not (_count(launch.memory_mib) and _count(launch.cpu_millis)):
+        raise PodSpecRefused("launch resources must be positive integers", "resources")
+    if launch.memory_mib > limits["memory_mib"] or launch.cpu_millis > limits["cpu_millis"]:
+        raise PodSpecRefused(f"launch resources exceed the {launch.profile} profile limits", "resources")
+    if launch.credential_ref not in policy["credentials"]:
+        raise PodSpecRefused("launch credential_ref is not an approved credential", "credential")
+    return policy["profiles"][launch.profile]
+
+
+def _payload(launch: AdmittedLaunch) -> str:
+    if not isinstance(launch.task_payload, Mapping):
+        raise PodSpecRefused("launch task_payload must be a JSON object", "payload")
+    try:
+        return payload_digest(launch.task_payload)
+    except (TypeError, ValueError):
+        raise PodSpecRefused("launch task_payload must be a JSON object", "payload") from None
+
+
+def _metadata(policy: dict, launch: AdmittedLaunch, payload: str) -> dict:
+    version = policy["template_version"]
+    return {
+        "name": f"swarm-{launch.execution_id}",
+        "namespace": policy["namespace"],
+        "labels": {
+            "app.kubernetes.io/managed-by": "agentihooks",
+            "app.kubernetes.io/component": "swarm-execution",
+            OWNER_LABEL: policy["owner"],
+            EXECUTION_LABEL: launch.execution_id,
+            f"{DOMAIN}/generation": str(launch.generation),
+            f"{DOMAIN}/swarm": launch.swarm_id,
+            f"{DOMAIN}/task": launch.task_id,
+            f"{DOMAIN}/template-version": version,
+        },
+        "annotations": {
+            f"{DOMAIN}/seat": launch.seat_id,
+            f"{DOMAIN}/grant-ref": launch.grant_ref,
+            f"{DOMAIN}/controller-epoch": str(launch.controller_epoch),
+            f"{DOMAIN}/project": launch.project_id,
+            f"{DOMAIN}/harness": launch.harness,
+            f"{DOMAIN}/profile": launch.profile,
+            f"{DOMAIN}/image-digest": launch.image_digest,
+            f"{DOMAIN}/template-version": version,
+            f"{DOMAIN}/task-payload-digest": payload,
+        },
+    }
+
+
+def _seconds(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else repr(float(value))
+
+
+def _probe(policy: dict, launch: AdmittedLaunch, mode: str) -> dict:
+    probes = policy["probes"]
+    command = ["python", "/opt/swarm-node/health.py", mode, "--attempt", f"{ATTEMPTS}/{launch.execution_id}"]
+    command += ["--harness", launch.harness, "--herdr-timeout", _seconds(probes["herdr_timeout_seconds"])]
+    command += ["--brain-timeout", _seconds(probes["brain_timeout_seconds"])]
+    timing = probes[mode]
+    return {
+        "exec": {"command": command},
+        "initialDelaySeconds": timing["initial_delay_seconds"],
+        "periodSeconds": timing["period_seconds"],
+        "timeoutSeconds": timing["timeout_seconds"],
+        "failureThreshold": timing["failure_threshold"],
+    }
+
+
+def _resources(launch: AdmittedLaunch, limits: dict) -> dict:
+    disk = f"{limits['ephemeral_mib']}Mi"
+    return {
+        "requests": {"cpu": f"{launch.cpu_millis}m", "memory": f"{launch.memory_mib}Mi", "ephemeral-storage": disk},
+        "limits": {"cpu": f"{limits['cpu_millis']}m", "memory": f"{limits['memory_mib']}Mi", "ephemeral-storage": disk},
+    }
+
+
+def _container(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
+    container = {
+        "name": "agent",
+        "image": f"{policy['image_repository']}@{launch.image_digest}",
+        "imagePullPolicy": "IfNotPresent",
+        "args": [
+            "python",
+            "/opt/swarm-node/supervisor.py",
+            f"{ATTEMPTS}/{launch.execution_id}",
+            f"{LAUNCH_DIR}/launch.json",
+        ],
+        "env": [{"name": "BRAIN_URL", "value": policy["brain_url"]}] if "brain_url" in policy else [],
+        "resources": _resources(launch, profile["limits"]),
+        "securityContext": {
+            "allowPrivilegeEscalation": False,
+            "privileged": False,
+            "readOnlyRootFilesystem": True,
+            "capabilities": {"drop": ["ALL"]},
+        },
+        "volumeMounts": [
+            {"name": "home", "mountPath": "/home/worker"},
+            {"name": "tmp", "mountPath": "/tmp"},
+            {"name": "launch", "mountPath": LAUNCH_DIR, "readOnly": True},
+            {"name": "credential", "mountPath": CREDENTIAL_DIR, "readOnly": True},
+        ],
+    }
+    for mode in PROBES:
+        container[f"{mode}Probe"] = _probe(policy, launch, mode)
+    return container
+
+
+def _placement(profile: dict) -> dict:
+    placement = {"nodeSelector": dict(profile["node_selector"]), "tolerations": copy.deepcopy(profile["tolerations"])}
+    excluded = [
+        {"key": key, "operator": "NotIn", "values": list(values)} for key, values in profile["excluded_nodes"].items()
+    ]
+    if excluded:
+        terms = {"nodeSelectorTerms": [{"matchExpressions": excluded}]}
+        placement["affinity"] = {"nodeAffinity": {"requiredDuringSchedulingIgnoredDuringExecution": terms}}
+    return placement
+
+
+def _spec(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
+    body = {
+        "restartPolicy": "Never",
+        "serviceAccountName": policy["service_account"],
+        "automountServiceAccountToken": False,
+        "enableServiceLinks": False,
+        "hostNetwork": False,
+        "hostPID": False,
+        "hostIPC": False,
+        "terminationGracePeriodSeconds": policy["termination_grace_seconds"],
+        "securityContext": {
+            "runAsNonRoot": True,
+            "runAsUser": WORKER_ID,
+            "runAsGroup": WORKER_ID,
+            "fsGroup": WORKER_ID,
+            "seccompProfile": {"type": "RuntimeDefault"},
+        },
+        **_placement(profile),
+        "containers": [_container(policy, launch, profile)],
+        "volumes": [
+            {"name": "home", "emptyDir": {"sizeLimit": f"{profile['limits']['ephemeral_mib']}Mi"}},
+            {"name": "tmp", "emptyDir": {"sizeLimit": f"{TMP_MIB}Mi"}},
+            {"name": "launch", "configMap": {"name": f"swarm-{launch.execution_id}-launch", "defaultMode": 0o444}},
+            {"name": "credential", "secret": {"secretName": launch.credential_ref, "defaultMode": 0o400}},
+        ],
+    }
+    if "runtime_class_name" in policy:
+        body["runtimeClassName"] = policy["runtime_class_name"]
+    return body
+
+
+class PodTemplate:
+    def __init__(self, policy: dict) -> None:
+        self.policy = policy
+        self.failures = Counter()
+
+    def render(self, launch: "AdmittedLaunch | PodSpecRefused") -> Rendered:
+        try:
+            if isinstance(launch, PodSpecRefused):
+                raise launch
+            _identity(launch)
+            profile = _profile(self.policy, launch)
+            payload = _payload(launch)
+        except PodSpecRefused as refused:
+            self.failures[refused.reason] += 1
+            raise
+        pod = {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": _metadata(self.policy, launch, payload),
+            "spec": _spec(self.policy, launch, profile),
+        }
+        return Rendered(pod, canonical_digest(pod))
+
+    def pod_spec_validation_failures_total(self) -> dict[str, int]:
+        return dict(self.failures)
+
+
+def _differences(left: object, right: object, path: str) -> list[str]:
+    if isinstance(left, dict) and isinstance(right, dict):
+        found = []
+        for key in sorted(set(left) | set(right)):
+            found += _differences(left.get(key), right.get(key), f"{path}.{key}" if path else key)
+        return found
+    if isinstance(left, list) and isinstance(right, list) and len(left) == len(right):
+        found = []
+        for index, (a, b) in enumerate(zip(left, right, strict=True)):
+            found += _differences(a, b, f"{path}[{index}]")
+        return found
+    return [] if left == right else [path]
+
+
+def probe_only_difference(before: dict, after: dict) -> list[str] | None:
+    """The differing probe paths when only probes differ; None when anything else changed."""
+    probes = {f"spec.containers[0].{mode}Probe" for mode in PROBES}
+    changed = sorted(
+        {next((p for p in probes if path.startswith(p)), path) for path in _differences(before, after, "")}
+    )
+    return changed if set(changed) <= probes else None
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="python -m scripts.swarm_v2.kubernetes.spec")
+    parser.add_argument("action", choices=("render", "digest"))
+    parser.add_argument("--policy", required=True, type=Path)
+    parser.add_argument("--launch", required=True, type=Path)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        return 0 if exc.code == 0 else 64
+    try:
+        template = PodTemplate(load_policy(args.policy))
+        rendered = template.render(AdmittedLaunch.from_record(json.loads(args.launch.read_text())))
+    except PodSpecRefused as refused:
+        print(refused, file=sys.stderr)
+        return 1
+    print(json.dumps(rendered.pod, sort_keys=True) if args.action == "render" else rendered.digest)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

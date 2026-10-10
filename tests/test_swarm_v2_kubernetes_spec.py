@@ -3,9 +3,9 @@ import json
 from pathlib import Path
 
 import pytest
-from scripts.swarm_v2.kubernetes.spec import AdmittedLaunch, PodSpecRefused, PodTemplate, canonical_digest, load_policy
 
 from scripts.swarm_v2.kubernetes import spec
+from scripts.swarm_v2.kubernetes.spec import AdmittedLaunch, PodSpecRefused, PodTemplate, canonical_digest, load_policy
 from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL, OWNER_LABEL
 
 pytestmark = pytest.mark.unit
@@ -13,6 +13,7 @@ pytestmark = pytest.mark.unit
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2"
 POLICY = FIXTURES / "pod-policy.json"
 LAUNCH = FIXTURES / "pod-launch.json"
+EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-KUB-01"
 EXECUTION = "exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0"
 ATTEMPT = f"/home/worker/attempts/{EXECUTION}"
 
@@ -530,3 +531,17 @@ def test_the_command_line_digest_action_prints_the_spec_digest(capsys):
 
 def test_the_command_line_refuses_an_unknown_action(capsys):
     assert spec.main(["apply", "--policy", str(POLICY), "--launch", str(LAUNCH)]) == 64
+
+
+def test_the_golden_pod_validated_in_kind_is_the_current_render():
+    assert json.loads((FIXTURES / "pod-rendered.json").read_text()) == render()[1].pod
+
+
+@pytest.mark.parametrize("case", ["a", "b", "c"])
+def test_package_cases_match_their_committed_evidence(case):
+    from tests.sv2_kub01_cases import run_case
+
+    first, second = run_case(case), run_case(case)
+    assert first == second
+    committed = json.loads((EVIDENCE / f"{case}-result.json").read_text())
+    assert committed == {**first, "independent_runs": 2}, json.dumps(first, indent=2, sort_keys=True)
