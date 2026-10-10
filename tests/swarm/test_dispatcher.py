@@ -255,6 +255,14 @@ def test_grouping_runs_unchanged_and_logs_its_actions(store, home, shipped, monk
     assert [(r["rule"], r["action"]) for r in shipped[0][1]] == [("grouping", "grouped tasks b under a")]
 
 
+def test_a_refused_grouping_is_returned_but_not_logged_as_an_action(store, home, shipped, monkeypatch):
+    skipped = "skipped grouping under task a: the ledger refused its write"
+    monkeypatch.setattr(grouping, "group_pass", lambda *a: [skipped, "grouped tasks d under c"])
+    assert dispatcher.group(SLUG, store.config(SLUG), store, "L", doc([]), NOW) == [skipped, "grouped tasks d under c"]
+    assert [r["reason"] for r in gate_log.recent(SLUG, None, home)] == ["grouped tasks d under c"]
+    assert [r["action"] for r in shipped[0][1]] == ["grouped tasks d under c"]
+
+
 def test_the_priority_sweep_runs_unchanged_and_logs_its_actions(store, home, shipped, monkeypatch):
     calls = []
     monkeypatch.setattr(priority_sweep, "priority_pass", lambda *a: calls.append(a) or ["cleared one"])

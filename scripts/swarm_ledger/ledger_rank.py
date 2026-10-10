@@ -51,7 +51,7 @@ def apply(doc, op, ctx):
     rank = canonical(op["rank"])
     if op.get("if_unranked") and "rank" in task:
         return True
-    if task.get("rank", DEFAULT) != rank:
+    if task.get("rank") != rank:
         task["rank"] = rank
         ctx.stamp(f"{op['item']}/rank", by)
         ctx.record(by, "rank set", op["item"], text=rank)

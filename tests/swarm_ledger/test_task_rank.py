@@ -229,11 +229,23 @@ def test_the_page_rank_op_records_the_operator_and_marks_the_ledger_changed():
     assert ctx.dirty is True
 
 
-@pytest.mark.parametrize(("task", "rank"), [({"id": "t1"}, "normal"), ({"id": "t1", "rank": "low"}, "low")])
+@pytest.mark.parametrize(
+    ("task", "rank"), [({"id": "t1", "rank": "normal"}, "normal"), ({"id": "t1", "rank": "low"}, "low")]
+)
 def test_setting_the_rank_a_task_already_has_changes_nothing(task, rank):
     doc, ctx = {"tasks": [task]}, FakeContext()
     assert ledger_rank.apply(doc, page_rank(rank), ctx) is True
     assert (doc["tasks"][0], ctx.stamps, ctx.events, ctx.dirty) == (dict(task), [], [], False)
+
+
+def test_an_explicit_normal_on_an_unranked_task_is_stored_so_the_dispatcher_leaves_it():
+    doc, ctx = {"tasks": [{"id": "t1"}]}, FakeContext()
+    assert ledger_rank.apply(doc, page_rank("normal"), ctx) is True
+    assert (doc["tasks"][0], ctx.stamps, ctx.dirty) == (
+        {"id": "t1", "rank": "normal"},
+        [("tasks/t1/rank", "operator")],
+        True,
+    )
 
 
 def test_the_page_rank_op_on_a_ledger_without_tasks_is_rejected():

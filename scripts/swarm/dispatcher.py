@@ -20,6 +20,7 @@ TOP = 3
 RANK = "high"
 LANES = {"engineering": "eng", "ci": "ci"}
 LEVERAGE, GROUPING, PRIORITIES = "leverage-rank", "grouping", "priority-sweep"
+SKIPPED = "skipped "
 TABLE = metrics_outbox.Table("dispatch_actions", (("rule", "String"), ("mode", "String"), ("action", "String")))
 RAISED = "The dispatcher raised this task to high rank because it unblocks {work}."
 PROPOSED = "The dispatcher proposed high rank for this task to the master because it unblocks {work}."
@@ -80,7 +81,7 @@ def rank_pass(slug, config, store, ledger, doc, now_ms):
     else:
         mail = Mail(InboxStore(store.redis), store, slug)
         done = [action for task, work in unranked if (action := _propose(slug, ledger, mail, task, work))]
-    return log(slug, done, now_ms)
+    return [action.text for action in done] + log(slug, done, now_ms)
 
 
 def _raise(slug, ledger, task, work):
@@ -115,12 +116,13 @@ def _propose(slug, ledger, mail, task, work):
 def group(slug, config, store, ledger, doc, now_ms):
     mode = "apply" if config.autonomy in grouping.APPLIES else "propose"
     found = grouping.group_pass(slug, config, store, ledger, doc)
-    return log(slug, [Action(GROUPING, mode, text, {}) for text in found], now_ms)
+    landed = [Action(GROUPING, mode, text, {}) for text in found if not text.startswith(SKIPPED)]
+    return found + log(slug, landed, now_ms)
 
 
 def priorities(store, slug, doc, ledger, view, now_ms):
     found = priority_sweep.priority_pass(store, slug, doc, ledger, None, view)
-    return log(slug, [Action(PRIORITIES, "apply", text, {}) for text in found], now_ms)
+    return found + log(slug, [Action(PRIORITIES, "apply", text, {}) for text in found], now_ms)
 
 
 def log(slug, actions, now_ms):
@@ -132,7 +134,7 @@ def log(slug, actions, now_ms):
         row = gate_log.Row(now_ms, AUTHOR, action.mode, AUTHOR, action.task.get("id", ""), action.rule, action.text)
         gate_log.append(slug, row)
     rows = [dispatch_row(slug, index, action, now_ms) for index, action in enumerate(actions)]
-    return [action.text for action in actions] + metrics.record(TABLE, rows, now_ms)
+    return metrics.record(TABLE, rows, now_ms)
 
 
 def dispatch_row(slug, index, action, now_ms):
