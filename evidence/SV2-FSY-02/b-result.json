@@ -1,0 +1,504 @@
+{
+  "package": "SV2-FSY-02",
+  "case": "T-SV2-FSY-02-B",
+  "title": "rejection: a cached repository with a mismatched origin cannot be reused based on its folder name alone",
+  "tested_commit": "0c0e1736faaa679cd061ac6139d297fc27e8015c",
+  "evidence_class": "local isolated fixture in CI: real git against file origins in pytest temporary execution roots; nothing mocked except monkeypatched git failures in named refusal tests; not live rollout proof",
+  "mocked": false,
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063533508",
+  "passed": true,
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_unsupported_origin_is_refused[ftp://host/a/b]",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.2212116Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_unsupported_origin_is_refused[http://github.com/a/b]",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.2225907Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_unsupported_origin_is_refused[]",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.2256557Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_unsupported_origin_is_refused[git@github.com:]",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.2299516Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_unsupported_origin_is_refused[not",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.2336680Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_unsupported_origin_is_refused[https://github.com/]",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.2371595Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_unsupported_origin_is_refused[https://h:abc/x]",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.2390970Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_unsupported_origin_is_refused[file://host/a/b]",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.2496064Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_unsupported_origin_is_refused[https://[::1/x]",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.2497508Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_missing_base_branch_is_refused",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.4396381Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change0-invalid",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.5656247Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_an_older_generation_cannot_overwrite_a_newer_record",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.5864066Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change3-invalid",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.6313692Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_recorded_generation_for_another_project_is_refused",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.6708428Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change5-invalid",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.7000340Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_recorded_generation_for_another_base_is_refused",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.7053764Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change1-invalid",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.7367248Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change7-invalid",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.7664900Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change2-invalid",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.7688265Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change4-invalid",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.8024026Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change9-invalid",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.8346481Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change6-invalid",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.8347500Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change8-invalid",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.8661675Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change10-origin",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.8997094Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change12-origin",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.9051071Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change11-origin",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.9328082Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change13-origin",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.9673821Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change15-origin",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:19.9727125Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change14-origin",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:20.0000969Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change16-origin",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:20.0306372Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_wrong_origin_mirror_is_not_reused_by_its_folder_name",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:20.0886220Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change17-origin",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:20.0934808Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change18-invalid",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:20.1304075Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_folder_without_an_origin_is_not_reused",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:20.1657258Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_base_without_the_required_commit_is_refused_as_stale",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:20.2886191Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_mirror_with_an_unreadable_origin_is_not_reused",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:20.6585992Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_branch_name_held_by_the_mirror_is_not_reused",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:20.7718392Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_an_inherited_git_dir_does_not_redirect_preparation",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:20.9340434Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_plain_folder_inside_a_matching_repository_is_not_reused",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:20.9937379Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_replay_with_a_newer_required_commit_is_refused_as_stale",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:21.1889923Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_package_cases_pass_on_the_isolated_fixture",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:23.0188326Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_unsupported_origin_is_refused[ftp://host/a/b]",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:02.2709871Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_unsupported_origin_is_refused[http://github.com/a/b]",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:02.3053705Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_unsupported_origin_is_refused[git@github.com:]",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:02.3411279Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_unsupported_origin_is_refused[not",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:02.3732003Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_unsupported_origin_is_refused[]",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:02.3827528Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_unsupported_origin_is_refused[https://[::1/x]",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:02.4080074Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_unsupported_origin_is_refused[file://host/a/b]",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:02.4413386Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_unsupported_origin_is_refused[https://github.com/]",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:02.4435874Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_unsupported_origin_is_refused[https://h:abc/x]",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:02.5035726Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_missing_base_branch_is_refused",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:03.1662358Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_an_older_generation_cannot_overwrite_a_newer_record",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:03.3356700Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_recorded_generation_for_another_project_is_refused",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:03.3948135Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change1-invalid",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:03.5439610Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_recorded_generation_for_another_base_is_refused",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:03.5775296Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change2-invalid",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:03.6390142Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change4-invalid",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:03.7218419Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change0-invalid",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:03.7584770Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change5-invalid",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:03.8298298Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change7-invalid",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:03.8930866Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change3-invalid",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:03.9491214Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change6-invalid",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:04.0251747Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change10-origin",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:04.0798645Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change8-invalid",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:04.1494562Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change9-invalid",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:04.2049762Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change13-origin",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:04.2592740Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change11-origin",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:04.3387513Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change12-origin",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:04.3858450Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change16-origin",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:04.4339849Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change14-origin",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:04.5240981Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change15-origin",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:04.5698707Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_wrong_origin_mirror_is_not_reused_by_its_folder_name",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:04.6513098Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change17-origin",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:04.6949353Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_invalid_requests_are_refused_before_any_git_io[change18-invalid",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:04.7598765Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_folder_without_an_origin_is_not_reused",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:04.8855801Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_base_without_the_required_commit_is_refused_as_stale",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:05.1745266Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_mirror_with_an_unreadable_origin_is_not_reused",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:05.8190191Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_branch_name_held_by_the_mirror_is_not_reused",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:06.1606939Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_an_inherited_git_dir_does_not_redirect_preparation",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:06.4341866Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_plain_folder_inside_a_matching_repository_is_not_reused",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:06.7208433Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_replay_with_a_newer_required_commit_is_refused_as_stale",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:06.8440573Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_package_cases_pass_on_the_isolated_fixture",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:11.1756117Z"
+    }
+  ]
+}

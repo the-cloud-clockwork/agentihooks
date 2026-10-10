@@ -1,0 +1,276 @@
+{
+  "package": "SV2-FSY-02",
+  "case": "T-SV2-FSY-02-C",
+  "title": "recovery: a fetch failure leaves the prior cache untouched and does not start work from an unverified stale base",
+  "tested_commit": "0c0e1736faaa679cd061ac6139d297fc27e8015c",
+  "evidence_class": "local isolated fixture in CI: real git against file origins in pytest temporary execution roots; nothing mocked except monkeypatched git failures in named refusal tests; not live rollout proof",
+  "mocked": false,
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063533508",
+  "passed": true,
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_fetch_failure_leaves_the_cache_untouched_and_starts_no_work",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:20.2583219Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_failed_clone_leaves_no_partial_mirror",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:20.3312074Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_disabled_cache_reuse_ignores_a_wrong_origin_folder",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:20.4556192Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_disabled_cache_reuse_clones_fresh_beside_the_cached_mirror",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:20.5773957Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_fresh_clone_name_adds_an_attempt_suffix",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:20.6874282Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_worktree_that_git_refuses_is_reported_and_not_created",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:20.7834840Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_an_interrupted_preparation_resumes_its_recorded_worktree",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:21.1394383Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_replay_restores_a_removed_worktree_at_its_branch_tip",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:21.1471479Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_replay_restores_a_half_created_worktree_folder",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:21.2004052Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_replay_whose_mirror_is_gone_is_refused",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:21.2716180Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_the_record_is_replaced_whole",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:21.3157406Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_failed_branch_listing_starts_no_work",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:21.3206374Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_git_runs_without_prompting_and_with_a_timeout",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:21.3892561Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_clone_that_does_not_finish_leaves_no_partial_mirror",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:21.3996420Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_the_record_folder_is_private",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:21.4025547Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_git_call_that_does_not_finish_is_refused[error0]",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:21.5198906Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_git_call_that_does_not_finish_is_refused[error1]",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:21.5376190Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_the_clone_is_staged_beside_the_mirror",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:21.5897894Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_the_record_is_staged_beside_it",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:21.6340305Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_preparation_holds_an_exclusive_lock",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:21.6559903Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_partially_failed_fetch_updates_no_reference",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:21.7485101Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_package_cases_pass_on_the_isolated_fixture",
+      "job": "114246580185",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:28:23.0188326Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_fetch_failure_leaves_the_cache_untouched_and_starts_no_work",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:05.0797800Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_failed_clone_leaves_no_partial_mirror",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:05.2760542Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_fresh_clone_name_adds_an_attempt_suffix",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:05.6260665Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_disabled_cache_reuse_clones_fresh_beside_the_cached_mirror",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:05.8470106Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_disabled_cache_reuse_ignores_a_wrong_origin_folder",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:05.9324705Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_worktree_that_git_refuses_is_reported_and_not_created",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:06.3560386Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_replay_restores_a_half_created_worktree_folder",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:06.8768239Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_replay_restores_a_removed_worktree_at_its_branch_tip",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:06.8799838Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_failed_branch_listing_starts_no_work",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:07.0948899Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_an_interrupted_preparation_resumes_its_recorded_worktree",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:07.1350942Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_replay_whose_mirror_is_gone_is_refused",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:07.2311363Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_the_record_is_replaced_whole",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:07.2912116Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_git_runs_without_prompting_and_with_a_timeout",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:07.3653244Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_the_record_folder_is_private",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:07.4168957Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_git_call_that_does_not_finish_is_refused[error0]",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:07.5150379Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_clone_that_does_not_finish_leaves_no_partial_mirror",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:07.6100463Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_git_call_that_does_not_finish_is_refused[error1]",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:07.6291238Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_the_clone_is_staged_beside_the_mirror",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:07.8474412Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_preparation_holds_an_exclusive_lock",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:07.8687366Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_the_record_is_staged_beside_it",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:07.8777981Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_partially_failed_fetch_updates_no_reference",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:08.0362310Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_package_cases_pass_on_the_isolated_fixture",
+      "job": "114246580251",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:30:11.1756117Z"
+    }
+  ]
+}
