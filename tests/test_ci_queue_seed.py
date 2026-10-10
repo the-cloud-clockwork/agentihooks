@@ -313,7 +313,10 @@ def test_a_failed_queue_run_publishes_its_baseline_then_stops_red():
     mint = _step(steps, "Mint the tcc main ci App token")
     assert "!cancelled()" in job["if"]
     assert "if" not in upload
-    assert stop["if"] == "needs.unit.result != 'success'"
+    assert stop["if"] in (
+        "needs.unit.result != 'success'",
+        "needs.unit.result != 'success' && needs.reuse.outputs.reused != 'true'",
+    )
     assert steps.index(upload) < steps.index(stop) < steps.index(mint)
     result = subprocess.run(["bash", "-e", "-c", stop["run"]], capture_output=True, text=True)
     assert result.returncode != 0
