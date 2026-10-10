@@ -8,9 +8,10 @@ import pytest
 from scripts.hive import auth as hive_auth
 from scripts.swarm import lease
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
+from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, load_policy
 from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL, owner_for
 from scripts.swarm_v2.launch import DistributedLaunch, LaunchTerms
-from scripts.swarm_v2.runtime.base import LOCAL
+from scripts.swarm_v2.runtime.base import LOCAL, SpawnRequest
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
@@ -169,8 +170,6 @@ def test_the_launch_record_names_the_admitted_execution_and_the_worker_settings(
         "endpoints": {"api_url": API_URL},
         "launch_grant": "never-copied",
     }
-    from scripts.swarm_v2.runtime.base import SpawnRequest
-
     record = workers.launch(SpawnRequest(config, "eng", "engineer-1", task))
 
     assert record == {
@@ -253,7 +252,9 @@ def test_an_invalid_pod_policy_is_refused(tmp_path):
     with pytest.raises(SwarmError) as refused:
         deployed.Workers.from_environ(_workers(tmp_path, **{deployed.POLICY_ENV: str(path)}), SLUG)
 
-    assert str(refused.value).startswith("pod policy is invalid at ")
+    with pytest.raises(PodSpecRefused) as expected:
+        load_policy(path)
+    assert str(refused.value) == str(expected.value)
 
 
 def test_a_scheduled_pass_gives_each_swarm_its_own_runtime_or_the_shared_one(monkeypatch):
@@ -287,3 +288,63 @@ def test_the_pod_api_talks_to_the_in_cluster_server_in_the_policy_namespace(monk
 
     assert isinstance(api, deployed.PodClient)
     assert (api.http, api.namespace) == (("in-cluster", environ), "swarm-pod-proof")
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (KeyError("KUBERNETES_SERVICE_HOST"), "the Kubernetes runtime needs KUBERNETES_SERVICE_HOST"),
+        (
+            FileNotFoundError(2, "No such file or directory"),
+            "the service account CA is unreadable: No such file or directory",
+        ),
+    ],
+)
+def test_a_controller_outside_a_cluster_is_refused_by_name(monkeypatch, error, message):
+    deployed = _deployed()
+
+    def in_cluster(environ):
+        raise error
+
+    monkeypatch.setattr(deployed.KubeHttp, "in_cluster", in_cluster)
+
+    with pytest.raises(SwarmError) as refused:
+        deployed.pod_api({}, "swarm-pod-proof")
+
+    assert str(refused.value) == message
+
+
+@pytest.mark.parametrize("projects", [" , ", ","])
+def test_a_project_list_naming_no_project_is_refused(tmp_path, projects):
+    deployed = _deployed()
+
+    with pytest.raises(SwarmError) as refused:
+        deployed.Workers.from_environ(_workers(tmp_path, **{deployed.PROJECTS_ENV: projects}), SLUG)
+
+    assert str(refused.value) == f"{deployed.PROJECTS_ENV} names no project"
+
+
+def test_a_launch_cap_in_non_ascii_digits_is_refused(tmp_path):
+    deployed = _deployed()
+
+    with pytest.raises(SwarmError) as refused:
+        deployed.Workers.from_environ(_workers(tmp_path, **{deployed.CAP_ENV: "²"}), SLUG)
+
+    assert str(refused.value) == f"{deployed.CAP_ENV} must be a whole number above zero"
+
+
+def test_only_the_lease_holder_writes_the_api_address(tmp_path, monkeypatch):
+    store = _store()
+    monkeypatch.setattr(_deployed(), "pod_api", lambda environ, namespace: Pods(namespace))
+    holder = _cs().ControlService(store, SLUG, _cs().launch_key(_environ(tmp_path, store)), lambda: True)
+    assert holder.start()
+
+    service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    try:
+        assert service.runtime is not None
+        assert store.config(SLUG).api_url == ""
+        holder.stop()
+        assert service.tick() is True
+        assert store.config(SLUG).api_url == API_URL
+    finally:
+        service.stop()

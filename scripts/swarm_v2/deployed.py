@@ -1,8 +1,7 @@
-"""The deployed controller's tick runtime: engineer and CI spawns go to Kubernetes through the distributed launch."""
-
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import partial
+from typing import TYPE_CHECKING
 
 from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_v2.accounts import AccountCapacity
@@ -15,6 +14,9 @@ from scripts.swarm_v2.launch import DistributedLaunch, LaunchTerms
 from scripts.swarm_v2.registry import FleetRegistry
 from scripts.swarm_v2.runtime.base import SpawnRequest
 from scripts.swarm_v2.runtime.routed import RoutedRuntime, routed
+
+if TYPE_CHECKING:
+    from scripts.swarm_v2.control_service import ControlService
 
 API_URL_ENV = "AGENTIHOOKS_CONTROL_API_URL"
 POLICY_ENV = "AGENTIHOOKS_POD_POLICY_FILE"
@@ -34,14 +36,18 @@ class WorkerSettingsRefused(SwarmError):
 
 
 class PodGrants:
-    """No path hands a launch grant to a worker Pod yet, so the launch records it as not handed."""
-
     def hand(self, agent: AgentRecord, grant: str) -> bool:
         return False
 
 
 def pod_api(environ: Mapping[str, str], namespace: str) -> PodApi:
-    return PodClient(KubeHttp.in_cluster(environ), namespace)
+    try:
+        http = KubeHttp.in_cluster(environ)
+    except KeyError as missing:
+        raise WorkerSettingsRefused(f"the Kubernetes runtime needs {missing.args[0]}") from None
+    except OSError as error:
+        raise WorkerSettingsRefused(f"the service account CA is unreadable: {error.strerror}") from None
+    return PodClient(http, namespace)
 
 
 def _policy(path: str, slug: str) -> dict:
@@ -69,12 +75,14 @@ class Workers:
         if missing := [name for name in REQUIRED if not environ.get(name)]:
             raise WorkerSettingsRefused(f"the Kubernetes runtime needs {', '.join(missing)}")
         cap = environ[CAP_ENV]
-        if not cap.isdigit() or int(cap) < 1:
+        if not (cap.isascii() and cap.isdigit()) or int(cap) < 1:
             raise WorkerSettingsRefused(f"{CAP_ENV} must be a whole number above zero")
         policy, profile = _policy(environ[POLICY_ENV], slug), environ[PROFILE_ENV]
         if profile not in policy["profiles"]:
             raise WorkerSettingsRefused(f"the Pod policy has no {profile} profile")
         projects = tuple(project.strip() for project in environ[PROJECTS_ENV].split(",") if project.strip())
+        if not projects:
+            raise WorkerSettingsRefused(f"{PROJECTS_ENV} names no project")
         terms = LaunchTerms(environ[ACCOUNT_ENV], int(cap), RESERVATION_MS, projects, environ[BRAIN_ENV], api_url)
         return cls(terms, policy, environ[IMAGE_ENV], profile)
 
@@ -108,7 +116,7 @@ class Workers:
         return KubernetesTransport(pod_api(environ, self.policy["namespace"]), slug, PodTemplate(self.policy))
 
 
-def tick_runtime(service, workers: Workers, environ: Mapping[str, str]) -> RoutedRuntime:
+def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[str, str]) -> RoutedRuntime:
     controller, grants = service.controller, service.grants
     slug = controller.slug
 

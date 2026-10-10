@@ -4,9 +4,13 @@ import os
 import sys
 import time
 import uuid
+from typing import TYPE_CHECKING
 
 from scripts.swarm import lease
 from scripts.swarm.store import RedisStore, SwarmError, connect
+
+if TYPE_CHECKING:
+    from scripts.swarm_v2.control_service import ControlService
 
 
 class FencedLedger:
@@ -108,7 +112,7 @@ def keep_tick(store: RedisStore, slug: str, held: lease.Lease, token: str, ttl_m
                 continue
 
 
-def run_once(store: RedisStore, ledger=None, runtime=None, messenger=None, runtimes=None) -> dict:
+def run_once(store: RedisStore, ledger=None, runtime=None, messenger=None, runtimes: dict | None = None) -> dict:
     from scripts.swarm.cli import run_tick
 
     runtimes = runtimes or {}
@@ -118,7 +122,7 @@ def run_once(store: RedisStore, ledger=None, runtime=None, messenger=None, runti
     }
 
 
-def tick_once(store: RedisStore, service) -> dict:
+def tick_once(store: RedisStore, service: "ControlService | None") -> dict:
     if service is None or service.runtime is None:
         return run_once(store)
     return run_once(store, runtimes={service.controller.slug: service.runtime})

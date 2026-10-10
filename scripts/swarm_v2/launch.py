@@ -100,7 +100,7 @@ class DistributedLaunch:
             return Launch(admitted, grant, slot, outcome)
         return Launch(admitted, grant, slot, outcome, self.homes.hand(admitted, grant))
 
-    def from_tick(self, request: SpawnRequest, terms: LaunchTerms, target: Target | None = None) -> Outcome:
+    def from_tick(self, request: SpawnRequest, terms: LaunchTerms, target: Target) -> Outcome:
         api_url, backend = request.config.api_url, self.router.spawn_backend(request)
         if not api_url:
             return Outcome("spawn", Status.REFUSED, backend, detail=NO_API_URL)
@@ -110,7 +110,7 @@ class DistributedLaunch:
             request.task["id"],
             seat=request.task["seat"],
             runtime_backend=backend,
-            runtime_target=target(request) if target else {},
+            runtime_target=target(request),
         )
         return self.spawn(request, agent, replace(terms, api_url=api_url), "").outcome
 

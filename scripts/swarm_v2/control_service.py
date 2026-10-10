@@ -77,6 +77,7 @@ class ControlService:
         self.server: ThreadingHTTPServer | None = None
         self.listen: tuple[str, int] | None = None
         self.runtime = None
+        self.api_url = ""
 
     def start(self) -> bool:
         if not self.controller.acquire():
@@ -105,6 +106,8 @@ class ControlService:
     def _open(self) -> None:
         if self.listen is not None and self.server is None:
             self.serve(*self.listen)
+            if self.api_url:
+                self.controller.store.update(self.controller.slug, api_url=self.api_url)
 
     def serve(self, host: str, port: int) -> ThreadingHTTPServer:
         self.server = serve(self.executions, host, port)
@@ -142,11 +145,11 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
         owner=owner,
     )
     service.listen = (HOST, int(port))
+    if workers is not None:
+        service.api_url = workers.terms.api_url
+        service.runtime = deployed.tick_runtime(service, workers, environ)
     try:
         service.start()
-        if workers is not None:
-            service.runtime = deployed.tick_runtime(service, workers, environ)
-            store.update(slug, api_url=workers.terms.api_url)
     except BaseException:
         service.stop()
         raise
