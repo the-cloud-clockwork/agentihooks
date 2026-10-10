@@ -245,8 +245,8 @@ def publish(store: Store, execution: Execution, layer: Layer) -> Path | None:
     with _locked(store):
         for stale in store.policy.store.glob(f"{STAGING}*"):
             filesystem.remove(stale)
-        if entry.exists() or entry.is_symlink():
-            if _recorded(entry) != files:
+        if _verified(store, layer.key) is not None:
+            if json.loads((entry / ENTRY).read_text())["files"] != files:
                 raise CacheError("the cache entry for this key holds other content and is not replaced")
             return entry / CONTENT
         victims = _victims(store, _size(layer.writable))
@@ -254,10 +254,3 @@ def publish(store: Store, execution: Execution, layer: Layer) -> Path | None:
         for path in victims:
             _drop(path)
     return entry / CONTENT
-
-
-def _recorded(entry: Path) -> dict | None:
-    try:
-        return json.loads((entry / ENTRY).read_text())["files"]
-    except (OSError, ValueError, KeyError, TypeError):
-        return None

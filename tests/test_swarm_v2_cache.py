@@ -316,7 +316,7 @@ def test_a_link_swapped_in_after_the_check_is_copied_as_a_link_and_refused(world
     assert entries(world.store) == []
 
 
-def test_a_dangling_link_in_place_of_an_entry_blocks_publish_until_attach_discards_it(world):
+def test_a_dangling_link_in_place_of_an_entry_is_discarded_by_attach_and_by_publish(world):
     world.store.policy.store.mkdir(mode=0o700)
     entry = world.store.policy.store / key().digest()
     entry.symlink_to(world.tmp / "gone")
@@ -325,13 +325,20 @@ def test_a_dangling_link_in_place_of_an_entry_blocks_publish_until_attach_discar
     assert cache.METRICS["cache_corruption_total"] == 1
     entry.symlink_to(world.tmp / "gone")
     fill(layer, {"a.whl": b"x"})
-    with pytest.raises(cache.CacheError) as error:
-        cache.publish(world.store, world.first, layer)
-    assert str(error.value) == "the cache entry for this key holds other content and is not replaced"
-    assert entry.is_symlink()
-    assert cache.attach(world.store, world.second, key()).seed is None
-    assert cache.METRICS["cache_corruption_total"] == 2
     assert cache.publish(world.store, world.first, layer) == entry / "content"
+    assert not entry.is_symlink() and (entry / "content" / "a.whl").read_bytes() == b"x"
+    assert cache.METRICS["cache_corruption_total"] == 2
+
+
+def test_publish_rebuilds_an_entry_moved_under_its_key_even_when_the_files_match(world):
+    moved = published(world, key(lock="1" * 64), {"a.whl": b"x"})
+    root = world.store.policy.store
+    moved.parent.rename(root / key().digest())
+    layer = cache.attach(replace(world.store, policy=replace(world.store.policy, enabled=False)), world.first, key())
+    fill(layer, {"a.whl": b"x"})
+    seed = cache.publish(world.store, world.first, layer)
+    assert json.loads((seed.parent / "entry.json").read_text())["key"] == asdict(key())
+    assert cache.METRICS["cache_corruption_total"] == 1
 
 
 def test_publish_waits_for_the_store_lock_even_against_a_shared_holder(world):
