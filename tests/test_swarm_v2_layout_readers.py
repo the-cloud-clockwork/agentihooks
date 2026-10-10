@@ -38,22 +38,46 @@ def named_folders(source: str, folders: set[str]) -> list[str]:
     found = []
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
-            part, joined = node.right, False
+            parts, joined = [node.right], False
         elif isinstance(node, ast.JoinedStr) and node.values:
-            part, joined = node.values[0], True
+            parts, joined = [node.values[0]], True
+        elif isinstance(node, ast.Tuple):
+            parts, joined = node.elts, False
+        elif isinstance(node, ast.Call) and ast.unparse(node.func) in ("Path", "os.path.join"):
+            parts, joined = node.args, False
         else:
             continue
-        if isinstance(part, ast.Constant) and isinstance(part.value, str):
-            head, slash, _ = part.value.partition("/")
-            if head in folders and (slash or not joined):
-                found.append(f"{node.lineno}: {part.value}")
+        for part in parts:
+            if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                head, slash, _ = part.value.partition("/")
+                if head in folders and (slash or not joined):
+                    found.append(f"{node.lineno}: {part.value}")
     return sorted(found)
 
 
 def test_the_guard_catches_a_reader_naming_a_layout_folder():
     folders = {"homes", "run", "tmp"}
-    source = 'a / "homes" / t\nb = f"run/{x}"\nc = a / "tmp/x"\nd = ["pane", "run"]\ne = a / "work"\nf = f"homes{x}"\n'
-    assert named_folders(source, folders) == ["1: homes", "2: run/", "3: tmp/x"]
+    source = (
+        'a / "homes" / t\n'
+        'b = f"run/{x}"\n'
+        'c = a / "tmp/x"\n'
+        'd = ["pane", "run"]\n'
+        'e = a / "work"\n'
+        'f = f"homes{x}"\n'
+        'for name in ("run", "tmp"): pass\n'
+        'h = Path(a, "tmp")\n'
+        'i = os.path.join(a, "homes/x")\n'
+        'j = record.get("homes")\n'
+    )
+    assert named_folders(source, folders) == [
+        "1: homes",
+        "2: run/",
+        "3: tmp/x",
+        "7: run",
+        "7: tmp",
+        "8: tmp",
+        "9: homes/x",
+    ]
 
 
 @pytest.mark.parametrize("module", READERS, ids=lambda module: module.__name__)
