@@ -327,6 +327,16 @@ def test_a_short_or_covered_bottleneck_is_no_trigger(named, ticks):
     assert dispatch_seat.uncovered(swarm(), SLUG, NOW) == []
 
 
+def test_a_bottleneck_whose_report_stopped_fifteen_minutes_ago_closes():
+    store, runtime = swarm(), FakeRuntime()
+    held(store)
+    fresh = REPORT["at"] + dispatch_seat.STALE_MS
+    assert [t["id"] for t in dispatch_seat.uncovered(store, SLUG, fresh)] == ["bottleneck:review"]
+    assert dispatch_seat.uncovered(store, SLUG, fresh + 1) == []
+    run(store, runtime, doc())
+    assert run(store, runtime, doc(), fresh + 1) == [f"ended dispatcher {NAME}: its triggers closed"]
+
+
 def test_a_red_dev_holding_blocked_tasks_asks_for_a_freeze_or_focus():
     from scripts.swarm import dev_red
 

@@ -39,7 +39,7 @@ def triggers(doc: dict, now_ms: int) -> list[dict]:
 def uncovered(store, slug: str, now_ms: int) -> list[dict]:
     held = json.loads(store.redis.get(store.key(slug, lane_split.KEY)) or "{}")
     named = held.get("named")
-    if not named or named in lane_split.MOVES or held["ticks"] < lane_split.TICKS:
+    if not named or named in lane_split.MOVES or held["ticks"] < lane_split.TICKS or now_ms - held["at"] > STALE_MS:
         return []
     text = bottleneck.line(bottleneck.read(store, slug), now_ms)
     return [{"id": f"bottleneck:{named}", "kind": "bottleneck", "ticks": held["ticks"], "text": text}]
