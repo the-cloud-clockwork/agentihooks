@@ -19,6 +19,11 @@ def seat(index: int) -> str:
     return MASTER if index == 1 else f"{MASTER}-{index}"
 
 
+def is_lead(slug: str, agent) -> bool:
+    """A master record in the lead seat; a record with no seat predates seats and is the lead."""
+    return agent.lane == MASTER and agent.seat in ("", seat_address(slug, MASTER))
+
+
 def seats(slug: str, count: int) -> list[str]:
     return [seat_address(slug, seat(index)) for index in range(1, _checked(count) + 1)]
 

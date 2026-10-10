@@ -30,11 +30,13 @@ LEAD_NAME = f"{SLUG}-master-1"
 def swarm():
     import fakeredis
 
-    store = RedisStore(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True))
+    server = fakeredis.FakeServer()
+    store = RedisStore(fakeredis.FakeRedis(server=server, decode_responses=True))
     store.create(SwarmConfig(SLUG, "/repo", 20, 0))
     store.update(SLUG, state="running")
     master_scale.set_rule(store.redis, SLUG, master_scale.rule_of(FIXTURE["rule"]))
     runtime = FakeRuntime()
+    runtime.server = server
     store.put_agent(SLUG, AgentRecord(LEAD_NAME, MASTER, MASTER, pane_id="pm1", seat=LEAD))
     store.seats.occupy(LEAD, LEAD_NAME, 1)
     runtime.live.add(LEAD_NAME)
@@ -279,7 +281,80 @@ def test_twenty_back_to_five_retires_extra_seats_through_their_handoffs(swarm):
     assert actions == [f"retired master seat {SECOND} after 120 seconds", "master seats 2 to 1 for 5 working agents"]
     assert count(store) == 1 and set(owners(store).values()) == {LEAD}
     assert len(posts(store)) == 3 and len(runtime.masters) == 3
+    assert any("notes of " + SECOND in item.text for item in inbox.pending_items(LEAD))
+    assert all(inbox.open_items(address) == [] for address in (SECOND, THIRD, FOURTH))
+    assert master_scale.measurements(store.redis, SLUG) == {
+        "master_seat_count": 1,
+        "master_retire_seconds": [60, 60, 120],
+    }
 
-    restarted = masters.MasterSeats(store.redis).owners(SLUG, DOC)
-    assert restarted == owners(store)
-    assert run(store, runtime, NOW + 4 * MINUTE + HOLD) == []
+    import fakeredis
+
+    restarted = RedisStore(fakeredis.FakeRedis(server=runtime.server, decode_responses=True))
+    assert masters.MasterSeats(restarted.redis).owners(SLUG, DOC) == owners(store)
+    assert master_scale.run(SLUG, restarted.config(SLUG), restarted, runtime, DOC, NOW + 4 * MINUTE + HOLD) == []
+
+
+def test_a_retired_seat_moves_items_its_master_read_but_never_closed(swarm):
+    store, runtime = swarm
+    inbox = InboxStore(store.redis)
+    _, _, fourth = asked(swarm)
+    taken = inbox.send(f"{SLUG}-eng-1", FOURTH, "read but not answered")
+    inbox.deliver(taken.id, FOURTH)
+    [ask] = [i for i in inbox.inbox(FOURTH) if i.sender == "swarm"]
+    inbox.deliver(ask.id, FOURTH)
+    hand_off(store, runtime, fourth)
+
+    run(store, runtime, NOW + 2 * MINUTE + HOLD)
+
+    assert inbox.get(taken.id).address == LEAD and inbox.get(taken.id).state == "pending"
+    assert inbox.get(ask.id).state == "cancelled"
+
+
+def test_regrowth_after_the_asks_withdraws_them_and_keeps_every_seat(swarm):
+    store, runtime = swarm
+    inbox = InboxStore(store.redis)
+    seated = asked(swarm)
+    asks = [item for agent in seated for item in inbox.pending_items(agent.seat)]
+    assert len(asks) == 3
+
+    staffed(store, 20)
+    assert run(store, runtime, NOW + 2 * MINUTE + HOLD) == []
+
+    assert {inbox.get(item.id).state for item in asks} == {"cancelled"}
+    assert count(store) == 4 and extras(store) == seated
+    staffed(store, 5)
+    assert run(store, runtime, NOW + 3 * MINUTE + HOLD) == []
+
+
+def test_the_fixture_swarm_grows_and_shrinks_through_every_step(swarm):
+    store, runtime = swarm
+    now = NOW
+    for step in FIXTURE["steps"]:
+        staffed(store, step["agents"])
+        run(store, runtime, now)
+        run(store, runtime, now + HOLD)
+        for agent in extras(store):
+            if InboxStore(store.redis).pending_items(agent.seat):
+                hand_off(store, runtime, agent)
+        run(store, runtime, now + HOLD + MINUTE)
+        assert count(store) == step["wanted"], step
+        assert len(extras(store)) == step["wanted"] - 1
+        assert set(owners(store).values()) == set(masters.seats(SLUG, step["wanted"]))
+        now += HOLD + 2 * MINUTE
+
+
+def test_an_extra_master_never_stands_in_for_a_lead_that_is_down(swarm):
+    from scripts.swarm import control_notifications, tick_master
+
+    store, runtime = swarm
+    store.drop_agent(SLUG, LEAD_NAME)
+    runtime.live.discard(LEAD_NAME)
+    second = AgentRecord(f"{SLUG}-master-2", MASTER, "master-2", seat=SECOND)
+    store.put_agent(SLUG, second)
+    runtime.live.add(second.name)
+
+    assert tick_master._bound(store, SLUG, runtime) is None
+    assert control_notifications.master(store, SLUG) is None
+    assert tick_module._recover_master(SLUG, store.config(SLUG), store, runtime, NOW) == []
+    assert [a.name for a in store.agents(SLUG) if masters.is_lead(SLUG, a)] == []

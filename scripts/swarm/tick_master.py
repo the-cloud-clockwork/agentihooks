@@ -8,6 +8,7 @@ from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm import master_alarm, master_start
 from scripts.swarm.store import MASTER
+from scripts.swarm_v2 import masters
 
 KEY = "master-outage"
 SENDER = "swarm"
@@ -111,7 +112,7 @@ def _save(store, slug, state):
 
 
 def _masters(store, slug):
-    return [a for a in store.agents(slug) if a.lane == MASTER and a.state != "finished"]
+    return [a for a in store.agents(slug) if masters.is_lead(slug, a) and a.state != "finished"]
 
 
 def _starting(store, slug):
