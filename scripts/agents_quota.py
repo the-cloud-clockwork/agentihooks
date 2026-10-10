@@ -89,13 +89,13 @@ def _codex_state(account: "codex_router.CodexAccount", quota: "CodexQuota | None
         return "SIGNED_OUT"
     if quota is None:
         return "UNKNOWN"
-    return quota.state if session_bands.fresh(quota.observed_at, now) else STALE
+    return quota.state_at(now) if session_bands.fresh(quota.observed_at, now) else STALE
 
 
 def _codex_source(quota: "CodexQuota | None", now: float) -> str:
     if quota is None:
         return "no session log"
-    seen = f"session-log {_span(max(0, int(now - quota.observed_at)))} ago"
+    seen = f"session-log {_span(int(now - quota.observed_at))} ago"
     return f"{seen}, {quota.reached}" if quota.reached else seen
 
 

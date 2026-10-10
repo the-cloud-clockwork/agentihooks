@@ -5,6 +5,8 @@ import subprocess
 import time
 from datetime import UTC, datetime
 
+import pytest
+
 from hooks.context import account_sessions
 from scripts import agents_quota, codex_quota, codex_router
 from scripts.claude_quota_balancer import QuotaWindow
@@ -120,33 +122,121 @@ def test_a_routed_launch_counts_by_its_subcommand_after_the_router_options(tmp_p
     _proc(root, 403, "codex", 1, ["codex", "--no-daemon", "-c", "a=1", "mcp-server"], alpha)
     _proc(root, 404, "codex", 1, ["codex", "--no-daemon", "-c"], alpha)
     _proc(root, 405, "codex", 1, ["codex", "-c=exec", "resume"], {})
-    assert account_sessions.codex_sessions_by_account(root) == {"alpha": 2, "default": 1}
-    assert account_sessions.live_codex_sessions(root) == 3
+    _proc(root, 406, "codex", 1, ["codex", "--no-daemon", "exec", "x"], alpha)
+    _proc(root, 407, "codex", 1, ["codex", "resume", "exec"], {})
+    _proc(root, 408, "codex", 1, ["codex", "--config=x=1", "exec"], {})
+    assert account_sessions.codex_sessions_by_account(root) == {"alpha": 2, "default": 2}
+    assert account_sessions.live_codex_sessions(root) == 4
+
+
+@pytest.mark.parametrize(
+    "flag",
+    [
+        "-c",
+        "--config",
+        "--enable",
+        "--disable",
+        "--remote",
+        "--remote-auth-token-env",
+        "-i",
+        "--image",
+        "-m",
+        "--model",
+        "--local-provider",
+        "-p",
+        "--profile",
+        "-s",
+        "--sandbox",
+        "-C",
+        "--cd",
+        "--add-dir",
+        "-a",
+        "--ask-for-approval",
+    ],
+)
+def test_an_option_value_ahead_of_exec_is_not_taken_for_the_subcommand(flag, tmp_path):
+    root = tmp_path / "proc"
+    _proc(root, 420, "codex", 1, ["codex", flag, "value", "exec", "ok"], {"AH_CX_TOKEN_alpha": "a"})
+    assert account_sessions.codex_sessions_by_account(root) == {}
 
 
 def test_rows_say_stale_unknown_and_blocked_and_never_carry_a_stale_cap():
     accounts = [CodexAccount("default"), CodexAccount("alpha", "AH_CX_TOKEN_alpha"), CodexAccount("beta", "x")]
     stale = CodexQuota(NOW - 901, "pro", QuotaWindow(10.0, NOW + 60), QuotaWindow(20.0, NOW + 6000))
-    blocked = CodexQuota(NOW - 120, "?", reached=DEPLETED)
+    blocked = CodexQuota(NOW - 120.5, "?", reached=DEPLETED)
     rows = agents_quota.codex_rows(accounts, {"default": stale, "alpha": blocked}, {"alpha": 1}, NOW)
     assert [(row.account, row.state, row.cap, row.sessions) for row in rows] == [
         ("default", "STALE", None, 0),
         ("alpha", "BLOCKED", 0, 1),
         ("beta", "UNKNOWN", None, 0),
     ]
+    assert [(row.five_hour_left, row.seven_day_left) for row in rows] == [(90.0, 80.0), (None, None), (None, None)]
     assert rows[0].source == "session-log 15m ago"
     assert rows[1].source == f"session-log 2m ago, {DEPLETED}"
     assert rows[2].source == "no session log"
 
 
-def test_a_window_whose_reset_has_passed_reads_full():
-    quota = CodexQuota(NOW - 60, "pro", QuotaWindow(97.0, NOW - 1), QuotaWindow(40.0, NOW + 6000))
-    [row] = agents_quota.codex_rows([CodexAccount("default")], {"default": quota}, {}, NOW)
-    assert (row.five_hour_left, row.seven_day_left) == (100.0, 60.0)
-    assert (row.five_hour_resets_at, row.seven_day_resets_at, row.observed_at) == (NOW - 1, NOW + 6000, NOW - 60)
+def test_a_window_whose_reset_has_passed_reads_full_and_unused():
+    five_passed = CodexQuota(NOW - 60, "pro", QuotaWindow(97.0, NOW), QuotaWindow(40.0, NOW + 6000))
+    week_passed = CodexQuota(NOW - 60, "pro", QuotaWindow(70.0, NOW + 60), QuotaWindow(99.0, NOW - 1))
+    accounts = [CodexAccount("default"), CodexAccount("alpha", "AH_CX_TOKEN_alpha")]
+    rows = agents_quota.codex_rows(accounts, {"default": five_passed, "alpha": week_passed}, {}, NOW)
+    assert [(row.five_hour_left, row.seven_day_left, row.state) for row in rows] == [
+        (100.0, 60.0, "NORMAL"),
+        (30.0, 100.0, "REDUCE"),
+    ]
+    assert (rows[0].five_hour_resets_at, rows[0].seven_day_resets_at, rows[0].observed_at) == (
+        NOW,
+        NOW + 6000,
+        NOW - 60,
+    )
+    assert codex_quota._current(QuotaWindow(97.0, NOW), NOW) == QuotaWindow(used=0.0)
+    assert codex_quota._current(QuotaWindow(97.0, NOW + 1), NOW) == QuotaWindow(97.0, NOW + 1)
+    assert codex_quota._current(QuotaWindow(97.0), NOW) == QuotaWindow(97.0)
 
 
-def test_the_account_open_placement_picks_next_is_marked(monkeypatch):
+def test_two_accounts_render_both_windows_their_resets_and_the_reading_age():
+    alpha = CodexQuota(NOW - 60, "pro", QuotaWindow(20.0, NOW + 3600), QuotaWindow(97.0, NOW + 86400))
+    beta = CodexQuota(NOW - 30, "pro", QuotaWindow(70.0, NOW + 1800), QuotaWindow(40.0, NOW + 400000))
+    accounts = [CodexAccount("alpha", "AH_CX_TOKEN_alpha"), CodexAccount("beta", "AH_CX_TOKEN_beta")]
+    rows = agents_quota.codex_rows(accounts, {"alpha": alpha, "beta": beta}, {"alpha": 1, "beta": 2}, NOW)
+    table = agents_quota.render(agents_quota.mark_next(rows, "beta"), now=NOW).splitlines()
+    assert table[1].split() == [
+        "codex",
+        "alpha",
+        "subscription",
+        "DRAIN",
+        "1/0",
+        "-",
+        "0",
+        "80%",
+        "1h00m",
+        "3%",
+        "1d00h",
+        "session-log",
+        "1m",
+        "ago",
+    ]
+    assert table[2].split() == [
+        "codex",
+        "beta",
+        agents_quota.NEXT_MARK,
+        "subscription",
+        "REDUCE",
+        "2/6",
+        "-",
+        "6",
+        "30%",
+        "30m",
+        "60%",
+        "4d15h",
+        "session-log",
+        "0m",
+        "ago",
+    ]
+
+
+def test_the_account_open_placement_picks_next_is_marked():
     rows = [
         agents_quota.QuotaRow("codex", "alpha", "NORMAL", 0, 90.0, 80.0, None, "log", cap=6),
         agents_quota.QuotaRow("codex", "beta", "NORMAL", 0, 90.0, 80.0, None, "log", cap=6),
@@ -155,17 +245,46 @@ def test_the_account_open_placement_picks_next_is_marked(monkeypatch):
     assert [row.selected for row in marked] == [False, True]
     assert agents_quota.mark_next(rows, "") == rows
     table = agents_quota.render(marked, now=NOW).splitlines()
-    assert table[1].split()[:2] == ["codex", "alpha"]
-    assert table[2].split()[:3] == ["codex", "beta", agents_quota.NEXT_MARK]
+    assert table[1].startswith("codex  alpha" + " " * 8 + "subscription")
+    assert table[2].startswith("codex  beta (next)  subscription")
 
 
-def test_next_account_is_open_placement_over_unrefused_accounts(monkeypatch):
+def test_next_account_is_open_placement_over_unrefused_accounts():
     env = {"AH_CX_TOKEN_alpha": "sk-refused", "AH_CX_TOKEN_beta": "at-beta"}
     pool = [CodexAccount("alpha", "AH_CX_TOKEN_alpha"), CodexAccount("beta", "AH_CX_TOKEN_beta")]
     quotas = {name: CodexQuota(NOW, "pro", seven_day=QuotaWindow(10.0, NOW + 6000)) for name in ("alpha", "beta")}
     assert agents_quota.next_account(pool, quotas, {"beta": 5}, NOW, env) == "beta"
     assert agents_quota.next_account(pool, quotas, {"beta": 6}, NOW, env) == ""
     assert agents_quota.next_account(pool, {}, {}, NOW, env) == ""
+
+
+def test_next_account_hands_select_the_usable_pool_and_the_environment(monkeypatch):
+    seen = []
+
+    def select(pool, quotas, sessions, now, environ):
+        seen.append((pool, quotas, sessions, now, environ))
+        return pool[0], "open", None
+
+    monkeypatch.setattr(codex_router, "select", select)
+    env = {"AH_CX_TOKEN_alpha": "sk-refused", "AH_CX_TOKEN_beta": "at-beta"}
+    pool = [CodexAccount("alpha", "AH_CX_TOKEN_alpha"), CodexAccount("beta", "AH_CX_TOKEN_beta")]
+    assert agents_quota.next_account(pool, {"beta": None}, {"beta": 1}, NOW, env) == "beta"
+    assert seen == [([pool[1]], {"beta": None}, {"beta": 1}, NOW, env)]
+
+
+def test_the_codex_rows_mark_the_account_placement_picks_from_live_readings(monkeypatch):
+    pool = [CodexAccount("default"), CodexAccount("alpha", "AH_CX_TOKEN_alpha")]
+    quotas = {"alpha": CodexQuota(NOW, "pro", seven_day=QuotaWindow(10.0, NOW + 6000))}
+    seen = []
+    monkeypatch.setattr(codex_router, "accounts", lambda environ: pool)
+    monkeypatch.setattr(codex_router, "quotas", lambda accounts, environ: quotas)
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {"alpha": 2})
+    monkeypatch.setattr(agents_quota, "api_rows", lambda source, harness, now: [])
+    monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {})
+    monkeypatch.setattr(agents_quota, "next_account", lambda *args: seen.append(args) or "alpha")
+    rows = agents_quota._codex(NOW)
+    assert [(row.account, row.selected) for row in rows] == [("default", False), ("alpha", True)]
+    assert seen == [(pool, quotas, {"alpha": 2}, NOW, dict(os.environ))]
 
 
 def test_two_concurrent_accounts_read_count_and_place_apart(tmp_path, monkeypatch):

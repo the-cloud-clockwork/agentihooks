@@ -1,7 +1,7 @@
 import json
 import os
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -36,6 +36,14 @@ class CodexQuota:
     def highest_used(self) -> float | None:
         used = [w.used for w in (self.five_hour, self.seven_day) if w.used is not None]
         return max(used) if used else None
+
+    def state_at(self, now: float) -> str:
+        return replace(self, five_hour=_current(self.five_hour, now), seven_day=_current(self.seven_day, now)).state
+
+
+def _current(window: QuotaWindow, now: float) -> QuotaWindow:
+    passed = window.resets_at is not None and window.resets_at <= now
+    return QuotaWindow(used=0.0) if passed else window
 
 
 def codex_home(environ: dict[str, str]) -> Path:
