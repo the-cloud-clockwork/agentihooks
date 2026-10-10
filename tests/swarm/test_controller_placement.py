@@ -49,22 +49,26 @@ def test_distributed_controller_spawns_engineer_and_ci_work_placed_on_kubernetes
 
 
 def test_distributed_controller_leaves_workstation_work_unclaimed(store):
+    from scripts.swarm import master_start
     from tests.swarm.test_tick import FakeLedger
 
     runtime = placed_runtime()
     ledger = FakeLedger(
-        [{"id": "slice", "lane": "plan"}, {"id": "page", "lane": "eng", "profile": "frontend"}, {"id": "build"}]
+        [
+            {"id": "slice", "lane": "plan"},
+            {"id": "page", "lane": "eng", "profile": "frontend"},
+            {"id": "form", "lane": "eng", "profile": "frontend"},
+            {"id": "build"},
+        ]
     )
     actions = tick(store, ledger, runtime)
     assert [task for _, _, task in runtime.spawned] == ["build"]
     assert runtime.masters == []
-    assert states(ledger) == {"slice": "open", "page": "open", "build": "claimed"}
-    assert store.claimant("sw", "slice") is None
-    assert store.claimant("sw", "page") is None
-    assert "slice: the workstation hive spawns plan work" in actions
-    assert "page: the workstation hive spawns eng work" in actions
+    assert states(ledger) == {"slice": "open", "page": "open", "form": "open", "build": "claimed"}
+    assert [store.claimant("sw", task) for task in ("slice", "page", "form")] == [None, None, None]
     assert "the workstation hive spawns master work" in actions
     assert [agent.task for agent in store.agents("sw")] == ["build"]
+    assert master_start.read(store, "sw") == {}
 
 
 def test_seat_placement_refuses_the_dispatcher_and_passes_a_plain_runtime(store):
@@ -126,7 +130,22 @@ def test_distributed_controller_refuses_a_disabled_kubernetes_backend(store):
     inner = placed_runtime()
     inner.router = RuntimeRouter([], disabled=["kubernetes"], placement=Placement("kubernetes"))
     runtime = controller.FencedRuntime(store, "sw", held, inner, "distributed")
-    assert runtime.placement_refusal(store.config("sw"), "eng", {"id": "t"}) == "the workstation hive spawns eng work"
+    config = store.config("sw")
+    assert runtime.placement_refusal(config, "eng", {"id": "t"}) == (
+        "the kubernetes runtime is disabled on this controller"
+    )
+    assert runtime.placement_refusal(config, "plan", {"id": "t"}) == "the workstation hive spawns plan work"
+
+
+def test_distributed_capacity_ignores_the_workstation_session_cap(store):
+    from tests.swarm.test_tick import FakeLedger
+
+    runtime = placed_runtime()
+    runtime.full = True
+    ledger = FakeLedger([{"id": "build"}])
+    tick(store, ledger, runtime)
+    assert [task for _, _, task in runtime.spawned] == ["build"]
+    assert runtime.capacity_for == []
 
 
 def test_two_ticks_never_spawn_one_task_twice(store):
