@@ -394,10 +394,12 @@ def findings_pass(inbox, store, slug, shown, doc=None):
 def _about(mail, found):
     subject = found.get("subject", "")
     if found["kind"] in TASK_FINDINGS:
-        return f"tasks/{subject}"
-    if found["kind"] in HELD_FINDINGS and mail.held.get(subject):
-        return f"tasks/{mail.held[subject]}"
-    return ""
+        task = subject
+    elif found["kind"] in HELD_FINDINGS:
+        task = mail.held.get(subject, "")
+    else:
+        task = ""
+    return f"tasks/{task}" if task else ""
 
 
 def new_events(store, slug, doc, cursor_name):
