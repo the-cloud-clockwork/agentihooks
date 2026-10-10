@@ -1,18 +1,19 @@
 """The dispatcher's own LLM seat, `dispatcher@<slug>`, woken only on triggers the deterministic passes could not settle.
 
 At full autonomy a trigger wakes the live seat through its inbox or, unless the swarm is paused, spawns it through the
-seat spawn helper; below full, or once every trigger closes, the seat is marked finished and the reap pass retires it.
-A trigger is a priority the sweep left unresolved for fifteen minutes, a bottleneck no lane rule covers held for the
-lane split's ticks, or a red dev holding blocked tasks, where a freeze or focus may be worth proposing. A priority that
-waits on an operator decision, or that a dispatcher seat handed to him by raising it again under its own name, is no
-trigger.
+seat spawn helper; below full, once every trigger closes, or once the seat left the ledger, the seat is marked finished
+and the reap pass retires it. Triggers that a departed seat had received spawn no new seat; a new trigger spawns one
+primed with every open trigger. A trigger is a priority the sweep left unresolved for fifteen minutes, a bottleneck no
+lane rule covers held for the lane split's ticks, or a red dev holding blocked tasks, where a freeze or focus may be
+worth proposing. A priority that waits on an operator decision, or that a dispatcher seat handed to him by raising it
+again under its own name, is no trigger.
 """
 
 import json
 from dataclasses import replace
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import bottleneck, dev_red, lane_split, lifetime, priority_sweep, seat_spawn
+from scripts.swarm import bottleneck, dev_red, lane_split, launch_check, lifetime, priority_sweep, seat_spawn
 from scripts.swarm.store import DISPATCH, FULL
 
 LANE = DISPATCH
@@ -20,6 +21,9 @@ SEAT = "dispatcher"
 SENDER = "swarm"
 STALE_MS = 15 * 60 * 1000
 SENT = "dispatch-sent"
+LEFT = "dispatch-left"
+CLOSED = "its triggers closed"
+DEPARTED = "it left the ledger"
 ENDED_STATES = ("stopping", "stopped")
 PAUSED = "paused"
 REFUSED = "dispatcher triggers are still open; settle them, or the tick ends your seat once they close:\n{lines}"
@@ -77,15 +81,28 @@ def run(slug: str, config, store, runtime, doc: dict, now_ms: int, sleeping: boo
     seats = [a for a in store.agents(slug) if a.lane == LANE and a.state != "finished"]
     found = open_triggers(slug, config, store, doc, now_ms, sleeping)
     if not found:
-        store.redis.delete(store.key(slug, SENT))
+        store.redis.delete(store.key(slug, SENT), store.key(slug, LEFT))
         return [_end(slug, store, seat) for seat in seats]
+    gone = [seat for seat in seats if left(seat, doc)]
+    if gone:
+        if seen := set(store.redis.hkeys(store.key(slug, SENT))) & {trigger["id"] for trigger in found}:
+            store.redis.sadd(store.key(slug, LEFT), *seen)
+        return [_end(slug, store, seat, DEPARTED) for seat in gone]
     if seats:
         return _wake(slug, store, seats[0], found)
-    if config.state == PAUSED:
+    held = store.redis.smembers(store.key(slug, LEFT))
+    if closed := held - {trigger["id"] for trigger in found}:
+        store.redis.srem(store.key(slug, LEFT), *closed)
+    if config.state == PAUSED or all(trigger["id"] in held for trigger in found):
         return []
     if refused := seat_spawn.no_slot(config, runtime, SEAT) or seat_spawn.host_hold(slug, store, now_ms, SEAT):
         return [refused]
     return _spawn(slug, config, store, runtime, found, now_ms)
+
+
+def left(seat, doc: dict) -> bool:
+    members = doc.get("_meta", {}).get("members", {})
+    return seat.name not in members and launch_check.joined_at(seat, doc) is not None
 
 
 def _spawn(slug, config, store, runtime, found, now_ms):
@@ -115,9 +132,9 @@ def _wake(slug, store, seat, found):
     return [f"woke {seat.name} with {_count(new, 'new ')}"]
 
 
-def _end(slug, store, seat):
+def _end(slug, store, seat, why=CLOSED):
     store.put_agent(slug, replace(seat, state="finished"))
-    return f"ended dispatcher {seat.name}: its triggers closed"
+    return f"ended dispatcher {seat.name}: {why}"
 
 
 def _sent(store, slug, found):
