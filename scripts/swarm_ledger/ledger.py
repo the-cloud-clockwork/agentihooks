@@ -102,7 +102,7 @@ import ledger_workspace  # noqa: E402
 import watch_ledger  # noqa: E402
 
 from scripts.gates.base import Who
-from scripts.swarm_ledger import ledger_phases, ledger_task_duplicates
+from scripts.swarm_ledger import ledger_phases, ledger_plans, ledger_task_duplicates
 from scripts.swarm_ledger.repository import repository
 
 BASE = "" if ledger_link.remote() else ledger_link.base()
@@ -425,6 +425,7 @@ def cmd_publish_plan(args):
         file = upload_artifact(args.slug, args.name, path, {"task": task, "title": title, "plan": True})
         send(args, "artifact_add", task=task, title=title, file=file, plan=True)
         stored["url"] = f"{base()}/artifacts/{args.slug}/{file['id']}"
+        stored["plan"] = ledger_plans.plan_id(file["id"])
         return stored["url"]
 
     try:
@@ -432,11 +433,15 @@ def cmd_publish_plan(args):
         url, where = ledger_publish.publish(args.path, title, args.repo, artifact, issue_title=issue_title)
     except ledger_publish.PublishError as exc:
         sys.exit(str(exc))
-    ops = []
+    ops = [op("plan_add", args, plan=stored["plan"], title=title, artifact=stored["url"], url=url)]
     for phase in phases:
-        fields = {"plan_url": url, "plan_ref": {"artifact": stored["url"], "lines": ranges[phase]}}
+        fields = {
+            "plan_url": url,
+            "plan_ref": {"artifact": stored["url"], "lines": ranges[phase]},
+            "plan": f"plans/{stored['plan']}",
+        }
         ops.append(op("phase_update", args, item=f"phases/{phase}", fields=fields))
-        text = (
+        note = (
             f"Plan published as a GitHub issue: {url}" if where == "issue" else f"Plan published on the ledger: {url}"
         )
         ops.append(
@@ -444,12 +449,19 @@ def cmd_publish_plan(args):
                 "op": "add",
                 "thread": f"phases/{phase}/comments",
                 "id": f"c-{uuid.uuid4().hex[:10]}",
-                "text": text,
+                "text": note,
                 "by": args.name,
             }
         )
-    refused(call(args.slug, ops), ops)
-    print(json.dumps({"plan_url": url, "published_to": where, "phases": phases}))
+        ops += [
+            op("slice_add", args, phase=f"phases/{phase}", anchor=anchor)
+            for anchor in plan_ranges.slice_anchors(text, ranges[phase])
+        ]
+    state = call(args.slug, ops)
+    refused(state, ops)
+    tasks = ledger_plans.resliced(doc["tasks"], state["tasks"])
+    reslice = {"tasks": tasks} if any(tasks.values()) else {}
+    print(json.dumps({"plan_url": url, "published_to": where, "phases": phases, **reslice}))
 
 
 def cmd_plan(args):
@@ -648,8 +660,7 @@ def cmd_task(args):
         contract = {k: getattr(args, k) for k in ("must", "check", "judge") if getattr(args, k)}
         if contract:
             lists["contract"] = contract
-        if args.artifact:
-            lists["artifact"] = True
+        lists.update((key, True) for key in ("artifact", "follow_up") if getattr(args, key))
         options = (
             ("kind", args.kind),
             ("profile", args.profile),
@@ -835,6 +846,9 @@ def build_parser():
     task.add_argument("--overlays", help="comma separated overlays this task's agent wears, at most three")
     task.add_argument("--rank", help="queue rank: urgent, high, normal (default) or low; next means urgent")
     task.add_argument("--plan-slice", default="", help="task slice anchor; computes its plan lines")
+    task.add_argument(
+        "--follow-up", action="store_true", help="a follow up task: no slice in a sliced phase, judged by its text"
+    )
     task.add_argument("--plan", default="", help="link to the published plan; default the phase's plan link")
     task.add_argument("--difficulty", choices=ledger_tasks.DIFFICULTIES, help="task size: S, M or L")
     task.add_argument(

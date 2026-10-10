@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=python:3.12.12-slim-bookworm@sha256:2986c55feb36e6cae00fa1fefb454283e4b33f35e75ff8bdd123b134130be301
+ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.12.12-slim-bookworm@sha256:2986c55feb36e6cae00fa1fefb454283e4b33f35e75ff8bdd123b134130be301
 FROM ${BASE_IMAGE}
 ARG BASE_IMAGE
 ARG TARGETARCH

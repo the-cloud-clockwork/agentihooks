@@ -14,7 +14,7 @@ from scripts.swarm.tick import SPAWN_HOLD
 
 IDENTITY = ("agent", "lane", "harness", "account", "model", "effort", "execution_id")
 EVENT_COLUMNS = (*((key, "String") for key in IDENTITY), ("kind", "String"), ("reason", "String"))
-AGENTS = metrics_outbox.Table("agent_events", EVENT_COLUMNS)
+AGENTS = metrics_outbox.Table("agent_events", (*EVENT_COLUMNS, ("finding_kind", "String")))
 DELIVERY = metrics_outbox.Table(
     "delivery_events", (*EVENT_COLUMNS, ("pull_request", "String"), ("claim_to_merge_seconds", "Float64"))
 )
@@ -134,21 +134,27 @@ def _event(slug: str, task: dict, agent: dict, at: int, kind: str, identity: obj
     }
 
 
+def _with_finding_kind(row: dict, finding_kind: str = "") -> dict:
+    return {**row, "finding_kind": finding_kind}
+
+
 def agent_rows(slug: str, doc: dict, agents: list) -> list[dict]:
     rows = []
     for agent in agents:
         task = _task(doc, agent["task"])
         life = [agent["name"], agent["started_at"]]
         if agent["started_at"]:
-            rows.append(_event(slug, task, agent, agent["started_at"], "spawn", life))
+            rows.append(_with_finding_kind(_event(slug, task, agent, agent["started_at"], "spawn", life)))
         if agent.get("ended_at"):
-            rows.append(_event(slug, task, agent, agent["ended_at"], "retire", life, agent["reason"]))
+            rows.append(
+                _with_finding_kind(_event(slug, task, agent, agent["ended_at"], "retire", life, agent["reason"]))
+            )
     for source in doc.get("_meta", {}).get("events", []):
         if source["kind"] != "task claimed":
             continue
         task_id = source["target"].removeprefix("tasks/")
         agent = _owner(agents, task_id, source["at"], source.get("by", ""))
-        rows.append(_event(slug, _task(doc, task_id), agent, source["at"], "claim", source))
+        rows.append(_with_finding_kind(_event(slug, _task(doc, task_id), agent, source["at"], "claim", source)))
     return rows
 
 
@@ -190,9 +196,11 @@ def gate_rows(slug: str, doc: dict, agents: list, gates: list) -> tuple[list, li
         task = _task(doc, source["task"])
         agent = _owner(agents, source["task"], source["at"], source["agent"])
         if source["kind"] == "deny":
-            rows.append(_event(slug, task, agent, source["at"], "gate_deny", source, source["reason"]))
+            rows.append(
+                _with_finding_kind(_event(slug, task, agent, source["at"], "gate_deny", source, source["reason"]))
+            )
         elif source["gate"] == "idle-ticks" and source["kind"] == "count":
-            rows.append(_event(slug, task, agent, source["at"], "idle", source, source["reason"]))
+            rows.append(_with_finding_kind(_event(slug, task, agent, source["at"], "idle", source, source["reason"])))
         elif source["gate"] == "reruns" and source["kind"] == "count":
             deliveries.append(
                 _delivery(_event(slug, task, agent, source["at"], "rerun", source, source["reason"]), task)
@@ -205,12 +213,15 @@ def signal_rows(slug: str, doc: dict, agents: list, handoffs: list, found: list)
     for source in handoffs:
         task = _task(doc, source["task"])
         agent = _owner(agents, source["task"], source["at"], source["predecessor"])
-        rows.append(_event(slug, task, agent, source["at"], "handoff", source["id"], source["reason"]))
+        rows.append(
+            _with_finding_kind(_event(slug, task, agent, source["at"], "handoff", source["id"], source["reason"]))
+        )
     for source in found:
         at, subject = source["seen_at"], source["subject"]
         agent = _owner(agents, subject, at, subject)
         task = _task(doc, agent.get("task", subject if any(t["id"] == subject for t in doc.get("tasks", [])) else ""))
-        rows.append(_event(slug, task, agent, at, "health_finding", [source["id"], at], source["summary"]))
+        row = _event(slug, task, agent, at, "health_finding", [source["id"], at], source["summary"])
+        rows.append(_with_finding_kind(row, source["kind"]))
     return rows
 
 

@@ -213,6 +213,30 @@ def test_a_configured_confidence_floor_keeps_the_default_below_it(monkeypatch):
     assert (picked.model, picked.effort, picked.confidence) == ("auto", "max", 0.7)
 
 
+def test_a_legacy_floor_outside_zero_to_one_is_refused_and_keeps_the_lane_default(monkeypatch, tmp_path):
+    from hooks import config
+
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("picked with a malformed floor"))
+    lane = {"model": "auto", "effort": "auto"}
+    for value in ("1.5", "nan"):
+        picked = model_pick.pick("claude", lane, {}, {"AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE": value})
+        assert picked == model_pick.ModelPick("auto", "auto")
+
+
+def test_a_refused_definition_keeps_the_lane_default(monkeypatch, tmp_path):
+    from hooks import config
+    from hooks.classifier import decision_log
+
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("picked without a definition"))
+    lane = {"model": "auto", "effort": "auto"}
+    picked = model_pick.pick("claude", lane, {}, {"AGENTIHOOKS_CLASSIFIER_MODEL_PICK_CONFIDENCE": "1.5"})
+    assert picked == model_pick.ModelPick("auto", "auto")
+    [entry] = decision_log.read("model-pick")
+    assert entry["failures"] == [{"model": "definition", "reason": "threshold confidence must be between zero and one"}]
+
+
 def test_caller_error_is_not_hidden(monkeypatch):
     from hooks.classifier import ClassifierRequestError
 

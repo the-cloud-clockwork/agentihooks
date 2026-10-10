@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/metrics_swarm.py:scripts.swarm.metrics_swarm.x__log_batch__mutmut_15:a8b9b76537ab742e5f679f7c4111228064ac7a666e426114b150bbd2cbceecae": {
+    "reader": "standards_reader",
+    "reason": "Only unquoted SQL identifier letter case changes. SQLite resolves these ASCII table and column identifiers case insensitively; the collector observes identical columns, constraints and cursor rows."
+  }
+}

@@ -351,3 +351,34 @@ def test_slice_tasks_of_a_missing_phase_or_without_a_slice_are_invalid():
 
     doc = {"phases": [], "artifacts": [], "tasks": [{"id": "a", "plan_slice": "a"}, {"id": "b"}, {"id": "c"}]}
     assert plan_ranges.invalid_tasks({"phase": "gone"}, doc, ["a", "b"]) == ["a", "b"]
+
+
+MARKED = "## Build\n<!-- slice: one -->\n### A\n<!-- slice: two -->\n### B\n## Ship\n<!-- slice: three -->\n### C\n"
+
+
+def test_slice_anchors_are_the_markers_inside_a_range():
+    from scripts.swarm_ledger import plan_ranges
+
+    assert plan_ranges.slice_anchors(MARKED, "1-5") == ["one", "two"]
+    assert plan_ranges.slice_anchors(MARKED, "2-2") == ["one"]
+    assert plan_ranges.slice_anchors(MARKED, "6-8") == ["three"]
+    assert plan_ranges.slice_anchors(MARKED, "3-3") == []
+
+
+@pytest.mark.parametrize(
+    ("ranges", "repeated"),
+    [
+        ({"p1": "1-5", "p2": "6-8"}, ""),
+        ({"p1": "1-5", "p2": "1-5"}, "one, two"),
+        ({"p1": "1-3", "p2": "1-5"}, "one"),
+    ],
+)
+def test_require_markers_refuses_a_slice_name_used_twice_across_phases(ranges, repeated):
+    from scripts.swarm_ledger import plan_ranges
+
+    if not repeated:
+        assert plan_ranges.require_markers(MARKED, ranges) is None
+        return
+    with pytest.raises(ValueError) as raised:
+        plan_ranges.require_markers(MARKED, ranges)
+    assert str(raised.value) == f"each slice marker needs its own name across the plan's phases: {repeated}"

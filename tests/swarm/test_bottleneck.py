@@ -6,7 +6,7 @@ from scripts.swarm import bottleneck
 from scripts.swarm.metrics_outbox import Outbox, Settings
 from scripts.swarm.store import RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 SLUG = "scratch"
 H = 3_600_000
 NOW = 10 * H

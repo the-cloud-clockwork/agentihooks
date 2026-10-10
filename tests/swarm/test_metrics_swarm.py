@@ -10,7 +10,7 @@ from scripts.swarm.host_budget import HostSample
 from scripts.swarm.metrics_outbox import Outbox, Settings
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 SLUG = "scratch"
 NOW = 1_800_000_000_000
 TASK = {
@@ -112,7 +112,9 @@ def test_gate_denies_idle_and_reruns_keep_observed_time():
         ("gate_deny", NOW + 1, "outside scope"),
         ("idle", NOW + 2, "idle tick 1"),
     ]
+    assert [row["finding_kind"] for row in agent] == ["", ""]
     assert [(row["kind"], row["ts_ms"]) for row in delivery] == [("rerun", NOW + 3)]
+    assert "finding_kind" not in delivery[0]
 
 
 def test_handoff_and_health_finding_have_stable_source_ids():
@@ -129,6 +131,7 @@ def test_handoff_and_health_finding_have_stable_source_ids():
     rows = metrics_swarm.signal_rows(SLUG, doc(), [AGENT], handoffs, found)
     assert [row["kind"] for row in rows] == ["handoff", "health_finding"]
     assert [row["reason"] for row in rows] == ["recycle", "idle"]
+    assert [row["finding_kind"] for row in rows] == ["", "idle with claim"]
     assert (
         metrics_swarm.signal_rows(SLUG, doc(), [AGENT], handoffs, [{**found[0], "summary": "still idle"}])[1][
             "event_id"

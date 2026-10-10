@@ -608,6 +608,13 @@ class TestPlanChunk:
         planned["tasks"][0].pop("plan_lines")
         assert intent.state_of(planned, planned["tasks"][0], PR) == intent.state_of(DOC, DOC["tasks"][0], PR)
 
+    def test_a_follow_up_task_is_graded_by_its_description_alone(self, planned):
+        planned["tasks"][0]["follow_up"] = True
+        state = intent.state_of(planned, planned["tasks"][0], PR)
+        assert state == intent.state_of(DOC, DOC["tasks"][0], PR)
+        assert state["task_text"] == planned["tasks"][0]["description"]
+        assert list(intent.questions_for(state)) == BASE_QUESTIONS
+
     @pytest.mark.parametrize(
         "change",
         [
@@ -638,11 +645,11 @@ class TestPlanChunk:
     def test_a_slice_too_long_for_line_questions_is_still_judged_on_the_whole_chunk(self):
         from hooks.classifier.questions import MAX_QUESTIONS
 
-        fits = MAX_QUESTIONS - len(intent.QUESTIONS)
+        fits = MAX_QUESTIONS - len(intent.BASE_QUESTIONS) - len(intent.CHUNK_QUESTIONS)
         state = {"plan_lines": f"1-{fits + 1}", "plan_chunk": "".join(f"r{n}\n" for n in range(1, fits + 2))}
         fitting = "".join(f"r{n}\n" for n in range(1, fits + 1))
         assert len(intent.questions_for({"plan_lines": f"1-{fits}", "plan_chunk": fitting})) == MAX_QUESTIONS
-        assert list(intent.questions_for(state)) == list(intent.QUESTIONS)
+        assert list(intent.questions_for(state)) == [*intent.BASE_QUESTIONS, *intent.CHUNK_QUESTIONS]
         verdict, reason = intent.judge(state, decide=chunk_classifier(0.5))
         quoted = ", ".join(f'line {n} "r{n}"' for n in range(1, fits + 2))
         assert (verdict, reason.split("; ")[-1]) == (
@@ -652,7 +659,7 @@ class TestPlanChunk:
         )
 
     def test_the_chunk_questions_are_asked_only_with_a_chunk(self):
-        assert list(intent.QUESTIONS) == [*BASE_QUESTIONS, "underdelivers", "overdelivers"]
+        assert [*intent.BASE_QUESTIONS, *intent.CHUNK_QUESTIONS] == [*BASE_QUESTIONS, "underdelivers", "overdelivers"]
         assert list(intent.questions_for({})) == BASE_QUESTIONS
         assert list(intent.questions_for(CHUNK_STATE)) == CHUNK_QUESTIONS
         line = intent.questions_for(CHUNK_STATE)["misses_line_17"]

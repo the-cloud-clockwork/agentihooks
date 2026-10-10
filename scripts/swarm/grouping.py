@@ -2,7 +2,7 @@
 
 import math
 
-from hooks.classifier import ClassifierError, YesNo, decide
+from hooks.classifier import ClassifierError, decide, definitions, runner
 from scripts.inbox.store import InboxStore
 from scripts.swarm import difficulty
 from scripts.swarm.ledger_client import LedgerRefused
@@ -10,13 +10,9 @@ from scripts.swarm.ledger_events import Mail
 from scripts.swarm_ledger import ledger_groups, ledger_rank
 
 PER_TICK = 3
-MIN_CONFIDENCE = 0.6
 APPLIES = ("delegate", "full")
 PURPOSE = "task-grouping"
 SEEN = "groupings"
-CONFIRM = "Tasks {tasks}: is this one change surface that one pull request, one review and one browser check cover?"
-TRUE = "one change surface, one review and one browser check cover every task"
-FALSE = "the tasks need separate changes, reviews or browser checks"
 PROPOSE = "Group {n} small tasks into one pull request led by this task."
 ASK = (
     "The swarm proposes one pull request for tasks {lead} and {members}, led by {lead}. If the operator agrees, apply "
@@ -111,14 +107,12 @@ def candidates(doc: dict) -> list[list[dict]]:
 
 
 def confirm(groups, doc):
-    questions = {
-        f"group_{i}": YesNo(CONFIRM.format(tasks=_named(g)), true=TRUE, false=FALSE) for i, g in enumerate(groups)
-    }
     try:
-        answers = decide(state(groups, doc), questions, purpose=PURPOSE).answers
+        output = runner.run(PURPOSE, state(groups, doc), {"groups": [_named(g) for g in groups]}, decider=decide)
     except ClassifierError:
         return None
-    return [_yes(answers[f"group_{i}"].noul) for i in range(len(groups))]
+    floor = output.thresholds["confidence"]
+    return [_yes(output.raw.answers[f"group_{i}"].noul, floor) for i in range(len(groups))]
 
 
 def state(groups, doc):
@@ -184,10 +178,11 @@ def _named(group):
     return ", ".join(f"{t['id']} titled {t['title']}" for t in group)
 
 
-def _yes(noul):
-    return (
-        isinstance(noul, (int, float))
-        and not isinstance(noul, bool)
-        and not math.isnan(noul)
-        and noul >= MIN_CONFIDENCE
-    )
+def _yes(noul, floor):
+    return isinstance(noul, (int, float)) and not isinstance(noul, bool) and not math.isnan(noul) and noul >= floor
+
+
+def __getattr__(name):
+    if name == "MIN_CONFIDENCE":
+        return definitions.load(PURPOSE).thresholds["confidence"]
+    raise AttributeError(name)

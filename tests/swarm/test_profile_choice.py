@@ -210,6 +210,34 @@ def test_an_answer_without_confidence_takes_the_lane_default(asked):
     assert decision.responsibility.endswith("answered frontend with confidence 0.00, below the floor 0.00")
 
 
+def test_a_legacy_floor_above_one_is_refused_with_its_remedy(monkeypatch, tmp_path, ledger_file):
+    from hooks import config
+
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("picked with a malformed floor"))
+    with pytest.raises(profile_choice.ProfileUnresolved) as refused:
+        profile_choice.choose("sw", "eng", {}, TASK, {"AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE": "1.5"})
+    assert str(refused.value) == (
+        "task t9 profile classification is unavailable (threshold confidence must be between zero and one): "
+        "set it with agentihooks ledger --slug sw task set t9 profile=<frontend|engineer|qa>, or split the task "
+        "into one public responsibility each, then reopen it"
+    )
+
+
+def test_a_refused_definition_is_unresolved_with_its_remedy(monkeypatch, tmp_path, ledger_file):
+    from hooks import config
+
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("picked without a definition"))
+    with pytest.raises(profile_choice.ProfileUnresolved) as refused:
+        profile_choice.classify("sw", TASK, {"AGENTIHOOKS_CLASSIFIER_PROFILE_PICK_CONFIDENCE": "1.5"})
+    assert str(refused.value) == (
+        "task t9 profile classification is unavailable (threshold confidence must be between zero and one): "
+        "set it with agentihooks ledger --slug sw task set t9 profile=<frontend|engineer|qa>, or split the task "
+        "into one public responsibility each, then reopen it"
+    )
+
+
 def test_pinned_task_profile_wins_over_a_low_confidence_answer(asked):
     calls = asked("frontend", confidence=0.1)
     decision = profile_choice.choose("sw", "eng", {}, {**TASK, "profile": "qa"}, {})

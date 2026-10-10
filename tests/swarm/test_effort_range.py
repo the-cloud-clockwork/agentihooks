@@ -184,6 +184,14 @@ def test_set_refuses_an_unordered_or_unknown_range(env, pairs):  # noqa: F811
     assert (config.effort_min, config.effort_max) == ("medium", "high")
 
 
+@pytest.mark.parametrize(
+    "harness,effort,named",
+    [("codex", "max", "xhigh"), ("claude", "xhigh", "max"), ("codex", "medium", "medium"), ("codex", "turbo", "turbo")],
+)
+def test_an_effort_is_named_for_a_harness_by_its_rank(harness, effort, named):
+    assert effort_range.named(harness, effort) == named
+
+
 def test_a_codex_name_sets_the_range_on_the_shared_scale(env):  # noqa: F811
     store, _, _ = env
     assert cli.EFFORT_KEYS == {"effort-min": "effort_min", "effort-max": "effort_max"}

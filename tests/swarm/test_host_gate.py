@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from scripts.swarm import cli, host_budget, tick
+from scripts.swarm import capacity, cli, host_budget, tick
 from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
@@ -133,6 +133,25 @@ def test_a_spawn_at_the_tick_time_counts_and_a_later_one_does_not(store):
     assert tick._host_full("sw", store, 60_000) == ""
     tick._spend_host(store, "now", 60_000)
     assert tick._host_full("sw", store, 60_000) == f"host memory room 1, 1 spawned since it was granted: {MEMORY}"
+
+
+def test_host_spent_counts_from_the_start_lag_before_since_through_now(store):
+    for name, at in (("early", 29_999), ("lagged", 30_000), ("now", 60_000), ("later", 60_001)):
+        tick._spend_host(store, name, at)
+    assert tick.host_spent(store, 60_000, 60_000) == 2
+    assert tick.host_spent(store, 60_001, 60_001) == 2
+
+
+def test_the_spawn_gate_closes_exactly_when_autoscale_has_no_room_left(store):
+    _decide(store, 2, granted_at=50_000)
+    host = capacity.read(store, "sw")["host"]
+    counter = capacity.spawn_counter(store, 60_000)
+    seen = []
+    for name in ("first", "second"):
+        seen.append((capacity.unspent(host, counter), tick._host_full("sw", store, 60_000)))
+        tick._spend_host(store, name, 60_000)
+    seen.append((capacity.unspent(host, counter), tick._host_full("sw", store, 60_000)))
+    assert seen == [(2, ""), (1, ""), (0, f"host memory room 2, 2 spawned since it was granted: {MEMORY}")]
 
 
 def test_the_quota_seat_check_runs_before_the_host_gate(store):
