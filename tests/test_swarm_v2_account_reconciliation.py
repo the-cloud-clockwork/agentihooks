@@ -6,6 +6,7 @@ import pytest
 
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import SwarmError
+from scripts.swarm_v2 import accounts
 from scripts.swarm_v2.accounts import OCCUPIED, RESERVED, AccountCapacity
 from scripts.swarm_v2.reconciliation import accounts as reconciliation
 from scripts.swarm_v2.reconciliation.accounts import AccountReconciler, Finding
@@ -118,6 +119,7 @@ def test_a_handoff_releases_the_old_slot_only_after_the_successor_occupies(world
     successor = world.agents[HANDOFF]
 
     assert sorted(world.rows()) == sorted([LOST_TERMINAL, ORPHANED, RETIRING, SUCCESSOR]), run
+    assert accounts.stored_accounts(world.store) == [ACCOUNT]
     assert (world.row(RETIRING)["execution_id"], world.row(RETIRING)["state"]) == (
         world.predecessor.execution_id,
         OCCUPIED,
@@ -128,6 +130,10 @@ def test_a_handoff_releases_the_old_slot_only_after_the_successor_occupies(world
         RETIRING: ("handoff_unconfirmed", "keep"),
         ORPHANED: ("orphan_reservation", "keep"),
         LOST_TERMINAL: ("terminal_loss", "keep"),
+    }
+    assert {f.holder: f.evidence for f in held if f.holder in (RETIRING, ORPHANED)} == {
+        RETIRING: "successor occupancy unconfirmed",
+        ORPHANED: "not the seat's current execution",
     }
     assert sorted(world.rows()) == sorted([LOST_TERMINAL, ORPHANED, RETIRING, SUCCESSOR])
     assert world.reconciler.account_occupancy_discrepancies() == {"handoff_unconfirmed": 1, "orphan_reservation": 1}
@@ -163,6 +169,10 @@ def test_a_successor_that_never_confirms_leaves_the_old_slot_counted(world):
         ORPHANED: ("expired_reservation", "release"),
         LOST_TERMINAL: ("terminal_loss", "keep"),
     }
+    successor = world.agents[HANDOFF]
+    assert [f for f in found if f.holder == SUCCESSOR] == [
+        Finding("expired_reservation", "release", ACCOUNT, SUCCESSOR, successor.execution_id, 2, "")
+    ]
     assert sorted(world.rows()) == sorted([LOST_TERMINAL, RETIRING])
     assert [slot.holder for slot in world.capacity.slots(ACCOUNT)] == [RETIRING, LOST_TERMINAL]
     assert world.reconciler.account_occupancy_discrepancies() == {"handoff_unconfirmed": 1}
@@ -236,6 +246,39 @@ def test_a_lost_current_worker_is_released_and_its_seat_can_be_refilled(world):
     assert (finding.kind, finding.action, finding.evidence) == ("orphan_occupancy", "release", "lost/worker_loss")
     assert (slot.generation, slot.state) == (2, RESERVED)
     assert sorted(world.rows()) == [LOST_TERMINAL]
+
+
+def test_an_unobserved_replaced_occupancy_is_kept_and_named_unobserved(world):
+    world.running(TERMINAL)
+    world.launch(TERMINAL)
+
+    [finding] = world.reconciler.reconcile()
+
+    assert (finding.kind, finding.action, finding.evidence) == ("orphan_occupancy", "keep", "unobserved")
+    assert sorted(world.rows()) == [LOST_TERMINAL]
+
+
+def test_a_retiring_row_of_the_current_generation_is_never_a_confirmed_handoff(world):
+    world.running(TERMINAL)
+    world.store.redis.hset(
+        f"{ROOT}:accounts:{ACCOUNT}",
+        f"{LOST_TERMINAL}#1",
+        json.dumps({**world.row(LOST_TERMINAL), "holder": f"{LOST_TERMINAL}#1"}),
+    )
+
+    found = world.reconciler.reconcile()
+
+    assert kinds(found) == {f"{LOST_TERMINAL}#1": ("handoff_unconfirmed", "keep")}
+    assert f"{LOST_TERMINAL}#1" in world.rows()
+
+
+def test_the_reconciler_judges_expiry_by_its_own_clock_and_holds_no_grant(world):
+    world.scene()
+    later = AccountReconciler(world.store, SLUG, lambda: world.clock[0] + TTL, {})
+
+    assert kinds(later.report())[ORPHANED] == ("expired_reservation", "release")
+    assert kinds(world.reconciler.report())[ORPHANED] == ("orphan_reservation", "keep")
+    assert refusal(later.capacity.reserve, world.tokens[HANDOFF], CAP, TTL) == "forbidden_scope"
 
 
 def test_a_worker_waiting_on_quota_keeps_its_slot_until_its_session_closes(world):
@@ -332,10 +375,11 @@ def test_a_delayed_exit_of_a_replaced_generation_never_frees_the_newer_slot(worl
     late = world.reconciler.exited(world.predecessor.execution_id, 1, "kubernetes")
     wrong = world.reconciler.exited(successor.execution_id, 1, "kubernetes")
 
-    assert (late.kind, late.action) == ("stale_exit", "keep")
+    assert late == Finding("stale_exit", "keep", "", "", world.predecessor.execution_id, 1, "kubernetes")
     assert (wrong.kind, wrong.action) == ("stale_exit", "keep")
     assert world.rows()[SUCCESSOR] == newer
     assert world.reconciler.stale_exit_events() == 2
+    assert world.store.redis.get(world.store.key(SLUG, "account-stale-exits")) == "2"
 
 
 def test_an_exit_of_the_current_generation_frees_only_its_own_row(world):

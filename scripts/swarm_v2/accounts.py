@@ -258,14 +258,13 @@ class AccountCapacity:
             found = registration(record.execution_id) if record.state != CLOSED and record.execution_id else None
             if found is not None and found.swarm_id == self.slug and self._owns(record, found):
                 valid.append((record, found))
-        newest: dict[str, int] = {}
-        for record, _ in valid:
-            newest[record.seat] = max(newest.get(record.seat, 0), record.generation)
         confirmed: dict[str, dict[str, Slot]] = {}
-        for record, found in valid:
+        seated: set[str] = set()
+        for record, found in sorted(valid, key=lambda pair: pair[0].generation, reverse=True):
             holder = self._holder(record.seat)
-            if record.generation < newest[record.seat]:
+            if record.seat in seated:
                 holder = retiring(holder, record.generation)
+            seated.add(record.seat)
             slot = Slot(found.account, holder, record.execution_id, record.generation, OCCUPIED, 0, record.key())
             confirmed.setdefault(found.account, {})[holder] = slot
         return confirmed
