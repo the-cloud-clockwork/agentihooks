@@ -189,6 +189,64 @@ def test_app_bounds_idle_sessions():
     assert app.state.session_manager.session_idle_timeout == SESSION_IDLE_SECONDS
 
 
+OPT_IN = {"read_file", "search_for_pattern"}
+
+
+async def _listed_over_http(router, path: str) -> set[str]:
+    import json
+
+    import httpx
+
+    from hooks.serena_router.app import build_app
+
+    app = build_app(*router)
+    headers = {"Accept": "application/json, text/event-stream"}
+    init = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}},
+    }
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://router") as client,
+    ):
+        started = await client.post(path, json=init, headers=headers)
+        headers["mcp-session-id"] = started.headers["mcp-session-id"]
+        await client.post(path, json={"jsonrpc": "2.0", "method": "notifications/initialized"}, headers=headers)
+        listed = await client.post(path, json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, headers=headers)
+    data = [line.removeprefix("data:") for line in listed.text.splitlines() if line.startswith("data:")]
+    return {tool["name"] for tool in json.loads(data[-1])["result"]["tools"]}
+
+
+async def test_default_listing_hides_the_opt_in_tools(router):
+    async with connect(router) as session:
+        names = {tool.name for tool in (await session.list_tools()).tools}
+    assert "find_symbol" in names
+    assert not names & OPT_IN
+
+
+async def test_mcp_endpoint_hides_the_opt_in_tools_without_a_query(router):
+    names = await _listed_over_http(router, "/mcp")
+    assert "find_symbol" in names
+    assert not names & OPT_IN
+
+
+async def test_mcp_endpoint_lists_the_opt_in_tools_its_query_names(router):
+    assert await _listed_over_http(router, "/mcp?tools=read_file,search_for_pattern") >= OPT_IN | {"find_symbol"}
+    assert OPT_IN - await _listed_over_http(router, "/mcp?tools=read_file") == {"search_for_pattern"}
+
+
+def test_listed_ignores_names_outside_the_opt_in_set():
+    from mcp.types import Tool
+
+    from hooks.serena_router.server import listed
+
+    tools = [Tool(name=name, inputSchema={"type": "object"}) for name in ("find_symbol", "read_file", "mystery")]
+    assert [t.name for t in listed(tools, "")] == ["find_symbol", "mystery"]
+    assert [t.name for t in listed(tools, "read_file,mystery,")] == ["find_symbol", "read_file", "mystery"]
+
+
 def test_fake_backend_imports_only_the_standard_library():
     tree = ast.parse(FAKE.read_text())
     modules = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
