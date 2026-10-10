@@ -1,0 +1,47 @@
+{
+  "case": "T-SV2-KUB-04-B",
+  "evidence_class": "mocked: fakeredis execution registry, heartbeat archive watermarks, attempt records and cleanup journal, a fake lease clock, an in process API server that enforces delete uid preconditions and can drop a delete response, and in process attach and secret registries; no Kubernetes API server was called",
+  "input_sha256": {
+    "cleanup-attempts.json": "39a4e5c1dc686133750138a012ddc2d2764666e2562588959752e670ab12d4ce",
+    "pod-launch.json": "dc9258de4781082cc2abb9a2048ff04db03da0a83ea144f96fe728847b34c809",
+    "pod-policy.json": "6f10e42c7c8461ea18fe3ae9f0c46001020bd50153665477b415076cf71099f5"
+  },
+  "observed": {
+    "deletes_before_resume": 1,
+    "execution_cleanup_backlog": {
+      "ready": 0,
+      "waiting_archive": 0,
+      "waiting_outcome": 0
+    },
+    "interrupted": "delete response dropped",
+    "protected_state_unchanged_by_refusals": true,
+    "refusals": {
+      "final_record_is_immutable": "a final attempt record cannot change",
+      "not_final_replacement": "not_final",
+      "revoked_grant": "a scoped controller grant is required",
+      "running_is_not_final": "an attempt is final only when completed or explicitly cancelled",
+      "stale_controller": "the controller lease is stale",
+      "unknown_attempt": "unknown execution identity; display labels cannot identify attempts"
+    },
+    "removed": {
+      "pods": [
+        {
+          "name": "swarm-<old>",
+          "outcome": "replaced",
+          "uid": "uid-1"
+        }
+      ],
+      "services": [
+        {
+          "name": "swarm-attach-<old>",
+          "outcome": "deleted",
+          "uid": "uid-2"
+        }
+      ]
+    },
+    "replacement_pod_survives": true,
+    "resumed": "done",
+    "reused_name_pod_survives": true
+  },
+  "state": "passed"
+}

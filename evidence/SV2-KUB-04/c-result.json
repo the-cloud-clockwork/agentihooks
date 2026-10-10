@@ -1,0 +1,121 @@
+{
+  "case": "T-SV2-KUB-04-C",
+  "evidence_class": "mocked: fakeredis execution registry, heartbeat archive watermarks, attempt records and cleanup journal, a fake lease clock, an in process API server that enforces delete uid preconditions and can drop a delete response, and in process attach and secret registries; no Kubernetes API server was called",
+  "input_sha256": {
+    "cleanup-attempts.json": "39a4e5c1dc686133750138a012ddc2d2764666e2562588959752e670ab12d4ce",
+    "pod-launch.json": "dc9258de4781082cc2abb9a2048ff04db03da0a83ea144f96fe728847b34c809",
+    "pod-policy.json": "6f10e42c7c8461ea18fe3ae9f0c46001020bd50153665477b415076cf71099f5"
+  },
+  "observed": {
+    "attached": [
+      "<replacement>"
+    ],
+    "backlog_while_suspended": {
+      "ready": 1,
+      "waiting_archive": 0,
+      "waiting_outcome": 0
+    },
+    "crashes": [
+      "delete response dropped",
+      "secrets registry unavailable"
+    ],
+    "deletes": [
+      [
+        "pods",
+        "swarm-<old>",
+        "uid-1"
+      ],
+      [
+        "pods",
+        "swarm-<old>",
+        "uid-1"
+      ],
+      [
+        "services",
+        "swarm-attach-<old>",
+        "uid-2"
+      ]
+    ],
+    "execution_cleanup_backlog": {
+      "ready": 0,
+      "waiting_archive": 0,
+      "waiting_outcome": 0
+    },
+    "journal_after_lost_delete": {
+      "done": [],
+      "pinned": {
+        "pods": [
+          {
+            "name": "swarm-<old>",
+            "uid": "uid-1"
+          }
+        ],
+        "services": [
+          {
+            "name": "swarm-attach-<old>",
+            "uid": "uid-2"
+          }
+        ]
+      }
+    },
+    "journal_mid_release": {
+      "done": [
+        "pods",
+        "services",
+        "attach"
+      ],
+      "removed": {
+        "pods": [
+          {
+            "name": "swarm-<old>",
+            "outcome": "absent",
+            "uid": "uid-1"
+          }
+        ],
+        "services": [
+          {
+            "name": "swarm-attach-<old>",
+            "outcome": "deleted",
+            "uid": "uid-2"
+          }
+        ]
+      }
+    },
+    "pods_left": [
+      "swarm-<replacement>"
+    ],
+    "releases": [
+      "attach",
+      "secrets",
+      "secrets"
+    ],
+    "removed": {
+      "pods": [
+        {
+          "name": "swarm-<old>",
+          "outcome": "absent",
+          "uid": "uid-1"
+        }
+      ],
+      "services": [
+        {
+          "name": "swarm-attach-<old>",
+          "outcome": "deleted",
+          "uid": "uid-2"
+        }
+      ]
+    },
+    "replay": "done",
+    "resumed": "done",
+    "retained_once": true,
+    "retained_while_suspended": true,
+    "secret_refs": [
+      "<replacement>"
+    ],
+    "services_left": [
+      "swarm-attach-<replacement>"
+    ],
+    "suspended": "suspended"
+  },
+  "state": "passed"
+}
