@@ -402,7 +402,7 @@ def test_publish_plan_reads_the_plan_as_utf8(monkeypatch):
     with pytest.raises(SystemExit):
         ledger.cmd_publish_plan(args)
     assert reads == [("plan.md", "utf-8")]
-    assert titles == ["Café plan"]
+    assert titles == ["Café plan", f"closed {PLAN}"]
 
 
 def test_publish_plan_exits_with_the_gh_failure(plan_ledger, tmp_path, monkeypatch):
