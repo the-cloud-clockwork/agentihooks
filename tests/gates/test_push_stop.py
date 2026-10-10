@@ -2,6 +2,7 @@ import re
 import subprocess
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -654,8 +655,16 @@ def test_under_a_slow_push_a_later_gate_with_less_than_the_floor_left_never_star
 def test_a_gate_left_exactly_the_floor_is_started_with_that_budget(monkeypatch, rig):
     install_gate(rig, 0)
     waits = []
+
+    class Gate:
+        def wait(self, seconds):
+            waits.append(seconds)
+            return 0
+
     monkeypatch.setattr(
-        push_stop.subprocess, "Popen", lambda *a, **kw: type("Gate", (), {"wait": lambda _, s: waits.append(s) or 0})()
+        push_stop,
+        "subprocess",
+        SimpleNamespace(Popen=lambda *a, **kw: Gate(), DEVNULL=subprocess.DEVNULL, TimeoutExpired=TimeoutError),
     )
     tree = push_stop.Tree(rig.tree, BRANCH, False, 1, 1)
     assert push_stop.gate_refusal(tree, lambda: FLOOR_S) is None
@@ -679,7 +688,7 @@ def test_the_gate_budget_counts_from_when_the_hook_started_not_from_when_the_gat
     rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
     log = install_gate(rig, 0)
     monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", RESERVE_S + FLOOR_S + 4)
-    rig.ticks[:] = [4.5]
+    rig.ticks[:] = [4.5, 4.5]
     decision = rig.stop(started=0.0)
     assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {GATE_LATE.format(path=rig.tree)}")
     assert not log.exists()
@@ -699,7 +708,7 @@ def test_a_passing_gate_followed_by_a_slow_push_and_ledger_write_ends_inside_the
     log = install_gate(rig, 0, before="import time\ntime.sleep(1.5)\n")
     slow_origin(rig, 2.3)
     rig.ledger.delay = 0.52
-    timeout = RESERVE_S + 2
+    timeout = RESERVE_S + 3
     monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", timeout)
     started = time.monotonic()
     assert rig.stop(started=started).allowed

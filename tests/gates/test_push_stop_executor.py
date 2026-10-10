@@ -210,4 +210,4 @@ def test_a_pre_push_gate_that_overruns_is_stopped_by_the_gate_inside_the_stop_co
     assert "The pre push gate did not finish in " in done.stderr
     assert f" s in {rig.tree}, so the stop hook did not push it." in done.stderr
     assert rig.remote_head() == ""
-    assert took < 6 + 3
+    assert took < 6

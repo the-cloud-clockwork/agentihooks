@@ -25,7 +25,7 @@ SETTLED = "a later stop passed with the work committed, on origin and recorded"
 PUSHED = "pushed"
 GITHUB_RE = re.compile(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$")
 GIT_TIMEOUT_S = 60
-# Measured: a GitHub push takes up to 2.3 s and the ledger write after it up to 0.52 s.
+# Measured: a GitHub push takes up to 2.3 s, the ledger write after it up to 0.52 s and the hook's startup up to 0.23 s.
 RESERVE_S = 3.5
 FLOOR_S = 1.0
 PREPUSH = Path("scripts") / "ci_prepush" / "__init__.py"
@@ -41,6 +41,7 @@ GATE_LATE = (
     "The stop hook had too little time left to run the pre push gate in {path}, so it did not push it. "
     "Run python -m scripts.ci_prepush there and commit."
 )
+PUSH_LATE = "The stop hook had too little time left to push {path}, so it did not push it. Push it yourself."
 
 
 @dataclass(frozen=True)
@@ -81,7 +82,7 @@ def trees(root, name):
     return [tree for tree in found if tree is not None]
 
 
-def gate_refusal(tree, left):
+def gate_refusal(tree, budget):
     """Why the pre push gate keeps HEAD off origin, or None: a repo without one passes, a stamped HEAD is not rerun."""
     if not (tree.path / PREPUSH).is_file():
         return None
@@ -89,7 +90,7 @@ def gate_refusal(tree, left):
 
     if passed(tree.path):
         return None
-    seconds = left()
+    seconds = budget()
     if seconds < FLOOR_S:
         return GATE_LATE.format(path=tree.path)
     gate = subprocess.Popen(
@@ -159,7 +160,7 @@ class PushStop:
 
     def __init__(self, connect=None, ledger=None, root=None, now=None, clock=None):
         self._connect, self._ledger, self._root, self._now, self._clock = connect, ledger, root, now, clock
-        # The hook process builds its gates on import, so this is when the Stop condition started.
+        # The hook process builds its gates right after its imports; the reserve covers the startup before this.
         self.started = self.clock()
 
     def matches(self, call):
@@ -175,7 +176,7 @@ class PushStop:
             return Decision()
         store, owed, failed = self.connect(), False, []
         for tree in trees(self.root(), who.name):
-            if tree.unpushed and (refused := gate_refusal(tree, self.left)):
+            if tree.unpushed and (refused := self.held(tree)):
                 failed.append(refused)
             elif tree.unpushed and push(tree):
                 self.record(store, ledger, who, tree)
@@ -186,6 +187,10 @@ class PushStop:
             return Decision()
         self.notify(store, who)
         return Decision.deny(" ".join([TEMPLATE, *failed]))
+
+    def held(self, tree):
+        """Why HEAD stays off origin: its pre push gate refused, or less than the reserve is left for the push."""
+        return gate_refusal(tree, self.left) or (PUSH_LATE.format(path=tree.path) if self.left() < 0 else None)
 
     def on_origin(self, tree):
         return count(tree.path, "HEAD", "--not", "--remotes=origin") == 0
