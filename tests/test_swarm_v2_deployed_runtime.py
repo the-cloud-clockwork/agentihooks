@@ -147,7 +147,8 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
     assert (placed.placement, placed.harness, placed.profile) == (BACKEND, "claude", "general")
     [pod] = pods.created
     execution = pod["metadata"]["labels"][EXECUTION_LABEL]
-    assert store.execution(SLUG, execution).seat == SEAT
+    admitted = store.execution(SLUG, execution)
+    assert (admitted.seat, admitted.runtime_backend) == (SEAT, BACKEND)
     assert lease.current(store, SLUG) is None
 
 
