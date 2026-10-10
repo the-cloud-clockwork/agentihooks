@@ -329,6 +329,65 @@ def test_the_seat_spawn_helper_stamps_the_seat_and_the_host_spend():
     assert int(store.names.entry(NAME)["spawned_at"]) == NOW
 
 
+def crew(found, members=(), joined=()):
+    return {**found, "_meta": {"members": {name: {"role": "member"} for name in members}, "join_history": dict(joined)}}
+
+
+def test_a_seat_that_left_the_ledger_is_ended_while_its_triggers_stay_open():
+    store, runtime = swarm(), FakeRuntime()
+    run(store, runtime, doc(priority()))
+    left = crew(doc(priority()), joined={NAME: [NOW + 10_000]})
+    assert run(store, runtime, left, NOW + MINUTE) == [f"ended dispatcher {NAME}: it left the ledger"]
+    assert [a.state for a in seats(store)] == ["finished"]
+
+
+@pytest.mark.parametrize(
+    "members, joined",
+    [((), ()), ((NAME,), {NAME: [NOW + 10_000]}), ((), {NAME: [NOW - 1]})],
+    ids=["not joined yet", "still a member", "joined only before this launch"],
+)
+def test_a_seat_that_has_not_left_the_ledger_is_kept(members, joined):
+    store, runtime = swarm(), FakeRuntime()
+    run(store, runtime, doc(priority()))
+    later = priority("pr2", "followups/f1", "Approve the lane cap")
+    actions = run(store, runtime, crew(doc(priority(), later), members, joined), NOW + MINUTE)
+    assert actions == [f"woke {NAME} with 1 new trigger"]
+    assert [a.state for a in seats(store)] == ["working"]
+
+
+def test_triggers_a_departed_seat_left_open_spawn_no_seat_and_a_new_trigger_does():
+    store, runtime = swarm(), FakeRuntime()
+    run(store, runtime, doc(priority()))
+    gone = {NAME: [NOW + 10_000]}
+    run(store, runtime, crew(doc(priority()), joined=gone), NOW + MINUTE)
+    assert run(store, runtime, crew(doc(priority()), joined=gone), NOW + 2 * MINUTE) == []
+    later = priority("pr2", "followups/f1", "Approve the lane cap")
+    actions = run(store, runtime, crew(doc(priority(), later), joined=gone), NOW + 3 * MINUTE)
+    assert actions == ["spawned dispatcher dispatcher@a1b2c3-0002 for 1 trigger"]
+    assert runtime.tasks[-1]["triggers"] == [
+        {"id": "pr2", "item": "followups/f1", "text": "Approve the lane cap", "minutes": 15}
+    ]
+    run(store, runtime, doc(), NOW + 4 * MINUTE)
+    assert not store.redis.exists(store.key(SLUG, dispatch_seat.LEFT))
+
+
+def test_the_tick_retires_the_process_of_a_seat_that_left_the_ledger_within_two_ticks():
+    class Ledger(FakeLedger):
+        def state(self, slug):
+            found = {**super().state(slug), "priorities": [priority()]}
+            return {**found, "_meta": {**found["_meta"], "members": {}, "join_history": self.joined}}
+
+    store, runtime, ledger = swarm(), FakeRuntime(), Ledger([])
+    ledger.joined = {}
+    tick(SLUG, store, ledger, runtime, NOW)
+    [seat] = seats(store)
+    ledger.joined = {seat.name: [NOW + 10_000]}
+    assert f"ended dispatcher {seat.name}: it left the ledger" in tick(SLUG, store, ledger, runtime, NOW + MINUTE)
+    assert f"retired {seat.name}" in tick(SLUG, store, ledger, runtime, NOW + 2 * MINUTE)
+    assert runtime.killed == [seat.name] and seats(store) == []
+    assert sum(lane == dispatch_seat.LANE for lane, _, _ in runtime.spawned) == 1
+
+
 def test_the_swarm_config_reaches_the_seat_spawn():
     class Recording(FakeRuntime):
         def spawn(self, config, lane, name, task):
