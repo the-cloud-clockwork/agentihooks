@@ -309,14 +309,38 @@ def test_verify_refuses_a_revoked_grant(world):
     assert world.fleet.records() == []
 
 
-def test_verify_refuses_the_grant_of_a_superseded_execution(world):
+def test_a_superseded_worker_cannot_register_again_but_can_close_its_session(world):
     old = world.launch(FIRST)
+    world.launcher.registered(world.session(old), old.grant)
     world.launch(FIRST, previous=old.agent.execution_id)
+    body = {"execution_id": old.agent.execution_id, "generation": 1}
 
     with pytest.raises(GrantRefused) as refused:
-        world.grants.verify(SLUG, old.grant)
+        world.grants.register(SLUG, old.grant, body)
+    closed = world.fleet.close(MACHINE, world.session(old).session_id, old.grant)
 
     assert str(refused.value) == "launch grant is for a superseded execution"
+    assert closed.state == CLOSED
+
+
+def test_an_occupy_refused_after_a_replacement_reserved_closes_the_session(world, monkeypatch):
+    old = world.launch(FIRST)
+    register = world.fleet.register
+
+    def then_replaced(session, grant):
+        record = register(session, grant)
+        world.launch(FIRST, previous=old.agent.execution_id)
+        return record
+
+    monkeypatch.setattr(world.fleet, "register", then_replaced)
+
+    with pytest.raises(SwarmError) as refused:
+        world.launcher.registered(world.session(old), old.grant)
+
+    assert str(refused.value) == "stale_generation"
+    [record] = world.fleet.records()
+    assert (record.state, record.execution_id) == (CLOSED, old.agent.execution_id)
+    assert world.rows()[f"{SLUG}/{FIRST}"]["generation"] == 2
 
 
 def test_verify_returns_the_grant_identity_unregistered(world):
