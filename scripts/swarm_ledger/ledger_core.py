@@ -67,6 +67,7 @@ LISTS = {
         "done",
         "out_of_scope",
     ),
+    "plans": ("out_of_scope",),
 }
 BOOL_FIELDS = ("done", "out_of_scope")
 STATE_EVENTS = {"done": ("checked", "unchecked"), "out_of_scope": ("out of scope", "back in scope")}
@@ -444,7 +445,7 @@ def apply_changes(doc, changes, ctx):
             set_state(item, parts[2], value)
             ctx.stamp(change["path"], "operator")
             ctx.record("operator", state_event(parts[2], value), "/".join(parts[:2]))
-            if parts[2] == "out_of_scope":
+            if parts[2] == "out_of_scope" and "comments" in item:
                 note = "Out of scope." if value else "Back in scope."
                 item["comments"].append(
                     {"id": f"scope-{ctx.rev}-{parts[1]}", "by": "operator", "at": ctx.at, "text": note}

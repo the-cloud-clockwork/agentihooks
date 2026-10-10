@@ -11,38 +11,59 @@ import { renderChat, renderChatBadge } from "./chat.js";
 import { inboxPending, renderSwarm, swarm } from "./swarm.js";
 import { readWorkspace } from "./api.js";
 import { firstPage, lazy, moreButton, wanted } from "./pages.js";
+import { frozen, held, ownFreeze, snowflake } from "./freezes.js";
 
-function scopeDot(key, item) {
+function scopeDot(key, item, off) {
   if (item.done) return null;
   const out = !!item.out_of_scope;
-  return h("button", { class: "scope", type: "button", "data-focus": `scope:${key}`, "aria-pressed": String(out),
-    title: out ? "Bring back in scope" : "Mark out of scope", text: "out of scope", on: { click: () => {
+  return h("button", { class: "scope", type: "button", "data-focus": `scope:${key}`, "aria-pressed": String(out), disabled: off ? "" : false,
+    title: out ? "Bring back in scope" : "Mark out of scope", text: "out of scope", on: { click: (ev) => {
+      ev.preventDefault();
       if (out || confirm("Mark this item out of scope?")) toggle(key, !out, "out_of_scope");
     } } });
 }
 
-export function verdictButton(item, verdict, cls, text) {
-  return h("button", { class: `link ${cls}`, type: "button", text, on: { click: () => queue({ op: "verdict", id: newId("comment"), item, verdict }) } });
+function freezeButton(key) {
+  const own = ownFreeze(doc, key);
+  return h("button", { class: "freeze", type: "button", "data-focus": `freeze:${key}`, "aria-pressed": String(!!own),
+    title: own ? "Lift this freeze" : "Freeze this item and everything under it", text: own ? "unfreeze" : "freeze", on: { click: (ev) => {
+      ev.preventDefault();
+      queue(own ? { op: "freeze_clear", id: newId("freeze"), target: key } : { op: "freeze_set", id: newId("freeze"), verb: "freeze", target: key });
+    } } });
+}
+
+export function verdictButton(item, verdict, cls, text, off) {
+  return h("button", { class: `link ${cls}`, type: "button", text, disabled: off ? "" : false, on: { click: () => queue({ op: "verdict", id: newId("comment"), item, verdict }) } });
 }
 
 function itemActions(key, item) {
-  if (item.done || item.out_of_scope) return h("div", { class: "item-actions" }, scopeDot(key, item));
-  return h("div", { class: "item-actions" }, verdictButton(key, "approved", "approve", "Approve"), verdictButton(key, "denied", "deny", "Deny"), scopeDot(key, item));
+  const off = frozen(doc, key);
+  if (item.done || item.out_of_scope) return h("div", { class: "item-actions" }, scopeDot(key, item, off));
+  const freeze = ["phases", "tasks"].includes(key.split("/")[0]) ? freezeButton(key) : null;
+  return h("div", { class: "item-actions" }, verdictButton(key, "approved", "approve", "Approve", off), verdictButton(key, "denied", "deny", "Deny", off), freeze, scopeDot(key, item, off));
 }
 
-function itemClass(item) {
-  return "item" + (item.done ? " done" : "") + (item.out_of_scope ? " out" : "");
+function holdClass(key) {
+  return frozen(doc, key) ? " frozen" : held(doc, key) ? " held" : "";
+}
+
+function holdMark(key) {
+  return frozen(doc, key) ? snowflake("Frozen") : held(doc, key) ? snowflake("Held by a focus") : null;
+}
+
+function itemClass(item, key) {
+  return "item" + (item.done ? " done" : "") + (item.out_of_scope ? " out" : "") + (key ? holdClass(key) : "");
 }
 
 function checkRow(list, item, n, titleText, descText) {
   const key = `${list}/${item.id}`;
-  const box = h("input", { type: "checkbox", "data-focus": `check:${key}`, "aria-label": titleText, disabled: item.out_of_scope ? "" : false });
+  const box = h("input", { type: "checkbox", "data-focus": `check:${key}`, "aria-label": titleText, disabled: item.out_of_scope || frozen(doc, key) ? "" : false });
   box.checked = !!item.done;
   box.addEventListener("change", () => toggle(key, box.checked, "done"));
   const body = h("div", {}, h("div", { class: "text", text: titleText }),
     descText ? h("p", { class: "desc", text: descText }) : null);
   const row = h("div", { class: "row" }, box, n ? h("span", { class: "num", text: `${n}.` }) : null, body, itemActions(key, item));
-  return h("li", { class: itemClass(item), id: `item-${list}-${item.id}` }, row, commentsView(key, item.comments));
+  return h("li", { class: itemClass(item, key), id: `item-${list}-${item.id}` }, holdMark(key), row, commentsView(key, item.comments));
 }
 
 function phaseLabel(phase, doc) {
@@ -72,7 +93,7 @@ function phaseReview(phase) {
 
 function phaseRow(item, n) {
   const key = `phases/${item.id}`;
-  const box = h("input", { type: "checkbox", "data-focus": `check:${key}`, "aria-label": item.title, disabled: item.out_of_scope ? "" : false });
+  const box = h("input", { type: "checkbox", "data-focus": `check:${key}`, "aria-label": item.title, disabled: item.out_of_scope || frozen(doc, key) ? "" : false });
   box.checked = !!item.done;
   box.addEventListener("change", () => toggle(key, box.checked, "done"));
   const fold = h("details", { class: "phase-fold" },
@@ -81,7 +102,7 @@ function phaseRow(item, n) {
   fold.open = !closedComments.has(`${key}/row`);
   fold.addEventListener("toggle", () => rememberComment(`${key}/row`, fold.open));
   const row = h("div", { class: "row" }, box, h("span", { class: "num", text: `${n}.` }), h("div", {}, fold), itemActions(key, item));
-  return h("li", { class: itemClass(item), id: `item-phases-${item.id}` }, row, commentsView(key, item.comments));
+  return h("li", { class: itemClass(item, key), id: `item-phases-${item.id}` }, holdMark(key), row, commentsView(key, item.comments));
 }
 
 function phaseSlices(phase) {
@@ -89,26 +110,32 @@ function phaseSlices(phase) {
   if (!rows.length) return null;
   const count = (s) => doc.tasks.filter((t) => !t.deleted && t.slice === `slices/${s.id}`).length;
   return h("div", { class: "phase-slices" }, h("span", { class: "phase-slices-label", text: "slices" }),
-    ...rows.map((s) => h("span", { class: "slice", text: `${s.anchor} ${count(s)}` })));
+    ...rows.map((s) => h("span", { class: "slice" + holdClass(`slices/${s.id}`), id: `item-slices-${s.id}` }, holdMark(`slices/${s.id}`),
+      h("span", { class: "slice-name", text: `${s.anchor} ${count(s)}` }), freezeButton(`slices/${s.id}`))));
 }
 
 function planGroups() {
   const known = new Set(doc.plans.map((p) => `plans/${p.id}`));
-  const groups = doc.plans.map((plan) => ({ key: `plans/${plan.id}`, id: `item-plans-${plan.id}`, title: plan.title || plan.id,
+  const groups = doc.plans.map((plan) => ({ key: `plans/${plan.id}`, id: `item-plans-${plan.id}`, title: plan.title || plan.id, plan,
     phases: doc.phases.filter((p) => p.plan === `plans/${plan.id}`) }));
   const loose = doc.phases.filter((p) => !known.has(p.plan));
   return loose.length ? [...groups, { key: "unplanned", id: "phases-unplanned", title: "Phases without a plan", phases: loose }] : groups;
 }
 
-function planRow({ key, id, title, phases }) {
+function planActions(key, plan) {
+  if (!plan) return null;
+  return h("span", { class: "item-actions plan-actions" }, plan.out_of_scope ? null : freezeButton(key), scopeDot(key, plan, frozen(doc, key)));
+}
+
+function planRow({ key, id, title, phases, plan }) {
   const idOf = (p) => `item-phases-${p.id}`;
   const fold = h("details", { class: "plan-fold" }, h("summary", {}, h("span", { class: "plan-title", text: title }),
-    h("span", { class: "plan-count", text: `${phases.length} ${phases.length === 1 ? "phase" : "phases"}` })));
+    h("span", { class: "plan-count", text: `${phases.length} ${phases.length === 1 ? "phase" : "phases"}` }), planActions(key, plan)));
   fold.open = !closedComments.has(`${key}/row`) || phases.some((p) => idOf(p) === wanted.id);
   fold.addEventListener("toggle", () => rememberComment(`${key}/row`, fold.open));
   lazy(fold, () => h("ol", { class: "plan-phases" }, ...firstPage(key, phases, idOf).map((p, i) => phaseRow(p, i + 1)),
     moreButton(key, phases.length, "more phases", render), phases.length ? null : h("li", { class: "empty", text: "None." })));
-  return h("li", { class: "plan", id }, fold);
+  return h("li", { class: "plan" + (plan && plan.out_of_scope ? " out" : "") + (plan ? holdClass(key) : ""), id }, plan ? holdMark(key) : null, fold);
 }
 
 function phaseList() {
@@ -166,7 +193,7 @@ function taskProof(key, item) {
 
 function rankPick(key, item) {
   const pick = h("select", { class: `rank-pick rank-${taskRank(item)}`, "aria-label": `Queue rank of ${item.title}`, "data-focus": `rank:${key}`,
-    disabled: item.state === "done" ? "" : false, on: { change: () => queue({ op: "task_rank", id: newId("rank"), item: key, rank: pick.value }) } },
+    disabled: item.state === "done" || frozen(doc, key) ? "" : false, on: { change: () => queue({ op: "task_rank", id: newId("rank"), item: key, rank: pick.value }) } },
     ...taskRanks().map((r) => h("option", { value: r, text: r })));
   pick.value = taskRank(item);
   return pick;
@@ -191,7 +218,7 @@ function taskRow(item, tasks) {
     item.description ? h("p", { class: "desc", text: item.description }) : null, meta,
     waits ? h("p", { class: "desc", text: waits }) : null);
   const row = h("div", { class: "row" }, body, itemActions(key, item));
-  return h("li", { class: itemClass(item), id: `item-tasks-${item.id}` }, row, taskProof(`${key}/proof`, item), commentsView(key, item.comments));
+  return h("li", { class: itemClass(item, key), id: `item-tasks-${item.id}` }, holdMark(key), row, taskProof(`${key}/proof`, item), commentsView(key, item.comments));
 }
 
 function taskCounts(tasks) {

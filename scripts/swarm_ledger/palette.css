@@ -70,6 +70,7 @@
   --pending: var(--slate-050);
   --selection: var(--blue-700);
   --grip: var(--blue-400);
+  --frozen: var(--blue-300);
 }
 
 main:not(.home) {

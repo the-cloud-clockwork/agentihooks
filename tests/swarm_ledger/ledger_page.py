@@ -15,6 +15,7 @@ ORDER = (
     "pages",
     "api",
     "patch",
+    "freezes",
     "state",
     "sync",
     "markdown",
