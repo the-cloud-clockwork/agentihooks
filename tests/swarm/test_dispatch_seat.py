@@ -428,7 +428,7 @@ def pause(store):
     store.update(SLUG, state="paused")
 
 
-@pytest.mark.parametrize("hold", [sleep, pause])
+@pytest.mark.parametrize("hold", [sleep, pause], ids=["sleeping", "paused"])
 def test_a_sleeping_or_paused_swarm_tick_spawns_no_dispatcher(hold):
     store, runtime = swarm(), FakeRuntime()
     hold(store)
