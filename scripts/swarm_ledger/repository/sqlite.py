@@ -438,6 +438,13 @@ class SQLiteLedgerRepository:
             connection.execute(BEGIN_IMMEDIATE)
             return hierarchy.rebuild(connection, slug, self._entry(connection, slug).state)
 
+    def nodes(self, slug: str, read: str, node: str | None = None) -> list:
+        """Hierarchy rows: `children`, `ancestors`, `subtree` or `dependents` of a node, or of the ledger root."""
+        self._adopt(slug)
+        with self.connect() as connection, connection:
+            connection.execute(BEGIN)
+            return hierarchy.read(connection, slug, read, node)
+
     def events_since(self, slug: str, revision: int) -> list:
         self._adopt(slug)
         with self.connect() as connection:
