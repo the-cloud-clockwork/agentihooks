@@ -26,10 +26,13 @@ from scripts.claude_quota_balancer import (
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, Slot
 
 if TYPE_CHECKING:
+    from scripts.codex_quota import CodexQuota
     from scripts.routing.master_account import MasterAccount
     from scripts.routing.slots import SlotSource
 
 PAGE_TTL_S = 60
+STALE = "STALE"
+NEXT_MARK = "(next)"
 REFRESH_MIN_S = 60
 _page_cache: dict = {}
 _last_refresh: dict = {}
@@ -52,10 +55,7 @@ class QuotaRow:
     kind: str = SUBSCRIPTION
     weight: int | None = None
     master: str = ""
-
-
-def _left(used: float | None) -> float | None:
-    return None if used is None else max(0.0, 100.0 - used)
+    selected: bool = False
 
 
 def claude_rows(
@@ -84,27 +84,58 @@ def claude_rows(
     ]
 
 
+def _codex_state(account: "codex_router.CodexAccount", quota: "CodexQuota | None", now: float) -> str:
+    if not account.signed_in:
+        return "SIGNED_OUT"
+    if quota is None:
+        return "UNKNOWN"
+    return quota.state if session_bands.fresh(quota.observed_at, now) else STALE
+
+
+def _codex_source(quota: "CodexQuota | None", now: float) -> str:
+    if quota is None:
+        return "no session log"
+    seen = f"session-log {_span(max(0, int(now - quota.observed_at)))} ago"
+    return f"{seen}, {quota.reached}" if quota.reached else seen
+
+
 def codex_rows(accounts: list, quotas: dict, sessions: dict[str, int], now: float) -> list[QuotaRow]:
     rows = []
     for account in accounts:
         quota = quotas.get(account.name)
-        state = "SIGNED_OUT" if not account.signed_in else quota.state if quota else "UNKNOWN"
         rows.append(
             QuotaRow(
                 agent="codex",
                 account=account.name,
-                state=state,
+                state=_codex_state(account, quota, now),
                 sessions=sessions.get(account.name, 0),
-                five_hour_left=_left(quota.five_hour.used) if quota else None,
-                seven_day_left=_left(quota.seven_day.used) if quota else None,
+                five_hour_left=session_bands.left(quota.five_hour.used, quota.five_hour.resets_at, now)
+                if quota
+                else None,
+                seven_day_left=session_bands.left(quota.seven_day.used, quota.seven_day.resets_at, now)
+                if quota
+                else None,
                 seven_day_resets_at=quota.seven_day.resets_at if quota else None,
-                source=f"session-log {_span(max(0, int(now - quota.observed_at)))} ago" if quota else "no session log",
+                source=_codex_source(quota, now),
                 five_hour_resets_at=quota.five_hour.resets_at if quota else None,
                 observed_at=quota.observed_at if quota else None,
                 cap=codex_router.account_cap(quota, now) if account.signed_in else None,
             )
         )
     return rows
+
+
+def next_account(pool: list, quotas: dict, sessions: dict[str, int], now: float, environ: dict[str, str]) -> str:
+    """The account open placement would give the next launch, among accounts whose credential is not refused."""
+    usable = [account for account in pool if not codex_router.refusal(account, environ)]
+    try:
+        return codex_router.select(usable, quotas, sessions, now, environ=environ)[0].name
+    except codex_router.RoutingError:
+        return ""
+
+
+def mark_next(rows: list[QuotaRow], account: str) -> list[QuotaRow]:
+    return [replace(row, selected=True) if account and row.account == account else row for row in rows]
 
 
 def render(rows: list[QuotaRow], now: int) -> str:
@@ -125,7 +156,7 @@ def render(rows: list[QuotaRow], now: int) -> str:
     table = [
         [
             row.agent,
-            f"{row.account} {row.master}".rstrip(),
+            " ".join(part for part in (row.account, row.master, NEXT_MARK if row.selected else "") if part),
             row.kind,
             row.state,
             f"{row.sessions}/{_cap_text(row.cap)}",
@@ -236,9 +267,11 @@ def _codex(now: float) -> list[QuotaRow]:
 
     pool = codex_router.accounts(os.environ)
     sessions = codex_sessions_by_account()
-    rows = codex_rows(pool, codex_router.quotas(pool, os.environ), sessions, now)
+    quotas = codex_router.quotas(pool, os.environ)
+    rows = codex_rows(pool, quotas, sessions, now)
     master = _masters("codex").get("codex")
-    return [_mark(row, master) for row in rows + api_rows(CodexApiSource(sessions), "codex", now)]
+    marked = [_mark(row, master) for row in rows + api_rows(CodexApiSource(sessions), "codex", now)]
+    return mark_next(marked, next_account(pool, quotas, sessions, now, dict(os.environ)))
 
 
 def codex_table() -> str:

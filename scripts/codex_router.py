@@ -197,6 +197,8 @@ def account_cap(quota: CodexQuota | None, now: float) -> int | None:
     """Live sessions under the session bands: the week alone sets it; None without a fresh reading."""
     if quota is None or not session_bands.fresh(quota.observed_at, now):
         return None
+    if quota.reached:
+        return 0
     return session_bands.week_cap(session_bands.left(quota.seven_day.used, quota.seven_day.resets_at, now))
 
 
