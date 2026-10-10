@@ -2,9 +2,10 @@
 
 from typing import Any
 
-from scripts.swarm_v2.artifacts.base import Ack
+from scripts.swarm_v2.artifacts.base import Ack, ArtifactError
 
 MISSING = frozenset({"404", "NoSuchKey", "NotFound"})
+PAGES = 10_000
 
 
 def _missing(error: Exception) -> bool:
@@ -49,10 +50,12 @@ class ObjectStoreBackend:
         self.client.delete_object(**self._request(key))
 
     def keys(self, prefix: str) -> list[str]:
-        found, page = [], {}
-        while True:
-            token = {"ContinuationToken": page["NextContinuationToken"]} if page.get("IsTruncated") else {}
-            page = self.client.list_objects_v2(Bucket=self.bucket, Prefix=self.prefix + prefix, **token)
+        request = {"Bucket": self.bucket, "Prefix": self.prefix + prefix}
+        found = []
+        for _ in range(PAGES):
+            page = self.client.list_objects_v2(**request)
             found.extend(item["Key"].removeprefix(self.prefix) for item in page.get("Contents", ()))
             if not page.get("IsTruncated"):
                 return sorted(found)
+            request["ContinuationToken"] = page["NextContinuationToken"]
+        raise ArtifactError(f"listing {prefix} did not finish within {PAGES} pages")
