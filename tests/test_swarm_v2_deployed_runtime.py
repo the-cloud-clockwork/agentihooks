@@ -240,6 +240,18 @@ def test_the_start_logs_that_it_built_the_kubernetes_runtime(tmp_path, monkeypat
         service.stop()
 
 
+def test_the_runtime_line_is_flushed_so_the_container_log_shows_it_at_once(tmp_path, monkeypatch):
+    store, printed = _store(), []
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: Pods(namespace))
+    monkeypatch.setattr(_cs(), "print", lambda *args, **kwargs: printed.append(kwargs), raising=False)
+
+    service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    try:
+        assert printed == [{"flush": True}]
+    finally:
+        service.stop()
+
+
 def test_a_start_without_an_api_address_logs_no_kubernetes_runtime(tmp_path, capsys):
     store = _store()
     environ = _environ(tmp_path, store, **{deployed.API_URL_ENV: None, deployed.POLICY_ENV: None})

@@ -88,6 +88,26 @@ def test_a_grant_answering_access_token_is_used():
     assert registry.requests[2][0].get_header("Authorization") == "Bearer " + PULL
 
 
+def test_a_grant_answer_naming_no_token_retries_without_credentials():
+    registry = Registry(_refused(401, WWW_Authenticate=CHALLENGE), _granted("scope"), _refused(401))
+
+    with pytest.raises(image_tag.ImageUnresolved) as refused:
+        image_tag.resolve(REPOSITORY, "dev", registry)
+
+    assert str(refused.value) == f"the registry answered 401 for {REPOSITORY}:dev"
+    assert registry.requests[2][0].get_header("Authorization") is None
+
+
+def test_a_bearer_challenge_without_a_realm_is_refused_as_unreachable():
+    registry = Registry(_refused(401, WWW_Authenticate='Bearer service="ghcr.io"'))
+
+    with pytest.raises(image_tag.ImageUnresolved) as refused:
+        image_tag.resolve(REPOSITORY, "dev", registry)
+
+    assert str(refused.value) == f"the registry for {REPOSITORY}:dev is unreachable"
+    assert len(registry.requests) == 1
+
+
 def test_a_missing_tag_is_refused_with_the_registry_answer():
     registry = Registry(_refused(404))
 
