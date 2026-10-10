@@ -375,6 +375,17 @@ def test_a_stopping_or_sleeping_swarm_spawns_no_seat():
     assert runtime.spawned == []
 
 
+def test_a_distributed_controller_leaves_the_seat_to_the_workstation_hive():
+    from scripts.swarm import controller, lease
+    from scripts.swarm_v2.runtime.base import Placement, RuntimeRouter
+
+    store, inner = swarm(), FakeRuntime()
+    inner.router = RuntimeRouter([], placement=Placement("kubernetes"))
+    runtime = controller.FencedRuntime(store, SLUG, lease.acquire(store, SLUG, "anton"), inner, "distributed")
+    assert run(store, runtime, doc(priority())) == [f"the workstation hive spawns {dispatch_seat.LANE} work"]
+    assert inner.spawned == [] and seats(store) == []
+
+
 def test_a_full_host_holds_the_seat_spawn():
     from tests.swarm.test_host_gate import MEMORY, _decide
 

@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 
 from scripts.swarm import lease
 from scripts.swarm.store import RedisStore, SwarmError, connect
+from scripts.swarm_v2.runtime.base import LOCAL as WORKSTATION_BACKEND
+from scripts.swarm_v2.runtime.base import SpawnRequest
 
 if TYPE_CHECKING:
     from scripts.swarm_v2.control_service import ControlService
@@ -60,9 +62,6 @@ class FencedRuntime:
         return "" if getattr(router, "placement", None) is not None else NO_KUBERNETES
 
     def placement_refusal(self, config, lane: str, task: dict) -> str:
-        from scripts.swarm_v2.runtime.base import LOCAL as WORKSTATION_BACKEND
-        from scripts.swarm_v2.runtime.base import SpawnRequest
-
         if refused := self._mode_refusal():
             return refused
         if self.deployment == LOCAL:
