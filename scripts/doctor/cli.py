@@ -209,13 +209,13 @@ def cmd_stop(store, args):
     _close(store, *_pair_of(store, args.slug), announce=False)
 
 
-def timer(store, doctor, now_ms):
+def timer(store, doctor, now_ms, telemetry):
     ledger = swarm.LedgerClient()
     return loop.run(
         store,
         doctor,
         now_ms,
-        lambda watched: detect.collect(detect.readers(store, ledger, watched, now_ms)),
+        lambda watched: detect.collect(detect.readers(store, ledger, watched, now_ms, telemetry=telemetry)),
         lambda: _close(store, store.peer(doctor), doctor, QUIET),
     )
 
