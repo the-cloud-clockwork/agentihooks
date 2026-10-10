@@ -1,4 +1,4 @@
-"""Master seats of one swarm and the phases each owns. Seat one is the lead at the address a single master swarm uses."""
+"""Master seats of one swarm and the phases each owns. Seat one is the lead, at the single master swarm's address."""
 
 import json
 from collections.abc import Callable
@@ -30,7 +30,7 @@ def _checked(count: int) -> int:
 
 
 def lead_of(slug: str, live: list[str]) -> str:
-    """The lead seat answers while it is live, else the lowest numbered live master, so no line waits on an empty seat."""
+    """The lead seat while it is live, else the lowest numbered live master; the empty lead only when none is live."""
     lead = seat_address(slug, MASTER)
     return lead if lead in live or not live else min(live, key=_number)
 

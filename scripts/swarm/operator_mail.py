@@ -1,7 +1,7 @@
 """Operator writes on a swarm ledger as inbox items: a task's to the agent that claimed it, a chat line to its
 addressee (for @swarm and @master the lead master, with an information only copy of @swarm for every other live agent),
 a phase's or an unclaimed task's to the live master owning its phase, everything else to the lead master. The lead is
-the lead seat while it is live, else the lowest numbered live master. An addressee that is gone falls back to the lead."""
+the lead seat while it is live, else the lowest numbered live master. A gone addressee falls back to the lead."""
 
 import functools
 
