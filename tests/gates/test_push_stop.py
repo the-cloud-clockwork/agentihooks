@@ -571,10 +571,10 @@ def test_a_pre_push_gate_past_its_timeout_is_killed_with_its_children_and_keeps_
         "time.sleep(30)\n"
     )
     install_gate(rig, 0, before=slow)
-    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", RESERVE_S + 2)
+    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", RESERVE_S + 2.26)
     rig.ticks[:] = [0.0, 0.0]
     decision = rig.stop()
-    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {GATE_SLOW.format(path=rig.tree, seconds=2)}")
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {GATE_SLOW.format(path=rig.tree, seconds=2.3)}")
     assert rig.remote_head() == ""
     assert gone(int(pid.read_text()))
 
