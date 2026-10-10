@@ -121,7 +121,7 @@ def _check(request: Request) -> None:
     parts = urlsplit(origin)
     userinfo, at, _ = origin.partition("@")
     scp_secret = bool(at) and "/" not in userinfo and ":" in userinfo
-    if parts.password or (parts.username and parts.scheme == "https") or parts.query or scp_secret:
+    if parts.password or (parts.username and parts.scheme == "https") or parts.query or parts.fragment or scp_secret:
         raise WorkspaceError("origin carries a credential; supply it through a credential helper")
 
 
