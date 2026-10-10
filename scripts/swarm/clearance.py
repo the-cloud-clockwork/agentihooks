@@ -1,4 +1,4 @@
-"""The Swarm panel's controls on the command line: the operator, or the live master of that same swarm, and nobody else; freezes also admit the live dispatcher seat at full autonomy."""
+"""The Swarm panel's controls on the command line: the operator, or the live master of that same swarm, and nobody else."""
 
 import os
 
@@ -27,7 +27,6 @@ def _seated(store, slug, who, lane):
 
 
 def freezer(store, slug, who, environ=None):
-    """The freeze writer: the live dispatcher seat of this swarm at full autonomy, else the controls holder."""
     if not _seated(store, slug, who, DISPATCH):
         return holder(store, slug, who, environ)
     autonomy = store.config(slug).autonomy

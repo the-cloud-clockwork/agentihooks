@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from scripts.swarm import cli
+from scripts.swarm import cli, naming
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from tests.swarm.test_cli import env, run  # noqa: F401
@@ -71,7 +71,9 @@ def test_an_engineers_freeze_command_is_refused(swarm, monkeypatch, capsys):
     acting(monkeypatch, ENGINEER, "demo")
     assert cli.main(["demo", "freeze", "plans/a", "--quote", "freeze it"]) == 1
     assert ledger.freezes == []
-    assert "is neither" in capsys.readouterr().err
+    assert capsys.readouterr().err == (
+        f"swarm: only the operator or the master of swarm demo uses its swarm controls, and {ENGINEER} is neither\n"
+    )
 
 
 @pytest.mark.parametrize("verb", ["freeze", "focus", "unfreeze"])
@@ -101,12 +103,21 @@ def test_a_finished_dispatcher_is_refused(swarm, monkeypatch, capsys):
     store, ledger = swarm
     store.update("demo", autonomy="full")
     store.put_agent("demo", AgentRecord(DISPATCHER, "dispatch", "dispatcher", state="finished"))
+    assert [a.state for a in store.agents("demo") if a.name == DISPATCHER] == ["finished"]
     acting(monkeypatch, DISPATCHER, "demo")
     assert cli.main(["demo", "focus", "plans/a"]) == 1
     assert ledger.freezes == []
     assert capsys.readouterr().err == (
         f"swarm: only the operator or the master of swarm demo uses its swarm controls, and {DISPATCHER} is neither\n"
     )
+
+
+def test_the_dispatcher_pinned_by_its_swarm_name_writes_at_full_autonomy(swarm, monkeypatch):
+    store, ledger = swarm
+    store.update("demo", autonomy="full")
+    acting(monkeypatch, DISPATCHER, naming.swarm_name(store.ensure_code("demo").code))
+    assert cli.main(["demo", "focus", "plans/a"]) == 0
+    assert ledger.freezes == [("demo", "focus", "plans/a", {"by": "dispatcher", "reason": "", "quote": ""})]
 
 
 def test_the_dispatcher_of_another_swarm_is_refused(swarm, monkeypatch, capsys):
