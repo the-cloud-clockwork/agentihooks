@@ -17,6 +17,10 @@ LAUNCH = FIXTURES / "pod-launch.json"
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-KUB-01"
 EXECUTION = "exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0"
 ATTEMPT = f"/home/worker/attempts/{EXECUTION}"
+TOKEN_ENV = {
+    "name": "AH_CC_TOKEN_claude_fixtureatexample_com",
+    "valueFrom": {"secretKeyRef": {"name": "swarm-claude-creds", "key": "claude-fixtureatexample-com"}},
+}
 
 
 def policy_doc() -> dict:
@@ -70,7 +74,7 @@ def test_the_fixture_renders_a_pod_bound_to_its_launch_identity():
         "swarm.agentihooks.io/swarm": "rig-grade-swarm",
         "swarm.agentihooks.io/task": "vkub1",
         "swarm.agentihooks.io/template-version": "kub01-v2",
-        "swarm.agentihooks.io/provider-account": "claude-fixture",
+        "swarm.agentihooks.io/provider-account": "claude-fixtureatexample-com",
     }
     assert meta["annotations"] == {
         "swarm.agentihooks.io/seat": "eng-3@rig-grade-swarm",
@@ -98,16 +102,16 @@ def test_the_single_agent_container_runs_the_supervisor_from_the_admitted_image(
         ATTEMPT,
         "/var/run/swarm/launch/launch.json",
     ]
-    assert container["env"] == [{"name": "BRAIN_URL", "value": "http://brain-api.swarm-brain.svc:8080"}]
+    assert container["env"] == [TOKEN_ENV, {"name": "BRAIN_URL", "value": "http://brain-api.swarm-brain.svc:8080"}]
     assert "initContainers" not in rendered.pod["spec"]
     assert "ephemeralContainers" not in rendered.pod["spec"]
 
 
-def test_a_policy_without_a_brain_sets_no_environment():
+def test_a_policy_without_a_brain_sets_only_the_account_token():
     policy = load_policy(POLICY)
     del policy["brain_url"]
     _, rendered = render(policy=policy)
-    assert rendered.pod["spec"]["containers"][0]["env"] == []
+    assert rendered.pod["spec"]["containers"][0]["env"] == [TOKEN_ENV]
 
 
 def test_requests_come_from_the_admitted_launch_and_limits_from_the_profile():
@@ -186,27 +190,18 @@ def test_the_policy_runtime_class_reaches_the_pod():
     assert rendered.pod["spec"]["runtimeClassName"] == "kata-qemu"
 
 
-def test_volumes_are_private_scratch_the_launch_record_and_one_approved_credential():
+def test_volumes_are_private_scratch_and_the_launch_record_with_no_credential_mount():
     _, rendered = render()
     body = rendered.pod["spec"]
     assert body["volumes"] == [
         {"name": "home", "emptyDir": {"sizeLimit": "9216Mi"}},
         {"name": "tmp", "emptyDir": {"sizeLimit": "1024Mi"}},
         {"name": "launch", "configMap": {"name": f"swarm-{EXECUTION}-launch", "defaultMode": 0o444}},
-        {
-            "name": "credential",
-            "secret": {
-                "secretName": "swarm-account-claude-fixture",
-                "items": [{"key": "token", "path": "token"}],
-                "defaultMode": 0o400,
-            },
-        },
     ]
     assert body["containers"][0]["volumeMounts"] == [
         {"name": "home", "mountPath": "/home/worker"},
         {"name": "tmp", "mountPath": "/tmp"},
         {"name": "launch", "mountPath": "/var/run/swarm/launch", "readOnly": True},
-        {"name": "credential", "mountPath": "/var/run/swarm/credential", "readOnly": True},
     ]
 
 
@@ -327,25 +322,31 @@ REFUSALS = [
     ("bool cpu", lambda d: d.update(cpu_millis=True), "launch resources must be positive integers", "resources"),
     (
         "unapproved provider account",
-        lambda d: d.update(provider_account="cluster-admin-token"),
+        lambda d: d.update(provider_account="cluster-admin@token.io"),
         "launch provider_account is not an approved provider account",
         "account",
     ),
     (
-        "uppercase provider account",
-        lambda d: d.update(provider_account="Claude-fixture"),
+        "provider account without an at sign",
+        lambda d: d.update(provider_account="claude-fixture"),
         "launch provider_account is not a valid value",
         "identity",
     ),
     (
         "provider account ending in a dash",
-        lambda d: d.update(provider_account="claude-"),
+        lambda d: d.update(provider_account="claude-fixture@example.com-"),
+        "launch provider_account is not a valid value",
+        "identity",
+    ),
+    (
+        "provider account with a line break",
+        lambda d: d.update(provider_account="claude-fixture@example.com\n"),
         "launch provider_account is not a valid value",
         "identity",
     ),
     (
         "provider account past the label bound",
-        lambda d: d.update(provider_account="a" * 49),
+        lambda d: d.update(provider_account="a" * 58 + "@x.io"),
         "launch provider_account is not a valid value",
         "identity",
     ),
@@ -499,25 +500,51 @@ def test_identity_values_at_their_bounds_are_accepted():
     assert rendered.pod["metadata"]["annotations"]["swarm.agentihooks.io/project"] == "unknown"
 
 
-def test_a_provider_account_at_its_bound_labels_and_mounts_its_own_secret():
+def token_env(pod: dict) -> list:
+    return [entry for entry in pod["spec"]["containers"][0]["env"] if "valueFrom" in entry]
+
+
+def test_a_provider_account_at_its_bound_labels_and_reads_its_own_secret_key():
+    email = "a" * 57 + "@x.io"
     policy = load_policy(POLICY)
-    policy["provider_accounts"] = ["a" * 48]
+    policy["provider_accounts"] = [email]
     doc = launch_doc()
-    doc["provider_account"] = "a" * 48
+    doc["provider_account"] = email
     _, rendered = render(doc, policy)
-    assert rendered.pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == "a" * 48
-    assert rendered.pod["spec"]["volumes"][3]["secret"]["secretName"] == "swarm-account-" + "a" * 48
+    key = "a" * 57 + "atx-io"
+    assert len(key) == 63
+    assert rendered.pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == key
+    assert token_env(rendered.pod) == [
+        {
+            "name": "AH_CC_TOKEN_" + "a" * 57 + "atx_io",
+            "valueFrom": {"secretKeyRef": {"name": "swarm-claude-creds", "key": key}},
+        }
+    ]
+
+
+def test_an_upper_case_account_renders_the_same_pod_as_its_lower_case_form():
+    doc = launch_doc()
+    doc["provider_account"] = "CLAUDE-FIXTURE@EXAMPLE.COM"
+    assert render(doc)[1].pod == render()[1].pod
+    policy = load_policy(POLICY)
+    policy["provider_accounts"] = ["Claude-Fixture@Example.com"]
+    assert render(policy=policy)[1].pod == render()[1].pod
 
 
 def test_a_codex_launch_names_codex_in_its_probes_and_binds_its_own_provider_account():
     doc = launch_doc()
-    doc.update(harness="codex", provider_account="codex-fixture")
+    doc.update(harness="codex", provider_account="codex-fixture@example.com")
     _, rendered = render(doc)
     container = rendered.pod["spec"]["containers"][0]
     assert container["readinessProbe"]["exec"]["command"][5:7] == ["--harness", "codex"]
     assert rendered.pod["metadata"]["annotations"]["swarm.agentihooks.io/harness"] == "codex"
-    assert rendered.pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == "codex-fixture"
-    assert rendered.pod["spec"]["volumes"][3]["secret"]["secretName"] == "swarm-account-codex-fixture"
+    assert rendered.pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == "codex-fixtureatexample-com"
+    assert token_env(rendered.pod) == [
+        {
+            "name": "AH_CC_TOKEN_codex_fixtureatexample_com",
+            "valueFrom": {"secretKeyRef": {"name": "swarm-claude-creds", "key": "codex-fixtureatexample-com"}},
+        }
+    ]
 
 
 def test_a_probe_initial_delay_comes_from_the_policy():
@@ -550,13 +577,14 @@ POLICY_REFUSALS = [
     ),
     (
         "account name past the label bound",
-        lambda d: d.update(provider_accounts=["a" * 49]),
-        "pod policy is invalid at provider_accounts/0: '" + "a" * 49 + "' is too long",
+        lambda d: d.update(provider_accounts=["a" * 58 + "@x.io"]),
+        "pod policy is invalid at provider_accounts/0: '" + "a" * 58 + "@x.io' is too long",
     ),
     (
-        "account name ending in a dash",
-        lambda d: d.update(provider_accounts=["claude-"]),
-        "pod policy is invalid at provider_accounts/0: 'claude-' does not match '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'",
+        "account name without an at sign",
+        lambda d: d.update(provider_accounts=["claude-fixture"]),
+        "pod policy is invalid at provider_accounts/0: 'claude-fixture' does not match "
+        "'^[A-Za-z0-9]([A-Za-z0-9._+-]*[A-Za-z0-9])?@[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$'",
     ),
     (
         "unbounded grace",
@@ -651,7 +679,7 @@ def test_the_command_line_renders_the_pod_as_sorted_json(capsys):
 
 def test_the_command_line_refuses_a_hostile_launch_without_output(tmp_path, capsys):
     doc = launch_doc()
-    doc["provider_account"] = "cluster-admin-token"
+    doc["provider_account"] = "cluster-admin@token.io"
     assert spec.main(["render", "--policy", str(POLICY), "--launch", str(write(tmp_path, doc, "l.json"))]) == 1
     captured = capsys.readouterr()
     assert captured.out == ""
