@@ -1,0 +1,87 @@
+{
+  "package": "SV2-ACC-03",
+  "case": "T-SV2-ACC-03-B",
+  "title": "rejection and containment: missing quota data is labelled unknown rather than full capacity",
+  "tested_commit": "37077bcf8d769d611e63bbdb62df8d284371d6cd",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38054947948",
+  "fixture": "tests/fixtures/swarm_v2/quota-observations.json plus absent, failed, partial, aged and out-of-schema reports, a leak canary string and grants of another swarm",
+  "fixture_clock": "build() patches time.time to the fixture clock; QuotaObservations reads the same list; the aged case moves it to observed_ms plus 900001 ms",
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_quota.py::test_missing_or_failed_quota_data_is_unknown_never_full[None]",
+      "job": 114222011842,
+      "output": "PASSED at 2026-10-10T13:21:47.3633231Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_quota.py::test_missing_or_failed_quota_data_is_unknown_never_full[report1]",
+      "job": 114222011826,
+      "output": "PASSED at 2026-10-10T13:21:21.0768916Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_quota.py::test_missing_or_failed_quota_data_is_unknown_never_full[report2]",
+      "job": 114222011902,
+      "output": "PASSED at 2026-10-10T13:21:33.5607374Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_quota.py::test_missing_or_failed_quota_data_is_unknown_never_full[report3]",
+      "job": 114222011846,
+      "output": "PASSED at 2026-10-10T13:20:43.5678640Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_quota.py::test_missing_or_failed_quota_data_is_unknown_never_full[report4]",
+      "job": 114222011842,
+      "output": "PASSED at 2026-10-10T13:21:47.3953304Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_quota.py::test_an_aged_reading_is_unknown",
+      "job": 114222011902,
+      "output": "PASSED at 2026-10-10T13:21:33.4589515Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_quota.py::test_an_aged_fleet_observation_reaches_routing_as_unknown_never_full",
+      "job": 114222011794,
+      "output": "PASSED at 2026-10-10T13:21:10.8621916Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_quota.py::test_reports_outside_the_provider_schema_are_refused_without_writing_or_echoing",
+      "job": 114222011842,
+      "output": "all 21 parametrized cases PASSED; claude-report0 PASSED at 2026-10-10T13:21:47.3581732Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_quota.py::test_nothing_but_the_provider_windows_reaches_the_store",
+      "job": 114222011842,
+      "output": "PASSED at 2026-10-10T13:21:47.4993286Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_quota.py::test_a_report_without_a_grant_of_this_swarm_is_refused",
+      "job": 114222011826,
+      "output": "PASSED at 2026-10-10T13:21:21.1449395Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_quota.py::test_an_undecodable_record_hides_no_other_account",
+      "job": 114222011842,
+      "output": "PASSED at 2026-10-10T13:21:47.3504008Z"
+    }
+  ],
+  "rejections": {
+    "no_observation": "reading unknown, cap 0, admit waits",
+    "provider_status_error_or_missing_window": "reading unknown, cap 0, admit waits",
+    "observation_older_than_900_s": "reading unknown; fleet_observations passes empty windows so quota_policy never counts it as room",
+    "token_field_budget_fields_account_override_bad_types_out_of_range_future_time_missing_fields_unknown_harness": "invalid_request",
+    "empty_grant_refusing_authority_or_grant_of_another_swarm": "forbidden_scope"
+  },
+  "state_assertion": "every quota key under the swarm root is byte-equal before and after each refused report",
+  "disclosure_assertion": "refusals are the bare codes invalid_request and forbidden_scope; the leak canary and the launch token never appear in a refusal or in any stored quota key",
+  "budget_separation": "infrastructure_budget and operator_budget fields are refused; only provider windows are stored",
+  "recovery_isolation": "a corrected report needs a new publish with a valid grant of this swarm; no fallback reads the refused input",
+  "cleanup": "fakeredis per test; no live resource mutations",
+  "quota_observation_age_seconds": {
+    "absent": null,
+    "failed_at_240000_ms": 30.0,
+    "partial_or_failed_at_120000_ms": 150.0,
+    "aged": 900.001,
+    "dimension": "account fixture, harness claude; fixture clock 270000 ms except the aged case, whose clock is the stale full observation at 120000 ms plus 900001 ms (1020001 ms); the age is reported even when the reading is unknown"
+  },
+  "passed": true
+}

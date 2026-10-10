@@ -1,0 +1,42 @@
+{
+  "case": "T-SV2-LDG-03-C",
+  "independent_runs": 2,
+  "observed": {
+    "case": "T-SV2-LDG-03-C",
+    "evidence_class": "mocked Redis and server clock; SQLite fixture ledger; signed fixture grants",
+    "input_sha256": "d398bb2096487a5e0fe517c41511bc1e409b3e90578ca17c1bb24f17c8b92683",
+    "observed": {
+      "ledger_revision_conflicts_total": 0,
+      "replayed": [
+        200,
+        true
+      ],
+      "reused_operation_id": [
+        409,
+        "operation_conflict",
+        "new_request"
+      ],
+      "rollback": {
+        "read": 200,
+        "write": [
+          409,
+          "revision_conflict",
+          "new_request",
+          true
+        ]
+      },
+      "second_kept": [
+        200,
+        [
+          "Building the second slice"
+        ]
+      ],
+      "stale_attempt": [
+        409,
+        "stale_generation",
+        "new_request"
+      ]
+    },
+    "state": "passed"
+  }
+}
