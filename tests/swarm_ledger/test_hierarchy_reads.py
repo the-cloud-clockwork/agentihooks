@@ -7,6 +7,7 @@ import pytest
 from scripts.swarm_ledger import ledger
 from scripts.swarm_ledger.api import resources, routes
 from scripts.swarm_ledger.api.errors import APIError
+from scripts.swarm_ledger.repository import hierarchy
 from scripts.swarm_ledger.repository import sqlite as store
 
 SLUG = "hierarchy-reads"
@@ -112,9 +113,10 @@ def test_dependents_follow_the_requires_links_downstream(repo):
     assert repo.nodes(SLUG, "dependents", "tasks/t8") == []
 
 
-def test_an_unknown_node_is_refused(repo):
+@pytest.mark.parametrize("read", sorted(hierarchy.READS))
+def test_an_unknown_node_is_refused(repo, read):
     with pytest.raises(KeyError):
-        repo.nodes(SLUG, "subtree", "tasks/nope")
+        repo.nodes(SLUG, read, "tasks/nope")
 
 
 def test_cycles_in_parents_and_dependencies_end(tmp_path):
@@ -176,6 +178,23 @@ def test_the_hierarchy_resource_runs_each_read_on_a_node(repo):
     assert [row["node"] for row in reply["data"]] == ["tasks/t6", "tasks/t8"]
     reply = routes.ledger_read(server(repo), SLUG, "hierarchy/children/phases/p1", {})
     assert [row["node"] for row in reply["data"]] == ["slices/s1", "slices/s2", "tasks/t3"]
+
+
+def test_the_hierarchy_revision_follows_the_rows(repo):
+    whole = resources.hierarchy_read(repo, SLUG, "hierarchy")["revision"]
+    assert whole == resources.hierarchy_read(repo, SLUG, "hierarchy")["revision"]
+    assert whole != resources.hierarchy_read(repo, SLUG, "hierarchy/subtree/slices/s1")["revision"]
+
+
+def test_a_node_whose_item_left_the_document_reads_as_open():
+    class Drifted:
+        def nodes(self, slug, read, node=None):
+            return [{"node": "tasks/gone", "kind": "task", "parent": None, "depth": 0}]
+
+        def read(self, slug, *keys):
+            return {"tasks": []}
+
+    assert [row["state"] for row in resources.hierarchy_read(Drifted(), SLUG, "hierarchy")["data"]] == ["open"]
 
 
 @pytest.mark.parametrize(

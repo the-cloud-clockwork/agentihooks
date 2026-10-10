@@ -86,9 +86,9 @@ def rebuild(connection, slug: str, state: dict) -> dict:
     return drift(have, want)
 
 
-def ordering(alias: str) -> str:
-    kind = f"CASE {alias}.kind WHEN 'plan' THEN 0 WHEN 'phase' THEN 1 WHEN 'slice' THEN 2 ELSE 3 END"
-    return f"printf('%d.%09d', {kind}, {alias}.position)"
+ORDER = (
+    "printf('%d.%09d', CASE n.kind WHEN 'plan' THEN 0 WHEN 'phase' THEN 1 WHEN 'slice' THEN 2 ELSE 3 END, n.position)"
+)
 
 
 ROOT = (
@@ -100,14 +100,14 @@ LEVELS = 3
 CHAIN = 64
 CHILDREN = (
     f"SELECT n.node_id, n.kind, n.parent_id, :node IS NOT NULL FROM work_nodes n WHERE n.ledger_slug=:slug AND {ROOT} "
-    f"ORDER BY {ordering('n')}"
+    f"ORDER BY {ORDER}"
 )
 SUBTREE = f"""
 WITH RECURSIVE tree(node_id, kind, parent_id, depth, sort) AS (
-  SELECT n.node_id, n.kind, n.parent_id, 0, {ordering("n")} FROM work_nodes n
+  SELECT n.node_id, n.kind, n.parent_id, 0, {ORDER} FROM work_nodes n
   WHERE n.ledger_slug=:slug AND (n.node_id=:node OR (:node IS NULL AND {ROOT}))
   UNION ALL
-  SELECT n.node_id, n.kind, n.parent_id, tree.depth + 1, tree.sort || '/' || {ordering("n")}
+  SELECT n.node_id, n.kind, n.parent_id, tree.depth + 1, tree.sort || '/' || {ORDER}
   FROM work_nodes n JOIN tree ON n.ledger_slug=:slug AND n.parent_id=tree.node_id WHERE tree.depth < {LEVELS}
 )
 SELECT node_id, kind, parent_id, depth FROM tree ORDER BY sort
@@ -130,7 +130,7 @@ WITH RECURSIVE down(node_id, depth) AS (
 )
 SELECT n.node_id, n.kind, n.parent_id, MIN(down.depth) AS nearest
 FROM down JOIN work_nodes n ON n.ledger_slug=:slug AND n.node_id=down.node_id WHERE n.node_id != :node
-GROUP BY n.node_id ORDER BY nearest, {ordering("n")}
+GROUP BY n.node_id ORDER BY nearest, {ORDER}
 """
 READS = {"children": CHILDREN, "subtree": SUBTREE, "ancestors": ANCESTORS, "dependents": DEPENDENTS}
 NODE = "SELECT 1 FROM work_nodes WHERE ledger_slug=? AND node_id=?"
