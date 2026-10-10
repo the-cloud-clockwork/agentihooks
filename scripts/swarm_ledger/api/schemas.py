@@ -99,6 +99,8 @@ FIELDS = {
     "alert_claim": "by target",
     "alert_close": "by target outcome",
     "time_left": "by slots ci_minutes",
+    "freeze_set": "by verb target reason quote",
+    "freeze_clear": "by target reason quote",
 }
 TYPES = {
     "long": {"type": "boolean"},
@@ -215,4 +217,6 @@ def target(op: dict) -> str:
         "source_add": "sources",
         "plan_add": "plans",
         "slice_add": "slices",
+        "freeze_set": "freezes",
+        "freeze_clear": "freezes",
     }.get(kind, "metadata")

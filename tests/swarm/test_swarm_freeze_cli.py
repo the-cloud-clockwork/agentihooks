@@ -5,6 +5,7 @@ import pytest
 from scripts.swarm import cli
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_tick import FakeLedger
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
@@ -85,6 +86,7 @@ def test_an_engineers_freeze_command_is_refused(swarm, monkeypatch, capsys):
             },
         ),
         ("unfreeze", "dispatcher", {}, {"op": "freeze_clear", "target": "plans/a", "by": "dispatcher"}),
+        ("unfreeze", None, {"reason": "done"}, {"op": "freeze_clear", "target": "plans/a", "reason": "done"}),
     ],
 )
 def test_the_client_sends_one_freeze_op(monkeypatch, verb, by, fields, op):
@@ -95,3 +97,16 @@ def test_the_client_sends_one_freeze_op(monkeypatch, verb, by, fields, op):
     assert slug == "demo"
     assert written.pop("id").startswith(op["op"] + "-")
     assert written == op
+
+
+def test_status_lists_each_active_freeze(env, capsys):  # noqa: F811
+    _, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    state = ledger.state
+    ledger.state = lambda slug: {
+        **state(slug),
+        "freezes": [{"id": "f1", "verb": "freeze", "target": "lane:ci", "by": "operator", "at": 0, "reason": "hold"}],
+    }
+    capsys.readouterr()
+    run("sw", "status")
+    assert "freeze  lane:ci  by operator  at 1970-01-01T00:00Z  hold" in capsys.readouterr().out.splitlines()

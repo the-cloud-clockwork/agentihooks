@@ -5,7 +5,7 @@ import pytest
 from hooks.context import operator_words
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger import ledger_freezes, ledger_tasks, new_ledger
-from scripts.swarm_ledger.api import resources
+from scripts.swarm_ledger.api import resources, schemas
 from scripts.swarm_ledger.repository import rows
 from tests.swarm_ledger import legacy_page
 
@@ -86,6 +86,12 @@ def test_freezes_are_a_ledger_collection_with_verb_target_author_time_and_reason
     assert targets(state) == [("freeze", "plans/a"), ("focus", "plans/b")]
 
 
+def test_an_operator_quote_is_kept_on_the_record():
+    state, rejected = freeze("phases/p2", quote="hold ship")
+    assert rejected == []
+    assert state["freezes"][0]["quote"] == "hold ship"
+
+
 def test_setting_the_same_verb_on_the_same_target_twice_keeps_one_record():
     freeze("phases/p1")
     state, rejected = freeze("phases/p1")
@@ -126,15 +132,30 @@ def test_unfreezing_a_plan_clears_freezes_on_its_phases_slices_and_tasks():
     for target in ("plans/a", "phases/p1", "slices/a.first", "tasks/t1", "phases/p2", "tasks/t2", "lane:ci"):
         freeze(target)
     freeze("phases/p1", verb="focus")
-    state, rejected = write("freeze_clear", target="plans/a")
+    state, rejected = write("freeze_clear", target="plans/a", reason="hierarchy shipped")
     assert rejected == []
     assert targets(state) == [("freeze", "phases/p2"), ("freeze", "tasks/t2"), ("freeze", "lane:ci")]
     event = state["_meta"]["events"][-1]
-    assert (event["kind"], event["target"], event["cleared"]) == (
+    assert (event["kind"], event["target"], event["cleared"], event["reason"]) == (
         "unfrozen",
         "plans/a",
         ["plans/a", "phases/p1", "slices/a.first", "tasks/t1", "phases/p1"],
+        "hierarchy shipped",
     )
+
+
+def test_a_task_group_lead_holds_its_members_under_it():
+    doc = {
+        "phases": [{"id": "p1"}],
+        "tasks": [
+            {"id": "t1", "phase": "p1", "group_members": ["t3"]},
+            {"id": "t2", "phase": "p1"},
+            {"id": "t3", "phase": "p1", "merged_into": "t1"},
+        ],
+    }
+    assert ledger_freezes.under(doc, "tasks/t1") == {"tasks/t1", "tasks/t3"}
+    assert ledger_freezes.under(doc, "phases/p1") == {"phases/p1", "tasks/t1", "tasks/t2", "tasks/t3"}
+    assert ledger_freezes.under(doc, "tasks/t2") == {"tasks/t2"}
 
 
 def test_clearing_a_selector_removes_only_that_selector():
@@ -189,8 +210,18 @@ def test_lines_name_each_active_freeze_for_swarm_status():
     assert ledger_freezes.lines({}) == []
     freeze("plans/a", reason="Ship the hierarchy first")
     state, _ = freeze("lane:ci", verb="focus")
-    first, second = ledger_freezes.lines(state)
-    assert first.startswith("freeze  plans/a  by operator  at ")
-    assert first.endswith("  Ship the hierarchy first")
-    assert second.startswith("focus  lane:ci  by operator  at ")
-    assert second.endswith("Z")
+    for row, at in zip(state["freezes"], (0, 1791605100000)):
+        row["at"] = at
+    assert ledger_freezes.lines(state) == [
+        "freeze  plans/a  by operator  at 1970-01-01T00:00Z  Ship the hierarchy first",
+        "focus  lane:ci  by operator  at 2026-10-10T04:05Z",
+    ]
+
+
+def test_the_api_takes_freeze_ops_against_the_freezes_collection():
+    ops = [
+        {"op": "freeze_set", "id": "f1", "verb": "focus", "target": "plans/a", "reason": "r", "quote": "q"},
+        {"op": "freeze_clear", "id": "f2", "by": MASTER, "target": "plans/a", "quote": "q"},
+    ]
+    assert schemas.check_operations({"operation_id": "o1", "ops": ops, "guards": {}}, core, ()) == ops
+    assert [schemas.target(op) for op in ops] == ["freezes", "freezes"]

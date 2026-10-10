@@ -13,7 +13,7 @@ def apply(slug, state, core, changes=None, ops=None, gate=None, created=False):
 
     doc, meta = state, state.pop("_meta")
 
-    ctx = core.Context(meta, core.now_ms())
+    ctx = core.Context(meta, core.now_ms(), slug)
     meta.setdefault("members", {})
     meta["created_at"] = core.earliest(meta, ctx.at)
     rejected = core.apply_changes(doc, changes or [], ctx)

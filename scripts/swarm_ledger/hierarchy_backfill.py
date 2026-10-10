@@ -188,7 +188,7 @@ def commit(repo: store.SQLiteLedgerRepository, slug: str, by: str) -> dict:
         report["repaired"] = hierarchy.drift(hierarchy.stored(connection, slug), hierarchy.project(after))
         if after != entry.state or report["repaired"]["drift"]:
             meta = after["_meta"]
-            ctx = repo.domain.Context(meta, repo.domain.now_ms())
+            ctx = repo.domain.Context(meta, repo.domain.now_ms(), slug)
             ctx.record(by, "backfilled", "hierarchy")
             meta.update(rev=ctx.rev, updated_at=ctx.at)
             meta["events"] = (meta["events"] + ctx.events)[-repo.domain.EVENTS_KEPT :]

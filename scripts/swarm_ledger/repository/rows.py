@@ -16,6 +16,7 @@ COLLECTIONS = frozenset(
         "alerts",
         "plans",
         "slices",
+        "freezes",
     )
 )
 
