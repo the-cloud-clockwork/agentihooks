@@ -196,5 +196,6 @@ def record(box: metrics_outbox.Outbox, slug: str, now_ms: int, ledger: LedgerCli
         connection.execute(SAVE_CHECKPOINT, (slug, doc["_meta"]["rev"], snapshot))
 
     box.append_many(batches, checkpoint)
-    if any(event["rev"] > doc["_meta"].get("events_ack", -1) for event in events):
+    acknowledged = doc["_meta"].get("events_ack")
+    if any(acknowledged is None or event["rev"] > acknowledged for event in events):
         ledger.ack_events(slug, doc["_meta"]["rev"])

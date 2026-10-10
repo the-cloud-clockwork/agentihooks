@@ -4,7 +4,6 @@ import json
 from .rows import changes, encode
 
 LAST = "SELECT MAX(position) FROM events WHERE slug=?"
-COUNT = "SELECT COUNT(*) FROM events WHERE slug=?"
 APPEND = "INSERT INTO events VALUES (?, ?, ?, ?, ?)"
 TRIM = (
     "DELETE FROM events WHERE slug=? AND position NOT IN "
@@ -62,14 +61,13 @@ def append_events(connection, slug: str, events: list, kept: int) -> None:
 
 
 def trim_events(connection, slug: str, kept: int) -> None:
-    if connection.execute(COUNT, (slug,)).fetchone()[0] > kept:
-        connection.execute(TRIM, (slug, slug, kept))
+    connection.execute(TRIM, (slug, slug, kept))
 
 
 def retained(events: list, ack: int | None, kept: int, ceiling: int) -> int:
     """Index of the oldest event to keep: the newest `kept`, every one after `ack`, never more than `ceiling`."""
     start = max(0, len(events) - kept)
     if ack is not None:
-        while start and events[start - 1].get("rev", 0) > ack:
+        while start and events[start - 1]["rev"] > ack:
             start -= 1
     return max(start, len(events) - ceiling)

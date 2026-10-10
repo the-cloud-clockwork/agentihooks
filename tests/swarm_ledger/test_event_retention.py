@@ -1,3 +1,7 @@
+import sqlite3
+from contextlib import closing
+from types import SimpleNamespace
+
 import pytest
 
 from scripts.swarm import metrics_ledger, metrics_outbox
@@ -109,14 +113,38 @@ def test_an_acknowledgement_never_passes_the_head_revision(repo):
 
 
 @pytest.mark.parametrize(
-    "operation",
-    [ack(1, by="eng"), ack(-1), ack(True), {"op": "events_ack", "id": "a", "by": "swarm"}],
+    ("operation", "message"),
+    [
+        (ack(1, by="eng"), "events_ack is the swarm's"),
+        (ack(-1), "events_ack rev is invalid"),
+        (ack(True), "events_ack rev is invalid"),
+        ({"op": "events_ack", "id": "a", "by": "swarm"}, "events_ack is the swarm's"),
+    ],
 )
-def test_only_the_swarm_acknowledges_a_nonnegative_revision(repo, operation):
+def test_only_the_swarm_acknowledges_a_nonnegative_revision(repo, operation, message):
     with pytest.raises(ValueError):
         repo.domain.check_body({"ops": [operation]})
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as raised:
         ledger_events_ack.check(operation)
+    assert str(raised.value) == message
+    ledger_events_ack.check(ack(0))
+
+
+@pytest.mark.parametrize(
+    ("meta", "revision", "after", "dirty"),
+    [({"rev": 5}, 0, 0, True), ({"rev": 5, "events_ack": 3}, 3, 3, False), ({"rev": 5, "events_ack": 3}, 4, 4, True)],
+)
+def test_an_acknowledgement_marks_the_ledger_dirty_only_when_it_advances(meta, revision, after, dirty):
+    ctx = SimpleNamespace(meta=meta, dirty=False)
+    assert ledger_events_ack.apply({}, ack(revision), ctx) is True
+    assert (ctx.meta["events_ack"], ctx.dirty) == (after, dirty)
+
+
+def test_a_trim_drops_stored_rows_past_the_kept_count(path, repo):
+    write(repo, 1, 2)
+    with closing(sqlite3.connect(path)) as connection:
+        events.trim_events(connection, "ledger", 1)
+        assert connection.execute("SELECT COUNT(*) FROM events WHERE slug='ledger'").fetchone()[0] == 1
 
 
 def test_retained_drops_only_a_prefix_bounded_by_the_ceiling():
@@ -150,16 +178,40 @@ def test_the_client_acknowledges_through_the_swarm_op(monkeypatch):
 class Client:
     def __init__(self, repo):
         self.repo = repo
+        self.acks = []
 
     def state(self, slug):
         return self.repo.get_document(slug)
 
     def ack_events(self, slug, revision):
+        self.acks.append(revision)
         acknowledge(self.repo, revision)
 
 
 def gaps(box):
     return [row for row in box.recent("ledger_events", NOW + 10_000) if row["kind"] == "history gap"]
+
+
+def test_a_trim_marker_at_the_cursor_is_no_gap():
+    assert metrics_ledger.event_rows("ledger", [], {}, 4, NOW, 4) == []
+    [gap] = metrics_ledger.event_rows("ledger", [], {}, 4, NOW, 5)
+    assert (gap["first_missed"], gap["last_missed"]) == (5, 5)
+
+
+def test_the_metrics_pass_acknowledges_only_events_past_the_acknowledgement(repo, tmp_path):
+    box = metrics_outbox.Outbox(tmp_path / "outbox.sqlite", metrics_outbox.Settings("http://sink", "", ""))
+    client = Client(repo)
+    try:
+        state, _ = write(repo, 1)
+        metrics_ledger.record(box, "ledger", NOW, client)
+        assert client.acks == [state["_meta"]["rev"]]
+        metrics_ledger.record(box, "ledger", NOW + 1, client)
+        assert client.acks == [state["_meta"]["rev"]]
+        state, _ = write(repo, 2)
+        metrics_ledger.record(box, "ledger", NOW + 2, client)
+        assert client.acks[-1] == state["_meta"]["rev"] and len(client.acks) == 2
+    finally:
+        box.close()
 
 
 def test_the_metrics_pass_acknowledges_and_only_the_ceiling_trim_yields_a_gap(repo, tmp_path):
