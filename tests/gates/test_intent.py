@@ -351,9 +351,14 @@ class TestState:
 
     @pytest.mark.parametrize(
         "body,expected,draft",
-        [(None, "", {}), ("Closes 4", "Closes 4", {"isDraft": False}), ("Closes 4", "Closes 4", {"isDraft": True})],
+        [
+            (None, "", {}),
+            ("Closes 4", "Closes 4", {"isDraft": False, "state": "OPEN"}),
+            ("Closes 4", "Closes 4", {"isDraft": True}),
+            ("Closes 4", "Closes 4", {"state": "MERGED"}),
+        ],
     )
-    def test_pr_view_reads_title_body_file_paths_and_draft(self, body, expected, draft):
+    def test_pr_view_reads_title_body_file_paths_draft_and_merged(self, body, expected, draft):
         raw = {"title": "T", "body": body, "files": [{"path": "a.py", "additions": 1}, {"path": "b.py"}], **draft}
         ran = Ran((0, "abc123\n"), (0, json.dumps(raw)), (0, ""), (0, "abc123\n"))
         assert intent.pr_view(URL, run=ran) == {
@@ -362,10 +367,11 @@ class TestState:
             "body": expected,
             "files": ["a.py", "b.py"],
             "draft": draft.get("isDraft", False),
+            "merged": draft.get("state") == "MERGED",
             "reviewer_findings": {"reviews": [], "comments": [], "inline": []},
         }
         args, kwargs = ran.calls[1]
-        assert args == ["gh", "pr", "view", URL, "--json", "title,body,files,reviews,comments,isDraft"]
+        assert args == ["gh", "pr", "view", URL, "--json", "title,body,files,reviews,comments,isDraft,state"]
         assert (kwargs["capture_output"], kwargs["text"], kwargs["timeout"]) == (True, True, intent.GH_TIMEOUT_SEC)
 
     @pytest.mark.parametrize("results", [[(1, "")], [(0, "nope")], [OSError("x")], [(0, json.dumps({"body": "b"}))]])

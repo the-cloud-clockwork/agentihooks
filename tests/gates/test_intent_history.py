@@ -156,7 +156,7 @@ def test_pull_request_findings_include_original_reviews_and_inline_comments():
         "comments": [discussion],
         "inline": [inline, {**inline, "line": 9}],
     }
-    assert calls[0][-1] == "title,body,files,reviews,comments,isDraft"
+    assert calls[0][-1] == "title,body,files,reviews,comments,isDraft,state"
     assert calls[1] == ["gh", "api", "--paginate", "--jq", ".[] | @json", "repos/o/r/pulls/1/comments"]
 
 

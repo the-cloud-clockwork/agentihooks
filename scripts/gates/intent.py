@@ -32,6 +32,8 @@ GH_TIMEOUT_SEC = 20
 PROOF_CHARS = 4000
 FAIL_COMMENT = "The intent check failed. The engineer has the verdict and the fix steps in the inbox."
 SHORTFALL_COMMENT = "Intent remains unmet after two fix rounds. The master must review this shortfall in the gate log."
+MERGED_COMMENT = "Intent remains unmet on a merged pull request. The master must review this shortfall in the gate log."
+DRAFT = "draft pull request, judged once ready for review"
 START, END = "<!-- agentihooks intent -->", "<!-- /agentihooks intent -->"
 MERGE_QUEUE = ["merge", "queue"]
 PULL = re.compile(r"github\.com/([^/]+)/([^/]+)/pull/(\d+)")
@@ -153,7 +155,7 @@ def pr_view(url, run=subprocess.run):
     if not before:
         return None
     try:
-        done = _gh(["gh", "pr", "view", url, "--json", "title,body,files,reviews,comments,isDraft"], run)
+        done = _gh(["gh", "pr", "view", url, "--json", "title,body,files,reviews,comments,isDraft,state"], run)
         raw = json.loads(done.stdout) if done.returncode == 0 else None
         if raw is None:
             return None
@@ -174,6 +176,7 @@ def pr_view(url, run=subprocess.run):
             "body": body,
             "files": files,
             "draft": bool(raw.get("isDraft")),
+            "merged": raw.get("state") == "MERGED",
             **diff,
             "reviewer_findings": {
                 "reviews": raw.get("reviews", []),
@@ -404,14 +407,10 @@ def plan_check(slug, doc, task_id, traced, mode, now_ms, home=None):
     return {"verdict": verdict, "reason": reason}
 
 
-def _inputs(doc, task):
+def _fingerprint(doc, task):
     phase = _phase(doc, task)
     judged = [task.get("title"), task.get("description"), phase.get("title"), phase.get("description")]
     return hashlib.sha256(json.dumps([*judged, _plan_chunk(doc, task)]).encode()).hexdigest()
-
-
-def _same_inputs(previous, inputs):
-    return previous.get("inputs", inputs) == inputs
 
 
 @dataclass(frozen=True)
@@ -462,7 +461,7 @@ class Check:
         return actions
 
     def _judge(self, doc, task):
-        inputs = _inputs(doc, task) if self.mode == "coach" else None
+        inputs = _fingerprint(doc, task) if self.mode == "coach" else None
         previous = self._unmoved(task, inputs)
         if previous:
             return _Judgment(None, previous, None, None)
@@ -473,7 +472,7 @@ class Check:
             return _Judgment(pr, None, None, None)
         previous = self._coaching().read(task["id"]) if self.mode == "coach" else None
         previous = previous if previous and _same_phase(previous, task) else None
-        if previous and previous["head"] == pr.get("head") and _same_inputs(previous, inputs):
+        if previous and previous["head"] == pr.get("head") and previous.get("inputs") == inputs:
             return _Judgment(pr, previous, None, None)
         state = intent_history.prepare(state_of(doc, task, pr))
         if state.get("task_part") == "tests-first":
@@ -483,7 +482,7 @@ class Check:
     def _check(self, task, judgment, verdicts):
         previous, pr = judgment.previous, judgment.pr
         if judgment.state is None and previous is None:
-            verdicts.write(task["id"], PENDING, RUNNING, self.now_ms, phase=task.get("phase"))
+            verdicts.write(task["id"], PENDING, DRAFT, self.now_ms, phase=task.get("phase"))
             return []
         if judgment.state is None:
             self._keep(task, previous, verdicts)
@@ -507,7 +506,7 @@ class Check:
         if verdict == UNCHECKED:
             log.append(self.slug, log.Row.of(NAME, "count", who, reason=reason), self.home)
         elif verdict == FAIL:
-            actions += self._failed(task, who, reason, rounds)
+            actions += self._failed(task, who, reason, rounds, pr.get("merged"))
         elif self.mode == "coach" and task.get("state") == "claimed":
             self.ledger.update_task(self.slug, task["id"], {"state": "pr"})
         return actions
@@ -523,7 +522,7 @@ class Check:
             not previous
             or not previous.get("head")
             or not _same_phase(previous, task)
-            or not _same_inputs(previous, inputs)
+            or previous.get("inputs") != inputs
             or previous["head"] != self.head(task["pr_url"])
         ):
             return None
@@ -541,15 +540,17 @@ class Check:
             phase=task.get("phase"),
         )
 
-    def _failed(self, task, who, reason, rounds=0):
+    def _failed(self, task, who, reason, rounds=0, merged=False):
         log.append(self.slug, log.Row.of(NAME, _fail_kind(self.mode), who, reason=reason), self.home)
-        if self.mode == "coach" and rounds >= 2:
-            text = f"Intent remains unmet after two fix rounds: {reason}. The master must review this shortfall."
+        if self.mode == "coach" and (rounds >= 2 or merged):
+            unmet = "on a merged pull request" if merged else "after two fix rounds"
+            text = f"Intent remains unmet {unmet}: {reason}. The master must review this shortfall."
             key, ref = f"intent-shortfall:{task['id']}:{self.now_ms}", f"tasks/{task['id']}"
             told = self.mail.send(key, self.mail.master, text, ref=ref)
             if task.get("state") == "claimed":
                 self.ledger.update_task(self.slug, task["id"], {"state": "pr"})
-            self.ledger.comment(self.slug, task["id"], SHORTFALL_COMMENT, by="swarm")
+            comment = MERGED_COMMENT if merged else SHORTFALL_COMMENT
+            self.ledger.comment(self.slug, task["id"], comment, by="swarm")
             return told
         if self.mode not in ("enforce", "coach"):
             return []
@@ -594,9 +595,11 @@ class IntentGate:
                 state.write(who.task, PENDING, RUNNING, int(self.clock() * 1000))
                 return Decision.deny("Intent must be checked on the new head. Wait for the tick to rerun the check.")
         if verdict == FAIL:
-            if mode == "coach" and record.get("coach_rounds", 0) >= 2:
-                outcome = "merged" if pr_merged(record["url"]) else "merge permitted"
-                reason = f"{outcome} with intent unmet after two fix rounds: {record['reason']}"
+            merged = mode == "coach" and bool(record.get("url")) and pr_merged(record["url"])
+            if mode == "coach" and (record.get("coach_rounds", 0) >= 2 or merged):
+                outcome = "merged" if merged else "merge permitted"
+                unmet = "after two fix rounds" if record.get("coach_rounds", 0) >= 2 else "on a merged pull request"
+                reason = f"{outcome} with intent unmet {unmet}: {record['reason']}"
                 log.append(state.slug, log.Row.of(NAME, "count", who, call.tool, reason), state.home)
                 return Decision()
             text = f"intent check failed for task {who.task}: {record['reason']}. {fix_steps(who.swarm)}"
@@ -605,6 +608,8 @@ class IntentGate:
             return Decision.deny(text)
         if verdict != PENDING:
             return Decision()
+        if record["reason"] == DRAFT:
+            return Decision.deny(f"intent for task {who.task} is judged once its pull request is ready for review")
         waited = int(self.clock() * 1000) - record["at"]
         if waited < GRACE_MS:
             return Decision.deny(
