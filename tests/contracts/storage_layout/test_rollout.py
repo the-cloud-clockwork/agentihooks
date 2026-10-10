@@ -113,6 +113,8 @@ def test_the_benchmark_command_prints_its_report(tmp_path, capsys):
     assert out == json.dumps(report, indent=2) + "\n"
     assert [(row["size_mib"], row["rounds"]) for row in report["throughput"]] == [(1, 3)]
     assert report["loss"]["after_restore"] == "published"
+    assert benchmark.main([str(tmp_path), "--sizes", "1", "--rounds", "2"]) == 0
+    assert json.loads(capsys.readouterr().out)["throughput"][0]["rounds"] == 2
 
 
 def test_the_benchmark_command_refuses_a_missing_folder_and_bad_sizes(tmp_path, capsys):
