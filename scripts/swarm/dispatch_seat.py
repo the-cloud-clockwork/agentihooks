@@ -95,7 +95,11 @@ def run(slug: str, config, store, runtime, doc: dict, now_ms: int, sleeping: boo
         store.redis.srem(store.key(slug, LEFT), *closed)
     if config.state == PAUSED or all(trigger["id"] in held for trigger in found):
         return []
-    if refused := seat_spawn.no_slot(config, runtime, SEAT) or seat_spawn.host_hold(slug, store, now_ms, SEAT):
+    if refused := (
+        seat_spawn.placed_elsewhere(runtime, LANE, {})
+        or seat_spawn.no_slot(config, runtime, SEAT)
+        or seat_spawn.host_hold(slug, store, now_ms, SEAT)
+    ):
         return [refused]
     return _spawn(slug, config, store, runtime, found, now_ms)
 
