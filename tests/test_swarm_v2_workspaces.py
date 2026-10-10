@@ -1,6 +1,7 @@
 import hashlib
 import os
 import re
+import shutil
 import stat
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
@@ -380,12 +381,90 @@ def test_a_branch_name_held_by_the_mirror_is_not_reused(world):
     assert workspaces.prepare(world.execution, world.request()).branch == "engineer-abc123-0007-2"
 
 
-def test_a_worktree_that_git_refuses_is_reported_and_not_recorded(world, monkeypatch):
-    monkeypatch.setattr(workspaces, "_branch", lambda *_: "dev")
+def test_a_worktree_that_git_refuses_is_reported_and_not_created(world, monkeypatch):
+    monkeypatch.setattr(workspaces, "_branch", lambda *_: "bad..name")
     with pytest.raises(workspaces.WorkspaceError) as refused:
         workspaces.prepare(world.execution, world.request())
-    assert str(refused.value) == "worktree dev could not be created"
-    assert workspaces.recorded(world.execution, "t1") is None
+    assert str(refused.value) == "worktree bad..name could not be created"
+    assert not (world.execution.path("worktree") / "bad..name").exists()
+    assert workspaces.recorded(world.execution, "t1")["workspace_prepare_seconds"] == 0.0
+
+
+@pytest.mark.parametrize(
+    "origin",
+    ["https://user:pass@github.com/o/r", "https://token@github.com/o/r", "ssh://git:pass@host.example/o/r"],
+)
+def test_an_origin_carrying_a_credential_is_refused_before_any_git_io(world, origin):
+    with pytest.raises(workspaces.WorkspaceError) as refused:
+        workspaces.prepare(world.execution, replace(world.request(), origin=origin))
+    assert str(refused.value) == "origin carries a credential; supply it through a credential helper"
+    assert [p.name for p in world.execution.path("checkout").iterdir()] == []
+
+
+def test_an_ssh_user_without_a_password_is_not_a_credential(world):
+    with pytest.raises(workspaces.WorkspaceError) as refused:
+        workspaces.prepare(world.execution, replace(world.request(), origin="ssh://git@host.invalid/o/r"))
+    assert str(refused.value) == "clone of host.invalid/o/r failed"
+
+
+def test_an_inherited_git_dir_does_not_redirect_preparation(world, monkeypatch):
+    monkeypatch.setenv("GIT_DIR", str(world.other))
+    monkeypatch.setenv("GIT_WORK_TREE", str(world.other_work))
+    prepared = workspaces.prepare(world.execution, world.request())
+    assert prepared.base_commit == world.head()
+    assert workspaces.identity(git("config", "remote.origin.url", cwd=prepared.mirror)) == world.project
+
+
+def test_a_plain_folder_inside_a_matching_repository_is_not_reused(world):
+    git("init", "-q", str(world.root))
+    git("config", "remote.origin.url", world.url, cwd=world.root)
+    mirror = workspaces.mirror_path(world.execution, world.project)
+    mirror.mkdir()
+    with pytest.raises(workspaces.WorkspaceError) as refused:
+        workspaces.prepare(world.execution, world.request())
+    assert (
+        str(refused.value) == f"cached mirror {mirror.name} has origin unknown, not {world.project}; it is not reused"
+    )
+
+
+def test_a_replay_restores_a_removed_worktree_at_its_branch_tip(world):
+    first = workspaces.prepare(world.execution, world.request())
+    tip = commit(first.path, "work")
+    shutil.rmtree(first.path)
+    replayed = workspaces.prepare(world.execution, world.request())
+    assert replayed == first
+    assert git("rev-parse", "HEAD", cwd=replayed.path) == tip
+
+
+def test_an_interrupted_preparation_resumes_its_recorded_worktree(world, monkeypatch):
+    real = workspaces._materialize
+
+    def killed(_):
+        raise RuntimeError("killed before the worktree was added")
+
+    monkeypatch.setattr(workspaces, "_materialize", killed)
+    with pytest.raises(RuntimeError):
+        workspaces.prepare(world.execution, world.request())
+    monkeypatch.setattr(workspaces, "_materialize", real)
+    resumed = workspaces.prepare(world.execution, world.request())
+    assert resumed.branch == "engineer-abc123-0007"
+    assert [p.name for p in world.execution.path("worktree").iterdir()] == [resumed.branch]
+    assert git("rev-parse", "HEAD", cwd=resumed.path) == world.head()
+
+
+def test_a_replay_whose_mirror_is_gone_is_refused(world):
+    first = workspaces.prepare(world.execution, world.request())
+    shutil.rmtree(first.path)
+    shutil.rmtree(first.mirror)
+    with pytest.raises(workspaces.WorkspaceError) as refused:
+        workspaces.prepare(world.execution, world.request())
+    assert str(refused.value) == "task t1 generation 1 lost its mirror"
+
+
+def test_the_record_is_replaced_whole(world):
+    workspaces.prepare(world.execution, world.request())
+    folder = world.execution.path("spool") / "workspaces"
+    assert sorted(p.name for p in folder.iterdir()) == ["t1.json"]
 
 
 def test_the_record_folder_is_private(world):

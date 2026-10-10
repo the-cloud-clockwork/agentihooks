@@ -10,7 +10,7 @@ import time
 import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -23,6 +23,7 @@ BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 LOCK = ".prepare.lock"
 GIT_TIMEOUT = 600
 TRACKING = "+refs/heads/*:refs/remotes/origin/*"
+GIT_SCOPE = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY")
 
 
 class WorkspaceError(ValueError):
@@ -83,14 +84,15 @@ def recorded(execution: Execution, task: str) -> dict | None:
     return json.loads(path.read_text()) if path.is_file() else None
 
 
-def _git(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
+def _git(*args: str, repo: Path | None = None) -> subprocess.CompletedProcess:
+    scope = ["--git-dir", str(repo)] if repo else []
+    environ = {key: value for key, value in os.environ.items() if key not in GIT_SCOPE}
     return subprocess.run(
-        ["git", *args],
-        cwd=cwd,
+        ["git", *scope, *args],
         capture_output=True,
         text=True,
         timeout=GIT_TIMEOUT,
-        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        env={**environ, "GIT_TERMINAL_PROMPT": "0"},
     )
 
 
@@ -108,6 +110,9 @@ def _check(request: Request) -> None:
         raise WorkspaceError(f"invalid generation: {request.generation}")
     if not BRANCH.fullmatch(request.base):
         raise WorkspaceError(f"invalid base branch: {request.base}")
+    parts = urlsplit(request.origin.strip())
+    if parts.password or (parts.username and parts.scheme in {"http", "https"}):
+        raise WorkspaceError("origin carries a credential; supply it through a credential helper")
 
 
 def _replay(execution: Execution, request: Request, project: str) -> Workspace | None:
@@ -123,7 +128,7 @@ def _replay(execution: Execution, request: Request, project: str) -> Workspace |
 
 
 def _verify(mirror: Path, project: str) -> None:
-    found = _git("config", "remote.origin.url", cwd=mirror)
+    found = _git("config", "remote.origin.url", repo=mirror)
     try:
         origin = identity(found.stdout) if found.returncode == 0 else "unknown"
     except WorkspaceError:
@@ -141,22 +146,22 @@ def _clone(url: str, mirror: Path, project: str) -> None:
 
 
 def _fetch(mirror: Path, project: str) -> None:
-    if _git("fetch", "--atomic", "--prune", "origin", TRACKING, cwd=mirror).returncode:
+    if _git("fetch", "--atomic", "--prune", "origin", TRACKING, repo=mirror).returncode:
         raise WorkspaceError(f"fetch of {project} failed; the cached base is unverified, so work does not start")
 
 
 def _base(mirror: Path, request: Request, project: str) -> str:
-    found = _git("rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{request.base}^{{commit}}", cwd=mirror)
+    found = _git("rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{request.base}^{{commit}}", repo=mirror)
     if found.returncode:
         raise WorkspaceError(f"base {request.base} is missing from {project}")
     commit = found.stdout.strip()
-    if request.minimum and _git("merge-base", "--is-ancestor", request.minimum, commit, cwd=mirror).returncode:
+    if request.minimum and _git("merge-base", "--is-ancestor", request.minimum, commit, repo=mirror).returncode:
         raise WorkspaceError(f"base {request.base} at {commit} does not contain {request.minimum}; it is stale")
     return commit
 
 
 def _branch(execution: Execution, mirror: Path, agent: str) -> str:
-    heads = _git("for-each-ref", "--format=%(refname:short)", "refs/heads", cwd=mirror).stdout.split()
+    heads = _git("for-each-ref", "--format=%(refname:short)", "refs/heads", repo=mirror).stdout.split()
     taken = {path.name for path in execution.path("worktree").iterdir()} | set(heads)
     return naming.worktree({"AGENTIHOOKS_AGENT_NAME": agent}, taken)
 
@@ -171,6 +176,29 @@ def _mirror(execution: Execution, request: Request, project: str, reuse: bool) -
     return mirror
 
 
+def _save(execution: Execution, workspace: Workspace) -> None:
+    record = _record_path(execution, workspace.task)
+    record.parent.mkdir(mode=0o700, exist_ok=True)
+    staging = record.with_suffix(".partial")
+    staging.write_text(json.dumps({**asdict(workspace), "path": str(workspace.path), "mirror": str(workspace.mirror)}))
+    staging.replace(record)
+
+
+def _materialize(workspace: Workspace) -> None:
+    if workspace.path.is_dir():
+        return
+    if not workspace.mirror.is_dir():
+        raise WorkspaceError(f"task {workspace.task} generation {workspace.generation} lost its mirror")
+    _git("worktree", "prune", repo=workspace.mirror)
+    held = _git("rev-parse", "--verify", "--quiet", f"refs/heads/{workspace.branch}", repo=workspace.mirror)
+    if held.returncode == 0:
+        target = [str(workspace.path), workspace.branch]
+    else:
+        target = ["-b", workspace.branch, str(workspace.path), workspace.base_commit]
+    if _git("worktree", "add", *target, repo=workspace.mirror).returncode:
+        raise WorkspaceError(f"worktree {workspace.branch} could not be created")
+
+
 def prepare(
     execution: Execution, request: Request, *, reuse: bool = True, clock: Callable[[], float] = time.monotonic
 ) -> Workspace:
@@ -178,19 +206,17 @@ def prepare(
     _check(request)
     project = identity(request.origin)
     with _locked(execution):
-        replayed = _replay(execution, request, project)
-        if replayed is not None:
-            return replayed
+        held = _replay(execution, request, project)
+        if held is not None:
+            _materialize(held)
+            return held
         mirror = _mirror(execution, request, project, reuse)
         commit = _base(mirror, request, project)
         branch = _branch(execution, mirror, request.agent)
         path = execution.path("worktree") / branch
-        if _git("worktree", "add", "-b", branch, str(path), commit, cwd=mirror).returncode:
-            raise WorkspaceError(f"worktree {branch} could not be created")
-        workspace = Workspace(
-            path, branch, mirror, project, request.base, commit, request.task, request.generation, clock() - started
-        )
-        record = _record_path(execution, request.task)
-        record.parent.mkdir(mode=0o700, exist_ok=True)
-        record.write_text(json.dumps({**asdict(workspace), "path": str(path), "mirror": str(mirror)}))
+        planned = Workspace(path, branch, mirror, project, request.base, commit, request.task, request.generation, 0.0)
+        _save(execution, planned)
+        _materialize(planned)
+        workspace = replace(planned, workspace_prepare_seconds=clock() - started)
+        _save(execution, workspace)
         return workspace
