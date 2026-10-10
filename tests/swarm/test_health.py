@@ -154,6 +154,15 @@ def test_a_dispatcher_seat_is_credited_with_each_priority_it_settles_with_a_deci
     assert run({"tasks": [], "_meta": {"events": events}}) == []
 
 
+def test_the_dispatcher_seat_that_settled_twenty_four_priorities_no_longer_trips_ceremony():
+    events = [ev("joined", by=DISPATCHER), *settled(DISPATCHER)]
+    events += [ev("comment added", f"tasks/t{n}", by=DISPATCHER) for n in range(2)]
+    events += [cleared(DISPATCHER, n) for n in range(5)] + [ev("left", by=DISPATCHER)]
+    moves = [e for e in events if e["kind"] not in health.NOT_TRANSITIONS]
+    assert (len(moves), health._decided(events)[DISPATCHER]) == (55, 24)
+    assert run({"tasks": [], "_meta": {"events": events}}) == []
+
+
 def test_an_engineer_seat_with_the_same_settles_is_still_ceremony():
     events = settled(ENGINEER) + [cleared(ENGINEER, n) for n in range(5)]
     assert [(f["subject"], f["evidence"]) for f in run({"tasks": [], "_meta": {"events": events}})] == [
