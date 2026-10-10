@@ -67,7 +67,7 @@ class WorkerControl:
         self, transport: CommandTransport, state_path: Path, handlers: Mapping[str, Callable[[dict], dict]]
     ) -> None:
         self.transport, self.path, self.handlers = transport, state_path, handlers
-        self.records = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
+        self.records = json.loads(state_path.read_bytes()) if state_path.exists() else {}
 
     def may_mutate(self) -> bool:
         return not any(record["kind"] == DRAIN and not _voided(record) for record in self.records.values())
@@ -157,8 +157,8 @@ class WorkerControl:
 
     def _save(self) -> None:
         staged = self.path.with_name(f"{self.path.name}.tmp")
-        with staged.open("w", encoding="utf-8") as handle:
-            handle.write(json.dumps(self.records))
+        with staged.open("wb") as handle:
+            handle.write(json.dumps(self.records).encode())
             handle.flush()
             os.fsync(handle.fileno())
         staged.replace(self.path)

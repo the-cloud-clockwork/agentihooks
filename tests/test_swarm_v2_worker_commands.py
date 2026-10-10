@@ -152,7 +152,8 @@ def test_an_unknown_command_has_no_outcome_and_an_unacknowledged_one_expires_on_
     assert world.state(agent, command) == "issued"
     world.later(1)
     assert world.state(agent, command) == "expired"
-    stored = json.loads(world.store.redis.hget(world.queue.key(agent.execution_id), command["command_id"]))
+    key = world.store.key(SLUG, "worker-commands", agent.execution_id)
+    stored = json.loads(world.store.redis.hget(key, command["command_id"]))
     assert stored["state"] == "issued"
 
 
@@ -184,14 +185,18 @@ def test_polls_faster_than_the_interval_are_refused_for_a_retry(world, worker):
     assert poll(world, agent, network) == detail(429, "rate_limited", "poll again in 1 ms", "same_request")
     world.later(1)
     assert poll(world, agent, network)[0] == 200
+    assert world.store.redis.hget(world.store.key(SLUG, "worker-command-polls"), agent.execution_id) == "1010"
 
 
 def test_the_api_rejects_bad_settings(world):
     from scripts.swarm_v2.api.commands import CommandsAPI
 
     for interval, limit in ((0, 1), (1, 0), (1.0, 1), (1, True)):
-        with pytest.raises(ValueError, match="poll interval and limit must be positive integers"):
+        with pytest.raises(ValueError) as caught:
             CommandsAPI(world.grants, world.queue, interval, limit)
+        assert str(caught.value) == "poll interval and limit must be positive integers"
+    smallest = CommandsAPI(world.grants, world.queue, 1, 1)
+    assert (smallest.poll_interval_ms, smallest.poll_limit) == (1, 1)
     api = CommandsAPI(world.grants, world.queue)
     assert (api.poll_interval_ms, api.poll_limit) == (1000, 10)
 
@@ -439,6 +444,7 @@ def test_commands_run_only_after_acceptance_and_never_twice(world, worker):
     control.step()
     assert world.ran == [["answer", {"text": "yes"}]]
     assert world.queue.outcome(agent.execution_id, answer["command_id"])["outcome"] == {"status": "succeeded"}
+    assert json.loads(control.path.read_bytes())[answer["command_id"]]["state"] == "reported"
     assert control.may_mutate()
 
 
@@ -468,7 +474,13 @@ def test_an_already_accepted_command_without_local_state_is_reported_not_rerun(w
         "detail": "accepted before this worker state existed; not rerun",
     }
     assert world.state(agent, drain) == "accepted"
+    assert [call[1] for call in network.calls if call[0] == "POST"] == ["complete"]
     assert not control.may_mutate()
+    control.checkpointed("refs/checkpoints/late")
+    assert world.queue.outcome(agent.execution_id, drain["command_id"])["outcome"] == {
+        "status": "checkpointed",
+        "checkpoint": "refs/checkpoints/late",
+    }
 
 
 def test_a_command_interrupted_while_running_is_reported_not_rerun(world, worker):
@@ -696,12 +708,12 @@ def test_the_ack_lag_measurement_keeps_only_the_newest_samples(world, worker, mo
     from scripts.swarm_v2.api.commands import worker_command_ack_lag_seconds
 
     agent, network, _ = worker
-    monkeypatch.setattr(commands, "ACK_LAG_SAMPLES", 2)
-    issued = [world.issue(agent, "cancel", f"cancel-{n}") for n in range(3)]
+    monkeypatch.setattr(commands, "ACK_LAG_SAMPLES", 3)
+    issued = [world.issue(agent, "cancel", f"cancel-{n}") for n in range(4)]
     for n, command in enumerate(issued):
         world.later(n + 1)
         ack(world, agent, network, command)
-    assert worker_command_ack_lag_seconds(world.store, SLUG) == [0.003, 0.006]
+    assert worker_command_ack_lag_seconds(world.store, SLUG) == [0.003, 0.006, 0.01]
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])
