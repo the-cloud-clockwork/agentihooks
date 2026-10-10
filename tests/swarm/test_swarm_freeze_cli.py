@@ -86,6 +86,7 @@ def test_an_engineers_freeze_command_is_refused(swarm, monkeypatch, capsys):
             },
         ),
         ("unfreeze", "dispatcher", {}, {"op": "freeze_clear", "target": "plans/a", "by": "dispatcher"}),
+        ("unfreeze", None, {"reason": "done"}, {"op": "freeze_clear", "target": "plans/a", "reason": "done"}),
     ],
 )
 def test_the_client_sends_one_freeze_op(monkeypatch, verb, by, fields, op):

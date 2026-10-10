@@ -100,7 +100,7 @@ FIELDS = {
     "alert_close": "by target outcome",
     "time_left": "by slots ci_minutes",
     "freeze_set": "by verb target reason quote",
-    "freeze_clear": "by target quote",
+    "freeze_clear": "by target reason quote",
 }
 TYPES = {
     "long": {"type": "boolean"},

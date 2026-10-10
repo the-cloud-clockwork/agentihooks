@@ -126,15 +126,30 @@ def test_unfreezing_a_plan_clears_freezes_on_its_phases_slices_and_tasks():
     for target in ("plans/a", "phases/p1", "slices/a.first", "tasks/t1", "phases/p2", "tasks/t2", "lane:ci"):
         freeze(target)
     freeze("phases/p1", verb="focus")
-    state, rejected = write("freeze_clear", target="plans/a")
+    state, rejected = write("freeze_clear", target="plans/a", reason="hierarchy shipped")
     assert rejected == []
     assert targets(state) == [("freeze", "phases/p2"), ("freeze", "tasks/t2"), ("freeze", "lane:ci")]
     event = state["_meta"]["events"][-1]
-    assert (event["kind"], event["target"], event["cleared"]) == (
+    assert (event["kind"], event["target"], event["cleared"], event["reason"]) == (
         "unfrozen",
         "plans/a",
         ["plans/a", "phases/p1", "slices/a.first", "tasks/t1", "phases/p1"],
+        "hierarchy shipped",
     )
+
+
+def test_a_task_group_lead_holds_its_members_under_it():
+    doc = {
+        "phases": [{"id": "p1"}],
+        "tasks": [
+            {"id": "t1", "phase": "p1", "group_members": ["t3"]},
+            {"id": "t2", "phase": "p1"},
+            {"id": "t3", "phase": "p1", "merged_into": "t1"},
+        ],
+    }
+    assert ledger_freezes.under(doc, "tasks/t1") == {"tasks/t1", "tasks/t3"}
+    assert ledger_freezes.under(doc, "phases/p1") == {"phases/p1", "tasks/t1", "tasks/t2", "tasks/t3"}
+    assert ledger_freezes.under(doc, "tasks/t2") == {"tasks/t2"}
 
 
 def test_clearing_a_selector_removes_only_that_selector():

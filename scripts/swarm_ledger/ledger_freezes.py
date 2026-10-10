@@ -16,7 +16,7 @@ SELECTORS = {"lane": LANES, "kind": KINDS}
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 DISPATCHER = "dispatcher"
 FULL = "full"
-FIELDS = {"freeze_set": ("verb", "target", "reason", "quote"), "freeze_clear": ("target", "quote")}
+FIELDS = {"freeze_set": ("verb", "target", "reason", "quote"), "freeze_clear": ("target", "reason", "quote")}
 EVENTS = {"freeze": "frozen", "focus": "focused"}
 MAX_TEXT = 2000
 
@@ -42,11 +42,13 @@ def check(op):
 
 
 def autonomy(slug: str) -> str:
+    from redis import RedisError
+
     from scripts.swarm.store import SwarmError, connect
 
     try:
         return connect().config(slug).autonomy
-    except SwarmError:
+    except (SwarmError, RedisError):
         return ""
 
 
@@ -64,11 +66,13 @@ def author(op, ctx) -> tuple[str, str] | None:
 
 def under(doc: dict, target: str) -> set:
     nodes, _ = project(doc)
+    members = {f"tasks/{t['id']}": [f"tasks/{m}" for m in t.get("group_members", [])] for t in doc.get("tasks", [])}
     found, frontier = {target}, [target]
     while frontier:
         parent = frontier.pop()
-        for node, (_, link, _) in nodes.items():
-            if link == parent and node not in found:
+        below = [node for node, (_, link, _) in nodes.items() if link == parent] + members.get(parent, [])
+        for node in below:
+            if node not in found:
                 found.add(node)
                 frontier.append(node)
     return found
@@ -95,7 +99,8 @@ def _clear(doc, op, ctx, by):
     gone = [row for row in rows if row["target"] in held]
     if gone:
         doc["freezes"] = [row for row in rows if row["target"] not in held]
-        ctx.record(by, "unfrozen", target, id=op["id"], cleared=[row["target"] for row in gone])
+        cleared = [row["target"] for row in gone]
+        ctx.record(by, "unfrozen", target, id=op["id"], cleared=cleared, reason=op.get("reason", ""))
         ctx.stamp("freezes", by)
     return True
 
