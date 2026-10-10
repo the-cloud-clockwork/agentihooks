@@ -12,6 +12,7 @@ from scripts.gates.push_stop import (
     GATE_FAILED,
     GATE_LATE,
     GATE_SLOW,
+    PUSH_LATE,
     RESERVE_S,
     TEMPLATE,
     PushStop,
@@ -707,6 +708,58 @@ def test_a_passing_gate_followed_by_a_slow_push_and_ledger_write_ends_inside_the
     assert rig.remote_head() == git(rig.tree, "rev-parse", "HEAD")
     assert len(rig.ledger.comments) == 1
     assert 1.5 + 2.3 + 0.52 <= took <= timeout
+
+
+def test_the_push_late_text_is_exact():
+    assert PUSH_LATE.format(path="/w") == (
+        "The stop hook had too little time left to push /w, so it did not push it. Push it yourself."
+    )
+
+
+def test_a_worktree_without_a_gate_is_pushed_with_exactly_the_reserve_left(monkeypatch, rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    rig.commit()
+    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", RESERVE_S)
+    rig.ticks[:] = [0.0]
+    assert rig.stop(started=0.0).allowed
+    assert rig.remote_head() == git(rig.tree, "rev-parse", "HEAD")
+
+
+def test_a_worktree_without_a_gate_is_not_pushed_with_less_than_the_reserve_left(monkeypatch, rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    rig.commit()
+    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", RESERVE_S - 0.01)
+    rig.ticks[:] = [0.0]
+    decision = rig.stop(started=0.0)
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {PUSH_LATE.format(path=rig.tree)}")
+    assert rig.remote_head() == ""
+    assert rig.ledger.comments == []
+
+
+def test_a_passing_gate_is_followed_by_the_push_time_check(monkeypatch, rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    install_gate(rig, 0)
+    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", RESERVE_S + FLOOR_S + 4)
+    rig.ticks[:] = [0.0, 5.5]
+    decision = rig.stop(started=0.0)
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {PUSH_LATE.format(path=rig.tree)}")
+    assert rig.remote_head() == ""
+
+
+def test_under_a_slow_push_a_later_worktree_without_a_gate_is_not_pushed_past_the_stop_condition(monkeypatch, rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    second_tree_with_work(rig)
+    rig.commit()
+    slow_origin(rig, 2)
+    timeout = RESERVE_S + 1
+    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", timeout)
+    started = time.monotonic()
+    decision = rig.stop(started=started)
+    took = time.monotonic() - started
+    assert git(rig.seed, "ls-remote", str(rig.origin), f"refs/heads/{BRANCH}-2")
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {PUSH_LATE.format(path=rig.tree)}")
+    assert rig.remote_head() == ""
+    assert 2 <= took <= timeout
 
 
 def test_a_pre_push_gate_killed_by_a_signal_keeps_the_branch_off_origin(rig):
