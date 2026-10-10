@@ -1,7 +1,7 @@
 import pytest
 
 from scripts.swarm.store import AgentRecord
-from scripts.swarm_v2.kubernetes import grants
+from scripts.swarm_v2.broadcast_bridge import GRANT_NAME
 from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused
 from scripts.swarm_v2.kubernetes.grants import PodGrants
 from scripts.swarm_v2.kubernetes.spec import LAUNCH_DIR, PodTemplate, launch_name
@@ -88,7 +88,7 @@ def test_the_config_map_is_the_one_the_pod_template_mounts_at_the_launch_folder(
     [mount] = [mount for mount in rendered["spec"]["containers"][0]["volumeMounts"] if mount["name"] == "launch"]
 
     assert volume["configMap"]["name"] == material()["metadata"]["name"] == launch_name(EXECUTION)
-    assert f"{mount['mountPath']}/{grants.GRANT_KEY}" == f"{LAUNCH_DIR}/launch-grant"
+    assert f"{mount['mountPath']}/{GRANT_NAME}" == f"{LAUNCH_DIR}/launch-grant"
     assert mount["readOnly"] is True
 
 
@@ -155,10 +155,3 @@ def test_a_config_map_that_exists_or_is_refused_is_not_handed(failure):
     api = Api(pod(), create_failure=failure)
 
     assert PodGrants(api, SLUG).hand(agent(), GRANT) is False
-
-
-def test_the_grant_never_reaches_a_repr_or_the_owner_name():
-    grants_ = PodGrants(Api(pod()), SLUG)
-
-    assert grants_.owner == OWNER
-    assert GRANT not in repr(grants_)

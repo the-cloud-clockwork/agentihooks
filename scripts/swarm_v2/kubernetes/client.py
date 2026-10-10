@@ -107,7 +107,10 @@ class PodClient:
         return f"{path}/{name}" if name else path
 
     def create_pod(self, body: dict) -> dict:
-        status, answer = self.http.send("POST", self._path(), body)
+        return self._create("pods", body)
+
+    def _create(self, kind: str, body: dict) -> dict:
+        status, answer = self.http.send("POST", self._path(kind=kind), body)
         if status == 409 and answer.get("reason") == "AlreadyExists":
             raise AlreadyExists(body["metadata"]["name"])
         return _answer(status, answer)
@@ -142,7 +145,4 @@ class PodClient:
         return True
 
     def create_config_map(self, body: dict) -> dict:
-        status, answer = self.http.send("POST", self._path(kind="configmaps"), body)
-        if status == 409 and answer.get("reason") == "AlreadyExists":
-            raise AlreadyExists(body["metadata"]["name"])
-        return _answer(status, answer)
+        return self._create("configmaps", body)

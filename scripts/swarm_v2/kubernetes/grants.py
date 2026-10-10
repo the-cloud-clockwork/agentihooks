@@ -1,5 +1,4 @@
-"""A worker's launch grant rides in the launch ConfigMap its Pod mounts. A required ConfigMap volume holds the container
-until the ConfigMap exists, so a hand after the Pod create still lands before the worker starts."""
+"""The launch ConfigMap's required volume holds the worker until it exists, so the hand may follow the Pod create."""
 
 from scripts.swarm.store import AgentRecord
 from scripts.swarm_v2.broadcast_bridge import GRANT_NAME
@@ -7,8 +6,6 @@ from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused, PodApi
 from scripts.swarm_v2.kubernetes.runtime import GENERATION_LABEL
 from scripts.swarm_v2.kubernetes.spec import launch_name, pod_name
 from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL, OWNER_LABEL, owner_for
-
-GRANT_KEY = GRANT_NAME
 
 
 def _owned(pod: dict, labels: dict[str, str]) -> bool:
@@ -30,7 +27,7 @@ def _material(pod: dict, labels: dict[str, str], grant: str) -> dict:
             "ownerReferences": [owner],
         },
         "immutable": True,
-        "data": {GRANT_KEY: grant},
+        "data": {GRANT_NAME: grant},
     }
 
 

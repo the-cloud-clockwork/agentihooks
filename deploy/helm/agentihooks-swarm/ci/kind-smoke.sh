@@ -270,7 +270,8 @@ from scripts.swarm import commands
 from scripts.swarm.store import AgentRecord, connect
 from scripts.swarm_v2 import control_service
 from scripts.swarm_v2.kubernetes.client import KubeHttp, PodClient
-from scripts.swarm_v2.kubernetes.grants import GRANT_KEY, PodGrants
+from scripts.swarm_v2.broadcast_bridge import GRANT_NAME
+from scripts.swarm_v2.kubernetes.grants import PodGrants
 from scripts.swarm_v2.kubernetes.runtime import GENERATION_LABEL
 from scripts.swarm_v2.kubernetes.spec import LAUNCH_DIR, launch_volume, pod_name
 from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL, OWNER_LABEL, owner_for
@@ -289,7 +290,8 @@ probe = control_service.ControlService(
     owner=commands.hive_id(),
 )
 assert probe.start(), "the probe could not share the deployed controller lease"
-token_file = Path(tempfile.mkdtemp()) / "token"
+scratch = tempfile.TemporaryDirectory()
+token_file = Path(scratch.name) / "token"
 token_file.write_text(access["token"])
 server = f"https://{env['KUBERNETES_SERVICE_HOST']}:{env['KUBERNETES_SERVICE_PORT']}"
 api = PodClient(KubeHttp(server, token_file, ssl.create_default_context(cadata=access["ca"])), "default")
@@ -303,14 +305,14 @@ grant = probe.grants.issue(
 )
 worker = f"""
 import json, os, urllib.request
-path = "{LAUNCH_DIR}/{GRANT_KEY}"
+path = "{LAUNCH_DIR}/{GRANT_NAME}"
 grant = open(path).read().strip()
 body = json.dumps({{"execution_id": os.environ["EXECUTION_ID"], "generation": int(os.environ["GENERATION"])}}).encode()
 headers = {{"Authorization": "Bearer " + grant, "Content-Type": "application/json"}}
 request = urllib.request.Request(os.environ["CONTROL_URL"] + "/v2/executions/register", body, headers, method="POST")
 with urllib.request.urlopen(request, timeout=10) as answer:
     status = answer.status
-print(json.dumps({{"register": status, "uid": os.getuid(), "mode": oct(os.stat(path).st_mode & 0o777)}}, sort_keys=True))
+print(json.dumps({{"register": status, "uid": os.getuid(), "path": path, "mode": oct(os.stat(path).st_mode & 0o777)}}, sort_keys=True))
 """
 name = pod_name(agent.execution_id)
 labels = {
@@ -339,7 +341,9 @@ api.create_pod({
         "volumes": [launch_volume(agent.execution_id)],
     },
 })
-print(json.dumps({"pod": name, "handed": PodGrants(api, slug).hand(agent, grant)}, sort_keys=True))
+handed = PodGrants(api, slug).hand(agent, grant)
+scratch.cleanup()
+print(json.dumps({"pod": name, "handed": handed}, sort_keys=True))
 EOF
 )"
 handed="$(python3 - <<'EOF' | kubectl exec -i "deployment/$release-controller" -c controller -- env CONTROL_URL="http://$release-controller:8780" SLUG="$slug" RELEASE="$release" IMAGE="$image" python -c "$hand_grant"
@@ -347,7 +351,7 @@ import base64, json, subprocess
 
 
 def run(*command):
-    return subprocess.run(command, check=True, capture_output=True, text=True).stdout
+    return subprocess.run(command, check=True, stdout=subprocess.PIPE, text=True).stdout
 
 
 token = run("kubectl", "create", "token", "swarm-grant-proof", "--duration", "10m").strip()
@@ -366,17 +370,21 @@ if [[ $owner != "Pod/$worker_pod immutable=true" ]]; then
   printf 'the launch ConfigMap is not an immutable object owned by its Pod: %s\n' "$owner" >&2
   exit 1
 fi
-kubectl wait pod "$worker_pod" --for=jsonpath='{.status.phase}'=Succeeded --timeout 2m || kubectl describe pod "$worker_pod"
-read_grant="$(kubectl logs "$worker_pod" 2>&1 || true)"
+kubectl wait pod "$worker_pod" --for=jsonpath='{.status.phase}'=Succeeded --timeout 2m || {
+  kubectl describe pod "$worker_pod"
+  kubectl logs "$worker_pod" || true
+  exit 1
+}
+read_grant="$(kubectl logs "$worker_pod")"
 if [[ $read_grant != *'"register": 200'* || $read_grant != *'"uid": 10001'* ]]; then
   printf 'the worker did not read its launch grant and register: %s\n' "$read_grant" >&2
   exit 1
 fi
-printf 'a worker Pod read its launch grant from %s and registered: %s\n' "/var/run/swarm/launch/launch-grant" "$read_grant"
+printf 'a worker Pod read its launch grant from its launch ConfigMap and registered: %s\n' "$read_grant"
 kubectl delete pod "$worker_pod" --wait --timeout 1m
 collected=""
 for _ in $(seq 60); do
-  if ! kubectl get configmap "$worker_pod-launch" >/dev/null 2>&1; then
+  if [[ -z "$(kubectl get configmap "$worker_pod-launch" --ignore-not-found -o name)" ]]; then
     collected=yes
     break
   fi
