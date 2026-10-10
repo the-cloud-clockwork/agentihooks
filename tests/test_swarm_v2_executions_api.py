@@ -567,7 +567,12 @@ def test_a_credential_renewal_is_bound_to_its_own_live_execution(world, long_liv
     other, other_token = world.start("eng-2@fixture", "other")
     world.register(other, other_token)
     status, refusal = renew(api, other.execution_id, token)
-    assert (status, refusal["error_class"]) == (403, "forbidden_scope")
+    assert (status, refusal["error_class"], refusal["message"]) == (
+        403,
+        "forbidden_scope",
+        "credential renewal names another execution",
+    )
+    assert api.route("GET", f"/v2/executions/{agent.execution_id}/credential", f"Bearer {token}", {})[0] == 404
     assert renew(api, agent.execution_id, "v2.forged.token")[1]["error_class"] == "unauthenticated"
     world.start(previous=agent.execution_id)
     assert renew(api, agent.execution_id, token)[0] == 409
