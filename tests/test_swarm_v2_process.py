@@ -346,10 +346,8 @@ def launch_store():
 
 
 def launched(store, pid=PID):
-    validation = {"pid": pid} if pid is not None else {}
-    return AgentRecord(
-        store.next_name("sw", "eng"), "eng", "t1", seat="eng-1@sw", profile_decision={"validation": validation}
-    )
+    decision = {"validation": {"pid": pid}} if pid is not None else {}
+    return AgentRecord(store.next_name("sw", "eng"), "eng", "t1", seat="eng-1@sw", profile_decision=decision)
 
 
 def launcher(namespace=ANTON, table=None):
@@ -384,6 +382,7 @@ def test_a_local_relaunch_replaces_the_execution_it_names_on_the_seat():
         (ANTON, {PID: proc(start=0)}, PID, "start time"),
         (ANTON, None, None, "process number and start time"),
         (ANTON, None, True, "process number and start time"),
+        (ANTON, None, float(PID), "process number and start time"),
         (ANTON, {-PID: proc(pid=-PID)}, -PID, "process number and start time"),
         ("", {}, None, "process namespace, process number and start time"),
     ],
