@@ -152,6 +152,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/packaging/swarm-smoke.sh",
         "scripts/size_limits.py",
         "scripts/swarm_ledger/artifact_sanity.py",
+        "tests/chart_workers.py",
         "tests/count_floor.py",
         "tests/coverage_baseline.py",
         "tests/coverage_ratchet.py",
