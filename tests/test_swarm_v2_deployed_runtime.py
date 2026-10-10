@@ -9,7 +9,7 @@ from scripts.hive import auth as hive_auth
 from scripts.swarm import controller as loop
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
-from scripts.swarm_v2 import control_service, deployed
+from scripts.swarm_v2 import deployed
 from scripts.swarm_v2.auth_context import GrantRefused
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, load_policy
@@ -26,6 +26,12 @@ API_URL = "http://swarm-api.agentihooks-swarm.svc:8780"
 IMAGE = "sha256:" + "4b" * 32
 PROJECT = "github.com/the-cloud-clockwork/agentihooks"
 POLICY = Path(__file__).parent / "fixtures" / "swarm_v2" / "pod-policy.json"
+
+
+def _cs():
+    from scripts.swarm_v2 import control_service
+
+    return control_service
 
 
 class Pods:
@@ -81,11 +87,11 @@ def _environ(tmp_path, store, **changes):
     key = tmp_path / "launch.key"
     key.write_bytes(b"k" * 32)
     return {
-        control_service.KEY_ID_ENV: "launch-1",
-        control_service.KEY_FILE_ENV: str(key),
-        control_service.PORT_ENV: str(_free_port()),
-        control_service.SWARM_ENV: SLUG,
-        control_service.CREDENTIAL_ENV: hive_auth.issue_controller(store.redis),
+        _cs().KEY_ID_ENV: "launch-1",
+        _cs().KEY_FILE_ENV: str(key),
+        _cs().PORT_ENV: str(_free_port()),
+        _cs().SWARM_ENV: SLUG,
+        _cs().CREDENTIAL_ENV: hive_auth.issue_controller(store.redis),
         **_workers(tmp_path, **changes),
     }
 
@@ -100,8 +106,8 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
         "pod_api",
         lambda environ, namespace: apis.append((environ.get(deployed.API_URL_ENV), namespace)) or pods,
     )
-    real_host = control_service.host
-    monkeypatch.setattr(control_service, "host", lambda *args: hosted.append(real_host(*args)) or hosted[0])
+    real_host = _cs().host
+    monkeypatch.setattr(_cs(), "host", lambda *args: hosted.append(real_host(*args)) or hosted[0])
     monkeypatch.setattr(loop, "connect", lambda: store)
     monkeypatch.setattr("scripts.operator_env.fill", lambda env: None)
 
@@ -189,7 +195,7 @@ def test_the_start_runs_as_before_without_an_api_address(tmp_path):
     store = _store()
     environ = _environ(tmp_path, store, **{deployed.API_URL_ENV: None, deployed.POLICY_ENV: None})
 
-    service = control_service.host(environ, store, "hive-fixture")
+    service = _cs().host(environ, store, "hive-fixture")
     try:
         assert service.runtime is None
         assert store.config(SLUG).api_url == ""
@@ -199,9 +205,7 @@ def test_the_start_runs_as_before_without_an_api_address(tmp_path):
 
 def test_a_service_publishes_no_api_address_until_one_is_set(tmp_path):
     store = _store()
-    service = control_service.ControlService(
-        store, SLUG, control_service.launch_key(_environ(tmp_path, store)), lambda: True
-    )
+    service = _cs().ControlService(store, SLUG, _cs().launch_key(_environ(tmp_path, store)), lambda: True)
 
     assert service.api_url == ""
 
@@ -211,7 +215,7 @@ def test_the_tick_runtime_takes_its_disabled_backends_from_the_control_service_s
     monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: Pods(namespace))
     environ = {**_environ(tmp_path, store), "AGENTIHOOKS_RUNTIME_DISABLED": BACKEND}
 
-    service = control_service.host(environ, store, "hive-fixture")
+    service = _cs().host(environ, store, "hive-fixture")
     try:
         assert service.runtime.router.disabled == frozenset({BACKEND})
     finally:
@@ -223,7 +227,7 @@ def test_a_missing_worker_setting_refuses_the_start_and_names_each_one(tmp_path)
     environ = _environ(tmp_path, store, **{deployed.IMAGE_ENV: None, deployed.BRAIN_ENV: None})
 
     with pytest.raises(SwarmError) as refused:
-        control_service.host(environ, store, "hive-fixture")
+        _cs().host(environ, store, "hive-fixture")
 
     assert str(refused.value) == f"the Kubernetes runtime needs {deployed.IMAGE_ENV}, {deployed.BRAIN_ENV}"
     assert lease.current(store, SLUG) is None
@@ -340,12 +344,10 @@ def test_a_launch_cap_in_non_ascii_digits_is_refused(tmp_path):
 def test_only_the_lease_holder_writes_the_api_address(tmp_path, monkeypatch):
     store = _store()
     monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: Pods(namespace))
-    holder = control_service.ControlService(
-        store, SLUG, control_service.launch_key(_environ(tmp_path, store)), lambda: True
-    )
+    holder = _cs().ControlService(store, SLUG, _cs().launch_key(_environ(tmp_path, store)), lambda: True)
     assert holder.start()
 
-    service = control_service.host(_environ(tmp_path, store), store, "hive-fixture")
+    service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
     try:
         assert service.runtime is not None
         assert store.config(SLUG).api_url == ""
