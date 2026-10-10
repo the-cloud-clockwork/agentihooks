@@ -245,6 +245,9 @@ def test_a_recorded_generation_for_another_base_is_refused(world):
         ({"minimum": "abc"}, "invalid required commit: abc"),
         ({"minimum": "dev"}, "invalid required commit: dev"),
         ({"agent": "engineer"}, "invalid agent: engineer"),
+        ({"agent": "Engineer 7"}, "invalid agent: Engineer 7"),
+        ({"agent": "eng-7@rig-grade-swarm"}, "invalid agent: eng-7@rig-grade-swarm"),
+        ({"agent": "engineer@ABC123-0007"}, "invalid agent: engineer@ABC123-0007"),
         ({"origin": "https://user:pass@github.com/o/r"}, CREDENTIAL),
         ({"origin": "https://token@github.com/o/r"}, CREDENTIAL),
         ({"origin": " https://user:pass@github.com/o/r"}, CREDENTIAL),
@@ -695,6 +698,16 @@ def test_branch_style_base_names_are_accepted(world, base):
     with pytest.raises(workspaces.WorkspaceError) as refused:
         workspaces.prepare(world.execution, world.request(base=base))
     assert str(refused.value) == f"base {base} is missing from {world.project}"
+
+
+def test_branches_and_base_match_the_local_development_cycle(world):
+    environ = {"AGENTIHOOKS_AGENT_NAME": AGENT}
+    first = workspaces.prepare(world.execution, world.request("t1"))
+    second = workspaces.prepare(world.execution, world.request("t2"))
+    wt = (Path(__file__).resolve().parents[1] / "profiles/package/skills/worktree/scripts/wt.sh").read_text()
+    assert (first.branch, second.branch) == (naming.worktree(environ), naming.worktree(environ, {first.branch}))
+    assert 'BASE="${WT_BASE_BRANCH:-dev}"' in wt
+    assert first.base == world.request().base == "dev"
 
 
 def test_package_cases_pass_on_the_isolated_fixture():
