@@ -107,8 +107,8 @@ class DistributedLaunch:
         store.redis.hset(store.key(self.slug, HANDS), admitted.execution_id, json.dumps(asdict(hand)))
         if hand.handed or outcome.status is Status.AMBIGUOUS:
             return Launch(admitted, grant, slot, outcome, hand)
-        self.grants.withdraw(self.slug, grant)
         self.exited(admitted)
+        self.grants.withdraw(self.slug, grant)
         return Launch(
             admitted, grant, slot, Outcome("spawn", Status.REFUSED, backend, detail=NOT_HANDED + hand.reason), hand
         )

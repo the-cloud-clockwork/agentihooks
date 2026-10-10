@@ -582,6 +582,20 @@ def test_withdrawing_a_grant_revokes_it_once(world):
     assert str(refused.value) == "launch grant was revoked"
 
 
+def test_a_refused_withdraw_still_frees_the_slot_of_an_unhanded_launch(monkeypatch):
+    world = World(monkeypatch, homes=Homes(Hand(False, "pod_missing", False)))
+
+    def refuse(slug, token):
+        raise GrantRefused("dependency_unavailable", "launch grants kept changing; the grant was not withdrawn")
+
+    monkeypatch.setattr(world.grants, "withdraw", refuse)
+
+    with pytest.raises(GrantRefused):
+        world.launch(FIRST)
+
+    assert world.rows() == {}
+
+
 def test_a_launch_refused_on_a_full_account_hands_no_grant(world):
     world.launch(FIRST)
 
