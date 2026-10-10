@@ -260,6 +260,19 @@ def test_the_seat_spawn_helper_stamps_the_seat_and_the_host_spend():
     assert [(e["occupant"], e["at"]) for e in store.seats.history(record.seat)] == [(NAME, NOW)]
     assert store.redis.zrange(tick_module.HOST_SPENDS, 0, -1, withscores=True) == [(NAME, float(NOW))]
     assert runtime.tasks == [{"id": "dispatcher"}]
+    assert int(store.names.entry(NAME)["spawned_at"]) == NOW
+
+
+def test_the_swarm_config_reaches_the_seat_spawn():
+    class Recording(FakeRuntime):
+        def spawn(self, config, lane, name, task):
+            self.configs = [*getattr(self, "configs", []), config]
+            return super().spawn(config, lane, name, task)
+
+    store, runtime = swarm(), Recording()
+    config = store.config(SLUG)
+    dispatch_seat.run(SLUG, config, store, runtime, doc(priority()), NOW)
+    assert runtime.configs == [config]
 
 
 def test_a_sleeping_swarm_tick_spawns_no_dispatcher():
