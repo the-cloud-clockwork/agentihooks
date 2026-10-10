@@ -73,10 +73,10 @@
     "data_safety": "broadcasts, broadcast-history, broadcast-operations and broadcast-deliveries are authoritative and no code path deletes them; freeze only sets broadcasts-frozen"
   },
   "remaining_limitations": [
-    "No hook calls sync_local or acknowledge_local yet: workers carry no launch grant into the hook environment (ledger follow-up filed), so hook-side delivery and local acknowledgement are not complete",
+    "No hook calls sync_local or acknowledge_local yet: no code on dev places a validated launch grant in a worker's hook environment (no LAUNCH_GRANT or AGENTIHOOKS_GRANT reference on dev when this record was written), so hook-side delivery and local acknowledgement are not complete. Wiring them needs that grant delivery, which belongs with the worker entrypoint and registration packages; a ledger follow-up is filed",
+    "hooks/mcp/channels.py, an owned path candidate, is unchanged: operator credentials are refused to sessions that carry an agent name or swarm, and an operator session has no swarm to name, so an operator fleet publish from that tool needs a swarm binding decision first",
     "freeze and thaw are not authenticated",
     "At the message cap cache_fleet_broadcasts evicts fleet cache entries before local ones, while create_broadcast still trims the oldest entry of any kind",
-    "broadcast_delivery_lag_seconds is collected as evidence only; no metric exporter emits it",
-    "hooks/mcp/channels.py still publishes to the local broadcast file only"
+    "broadcast_delivery_lag_seconds is collected as evidence only; no metric exporter emits it"
   ]
 }
