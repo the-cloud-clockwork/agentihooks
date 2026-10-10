@@ -36,7 +36,7 @@
     "tests": "proofs run 38068093385 at tested_commit: 180 passed across the client, runtime, operations and controller modules; the case C comparison failed only because its record was absent and is now committed",
     "lint": "ruff check and ruff format passed through python -m scripts.ci_prepush",
     "review": "Standards and Spec readers, three rounds. Fixed: unreadable answers and tokens, ambiguous status, the grant case, the restarted spawn, rollback wording, dead code, import order, counts. A live spec comparison on adoption was tried and withdrawn because API server admission rewrites tolerations, quantities and defaults. A ruling reader closed the held findings: adoption and observation without a live spec check not upheld (bounded by RBAC and admission); the re-create after a reaped Pod upheld and fixed with the journal attempted mark.",
-    "mutation": "Scoped mutation proof run 38066991365: six equivalent header case mutants in KubeHttp.send cleared by the Standards reader in mutation-clearances; the runtime survivors there are killed by tests added after it; the next preflight qualifies"
+    "mutation": "Scoped mutation proof run 38068236817 at tested_commit: runtime 281 killed, client 158 killed, operations 50 killed; seven equivalent survivors (six header name case variants in KubeHttp.send and the attempted override in OperationJournal.settle) cleared by the Standards reader in mutation-clearances; the preflight on the restacked branch qualifies"
   },
   "cases": {
     "a": "evidence/SV2-KUB-02/a-result.json",
