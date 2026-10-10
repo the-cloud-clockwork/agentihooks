@@ -559,6 +559,28 @@ def test_apply_records_one_backfill_event_at_the_write_time(tmp_path, monkeypatc
     ]
 
 
+def test_apply_repairs_drifted_hierarchy_rows_with_one_reported_event(tmp_path):
+    repo = repository(tmp_path)
+    hierarchy_backfill.backfill(repo, SLUG, "planner", apply=True)
+    with repo.connect() as connection, connection:
+        node = connection.execute(
+            "SELECT node_id FROM work_nodes WHERE ledger_slug=? ORDER BY node_id LIMIT 1", (SLUG,)
+        ).fetchone()[0]
+        connection.execute("DELETE FROM work_nodes WHERE ledger_slug=? AND node_id=?", (SLUG, node))
+    events = len(repo.export_document(SLUG)["_meta"]["events"])
+    repaired = hierarchy_backfill.backfill(repo, SLUG, "repairer", apply=True)
+    assert repaired["repaired"]["missing_nodes"] == [node]
+    assert repaired["repaired"]["drift"] == 1
+    assert repaired["drift"]["drift"] == 0
+    assert repaired["conflicts"] == []
+    saved = repo.export_document(SLUG)["_meta"]["events"]
+    assert len(saved) == events + 1
+    assert (saved[-1]["by"], saved[-1]["kind"], saved[-1]["target"]) == ("repairer", "backfilled", "hierarchy")
+    again = hierarchy_backfill.backfill(repo, SLUG, "repairer", apply=True)
+    assert again["repaired"]["drift"] == 0
+    assert len(repo.export_document(SLUG)["_meta"]["events"]) == events + 1
+
+
 def test_the_applied_ledger_is_served_from_the_repository_cache(tmp_path, monkeypatch):
     repo = repository(tmp_path)
     hierarchy_backfill.backfill(repo, SLUG, "planner", apply=True)

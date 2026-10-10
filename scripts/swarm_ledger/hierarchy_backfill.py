@@ -165,7 +165,8 @@ def commit(repo: store.SQLiteLedgerRepository, slug: str, by: str) -> dict:
             row["kind"] == "missing_phase" and row["after"] is None for row in report["conflicts"]
         ):
             raise ValueError(json.dumps(report, sort_keys=True))
-        if after != entry.state:
+        report["repaired"] = hierarchy.drift(hierarchy.stored(connection, slug), hierarchy.project(after))
+        if after != entry.state or report["repaired"]["drift"]:
             meta = after["_meta"]
             ctx = repo.domain.Context(meta, repo.domain.now_ms())
             ctx.record(by, "backfilled", "hierarchy")
@@ -174,7 +175,6 @@ def commit(repo: store.SQLiteLedgerRepository, slug: str, by: str) -> dict:
             written = repo._write(connection, slug, entry, after, ctx.events)
         else:
             written = entry
-            hierarchy.sync(connection, slug, after)
         report["applied"] = True
         report["drift"] = hierarchy.drift(hierarchy.stored(connection, slug), hierarchy.project(after))
     repo._remember(slug, written)
