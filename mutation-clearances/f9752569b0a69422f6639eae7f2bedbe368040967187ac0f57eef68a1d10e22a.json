@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/autoscale.py:scripts.swarm.autoscale.x__shifted__mutmut_6:811b01f2dbb2df941f3bfbbc845a787e30cfab712e3660d47868430f01fb7131": {
+    "reader": "standards_reader",
+    "reason": "calculate calls _shifted only through _shifted(...) if shift else ({}, \"\"), so shift is never 0 inside _shifted. For every nonzero integer, shift > 0 and shift >= 0 select the same branch."
+  }
+}
