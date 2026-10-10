@@ -23,6 +23,7 @@ trap cleanup EXIT
 
 docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$revision" \
     -f "$context/docker/swarm-node/Dockerfile" -t "$image" "$context" > "$output/build.log" 2>&1
+bash "$context/docker/swarm-node/scan.sh" "$image" "$output/credential-scan"
 for attempt in first second; do
     docker run --rm --network none --read-only \
         --tmpfs /home/worker:uid=10001,gid=10001 --tmpfs /tmp \
