@@ -154,8 +154,9 @@ def publish(tmp_path, existing, config=TESTED):
     return done, log, json.loads(promoted.read_text()) if promoted.exists() else None
 
 
-def test_publish_pushes_an_absent_commit_tag_and_records_its_digest(tmp_path):
-    done, log, promoted = publish(tmp_path, "manifest unknown: not found")
+@pytest.mark.parametrize("reply", ["ghcr.io/o/worker:sha-x: not found", "MANIFEST_UNKNOWN: manifest unknown"])
+def test_publish_pushes_an_absent_commit_tag_and_records_its_digest(tmp_path, reply):
+    done, log, promoted = publish(tmp_path, reply)
 
     tag = f"ghcr.io/o/worker:sha-{COMMIT}"
     assert done.returncode == 0, done.stderr
