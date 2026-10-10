@@ -15,7 +15,7 @@ INTERPRETER = Path("/opt/venv/bin/python")
 ATTEMPT = "image-probe"
 PROFILES = {"claude": "fixture-claude", "codex": "fixture-codex"}
 ACCOUNTS = {"claude": "AH_CC_TOKEN_FIXTURE", "codex": "AH_CX_TOKEN_FIXTURE"}
-ENDPOINTS = {"AGENTIHOOKS_LEDGER_URL": "http://ledger.swarm.invalid:8765"}
+ENDPOINTS = {"AGENTIHOOKS_LEDGER_URL": "https://ledger.swarm.invalid:8765"}
 OFFLINE = {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
 LAUNCHES = {
     "claude": (["claude", "-p", "hello"], 60),

@@ -300,7 +300,7 @@ def test_probe_bootstraps_an_attempt_and_observes_every_target(tmp_path, monkeyp
     assert request.root == root and request.attempt == "image-probe" and request.templates == tmp_path / "templates"
     assert request.profiles == {"claude": "fixture-claude", "codex": "fixture-codex"}
     assert request.accounts == {"claude": "AH_CC_TOKEN_FIXTURE", "codex": "AH_CX_TOKEN_FIXTURE"}
-    assert request.endpoints == {"AGENTIHOOKS_LEDGER_URL": "http://ledger.swarm.invalid:8765"}
+    assert request.endpoints == {"AGENTIHOOKS_LEDGER_URL": "https://ledger.swarm.invalid:8765"}
     assert request.interpreter == Path("/opt/venv/bin/python")
     assert (request.uid, request.gid) == (os.getuid(), os.getgid())
     environ = {"PATH": "/bin", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
