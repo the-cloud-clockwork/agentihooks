@@ -3,7 +3,7 @@ import tempfile
 from pathlib import Path
 
 from scripts.swarm_v2.artifacts import base, local, object_store
-from tests.test_swarm_v2_artifacts import DATA, KINDS, OTHER, Authority, World, registration
+from tests.test_swarm_v2_artifacts import DATA, KINDS, OTHER, World, bound
 
 DIMENSIONS = {"fixture": "sv2-fsy-04"}
 
@@ -12,14 +12,10 @@ def _contents(world: World) -> dict[str, bytes]:
     return {key: world.backend.read(key, 0, world.backend.size(key)) for key in world.backend.keys("")}
 
 
-def _bound(backend: base.Backend, **grant) -> base.ArtifactStore:
-    return base.ArtifactStore(backend, Authority(registration(**grant)), "grant")
-
-
 def _restarted(world: World, root: Path, **grant) -> base.ArtifactStore:
     if world.kind == "local":
-        return _bound(local.LocalBackend(root / "durable"), **grant)
-    return _bound(object_store.ObjectStoreBackend(world.fake, "bucket", "swarm/"), **grant)
+        return bound(local.LocalBackend(root / "durable"), **grant)
+    return bound(object_store.ObjectStoreBackend(world.fake, "bucket", "swarm/"), **grant)
 
 
 def _positive(kind: str) -> dict:
@@ -153,7 +149,7 @@ def _rollback() -> dict:
         world.store.commit_manifest("outputs", ["a1"])
         published = dict(world.fake.objects)
         writes = world.fake.calls["put_object"] + world.fake.calls["copy_object"] + world.fake.calls["delete_object"]
-        previous = _bound(local.LocalBackend(Path(root) / "previous"), execution="e3", generation=3)
+        previous = bound(local.LocalBackend(Path(root) / "previous"), execution="e3", generation=3)
         previous.put("a1", world.store.get_range(ref))
         manifest = previous.commit_manifest("outputs", ["a1"])
         key = "s1/t1/manifests/outputs/3.json"

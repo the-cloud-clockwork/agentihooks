@@ -87,15 +87,20 @@ class Backend(Protocol):
 
 
 class ArtifactStore:
-    """The authorization callback must validate a launch grant token with the launch authority; the scope comes from it."""
+    """The authorization callback must validate a launch grant token with the launch authority; the scope comes from it
+    once, at construction, and holds for the store's lifetime, so a caller builds one store per attempt."""
 
     def __init__(self, backend: Backend, authorize: Callable[[str], Registration], token: str) -> None:
         registration = authorize(token) if isinstance(token, str) and token else None
         if not isinstance(registration, Registration):
             _refuse(UNGRANTED)
         self.backend = backend
-        self.scope = Scope.granted(registration)
+        self._scope = Scope.granted(registration)
         self.failures: Counter[str] = Counter()
+
+    @property
+    def scope(self) -> Scope:
+        return self._scope
 
     def metrics(self) -> dict[str, dict[str, int]]:
         return {METRIC: dict(self.failures)}

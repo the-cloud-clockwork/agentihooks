@@ -47,6 +47,10 @@ class Authority:
         return self.result
 
 
+def bound(backend, **grant) -> base.ArtifactStore:
+    return base.ArtifactStore(backend, Authority(registration(**grant)), "grant")
+
+
 class Missing(Exception):
     def __init__(self, code: str = "NoSuchKey"):
         super().__init__(code)
@@ -156,7 +160,7 @@ class World:
         self.store = self.bound()
 
     def bound(self, **grant) -> base.ArtifactStore:
-        return base.ArtifactStore(self.backend, Authority(registration(**grant)), "grant")
+        return bound(self.backend, **grant)
 
     def truncate(self, uploads: int = 1) -> None:
         if self.kind == "local":
@@ -230,6 +234,12 @@ def test_store_takes_its_scope_from_the_verified_registration(tmp_path):
     assert store.scope.key("objects", "x") == "s1/t9/objects/x"
     ref = store.put("a1", DATA)
     assert store.backend.keys("s1/") == ["s1/t9/artifacts/a1.json", f"s1/t9/objects/{ref.sha256}"]
+
+
+def test_bound_scope_cannot_be_replaced(world):
+    with pytest.raises(AttributeError):
+        world.store.scope = base.Scope("s1", "t2", "e9", 9)
+    assert world.store.scope == base.Scope("s1", "t1", "e1", 2)
 
 
 @pytest.mark.parametrize(

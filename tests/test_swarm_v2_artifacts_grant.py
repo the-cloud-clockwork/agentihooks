@@ -56,9 +56,9 @@ def test_hand_built_scope_is_refused_by_the_store(grants, tmp_path):
     execution = grants.execution
     scope = base.Scope(SLUG, "t1", execution.execution_id, execution.generation)
     with pytest.raises(base.ArtifactError) as raised:
-        base.ArtifactStore(local.LocalBackend(tmp_path), grants.bound, scope)
+        base.ArtifactStore(local.LocalBackend(tmp_path / "durable"), grants.bound, scope)
     assert str(raised.value) == base.UNGRANTED
-    assert list(tmp_path.iterdir()) == []
+    assert not (tmp_path / "durable").exists()
 
 
 def test_unregistered_grant_builds_no_store(grants, tmp_path):
@@ -72,6 +72,15 @@ def test_grant_signed_with_another_key_builds_no_store(grants, tmp_path):
     with pytest.raises(GrantRefused) as raised:
         base.ArtifactStore(local.LocalBackend(tmp_path), grants.bound, forged)
     assert str(raised.value) == "launch grant signature is invalid"
+
+
+def test_store_keeps_its_scope_for_its_lifetime(grants, tmp_path):
+    token = grants.issue()
+    grants.register(token)
+    store = base.ArtifactStore(local.LocalBackend(tmp_path / "durable"), grants.bound, token)
+    assert grants.authority.revoke(SLUG, grants.execution.execution_id) is True
+    ref = store.put("a1", DATA)
+    assert store.recorded("a1") == ref
 
 
 def test_revoked_grant_builds_no_store(grants, tmp_path):
