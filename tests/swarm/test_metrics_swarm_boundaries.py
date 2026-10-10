@@ -221,11 +221,14 @@ def test_active_and_recently_completed_pulls_are_selected_with_a_bounded_window(
     ]
     state = {"tasks": tasks, "_meta": {"events": events}}
     snapshots = []
-    source = metrics_swarm.TickInput(None, state, [], lambda url: snapshots.append(url) or url)
+    source = metrics_swarm.TickInput(None, state, [], lambda url: snapshots.append(url) or url, None)
     assert metrics_swarm.pull_rows(box, NOW, source) == {"pr": "pr", "claimed": "claimed", "done": "done"}
     assert snapshots == ["pr", "claimed", "done"]
-    assert metrics_swarm.pull_rows(box, NOW, metrics_swarm.TickInput(None, {"tasks": []}, [], None)) == {}
-    assert metrics_swarm.pull_rows(box, NOW, metrics_swarm.TickInput(None, {"tasks": [], "_meta": {}}, [], None)) == {}
+    assert metrics_swarm.pull_rows(box, NOW, metrics_swarm.TickInput(None, {"tasks": []}, [], None, None)) == {}
+    assert (
+        metrics_swarm.pull_rows(box, NOW, metrics_swarm.TickInput(None, {"tasks": [], "_meta": {}}, [], None, None))
+        == {}
+    )
 
 
 def test_log_readers_preserve_empty_batches_and_skip_pending_reviews(box, tmp_path, monkeypatch):
@@ -396,7 +399,7 @@ def test_opened_pull_rows_do_not_suppress_merge_observation(box):
     opened = metrics_swarm.delivery_rows(SLUG, doc([event("task pr", NOW)]), [AGENT], {})
     box.append(metrics_swarm.DELIVERY, opened)
     calls = []
-    source = metrics_swarm.TickInput(None, doc(), [], lambda url: calls.append(url) or url)
+    source = metrics_swarm.TickInput(None, doc(), [], lambda url: calls.append(url) or url, None)
     assert metrics_swarm.pull_rows(box, NOW, source) == {TASK["pr_url"]: TASK["pr_url"]}
     assert calls == [TASK["pr_url"]]
 
