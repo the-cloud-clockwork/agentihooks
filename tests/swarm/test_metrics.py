@@ -149,7 +149,7 @@ def test_run_tick_records_metrics_after_the_priority_pass(monkeypatch):
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", ".", 0, 0, state="paused"))
     order = []
-    monkeypatch.setattr(cli.priority_sweep, "priority_pass", lambda *args: order.append("priority") or [])
+    monkeypatch.setattr(cli.dispatcher.priority_sweep, "priority_pass", lambda *args: order.append("priority") or [])
     monkeypatch.setattr(
         metrics, "record_pass", lambda slug, now, actions, env, swarm: order.append(("metrics", slug, now > 0)) or ["m"]
     )
