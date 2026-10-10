@@ -122,7 +122,7 @@ def test_a_fresh_codex_reading_with_only_the_week_gets_the_top_band(monkeypatch)
     weekly = CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=10, resets_at=500))
     monkeypatch.setattr(capacity.codex_router, "quotas", lambda accounts, env: {"a": weekly})
     monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: pytest.fail("reached the real codex probe"))
-    seen = capacity.accounts({}, 100)
+    seen = capacity.accounts({"AH_CX_TOKEN_a": "fake-a"}, 100)
     assert seen == [capacity.Account("codex", "a", "OPEN", 0, None, 90, 6, 500)]
 
 
@@ -171,7 +171,7 @@ def test_a_stale_codex_reading_gets_no_seat(monkeypatch):
     stale = CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=10))
     monkeypatch.setattr(capacity.codex_router, "quotas", lambda accounts, env: {"a": stale})
     monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: None)
-    seen = capacity.accounts({}, stale_at)
+    seen = capacity.accounts({"AH_CX_TOKEN_a": "fake-a"}, stale_at)
     assert seen == [capacity.Account("codex", "a", "UNKNOWN", 0, None, 90, None)]
 
 
@@ -377,7 +377,7 @@ def test_codex_accounts_with_live_sessions_keep_their_own_quotas(monkeypatch):
 
     monkeypatch.setattr(capacity.codex_router, "quotas", quotas)
     monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: pytest.fail("reached the real codex probe"))
-    seen = capacity.accounts({}, 100)
+    seen = capacity.accounts({"AH_CX_TOKEN_a": "fake-a"}, 100)
     assert [(row.name, row.sessions, row.week_left, row.cap) for row in seen] == [("a", 1, 80, 6), ("b", 2, 80, None)]
     assert [(seat.account, seat.free) for seat in capacity.offered(seen)] == [("a", 5), ("b", 0)]
 

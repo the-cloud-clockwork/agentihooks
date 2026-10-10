@@ -1,9 +1,11 @@
 """Route a Codex launch to one account: the default `codex login`, an AH_CX_TOKEN_<slug> or the api key.
 
-Token values only move from the environment into the child's CODEX_ACCESS_TOKEN, and an api
-key stays in the child's environment under its own name; neither is printed or written anywhere.
+Token values only move from the environment into the child's CODEX_ACCESS_TOKEN, an ordinary ChatGPT
+token's account id claim into AGENTIHOOKS_CHATGPT_ACCOUNT_ID, and an api key stays in the child's
+environment under its own name; none is printed or written anywhere.
 """
 
+import base64
 import contextlib
 import fcntl
 import json
@@ -13,7 +15,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from hooks.context.account_sessions import (
@@ -34,6 +36,17 @@ CODEX_BIN = "codex"
 ATTEMPTS_FILE = "codex-probe-attempts.json"
 # A running app-server daemon answers account/read with its own auth, so a token session must not attach to it.
 NO_DAEMON = "--no-daemon"
+ACCOUNT_ID_ENV = envs.CHATGPT_ACCOUNT_ID_ENV
+BEARER_PROVIDER = "agentihooks-chatgpt"
+CHATGPT_BASE_URL = "https://chatgpt.com/backend-api/codex"
+OPENAI_AUTH_CLAIM = "https://api.openai.com/auth"
+AGENT_IDENTITY_CLAIM = "agent_runtime_id"
+API_KEY_PREFIX = "sk-"
+PERSONAL_TOKEN_PREFIX = "at-"
+DEFAULT_KIND = "default"
+API_KIND = "api"
+OAUTH_KIND = "chatgpt-oauth"
+ACCESS_TOKEN_KIND = "codex-access-token"
 
 
 @dataclass(frozen=True)
@@ -43,6 +56,7 @@ class CodexAccount:
     signed_in: bool = True
     key_env: str = ""
     base_url: str = ""
+    bearer: bool = False
 
     @property
     def is_token(self) -> bool:
@@ -55,6 +69,73 @@ class CodexAccount:
 
 class RoutingError(RuntimeError):
     pass
+
+
+def _claims(token: str) -> dict:
+    parts = token.split(".")
+    if len(parts) != 3:
+        return {}
+    with contextlib.suppress(ValueError):
+        claims = json.loads(base64.urlsafe_b64decode(parts[1] + "=="))
+        if isinstance(claims, dict):
+            return claims
+    return {}
+
+
+def _chatgpt_account_id(claims: Mapping) -> str:
+    auth = claims.get(OPENAI_AUTH_CLAIM)
+    found = auth.get("chatgpt_account_id") if isinstance(auth, dict) else None
+    return found if isinstance(found, str) else ""
+
+
+def credential_kind(account: CodexAccount, environ: Mapping[str, str]) -> str:
+    """Classifies only this account's credential, in memory; Codex itself reads every other token as its own."""
+    if account.is_api:
+        return API_KIND
+    if not account.is_token:
+        return DEFAULT_KIND
+    token = environ.get(account.env_name)
+    if not token:
+        raise RoutingError(f"Codex account '{account.name}' has no token in {account.env_name}")
+    if token.startswith(PERSONAL_TOKEN_PREFIX):
+        return ACCESS_TOKEN_KIND
+    if token.startswith(API_KEY_PREFIX):
+        raise RoutingError(
+            f"{account.env_name} holds an api key; put it in CODEX_API_KEY and route {API_ACCOUNT} instead"
+        )
+    claims = _claims(token)
+    if AGENT_IDENTITY_CLAIM in claims or OPENAI_AUTH_CLAIM not in claims:
+        return ACCESS_TOKEN_KIND
+    if not _chatgpt_account_id(claims):
+        raise RoutingError(f"{account.env_name} holds a ChatGPT token with no chatgpt_account_id claim")
+    return OAUTH_KIND
+
+
+def credential(account: CodexAccount, environ: Mapping[str, str]) -> CodexAccount:
+    return replace(account, bearer=True) if credential_kind(account, environ) == OAUTH_KIND else account
+
+
+def refusal(account: CodexAccount, environ: Mapping[str, str]) -> str:
+    try:
+        credential_kind(account, environ)
+    except RoutingError as exc:
+        return str(exc)
+    return ""
+
+
+def bearer_overrides() -> list[str]:
+    settings = {
+        "name": "ChatGPT",
+        "base_url": CHATGPT_BASE_URL,
+        "env_key": TOKEN_ENV,
+        "wire_api": "responses",
+        "requires_openai_auth": False,
+        "supports_websockets": False,
+    }
+    pairs = [f"model_provider={json.dumps(BEARER_PROVIDER)}"]
+    pairs += [f"model_providers.{BEARER_PROVIDER}.{key}={json.dumps(value)}" for key, value in settings.items()]
+    pairs.append(f"model_providers.{BEARER_PROVIDER}.env_http_headers.chatgpt-account-id={json.dumps(ACCOUNT_ID_ENV)}")
+    return [part for pair in pairs for part in ("-c", pair)]
 
 
 def token_accounts(environ: Mapping[str, str]) -> list[CodexAccount]:
@@ -102,7 +183,7 @@ def _registry() -> dict:
 def quotas(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, CodexQuota | None]:
     """Each account's newest quota, from the session logs the session registry attributes to it."""
     owner = {session_id: info.get("account") for session_id, info in _registry().items()}
-    tokens = {account.name for account in pool if account.is_token}
+    tokens = {account.name for account in [*pool, *token_accounts(environ)] if account.is_token}
 
     def keep(account: CodexAccount) -> Callable[[str], bool]:
         if account.is_token:
@@ -132,6 +213,7 @@ def probe(account: CodexAccount, environ: Mapping[str, str], run: Callable = sub
     """A fresh reading from one tiny exec on the account, read from the rollout it writes."""
     codex_bin = shutil.which(CODEX_BIN) or CODEX_BIN
     try:
+        account = credential(account, environ)
         done = run(
             command(account, codex_bin, PROBE_ARGS),
             env=child_environment(account, environ),
@@ -140,7 +222,7 @@ def probe(account: CodexAccount, environ: Mapping[str, str], run: Callable = sub
             stdin=subprocess.DEVNULL,
             timeout=PROBE_TIMEOUT_S,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired, RoutingError):
         return None
     thread = _thread(done.stdout) if done.stdout else ""
     return codex_quota.session_quota(dict(environ), thread) if thread else None
@@ -183,7 +265,7 @@ class CodexAccountSource:
         return () if self.run is None else (self.run,)
 
     def pool(self, environ: Mapping[str, str]) -> list[CodexAccount]:
-        return routing_pool(environ, *self._run())
+        return [account for account in routing_pool(environ, *self._run()) if not refusal(account, environ)]
 
     def readings(
         self, pool: list[CodexAccount], environ: Mapping[str, str], now: float
@@ -215,7 +297,7 @@ class CodexAccountSource:
         if slot.account not in tokens:
             available = ", ".join(tokens) or "none"
             raise RoutingError(f"Codex account '{slot.account}' has no token; available: {available}")
-        return child_environment(tokens[slot.account], environ)
+        return child_environment(credential(tokens[slot.account], environ), environ)
 
 
 def select(
@@ -238,7 +320,9 @@ def select(
     pool_live = sum(sessions.get(account.name, 0) for account in pool)
     seat = place.place(api, CodexAccountSource(sessions=sessions).offer(pool, quotas, now), weight, pool_live)
     if seat is None:
-        raise RoutingError("no signed in Codex account has a fresh reading and a free session under its quota band")
+        refused = [text for account in token_accounts(environ or {}) if (text := refusal(account, environ or {}))]
+        no_seat = "no signed in Codex account has a fresh reading and a free session under its quota band"
+        raise RoutingError("; ".join([no_seat, *refused]))
     if seat.kind == API:
         return api_account(environ or {}), "open", seat
     return by_name[seat.account], "open", seat
@@ -262,12 +346,16 @@ def child_environment(account: CodexAccount, environ: Mapping[str, str]) -> dict
     if account.is_token:
         child[account.env_name] = environ[account.env_name]
         child[TOKEN_ENV] = environ[account.env_name]
+    if account.bearer:
+        child[ACCOUNT_ID_ENV] = _chatgpt_account_id(_claims(environ[account.env_name]))
     return child
 
 
 def command(account: CodexAccount, codex_bin: str, args: list[str]) -> list[str]:
     if account.is_api:
         return [codex_bin, NO_DAEMON, *codex_api.overrides(account.key_env, account.base_url), *args]
+    if account.bearer:
+        return [codex_bin, NO_DAEMON, *bearer_overrides(), *args]
     return [codex_bin, *([NO_DAEMON] if account.is_token else []), *args]
 
 
@@ -307,7 +395,7 @@ def _route(environ: Mapping[str, str], route: str, run: Callable) -> tuple[Codex
     if route == API_ACCOUNT:
         return api_account(environ), "forced", sessions.get(API_ACCOUNT, 0), "?"
     source = CodexAccountSource(run, refresh=not route)
-    pool = source.pool(environ)
+    pool = routing_pool(environ, run) if route else source.pool(environ)
     now = time.time()
     found = source.readings(pool, environ, now)
     account, placement, seat = select(pool, found, sessions, now, route, environ)
@@ -330,6 +418,7 @@ def main(
     fcntl.flock(lock, fcntl.LOCK_EX)
     try:
         account, placement, live, cap = _route(active, route, run)
+        account = credential(account, active)
     except RoutingError as exc:
         print(f"agentihooks codex: {exc}", file=sys.stderr)
         _report(report, status="failed", error=str(exc))
