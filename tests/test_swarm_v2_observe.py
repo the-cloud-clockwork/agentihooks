@@ -549,8 +549,9 @@ def test_a_working_classification_holds_the_attempt_working_on_the_same_evidence
         suspect.failure,
     )
     running = observer.observe("fixture", agent, [pod(agent, age=-20.0)], NOW + 20)
+    denied = observer.observe("fixture", agent, [pod(agent, Reading.FORBIDDEN, "", age=-30.0)], NOW + 30)
     later = observer.observe("fixture", agent, [], NOW + 5000)
-    for held in (running, later):
+    for held in (running, denied, later):
         assert (held.state, held.needs_operator, held.suspect_since) == (State.WORKING, False, 0.0)
         assert ruling_of(held) == ("working", REASON, "master@x-1", NOW + 10)
     assert observer.audit("fixture") == []
@@ -656,7 +657,7 @@ def test_the_master_or_the_operator_classifies_through_the_swarm_command(cautiou
     name = who
     if who == "master":
         name = store.next_name("fixture", "master")
-        store.put_agent("fixture", AgentRecord(name, "master", "master", seat="master@fixture"))
+        store.put_agent("fixture", AgentRecord(name, "master", "", seat="master@fixture"))
     named = ["--as", name] if name else []
     assert classify_cli(monkeypatch, store, *named, "classify", agent.execution_id, "lost", "--reason", "gone") == 0
     by = name or "operator"

@@ -164,6 +164,12 @@ def _terminal(found: Seen | None) -> Terminal:
     return Terminal.REACHABLE if found.reading is Reading.OK else Terminal.DEGRADED
 
 
+def _lost(source: Source, reading: Reading, value: str) -> bool:
+    if source is Source.KUBERNETES and reading is Reading.NOT_FOUND:
+        return True
+    return reading is Reading.OK and (source, value) in LOSS
+
+
 def _alive(gone: bool, values: dict[Source, str], current: dict[Source, str]) -> tuple[State, Failure, Confidence]:
     if gone:
         return State.SUSPECT, Failure.WORKER_LOSS, Confidence.UNCERTAIN
@@ -183,7 +189,7 @@ def _judge(
     pod = latest[Source.KUBERNETES].reading if Source.KUBERNETES in latest else Reading.UNREACHABLE
     values = _values(latest)
     phase, supervisor = values.get(Source.KUBERNETES), values.get(Source.SUPERVISOR)
-    gone = pod is Reading.NOT_FOUND or phase in ENDED or supervisor == EXITED
+    gone = any(_lost(source, found.reading, found.value) for source, found in latest.items())
     if fresh:
         return _alive(gone, values, _values(current))
     if gone:
@@ -222,8 +228,7 @@ def _loss_at(sources: dict[str, dict[str, Any]]) -> float:
         (
             entry["observed_at"]
             for name, entry in sources.items()
-            if (name, entry["reading"]) == (Source.KUBERNETES, Reading.NOT_FOUND)
-            or (entry["reading"] == Reading.OK and (name, entry["value"]) in LOSS)
+            if _lost(Source(name), Reading(entry["reading"]), entry["value"])
         ),
         default=0.0,
     )
