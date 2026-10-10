@@ -6,6 +6,7 @@ import subprocess
 
 HEADING_RE = re.compile(r"^#\s+(.+)$", re.M)
 NO_REPO = ("not a git repository", "point to a known GitHub host")
+REFUSED_NOTE = "The ledger refused this plan publish, so its issue is closed until the same plan is published again."
 
 
 class PublishError(RuntimeError):
@@ -52,20 +53,24 @@ def reused_issue(path: str, repo: str, run=subprocess.run) -> str:
         "--search",
         f'"{path}" in:body',
         "--json",
-        "url,state,body",
+        "url,state,body,comments",
         *(["--repo", repo] if repo else []),
     ]
     found = [issue for issue in json.loads(gh_issue(argv, run)) if path in issue["body"]]
-    if not found:
+    if issue := next((issue for issue in found if issue["state"] == "OPEN"), None):
+        return issue["url"]
+    issue = next(
+        (issue for issue in found if issue["comments"][-1:] and issue["comments"][-1]["body"] == REFUSED_NOTE), None
+    )
+    if issue is None:
         return ""
-    issue = min(found, key=lambda issue: issue["state"] != "OPEN")
-    if issue["state"] != "OPEN":
-        gh_issue(["gh", "issue", "reopen", issue["url"]], run)
+    gh_issue(["gh", "issue", "reopen", issue["url"]], run)
     return issue["url"]
 
 
 def close_issue(url: str, run=subprocess.run) -> None:
-    gh_issue(["gh", "issue", "close", url, "--reason", "not planned"], run)
+    gh_issue(["gh", "issue", "comment", url, "--body", REFUSED_NOTE], run)
+    gh_issue(["gh", "issue", "close", url], run)
 
 
 def gh_issue(argv: list[str], run) -> str:
