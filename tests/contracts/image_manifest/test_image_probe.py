@@ -60,6 +60,7 @@ def server(monkeypatch):
         return instance
 
     monkeypatch.setattr(image_probe.subprocess, "Popen", popen)
+    monkeypatch.setattr(image_probe, "STARTUP_SECONDS", 0.0)
     return instance
 
 
