@@ -947,7 +947,7 @@ def test_a_refused_publish_whose_issue_will_not_close_still_names_the_refusal(tm
     stub_publish(monkeypatch, [])
 
     def close(url):
-        raise ledger_publish.PublishError(f"gh issue close failed: {url}")
+        raise ledger.ledger_publish.PublishError(f"gh issue close failed: {url}")
 
     monkeypatch.setattr(ledger.ledger_publish, "close_issue", close)
     phases = {"phases": [{"id": "p1", "title": "One"}]}
