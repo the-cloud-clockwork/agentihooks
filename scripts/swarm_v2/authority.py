@@ -22,13 +22,24 @@ local expected = cjson.decode(ARGV[4])
 if leader.owner ~= expected.owner or leader.epoch ~= expected.epoch or leader.expires_at <= now then
     return 'controller_stale'
 end
-if ARGV[3] ~= 'replayed' and tonumber(ARGV[7]) <= now then return 'worker_expired' end
+if ARGV[7] ~= '' and tonumber(ARGV[7]) <= now then return 'worker_expired' end
 if (redis.call('GET', KEYS[1]) or '') ~= ARGV[2] then return 'stale_generation' end
 local current = cjson.decode(ARGV[1])
 if ARGV[3] == 'admitted' and current.lease_deadline_ms <= now then return 'stale_generation' end
 if ARGV[3] ~= 'admitted' and ARGV[3] ~= 'replayed' then
     local previous = cjson.decode(ARGV[2])
     if previous.state ~= 'active' or previous.lease_deadline_ms <= now then return 'stale_generation' end
+end
+if ARGV[8] ~= '' then
+    local sequence = tonumber(ARGV[8])
+    local seen = redis.call('GET', KEYS[5])
+    if seen then
+        local fence = cjson.decode(seen)
+        if fence.sequence > sequence or (fence.sequence == sequence and fence.digest ~= ARGV[9]) then
+            return 'out_of_order'
+        end
+    end
+    redis.call('SET', KEYS[5], cjson.encode({sequence = sequence, digest = ARGV[9]}))
 end
 redis.call('SET', KEYS[1], ARGV[1])
 if ARGV[5] ~= '' then redis.call('RPUSH', KEYS[2], ARGV[5]) end
@@ -52,6 +63,13 @@ class TaskClaim:
     lease_deadline_ms: int
     state: str = "active"
     result: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class RenewalFence:
+    key: str
+    sequence: int
+    digest: str
 
 
 class TaskAuthority:
@@ -151,14 +169,14 @@ class TaskAuthority:
 
         return self._write(token, "admitted", create)
 
-    def renew(self, token: str, generation: int, lease_ms: int) -> TaskClaim:
+    def renew(self, token: str, generation: int, lease_ms: int, fence: RenewalFence | None = None) -> TaskClaim:
         self._duration(lease_ms)
 
         def update(pipe, scope, previous):
             self._holder(scope, generation, previous)
             return replace(previous, lease_deadline_ms=lease.now_ms(self.store) + lease_ms)
 
-        return self._write(token, "renewed", update)
+        return self._write(token, "renewed", update, fence)
 
     def release(self, token: str, generation: int) -> TaskClaim:
         def update(pipe, scope, previous):
@@ -205,7 +223,9 @@ class TaskAuthority:
         if previous.state != "active" or previous.lease_deadline_ms <= lease.now_ms(self.store):
             self._stale()
 
-    def _write(self, token: str, event: str, action: Callable[..., TaskClaim]) -> TaskClaim:
+    def _write(
+        self, token: str, event: str, action: Callable[..., TaskClaim], fence: RenewalFence | None = None
+    ) -> TaskClaim:
         scope = self._scope(token)
         key = self.store.key(self.slug, "task-authority", scope.task_id)
         journal = self.store.key(self.slug, "claim-journal", scope.task_id)
@@ -224,6 +244,7 @@ class TaskAuthority:
                     "launch-grants-disabled",
                 )
             ],
+            *([fence.key] if fence else []),
         ]
         for _ in range(WRITE_ATTEMPTS):
             with self.store.redis.pipeline() as pipe:
@@ -239,18 +260,24 @@ class TaskAuthority:
                     if previous is not None and (tail is None or previous != TaskClaim(**json.loads(tail)["claim"])):
                         raise SwarmError("journal_conflict")
                     current = action(pipe, scope, previous)
-                    if current == previous:
+                    if current == previous and fence is None:
                         return current
                     audit = json.loads(pipe.hget(self.store.key(self.slug, "launch-grants"), scope.grant_id))
                     deadline = int(datetime.fromisoformat(audit["expires_at"]).timestamp() * 1000)
-                    self._commit(pipe, current, previous, event, deadline)
+                    self._commit(pipe, current, previous, event, deadline, fence)
                     return current
                 except WatchError:
                     continue
         raise SwarmError("dependency_unavailable")
 
     def _commit(
-        self, pipe: Any, current: TaskClaim, previous: TaskClaim | None, event: str, worker_deadline_ms: int = 0
+        self,
+        pipe: Any,
+        current: TaskClaim,
+        previous: TaskClaim | None,
+        event: str,
+        worker_deadline_ms: int | str = "",
+        fence: RenewalFence | None = None,
     ) -> None:
         task = current.task_id
         fenced = (
@@ -258,14 +285,18 @@ class TaskAuthority:
             if event == "admitted" and previous and previous.state == "active"
             else None
         )
-        pipe.multi()
-        pipe.eval(
-            COMMIT,
-            4,
+        keys = [
             self.store.key(self.slug, "task-authority", task),
             self.store.key(self.slug, "claim-journal", task),
             self.store.key(self.slug, "claim", task),
             self.store.key(self.slug, "control-owner"),
+            *([fence.key] if fence else []),
+        ]
+        pipe.multi()
+        pipe.eval(
+            COMMIT,
+            len(keys),
+            *keys,
             json.dumps(asdict(current)),
             json.dumps(asdict(previous)) if previous else "",
             event,
@@ -273,11 +304,14 @@ class TaskAuthority:
             json.dumps({"event": "fenced", "claim": asdict(fenced)}) if fenced else "",
             json.dumps({"event": event, "claim": asdict(current)}) if event != "replayed" else "",
             worker_deadline_ms,
+            *((fence.sequence, fence.digest) if fence else ("",)),
         )
         result = pipe.execute()[0]
         if result == "worker_expired":
             raise SwarmError("worker credential has expired")
         if result == "stale_generation":
             self._stale()
+        if result == "out_of_order":
+            raise SwarmError("out_of_order")
         if result != "committed":
             raise SwarmError("the controller lease is stale")
