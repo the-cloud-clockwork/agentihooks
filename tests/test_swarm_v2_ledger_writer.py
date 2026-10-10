@@ -127,11 +127,40 @@ def test_a_snapshot_copies_committed_rows_still_in_the_write_ahead_log(tmp_path)
         live.close()
     assert texts(target) == ["first", "second"]
     assert sorted(path.name for path in target.parent.iterdir()) == ["copy.sqlite3"]
-    copy = sqlite3.connect(target)
-    try:
-        assert copy.execute("PRAGMA journal_mode").fetchone() == ("delete",)
-    finally:
-        copy.close()
+
+
+def test_a_snapshot_creates_nested_backup_folders(tmp_path):
+    database(tmp_path / "live.sqlite3", "row").close()
+    target = tmp_path / "backups" / "daily" / "copy.sqlite3"
+    ledger_writer.snapshot(tmp_path / "live.sqlite3", target)
+    assert texts(target) == ["row"]
+
+
+def test_a_snapshot_copies_into_a_hidden_temporary_beside_the_target(tmp_path, monkeypatch):
+    database(tmp_path / "live.sqlite3", "row").close()
+    seen = []
+    real = ledger_writer.copy_database
+
+    def copy(source, temporary):
+        seen.append(temporary)
+        real(source, temporary)
+
+    monkeypatch.setattr(ledger_writer, "copy_database", copy)
+    target = tmp_path / "backups" / "copy.sqlite3"
+    ledger_writer.snapshot(tmp_path / "live.sqlite3", target)
+    assert seen[0].parent == target.parent
+    assert seen[0].name.startswith(".copy.sqlite3.")
+    assert not seen[0].exists()
+
+
+def test_a_failure_after_the_temporary_vanished_keeps_its_own_error(tmp_path, monkeypatch):
+    def vanish(source, temporary):
+        temporary.unlink()
+        raise ValueError("copy failed")
+
+    monkeypatch.setattr(ledger_writer, "copy_database", vanish)
+    with pytest.raises(ValueError, match="^copy failed$"):
+        ledger_writer.snapshot(tmp_path / "live.sqlite3", tmp_path / "out" / "copy.sqlite3")
 
 
 def test_a_snapshot_accepts_text_paths(tmp_path):
@@ -144,8 +173,9 @@ def test_a_failed_snapshot_keeps_the_previous_copy_and_leaves_no_partial_file(tm
     target = tmp_path / "backups" / "copy.sqlite3"
     target.parent.mkdir()
     database(target, "previous").close()
-    with pytest.raises(sqlite3.OperationalError):
+    with pytest.raises(FileNotFoundError) as missing:
         ledger_writer.snapshot(tmp_path / "missing.sqlite3", target)
+    assert str(missing.value) == f"no database at {tmp_path / 'missing.sqlite3'}"
     assert texts(target) == ["previous"]
     assert sorted(path.name for path in target.parent.iterdir()) == ["copy.sqlite3"]
 
@@ -159,6 +189,7 @@ def test_an_unverified_snapshot_is_never_renamed_into_place(tmp_path, monkeypatc
 
 
 def test_verify_names_a_failed_integrity_check(tmp_path, monkeypatch):
+    (tmp_path / "copy.sqlite3").touch()
     connection = Mock()
     connection.execute.return_value.fetchone.return_value = ("row 3 missing from index",)
     connect = Mock(return_value=connection)
@@ -166,13 +197,13 @@ def test_verify_names_a_failed_integrity_check(tmp_path, monkeypatch):
     with pytest.raises(ValueError) as failed:
         ledger_writer.verify(tmp_path / "copy.sqlite3")
     assert str(failed.value) == f"{tmp_path / 'copy.sqlite3'} failed its integrity check: row 3 missing from index"
-    connect.assert_called_once_with(f"{(tmp_path / 'copy.sqlite3').as_uri()}?mode=ro", uri=True)
+    connect.assert_called_once_with(tmp_path / "copy.sqlite3")
     connection.execute.assert_called_once_with("PRAGMA integrity_check")
     connection.close.assert_called_once_with()
 
 
 def test_verify_never_creates_a_missing_file(tmp_path):
-    with pytest.raises(sqlite3.OperationalError):
+    with pytest.raises(FileNotFoundError):
         ledger_writer.verify(tmp_path / "missing.sqlite3")
     assert not (tmp_path / "missing.sqlite3").exists()
 
@@ -199,7 +230,7 @@ def test_a_restore_is_refused_while_a_writer_holds_the_folder(tmp_path, lease):
 
 
 def test_a_missing_backup_is_refused_before_the_lease_is_taken(tmp_path, lease):
-    with pytest.raises(sqlite3.OperationalError):
+    with pytest.raises(FileNotFoundError):
         ledger_writer.restore(tmp_path / "missing.sqlite3", tmp_path)
     assert ledger_writer.conflicts_total(tmp_path) == 0
 
@@ -261,6 +292,17 @@ def test_the_command_reads_the_development_ledger_folder_by_default(tmp_path, mo
     finally:
         held.release()
     assert json.loads(capsys.readouterr().out) == {"holder": CLAIMANT, "conflicts": 0}
+
+
+def test_the_command_reports_a_missing_backup(tmp_path, capsys):
+    assert ledger_writer.main(["--dir", str(tmp_path), "restore", str(tmp_path / "gone.sqlite3")]) == 1
+    assert capsys.readouterr().err == f"no database at {tmp_path / 'gone.sqlite3'}\n"
+
+
+def test_the_command_help_states_its_purpose(capsys):
+    with pytest.raises(SystemExit):
+        ledger_writer.main(["--help"])
+    assert "One active writer per ledger folder: a flock lease" in " ".join(capsys.readouterr().out.split())
 
 
 def test_the_command_needs_a_subcommand(capsys):

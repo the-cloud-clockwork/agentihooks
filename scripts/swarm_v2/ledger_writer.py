@@ -70,8 +70,9 @@ class WriterLease:
             found = holder(self.directory)
             record_conflict(self.directory, found, claimant)
             raise WriterConflict(self.directory, found) from None
-        os.ftruncate(fd, 0)
-        os.pwrite(fd, json.dumps(claimant, sort_keys=True).encode(), 0)
+        record = json.dumps(claimant, sort_keys=True).encode()
+        os.pwrite(fd, record, 0)
+        os.ftruncate(fd, len(record))
         os.fsync(fd)
         self._fd = fd
         return self
@@ -82,8 +83,14 @@ class WriterLease:
             self._fd = None
 
 
+def existing(path: Path) -> sqlite3.Connection:
+    if not Path(path).is_file():
+        raise FileNotFoundError(f"no database at {path}")
+    return sqlite3.connect(path)
+
+
 def verify(path: Path) -> None:
-    connection = sqlite3.connect(f"{Path(path).as_uri()}?mode=ro", uri=True)
+    connection = existing(path)
     try:
         result = connection.execute("PRAGMA integrity_check").fetchone()[0]
     finally:
@@ -92,14 +99,12 @@ def verify(path: Path) -> None:
         raise ValueError(f"{path} failed its integrity check: {result}")
 
 
-def copy_database(source: Path, target: Path, standalone: bool = False) -> None:
-    reader = sqlite3.connect(f"{Path(source).as_uri()}?mode=ro", uri=True)
+def copy_database(source: Path, target: Path) -> None:
+    reader = existing(source)
     try:
         writer = sqlite3.connect(target)
         try:
             reader.backup(writer)
-            if standalone:
-                writer.execute("PRAGMA journal_mode=DELETE")
         finally:
             writer.close()
     finally:
@@ -112,7 +117,7 @@ def snapshot(database: Path, target: Path) -> Path:
     fd, temporary = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.")
     os.close(fd)
     try:
-        copy_database(database, Path(temporary), standalone=True)
+        copy_database(database, Path(temporary))
         verify(Path(temporary))
         os.replace(temporary, target)
     except BaseException:
@@ -137,8 +142,8 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dir", type=Path, default=Path(os.environ.get("LEDGER_DIR", "~/development-ledger")))
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("snapshot").add_argument("target", type=Path)
-    commands.add_parser("restore").add_argument("backup", type=Path)
+    commands.add_parser("snapshot").add_argument("target")
+    commands.add_parser("restore").add_argument("backup")
     commands.add_parser("holder")
     args = parser.parse_args(argv)
     directory = args.dir.expanduser()
@@ -148,8 +153,8 @@ def main(argv=None) -> int:
         elif args.command == "restore":
             print(restore(args.backup, directory))
         else:
-            print(json.dumps({"holder": holder(directory), "conflicts": conflicts_total(directory)}, sort_keys=True))
-    except (WriterConflict, ValueError, sqlite3.Error) as exc:
+            print(json.dumps({"holder": holder(directory), "conflicts": conflicts_total(directory)}))
+    except (WriterConflict, OSError, ValueError, sqlite3.Error) as exc:
         print(exc, file=sys.stderr)
         return 1
     return 0
