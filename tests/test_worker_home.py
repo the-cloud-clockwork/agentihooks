@@ -198,13 +198,22 @@ def test_a_home_bootstrapped_from_a_distributed_launch_claims_broadcasts_from_it
     assert settings["env"]["AGENTIHOOKS_SWARM_API_URL"] == API
     assert f'export AGENTIHOOKS_SWARM_API_URL="${{AGENTIHOOKS_SWARM_API_URL:={API}}}"' in wrapper
     worker_home.store_grant(attempt, launch.grant)
-    sent = []
-    monkeypatch.setattr(
-        "urllib.request.urlopen", lambda claim, timeout: sent.append(claim) or io.BytesIO(b'{"deliveries": []}')
-    )
-    monkeypatch.setattr("hooks.context.broadcast.cache_fleet_broadcasts", len)
+    sent, cached = [], []
+
+    def urlopen(claim, timeout):
+        sent.append(claim)
+        return io.BytesIO(b'{"deliveries": []}')
+
+    def cache(entries):
+        cached.append(entries)
+        return 0
+
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    monkeypatch.setattr("hooks.context.broadcast.cache_fleet_broadcasts", cache)
 
     assert broadcast_bridge.claim("s-remote", ["brain"], {**settings["env"], broadcasts.FLAG: "1"}) == 0
+
+    assert cached == [[]]
 
     [claim] = sent
     assert claim.full_url == f"{API}/v2/broadcasts/claim"
