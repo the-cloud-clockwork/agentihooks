@@ -1,6 +1,9 @@
 {{- $fullname := include "swarm.fullname" . }}
 {{- $host := printf "%s-ledger" $fullname }}
 {{- $port := .Values.ledger.port }}
+{{- if ne (int .Values.ledger.replicas) 1 }}
+{{- fail "ledger.replicas must be 1: the ledger folder has one active writer, and a second replica would be refused at startup" }}
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -25,7 +28,7 @@ metadata:
     {{- include "swarm.labels" . | nindent 4 }}
     app.kubernetes.io/component: ledger
 spec:
-  replicas: 1
+  replicas: {{ .Values.ledger.replicas }}
   serviceName: {{ $host }}
   podManagementPolicy: OrderedReady
   updateStrategy:

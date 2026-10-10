@@ -48,6 +48,7 @@ from scripts.swarm_ledger.events.publishing import publishing  # noqa: E402
 from scripts.swarm_ledger.repository import legacy  # noqa: E402
 from scripts.swarm_ledger.repository import repository as stored  # noqa: E402
 from scripts.swarm_ledger.server_code import CODE_DIRS, code_stamp  # noqa: E402
+from scripts.swarm_v2 import ledger_writer  # noqa: E402
 
 HOST, PORT = ledger_link.address()
 BASE = f"http://{HOST}:{PORT}"
@@ -911,6 +912,10 @@ def watch_ledgers(interval=2.0):
 
 def serve():
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        writer = ledger_writer.WriterLease(core.LEDGER_DIR).acquire(ledger_writer.owner())
+    except ledger_writer.WriterConflict as conflict:
+        sys.exit(str(conflict))
     legacy.adopt(stored)
     threading.Thread(target=watch_ledgers, daemon=True).start()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
@@ -923,6 +928,7 @@ def serve():
     finally:
         stopped.set()
         server.server_close()
+        writer.release()
 
 
 def port_held() -> bool:
