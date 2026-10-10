@@ -79,8 +79,8 @@
     "manifest": "evidence/SV2-LDG-05/manifest.json"
   },
   "decisions": [
-    "A worker enters no new mutations mode when it receives a drain, before the server confirmed the acknowledgement: stopping early is safe and a dropped acknowledgement must not let mutations continue; a drain the server refuses lifts it unless another drain holds",
-    "Answer, cancel and stop run only after the server accepted them, so an expired command is never run and a retried acknowledgement returns the stored acceptance without a second run",
+    "A worker enters no new mutations mode when it receives a drain, before the server confirmed the acknowledgement: stopping early is safe and a dropped acknowledgement must not let mutations continue",
+    "Every command is acknowledged before the worker acts on it, so an expired command is never acted on and a retried acknowledgement returns the stored acceptance without a second run; cancel and stop then run, and an answer runs unless a drain holds, in which case it is reported not_run",
     "Expiry is derived on read from the stored issue time; an unacknowledged command past its expiry is never delivered or accepted, while an accepted command may still report its outcome after expiry",
     "An answer delivered while a drain holds is acknowledged and reported not_run instead of run, because new instructions would start new work; cancel and stop still run because they only end work",
     "A drain stops holding only when the server refused its acknowledgement as expired and no checkpoint was taken; a refusal for a superseded execution or a refused completion keeps the hold"
