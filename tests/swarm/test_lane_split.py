@@ -275,6 +275,25 @@ def test_a_shift_keeps_live_agents_and_one_seat_for_ready_work():
     assert (live["shift"], ready["shift"], idle["shift"]) == (0, 0, 1)
 
 
+def test_a_shift_of_one_moves_one_ceiling_toward_ci():
+    previous = {"ceilings": {"plan": 0, "ci": 1, "eng": 5}, "pending_raise": {"target": None, "ticks": 0}}
+    one = calculate({"eng": 1, "ci": 1}, {"claude": 4}, 10, {"eng": 3, "ci": 3}, previous, shift=1)
+    assert (one["ceilings"], one["shift"]) == ({"plan": 0, "ci": 5, "eng": 1}, 1)
+    assert one["reason"].endswith("; lane shift 1 from eng to ci.")
+
+
+def test_a_lane_missing_from_live_and_demand_has_no_floor():
+    previous = {"ceilings": {"plan": 0, "ci": 0, "eng": 1}, "pending_raise": {"target": None, "ticks": 0}}
+    decision = calculate({"ci": 0}, {"claude": 1}, 10, {}, previous, shift=1)
+    assert (decision["ceilings"], decision["shift"]) == ({"plan": 0, "ci": 1, "eng": 0}, 1)
+
+
+def test_a_clamped_shift_leaves_the_reason_unchanged():
+    previous = {"ceilings": {"plan": 0, "ci": 1, "eng": 5}, "pending_raise": {"target": None, "ticks": 0}}
+    args = ({"eng": 3, "ci": 0}, {"claude": 4}, 10, {"eng": 0, "ci": 3}, previous)
+    assert calculate(*args, shift=9)["reason"] == calculate(*args)["reason"]
+
+
 def test_no_shift_leaves_the_decision_unchanged():
     previous = {"ceilings": {"plan": 0, "ci": 1, "eng": 5}, "pending_raise": {"target": None, "ticks": 0}}
     args = ({"eng": 1, "ci": 1}, {"claude": 4}, 10, {"eng": 3, "ci": 3}, previous)

@@ -29,8 +29,8 @@ class Lanes:
 def streak(previous: dict, found: dict) -> dict:
     if not found or found.get("at") == previous.get("at"):
         return previous
-    named = found.get("bottleneck", "")
-    ticks = previous.get("ticks", 0) + 1 if named == previous.get("named") else 1
+    named = found["bottleneck"]
+    ticks = previous["ticks"] + 1 if named == previous.get("named") else 1
     return {"named": named, "ticks": ticks, "at": found["at"]}
 
 
