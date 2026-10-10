@@ -16,20 +16,20 @@ from pathlib import Path
 from scripts.swarm.keyspace import ROOT
 
 PREFIX = f"{ROOT}:names"
-TYPES = {"master": "master", "eng": "engineer", "ci": "ci", "plan": "planner"}
+TYPES = {"master": "master", "eng": "engineer", "ci": "ci", "plan": "planner", "dispatch": "dispatcher"}
 LANES = {kind: lane for lane, kind in TYPES.items()}
 OPERATOR = "operator"
-NAME_RE = re.compile(r"(master|engineer|ci|planner)@([0-9a-f]{6})-(\d{4})")
+NAME_RE = re.compile(r"(master|engineer|ci|planner|dispatcher)@([0-9a-f]{6})-(\d{4})")
 LEGACY_RE = re.compile(r"(.+)-(eng|ci|master)-\d+")
 CODE_RE = re.compile(r"[0-9a-f]{6}")
 SWARM_RE = re.compile(r"swarm@([0-9a-f]{6})")
 MINT_ATTEMPTS = 20
-_BASE = r"(?:(?:master|engineer|ci|planner)-[0-9a-f]{6}-\d{4}|session-[0-9a-f]{8})"
+_BASE = r"(?:(?:master|engineer|ci|planner|dispatcher)-[0-9a-f]{6}-\d{4}|session-[0-9a-f]{8})"
 _REPO = r"[a-z0-9][a-z0-9._-]*"
 PROOF_RE = re.compile(r"proof-[0-9a-f]{6}-[a-z0-9]+-\d+")
 PATTERNS = {
     "agent": NAME_RE,
-    "pane": re.compile(r"(?:master|engineer|ci|planner)-[0-9a-f]{6}-\d{4}"),
+    "pane": re.compile(r"(?:master|engineer|ci|planner|dispatcher)-[0-9a-f]{6}-\d{4}"),
     "space": re.compile(rf"{_REPO}-[0-9a-f]{{6}}|{PROOF_RE.pattern}"),
     "worktree": re.compile(rf"{_BASE}(?:-\d+)?"),
     "tmp": re.compile(rf"{_BASE}-tmp-\d+"),

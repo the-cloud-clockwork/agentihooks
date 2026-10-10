@@ -123,7 +123,7 @@ def test_the_tick_spawns_the_seat_at_full_autonomy_only():
 def test_the_seat_spawn_helper_names_records_and_places_a_seat():
     store, runtime = swarm(), FakeRuntime()
     record, placed = seat_spawn.place(
-        SLUG, store.config(SLUG), store, runtime, dispatch_seat.LANE, "dispatcher", NOW, lambda r: {"id": r.task}
+        SLUG, store.config(SLUG), store, runtime, dispatch_seat.LANE, NOW, lambda r: {"id": r.task}
     )
     assert (record.lane, record.task, record.seat) == ("dispatch", "dispatcher", f"dispatcher@{SLUG}")
     assert placed.pane_id and record.name in runtime.live
