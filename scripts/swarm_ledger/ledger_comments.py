@@ -102,7 +102,6 @@ def post_status(thread, by, entry_id, text, ctx, target, attachments=None):
 
 
 def post_outcome(thread, op, ctx, target):
-    """An outcome proposal is a claim the master judges, so it always starts its own entry."""
     if not any(e["id"] == op["id"] for e in thread):
         thread.append({"id": op["id"], "by": op["by"], "at": ctx.at, "text": op["text"], "outcome": op["outcome"]})
         ctx.record(op["by"], "comment added", target, id=op["id"], text=op["text"])
@@ -118,8 +117,11 @@ def seen(ctx, by):
 def check_outcome(op):
     if "outcome" not in op:
         return
-    if op["outcome"] not in OUTCOMES or op["op"] != "add" or "by" not in op or not op["thread"].endswith("/comments"):
-        raise ValueError("outcome rides only on an agent add to a comment thread, as done or blocked")
+    agent_comment = op["op"] == "add" and "by" in op and op["thread"].endswith("/comments")
+    if op["outcome"] not in OUTCOMES or not agent_comment or "attachments" in op:
+        raise ValueError(
+            "outcome rides only on an agent add to a comment thread, as done or blocked, without attachments"
+        )
 
 
 def refused(text, kind, where, ctx):

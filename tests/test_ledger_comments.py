@@ -101,8 +101,9 @@ def test_an_op_without_an_outcome_is_accepted(comments):
         {"op": "edit", "thread": "tasks/t/comments", "by": AGENT, "outcome": "done"},
         {"op": "add", "thread": "chat", "by": AGENT, "outcome": "done"},
         {"op": "add", "thread": "tasks/t/comments", "outcome": "done"},
+        {"op": "add", "thread": "tasks/t/comments", "by": AGENT, "outcome": "done", "attachments": []},
     ],
 )
 def test_an_outcome_rides_only_on_an_agent_comment_add(comments, op):
-    with pytest.raises(ValueError, match="outcome rides only on an agent add to a comment thread, as done or blocked"):
+    with pytest.raises(ValueError, match="as done or blocked, without attachments"):
         comments.check_outcome(op)
