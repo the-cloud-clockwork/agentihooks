@@ -56,6 +56,7 @@ class Controller:
         with lease.fencing(self.held.epoch):
             self.operations.recover(self.slug)
         self.reconcile()
+        self._authority()
         self.accounts.reconcile()
         self._authority()
         self.reconciled_epoch = self.held.epoch
