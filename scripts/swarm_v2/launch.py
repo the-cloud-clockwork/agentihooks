@@ -26,11 +26,10 @@ class WorkerHomeCommand:
     """The grant must never reach argv: the process table shows it."""
 
     root: Path
-    python: str = sys.executable
 
     def hand(self, agent: AgentRecord, grant: str) -> bool:
         attempt = self.root / agent.execution_id
-        command = [self.python, "-m", "scripts.swarm_v2.worker_home", "grant", str(attempt)]
+        command = [sys.executable, "-m", "scripts.swarm_v2.worker_home", "grant", str(attempt)]
         try:
             done = subprocess.run(command, input=grant, capture_output=True, text=True, timeout=GRANT_SECONDS)
         except (OSError, subprocess.TimeoutExpired):
