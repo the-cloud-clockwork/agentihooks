@@ -224,16 +224,13 @@ def test_auto_scaling_moves_the_stored_shift_against_the_last_ceilings(store, ho
     assert store.config(SLUG).lane_shift == 0
 
 
-def test_two_auto_moves_before_the_next_autoscale_run_both_count(store, home):
+def test_an_auto_move_leaves_the_autoscale_record_to_the_next_calculate(store, home):
     store.update(SLUG, scaling="auto")
-    stored = {"plan": 1, "ci": 1, "eng": 4}
-    store.redis.set(
-        store.key(SLUG, "quota-capacity"), json.dumps({"other": 7, "autoscale": {"ceilings": stored, "reason": "r"}})
-    )
-    ticks(store, "ci", 6)
-    assert store.config(SLUG).lane_shift == 2
-    saved = json.loads(store.redis.get(store.key(SLUG, "quota-capacity")))
-    assert saved == {"other": 7, "autoscale": {"ceilings": {"plan": 1, "ci": 3, "eng": 2}, "reason": "r", "shift": 2}}
+    record = {"other": 7, "autoscale": {"ceilings": {"plan": 1, "ci": 1, "eng": 4}, "reason": "r"}}
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps(record))
+    ticks(store, "ci", 3)
+    assert store.config(SLUG).lane_shift == 1
+    assert json.loads(store.redis.get(store.key(SLUG, "quota-capacity"))) == record
 
 
 def test_auto_scaling_moves_from_the_shift_calculate_achieved(store, home):
@@ -336,14 +333,20 @@ def shipped(monkeypatch):
     return rows
 
 
-def steps(store, monkeypatch, tasks):
+def steps(store, monkeypatch, tasks, record=None, spent=0):
     ready = {"eng": [{"id": "r1"}], "ci": [{"id": "r2"}, {"id": "r3"}], "plan": []}
     monkeypatch.setattr(capacity, "ready_work", lambda slug, saved, doc: (tasks, ready))
-    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps({"host": {"room": 4}}))
+    counted = []
+    monkeypatch.setattr(
+        capacity, "spawn_counter", lambda saved, now_ms: lambda since: counted.append((since, now_ms)) or spent
+    )
+    host = {"host": {"room": 4, "granted_at": NOW - 5}}
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps(host if record is None else record))
     actions = []
     for n in range(3):
         report(store, "ci", NOW + n * 60_000)
         actions += lane_split.step(SLUG, store.config(SLUG), store, {"tasks": []}, NOW + n * 60_000)
+    assert counted in ([], [(NOW - 5, NOW + 120_000)])
     return actions
 
 
@@ -373,14 +376,22 @@ def test_the_tick_step_skips_ended_agents_reads_host_room_and_ships_nothing_for_
 ):
     from scripts.swarm.store import AgentRecord
 
-    store.update(SLUG, max_ci=4)
+    store.update(SLUG, max_ci=3)
     for name, task_id in (("ci@x-1", "t2"), ("ci@x-2", "t3")):
         store.put_agent(SLUG, AgentRecord(name, "ci", task_id))
     ended = {"t2": {"id": "t2", "state": "done"}, "t3": {"id": "t3", "state": "done"}}
-    assert steps(store, monkeypatch, ended) == [
-        lane_split.HELD.format(named="ci", ticks=3, reason="the ci lane would pass host room 4")
+    assert steps(store, monkeypatch, ended, spent=1) == [
+        lane_split.HELD.format(named="ci", ticks=3, reason="the ci lane would pass host room 3")
     ]
-    assert (caps(store), shipped) == ((4, 4), [])
+    assert (caps(store), shipped) == ((4, 3), [])
+
+
+def test_the_tick_step_without_a_host_reading_moves_without_a_room_check(store, home, shipped, monkeypatch):
+    store.update(SLUG, max_ci=9)
+    steps(store, monkeypatch, {}, record={})
+    assert caps(store) == (3, 10)
+    (row,) = gate_log.recent(SLUG, None, home)
+    assert row["reason"].endswith(" Host room unknown.")
 
 
 def test_the_tick_runs_the_lane_split_after_the_rank_step_and_before_spawns():

@@ -57,21 +57,11 @@ def _capacity(config, store, slug: str) -> tuple[dict, int]:
     return {"eng": config.max_eng, "ci": config.max_ci}, config.lane_shift
 
 
-def _write_record(slug: str, store, caps: dict, shift: int) -> None:
-    key = store.key(slug, "quota-capacity")
-    saved = json.loads(store.redis.get(key) or "{}")
-    stored = saved.get("autoscale") or {}
-    if stored.get("ceilings"):
-        saved["autoscale"] = {**stored, "ceilings": {**stored["ceilings"], **caps}, "shift": shift}
-        store.redis.set(key, json.dumps(saved))
-
-
 def _apply(slug: str, config, store, caps: dict, shift: int) -> None:
     if config.scaling != AUTO_SCALING:
         store.update(slug, max_eng=caps["eng"], max_ci=caps["ci"])
         return
     store.update(slug, lane_shift=shift)
-    _write_record(slug, store, caps, shift)
 
 
 def _record(slug: str, named: str, caps: dict, move: tuple, lanes: Lanes, now_ms: int) -> str:
@@ -108,19 +98,20 @@ def lane_pass(slug: str, config: SwarmConfig, store: RedisStore, read: Callable[
     return [_record(slug, current["named"], caps, move, lanes, now_ms)]
 
 
-def _lanes(slug: str, store: RedisStore, doc: dict) -> Lanes:
+def _lanes(slug: str, store: RedisStore, doc: dict, now_ms: int) -> Lanes:
     from scripts.swarm.tick import _ended
 
     rows, ready = capacity.ready_work(slug, store, doc)
     live = capacity._busy([agent for agent in store.agents(slug) if not _ended(agent, rows)])
-    room = (capacity.read(store, slug).get("host") or {}).get("room")
+    host = capacity.read(store, slug).get("host")
+    room = capacity.unspent(host, capacity.spawn_counter(store, now_ms)) if host else None
     return Lanes({lane: len(tasks) for lane, tasks in ready.items()}, live, room)
 
 
 def step(slug: str, config: SwarmConfig, store: RedisStore, doc: dict, now_ms: int) -> list[str]:
     from scripts.swarm import metrics
 
-    found = lane_pass(slug, config, store, partial(_lanes, slug, store, doc), now_ms)
+    found = lane_pass(slug, config, store, partial(_lanes, slug, store, doc, now_ms), now_ms)
     moved = [dispatcher.Action(RULE, "apply", text, {}) for text in found if text.startswith("Moved")]
     shipped = [dispatcher.dispatch_row(slug, index, action, now_ms) for index, action in enumerate(moved)]
     return found + (metrics.record(dispatcher.TABLE, shipped, now_ms) if shipped else [])
