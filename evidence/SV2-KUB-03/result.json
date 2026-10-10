@@ -4,7 +4,7 @@
   "dependency": "SV2-KUB-02",
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2459",
-  "tested_commit": "c0fab8414b7123fa2bd44e737cc83581ea879c6e",
+  "tested_commit": "cba41f202402f9445a3b7bc58a1ba63abeaa0ac0",
   "status": "fixture-qualified-awaiting-ci",
   "evidence_class": "Mocked: fakeredis command queue, operation journal and execution registry, a fake server clock, a fixture network between worker and API, and an in process run of the worker helper standing in for kubectl exec; no Kubernetes API server, kubelet exec or live worker Pod was used.",
   "interfaces": [
@@ -28,16 +28,16 @@
   "authority": "The actor comes from Commands, which accepts only an authenticated operator or the current master incarnation, and the command queue issues only to the current occupant generation of the seat; a forged credential is refused before any write in case B. The fallback execs only into a Pod whose owner label is owner_for(slug) and whose execution and generation labels match the stored command; the helper refuses an envelope for another execution or generation of its own launch record. Kubernetes RBAC for pods/exec in the worker namespace bounds who can run the helper at all.",
   "authoritative_objects": "The worker command queue in Redis and the runtime operation journal are authoritative; the worker state file holds the worker's own run record. Helper reports, the ambiguity counts and the inbox files are observational or transient and may be dropped.",
   "states": {
-    "observed": "Cases A, B and C each ran twice with identical records and every case check held in proofs run 38073606119; the later commit only removes an unreachable leftover in the inbox collector, confirmed by the run named in validation.",
+    "observed": "Cases A, B and C each ran twice with identical records and every case check held; the records committed from proofs run 38073606119 match unchanged at tested_commit in proofs run 38074146563.",
     "accepted": "Answers from the fixture reach the worker handler with the exact structured payload over HTTP and over the fallback helper; a drain over the fallback and a drain over HTTP each put their worker in no new mutations mode and complete on its checkpoint. Shell metacharacters stay message content and every helper argv is the fixed helper, a mode and one URL safe envelope. Refused envelopes for another execution or generation, a tampered payload and an expired command leave the inbox empty, and a corrected new request is delivered. A lost delivery reply is reconciled by a status probe with no second delivery, a worker restart after a lost completion reports without rerunning, a lost issue reply is reconciled by command id with one stored command, a superseded execution is answered stale, and its worker's checkpoint after succession is refused so the server keeps the drain accepted.",
     "committed": "Code and fixture inputs are at tested_commit; manifest.json hashes them.",
     "externally_verified": "None: no live API server, exec or G3 deployment was exercised."
   },
   "validation": {
     "red": "proofs run 38071702796 on the tests only commit f78dc848: collection of the Kubernetes command tests fails on the missing module and every new worker control test fails on the missing helper functions",
-    "tests": "proofs run 38073125527 at tested_commit: 274 passed across the Kubernetes commands, worker control, worker commands, runtime commands and Kubernetes runtime modules; only the case records, then regenerated, differed",
+    "tests": "proofs run 38074146563 at tested_commit: every test passed across the Kubernetes commands, worker control, worker commands, runtime commands and Kubernetes runtime modules, including the three case record comparisons",
     "lint": "ruff check and ruff format passed through python -m scripts.ci_prepush",
-    "review": "Round one: Spec reader eleven findings, Standards reader thirteen, all fixed or answered. Round two: fixed inbox records saved before acknowledgement and dropped on refusal, helper refusals carrying the Pod identity, C1 and ESC string sequences, the visible U+009B escape in the fixture, a superseded worker's refused checkpoint, and the shared MODES constant. Held with reasons: the rollback switch stays a constructor flag like SV2-KUB-02, the uncapped exec capture is a recorded limitation, and a pod read without metadata cannot come from the API server.",
+    "review": "Three rounds by a Standards and a Spec reader. Round one: eleven Spec and thirteen Standards findings, all fixed or answered. Round two: inbox records saved before acknowledgement and dropped on refusal, helper replies carrying the Pod identity, C1 and ESC string sequences, the visible U+009B fixture escape, a superseded worker's refused checkpoint, the shared MODES constant. Round three: a received inbox drain blocks mutations like a polled one, and a helper refusal binds by command id alone. Ruling: the Standards reader did not uphold the Spec finding that the rollback switch needs a config key now, since SV2-KUB-02 uses the same constructor flag and nothing constructs the transport yet; the key must land with the controller wiring, recorded below.",
     "mutation": "pending"
   },
   "measurements": {
@@ -70,11 +70,13 @@
   "remaining_limitations": [
     "The worker loop in the image does not yet construct WorkerControl with the helper inbox and state paths; the helper writes into /home/worker/commands, which the supervisor must wire when the worker command loop lands.",
     "The fallback only delivers: acknowledgement and completion still need the authenticated endpoint, so a worker that cannot reach the controller holds a fallback command in its inbox until it expires.",
-    "The fallback switch is the fallback_enabled constructor argument, as SV2-KUB-02 does for creation; wiring it to controller configuration belongs to the controller deployment package.",
+    "The fallback switch is the fallback_enabled constructor argument and attribute, as SV2-KUB-02 does for creation; a reviewer ruling requires the controller wiring that first constructs KubernetesCommandTransport to read it from controller configuration.",
     "The Pod name is derived from the execution id by the SV2-KUB-01 naming rule rather than read from the execution registry, whose runtime target still carries a placeholder.",
     "Helper reports and ambiguity counts are kept in Redis per swarm and not exported as telemetry yet.",
     "KubectlExec captures the whole helper output before sanitize_report withholds anything over 65536 bytes; the read itself is bounded only by the exec timeout.",
-    "The controller host needs kubectl and a pods/exec grant for the fallback; neither ships with this package."
+    "The controller host needs kubectl and a pods/exec grant for the fallback; neither ships with this package.",
+    "A worker that loses its state file while keeping an inbox file it already acknowledged could run that command again; the fallback execs only for commands still issued, and a recreated Pod loses its inbox with its state.",
+    "An unterminated escape string sequence in helper output removes the rest of that report; nothing leaks, but the report can be shorter than the output."
   ],
   "pull_request": "pending",
   "follow_ups": []
