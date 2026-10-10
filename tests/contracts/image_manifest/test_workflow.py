@@ -27,9 +27,19 @@ def named(workflow, name):
 def test_dispatch_and_dev_pushes_trigger_it(workflow):
     triggers = workflow[True]
 
-    assert triggers["push"]["branches"] == ["dev"]
+    assert triggers["push"]["branches"] == ["dev", "diffcheck/**"]
     assert triggers["workflow_dispatch"]["inputs"]["publish"]["type"] == "boolean"
     assert "pull_request" not in triggers
+
+
+def test_proof_branches_publish_only_to_the_proof_repository(workflow):
+    repository = workflow["jobs"]["image"]["env"]["REPOSITORY"]
+
+    assert repository == (
+        "${{ startsWith(github.ref, 'refs/heads/diffcheck/')"
+        " && 'ghcr.io/the-cloud-clockwork/agentihooks-worker-proof'"
+        " || 'ghcr.io/the-cloud-clockwork/agentihooks-worker' }}"
+    )
 
 
 def test_every_job_runs_on_a_github_hosted_runner_without_swarm_services(workflow):

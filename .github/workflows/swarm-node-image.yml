@@ -1,0 +1,89 @@
+name: Swarm worker image
+
+on:
+  push:
+    branches: [dev, 'diffcheck/**']
+    paths:
+      - docker/swarm-node/**
+      - hooks/**
+      - profiles/**
+      - scripts/**
+      - pyproject.toml
+      - tests/contracts/image_manifest/**
+      - .github/workflows/swarm-node-image.yml
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Push the qualified image under its commit tag
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: swarm-node-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    env:
+      CANDIDATE: agentihooks-worker-candidate:${{ github.sha }}
+      INCOMPATIBLE: agentihooks-worker-incompatible-herdr:${{ github.sha }}
+      REPOSITORY: >-
+        ${{ startsWith(github.ref, 'refs/heads/diffcheck/')
+        && 'ghcr.io/the-cloud-clockwork/agentihooks-worker-proof'
+        || 'ghcr.io/the-cloud-clockwork/agentihooks-worker' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the candidate
+        run: >-
+          docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$GITHUB_SHA"
+          --file docker/swarm-node/Dockerfile --tag "$CANDIDATE" .
+      - name: Build the incompatible herdr fixture
+        run: >-
+          docker build --build-arg WORKER_IMAGE="$CANDIDATE" --tag "$INCOMPATIBLE"
+          tests/contracts/image_manifest/incompatible-herdr
+      - name: Refuse the incompatible herdr fixture
+        run: |
+          out="$RUNNER_TEMP/worker-image-attestation/incompatible"
+          if bash docker/swarm-node/qualify.sh "$INCOMPATIBLE" "$out" "$GITHUB_SHA"; then
+            echo "incompatible herdr fixture qualified" >&2
+            exit 1
+          fi
+          jq -e '.promotable == false and .report.worker_image_qualified_targets == 2
+            and .report.targets.herdr.qualified == false' "$out/attestation.json"
+      - name: Qualify the candidate
+        run: bash docker/swarm-node/qualify.sh "$CANDIDATE" "$RUNNER_TEMP/worker-image-attestation/candidate" "$GITHUB_SHA"
+      - name: Requalify the candidate independently
+        run: |
+          out="$RUNNER_TEMP/worker-image-attestation"
+          bash docker/swarm-node/qualify.sh "$CANDIDATE" "$out/repeat" "$GITHUB_SHA"
+          diff <(jq -S .report "$out/candidate/attestation.json") <(jq -S .report "$out/repeat/attestation.json")
+      - name: Log in to the registry
+        if: github.event_name == 'push' || inputs.publish
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish the qualified candidate
+        if: github.event_name == 'push' || inputs.publish
+        run: |
+          out="$RUNNER_TEMP/worker-image-attestation/candidate"
+          bash docker/swarm-node/publish.sh "$CANDIDATE" "$REPOSITORY" "$GITHUB_SHA" "$out"
+          jq -r '"digest: \(.digest)  promoted: \(.promoted)  replayed: \(.replayed)"' "$out/promoted.json" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the attestation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swarm-worker-image-attestation
+          path: ${{ runner.temp }}/worker-image-attestation

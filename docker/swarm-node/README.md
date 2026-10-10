@@ -130,3 +130,32 @@ image and no agent restart. Probe wiring and
 thresholds live in the Pod template under antoncore GitOps and roll back
 independently of the image. `tests/integration/swarm_node/run_health_proof.sh`
 proves the probes against isolated containers with real headless herdr.
+
+Image promotion runs in `.github/workflows/swarm-node-image.yml` on GitHub hosted
+runners only, so a broken swarm can still build and publish its repair image: no
+swarm runner, ledger or Redis is involved. A dev push (or a dispatch with
+`publish`) builds the candidate from the checked out commit, then
+`docker/swarm-node/qualify.sh` runs `python -m scripts.swarm_v2.image_probe`
+inside it with the network disabled and no credentials. The probe starts a
+private headless herdr server and reads its status and socket API schema, then
+launches `claude -p` and `codex exec` from fixture profiles and counts the
+sessions their SessionStart hooks registered. `scripts.swarm_v2.image_attestation`
+qualifies each target against the image manifest's pinned version and the
+accepted herdr contract (protocol 22, the detached server daemon and health check
+capabilities, and every socket method the runtime calls) and reports
+`worker_image_qualified_targets`. Any refused target, or a manifest naming another
+commit, leaves the image unpromotable and nothing is pushed. The same job builds
+an incompatible herdr fixture and requires its refusal, and qualifies the
+candidate twice in independent containers.
+
+Only a qualified image is pushed, under the immutable tag `sha-<commit>`, after
+the registry login, which holds the workflow token; build arguments carry only
+the source revision. `docker/swarm-node/publish.sh` confirms the registry config
+digest equals the tested image before recording the digest. An existing commit
+tag is never pushed again: a rerun records the accepted digest as a replay. The
+`swarm-worker-image-attestation` artifact holds the probe output and the
+attestation with digest, version manifest, test report and provenance naming the
+commit and run. `diffcheck/` proof branches publish only to the
+`agentihooks-worker-proof` repository. Rollback points deployment at the last
+accepted digest without rebuilding or retagging it; deployment selection belongs
+to antoncore GitOps.
