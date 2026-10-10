@@ -3,7 +3,7 @@ into occupancy, and only the holder's own execution and generation releases it. 
 evidence; this store is the authority for distributed launches."""
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import asdict, dataclass, replace
 
 from scripts.swarm import lease
@@ -15,6 +15,7 @@ from scripts.swarm_v2.registry import decode as decode_session
 from scripts.swarm_v2.runtime.base import LOCAL
 
 RESERVED, OCCUPIED, ENDED = "reserved", "occupied", "ended"
+RETIRING = "#"
 WRITE_ATTEMPTS = 5
 MAX_RESERVATION_MS = MAX_TTL_SECONDS * 1000
 FROZEN = f"{ROOT}:accounts-frozen"
@@ -37,6 +38,20 @@ class Slot:
 
 def account_key(account: str) -> str:
     return f"{ROOT}:accounts:{account}"
+
+
+def retiring(holder: str, generation: int) -> str:
+    """A replaced generation's live occupancy keeps counting under this name until its handoff completes."""
+    return f"{holder}{RETIRING}{generation}"
+
+
+def seat_holder(name: str) -> str:
+    return name.partition(RETIRING)[0]
+
+
+def stored_accounts(store: RedisStore) -> list[str]:
+    prefix = account_key("")
+    return sorted(key.removeprefix(prefix) for key in store.redis.scan_iter(match=account_key("*")))
 
 
 def encode(slot: Slot) -> str:
@@ -148,11 +163,14 @@ class AccountCapacity:
             if held and (held.generation, held.execution_id) != (grant.generation, grant.execution_id):
                 if held.generation >= grant.generation:
                     raise SwarmError("stale_generation")
-            used = sum(name != holder and slot.counts(now) for name, slot in slots.items())
+            retired = (
+                [replace(held, holder=retiring(holder, held.generation))] if held and held.state == OCCUPIED else []
+            )
+            used = len(retired) + sum(name != holder and slot.counts(now) for name, slot in slots.items())
             if used >= cap:
                 return [], [], None
             slot = Slot(grant.account, holder, grant.execution_id, grant.generation, RESERVED, now + ttl_ms)
-            return [slot], expired, slot
+            return [*retired, slot], expired, slot
 
         slot = self._write(grant.account, decide)
         if slot is None:
@@ -194,6 +212,9 @@ class AccountCapacity:
         holder = self._holder(seat)
 
         def decide(pipe, slots, now):
+            own = slots.get(retiring(holder, grant.generation))
+            if own is not None and self._owns(own, grant):
+                return [], [own.holder], own
             held = slots.get(holder)
             if held is None:
                 return [], [], None
@@ -209,6 +230,20 @@ class AccountCapacity:
         judged = self._judge(self.store.redis, found).values()
         return sorted((slot for slot in judged if slot.counts(now)), key=lambda slot: slot.holder)
 
+    def rows(self, account: str) -> dict[str, Slot]:
+        """Every stored row of the account as the registry judges it, counting or not."""
+        found = {name: decode(raw) for name, raw in self.store.redis.hgetall(account_key(account)).items()}
+        return self._judge(self.store.redis, found)
+
+    def drop(self, account: str, expected: Collection[Slot]) -> list[Slot]:
+        """Controller release of rows judged on evidence; a row that changed since that judgement is kept."""
+
+        def decide(pipe, slots, now):
+            gone = [slot for slot in expected if slots.get(slot.holder) == slot]
+            return [], [slot.holder for slot in gone], gone
+
+        return self._write(account, decide)
+
     def freeze(self) -> None:
         self.store.redis.set(FROZEN, "1")
 
@@ -221,12 +256,19 @@ class AccountCapacity:
     def _confirmed(
         self, registry: FleetRegistry, registration: Callable[[str], Registration | None]
     ) -> dict[str, dict[str, Slot]]:
-        confirmed: dict[str, dict[str, Slot]] = {}
+        valid = []
         for record in registry.records():
             found = registration(record.execution_id) if record.state != CLOSED and record.execution_id else None
-            if found is None or found.swarm_id != self.slug or not self._owns(record, found):
-                continue
+            if found is not None and found.swarm_id == self.slug and self._owns(record, found):
+                valid.append((record, found))
+        newest: dict[str, int] = {}
+        for record, _ in valid:
+            newest[record.seat] = max(newest.get(record.seat, 0), record.generation)
+        confirmed: dict[str, dict[str, Slot]] = {}
+        for record, found in valid:
             holder = self._holder(record.seat)
+            if record.generation < newest[record.seat]:
+                holder = retiring(holder, record.generation)
             slot = Slot(found.account, holder, record.execution_id, record.generation, OCCUPIED, 0, record.key())
             confirmed.setdefault(found.account, {})[holder] = slot
         return confirmed
