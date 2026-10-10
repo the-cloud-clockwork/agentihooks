@@ -148,11 +148,22 @@ def preview(doc: dict, slug: str) -> tuple[dict, dict]:
     assign_unphased(after, slug, conflicts)
     assign_phases(after, slug, conflicts)
     assign_tasks(after, conflicts)
-    report = {"applied": False, "before": counts(doc), "after": counts(after), "conflicts": conflicts, "refused": ""}
+    dangling = [
+        f"{row['item']} names phases/{row['before']}, which does not exist"
+        for row in conflicts
+        if row["kind"] == "missing_phase" and row["after"] is None
+    ]
+    report = {
+        "applied": False,
+        "before": counts(doc),
+        "after": counts(after),
+        "conflicts": conflicts,
+        "refused": "; ".join(dangling),
+    }
     try:
         ledger_plans.validate(after)
     except ValueError as refused:
-        report["refused"] = str(refused)
+        report["refused"] = report["refused"] or str(refused)
     return after, report
 
 
@@ -161,9 +172,7 @@ def commit(repo: store.SQLiteLedgerRepository, slug: str, by: str) -> dict:
         connection.execute(store.BEGIN_IMMEDIATE)
         entry = repo._entry(connection, slug)
         after, report = preview(entry.state, slug)
-        if report["refused"] or any(
-            row["kind"] == "missing_phase" and row["after"] is None for row in report["conflicts"]
-        ):
+        if report["refused"]:
             raise ValueError(json.dumps(report, sort_keys=True))
         report["repaired"] = hierarchy.drift(hierarchy.stored(connection, slug), hierarchy.project(after))
         if after != entry.state or report["repaired"]["drift"]:

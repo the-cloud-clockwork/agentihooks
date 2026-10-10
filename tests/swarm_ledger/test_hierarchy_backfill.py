@@ -378,7 +378,7 @@ def test_preview_places_every_legacy_shape_and_reports_each_conflict_in_order():
         ("task_slice", "tasks/t18", "slices/custom", "slices/kept.s9"),
     ]
     assert report["applied"] is False
-    assert report["refused"] == "phase p1 holds slices of another plan: custom, custom2"
+    assert report["refused"] == "tasks/t13 names phases/ghost, which does not exist"
     assert report["before"] == {
         "plans": 4,
         "phases": 11,
@@ -457,6 +457,17 @@ def test_preview_fills_collections_an_old_document_never_stored():
     }
 
 
+def test_refusal_names_every_task_whose_phase_does_not_exist():
+    doc = {
+        "phases": [{"id": "p1", "title": "One"}],
+        "tasks": [{"id": "a", "title": "", "phase": "gone"}, {"id": "b", "title": "", "phase": "lost"}],
+    }
+    _, report = hierarchy_backfill.preview(doc, SLUG)
+    assert report["refused"] == (
+        "tasks/a names phases/gone, which does not exist; tasks/b names phases/lost, which does not exist"
+    )
+
+
 def dependent(tmp_path):
     repo = store.SQLiteLedgerRepository(tmp_path / store.DATABASE)
     assert repo.create(
@@ -501,7 +512,7 @@ def test_dry_run_compares_the_stored_rows_and_apply_refuses_a_task_without_its_p
             "tasks_in_slices": 0,
         },
         "conflicts": [{"kind": "missing_phase", "item": "tasks/t1", "before": "ghost", "after": None}],
-        "refused": "",
+        "refused": "tasks/t1 names phases/ghost, which does not exist",
         "drift": {
             "missing_nodes": [],
             "extra_nodes": [],
