@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -152,7 +153,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
 
     rig = type("Rig", (), {})()
     rig.stop, rig.redis, rig.task, rig.ledger_task, rig.cli, rig.rows = stop, client, task, ledger_task, cli, rows
-    rig.commit, rig.remote_head, rig.tree = commit, remote_head, tree
+    rig.commit, rig.remote_head, rig.tree, rig.env = commit, remote_head, tree, env
     try:
         cli("join")
         yield rig
@@ -190,3 +191,23 @@ def test_dirty_work_is_refused_and_a_clean_pushed_worktree_with_its_pull_request
     (rig.tree / "draft").unlink()
     clean = rig.stop()
     assert clean.returncode == 0, clean.stderr
+
+
+def test_a_pre_push_gate_that_overruns_is_stopped_by_the_gate_inside_the_stop_condition(rig):
+    rig.cli("task", "set", rig.task, f"pr_url={URL}")
+    gate = rig.tree / "scripts" / "ci_prepush"
+    gate.mkdir(parents=True)
+    (rig.tree / "scripts" / "__init__.py").write_text("")
+    (gate / "__init__.py").write_text("")
+    (gate / "__main__.py").write_text("import time\ntime.sleep(60)\n")
+    git(rig.tree, "add", "scripts")
+    git(rig.tree, "commit", "-m", "gate")
+    rig.env["CONDITIONS_TIMEOUT_SEC"] = "6"
+    started = time.monotonic()
+    done = rig.stop()
+    took = time.monotonic() - started
+    assert done.returncode == 2, (done.stderr, rig.rows())
+    assert "The pre push gate did not finish in " in done.stderr
+    assert f" s in {rig.tree}, so the stop hook did not push it." in done.stderr
+    assert rig.remote_head() == ""
+    assert took < 6
