@@ -27,7 +27,7 @@ if docker buildx imagetools inspect --format '{{json .Manifest}}' "$tag" > "$out
     promote "$(jq -r .digest "$output/existing.json")" --existing
     exit 0
 fi
-if ! grep -qi "not found" "$output/existing.log"; then
+if ! grep -qiE "not found|manifest unknown" "$output/existing.log"; then
     echo "cannot tell whether $tag exists; nothing pushed" >&2
     exit 1
 fi

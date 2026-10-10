@@ -43,7 +43,16 @@ def version(name: str, environ: dict) -> str:
 
 def methods(schema: dict) -> list[str]:
     requests = schema.get("schemas", {}).get("request", {}).get("oneOf", [])
-    return sorted(request["properties"]["method"]["const"] for request in requests)
+    found = (request.get("properties", {}).get("method", {}).get("const") for request in requests)
+    return sorted(name for name in found if isinstance(name, str))
+
+
+def parsed(text: str) -> dict:
+    try:
+        document = json.loads(text)
+    except ValueError:
+        return {}
+    return document if isinstance(document, dict) else {}
 
 
 def server_status(
@@ -71,7 +80,7 @@ def herdr(root: Path, environ: dict) -> dict:
     server = subprocess.Popen(HERDR_SERVER, env=environ, stdin=devnull, stdout=devnull, stderr=devnull)
     try:
         status = server_status(environ)
-        schema = json.loads(run(HERDR_SCHEMA, environ, COMMAND_SECONDS).stdout or "{}")
+        schema = parsed(run(HERDR_SCHEMA, environ, COMMAND_SECONDS).stdout)
     finally:
         server.terminate()
         server.wait(timeout=STOP_SECONDS)

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 image="${1:?worker image to qualify}"
-output="${2:?attestation directory}"
+output="$(realpath -m "${2:?attestation directory}")"
 commit="${3:?tested agentihooks commit}"
 repo="$(git rev-parse --show-toplevel)"
 fixtures="$repo/docker/swarm-node/fixtures/profiles"

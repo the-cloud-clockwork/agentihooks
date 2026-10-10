@@ -116,6 +116,21 @@ def test_methods_of_a_schema_without_requests_is_empty(schema):
     assert image_probe.methods(schema) == []
 
 
+@pytest.mark.parametrize(
+    "request_schema",
+    [{}, {"properties": {}}, {"properties": {"method": {}}}, {"properties": {"method": {"const": 3}}}],
+)
+def test_methods_skip_requests_without_a_method_name(request_schema):
+    schema = {"schemas": {"request": {"oneOf": [request_schema, {"properties": {"method": {"const": "pane.read"}}}]}}}
+
+    assert image_probe.methods(schema) == ["pane.read"]
+
+
+@pytest.mark.parametrize(("text", "document"), [('{"a": 1}', {"a": 1}), ("", {}), ("not json", {}), ("[1]", {})])
+def test_parsed_reads_only_a_json_object(text, document):
+    assert image_probe.parsed(text) == document
+
+
 def test_server_status_polls_until_the_server_runs(monkeypatch):
     slow = subprocess.TimeoutExpired(["herdr"], 10)
     answers = [done("not json"), slow, done('{"running": false}'), done(json.dumps(STATUS))]
