@@ -1,12 +1,14 @@
 import json
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
 
 from scripts.swarm.store import SwarmError
-from scripts.swarm_v2.kubernetes import failures
+from scripts.swarm_v2 import deployed
+from scripts.swarm_v2.kubernetes import client, failures
 from scripts.swarm_v2.kubernetes.failures import AccountSlot, Decision
 from tests import sv2_kub05_cases as cases
 
@@ -359,6 +361,77 @@ def test_the_pause_records_the_controller_epoch_that_set_it(world):
     recovery.pause(True)
     key = world.store.key(cases.SLUG, "recovery-paused")
     assert int(world.store.redis.get(key)) == world.live.held.epoch
+
+
+class _Nodes:
+    def __init__(self, answer):
+        self.answer, self.paths = answer, []
+
+    def send(self, method, path, body=None):
+        self.paths.append((method, path))
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return self.answer
+
+
+def _node(name, *conditions):
+    return {"metadata": {"name": name}, "status": {"conditions": list(conditions)}}
+
+
+def test_only_ready_nodes_are_listed_and_a_failed_listing_is_none():
+    ready, unready = {"type": "Ready", "status": "True"}, {"type": "Ready", "status": "False"}
+    items = [
+        _node("a", {"type": "MemoryPressure", "status": "True"}, ready),
+        _node("b", unready),
+        _node("c", {"type": "DiskPressure", "status": "True"}),
+        {"metadata": {"name": "d"}, "status": {}},
+        {"metadata": {"name": "e"}},
+    ]
+    http = _Nodes((200, {"items": items}))
+    assert client.PodClient(http, "swarm").ready_nodes() == ["a"]
+    assert http.paths == [("GET", "/api/v1/nodes")]
+    for answer in ((403, {"reason": "Forbidden"}), (201, {"items": items}), ConnectionError("down")):
+        assert client.PodClient(_Nodes(answer), "swarm").ready_nodes() is None
+
+
+class _Grants:
+    def __init__(self):
+        self.revoked = []
+
+    def revoke(self, slug, execution_id):
+        self.revoked.append((slug, execution_id))
+        return True
+
+
+class _Cluster:
+    def __init__(self, world):
+        self.world, self.selectors = world, []
+
+    def list_pods(self, selector):
+        self.selectors.append(selector)
+        return json.loads(json.dumps(list(self.world.api.objects.values())))
+
+    def ready_nodes(self):
+        return sorted(self.world.ready)
+
+
+def test_the_deployed_pass_fences_an_attempt_whose_node_was_deleted(world):
+    grants, cluster = _Grants(), _Cluster(world)
+    service = SimpleNamespace(controller=world.live, grants=grants)
+    recover = deployed.recovery_pass(service, SimpleNamespace(image_digest="sha256:" + "4b" * 32), cluster)
+    assert recover() == {world.old.execution_id: "working"}
+    world.ready.discard(world.fx["first"]["node"])
+    world.api.objects.pop(f"swarm-{world.old.execution_id}")
+    assert recover() == {world.old.execution_id: "fenced"}
+    fence = world.recovery(world.live).fence(world.old.execution_id)
+    assert (fence["reason"], fence["released"]) == ("node_lost", ["grant", "account"])
+    assert "before the node lost failure and is not recovered" in fence["tail"]
+    decision = world.recovery(world.live).decision(world.old.execution_id)
+    assert (decision.mode, decision.replacement) == ("recovery_pending", "")
+    assert world.occupant().state == "awaiting-decision"
+    assert grants.revoked == [(cases.SLUG, world.old.execution_id)]
+    assert world.slots() == []
+    assert cluster.selectors == [f"{cases.watch.OWNER_LABEL}={cases.watch.owner_for(cases.SLUG)}"] * 2
 
 
 def test_resume_decision_uses_the_checkpoint_and_admits_one_replacement(world):

@@ -13,7 +13,10 @@
     "Recovery.handle(execution_id, reason) writes a write once fence (reason, generation, seat, controller epoch, native session, archive watermark, unarchived tail explanation), releases the attempt grant then its provider account slot, then decides: resume from the latest complete compatible checkpoint with exactly one replacement admitted through Controller.admit with the fenced attempt as predecessor, or recovery_pending with the seat state awaiting-decision when there is no such checkpoint, the reason is image_pull, automatic replacement is off, or the operator paused it",
     "Recovery.decide(execution_id, fresh|resume) settles a pending decision with one replacement; Recovery.pause(True|False) and paused() hold the operator pause in Redis under the swarm key",
     "AccountSlot(store, slug, capacity).release(execution_id) ends the provider slot held by exactly that execution and generation through AccountCapacity.end",
-    "Recovery.execution_failures_by_reason() counts fence records by reason; late_observations(execution_id) counts ignored late observations"
+    "Recovery.execution_failures_by_reason() counts fence records by reason; late_observations(execution_id) counts ignored late observations",
+    "scripts.swarm_v2.deployed.recovery_pass(service, workers, api) builds the production Recovery with GrantRelease (LaunchAuthority.revoke), AccountSlot and NoCheckpoints, and returns the pass that reconciles the swarm owner's Pods from PodClient.list_pods against PodClient.ready_nodes",
+    "scripts.swarm_v2.kubernetes.client.PodClient.ready_nodes() lists the names of nodes whose Ready condition is True, or None when the listing is refused or fails",
+    "scripts.swarm_v2.control_service.ControlService.tick runs its recover pass after each held controller tick; control_service.host wires it whenever the Kubernetes worker settings are present"
   ],
   "supported_versions": {
     "python": "3.11 and later",
@@ -38,9 +41,27 @@
   },
   "measurements": {
     "execution_failures_by_reason": {
-      "a": {"oom_killed": 0, "evicted": 0, "node_lost": 1, "image_pull": 0, "application_exit": 0},
-      "b": {"oom_killed": 0, "evicted": 0, "node_lost": 0, "image_pull": 1, "application_exit": 0},
-      "c": {"oom_killed": 1, "evicted": 1, "node_lost": 0, "image_pull": 0, "application_exit": 0}
+      "a": {
+        "oom_killed": 0,
+        "evicted": 0,
+        "node_lost": 1,
+        "image_pull": 0,
+        "application_exit": 0
+      },
+      "b": {
+        "oom_killed": 0,
+        "evicted": 0,
+        "node_lost": 0,
+        "image_pull": 1,
+        "application_exit": 0
+      },
+      "c": {
+        "oom_killed": 1,
+        "evicted": 1,
+        "node_lost": 0,
+        "image_pull": 0,
+        "application_exit": 0
+      }
     }
   },
   "cases": {
@@ -55,7 +76,8 @@
     "proof": "Case C runs the evicted attempt with automatic replacement off: one fence, a recovery_pending decision, state awaiting-decision, one attempt for the seat, and a later old Pod observation leaves it retired."
   },
   "remaining_limitations": [
-    "Nothing calls Recovery.reconcile, handle, decide or pause yet: the controller loop must call reconcile with the watch view's Pods and the node listing, passing None when the listing fails, and an operator control must call pause and decide.",
+    "ControlService.tick runs the recovery pass in production, but no checkpoint store is deployed, so every failure waits for an explicit fresh or resume decision, and no operator control calls Recovery.pause or Recovery.decide yet.",
+    "The swarm-controller ServiceAccount holds only namespaced grants, so PodClient.ready_nodes answers None on Anton until the operator decides on a cluster scoped node read; until then a Pod whose node is deleted is fenced only when its own status shows the loss, and a Pod that vanishes with its node stays unobserved.",
     "A Pod deleted before any reconcile recorded its node stays unobserved; the controller loop must pass each DELETED watch event's last Pod object so its node is seen.",
     "Decision.checkpoint is recorded but no launch path reads it yet; the replacement record carries no checkpoint field.",
     "The task level recovery_pending state is not written to the ledger; the seat state and the decision record carry it.",
