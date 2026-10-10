@@ -16,6 +16,8 @@ LAYOUTS = (
 ROOTS = ("home", "runtime", "checkout", "worktree", "spool", "scratch", "seed")
 SEGMENT = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 SOCKET_BYTES = 107
+ARCHIVE_MEMBERS = 100_000
+ARCHIVE_BYTES = 8 * 2**30
 FAILURES = {"execution_path_validation_failures": 0}
 
 
@@ -149,7 +151,10 @@ def extract(execution: Execution, archive: Path, destination: Path) -> Path:
     if target.exists():
         _refuse(f"extraction destination already exists: {destination}")
     with tarfile.open(archive) as bundle:
-        absolute = [name for name in bundle.getnames() if name.startswith("/")]
+        members = bundle.getmembers()
+        if len(members) > ARCHIVE_MEMBERS or sum(member.size for member in members) > ARCHIVE_BYTES:
+            _refuse(f"archive exceeds {ARCHIVE_MEMBERS} members or {ARCHIVE_BYTES} bytes: {archive.name}")
+        absolute = [member.name for member in members if member.name.startswith("/")]
         if absolute:
             _refuse(f"archive member leaves its destination: {absolute[0]}")
         staging = execution.path("scratch") / f"extract-{uuid.uuid4().hex}"
