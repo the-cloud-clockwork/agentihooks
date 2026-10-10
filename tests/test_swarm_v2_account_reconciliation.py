@@ -14,7 +14,7 @@ from scripts.swarm_v2.registry import STALE_AFTER_MS, FleetRegistry, Scope, Sess
 from scripts.swarm_v2.runtime import observe
 from tests.sv2_ctl02_cases import build
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 INPUTS = json.loads((Path(__file__).parent / "fixtures/swarm_v2/account-reconciliation.json").read_text())
 SLUG = "fixture"
