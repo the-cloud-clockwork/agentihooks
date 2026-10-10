@@ -2,8 +2,8 @@
 
 At full autonomy a trigger wakes the live seat through its inbox or spawns it through the seat spawn helper; below
 full, or once every trigger closes, the seat is marked finished and the reap pass retires it. A trigger is a priority
-the sweep left unresolved for fifteen minutes, unless a dispatcher seat raised it again under its own name to hand it
-to the operator, a bottleneck no lane rule covers held for the lane split's ticks, or a red dev holding blocked tasks,
+the sweep left unresolved for fifteen minutes and no dispatcher seat handed to the operator by raising it again under
+its own name, a bottleneck no lane rule covers held for the lane split's ticks, or a red dev holding blocked tasks,
 where a freeze or focus may be worth proposing.
 """
 
