@@ -630,10 +630,8 @@ def test_the_served_api_carries_task_reads_and_writes_beside_executions(world, s
         "proof": "Pull request merged",
     }
     assert send(served, "POST", "/v2/tasks/task/outcomes", token, outcome)[0] == 200
-    assert [entry["text"] for entry in world.task()["comments"]] == [
-        "Building the first slice",
-        "Asking about the second slice",
-        "Outcome proposal: done. Pull request merged",
+    assert [(entry["by"], entry["text"]) for entry in world.task()["comments"]] == [
+        (agent.name, "Outcome proposal: done. Pull request merged")
     ]
     assert send(served, "PATCH", "/v2/swarm/config", token, {"max_eng_agents": 99})[0] == 403
     assert (world.task()["state"], world.task()["pr_url"]) == ("pr", PR)
