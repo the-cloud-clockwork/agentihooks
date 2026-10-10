@@ -180,7 +180,7 @@ class _Store:
         return []
 
     def config(self, slug):
-        return SwarmConfig(slug, "/repo")
+        return SwarmConfig(slug, "/repo", max_eng=1, max_ci=0)
 
     def peer(self, slug):
         return ""
