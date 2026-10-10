@@ -19,7 +19,6 @@ ACCEPT = ", ".join(
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 TAG = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}")
 COMMIT = re.compile(r"[0-9a-f]{40}")
-CHALLENGE = re.compile(r'(\w+)="([^"]*)"')
 TIMEOUT_SECONDS = 10
 
 Opener = Callable[..., object]
@@ -43,7 +42,7 @@ def _head(url: str, grant: str, opener: Opener) -> str:
 
 
 def _grant(challenge: str, host: str, image: str, opener: Opener) -> str:
-    fields = dict(CHALLENGE.findall(challenge))
+    fields = urllib.request.parse_keqv_list(urllib.request.parse_http_list(challenge.removeprefix("Bearer ")))
     realm = fields.pop("realm", "")
     where = urllib.parse.urlsplit(realm)
     if (where.scheme, where.hostname) != ("https", host):

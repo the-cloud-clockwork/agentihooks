@@ -17,6 +17,7 @@ paths=(
   profiles/
   media/
   docs/swarm-v2/schemas/
+  tests/chart_workers.py
 )
 changed="$(git diff --name-only "$base...$head" -- "${paths[@]}")"
 if [[ -n $changed ]]; then

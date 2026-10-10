@@ -60,7 +60,7 @@ api=(
   --set controller.api.signingKey.secretName=swarm-launch-signing
 )
 workers=(-f "$chart/ci/kind-workers.yaml")
-helm template "$release" "$chart" "${workers[@]}" "${api[@]}" | python3 "$chart/ci/check-workers.py" "$chart/ci/kind-workers.yaml"
+helm template "$release" "$chart" "${workers[@]}" "${api[@]}" | python3 tests/chart_workers.py "$chart/ci/kind-workers.yaml"
 refuse_workers() {
   local expected=$1 refusal
   shift

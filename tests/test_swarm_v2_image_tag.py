@@ -117,6 +117,16 @@ def test_a_token_service_off_the_registry_https_host_is_refused_before_any_grant
     assert len(registry.requests) == 1
 
 
+def test_a_malformed_bearer_challenge_is_refused_as_unreachable():
+    registry = Registry(_refused(401, WWW_Authenticate='Bearer realm="https://ghcr.io/token",broken'))
+
+    with pytest.raises(image_tag.ImageUnresolved) as refused:
+        image_tag.resolve(REPOSITORY, "dev", registry)
+
+    assert str(refused.value) == f"the registry for {REPOSITORY}:dev is unreachable"
+    assert len(registry.requests) == 1
+
+
 def test_a_grant_answer_that_is_not_an_object_retries_without_credentials():
     registry = Registry(_refused(401, WWW_Authenticate=CHALLENGE), Response(b"[]"), _refused(401))
 
