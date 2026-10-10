@@ -89,11 +89,12 @@ def test_a_node_read_pages_its_subtree(large):
 def pauses(monkeypatch):
     seen = []
     monkeypatch.setattr(api_client.time, "sleep", seen.append)
+    monkeypatch.setattr(api_client.random, "uniform", lambda low, high: (low, high))
     return seen
 
 
 def backoff(attempt, pause):
-    return api_client.BACKOFF * 2**attempt / 2 <= pause <= api_client.BACKOFF * 2**attempt
+    return pause == (api_client.BACKOFF * 2**attempt / 2, api_client.BACKOFF * 2**attempt)
 
 
 def test_a_hierarchy_that_changes_between_pages_restarts_from_the_first_page(tmp_path, pauses):
