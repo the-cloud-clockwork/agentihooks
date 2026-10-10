@@ -595,6 +595,19 @@ def test_a_working_classification_ends_when_the_attempt_recovers_on_its_own(caut
     assert (again.state, again.needs_operator) == (State.SUSPECT, True)
 
 
+def test_status_shows_a_ruled_state_apart_from_an_observed_one(cautious):
+    from scripts.swarm import status
+
+    store, agent, observer = cautious
+    flagged(observer, agent)
+    rule(store, "fixture", agent.execution_id, "working", REASON, "operator", NOW + 10)
+    held = status.observation(store, "fixture", agent)
+    assert (held["state"], held["needs_operator"], held["failure"]) == ("working", False, "worker_loss")
+    assert held["ruling"] == {"state": "working", "reason": REASON, "by": "operator", "at": NOW + 10}
+    observer.observe("fixture", agent, [beat(agent, -20.0), pod(agent, age=-20.0)], NOW + 20)
+    assert "ruling" not in status.observation(store, "fixture", agent)
+
+
 @pytest.mark.parametrize(
     ("ruling", "reason", "message"),
     [
