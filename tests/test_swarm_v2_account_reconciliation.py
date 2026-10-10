@@ -548,6 +548,18 @@ def test_status_reports_the_reconciliation_and_releases_nothing(world, monkeypat
     assert world.rows() == before
 
 
+def test_holds_names_only_the_exact_execution_and_generation_of_a_row(world):
+    world.running(TERMINAL)
+    lost = world.agents[TERMINAL]
+
+    assert world.reconciler.holds(lost.execution_id, lost.generation) is True
+    assert world.reconciler.holds(lost.execution_id, lost.generation + 1) is False
+    assert world.reconciler.holds("exec-other", lost.generation) is False
+    world.observed(lost, "lost_terminal", sources="supervisor_exit")
+    world.reconciler.exited(lost.execution_id, lost.generation, "supervisor")
+    assert world.reconciler.holds(lost.execution_id, lost.generation) is False
+
+
 @pytest.mark.parametrize(
     ("sources", "expected"),
     [

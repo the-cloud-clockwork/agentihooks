@@ -92,6 +92,13 @@ class AccountReconciler:
                 rows[account] = found
         return rows
 
+    def holds(self, execution_id: str, generation: int) -> bool:
+        return any(
+            (slot.execution_id, slot.generation) == (execution_id, generation)
+            for found in self._rows().values()
+            for slot in found.values()
+        )
+
     def _seat(self, name: str) -> str:
         return seat_holder(name).removeprefix(f"{self.slug}/")
 

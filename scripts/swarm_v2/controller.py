@@ -73,6 +73,7 @@ class Controller:
             self.held = None
             return False
         if self.reconciled_epoch == self.held.epoch:
+            self._authority()
             self.accounts.reconcile()
             self.ready = True
         return self.ready
@@ -114,12 +115,9 @@ class Controller:
 
     def observe(self, observer: Observer, agent: AgentRecord, signals: Iterable[Signal], now: float) -> Finding | None:
         self._authority()
-        prior = observer.get(self.slug, agent.execution_id)
         seen = observer.observe(self.slug, agent, signals, now)
         source = exit_source(seen)
-        if source is None or (
-            prior is not None and prior.generation == seen.generation and exit_source(prior) is not None
-        ):
+        if source is None or not self.accounts.holds(seen.execution_id, seen.generation):
             return None
         self._authority()
         return self.accounts.exited(seen.execution_id, seen.generation, source)

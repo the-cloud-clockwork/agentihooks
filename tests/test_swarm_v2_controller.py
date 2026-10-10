@@ -7,6 +7,8 @@ from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2.controller import Controller
 from scripts.swarm_v2.kubernetes import watch
+from scripts.swarm_v2.reconciliation import accounts as reconciliation
+from scripts.swarm_v2.reconciliation.accounts import AccountReconciler
 from scripts.swarm_v2.runtime import observe
 from scripts.swarm_v2.runtime.operations import Observation, OperationRequest, Phase
 from tests.test_swarm_v2_account_reconciliation import (
@@ -771,6 +773,25 @@ def test_a_repeated_exit_observation_reaches_the_exit_call_once(accounts, stored
     assert again is None
     assert controller.accounts.stale_exit_events() == 0
     assert sorted(accounts.rows()) == sorted([RETIRING, ORPHANED, SUCCESSOR])
+
+
+def test_an_exit_whose_release_was_held_back_is_released_on_a_later_observation(accounts):
+    controller, lost = accounts.authority.controller, accounts.agents[TERMINAL]
+    observer = observe.Observer(accounts.store, "local", observe.Thresholds())
+    now = accounts.clock[0] / 1000
+    signal = exit_signal(lost, observe.Source.SUPERVISOR, observe.EXITED, now)
+    controller.accounts = AccountReconciler(accounts.store, "fixture", environ={reconciliation.MODE: "observe"})
+
+    held = controller.observe(observer, lost, [signal], now)
+    assert (held.kind, held.action) == ("exited", "observe_only")
+    assert LOST_TERMINAL in accounts.rows()
+
+    controller.accounts = AccountReconciler(accounts.store, "fixture", environ={})
+    retried = controller.observe(observer, lost, [signal], now + 1)
+
+    assert (retried.kind, retried.action, retried.holder) == ("exited", "release", LOST_TERMINAL)
+    assert LOST_TERMINAL not in accounts.rows()
+    assert controller.accounts.stale_exit_events() == 0
 
 
 def test_a_second_source_reporting_the_same_exit_is_not_a_stale_exit(accounts):
