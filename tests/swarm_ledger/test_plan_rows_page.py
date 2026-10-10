@@ -171,7 +171,9 @@ def test_show_all_comments_reaches_phases_inside_a_folded_plan(tab):
     fold_v2_and_reload(tab)
     tab.click("#sec-phases button[data-comments]")
     tab.click("#item-plans-v2 > details.plan-fold > summary")
-    assert tab.evaluate("() => document.querySelector('#item-phases-p3 details[data-key=\"phases/p3\"]').open") is True
+    tab.wait_for_function(
+        "() => document.querySelector('#item-phases-p3 details[data-key=\"phases/p3\"]')?.open === true"
+    )
 
 
 def test_a_ledger_without_plans_keeps_the_flat_phase_list(tab):
