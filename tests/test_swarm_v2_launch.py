@@ -1,7 +1,6 @@
 import json
 from dataclasses import replace
 
-import fakeredis
 import pytest
 
 from scripts.swarm.keyspace import ROOT
@@ -13,7 +12,7 @@ from scripts.swarm_v2.launch import DistributedLaunch, Launch, LaunchTerms
 from scripts.swarm_v2.registry import CLOSED, LIVE, FleetRegistry, Scope, Session
 from scripts.swarm_v2.runtime.base import Capability, Outcome, RuntimeRouter, SpawnRequest, Status
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
 SLUG = "fixture"
 ACCOUNT = "fixture"
@@ -41,6 +40,8 @@ class Remote:
 
 class World:
     def __init__(self, monkeypatch, cap=1, runtime=None):
+        import fakeredis
+
         self.store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
         self.store.create(SwarmConfig(SLUG, "agentihooks", 2, 0))
         self.clock = [1000]
