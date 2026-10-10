@@ -132,6 +132,60 @@ def test_an_open_pull_request_without_green_checks_is_still_ceremony():
     assert [f["evidence"] for f in run(ledger)] == [["25 ledger transitions", "0 outcomes"]]
 
 
+DISPATCHER = "dispatcher@323133-0001"
+ENGINEER = "engineer@323133-0002"
+
+
+def settled(by, items=24, decided=True):
+    events = []
+    for n in range(items):
+        target = f"followups/f{n}"
+        events += [ev("comment added", target, by=by)] if decided else [ev("comment edited", "phases/p1", by=by)]
+        events.append(ev("checked", target, by=by))
+    return events
+
+
+def cleared(by, n, reason=None):
+    found = ev("priority cleared", f"followups/c{n}", by=by)
+    return {**found, "reason": reason} if reason else found
+
+
+def test_a_dispatcher_seat_is_credited_with_each_priority_it_settles_with_a_decision():
+    events = settled(DISPATCHER) + [cleared(DISPATCHER, n) for n in range(5)]
+    assert run({"tasks": [], "_meta": {"events": events}}) == []
+
+
+def test_an_engineer_seat_with_the_same_settles_is_still_ceremony():
+    events = settled(ENGINEER) + [cleared(ENGINEER, n) for n in range(5)]
+    assert [(f["subject"], f["evidence"]) for f in run({"tasks": [], "_meta": {"events": events}})] == [
+        (ENGINEER, ["53 ledger transitions", "0 outcomes"])
+    ]
+
+
+def test_a_dispatcher_seat_settling_without_a_decision_is_still_ceremony():
+    events = settled(DISPATCHER, decided=False) + [cleared(DISPATCHER, n) for n in range(5)]
+    assert [(f["subject"], f["evidence"]) for f in run({"tasks": [], "_meta": {"events": events}})] == [
+        (DISPATCHER, ["53 ledger transitions", "0 outcomes"])
+    ]
+
+
+def test_a_priority_cleared_with_a_reason_or_settled_twice_counts_once_per_item():
+    events = [ev("comment edited", "phases/p1", by=DISPATCHER) for _ in range(24)]
+    events += [cleared(DISPATCHER, 0, "the follow up was answered"), cleared(DISPATCHER, 0, "again")]
+    assert [f["evidence"] for f in run({"tasks": [], "_meta": {"events": events}})] == [
+        ["26 ledger transitions", "1 outcome"]
+    ]
+
+
+def test_a_comment_by_another_agent_is_not_the_dispatcher_decision():
+    events = [ev("comment added", f"followups/f{n}", by=ENGINEER) for n in range(3)]
+    events += [ev("checked", f"followups/f{n}", by=DISPATCHER) for n in range(3)]
+    events += [ev("comment edited", "phases/p1", by=DISPATCHER) for _ in range(20)]
+    assert [(f["subject"], f["evidence"]) for f in run({"tasks": [], "_meta": {"events": events}})] == [
+        (DISPATCHER, ["23 ledger transitions", "0 outcomes"])
+    ]
+
+
 def test_scope_inflation_lists_each_task_by_title_with_its_gain():
     events = [ev("added", f"tasks/q{n}") for n in range(3)]
     tasks = [
