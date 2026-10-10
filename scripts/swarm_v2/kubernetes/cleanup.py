@@ -7,11 +7,11 @@ from typing import Protocol
 
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2 import retention
-from scripts.swarm_v2.kubernetes.client import PreconditionFailed
+from scripts.swarm_v2.kubernetes.client import DELETABLE, PreconditionFailed
 from scripts.swarm_v2.kubernetes.runtime import GENERATION_LABEL
 from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL, OWNER_LABEL, owner_for
 
-KINDS = ("pods", "services")
+KINDS = DELETABLE
 STEPS = (*KINDS, "attach", "secrets")
 
 
@@ -65,6 +65,7 @@ class Cleanup:
             return Result(execution_id, "not_final")
         kept = retention.retained(self.store, self.slug, execution_id)
         if kept:
+            self.store.redis.hdel(self.journal_key, execution_id)
             return Result(execution_id, "done", kept["removed"])
         wait = retention.waiting(self.store, self.slug, entry)
         if wait:
@@ -82,9 +83,7 @@ class Cleanup:
         return Result(execution_id, "done", journal["removed"])
 
     def _pin(self, entry: retention.Final) -> dict:
-        selector = (
-            f"{OWNER_LABEL}={self.owner},{EXECUTION_LABEL}={entry.execution_id},{GENERATION_LABEL}={entry.generation}"
-        )
+        selector = self._selector(entry.execution_id, entry.generation)
         found = {"pods": self.api.list_pods(selector), "services": self.api.list_services(selector)}
         journal = {
             "execution_id": entry.execution_id,
@@ -93,6 +92,7 @@ class Cleanup:
                 kind: [{"name": item["metadata"]["name"], "uid": item["metadata"]["uid"]} for item in found[kind]]
                 for kind in KINDS
             },
+            "sent": [],
             "done": [],
             "removed": {kind: [] for kind in KINDS},
         }
@@ -104,17 +104,32 @@ class Cleanup:
             self.require()
             self.releases[step].release(journal["execution_id"])
             return
+        listing = self.api.list_pods if step == "pods" else self.api.list_services
+        live = {
+            item["metadata"]["uid"] for item in listing(self._selector(journal["execution_id"], journal["generation"]))
+        }
         settled = {item["uid"] for item in journal["removed"][step]}
         for pinned in journal["pinned"][step]:
-            if pinned["uid"] in settled:
-                continue
-            self.require()
-            try:
-                outcome = "deleted" if self.api.delete(step, pinned["name"], pinned["uid"]) else "absent"
-            except PreconditionFailed:
-                outcome = "replaced"
-            journal["removed"][step].append({**pinned, "outcome": outcome})
+            if pinned["uid"] not in settled:
+                journal["removed"][step].append({**pinned, "outcome": self._remove(step, pinned, live, journal)})
+                self._save(journal)
+
+    def _remove(self, kind: str, pinned: dict, live: set, journal: dict) -> str:
+        resent = pinned["uid"] in journal["sent"]
+        gone = "absent_after_send" if resent else "absent"
+        if pinned["uid"] not in live:
+            return gone
+        if not resent:
+            journal["sent"].append(pinned["uid"])
             self._save(journal)
+        self.require()
+        try:
+            return "deleted" if self.api.delete(kind, pinned["name"], pinned["uid"]) else gone
+        except PreconditionFailed:
+            return "replaced"
+
+    def _selector(self, execution_id: str, generation: int) -> str:
+        return f"{OWNER_LABEL}={self.owner},{EXECUTION_LABEL}={execution_id},{GENERATION_LABEL}={generation}"
 
     def _save(self, journal: dict) -> None:
         self.require()

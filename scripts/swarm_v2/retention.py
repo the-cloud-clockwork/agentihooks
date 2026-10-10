@@ -1,6 +1,7 @@
 """Final attempt records outlive runtime deletion; cleanup waits until the outcome and the archived transcript are durable."""
 
 import json
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
 from scripts.swarm import lease
@@ -25,8 +26,16 @@ def final(store: RedisStore, slug: str, execution_id: str) -> Final | None:
 
 
 def finalize(
-    store: RedisStore, slug: str, execution_id: str, state: str, transcript_end: int, outcome_ref: str = ""
+    store: RedisStore,
+    slug: str,
+    require: Callable[[], None],
+    execution_id: str,
+    state: str,
+    transcript_end: int,
+    outcome_ref: str = "",
 ) -> Final:
+    """`require` must raise unless the caller holds the current controller lease and a scoped grant."""
+    require()
     if state not in FINAL_STATES:
         raise SwarmError("an attempt is final only when completed or explicitly cancelled")
     if type(transcript_end) is not int or transcript_end < 0:
@@ -35,8 +44,7 @@ def finalize(
     current = final(store, slug, execution_id)
     if current and (
         (current.state, current.transcript_end) != (state, transcript_end)
-        or outcome_ref
-        and current.outcome_ref not in ("", outcome_ref)
+        or (outcome_ref and current.outcome_ref not in ("", outcome_ref))
     ):
         raise SwarmError("a final attempt record cannot change")
     kept = current.outcome_ref if current else ""

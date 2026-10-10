@@ -100,8 +100,8 @@ class PodClient:
     def __init__(self, http: KubeHttp, namespace: str) -> None:
         self.http, self.namespace = http, namespace
 
-    def _path(self, name: str = "") -> str:
-        path = f"/api/v1/namespaces/{self.namespace}/pods"
+    def _path(self, name: str = "", kind: str = "pods") -> str:
+        path = f"/api/v1/namespaces/{self.namespace}/{kind}"
         return f"{path}/{name}" if name else path
 
     def create_pod(self, body: dict) -> dict:
@@ -120,19 +120,18 @@ class PodClient:
 
     def list_services(self, selector: str) -> list[dict]:
         query = urllib.parse.urlencode({"labelSelector": selector})
-        path = f"/api/v1/namespaces/{self.namespace}/services?{query}"
-        return _answer(*self.http.send("GET", path))["items"]
+        return _answer(*self.http.send("GET", f"{self._path(kind='services')}?{query}"))["items"]
 
     def delete(self, kind: str, name: str, uid: str) -> bool:
         """False when the name is gone; PreconditionFailed when the name now holds another object."""
         if kind not in DELETABLE:
             raise ValueError("cleanup deletes only pods and services")
         options = {"apiVersion": "v1", "kind": "DeleteOptions", "preconditions": {"uid": uid}}
-        status, answer = self.http.send("DELETE", f"/api/v1/namespaces/{self.namespace}/{kind}/{name}", options)
+        status, answer = self.http.send("DELETE", self._path(name, kind), options)
         if status == 404:
             return False
         if status == 409:
             raise PreconditionFailed(name)
-        if status not in (200, 202):
+        if not 200 <= status < 300:
             _answer(status, answer)
         return True
