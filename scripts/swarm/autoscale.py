@@ -12,12 +12,22 @@ class Decision(TypedDict):
     reason: str
 
 
+def _shifted(ceilings: dict[str, int], live: dict[str, int], demand: dict[str, int], shift: int) -> str:
+    giver, taker = ("eng", "ci") if shift > 0 else ("ci", "eng")
+    floor = max(live.get(giver, 0), 1 if demand.get(giver, 0) else 0)
+    moved = min(abs(shift), max(0, ceilings[giver] - floor))
+    ceilings[giver] -= moved
+    ceilings[taker] += moved
+    return f"{moved} from {giver} to {taker}" if moved else ""
+
+
 def calculate(
     live: dict[str, int],
     free_seats: dict[str, int],
     host_room: int | None,
     demand: dict[str, int],
     previous: Decision | None = None,
+    shift: int = 0,
 ) -> Decision:
     seats = sum(free_seats.values())
     target = min(50, sum(live.values()) + (seats if host_room is None else min(seats, host_room)))
@@ -41,6 +51,7 @@ def calculate(
         ceilings[lane] += added
         room -= added
     ceilings["eng"] += room
+    moved = _shifted(ceilings, live, demand, shift)
     harnesses = ", ".join(f"{harness} {seats}" for harness, seats in sorted(free_seats.items()))
     host_text = "unknown" if host_room is None else host_room
     reason = f"Quota seats {seats} ({harnesses}); host room {host_text}; ceiling {total} of {target}"
@@ -50,6 +61,8 @@ def calculate(
             if pending["ticks"] < 3
             else "; raise held by the two seat per tick limit"
         )
+    if moved:
+        reason += f"; lane shift {moved}"
     return {
         "ceilings": ceilings,
         "pending_raise": pending,

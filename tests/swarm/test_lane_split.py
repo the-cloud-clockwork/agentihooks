@@ -3,7 +3,7 @@ import json
 import pytest
 
 from scripts.gates import log as gate_log
-from scripts.swarm import lane_split
+from scripts.swarm import autoscale, capacity, lane_split
 from scripts.swarm.autoscale import calculate
 from scripts.swarm.store import MANUAL_SCALING, RedisStore, SwarmConfig
 
@@ -132,6 +132,8 @@ def test_the_receiving_lane_never_passes_host_room(store, home):
     unknown = lane_split.Lanes(ready={"eng": 3, "ci": 2}, live={"eng": 1, "ci": 1}, room=None)
     ticks(store, "ci", 3, unknown, start=3)
     assert caps(store) == (3, 2)
+    (row,) = gate_log.recent(SLUG, None, home)
+    assert row["reason"].endswith(" Host room unknown.")
 
 
 def test_seats_already_live_do_not_need_host_room(store, home):
@@ -213,3 +215,20 @@ def test_no_shift_leaves_the_decision_unchanged():
     previous = {"ceilings": {"plan": 0, "ci": 1, "eng": 5}, "pending_raise": {"target": None, "ticks": 0}}
     args = ({"eng": 1, "ci": 1}, {"claude": 4}, 10, {"eng": 3, "ci": 3}, previous)
     assert calculate(*args, shift=0) == calculate(*args)
+
+
+def test_a_config_stored_before_the_lane_shift_reads_zero(store):
+    store.redis.hdel(store.key(SLUG, "config"), "lane_shift")
+    assert store.config(SLUG).lane_shift == 0
+    store.update(SLUG, lane_shift=-2)
+    assert store.config(SLUG).lane_shift == -2
+
+
+def test_autoscaled_passes_the_stored_lane_shift(monkeypatch):
+    seen = []
+    decision = {"ceilings": {"plan": 0, "ci": 1, "eng": 1}, "pending_raise": {"target": None, "ticks": 0}, "reason": ""}
+    monkeypatch.setattr(autoscale, "calculate", lambda *args: seen.append(args[-1]) or decision)
+    config = SwarmConfig(SLUG, "/repo", max_eng=1, max_ci=0, lane_shift=-2)
+    scaled, _ = capacity.autoscaled(config, capacity.ScaleInputs([], [], None, lambda: None, {}))
+    assert seen == [-2]
+    assert (scaled.max_eng, scaled.max_ci) == (1, 1)
