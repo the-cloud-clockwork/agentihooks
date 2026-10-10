@@ -1,4 +1,38 @@
 {{- $api := .Values.controller.api }}
+{{- $workers := .Values.controller.workers }}
+{{- if $workers.apiUrl }}
+{{- $tag := toString $workers.imageTag }}
+{{- if or (eq $tag "") (contains "@" $tag) (contains "sha256" $tag) (regexMatch "^[0-9a-f]{40}$" $tag) }}
+{{- fail "controller.workers.imageTag must be a floating tag such as dev, never a digest or commit hash; the controller resolves its digest at each launch" }}
+{{- end }}
+{{- range $setting := list "profile" "brain" }}
+{{- if not (index $workers $setting) }}
+{{- fail (printf "controller.workers.%s is required for the Kubernetes runtime" $setting) }}
+{{- end }}
+{{- end }}
+{{- if lt (int $workers.cap) 1 }}
+{{- fail "controller.workers.cap must be a whole number above zero" }}
+{{- end }}
+{{- if not $workers.projects }}
+{{- fail "controller.workers.projects names no project" }}
+{{- end }}
+{{- if not $workers.podPolicy }}
+{{- fail "controller.workers.podPolicy is required for the Kubernetes runtime" }}
+{{- end }}
+{{- if not .Values.controller.serviceAccountName }}
+{{- fail "controller.serviceAccountName is required: the Kubernetes runtime creates worker Pods with its token" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "swarm.fullname" . }}-pod-policy
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+data:
+  pod-policy.json: {{ toJson $workers.podPolicy | quote }}
+---
+{{- end }}
 {{- if $api.enabled }}
 {{- if not $api.swarm }}
 {{- fail "controller.api.swarm must name the swarm the control API serves" }}
@@ -42,8 +76,16 @@ spec:
       labels:
         {{- include "swarm.labels" . | nindent 8 }}
         app.kubernetes.io/component: controller
+      {{- if $workers.apiUrl }}
+      annotations:
+        checksum/pod-policy: {{ toJson $workers.podPolicy | sha256sum }}
+      {{- end }}
     spec:
-      {{- include "swarm.podSecurity" . | nindent 6 }}
+      {{- with .Values.controller.serviceAccountName }}
+      serviceAccountName: {{ . }}
+      {{- end }}
+      automountServiceAccountToken: {{ not (empty $workers.apiUrl) }}
+      {{- include "swarm.podSecurityContext" . | nindent 6 }}
       terminationGracePeriodSeconds: {{ .Values.controller.terminationGracePeriodSeconds | default 30 }}
       {{- with .Values.controller.affinity }}
       affinity:
@@ -125,6 +167,22 @@ spec:
             - name: AGENTIHOOKS_LAUNCH_SIGNING_KEY_FILE
               value: /run/secrets/launch-signing/{{ $api.signingKey.secretKey }}
             {{- end }}
+            {{- if $workers.apiUrl }}
+            - name: AGENTIHOOKS_CONTROL_API_URL
+              value: {{ $workers.apiUrl | quote }}
+            - name: AGENTIHOOKS_POD_POLICY_FILE
+              value: /etc/agentihooks/pod-policy/pod-policy.json
+            - name: AGENTIHOOKS_WORKER_IMAGE_TAG
+              value: {{ toString $workers.imageTag | quote }}
+            - name: AGENTIHOOKS_WORKER_PROFILE
+              value: {{ $workers.profile | quote }}
+            - name: AGENTIHOOKS_LAUNCH_CAP
+              value: {{ int $workers.cap | toString | quote }}
+            - name: AGENTIHOOKS_LAUNCH_PROJECTS
+              value: {{ join "," $workers.projects | quote }}
+            - name: AGENTIHOOKS_LAUNCH_BRAIN
+              value: {{ $workers.brain | quote }}
+            {{- end }}
             {{- include "swarm.extraEnv" .Values.controller.env | nindent 12 }}
           {{- include "swarm.envFrom" . | nindent 10 }}
           resources:
@@ -137,6 +195,11 @@ spec:
               mountPath: /run/secrets/launch-signing
               readOnly: true
             {{- end }}
+            {{- if $workers.apiUrl }}
+            - name: pod-policy
+              mountPath: /etc/agentihooks/pod-policy
+              readOnly: true
+            {{- end }}
       volumes:
         - name: home
           emptyDir:
@@ -146,4 +209,9 @@ spec:
           secret:
             secretName: {{ $api.signingKey.secretName }}
             defaultMode: 0400
+        {{- end }}
+        {{- if $workers.apiUrl }}
+        - name: pod-policy
+          configMap:
+            name: {{ include "swarm.fullname" . }}-pod-policy
         {{- end }}

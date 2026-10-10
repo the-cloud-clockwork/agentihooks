@@ -211,7 +211,8 @@ the source revision. `docker/swarm-node/publish.sh` confirms the registry config
 digest equals the tested image before recording the digest. An existing commit
 tag is never pushed again: a rerun records it as a replay only when it holds the
 tested image, and a registry that cannot say whether the tag exists stops the
-run with nothing pushed. The
+run with nothing pushed. On dev the floating `dev` tag then moves to the published
+digest; the deployed controller resolves that tag to its digest at each launch. The
 `swarm-worker-image-attestation` artifact holds the probe output and the
 attestation with the registry digest, which is the immutable digest reference
 `agentihooks-worker@sha256:...`, the version manifest, the protocol compatibility
