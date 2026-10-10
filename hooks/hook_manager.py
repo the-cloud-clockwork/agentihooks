@@ -692,6 +692,22 @@ def on_session_end(payload: dict) -> None:
             log("broadcast session_end failed", {"error": str(e)})
 
 
+def _prompt_broadcasts(session_id: str) -> None:
+    try:
+        from hooks.context.broadcast import _get_session_channels
+        from scripts.swarm_v2 import broadcast_bridge
+
+        broadcast_bridge.claim(session_id, _get_session_channels(session_id), os.environ)
+    except Exception as e:
+        log("fleet broadcast claim failed", {"error": str(e)})
+    try:
+        from hooks.context.broadcast import check_and_inject_broadcasts
+
+        check_and_inject_broadcasts(session_id)
+    except Exception as e:
+        log("broadcast user_prompt failed", {"error": str(e)})
+
+
 def on_user_prompt_submit(payload: dict) -> None:
     """Handle UserPromptSubmit event."""
     from hooks.config import SECRETS_MODE
@@ -968,19 +984,7 @@ def on_user_prompt_submit(payload: dict) -> None:
     from hooks.config import BROADCAST_ENABLED
 
     if BROADCAST_ENABLED:
-        try:
-            from hooks.context.broadcast import _get_session_channels
-            from scripts.swarm_v2 import broadcast_bridge
-
-            broadcast_bridge.claim(session_id, _get_session_channels(session_id), os.environ)
-        except Exception as e:
-            log("fleet broadcast claim failed", {"error": str(e)})
-        try:
-            from hooks.context.broadcast import check_and_inject_broadcasts
-
-            check_and_inject_broadcasts(session_id)
-        except Exception as e:
-            log("broadcast user_prompt failed", {"error": str(e)})
+        _prompt_broadcasts(session_id)
 
     _inject_refocus(session_id, "prompt")
     _inject_ledger_decision(payload)
