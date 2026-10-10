@@ -2,9 +2,10 @@
 
 At full autonomy a trigger wakes the live seat through its inbox or, unless the swarm is paused, spawns it through the
 seat spawn helper; below full, or once every trigger closes, the seat is marked finished and the reap pass retires it.
-A trigger is a priority the sweep left unresolved for fifteen minutes that waits on no operator decision and that no
-dispatcher seat handed to the operator by raising it again under its own name, a bottleneck no lane rule covers held
-for the lane split's ticks, or a red dev holding blocked tasks, where a freeze or focus may be worth proposing.
+A trigger is a priority the sweep left unresolved for fifteen minutes, a bottleneck no lane rule covers held for the
+lane split's ticks, or a red dev holding blocked tasks, where a freeze or focus may be worth proposing. A priority that
+waits on an operator decision, or that a dispatcher seat handed to him by raising it again under its own name, is no
+trigger.
 """
 
 import json

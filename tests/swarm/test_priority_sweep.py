@@ -331,7 +331,7 @@ def test_a_priority_a_dispatcher_handed_to_the_operator_counts_only_his_writes(b
     assert priority_sweep._counts(doc, row, priority_sweep.Write("operator", "comment", path, "x")) is True
 
 
-def test_operator_only_reads_a_ledger_missing_the_items_collection():
+def test_operator_only_covers_handed_rows_operator_decisions_and_a_missing_collection():
     assert priority_sweep.operator_only({}, {"item": "questions/q1"}) is True
     assert priority_sweep.operator_only({}, {"item": "followups/f1"}) is False
     assert priority_sweep.operator_only({}, {"item": "tasks/t1", "by": "dispatcher@a1b2c3-0001"}) is True

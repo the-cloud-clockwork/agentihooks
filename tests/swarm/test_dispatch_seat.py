@@ -175,14 +175,15 @@ def test_a_failed_spawn_leaves_no_seat_record():
     assert seats(store) == []
 
 
-def test_the_tick_spawns_the_seat_at_full_autonomy_only():
-    class Ledger(FakeLedger):
-        def state(self, slug):
-            return {**super().state(slug), "priorities": [priority()]}
+class PriorityLedger(FakeLedger):
+    def state(self, slug):
+        return {**super().state(slug), "priorities": [priority()]}
 
+
+def test_the_tick_spawns_the_seat_at_full_autonomy_only():
     for autonomy, spawned in (("full", 1), ("delegate", 0)):
         store, runtime = swarm(autonomy), FakeRuntime()
-        tick(SLUG, store, Ledger([]), runtime, NOW)
+        tick(SLUG, store, PriorityLedger([]), runtime, NOW)
         assert sum(lane == dispatch_seat.LANE for lane, _, _ in runtime.spawned) == spawned
 
 
@@ -196,8 +197,11 @@ OPERATOR_ONLY = {
 
 def operator_only_doc(*extra):
     rows = [priority(f"pr{n}", path, f"Decide {n}") for n, path in enumerate(OPERATOR_ONLY)]
-    items = {path.split("/")[0]: [{"id": path.split("/")[1], **item}] for path, item in OPERATOR_ONLY.items()}
-    return {**doc(*rows, *extra), **{name: found for name, found in items.items() if name != "questions"}}
+    found = doc(*rows, *extra)
+    found["tasks"] = [{"id": "t1", **OPERATOR_ONLY["tasks/t1"]}]
+    found["followups"] = [{"id": "f1", **OPERATOR_ONLY["followups/f1"]}]
+    found["phases"] = [{"id": "p1", **OPERATOR_ONLY["phases/p1"]}]
+    return found
 
 
 @pytest.mark.parametrize("path", list(OPERATOR_ONLY))
@@ -205,9 +209,17 @@ def test_a_priority_only_the_operator_can_settle_is_no_trigger(path):
     name, item_id = path.split("/")
     found = {**doc(priority("pr1", path, "Decide it")), name: [{"id": item_id, **OPERATOR_ONLY[path]}]}
     assert dispatch_seat.triggers(found, NOW) == []
-    assert dispatch_seat.triggers({**found, name: [{"id": item_id}]}, NOW) == (
-        [] if name == "questions" else [{"id": "pr1", "item": path, "text": "Decide it", "minutes": 15}]
-    )
+
+
+@pytest.mark.parametrize("path", ["tasks/t1", "followups/f1", "phases/p1"])
+def test_the_same_item_without_an_operator_decision_is_a_trigger(path):
+    name, item_id = path.split("/")
+    found = {**doc(priority("pr1", path, "Decide it")), name: [{"id": item_id}]}
+    assert dispatch_seat.triggers(found, NOW) == [{"id": "pr1", "item": path, "text": "Decide it", "minutes": 15}]
+
+
+def test_a_question_is_no_trigger_even_when_the_ledger_has_no_questions():
+    assert dispatch_seat.triggers(doc(priority("pr1", "questions/q1", "Decide it")), NOW) == []
 
 
 def test_no_seat_spawns_while_every_open_priority_waits_on_the_operator():
@@ -244,18 +256,6 @@ def test_a_live_seat_is_still_woken_while_the_swarm_is_paused():
     later = priority("pr2", "followups/f2", "Approve the lane cap", age=20 * MINUTE)
     assert run(store, runtime, doc(priority(), later), NOW + MINUTE) == [f"woke {seat.name} with 1 new trigger"]
     assert len(runtime.spawned) == 1
-
-
-def test_the_tick_spawns_no_seat_while_the_swarm_is_paused():
-    class Ledger(FakeLedger):
-        def state(self, slug):
-            return {**super().state(slug), "priorities": [priority()]}
-
-    store, runtime = swarm(), FakeRuntime()
-    store.update(SLUG, state="paused")
-    tick(SLUG, store, Ledger([]), runtime, NOW)
-    assert [lane for lane, _, _ in runtime.spawned if lane == dispatch_seat.LANE] == []
-    assert seats(store) == []
 
 
 def test_the_seat_spawn_helper_names_records_and_places_a_seat():
@@ -413,15 +413,16 @@ def test_the_swarm_config_reaches_the_seat_spawn():
     assert runtime.configs == [config]
 
 
-def test_a_sleeping_swarm_tick_spawns_no_dispatcher():
-    class Ledger(FakeLedger):
-        def state(self, slug):
-            return {**super().state(slug), "priorities": [priority()]}
-
+@pytest.mark.parametrize("hold", ["sleeping", "paused"])
+def test_a_sleeping_or_paused_swarm_tick_spawns_no_dispatcher(hold):
     store, runtime = swarm(), FakeRuntime()
-    store.redis.set(store.key(SLUG, "master-retired-tasks"), json.dumps([]))
-    tick(SLUG, store, Ledger([]), runtime, NOW)
+    if hold == "sleeping":
+        store.redis.set(store.key(SLUG, "master-retired-tasks"), json.dumps([]))
+    else:
+        store.update(SLUG, state="paused")
+    tick(SLUG, store, PriorityLedger([]), runtime, NOW)
     assert [lane for lane, _, _ in runtime.spawned if lane == dispatch_seat.LANE] == []
+    assert seats(store) == []
 
 
 REPORT = {
