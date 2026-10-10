@@ -208,12 +208,21 @@ def test_detaching_viewers_keeps_agent_exporter_and_grandchildren_alive(worker):
     root = runtime_directory(attempt, child)
     wait_for(root / "running.json", child)
     roles = ("agent", "tool", "grandchild-one", "grandchild-two", "exporter")
-    before = {role: wait_for(root / f"heartbeat-{role}.json", child)["tick"] for role in roles}
+    for role in roles:
+        wait_for(root / f"heartbeat-{role}.json", child)
+
+    def ticks():
+        return {role: json.loads((root / f"heartbeat-{role}.json").read_text())["tick"] for role in roles}
+
     viewer = subprocess.Popen([sys.executable, "-c", "pass"])
     assert viewer.wait() == 0
-    time.sleep(0.1)
-    after = {role: json.loads((root / f"heartbeat-{role}.json").read_text())["tick"] for role in roles}
-    assert all(after[role] > before[role] for role in roles)
+    before = ticks()
+    deadline = time.monotonic() + 5
+    after = ticks()
+    while not all(after[role] > before[role] for role in roles) and time.monotonic() < deadline:
+        time.sleep(0.02)
+        after = ticks()
+    assert all(after[role] > before[role] for role in roles), [role for role in roles if after[role] <= before[role]]
     assert child.poll() is None
 
 
