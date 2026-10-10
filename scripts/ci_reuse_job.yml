@@ -40,7 +40,10 @@ steps:
     if: github.event_name == 'merge_group' && hashFiles('scripts/ci_reuse.py') != ''
     env:
       GH_TOKEN: ${{ steps.app-token.outputs.token }}
+      QUEUE_REF: ${{ github.event.merge_group.head_ref }}
     run: |
+      [[ "$QUEUE_REF" =~ ^refs/heads/gh-readonly-queue/.+/pr-([0-9]+)-[0-9a-f]+$ ]] || exit 0
+      pull="${BASH_REMATCH[1]}"
       evidence="$RUNNER_TEMP/evidence"
       actions="repos/$GITHUB_REPOSITORY/actions"
       mkdir -p "$evidence"
@@ -62,7 +65,7 @@ steps:
       }
       export -f fetch
       export evidence actions
-      jq -r '.workflow_runs[] | "\(.id) \(.run_attempt)"' "$evidence/runs.json" | xargs -r -n 2 -P 8 bash -c 'fetch "$@"' fetch
+      jq -r --argjson pull "$pull" '.workflow_runs[] | select(any(.pull_requests[]?; .number == $pull)) | "\(.id) \(.run_attempt)"' "$evidence/runs.json" | xargs -r -n 2 -P 8 bash -c 'fetch "$@"' fetch
 
   - name: Decide from protected code and record the tested tree
     id: decision

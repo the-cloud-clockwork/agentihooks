@@ -136,7 +136,10 @@ def _find(args, current):
         folder = args.evidence / str(run["id"])
         if not all((folder / name).is_file() for name in EVIDENCE):
             continue
-        head = _revision(run["head_sha"])
+        try:
+            head = _revision(run["head_sha"])
+        except subprocess.CalledProcessError:
+            continue
         if _git("rev-parse", f"{head}:.github") != current["inputs"]["workflow"]:
             continue
         artifacts = _lines(folder / "artifacts.jsonl")
@@ -155,7 +158,10 @@ def _find(args, current):
             or record.get("inputs") != current["inputs"]
         ):
             continue
-        tested = _revision(record["commit"])
+        try:
+            tested = _revision(record["commit"])
+        except subprocess.CalledProcessError:
+            continue
         if _git("rev-parse", f"{tested}^{{tree}}") != current["tree"]:
             continue
         shards = workflow["jobs"]["unit"]["strategy"]["matrix"]["shard"]

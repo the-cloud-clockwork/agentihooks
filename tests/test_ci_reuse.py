@@ -16,6 +16,7 @@ import yaml
 pytestmark = pytest.mark.unit
 PROGRAM = Path(__file__).resolve().parents[1] / "scripts/ci_reuse.py"
 FETCH = "Fetch the evidence of recent passed runs"
+QUEUE_REF = "refs/heads/gh-readonly-queue/dev/pr-5-0123abcd"
 RUNS = "repos/o/r/actions/workflows/test.yml/runs?event=pull_request&status=success&per_page=20"
 JOBS = "repos/o/r/actions/runs/7/attempts/1/jobs?per_page=100"
 ARTIFACTS = "repos/o/r/actions/runs/7/artifacts?per_page=100"
@@ -68,7 +69,7 @@ def fetch(env, temp):
     temp.mkdir()
     result = subprocess.run(
         ["bash", "-e", "-c", step["run"]],
-        env=dict(env, GITHUB_REPOSITORY="o/r", RUNNER_TEMP=str(temp)),
+        env=dict(env, GITHUB_REPOSITORY="o/r", RUNNER_TEMP=str(temp), QUEUE_REF=QUEUE_REF),
         capture_output=True,
         text=True,
     )
@@ -128,6 +129,7 @@ def full_source(reuse_repo, tmp_path):
         "status": "completed",
         "conclusion": "success",
         "head_sha": head,
+        "pull_requests": [{"number": 5}],
     }
     names = ["reuse", "unit (3.11, 1)", "unit (3.12, 1)", "lint", "Gate — Required"]
     jobs = [{"id": 91 + n, "name": name, "conclusion": "success"} for n, name in enumerate(names)]
@@ -214,7 +216,7 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
 
 
 @pytest.mark.parametrize("reuse_repo", ["dynamic"], indirect=True)
-def test_a_full_pass_includes_every_dynamic_mutation_shard(full_source, tmp_path):
+def test_a_full_pass_with_dynamic_mutation_shards_reuses(full_source, tmp_path):
     root, base, _, queue, env, _, _ = full_source
     result = invoke(root, base, queue, "merge_group", tmp_path / "dynamic.json", env)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -537,7 +539,8 @@ def test_a_queue_tree_that_changes_workflows_runs_fully(full_source, tmp_path):
     assert "reused=false" in result.stdout
 
 
-DECOYS = ["valid", "event", "evidence", "workflow", "metadata", "record", "tree", "coverage", "jobs"]
+DECOYS = ["valid", "event", "evidence", "head", "workflow", "metadata", "record", "commit", "tree", "coverage", "jobs"]
+ABSENT = "0123456789abcdef0123456789abcdef01234567"
 
 
 @pytest.mark.parametrize("decoy", DECOYS)
@@ -563,6 +566,10 @@ def test_a_rejected_newer_run_still_lets_an_older_full_pass_reuse(full_source, t
         decoy_record["commit"] = git(root, "commit-tree", git(root, "write-tree"), "-p", base, input="tree\n")
     elif decoy == "coverage":
         artifacts = [item for item in artifacts if not item["name"].startswith("coverage-")]
+    elif decoy == "head":
+        decoy_source["head_sha"] = ABSENT
+    elif decoy == "commit":
+        decoy_record["commit"] = ABSENT
     elif decoy == "jobs":
         next(job for job in jobs if job["name"] == "lint")["conclusion"] = "failure"
     archive = io.BytesIO()
@@ -581,3 +588,35 @@ def test_a_rejected_newer_run_still_lets_an_older_full_pass_reuse(full_source, t
     assert result.returncode == 0, result.stdout + result.stderr
     assert "reused=true" in result.stdout
     assert f"run={8 if decoy == 'valid' else 7}\n" in result.stdout
+
+
+@pytest.mark.parametrize("pulls", [[{"number": 6}], [], None])
+def test_only_the_queued_pull_requests_runs_are_fetched(full_source, tmp_path, pulls):
+    root, base, _, queue, env, responses, _ = full_source
+    source = responses[RUNS]["workflow_runs"][0]
+    if pulls is None:
+        del source["pull_requests"]
+    else:
+        source["pull_requests"] = pulls
+    Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
+    evidence = fetch(env, tmp_path / "runner")
+    assert not (evidence / "7").exists()
+    result = invoke(root, base, queue, "merge_group", tmp_path / "other.json", env)
+    assert "reused=false" in result.stdout
+
+
+def test_a_queue_ref_naming_no_pull_request_fetches_nothing(full_source, tmp_path):
+    from scripts import ci_reuse
+
+    _, _, _, _, env, _, _ = full_source
+    [step] = [step for step in ci_reuse.reuse_job()["steps"] if step.get("name") == FETCH]
+    temp = tmp_path / "runner"
+    temp.mkdir()
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        env=dict(env, GITHUB_REPOSITORY="o/r", RUNNER_TEMP=str(temp), QUEUE_REF="refs/heads/dev"),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert list(temp.iterdir()) == []
