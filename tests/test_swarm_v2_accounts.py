@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 from redis.exceptions import WatchError
-from scripts.swarm_v2.accounts import OCCUPIED, RESERVED, AccountCapacity, Slot
 
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import SwarmError
 from scripts.swarm_v2 import accounts
+from scripts.swarm_v2.accounts import OCCUPIED, RESERVED, AccountCapacity, Slot
 from scripts.swarm_v2.registry import FleetRegistry, Scope, Session
 from tests.sv2_ctl02_cases import build
 
@@ -130,9 +130,20 @@ def test_two_concurrent_controllers_cannot_both_take_the_last_slot(world, run):
     assert won == [Slot(ACCOUNT, f"{SLUG}/{SECOND}", world.agents[SECOND].execution_id, 1, RESERVED, 1000 + TTL)]
     assert world.holders() == [f"{SLUG}/{HELD}", f"{SLUG}/{SECOND}"]
     assert held.state == OCCUPIED
-    assert json.loads(world.rows()[f"{SLUG}/{SECOND}"])["execution_id"] == world.agents[SECOND].execution_id
+    stored = json.loads(world.rows()[f"{SLUG}/{SECOND}"])
+    assert (stored["execution_id"], stored["state"]) == (world.agents[SECOND].execution_id, "reserved")
+    assert json.loads(world.rows()[f"{SLUG}/{HELD}"])["state"] == "occupied"
     assert world.capacity.account_reservation_conflicts_total() == 1
     assert world.capacity.account_reservation_conflicts() == {ACCOUNT: 1}
+    assert world.store.redis.hgetall(f"{ROOT}:account-reservation-conflicts") == {ACCOUNT: "1"}
+
+
+def test_an_account_with_no_slots_refuses_without_writing(world):
+    token = world.launch(FIRST)
+
+    assert refusal(world.capacity.reserve, token, 0, TTL) == "account_full"
+    assert world.rows() == {}
+    assert world.capacity.account_reservation_conflicts_total() == 1
 
 
 def test_simultaneous_launch_threads_take_one_slot(world):
@@ -225,6 +236,7 @@ def test_an_expired_own_reservation_is_taken_again_when_there_is_room(world):
     token = world.launch(FIRST)
     world.capacity.reserve(token, CAP, TTL)
     world.clock[0] += TTL
+    assert refusal(world.capacity.occupy, token, MACHINE, "sess-x") == "reservation_expired"
 
     again = world.capacity.reserve(token, CAP, TTL)
 
@@ -287,6 +299,7 @@ def test_freeze_refuses_new_reservations_and_reconstruct_rebuilds_occupancy(worl
 
     world.capacity.freeze()
     assert world.capacity.frozen()
+    assert world.store.redis.get(f"{ROOT}:accounts-frozen") == "1"
     assert refusal(world.capacity.reserve, blocked, CAP + 1, TTL) == "reservations_frozen"
 
     assert world.capacity.reconstruct(world.fleet, registration) == {ACCOUNT: 1}
@@ -311,6 +324,25 @@ def test_reconstruct_skips_records_without_a_matching_registration(world):
     assert world.capacity.slots(ACCOUNT) == []
 
 
+def test_reconstruct_confirms_a_reserved_record_and_keeps_a_newer_reservation(world):
+    reserved = world.capacity.reserve(world.launch(HELD), CAP, TTL)
+    world.fleet.register(world.session(HELD), world.tokens[HELD])
+    old = world.launch(FIRST)
+    world.capacity.reserve(old, CAP, TTL)
+    world.fleet.register(world.session(FIRST), old)
+    grants = {world.agents[seat].execution_id: world.authority.authorize(world.tokens[seat]) for seat in (HELD, FIRST)}
+    newer = world.capacity.reserve(world.launch(FIRST, previous=world.agents[FIRST].execution_id), CAP, TTL)
+    stray = Slot("other", f"{SLUG}/eng-9@fixture", "exe-stray", 1, OCCUPIED, 0, "gone")
+    world.store.redis.hset(f"{ROOT}:accounts:other", stray.holder, accounts.encode(stray))
+
+    rebuilt = world.capacity.reconstruct(world.fleet, grants.get)
+
+    session = world.session(HELD).key()
+    assert rebuilt == {ACCOUNT: 2}
+    assert world.capacity.slots(ACCOUNT) == [replace(reserved, state=OCCUPIED, expires_ms=0, session=session), newer]
+    assert world.store.redis.hgetall(f"{ROOT}:accounts:other") == {}
+
+
 @pytest.mark.parametrize(("cap", "ttl"), [(-1, TTL), (True, TTL), (CAP, 0), (CAP, 1.5), (CAP, False)])
 def test_invalid_caps_and_lifetimes_are_refused(world, cap, ttl):
     token = world.launch(FIRST)
@@ -332,11 +364,9 @@ def test_a_request_without_a_grant_of_this_swarm_is_refused(world):
 def test_writes_retry_a_watch_conflict_and_give_up_after_their_attempts(world):
     token = world.launch(FIRST)
 
-    assert world.controller(Flaky(world.store, accounts.WRITE_ATTEMPTS - 1)).reserve(token, CAP, TTL).holder
+    assert world.controller(Flaky(world.store, 4)).reserve(token, CAP, TTL).holder
     world.capacity.release(token)
-    assert refusal(world.controller(Flaky(world.store, accounts.WRITE_ATTEMPTS)).reserve, token, CAP, TTL) == (
-        "dependency_unavailable"
-    )
+    assert refusal(world.controller(Flaky(world.store, 5)).reserve, token, CAP, TTL) == ("dependency_unavailable")
     assert world.rows() == {}
 
 
