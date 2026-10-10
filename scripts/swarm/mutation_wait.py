@@ -81,8 +81,8 @@ def _report(target, started_at):
     archive = _api(f"repos/{repo}/actions/artifacts/{artifact['id']}/zip", binary=True)
     with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
         name = next(name for name in zipped.namelist() if name == "report.json" or name.endswith("/report.json"))
-        scope = next((name for name in zipped.namelist() if name == "scope.json" or name.endswith("/scope.json")), None)
-        return json.loads(zipped.read(name)), scope and json.loads(zipped.read(scope))
+        scope = json.loads(zipped.read("scope.json")) if "scope.json" in zipped.namelist() else None
+        return json.loads(zipped.read(name)), scope
 
 
 def resolution(held: dict) -> str:

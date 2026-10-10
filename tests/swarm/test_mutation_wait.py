@@ -64,6 +64,7 @@ def preflight(monkeypatch):
         tip="first",
         base="base",
         scope=None,
+        scope_name="scope.json",
         report_name="report.json",
         artifacts=[
             {"id": 7, "name": "mutation-preflight-report", "expired": False, "created_at": report_at},
@@ -83,7 +84,7 @@ def preflight(monkeypatch):
             with zipfile.ZipFile(data, "w") as zipped:
                 zipped.writestr(state.report_name, json.dumps(state.report))
                 if state.scope is not None:
-                    zipped.writestr("scope.json", json.dumps(state.scope))
+                    zipped.writestr(state.scope_name, json.dumps(state.scope))
             output = data.getvalue()
         elif "artifacts?" in args[-1]:
             output = json.dumps({"artifacts": [] if state.missing else state.artifacts})
@@ -355,6 +356,15 @@ def test_a_run_ends_red_once_the_branch_moves_past_it(preflight, focused):
 def test_a_focused_proof_report_that_does_not_grade_the_head_from_its_merge_base_ends_red(preflight, scope):
     _focused_proof(preflight)
     preflight.scope = scope
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == (
+        f"mutation preflight {URL}, now red; the mutation report does not grade the branch head from its dev merge base"
+    )
+
+
+def test_a_focused_proof_reads_only_the_recorded_scope_at_the_report_root(preflight):
+    _focused_proof(preflight)
+    preflight.scope_name = "work/scope.json"
     held = {**waits.on("mutation", URL), "head": "first"}
     assert waits.resolution(held, {}, None, None, None, False) == (
         f"mutation preflight {URL}, now red; the mutation report does not grade the branch head from its dev merge base"
