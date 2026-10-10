@@ -324,5 +324,6 @@ def test_package_cases_match_their_committed_evidence(case):
     first, second = cases.run_case(case), cases.run_case(case)
     assert first == second
     assert first["state"] == "passed", json.dumps(first, indent=2, sort_keys=True)
-    committed = json.loads((EVIDENCE / f"{case}-result.json").read_text())
+    path = EVIDENCE / f"{case}-result.json"
+    committed = json.loads(path.read_text()) if path.exists() else None
     assert committed == first, json.dumps(first, indent=2, sort_keys=True)
