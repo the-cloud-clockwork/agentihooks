@@ -235,7 +235,7 @@ def _container(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
         },
         "volumeMounts": [
             {"name": "home", "mountPath": "/home/worker"},
-            {"name": "tmp", "mountPath": "/tmp"},
+            {"name": "tmp", "mountPath": "/tmp"},  # NOSONAR: a Pod-private emptyDir, never the host /tmp
             {"name": "launch", "mountPath": LAUNCH_DIR, "readOnly": True},
             {"name": "credential", "mountPath": CREDENTIAL_DIR, "readOnly": True},
         ],
