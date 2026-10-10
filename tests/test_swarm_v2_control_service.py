@@ -25,9 +25,12 @@ def _store():
     return store
 
 
-def _post(url, token, body):
+def _post(url, token, body, method="POST"):
     request = urllib.request.Request(
-        url, json.dumps(body).encode(), {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        url,
+        json.dumps(body).encode(),
+        {"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        method=method,
     )
     try:
         with urllib.request.urlopen(request, timeout=5) as response:
@@ -113,7 +116,7 @@ def test_a_worker_registers_over_http_and_its_heartbeat_reaches_the_api(tmp_path
             token,
             {"execution_id": agent.execution_id, "generation": agent.generation},
         )
-        refused, detail = _post(f"{base}/v2/executions/{agent.execution_id}/heartbeat", token, {})
+        refused, detail = _post(f"{base}/v2/executions/{agent.execution_id}/heartbeat", token, {}, "PUT")
     finally:
         server.shutdown()
         server.server_close()
