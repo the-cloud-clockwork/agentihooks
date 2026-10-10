@@ -147,6 +147,53 @@ def test_a_stale_reading_stays_a_target_with_no_band_cap_for_the_router_to_refre
     assert (found.account, found.observed_at, found.cap) == ("beta", observed, None)
 
 
+def test_a_newer_fleet_observation_outranks_the_local_cache(monkeypatch):
+    from scripts import claude_quota_balancer as balancer
+
+    def beta(five_used):
+        return balancer.ProbeResult(
+            "beta", "allowed", "NORMAL", 70.0, balancer.QuotaWindow(five_used, None), balancer.QuotaWindow(30.0, None)
+        )
+
+    observed = time.time()
+    monkeypatch.setattr(balancer, "cached_observations", lambda: [(observed - 60, beta(0.0))])
+    [found] = qp._other_accounts({}, [(observed, beta(100.0))])
+    assert (found.five_used, found.observed_at) == (100.0, observed)
+    [kept] = qp._other_accounts({}, [(observed - 120, beta(100.0))])
+    assert kept.five_used == 0.0
+
+
+def test_a_fleet_observation_wins_a_tie_with_the_local_cache(monkeypatch):
+    from scripts import claude_quota_balancer as balancer
+
+    def beta(five_used):
+        return balancer.ProbeResult(
+            "beta", "allowed", "NORMAL", 70.0, balancer.QuotaWindow(five_used, None), balancer.QuotaWindow(30.0, None)
+        )
+
+    observed = time.time()
+    monkeypatch.setattr(balancer, "cached_observations", lambda: [(observed, beta(0.0))])
+    [found] = qp._other_accounts({}, [(observed, beta(100.0))])
+    assert found.five_used == 100.0
+
+
+def test_evaluate_reads_fleet_observations_from_its_environment(monkeypatch):
+    seen = []
+    monkeypatch.delenv("AH_ROUTE_API", raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_FLEET_QUOTA", "1")
+    monkeypatch.setattr(qp, "_session_windows", lambda session: (100, 50, time.time() + 3600, None))
+    monkeypatch.setattr("scripts.swarm_v2.quota.fleet_observations", lambda environ: seen.append(environ) or [])
+    monkeypatch.setattr(qp, "_other_accounts", lambda sessions, fleet: [_c("beta", 10, 30)] if fleet == [] else [])
+    monkeypatch.setattr(qp, "_api_accounts", lambda sessions: [])
+    monkeypatch.setattr("hooks.context.account_sessions.agent_pid", lambda: 1)
+    monkeypatch.setattr("hooks.context.account_sessions.session_account", lambda pid: "alpha")
+    monkeypatch.setattr("hooks.context.account_sessions.sessions_by_account", lambda: {})
+    monkeypatch.setattr(qp, "push_active", lambda session: False)
+    decision = qp.evaluate("subscription")
+    assert (decision.action, decision.target.account) == ("handoff", "beta")
+    assert seen[0]["AGENTIHOOKS_FLEET_QUOTA"] == "1"
+
+
 def test_an_open_account_with_exactly_the_minimum_routing_left_wins_over_a_full_one():
     edge = qp.Candidate("beta", 0, 100 - qp.MIN_ROUTING_LEFT, 0, time.time(), cap=6)
     full = qp.Candidate("gamma", 10, 50, 5, time.time(), cap=4)
