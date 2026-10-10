@@ -66,7 +66,7 @@ def test_unit_shards_adopt_dev_durations_through_the_script_before_the_tests_run
     download = next(s for s in steps if s.get("name") == "Download the durations this run splits on")
     assert download["with"] == {"name": "split-${{ matrix.python-version }}"}
     assert steps.index(download) < next(i for i, s in enumerate(steps) if s.get("name") == "Run tests")
-    assert jobs["unit"]["needs"] in (["split"], ["split", "reuse"])
+    assert jobs["unit"]["needs"] == ["split", "reuse"]
 
 
 def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
@@ -87,7 +87,7 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     assert restore["with"]["key"] == "${{ needs.durations.outputs.key }}"
     assert restore["if"] == "needs.durations.outputs.key != ''"
     assert restore["with"]["fail-on-cache-miss"] is True
-    assert jobs["split"]["needs"] in (["durations"], ["durations", "reuse"])
+    assert jobs["split"]["needs"] == ["durations", "reuse"]
     lookup = jobs["durations"]["steps"][0]
     assert jobs["durations"]["outputs"] == {
         "key": "${{ steps.stored.outputs.cache-matched-key }}",

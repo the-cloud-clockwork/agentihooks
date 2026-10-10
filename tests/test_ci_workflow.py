@@ -346,9 +346,9 @@ def _workflow() -> dict:
 def test_shards_wait_only_on_the_durations_lookup():
     jobs = _workflow()["jobs"]
     assert "already-tested" not in jobs
-    assert jobs["split"]["needs"] in (["durations"], ["durations", "reuse"])
-    assert jobs["unit"]["needs"] in (["split"], ["split", "reuse"])
-    assert jobs["lint"].get("needs") in (None, ["reuse"])
+    assert jobs["split"]["needs"] == ["durations", "reuse"]
+    assert jobs["unit"]["needs"] == ["split", "reuse"]
+    assert jobs["lint"]["needs"] == ["reuse"]
 
 
 def test_unit_shards_check_out_full_history_without_old_file_contents():
@@ -734,7 +734,7 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
 def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     jobs = _mutation_workflow()["jobs"]
     plan, mutation = jobs["mutation-plan"], jobs["mutation"]
-    assert plan.get("needs") in (None, ["reuse"])
+    assert "needs" not in plan
     assert plan["if"] == mutation["if"]
     assert plan["outputs"]["shards"] == "${{ steps.plan.outputs.shards }}"
     step = next(step for step in plan["steps"] if step.get("id") == "plan")

@@ -26,22 +26,130 @@ permissions:
   contents: read
 
 jobs:
+  reuse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      reused: ${{ steps.decision.outputs.reused || 'false' }}
+      run: ${{ steps.decision.outputs.run }}
+      attempt: ${{ steps.decision.outputs.attempt }}
+      grader: ${{ steps.grader.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Record the protected grader revision
+        id: grader
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v5
+        if: hashFiles('scripts/ci_reuse.py') != ''
+        with:
+          python-version: "3.12"
+
+      - name: Install metadata dependencies
+        if: hashFiles('scripts/ci_reuse.py') != ''
+        run: python -m pip install "pyyaml>=6.0"
+
+      - name: Mint the tcc main ci App token
+        id: app-token
+        if: github.event_name == 'merge_group' && hashFiles('scripts/ci_reuse.py') != ''
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-contents: read
+
+      - name: Fetch the evidence of recent passed runs
+        if: github.event_name == 'merge_group' && hashFiles('scripts/ci_reuse.py') != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          QUEUE_REF: ${{ github.event.merge_group.head_ref }}
+        run: |
+          [[ "$QUEUE_REF" =~ ^refs/heads/gh-readonly-queue/.+/pr-([0-9]+)-[0-9a-f]+$ ]] || exit 0
+          pull="${BASH_REMATCH[1]}"
+          evidence="$RUNNER_TEMP/evidence"
+          actions="repos/$GITHUB_REPOSITORY/actions"
+          mkdir -p "$evidence"
+          if ! gh api "$actions/workflows/test.yml/runs?event=pull_request&status=success&per_page=100" > "$evidence/runs.json"; then
+            rm -f "$evidence/runs.json"
+            exit 0
+          fi
+          fetch() {
+            local folder="$evidence/$1" artifact job
+            mkdir -p "$folder"
+            gh api --paginate "$actions/runs/$1/artifacts?per_page=100" --jq '.artifacts[]' > "$folder/artifacts.jsonl" || { rm -f "$folder/artifacts.jsonl"; return 0; }
+            artifact="$(jq -r --arg name "required-tree-$2" 'select(.name == $name and (.expired | not)) | .id' "$folder/artifacts.jsonl" | head -n 1)"
+            [[ -n "$artifact" ]] || return 0
+            gh api "$actions/artifacts/$artifact/zip" > "$folder/proof.zip" || { rm -f "$folder/proof.zip"; return 0; }
+            gh api --paginate "$actions/runs/$1/attempts/$2/jobs?per_page=100" --jq '.jobs[]' > "$folder/jobs.jsonl" || { rm -f "$folder/jobs.jsonl"; return 0; }
+            job="$(jq -r 'select(.name == "reuse" and .conclusion == "success") | .id' "$folder/jobs.jsonl" | head -n 1)"
+            [[ -n "$job" ]] || return 0
+            gh api "$actions/jobs/$job/logs" > "$folder/reuse.log" || rm -f "$folder/reuse.log"
+          }
+          export -f fetch
+          export evidence actions
+          jq -r --argjson pull "$pull" '.workflow_runs[] | select(any(.pull_requests[]?; .number == $pull)) | "\(.id) \(.run_attempt)"' "$evidence/runs.json" | xargs -r -n 2 -P 8 bash -c 'fetch "$@"' fetch
+
+      - name: Decide from protected code and record the tested tree
+        id: decision
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
+          HEAD: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+          RUN: ${{ github.run_id }}
+          ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          if [[ ! -f scripts/ci_reuse.py ]]; then
+            echo "reused=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python -I scripts/ci_reuse.py --base "$BASE" --head "$HEAD" --event "$EVENT" \
+            --repository "$GITHUB_REPOSITORY" --run "$RUN" --attempt "$ATTEMPT" \
+            --evidence "$RUNNER_TEMP/evidence" --record "$RUNNER_TEMP/provenance.json"
+
+      - name: Publish protected tested tree evidence
+        if: steps.decision.outputs.recorded == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: required-tree-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/provenance.json
+          if-no-files-found: error
+          retention-days: 7
+
   worker-image:
+    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [reuse]
     uses: ./.github/workflows/swarm-node-smoke.yml
   swarm-image:
+    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [reuse]
     uses: ./.github/workflows/swarm-smoke.yml
   semgrep:
+    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [reuse]
     uses: ./.github/workflows/semgrep.yml
     with:
       base: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
 
   brain-smoke:
+    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [reuse]
     uses: ./.github/workflows/brain-smoke.yml
 
   ledger-load:
+    needs: [reuse]
+    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
     uses: ./.github/workflows/ledger-load.yml
 
   kind-due:
+    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [reuse]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -49,6 +157,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Decide from the base branch rule whether the chart proof is due
@@ -72,6 +181,8 @@ jobs:
 
   # Every shard restores this one key, or nothing when the lookup found none, so all shards of a run split alike.
   durations:
+    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [reuse]
     runs-on: ubuntu-latest
     timeout-minutes: ${{ (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch') && 4 || 2 }}
     permissions:
@@ -202,7 +313,8 @@ jobs:
 
   # Every shard of a version splits on the one map this job chooses, so the whole suite is collected once per version, not once per shard.
   split:
-    needs: [durations]
+    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [durations, reuse]
     runs-on: ubuntu-latest
     timeout-minutes: 7
     permissions:
@@ -214,6 +326,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - &python
@@ -309,7 +422,8 @@ jobs:
           overwrite: true
 
   unit:
-    needs: [split]
+    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [split, reuse]
     runs-on: ubuntu-latest
     timeout-minutes: 7
     permissions:
@@ -329,6 +443,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           filter: blob:none
 
@@ -416,7 +531,8 @@ jobs:
           overwrite: true
 
   shard-check:
-    needs: [unit]
+    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [unit, reuse]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -475,6 +591,8 @@ jobs:
         run: python -m tests.shard_budget shard-durations/*/durations.json
 
   test-count:
+    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [reuse]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -486,6 +604,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - *python
@@ -511,8 +630,9 @@ jobs:
           python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
   sonar:
+    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
     # Waits for the shards' coverage through needs; the API that could poll for it has an hourly quota every run shares.
-    needs: [unit]
+    needs: [unit, reuse]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -523,6 +643,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
@@ -759,6 +880,8 @@ jobs:
         run: kill "$PROXY_PID"
 
   lint:
+    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [reuse]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -768,6 +891,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Set up Python
@@ -796,8 +920,10 @@ jobs:
         run: git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
 
       - name: Check out the protected grader
+        env:
+          GRADER: ${{ needs.reuse.outputs.grader }}
         run: |
-          git fetch --no-tags origin dev
+          git fetch --no-tags origin "$GRADER"
           git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
 
       # Each control grades even after an earlier one is red, so one run reports every red control.
@@ -871,7 +997,7 @@ jobs:
         run: python -m scripts.swarm_ledger.artifact_sanity tests/fixtures/artifacts/*
 
   coverage-ratchet:
-    needs: [durations, unit, queue-baseline]
+    needs: [durations, unit, queue-baseline, reuse]
     if: ${{ !cancelled() && needs.unit.result == 'success' && (github.event_name != 'merge_group' || needs['queue-baseline'].result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -880,6 +1006,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
@@ -987,13 +1114,14 @@ jobs:
 
   # Reports only: it fails when it cannot read the run, never because a stage ran slow.
   stage-budget:
-    needs: [durations, split, unit, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load]
+    needs: [durations, split, unit, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load, reuse, queue-baseline]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Mint the tcc main ci App token
@@ -1018,7 +1146,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [durations, split, unit, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget]
+    needs: [durations, split, unit, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-baseline]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1028,9 +1156,18 @@ jobs:
           NEEDS: ${{ toJSON(needs) }}
           MUTATION: ${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}
           KIND: ${{ needs.kind-due.outputs.due }}
+          EVENT: ${{ github.event_name }}
+          REUSED: ${{ needs.reuse.outputs.reused }}
         run: |
           echo "$NEEDS"
-          if ! jq -e --arg mutation "$MUTATION" --arg kind "${KIND:-}" 'all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false"))' <<< "$NEEDS"; then
+          if [[ "${REUSED:-false}" == true ]]; then
+            if [[ "${EVENT:-}" != merge_group ]] || ! jq -e 'has("reuse") and .reuse.result == "success" and .reuse.outputs.reused == "true" and (.reuse.outputs.run // "" | test("^[0-9]+$")) and has("queue-baseline") and ."queue-baseline".result == "success" and all(to_entries[]; ((.key == "reuse" or .key == "queue-baseline" or .key == "stage-budget") and .value.result == "success") or (.key != "reuse" and .key != "queue-baseline" and .key != "stage-budget" and .value.result == "skipped"))' <<< "$NEEDS"; then
+              echo "::error::Verified queue reuse and its coverage baseline must succeed."
+              exit 1
+            fi
+            exit 0
+          fi
+          if ! jq -e --arg event "${EVENT:-}" --arg mutation "$MUTATION" --arg kind "${KIND:-}" 'all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false") or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group"))' <<< "$NEEDS"; then
             echo "::error::Every required gate must succeed."
             exit 1
           fi
@@ -1110,6 +1247,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
@@ -1163,7 +1301,7 @@ jobs:
 
   # A later queue entry's base is the earlier entry's merge commit, so the run that measured it may still be finishing.
   queue-baseline:
-    needs: [unit]
+    needs: [unit, reuse]
     # The record step refuses a missing 3.12 shard, so a run red only on another shard still publishes what later entries wait on.
     if: ${{ !cancelled() && github.event_name == 'merge_group' }}
     runs-on: ubuntu-latest
@@ -1172,6 +1310,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
       - uses: actions/setup-python@v5
         with:
@@ -1180,11 +1320,33 @@ jobs:
       - name: Install coverage
         run: python -m pip install "coverage>=7.4"
 
+      - name: Mint the token that reads the reused run
+        if: needs.reuse.outputs.reused == 'true'
+        id: reuse-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-contents: read
+
       - name: Download this run's shard coverage
+        if: needs.reuse.outputs.reused != 'true'
         uses: actions/download-artifact@v4
         with:
           pattern: coverage-3.12-*
           path: .coverage-shards
+
+      - name: Download the reused run's shard coverage
+        if: needs.reuse.outputs.reused == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-3.12-*
+          path: .coverage-shards
+          run-id: ${{ needs.reuse.outputs.run }}
+          repository: ${{ github.repository }}
+          github-token: ${{ steps.reuse-token.outputs.token }}
 
       # Later queue entries wait on this upload, so it runs before Sonar and the gate rather than after them.
       - name: Record this run's coverage baseline
@@ -1200,7 +1362,7 @@ jobs:
           overwrite: true
 
       - name: Stop when this run's unit shards failed
-        if: needs.unit.result != 'success'
+        if: needs.unit.result != 'success' && needs.reuse.outputs.reused != 'true'
         run: |
           echo "::error::A unit shard failed; this run published its 3.12 baseline for later queue entries and grades nothing."
           exit 1
@@ -1216,6 +1378,7 @@ jobs:
           permission-contents: read
 
       - name: Find the run that measured the base tree
+        if: needs.reuse.outputs.reused != 'true'
         id: base-run
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -1250,6 +1413,7 @@ jobs:
           done
 
       - name: Download the base tree's coverage baseline
+        if: needs.reuse.outputs.reused != 'true'
         uses: actions/download-artifact@v4
         with:
           name: coverage-baseline
@@ -1259,6 +1423,7 @@ jobs:
           github-token: ${{ steps.app-token.outputs.token }}
 
       - name: Hold the base tree
+        if: needs.reuse.outputs.reused != 'true'
         env:
           BASE_TREE: ${{ steps.base-run.outputs.tree }}
         run: |
@@ -1270,6 +1435,7 @@ jobs:
           echo "Restored the coverage baseline of base tree $tree"
 
       - name: Publish the base tree's coverage baseline
+        if: needs.reuse.outputs.reused != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: queue-coverage-baseline

@@ -114,10 +114,10 @@ def test_a_shard_without_durations_is_red_and_named(tmp_path):
 def test_shard_check_grades_every_unit_shard_before_the_required_gate():
     jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     job = jobs["shard-check"]
-    assert job["needs"] in (["unit"], ["unit", "reuse"])
-    assert job.get("if") in (
-        None,
-        "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+    assert job["needs"] == ["unit", "reuse"]
+    assert (
+        job["if"]
+        == "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}"
     )
     assert job["strategy"]["matrix"]["python-version"] == jobs["unit"]["strategy"]["matrix"]["python-version"]
     assert "shard-check" in jobs["gate-required"]["needs"]

@@ -286,7 +286,7 @@ def test_size_runs_in_lint_graded_by_the_base_with_the_pinned_ruff():
     jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     job = jobs["lint"]
     assert "size" not in jobs
-    assert job.get("needs") in (None, ["reuse"])
+    assert job["needs"] == ["reuse"]
     assert "lint" in jobs["gate-required"]["needs"]
     steps = {step.get("name"): step for step in job["steps"]}
     install, base = steps["Install ruff"], steps["Check out the base revision"]
