@@ -447,6 +447,16 @@ def test_a_grant_command_that_fails_or_times_out_reports_unhanded(monkeypatch, t
     assert world.launch(FIRST).handed is False
 
 
+def test_a_grant_command_that_cannot_start_reports_unhanded_and_keeps_the_slot(monkeypatch, tmp_path):
+    world = World(monkeypatch, homes=WorkerHomeCommand(tmp_path, str(tmp_path / "missing-python")))
+
+    launch = world.launch(FIRST)
+
+    assert launch.outcome.ok
+    assert launch.handed is False
+    assert world.rows()[f"{SLUG}/{FIRST}"]["state"] == RESERVED
+
+
 def test_a_launched_worker_is_handed_its_own_grant(world):
     launch = world.launch(FIRST)
 

@@ -378,6 +378,12 @@ class TestRecursiveRewrite:
             assert rc not in GREP_EXCLUDES, rc
             assert rc not in RG_EXCLUDES, rc
 
+    def test_the_grant_file_the_worker_home_writes_is_a_credential(self, tmp_path):
+        from hooks.context.credential_guard import KIND_CREDENTIAL, sensitive_kind
+        from scripts.swarm_v2.broadcast_bridge import grant_path
+
+        assert sensitive_kind(str(grant_path(tmp_path / "exe-1"))) == KIND_CREDENTIAL
+
     def test_recursive_search_leaves_the_worker_grant_out(self):
         from scripts.swarm_v2.broadcast_bridge import GRANT_NAME
 
