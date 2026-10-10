@@ -806,9 +806,9 @@ def cmd_status(store, args):
 
 
 def cmd_freeze(store, args):
-    writer = clearance.holder(store, args.slug, Who.from_env())
+    writer = clearance.freezer(store, args.slug, Who.from_env())
     by = None if writer == clearance.OPERATOR else writer
-    if by and not args.quote:
+    if by not in (None, clearance.DISPATCHER) and not args.quote:
         raise SwarmError("the master writes freezes only with the operator's words: pass them with --quote")
     LedgerClient().freeze(args.slug, args.command, args.target, by=by, reason=args.reason, quote=args.quote)
     print(json.dumps({args.command: args.target, "by": writer}))
