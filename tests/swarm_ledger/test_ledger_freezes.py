@@ -283,6 +283,16 @@ def test_the_live_dispatcher_at_full_autonomy_freezes_focuses_and_unfreezes_unde
     assert state["_meta"]["stamps"]["freezes"]["by"] == DISPATCHER
 
 
+def test_an_alias_is_judged_by_the_live_name_it_resolves_to(monkeypatch):
+    aliases = {"retired-dispatcher": DISPATCHER, "retired-engineer": ENGINEER}
+    monkeypatch.setattr(ledger_freezes, "resolve_name", lambda name: aliases.get(name, name))
+    monkeypatch.setattr(ledger_freezes, "autonomy", lambda slug: "full")
+    assert freeze("plans/a", by="retired-dispatcher")[1] == []
+    state, rejected = freeze("plans/b", by="retired-engineer")
+    assert [op.rsplit("-", 1)[0] for op in rejected] == ["freeze_set"]
+    assert [(row["target"], row["by"]) for row in state["freezes"]] == [("plans/a", "retired-dispatcher")]
+
+
 @pytest.mark.parametrize("autonomy", ["", "manual", "assist", "delegate"])
 @pytest.mark.parametrize("verb", ["freeze", "focus", "unfreeze"])
 def test_the_live_dispatcher_below_full_autonomy_writes_no_freeze(monkeypatch, autonomy, verb):
