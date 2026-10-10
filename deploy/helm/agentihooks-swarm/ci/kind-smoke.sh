@@ -143,8 +143,10 @@ if [[ -z $retaken ]]; then
 fi
 printf 'controller restarted by its liveness probe and holds the lease again: %s\n' "$retaken"
 
-kubectl create secret generic swarm-launch-signing --dry-run=client -o yaml \
-  --from-file=signing-key=<(python3 -c 'import secrets; print(secrets.token_hex(32))') | kubectl apply -f -
+signing_key="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+printf '%s' "$signing_key" | kubectl create secret generic swarm-launch-signing --dry-run=client -o yaml \
+  --from-file=signing-key=/dev/stdin | kubectl apply -f -
+unset signing_key
 helm upgrade "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m \
   --set controller.api.enabled=true \
   --set controller.api.swarm="$slug" \
@@ -243,8 +245,11 @@ if [[ $placement != *"node affinity"* || -z $pending ]]; then
   exit 1
 fi
 printf 'controller held Pending on reclaimable capacity: %s\n' "$(tail -1 <<< "$placement")"
+restart_at="$(date +%s.%N)"
 kubectl label node "$node" anton.io/capacity-type-
 kubectl rollout status deployment "$release-controller" --timeout 2m
+recovered="$(python3 -c 'import sys, time; print(round(time.time() - float(sys.argv[1]), 1))' "$restart_at")"
+printf 'swarm_control_restart_recovery_seconds=%s measured from durable capacity returning to the control API ready (kind)\n' "$recovered"
 
 before="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')"
 host="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].metadata.name}')"
