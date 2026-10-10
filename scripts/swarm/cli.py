@@ -1434,6 +1434,17 @@ def cmd_culture(store, args):
     print(text, end="")
 
 
+def cmd_masters_channel(store, args):
+    from scripts.swarm_v2.masters_channel import MastersChannel
+
+    channel, name = MastersChannel(store.redis), store.names.resolve(Who.from_env().name)
+    if args.action == "say":
+        print(json.dumps(asdict(channel.post(args.slug, name, args.text, time.time()))))
+        return
+    posts = channel.read(args.slug, name) if args.all else channel.unread(args.slug, name)
+    print(json.dumps([asdict(post) for post in posts]))
+
+
 def _read(path, what):
     try:
         return Path(path).expanduser().read_text(encoding="utf-8")
@@ -1571,6 +1582,9 @@ def build_parser():
     retire.add_argument("seat")
     retire.add_argument("number", type=int)
     retire.add_argument("--reason", required=True)
+    channel = sub.add_parser("masters-channel").add_subparsers(dest="action", required=True)
+    channel.add_parser("say").add_argument("text")
+    channel.add_parser("read").add_argument("--all", action="store_true")
     culture = sub.add_parser("culture").add_subparsers(dest="action", required=True)
     culture.add_parser("set").add_argument("file")
     culture.add_parser("show")
