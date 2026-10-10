@@ -314,7 +314,7 @@ def test_namespace_is_kept_for_callers():
 DELETE_OPTIONS = {"apiVersion": "v1", "kind": "DeleteOptions", "preconditions": {"uid": "u1"}}
 
 
-@pytest.mark.parametrize("status", [200, 202])
+@pytest.mark.parametrize("status", [200, 202, 204])
 @pytest.mark.parametrize("kind", ["pods", "services"])
 def test_delete_sends_a_uid_precondition_and_answers_deleted(kind, status):
     transport = Http((status, {"metadata": {"uid": "u1"}}))
@@ -338,10 +338,11 @@ def test_delete_overload_is_ambiguous(status):
         PodClient(Http((status, {})), "ns").delete("pods", "swarm-a", "u1")
 
 
-def test_delete_refusal_raises():
+@pytest.mark.parametrize("status", [300, 403])
+def test_delete_refusal_raises(status):
     with pytest.raises(ApiRefused) as raised:
-        PodClient(Http((403, {"reason": "Forbidden"})), "ns").delete("services", "swarm-a", "u1")
-    assert raised.value.status == 403
+        PodClient(Http((status, {"reason": "Forbidden"})), "ns").delete("services", "swarm-a", "u1")
+    assert raised.value.status == status
 
 
 def test_delete_refuses_a_kind_outside_pods_and_services_without_a_call():
@@ -356,3 +357,20 @@ def test_list_services_selects_by_label():
     transport = Http((200, {"items": [{"metadata": {"name": "s"}}]}))
     assert PodClient(transport, "ns").list_services("owner=x") == [{"metadata": {"name": "s"}}]
     assert transport.calls == [("GET", "/api/v1/namespaces/ns/services?labelSelector=owner%3Dx", None)]
+
+
+@pytest.mark.parametrize("kind", ["pods", "services"])
+def test_read_gets_the_named_object_and_answers_none_when_absent(kind):
+    transport = Http((200, {"metadata": {"uid": "u1"}}), (404, {"reason": "NotFound"}))
+    client_ = PodClient(transport, "ns")
+    assert client_.read(kind, "swarm-a") == {"metadata": {"uid": "u1"}}
+    assert client_.read(kind, "gone") is None
+    assert transport.calls == [
+        ("GET", f"/api/v1/namespaces/ns/{kind}/swarm-a", None),
+        ("GET", f"/api/v1/namespaces/ns/{kind}/gone", None),
+    ]
+
+
+def test_read_raises_on_a_refused_answer():
+    with pytest.raises(ApiRefused):
+        PodClient(Http((403, {"reason": "Forbidden"})), "ns").read("services", "swarm-a")

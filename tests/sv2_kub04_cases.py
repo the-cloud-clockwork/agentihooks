@@ -13,6 +13,7 @@ from tests import sv2_kub02_cases as kub02
 
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2"
 INPUTS = ("cleanup-attempts.json", "pod-policy.json", "pod-launch.json")
+STORED = ("attempt-finals", "attempt-retained", "cleanup-journal", "executions", "heartbeats")
 SLUG = kub02.SLUG
 EVIDENCE_CLASS = (
     "mocked: fakeredis execution registry, heartbeat archive watermarks, attempt records and cleanup journal, a fake "
@@ -55,6 +56,9 @@ class ApiServer(kub02.ApiServer):
             return self.list_pods(selector)
         finally:
             self.objects = objects
+
+    def read(self, kind: str, name: str) -> dict | None:
+        return copy.deepcopy((self.objects if kind == "pods" else self.services).get(name))
 
     def delete(self, kind: str, name: str, uid: str) -> bool:
         self.deletes.append((kind, name, uid))
@@ -141,13 +145,17 @@ class World(kub02.World):
         self.spawn(controller, replacement, fx)
         return old, replacement
 
-    def snapshot(self) -> dict:
+    def runtime(self) -> dict:
         return {
             "pods": copy.deepcopy(self.api.objects),
             "services": copy.deepcopy(self.api.services),
             "attached": sorted(self.attached),
             "secret_refs": sorted(self.secret_refs),
         }
+
+    def snapshot(self) -> dict:
+        stored = {name: self.store.redis.hgetall(self.store.key(SLUG, name)) for name in STORED}
+        return {**self.runtime(), **stored}
 
 
 def _masked(observed: dict, *attempts: AgentRecord) -> dict:
@@ -161,6 +169,20 @@ def _names(table: dict) -> list[str]:
     return sorted(table)
 
 
+def _scoped(world: World, before: dict, old: AgentRecord) -> bool:
+    expected = {
+        watch.OWNER_LABEL: watch.owner_for(SLUG),
+        watch.EXECUTION_LABEL: old.execution_id,
+        GENERATION_LABEL: str(old.generation),
+    }
+    deleted = [before[kind][name]["metadata"] for kind, name, _ in world.api.deletes]
+    return bool(deleted) and all(
+        meta["namespace"] == kub02.policy()["namespace"]
+        and {key: meta["labels"].get(key) for key in expected} == expected
+        for meta in deleted
+    )
+
+
 def _clean(name: str) -> dict:
     fx = fixture(name)
     world = World()
@@ -170,15 +192,23 @@ def _clean(name: str) -> dict:
         old, replacement = world.attempts(controller, fx)
         replacement_record = world.store.execution(SLUG, replacement.execution_id)
         cleanup = world.cleanup(controller)
-        before = world.snapshot()
+        before = world.runtime()
         not_final = cleanup.run(old.execution_id).state
-        retention.finalize(world.store, SLUG, old.execution_id, fx["state"], fx["transcript_end"])
+        retention.finalize(world.store, SLUG, controller.require, old.execution_id, fx["state"], fx["transcript_end"])
         world.acknowledge(old.execution_id, fx["pending_archive_watermark"])
         waiting_outcome = cleanup.run(old.execution_id).state
-        retention.finalize(world.store, SLUG, old.execution_id, fx["state"], fx["transcript_end"], fx["outcome_ref"])
+        retention.finalize(
+            world.store,
+            SLUG,
+            controller.require,
+            old.execution_id,
+            fx["state"],
+            fx["transcript_end"],
+            fx["outcome_ref"],
+        )
         waiting_archive = cleanup.run(old.execution_id).state
         backlog_pending = retention.execution_cleanup_backlog(world.store, SLUG)
-        untouched_while_waiting = world.snapshot() == before and world.api.deletes == []
+        untouched_while_waiting = world.runtime() == before and world.api.deletes == []
         world.acknowledge(old.execution_id, fx["transcript_end"])
         backlog_ready = retention.execution_cleanup_backlog(world.store, SLUG)
         done = cleanup.run(old.execution_id)
@@ -194,6 +224,7 @@ def _clean(name: str) -> dict:
             },
             "removed": done.removed,
             "deletes": world.api.deletes,
+            "deleted_objects_scoped": _scoped(world, before, old),
             "pods_left": _names(world.api.objects),
             "services_left": _names(world.api.services),
             "replacement_pod_unchanged": world.api.objects[f"swarm-{replacement.execution_id}"]
@@ -230,6 +261,7 @@ def _positive() -> tuple[dict, bool]:
             run["execution_cleanup_backlog"]["after_cleanup"]
             == {"waiting_outcome": 0, "waiting_archive": 0, "ready": 0},
             run["deletes"] == [["pods", "swarm-<old>", "uid-1"], ["services", "swarm-attach-<old>", "uid-2"]],
+            run["deleted_objects_scoped"],
             run["pods_left"] == ["swarm-<replacement>"],
             run["services_left"] == ["swarm-attach-<replacement>"],
             run["replacement_pod_unchanged"],
@@ -258,31 +290,44 @@ def _rejection() -> tuple[dict, bool]:
         stale, _ = world.controller()
         assert stale.acquire()
         old, replacement = world.attempts(stale, fx)
-        retention.finalize(world.store, SLUG, old.execution_id, fx["state"], fx["transcript_end"], fx["outcome_ref"])
+        args = (old.execution_id, fx["state"], fx["transcript_end"], fx["outcome_ref"])
+        retention.finalize(world.store, SLUG, stale.require, *args)
+        world.acknowledge(old.execution_id, fx["pending_archive_watermark"])
+        waiting = world.cleanup(stale).run(old.execution_id).state
+        deletes_while_archive_pending = len(world.api.deletes)
         world.acknowledge(old.execution_id, fx["transcript_end"])
+        old_name = f"swarm-{old.execution_id}"
+        old_pod = copy.deepcopy(world.api.objects[old_name])
         world.api.drop_next_delete = True
         try:
             world.cleanup(stale).run(old.execution_id)
             interrupted = "finished"
         except TimeoutError as error:
             interrupted = str(error)
-        old_name = f"swarm-{old.execution_id}"
-        reused = copy.deepcopy(world.api.objects[f"swarm-{replacement.execution_id}"])
-        reused["metadata"]["name"] = old_name
-        reused = world.api.put(reused)
+        reused = world.api.put(old_pod)
         world.clock[0] += kub02.lease.ttl_ms()
         current, _ = world.controller()
         assert current.acquire()
+        accepted = retention.final(world.store, SLUG, old.execution_id)
         protected = world.snapshot()
         refusals = {}
         for label, action in (
             ("stale_controller", lambda: world.cleanup(stale).run(old.execution_id)),
+            ("stale_finalize", lambda: retention.finalize(world.store, SLUG, stale.require, *args)),
             ("not_final_replacement", lambda: world.cleanup(current).run(replacement.execution_id)),
-            ("unknown_attempt", lambda: retention.finalize(world.store, SLUG, "exe-" + "f" * 32, "completed", 1)),
-            ("running_is_not_final", lambda: retention.finalize(world.store, SLUG, old.execution_id, "running", 1)),
+            (
+                "unknown_attempt",
+                lambda: retention.finalize(world.store, SLUG, current.require, "exe-" + "f" * 32, "completed", 1),
+            ),
+            (
+                "running_is_not_final",
+                lambda: retention.finalize(world.store, SLUG, current.require, old.execution_id, "running", 1),
+            ),
             (
                 "final_record_is_immutable",
-                lambda: retention.finalize(world.store, SLUG, old.execution_id, "cancelled", fx["transcript_end"]),
+                lambda: retention.finalize(
+                    world.store, SLUG, current.require, old.execution_id, "cancelled", fx["transcript_end"]
+                ),
             ),
         ):
             try:
@@ -296,16 +341,23 @@ def _rejection() -> tuple[dict, bool]:
         except SwarmError as error:
             refusals["revoked_grant"] = str(error)
         unchanged = world.snapshot() == protected
+        final_unchanged = retention.final(world.store, SLUG, old.execution_id) == accepted
         deletes_before_resume = len(world.api.deletes)
         world.grant["allowed"] = True
         resumed = world.cleanup(current).run(old.execution_id)
+        private = (kub02.launch()["credential_ref"], old.execution_id, replacement.execution_id, old.name)
         observed = {
+            "waiting": waiting,
+            "deletes_while_archive_pending": deletes_while_archive_pending,
             "interrupted": interrupted,
             "refusals": refusals,
             "protected_state_unchanged_by_refusals": unchanged,
+            "final_record_unchanged_by_refusals": final_unchanged,
+            "refusals_disclose_nothing": not any(value in json.dumps(refusals) for value in private),
             "deletes_before_resume": deletes_before_resume,
             "resumed": resumed.state,
             "removed": resumed.removed,
+            "deletes": world.api.deletes,
             "reused_name_pod_survives": world.api.objects.get(old_name, {}).get("metadata", {}).get("uid")
             == reused["metadata"]["uid"],
             "replacement_pod_survives": f"swarm-{replacement.execution_id}" in world.api.objects,
@@ -313,10 +365,13 @@ def _rejection() -> tuple[dict, bool]:
         }
     observed = _masked(observed, old, replacement)
     checks = [
+        observed["waiting"] == "waiting_archive",
+        observed["deletes_while_archive_pending"] == 0,
         observed["interrupted"] == "delete response dropped",
         observed["refusals"]
         == {
             "stale_controller": "the controller lease is stale",
+            "stale_finalize": "the controller lease is stale",
             "not_final_replacement": "not_final",
             "unknown_attempt": "unknown execution identity; display labels cannot identify attempts",
             "running_is_not_final": "an attempt is final only when completed or explicitly cancelled",
@@ -324,6 +379,8 @@ def _rejection() -> tuple[dict, bool]:
             "revoked_grant": "a scoped controller grant is required",
         },
         observed["protected_state_unchanged_by_refusals"],
+        observed["final_record_unchanged_by_refusals"],
+        observed["refusals_disclose_nothing"],
         observed["deletes_before_resume"] == 1,
         observed["resumed"] == "done",
         observed["removed"]
@@ -331,6 +388,7 @@ def _rejection() -> tuple[dict, bool]:
             "pods": [{"name": "swarm-<old>", "uid": "uid-1", "outcome": "replaced"}],
             "services": [{"name": "swarm-attach-<old>", "uid": "uid-2", "outcome": "deleted"}],
         },
+        observed["deletes"] == [["pods", "swarm-<old>", "uid-1"], ["services", "swarm-attach-<old>", "uid-2"]],
         observed["reused_name_pod_survives"],
         observed["replacement_pod_survives"],
         observed["execution_cleanup_backlog"] == {"waiting_outcome": 0, "waiting_archive": 0, "ready": 0},
@@ -345,13 +403,15 @@ def _recovery() -> tuple[dict, bool]:
         controller, _ = world.controller()
         assert controller.acquire()
         old, replacement = world.attempts(controller, fx)
-        retention.finalize(world.store, SLUG, old.execution_id, fx["state"], fx["transcript_end"], fx["outcome_ref"])
+        args = (old.execution_id, fx["state"], fx["transcript_end"], fx["outcome_ref"])
+        retention.finalize(world.store, SLUG, controller.require, *args)
+        world.acknowledge(old.execution_id, fx["pending_archive_watermark"])
+        waiting = world.cleanup(controller).run(old.execution_id).state
+        nothing_retained_while_waiting = retention.retained(world.store, SLUG, old.execution_id) is None
         world.acknowledge(old.execution_id, fx["transcript_end"])
+        accepted = world.snapshot()
         suspended = world.cleanup(controller, enabled=False).run(old.execution_id).state
-        retained_while_suspended = sorted(world.api.objects) == [
-            f"swarm-{old.execution_id}",
-            f"swarm-{replacement.execution_id}",
-        ]
+        retained_while_suspended = world.snapshot() == accepted
         backlog_suspended = retention.execution_cleanup_backlog(world.store, SLUG)
         world.api.drop_next_delete = True
         crashes = []
@@ -371,15 +431,32 @@ def _recovery() -> tuple[dict, bool]:
         assert restarted.acquire()
         resumed = world.cleanup(restarted).run(old.execution_id)
         replay = world.cleanup(restarted).run(old.execution_id)
+        kept = retention.retained(world.store, SLUG, old.execution_id)
+        try:
+            world.cleanup(controller).run(old.execution_id)
+            earlier_attempt = "ran"
+        except SwarmError as error:
+            earlier_attempt = str(error)
         observed = {
+            "waiting": waiting,
+            "nothing_retained_while_waiting": nothing_retained_while_waiting,
             "suspended": suspended,
             "retained_while_suspended": retained_while_suspended,
             "backlog_while_suspended": backlog_suspended,
             "crashes": crashes,
-            "journal_after_lost_delete": {"pinned": journal["pinned"], "done": journal["done"]},
+            "journal_after_lost_delete": {
+                "pinned": journal["pinned"],
+                "sent": journal["sent"],
+                "done": journal["done"],
+            },
             "journal_mid_release": {"done": mid_release["done"], "removed": mid_release["removed"]},
             "resumed": resumed.state,
             "replay": replay.state,
+            "earlier_controller": earlier_attempt,
+            "retained_unchanged_after_earlier_controller": retention.retained(world.store, SLUG, old.execution_id)
+            == kept,
+            "final_record_survived": retention.final(world.store, SLUG, old.execution_id)
+            == retention.Final(old.execution_id, old.generation, *args[1:]),
             "removed": resumed.removed,
             "deletes": world.api.deletes,
             "releases": world.log,
@@ -387,11 +464,13 @@ def _recovery() -> tuple[dict, bool]:
             "services_left": _names(world.api.services),
             "attached": sorted(world.attached),
             "secret_refs": sorted(world.secret_refs),
-            "retained_once": retention.retained(world.store, SLUG, old.execution_id)["removed"] == resumed.removed,
+            "retained_once": kept["removed"] == resumed.removed,
             "execution_cleanup_backlog": retention.execution_cleanup_backlog(world.store, SLUG),
         }
     observed = _masked(observed, old, replacement)
     checks = [
+        observed["waiting"] == "waiting_archive",
+        observed["nothing_retained_while_waiting"],
         observed["suspended"] == "suspended",
         observed["retained_while_suspended"],
         observed["backlog_while_suspended"] == {"waiting_outcome": 0, "waiting_archive": 0, "ready": 1},
@@ -402,18 +481,20 @@ def _recovery() -> tuple[dict, bool]:
                 "pods": [{"name": "swarm-<old>", "uid": "uid-1"}],
                 "services": [{"name": "swarm-attach-<old>", "uid": "uid-2"}],
             },
+            "sent": ["uid-1"],
             "done": [],
         },
         observed["journal_mid_release"]["done"] == ["pods", "services", "attach"],
-        observed["journal_mid_release"]["removed"]["pods"]
-        == [{"name": "swarm-<old>", "uid": "uid-1", "outcome": "absent"}],
+        observed["journal_mid_release"]["removed"]
+        == {
+            "pods": [{"name": "swarm-<old>", "uid": "uid-1", "outcome": "absent_after_send"}],
+            "services": [{"name": "swarm-attach-<old>", "uid": "uid-2", "outcome": "deleted"}],
+        },
         observed["resumed"] == observed["replay"] == "done",
-        observed["deletes"]
-        == [
-            ["pods", "swarm-<old>", "uid-1"],
-            ["pods", "swarm-<old>", "uid-1"],
-            ["services", "swarm-attach-<old>", "uid-2"],
-        ],
+        observed["earlier_controller"] == "the controller lease is stale",
+        observed["retained_unchanged_after_earlier_controller"],
+        observed["final_record_survived"],
+        observed["deletes"] == [["pods", "swarm-<old>", "uid-1"], ["services", "swarm-attach-<old>", "uid-2"]],
         observed["releases"] == ["attach", "secrets", "secrets"],
         observed["pods_left"] == ["swarm-<replacement>"],
         observed["services_left"] == ["swarm-attach-<replacement>"],

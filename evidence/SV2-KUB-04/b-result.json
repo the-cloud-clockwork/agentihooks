@@ -7,12 +7,26 @@
     "pod-policy.json": "6f10e42c7c8461ea18fe3ae9f0c46001020bd50153665477b415076cf71099f5"
   },
   "observed": {
+    "deletes": [
+      [
+        "pods",
+        "swarm-<old>",
+        "uid-1"
+      ],
+      [
+        "services",
+        "swarm-attach-<old>",
+        "uid-2"
+      ]
+    ],
     "deletes_before_resume": 1,
+    "deletes_while_archive_pending": 0,
     "execution_cleanup_backlog": {
       "ready": 0,
       "waiting_archive": 0,
       "waiting_outcome": 0
     },
+    "final_record_unchanged_by_refusals": true,
     "interrupted": "delete response dropped",
     "protected_state_unchanged_by_refusals": true,
     "refusals": {
@@ -21,8 +35,10 @@
       "revoked_grant": "a scoped controller grant is required",
       "running_is_not_final": "an attempt is final only when completed or explicitly cancelled",
       "stale_controller": "the controller lease is stale",
+      "stale_finalize": "the controller lease is stale",
       "unknown_attempt": "unknown execution identity; display labels cannot identify attempts"
     },
+    "refusals_disclose_nothing": true,
     "removed": {
       "pods": [
         {
@@ -41,7 +57,8 @@
     },
     "replacement_pod_survives": true,
     "resumed": "done",
-    "reused_name_pod_survives": true
+    "reused_name_pod_survives": true,
+    "waiting": "waiting_archive"
   },
   "state": "passed"
 }

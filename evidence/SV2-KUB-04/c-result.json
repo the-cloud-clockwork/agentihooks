@@ -26,21 +26,18 @@
         "uid-1"
       ],
       [
-        "pods",
-        "swarm-<old>",
-        "uid-1"
-      ],
-      [
         "services",
         "swarm-attach-<old>",
         "uid-2"
       ]
     ],
+    "earlier_controller": "the controller lease is stale",
     "execution_cleanup_backlog": {
       "ready": 0,
       "waiting_archive": 0,
       "waiting_outcome": 0
     },
+    "final_record_survived": true,
     "journal_after_lost_delete": {
       "done": [],
       "pinned": {
@@ -56,7 +53,10 @@
             "uid": "uid-2"
           }
         ]
-      }
+      },
+      "sent": [
+        "uid-1"
+      ]
     },
     "journal_mid_release": {
       "done": [
@@ -68,7 +68,7 @@
         "pods": [
           {
             "name": "swarm-<old>",
-            "outcome": "absent",
+            "outcome": "absent_after_send",
             "uid": "uid-1"
           }
         ],
@@ -81,6 +81,7 @@
         ]
       }
     },
+    "nothing_retained_while_waiting": true,
     "pods_left": [
       "swarm-<replacement>"
     ],
@@ -93,7 +94,7 @@
       "pods": [
         {
           "name": "swarm-<old>",
-          "outcome": "absent",
+          "outcome": "absent_after_send",
           "uid": "uid-1"
         }
       ],
@@ -108,6 +109,7 @@
     "replay": "done",
     "resumed": "done",
     "retained_once": true,
+    "retained_unchanged_after_earlier_controller": true,
     "retained_while_suspended": true,
     "secret_refs": [
       "<replacement>"
@@ -115,7 +117,8 @@
     "services_left": [
       "swarm-attach-<replacement>"
     ],
-    "suspended": "suspended"
+    "suspended": "suspended",
+    "waiting": "waiting_archive"
   },
   "state": "passed"
 }

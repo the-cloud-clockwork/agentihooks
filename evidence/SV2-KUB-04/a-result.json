@@ -11,6 +11,7 @@
       "attached": [
         "<replacement>"
       ],
+      "deleted_objects_scoped": true,
       "deletes": [
         [
           "pods",
@@ -98,6 +99,7 @@
       "attached": [
         "<replacement>"
       ],
+      "deleted_objects_scoped": true,
       "deletes": [
         [
           "pods",
