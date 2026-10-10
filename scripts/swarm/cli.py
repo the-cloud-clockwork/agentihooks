@@ -1139,7 +1139,7 @@ def cmd_wait(store, args):
     agent = _me(store, args)
     if args.inbox:
         return cmd_wait_inbox(store, args, agent)
-    held = waits.on(*args.on) if args.on else None
+    held = waits.on(*args.on, task=agent.task) if args.on else None
     if held is None and (args.minutes or 0) <= 0:
         raise SwarmError("a wait lasts a whole number of minutes above zero")
     if held is None and args.minutes > waits.BARE_MAX_MINUTES:
