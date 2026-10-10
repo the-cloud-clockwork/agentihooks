@@ -583,6 +583,14 @@ def test_an_outcome_proposal_names_a_worker_outcome_and_its_proof(world, worker,
     assert world.document() == ledger
 
 
+@pytest.mark.parametrize(("method", "path"), [("GET", "/v2/tasks/task/outcomes"), ("POST", "/v2/tasks/task/other")])
+def test_an_unrouted_method_or_path_is_no_task_endpoint(world, worker, method, path):
+    _, token = worker
+    ledger = world.document()
+    assert world.call(method, path, token, {}) == (404, detail("invalid_request", "no such task endpoint"))
+    assert world.document() == ledger
+
+
 @pytest.fixture
 def served(world):
     from scripts.swarm_v2.api.server import Routes, serve
