@@ -5,7 +5,7 @@
   "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059850340",
   "case": "T-SV2-ACC-04-C",
   "title": "recovery and replay: reconnecting workers replay unexpired undelivered messages without duplicating acknowledged content",
-  "fixture": "tests/fixtures/swarm_v2/fleet-broadcasts.json: local seat eng-1@fixture and remote seat eng-2@fixture on channels brain and amygdala; operator critical warning (until_ack, ttl 600 s), expired warning (ttl 30 s), personal brain message, another fleet's warning, an agent info note (once) and a follow-up warning; published at 1000 ms, claimed at 61000 ms",
+  "fixture": "tests/fixtures/swarm_v2/fleet-broadcasts.json: local seat eng-1@fixture and remote seat eng-2@fixture on channels brain and amygdala; operator critical warning acknowledged by generation 1, then a follow-up alert, an expired warning and an agent note published before the worker reconnects as generation 2 and claims at 61000 ms",
   "fixture_clock": "build() from tests/sv2_ctl02_cases.py patches time.time to the fixture clock and issues launch grants; FleetBroadcasts reads the same list; fakeredis server clock only in test_the_default_clock_is_the_redis_server_clock",
   "tests": [
     {
@@ -39,7 +39,7 @@
     "operation_identity": "Retrying claim-1 returns the same deliveries and leaves every broadcast key unchanged",
     "fence": "The older generation's claim and acknowledge raise stale_generation without writing",
     "revision": "A revised warning under op-1 becomes revision 2, an identical retry returns it, a retry with other content or lifetime is refused invalid_request; acknowledging revision 1 is refused stale_revision",
-    "until_ack": "A delivered unacknowledged until_ack warning replays to the next generation with its first delivery time; an older generation cannot acknowledge it"
+    "until_ack": "A delivered unacknowledged follow-up alert replays to the next generation with its first delivery time 1000 ms; an older generation's acknowledgement is refused stale_generation without writing"
   },
   "durability": "Survived: canonical broadcasts, history, per-seat delivery records with generation and the operation map. Not covered: the local broadcast file, which a reconnecting worker rebuilds from claims",
   "cleanup": "fakeredis per test; no live resource mutations",

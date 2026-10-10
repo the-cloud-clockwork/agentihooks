@@ -5,7 +5,7 @@
   "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059850340",
   "case": "T-SV2-ACC-04-B",
   "title": "rejection and containment: a personal brain message or another fleet's warning is not delivered by matching only the channel name",
-  "fixture": "tests/fixtures/swarm_v2/fleet-broadcasts.json: local seat eng-1@fixture and remote seat eng-2@fixture on channels brain and amygdala; operator critical warning (until_ack, ttl 600 s), expired warning (ttl 30 s), personal brain message, another fleet's warning, an agent info note (once) and a follow-up warning; published at 1000 ms, claimed at 61000 ms",
+  "fixture": "tests/fixtures/swarm_v2/fleet-broadcasts.json: local seat eng-1@fixture and remote seat eng-2@fixture on channels brain and amygdala; personal brain message, another fleet's critical warning, the agent note, the operator warning and malformed drafts; every request at 1000 ms",
   "fixture_clock": "build() from tests/sv2_ctl02_cases.py patches time.time to the fixture clock and issues launch grants; FleetBroadcasts reads the same list; fakeredis server clock only in test_the_default_clock_is_the_redis_server_clock",
   "tests": [
     {
@@ -175,11 +175,11 @@
     "foreign_record": "A canonical record planted with another fleet's name is never delivered",
     "agent_grant": "An agent grant cannot publish critical or nuclear severity, outside its project, or to the personal brain",
     "authentication": "Empty or forged operator credentials, an operator callback naming nobody and a launch grant offered as an operator credential are refused unauthenticated",
-    "ownership": "A broadcast id and an operation id stay with the publisher that first used them; a replay with other content, lifetime or id is refused invalid_request",
+    "ownership": "A broadcast id stays with the publisher and brain that first used it: another seat, the operator or another brain is refused forbidden_scope, while the same seat's next generation may revise it. An operation id replays only for its own publisher; a replay with other content or another explicit id is refused invalid_request",
     "drafts": "Twenty one malformed drafts are refused invalid_request",
     "no_mutation": "A snapshot of every broadcast key is identical before and after each refusal"
   },
-  "disclosure": "Refusals carry only the error class (forbidden_scope, unauthenticated, invalid_request); no token, grant or message content",
+  "disclosure_assertion": "Refusals carry only an error class (forbidden_scope, unauthenticated, invalid_request here; distribution_disabled, stale_generation, stale_revision, not_delivered and dependency_unavailable elsewhere in the module); no token, grant or message content",
   "recovery_isolation": "A corrected draft must be a new publish under a valid grant or operator credential; no refusal falls back to a privileged path",
   "cleanup": "fakeredis per test; no live resource mutations",
   "broadcast_delivery_lag_seconds": {

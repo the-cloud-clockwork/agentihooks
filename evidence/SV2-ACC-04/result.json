@@ -12,7 +12,7 @@
   "evidence_class": "Scoped fixture launch grants from LaunchAuthority, fixture operator credential, fakeredis, fixture clock; no live rollout. Live G3 qualification is separate.",
   "failure_fixture": "tests/fixtures/swarm_v2/fleet-broadcasts.json with the Racing store wrapper in tests/test_swarm_v2_broadcasts.py, which runs a concurrent write before each commit",
   "interfaces": [
-    "scripts.swarm_v2.broadcasts.FleetBroadcasts.publish: grant-only; author, project and brain come from the validated launch grant; agents cannot publish critical or nuclear",
+    "scripts.swarm_v2.broadcasts.FleetBroadcasts.publish: grant-only; the author is the seat and execution id of the validated launch grant, the brain defaults to and must equal the grant's brain, the project must be one of the grant's projects; agents cannot publish critical or nuclear",
     "FleetBroadcasts.publish_operator: operator credential resolved by the operator callback; a launch grant is refused as an operator credential",
     "FleetBroadcasts.claim: routing on fleet, brain, project, target role, channel, revision and expiry; once and until_ack policies; optional claim id replays the same answer; older seat generations are fenced",
     "FleetBroadcasts.acknowledge, delivery, duplicate_acknowledgements, broadcast_delivery_lag_seconds, current, history",
@@ -23,12 +23,12 @@
   "supported_versions": {
     "python": "3.11 and 3.12 unit shards passed in the linked CI run",
     "coordination": "SV2-CTL launch grants (LaunchAuthority), Redis WATCH/MULTI on the broadcast keys under the swarm root, five write attempts",
-    "compatibility": "With AGENTIHOOKS_FLEET_BROADCASTS unset, sync_local writes nothing and the broadcast file behaves as before; fleet entries in the file are shown only to the session that claimed them"
+    "compatibility": "With AGENTIHOOKS_FLEET_BROADCASTS unset, sync_local writes nothing and the broadcast file behaves as before; hook injection shows fleet entries only to the session that claimed them, while list_broadcasts and the CLI listing still show every entry"
   },
   "states": {
     "observed": "Drafts from operator credentials and launch grants; claims from subscribed seats",
     "accepted": "A draft whose credential or grant validates for this swarm and whose fields pass the draft schema",
-    "committed": "Redis WATCH/MULTI transaction on broadcasts, broadcast-history and broadcast-operations (publish), and on broadcast-deliveries, broadcast-claims and broadcast-generations (claim and acknowledge)",
+    "committed": "Redis WATCH/MULTI transaction on broadcasts, broadcast-history and broadcast-operations (publish); on broadcast-deliveries, broadcast-claims and broadcast-generations with broadcasts watched (claim); on broadcast-deliveries with broadcast-generations watched, plus broadcast-duplicate-acks inside the same transaction (acknowledge)",
     "externally_verified": "None; no hook delivers fleet broadcasts yet"
   },
   "recovery_contract": {

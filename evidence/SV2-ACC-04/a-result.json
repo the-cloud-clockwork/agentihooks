@@ -5,7 +5,7 @@
   "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059850340",
   "case": "T-SV2-ACC-04-A",
   "title": "successful behavior: a critical authorized swarm warning reaches local and remote subscribers once per policy",
-  "fixture": "tests/fixtures/swarm_v2/fleet-broadcasts.json: local seat eng-1@fixture and remote seat eng-2@fixture on channels brain and amygdala; operator critical warning (until_ack, ttl 600 s), expired warning (ttl 30 s), personal brain message, another fleet's warning, an agent info note (once) and a follow-up warning; published at 1000 ms, claimed at 61000 ms",
+  "fixture": "tests/fixtures/swarm_v2/fleet-broadcasts.json: local seat eng-1@fixture and remote seat eng-2@fixture on channels brain and amygdala; operator critical warning (until_ack, ttl 600 s), expired warning (ttl 30 s), personal brain message and an agent info note (once); published at 1000 ms, claimed at 61000 ms",
   "fixture_clock": "build() from tests/sv2_ctl02_cases.py patches time.time to the fixture clock and issues launch grants; FleetBroadcasts reads the same list; fakeredis server clock only in test_the_default_clock_is_the_redis_server_clock",
   "independent_runs": 2,
   "tests": [
@@ -46,7 +46,7 @@
     "acknowledgement": "The first acknowledgement of revision 1 returns true, the duplicate returns false and broadcast-duplicate-acks counts 1 per seat",
     "store": "broadcast-deliveries for the local seat records revision 1, delivered 61000 ms, acked, the grant's execution id and generation 1; history lists the four published revisions in order",
     "authority": "The operator warning carries author operator:operator and the swarm fleet; the agent note's author is the seat and execution id from its validated launch grant",
-    "local_cache": "Claimed revisions land in the broadcast file in the hook format, tagged fleet, and only the session that claimed them reads them; sync_local writes nothing unless AGENTIHOOKS_FLEET_BROADCASTS=1"
+    "local_cache": "Claimed revisions land in the broadcast file in the hook format, tagged fleet, and hook injection shows them only to the session that claimed them; sync_local writes nothing unless AGENTIHOOKS_FLEET_BROADCASTS=1"
   },
   "boundary": "The Redis records under the swarm root are the authoritative broadcasts and delivery state; the local broadcast file is a per-session compatibility cache",
   "cleanup": "fakeredis and tmp_path per test; no live resource mutations",
