@@ -4,11 +4,15 @@ import re
 import subprocess
 import zipfile
 from datetime import datetime
+from urllib.parse import quote
 
 from scripts.swarm.store import SwarmError
 
 RUN_URL = re.compile(r"https://github\.com/([^/]+/[^/]+)/actions/runs/([0-9]+)")
 WORKFLOW = ".github/workflows/mutation-preflight.yml"
+PROOFS = ".github/workflows/proofs.yml"
+EVENTS = {WORKFLOW: "push", PROOFS: "workflow_dispatch"}
+UNREADABLE = (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError)
 
 
 def _api(endpoint, binary=False):
@@ -31,11 +35,30 @@ def read(target: str) -> dict | None:
 
 def bind(target: str) -> str:
     run = read(target)
-    if not run or run.get("path") != WORKFLOW or run.get("event") != "push":
-        raise SwarmError("wait on mutation needs a readable branch Mutation preflight run url")
+    if not run or not _graded(run):
+        raise SwarmError(
+            "wait on mutation needs a readable branch Mutation preflight or focused mutation proof run url"
+        )
     if not run.get("head_sha"):
         raise SwarmError("cannot read the mutation preflight head; retry the mutation wait")
+    try:
+        stale = _stale(target, run)
+    except UNREADABLE:
+        raise SwarmError("cannot read the proof branch head; retry the mutation wait") from None
+    if stale:
+        raise SwarmError("the focused mutation proof run grades a stale head; dispatch it again on the branch head")
     return run["head_sha"]
+
+
+def _graded(run):
+    return run.get("path") in EVENTS and run.get("event") == EVENTS[run["path"]]
+
+
+def _stale(target, run):
+    if run["path"] != PROOFS:
+        return False
+    repo = RUN_URL.fullmatch(target).group(1)
+    return _api(f"repos/{repo}/branches/{quote(run['head_branch'], safe='')}")["commit"]["sha"] != run["head_sha"]
 
 
 def _report(target, started_at):
@@ -61,11 +84,16 @@ def resolution(held: dict) -> str:
     run = read(target)
     if run is None:
         return ""
-    if run.get("path") != WORKFLOW or run.get("event") != "push" or run.get("head_sha") != held["head"]:
+    if not _graded(run) or run.get("head_sha") != held["head"]:
         return f"mutation preflight {target}, now red; run no longer matches the declared preflight head"
     if run.get("status") != "completed":
         return ""
     outcome = f"mutation preflight {target}"
+    try:
+        if _stale(target, run):
+            return f"{outcome}, now red; the branch moved past the proof head"
+    except UNREADABLE:
+        return ""
     if run.get("conclusion") != "success" and run.get("conclusion") != "failure":
         return f"{outcome}, now red; run {run.get('conclusion')}"
     try:

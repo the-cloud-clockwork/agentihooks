@@ -58,6 +58,7 @@ def preflight(monkeypatch):
         },
         report={"files": [], "not_mutated": [], "failed": False},
         missing=False,
+        tip="first",
         report_name="report.json",
         artifacts=[
             {"id": 7, "name": "mutation-preflight-report", "expired": False, "created_at": report_at},
@@ -79,6 +80,8 @@ def preflight(monkeypatch):
             output = data.getvalue()
         elif "artifacts?" in args[-1]:
             output = json.dumps({"artifacts": [] if state.missing else state.artifacts})
+        elif "/branches/" in args[-1]:
+            output = json.dumps({"commit": {"sha": state.tip}})
         else:
             output = json.dumps(state.run)
         if kwargs.get("text", False):
@@ -192,7 +195,7 @@ def test_cli_refuses_an_unrelated_or_unbound_run(env, preflight, field, value, c
     reason = (
         "cannot read the mutation preflight head; retry the mutation wait"
         if field == "head_sha"
-        else "wait on mutation needs a readable branch Mutation preflight run url"
+        else "wait on mutation needs a readable branch Mutation preflight or focused mutation proof run url"
     )
     assert capsys.readouterr().err.endswith(f"swarm: {reason}\n")
     assert idle.wait(store.redis, "sw", ME) is None
@@ -280,3 +283,55 @@ def test_utf8_json_is_parsed_without_process_locale_decoding(preflight, monkeypa
     assert waits.resolution(held, {}, None, None, None, False) == (
         f"mutation preflight {URL}, now green; no failing mutants"
     )
+
+
+def _focused_proof(preflight):
+    preflight.run.update(path=".github/workflows/proofs.yml", event="workflow_dispatch", head_branch="feature/x")
+
+
+def test_cli_binds_a_focused_proof_run_on_the_branch_head(env, preflight):  # noqa: F811
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    ledger.tasks = lambda slug: list(ledger.rows.values())
+    _focused_proof(preflight)
+    assert cli.main(["sw", "--as", ME, "wait", "--on", "mutation", URL]) == 0
+    assert idle.wait(store.redis, "sw", ME)["on"] == {"kind": "mutation", "target": URL, "head": "first"}
+    assert "repos/org/repo/branches/feature%2Fx" in preflight.requests
+
+
+def test_cli_refuses_a_focused_proof_run_on_a_stale_head(env, preflight, capsys):  # noqa: F811
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    ledger.tasks = lambda slug: list(ledger.rows.values())
+    _focused_proof(preflight)
+    preflight.tip = "second"
+    assert cli.main(["sw", "--as", ME, "wait", "--on", "mutation", URL]) == 1
+    assert capsys.readouterr().err.endswith(
+        "swarm: the focused mutation proof run grades a stale head; dispatch it again on the branch head\n"
+    )
+    assert idle.wait(store.redis, "sw", ME) is None
+
+
+def test_a_focused_proof_run_on_the_current_head_ends_green(preflight):
+    _focused_proof(preflight)
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == (
+        f"mutation preflight {URL}, now green; no failing mutants"
+    )
+
+
+def test_a_focused_proof_run_ends_red_once_the_branch_moves_past_it(preflight):
+    _focused_proof(preflight)
+    preflight.tip = "second"
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == (
+        f"mutation preflight {URL}, now red; the branch moved past the proof head"
+    )
+
+
+def test_a_proofs_push_run_is_not_a_focused_mutation_proof(preflight):
+    preflight.run["path"] = ".github/workflows/proofs.yml"
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert "run no longer matches" in waits.resolution(held, {}, None, None, None, False)
