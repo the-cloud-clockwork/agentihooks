@@ -36,8 +36,8 @@ class Supervisor:
         self.failure_class = None
         self.phase = "startup"
         self.environment = {k: v for k, v in os.environ.items() if not k.startswith("HERDR_")}
+        self.environment.update(oauth_env(self.environment))
         self.environment.update(
-            oauth_env(self.environment),
             filesystem.environment(launch.execution, launch.harness),
             HERDR_CONFIG_PATH=str(self.root / "herdr.toml"),
             SWARM_SUPERVISION_DIR=str(self.root),
