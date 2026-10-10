@@ -3,10 +3,6 @@ from pathlib import Path
 
 import pytest
 
-from scripts.swarm.store import SwarmError
-from scripts.swarm_v2.api.executions import ExecutionsAPI, heartbeat_rejections, heartbeat_rejections_total
-from scripts.swarm_v2.authority import RenewalFence
-
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-LDG-02"
@@ -78,6 +74,8 @@ def test_registration_while_another_execution_holds_the_task_is_stale(world, wor
 
 
 def test_a_worker_credential_expired_by_server_time_is_unauthenticated(world):
+    from scripts.swarm_v2.api.executions import ExecutionsAPI
+
     api = ExecutionsAPI(world.grants, world.tasks, 600_000)
     agent, token = world.start()
     path = f"/v2/executions/{agent.execution_id}/heartbeat"
@@ -117,6 +115,8 @@ def test_an_unavailable_store_is_reported_as_a_dependency_failure(world, worker,
 
 
 def test_a_heartbeat_before_registration_is_unauthenticated(world):
+    from scripts.swarm_v2.api.executions import heartbeat_rejections
+
     agent, token = world.start()
     status, refusal = world.put(agent.execution_id, token, world.beat(agent, 1))
     assert (status, refusal["error_class"]) == (401, "unauthenticated")
@@ -159,6 +159,8 @@ def test_a_heartbeat_renews_its_own_lease_from_server_time_only(world, worker):
 
 
 def test_a_forged_url_subject_cannot_touch_another_execution(world, worker):
+    from scripts.swarm_v2.api.executions import heartbeat_rejections
+
     agent, token = worker
     other, other_token = world.start("eng-2@fixture", "other")
     world.register(other, other_token)
@@ -258,6 +260,8 @@ def test_a_heartbeat_body_that_is_not_an_object_is_invalid(world, worker):
 
 
 def test_a_replayed_heartbeat_returns_its_acknowledgement_and_writes_nothing(world, worker):
+    from scripts.swarm_v2.api.executions import ExecutionsAPI
+
     agent, token = worker
     _, accepted = world.put(agent.execution_id, token, world.beat(agent, 5, archive_watermark=12))
     record, claim = stored(world, agent), world.tasks.current("task")
@@ -271,6 +275,8 @@ def test_a_replayed_heartbeat_returns_its_acknowledgement_and_writes_nothing(wor
 
 @pytest.mark.parametrize("sequence, change", [(3, {}), (5, {"state": "waiting"})])
 def test_an_out_of_order_heartbeat_moves_nothing_backward(world, worker, sequence, change):
+    from scripts.swarm_v2.api.executions import heartbeat_rejections_total
+
     agent, token = worker
     world.put(agent.execution_id, token, world.beat(agent, 5, archive_watermark=12))
     record, claim = stored(world, agent), world.tasks.current("task")
@@ -473,11 +479,15 @@ def test_a_request_without_a_bearer_credential_is_unauthenticated(world, worker,
 
 @pytest.mark.parametrize("lease_ms", [0, -5, 1.5, True])
 def test_the_server_lease_duration_must_be_a_positive_integer(world, lease_ms):
+    from scripts.swarm_v2.api.executions import ExecutionsAPI
+
     with pytest.raises(ValueError):
         ExecutionsAPI(world.grants, world.tasks, lease_ms)
 
 
 def test_the_default_server_lease_is_one_minute(world):
+    from scripts.swarm_v2.api.executions import ExecutionsAPI
+
     assert ExecutionsAPI(world.grants, world.tasks).lease_ms == 60_000
 
 
@@ -492,6 +502,8 @@ def test_package_cases_match_their_committed_evidence(case):
 
 
 def test_the_smallest_server_lease_is_one_millisecond_and_refusals_name_it(world):
+    from scripts.swarm_v2.api.executions import ExecutionsAPI
+
     assert ExecutionsAPI(world.grants, world.tasks, 1).lease_ms == 1
     with pytest.raises(ValueError, match="^the server lease duration must be a positive number of milliseconds$"):
         ExecutionsAPI(world.grants, world.tasks, 0)
@@ -583,6 +595,9 @@ def fence_of(world, fence):
 
 
 def test_a_fenced_renewal_refuses_an_older_or_altered_sequence_and_admits_its_own_retry(world, worker):
+    from scripts.swarm.store import SwarmError
+    from scripts.swarm_v2.authority import RenewalFence
+
     _, token = worker
     fence = world.store.key("fixture", "fence-probe")
     world.clock[0] += 5
@@ -604,6 +619,8 @@ def test_a_fenced_renewal_refuses_an_older_or_altered_sequence_and_admits_its_ow
 
 
 def test_a_fenced_renewal_at_an_unchanged_deadline_still_advances_its_fence(world, worker):
+    from scripts.swarm_v2.authority import RenewalFence
+
     _, token = worker
     fence = world.store.key("fixture", "fence-probe")
     claim = world.tasks.current("task")
