@@ -5,7 +5,7 @@ Flags never send a slice back. At full autonomy the tick approves a slice only w
 
 from dataclasses import dataclass
 
-from hooks.classifier import ClassifierError, decide, definitions, runner
+from hooks.classifier import ClassifierError, code_rules, decide, definitions, runner
 from scripts.swarm import slice_check
 from scripts.swarm_ledger import ledger_kinds
 
@@ -43,7 +43,7 @@ def screen(phase, doc, confidence):
         ],
     }
     try:
-        output = runner.run(PURPOSE, state, {"tasks": mine}, decider=decide)
+        output = runner.run(PURPOSE, state, {"tasks": mine, "confidence": confidence}, decider=decide)
     except ClassifierError:
         return Screen(reason="the classifier did not answer")
     result = output.raw
@@ -79,6 +79,13 @@ def hold(problems, result):
     if result.flags:
         return "the classifier flagged a task"
     return result.reason
+
+
+def _verdicts(definition, state, params, answers):
+    return {"flagged": bool(flags(answers, params["tasks"], params["confidence"], definition))}
+
+
+RULE = code_rules.CodeRule(code_rules.asked, _verdicts, {"flagged": (True, False)}, {"flagged": True})
 
 
 def __getattr__(name):

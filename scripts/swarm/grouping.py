@@ -2,7 +2,7 @@
 
 import math
 
-from hooks.classifier import ClassifierError, decide, definitions, runner
+from hooks.classifier import ClassifierError, code_rules, decide, definitions, runner
 from scripts.inbox.store import InboxStore
 from scripts.swarm import difficulty
 from scripts.swarm.ledger_client import LedgerRefused
@@ -111,8 +111,11 @@ def confirm(groups, doc):
         output = runner.run(PURPOSE, state(groups, doc), {"groups": [_named(g) for g in groups]}, decider=decide)
     except ClassifierError:
         return None
-    floor = output.thresholds["confidence"]
-    return [_yes(output.raw.answers[f"group_{i}"].noul, floor) for i in range(len(groups))]
+    return _confirmed(output.raw.answers, len(groups), output.thresholds["confidence"])
+
+
+def _confirmed(answers, count, floor) -> list[bool]:
+    return [_yes(answers[f"group_{i}"].noul, floor) for i in range(count)]
 
 
 def state(groups, doc):
@@ -180,6 +183,13 @@ def _named(group):
 
 def _yes(noul, floor):
     return isinstance(noul, (int, float)) and not isinstance(noul, bool) and not math.isnan(noul) and noul >= floor
+
+
+def _verdicts(definition, state, params, answers):
+    return {"group": all(_confirmed(answers, len(params["groups"]), definition.thresholds["confidence"]))}
+
+
+RULE = code_rules.CodeRule(code_rules.asked, _verdicts, {"group": (True, False)}, {"group": False})
 
 
 def __getattr__(name):

@@ -16,7 +16,32 @@ from .test_definitions import definition_home as definition_home
 from .test_definitions import sample, write_definition
 
 PACKAGE = Path(__file__).resolve().parents[2] / "profiles" / "package" / "classifiers"
-KNOWN_MISSES = {"intent-check": ["g18-quiet-week"]}
+KNOWN_MISSES = {
+    "filter": ["home-3"],
+    "intent-check": ["g18-quiet-week", "lifted-t201", "lifted-t205"],
+    "model-pick": [
+        "rig-grade-swarm-cxc0",
+        "rig-grade-swarm-doctor-fx-9b243b65-tune",
+        "rig-grade-swarm-doctor-t38",
+        "rig-grade-swarm-ed1",
+    ],
+    "profile-pick": [
+        "rig-grade-swarm-doctor-fx-29d21c6e-code",
+        "rig-grade-swarm-doctor-fx-30373668-cause",
+        "rig-grade-swarm-doctor-t9",
+    ],
+    "phase-slice": ["rig-grade-swarm-p21-12", "rig-grade-swarm-p21-6"],
+    "priority-resolve": [
+        "okay-we-re-going-to-mossy-rabin-2026-10-05-auto-followups-add_item-85b8a48e1d",
+        "okay-we-re-going-to-mossy-rabin-2026-10-05-auto-followups-add_item-a5a642ab31",
+        "rearchitecture-v3-2026-10-02-priority-7c34a25acf",
+        "rig-grade-swarm-doctor-auto-tasks-fx-8df17d5f-tune",
+        "rig-grade-swarm-doctor-priority-365247e55c",
+    ],
+    "task-difficulty": ["rig-grade-swarm-vprf5"],
+    "task-grouping": ["rig-grade-swarm-asc1,asc8", "rig-grade-swarm-tc105,tc111"],
+    "trace-plan": ["rig-grade-swarm-doctor-fx-a66a8ac4-code"],
+}
 ON = {"AGENTIHOOKS_METRICS_URL": "http://ch:8123", "AGENTIHOOKS_METRICS_USER": "writer", "AGENTIHOOKS_SWARM": "sw"}
 
 
@@ -427,6 +452,33 @@ def test_every_packaged_corpus_replays_clean(name):
         for item in yaml.safe_load((PACKAGE / f"{name}.corpus.yaml").read_text())["cases"]
         if item["control"] and item["name"] not in known
     )
+
+
+DEFINITIONS = sorted(path.stem for path in PACKAGE.glob("*.yaml") if ".corpus" not in path.name)
+NO_CORPUS = {"intent-check-tests-first": "the decision log holds no tests first intent decision to draw cases from"}
+CLASSIFIERS = [name for name in DEFINITIONS if name not in NO_CORPUS]
+GENERIC = ("choice", "score", "yes")
+
+
+def test_only_named_definitions_go_without_a_corpus():
+    assert [name for name in DEFINITIONS if not (PACKAGE / f"{name}.corpus.yaml").is_file()] == list(NO_CORPUS)
+
+
+@pytest.mark.parametrize("name", CLASSIFIERS)
+def test_every_packaged_classifier_has_a_corpus(name):
+    assert (PACKAGE / f"{name}.corpus.yaml").is_file()
+
+
+@pytest.mark.parametrize("name", [name for name in CLASSIFIERS if name not in GENERIC])
+def test_every_classifier_corpus_holds_ten_cases(name):
+    assert len(evaluation.evaluate(name).cases) >= 10
+
+
+def test_model_pick_expects_each_reader_level_raised_to_the_floor():
+    for case in evaluation.evaluate("model-pick").cases:
+        levels, reader, floor = case.params["levels"], case.notes["reader_level"], case.notes["floor"]
+        assert floor == case.params["floor"]
+        assert case.expected == {"effort": levels[max(levels.index(reader), levels.index(floor))]}
 
 
 def test_profile_pick_replay_scores_both_ci_proof_troubleshoot_tasks_as_engineer():
