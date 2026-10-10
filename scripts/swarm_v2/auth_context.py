@@ -279,6 +279,16 @@ class LaunchAuthority:
         raw = self.redis.hget(self.store.key(slug, "launch-registrations"), execution_id)
         return Registration(**json.loads(raw)) if raw else None
 
+    def bound(self, slug: str, token: str) -> Registration:
+        claims = self._verify(slug, token)
+        registration = self.registration(slug, claims["execution_id"])
+        if registration is None or registration.grant_id != claims["grant_id"]:
+            self.refuse(slug, "unauthenticated", "launch grant is not registered")
+        occupants = self.store.execution_occupants(slug).values()
+        if (claims["execution_id"], claims["generation"]) not in {(a.execution_id, a.generation) for a in occupants}:
+            self.refuse(slug, "stale_generation", "launch grant is for a superseded execution")
+        return registration
+
     def disable(self, slug: str) -> list[str]:
         from redis.exceptions import WatchError
 
