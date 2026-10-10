@@ -4,8 +4,8 @@ import os
 from collections import Counter
 
 import pytest
-from scripts.swarm_v2.artifacts import base, local, object_store
 
+from scripts.swarm_v2.artifacts import base, local, object_store
 from scripts.swarm_v2.auth_context import Registration
 
 pytestmark = pytest.mark.unit
@@ -172,6 +172,22 @@ def staging_key(data: bytes) -> str:
 def record_bytes(data: bytes, execution: str = "e1", generation: int = 2) -> bytes:
     document = {"execution_id": execution, "generation": generation, "sha256": sha(data), "size": len(data)}
     return json.dumps(document, sort_keys=True).encode()
+
+
+def test_published_names_are_stable():
+    assert base.METRIC == "artifact_upload_verification_failures"
+    assert (base.ABSENT, base.CORRUPT, base.VERIFIED) == ("absent", "corrupt", "verified")
+    assert base.CHUNK == 1 << 20
+    assert local.TEMPORARY == ".partial-"
+    assert (local.LocalBackend.kind, object_store.ObjectStoreBackend.kind) == KINDS
+
+
+def test_every_refused_upload_is_counted(world):
+    world.truncate(2)
+    for _ in range(2):
+        with pytest.raises(base.ArtifactError):
+            world.store.put(world.scope, "a1", DATA)
+    assert world.store.metrics() == {base.METRIC: {world.kind: 2}}
 
 
 def test_reference_is_the_content_digest_and_size():
@@ -487,18 +503,28 @@ def test_local_write_syncs_the_file_and_its_directory(tmp_path, monkeypatch):
     backend = local.LocalBackend(tmp_path / "durable")
     synced = []
     real = os.fsync
-    monkeypatch.setattr(os, "fsync", lambda fd: synced.append(os.readlink(f"/proc/self/fd/{fd}")) or real(fd))
+
+    def fsync(fd):
+        synced.append((os.readlink(f"/proc/self/fd/{fd}"), os.fstat(fd).st_size))
+        real(fd)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    descriptors = len(os.listdir("/proc/self/fd"))
     ack = backend.write("a/b/c", DATA)
     assert ack == base.Ack(len(DATA), sha(DATA))
-    target = tmp_path / "durable" / "a" / "b"
-    assert synced[-1] == str(target)
-    assert synced[0].startswith(str(target / local.TEMPORARY))
-    assert len(synced) == 2
+    target = tmp_path.resolve() / "durable" / "a" / "b"
+    assert [path for path, _ in synced][1:] == [str(target)]
+    assert synced[0][0].startswith(str(target / ".partial-"))
+    assert synced[0][1] == len(DATA)
     synced.clear()
-    backend.move("a/b/c", "d/e")
-    assert synced == [str(tmp_path / "durable" / "d")]
-    assert backend.read("d/e", 0, len(DATA)) == DATA
+    backend.move("a/b/c", "d/e/f")
+    backend.write("a/b/g", OTHER)
+    synced.clear()
+    backend.move("a/b/g", "d/e/h")
+    assert [path for path, _ in synced] == [str(tmp_path.resolve() / "durable" / "d" / "e")]
+    assert backend.read("d/e/f", 0, len(DATA)) == DATA
     assert backend.size("a/b/c") is None
+    assert len(os.listdir("/proc/self/fd")) == descriptors
 
 
 def test_local_failed_write_leaves_no_partial_file(tmp_path, monkeypatch):
@@ -554,14 +580,15 @@ def test_object_store_empty_read_sends_no_request():
     assert fake.calls["get_object"] == 0
 
 
-def test_object_store_ack_without_etag_is_empty():
-    class NoTag(FakeObjectStore):
+@pytest.mark.parametrize(("response", "checksum"), [({}, ""), ({"ETag": '"X1X"'}, "X1X")])
+def test_object_store_ack_carries_the_unquoted_etag(response, checksum):
+    class Tagged(FakeObjectStore):
         def put_object(self, **request):
             super().put_object(**request)
-            return {}
+            return response
 
-    _, backend = object_backend(NoTag())
-    assert backend.write("k", DATA) == base.Ack(len(DATA), "")
+    _, backend = object_backend(Tagged())
+    assert backend.write("k", DATA) == base.Ack(len(DATA), checksum)
 
 
 @pytest.mark.parametrize("code", ["404", "NoSuchKey", "NotFound"])
@@ -610,3 +637,9 @@ def test_truncated_copy_is_refused_and_removed(tmp_path):
     )
     assert world.keys() == []
     assert world.store.metrics() == {base.METRIC: {"object-store": 1}}
+
+
+def test_package_acceptance_cases_pass():
+    from tests.sv2_fsy04_cases import case_a, case_b, case_c
+
+    assert [case()["passed"] for case in (case_a, case_b, case_c)] == [True, True, True]
