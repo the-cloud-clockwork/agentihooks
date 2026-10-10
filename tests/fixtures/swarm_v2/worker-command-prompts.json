@@ -14,7 +14,7 @@
     "café — 日本語 — ünïçødé — 𝔘𝔫𝔦",
     "--namespace=kube-system -- sh -c 'kubectl delete pods --all'"
   ],
-  "helper_stderr": "\u001b[31mwarning\u001b[0m \u0007bell\r\n2Jcleared",
+  "helper_stderr": "\u001b[31mwarning\u001b[0m \u0007bell\r\n\u009b2Jcleared",
   "cases": [
     "a",
     "b",

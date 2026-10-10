@@ -1,9 +1,8 @@
 # syntax=mirror.gcr.io/docker/dockerfile:1
 FROM mirror.gcr.io/library/python:3.12-slim AS build
 WORKDIR /build
-COPY pyproject.toml README.md ./
-RUN python -c 'import tomllib; print("\n".join(tomllib.load(open("pyproject.toml", "rb"))["project"]["optional-dependencies"]["ledger"]))' > ledger-requirements.txt
-RUN python -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir -r ledger-requirements.txt
+COPY pyproject.toml README.md docker/swarm/requirements.lock ./
+RUN python -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir --require-hashes -r requirements.lock
 COPY hooks/ hooks/
 COPY scripts/ scripts/
 COPY profiles/ profiles/
@@ -21,6 +20,7 @@ ENV PATH=/opt/venv/bin:$PATH \
 RUN groupadd --gid 10001 swarm && useradd --uid 10001 --gid swarm --create-home swarm && mkdir /data && chown swarm:swarm /data
 COPY --from=build /opt/venv /opt/venv
 COPY media/agentihooks-logo.png /opt/venv/lib/python3.12/site-packages/media/agentihooks-logo.png
+COPY docs/swarm-v2/schemas/ /opt/venv/lib/python3.12/site-packages/docs/swarm-v2/schemas/
 USER 10001:10001
 VOLUME /data
 EXPOSE 8765

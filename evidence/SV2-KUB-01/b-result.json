@@ -3,10 +3,10 @@
   "state": "passed",
   "evidence_class": "mocked: in process rendering; Kubernetes schema validity comes from the kind job's strict server side dry run of the committed golden Pods, recorded with its run id in result.json",
   "input_sha256": {
-    "pod-policy.json": "6f10e42c7c8461ea18fe3ae9f0c46001020bd50153665477b415076cf71099f5",
-    "pod-launch.json": "dc9258de4781082cc2abb9a2048ff04db03da0a83ea144f96fe728847b34c809",
-    "pod-rendered.json": "a50787a1f9d90540ada874c745b31de2bd01915593da7189f7f48fcecfdff205",
-    "pod-rendered-wrong-probes.json": "fec706d02fa08d5f7f461a27e7734c2b3ce704bcc0a8fd10b37d8b417d2f1f07"
+    "pod-policy.json": "cac05e3a549966cf63b9c00183883ec7087b814eb91fc785dad689df9e66723b",
+    "pod-launch.json": "8d1964999c9d4fc4e3bfd4f8aea2938da30b825411e1e5a12f4ea7e432261908",
+    "pod-rendered.json": "8dc5ffd81a7f1d5dd956a604a3ac4eb11acab0680deee20b1f97998a34330a35",
+    "pod-rendered-wrong-probes.json": "c85a1a11dea0969dc2560337fa59e1c3749e100f51c78f809b135cd822c6daa0"
   },
   "observed": {
     "refusals": {
@@ -18,9 +18,9 @@
         "identity",
         "launch task_id is not a valid value"
       ],
-      "unapproved credential": [
-        "credential",
-        "launch credential_ref is not an approved credential"
+      "unapproved provider account": [
+        "account",
+        "launch provider_account is not an approved provider account"
       ],
       "unapproved profile": [
         "profile",
@@ -40,7 +40,7 @@
     "pod_spec_validation_failures_total": {
       "fields": 1,
       "identity": 1,
-      "credential": 1,
+      "account": 1,
       "profile": 1,
       "resources": 1,
       "image": 1

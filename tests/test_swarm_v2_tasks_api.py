@@ -566,6 +566,20 @@ def test_an_outcome_proposal_needs_the_current_revision_and_lands_once(world, wo
     ]
 
 
+def test_progress_after_an_outcome_proposal_leaves_the_proposal_intact(world, worker):
+    agent, token = worker
+    assert world.progress(token, "progress-1", "Building the first slice")[0] == 200
+    current = world.read(token)[1]["revision"]
+    assert propose(world, token, "outcome-1", current)[0] == 200
+    assert world.progress(token, "progress-2", "Watching the merge queue")[0] == 200
+    assert world.progress(token, "progress-3", "Merge queue passed")[0] == 200
+    assert [(entry["by"], entry["text"], entry.get("outcome")) for entry in world.task()["comments"]] == [
+        (agent.name, "Building the first slice", None),
+        (agent.name, "Outcome proposal: done. Pull request merged", "done"),
+        (agent.name, "Merge queue passed", None),
+    ]
+
+
 @pytest.mark.parametrize(
     ("outcome", "proof", "message"),
     [
@@ -639,7 +653,8 @@ def test_the_served_api_carries_task_reads_and_writes_beside_executions(world, s
     }
     assert send(served, "POST", "/v2/tasks/task/outcomes", token, outcome)[0] == 200
     assert [(entry["by"], entry["text"]) for entry in world.task()["comments"]] == [
-        (agent.name, "Outcome proposal: done. Pull request merged")
+        (agent.name, "Asking about the second slice"),
+        (agent.name, "Outcome proposal: done. Pull request merged"),
     ]
     assert send(served, "PATCH", "/v2/swarm/config", token, {"max_eng_agents": 99})[0] == 403
     assert (world.task()["state"], world.task()["pr_url"]) == ("pr", PR)

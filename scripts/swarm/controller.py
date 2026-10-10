@@ -120,17 +120,26 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
     from scripts import operator_env
+    from scripts.swarm import commands
+    from scripts.swarm_v2 import control_service
 
     operator_env.fill(os.environ)
     store = connect()
+    service = None
     try:
+        service = control_service.host(os.environ, store, commands.hive_id())
         while True:
             for slug, actions in run_once(store).items():
                 for action in actions:
                     print(f"{slug}: {action}", flush=True)
+            if service is not None:
+                service.tick()
             if args.once:
                 return 0
             time.sleep(lease.tick_ms() / 1000)
     except SwarmError as exc:
         print(f"controller: {exc}", file=sys.stderr)
         return 1
+    finally:
+        if service is not None:
+            service.stop()

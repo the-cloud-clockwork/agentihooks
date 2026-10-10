@@ -19,6 +19,7 @@
       "swarm.agentihooks.io/controller-owner": "agentihooks-swarm-fixture",
       "swarm.agentihooks.io/execution-id": "exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0",
       "swarm.agentihooks.io/generation": "3",
+      "swarm.agentihooks.io/provider-account": "claude-fixture",
       "swarm.agentihooks.io/swarm": "rig-grade-swarm",
       "swarm.agentihooks.io/task": "vkub1",
       "swarm.agentihooks.io/template-version": "kub01-v2"
@@ -179,6 +180,7 @@
       "anton.io/pool": "general"
     },
     "restartPolicy": "Never",
+    "runtimeClassName": "kata-fc",
     "securityContext": {
       "fsGroup": 10001,
       "runAsGroup": 10001,
@@ -221,7 +223,13 @@
         "name": "credential",
         "secret": {
           "defaultMode": 256,
-          "secretName": "swarm-claude-fixture"
+          "items": [
+            {
+              "key": "token",
+              "path": "token"
+            }
+          ],
+          "secretName": "swarm-account-claude-fixture"
         }
       }
     ]

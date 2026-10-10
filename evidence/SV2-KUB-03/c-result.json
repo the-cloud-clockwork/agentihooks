@@ -3,8 +3,20 @@
   "independent_runs": 2,
   "observed": {
     "case": "T-SV2-KUB-03-C",
+    "checks": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
     "evidence_class": "mocked Redis and server clock; fixture network; in process helper exec; no Kubernetes calls",
-    "input_sha256": "896370c48ac21c79969cc90d1edd9d4bbe279005314a7d61d64a81149d25c1a8",
+    "input_sha256": "a72d5c962385abf18d1df7a6fe17443cde4a010a28faeb385c56443a442b8554",
     "observed": {
       "after_completion": "completed",
       "fallback_calls": [
@@ -44,10 +56,31 @@
         [
           "status",
           0,
-          "warning bell\n2Jcleared[REDACTED:github_token]"
+          "warning bell\ncleared[REDACTED:github_token]"
         ]
       ],
+      "stale_checkpoint": [
+        "rejected",
+        "stale_generation",
+        "accepted"
+      ],
       "stored": "completed",
+      "stored_lost_issue_commands": 1,
+      "superseded": [
+        "stale",
+        "refused",
+        "execution generation is stale"
+      ],
+      "worker_restart": [
+        [
+          "done",
+          1
+        ],
+        [
+          "reported",
+          1
+        ]
+      ],
       "worker_transport_ambiguous_total": {
         "deliver": 1,
         "status": 0
