@@ -6,6 +6,7 @@ because the hook runs on every prompt of every session."""
 import json
 import os
 import tempfile
+import uuid
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -18,6 +19,7 @@ GRANT_NAME = "launch-grant"
 API_URL = "AGENTIHOOKS_SWARM_API_URL"
 CLAIM_PATH = "/v2/broadcasts/claim"
 TIMEOUT_SECONDS = 5
+CLAIM_ATTEMPTS = 2
 
 
 def grant_path(attempt: Path) -> Path:
@@ -64,7 +66,14 @@ def claim(session_id: str, channels: list[str], environ: Mapping[str, str]) -> i
 
     if environ.get(FLAG) != "1":
         return 0
-    try:
-        return sync_local(RemoteFleet(environ[API_URL]), read_grant(environ), session_id, channels, environ)
-    except (OSError, ValueError):
-        return 0
+    from urllib.error import HTTPError
+
+    fleet, claim_id = RemoteFleet(environ[API_URL]), uuid.uuid4().hex
+    for _ in range(CLAIM_ATTEMPTS):
+        try:
+            return sync_local(fleet, read_grant(environ), session_id, channels, environ, claim_id)
+        except (HTTPError, ValueError):
+            return 0
+        except OSError:
+            continue
+    return 0

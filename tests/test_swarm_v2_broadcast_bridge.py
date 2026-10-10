@@ -139,15 +139,18 @@ def test_a_remote_worker_prompt_receives_the_fleet_broadcast(world, served, tmp_
     monkeypatch.setattr(hb, "_get_session_channels", lambda session_id: list(CHANNELS))
     monkeypatch.setattr(hb.quarantine, "mode", lambda: "off")
     quiet(monkeypatch)
-    delivered = Mock()
+    delivered, logged = Mock(), Mock()
     monkeypatch.setattr("hooks.context.broadcast.check_and_inject_broadcasts", delivered)
+    monkeypatch.setattr(hook_manager, "log", logged)
 
     hook_manager.on_user_prompt_submit({"session_id": "s-remote", "prompt": "", "cwd": ""})
 
     delivered.assert_called_once_with("s-remote")
+    assert [c for c in logged.call_args_list if "broadcast" in c.args[0]] == []
+    assert world.publisher.delivery(REMOTE, "fleet-warning")["execution_id"] == agent.execution_id
+    assert [m["id"] for m in hb.list_broadcasts()] == [f"{SLUG}:fleet-warning:1:s-remote"]
     assert [m["id"] for m in hb.get_critical_broadcasts("s-remote")] == [f"{SLUG}:fleet-warning:1:s-remote"]
     assert hb.get_critical_broadcasts("s-other") == []
-    assert world.publisher.delivery(REMOTE, "fleet-warning")["execution_id"] == agent.execution_id
 
 
 def test_the_prompt_hook_claims_on_the_session_channels_before_it_delivers(monkeypatch):
@@ -275,6 +278,50 @@ def test_the_bridge_posts_its_grant_and_channels_to_the_claim_endpoint(monkeypat
 
 def test_an_answer_that_is_not_json_claims_nothing(world, tmp_path, monkeypatch):
     _, _, environ = launch(world, tmp_path, REMOTE, monkeypatch)
-    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: Answer(b"<html>"))
+    sent = []
+    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: sent.append(request) or Answer(b"<html>"))
     assert broadcast_bridge.claim("s-remote", list(CHANNELS), environ) == 0
+    assert len(sent) == 1
     assert hb.list_broadcasts() == []
+
+
+def test_a_lost_answer_is_retried_once_with_the_same_claim_id(world, served, tmp_path, monkeypatch):
+    import urllib.request
+    from urllib.error import URLError
+
+    _, _, environ = launch(world, tmp_path, REMOTE, monkeypatch, served)
+    world.announce()
+    real = urllib.request.urlopen
+
+    def lost(request, timeout):
+        real(request, timeout=timeout).close()
+        raise URLError("reset")
+
+    sent = []
+    answers = [lost, real]
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda request, timeout: sent.append(json.loads(request.data)) or answers.pop(0)(request, timeout=timeout),
+    )
+    assert broadcast_bridge.claim("s-remote", list(CHANNELS), environ) == 1
+    first, second = sent
+    assert first == second == {"channels": CHANNELS, "claim_id": first["claim_id"]}
+    assert len(first["claim_id"]) == 32
+    assert [m["id"] for m in hb.list_broadcasts()] == [f"{SLUG}:fleet-warning:1:s-remote"]
+    answers[:] = [real]
+    assert broadcast_bridge.claim("s-remote", list(CHANNELS), environ) == 0
+    assert sent[2]["claim_id"] != first["claim_id"]
+
+
+def test_a_transport_failure_is_tried_twice_and_a_refusal_once(world, tmp_path, monkeypatch):
+    from urllib.error import HTTPError, URLError
+
+    _, _, environ = launch(world, tmp_path, REMOTE, monkeypatch)
+    tries = Mock(side_effect=URLError("down"))
+    monkeypatch.setattr("urllib.request.urlopen", tries)
+    assert broadcast_bridge.claim("s-remote", list(CHANNELS), environ) == 0
+    assert tries.call_count == 2
+    refused = Mock(side_effect=HTTPError("http://swarm.invalid", 401, "unauthenticated", {}, None))
+    monkeypatch.setattr("urllib.request.urlopen", refused)
+    assert broadcast_bridge.claim("s-remote", list(CHANNELS), environ) == 0
+    assert refused.call_count == 1
