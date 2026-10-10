@@ -78,6 +78,7 @@ done
 mv "$context/docker/swarm-node/versions.original" "$context/docker/swarm-node/versions.lock"
 docker build --no-cache-filter worker --platform linux/amd64 --build-arg SOURCE_REVISION="$revision" \
     -f "$context/docker/swarm-node/Dockerfile" -t "$rebuild" "$context" > "$output/rebuild.log" 2>&1
+bash "$context/docker/swarm-node/scan.sh" "$rebuild" "$output/credential-scan-rebuild"
 docker run --rm --network none --read-only --tmpfs /home/worker:uid=10001,gid=10001 \
     --tmpfs /tmp "$rebuild" > "$output/rebuild.json"
 docker run --rm --network none --read-only --tmpfs /home/worker:uid=10001,gid=10001 \

@@ -292,8 +292,10 @@ def test_the_planted_credential_is_generated_at_build_time_and_refused_before_pu
         assert not {"if", "continue-on-error"} & named(workflow, name).keys()
 
 
-def test_the_pull_request_smoke_scans_the_image_it_built():
+def test_the_pull_request_smoke_scans_every_image_it_built():
     smoke = (ROOT / "docker/swarm-node/smoke.sh").read_text()
     build = smoke.index('-t "$image" "$context" > "$output/build.log"')
+    rebuild = smoke.index('-t "$rebuild" "$context" > "$output/rebuild.log"')
 
     assert smoke.index('scan.sh" "$image" "$output/credential-scan"') > build
+    assert smoke.index('scan.sh" "$rebuild" "$output/credential-scan-rebuild"') > rebuild
