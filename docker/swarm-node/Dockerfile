@@ -1,5 +1,13 @@
 ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.12.12-slim-bookworm@sha256:2986c55feb36e6cae00fa1fefb454283e4b33f35e75ff8bdd123b134130be301
-FROM ${BASE_IMAGE}
+FROM ${BASE_IMAGE} AS downloads
+ARG TARGETARCH
+COPY docker/swarm-node/versions.lock docker/swarm-node/requirements.lock /opt/swarm-node/
+COPY scripts/swarm_v2/worker_image.py /opt/swarm-node/worker_image.py
+RUN mkdir -p /downloads/tools \
+    && pip download --no-cache-dir --require-hashes -d /downloads/pip -r /opt/swarm-node/requirements.lock \
+    && python /opt/swarm-node/worker_image.py download --architecture "$TARGETARCH" --cache /downloads/tools
+
+FROM ${BASE_IMAGE} AS worker
 ARG BASE_IMAGE
 ARG TARGETARCH
 ARG SOURCE_REVISION=unknown
@@ -18,9 +26,11 @@ RUN python /opt/swarm-node/worker_image.py validate --architecture "$TARGETARCH"
     && apt-get update \
     && apt-get install -y --no-install-recommends $(python /opt/swarm-node/worker_image.py shell-packages) \
     && rm -r /var/lib/apt/lists/*
-RUN python -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir --require-hashes -r /opt/swarm-node/requirements.lock \
-    && python /opt/swarm-node/worker_image.py install --architecture "$TARGETARCH"
+RUN --mount=type=bind,from=downloads,source=/downloads,target=/downloads \
+    python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir --no-index --find-links /downloads/pip --require-hashes \
+        -r /opt/swarm-node/requirements.lock \
+    && python /opt/swarm-node/worker_image.py install --architecture "$TARGETARCH" --cache /downloads/tools
 COPY pyproject.toml README.md ./
 COPY hooks/ hooks/
 COPY scripts/ scripts/
