@@ -300,6 +300,20 @@ def test_the_first_freeze_on_a_ledger_without_a_freezes_collection_creates_it(ve
     ]
 
 
+def test_the_server_path_stores_the_first_focus_on_a_ledger_saved_without_freezes():
+    from scripts.swarm_ledger.repository import repository
+
+    stored = repository.bound(core)
+    state = stored.get_document(SLUG)
+    del state["freezes"]
+    stored.import_document(SLUG, state, replace=True)
+    assert "freezes" not in stored.get_document(SLUG)
+    state, rejected = freeze("plans/a", verb="focus")
+    assert rejected == []
+    assert [(row["verb"], row["target"], row["by"]) for row in state["freezes"]] == [("focus", "plans/a", "operator")]
+    assert [(row["verb"], row["target"]) for row in stored.get_document(SLUG)["freezes"]] == [("focus", "plans/a")]
+
+
 def test_an_unfreeze_on_a_ledger_without_a_freezes_collection_clears_nothing():
     state, ctx = stored_without_freezes()
     assert ledger_freezes.apply(state, {"op": "freeze_clear", "id": "first", "target": "plans/a"}, ctx) is True
