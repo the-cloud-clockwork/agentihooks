@@ -188,3 +188,44 @@ def test_the_tick_raises_a_refused_kubernetes_spawn_as_a_spawn_error():
     with pytest.raises(SpawnError) as raised:
         runtime.spawn(CONFIG, "eng", "e1", {"id": "t1", "execution_id": "exe-1", "generation": 2})
     assert (str(raised.value), raised.value.status) == ("spawn operation op-1 is refused", "refused")
+
+
+class Launcher:
+    def __init__(self, status=Status.OK, detail=""):
+        self.status, self.detail, self.spawned = status, detail, []
+
+    def __call__(self, request):
+        self.spawned.append(request.name)
+        placed = Placed("", "claude", placement=BACKEND) if self.status is Status.OK else None
+        return Outcome("spawn", self.status, BACKEND, placed, self.detail)
+
+
+def test_the_tick_runtime_sends_placed_spawns_through_the_distributed_launch():
+    herdr, remote, launcher = Herdr(), Remote(), Launcher()
+    runtime = routed({}, herdr, kubernetes=remote, launch=launcher)
+    for lane, name, task in (
+        ("eng", "e1", {}),
+        ("ci", "c1", {}),
+        (MASTER, "m1", {}),
+        ("plan", "p1", {}),
+        ("eng", "f1", {"profile": "frontend"}),
+    ):
+        placed = runtime.spawn(CONFIG, lane, name, {"id": "t1", **task})
+        assert placed.placement == (BACKEND if name in ("e1", "c1") else "")
+    assert launcher.spawned == ["e1", "c1"]
+    assert remote.spawned == []
+    assert herdr.spawned == ["m1", "p1", "f1"]
+
+
+def test_the_tick_runtime_keeps_placed_spawns_local_when_kubernetes_is_disabled():
+    herdr, launcher = Herdr(), Launcher()
+    runtime = routed({"AGENTIHOOKS_RUNTIME_DISABLED": BACKEND}, herdr, kubernetes=Remote(), launch=launcher)
+    runtime.spawn(CONFIG, "eng", "e1", {"id": "t1"})
+    assert (launcher.spawned, herdr.spawned) == ([], ["e1"])
+
+
+def test_the_tick_raises_a_refused_distributed_launch_as_a_spawn_error():
+    runtime = routed({}, Herdr(), kubernetes=Remote(), launch=Launcher(Status.REFUSED, "account_full"))
+    with pytest.raises(SpawnError) as raised:
+        runtime.spawn(CONFIG, "eng", "e1", {"id": "t1"})
+    assert (str(raised.value), raised.value.status) == ("account_full", "refused")

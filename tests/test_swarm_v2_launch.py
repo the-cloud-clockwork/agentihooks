@@ -14,7 +14,7 @@ from scripts.swarm_v2.auth_context import GrantRefused, LaunchAuthority, LaunchK
 from scripts.swarm_v2.controller import Controller
 from scripts.swarm_v2.launch import DistributedLaunch, Launch, LaunchTerms, WorkerHomeCommand
 from scripts.swarm_v2.registry import CLOSED, LIVE, FleetRegistry, Scope, Session
-from scripts.swarm_v2.runtime.base import Capability, Outcome, RuntimeRouter, SpawnRequest, Status
+from scripts.swarm_v2.runtime.base import Capability, Outcome, Placement, RuntimeRouter, SpawnRequest, Status
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
@@ -506,3 +506,45 @@ def test_a_launch_refused_on_a_full_account_hands_no_grant(world):
     assert refused.outcome.detail == "account_full"
     assert refused.handed is False
     assert len(world.homes.calls) == 1
+
+
+OTHER_API = "https://swarm.example.test:8443"
+
+
+def test_a_refused_launch_names_the_backend_its_spawn_was_placed_on(monkeypatch):
+    world = World(monkeypatch, cap=0)
+    world.launcher.router = RuntimeRouter([world.runtime], placement=Placement(BACKEND))
+
+    launch = world.launch(FIRST)
+
+    assert launch.outcome == Outcome("spawn", Status.REFUSED, BACKEND, None, "account_full")
+
+
+def test_a_tick_spawn_hands_the_worker_the_api_address_of_its_swarm_config(world):
+    name = world.store.next_name(SLUG, "eng")
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+    request = SpawnRequest(config, "eng", name, {"id": "task", "seat": FIRST})
+
+    outcome = world.launcher.from_tick(request, replace(world.terms, api_url=""))
+
+    assert outcome == Outcome("spawn", Status.OK, BACKEND, f"placed-{name}")
+    [sent] = world.runtime.requests
+    assert sent.task["endpoints"] == {broadcast_bridge.API_URL: OTHER_API}
+    agent = world.store.execution(SLUG, sent.task["execution_id"])
+    assert (agent.name, agent.lane, agent.task, agent.seat, agent.account) == (name, "eng", "task", FIRST, ACCOUNT)
+
+
+def test_a_tick_spawn_without_a_swarm_api_address_is_refused_before_admission(world):
+    request = SpawnRequest(SwarmConfig(SLUG, "agentihooks", 2, 0), "eng", "e1", {"id": "task", "seat": FIRST})
+
+    outcome = world.launcher.from_tick(request, world.terms)
+
+    assert outcome == Outcome("spawn", Status.REFUSED, BACKEND, None, "the swarm config has no API address")
+    assert world.runtime.requests == []
+    assert world.rows() == {}
+
+
+def test_the_swarm_config_keeps_its_api_address(world):
+    assert world.store.config(SLUG).api_url == ""
+    world.store.update(SLUG, api_url=OTHER_API)
+    assert world.store.config(SLUG).api_url == OTHER_API
