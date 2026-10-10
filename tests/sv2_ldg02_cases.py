@@ -70,7 +70,7 @@ class World:
 
 
 def stable(ack):
-    return {name: ack[name] for name in sorted(ack) if name not in ("execution_id", "owner_identity")}
+    return {name: ack[name] for name in sorted(ack) if name not in ("execution_id", "owner_identity", "grant_id")}
 
 
 def _positive(world):
