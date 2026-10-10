@@ -13,11 +13,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxError
+from scripts.swarm import operator_mail
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER, PREFIX
+from scripts.swarm_v2 import masters
 
 MINUTE_MS = 60_000
 FOLLOWUP_RAISE_MS = 15 * MINUTE_MS
@@ -262,13 +263,17 @@ def tick_view(inbox: object, store: object, slug: str, doc: dict) -> Callable[[s
 
 
 class Mail:
-    def __init__(self, inbox, store, slug):
-        self.inbox, self.store, self.slug = inbox, store, slug
+    def __init__(self, inbox, store, slug, doc=None):
+        self.inbox, self.store, self.slug, self.doc = inbox, store, slug, doc or {}
         live = [a for a in store.agents(slug) if a.state != "finished"]
         self.seats = {a.name: a.seat or a.name for a in live}
-        boss = next((a for a in live if a.lane == MASTER), None)
-        self.has_master = boss is not None
-        self.master = self.seats[boss.name] if boss else seat_address(slug, MASTER)
+        self.has_master = any(a.lane == MASTER for a in live)
+        self.master = operator_mail.master_address(slug, live)
+        self.masters = [a.seat for a in live if a.lane == MASTER]
+        self.owners = masters.MasterSeats(store.redis).owners(slug, self.doc) if doc else {}
+
+    def owner(self, target):
+        return masters.route(target, self.doc, self.owners, self.masters, self.master)
 
     def once(self, key, act):
         marker = self.store.key(self.slug, "events-sent", key)
@@ -299,7 +304,7 @@ class Mail:
 
 
 def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
-    mail, github = Mail(inbox, store, slug), functools.cache(github)
+    mail, github = Mail(inbox, store, slug, doc), functools.cache(github)
     events = doc.get("_meta", {}).get("events", [])
     tasks = {t["id"]: t for t in doc.get("tasks", [])}
     raised = _raised_for_operator(doc, events)
@@ -400,7 +405,7 @@ def _events(mail, events, tasks, raised):
         if text:
             sent += mail.send(
                 f"event:{event['rev']}:{event['kind']}:{event['target']}",
-                mail.master,
+                mail.owner(event["target"]),
                 text,
                 ref=f"{mail.slug}:event:{event['target']}",
                 fyi=event["kind"] == "task done",
@@ -498,7 +503,7 @@ def _pull_requests(mail, tasks, now_ms, github):
                 sent += mail.send(f"{url}:merged:engineer", mail.engineer(task), text)
             if age >= MERGED_MASTER_MS:
                 text = f"{title} on ledger {mail.slug} is still in pull request twenty minutes after {url} merged."
-                sent += mail.send(f"{url}:merged:master", mail.master, text)
+                sent += mail.send(f"{url}:merged:master", mail.owner(f"tasks/{task['id']}"), text)
         elif found.state == "CLOSED":
             text = f"Your pull request {url} for {title} was closed without merging. Reopen it, open a new one, or block the task."
             sent += mail.send(f"{url}:closed", mail.engineer(task), text)

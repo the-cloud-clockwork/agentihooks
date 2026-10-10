@@ -5,6 +5,7 @@ from scripts.inbox.seats import seat_address
 from scripts.inbox.seen import write_ref
 from scripts.swarm.store import MASTER, SwarmError
 from scripts.swarm_ledger.ledger_gate import IGNORED_KINDS, MENTION_RE
+from scripts.swarm_v2 import masters
 
 OPERATOR = "operator"
 SYNC_ORDER = "sync requested"
@@ -23,7 +24,7 @@ def _live(agents):
     return [a for a in agents if a.state != "finished"]
 
 
-def addresses(slug, event, doc, agents):
+def addresses(slug, event, doc, agents, owners=None):
     live = _live(agents)
     master = master_address(slug, live)
     if event.get("kind") == SYNC_ORDER:
@@ -40,7 +41,8 @@ def addresses(slug, event, doc, agents):
         task_id = target.split("/")[1]
         claimant = next((t.get("claimed_by") for t in doc.get("tasks", []) if t.get("id") == task_id), "")
         found = [a for a in live if claimant and a.name == claimant]
-    return [a.seat or a.name for a in found] or [master]
+    seated = [a.seat for a in live if a.lane == MASTER]
+    return [a.seat or a.name for a in found] or [masters.route(target, doc, owners or {}, seated, master)]
 
 
 def mentioned(event):
@@ -54,8 +56,9 @@ def informed(event, address, master):
 
 
 def master_address(slug, live):
-    boss = next((a for a in live if a.lane == MASTER), None)
-    return (boss.seat or boss.name) if boss else seat_address(slug, MASTER)
+    lead = seat_address(slug, MASTER)
+    seated = [a.seat or a.name for a in live if a.lane == MASTER]
+    return lead if lead in seated or not seated else seated[0]
 
 
 def primed(text, event, address, master):
@@ -75,6 +78,7 @@ def relay(inbox, store, slug, doc, events, line):
     except SwarmError:
         return []
     agents, sent = store.agents(slug), []
+    owners = masters.MasterSeats(inbox.redis).owners(slug, doc)
     for event in events:
         if event.get("by") != OPERATOR or event.get("kind") in IGNORED_KINDS:
             continue
@@ -91,6 +95,6 @@ def relay(inbox, store, slug, doc, events, line):
                 ref=ref,
                 fyi=informed(event, address, master),
             )
-            for address in addresses(slug, event, doc, agents)
+            for address in addresses(slug, event, doc, agents, owners)
         ]
     return sent
