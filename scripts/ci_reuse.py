@@ -44,6 +44,13 @@ def _revision(ref):
     return _git("rev-parse", ref)
 
 
+def _resolved(ref, suffix):
+    try:
+        return _git("rev-parse", f"{_revision(ref)}{suffix}")
+    except subprocess.CalledProcessError:
+        return None
+
+
 def _lines(path):
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
@@ -136,11 +143,7 @@ def _find(args, current):
         folder = args.evidence / str(run["id"])
         if not all((folder / name).is_file() for name in EVIDENCE):
             continue
-        try:
-            head = _revision(run["head_sha"])
-        except subprocess.CalledProcessError:
-            continue
-        if _git("rev-parse", f"{head}:.github") != current["inputs"]["workflow"]:
+        if _resolved(run["head_sha"], ":.github") != current["inputs"]["workflow"]:
             continue
         artifacts = _lines(folder / "artifacts.jsonl")
         name = f"required-tree-{run['run_attempt']}"
@@ -158,11 +161,7 @@ def _find(args, current):
             or record.get("inputs") != current["inputs"]
         ):
             continue
-        try:
-            tested = _revision(record["commit"])
-        except subprocess.CalledProcessError:
-            continue
-        if _git("rev-parse", f"{tested}^{{tree}}") != current["tree"]:
+        if _resolved(record["commit"], "^{tree}") != current["tree"]:
             continue
         shards = workflow["jobs"]["unit"]["strategy"]["matrix"]["shard"]
         coverage = {f"coverage-3.12-{shard}" for shard in shards}
