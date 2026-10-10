@@ -51,7 +51,8 @@ def _claims(token: str) -> dict:
 
 def registered(store: "RedisStore", token: str) -> "Registration":
     """The worker holds no signing key, so a grant counts only while it is unexpired, recorded at registration under
-    its grant id, and still the current attempt of its seat."""
+    its grant id, and still the current attempt of its seat. This scopes deliveries to the right seat; it is no
+    authentication, since a holder of the worker's Redis credential can read registrations and write deliveries."""
     from scripts.swarm import lease
     from scripts.swarm.store import SwarmError
     from scripts.swarm_v2.auth_context import Registration, _seconds
