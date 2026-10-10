@@ -57,8 +57,8 @@ def leverage(doc: dict) -> dict[str, int]:
     return {task_id: len(_downstream(task_id, waiters)) for task_id in tasks}
 
 
-def ordered(doc: dict, named: str) -> list[str]:
-    scores, lane = leverage(doc), LANES.get(named)
+def ordered(doc: dict, named: str, scores: dict | None = None) -> list[str]:
+    scores, lane = leverage(doc) if scores is None else scores, LANES.get(named)
     focused = _focused(doc)
     position = {t["id"]: index for index, t in enumerate(doc.get("tasks", []))}
     rows = [t for t in doc.get("tasks", []) if scores.get(t["id"]) and t.get("state") == "open"]
@@ -74,7 +74,8 @@ def ordered(doc: dict, named: str) -> list[str]:
 
 def rank_pass(slug, config, store, ledger, doc, now_ms):
     scores, known = leverage(doc), {t["id"]: t for t in doc.get("tasks", [])}
-    top = [known[task_id] for task_id in ordered(doc, bottleneck.read(store, slug).get("bottleneck", ""))[:TOP]]
+    named = bottleneck.read(store, slug).get("bottleneck", "")
+    top = [known[task_id] for task_id in ordered(doc, named, scores)[:TOP]]
     unranked = [(task, _work(scores[task["id"]])) for task in top if "rank" not in task]
     if config.autonomy in APPLIES:
         done = [action for task, work in unranked if (action := _raise(slug, ledger, task, work))]

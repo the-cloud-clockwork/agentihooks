@@ -108,6 +108,12 @@ def test_leverage_order_breaks_ties_by_the_bottleneck_lane_then_the_focus():
     assert dispatcher.ordered(doc(tasks, phases=[]), "") == ["x", "y", "z"]
 
 
+def test_ordered_uses_the_scores_it_is_given():
+    found = doc([task("x", phase=""), task("y", phase=""), task("w", phase="", depends_on=["x"])], phases=[])
+    assert dispatcher.ordered(found, "") == ["x"]
+    assert dispatcher.ordered(found, "", {"x": 1, "y": 2, "w": 0}) == ["y", "x"]
+
+
 @pytest.mark.parametrize(
     ("target", "first"),
     [("phases/p1", "y"), ("plans/pl", "y"), ("lane:ci", "y"), ("kind:ops", "y"), ("tasks/x", "x"), ("lane:plan", "x")],
