@@ -1,7 +1,7 @@
 """A denied or unreachable read is never evidence that a Pod is gone."""
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, replace
 from enum import StrEnum
 from typing import Any
@@ -13,6 +13,7 @@ MODE_VARIABLE = "AGENTIHOOKS_OBSERVATION_MODE"
 RUNNING, PENDING = "Running", "Pending"
 ENDED = frozenset(("Succeeded", "Failed"))
 HANDSHAKE, EXITED, QUOTA_WAIT = "confirmed", "exited", "quota_wait"
+LOSS = frozenset({*(("kubernetes", phase) for phase in ENDED), ("supervisor", EXITED)})
 
 
 class Source(StrEnum):
@@ -216,11 +217,22 @@ def _settled(state: State, kept: Classification | None, thresholds: Thresholds, 
     return state
 
 
+def _loss_at(sources: dict[str, dict[str, Any]]) -> float:
+    return max(
+        (
+            entry["observed_at"]
+            for name, entry in sources.items()
+            if (name, entry["reading"]) == (Source.KUBERNETES, Reading.NOT_FOUND)
+            or (entry["reading"] == Reading.OK and (name, entry["value"]) in LOSS)
+        ),
+        default=0.0,
+    )
+
+
 def _ruled(kept: Classification | None, seen: Classification) -> Classification:
-    """A working ruling covers the evidence it was given, so loss proof seen after it asks again."""
     if kept is None or kept.ruling != Ruling.WORKING or seen.state not in (State.SUSPECT, State.LOST):
         return seen
-    if seen.proof_since > kept.ruled_at:
+    if _loss_at(seen.sources) > kept.ruled_at:
         return seen
     return replace(
         seen,
@@ -305,43 +317,54 @@ def stored(store: Any, slug: str, execution_id: str) -> Classification | None:
     return _decode(store.redis.hget(_key(store, slug), execution_id))
 
 
-def rule(store: Any, slug: str, execution_id: str, ruling: str, reason: str, by: str, now: float) -> Classification:
+def _write(
+    store: Any, slug: str, execution_id: str, decide: Callable[[Classification | None], Classification]
+) -> Classification:
     from redis.exceptions import WatchError
 
-    if not reason.strip():
-        raise ObservationRefused("a classification needs a reason", "invalid_request")
-    if ruling not in set(Ruling):
-        raise ObservationRefused("a classification is one of lost, working", "invalid_request")
-    chosen, key = Ruling(ruling), _key(store, slug)
+    key = _key(store, slug)
     for _ in range(WRITE_ATTEMPTS):
         with store.redis.pipeline() as pipe:
             try:
                 pipe.watch(key)
                 prior = _decode(pipe.hget(key, execution_id))
-                if prior is None or not prior.needs_operator:
-                    raise ObservationRefused(
-                        "execution attempt does not need an operator classification", "not_suspect"
-                    )
-                ruled = replace(
-                    prior,
-                    state=State(chosen.value),
-                    classified_at=now,
-                    suspect_since=prior.suspect_since if chosen is Ruling.LOST else 0.0,
-                    needs_operator=False,
-                    ruling=chosen.value,
-                    ruling_reason=reason.strip(),
-                    ruled_by=by,
-                    ruled_at=now,
-                )
+                seen = decide(prior)
+                if seen is prior:
+                    return prior
                 pipe.multi()
-                pipe.hset(key, execution_id, json.dumps(asdict(ruled)))
-                if chosen is Ruling.LOST:
-                    pipe.rpush(_key(store, slug, "observation-audit"), json.dumps(asdict(ruled)))
+                pipe.hset(key, execution_id, json.dumps(asdict(seen)))
+                if seen.state is State.LOST and (prior is None or prior.state is not State.LOST):
+                    pipe.rpush(_key(store, slug, "observation-audit"), json.dumps(asdict(seen)))
                 pipe.execute()
-                return ruled
+                return seen
             except WatchError:
                 continue
     raise ObservationRefused("observation record kept changing; nothing recorded", "revision_conflict", True)
+
+
+def rule(store: Any, slug: str, execution_id: str, ruling: str, reason: str, by: str, now: float) -> Classification:
+    if not reason.strip():
+        raise ObservationRefused("a classification needs a reason", "invalid_request")
+    if ruling not in set(Ruling):
+        raise ObservationRefused("a classification is one of lost, working", "invalid_request")
+    chosen = Ruling(ruling)
+
+    def decide(prior: Classification | None) -> Classification:
+        if prior is None or not prior.needs_operator:
+            raise ObservationRefused("execution attempt does not need an operator classification", "not_suspect")
+        return replace(
+            prior,
+            state=State(chosen.value),
+            classified_at=now,
+            suspect_since=prior.suspect_since if chosen is Ruling.LOST else 0.0,
+            needs_operator=False,
+            ruling=chosen.value,
+            ruling_reason=reason.strip(),
+            ruled_by=by,
+            ruled_at=now,
+        )
+
+    return _write(store, slug, execution_id, decide)
 
 
 class Observer:
@@ -377,23 +400,9 @@ class Observer:
         }
 
     def _record(self, slug: str, agent: AgentRecord, signals: list[Signal], now: float) -> Classification:
-        from redis.exceptions import WatchError
+        def decide(prior: Classification | None) -> Classification:
+            if prior and (prior.generation, prior.classified_at) > (agent.generation, now):
+                return prior
+            return classify(agent.execution_id, agent.generation, signals, prior, self.thresholds, now)
 
-        key = _key(self.store, slug)
-        for _ in range(WRITE_ATTEMPTS):
-            with self.store.redis.pipeline() as pipe:
-                try:
-                    pipe.watch(key)
-                    prior = _decode(pipe.hget(key, agent.execution_id))
-                    if prior and (prior.generation, prior.classified_at) > (agent.generation, now):
-                        return prior
-                    seen = classify(agent.execution_id, agent.generation, signals, prior, self.thresholds, now)
-                    pipe.multi()
-                    pipe.hset(key, agent.execution_id, json.dumps(asdict(seen)))
-                    if seen.state is State.LOST and (prior is None or prior.state is not State.LOST):
-                        pipe.rpush(_key(self.store, slug, "observation-audit"), json.dumps(asdict(seen)))
-                    pipe.execute()
-                    return seen
-                except WatchError:
-                    continue
-        raise ObservationRefused("observation record kept changing; nothing recorded", "revision_conflict", True)
+        return _write(self.store, slug, agent.execution_id, decide)

@@ -501,6 +501,7 @@ def test_contention_refusal_names_its_failure(fixture, monkeypatch):
 
 
 CAUTIOUS = replace(LIMITS, mode=Mode.CONSERVATIVE)
+REASON = "agent answered in its pane"
 
 
 @pytest.fixture
@@ -515,103 +516,127 @@ def flagged(observer, agent, *signals):
     return seen
 
 
+def ruling_of(seen):
+    return seen.ruling, seen.ruling_reason, seen.ruled_by, seen.ruled_at
+
+
 def test_a_lost_classification_is_recorded_with_its_reason_and_held(cautious):
     store, agent, observer = cautious
     flagged(observer, agent)
     ruled = rule(store, "fixture", agent.execution_id, "lost", " pod gone in the console ", "operator", NOW + 10)
-    assert (ruled.state, ruled.needs_operator, ruled.classified_at) == (State.LOST, False, NOW + 10)
-    assert (ruled.ruling, ruled.ruling_reason, ruled.ruled_by, ruled.ruled_at) == (
-        "lost",
-        "pod gone in the console",
-        "operator",
+    assert (ruled.state, ruled.needs_operator, ruled.classified_at, ruled.suspect_since) == (
+        State.LOST,
+        False,
         NOW + 10,
+        NOW,
     )
+    assert ruling_of(ruled) == ("lost", "pod gone in the console", "operator", NOW + 10)
     assert observer.get("fixture", agent.execution_id) == ruled
     assert observer.audit("fixture") == [ruled]
     alive = [beat(agent, -20.0), pod(agent, age=-20.0), handshake(agent, -20.0)]
     assert observer.observe("fixture", agent, alive, NOW + 20) == ruled
+    assert observer.audit("fixture") == [ruled]
 
 
 def test_a_working_classification_holds_the_attempt_working_on_the_same_evidence(cautious):
     store, agent, observer = cautious
     suspect = flagged(observer, agent)
-    ruled = rule(store, "fixture", agent.execution_id, "working", "agent answered in its pane", "master@x-1", NOW + 10)
+    ruled = rule(store, "fixture", agent.execution_id, "working", REASON, "master@x-1", NOW + 10)
     assert (ruled.state, ruled.needs_operator, ruled.suspect_since, ruled.failure) == (
         State.WORKING,
         False,
         0.0,
         suspect.failure,
     )
+    running = observer.observe("fixture", agent, [pod(agent, age=-20.0)], NOW + 20)
     later = observer.observe("fixture", agent, [], NOW + 5000)
-    assert (later.state, later.needs_operator, later.suspect_since) == (State.WORKING, False, 0.0)
-    assert (later.ruling, later.ruling_reason, later.ruled_by, later.ruled_at) == (
-        "working",
-        "agent answered in its pane",
-        "master@x-1",
-        NOW + 10,
-    )
+    for held in (running, later):
+        assert (held.state, held.needs_operator, held.suspect_since) == (State.WORKING, False, 0.0)
+        assert ruling_of(held) == ("working", REASON, "master@x-1", NOW + 10)
     assert observer.audit("fixture") == []
 
 
-def test_a_working_classification_also_covers_loss_proof_seen_before_it(cautious):
+def test_a_working_classification_also_covers_loss_seen_up_to_its_own_time(cautious):
     store, agent, observer = cautious
     flagged(observer, agent, pod(agent, Reading.NOT_FOUND, ""))
-    rule(store, "fixture", agent.execution_id, "working", "pod was recreated by hand", "operator", NOW + 10)
-    later = observer.observe("fixture", agent, [], NOW + 5000)
+    rule(store, "fixture", agent.execution_id, "working", REASON, "operator", NOW + 10)
+    same_time = pod(agent, Reading.NOT_FOUND, "", age=-10.0)
+    later = observer.observe("fixture", agent, [same_time], NOW + 5000)
     assert (later.state, later.needs_operator, later.proof_since) == (State.WORKING, False, NOW)
 
 
-def test_new_loss_proof_after_a_working_classification_asks_the_operator_again(cautious):
+@pytest.mark.parametrize("first", ["stale", "deleted"])
+@pytest.mark.parametrize(
+    "loss",
+    [
+        lambda agent: pod(agent, Reading.NOT_FOUND, "", age=-20.0),
+        lambda agent: pod(agent, value="Failed", age=-20.0),
+        lambda agent: pod(agent, value="Succeeded", age=-20.0),
+        lambda agent: signal(agent, Source.SUPERVISOR, value="exited", age=-20.0),
+    ],
+)
+def test_new_loss_after_a_working_classification_asks_the_operator_again(cautious, first, loss):
     store, agent, observer = cautious
-    flagged(observer, agent)
-    rule(store, "fixture", agent.execution_id, "working", "agent answered in its pane", "operator", NOW + 10)
-    gone = observer.observe("fixture", agent, [pod(agent, Reading.NOT_FOUND, "", age=-20.0)], NOW + 20)
-    assert (gone.state, gone.needs_operator, gone.proof_since, gone.suspect_since) == (
-        State.SUSPECT,
-        True,
-        NOW + 20,
-        NOW + 20,
-    )
-    assert (gone.ruling, gone.ruling_reason, gone.ruled_by, gone.ruled_at) == ("", "", "", 0.0)
+    flagged(observer, agent, *([pod(agent, Reading.NOT_FOUND, "")] if first == "deleted" else []))
+    rule(store, "fixture", agent.execution_id, "working", REASON, "operator", NOW + 10)
+    gone = observer.observe("fixture", agent, [loss(agent)], NOW + 20)
+    assert (gone.state, gone.needs_operator, gone.suspect_since) == (State.SUSPECT, True, NOW + 20)
+    assert ruling_of(gone) == ("", "", "", 0.0)
 
 
 def test_a_working_classification_ends_when_the_attempt_recovers_on_its_own(cautious):
     store, agent, observer = cautious
     flagged(observer, agent)
-    rule(store, "fixture", agent.execution_id, "working", "agent answered in its pane", "operator", NOW + 10)
+    rule(store, "fixture", agent.execution_id, "working", REASON, "operator", NOW + 10)
     alive = observer.observe("fixture", agent, [beat(agent, -20.0), pod(agent, age=-20.0)], NOW + 20)
-    assert (alive.state, alive.ruling, alive.ruled_at) == (State.WORKING, "", 0.0)
+    assert (alive.state, *ruling_of(alive)) == (State.WORKING, "", "", "", 0.0)
     again = observer.observe("fixture", agent, [], NOW + 2000)
     assert (again.state, again.needs_operator) == (State.SUSPECT, True)
 
 
 @pytest.mark.parametrize(
-    ("ruling", "reason", "message", "error_class"),
+    ("ruling", "reason", "message"),
     [
-        ("working", "  ", "needs a reason", "invalid_request"),
-        ("gone", "why", "one of lost, working", "invalid_request"),
-        ("suspect", "why", "one of lost, working", "invalid_request"),
+        ("working", "  ", "a classification needs a reason"),
+        ("gone", "why", "a classification is one of lost, working"),
+        ("suspect", "why", "a classification is one of lost, working"),
     ],
 )
-def test_a_classification_refuses_a_bad_request(cautious, ruling, reason, message, error_class):
+def test_a_classification_refuses_a_bad_request(cautious, ruling, reason, message):
     store, agent, observer = cautious
     before = flagged(observer, agent)
-    with pytest.raises(ObservationRefused, match=message) as refused:
+    with pytest.raises(ObservationRefused, match=rf"^{message}$") as refused:
         rule(store, "fixture", agent.execution_id, ruling, reason, "operator", NOW + 10)
-    assert (refused.value.error_class, refused.value.retryable) == (error_class, False)
+    assert (refused.value.error_class, refused.value.retryable) == ("invalid_request", False)
     assert observer.get("fixture", agent.execution_id) == before
 
 
 def test_a_classification_refuses_an_attempt_that_does_not_need_the_operator(cautious):
     store, agent, observer = cautious
-    with pytest.raises(ObservationRefused, match="does not need an operator classification") as unknown:
+    message = r"^execution attempt does not need an operator classification$"
+    with pytest.raises(ObservationRefused, match=message) as unknown:
         rule(store, "fixture", agent.execution_id, "lost", "why", "operator", NOW)
     assert (unknown.value.error_class, unknown.value.retryable) == ("not_suspect", False)
     healthy = observer.observe("fixture", agent, [beat(agent), pod(agent)], NOW)
-    with pytest.raises(ObservationRefused, match="does not need an operator classification"):
+    with pytest.raises(ObservationRefused, match=message):
         rule(store, "fixture", agent.execution_id, "lost", "why", "operator", NOW + 10)
     assert observer.get("fixture", agent.execution_id) == healthy
     assert observer.audit("fixture") == []
+
+
+@pytest.mark.parametrize("failures", [1, 5])
+def test_a_contended_classification_retries_then_refuses(cautious, monkeypatch, failures):
+    store, agent, observer = cautious
+    before = flagged(observer, agent)
+    real, left = store.redis.pipeline, [None] * failures
+    monkeypatch.setattr(store.redis, "pipeline", lambda: Contended(real(), left))
+    if failures < 5:
+        assert rule(store, "fixture", agent.execution_id, "lost", "why", "operator", NOW + 10).state is State.LOST
+        return
+    with pytest.raises(ObservationRefused, match=r"^observation record kept changing; nothing recorded$") as refused:
+        rule(store, "fixture", agent.execution_id, "lost", "why", "operator", NOW + 10)
+    assert (refused.value.error_class, refused.value.retryable) == ("revision_conflict", True)
+    assert observer.get("fixture", agent.execution_id) == before
 
 
 def classify_cli(monkeypatch, store, *argv):
@@ -624,25 +649,26 @@ def classify_cli(monkeypatch, store, *argv):
     return cli.main(["fixture", *argv])
 
 
-@pytest.mark.parametrize("who", ["operator", "master"])
+@pytest.mark.parametrize("who", ["", "operator", "master"])
 def test_the_master_or_the_operator_classifies_through_the_swarm_command(cautious, monkeypatch, capsys, who):
     store, agent, observer = cautious
     flagged(observer, agent)
-    name = "operator"
+    name = who
     if who == "master":
         name = store.next_name("fixture", "master")
-        store.put_agent("fixture", AgentRecord(name, "master", ""))
-    args = ["--as", name, "classify", agent.execution_id, "lost", "--reason", "pod gone"]
-    assert classify_cli(monkeypatch, store, *args) == 0
+        store.put_agent("fixture", AgentRecord(name, "master", "master", seat="master@fixture"))
+    named = ["--as", name] if name else []
+    assert classify_cli(monkeypatch, store, *named, "classify", agent.execution_id, "lost", "--reason", "gone") == 0
+    by = name or "operator"
     assert json.loads(capsys.readouterr().out) == {
         "execution_id": agent.execution_id,
         "state": "lost",
         "ruling": "lost",
-        "reason": "pod gone",
-        "by": name,
+        "reason": "gone",
+        "by": by,
     }
     ruled = observer.get("fixture", agent.execution_id)
-    assert (ruled.state, ruled.ruled_by, ruled.ruled_at) == (State.LOST, name, NOW + 10)
+    assert (ruled.state, ruled.ruled_by, ruled.ruled_at) == (State.LOST, by, NOW + 10)
 
 
 def test_a_lane_agent_may_not_classify_an_attempt(cautious, monkeypatch, capsys):
@@ -651,12 +677,36 @@ def test_a_lane_agent_may_not_classify_an_attempt(cautious, monkeypatch, capsys)
     assert agent.name in [found.name for found in store.agents("fixture")]
     args = ["--as", agent.name, "classify", agent.execution_id, "working", "--reason", "fine"]
     assert classify_cli(monkeypatch, store, *args) == 1
-    assert "only the master or the operator classifies an execution attempt" in capsys.readouterr().err
+    assert capsys.readouterr().err == "swarm: only the master or the operator classifies an execution attempt\n"
     assert observer.get("fixture", agent.execution_id) == before
 
 
-def test_a_refused_classification_is_reported_by_the_swarm_command(cautious, monkeypatch, capsys):
+@pytest.mark.parametrize(
+    ("reason", "message"),
+    [
+        ("gone", "execution attempt does not need an operator classification"),
+        (" ", "a classification needs a reason"),
+    ],
+)
+def test_a_refused_classification_is_reported_by_the_swarm_command(cautious, monkeypatch, capsys, reason, message):
     store, agent, _ = cautious
-    args = ["--as", "operator", "classify", agent.execution_id, "lost", "--reason", "gone"]
+    args = ["--as", "operator", "classify", agent.execution_id, "lost", "--reason", reason]
     assert classify_cli(monkeypatch, store, *args) == 1
-    assert "does not need an operator classification" in capsys.readouterr().err
+    assert capsys.readouterr().err == f"swarm: {message}\n"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["classify", "attempt", "suspect", "--reason", "why"],
+        ["classify", "attempt", "lost"],
+    ],
+)
+def test_the_swarm_command_needs_a_known_class_and_a_reason(argv):
+    from scripts.swarm import cli
+
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["fixture", *argv])
+    assert cli.build_parser().parse_args(["fixture", "classify", "attempt", "working", "--reason", "why"]).ruling == (
+        "working"
+    )

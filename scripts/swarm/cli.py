@@ -903,12 +903,12 @@ def cmd_rename(store, args):
         raise SwarmError("; ".join(failed))
 
 
-def _master_or_operator(store, args, refused):
+def _master_or_operator(store, args, message):
     store.config(args.slug)
     name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
     if agent is not None and agent.lane != MASTER:
-        raise SwarmError(refused)
+        raise SwarmError(message)
     return name or "operator"
 
 
@@ -927,8 +927,17 @@ def cmd_classify(store, args):
         ruled = observe.rule(store, args.slug, args.execution_id, args.ruling, args.reason, by, time.time())
     except observe.ObservationRefused as exc:
         raise SwarmError(str(exc)) from exc
-    row = {"execution_id": ruled.execution_id, "state": ruled.state.value, "ruling": ruled.ruling}
-    print(json.dumps({**row, "reason": ruled.ruling_reason, "by": ruled.ruled_by}))
+    print(
+        json.dumps(
+            {
+                "execution_id": ruled.execution_id,
+                "state": ruled.state.value,
+                "ruling": ruled.ruling,
+                "reason": ruled.ruling_reason,
+                "by": ruled.ruled_by,
+            }
+        )
+    )
 
 
 def cmd_lift(store, args):
