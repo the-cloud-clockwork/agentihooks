@@ -1019,6 +1019,32 @@ def test_a_running_swarm_spawns_one_master_that_claims_no_task(store):
     assert all(store.claimant("sw", t) != "master@a1b2c3-0001" for t in ledger.rows)
 
 
+def test_a_raised_master_count_launches_a_master_in_every_seat(store):
+    from scripts.swarm_v2.masters import MasterSeats
+
+    MasterSeats(store.redis).set_count("sw", 3)
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, 1)
+    tick("sw", store, ledger, runtime, 2)
+    assert sorted(a.seat for a in masters(store)) == ["master-2@sw", "master-3@sw", "master@sw"]
+    assert len(runtime.masters) == 3
+
+
+def test_a_master_that_ended_in_seat_two_is_respawned_in_seat_two(store):
+    from scripts.swarm_v2.masters import MasterSeats
+
+    MasterSeats(store.redis).set_count("sw", 2)
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, 1)
+    (second,) = [a for a in masters(store) if a.seat == "master-2@sw"]
+    store.put_agent("sw", replace(second, state="finished"))
+    runtime.live.discard(second.name)
+    tick("sw", store, ledger, runtime, 2 + STARTUP_GRACE_MS)
+    live = [a for a in masters(store) if a.state != "finished"]
+    assert sorted(a.seat for a in live) == ["master-2@sw", "master@sw"]
+    assert len(runtime.masters) == 3
+
+
 def test_a_paused_or_drained_swarm_keeps_its_master_and_a_stopped_one_has_none(store):
     store.update("sw", state="paused")
     runtime = FakeRuntime()
