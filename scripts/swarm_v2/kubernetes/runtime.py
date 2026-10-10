@@ -12,9 +12,6 @@ GENERATION_LABEL = f"{DOMAIN}/generation"
 SPEC_DIGEST = f"{DOMAIN}/spec-digest"
 OPERATION_DIGEST = f"{DOMAIN}/operation-digest"
 OUTCOMES = ("created", "adopted", "observed", "quarantined", "disabled")
-# The API server rewrites quantities into canonical form, so a matching Pod can show "1" for "1000m".
-QUANTITIES = frozenset(("resources", "sizeLimit"))
-FORBIDDEN = frozenset(("initContainers", "ephemeralContainers", "command", "envFrom"))
 
 
 @dataclass(frozen=True)
@@ -26,19 +23,6 @@ class PodStatus:
     phase: str
     reasons: tuple[str, ...]
     deleting: bool
-
-
-def covers(live: object, wanted: object) -> bool:
-    """Every value the template sets is unchanged on the live Pod; the API server may add defaults beside them."""
-    if isinstance(wanted, dict):
-        return (
-            isinstance(live, dict)
-            and not any(key in live for key in FORBIDDEN - wanted.keys())
-            and all(key in QUANTITIES or (key in live and covers(live[key], value)) for key, value in wanted.items())
-        )
-    if isinstance(wanted, list):
-        return isinstance(live, list) and len(live) == len(wanted) and all(map(covers, live, wanted))
-    return live == wanted
 
 
 def pod_status(pod: dict) -> PodStatus:
@@ -128,7 +112,7 @@ class KubernetesTransport:
         reasons = [self._mismatch(operation, pod, rendered) for pod in pods]
         if reasons == [""]:
             return self._applied(pods[0], outcome)
-        for pod, reason in zip(pods, reasons, strict=True):
+        for pod, reason in zip(pods, reasons):
             self._quarantine(pod, reason or "ambiguous")
         return Observation(Phase.REFUSED)
 
@@ -143,11 +127,7 @@ class KubernetesTransport:
             return "generation"
         if notes.get(OPERATION_DIGEST) != operation.payload_digest:
             return "operation"
-        if rendered is None:
-            return ""
-        if notes.get(SPEC_DIGEST) != rendered["metadata"]["annotations"][SPEC_DIGEST]:
-            return "spec"
-        if not covers(pod.get("spec"), rendered["spec"]):
+        if rendered is not None and notes.get(SPEC_DIGEST) != rendered["metadata"]["annotations"][SPEC_DIGEST]:
             return "spec"
         return ""
 

@@ -141,7 +141,7 @@ def test_send_turns_a_truncated_success_body_into_a_connection_error(token):
     response.read = Truncated().read
     with pytest.raises(ConnectionError) as raised:
         KubeHttp("https://api.test", token, CONTEXT, RawOpener(response)).send("GET", "/p")
-    assert str(raised.value) == "the API server answer is unreadable"
+    assert str(raised.value) == "the API server exchange failed: IncompleteRead"
 
 
 def test_send_turns_a_tls_failure_while_reading_into_a_connection_error(token):
@@ -152,7 +152,17 @@ def test_send_turns_a_tls_failure_while_reading_into_a_connection_error(token):
     response.read = broken
     with pytest.raises(ConnectionError) as raised:
         KubeHttp("https://api.test", token, CONTEXT, RawOpener(response)).send("GET", "/p")
-    assert str(raised.value) == "the API server answer is unreadable"
+    assert str(raised.value) == "the API server exchange failed: SSLError"
+
+
+def test_send_returns_an_empty_body_when_an_http_error_body_breaks(token):
+    def broken():
+        raise ssl.SSLError("record layer failure")
+
+    error = http_error(500, b"")
+    error.read = broken
+    api, _ = http(token, error)
+    assert api.send("GET", "/p") == (500, {})
 
 
 def test_send_lets_a_timeout_while_reading_through(token):

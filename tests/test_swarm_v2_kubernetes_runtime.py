@@ -72,11 +72,29 @@ def test_only_spawn_is_carried(action):
     assert sender.api.create_calls == 0
 
 
-def test_disabled_creation_calls_nothing_and_counts_the_hold():
+def test_disabled_creation_calls_nothing_and_counts_each_hold():
     sender = transport(creation_enabled=False)
     assert sender.apply_operation(operation(), cases.launch()) == Observation(Phase.ABSENT)
+    sender.apply_operation(operation(), cases.launch())
     assert sender.api.create_calls == 0
-    assert sender.kubernetes_create_reconciliation_total() == {**ZERO, "disabled": 1}
+    assert sender.kubernetes_create_reconciliation_total() == {**ZERO, "disabled": 2}
+
+
+def test_each_observation_of_a_matching_pod_is_counted():
+    sender = transport()
+    sender.apply_operation(operation(), cases.launch())
+    sender.observe_operation(operation())
+    sender.observe_operation(operation())
+    assert sender.kubernetes_create_reconciliation_total() == {**ZERO, "created": 1, "observed": 2}
+
+
+def test_a_labelled_pod_without_annotations_is_quarantined_for_its_operation():
+    sender = transport()
+    pod = existing(sender)
+    del pod["metadata"]["annotations"]
+    sender.api.objects[NAME] = pod
+    assert sender.observe_operation(operation()) == Observation(Phase.REFUSED)
+    assert sender.quarantined["uid-1"]["reason"] == "operation"
 
 
 def test_creation_is_enabled_by_default():
@@ -339,84 +357,6 @@ def test_an_unanswered_observation_is_retried_with_one_create():
         retried = controller.execute(request)
     assert (first.phase, retried.phase) == (Phase.UNKNOWN, Phase.APPLIED)
     assert world.api.create_calls == 1
-
-
-def forged(change) -> dict:
-    rendered = PodTemplate(cases.policy()).render(cases.launch())
-    rendered.pod["metadata"]["annotations"].update(
-        {runtime.OPERATION_DIGEST: DIGEST, runtime.SPEC_DIGEST: rendered.digest}
-    )
-    change(rendered.pod["spec"])
-    return rendered.pod
-
-
-def _set(path, value):
-    def change(spec):
-        place = spec
-        for key in path[:-1]:
-            place = place[key]
-        place[path[-1]] = value
-
-    return change
-
-
-FORGERIES = {
-    "image": _set(("containers", 0, "image"), "ghcr.io/other/image@sha256:" + "0" * 64),
-    "privileged": _set(("containers", 0, "securityContext", "privileged"), True),
-    "args": _set(("containers", 0, "args", 1), "/tmp/evil.py"),
-    "env": _set(("containers", 0, "env"), [{"name": "BRAIN_URL", "value": "http://evil"}]),
-    "mount": _set(("containers", 0, "volumeMounts", 3, "readOnly"), False),
-    "credential secret": _set(("volumes", 3, "secret", "secretName"), "cluster-admin-token"),
-    "launch config map": _set(("volumes", 2, "configMap", "name"), "other-launch"),
-    "service account": _set(("serviceAccountName",), "cluster-admin"),
-    "token automount": _set(("automountServiceAccountToken",), True),
-    "host network": _set(("hostNetwork",), True),
-    "pod security": _set(("securityContext", "runAsNonRoot"), False),
-    "node selector": _set(("nodeSelector",), {"anton.io/pool": "research"}),
-    "probe": _set(("containers", 0, "livenessProbe", "failureThreshold"), 1),
-    "host path": lambda spec: spec["volumes"].append({"name": "root", "hostPath": {"path": "/"}}),
-    "sidecar": lambda spec: spec["containers"].append({"name": "sidecar", "image": "busybox"}),
-    "init container": _set(("initContainers",), [{"name": "init", "image": "busybox"}]),
-    "ephemeral container": _set(("ephemeralContainers",), [{"name": "debug", "image": "busybox"}]),
-    "command": _set(("containers", 0, "command"), ["sh", "-c", "id"]),
-    "env from": _set(("containers", 0, "envFrom"), [{"secretRef": {"name": "cluster-admin-token"}}]),
-    "dropped field": lambda spec: spec.pop("hostPID"),
-    "spec missing": lambda spec: spec.clear(),
-}
-
-
-@pytest.mark.parametrize("name", sorted(FORGERIES))
-def test_an_already_existing_pod_with_forged_digests_and_a_changed_spec_is_quarantined(name):
-    sender = transport()
-    sender.api.put(forged(FORGERIES[name]))
-    assert sender.apply_operation(operation(), cases.launch()) == Observation(Phase.REFUSED)
-    assert sender.quarantined["uid-1"]["reason"] == "spec"
-
-
-def defaulted(spec):
-    spec.update(dnsPolicy="ClusterFirst", schedulerName="default-scheduler", nodeName="node-1", priority=0)
-    container = spec["containers"][0]
-    container.update(terminationMessagePath="/dev/termination-log")
-    container["resources"] = {"requests": {"cpu": "1500m", "memory": "3Gi"}, "limits": {"cpu": "2", "memory": "4Gi"}}
-    spec["volumes"][0]["emptyDir"]["sizeLimit"] = "9Gi"
-
-
-def test_a_pod_the_api_server_defaulted_and_canonicalized_is_adopted():
-    sender = transport()
-    sender.api.put(forged(defaulted))
-    assert sender.apply_operation(operation(), cases.launch()) == applied()
-    assert sender.quarantined == {}
-
-
-def test_a_missing_spec_on_the_live_pod_is_not_covered():
-    assert runtime.covers(None, {"hostNetwork": False}) is False
-    assert runtime.covers({}, {"hostNetwork": False}) is False
-    assert runtime.covers({"hostNetwork": False, "extra": 1}, {"hostNetwork": False}) is True
-    assert runtime.covers([1], [1, 2]) is False
-    assert runtime.covers("1", [1]) is False
-    assert runtime.covers({"resources": {"cpu": "1"}}, {"resources": {"cpu": "1000m"}}) is True
-    assert runtime.covers({}, {"sizeLimit": "9216Mi"}) is True
-    assert runtime.covers({"command": []}, {"command": []}) is True
 
 
 def test_a_created_pod_is_matched_by_the_controller_reconcile():

@@ -67,14 +67,14 @@ class KubeHttp:
         except urllib.error.HTTPError as error:
             try:
                 return error.code, json.loads(error.read())
-            except (ValueError, http.client.HTTPException):
+            except (ValueError, OSError, http.client.HTTPException):
                 return error.code, {}
         except urllib.error.URLError as error:
             raise ConnectionError(str(error.reason)) from None
         except TimeoutError:
             raise
-        except (OSError, http.client.HTTPException):
-            raise ConnectionError("the API server answer is unreadable") from None
+        except (OSError, http.client.HTTPException) as error:
+            raise ConnectionError(f"the API server exchange failed: {type(error).__name__}") from None
         try:
             return status, json.loads(raw)
         except ValueError:
