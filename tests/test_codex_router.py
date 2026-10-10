@@ -686,12 +686,39 @@ def test_an_open_route_never_places_an_account_whose_credential_is_refused(monke
     assert rc == 0 and report.read_text() == "status=routed\naccount=alpha\nplacement=open\n"
     pool = router.CodexAccountSource(_status(0)).pool(environ)
     assert [account.name for account in pool] == ["default", "alpha"]
-    assert [router.usable(account, OAUTH_ENV) for account in map(_token, ("alpha", "keyed", "bare", "ghost"))] == [
-        True,
-        False,
-        False,
-        False,
+    assert [router.refusal(account, OAUTH_ENV) for account in map(_token, ("alpha", "gamma", "keyed", "ghost"))] == [
+        "",
+        "",
+        "AH_CX_TOKEN_keyed holds an api key; put it in CODEX_API_KEY and route api instead",
+        "Codex account 'ghost' has no token in AH_CX_TOKEN_ghost",
     ]
+
+
+def test_an_open_route_with_no_seat_names_each_refused_credential(monkeypatch, tmp_path, capsys):
+    environ = {"HOME": "/home/u", "AH_CX_TOKEN_keyed": "sk-proj-value", "AH_CX_TOKEN_gamma": AGENT}
+    quotas = {"default": _quota(97.0), "gamma": _quota(97.0), "keyed": _quota(1.0)}
+    rc, seen, report = _launch(monkeypatch, tmp_path, environ, ["-m", "o3"], quotas)
+    error = (
+        "no signed in Codex account has a fresh reading and a free session under its quota band; "
+        "AH_CX_TOKEN_keyed holds an api key; put it in CODEX_API_KEY and route api instead"
+    )
+    assert (rc, seen) == (3, {})
+    assert report.read_text() == f"status=failed\nerror={error}\n"
+    assert capsys.readouterr().err == f"agentihooks codex: {error}\n"
+    quotas = {"default": _quota(97.0), "alpha": _quota(97.0), "beta": _quota(97.0)}
+    rc, seen, report = _launch(monkeypatch, tmp_path, ENV, [], quotas)
+    assert report.read_text() == (
+        "status=failed\nerror=no signed in Codex account has a fresh reading and a free session under its quota band\n"
+    )
+
+
+def test_a_refused_token_keeps_its_sessions_out_of_the_default_reading(monkeypatch):
+    monkeypatch.setattr(router, "_registry", lambda: {"s-keyed": {"account": "keyed"}, "s-own": {}})
+    monkeypatch.setattr(
+        router.codex_quota, "latest_codex_quota", lambda environ, keep: [s for s in ("s-keyed", "s-own") if keep(s)]
+    )
+    environ = {"AH_CX_TOKEN_keyed": "sk-proj-value"}
+    assert router.quotas([router.CodexAccount("default")], environ) == {"default": ["s-own"]}
 
 
 def test_a_chatgpt_account_stays_a_subscription_seat():

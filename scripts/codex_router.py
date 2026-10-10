@@ -115,12 +115,12 @@ def credential(account: CodexAccount, environ: Mapping[str, str]) -> CodexAccoun
     return replace(account, bearer=True) if credential_kind(account, environ) == OAUTH_KIND else account
 
 
-def usable(account: CodexAccount, environ: Mapping[str, str]) -> bool:
+def refusal(account: CodexAccount, environ: Mapping[str, str]) -> str:
     try:
         credential_kind(account, environ)
-    except RoutingError:
-        return False
-    return True
+    except RoutingError as exc:
+        return str(exc)
+    return ""
 
 
 def bearer_overrides() -> list[str]:
@@ -183,7 +183,7 @@ def _registry() -> dict:
 def quotas(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, CodexQuota | None]:
     """Each account's newest quota, from the session logs the session registry attributes to it."""
     owner = {session_id: info.get("account") for session_id, info in _registry().items()}
-    tokens = {account.name for account in pool if account.is_token}
+    tokens = {account.name for account in [*pool, *token_accounts(environ)] if account.is_token}
 
     def keep(account: CodexAccount) -> Callable[[str], bool]:
         if account.is_token:
@@ -265,7 +265,7 @@ class CodexAccountSource:
         return () if self.run is None else (self.run,)
 
     def pool(self, environ: Mapping[str, str]) -> list[CodexAccount]:
-        return [account for account in routing_pool(environ, *self._run()) if usable(account, environ)]
+        return [account for account in routing_pool(environ, *self._run()) if not refusal(account, environ)]
 
     def readings(
         self, pool: list[CodexAccount], environ: Mapping[str, str], now: float
@@ -396,7 +396,13 @@ def _route(environ: Mapping[str, str], route: str, run: Callable) -> tuple[Codex
     pool = routing_pool(environ, run) if route else source.pool(environ)
     now = time.time()
     found = source.readings(pool, environ, now)
-    account, placement, seat = select(pool, found, sessions, now, route, environ)
+    try:
+        account, placement, seat = select(pool, found, sessions, now, route, environ)
+    except RoutingError as exc:
+        refused = [] if route else [text for account in token_accounts(environ) if (text := refusal(account, environ))]
+        if not refused:
+            raise
+        raise RoutingError("; ".join([str(exc), *refused])) from exc
     return account, placement, sessions.get(account.name, 0), str(seat.cap) if seat else "?"
 
 
