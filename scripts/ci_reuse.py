@@ -1,6 +1,5 @@
 import argparse
 import hashlib
-import io
 import itertools
 import json
 import os
@@ -11,6 +10,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
+
+EVIDENCE = ("artifacts.jsonl", "proof.zip", "jobs.jsonl", "reuse.log")
 
 
 def gate_steps() -> list[dict]:
@@ -30,80 +31,7 @@ def gate_steps() -> list[dict]:
 
 
 def reuse_job() -> dict:
-    return {
-        "runs-on": "ubuntu-latest",
-        "timeout-minutes": 5,
-        "outputs": {
-            "reused": "${{ steps.decision.outputs.reused || 'false' }}",
-            "run": "${{ steps.decision.outputs.run }}",
-            "attempt": "${{ steps.decision.outputs.attempt }}",
-            "grader": "${{ steps.grader.outputs.sha }}",
-        },
-        "steps": [
-            {
-                "uses": "actions/checkout@v4",
-                "with": {
-                    "ref": "dev",
-                    "fetch-depth": 0,
-                    "persist-credentials": False,
-                },
-            },
-            {
-                "name": "Record the protected grader revision",
-                "id": "grader",
-                "run": 'echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"',
-            },
-            {
-                "uses": "actions/setup-python@v5",
-                "if": "hashFiles('scripts/ci_reuse.py') != ''",
-                "with": {
-                    "python-version": "3.12",
-                },
-            },
-            {
-                "name": "Install metadata dependencies",
-                "if": "hashFiles('scripts/ci_reuse.py') != ''",
-                "run": 'python -m pip install "pyyaml>=6.0"',
-            },
-            {
-                "name": "Mint the tcc main ci App token",
-                "id": "app-token",
-                "if": "github.event_name == 'merge_group' && hashFiles('scripts/ci_reuse.py') != ''",
-                "uses": "actions/create-github-app-token@v3.2.0",
-                "with": {
-                    "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
-                    "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
-                    "repositories": "${{ github.event.repository.name }}",
-                    "permission-actions": "read",
-                    "permission-contents": "read",
-                },
-            },
-            {
-                "name": "Decide from protected code and record the tested tree",
-                "id": "decision",
-                "env": {
-                    "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
-                    "BASE": "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}",
-                    "HEAD": "${{ github.sha }}",
-                    "EVENT": "${{ github.event_name }}",
-                    "RUN": "${{ github.run_id }}",
-                    "ATTEMPT": "${{ github.run_attempt }}",
-                },
-                "run": 'if [[ ! -f scripts/ci_reuse.py ]]; then\n  echo "reused=false" >> "$GITHUB_OUTPUT"\n  exit 0\nfi\npython -I scripts/ci_reuse.py --base "$BASE" --head "$HEAD" --event "$EVENT" \\\n  --repository "$GITHUB_REPOSITORY" --run "$RUN" --attempt "$ATTEMPT" \\\n  --record "$RUNNER_TEMP/provenance.json"\n',
-            },
-            {
-                "name": "Publish protected tested tree evidence",
-                "if": "steps.decision.outputs.recorded == 'true'",
-                "uses": "actions/upload-artifact@v4",
-                "with": {
-                    "name": "required-tree-${{ github.run_attempt }}",
-                    "path": "${{ runner.temp }}/provenance.json",
-                    "if-no-files-found": "error",
-                    "retention-days": 7,
-                },
-            },
-        ],
-    }
+    return yaml.safe_load(Path(__file__).with_name("ci_reuse_job.yml").read_text())
 
 
 def _git(*args):
@@ -116,20 +44,8 @@ def _revision(ref):
     return _git("rev-parse", ref)
 
 
-def _api(path, binary=False):
-    value = subprocess.check_output(["gh", "api", path], stderr=subprocess.PIPE)
-    return value if binary else json.loads(value)
-
-
-def _pages(path, key):
-    values = []
-    page = 1
-    while True:
-        response = _api(f"{path}?per_page=100&page={page}")
-        values.extend(response[key])
-        if len(values) >= response["total_count"]:
-            return values
-        page += 1
+def _lines(path):
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
 def _snapshot(args):
@@ -192,17 +108,17 @@ def _digest(record):
     return hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def _authenticated(prefix, record, jobs):
+def _authenticated(folder, record, jobs):
     attestations = [job for job in jobs if job["name"] == "reuse" and job["conclusion"] == "success"]
     if len(attestations) != 1:
         return False
-    log = _api(f"{prefix}/jobs/{attestations[0]['id']}/logs", binary=True).decode()
+    log = (folder / "reuse.log").read_text()
     digests = re.findall(r"(?m)^\S+ required-tree-sha256=([0-9a-f]{64})$", log)
     return digests == [_digest(record)]
 
 
 def _proof(path):
-    with zipfile.ZipFile(io.BytesIO(_api(path, binary=True))) as archive:
+    with zipfile.ZipFile(path) as archive:
         entry = archive.getinfo("provenance.json")
         if entry.file_size > 65536:
             raise ValueError("The source metadata is too large")
@@ -210,22 +126,23 @@ def _proof(path):
 
 
 def _find(args, current):
-    prefix = f"repos/{args.repository}/actions"
     workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text())
-    runs = _api(f"{prefix}/workflows/test.yml/runs?event=pull_request&status=success&per_page=20")["workflow_runs"]
+    runs = json.loads((args.evidence / "runs.json").read_text())["workflow_runs"]
     for run in runs:
         if run["event"] != "pull_request" or run["status"] != "completed" or run["conclusion"] != "success":
+            continue
+        folder = args.evidence / str(run["id"])
+        if not all((folder / name).is_file() for name in EVIDENCE):
             continue
         head = _revision(run["head_sha"])
         if _git("rev-parse", f"{head}:.github") != current["inputs"]["workflow"]:
             continue
-        source = f"{prefix}/runs/{run['id']}"
-        artifacts = _pages(f"{source}/artifacts", "artifacts")
+        artifacts = _lines(folder / "artifacts.jsonl")
         name = f"required-tree-{run['run_attempt']}"
         metadata = [item for item in artifacts if item["name"] == name and not item["expired"]]
         if len(metadata) != 1:
             continue
-        record = _proof(f"{prefix}/artifacts/{metadata[0]['id']}/zip")
+        record = _proof(folder / "proof.zip")
         if (
             record.get("version") != 1
             or record.get("event") != "pull_request"
@@ -246,8 +163,8 @@ def _find(args, current):
         kept = {item["name"] for item in artifacts if not item["expired"]}
         if not coverage <= kept:
             continue
-        jobs = _pages(f"{source}/attempts/{run['run_attempt']}/jobs", "jobs")
-        if _passed(workflow, jobs) and _authenticated(prefix, record, jobs):
+        jobs = _lines(folder / "jobs.jsonl")
+        if _passed(workflow, jobs) and _authenticated(folder, record, jobs):
             return run
     return None
 
@@ -260,6 +177,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repository", required=True)
     parser.add_argument("--run", type=int, required=True)
     parser.add_argument("--attempt", type=int, required=True)
+    parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--record", type=Path, required=True)
     args = parser.parse_args(argv)
     record = _snapshot(args)

@@ -14,6 +14,10 @@ import yaml
 
 pytestmark = pytest.mark.unit
 PROGRAM = Path(__file__).resolve().parents[1] / "scripts/ci_reuse.py"
+FETCH = "Fetch the evidence of recent passed runs"
+RUNS = "repos/o/r/actions/workflows/test.yml/runs?event=pull_request&status=success&per_page=20"
+JOBS = "repos/o/r/actions/runs/7/attempts/1/jobs?per_page=100"
+ARTIFACTS = "repos/o/r/actions/runs/7/artifacts?per_page=100"
 
 
 def git(root, *args, input=None):
@@ -56,9 +60,27 @@ def reuse_repo(tmp_path, request):
     return root, base, head, queue
 
 
+def fetch(env, temp):
+    from scripts import ci_reuse
+
+    [step] = [step for step in ci_reuse.reuse_job()["steps"] if step.get("name") == FETCH]
+    temp.mkdir()
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        env=dict(env, GITHUB_REPOSITORY="o/r", RUNNER_TEMP=str(temp)),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return temp / "evidence"
+
+
 def invoke(root, base, head, event, output, env=None):
     from scripts import ci_reuse
 
+    evidence = output.parent / f"{output.stem}-absent"
+    if env and "REUSE_FIXTURE" in env:
+        evidence = fetch(env, output.parent / f"{output.stem}-runner")
     args = [
         "--base",
         base,
@@ -72,6 +94,8 @@ def invoke(root, base, head, event, output, env=None):
         "7",
         "--attempt",
         "1",
+        "--evidence",
+        str(evidence),
         "--record",
         str(output),
     ]
@@ -112,14 +136,9 @@ def full_source(reuse_repo, tmp_path):
     artifacts = [{"id": 42, "name": "required-tree-1", "expired": False}]
     artifacts.append({"id": 51, "name": "coverage-3.12-1", "expired": False})
     responses = {
-        "repos/o/r/actions/workflows/test.yml/runs?event=pull_request&status=success&per_page=20": {
-            "workflow_runs": [source]
-        },
-        "repos/o/r/actions/runs/7/attempts/1/jobs?per_page=100&page=1": {"total_count": len(jobs), "jobs": jobs},
-        "repos/o/r/actions/runs/7/artifacts?per_page=100&page=1": {
-            "total_count": len(artifacts),
-            "artifacts": artifacts,
-        },
+        RUNS: {"workflow_runs": [source]},
+        JOBS: {"total_count": len(jobs), "jobs": jobs},
+        ARTIFACTS: {"total_count": len(artifacts), "artifacts": artifacts},
         "repos/o/r/actions/artifacts/42/zip": {"binary": base64.b64encode(archive.getvalue()).decode()},
         "repos/o/r/actions/jobs/91/logs": {
             "binary": base64.b64encode(
@@ -135,8 +154,10 @@ def full_source(reuse_repo, tmp_path):
         "#!/usr/bin/env python3\n"
         "import base64, json, os, sys\n"
         "from pathlib import Path\n"
-        "value = json.loads(Path(os.environ['REUSE_FIXTURE']).read_text())[sys.argv[2]]\n"
+        "args = [arg for arg in sys.argv[2:] if arg != '--paginate']\n"
+        "value = json.loads(Path(os.environ['REUSE_FIXTURE']).read_text())[args[0]]\n"
         "if 'binary' in value: sys.stdout.buffer.write(base64.b64decode(value['binary']))\n"
+        "elif args[1:2] == ['--jq']: print(*(json.dumps(item) for item in value[args[2][1:-2]]), sep='\\n')\n"
         "else: print(json.dumps(value))\n"
     )
     (bin_dir / "gh").chmod(0o755)
@@ -236,7 +257,7 @@ def test_any_changed_trusted_grading_input_runs_fully(full_source, tmp_path, fie
 @pytest.mark.parametrize("outcome", ["failure", "skipped", "cancelled", None])
 def test_every_required_source_job_must_have_passed(full_source, tmp_path, name, outcome):
     root, base, _, queue, env, responses, _ = full_source
-    jobs = responses["repos/o/r/actions/runs/7/attempts/1/jobs?per_page=100&page=1"]["jobs"]
+    jobs = responses[JOBS]["jobs"]
     next(job for job in jobs if job["name"] == name)["conclusion"] = outcome
     Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
     result = invoke(root, base, queue, "merge_group", tmp_path / "failed.json", env)
@@ -245,12 +266,29 @@ def test_every_required_source_job_must_have_passed(full_source, tmp_path, name,
 
 
 @pytest.mark.parametrize(
-    "kind", ["missing-unit", "missing-metadata", "expired-metadata", "expired-coverage", "bad-archive", "missing-log"]
+    "kind",
+    [
+        "missing-unit",
+        "missing-metadata",
+        "expired-metadata",
+        "expired-coverage",
+        "bad-archive",
+        "missing-log",
+        "unlisted-runs",
+        "unlisted-artifacts",
+        "missing-archive",
+        "unlisted-jobs",
+    ],
 )
 def test_unavailable_source_evidence_runs_fully(full_source, tmp_path, kind):
     root, base, _, queue, env, responses, _ = full_source
-    if kind == "missing-unit":
-        body = responses["repos/o/r/actions/runs/7/attempts/1/jobs?per_page=100&page=1"]
+    unlisted = {"unlisted-runs": RUNS, "unlisted-artifacts": ARTIFACTS, "unlisted-jobs": JOBS}
+    if kind in unlisted:
+        responses.pop(unlisted[kind])
+    elif kind == "missing-archive":
+        responses.pop("repos/o/r/actions/artifacts/42/zip")
+    elif kind == "missing-unit":
+        body = responses[JOBS]
         body["jobs"] = [job for job in body["jobs"] if job["name"] != "unit (3.12, 1)"]
         body["total_count"] = len(body["jobs"])
     elif kind == "bad-archive":
@@ -258,7 +296,7 @@ def test_unavailable_source_evidence_runs_fully(full_source, tmp_path, kind):
     elif kind == "missing-log":
         responses.pop("repos/o/r/actions/jobs/91/logs")
     else:
-        body = responses["repos/o/r/actions/runs/7/artifacts?per_page=100&page=1"]
+        body = responses[ARTIFACTS]
         if kind == "missing-metadata":
             body["artifacts"] = [item for item in body["artifacts"] if item["name"] != "required-tree-1"]
             body["total_count"] = len(body["artifacts"])
@@ -274,9 +312,7 @@ def test_unavailable_source_evidence_runs_fully(full_source, tmp_path, kind):
 @pytest.mark.parametrize("field, value", [("event", "push"), ("status", "in_progress"), ("conclusion", "failure")])
 def test_a_source_run_must_be_a_completed_successful_required_run(full_source, tmp_path, field, value):
     root, base, _, queue, env, responses, _ = full_source
-    source = responses["repos/o/r/actions/workflows/test.yml/runs?event=pull_request&status=success&per_page=20"][
-        "workflow_runs"
-    ][0]
+    source = responses[RUNS]["workflow_runs"][0]
     source[field] = value
     Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
     result = invoke(root, base, queue, "merge_group", tmp_path / "run.json", env)
@@ -303,6 +339,8 @@ def test_the_protected_script_runs_in_isolated_cli_mode(reuse_repo, tmp_path):
             "7",
             "--attempt",
             "1",
+            "--evidence",
+            str(tmp_path / "absent"),
             "--record",
             str(tmp_path / "cli.json"),
         ],

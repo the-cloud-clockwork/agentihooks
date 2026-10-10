@@ -356,3 +356,13 @@ def test_removing_the_protected_reuse_producer_names_the_violation():
     del head["jobs"]["reuse"]
     problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
     assert "The head removes the protected reuse job." in problems
+
+
+def test_a_head_moving_the_gate_away_from_the_protected_reuse_job_is_named_not_crashed():
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["reuse"] = ci_reuse.reuse_job()
+    base["jobs"]["gate"]["needs"].append("reuse")
+    problems = gate_protected.grade({"test.yml": base}, {}, {"other.yml": copy.deepcopy(base)}, {}, _TODAY)
+    assert "The head removes the protected reuse job." in problems

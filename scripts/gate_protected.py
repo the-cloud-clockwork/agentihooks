@@ -65,7 +65,7 @@ def grade(
         return [f"The head holds {len(head_gates)} jobs named {GATE}; exactly one must be."]
     problems = _aggregator_problems(base_gates[0], head_gates[0])
     file = base_gates[0][0]
-    problems += _reuse_problems(base_workflows[file]["jobs"], head_workflows[file]["jobs"])
+    problems += _reuse_problems(base_workflows[file]["jobs"], (head_workflows.get(file) or {}).get("jobs") or {})
     return problems + ci_wiring.check(head_workflows, _protected_config(base_config, head_config), today)
 
 

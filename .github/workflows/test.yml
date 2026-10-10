@@ -65,10 +65,37 @@ jobs:
           permission-actions: read
           permission-contents: read
 
+      - name: Fetch the evidence of recent passed runs
+        if: github.event_name == 'merge_group' && hashFiles('scripts/ci_reuse.py') != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          evidence="$RUNNER_TEMP/evidence"
+          actions="repos/$GITHUB_REPOSITORY/actions"
+          mkdir -p "$evidence"
+          if ! gh api "$actions/workflows/test.yml/runs?event=pull_request&status=success&per_page=20" > "$evidence/runs.json"; then
+            rm -f "$evidence/runs.json"
+            exit 0
+          fi
+          fetch() {
+            local folder="$evidence/$1" artifact job
+            mkdir -p "$folder"
+            gh api --paginate "$actions/runs/$1/artifacts?per_page=100" --jq '.artifacts[]' > "$folder/artifacts.jsonl" || { rm -f "$folder/artifacts.jsonl"; return 0; }
+            artifact="$(jq -r --arg name "required-tree-$2" 'select(.name == $name and (.expired | not)) | .id' "$folder/artifacts.jsonl" | head -n 1)"
+            [[ -n "$artifact" ]] || return 0
+            gh api "$actions/artifacts/$artifact/zip" > "$folder/proof.zip" || { rm -f "$folder/proof.zip"; return 0; }
+            gh api --paginate "$actions/runs/$1/attempts/$2/jobs?per_page=100" --jq '.jobs[]' > "$folder/jobs.jsonl" || { rm -f "$folder/jobs.jsonl"; return 0; }
+            job="$(jq -r 'select(.name == "reuse" and .conclusion == "success") | .id' "$folder/jobs.jsonl" | head -n 1)"
+            [[ -n "$job" ]] || return 0
+            gh api "$actions/jobs/$job/logs" > "$folder/reuse.log" || rm -f "$folder/reuse.log"
+          }
+          export -f fetch
+          export evidence actions
+          jq -r '.workflow_runs[] | "\(.id) \(.run_attempt)"' "$evidence/runs.json" | xargs -r -n 2 -P 8 bash -c 'fetch "$@"' fetch
+
       - name: Decide from protected code and record the tested tree
         id: decision
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
           HEAD: ${{ github.sha }}
           EVENT: ${{ github.event_name }}
@@ -81,7 +108,7 @@ jobs:
           fi
           python -I scripts/ci_reuse.py --base "$BASE" --head "$HEAD" --event "$EVENT" \
             --repository "$GITHUB_REPOSITORY" --run "$RUN" --attempt "$ATTEMPT" \
-            --record "$RUNNER_TEMP/provenance.json"
+            --evidence "$RUNNER_TEMP/evidence" --record "$RUNNER_TEMP/provenance.json"
 
       - name: Publish protected tested tree evidence
         if: steps.decision.outputs.recorded == 'true'
@@ -1415,7 +1442,6 @@ jobs:
           overwrite: true
 
   mutation-plan:
-    needs: [reuse]
     if: ${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
