@@ -5,7 +5,7 @@ from contextlib import contextmanager
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
-from scripts.swarm import capacity, timing
+from scripts.swarm import capacity, freeze, timing
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_client import LedgerGone
 
@@ -30,7 +30,7 @@ def eligible(store, slug: str, ledger, at: int, runtime) -> bool:
     if config.state != "running":
         return False
     try:
-        rows, ready = capacity.ready_work(slug, store, ledger.state(slug))
+        rows, ready = capacity.ready_work(slug, store, freeze.watched(slug, store, ledger, ledger.state(slug)))
     except LedgerGone:
         return False
     demand = {lane: len(tasks) for lane, tasks in ready.items()}
