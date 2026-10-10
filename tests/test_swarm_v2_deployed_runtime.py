@@ -142,9 +142,7 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
         service.grants,
         runtime.router,
     )
-    assert runtime.launch.keywords == {
-        "terms": LaunchTerms("claude-fixture", 2, _deployed().RESERVATION_MS, (PROJECT,), "swarm", API_URL)
-    }
+    assert runtime.launch.keywords == {"terms": LaunchTerms("claude-fixture", 2, 300_000, (PROJECT,), "swarm", API_URL)}
     assert store.config(SLUG).api_url == API_URL
     assert (placed.placement, placed.harness, placed.profile) == (BACKEND, "claude", "general")
     [pod] = pods.created
@@ -248,3 +246,36 @@ def test_an_invalid_pod_policy_is_refused(tmp_path):
         deployed.Workers.from_environ(_workers(tmp_path, **{deployed.POLICY_ENV: str(path)}), SLUG)
 
     assert str(refused.value).startswith("pod policy is invalid at ")
+
+
+def test_a_scheduled_pass_gives_each_swarm_its_own_runtime_or_the_shared_one(monkeypatch):
+    from scripts.swarm import controller as loop
+
+    store = _store()
+    store.create(SwarmConfig("other", "agentihooks", 2, 0))
+    given = []
+    monkeypatch.setattr(
+        "scripts.swarm.cli.run_tick",
+        lambda store, slug, ledger, runtime, messenger, scheduled: given.append((slug, runtime, scheduled)) or [],
+    )
+
+    loop.run_once(store, runtime="shared", runtimes={SLUG: "deployed"})
+
+    assert sorted(given) == [(SLUG, "deployed", True), ("other", "shared", True)]
+
+
+def test_a_launch_grant_is_never_reported_handed_to_a_pod():
+    from scripts.swarm.store import AgentRecord
+
+    assert _deployed().PodGrants().hand(AgentRecord("e1", "eng", "t1"), "grant") is False
+
+
+def test_the_pod_api_talks_to_the_in_cluster_server_in_the_policy_namespace(monkeypatch):
+    deployed = _deployed()
+    environ = {"KUBERNETES_SERVICE_HOST": "10.0.0.1", "KUBERNETES_SERVICE_PORT": "443"}
+    monkeypatch.setattr(deployed.KubeHttp, "in_cluster", lambda given: ("in-cluster", given))
+
+    api = deployed.pod_api(environ, "swarm-pod-proof")
+
+    assert isinstance(api, deployed.PodClient)
+    assert (api.http, api.namespace) == (("in-cluster", environ), "swarm-pod-proof")
