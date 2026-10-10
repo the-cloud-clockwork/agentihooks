@@ -677,7 +677,7 @@ def cmd_set(store, args):
             continue
         if key not in SETTABLE or not value.isdigit():
             raise SwarmError(
-                f"set takes {', '.join(SETTABLE)}=<whole number>, autonomy={'|'.join(AUTONOMY)}, masters=N, "
+                f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, autonomy={'|'.join(AUTONOMY)}, "
                 f"effort-min=E, effort-max=E, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB "
                 f"or {', '.join(LANE_KEYS)}=<value>"
             )
