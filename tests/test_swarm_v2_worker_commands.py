@@ -464,7 +464,7 @@ def test_an_already_accepted_command_without_local_state_is_reported_not_rerun(w
     control.step()
     assert world.ran == []
     assert world.queue.outcome(agent.execution_id, answer["command_id"])["outcome"] == {
-        "status": "failed",
+        "status": "not_run",
         "detail": "accepted before this worker state existed; not rerun",
     }
     assert world.state(agent, drain) == "accepted"
@@ -554,7 +554,154 @@ def test_worker_state_survives_a_restart_and_is_written_whole(world, worker):
             "outcome": None,
         }
     }
-    assert sorted(path.name for path in control.path.parent.iterdir()) == [control.path.name]
+    assert sorted(path.name for path in control.path.parent.glob(f"{agent.execution_id}*")) == [control.path.name]
+
+
+def test_every_state_write_is_flushed_to_disk_before_it_replaces_the_file(world, worker, monkeypatch):
+    from scripts.swarm_v2.worker import control as module
+
+    agent, network, control = worker
+    synced = []
+    real = module.os.fsync
+
+    def fsync(descriptor):
+        synced.append(json.loads(control.path.with_name(f"{control.path.name}.tmp").read_text(encoding="utf-8")))
+        real(descriptor)
+
+    monkeypatch.setattr(module.os, "fsync", fsync)
+    drain = world.issue(agent, "drain", "drain-1")
+    control.step()
+    assert [entry[drain["command_id"]]["state"] for entry in synced] == ["received", "accepted"]
+
+
+def test_a_handler_failure_is_reported_as_a_failed_outcome(world, worker):
+    agent, network, control = worker
+    answer = world.issue(agent, "answer", "answer-1", {"text": "yes"})
+
+    def broken(payload):
+        raise ConnectionError("handler lost its tool")
+
+    control.handlers = {"answer": broken}
+    control.step()
+    assert world.queue.outcome(agent.execution_id, answer["command_id"])["outcome"] == {
+        "status": "failed",
+        "detail": "handler raised ConnectionError",
+    }
+
+
+def test_a_checkpoint_taken_before_the_drain_ack_lands_completes_after_it(world, worker):
+    agent, network, control = worker
+    drain = world.issue(agent, "drain", "drain-1")
+    answer = world.issue(agent, "answer", "answer-1", {"text": "yes"})
+    network.drop = {"ack"}
+    control.step()
+    control.checkpointed("refs/checkpoints/early")
+    assert world.state(agent, drain) == "issued"
+    assert json.loads(control.path.read_text(encoding="utf-8"))[answer["command_id"]]["outcome"] is None
+    network.drop = set()
+    world.later(10)
+    control.step()
+    assert world.queue.outcome(agent.execution_id, drain["command_id"])["outcome"] == {
+        "status": "checkpointed",
+        "checkpoint": "refs/checkpoints/early",
+    }
+    assert world.queue.outcome(agent.execution_id, answer["command_id"])["outcome"] == {
+        "status": "not_run",
+        "detail": "refused while draining",
+    }
+    assert world.ran == []
+    assert not control.may_mutate()
+
+
+def test_a_drain_refuses_answers_but_still_runs_cancel_and_stop(world, worker):
+    agent, network, control = worker
+    world.issue(agent, "drain", "drain-1")
+    control.step()
+    answer = world.issue(agent, "answer", "answer-1", {"text": "yes"})
+    world.later(1)
+    cancel = world.issue(agent, "cancel", "cancel-1")
+    world.later(1)
+    stop = world.issue(agent, "stop", "stop-1")
+    world.later(10)
+    control.step()
+    world.later(10)
+    control.step()
+    assert world.ran == [["cancel", {}]]
+    assert world.queue.outcome(agent.execution_id, answer["command_id"])["outcome"]["status"] == "not_run"
+    assert world.queue.outcome(agent.execution_id, cancel["command_id"])["outcome"] == {"status": "succeeded"}
+    assert world.state(agent, stop) == "issued"
+    world.later(10)
+    control.step()
+    assert world.ran == [["cancel", {}], ["stop", {}]]
+
+
+def test_a_drain_holds_unless_the_server_voids_it_by_expiry_before_any_checkpoint(world, worker):
+    from scripts.swarm_v2.worker.control import CommandRefused, WorkerControl
+
+    agent, network, control = worker
+    drain = world.issue(agent, "drain", "drain-1")
+    network.drop = {"ack"}
+    control.step()
+    control.checkpointed("refs/checkpoints/taken")
+    world.later(60)
+    network.drop = set()
+    control.step()
+    assert world.state(agent, drain) == "expired"
+    assert not control.may_mutate()
+
+    class Superseded:
+        def poll(self):
+            return [{**drain, "state": "issued"}]
+
+        def ack(self, command_id, payload_digest):
+            raise CommandRefused("stale_generation", "launch grant is for a superseded execution")
+
+    stale = WorkerControl(Superseded(), control.path.with_name("superseded.json"), {})
+    stale.step()
+    assert json.loads(stale.path.read_text(encoding="utf-8"))[drain["command_id"]]["refusal"] == "stale_generation"
+    assert not stale.may_mutate()
+
+
+def test_a_concurrent_poll_that_loses_the_stamp_is_rate_limited(world, worker, monkeypatch):
+    from redis.exceptions import WatchError
+
+    agent, network, _ = worker
+    real = world.store.redis.pipeline
+
+    def raced(*args, **kwargs):
+        pipe = real(*args, **kwargs)
+
+        def execute(*args, **kwargs):
+            raise WatchError("fixture concurrent poll")
+
+        pipe.execute = execute
+        return pipe
+
+    monkeypatch.setattr(world.store.redis, "pipeline", raced)
+    assert poll(world, agent, network) == detail(429, "rate_limited", "poll again in 10 ms", "same_request")
+    assert world.store.redis.hget(world.store.key(SLUG, "worker-command-polls"), agent.execution_id) is None
+
+
+def test_an_expired_unacknowledged_command_cannot_be_completed(world, worker):
+    agent, network, _ = worker
+    stop = world.issue(agent, "stop", "stop-1")
+    world.later(50)
+    assert complete(world, agent, network, stop, {"status": "succeeded"}) == detail(
+        410, "expired", "the command expired before it was acknowledged"
+    )
+
+
+def test_the_ack_lag_measurement_keeps_only_the_newest_samples(world, worker, monkeypatch):
+    from scripts.swarm_v2.api import commands
+    from scripts.swarm_v2.api.commands import worker_command_ack_lag_seconds
+
+    agent, network, _ = worker
+    monkeypatch.setattr(commands, "ACK_LAG_SAMPLES", 2)
+    issued = [world.issue(agent, "cancel", f"cancel-{n}") for n in range(3)]
+    for n, command in enumerate(issued):
+        world.later(n + 1)
+        ack(world, agent, network, command)
+    assert worker_command_ack_lag_seconds(world.store, SLUG) == [0.003, 0.006]
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])
