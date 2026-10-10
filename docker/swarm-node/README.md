@@ -101,7 +101,9 @@ Each launch has an exclusive attempt lock and a new random incarnation under
 its run directory. `SWARM_SUPERVISION_DIR` points to that directory; its
 `context.json` binds authority and incarnation. An exporter calls
 `scripts.swarm_v2.supervision_protocol.acknowledge("exporter", status="ready")`
-when usable. Only then does the main agent start. SIGTERM or SIGINT publishes
+when usable. Only then does the main agent start. A launch record with no
+`exporter` starts herdr and the agent alone and reports its checkpoint
+incomplete. SIGTERM or SIGINT publishes
 `drain.json`, stops the agent and herdr process trees including escaped
 grandchildren, and publishes `quiesced.json`. The exporter remains alive to
 flush. No task reconciliation, authority renewal or second swarm timer runs

@@ -114,8 +114,9 @@ class Supervisor:
     def start(self) -> str | None:
         deadline = time.monotonic() + self.launch.budgets.startup
         self.spawn("herdr", self.launch.herdr)
-        self.spawn("exporter", self.launch.exporter)
-        for role in ("herdr", "exporter"):
+        if self.launch.exporter:
+            self.spawn("exporter", self.launch.exporter)
+        for role in ("herdr", "exporter") if self.launch.exporter else ("herdr",):
             if not self.ready(role, deadline):
                 return "termination" if self.stop else f"{role}_startup_failure"
         agent = native_command(self.launch.agent, self.launch.attempt, self.environment)
@@ -162,7 +163,7 @@ class Supervisor:
         write(self.root / "quiesced.json", {**self.scope, "status": "quiesced" if clean else "forced"})
         identifier = None
         deadline = time.monotonic() + self.launch.budgets.checkpoint
-        while clean and time.monotonic() < deadline:
+        while clean and self.launch.exporter and time.monotonic() < deadline:
             identifier = checkpoint(self.launch.attempt, read(self.root / "exporter.checkpoint.json"), self.scope)
             if identifier or "exporter" in self.exits:
                 break

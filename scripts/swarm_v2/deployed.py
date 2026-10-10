@@ -1,4 +1,5 @@
-from collections.abc import Mapping
+import json
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
@@ -6,10 +7,11 @@ from typing import TYPE_CHECKING
 from scripts.swarm.store import SwarmError
 from scripts.swarm_v2 import image_tag
 from scripts.swarm_v2.accounts import AccountCapacity
+from scripts.swarm_v2.auth_context import Registration
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 from scripts.swarm_v2.kubernetes.client import KubeHttp, PodApi, PodClient
 from scripts.swarm_v2.kubernetes.failures import AccountSlot, Recovery
-from scripts.swarm_v2.kubernetes.grants import PodGrants
+from scripts.swarm_v2.kubernetes.grants import PodGrants, Supervision
 from scripts.swarm_v2.kubernetes.runtime import KubernetesTransport
 from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, PodTemplate, load_policy
 from scripts.swarm_v2.kubernetes.watch import OWNER_LABEL, owner_for
@@ -30,6 +32,7 @@ ACCOUNT_ENV = "AGENTIHOOKS_LAUNCH_ACCOUNT"
 CAP_ENV = "AGENTIHOOKS_LAUNCH_CAP"
 PROJECTS_ENV = "AGENTIHOOKS_LAUNCH_PROJECTS"
 BRAIN_ENV = "AGENTIHOOKS_LAUNCH_BRAIN"
+EXPORTER_ENV = "AGENTIHOOKS_WORKER_EXPORTER"
 REQUIRED = (POLICY_ENV, IMAGE_TAG_ENV, PROFILE_ENV, ACCOUNT_ENV, CAP_ENV, PROJECTS_ENV, BRAIN_ENV)
 RESERVATION_MS = 300_000
 HARNESS = "claude"
@@ -59,12 +62,25 @@ def _policy(path: str, slug: str) -> dict:
     return policy
 
 
+def _exporter(value: str | None) -> tuple[str, ...] | None:
+    if not value:
+        return None
+    try:
+        words = json.loads(value)
+    except ValueError:
+        words = None
+    if not isinstance(words, list) or not words or not all(isinstance(w, str) and w and "\0" not in w for w in words):
+        raise WorkerSettingsRefused(f"{EXPORTER_ENV} must be a JSON list of command words")
+    return tuple(words)
+
+
 @dataclass(frozen=True)
 class Workers:
     terms: LaunchTerms
     policy: dict
     image_tag: str
     profile: str
+    exporter: tuple[str, ...] | None
 
     @classmethod
     def from_environ(cls, environ: Mapping[str, str], slug: str) -> "Workers | None":
@@ -85,7 +101,7 @@ class Workers:
         if not projects:
             raise WorkerSettingsRefused(f"{PROJECTS_ENV} names no project")
         terms = LaunchTerms(environ[ACCOUNT_ENV], int(cap), RESERVATION_MS, projects, environ[BRAIN_ENV], api_url)
-        return cls(terms, policy, environ[IMAGE_TAG_ENV], profile)
+        return cls(terms, policy, environ[IMAGE_TAG_ENV], profile, _exporter(environ.get(EXPORTER_ENV)))
 
     def launch(self, request: SpawnRequest) -> dict:
         task, limits = request.task, self.policy["profiles"][self.profile]["limits"]
@@ -116,8 +132,9 @@ class Workers:
     def transport(self, environ: Mapping[str, str], slug: str) -> KubernetesTransport:
         return KubernetesTransport(pod_api(environ, self.policy["namespace"]), slug, PodTemplate(self.policy))
 
-    def grants(self, environ: Mapping[str, str], slug: str) -> PodGrants:
-        return PodGrants(pod_api(environ, self.policy["namespace"]), slug)
+    def grants(self, environ: Mapping[str, str], slug: str, verify: Callable[[str], Registration]) -> PodGrants:
+        supervision = Supervision(HARNESS, self.exporter)
+        return PodGrants(pod_api(environ, self.policy["namespace"]), slug, verify, supervision)
 
 
 def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[str, str]) -> RoutedRuntime:
@@ -128,7 +145,7 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
         return grants.verify(slug, token)
 
     capacity, fleet = AccountCapacity(controller.store, slug, verify), FleetRegistry(controller.store, slug, verify)
-    launcher = DistributedLaunch(controller, grants, capacity, fleet, None, workers.grants(environ, slug))
+    launcher = DistributedLaunch(controller, grants, capacity, fleet, None, workers.grants(environ, slug, verify))
     kubernetes = KubernetesRuntime(controller.execute, workers.launch)
     runtime = routed(
         environ, kubernetes=kubernetes, launch=partial(launcher.from_tick, terms=workers.terms, target=workers.target)
