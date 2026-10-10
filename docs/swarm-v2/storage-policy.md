@@ -10,7 +10,7 @@ Package SV2-FSY-05. Shared storage is allowed; shared mutable runtime identity i
 | Read only configuration seed | Yes | Pod policy `mounts` entry with purpose `seed`, rendered read only |
 | Checkpoint and artifact storage | Yes, scoped | Purpose `artifact`, rendered writable with `subPath` set to the execution id |
 | Node cache store | Yes, read only into attempts | Purpose `cache`, rendered read only; only the store owner writes seeds |
-| The operator home from the node (`/`, `/home`, `/home/<user>`, `/root`, `/Users/<user>`, the WSL `/mnt/<drive>/Users/<user>`, their parents, and any dot folder inside a home) | Never, not even read only | Refused |
+| Any host path at or inside an operator home (`/home/<user>`, `/root`, `/Users/<user>`, the WSL `/mnt/<drive>/Users/<user>`) or a parent of one (`/`, `/home`, `/Users`, `/mnt`, `/mnt/<drive>`) | Never, not even read only | Refused; a seed comes from a claim, NFS or a host path outside every home |
 
 `scripts.swarm_v2.kubernetes.storage.MountChecker` enforces the table on every rendered Pod. `PodTemplate.render`
 refuses a Pod that fails it with reason `storage`, and `python -m scripts.swarm_v2.kubernetes.storage <pod.json>`

@@ -15,8 +15,8 @@ PRIVATE_ROOTS = ("/home/worker/attempts", "/tmp", "/var/run/swarm")
 NATIVE = frozenset({".codex", ".claude", ".config", ".local", "herdr"})
 PRIVATE_KINDS = frozenset({"emptyDir", "configMap", "secret", "projected", "downwardAPI", "ephemeral"})
 SOURCE_READ_ONLY = frozenset({"persistentVolumeClaim", "nfs"})
-HOME = re.compile(r"(/(home|Users)/[^/]+|/root|/mnt/[a-z]/Users/[^/]+)(/.+)?")
-HOME_PARENTS = re.compile(r"/|/home|/Users|/mnt|/mnt/[a-z]|/mnt/[a-z]/Users")
+HOME = re.compile(r"(/(home|Users)/[^/]+|/root|/mnt/[a-zA-Z]/Users/[^/]+)(/.+)?")
+HOME_PARENTS = re.compile(r"/|/home|/Users|/mnt|/mnt/[a-zA-Z]|/mnt/[a-zA-Z]/Users")
 
 
 class StorageRefused(ValueError):
@@ -25,7 +25,7 @@ class StorageRefused(ValueError):
         self.reason = reason
 
 
-def _normal(path: str) -> str:
+def normal(path: str) -> str:
     return posixpath.normpath("/" + path.lstrip("/"))
 
 
@@ -34,7 +34,7 @@ def _within(path: str, root: str) -> bool:
 
 
 def _runtime(path: str) -> bool:
-    path = _normal(path)
+    path = normal(path)
     if _within(POD_HOME, path) or any(_within(path, root) or _within(root, path) for root in PRIVATE_ROOTS):
         return True
     return not NATIVE.isdisjoint(PurePosixPath(path).parts)
@@ -57,11 +57,8 @@ def _read_only_source(volumes: list[dict]) -> bool:
 
 
 def _operator_home(path: str) -> bool:
-    path = _normal(path)
-    home = HOME.fullmatch(path)
-    if home is None:
-        return HOME_PARENTS.fullmatch(path) is not None
-    return home.group(3) is None or any(part.startswith(".") for part in home.group(3).split("/"))
+    path = normal(path)
+    return HOME.fullmatch(path) is not None or HOME_PARENTS.fullmatch(path) is not None
 
 
 def _scoped(mount: dict, execution: str | None) -> bool:

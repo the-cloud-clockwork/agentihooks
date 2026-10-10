@@ -301,6 +301,13 @@ def test_init_containers_are_checked_like_the_agent(tmp_path):
         "/mnt/c",
         "/mnt",
         "/mnt/c/Users/op/.aws",
+        "/mnt/C/Users/op",
+        "/mnt/D",
+        "/home/iamroot/dev",
+        "/home/iamroot/dev/seed",
+        "/Users/op/x",
+        "/root/x",
+        "/mnt/c/Users/op/seed",
     ],
 )
 def test_the_operator_home_from_the_node_is_refused_even_read_only(tmp_path, path):
@@ -325,9 +332,9 @@ def test_an_unmounted_operator_home_volume_is_still_refused(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "path", ["/home/iamroot/dev/seed", "/var/lib/swarm-cache", "/Users/op/x", "/mnt/c/Users/op/seed", "/mnt/data"]
+    "path", ["/var/lib/swarm-cache", "/opt/seed", "/mnt/data", "/srv/home/iamroot", "/homes/x", "/rootfs"]
 )
-def test_a_folder_inside_an_operator_home_is_not_the_whole_home(tmp_path, path):
+def test_a_host_path_outside_every_operator_home_is_a_seed(tmp_path, path):
     pod = add(
         safe_pod(tmp_path),
         {"name": "seed", "hostPath": {"path": path}},
@@ -520,3 +527,18 @@ def test_the_policy_refuses_mounts_that_repeat_a_name_or_a_path(tmp_path, field)
     with pytest.raises(PodSpecRefused) as error:
         load(tmp_path, policy(SEED, other))
     assert (error.value.reason, str(error.value)) == ("policy", f"pod policy mounts repeat a {field}")
+
+
+def test_the_policy_compares_mount_paths_after_normalising_them(tmp_path):
+    other = {**ARTIFACTS, "mount_path": SEED["mount_path"] + "/"}
+    with pytest.raises(PodSpecRefused) as error:
+        load(tmp_path, policy(SEED, other))
+    assert str(error.value) == "pod policy mounts repeat a mount_path"
+
+
+def test_the_policy_compares_mount_names_exactly(tmp_path):
+    assert [m["name"] for m in load(tmp_path, policy(SEED, ARTIFACTS, CACHE))["mounts"]] == [
+        "profiles",
+        "artifacts",
+        "node-cache",
+    ]

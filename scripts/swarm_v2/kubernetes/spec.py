@@ -14,7 +14,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 
-from scripts.swarm_v2.kubernetes.storage import MountChecker, StorageRefused
+from scripts.swarm_v2.kubernetes.storage import MountChecker, StorageRefused, normal
 from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL, OWNER_LABEL
 
 SCHEMA = Path(__file__).resolve().parents[3] / "docs" / "swarm-v2" / "schemas" / "pod-policy.json"
@@ -116,8 +116,8 @@ def load_policy(path: str | Path) -> dict:
                 f"{name} probe timeout_seconds must exceed the herdr and brain timeouts together", "policy"
             )
     mounts = policy.get("mounts", [])
-    for field in ("name", "mount_path"):
-        if len({mount[field] for mount in mounts}) < len(mounts):
+    for field, key in (("name", str), ("mount_path", normal)):
+        if len({key(mount[field]) for mount in mounts}) < len(mounts):
             raise PodSpecRefused(f"pod policy mounts repeat a {field}", "policy")
     return policy
 
