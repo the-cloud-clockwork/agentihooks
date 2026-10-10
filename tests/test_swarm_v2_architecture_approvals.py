@@ -148,7 +148,9 @@ def test_an_approval_outside_the_authenticated_operator_transport_writes_nothing
 ):
     path = _record(tmp_path)
     before = path.read_text()
-    with pytest.raises(architecture.ArchitectureError, match="authenticated operator required"):
+    with pytest.raises(
+        architecture.ArchitectureError, match="^authenticated operator required for an architecture change$"
+    ):
         _approve(path, _dispatcher(), credential=credential, slug=slug, authenticate=authenticate)
     assert path.read_text() == before
 
@@ -252,3 +254,52 @@ def test_the_cli_reports_a_malformed_public_key_without_a_traceback(monkeypatch,
     monkeypatch.setenv("SWARM_ARCHITECTURE_PUBLIC_KEY", "short")
     assert architecture.main(["check", "--record", str(RECORD)]) == 2
     assert capsys.readouterr().err == "error: SWARM_ARCHITECTURE_PUBLIC_KEY must be a hex Ed25519 public key\n"
+
+
+def test_the_signed_content_is_the_schema_and_the_change_fields_in_key_order():
+    change = {
+        "reason": "r",
+        "revision": 3,
+        "approved_by": "nestor",
+        "sha256": "s",
+        "proposal": "p",
+        "key_id": "k",
+        "signature": "ignored",
+        "extra": "ignored",
+    }
+    assert architecture._signed(change) == (
+        b'{"approved_by": "nestor", "key_id": "k", "proposal": "p", "reason": "r",'
+        b' "revision": 3, "schema": "swarm-v2-architecture/1", "sha256": "s"}'
+    )
+
+
+def test_changed_content_needs_its_own_approval(tmp_path):
+    path = _record(tmp_path)
+    first = _approve(path, _dispatcher())
+    second = _approve(path, {**_dispatcher(), "name": "Renamed dispatcher"})
+    assert second["sha256"] != first["sha256"]
+    assert architecture.load_record(path)["operator_changes"] == [first, second]
+
+
+def test_a_refusal_names_only_the_authorities_the_verify_key_leaves(tmp_path):
+    path = _record(tmp_path)
+    _approve(path, _dispatcher())
+    architecture.apply_inventory(path, _inventory(), key=KEY)
+    record = architecture.load_record(path)
+    other = {**_dispatcher(), "id": "other", "name": "Other dispatcher", "authoritative_state": "other queue"}
+    inventory = {**_inventory(), "operation": "op-2", "base_revision": record["revision"], "proposals": [other]}
+    assert architecture.review(record, inventory, KEY)["rejected"][0]["reason"] == DISPATCHER_REASON
+
+
+def test_the_cli_review_counts_an_approval_only_with_the_verify_key(tmp_path, monkeypatch, capsys):
+    path = _record(tmp_path)
+    _approve(path, _dispatcher())
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text(json.dumps(_inventory()))
+    args = ["review", "--record", str(path), "--inventory", str(inventory)]
+    monkeypatch.setenv("SWARM_ARCHITECTURE_PUBLIC_KEY", PUBLIC_HEX)
+    assert architecture.main(args) == 0
+    assert json.loads(capsys.readouterr().out)["accepted"] == ["duplicate-dispatcher", "embedding-backlog"]
+    monkeypatch.delenv("SWARM_ARCHITECTURE_PUBLIC_KEY")
+    assert architecture.main(args) == 0
+    assert json.loads(capsys.readouterr().out)["accepted"] == ["embedding-backlog"]
