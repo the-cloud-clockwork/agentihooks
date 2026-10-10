@@ -20,7 +20,7 @@ def _observe(module, path, calls):
     outputs = []
     for function, arguments, *keywords in calls:
         try:
-            result = getattr(module, function)(*arguments, **dict(*keywords))
+            result = getattr(module, function)(*arguments, **(keywords[0] if keywords else {}))
         except ValueError as error:
             result = {"error": type(error).__name__, "message": str(error)}
         outputs.append(

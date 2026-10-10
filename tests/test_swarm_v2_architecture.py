@@ -713,6 +713,7 @@ def test_cli_rollback_writes_the_record_and_its_markdown(tmp_path, monkeypatch, 
     markdown = tmp_path / "decisions.md"
     monkeypatch.setattr(architecture, "_page_credential", {"rig": "page"}.get)
     monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
     argv = ["rollback", "--record", str(path), "--to", "1", "--operation", "r", "--markdown", str(markdown)]
     argv += ["--slug", "rig"]
     assert architecture.main(argv) == 0

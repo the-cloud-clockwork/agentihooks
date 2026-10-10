@@ -274,6 +274,7 @@ def _operator_cli(tmp_path, monkeypatch, *, agent=None, signing=SIGNING_HEX):
         monkeypatch.setenv("SWARM_ARCHITECTURE_SIGNING_KEY", signing)
     if agent is None:
         monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+        monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
     else:
         monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
         monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", agent)
@@ -401,8 +402,9 @@ def test_a_rollback_needs_a_named_operator_principal(tmp_path, authenticate):
     path = _record(tmp_path)
     architecture.apply_inventory(path, _inventory())
     before = path.read_bytes()
-    with pytest.raises(architecture.ArchitectureError):
+    with pytest.raises(architecture.ArchitectureError) as caught:
         architecture.rollback(path, 1, "r", slug=SLUG, credential="operator-credential", authenticate=authenticate)
+    assert str(caught.value) == "authenticated operator required for an architecture change"
     assert path.read_bytes() == before
 
 
@@ -416,6 +418,10 @@ def test_the_cli_rolls_back_for_the_operator_and_refuses_an_agent(tmp_path, monk
     assert capsys.readouterr().err == REFUSED
     assert path.read_bytes() == before
     monkeypatch.delenv("AGENTIHOOKS_SWARM")
+    assert architecture.main(argv) == 2
+    assert capsys.readouterr().err == REFUSED
+    assert path.read_bytes() == before
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
     assert architecture.main(argv) == 0
     assert json.loads(capsys.readouterr().out)["rolled_back"] == ["Brain arc embedding backlog"]
     assert markdown.read_text() == architecture.render(architecture.load_record(path))

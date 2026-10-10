@@ -2,9 +2,9 @@ import hashlib
 import hmac
 
 import pytest
-import scripts.swarm_v2.operator_auth as operator_auth
 
 from scripts.gates.base import Who
+from scripts.swarm_v2 import operator_auth
 from scripts.swarm_v2.runtime.commands import Principal, Role
 
 SLUG = "rig"
