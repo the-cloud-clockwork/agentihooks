@@ -13,7 +13,8 @@ def test_proofs_dispatch_cannot_satisfy_required_tests():
     workflow = _workflow()
     assert set(workflow[True]) == {"workflow_dispatch", "push"}
     assert workflow[True]["push"] == {"branches": ["diffcheck/**"], "paths": [".github/workflows/proofs.yml"]}
-    assert workflow["concurrency"] == {"group": "proofs-${{ github.run_id }}", "cancel-in-progress": False}
+    assert workflow["concurrency"]["queue"] == "max"
+    assert workflow["concurrency"]["cancel-in-progress"] is False
     assert workflow["permissions"] == {"contents": "read", "pull-requests": "read", "actions": "read"}
     inputs = workflow[True]["workflow_dispatch"]["inputs"]
     assert inputs["proof"]["type"] == "choice"

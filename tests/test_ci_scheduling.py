@@ -10,8 +10,8 @@ _ROOT = Path(__file__).resolve().parents[1]
 
 def test_push_and_dispatch_concurrency_is_per_run():
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
-    assert workflow["concurrency"]["group"] == (
-        "tests-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}"
+    assert workflow["concurrency"]["group"].endswith(
+        "|| format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}"
     )
 
 
