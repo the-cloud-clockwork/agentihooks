@@ -40,7 +40,6 @@ STATUS = {
     "stale_generation": 409,
     "revision_conflict": 409,
     "operation_conflict": 409,
-    "read_only": 409,
     "dependency_unavailable": 503,
 }
 CLAIM_REFUSALS = {
@@ -175,7 +174,10 @@ class RevisionConflict(GrantRefused):
 
 class ReadOnly(RevisionConflict):
     def __init__(self, task_id: str, current: str) -> None:
-        super().__init__("read_only", "task writes are read only; refresh and retry later", task_id, current)
+        super().__init__("revision_conflict", "task writes are read only; refresh and retry later", task_id, current)
+
+    def detail(self) -> dict:
+        return {**super().detail(), "read_only": True}
 
 
 class WorkerGate:
