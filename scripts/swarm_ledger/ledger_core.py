@@ -602,6 +602,7 @@ def check_op(op, task_ids=()):
         if op["op"] != "add" or not talks:
             raise ValueError("attachments ride only on an add to chat or a comment thread")
         ledger_media.check(op["attachments"])
+    ledger_comments.check_outcome(op)
     if "by" in op:
         talks = op["op"] != "clear" and (op["thread"] == "chat" or op["thread"].endswith("/comments"))
         if not talks or not AUTHOR_RE.match(str(op["by"])) or op["by"] == "operator":
