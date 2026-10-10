@@ -354,6 +354,34 @@ def test_a_socket_path_past_the_unix_limit_or_with_a_path_name_is_refused(tmp_pa
         filesystem.socket(execution, "../s")
 
 
+def test_environment_points_every_process_at_its_private_roots(world, layout):
+    bases, _ = world
+    first, second = (filesystem.allocate(base, ATTEMPT, layout) for base in bases)
+    home = first.path("home") / "claude"
+    assert filesystem.environment(first, "claude") == {
+        "HOME": str(home),
+        "CLAUDE_CONFIG_DIR": str(home / ".claude"),
+        "CODEX_HOME": str(home / ".codex"),
+        "XDG_RUNTIME_DIR": str(first.path("runtime")),
+        "TMPDIR": str(first.path("scratch")),
+    }
+    shared = set(filesystem.environment(first, "codex").values()) & set(
+        filesystem.environment(second, "codex").values()
+    )
+    assert shared == set()
+
+
+@pytest.mark.parametrize("target", ["../codex", "Claude", ""])
+def test_environment_refuses_an_invalid_target(world, layout, target):
+    bases, _ = world
+    execution = filesystem.allocate(bases[0], ATTEMPT, layout)
+    count = failures()
+    with pytest.raises(filesystem.LayoutError) as error:
+        filesystem.environment(execution, target)
+    assert str(error.value) == f"invalid home target: {target}"
+    assert failures() == count + 1
+
+
 def test_recreating_an_attempt_restores_paths_from_metadata_on_a_new_node(tmp_path, world, layout):
     bases, _ = world
     old = filesystem.allocate(bases[0], ATTEMPT, layout)
