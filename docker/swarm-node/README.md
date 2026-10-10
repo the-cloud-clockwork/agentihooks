@@ -113,14 +113,15 @@ process namespace and it has published no result. herdr and every external
 dependency stay out of liveness, so an outage never restarts a running agent.
 `startup` adds the self tests: herdr and the harness binary on `PATH`, the
 private home readable and writable, the attempt `run` and `tmp` folders
-writable, every SessionStart hook command callable, and herdr answering
+writable, every program in every SessionStart hook command callable (a `cd`
+must name an existing folder), and herdr answering
 `workspace list` over its local socket for that incarnation. `readiness` also
 requires the agent to be running. A brain named by `BRAIN_URL` that does not
 answer `/health` reports `degraded` under `dependencies` with exit zero; local
 failures report `not_ready` with exit one. `diagnose` prints the full report
 for a failed bootstrap with exit zero and lists environment variable names,
 never values. Every report names `worker_startup_failure_reason`, the first
-failing local check. Probes write nothing to the attempt. Probe wiring and
+failing local check. Probes leave nothing behind in the attempt. Probe wiring and
 thresholds live in the Pod template under antoncore GitOps and roll back
 independently of the image. `tests/integration/swarm_node/run_health_proof.sh`
 proves the probes against isolated containers with real headless herdr.

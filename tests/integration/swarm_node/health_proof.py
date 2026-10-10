@@ -263,17 +263,48 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     private = uuid.uuid4().hex
     fixture = manifest(args.tested_commit, {"fixture": args.image, "missing_binary": args.missing_binary_image})
-    record(args.output, "a-result.json", "A", [positive_run(args.image, private) for _ in range(2)], fixture)
-    rejections = [missing_binary_run(args.missing_binary_image, private), private_home_run(args.image, private)]
-    record(args.output, "b-result.json", "B", rejections, fixture)
-    record(args.output, "c-result.json", "C", [recovery_run(args.image, private) for _ in range(2)], fixture)
+    case = "A"
+    try:
+        record(args.output, "a-result.json", case, [positive_run(args.image, private) for _ in range(2)], fixture)
+        case = "B"
+        rejections = [missing_binary_run(args.missing_binary_image, private), private_home_run(args.image, private)]
+        record(args.output, "b-result.json", case, rejections, fixture)
+        case = "C"
+        record(args.output, "c-result.json", case, [recovery_run(args.image, private) for _ in range(2)], fixture)
+    except Exception as exc:
+        failure = {"package": "SV2-IMG-04", "case": case, "error": repr(exc)[:2000], "fixture_manifest": fixture}
+        (args.output / "failure.json").write_text(json.dumps(failure, indent=2, sort_keys=True) + "\n")
+        raise
+    versions = json.loads((Path(__file__).resolve().parents[3] / "docker/swarm-node/versions.lock").read_text())
     summary = {
         "package": "SV2-IMG-04",
         "tested_commit": args.tested_commit,
         "mocked": False,
+        "stubbed": ["brain: fixture HTTP server on container loopback"],
         "cases": ["A", "B", "C"],
         "status": "passed",
         "fixture_manifest": fixture,
+        "supported_versions": {"harnesses": ["claude", "codex"], "worker_image": versions},
+        "interfaces": [
+            "health.py liveness, startup, readiness and diagnose with exit 0, 1 and 64",
+            "worker_startup_failure_reason in every report",
+            "dependencies.brain: ok, unconfigured, brain_unreachable, brain_http_<status>",
+        ],
+        "compatibility": "new local probe interface; no earlier probe protocol exists to compare",
+        "state": {
+            "observed": "real isolated containers and real headless herdr",
+            "accepted": "fixture assertions passed",
+            "committed": "tested commit",
+            "externally_verified": "not run; production rollout belongs to antoncore",
+        },
+        "rollback_rehearsal": "named gap: probe wiring and thresholds live in the Pod template, which is not "
+        "built yet; the image runs health.py only when a probe calls it, so removing the probe leaves the image "
+        "unchanged",
+        "limitations": [
+            "Only the codex harness runs in the container cases; claude is covered by unit tests",
+            "Linux amd64 only",
+            "Probe thresholds are not chosen here",
+        ],
         "production_rollout": "not exercised; probe wiring belongs to the Pod template and antoncore GitOps",
     }
     (args.output / "result.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")

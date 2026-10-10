@@ -189,6 +189,12 @@ def test_invalid_brain_url_is_unreachable(tmp_path):
     assert report(attempt, environ, "readiness")["dependencies"] == {"brain": "brain_unreachable"}
 
 
+def test_brain_url_with_an_invalid_port_is_unreachable(tmp_path):
+    attempt, _, environ = fixture(tmp_path)
+    environ["BRAIN_URL"] = "http://127.0.0.1:notaport"
+    assert report(attempt, environ, "readiness")["dependencies"] == {"brain": "brain_unreachable"}
+
+
 def test_recovered_brain_clears_degradation_without_touching_the_attempt(tmp_path, brain):
     attempt, _, environ = fixture(tmp_path)
     port = brain.server_address[1]
@@ -241,10 +247,10 @@ def test_bare_hook_name_resolves_on_the_probe_path(tmp_path):
 def test_missing_path_ignores_host_path_and_working_directory(tmp_path, monkeypatch):
     attempt, _, environ = fixture(tmp_path)
     bare_hook(attempt)
-    near = tmp_path / "XXXX"
-    near.mkdir()
+    decoy = tmp_path / "XXXX"
+    decoy.mkdir()
     for name in ("herdr", "codex", "hook"):
-        executable(near / name, "#!/bin/sh\n")
+        executable(decoy / name, "#!/bin/sh\n")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PATH", str(tmp_path / "bin"))
     del environ["PATH"]
@@ -334,6 +340,30 @@ def test_every_session_start_hook_is_checked(tmp_path):
     document = json.loads(path.read_text())
     document["hooks"]["SessionStart"].append({"hooks": [{"command": "absent-hook"}]})
     path.write_text(json.dumps(document))
+    assert report(attempt, environ, "startup")["checks"]["hook"] == "hook_uncallable"
+
+
+def hook_commands(attempt, commands):
+    path = attempt / "homes" / "codex" / ".codex" / "hooks.json"
+    path.write_text(json.dumps({"hooks": {"SessionStart": [{"hooks": [{"command": c} for c in commands]}]}}))
+
+
+def test_shell_hook_commands_resolve_each_program(tmp_path):
+    attempt, _, environ = fixture(tmp_path)
+    (tmp_path / "a+b").mkdir()
+    hook_commands(
+        attempt, [f"cd {tmp_path}/a+b && hook -m hooks", "FIXTURE=1 OTHER=2 hook start", "hook | hook; hook || hook"]
+    )
+    assert report(attempt, environ, "startup")["checks"]["hook"] is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["cd {tmp}/absent && hook", "cd {tmp} {tmp} && hook", "cd && hook", "hook && absent-hook", "FIXTURE=1", "hook &&"],
+)
+def test_shell_hook_with_an_uncallable_part_is_uncallable(tmp_path, command):
+    attempt, _, environ = fixture(tmp_path)
+    hook_commands(attempt, [command.format(tmp=tmp_path)])
     assert report(attempt, environ, "startup")["checks"]["hook"] == "hook_uncallable"
 
 
@@ -437,7 +467,7 @@ def test_zombie_supervisor_is_not_live(tmp_path, monkeypatch):
         while _process(child.pid, Path("/proc")).state != "Z" and time.monotonic() < deadline:
             time.sleep(0.01)
         write(root / "context.json", {**scope, "supervisor_pid": child.pid})
-        monkeypatch.setattr(worker_health.os, "readlink", lambda _path: scope["process_namespace"])
+        monkeypatch.setattr(worker_health.Path, "readlink", lambda _path: Path(scope["process_namespace"]))
         assert report(attempt, environ, "liveness")["checks"] == {"supervisor": "supervisor_absent"}
     finally:
         child.wait()
@@ -449,7 +479,7 @@ def test_unreadable_supervisor_namespace_is_not_live(tmp_path, monkeypatch):
     def refuse(_path):
         raise PermissionError
 
-    monkeypatch.setattr(worker_health.os, "readlink", refuse)
+    monkeypatch.setattr(worker_health.Path, "readlink", refuse)
     assert report(attempt, environ, "liveness")["status"] == "not_live"
 
 
@@ -460,17 +490,18 @@ def test_startup_names_an_absent_supervisor(tmp_path):
     assert (checks["supervisor"], checks["herdr"]) == ("supervisor_absent", "herdr_unavailable")
 
 
-def test_newest_live_incarnation_is_chosen(tmp_path):
+def test_only_the_newest_incarnation_counts(tmp_path):
     attempt, root, environ = fixture(tmp_path)
     older = root.parent / "older"
     older.mkdir()
     scope = {**json.loads((root / "context.json").read_text()), "incarnation": "older"}
     write(older / "context.json", scope)
     os.utime(older / "context.json", (1, 1))
+    assert report(attempt, environ, "liveness")["incarnation"] == "incarnation"
     newer = root.parent / "newer"
     newer.mkdir()
     write(newer / "context.json", {**scope, "incarnation": "newer", "supervisor_pid": dead_pid()})
-    assert report(attempt, environ, "liveness")["incarnation"] == "incarnation"
+    assert report(attempt, environ, "liveness")["checks"] == {"supervisor": "supervisor_absent"}
 
 
 def test_agent_not_running_blocks_readiness_only(tmp_path):
@@ -542,3 +573,9 @@ def test_cli_usage_errors_exit_64(args, capsys, monkeypatch):
     code, out = run_main(args, capsys, monkeypatch, {})
     assert code == 64
     assert out.out == ""
+
+
+def test_cli_help_exits_zero(capsys, monkeypatch):
+    code, out = run_main(["--help"], capsys, monkeypatch, {})
+    assert code == 0
+    assert out.out.startswith("usage: health.py")

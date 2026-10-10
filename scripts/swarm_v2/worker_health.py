@@ -1,4 +1,6 @@
 import argparse
+import http.client
+import itertools
 import json
 import os
 import re
@@ -20,6 +22,8 @@ HARNESSES = ("claude", "codex")
 HERDR_TIMEOUT = 2.0
 BRAIN_TIMEOUT = 2.0
 VARIABLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*")
+SHELL_OPERATORS = frozenset(("&&", "||", ";", "|"))
 
 
 @dataclass(frozen=True)
@@ -76,16 +80,37 @@ def session_start_commands(home: Path, harness: str) -> list:
     return [h["command"] for h in handlers if isinstance(h.get("command"), str)]
 
 
+def command_segments(command: str) -> list[list[str]]:
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    segments = [[]]
+    for token in lexer:
+        if token in SHELL_OPERATORS:
+            segments.append([])
+        else:
+            segments[-1].append(token)
+    return segments
+
+
+def segment_callable(words: list[str], path: str) -> bool:
+    words = list(itertools.dropwhile(ASSIGNMENT.fullmatch, words))
+    if words[:1] == ["cd"]:
+        return len(words) == 2 and Path(words[1]).is_dir()
+    return bool(words) and shutil.which(words[0], path=path) is not None
+
+
 def hook_failure(home: Path | None, harness: str, environ: dict) -> str | None:
     commands = session_start_commands(home, harness) if home else []
     if not commands:
         return "hook_missing"
     for command in commands:
         try:
-            program = shlex.split(command)[0]
-        except (ValueError, IndexError):
+            segments = command_segments(command)
+        except ValueError:
             return "hook_invalid"
-        if shutil.which(program, path=environ.get("PATH", "")) is None:
+        if segments == [[]]:
+            return "hook_invalid"
+        if not all(segment_callable(words, environ.get("PATH", "")) for words in segments):
             return "hook_uncallable"
     return None
 
@@ -98,20 +123,17 @@ def alive(scope: dict) -> bool:
     if found is None or found.state == "Z":
         return False
     try:
-        return os.readlink(f"/proc/{pid}/ns/pid") == scope.get("process_namespace")
+        return str(Path(f"/proc/{pid}/ns/pid").readlink()) == scope.get("process_namespace")
     except OSError:
         return False
 
 
 def incarnation(attempt: Path) -> tuple[Path, dict] | None:
-    contexts = sorted(
-        (attempt / "run" / "supervision").glob("*/context.json"), key=lambda p: p.stat().st_mtime_ns, reverse=True
-    )
-    for path in contexts:
-        scope = read(path)
-        if alive(scope) and not (path.parent / "result.json").exists():
-            return path.parent, scope
-    return None
+    contexts = sorted((attempt / "run" / "supervision").glob("*/context.json"), key=lambda p: p.stat().st_mtime_ns)
+    if not contexts:
+        return None
+    scope = read(contexts[-1])
+    return (contexts[-1].parent, scope) if alive(scope) and not (contexts[-1].parent / "result.json").exists() else None
 
 
 def herdr_failure(probe: Probe, home: Path | None, root: Path | None) -> str | None:
@@ -156,7 +178,7 @@ def brain_state(environ: dict) -> str:
             return "ok"
     except urllib.error.HTTPError as exc:
         return f"brain_http_{exc.code}"
-    except (OSError, ValueError):
+    except (OSError, ValueError, http.client.HTTPException):
         return "brain_unreachable"
 
 
@@ -211,8 +233,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     try:
         args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
-    except SystemExit:
-        return 64
+    except SystemExit as exc:
+        return 0 if exc.code == 0 else 64
     report = evaluate(Probe(args.attempt, args.harness, dict(os.environ)), args.mode)
     print(json.dumps(report, sort_keys=True), flush=True)
     return 0 if args.mode == "diagnose" or report["status"] in ("live", "ready", "degraded") else 1
