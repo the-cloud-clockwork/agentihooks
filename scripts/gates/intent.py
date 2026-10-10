@@ -595,16 +595,17 @@ class IntentGate:
                 state.write(who.task, PENDING, RUNNING, int(self.clock() * 1000))
                 return Decision.deny("Intent must be checked on the new head. Wait for the tick to rerun the check.")
         if verdict == FAIL:
+            rounds = record.get("coach_rounds", 0)
             merged = mode == "coach" and bool(record.get("url")) and pr_merged(record["url"])
-            if mode == "coach" and (record.get("coach_rounds", 0) >= 2 or merged):
+            if mode == "coach" and (rounds >= 2 or merged):
                 outcome = "merged" if merged else "merge permitted"
-                unmet = "after two fix rounds" if record.get("coach_rounds", 0) >= 2 else "on a merged pull request"
+                unmet = "after two fix rounds" if rounds >= 2 else "on a merged pull request"
                 reason = f"{outcome} with intent unmet {unmet}: {record['reason']}"
                 log.append(state.slug, log.Row.of(NAME, "count", who, call.tool, reason), state.home)
                 return Decision()
             text = f"intent check failed for task {who.task}: {record['reason']}. {fix_steps(who.swarm)}"
             if mode == "coach":
-                text += f" Run fix round {record.get('coach_rounds', 0) + 1} of 2."
+                text += f" Run fix round {rounds + 1} of 2."
             return Decision.deny(text)
         if verdict != PENDING:
             return Decision()

@@ -120,6 +120,7 @@ def test_deny_feedback_contains_fix_steps(tmp_path):
     assert not decision.allowed
     assert "missing behavior" in decision.reason
     assert "Fix steps:" in decision.reason
+    assert decision.reason.endswith(" Run fix round 1 of 2.")
 
 
 def test_a_new_head_cannot_merge_on_an_old_pass(tmp_path, monkeypatch):
