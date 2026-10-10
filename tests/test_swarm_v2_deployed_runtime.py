@@ -1,0 +1,250 @@
+import json
+import socket
+from functools import partial
+from pathlib import Path
+
+import pytest
+
+from scripts.hive import auth as hive_auth
+from scripts.swarm import lease
+from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
+from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL, owner_for
+from scripts.swarm_v2.launch import DistributedLaunch, LaunchTerms
+from scripts.swarm_v2.runtime.base import LOCAL
+
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+
+SLUG = "control-fixture"
+SEAT = f"eng-1@{SLUG}"
+API_URL = "http://swarm-api.agentihooks-swarm.svc:8780"
+IMAGE = "sha256:" + "4b" * 32
+PROJECT = "github.com/the-cloud-clockwork/agentihooks"
+POLICY = Path(__file__).parent / "fixtures" / "swarm_v2" / "pod-policy.json"
+
+
+def _cs():
+    from scripts.swarm_v2 import control_service
+
+    return control_service
+
+
+def _deployed():
+    from scripts.swarm_v2 import deployed
+
+    return deployed
+
+
+class Pods:
+    def __init__(self, namespace):
+        self.namespace, self.created = namespace, []
+
+    def create_pod(self, body):
+        self.created.append(body)
+        return {**body, "metadata": {**body["metadata"], "uid": "uid-1"}}
+
+    def read_pod(self, name):
+        return None
+
+    def list_pods(self, selector):
+        return []
+
+
+def _store():
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig(SLUG, "agentihooks", 2, 0))
+    return store
+
+
+def _free_port():
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def _policy(tmp_path, owner=owner_for(SLUG)):
+    path = tmp_path / "pod-policy.json"
+    path.write_text(json.dumps({**json.loads(POLICY.read_text()), "owner": owner}))
+    return path
+
+
+def _workers(tmp_path, **changes):
+    deployed = _deployed()
+    environ = {
+        deployed.API_URL_ENV: API_URL,
+        deployed.POLICY_ENV: str(_policy(tmp_path)),
+        deployed.IMAGE_ENV: IMAGE,
+        deployed.PROFILE_ENV: "general",
+        deployed.ACCOUNT_ENV: "claude-fixture",
+        deployed.CAP_ENV: "2",
+        deployed.PROJECTS_ENV: f" {PROJECT} ,",
+        deployed.BRAIN_ENV: "swarm",
+    }
+    return {name: value for name, value in {**environ, **changes}.items() if value is not None}
+
+
+def _environ(tmp_path, store, **changes):
+    key = tmp_path / "launch.key"
+    key.write_bytes(b"k" * 32)
+    return {
+        _cs().KEY_ID_ENV: "launch-1",
+        _cs().KEY_FILE_ENV: str(key),
+        _cs().PORT_ENV: str(_free_port()),
+        _cs().SWARM_ENV: SLUG,
+        _cs().CREDENTIAL_ENV: hive_auth.issue_controller(store.redis),
+        **_workers(tmp_path, **changes),
+    }
+
+
+def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_distributed_launch(tmp_path, monkeypatch):
+    from scripts.swarm import controller as loop
+    from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    store = _store()
+    for name, value in {**_environ(tmp_path, store), "SWARM_HIVE_ID": "hive-fixture"}.items():
+        monkeypatch.setenv(name, value)
+    pods, hosted, seen = Pods("swarm-pod-proof"), [], []
+    monkeypatch.setattr(
+        _deployed(), "pod_api", lambda environ, namespace: pods if namespace == pods.namespace else None
+    )
+    real_host = _cs().host
+    monkeypatch.setattr(_cs(), "host", lambda *args: hosted.append(real_host(*args)) or hosted[0])
+    monkeypatch.setattr(loop, "connect", lambda: store)
+    monkeypatch.setattr("scripts.operator_env.fill", lambda env: None)
+
+    def tick(given, runtimes):
+        service = hosted[0]
+        runtime = runtimes[SLUG]
+        task = {"id": "t1", "seat": SEAT, "controller_epoch": service.controller.held.epoch}
+        placed = runtime.spawn(store.config(SLUG), "eng", store.next_name(SLUG, "eng"), task)
+        seen.append((given, list(runtimes), service, runtime, placed))
+        return {SLUG: ["ticked"]}
+
+    monkeypatch.setattr(loop, "run_once", tick)
+
+    assert loop.main(["run", "--once"]) == 0
+
+    [(given, slugs, service, runtime, placed)] = seen
+    assert (given, slugs) == (store, [SLUG])
+    assert isinstance(runtime, RoutedRuntime)
+    assert list(runtime.router.runtimes) == [LOCAL, BACKEND]
+    kubernetes = runtime.router.runtimes[BACKEND]
+    assert isinstance(kubernetes, KubernetesRuntime)
+    assert kubernetes.execute == service.controller.execute
+    assert isinstance(runtime.launch, partial)
+    launcher = runtime.launch.func.__self__
+    assert isinstance(launcher, DistributedLaunch)
+    assert runtime.launch.func == launcher.from_tick
+    assert (launcher.controller, launcher.grants, launcher.router) == (
+        service.controller,
+        service.grants,
+        runtime.router,
+    )
+    assert runtime.launch.keywords == {
+        "terms": LaunchTerms("claude-fixture", 2, _deployed().RESERVATION_MS, (PROJECT,), "swarm", API_URL)
+    }
+    assert store.config(SLUG).api_url == API_URL
+    assert (placed.placement, placed.harness, placed.profile) == (BACKEND, "claude", "general")
+    [pod] = pods.created
+    execution = pod["metadata"]["labels"][EXECUTION_LABEL]
+    assert store.execution(SLUG, execution).seat == SEAT
+    assert lease.current(store, SLUG) is None
+
+
+def test_the_launch_record_names_the_admitted_execution_and_the_worker_settings(tmp_path):
+    workers = _deployed().Workers.from_environ(_workers(tmp_path), SLUG)
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=API_URL)
+    task = {
+        "id": "t1",
+        "seat": SEAT,
+        "controller_epoch": 4,
+        "execution_id": "exe-" + "1" * 32,
+        "generation": 1,
+        "endpoints": {"api_url": API_URL},
+        "launch_grant": "never-copied",
+    }
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    record = workers.launch(SpawnRequest(config, "eng", "engineer-1", task))
+
+    assert record == {
+        "task_id": "t1",
+        "swarm_id": SLUG,
+        "seat_id": SEAT,
+        "grant_ref": "grant-exe-" + "1" * 32,
+        "controller_epoch": 4,
+        "project_id": PROJECT,
+        "harness": "claude",
+        "image_digest": IMAGE,
+        "profile": "general",
+        "memory_mib": 4096,
+        "cpu_millis": 2000,
+        "provider_account": "claude-fixture",
+        "task_payload": {"task_id": "t1", "lane": "eng", "name": "engineer-1", "endpoints": {"api_url": API_URL}},
+    }
+
+
+def test_the_start_runs_as_before_without_an_api_address(tmp_path):
+    store = _store()
+    environ = _environ(tmp_path, store, **{_deployed().API_URL_ENV: None, _deployed().POLICY_ENV: None})
+
+    service = _cs().host(environ, store, "hive-fixture")
+    try:
+        assert service.runtime is None
+        assert store.config(SLUG).api_url == ""
+    finally:
+        service.stop()
+
+
+def test_a_missing_worker_setting_refuses_the_start_and_names_each_one(tmp_path):
+    deployed = _deployed()
+    store = _store()
+    environ = _environ(tmp_path, store, **{deployed.IMAGE_ENV: None, deployed.BRAIN_ENV: None})
+
+    with pytest.raises(SwarmError) as refused:
+        _cs().host(environ, store, "hive-fixture")
+
+    assert str(refused.value) == f"the Kubernetes runtime needs {deployed.IMAGE_ENV}, {deployed.BRAIN_ENV}"
+    assert lease.current(store, SLUG) is None
+
+
+@pytest.mark.parametrize("cap", ["0", "two", "-1"])
+def test_a_launch_cap_that_is_not_a_positive_whole_number_is_refused(tmp_path, cap):
+    deployed = _deployed()
+
+    with pytest.raises(SwarmError) as refused:
+        deployed.Workers.from_environ(_workers(tmp_path, **{deployed.CAP_ENV: cap}), SLUG)
+
+    assert str(refused.value) == f"{deployed.CAP_ENV} must be a whole number above zero"
+
+
+def test_a_profile_the_pod_policy_lacks_is_refused(tmp_path):
+    deployed = _deployed()
+
+    with pytest.raises(SwarmError) as refused:
+        deployed.Workers.from_environ(_workers(tmp_path, **{deployed.PROFILE_ENV: "gpu"}), SLUG)
+
+    assert str(refused.value) == "the Pod policy has no gpu profile"
+
+
+def test_a_pod_policy_owned_by_another_swarm_is_refused(tmp_path):
+    deployed = _deployed()
+    environ = _workers(tmp_path, **{deployed.POLICY_ENV: str(_policy(tmp_path, owner="agentihooks-swarm-other"))})
+
+    with pytest.raises(SwarmError) as refused:
+        deployed.Workers.from_environ(environ, SLUG)
+
+    assert str(refused.value) == f"the Pod policy owner must be {owner_for(SLUG)}"
+
+
+def test_an_invalid_pod_policy_is_refused(tmp_path):
+    deployed = _deployed()
+    path = tmp_path / "broken.json"
+    path.write_text(json.dumps({"owner": owner_for(SLUG)}))
+
+    with pytest.raises(SwarmError) as refused:
+        deployed.Workers.from_environ(_workers(tmp_path, **{deployed.POLICY_ENV: str(path)}), SLUG)
+
+    assert str(refused.value).startswith("pod policy is invalid at ")
