@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/kubernetes/spec.py:scripts.swarm_v2.kubernetes.spec.x__canonical__mutmut_4:ccd42f436699fac6ce68aa071b4a66b5ebe477fb1e54df32c612effe5591332c": {
+    "reader": "standards_reader",
+    "reason": "Changes allow_nan=False to allow_nan=None in the canonical JSON encoder; CPython's json encoder only tests allow_nan for truth, so None behaves as False and NaN and Infinity are refused on both the Python and C paths under either value."
+  }
+}
