@@ -165,14 +165,25 @@ def test_the_worker_is_hardened_and_never_mounts_a_service_account_token():
         "readOnlyRootFilesystem": True,
         "capabilities": {"drop": ["ALL"]},
     }
-    assert "runtimeClassName" not in body
 
 
-def test_a_runtime_class_in_the_policy_reaches_the_pod():
+def test_a_policy_without_a_runtime_class_is_refused_before_any_pod_renders(tmp_path):
+    doc = policy_doc()
+    doc.pop("runtime_class_name", None)
+    with pytest.raises(PodSpecRefused) as refused:
+        load_policy(write(tmp_path, doc))
+    assert (
+        str(refused.value) == "pod policy is invalid at the document root: 'runtime_class_name' is a required property"
+    )
+    assert refused.value.reason == "policy"
+
+
+def test_the_policy_runtime_class_reaches_the_pod():
+    assert render()[1].pod["spec"]["runtimeClassName"] == "kata-fc"
     policy = load_policy(POLICY)
-    policy["runtime_class_name"] = "kata-fc"
+    policy["runtime_class_name"] = "kata-qemu"
     _, rendered = render(policy=policy)
-    assert rendered.pod["spec"]["runtimeClassName"] == "kata-fc"
+    assert rendered.pod["spec"]["runtimeClassName"] == "kata-qemu"
 
 
 def test_volumes_are_private_scratch_the_launch_record_and_one_approved_credential():

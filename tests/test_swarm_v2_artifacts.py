@@ -37,6 +37,20 @@ def registration(task: str = "t1", execution: str = "e1", generation: int = 2) -
     )
 
 
+class Authority:
+    def __init__(self, result: object):
+        self.result = result
+        self.tokens: list[object] = []
+
+    def __call__(self, token: object) -> object:
+        self.tokens.append(token)
+        return self.result
+
+
+def bound(backend, **grant) -> base.ArtifactStore:
+    return base.ArtifactStore(backend, Authority(registration(**grant)), "grant")
+
+
 class Missing(Exception):
     def __init__(self, code: str = "NoSuchKey"):
         super().__init__(code)
@@ -143,8 +157,10 @@ class World:
             real(key, data)
 
         self.backend.write = write
-        self.store = base.ArtifactStore(self.backend)
-        self.scope = base.Scope.granted(registration())
+        self.store = self.bound()
+
+    def bound(self, **grant) -> base.ArtifactStore:
+        return bound(self.backend, **grant)
 
     def truncate(self, uploads: int = 1) -> None:
         if self.kind == "local":
@@ -190,7 +206,7 @@ def test_every_refused_upload_is_counted(world):
     world.truncate(2)
     for _ in range(2):
         with pytest.raises(base.ArtifactError):
-            world.store.put(world.scope, "a1", DATA)
+            world.store.put("a1", DATA)
     assert world.store.metrics() == {base.METRIC: {world.kind: 2}}
 
 
@@ -210,10 +226,40 @@ def test_malformed_reference_is_refused(digest, size):
     assert str(raised.value) == f"not a content reference: {digest}:{size}"
 
 
-def test_scope_comes_from_the_verified_grant():
-    scope = base.Scope.granted(registration(task="t9", execution="e7", generation=4))
-    assert scope == base.Scope("s1", "t9", "e7", 4)
-    assert scope.key("objects", "x") == "s1/t9/objects/x"
+def test_store_takes_its_scope_from_the_verified_registration(tmp_path):
+    authorize = Authority(registration(task="t9", execution="e7", generation=4))
+    store = base.ArtifactStore(local.LocalBackend(tmp_path / "durable"), authorize, "grant")
+    assert authorize.tokens == ["grant"]
+    assert store.scope == base.Scope("s1", "t9", "e7", 4)
+    assert store.scope.key("objects", "x") == "s1/t9/objects/x"
+    ref = store.put("a1", DATA)
+    assert store.backend.keys("s1/") == ["s1/t9/artifacts/a1.json", f"s1/t9/objects/{ref.sha256}"]
+
+
+def test_bound_scope_cannot_be_replaced(world):
+    with pytest.raises(AttributeError):
+        world.store.scope = base.Scope("s1", "t2", "e9", 9)
+    assert world.store.scope == base.Scope("s1", "t1", "e1", 2)
+
+
+@pytest.mark.parametrize(
+    "token", [base.Scope("s1", "t1", "e1", 2), registration(), {"execution_id": "e1"}, "", None, b"grant"]
+)
+def test_hand_built_scope_is_refused_before_authorization(tmp_path, token):
+    authorize = Authority(registration())
+    with pytest.raises(base.ArtifactError) as raised:
+        base.ArtifactStore(local.LocalBackend(tmp_path), authorize, token)
+    assert str(raised.value) == base.UNGRANTED
+    assert authorize.tokens == []
+
+
+@pytest.mark.parametrize("result", [base.Scope("s1", "t1", "e1", 2), {"swarm_id": "s1"}, None, "grant"])
+def test_authorization_that_returns_no_registration_is_refused(tmp_path, result):
+    authorize = Authority(result)
+    with pytest.raises(base.ArtifactError) as raised:
+        base.ArtifactStore(local.LocalBackend(tmp_path), authorize, "grant")
+    assert str(raised.value) == base.UNGRANTED
+    assert authorize.tokens == ["grant"]
 
 
 @pytest.mark.parametrize("field", ["swarm_id", "task_id", "execution_id"])
@@ -226,13 +272,13 @@ def test_scope_refuses_names_that_are_not_identifiers(field, value):
 
 
 def test_put_verifies_and_retrieves_by_content_reference(world):
-    ref = world.store.put(world.scope, "a1", DATA)
+    ref = world.store.put("a1", DATA)
     assert ref == base.ArtifactRef(sha(DATA), len(DATA))
-    assert world.store.stat(world.scope, ref) == base.VERIFIED
-    assert world.store.get_range(world.scope, ref) == DATA
-    assert world.store.get_range(world.scope, ref, 2, 3) == DATA[2:5]
-    assert world.store.get_range(world.scope, ref, 3) == DATA[3:]
-    assert world.store.recorded(world.scope, "a1") == ref
+    assert world.store.stat(ref) == base.VERIFIED
+    assert world.store.get_range(ref) == DATA
+    assert world.store.get_range(ref, 2, 3) == DATA[2:5]
+    assert world.store.get_range(ref, 3) == DATA[3:]
+    assert world.store.recorded("a1") == ref
     assert world.keys() == ["s1/t1/artifacts/a1.json", object_key(DATA)]
     assert world.writes == [staging_key(DATA), staging_key(record_bytes(DATA))]
     assert world.document("s1/t1/artifacts/a1.json") == json.loads(record_bytes(DATA))
@@ -240,48 +286,48 @@ def test_put_verifies_and_retrieves_by_content_reference(world):
 
 
 def test_empty_artifact_round_trips(world):
-    ref = world.store.put(world.scope, "empty", b"")
-    assert world.store.stat(world.scope, ref) == base.VERIFIED
-    assert world.store.get_range(world.scope, ref) == b""
+    ref = world.store.put("empty", b"")
+    assert world.store.stat(ref) == base.VERIFIED
+    assert world.store.get_range(ref) == b""
 
 
 def test_identical_content_is_stored_once(world):
-    first = world.store.put(world.scope, "a1", DATA)
-    second = world.store.put(world.scope, "a2", DATA)
+    first = world.store.put("a1", DATA)
+    second = world.store.put("a2", DATA)
     assert first == second
     assert world.keys() == ["s1/t1/artifacts/a1.json", "s1/t1/artifacts/a2.json", object_key(DATA)]
     assert world.writes.count(staging_key(DATA)) == 1
 
 
 def test_truncated_upload_is_refused_counted_and_leaves_no_state(world):
-    world.store.put(world.scope, "a1", OTHER)
+    world.store.put("a1", OTHER)
     before = {key: world.backend.read(key, 0, world.backend.size(key)) for key in world.keys()}
     world.truncate()
     with pytest.raises(base.ArtifactError) as raised:
-        world.store.put(world.scope, "a2", DATA)
+        world.store.put("a2", DATA)
     assert str(raised.value) == (
         f"{world.kind} reported a successful write of {len(DATA)} bytes to {staging_key(DATA)} "
         f"but the read back does not match {sha(DATA)}"
     )
     assert {key: world.backend.read(key, 0, world.backend.size(key)) for key in world.keys()} == before
-    assert world.store.recorded(world.scope, "a2") is None
-    assert world.store.stat(world.scope, base.ArtifactRef.of(DATA)) == base.ABSENT
+    assert world.store.recorded("a2") is None
+    assert world.store.stat(base.ArtifactRef.of(DATA)) == base.ABSENT
     assert world.store.metrics() == {base.METRIC: {world.kind: 1}}
 
 
 def test_retry_after_a_refused_upload_is_a_new_valid_request(world):
     world.truncate()
     with pytest.raises(base.ArtifactError):
-        world.store.put(world.scope, "a1", DATA)
-    ref = world.store.put(world.scope, "a1", DATA)
-    assert world.store.get_range(world.scope, ref) == DATA
+        world.store.put("a1", DATA)
+    ref = world.store.put("a1", DATA)
+    assert world.store.get_range(ref) == DATA
     assert world.store.metrics() == {base.METRIC: {world.kind: 1}}
 
 
 def test_same_length_corruption_is_refused(world):
     world.flip = 1
     with pytest.raises(base.ArtifactError) as raised:
-        world.store.put(world.scope, "a1", DATA)
+        world.store.put("a1", DATA)
     assert str(raised.value) == (
         f"{world.kind} reported a successful write of {len(DATA)} bytes to {staging_key(DATA)} "
         f"but the read back does not match {sha(DATA)}"
@@ -299,12 +345,12 @@ def test_interrupted_upload_leaves_no_staging(world):
 
     world.backend.write = write
     with pytest.raises(OSError):
-        world.store.put(world.scope, "a1", DATA)
+        world.store.put("a1", DATA)
     assert world.keys() == []
 
 
 def test_every_range_read_verifies_the_whole_object(world):
-    ref = world.store.put(world.scope, "a1", DATA)
+    ref = world.store.put("a1", DATA)
     reads = []
     real = world.backend.read
 
@@ -313,34 +359,34 @@ def test_every_range_read_verifies_the_whole_object(world):
         return real(key, start, length)
 
     world.backend.read = read
-    world.store.get_range(world.scope, ref, 2, 3)
-    world.store.get_range(world.scope, ref, 2, 3)
+    world.store.get_range(ref, 2, 3)
+    world.store.get_range(ref, 2, 3)
     assert reads == [(0, len(DATA)), (2, 3), (0, len(DATA)), (2, 3)]
     world.backend.write(object_key(DATA), DATA[:-1] + b"X")
     with pytest.raises(base.ArtifactError):
-        world.store.get_range(world.scope, ref, 2, 3)
+        world.store.get_range(ref, 2, 3)
 
 
 def test_deleted_artifact_is_no_longer_readable(world):
-    ref = world.store.put(world.scope, "a1", DATA)
-    world.store.get_range(world.scope, ref)
-    assert world.store.delete_if_unreferenced(world.scope, ref) is True
+    ref = world.store.put("a1", DATA)
+    world.store.get_range(ref)
+    assert world.store.delete_if_unreferenced(ref) is True
     with pytest.raises(base.ArtifactError) as raised:
-        world.store.get_range(world.scope, ref)
+        world.store.get_range(ref)
     assert str(raised.value) == f"artifact {sha(DATA)} is not verified in {world.kind}"
 
 
 def test_stale_generation_cannot_delete_a_newer_record(world):
-    newer = base.Scope.granted(registration(execution="e3", generation=3))
-    ref = world.store.put(newer, "a1", DATA)
+    newer = world.bound(execution="e3", generation=3)
+    ref = newer.put("a1", DATA)
     keys = world.keys()
-    assert world.store.delete_if_unreferenced(world.scope, ref) is False
+    assert world.store.delete_if_unreferenced(ref) is False
     assert world.keys() == keys
-    assert world.store.delete_if_unreferenced(newer, ref) is True
+    assert newer.delete_if_unreferenced(ref) is True
 
 
 def test_truncated_record_keeps_the_verified_object_and_writes_no_record(world):
-    world.store.put(world.scope, "warm", OTHER)
+    world.store.put("warm", OTHER)
     world.writes.clear()
     real = world.backend.write
 
@@ -351,88 +397,88 @@ def test_truncated_record_keeps_the_verified_object_and_writes_no_record(world):
 
     world.backend.write = write
     with pytest.raises(base.ArtifactError):
-        world.store.put(world.scope, "a1", DATA)
-    assert world.store.recorded(world.scope, "a1") is None
-    assert world.store.stat(world.scope, base.ArtifactRef.of(DATA)) == base.VERIFIED
+        world.store.put("a1", DATA)
+    assert world.store.recorded("a1") is None
+    assert world.store.stat(base.ArtifactRef.of(DATA)) == base.VERIFIED
     world.backend.write = real
     world.writes.clear()
-    world.store.put(world.scope, "a1", DATA)
+    world.store.put("a1", DATA)
     assert world.writes == [staging_key(record_bytes(DATA))]
 
 
 def test_retrying_a_completed_upload_returns_the_committed_object_without_writing(world):
-    ref = world.store.put(world.scope, "a1", DATA)
+    ref = world.store.put("a1", DATA)
     keys = world.keys()
     world.writes.clear()
-    assert world.store.put(world.scope, "a1", DATA) == ref
+    assert world.store.put("a1", DATA) == ref
     assert world.writes == []
     assert world.keys() == keys
 
 
 def test_same_artifact_id_with_other_content_is_refused_without_writing(world):
-    world.store.put(world.scope, "a1", DATA)
+    world.store.put("a1", DATA)
     keys = world.keys()
     world.writes.clear()
     with pytest.raises(base.ArtifactError) as raised:
-        world.store.put(world.scope, "a1", OTHER)
+        world.store.put("a1", OTHER)
     assert str(raised.value) == "artifact a1 is committed with other content"
     assert world.writes == []
     assert world.keys() == keys
 
 
 def test_lost_object_behind_a_record_is_republished_from_matching_content(world):
-    ref = world.store.put(world.scope, "a1", DATA)
+    ref = world.store.put("a1", DATA)
     world.backend.remove(object_key(DATA))
-    assert world.store.stat(world.scope, ref) == base.ABSENT
+    assert world.store.stat(ref) == base.ABSENT
     world.writes.clear()
-    assert world.store.put(world.scope, "a1", DATA) == ref
+    assert world.store.put("a1", DATA) == ref
     assert world.writes == [staging_key(DATA)]
-    assert world.store.stat(world.scope, ref) == base.VERIFIED
+    assert world.store.stat(ref) == base.VERIFIED
 
 
 @pytest.mark.parametrize("damage", [DATA[:-1], DATA[:-1] + b"X"])
 def test_damaged_object_is_corrupt_unreadable_and_repaired_by_put(world, damage):
-    ref = world.store.put(world.scope, "a1", DATA)
+    ref = world.store.put("a1", DATA)
     world.backend.write(object_key(DATA), damage)
-    assert world.store.stat(world.scope, ref) == base.CORRUPT
+    assert world.store.stat(ref) == base.CORRUPT
     with pytest.raises(base.ArtifactError) as raised:
-        world.store.get_range(world.scope, ref, 0, 1)
+        world.store.get_range(ref, 0, 1)
     assert str(raised.value) == f"artifact {sha(DATA)} is not verified in {world.kind}"
-    world.store.put(world.scope, "a1", DATA)
-    assert world.store.get_range(world.scope, ref) == DATA
+    world.store.put("a1", DATA)
+    assert world.store.get_range(ref) == DATA
 
 
 def test_unknown_reference_is_absent(world):
-    assert world.store.stat(world.scope, base.ArtifactRef.of(DATA)) == base.ABSENT
-    assert world.store.recorded(world.scope, "a1") is None
+    assert world.store.stat(base.ArtifactRef.of(DATA)) == base.ABSENT
+    assert world.store.recorded("a1") is None
 
 
 def test_another_task_scope_sees_nothing(world):
-    ref = world.store.put(world.scope, "a1", DATA)
-    other = base.Scope.granted(registration(task="t2"))
-    assert world.store.stat(other, ref) == base.ABSENT
-    assert world.store.recorded(other, "a1") is None
+    ref = world.store.put("a1", DATA)
+    other = world.bound(task="t2")
+    assert other.stat(ref) == base.ABSENT
+    assert other.recorded("a1") is None
 
 
 @pytest.mark.parametrize(("start", "length"), [(-1, 1), (0, -1), (0, len(DATA) + 1), (len(DATA), 1), (5, len(DATA))])
 def test_range_outside_the_artifact_is_refused(world, start, length):
-    ref = world.store.put(world.scope, "a1", DATA)
+    ref = world.store.put("a1", DATA)
     with pytest.raises(base.ArtifactError) as raised:
-        world.store.get_range(world.scope, ref, start, length)
+        world.store.get_range(ref, start, length)
     assert str(raised.value) == f"range {start}+{length} is outside {len(DATA)} bytes"
 
 
 def test_range_edges_are_readable(world):
-    ref = world.store.put(world.scope, "a1", DATA)
-    assert world.store.get_range(world.scope, ref, len(DATA) - 1, 1) == DATA[-1:]
-    assert world.store.get_range(world.scope, ref, len(DATA), 0) == b""
-    assert world.store.get_range(world.scope, ref, len(DATA)) == b""
+    ref = world.store.put("a1", DATA)
+    assert world.store.get_range(ref, len(DATA) - 1, 1) == DATA[-1:]
+    assert world.store.get_range(ref, len(DATA), 0) == b""
+    assert world.store.get_range(ref, len(DATA)) == b""
 
 
 @pytest.mark.parametrize("artifact_id", ["../a", "", "a/b", ".a", 3])
 def test_artifact_ids_must_be_identifiers(world, artifact_id):
     with pytest.raises(base.ArtifactError) as raised:
-        world.store.put(world.scope, artifact_id, DATA)
+        world.store.put(artifact_id, DATA)
     assert str(raised.value) == f"not an identifier: {artifact_id!r}"
     assert world.writes == []
 
@@ -448,15 +494,15 @@ def test_reads_large_artifacts_in_chunks(world, monkeypatch):
 
     world.backend.read = read
     data = b"0123456789"
-    ref = world.store.put(world.scope, "a1", data)
+    ref = world.store.put("a1", data)
     reads.clear()
-    assert world.store.stat(world.scope, ref) == base.VERIFIED
+    assert world.store.stat(ref) == base.VERIFIED
     assert reads == [(0, 4), (4, 4), (8, 2)]
 
 
 def committed(world, *pairs):
     for artifact_id, data in pairs:
-        world.store.put(world.scope, artifact_id, data)
+        world.store.put(artifact_id, data)
 
 
 def manifest(generation=2, execution="e1", artifacts=None):
@@ -471,61 +517,61 @@ def manifest(generation=2, execution="e1", artifacts=None):
 
 def test_manifest_commits_verified_artifacts_once(world):
     committed(world, ("a1", DATA), ("a2", OTHER))
-    result = world.store.commit_manifest(world.scope, "m", ["a2", "a1", "a2"])
+    result = world.store.commit_manifest("m", ["a2", "a1", "a2"])
     assert result == manifest()
     assert list(result["artifacts"]) == ["a1", "a2"]
     assert world.document("s1/t1/manifests/m/2.json") == manifest()
     world.writes.clear()
-    assert world.store.commit_manifest(world.scope, "m", ["a1", "a2"]) == manifest()
+    assert world.store.commit_manifest("m", ["a1", "a2"]) == manifest()
     assert world.writes == []
 
 
 def test_manifest_with_other_content_at_the_same_generation_is_refused(world):
     committed(world, ("a1", DATA), ("a2", OTHER))
-    world.store.commit_manifest(world.scope, "m", ["a1", "a2"])
+    world.store.commit_manifest("m", ["a1", "a2"])
     with pytest.raises(base.ArtifactError) as raised:
-        world.store.commit_manifest(world.scope, "m", ["a1"])
+        world.store.commit_manifest("m", ["a1"])
     assert str(raised.value) == "manifest m generation 2 is committed with other content"
-    sibling = base.Scope.granted(registration(execution="e2"))
+    sibling = world.bound(execution="e2")
     with pytest.raises(base.ArtifactError):
-        world.store.commit_manifest(sibling, "m", ["a1", "a2"])
+        sibling.commit_manifest("m", ["a1", "a2"])
     assert world.document("s1/t1/manifests/m/2.json") == manifest()
 
 
 def test_stale_generation_cannot_publish_over_a_newer_manifest(world):
     committed(world, ("a1", DATA), ("a2", OTHER))
-    newer = base.Scope.granted(registration(execution="e3", generation=3))
-    assert world.store.commit_manifest(newer, "m", ["a1"]) == manifest(3, "e3", {"a1": DATA})
+    newer = world.bound(execution="e3", generation=3)
+    assert newer.commit_manifest("m", ["a1"]) == manifest(3, "e3", {"a1": DATA})
     keys = world.keys()
     with pytest.raises(base.ArtifactError) as raised:
-        world.store.commit_manifest(world.scope, "m", ["a1", "a2"])
+        world.store.commit_manifest("m", ["a1", "a2"])
     assert str(raised.value) == "manifest m has newer generation 3"
     assert world.keys() == keys
-    newest = base.Scope.granted(registration(execution="e4", generation=4))
-    assert world.store.commit_manifest(newest, "m", ["a2"]) == manifest(4, "e4", {"a2": OTHER})
+    newest = world.bound(execution="e4", generation=4)
+    assert newest.commit_manifest("m", ["a2"]) == manifest(4, "e4", {"a2": OTHER})
 
 
 def test_generation_fence_is_per_manifest_name(world):
     committed(world, ("a1", DATA))
-    world.store.commit_manifest(base.Scope.granted(registration(generation=5)), "m2", ["a1"])
-    assert world.store.commit_manifest(world.scope, "m", ["a1"]) == manifest(artifacts={"a1": DATA})
+    world.bound(generation=5).commit_manifest("m2", ["a1"])
+    assert world.store.commit_manifest("m", ["a1"]) == manifest(artifacts={"a1": DATA})
 
 
 def test_manifest_refuses_an_absent_or_unverified_artifact(world):
     committed(world, ("a1", DATA))
     with pytest.raises(base.ArtifactError) as raised:
-        world.store.commit_manifest(world.scope, "m", ["a1", "a9"])
+        world.store.commit_manifest("m", ["a1", "a9"])
     assert str(raised.value) == "artifact a9 is not committed and verified"
     world.backend.write(object_key(DATA), b"tampered")
     with pytest.raises(base.ArtifactError) as raised:
-        world.store.commit_manifest(world.scope, "m", ["a1"])
+        world.store.commit_manifest("m", ["a1"])
     assert str(raised.value) == "artifact a1 is not committed and verified"
     assert not [key for key in world.keys() if "/manifests/" in key]
 
 
 def test_manifest_name_must_be_an_identifier(world):
     with pytest.raises(base.ArtifactError) as raised:
-        world.store.commit_manifest(world.scope, "../m", [])
+        world.store.commit_manifest("../m", [])
     assert str(raised.value) == "not an identifier: '../m'"
 
 
@@ -533,25 +579,25 @@ def test_truncated_manifest_upload_publishes_no_manifest(world):
     committed(world, ("a1", DATA))
     world.truncate()
     with pytest.raises(base.ArtifactError):
-        world.store.commit_manifest(world.scope, "m", ["a1"])
+        world.store.commit_manifest("m", ["a1"])
     assert not [key for key in world.keys() if "/manifests/" in key]
     assert world.store.metrics() == {base.METRIC: {world.kind: 1}}
 
 
 def test_referenced_artifact_is_not_deleted(world):
     committed(world, ("a1", DATA), ("a2", OTHER))
-    world.store.commit_manifest(world.scope, "m", ["a1"])
+    world.store.commit_manifest("m", ["a1"])
     keys = world.keys()
-    assert world.store.delete_if_unreferenced(world.scope, base.ArtifactRef.of(DATA)) is False
+    assert world.store.delete_if_unreferenced(base.ArtifactRef.of(DATA)) is False
     assert world.keys() == keys
 
 
 def test_unreferenced_artifact_and_its_records_are_deleted(world):
     committed(world, ("a1", DATA), ("copy", DATA), ("a2", OTHER))
-    world.store.commit_manifest(world.scope, "m", ["a2"])
-    assert world.store.delete_if_unreferenced(world.scope, base.ArtifactRef.of(DATA)) is True
+    world.store.commit_manifest("m", ["a2"])
+    assert world.store.delete_if_unreferenced(base.ArtifactRef.of(DATA)) is True
     assert world.keys() == ["s1/t1/artifacts/a2.json", "s1/t1/manifests/m/2.json", object_key(OTHER)]
-    assert world.store.stat(world.scope, base.ArtifactRef.of(OTHER)) == base.VERIFIED
+    assert world.store.stat(base.ArtifactRef.of(OTHER)) == base.VERIFIED
 
 
 def test_local_backend_contains_every_key(tmp_path):
@@ -698,7 +744,7 @@ def test_truncated_copy_is_refused_and_removed(tmp_path):
     world = World("object-store", tmp_path)
     world.fake.truncate_copies = 1
     with pytest.raises(base.ArtifactError) as raised:
-        world.store.put(world.scope, "a1", DATA)
+        world.store.put("a1", DATA)
     assert str(raised.value) == (
         f"object-store reported a successful write of {len(DATA)} bytes to {object_key(DATA)} "
         f"but the read back does not match {sha(DATA)}"
