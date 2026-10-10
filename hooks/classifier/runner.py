@@ -3,6 +3,7 @@ from dataclasses import dataclass, replace
 
 from hooks.classifier import code_rules, decide, decision_log
 from hooks.classifier.definitions import Definition, DefinitionError, QuestionSpec, load
+from hooks.classifier.errors import ClassifierInputError
 from hooks.classifier.questions import Choice, Question, YesNo, validate
 from hooks.classifier.result import Answer, DecisionResult
 
@@ -84,7 +85,10 @@ def questions_for(definition: Definition, params: dict | None = None) -> dict[st
             if name in questions:
                 raise DefinitionError("expanded question names must be unique")
             questions[name] = question
-    validate(questions)
+    try:
+        validate(questions)
+    except ClassifierInputError as exc:
+        raise DefinitionError(str(exc)) from exc
     return questions
 
 
@@ -109,13 +113,13 @@ def run(
 ) -> RunResult:
     try:
         definition = load(name, environ=environ)
+        rule = code_rules.rule_for(definition)
+        params = {} if params is None else params
+        questions = questions_for(definition, params) if rule is None else rule.questions(definition, state, params)
     except DefinitionError as exc:
         with decision_log.record_context(definition=name):
             decision_log.append(name, state, None, 0, [decision_log.failure_record("definition", exc)])
         raise
-    rule = code_rules.rule_for(definition)
-    params = {} if params is None else params
-    questions = questions_for(definition, params) if rule is None else rule.questions(definition, state, params)
     options = {
         "purpose": definition.purpose,
         "harness": harness,
