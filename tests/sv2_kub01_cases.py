@@ -67,7 +67,7 @@ def second() -> dict:
         harness="codex",
         memory_mib=2048,
         cpu_millis=1000,
-        credential_ref="swarm-codex-fixture",
+        credential_ref="codex-fixture",
         task_payload={"prompt": "A second independent task."},
     )
     return doc

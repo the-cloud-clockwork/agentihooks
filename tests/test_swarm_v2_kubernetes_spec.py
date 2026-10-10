@@ -70,6 +70,7 @@ def test_the_fixture_renders_a_pod_bound_to_its_launch_identity():
         "swarm.agentihooks.io/swarm": "rig-grade-swarm",
         "swarm.agentihooks.io/task": "vkub1",
         "swarm.agentihooks.io/template-version": "kub01-v2",
+        "swarm.agentihooks.io/provider-account": "claude-fixture",
     }
     assert meta["annotations"] == {
         "swarm.agentihooks.io/seat": "eng-3@rig-grade-swarm",
@@ -181,7 +182,14 @@ def test_volumes_are_private_scratch_the_launch_record_and_one_approved_credenti
         {"name": "home", "emptyDir": {"sizeLimit": "9216Mi"}},
         {"name": "tmp", "emptyDir": {"sizeLimit": "1024Mi"}},
         {"name": "launch", "configMap": {"name": f"swarm-{EXECUTION}-launch", "defaultMode": 0o444}},
-        {"name": "credential", "secret": {"secretName": "swarm-claude-fixture", "defaultMode": 0o400}},
+        {
+            "name": "credential",
+            "secret": {
+                "secretName": "swarm-account-claude-fixture",
+                "items": [{"key": "token", "path": "token"}],
+                "defaultMode": 0o400,
+            },
+        },
     ]
     assert body["containers"][0]["volumeMounts"] == [
         {"name": "home", "mountPath": "/home/worker"},
@@ -464,12 +472,13 @@ def test_identity_values_at_their_bounds_are_accepted():
 
 def test_a_codex_launch_names_codex_in_its_probes_and_annotation():
     doc = launch_doc()
-    doc.update(harness="codex", credential_ref="swarm-codex-fixture")
+    doc.update(harness="codex", credential_ref="codex-fixture")
     _, rendered = render(doc)
     container = rendered.pod["spec"]["containers"][0]
     assert container["readinessProbe"]["exec"]["command"][5:7] == ["--harness", "codex"]
     assert rendered.pod["metadata"]["annotations"]["swarm.agentihooks.io/harness"] == "codex"
-    assert rendered.pod["spec"]["volumes"][3]["secret"]["secretName"] == "swarm-codex-fixture"
+    assert rendered.pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == "codex-fixture"
+    assert rendered.pod["spec"]["volumes"][3]["secret"]["secretName"] == "swarm-account-codex-fixture"
 
 
 def test_a_probe_initial_delay_comes_from_the_policy():
@@ -499,6 +508,13 @@ POLICY_REFUSALS = [
         lambda d: d.update(image_repository="ghcr.io/x/worker:dev"),
         "pod policy is invalid at image_repository: 'ghcr.io/x/worker:dev' does not match "
         "'^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?(/[a-z0-9]+([._-][a-z0-9]+)*)+$'",
+    ),
+    (
+        "account name past the label bound",
+        lambda d: d.update(credentials=["a" * 49]),
+        "pod policy is invalid at credentials/0: '"
+        + "a" * 49
+        + "' does not match '^[a-z0-9]([a-z0-9-]{0,46}[a-z0-9])?$'",
     ),
     (
         "unbounded grace",
