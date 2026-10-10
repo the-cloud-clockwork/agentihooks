@@ -1,0 +1,94 @@
+{
+  "package": "SV2-MST-01",
+  "dependency": [
+    "SV2-LDG-05"
+  ],
+  "dependents": [],
+  "integration_gate": "G10",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2426",
+  "pull_request": null,
+  "tested_commit": "e9a23a414b8a",
+  "status": "mocked-acceptance-qualified",
+  "package_complete": false,
+  "evidence_class": "fakeredis swarm store and inbox, a fixture ledger document with four phases and two master seats; no live swarm. Live G10 qualification is separate.",
+  "interfaces": [
+    "masters.seats(slug, count): master@slug (the lead, the address every single master swarm already uses) then master-2@slug up to master-N@slug; a count below one is refused",
+    "MasterSeats.owners(slug, doc): every ledger phase has exactly one owning seat, saved in the swarm's masters hash; a phase keeps a seat that still exists, an unowned phase goes to the seat owning fewest (ties to the lower seat), and a newly added seat takes the busiest seats' last phases up to an even share",
+    "masters.route(target, doc, owners, live, lead): a phase or task item reaches the live master owning its phase, anything else and any item whose owner seat has no live master reaches the lead",
+    "masters.lead_of(slug, live): the lead seat while it is live, else the lowest numbered live master",
+    "agentihooks swarm SLUG set masters=N: stores the master seat count after every other pair is checked and reports it"
+  ],
+  "supported_versions": {
+    "python": "3.11 and 3.12 unit shards on the pull request",
+    "compatibility": "A swarm with no stored count has one master seat at the existing master address, so single master swarms route exactly as before (INV-R11)"
+  },
+  "states": {
+    "observed": "Owners are computed from the ledger phases and the stored count on each read",
+    "committed": "Owners and the seat list are written to the masters hash under a watch; a clashing write is retried and refused by name after five attempts",
+    "externally_verified": "None; no live multi master swarm yet"
+  },
+  "authoritative_objects": [
+    "The swarm masters hash in Redis holds the seat count, the phase owners and the seat list they were assigned against",
+    "The ledger document stays the single writer of phases and tasks; this package never writes it"
+  ],
+  "rollback_rehearsal": {
+    "action": "agentihooks swarm SLUG set masters=1: every phase returns to the lead and every item routes to the single master address",
+    "test": "tests/test_swarm_v2_master_seats.py::test_a_single_master_swarm_routes_a_phase_item_to_its_one_master_as_before",
+    "data_safety": "Lowering the count only reassigns owners of removed seats; no inbox item or ledger record is deleted"
+  },
+  "remaining_limitations": [
+    "The tick does not yet launch or respawn masters in seats two and up; filed as a ledger follow up",
+    "Hive ownership is not delivered; a seat owns phases only; filed as a ledger follow up"
+  ],
+  "validation": {
+    "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38069851670",
+    "unit": "Focused proofs https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38069851670 on the tested commit: every master seats and ledger events test passed, 166 passed; the three package case tests ran each case twice on independent fakeredis servers and failed only because the committed case records were placeholders, whose observed records this commit holds",
+    "mutation": "Mutation preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063779158 on the restacked parent left 47 survivors in masters, ledger events and the swarm command; dead defaults were removed and exact tests added in 6e2e86d4",
+    "local": "No local tests or mutation ran; static prepush passed on every commit"
+  },
+  "measurements": {},
+  "cases": {
+    "a": "evidence/SV2-MST-01/a-result.json",
+    "b": "evidence/SV2-MST-01/b-result.json",
+    "c": "evidence/SV2-MST-01/c-result.json",
+    "manifest": "evidence/SV2-MST-01/manifest.json"
+  },
+  "decisions": [
+    "Seat one keeps the existing master address so a single master swarm routes exactly as before",
+    "Owners stay put unless a seat is added, because owners must not change under running work",
+    "An item whose owner seat has no live master goes to the lead; with the lead seat empty the lowest numbered live master answers"
+  ],
+  "obligations": {
+    "input_preparation": {
+      "met_by": "tests/sv2_mst01_cases.py builds the four phase two seat fixture from tests/fixtures/swarm_v2/master-seats.json",
+      "tests": [
+        "tests/test_swarm_v2_master_seats.py::test_package_cases_match_their_committed_evidence",
+        "tests/test_swarm_v2_master_seats.py::test_the_manifest_names_the_hash_of_every_case_input"
+      ]
+    },
+    "output_contract": {
+      "met_by": "Four phases split two and two; a task comment on a phase owned by master-2 reaches master-2 only; unaddressed chat reaches the lead",
+      "tests": [
+        "tests/test_swarm_v2_master_seats.py::test_four_phases_split_two_and_two_between_two_master_seats",
+        "tests/test_swarm_v2_master_seats.py::test_an_operator_comment_on_a_phase_of_the_second_master_reaches_only_that_master"
+      ]
+    },
+    "rejection_contract": {
+      "met_by": "An owner seat with no live master never strands an item; a count below one or not a whole number is refused by name",
+      "tests": [
+        "tests/test_swarm_v2_master_seats.py::test_an_owner_seat_with_no_live_master_never_strands_an_item",
+        "tests/test_swarm_v2_master_seats.py::test_refusals_name_the_count_they_refused"
+      ]
+    },
+    "recovery_contract": {
+      "met_by": "A removed seat's phases move while every other phase keeps its owner; a re-read after a restart returns the saved owners",
+      "tests": [
+        "tests/test_swarm_v2_master_seats.py::test_a_removed_seat_hands_its_phases_on_and_every_other_phase_keeps_its_owner",
+        "tests/test_swarm_v2_master_seats.py::test_a_new_reader_after_a_restart_gets_the_saved_owners_whatever_the_phase_order"
+      ]
+    },
+    "mutation_scope": {
+      "met_by": "Only the masters hash and inbox items change; the ledger document is never written"
+    }
+  }
+}

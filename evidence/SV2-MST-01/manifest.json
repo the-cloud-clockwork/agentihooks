@@ -13,5 +13,7 @@
     "tests/fixtures/swarm_v2/master-seats.json": "442c3c3caf41df962800006dea2f299f7e410a3f7a0ceaafa626d89c09177ca7"
   },
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2426",
-  "package": "SV2-MST-01"
+  "package": "SV2-MST-01",
+  "tested_commit": "e9a23a414b8a",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38069851670"
 }
