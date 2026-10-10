@@ -1,7 +1,6 @@
 import hashlib
 import json
 from pathlib import Path
-from unittest import mock
 
 import yaml
 
@@ -19,10 +18,10 @@ INPUTS = ("tests/fixtures/swarm_v2/control-nodes.json", "deploy/helm/agentihooks
 SLUG = "control-fixture"
 OWNER = "hive-anton"
 KEY = LaunchKey("launch-1", b"k" * 32)
-START_MS = 1_000_000
 EVIDENCE_CLASS = (
-    "mocked: fakeredis store shared by both controller processes, a fake lease clock, the chart's controller "
-    "affinity evaluated against labelled node fixtures; no Kubernetes scheduler, autoscaler or EC2 call was made"
+    "mocked: fakeredis store shared by both controller processes with its own clock, the chart's controller "
+    "affinity evaluated against labelled node fixtures; recovery seconds count controller ticks times the tick "
+    "interval; no Kubernetes scheduler, autoscaler or EC2 call was made"
 )
 
 
@@ -31,16 +30,12 @@ class World:
         import fakeredis
 
         self.server = fakeredis.FakeServer()
-        self.clock = [START_MS]
         self.store().create(SwarmConfig(SLUG, "agentihooks", 2, 0))
 
     def store(self) -> RedisStore:
         import fakeredis
 
         return RedisStore(fakeredis.FakeRedis(server=self.server, decode_responses=True))
-
-    def clocked(self):
-        return mock.patch.object(lease, "now_ms", lambda store: self.clock[0])
 
     def service(self, authorize=lambda: True) -> control_service.ControlService:
         return control_service.ControlService(self.store(), SLUG, KEY, authorize, owner=OWNER)
@@ -136,6 +131,15 @@ def _observed(store, agents) -> dict:
     return {agent.task: observe.stored(store, SLUG, agent.execution_id).state.value for agent in agents}
 
 
+def _recovery_seconds(service, agents) -> float | None:
+    """Ticks until every attempt is observed working, times the tick interval: deterministic, an upper bound."""
+    for ticks in range(1, 4):
+        service.tick()
+        if set(_observed(service.controller.store, agents).values()) == {"working"}:
+            return ticks * lease.tick_ms() / 1000
+    return None
+
+
 def _two_attempts(world: World):
     first = world.service()
     assert first.start()
@@ -151,32 +155,33 @@ def _positive() -> tuple[dict, bool]:
     runs = []
     for _ in range(2):
         world = World()
-        with world.clocked():
-            first, attempts = _two_attempts(world)
-            agents = [agent for agent, _ in attempts]
-            before = _claims(first, agents)
-            first.stop()
-            restart_ms = world.clock[0]
-            second = world.service()
-            restarted = second.start()
-            world.clock[0] += 1000
-            for agent, token in attempts:
-                second.executions.heartbeat(
-                    agent.execution_id, token, _beat(second, agent, 2, second.controller.held.epoch)
-                )
-            second.tick(now=world.clock[0] / 1000)
-            runs.append(
-                {
-                    "restarted": restarted,
-                    "epoch_after_graceful_stop": second.controller.held.epoch,
-                    "task_authority_kept": _claims(second, agents) == before,
-                    "observed": _observed(second.controller.store, agents),
-                    "swarm_control_restart_recovery_seconds": (world.clock[0] - restart_ms) / 1000,
-                }
+        first, attempts = _two_attempts(world)
+        agents = [agent for agent, _ in attempts]
+        before = _claims(first, agents)
+        first.stop()
+        released = lease.current(world.store(), SLUG) is None
+        second = world.service()
+        restarted = second.start()
+        for agent, token in attempts:
+            second.executions.heartbeat(
+                agent.execution_id, token, _beat(second, agent, 2, second.controller.held.epoch)
             )
+        runs.append(
+            {
+                "restarted": restarted,
+                "lease_released_on_stop": released,
+                "task_authority_kept": _claims(second, agents) == before,
+                "swarm_control_restart_recovery_seconds": _recovery_seconds(second, agents),
+                "observed": _observed(second.controller.store, agents),
+            }
+        )
     observed = {"placement": durable, "runs": runs, "independent_runs_agree": runs[0] == runs[1]}
     passed = all(p["schedulable"] for p in durable.values()) and all(
-        r["restarted"] and r["task_authority_kept"] and set(r["observed"].values()) == {"working"} for r in runs
+        r["restarted"]
+        and r["lease_released_on_stop"]
+        and r["task_authority_kept"]
+        and set(r["observed"].values()) == {"working"}
+        for r in runs
     )
     return observed, passed and runs[0] == runs[1]
 
@@ -209,43 +214,38 @@ def _rejection() -> tuple[dict, bool]:
 
 def _recovery() -> tuple[dict, bool]:
     world = World()
-    with world.clocked():
-        first, attempts = _two_attempts(world)
-        agents = [agent for agent, _ in attempts]
-        before = _claims(first, agents)
-        epoch = first.controller.held.epoch
-        world.clock[0] += 5000
-        restart_ms = world.clock[0]
-        second = world.service()
-        restarted = second.start()
-        rival = control_service.ControlService(world.store(), SLUG, KEY, lambda: True, owner="hive-rival")
-        rival_took = rival.start()
-        world.clock[0] += 2000
-        acks, stale = {}, {}
-        for agent, token in attempts:
-            body = _beat(second, agent, 2, second.controller.held.epoch)
-            first_ack = second.executions.heartbeat(agent.execution_id, token, body)
-            replay_ack = second.executions.heartbeat(agent.execution_id, token, body)
-            acks[agent.task] = {"epoch": first_ack["controller_epoch"], "replay_identical": first_ack == replay_ack}
-            older = {**_beat(second, agent, 1, epoch), "state": "starting"}
-            try:
-                second.executions.heartbeat(agent.execution_id, token, older)
-                stale[agent.task] = "accepted"
-            except Exception as error:
-                stale[agent.task] = getattr(error, "error_class", type(error).__name__)
-        second.tick(now=world.clock[0] / 1000)
-        store = second.controller.store
-        observed = {
-            "restarted": restarted,
-            "epochs": [epoch, second.controller.held.epoch],
-            "rival_controller_took_lease": rival_took,
-            "active_attempts_after_restart": sorted(a.task for a in store.execution_occupants(SLUG).values()),
-            "task_authority_kept": _claims(second, agents) == before,
-            "current_heartbeats": acks,
-            "older_heartbeats": stale,
-            "observed": _observed(store, agents),
-            "swarm_control_restart_recovery_seconds": (world.clock[0] - restart_ms) / 1000,
-        }
+    first, attempts = _two_attempts(world)
+    agents = [agent for agent, _ in attempts]
+    before = _claims(first, agents)
+    epoch = first.controller.held.epoch
+    second = world.service()
+    restarted = second.start()
+    rival = control_service.ControlService(world.store(), SLUG, KEY, lambda: True, owner="hive-rival")
+    rival_took = rival.start()
+    acks, stale = {}, {}
+    for agent, token in attempts:
+        body = _beat(second, agent, 2, second.controller.held.epoch)
+        first_ack = second.executions.heartbeat(agent.execution_id, token, body)
+        replay_ack = second.executions.heartbeat(agent.execution_id, token, body)
+        acks[agent.task] = {"epoch": first_ack["controller_epoch"], "replay_identical": first_ack == replay_ack}
+        older = {**_beat(second, agent, 1, epoch), "state": "starting"}
+        try:
+            second.executions.heartbeat(agent.execution_id, token, older)
+            stale[agent.task] = "accepted"
+        except Exception as error:
+            stale[agent.task] = getattr(error, "error_class", type(error).__name__)
+    store = second.controller.store
+    observed = {
+        "restarted": restarted,
+        "epochs": [epoch, second.controller.held.epoch],
+        "rival_controller_took_lease": rival_took,
+        "active_attempts_after_restart": sorted(a.task for a in store.execution_occupants(SLUG).values()),
+        "task_authority_kept": _claims(second, agents) == before,
+        "current_heartbeats": acks,
+        "older_heartbeats": stale,
+        "swarm_control_restart_recovery_seconds": _recovery_seconds(second, agents),
+        "observed": _observed(store, agents),
+    }
     passed = (
         restarted
         and not rival_took
