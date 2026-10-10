@@ -102,7 +102,7 @@ class DistributedLaunch:
         api_url = request.config.api_url
         if not api_url:
             return Outcome("spawn", Status.REFUSED, self.router.spawn_backend(request), detail=NO_API_URL)
-        agent = AgentRecord(request.name, request.lane, request.task["id"], seat=request.task.get("seat", ""))
+        agent = AgentRecord(request.name, request.lane, request.task["id"], seat=request.task["seat"])
         return self.spawn(request, agent, replace(terms, api_url=api_url), "").outcome
 
     def registered(self, session: Session, grant: str) -> Slot:

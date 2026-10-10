@@ -537,6 +537,7 @@ def test_a_tick_spawn_hands_the_worker_the_api_address_of_its_swarm_config(world
 
 def test_a_tick_spawn_without_a_swarm_api_address_is_refused_before_admission(world):
     request = SpawnRequest(SwarmConfig(SLUG, "agentihooks", 2, 0), "eng", "e1", {"id": "task", "seat": FIRST})
+    world.launcher.router = RuntimeRouter([world.runtime], placement=Placement(BACKEND))
 
     outcome = world.launcher.from_tick(request, world.terms)
 

@@ -142,6 +142,7 @@ SCALING_KEYS = {
     "memory-per-agent": "memory_per_agent_mb",
 }
 ADDRESS_KEYS = {"api-url": "api_url"}
+NO_API_ADDRESS = "api-url takes an http or https address with a host and no credentials"
 CONFIG_KEYS = {**SCALING_KEYS, **ADDRESS_KEYS}
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 GATE_MODES = modes.MODES
@@ -640,11 +641,11 @@ def scaling_value(key, value):
 def api_address(value):
     try:
         parts = urlsplit(value)
-        usable = parts.scheme in ("http", "https") and bool(parts.hostname) and "@" not in parts.netloc
+        host = parts.hostname
     except ValueError:
-        usable = False
-    if value and not usable:
-        raise SwarmError("api-url takes an http or https address with a host and no credentials")
+        raise SwarmError(NO_API_ADDRESS) from None
+    if value and (parts.scheme not in ("http", "https") or not host or "@" in parts.netloc):
+        raise SwarmError(NO_API_ADDRESS)
     return value
 
 

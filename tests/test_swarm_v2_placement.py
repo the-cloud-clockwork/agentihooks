@@ -79,6 +79,13 @@ def test_a_disabled_placement_backend_rolls_placed_spawns_back_to_local():
     assert router.spawn_backend(request("eng")) == LOCAL
 
 
+def test_the_router_spawns_a_placed_request_on_its_placement_backend():
+    remote = Remote()
+    outcome = RuntimeRouter([remote], placement=Placement(BACKEND)).spawn(request("eng", "e1"))
+    assert outcome == Outcome("spawn", Status.OK, BACKEND, Placed("", "claude", placement=BACKEND))
+    assert remote.spawned == ["e1"]
+
+
 def test_the_tick_runtime_refuses_a_kubernetes_runtime_without_a_distributed_launch():
     with pytest.raises(ValueError) as raised:
         routed({}, Herdr(), kubernetes=Remote())
