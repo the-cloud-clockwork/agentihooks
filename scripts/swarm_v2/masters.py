@@ -9,6 +9,7 @@ from scripts.swarm.store import MASTER, PREFIX, SwarmError
 DEFAULT_COUNT = 1
 SAVE_ATTEMPTS = 5
 UNNUMBERED = 10_000
+HIVES = "hives"
 
 
 class MasterError(SwarmError):
@@ -73,6 +74,8 @@ def count_of(text: str) -> int:
 def owner_of(target: str, doc: dict, owners: dict[str, str]) -> str:
     kind, _, rest = target.partition("/")
     item = rest.partition("/")[0]
+    if kind == HIVES:
+        return owners.get(f"{HIVES}/{item}", "")
     if kind == "tasks":
         item = {t.get("id"): t.get("phase") for t in doc.get("tasks", [])}.get(item)
     elif kind != "phases":
@@ -81,8 +84,8 @@ def owner_of(target: str, doc: dict, owners: dict[str, str]) -> str:
 
 
 def route(target: str, doc: dict, owners: Callable[[], dict[str, str]], live: list[str], lead: str) -> str:
-    """owners is read only for a phase or task target, so other items write no owner state."""
-    if target.partition("/")[0] not in ("phases", "tasks"):
+    """owners is read only for a phase, task or hive target, so other items write no owner state."""
+    if target.partition("/")[0] not in ("phases", "tasks", HIVES):
         return lead
     owner = owner_of(target, doc, owners())
     return owner if owner in live else lead
@@ -100,6 +103,18 @@ class MasterSeats:
 
     def count(self, slug: str) -> int:
         return int(self.redis.hget(self.key(slug), "count") or DEFAULT_COUNT)
+
+    def own_hive(self, slug: str, hive_id: str, owner: str) -> None:
+        if owner not in seats(slug, self.count(slug)):
+            raise MasterError(f"{owner} is not a master seat of {slug}, so it cannot own hive {hive_id}")
+        hives = json.loads(self.redis.hget(self.key(slug), HIVES) or "{}")
+        self.redis.hset(self.key(slug), HIVES, json.dumps({**hives, hive_id: owner}, sort_keys=True))
+
+    def hive_owners(self, slug: str) -> dict[str, str]:
+        """A hive whose owning seat was removed by a lower count goes back to the lead."""
+        current = seats(slug, self.count(slug))
+        hives = json.loads(self.redis.hget(self.key(slug), HIVES) or "{}")
+        return {f"{HIVES}/{hive}": owner for hive, owner in hives.items() if owner in current}
 
     def owners(self, slug: str, doc: dict) -> dict[str, str]:
         from redis.exceptions import WatchError
@@ -120,7 +135,7 @@ class MasterSeats:
                             key, mapping={"owners": json.dumps(owners, sort_keys=True), "seats": json.dumps(current)}
                         )
                         pipe.execute()
-                    return owners
+                    return {**owners, **self.hive_owners(slug)}
                 except WatchError:
                     continue
         raise MasterError(f"master seats of {slug} kept changing; phase owners were not saved")

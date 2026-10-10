@@ -493,3 +493,49 @@ def test_an_added_seat_that_took_a_new_phase_takes_only_what_its_share_still_lac
     previous = {"p1": LEAD, "p2": LEAD, "p3": SECOND}
     owners = masters.assign(PHASES, [LEAD, SECOND, third], previous, [LEAD, SECOND])
     assert owners == {"p1": LEAD, "p2": LEAD, "p3": SECOND, "p4": third}
+
+
+def test_a_master_seat_owns_a_hive_and_receives_its_items(swarm):
+    store, inbox = swarm
+    seated(store, FIRST, OTHER)
+    masters.MasterSeats(store.redis).own_hive(SLUG, "anton-1", SECOND)
+    assert masters.MasterSeats(store.redis).hive_owners(SLUG) == {"hives/anton-1": SECOND}
+    relay(swarm, write(5, "hives/anton-1"))
+    assert texts(inbox, SECOND) and not texts(inbox, LEAD)
+
+
+def test_a_hive_item_goes_to_the_lead_while_its_owner_is_not_live(swarm):
+    store, inbox = swarm
+    seated(store, FIRST)
+    masters.MasterSeats(store.redis).own_hive(SLUG, "anton-1", SECOND)
+    relay(swarm, write(6, "hives/anton-1"))
+    assert texts(inbox, LEAD) and not texts(inbox, SECOND)
+
+
+def test_a_seat_outside_the_master_count_cannot_own_a_hive(swarm):
+    store, _ = swarm
+    seats = masters.MasterSeats(store.redis)
+    with pytest.raises(masters.MasterError, match="is not a master seat"):
+        seats.own_hive(SLUG, "anton-1", f"master-3@{SLUG}")
+    assert seats.hive_owners(SLUG) == {}
+
+
+def test_a_hive_owned_by_a_removed_seat_returns_to_the_lead(swarm):
+    store, _ = swarm
+    seats = masters.MasterSeats(store.redis)
+    seats.own_hive(SLUG, "anton-1", SECOND)
+    seats.set_count(SLUG, 1)
+    assert seats.hive_owners(SLUG) == {}
+    assert masters.route("hives/anton-1", DOC, lambda: seats.owners(SLUG, DOC), [LEAD], LEAD) == LEAD
+
+
+def test_a_hive_owner_routes_its_hive_and_leaves_phase_owners_untouched(swarm):
+    store, _ = swarm
+    seats = masters.MasterSeats(store.redis)
+    before = seats.owners(SLUG, DOC)
+    seats.own_hive(SLUG, "anton-1", SECOND)
+    after = seats.owners(SLUG, DOC)
+    assert after == {**before, "hives/anton-1": SECOND}
+    assert masters.route("hives/anton-1", DOC, lambda: after, [LEAD, SECOND], LEAD) == SECOND
+    assert masters.owner_of("hives/anton-1/x", DOC, after) == SECOND
+    assert json.loads(store.redis.hget(seats.key(SLUG), "owners")) == before
