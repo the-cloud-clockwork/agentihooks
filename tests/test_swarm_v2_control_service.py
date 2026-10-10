@@ -9,8 +9,6 @@ import pytest
 from scripts.hive import auth as hive_auth
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
-from scripts.swarm_v2 import control_service
-from scripts.swarm_v2.control_service import ControlService, launch_key
 from scripts.swarm_v2.kubernetes.watch import BACKEND
 from scripts.swarm_v2.runtime import observe
 
@@ -20,10 +18,16 @@ SLUG = "control-fixture"
 SECRET = b"k" * 32
 
 
+def _cs():
+    from scripts.swarm_v2 import control_service
+
+    return control_service
+
+
 def _environ(tmp_path, secret=SECRET, key_id="launch-1"):
     path = tmp_path / "launch.key"
     path.write_bytes(secret)
-    return {control_service.KEY_ID_ENV: key_id, control_service.KEY_FILE_ENV: str(path)}
+    return {_cs().KEY_ID_ENV: key_id, _cs().KEY_FILE_ENV: str(path)}
 
 
 def _store():
@@ -49,23 +53,23 @@ def _post(url, token, body, method="POST"):
 
 
 def test_launch_key_reads_the_key_file_named_by_the_environment(tmp_path):
-    key = launch_key(_environ(tmp_path))
+    key = _cs().launch_key(_environ(tmp_path))
 
     assert (key.key_id, key.secret) == ("launch-1", SECRET)
 
 
-@pytest.mark.parametrize("drop", [control_service.KEY_ID_ENV, control_service.KEY_FILE_ENV])
+@pytest.mark.parametrize("drop", ["AGENTIHOOKS_LAUNCH_SIGNING_KEY_ID", "AGENTIHOOKS_LAUNCH_SIGNING_KEY_FILE"])
 def test_launch_key_refuses_a_missing_setting(tmp_path, drop):
     environ = _environ(tmp_path)
     del environ[drop]
 
-    with pytest.raises(control_service.ControlError, match=drop):
-        launch_key(environ)
+    with pytest.raises(_cs().ControlError, match=drop):
+        _cs().launch_key(environ)
 
 
 def test_launch_key_names_every_missing_setting():
-    with pytest.raises(control_service.ControlError) as refused:
-        launch_key({})
+    with pytest.raises(_cs().ControlError) as refused:
+        _cs().launch_key({})
 
     assert str(refused.value) == (
         "the launch signing key needs AGENTIHOOKS_LAUNCH_SIGNING_KEY_ID, AGENTIHOOKS_LAUNCH_SIGNING_KEY_FILE"
@@ -73,35 +77,35 @@ def test_launch_key_names_every_missing_setting():
 
 
 def test_launch_key_refuses_a_short_key_without_echoing_it(tmp_path):
-    with pytest.raises(control_service.ControlError) as refused:
-        launch_key(_environ(tmp_path, secret=b"short-secret-value"))
+    with pytest.raises(_cs().ControlError) as refused:
+        _cs().launch_key(_environ(tmp_path, secret=b"short-secret-value"))
 
     assert str(refused.value) == "signing key must be at least 32 bytes"
 
 
 def test_launch_key_refuses_a_key_id_that_is_not_an_identifier(tmp_path):
-    with pytest.raises(control_service.ControlError) as refused:
-        launch_key(_environ(tmp_path, key_id="not an id"))
+    with pytest.raises(_cs().ControlError) as refused:
+        _cs().launch_key(_environ(tmp_path, key_id="not an id"))
 
     assert str(refused.value) == "signing key ID must be an identifier"
 
 
 def test_launch_key_refuses_an_unreadable_file(tmp_path):
-    environ = {control_service.KEY_ID_ENV: "launch-1", control_service.KEY_FILE_ENV: str(tmp_path / "absent")}
+    environ = {_cs().KEY_ID_ENV: "launch-1", _cs().KEY_FILE_ENV: str(tmp_path / "absent")}
 
-    with pytest.raises(control_service.ControlError, match="unreadable"):
-        launch_key(environ)
+    with pytest.raises(_cs().ControlError, match="unreadable"):
+        _cs().launch_key(environ)
 
 
 def test_the_service_refuses_to_start_without_the_scoped_credential(tmp_path):
-    service = ControlService(_store(), SLUG, launch_key(_environ(tmp_path)), lambda: False)
+    service = _cs().ControlService(_store(), SLUG, _cs().launch_key(_environ(tmp_path)), lambda: False)
 
     with pytest.raises(Exception, match="scoped controller grant"):
         service.start()
 
 
 def test_the_service_holds_the_controller_and_renews_it_each_tick(tmp_path):
-    service = ControlService(_store(), SLUG, launch_key(_environ(tmp_path)), lambda: True)
+    service = _cs().ControlService(_store(), SLUG, _cs().launch_key(_environ(tmp_path)), lambda: True)
 
     assert service.start() is True
     epoch = service.controller.held.epoch
@@ -111,18 +115,21 @@ def test_the_service_holds_the_controller_and_renews_it_each_tick(tmp_path):
 
 def test_a_second_service_cannot_take_a_held_controller(tmp_path):
     store = _store()
-    key = launch_key(_environ(tmp_path))
-    first = ControlService(store, SLUG, key, lambda: True)
+    key = _cs().launch_key(_environ(tmp_path))
+    first = _cs().ControlService(store, SLUG, key, lambda: True)
     assert first.start()
 
-    second = ControlService(store, SLUG, key, lambda: True)
+    second = _cs().ControlService(store, SLUG, key, lambda: True)
 
     assert second.start() is False
     assert second.tick() is False
 
 
 def _admitted(service, store, seat="eng-1@" + SLUG, task="t1"):
-    record = AgentRecord(store.next_name(SLUG, "eng"), "eng", task, seat=seat, runtime_backend=BACKEND)
+    pod = {"pod_namespace": "swarm", "pod_name": f"worker-{task}"}
+    record = AgentRecord(
+        store.next_name(SLUG, "eng"), "eng", task, seat=seat, runtime_backend=BACKEND, runtime_target=pod
+    )
     agent = service.controller.admit(record, "")
     token = service.grants.issue(
         SLUG,
@@ -161,7 +168,7 @@ def _register_and_beat(base, service, agent, token):
 
 def test_a_worker_registers_and_heartbeats_over_http(tmp_path):
     store = _store()
-    service = ControlService(store, SLUG, launch_key(_environ(tmp_path)), lambda: True)
+    service = _cs().ControlService(store, SLUG, _cs().launch_key(_environ(tmp_path)), lambda: True)
     assert service.start()
     agent, token = _admitted(service, store)
     server = service.serve("127.0.0.1", 0)
@@ -177,10 +184,10 @@ def test_a_worker_registers_and_heartbeats_over_http(tmp_path):
 
 
 def test_the_api_thread_is_a_named_daemon(tmp_path):
-    service = ControlService(_store(), SLUG, launch_key(_environ(tmp_path)), lambda: True)
+    service = _cs().ControlService(_store(), SLUG, _cs().launch_key(_environ(tmp_path)), lambda: True)
     service.serve("127.0.0.1", 0)
     try:
-        threads = [thread for thread in threading.enumerate() if thread.name == control_service.THREAD]
+        threads = [thread for thread in threading.enumerate() if thread.name == _cs().THREAD]
         assert [thread.daemon for thread in threads] == [True]
     finally:
         service.stop()
@@ -188,19 +195,21 @@ def test_the_api_thread_is_a_named_daemon(tmp_path):
 
 def test_stop_releases_the_lease_so_a_restart_takes_it_at_once(tmp_path):
     store = _store()
-    key = launch_key(_environ(tmp_path))
-    first = ControlService(store, SLUG, key, lambda: True)
+    key = _cs().launch_key(_environ(tmp_path))
+    first = _cs().ControlService(store, SLUG, key, lambda: True)
     assert first.start()
 
     first.stop()
 
     assert lease.current(store, SLUG) is None
-    assert ControlService(store, SLUG, key, lambda: True).start() is True
+    assert _cs().ControlService(store, SLUG, key, lambda: True).start() is True
 
 
 def test_the_service_shares_the_lease_with_the_hive_tick(tmp_path):
     store = _store()
-    service = ControlService(store, SLUG, launch_key(_environ(tmp_path)), lambda: True, owner="hive-fixture")
+    service = _cs().ControlService(
+        store, SLUG, _cs().launch_key(_environ(tmp_path)), lambda: True, owner="hive-fixture"
+    )
     assert service.start()
 
     tick_lease = lease.acquire(store, SLUG, "hive-fixture")
@@ -211,7 +220,7 @@ def test_the_service_shares_the_lease_with_the_hive_tick(tmp_path):
 
 def test_a_tick_takes_the_controller_again_after_its_lease_lapsed(tmp_path):
     store = _store()
-    service = ControlService(store, SLUG, launch_key(_environ(tmp_path)), lambda: True)
+    service = _cs().ControlService(store, SLUG, _cs().launch_key(_environ(tmp_path)), lambda: True)
     assert service.start()
     epoch = service.controller.held.epoch
     store.redis.delete(store.key(SLUG, "control-owner"))
@@ -222,7 +231,7 @@ def test_a_tick_takes_the_controller_again_after_its_lease_lapsed(tmp_path):
 
 def test_a_tick_sends_each_remote_heartbeat_through_the_controller(tmp_path):
     store = _store()
-    service = ControlService(store, SLUG, launch_key(_environ(tmp_path)), lambda: True)
+    service = _cs().ControlService(store, SLUG, _cs().launch_key(_environ(tmp_path)), lambda: True)
     assert service.start()
     beating, token = _admitted(service, store)
     silent, _ = _admitted(service, store, seat=f"eng-2@{SLUG}", task="t2")
@@ -243,23 +252,23 @@ def test_a_tick_sends_each_remote_heartbeat_through_the_controller(tmp_path):
 
 
 def test_hosting_is_off_without_an_api_port(tmp_path):
-    assert control_service.host(_environ(tmp_path), _store(), "hive-fixture") is None
+    assert _cs().host(_environ(tmp_path), _store(), "hive-fixture") is None
 
 
 def test_hosting_needs_the_swarm_it_serves(tmp_path):
-    environ = {**_environ(tmp_path), control_service.PORT_ENV: "0"}
+    environ = {**_environ(tmp_path), _cs().PORT_ENV: "0"}
 
-    with pytest.raises(control_service.ControlError) as refused:
-        control_service.host(environ, _store(), "hive-fixture")
+    with pytest.raises(_cs().ControlError) as refused:
+        _cs().host(environ, _store(), "hive-fixture")
 
     assert str(refused.value) == "the control API needs AGENTIHOOKS_CONTROL_SWARM"
 
 
 def test_hosting_refuses_a_port_that_is_not_a_number(tmp_path):
-    environ = {**_environ(tmp_path), control_service.PORT_ENV: "eighty", control_service.SWARM_ENV: SLUG}
+    environ = {**_environ(tmp_path), _cs().PORT_ENV: "eighty", _cs().SWARM_ENV: SLUG}
 
-    with pytest.raises(control_service.ControlError) as refused:
-        control_service.host(environ, _store(), "hive-fixture")
+    with pytest.raises(_cs().ControlError) as refused:
+        _cs().host(environ, _store(), "hive-fixture")
 
     assert str(refused.value) == "AGENTIHOOKS_CONTROL_API_PORT must be a port number"
 
@@ -269,13 +278,13 @@ def test_hosting_refuses_a_controller_credential_the_hive_did_not_issue(tmp_path
     hive_auth.issue_controller(store.redis)
     environ = {
         **_environ(tmp_path),
-        control_service.PORT_ENV: "0",
-        control_service.SWARM_ENV: SLUG,
-        control_service.CREDENTIAL_ENV: "forged",
+        _cs().PORT_ENV: "0",
+        _cs().SWARM_ENV: SLUG,
+        _cs().CREDENTIAL_ENV: "forged",
     }
 
     with pytest.raises(SwarmError, match="scoped controller grant"):
-        control_service.host(environ, store, "hive-fixture")
+        _cs().host(environ, store, "hive-fixture")
 
     assert lease.current(store, SLUG) is None
 
@@ -293,16 +302,16 @@ def test_the_controller_loop_hosts_registration_and_heartbeats(tmp_path, monkeyp
     port = _free_port()
     environ = {
         **_environ(tmp_path),
-        control_service.PORT_ENV: str(port),
-        control_service.SWARM_ENV: SLUG,
-        control_service.CREDENTIAL_ENV: hive_auth.issue_controller(store.redis),
+        _cs().PORT_ENV: str(port),
+        _cs().SWARM_ENV: SLUG,
+        _cs().CREDENTIAL_ENV: hive_auth.issue_controller(store.redis),
         "SWARM_HIVE_ID": "hive-fixture",
     }
     for name, value in environ.items():
         monkeypatch.setenv(name, value)
     hosted, seen = [], []
-    real_host = control_service.host
-    monkeypatch.setattr(control_service, "host", lambda *args: hosted.append(real_host(*args)) or hosted[0])
+    real_host = _cs().host
+    monkeypatch.setattr(_cs(), "host", lambda *args: hosted.append(real_host(*args)) or hosted[0])
     monkeypatch.setattr(loop, "connect", lambda: store)
     monkeypatch.setattr("scripts.operator_env.fill", lambda env: None)
 
