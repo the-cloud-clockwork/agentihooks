@@ -5,11 +5,13 @@ import re
 import sys
 from pathlib import Path
 
+from scripts.swarm_v2.herdr import capabilities
+
 PACKAGE = "SV2-IMG-05"
 SCHEMA_VERSION = 1
 TARGETS = ("herdr", "claude", "codex")
 HERDR_PROTOCOL = 22
-HERDR_CAPABILITIES = {"endpoint_protocol_generation": 1, "health_check": True}
+HERDR_CAPABILITIES = capabilities.SERVER_CAPABILITIES
 HERDR_BASELINE = "local herdr 0.9.1 runtime path"
 HERDR_METHODS = frozenset(
     {
@@ -21,6 +23,7 @@ HERDR_METHODS = frozenset(
         "pane.list",
         "pane.process_info",
         "pane.read",
+        "pane.send_input",
         "pane.send_keys",
         "pane.send_text",
         "pane.split",
