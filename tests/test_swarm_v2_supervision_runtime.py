@@ -10,6 +10,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from scripts.swarm_v2 import filesystem
 from scripts.swarm_v2 import supervision_agent as agent
 from scripts.swarm_v2 import supervision_protocol as protocol
 from scripts.swarm_v2 import supervision_runtime as runtime
@@ -18,10 +19,16 @@ from scripts.swarm_v2.supervision import Budgets, Launch, LaunchRefused
 
 @pytest.fixture
 def supervisor(tmp_path):
-    home = tmp_path / "homes" / "codex"
-    home.mkdir(parents=True)
+    (tmp_path / "homes" / "codex").mkdir(parents=True)
+    execution = filesystem.Execution(tmp_path, filesystem.load())
     launch = Launch(
-        tmp_path, {"execution_id": "admitted"}, home, ("tool",), ("exporter",), ("herdr", "server"), Budgets(2, 1, 1, 1)
+        execution,
+        {"execution_id": "admitted"},
+        "codex",
+        ("tool",),
+        ("exporter",),
+        ("herdr", "server"),
+        Budgets(2, 1, 1, 1),
     )
     owner = runtime.Supervisor(launch)
     owner.root.mkdir(parents=True)
@@ -406,7 +413,8 @@ def test_scope_and_runtime_environment_are_attempt_local(supervisor):
         "supervisor_pid": os.getpid(),
         "process_namespace": os.readlink("/proc/self/ns/pid"),
     }
-    assert supervisor.environment["XDG_RUNTIME_DIR"] == str(supervisor.launch.attempt / "tmp")
+    assert supervisor.environment["XDG_RUNTIME_DIR"] == str(supervisor.launch.attempt / "run")
+    assert supervisor.environment["TMPDIR"] == str(supervisor.launch.attempt / "tmp")
     assert supervisor.environment["HERDR_CONFIG_PATH"] == str(supervisor.root / "herdr.toml")
     assert supervisor.environment["SWARM_SUPERVISION_DIR"] == str(supervisor.root)
     assert supervisor.failure_class is None
@@ -415,9 +423,9 @@ def test_scope_and_runtime_environment_are_attempt_local(supervisor):
 def test_herdr_command_preserves_prefix_environment_and_call_budget(supervisor, monkeypatch):
     launch = supervisor.launch
     supervisor.launch = Launch(
-        launch.attempt,
+        launch.execution,
         launch.authority,
-        launch.home,
+        launch.harness,
         launch.agent,
         launch.exporter,
         ("python", "fixture", "herdr", "server"),
