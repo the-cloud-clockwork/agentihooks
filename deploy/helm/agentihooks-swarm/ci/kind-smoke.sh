@@ -398,9 +398,9 @@ api.create_pod({
         "volumes": [launch_volume(agent.execution_id)],
     },
 })
-handed = PodGrants(api, slug).hand(agent, grant)
+hand = PodGrants(api, slug).hand(agent, grant)
 scratch.cleanup()
-print(json.dumps({"pod": name, "handed": handed}, sort_keys=True))
+print(json.dumps({"pod": name, "handed": hand.handed, "reason": hand.reason}, sort_keys=True))
 EOF
 )"
 handed="$(python3 - <<'EOF' | kubectl exec -i "deployment/$release-controller" -c controller -- env CONTROL_URL="http://$release-controller:8780" SLUG="$slug" RELEASE="$release" IMAGE="$image" python -c "$hand_grant"
