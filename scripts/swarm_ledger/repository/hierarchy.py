@@ -86,6 +86,7 @@ def rebuild(connection, slug: str, state: dict) -> dict:
     return drift(have, want)
 
 
+# Every query using ORDER aliases work_nodes as n.
 ORDER = (
     "printf('%d.%09d', CASE n.kind WHEN 'plan' THEN 0 WHEN 'phase' THEN 1 WHEN 'slice' THEN 2 ELSE 3 END, n.position)"
 )

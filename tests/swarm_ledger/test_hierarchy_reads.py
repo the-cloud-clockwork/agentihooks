@@ -204,7 +204,7 @@ def test_a_node_whose_item_left_the_document_reads_as_open():
 )
 def test_the_hierarchy_resource_answers_missing_for_an_unknown_read_or_node(repo, path, message):
     with pytest.raises(APIError) as caught:
-        resources.hierarchy_read(repo, SLUG, path)
+        routes.ledger_read(server(repo), SLUG, path, {})
     assert (caught.value.status, caught.value.code, str(caught.value)) == (404, "resource_missing", message)
 
 
