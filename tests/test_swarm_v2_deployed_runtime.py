@@ -440,10 +440,70 @@ def test_a_kubernetes_launch_puts_its_grant_in_the_pod_launch_material_and_recor
                 "ownerReferences": [{"apiVersion": "v1", "kind": "Pod", "name": f"swarm-{execution}", "uid": "uid-1"}],
             },
             "immutable": True,
-            "data": {"launch-grant": launch.grant},
+            "data": {"launch-grant": launch.grant, "launch.json": pods.maps[0]["data"]["launch.json"]},
         }
     ]
     assert claims.execution_id == execution
+    assert json.loads(pods.maps[0]["data"]["launch.json"]) == {
+        "schema_version": 1,
+        "execution_id": execution,
+        "generation": launch.agent.generation,
+        "authority": {
+            "execution_id": execution,
+            "generation": launch.agent.generation,
+            "task_id": "t1",
+            "seat_id": SEAT,
+            "swarm_id": SLUG,
+            "grant_id": claims.grant_id,
+        },
+        "harness": "claude",
+        "agent": ["claude"],
+    }
+
+
+def test_the_exporter_worker_setting_reaches_the_launch_record(tmp_path, monkeypatch):
+    store = _store()
+    pods = Pods("swarm-pod-proof")
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: pods)
+    environ = _environ(tmp_path, store, **{deployed.EXPORTER_ENV: '["python", "-m", "exporter"]'})
+    service = _cs().host(environ, store, "hive-fixture")
+    try:
+        runtime = service.runtime
+        launcher = runtime.launch.func.__self__
+        task = {"id": "t1", "seat": SEAT, "controller_epoch": service.controller.held.epoch}
+        request = SpawnRequest(store.config(SLUG), "eng", store.next_name(SLUG, "eng"), task)
+        target = runtime.launch.keywords["target"](request)
+        agent = AgentRecord(request.name, "eng", "t1", seat=SEAT, runtime_backend=BACKEND, runtime_target=target)
+        launch = launcher.spawn(request, agent, runtime.launch.keywords["terms"], "")
+    finally:
+        service.stop()
+
+    assert launch.handed is True
+    assert json.loads(pods.maps[0]["data"]["launch.json"])["exporter"] == ["python", "-m", "exporter"]
+
+
+@pytest.mark.parametrize("value", [None, ""])
+def test_an_unset_exporter_setting_records_no_exporter(tmp_path, value):
+    workers = deployed.Workers.from_environ(_workers(tmp_path, **{deployed.EXPORTER_ENV: value}), SLUG)
+
+    assert workers.exporter is None
+
+
+def test_an_exporter_setting_becomes_its_command_words(tmp_path):
+    environ = _workers(tmp_path, **{deployed.EXPORTER_ENV: '["python", "-m", "exporter"]'})
+
+    assert deployed.Workers.from_environ(environ, SLUG).exporter == ("python", "-m", "exporter")
+
+
+@pytest.mark.parametrize(
+    "value", ["python -m exporter", "[]", '[""]', '["ok", 1]', '"exporter"', '{"a": 1}', '["a\\u0000b"]']
+)
+def test_a_malformed_exporter_setting_is_refused(tmp_path, value):
+
+    with pytest.raises(SwarmError) as refused:
+        deployed.Workers.from_environ(_workers(tmp_path, **{deployed.EXPORTER_ENV: value}), SLUG)
+
+    assert str(refused.value) == f"{deployed.EXPORTER_ENV} must be a JSON list of command words"
 
 
 def test_the_pod_api_talks_to_the_in_cluster_server_in_the_policy_namespace(monkeypatch):

@@ -97,7 +97,7 @@ def test_a_tick_slower_than_the_lease_keeps_writing(store, clock):
             spawn=lambda *args: "placed",
             retire=lambda agent, homes=None: (agent, homes),
         ),
-        True,
+        "local",
     )
     for step in range(5):
         clock[0] += 120000
@@ -118,7 +118,7 @@ def test_a_tick_whose_lease_was_stolen_stops(store, clock):
     writes, spawned = [], []
     ledger = controller.FencedLedger(store, "sw", held, SimpleNamespace(update_task=lambda *args: writes.append(args)))
     runtime = controller.FencedRuntime(
-        store, "sw", held, SimpleNamespace(spawn=lambda *args: spawned.append(args), retire=spawned.append), True
+        store, "sw", held, SimpleNamespace(spawn=lambda *args: spawned.append(args), retire=spawned.append), "local"
     )
     ledger.update_task("sw", "t", {"step": 0})
     clock[0] += lease.ttl_ms()
