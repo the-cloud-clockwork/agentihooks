@@ -3,6 +3,7 @@ grant so the account and source execution come from the grant. A stale report ne
 missing, failed or aged reading is unknown, never full capacity. Infrastructure and operator budgets stay out."""
 
 import json
+import math
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
@@ -97,9 +98,11 @@ def latest_all(redis: "Redis", harness: str) -> dict[str, Observation]:
     found = {}
     for account, raw in redis.hgetall(latest_key(harness)).items():
         try:
-            found[account] = decode(raw)
-        except (ValueError, TypeError):
+            observed = decode(raw)
+            _report({field: getattr(observed, field) for field in REPORT_FIELDS}, math.inf)
+        except (ValueError, TypeError, SwarmError):
             continue
+        found[account] = observed
     return found
 
 
