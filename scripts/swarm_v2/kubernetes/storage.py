@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL
 
 POD_HOME = "/home/worker"
-PRIVATE_ROOTS = ("/home/worker/attempts", "/tmp", "/var/run/swarm")
+PRIVATE_ROOTS = ("/home/worker/attempts", "/tmp", "/var/run/swarm")  # NOSONAR: Pod paths compared, never opened
 NATIVE = frozenset({".codex", ".claude", ".config", ".local", "herdr"})
 PRIVATE_KINDS = frozenset({"emptyDir", "configMap", "secret", "projected", "downwardAPI", "ephemeral"})
 SOURCE_READ_ONLY = frozenset({"persistentVolumeClaim", "nfs"})
