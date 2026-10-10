@@ -11,7 +11,7 @@ import json
 from dataclasses import replace
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import bottleneck, dev_red, lane_split, lifetime, naming, seat_spawn
+from scripts.swarm import bottleneck, dev_red, lane_split, lifetime, priority_sweep, seat_spawn
 from scripts.swarm.store import DISPATCH, FULL
 
 LANE = DISPATCH
@@ -34,13 +34,8 @@ def triggers(doc: dict, now_ms: int) -> list[dict]:
     return [
         {"id": row["id"], "item": row["item"], "text": row["text"], "minutes": (now_ms - row["at"]) // 60_000}
         for row in doc.get("priorities", [])
-        if now_ms - row["at"] >= STALE_MS and not handed(row)
+        if now_ms - row["at"] >= STALE_MS and not priority_sweep.handed(row)
     ]
-
-
-def handed(row: dict) -> bool:
-    found = naming.parse(row.get("by"))
-    return found is not None and found.kind == SEAT
 
 
 def uncovered(store, slug: str, now_ms: int) -> list[dict]:
