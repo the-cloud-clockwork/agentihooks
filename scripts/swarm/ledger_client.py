@@ -138,6 +138,16 @@ class LedgerClient:
     def priority(self, slug, item, text):
         return self._write(slug, _op("priority", "swarm", item=item, text=text), "priority")
 
+    def freeze(self, slug, verb, target, by=None, reason="", quote=""):
+        fields = {"target": target, **({"reason": reason} if reason else {}), **({"quote": quote} if quote else {})}
+        if verb == "unfreeze":
+            op = _op("freeze_clear", by, **fields)
+        else:
+            op = _op("freeze_set", by, verb=verb, **fields)
+        if by is None:
+            op.pop("by")
+        self._call(slug, [op])
+
     def group_tasks(self, slug, lead, members):
         self._call(slug, [_op("task_group", "swarm", item=f"tasks/{lead}", members=list(members))])
 

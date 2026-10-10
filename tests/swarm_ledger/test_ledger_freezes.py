@@ -5,7 +5,7 @@ import pytest
 from hooks.context import operator_words
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger import ledger_freezes, ledger_tasks, new_ledger
-from scripts.swarm_ledger.api import resources
+from scripts.swarm_ledger.api import resources, schemas
 from scripts.swarm_ledger.repository import rows
 from tests.swarm_ledger import legacy_page
 
@@ -194,3 +194,12 @@ def test_lines_name_each_active_freeze_for_swarm_status():
     assert first.endswith("  Ship the hierarchy first")
     assert second.startswith("focus  lane:ci  by operator  at ")
     assert second.endswith("Z")
+
+
+def test_the_api_takes_freeze_ops_against_the_freezes_collection():
+    ops = [
+        {"op": "freeze_set", "id": "f1", "verb": "focus", "target": "plans/a", "reason": "r", "quote": "q"},
+        {"op": "freeze_clear", "id": "f2", "by": MASTER, "target": "plans/a", "quote": "q"},
+    ]
+    assert schemas.check_operations({"operation_id": "o1", "ops": ops, "guards": {}}, core, ()) == ops
+    assert [schemas.target(op) for op in ops] == ["freezes", "freezes"]
