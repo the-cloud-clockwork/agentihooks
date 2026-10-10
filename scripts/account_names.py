@@ -10,9 +10,5 @@ def secret_key(email: str) -> str:
     return SYMBOL.sub("-", email.lower().replace("@", "at"))
 
 
-def env_slug(email: str) -> str:
-    return secret_key(email).replace("-", "_")
-
-
 def token_env(email: str) -> str:
-    return TOKEN_PREFIX + env_slug(email)
+    return TOKEN_PREFIX + secret_key(email).replace("-", "_")

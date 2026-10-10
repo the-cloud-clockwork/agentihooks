@@ -16,7 +16,6 @@ pytestmark = pytest.mark.unit
 )
 def test_an_email_names_its_secret_key_and_its_token_variable(email, key, env):
     assert account_names.secret_key(email) == key
-    assert account_names.env_slug(email) == key.replace("-", "_")
     assert account_names.token_env(email) == env
 
 

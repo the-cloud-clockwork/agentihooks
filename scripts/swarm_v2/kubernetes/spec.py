@@ -108,6 +108,11 @@ def load_policy(path: str | Path) -> dict:
     error = best_match(Draft202012Validator(json.loads(SCHEMA.read_text())).iter_errors(policy))
     if error is not None:
         raise PodSpecRefused(f"pod policy is invalid at {_where(error.absolute_path)}: {error.message}", "policy")
+    if not all(ACCOUNT.fullmatch(account) for account in policy["provider_accounts"]):
+        raise PodSpecRefused("pod policy provider_accounts must each be one account email", "policy")
+    keys = [secret_key(account) for account in policy["provider_accounts"]]
+    if len(set(keys)) != len(keys):
+        raise PodSpecRefused("pod policy provider_accounts must name distinct secret keys", "policy")
     probes = policy["probes"]
     budget = probes["herdr_timeout_seconds"] + probes["brain_timeout_seconds"]
     for name in PROBES:
@@ -144,7 +149,7 @@ def _profile(policy: dict, launch: AdmittedLaunch) -> dict:
         raise PodSpecRefused("launch resources must be positive integers", "resources")
     if launch.memory_mib > limits["memory_mib"] or launch.cpu_millis > limits["cpu_millis"]:
         raise PodSpecRefused(f"launch resources exceed the {launch.profile} profile limits", "resources")
-    if secret_key(launch.provider_account) not in {secret_key(account) for account in policy["provider_accounts"]}:
+    if launch.provider_account.lower() not in {account.lower() for account in policy["provider_accounts"]}:
         raise PodSpecRefused("launch provider_account is not an approved provider account", "account")
     return policy["profiles"][launch.profile]
 

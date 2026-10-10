@@ -500,6 +500,24 @@ def test_identity_values_at_their_bounds_are_accepted():
     assert rendered.pod["metadata"]["annotations"]["swarm.agentihooks.io/project"] == "unknown"
 
 
+@pytest.mark.parametrize(("email", "key"), [("a@b", "aatb"), ("ops.a+b_c@x-y.io", "ops-a-b-catx-y-io")])
+def test_short_and_symbol_rich_account_emails_are_accepted(email, key):
+    policy = load_policy(POLICY)
+    policy["provider_accounts"] = [email]
+    doc = launch_doc()
+    doc["provider_account"] = email
+    _, rendered = render(doc, policy)
+    assert rendered.pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == key
+
+
+def test_an_account_sharing_an_approved_secret_key_is_not_approved():
+    doc = launch_doc()
+    doc["provider_account"] = "claude.fixture@example.com"
+    with pytest.raises(PodSpecRefused) as refused:
+        render(doc)
+    assert str(refused.value) == "launch provider_account is not an approved provider account"
+
+
 def token_env(pod: dict) -> list:
     return [entry for entry in pod["spec"]["containers"][0]["env"] if "valueFrom" in entry]
 
@@ -585,6 +603,21 @@ POLICY_REFUSALS = [
         lambda d: d.update(provider_accounts=["claude-fixture"]),
         "pod policy is invalid at provider_accounts/0: 'claude-fixture' does not match "
         "'^[A-Za-z0-9]([A-Za-z0-9._+-]*[A-Za-z0-9])?@[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$'",
+    ),
+    (
+        "account name with a line break",
+        lambda d: d.update(provider_accounts=["claude-fixture@example.com", "codex-fixture@example.com\n"]),
+        "pod policy provider_accounts must each be one account email",
+    ),
+    (
+        "accounts sharing a secret key",
+        lambda d: d.update(provider_accounts=["ops.team@x.io", "ops-team@x.io"]),
+        "pod policy provider_accounts must name distinct secret keys",
+    ),
+    (
+        "accounts differing only in case",
+        lambda d: d.update(provider_accounts=["ops@x.io", "OPS@x.io"]),
+        "pod policy provider_accounts must name distinct secret keys",
     ),
     (
         "unbounded grace",
