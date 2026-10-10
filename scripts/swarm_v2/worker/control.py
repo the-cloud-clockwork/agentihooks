@@ -1,10 +1,23 @@
+import base64
 import json
 import os
+import re
+import sys
+import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Protocol
 
 from scripts.swarm_v2.runtime.operations import digest
+
+INBOX = Path("/home/worker/commands/inbox")
+STATE = Path("/home/worker/commands/state.json")
+LAUNCH = Path("/var/run/swarm/launch/launch.json")
+ENVELOPE = ("command_id", "execution_id", "generation", "kind", "payload", "payload_digest", "expires_at_ms")
+COMMAND_ID = re.compile(r"cmd-[0-9a-f]{32}")
+ENCODED = re.compile(r"[A-Za-z0-9_-]+={0,2}")
+MODES = ("status", "deliver")
+USAGE = "usage: status ENVELOPE | deliver ENVELOPE"
 
 DRAIN, ANSWER = "drain", "answer"
 RECEIVED, ACCEPTED, RUNNING, DONE, REPORTED, REJECTED = (
@@ -16,6 +29,16 @@ RECEIVED, ACCEPTED, RUNNING, DONE, REPORTED, REJECTED = (
     "rejected",
 )
 UNREACHABLE = (ConnectionError, TimeoutError)
+
+
+def _entry(command: Mapping, state: str) -> dict:
+    return {
+        "kind": command["kind"],
+        "payload_digest": command["payload_digest"],
+        "payload": command["payload"],
+        "state": state,
+        "outcome": None,
+    }
 
 
 def _voided(record: dict) -> bool:
@@ -64,9 +87,13 @@ class WorkerControl:
     """Runs a command only after the server accepted it and never twice; `state_path` must outlive the process."""
 
     def __init__(
-        self, transport: CommandTransport, state_path: Path, handlers: Mapping[str, Callable[[dict], dict]]
+        self,
+        transport: CommandTransport,
+        state_path: Path,
+        handlers: Mapping[str, Callable[[dict], dict]],
+        inbox: Path | None = None,
     ) -> None:
-        self.transport, self.path, self.handlers = transport, state_path, handlers
+        self.transport, self.path, self.handlers, self.inbox = transport, state_path, handlers, inbox
         self.records = json.loads(state_path.read_bytes()) if state_path.exists() else {}
 
     def may_mutate(self) -> bool:
@@ -75,6 +102,9 @@ class WorkerControl:
     def step(self) -> None:
         for command_id in list(self.records):
             self._advance(command_id)
+        if self.inbox is not None:
+            for path in sorted(self.inbox.glob("cmd-*.json")):
+                self._collect(path)
         try:
             commands = self.transport.poll()
         except UNREACHABLE:
@@ -87,6 +117,24 @@ class WorkerControl:
             ):
                 self._receive(command)
 
+    def _collect(self, path: Path) -> None:
+        """An inbox command is saved before its acknowledgement and dropped if the server refuses it."""
+        try:
+            command = checked(json.loads(path.read_bytes()))
+        except OSError:
+            return
+        except ValueError:
+            path.unlink()
+            return
+        command_id = command["command_id"]
+        known = command_id in self.records
+        if not known:
+            self.records[command_id] = {**_entry(command, RECEIVED), "inbox": True}
+            self._save()
+        path.unlink()
+        if not known:
+            self._advance(command_id)
+
     def checkpointed(self, checkpoint: str) -> None:
         for command_id, record in self.records.items():
             if record["kind"] == DRAIN and record["state"] in (RECEIVED, ACCEPTED) and record["outcome"] is None:
@@ -95,13 +143,7 @@ class WorkerControl:
                 self._advance(command_id)
 
     def _receive(self, command: dict) -> None:
-        record = {
-            "kind": command["kind"],
-            "payload_digest": command["payload_digest"],
-            "payload": command["payload"],
-            "state": RECEIVED,
-            "outcome": None,
-        }
+        record = _entry(command, RECEIVED)
         if command["state"] == "accepted":
             record["state"] = ACCEPTED
             if command["kind"] != DRAIN:
@@ -135,6 +177,10 @@ class WorkerControl:
         except UNREACHABLE:
             return
         except CommandRefused as error:
+            if record.get("inbox") and record["state"] == RECEIVED:
+                del self.records[command_id]
+                self._save()
+                return
             record["refusal"] = error.error_class
             self._move(record, REJECTED)
 
@@ -162,3 +208,98 @@ class WorkerControl:
             handle.flush()
             os.fsync(handle.fileno())
         staged.replace(self.path)
+
+
+def encode(record: Mapping) -> str:
+    envelope = {name: record[name] for name in ENVELOPE}
+    return base64.urlsafe_b64encode(json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode()).decode()
+
+
+def checked(envelope: object) -> dict:
+    if not isinstance(envelope, dict) or sorted(envelope) != sorted(ENVELOPE):
+        raise ValueError("the envelope fields are wrong")
+    if not isinstance(envelope["command_id"], str) or not COMMAND_ID.fullmatch(envelope["command_id"]):
+        raise ValueError("the command id is malformed")
+    if type(envelope["generation"]) is not int or type(envelope["expires_at_ms"]) is not int:
+        raise ValueError("the generation and expiry must be integers")
+    if digest({"kind": envelope["kind"], "payload": envelope["payload"]}) != envelope["payload_digest"]:
+        raise ValueError("the payload digest does not match")
+    return envelope
+
+
+def decode(text: str) -> dict:
+    if not ENCODED.fullmatch(text):
+        raise ValueError("the envelope is not url safe base64")
+    return checked(json.loads(base64.urlsafe_b64decode(text)))
+
+
+def status(command_id: str, inbox: Path, state: Path) -> str:
+    if (inbox / f"{command_id}.json").exists():
+        return "queued"
+    return "known" if state.exists() and command_id in json.loads(state.read_bytes()) else "absent"
+
+
+def _refused(envelope: Mapping, reason: str) -> dict:
+    return {
+        "command_id": envelope.get("command_id", ""),
+        "execution_id": envelope.get("execution_id", ""),
+        "generation": envelope.get("generation", 0),
+        "state": "refused",
+        "reason": reason,
+    }
+
+
+def handle(mode: str, text: str, inbox: Path, state: Path, launch: Path, now_ms: int) -> tuple[int, dict]:
+    try:
+        envelope = decode(text)
+    except ValueError as error:
+        return 2, _refused({}, str(error))
+    try:
+        identity = json.loads(launch.read_bytes())
+        owner = (identity["execution_id"], identity["generation"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return 2, _refused(envelope, "the launch record is unreadable")
+    reply = {"command_id": envelope["command_id"], "execution_id": owner[0], "generation": owner[1]}
+    if (envelope["execution_id"], envelope["generation"]) != owner:
+        return 2, _refused(reply, "the envelope names another execution")
+    held = status(envelope["command_id"], inbox, state)
+    if mode == "status":
+        return 0, {**reply, "state": held}
+    if held != "absent":
+        return 0, {**reply, "state": "known"}
+    if now_ms >= envelope["expires_at_ms"]:
+        return 2, _refused(reply, "the command expired")
+    inbox.mkdir(parents=True, exist_ok=True)
+    staged = inbox / f"{envelope['command_id']}.{os.getpid()}.tmp"
+    with staged.open("wb") as stream:
+        stream.write(json.dumps(envelope).encode())
+        stream.flush()
+        os.fsync(stream.fileno())
+    try:
+        os.link(staged, inbox / f"{envelope['command_id']}.json")
+    except FileExistsError:
+        return 0, {**reply, "state": "known"}
+    finally:
+        staged.unlink()
+    return 0, {**reply, "state": "queued"}
+
+
+def main(
+    argv: list[str] | None = None,
+    inbox: Path = INBOX,
+    state: Path = STATE,
+    launch: Path = LAUNCH,
+    clock: Callable[[], float] | None = None,
+) -> int:
+    """The only command a controller may exec in a worker Pod: one mode and one encoded envelope, no shell."""
+    args = sys.argv[1:] if argv is None else argv
+    if len(args) != 2 or args[0] not in MODES:
+        code, reply = 2, _refused({}, USAGE)
+    else:
+        code, reply = handle(args[0], args[1], inbox, state, launch, int((clock or time.time)() * 1000))
+    print(json.dumps(reply, sort_keys=True))
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

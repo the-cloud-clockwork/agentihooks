@@ -66,12 +66,15 @@ class CommandQueue:
     def key(self, execution_id: str) -> str:
         return self.store.key(self.slug, "worker-commands", execution_id)
 
+    def command_id(self, execution_id: str, key: str) -> str:
+        return f"cmd-{uuid5(NAMESPACE_URL, json.dumps([self.slug, execution_id, key])).hex}"
+
     def issue(self, execution_id: str, generation: int, kind: str, payload: dict, key: str, expires_in_ms: int) -> dict:
         _check(kind, payload, key, expires_in_ms)
         occupants = self.store.execution_occupants(self.slug).values()
         if (execution_id, generation) not in {(agent.execution_id, agent.generation) for agent in occupants}:
             raise GrantRefused("stale_generation", "the execution is not the current occupant of its seat")
-        command_id = f"cmd-{uuid5(NAMESPACE_URL, json.dumps([self.slug, execution_id, key])).hex}"
+        command_id = self.command_id(execution_id, key)
         payload_digest = digest({"kind": kind, "payload": payload})
 
         def create(record: dict | None, now: int) -> tuple[dict, None]:
