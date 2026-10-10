@@ -127,7 +127,7 @@ def test_the_seat_spawn_helper_names_records_and_places_a_seat():
     )
     assert (record.lane, record.task, record.seat) == ("dispatch", "dispatcher", f"dispatcher@{SLUG}")
     assert placed.pane_id and record.name in runtime.live
-    assert store.seats.occupant(record.seat) == record.name
+    assert store.seats.occupant(record.seat).occupant == record.name
 
 
 def test_the_dispatcher_naming_type_and_profile():
