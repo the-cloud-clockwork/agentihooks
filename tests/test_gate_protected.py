@@ -307,3 +307,62 @@ def test_the_protected_grader_reports_gate_required_on_the_head():
     assert all('context="$CONTEXT"' in step["run"] for step in statuses)
     assert _protected_workflow()["env"]["CONTEXT"] == gate_protected.GATE
     assert statuses[-1]["if"] == "${{ always() }}"
+
+
+@pytest.mark.parametrize("weakened", [False, True])
+def test_only_the_canonical_reuse_protocol_is_an_allowed_transition(weakened):
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["gate-required"] = base["jobs"].pop("gate")
+    head = copy.deepcopy(base)
+    head["jobs"]["reuse"] = ci_reuse.reuse_job()
+    head["jobs"]["queue-baseline"] = {"runs-on": "ubuntu-latest"}
+    head["jobs"]["gate-required"]["needs"].extend(["reuse", "queue-baseline"])
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps()
+    if weakened:
+        head["jobs"]["gate-required"]["steps"][0]["run"] += "true\n"
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    assert bool(problems) == weakened, problems
+
+
+def test_a_head_cannot_replace_the_protected_reuse_decision():
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["gate-required"] = base["jobs"].pop("gate")
+    base["jobs"]["reuse"] = ci_reuse.reuse_job()
+    base["jobs"]["gate-required"]["needs"].append("reuse")
+    head = copy.deepcopy(base)
+    head["jobs"]["reuse"]["steps"] = [{"run": "echo reused=true"}]
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    assert "The head changes the protected reuse job; the protected branch grades with its own." in problems
+
+
+def test_an_unchanged_protected_reuse_producer_stays_accepted():
+    base = _workflow()
+    base["jobs"]["reuse"] = {"runs-on": "ubuntu-latest", "steps": [{"run": "echo legacy"}]}
+    base["jobs"]["gate"]["needs"].append("reuse")
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": copy.deepcopy(base)}, {}, _TODAY) == []
+
+
+def test_removing_the_protected_reuse_producer_names_the_violation():
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["reuse"] = ci_reuse.reuse_job()
+    base["jobs"]["gate"]["needs"].append("reuse")
+    head = copy.deepcopy(base)
+    del head["jobs"]["reuse"]
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    assert "The head removes the protected reuse job." in problems
+
+
+def test_a_head_moving_the_gate_away_from_the_protected_reuse_job_is_named_not_crashed():
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["reuse"] = ci_reuse.reuse_job()
+    base["jobs"]["gate"]["needs"].append("reuse")
+    problems = gate_protected.grade({"test.yml": base}, {}, {"other.yml": copy.deepcopy(base)}, {}, _TODAY)
+    assert "The head removes the protected reuse job." in problems

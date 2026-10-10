@@ -13,6 +13,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - name: Prove a clean local Compose install
         run: bash scripts/packaging/swarm-smoke.sh
   hive-join:
@@ -20,6 +22,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - name: Join a member container to a hive container over Redis ACL
         run: bash scripts/packaging/hive-join-smoke.sh
   compose-hive:
@@ -27,5 +31,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - name: Join a hive container to the Compose stack and hold the controller lease
         run: bash scripts/packaging/compose-hive-smoke.sh

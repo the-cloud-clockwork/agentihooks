@@ -186,10 +186,10 @@ def test_dependency_audit_is_a_lint_step_graded_by_the_base():
     job = jobs["lint"]
     assert "dependency-audit" not in jobs
     assert "lint" in jobs["gate-required"]["needs"]
-    assert job.get("needs") in (None, ["reuse"])
-    assert job.get("if") in (
-        None,
-        "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+    assert job["needs"] == ["reuse"]
+    assert (
+        job["if"]
+        == "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}"
     )
     assert "continue-on-error" not in job
     assert all("continue-on-error" not in step for step in job["steps"])

@@ -13,10 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_queue_suites_use_a_precise_reuse_condition():
     jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     condition = "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}"
-    assert jobs["unit"].get("if") in (None, condition)
-    if jobs["unit"].get("if") == condition:
-        assert "reuse" in jobs["unit"]["needs"]
-        assert jobs["reuse"]["outputs"]["reused"] == "${{ steps.decision.outputs.reused || 'false' }}"
+    assert jobs["unit"]["if"] == condition
+    assert "reuse" in jobs["unit"]["needs"]
+    assert jobs["reuse"]["outputs"]["reused"] == "${{ steps.decision.outputs.reused || 'false' }}"
 
 
 @pytest.mark.parametrize("event", ["merge_group", "pull_request", "push", "workflow_dispatch"])
@@ -29,6 +28,7 @@ def test_required_gate_reuses_only_complete_queue_evidence(event, reuse_result, 
     needs = {name: {"result": "skipped"} for name in jobs["gate-required"]["needs"]}
     needs["reuse"] = {"result": reuse_result, "outputs": {"reused": "true", "run": source_run}}
     needs["queue-baseline"] = {"result": baseline_result}
+    needs["stage-budget"] = {"result": "success"}
     result = subprocess.run(
         ["bash", "-e", "-c", step["run"]],
         env=dict(os.environ, NEEDS=json.dumps(needs), REUSED="true", EVENT=event, MUTATION="false"),
@@ -44,14 +44,21 @@ def test_required_gate_reuses_only_complete_queue_evidence(event, reuse_result, 
     assert (result.returncode == 0) == expected, result.stdout + result.stderr
 
 
-@pytest.mark.parametrize("failed", ["unit", "lint", "sonar", "test-count", "reuse", "queue-baseline"])
-def test_a_reused_queue_rejects_failed_or_executed_suites(failed):
+GATE_NEEDS = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["gate-required"]["needs"]
+
+
+@pytest.mark.parametrize("result", ["failure", "success"])
+@pytest.mark.parametrize("failed", GATE_NEEDS)
+def test_a_reused_queue_rejects_failed_or_executed_suites(failed, result):
     jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     step = jobs["gate-required"]["steps"][0]
     needs = {name: {"result": "skipped"} for name in jobs["gate-required"]["needs"]}
     needs["reuse"] = {"result": "success", "outputs": {"reused": "true", "run": "12345"}}
     needs["queue-baseline"] = {"result": "success"}
-    needs[failed]["result"] = "failure"
+    needs["stage-budget"] = {"result": "success"}
+    if failed in {"reuse", "queue-baseline", "stage-budget"} and result == "success":
+        result = "skipped"
+    needs[failed]["result"] = result
     result = subprocess.run(
         ["bash", "-e", "-c", step["run"]],
         env=dict(os.environ, NEEDS=json.dumps(needs), REUSED="true", EVENT="merge_group", MUTATION="false"),
