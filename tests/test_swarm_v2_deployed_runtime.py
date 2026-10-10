@@ -448,6 +448,10 @@ class HandPods(Pods):
         super().__init__(namespace)
         self.refuse, self.lose, self.deleted = refuse, lose, []
 
+    def create_pod(self, body):
+        self.created.append(body)
+        return Pods.read_pod(self, body["metadata"]["name"])
+
     def read_pod(self, name):
         return None if self.lose else super().read_pod(name)
 

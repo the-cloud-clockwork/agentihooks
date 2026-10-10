@@ -1,9 +1,10 @@
 """The capacity and registry given here must authorize with LaunchAuthority.verify, never register."""
 
+import json
 import subprocess
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -18,11 +19,23 @@ from scripts.swarm_v2.runtime.base import Outcome, RuntimeRouter, SpawnRequest, 
 NOT_LAUNCHED = (Status.REFUSED, Status.UNAVAILABLE, Status.UNSUPPORTED)
 GRANT_SECONDS = 30
 NO_API_URL = "the swarm config has no API address"
+NOT_HANDED = "launch grant not handed: "
+HANDS = "launch-grant-hands"
 Target = Callable[[SpawnRequest], dict]
 
 
+@dataclass(frozen=True)
+class Hand:
+    handed: bool
+    reason: str
+    removed: bool = False
+
+
+HANDED = Hand(True, "handed")
+
+
 class WorkerHomes(Protocol):
-    def hand(self, agent: AgentRecord, grant: str) -> bool: ...
+    def hand(self, agent: AgentRecord, grant: str) -> Hand: ...
 
 
 @dataclass(frozen=True)
@@ -31,14 +44,14 @@ class WorkerHomeCommand:
 
     root: Path
 
-    def hand(self, agent: AgentRecord, grant: str) -> bool:
+    def hand(self, agent: AgentRecord, grant: str) -> Hand:
         attempt = self.root / agent.execution_id
         command = [sys.executable, "-m", "scripts.swarm_v2.worker_home", "grant", str(attempt)]
         try:
             done = subprocess.run(command, input=grant, capture_output=True, text=True, timeout=GRANT_SECONDS)
         except (OSError, subprocess.TimeoutExpired):
-            return False
-        return done.returncode == 0
+            return Hand(False, "grant_command_unavailable")
+        return HANDED if done.returncode == 0 else Hand(False, "grant_command_failed")
 
 
 @dataclass(frozen=True)
@@ -57,7 +70,7 @@ class Launch:
     grant: str = field(repr=False)
     slot: Slot | None
     outcome: Outcome
-    handed: bool = False
+    hand: Hand | None = None
 
 
 class DistributedLaunch:
@@ -98,7 +111,15 @@ class DistributedLaunch:
         if outcome.status in NOT_LAUNCHED:
             self.exited(admitted)
             return Launch(admitted, grant, slot, outcome)
-        return Launch(admitted, grant, slot, outcome, self.homes.hand(admitted, grant))
+        hand = self.homes.hand(admitted, grant)
+        store = self.controller.store
+        store.redis.hset(store.key(self.slug, HANDS), admitted.execution_id, json.dumps(asdict(hand)))
+        if hand.handed:
+            return Launch(admitted, grant, slot, outcome, hand)
+        self.exited(admitted)
+        return Launch(
+            admitted, grant, slot, Outcome("spawn", Status.REFUSED, backend, detail=NOT_HANDED + hand.reason), hand
+        )
 
     def from_tick(self, request: SpawnRequest, terms: LaunchTerms, target: Target) -> Outcome:
         api_url, backend = request.config.api_url, self.router.spawn_backend(request)
