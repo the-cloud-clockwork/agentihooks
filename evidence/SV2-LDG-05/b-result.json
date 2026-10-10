@@ -1,1 +1,49 @@
-{}
+{
+  "case": "T-SV2-LDG-05-B",
+  "independent_runs": 2,
+  "observed": {
+    "case": "T-SV2-LDG-05-B",
+    "evidence_class": "mocked Redis and server clock; fixture network; signed fixture grants",
+    "input_sha256": "8228171c01e6568f9185b5a77df62336814091f915daec25c7d6b26ba160c029",
+    "observed": {
+      "handlers_ran": [],
+      "late_ack": [
+        410,
+        "expired",
+        "new_request"
+      ],
+      "late_delivery": [
+        [
+          [
+            "GET",
+            "commands",
+            200
+          ]
+        ],
+        true
+      ],
+      "old_conversation_poll": [
+        409,
+        "stale_generation",
+        "new_request"
+      ],
+      "reissue_to_superseded": [
+        "stale_generation",
+        "the execution is not the current occupant of its seat"
+      ],
+      "states": [
+        "expired",
+        "expired"
+      ],
+      "successor_delivered": [
+        [
+          "GET",
+          "commands",
+          200
+        ]
+      ],
+      "worker_command_ack_lag_seconds": []
+    },
+    "state": "passed"
+  }
+}

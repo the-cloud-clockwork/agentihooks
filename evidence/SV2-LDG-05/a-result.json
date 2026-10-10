@@ -1,1 +1,62 @@
-{}
+{
+  "case": "T-SV2-LDG-05-A",
+  "independent_runs": 2,
+  "observed": {
+    "case": "T-SV2-LDG-05-A",
+    "evidence_class": "mocked Redis and server clock; fixture network; signed fixture grants",
+    "input_sha256": "8228171c01e6568f9185b5a77df62336814091f915daec25c7d6b26ba160c029",
+    "observed": {
+      "accepted": [
+        "accepted",
+        null,
+        false
+      ],
+      "accepted_before_completed": true,
+      "calls": [
+        [
+          "GET",
+          "commands",
+          200
+        ],
+        [
+          "POST",
+          "ack",
+          200
+        ],
+        [
+          "GET",
+          "commands",
+          200
+        ],
+        [
+          "POST",
+          "complete",
+          200
+        ]
+      ],
+      "completed": [
+        "completed",
+        {
+          "checkpoint": "refs/checkpoints/fixture-1",
+          "status": "checkpointed"
+        },
+        false
+      ],
+      "duplicate_poll": [
+        200,
+        [
+          "issued"
+        ]
+      ],
+      "issued": "issued",
+      "while_ack_unreachable": [
+        false,
+        "issued"
+      ],
+      "worker_command_ack_lag_seconds": [
+        0.04
+      ]
+    },
+    "state": "passed"
+  }
+}
