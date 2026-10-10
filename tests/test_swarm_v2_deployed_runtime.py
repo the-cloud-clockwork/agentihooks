@@ -10,6 +10,7 @@ from scripts.swarm import controller as loop
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2 import control_service, deployed
+from scripts.swarm_v2.auth_context import GrantRefused
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, load_policy
 from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL, owner_for
@@ -93,8 +94,12 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
     store = _store()
     for name, value in {**_environ(tmp_path, store), "SWARM_HIVE_ID": "hive-fixture"}.items():
         monkeypatch.setenv(name, value)
-    pods, hosted, seen = Pods("swarm-pod-proof"), [], []
-    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: pods if namespace == pods.namespace else None)
+    pods, hosted, seen, apis = Pods("swarm-pod-proof"), [], [], []
+    monkeypatch.setattr(
+        deployed,
+        "pod_api",
+        lambda environ, namespace: apis.append((environ.get(deployed.API_URL_ENV), namespace)) or pods,
+    )
     real_host = control_service.host
     monkeypatch.setattr(control_service, "host", lambda *args: hosted.append(real_host(*args)) or hosted[0])
     monkeypatch.setattr(loop, "connect", lambda: store)
@@ -123,6 +128,12 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
     launcher = runtime.launch.func.__self__
     assert isinstance(launcher, DistributedLaunch)
     assert runtime.launch.func == launcher.from_tick
+    assert apis == [(API_URL, "swarm-pod-proof")]
+    assert (launcher.capacity.slug, launcher.fleet.slug) == (SLUG, SLUG)
+    for authorize in (launcher.capacity.authorize, launcher.fleet.authorize):
+        with pytest.raises(GrantRefused) as refused:
+            authorize("not-a-grant")
+        assert str(refused.value) == "launch grant is malformed"
     assert (launcher.controller, launcher.grants, launcher.router) == (
         service.controller,
         service.grants,
@@ -182,6 +193,27 @@ def test_the_start_runs_as_before_without_an_api_address(tmp_path):
     try:
         assert service.runtime is None
         assert store.config(SLUG).api_url == ""
+    finally:
+        service.stop()
+
+
+def test_a_service_publishes_no_api_address_until_one_is_set(tmp_path):
+    store = _store()
+    service = control_service.ControlService(
+        store, SLUG, control_service.launch_key(_environ(tmp_path, store)), lambda: True
+    )
+
+    assert service.api_url == ""
+
+
+def test_the_tick_runtime_takes_its_disabled_backends_from_the_control_service_settings(tmp_path, monkeypatch):
+    store = _store()
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: Pods(namespace))
+    environ = {**_environ(tmp_path, store), "AGENTIHOOKS_RUNTIME_DISABLED": BACKEND}
+
+    service = control_service.host(environ, store, "hive-fixture")
+    try:
+        assert service.runtime.router.disabled == frozenset({BACKEND})
     finally:
         service.stop()
 
