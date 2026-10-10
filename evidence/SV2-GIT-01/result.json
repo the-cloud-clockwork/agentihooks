@@ -6,7 +6,7 @@
     "agentihooks",
     "antoncore"
   ],
-  "tested_commit": "39cfef6ab556b49d59a84ff8a710c65640bf4eef",
+  "tested_commit": "05f2fb2f6235efa1bdb2cafb3dab95477577a0d7",
   "status": "fixture-qualified; live API enablement on anton-prod waits for gate G12",
   "evidence_class": "Mocked for cases A to C: a fakeredis store shared by both controller processes, labelled node fixtures taken from the anton-prod node list and the antoncore ec2-arc-runners node labels, and the chart controller placement pinned to the fixture by a chart test. Live in kind: Proofs run 38076980770 at agentihooks 30afd472be87e5659206b5d122d31457f42873b0 deployed the chart with the control API on, registered one worker and heartbeated it through the controller API Service, saw the controller tick observe it working, and saw the kube-scheduler hold the controller Pending on a node labelled as Spot capacity; output in kind-proof.txt.",
   "interfaces": [
