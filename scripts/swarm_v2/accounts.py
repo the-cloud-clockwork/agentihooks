@@ -278,8 +278,7 @@ class AccountCapacity:
     ) -> dict[str, int]:
         """Rebuild this swarm's occupancy from current confirmed registry records; reservations stay to expire."""
         confirmed = self._confirmed(registry, registration)
-        prefix = account_key("")
-        stored = {key.removeprefix(prefix) for key in self.store.redis.scan_iter(match=account_key("*"))}
+        stored = set(stored_accounts(self.store))
         mine = self._holder("")
         rebuilt = {}
         for account in sorted(stored | set(confirmed)):

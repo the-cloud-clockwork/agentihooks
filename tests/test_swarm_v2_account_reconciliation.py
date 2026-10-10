@@ -107,7 +107,9 @@ def refusal(call, *args):
 
 
 def kinds(found):
-    return {finding.holder: (finding.kind, finding.action) for finding in found}
+    keyed = {finding.holder: (finding.kind, finding.action) for finding in found}
+    assert len(keyed) == len(found)
+    return keyed
 
 
 @pytest.mark.parametrize("run", ["first", "second"])
@@ -454,6 +456,7 @@ def test_status_reports_the_reconciliation_and_releases_nothing(world, monkeypat
     world.scene()
     world.clock[0] += TTL
     monkeypatch.setattr(status, "page_quota", lambda: {})
+    monkeypatch.delenv(reconciliation.MODE, raising=False)
     before = world.rows()
 
     block = status.status_report(world.store, SLUG, {"tasks": []})["account_reconciliation"]
