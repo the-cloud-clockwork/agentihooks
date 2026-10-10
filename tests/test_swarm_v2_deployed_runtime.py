@@ -39,7 +39,7 @@ def _cs():
 
 class Pods:
     def __init__(self, namespace):
-        self.namespace, self.created, self.maps = namespace, [], []
+        self.namespace, self.created, self.maps, self.nodes_read = namespace, [], [], 0
 
     def create_pod(self, body):
         self.created.append(body)
@@ -50,6 +50,10 @@ class Pods:
         return {**found[0], "metadata": {**found[0]["metadata"], "uid": "uid-1"}} if found else None
 
     def list_pods(self, selector):
+        return []
+
+    def ready_nodes(self):
+        self.nodes_read += 1
         return []
 
     def create_config_map(self, body):
@@ -179,6 +183,7 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
     admitted = store.execution(SLUG, execution)
     assert (admitted.seat, admitted.runtime_backend) == (SEAT, BACKEND)
     assert admitted.runtime_target == {"pod_namespace": "swarm-pod-proof", "pod_name": "swarm-t1"}
+    assert pods.nodes_read == 1
     assert lease.current(store, SLUG) is None
 
 

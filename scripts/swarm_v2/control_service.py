@@ -78,6 +78,7 @@ class ControlService:
         self.listen: tuple[str, int] | None = None
         self.runtime = None
         self.api_url = ""
+        self.recover: Callable[[], dict[str, str]] | None = None
 
     def start(self) -> bool:
         if not self.controller.acquire():
@@ -91,6 +92,8 @@ class ControlService:
         self._open()
         store = self.controller.store
         self.observe(lease.now_ms(store) / 1000 if now is None else now)
+        if self.recover is not None:
+            self.recover()
         return True
 
     def observe(self, now: float) -> list[Finding]:
@@ -148,6 +151,7 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
     if workers is not None:
         service.api_url = workers.terms.api_url
         service.runtime = deployed.tick_runtime(service, workers, environ)
+        service.recover = deployed.recovery_pass(service, workers, transports[0].api)
     try:
         service.start()
     except BaseException:

@@ -8,16 +8,18 @@ from scripts.swarm_v2 import image_tag
 from scripts.swarm_v2.accounts import AccountCapacity
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 from scripts.swarm_v2.kubernetes.client import KubeHttp, PodApi, PodClient
+from scripts.swarm_v2.kubernetes.failures import AccountSlot, Recovery
 from scripts.swarm_v2.kubernetes.grants import PodGrants
 from scripts.swarm_v2.kubernetes.runtime import KubernetesTransport
 from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, PodTemplate, load_policy
-from scripts.swarm_v2.kubernetes.watch import owner_for
+from scripts.swarm_v2.kubernetes.watch import OWNER_LABEL, owner_for
 from scripts.swarm_v2.launch import DistributedLaunch, LaunchTerms
 from scripts.swarm_v2.registry import FleetRegistry
 from scripts.swarm_v2.runtime.base import SpawnRequest
 from scripts.swarm_v2.runtime.routed import RoutedRuntime, routed
 
 if TYPE_CHECKING:
+    from scripts.swarm_v2.auth_context import LaunchAuthority
     from scripts.swarm_v2.control_service import ControlService
 
 API_URL_ENV = "AGENTIHOOKS_CONTROL_API_URL"
@@ -133,3 +135,41 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
     )
     launcher.router = runtime.router
     return runtime
+
+
+class GrantRelease:
+    def __init__(self, grants: "LaunchAuthority", slug: str) -> None:
+        self.grants, self.slug = grants, slug
+
+    def release(self, execution_id: str) -> None:
+        self.grants.revoke(self.slug, execution_id)
+
+
+class NoCheckpoints:
+    """No checkpoint store is deployed yet, so every failure waits for an explicit fresh or resume decision."""
+
+    def list(self, execution_id: str) -> list[dict]:
+        return []
+
+
+@dataclass(frozen=True)
+class RecoveryPass:
+    recovery: Recovery
+    api: PodApi
+    selector: str
+
+    def __call__(self) -> dict[str, str]:
+        return self.recovery.reconcile(self.api.list_pods(self.selector), self.api.ready_nodes())
+
+
+def recovery_pass(service: "ControlService", workers: Workers, api: PodApi) -> RecoveryPass:
+    controller, grants = service.controller, service.grants
+    slug = controller.slug
+
+    def verify(token: str):
+        return grants.verify(slug, token)
+
+    capacity = AccountCapacity(controller.store, slug, verify)
+    releases = {"grant": GrantRelease(grants, slug), "account": AccountSlot(controller.store, slug, capacity)}
+    recovery = Recovery(controller.store, slug, controller, NoCheckpoints(), releases, workers.image_tag)
+    return RecoveryPass(recovery, api, f"{OWNER_LABEL}={owner_for(slug)}")
