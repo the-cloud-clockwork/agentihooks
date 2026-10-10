@@ -77,9 +77,12 @@ manifest no longer matches is discarded on its next attach and counted in
 seed. Setting `enabled` to false turns reuse off in the module: attaches return
 no seed, publishes write nothing, and no workspace, home or archive is touched.
 No worker launch path calls the module yet, and the granted scope is passed in
-by the caller. Seeds are sealed by file mode only and every attach re-verifies
-their recorded hashes; a store owned by another user or mounted read only into
-attempts is the deployment's job (SV2-FSY-05).
+by the caller, so the toolchain rejection holds at this interface only. Seeds
+are sealed by file mode only. Each attach and each publish over an existing
+entry re-hashes its files and checks their execute bits, but a seed edited
+after an attach runs unverified for that holder until the next attach discards
+it. A store owned by another user or mounted read only into attempts is left
+to deployment.
 
 The SV2-IMG-03 launch JSON has schema version one, `authority`, `harness`,
 `agent` and `exporter` argument vectors. Authority must exactly match a
