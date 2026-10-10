@@ -2,6 +2,7 @@ import ast
 import os
 import re
 import subprocess
+from collections import Counter
 from functools import cache
 from pathlib import Path
 
@@ -21,51 +22,91 @@ def own_bases(root: Path, base: str, head: str, graded=lambda sha: False) -> lis
     def git(*args: str) -> str:
         return subprocess.check_output(["git", *args], cwd=root).decode().strip()
 
-    def keeps_tests(sha: str) -> bool:
-        return "deletion" not in git("diff", "--shortstat", sha, head, "--", "tests")
-
     tip = git("rev-parse", head)
-    bases = {git("merge-base", base, head)}
+    given = git("merge-base", base, head)
+    bases = {given}
     if git("for-each-ref", INTEGRATION):
         bases.add(git("merge-base", INTEGRATION, head))
     unmerged = [f"--no-merged={own}" for own in bases]
     pushed = git("for-each-ref", "--merged", head, *unmerged, "--format=%(objectname)", "refs/remotes/origin").split()
-    bases.update(sha for sha in set(pushed) - {tip} if keeps_tests(sha) and graded(sha))
-    return sorted(bases)
+    bases.update(sha for sha in set(pushed) - {tip} if graded(sha))
+    return [given, *sorted(bases - {given})]
 
 
 def graded_green(sha: str) -> bool:
-    def suites(check: str) -> set[str]:
-        found = subprocess.run(
-            [
-                "gh",
-                "api",
-                "-X",
-                "GET",
-                f"repos/{os.environ['GITHUB_REPOSITORY']}/commits/{sha}/check-runs",
-                "-f",
-                f"check_name={check}",
-                "-f",
-                "status=completed",
-                "--jq",
-                '.check_runs[] | select(.conclusion == "success") | .check_suite.id',
-            ],
-            capture_output=True,
-            text=True,
-        )
-        return set(found.stdout.split()) if found.returncode == 0 else set()
-
-    return bool(suites("mutation") or suites("Gate — Required") & suites("mutation (0)"))
+    found = subprocess.run(
+        [
+            "gh",
+            "api",
+            "-X",
+            "GET",
+            f"repos/{os.environ['GITHUB_REPOSITORY']}/commits/{sha}/check-runs",
+            "-f",
+            "check_name=mutation",
+            "-f",
+            "status=completed",
+            "--jq",
+            '[.check_runs[] | select(.conclusion == "success")] | length',
+        ],
+        capture_output=True,
+        text=True,
+    )
+    return found.returncode == 0 and found.stdout.strip() not in ("", "0")
 
 
 def discover_changes(root: Path, base: str | list[str], head: str) -> dict[str, set[int]]:
     bases = own_bases(root, base, head) if isinstance(base, str) else base
-    found = [changes_since(root, own, head) for own in bases]
-    return {
-        name: set.intersection(*(changes[name] for changes in found))
-        for name in found[0]
-        if all(name in changes for changes in found)
-    }
+    given, *newer = [changes_since(root, own, head) for own in bases]
+    weak = [weakened_tests(root, own, head) for own in bases[1:]]
+    found = {}
+    for name, lines in given.items():
+        kept = [lines if reads(root, name, tests) else changes.get(name) for changes, tests in zip(newer, weak)]
+        if None not in kept:
+            found[name] = lines.intersection(*kept)
+    return found
+
+
+def reads(root: Path, name: str, weakened: set[str]) -> bool:
+    if not weakened:
+        return False
+    if any(not is_test_file(path) or not (root / path).is_file() for path in weakened):
+        return True
+    return not weakened.isdisjoint(select_tests(root, Path(name)))
+
+
+def is_test_file(path: str) -> bool:
+    return Path(path).name.startswith("test_") and Path(path).suffix == ".py"
+
+
+def weakened_tests(root: Path, base: str, head: str) -> set[str]:
+    names = subprocess.check_output(["git", "diff", "--name-only", "-z", base, head, "--", "tests"], cwd=root)
+    return {name for name in names.decode().split("\0") if name and not adds_only_tests(root, base, head, name)}
+
+
+def adds_only_tests(root: Path, base: str, head: str, name: str) -> bool:
+    if not is_test_file(name):
+        return False
+    old, new = (blob(root, rev, name) for rev in (base, head))
+    if new is None:
+        return False
+    before = Counter(ast.dump(node) for node in ast.parse(old or "").body)
+    nodes = ast.parse(new).body
+    after = Counter(ast.dump(node) for node in nodes)
+    added = after - before
+    return not before - after and all(is_test(node) for node in nodes if added[ast.dump(node)])
+
+
+def blob(root: Path, rev: str, name: str) -> str | None:
+    shown = subprocess.run(["git", "show", f"{rev}:{name}"], cwd=root, capture_output=True, text=True)
+    return shown.stdout if shown.returncode == 0 else None
+
+
+def is_test(node: ast.stmt) -> bool:
+    if isinstance(node, ast.Import | ast.ImportFrom):
+        return True
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        return node.name.startswith("test")
+    return isinstance(node, ast.ClassDef) and node.name.startswith("Test")
 
 
 def changes_since(root: Path, base: str, head: str) -> dict[str, set[int]]:

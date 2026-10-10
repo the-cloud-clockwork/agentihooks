@@ -71,10 +71,11 @@ def test_preflight_mutates_against_dev_with_the_pull_request_budget():
     assert steps[-1]["with"]["name"] == "mutation-preflight-report"
 
 
-def test_the_checks_that_prove_a_commit_graded_keep_the_names_the_scope_reads():
+def test_only_the_push_preflight_reports_the_check_that_proves_a_commit_graded():
     tests = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
-    assert tests["gate-required"]["name"] == "Gate — Required"
     assert "name" not in tests["mutation"]
     assert tests["mutation"]["strategy"]["matrix"] == {"shard": "${{ fromJSON(needs.mutation-plan.outputs.shards) }}"}
     assert "name" not in _workflow()["jobs"]["mutation"]
     assert "strategy" not in _workflow()["jobs"]["mutation"]
+    proofs = yaml.safe_load((_ROOT / ".github/workflows/proofs.yml").read_text())["jobs"]
+    assert proofs["mutation"]["uses"] == "./.github/workflows/mutation-preflight.yml"

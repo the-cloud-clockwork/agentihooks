@@ -184,7 +184,7 @@ def test_a_stacked_branch_grades_only_its_own_lines_once_the_earlier_branch_was_
     git("checkout", "-q", "stacked")
     git("merge", "-q", "--no-edit", "dev")
     bases = own_bases(tmp_path, pinned, "HEAD", [earlier].__contains__)
-    assert bases == sorted([pinned, earlier, merged_dev])
+    assert bases == [pinned, *sorted([earlier, merged_dev])]
     assert discover_changes(tmp_path, bases, "HEAD") == {"hooks/own.py": {1, 2}, "hooks/earlier.py": {2}}
     assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/own.py": {1, 2}, "hooks/earlier.py": {1, 2}}
 
@@ -214,7 +214,7 @@ def test_only_a_pushed_commit_inside_the_head_and_graded_green_counts_as_an_earl
 
     bases = own_bases(tmp_path, base, "HEAD", graded)
     assert asked == [first]
-    assert bases == sorted([base, first] if green else [base])
+    assert bases == ([base, first] if green else [base])
     own = {"hooks/mid.py": {1, 2}, "hooks/two.py": {1, 2}} | ({} if green else {"hooks/one.py": {1, 2}})
     assert discover_changes(tmp_path, bases, "HEAD") == own
 
@@ -246,44 +246,125 @@ def test_resolved_bases_are_graded_without_looking_up_branches_again(tmp_path):
     assert discover_changes(tmp_path, [earlier], "HEAD") == {"hooks/two.py": {1, 2}}
 
 
-@pytest.mark.parametrize(("edit", "counted"), [("    assert f() == 1\n    assert f()\n", True), ("    f()\n", False)])
-def test_an_earlier_branch_counts_only_while_the_head_keeps_every_test_line_it_was_graded_with(tmp_path, edit, counted):
-    from scripts.ci_mutation.scope import own_bases
-
-    git, commit = _repo(tmp_path)
-    base = commit("dev.py", "a = 1\n")
-    git("checkout", "-q", "-b", "branch")
-    (tmp_path / "tests").mkdir()
-    test = tmp_path / "tests" / "test_one.py"
-    test.write_text("def test_f():\n    assert f() == 1\n")
-    git("add", "tests/test_one.py")
-    earlier = commit("one.py", "def f():\n    return 1\n")
-    git("update-ref", "refs/remotes/origin/earlier", earlier)
-    test.write_text("def test_f():\n" + edit)
-    (tmp_path / "tests" / "test_two.py").write_text("def test_g():\n    assert g() == 2\n")
-    git("add", "tests/test_one.py", "tests/test_two.py")
-    commit("two.py", "def g():\n    return 2\n")
-    test.write_text("def test_f():\n")
-    asked = []
-
-    def graded(sha):
-        asked.append(sha)
-        return True
-
-    assert own_bases(tmp_path, base, "HEAD", graded) == sorted([base, earlier] if counted else [base])
-    assert asked == ([earlier] if counted else [])
+PASSING = "import pytest\n\n\ndef test_a():\n    assert 1\n\n\ndef test_b():\n    assert 2\n"
 
 
 @pytest.mark.parametrize(
-    ("answers", "expected"),
+    ("name", "old", "new", "expected"),
     [
-        ({"mutation": (0, "11\n")}, True),
-        ({"mutation": (0, ""), "Gate — Required": (0, "5\n6\n"), "mutation (0)": (0, "6\n")}, True),
-        ({"mutation": (0, ""), "Gate — Required": (0, "5\n"), "mutation (0)": (0, "7\n")}, False),
-        ({"mutation": (1, "9\n"), "Gate — Required": (0, "5\n"), "mutation (0)": (1, "5\n")}, False),
+        ("tests/test_x.py", PASSING, PASSING + "\n\ndef test_c():\n    assert 3\n", True),
+        ("tests/test_x.py", PASSING, PASSING + "\n\nasync def test_c():\n    assert 3\n", True),
+        ("tests/test_x.py", PASSING, PASSING + "\n\nclass TestC:\n    def test_c(self):\n        assert 3\n", True),
+        ("tests/test_x.py", PASSING, "import os\n" + PASSING, True),
+        ("tests/test_x.py", PASSING, "from os import path\n" + PASSING, True),
+        ("tests/test_x.py", PASSING, PASSING.replace("def test_a", "@pytest.mark.skip\ndef test_a"), False),
+        ("tests/test_x.py", PASSING, PASSING.replace("assert 2", "assert 2 or True"), False),
+        ("tests/test_x.py", PASSING, PASSING + "\n\ndef helper():\n    return 3\n", False),
+        ("tests/test_x.py", PASSING, PASSING + "\n\nclass Helper:\n    pass\n", False),
+        ("tests/test_x.py", PASSING, PASSING + "\nx = 1\n", False),
+        ("tests/test_x.py", PASSING, PASSING.replace("def test_b():\n    assert 2\n", ""), False),
+        ("tests/test_x.py", None, PASSING, True),
+        ("tests/test_x.py", PASSING, None, False),
+        ("tests/cases.py", PASSING, PASSING + "\n\ndef test_c():\n    assert 3\n", False),
+        ("tests/test_x.json", "{}\n", '{"a": 1}\n', False),
     ],
 )
-def test_a_commit_is_graded_only_by_a_green_preflight_or_a_green_gate_whose_run_mutated(monkeypatch, answers, expected):
+def test_a_test_file_change_counts_as_harmless_only_when_it_adds_tests(tmp_path, name, old, new, expected):
+    from scripts.ci_mutation.scope import adds_only_tests
+
+    git, commit = _repo(tmp_path)
+    path = tmp_path / name
+    path.parent.mkdir(exist_ok=True)
+    if old is not None:
+        path.write_text(old)
+        git("add", name)
+    base = commit("dev.py", "a = 1\n")
+    if new is None:
+        git("rm", "-q", name)
+    else:
+        path.write_text(new)
+        git("add", name)
+    commit("dev.py", "a = 2\n")
+    assert adds_only_tests(tmp_path, base, "HEAD", name) is expected
+
+
+def test_weakened_tests_name_every_test_change_beyond_added_tests(tmp_path):
+    from scripts.ci_mutation.scope import weakened_tests
+
+    git, commit = _repo(tmp_path)
+    (tmp_path / "tests").mkdir()
+    for name in ("test_add.py", "test_skip.py"):
+        (tmp_path / "tests" / name).write_text(PASSING)
+    git("add", "tests")
+    base = commit("dev.py", "a = 1\n")
+    (tmp_path / "tests" / "test_add.py").write_text(PASSING + "\n\ndef test_c():\n    assert 3\n")
+    (tmp_path / "tests" / "test_skip.py").write_text(PASSING.replace("def test_a", "@pytest.mark.skip\ndef test_a"))
+    git("add", "tests")
+    commit("dev.py", "a = 2\n")
+    assert weakened_tests(tmp_path, base, "HEAD") == {"tests/test_skip.py"}
+
+
+@pytest.mark.parametrize(
+    ("weakened", "one", "two"),
+    [
+        (set(), False, False),
+        ({"tests/test_one.py"}, True, False),
+        ({"tests/conftest.py"}, True, True),
+        ({"tests/test_one.json"}, True, True),
+        ({"tests/test_gone.py"}, True, True),
+        ({"tests/conftest.py", "tests/test_one.py"}, True, True),
+    ],
+)
+def test_an_inherited_file_reads_weakened_tests_through_its_selected_tests_or_any_helper(tmp_path, weakened, one, two):
+    from scripts.ci_mutation.scope import reads
+
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_one.py").write_text("from hooks import one\n")
+    (tests / "test_two.py").write_text("from hooks import two\n")
+    (tests / "conftest.py").write_text("")
+    (tests / "test_one.json").write_text("{}\n")
+    assert reads(tmp_path, "hooks/one.py", weakened) is one
+    assert reads(tmp_path, "hooks/two.py", weakened) is two
+
+
+@pytest.mark.parametrize(
+    ("edit", "regraded"),
+    [
+        (lambda text: text + "\n\ndef test_more():\n    assert dev.d() == 1\n", False),
+        (lambda text: text.replace("def test_d", "@pytest.mark.skip\ndef test_d"), True),
+        (None, True),
+    ],
+)
+def test_inherited_lines_are_regraded_once_the_branch_weakens_the_tests_that_select_them(tmp_path, edit, regraded):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path)
+    (tmp_path / "tests").mkdir()
+    test = tmp_path / "tests" / "test_dev.py"
+    test.write_text("import pytest\n\nfrom hooks import dev\n\n\ndef test_d():\n    assert dev.d() == 1\n")
+    git("add", "tests")
+    pinned = commit("dev.py", "def d():\n    return 1\n")
+    git("checkout", "-q", "-b", "branch")
+    if edit is None:
+        (tmp_path / "tests" / "helpers.py").write_text("STUB = True\n")
+    else:
+        test.write_text(edit(test.read_text()))
+    git("add", "tests")
+    commit("own.py", "def f():\n    return 1\n")
+    git("checkout", "-q", "dev")
+    commit("dev.py", "def d():\n    return 1\n\n\ndef e():\n    return 2\n")
+    git("update-ref", "refs/remotes/origin/dev", "HEAD")
+    git("checkout", "-q", "branch")
+    git("merge", "-q", "--no-edit", "dev")
+    own = {"hooks/own.py": {1, 2}}
+    assert discover_changes(tmp_path, pinned, "HEAD") == (own | {"hooks/dev.py": {3, 4, 5, 6}} if regraded else own)
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"), [((0, "1\n"), True), ((0, "0\n"), False), ((0, ""), False), ((1, "5\n"), False)]
+)
+def test_a_commit_is_graded_only_by_a_green_push_preflight_mutation_check(monkeypatch, answer, expected):
     import subprocess
 
     from scripts.ci_mutation import scope
@@ -292,10 +373,8 @@ def test_a_commit_is_graded_only_by_a_green_preflight_or_a_green_gate_whose_run_
     calls = []
 
     def run(command, **kwargs):
-        check = command[6].removeprefix("check_name=")
         calls.append((command, kwargs))
-        code, out = answers[check]
-        return subprocess.CompletedProcess(command, code, out, "")
+        return subprocess.CompletedProcess(command, answer[0], answer[1], "")
 
     monkeypatch.setattr(scope.subprocess, "run", run)
     assert scope.graded_green("abc") is expected
@@ -308,13 +387,12 @@ def test_a_commit_is_graded_only_by_a_green_preflight_or_a_green_gate_whose_run_
                 "GET",
                 "repos/owner/repo/commits/abc/check-runs",
                 "-f",
-                f"check_name={check}",
+                "check_name=mutation",
                 "-f",
                 "status=completed",
                 "--jq",
-                '.check_runs[] | select(.conclusion == "success") | .check_suite.id',
+                '[.check_runs[] | select(.conclusion == "success")] | length',
             ],
             {"capture_output": True, "text": True},
         )
-        for check in answers
     ]
