@@ -236,7 +236,9 @@ def test_tree_prints_the_subtree_indented_with_states(repo, monkeypatch, capsys)
 
 def test_tree_without_a_node_prints_the_whole_ledger(repo, monkeypatch, capsys):
     monkeypatch.setattr(
-        ledger, "resource", lambda slug, path, collection: routes.ledger_read(server(repo), slug, path, {})["data"]
+        ledger,
+        "resource",
+        lambda slug, path, collection=False: routes.ledger_read(server(repo), slug, path, {})["data"],
     )
     ledger.cmd_tree(SimpleNamespace(slug=SLUG, node=None))
     lines = capsys.readouterr().out.splitlines()
@@ -245,7 +247,9 @@ def test_tree_without_a_node_prints_the_whole_ledger(repo, monkeypatch, capsys):
 
 def test_tree_reads_without_a_member_name(repo, monkeypatch, capsys):
     monkeypatch.setattr(
-        ledger, "resource", lambda slug, path, collection: routes.ledger_read(server(repo), slug, path, {})["data"]
+        ledger,
+        "resource",
+        lambda slug, path, collection=False: routes.ledger_read(server(repo), slug, path, {})["data"],
     )
     monkeypatch.setattr(sys, "argv", ["ledger", "--slug", SLUG, "tree", "slices/s2"])
     ledger.main()
