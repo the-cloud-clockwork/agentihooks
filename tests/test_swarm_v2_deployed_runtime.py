@@ -306,7 +306,8 @@ def test_a_kubernetes_launch_puts_its_grant_in_the_pod_launch_material_and_recor
         launcher = runtime.launch.func.__self__
         task = {"id": "t1", "seat": SEAT, "controller_epoch": service.controller.held.epoch}
         request = SpawnRequest(store.config(SLUG), "eng", store.next_name(SLUG, "eng"), task)
-        agent = AgentRecord(request.name, "eng", "t1", seat=SEAT, runtime_backend=BACKEND)
+        target = runtime.launch.keywords["target"](request)
+        agent = AgentRecord(request.name, "eng", "t1", seat=SEAT, runtime_backend=BACKEND, runtime_target=target)
         launch = launcher.spawn(request, agent, runtime.launch.keywords["terms"], "")
         claims = service.grants.verify(SLUG, pods.maps[0]["data"]["launch-grant"])
     finally:
