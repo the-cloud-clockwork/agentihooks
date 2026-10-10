@@ -32,11 +32,11 @@ def _checked(count: int) -> int:
 def lead_of(slug: str, live: list[str]) -> str:
     """The lead seat while it is live, else the lowest numbered live master; the empty lead only when none is live."""
     lead = seat_address(slug, MASTER)
-    return lead if lead in live or not live else min(live, key=_number)
+    return lead if lead in live or not live else min(live, key=lambda address: _number(slug, address))
 
 
-def _number(address: str) -> int:
-    found = address.split("@", 1)[0].removeprefix(f"{MASTER}-")
+def _number(slug: str, address: str) -> int:
+    found = address.removesuffix(f"@{slug}").removeprefix(f"{MASTER}-")
     return int(found) if found.isdecimal() else UNNUMBERED
 
 
@@ -72,9 +72,9 @@ def count_of(text: str) -> int:
 
 def owner_of(target: str, doc: dict, owners: dict[str, str]) -> str:
     kind, _, rest = target.partition("/")
-    item = rest.split("/", 1)[0]
+    item = rest.partition("/")[0]
     if kind == "tasks":
-        item = next((t.get("phase", "") for t in doc.get("tasks", []) if t.get("id") == item), "")
+        item = {t.get("id"): t.get("phase") for t in doc.get("tasks", [])}.get(item)
     elif kind != "phases":
         return ""
     return owners.get(item, "")
@@ -82,7 +82,9 @@ def owner_of(target: str, doc: dict, owners: dict[str, str]) -> str:
 
 def route(target: str, doc: dict, owners: Callable[[], dict[str, str]], live: list[str], lead: str) -> str:
     """owners is read only for a phase or task target, so other items write no owner state."""
-    owner = owner_of(target, doc, owners()) if target.partition("/")[0] in ("phases", "tasks") else ""
+    if target.partition("/")[0] not in ("phases", "tasks"):
+        return lead
+    owner = owner_of(target, doc, owners())
     return owner if owner in live else lead
 
 

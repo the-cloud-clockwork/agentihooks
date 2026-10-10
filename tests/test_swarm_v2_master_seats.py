@@ -303,3 +303,127 @@ def test_swarm_set_masters_stores_the_count_and_reports_it(swarm, monkeypatch, c
     assert cli.main(["paused-sw", "set", "masters=0"]) != 0
     assert cli.main(["paused-sw", "set", "masters=4", "bogus=1"]) != 0
     assert masters.MasterSeats(store.redis).count("paused-sw") == 3
+
+
+def test_swarm_set_refuses_a_master_count_holding_another_equals_sign(swarm, monkeypatch, capsys):
+    store, _ = swarm
+    store.create(SwarmConfig("paused-sw", "/repo", 1, 1, state="paused"))
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    assert cli.main(["paused-sw", "set", "masters=2=3"]) == 1
+    assert capsys.readouterr().err.splitlines()[-1] == "swarm: masters takes a whole number of master seats, not '2=3'"
+    assert masters.MasterSeats(store.redis).count("paused-sw") == 1
+
+
+def test_refusals_name_the_count_they_refused():
+    with pytest.raises(masters.MasterError) as below:
+        masters.seats(SLUG, 0)
+    assert str(below.value) == "a swarm needs at least one master seat, not 0"
+    with pytest.raises(masters.MasterError) as text:
+        masters.count_of("two")
+    assert str(text.value) == "masters takes a whole number of master seats, not 'two'"
+
+
+def test_the_lowest_numbered_live_master_is_read_as_a_number_not_as_text():
+    assert masters.lead_of(SLUG, [f"master-10@{SLUG}", f"master-2@{SLUG}"]) == f"master-2@{SLUG}"
+
+
+def test_an_added_seat_takes_the_last_phases_of_the_busiest_seat():
+    third = f"master-3@{SLUG}"
+    previous = {"p1": LEAD, "p2": SECOND, "p3": SECOND, "p4": SECOND, "p5": SECOND, "p6": LEAD}
+    owners = masters.assign(["p1", "p2", "p3", "p4", "p5", "p6"], [LEAD, SECOND, third], previous, [LEAD, SECOND])
+    assert owners == {"p1": LEAD, "p2": SECOND, "p3": SECOND, "p4": third, "p5": third, "p6": LEAD}
+
+
+def test_an_added_seat_takes_from_the_lower_numbered_seat_when_two_are_equally_busy():
+    third = f"master-3@{SLUG}"
+    previous = {"p1": LEAD, "p2": LEAD, "p3": SECOND, "p4": SECOND}
+    owners = masters.assign(PHASES, [LEAD, SECOND, third], previous, [LEAD, SECOND])
+    assert owners == {"p1": LEAD, "p2": third, "p3": SECOND, "p4": SECOND}
+
+
+def test_an_item_under_a_phase_belongs_to_the_phase_owner_and_a_ledger_without_tasks_has_no_task_owner():
+    owners = {"p2": SECOND}
+    assert masters.owner_of("phases/p2/comments/c1", DOC, owners) == SECOND
+    assert masters.owner_of("tasks/t2/comments/c1", DOC, owners) == SECOND
+    assert masters.owner_of("tasks/t2", {}, owners) == ""
+
+
+def test_a_ledger_without_phases_has_no_owners(swarm):
+    store, _ = swarm
+    assert masters.MasterSeats(store.redis).owners(SLUG, {"tasks": []}) == {}
+
+
+def test_owners_and_seats_are_saved_sorted_beside_the_count(swarm):
+    store, _ = swarm
+    seats = masters.MasterSeats(store.redis)
+    reordered = {**DOC, "phases": list(reversed(DOC["phases"]))}
+    assert seats.owners(SLUG, reordered) == {"p4": LEAD, "p3": SECOND, "p2": LEAD, "p1": SECOND}
+    assert store.redis.hgetall(seats.key(SLUG)) == {
+        "count": "2",
+        "owners": json.dumps({"p1": SECOND, "p2": LEAD, "p3": SECOND, "p4": LEAD}, sort_keys=True),
+        "seats": json.dumps([LEAD, SECOND]),
+    }
+
+
+def test_a_saved_uneven_split_with_no_new_seat_is_read_back_unchanged(swarm):
+    store, _ = swarm
+    seats = masters.MasterSeats(store.redis)
+    saved = {"p1": LEAD, "p2": LEAD, "p3": LEAD, "p4": SECOND}
+    store.redis.hset(seats.key(SLUG), mapping={"owners": json.dumps(saved), "seats": json.dumps([LEAD, SECOND])})
+    assert seats.owners(SLUG, DOC) == saved
+
+
+class Clashing:
+    def __init__(self, redis, clashes):
+        self.redis, self.clashes = redis, clashes
+
+    def pipeline(self):
+        from redis.exceptions import WatchError
+
+        pipe = self.redis.pipeline()
+        if self.clashes:
+            self.clashes -= 1
+
+            def clash():
+                raise WatchError("changed")
+
+            pipe.execute = clash
+        return pipe
+
+
+def test_a_clashing_save_is_tried_again(swarm):
+    store, _ = swarm
+    owners = masters.MasterSeats(Clashing(store.redis, 1)).owners(SLUG, DOC)
+    assert owners == {"p1": LEAD, "p2": SECOND, "p3": LEAD, "p4": SECOND}
+    assert json.loads(store.redis.hget(masters.MasterSeats(store.redis).key(SLUG), "owners")) == owners
+
+
+def test_a_save_that_keeps_clashing_is_refused_by_name(swarm):
+    store, _ = swarm
+    with pytest.raises(masters.MasterError) as refused:
+        masters.MasterSeats(Clashing(store.redis, masters.SAVE_ATTEMPTS)).owners(SLUG, DOC)
+    assert str(refused.value) == f"master seats of {SLUG} kept changing; phase owners were not saved"
+
+
+def test_every_health_finding_sent_is_reported(swarm):
+    store, inbox = swarm
+    seated(store, FIRST, OTHER)
+    shown = [
+        {"id": "stale-claim/t2", "kind": "stale claim", "subject": "t2", "summary": "quiet"},
+        {"id": "ceremony/sw-eng-1", "kind": "ceremony", "subject": "sw-eng-1", "summary": "busy"},
+    ]
+    sent = ledger_events.findings_pass(inbox, store, SLUG, shown, DOC)
+    assert [s.split(": ")[0] for s in sent] == [f"told {SECOND}", f"told {LEAD}"]
+
+
+def test_a_merged_pull_request_left_open_reports_both_notices(swarm):
+    store, inbox = swarm
+    seated(store, FIRST, OTHER)
+    url = "https://example.test/pull/1"
+    doc = {**DOC, "tasks": [{"id": "t2", "phase": "p2", "state": "pr", "pr_url": url, "claimed_by": "sw-eng-gone"}]}
+    merged = ledger_events.PullRequest("MERGED", 1, 1, False)
+    sent = tick(store, inbox, doc, now_ms=1 + 21 * ledger_events.MINUTE_MS, github=lambda _: merged)
+    assert [s for s in sent if ":merged:" in s] == [
+        f"told {SECOND}: {url}:merged:engineer",
+        f"told {SECOND}: {url}:merged:master",
+    ]

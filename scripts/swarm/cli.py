@@ -637,7 +637,9 @@ def scaling_value(key, value):
 
 def _master_counts(pairs):
     """The master seat count lives beside the swarm config: checked with the other pairs, stored after them."""
-    return [masters.count_of(pair.partition("=")[2]) for pair in pairs if pair.partition("=")[0] == "masters"]
+    split = [(pair, *pair.partition("=")) for pair in pairs]
+    counts = [masters.count_of(value) for _, key, _, value in split if key == "masters"]
+    return counts, [pair for pair, key, _, _ in split if key != "masters"]
 
 
 def _store_master_counts(store, slug, counts):
@@ -647,8 +649,8 @@ def _store_master_counts(store, slug, counts):
 
 def cmd_set(store, args):
     changes, lanes = {}, {key: dict(value) for key, value in store.config(args.slug).lanes.items()}
-    counts = _master_counts(args.pairs)
-    for pair in [pair for pair in args.pairs if pair.partition("=")[0] != "masters"]:
+    counts, pairs = _master_counts(args.pairs)
+    for pair in pairs:
         key, _, value = pair.partition("=")
         if key in LANE_KEYS:
             lane, field = LANE_KEYS[key]

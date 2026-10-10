@@ -306,7 +306,7 @@ class Mail:
         self.store.redis.hset(self.red_index(), item.id, url)
 
     def engineer(self, task):
-        return self.seats.get(task.get("claimed_by", "")) or self.owner(f"tasks/{task.get('id', '')}")
+        return self.seats.get(task.get("claimed_by")) or self.owner(f"tasks/{task['id']}")
 
 
 def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
@@ -384,8 +384,8 @@ def findings_pass(inbox, store, slug, shown, doc=None):
             f"New health finding on swarm {slug}: {found['summary']} ({found['kind']}). Give it a verdict: "
             f'agentihooks swarm {slug} verdict {found["id"]} {"|".join(VERDICTS)} --note "<why>"'
         )
-        about = f"tasks/{found.get('subject', '')}" if found["kind"] in TASK_FINDINGS else ""
-        sent += mail.send(f"finding:{found['id']}:{judged}", mail.owner(about), text)
+        owner = mail.owner(f"tasks/{found['subject']}") if found["kind"] in TASK_FINDINGS else mail.master
+        sent += mail.send(f"finding:{found['id']}:{judged}", owner, text)
     return sent
 
 
