@@ -195,6 +195,7 @@ def test_direct_dispatches_and_branch_pushes_queue_on_a_lane():
     }
 
 
+@pytest.mark.parametrize("event", ["push", "workflow_dispatch"])
 def test_only_the_dev_push_worker_image_build_stays_uncapped_because_it_publishes_the_deploy_image(event):
     github = {"event_name": event, "ref": "refs/heads/dev", "workflow": "Swarm worker image", "run_id": 1000}
     resolved = _resolve(_block("swarm-node-image.yml"), **github)
