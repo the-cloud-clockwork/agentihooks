@@ -672,6 +672,7 @@ def test_draft_constants_and_name_rules_hold_their_published_values(world):
     }
     assert broadcasts.OPERATOR_ONLY == {"nuclear", "critical"}
     assert broadcasts.role_of("swarm-buildout-ci-12@x") == "swarm-buildout-ci"
+    assert broadcasts.role_of("eng-3") == "eng"
     assert world.announce({**WARNING, "broadcast_id": "a._-" + "b" * 60}).broadcast_id == "a._-" + "b" * 60
     assert refusal(world.announce, {**WARNING, "broadcast_id": "a" * 65}) == "invalid_request"
     assert refusal(world.announce, {**WARNING, "broadcast_id": "-a"}) == "invalid_request"
