@@ -413,6 +413,14 @@ def _fingerprint(doc, task):
     return hashlib.sha256(json.dumps([*judged, _plan_chunk(doc, task)]).encode()).hexdigest()
 
 
+def _drafted(record):
+    return bool(record) and record["verdict"] == PENDING and record["reason"] == DRAFT
+
+
+def _rearmed(record, task, moved):
+    return not record or not _same_phase(record, task) or moved or _drafted(record)
+
+
 @dataclass(frozen=True)
 class _Judgment:
     pr: dict | None
@@ -448,15 +456,17 @@ class Check:
             if self.mode != "coach" and judged and _same_phase(record, task) and not moved:
                 continue
             tasks.append((task, record, moved))
+        for task, record, moved in tasks:
+            if _rearmed(record, task, moved):
+                verdicts.write(task["id"], PENDING, RUNNING, self.now_ms, phase=task.get("phase"))
         with ThreadPoolExecutor(max_workers=2) as workers:
             pending = [
-                (task, record, moved, workers.submit(copy_context().run, self._judge, doc, task))
-                for task, record, moved in tasks
+                (task, record, workers.submit(copy_context().run, self._judge, doc, task)) for task, record, _ in tasks
             ]
-            for task, record, moved, future in pending:
-                if not record or not _same_phase(record, task) or moved:
-                    verdicts.write(task["id"], PENDING, RUNNING, self.now_ms, phase=task.get("phase"))
+            for task, record, future in pending:
                 judgment = future.result()
+                if judgment is None and _drafted(record):
+                    verdicts.write(task["id"], PENDING, DRAFT, record["at"], phase=record.get("phase"))
                 if judgment is not None:
                     actions += self._check(task, judgment, verdicts)
                     timing.keep()
@@ -572,6 +582,13 @@ def _gated(words):
     return program == "agentihooks" and rest[:1] == ["swarm"] and (rest[2:3] == ["done"] or rest[2:4] == MERGE_QUEUE)
 
 
+def _next_step(who):
+    return (
+        "Mark the pull request ready with gh pr ready <pull request url> if it is a draft, then wait for the verdict: "
+        f"agentihooks swarm {who.swarm} wait --on intent <pull request url>"
+    )
+
+
 class IntentGate:
     name = NAME
     default_mode = DEFAULT_MODE
@@ -608,12 +625,14 @@ class IntentGate:
         if verdict != PENDING:
             return Decision()
         if record["reason"] == DRAFT:
-            return Decision.deny(f"intent for task {who.task} is judged once its pull request is ready for review")
+            return Decision.deny(
+                f"intent for task {who.task} is judged once its pull request is ready for review. {_next_step(who)}"
+            )
         waited = int(self.clock() * 1000) - record["at"]
         if waited < GRACE_MS:
             return Decision.deny(
                 f"intent check running for task {who.task}, started {waited // 1000} s ago; it passes unchecked at "
-                f'{GRACE_MS // 1000} s. Wait for it: agentihooks swarm {who.swarm} wait 2 --reason "intent check"'
+                f"{GRACE_MS // 1000} s. {_next_step(who)}"
             )
         reason = "intent check still pending after two minutes, passed unchecked"
         log.append(state.slug, log.Row.of(NAME, "count", who, call.tool, reason), state.home)

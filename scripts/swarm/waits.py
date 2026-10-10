@@ -7,11 +7,13 @@ through its inbox, which the wake ladder delivers. A bare minutes wait, checked 
 import json
 import re
 
+from scripts.gates import intent
+from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import CLOSED, InboxError
 from scripts.swarm import idle, mutation_wait
 from scripts.swarm.store import SwarmError
 
-KINDS = ("checks", "merge", "reply", "task", "mutation")
+KINDS = ("checks", "merge", "reply", "task", "mutation", "intent")
 BARE_MAX_MINUTES = 60
 CHECKED_MINUTES = 12 * 60
 FRESH_MS = 5 * 60_000
@@ -21,10 +23,10 @@ PULL_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
 NOTICE_RE = re.compile(r"Your wait on .+ has ended\. Pick task (\S+) back up:")
 
 
-def on(kind, target):
+def on(kind, target, task=""):
     if kind not in KINDS:
         raise SwarmError(f"wait on one of: {', '.join(KINDS)}")
-    return {"kind": kind, "target": target}
+    return {"kind": kind, "target": target, **({"task": task} if kind == "intent" else {})}
 
 
 def checks_resolution(held, github):
@@ -76,6 +78,9 @@ def target_problem(kind, target, mine, rows, get):
         return "" if PULL_URL.fullmatch(target) else f"wait on {kind} needs a pull request url, not {target}"
     if kind == "mutation":
         return "" if mutation_wait.RUN_URL.fullmatch(target) else "wait on mutation needs an Actions run url"
+    if kind == "intent":
+        own = rows.get(mine, {}).get("pr_url")
+        return "" if target == own else f"wait on intent needs the pull request of your task {mine}, not {target}"
     if kind == "task":
         if target == mine:
             return f"task {target} is your own task"
@@ -108,11 +113,23 @@ def merge_resolution(held, github, reread, fresh):
     return f"pull request {target}, now red; left the merge queue without merging; fix it and queue it again"
 
 
-def resolution(held, rows, inbox, github, reread, fresh):
+def intent_resolution(held, record, github):
+    if not record or record["verdict"] == intent.PENDING:
+        return ""
+    if record.get("head"):
+        pull = github(held["target"])
+        if pull is None or pull.head != record["head"]:
+            return ""
+    return f"the intent verdict on {held['target']}, now {record['verdict']}: {record['reason']}"
+
+
+def resolution(held, rows, inbox, github, reread, fresh, verdicts=None):
     """What ended the wait, in plain words, or '' while it still holds."""
     kind, target = held["kind"], held["target"]
     if kind == "mutation":
         return mutation_wait.resolution(held)
+    if kind == "intent":
+        return intent_resolution(held, verdicts.read(held["task"]), github)
     if kind == "checks":
         return checks_resolution(held, github)
     if kind == "merge":
@@ -130,13 +147,13 @@ def resolution(held, rows, inbox, github, reread, fresh):
 
 
 def end_pass(store, slug, rows, inbox, github, now_ms, reread):
-    ended = []
+    ended, verdicts = [], Verdicts(slug, intent.NAME)
     for agent in store.agents(slug):
         held = idle.wait(store.redis, slug, agent.name)
         if agent.state == "finished" or not (held and held.get("on")):
             continue
         previous = json.dumps(held)
-        outcome = resolution(held["on"], rows, inbox, github, reread, now_ms - held["at"] < FRESH_MS)
+        outcome = resolution(held["on"], rows, inbox, github, reread, now_ms - held["at"] < FRESH_MS, verdicts)
         if (outcome or json.dumps(held) != previous) and not _save_wait(
             store.redis, slug, agent.name, previous, held, outcome, now_ms
         ):
