@@ -396,7 +396,10 @@ def test_only_ready_nodes_are_listed_and_a_failed_listing_is_none():
 
 class _Grants:
     def __init__(self):
-        self.revoked = []
+        self.revoked, self.verified = [], []
+
+    def verify(self, slug, token):
+        self.verified.append((slug, token))
 
     def revoke(self, slug, execution_id):
         self.revoked.append((slug, execution_id))
@@ -418,7 +421,11 @@ class _Cluster:
 def test_the_deployed_pass_fences_an_attempt_whose_node_was_deleted(world):
     grants, cluster = _Grants(), _Cluster(world)
     service = SimpleNamespace(controller=world.live, grants=grants)
-    recover = deployed.recovery_pass(service, SimpleNamespace(image_digest="sha256:" + "4b" * 32), cluster)
+    digest = "sha256:" + "4b" * 32
+    recover = deployed.recovery_pass(service, SimpleNamespace(image_digest=digest), cluster)
+    assert recover.recovery.compatibility == digest
+    recover.recovery.releases["account"].capacity.authorize("a-token")
+    assert grants.verified == [(cases.SLUG, "a-token")]
     assert recover() == {world.old.execution_id: "working"}
     world.ready.discard(world.fx["first"]["node"])
     world.api.objects.pop(f"swarm-{world.old.execution_id}")

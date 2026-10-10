@@ -1,4 +1,4 @@
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
@@ -149,7 +149,17 @@ class NoCheckpoints:
         return []
 
 
-def recovery_pass(service: "ControlService", workers: Workers, api: PodApi) -> Callable[[], dict[str, str]]:
+@dataclass(frozen=True)
+class RecoveryPass:
+    recovery: Recovery
+    api: PodApi
+    selector: str
+
+    def __call__(self) -> dict[str, str]:
+        return self.recovery.reconcile(self.api.list_pods(self.selector), self.api.ready_nodes())
+
+
+def recovery_pass(service: "ControlService", workers: Workers, api: PodApi) -> RecoveryPass:
     controller, grants = service.controller, service.grants
     slug = controller.slug
 
@@ -159,5 +169,4 @@ def recovery_pass(service: "ControlService", workers: Workers, api: PodApi) -> C
     capacity = AccountCapacity(controller.store, slug, verify)
     releases = {"grant": GrantRelease(grants, slug), "account": AccountSlot(controller.store, slug, capacity)}
     recovery = Recovery(controller.store, slug, controller, NoCheckpoints(), releases, workers.image_digest)
-    selector = f"{OWNER_LABEL}={owner_for(slug)}"
-    return lambda: recovery.reconcile(api.list_pods(selector), api.ready_nodes())
+    return RecoveryPass(recovery, api, f"{OWNER_LABEL}={owner_for(slug)}")
