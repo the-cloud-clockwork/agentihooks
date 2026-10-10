@@ -103,13 +103,14 @@ CHILDREN = (
     f"SELECT n.node_id, n.kind, n.parent_id, :node IS NOT NULL FROM work_nodes n WHERE n.ledger_slug=:slug AND {ROOT} "
     f"ORDER BY {ORDER}"
 )
+# Keep CROSS JOIN: it pins tree as the outer loop; an inner join lets the planner scan the ledger per level.
 SUBTREE = f"""
 WITH RECURSIVE tree(node_id, kind, parent_id, depth, sort) AS (
   SELECT n.node_id, n.kind, n.parent_id, 0, {ORDER} FROM work_nodes n
   WHERE n.ledger_slug=:slug AND (n.node_id=:node OR (:node IS NULL AND {ROOT}))
   UNION ALL
   SELECT n.node_id, n.kind, n.parent_id, tree.depth + 1, tree.sort || '/' || {ORDER}
-  FROM work_nodes n JOIN tree ON n.ledger_slug=:slug AND n.parent_id=tree.node_id WHERE tree.depth < {LEVELS}
+  FROM tree CROSS JOIN work_nodes n ON n.ledger_slug=:slug AND n.parent_id=tree.node_id WHERE tree.depth < {LEVELS}
 )
 SELECT node_id, kind, parent_id, depth FROM tree ORDER BY sort
 """

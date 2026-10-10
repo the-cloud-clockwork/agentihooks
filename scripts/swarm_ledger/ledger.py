@@ -320,7 +320,7 @@ def cmd_show(args):
 
 
 def cmd_tree(args):
-    for row in resource(args.slug, f"hierarchy/subtree/{args.node}" if args.node else "hierarchy"):
+    for row in resource(args.slug, f"hierarchy/subtree/{args.node}" if args.node else "hierarchy", collection=True):
         print(f"{'  ' * row['depth']}{row['node']}  {row['state']}")
 
 

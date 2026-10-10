@@ -237,6 +237,8 @@ def test_the_ledger_client_reads_the_hierarchy_resource(monkeypatch):
 
     read = []
     monkeypatch.setattr(
-        ledger_client.LedgerClient, "_resource", lambda self, slug, path, collection=False: read.append(path) or []
+        ledger_client.LedgerClient,
+        "_resource",
+        lambda self, slug, path, collection=False: read.append((path, collection)) or [],
     )
-    assert ledger_client.LedgerClient().hierarchy("sw") == [] and read == ["hierarchy"]
+    assert ledger_client.LedgerClient().hierarchy("sw") == [] and read == [("hierarchy", True)]

@@ -69,7 +69,7 @@ class LedgerClient:
         return self._resource(slug, "chat", collection=True)
 
     def hierarchy(self, slug):
-        return self._resource(slug, "hierarchy")
+        return self._resource(slug, "hierarchy", collection=True)
 
     def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
         guard = {"if_state": list(if_state)} if if_state else {}

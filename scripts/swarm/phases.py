@@ -13,7 +13,7 @@ def phase_pass(inbox, store, slug, doc, ledger):
     try:
         under = phase_tasks(ledger.hierarchy(slug))
     except OSError as exc:
-        # A refused or unreachable hierarchy read (a server not yet restarted, an oversized reply) waits a tick.
+        # A refused or unreachable hierarchy read (server not restarted, tree changed between pages) waits a tick.
         return [f"phase pass skipped, the hierarchy read failed: {exc}"]
     mail, actions = Mail(inbox, store, slug), []
     for phase in doc.get("phases", []):
