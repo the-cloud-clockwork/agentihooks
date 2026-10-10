@@ -91,6 +91,40 @@ def test_the_guard_catches_a_reader_naming_a_layout_folder():
     ]
 
 
+def test_the_guard_catches_a_folder_name_passed_through_a_variable():
+    folders = {"homes", "run", "tmp"}
+    source = (
+        'name = "tmp"\n'
+        "a = root / name\n"
+        'FOLDERS = ["run", "tmp"]\n'
+        "for folder in FOLDERS: pass\n"
+        'copytree(src, dst, "homes")\n'
+        'def f(base="run"): return Path(base)\n'
+        'self.where = "homes"\n'
+        "g = os.path.join(root, self.where)\n"
+        'h = f"{name}/x"\n'
+        "i = [d for d in FOLDERS]\n"
+        'cmd = ["pane", "run"]\n'
+        "herdr(cmd)\n"
+        'key = "homes"\n'
+        "record.get(key)\n"
+        "record[key]\n"
+        'sub = "run"\n'
+        'herdr(["pane", sub])\n'
+        'mkdtemp(dir="tmp")\n'
+    )
+    assert named_folders(source, folders) == [
+        "10: FOLDERS",
+        "18: tmp",
+        "2: name",
+        "4: FOLDERS",
+        "5: homes",
+        "6: base",
+        "8: self.where",
+        "9: name",
+    ]
+
+
 @pytest.mark.parametrize("module", READERS, ids=lambda module: module.__name__)
 def test_no_reader_names_a_layout_folder(module):
     folders = set(filesystem.load().roots.values())
