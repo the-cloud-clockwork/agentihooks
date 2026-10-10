@@ -56,9 +56,14 @@ def test_the_operator_presents_the_page_credential():
 
 @pytest.mark.parametrize(
     "who",
-    [Who(name="engineer@rig-1", swarm=SLUG), Who(name="master@rig-1", swarm="other")],
+    [
+        Who(name="engineer@rig-1", swarm=SLUG),
+        Who(name="master@rig-1", swarm="other"),
+        Who(name="engineer@rig-1"),
+        Who(swarm=SLUG),
+    ],
 )
-def test_a_pinned_agent_presents_no_credential(who):
+def test_any_agent_identity_presents_no_credential(who):
     assert operator_auth.credential(SLUG, CREDENTIALS.get, who) == ""
 
 

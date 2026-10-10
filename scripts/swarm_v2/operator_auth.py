@@ -18,6 +18,6 @@ def authenticator(page_credential: Callable[[str], str | None]) -> Callable[[str
 
 
 def credential(slug: str, page_credential: Callable[[str], str | None], who: Who) -> str:
-    if who.pinned:
+    if who.name or who.swarm:
         return ""
     return page_credential(slug) or ""
