@@ -94,6 +94,8 @@ controller:
     brain: ""
     # The Pod policy, docs/swarm-v2/schemas/pod-policy.json; its owner is agentihooks-swarm-<api.swarm>.
     podPolicy: {}
+    # Or the name of a ConfigMap in the release namespace holding pod-policy.json, such as one GitOps manages.
+    podPolicyConfigMap: ""
   livenessProbe:
     initialDelaySeconds: 60
     periodSeconds: 10
