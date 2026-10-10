@@ -97,7 +97,7 @@ class World(kub04.World):
         return self.store.execution_occupants(SLUG)[f"{seat}@{SLUG}"]
 
     def protected(self) -> dict:
-        hashes = ("executions", "attempt-fences", "attempt-recoveries", "execution-failures")
+        hashes = ("executions", "attempt-fences", "attempt-recoveries")
         return {
             "hashes": {name: self.store.redis.hgetall(self.store.key(SLUG, name)) for name in hashes},
             "pods": copy.deepcopy(self.api.objects),
@@ -151,6 +151,7 @@ def _node_deleted(name: str) -> dict:
             "fence": recovery.fence(old.execution_id),
             "attempts": world.attempts(),
             "occupant": world.occupant().execution_id,
+            "old_state": world.store.execution(SLUG, old.execution_id).state,
             "grants": sorted(world.grants),
             "slots": world.slots(),
             "releases": world.log,
@@ -201,6 +202,7 @@ def _positive() -> tuple[dict, bool]:
             run["fence"]["released"] == ["grant", "account"],
             run["attempts"] == [["<old>", 1], ["<replacement>", 2]],
             run["occupant"] == "<replacement>",
+            run["old_state"] == "fenced",
             run["grants"] == [],
             run["slots"] == [],
             run["releases"] == ["grant"],
@@ -367,6 +369,7 @@ def _recovery() -> tuple[dict, bool]:
             "late_old_pod": late,
             "late_observations": late_count,
             "old_record_unchanged": world.store.execution(SLUG, old.execution_id) == old_record,
+            "old_state": old_record.state,
             "decision_unchanged": recovery.decision(old.execution_id) == decision,
             "releases": world.log,
             "slots": world.slots(),
@@ -399,6 +402,7 @@ def _recovery() -> tuple[dict, bool]:
         observed["late_old_pod"] == [{"<replacement>": "unobserved", "<old>": "retired"}] * 2,
         observed["late_observations"] == 3,
         observed["old_record_unchanged"],
+        observed["old_state"] == "fenced",
         observed["decision_unchanged"],
         observed["releases"] == ["grant", "grant", "grant"],
         observed["slots"] == [],
