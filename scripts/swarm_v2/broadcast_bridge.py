@@ -1,17 +1,20 @@
 """A worker's prompt hook claims its fleet broadcasts with the launch grant its launch left in the attempt's private run
 folder. The hook environment names only the grant file: the settings writer drops credential shaped literals, and a
-token in settings would outlive its execution."""
+token in settings would outlive its execution. Swarm modules load only once a grant file is named, because the hook runs
+on every prompt of every session."""
 
 import base64
 import binascii
 import json
 import os
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from scripts.swarm.store import RedisStore, SwarmError, connect
-from scripts.swarm_v2.auth_context import TOKEN_PREFIX, Registration
-from scripts.swarm_v2.broadcasts import FLAG, FleetBroadcasts, sync_local
+if TYPE_CHECKING:
+    from scripts.swarm.store import RedisStore
+    from scripts.swarm_v2.auth_context import Registration
 
 GRANT_FILE = "AGENTIHOOKS_LAUNCH_GRANT_FILE"
 GRANT_NAME = "launch-grant"
@@ -22,11 +25,10 @@ def grant_path(attempt: Path) -> Path:
 
 
 def store_grant(path: Path, token: str) -> None:
-    staged = path.with_name(f".{path.name}.tmp")
-    descriptor = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    descriptor, staged = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
         handle.write(token.strip())
-    staged.replace(path)
+    Path(staged).replace(path)
 
 
 def read_grant(environ: Mapping[str, str]) -> str:
@@ -34,44 +36,59 @@ def read_grant(environ: Mapping[str, str]) -> str:
 
 
 def _claims(token: str) -> dict:
+    from scripts.swarm.store import SwarmError
+    from scripts.swarm_v2.auth_context import CLAIMS, TOKEN_PREFIX, _claims_valid
+
     parts = token.split(".")
     try:
         claims = json.loads(base64.urlsafe_b64decode(parts[1] + "=="))
     except (IndexError, binascii.Error, ValueError):
         claims = None
-    if parts[0] != TOKEN_PREFIX or not isinstance(claims, dict):
+    if parts[0] != TOKEN_PREFIX or not isinstance(claims, dict) or set(claims) != CLAIMS or not _claims_valid(claims):
         raise SwarmError("unauthenticated")
     return claims
 
 
-def registered(store: RedisStore, token: str) -> Registration:
-    """The registration recorded for this grant; the worker holds no signing key, so the grant is trusted only as far
-    as the fleet recorded it when the worker registered."""
+def registered(store: "RedisStore", token: str) -> "Registration":
+    """The worker holds no signing key, so a grant counts only while it is unexpired, recorded at registration under
+    its grant id, and still the current attempt of its seat."""
+    from scripts.swarm import lease
+    from scripts.swarm.store import SwarmError
+    from scripts.swarm_v2.auth_context import Registration, _seconds
+
     claims = _claims(token)
-    raw = store.redis.hget(
-        store.key(str(claims.get("swarm_id")), "launch-registrations"), str(claims.get("execution_id"))
-    )
-    registration = Registration(**json.loads(raw)) if raw else None
-    if registration is None or registration.grant_id != claims.get("grant_id"):
+    if lease.now_ms(store) // 1000 >= _seconds(claims["expires_at"]):
         raise SwarmError("unauthenticated")
+    raw = store.redis.hget(store.key(claims["swarm_id"], "launch-registrations"), claims["execution_id"])
+    registration = Registration(**json.loads(raw)) if raw else None
+    if registration is None or registration.grant_id != claims["grant_id"]:
+        raise SwarmError("unauthenticated")
+    occupants = store.execution_occupants(registration.swarm_id).values()
+    if (registration.execution_id, registration.generation) not in {(a.execution_id, a.generation) for a in occupants}:
+        raise SwarmError("stale_generation")
     return registration
 
 
 def no_operator(token: str) -> str:
+    from scripts.swarm.store import SwarmError
+
     raise SwarmError("forbidden_scope")
 
 
 def claim(session_id: str, channels: list[str], environ: Mapping[str, str]) -> int:
-    """Claim this worker's fleet broadcasts into the local cache; nothing while the fleet path is off, the grant is
-    missing, or the fleet is unreachable or refuses the grant."""
-    if environ.get(FLAG) != "1" or not environ.get(GRANT_FILE):
+    if not environ.get(GRANT_FILE):
         return 0
     from redis.exceptions import RedisError
 
+    from scripts.swarm import store as swarm_store
+    from scripts.swarm_v2.broadcasts import FLAG, FleetBroadcasts, sync_local
+
+    if environ.get(FLAG) != "1":
+        return 0
     try:
         token = read_grant(environ)
-        store = connect(environ)
+        store = swarm_store.connect(environ)
         fleet = FleetBroadcasts(store, _claims(token)["swarm_id"], lambda grant: registered(store, grant), no_operator)
         return sync_local(fleet, token, session_id, channels, environ)
-    except (OSError, RedisError, SwarmError):
+    except (OSError, RedisError, swarm_store.SwarmError):
         return 0

@@ -3,6 +3,7 @@ import io
 import json
 import stat
 import sys
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -11,6 +12,7 @@ from hooks import config, hook_manager
 from hooks.context import broadcast as hb
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2 import broadcast_bridge, broadcasts, worker_home
+from scripts.swarm_v2.auth_context import DEFAULT_TTL_SECONDS as TTL_SECONDS
 from tests.test_swarm_v2_broadcasts import CHANNELS, LOCAL, PUBLISH_MS, REMOTE, SLUG, WARNING, Epoch, World
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
@@ -23,7 +25,7 @@ def world(monkeypatch, tmp_path):
     monkeypatch.setattr(hb, "_broadcast_path", lambda: tmp_path / "broadcast.json")
     monkeypatch.setattr(hb, "_sessions_path", lambda: tmp_path / "active-sessions.json")
     monkeypatch.setattr(hb, "datetime", Epoch)
-    monkeypatch.setattr(broadcast_bridge, "connect", lambda environ: RedisStore(found.store.redis))
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda environ: RedisStore(found.store.redis))
     return found
 
 
@@ -169,6 +171,52 @@ def test_an_unregistered_grant_claims_nothing(world, tmp_path):
     assert hb.list_broadcasts() == []
 
 
+def test_a_superseded_or_foreign_grant_claims_nothing(world, tmp_path, monkeypatch):
+    old, environ = launch(world, tmp_path, REMOTE, monkeypatch)
+    world.announce(WARNING)
+    successor = world.token(REMOTE, previous=world.agents[REMOTE].execution_id)
+    world.authority.authorize(successor)
+    with pytest.raises(SwarmError, match="stale_generation"):
+        broadcast_bridge.registered(world.store, old)
+    assert broadcast_bridge.claim("s-remote", list(CHANNELS), environ) == 0
+    broadcast_bridge.store_grant(Path(environ[broadcast_bridge.GRANT_FILE]), grant_with(successor, swarm_id="other"))
+    assert broadcast_bridge.claim("s-remote", list(CHANNELS), environ) == 0
+    assert hb.list_broadcasts() == []
+
+
+def test_an_expired_grant_claims_nothing(world, tmp_path, monkeypatch):
+    token, environ = launch(world, tmp_path, REMOTE, monkeypatch)
+    world.announce(WARNING)
+    world.clock[0] = PUBLISH_MS + (TTL_SECONDS - 1) * 1000
+    assert broadcast_bridge.registered(world.store, token).seat_id == REMOTE
+    world.clock[0] = PUBLISH_MS + TTL_SECONDS * 1000
+    with pytest.raises(SwarmError, match="unauthenticated"):
+        broadcast_bridge.registered(world.store, token)
+    assert broadcast_bridge.claim("s-remote", list(CHANNELS), environ) == 0
+    assert hb.list_broadcasts() == []
+
+
+def test_a_grant_whose_claims_are_incomplete_is_unauthenticated(world):
+    token = world.token(REMOTE)
+    world.authority.authorize(token)
+    head, payload, signature = token.split(".")
+    claims = json.loads(base64.urlsafe_b64decode(payload + "=="))
+    claims.pop("swarm_id")
+    short = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+    for broken in (f"{head}.{short}.{signature}", f"v1.{payload}.{signature}", grant_with(token, generation="1")):
+        with pytest.raises(SwarmError, match="unauthenticated"):
+            broadcast_bridge.registered(world.store, broken)
+
+
+def test_a_grant_file_left_open_to_others_is_replaced_privately(tmp_path):
+    path = tmp_path / "launch-grant"
+    path.write_text("old")
+    path.chmod(0o644)
+    broadcast_bridge.store_grant(path, "v2.new.grant")
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert path.read_text(encoding="utf-8") == "v2.new.grant"
+
+
 def test_an_unreachable_fleet_claims_nothing(world, tmp_path, monkeypatch):
     import redis
 
@@ -177,7 +225,7 @@ def test_an_unreachable_fleet_claims_nothing(world, tmp_path, monkeypatch):
     def down(environ):
         raise redis.ConnectionError("down")
 
-    monkeypatch.setattr(broadcast_bridge, "connect", down)
+    monkeypatch.setattr("scripts.swarm.store.connect", down)
     assert broadcast_bridge.claim("s-remote", list(CHANNELS), environ) == 0
 
 
