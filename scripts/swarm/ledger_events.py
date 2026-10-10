@@ -1,6 +1,6 @@
 """Agent writes on a swarm ledger as inbox items, sent by the minute tick so the master hears of them asleep or awake.
 
-New ledger events past the swarm's cursor go to the master. Time rules raise a follow-up nobody decided, watch each
+New ledger events past the swarm's cursor go to the master owning their phase, else the lead. Time rules raise a follow-up nobody decided, watch each
 task's pull request on GitHub and pass every new health finding on for a verdict. Each item is sent once, so a replay
 of the same ledger sends nothing; the wake ladder then carries every item to a reader.
 """
@@ -269,10 +269,14 @@ class Mail:
         self.seats = {a.name: a.seat or a.name for a in live}
         self.has_master = any(a.lane == MASTER for a in live)
         self.master = operator_mail.master_address(slug, live)
-        self.masters = [a.seat for a in live if a.lane == MASTER]
-        self.owners = masters.MasterSeats(store.redis).owners(slug, self.doc) if doc else {}
+        self.masters = masters.live_seats(live)
+
+    @functools.cached_property
+    def owners(self):
+        return masters.MasterSeats(self.store.redis).owners(self.slug, self.doc) if self.doc else {}
 
     def owner(self, target):
+        """A phase's or a task's item goes to the live master owning its phase, anything else to the lead."""
         return masters.route(target, self.doc, self.owners, self.masters, self.master)
 
     def once(self, key, act):
@@ -300,7 +304,7 @@ class Mail:
         self.store.redis.hset(self.red_index(), item.id, url)
 
     def engineer(self, task):
-        return self.seats.get(task.get("claimed_by", ""), self.master)
+        return self.seats.get(task.get("claimed_by", "")) or self.owner(f"tasks/{task.get('id', '')}")
 
 
 def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
@@ -476,8 +480,8 @@ def _priorities(mail, doc, raised):
                 f"New priority on ledger {mail.slug} for {item}: {row['text']}\n"
                 "Triage it: resolve it if the call is yours, else leave it for the operator."
             )
-            mail.inbox.send(SENDER, mail.master, text, ref=f"{mail.slug}:priority:{item}")
-            sent.append(f"told {mail.master}: priority {item}")
+            mail.inbox.send(SENDER, mail.owner(item), text, ref=f"{mail.slug}:priority:{item}")
+            sent.append(f"told {mail.owner(item)}: priority {item}")
         mail.store.redis.sadd(key, item)
     mail.store.redis.set(marker, 1)
     return sent

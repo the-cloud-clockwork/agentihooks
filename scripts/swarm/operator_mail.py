@@ -1,5 +1,9 @@
 """Operator writes on a swarm ledger as inbox items: a task's to the agent that claimed it, a chat line to its
-addressee (for @swarm the master's seat, with an information only copy for every other live agent), everything else to the master's seat. An addressee that is gone falls back to the master."""
+addressee (for @swarm and @master the lead master's seat, with an information only copy of @swarm for every other live
+agent), a phase's or an unclaimed task's to the live master owning its phase, everything else to the lead master. An
+addressee that is gone falls back to the lead."""
+
+import functools
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.seen import write_ref
@@ -24,7 +28,8 @@ def _live(agents):
     return [a for a in agents if a.state != "finished"]
 
 
-def addresses(slug, event, doc, agents, owners=None):
+def addresses(slug, event, doc, agents, owners):
+    """owners is called only when an item falls back to a master, so a write with a live addressee reads no seats."""
     live = _live(agents)
     master = master_address(slug, live)
     if event.get("kind") == SYNC_ORDER:
@@ -36,13 +41,14 @@ def addresses(slug, event, doc, agents, owners=None):
         if to == EVERYONE:
             everyone = [a.seat or a.name for a in live]
             return everyone if master in everyone else [*everyone, master]
+        if to == MASTER:
+            return [master]
         found = [a for a in live if to in (a.name, a.lane)]
     elif target.startswith("tasks/"):
         task_id = target.split("/")[1]
         claimant = next((t.get("claimed_by") for t in doc.get("tasks", []) if t.get("id") == task_id), "")
         found = [a for a in live if claimant and a.name == claimant]
-    seated = [a.seat for a in live if a.lane == MASTER]
-    return [a.seat or a.name for a in found] or [masters.route(target, doc, owners or {}, seated, master)]
+    return [a.seat or a.name for a in found] or [masters.route(target, doc, owners(), masters.live_seats(live), master)]
 
 
 def mentioned(event):
@@ -56,9 +62,10 @@ def informed(event, address, master):
 
 
 def master_address(slug, live):
+    """The lead answers the operator; a lone live master in another seat answers while the lead seat is empty."""
     lead = seat_address(slug, MASTER)
-    seated = [a.seat or a.name for a in live if a.lane == MASTER]
-    return lead if lead in seated or not seated else seated[0]
+    seated = masters.live_seats(live)
+    return seated[0] if len(seated) == 1 else lead
 
 
 def primed(text, event, address, master):
@@ -78,7 +85,7 @@ def relay(inbox, store, slug, doc, events, line):
     except SwarmError:
         return []
     agents, sent = store.agents(slug), []
-    owners = masters.MasterSeats(inbox.redis).owners(slug, doc)
+    owners = functools.cache(lambda: masters.MasterSeats(inbox.redis).owners(slug, doc))
     for event in events:
         if event.get("by") != OPERATOR or event.get("kind") in IGNORED_KINDS:
             continue

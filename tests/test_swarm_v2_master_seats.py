@@ -1,7 +1,9 @@
+import json
+
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import ledger_events, operator_mail
+from scripts.swarm import cli, ledger_events, operator_mail
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger.watch_ledger import line
 from scripts.swarm_v2 import masters
@@ -113,7 +115,7 @@ def test_a_removed_seat_hands_its_phases_on_and_every_other_phase_keeps_its_owne
     assert after["p3"] == SECOND
 
 
-def test_owners_read_again_after_a_restart_are_the_same(swarm):
+def test_a_new_reader_after_a_restart_gets_the_saved_owners_whatever_the_phase_order(swarm):
     store, _ = swarm
     first = masters.MasterSeats(store.redis).owners(SLUG, DOC)
     reordered = {**DOC, "phases": list(reversed(DOC["phases"]))}
@@ -144,7 +146,7 @@ def test_an_operator_comment_on_a_phase_of_the_second_master_reaches_only_that_m
     assert len(texts(inbox, SECOND)) == 1 and texts(inbox, LEAD) == []
 
 
-def test_an_operator_comment_on_an_unclaimed_task_reaches_its_phase_owner(swarm):
+def test_an_operator_comment_on_a_task_whose_claimant_is_gone_reaches_its_phase_owner(swarm):
     store, inbox = swarm
     seated(store, FIRST, OTHER)
     relay(swarm, write(5, "tasks/t4/comments/c1"))
@@ -166,18 +168,107 @@ def test_an_owner_seat_with_no_live_master_never_strands_an_item(swarm):
     assert len(texts(inbox, LEAD)) == 1 and texts(inbox, SECOND) == []
 
 
+class Ledger:
+    def __init__(self):
+        self.raised = []
+
+    def priority(self, slug, item, text):
+        self.raised.append(item)
+
+
+def tick(store, inbox, doc, now_ms=1000, github=lambda url: None):
+    return ledger_events.event_pass(inbox, store, SLUG, doc, Ledger(), now_ms, github)
+
+
+def with_events(*events, **extra):
+    return {**DOC, **extra, "_meta": {"rev": 2, "events": list(events)}}
+
+
 def test_the_tick_tells_the_phase_owner_when_a_task_in_its_phase_is_blocked(swarm):
     store, inbox = swarm
     seated(store, FIRST, OTHER)
-    blocked = {"rev": 2, "at": 1000, "by": "sw-eng-1", "kind": "task blocked", "target": "tasks/t2"}
-    doc = {**DOC, "_meta": {"rev": 2, "events": [blocked]}}
-    ledger_events._events(ledger_events.Mail(inbox, store, SLUG, doc), [blocked], {"t2": DOC["tasks"][1]}, set())
+    tick(store, inbox, DOC)
+    tick(
+        store,
+        inbox,
+        with_events({"rev": 2, "at": 1000, "by": "sw-eng-1", "kind": "task blocked", "target": "tasks/t2"}),
+    )
     assert len(texts(inbox, SECOND)) == 1 and texts(inbox, LEAD) == []
 
 
 def test_the_tick_keeps_a_follow_up_with_the_lead(swarm):
     store, inbox = swarm
     seated(store, FIRST, OTHER)
+    tick(store, inbox, DOC)
     added = {"rev": 2, "at": 1000, "by": "sw-eng-1", "kind": "added", "target": "followups/f1", "text": "x"}
-    ledger_events._events(ledger_events.Mail(inbox, store, SLUG, DOC), [added], {}, set())
+    tick(store, inbox, with_events(added, followups=[{"id": "f1", "text": "x", "done": False}]))
     assert len(texts(inbox, LEAD)) == 1 and texts(inbox, SECOND) == []
+
+
+def test_a_merged_pull_request_left_open_reaches_its_phase_owner_when_its_engineer_is_gone(swarm):
+    store, inbox = swarm
+    seated(store, FIRST, OTHER)
+    url = "https://example.test/pull/1"
+    task = {"id": "t2", "phase": "p2", "state": "pr", "pr_url": url, "claimed_by": "sw-eng-gone"}
+    doc = {**DOC, "tasks": [task]}
+    merged = ledger_events.PullRequest("MERGED", 1, 1, False)
+    tick(store, inbox, doc, now_ms=1 + 21 * ledger_events.MINUTE_MS, github=lambda _: merged)
+    assert len(texts(inbox, SECOND)) == 2 and texts(inbox, LEAD) == []
+
+
+def test_a_new_priority_on_a_task_reaches_its_phase_owner(swarm):
+    store, inbox = swarm
+    seated(store, FIRST, OTHER)
+    tick(store, inbox, DOC)
+    tick(store, inbox, {**DOC, "priorities": [{"item": "tasks/t2", "text": "decide", "by": "sw-eng-1"}]})
+    assert len(texts(inbox, SECOND)) == 1 and texts(inbox, LEAD) == []
+
+
+def test_raising_the_master_count_moves_phases_to_the_new_seat(swarm):
+    store, _ = swarm
+    seats = masters.MasterSeats(store.redis)
+    seats.set_count(SLUG, 1)
+    assert set(seats.owners(SLUG, DOC).values()) == {LEAD}
+    seats.set_count(SLUG, 2)
+    assert seats.owners(SLUG, DOC) == {"p1": LEAD, "p2": LEAD, "p3": SECOND, "p4": SECOND}
+
+
+def test_an_operator_line_to_at_master_reaches_only_the_lead(swarm):
+    store, inbox = swarm
+    seated(store, FIRST, OTHER)
+    relay(swarm, write(5, "chat", text="@master where are we"))
+    assert len(texts(inbox, LEAD)) == 1 and texts(inbox, SECOND) == []
+
+
+def test_the_lead_seat_answers_the_operator_even_while_two_other_masters_are_live(swarm):
+    store, inbox = swarm
+    third = AgentRecord("sw-master-3", MASTER, MASTER, pane_id="pm3", seat=f"master-3@{SLUG}")
+    seated(store, OTHER, third)
+    relay(swarm, write(5, "chat", text="where are we"))
+    assert len(texts(inbox, LEAD)) == 1 and texts(inbox, SECOND) == []
+
+
+def test_a_single_master_swarm_routes_a_phase_item_to_its_one_master_as_before(swarm):
+    store, inbox = swarm
+    masters.MasterSeats(store.redis).set_count(SLUG, 1)
+    lone = AgentRecord("sw-master-9", MASTER, MASTER, pane_id="pm9", seat="")
+    store.put_agent(SLUG, lone)
+    relay(swarm, write(5, "phases/p2"))
+    assert len(texts(inbox, lone.name)) == 1 and texts(inbox, LEAD) == []
+
+
+@pytest.mark.parametrize("text", ["0", "two", "-1", ""])
+def test_the_master_count_text_must_be_a_whole_number_of_at_least_one(text):
+    with pytest.raises(masters.MasterError):
+        masters.count_of(text)
+
+
+def test_swarm_set_masters_stores_the_count_and_reports_it(swarm, monkeypatch, capsys):
+    store, _ = swarm
+    store.create(SwarmConfig("paused-sw", "/repo", 1, 1, state="paused"))
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    assert cli.main(["paused-sw", "set", "masters=3"]) == 0
+    assert masters.MasterSeats(store.redis).count("paused-sw") == 3
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["masters"] == 3
+    assert cli.main(["paused-sw", "set", "masters=0"]) != 0
+    assert masters.MasterSeats(store.redis).count("paused-sw") == 3
