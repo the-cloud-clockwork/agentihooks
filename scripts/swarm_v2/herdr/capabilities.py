@@ -146,8 +146,7 @@ def runner(environ: dict[str, str]) -> Callable[[list[str]], subprocess.Complete
 
 
 class Qualifier:
-    """The incarnation is the caller's execution attempt id: herdr reports none, and the supervisor
-    starts one herdr server per attempt and ends the attempt when that server exits."""
+    """The incarnation is the execution attempt id: one supervised herdr server lives per attempt."""
 
     def __init__(self, probe: Callable[[str], Observation]) -> None:
         self.probe = probe
