@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from scripts.swarm_v2.api.executions import ExecutionsAPI, heartbeat_rejections, heartbeat_rejections_total
+from scripts.swarm_v2.auth_context import GrantRefused
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
@@ -457,6 +458,88 @@ def test_the_server_lease_duration_must_be_a_positive_integer(world, lease_ms):
 
 def test_the_default_server_lease_is_one_minute(world):
     assert ExecutionsAPI(world.grants, world.tasks).lease_ms == 60_000
+
+
+@pytest.fixture
+def long_lived(world):
+    api = ExecutionsAPI(world.grants, world.tasks, 600_000)
+    agent, token = world.start()
+    body = {"execution_id": agent.execution_id, "generation": 1}
+    assert api.route("POST", "/v2/executions/register", f"Bearer {token}", body)[0] == 200
+    return api, agent, token
+
+
+def advance(world, now):
+    world.clock[0] = now
+    assert world.controller.renew()
+
+
+def beat(api, world, agent, token, sequence):
+    return api.route(
+        "PUT", f"/v2/executions/{agent.execution_id}/heartbeat", f"Bearer {token}", world.beat(agent, sequence)
+    )
+
+
+def renew(api, execution_id, token):
+    return api.route("POST", f"/v2/executions/{execution_id}/credential", f"Bearer {token}", {})
+
+
+def test_a_renewed_credential_keeps_heartbeats_and_task_writes_past_the_launch_grant(world, long_lived):
+    api, agent, token = long_lived
+    advance(world, 150_000)
+    status, renewal = renew(api, agent.execution_id, token)
+    assert status == 200
+    assert renewal == {
+        "execution_id": agent.execution_id,
+        "grant_id": world.grants.registration("fixture", agent.execution_id).grant_id,
+        "credential": renewal["credential"],
+        "expires_at": "1970-01-01T00:07:30Z",
+    }
+    renewed = renewal["credential"]
+    assert renewed != token
+    advance(world, 301_000)
+    status, refusal = beat(api, world, agent, token, 1)
+    assert (status, refusal["error_class"]) == (401, "unauthenticated")
+    status, ack = beat(api, world, agent, renewed, 2)
+    assert (status, ack["lease_deadline_ms"]) == (200, 901_000)
+    advance(world, 449_000)
+    claim = world.tasks.complete(renewed, 1, {"outcome": "merged"})
+    assert (claim.state, claim.result) == ("completed", {"outcome": "merged"})
+
+
+def test_revoking_the_registration_stops_heartbeats_task_writes_and_renewal(world, long_lived):
+    api, agent, token = long_lived
+    renewed = renew(api, agent.execution_id, token)[1]["credential"]
+    assert world.grants.revoke("fixture", agent.execution_id)
+    before = world.protected()
+    for credential in (token, renewed):
+        status, refusal = beat(api, world, agent, credential, 1)
+        assert (status, refusal["error_class"], refusal["message"]) == (
+            401,
+            "unauthenticated",
+            "launch grant was revoked",
+        )
+        status, refusal = renew(api, agent.execution_id, credential)
+        assert (status, refusal["error_class"]) == (401, "unauthenticated")
+        with pytest.raises(GrantRefused) as error:
+            world.tasks.release(credential, 1)
+        assert error.value.error_class == "unauthenticated"
+    assert world.protected() == before
+
+
+def test_a_credential_renewal_is_bound_to_its_own_live_execution(world, long_lived):
+    api, agent, token = long_lived
+    other, other_token = world.start("eng-2@fixture", "other")
+    world.register(other, other_token)
+    status, refusal = renew(api, other.execution_id, token)
+    assert (status, refusal["error_class"]) == (403, "forbidden_scope")
+    assert renew(api, agent.execution_id, "v2.forged.token")[1]["error_class"] == "unauthenticated"
+    world.start(previous=agent.execution_id)
+    assert renew(api, agent.execution_id, token)[0] == 409
+    advance(world, 150_000)
+    advance(world, 301_000)
+    status, refusal = renew(api, other.execution_id, other_token)
+    assert (status, refusal["error_class"], refusal["message"]) == (401, "unauthenticated", "launch grant has expired")
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])
