@@ -43,7 +43,7 @@ class Action:
 
 
 def leverage(doc: dict) -> dict[str, int]:
-    tasks = {t["id"]: t for t in doc.get("tasks", []) if _open(t)}
+    tasks = {t["id"]: t for t in doc["tasks"] if _open(t)}
     nodes, edges = hierarchy.project(doc)
     under = {}
     for task_id in tasks:
@@ -61,11 +61,11 @@ def leverage(doc: dict) -> dict[str, int]:
     return {task_id: len(_downstream(task_id, waiters)) for task_id in tasks}
 
 
-def ordered(doc: dict, named: str, scores: dict | None = None) -> list[str]:
-    scores, lane = leverage(doc) if scores is None else scores, LANES.get(named)
+def ordered(doc: dict, named: str, scores: dict) -> list[str]:
+    lane = LANES.get(named)
     focused = _focused(doc)
-    position = {t["id"]: index for index, t in enumerate(doc.get("tasks", []))}
-    rows = [t for t in doc.get("tasks", []) if scores.get(t["id"]) and t.get("state") == "open"]
+    position = {t["id"]: index for index, t in enumerate(doc["tasks"])}
+    rows = [t for t in doc["tasks"] if scores.get(t["id"]) and t.get("state") == "open"]
     rows = [t for t in rows if not t.get("merged_into")]
     return [
         t["id"]
@@ -77,8 +77,8 @@ def ordered(doc: dict, named: str, scores: dict | None = None) -> list[str]:
 
 
 def rank_pass(slug, config, store, ledger, doc, now_ms):
-    scores, known = leverage(doc), {t["id"]: t for t in doc.get("tasks", [])}
-    named = bottleneck.read(store, slug).get("bottleneck", "")
+    scores, known = leverage(doc), {t["id"]: t for t in doc["tasks"]}
+    named = bottleneck.read(store, slug).get("bottleneck")
     window = [known[task_id] for task_id in ordered(doc, named, scores) if known[task_id].get("rank") in WINDOW]
     unranked = [(task, _work(scores[task["id"]])) for task in window[:TOP] if "rank" not in task]
     if config.autonomy in APPLIES:
@@ -114,7 +114,7 @@ def _comment(slug, ledger, task, text):
 
 
 def _propose(slug, ledger, mail, task, work):
-    text = PROPOSE.format(slug=slug, task=task["id"], title=task.get("title", ""), work=work)
+    text = PROPOSE.format(slug=slug, task=task["id"], title=task["title"], work=work)
     if not mail.send(f"dispatch-rank:{task['id']}", mail.master, text):
         return None
     said = f"proposed rank high for task {task['id']} to the master: it unblocks {work}"
@@ -188,9 +188,8 @@ def _focused(doc):
     nodes, _ = hierarchy.project(doc)
     return {
         t["id"]
-        for t in doc.get("tasks", [])
-        if targets
-        & {*_lineage(f"tasks/{t['id']}", nodes), f"lane:{t.get('lane', '')}", f"kind:{t.get('kind', 'code')}"}
+        for t in doc["tasks"]
+        if targets & {*_lineage(f"tasks/{t['id']}", nodes), f"lane:{t.get('lane')}", f"kind:{t.get('kind', 'code')}"}
     }
 
 

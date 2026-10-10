@@ -105,15 +105,15 @@ def test_leverage_order_breaks_ties_by_the_bottleneck_lane_then_the_focus():
     ]
     focus = [{"id": "f1", "verb": "focus", "target": "tasks/z"}, {"id": "f2", "verb": "freeze", "target": "tasks/x"}]
     found = doc(tasks, phases=[], freezes=focus)
-    assert dispatcher.ordered(found, "ci") == ["y", "z", "x"]
-    assert dispatcher.ordered(found, "engineering") == ["z", "x", "y"]
-    assert dispatcher.ordered(found, "review") == ["z", "x", "y"]
-    assert dispatcher.ordered(doc(tasks, phases=[]), "") == ["x", "y", "z"]
+    assert dispatcher.ordered(found, "ci", dispatcher.leverage(found)) == ["y", "z", "x"]
+    assert dispatcher.ordered(found, "engineering", dispatcher.leverage(found)) == ["z", "x", "y"]
+    assert dispatcher.ordered(found, "review", dispatcher.leverage(found)) == ["z", "x", "y"]
+    assert dispatcher.ordered(doc(tasks, phases=[]), "", dispatcher.leverage(doc(tasks, phases=[]))) == ["x", "y", "z"]
 
 
 def test_ordered_uses_the_scores_it_is_given():
     found = doc([task("x", phase=""), task("y", phase=""), task("w", phase="", depends_on=["x"])], phases=[])
-    assert dispatcher.ordered(found, "") == ["x"]
+    assert dispatcher.ordered(found, "", dispatcher.leverage(found)) == ["x"]
     assert dispatcher.ordered(found, "", {"x": 1, "y": 2, "w": 0}) == ["y", "x"]
 
 
@@ -126,7 +126,7 @@ def test_focus_on_an_ancestor_or_a_selector_lifts_its_task_above_ledger_order(ta
     tasks = [other, focused, task("w", phase="", depends_on=["x", "y"])]
     phases = [{"id": "p1", "depends_on": [], "plan": "plans/pl"}]
     found = doc(tasks, phases=phases, plans=[{"id": "pl"}], freezes=[{"verb": "focus", "target": target}])
-    assert dispatcher.ordered(found, "") == [focused["id"], other["id"]]
+    assert dispatcher.ordered(found, "", dispatcher.leverage(found)) == [focused["id"], other["id"]]
 
 
 def test_below_delegate_a_high_leverage_task_yields_one_master_proposal_and_no_rank(store, home, shipped):
@@ -356,3 +356,65 @@ def test_the_ledger_client_ranks_a_task_as_its_author(monkeypatch):
         "if_unranked": True,
     }
     assert "if_unranked" not in plain and (plain["item"], plain["rank"]) == ("tasks/q", "low")
+
+
+def test_a_task_merged_into_a_group_lead_is_never_ranked():
+    found = doc([task("x", phase=""), task("y", phase="", merged_into="x"), task("w", phase="", depends_on=["x", "y"])])
+    assert dispatcher.ordered(found, "", dispatcher.leverage(found)) == ["x"]
+
+
+def test_the_dispatch_row_carries_the_task_path_or_empty_strings():
+    ranked = task("a", plan_url="http://plan", plan_slice="dp-step")
+    landed = dispatcher.Action(dispatcher.LEVERAGE, "apply", "ranked", ranked)
+    assert dispatcher.dispatch_row(SLUG, 2, landed, NOW) == {
+        "event_id": f"dispatch:{SLUG}:leverage-rank:{NOW}:2",
+        "ledger": SLUG,
+        "ts_ms": NOW,
+        "plan": "http://plan",
+        "phase": "p1",
+        "slice": "dp-step",
+        "task": "a",
+        "rule": "leverage-rank",
+        "mode": "apply",
+        "action": "ranked",
+    }
+    swept = dispatcher.dispatch_row(SLUG, 0, dispatcher.Action(dispatcher.PRIORITIES, "apply", "cleared", {}), NOW)
+    assert {k: swept[k] for k in ("plan", "phase", "slice", "task")} == dict.fromkeys(
+        ("plan", "phase", "slice", "task"), ""
+    )
+
+
+@pytest.mark.parametrize(
+    ("autonomy", "mode"), [("delegate", "apply"), ("full", "apply"), ("assist", "propose"), ("manual", "propose")]
+)
+def test_grouping_rows_name_the_mode_its_autonomy_gives(store, home, shipped, monkeypatch, autonomy, mode):
+    monkeypatch.setattr(grouping, "group_pass", lambda *a: ["grouped tasks b under a"])
+    dispatcher.group(SLUG, store.update(SLUG, autonomy=autonomy), store, "L", doc([]), NOW)
+    (row,) = gate_log.recent(SLUG, None, home)
+    assert (row["kind"], row["at"]) == (mode, NOW)
+    assert [(r["mode"], r["ts_ms"]) for r in shipped[0][1]] == [(mode, NOW)]
+
+
+def test_priority_sweep_rows_carry_each_cleared_text_and_the_tick_time(store, home, shipped, monkeypatch):
+    monkeypatch.setattr(priority_sweep, "priority_pass", lambda *a: ["cleared one", "cleared two"])
+    dispatcher.priorities(store, SLUG, doc([]), "L", "V", NOW)
+    assert [(r["action"], r["ts_ms"]) for r in shipped[0][1]] == [("cleared one", NOW), ("cleared two", NOW)]
+    assert [(r["reason"], r["at"]) for r in gate_log.recent(SLUG, None, home)] == [
+        ("cleared one", NOW),
+        ("cleared two", NOW),
+    ]
+
+
+def test_the_tick_hands_its_clock_to_the_dispatcher_steps(monkeypatch):
+    import fakeredis
+
+    from scripts.swarm import tick
+    from tests.swarm.test_tick import FakeLedger, FakeRuntime
+
+    saved = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    saved.create(SwarmConfig(SLUG, "/repo", max_eng=0, max_ci=0))
+    seen = []
+    monkeypatch.setattr(dispatcher, "group", lambda *a: seen.append(("group", a[-1])) or [])
+    monkeypatch.setattr(dispatcher, "rank_pass", lambda *a: seen.append(("rank", a[-1])) or [])
+    tick.tick(SLUG, saved, FakeLedger([{"id": "a"}]), FakeRuntime(), now_ms=4_321)
+    assert seen == [("group", 4_321), ("rank", 4_321)]
