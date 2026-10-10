@@ -252,6 +252,9 @@ def _rejection() -> tuple[dict, bool]:
         refusals["revoked_grant"] = _refused(lambda: live.decide(old.execution_id, "fresh"))
         world.grant["allowed"] = True
         unchanged = world.protected() == protected
+        private = [run["native_session"], ACCOUNT, world.fx["compatibility"]]
+        private += [entry["checkpoint_id"] for entry in run["checkpoints"]]
+        disclosed = [word for word in private if any(word in text for text in refusals.values())]
         fresh = live.decide(old.execution_id, "fresh")
         again = _refused(lambda: live.decide(old.execution_id, "fresh"))
         observed = {
@@ -259,6 +262,7 @@ def _rejection() -> tuple[dict, bool]:
             "pending": pending,
             "refusals": refusals,
             "protected_state_unchanged_by_refusals": unchanged,
+            "refusals_disclose": disclosed,
             "fresh": asdict(fresh),
             "repeated_decision": again,
             "attempts": world.attempts(),
@@ -298,6 +302,7 @@ def _rejection() -> tuple[dict, bool]:
             "revoked_grant": "a scoped controller grant is required",
         },
         observed["protected_state_unchanged_by_refusals"],
+        observed["refusals_disclose"] == [],
         observed["fresh"]
         == {
             "execution_id": "<old>",

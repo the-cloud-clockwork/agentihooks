@@ -68,6 +68,8 @@ def test_node_health_counts_only_when_observed():
     assert failures.classify(pod, frozenset()) == "node_lost"
     assert failures.classify(_pod({"phase": "Pending"}), frozenset()) == ""
     assert failures.classify(cases.fixture()["pods"]["node_unreachable"]) == "node_lost"
+    lost = {"phase": "Running", "conditions": [{"type": "Ready", "status": "False", "reason": "NodeNotReady"}]}
+    assert failures.classify(_pod(lost, "worker-b"), frozenset({"worker-b"})) == "node_lost"
     unready = {"phase": "Running", "conditions": [{"type": "Ready", "status": "False", "reason": "ContainersNotReady"}]}
     assert failures.classify(_pod(unready, "worker-b")) == ""
 
@@ -207,6 +209,48 @@ def test_a_lost_fence_race_keeps_the_winning_fence(world, monkeypatch):
     assert decision.reason == "evicted"
     assert recovery.fence(world.old.execution_id) == {**winner, "released": ["grant", "account"]}
     assert recovery.execution_failures_by_reason() == {**dict.fromkeys(failures.REASONS, 0), "evicted": 1}
+
+
+def test_unfinished_fences_resume_in_execution_order(world):
+    other = world.launch(world.live, world.fx["second"], "eng-2")
+    recovery, order = world.recovery(world.live), []
+    for attempt in (other, world.old):
+        recovery._fence(world.store.execution(cases.SLUG, attempt.execution_id), "oom_killed")
+    admit = world.live.admit
+
+    def admitted(record, previous_execution_id=""):
+        order.append(previous_execution_id)
+        return admit(record, previous_execution_id)
+
+    world.live.admit = admitted
+    world.reconcile(recovery)
+    assert order == sorted([other.execution_id, world.old.execution_id])
+
+
+def test_an_operator_pause_outlives_the_recovery_instance(world):
+    world.recovery(world.live).pause(True)
+    restarted = world.recovery(world.live)
+    assert restarted.paused()
+    decision = restarted.handle(world.old.execution_id, "oom_killed")
+    assert (decision.mode, decision.replacement) == ("recovery_pending", "")
+    restarted.pause(False)
+    assert not world.recovery(world.live).paused()
+    other = world.launch(world.live, world.fx["second"], "eng-2")
+    assert world.recovery(world.live).handle(other.execution_id, "oom_killed").mode == "resume"
+    world.grant["allowed"] = False
+    with pytest.raises(SwarmError, match="a scoped controller grant is required"):
+        restarted.pause(True)
+    assert not restarted.paused()
+
+
+def test_a_node_seen_before_a_controller_restart_still_fences_its_vanished_pod(world):
+    assert world.reconcile(world.recovery(world.live)) == {world.old.execution_id: "working"}
+    world.clock[0] += cases.kub02.lease.ttl_ms()
+    restarted, _ = world.controller()
+    assert restarted.acquire()
+    world.ready.discard(world.fx["first"]["node"])
+    world.api.objects.pop(f"swarm-{world.old.execution_id}")
+    assert world.reconcile(world.recovery(restarted)) == {world.old.execution_id: "fenced"}
 
 
 def test_the_latest_complete_compatible_checkpoint_wins(world):

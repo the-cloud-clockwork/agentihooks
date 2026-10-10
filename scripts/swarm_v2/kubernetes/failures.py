@@ -28,6 +28,7 @@ RECOVERIES = "attempt-recoveries"
 LATE = "attempt-late-observations"
 NODES = "attempt-nodes"
 PULLS = "image-pull-since"
+PAUSED = "recovery-paused"
 NO_TAIL = "the image never started, so no transcript was written"
 TAIL = (
     "transcript written by native session {session} after archive offset {watermark} was not archived before the "
@@ -159,6 +160,17 @@ class Recovery:
         replacement = self._replace(self.store.execution(self.slug, execution_id))
         return self._record(replace(known, mode=choice, checkpoint=checkpoint, replacement=replacement))
 
+    def pause(self, paused: bool) -> None:
+        """The operator's pause outlives a controller restart; the constructor flag stays the deployment default."""
+        self.controller.require()
+        if paused:
+            self.store.redis.set(self._key(PAUSED), "1")
+        else:
+            self.store.redis.delete(self._key(PAUSED))
+
+    def paused(self) -> bool:
+        return bool(self.store.redis.exists(self._key(PAUSED)))
+
     def fence(self, execution_id: str) -> dict | None:
         raw = self.store.redis.hget(self._key(FENCES), execution_id)
         return json.loads(raw) if raw else None
@@ -179,7 +191,7 @@ class Recovery:
 
     def _resume(self) -> None:
         decided = set(self.store.redis.hkeys(self._key(RECOVERIES)))
-        for execution_id in set(self.store.redis.hkeys(self._key(FENCES))) - decided:
+        for execution_id in sorted(set(self.store.redis.hkeys(self._key(FENCES))) - decided):
             self.handle(execution_id, self.fence(execution_id)["reason"])
 
     def _observe(self, agent: AgentRecord, pods: list[dict], ready: frozenset[str] | None) -> str:
@@ -247,7 +259,7 @@ class Recovery:
 
     def _decide(self, agent: AgentRecord, reason: str) -> Decision:
         checkpoint = self._checkpoint(agent.execution_id)
-        if not self.automatic or reason == IMAGE_PULL or not checkpoint:
+        if not self.automatic or self.paused() or reason == IMAGE_PULL or not checkpoint:
             occupant = self.store.execution_occupants(self.slug)[agent.seat]
             if occupant.execution_id == agent.execution_id:
                 self.controller.require()
