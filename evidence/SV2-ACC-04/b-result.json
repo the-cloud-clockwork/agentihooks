@@ -1,0 +1,190 @@
+{
+  "package": "SV2-ACC-04",
+  "tested_commit": "eea0a65108ef3076a97d4686b49875b325948583",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059850340",
+  "case": "T-SV2-ACC-04-B",
+  "title": "rejection and containment: a personal brain message or another fleet's warning is not delivered by matching only the channel name",
+  "fixture": "tests/fixtures/swarm_v2/fleet-broadcasts.json: local seat eng-1@fixture and remote seat eng-2@fixture on channels brain and amygdala; operator critical warning (until_ack, ttl 600 s), expired warning (ttl 30 s), personal brain message, another fleet's warning, an agent info note (once) and a follow-up warning; published at 1000 ms, claimed at 61000 ms",
+  "fixture_clock": "build() from tests/sv2_ctl02_cases.py patches time.time to the fixture clock and issues launch grants; FleetBroadcasts reads the same list; fakeredis server clock only in test_the_default_clock_is_the_redis_server_clock",
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_a_personal_brain_message_or_another_fleets_warning_never_matches_on_the_channel_name",
+      "job": 114235852616,
+      "output": "PASSED at 2026-10-10T14:32:38.2524509Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_a_canonical_record_from_another_fleet_is_never_delivered",
+      "job": 114235852619,
+      "output": "PASSED at 2026-10-10T14:34:49.5710487Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_an_agent_grant_stays_inside_its_brain_projects_and_severity[change0]",
+      "job": 114235852606,
+      "output": "PASSED at 2026-10-10T14:34:14.9226592Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_an_agent_grant_stays_inside_its_brain_projects_and_severity[change1]",
+      "job": 114235852616,
+      "output": "PASSED at 2026-10-10T14:32:38.2956332Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_an_agent_grant_stays_inside_its_brain_projects_and_severity[change2]",
+      "job": 114235852596,
+      "output": "PASSED at 2026-10-10T14:33:37.0571208Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_an_agent_grant_stays_inside_its_brain_projects_and_severity[change3]",
+      "job": 114235852627,
+      "output": "PASSED at 2026-10-10T14:33:04.1452573Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_an_agent_grant_stays_inside_its_brain_projects_and_severity[change4]",
+      "job": 114235852619,
+      "output": "PASSED at 2026-10-10T14:34:49.3841298Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_an_unauthenticated_publisher_is_refused_without_writing",
+      "job": 114235852616,
+      "output": "PASSED at 2026-10-10T14:32:38.2861753Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_a_launch_grant_is_not_an_operator_credential",
+      "job": 114235852606,
+      "output": "PASSED at 2026-10-10T14:34:15.0386256Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_a_broadcast_id_stays_with_its_owner_and_brain",
+      "job": 114235852596,
+      "output": "PASSED at 2026-10-10T14:33:37.4736146Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_an_operation_id_replays_only_for_its_own_publisher",
+      "job": 114235852619,
+      "output": "PASSED at 2026-10-10T14:34:49.5992954Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_malformed_drafts_are_refused_without_writing[draft0]",
+      "job": 114235852616,
+      "output": "PASSED at 2026-10-10T14:32:38.2743965Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_malformed_drafts_are_refused_without_writing[draft10]",
+      "job": 114235852627,
+      "output": "PASSED at 2026-10-10T14:33:04.1439818Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_malformed_drafts_are_refused_without_writing[draft11]",
+      "job": 114235852591,
+      "output": "PASSED at 2026-10-10T14:34:55.8107489Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_malformed_drafts_are_refused_without_writing[draft12]",
+      "job": 114235852616,
+      "output": "PASSED at 2026-10-10T14:32:38.3024004Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_malformed_drafts_are_refused_without_writing[draft13]",
+      "job": 114235852619,
+      "output": "PASSED at 2026-10-10T14:34:49.4769855Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_malformed_drafts_are_refused_without_writing[draft14]",
+      "job": 114235852627,
+      "output": "PASSED at 2026-10-10T14:33:04.1859874Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_malformed_drafts_are_refused_without_writing[draft15]",
+      "job": 114235852596,
+      "output": "PASSED at 2026-10-10T14:33:37.1658661Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_malformed_drafts_are_refused_without_writing[draft16]",
+      "job": 114235852616,
+      "output": "PASSED at 2026-10-10T14:32:38.3291603Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_malformed_drafts_are_refused_without_writing[draft17]",
+      "job": 114235852606,
+      "output": "PASSED at 2026-10-10T14:34:14.9106421Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_malformed_drafts_are_refused_without_writing[draft18]",
+      "job": 114235852627,
+      "output": "PASSED at 2026-10-10T14:33:04.2103816Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_malformed_drafts_are_refused_without_writing[draft19]",
+      "job": 114235852591,
+      "output": "PASSED at 2026-10-10T14:34:55.9138959Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_malformed_drafts_are_refused_without_writing[draft1]",
+      "job": 114235852619,
+      "output": "PASSED at 2026-10-10T14:34:49.3491027Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_malformed_drafts_are_refused_without_writing[draft20]",
+      "job": 114235852591,
+      "output": "PASSED at 2026-10-10T14:34:55.9268392Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_malformed_drafts_are_refused_without_writing[draft2]",
+      "job": 114235852627,
+      "output": "PASSED at 2026-10-10T14:33:04.1559724Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_malformed_drafts_are_refused_without_writing[draft3]",
+      "job": 114235852591,
+      "output": "PASSED at 2026-10-10T14:34:55.8207969Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_malformed_drafts_are_refused_without_writing[draft4]",
+      "job": 114235852616,
+      "output": "PASSED at 2026-10-10T14:32:38.3221534Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_malformed_drafts_are_refused_without_writing[draft5]",
+      "job": 114235852606,
+      "output": "PASSED at 2026-10-10T14:34:14.9516340Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_malformed_drafts_are_refused_without_writing[draft6]",
+      "job": 114235852627,
+      "output": "PASSED at 2026-10-10T14:33:04.1789764Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_malformed_drafts_are_refused_without_writing[draft7]",
+      "job": 114235852596,
+      "output": "PASSED at 2026-10-10T14:33:37.1178851Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_malformed_drafts_are_refused_without_writing[draft8]",
+      "job": 114235852616,
+      "output": "PASSED at 2026-10-10T14:32:38.3121491Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_b_malformed_drafts_are_refused_without_writing[draft9]",
+      "job": 114235852619,
+      "output": "PASSED at 2026-10-10T14:34:49.5121035Z"
+    }
+  ],
+  "state_assertions": {
+    "scope": "Claim, acknowledge and publish through another fleet's FleetBroadcasts with this fleet's grant are refused forbidden_scope; a wildcard channel claim returns nothing and writes no delivery record",
+    "personal": "The personal brain message is never delivered to a swarm seat and has no delivery record or lag",
+    "foreign_record": "A canonical record planted with another fleet's name is never delivered",
+    "agent_grant": "An agent grant cannot publish critical or nuclear severity, outside its project, or to the personal brain",
+    "authentication": "Empty or forged operator credentials, an operator callback naming nobody and a launch grant offered as an operator credential are refused unauthenticated",
+    "ownership": "A broadcast id and an operation id stay with the publisher that first used them; a replay with other content, lifetime or id is refused invalid_request",
+    "drafts": "Twenty one malformed drafts are refused invalid_request",
+    "no_mutation": "A snapshot of every broadcast key is identical before and after each refusal"
+  },
+  "disclosure": "Refusals carry only the error class (forbidden_scope, unauthenticated, invalid_request); no token, grant or message content",
+  "recovery_isolation": "A corrected draft must be a new publish under a valid grant or operator credential; no refusal falls back to a privileged path",
+  "cleanup": "fakeredis per test; no live resource mutations",
+  "broadcast_delivery_lag_seconds": {
+    "personal-note": null,
+    "dimension": "seat eng-1@fixture; no delivery is recorded so no lag exists"
+  },
+  "passed": true
+}

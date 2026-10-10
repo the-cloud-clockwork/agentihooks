@@ -1,0 +1,14 @@
+{
+  "package": "SV2-ACC-04",
+  "tested_commit": "eea0a65108ef3076a97d4686b49875b325948583",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059850340",
+  "fixture_clock": "build() from tests/sv2_ctl02_cases.py patches time.time to the fixture clock and issues launch grants; FleetBroadcasts reads the same list; fakeredis server clock only in test_the_default_clock_is_the_redis_server_clock",
+  "independent_runs": 2,
+  "cleanup": "pytest fakeredis and tmp_path; no live resource mutations",
+  "mutation_scope": "Fleet broadcasts and delivery state only; the local broadcast file stays a per-session cache",
+  "inputs": {
+    "fleet-broadcasts.json": "30a96592e90466b43bdada4da368c2d3b9e3c1a356810b2f6a8e92dc6de57339",
+    "task-authority.json": "1f48c3140e8ec3f96c83c98b7c1617ce88b9cb04681dce6c5c6d03693fdfaa57"
+  }
+}
