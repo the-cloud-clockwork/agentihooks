@@ -1,8 +1,8 @@
 import json
 import re
+import time
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
-from datetime import UTC, datetime
+from contextlib import contextmanager, suppress
 from uuid import uuid4
 
 from redis import Redis
@@ -18,6 +18,8 @@ from scripts.swarm_v2.runtime.operations import SPAWN, OperationJournal, digest
 
 DEFAULT_LEASE_MS = 60_000
 HEARTBEAT_LOCK_MS = 5_000
+BEARER = "Bearer "
+RELEASE = "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0"
 WRITE_ATTEMPTS = 5
 REGISTER = "/v2/executions/register"
 HEARTBEAT = re.compile(r"/v2/executions/([^/]+)/heartbeat")
@@ -56,7 +58,9 @@ class ExecutionsAPI:
         self.contracts = contracts.load()
 
     def route(self, method: str, path: str, authorization: str, body: object) -> tuple[int, dict]:
-        token = authorization.removeprefix("Bearer ") if authorization.startswith("Bearer ") else ""
+        if not authorization.startswith(BEARER):
+            return 401, GrantRefused("unauthenticated", "a bearer credential is required").detail()
+        token = authorization.removeprefix(BEARER)
         subject = HEARTBEAT.fullmatch(path)
         try:
             if (method, path) == ("POST", REGISTER):
@@ -112,12 +116,8 @@ class ExecutionsAPI:
         try:
             yield
         finally:
-            with self.store.redis.pipeline() as pipe:
-                pipe.watch(key)
-                if pipe.get(key) == holder:
-                    pipe.multi()
-                    pipe.delete(key)
-                    pipe.execute()
+            with suppress(RedisError):
+                self.store.redis.eval(RELEASE, 1, key, holder)
 
     def _bind(self, registration: Registration, authority: dict) -> None:
         agent = self.store.execution(self.slug, registration.execution_id)
@@ -207,4 +207,5 @@ def _operation_id(value: object) -> str:
 
 
 def _timestamp(ms: int) -> str:
-    return f"{datetime.fromtimestamp(ms // 1000, UTC):%Y-%m-%dT%H:%M:%S}.{ms % 1000:03d}Z"
+    seconds, millis = divmod(ms, 1000)
+    return f"{time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(seconds))}.{millis:03d}Z"

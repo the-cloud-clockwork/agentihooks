@@ -103,6 +103,7 @@ def test_an_unavailable_store_is_reported_as_a_dependency_failure(world, worker,
     monkeypatch.setattr(world.store.redis, "hget", lost)
     status, refusal = world.put(agent.execution_id, token, world.beat(agent, 1))
     assert (status, refusal["error_class"], refusal["retry"]) == (503, "dependency_unavailable", "same_request")
+    assert refusal["message"] == "the execution store is unavailable"
 
 
 def test_a_heartbeat_before_registration_is_unauthenticated(world):
@@ -207,6 +208,7 @@ def test_a_superseded_execution_cannot_heartbeat(world, worker):
     before = world.protected()
     status, refusal = world.put(agent.execution_id, token, world.beat(agent, 1))
     assert (status, refusal["error_class"]) == (409, "stale_generation")
+    assert refusal["message"] == "launch grant is for a superseded execution"
     assert world.protected() == before
 
 
@@ -215,6 +217,7 @@ def test_controller_admission_disabled_refuses_renewal_as_unavailable(world, wor
     world.controller.admission_enabled = False
     status, refusal = world.put(agent.execution_id, token, world.beat(agent, 1))
     assert (status, refusal["error_class"]) == (503, "dependency_unavailable")
+    assert refusal["message"] == "controller admission is disabled until reconciliation completes"
     assert stored(world, agent) is None
 
 
@@ -312,6 +315,7 @@ def test_a_concurrent_heartbeat_is_refused_before_any_lease_write(world, worker,
         "dependency_unavailable",
         "same_request",
     )
+    assert seen[0][1]["message"] == "another heartbeat for this execution is in flight"
     assert (status, ack["lease_deadline_ms"], stored(world, agent)["renewal_sequence"]) == (200, 1100, 8)
     assert not world.store.redis.exists(lock)
 
@@ -386,6 +390,7 @@ def test_a_heartbeat_commit_that_keeps_conflicting_writes_nothing(world, worker,
     monkeypatch.setattr(world.store.redis, "pipeline", lambda *a, **k: Conflicting(real(*a, **k)))
     status, refusal = world.put(agent.execution_id, token, world.beat(agent, 1))
     assert (status, refusal["error_class"], refusal["retry"]) == (503, "dependency_unavailable", "same_request")
+    assert refusal["message"] == "heartbeats kept changing; the heartbeat was not recorded"
     assert len(attempts) == 5
     assert stored(world, agent) is None
 
@@ -467,3 +472,73 @@ def test_package_cases_match_their_committed_evidence(case):
     assert first == second
     committed = json.loads((EVIDENCE / f"{case}-result.json").read_text())
     assert committed == {"case": f"T-SV2-LDG-02-{case.upper()}", "independent_runs": 2, "observed": first}
+
+
+def test_the_smallest_server_lease_is_one_millisecond_and_refusals_name_it(world):
+    assert ExecutionsAPI(world.grants, world.tasks, 1).lease_ms == 1
+    with pytest.raises(ValueError, match="^the server lease duration must be a positive number of milliseconds$"):
+        ExecutionsAPI(world.grants, world.tasks, 0)
+
+
+def test_each_refusal_names_its_cause(world, worker):
+    agent, token = worker
+    other, other_token = world.start("eng-2@fixture", "other")
+    world.register(other, other_token)
+    stranger, stranger_token = world.start("eng-3@fixture", "third")
+
+    def message(execution_id, credential, body):
+        return world.put(execution_id, credential, body)[1]["message"]
+
+    foreign = world.beat(agent, 1)
+    foreign["authority"]["task_id"] = "other"
+    epoch = world.beat(agent, 1)
+    epoch["authority"]["controller_epoch"] = 2
+    assert world.api.route("PUT", "/v2/executions/x/heartbeat", "Basic abc", {})[1]["message"] == (
+        "a bearer credential is required"
+    )
+    assert world.api.route("GET", "/v2/executions", f"Bearer {token}", {})[1]["message"] == (
+        "no such execution endpoint"
+    )
+    assert message(other.execution_id, token, world.beat(other, 1)) == "heartbeat names another execution"
+    assert message(agent.execution_id, token, foreign) == "heartbeat authority is outside its registered execution"
+    assert message(agent.execution_id, token, epoch) == "heartbeat names another controller epoch"
+    assert message(agent.execution_id, token, world.beat(agent, 1, generation=2)) == "stale_generation"
+    assert message(agent.execution_id, token, {**world.beat(agent, 1), "renewal_sequence": -1}) == (
+        "renewal_sequence: fails minimum"
+    )
+    assert message(stranger.execution_id, stranger_token, world.beat(stranger, 1)) == ("launch grant is not registered")
+    world.put(agent.execution_id, token, world.beat(agent, 5))
+    assert message(agent.execution_id, token, world.beat(agent, 4)) == (
+        "heartbeat renewal sequence is not newer than the accepted one"
+    )
+    world.controller.held = None
+    assert message(agent.execution_id, token, world.beat(agent, 6)) == "the controller lease is absent"
+
+
+def test_a_repeated_registration_reports_the_accepted_archive_watermark(world, worker):
+    agent, token = worker
+    world.put(agent.execution_id, token, world.beat(agent, 1, archive_watermark=12))
+    assert stored(world, agent)["resources"] == {}
+    assert world.register(agent, token)[1]["archive_watermark"] == 12
+
+
+def test_a_failed_lock_release_keeps_the_committed_heartbeat(world, worker, monkeypatch):
+    from redis.exceptions import ConnectionError as StoreLost
+
+    agent, token = worker
+    lock = world.store.key("fixture", "heartbeat-lock", agent.execution_id)
+
+    def lost(*args):
+        raise StoreLost("fixture release lost")
+
+    monkeypatch.setattr(world.store.redis, "eval", lost)
+    status, ack = world.put(agent.execution_id, token, world.beat(agent, 1))
+    assert (status, ack["renewal_sequence"], stored(world, agent)["renewal_sequence"]) == (200, 1, 1)
+    assert world.store.redis.exists(lock)
+
+
+def test_server_deadlines_render_as_utc_with_milliseconds():
+    from scripts.swarm_v2.api.executions import _timestamp
+
+    assert _timestamp(1_791_630_892_123) == "2026-10-10T11:14:52.123Z"
+    assert _timestamp(7) == "1970-01-01T00:00:00.007Z"
