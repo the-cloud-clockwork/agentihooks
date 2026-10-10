@@ -172,7 +172,7 @@ def _conflict(record: dict, proposal: dict, repeated: set[str]) -> str:
     return ""
 
 
-def _verdict(record: dict, proposal: dict, repeated: set[str], key: Ed25519PublicKey | None) -> tuple[str, str]:
+def _verdict(record: dict, proposal: dict, repeated: set[str], key: Ed25519PublicKey | None = None) -> tuple[str, str]:
     kind = proposal.get("kind")
     role = missing_owner(record, proposal)
     if kind not in KINDS:
