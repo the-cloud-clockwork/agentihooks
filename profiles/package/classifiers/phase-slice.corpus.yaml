@@ -1,8 +1,8 @@
 version: 1
 notes: Seeded from the classifier decision log. Historic states for this classifier could not be rebuilt, so each case state
-  was rebuilt from its ledger on 2026-10-10 and asked once; its samples are the answers the decision log recorded for that
-  ask. Expected verdicts were written by a separate reader agent that saw only each case state and its question, never the
-  thresholds or the rule.
+  was rebuilt from its ledger and asked once during seeding on 2026-10-09 UTC; its samples are the answers the decision log
+  recorded for that ask. Expected verdicts were written by a separate reader agent that saw only each case state and its question,
+  never the thresholds or the rule.
 cases:
 - name: rig-grade-swarm-p21-12
   state:
@@ -529,8 +529,8 @@ cases:
       serves_11:
         type: noul
         noul: 0.9989677691437906
-  notes: state digest dd64fee1631bb62b, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest dd64fee1631bb62b, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-p21-6
   state:
     phase: Impeccable audit implementation
@@ -803,8 +803,8 @@ cases:
       serves_5:
         type: noul
         noul: 0.9990302482054545
-  notes: state digest 878de3d1052d4591, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest 878de3d1052d4591, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-p23-12
   state:
     phase: Correct profiles and continuous observability
@@ -1309,8 +1309,8 @@ cases:
       serves_11:
         type: noul
         noul: 0.9995955184607372
-  notes: state digest 4e2941e544f7dfd1, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 4e2941e544f7dfd1, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-p23-6
   state:
     phase: Correct profiles and continuous observability
@@ -1576,8 +1576,8 @@ cases:
       serves_5:
         type: noul
         noul: 0.998967769159156
-  notes: state digest 204caeb8004e460c, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 204caeb8004e460c, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-p24-9
   state:
     phase: Recall from ledgers and swarms
@@ -2052,8 +2052,8 @@ cases:
       serves_3:
         type: noul
         noul: 0.9985896417486598
-  notes: state digest 3ca17f87ad3bc89a, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest 3ca17f87ad3bc89a, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-p25-11
   state:
     phase: Engineers never sit idle behind a dependency
@@ -2412,8 +2412,8 @@ cases:
       serves_10:
         type: noul
         noul: 0.9976768378745489
-  notes: state digest 8d33ed142359a7f3, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 8d33ed142359a7f3, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-p25-5
   state:
     phase: Engineers never sit idle behind a dependency
@@ -2592,8 +2592,8 @@ cases:
       serves_4:
         type: noul
         noul: 0.9993332977813495
-  notes: state digest 5b955ff5c81a736c, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest 5b955ff5c81a736c, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-p40-12
   state:
     phase: Swarm brain on Kubernetes
@@ -3318,8 +3318,8 @@ cases:
       serves_5:
         type: noul
         noul: 0.9985896413328681
-  notes: state digest 6b8c9fce4d2552cc, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 6b8c9fce4d2552cc, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-p44-7
   state:
     phase: Duplicate check when adding to the ledger
@@ -3798,5 +3798,5 @@ cases:
       serves_2:
         type: noul
         noul: 0.9996200154902007
-  notes: state digest ae1d8916f37297df, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest ae1d8916f37297df, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it

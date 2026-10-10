@@ -1,8 +1,8 @@
 version: 1
 notes: Seeded from the classifier decision log. Historic states for this classifier could not be rebuilt, so each case state
-  was rebuilt from its ledger on 2026-10-10 and asked once; its samples are the answers the decision log recorded for that
-  ask. Expected verdicts were written by a separate reader agent that saw only each case state and its question, never the
-  thresholds or the rule. Every case holds one group, so the one verdict is that group's.
+  was rebuilt from its ledger and asked once during seeding on 2026-10-09 UTC; its samples are the answers the decision log
+  recorded for that ask. Expected verdicts were written by a separate reader agent that saw only each case state and its question,
+  never the thresholds or the rule. Every case holds one group, so the one verdict is that group's.
 cases:
 - name: rig-grade-swarm-tc105,tc111
   state:
@@ -41,8 +41,8 @@ cases:
       group_0:
         type: noul
         noul: 0.11920290324780274
-  notes: state digest c4b5f9492d8aeb8b, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest c4b5f9492d8aeb8b, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-sz38,sz40
   state:
     overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
@@ -79,8 +79,8 @@ cases:
       group_0:
         type: noul
         noul: 0.1329642436335826
-  notes: state digest 73f9f15d11d4c8ee, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest 73f9f15d11d4c8ee, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-jdg1,jdg2
   state:
     overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
@@ -117,8 +117,8 @@ cases:
       group_0:
         type: noul
         noul: 0.4378234991142019
-  notes: state digest 310e8e6f91964d80, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest 310e8e6f91964d80, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-t278,t283
   state:
     overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
@@ -172,8 +172,8 @@ cases:
       group_0:
         type: noul
         noul: 0.0038244840988075806
-  notes: state digest b8ec08ce45f090d7, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest b8ec08ce45f090d7, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-vret2,vret4
   state:
     overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
@@ -216,8 +216,8 @@ cases:
       group_0:
         type: noul
         noul: 0.01243164902375476
-  notes: state digest f4a99c353553cb5f, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest f4a99c353553cb5f, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-vgat3,vgat4
   state:
     overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
@@ -260,8 +260,8 @@ cases:
       group_0:
         type: noul
         noul: 0.022977374593338037
-  notes: state digest 6bc1663d939ba0c6, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 6bc1663d939ba0c6, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-t273,t283
   state:
     overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
@@ -309,8 +309,8 @@ cases:
       group_0:
         type: noul
         noul: 0.001325022328481215
-  notes: state digest 0e7b1f47cea87c0d, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest 0e7b1f47cea87c0d, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-sz51,tc143
   state:
     overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
@@ -349,8 +349,8 @@ cases:
       group_0:
         type: noul
         noul: 0.09009300862044806
-  notes: state digest d7e5399ed68e656e, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest d7e5399ed68e656e, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-t283,t284
   state:
     overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
@@ -402,8 +402,8 @@ cases:
       group_0:
         type: noul
         noul: 0.006692849933647288
-  notes: state digest 4ba727df0a1f0cb6, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest 4ba727df0a1f0cb6, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-ving4,ving5
   state:
     overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
@@ -446,8 +446,8 @@ cases:
       group_0:
         type: noul
         noul: 0.01322282253002531
-  notes: state digest c2d5010b7fe9b9cb, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest c2d5010b7fe9b9cb, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-vses2,vses5
   state:
     overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
@@ -491,8 +491,8 @@ cases:
       group_0:
         type: noul
         noul: 0.001597845660419315
-  notes: state digest 13a23d768aa6b485, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 13a23d768aa6b485, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-asc1,asc8
   state:
     overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
@@ -533,5 +533,5 @@ cases:
       group_0:
         type: noul
         noul: 0.25683200276421697
-  notes: state digest 6707d4d23020efff, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest 6707d4d23020efff, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it

@@ -1,8 +1,8 @@
 version: 1
 notes: Seeded from the classifier decision log. Historic states for this classifier could not be rebuilt, so each case state
-  was rebuilt from its ledger on 2026-10-10 and asked once; its samples are the answers the decision log recorded for that
-  ask. Expected verdicts were written by a separate reader agent that saw only each case state and its question, never the
-  thresholds or the rule. The reader passed every plan, so no case yet exercises a failing plan.
+  was rebuilt from its ledger and asked once during seeding on 2026-10-09 UTC; its samples are the answers the decision log
+  recorded for that ask. Expected verdicts were written by a separate reader agent that saw only each case state and its question,
+  never the thresholds or the rule. The reader passed every plan, so no case yet exercises a failing plan.
 cases:
 - name: rig-grade-swarm-doctor-fx-a7256753-code
   state:
@@ -418,8 +418,8 @@ cases:
           '1': one pull request
           '2': several pull requests
           '3': a whole phase
-  notes: state digest 6e7a2412bd20278b, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 6e7a2412bd20278b, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-doctor-t41
   state:
     project intent: 'The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
@@ -845,8 +845,8 @@ cases:
           '1': one pull request
           '2': several pull requests
           '3': a whole phase
-  notes: state digest de3ee41dd88dd5e4, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest de3ee41dd88dd5e4, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-doctor-t22
   state:
     project intent: 'The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
@@ -1250,8 +1250,8 @@ cases:
           '1': one pull request
           '2': several pull requests
           '3': a whole phase
-  notes: state digest 45a89af7ee3597fd, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 45a89af7ee3597fd, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-doctor-fx-8be892c4-code
   state:
     project intent: 'The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
@@ -1747,8 +1747,8 @@ cases:
           '1': one pull request
           '2': several pull requests
           '3': a whole phase
-  notes: state digest 6b4db973fb402be6, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 6b4db973fb402be6, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-doctor-t56
   state:
     project intent: 'The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
@@ -2150,8 +2150,8 @@ cases:
           '1': one pull request
           '2': several pull requests
           '3': a whole phase
-  notes: state digest 19478a220625dc40, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 19478a220625dc40, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-doctor-t18
   state:
     project intent: 'The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
@@ -2583,8 +2583,8 @@ cases:
           '1': one pull request
           '2': several pull requests
           '3': a whole phase
-  notes: state digest 52737b892bfad035, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 52737b892bfad035, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-doctor-t53
   state:
     project intent: 'The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
@@ -3046,8 +3046,8 @@ cases:
           '1': one pull request
           '2': several pull requests
           '3': a whole phase
-  notes: state digest 97e67099e79c3db8, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 97e67099e79c3db8, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-doctor-fx-e234ffce-code
   state:
     project intent: 'The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
@@ -3475,8 +3475,8 @@ cases:
           '1': one pull request
           '2': several pull requests
           '3': a whole phase
-  notes: state digest f44ea9a4070f230e, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest f44ea9a4070f230e, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-doctor-t16
   state:
     project intent: 'The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
@@ -3930,8 +3930,8 @@ cases:
           '1': one pull request
           '2': several pull requests
           '3': a whole phase
-  notes: state digest 0cddd2f51dcad39b, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 0cddd2f51dcad39b, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-doctor-fx-29d21c6e-code
   state:
     project intent: 'The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
@@ -4362,8 +4362,8 @@ cases:
           '1': one pull request
           '2': several pull requests
           '3': a whole phase
-  notes: state digest 795d6c11dd0af0f1, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 795d6c11dd0af0f1, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-doctor-fx-a66a8ac4-code
   state:
     project intent: 'The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
@@ -4829,8 +4829,8 @@ cases:
           '1': one pull request
           '2': several pull requests
           '3': a whole phase
-  notes: state digest 947f87b480cbc431, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 947f87b480cbc431, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-doctor-t54
   state:
     project intent: 'The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
@@ -5256,5 +5256,5 @@ cases:
           '1': one pull request
           '2': several pull requests
           '3': a whole phase
-  notes: state digest 73f2ca695dc9debf, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 73f2ca695dc9debf, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package

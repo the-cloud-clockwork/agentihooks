@@ -1,8 +1,8 @@
 version: 1
 notes: Seeded from the classifier decision log. Historic states for this classifier could not be rebuilt, so each case state
-  was rebuilt from its ledger on 2026-10-10 and asked once; its samples are the answers the decision log recorded for that
-  ask. Expected verdicts were written by a separate reader agent that saw only each case state and its question, never the
-  thresholds or the rule. Every case asks about one new item, so the one verdict is that item's.
+  was rebuilt from its ledger and asked once during seeding on 2026-10-09 UTC; its samples are the answers the decision log
+  recorded for that ask. Expected verdicts were written by a separate reader agent that saw only each case state and its question,
+  never the thresholds or the rule. Every case asks about one new item, so the one verdict is that item's.
 cases:
 - name: rig-grade-swarm-ef2
   state:
@@ -101,8 +101,8 @@ cases:
       new_0_existing_3:
         type: noul
         noul: 0.0007554054977545243
-  notes: state digest da354dc7d44c1038, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest da354dc7d44c1038, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-sz15
   state:
     new:
@@ -187,8 +187,8 @@ cases:
       new_0_existing_3:
         type: noul
         noul: 1.8925144862021476e-05
-  notes: state digest 20c40c8d82116190, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest 20c40c8d82116190, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-rb10
   state:
     new:
@@ -282,8 +282,8 @@ cases:
       new_0_existing_3:
         type: noul
         noul: 0.006692849586924174
-  notes: state digest f89dca02580301f0, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest f89dca02580301f0, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-t80
   state:
     new:
@@ -359,8 +359,8 @@ cases:
       new_0_existing_3:
         type: noul
         noul: 1.7983074655212024e-07
-  notes: state digest 4c80c0809530eddf, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest 4c80c0809530eddf, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-cxc0
   state:
     new:
@@ -431,8 +431,8 @@ cases:
       new_0_existing_3:
         type: noul
         noul: 1.3007127012835138e-05
-  notes: state digest 1b189c8d4cea3526, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest 1b189c8d4cea3526, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-asc2
   state:
     new:
@@ -523,8 +523,8 @@ cases:
       new_0_existing_3:
         type: noul
         noul: 0.00013135178532304502
-  notes: state digest deaa1f6506e52b0a, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest deaa1f6506e52b0a, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-tc109
   state:
     new:
@@ -607,8 +607,8 @@ cases:
       new_0_existing_3:
         type: noul
         noul: 0.00010229979680506539
-  notes: state digest c4d1e6dec1f1c825, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest c4d1e6dec1f1c825, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-ss1
   state:
     new:
@@ -705,8 +705,8 @@ cases:
       new_0_existing_3:
         type: noul
         noul: 0.13296423676207594
-  notes: state digest 967a1e05fc850608, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest 967a1e05fc850608, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-tc35
   state:
     new:
@@ -792,8 +792,8 @@ cases:
       new_0_existing_3:
         type: noul
         noul: 2.457994143901738e-07
-  notes: state digest e8072fe6150331f2, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest e8072fe6150331f2, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-sb4
   state:
     new:
@@ -878,8 +878,8 @@ cases:
       new_0_existing_3:
         type: noul
         noul: 1.9333574070180246e-06
-  notes: state digest c6b0ea6f73d66ac9, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest c6b0ea6f73d66ac9, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-ap1
   state:
     new:
@@ -1000,8 +1000,8 @@ cases:
       new_0_existing_3:
         type: noul
         noul: 0.014957088349504917
-  notes: state digest 03a391db0b8c9102, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 03a391db0b8c9102, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-tc79
   state:
     new:
@@ -1094,8 +1094,8 @@ cases:
       new_0_existing_3:
         type: noul
         noul: 2.785270666142162e-07
-  notes: state digest ba8a1807e36dc70e, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest ba8a1807e36dc70e, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-add_item-f535935391
   state:
     new:
@@ -1182,8 +1182,8 @@ cases:
       new_0_existing_3:
         type: noul
         noul: 0.027585279828507708
-  notes: state digest e884a8230552644d, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest e884a8230552644d, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rig-grade-swarm-add_item-07ca73c817
   state:
     new:
@@ -1278,8 +1278,8 @@ cases:
       new_0_existing_3:
         type: noul
         noul: 1.0783315034923109e-05
-  notes: state digest 3c51af5e25ba14dc, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest 3c51af5e25ba14dc, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-add_item-df99b0b9e7
   state:
     new:
@@ -1357,8 +1357,8 @@ cases:
       new_0_existing_3:
         type: noul
         noul: 2.8130187415868627e-06
-  notes: state digest 4d267613be1f468d, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest 4d267613be1f468d, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-add_item-aceb9a5012
   state:
     new:
@@ -1439,8 +1439,8 @@ cases:
       new_0_existing_3:
         type: noul
         noul: 2.406102868559163e-06
-  notes: state digest a34a1f6b89442c02, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest a34a1f6b89442c02, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-add_item-e25d5f46cb
   state:
     new:
@@ -1519,8 +1519,8 @@ cases:
       new_0_existing_3:
         type: noul
         noul: 4.539787952563966e-05
-  notes: state digest 0fca3bd32704f3a7, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest 0fca3bd32704f3a7, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-add_item-f6a33b4bf3
   state:
     new:
@@ -1605,5 +1605,5 @@ cases:
       new_0_existing_3:
         type: noul
         noul: 7.967299977046305e-05
-  notes: state digest 9e85b2fb82d9ad2e, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest 9e85b2fb82d9ad2e, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it

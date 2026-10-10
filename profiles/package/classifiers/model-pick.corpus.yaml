@@ -1,8 +1,8 @@
 version: 1
 notes: Seeded from the classifier decision log. Each case state was rebuilt from its ledger and matched to a state digest
-  the decision log recorded before 2026-10-10; its samples are the answers logged for that digest. Expected verdicts were
-  written by a separate reader agent that saw only each case state and its question, never the thresholds or the rule. Model
-  pick expectations are the reader's level raised to the lane floor, as the call site raises them.
+  the decision log recorded before seeding; its samples are the answers logged for that digest. Expected verdicts were written
+  by a separate reader agent that saw only each case state and its question, never the thresholds or the rule. Model pick
+  expectations are the reader's level raised to the lane floor, as the call site raises them.
 cases:
 - name: rig-grade-swarm-t58
   state:
@@ -42,7 +42,7 @@ cases:
           '1': medium
           '2': high
           '3': max
-  notes: state digest 9ab27e2cb7206f5a
+  notes: state digest 9ab27e2cb7206f5a; reader level high, raised to the floor high
 - name: rig-grade-swarm-cxc0
   state:
     title: Commit the Codex Channels plan into resources plans
@@ -96,7 +96,7 @@ cases:
           '1': medium
           '2': high
           '3': max
-  notes: state digest 3665c32f581a8043
+  notes: state digest 3665c32f581a8043; reader level low, raised to the floor high
 - name: rig-grade-swarm-doctor-fx-9b243b65-tune
   state:
     title: Move the number behind the task cost finding
@@ -136,7 +136,7 @@ cases:
           '1': medium
           '2': high
           '3': max
-  notes: state digest 79d0c2def5bd1ce7
+  notes: state digest 79d0c2def5bd1ce7; reader level high, raised to the floor high
 - name: rig-grade-swarm-vidn2
   state:
     title: Separate logical agents from execution attempts
@@ -177,7 +177,7 @@ cases:
           '1': medium
           '2': high
           '3': xhigh
-  notes: state digest a53cb64d4dd464ba; internal names masked for the package
+  notes: state digest a53cb64d4dd464ba; internal names masked for the package; reader level xhigh, raised to the floor high
 - name: rig-grade-swarm-doctor-t14
   state:
     title: Measure non master replies to whole swarm chat lines after the fix is live
@@ -231,7 +231,7 @@ cases:
           '1': medium
           '2': high
           '3': max
-  notes: state digest ac2ce7b5cfe261e5
+  notes: state digest ac2ce7b5cfe261e5; reader level low, raised to the floor high
 - name: rig-grade-swarm-tc1
   state:
     title: Grouped local test runs across swarm and root tests keep swarm fixtures
@@ -270,7 +270,7 @@ cases:
           '1': medium
           '2': high
           '3': xhigh
-  notes: state digest 9d90cdbe140a28ad
+  notes: state digest 9d90cdbe140a28ad; reader level high, raised to the floor high
 - name: rig-grade-swarm-doctor-t25
   state:
     title: Measure rewritten life stamps over a full hour of watched swarm startups
@@ -310,7 +310,7 @@ cases:
           '1': medium
           '2': high
           '3': max
-  notes: state digest fb871e174812dba4
+  notes: state digest fb871e174812dba4; reader level medium, raised to the floor high
 - name: rig-grade-swarm-doctor-t38
   state:
     title: The red checks detector waits for a head to sit red with no push
@@ -352,7 +352,7 @@ cases:
           '1': medium
           '2': high
           '3': max
-  notes: state digest 0f4bd84eaecc604c
+  notes: state digest 0f4bd84eaecc604c; reader level high, raised to the floor high
 - name: rig-grade-swarm-ed1
   state:
     title: Enforce determinism skill reaches every profile
@@ -390,7 +390,7 @@ cases:
           '1': medium
           '2': high
           '3': max
-  notes: state digest d32bba8bda0565d3
+  notes: state digest d32bba8bda0565d3; reader level medium, raised to the floor high
 - name: rig-grade-swarm-doctor-fx-8be892c4-cause
   state:
     title: Find the cause of the inbox no outcome finding
@@ -431,7 +431,7 @@ cases:
           '1': medium
           '2': high
           '3': xhigh
-  notes: state digest a6c1d6d8f56a8616
+  notes: state digest a6c1d6d8f56a8616; reader level xhigh, raised to the floor high
 - name: rig-grade-swarm-t64
   state:
     title: Quota transfer refusal text names the right direction
@@ -468,7 +468,7 @@ cases:
           '1': medium
           '2': high
           '3': xhigh
-  notes: state digest 35ef80246812c2db
+  notes: state digest 35ef80246812c2db; reader level low, raised to the floor high
 - name: rig-grade-swarm-tc104
   state:
     title: Unit test jobs carry a time limit
@@ -505,4 +505,4 @@ cases:
           '1': medium
           '2': high
           '3': max
-  notes: state digest bcc7c04ca294ff60
+  notes: state digest bcc7c04ca294ff60; reader level low, raised to the floor high

@@ -1,8 +1,8 @@
 version: 1
 notes: Seeded from the classifier decision log. Historic states for this classifier could not be rebuilt, so each case state
-  was rebuilt from its ledger on 2026-10-10 and asked once; its samples are the answers the decision log recorded for that
-  ask. Expected verdicts were written by a separate reader agent that saw only each case state and its question, never the
-  thresholds or the rule.
+  was rebuilt from its ledger and asked once during seeding on 2026-10-09 UTC; its samples are the answers the decision log
+  recorded for that ask. Expected verdicts were written by a separate reader agent that saw only each case state and its question,
+  never the thresholds or the rule.
 cases:
 - name: now-do-a-plan-sparkling-pumpkin-2026-10-02-auto-questions-q1
   state:
@@ -30,8 +30,8 @@ cases:
       resolves:
         type: noul
         noul: 0.4378235137849365
-  notes: state digest 63272468f2701791, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 63272468f2701791, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: okay-we-re-going-to-mossy-rabin-2026-10-05-auto-followups-add_item-85b8a48e1d
   state:
     item: Gateway drift check shows four drifts. The atlas agent key file grants 35 agentibridge and agentibrain tools whose
@@ -57,8 +57,8 @@ cases:
       resolves:
         type: noul
         noul: 0.7981867777396212
-  notes: state digest 4d15a28fbecac982, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 4d15a28fbecac982, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: okay-we-re-going-to-mossy-rabin-2026-10-05-auto-followups-add_item-d09de973a6
   state:
     item: The installed GitHub CLI cannot edit a pull request body because it requests the retired classic projects field.
@@ -84,8 +84,8 @@ cases:
       resolves:
         type: noul
         noul: 0.18242552380635632
-  notes: state digest ba9e67dbd6a8c312, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest ba9e67dbd6a8c312, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: okay-we-re-going-to-mossy-rabin-2026-10-05-auto-followups-add_item-a5a642ab31
   state:
     item: antoncore deploys rebuild every image on the Atlas host because its registry login is denied, so pulls of fresh
@@ -111,8 +111,8 @@ cases:
       resolves:
         type: noul
         noul: 0.679178673200285
-  notes: state digest f5c941b6104ae0bd, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest f5c941b6104ae0bd, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: rearchitecture-v3-2026-10-02-priority-d29dbadcb6
   state:
     item: Arming the bracket geometry gate is a setting on the traded risk group. It needs the operator's value.
@@ -135,8 +135,8 @@ cases:
       resolves:
         type: noul
         noul: 0.02442309342702589
-  notes: state digest f616c82ece38e6d2, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest f616c82ece38e6d2, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rearchitecture-v3-2026-10-02-priority-7c34a25acf
   state:
     item: Live and backtest place the premarket target differently after a fill. The operator decides which side to align.
@@ -161,8 +161,8 @@ cases:
       resolves:
         type: noul
         noul: 0.9149009607937928
-  notes: state digest 36c6099ec7f6c5b7, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest 36c6099ec7f6c5b7, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rearchitecture-v3-2026-10-02-priority-db350f728b
   state:
     item: 'The seven replay and backtest S3 calls have no guard of their own against the AWS endpoint: if the MinIO endpoint
@@ -187,8 +187,8 @@ cases:
       resolves:
         type: noul
         noul: 0.0001313518000008236
-  notes: state digest afb0f2d12e413712, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest afb0f2d12e413712, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rearchitecture-v3-2026-10-02-priority-e9e5528f8a
   state:
     item: 'Fix: EDGAR number-word patterns match Unicode look-alikes that then read as no value; make them ASCII-only.'
@@ -211,8 +211,8 @@ cases:
       resolves:
         type: noul
         noul: 0.23370635691404026
-  notes: state digest 2d2d86ae471c5622, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest 2d2d86ae471c5622, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rearchitecture-v3-2026-10-02-priority-8e479829de
   state:
     item: A maintenance window control key still names the broker outside the adapters. Rename it together with its registry
@@ -238,8 +238,8 @@ cases:
       resolves:
         type: noul
         noul: 0.348645162405387
-  notes: state digest bd90632df85624a5, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest bd90632df85624a5, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-doctor-priority-365247e55c
   state:
     item: Swarm agents now skip the dependency restart and pick up a change only at their successor. This differs from the
@@ -265,8 +265,8 @@ cases:
       resolves:
         type: noul
         noul: 0.9867771774699747
-  notes: state digest 24175d18391b1b90, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest 24175d18391b1b90, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-doctor-auto-tasks-fx-8df17d5f-tune
   state:
     item: Move the number behind the task cost finding
@@ -291,8 +291,8 @@ cases:
       resolves:
         type: noul
         noul: 0.7981867873410141
-  notes: state digest 765ba2ac7efc4a93, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest 765ba2ac7efc4a93, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
 - name: rig-grade-swarm-doctor-auto-tasks-t55
   state:
     item: One swarm timer pass fits inside its one minute interval again
@@ -315,5 +315,5 @@ cases:
       resolves:
         type: noul
         noul: 0.9496693659780479
-  notes: state digest 36ac68846e305755, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it
+  notes: state digest 36ac68846e305755, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it

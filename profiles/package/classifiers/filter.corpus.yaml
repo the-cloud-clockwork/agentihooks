@@ -1,8 +1,8 @@
 version: 1
 notes: Seeded from the classifier decision log. Historic states for this classifier could not be rebuilt, so each case state
-  was rebuilt from its ledger on 2026-10-10 and asked once; its samples are the answers the decision log recorded for that
-  ask. Expected verdicts were written by a separate reader agent that saw only each case state and its question, never the
-  thresholds or the rule. Cases share a file state and differ by the findings asked about.
+  was rebuilt from its ledger and asked once during seeding on 2026-10-09 UTC; its samples are the answers the decision log
+  recorded for that ask. Expected verdicts were written by a separate reader agent that saw only each case state and its question,
+  never the thresholds or the rule. Cases share a file state and differ by the findings asked about.
 cases:
 - name: home-0
   state:
@@ -43,8 +43,8 @@ cases:
       finding_2:
         type: noul
         noul: 0.10669060530721626
-  notes: state digest 3a790fd2cfbbf821, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 3a790fd2cfbbf821, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: home-3
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
@@ -84,8 +84,8 @@ cases:
       finding_2:
         type: noul
         noul: 0.33458944125318596
-  notes: state digest 3a790fd2cfbbf821, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 3a790fd2cfbbf821, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: home-6
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
@@ -125,8 +125,8 @@ cases:
       finding_2:
         type: noul
         noul: 0.37754066879814546
-  notes: state digest 3a790fd2cfbbf821, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 3a790fd2cfbbf821, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: home-9
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
@@ -176,8 +176,8 @@ cases:
       finding_2:
         type: noul
         noul: 0.29421497216298875
-  notes: state digest 3a790fd2cfbbf821, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 3a790fd2cfbbf821, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: shell-0
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
@@ -217,8 +217,8 @@ cases:
       finding_2:
         type: noul
         noul: 0.16451644651115205
-  notes: state digest f1be1dd60f8a094f, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest f1be1dd60f8a094f, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: shell-3
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
@@ -258,8 +258,8 @@ cases:
       finding_2:
         type: noul
         noul: 0.1919328141803125
-  notes: state digest f1be1dd60f8a094f, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest f1be1dd60f8a094f, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: shell-6
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
@@ -299,8 +299,8 @@ cases:
       finding_2:
         type: noul
         noul: 0.18242553269617778
-  notes: state digest f1be1dd60f8a094f, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest f1be1dd60f8a094f, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: shell-9
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
@@ -340,8 +340,8 @@ cases:
       finding_2:
         type: noul
         noul: 0.3923368301671084
-  notes: state digest f1be1dd60f8a094f, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest f1be1dd60f8a094f, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: template-0
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
@@ -381,8 +381,8 @@ cases:
       finding_2:
         type: noul
         noul: 0.07585818419975078
-  notes: state digest 06ad8472dfbf72c0, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 06ad8472dfbf72c0, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: template-3
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
@@ -422,8 +422,8 @@ cases:
       finding_2:
         type: noul
         noul: 0.2120687844377551
-  notes: state digest 06ad8472dfbf72c0, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 06ad8472dfbf72c0, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: template-6
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
@@ -463,8 +463,8 @@ cases:
       finding_2:
         type: noul
         noul: 0.10669058826486906
-  notes: state digest 06ad8472dfbf72c0, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 06ad8472dfbf72c0, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
 - name: template-9
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
@@ -504,5 +504,5 @@ cases:
       finding_2:
         type: noul
         noul: 0.743168019989179
-  notes: state digest 06ad8472dfbf72c0, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
-    it; internal names masked for the package
+  notes: state digest 06ad8472dfbf72c0, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package

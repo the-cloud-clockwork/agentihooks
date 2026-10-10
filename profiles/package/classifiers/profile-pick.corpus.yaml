@@ -1,7 +1,7 @@
 version: 1
 notes: Seeded from the classifier decision log. Each case state was rebuilt from its ledger and matched to a state digest
-  the decision log recorded before 2026-10-10; its samples are the answers logged for that digest. Expected verdicts were
-  written by a separate reader agent that saw only each case state and its question, never the thresholds or the rule.
+  the decision log recorded before seeding; its samples are the answers logged for that digest. Expected verdicts were written
+  by a separate reader agent that saw only each case state and its question, never the thresholds or the rule.
 cases:
 - name: rig-grade-swarm-doctor-t9
   state:
