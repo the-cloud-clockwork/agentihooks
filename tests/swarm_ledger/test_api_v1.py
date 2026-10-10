@@ -616,7 +616,7 @@ def test_control_actions_validate_before_domain_execution(live):
 
 def test_item_revision_uses_canonical_utf8_content(live, monkeypatch):
     document = {"tasks": [{"title": "Café", "id": "t1"}], "_meta": {"rev": 1}}
-    monkeypatch.setattr(server.repository, "get_document", lambda slug, **kwargs: document)
+    monkeypatch.setattr(server.repository, "read", lambda slug, *keys: document)
     assert request(live, "GET", "tasks/t1") == (
         200,
         {
@@ -1425,6 +1425,7 @@ def test_mutations_enforce_the_ledger_talk_budget(live, monkeypatch):
     store.update(SLUG, gates={"talk": "enforce"})
     worker = "engineer@323133-0440"
     marks = progress.Progress(redis, SLUG)
+    marks.outcome(worker, "pushed", 1)
     for _ in range(talk.BUDGET):
         marks.talk(worker)
 
@@ -2229,8 +2230,10 @@ def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeyp
         must="",
         check="",
         judge="",
+        push="",
         kind="",
         artifact=False,
+        follow_up=False,
         profile="",
         rank="",
         difficulty=None,
@@ -2437,6 +2440,7 @@ def test_repository_optional_collections_have_empty_http_resources(live, monkeyp
 
     document = {"_meta": {}, "questions": [{"id": "q1"}]}
     monkeypatch.setattr(server.repository, "get_document", lambda slug: document)
+    monkeypatch.setattr(server.repository, "read", lambda slug, *keys: document)
     assert request(live, "GET", path) == (
         200,
         {"data": [], "revision": revision([]), "next_cursor": None},

@@ -15,6 +15,7 @@ class FakeLedger:
         }
         self.notes = []
         self.swarm_sized = []
+        self.ranks, self.comments = [], []
 
     def tasks(self, slug):
         return list(self.rows.values())
@@ -32,6 +33,26 @@ class FakeLedger:
             "followups": [],
         }
 
+    def hierarchy(self, slug):
+        tasks = self.tasks(slug)
+        return [
+            row
+            for phase in getattr(self, "phases", [])
+            for row in [
+                {"node": f"phases/{phase['id']}", "kind": "phase", "depth": 0, "state": "open"},
+                *(
+                    {
+                        "node": f"tasks/{t['id']}",
+                        "kind": "task",
+                        "depth": 1,
+                        "state": "out_of_scope" if t.get("out_of_scope") else t["state"],
+                    }
+                    for t in tasks
+                    if t.get("phase") == phase["id"]
+                ),
+            ]
+        ]
+
     def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
         assert slug == "sw"
         row = self.rows[task_id]
@@ -48,6 +69,13 @@ class FakeLedger:
 
     def binned(self, slug):
         return slug in getattr(self, "bin", set())
+
+    def rank_task(self, slug, task_id, rank, by, if_unranked=False):
+        self.ranks.append((task_id, rank, by))
+        return {"id": task_id, "rank": rank}
+
+    def comment(self, slug, task_id, text, by):
+        self.comments.append((task_id, text, by))
 
 
 class FakeRuntime:
@@ -1559,7 +1587,7 @@ def test_claims_follow_rank_then_the_small_fast_clear_task_then_critical_path_de
     ledger = FakeLedger(
         [
             {"id": "shallow", "phase": "p1"},
-            {"id": "deep", "phase": "p2"},
+            {"id": "deep", "rank": "normal", "phase": "p2"},
             {"id": "w1", "depends_on": ["deep"], "rank": "low", "phase": "p2"},
             {"id": "w2", "depends_on": ["w1"], "rank": "low", "phase": "p2"},
             {"id": "small", "difficulty": "S", "phase": "p3"},

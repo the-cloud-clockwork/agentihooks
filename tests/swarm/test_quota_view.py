@@ -49,6 +49,22 @@ def test_no_decision_says_capacity_was_not_observed():
     assert quota_view.lines({}, 0) == ["quota capacity has not been observed"]
 
 
+def test_the_host_room_follows_the_quota_head_line():
+    host = {"room": 3, "reason": "2100 MB available memory fits 3 at 700 MB each", "limit": "memory"}
+    lines = quota_view.lines({**DECISION, "accounts": [], "host": host}, 1_000_000)
+    assert lines[1:] == ["host room 3: 2100 MB available memory fits 3 at 700 MB each"]
+    assert len(quota_view.lines({**DECISION, "accounts": []}, 1_000_000)) == 1
+
+
+def test_an_unknown_host_room_reads_unknown():
+    host = {"room": None, "reason": "host unknown: the process files cannot be read, so spawns pass"}
+    assert (
+        quota_view.host_line(host)
+        == "host room unknown: host unknown: the process files cannot be read, so spawns pass"
+    )
+    assert quota_view.host_line({"room": 0, "reason": "full"}) == "host room 0: full"
+
+
 def test_routing_left_is_the_lower_window_or_none_when_either_is_unknown():
     assert quota_view.routing_left(row("a", five=30.0, week=70.0)) == 30.0
     assert quota_view.routing_left(row("a", five=90.0, week=12.0)) == 12.0

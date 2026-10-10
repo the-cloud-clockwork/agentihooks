@@ -167,7 +167,7 @@ def test_no_redis_refuses():
         RedisStore(None)
 
 
-def test_an_unreachable_redis_is_refused_with_a_clear_error():
+def refused_unreachable_redis():
     from scripts.swarm.store import connect
 
     with socket.socket() as closed:
@@ -175,16 +175,34 @@ def test_an_unreachable_redis_is_refused_with_a_clear_error():
         start = time.monotonic()
         with pytest.raises(SwarmError, match="refuses to run"):
             connect({"AGENTIHOOKS_SWARM_REDIS_URL": f"redis://127.0.0.1:{closed.getsockname()[1]}/0"})
-    assert time.monotonic() - start < 1
+    return time.monotonic() - start
 
 
-def test_the_suite_swarm_redis_is_refused_at_once():
+def refused_suite_redis():
     from scripts.swarm.store import connect
 
     start = time.monotonic()
     with pytest.raises(SwarmError, match="refuses to run"):
         connect()
-    assert time.monotonic() - start < 1
+    return time.monotonic() - start
+
+
+def test_an_unreachable_redis_is_refused_with_a_clear_error():
+    refused_unreachable_redis()
+
+
+@pytest.mark.wall_clock
+def test_an_unreachable_redis_is_refused_within_a_second():
+    assert refused_unreachable_redis() < 1
+
+
+def test_the_suite_swarm_redis_is_refused():
+    refused_suite_redis()
+
+
+@pytest.mark.wall_clock
+def test_the_suite_swarm_redis_is_refused_at_once():
+    assert refused_suite_redis() < 1
 
 
 def test_one_redis_for_every_caller_whatever_redis_url_says():
@@ -232,6 +250,13 @@ def test_scaling_settings_round_trip_and_an_old_config_reads_the_defaults(store)
         DEFAULT_MEMORY_PER_AGENT_MB,
     )
     assert DEFAULT_LOAD_LOW < DEFAULT_LOAD_HIGH
+
+
+def test_the_api_address_round_trips_and_an_old_config_reads_it_empty(store):
+    store.create(config(api_url="https://swarm.example.test:8443"))
+    assert store.config("smoke").api_url == "https://swarm.example.test:8443"
+    store.redis.hdel(store.key("smoke", "config"), "api_url")
+    assert store.config("smoke").api_url == ""
 
 
 @pytest.mark.parametrize(

@@ -141,6 +141,45 @@ form, one object per name:
 It prints the result JSON and exits 0; 2 for an input or request error; 1 when no
 backend answered.
 
+## Corpus and eval
+
+A corpus file `<name>.corpus.yaml` sits next to the definition file the loader selects
+(package, bundle or `$AGENTIHOOKS_HOME/classifiers`). Each case holds the state, the
+definition parameters, the expected verdict per question, a control flag and recorded
+answer samples in the decisions wire shape:
+
+```yaml
+version: 1
+cases:
+  - name: one_line_typo
+    state: {task: "Fix the spelling of 'recieve' in the README heading"}
+    params: {instructions: "Is this task a change to a single line of text?", "true": "One line", "false": "More"}
+    expected: {verdict: true}
+    control: false
+    samples:
+      - source: liquid-d1
+        latency_ms: 557
+        answers:
+          verdict: {type: noul, noul: 0.98}
+```
+
+A yes rule expects `true` or `false`, a choice rule an option key, and a score rule a
+`[min, max]` range. A choice or score rule with a threshold may expect `null`, meaning
+the answer falls below its confidence floor. A control case may expect only rejections:
+`false` or `null`. Definitions with a code rule have no corpus.
+
+```bash
+agentihooks classifier eval NAME             # replay the recorded samples
+agentihooks classifier eval NAME --live N    # ask every API model, haiku and luna N times per case
+```
+
+Replay calls no backend and runs in the CI tests. `--live` runs only on demand and is
+refused whenever `CI` is set. Both print wrong cases, held controls (controls whose every
+sample was rejected), and samples and latency per backend. They exit 1 on any wrong
+sample or when no backend answered, and 2 for a malformed definition or corpus. With
+`AGENTIHOOKS_METRICS_URL` and `AGENTIHOOKS_METRICS_USER` set, each sample is a row in
+`swarm.classifier_evals`.
+
 ## Auto swarm lanes
 
 When an eng or ci lane's effort is `auto`, the spawn runtime asks the classifier
@@ -148,17 +187,23 @@ how much reasoning the task needs, following harness routing, using its title,
 description, kind and territory size. The answer only raises effort above the
 launch default (`high` unless `AGENTIHOOKS_CLAUDE_EFFORT` or
 `AGENTIHOOKS_CODEX_EFFORT` names another): Claude launches high or max, Codex high
-or xhigh. A launch default outside those levels is kept without asking. The
+or xhigh. The question offers two levels, the launch default and the harness's top
+effort, because every answer at or below the default launches the default; a lower
+default such as `low` therefore launches low or the top, never a level between. A
+default at the top launches without asking, and a launch default outside those levels
+is kept without asking. The
 classifier never picks a model: a lane model of `auto` launches the harness
 default, opus for Claude and gpt-6.1-sol for Codex unless
 `AGENTIHOOKS_CLAUDE_MODEL` or `AGENTIHOOKS_CODEX_MODEL` names another. Explicit
 model and effort values remain unchanged, and master and plan seats never consult
 the classifier. A master always launches on the frontier model at high effort for
 its harness, whatever its lane or the environment names, and records `frontier`.
-Decisions use purpose `model-pick` in the classifier log.
+Each decision it asks for uses purpose `model-pick` in the classifier log.
 
-`AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE` defaults to 0.6. The effort answer's
-confidence must meet it; otherwise the lane keeps its launch defaults. An
+The `model-pick` definition's `confidence` threshold defaults to 0.6;
+`AGENTIHOOKS_CLASSIFIER_MODEL_PICK_CONFIDENCE` overrides it, and the older
+`AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE` still applies when that is unset. The
+effort answer's confidence must meet it; otherwise the lane keeps its launch defaults. An
 unavailable classifier also preserves those defaults.
 Agent records, swarm status and the page carry `model_source` and
 `model_confidence`; low confidence retains the attempted classifier's metadata,

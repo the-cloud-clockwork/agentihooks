@@ -66,13 +66,15 @@ def test_explicit_lane_never_calls_classifier(monkeypatch):
     [
         ("claude", -1, "low"),
         ("claude", 0.49, "low"),
-        ("claude", 0.51, "medium"),
-        ("claude", 1.6, "high"),
+        ("claude", 0.5, "low"),
+        ("claude", float("nan"), "low"),
+        ("claude", 0.51, "max"),
+        ("claude", 1.6, "max"),
         ("claude", 9, "max"),
         ("codex", 9, "xhigh"),
     ],
 )
-def test_effort_rounds_and_clamps_without_changing_fixed_model(monkeypatch, harness, score, expected):
+def test_effort_takes_the_top_above_one_half_without_changing_fixed_model(monkeypatch, harness, score, expected):
     monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: decision(score=score))
     floor = {f"AGENTIHOOKS_{harness.upper()}_EFFORT": "low"}
     picked = model_pick.pick(harness, {"model": "fixed", "effort": "auto"}, {}, floor)
@@ -83,10 +85,11 @@ def test_effort_rounds_and_clamps_without_changing_fixed_model(monkeypatch, harn
     "harness,score,expected",
     [
         ("claude", -1, "high"),
-        ("claude", 1.6, "high"),
+        ("claude", 0.4, "high"),
+        ("claude", 0.6, "max"),
         ("claude", 2.6, "max"),
         ("codex", 0, "high"),
-        ("codex", 3, "xhigh"),
+        ("codex", 1, "xhigh"),
     ],
 )
 def test_an_effort_answer_only_raises_the_default_effort(monkeypatch, harness, score, expected):
@@ -94,10 +97,12 @@ def test_an_effort_answer_only_raises_the_default_effort(monkeypatch, harness, s
     assert model_pick.pick(harness, {"model": "auto", "effort": "auto"}, {}, {}).effort == expected
 
 
-def test_a_configured_default_effort_is_the_floor(monkeypatch):
-    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: decision(score=2))
-    picked = model_pick.pick("claude", {"model": "auto", "effort": "auto"}, {}, {"AGENTIHOOKS_CLAUDE_EFFORT": "max"})
-    assert (picked.model, picked.effort) == ("auto", "max")
+@pytest.mark.parametrize(("harness", "top"), [("claude", "max"), ("codex", "xhigh")])
+def test_a_default_effort_at_the_top_launches_it_without_asking(monkeypatch, harness, top):
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("a top default asked the classifier"))
+    lane = {"model": "auto", "effort": "auto"}
+    picked = model_pick.pick(harness, lane, {}, {f"AGENTIHOOKS_{harness.upper()}_EFFORT": top})
+    assert (picked.model, picked.effort, picked.source, picked.confidence) == ("auto", top, "lane-default", None)
 
 
 def test_a_default_effort_the_classifier_cannot_rank_is_kept_without_asking(monkeypatch):
@@ -188,8 +193,11 @@ def test_only_an_auto_effort_asks_the_classifier(monkeypatch):
     assert (picked.model, picked.effort) == ("fixed", "max")
     assert set(calls[0][1]) == {"effort"}
     assert calls[0][0] == {"title": "", "description": "", "kind": "code", "territory_size": 0}
-    assert calls[0][1]["effort"].levels == ["low", "medium", "high", "max"]
-    assert calls[0][1]["effort"].instructions == "How much reasoning does this task need?"
+    assert calls[0][1]["effort"].levels == [
+        "high: the task names what to change and how to check it",
+        "max: an unknown cause to find across several components, or a redesign of a core concept",
+    ]
+    assert calls[0][1]["effort"].instructions.startswith("Which reasoning effort does a coding agent need")
     assert set(model_pick.pick("claude", {"model": "auto", "effort": "high"}, {}, {}).__dict__) == {
         "model",
         "effort",
@@ -211,6 +219,30 @@ def test_a_configured_confidence_floor_keeps_the_default_below_it(monkeypatch):
     )
     picked = model_pick.pick("claude", lane, {}, {"AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE": "0.7"})
     assert (picked.model, picked.effort, picked.confidence) == ("auto", "max", 0.7)
+
+
+def test_a_legacy_floor_outside_zero_to_one_is_refused_and_keeps_the_lane_default(monkeypatch, tmp_path):
+    from hooks import config
+
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("picked with a malformed floor"))
+    lane = {"model": "auto", "effort": "auto"}
+    for value in ("1.5", "nan"):
+        picked = model_pick.pick("claude", lane, {}, {"AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE": value})
+        assert picked == model_pick.ModelPick("auto", "auto")
+
+
+def test_a_refused_definition_keeps_the_lane_default(monkeypatch, tmp_path):
+    from hooks import config
+    from hooks.classifier import decision_log
+
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("picked without a definition"))
+    lane = {"model": "auto", "effort": "auto"}
+    picked = model_pick.pick("claude", lane, {}, {"AGENTIHOOKS_CLASSIFIER_MODEL_PICK_CONFIDENCE": "1.5"})
+    assert picked == model_pick.ModelPick("auto", "auto")
+    [entry] = decision_log.read("model-pick")
+    assert entry["failures"] == [{"model": "definition", "reason": "threshold confidence must be between zero and one"}]
 
 
 def test_caller_error_is_not_hidden(monkeypatch):

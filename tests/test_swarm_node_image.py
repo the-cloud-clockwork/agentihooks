@@ -44,8 +44,11 @@ def locked(tmp_path):
     return path, lock, payloads
 
 
-def test_lock_accepts_pinned_fixture(locked):
+@pytest.mark.parametrize("registry", ["", "public.ecr.aws/docker/library/"])
+def test_lock_accepts_pinned_fixture(locked, registry):
     path, lock, _ = locked
+    lock["base_image"] = registry + lock["base_image"]
+    path.write_text(json.dumps(lock))
     assert worker_image.load_lock(path, "amd64") == lock
 
 
@@ -111,6 +114,47 @@ def test_install_native_binaries_and_reject_wrong_version(locked, tmp_path, monk
     assert str(error.value) == "binary version mismatch: herdr"
 
 
+def test_install_reuses_only_verified_cached_downloads(locked, tmp_path, monkeypatch):
+    _, lock, payloads = locked
+    download = Mock(side_effect=lambda url, timeout: io.BytesIO(payloads[url]))
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", download)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    first = tmp_path / "first"
+    first.mkdir()
+    worker_image.install_tools(lock, first, cache)
+    assert download.call_count == 3
+    assert {p.name: p.read_bytes() for p in cache.iterdir()} == {
+        tool["sha256"]: payloads[tool["url"]] for tool in lock["tools"].values()
+    }
+    herdr = lock["tools"]["herdr"]
+    (cache / herdr["sha256"]).write_bytes(b"tampered")
+    download.reset_mock()
+    second = tmp_path / "second"
+    second.mkdir()
+    worker_image.install_tools(lock, second, cache)
+    assert download.call_args_list == [call(herdr["url"], timeout=120)]
+    assert (cache / herdr["sha256"]).read_bytes() == payloads[herdr["url"]]
+    assert {p.name: p.read_bytes() for p in second.iterdir()} == {p.name: p.read_bytes() for p in first.iterdir()}
+
+
+def test_install_never_caches_a_mismatched_download(locked, tmp_path, monkeypatch):
+    _, lock, payloads = locked
+    codex = lock["tools"]["codex"]
+    payloads[codex["url"]] = b"wrong binary"
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(payloads[url]))
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / codex["sha256"]).write_bytes(b"also wrong")
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    with pytest.raises(ValueError) as error:
+        worker_image.install_tools(lock, destination, cache)
+    assert str(error.value) == "artifact checksum mismatch: codex"
+    assert (cache / codex["sha256"]).read_bytes() == b"also wrong"
+    assert list(destination.iterdir()) == []
+
+
 def test_codex_archive_installs_only_named_binary(locked, tmp_path, monkeypatch):
     _, lock, payloads = locked
     url = lock["tools"]["codex"]["url"]
@@ -166,6 +210,18 @@ def test_committed_image_inputs_pin_base_and_keep_profiles_outside_home():
     assert "USER 10001:10001" in dockerfile
     assert "DISABLE_AUTOUPDATER=1" in dockerfile
     assert "--require-hashes" in dockerfile
+    assert "--require-hashes -d /downloads/pip -r /opt/swarm-node/requirements.lock" in dockerfile
+    assert (
+        'worker_image.py download --architecture "$TARGETARCH" --cache /downloads/tools\n\nFROM ${BASE_IMAGE} AS worker\n'
+        in dockerfile
+    )
+    assert 'worker_image.py install --architecture "$TARGETARCH" --cache /downloads/tools\nCOPY pyproject' in dockerfile
+    smoke = (inputs / "smoke.sh").read_text()
+    assert "docker build --no-cache-filter worker --platform" in smoke
+    assert "--mount=type=bind,from=downloads,source=/downloads,target=/downloads" in dockerfile
+    assert "--no-index --find-links /downloads/pip --require-hashes" in dockerfile
+    assert dockerfile.endswith('CMD ["python", "/opt/swarm-node/worker_image.py", "report"]\n')
+    assert dockerfile.count("FROM ") == 2
 
 
 @pytest.mark.parametrize(
@@ -298,24 +354,42 @@ def test_build_rejects_selected_base_that_differs_from_lock(locked, monkeypatch)
     assert str(error.value) == "base image differs from lock"
 
 
-@pytest.mark.parametrize("action", ["validate", "install", "manifest", "report", "shell-packages"])
+@pytest.mark.parametrize("action", ["validate", "download", "install", "manifest", "report", "shell-packages"])
 def test_build_command_routes_locked_actions(locked, monkeypatch, capsys, action):
     path, lock, _ = locked
     lock["shell_packages"].update(bash="5.2", curl="7.88")
     path.write_text(json.dumps(lock))
     monkeypatch.setattr(
         "sys.argv",
-        ["worker_image", action, "--lock", str(path), "--architecture", "amd64", "--source-revision", "tested"],
+        [
+            "worker_image",
+            action,
+            "--lock",
+            str(path),
+            "--architecture",
+            "amd64",
+            "--source-revision",
+            "tested",
+            "--cache",
+            "/var/cache/tools",
+        ],
     )
+    fetch = Mock()
     install = Mock()
     manifest = Mock()
     report = Mock(return_value={"zeta": 2, "alpha": 1})
+    monkeypatch.setattr(worker_image, "fetch", fetch)
     monkeypatch.setattr(worker_image, "install_tools", install)
     monkeypatch.setattr(worker_image, "write_manifest", manifest)
     monkeypatch.setattr(worker_image, "report", report)
     worker_image.main()
-    if action == "install":
-        install.assert_called_once_with(lock, Path("/usr/local/bin"))
+    if action == "download":
+        assert fetch.call_args_list == [
+            call(name, artifact, Path("/var/cache/tools")) for name, artifact in lock["tools"].items()
+        ]
+        install.assert_not_called()
+    elif action == "install":
+        install.assert_called_once_with(lock, Path("/usr/local/bin"), Path("/var/cache/tools"))
     elif action == "manifest":
         manifest.assert_called_once_with(path, "amd64", "tested", Path("/opt/agentihooks/templates"))
     elif action == "report":
@@ -324,6 +398,7 @@ def test_build_command_routes_locked_actions(locked, monkeypatch, capsys, action
     elif action == "shell-packages":
         assert capsys.readouterr().out == "git=1:2.39.5-0+deb12u3 bash=5.2 curl=7.88\n"
     else:
+        fetch.assert_not_called()
         install.assert_not_called()
         manifest.assert_not_called()
         report.assert_not_called()

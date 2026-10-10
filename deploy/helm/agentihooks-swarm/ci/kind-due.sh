@@ -11,10 +11,12 @@ paths=(
   .dockerignore
   pyproject.toml
   README.md
+  docker/swarm/requirements.lock
   hooks/
   scripts/
   profiles/
   media/
+  docs/swarm-v2/schemas/
 )
 changed="$(git diff --name-only "$base...$head" -- "${paths[@]}")"
 if [[ -n $changed ]]; then

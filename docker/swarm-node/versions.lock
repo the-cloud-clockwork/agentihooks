@@ -3,7 +3,7 @@
   "architectures": [
     "amd64"
   ],
-  "base_image": "python:3.12.12-slim-bookworm@sha256:2986c55feb36e6cae00fa1fefb454283e4b33f35e75ff8bdd123b134130be301",
+  "base_image": "public.ecr.aws/docker/library/python:3.12.12-slim-bookworm@sha256:2986c55feb36e6cae00fa1fefb454283e4b33f35e75ff8bdd123b134130be301",
   "python": "3.12.12",
   "debian_snapshot": "20260301T000000Z",
   "shell_packages": {
@@ -14,7 +14,8 @@
     "ripgrep": "13.0.0-4+b2",
     "curl": "7.88.1-10+deb12u14",
     "procps": "2:4.0.2-3",
-    "jq": "1.6-2.1+deb12u1"
+    "jq": "1.6-2.1+deb12u1",
+    "tini": "0.19.0-1+b3"
   },
   "requirements_sha256": "3276c12934510bd99b22f0f51c4f4094226e06fb431ecbf16bcc9dd5fdd9ea44",
   "tools": {

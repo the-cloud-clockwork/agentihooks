@@ -73,6 +73,35 @@ RUNNERS = [
     "prove",
     "python -c 'import pytest; pytest.main()'",
     "python -m scripts.ci_mutation",
+    "python3 -c \"import subprocess; subprocess.run(['pytest', '-q'])\"",
+    "python3 -c \"__import__('pytest').main()\"",
+    "python3 -c \"import runpy; runpy.run_module('pytest')\"",
+    "python3 - <<'EOF'\nimport os\nos.system('python -m pytest')\nEOF",
+    "node -e \"require('child_process').execSync('npx jest')\"",
+    "node -e \"require('node:test')\"",
+    "python3 -c \"getattr(__builtins__, '__import__')('pytest').main()\"",
+    "python3 -c \"vars(__builtins__)['__import__']('unittest').main()\"",
+    "node -e \"const M = require('mocha'); new M().run()\"",
+    "node -e \"require('jest-cli').run()\"",
+    "node -e \"require('vitest/node').startVitest('unit')\"",
+    "python3 -c \"import os; getattr(os, 'system')('python -m pytest')\"",
+    "python3 -c \"eval(\\\"__import__('os').system('python -m pytest')\\\")\"",
+    "node -e \"require('child_process')['exec']('npx jest')\"",
+    'node -e "new Function(\'require(\\"child_process\\").execSync(\\"npx jest\\")\')()"',
+    "python3 - $'\\' ' <<EOF\nimport pytest; pytest.main(); print(\"'\")  # \"\nEOF",
+    "# don't\npython3 - <<'EOF'\nimport pytest; pytest.main(); print(\"'\")  # \"\nEOF",
+    "cd tests # run them\npytest -q",
+    "echo a#b\npytest -q",
+    "echo \\ #x; pytest -q",
+    "node -e \"import('vitest/node').then(v => v.startVitest('unit'))\"",
+    "node --input-type=module -e \"import M from 'mocha'; await new M().run()\"",
+    "python3 -c \"import asyncio; asyncio.run(asyncio.create_subprocess_shell('python -m pytest'))\"",
+    "python3 -c \"eval('import pytest; pytest.main()')\"",
+    "python3 -c \"exec(compile('import pytest; pytest.main()', 'x', 'exec'))\"",
+    'node -e "eval(\'require(\\"mocha\\").run()\')"',
+    "node -e \"const m = 'mocha'; new (require(m))().run()\"",
+    "node -e \"require('vm').runInThisContext('require(\\\"jest\\\").run()')\"",
+    "node --input-type=module -e \"import { startVitest } from 'vitest/node'; await startVitest('unit')\"",
 ]
 
 WRAPPERS = [
@@ -161,6 +190,45 @@ def test_non_test_commands_pass(command, monkeypatch):
 
 
 @pytest.mark.parametrize(
+    "command",
+    [
+        "grep -n pytest .github/workflows/test.yml",
+        "grep -n '<<' .github/workflows/test.yml",
+        'grep -n "cat <<EOF" .github/workflows/test.yml',
+        "grep -c \\<\\< tests/test_a.py",
+        "awk '/<<EOF/,/^EOF/' .github/workflows/test.yml",
+        "sed -n '/pytest/,+3p' .github/workflows/test.yml",
+        "cat tests/context/test_local_test_guard.py",
+        "git show origin/dev:.github/workflows/test.yml | grep -n 'python -m pytest'",
+        "python3 -c \"import pathlib; p = pathlib.Path('t.yml'); p.write_text(p.read_text().replace('pytest -x', 'pytest -q'))\"",
+        "python3 - <<'EOF'\nfrom pathlib import Path\np = Path('.github/workflows/test.yml')\nold = '''run: python -m pytest -x'''\n"
+        'p.write_text(p.read_text().replace(old, "run: python -m pytest -q"))  # pytest\nEOF',
+        "node -e \"fs.writeFileSync('p.json', s.replace('jest', 'vitest')) // jest\"",
+        "python3 -c \"print('pytest')\"",
+        "python3 -c \"import pathlib; p = pathlib.Path('ecosystem.yml'); p.write_text(p.read_text().replace('pytest -x', 'pytest -q'))\"",
+        "python3 -c \"print(open('pytest.ini').read())\"",
+        "node -e \"console.log('jest')\"",
+        "echo ok #c; pytest -q",
+        " # ok; pytest -q",
+        "# ok; pytest -q\necho done",
+        "python3 -c'print(1)  # pytest'",
+        "cat 'a\\' <<EOF\npytest\nEOF",
+        "cat \\\\'x' <<EOF\npytest\nEOF",
+        "cat $'a' <<EOF\npytest\nEOF",
+        "python3 -c \"'" + "\\\\" * 80 + '"',
+        "echo \"don't\" # it's\ncat <<EOF\npytest\nEOF",
+        "grep -n '^<<<<<<< \\|^=======\\|^>>>>>>> ' .github/workflows/test.yml",
+        'git show HEAD:tests/test_a.py | grep -c "<<<<<<< HEAD"',
+    ],
+)
+def test_reads_and_quoted_runner_names_pass(command, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    check_local_tests({"tool_name": "Bash", "tool_input": {"command": command}})
+
+
+@pytest.mark.parametrize(
     "target,name,args",
     [
         ("claude", "Bash", {"command": "pytest"}),
@@ -179,6 +247,106 @@ def test_pre_tool_use_blocks_each_harness(target, name, args, monkeypatch):
     payload = normalize_payload({"tool_name": name, "tool_input": args, "session_id": "local-test-guard"})
     with pytest.raises(BlockAction, match="draft pull request"):
         hook_manager.on_pre_tool_use(payload)
+
+
+CLEARANCE_WRITER = (
+    "python3 - <<'PY'\n"
+    "import json\n"
+    "from pathlib import Path\n"
+    "from scripts.ci_mutation.clearances import write_clearance\n"
+    "root = Path('/home/iamroot/dev/worktrees/agentihooks/engineer-323133-0837')\n"
+    "records = json.loads(Path('/home/iamroot/scratchpad/agentihooks/rig-grade-swarm-mt3/"
+    "standards-equivalence-rulings.json').read_text())\n"
+    "for record in records:\n"
+    "    write_clearance(root, record['key'], {'reader': 'Standards reader', 'reason': record['reason']})\n"
+    "print(len(records))\n"
+    "PY"
+)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"cmd": CLEARANCE_WRITER},
+        {"command": CLEARANCE_WRITER},
+        {"cmd": "python3 -m scripts.ci_mutation.clearances"},
+    ],
+)
+def test_native_clearance_writer_passes(args, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+    from hooks.targets.normalizer import normalize_payload
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    check_local_tests(normalize_payload({"tool_name": "exec", "tool_input": args}))
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        CLEARANCE_WRITER.removesuffix("PY") + "from scripts.ci_mutation.runner import main\nmain()\nPY",
+        CLEARANCE_WRITER.removesuffix("PY") + "import scripts.ci_mutation.selection\nPY",
+        CLEARANCE_WRITER.removesuffix("PY") + "import subprocess\nsubprocess.run(['python', '-m', 'pytest'])\nPY",
+        CLEARANCE_WRITER.removesuffix("PY") + "import pytest\npytest.main()\nPY",
+        CLEARANCE_WRITER + "\npython -m scripts.ci_mutation",
+        "python3 -m scripts.ci_mutation",
+    ],
+)
+def test_clearance_writer_mixed_with_a_runner_is_blocked(command, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+    from hooks.targets.normalizer import normalize_payload
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    with pytest.raises(BlockAction, match="draft pull request"):
+        check_local_tests(normalize_payload({"tool_name": "exec", "tool_input": {"cmd": command}}))
+
+
+MUTATION_GATE_PATHS = [
+    "python scripts/ci_mutation/__main__.py --base origin/dev",
+    "python3 scripts/ci_mutation/__main__.py --base origin/dev",
+    "python ./scripts/ci_mutation/__main__.py --base origin/dev",
+    "python /home/u/dev/agentihooks/scripts/ci_mutation/__main__.py --base origin/dev",
+    "python scripts/ci_mutation --base origin/dev",
+    "python scripts/gates/../ci_mutation/__main__.py --base origin/dev",
+]
+
+
+@pytest.mark.parametrize("key", ["command", "cmd"])
+@pytest.mark.parametrize("command", MUTATION_GATE_PATHS)
+def test_mutation_gate_run_by_its_file_path_is_blocked(command, key, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    with pytest.raises(BlockAction, match="draft pull request"):
+        check_local_tests({"tool_name": "Bash", "tool_input": {key: command}})
+
+
+@pytest.mark.parametrize("command", MUTATION_GATE_PATHS)
+def test_native_codex_mutation_gate_file_path_is_blocked(command, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+    from hooks.targets.normalizer import normalize_payload
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    with pytest.raises(BlockAction, match="draft pull request"):
+        check_local_tests(normalize_payload({"tool_name": "exec", "tool_input": {"cmd": command}}))
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "python scripts/other.py",
+        "python3 scripts/ci_mutation_notes.py",
+        "python myscripts/ci_mutation/x.py",
+        "python3 scripts/ci_mutation/clearances.py",
+    ],
+)
+def test_unrelated_script_paths_pass(command, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    check_local_tests({"tool_name": "Bash", "tool_input": {"command": command}})
 
 
 def test_later_commands_and_substitutions_are_checked(monkeypatch):

@@ -16,7 +16,8 @@
     "Rollback lowers write_minor so producers write the previous minor while readers keep accepting both.",
     "Schemas fix wire layout; the field tables and examples in plan section 22 list field sets, and their authority fields travel inside the authority object.",
     "These contracts publish checkpoint_sequence and renewal_sequence; SV2-CKP-04 orders checkpoints when it promotes the latest pointer, and SV2-LDG-02 orders heartbeat renewals.",
-    "Admission fences each task across every contract: an older task_generation, or another execution at the accepted generation, is refused as stale_generation."
+    "Admission fences each task across every contract: an older task_generation, or another execution at the accepted generation, is refused as stale_generation.",
+    "SV2-LDG-02 types two optional heartbeat fields every 2.x minor already admitted as top-level extension: archive_watermark, the worker-reported durable archive watermark (default 0), and resources, resource telemetry that never schedules or extends a lease (default empty)."
   ],
   "contracts": {
     "launch": {

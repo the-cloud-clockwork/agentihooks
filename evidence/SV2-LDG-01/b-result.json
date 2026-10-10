@@ -1,0 +1,20 @@
+{
+  "package": "SV2-LDG-01",
+  "tested_commit": "42a01505c97dde74803aee8ccc17834a5c2be000",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37936842869",
+  "fixture_clock": "time.sleep patched and recorded; no wall clock waits",
+  "independent_runs": 2,
+  "cleanup": "pytest tmp_path homes and the module scoped ledger folder; no live resource mutations",
+  "mutation_scope": "Comments and joins on the fixture ledger only; the in-process server is the single writer of its SQLite file",
+  "case": "T-SV2-LDG-01-B",
+  "test": "test_a_missing_token_or_foreign_label_is_unauthenticated_and_never_uses_the_local_credential@fakeredis",
+  "job": 113842058392,
+  "output": "PASSED at 2026-10-09T13:31:44.7101510Z",
+  "missing_token": "unauthenticated",
+  "foreign_label": "unauthenticated",
+  "protected_state_changed": false,
+  "credential_disclosed": false,
+  "new_valid_request_posted": true,
+  "ledger_remote_auth_failures_total": 2
+}

@@ -1,0 +1,45 @@
+version: 1
+cases:
+  - name: page_layout_is_frontend
+    state:
+      task: Restyle the ledger page sidebar and fold the outline on narrow screens
+    params: &profile
+      instructions: Which specialist profile fits this task?
+      first: "frontend: page, CSS and browser work"
+      second: "backend: server, storage and command line work"
+    expected:
+      verdict: first
+    control: false
+    samples:
+      - source: liquid-d1
+        latency_ms: 273
+        answers:
+          verdict: {type: choice, choice: first, confidence: 0.998391827973103}
+      - source: jev-1.13
+        latency_ms: 287
+        answers:
+          verdict: {type: choice, choice: first, confidence: 1.0}
+      - source: pplx-decider-v1-27b
+        latency_ms: 309
+        answers:
+          verdict: {type: choice, choice: first, confidence: 0.9998661261976391}
+  - name: empty_task_control
+    state:
+      task: ""
+    params: *profile
+    expected:
+      verdict: null
+    control: true
+    samples:
+      - source: liquid-d1
+        latency_ms: 271
+        answers:
+          verdict: {type: choice, choice: first, confidence: 0.2153263396657834}
+      - source: jev-1.13
+        latency_ms: 288
+        answers:
+          verdict: {type: choice, choice: first, confidence: 0.56}
+      - source: pplx-decider-v1-27b
+        latency_ms: 311
+        answers:
+          verdict: {type: choice, choice: second, confidence: 0.0875902489523499}

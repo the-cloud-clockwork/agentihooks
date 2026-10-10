@@ -24,6 +24,7 @@ import ledger_alerts
 import ledger_answer
 import ledger_close
 import ledger_comments
+import ledger_events_ack
 import ledger_names
 import ledger_notifications
 import ledger_priorities
@@ -36,7 +37,7 @@ import ledger_title
 import ledger_verdict
 import orjson
 
-from scripts.swarm_ledger import ledger_groups, ledger_phases, ledger_rank
+from scripts.swarm_ledger import ledger_freezes, ledger_groups, ledger_phases, ledger_plans, ledger_rank
 
 LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,120}$")
@@ -66,6 +67,7 @@ LISTS = {
         "done",
         "out_of_scope",
     ),
+    "plans": ("out_of_scope",),
 }
 BOOL_FIELDS = ("done", "out_of_scope")
 STATE_EVENTS = {"done": ("checked", "unchecked"), "out_of_scope": ("out of scope", "back in scope")}
@@ -88,6 +90,7 @@ DEFAULT_CHAT_INSTRUCTIONS = (
     "or capital labels. Under 100 words unless the operator asks, in a separate message, to expand."
 )
 EVENTS_KEPT = 2000
+EVENTS_CEILING = 10000
 MAX_TEXT = 20000
 LOG_MAX_BYTES = 5 << 20
 LOCK = threading.Lock()
@@ -106,11 +109,14 @@ EXTENSION_OPS = {
         ledger_size,
         ledger_sources,
         ledger_phases,
+        ledger_plans,
         ledger_relay,
         ledger_answer,
         ledger_verdict,
         ledger_alerts,
         ledger_time_left,
+        ledger_freezes,
+        ledger_events_ack,
     )
     for name in module.OPS
 }
@@ -191,6 +197,9 @@ def normalize(doc):
     doc.setdefault("artifacts", [])
     doc.setdefault("artifact_trash", [])
     doc.setdefault("tasks", [])
+    doc.setdefault("plans", [])
+    doc.setdefault("slices", [])
+    doc.setdefault("freezes", [])
     for name in THREADS:
         for item in doc.get(name, []) if isinstance(doc.get(name), list) else []:
             if not isinstance(item, dict):
@@ -253,6 +262,7 @@ def validate(doc):
                 ledger_tasks.check_task(item)
 
     ledger_phases.validate(doc.get("phases", []))
+    ledger_plans.validate(doc)
 
 
 def thread_paths(doc):
@@ -359,7 +369,7 @@ def warnings(doc):
     if words > 200:
         found.append(f"overview has {words} words, limit 200")
     for phase in doc["phases"]:
-        if len(phase["description"].split()) > 100:
+        if "description" in phase and len(phase["description"].split()) > 100:
             found.append(f"phase {phase['id']} description has {len(phase['description'].split())} words, limit 100")
     return found
 
@@ -371,11 +381,12 @@ def size_warning(text):
 class Context:
     """One sync's clock, rev, stamps and event log."""
 
-    def __init__(self, meta, at):
+    def __init__(self, meta, at, slug=""):
         self.at, self.rev = at, meta["rev"] + 1
         self.stamps, self.events = meta["stamps"], []
         self.meta, self.dirty, self.refused, self.dropped = meta, False, [], []
         self.names = {}
+        self.slug = slug
 
     def author(self, name: str) -> str:
         if name not in self.names:
@@ -434,7 +445,7 @@ def apply_changes(doc, changes, ctx):
             set_state(item, parts[2], value)
             ctx.stamp(change["path"], "operator")
             ctx.record("operator", state_event(parts[2], value), "/".join(parts[:2]))
-            if parts[2] == "out_of_scope":
+            if parts[2] == "out_of_scope" and parts[0] != "plans":
                 note = "Out of scope." if value else "Back in scope."
                 item["comments"].append(
                     {"id": f"scope-{ctx.rev}-{parts[1]}", "by": "operator", "at": ctx.at, "text": note}
@@ -591,6 +602,7 @@ def check_op(op, task_ids=()):
         if op["op"] != "add" or not talks:
             raise ValueError("attachments ride only on an add to chat or a comment thread")
         ledger_media.check(op["attachments"])
+    ledger_comments.check_outcome(op)
     if "by" in op:
         talks = op["op"] != "clear" and (op["thread"] == "chat" or op["thread"].endswith("/comments"))
         if not talks or not AUTHOR_RE.match(str(op["by"])) or op["by"] == "operator":

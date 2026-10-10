@@ -17,6 +17,7 @@ from hooks.context.project_sessions import SessionGrant
 from scripts.swarm.store import SwarmError
 
 if TYPE_CHECKING:
+    from redis import Redis
     from redis.client import Pipeline
 
     from scripts.swarm.store import AgentRecord, RedisStore
@@ -246,15 +247,25 @@ class LaunchAuthority:
             slug, "dependency_unavailable", "launch registrations kept changing; registration was not committed"
         )
 
-    def admit(self, pipe: Pipeline, slug: str, claims: dict) -> Registration:
-        grants = self.store.key(slug, "launch-grants")
-        registrations = self.store.key(slug, "launch-registrations")
-        raw = pipe.hget(grants, claims["grant_id"])
+    def issued(self, reader: Redis | Pipeline, slug: str, claims: dict) -> dict:
+        raw = reader.hget(self.store.key(slug, "launch-grants"), claims["grant_id"])
         if not raw:
             self.refuse(slug, "unauthenticated", "launch grant was not issued by this controller")
         audit = json.loads(raw)
         if audit["state"] == "revoked":
             self.refuse(slug, "unauthenticated", "launch grant was revoked")
+        return audit
+
+    def verify(self, slug: str, token: str) -> Registration:
+        """Checks the grant without registering it and without judging currency; issue and register judge that."""
+        claims = self._verify(slug, token)
+        self.issued(self.redis, slug, claims)
+        return _registration(claims, "")
+
+    def admit(self, pipe: Pipeline, slug: str, claims: dict) -> Registration:
+        grants = self.store.key(slug, "launch-grants")
+        registrations = self.store.key(slug, "launch-registrations")
+        audit = self.issued(pipe, slug, claims)
         occupants = self.store.execution_occupants(slug).values()
         if (claims["execution_id"], claims["generation"]) not in {(a.execution_id, a.generation) for a in occupants}:
             self.refuse(slug, "stale_generation", "launch grant is for a superseded execution")
@@ -266,9 +277,7 @@ class LaunchAuthority:
             return registration
         if pipe.exists(self.store.key(slug, "launch-grants-disabled")):
             self.refuse(slug, "forbidden_scope", "launch grants are disabled for this swarm")
-        registration = Registration(
-            **{name: claims[name] for name in (*BOUND, *AUDIT)}, registered_at=_timestamp(int(self.clock()))
-        )
+        registration = _registration(claims, _timestamp(int(self.clock())))
         pipe.multi()
         pipe.hset(registrations, claims["execution_id"], json.dumps(asdict(registration)))
         pipe.hset(grants, claims["grant_id"], json.dumps({**audit, "state": "registered"}))
@@ -278,6 +287,64 @@ class LaunchAuthority:
     def registration(self, slug: str, execution_id: str) -> Registration | None:
         raw = self.redis.hget(self.store.key(slug, "launch-registrations"), execution_id)
         return Registration(**json.loads(raw)) if raw else None
+
+    def bound(self, slug: str, token: str) -> Registration:
+        claims = self._verify(slug, token)
+        registration = self.registration(slug, claims["execution_id"])
+        if registration is None or registration.grant_id != claims["grant_id"]:
+            self.refuse(slug, "unauthenticated", "launch grant is not registered")
+        if self._audit(self.redis, slug, registration.grant_id)["state"] == "revoked":
+            self.refuse(slug, "unauthenticated", "launch grant was revoked")
+        occupants = self.store.execution_occupants(slug).values()
+        if (claims["execution_id"], claims["generation"]) not in {(a.execution_id, a.generation) for a in occupants}:
+            self.refuse(slug, "stale_generation", "launch grant is for a superseded execution")
+        return registration
+
+    def renew(self, slug: str, token: str) -> tuple[str, str]:
+        registration = self.bound(slug, token)
+        now = int(self.clock())
+        claims = {name: getattr(registration, name) for name in (*BOUND, *AUDIT)}
+        claims.update(schema_version=SCHEMA_VERSION, issued_at=_timestamp(now), expires_at=_timestamp(now + self.ttl))
+
+        def extend(audit: dict) -> dict:
+            if audit["state"] == "revoked":
+                self.refuse(slug, "unauthenticated", "launch grant was revoked")
+            return {**audit, "expires_at": claims["expires_at"], "renewals": audit.get("renewals", 0) + 1}
+
+        self._rewrite(slug, registration.grant_id, extend, "the credential was not renewed")
+        return self.sign(claims), claims["expires_at"]
+
+    def revoke(self, slug: str, execution_id: str) -> bool:
+        registration = self.registration(slug, execution_id)
+        if registration is None:
+            return False
+
+        def revoked(audit: dict) -> dict | None:
+            return None if audit["state"] == "revoked" else {**audit, "state": "revoked"}
+
+        return self._rewrite(slug, registration.grant_id, revoked, "the registration was not revoked") is not None
+
+    def _audit(self, reader: Redis | Pipeline, slug: str, grant_id: str) -> dict:
+        return json.loads(reader.hget(self.store.key(slug, "launch-grants"), grant_id))
+
+    def _rewrite(self, slug: str, grant_id: str, change: Callable[[dict], dict | None], failure: str) -> dict | None:
+        from redis.exceptions import WatchError
+
+        key = self.store.key(slug, "launch-grants")
+        for _ in range(WRITE_ATTEMPTS):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(key)
+                    audit = change(self._audit(pipe, slug, grant_id))
+                    if audit is None:
+                        return None
+                    pipe.multi()
+                    pipe.hset(key, grant_id, json.dumps(audit))
+                    pipe.execute()
+                    return audit
+                except WatchError:
+                    continue
+        self.refuse(slug, "dependency_unavailable", f"launch grants kept changing; {failure}")
 
     def disable(self, slug: str) -> list[str]:
         from redis.exceptions import WatchError
@@ -301,6 +368,10 @@ class LaunchAuthority:
 
     def enable(self, slug: str) -> None:
         self.redis.delete(self.store.key(slug, "launch-grants-disabled"))
+
+
+def _registration(claims: dict, registered_at: str) -> Registration:
+    return Registration(**{name: claims[name] for name in (*BOUND, *AUDIT)}, registered_at=registered_at)
 
 
 def _identifier(value: object) -> bool:

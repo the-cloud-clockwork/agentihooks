@@ -1,0 +1,22 @@
+{
+  "package": "SV2-LDG-01",
+  "tested_commit": "42a01505c97dde74803aee8ccc17834a5c2be000",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37936842869",
+  "fixture_clock": "time.sleep patched and recorded; no wall clock waits",
+  "independent_runs": 2,
+  "cleanup": "pytest tmp_path homes and the module scoped ledger folder; no live resource mutations",
+  "mutation_scope": "Comments and joins on the fixture ledger only; the in-process server is the single writer of its SQLite file",
+  "case": "T-SV2-LDG-01-C",
+  "test": "test_a_transient_outage_retries_reads_without_starting_a_server@fakeredis",
+  "job": 113842058395,
+  "output": "PASSED at 2026-10-09T13:32:50.1886362Z",
+  "read_attempts": 3,
+  "write_attempts": 3,
+  "servers_started": 0,
+  "lost_response_applied": true,
+  "replayed_effects": 1,
+  "ledger_remote_auth_failures_total": 0,
+  "survived": "The write applied before the lost response; the SQLite ledger kept one comment through two replays of the same op id",
+  "lost": "The first write response and two read connections; reads recovered on the third attempt"
+}

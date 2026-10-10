@@ -56,8 +56,17 @@ def dispatch(handler: object, server: ModuleType) -> dict | None:
             return resources.swarm_read(server.swarm_status(slug), path, query)
         if WORKSPACE_RE.fullmatch(path):
             return workspace(server, slug, path.split("/")[1])
-        return resources.read(server.repository.get_document(slug), path, query)
+        return ledger_read(server, slug, path, query)
     return ledger_operation(handler, server, slug, path, principal)
+
+
+def ledger_read(server: ModuleType, slug: str, path: str, query: dict) -> dict:
+    parts = path.split("/")
+    if parts[0] == "hierarchy":
+        return resources.hierarchy_read(server.repository, slug, path, query)
+    if parts[0] in resources.COLLECTIONS and len(parts) in (2, 3):
+        return resources.read(server.repository.read(slug, "/".join(parts[:2])), path, query)
+    return resources.read(server.repository.get_document(slug), path, query)
 
 
 def agent_token(handler: object, server: ModuleType, slug: str) -> dict:

@@ -1,8 +1,12 @@
 import ast
 import re
 import subprocess
+from collections import Counter
 from functools import cache
 from pathlib import Path
+
+INTEGRATION = "refs/remotes/origin/dev"
+PREFLIGHT = "actions/workflows/mutation-preflight.yml/runs"
 
 
 def changed_lines(diff: str) -> set[int]:
@@ -14,7 +18,101 @@ def changed_lines(diff: str) -> set[int]:
     return lines
 
 
-def discover_changes(root: Path, base: str, head: str) -> dict[str, set[int]]:
+def own_bases(root: Path, base: str, head: str, graded=lambda sha: False) -> list[str]:
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], cwd=root).decode().strip()
+
+    tip = git("rev-parse", head)
+    given = git("merge-base", base, head)
+    bases = {given}
+    if git("for-each-ref", INTEGRATION):
+        bases.add(git("merge-base", INTEGRATION, head))
+    unmerged = [f"--no-merged={own}" for own in bases]
+    pushed = git("for-each-ref", "--merged", head, *unmerged, "--format=%(objectname)", "refs/remotes/origin").split()
+    bases.update(sha for sha in set(pushed) - {tip} if graded(sha))
+    return [given, *sorted(bases - {given})]
+
+
+def graded_green(sha: str) -> bool:
+    def api(path: str, *query: str) -> str:
+        command = ["gh", "api", "-X", "GET", f"repos/{{owner}}/{{repo}}/{path}", *query]
+        found = subprocess.run(command, capture_output=True, text=True)
+        return found.stdout if found.returncode == 0 else ""
+
+    runs = api(PREFLIGHT, "-f", f"head_sha={sha}", "-f", "event=push", "--jq", ".workflow_runs[].id")
+    green = '[.jobs[] | select(.name == "mutation" and .conclusion == "success")] | length'
+    return any(api(f"actions/runs/{run}/jobs", "--jq", green).strip() not in ("", "0") for run in runs.split())
+
+
+def discover_changes(root: Path, base: str | list[str], head: str) -> dict[str, set[int]]:
+    bases = own_bases(root, base, head) if isinstance(base, str) else base
+    given, *newer = [changes_since(root, own, head) for own in bases]
+    weak = [weakened_tests(root, own, head) for own in bases[1:]]
+    found = {}
+    for name, lines in given.items():
+        kept = [lines if tests else changes.get(name) for changes, tests in zip(newer, weak)]
+        if None not in kept:
+            found[name] = lines.intersection(*kept)
+    return found
+
+
+def is_test_file(path: str) -> bool:
+    return Path(path).name.startswith("test_") and Path(path).suffix == ".py"
+
+
+def weakened_tests(root: Path, base: str, head: str) -> set[str]:
+    command = ["git", "diff", "--name-only", "--no-renames", "-z", base, head, "--", "tests"]
+    names = subprocess.check_output(command, cwd=root).decode().split("\0")
+    return {name for name in names if name and not adds_only_tests(root, base, head, name)}
+
+
+def adds_only_tests(root: Path, base: str, head: str, name: str) -> bool:
+    if not is_test_file(name):
+        return False
+    old, new = (blob(root, rev, name) for rev in (base, head))
+    if new is None:
+        return False
+    previous = ast.parse(old or b"").body
+    nodes = ast.parse(new).body
+    before = Counter(ast.dump(node) for node in previous)
+    after = Counter(ast.dump(node) for node in nodes)
+    added = after - before
+    names = Counter(bound for node in nodes for bound in bindings(node))
+    extra = names - Counter(bound for node in previous for bound in bindings(node))
+    if before - after or any(names[bound] > 1 for bound in extra):
+        return False
+    return all(is_test(node) for node in nodes if added[ast.dump(node)])
+
+
+def blob(root: Path, rev: str, name: str) -> bytes | None:
+    shown = subprocess.run(["git", "show", f"{rev}:{name}"], cwd=root, capture_output=True)
+    return shown.stdout if shown.returncode == 0 else None
+
+
+def is_test(node: ast.stmt) -> bool:
+    if isinstance(node, ast.Import | ast.ImportFrom):
+        return True
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        return node.name.startswith("test_") and marked(node)
+    if isinstance(node, ast.ClassDef):
+        methods = all(isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef) and is_test(item) for item in node.body)
+        return node.name.startswith("Test") and marked(node) and methods
+    return False
+
+
+def marked(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) -> bool:
+    return all(ast.unparse(mark).startswith("pytest.mark.") for mark in node.decorator_list)
+
+
+def bindings(node: ast.stmt) -> list[str]:
+    if isinstance(node, ast.Import | ast.ImportFrom):
+        return [alias.asname or alias.name.split(".")[0] for alias in node.names]
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        return [node.name]
+    return []
+
+
+def changes_since(root: Path, base: str, head: str) -> dict[str, set[int]]:
     comparison = f"{base}...{head}"
     names = (
         subprocess.check_output(

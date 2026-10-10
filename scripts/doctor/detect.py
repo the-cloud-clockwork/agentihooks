@@ -5,7 +5,19 @@ import re
 from dataclasses import asdict
 from functools import cache
 
-from scripts.doctor import ci, ci_read, handoffs, health, inbox, read, spawn_read, spawns, traces, traces_read
+from scripts.doctor import (
+    ci,
+    ci_read,
+    handoffs,
+    health,
+    inbox,
+    master_launches,
+    read,
+    spawn_read,
+    spawns,
+    traces,
+    traces_read,
+)
 from scripts.inbox import wake
 from scripts.inbox.store import InboxStore
 from scripts.swarm import status, timing
@@ -30,7 +42,7 @@ def _inbox(store, mail, slug, now_ms, env, items):
     return inbox.findings(items, now_ms, wake.window_ms(env), read.inbox_receivers(store, mail, slug, items))
 
 
-def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME):
+def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetry=True):
     env = os.environ if environ is None else environ
     mail = InboxStore(store.redis)
 
@@ -38,13 +50,14 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME):
     def items():
         return read.inbox_items(mail, slug)
 
-    return {
+    found = {
         "health": lambda: health.findings(
             read.health_records(store.redis, slug), now_ms, reported=reported(store, ledger, slug)
         ),
         "inbox": lambda: _inbox(store, mail, slug, now_ms, env, items()),
         "handoff": lambda: handoffs.findings(read.handoffs(store, mail, home, slug, items())),
         "spawn": lambda: spawns.findings(spawn_read.records(store, slug, now_ms)),
+        "master launch": lambda: master_launches.findings(spawn_read.master_records(store, slug)),
         "startup": lambda: spawns.silent_starts(
             [asdict(a) for a in store.agents(slug)], activity.first_events(slug), now_ms
         ),
@@ -60,6 +73,7 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME):
             traces.Limits.from_env(env),
         ),
     }
+    return found if telemetry else {name: read for name, read in found.items() if name != "trace"}
 
 
 def collect(found_by):

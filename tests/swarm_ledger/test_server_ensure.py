@@ -97,6 +97,21 @@ def isolated_server(tmp_path, monkeypatch):
     return tmp_path
 
 
+def test_occupied_unresponsive_port_gives_up_without_starting(isolated_server, monkeypatch):
+    monkeypatch.setattr(server, "SERVER_WAIT", 0.15)
+    with socket.socket() as held:
+        held.bind(("127.0.0.1", 0))
+        monkeypatch.setattr(server, "PORT", held.getsockname()[1])
+        monkeypatch.setattr(server, "BASE", f"http://127.0.0.1:{server.PORT}")
+        with (
+            patch.object(server.subprocess, "Popen") as start,
+            pytest.raises(SystemExit, match="did not answer"),
+        ):
+            server.ensure()
+        start.assert_not_called()
+
+
+@pytest.mark.wall_clock
 def test_occupied_unresponsive_port_times_out_without_starting(isolated_server, monkeypatch):
     monkeypatch.setattr(server, "SERVER_WAIT", 0.15)
     with socket.socket() as held:
@@ -152,6 +167,12 @@ def test_a_listening_silent_port_waits_out_the_deadline_without_starting(isolate
     "pid", [None, "invalid", "999999999", str(os.getpid())], ids=["missing", "invalid", "stale", "unrelated"]
 )
 def test_free_port_starts_once_and_waits_for_readiness(isolated_server, monkeypatch, pid, capsys):
+    now = 100.0
+
+    def advance(seconds):
+        nonlocal now
+        now += seconds
+
     with socket.socket() as spare:
         spare.bind(("127.0.0.1", 0))
         port = spare.getsockname()[1]
@@ -159,10 +180,19 @@ def test_free_port_starts_once_and_waits_for_readiness(isolated_server, monkeypa
     if pid is not None:
         server.PIDFILE.write_text(pid)
     with (
-        patch.object(server.ledger_link, "serving", side_effect=[None, None, str(isolated_server)]),
+        patch.object(server.ledger_link, "serving", side_effect=[None, None, str(isolated_server)]) as serving,
         patch.object(server.subprocess, "Popen") as start,
+        patch.object(server.time, "monotonic", side_effect=lambda: now),
+        patch.object(server.time, "sleep", side_effect=advance) as sleep,
     ):
         server.ensure()
+    assert sleep.call_args_list == [call(0.1), call(0.1)]
+    assert now == pytest.approx(100.2)
+    assert serving.call_args_list == [
+        call(url=server.BASE),
+        call(timeout=0.5, url=server.BASE),
+        call(timeout=pytest.approx(0.4), url=server.BASE),
+    ]
     start.assert_called_once()
     assert start.call_args.args[0][-1] == "--serve"
     options = start.call_args.kwargs

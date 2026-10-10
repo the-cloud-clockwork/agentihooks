@@ -1,4 +1,5 @@
 import os
+import posixpath
 import re
 from pathlib import Path
 
@@ -63,8 +64,20 @@ _BUILD_TOOLS = frozenset(
 )
 _TEST_TASK = re.compile(r"^(?:test|tests|coverage|mutation)(?:$|[:_.-])|^.*:test$")
 _PYTHON = re.compile(r"^(?:python[\d.]*|pypy[\d.]*)$")
-_PYTHON_TEST = re.compile(r"\b(?:pytest|unittest|tox|nox|mutmut|mutatest|mutpy)\b|scripts\.ci_mutation\b")
-_NODE_TEST = re.compile(r"\b(?:jest|vitest|mocha)\b|require\(['\"]node:test['\"]\)")
+_PYTHON_TEST = re.compile(
+    r"\b(?:pytest|unittest|tox|nox|mutmut|mutatest|mutpy)\b|scripts\.ci_mutation\b(?!\.clearances\b)"
+)
+_MUTATION_PATH = re.compile(r"(?:^|/)scripts/ci_mutation(?!/clearances\.py$)(?:/|$)")
+_NODE_TEST = re.compile(r"\b(?:jest|vitest|mocha)\b|node:test")
+_LITERAL = (
+    r"(?P<module>\b(?:require|import)\s*\(\s*|\b(?:from|import)\s*)?"
+    r"(?P<q>\"{3}|'{3}|[\"'`])(?:\\.|(?!(?P=q))[^\\])*(?P=q)"
+)
+_LAUNCH = re.compile(
+    r"\b(?:\w+_)?(?:subprocess|system|popen|spawn|exec)\w*"
+    r"|\b(?:eval|compile|Function|vm|run_module|run_path|__import__|import_module|child_process)\b"
+    r"|\brequire\s*\(\s*[A-Za-z_$]"
+)
 _DENY = (
     "BLOCKED: Local test and mutation runs are disabled. Push and open a draft pull request so CI runs the tests. "
     "Set AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN=true to opt in to local runs."
@@ -75,17 +88,28 @@ def local_tests_allowed() -> bool:
     return os.getenv(ALLOW_LOCAL_TEST_RUN_ENV, _FALSE).lower() == _TRUE
 
 
+def _code_runs_tests(source: str, runners: re.Pattern, comment: str) -> bool:
+    code = re.sub(
+        f"(?s){_LITERAL}|{re.escape(comment)}[^\\n]*",
+        lambda match: match[0] if match["module"] else match["q"],
+        source,
+    )
+    return bool(runners.search(source if _LAUNCH.search(source) else code))
+
+
 def _python_test(args: list[str]) -> bool:
     for index, arg in enumerate(args):
         if arg in {"-m", "-c"}:
-            if index + 1 < len(args) and _PYTHON_TEST.search(args[index + 1]):
+            if index + 1 < len(args) and _code_runs_tests(args[index + 1], _PYTHON_TEST, "#"):
                 return True
-        elif arg.startswith(("-m", "-c")) and _PYTHON_TEST.search(arg[2:]):
+        elif arg.startswith(("-m", "-c")) and _code_runs_tests(arg[2:], _PYTHON_TEST, "#"):
             return True
     if any(arg.startswith(("-m", "-c")) for arg in args):
         return False
     return any(
-        Path(arg).name in _RUNNERS or (Path(arg).name.startswith(("test_", "test-")) and arg.endswith(".py"))
+        Path(arg).name in _RUNNERS
+        or (Path(arg).name.startswith(("test_", "test-")) and arg.endswith(".py"))
+        or _MUTATION_PATH.search(posixpath.normpath(arg))
         for arg in args
     )
 
@@ -99,7 +123,7 @@ def _test_command(tokens: list[str]) -> bool:
         return _python_test(args)
     if name == "node":
         return any(arg == "--test" or arg.startswith("--test=") for arg in args) or (
-            any(arg in {"-e", "--eval"} for arg in args) and bool(_NODE_TEST.search(" ".join(args)))
+            any(arg in {"-e", "--eval"} for arg in args) and _code_runs_tests(" ".join(args), _NODE_TEST, "//")
         )
     if name == "ruby":
         return "rspec" in args

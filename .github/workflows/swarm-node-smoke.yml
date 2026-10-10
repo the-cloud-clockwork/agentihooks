@@ -22,3 +22,16 @@ jobs:
         with:
           name: swarm-worker-image-evidence
           path: ~/scratchpad/worker-image-evidence
+
+  worker-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove worker probes against isolated containers
+        run: bash tests/integration/swarm_node/run_health_proof.sh "$HOME/scratchpad/worker-health-evidence"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: swarm-worker-health-evidence
+          path: ~/scratchpad/worker-health-evidence

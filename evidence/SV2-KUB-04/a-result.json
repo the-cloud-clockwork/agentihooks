@@ -1,0 +1,188 @@
+{
+  "case": "T-SV2-KUB-04-A",
+  "evidence_class": "mocked: fakeredis execution registry, heartbeat archive watermarks, attempt records and cleanup journal, a fake lease clock, an in process API server that enforces delete uid preconditions and can drop a delete response, and in process attach and secret registries; no Kubernetes API server was called",
+  "input_sha256": {
+    "cleanup-attempts.json": "39a4e5c1dc686133750138a012ddc2d2764666e2562588959752e670ab12d4ce",
+    "pod-launch.json": "a3dd9f7083b76f91ac724de6fc3d05d0227424feda9caac8d1c8f50eeede87ae",
+    "pod-policy.json": "fe59695070f986ee8928dcfa9abff5d0a07372f6af03611733a4cdad34772acb"
+  },
+  "observed": {
+    "fixture": {
+      "attached": [
+        "<replacement>"
+      ],
+      "deleted_objects_scoped": true,
+      "deletes": [
+        [
+          "pods",
+          "swarm-<old>",
+          "uid-1"
+        ],
+        [
+          "services",
+          "swarm-attach-<old>",
+          "uid-2"
+        ]
+      ],
+      "execution_cleanup_backlog": {
+        "after_cleanup": {
+          "ready": 0,
+          "waiting_archive": 0,
+          "waiting_outcome": 0
+        },
+        "archive_acknowledged": {
+          "ready": 1,
+          "waiting_archive": 0,
+          "waiting_outcome": 0
+        },
+        "archive_pending": {
+          "ready": 0,
+          "waiting_archive": 1,
+          "waiting_outcome": 0
+        }
+      },
+      "execution_records_kept": true,
+      "journal_cleared": true,
+      "pods_left": [
+        "swarm-<replacement>"
+      ],
+      "releases": [
+        "attach",
+        "secrets"
+      ],
+      "removed": {
+        "pods": [
+          {
+            "name": "swarm-<old>",
+            "outcome": "deleted",
+            "uid": "uid-1"
+          }
+        ],
+        "services": [
+          {
+            "name": "swarm-attach-<old>",
+            "outcome": "deleted",
+            "uid": "uid-2"
+          }
+        ]
+      },
+      "replacement_pod_unchanged": true,
+      "retained": {
+        "archive_watermark": 4096,
+        "execution_generation": 1,
+        "execution_seat": "eng-1@fixture",
+        "final": {
+          "execution_id": "<old>",
+          "generation": 1,
+          "outcome_ref": "ledger:tasks/fixture-task/outcomes/1",
+          "state": "completed",
+          "transcript_end": 4096
+        },
+        "removed_matches": true
+      },
+      "secret_refs": [
+        "<replacement>"
+      ],
+      "services_left": [
+        "swarm-attach-<replacement>"
+      ],
+      "states": [
+        "not_final",
+        "waiting_outcome",
+        "waiting_archive",
+        "done",
+        "done"
+      ],
+      "untouched_while_waiting": true
+    },
+    "second_fixture": {
+      "attached": [
+        "<replacement>"
+      ],
+      "deleted_objects_scoped": true,
+      "deletes": [
+        [
+          "pods",
+          "swarm-<old>",
+          "uid-1"
+        ],
+        [
+          "services",
+          "swarm-attach-<old>",
+          "uid-2"
+        ]
+      ],
+      "execution_cleanup_backlog": {
+        "after_cleanup": {
+          "ready": 0,
+          "waiting_archive": 0,
+          "waiting_outcome": 0
+        },
+        "archive_acknowledged": {
+          "ready": 1,
+          "waiting_archive": 0,
+          "waiting_outcome": 0
+        },
+        "archive_pending": {
+          "ready": 0,
+          "waiting_archive": 1,
+          "waiting_outcome": 0
+        }
+      },
+      "execution_records_kept": true,
+      "journal_cleared": true,
+      "pods_left": [
+        "swarm-<replacement>"
+      ],
+      "releases": [
+        "attach",
+        "secrets"
+      ],
+      "removed": {
+        "pods": [
+          {
+            "name": "swarm-<old>",
+            "outcome": "deleted",
+            "uid": "uid-1"
+          }
+        ],
+        "services": [
+          {
+            "name": "swarm-attach-<old>",
+            "outcome": "deleted",
+            "uid": "uid-2"
+          }
+        ]
+      },
+      "replacement_pod_unchanged": true,
+      "retained": {
+        "archive_watermark": 9000,
+        "execution_generation": 1,
+        "execution_seat": "eng-1@fixture",
+        "final": {
+          "execution_id": "<old>",
+          "generation": 1,
+          "outcome_ref": "ledger:tasks/fixture-task/outcomes/2",
+          "state": "cancelled",
+          "transcript_end": 9000
+        },
+        "removed_matches": true
+      },
+      "secret_refs": [
+        "<replacement>"
+      ],
+      "services_left": [
+        "swarm-attach-<replacement>"
+      ],
+      "states": [
+        "not_final",
+        "waiting_outcome",
+        "waiting_archive",
+        "done",
+        "done"
+      ],
+      "untouched_while_waiting": true
+    }
+  },
+  "state": "passed"
+}

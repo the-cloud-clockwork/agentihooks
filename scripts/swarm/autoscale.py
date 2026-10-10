@@ -1,4 +1,4 @@
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 
 class PendingRaise(TypedDict):
@@ -10,16 +10,30 @@ class Decision(TypedDict):
     ceilings: dict[str, int]
     pending_raise: PendingRaise
     reason: str
+    shift: NotRequired[int]
+
+
+def _shifted(ceilings: dict[str, int], live: dict[str, int], demand: dict[str, int], shift: int) -> tuple[dict, str]:
+    giver, taker = ("eng", "ci") if shift > 0 else ("ci", "eng")
+    floor = max(live.get(giver, 0), 1 if demand.get(giver) else 0)
+    moved = min(abs(shift), max(0, ceilings[giver] - floor))
+    ceilings[giver] -= moved
+    ceilings[taker] += moved
+    return {
+        "shift": moved if giver == "eng" else -moved
+    }, f"; lane shift {moved} from {giver} to {taker}" if moved else ""
 
 
 def calculate(
     live: dict[str, int],
     free_seats: dict[str, int],
-    host_room: int,
+    host_room: int | None,
     demand: dict[str, int],
     previous: Decision | None = None,
+    shift: int = 0,
 ) -> Decision:
-    target = min(50, sum(live.values()) + min(sum(free_seats.values()), host_room))
+    seats = sum(free_seats.values())
+    target = min(50, sum(live.values()) + (seats if host_room is None else min(seats, host_room)))
     current = sum(previous["ceilings"].values()) if previous is not None else sum(live.values())
     pending: PendingRaise = {"target": None, "ticks": 0}
     total = target
@@ -40,16 +54,21 @@ def calculate(
         ceilings[lane] += added
         room -= added
     ceilings["eng"] += room
+    extra, shifted = _shifted(ceilings, live, demand, shift) if shift else ({}, "")
     harnesses = ", ".join(f"{harness} {seats}" for harness, seats in sorted(free_seats.items()))
-    reason = f"Quota seats {sum(free_seats.values())} ({harnesses}); host room {host_room}; ceiling {total} of {target}"
+    host_text = "unknown" if host_room is None else host_room
+    reason = f"Quota seats {seats} ({harnesses}); host room {host_text}; ceiling {total} of {target}"
     if target > total:
         reason += (
             f"; raise held at tick {pending['ticks']} of 3"
             if pending["ticks"] < 3
             else "; raise held by the two seat per tick limit"
         )
-    return {
+    reason += shifted
+    decision: Decision = {
         "ceilings": ceilings,
         "pending_raise": pending,
         "reason": reason + ".",
+        **extra,
     }
+    return decision

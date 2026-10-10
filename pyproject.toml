@@ -49,10 +49,12 @@ dependencies = [
     # The ledger repository writes a multi-megabyte indented document on every sync;
     # the stdlib encoder takes the pure Python path whenever indent is set.
     "orjson>=3.10",
+    # Operator architecture approvals are Ed25519 signed (scripts/swarm_v2/architecture.py).
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]
-ledger = ["redis>=5.0.0", "jsonschema>=4.23", "orjson>=3.10", "pyyaml>=6.0", "tomlkit>=0.12"]
+ledger = ["redis>=5.0.0", "jsonschema>=4.23", "orjson>=3.10", "pyyaml>=6.0", "tomlkit>=0.12", "requests>=2.31.0"]
 postgres = ["psycopg2-binary>=2.9.9"]
 otel = [
     "opentelemetry-api>=1.20.0",
@@ -122,7 +124,10 @@ Issues = "https://github.com/The-Cloud-Clockwork/agentihooks/issues"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["unit: Unit tests"]
+markers = [
+    "unit: Unit tests",
+    "wall_clock: asserts an elapsed real time bound; the mutation stats pass deselects it",
+]
 asyncio_mode = "auto"
 
 [tool.mutmut]

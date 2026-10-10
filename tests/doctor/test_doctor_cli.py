@@ -7,7 +7,7 @@ import pytest
 from scripts.doctor import cli as doctor
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli as swarm_cli
-from scripts.swarm import prompt
+from scripts.swarm import controller, prompt
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.status import status_report
@@ -40,8 +40,17 @@ class FileLedger(LedgerClient):
         return state
 
     def _resource(self, slug, path, collection=False):
-        from scripts.swarm_ledger.api.resources import value
+        from scripts.swarm_ledger.api.resources import hierarchy_read, value
+        from scripts.swarm_ledger.repository import repository
 
+        if path.startswith("hierarchy"):
+            rows, query = [], {"limit": 100}
+            while True:
+                reply = hierarchy_read(repository.bound(core), slug, path, query)
+                rows += reply["data"]
+                if reply["next_cursor"] is None:
+                    return rows
+                query["cursor"] = reply["next_cursor"]
         return value(self._call(slug), path)
 
 
@@ -433,6 +442,56 @@ def test_the_swarm_tick_closes_a_quiet_doctor_with_its_note(env, monkeypatch):
     assert not any("no new finding" in action for action in tick(store, rt))
 
 
+READERS = doctor.detect.readers
+UNTRACED = Finding(
+    "untraced session", "watch-eng-2", "working session with no Langfuse trace", ("agent watch-eng-2",), "a trace", 1
+)
+
+
+def reading_traces(monkeypatch):
+    reads, passes = [], []
+
+    def readers(store, ledger, slug, now_ms, **kwargs):
+        found = READERS(store, ledger, slug, now_ms, **kwargs)
+        passes.append(set(found) if isinstance(now_ms, int) else now_ms)
+        return {"health": lambda: [STALE], **{name: found[name] for name in ("trace",) if name in found}}
+
+    def client(environ):
+        reads.append(environ)
+        return lambda path, params: {}
+
+    monkeypatch.setattr(doctor.detect, "readers", readers)
+    monkeypatch.setattr(doctor.detect.traces_read, "client", client)
+    monkeypatch.setattr(doctor.detect.traces_read, "record", lambda *args: {})
+    monkeypatch.setattr(doctor.detect.traces, "findings", lambda data, limits: [UNTRACED])
+    return reads, passes
+
+
+def sent(store):
+    return "\n".join(item.text for item in InboxStore(store.redis).inbox(f"master@{DOCTOR}"))
+
+
+@pytest.mark.parametrize(
+    "scheduled",
+    [
+        lambda store, rt: swarm_cli._tick_one(store, DOCTOR),
+        lambda store, rt: controller.run_once(store, FileLedger(), rt, FakeHerdr({})),
+    ],
+    ids=["timer", "controller"],
+)
+def test_a_doctor_start_leaves_the_first_telemetry_pass_to_the_scheduled_tick(env, monkeypatch, scheduled):
+    store, rt, _ = env
+    reads, passes = reading_traces(monkeypatch)
+    every = {"health", "inbox", "handoff", "spawn", "master launch", "startup", "ci", "trace"}
+    assert doctor.main([WATCHED, "start"]) == 0
+    assert reads == [] and passes == [every - {"trace"}]
+    assert STALE.id in sent(store) and UNTRACED.id not in sent(store)
+    doctor.loop.reset(store, DOCTOR)
+    scheduled(store, rt)
+    assert len(reads) == 1 and passes[1:] == [every]
+    assert UNTRACED.id in sent(store)
+
+
 def test_intervene_refuses_a_forbidden_action_and_logs_nothing(env, capsys):
     doctor.main([WATCHED, "start"])
     before = len(state(WATCHED)["chat"])
@@ -516,7 +575,7 @@ def test_failed_spawn_measure_uses_only_the_spawn_reader(env, monkeypatch, capsy
         (
             "health/f1",
             ["--since", "2026-10-07T09:00Z", "--until", "2026-10-07T12:00Z"],
-            "journal bounds are only supported for failed-spawn findings",
+            "journal bounds are only supported for failed-spawn findings and master-launch-missed",
         ),
     ],
 )
@@ -528,6 +587,88 @@ def test_failed_spawn_measure_refuses_invalid_bounds(env, monkeypatch, capsys, f
     output = capsys.readouterr()
     assert output.err == f"doctor: {error}\n"
     assert output.out == ""
+
+
+@pytest.mark.parametrize("detectors,count", [("before", 12), ("after", 0)])
+def test_master_launch_missed_measure_replays_the_recorded_outage(env, monkeypatch, capsys, detectors, count):
+    from scripts.doctor import loop, master_launches
+    from tests.doctor.recorded import load
+
+    store, _, _ = env
+    assert doctor.main([WATCHED, "start"]) == 0
+    capsys.readouterr()
+    record = {**load("master_outage"), "journal_error": ""}
+    for finding_id, stored in record["verdicts"].items():
+        store.redis.hset(loop.verdicts(store, DOCTOR).key, finding_id, json.dumps(stored))
+    monkeypatch.setattr(swarm_cli, "now_ms", lambda: 1791588800000)
+    seen = []
+
+    def read(actual_store, slug, **kwargs):
+        seen.append((actual_store, slug, kwargs))
+        return record
+
+    monkeypatch.setattr(doctor.spawn_read, "master_records", read)
+    passed = []
+
+    def passes(slug, **kwargs):
+        passed.append((slug, kwargs))
+        return tuple(record["passes"])
+
+    monkeypatch.setattr(doctor.spawn_read, "doctor_passes", passes)
+    if detectors == "before":
+        monkeypatch.setattr(master_launches, "DETECTORS", (master_launches.journal_hour,))
+    since, until = "2026-10-09T19:50Z", "2026-10-09T20:35Z"
+    assert doctor.main([WATCHED, "measure", "master-launch-missed", "--since", since, "--until", until]) == 0
+    assert capsys.readouterr().out == f"master-launch-missed {count}\n"
+    start = doctor._at_ms(since) - master_launches.JOURNAL_MS
+    end = doctor._at_ms(until) + master_launches.MATCH_MS
+    journal = {"since": f"@{start / 1000:.3f}", "until": f"@{end / 1000:.3f}"}
+    assert seen == [(store, WATCHED, journal)]
+    assert passed == [(DOCTOR, journal)]
+
+
+def test_master_launch_missed_measure_refuses_an_unreadable_journal(env, monkeypatch, capsys):
+    assert doctor.main([WATCHED, "start"]) == 0
+    capsys.readouterr()
+    record = {"slug": WATCHED, "transfers": [], "restored": [], "agents": [], "journal": None, "journal_error": "gone"}
+    monkeypatch.setattr(doctor.spawn_read, "master_records", lambda store, slug, **kwargs: record)
+    monkeypatch.setattr(doctor.spawn_read, "doctor_passes", lambda slug, **kwargs: ())
+    assert doctor.main([WATCHED, "measure", "master-launch-missed"]) == 1
+    output = capsys.readouterr()
+    assert output.err == "doctor: master-launch-missed unavailable: gone\n"
+    assert output.out == ""
+
+
+def test_master_launch_missed_measure_refuses_times_without_a_zone(env, monkeypatch, capsys):
+    assert doctor.main([WATCHED, "start"]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(swarm_cli, "now_ms", lambda: 1791588800000)
+    flags = ["--since", "2026-10-09T21:50", "--until", "2026-10-09T22:35"]
+    assert doctor.main([WATCHED, "measure", "master-launch-missed", *flags]) == 1
+    assert (
+        capsys.readouterr().err == "doctor: master-launch-missed takes times with a zone, such as 2026-10-09T19:50Z\n"
+    )
+
+
+def test_master_launch_missed_measure_defaults_to_the_last_hour_with_the_doctor_timings(env, monkeypatch, capsys):
+    from scripts.doctor import master_launches
+
+    assert doctor.main([WATCHED, "start"]) == 0
+    capsys.readouterr()
+    for name in ("AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES", "AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES"):
+        monkeypatch.delenv(name, raising=False)
+    now = 1791588800000
+    monkeypatch.setattr(swarm_cli, "now_ms", lambda: now)
+    record = {"slug": WATCHED, "transfers": [], "restored": [], "agents": [], "journal": [], "journal_error": ""}
+    monkeypatch.setattr(doctor.spawn_read, "master_records", lambda store, slug, **kwargs: record)
+    monkeypatch.setattr(doctor.spawn_read, "doctor_passes", lambda slug, **kwargs: (5,))
+    calls = []
+    monkeypatch.setattr(master_launches, "missed", lambda *args: calls.append(args) or 3)
+    assert doctor.main([WATCHED, "measure", "master-launch-missed"]) == 0
+    assert capsys.readouterr().out == "master-launch-missed 3\n"
+    [(_, replay, window, _)] = calls
+    assert window == (now - 3_600_000, now)
+    assert (replay.cooldown_ms, replay.interval_ms, replay.passes) == (3_600_000, 600_000, (5,))
 
 
 def test_failed_spawn_measure_accepts_a_window_ending_now(env, monkeypatch, capsys):

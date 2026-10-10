@@ -141,3 +141,21 @@ def test_missing_tool_clock_remains_unmeasured_despite_old_launch_or_heartbeat(m
     rows = _health_rows(store, "sw", [worker], {}, at)
     assert health.stalled(rows, health.Limits()) == []
     assert rows[0]["tool_quiet_minutes"] is None
+
+
+def test_talk_before_the_first_outcome_reads_as_none():
+    import fakeredis
+
+    from scripts.gates.progress import Progress
+    from scripts.swarm.status import talk_since_outcome
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    marks = Progress(store.redis, "s")
+    fresh, worked, master = "engineer@abcdef-0001", "engineer@abcdef-0002", "master@abcdef-0003"
+    for _ in range(12):
+        marks.talk(fresh)
+    marks.outcome(worked, "pushed", 5)
+    for _ in range(12):
+        marks.talk(worked)
+    rows = [{"name": fresh, "lane": "eng"}, {"name": worked, "lane": "eng"}, {"name": master, "lane": "master"}]
+    assert talk_since_outcome(store, "s", rows) == {fresh: 0, worked: 12}

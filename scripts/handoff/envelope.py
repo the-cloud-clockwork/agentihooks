@@ -8,13 +8,24 @@ import subprocess
 from datetime import datetime, timezone
 
 from scripts.inbox.store import CLOSED, InboxStore
-from scripts.swarm import snapshot
+from scripts.swarm import effort_range, snapshot
 from scripts.swarm.ledger_events import RED
 from scripts.swarm.naming import plain
 from scripts.swarm.store import MASTER
 
 REASONS = ("recycle", "quota", "succession", "takeover", "reopen", "restore", "inbox", "exit", "operator")
 UNKNOWN, NONE = "unknown", "none"
+LAUNCH = (
+    "profile",
+    "harness",
+    "model",
+    "effort",
+    "account",
+    "model_source",
+    "model_confidence",
+    "profile_decision",
+    "overlays",
+)
 PASSED = {"SUCCESS", "NEUTRAL", "SKIPPED"}
 FAILED = (OSError, subprocess.SubprocessError)
 
@@ -41,21 +52,15 @@ def build(store, slug, agent, reason, rows, at, run=subprocess.run):
         "inbox": _open_items(store, agent),
         "claims": UNKNOWN if rows is None else [r["id"] for r in rows if store.claimant(slug, r["id"]) == agent.name],
         "conversation_id": agent.conversation_id or UNKNOWN,
-        "launch": {
-            key: getattr(agent, key)
-            for key in (
-                "profile",
-                "harness",
-                "model",
-                "effort",
-                "account",
-                "model_source",
-                "model_confidence",
-                "profile_decision",
-                "overlays",
-            )
-        },
+        "launch": _launch(store, slug, agent),
     }
+
+
+def _launch(store, slug, agent):
+    launch = {key: getattr(agent, key) for key in LAUNCH}
+    if agent.lane == MASTER and agent.harness in effort_range.EFFORTS:
+        launch["effort"] = effort_range.clamp(agent.harness, agent.effort, effort_range.of(store.config(slug)))
+    return launch
 
 
 def _worktree(store, slug, agent, run):

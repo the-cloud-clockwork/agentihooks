@@ -1,0 +1,49 @@
+{
+  "case": "T-SV2-KUB-01-B",
+  "state": "passed",
+  "evidence_class": "mocked: in process rendering; Kubernetes schema validity comes from the kind job's strict server side dry run of the committed golden Pods, recorded with its run id in result.json",
+  "input_sha256": {
+    "pod-policy.json": "fe59695070f986ee8928dcfa9abff5d0a07372f6af03611733a4cdad34772acb",
+    "pod-launch.json": "a3dd9f7083b76f91ac724de6fc3d05d0227424feda9caac8d1c8f50eeede87ae",
+    "pod-rendered.json": "6db732d6d34b9873cb8eaeb6e8143fb01e0722c404de12250beaf49b5932bda0",
+    "pod-rendered-wrong-probes.json": "94631ea9668d46e6344aede03b750c04f38d37930c0e7fc61959d3a0636e9a42"
+  },
+  "observed": {
+    "refusals": {
+      "unknown fields": [
+        "fields",
+        "launch has unknown fields: host_mounts, privileged, secrets"
+      ],
+      "yaml in task id": [
+        "identity",
+        "launch task_id is not a valid value"
+      ],
+      "unapproved provider account": [
+        "account",
+        "launch provider_account is not an approved provider account"
+      ],
+      "unapproved profile": [
+        "profile",
+        "launch profile is not an approved resource profile"
+      ],
+      "resources over the profile": [
+        "resources",
+        "launch resources exceed the general profile limits"
+      ],
+      "image by tag": [
+        "image",
+        "launch image_digest must be a sha256 digest"
+      ]
+    },
+    "policy_unchanged": true,
+    "payload_fragments_in_pod": [],
+    "pod_spec_validation_failures_total": {
+      "fields": 1,
+      "identity": 1,
+      "account": 1,
+      "profile": 1,
+      "resources": 1,
+      "image": 1
+    }
+  }
+}

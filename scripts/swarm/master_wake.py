@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from scripts.swarm.tick import Runtime
 
 WINDOW_MS = 20 * 60 * 1000
+BACKSTOP_REF = "master-backstop"
 PROMPT = "Swarm backstop: run agentihooks msg inbox and work your Priorities. Work is waiting while your pane is idle."
 
 
@@ -48,11 +49,19 @@ def run(slug: str, store: RedisStore, runtime: "Runtime", doc: dict, now_ms: int
         last = idle.last_prompt(store.redis, slug, agent.name)
         if observed.typed or (last is not None and now_ms - last < wake.quiet_ms(os.environ)):
             continue
-        if not (
-            waiting(doc) or inbox.open_items(agent.name) or inbox.open_items(agent.seat or seat_address(slug, MASTER))
-        ):
+        if not _backstop(inbox, agent.name, agent.seat or seat_address(slug, MASTER), waiting(doc)):
             continue
-        runtime.nudge(agent, PROMPT)
         store.redis.hset(key, "woken_at", now_ms)
-        actions.append(f"woke idle master {agent.name} to work waiting Priorities")
+        actions.append(f"sent idle master {agent.name} the backstop through its inbox to work waiting Priorities")
     return actions
+
+
+def _backstop(inbox: InboxStore, name: str, seat: str, work: bool) -> bool:
+    mail = inbox.open_items(name) + inbox.open_items(seat)
+    earlier = [item for item in mail if item.ref.startswith(f"{BACKSTOP_REF}:")]
+    if any(item.state == "pending" for item in earlier) or not (work or len(mail) > len(earlier)):
+        return False
+    for item in earlier:
+        inbox.close(item.id, item.address, "done", "a newer backstop replaced it")
+    inbox.send(wake.BY, seat, PROMPT, ref=f"{BACKSTOP_REF}:{name}")
+    return True

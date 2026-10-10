@@ -65,8 +65,14 @@ def bounded(what, seconds=30):
 
     before = children()
     previous = signal.signal(signal.SIGALRM, expired)
+
     # Ends the worker, which xdist reports as a crash in this test, when SIGALRM cannot interrupt the wait.
-    faulthandler.dump_traceback_later(seconds + 10, exit=True)
+    def abort():
+        faulthandler.dump_traceback()
+        os._exit(1)
+
+    watchdog = threading.Timer(seconds + 10, abort)
+    watchdog.start()
     try:
         signal.setitimer(signal.ITIMER_REAL, seconds)
         yield
@@ -79,8 +85,21 @@ def bounded(what, seconds=30):
             with suppress(ProcessLookupError, ChildProcessError):
                 os.kill(pid, signal.SIGKILL)
                 os.waitpid(pid, 0)
-        faulthandler.cancel_dump_traceback_later()
+        watchdog.cancel()
     assert not left, f"{what} left child processes running"
+
+
+def test_bounded_does_not_cancel_a_pending_faulthandler_dump(tmp_path):
+    with (tmp_path / "dump").open("w+") as dump:
+        faulthandler.dump_traceback_later(0.5, file=dump)
+        try:
+            with bounded("nothing"):
+                pass
+            threading.Event().wait(1)
+        finally:
+            faulthandler.cancel_dump_traceback_later()
+        dump.seek(0)
+        assert "Timeout" in dump.read()
 
 
 def test_the_local_namespace_is_the_boot_id_and_the_pid_namespace_link(tmp_path):
@@ -316,6 +335,71 @@ def test_a_local_target_may_carry_the_pid_start_time():
                 runtime_target={**agent.runtime_target, "pid_start": "777"},
             ),
         )
+
+
+def launch_store():
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
+    return store
+
+
+def launched(store, pid=PID):
+    decision = {"validation": {"pid": pid}} if pid is not None else {}
+    return AgentRecord(store.next_name("sw", "eng"), "eng", "t1", seat="eng-1@sw", profile_decision=decision)
+
+
+def launcher(namespace=ANTON, table=None):
+    rows = {PID: proc()} if table is None else table
+    return LocalHerdrRuntime(None, namespace=lambda: namespace, table=lambda: rows)
+
+
+@pytest.mark.parametrize("pid", [PID, 1])
+def test_a_local_launch_stores_its_process_namespace_number_and_start_time(pid):
+    store = launch_store()
+    table = {pid: proc(pid=pid)}
+    started = launcher(table=table).admit(store, "sw", launched(store, pid))
+    stored = store.execution("sw", started.execution_id)
+    assert stored.runtime_backend == LOCAL
+    assert stored.runtime_target == {"process_namespace": ANTON, "pid": pid, "pid_start": STARTED}
+    assert process.resolve(stored, ANTON, table) == pid
+
+
+@pytest.mark.parametrize(
+    ("namespace", "table", "pid", "missing"),
+    [
+        ("", None, PID, "process namespace"),
+        (ANTON, {}, PID, "start time"),
+        (ANTON, {PID: proc(start=0)}, PID, "start time"),
+        (ANTON, None, None, "process number and start time"),
+        (ANTON, None, True, "process number and start time"),
+        (ANTON, None, float(PID), "process number and start time"),
+        (ANTON, {-PID: proc(pid=-PID)}, -PID, "process number and start time"),
+        ("", {}, None, "process namespace, process number and start time"),
+    ],
+)
+def test_a_local_launch_that_cannot_read_its_process_identity_is_refused_and_leaves_no_record(
+    namespace, table, pid, missing
+):
+    store = launch_store()
+    with pytest.raises(SwarmError) as refused:
+        launcher(namespace, table).admit(store, "sw", launched(store, pid))
+    assert str(refused.value) == f"local launch refused: its {missing} could not be read"
+    assert store.execution_registry.records("sw") == []
+    assert store.agents("sw") == []
+    assert store.execution_identity_conflicts_total("sw") == 0
+
+
+def test_a_local_launch_admitted_by_the_local_runtime_is_retired_through_the_tick_runtime(tmp_path, monkeypatch):
+    with bounded("the admitted launch retire"):
+        store = launch_store()
+        local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+        started = local.admit(store, "sw", launched(store))
+        tick_runtime = RoutedRuntime(local.herdr, RuntimeRouter([local]))
+        assert tick_runtime.retire(store.execution("sw", started.execution_id), ("/scratch/t1",))
+        assert ended == [(started.name, PID, ("/scratch/t1",), STARTED)]
+        assert tick_runtime.refused == {}
 
 
 @pytest.fixture

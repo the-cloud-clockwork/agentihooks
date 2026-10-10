@@ -474,7 +474,7 @@ jobs:
           SHARD: ${{ matrix.shard }}/${{ matrix.python-version == '3.12' && 8 || 4 }}
           NODE_OPTIONS: ${{ matrix.python-version == '3.12' && format('--require {0}/tests/node_capture.cjs', github.workspace) || '' }}
           JS_COVERAGE_DIR: ${{ matrix.python-version == '3.12' && format('{0}/js-coverage', github.workspace) || '' }}
-        run: python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' tests/ -v -n auto --dist loadgroup --shard "$SHARD" --tb=short --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
+        run: python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' tests/ -v -n auto --dist loadgroup --shard "$SHARD" --tb=short -o faulthandler_timeout=60 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
 
       # Shards balance on these: per-test times here differ from a local run.
       - name: Upload durations
@@ -1084,7 +1084,7 @@ jobs:
 
   # Reports only: it fails when it cannot read the run, never because a stage ran slow.
   stage-budget:
-    needs: [durations, split, unit, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load, reuse, queue-baseline]
+    needs: [durations, split, unit, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load, reuse, queue-baseline]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 3
@@ -1116,7 +1116,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [durations, split, unit, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-baseline]
+    needs: [durations, split, unit, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-baseline]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1137,7 +1137,7 @@ jobs:
             fi
             exit 0
           fi
-          if ! jq -e --arg event "${EVENT:-}" --arg mutation "$MUTATION" --arg kind "${KIND:-}" 'all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan") and .value.result == "skipped" and $mutation == "false") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false") or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group"))' <<< "$NEEDS"; then
+          if ! jq -e --arg event "${EVENT:-}" --arg mutation "$MUTATION" --arg kind "${KIND:-}" 'all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false") or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group"))' <<< "$NEEDS"; then
             echo "::error::Every required gate must succeed."
             exit 1
           fi
@@ -1272,7 +1272,8 @@ jobs:
   # A later queue entry's base is the earlier entry's merge commit, so the run that measured it may still be finishing.
   queue-baseline:
     needs: [unit, reuse]
-    if: ${{ !cancelled() && github.event_name == 'merge_group' && (needs.unit.result == 'success' || needs.reuse.outputs.reused == 'true') }}
+    # The record step refuses a missing 3.12 shard, so a run red only on another shard still publishes what later entries wait on.
+    if: ${{ !cancelled() && github.event_name == 'merge_group' }}
     runs-on: ubuntu-latest
     timeout-minutes: 13
     permissions:
@@ -1289,8 +1290,9 @@ jobs:
       - name: Install coverage
         run: python -m pip install "coverage>=7.4"
 
-      - name: Mint the tcc main ci App token
-        id: app-token
+      - name: Mint the token that reads the reused run
+        if: needs.reuse.outputs.reused == 'true'
+        id: reuse-token
         uses: actions/create-github-app-token@v3.2.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
@@ -1314,7 +1316,7 @@ jobs:
           path: .coverage-shards
           run-id: ${{ needs.reuse.outputs.run }}
           repository: ${{ github.repository }}
-          github-token: ${{ steps.app-token.outputs.token }}
+          github-token: ${{ steps.reuse-token.outputs.token }}
 
       # Later queue entries wait on this upload, so it runs before Sonar and the gate rather than after them.
       - name: Record this run's coverage baseline
@@ -1329,6 +1331,22 @@ jobs:
           retention-days: 7
           overwrite: true
 
+      - name: Stop when this run's unit shards failed
+        if: needs.unit.result != 'success' && needs.reuse.outputs.reused != 'true'
+        run: |
+          echo "::error::A unit shard failed; this run published its 3.12 baseline for later queue entries and grades nothing."
+          exit 1
+
+      - name: Mint the tcc main ci App token
+        id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-contents: read
+
       - name: Find the run that measured the base tree
         if: needs.reuse.outputs.reused != 'true'
         id: base-run
@@ -1340,8 +1358,11 @@ jobs:
           wait="${WAIT_SECONDS:-600}"
           deadline=$((SECONDS + wait))
           while true; do
-            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$BASE_SHA&per_page=20" --jq '.workflow_runs[].id')
-            for run in $runs; do
+            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$BASE_SHA&per_page=20" --jq '.workflow_runs[] | "\(.id) \(.status)"')
+            running=0
+            while read -r run status; do
+              [[ -n "$run" ]] || continue
+              [[ "$status" == completed ]] || running=1
               kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=coverage-baseline" --jq '[.artifacts[] | select(.expired | not)] | length')
               if [[ "$kept" -gt 0 ]]; then
                 echo "Restoring the coverage baseline of base $BASE_SHA tree $tree from run $run"
@@ -1349,7 +1370,11 @@ jobs:
                 echo "tree=$tree" >> "$GITHUB_OUTPUT"
                 exit 0
               fi
-            done
+            done <<< "$runs"
+            if [[ -n "$runs" && "$running" == 0 ]]; then
+              echo "::error::Every Tests run on base $BASE_SHA finished without a coverage baseline, so the queue entry it measured failed and this group is superseded."
+              exit 1
+            fi
             if (( SECONDS >= deadline )); then
               echo "::error::No run kept a coverage baseline for base $BASE_SHA within $wait seconds."
               exit 1
@@ -1396,6 +1421,8 @@ jobs:
     timeout-minutes: 5
     outputs:
       shards: ${{ steps.plan.outputs.shards }}
+      stats_parts: ${{ steps.plan.outputs.stats_parts }}
+      bases: ${{ steps.plan.outputs.bases }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1415,14 +1442,101 @@ jobs:
       - name: Install dependencies
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
+      # An earlier branch counts as a base only once its push preflight mutated it green; the lookup runs on the App's quota.
+      - name: Mint the tcc main ci App token
+        id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+
       - name: Size mutation shards from stored timings
         id: plan
         env:
           BASE: ${{ github.event.pull_request.base.sha || inputs.base }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: python -m scripts.ci_mutation.plan --base "$BASE"
 
-  mutation:
+  mutation-stats:
     needs: mutation-plan
+    if: ${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        part: ${{ fromJSON(needs.mutation-plan.outputs.stats_parts) }}
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+
+      - name: Install dependencies
+        run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Select mutation tests before browser setup
+        id: selection
+        env:
+          BASES: ${{ needs.mutation-plan.outputs.bases }}
+        run: python -m scripts.ci_mutation.browser --bases "$BASES"
+
+      - name: Install the browser that page tests drive
+        id: browser
+        if: steps.selection.outputs.browser == 'true'
+        timeout-minutes: 2
+        uses: ./.github/actions/browser-cache
+
+      - name: Report browser setup failure
+        if: failure() && steps.browser.outcome == 'failure'
+        run: |
+          echo "::error::Chromium setup failed or exceeded its two minute timeout; mutation tests cannot run."
+          exit 1
+
+      - name: Collect one stats part for every mutation shard
+        env:
+          BASES: ${{ needs.mutation-plan.outputs.bases }}
+          PYTHONUNBUFFERED: "1"
+          PART: ${{ matrix.part }}
+          PARTS: ${{ strategy.job-total }}
+        run: mkdir -p .mutation-stats && touch ".mutation-stats/collected-$PART" && python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"
+
+      - name: Upload mutation stats part
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-stats-${{ matrix.part }}
+          path: .mutation-stats/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+      - name: Upload stats evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-evidence-stats-${{ matrix.part }}
+          path: .mutation-gate/
+          include-hidden-files: true
+          retention-days: 7
+          overwrite: true
+
+  mutation:
+    needs: [mutation-plan, mutation-stats]
     if: ${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1454,8 +1568,8 @@ jobs:
       - name: Select mutation tests before browser setup
         id: selection
         env:
-          BASE: ${{ github.event.pull_request.base.sha || inputs.base }}
-        run: python -m scripts.ci_mutation.browser --base "$BASE"
+          BASES: ${{ needs.mutation-plan.outputs.bases }}
+        run: python -m scripts.ci_mutation.browser --bases "$BASES"
 
       - name: Install the browser that page tests drive
         id: browser
@@ -1469,23 +1583,30 @@ jobs:
           echo "::error::Chromium setup failed or exceeded its two minute timeout; mutation tests cannot run."
           exit 1
 
+      - name: Download the shared mutation stats
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mutation-stats-*
+          path: .mutation-stats
+          merge-multiple: true
+
       - name: Mutate changed Python files
         if: github.event_name == 'pull_request'
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
+          BASES: ${{ needs.mutation-plan.outputs.bases }}
           PYTHONUNBUFFERED: "1"
           SHARD: ${{ matrix.shard }}
           SHARDS: ${{ strategy.job-total }}
-        run: python -m scripts.ci_mutation --base "$BASE" --budget 1080 --shard "$SHARD" --shards "$SHARDS"
+        run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard "$SHARD" --shards "$SHARDS" --stats .mutation-stats
 
       - name: Mutate dispatched Python files
         if: github.event_name == 'workflow_dispatch'
         env:
-          BASE: ${{ inputs.base }}
+          BASES: ${{ needs.mutation-plan.outputs.bases }}
           PYTHONUNBUFFERED: "1"
           SHARD: ${{ matrix.shard }}
           SHARDS: ${{ strategy.job-total }}
-        run: python -m scripts.ci_mutation --base "$BASE" --budget 1080 --shard "$SHARD" --shards "$SHARDS"
+        run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard "$SHARD" --shards "$SHARDS" --stats .mutation-stats
 
       - name: Upload complete mutation evidence
         if: always()

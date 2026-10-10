@@ -1,0 +1,28 @@
+version: 1
+purpose: trace-plan
+fallbacks: cli
+questions:
+  - name: piece
+    type: yesno
+    each: pieces
+    key: "piece_{item[slot]}"
+    instructions: "Is piece {item[number]}, {item[what]}, needed to deliver the task?"
+    "true": the task needs it
+    "false": it serves something else
+  - name: size
+    type: score
+    each: sized
+    key: size
+    instructions: >-
+      How much source work is the plan? Judge only pieces with nonempty areas; test only pieces and the shared
+      mutation clearance file are supporting proof, not additional scope.
+    levels:
+      - trivial
+      - one pull request
+      - several pull requests
+      - a whole phase
+thresholds:
+  off_intent: 0.3
+  too_big_confidence: 0.7
+rule:
+  type: code

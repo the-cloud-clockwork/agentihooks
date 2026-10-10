@@ -3,33 +3,15 @@
 import os
 from dataclasses import asdict, dataclass, replace
 
-from hooks.classifier import Choice, ClassifierUnavailable, decide
+from hooks.classifier import ClassifierUnavailable, decide, definitions, runner
 from scripts.swarm import overlays
 from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm_ledger import ledger_close
 
 CLASSIFIED_LANE = "eng"
-MIN_CONFIDENCE_VAR = "AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE"
-MIN_CONFIDENCE = 0.6
-RESPONSIBILITIES = {
-    "frontend": (
-        "A product interface behavior: what a person sees or does on a page, panel, control or layout, including a "
-        "product interaction such as claim ordering or ranking from a view, even when Python code implements it."
-    ),
-    "engineer": (
-        "Backend or infrastructure behavior: services, APIs, command lines, hooks, runtimes, storage, deployment or "
-        "CI plumbing, with no change to what a person sees or does in a product interface."
-    ),
-    "qa": (
-        "Independent verification: stress testing or proving work that others built, producing evidence rather "
-        "than changing behavior."
-    ),
-}
+PURPOSE = "profile-pick"
+RESPONSIBILITIES = ("frontend", "engineer", "qa")
 HARNESS_ORDER = {"frontend": ("claude", "codex")}
-NOT_ONE = {
-    "split": "Two or more unrelated public responsibilities bundled in one task that should become separate tasks.",
-    "unresolved": "The task does not say enough about the public behavior it changes to decide.",
-}
 
 
 class ProfileUnresolved(RuntimeError):
@@ -70,6 +52,10 @@ def choose(
         decision = ProfileDecision(task["profile"], "task", "explicit task profile")
     elif lane != CLASSIFIED_LANE or pinned != DEFAULT_PROFILES[lane]:
         decision = ProfileDecision(pinned, "lane", f"{lane} lane")
+    elif needs_ci_push(task):
+        decision = ProfileDecision(
+            DEFAULT_PROFILES[CLASSIFIED_LANE], "proof contract", "proof needs a pushed CI run", anchors=anchors(task)
+        )
     else:
         decision = classify(slug, task, environ)
     if not installed(decision.profile):
@@ -83,22 +69,22 @@ def choose(
         raise ProfileUnresolved(f"task {task.get('id')} overlays are refused: {exc}") from exc
 
 
+def needs_ci_push(task: dict) -> bool:
+    return (task.get("contract") or {}).get("push") == "yes"
+
+
 def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
-    question = Choice(
-        f'Task {task.get("id")} "{task.get("title", "")}": which responsibility owns the public behavior this task '
-        "changes? Judge what a user or caller observes changing, from the description, parent intent and territory, "
-        "never from keywords or file names. Mixed interface and backend work follows the public behavior changed.",
-        {**RESPONSIBILITIES, **NOT_ONE},
-    )
+    params = {"id": task.get("id"), "title": task.get("title", "")}
     try:
-        result = decide(state(slug, task), {"responsibility": question}, purpose="profile-pick")
-    except ClassifierUnavailable as exc:
+        output = runner.run(PURPOSE, state(slug, task), params, decider=decide, environ=environ)
+    except (ClassifierUnavailable, definitions.DefinitionError) as exc:
         raise ProfileUnresolved(
             f"task {task.get('id')} profile classification is unavailable ({exc}): {_remedy(slug, task)}"
         ) from exc
-    answer, floor = result.answers["responsibility"], float(environ.get(MIN_CONFIDENCE_VAR, MIN_CONFIDENCE))
+    result, floor = output.raw, output.thresholds["confidence"]
+    answer = result.answers["responsibility"]
     confidence = answer.confidence if answer.confidence is not None else 0.0
-    if confidence < floor:
+    if output.verdicts["responsibility"] is None:
         return ProfileDecision(
             DEFAULT_PROFILES[CLASSIFIED_LANE],
             "lane default",

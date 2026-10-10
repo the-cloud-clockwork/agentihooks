@@ -61,6 +61,15 @@ def decide(item, pane, history, now_ms, window):
     )
 
 
+def raised_note(master: str, raised_id: str) -> str:
+    return f"raised to {master} as message {raised_id}"
+
+
+def raised_id(entry: dict) -> str:
+    """The master item a history entry raised, '' for any other entry."""
+    return entry["reason"].rpartition(" ")[2] if entry.get("event") == TO_MASTER else ""
+
+
 def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_QUIET_S * 1000):
     names = {a.name for a in agents}
     panes = {a.name: a for a in agents if typed_wake(a)}
@@ -94,10 +103,10 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_
                 actions.append(f"woke {receiver} for message {item.id}")
         elif step == TO_MASTER and master and receiver != boss.name:
             raised = inbox.send(BY, master, _master_text(item), ref=f"inbox-escalation:{item.id}")
-            inbox.note(item.id, TO_MASTER, BY, f"raised to {master} as message {raised.id}", now_ms)
+            inbox.note(item.id, TO_MASTER, BY, raised_note(master, raised.id), now_ms)
             actions.append(f"raised message {item.id} to {master}")
         elif step in (TO_MASTER, TO_OPERATOR):
-            if not post(inbox, item, lambda: ledger.followup(slug, _operator_text(item))):
+            if not post(inbox, item, lambda: ledger.followup(slug, _operator_text(item), needs_operator=True)):
                 actions.append(f"the ledger page refused message {item.id}, closed it")
                 continue
             inbox.note(item.id, TO_OPERATOR, BY, "shown to the operator on the ledger page", now_ms)

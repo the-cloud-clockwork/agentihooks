@@ -12,6 +12,7 @@ from scripts.swarm_ledger import ledger_kinds
 
 NOT_TRANSITIONS = ("joined", "left", "task started", "launch failed")
 HELD = ("claimed", "pr")
+SETTLED = ("checked", "priority cleared")
 MINUTE_MS = 60_000
 ENV = {
     "ceremony_min": "AGENTIHOOKS_HEALTH_CEREMONY_MIN",
@@ -122,16 +123,29 @@ def _outcome(task):
     return bool(task.get("pr_url")) or (ledger_kinds.kind(task) in ledger_kinds.NEEDS and not ledger_kinds.unmet(task))
 
 
+def _is_dispatcher(by):
+    return naming.lane_of(by) == "dispatch"
+
+
+def _decided(events):
+    commented = {(e["by"], e["target"]) for e in events if e.get("kind") == "comment added"}
+    settled = {
+        (e["by"], e["target"]) for e in events if e.get("kind") in SETTLED and (e["by"], e["target"]) in commented
+    }
+    return Counter(by for by, _ in settled if _is_dispatcher(by))
+
+
 def ceremony(events, tasks, limits, green=frozenset(), talk=None):
     finished = {tid for tid, t in tasks.items() if _outcome(t)}
     moves = Counter(e["by"] for e in events if e.get("kind") not in NOT_TRANSITIONS)
     closed = Counter(e["by"] for e in events if e.get("kind") == "task done" and _task_id(e["target"]) in finished)
+    decided = _decided(events)
     delivering = {tasks[tid].get("claimed_by") for tid in (*green, *finished) if tid in tasks}
     found = []
     for by, count in sorted(moves.items()):
         if not naming.lane_of(by) or by in delivering or (talk is not None and _is_worker(by)):
             continue
-        outcomes = len(finished) if _is_master(by) else closed[by]
+        outcomes = len(finished) if _is_master(by) else closed[by] + decided[by]
         if count >= limits.ceremony_min and count / max(outcomes, 1) > limits.ceremony_ratio:
             found.append(
                 Finding(
