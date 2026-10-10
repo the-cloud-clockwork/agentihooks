@@ -97,10 +97,8 @@ def path_parts(node: ast.AST) -> list[tuple[ast.AST, str]]:
     if isinstance(node, ast.JoinedStr) and node.values:
         head = node.values[0]
         return [(head.value if isinstance(head, ast.FormattedValue) else head, "name")]
-    if isinstance(node, ast.Tuple) and isinstance(node.ctx, ast.Load):
-        return [(element, "name") for element in node.elts]
     if isinstance(node, (ast.For, ast.comprehension)):
-        if isinstance(node.iter, (ast.List, ast.Set)):
+        if isinstance(node.iter, (ast.List, ast.Tuple, ast.Set)):
             return [(element, "name") for element in node.iter.elts]
         return [(unwrapped(node.iter), "sequence")]
     if isinstance(node, ast.Call):
@@ -170,7 +168,7 @@ def folder_kind(value: ast.AST, folders: set[str], bound: dict[str, set[str]]) -
         return next(filter(None, (folder_kind(item, folders, bound) for item in value.values)), None)
     if is_folder(value, folders):
         return "name"
-    if isinstance(value, (ast.Name, ast.Attribute, ast.Subscript)):
+    if isinstance(value, (ast.Name, ast.Attribute, ast.Subscript, ast.Call)):
         return next((kind for kind in bound if is_bound(value, kind, bound)), None)
     items = value.elts if isinstance(value, (ast.List, ast.Tuple, ast.Set)) else []
     if any(folder_kind(item, folders, bound) == "name" for item in items):
@@ -289,6 +287,9 @@ def test_the_guard_follows_aliases_wrappers_and_fallbacks_but_not_keys_or_subcom
         'n = record.get("homes", {})\n'
         'os.rename(src, "tmp")\n'
         'o = root / ROOTS.get("runtime")\n'
+        'herdr(("pane", "run"))\n'
+        'v = ROOTS.get("runtime")\n'
+        "w = root / v\n"
     )
     assert named_folders(source, folders) == [
         "10: FOLDERS",
@@ -299,6 +300,7 @@ def test_the_guard_follows_aliases_wrappers_and_fallbacks_but_not_keys_or_subcom
         "19: cfg['f']",
         "26: tmp",
         "27: ROOTS.get('runtime')",
+        "30: v",
         "3: y",
         "5: p",
         "7: sub",
