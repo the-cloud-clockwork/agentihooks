@@ -11,7 +11,7 @@ from tests.swarm_ledger import legacy_page
 
 SLUG = "freeze-records"
 IDS = itertools.count()
-MASTER, ENGINEER = "master@f2e3d4-0001", "engineer@f2e3d4-0002"
+MASTER, ENGINEER, STRANGER = "master@f2e3d4-0001", "engineer@f2e3d4-0002", "master@f2e3d4-0009"
 WORDS = "Freeze the swarm v2 plan while we ship the hierarchy"
 
 
@@ -64,6 +64,11 @@ def targets(state):
     return [(row["verb"], row["target"]) for row in state["freezes"]]
 
 
+def event_of(state):
+    event = state["_meta"]["events"][-1]
+    return {key: value for key, value in event.items() if key not in ("rev", "at")}
+
+
 def test_freezes_are_a_ledger_collection_with_verb_target_author_time_and_reason():
     assert "freezes" in rows.COLLECTIONS
     assert "freezes" in resources.COLLECTIONS
@@ -79,10 +84,31 @@ def test_freezes_are_a_ledger_collection_with_verb_target_author_time_and_reason
         "reason": "Ship the hierarchy first",
     }
     assert row["at"] > 0
-    event = state["_meta"]["events"][-1]
-    assert (event["by"], event["kind"], event["target"]) == ("operator", "frozen", "plans/a")
+    assert event_of(state) == {
+        "by": "operator",
+        "kind": "frozen",
+        "target": "plans/a",
+        "id": row["id"],
+        "reason": "Ship the hierarchy first",
+    }
+    assert state["_meta"]["stamps"]["freezes"]["by"] == "operator"
     state, _ = freeze("plans/b", verb="focus")
-    assert state["_meta"]["events"][-1]["kind"] == "focused"
+    focus = state["freezes"][1]
+    assert focus == {
+        "id": focus["id"],
+        "verb": "focus",
+        "target": "plans/b",
+        "by": "operator",
+        "at": focus["at"],
+        "reason": "",
+    }
+    assert event_of(state) == {
+        "by": "operator",
+        "kind": "focused",
+        "target": "plans/b",
+        "id": focus["id"],
+        "reason": "",
+    }
     assert targets(state) == [("freeze", "plans/a"), ("focus", "plans/b")]
 
 
@@ -115,12 +141,24 @@ def test_lane_and_kind_selectors_are_targets():
         ({"verb": "freeze", "target": "kind:chore"}, "a freeze target is a plan, phase, slice or task address"),
         ({"verb": "freeze", "target": "plans/a", "reason": 3}, "reason and quote must be text"),
         ({"verb": "freeze", "target": "plans/a", "extra": 1}, "freeze_set takes only verb target reason quote"),
+        ({"verb": "freeze", "target": "lane:ci:x"}, "a freeze target is a plan, phase, slice or task address"),
+        ({"verb": "freeze", "target": "plans/a", "by": "operator"}, "invalid freeze author"),
+        ({"verb": "freeze", "target": "plans/a", "by": "1bad"}, "invalid freeze author"),
+        ({"verb": "freeze", "target": "plans/a", "by": 7}, "invalid freeze author"),
+        ({"verb": "freeze", "target": "plans/a", "quote": 3}, "reason and quote must be text"),
+        ({"verb": "freeze", "target": "plans/a", "quote": "q" * 2001}, "reason and quote must be text"),
+        ({"verb": "freeze", "target": "plans/a", "reason": "r" * 2001}, "reason and quote must be text"),
     ],
 )
 def test_a_malformed_freeze_is_refused_at_check(op, message):
     with pytest.raises(ValueError) as raised:
         core.check_op({"op": "freeze_set", "id": "f", **op})
     assert str(raised.value) == message
+
+
+def test_reason_and_quote_may_reach_the_text_limit():
+    text = "x" * ledger_freezes.MAX_TEXT
+    core.check_op({"op": "freeze_set", "id": "f", "verb": "freeze", "target": "plans/a", "reason": text, "quote": text})
 
 
 def test_a_freeze_on_a_node_the_ledger_lacks_is_rejected():
@@ -135,13 +173,17 @@ def test_unfreezing_a_plan_clears_freezes_on_its_phases_slices_and_tasks():
     state, rejected = write("freeze_clear", target="plans/a", reason="hierarchy shipped")
     assert rejected == []
     assert targets(state) == [("freeze", "phases/p2"), ("freeze", "tasks/t2"), ("freeze", "lane:ci")]
-    event = state["_meta"]["events"][-1]
-    assert (event["kind"], event["target"], event["cleared"], event["reason"]) == (
-        "unfrozen",
-        "plans/a",
-        ["plans/a", "phases/p1", "slices/a.first", "tasks/t1", "phases/p1"],
-        "hierarchy shipped",
-    )
+    assert event_of(state) == {
+        "by": "operator",
+        "kind": "unfrozen",
+        "target": "plans/a",
+        "id": state["_meta"]["events"][-1]["id"],
+        "cleared": ["plans/a", "phases/p1", "slices/a.first", "tasks/t1", "phases/p1"],
+        "reason": "hierarchy shipped",
+    }
+    assert state["_meta"]["events"][-1]["id"].startswith("freeze_clear-")
+    stamp = state["_meta"]["stamps"]["freezes"]
+    assert (stamp["by"], stamp["rev"]) == ("operator", state["_meta"]["rev"])
 
 
 def test_a_task_group_lead_holds_its_members_under_it():
@@ -164,6 +206,8 @@ def test_clearing_a_selector_removes_only_that_selector():
     state, rejected = write("freeze_clear", target="lane:ci")
     assert rejected == []
     assert targets(state) == [("freeze", "kind:ci")]
+    assert event_of(state)["cleared"] == ["lane:ci"]
+    assert event_of(state)["reason"] == ""
 
 
 def test_clearing_a_target_without_records_changes_nothing():
@@ -193,6 +237,14 @@ def test_the_master_writes_a_freeze_only_with_the_operators_recorded_words():
     assert rejected and targets(state) == [("freeze", "plans/a")]
     state, rejected = write("freeze_clear", by=MASTER, target="plans/a", quote="freeze the swarm v2 plan")
     assert rejected == [] and state["freezes"] == []
+    assert event_of(state)["by"] == MASTER
+    assert state["_meta"]["stamps"]["freezes"]["by"] == MASTER
+
+
+def test_an_author_who_never_joined_is_refused_without_error():
+    operator_words.record(STRANGER, WORDS)
+    state, rejected = freeze("plans/a", by=STRANGER, quote="freeze the swarm v2 plan")
+    assert rejected and state["freezes"] == []
 
 
 def test_the_dispatcher_writes_freezes_only_at_full_autonomy(monkeypatch):
@@ -202,7 +254,15 @@ def test_the_dispatcher_writes_freezes_only_at_full_autonomy(monkeypatch):
     monkeypatch.setattr(ledger_freezes, "autonomy", lambda slug: asked.append(slug) or "full")
     state, rejected = freeze("plans/a", by=ledger_freezes.DISPATCHER)
     assert rejected == []
-    assert state["freezes"][0]["by"] == ledger_freezes.DISPATCHER
+    row = state["freezes"][0]
+    assert row == {
+        "id": row["id"],
+        "verb": "freeze",
+        "target": "plans/a",
+        "by": "dispatcher",
+        "at": row["at"],
+        "reason": "",
+    }
     assert asked == [SLUG]
 
 

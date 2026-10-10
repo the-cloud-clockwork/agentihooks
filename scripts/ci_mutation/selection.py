@@ -97,7 +97,13 @@ def stats_shards(root: Path, files: list[str], count: int) -> list[list[str]]:
 def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, basetemp: str) -> None:
     os.environ["MUTANT_UNDER_TEST"] = "stats"
     os.environ["PY_IGNORE_IMPORTMISMATCH"] = "1"
-    test_runner._pytest_add_cli_args = [*test_runner._pytest_add_cli_args, f"--basetemp={basetemp}"]
+    # Stats tracing slows every test, so a wall clock bound only holds in the unit shards.
+    test_runner._pytest_add_cli_args = [
+        *test_runner._pytest_add_cli_args,
+        "-m",
+        "not wall_clock",
+        f"--basetemp={basetemp}",
+    ]
     start = process_time()
     status = test_runner.run_stats(tests=tests)
     tests_by_function = {name: sorted(names) for name, names in runner.mutmut.tests_by_mangled_function_name.items()}

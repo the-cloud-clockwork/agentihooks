@@ -60,6 +60,8 @@ OPS = ("task_add", "task_update")
 PARENT_FIELDS = {"slice", "phase", "plan_slice", "plan_lines"}
 WORKER_LANES = ("eng", "ci")
 SWARM = "swarm"
+RANK_AUTHORS = ("operator", SWARM, "dispatcher")
+RANK_LANES = ("master", "plan", "dispatch")
 PROPOSE = 'propose the work with agentihooks ledger followup add "<plain words>" and the master decides'
 PUBLISH = (
     "publish the plan with agentihooks ledger publish-plan <file> --phase <phase id>, then link each task with "
@@ -230,7 +232,12 @@ def _add(doc, op, ctx):
     if not _known(tasks, op.get("depends_on", [])):
         return False
     appended = {p["id"] for p in doc.get("phases", []) if p.get("added_by") == op["by"]}
-    if refusal := add_refusal(tasks, op, appended) or follow_up_refusal(op) or unsliced_refusal(doc, op, op["by"]):
+    if refusal := (
+        add_refusal(tasks, op, appended)
+        or ("rank" in op and rank_refusal(op["by"]))
+        or follow_up_refusal(op)
+        or unsliced_refusal(doc, op, op["by"])
+    ):
         ctx.refused.append(refusal)
         return False
     task = {
@@ -331,6 +338,8 @@ def rank_refusal(by, field="rank"):
     from scripts.swarm.naming import lane_of
 
     lane = lane_of(by)
+    if field == "rank":
+        return "" if by in RANK_AUTHORS or lane in RANK_LANES else f"{by} cannot set a task rank: {PROPOSE}"
     if lane in WORKER_LANES:
         return f"{by} works in the {lane} lane and cannot set a task {field}: {PROPOSE}"
     return ""

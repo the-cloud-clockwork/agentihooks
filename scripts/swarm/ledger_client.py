@@ -106,6 +106,9 @@ class LedgerClient:
     def time_left(self, slug: str, slots: int, ci_minutes: float | None) -> None:
         self._call(slug, [_op("time_left", "swarm", slots=slots, ci_minutes=ci_minutes)])
 
+    def ack_events(self, slug: str, revision: int) -> None:
+        self._call(slug, [_op("events_ack", "swarm", rev=revision)])
+
     def set_phase(self, slug, phase_id, done, status):
         self._call(slug, [_op("set", "swarm", path=f"phases/{phase_id}/done", value=done, status=status)])
 
@@ -153,6 +156,10 @@ class LedgerClient:
 
     def ungroup_tasks(self, slug, lead):
         self._call(slug, [_op("task_ungroup", "swarm", item=f"tasks/{lead}")])
+
+    def rank_task(self, slug, task_id, rank, by, if_unranked=False):
+        guard = {"if_unranked": True} if if_unranked else {}
+        self._call(slug, [_op("task_rank", by, item=f"tasks/{task_id}", rank=rank, **guard)])
 
     def clear_priority(self, slug, priority_id, reason):
         self._call(slug, [_op("priority_clear", "swarm", target=priority_id, reason=reason)])

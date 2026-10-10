@@ -57,7 +57,9 @@ def test_the_master_without_the_operators_words_is_refused(swarm, monkeypatch, c
     acting(monkeypatch, MASTER, "demo")
     assert cli.main(["demo", "focus", "plans/a"]) == 1
     assert ledger.freezes == []
-    assert "the master writes freezes only with the operator's words" in capsys.readouterr().err
+    assert capsys.readouterr().err == (
+        "swarm: the master writes freezes only with the operator's words: pass them with --quote\n"
+    )
 
 
 def test_an_engineers_freeze_command_is_refused(swarm, monkeypatch, capsys):

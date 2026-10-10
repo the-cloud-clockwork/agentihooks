@@ -63,6 +63,13 @@ def test_an_engineer_cannot_add_a_ranked_task_either():
     assert rejected == ["add-3"] and "t3" not in [t["id"] for t in state["tasks"]]
 
 
+def test_a_ranked_task_add_outside_the_allowlist_is_refused_and_an_unranked_one_lands():
+    ranked = {"op": "task_add", "id": "add-4", "by": "someone", "task": "t4", "title": "d", "lane": "eng"}
+    state, rejected = core.sync(SLUG, ops=[{**ranked, "rank": "high"}, {**ranked, "id": "add-5", "task": "t5"}])
+    assert rejected == ["add-4"] and [t["id"] for t in state["tasks"]] == ["t1", "t5"]
+    assert state["_meta"]["warnings"][0] == f"someone cannot set a task rank: {ledger_tasks.PROPOSE}"
+
+
 @pytest.mark.parametrize("bad", ["top", "", "URGENT", 1, None])
 def test_an_unknown_rank_is_refused(bad):
     with pytest.raises(ValueError, match="rank must be one of|as strings"):
@@ -82,7 +89,8 @@ def test_the_operator_ranks_a_task_from_the_page():
 @pytest.mark.parametrize(
     "bad",
     [
-        {"op": "task_rank", "id": "p", "item": "tasks/t1", "rank": "high", "by": MASTER},
+        {"op": "task_rank", "id": "p", "item": "tasks/t1", "rank": "high", "by": MASTER, "extra": 1},
+        {"op": "task_rank", "id": "p", "item": "tasks/t1", "rank": "high", "by": ""},
         {"op": "task_rank", "id": "p", "item": "phases/p1", "rank": "high"},
         {"op": "task_rank", "id": "p", "item": "tasks/t1"},
     ],
@@ -90,6 +98,44 @@ def test_the_operator_ranks_a_task_from_the_page():
 def test_the_page_rank_op_is_the_operators_and_names_a_task(bad):
     with pytest.raises(ValueError):
         core.check_op(bad)
+
+
+@pytest.mark.parametrize("by", [MASTER, "dispatcher", "planner@abcdef-0003", "operator", "swarm"])
+def test_task_rank_takes_an_allowed_author_and_records_it(by):
+    op = {"op": "task_rank", "id": "auth-1", "item": "tasks/t1", "rank": "high", "by": by}
+    core.check_op(op)
+    state, rejected = core.sync(SLUG, ops=[op])
+    assert (rejected, rank_of(state)) == ([], "high")
+    assert (state["_meta"]["events"][-1]["by"], state["_meta"]["stamps"]["tasks/t1/rank"]["by"]) == (by, by)
+
+
+@pytest.mark.parametrize("by", [ENGINEER, "ci@abcdef-0004", "session-0a1b2c3d", "someone"])
+def test_task_rank_refuses_an_author_outside_the_allowlist(by):
+    op = {"op": "task_rank", "id": "auth-2", "item": "tasks/t1", "rank": "urgent", "by": by}
+    core.check_op(op)
+    state, rejected = core.sync(SLUG, ops=[op])
+    assert rejected == ["auth-2"] and rank_of(state) is None
+    assert state["_meta"]["warnings"][0] == f"{by} cannot set a task rank: {ledger_tasks.PROPOSE}"
+
+
+@pytest.mark.parametrize("by", ["session-0a1b2c3d", "someone"])
+def test_a_task_update_rank_outside_the_allowlist_is_refused(by):
+    state, rejected = update(by, "high")
+    assert rejected == ["rank-1"] and rank_of(state) is None
+    assert state["_meta"]["warnings"][0] == f"{by} cannot set a task rank: {ledger_tasks.PROPOSE}"
+
+
+@pytest.mark.parametrize("by", ["dispatcher", "planner@abcdef-0003", "swarm"])
+def test_a_task_update_rank_by_an_allowed_author_applies(by):
+    state, rejected = update(by, "high")
+    assert (rejected, rank_of(state)) == ([], "high")
+
+
+def test_a_difficulty_change_keeps_the_worker_lane_refusal_only():
+    assert ledger_tasks.rank_refusal(ENGINEER, "difficulty") == (
+        f"{ENGINEER} works in the eng lane and cannot set a task difficulty: {ledger_tasks.PROPOSE}"
+    )
+    assert ledger_tasks.rank_refusal("someone", "difficulty") == ""
 
 
 def test_ranking_an_unknown_task_is_rejected():
@@ -127,11 +173,52 @@ def test_order_puts_each_rank_in_its_place(task, position):
     assert ledger_rank.order(task) == position
 
 
-def test_the_page_rank_op_refusal_names_its_shape():
-    with pytest.raises(
-        ValueError, match=r"^task_rank is the operator's and takes only an id, an item tasks/<id> and a rank$"
-    ):
-        ledger_rank.check({"op": "task_rank", "id": "p", "item": "tasks/t1", "rank": "high", "by": MASTER})
+@pytest.mark.parametrize("extra", [{"by": ""}, {"by": 7}, {"by": None}, {"if_unranked": False}, {"if_unranked": 1}])
+def test_the_page_rank_op_refusal_names_its_shape(extra):
+    with pytest.raises(ValueError) as refused:
+        ledger_rank.check({"op": "task_rank", "id": "p", "item": "tasks/t1", "rank": "high", **extra})
+    assert str(refused.value) == (
+        "task_rank takes an id, an item tasks/<id>, a rank and an optional author by and if_unranked"
+    )
+
+
+def test_an_if_unranked_rank_lands_on_a_task_nobody_ranked():
+    doc, ctx = {"tasks": [{"id": "t1"}]}, FakeContext()
+    op = {**page_rank("high"), "by": "dispatcher", "if_unranked": True}
+    ledger_rank.check(op)
+    assert ledger_rank.apply(doc, op, ctx) is True
+    assert (doc["tasks"][0], ctx.dirty, ctx.stamps) == (
+        {"id": "t1", "rank": "high"},
+        True,
+        [("tasks/t1/rank", "dispatcher")],
+    )
+
+
+@pytest.mark.parametrize("held", ["low", "high"])
+def test_an_if_unranked_rank_on_a_ranked_task_is_refused_and_names_the_rank(held):
+    op = {"op": "task_rank", "id": "g-1", "item": "tasks/t1", "rank": "low", "by": MASTER}
+    core.sync(SLUG, ops=[{**op, "rank": held}])
+    guarded = {
+        "op": "task_rank",
+        "id": "g-2",
+        "item": "tasks/t1",
+        "rank": "high",
+        "by": "dispatcher",
+        "if_unranked": True,
+    }
+    core.check_op(guarded)
+    state, rejected = core.sync(SLUG, ops=[guarded])
+    assert (rejected, rank_of(state)) == (["g-2"], held)
+    assert state["_meta"]["warnings"][0] == f"task t1 already has rank {held}"
+    assert state["_meta"]["stamps"]["tasks/t1/rank"]["by"] == MASTER
+
+
+def test_the_rank_op_by_a_refused_author_changes_nothing_and_names_why():
+    doc, ctx = {"tasks": [{"id": "t1"}]}, FakeContext()
+    ctx.refused = []
+    assert ledger_rank.apply(doc, {**page_rank("high"), "by": ENGINEER}, ctx) is False
+    assert (doc["tasks"][0], ctx.stamps, ctx.events, ctx.dirty) == ({"id": "t1"}, [], [], False)
+    assert ctx.refused == [f"{ENGINEER} cannot set a task rank: {ledger_tasks.PROPOSE}"]
 
 
 class FakeContext:
@@ -158,11 +245,23 @@ def test_the_page_rank_op_records_the_operator_and_marks_the_ledger_changed():
     assert ctx.dirty is True
 
 
-@pytest.mark.parametrize(("task", "rank"), [({"id": "t1"}, "normal"), ({"id": "t1", "rank": "low"}, "low")])
+@pytest.mark.parametrize(
+    ("task", "rank"), [({"id": "t1", "rank": "normal"}, "normal"), ({"id": "t1", "rank": "low"}, "low")]
+)
 def test_setting_the_rank_a_task_already_has_changes_nothing(task, rank):
     doc, ctx = {"tasks": [task]}, FakeContext()
     assert ledger_rank.apply(doc, page_rank(rank), ctx) is True
     assert (doc["tasks"][0], ctx.stamps, ctx.events, ctx.dirty) == (dict(task), [], [], False)
+
+
+def test_an_explicit_normal_on_an_unranked_task_is_stored_so_the_dispatcher_leaves_it():
+    doc, ctx = {"tasks": [{"id": "t1"}]}, FakeContext()
+    assert ledger_rank.apply(doc, page_rank("normal"), ctx) is True
+    assert (doc["tasks"][0], ctx.stamps, ctx.dirty) == (
+        {"id": "t1", "rank": "normal"},
+        [("tasks/t1/rank", "operator")],
+        True,
+    )
 
 
 def test_the_page_rank_op_on_a_ledger_without_tasks_is_rejected():

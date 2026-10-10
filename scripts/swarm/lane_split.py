@@ -1,0 +1,117 @@
+"""Manual scaling moves the stored caps; auto scaling moves the stored lane shift that `autoscale.calculate` applies."""
+
+import json
+from collections.abc import Callable
+from dataclasses import dataclass
+from functools import partial
+
+from scripts.gates import log as gate_log
+from scripts.swarm import bottleneck, capacity, dispatcher
+from scripts.swarm.store import AUTO_SCALING, DELEGATE, FULL, RedisStore, SwarmConfig
+
+KEY = "lane-split"
+TICKS = 3
+AUTHOR = "dispatcher"
+RULE = "lane-split"
+MOVES = {"ci": ("eng", "ci"), "engineering": ("ci", "eng")}
+MOVED = (
+    "Moved one seat from the {giver} lane to the {taker} lane after the bottleneck report named {named} {ticks} ticks"
+    " running: engineers {eng}, CI {ci}, sum {total}."
+)
+HELD = "Lane split held after the bottleneck report named {named} {ticks} ticks running: {reason}."
+
+
+@dataclass(frozen=True)
+class Lanes:
+    ready: dict
+    live: dict
+    room: int | None
+
+
+def streak(previous: dict, found: dict) -> dict:
+    if not found or found.get("at") == previous.get("at"):
+        return previous
+    named = found["bottleneck"]
+    ticks = previous["ticks"] + 1 if named == previous.get("named") else 1
+    return {"named": named, "ticks": ticks, "at": found["at"]}
+
+
+def refusal(caps: dict, giver: str, taker: str, lanes: Lanes) -> str:
+    if caps[giver] <= 0:
+        return f"the {giver} lane has no seat to give"
+    if caps[giver] <= 1 and lanes.ready[giver]:
+        return f"the {giver} lane keeps its last seat for ready work"
+    if caps[giver] <= lanes.live[giver]:
+        return f"the {giver} lane keeps a seat for each of its {lanes.live[giver]} live agents"
+    if lanes.room is not None and caps[taker] + 1 - lanes.live[taker] > lanes.room:
+        return f"the {taker} lane would pass host room {lanes.room}"
+    return ""
+
+
+def _capacity(config, store, slug: str) -> tuple[dict, int]:
+    if config.scaling == AUTO_SCALING:
+        stored = json.loads(store.redis.get(store.key(slug, "quota-capacity")) or "{}").get("autoscale") or {}
+        ceilings = stored.get("ceilings")
+        if ceilings:
+            return {"eng": ceilings["eng"], "ci": ceilings["ci"]}, stored.get("shift", 0)
+    return {"eng": config.max_eng, "ci": config.max_ci}, config.lane_shift
+
+
+def _apply(slug: str, config, store, caps: dict, shift: int) -> None:
+    if config.scaling != AUTO_SCALING:
+        store.update(slug, max_eng=caps["eng"], max_ci=caps["ci"])
+        return
+    store.update(slug, lane_shift=shift)
+
+
+def _record(slug: str, named: str, caps: dict, move: tuple, lanes: Lanes, now_ms: int) -> str:
+    giver, taker = move
+    text = MOVED.format(
+        giver=giver, taker=taker, named=named, ticks=TICKS, eng=caps["eng"], ci=caps["ci"], total=sum(caps.values())
+    )
+    room = "unknown" if lanes.room is None else lanes.room
+    gate_log.append(slug, gate_log.Row(now_ms, AUTHOR, "apply", AUTHOR, "", RULE, f"{text} Host room {room}."))
+    return text
+
+
+def lane_pass(slug: str, config: SwarmConfig, store: RedisStore, read: Callable[[], Lanes], now_ms: int) -> list[str]:
+    if config.autonomy not in (DELEGATE, FULL):
+        return []
+    key = store.key(slug, KEY)
+    previous = json.loads(store.redis.get(key) or "{}")
+    current = streak(previous, bottleneck.read(store, slug))
+    if current is previous:
+        return []
+    move = MOVES.get(current["named"])
+    due = move is not None and current["ticks"] >= TICKS
+    store.redis.set(key, json.dumps({**current, "ticks": 0} if due else current))
+    if not due:
+        return []
+    giver, taker = move
+    caps, shift = _capacity(config, store, slug)
+    lanes = read()
+    reason = refusal(caps, giver, taker, lanes)
+    if reason:
+        return [HELD.format(named=current["named"], ticks=TICKS, reason=reason)]
+    caps = {giver: caps[giver] - 1, taker: caps[taker] + 1}
+    _apply(slug, config, store, caps, shift + (1 if taker == "ci" else -1))
+    return [_record(slug, current["named"], caps, move, lanes, now_ms)]
+
+
+def _lanes(slug: str, store: RedisStore, doc: dict, now_ms: int) -> Lanes:
+    from scripts.swarm.tick import _ended
+
+    rows, ready = capacity.ready_work(slug, store, doc)
+    live = capacity._busy([agent for agent in store.agents(slug) if not _ended(agent, rows)])
+    host = capacity.read(store, slug).get("host")
+    room = capacity.unspent(host, capacity.spawn_counter(store, now_ms)) if host else None
+    return Lanes({lane: len(tasks) for lane, tasks in ready.items()}, live, room)
+
+
+def step(slug: str, config: SwarmConfig, store: RedisStore, doc: dict, now_ms: int) -> list[str]:
+    from scripts.swarm import metrics
+
+    found = lane_pass(slug, config, store, partial(_lanes, slug, store, doc, now_ms), now_ms)
+    moved = [dispatcher.Action(RULE, "apply", text, {}) for text in found if text.startswith("Moved")]
+    shipped = [dispatcher.dispatch_row(slug, index, action, now_ms) for index, action in enumerate(moved)]
+    return found + (metrics.record(dispatcher.TABLE, shipped, now_ms) if shipped else [])

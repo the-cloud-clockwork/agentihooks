@@ -29,8 +29,10 @@ from scripts.swarm import (
     control_notifications,
     dev_red,
     difficulty,
+    dispatcher,
     freeze,
     grouping,
+    lane_split,
     launch_check,
     ledger_probe,
     lifetime,
@@ -179,7 +181,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += skip_refused(dev_red.reopen_pass, slug, config, store, ledger, rows)
     actions += skip_refused(difficulty.size_pass, slug, ledger, doc)
     actions += skip_refused(grouping.release_pass, slug, store, ledger, doc)
-    actions += skip_refused(grouping.group_pass, slug, config, store, ledger, doc)
+    actions += skip_refused(dispatcher.group, slug, config, store, ledger, doc, now_ms)
     from scripts.swarm import quota_notice
 
     with PLACING:
@@ -200,6 +202,8 @@ def tick(slug, store, ledger, runtime, now_ms):
                 now_ms,
                 lambda: _master(slug, config, store, runtime, now_ms),
             )
+            actions += skip_refused(dispatcher.rank_pass, slug, config, store, ledger, doc, now_ms)
+            actions += skip_refused(lane_split.step, slug, config, store, doc, now_ms)
             if config.state == "running":
                 actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
     actions += timing.call(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))

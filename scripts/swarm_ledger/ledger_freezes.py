@@ -3,8 +3,6 @@
 import re
 import time
 
-import ledger_relay
-
 from scripts.swarm_ledger.ledger_kinds import KINDS
 from scripts.swarm_ledger.ledger_tasks import LANES
 from scripts.swarm_ledger.repository.hierarchy import project
@@ -12,7 +10,7 @@ from scripts.swarm_ledger.repository.hierarchy import project
 OPS = ("freeze_set", "freeze_clear")
 VERBS = ("freeze", "focus")
 NODE_RE = re.compile(r"^(plans|phases|slices|tasks)/[^/\s]+$")
-SELECTORS = {"lane": LANES, "kind": KINDS}
+SELECTORS = frozenset({*(f"lane:{lane}" for lane in LANES), *(f"kind:{kind}" for kind in KINDS)})
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 DISPATCHER = "dispatcher"
 FULL = "full"
@@ -22,8 +20,7 @@ MAX_TEXT = 2000
 
 
 def selector(target: str) -> bool:
-    kind, sep, value = target.partition(":")
-    return bool(sep) and value in SELECTORS.get(kind, ())
+    return target in SELECTORS
 
 
 def check(op):
@@ -54,9 +51,11 @@ def autonomy(slug: str) -> str:
 
 def author(op, ctx) -> tuple[str, str] | None:
     """(writer, the operator's quoted words) when the op may write freezes, else None."""
+    import ledger_relay
+
     by = op.get("by")
     if by is None:
-        return "operator", op.get("quote", "")
+        return "operator", op.get("quote")
     if by == DISPATCHER:
         return (by, "") if autonomy(ctx.slug) == FULL else None
     master = ctx.meta["members"].get(by, {}).get("role") == "orchestrator"
@@ -65,24 +64,22 @@ def author(op, ctx) -> tuple[str, str] | None:
 
 
 def under(doc: dict, target: str) -> set:
-    nodes, _ = project(doc)
-    members = {f"tasks/{t['id']}": [f"tasks/{m}" for m in t.get("group_members", [])] for t in doc.get("tasks", [])}
-    found, frontier = {target}, [target]
-    while frontier:
-        parent = frontier.pop()
-        below = [node for node, (_, link, _) in nodes.items() if link == parent] + members.get(parent, [])
-        for node in below:
-            if node not in found:
-                found.add(node)
-                frontier.append(node)
-    return found
+    below = {}
+    for node, (_, link, _) in project(doc)[0].items():
+        below.setdefault(link, []).append(node)
+    for task in doc["tasks"]:
+        below.setdefault(f"tasks/{task['id']}", []).extend(f"tasks/{m}" for m in task.get("group_members", []))
+    found = [target]
+    for parent in found:
+        found += [node for node in below.get(parent, []) if node not in found]
+    return set(found)
 
 
 def _set(doc, op, ctx, by, words):
     target = op["target"]
     if not selector(target) and target not in project(doc)[0]:
         return False
-    rows = doc.setdefault("freezes", [])
+    rows = doc["freezes"]
     if any(row["verb"] == op["verb"] and row["target"] == target for row in rows):
         return True
     row = {"id": op["id"], "verb": op["verb"], "target": target, "by": by, "at": ctx.at, "reason": op.get("reason", "")}
@@ -94,8 +91,8 @@ def _set(doc, op, ctx, by, words):
 
 def _clear(doc, op, ctx, by):
     target = op["target"]
-    held = {target} if selector(target) else under(doc, target)
-    rows = doc.setdefault("freezes", [])
+    held = under(doc, target)
+    rows = doc["freezes"]
     gone = [row for row in rows if row["target"] in held]
     if gone:
         doc["freezes"] = [row for row in rows if row["target"] not in held]
