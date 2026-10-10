@@ -91,7 +91,7 @@ def _stale(item, github):
 
 def _item(doc, path):
     name, item_id = _split(path)
-    return next((i for i in doc.get(name, []) if i["id"] == item_id), {})
+    return next((i for i in doc[name] if i["id"] == item_id), {})
 
 
 def _split(path):

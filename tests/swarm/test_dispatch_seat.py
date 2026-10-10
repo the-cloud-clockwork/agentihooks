@@ -25,7 +25,7 @@ def priority(row_id="pr1", item="tasks/t5", text="Pick the release day", age=15 
 
 
 def doc(*rows):
-    return {"tasks": [], "phases": [], "priorities": list(rows)}
+    return {"tasks": [], "phases": [], "questions": [], "followups": [], "priorities": list(rows)}
 
 
 def swarm(autonomy="full"):
@@ -218,7 +218,7 @@ def test_the_same_item_without_an_operator_decision_is_a_trigger(path):
     assert dispatch_seat.triggers(found, NOW) == [{"id": "pr1", "item": path, "text": "Decide it", "minutes": 15}]
 
 
-def test_a_question_is_no_trigger_even_when_the_ledger_has_no_questions():
+def test_a_question_is_no_trigger_even_once_it_is_gone():
     assert dispatch_seat.triggers(doc(priority("pr1", "questions/q1", "Decide it")), NOW) == []
 
 
