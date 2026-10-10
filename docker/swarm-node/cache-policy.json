@@ -23,6 +23,7 @@
     ".env",
     "*.env",
     ".env.*",
+    "*.env.*",
     "*.sqlite",
     "*.sqlite3",
     "*.db",

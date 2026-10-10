@@ -168,18 +168,17 @@ def _locked(store: Store):
         yield
 
 
-def _check(store: Store, key: Key, writing: bool) -> None:
+def _check(store: Store, key: Key, scopes: tuple[str, ...]) -> None:
     if key.kind not in store.policy.kinds:
         raise CacheError(f"cache kind {key.kind} is not in the policy")
     if not all(asdict(key).values()):
         raise CacheError("a cache key needs its toolchain, lock, platform and scope")
-    readable = key.scope in store.policy.shared and not writing
-    if key.scope != store.scope and not readable:
+    if key.scope not in scopes:
         raise CacheError(f"cache scope {key.scope} is not granted to this attempt")
 
 
 def attach(store: Store, execution: Execution, key: Key) -> Layer:
-    _check(store, key, writing=False)
+    _check(store, key, (store.scope, *store.policy.shared))
     layers = execution.path("scratch") / "cache"
     layers.mkdir(mode=0o700, exist_ok=True)
     writable = layers / key.digest()
@@ -218,7 +217,7 @@ def _victims(store: Store, size: int) -> list[Path]:
     return victims
 
 
-def _stage(store: Store, layer: Layer) -> Path:
+def _write(store: Store, layer: Layer, entry: Path) -> None:
     staging = store.policy.store / f"{STAGING}{uuid.uuid4().hex}"
     staging.mkdir()
     try:
@@ -227,29 +226,38 @@ def _stage(store: Store, layer: Layer) -> Path:
         record = {"key": asdict(layer.key), "files": files, "bytes": _size(staging / CONTENT)}
         (staging / ENTRY).write_text(json.dumps(record))
         filesystem.seal(staging)
+        now = store.clock()
+        os.utime(staging, (now, now))
+        staging.rename(entry)
     except (OSError, CacheError) as error:
         filesystem.remove(staging)
         reason = error.strerror if isinstance(error, OSError) else str(error)
         raise CacheError(f"the cache entry could not be written: {reason}") from None
-    return staging
 
 
 def publish(store: Store, execution: Execution, layer: Layer) -> Path | None:
     if not store.policy.enabled:
         return None
     filesystem.contain(execution.path("scratch") / "cache", layer.writable)
-    _check(store, layer.key, writing=True)
-    _manifest(layer.writable, store.policy, layer.key.kind)
+    _check(store, layer.key, (store.scope,))
+    files = _manifest(layer.writable, store.policy, layer.key.kind)
     entry = store.policy.store / layer.key.digest()
     with _locked(store):
         for stale in store.policy.store.glob(f"{STAGING}*"):
             filesystem.remove(stale)
-        if not entry.exists() and not entry.is_symlink():
-            victims = _victims(store, _size(layer.writable))
-            staging = _stage(store, layer)
-            for path in victims:
-                _drop(path)
-            now = store.clock()
-            os.utime(staging, (now, now))
-            staging.rename(entry)
+        if entry.exists() or entry.is_symlink():
+            if _recorded(entry) != files:
+                raise CacheError("the cache entry for this key holds other content and is not replaced")
+            return entry / CONTENT
+        victims = _victims(store, _size(layer.writable))
+        _write(store, layer, entry)
+        for path in victims:
+            _drop(path)
     return entry / CONTENT
+
+
+def _recorded(entry: Path) -> dict | None:
+    try:
+        return json.loads((entry / ENTRY).read_text())["files"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
