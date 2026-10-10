@@ -52,6 +52,17 @@ class SpawnRequest:
 
 
 @dataclass(frozen=True)
+class Placement:
+    backend: str
+    lanes: frozenset[str] = frozenset(("eng", "ci"))
+    local_profiles: frozenset[str] = frozenset(("frontend",))
+
+    def backend_for(self, request: SpawnRequest) -> str:
+        placed = request.lane in self.lanes and request.task.get("profile") not in self.local_profiles
+        return self.backend if placed else LOCAL
+
+
+@dataclass(frozen=True)
 class Outcome:
     operation: str
     status: Status
@@ -96,21 +107,32 @@ def legacy(agent: AgentRecord) -> bool:
 
 
 class RuntimeRouter:
-    def __init__(self, runtimes: Iterable[Runtime], default: str = LOCAL, disabled: Iterable[str] = ()):
+    def __init__(
+        self,
+        runtimes: Iterable[Runtime],
+        default: str = LOCAL,
+        disabled: Iterable[str] = (),
+        placement: Placement | None = None,
+    ):
         self.runtimes = {runtime.backend: runtime for runtime in runtimes}
-        self.default, self.disabled = default, frozenset(disabled)
+        self.default, self.disabled, self.placement = default, frozenset(disabled), placement
         self.failures, self.rejected = Counter(), Counter()
 
     @classmethod
-    def from_environ(cls, runtimes: Iterable[Runtime], environ: Mapping[str, str]) -> "RuntimeRouter":
+    def from_environ(
+        cls, runtimes: Iterable[Runtime], environ: Mapping[str, str], placement: Placement | None = None
+    ) -> "RuntimeRouter":
         disabled = [name.strip() for name in environ.get(DISABLED_VARIABLE, "").split(",") if name.strip()]
-        return cls(runtimes, environ.get(BACKEND_VARIABLE) or LOCAL, disabled)
+        return cls(runtimes, environ.get(BACKEND_VARIABLE) or LOCAL, disabled, placement)
 
-    def spawn_backend(self) -> str:
-        return LOCAL if self.default in self.disabled else self.default
+    def spawn_backend(self, request: SpawnRequest | None = None) -> str:
+        wanted = self.default
+        if self.placement is not None and request is not None:
+            wanted = self.placement.backend_for(request)
+        return LOCAL if wanted in self.disabled else wanted
 
     def spawn(self, request: SpawnRequest, needs: Iterable[Capability] = ()) -> Outcome:
-        backend = self.spawn_backend()
+        backend = self.spawn_backend(request)
         if backend not in self.runtimes or backend in self.disabled:
             return Outcome("spawn", Status.UNAVAILABLE, backend, detail=f"no enabled runtime for {backend}")
         return self._call(backend, "spawn", (Capability.SPAWN, *needs), request)

@@ -1,10 +1,10 @@
 from types import SimpleNamespace
 
 import pytest
-from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 
 from scripts.swarm.store import MASTER, SwarmError
 from scripts.swarm.tick import Placed, SpawnError
+from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 from scripts.swarm_v2.kubernetes.watch import BACKEND
 from scripts.swarm_v2.runtime.base import (
     LOCAL,
