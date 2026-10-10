@@ -1,1 +1,38 @@
-{}
+{
+  "case": "T-SV2-LDG-04-C",
+  "independent_runs": 2,
+  "observed": {
+    "case": "T-SV2-LDG-04-C",
+    "evidence_class": "two real ledger server processes sharing one SQLite ledger folder; no Redis fixture",
+    "observed": {
+      "accepted": {
+        "applied": [
+          "c-1"
+        ],
+        "rejected": [],
+        "status": 200
+      },
+      "chat_after_the_new_write": [
+        "Accepted before the crash",
+        "Written after the restart"
+      ],
+      "lease_moved_to_the_restarted_writer": true,
+      "ledger_writer_conflicts_total": 0,
+      "replay": {
+        "applied": [
+          "c-1"
+        ],
+        "rejected": [],
+        "status": 200
+      },
+      "replay_added_nothing": true,
+      "restart_loaded_the_last_committed_revision": true,
+      "rollback": {
+        "exit": 0,
+        "restored_the_backup": true
+      },
+      "snapshot_exit": 0
+    },
+    "state": "passed"
+  }
+}
