@@ -3,13 +3,13 @@ from dataclasses import replace
 
 import fakeredis
 import pytest
-from scripts.swarm_v2.launch import DistributedLaunch, Launch, LaunchTerms
 
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2.accounts import OCCUPIED, RESERVED, AccountCapacity, Slot
 from scripts.swarm_v2.auth_context import GrantRefused, LaunchAuthority, LaunchKey
 from scripts.swarm_v2.controller import Controller
+from scripts.swarm_v2.launch import DistributedLaunch, Launch, LaunchTerms
 from scripts.swarm_v2.registry import LIVE, FleetRegistry, Scope, Session
 from scripts.swarm_v2.runtime.base import Capability, Outcome, RuntimeRouter, SpawnRequest, Status
 
