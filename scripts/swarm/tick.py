@@ -714,13 +714,6 @@ def _spawn_stop(slug, config, store, runtime, now_ms):
     return ""
 
 
-def _placed_elsewhere(config, runtime, lane, task):
-    from scripts.swarm import seat_spawn
-
-    refused = seat_spawn.placed_elsewhere(config, runtime, lane, task)
-    return f"{task['id']}: {refused}" if refused else ""
-
-
 def _record_spawn_failure(slug, store, record, error):
     if record_failure := timing.ON_FAILURE.get():
         record_failure(f"{__name__}._spawn", error)
@@ -734,16 +727,12 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     agents, actions = store.agents(slug), []
     taken = {a.seat for a in agents}
     held = _held_for_master(slug, store, now_ms)
-    for lane, task in _spawn_order(slug, config, store, agents, rows, doc):
+    for lane, task in _spawn_order(slug, config, store, agents, rows, doc, runtime):
         if held:
             return actions + held
         if stop := _spawn_stop(slug, config, store, runtime, now_ms):
             return actions + [stop]
-        blocked = (
-            _placed_elsewhere(config, runtime, lane, task)
-            or _lives_spent(slug, store, ledger, rows, task)
-            or _held_back(slug, ledger, rows, runtime, task, now_ms)
-        )
+        blocked = _lives_spent(slug, store, ledger, rows, task) or _held_back(slug, ledger, rows, runtime, task, now_ms)
         if blocked:
             actions.append(blocked)
             continue
@@ -812,8 +801,8 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     return actions
 
 
-def _spawn_order(slug, config, store, agents, rows, doc):
-    from scripts.swarm import capacity
+def _spawn_order(slug, config, store, agents, rows, doc, runtime):
+    from scripts.swarm import capacity, seat_spawn
 
     decision = capacity.read(store, slug)
     caps = decision.get("effective", {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan})
@@ -823,6 +812,7 @@ def _spawn_order(slug, config, store, agents, rows, doc):
         ready = _launch_order(slug, store, _claimable(slug, store, rows, doc, lane))
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]
+        ready = [task for task in ready if not seat_spawn.placed_elsewhere(config, runtime, lane, task)]
         ready = ready[: max(cap - busy, 0)]
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
     return [(lane, task) for _, lane, task in sorted(queue, key=lambda entry: entry[0])]

@@ -18,6 +18,7 @@ LOCAL, DISTRIBUTED = "local", "distributed"
 NO_SPAWNING = "controller spawning is disabled in this deployment mode"
 NO_KUBERNETES = "the distributed controller spawns only through its Kubernetes runtime"
 WORKSTATION = "the workstation hive spawns {lane} work"
+DISABLED = "the {backend} runtime is disabled on this controller"
 
 
 class FencedLedger:
@@ -66,14 +67,17 @@ class FencedRuntime:
             return refused
         if self.deployment == LOCAL:
             return ""
-        request = SpawnRequest(config, lane, "", task)
-        return (
-            WORKSTATION.format(lane=lane) if self.runtime.router.spawn_backend(request) == WORKSTATION_BACKEND else ""
-        )
+        router = self.runtime.router
+        wanted = router.placement.backend_for(SpawnRequest(config, lane, "", task))
+        if wanted == WORKSTATION_BACKEND:
+            return WORKSTATION.format(lane=lane)
+        return DISABLED.format(backend=wanted) if wanted in router.disabled else ""
 
     def has_capacity(self, config) -> bool:
         lease.renew(self.store, self.slug, self.held)
-        return not self._mode_refusal() and self.runtime.has_capacity(config)
+        if self._mode_refusal():
+            return False
+        return self.deployment == DISTRIBUTED or self.runtime.has_capacity(config)
 
     def spawn(self, config, lane, name, task):
         lease.renew(self.store, self.slug, self.held)
