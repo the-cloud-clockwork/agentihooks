@@ -104,8 +104,24 @@ details.phase-fold > summary::before, details.plan-fold > summary::before { alig
   font-size: var(--fs-meta); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); cursor: pointer; white-space: nowrap; opacity: .45; transition: opacity .15s; }
 .scope::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 1px solid currentColor; }
 .item:hover .scope, .scope:focus-visible { opacity: .85; outline: none; }
-.out .scope { opacity: 1; color: var(--warn); }
-.out .scope::before { background: var(--warn); }
+.out > .row .scope, .plan.out > details > summary .scope { opacity: 1; color: var(--warn); }
+.out > .row .scope::before, .plan.out > details > summary .scope::before { background: var(--warn); }
+.freeze { flex: none; background: none; border: 0; padding: 2px 0; font: inherit; font-size: var(--fs-meta); letter-spacing: .08em; text-transform: uppercase;
+  color: var(--muted); cursor: pointer; white-space: nowrap; opacity: .45; transition: opacity .15s; }
+.item:hover .freeze, .plan:hover > details > summary .freeze, .slice:hover > .freeze, .freeze:focus-visible { opacity: .85; outline: none; }
+.freeze[aria-pressed=true] { opacity: 1; color: var(--frozen); }
+.scope:disabled, .item-actions .link:disabled { cursor: not-allowed; opacity: .3; }
+.plan-actions { margin-left: auto; align-self: center; }
+.plan { position: relative; }
+.snowflake { position: absolute; display: inline-block; top: 14px; left: -18px; width: 13px; height: 13px; color: var(--frozen); }
+.snowflake svg { display: block; width: 100%; height: 100%; }
+.item:first-child > .snowflake, .plan:first-child > .snowflake { top: 2px; }
+.plan > .snowflake { top: 12px; }
+.slice { display: inline-flex; align-items: baseline; gap: 8px; }
+.slice > .snowflake, .sw-table .snowflake { position: static; align-self: center; }
+.frozen > .row > :not(.item-actions), .frozen > .row > .item-actions > :not(.freeze),
+.plan.frozen > details > summary > :not(.plan-actions), .plan.frozen > details > summary > .plan-actions > :not(.freeze),
+.slice.frozen > .slice-name { opacity: .45; }
 .out .item-title, .out .text, .out .desc, .out .num { color: var(--muted); opacity: .6; }
 .out input[type=checkbox] { opacity: .35; cursor: not-allowed; }
 .sync { position: fixed; left: 16px; bottom: 16px; z-index: 10; width: 44px; height: 44px; border-radius: 12px; display: grid;
