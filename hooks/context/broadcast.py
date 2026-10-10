@@ -520,6 +520,35 @@ def reconcile_channel_broadcasts(channel: str, desired: list[dict]) -> dict:
     }
 
 
+def cache_fleet_broadcasts(entries: list[dict]) -> int:
+    """Cache fleet revisions claimed for one session each, keeping only the newest revision per session; entries
+    without a ``fleet`` tag are local broadcasts and stay untouched. Returns how many new entries the file kept."""
+
+    def name(m: dict) -> tuple[str, str, str]:
+        return m["fleet"]["swarm"], m["fleet"]["broadcast_id"], m["fleet"]["session"]
+
+    with _file_lock(_broadcast_path()):
+        msgs = _read_broadcasts()
+        held = {m["id"] for m in msgs}
+        tagged = sorted((m for m in [*msgs, *entries] if "fleet" in m), key=lambda m: m["fleet"]["revision"])
+        newest = {name(m): m["fleet"]["revision"] for m in tagged}
+        kept = [m for m in msgs if "fleet" not in m or m["fleet"]["revision"] == newest[name(m)]]
+        added = [
+            {**entry, "content_hash": _msg_hash(entry)}
+            for entry in entries
+            if entry["id"] not in held and entry["fleet"]["revision"] == newest[name(entry)]
+        ]
+        if not added and len(kept) == len(msgs):
+            return 0
+        saved = kept + added
+        fleet_ids = [m["id"] for m in saved if "fleet" in m]
+        evicted = set(fleet_ids[: max(len(saved) - BROADCAST_MAX_MESSAGES, 0)])
+        saved = [m for m in saved if m["id"] not in evicted][-BROADCAST_MAX_MESSAGES:]
+        _save_broadcasts(saved)
+        fresh = {m["id"] for m in added}
+        return sum(1 for m in saved if m["id"] in fresh)
+
+
 def find_broadcast_by_content_hash(content_hash: str, channel: str | None = None) -> dict | None:
     """Return the most recent broadcast matching content_hash + channel, else None."""
     if not content_hash:
@@ -566,6 +595,7 @@ def clear_broadcasts(message_id: str | None = None, channel: str | None = None) 
 
 
 def _admitted(session_id: str, msgs: list[dict]) -> list[dict]:
+    msgs = [m for m in msgs if "fleet" not in m or m["fleet"]["session"] == session_id]
     return quarantine.keep(
         session_id,
         "broadcast",
