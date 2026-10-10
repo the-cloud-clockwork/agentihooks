@@ -563,9 +563,18 @@ def test_diagnose_reports_names_never_values(tmp_path):
 
 
 def run_main(args, capsys, monkeypatch, environ):
-    monkeypatch.setattr(os, "environ", environ)
-    code = main(args)
+    code = main(args, environ)
     return code, capsys.readouterr()
+
+
+def test_cli_defaults_to_the_process_arguments_and_environment(tmp_path, capsys, monkeypatch):
+    attempt, _, environ = fixture(tmp_path)
+    for name, value in environ.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("BRAIN_URL", raising=False)
+    monkeypatch.setattr("sys.argv", ["health.py", "readiness", "--attempt", str(attempt), "--harness", "codex"])
+    assert main() == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "ready"
 
 
 def test_cli_exit_codes_follow_status(tmp_path, capsys, monkeypatch):
@@ -587,7 +596,13 @@ def test_cli_exit_codes_follow_status(tmp_path, capsys, monkeypatch):
 
 @pytest.mark.parametrize(
     "args",
-    [[], ["ready", "--attempt", "a", "--harness", "codex"], ["startup", "--attempt", "a", "--harness", "copilot"]],
+    [
+        [],
+        ["ready", "--attempt", "a", "--harness", "codex"],
+        ["startup", "--attempt", "a", "--harness", "copilot"],
+        ["startup", "--harness", "codex"],
+        ["startup", "--attempt", "a"],
+    ],
 )
 def test_cli_usage_errors_exit_64(args, capsys, monkeypatch):
     code, out = run_main(args, capsys, monkeypatch, {})

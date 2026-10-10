@@ -240,12 +240,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, environ: dict | None = None) -> int:
     try:
         args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
     except SystemExit as exc:
         return 0 if exc.code == 0 else 64
-    report = evaluate(Probe(args.attempt, args.harness, dict(os.environ)), args.mode)
+    report = evaluate(Probe(args.attempt, args.harness, dict(os.environ) if environ is None else environ), args.mode)
     print(json.dumps(report, sort_keys=True), flush=True)
     return 0 if args.mode == "diagnose" or report["status"] in ("live", "ready", "degraded") else 1
 
