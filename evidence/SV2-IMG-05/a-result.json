@@ -1,0 +1,109 @@
+{
+  "case": "T-SV2-IMG-05-A",
+  "fixture_manifest": {
+    "inputs": {
+      "docker/swarm-node/Dockerfile": "f36e23bd81a2c2f85942cd79de53bee3010e6e3fe9c381fd8a43a5ca33a8c448",
+      "docker/swarm-node/publish.sh": "ce45bb34a223c600af4795df4584eed62f572bae74188a1bc461c6a4edcaffc6",
+      "docker/swarm-node/qualify.sh": "3a109a0851e18c394283c1b472c351e185535731bf0a6b36a69fddee70d9126d",
+      "docker/swarm-node/versions.lock": "b544826239a51a515cf4e6a814844f60d2b8c15f390f0b8869454465686d9b58",
+      "tests/contracts/image_manifest/incompatible-herdr/Dockerfile": "e1414d36b233c16271d35c43a305ff69619a6a0b34fa1956d164beaf7fba9437",
+      "tests/contracts/image_manifest/incompatible-herdr/herdr": "ffe77581bb54fa4659a21a1d3b350e55f453d7336a96881d0cbda2246145ef96"
+    },
+    "tested_commit": "13654b4a725ccff96384786575614fad00752a08"
+  },
+  "independent_qualifications": 2,
+  "mocked": false,
+  "package": "SV2-IMG-05",
+  "registry_missing_tag_reply": "ERROR: ghcr.io/the-cloud-clockwork/agentihooks-worker-proof:sha-13654b4a725ccff96384786575614fad00752a08: not found",
+  "release_artifact": {
+    "compatibility": {
+      "baseline": "local herdr 0.9.1 runtime path",
+      "herdr_methods": [
+        "agent.get",
+        "agent.list",
+        "agent.prompt",
+        "agent.rename",
+        "pane.close",
+        "pane.list",
+        "pane.process_info",
+        "pane.read",
+        "pane.send_keys",
+        "pane.send_text",
+        "pane.split",
+        "pane.wait_for_output",
+        "server.stop",
+        "tab.close",
+        "tab.create",
+        "tab.list",
+        "workspace.close",
+        "workspace.create",
+        "workspace.list"
+      ],
+      "herdr_protocol": 22,
+      "herdr_server_capabilities": {
+        "endpoint_protocol_generation": 1,
+        "health_check": true
+      },
+      "targets": {
+        "claude": "2.1.295 (Claude Code)",
+        "codex": "codex-cli 0.162.0",
+        "herdr": "herdr 0.9.1"
+      }
+    },
+    "config": "sha256:6245fc43db0abe012de6218f687707a1992bdd2e3ba6ceb53f6b6591725e6da0",
+    "digest": "sha256:bff25cb56014d1008ee2cafb647d374714cc3cfd5ea7be6c153cb75dfd72dca8",
+    "manifest_source_revision": "13654b4a725ccff96384786575614fad00752a08",
+    "promoted": true,
+    "provenance": {
+      "commit": "13654b4a725ccff96384786575614fad00752a08",
+      "ref": "refs/heads/diffcheck/vimg5-image",
+      "repository": "the-cloud-clockwork/agentihooks",
+      "run_attempt": "1",
+      "run_id": "38049448237",
+      "runner": "github-hosted",
+      "workflow": "the-cloud-clockwork/agentihooks/.github/workflows/swarm-node-image.yml@refs/heads/diffcheck/vimg5-image"
+    },
+    "replayed": false,
+    "report": {
+      "package": "SV2-IMG-05",
+      "promotable": true,
+      "targets": {
+        "claude": {
+          "observed": "2.1.295 (Claude Code)",
+          "pinned": "2.1.295 (Claude Code)",
+          "qualified": true,
+          "refusals": []
+        },
+        "codex": {
+          "observed": "codex-cli 0.162.0",
+          "pinned": "codex-cli 0.162.0",
+          "qualified": true,
+          "refusals": []
+        },
+        "herdr": {
+          "observed": "herdr 0.9.1",
+          "pinned": "herdr 0.9.1",
+          "qualified": true,
+          "refusals": []
+        }
+      },
+      "worker_image_qualified_targets": 3
+    },
+    "tags": [
+      "ghcr.io/the-cloud-clockwork/agentihooks-worker-proof:sha-13654b4a725ccff96384786575614fad00752a08"
+    ]
+  },
+  "reports_identical": true,
+  "run_attempt": 1,
+  "runner": "github-hosted",
+  "state": {
+    "accepted": "attestation promotable",
+    "committed": "pushed to the proof repository under the commit tag",
+    "externally_verified": "registry config digest equals tested image id",
+    "observed": "real GitHub hosted build and isolated offline containers"
+  },
+  "tested_commit": "13654b4a725ccff96384786575614fad00752a08",
+  "tested_image_id": "sha256:6245fc43db0abe012de6218f687707a1992bdd2e3ba6ceb53f6b6591725e6da0",
+  "worker_image_qualified_targets": 3,
+  "workflow_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38049448237"
+}

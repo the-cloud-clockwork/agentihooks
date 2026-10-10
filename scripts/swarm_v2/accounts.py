@@ -187,17 +187,21 @@ class AccountCapacity:
 
     def release(self, token: str) -> Slot | None:
         grant = self._grant(token)
-        holder = self._holder(grant.seat_id)
+        return self.end(grant.account, grant.seat_id, grant.execution_id, grant.generation)
+
+    def end(self, account: str, seat: str, execution_id: str, generation: int) -> Slot | None:
+        """Releases the slot held by exactly this execution and generation; takes no grant."""
+        holder = self._holder(seat)
 
         def decide(pipe, slots, now):
             held = slots.get(holder)
             if held is None:
                 return [], [], None
-            if not self._owns(held, grant):
+            if (held.execution_id, held.generation) != (execution_id, generation):
                 raise SwarmError("stale_generation")
             return [], [holder], held
 
-        return self._write(grant.account, decide)
+        return self._write(account, decide)
 
     def slots(self, account: str) -> list[Slot]:
         now = self.clock()
