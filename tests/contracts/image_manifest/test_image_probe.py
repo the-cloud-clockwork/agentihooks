@@ -200,7 +200,16 @@ def test_herdr_runs_a_private_headless_server_and_reads_its_capabilities(tmp_pat
     }
     devnull = subprocess.DEVNULL
     assert server.started == [
-        (["herdr", "server"], {"env": environ, "stdin": devnull, "stdout": devnull, "stderr": devnull})
+        (
+            ["herdr", "server"],
+            {
+                "env": environ,
+                "stdin": devnull,
+                "stdout": devnull,
+                "stderr": devnull,
+                "start_new_session": True,
+            },
+        )
     ]
     assert home.stat().st_mode & 0o777 == 0o700
     assert server.terminated and server.waited == 10

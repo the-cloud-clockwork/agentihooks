@@ -76,7 +76,9 @@ def herdr(execution: filesystem.Execution, environ: dict) -> dict:
     )
     Path(environ["HOME"]).mkdir(mode=0o700)
     devnull = subprocess.DEVNULL
-    server = subprocess.Popen(HERDR_SERVER, env=environ, stdin=devnull, stdout=devnull, stderr=devnull)
+    server = subprocess.Popen(
+        HERDR_SERVER, env=environ, stdin=devnull, stdout=devnull, stderr=devnull, start_new_session=True
+    )
     try:
         status = server_status(environ)
         schema = parsed(run(HERDR_SCHEMA, environ, COMMAND_SECONDS).stdout)
