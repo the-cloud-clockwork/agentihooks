@@ -444,7 +444,8 @@ class Check:
                 continue
             record = verdicts.read(task["id"])
             judged = record and record["verdict"] != PENDING and not record.get("planned")
-            if self.mode != "coach" and judged and _same_phase(record, task):
+            reused = self.mode != "coach" and judged and _same_phase(record, task)
+            if reused and record.get("inputs") == _fingerprint(doc, task):
                 continue
             tasks.append((task, record))
         with ThreadPoolExecutor(max_workers=2) as workers:
@@ -461,7 +462,7 @@ class Check:
         return actions
 
     def _judge(self, doc, task):
-        inputs = _fingerprint(doc, task) if self.mode == "coach" else None
+        inputs = _fingerprint(doc, task)
         previous = self._unmoved(task, inputs)
         if previous:
             return _Judgment(None, previous, None, None)
@@ -492,12 +493,8 @@ class Check:
         fixed = bool(previous) and previous["verdict"] == FAIL and previous["head"] != head
         rounds = min(previous["coach_rounds"] + fixed, 2) if previous else 0
         _remember(self.slug, task, self.now_ms, state, judgment.answer, self.home)
-        coached = (
-            {"coach_rounds": rounds, "head": head, "url": task["pr_url"], "inputs": judgment.inputs}
-            if self.mode == "coach"
-            else {}
-        )
-        fields = {"phase": task.get("phase"), **coached}
+        coached = {"coach_rounds": rounds, "head": head, "url": task["pr_url"]} if self.mode == "coach" else {}
+        fields = {"phase": task.get("phase"), **coached, "inputs": judgment.inputs}
         verdicts.write(task["id"], verdict, reason, self.now_ms, **fields)
         if self.mode == "coach":
             self._coaching().write(task["id"], verdict, reason, self.now_ms, **fields)

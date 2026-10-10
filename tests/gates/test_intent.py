@@ -439,7 +439,13 @@ class TestCheckPass:
     def test_a_fail_under_enforce_returns_the_task_to_its_agent(self, tmp_path):
         verdicts(tmp_path).write(TASK, "pending", "intent check running", NOW - 5)
         got = run_pass(tmp_path)
-        assert verdicts(tmp_path).read(TASK) == {"verdict": "fail", "reason": FAIL_REASON, "at": NOW, "phase": "p8"}
+        assert verdicts(tmp_path).read(TASK) == {
+            "verdict": "fail",
+            "reason": FAIL_REASON,
+            "at": NOW,
+            "phase": "p8",
+            "inputs": intent._fingerprint(DOC, DOC["tasks"][0]),
+        }
         assert got.viewed == [URL]
         assert got.ledger.updates == [(SLUG, TASK, {"state": "claimed"}, "swarm")]
         assert got.ledger.comments == [(SLUG, TASK, FAIL_COMMENT, "swarm")]
@@ -507,13 +513,15 @@ class TestCheckPass:
             "reason": "the phase can use it as delivered at probability 0.90",
             "at": NOW,
             "phase": "p8",
+            "inputs": intent._fingerprint(DOC, DOC["tasks"][0]),
         }
         assert (got.ledger.updates, got.mail.sent, rows(tmp_path)) == ([], [], [])
         assert got.actions == [f"task {TASK} intent check pass"]
 
     @pytest.mark.parametrize("verdict", ["pass", "fail", "unchecked"])
     def test_a_judged_task_is_not_asked_again(self, tmp_path, verdict):
-        verdicts(tmp_path).write(TASK, verdict, "done before", NOW - 5, phase="p8")
+        inputs = intent._fingerprint(DOC, DOC["tasks"][0])
+        verdicts(tmp_path).write(TASK, verdict, "done before", NOW - 5, phase="p8", inputs=inputs)
         got = run_pass(tmp_path)
         assert (got.actions, got.viewed) == ([], [])
         assert verdicts(tmp_path).read(TASK)["at"] == NOW - 5
@@ -561,7 +569,7 @@ class TestCheckPass:
             {**base, "id": "c", "pr_url": "https://github.com/o/r/pull/404"},
             {**base, "id": "d"},
         ]
-        verdicts(tmp_path).write("b", "pass", "judged", NOW - 5, phase="p8")
+        verdicts(tmp_path).write("b", "pass", "judged", NOW - 5, phase="p8", inputs=intent._fingerprint(DOC, base))
 
         def view(url):
             return None if url.endswith("/404") else PR
