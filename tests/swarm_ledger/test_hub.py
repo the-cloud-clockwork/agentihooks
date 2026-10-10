@@ -228,25 +228,41 @@ def test_wait_returns_nothing_after_its_timeout():
     assert events == [] and took >= 0.05
 
 
-@pytest.mark.wall_clock
-def test_wait_wakes_at_once_on_a_publish():
+def woken_by_a_publish():
     hub = Hub()
     opened(hub)
     timer = threading.Timer(0.05, hub.publish, args=(SLUG, "ledger", ledger(2)))
     timer.start()
     events, took = bounded(hub.wait, SLUG, 0, 1.5)
     timer.join()
-    assert [at for at, *_ in events] == [1] and took < 1
+    return [at for at, *_ in events], took
 
 
-@pytest.mark.wall_clock
-def test_wait_answers_at_once_when_events_are_already_kept():
+def answered_from_kept_events():
     hub = Hub()
     opened(hub)
     for rev in (2, 3, 4):
         hub.publish(SLUG, "ledger", ledger(rev))
     events, took = bounded(hub.wait, SLUG, 2, 1.5)
-    assert [at for at, *_ in events] == [3] and took < 1
+    return [at for at, *_ in events], took
+
+
+def test_wait_wakes_on_a_publish():
+    assert woken_by_a_publish()[0] == [1]
+
+
+@pytest.mark.wall_clock
+def test_wait_wakes_at_once_on_a_publish():
+    assert woken_by_a_publish()[1] < 1
+
+
+def test_wait_answers_when_events_are_already_kept():
+    assert answered_from_kept_events()[0] == [3]
+
+
+@pytest.mark.wall_clock
+def test_wait_answers_at_once_when_events_are_already_kept():
+    assert answered_from_kept_events()[1] < 1
 
 
 def test_wait_raises_expired_when_a_slow_reader_fell_out_of_retention():

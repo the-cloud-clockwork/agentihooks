@@ -3,6 +3,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -561,20 +562,33 @@ def test_shard_stats_run_in_stats_mode_with_their_own_basetemp_and_record_everyt
     assert result == {"status": 4, "tests": {"m.x_f": ["a::t", "b::t"]}, "durations": {"a::t": 2.5}}
 
 
-def test_the_wall_clock_marker_is_registered_and_carried_by_every_budget_test():
-    import tomllib
+def test_a_bucket_whose_every_test_carries_the_marker_counts_as_collected(tmp_path, monkeypatch):
+    from scripts.ci_mutation.selection import collect_shard_stats
 
+    monkeypatch.setenv("MUTANT_UNDER_TEST", os.environ.get("MUTANT_UNDER_TEST", ""))
+    monkeypatch.setenv("PY_IGNORE_IMPORTMISMATCH", "0")
+    engine = SimpleNamespace(tests_by_mangled_function_name={}, duration_by_test={})
+    runner = SimpleNamespace(_pytest_add_cli_args=[], run_stats=lambda *, tests: 5)
+    output = tmp_path / "out.json"
+    collect_shard_stats(SimpleNamespace(mutmut=engine), runner, ["tests/test_a.py"], output, str(tmp_path))
+    assert json.loads(output.read_text())["status"] == 0
+
+
+def test_the_wall_clock_marker_is_registered_on_the_budget_tests():
     root = Path(__file__).resolve().parents[1]
     markers = tomllib.loads((root / "pyproject.toml").read_text())["tool"]["pytest"]["ini_options"]["markers"]
     assert any(marker.startswith("wall_clock:") for marker in markers)
     for path, test in [
-        ("tests/swarm_ledger/test_hook.py", "    def test_block_budget_then_allow("),
-        ("tests/test_hook_targets.py", "    def test_deep_history_stays_fast("),
-        ("tests/swarm_ledger/test_hub.py", "def test_wait_wakes_at_once_on_a_publish("),
-        ("tests/swarm_ledger/test_hub.py", "def test_wait_answers_at_once_when_events_are_already_kept("),
+        (
+            "tests/swarm_ledger/test_hook.py",
+            "    @pytest.mark.wall_clock\n    def test_four_stops_answer_within_two_seconds(",
+        ),
+        ("tests/test_hook_targets.py", "    @pytest.mark.wall_clock\n    def test_deep_history_stays_fast("),
+        ("tests/swarm_ledger/test_hub.py", "@pytest.mark.wall_clock\ndef test_wait_wakes_at_once_on_a_publish("),
+        ("tests/swarm_ledger/test_hub.py", "@pytest.mark.wall_clock\ndef test_wait_answers_at_once_when_events_"),
+        ("tests/gates/test_prompts.py", "@pytest.mark.wall_clock\ndef test_inline_scripts_read_a_long_option_"),
     ]:
-        indent = test[: len(test) - len(test.lstrip())]
-        assert f"{indent}@pytest.mark.wall_clock\n{test}" in (root / path).read_text(), (path, test)
+        assert test in (root / path).read_text(), (path, test)
 
 
 def test_parallel_stats_merge_every_shard_and_fail_on_any_red_shard(tmp_path, capsys):
@@ -594,7 +608,7 @@ def test_parallel_stats_merge_every_shard_and_fail_on_any_red_shard(tmp_path, ca
 
         def run_stats(self, *, tests):
             assert os.environ["MUTANT_UNDER_TEST"] == "stats"
-            basetemp = Path(self._pytest_add_cli_args[1].removeprefix("--basetemp="))
+            basetemp = Path(self._pytest_add_cli_args[-1].removeprefix("--basetemp="))
             assert basetemp.is_dir()
             assert basetemp.name.startswith("mutation-stats-")
             for test in tests:

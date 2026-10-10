@@ -221,12 +221,17 @@ class Gate(unittest.TestCase):
         bash(f"python3 {SCRIPTS}/ledger.py --slug {SLUG} --as boss ack")
         self.assertIsNone(hook("Stop"))
 
-    @pytest.mark.wall_clock
     def test_block_budget_then_allow(self):
         ask("still there", 3)
-        start = time.monotonic()
         results = [hook("Stop") for _ in range(4)]
         self.assertEqual([bool(r) for r in results], [True, True, True, False])
+
+    @pytest.mark.wall_clock
+    def test_four_stops_answer_within_two_seconds(self):
+        ask("still there", 3)
+        start = time.monotonic()
+        for _ in range(4):
+            hook("Stop")
         self.assertLess(time.monotonic() - start, 2)
 
     def test_work_without_recording_blocks_stop(self):
