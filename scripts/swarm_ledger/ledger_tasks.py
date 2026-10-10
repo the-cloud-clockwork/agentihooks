@@ -61,7 +61,7 @@ PARENT_FIELDS = {"slice", "phase", "plan_slice", "plan_lines"}
 WORKER_LANES = ("eng", "ci")
 SWARM = "swarm"
 RANK_AUTHORS = ("operator", SWARM, "dispatcher")
-RANK_LANES = ("master", "plan", "dispatch")
+RANK_LANES = ("master", "dispatch")
 PROPOSE = 'propose the work with agentihooks ledger followup add "<plain words>" and the master decides'
 PUBLISH = (
     "publish the plan with agentihooks ledger publish-plan <file> --phase <phase id>, then link each task with "

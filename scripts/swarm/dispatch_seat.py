@@ -10,7 +10,7 @@ import json
 from dataclasses import replace
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import bottleneck, dev_red, lane_split, seat_spawn
+from scripts.swarm import bottleneck, dev_red, lane_split, lifetime, seat_spawn
 from scripts.swarm.store import DISPATCH, FULL
 
 LANE = DISPATCH
@@ -19,6 +19,7 @@ SENDER = "swarm"
 STALE_MS = 15 * 60 * 1000
 SENT = "dispatch-sent"
 ENDED_STATES = ("stopping", "stopped")
+REFUSED = "dispatcher triggers are still open; settle them, or the tick ends your seat once they close:\n{lines}"
 WAKE = "New dispatcher triggers in swarm {slug}:\n{lines}\nSettle each one, then tell the master what you did."
 LINES = {
     "priority": "- The priority on {item} is unresolved after {minutes} minutes: {text}",
@@ -58,10 +59,20 @@ def line(trigger: dict) -> str:
     return LINES[trigger.get("kind", "priority")].format(**trigger)
 
 
+def open_triggers(slug: str, config, store, doc: dict, now_ms: int, sleeping: bool) -> list[dict]:
+    active = config.autonomy == FULL and config.state not in ENDED_STATES and not sleeping
+    return triggers(doc, now_ms) + uncovered(store, slug, now_ms) + red_dev(store, slug, doc) if active else []
+
+
+def refusal(slug: str, config, store, doc: dict, now_ms: int) -> str:
+    sleeping = lifetime.sleeping(slug, store, {task["id"]: task for task in doc["tasks"]})
+    found = open_triggers(slug, config, store, doc, now_ms, sleeping)
+    return REFUSED.format(lines="\n".join(line(trigger) for trigger in found)) if found else ""
+
+
 def run(slug: str, config, store, runtime, doc: dict, now_ms: int, sleeping: bool = False) -> list[str]:
     seats = [a for a in store.agents(slug) if a.lane == LANE and a.state != "finished"]
-    active = config.autonomy == FULL and config.state not in ENDED_STATES and not sleeping
-    found = triggers(doc, now_ms) + uncovered(store, slug, now_ms) + red_dev(store, slug, doc) if active else []
+    found = open_triggers(slug, config, store, doc, now_ms, sleeping)
     if not found:
         store.redis.delete(store.key(slug, SENT))
         return [_end(slug, store, seat) for seat in seats]

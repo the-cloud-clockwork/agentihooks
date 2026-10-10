@@ -100,6 +100,44 @@ def test_the_seat_ends_when_its_triggers_close_or_autonomy_drops():
     assert run(store, runtime, doc(priority()), NOW + MINUTE)[0].startswith("ended dispatcher")
 
 
+def test_done_from_the_seat_is_refused_while_a_trigger_is_open_and_names_it():
+    store = swarm()
+    refused = dispatch_seat.refusal(SLUG, store.config(SLUG), store, doc(priority()), NOW)
+    assert refused == (
+        "dispatcher triggers are still open; settle them, or the tick ends your seat once they close:\n"
+        "- The priority on questions/q1 is unresolved after 15 minutes: Pick the release day"
+    )
+
+
+def test_done_from_the_seat_names_every_open_trigger_one_per_line():
+    from scripts.swarm import dev_red
+
+    store = swarm()
+    dev_red.hold(store.redis, SLUG, "t9", 77)
+    found = {**doc(priority()), "tasks": [{"id": "t9", "state": "blocked"}]}
+    assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, found, NOW).splitlines()[1:] == [
+        "- The priority on questions/q1 is unresolved after 15 minutes: Pick the release day",
+        "- Dev Tests run 77 is red and holds these blocked tasks: t9. Propose a freeze or a focus to the master if one "
+        "would help.",
+    ]
+
+
+@pytest.mark.parametrize("autonomy, age", [("full", 15 * MINUTE - 1), ("delegate", 15 * MINUTE)])
+def test_done_from_the_seat_passes_once_no_trigger_is_open(autonomy, age):
+    store = swarm(autonomy)
+    assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, doc(priority(age=age)), NOW) == ""
+
+
+def test_done_from_the_seat_passes_while_the_swarm_sleeps_as_the_tick_raises_nothing_then():
+    store = swarm()
+    store.redis.set(store.key(SLUG, "master-retired-tasks"), json.dumps(["t1"]))
+    found = {**doc(priority()), "tasks": [{"id": "t1", "state": "done"}]}
+    assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, found, NOW) == ""
+    woken = {**found, "tasks": [{"id": "t2", "state": "open"}]}
+    assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, woken, NOW).startswith("dispatcher triggers")
+    assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, found, NOW).startswith("dispatcher triggers")
+
+
 def test_no_session_slot_holds_the_spawn():
     store, runtime = swarm(), FakeRuntime(full=True)
     assert run(store, runtime, doc(priority())) == ["no session slot for the dispatcher, waiting"]
@@ -163,7 +201,8 @@ After each trigger, tell the master what you did: agentihooks msg send master@{S
 New triggers arrive as inbox messages: answer one with agentihooks msg reply <id> "<text>", or close it with \
 agentihooks msg close <id> done "<where the work went>".
 While you wait on a trigger, declare it: agentihooks swarm {SLUG} wait 30 --reason "<what you wait on>".
-When every trigger is closed, run {LED} leave and stop: the swarm ends your session.
+When every trigger is closed, run {LED} leave, then agentihooks swarm {SLUG} done and stop: the swarm ends your \
+session.
 Write ledger comments and messages in plain words: no ids, paths, hashes or dashes.
 """
 TRIGGER_LINE = "- The priority on questions/q1 is unresolved after 15 minutes: Pick the release day\n"

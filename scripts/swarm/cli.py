@@ -74,6 +74,7 @@ from scripts.swarm import (
     control_notifications,
     delivery,
     dev_red,
+    dispatch_seat,
     dispatcher,
     done_gate,
     idle,
@@ -248,7 +249,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                 now_ms(),
                 len(actions),
                 os.environ,
-                metrics.metrics_swarm.TickInput(store, doc, found, view),
+                metrics.metrics_swarm.TickInput(store, doc, found, view, ledger),
             )
             window = wake.window_ms(os.environ)
             actions += skip_refused(
@@ -1028,6 +1029,8 @@ def cmd_merge(store, args):
 
 def cmd_done(store, args):
     agent = _worker(store, args)
+    if agent.lane == dispatch_seat.LANE:
+        return _dispatcher_done(store, args.slug, agent)
     done_gate.require_local(store, args.slug, agent.task)
     ledger = LedgerClient()
     row = next((t for t in ledger.tasks(args.slug) if t.get("id") == agent.task), {})
@@ -1064,6 +1067,14 @@ def cmd_done(store, args):
     waits.settle_notices(InboxStore(store.redis), agent, "done")
     _retire(store, args.slug, agent, "finished its task and exited")
     print(json.dumps({"task": agent.task, "state": "done", "next": "stop now; the swarm closes this session"}))
+
+
+def _dispatcher_done(store, slug, agent):
+    refused = dispatch_seat.refusal(slug, store.config(slug), store, LedgerClient().state(slug), now_ms())
+    if refused:
+        raise SwarmError(refused)
+    _retire(store, slug, agent, "settled its triggers and exited")
+    print(json.dumps({"seat": agent.name, "state": "finished", "next": "stop now; the swarm closes this session"}))
 
 
 def _close_members(ledger, slug, agent, lead, fields):

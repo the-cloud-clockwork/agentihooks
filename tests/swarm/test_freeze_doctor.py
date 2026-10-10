@@ -1,8 +1,13 @@
+import json
+from urllib.error import URLError
+
 import pytest
 
 from scripts.doctor import loop, priming
-from scripts.swarm import capacity, freeze
+from scripts.swarm import capacity, freeze, metrics, metrics_outbox, metrics_swarm
+from scripts.swarm.host_budget import HostSample
 from scripts.swarm.ledger_client import LedgerGone
+from scripts.swarm.metrics_outbox import Outbox, Settings
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_freeze import PHASES, PLANS, SLICES, FrozenLedger, record, spawned
@@ -147,3 +152,31 @@ def test_the_capacity_pass_for_the_doctor_counts_no_task_the_watched_focus_holds
     ledger, runtime = doctor(store, [record("plans/a", "focus")]), DemandRuntime()
     capacity.apply("sw", store.config("sw"), store, ledger, runtime, 1_000)
     assert runtime.demand == [{"eng": 1, "ci": 0, "plan": 0}]
+
+
+def test_the_held_spawns_gauge_counts_no_doctor_task_the_watched_focus_holds(store, monkeypatch, tmp_path):
+    ledger = doctor(store, [record("plans/a", "focus")])
+    store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"configured": {"eng": 2}}))
+    monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(1.0, 1, 512, 0))
+    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
+    monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
+    monkeypatch.setattr(metrics.metrics_ledger, "record", lambda *args: None)
+    spool = tmp_path / "outbox.db"
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: spool)
+    monkeypatch.setattr(
+        metrics_outbox.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(URLError("sink down")),
+    )
+    configured = {"AGENTIHOOKS_METRICS_URL": "http://sink", "AGENTIHOOKS_METRICS_USER": "test"}
+    snapshot = metrics_swarm.TickInput(store, ledger.state("sw"), [], lambda url: None, ledger)
+    assert metrics.record_pass("sw", 1_000, 0, configured, snapshot) == []
+    box = Outbox(spool, Settings("http://sink", "", ""))
+    try:
+        [row] = box.recent("host_samples", 1_000)
+    finally:
+        box.close()
+    assert row["held_spawns"] == 1
+    assert row["held_by"] == "quota"
+    assert "watched" in ledger.read
