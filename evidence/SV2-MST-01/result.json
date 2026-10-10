@@ -6,7 +6,7 @@
   "dependents": [],
   "integration_gate": "G10",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2426",
-  "pull_request": null,
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2464",
   "tested_commit": "7fa7b333b3a4",
   "status": "mocked-acceptance-qualified",
   "package_complete": false,
