@@ -1,5 +1,5 @@
 {
-  "tested_commit": "cba41f202402f9445a3b7bc58a1ba63abeaa0ac0",
+  "tested_commit": "791c069052a28042da9733c509af815ec85a00a5",
   "evidence_class": "mocked Redis, fake server clock, fixture network and an in process worker helper standing in for kubectl exec; no Kubernetes API server, kubelet exec or live worker Pod",
   "cases": [
     "T-SV2-KUB-03-A",

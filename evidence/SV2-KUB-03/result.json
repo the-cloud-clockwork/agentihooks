@@ -4,8 +4,8 @@
   "dependency": "SV2-KUB-02",
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2459",
-  "tested_commit": "cba41f202402f9445a3b7bc58a1ba63abeaa0ac0",
-  "status": "fixture-qualified-awaiting-ci",
+  "tested_commit": "791c069052a28042da9733c509af815ec85a00a5",
+  "status": "fixture-qualified",
   "evidence_class": "Mocked: fakeredis command queue, operation journal and execution registry, a fake server clock, a fixture network between worker and API, and an in process run of the worker helper standing in for kubectl exec; no Kubernetes API server, kubelet exec or live worker Pod was used.",
   "interfaces": [
     "scripts.swarm_v2.kubernetes.commands: KubernetesCommandTransport(queue, pods, runner, expires_in_ms, fallback_enabled) is the runtime CommandTransport for backend kubernetes carrying answer, drain and cancel; apply_operation issues the structured command into the SV2-LDG-05 CommandQueue keyed by the operation id with the execution generation and expiry, and the worker receives it over the authenticated command endpoint",
@@ -28,17 +28,17 @@
   "authority": "The actor comes from Commands, which accepts only an authenticated operator or the current master incarnation, and the command queue issues only to the current occupant generation of the seat; a forged credential is refused before any write in case B. The fallback execs only into a Pod whose owner label is owner_for(slug) and whose execution and generation labels match the stored command; the helper refuses an envelope for another execution or generation of its own launch record. Kubernetes RBAC for pods/exec in the worker namespace bounds who can run the helper at all.",
   "authoritative_objects": "The worker command queue in Redis and the runtime operation journal are authoritative; the worker state file holds the worker's own run record. Helper reports, the ambiguity counts and the inbox files are observational or transient and may be dropped.",
   "states": {
-    "observed": "Cases A, B and C each ran twice with identical records and every case check held; the records committed from proofs run 38073606119 match unchanged at tested_commit in proofs run 38074146563.",
+    "observed": "Cases A, B and C each ran twice with identical records and every case check held; the records committed from proofs run 38073606119 match unchanged at the reviewed head in proofs run 38074146563 and at tested_commit in Tests run 38077195725.",
     "accepted": "Answers from the fixture reach the worker handler with the exact structured payload over HTTP and over the fallback helper; a drain over the fallback and a drain over HTTP each put their worker in no new mutations mode and complete on its checkpoint. Shell metacharacters stay message content and every helper argv is the fixed helper, a mode and one URL safe envelope. Refused envelopes for another execution or generation, a tampered payload and an expired command leave the inbox empty, and a corrected new request is delivered. A lost delivery reply is reconciled by a status probe with no second delivery, a worker restart after a lost completion reports without rerunning, a lost issue reply is reconciled by command id with one stored command, a superseded execution is answered stale, and its worker's checkpoint after succession is refused so the server keeps the drain accepted.",
     "committed": "Code and fixture inputs are at tested_commit; manifest.json hashes them.",
     "externally_verified": "None: no live API server, exec or G3 deployment was exercised."
   },
   "validation": {
     "red": "proofs run 38071702796 on the tests only commit f78dc848: collection of the Kubernetes command tests fails on the missing module and every new worker control test fails on the missing helper functions",
-    "tests": "proofs run 38074146563 at tested_commit: every test passed across the Kubernetes commands, worker control, worker commands, runtime commands and Kubernetes runtime modules, including the three case record comparisons",
+    "tests": "Tests run 38077195725 at tested_commit: every unit shard on Python 3.11 and 3.12, mutation and the coverage ratchet passed; proofs run 38074146563 on the reviewed head: every test passed across the Kubernetes commands, worker control, worker commands, runtime commands and Kubernetes runtime modules, including the three case record comparisons",
     "lint": "ruff check and ruff format passed through python -m scripts.ci_prepush",
     "review": "Three rounds by a Standards and a Spec reader. Round one: eleven Spec and thirteen Standards findings, all fixed or answered. Round two: inbox records saved before acknowledgement and dropped on refusal, helper replies carrying the Pod identity, C1 and ESC string sequences, the visible U+009B fixture escape, a superseded worker's refused checkpoint, the shared MODES constant. Round three: a received inbox drain blocks mutations like a polled one, and a helper refusal binds by command id alone. Ruling: the Standards reader did not uphold the Spec finding that the rollback switch needs a config key now, since SV2-KUB-02 uses the same constructor flag and nothing constructs the transport yet; the key must land with the controller wiring, recorded below.",
-    "mutation": "Scoped mutation proof run 38074215460 on the reviewed head against the dependency branch: kubernetes commands 411 killed, worker control 310 killed, api commands 10 killed, no survivor and no clearance"
+    "mutation": "Scoped mutation proof run 38074215460 on the reviewed head against the dependency branch: kubernetes commands 411 killed, worker control 310 killed, api commands 10 killed, no survivor and no clearance; the pull request mutation shards in Tests run 38077195725 passed at tested_commit"
   },
   "measurements": {
     "worker_transport_ambiguous_total": {
