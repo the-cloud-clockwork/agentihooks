@@ -269,6 +269,35 @@ def test_the_gate_refuses_a_write_the_ledger_rejects(world, worker):
     assert agent.name == world.task()["claimed_by"]
 
 
+def test_the_gate_accepts_and_records_a_write_then_accepts_its_replay(world, worker):
+    from types import SimpleNamespace
+
+    from scripts.swarm_v2.api.tasks import WorkerGate
+
+    _, token = worker
+    scope = world.grants.bound("fixture", token)
+    request = {"operation_id": "update-1", "task_generation": 1}
+    op = {"op": "task_update", "item": "tasks/task", "fields": {"state": "pr"}}
+    task = world.task()
+    context = SimpleNamespace(meta={}, rev=9, dirty=False)
+    gate = WorkerGate(world.tasks_api, scope, request, op, spec_revision(task))
+    assert gate.apply({"tasks": [task]}, gate.op, context, lambda *_: True) is True
+    ack = {"task_id": "task", "operation_id": "update-1", "revision": spec_revision(task), "ledger_revision": 9}
+    assert (gate.ack, context.dirty) == (ack, True)
+    assert context.meta == {
+        "task_operations": {"task": {"generation": 1, "operations": {"update-1": {"digest": gate.digest, "ack": ack}}}}
+    }
+    context.dirty, context.rev = False, 10
+    replay = WorkerGate(world.tasks_api, scope, request, op, spec_revision(task))
+    assert replay.apply({"tasks": []}, replay.op, context, lambda *_: False) is True
+    assert (replay.ack, context.dirty) == (ack, False)
+    other = WorkerGate(world.tasks_api, scope, request, op, "0" * 64)
+    assert other.digest != gate.digest
+    with pytest.raises(GrantRefused) as reused:
+        other.apply({"tasks": [task]}, other.op, context, lambda *_: True)
+    assert str(reused.value) == "the operation ID was already used for different content"
+
+
 def test_a_wrong_generation_is_stale(world, worker):
     _, token = worker
     assert world.progress(token, "progress-1", "Building", generation=2) == (

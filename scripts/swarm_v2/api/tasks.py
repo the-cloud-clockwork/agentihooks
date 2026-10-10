@@ -135,7 +135,7 @@ class TasksAPI:
         return scope
 
     def _task(self, task_id: str) -> dict:
-        task = self.ledger.read(self.slug, f"tasks/{task_id}").get("tasks", [])
+        task = self.ledger.read(self.slug, f"tasks/{task_id}").get("tasks")
         if not task:
             raise GrantRefused("invalid_request", "the task is not on the ledger")
         return task[0]
@@ -183,9 +183,8 @@ class ReadOnly(RevisionConflict):
 class WorkerGate:
     def __init__(self, api: TasksAPI, scope: Registration, request: dict, op: dict, expected: str | None) -> None:
         self.api, self.scope, self.request, self.expected = api, scope, request, expected
-        self.digest = revision({"op": op, "expected_revision": expected})
+        self.digest = revision([op, expected])
         self.op = {**op, "id": f"w-{revision([api.slug, scope.task_id, request['operation_id']])[:16]}"}
-        self.ack = None
 
     def apply(self, doc: dict, op: dict, ctx: object, apply_op) -> bool:
         generation = self.request["task_generation"]
@@ -199,7 +198,7 @@ class WorkerGate:
                 raise GrantRefused("operation_conflict", "the operation ID was already used for different content")
             self.ack = known["ack"]
             return True
-        task = next((row for row in doc.get("tasks", []) if row["id"] == self.scope.task_id), None)
+        task = next((row for row in doc["tasks"] if row["id"] == self.scope.task_id), None)
         if task is None:
             raise GrantRefused("invalid_request", "the task is not on the ledger")
         if self.expected is not None and spec_revision(task) != self.expected:
