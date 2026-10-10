@@ -162,13 +162,10 @@ class Watch(unittest.TestCase):
     def test_watcher_removes_its_beat_file_on_sigterm(self):
         beat = core.watch_path(SLUG, "watcher")
         env = {**os.environ, "LEDGER_DIR": str(core.LEDGER_DIR), "LEDGER_PORT": "9"}
-        plant = "import runpy, signal, sys; signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM}); sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name='__main__')"
         command = [
             sys.executable,
             "-X",
             "faulthandler",
-            "-c",
-            plant,
             str(SCRIPTS / "watch_ledger.py"),
             SLUG,
             "--as",
