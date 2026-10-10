@@ -326,6 +326,8 @@ def test_a_dangling_link_in_place_of_an_entry_blocks_publish_until_attach_discar
     fill(layer, {"a.whl": b"x"})
     assert cache.publish(world.store, world.first, layer) == entry / "content"
     assert entry.is_symlink()
+    assert cache.attach(world.store, world.second, key()).seed is None
+    assert cache.METRICS["cache_corruption_total"] == 2
 
 
 def test_publish_waits_for_the_store_lock_even_against_a_shared_holder(world):
@@ -497,7 +499,8 @@ def test_a_full_disk_refuses_publish_without_evicting_or_writing(world):
 
 def test_eviction_frees_disk_room_when_the_reserve_would_be_crossed(world):
     old = published(world, key(lock="1" * 64), {"a.whl": b"x" * 100})
-    tight = replace(world.store, usage=free(world.store.policy.reserve_bytes + 200))
+    room = free(world.store.policy.reserve_bytes + 200)
+    tight = replace(world.store, usage=lambda path: room(path) if path == world.store.policy.store else None)
     layer = cache.attach(tight, world.second, key(lock="2" * 64))
     fill(layer, {"b.whl": b"y" * 300})
     assert cache.publish(tight, world.second, layer).exists()

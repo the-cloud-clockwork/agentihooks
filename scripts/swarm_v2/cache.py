@@ -138,17 +138,20 @@ def _drop(path: Path) -> None:
         filesystem.remove(path)
 
 
+def _matches(store: Store, key: Key, entry: Path) -> bool:
+    try:
+        record = json.loads((entry / ENTRY).read_text())
+        files = _manifest(entry / CONTENT, store.policy, key.kind)
+        return not entry.is_symlink() and record["key"] == asdict(key) and record["files"] == files
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
 def _verified(store: Store, key: Key) -> Path | None:
     entry = store.policy.store / key.digest()
     if not entry.exists() and not entry.is_symlink():
         return None
-    try:
-        record = json.loads((entry / ENTRY).read_text())
-        sound = not entry.is_symlink() and record["key"] == asdict(key)
-        sound = sound and record["files"] == _manifest(entry / CONTENT, store.policy, key.kind)
-    except (OSError, ValueError, KeyError, TypeError):
-        sound = False
-    if not sound:
+    if not _matches(store, key, entry):
         METRICS["cache_corruption_total"] += 1
         _drop(entry)
         return None
