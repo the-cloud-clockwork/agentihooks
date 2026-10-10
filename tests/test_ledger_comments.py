@@ -107,3 +107,36 @@ def test_an_op_without_an_outcome_is_accepted(comments):
 def test_an_outcome_rides_only_on_an_agent_comment_add(comments, op):
     with pytest.raises(ValueError, match="as done or blocked, without attachments"):
         comments.check_outcome(op)
+
+
+@pytest.mark.parametrize("change", ["edit", "delete"])
+def test_no_agent_edits_or_deletes_an_outcome_entry(comments, change):
+    thread, ctx = [], Context()
+    ctx.meta["members"]["master@1-1"] = {"role": "orchestrator"}
+    post(comments, thread, ctx, "o1", "Outcome proposal: done. Pull request merged", "done")
+    for by in (AGENT, "master@1-1"):
+        op = {"op": change, "id": "o1", "by": by, "thread": "tasks/t/comments", "text": "Still building"}
+        assert not comments.agent_thread_op(thread, op, ctx, "tasks/t", "comment")
+    assert shown(thread) == [("o1", "Outcome proposal: done. Pull request merged", "done")]
+
+
+@pytest.mark.parametrize(
+    "op",
+    [
+        {"op": "add", "thread": "tasks/t/comments"},
+        {"op": "add", "thread": "notes", "by": AGENT},
+        {"op": "edit", "thread": "tasks/t/comments", "by": AGENT},
+    ],
+)
+def test_the_ledger_op_check_refuses_a_misplaced_outcome(comments, op):
+    from scripts.swarm_ledger import ledger_core
+
+    with pytest.raises(ValueError, match="as done or blocked, without attachments"):
+        ledger_core.check_op({**op, "id": "o1", "text": "Pull request merged", "outcome": "done"})
+
+
+def test_the_ledger_op_check_accepts_an_agent_outcome_on_a_comment_add(comments):
+    from scripts.swarm_ledger import ledger_core
+
+    op = {"op": "add", "id": "o1", "thread": "tasks/t/comments", "by": AGENT, "text": "Pull request merged"}
+    ledger_core.check_op({**op, "outcome": "blocked"})

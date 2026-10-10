@@ -74,7 +74,7 @@ def check(text, kind, long=False, task_ids=()):
 
 
 def can_change(entry, by, members):
-    if entry.get("by") == "operator" or entry.get("deleted"):
+    if entry.get("by") == "operator" or entry.get("deleted") or "outcome" in entry:
         return False
     return entry.get("by") == by or members.get(by, {}).get("role") == "orchestrator"
 
