@@ -16,22 +16,26 @@
         [
           "GET",
           "commands",
-          200
+          200,
+          1
         ],
         [
           "POST",
           "ack",
-          200
+          200,
+          null
         ],
         [
           "GET",
           "commands",
-          200
+          200,
+          1
         ],
         [
           "POST",
           "complete",
-          200
+          200,
+          null
         ]
       ],
       "completed": [
