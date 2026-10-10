@@ -320,9 +320,8 @@ def _spec(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
             },
             *_shared_volumes(policy),
         ],
+        "runtimeClassName": policy["runtime_class_name"],
     }
-    if "runtime_class_name" in policy:
-        body["runtimeClassName"] = policy["runtime_class_name"]
     return body
 
 

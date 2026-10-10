@@ -4,6 +4,7 @@
   "namespace": "swarm-pod-proof",
   "owner": "agentihooks-swarm-fixture",
   "service_account": "swarm-worker",
+  "runtime_class_name": "kata-fc",
   "image_repository": "ghcr.io/the-cloud-clockwork/agentihooks-worker",
   "brain_url": "http://brain-api.swarm-brain.svc:8080",
   "termination_grace_seconds": 60,
