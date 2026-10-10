@@ -67,7 +67,11 @@ def test_registration_while_another_execution_holds_the_task_is_stale(world, wor
     claim = world.tasks.current("task")
     rival, rival_token = world.start("eng-2@fixture")
     status, refusal = world.register(rival, rival_token)
-    assert (status, refusal["error_class"]) == (409, "stale_generation")
+    assert (status, refusal["error_class"], refusal["message"]) == (
+        409,
+        "stale_generation",
+        "another execution holds this task",
+    )
     assert world.tasks.current("task") == claim
 
 
@@ -87,7 +91,11 @@ def test_a_worker_credential_expired_by_server_time_is_unauthenticated(world):
     world.grants.clock = lambda: 300.0
     claim = world.tasks.current("task")
     status, refusal = api.route("PUT", path, f"Bearer {token}", world.beat(agent, 1))
-    assert (status, refusal["error_class"]) == (401, "unauthenticated")
+    assert (status, refusal["error_class"], refusal["message"]) == (
+        401,
+        "unauthenticated",
+        "the worker credential has expired",
+    )
     assert world.tasks.current("task") == claim
     assert stored(world, agent) is None
 
@@ -502,7 +510,9 @@ def test_each_refusal_names_its_cause(world, worker):
     assert message(other.execution_id, token, world.beat(other, 1)) == "heartbeat names another execution"
     assert message(agent.execution_id, token, foreign) == "heartbeat authority is outside its registered execution"
     assert message(agent.execution_id, token, epoch) == "heartbeat names another controller epoch"
-    assert message(agent.execution_id, token, world.beat(agent, 1, generation=2)) == "stale_generation"
+    assert message(agent.execution_id, token, world.beat(agent, 1, generation=2)) == (
+        "the task generation is no longer current"
+    )
     assert message(agent.execution_id, token, {**world.beat(agent, 1), "renewal_sequence": -1}) == (
         "renewal_sequence: fails minimum"
     )

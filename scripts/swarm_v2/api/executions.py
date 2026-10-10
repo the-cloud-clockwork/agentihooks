@@ -32,9 +32,9 @@ STATUS = {
     "dependency_unavailable": 503,
 }
 TASK_REFUSALS = {
-    "stale_generation": "stale_generation",
-    "claim_held": "stale_generation",
-    "worker credential has expired": "unauthenticated",
+    "stale_generation": ("stale_generation", "the task generation is no longer current"),
+    "claim_held": ("stale_generation", "another execution holds this task"),
+    "worker credential has expired": ("unauthenticated", "the worker credential has expired"),
 }
 
 
@@ -191,7 +191,8 @@ def _task(action: Callable[[], TaskClaim]) -> TaskClaim:
     except GrantRefused:
         raise
     except SwarmError as error:
-        raise GrantRefused(TASK_REFUSALS.get(str(error), "dependency_unavailable"), str(error)) from error
+        error_class, message = TASK_REFUSALS.get(str(error), ("dependency_unavailable", str(error)))
+        raise GrantRefused(error_class, message) from error
 
 
 def _order(record: dict | None, sequence: int, fingerprint: str) -> dict | None:
