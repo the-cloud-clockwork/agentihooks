@@ -255,6 +255,12 @@ FIXTURED = PASSING + "\n\n@pytest.fixture\ndef thing():\n    return 1\n"
     [
         ("tests/test_x.py", PASSING, PASSING + "\n\ndef test_c():\n    assert 3\n", True),
         ("tests/test_x.py", FIXTURED, FIXTURED + "\n\ndef test_c():\n    assert 3\n", True),
+        (
+            "tests/test_x.py",
+            "import os\nimport os\n" + PASSING,
+            "import os\nimport os\n" + PASSING + "\n\ndef test_c():\n    pass\n",
+            True,
+        ),
         ("tests/test_x.py", PASSING, PASSING + "\n\nasync def test_c():\n    assert 3\n", True),
         ("tests/test_x.py", PASSING, PASSING + "\n\nclass TestC:\n    def test_c(self):\n        assert 3\n", True),
         ("tests/test_x.py", PASSING, "import os\n" + PASSING, True),

@@ -78,9 +78,9 @@ def adds_only_tests(root: Path, base: str, head: str, name: str) -> bool:
     before = Counter(ast.dump(node) for node in previous)
     after = Counter(ast.dump(node) for node in nodes)
     added = after - before
-    taken = {bound for node in previous for bound in bindings(node)}
-    fresh = Counter(bound for node in nodes for bound in bindings(node)) - Counter(taken)
-    if before - after or any(bound in taken or count > 1 for bound, count in fresh.items()):
+    names = Counter(bound for node in nodes for bound in bindings(node))
+    extra = names - Counter(bound for node in previous for bound in bindings(node))
+    if before - after or any(names[bound] > 1 for bound in extra):
         return False
     return all(is_test(node) for node in nodes if added[ast.dump(node)])
 
