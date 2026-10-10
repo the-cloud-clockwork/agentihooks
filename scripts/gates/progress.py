@@ -8,8 +8,8 @@ from scripts.swarm.keyspace import ROOT
 
 PREFIX = f"{ROOT}:swarm"
 OUTCOME_COMMANDS = (
-    ("pushed", re.compile(r"(?:^|[;&|(]\s*)git(?:\s+-C\s+\S+)?\s+push\b")),
-    ("pull request opened", re.compile(r"(?:^|[;&|(]\s*)gh\s+pr\s+create\b")),
+    ("pushed", re.compile(r"(?:^|[;&|(\n]\s*)git(?:\s+-C\s+\S+)?\s+push\b")),
+    ("pull request opened", re.compile(r"(?:^|[;&|(\n]\s*)gh\s+pr\s+create\b")),
 )
 
 

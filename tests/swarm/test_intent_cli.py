@@ -107,6 +107,11 @@ def test_the_tick_reads_each_pull_request_once_for_all_its_passes(started, monke
     assert reads == [URL, URL]
 
 
+def fingerprint(ledger):
+    doc = ledger.state("sw")
+    return intent._fingerprint(doc, next(task for task in doc["tasks"] if task["id"] == "t1"))
+
+
 def test_the_tick_batches_active_tasks_and_red_notices_then_refreshes_the_next_tick(started, monkeypatch):
     from scripts.gates.verdicts import Verdicts
     from scripts.inbox.store import InboxStore
@@ -118,7 +123,9 @@ def test_the_tick_batches_active_tasks_and_red_notices_then_refreshes_the_next_t
     other = "https://github.com/another/repo/pull/2"
     notice = InboxStore(store.redis).send("swarm", "eng-1@sw", "red checks")
     store.redis.hset(store.key("sw", "red-notices"), notice.id, other)
-    Verdicts("sw", "intent-coach").write("t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1")
+    Verdicts("sw", "intent-coach").write(
+        "t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1", inputs=fingerprint(ledger)
+    )
     batches, heads = [], []
 
     def batch(urls, cache=None):
@@ -143,7 +150,9 @@ def test_the_coach_tick_keeps_an_unchanged_head_from_the_ticks_pull_request_read
     store, ledger, _ = started
     store.update("sw", gates={"intent": "coach"})
     ledger.rows["t1"].update(state="pr", pr_url=URL, claimed_by=ME)
-    Verdicts("sw", "intent-coach").write("t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1")
+    Verdicts("sw", "intent-coach").write(
+        "t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1", inputs=fingerprint(ledger)
+    )
     from scripts.swarm import ledger_events
 
     reads, views = [], []
@@ -165,7 +174,9 @@ def test_the_coach_tick_reads_the_whole_pull_request_when_the_ticks_read_has_no_
     store, ledger, _ = started
     store.update("sw", gates={"intent": "coach"})
     ledger.rows["t1"].update(state="pr", pr_url=URL, claimed_by=ME)
-    Verdicts("sw", "intent-coach").write("t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1")
+    Verdicts("sw", "intent-coach").write(
+        "t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1", inputs=fingerprint(ledger)
+    )
     pull = None if head is None else ledger_events.PullRequest("OPEN", None, None, False, head=head)
     monkeypatch.setattr(ledger_events, "view", lambda url: pull)
     views = []
@@ -218,4 +229,10 @@ def test_the_tick_stamps_its_own_time_on_the_verdict(started, monkeypatch):
     monkeypatch.setattr(intent, "judge", lambda state: ("pass", "ok"))
     monkeypatch.setattr(cli, "now_ms", lambda: 777)
     cli.run_tick(store, "sw")
-    assert Verdicts("sw", "intent").read("t1") == {"verdict": "pass", "reason": "ok", "at": 777, "phase": "p1"}
+    assert Verdicts("sw", "intent").read("t1") == {
+        "verdict": "pass",
+        "reason": "ok",
+        "at": 777,
+        "phase": "p1",
+        "inputs": intent._fingerprint({"phases": ledger.phases}, ledger.rows["t1"]),
+    }

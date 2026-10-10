@@ -5,7 +5,7 @@ import re
 import ledger_comments
 import ledger_kinds
 
-from scripts.swarm_ledger import ledger_rank
+from scripts.swarm_ledger import ledger_plans, ledger_rank
 
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
@@ -41,8 +41,10 @@ UPDATABLE = (
     "difficulty_source",
     "difficulty_confidence",
     "phase",
+    "slice",
+    "follow_up",
 )
-BOOL_FIELDS = ("artifact",)
+BOOL_FIELDS = ("artifact", "follow_up")
 DIFFICULTIES = ("S", "M", "L")
 DIFFICULTY_SOURCES = ("operator", "rule", "classifier", "default")
 DIFFICULTY_FIELDS = ("difficulty", "difficulty_source", "difficulty_confidence")
@@ -55,7 +57,11 @@ OBJECT_FIELDS = ("contract", "proof")
 URL_FIELDS = ("issue_url", "pr_url", "plan_url")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")
+PARENT_FIELDS = {"slice", "phase", "plan_slice", "plan_lines"}
 WORKER_LANES = ("eng", "ci")
+SWARM = "swarm"
+RANK_AUTHORS = ("operator", SWARM, "dispatcher")
+RANK_LANES = ("master", "dispatch")
 PROPOSE = 'propose the work with agentihooks ledger followup add "<plain words>" and the master decides'
 PUBLISH = (
     "publish the plan with agentihooks ledger publish-plan <file> --phase <phase id>, then link each task with "
@@ -82,8 +88,8 @@ def check(op):
             raise ValueError("task_add needs task <id> and title")
         if op.get("lane") not in LANES:
             raise ValueError(f"lane must be one of {LANES}")
-        if not all(isinstance(op.get(key, ""), str) for key in ("phase", "description", "workspace")):
-            raise ValueError("phase, description and workspace must be strings")
+        if not all(isinstance(op.get(key, ""), str) for key in ("phase", "description", "workspace", "slice")):
+            raise ValueError("phase, description, workspace and slice must be strings")
         if "not_duplicate" in op and not (isinstance(op["not_duplicate"], str) and op["not_duplicate"].strip()):
             raise ValueError("not_duplicate must say in plain words why the task differs from the one it resembles")
         check_lists(op)
@@ -215,6 +221,7 @@ def check_task(task):
 
 
 def _add(doc, op, ctx):
+    op = ledger_plans.with_slice(doc, ledger_plans.with_plan_slice(doc, op))
     tasks = doc.setdefault("tasks", [])
     if taken := next((t for t in tasks if t["id"] == op["task"]), None):
         ctx.refused.append(
@@ -225,7 +232,12 @@ def _add(doc, op, ctx):
     if not _known(tasks, op.get("depends_on", [])):
         return False
     appended = {p["id"] for p in doc.get("phases", []) if p.get("added_by") == op["by"]}
-    if refusal := add_refusal(tasks, op, appended):
+    if refusal := (
+        add_refusal(tasks, op, appended)
+        or ("rank" in op and rank_refusal(op["by"]))
+        or follow_up_refusal(op)
+        or unsliced_refusal(doc, op, op["by"])
+    ):
         ctx.refused.append(refusal)
         return False
     task = {
@@ -244,7 +256,17 @@ def _add(doc, op, ctx):
         "done": False,
         "comments": [],
     }
-    for key in ("gain", "contract", "workspace", "artifact", "profile", "overlays", "not_duplicate"):
+    for key in (
+        "gain",
+        "contract",
+        "workspace",
+        "artifact",
+        "profile",
+        "overlays",
+        "not_duplicate",
+        "slice",
+        "follow_up",
+    ):
         if key in op:
             task[key] = op[key]
     if "rank" in op:
@@ -262,6 +284,9 @@ def _add(doc, op, ctx):
             ctx.refused.append(str(exc))
             return False
         task["plan_slice"] = op["plan_slice"]
+    if refusal := ledger_plans.task_refusal(doc, task):
+        ctx.refused.append(refusal)
+        return False
     tasks.append(task)
     ctx.record(op["by"], "added", f"tasks/{task['id']}", text=task["title"])
     return True
@@ -283,10 +308,38 @@ def add_refusal(tasks, op, appended):
     return ""
 
 
+def follow_up_refusal(op: dict) -> str:
+    if op.get("follow_up") and (op.get("plan_slice") or op.get("slice")):
+        return f"task {op['task']} is a follow up and names no slice: drop --plan-slice or --follow-up"
+    return ""
+
+
+def unsliced_refusal(doc: dict, task: dict, by: str) -> str:
+    if task.get("plan_slice") or task.get("slice") or task.get("follow_up") or by == SWARM:
+        return ""
+    if ledger_kinds.kind(task) == "plan":
+        return ""
+    from scripts.swarm_ledger import plan_ranges
+
+    phase = next((p for p in doc.get("phases", []) if p["id"] == task.get("phase")), {})
+    try:
+        names = plan_ranges.anchors(doc, phase)
+    except ValueError as exc:
+        return str(exc)
+    if names:
+        return (
+            f"phase {phase['id']} has a plan with slice anchors: name the task's slice with --plan-slice "
+            f"on task add or plan_slice= on task set, one of {', '.join(names)}"
+        )
+    return ""
+
+
 def rank_refusal(by, field="rank"):
     from scripts.swarm.naming import lane_of
 
     lane = lane_of(by)
+    if field == "rank":
+        return "" if by in RANK_AUTHORS or lane in RANK_LANES else f"{by} cannot set a task rank: {PROPOSE}"
     if lane in WORKER_LANES:
         return f"{by} works in the {lane} lane and cannot set a task {field}: {PROPOSE}"
     return ""
@@ -305,6 +358,9 @@ def update_refusal(doc: dict, op: dict, meta: dict | None = None) -> str:
     phase = op["fields"].get("phase")
     if phase is not None and phase not in {p["id"] for p in doc["phases"]}:
         return f"phase {phase} is not on this ledger: name one of its phase ids"
+    task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), {})
+    if phase is not None and phase != task.get("phase"):
+        return unsliced_refusal(doc, {**task, "plan_slice": "", **op["fields"]}, op["by"])
     return ""
 
 
@@ -351,6 +407,8 @@ def slice_refusal(item: str, plan: dict, doc: dict) -> str:
 
 
 def _update_fields(task: dict, fields: dict) -> dict:
+    if "contract" in fields:
+        fields = {**fields, "contract": {**(task.get("contract") or {}), **fields["contract"]}}
     if ledger_kinds.kind(task) == "plan" and fields.get("kind", "plan") != "plan" and "lane" not in fields:
         return {**fields, "lane": "eng"}
     return fields
@@ -448,17 +506,44 @@ def complete_outcome(doc: dict, op: dict, ctx: object, outcome: dict, actor: str
     return True
 
 
+def _move_plan(doc: dict, task: dict, fields: dict, phase: dict) -> None:
+    if "phase" not in fields or fields["phase"] == task.get("phase"):
+        return
+    fields["plan_lines"] = ""
+    source = next((p for p in doc["phases"] if p["id"] == task.get("phase")), {})
+    if "plan_url" not in fields and (fields.get("plan_slice") or task.get("plan_url") == source.get("plan_url")):
+        fields["plan_url"] = phase.get("plan_url", "") if fields.get("plan_slice") else ""
+    fields.setdefault("plan_slice", "")
+    if task.get("slice"):
+        fields.setdefault("slice", "")
+
+
+def _follow_up(op: dict, ctx) -> bool:
+    fields = op["fields"]
+    if fields.get("plan_slice") or fields.get("slice"):
+        task_id = op["item"].split("/")[1]
+        ctx.refused.append(f"task {task_id} is a follow up and names no slice: drop plan_slice or follow_up")
+        return False
+    fields.update(plan_slice="", plan_lines="", slice="")
+    return True
+
+
 def _set_slice(doc: dict, op: dict, ctx) -> bool:
     fields = op["fields"]
-    if "plan_slice" not in fields:
-        return True
+    supplied_slice = "plan_slice" in fields
     task_id = op["item"].split("/")[1]
     task = next((t for t in doc.get("tasks", []) if t["id"] == task_id), None)
     if task is None or (op.get("if_state") and task.get("state", "open") not in op["if_state"]):
         return True
+    target = fields.get("phase", task.get("phase"))
+    phase = next((p for p in doc.get("phases", []) if p["id"] == target), {})
+    _move_plan(doc, task, fields, phase)
+    if fields.get("follow_up"):
+        return _follow_up(op, ctx)
+    if not supplied_slice:
+        return True
     from scripts.swarm_ledger import plan_ranges
 
-    phase = next((p for p in doc.get("phases", []) if p["id"] == task.get("phase")), {})
     try:
         fields["plan_lines"] = plan_ranges.task_slice(
             doc, phase, fields["plan_slice"], fields.get("plan_url", task.get("plan_url", ""))
@@ -476,6 +561,19 @@ def apply(doc, op, ctx):
         t["id"] == op["item"].split("/")[1] and t.get("plan_lines") for t in doc.get("tasks", [])
     ):
         return True
+    op = {**op, "fields": ledger_plans.with_plan_slice(doc, op["fields"])}
+    if "plan_slice" not in op["fields"]:
+        op = {**op, "fields": dict(op["fields"])}
     if not _set_slice(doc, op, ctx):
         return False
+    if refusal := _parent_refusal(doc, op):
+        ctx.refused.append(refusal)
+        return False
     return _update(doc, op, ctx)
+
+
+def _parent_refusal(doc: dict, op: dict) -> str:
+    task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), None)
+    if task is None or not PARENT_FIELDS & set(op["fields"]):
+        return ""
+    return ledger_plans.task_refusal(doc, {**task, **op["fields"]})

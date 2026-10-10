@@ -32,6 +32,9 @@ LOOP = {
         "agentihooks swarm <slug> verdict",
         "--must",
         "agentihooks swarm <slug> restore-decision",
+        "<!-- slice: <id> -->",
+        "agentihooks ledger --slug <slug> --as <name> publish-plan",
+        "--plan-slice <id>",
     ),
     "engineer": (*WORKER, "agentihooks swarm <slug> issue <url>", "agentihooks swarm <slug> pr <url>", "--pr <url>"),
     "cicd": (*WORKER, "agentihooks swarm <slug> pr <url>", "--pr <url>", "--command", "--output"),
@@ -43,6 +46,44 @@ PARSERS["ledger"] = lambda argv: ledger_parser().parse_args(argv)
 
 def _skill(role: str) -> Path:
     return ROLES / role / ".claude" / "skills" / ROLE_SKILLS[role] / "SKILL.md"
+
+
+def test_planner_guidance_nests_task_headings_with_slice_anchors():
+    text = " ".join(_skill("planner").read_text().split())
+
+    assert (
+        "Put each phase under a heading with its exact title, each task section "
+        "under a heading one level deeper, and one unique `<!-- slice: <id> -->` "
+        "anchor immediately before each task heading."
+    ) in text
+
+
+@pytest.mark.parametrize(
+    "guidance",
+    [
+        ROLES / "master" / "CLAUDE.md",
+        ROLES / "planner" / "CLAUDE.md",
+        _skill("master"),
+        _skill("planner"),
+        ROLES.parent / "skills" / "init-swarm" / "SKILL.md",
+        ROLES.parent / "skills" / "take-master" / "SKILL.md",
+    ],
+)
+def test_plan_publishers_distinguish_full_plans_from_standalone_tasks(guidance):
+    text = " ".join(guidance.read_text().split())
+    rules = (
+        "A full plan is a plan file a master or planner writes and publishes "
+        "to the artifacts; every task built from it carries its slice.",
+        "Follow ups, open questions, operator notes and orders the operator "
+        "types or gives are standalone tasks with no plan and no slice.",
+        "A standalone task that a master or planner expands because it grew "
+        "wide becomes a plan: write and publish the plan with slice markers, "
+        "then add its tasks with their slices.",
+        "Small self explanatory changes, such as a style tweak or a loose "
+        "layout change, stay standalone and never get a plan.",
+    )
+
+    assert [rule for rule in rules if rule not in text] == []
 
 
 def _commands(text: str) -> list[str]:

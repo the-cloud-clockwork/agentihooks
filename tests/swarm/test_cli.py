@@ -170,6 +170,43 @@ def test_done_on_a_code_task_waits_for_its_pull_request_to_merge(env, monkeypatc
     assert ledger.rows["t1"]["state"] == "done"
 
 
+def test_done_from_the_dispatcher_seat_ends_it_without_a_pull_request_once_its_triggers_settle(
+    env, monkeypatch, capsys
+):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    store.update("sw", autonomy="full")
+    seat = "dispatcher@a1b2c3-0001"
+    store.put_agent("sw", AgentRecord(seat, "dispatch", "dispatcher", seat="dispatcher@sw"))
+    monkeypatch.setattr(cli.ledger_events, "view", lambda url: pytest.fail("a pull request was read"))
+    stale = {"id": "pr1", "item": "questions/q1", "text": "Pick the release day", "at": 0}
+    settled = ledger.state
+    ledger.state = lambda slug: {**settled(slug), "priorities": [stale]}
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", seat)
+    capsys.readouterr()
+    assert run("sw", "done") == 1
+    assert "dispatcher triggers are still open" in capsys.readouterr().err
+    assert [a.state for a in store.agents("sw") if a.name == seat] == ["working"]
+    ledger.state = lambda slug: {**settled(slug), "priorities": [] if slug == "sw" else [stale]}
+    inbox = InboxStore(store.redis)
+    item = inbox.send("master@a1b2c3-0001", seat, "one more look")
+    assert run("sw", "done") == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "seat": seat,
+        "state": "finished",
+        "next": "stop now; the swarm closes this session",
+    }
+    assert f"{seat} settled its triggers and exited" in inbox.get(item.id).reason
+    assert [a.state for a in store.agents("sw") if a.name == seat] == ["finished"]
+    assert "dispatcher" not in ledger.rows
+    assert [row["state"] for row in ledger.rows.values()] == ["claimed", "claimed"]
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    assert run("sw", "done") == 1
+    assert "a code task is done only with its merged pull request" in capsys.readouterr().err
+    assert ledger.rows["t1"]["state"] == "claimed"
+
+
 @pytest.mark.parametrize("kind", ["code", "ci"])
 def test_done_waits_on_a_queued_pull_request_and_accepts_only_after_it_lands(env, monkeypatch, capsys, kind):
     store, ledger, _ = env
@@ -232,6 +269,15 @@ def test_the_tick_reopens_a_done_task_whose_pull_request_closed_unmerged(env, mo
     assert "task t2 reopened, its pull request is closed" in actions
     assert (ledger.rows["t2"]["state"], ledger.rows["t2"]["claimed_by"]) == ("open", "")
     assert ledger.comments[-1][0::2] == ("t2", "swarm")
+
+
+def test_the_tick_hands_the_metrics_pass_its_ledger(env, monkeypatch):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    seen = []
+    monkeypatch.setattr(cli.metrics, "record_pass", lambda *args: seen.append(args[-1].ledger.state("sw")) or [])
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert [state["tasks"] for state in seen] == [ledger.state("sw")["tasks"]]
 
 
 @pytest.mark.parametrize("dependencies", [None, [], ["done"]])
@@ -2199,7 +2245,8 @@ def _tick_all(monkeypatch, run_tick, slugs, tick_seconds=0.05):
     monkeypatch.setattr(herdr_gc, "run", lambda environ, now, apply: swept.append((environ, now, apply)) or ["swept"])
     counts = {}
 
-    def bounded(store, slug):
+    def bounded(store, slug, scheduled):
+        assert scheduled
         counts[slug] = counts.get(slug, 0) + 1
         if counts[slug] > 10:
             pytest.fail(f"{slug} ticked more than ten times in one pass")
@@ -2284,7 +2331,7 @@ def test_no_swarms_still_sweeps_herdr(monkeypatch, capsys):
     assert capsys.readouterr().out.splitlines() == ["herdr: swept"]
 
 
-def test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs(monkeypatch, capsys):
+def quick_beside_slow(monkeypatch, capsys):
     import threading
     import time
 
@@ -2304,11 +2351,20 @@ def test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs(monkeypatch, capsy
         return [f"tick {ticks[slug]}"]
 
     _tick_all(monkeypatch, run_tick, ["slow", "fast"], tick_seconds=0.5)
+    return ticks, starts, capsys.readouterr().out.splitlines()
+
+
+def test_a_quick_swarm_keeps_ticking_while_a_slow_one_runs(monkeypatch, capsys):
+    ticks, _, out = quick_beside_slow(monkeypatch, capsys)
     assert ticks == {"fast": 3, "slow": 1}
-    assert all(0.45 <= later - earlier < 0.9 for earlier, later in zip(starts, starts[1:]))
-    out = capsys.readouterr().out.splitlines()
     assert sorted(out[:-1]) == ["fast: tick 1", "fast: tick 2", "fast: tick 3", "slow: tick 1"]
     assert out[-1] == "herdr: swept"
+
+
+@pytest.mark.wall_clock
+def test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs(monkeypatch, capsys):
+    _, starts, _ = quick_beside_slow(monkeypatch, capsys)
+    assert all(0.45 <= later - earlier < 0.9 for earlier, later in zip(starts, starts[1:]))
 
 
 def test_swarms_that_finish_together_tick_once(monkeypatch, capsys):

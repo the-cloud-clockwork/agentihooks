@@ -8,7 +8,7 @@ from scripts.handoff.check import section
 from scripts.inbox.seats import MATURITIES
 from scripts.swarm import naming, plan_review
 from scripts.swarm.health.verdicts import VERDICTS
-from scripts.swarm.store import ASSIST, DELEGATE, FULL, MANUAL, MASTER
+from scripts.swarm.store import ASSIST, DELEGATE, DISPATCH, FULL, MANUAL, MASTER
 from scripts.swarm_ledger import ledger_close, ledger_kinds, plan_read
 
 CLOSES = "The swarm then closes this session; stop working."
@@ -232,9 +232,40 @@ def operator_plan_steps(slug, led, leave):
     ]
 
 
+def build_dispatcher(slug: str, repo: str, name: str, task: dict, autonomy: str = DELEGATE) -> str:
+    from scripts.swarm import dispatch_seat
+
+    me = f"agentihooks swarm {slug}"
+    led = f"agentihooks ledger --slug {slug} --as {name}"
+    lines = [
+        f"You are {name}, the dispatcher of swarm {slug}, working beside its master in the repo {repo}. "
+        f"The swarm runs at {autonomy} autonomy.",
+        "The tick woke you because its deterministic passes could not settle these triggers:",
+        *(dispatch_seat.line(trigger) for trigger in task.get("triggers", [])),
+        *priming_lines(task),
+        "",
+        f"Before anything else, run once: {led} join. Then read the ledger with {ledger_read(slug)} and each trigger's "
+        "item in it.",
+        "Settle each trigger within the swarm's autonomy with the agentihooks commands, the classifiers and read only sub "
+        f'agents: comment on its item with {led} comment <item> "<text>", close a decided follow up, rank a task, and '
+        f"clear the priority once it is resolved with {led} priority clear <priority id>.",
+        "A decision only the operator can make goes to the master; never ask the operator yourself. You never edit "
+        "code or config files, commit, merge or claim a task.",
+        f'After each trigger, tell the master what you did: agentihooks msg send {MASTER}@{slug} "<plain words>".',
+        'New triggers arrive as inbox messages: answer one with agentihooks msg reply <id> "<text>", or close it with '
+        'agentihooks msg close <id> done "<where the work went>".',
+        f'While you wait on a trigger, declare it: {me} wait 30 --reason "<what you wait on>".',
+        f"When every trigger is closed, run {led} leave, then {me} done and stop: the swarm ends your session.",
+        "Write ledger comments and messages in plain words: no ids, paths, hashes or dashes.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
     if lane == MASTER:
         return build_master(slug, repo, name, task, autonomy)
+    if lane == DISPATCH:
+        return build_dispatcher(slug, repo, name, task, autonomy)
     me = f"agentihooks swarm {slug}"
     led = f"agentihooks ledger --slug {slug} --as {name}"
     phase = task.get("phase") or "<phase id>"

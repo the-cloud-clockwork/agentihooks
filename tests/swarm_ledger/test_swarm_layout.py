@@ -8,6 +8,7 @@ from tests.swarm_ledger.ledger_page import (
     fulfill_events,
     is_events,
     ledger_state,
+    loaded,
     page_source,
     serve_modules,
     shell_html,
@@ -133,6 +134,7 @@ class Page:
         self.errors = []
         self.tab.on("pageerror", lambda error: self.errors.append(str(error)))
         self.tab.goto(URL + "#swarm")
+        loaded(self.tab)
         self.tab.locator("#swarm-agents tr").first.wait_for(timeout=3000)
 
     def route(self, route, html):
@@ -183,7 +185,9 @@ def test_rows_run_header_alert_capacity_work_accounts_health_handoffs():
     assert 'class="fold sw-command-log" id="command-log"' in box
     assert '<details class="fold sw-fold" id="overlays-fold" open>' in box
     assert '<details class="fold sw-fold" id="quota-fold" open>' in box
-    box = re.sub(r'<details[^>]*id="(command-log|overlays-fold|quota-fold)".*?</details>', "", box, flags=re.S)
+    box = re.sub(
+        r'<details[^>]*id="(command-log|overlays-fold|quota-fold|freeze-fold)".*?</details>', "", box, flags=re.S
+    )
     for gone in ("crew", "needs-you", "swarm-figs", "swarm-work", "restore-box", "<section", "<details"):
         assert gone not in box, gone
 
@@ -518,6 +522,7 @@ def test_the_overlays_box_folds_on_its_header_and_remembers_it(open_page):
     assert not page.tab.locator("#swarm-overlays").is_visible()
     page.tab.wait_for_function("() => Object.values(localStorage).some((v) => v.includes('\"overlays-fold\":false'))")
     page.tab.reload()
+    loaded(page.tab)
     page.tab.locator("#swarm-agents tr").first.wait_for(timeout=3000)
     assert page.tab.eval_on_selector("#overlays-fold", "d => d.open") is False
 

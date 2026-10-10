@@ -15,6 +15,8 @@ finish() {
   if [[ $status -ne 0 ]]; then
     kubectl get pods -o wide || true
     kubectl logs "${controller[@]}" --tail 100 || true
+    kubectl logs "${controller[@]}" --previous --tail 100 || true
+    kubectl get pods "${controller[@]}" -o jsonpath='{range .items[*].status.initContainerStatuses[*]}{.name} last state {.lastState}{"\n"}{end}{range .items[*].status.containerStatuses[*]}{.name} last state {.lastState}{"\n"}{end}' || true
     kubectl logs "$ledger_pod" --tail 100 || true
   fi
   kind delete cluster --name "$cluster" || true
@@ -39,7 +41,7 @@ done
 docker build -q -t "$image" . >/dev/null &
 build=$!
 trap finish EXIT
-kind create cluster --name "$cluster" --wait 120s
+kind create cluster --name "$cluster" --image "$KIND_NODE_IMAGE" --wait 120s
 wait "$build"
 kind load docker-image "$image" --name "$cluster"
 helm install "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m

@@ -23,6 +23,7 @@ def render(task, tail=None):
         "const h = (tag, attrs, ...kids) => ({ tag, attrs: attrs || {}, kids: kids.filter(Boolean), addEventListener() {},"
         " replaceWith(node) { Object.assign(this, node); } });"
         "const itemActions = () => null; const commentsView = (key) => ({ tag: 'comments', attrs: { key }, kids: [] });"
+        "const doc = { freezes: [] }; const frozen = () => false; const holdClass = () => ''; const holdMark = () => null;"
         "const ser = (n) => (n && typeof n === 'object' ? [n.tag, n.attrs.class || '', n.attrs.text || '', n.kids.map(ser)] : n);"
         "const lazy = (box, fill) => { box.kids.push(...[fill()].flat().filter(Boolean)); return box; };"
         f"const readWorkspace = () => Promise.resolve({{ ok: {json.dumps(tail is not None)},"

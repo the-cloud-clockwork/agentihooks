@@ -253,7 +253,7 @@ def test_overlay_check_refuses_a_name_outside_the_profiles_folder(tmp_path, caps
 
 
 def test_base_roles_are_the_package_roles():
-    assert scaffold.base_roles() == ["cicd", "engineer", "master", "planner", "qa"]
+    assert scaffold.base_roles() == ["cicd", "dispatcher", "engineer", "master", "planner", "qa"]
 
 
 def test_install_routes_the_scaffold_commands(monkeypatch):

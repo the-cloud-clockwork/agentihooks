@@ -1031,6 +1031,15 @@ def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None
         log("swarm heartbeat failed", {"error": str(e)})
 
 
+def _swarm_outcome(payload: dict) -> None:
+    try:
+        from hooks.context.swarm_heartbeat import outcome
+
+        outcome(payload)
+    except Exception as e:
+        log("swarm outcome record failed", {"error": str(e)})
+
+
 def _operator_words(payload: dict) -> bool:
     try:
         from hooks.context.operator_words import typed
@@ -1774,7 +1783,7 @@ def on_post_tool_use(payload: dict) -> None:
     log(f"Post tool use: {tool_name}", {"tool": tool_name})
     _trace_session_id = payload.get("session_id", "")
     _operator_words(payload)
-
+    _swarm_outcome(payload)
     _conditions = None
     try:
         from hooks.context.conditions import post_effect

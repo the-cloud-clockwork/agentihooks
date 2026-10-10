@@ -202,12 +202,15 @@ def test_remote_refusals_name_what_is_missing():
         with exits("a remote ledger client cannot make service writes; the operator credential stays on its host"):
             ledger.credentials(SLUG, service=True)
         with exits(
-            "a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential "
+            "unauthenticated: a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential "
             "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL from agentihooks hive join"
         ):
             ledger.credentials(SLUG)
         os.environ.pop("AGENTIHOOKS_AGENT_NAME")
-        with exits("a remote ledger client needs a pinned agent identity; the operator credential stays on its host"):
+        with exits(
+            "unauthenticated: a remote ledger client needs a pinned agent identity; "
+            "the operator credential stays on its host"
+        ):
             ledger.credentials(SLUG)
 
 
@@ -218,10 +221,12 @@ def test_a_refused_launch_token_fetch_sends_both_headers_and_names_the_status():
         patch.dict(os.environ, {**REMOTE, "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": CREDENTIAL}),
         patch.object(ledger, "BASE", ""),
         patch("scripts.swarm_ledger.api.client.ResourceClient", client),
-        exits("the ledger server refused the hive credential: 403"),
+        exits("unauthenticated: the ledger server refused the hive credential: 403"),
     ):
         ledger.launch_token(SLUG, WORKER)
-    client.assert_called_once_with("https://hub.example", {"X-Hive-Credential": CREDENTIAL, "X-Ledger-Agent": WORKER})
+    client.assert_called_once_with(
+        "https://hub.example", {"X-Hive-Credential": CREDENTIAL, "X-Ledger-Agent": WORKER}, ledger.REQUEST_TIMEOUT
+    )
     client.return_value.request.assert_called_once_with(SLUG, "agent-token", {})
 
 

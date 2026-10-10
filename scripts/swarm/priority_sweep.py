@@ -11,16 +11,13 @@ master relay among them; an agent's write on it is never judged.
 import re
 from dataclasses import dataclass
 
-from hooks.classifier import ClassifierError, YesNo, decide
+from hooks.classifier import ClassifierError, code_rules, decide, runner
 from scripts.swarm import ledger_events
 
 PURPOSE = "priority-resolve"
 CURSOR = "priority-cursor"
 PATH = re.compile(r"([a-z]+)/([^/]+)")
-RESOLVES = "the write resolves what the priority asks"
-WAITS = "the priority still waits"
 CLEARED = "Priority cleared by the swarm: {reason}."
-YES = 0.5
 OPERATOR = "operator"
 SELF = ("swarm", "ledger")
 WRITES = {
@@ -58,7 +55,7 @@ def priority_pass(store, slug, doc, ledger, judge=None, github=None):
             continue
         judged.add((row["id"], write.text))
         yes = _judge(doc, row, write, judge)
-        if yes is not None and yes >= YES:
+        if yes is not None:
             reason = (
                 f"the classifier judged that the {write.kind} from {write.who} resolves it, at probability {yes:.2f}"
             )
@@ -154,15 +151,24 @@ def _judge(doc, row, write, judge):
         "priority": row["text"],
         "write": {"by": write.who, "kind": write.kind, "text": write.text},
     }
-    question = YesNo(
-        f"Does this {write.kind} on {subject} resolve what its priority asks: {row['text']}",
-        true=RESOLVES,
-        false=WAITS,
-    )
+    params = {"kind": write.kind, "subject": subject, "priority": row["text"]}
     try:
-        return judge(state, {"resolves": question}, purpose=PURPOSE).answers["resolves"].noul
+        output = runner.run(PURPOSE, state, params, decider=judge)
     except ClassifierError:
         return None
+    return _probable(output.raw.answers, output.thresholds["probability"])
+
+
+def _probable(answers, threshold) -> float | None:
+    yes = answers["resolves"].noul
+    return yes if yes is not None and yes >= threshold else None
+
+
+def _verdicts(definition, state, params, answers):
+    return {"resolves": _probable(answers, definition.thresholds["probability"]) is not None}
+
+
+RULE = code_rules.CodeRule(code_rules.asked, _verdicts, {"resolves": (True, False)}, {"resolves": False})
 
 
 def _resolve(ledger, slug, row, write, reason):

@@ -387,9 +387,9 @@ def test_run_once_passes_the_supplied_tick_interfaces(store, monkeypatch):
 
     ledger, runtime, messenger = object(), object(), object()
     calls = []
-    monkeypatch.setattr(cli, "run_tick", lambda *args: calls.append(args) or ["done"])
+    monkeypatch.setattr(cli, "run_tick", lambda *args, **kwargs: calls.append((args, kwargs)) or ["done"])
     assert controller.run_once(store, ledger, runtime, messenger) == {"sw": ["done"]}
-    assert calls == [(store, "sw", ledger, runtime, messenger)]
+    assert calls == [((store, "sw", ledger, runtime, messenger), {"scheduled": True})]
 
 
 def test_runtime_spawn_carries_epoch_to_launch_receiver(store, monkeypatch, tmp_path):

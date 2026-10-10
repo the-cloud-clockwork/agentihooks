@@ -25,12 +25,12 @@ def run_check(tmp_path, head, verdict="fail", reason="missing behavior"):
     return ledger, mail
 
 
-def gate(tmp_path, command="gh pr merge 9 --squash"):
+def gate(tmp_path, command="gh pr merge 9 --squash", merged=False):
     who = Who(name=ME, swarm=SLUG, task=TASK)
     state = Verdicts(SLUG, "intent", tmp_path)
     with (
         patch.object(intent, "pr_head", return_value=state.read(TASK).get("head")),
-        patch.object(intent, "pr_merged", return_value="done" in command),
+        patch.object(intent, "pr_merged", return_value=merged),
     ):
         return intent.IntentGate().decide(Call("Bash", {"command": command}), who, state, mode="coach")
 
@@ -58,7 +58,7 @@ def test_two_failed_fix_rounds_allow_merge_and_done_and_record_shortfall(tmp_pat
     assert "fix round 2 of 2" in mail.sent[0][2]
     assert not gate(tmp_path, command).allowed
     ledger, mail = run_check(tmp_path, "fix-two")
-    assert gate(tmp_path, command).allowed
+    assert gate(tmp_path, command, merged="done" in command).allowed
     assert ledger.updates == []
     assert mail.sent == [
         (
@@ -120,6 +120,7 @@ def test_deny_feedback_contains_fix_steps(tmp_path):
     assert not decision.allowed
     assert "missing behavior" in decision.reason
     assert "Fix steps:" in decision.reason
+    assert decision.reason.endswith(" Run fix round 1 of 2.")
 
 
 def test_a_new_head_cannot_merge_on_an_old_pass(tmp_path, monkeypatch):
@@ -190,7 +191,7 @@ def test_coach_mode_runs_through_the_real_gate_entry(tmp_path, monkeypatch, caps
 
     monkeypatch.setattr(modes, "swarm_gates", lambda *args: {"intent": "coach"})
     monkeypatch.setattr(intent, "pr_head", lambda url: "original")
-    monkeypatch.setattr(intent, "pr_merged", lambda url: "done" in command)
+    monkeypatch.setattr(intent, "pr_merged", lambda url: False)
     run_check(tmp_path, "original")
     env = {"AGENTIHOOKS_AGENT_NAME": ME, "AGENTIHOOKS_SWARM": SLUG, "AGENTIHOOKS_SWARM_TASK": TASK}
     payload = {"tool_name": "Bash", "tool_input": {"command": command}}
@@ -220,6 +221,145 @@ def test_coach_mode_is_accepted_by_the_control_endpoint():
     assert control_argv({"action": "set", "gates": {"intent": "coach"}}) == ["set", "intent-gate=coach"]
     with pytest.raises(ValueError):
         control_argv({"action": "set", "gates": {"watch": "coach"}})
+
+
+def coach(tmp_path, pr, asked, verdict="fail", head=None, ledger=None, mail=None):
+    return intent.Check(
+        SLUG,
+        "coach",
+        NOW,
+        ledger or Ledger(),
+        mail or Mail(),
+        lambda url: pr,
+        lambda state: asked.append(state) or (verdict, "missing behavior"),
+        home=tmp_path,
+        head=head,
+    )
+
+
+def test_a_draft_is_not_judged_and_holds_merge_until_its_ready_head_is_judged(tmp_path):
+    asked, ledger, mail = [], Ledger(), Mail()
+    coach(tmp_path, {**PR, "head": "red", "draft": True}, asked, ledger=ledger, mail=mail).run(DOC)
+    assert asked == []
+    assert (ledger.updates, ledger.comments, mail.sent) == ([], [], [])
+    assert Verdicts(SLUG, "intent", tmp_path).read(TASK) == {
+        "verdict": "pending",
+        "reason": "draft pull request, judged once ready for review",
+        "at": NOW,
+        "phase": "p8",
+    }
+    assert Verdicts(SLUG, "intent-coach", tmp_path).read(TASK) is None
+    held = intent.IntentGate(clock=lambda: NOW / 1000 + 600).decide(
+        Call("Bash", {"command": f"agentihooks swarm {SLUG} merge queue x"}),
+        Who(name=ME, swarm=SLUG, task=TASK),
+        Verdicts(SLUG, "intent", tmp_path),
+        mode="coach",
+    )
+    assert not held.allowed
+    assert held.reason == f"intent for task {TASK} is judged once its pull request is ready for review"
+    coach(tmp_path, {**PR, "head": "ready", "draft": False}, asked, ledger=ledger, mail=mail).run(DOC)
+    assert len(asked) == 1
+    assert "fix round 1 of 2" in mail.sent[0][2]
+    assert Verdicts(SLUG, "intent-coach", tmp_path).read(TASK)["coach_rounds"] == 0
+
+
+def test_a_draft_after_a_judged_head_keeps_its_rounds(tmp_path):
+    asked = []
+    coach(tmp_path, {**PR, "head": "one"}, asked).run(DOC)
+    coach(tmp_path, {**PR, "head": "two", "draft": True}, asked).run(DOC)
+    mail = Mail()
+    coach(tmp_path, {**PR, "head": "three"}, asked, mail=mail).run(DOC)
+    assert len(asked) == 2
+    assert "fix round 2 of 2" in mail.sent[0][2]
+
+
+def corrected(**fields):
+    return {**DOC, "tasks": [{**DOC["tasks"][0], **fields}]}
+
+
+@pytest.mark.parametrize("use_head", [False, True])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"description": "Refuse merge and done on a failed check."},
+        {"title": "Intent gate"},
+        {"plan_lines": "3-5"},
+    ],
+)
+def test_a_corrected_task_on_a_final_head_is_judged_again_without_a_fix_round(tmp_path, change, use_head):
+    asked, head = [], (lambda url: "final") if use_head else None
+    coach(tmp_path, {**PR, "head": "final"}, asked, head=head).run(DOC)
+    coach(tmp_path, {**PR, "head": "final"}, asked, head=head).run(DOC)
+    assert len(asked) == 1
+    ledger, mail = Ledger(), Mail()
+    coach(tmp_path, {**PR, "head": "final"}, asked, "pass", head, ledger, mail).run(corrected(**change))
+    assert len(asked) == 2
+    record = Verdicts(SLUG, "intent", tmp_path).read(TASK)
+    assert (record["verdict"], record["coach_rounds"], record["head"]) == ("pass", 0, "final")
+    assert gate(tmp_path, f"agentihooks swarm {SLUG} done --pr x").allowed
+
+
+@pytest.mark.parametrize("change", [{"description": "Stop failures before merge."}, {"title": "Gate checks"}])
+def test_a_corrected_phase_is_judged_again_on_the_same_head(tmp_path, change):
+    asked = []
+    coach(tmp_path, {**PR, "head": "final"}, asked).run(DOC)
+    phases = [DOC["phases"][0], {**DOC["phases"][1], **change}]
+    coach(tmp_path, {**PR, "head": "final"}, asked).run({**DOC, "phases": phases})
+    assert len(asked) == 2
+
+
+def test_a_changed_plan_slice_text_is_judged_again_on_the_same_head(tmp_path, monkeypatch):
+    asked, plan = [], {"text": "line one"}
+    monkeypatch.setattr(intent.plan_read, "exact", lambda doc, task: plan["text"])
+    doc = corrected(plan_lines="1-1")
+    coach(tmp_path, {**PR, "head": "final"}, asked).run(doc)
+    coach(tmp_path, {**PR, "head": "final"}, asked).run(doc)
+    assert len(asked) == 1
+    plan["text"] = "line one corrected"
+    mail = Mail()
+    coach(tmp_path, {**PR, "head": "final"}, asked, mail=mail).run(doc)
+    assert len(asked) == 2
+    assert "fix round 1 of 2" in mail.sent[0][2]
+
+
+def test_a_proof_note_alone_does_not_rejudge_a_final_head(tmp_path):
+    asked = []
+    coach(tmp_path, {**PR, "head": "final"}, asked).run(DOC)
+    coach(tmp_path, {**PR, "head": "final"}, asked).run(corrected(proof={"command": "pytest"}))
+    assert len(asked) == 1
+
+
+@pytest.mark.parametrize("use_head", [False, True])
+def test_a_record_without_a_fingerprint_is_judged_once_on_its_head(tmp_path, use_head):
+    Verdicts(SLUG, "intent-coach", tmp_path).write(
+        TASK, "fail", "stale", 5, coach_rounds=1, head="final", url=DOC["tasks"][0]["pr_url"], phase="p8"
+    )
+    asked, head = [], (lambda url: "final") if use_head else None
+    coach(tmp_path, {**PR, "head": "final"}, asked, "pass", head).run(DOC)
+    coach(tmp_path, {**PR, "head": "final"}, asked, "pass", head).run(DOC)
+    assert len(asked) == 1
+    record = Verdicts(SLUG, "intent-coach", tmp_path).read(TASK)
+    assert (record["verdict"], record["coach_rounds"]) == ("pass", 1)
+    assert record["inputs"] == intent._fingerprint(DOC, DOC["tasks"][0])
+
+
+def test_a_failed_merged_pull_request_goes_to_the_master_not_back_to_its_engineer(tmp_path):
+    asked, ledger, mail = [], Ledger(), Mail()
+    coach(tmp_path, {**PR, "head": "final", "merged": True}, asked, ledger=ledger, mail=mail).run(DOC)
+    assert mail.sent == [
+        (
+            f"intent-shortfall:{TASK}:{NOW}",
+            "master-seat",
+            "Intent remains unmet on a merged pull request: missing behavior. The master must review this shortfall.",
+            f"tasks/{TASK}",
+        )
+    ]
+    assert ledger.updates == []
+    assert ledger.comments == [(SLUG, TASK, intent.MERGED_COMMENT, "swarm")]
+    command = f"agentihooks swarm {SLUG} done --pr x"
+    assert gate(tmp_path, command, merged=True).allowed
+    assert rows(tmp_path)[-1]["reason"] == "merged with intent unmet on a merged pull request: missing behavior"
+    assert not gate(tmp_path, "gh pr merge 9").allowed
 
 
 @pytest.mark.parametrize("result", [None, "blank", "failed", "timeout", "error"])
@@ -282,15 +422,17 @@ def test_head_lookup_uses_the_exact_command_and_strips_output():
 def test_remediation_at_the_question_thresholds():
     from tests.gates.test_intent import answer
 
+    THRESHOLDS = intent.definitions.load(intent.PURPOSE).thresholds
+
     state = {"task": "Status", "task_text": "Show controller", "phase": "Control", "phase_intent": "Workers see owners"}
     answers = {"delivers": answer(0.5), "reachable": answer(0.5), "weakens": answer(0.5)}
-    assert intent.remediation(state, answers) == (
+    assert intent.remediation(state, answers, THRESHOLDS) == (
         "What would meet intent: Deliver Status: Show controller. "
         "The phase must be able to use it for Control: Workers see owners. "
         "Preserve Control: Workers see owners while implementing Status: Show controller."
     )
     answers = {"delivers": answer(0.1), "reachable": answer(0.1), "weakens": answer(0.4)}
-    assert intent.remediation(state, answers) == (
+    assert intent.remediation(state, answers, THRESHOLDS) == (
         "What would meet intent: Deliver Status: Show controller. "
         "The phase must be able to use it for Control: Workers see owners. "
         "Implement the missing acceptance behavior described by Status: Show controller. "
@@ -356,8 +498,9 @@ def test_environment_and_catalog_accept_intent_coach():
 
 def test_an_unmoved_head_is_read_once_and_skips_the_full_view(tmp_path):
     url = DOC["tasks"][0]["pr_url"]
+    inputs = intent._fingerprint(DOC, DOC["tasks"][0])
     Verdicts(SLUG, "intent-coach", tmp_path).write(
-        TASK, "fail", "missing behavior", 5, coach_rounds=1, head="original", url="old", phase="p8"
+        TASK, "fail", "missing behavior", 5, coach_rounds=1, head="original", url="old", phase="p8", inputs=inputs
     )
     heads, views = [], []
     check = intent.Check(

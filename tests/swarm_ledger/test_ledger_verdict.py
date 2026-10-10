@@ -189,6 +189,7 @@ def run_page(body):
         "const h = (tag, attrs, ...kids) => ({ tag, attrs: attrs || {}, kids: kids.filter(Boolean) });"
         "const scopeDot = () => ({ tag: 'scope', attrs: {}, kids: [] }); const queued = [];"
         "const queue = (op) => queued.push(op); const newId = (noun) => `${noun[0]}-1`;"
+        "const doc = { freezes: [] }; const frozen = () => false; const freezeButton = () => null;"
     )
     names = ("verdictButton", "itemActions", "itemOf", "applyOp")
     script = stubs + "\n".join(function_source(n) for n in names) + "\n" + body

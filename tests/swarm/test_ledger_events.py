@@ -114,6 +114,28 @@ def test_a_replay_of_the_same_ledger_makes_no_item(store):
     assert len(texts(store, MASTER_SEAT)) == 4
 
 
+def test_a_follow_up_already_flagged_for_the_operator_sends_the_master_no_notice(store):
+    run(store, recorded())
+    flagged = event(11, 100_000, "swarm", "added", "followups/f1", "A message to master@sw is still unread")
+    unflagged = event(12, 100_000, "swarm", "added", "followups/f2", "Retries need a cap")
+    rows = [
+        {"id": "f1", "text": flagged["text"], "comments": [], "done": False, "needs_operator": True},
+        {"id": "f2", "text": unflagged["text"], "comments": [], "done": False},
+    ]
+    run(store, recorded([flagged, unflagged], followups=rows))
+    (notice,) = texts(store, MASTER_SEAT)
+    assert "Retries need a cap" in notice
+
+
+def test_a_ledger_without_follow_ups_still_sends_its_notices(store):
+    run(store, recorded())
+    doc = recorded(AGENT_EVENTS[2:3])
+    del doc["followups"]
+    run(store, doc)
+    (notice,) = texts(store, MASTER_SEAT)
+    assert "Build the thing" in notice
+
+
 def test_the_cursor_is_kept_per_swarm(store):
     store.create(SwarmConfig("other", "/repo", max_eng=1, max_ci=0))
     run(store, recorded())
@@ -161,6 +183,24 @@ def test_a_new_priority_makes_one_master_item_naming_the_item_and_the_ask(store)
     assert actions == [f"told {MASTER_SEAT}: priority tasks/t1"]
     assert store.redis.smembers(store.key("sw", "priorities-sent")) == {"tasks/t1"}
     assert texts(store, ENG_SEAT) == []
+
+
+def test_a_priority_on_a_follow_up_the_swarm_raised_for_the_operator_sends_the_master_no_notice(store):
+    raised = event(11, 100_000, "swarm", "added", "followups/f1", "A message to master@sw is still unread")
+    flagged = event(12, 100_000, "sw-eng-1", "added", "followups/f2", "Pick the release date")
+    doc = recorded(
+        [raised, flagged],
+        followups=[
+            {"id": "f1", "text": raised["text"], "comments": [], "done": False, "needs_operator": True},
+            {"id": "f2", "text": flagged["text"], "comments": [], "done": False, "needs_operator": True},
+        ],
+    )
+    run(store, dict(doc, priorities=[]))
+    doc["priorities"] = [priority(f"followups/{n}", "Decide: it", by="ledger") for n in ("f1", "f2")]
+    run(store, doc)
+    doc["_meta"]["events"] = [e for e in doc["_meta"]["events"] if e["target"] != "followups/f1"]
+    run(store, doc)
+    assert [i.ref for i in InboxStore(store.redis).inbox(MASTER_SEAT)] == ["sw:priority:followups/f2"]
 
 
 def test_priorities_open_before_the_first_pass_are_not_announced_and_later_ones_are(store):

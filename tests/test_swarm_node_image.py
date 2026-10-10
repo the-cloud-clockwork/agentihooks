@@ -44,8 +44,11 @@ def locked(tmp_path):
     return path, lock, payloads
 
 
-def test_lock_accepts_pinned_fixture(locked):
+@pytest.mark.parametrize("registry", ["", "public.ecr.aws/docker/library/"])
+def test_lock_accepts_pinned_fixture(locked, registry):
     path, lock, _ = locked
+    lock["base_image"] = registry + lock["base_image"]
+    path.write_text(json.dumps(lock))
     assert worker_image.load_lock(path, "amd64") == lock
 
 

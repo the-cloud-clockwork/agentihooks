@@ -44,7 +44,6 @@ def test_task_update_transport_rejects_nonboolean_missing_range_guards(guard):
 
 def test_guarded_slice_assignment_crosses_the_versioned_request_boundary(live):
     ledger.request(SLUG, [{"op": "join", "id": "boss-join", "by": "boss", "role": "orchestrator"}], service=True)
-    anchored(SLUG, "first", "second", core=core)
     ledger.request(
         SLUG,
         [
@@ -60,6 +59,7 @@ def test_guarded_slice_assignment_crosses_the_versioned_request_boundary(live):
         ],
         service=True,
     )
+    anchored(SLUG, "first", "second", core=core)
     cases = [(True, "first", "first", "2-3"), (True, "absent", "first", "2-3"), (False, "second", "second", "4-5")]
     for number, (guard, name, expected_name, expected_lines) in enumerate(cases):
         expected = test_api_v1.request(live, "GET", "tasks/t1")[1]["revision"]

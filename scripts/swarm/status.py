@@ -14,6 +14,7 @@ from scripts.handoff import transfers
 from scripts.inbox.store import InboxStore
 from scripts.swarm import (
     affinity,
+    bottleneck,
     drain_watch,
     idle,
     launch_check,
@@ -122,7 +123,8 @@ def _health_rows(store, slug, agents, quiet, at):
 
 def talk_since_outcome(store, slug, rows):
     marks = progress.Progress(store.redis, slug)
-    return {row["name"]: marks.read(row["name"]).talk for row in rows if row.get("lane") in WORKER_LANES}
+    held = {row["name"]: marks.read(row["name"]) for row in rows if row.get("lane") in WORKER_LANES}
+    return {name: mark.talk if mark.outcome_at else 0 for name, mark in held.items()}
 
 
 def compact_limit(config):
@@ -254,6 +256,7 @@ def status_report(store, slug, state):
         "doctor": doctor_report(store, slug),
         "quota": page_quota(),
         "quota_capacity": quota_view.page(capacity.read(store, slug)),
+        "bottleneck": bottleneck.read(store, slug),
         "gates": [{**row, "kind": modes.label(row["kind"])} for row in gate_log.decisions(slug)],
         "gate_modes": {name: modes.label(mode) for name, mode in catalog.current(config.gates).items()},
         "master_affinity": affinity.report(store, slug, config, store.agents(slug)),

@@ -305,7 +305,13 @@ def test_the_harness_routes_the_page_its_assets_and_its_stream_then_closes_the_t
     tab = browser.tab
     assert browser.viewport == sanity.VIEWPORT
     assert tab.visited == [sanity.PAGE_URL]
-    assert tab.waited == ["() => document.getElementById('status').textContent !== 'loading'"]
+    assert tab.waited == [
+        """async () => {
+          const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
+          await (await import(new URL("sync.js", main))).loaded;
+          return true;
+        }"""
+    ]
     assert tab.closed
     assert answered(tab.routes[sanity.PAGE_URL]) == {
         "body": sanity.page_html(),
