@@ -232,7 +232,7 @@ def operator_plan_steps(slug, led, leave):
     ]
 
 
-def build_dispatcher(slug, repo, name, task, autonomy=DELEGATE):
+def build_dispatcher(slug: str, repo: str, name: str, task: dict, autonomy: str = DELEGATE) -> str:
     from scripts.swarm import dispatch_seat
 
     me = f"agentihooks swarm {slug}"

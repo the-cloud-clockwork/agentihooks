@@ -21,7 +21,7 @@ ENDED_STATES = ("stopping", "stopped")
 WAKE = "New dispatcher triggers in swarm {slug}:\n{lines}\nSettle each one, then tell the master what you did."
 
 
-def triggers(doc, now_ms):
+def triggers(doc: dict, now_ms: int) -> list[dict]:
     return [
         {"id": row["id"], "item": row["item"], "text": row["text"], "minutes": (now_ms - row["at"]) // 60_000}
         for row in doc.get("priorities", [])
@@ -29,11 +29,11 @@ def triggers(doc, now_ms):
     ]
 
 
-def line(trigger):
+def line(trigger: dict) -> str:
     return f"- The priority on {trigger['item']} is unresolved after {trigger['minutes']} minutes: {trigger['text']}"
 
 
-def run(slug, config, store, runtime, doc, now_ms, sleeping=False):
+def run(slug: str, config, store, runtime, doc: dict, now_ms: int, sleeping: bool = False) -> list[str]:
     seats = [a for a in store.agents(slug) if a.lane == LANE and a.state != "finished"]
     active = config.autonomy == FULL and config.state not in ENDED_STATES and not sleeping
     found = triggers(doc, now_ms) if active else []

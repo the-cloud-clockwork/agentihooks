@@ -11,18 +11,18 @@ class SeatFailed(Exception):
         self.record, self.error = record, error
 
 
-def no_slot(config, runtime, what):
+def no_slot(config, runtime, what: str) -> str:
     return "" if runtime.has_capacity(config) else f"no session slot for the {what}, waiting"
 
 
-def host_hold(slug, store, now_ms, what):
+def host_hold(slug: str, store, now_ms: int, what: str) -> str:
     from scripts.swarm import tick
 
     host = tick._host_full(slug, store, now_ms)
     return tick._hold(slug, store, f"holding the {what} spawn: {host}") if host else ""
 
 
-def place(slug, config, store, runtime, lane, now_ms, prepare):
+def place(slug: str, config, store, runtime, lane: str, now_ms: int, prepare):
     """Name, record and launch the lane's seat; prepare(record) returns the task its prompt is built from. A failure
     raises SeatFailed with the record still stored, so the caller settles what it began before dropping it."""
     from scripts.swarm import tick
