@@ -64,6 +64,8 @@ def page(browser, request):
     tab.on("dialog", lambda dialog: dialog.accept())
     tab.goto(URL)
     loaded(tab)
+    tab.click("#tasks-box > summary")
+    tab.locator("#item-tasks-t1").wait_for()
     yield tab, sent
     context.close()
 
@@ -131,6 +133,7 @@ def test_a_frozen_plan_dims_and_disables_everything_under_it_while_comments_stay
             [True],
         )
         tab.click(f"{selector} > details[data-key] > summary")
+        tab.click(f"{selector} > details[data-key] button.add")
         assert tab.locator(f"{selector} > details[data-key] textarea").first.is_enabled()
     task_state = row_state(tab, "#item-tasks-t2")
     assert (task_state["frozen"], task_state["flake"], task_state["rank"], task_state["verdicts"]) == (
