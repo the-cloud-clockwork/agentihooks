@@ -1,12 +1,12 @@
 import json
-import posixpath
+import os
 import re
 import shutil
 import stat
 import tarfile
 import uuid
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import NoReturn
 
 LAYOUTS = (
@@ -16,7 +16,6 @@ LAYOUTS = (
 ROOTS = ("home", "runtime", "checkout", "worktree", "spool", "scratch", "seed")
 SEGMENT = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 SOCKET_BYTES = 107
-MEMBERS = (tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE, tarfile.SYMTYPE)
 FAILURES = {"execution_path_validation_failures": 0}
 
 
@@ -71,8 +70,10 @@ def parse(document: dict) -> Layout:
 
 
 def load(path: Path | None = None) -> Layout:
-    found = path or next((p for p in LAYOUTS if p.is_file()), LAYOUTS[-1])
-    return parse(json.loads(found.read_text(encoding="utf-8")))
+    for found in [path] if path else LAYOUTS:
+        if found.is_file():
+            return parse(json.loads(found.read_text()))
+    _refuse("no layout file is installed, so new launches stop")
 
 
 def mapping(layout: Layout) -> dict:
@@ -80,7 +81,7 @@ def mapping(layout: Layout) -> dict:
 
 
 def contain(root: Path, candidate: Path | str) -> Path:
-    base = root.resolve(strict=True)
+    base = root.resolve()
     resolved = (base / candidate).resolve()
     if not resolved.is_relative_to(base):
         _refuse(f"path resolves outside its execution root: {candidate}")
@@ -118,13 +119,12 @@ def _links(tree: Path, inside: Path) -> None:
 def seal(tree: Path) -> None:
     for path in [tree, *tree.rglob("*")]:
         if not path.is_symlink():
-            path.chmod(stat.S_IMODE(path.lstat().st_mode) & ~0o222)
+            path.chmod(stat.S_IMODE(path.lstat().st_mode) & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))
 
 
 def remove(tree: Path) -> None:
-    for path in [tree, *tree.rglob("*")]:
-        if path.is_dir() and not path.is_symlink():
-            path.chmod(stat.S_IMODE(path.lstat().st_mode) | 0o700)
+    for folder, _, _ in os.walk(tree):
+        os.chmod(folder, stat.S_IMODE(os.lstat(folder).st_mode) | stat.S_IRWXU)
     shutil.rmtree(tree)
 
 
@@ -143,29 +143,18 @@ def seed(execution: Execution, source: Path, name: str) -> Path:
     return copy
 
 
-def _check_member(member: tarfile.TarInfo) -> None:
-    name = PurePosixPath(member.name)
-    if name.is_absolute() or ".." in name.parts:
-        _refuse(f"archive member leaves its destination: {member.name}")
-    if member.type not in MEMBERS:
-        _refuse(f"archive member is not a file, folder or relative link: {member.name}")
-    joined = posixpath.normpath(posixpath.join(str(name.parent), member.linkname))
-    if member.issym() and (member.linkname.startswith("/") or joined == ".." or joined.startswith("../")):
-        _refuse(f"archive member leaves its destination: {member.name}")
-
-
 def extract(execution: Execution, archive: Path, destination: Path) -> Path:
     target = contain(execution.root, destination)
     if target.exists():
         _refuse(f"extraction destination already exists: {destination}")
     with tarfile.open(archive) as bundle:
-        members = bundle.getmembers()
-        for member in members:
-            _check_member(member)
+        absolute = [name for name in bundle.getnames() if name.startswith("/")]
+        if absolute:
+            _refuse(f"archive member leaves its destination: {absolute[0]}")
         staging = execution.path("scratch") / f"extract-{uuid.uuid4().hex}"
-        staging.mkdir(mode=0o700)
+        staging.mkdir(mode=stat.S_IRWXU)
         try:
-            bundle.extractall(staging, members=members, filter="data")
+            bundle.extractall(staging, filter="data")
             _links(staging, staging)
         except tarfile.FilterError as error:
             remove(staging)

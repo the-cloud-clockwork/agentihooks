@@ -1,20 +1,108 @@
 {
   "package": "SV2-FSY-01",
   "attempt": "fsy-1",
-  "bases": ["a", "b"],
+  "bases": [
+    "a",
+    "b"
+  ],
   "profile": "fixture-seed",
   "socket": "herdr.sock",
-  "path_escapes": ["../outside", "../../outside/state.json", "homes/../../outside"],
+  "path_escapes": [
+    "../outside",
+    "../../outside/state.json",
+    "homes/../../outside"
+  ],
   "archive_escapes": {
-    "parent member": [{"name": "../escape.txt", "type": "file"}],
-    "absolute member": [{"name": "/escape.txt", "type": "file"}],
-    "parent link": [{"name": "out", "type": "symlink", "link": "../outside"}],
-    "absolute link": [{"name": "out", "type": "symlink", "link": "/etc"}],
-    "hard link": [{"name": "a.txt", "type": "file"}, {"name": "b.txt", "type": "hardlink", "link": "a.txt"}],
-    "chained link": [
-      {"name": "s", "type": "dir"},
-      {"name": "s/c", "type": "symlink", "link": ".."},
-      {"name": "s/c/c2", "type": "symlink", "link": ".."}
-    ]
+    "parent member": {
+      "refused": "../escape.txt",
+      "members": [
+        {
+          "name": "../escape.txt",
+          "type": "file"
+        }
+      ]
+    },
+    "absolute member": {
+      "refused": "/escape.txt",
+      "members": [
+        {
+          "name": "/escape.txt",
+          "type": "file"
+        }
+      ]
+    },
+    "parent link": {
+      "refused": "out",
+      "members": [
+        {
+          "name": "out",
+          "type": "symlink",
+          "link": "../outside"
+        }
+      ]
+    },
+    "absolute link": {
+      "refused": "out",
+      "members": [
+        {
+          "name": "out",
+          "type": "symlink",
+          "link": "/etc"
+        }
+      ]
+    },
+    "hard link": {
+      "refused": "b.txt",
+      "members": [
+        {
+          "name": "b.txt",
+          "type": "hardlink",
+          "link": "../outside/state.json"
+        }
+      ]
+    },
+    "chained link": {
+      "refused": "s/c/c2",
+      "members": [
+        {
+          "name": "s",
+          "type": "dir"
+        },
+        {
+          "name": "s/c",
+          "type": "symlink",
+          "link": ".."
+        },
+        {
+          "name": "s/c/c2",
+          "type": "symlink",
+          "link": ".."
+        }
+      ]
+    },
+    "late chained link": {
+      "refused": "s/c",
+      "members": [
+        {
+          "name": "s",
+          "type": "dir"
+        },
+        {
+          "name": "s/c",
+          "type": "symlink",
+          "link": "x/.."
+        },
+        {
+          "name": "s/x",
+          "type": "symlink",
+          "link": "y"
+        },
+        {
+          "name": "s/y",
+          "type": "symlink",
+          "link": ".."
+        }
+      ]
+    }
   }
 }

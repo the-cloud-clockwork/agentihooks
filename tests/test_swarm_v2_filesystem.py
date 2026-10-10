@@ -101,8 +101,25 @@ def test_load_reads_the_repository_layout_then_the_image_copy(tmp_path, monkeypa
     monkeypatch.setattr(filesystem, "LAYOUTS", (tmp_path / "missing.json", image))
     assert filesystem.load() == layout
     image.unlink()
-    with pytest.raises(FileNotFoundError):
+    count = failures()
+    with pytest.raises(filesystem.LayoutError, match="^no layout file is installed, so new launches stop$"):
         filesystem.load()
+    assert failures() == count + 1
+
+
+def test_load_reads_an_explicit_layout_file_only(tmp_path, layout):
+    document = filesystem.mapping(layout)
+    document["roots"]["home"] = "private"
+    chosen = tmp_path / "chosen.json"
+    chosen.write_text(json.dumps(document))
+    assert filesystem.load(chosen).roots["home"] == "private"
+    with pytest.raises(filesystem.LayoutError, match="^no layout file is installed"):
+        filesystem.load(tmp_path / "absent.json")
+
+
+def test_every_root_may_be_immutable(layout):
+    document = filesystem.mapping(layout) | {"immutable": list(filesystem.ROOTS)}
+    assert filesystem.parse(document).immutable == filesystem.ROOTS
 
 
 def test_two_attempts_share_internal_names_but_no_mutable_file_or_socket(world, layout):
@@ -227,12 +244,12 @@ def test_a_contained_archive_extracts_into_its_destination(tmp_path, world, layo
 def test_an_archive_that_resolves_outside_its_root_is_refused_before_any_write(tmp_path, world, layout, case):
     bases, outside = world
     execution = filesystem.allocate(bases[0], ATTEMPT, layout)
-    members = FIXTURE["archive_escapes"][case]
-    bundle = archive(tmp_path, members)
+    escape = FIXTURE["archive_escapes"][case]
+    bundle = archive(tmp_path, escape["members"])
     before, protected, count = snapshot(execution.root), snapshot(outside), failures()
     with pytest.raises(filesystem.LayoutError) as error:
         filesystem.extract(execution, bundle, execution.path("checkout") / "task")
-    assert str(error.value).endswith(members[-1]["name"])
+    assert str(error.value).endswith(escape["refused"])
     assert snapshot(execution.root) == before
     assert snapshot(outside) == protected
     assert failures() == count + 1
@@ -356,13 +373,21 @@ def test_a_record_naming_an_old_node_path_or_unknown_version_stops_the_launch(wo
     assert failures() == count + 1
 
 
-def test_remove_restores_write_bits_on_sealed_folders(tmp_path):
+def test_seal_clears_every_write_bit_and_remove_restores_them(tmp_path):
     tree = tmp_path / "tree"
     (tree / "inner").mkdir(parents=True)
     (tree / "inner" / "file").write_text("x")
     (tree / "link").symlink_to("inner")
+    kept = tmp_path / "kept"
+    kept.mkdir()
+    (tree / "outside").symlink_to(kept)
+    for path, mode in ((tree, 0o777), (tree / "inner", 0o777), (tree / "inner" / "file", 0o666), (kept, 0o555)):
+        path.chmod(mode)
     filesystem.seal(tree)
-    assert stat.S_IMODE(tree.stat().st_mode) & 0o222 == 0
-    assert stat.S_IMODE((tree / "inner" / "file").stat().st_mode) & 0o222 == 0
+    assert stat.S_IMODE(tree.stat().st_mode) == 0o555
+    assert stat.S_IMODE((tree / "inner").stat().st_mode) == 0o555
+    assert stat.S_IMODE((tree / "inner" / "file").stat().st_mode) == 0o444
     filesystem.remove(tree)
     assert not tree.exists()
+    assert stat.S_IMODE(kept.stat().st_mode) == 0o555
+    kept.chmod(0o755)
