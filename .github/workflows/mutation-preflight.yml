@@ -46,6 +46,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Record the revisions the report grades
+        run: |
+          mkdir -p .mutation-gate
+          printf '{"base": "%s", "head": "%s"}\n' "$(git merge-base "$BASE" HEAD)" "$(git rev-parse HEAD)" > .mutation-gate/scope.json
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
