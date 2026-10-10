@@ -72,9 +72,9 @@ class Controller:
         except SwarmError:
             self.held = None
             return False
-        self.ready = self.reconciled_epoch == self.held.epoch
-        if self.ready:
+        if self.reconciled_epoch == self.held.epoch:
             self.accounts.reconcile()
+            self.ready = True
         return self.ready
 
     def _authorize(self) -> None:
@@ -114,9 +114,15 @@ class Controller:
 
     def observe(self, observer: Observer, agent: AgentRecord, signals: Iterable[Signal], now: float) -> Finding | None:
         self._authority()
+        prior = observer.get(self.slug, agent.execution_id)
         seen = observer.observe(self.slug, agent, signals, now)
         source = exit_source(seen)
-        return None if source is None else self.accounts.exited(seen.execution_id, seen.generation, source)
+        if source is None or (
+            prior is not None and prior.generation == seen.generation and exit_source(prior) is not None
+        ):
+            return None
+        self._authority()
+        return self.accounts.exited(seen.execution_id, seen.generation, source)
 
     def admit(self, agent: AgentRecord, previous_execution_id: str = "") -> AgentRecord:
         self.require()

@@ -697,6 +697,30 @@ def test_each_renew_tick_reconciles_accounts(accounts):
     assert sorted(accounts.rows()) == sorted([LOST_TERMINAL, RETIRING])
 
 
+def test_a_renew_tick_of_an_unreconciled_epoch_releases_nothing_and_stays_closed(accounts):
+    controller = accounts.authority.controller
+    controller.reconciled_epoch = None
+    accounts.clock[0] += TTL
+    before = accounts.rows()
+
+    assert controller.renew() is False
+    assert controller.ready is False
+    assert accounts.rows() == before
+
+
+def test_a_renew_tick_whose_account_reconcile_fails_leaves_admission_closed(accounts, monkeypatch):
+    controller = accounts.authority.controller
+
+    def unavailable():
+        raise SwarmError("dependency_unavailable")
+
+    monkeypatch.setattr(controller.accounts, "reconcile", unavailable)
+
+    with pytest.raises(SwarmError, match="^dependency_unavailable$"):
+        controller.renew()
+    assert controller.ready is False
+
+
 def test_a_refused_renew_tick_releases_nothing(accounts):
     controller = accounts.authority.controller
     accounts.clock[0] += lease.ttl_ms()
@@ -712,7 +736,11 @@ def exit_signal(agent, source, value, at):
 
 @pytest.mark.parametrize(
     ("source", "value"),
-    ((observe.Source.SUPERVISOR, observe.EXITED), (observe.Source.KUBERNETES, "Failed")),
+    (
+        (observe.Source.SUPERVISOR, observe.EXITED),
+        (observe.Source.KUBERNETES, "Failed"),
+        (observe.Source.KUBERNETES, "Succeeded"),
+    ),
 )
 def test_an_exit_observation_reaches_the_account_exit_call(accounts, source, value):
     controller, lost = accounts.authority.controller, accounts.agents[TERMINAL]
@@ -725,6 +753,37 @@ def test_an_exit_observation_reaches_the_account_exit_call(accounts, source, val
     assert (found.execution_id, found.generation, found.evidence) == (lost.execution_id, lost.generation, source.value)
     assert sorted(accounts.rows()) == sorted([RETIRING, ORPHANED, SUCCESSOR])
     assert observer.get("fixture", lost.execution_id).sources[source.value]["value"] == value
+
+
+@pytest.mark.parametrize("stored", (True, False))
+def test_a_repeated_exit_observation_reaches_the_exit_call_once(accounts, stored):
+    controller, lost = accounts.authority.controller, accounts.agents[TERMINAL]
+    observer = observe.Observer(accounts.store, "local", observe.Thresholds())
+    if not stored:
+        accounts.store.redis.hdel(accounts.store.key("fixture", "observations"), lost.execution_id)
+    now = accounts.clock[0] / 1000
+    signal = exit_signal(lost, observe.Source.SUPERVISOR, observe.EXITED, now)
+
+    first = controller.observe(observer, lost, [signal], now)
+    again = controller.observe(observer, lost, [signal], now + 1)
+
+    assert (first.kind, first.action) == ("exited", "release")
+    assert again is None
+    assert controller.accounts.stale_exit_events() == 0
+    assert sorted(accounts.rows()) == sorted([RETIRING, ORPHANED, SUCCESSOR])
+
+
+def test_a_second_source_reporting_the_same_exit_is_not_a_stale_exit(accounts):
+    controller, lost = accounts.authority.controller, accounts.agents[TERMINAL]
+    observer = observe.Observer(accounts.store, "local", observe.Thresholds())
+    now = accounts.clock[0] / 1000
+
+    first = controller.observe(observer, lost, [exit_signal(lost, observe.Source.SUPERVISOR, observe.EXITED, now)], now)
+    later = controller.observe(observer, lost, [exit_signal(lost, observe.Source.KUBERNETES, "Failed", now)], now)
+
+    assert (first.kind, first.evidence) == ("exited", "supervisor")
+    assert later is None
+    assert controller.accounts.stale_exit_events() == 0
 
 
 def test_an_observation_without_an_exit_frees_no_slot(accounts):

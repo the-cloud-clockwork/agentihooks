@@ -557,11 +557,16 @@ def test_status_reports_the_reconciliation_and_releases_nothing(world, monkeypat
         (("pod_running",), None),
         (("pod_gone",), None),
         (("pod_unreachable",), None),
+        (("pod_failed_forbidden",), None),
         ((), None),
     ],
 )
 def test_the_exit_source_is_the_first_source_whose_reading_shows_an_exit(sources, expected):
-    found = {name: entry for case in sources for name, entry in INPUTS[case].items()}
+    cases = {
+        **INPUTS,
+        "pod_failed_forbidden": {"kubernetes": {**INPUTS["pod_failed"]["kubernetes"], "reading": "forbidden"}},
+    }
+    found = {name: entry for case in sources for name, entry in cases[case].items()}
     values = INPUTS["lost_worker"]
     seen = observe.Classification(
         "exec-1",
