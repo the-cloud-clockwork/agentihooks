@@ -624,3 +624,9 @@ def test_reuse_off_attaches_without_a_seed_and_publishes_nothing(world):
     assert cache.publish(off, world.second, replace(layer, key=key(lock="b" * 64))) is None
     assert entries(world.store) == [key().digest()]
     assert (seed / "a.whl").read_bytes() == b"x"
+
+
+def test_package_cases_pass_on_the_isolated_fixture():
+    from tests.sv2_fsy03_cases import case_a, case_b, case_c
+
+    assert [case()["passed"] for case in (case_a, case_b, case_c)] == [True, True, True]
