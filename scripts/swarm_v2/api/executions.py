@@ -76,7 +76,7 @@ class ExecutionsAPI:
     def credential(self, execution_id: str, token: str) -> dict:
         registration = self.grants.bound(self.slug, token)
         if execution_id != registration.execution_id:
-            raise GrantRefused("forbidden_scope", "credential renewal names another execution")
+            self.grants.refuse(self.slug, "forbidden_scope", "credential renewal names another execution")
         renewed, expires_at = self.grants.renew(self.slug, token)
         return {
             "execution_id": execution_id,

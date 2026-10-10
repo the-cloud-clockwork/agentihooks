@@ -502,9 +502,19 @@ def test_a_renewed_credential_keeps_heartbeats_and_task_writes_past_the_launch_g
     assert (status, refusal["error_class"]) == (401, "unauthenticated")
     status, ack = beat(api, world, agent, renewed, 2)
     assert (status, ack["lease_deadline_ms"]) == (200, 901_000)
-    advance(world, 449_000)
-    claim = world.tasks.complete(renewed, 1, {"outcome": "merged"})
+    advance(world, 400_000)
+    status, again = renew(api, agent.execution_id, renewed)
+    assert (status, again["expires_at"]) == (200, "1970-01-01T00:11:40Z")
+    advance(world, 550_000)
+    status, refusal = beat(api, world, agent, renewed, 3)
+    assert (status, refusal["error_class"]) == (401, "unauthenticated")
+    status, ack = beat(api, world, agent, again["credential"], 3)
+    assert (status, ack["lease_deadline_ms"]) == (200, 1_150_000)
+    advance(world, 600_000)
+    claim = world.tasks.complete(again["credential"], 1, {"outcome": "merged"})
     assert (claim.state, claim.result) == ("completed", {"outcome": "merged"})
+    audit = json.loads(world.store.redis.hget(world.store.key("fixture", "launch-grants"), renewal["grant_id"]))
+    assert (audit["renewals"], audit["expires_at"]) == (2, "1970-01-01T00:11:40Z")
 
 
 def test_revoking_the_registration_stops_heartbeats_task_writes_and_renewal(world, long_lived):
@@ -521,9 +531,10 @@ def test_revoking_the_registration_stops_heartbeats_task_writes_and_renewal(worl
         )
         status, refusal = renew(api, agent.execution_id, credential)
         assert (status, refusal["error_class"]) == (401, "unauthenticated")
-        with pytest.raises(GrantRefused) as error:
-            world.tasks.release(credential, 1)
-        assert error.value.error_class == "unauthenticated"
+        for write in (lambda: world.tasks.release(credential, 1), lambda: world.tasks.complete(credential, 1, {})):
+            with pytest.raises(GrantRefused) as error:
+                write()
+            assert error.value.error_class == "unauthenticated"
     assert world.protected() == before
 
 
@@ -541,6 +552,9 @@ def test_a_credential_renewal_is_bound_to_its_own_live_execution(world, long_liv
         path = f"/v2/executions/{agent.execution_id}/credential{suffix}"
         assert api.route(method, path, f"Bearer {token}", {})[0] == 404
     assert renew(api, agent.execution_id, "v2.forged.token")[1]["error_class"] == "unauthenticated"
+    stranger, stranger_token = world.start("eng-3@fixture", "third")
+    status, refusal = renew(api, stranger.execution_id, stranger_token)
+    assert (status, refusal["message"]) == (401, "launch grant is not registered")
     world.start(previous=agent.execution_id)
     assert renew(api, agent.execution_id, token)[0] == 409
     advance(world, 150_000)
