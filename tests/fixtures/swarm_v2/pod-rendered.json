@@ -1,0 +1,236 @@
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "annotations": {
+      "swarm.agentihooks.io/controller-epoch": "7",
+      "swarm.agentihooks.io/grant-ref": "lgr-00112233445566778899aabbccddeeff",
+      "swarm.agentihooks.io/harness": "claude",
+      "swarm.agentihooks.io/image-digest": "sha256:4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b",
+      "swarm.agentihooks.io/profile": "general",
+      "swarm.agentihooks.io/project": "github.com/the-cloud-clockwork/agentihooks",
+      "swarm.agentihooks.io/seat": "eng-3@rig-grade-swarm",
+      "swarm.agentihooks.io/task-payload-digest": "sha256:e973bff0c798c16e5869d37e33bf4f24d8b174d27e7abb7470a0e8e966a4d8af",
+      "swarm.agentihooks.io/template-version": "kub01-v2"
+    },
+    "labels": {
+      "app.kubernetes.io/component": "swarm-execution",
+      "app.kubernetes.io/managed-by": "agentihooks",
+      "swarm.agentihooks.io/controller-owner": "agentihooks-swarm-fixture",
+      "swarm.agentihooks.io/execution-id": "exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+      "swarm.agentihooks.io/generation": "3",
+      "swarm.agentihooks.io/provider-account": "claude-fixture",
+      "swarm.agentihooks.io/swarm": "rig-grade-swarm",
+      "swarm.agentihooks.io/task": "vkub1",
+      "swarm.agentihooks.io/template-version": "kub01-v2"
+    },
+    "name": "swarm-exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+    "namespace": "swarm-pod-proof"
+  },
+  "spec": {
+    "affinity": {
+      "nodeAffinity": {
+        "requiredDuringSchedulingIgnoredDuringExecution": {
+          "nodeSelectorTerms": [
+            {
+              "matchExpressions": [
+                {
+                  "key": "anton.io/pool",
+                  "operator": "NotIn",
+                  "values": [
+                    "research"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "automountServiceAccountToken": false,
+    "containers": [
+      {
+        "args": [
+          "python",
+          "/opt/swarm-node/supervisor.py",
+          "/home/worker/attempts/exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+          "/var/run/swarm/launch/launch.json"
+        ],
+        "env": [
+          {
+            "name": "BRAIN_URL",
+            "value": "http://brain-api.swarm-brain.svc:8080"
+          }
+        ],
+        "image": "ghcr.io/the-cloud-clockwork/agentihooks-worker@sha256:4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b",
+        "imagePullPolicy": "IfNotPresent",
+        "livenessProbe": {
+          "exec": {
+            "command": [
+              "python",
+              "/opt/swarm-node/health.py",
+              "liveness",
+              "--attempt",
+              "/home/worker/attempts/exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+              "--harness",
+              "claude",
+              "--herdr-timeout",
+              "2",
+              "--brain-timeout",
+              "2"
+            ]
+          },
+          "failureThreshold": 4,
+          "initialDelaySeconds": 0,
+          "periodSeconds": 15,
+          "timeoutSeconds": 6
+        },
+        "name": "agent",
+        "readinessProbe": {
+          "exec": {
+            "command": [
+              "python",
+              "/opt/swarm-node/health.py",
+              "readiness",
+              "--attempt",
+              "/home/worker/attempts/exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+              "--harness",
+              "claude",
+              "--herdr-timeout",
+              "2",
+              "--brain-timeout",
+              "2"
+            ]
+          },
+          "failureThreshold": 3,
+          "initialDelaySeconds": 0,
+          "periodSeconds": 10,
+          "timeoutSeconds": 6
+        },
+        "resources": {
+          "limits": {
+            "cpu": "2000m",
+            "ephemeral-storage": "10240Mi",
+            "memory": "4096Mi"
+          },
+          "requests": {
+            "cpu": "1500m",
+            "ephemeral-storage": "10240Mi",
+            "memory": "3072Mi"
+          }
+        },
+        "securityContext": {
+          "allowPrivilegeEscalation": false,
+          "capabilities": {
+            "drop": [
+              "ALL"
+            ]
+          },
+          "privileged": false,
+          "readOnlyRootFilesystem": true
+        },
+        "startupProbe": {
+          "exec": {
+            "command": [
+              "python",
+              "/opt/swarm-node/health.py",
+              "startup",
+              "--attempt",
+              "/home/worker/attempts/exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+              "--harness",
+              "claude",
+              "--herdr-timeout",
+              "2",
+              "--brain-timeout",
+              "2"
+            ]
+          },
+          "failureThreshold": 24,
+          "initialDelaySeconds": 0,
+          "periodSeconds": 5,
+          "timeoutSeconds": 6
+        },
+        "volumeMounts": [
+          {
+            "mountPath": "/home/worker",
+            "name": "home"
+          },
+          {
+            "mountPath": "/tmp",
+            "name": "tmp"
+          },
+          {
+            "mountPath": "/var/run/swarm/launch",
+            "name": "launch",
+            "readOnly": true
+          },
+          {
+            "mountPath": "/var/run/swarm/credential",
+            "name": "credential",
+            "readOnly": true
+          }
+        ]
+      }
+    ],
+    "enableServiceLinks": false,
+    "hostIPC": false,
+    "hostNetwork": false,
+    "hostPID": false,
+    "nodeSelector": {
+      "anton.io/pool": "general"
+    },
+    "restartPolicy": "Never",
+    "securityContext": {
+      "fsGroup": 10001,
+      "runAsGroup": 10001,
+      "runAsNonRoot": true,
+      "runAsUser": 10001,
+      "seccompProfile": {
+        "type": "RuntimeDefault"
+      }
+    },
+    "serviceAccountName": "swarm-worker",
+    "terminationGracePeriodSeconds": 60,
+    "tolerations": [
+      {
+        "effect": "NoSchedule",
+        "key": "anton.io/spot",
+        "operator": "Exists"
+      }
+    ],
+    "volumes": [
+      {
+        "emptyDir": {
+          "sizeLimit": "9216Mi"
+        },
+        "name": "home"
+      },
+      {
+        "emptyDir": {
+          "sizeLimit": "1024Mi"
+        },
+        "name": "tmp"
+      },
+      {
+        "configMap": {
+          "defaultMode": 292,
+          "name": "swarm-exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0-launch"
+        },
+        "name": "launch"
+      },
+      {
+        "name": "credential",
+        "secret": {
+          "defaultMode": 256,
+          "items": [
+            {
+              "key": "token",
+              "path": "token"
+            }
+          ],
+          "secretName": "swarm-account-claude-fixture"
+        }
+      }
+    ]
+  }
+}
