@@ -349,6 +349,7 @@ def _recovery() -> tuple[dict, bool]:
         old_record = world.store.execution(SLUG, old.execution_id)
         world.show(old, "running")
         late = [world.reconcile(recovery), world.reconcile(recovery)]
+        late_count = recovery.late_observations(old.execution_id)
         paused = world.recovery(restarted, automatic=False)
         other = world.launch(restarted, world.fx["second"], "eng-2")
         world.show(other, "evicted")
@@ -364,7 +365,7 @@ def _recovery() -> tuple[dict, bool]:
             "attempts": world.attempts(),
             "occupant": world.occupant().execution_id,
             "late_old_pod": late,
-            "late_observations": recovery.late_observations(old.execution_id),
+            "late_observations": late_count,
             "old_record_unchanged": world.store.execution(SLUG, old.execution_id) == old_record,
             "decision_unchanged": recovery.decision(old.execution_id) == decision,
             "releases": world.log,
@@ -403,8 +404,8 @@ def _recovery() -> tuple[dict, bool]:
         observed["slots"] == [],
         observed["rollback"]
         == {
-            "first": {"<replacement>": "unobserved", "<other>": "fenced"},
-            "late": {"<replacement>": "unobserved", "<other>": "retired"},
+            "first": {"<replacement>": "unobserved", "<other>": "fenced", "<old>": "retired"},
+            "late": {"<replacement>": "unobserved", "<other>": "retired", "<old>": "retired"},
             "decision": {
                 "execution_id": "<other>",
                 "generation": 1,

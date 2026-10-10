@@ -1,0 +1,92 @@
+{
+  "case": "T-SV2-KUB-05-C",
+  "state": "passed",
+  "evidence_class": "mocked: fakeredis execution registry, heartbeat archive watermarks, provider account slots, fence and recovery records, a fake lease clock, an in process API server whose Pods carry fixture statuses, an in process grant registry and an in process checkpoint list; no Kubernetes API server, node or worker Pod was used",
+  "input_sha256": {
+    "pod-failures.json": "13b5e8d94825f40ea87fada359454c47dee84fd4161945eebcdea4e235fff4b4",
+    "pod-launch.json": "dc9258de4781082cc2abb9a2048ff04db03da0a83ea144f96fe728847b34c809",
+    "pod-policy.json": "6f10e42c7c8461ea18fe3ae9f0c46001020bd50153665477b415076cf71099f5"
+  },
+  "observed": {
+    "attempts": [
+      [
+        "<old>",
+        1
+      ],
+      [
+        "<replacement>",
+        2
+      ]
+    ],
+    "crashes": [
+      "grant registry unavailable",
+      "admission response dropped"
+    ],
+    "decision": {
+      "checkpoint": "ckpt-one-2",
+      "execution_id": "<old>",
+      "generation": 1,
+      "mode": "resume",
+      "reason": "oom_killed",
+      "replacement": "<replacement>"
+    },
+    "decision_unchanged": true,
+    "execution_failures_by_reason": {
+      "application_exit": 0,
+      "evicted": 1,
+      "image_pull": 0,
+      "node_lost": 0,
+      "oom_killed": 1
+    },
+    "fence_after_crash": {
+      "reason": "oom_killed",
+      "released": []
+    },
+    "fence_written_once": true,
+    "late_observations": 3,
+    "late_old_pod": [
+      {
+        "<old>": "retired",
+        "<replacement>": "unobserved"
+      },
+      {
+        "<old>": "retired",
+        "<replacement>": "unobserved"
+      }
+    ],
+    "occupant": "<replacement>",
+    "old_record_unchanged": true,
+    "releases": [
+      "grant",
+      "grant",
+      "grant"
+    ],
+    "resumed": {
+      "<old>": "retired",
+      "<replacement>": "unobserved"
+    },
+    "rollback": {
+      "attempts": 1,
+      "decision": {
+        "checkpoint": "",
+        "execution_id": "<other>",
+        "generation": 1,
+        "mode": "recovery_pending",
+        "reason": "evicted",
+        "replacement": ""
+      },
+      "first": {
+        "<old>": "retired",
+        "<other>": "fenced",
+        "<replacement>": "unobserved"
+      },
+      "late": {
+        "<old>": "retired",
+        "<other>": "retired",
+        "<replacement>": "unobserved"
+      },
+      "state": "awaiting-decision"
+    },
+    "slots": []
+  }
+}
