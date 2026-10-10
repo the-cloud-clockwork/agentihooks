@@ -1,0 +1,57 @@
+{
+  "package": "SV2-KUB-02",
+  "dependency": "SV2-KUB-01",
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2430",
+  "tested_commit": "pending: set to the reviewed head",
+  "status": "fixture-qualified-awaiting-ci",
+  "evidence_class": "Mocked: fakeredis journal and execution registry, a fake lease clock and an in process API server that applies a create, drops its response and then answers AlreadyExists; no Kubernetes API server, node autoscaler or EC2 call was made.",
+  "interfaces": [
+    "scripts.swarm_v2.kubernetes.client: KubeHttp(server, token_path, context, opener) and KubeHttp.in_cluster(environ, account) send JSON to the API server with the service account token read per request; an unreachable server raises ConnectionError and a read timeout raises TimeoutError",
+    "PodClient(http, namespace): create_pod, read_pod (None on 404), list_pods(selector) without a resourceVersion, so a quorum read; 409 AlreadyExists raises AlreadyExists, 429 and 5xx raise ConnectionError, other refusals raise ApiRefused(status, reason)",
+    "scripts.swarm_v2.kubernetes.runtime: KubernetesTransport(api, slug, template, creation_enabled) is the OperationTransport for backend kubernetes and action spawn; apply_operation renders the admitted launch with the SV2-KUB-01 PodTemplate, refuses a render whose owner label is not owner_for(slug), whose execution or generation labels disagree with the operation, or whose namespace is not the client namespace, annotates the Pod with its spec digest and operation payload digest, and creates it under the deterministic name swarm-<execution_id>; the applied result carries the Pod uid, name and namespace",
+    "On AlreadyExists the transport reads the Pod and adopts it only when owner, execution and generation labels and both digests match; otherwise the Pod is quarantined in KubernetesTransport.quarantined with its reason (owner, execution, generation, operation, spec or ambiguous) and the operation is refused; a quarantined Pod is never adopted, patched or deleted",
+    "observe_operation lists Pods by the controller-owner and execution-id labels, so Operations.recover in a restarted controller finds the Pod and its uid; a second labelled Pod for one execution quarantines both as ambiguous",
+    "status(execution_id) returns PodStatus with the Pod phase, status and container termination or waiting reasons and the deleting flag, kept apart from task state; a Succeeded Pod never marks the ledger outcome committed",
+    "kubernetes_create_reconciliation_total() counts created, adopted, observed, quarantined and disabled"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "kubernetes": "core v1 Pods over the REST API: label selector list, named read and create with 409 AlreadyExists; any supported Kubernetes release",
+    "redis": "the runtime operation journal and execution registry from SV2-RUN-04 and SV2-CTL-01",
+    "compatibility": "The local runtime and its transports are unchanged; the transport registers only under backend kubernetes, so a controller without it settles kubernetes operations as unknown, as before"
+  },
+  "authority": "The owner label value comes from owner_for(slug), never from a display label or Pod name. Creation runs only through the controller's fenced transport, which re-checks the scoped grant and the lease before every apply. Case C shows a stale controller refused after takeover.",
+  "states": {
+    "observed": "Cases A, B and C each passed twice in proofs run 38064279330 with identical records; the client and runtime test modules passed 68 tests in proofs run 38064097545 with only the three evidence comparisons failing for the absent files.",
+    "accepted": "A lost create response followed by observation adopts the original Pod uid with one create; a direct retry reaching AlreadyExists adopts the same uid; a squatting Pod with another execution label is quarantined twice and left unchanged; a restarted controller recovers the uid through the label qualified list and matches it in reconcile.",
+    "committed": "Code and fixture inputs are at tested_commit.",
+    "externally_verified": "None: no live API server or G3 deployment was exercised."
+  },
+  "validation": {
+    "red": "Mutation preflight run 38063828425 on the tests only commit 30d5da67: its run log shows ModuleNotFoundError for scripts.swarm_v2.kubernetes.client collecting the runtime tests",
+    "tests": "proofs run 38064097545 (68 passed, 3 evidence comparisons failed for absent files) and proofs run 38064279330 (case records)",
+    "lint": "ruff check and ruff format passed through python -m scripts.ci_prepush",
+    "mutation": "pending the next preflight run"
+  },
+  "cases": {
+    "a": "evidence/SV2-KUB-02/a-result.json",
+    "b": "evidence/SV2-KUB-02/b-result.json",
+    "c": "evidence/SV2-KUB-02/c-result.json",
+    "manifest": "evidence/SV2-KUB-02/manifest.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Construct the transport with creation_enabled False: no create call is made, observation, status and the controller's reconcile and orphan cleanup continue.",
+    "authoritative_objects": "The runtime operation journal, the execution registry and the execution Pods themselves; the in memory quarantine list and reconciliation counts are observational.",
+    "proof": "Case C takes over with creation disabled: a new launch settles accepted with no create call and the existing Pod is still observed by uid."
+  },
+  "remaining_limitations": [
+    "The execution registry requires a Pod name in the runtime target before admission allocates the execution id, so the target carries a placeholder; the real Pod name and uid live in the operation journal result.",
+    "The quarantine list and reconciliation counts are in memory per transport; they are not persisted for operator review or exported as telemetry yet.",
+    "No PodSource over the Kubernetes watch API exists yet; PodView in the cases reads the same fake API server.",
+    "The transport carries spawn only; command, drain, terminate and recover belong to later packages, and the swarm router does not hold a Kubernetes runtime yet.",
+    "The launch ConfigMap and credential Secret the template mounts are not created by this package."
+  ],
+  "pull_request": "pending",
+  "follow_ups": []
+}

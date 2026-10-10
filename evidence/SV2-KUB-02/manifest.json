@@ -1,0 +1,14 @@
+{
+  "tested_commit": "pending: set to the reviewed head",
+  "evidence_class": "mocked Redis, fake lease clock and an in process API server; no Kubernetes, autoscaler or EC2 calls",
+  "inputs": {
+    "tests/fixtures/swarm_v2/pod-policy.json": "6f10e42c7c8461ea18fe3ae9f0c46001020bd50153665477b415076cf71099f5",
+    "tests/fixtures/swarm_v2/pod-launch.json": "dc9258de4781082cc2abb9a2048ff04db03da0a83ea144f96fe728847b34c809",
+    "tests/sv2_kub02_cases.py": "6333773cef67331a90fe36798a9f763c08bf406bf00e7288268b28a41555125d",
+    "tests/test_swarm_v2_kubernetes_runtime.py": "db9b379483f992b55224454a405015eac908763492d4066d7289ac7b99b5450e",
+    "tests/test_swarm_v2_kubernetes_client.py": "5fb1e5a6731f3d310b6ab98fb0912e394908869468c0b758ae627f2674f3059e",
+    "scripts/swarm_v2/kubernetes/client.py": "f0844855cc2a411314392eb5fa1e473b917b5077ca18eafa20e0f790c415b467",
+    "scripts/swarm_v2/kubernetes/runtime.py": "4af110d5db479d3a9a0bc1c0b02574d9a2d0b4da7a1b8e89996ac86ad11d6abd",
+    "scripts/swarm_v2/kubernetes/spec.py": "585862233f4a3fa0928f07a6082b649c947fe04761d880738bb58c061888d7c1"
+  }
+}

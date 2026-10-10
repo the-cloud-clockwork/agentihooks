@@ -2,10 +2,10 @@ import json
 from pathlib import Path
 
 import pytest
-from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused
-from scripts.swarm_v2.kubernetes.runtime import KubernetesTransport, PodStatus, pod_status
 
 from scripts.swarm_v2.kubernetes import runtime, watch
+from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused
+from scripts.swarm_v2.kubernetes.runtime import KubernetesTransport, PodStatus, pod_status
 from scripts.swarm_v2.kubernetes.spec import PodTemplate
 from scripts.swarm_v2.runtime.operations import Observation, Operation, Phase
 from tests import sv2_kub02_cases as cases
