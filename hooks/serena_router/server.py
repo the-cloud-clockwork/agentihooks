@@ -17,7 +17,7 @@ from hooks.serena_router.binding import (
 from hooks.serena_router.pool import BackendError, Pool
 
 ACTIVATE = "activate_project"
-# Claude covers these with its own tools; a client lists them by naming them in the endpoint's `tools` query.
+# Listed only when the endpoint's `tools` query names them.
 OPT_IN = frozenset({"read_file", "search_for_pattern"})
 
 UNBOUND = (

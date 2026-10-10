@@ -12,6 +12,7 @@ import pytest
 pytestmark = pytest.mark.xdist_group("mcp-sdk")
 
 FAKE = Path(__file__).parent / "fixtures" / "fake_serena.py"
+OPT_IN = {"read_file", "search_for_pattern"}
 
 
 def _git(cwd: Path, *args: str) -> None:
@@ -187,9 +188,6 @@ def test_app_bounds_idle_sessions():
 
     app = build_app(Pool(BackendConfig(command=(sys.executable, str(FAKE)))), [])
     assert app.state.session_manager.session_idle_timeout == SESSION_IDLE_SECONDS
-
-
-OPT_IN = {"read_file", "search_for_pattern"}
 
 
 async def _listed_over_http(router, path: str) -> set[str]:
