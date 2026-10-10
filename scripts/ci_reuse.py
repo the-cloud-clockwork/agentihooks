@@ -75,7 +75,7 @@ def _matrix(job):
     axes = {key: values for key, values in matrix.items() if key not in {"include", "exclude"}}
     if any(not isinstance(values, list) for values in axes.values()):
         return 1
-    rows = [dict(zip(axes, values, strict=True)) for values in itertools.product(*axes.values())]
+    rows = [dict(pairs) for pairs in itertools.product(*([(key, value) for value in axes[key]] for key in axes))]
     rows = [
         row
         for row in rows
@@ -126,6 +126,8 @@ def _proof(path):
 
 
 def _find(args, current):
+    if _git("rev-parse", f"{current['commit']}:.github") != current["inputs"]["workflow"]:
+        return None
     workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text())
     runs = json.loads((args.evidence / "runs.json").read_text())["workflow_runs"]
     for run in runs:
@@ -156,12 +158,10 @@ def _find(args, current):
         tested = _revision(record["commit"])
         if _git("rev-parse", f"{tested}^{{tree}}") != current["tree"]:
             continue
-        if _git("rev-parse", f"{tested}:.github") != current["inputs"]["workflow"]:
-            continue
         shards = workflow["jobs"]["unit"]["strategy"]["matrix"]["shard"]
         coverage = {f"coverage-3.12-{shard}" for shard in shards}
         kept = {item["name"] for item in artifacts if not item["expired"]}
-        if not coverage <= kept:
+        if coverage - kept:
             continue
         jobs = _lines(folder / "jobs.jsonl")
         if _passed(workflow, jobs) and _authenticated(folder, record, jobs):
