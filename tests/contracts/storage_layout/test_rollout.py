@@ -84,8 +84,10 @@ class Clock:
 
 
 def test_the_benchmark_reports_throughput_and_loss_and_removes_its_folder(tmp_path):
-    report = benchmark.run(tmp_path, [1, 2], 2, Clock())
-    assert report["root"] == str(tmp_path)
+    mount = tmp_path / "mount"
+    mount.mkdir()
+    report = benchmark.run(mount, [1, 2], 2, Clock())
+    assert report["root"] == str(mount)
     assert report["throughput"] == [
         {"size_mib": 1, "rounds": 2, "seconds": 0.5, "mib_per_s": 4.0},
         {"size_mib": 2, "rounds": 2, "seconds": 0.5, "mib_per_s": 8.0},
@@ -93,7 +95,7 @@ def test_the_benchmark_reports_throughput_and_loss_and_removes_its_folder(tmp_pa
     loss = report["loss"]
     assert (loss["while_lost"], loss["source_intact"], loss["after_restore"]) == ("paused", True, "published")
     assert loss["reason"].startswith("artifact storage is unavailable (")
-    assert list(tmp_path.iterdir()) == []
+    assert list(mount.iterdir()) == []
 
 
 def test_the_benchmark_writes_each_round_as_its_own_artifact(tmp_path):
