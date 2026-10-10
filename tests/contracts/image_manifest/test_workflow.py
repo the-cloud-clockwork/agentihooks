@@ -232,7 +232,24 @@ def test_scan_reads_every_layer_and_the_image_config_for_secrets(tmp_path):
 
     assert done.returncode == 0, done.stderr
     assert "--scanners secret --image-config-scanners secret --exit-code 1" in log
+    assert "/trivy-secret.yaml:/etc/trivy-secret.yaml:ro" in log and "--secret-config /etc/trivy-secret.yaml" in log
     assert log.rstrip().endswith("candidate:x")
+
+
+def test_the_scan_allows_only_published_python_package_descriptions():
+    config = yaml.safe_load((ROOT / "docker/swarm-node/trivy-secret.yaml").read_text())
+    [rule] = config.pop("allow-rules")
+    path = re.compile(rule["path"])
+
+    assert config == {} and set(rule) == {"id", "description", "path"}
+    assert path.search("/opt/venv/lib/python3.12/site-packages/pyjwt-2.15.1.dist-info/METADATA")
+    for other in (
+        "/opt/agentihooks/.build-token",
+        "/root/.git-credentials",
+        "/opt/venv/lib/python3.12/site-packages/pyjwt-2.15.1.dist-info/METADATA.bak",
+        "/opt/venv/lib/python3.12/site-packages/jwt/api_jwt.py",
+    ):
+        assert not path.search(other)
     assert "no credentials found in candidate:x" in done.stdout
 
 
@@ -263,9 +280,16 @@ def test_the_planted_credential_is_generated_at_build_time_and_refused_before_pu
     assert not re.search(r"gh[pousr]_[0-9A-Za-z]{36}", fixture)
     assert "'ghs_' +" in fixture and "> /opt/agentihooks/.build-token" in fixture
     assert 'bash docker/swarm-node/scan.sh "$PLANTED"' in refusal and '"$status" != 1' in refusal
+    assert "grep -qE '^github-app-token (.*/)?opt/agentihooks/\\.build-token$' \"$out/findings.txt\"" in refusal
     assert named(workflow, "Scan the candidate for credentials")["run"].startswith(
         'bash docker/swarm-node/scan.sh "$CANDIDATE"'
     )
+    for name in (
+        "Build the planted credential fixture",
+        "Refuse the planted credential fixture",
+        "Scan the candidate for credentials",
+    ):
+        assert not {"if", "continue-on-error"} & named(workflow, name).keys()
 
 
 def test_the_pull_request_smoke_scans_the_image_it_built():

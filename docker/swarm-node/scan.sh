@@ -7,8 +7,11 @@ scanner="aquasec/trivy:0.58.1"
 mkdir -p "$output"
 rm -f "$output/secrets.json"
 status=0
-docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro -v "$output:/out" "$scanner" \
+config="$(dirname "$(realpath "$0")")/trivy-secret.yaml"
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro -v "$output:/out" \
+    -v "$config:/etc/trivy-secret.yaml:ro" "$scanner" \
     image --quiet --scanners secret --image-config-scanners secret --exit-code 1 \
+    --secret-config /etc/trivy-secret.yaml \
     --format json --output /out/secrets.json "$image" > "$output/scan.log" 2>&1 || status=$?
 if [[ ! -s "$output/secrets.json" ]]; then
     echo "credential scan did not complete for $image (exit $status)" >&2
