@@ -141,5 +141,20 @@
     "standards_review": "round one findings fixed; the task sub agent budget closed further rounds",
     "spec_review": "round one findings fixed or recorded here; the task sub agent budget closed further rounds",
     "sonar": "one python:S5443 hotspot on the Pod-private /tmp emptyDir mountPath, reviewed SAFE on the pull request analysis; coverage on new code 99.1"
-  }
+  },
+  "scope": {
+    "scripts/swarm_v2/kubernetes/spec.py": "owned path candidate; implementation sequence steps 1 to 4; rejection and recovery contracts; pod_spec_validation_failures_total",
+    "docs/swarm-v2/schemas/pod-policy.json": "owned path candidate; approved requests, limits, node constraints and secret references",
+    "provider account label and swarm-account Secret": "task instruction folded in by the master; the secret reference half of implementation step 2",
+    "tests/fixtures/swarm_v2/pod-*.json, tests/test_swarm_v2_kubernetes_spec.py": "required fixture: malicious payload with YAML fragments on a valid general profile",
+    "tests/sv2_kub01_cases.py, evidence/SV2-KUB-01/*": "cases T-SV2-KUB-01-A, B and C and the evidence record",
+    "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh": "output contract: the rendered Pod validates against Kubernetes schema on a real API server",
+    "docker/swarm-node/README.md": "task instruction: the probes package rollback, this template now holds the probe wiring and thresholds",
+    "mutation-clearances/<hash>.json": "the Standards reader's ruling on one equivalent mutant, required by the mutation gate"
+  },
+  "phase_use": [
+    "SV2-KUB-02 creates Pods through PodTemplate.render and load_policy from this renderer",
+    "SV2-SEC-06 stacks on this renderer and makes runtime_class_name required for the Firecracker RuntimeClass",
+    "SV2-SEC-02 (antoncore pull request 634, merged) admits only execution Pods carrying swarm.agentihooks.io/provider-account and referencing only Secret swarm-account-<label> key token, which is exactly what the golden Pod carries; helm-kind job 114256176988 accepted it by strict server side dry run"
+  ]
 }
