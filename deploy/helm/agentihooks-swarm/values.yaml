@@ -13,6 +13,7 @@ envFromSecrets: []
 externalSecrets: []
 
 ledger:
+  replicas: 1
   port: 8765
   publicUrl: ""
   persistence:

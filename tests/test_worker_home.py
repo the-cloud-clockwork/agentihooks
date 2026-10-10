@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm_v2 import worker_home
+from scripts.swarm_v2 import filesystem, worker_home
 
 WORKSTATION_PYTHON = "/home/operator/dev/tcc-ecosystem/.venv/bin/python"
 ENDPOINTS = {"AGENTIHOOKS_LEDGER_URL": "http://ledger.swarm.svc:8765", "BRAIN_URL": "https://brain.swarm.svc"}
@@ -30,8 +30,9 @@ def inprocess(monkeypatch):
 
     import scripts.install as package_install
 
-    def render(attempt: Path, target: str) -> None:
-        home = attempt / "homes" / target
+    def render(execution: filesystem.Execution, target: str) -> None:
+        attempt = execution.root
+        home = execution.path("home") / target
         state = home / ".agentihooks"
         paths = {
             "CLAUDE_HOME": home / ".claude",
@@ -136,6 +137,39 @@ def test_bootstrap_renders_both_targets_into_separate_homes(fixture):
     assert "AH_CC_TOKEN_POOL_A" not in claude_text + codex_text
 
 
+def test_bootstrap_allocates_the_layout_seals_seeds_and_records_relative_paths(fixture):
+    templates, volume = fixture
+    record = worker_home.bootstrap(request(templates, volume))
+    attempt = volume / "attempt-1"
+    layout = filesystem.load()
+    assert record["layout"] == filesystem.mapping(layout)
+    assert json.loads((attempt / worker_home.RECORD).read_text())["layout"] == filesystem.mapping(layout)
+    assert all((attempt / folder).is_dir() for folder in layout.roots.values())
+    seeds = [p for p in (attempt / "profiles").rglob("*") if not p.is_symlink()]
+    assert seeds and not any(p.lstat().st_mode & 0o222 for p in seeds)
+    assert (attempt / "homes" / "claude").stat().st_mode & 0o200
+
+
+def test_a_template_link_that_leaves_the_seed_copy_fails_bootstrap_and_removes_the_attempt(fixture):
+    templates, volume = fixture
+    profile = templates / "fixture-claude"
+    (profile / "persona.md").symlink_to(profile / "CLAUDE.md")
+    with pytest.raises(worker_home.BootstrapError) as error:
+        worker_home.bootstrap(request(templates, volume))
+    copy = volume / "attempt-1" / "profiles" / "fixture-claude" / "persona.md"
+    assert str(error.value) == f"path resolves outside its execution root: {copy}"
+    assert not (volume / "attempt-1").exists()
+
+
+def test_a_missing_layout_fails_bootstrap_and_leaves_no_attempt(fixture, monkeypatch):
+    templates, volume = fixture
+    monkeypatch.setattr(filesystem, "LAYOUTS", (volume / "layout.json",))
+    with pytest.raises(worker_home.BootstrapError) as error:
+        worker_home.bootstrap(request(templates, volume))
+    assert str(error.value) == "no layout file is installed, so new launches stop"
+    assert list(volume.iterdir()) == []
+
+
 def test_every_home_exports_the_grant_file_path_and_never_a_grant(fixture):
     templates, volume = fixture
     worker_home.bootstrap(request(templates, volume))
@@ -231,7 +265,7 @@ def codex_home(attempt: Path, config: str = "", wrapper: str = "", command: str 
 
 def check(attempt: Path, target: str) -> None:
     roots = [attempt.resolve(), Path(sys.prefix).resolve(), *worker_home.SYSTEM_ROOTS]
-    worker_home._check_home(attempt, target, roots, (os.geteuid(), os.getegid()))
+    worker_home._check_home(attempt / "homes" / target, target, roots, (os.geteuid(), os.getegid()))
 
 
 def hook(command: str) -> dict:
@@ -441,10 +475,10 @@ def test_rendered_link_escaping_the_execution_root_fails_bootstrap(fixture, tmp_
     outside.mkdir()
     render = worker_home.render
 
-    def plant(attempt, target):
-        render(attempt, target)
+    def plant(execution, target):
+        render(execution, target)
         if target == "codex":
-            (attempt / "homes" / "codex" / "escape").symlink_to(outside)
+            (execution.path("home") / "codex" / "escape").symlink_to(outside)
 
     monkeypatch.setattr(worker_home, "render", plant)
     with pytest.raises(worker_home.BootstrapError) as error:
@@ -481,7 +515,7 @@ def test_render_runs_the_child_in_the_target_home_with_its_environment(tmp_path,
     fields = "{'cwd': os.getcwd(), 'home': os.environ['HOME'], 'python': os.environ['AGENTIHOOKS_PYTHON']}"
     probe = f"import json, os; print(json.dumps({fields}))"
     monkeypatch.setattr(worker_home, "child_command", lambda path, target: [sys.executable, "-c", probe])
-    REAL_RENDER(attempt, "codex")
+    REAL_RENDER(filesystem.Execution(attempt, filesystem.load()), "codex")
     home = str(attempt / "homes" / "codex")
     logged = json.loads((attempt / "run" / "render-codex.log").read_text())
     assert logged == {"cwd": home, "home": home, "python": "/opt/venv/bin/python"}
@@ -559,8 +593,8 @@ def test_interrupted_bootstrap_restarts_without_duplicate_entries(fixture, tmp_p
     worker_home.bootstrap(request(templates, clean))
     render = worker_home.render
 
-    def crash(attempt, target):
-        render(attempt, target)
+    def crash(execution, target):
+        render(execution, target)
         if target == "codex":
             raise KeyboardInterrupt
 
@@ -652,7 +686,8 @@ def test_request_document_and_record_hold_exact_fields(fixture):
         "gid": os.getegid(),
     }
     assert worker_home._document(req) == document
-    assert worker_home._record(req, "abc", {"fixture-claude": "d1"}, 1.23456) == {
+    layout = filesystem.load()
+    assert worker_home._record(req, "abc", {"fixture-claude": "d1"}, 1.23456, layout) == {
         "schema_version": 1,
         "package": "SV2-IMG-02",
         "attempt": "attempt-1",
@@ -664,6 +699,7 @@ def test_request_document_and_record_hold_exact_fields(fixture):
         "interpreter": sys.executable,
         "homes": {"claude": "homes/claude", "codex": "homes/codex"},
         "worker_profile_materialization_seconds": 1.235,
+        "layout": filesystem.mapping(layout),
     }
 
 
@@ -726,7 +762,7 @@ def test_render_log_holds_stderr_and_the_child_gets_its_attempt_and_target(tmp_p
         return [sys.executable, "-c", "import sys; print('out'); sys.stdout.flush(); print('err', file=sys.stderr)"]
 
     monkeypatch.setattr(worker_home, "child_command", command)
-    REAL_RENDER(attempt, "claude")
+    REAL_RENDER(filesystem.Execution(attempt, filesystem.load()), "claude")
     assert seen == [(attempt, "claude")]
     assert (attempt / "run" / "render-claude.log").read_text() == "out\nerr\n"
 
@@ -809,7 +845,7 @@ def test_owner_refusal_names_the_expected_uid_and_gid(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "lstat", lambda path: SimpleNamespace(st_uid=5, st_gid=7, st_mode=0o100644))
     roots = [tmp_path.resolve()]
     with pytest.raises(worker_home.BootstrapError) as error:
-        worker_home._check_home(tmp_path, "claude", roots, (5, 8))
+        worker_home._check_home(tmp_path / "homes" / "claude", "claude", roots, (5, 8))
     assert str(error.value) == "claude home holds a file not owned by 5:8"
 
 

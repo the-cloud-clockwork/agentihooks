@@ -1,9 +1,8 @@
 # syntax=mirror.gcr.io/docker/dockerfile:1
 FROM mirror.gcr.io/library/python:3.12-slim AS build
 WORKDIR /build
-COPY pyproject.toml README.md ./
-RUN python -c 'import tomllib; print("\n".join(tomllib.load(open("pyproject.toml", "rb"))["project"]["optional-dependencies"]["ledger"]))' > ledger-requirements.txt
-RUN python -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir -r ledger-requirements.txt
+COPY pyproject.toml README.md docker/swarm/requirements.lock ./
+RUN python -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir --require-hashes -r requirements.lock
 COPY hooks/ hooks/
 COPY scripts/ scripts/
 COPY profiles/ profiles/

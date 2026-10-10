@@ -37,6 +37,22 @@ requested, because its hook wrapper must execute. Other relative paths are
 admitted. Rerunning an accepted request is a no-op, an interrupted one is
 rendered again from scratch, and a different request for an accepted attempt is
 refused. The execution record names the digest of each selected profile.
+
+`layout.json` (copied to `/opt/swarm-node/layout.json`) is the SV2-FSY-01 path
+contract, read by `scripts.swarm_v2.filesystem`. Every attempt root holds the
+same private folders: `homes` for writable CLI state, `run` for supervision and
+Unix sockets, `checkouts`, `worktrees`, `spool`, `tmp` for scratch, and
+`profiles` for profile seeds, which bootstrap seals read only. Each folder is
+created mode 0700 under the attempt, so two Pods use the same internal names
+without sharing a mutable file or socket. `filesystem.environment` gives a
+process its `HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_RUNTIME_DIR` and
+`TMPDIR` inside those folders. A path, profile link or archive member
+that resolves outside its attempt root after symlink resolution is refused
+before any write and counted in `execution_path_validation_failures`. The
+execution record carries the layout as relative folder names only;
+`filesystem.restore` recreates an attempt under a new base from that record and
+refuses absolute paths or an unknown layout version, which stops new launches
+while the readers for earlier versions stay in place.
 Rollback selects the prior profile digest for new attempts; existing attempt
 homes are kept for recovery. The supervisor pins both native config homes to
 the selected private home, marks the admitted attempt trusted for Claude, and
@@ -94,7 +110,8 @@ Historical supervisor image rollback must be requalified when such an image
 exists. Production rollout remains with antoncore GitOps.
 
 After committing inputs, `bash docker/swarm-node/smoke.sh OUTPUT_DIRECTORY`
-builds an archived clean context, starts two independent containers with network
+builds an archived clean context, scans the built image for credentials with
+`docker/swarm-node/scan.sh`, starts two independent containers with network
 disabled, rejects three invalid locks, rebuilds the worker stage without cache and starts
 the retained image again. The rebuild reuses the pip wheels and tool binaries of the
 `downloads` stage, each checked against its locked sha256 before use. It
@@ -151,7 +168,14 @@ the socket methods cover. Qualification reports
 `worker_image_qualified_targets`. Any refused target, or a manifest naming another
 commit, leaves the image unpromotable and nothing is pushed. The same job builds
 an incompatible herdr fixture and requires its refusal, and qualifies the
-candidate twice in independent containers.
+candidate twice in independent containers. Before the registry login it builds a
+fixture carrying a build-time generated GitHub app token, requires
+`docker/swarm-node/scan.sh` to refuse it, then scans the candidate. The scan runs
+Trivy's secret scanner over every image layer and the image config, fails on any
+finding and fails when the scanner cannot finish. The one exception is a
+`jwt-token` match in an installed Python package's `dist-info/METADATA`, where
+package descriptions quote example tokens; it is recorded in
+`package-examples.txt`, and any other rule in that file still fails.
 
 Only a qualified image is pushed, under the immutable tag `sha-<commit>`, after
 the registry login, which holds the workflow token; build arguments carry only
