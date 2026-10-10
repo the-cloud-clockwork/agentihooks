@@ -73,6 +73,13 @@ def test_without_an_acknowledgement_retention_keeps_the_newest_events(repo, path
     assert_stored(path, state)
 
 
+def test_one_write_past_retention_stores_only_the_retained_events(repo, path):
+    state, rejected = repo.apply_ops("ledger", ops=[chat(n) for n in range(1, 6)])
+    assert rejected == []
+    assert len(state["_meta"]["events"]) == 3
+    assert_stored(path, state)
+
+
 def test_unacknowledged_events_outlive_normal_retention_until_acknowledged(repo, path):
     state, _ = write(repo, 1)
     acknowledge(repo, state["_meta"]["rev"])

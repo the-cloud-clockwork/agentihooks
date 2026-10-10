@@ -355,7 +355,7 @@ class SQLiteLedgerRepository:
         write_rows(connection, slug, before, after)
         hierarchy.sync(connection, slug, state)
         kept = len(state["_meta"].get("events", []))
-        append_events(connection, slug, events, max(kept, len(events)))
+        append_events(connection, slug, events, kept)
         if not events and "events" in state["_meta"]:
             trim_events(connection, slug, kept)
         generation = entry.generation + 1
