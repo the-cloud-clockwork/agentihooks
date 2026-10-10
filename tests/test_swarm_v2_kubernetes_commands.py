@@ -3,12 +3,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from redis.exceptions import RedisError
 
 from scripts.swarm_v2.auth_context import GrantRefused
-from scripts.swarm_v2.kubernetes import commands
 from scripts.swarm_v2.kubernetes.client import ApiRefused
-from scripts.swarm_v2.kubernetes.commands import KubectlExec, KubernetesCommandTransport, sanitize_report
 from scripts.swarm_v2.kubernetes.runtime import GENERATION_LABEL
 from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL, OWNER_LABEL
 from scripts.swarm_v2.runtime.commands import Action
@@ -67,6 +64,8 @@ def operation(agent, action="command", payload=None, generation=None, key="op-ke
 
 
 def transport(world, runner=None, enabled=True):
+    from scripts.swarm_v2.kubernetes.commands import KubernetesCommandTransport
+
     return KubernetesCommandTransport(world.queue, world.pods, runner or Runner(), 100, enabled)
 
 
@@ -75,14 +74,21 @@ def issued(world, agent, key="cmd-key", text=TEXT):
 
 
 def ambiguous(world):
+    from scripts.swarm_v2.kubernetes import commands
+
     return commands.worker_transport_ambiguous_total(world.store, world.queue.slug)
 
 
 def reports(world):
+    from scripts.swarm_v2.kubernetes import commands
+
     return commands.worker_transport_reports(world.store, world.queue.slug)
 
 
 def test_the_transport_names_its_backend_helper_and_bounds():
+    from scripts.swarm_v2.kubernetes import commands
+    from scripts.swarm_v2.kubernetes.commands import KubernetesCommandTransport
+
     assert KubernetesCommandTransport.backend == "kubernetes"
     assert KubernetesCommandTransport.commands == frozenset((Action.ANSWER, Action.DRAIN, Action.CANCEL))
     assert commands.HELPER == ("python", "-m", "scripts.swarm_v2.worker.control")
@@ -95,6 +101,8 @@ def test_the_transport_names_its_backend_helper_and_bounds():
 
 
 def test_sanitize_report_strips_escape_and_control_sequences_but_keeps_lines_and_tabs():
+    from scripts.swarm_v2.kubernetes.commands import sanitize_report
+
     raw = b"\x1b[31mred\x1b[0m \x1b]0;title\x07osc \x1b]2;t\x1b\\st \x1bDfe\x00\x07\x08\r\x0b\x0c\x7f\xc2\x9b2J a\tb\nc"
     assert sanitize_report(raw) == "red osc st fe a\tb\nc"
     assert sanitize_report(b"a\x1fb\x1bZc\x1b@d\xc2\x9b1;2me\x1b[?25lf") == "abcdef"
@@ -107,6 +115,8 @@ def test_sanitize_report_strips_escape_and_control_sequences_but_keeps_lines_and
 
 
 def test_sanitize_report_replaces_invalid_utf8_and_redacts_secrets():
+    from scripts.swarm_v2.kubernetes.commands import sanitize_report
+
     expected = f"ok {REPLACEMENT} token [REDACTED:github_token] end"
     assert sanitize_report(b"ok \xff " + f"token {SECRET} end".encode()) == expected
     bearer = "Bea" + "rer " + "z9" * 12
@@ -114,6 +124,9 @@ def test_sanitize_report_replaces_invalid_utf8_and_redacts_secrets():
 
 
 def test_sanitize_report_bounds_its_length_after_redaction():
+    from scripts.swarm_v2.kubernetes import commands
+    from scripts.swarm_v2.kubernetes.commands import sanitize_report
+
     exact = b"x" * commands.REPORT_CHARS
     assert sanitize_report(exact) == exact.decode()
     assert sanitize_report(exact + b"y") == exact.decode() + "[truncated]"
@@ -122,6 +135,9 @@ def test_sanitize_report_bounds_its_length_after_redaction():
 
 
 def test_sanitize_report_withholds_an_oversized_output_whole():
+    from scripts.swarm_v2.kubernetes import commands
+    from scripts.swarm_v2.kubernetes.commands import sanitize_report
+
     assert sanitize_report(b"x" * commands.RAW_BYTES) == "x" * commands.REPORT_CHARS + "[truncated]"
     assert sanitize_report(b"x" * (commands.RAW_BYTES + 1)) == f"[{commands.RAW_BYTES + 1} bytes withheld]"
 
@@ -132,6 +148,8 @@ def test_the_metrics_start_at_zero_for_every_helper_mode(world):
 
 
 def test_kubectl_exec_passes_argv_after_a_separator_and_never_a_shell():
+    from scripts.swarm_v2.kubernetes.commands import KubectlExec
+
     seen = []
 
     def runner(command, **options):
@@ -149,6 +167,8 @@ def test_kubectl_exec_passes_argv_after_a_separator_and_never_a_shell():
 
 
 def test_kubectl_exec_defaults_to_kubectl_through_subprocess_run():
+    from scripts.swarm_v2.kubernetes.commands import KubectlExec
+
     default = KubectlExec()
     assert (default.kubectl, default.runner) == ("kubectl", subprocess.run)
 
@@ -161,6 +181,8 @@ def test_kubectl_exec_defaults_to_kubectl_through_subprocess_run():
     ],
 )
 def test_kubectl_exec_reports_an_unsure_exec_as_a_transport_error(error, raised, message):
+    from scripts.swarm_v2.kubernetes.commands import KubectlExec
+
     def runner(command, **options):
         raise error
 
@@ -229,6 +251,8 @@ def test_apply_refuses_a_stale_generation_and_a_conflicting_key(world, agent):
 
 
 def test_apply_is_unsure_when_the_queue_is_unavailable(world, agent, monkeypatch):
+    from redis.exceptions import RedisError
+
     payload = {"command": "answer", "text": TEXT}
 
     def contended(*args):
@@ -245,6 +269,8 @@ def test_apply_is_unsure_when_the_queue_is_unavailable(world, agent, monkeypatch
 
 
 def test_observe_reconciles_by_command_id(world, agent, monkeypatch):
+    from redis.exceptions import RedisError
+
     payload = {"command": "answer", "text": TEXT}
     op = operation(agent)
     assert transport(world).observe_operation(op) == Observation(Phase.ABSENT)
@@ -297,6 +323,8 @@ def test_fallback_never_reaches_a_superseded_execution(world, agent):
 
 
 def test_fallback_leaves_an_oversized_envelope_to_the_endpoint(world, agent, monkeypatch):
+    from scripts.swarm_v2.kubernetes import commands
+
     command = issued(world, agent)
     monkeypatch.setattr(commands, "ENVELOPE_CHARS", len(encode(command)) - 1)
     runner = Runner()
@@ -308,6 +336,8 @@ def test_fallback_leaves_an_oversized_envelope_to_the_endpoint(world, agent, mon
 
 
 def test_fallback_asks_the_status_first_then_delivers_the_same_envelope(world, agent):
+    from scripts.swarm_v2.kubernetes import commands
+
     command = issued(world, agent)
     runner = Runner(reply(command, "absent"), reply(command, "queued"))
     assert transport(world, runner).fallback(agent.execution_id, command["command_id"]) == "queued"
@@ -393,6 +423,8 @@ def test_fallback_counts_a_lost_delivery_reply_and_reports_it(world, agent):
 
 
 def test_fallback_sanitizes_helper_output_before_storing_it(world, agent):
+    from scripts.swarm_v2.kubernetes import commands
+
     command = issued(world, agent)
     noisy = (2, b"\x1b[2Jgarbage " + SECRET.encode(), b"\x1b[31mtrace\x1b[0m\r\n" + b"e" * 3000)
     transport(world, Runner(noisy)).fallback(agent.execution_id, command["command_id"])
@@ -404,6 +436,8 @@ def test_fallback_sanitizes_helper_output_before_storing_it(world, agent):
 
 
 def test_fallback_keeps_only_the_newest_reports(world, agent, monkeypatch):
+    from scripts.swarm_v2.kubernetes import commands
+
     monkeypatch.setattr(commands, "REPORTS_KEPT", 2)
     for n in range(3):
         command = issued(world, agent, f"k{n}")
@@ -456,6 +490,8 @@ def test_fallback_is_unavailable_when_the_pod_cannot_be_read(world, agent, monke
 
 
 def test_fallback_is_unavailable_while_the_store_is_down(world, agent, monkeypatch):
+    from redis.exceptions import RedisError
+
     command, runner = issued(world, agent), Runner()
     monkeypatch.setattr(world.queue, "outcome", lambda *args: (_ for _ in ()).throw(RedisError("down")))
     assert transport(world, runner).fallback(agent.execution_id, command["command_id"]) == "unavailable"

@@ -9,7 +9,7 @@
   "inputs": {
     "tests/fixtures/swarm_v2/worker-command-prompts.json": "a72d5c962385abf18d1df7a6fe17443cde4a010a28faeb385c56443a442b8554",
     "tests/sv2_kub03_cases.py": "450c25fc3ae30037d912910448a9c4e3cfd1d0d5ab6bb0d2217c7d78d575fd31",
-    "tests/test_swarm_v2_kubernetes_commands.py": "3d92919d0b2072ece8b3851b33776b938b143066394d8b21790e1dbea67fe25c",
+    "tests/test_swarm_v2_kubernetes_commands.py": "5454f0cf3c88cf9f8f4a2679301e03a8be5d992f9a432d82538b71f51c30a471",
     "tests/test_swarm_v2_worker_control.py": "2c390c10129e35db1361b1c38eac5bb7d6aab467a26b3db2379f7c1a1f883a04",
     "scripts/swarm_v2/kubernetes/commands.py": "6acdc1d041410b0b9f07c36e4fe0f3c675101aeb5bd03f294610bef5d3b0c61d",
     "scripts/swarm_v2/worker/control.py": "40450c1c493c6ee63ac81a956ce39affe392017848d341f749cc9f30a072e841",
