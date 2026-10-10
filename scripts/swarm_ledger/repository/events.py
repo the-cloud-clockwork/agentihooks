@@ -68,6 +68,5 @@ def retained(events: list, ack: int | None, kept: int, ceiling: int) -> int:
     """Index of the oldest event to keep: the newest `kept`, every one after `ack`, never more than `ceiling`."""
     start = max(0, len(events) - kept)
     if ack is not None:
-        while start and events[start - 1]["rev"] > ack:
-            start -= 1
+        start = min(start, next((index for index, event in enumerate(events) if event["rev"] > ack), start))
     return max(start, len(events) - ceiling)

@@ -154,6 +154,7 @@ def test_retained_drops_only_a_prefix_bounded_by_the_ceiling():
     assert events.retained(rows, 2, 2, 5) == 3
     assert events.retained(rows, 0, 2, 5) == 1
     assert events.retained(rows[:2], 0, 2, 5) == 0
+    assert events.retained(rows, 5, 2, 9) == 4
 
 
 def test_a_mutation_trims_acknowledged_events_and_marks_the_highest_trimmed(repo):
