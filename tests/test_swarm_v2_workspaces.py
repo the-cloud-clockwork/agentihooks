@@ -247,6 +247,7 @@ def test_a_recorded_generation_for_another_base_is_refused(world):
         ({"origin": "https://token@github.com/o/r"}, CREDENTIAL),
         ({"origin": " https://user:pass@github.com/o/r"}, CREDENTIAL),
         ({"origin": "ssh://git:pass@host.example/o/r"}, CREDENTIAL),
+        ({"origin": "user:secret@host.example:o/r"}, CREDENTIAL),
     ],
 )
 def test_invalid_requests_are_refused_before_any_git_io(world, change, message):
@@ -438,15 +439,28 @@ def test_an_ssh_user_without_a_password_is_not_a_credential(world):
 
 
 def test_an_inherited_git_dir_does_not_redirect_preparation(world, monkeypatch):
-    monkeypatch.setenv("GIT_DIR", str(world.other))
-    monkeypatch.setenv("GIT_WORK_TREE", str(world.other_work))
-    monkeypatch.setenv("GIT_COMMON_DIR", str(world.other))
+    inherited = {
+        "GIT_DIR": str(world.other),
+        "GIT_WORK_TREE": str(world.other_work),
+        "GIT_COMMON_DIR": str(world.other),
+        "GIT_INDEX_FILE": str(world.root / "missing" / "index"),
+        "GIT_OBJECT_DIRECTORY": str(world.root / "missing" / "objects"),
+    }
+    for key, value in inherited.items():
+        monkeypatch.setenv(key, value)
     prepared = workspaces.prepare(world.execution, world.request())
-    monkeypatch.delenv("GIT_DIR")
-    monkeypatch.delenv("GIT_WORK_TREE")
-    monkeypatch.delenv("GIT_COMMON_DIR")
+    for key in inherited:
+        monkeypatch.delenv(key)
     assert prepared.base_commit == world.head()
+    assert git("rev-parse", "HEAD", cwd=prepared.path) == world.head()
     assert workspaces.identity(git("config", "remote.origin.url", cwd=prepared.mirror)) == world.project
+
+
+@pytest.mark.parametrize("origin", ["host.invalid:o/a@b", "host.invalid:repo", "git@host.invalid:repo"])
+def test_an_scp_origin_without_a_password_is_not_a_credential(world, origin):
+    with pytest.raises(workspaces.WorkspaceError) as refused:
+        workspaces.prepare(world.execution, replace(world.request(), origin=origin))
+    assert str(refused.value) == f"clone of {workspaces.identity(origin)} failed"
 
 
 def test_a_plain_folder_inside_a_matching_repository_is_not_reused(world):
