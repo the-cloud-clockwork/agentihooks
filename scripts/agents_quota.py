@@ -18,7 +18,6 @@ from scripts.claude_quota_balancer import (
     _cap_text,
     _duration,
     _percent,
-    _span,
     _weight_text,
     account_cap,
     render_table,
@@ -95,7 +94,7 @@ def _codex_state(account: "codex_router.CodexAccount", quota: "CodexQuota | None
 def _codex_source(quota: "CodexQuota | None", now: float) -> str:
     if quota is None:
         return "no session log"
-    seen = f"session-log {_span(int(now - quota.observed_at))} ago"
+    seen = f"session-log {_duration(int(now), int(quota.observed_at))} ago"
     return f"{seen}, {quota.reached}" if quota.reached else seen
 
 

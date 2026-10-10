@@ -105,6 +105,26 @@ def test_a_fresh_blocked_reading_takes_no_session_and_a_stale_one_is_unknown():
     assert codex_router.account_cap(full, NOW) == 0
 
 
+def test_an_unregistered_session_log_feeds_the_default_login_only_without_token_accounts(tmp_path, monkeypatch):
+    _rollout(tmp_path, ALPHA, [_event(NOW, _windows(10.0, 50.0, NOW + 60, NOW + 6000))], mtime=NOW)
+    _rollout(tmp_path, BETA, [_event(NOW - 60, _windows(10.0, 20.0, NOW + 60, NOW + 6000))], mtime=NOW - 60)
+    monkeypatch.setattr(codex_router, "_registry", lambda: {BETA: {"account": "default"}})
+    default = CodexAccount("default")
+    assert codex_router.quotas([default], {"HOME": str(tmp_path)})["default"].seven_day.used == 50.0
+    env = {"HOME": str(tmp_path), "AH_CX_TOKEN_alpha": "at-alpha"}
+    readings = codex_router.quotas([default, CodexAccount("alpha", "AH_CX_TOKEN_alpha")], env)
+    assert readings["default"].seven_day.used == 20.0
+    assert readings["alpha"] is None
+
+
+def test_the_reading_age_is_in_whole_minutes_and_never_negative():
+    accounts = [CodexAccount("default")]
+    ahead = CodexQuota(NOW + 30, "pro", seven_day=QuotaWindow(10.0, NOW + 6000))
+    behind = CodexQuota(NOW - 119, "pro", seven_day=QuotaWindow(10.0, NOW + 6000))
+    assert agents_quota.codex_rows(accounts, {"default": ahead}, {}, NOW + 0.5)[0].source == "session-log 0m ago"
+    assert agents_quota.codex_rows(accounts, {"default": behind}, {}, NOW + 0.5)[0].source == "session-log 1m ago"
+
+
 def test_the_newest_depleted_event_replaces_an_older_windowed_reading(tmp_path):
     lines = [_event(NOW - 600, _windows(98.0, 15.0, NOW + 60, NOW + 6000)), _event(NOW, _depleted())]
     _rollout(tmp_path, ALPHA, lines, mtime=NOW)

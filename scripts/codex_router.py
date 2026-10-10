@@ -188,7 +188,9 @@ def quotas(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, Co
     def keep(account: CodexAccount) -> Callable[[str], bool]:
         if account.is_token:
             return lambda session_id: owner.get(session_id) == account.name
-        return lambda session_id: owner.get(session_id) not in tokens
+        if not tokens:
+            return lambda session_id: True
+        return lambda session_id: session_id in owner and owner[session_id] not in tokens
 
     return {account.name: codex_quota.latest_codex_quota(dict(environ), keep(account)) for account in pool}
 
