@@ -572,7 +572,9 @@ def test_a_credential_renewal_is_bound_to_its_own_live_execution(world, long_liv
         "forbidden_scope",
         "credential renewal names another execution",
     )
-    assert api.route("GET", f"/v2/executions/{agent.execution_id}/credential", f"Bearer {token}", {})[0] == 404
+    for method, suffix in (("GET", ""), ("POST", "/extra")):
+        path = f"/v2/executions/{agent.execution_id}/credential{suffix}"
+        assert api.route(method, path, f"Bearer {token}", {})[0] == 404
     assert renew(api, agent.execution_id, "v2.forged.token")[1]["error_class"] == "unauthenticated"
     world.start(previous=agent.execution_id)
     assert renew(api, agent.execution_id, token)[0] == 409
