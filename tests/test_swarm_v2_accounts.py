@@ -447,6 +447,14 @@ def test_a_suspect_occupancy_keeps_counting(world):
     assert world.capacity.slots(ACCOUNT) == [held]
 
 
+def test_an_occupancy_is_judged_by_the_registry_of_the_swarm_before_its_first_slash(world):
+    held = world.running(HELD)
+    nested = replace(held, holder=f"{SLUG}/lane/{HELD}")
+    world.store.redis.hset(f"{ROOT}:accounts:{ACCOUNT}", nested.holder, accounts.encode(nested))
+
+    assert world.capacity.slots(ACCOUNT) == [held, nested]
+
+
 class Ambiguous(Racing):
     """The commit lands but the reply is lost, as when the transport drops after Redis applied the write."""
 
