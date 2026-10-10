@@ -1,6 +1,5 @@
 import argparse
 import hashlib
-import hmac
 import json
 import os
 import sys
@@ -9,7 +8,10 @@ from collections.abc import Callable, Mapping
 from functools import partial
 from pathlib import Path
 
-from scripts.swarm_v2.auth_context import LaunchKey
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
 from scripts.swarm_v2.records import _replayed as _replay
 from scripts.swarm_v2.records import _write, digest
 from scripts.swarm_v2.runtime.commands import Principal, Role
@@ -20,8 +22,7 @@ ROLES = ("code_owner", "state_owner", "deployment_owner")
 KINDS = frozenset({"dispatcher", "backlog", "service", "worker_component"})
 CODING_TASKS = "coding_tasks"
 SIGNED = ("proposal", "sha256", "approved_by", "revision", "reason", "key_id")
-KEY_ID_ENV = "SWARM_ARCHITECTURE_KEY_ID"
-KEY_ENV = "SWARM_ARCHITECTURE_KEY"
+KEY_ENV = "SWARM_ARCHITECTURE_PUBLIC_KEY"
 CARRIES = ("changed_content", CODING_TASKS, "none", "transcripts")
 DECLARE = (
     f"a proposal must declare carries as one of {', '.join(CARRIES)}, launches_agents as true or false,"
@@ -69,30 +70,34 @@ def dispatches(component: dict) -> bool:
     )
 
 
-def _signature(key: LaunchKey, change: dict) -> str:
-    signed = json.dumps({"schema": SCHEMA, **{name: change.get(name) for name in SIGNED}}, sort_keys=True).encode()
-    return hmac.new(key.secret, signed, hashlib.sha256).hexdigest()
+def _signed(change: dict) -> bytes:
+    return json.dumps({"schema": SCHEMA, **{name: change.get(name) for name in SIGNED}}, sort_keys=True).encode()
 
 
-def _authentic(key: LaunchKey | None, change: dict) -> bool:
+def key_id(key: Ed25519PublicKey) -> str:
+    return hashlib.sha256(key.public_bytes(Encoding.Raw, PublicFormat.Raw)).hexdigest()[:16]
+
+
+def _authentic(key: Ed25519PublicKey | None, change: dict) -> bool:
     signature = change.get("signature")
-    return (
-        key is not None
-        and change.get("key_id") == key.key_id
-        and isinstance(signature, str)
-        and hmac.compare_digest(signature.encode(), _signature(key, change).encode())
-    )
+    if key is None or change.get("key_id") != key_id(key) or not isinstance(signature, str):
+        return False
+    try:
+        key.verify(bytes.fromhex(signature), _signed(change))
+    except (InvalidSignature, ValueError):
+        return False
+    return True
 
 
-def _changes(record: dict, key: LaunchKey | None) -> list[dict]:
+def _changes(record: dict, key: Ed25519PublicKey | None) -> list[dict]:
     return [c for c in record["operator_changes"] if _authentic(key, c)]
 
 
-def approved(record: dict, proposal: dict, key: LaunchKey | None = None) -> bool:
+def approved(record: dict, proposal: dict, key: Ed25519PublicKey | None = None) -> bool:
     return any(c["proposal"] == proposal["id"] and c["sha256"] == digest(proposal) for c in _changes(record, key))
 
 
-def authorities(record: dict, key: LaunchKey | None = None) -> list[str]:
+def authorities(record: dict, key: Ed25519PublicKey | None = None) -> list[str]:
     changed = {c["proposal"] for c in _changes(record, key)}
     return [c["name"] for c in record["components"] if dispatches(c) and c.get("proposal") not in changed]
 
@@ -105,7 +110,7 @@ def approve(
     slug: str,
     credential: str,
     authenticate: Callable[[str, str], Principal | None],
-    key: LaunchKey,
+    signer: Ed25519PrivateKey,
 ) -> dict:
     principal = authenticate(slug, credential)
     if (
@@ -117,6 +122,7 @@ def approve(
         raise ArchitectureError("authenticated operator required for an architecture change")
     record = load_record(path)
     sha256 = digest(proposal)
+    key = signer.public_key()
     done = next((c for c in _changes(record, key) if c["proposal"] == proposal["id"] and c["sha256"] == sha256), None)
     if done:
         return done
@@ -126,9 +132,9 @@ def approve(
         "approved_by": principal.name,
         "revision": record["revision"],
         "reason": reason,
-        "key_id": key.key_id,
+        "key_id": key_id(key),
     }
-    change["signature"] = _signature(key, change)
+    change["signature"] = signer.sign(_signed(change)).hex()
     record["operator_changes"].append(change)
     _write(path, record)
     return change
@@ -163,7 +169,7 @@ def _conflict(record: dict, proposal: dict, repeated: set[str]) -> str:
     return ""
 
 
-def _verdict(record: dict, proposal: dict, repeated: set[str], key: LaunchKey | None) -> tuple[str, str]:
+def _verdict(record: dict, proposal: dict, repeated: set[str], key: Ed25519PublicKey | None) -> tuple[str, str]:
     kind = proposal.get("kind")
     role = missing_owner(record, proposal)
     if kind not in KINDS:
@@ -195,7 +201,7 @@ def _repeated(proposals: list[dict]) -> set[str]:
     }
 
 
-def review(record: dict, inventory: dict, key: LaunchKey | None = None) -> dict:
+def review(record: dict, inventory: dict, key: Ed25519PublicKey | None = None) -> dict:
     repeated = _repeated(inventory["proposals"])
     result = {
         "operation": inventory["operation"],
@@ -214,7 +220,7 @@ def review(record: dict, inventory: dict, key: LaunchKey | None = None) -> dict:
     return {**result, "unowned": unowned, "measurements": {"architecture_unowned_components": len(unowned)}}
 
 
-def check(record: dict, key: LaunchKey | None = None) -> list[str]:
+def check(record: dict, key: Ed25519PublicKey | None = None) -> list[str]:
     components = record["components"]
     errors = [
         f"{c['name']}: {missing_owner(record, c)} must name exactly one owner from the record"
@@ -241,7 +247,7 @@ def _commit(path: Path | str, record: dict, operation: str, sha256: str, result:
     return result
 
 
-def apply_inventory(path: Path | str, inventory: dict, key: LaunchKey | None = None) -> dict:
+def apply_inventory(path: Path | str, inventory: dict, key: Ed25519PublicKey | None = None) -> dict:
     record = load_record(path)
     operation, sha256 = inventory["operation"], digest(inventory)
     done = _replayed(record, operation, sha256)
@@ -300,7 +306,7 @@ def rollback(path: Path | str, to_revision: int, operation: str) -> dict:
     return _commit(path, record, operation, sha256, result)
 
 
-def render(record: dict, signing: LaunchKey | None = None) -> str:
+def render(record: dict, signing: Ed25519PublicKey | None = None) -> str:
     lines = [
         "# Swarm v2 architecture decisions",
         "",
@@ -338,7 +344,7 @@ def render(record: dict, signing: LaunchKey | None = None) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _run(args, key: LaunchKey | None) -> int:
+def _run(args, key: Ed25519PublicKey | None) -> int:
     if args.command == "check":
         errors = check(load_record(args.record), key)
         print("\n".join(errors) or "ok")
@@ -354,14 +360,14 @@ def _run(args, key: LaunchKey | None) -> int:
     return 0
 
 
-def signing_key(environ: Mapping[str, str]) -> LaunchKey | None:
-    key_id, secret = environ.get(KEY_ID_ENV), environ.get(KEY_ENV)
-    if not key_id or not secret:
+def verify_key(environ: Mapping[str, str]) -> Ed25519PublicKey | None:
+    raw = environ.get(KEY_ENV)
+    if not raw:
         return None
     try:
-        return LaunchKey(key_id, secret.encode())
-    except ValueError as exc:
-        raise ArchitectureError(f"{KEY_ENV}: {exc}") from None
+        return Ed25519PublicKey.from_public_bytes(bytes.fromhex(raw))
+    except ValueError:
+        raise ArchitectureError(f"{KEY_ENV} must be a hex Ed25519 public key") from None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -379,7 +385,7 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--operation", required=True)
     args = parser.parse_args(argv)
     try:
-        return _run(args, signing_key(os.environ))
+        return _run(args, verify_key(os.environ))
     except ArchitectureError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

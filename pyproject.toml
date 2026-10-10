@@ -49,6 +49,8 @@ dependencies = [
     # The ledger repository writes a multi-megabyte indented document on every sync;
     # the stdlib encoder takes the pure Python path whenever indent is set.
     "orjson>=3.10",
+    # Operator architecture approvals are Ed25519 signed (scripts/swarm_v2/architecture.py).
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]

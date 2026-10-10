@@ -5,9 +5,9 @@ import sys
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 import scripts.swarm_v2.architecture as architecture
-from scripts.swarm_v2.auth_context import LaunchKey
 
 ROOT = Path(__file__).resolve().parents[1]
 RECORD = ROOT / "docs" / "swarm-v2" / "architecture.json"
@@ -15,12 +15,13 @@ MARKDOWN = ROOT / "docs" / "swarm-v2" / "decisions.md"
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2" / "architecture"
 DISPATCHER_REASON = "inserts another coding-task queue beside Swarm reconciliation controller (AD-05)"
 BACKLOG_REASON = "a backlog must be bounded and carry one of transcripts, changed_content (AD-05)"
-KEY = LaunchKey("architecture-1", b"k" * 32)
+SIGNER = Ed25519PrivateKey.from_private_bytes(b"k" * 32)
+KEY = SIGNER.public_key()
 
 
 def _signed(change):
-    change = {**change, "key_id": KEY.key_id}
-    return {**change, "signature": architecture._signature(KEY, change)}
+    change = {**change, "key_id": architecture.key_id(KEY)}
+    return {**change, "signature": SIGNER.sign(architecture._signed(change)).hex()}
 
 
 def _record(tmp_path):

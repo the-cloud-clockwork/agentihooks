@@ -3,16 +3,19 @@ import shutil
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 import scripts.swarm_v2.architecture as architecture
-from scripts.swarm_v2.auth_context import LaunchKey
 from scripts.swarm_v2.runtime.commands import Principal, Role
 
 ROOT = Path(__file__).resolve().parents[1]
 RECORD = ROOT / "docs" / "swarm-v2" / "architecture.json"
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2" / "architecture"
-KEY = LaunchKey("architecture-1", b"k" * 32)
-OTHER_KEY = LaunchKey("architecture-2", b"o" * 32)
+SIGNER = Ed25519PrivateKey.from_private_bytes(b"k" * 32)
+KEY = SIGNER.public_key()
+OTHER_KEY = Ed25519PrivateKey.from_private_bytes(b"o" * 32).public_key()
+PUBLIC_HEX = KEY.public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
 SLUG = "rig"
 DISPATCHER_REASON = "inserts another coding-task queue beside Swarm reconciliation controller (AD-05)"
 PRINCIPALS = {
@@ -41,7 +44,13 @@ def _dispatcher():
 
 def _approve(path, proposal, credential="operator-credential", slug=SLUG, authenticate=_authenticate):
     return architecture.approve(
-        path, proposal, "operator moves dispatch", slug=slug, credential=credential, authenticate=authenticate, key=KEY
+        path,
+        proposal,
+        "operator moves dispatch",
+        slug=slug,
+        credential=credential,
+        authenticate=authenticate,
+        signer=SIGNER,
     )
 
 
@@ -52,7 +61,8 @@ def test_an_authenticated_operator_approval_admits_its_dispatcher(tmp_path):
     assert change["sha256"] == architecture.digest(_dispatcher())
     assert change["approved_by"] == "nestor"
     assert change["revision"] == 1
-    assert change["key_id"] == "architecture-1"
+    assert change["key_id"] == architecture.key_id(KEY) != architecture.key_id(OTHER_KEY)
+    assert len(change["key_id"]) == 16
     assert architecture.load_record(path)["operator_changes"] == [change]
     result = architecture.apply_inventory(path, _inventory(), key=KEY)
     assert result["accepted"] == ["duplicate-dispatcher", "embedding-backlog"]
@@ -89,7 +99,9 @@ def test_a_forged_operator_label_is_refused(tmp_path):
         {"reason": "another reason"},
         {"revision": 2},
         {"proposal": "other"},
-        {"key_id": "architecture-2"},
+        {"key_id": "0" * 16},
+        {"signature": None},
+        {"signature": "zz"},
     ],
 )
 def test_a_signed_change_with_any_edited_field_is_refused(tmp_path, tamper):
@@ -169,11 +181,12 @@ def test_a_label_copy_of_an_authentic_approval_keeps_the_dispatcher_an_authority
     assert architecture.check(record, KEY) == ["expected one coding-task authority, found 2"]
 
 
-def test_a_non_ascii_signature_is_refused_without_an_error(tmp_path):
+@pytest.mark.parametrize("signature", ["é" * 64, "\ud800"])
+def test_a_non_ascii_signature_is_refused_without_an_error(tmp_path, signature):
     path = _record(tmp_path)
     change = _approve(path, _dispatcher())
     record = architecture.load_record(path)
-    record["operator_changes"] = [{**change, "signature": "é" * 64}]
+    record["operator_changes"] = [{**change, "signature": signature}]
     assert architecture.approved(record, _dispatcher(), KEY) is False
 
 
@@ -195,23 +208,25 @@ def test_render_lists_only_authentic_approvals(tmp_path):
     assert "\nOperator architecture changes: none.\n" in architecture.render(record)
 
 
-@pytest.mark.parametrize(
-    "environ",
-    [{}, {"SWARM_ARCHITECTURE_KEY_ID": "architecture-1"}, {"SWARM_ARCHITECTURE_KEY": "k" * 32}],
-)
-def test_no_signing_key_without_both_variables(environ):
-    assert architecture.signing_key(environ) is None
+@pytest.mark.parametrize("environ", [{}, {"SWARM_ARCHITECTURE_PUBLIC_KEY": ""}])
+def test_no_verify_key_without_the_variable(environ):
+    assert architecture.verify_key(environ) is None
 
 
-def test_the_signing_key_comes_from_the_environment():
-    key = architecture.signing_key({"SWARM_ARCHITECTURE_KEY_ID": "architecture-1", "SWARM_ARCHITECTURE_KEY": "k" * 32})
-    assert key == KEY
+def test_the_verify_key_is_the_public_key_from_the_environment():
+    key = architecture.verify_key({"SWARM_ARCHITECTURE_PUBLIC_KEY": PUBLIC_HEX})
+    assert architecture.key_id(key) == architecture.key_id(KEY)
 
 
-def test_a_short_signing_key_is_refused_by_name():
-    environ = {"SWARM_ARCHITECTURE_KEY_ID": "architecture-1", "SWARM_ARCHITECTURE_KEY": "short"}
-    with pytest.raises(architecture.ArchitectureError, match="^SWARM_ARCHITECTURE_KEY: signing key must be at least"):
-        architecture.signing_key(environ)
+def test_the_public_key_cannot_sign():
+    assert not hasattr(architecture.verify_key({"SWARM_ARCHITECTURE_PUBLIC_KEY": PUBLIC_HEX}), "sign")
+
+
+@pytest.mark.parametrize("raw", ["short", "ab" * 31, "zz" * 32])
+def test_a_malformed_public_key_is_refused_by_name(raw):
+    with pytest.raises(architecture.ArchitectureError) as caught:
+        architecture.verify_key({"SWARM_ARCHITECTURE_PUBLIC_KEY": raw})
+    assert str(caught.value) == "SWARM_ARCHITECTURE_PUBLIC_KEY must be a hex Ed25519 public key"
 
 
 def test_the_cli_counts_an_approval_only_with_the_signing_key(tmp_path, monkeypatch, capsys):
@@ -220,21 +235,19 @@ def test_the_cli_counts_an_approval_only_with_the_signing_key(tmp_path, monkeypa
     _approve(path, _dispatcher())
     inventory = tmp_path / "inventory.json"
     inventory.write_text(json.dumps(_inventory()))
-    monkeypatch.setenv("SWARM_ARCHITECTURE_KEY_ID", "architecture-1")
-    monkeypatch.setenv("SWARM_ARCHITECTURE_KEY", "k" * 32)
+    monkeypatch.setenv("SWARM_ARCHITECTURE_PUBLIC_KEY", PUBLIC_HEX)
     args = ["--record", str(path), "--inventory", str(inventory), "--markdown", str(markdown)]
     assert architecture.main(["record", *args]) == 0
     assert json.loads(capsys.readouterr().out)["accepted"] == ["duplicate-dispatcher", "embedding-backlog"]
     assert "duplicate-dispatcher by nestor" in markdown.read_text()
     assert architecture.main(["check", "--record", str(path)]) == 0
     assert capsys.readouterr().out == "ok\n"
-    monkeypatch.delenv("SWARM_ARCHITECTURE_KEY")
+    monkeypatch.delenv("SWARM_ARCHITECTURE_PUBLIC_KEY")
     assert architecture.main(["check", "--record", str(path)]) == 1
     assert capsys.readouterr().out == "expected one coding-task authority, found 2\n"
 
 
-def test_the_cli_reports_a_short_signing_key_without_a_traceback(monkeypatch, capsys):
-    monkeypatch.setenv("SWARM_ARCHITECTURE_KEY_ID", "architecture-1")
-    monkeypatch.setenv("SWARM_ARCHITECTURE_KEY", "short")
+def test_the_cli_reports_a_malformed_public_key_without_a_traceback(monkeypatch, capsys):
+    monkeypatch.setenv("SWARM_ARCHITECTURE_PUBLIC_KEY", "short")
     assert architecture.main(["check", "--record", str(RECORD)]) == 2
-    assert capsys.readouterr().err.startswith("error: SWARM_ARCHITECTURE_KEY: signing key must be at least")
+    assert capsys.readouterr().err == "error: SWARM_ARCHITECTURE_PUBLIC_KEY must be a hex Ed25519 public key\n"
