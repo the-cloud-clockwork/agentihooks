@@ -189,8 +189,15 @@ def test_done_from_the_dispatcher_seat_ends_it_without_a_pull_request_once_its_t
     assert "dispatcher triggers are still open" in capsys.readouterr().err
     assert [a.state for a in store.agents("sw") if a.name == seat] == ["working"]
     ledger.state = settled
+    inbox = InboxStore(store.redis)
+    item = inbox.send("master@a1b2c3-0001", seat, "one more look")
     assert run("sw", "done") == 0
-    assert json.loads(capsys.readouterr().out)["state"] == "finished"
+    assert json.loads(capsys.readouterr().out) == {
+        "seat": seat,
+        "state": "finished",
+        "next": "stop now; the swarm closes this session",
+    }
+    assert f"{seat} settled its triggers and exited" in inbox.get(item.id).reason
     assert [a.state for a in store.agents("sw") if a.name == seat] == ["finished"]
     assert "dispatcher" not in ledger.rows
     assert [row["state"] for row in ledger.rows.values()] == ["claimed", "claimed"]

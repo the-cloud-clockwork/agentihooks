@@ -178,7 +178,8 @@ After each trigger, tell the master what you did: agentihooks msg send master@{S
 New triggers arrive as inbox messages: answer one with agentihooks msg reply <id> "<text>", or close it with \
 agentihooks msg close <id> done "<where the work went>".
 While you wait on a trigger, declare it: agentihooks swarm {SLUG} wait 30 --reason "<what you wait on>".
-When every trigger is closed, run {LED} leave and stop: the swarm ends your session.
+When every trigger is closed, run {LED} leave, then agentihooks swarm {SLUG} done and stop: the swarm ends your \
+session.
 Write ledger comments and messages in plain words: no ids, paths, hashes or dashes.
 """
 TRIGGER_LINE = "- The priority on questions/q1 is unresolved after 15 minutes: Pick the release day\n"

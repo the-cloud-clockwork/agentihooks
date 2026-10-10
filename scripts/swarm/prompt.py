@@ -255,7 +255,7 @@ def build_dispatcher(slug: str, repo: str, name: str, task: dict, autonomy: str 
         'New triggers arrive as inbox messages: answer one with agentihooks msg reply <id> "<text>", or close it with '
         'agentihooks msg close <id> done "<where the work went>".',
         f'While you wait on a trigger, declare it: {me} wait 30 --reason "<what you wait on>".',
-        f"When every trigger is closed, run {led} leave and stop: the swarm ends your session.",
+        f"When every trigger is closed, run {led} leave, then {me} done and stop: the swarm ends your session.",
         "Write ledger comments and messages in plain words: no ids, paths, hashes or dashes.",
     ]
     return "\n".join(lines) + "\n"
