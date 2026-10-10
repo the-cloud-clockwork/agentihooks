@@ -4,7 +4,6 @@ import re
 import subprocess
 import zipfile
 from datetime import datetime
-from urllib.parse import quote
 
 from scripts.swarm.store import SwarmError
 
@@ -44,9 +43,9 @@ def bind(target: str) -> str:
     try:
         stale = _stale(target, run)
     except UNREADABLE:
-        raise SwarmError("cannot read the proof branch head; retry the mutation wait") from None
+        raise SwarmError("cannot read the branch head; retry the mutation wait") from None
     if stale:
-        raise SwarmError("the focused mutation proof run grades a stale head; dispatch it again on the branch head")
+        raise SwarmError("the mutation run grades a stale head; wait on a run for the branch head")
     return run["head_sha"]
 
 
@@ -55,10 +54,16 @@ def _graded(run):
 
 
 def _stale(target, run):
-    if run["path"] != PROOFS:
-        return False
     repo = RUN_URL.fullmatch(target).group(1)
-    return _api(f"repos/{repo}/branches/{quote(run['head_branch'], safe='')}")["commit"]["sha"] != run["head_sha"]
+    return _api(f"repos/{repo}/git/ref/heads/{run['head_branch']}")["object"]["sha"] != run["head_sha"]
+
+
+def _covers(target, run, scope):
+    if run["path"] != PROOFS:
+        return True
+    repo = RUN_URL.fullmatch(target).group(1)
+    base = _api(f"repos/{repo}/compare/dev...{run['head_sha']}")["merge_base_commit"]["sha"]
+    return scope == {"base": base, "head": run["head_sha"]}
 
 
 def _report(target, started_at):
@@ -76,7 +81,8 @@ def _report(target, started_at):
     archive = _api(f"repos/{repo}/actions/artifacts/{artifact['id']}/zip", binary=True)
     with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
         name = next(name for name in zipped.namelist() if name == "report.json" or name.endswith("/report.json"))
-        return json.loads(zipped.read(name))
+        scope = next((name for name in zipped.namelist() if name == "scope.json" or name.endswith("/scope.json")), None)
+        return json.loads(zipped.read(name)), scope and json.loads(zipped.read(scope))
 
 
 def resolution(held: dict) -> str:
@@ -91,13 +97,14 @@ def resolution(held: dict) -> str:
     outcome = f"mutation preflight {target}"
     try:
         if _stale(target, run):
-            return f"{outcome}, now red; the branch moved past the proof head"
+            return f"{outcome}, now red; the branch moved past the graded head"
     except UNREADABLE:
-        return f"{outcome}, now red; the proof branch head is unreadable"
+        return f"{outcome}, now red; the branch head is unreadable"
     if run.get("conclusion") != "success" and run.get("conclusion") != "failure":
         return f"{outcome}, now red; run {run.get('conclusion')}"
     try:
-        report = _report(target, run["run_started_at"])
+        report, scope = _report(target, run["run_started_at"])
+        covered = _covers(target, run, scope)
         failures = [
             f"{file['path']}:{failure['name']}:{failure['fingerprint']} ({failure['status']})"
             for file in report["files"]
@@ -107,6 +114,8 @@ def resolution(held: dict) -> str:
         failed = report["failed"]
     except (*UNREADABLE, StopIteration, zipfile.BadZipFile):
         return f"{outcome}, now red; complete mutation report unavailable; mutation may have been skipped"
+    if not covered:
+        return f"{outcome}, now red; the mutation report does not grade the branch head from its dev merge base"
     if run["conclusion"] == "success" and not failed and not failures:
         return f"{outcome}, now green; no failing mutants"
     detail = "; ".join(failures) or "mutation failed without a named survivor"

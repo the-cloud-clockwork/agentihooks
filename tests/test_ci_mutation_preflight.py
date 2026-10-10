@@ -64,5 +64,7 @@ def test_preflight_mutates_against_dev_with_the_pull_request_budget():
         assert select["run"] == "python -m scripts.ci_mutation.browser --base origin/dev"
         assert mutate["run"] == "python -m scripts.ci_mutation --base origin/dev --budget 1080"
     assert names.index("Install the browser that page tests drive") < names.index("Mutate changed Python files")
+    scope = steps[names.index("Record the revisions the report grades")]
+    assert '"$(git merge-base "$BASE" HEAD)" "$(git rev-parse HEAD)" > .mutation-gate/scope.json' in scope["run"]
     assert steps[-1]["if"] == "always()"
     assert steps[-1]["with"]["name"] == "mutation-preflight-report"
