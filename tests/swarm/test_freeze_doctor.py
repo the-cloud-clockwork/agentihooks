@@ -131,3 +131,19 @@ def test_autoscale_demand_for_the_doctor_counts_no_task_the_watched_focus_holds(
     ledger = doctor(store, [record("plans/a", "focus")])
     monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: [])
     assert capacity.live_inputs("sw", store, ledger, {}, 5_000).demand == {"eng": 1, "ci": 0, "plan": 0}
+
+
+class DemandRuntime:
+    def __init__(self):
+        self.demand = []
+
+    def quota_capacity(self, config, agents, now, demand, requirements):
+        self.demand.append(demand)
+        caps = {"eng": 1, "ci": 0, "plan": 0}
+        return {"configured": caps, "effective": caps, "reason": "accounts have quota", "placements": {}}
+
+
+def test_the_capacity_pass_for_the_doctor_counts_no_task_the_watched_focus_holds(store):
+    ledger, runtime = doctor(store, [record("plans/a", "focus")]), DemandRuntime()
+    capacity.apply("sw", store.config("sw"), store, ledger, runtime, 1_000)
+    assert runtime.demand == [{"eng": 1, "ci": 0, "plan": 0}]
