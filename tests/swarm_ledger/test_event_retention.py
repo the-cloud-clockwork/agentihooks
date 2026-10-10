@@ -209,6 +209,21 @@ def gaps(box):
     return [row for row in box.recent("ledger_events", NOW + 10_000) if row["kind"] == "history gap"]
 
 
+def test_a_pass_after_every_write_ships_each_event_once_with_no_gap_at_normal_retention(repo, tmp_path):
+    box = metrics_outbox.Outbox(tmp_path / "outbox.sqlite", metrics_outbox.Settings("http://sink", "", ""))
+    client = Client(repo)
+    try:
+        for n in range(1, 11):
+            write(repo, n)
+            metrics_ledger.record(box, "ledger", NOW + n, client)
+        shipped = [row["payload"] for row in box.recent("ledger_events", NOW + 10_000) if row["kind"] != "history gap"]
+        assert [sum(f'"m{n}"' in payload for payload in shipped) for n in range(1, 11)] == [1] * 10
+        assert gaps(box) == []
+        assert chats(repo.get_document("ledger")) == ["m8", "m9", "m10"]
+    finally:
+        box.close()
+
+
 def test_a_trim_marker_at_the_cursor_is_no_gap():
     assert metrics_ledger.event_rows("ledger", [], {}, 4, NOW, 4) == []
     [gap] = metrics_ledger.event_rows("ledger", [], {}, 4, NOW, 5)
