@@ -137,7 +137,11 @@ sessions their SessionStart hooks registered. `scripts.swarm_v2.image_attestatio
 qualifies each target against the image manifest's pinned version and the
 accepted herdr contract of the local herdr 0.9.1 runtime path (protocol 22,
 endpoint protocol generation one and the health check capability, and every
-socket method the runtime calls) and reports
+socket method the runtime calls). The contract leaves out `detached_server_daemon`: that flag
+reports whether a client spawned the server as a background daemon, and the
+supervisor runs `herdr server` in the foreground, where herdr 0.9.1 reports it
+false. Viewers attach and detach over the server socket, which protocol 22 and
+the socket methods cover. Qualification reports
 `worker_image_qualified_targets`. Any refused target, or a manifest naming another
 commit, leaves the image unpromotable and nothing is pushed. The same job builds
 an incompatible herdr fixture and requires its refusal, and qualifies the
