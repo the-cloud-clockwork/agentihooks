@@ -135,7 +135,7 @@ class TasksAPI:
         if not isinstance(proof, str) or not proof.strip():
             raise GrantRefused("invalid_request", "proof must be a non empty string")
         text = f"Outcome proposal: {request['outcome']}. {proof}"
-        op = {"op": "add", "thread": f"tasks/{task_id}/comments", "text": text}
+        op = {"op": "add", "thread": f"tasks/{task_id}/comments", "text": text, "outcome": request["outcome"]}
         return self._write(scope, request, op, request["expected_revision"])
 
     def _scope(self, token: str, task_id: str) -> Registration:

@@ -25,7 +25,11 @@ def comments(monkeypatch):
 
 
 def post(comments, thread, ctx, entry_id, text, outcome=None):
-    comments.post_status(thread, AGENT, entry_id, text, ctx, "tasks/t", outcome=outcome)
+    if outcome is None:
+        comments.post_status(thread, AGENT, entry_id, text, ctx, "tasks/t")
+    else:
+        op = {"id": entry_id, "by": AGENT, "text": text, "outcome": outcome}
+        comments.post_outcome(thread, op, ctx, "tasks/t")
 
 
 def shown(thread):
@@ -61,6 +65,23 @@ def test_a_replayed_outcome_entry_is_not_added_twice(comments):
     post(comments, thread, ctx, "o1", "Outcome proposal: done. Pull request merged", "done")
     assert shown(thread) == [("o1", "Outcome proposal: done. Pull request merged", "done")]
     assert len(ctx.records) == 1
+    assert ctx.meta["members"][AGENT]["last_seen"] == 5
+
+
+def test_an_agent_comment_add_with_an_outcome_takes_its_own_entry(comments):
+    thread, ctx = [], Context()
+    base = {"op": "add", "by": AGENT, "thread": "tasks/t/comments"}
+    for op in (
+        {**base, "id": "p1", "text": "Building the first slice"},
+        {**base, "id": "o1", "text": "Outcome proposal: done. Pull request merged", "outcome": "done"},
+        {**base, "id": "p2", "text": "Watching the merge queue"},
+    ):
+        assert comments.agent_thread_op(thread, op, ctx, "tasks/t", "comment")
+    assert shown(thread) == [
+        ("p1", "Building the first slice", None),
+        ("o1", "Outcome proposal: done. Pull request merged", "done"),
+        ("p2", "Watching the merge queue", None),
+    ]
 
 
 @pytest.mark.parametrize("outcome", ["done", "blocked"])
