@@ -1,9 +1,11 @@
+import fcntl
 import hashlib
 import os
 import re
 import shutil
 import stat
 import subprocess
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from itertools import count
@@ -17,6 +19,7 @@ from scripts.swarm_v2 import filesystem, workspaces
 pytestmark = pytest.mark.unit
 
 AGENT = "engineer@abc123-0007"
+CREDENTIAL = "origin carries a credential; supply it through a credential helper"
 
 
 def git(*args, cwd=None) -> str:
@@ -87,6 +90,8 @@ def world(tmp_path):
         "https://user:secret@github.com/Org/Repo/",
         "ssh://git@GitHub.com/Org/Repo.git",
         "git@github.com:Org/Repo.git",
+        "git@GitHub.com:Org/Repo.git",
+        "git://github.com/Org/Repo.git",
         " https://github.com/Org/Repo ",
     ],
 )
@@ -97,9 +102,24 @@ def test_origin_identity_is_normalized_and_credential_free(url):
 def test_origin_identity_keeps_a_port_and_reads_local_paths():
     assert workspaces.identity("ssh://git@host.example:2222/a/b.git") == "host.example:2222/a/b"
     assert workspaces.identity("file:///srv/git/repo.git") == "/srv/git/repo"
+    assert workspaces.identity("ssh://host.example:0/a") == "host.example/a"
+    assert workspaces.identity("https://github.com/org/BOX/") == "github.com/org/BOX"
 
 
-@pytest.mark.parametrize("url", ["", "ftp://host/a/b", "https://github.com/", "git@github.com:", "not a url"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "",
+        "ftp://host/a/b",
+        "http://github.com/a/b",
+        "https://github.com/",
+        "git@github.com:",
+        "not a url",
+        "https://h:abc/x",
+        "https://[::1/x",
+        "file://host/a/b",
+    ],
+)
 def test_unsupported_origin_is_refused(url):
     with pytest.raises(workspaces.WorkspaceError) as refused:
         workspaces.identity(url)
@@ -126,6 +146,7 @@ def test_prepare_starts_the_agent_in_an_isolated_worktree_at_the_fresh_base(worl
     assert git("rev-parse", "--abbrev-ref", "HEAD", cwd=prepared.path) == branch
     assert git("status", "--porcelain", cwd=prepared.path) == ""
     assert workspaces.identity(git("config", "remote.origin.url", cwd=prepared.path)) == world.project
+    assert git("rev-parse", "--is-bare-repository", cwd=prepared.mirror) == "true"
 
 
 def test_prepare_records_origin_and_base_before_the_first_edit(world):
@@ -198,7 +219,15 @@ def test_a_recorded_generation_for_another_project_is_refused(world):
     workspaces.prepare(world.execution, world.request())
     with pytest.raises(workspaces.WorkspaceError) as refused:
         workspaces.prepare(world.execution, replace(world.request(), origin=f"file://{world.other}"))
-    assert str(refused.value) == "task t1 generation 1 is recorded for another project"
+    assert str(refused.value) == "task t1 generation 1 is recorded for another project or base"
+
+
+def test_a_recorded_generation_for_another_base_is_refused(world):
+    git("push", "-q", str(world.origin), "dev:feature", cwd=world.work)
+    workspaces.prepare(world.execution, world.request())
+    with pytest.raises(workspaces.WorkspaceError) as refused:
+        workspaces.prepare(world.execution, world.request(base="feature"))
+    assert str(refused.value) == "task t1 generation 1 is recorded for another project or base"
 
 
 @pytest.mark.parametrize(
@@ -209,6 +238,15 @@ def test_a_recorded_generation_for_another_project_is_refused(world):
         ({"generation": 0}, "invalid generation: 0"),
         ({"base": "-x"}, "invalid base branch: -x"),
         ({"base": ""}, "invalid base branch: "),
+        ({"task": "t1/x"}, "invalid task id: t1/x"),
+        ({"generation": -1}, "invalid generation: -1"),
+        ({"minimum": "abc"}, "invalid required commit: abc"),
+        ({"minimum": "dev"}, "invalid required commit: dev"),
+        ({"agent": "engineer"}, "invalid agent: engineer"),
+        ({"origin": "https://user:pass@github.com/o/r"}, CREDENTIAL),
+        ({"origin": "https://token@github.com/o/r"}, CREDENTIAL),
+        ({"origin": " https://user:pass@github.com/o/r"}, CREDENTIAL),
+        ({"origin": "ssh://git:pass@host.example/o/r"}, CREDENTIAL),
     ],
 )
 def test_invalid_requests_are_refused_before_any_git_io(world, change, message):
@@ -293,7 +331,7 @@ def test_a_failed_clone_leaves_no_partial_mirror(world):
     with pytest.raises(workspaces.WorkspaceError) as refused:
         workspaces.prepare(world.execution, replace(world.request(), origin=missing))
     assert str(refused.value) == f"clone of {workspaces.identity(missing)} failed"
-    assert [p.name for p in world.execution.path("checkout").iterdir()] == [workspaces.LOCK]
+    assert [p.name for p in world.execution.path("checkout").iterdir()] == [".prepare.lock"]
 
 
 def test_concurrent_preparations_clone_once_and_get_distinct_worktrees(world):
@@ -317,10 +355,11 @@ def test_two_executions_keep_private_mirrors_and_worktrees(world):
     other = filesystem.allocate(world.base, "a2", world.layout)
     first = workspaces.prepare(world.execution, world.request())
     second = workspaces.prepare(other, world.request())
-    assert first.path.relative_to(world.execution.root)
-    assert second.path.relative_to(other.root)
-    assert first.mirror.relative_to(world.execution.root)
-    assert second.mirror.relative_to(other.root)
+    assert first.path.is_relative_to(world.execution.root)
+    assert second.path.is_relative_to(other.root)
+    assert first.mirror.is_relative_to(world.execution.root)
+    assert second.mirror.is_relative_to(other.root)
+    assert not first.path.is_relative_to(other.root)
 
 
 def test_disabled_cache_reuse_clones_fresh_beside_the_cached_mirror(world):
@@ -344,7 +383,9 @@ def test_scp_origin_without_a_user_is_read():
     assert workspaces.identity("github.com:Org/Repo.git") == "github.com/Org/Repo"
 
 
-@pytest.mark.parametrize(("project", "slug"), [("host/@@", "repo"), ("host/-My.Repo-", "my.repo")])
+@pytest.mark.parametrize(
+    ("project", "slug"), [("host/@@", "repo"), ("host/org/-My.Repox-.", "my.repox"), ("host/My--Repo", "my--repo")]
+)
 def test_the_mirror_folder_name_is_a_clean_slug_and_a_digest(world, project, slug):
     digest = hashlib.sha256(project.encode()).hexdigest()[:16]
     assert workspaces.mirror_path(world.execution, project).name == f"{slug}-{digest}.git"
@@ -390,17 +431,6 @@ def test_a_worktree_that_git_refuses_is_reported_and_not_created(world, monkeypa
     assert workspaces.recorded(world.execution, "t1")["workspace_prepare_seconds"] == 0.0
 
 
-@pytest.mark.parametrize(
-    "origin",
-    ["https://user:pass@github.com/o/r", "https://token@github.com/o/r", "ssh://git:pass@host.example/o/r"],
-)
-def test_an_origin_carrying_a_credential_is_refused_before_any_git_io(world, origin):
-    with pytest.raises(workspaces.WorkspaceError) as refused:
-        workspaces.prepare(world.execution, replace(world.request(), origin=origin))
-    assert str(refused.value) == "origin carries a credential; supply it through a credential helper"
-    assert [p.name for p in world.execution.path("checkout").iterdir()] == []
-
-
 def test_an_ssh_user_without_a_password_is_not_a_credential(world):
     with pytest.raises(workspaces.WorkspaceError) as refused:
         workspaces.prepare(world.execution, replace(world.request(), origin="ssh://git@host.invalid/o/r"))
@@ -410,7 +440,11 @@ def test_an_ssh_user_without_a_password_is_not_a_credential(world):
 def test_an_inherited_git_dir_does_not_redirect_preparation(world, monkeypatch):
     monkeypatch.setenv("GIT_DIR", str(world.other))
     monkeypatch.setenv("GIT_WORK_TREE", str(world.other_work))
+    monkeypatch.setenv("GIT_COMMON_DIR", str(world.other))
     prepared = workspaces.prepare(world.execution, world.request())
+    monkeypatch.delenv("GIT_DIR")
+    monkeypatch.delenv("GIT_WORK_TREE")
+    monkeypatch.delenv("GIT_COMMON_DIR")
     assert prepared.base_commit == world.head()
     assert workspaces.identity(git("config", "remote.origin.url", cwd=prepared.mirror)) == world.project
 
@@ -481,11 +515,111 @@ def test_git_runs_without_prompting_and_with_a_timeout(world, monkeypatch):
         seen.append(kwargs)
         return real(*args, **kwargs)
 
+    monkeypatch.delenv("GIT_SSH_COMMAND", raising=False)
     monkeypatch.setattr(workspaces.subprocess, "run", spy)
     workspaces.prepare(world.execution, world.request())
     assert seen
-    assert {(kw["env"]["GIT_TERMINAL_PROMPT"], kw["timeout"], kw["text"]) for kw in seen} == {("0", 600, True)}
+    assert {
+        (kw["env"]["GIT_TERMINAL_PROMPT"], kw["env"]["GIT_SSH_COMMAND"], kw["timeout"], kw["text"]) for kw in seen
+    } == {("0", "ssh -o BatchMode=yes", 600, True)}
     assert all(kw["env"]["PATH"] == os.environ["PATH"] for kw in seen)
+
+
+def test_an_operator_ssh_command_is_kept(world, monkeypatch):
+    seen = []
+    real = subprocess.run
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs["env"]["GIT_SSH_COMMAND"])
+        return real(*args, **kwargs)
+
+    monkeypatch.setenv("GIT_SSH_COMMAND", "ssh -i fixture-key")
+    monkeypatch.setattr(workspaces.subprocess, "run", spy)
+    workspaces.prepare(world.execution, world.request())
+    assert set(seen) == {"ssh -i fixture-key"}
+
+
+@pytest.mark.parametrize("error", [subprocess.TimeoutExpired("git", 600), FileNotFoundError("git")])
+def test_a_git_call_that_does_not_finish_is_refused(world, monkeypatch, error):
+    workspaces.prepare(world.execution, world.request("t1"))
+    real = subprocess.run
+
+    def stall(command, **kwargs):
+        if "fetch" in command:
+            raise error
+        return real(command, **kwargs)
+
+    monkeypatch.setattr(workspaces.subprocess, "run", stall)
+    with pytest.raises(workspaces.WorkspaceError) as refused:
+        workspaces.prepare(world.execution, world.request("t2"))
+    assert str(refused.value) == "git fetch did not finish"
+    assert workspaces.recorded(world.execution, "t2") is None
+
+
+def test_a_clone_that_does_not_finish_leaves_no_partial_mirror(world, monkeypatch):
+    def stall(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, 600)
+
+    monkeypatch.setattr(workspaces.subprocess, "run", stall)
+    with pytest.raises(workspaces.WorkspaceError) as refused:
+        workspaces.prepare(world.execution, world.request())
+    assert str(refused.value) == "git clone did not finish"
+    assert [p.name for p in world.execution.path("checkout").iterdir()] == [".prepare.lock"]
+
+
+def test_the_clone_is_staged_beside_the_mirror(world, monkeypatch):
+    staged = []
+    real = tempfile.mkdtemp
+
+    def spy(**kwargs):
+        staged.append(kwargs["dir"])
+        return real(**kwargs)
+
+    monkeypatch.setattr(workspaces.tempfile, "mkdtemp", spy)
+    workspaces.prepare(world.execution, world.request())
+    assert staged == [world.execution.path("checkout")]
+
+
+def test_preparation_holds_an_exclusive_lock(world, monkeypatch):
+    held = []
+    real = workspaces.fcntl.flock
+
+    def spy(handle, operation):
+        held.append(operation)
+        return real(handle, operation)
+
+    monkeypatch.setattr(workspaces.fcntl, "flock", spy)
+    workspaces.prepare(world.execution, world.request())
+    assert held == [fcntl.LOCK_EX]
+
+
+def test_a_partially_failed_fetch_updates_no_reference(world):
+    first = workspaces.prepare(world.execution, world.request("t1"))
+    git("push", "-q", str(world.origin), "dev:feature", cwd=world.work)
+    commit(world.work, "newer")
+    git("push", "-q", str(world.origin), "dev", cwd=world.work)
+    before = refs(first.mirror)
+    tracking = first.mirror / "refs" / "remotes" / "origin"
+    tracking.mkdir(parents=True, exist_ok=True)
+    (tracking / "dev.lock").write_text("")
+    with pytest.raises(workspaces.WorkspaceError):
+        workspaces.prepare(world.execution, world.request("t2"))
+    assert refs(first.mirror) == before
+
+
+def test_a_force_pushed_base_is_followed(world):
+    workspaces.prepare(world.execution, world.request("t1"))
+    git("checkout", "-q", "--orphan", "rewrite", cwd=world.work)
+    rewritten = commit(world.work, "rewrite")
+    git("push", "-q", "-f", str(world.origin), "rewrite:dev", cwd=world.work)
+    assert workspaces.prepare(world.execution, world.request("t2")).base_commit == rewritten
+
+
+@pytest.mark.parametrize("base", ["release.1", "feature/x", "x_y", "a-b", "a"])
+def test_branch_style_base_names_are_accepted(world, base):
+    with pytest.raises(workspaces.WorkspaceError) as refused:
+        workspaces.prepare(world.execution, world.request(base=base))
+    assert str(refused.value) == f"base {base} is missing from {world.project}"
 
 
 def test_package_cases_pass_on_the_isolated_fixture():
