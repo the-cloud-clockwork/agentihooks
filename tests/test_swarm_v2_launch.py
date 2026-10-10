@@ -582,6 +582,30 @@ def test_withdrawing_a_grant_revokes_it_once(world):
     assert str(refused.value) == "launch grant was revoked"
 
 
+def test_a_withdraw_that_keeps_losing_its_write_is_refused(world, monkeypatch):
+    from redis.exceptions import WatchError
+
+    launch = world.launch(FIRST)
+    real = world.grants.redis.pipeline
+
+    def pipeline():
+        pipe = real()
+
+        def execute():
+            raise WatchError("changed")
+
+        pipe.execute = execute
+        return pipe
+
+    monkeypatch.setattr(world.grants.redis, "pipeline", pipeline)
+
+    with pytest.raises(GrantRefused) as refused:
+        world.grants.withdraw(SLUG, launch.grant)
+
+    assert str(refused.value) == "launch grants kept changing; the grant was not withdrawn"
+    assert refused.value.error_class == "dependency_unavailable"
+
+
 def test_a_refused_withdraw_still_frees_the_slot_of_an_unhanded_launch(monkeypatch):
     world = World(monkeypatch, homes=Homes(Hand(False, "pod_missing", False)))
 
