@@ -11,19 +11,21 @@ import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
 from scripts.swarm import naming
 from scripts.swarm_v2.filesystem import SEGMENT, Execution
 
-SCHEMES = {"https", "http", "ssh", "git", "file"}
+SCHEMES = {"https", "ssh", "git", "file"}
 SCP = re.compile(r"(?:[^@/]+@)?([^:/]+):(.+)")
 BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
+COMMIT = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 LOCK = ".prepare.lock"
 GIT_TIMEOUT = 600
 TRACKING = "+refs/heads/*:refs/remotes/origin/*"
-GIT_SCOPE = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY")
+GIT_SCOPE = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")
+BATCH_SSH = "ssh -o BatchMode=yes"
 
 
 class WorkspaceError(ValueError):
@@ -55,21 +57,20 @@ class Workspace:
 
 def identity(url: str) -> str:
     url = url.strip()
-    if "://" in url:
-        parts = urlsplit(url)
+    found = None if "://" in url else SCP.fullmatch(url)
+    try:
+        parts = urlsplit(f"ssh://{found[1]}/{found[2]}" if found else url)
         host = (parts.hostname or "") + (f":{parts.port}" if parts.port else "")
-        scheme, path = parts.scheme, parts.path
-    else:
-        found = SCP.fullmatch(url)
-        scheme, host, path = ("ssh", found[1].lower(), "/" + found[2]) if found else ("", "", "")
-    path = path.rstrip("/").removesuffix(".git")
-    if scheme not in SCHEMES or not path or (scheme != "file") != bool(host):
+    except ValueError:
+        raise WorkspaceError("unsupported origin") from None
+    path = parts.path.rstrip("/").removesuffix(".git")
+    if parts.scheme not in SCHEMES or not path or (parts.scheme == "file") == bool(host):
         raise WorkspaceError("unsupported origin")
     return host + path
 
 
 def mirror_path(execution: Execution, project: str, reuse: bool = True) -> Path:
-    slug = re.sub(r"[^a-z0-9._-]+", "-", project.rsplit("/", 1)[-1].lower()).strip("-.") or "repo"
+    slug = re.sub(r"[^a-z0-9._-]+", "-", PurePosixPath(project).name.lower()).strip("-.") or "repo"
     digest = hashlib.sha256(project.encode()).hexdigest()[:16]
     suffix = "" if reuse else f"-{uuid.uuid4().hex[:8]}"
     return execution.path("checkout") / f"{slug}-{digest}{suffix}.git"
@@ -84,16 +85,20 @@ def recorded(execution: Execution, task: str) -> dict | None:
     return json.loads(path.read_text()) if path.is_file() else None
 
 
+def _environ() -> dict[str, str]:
+    environ = {key: value for key, value in os.environ.items() if key not in GIT_SCOPE}
+    environ.setdefault("GIT_SSH_COMMAND", BATCH_SSH)
+    return {**environ, "GIT_TERMINAL_PROMPT": "0"}
+
+
 def _git(*args: str, repo: Path | None = None) -> subprocess.CompletedProcess:
     scope = ["--git-dir", str(repo)] if repo else []
-    environ = {key: value for key, value in os.environ.items() if key not in GIT_SCOPE}
-    return subprocess.run(
-        ["git", *scope, *args],
-        capture_output=True,
-        text=True,
-        timeout=GIT_TIMEOUT,
-        env={**environ, "GIT_TERMINAL_PROMPT": "0"},
-    )
+    try:
+        return subprocess.run(
+            ["git", *scope, *args], capture_output=True, text=True, timeout=GIT_TIMEOUT, env=_environ()
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        raise WorkspaceError(f"git {args[0]} did not finish") from None
 
 
 @contextmanager
@@ -110,8 +115,12 @@ def _check(request: Request) -> None:
         raise WorkspaceError(f"invalid generation: {request.generation}")
     if not BRANCH.fullmatch(request.base):
         raise WorkspaceError(f"invalid base branch: {request.base}")
+    if request.minimum and not COMMIT.fullmatch(request.minimum):
+        raise WorkspaceError(f"invalid required commit: {request.minimum}")
+    if naming.parse(request.agent) is None:
+        raise WorkspaceError(f"invalid agent: {request.agent}")
     parts = urlsplit(request.origin.strip())
-    if parts.password or (parts.username and parts.scheme in {"http", "https"}):
+    if parts.password or (parts.username and parts.scheme == "https"):
         raise WorkspaceError("origin carries a credential; supply it through a credential helper")
 
 
@@ -119,11 +128,11 @@ def _replay(execution: Execution, request: Request, project: str) -> Workspace |
     held = recorded(execution, request.task)
     if held is None or held["generation"] < request.generation:
         return None
+    attempt = f"task {request.task} generation {request.generation}"
     if held["generation"] > request.generation:
-        older = f"task {request.task} generation {request.generation} is older"
-        raise WorkspaceError(f"{older} than its recorded generation {held['generation']}")
-    if held["project"] != project:
-        raise WorkspaceError(f"task {request.task} generation {request.generation} is recorded for another project")
+        raise WorkspaceError(f"{attempt} is older than its recorded generation {held['generation']}")
+    if (held["project"], held["base"]) != (project, request.base):
+        raise WorkspaceError(f"{attempt} is recorded for another project or base")
     return Workspace(**{**held, "path": Path(held["path"]), "mirror": Path(held["mirror"])})
 
 
@@ -139,9 +148,12 @@ def _verify(mirror: Path, project: str) -> None:
 
 def _clone(url: str, mirror: Path, project: str) -> None:
     staging = Path(tempfile.mkdtemp(dir=mirror.parent))
-    if _git("clone", "--bare", url, str(staging)).returncode:
+    try:
+        if _git("clone", "--bare", url, str(staging)).returncode:
+            raise WorkspaceError(f"clone of {project} failed")
+    except WorkspaceError:
         shutil.rmtree(staging)
-        raise WorkspaceError(f"clone of {project} failed")
+        raise
     staging.rename(mirror)
 
 
@@ -151,7 +163,7 @@ def _fetch(mirror: Path, project: str) -> None:
 
 
 def _base(mirror: Path, request: Request, project: str) -> str:
-    found = _git("rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{request.base}^{{commit}}", repo=mirror)
+    found = _git("rev-parse", f"refs/remotes/origin/{request.base}^{{commit}}", repo=mirror)
     if found.returncode:
         raise WorkspaceError(f"base {request.base} is missing from {project}")
     commit = found.stdout.strip()
@@ -161,7 +173,7 @@ def _base(mirror: Path, request: Request, project: str) -> str:
 
 
 def _branch(execution: Execution, mirror: Path, agent: str) -> str:
-    heads = _git("for-each-ref", "--format=%(refname:short)", "refs/heads", repo=mirror).stdout.split()
+    heads = _git("branch", "--format=%(refname:short)", repo=mirror).stdout.split()
     taken = {path.name for path in execution.path("worktree").iterdir()} | set(heads)
     return naming.worktree({"AGENTIHOOKS_AGENT_NAME": agent}, taken)
 
@@ -190,7 +202,7 @@ def _materialize(workspace: Workspace) -> None:
     if not workspace.mirror.is_dir():
         raise WorkspaceError(f"task {workspace.task} generation {workspace.generation} lost its mirror")
     _git("worktree", "prune", repo=workspace.mirror)
-    held = _git("rev-parse", "--verify", "--quiet", f"refs/heads/{workspace.branch}", repo=workspace.mirror)
+    held = _git("rev-parse", f"refs/heads/{workspace.branch}", repo=workspace.mirror)
     if held.returncode == 0:
         target = [str(workspace.path), workspace.branch]
     else:
@@ -203,8 +215,8 @@ def prepare(
     execution: Execution, request: Request, *, reuse: bool = True, clock: Callable[[], float] = time.monotonic
 ) -> Workspace:
     started = clock()
-    _check(request)
     project = identity(request.origin)
+    _check(request)
     with _locked(execution):
         held = _replay(execution, request, project)
         if held is not None:
