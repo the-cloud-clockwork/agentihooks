@@ -32,6 +32,7 @@ from scripts.swarm import (
     dispatch_seat,
     dispatcher,
     grouping,
+    lane_split,
     launch_check,
     ledger_probe,
     lifetime,
@@ -202,6 +203,7 @@ def tick(slug, store, ledger, runtime, now_ms):
                 lambda: _master(slug, config, store, runtime, now_ms),
             )
             actions += skip_refused(dispatcher.rank_pass, slug, config, store, ledger, doc, now_ms)
+            actions += skip_refused(lane_split.step, slug, config, store, doc, now_ms)
             if config.state == "running":
                 actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
         actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
