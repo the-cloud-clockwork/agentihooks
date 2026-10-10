@@ -4,8 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from scripts.gates import intent
 from scripts.swarm import phase_state, slice_check
-from scripts.swarm_ledger import ledger, ledger_tasks, plan_backfill, plan_packages, plan_ranges
+from scripts.swarm_ledger import ledger, ledger_tasks, plan_backfill, plan_packages, plan_ranges, plan_read
 
 OP = {"op": "task_add", "id": "a", "by": "master", "task": "f1", "title": "Follow up", "lane": "eng", "phase": "p1"}
 
@@ -133,7 +134,10 @@ def sliced():
     return {
         "overview": "Plan hierarchy",
         "phases": [{"id": "p1", "title": "Phase one", "description": "Slices"}],
-        "slices": [{"id": "plan-a.first", "anchor": "first", "lines": "3-5", "phase": "phases/p1"}],
+        "slices": [
+            {"id": "plan-a.first", "anchor": "first", "lines": "3-5", "phase": "phases/p1"},
+            {"id": "plan-a.second", "anchor": "second", "phase": "phases/p1"},
+        ],
         "tasks": [dict(SLICED)],
     }
 
@@ -149,7 +153,9 @@ def task_set(fields):
 
 
 @pytest.mark.parametrize("fields", [{"follow_up": True}, {"follow_up": True, "plan_slice": ""}])
-def test_task_set_marks_a_sliced_task_a_follow_up_and_clears_its_slice(sliced, fields):
+def test_task_set_marks_a_sliced_task_a_follow_up_and_clears_its_slice(sliced, fields, monkeypatch):
+    monkeypatch.setattr(plan_ranges, "task_slice", lambda *a: pytest.fail("a follow up computes no plan lines"))
+    sent = dict(fields)
     done = update_ctx()
     assert ledger_tasks.apply(sliced, task_set(fields), done) is True
     assert done.refused == []
@@ -161,12 +167,10 @@ def test_task_set_marks_a_sliced_task_a_follow_up_and_clears_its_slice(sliced, f
         "slice": "",
     }
     assert (task["plan_url"], task["description"]) == (SLICED["plan_url"], SLICED["description"])
+    assert fields == sent
 
 
 def test_the_intent_state_of_a_task_set_follow_up_carries_its_description_alone(sliced, monkeypatch):
-    from scripts.gates import intent
-    from scripts.swarm_ledger import plan_read
-
     monkeypatch.setattr(plan_read, "exact", lambda doc, task: "borrowed plan lines\n")
     pr = {"title": "Fix it", "body": "Closes 1", "files": ["scripts/x.py"]}
     before = intent.state_of(sliced, sliced["tasks"][0], pr)
@@ -177,7 +181,9 @@ def test_the_intent_state_of_a_task_set_follow_up_carries_its_description_alone(
     assert state["task_text"] == SLICED["description"]
 
 
-@pytest.mark.parametrize("named", [{"plan_slice": "first"}, {"slice": "slices/plan-a.first"}])
+@pytest.mark.parametrize(
+    "named", [{"plan_slice": "first"}, {"slice": "slices/plan-a.first"}, {"slice": "slices/plan-a.second"}]
+)
 def test_task_set_refuses_a_follow_up_that_names_a_slice(sliced, named):
     refused = update_ctx()
     assert ledger_tasks.apply(sliced, task_set({"follow_up": True, **named}), refused) is False
@@ -188,6 +194,24 @@ def test_task_set_refuses_a_follow_up_that_names_a_slice(sliced, named):
 def test_task_set_unmarking_a_follow_up_keeps_its_slice(sliced):
     assert ledger_tasks.apply(sliced, task_set({"follow_up": False}), update_ctx()) is True
     assert sliced["tasks"][0] == {**SLICED, "follow_up": False}
+
+
+def test_task_set_unmarking_a_follow_up_still_computes_a_named_slice(sliced, monkeypatch):
+    asked = []
+    monkeypatch.setattr(plan_ranges, "task_slice", lambda doc, phase, name, url: asked.append((name, url)) or "3-5")
+    assert ledger_tasks.apply(sliced, task_set({"follow_up": False, "plan_slice": "first"}), update_ctx()) is True
+    assert asked == [("first", SLICED["plan_url"])]
+    assert sliced["tasks"][0] == {**SLICED, "follow_up": False}
+
+
+def test_the_coach_fingerprint_changes_when_task_set_marks_a_follow_up(sliced, monkeypatch):
+    monkeypatch.setattr(plan_read, "exact", lambda doc, task: "borrowed plan lines\n")
+    before = intent._fingerprint(sliced, sliced["tasks"][0])
+    assert ledger_tasks.apply(sliced, task_set({"follow_up": True}), update_ctx()) is True
+    unsliced = {"overview": sliced["overview"], "phases": sliced["phases"], "tasks": []}
+    described = {key: SLICED[key] for key in ("id", "title", "description", "phase")}
+    after = intent._fingerprint(sliced, sliced["tasks"][0])
+    assert (after != before, after) == (True, intent._fingerprint(unsliced, described))
 
 
 @pytest.mark.parametrize(("value", "expected"), [("yes", True), ("no", False)])

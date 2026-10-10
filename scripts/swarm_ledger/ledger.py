@@ -62,7 +62,8 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       difficulty (S, M or L), artifact (yes or no) or plan_slice of a task;
                                       phase moves it to another phase, from the master or a planner;
                                       plan_slice computes its plan lines from the published plan;
-                                      follow_up=yes marks it a follow up and clears its slice and plan lines;
+                                      follow_up=yes marks it a follow up and clears its slice and plan lines,
+                                      refused while the same write names a plan_slice or slice;
                                       proof.KEY=VALUE and contract.KEY=VALUE pairs form one object, e.g.
                                       proof.command=C proof.output=O; contract pairs update only the keys they
                                       name, e.g. contract.push=yes
