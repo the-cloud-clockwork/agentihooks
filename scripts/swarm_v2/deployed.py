@@ -65,12 +65,13 @@ def _policy(path: str, slug: str) -> dict:
 def _exporter(value: str | None) -> tuple[str, ...] | None:
     if not value:
         return None
+    refused = WorkerSettingsRefused(f"{EXPORTER_ENV} must be a JSON list of command words")
     try:
         words = json.loads(value)
     except ValueError:
-        words = None
+        raise refused from None
     if not isinstance(words, list) or not words or not all(isinstance(w, str) and w and "\0" not in w for w in words):
-        raise WorkerSettingsRefused(f"{EXPORTER_ENV} must be a JSON list of command words")
+        raise refused
     return tuple(words)
 
 
