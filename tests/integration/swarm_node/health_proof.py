@@ -35,7 +35,7 @@ PROTECTED = (
     "h=a/'homes'/'codex'; "
     "print(json.dumps({'files':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in files},"
     "'home':sorted(str(p.relative_to(h)) for p in h.rglob('*') "
-    "if not p.relative_to(h).is_relative_to('.config/herdr'))}))"
+    "if p.is_file() and 'herdr' not in p.relative_to(h).parts)}))"
 )
 
 

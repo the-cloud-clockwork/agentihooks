@@ -1,12 +1,15 @@
+import contextlib
 import json
 import os
 import subprocess
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
 
+from hooks.proc import _process
 from scripts.swarm_v2 import worker_health
 from scripts.swarm_v2.supervision_protocol import write
 from scripts.swarm_v2.worker_health import Probe, evaluate, main
@@ -224,6 +227,31 @@ def test_missing_path_uses_no_host_binaries(tmp_path):
     assert report(attempt, environ, "startup")["checks"]["binaries"] == "missing_binary:herdr"
 
 
+def bare_hook(attempt):
+    path = attempt / "homes" / "codex" / ".codex" / "hooks.json"
+    path.write_text(json.dumps({"hooks": {"SessionStart": [{"hooks": [{"command": "hook --event start"}]}]}}))
+
+
+def test_bare_hook_name_resolves_on_the_probe_path(tmp_path):
+    attempt, _, environ = fixture(tmp_path)
+    bare_hook(attempt)
+    assert report(attempt, environ, "startup")["checks"]["hook"] is None
+
+
+def test_missing_path_ignores_host_path_and_working_directory(tmp_path, monkeypatch):
+    attempt, _, environ = fixture(tmp_path)
+    bare_hook(attempt)
+    near = tmp_path / "XXXX"
+    near.mkdir()
+    for name in ("herdr", "codex", "hook"):
+        executable(near / name, "#!/bin/sh\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PATH", str(tmp_path / "bin"))
+    del environ["PATH"]
+    checks = report(attempt, environ, "startup")["checks"]
+    assert (checks["binaries"], checks["hook"]) == ("missing_binary:herdr", "hook_uncallable")
+
+
 @pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses file modes")
 @pytest.mark.parametrize(
     "mode,reason", [(0o555, "home_unwritable"), (0o000, "home_unreadable"), (0o300, "home_unreadable")]
@@ -311,7 +339,7 @@ def test_every_session_start_hook_is_checked(tmp_path):
 
 def test_herdr_failure_is_not_death(tmp_path):
     attempt, _, environ = fixture(tmp_path)
-    executable(tmp_path / "bin" / "herdr", "#!/bin/sh\nexit 1\n")
+    executable(tmp_path / "bin" / "herdr", "#!/bin/sh\necho '{}'\nexit 1\n")
     assert report(attempt, environ, "liveness")["status"] == "live"
     result = report(attempt, environ, "startup")
     assert result["status"] == "not_ready"
@@ -331,6 +359,36 @@ def test_hung_herdr_is_bounded(tmp_path, monkeypatch):
     executable(tmp_path / "bin" / "herdr", "#!/bin/sh\nexec sleep 5\n")
     monkeypatch.setattr(worker_health, "HERDR_TIMEOUT", 0.2)
     assert report(attempt, environ, "startup")["checks"]["herdr"] == "herdr_unavailable"
+
+
+def test_herdr_probe_reads_no_input_and_is_bounded(tmp_path, monkeypatch):
+    attempt, _, environ = fixture(tmp_path)
+    seen = []
+    run = subprocess.run
+
+    def spy(*args, **kwargs):
+        seen.append({key: kwargs.get(key) for key in ("stdin", "capture_output", "timeout", "check")})
+        return run(*args, **kwargs)
+
+    monkeypatch.setattr(worker_health.subprocess, "run", spy)
+    assert report(attempt, environ, "startup")["checks"]["herdr"] is None
+    assert seen == [
+        {"stdin": subprocess.DEVNULL, "capture_output": True, "timeout": worker_health.HERDR_TIMEOUT, "check": True}
+    ]
+
+
+def test_brain_probe_trims_the_url_and_is_bounded(tmp_path, monkeypatch):
+    attempt, _, environ = fixture(tmp_path)
+    environ.update(BRAIN_URL=" http://brain.test/X// ", BRAIN_HTTP_TOKEN=SAMPLE)
+    seen = []
+
+    def urlopen(request, timeout=None):
+        seen.append((request.full_url, request.get_header("Authorization"), timeout))
+        return contextlib.nullcontext()
+
+    monkeypatch.setattr(worker_health.urllib.request, "urlopen", urlopen)
+    assert report(attempt, environ, "readiness")["dependencies"] == {"brain": "ok"}
+    assert seen == [("http://brain.test/X/health", f"Bearer {SAMPLE}", worker_health.BRAIN_TIMEOUT)]
 
 
 def dead_pid() -> int:
@@ -368,6 +426,38 @@ def test_finished_incarnation_is_not_live(tmp_path):
     attempt, root, environ = fixture(tmp_path)
     write(root / "result.json", {"reason": "agent_completed"})
     assert report(attempt, environ, "liveness")["checks"] == {"supervisor": "supervisor_absent"}
+
+
+def test_zombie_supervisor_is_not_live(tmp_path, monkeypatch):
+    attempt, root, environ = fixture(tmp_path)
+    scope = json.loads((root / "context.json").read_text())
+    child = subprocess.Popen(["true"])
+    try:
+        deadline = time.monotonic() + 5
+        while _process(child.pid, Path("/proc")).state != "Z" and time.monotonic() < deadline:
+            time.sleep(0.01)
+        write(root / "context.json", {**scope, "supervisor_pid": child.pid})
+        monkeypatch.setattr(worker_health.os, "readlink", lambda _path: scope["process_namespace"])
+        assert report(attempt, environ, "liveness")["checks"] == {"supervisor": "supervisor_absent"}
+    finally:
+        child.wait()
+
+
+def test_unreadable_supervisor_namespace_is_not_live(tmp_path, monkeypatch):
+    attempt, _, environ = fixture(tmp_path)
+
+    def refuse(_path):
+        raise PermissionError
+
+    monkeypatch.setattr(worker_health.os, "readlink", refuse)
+    assert report(attempt, environ, "liveness")["status"] == "not_live"
+
+
+def test_startup_names_an_absent_supervisor(tmp_path):
+    attempt, root, environ = fixture(tmp_path)
+    write(root / "result.json", {})
+    checks = report(attempt, environ, "startup")["checks"]
+    assert (checks["supervisor"], checks["herdr"]) == ("supervisor_absent", "herdr_unavailable")
 
 
 def test_newest_live_incarnation_is_chosen(tmp_path):
