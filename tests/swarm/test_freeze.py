@@ -149,8 +149,10 @@ def test_selector_values_and_node_ids_keep_every_later_separator():
 
 
 def test_only_a_doctor_swarm_has_a_fix_phase():
-    assert freeze.fix_phase(SwarmConfig("sw", "/repo")) == ""
-    assert freeze.fix_phase(SwarmConfig("sw", "/repo", template=priming.TEMPLATE)) == loop.FIX_PHASE
+    assert freeze.fix_phase(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1)) == ""
+    assert (
+        freeze.fix_phase(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1, template=priming.TEMPLATE)) == loop.FIX_PHASE
+    )
 
 
 def test_the_drain_notice_counts_held_work_and_names_only_the_freezes_holding_it():
