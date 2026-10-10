@@ -6,7 +6,7 @@
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2414",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2431",
-  "tested_commit": "0c0e1736faaa679cd061ac6139d297fc27e8015c",
+  "tested_commit": "b22a5468bbebdacda8681d413dbf5b9dbf05c18f",
   "status": "fixture-qualified",
   "package_complete": false,
   "evidence_class": "Local isolated fixture in CI: real git against bare file origins in pytest temporary execution roots laid out by SV2-FSY-01; correct mirror, wrong origin mirror, stale base and four concurrent preparations. Nothing mocked except monkeypatched git failures and timeouts in named refusal tests. Not live rollout proof.",
@@ -34,11 +34,12 @@
     "red": [
       "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38057852049 on 1300ff90: tests only commit, workspaces module missing at collection"
     ],
-    "green": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063533508 on 0c0e1736: every unit shard, every mutation shard, sonar and the image and kind jobs passed",
-    "mutation": "workspaces.py 118 killed, no survivors, no failures, in https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063533508; branch preflights https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38060436624 on 9f2bac2b and https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063107153 on the restacked 0c0e1736 succeeded",
-    "sonar": "Quality gate passed on the pull request analysis in https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063533508",
+    "green": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064418884 on b22a5468: every unit shard, every mutation shard, sonar and the image and kind jobs passed; earlier green https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063533508 on 0c0e1736",
+    "mutation": "workspaces.py 118 killed, no survivors, no failures, in https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064418884; branch preflights https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063107153 on 0c0e1736 and https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064415555 on b22a5468 succeeded",
+    "sonar": "Quality gate passed on the pull request analysis in https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064418884",
     "review": "Standards and Spec readers ran three rounds and closed; every finding fixed or recorded under remaining_limitations",
-    "local": "No local tests or mutation ran; lint, format and size passed in the pre push gate on every pushed head"
+    "local": "No local tests or mutation ran; lint, format and size passed in the pre push gate on every pushed head",
+    "intent": "Intent fix round one added the compatibility check and display label refusals in b22a5468"
   },
   "measurements": {
     "workspace_prepare_seconds": "Workspace.workspace_prepare_seconds, monotonic time from the prepare call to the materialized worktree, saved in the record; the package cases assert it is measured on every preparation",
@@ -52,12 +53,12 @@
     ],
     "data_safety": "The cached mirror is never deleted or rewritten by a refusal or by disabled reuse; records and worktrees of earlier tasks survive a failed preparation",
     "observed": {
-      "run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063533508",
+      "run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064418884",
       "outcomes": [
-        "tests/test_swarm_v2_workspaces.py::test_disabled_cache_reuse_clones_fresh_beside_the_cached_mirror unit (3.11, 3) job 114246580185: PASSED at 2026-10-10T15:28:20.5773957Z",
-        "tests/test_swarm_v2_workspaces.py::test_disabled_cache_reuse_clones_fresh_beside_the_cached_mirror unit (3.12, 6) job 114246580251: PASSED at 2026-10-10T15:30:05.8470106Z",
-        "tests/test_swarm_v2_workspaces.py::test_disabled_cache_reuse_ignores_a_wrong_origin_folder unit (3.11, 3) job 114246580185: PASSED at 2026-10-10T15:28:20.4556192Z",
-        "tests/test_swarm_v2_workspaces.py::test_disabled_cache_reuse_ignores_a_wrong_origin_folder unit (3.12, 6) job 114246580251: PASSED at 2026-10-10T15:30:05.9324705Z"
+        "tests/test_swarm_v2_workspaces.py::test_disabled_cache_reuse_clones_fresh_beside_the_cached_mirror unit (3.11, 2) job 114249518730: PASSED at 2026-10-10T15:43:00.6183288Z",
+        "tests/test_swarm_v2_workspaces.py::test_disabled_cache_reuse_clones_fresh_beside_the_cached_mirror unit (3.12, 6) job 114249518770: PASSED at 2026-10-10T15:45:09.2931089Z",
+        "tests/test_swarm_v2_workspaces.py::test_disabled_cache_reuse_ignores_a_wrong_origin_folder unit (3.11, 3) job 114249518796: PASSED at 2026-10-10T15:43:27.1301784Z",
+        "tests/test_swarm_v2_workspaces.py::test_disabled_cache_reuse_ignores_a_wrong_origin_folder unit (3.12, 3) job 114249518858: PASSED at 2026-10-10T15:44:56.3427392Z"
       ],
       "result": "With reuse off, a fresh clone landed beside the cached mirror at the fresh base and the cached mirror kept its references; a wrong origin folder at the cached path was ignored rather than reused"
     }
@@ -84,9 +85,9 @@
     "manifest": "evidence/SV2-FSY-02/manifest.json"
   },
   "test_outputs": {
-    "T-SV2-FSY-02-A": "78 of 78 test runs PASSED across the 3.11 and 3.12 shards of https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063533508",
-    "T-SV2-FSY-02-B": "82 of 82 test runs PASSED across the 3.11 and 3.12 shards of https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063533508",
-    "T-SV2-FSY-02-C": "44 of 44 test runs PASSED across the 3.11 and 3.12 shards of https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063533508"
+    "T-SV2-FSY-02-A": "80 of 80 runs PASSED across the 3.11 and 3.12 shards of https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064418884",
+    "T-SV2-FSY-02-B": "88 of 88 runs PASSED across the 3.11 and 3.12 shards of https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064418884",
+    "T-SV2-FSY-02-C": "44 of 44 runs PASSED across the 3.11 and 3.12 shards of https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064418884"
   },
   "completion_evidence": {
     "line": "record implemented interfaces, supported versions, test outputs, remaining limitations, and the rollback rehearsal",
@@ -95,5 +96,16 @@
     "test_outputs": "test_outputs, with every per test outcome in the a, b and c case files",
     "remaining_limitations": "remaining_limitations",
     "rollback_rehearsal": "rollback_rehearsal, with observed outcomes"
+  },
+  "fixture": "World in tests/test_swarm_v2_workspaces.py, per case under pytest tmp_path on an SV2-FSY-01 execution root: correct mirror (bare file origin cloned into the checkout root), wrong origin mirror (another repository at the correct mirror folder), stale base (a base branch lacking the required commit) and concurrent worktree preparation (four tasks prepared from one thread pool)",
+  "compatibility": {
+    "local_path": "wt.sh new from the worktree skill names the branch with agentihooks name worktree (scripts.swarm.naming.worktree) and cuts it from WT_BASE_BRANCH, default dev",
+    "comparison": "branches_and_base_match_the_local_development_cycle: a worker's first and second worktrees for one agent are named exactly as the local path names them (engineer-abc123-0007, then engineer-abc123-0007-2) and the default base is dev, read from wt.sh",
+    "local_skill_changed": false
+  },
+  "authority": {
+    "actor": "Request.agent, the agent name the controller takes from the launch grant; prepare accepts only a name scripts.swarm.naming.parse reads and grants no permission",
+    "refused_labels": "Engineer 7, eng-7@rig-grade-swarm and engineer@ABC123-0007 are refused before any Git I/O in invalid_requests_are_refused_before_any_git_io",
+    "scope": "mirror, worktree and record live under the execution root; two_executions_keep_private_mirrors_and_worktrees"
   }
 }
