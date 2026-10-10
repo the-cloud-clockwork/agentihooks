@@ -1,0 +1,492 @@
+{
+  "package": "SV2-FSY-02",
+  "case": "T-SV2-FSY-02-A",
+  "title": "successful behavior: an agent begins in an isolated worktree tied to the correct project and task generation",
+  "tested_commit": "b22a5468bbebdacda8681d413dbf5b9dbf05c18f",
+  "evidence_class": "local isolated fixture in CI: real git against file origins in pytest temporary execution roots; nothing mocked except monkeypatched git failures in named refusal tests; not live rollout proof",
+  "mocked": false,
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064418884",
+  "passed": true,
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_scp_origin_without_a_user_is_read",
+      "job": "114249518692",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T15:44:50.9532892Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_base_containing_the_required_commit_is_accepted",
+      "job": "114249518692",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T15:44:51.1792174Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_branches_and_base_match_the_local_development_cycle",
+      "job": "114249518692",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T15:44:51.7692179Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_origin_identity_is_normalized_and_credential_free[https://github.com/Org/Repo.git]",
+      "job": "114249518700",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T15:44:59.9944012Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_different_repositories_have_different_identities",
+      "job": "114249518700",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T15:45:00.0696078Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_prepare_takes_the_requested_base_branch",
+      "job": "114249518700",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T15:45:00.3389953Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_prepare_starts_the_agent_in_an_isolated_worktree_at_the_fresh_base",
+      "job": "114249518716",
+      "shard": "unit (3.12, 8)",
+      "output": "PASSED at 2026-10-10T15:45:10.2424544Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_prepare_fetches_new_base_commits_into_the_cached_mirror",
+      "job": "114249518716",
+      "shard": "unit (3.12, 8)",
+      "output": "PASSED at 2026-10-10T15:45:10.3082292Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_concurrent_preparations_clone_once_and_get_distinct_worktrees",
+      "job": "114249518716",
+      "shard": "unit (3.12, 8)",
+      "output": "PASSED at 2026-10-10T15:45:10.8322137Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_force_pushed_base_is_followed",
+      "job": "114249518716",
+      "shard": "unit (3.12, 8)",
+      "output": "PASSED at 2026-10-10T15:45:10.8342212Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_the_mirror_folder_name_is_a_clean_slug_and_a_digest[host/My--Repo-my--repo]",
+      "job": "114249518716",
+      "shard": "unit (3.12, 8)",
+      "output": "PASSED at 2026-10-10T15:45:11.0184760Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_package_cases_pass_on_the_isolated_fixture",
+      "job": "114249518716",
+      "shard": "unit (3.12, 8)",
+      "output": "PASSED at 2026-10-10T15:45:13.9163301Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_origin_identity_is_normalized_and_credential_free[git://github.com/Org/Repo.git]",
+      "job": "114249518730",
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T15:43:00.1063517Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_origin_identity_is_normalized_and_credential_free[",
+      "job": "114249518730",
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T15:43:00.1388141Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_origin_identity_keeps_a_port_and_reads_local_paths",
+      "job": "114249518730",
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T15:43:00.1509000Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_concurrent_replays_of_one_task_generation_create_one_worktree",
+      "job": "114249518730",
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T15:43:00.6108061Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_the_mirror_folder_name_is_a_clean_slug_and_a_digest[host/@@--]",
+      "job": "114249518730",
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T15:43:00.6933692Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_the_mirror_folder_name_is_a_clean_slug_and_a_digest[-repo]",
+      "job": "114249518730",
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T15:43:00.7022523Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_an_scp_origin_without_a_password_is_not_a_credential[host.invalid:repo]",
+      "job": "114249518730",
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T15:43:00.8172990Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_an_ssh_user_without_a_password_is_not_a_credential",
+      "job": "114249518730",
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T15:43:00.8188598Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_branch_deleted_upstream_is_pruned_from_the_cache",
+      "job": "114249518730",
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T15:43:00.8570979Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_an_scp_origin_without_a_password_is_not_a_credential[host.invalid:o/a@b]",
+      "job": "114249518730",
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T15:43:00.9672981Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_branch_style_base_names_are_accepted[release.1]",
+      "job": "114249518730",
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T15:43:01.1023613Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_branch_style_base_names_are_accepted[a-b]",
+      "job": "114249518730",
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T15:43:01.2655136Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_origin_identity_is_normalized_and_credential_free[https://github.com/Org/Repo.git]",
+      "job": "114249518742",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T15:44:00.2146630Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_different_repositories_have_different_identities",
+      "job": "114249518742",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T15:44:00.2537893Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_prepare_starts_the_agent_in_an_isolated_worktree_at_the_fresh_base",
+      "job": "114249518742",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T15:44:00.4258623Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_prepare_takes_the_requested_base_branch",
+      "job": "114249518742",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T15:44:00.4737084Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_prepare_fetches_new_base_commits_into_the_cached_mirror",
+      "job": "114249518742",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T15:44:00.5398567Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_the_mirror_folder_name_is_a_clean_slug_and_a_digest[host/My--Repo-my--repo]",
+      "job": "114249518742",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T15:44:00.8748852Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_force_pushed_base_is_followed",
+      "job": "114249518742",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T15:44:01.3236131Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_concurrent_preparations_clone_once_and_get_distinct_worktrees",
+      "job": "114249518742",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T15:44:01.3736937Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_package_cases_pass_on_the_isolated_fixture",
+      "job": "114249518742",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T15:44:02.8819613Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_origin_identity_is_normalized_and_credential_free[",
+      "job": "114249518770",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:45:08.3161052Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_origin_identity_is_normalized_and_credential_free[git://github.com/Org/Repo.git]",
+      "job": "114249518770",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:45:08.3172019Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_the_mirror_folder_name_is_a_clean_slug_and_a_digest[host/@@--]",
+      "job": "114249518770",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:45:08.8831428Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_branch_style_base_names_are_accepted[release.1]",
+      "job": "114249518770",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:45:09.1277204Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_concurrent_replays_of_one_task_generation_create_one_worktree",
+      "job": "114249518770",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T15:45:09.2841015Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_origin_identity_is_normalized_and_credential_free[git@GitHub.com:Org/Repo.git]",
+      "job": "114249518771",
+      "shard": "unit (3.12, 1)",
+      "output": "PASSED at 2026-10-10T15:43:49.6961298Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_replay_whose_base_holds_the_required_commit_returns_the_workspace",
+      "job": "114249518771",
+      "shard": "unit (3.12, 1)",
+      "output": "PASSED at 2026-10-10T15:43:50.1362135Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_branch_style_base_names_are_accepted[x_y]",
+      "job": "114249518771",
+      "shard": "unit (3.12, 1)",
+      "output": "PASSED at 2026-10-10T15:43:50.2596722Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_origin_identity_is_normalized_and_credential_free[***github.com/Org/Repo/]",
+      "job": "114249518788",
+      "shard": "unit (3.12, 7)",
+      "output": "PASSED at 2026-10-10T15:45:16.5770510Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_prepare_records_origin_and_base_before_the_first_edit",
+      "job": "114249518788",
+      "shard": "unit (3.12, 7)",
+      "output": "PASSED at 2026-10-10T15:45:16.8863912Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_newer_generation_gets_a_new_worktree_and_record",
+      "job": "114249518788",
+      "shard": "unit (3.12, 7)",
+      "output": "PASSED at 2026-10-10T15:45:16.9354832Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_the_mirror_path_is_derived_from_the_full_project_identity",
+      "job": "114249518788",
+      "shard": "unit (3.12, 7)",
+      "output": "PASSED at 2026-10-10T15:45:16.9429859Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_the_mirror_folder_name_is_a_clean_slug_and_a_digest[host/org/-My.Repox-.--my.repox-.]",
+      "job": "114249518788",
+      "shard": "unit (3.12, 7)",
+      "output": "PASSED at 2026-10-10T15:45:17.2471710Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_an_operator_ssh_command_is_kept",
+      "job": "114249518788",
+      "shard": "unit (3.12, 7)",
+      "output": "PASSED at 2026-10-10T15:45:17.4670363Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_two_executions_keep_private_mirrors_and_worktrees",
+      "job": "114249518788",
+      "shard": "unit (3.12, 7)",
+      "output": "PASSED at 2026-10-10T15:45:17.4916423Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_branch_style_base_names_are_accepted[a]",
+      "job": "114249518788",
+      "shard": "unit (3.12, 7)",
+      "output": "PASSED at 2026-10-10T15:45:17.8459747Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_origin_identity_is_normalized_and_credential_free[git@github.com:Org/Repo.git]",
+      "job": "114249518796",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:43:26.3912969Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_origin_identity_is_normalized_and_credential_free[***github.com/Org/Repo/]",
+      "job": "114249518796",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:43:26.3996490Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_origin_identity_is_normalized_and_credential_free[ssh://git@GitHub.com/Org/Repo.git]",
+      "job": "114249518796",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:43:26.4361076Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_prepare_records_origin_and_base_before_the_first_edit",
+      "job": "114249518796",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:43:26.5659881Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_replaying_the_same_task_generation_returns_the_same_workspace",
+      "job": "114249518796",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:43:26.5691758Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_newer_generation_gets_a_new_worktree_and_record",
+      "job": "114249518796",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:43:26.7733807Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_the_mirror_path_is_derived_from_the_full_project_identity",
+      "job": "114249518796",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:43:26.9282320Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_two_executions_keep_private_mirrors_and_worktrees",
+      "job": "114249518796",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:43:27.0788003Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_the_mirror_folder_name_is_a_clean_slug_and_a_digest[host/org/-My.Repox-.--my.repox-.]",
+      "job": "114249518796",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:43:27.1731869Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_an_scp_origin_without_a_password_is_not_a_credential[git@host.invalid:repo]",
+      "job": "114249518796",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:43:27.3011829Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_an_operator_ssh_command_is_kept",
+      "job": "114249518796",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:43:27.4894451Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_branch_style_base_names_are_accepted[feature/x]",
+      "job": "114249518796",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:43:27.6601897Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_branch_style_base_names_are_accepted[a]",
+      "job": "114249518796",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T15:43:27.6766771Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_origin_identity_keeps_a_port_and_reads_local_paths",
+      "job": "114249518828",
+      "shard": "unit (3.12, 2)",
+      "output": "PASSED at 2026-10-10T15:44:34.6991184Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_the_mirror_folder_name_is_a_clean_slug_and_a_digest[-repo]",
+      "job": "114249518828",
+      "shard": "unit (3.12, 2)",
+      "output": "PASSED at 2026-10-10T15:44:34.9983790Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_an_scp_origin_without_a_password_is_not_a_credential[host.invalid:repo]",
+      "job": "114249518828",
+      "shard": "unit (3.12, 2)",
+      "output": "PASSED at 2026-10-10T15:44:35.1152511Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_an_ssh_user_without_a_password_is_not_a_credential",
+      "job": "114249518828",
+      "shard": "unit (3.12, 2)",
+      "output": "PASSED at 2026-10-10T15:44:35.1570895Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_branch_deleted_upstream_is_pruned_from_the_cache",
+      "job": "114249518828",
+      "shard": "unit (3.12, 2)",
+      "output": "PASSED at 2026-10-10T15:44:35.2410701Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_an_scp_origin_without_a_password_is_not_a_credential[host.invalid:o/a@b]",
+      "job": "114249518828",
+      "shard": "unit (3.12, 2)",
+      "output": "PASSED at 2026-10-10T15:44:35.3950909Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_branch_style_base_names_are_accepted[a-b]",
+      "job": "114249518828",
+      "shard": "unit (3.12, 2)",
+      "output": "PASSED at 2026-10-10T15:44:35.5563954Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_origin_identity_is_normalized_and_credential_free[ssh://git@GitHub.com/Org/Repo.git]",
+      "job": "114249518858",
+      "shard": "unit (3.12, 3)",
+      "output": "PASSED at 2026-10-10T15:44:55.7733567Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_origin_identity_is_normalized_and_credential_free[git@github.com:Org/Repo.git]",
+      "job": "114249518858",
+      "shard": "unit (3.12, 3)",
+      "output": "PASSED at 2026-10-10T15:44:55.8756579Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_replaying_the_same_task_generation_returns_the_same_workspace",
+      "job": "114249518858",
+      "shard": "unit (3.12, 3)",
+      "output": "PASSED at 2026-10-10T15:44:56.0993269Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_an_scp_origin_without_a_password_is_not_a_credential[git@host.invalid:repo]",
+      "job": "114249518858",
+      "shard": "unit (3.12, 3)",
+      "output": "PASSED at 2026-10-10T15:44:56.4605401Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_branch_style_base_names_are_accepted[feature/x]",
+      "job": "114249518858",
+      "shard": "unit (3.12, 3)",
+      "output": "PASSED at 2026-10-10T15:44:56.6553309Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_origin_identity_is_normalized_and_credential_free[git@GitHub.com:Org/Repo.git]",
+      "job": "114249518859",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T15:44:32.6342865Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_scp_origin_without_a_user_is_read",
+      "job": "114249518859",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T15:44:32.8451082Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_base_containing_the_required_commit_is_accepted",
+      "job": "114249518859",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T15:44:33.0624346Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_a_replay_whose_base_holds_the_required_commit_returns_the_workspace",
+      "job": "114249518859",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T15:44:33.4576517Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_branches_and_base_match_the_local_development_cycle",
+      "job": "114249518859",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T15:44:33.7620972Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_workspaces.py::test_branch_style_base_names_are_accepted[x_y]",
+      "job": "114249518859",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T15:44:33.8210576Z"
+    }
+  ]
+}

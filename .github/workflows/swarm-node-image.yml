@@ -27,6 +27,7 @@ jobs:
     env:
       CANDIDATE: agentihooks-worker-candidate:${{ github.sha }}
       INCOMPATIBLE: agentihooks-worker-incompatible-herdr:${{ github.sha }}
+      PLANTED: agentihooks-worker-planted-credential:${{ github.sha }}
       REPOSITORY: >-
         ${{ startsWith(github.ref, 'refs/heads/diffcheck/')
         && 'ghcr.io/the-cloud-clockwork/agentihooks-worker-proof'
@@ -64,6 +65,22 @@ jobs:
           jq -S .report "$out/candidate/attestation.json" > "$out/candidate-report.json"
           jq -S .report "$out/repeat/attestation.json" > "$out/repeat-report.json"
           diff "$out/candidate-report.json" "$out/repeat-report.json"
+      - name: Build the planted credential fixture
+        run: >-
+          docker build --build-arg WORKER_IMAGE="$CANDIDATE" --tag "$PLANTED"
+          tests/contracts/image_manifest/planted-credential
+      - name: Refuse the planted credential fixture
+        run: |
+          out="$RUNNER_TEMP/worker-image-attestation/planted-scan"
+          status=0
+          bash docker/swarm-node/scan.sh "$PLANTED" "$out" || status=$?
+          if [[ "$status" != 1 ]]; then
+            echo "planted credential fixture was not refused (exit $status)" >&2
+            exit 1
+          fi
+          grep -qE '^github-app-token (.*/)?opt/agentihooks/\.build-token$' "$out/findings.txt"
+      - name: Scan the candidate for credentials
+        run: bash docker/swarm-node/scan.sh "$CANDIDATE" "$RUNNER_TEMP/worker-image-attestation/candidate-scan"
       - name: Log in to the registry
         if: >-
           (github.event_name == 'push' || inputs.publish)
