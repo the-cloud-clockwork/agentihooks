@@ -466,14 +466,21 @@ def counted_reads(world):
     return reads
 
 
-def test_stream_reads_each_piece_once_with_one_checksum_pass(world, monkeypatch):
+@pytest.mark.parametrize(
+    ("data", "pieces", "expected"),
+    [
+        (b"0123456789", [b"0123", b"4567", b"89"], [(0, 4), (4, 4), (8, 2)]),
+        (b"012345678", [b"0123", b"4567", b"8"], [(0, 4), (4, 4), (8, 1)]),
+        (b"01234567", [b"0123", b"4567"], [(0, 4), (4, 4)]),
+    ],
+)
+def test_stream_reads_each_piece_once_with_one_checksum_pass(world, monkeypatch, data, pieces, expected):
     monkeypatch.setattr(base, "CHUNK", 4)
     reads = counted_reads(world)
-    data = b"0123456789"
     ref = world.store.put(world.scope, "a1", data)
     reads.clear()
-    assert list(world.store.stream(world.scope, ref)) == [b"0123", b"4567", b"89"]
-    assert reads == [(0, 4), (4, 4), (8, 2)]
+    assert list(world.store.stream(world.scope, ref)) == pieces
+    assert reads == expected
 
 
 @pytest.mark.parametrize("position", [0, 9])

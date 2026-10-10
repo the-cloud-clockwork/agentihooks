@@ -124,6 +124,7 @@ class ArtifactStore:
         return self.backend.read(scope.key("objects", ref.sha256), start, length)
 
     def stream(self, scope: Scope, ref: ArtifactRef) -> Iterator[bytes]:
+        """Pieces arrive before the whole object is verified; discard them all when the iterator raises."""
         key = scope.key("objects", ref.sha256)
         if self.backend.size(key) != ref.size:
             _refuse(f"artifact {ref.sha256} is not verified in {self.backend.kind}")
