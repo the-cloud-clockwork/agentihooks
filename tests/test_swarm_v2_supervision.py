@@ -249,7 +249,7 @@ def test_detaching_viewers_keeps_agent_exporter_and_grandchildren_alive(worker):
 @pytest.mark.parametrize("mode,reason,code", [("complete", "agent_completed", 0), ("fail", "agent_failure", 70)])
 def test_agent_completion_is_distinct_from_failure(worker, mode, reason, code):
     start, attempt, spec = worker
-    child = start(agent=[*spec["agent"][:-1], mode])
+    child = start(agent=[*spec["agent"][:-1], mode], checkpoint_seconds=5 if mode == "complete" else 0.4)
     root = runtime_directory(attempt, child)
     result = wait_for(root / "result.json", child)
     assert child.wait(timeout=8) == code
