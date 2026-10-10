@@ -6,7 +6,7 @@
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2418",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2446",
-  "tested_commit": "7f65a6b31b437bdf07ddca272d6b78a7690fad62",
+  "tested_commit": "9a54962a47352faac17050996763fefa5a46267f",
   "status": "fixture-qualified",
   "package_complete": false,
   "evidence_class": "Local isolated fixture in CI: real files in pytest temporary execution roots laid out by SV2-FSY-01 and a temporary cache store with the shipped policy; fake clock and fake disk usage; trusted toolchain entry, poisoned executable entry, full disk and mismatched dependency lock. Nothing mocked except monkeypatched copy and write failures in named failure tests. Not live rollout proof.",
@@ -39,8 +39,8 @@
     "red": [
       "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38058634806 on c98891da: tests only commit, cache module missing at collection"
     ],
-    "green": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38067630237 on 7f65a6b31b437bdf07ddca272d6b78a7690fad62: every unit shard passed",
-    "mutation": "Branch preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38067627041 succeeded on 7f65a6b31b437bdf07ddca272d6b78a7690fad62; earlier preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059851797 graded cache.py 387 killed, 0 survived",
+    "green": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38068548038 on 9a54962a47352faac17050996763fefa5a46267f: every unit shard passed",
+    "mutation": "Branch preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38068544718 succeeded on 9a54962a47352faac17050996763fefa5a46267f; earlier preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059851797 graded cache.py 387 killed, 0 survived",
     "review": "Standards and Spec readers ran three rounds and closed; held items recorded under remaining_limitations",
     "local": "No local tests or mutation ran; lint, format and size passed in the pre push gate on every head"
   },
@@ -65,7 +65,7 @@
     "T-SV2-FSY-03-A": {
       "title": "successful behavior: two compatible tasks reuse a dependency cache while keeping native conversations and credentials separate",
       "passed": true,
-      "tests": 78,
+      "tests": 80,
       "file": "a-result.json"
     },
     "T-SV2-FSY-03-B": {
@@ -81,9 +81,10 @@
       "file": "c-result.json"
     }
   },
-  "test_outputs": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38067630237",
+  "test_outputs": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38068548038",
   "completion_evidence": "Fixture qualified only; the package is not complete until a worker launch path uses the module and a rollout gate verifies it live.",
   "fixture": "tests/test_swarm_v2_cache.py build() and tests/sv2_fsy03_cases.py",
-  "compatibility": "No preceding cache protocol exists; with reuse off every attempt behaves as the local path does today, a fresh layer with no seed",
+  "compatibility": "No preceding cache protocol exists; the local path today gives every attempt only its own files. With reuse off an attempt runs exactly that way: every file in its execution root, home and worktree included, is unchanged, the only addition is its private tmp/cache layer, and the node store is never created. Test: tests/test_swarm_v2_cache.py::test_reuse_off_runs_an_attempt_as_the_local_path_does_with_only_its_private_scratch_layer_added",
+  "phase_use": "The worker image installs the policy at /opt/swarm-node/cache-policy.json, the path load() reads with no argument (test_load_reads_the_installed_policy_when_no_path_is_given), and attach and publish take the SV2-FSY-01 Execution that the worker home and workspace packages already allocate; the worker launch wiring that calls them belongs to a later package",
   "authority": "The writable scope comes from the Store's granted scope, never from a key field or display label"
 }

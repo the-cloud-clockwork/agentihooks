@@ -2,191 +2,191 @@
   "package": "SV2-FSY-03",
   "case": "T-SV2-FSY-03-C",
   "title": "recovery: corrupt cache content is discarded and rebuilt without deleting the task's source changes",
-  "tested_commit": "7f65a6b31b437bdf07ddca272d6b78a7690fad62",
+  "tested_commit": "9a54962a47352faac17050996763fefa5a46267f",
   "evidence_class": "local isolated fixture in CI: real files in pytest temporary execution roots laid out by SV2-FSY-01 and a temporary cache store; fake clock and fake disk usage; monkeypatched copy and write failures only in named failure tests; not live rollout proof",
   "mocked": false,
-  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38067630237",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38068548038",
   "passed": true,
   "tests": [
     {
-      "test": "tests/test_swarm_v2_cache.py::test_a_dangling_link_in_place_of_an_entry_is_discarded_by_attach_and_by_publish",
-      "job": "114259054713",
-      "shard": "unit (3.11, 3)",
-      "output": "PASSED at 2026-10-10T16:32:31.2964335Z"
-    },
-    {
       "test": "tests/test_swarm_v2_cache.py::test_publish_rebuilds_an_entry_moved_under_its_key_even_when_the_files_match",
-      "job": "114259054713",
-      "shard": "unit (3.11, 3)",
-      "output": "PASSED at 2026-10-10T16:32:31.3693021Z"
-    },
-    {
-      "test": "tests/test_swarm_v2_cache.py::test_a_failure_after_staging_keeps_every_victim_and_leaves_no_staging",
-      "job": "114259054713",
-      "shard": "unit (3.11, 3)",
-      "output": "PASSED at 2026-10-10T16:32:31.5408747Z"
-    },
-    {
-      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[content]",
-      "job": "114259054713",
-      "shard": "unit (3.11, 3)",
-      "output": "PASSED at 2026-10-10T16:32:31.6122594Z"
-    },
-    {
-      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[mode]",
-      "job": "114259054713",
-      "shard": "unit (3.11, 3)",
-      "output": "PASSED at 2026-10-10T16:32:31.6521355Z"
-    },
-    {
-      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[missing]",
-      "job": "114259054713",
-      "shard": "unit (3.11, 3)",
-      "output": "PASSED at 2026-10-10T16:32:31.6789147Z"
-    },
-    {
-      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[record]",
-      "job": "114259054713",
-      "shard": "unit (3.11, 3)",
-      "output": "PASSED at 2026-10-10T16:32:31.6945819Z"
-    },
-    {
-      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[extra]",
-      "job": "114259054713",
-      "shard": "unit (3.11, 3)",
-      "output": "PASSED at 2026-10-10T16:32:31.7185578Z"
-    },
-    {
-      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[link]",
-      "job": "114259054713",
-      "shard": "unit (3.11, 3)",
-      "output": "PASSED at 2026-10-10T16:32:31.7354030Z"
-    },
-    {
-      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[shape]",
-      "job": "114259054713",
-      "shard": "unit (3.11, 3)",
-      "output": "PASSED at 2026-10-10T16:32:31.7478444Z"
-    },
-    {
-      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[fields]",
-      "job": "114259054713",
-      "shard": "unit (3.11, 3)",
-      "output": "PASSED at 2026-10-10T16:32:31.7847796Z"
-    },
-    {
-      "test": "tests/test_swarm_v2_cache.py::test_a_write_failure_leaves_no_staging_no_entry_and_evicts_nothing",
-      "job": "114259054713",
-      "shard": "unit (3.11, 3)",
-      "output": "PASSED at 2026-10-10T16:32:31.8496369Z"
-    },
-    {
-      "test": "tests/test_swarm_v2_cache.py::test_reuse_off_attaches_without_a_seed_and_publishes_nothing",
-      "job": "114259054713",
-      "shard": "unit (3.11, 3)",
-      "output": "PASSED at 2026-10-10T16:32:31.8743200Z"
+      "job": "114261302975",
+      "shard": "unit (3.12, 3)",
+      "output": "PASSED at 2026-10-10T16:44:03.2977476Z"
     },
     {
       "test": "tests/test_swarm_v2_cache.py::test_publish_clears_staging_left_by_an_interrupted_publish",
-      "job": "114259054713",
-      "shard": "unit (3.11, 3)",
-      "output": "PASSED at 2026-10-10T16:32:31.9512381Z"
-    },
-    {
-      "test": "tests/test_swarm_v2_cache.py::test_package_cases_pass_on_the_isolated_fixture",
-      "job": "114259054713",
-      "shard": "unit (3.11, 3)",
-      "output": "PASSED at 2026-10-10T16:32:32.1595404Z"
-    },
-    {
-      "test": "tests/test_swarm_v2_cache.py::test_publish_rebuilds_an_entry_moved_under_its_key_even_when_the_files_match",
-      "job": "114259054762",
-      "shard": "unit (3.12, 4)",
-      "output": "PASSED at 2026-10-10T16:32:02.3808691Z"
-    },
-    {
-      "test": "tests/test_swarm_v2_cache.py::test_a_dangling_link_in_place_of_an_entry_is_discarded_by_attach_and_by_publish",
-      "job": "114259054762",
-      "shard": "unit (3.12, 4)",
-      "output": "PASSED at 2026-10-10T16:32:02.4454534Z"
-    },
-    {
-      "test": "tests/test_swarm_v2_cache.py::test_a_failure_after_staging_keeps_every_victim_and_leaves_no_staging",
-      "job": "114259054762",
-      "shard": "unit (3.12, 4)",
-      "output": "PASSED at 2026-10-10T16:32:02.5600193Z"
-    },
-    {
-      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[mode]",
-      "job": "114259054762",
-      "shard": "unit (3.12, 4)",
-      "output": "PASSED at 2026-10-10T16:32:02.6450374Z"
-    },
-    {
-      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[content]",
-      "job": "114259054762",
-      "shard": "unit (3.12, 4)",
-      "output": "PASSED at 2026-10-10T16:32:02.6786460Z"
-    },
-    {
-      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[missing]",
-      "job": "114259054762",
-      "shard": "unit (3.12, 4)",
-      "output": "PASSED at 2026-10-10T16:32:02.7157050Z"
+      "job": "114261302975",
+      "shard": "unit (3.12, 3)",
+      "output": "PASSED at 2026-10-10T16:44:03.4611756Z"
     },
     {
       "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[extra]",
-      "job": "114259054762",
-      "shard": "unit (3.12, 4)",
-      "output": "PASSED at 2026-10-10T16:32:02.7485668Z"
+      "job": "114261303015",
+      "shard": "unit (3.12, 8)",
+      "output": "PASSED at 2026-10-10T16:44:35.2231086Z"
     },
     {
-      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[shape]",
-      "job": "114259054762",
-      "shard": "unit (3.12, 4)",
-      "output": "PASSED at 2026-10-10T16:32:02.7886843Z"
-    },
-    {
-      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[fields]",
-      "job": "114259054762",
-      "shard": "unit (3.12, 4)",
-      "output": "PASSED at 2026-10-10T16:32:02.7987961Z"
+      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[mode]",
+      "job": "114261303015",
+      "shard": "unit (3.12, 8)",
+      "output": "PASSED at 2026-10-10T16:44:35.2276589Z"
     },
     {
       "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[record]",
-      "job": "114259054762",
-      "shard": "unit (3.12, 4)",
-      "output": "PASSED at 2026-10-10T16:32:02.8684574Z"
-    },
-    {
-      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[link]",
-      "job": "114259054762",
-      "shard": "unit (3.12, 4)",
-      "output": "PASSED at 2026-10-10T16:32:02.9863835Z"
+      "job": "114261303015",
+      "shard": "unit (3.12, 8)",
+      "output": "PASSED at 2026-10-10T16:44:35.2727869Z"
     },
     {
       "test": "tests/test_swarm_v2_cache.py::test_a_write_failure_leaves_no_staging_no_entry_and_evicts_nothing",
-      "job": "114259054762",
-      "shard": "unit (3.12, 4)",
-      "output": "PASSED at 2026-10-10T16:32:03.0219920Z"
-    },
-    {
-      "test": "tests/test_swarm_v2_cache.py::test_publish_clears_staging_left_by_an_interrupted_publish",
-      "job": "114259054762",
-      "shard": "unit (3.12, 4)",
-      "output": "PASSED at 2026-10-10T16:32:03.1079682Z"
+      "job": "114261303021",
+      "shard": "unit (3.12, 2)",
+      "output": "PASSED at 2026-10-10T16:43:00.9997036Z"
     },
     {
       "test": "tests/test_swarm_v2_cache.py::test_reuse_off_attaches_without_a_seed_and_publishes_nothing",
-      "job": "114259054762",
+      "job": "114261303021",
+      "shard": "unit (3.12, 2)",
+      "output": "PASSED at 2026-10-10T16:43:01.0816838Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_a_dangling_link_in_place_of_an_entry_is_discarded_by_attach_and_by_publish",
+      "job": "114261303022",
       "shard": "unit (3.12, 4)",
-      "output": "PASSED at 2026-10-10T16:32:03.1399557Z"
+      "output": "PASSED at 2026-10-10T16:44:46.1939890Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[fields]",
+      "job": "114261303022",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:44:46.4499876Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[content]",
+      "job": "114261303022",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:44:46.4771613Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[link]",
+      "job": "114261303022",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:44:46.5869746Z"
     },
     {
       "test": "tests/test_swarm_v2_cache.py::test_package_cases_pass_on_the_isolated_fixture",
-      "job": "114259054762",
+      "job": "114261303022",
       "shard": "unit (3.12, 4)",
-      "output": "PASSED at 2026-10-10T16:32:03.4429682Z"
+      "output": "PASSED at 2026-10-10T16:44:47.6359824Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[shape]",
+      "job": "114261303027",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T16:44:48.7391496Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[missing]",
+      "job": "114261303027",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T16:44:48.7611256Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_a_failure_after_staging_keeps_every_victim_and_leaves_no_staging",
+      "job": "114261303032",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T16:43:37.1595643Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_rebuilds_an_entry_moved_under_its_key_even_when_the_files_match",
+      "job": "114261303062",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:43:08.7254357Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_clears_staging_left_by_an_interrupted_publish",
+      "job": "114261303062",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:43:08.7773575Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_a_failure_after_staging_keeps_every_victim_and_leaves_no_staging",
+      "job": "114261303064",
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T16:43:06.3952362Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_a_write_failure_leaves_no_staging_no_entry_and_evicts_nothing",
+      "job": "114261303064",
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T16:43:06.4291076Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_reuse_off_attaches_without_a_seed_and_publishes_nothing",
+      "job": "114261303064",
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T16:43:06.4322404Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[shape]",
+      "job": "114261303099",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T16:43:15.2987805Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[missing]",
+      "job": "114261303099",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T16:43:15.7949651Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_a_dangling_link_in_place_of_an_entry_is_discarded_by_attach_and_by_publish",
+      "job": "114261303134",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T16:43:38.5967116Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[content]",
+      "job": "114261303134",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T16:43:38.6330158Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[mode]",
+      "job": "114261303134",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T16:43:38.6476956Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[extra]",
+      "job": "114261303134",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T16:43:38.6752563Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[record]",
+      "job": "114261303134",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T16:43:38.7026918Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[fields]",
+      "job": "114261303134",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T16:43:38.7497828Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_corrupt_content_is_discarded_counted_and_rebuilt[link]",
+      "job": "114261303134",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T16:43:38.7706930Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_package_cases_pass_on_the_isolated_fixture",
+      "job": "114261303134",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T16:43:39.0756931Z"
     }
   ]
 }
