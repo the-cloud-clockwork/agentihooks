@@ -1,23 +1,35 @@
+import json
+import os
 import threading
+import time
 from collections.abc import Callable, Iterable, Mapping
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from scripts.swarm.store import RedisStore
+from scripts.hive import auth as hive_auth
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_v2.api.executions import ExecutionsAPI
 from scripts.swarm_v2.api.server import serve
-from scripts.swarm_v2.auth_context import MIN_KEY_BYTES, LaunchAuthority, LaunchKey
+from scripts.swarm_v2.auth_context import LaunchAuthority, LaunchKey
 from scripts.swarm_v2.authority import TaskAuthority
 from scripts.swarm_v2.controller import Controller
+from scripts.swarm_v2.kubernetes.watch import BACKEND
+from scripts.swarm_v2.reconciliation.accounts import Finding
+from scripts.swarm_v2.runtime.observe import Observer, Reading, Signal, Source, Thresholds
 from scripts.swarm_v2.runtime.operations import OperationTransport
 
 KEY_ID_ENV = "AGENTIHOOKS_LAUNCH_SIGNING_KEY_ID"
 KEY_FILE_ENV = "AGENTIHOOKS_LAUNCH_SIGNING_KEY_FILE"
+PORT_ENV = "AGENTIHOOKS_CONTROL_API_PORT"
+SWARM_ENV = "AGENTIHOOKS_CONTROL_SWARM"
+CREDENTIAL_ENV = "AGENTIHOOKS_CONTROLLER_CREDENTIAL"
+HOST = "0.0.0.0"  # noqa: S104  # NOSONAR: the API is a cluster Service; every route checks a signed grant
+THREAD = "swarm-v2-api"
 ISSUER = "controller"
 AUDIENCE = "workers"
 
 
-class ControlError(Exception):
+class ControlError(SwarmError):
     pass
 
 
@@ -29,12 +41,18 @@ def launch_key(environ: Mapping[str, str]) -> LaunchKey:
         secret = Path(environ[KEY_FILE_ENV]).read_bytes().strip()
     except OSError as error:
         raise ControlError(f"the launch signing key file is unreadable: {error.strerror}") from None
-    if len(secret) < MIN_KEY_BYTES:
-        raise ControlError(f"the launch signing key must be at least {MIN_KEY_BYTES} bytes")
     try:
         return LaunchKey(environ[KEY_ID_ENV], secret)
     except ValueError as error:
         raise ControlError(str(error)) from None
+
+
+def _heartbeat(agent: AgentRecord, raw: str | None) -> list[Signal]:
+    if not raw:
+        return []
+    beat = json.loads(raw)
+    seen = beat["accepted_at_ms"] / 1000
+    return [Signal(Source.HEARTBEAT, Reading.OK, seen, agent.execution_id, agent.generation, beat["state"])]
 
 
 class ControlService:
@@ -45,19 +63,62 @@ class ControlService:
         key: LaunchKey,
         authorize: Callable[[], bool],
         transports: Iterable[OperationTransport] = (),
+        owner: str = "",
     ) -> None:
         self.controller = Controller(store, slug, transports, authorize)
+        if owner:
+            self.controller.owner = owner
+        self.observer = Observer(store, BACKEND, Thresholds.from_environ(os.environ))
         self.grants = LaunchAuthority(store, key, ISSUER, AUDIENCE)
         self.tasks = TaskAuthority(store, self.controller, lambda token: self.grants.bound(slug, token))
         self.executions = ExecutionsAPI(self.grants, self.tasks)
+        self.server: ThreadingHTTPServer | None = None
 
     def start(self) -> bool:
         return self.controller.acquire()
 
-    def tick(self) -> bool:
-        return self.controller.renew()
+    def tick(self, now: float | None = None) -> bool:
+        if not (self.controller.renew() or self.controller.acquire()):
+            return False
+        self.observe(time.time() if now is None else now)
+        return True
+
+    def observe(self, now: float) -> list[Finding]:
+        store, slug = self.controller.store, self.controller.slug
+        beats = store.redis.hgetall(store.key(slug, "heartbeats"))
+        remote = [agent for agent in store.execution_occupants(slug).values() if agent.runtime_backend == BACKEND]
+        found = [
+            self.controller.observe(self.observer, agent, _heartbeat(agent, beats.get(agent.execution_id)), now)
+            for agent in remote
+        ]
+        return [finding for finding in found if finding is not None]
 
     def serve(self, host: str, port: int) -> ThreadingHTTPServer:
-        server = serve(self.executions, host, port)
-        threading.Thread(target=server.serve_forever, name="swarm-v2-api", daemon=True).start()
-        return server
+        self.server = serve(self.executions, host, port)
+        threading.Thread(target=self.server.serve_forever, name=THREAD, daemon=True).start()
+        return self.server
+
+    def stop(self) -> None:
+        if self.server is not None:
+            self.server.shutdown()
+            self.server.server_close()
+        if self.controller.held is not None:
+            self.controller.release()
+
+
+def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlService | None:
+    port = environ.get(PORT_ENV)
+    if not port:
+        return None
+    slug = environ.get(SWARM_ENV)
+    if not slug:
+        raise ControlError(f"the control API needs {SWARM_ENV}")
+    if not port.isdigit():
+        raise ControlError(f"{PORT_ENV} must be a port number")
+    credential = environ.get(CREDENTIAL_ENV) or ""
+    service = ControlService(
+        store, slug, launch_key(environ), lambda: hive_auth.controller(store.redis, credential), owner=owner
+    )
+    service.start()
+    service.serve(HOST, int(port))
+    return service
