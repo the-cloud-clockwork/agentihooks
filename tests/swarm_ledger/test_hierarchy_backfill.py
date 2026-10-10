@@ -534,6 +534,18 @@ def test_apply_records_one_backfill_event_at_the_write_time(tmp_path, monkeypatc
     ]
 
 
+def test_the_applied_ledger_is_served_from_the_repository_cache(tmp_path, monkeypatch):
+    repo = repository(tmp_path)
+    hierarchy_backfill.backfill(repo, SLUG, "planner", apply=True)
+    expected = store.SQLiteLedgerRepository(repo.path).export_document(SLUG)
+
+    def reload(*args):
+        raise AssertionError("the applied ledger was read back from its rows")
+
+    monkeypatch.setattr(store, "read_rows", reload)
+    assert repo.export_document(SLUG) == expected
+
+
 def test_a_missing_database_or_ledger_is_named(tmp_path):
     repository(tmp_path)
     for repo in (

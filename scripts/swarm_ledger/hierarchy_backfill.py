@@ -164,11 +164,13 @@ def commit(repo: store.SQLiteLedgerRepository, slug: str, by: str) -> dict:
             ctx.record(by, "backfilled", "hierarchy")
             meta.update(rev=ctx.rev, updated_at=ctx.at)
             meta["events"] = (meta["events"] + ctx.events)[-repo.domain.EVENTS_KEPT :]
-            repo._write(connection, slug, entry, after, ctx.events)
+            written = repo._write(connection, slug, entry, after, ctx.events)
         else:
+            written = entry
             hierarchy.sync(connection, slug, after)
         report["applied"] = True
         report["drift"] = hierarchy.drift(hierarchy.stored(connection, slug), hierarchy.project(after))
+    repo._remember(slug, written)
     return report
 
 
@@ -193,9 +195,10 @@ def backfill(repo: store.SQLiteLedgerRepository, slug: str, by: str, apply: bool
         if connection is None:
             raise store.Missing(slug)
         connection.execute("BEGIN")
-        doc = store.assemble(store.read_rows(connection, slug))
-        if "_meta" not in doc:
+        rows = store.read_rows(connection, slug)
+        if not rows:
             raise store.Missing(slug)
+        doc = store.assemble(rows)
         _, report = preview(doc, slug)
         report["drift"] = hierarchy.drift(stored(connection, slug), hierarchy.project(doc))
     return report
