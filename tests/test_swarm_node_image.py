@@ -210,9 +210,12 @@ def test_committed_image_inputs_pin_base_and_keep_profiles_outside_home():
     assert "USER 10001:10001" in dockerfile
     assert "DISABLE_AUTOUPDATER=1" in dockerfile
     assert "--require-hashes" in dockerfile
-    assert "--mount=type=cache,target=/var/cache/swarm-node " in dockerfile
-    assert "--cache-dir /var/cache/swarm-node/pip " in dockerfile
-    assert '--architecture "$TARGETARCH" --cache /var/cache/swarm-node/tools\n' in dockerfile
+    assert "--require-hashes -d /downloads/pip -r /opt/swarm-node/requirements.lock" in dockerfile
+    assert '--architecture "$TARGETARCH" --cache /downloads/tools\n\nFROM ${BASE_IMAGE} AS worker\n' in dockerfile
+    assert "--mount=type=bind,from=downloads,source=/downloads,target=/downloads" in dockerfile
+    assert "--no-index --find-links /downloads/pip --require-hashes" in dockerfile
+    assert dockerfile.endswith('CMD ["python", "/opt/swarm-node/worker_image.py", "report"]\n')
+    assert dockerfile.count("FROM ") == 2
 
 
 @pytest.mark.parametrize(
@@ -345,7 +348,7 @@ def test_build_rejects_selected_base_that_differs_from_lock(locked, monkeypatch)
     assert str(error.value) == "base image differs from lock"
 
 
-@pytest.mark.parametrize("action", ["validate", "install", "manifest", "report", "shell-packages"])
+@pytest.mark.parametrize("action", ["validate", "download", "install", "manifest", "report", "shell-packages"])
 def test_build_command_routes_locked_actions(locked, monkeypatch, capsys, action):
     path, lock, _ = locked
     lock["shell_packages"].update(bash="5.2", curl="7.88")
@@ -365,14 +368,21 @@ def test_build_command_routes_locked_actions(locked, monkeypatch, capsys, action
             "/var/cache/tools",
         ],
     )
+    fetch = Mock()
     install = Mock()
     manifest = Mock()
     report = Mock(return_value={"zeta": 2, "alpha": 1})
+    monkeypatch.setattr(worker_image, "fetch", fetch)
     monkeypatch.setattr(worker_image, "install_tools", install)
     monkeypatch.setattr(worker_image, "write_manifest", manifest)
     monkeypatch.setattr(worker_image, "report", report)
     worker_image.main()
-    if action == "install":
+    if action == "download":
+        assert fetch.call_args_list == [
+            call(name, artifact, Path("/var/cache/tools")) for name, artifact in lock["tools"].items()
+        ]
+        install.assert_not_called()
+    elif action == "install":
         install.assert_called_once_with(lock, Path("/usr/local/bin"), Path("/var/cache/tools"))
     elif action == "manifest":
         manifest.assert_called_once_with(path, "amd64", "tested", Path("/opt/agentihooks/templates"))
@@ -382,6 +392,7 @@ def test_build_command_routes_locked_actions(locked, monkeypatch, capsys, action
     elif action == "shell-packages":
         assert capsys.readouterr().out == "git=1:2.39.5-0+deb12u3 bash=5.2 curl=7.88\n"
     else:
+        fetch.assert_not_called()
         install.assert_not_called()
         manifest.assert_not_called()
         report.assert_not_called()

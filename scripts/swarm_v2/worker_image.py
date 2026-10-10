@@ -141,7 +141,7 @@ def report(path: Path) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("validate", "install", "manifest", "report", "shell-packages"))
+    parser.add_argument("action", choices=("validate", "download", "install", "manifest", "report", "shell-packages"))
     parser.add_argument("--lock", type=Path, default=Path("/opt/swarm-node/versions.lock"))
     parser.add_argument("--architecture", default="amd64")
     parser.add_argument("--base-image")
@@ -151,7 +151,10 @@ def main() -> None:
     lock = load_lock(args.lock, args.architecture)
     if args.base_image is not None and args.base_image != lock["base_image"]:
         raise ValueError("base image differs from lock")
-    if args.action == "install":
+    if args.action == "download":
+        for name, artifact in lock["tools"].items():
+            fetch(name, artifact, args.cache)
+    elif args.action == "install":
         install_tools(lock, Path("/usr/local/bin"), args.cache)
     elif args.action == "manifest":
         write_manifest(args.lock, args.architecture, args.source_revision, Path("/opt/agentihooks/templates"))
