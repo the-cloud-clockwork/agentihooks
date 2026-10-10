@@ -79,6 +79,14 @@
       "content": "x",
       "repeat": 5000,
       "key": "8bb0552dfc0a5a89b00da5e1a7ea9977"
+    },
+    {
+      "name": "null session id hashes as an empty session",
+      "session_id": null,
+      "type": "milestone",
+      "content": "shipped the thing",
+      "repeat": 1,
+      "key": "992bb40f86ea562597638e8b990e0199"
     }
   ]
 }

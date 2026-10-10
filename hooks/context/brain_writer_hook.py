@@ -259,7 +259,7 @@ def _drain_outbox(outbox_dir: str) -> int:
             continue
 
         body, idem = _marker_request(
-            marker, payload.get("session_id", ""), payload.get("cwd") or payload.get("project", "")
+            marker, payload.get("session_id") or "", payload.get("cwd") or payload.get("project", "")
         )
         response = post("/marker", body=body, idempotency_key=idem, surface_http_errors=True)
         status = (response or {}).get("__http_status__")
