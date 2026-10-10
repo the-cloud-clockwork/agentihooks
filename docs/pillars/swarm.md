@@ -115,7 +115,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm tick` | One reconcile pass over every swarm (the timer runs it). |
 | `agentihooks swarm <id> controller` | Show the controller owner, epoch and expiry. |
 | `agentihooks swarm <id> controller release` | Release this hive's lease so another controller can take over at a higher epoch. |
-| `agentihooks controller run [--once]` | Reconcile every registered swarm each minute; `--once` runs one pass. `AGENTIHOOKS_DEPLOYMENT=local` permits spawning; `compose` and `distributed` reconcile without spawning. |
+| `agentihooks controller run [--once]` | Reconcile every registered swarm each minute; `--once` runs one pass. `AGENTIHOOKS_DEPLOYMENT=local` permits spawning; `compose` reconciles without spawning; `distributed` spawns only engineer and CI work its Kubernetes runtime places, and leaves master, planner, dispatcher and frontend work to the workstation hive. |
 | `agentihooks swarm templates` | One line per swarm template, built-in or user: per lane its cap, agent, model, effort and default kind, then the compact limit. |
 | `agentihooks swarm <id> create --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N] [--max-plan-agents N]` | Register a swarm, paused. Defaults: 2 eng, 1 ci, 1 planner. `--template` takes the caps, compact limit and lane map from a template; a cap flag still wins. Ends with the `Ledger page: <link>` line. |
 | `agentihooks swarm <id> start` | Run: enable the timer and scale up at once. Ends with the `Ledger page: <link>` line. |

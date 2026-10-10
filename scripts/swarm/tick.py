@@ -714,6 +714,13 @@ def _spawn_stop(slug, config, store, runtime, now_ms):
     return ""
 
 
+def _placed_elsewhere(config, runtime, lane, task):
+    from scripts.swarm import seat_spawn
+
+    refused = seat_spawn.placed_elsewhere(config, runtime, lane, task)
+    return f"{task['id']}: {refused}" if refused else ""
+
+
 def _record_spawn_failure(slug, store, record, error):
     if record_failure := timing.ON_FAILURE.get():
         record_failure(f"{__name__}._spawn", error)
@@ -732,7 +739,11 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             return actions + held
         if stop := _spawn_stop(slug, config, store, runtime, now_ms):
             return actions + [stop]
-        blocked = _lives_spent(slug, store, ledger, rows, task) or _held_back(slug, ledger, rows, runtime, task, now_ms)
+        blocked = (
+            _placed_elsewhere(config, runtime, lane, task)
+            or _lives_spent(slug, store, ledger, rows, task)
+            or _held_back(slug, ledger, rows, runtime, task, now_ms)
+        )
         if blocked:
             actions.append(blocked)
             continue
@@ -974,6 +985,8 @@ def _master(slug, config, store, runtime, now_ms):
         return []
     if any(m.name in runtime.live_names() for m in masters):
         return ["the old master is still running, waiting for it to end before starting the next"]
+    if refused := seat_spawn.placed_elsewhere(config, runtime, MASTER, {"id": MASTER}):
+        return [refused]
     if refused := seat_spawn.no_slot(config, runtime, MASTER):
         store.redis.hset(MASTER_WAITING, slug, now_ms)
         return [refused]
