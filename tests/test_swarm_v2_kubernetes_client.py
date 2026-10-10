@@ -309,3 +309,31 @@ def test_list_raises_on_a_refused_answer():
 
 def test_namespace_is_kept_for_callers():
     assert PodClient(Http(), "swarm").namespace == "swarm"
+
+
+def test_create_config_map_posts_it_into_the_namespace():
+    transport = Http((201, {"metadata": {"name": "swarm-a-launch"}}))
+    maps = PodClient(transport, "swarm-pods")
+    body = {"metadata": {"name": "swarm-a-launch"}, "data": {"launch-grant": "g"}}
+    assert maps.create_config_map(body) == {"metadata": {"name": "swarm-a-launch"}}
+    assert transport.calls == [("POST", "/api/v1/namespaces/swarm-pods/configmaps", body)]
+
+
+def test_create_config_map_raises_already_exists_naming_it():
+    maps = PodClient(Http((409, {"reason": "AlreadyExists"})), "ns")
+    with pytest.raises(AlreadyExists) as raised:
+        maps.create_config_map({"metadata": {"name": "swarm-a-launch"}})
+    assert str(raised.value) == "swarm-a-launch"
+
+
+def test_create_config_map_refuses_a_conflict_that_is_not_already_exists():
+    maps = PodClient(Http((409, {"reason": "Conflict"})), "ns")
+    with pytest.raises(ApiRefused) as raised:
+        maps.create_config_map({"metadata": {"name": "swarm-a-launch"}})
+    assert (raised.value.status, raised.value.reason) == (409, "Conflict")
+
+
+def test_create_config_map_treats_a_server_error_as_ambiguous():
+    with pytest.raises(ConnectionError) as raised:
+        PodClient(Http((503, {})), "ns").create_config_map({"metadata": {"name": "swarm-a-launch"}})
+    assert str(raised.value) == "API server answered 503"

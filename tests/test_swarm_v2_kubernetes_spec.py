@@ -784,6 +784,17 @@ def test_a_toleration_with_exists_and_a_value_is_refused(tmp_path):
     )
 
 
+def test_the_pod_and_its_launch_material_are_named_after_the_execution():
+    _, rendered = render()
+    assert spec.pod_name(EXECUTION) == rendered.pod["metadata"]["name"] == f"swarm-{EXECUTION}"
+    assert spec.launch_name(EXECUTION) == f"swarm-{EXECUTION}-launch"
+    assert spec.launch_volume(EXECUTION) in rendered.pod["spec"]["volumes"]
+    assert spec.launch_volume(EXECUTION) == {
+        "name": "launch",
+        "configMap": {"name": f"swarm-{EXECUTION}-launch", "defaultMode": 0o444},
+    }
+
+
 @pytest.mark.parametrize("case", ["a", "b", "c"])
 def test_package_cases_match_their_committed_evidence(case):
     from tests.sv2_kub01_cases import run_case
