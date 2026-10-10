@@ -63,6 +63,13 @@ def test_an_engineer_cannot_add_a_ranked_task_either():
     assert rejected == ["add-3"] and "t3" not in [t["id"] for t in state["tasks"]]
 
 
+def test_a_ranked_task_add_outside_the_allowlist_is_refused_and_an_unranked_one_lands():
+    ranked = {"op": "task_add", "id": "add-4", "by": "someone", "task": "t4", "title": "d", "lane": "eng"}
+    state, rejected = core.sync(SLUG, ops=[{**ranked, "rank": "high"}, {**ranked, "id": "add-5", "task": "t5"}])
+    assert rejected == ["add-4"] and [t["id"] for t in state["tasks"]] == ["t1", "t5"]
+    assert state["_meta"]["warnings"][0] == f"someone cannot set a task rank: {ledger_tasks.PROPOSE}"
+
+
 @pytest.mark.parametrize("bad", ["top", "", "URGENT", 1, None])
 def test_an_unknown_rank_is_refused(bad):
     with pytest.raises(ValueError, match="rank must be one of|as strings"):

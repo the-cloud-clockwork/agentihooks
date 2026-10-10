@@ -73,6 +73,7 @@ from scripts.swarm import (
     control_notifications,
     delivery,
     dev_red,
+    dispatcher,
     done_gate,
     idle,
     launch_check,
@@ -89,7 +90,6 @@ from scripts.swarm import (
     phases,
     plan_review,
     priming_trace,
-    priority_sweep,
     prompt,
     reaper,
     snapshot,
@@ -236,7 +236,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             rows = {t["id"]: t for t in doc["tasks"]}
             actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms(), ledger_events.view)
             actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
-            actions += skip_refused(priority_sweep.priority_pass, store, slug, doc, ledger, None, view)
+            actions += skip_refused(dispatcher.priorities, store, slug, doc, ledger, view, now_ms())
             found = timing.call(
                 findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", [])
             )

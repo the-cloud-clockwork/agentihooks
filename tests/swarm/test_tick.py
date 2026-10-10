@@ -15,6 +15,7 @@ class FakeLedger:
         }
         self.notes = []
         self.swarm_sized = []
+        self.ranks, self.comments = [], []
 
     def tasks(self, slug):
         return list(self.rows.values())
@@ -68,6 +69,12 @@ class FakeLedger:
 
     def binned(self, slug):
         return slug in getattr(self, "bin", set())
+
+    def rank_task(self, slug, task_id, rank, by):
+        self.ranks.append((task_id, rank, by))
+
+    def comment(self, slug, task_id, text, by):
+        self.comments.append((task_id, text, by))
 
 
 class FakeRuntime:
