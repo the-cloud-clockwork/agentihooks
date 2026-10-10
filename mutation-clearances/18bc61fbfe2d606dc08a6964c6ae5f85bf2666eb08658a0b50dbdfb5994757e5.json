@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/kubernetes/client.py:scripts.swarm_v2.kubernetes.client.x\u01c1KubeHttp\u01c1send__mutmut_22:fa53d0f30c7c538cf01a3a224b54617da45e28e90f705060d44888d389bbdff0": {
+    "reader": "standards_reader",
+    "reason": "urllib.request.Request.add_header stores key.capitalize(), so 'Authorization', 'authorization' and 'AUTHORIZATION' store the same key 'Authorization', and likewise 'Accept' and 'Content-Type' (stored as 'Content-type') for their case variants; the request sends identical headers and bytes in each case, verified on this interpreter."
+  }
+}
