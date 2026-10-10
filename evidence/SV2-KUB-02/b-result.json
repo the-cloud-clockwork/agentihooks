@@ -3,7 +3,7 @@
   "evidence_class": "mocked: fakeredis journal and execution registry, a fake lease clock and an in process API server that applies a create, drops its response and then answers AlreadyExists; no Kubernetes API server was called",
   "input_sha256": {
     "pod-launch.json": "8d1964999c9d4fc4e3bfd4f8aea2938da30b825411e1e5a12f4ea7e432261908",
-    "pod-policy.json": "f8a7cb319094b100d5f09a4e6a6ea5b794c6011cec6443a280f6dc3d1be40085"
+    "pod-policy.json": "cac05e3a549966cf63b9c00183883ec7087b814eb91fc785dad689df9e66723b"
   },
   "observed": {
     "api_objects_unchanged": true,
