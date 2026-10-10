@@ -43,7 +43,7 @@
       "pods": [
         {
           "name": "swarm-<old>",
-          "outcome": "absent_after_send",
+          "outcome": "replaced",
           "uid": "uid-1"
         }
       ],

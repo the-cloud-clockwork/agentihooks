@@ -1,5 +1,5 @@
 {
-  "tested_commit": "0618061a5c410b38d306aebc66692b5aa705fe09",
+  "tested_commit": "35b1c3d5b2f454f1811f653e163b04f040a998a9",
   "evidence_class": "mocked Redis, fake lease clock, in process API server enforcing uid preconditions with a droppable delete response, in process attach and secret registries; no Kubernetes API server",
   "cases": [
     "T-SV2-KUB-04-A",
@@ -10,12 +10,12 @@
     "tests/fixtures/swarm_v2/cleanup-attempts.json": "39a4e5c1dc686133750138a012ddc2d2764666e2562588959752e670ab12d4ce",
     "tests/fixtures/swarm_v2/pod-policy.json": "6f10e42c7c8461ea18fe3ae9f0c46001020bd50153665477b415076cf71099f5",
     "tests/fixtures/swarm_v2/pod-launch.json": "dc9258de4781082cc2abb9a2048ff04db03da0a83ea144f96fe728847b34c809",
-    "tests/sv2_kub04_cases.py": "76a3a638f4cb02becd483ab21c3642d58a7ded678694585a32c3789687080c53",
-    "tests/test_swarm_v2_kubernetes_cleanup.py": "d99b9c244c5cdf590f8df31c30638fefcc9bef2850a8ff1aa31373a428411f0e",
+    "tests/sv2_kub04_cases.py": "509cdb69ba982b27e68be271503629258cc93336c71106ef52ebfa1074c6b918",
+    "tests/test_swarm_v2_kubernetes_cleanup.py": "7b79799f0bdf04a0ee2cc7da7860ca38b21f770fe050e74bc45d1927c118aac8",
     "tests/test_swarm_v2_retention.py": "01c2581201ecd7e9a6c5b30267e3afc49066d572cb4674a31930334a12faccba",
-    "tests/test_swarm_v2_kubernetes_client.py": "46e061d4827573cc7055f76aae466f9a170618f59807ae517d8e278073dba424",
-    "scripts/swarm_v2/kubernetes/cleanup.py": "d3620e122023036cfd4bd82319ecd413d47155ba2b24d15785c11ab1f2effed2",
+    "tests/test_swarm_v2_kubernetes_client.py": "2c860a79776484601ec9f910a773580d8fa30004d63ddd7c13aaf03bde76b43e",
+    "scripts/swarm_v2/kubernetes/cleanup.py": "8c817a95c823de52d52e5335d1d30a1a8d3418a29a30eddf874d7747e1d6f3c3",
     "scripts/swarm_v2/retention.py": "ffe42ea081b243ae2dfe275a107cbac7ad8f7c3f9a623d17297b6731a77be1db",
-    "scripts/swarm_v2/kubernetes/client.py": "3a8f0ef4ab1775f04a7bf1416fdfe6034fe2d94336cb226fbc05e33360fc5c1a"
+    "scripts/swarm_v2/kubernetes/client.py": "bbb0ffda1076eea799cb80784e4732d0ab4bda89eaac23b206705b51eaf6c41b"
   }
 }

@@ -4,7 +4,7 @@
   "dependency": "SV2-KUB-03",
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2466",
-  "tested_commit": "0618061a5c410b38d306aebc66692b5aa705fe09",
+  "tested_commit": "35b1c3d5b2f454f1811f653e163b04f040a998a9",
   "status": "fixture-qualified-awaiting-ci",
   "evidence_class": "Mocked: fakeredis execution registry, heartbeat archive watermarks, attempt records and cleanup journal, a fake lease clock, an in process API server that enforces delete uid preconditions and can drop a delete response, and in process attach and secret registries; no Kubernetes API server, Service or live worker Pod was used.",
   "interfaces": [
@@ -12,9 +12,9 @@
     "waiting(store, slug, final) answers waiting_outcome until the outcome reference is set, then waiting_archive until the accepted heartbeat archive watermark reaches the transcript end, else empty",
     "retain(store, slug, final, removed) keeps the execution record, the final record, the archive watermark and the removed object uids in attempt-retained after runtime deletion; retained reads it back",
     "execution_cleanup_backlog(store, slug) counts final attempts not yet retained by waiting_outcome, waiting_archive and ready",
-    "scripts.swarm_v2.kubernetes.cleanup: Cleanup(store, slug, api, require, attach, secrets, enabled).run(execution_id) answers suspended, not_final, waiting_outcome, waiting_archive or done; it pins the attempt's Pods and Services by owner, execution and generation labels into cleanup-journal, relists by the same selector before each kind and deletes only pinned uids still selected, with a uid precondition, then releases the attach registration and the attempt scoped secret references in that order; require runs before every delete, release and journal write",
-    "each removed object is recorded deleted, absent (gone before any delete was sent), absent_after_send (gone after a delete whose answer was lost) or replaced (the name holds another uid, so nothing was deleted); a pinned uid no longer selected by its labels is never deleted",
-    "scripts.swarm_v2.kubernetes.client: PodClient.list_services(selector) and PodClient.delete(kind, name, uid) for pods and services only, sending DeleteOptions with a uid precondition; any 2xx answers True, 404 False, 409 raises PreconditionFailed"
+    "scripts.swarm_v2.kubernetes.cleanup: Cleanup(store, slug, api, require, attach, secrets, enabled).run(execution_id) answers suspended, not_final, waiting_outcome, waiting_archive or done; it pins the attempt's Pods and Services by owner, execution and generation labels into cleanup-journal, reads each pinned object by name immediately before its delete and deletes only when the name still holds the pinned uid with those labels, with a uid precondition, then releases the attach registration and the attempt scoped secret references in that order; require runs before every read, delete, release and journal write",
+    "each removed object is recorded deleted, absent (gone before any delete was sent), absent_after_send (gone after a delete was sent, including one whose answer or journal write was lost), replaced (the name holds another uid; nothing deleted) or unselected (same uid but its labels changed; nothing deleted)",
+    "scripts.swarm_v2.kubernetes.client: PodClient.list_services(selector), PodClient.read(kind, name) answering None on 404, and PodClient.delete(kind, name, uid) for pods and services only, sending DeleteOptions with a uid precondition; any 2xx answers True, 404 False, 409 raises PreconditionFailed"
   ],
   "supported_versions": {
     "python": "3.11 and later",
@@ -25,16 +25,16 @@
   "authority": "finalize and every cleanup mutation call require, which the fixture binds to Controller.require: a scoped controller grant and the current controller lease. A stale controller or a revoked grant is refused before any write; case B shows it for both finalize and cleanup and case C for a pre-restart controller after the retained record exists. The generation and seat come from the execution registry, never from a label or a caller argument.",
   "authoritative_objects": "The execution registry, the final attempt record, the heartbeat archive watermark and the retained record are authoritative and are never deleted. The cleanup journal is transient and removed once the retained record is written. Pods, Services, attach registrations and attempt scoped secret references are transient runtime objects.",
   "states": {
-    "observed": "Cases A, B and C each ran twice with identical records in proofs run 38073989793.",
-    "accepted": "Cleanup removed only the old attempt's Pod and Service after its outcome reference and archive watermark were recorded; with the archive upload pending it waited in every case without any delete or retained record; the replacement Pod and Service and a Pod recreated under the old name with the old labels survived; an interrupted run resumed from its journal, recorded the Pod whose delete answer was lost as absent_after_send without a second delete, and released secrets once more.",
+    "observed": "Cases A and C ran twice with identical records in proofs run 38073989793 and case B in proofs run 38074906285; the case code of A and C is unchanged since.",
+    "accepted": "Cleanup removed only the old attempt's Pod and Service after its outcome reference and archive watermark were recorded; with the archive upload pending it waited in every case without any delete or retained record; the replacement Pod and Service survived, and a Pod recreated under the old name was recorded replaced and never deleted; an interrupted run resumed from its journal, recorded the Pod whose delete answer was lost as absent_after_send without a second delete, and released secrets once more.",
     "committed": "Code and fixture inputs are at tested_commit; manifest.json hashes them.",
     "externally_verified": "None: no live API server, Service or G3 deployment was exercised."
   },
   "validation": {
     "red": "proofs run 38073336208 on the tests only commit b57a0c35: collection fails on the missing retention module, the missing cleanup module and the missing PreconditionFailed",
-    "tests": "proofs run 38073989793 at 0618061a: 138 passed across the cleanup, retention, Kubernetes client and Kubernetes runtime modules; the three package case comparisons failed only because the committed records predated the round one changes, and each printed record has state passed",
+    "tests": "proofs run 38074906285 at 35b1c3d5: 143 passed across the cleanup, retention, Kubernetes client and Kubernetes runtime modules; only the case B comparison failed because its committed record predated the read before delete change, and its printed record has state passed",
     "lint": "ruff check and ruff format passed through python -m scripts.ci_prepush",
-    "review": "round one: Standards and Spec readers; findings fixed in 0618061a or ruled as recorded on the pull request",
+    "review": "rounds one and two: Standards and Spec readers; findings fixed or ruled as recorded on the pull request",
     "mutation": "pending"
   },
   "measurements": {
@@ -98,7 +98,7 @@
   "follow_ups": [],
   "invariants": {
     "INV-R07": "met in fixture: a stale controller cannot finalize, clean up or overwrite the retained record (cases B and C)",
-    "INV-R10": "met in fixture: deletion requires the current lease, a uid pinned by owner, execution and generation labels, the same labels on a relist immediately before the delete, and a uid precondition on the delete",
+    "INV-R10": "met in fixture: deletion requires the current lease, a uid pinned by owner, execution and generation labels, a read by name immediately before the delete showing the same uid and labels, and a uid precondition on the delete",
     "INV-M04": "not met by this package: the archive gate reads the server accepted heartbeat archive watermark, which the worker reports; it becomes a durable archive acknowledgement only when the transcript archive package supplies one"
   }
 }
