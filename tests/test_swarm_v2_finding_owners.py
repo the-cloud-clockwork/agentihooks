@@ -34,6 +34,7 @@ def swarm():
         AgentRecord("sw-eng-1", "eng", "t1", pane_id="p1"),
         AgentRecord("sw-eng-2", "eng", "t2", pane_id="p2"),
         AgentRecord("sw-eng-9", "eng", "", pane_id="p9"),
+        AgentRecord("sw-eng-done", "eng", "t2", pane_id="pd", state="finished"),
     ):
         store.put_agent(SLUG, agent)
     return store, InboxStore(store.redis)
@@ -51,14 +52,32 @@ def finding(kind, subject):
 def test_a_finding_on_an_agent_holding_a_task_reaches_the_master_owning_that_task_phase(swarm, kind):
     store, inbox = swarm
     ledger_events.findings_pass(inbox, store, SLUG, [finding(kind, "sw-eng-2")], DOC)
-    assert [kind in text for text in texts(inbox, SECOND)] == [True] and texts(inbox, LEAD) == []
+    assert [kind in text for text in texts(inbox, SECOND)] == [True]
+    assert texts(inbox, LEAD) == []
+
+
+def test_a_finding_on_a_finished_agent_still_holding_a_task_reaches_the_master_owning_its_phase(swarm):
+    store, inbox = swarm
+    ledger_events.findings_pass(inbox, store, SLUG, [finding("idle with claim", "sw-eng-done")], DOC)
+    assert len(texts(inbox, SECOND)) == 1
+    assert texts(inbox, LEAD) == []
 
 
 @pytest.mark.parametrize("kind", HELD_KINDS)
 def test_a_finding_on_an_agent_holding_a_lead_owned_task_reaches_the_lead(swarm, kind):
     store, inbox = swarm
     ledger_events.findings_pass(inbox, store, SLUG, [finding(kind, "sw-eng-1")], DOC)
-    assert [kind in text for text in texts(inbox, LEAD)] == [True] and texts(inbox, SECOND) == []
+    assert [kind in text for text in texts(inbox, LEAD)] == [True]
+    assert texts(inbox, SECOND) == []
+
+
+@pytest.mark.parametrize("kind", ["proof loop", "failed launch", "stale claim"])
+@pytest.mark.parametrize(("task", "owner", "other"), [("t2", SECOND, LEAD), ("t1", LEAD, SECOND)])
+def test_a_finding_about_a_task_reaches_the_master_owning_its_phase(swarm, kind, task, owner, other):
+    store, inbox = swarm
+    ledger_events.findings_pass(inbox, store, SLUG, [finding(kind, task)], DOC)
+    assert [kind in text for text in texts(inbox, owner)] == [True]
+    assert texts(inbox, other) == []
 
 
 @pytest.mark.parametrize("subject", ["sw-eng-9", "sw-gone"])
