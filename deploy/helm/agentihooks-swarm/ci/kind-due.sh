@@ -11,6 +11,7 @@ paths=(
   .dockerignore
   pyproject.toml
   README.md
+  docker/swarm/requirements.lock
   hooks/
   scripts/
   profiles/

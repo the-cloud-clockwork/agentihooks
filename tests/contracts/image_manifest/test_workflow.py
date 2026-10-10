@@ -77,6 +77,9 @@ def test_qualification_precedes_login_and_publication(workflow):
         "Refuse the incompatible herdr fixture",
         "Qualify the candidate",
         "Requalify the candidate independently",
+        "Build the planted credential fixture",
+        "Refuse the planted credential fixture",
+        "Scan the candidate for credentials",
         "Log in to the registry",
         "Publish the qualified candidate",
     ]
@@ -186,3 +189,121 @@ def test_publish_stops_when_the_registry_cannot_answer(tmp_path):
     assert done.returncode == 1
     assert "nothing pushed" in done.stderr
     assert promoted is None and not [line for line in log if line.startswith(("tag ", "push "))]
+
+
+SCANNER = """#!/usr/bin/env bash
+echo "$*" >> "$DOCKER_LOG"
+for arg in "$@"; do
+    case "$arg" in *:/out) out="${arg%:/out}";; esac
+done
+if [[ -n "$REPORT" ]]; then printf '%s' "$REPORT" > "$out/secrets.json"; fi
+exit "$STATUS"
+"""
+CLEAN = json.dumps({"Results": [{"Target": "opt/app/a.py", "Class": "secret"}]})
+LEAK = json.dumps(
+    {"Results": [{"Target": "opt/agentihooks/.build-token", "Secrets": [{"RuleID": "github-app-token"}]}]}
+)
+
+
+def scan(tmp_path, status, report):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "docker").write_text(SCANNER)
+    (bin_dir / "docker").chmod(0o755)
+    environ = os.environ | {
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "DOCKER_LOG": str(tmp_path / "docker.log"),
+        "STATUS": str(status),
+        "REPORT": report,
+    }
+    done = subprocess.run(
+        ["bash", str(ROOT / "docker/swarm-node/scan.sh"), "candidate:x", str(tmp_path / "out")],
+        env=environ,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return done, (tmp_path / "docker.log").read_text()
+
+
+def test_scan_reads_every_layer_and_the_image_config_for_secrets(tmp_path):
+    done, log = scan(tmp_path, 0, CLEAN)
+
+    assert done.returncode == 0, done.stderr
+    assert "--scanners secret --image-config-scanners secret --exit-code 1" in log
+    assert log.rstrip().endswith("candidate:x")
+    assert "no credentials found in candidate:x" in done.stdout
+
+
+METADATA = "opt/venv/lib/python3.12/site-packages/pyjwt-2.15.1.dist-info/METADATA"
+
+
+def secrets_report(*found):
+    return json.dumps({"Results": [{"Target": target, "Secrets": [{"RuleID": rule}]} for rule, target in found]})
+
+
+def test_scan_passes_only_a_jwt_example_in_python_package_metadata(tmp_path):
+    done, _ = scan(tmp_path, 1, secrets_report(("jwt-token", METADATA)))
+
+    assert done.returncode == 0, done.stderr
+    assert (tmp_path / "out/package-examples.txt").read_text() == f"jwt-token {METADATA}\n"
+
+
+@pytest.mark.parametrize(
+    "found",
+    [("github-app-token", METADATA), ("jwt-token", "opt/agentihooks/settings.json"), ("jwt-token", METADATA + ".bak")],
+)
+def test_scan_refuses_any_other_finding_beside_a_package_example(tmp_path, found):
+    done, _ = scan(tmp_path, 1, secrets_report(found, ("jwt-token", METADATA)))
+
+    assert done.returncode == 1
+    assert (tmp_path / "out/findings.txt").read_text() == "{} {}\n".format(*found)
+
+
+def test_scan_refuses_an_image_holding_a_credential(tmp_path):
+    done, _ = scan(tmp_path, 1, LEAK)
+
+    assert done.returncode == 1
+    assert "github-app-token opt/agentihooks/.build-token" in done.stderr
+    assert (tmp_path / "out/findings.txt").read_text() == "github-app-token opt/agentihooks/.build-token\n"
+
+
+@pytest.mark.parametrize(
+    ("status", "report"),
+    [(1, ""), (2, CLEAN), (1, CLEAN)],
+    ids=["no-report", "scanner-error", "exit-without-findings"],
+)
+def test_scan_is_red_when_the_scanner_cannot_finish(tmp_path, status, report):
+    done, _ = scan(tmp_path, status, report)
+
+    assert done.returncode == 2
+    assert "credential scan" in done.stderr
+
+
+def test_the_planted_credential_is_generated_at_build_time_and_refused_before_publication(workflow):
+    fixture = (ROOT / "tests/contracts/image_manifest/planted-credential/Dockerfile").read_text()
+    refusal = named(workflow, "Refuse the planted credential fixture")["run"]
+
+    assert not re.search(r"gh[pousr]_[0-9A-Za-z]{36}", fixture)
+    assert "'ghs_' +" in fixture and "> /opt/agentihooks/.build-token" in fixture
+    assert 'bash docker/swarm-node/scan.sh "$PLANTED"' in refusal and '"$status" != 1' in refusal
+    assert "grep -qE '^github-app-token (.*/)?opt/agentihooks/\\.build-token$' \"$out/findings.txt\"" in refusal
+    assert named(workflow, "Scan the candidate for credentials")["run"].startswith(
+        'bash docker/swarm-node/scan.sh "$CANDIDATE"'
+    )
+    for name in (
+        "Build the planted credential fixture",
+        "Refuse the planted credential fixture",
+        "Scan the candidate for credentials",
+    ):
+        assert not {"if", "continue-on-error"} & named(workflow, name).keys()
+
+
+def test_the_pull_request_smoke_scans_every_image_it_built():
+    smoke = (ROOT / "docker/swarm-node/smoke.sh").read_text()
+    build = smoke.index('-t "$image" "$context" > "$output/build.log"')
+    rebuild = smoke.index('-t "$rebuild" "$context" > "$output/rebuild.log"')
+
+    assert smoke.index('scan.sh" "$image" "$output/credential-scan"') > build
+    assert smoke.index('scan.sh" "$rebuild" "$output/credential-scan-rebuild"') > rebuild

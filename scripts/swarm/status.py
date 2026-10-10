@@ -32,6 +32,7 @@ from scripts.swarm.naming import swarm_name
 from scripts.swarm.store import ASSIST, SwarmError
 from scripts.swarm.tick import STARTUP_GRACE_MS, agent_status
 from scripts.swarm_ledger import plan_shape
+from scripts.swarm_v2.reconciliation import accounts as account_reconciliation
 from scripts.swarm_v2.runtime import observe
 
 DEFAULT_COMPACT_LIMIT = 600
@@ -261,6 +262,7 @@ def status_report(store, slug, state):
         "doctor": doctor_report(store, slug),
         "quota": page_quota(),
         "quota_capacity": quota_view.page(capacity.read(store, slug)),
+        "account_reconciliation": account_reconciliation.page(store, slug),
         "bottleneck": bottleneck.read(store, slug),
         "gates": [{**row, "kind": modes.label(row["kind"])} for row in gate_log.decisions(slug)],
         "gate_modes": {name: modes.label(mode) for name, mode in catalog.current(config.gates).items()},
