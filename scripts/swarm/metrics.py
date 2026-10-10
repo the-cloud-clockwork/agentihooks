@@ -2,7 +2,7 @@ import os
 import sqlite3
 from functools import partial
 
-from scripts.swarm import metrics_outbox, metrics_swarm
+from scripts.swarm import bottleneck, metrics_outbox, metrics_swarm
 
 TICKS = metrics_outbox.Table("ticks", (("actions", "Int64"),))
 
@@ -15,6 +15,7 @@ def tick_row(slug, now_ms, actions):
 def _collect(slug, now_ms, swarm, box):
     pulls = metrics_swarm.pull_rows(box, now_ms, swarm)
     metrics_swarm.record_pass(box, slug, now_ms, swarm.store, swarm.doc, swarm.findings, pulls)
+    bottleneck.record(box, swarm.store, slug, now_ms, swarm.doc.get("tasks", []))
 
 
 def record(table, rows, now_ms, environ=os.environ, extra=None):

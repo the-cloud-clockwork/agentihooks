@@ -14,6 +14,7 @@ from scripts.handoff import transfers
 from scripts.inbox.store import InboxStore
 from scripts.swarm import (
     affinity,
+    bottleneck,
     drain_watch,
     idle,
     launch_check,
@@ -255,6 +256,7 @@ def status_report(store, slug, state):
         "doctor": doctor_report(store, slug),
         "quota": page_quota(),
         "quota_capacity": quota_view.page(capacity.read(store, slug)),
+        "bottleneck": bottleneck.read(store, slug),
         "gates": [{**row, "kind": modes.label(row["kind"])} for row in gate_log.decisions(slug)],
         "gate_modes": {name: modes.label(mode) for name, mode in catalog.current(config.gates).items()},
         "master_affinity": affinity.report(store, slug, config, store.agents(slug)),

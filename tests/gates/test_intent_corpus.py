@@ -64,25 +64,27 @@ def test_retained_cases_replay_the_exact_classifier_input(cases):
 
 def test_the_weakens_and_chunk_questions_lower_wrong_verdicts_and_keep_every_control(cases, definition):
     assert intent_calibration.measure(cases, definition) == {
-        "cases": 22,
+        "cases": 24,
         "controls": 11,
         "before": {
-            "samples": 66,
-            "wrong": 15,
+            "samples": 72,
+            "wrong": 21,
             "wrong_cases": [
                 "chunk-added",
                 "chunk-missing",
                 "g18-gates-off",
                 "g18-quiet-week",
+                "lifted-t201",
+                "lifted-t205",
                 "pn1-unpublished",
                 "retained-t55",
             ],
             "controls_rejected": CONTROLS_BEFORE,
         },
         "after": {
-            "samples": 66,
-            "wrong": 2,
-            "wrong_cases": ["g18-quiet-week"],
+            "samples": 72,
+            "wrong": 8,
+            "wrong_cases": ["g18-quiet-week", "lifted-t201", "lifted-t205"],
             "controls_rejected": sorted(
                 [*CONTROLS_BEFORE, "chunk-added", "chunk-missing", "g18-gates-off", "pn1-unpublished"]
             ),
@@ -94,7 +96,7 @@ def test_the_weakens_and_chunk_questions_lower_wrong_verdicts_and_keep_every_con
 def test_the_eval_replay_gives_the_calibration_counts(definition):
     report = evaluation.evaluate(intent.PURPOSE).report()
     measured = intent_calibration.measure(corpus.load(definition, corpus.path_for(intent.PURPOSE)), definition)
-    assert (report["mode"], report["cases"], report["controls"], report["samples"]) == ("replay", 22, 11, 66)
+    assert (report["mode"], report["cases"], report["controls"], report["samples"]) == ("replay", 24, 11, 72)
     assert (report["wrong"], report["wrong_cases"]) == (measured["after"]["wrong"], measured["after"]["wrong_cases"])
     assert report["held_controls"] == measured["after"]["controls_rejected"]
 
@@ -152,7 +154,7 @@ def test_losing_a_control_is_not_a_calibration(raw, definition, tmp_path):
     accepted = {"usable": 0.9, "delivers": 0.9, "reachable": 0.9, "weakens": 0.1}
     control["samples"][0]["answers"] = {key: {"type": "noul", "noul": value} for key, value in accepted.items()}
     result = intent_calibration.measure(corpus.load(definition, write(tmp_path, raw)), definition)
-    assert (result["after"]["wrong"], "pn1-off" in result["after"]["controls_rejected"]) == (3, False)
+    assert (result["after"]["wrong"], "pn1-off" in result["after"]["controls_rejected"]) == (9, False)
     assert result["calibrated"] is False
 
 
@@ -163,7 +165,7 @@ def test_no_fewer_wrong_verdicts_is_not_a_calibration(raw, cases, definition, tm
     for case in raw["cases"]:
         case["baseline"] = replayed[case["name"]]
     result = intent_calibration.measure(corpus.load(definition, write(tmp_path, raw)), definition)
-    assert (result["before"]["wrong"], result["after"]["wrong"], result["calibrated"]) == (2, 2, False)
+    assert (result["before"]["wrong"], result["after"]["wrong"], result["calibrated"]) == (8, 8, False)
 
 
 def test_a_wrong_baseline_with_every_control_held_is_a_calibration(raw, definition, tmp_path):
@@ -171,7 +173,7 @@ def test_a_wrong_baseline_with_every_control_held_is_a_calibration(raw, definiti
         case["baseline"] = [{"verdict": "fail" if case["expected"]["verdict"] == "pass" else "pass"}] * 3
         case["control"] = False
     result = intent_calibration.measure(corpus.load(definition, write(tmp_path, raw)), definition)
-    assert (result["before"]["wrong"], result["after"]["wrong"], result["calibrated"]) == (66, 2, True)
+    assert (result["before"]["wrong"], result["after"]["wrong"], result["calibrated"]) == (72, 8, True)
 
 
 def answered(**values):

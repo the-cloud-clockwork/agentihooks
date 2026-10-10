@@ -428,7 +428,7 @@ def cmd_publish_plan(args):
     def artifact(path, title):
         task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
         file = upload_artifact(args.slug, args.name, path, {"task": task, "title": title, "plan": True})
-        send(args, "artifact_add", task=task, title=title, file=file, plan=True)
+        stored["add"] = op("artifact_add", args, task=task, title=title, file=file, plan=True)
         stored["url"] = f"{base()}/artifacts/{args.slug}/{file['id']}"
         stored["plan"] = ledger_plans.plan_id(file["id"])
         return stored["url"]
@@ -438,7 +438,7 @@ def cmd_publish_plan(args):
         url, where = ledger_publish.publish(args.path, title, args.repo, artifact, issue_title=issue_title)
     except ledger_publish.PublishError as exc:
         sys.exit(str(exc))
-    ops = [op("plan_add", args, plan=stored["plan"], title=title, artifact=stored["url"], url=url)]
+    ops = [stored["add"], op("plan_add", args, plan=stored["plan"], title=title, artifact=stored["url"], url=url)]
     for phase in phases:
         fields = {
             "plan_url": url,
@@ -463,6 +463,12 @@ def cmd_publish_plan(args):
             for anchor in plan_ranges.slice_anchors(text, ranges[phase])
         ]
     state = call(args.slug, ops)
+    linked = {row.get("url") for row in doc.get("plans", [])} | {phase.get("plan_url") for phase in doc["phases"]}
+    if state.get("rejected") and where == "issue" and url not in linked:
+        try:
+            ledger_publish.close_issue(url)
+        except ledger_publish.PublishError as exc:
+            print(exc, file=sys.stderr)
     refused(state, ops)
     tasks = ledger_plans.resliced(doc["tasks"], state["tasks"])
     reslice = {"tasks": tasks} if any(tasks.values()) else {}

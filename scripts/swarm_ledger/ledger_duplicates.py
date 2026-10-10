@@ -10,7 +10,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
-from hooks.classifier import ClassifierError, decide, runner
+from hooks.classifier import ClassifierError, code_rules, decide, runner
 from scripts.swarm_ledger import ledger_rank
 
 PURPOSE = "ledger-duplicate"
@@ -130,6 +130,14 @@ def _title(item):
 
 def _name(i, j):
     return f"new_{i}_existing_{j}"
+
+
+def _verdicts(definition, state, params, answers):
+    floor = definition.thresholds["same"]
+    return {"duplicate": any(_yes(answers[_name(p["new"], p["slot"])].noul, floor) for p in params["pairs"])}
+
+
+RULE = code_rules.CodeRule(code_rules.asked, _verdicts, {"duplicate": (True, False)}, {"duplicate": False})
 
 
 def main() -> None:

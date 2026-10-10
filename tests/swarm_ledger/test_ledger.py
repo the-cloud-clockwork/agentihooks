@@ -62,6 +62,7 @@ def cli(monkeypatch, tmp_path):
         "publish",
         lambda path, title, repo, artifact, issue_title: (artifact(path, title) and "https://x/1", "issue"),
     )
+    monkeypatch.setattr(ledger.ledger_publish, "close_issue", lambda url: None)
     monkeypatch.setattr(ledger_phase_cli, "append_phases", lambda plan, taken: [{"phase": "p9", "planning": "auto"}])
 
     def run(argv, reply):
