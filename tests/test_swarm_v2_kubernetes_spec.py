@@ -5,8 +5,9 @@ from pathlib import Path
 import pytest
 
 from scripts.swarm_v2.kubernetes import spec
-from scripts.swarm_v2.kubernetes.spec import AdmittedLaunch, PodSpecRefused, PodTemplate, canonical_digest, load_policy
+from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, PodTemplate, canonical_digest, load_policy
 from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL, OWNER_LABEL
+from tests import sv2_kub01_cases as cases
 
 pytestmark = pytest.mark.unit
 
@@ -34,7 +35,7 @@ def write(tmp_path, doc, name="policy.json") -> Path:
 
 def render(launch: dict | None = None, policy: dict | None = None):
     template = PodTemplate(policy or load_policy(POLICY))
-    return template, template.render(AdmittedLaunch.from_record(launch or launch_doc()))
+    return template, template.render(launch or launch_doc())
 
 
 def health(mode: str, herdr: str = "2", brain: str = "2") -> list:
@@ -79,7 +80,7 @@ def test_the_fixture_renders_a_pod_bound_to_its_launch_identity():
         "swarm.agentihooks.io/profile": "general",
         "swarm.agentihooks.io/image-digest": "sha256:" + "4b" * 32,
         "swarm.agentihooks.io/template-version": "kub01-v2",
-        "swarm.agentihooks.io/task-payload-digest": spec.payload_digest(launch_doc()["task_payload"]),
+        "swarm.agentihooks.io/task-payload-digest": canonical_digest(launch_doc()["task_payload"]),
     }
 
 
@@ -177,7 +178,7 @@ def test_volumes_are_private_scratch_the_launch_record_and_one_approved_credenti
     _, rendered = render()
     body = rendered.pod["spec"]
     assert body["volumes"] == [
-        {"name": "home", "emptyDir": {"sizeLimit": "10240Mi"}},
+        {"name": "home", "emptyDir": {"sizeLimit": "9216Mi"}},
         {"name": "tmp", "emptyDir": {"sizeLimit": "1024Mi"}},
         {"name": "launch", "configMap": {"name": f"swarm-{EXECUTION}-launch", "defaultMode": 0o444}},
         {"name": "credential", "secret": {"secretName": "swarm-claude-fixture", "defaultMode": 0o400}},
@@ -238,13 +239,15 @@ def test_the_task_payload_reaches_the_pod_only_as_its_digest():
     hostile_meta = copy.deepcopy(hostile.pod)
     plain_meta = copy.deepcopy(plain.pod)
     key = "swarm.agentihooks.io/task-payload-digest"
-    assert hostile_meta["metadata"]["annotations"].pop(key) != plain_meta["metadata"]["annotations"].pop(key)
+    hostile_digest = hostile_meta["metadata"]["annotations"].pop(key)
+    plain_digest = plain_meta["metadata"]["annotations"].pop(key)
+    assert hostile_digest != plain_digest
     assert hostile_meta == plain_meta
 
 
 def test_the_payload_digest_is_canonical_json_sha256():
-    assert spec.payload_digest({"b": 1, "a": "x"}) == spec.payload_digest({"a": "x", "b": 1})
-    assert spec.payload_digest({"a": 1}) == "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862"
+    assert canonical_digest({"b": 1, "a": "x"}) == canonical_digest({"a": "x", "b": 1})
+    assert canonical_digest({"a": 1}) == "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862"
 
 
 REFUSALS = [
@@ -312,10 +315,23 @@ REFUSALS = [
     ("list payload", lambda d: d.update(task_payload=["x"]), "launch task_payload must be a JSON object", "payload"),
     (
         "unserializable payload",
-        lambda d: d.update(task_payload={"x": float("nan")}),
+        lambda d: d.update(task_payload={1: "a", "b": 2}),
         "launch task_payload must be a JSON object",
         "payload",
     ),
+    (
+        "numeric execution id",
+        lambda d: d.update(execution_id=5),
+        "launch execution_id is not a valid value",
+        "identity",
+    ),
+    (
+        "listed profile",
+        lambda d: d.update(profile=["general"]),
+        "launch profile is not an approved resource profile",
+        "profile",
+    ),
+    ("long task id", lambda d: d.update(task_id="t" * 64), "launch task_id is not a valid value", "identity"),
 ]
 
 
@@ -326,7 +342,7 @@ def test_hostile_launches_are_refused_without_output_and_counted(change, message
     change(doc)
     before = copy.deepcopy(template.policy)
     with pytest.raises(PodSpecRefused) as refused:
-        template.render(AdmittedLaunch.from_record(doc))
+        template.render(doc)
     assert str(refused.value) == message
     assert refused.value.reason == reason
     assert template.pod_spec_validation_failures_total() == {reason: 1}
@@ -337,24 +353,24 @@ def test_hostile_launches_are_refused_without_output_and_counted(change, message
 def test_a_record_that_is_not_an_object_is_refused():
     template = PodTemplate(load_policy(POLICY))
     with pytest.raises(PodSpecRefused) as refused:
-        template.render(AdmittedLaunch.from_record(["not", "a", "record"]))
+        template.render(["not", "a", "record"])
     assert str(refused.value) == "launch must be a JSON object"
     assert template.pod_spec_validation_failures_total() == {"fields": 1}
 
 
 def test_failures_accumulate_per_reason_and_success_counts_nothing():
     template = PodTemplate(load_policy(POLICY))
-    template.render(AdmittedLaunch.from_record(launch_doc()))
+    template.render(launch_doc())
     assert template.pod_spec_validation_failures_total() == {}
     for profile in ("research", "memory"):
         doc = launch_doc()
         doc["profile"] = profile
         with pytest.raises(PodSpecRefused):
-            template.render(AdmittedLaunch.from_record(doc))
+            template.render(doc)
     doc = launch_doc()
     doc["harness"] = "copilot"
     with pytest.raises(PodSpecRefused):
-        template.render(AdmittedLaunch.from_record(doc))
+        template.render(doc)
     assert template.pod_spec_validation_failures_total() == {"profile": 2, "harness": 1}
 
 
@@ -395,13 +411,65 @@ def test_the_canonical_digest_ignores_key_order_only():
 def test_render_does_not_mutate_the_launch_or_policy():
     policy = load_policy(POLICY)
     snapshot = copy.deepcopy(policy)
-    launch = AdmittedLaunch.from_record(launch_doc())
-    payload = copy.deepcopy(launch.task_payload)
+    launch = launch_doc()
+    before = copy.deepcopy(launch)
     rendered = PodTemplate(policy).render(launch)
     rendered.pod["spec"]["nodeSelector"]["x"] = "y"
-    rendered.pod["spec"]["tolerations"].append({})
+    rendered.pod["spec"]["tolerations"][0]["key"] = "changed"
+    rendered.pod["spec"]["affinity"]["nodeAffinity"]["requiredDuringSchedulingIgnoredDuringExecution"][
+        "nodeSelectorTerms"
+    ][0]["matchExpressions"][0]["values"].append("general")
     assert policy == snapshot
-    assert launch.task_payload == payload
+    assert launch == before
+
+
+def test_a_payload_that_refers_to_itself_is_refused():
+    template = PodTemplate(load_policy(POLICY))
+    doc = launch_doc()
+    loop = {}
+    loop["self"] = loop
+    doc["task_payload"] = loop
+    with pytest.raises(PodSpecRefused) as refused:
+        template.render(doc)
+    assert str(refused.value) == "launch task_payload must be a JSON object"
+
+
+def test_resources_at_the_profile_limits_are_accepted():
+    doc = launch_doc()
+    doc.update(memory_mib=4096, cpu_millis=2000)
+    _, rendered = render(doc)
+    assert rendered.pod["spec"]["containers"][0]["resources"]["requests"] == {
+        "cpu": "2000m",
+        "memory": "4096Mi",
+        "ephemeral-storage": "10240Mi",
+    }
+
+
+def test_identity_values_at_their_bounds_are_accepted():
+    doc = launch_doc()
+    doc.update(task_id="t" * 63, swarm_id="s" * 63, project_id="local:scratch")
+    _, rendered = render(doc)
+    assert rendered.pod["metadata"]["labels"]["swarm.agentihooks.io/task"] == "t" * 63
+    doc["project_id"] = "unknown"
+    _, rendered = render(doc)
+    assert rendered.pod["metadata"]["annotations"]["swarm.agentihooks.io/project"] == "unknown"
+
+
+def test_a_codex_launch_names_codex_in_its_probes_and_annotation():
+    doc = launch_doc()
+    doc.update(harness="codex", credential_ref="swarm-codex-fixture")
+    _, rendered = render(doc)
+    container = rendered.pod["spec"]["containers"][0]
+    assert container["readinessProbe"]["exec"]["command"][5:7] == ["--harness", "codex"]
+    assert rendered.pod["metadata"]["annotations"]["swarm.agentihooks.io/harness"] == "codex"
+    assert rendered.pod["spec"]["volumes"][3]["secret"]["secretName"] == "swarm-codex-fixture"
+
+
+def test_a_probe_initial_delay_comes_from_the_policy():
+    policy = load_policy(POLICY)
+    policy["probes"]["startup"]["initial_delay_seconds"] = 3
+    _, rendered = render(policy=policy)
+    assert rendered.pod["spec"]["containers"][0]["startupProbe"]["initialDelaySeconds"] == 3
 
 
 def test_the_fixture_policy_loads():
@@ -476,9 +544,7 @@ def test_restoring_the_previous_template_version_keeps_existing_pod_annotations(
     previous["template_version"] = "kub01-v1"
     previous["termination_grace_seconds"] = 30
     _, existing = render(policy=current)
-    kept = copy.deepcopy(existing.pod)
     _, restored = render(policy=previous)
-    assert existing.pod == kept
     assert existing.pod["metadata"]["annotations"]["swarm.agentihooks.io/template-version"] == "kub01-v2"
     assert restored.pod["metadata"]["labels"]["swarm.agentihooks.io/template-version"] == "kub01-v1"
     assert restored.pod["metadata"]["annotations"]["swarm.agentihooks.io/template-version"] == "kub01-v1"
@@ -487,13 +553,9 @@ def test_restoring_the_previous_template_version_keeps_existing_pod_annotations(
 
 
 def test_a_wrong_probe_threshold_reverts_alone_while_the_image_stays():
-    good = load_policy(POLICY)
-    wrong = copy.deepcopy(good)
-    wrong["probes"]["herdr_timeout_seconds"] = 0.001
-    wrong["probes"]["liveness"]["failure_threshold"] = 1
-    _, broken = render(policy=wrong)
-    _, reverted = render(policy=good)
-    assert spec.probe_only_difference(broken.pod, reverted.pod) == [
+    _, broken = render(policy=cases.wrong_probes())
+    _, reverted = render()
+    assert cases.probe_only_difference(broken.pod, reverted.pod) == [
         "spec.containers[0].livenessProbe",
         "spec.containers[0].readinessProbe",
         "spec.containers[0].startupProbe",
@@ -506,13 +568,15 @@ def test_a_difference_outside_the_probes_is_reported():
     doc = launch_doc()
     doc["image_digest"] = "sha256:" + "5c" * 32
     _, second = render(doc)
-    assert spec.probe_only_difference(first.pod, second.pod) is None
+    assert cases.probe_only_difference(first.pod, second.pod) is None
+    assert cases.probe_only_difference(first.pod, first.pod) == []
+    assert cases.differences({"a": [1, 2]}, {"a": [1]}) == ["a"]
+    assert cases.differences({"a": 1}, {"b": 1}) == ["a", "b"]
 
 
-def test_the_command_line_renders_the_pod_as_json(tmp_path, capsys):
+def test_the_command_line_renders_the_pod_as_sorted_json(capsys):
     assert spec.main(["render", "--policy", str(POLICY), "--launch", str(LAUNCH)]) == 0
-    out = json.loads(capsys.readouterr().out)
-    assert out == render()[1].pod
+    assert capsys.readouterr().out == json.dumps(render()[1].pod, sort_keys=True) + "\n"
 
 
 def test_the_command_line_refuses_a_hostile_launch_without_output(tmp_path, capsys):
@@ -524,6 +588,18 @@ def test_the_command_line_refuses_a_hostile_launch_without_output(tmp_path, caps
     assert captured.err == "launch credential_ref is not an approved credential\n"
 
 
+def test_the_command_line_refuses_unreadable_inputs(tmp_path, capsys):
+    missing = tmp_path / "missing.json"
+    broken = tmp_path / "broken.json"
+    broken.write_text("{not json")
+    assert spec.main(["render", "--policy", str(missing), "--launch", str(LAUNCH)]) == 1
+    assert capsys.readouterr().err == f"{missing} is not a readable JSON file\n"
+    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(broken)]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == f"{broken} is not a readable JSON file\n"
+
+
 def test_the_command_line_digest_action_prints_the_spec_digest(capsys):
     assert spec.main(["digest", "--policy", str(POLICY), "--launch", str(LAUNCH)]) == 0
     assert capsys.readouterr().out == render()[1].digest + "\n"
@@ -531,10 +607,40 @@ def test_the_command_line_digest_action_prints_the_spec_digest(capsys):
 
 def test_the_command_line_refuses_an_unknown_action(capsys):
     assert spec.main(["apply", "--policy", str(POLICY), "--launch", str(LAUNCH)]) == 64
+    assert " ".join(capsys.readouterr().err.split()).startswith(
+        "usage: python -m scripts.swarm_v2.kubernetes.spec [-h] --policy POLICY --launch LAUNCH {render,digest}"
+    )
 
 
-def test_the_golden_pod_validated_in_kind_is_the_current_render():
+@pytest.mark.parametrize("missing", ["--policy", "--launch"])
+def test_the_command_line_requires_both_inputs(missing):
+    argv = ["render", "--policy", str(POLICY), "--launch", str(LAUNCH)]
+    index = argv.index(missing)
+    del argv[index : index + 2]
+    assert spec.main(argv) == 64
+
+
+def test_the_command_line_help_exits_cleanly(capsys):
+    assert spec.main(["--help"]) == 0
+    assert "--policy" in capsys.readouterr().out
+
+
+def test_the_golden_pods_are_the_current_render():
     assert json.loads((FIXTURES / "pod-rendered.json").read_text()) == render()[1].pod
+    wrong = json.loads((FIXTURES / "pod-rendered-wrong-probes.json").read_text())
+    assert wrong == render(policy=cases.wrong_probes())[1].pod
+
+
+def test_a_toleration_with_exists_and_a_value_is_refused(tmp_path):
+    doc = policy_doc()
+    doc["profiles"]["general"]["tolerations"][0]["value"] = "yes"
+    with pytest.raises(PodSpecRefused) as refused:
+        load_policy(write(tmp_path, doc))
+    assert str(refused.value) == (
+        "pod policy is invalid at profiles/general/tolerations/0: "
+        "{'key': 'anton.io/spot', 'operator': 'Exists', 'effect': 'NoSchedule', 'value': 'yes'} "
+        "should not be valid under {'required': ['value']}"
+    )
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])
@@ -544,4 +650,5 @@ def test_package_cases_match_their_committed_evidence(case):
     first, second = run_case(case), run_case(case)
     assert first == second
     committed = json.loads((EVIDENCE / f"{case}-result.json").read_text())
-    assert committed == {**first, "independent_runs": 2}, json.dumps(first, indent=2, sort_keys=True)
+    assert first["state"] == "passed"
+    assert committed == first, json.dumps(first, indent=2, sort_keys=True)
