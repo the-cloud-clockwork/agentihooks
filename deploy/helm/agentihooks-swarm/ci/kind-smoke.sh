@@ -61,6 +61,9 @@ api=(
 )
 workers=(-f "$chart/ci/kind-workers.yaml")
 helm template "$release" "$chart" "${workers[@]}" "${api[@]}" | python3 tests/chart_workers.py "$chart/ci/kind-workers.yaml"
+policy_map=(-f "$chart/ci/kind-policy-configmap.yaml")
+helm template "$release" "$chart" "${workers[@]}" "${policy_map[@]}" "${api[@]}" \
+  | python3 tests/chart_workers.py "$chart/ci/kind-workers.yaml" "$chart/ci/kind-policy-configmap.yaml"
 refuse_workers() {
   local expected=$1 refusal
   shift
@@ -78,7 +81,9 @@ for setting in profile brain; do
 done
 refuse_workers "controller.workers.cap must be a whole number above zero" --set controller.workers.cap=0
 refuse_workers "controller.workers.projects names no project" --set 'controller.workers.projects=null'
-refuse_workers "controller.workers.podPolicy is required" --set 'controller.workers.podPolicy=null'
+refuse_workers "controller.workers.podPolicy or podPolicyConfigMap is required" --set 'controller.workers.podPolicy=null'
+refuse_workers "set controller.workers.podPolicy or podPolicyConfigMap, not both" \
+  --set controller.workers.podPolicyConfigMap=swarm-pod-policy
 refuse_workers "controller.serviceAccountName is required" --set controller.serviceAccountName=
 printf 'the chart refused every incomplete or pinned worker setting\n'
 docker build -q -t "$image" . >/dev/null &
@@ -180,7 +185,10 @@ kubectl create serviceaccount swarm-controller
 kubectl create role swarm-controller --namespace swarm-pod-proof --verb=create,delete,get,list,watch --resource=pods
 kubectl create rolebinding swarm-controller --namespace swarm-pod-proof --role=swarm-controller \
   --serviceaccount=default:swarm-controller
-helm upgrade "$release" "$chart" -f "$chart/ci/kind-values.yaml" "${workers[@]}" "${api[@]}" --wait --timeout 5m
+python3 -c 'import json, sys, yaml; print(json.dumps(yaml.safe_load(open(sys.argv[1]))["controller"]["workers"]["podPolicy"]))' \
+  "$chart/ci/kind-workers.yaml" | kubectl create configmap swarm-pod-policy --from-file=pod-policy.json=/dev/stdin
+helm upgrade "$release" "$chart" -f "$chart/ci/kind-values.yaml" "${workers[@]}" "${policy_map[@]}" "${api[@]}" \
+  --wait --timeout 5m
 kubectl rollout status deployment "$release-controller" --timeout 2m
 built=""
 for _ in $(seq 60); do
