@@ -3,9 +3,24 @@
   "independent_runs": 2,
   "observed": {
     "case": "T-SV2-KUB-03-B",
+    "checks": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
     "evidence_class": "mocked Redis and server clock; fixture network; in process helper exec; no Kubernetes calls",
     "input_sha256": "896370c48ac21c79969cc90d1edd9d4bbe279005314a7d61d64a81149d25c1a8",
     "observed": {
+      "corrected_request": [
+        "queued",
+        true
+      ],
       "expired_fallback": "expired",
       "fallback_results": [
         "queued",
@@ -16,9 +31,13 @@
         "queued"
       ],
       "foreign_owner_pod": "refused",
-      "handlers_ran": 7,
+      "handlers_ran": 8,
       "helper_refused": {
         "another_execution": [
+          2,
+          "the envelope names another execution"
+        ],
+        "another_generation": [
           2,
           "the envelope names another execution"
         ],
@@ -28,7 +47,7 @@
         ],
         "tampered_payload": [
           2,
-          "the envelope is malformed"
+          "the payload digest does not match"
         ]
       },
       "metacharacters_stayed_content": [

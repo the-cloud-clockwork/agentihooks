@@ -1,5 +1,5 @@
 {
-  "tested_commit": "409e0b41a9873312a68403f1f76ad45d993d802d",
+  "tested_commit": "3bb302912e7843c40d03b30edd6e77c14ed6983a",
   "evidence_class": "mocked Redis, fake server clock, fixture network and an in process worker helper standing in for kubectl exec; no Kubernetes API server, kubelet exec or live worker Pod",
   "cases": [
     "T-SV2-KUB-03-A",
@@ -8,11 +8,11 @@
   ],
   "inputs": {
     "tests/fixtures/swarm_v2/worker-command-prompts.json": "896370c48ac21c79969cc90d1edd9d4bbe279005314a7d61d64a81149d25c1a8",
-    "tests/sv2_kub03_cases.py": "2dae27673a69b96d687b837e95d6eea8b8236afe7d548df9e0796dbdd9d6e68d",
-    "tests/test_swarm_v2_kubernetes_commands.py": "2b7828204d00704bb6b0a82a19914b313f42783408eb26417ff7359eb6bd049b",
-    "tests/test_swarm_v2_worker_control.py": "ecb4eba60a10271c7cb74011b221f2f13c5f30dd02268a72a1a582c2981e2e90",
-    "scripts/swarm_v2/kubernetes/commands.py": "bb543aab77c346c5ae42a841a2bfb3523f1e3aff585057795996905dddbe2723",
-    "scripts/swarm_v2/worker/control.py": "18f8697a379a235b2c02c07e014d86b0ffd753e1801aa710577593453682c584",
+    "tests/sv2_kub03_cases.py": "a5bf11f4217cba75be3db2f41eaef793de4ef73908dc4588b9eec47ac9ed09f5",
+    "tests/test_swarm_v2_kubernetes_commands.py": "4910ac685a7c99f19a18c37fdb6a4ed074b16f5ac0ed4da04a22fc28455e5d28",
+    "tests/test_swarm_v2_worker_control.py": "f6fe84779c7f7a5e487fec91f34d6e1bba114fdab24238dfc8c36fb260699482",
+    "scripts/swarm_v2/kubernetes/commands.py": "8d2980b281c6ca374e1f5eb42814373843f21c8aa8c53f4b2dcb156a75a03ab3",
+    "scripts/swarm_v2/worker/control.py": "619c8ce4e20c10c69f941f4a9a6b0a98cbd4348c32cada34ab8e460a45ea6d41",
     "scripts/swarm_v2/api/commands.py": "56f3060f7e79013cba1efe28b3023ec3957c5a8377d114aa6751fc3f323d2814"
   }
 }

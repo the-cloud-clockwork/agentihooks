@@ -3,19 +3,18 @@
   "independent_runs": 2,
   "observed": {
     "case": "T-SV2-KUB-03-A",
+    "checks": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
     "evidence_class": "mocked Redis and server clock; fixture network; in process helper exec; no Kubernetes calls",
     "input_sha256": "896370c48ac21c79969cc90d1edd9d4bbe279005314a7d61d64a81149d25c1a8",
     "observed": {
-      "drain": [
-        "ok",
-        false,
-        "completed",
-        {
-          "checkpoint": "refs/checkpoints/kub03-1",
-          "status": "checkpointed"
-        },
-        false
-      ],
       "fallback": [
         "queued",
         1,
@@ -30,9 +29,37 @@
         [
           "deliver",
           5
+        ],
+        [
+          "status",
+          5
+        ],
+        [
+          "deliver",
+          5
         ]
       ],
+      "fallback_drain": [
+        "queued",
+        "drain",
+        {},
+        false,
+        "completed",
+        {
+          "checkpoint": "refs/checkpoints/kub03-1",
+          "status": "checkpointed"
+        }
+      ],
       "handlers_ran": 7,
+      "http_drain": [
+        "ok",
+        false,
+        "completed",
+        {
+          "checkpoint": "refs/checkpoints/kub03-1",
+          "status": "checkpointed"
+        }
+      ],
       "http_payload_sha256": [
         "945c221b460423c62dc1b25f9925157015648d2a19539ffa2f60207be96d8f28",
         "0aaf0e40e6b4715905d140fdf7f4583a17c564cdc52e27d9a31d6ce6f7442507",
