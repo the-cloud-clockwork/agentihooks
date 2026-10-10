@@ -3,7 +3,9 @@ from pathlib import Path
 
 import pytest
 
+from scripts.swarm.store import SwarmError
 from scripts.swarm_v2.api.executions import ExecutionsAPI, heartbeat_rejections, heartbeat_rejections_total
+from scripts.swarm_v2.authority import RenewalFence
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
@@ -343,7 +345,7 @@ def test_a_heartbeat_after_an_expired_lock_cannot_move_the_sequence_backward(wor
     assert stored(world, agent)["renewal_sequence"] == 9
 
 
-def test_the_same_heartbeat_committed_after_an_expired_lock_is_returned(world, worker, monkeypatch):
+def test_the_same_heartbeat_sent_twice_after_an_expired_lock_renews_once(world, worker, monkeypatch):
     agent, token = worker
     lock = world.store.key("fixture", "heartbeat-lock", agent.execution_id)
 
@@ -352,7 +354,9 @@ def test_the_same_heartbeat_committed_after_an_expired_lock_is_returned(world, w
         return world.put(agent.execution_id, token, world.beat(agent, 8))
 
     seen = during_renewal(world, monkeypatch, after_expiry)
-    assert world.put(agent.execution_id, token, world.beat(agent, 8)) == seen[0]
+    status, ack = world.put(agent.execution_id, token, world.beat(agent, 8))
+    assert (seen[0][0], seen[0][1]["error_class"]) == (409, "revision_conflict")
+    assert (status, stored(world, agent)["ack"]) == (200, ack)
 
 
 def test_a_heartbeat_never_releases_a_lock_another_heartbeat_holds(world, worker, monkeypatch):
@@ -552,3 +556,59 @@ def test_server_deadlines_render_as_utc_with_milliseconds():
 
     assert _timestamp(1_791_630_892_123) == "2026-10-10T11:14:52.123Z"
     assert _timestamp(7) == "1970-01-01T00:00:00.007Z"
+
+
+def test_a_fenced_renewal_refuses_a_sequence_that_is_not_newer(world, worker):
+    _, token = worker
+    fence = world.store.key("fixture", "fence-probe")
+    world.clock[0] += 5
+    claim = world.tasks.renew(token, 1, 100, RenewalFence(fence, 5))
+    world.clock[0] += 10
+    with pytest.raises(SwarmError) as error:
+        world.tasks.renew(token, 1, 100, RenewalFence(fence, 5))
+    assert str(error.value) == "out_of_order"
+    assert (world.tasks.current("task"), world.store.redis.get(fence)) == (claim, "5")
+    renewed = world.tasks.renew(token, 1, 100, RenewalFence(fence, 6))
+    assert (renewed.lease_deadline_ms, world.store.redis.get(fence)) == (1115, "6")
+    world.clock[0] += 1
+    assert world.tasks.renew(token, 1, 100).lease_deadline_ms == 1116
+    assert world.store.redis.get(fence) == "6"
+
+
+def test_a_fenced_renewal_at_an_unchanged_deadline_still_advances_its_fence(world, worker):
+    _, token = worker
+    fence = world.store.key("fixture", "fence-probe")
+    claim = world.tasks.current("task")
+    journal = world.tasks.journal("task")
+    assert world.tasks.renew(token, 1, 100) == claim
+    assert world.tasks.journal("task") == journal
+    assert world.tasks.renew(token, 1, 100, RenewalFence(fence, 0)) == claim
+    assert world.store.redis.get(fence) == "0"
+    assert [row["event"] for row in world.tasks.journal("task")] == ["admitted", "renewed"]
+
+
+def test_a_heartbeat_stalled_past_its_lock_cannot_extend_the_lease(world, worker, monkeypatch):
+    agent, token = worker
+    lock = world.store.key("fixture", "heartbeat-lock", agent.execution_id)
+    renew = world.tasks.renew
+    newer = []
+
+    def stalled(*args):
+        if not newer:
+            newer.append(None)
+            world.store.redis.delete(lock)
+            world.clock[0] += 30
+            newer[0] = world.put(agent.execution_id, token, world.beat(agent, 9))
+            world.clock[0] += 20
+        return renew(*args)
+
+    monkeypatch.setattr(world.tasks, "renew", stalled)
+    status, refusal = world.put(agent.execution_id, token, world.beat(agent, 8))
+    assert (newer[0][0], newer[0][1]["lease_deadline_ms"]) == (200, 1130)
+    assert (status, refusal["error_class"], refusal["message"]) == (
+        409,
+        "revision_conflict",
+        "a newer heartbeat already renewed this lease",
+    )
+    assert world.tasks.current("task").lease_deadline_ms == 1130
+    assert stored(world, agent)["renewal_sequence"] == 9

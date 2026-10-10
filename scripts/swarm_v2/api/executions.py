@@ -13,7 +13,7 @@ from scripts.swarm import lease
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2 import contracts
 from scripts.swarm_v2.auth_context import IDENTIFIER, GrantRefused, LaunchAuthority, Registration
-from scripts.swarm_v2.authority import TaskAuthority, TaskClaim
+from scripts.swarm_v2.authority import RenewalFence, TaskAuthority, TaskClaim
 from scripts.swarm_v2.runtime.operations import SPAWN, OperationJournal, digest
 
 DEFAULT_LEASE_MS = 60_000
@@ -35,6 +35,7 @@ TASK_REFUSALS = {
     "stale_generation": ("stale_generation", "the task generation is no longer current"),
     "claim_held": ("stale_generation", "another execution holds this task"),
     "worker credential has expired": ("unauthenticated", "the worker credential has expired"),
+    "out_of_order": ("revision_conflict", "a newer heartbeat already renewed this lease"),
 }
 
 
@@ -104,7 +105,10 @@ class ExecutionsAPI:
             replay = _order(self._record(self.store.redis, execution_id), body["renewal_sequence"], fingerprint)
             if replay:
                 return replay
-            claim = _task(lambda: self.tasks.renew(token, body["authority"]["task_generation"], self.lease_ms))
+            fence = RenewalFence(
+                self.store.key(self.slug, "heartbeat-sequence", execution_id), body["renewal_sequence"]
+            )
+            claim = _task(lambda: self.tasks.renew(token, body["authority"]["task_generation"], self.lease_ms, fence))
             return self._commit(claim, body, fingerprint)
 
     @contextmanager
