@@ -10,5 +10,5 @@
   },
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2380",
   "package": "SV2-LDG-03",
-  "tested_commit": "recorded in the pull request body with its CI run ids"
+  "tested_commit": "f520b8a6e01e018a520fb7c04312efd6f22ca41a"
 }

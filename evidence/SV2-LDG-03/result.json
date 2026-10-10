@@ -5,7 +5,7 @@
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2380",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2402",
-  "tested_commit": "recorded in the pull request body with its CI run ids",
+  "tested_commit": "f520b8a6e01e018a520fb7c04312efd6f22ca41a",
   "status": "mocked-acceptance-qualified",
   "package_complete": false,
   "evidence_class": "Signed fixture launch grants from LaunchAuthority, fakeredis, fixture server clock and a SQLite fixture ledger; served over a loopback HTTP server in tests; no live rollout. Live G3 qualification is separate.",
@@ -48,10 +48,12 @@
     "Routes matches the raw request path, so a query string on a task path answers 404, the same as the execution endpoints"
   ],
   "validation": {
-    "red": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38049727166 on the tests only commit failed: the task API module did not exist",
-    "green": "Mutation preflight and Tests runs on the tested commit, listed in the pull request body",
-    "review": "Standards and Spec readers closed after three rounds",
-    "local": "No local tests or mutation ran; static prepush passed"
+    "red": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38049727166 on the first tests commit f4084a57 (before the restack onto dev) failed collecting the test module because the task API module did not exist; https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38055893539 on the intent fix tests commit 169b3bb8 failed only the new cases: the comments and outcomes routes answered 404, Routes was missing from the server and result.json was absent",
+    "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38057603878",
+    "unit": "All Python 3.11 and 3.12 unit shards, the shard budget and the coverage ratchet passed on the tested commit; each package case ran twice on independent fixtures",
+    "mutation": "Mutation preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38057600260 and the sharded mutation jobs of the Tests run passed on the tested commit; the last survivor (outcome routing) was killed by a test",
+    "review": "Standards and Spec readers closed after three rounds on the first implementation and three rounds on the intent fix",
+    "local": "No local tests or mutation ran; static prepush passed on every commit"
   },
   "measurements": {
     "ledger_revision_conflicts_total": {
