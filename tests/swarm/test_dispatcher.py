@@ -6,6 +6,7 @@ from scripts.gates import log as gate_log
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm import dispatcher, grouping, metrics, priority_sweep
+from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -32,15 +33,21 @@ def doc(tasks, phases=None, **extra):
 
 
 class Ledger:
-    def __init__(self):
+    def __init__(self, stored=None, refused=()):
         self.ranks, self.comments = [], []
+        self.stored, self.refused = stored or {}, set(refused)
 
-    def rank_task(self, slug, task_id, rank, by):
-        assert slug == SLUG
+    def rank_task(self, slug, task_id, rank, by, if_unranked=False):
+        assert slug == SLUG and if_unranked is True
+        if task_id in self.refused:
+            raise LedgerRefused(f"ledger {slug} refused")
         self.ranks.append((task_id, rank, by))
+        return {"id": task_id, "rank": self.stored.get(task_id, rank)}
 
     def comment(self, slug, task_id, text, by):
         assert slug == SLUG
+        if f"comment:{task_id}" in self.refused:
+            raise LedgerRefused(f"ledger {slug} refused")
         self.comments.append((task_id, text, by))
 
 
@@ -176,6 +183,33 @@ def test_an_operator_ranked_task_is_never_changed(store, home, shipped):
     assert ledger.ranks == [("c", "high", "dispatcher")]
 
 
+def test_a_rank_set_after_the_snapshot_wins_and_logs_nothing(store, home, shipped):
+    store.update(SLUG, autonomy="delegate")
+    ledger = Ledger(stored={"a": "low"})
+    tasks = chain()
+    actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, doc(tasks), NOW)
+    assert actions == ["ranked task b high: it unblocks 2 open tasks", "ranked task c high: it unblocks 1 open task"]
+    assert [c[0] for c in ledger.comments] == ["b", "c"]
+    assert [r["task"] for r in gate_log.recent(SLUG, None, home)] == ["b", "c"]
+    assert ("rank" not in tasks[0], tasks[1]["rank"], tasks[2]["rank"]) == (True, "high", "high")
+
+
+def test_a_refused_rank_write_skips_that_task_and_a_refused_comment_still_logs(store, home, shipped):
+    store.update(SLUG, autonomy="delegate")
+    ledger = Ledger(refused={"a", "comment:b"})
+    actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, doc(chain()), NOW)
+    assert actions == ["ranked task b high: it unblocks 2 open tasks", "ranked task c high: it unblocks 1 open task"]
+    assert ledger.comments == [("c", dispatcher.RAISED.format(work="1 open task"), "dispatcher")]
+
+
+def test_a_refused_proposal_comment_still_logs_the_proposal(store, home, shipped):
+    store.update(SLUG, autonomy="manual")
+    ledger = Ledger(refused={"comment:a"})
+    actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, doc(chain()), NOW)
+    assert actions[0] == "proposed rank high for task a to the master: it unblocks 3 open tasks"
+    assert [c[0] for c in ledger.comments] == ["b", "c"]
+
+
 def test_only_open_tasks_that_unblock_work_are_raised_and_at_most_the_top_count(store, home, shipped):
     store.update(SLUG, autonomy="delegate")
     tasks = [task(f"t{i}", phase="", depends_on=[]) for i in range(5)]
@@ -256,13 +290,17 @@ def test_the_ledger_client_ranks_a_task_as_its_author(monkeypatch):
     from scripts.swarm.ledger_client import LedgerClient
 
     sent = []
-    monkeypatch.setattr(LedgerClient, "_call", lambda self, slug, ops=None: sent.append((slug, ops)) or {})
-    LedgerClient().rank_task(SLUG, "a", "high", "dispatcher")
-    ((slug, (op,)),) = sent
+    state = {"tasks": [{"id": "z"}, {"id": "a", "rank": "high"}]}
+    monkeypatch.setattr(LedgerClient, "_call", lambda self, slug, ops=None: sent.append((slug, ops)) or state)
+    assert LedgerClient().rank_task(SLUG, "a", "high", "dispatcher", if_unranked=True) == state["tasks"][1]
+    assert LedgerClient().rank_task(SLUG, "q", "low", "master@abcdef-0001") == {}
+    ((_, (guarded,)), (slug, (plain,))) = sent
     assert slug == SLUG
-    assert {k: op[k] for k in ("op", "by", "item", "rank")} == {
+    assert {k: guarded[k] for k in ("op", "by", "item", "rank", "if_unranked")} == {
         "op": "task_rank",
         "by": "dispatcher",
         "item": "tasks/a",
         "rank": "high",
+        "if_unranked": True,
     }
+    assert "if_unranked" not in plain and (plain["item"], plain["rank"]) == ("tasks/q", "low")

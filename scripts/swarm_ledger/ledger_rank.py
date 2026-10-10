@@ -27,8 +27,9 @@ def order(task: dict) -> int:
 
 def check(op):
     by = op.get("by", OPERATOR)
-    if set(op) - {"by"} != {"op", "id", "item", "rank"} or not ITEM_RE.match(str(op["item"])) or not _named(by):
-        raise ValueError("task_rank takes an id, an item tasks/<id>, a rank and an optional author by")
+    shape = set(op) - {"by", "if_unranked"} == {"op", "id", "item", "rank"} and op.get("if_unranked", True) is True
+    if not shape or not ITEM_RE.match(str(op["item"])) or not _named(by):
+        raise ValueError("task_rank takes an id, an item tasks/<id>, a rank and an optional author by and if_unranked")
     canonical(op["rank"])
 
 
@@ -48,6 +49,8 @@ def apply(doc, op, ctx):
         ctx.refused.append(refusal)
         return False
     rank = canonical(op["rank"])
+    if op.get("if_unranked") and "rank" in task:
+        return True
     if task.get("rank", DEFAULT) != rank:
         task["rank"] = rank
         ctx.stamp(f"{op['item']}/rank", by)

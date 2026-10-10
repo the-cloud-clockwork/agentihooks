@@ -173,12 +173,28 @@ def test_order_puts_each_rank_in_its_place(task, position):
     assert ledger_rank.order(task) == position
 
 
-@pytest.mark.parametrize("by", ["", 7, None])
-def test_the_page_rank_op_refusal_names_its_shape(by):
-    with pytest.raises(
-        ValueError, match=r"^task_rank takes an id, an item tasks/<id>, a rank and an optional author by$"
-    ):
-        ledger_rank.check({"op": "task_rank", "id": "p", "item": "tasks/t1", "rank": "high", "by": by})
+@pytest.mark.parametrize("extra", [{"by": ""}, {"by": 7}, {"by": None}, {"if_unranked": False}, {"if_unranked": 1}])
+def test_the_page_rank_op_refusal_names_its_shape(extra):
+    with pytest.raises(ValueError) as refused:
+        ledger_rank.check({"op": "task_rank", "id": "p", "item": "tasks/t1", "rank": "high", **extra})
+    assert str(refused.value) == (
+        "task_rank takes an id, an item tasks/<id>, a rank and an optional author by and if_unranked"
+    )
+
+
+@pytest.mark.parametrize(
+    ("task", "after", "changed"), [({"id": "t1", "rank": "low"}, "low", False), ({"id": "t1"}, "high", True)]
+)
+def test_an_if_unranked_rank_only_lands_on_a_task_nobody_ranked(task, after, changed):
+    doc, ctx = {"tasks": [task]}, FakeContext()
+    op = {**page_rank("high"), "by": "dispatcher", "if_unranked": True}
+    ledger_rank.check(op)
+    assert ledger_rank.apply(doc, op, ctx) is True
+    assert (doc["tasks"][0]["rank"], ctx.dirty, ctx.stamps) == (
+        after,
+        changed,
+        [("tasks/t1/rank", "dispatcher")] if changed else [],
+    )
 
 
 def test_the_rank_op_by_a_refused_author_changes_nothing_and_names_why():

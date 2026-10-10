@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from scripts.gates import log as gate_log
 from scripts.inbox.store import InboxStore
 from scripts.swarm import bottleneck, grouping, metrics_outbox, priority_sweep
+from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.ledger_events import Mail
 from scripts.swarm_ledger.repository import hierarchy
 
@@ -75,7 +76,7 @@ def rank_pass(slug, config, store, ledger, doc, now_ms):
     top = [known[task_id] for task_id in ordered(doc, bottleneck.read(store, slug).get("bottleneck", ""))[:TOP]]
     unranked = [(task, _work(scores[task["id"]])) for task in top if "rank" not in task]
     if config.autonomy in APPLIES:
-        done = [_raise(slug, ledger, task, work) for task, work in unranked]
+        done = [action for task, work in unranked if (action := _raise(slug, ledger, task, work))]
     else:
         mail = Mail(InboxStore(store.redis), store, slug)
         done = [action for task, work in unranked if (action := _propose(slug, ledger, mail, task, work))]
@@ -83,16 +84,29 @@ def rank_pass(slug, config, store, ledger, doc, now_ms):
 
 
 def _raise(slug, ledger, task, work):
-    ledger.rank_task(slug, task["id"], RANK, AUTHOR)
-    ledger.comment(slug, task["id"], RAISED.format(work=work), AUTHOR)
+    try:
+        stored = ledger.rank_task(slug, task["id"], RANK, AUTHOR, if_unranked=True)
+    except LedgerRefused:
+        return None
+    if stored.get("rank") != RANK:
+        return None
+    task["rank"] = RANK
+    _comment(slug, ledger, task, RAISED.format(work=work))
     return Action(LEVERAGE, "apply", f"ranked task {task['id']} high: it unblocks {work}", task)
+
+
+def _comment(slug, ledger, task, text):
+    try:
+        ledger.comment(slug, task["id"], text, AUTHOR)
+    except LedgerRefused:
+        pass
 
 
 def _propose(slug, ledger, mail, task, work):
     text = PROPOSE.format(slug=slug, task=task["id"], title=task.get("title", ""), work=work)
     if not mail.send(f"dispatch-rank:{task['id']}", mail.master, text):
         return None
-    ledger.comment(slug, task["id"], PROPOSED.format(work=work), AUTHOR)
+    _comment(slug, ledger, task, PROPOSED.format(work=work))
     return Action(
         LEVERAGE, "propose", f"proposed rank high for task {task['id']} to the master: it unblocks {work}", task
     )

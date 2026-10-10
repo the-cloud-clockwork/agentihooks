@@ -70,8 +70,9 @@ class FakeLedger:
     def binned(self, slug):
         return slug in getattr(self, "bin", set())
 
-    def rank_task(self, slug, task_id, rank, by):
+    def rank_task(self, slug, task_id, rank, by, if_unranked=False):
         self.ranks.append((task_id, rank, by))
+        return {"id": task_id, "rank": rank}
 
     def comment(self, slug, task_id, text, by):
         self.comments.append((task_id, text, by))
