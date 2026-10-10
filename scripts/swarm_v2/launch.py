@@ -33,7 +33,7 @@ class WorkerHomeCommand:
         command = [self.python, "-m", "scripts.swarm_v2.worker_home", "grant", str(attempt)]
         try:
             done = subprocess.run(command, input=grant, capture_output=True, text=True, timeout=GRANT_SECONDS)
-        except subprocess.TimeoutExpired:
+        except (OSError, subprocess.TimeoutExpired):
             return False
         return done.returncode == 0
 
