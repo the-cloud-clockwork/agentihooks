@@ -12,6 +12,15 @@ GENERATION_LABEL = f"{DOMAIN}/generation"
 SPEC_DIGEST = f"{DOMAIN}/spec-digest"
 OPERATION_DIGEST = f"{DOMAIN}/operation-digest"
 OUTCOMES = ("created", "adopted", "observed", "quarantined", "disabled")
+GUARDED = (
+    "serviceAccountName",
+    "automountServiceAccountToken",
+    "hostNetwork",
+    "hostPID",
+    "hostIPC",
+    "runtimeClassName",
+    "securityContext",
+)
 
 
 @dataclass(frozen=True)
@@ -25,8 +34,17 @@ class PodStatus:
     deleting: bool
 
 
-def pod_name(execution_id: str) -> str:
-    return f"swarm-{execution_id}"
+def guarded(spec: dict) -> dict:
+    """Pod fields the template always sets explicitly, so the API server never defaults them."""
+    containers = spec.get("containers", [])
+    first = containers[0] if containers else {}
+    return {
+        **{key: spec.get(key) for key in GUARDED},
+        "containers": len(containers),
+        "image": first.get("image"),
+        "container_security": first.get("securityContext"),
+        "host_paths": [volume["name"] for volume in spec.get("volumes", []) if "hostPath" in volume],
+    }
 
 
 def pod_status(pod: dict) -> PodStatus:
@@ -55,7 +73,8 @@ class KubernetesTransport:
         except ApiRefused:
             return Observation(Phase.UNKNOWN)
         if not pods:
-            return Observation(Phase.ABSENT)
+            # After an unanswered create, a missing Pod may have run and been deleted, so it proves no absence.
+            return Observation(Phase.UNKNOWN if operation.phase is Phase.UNKNOWN else Phase.ABSENT)
         return self._judge(operation, pods, "observed", None)
 
     def apply_operation(self, operation: Operation, payload: dict) -> Observation:
@@ -74,9 +93,8 @@ class KubernetesTransport:
         except ApiRefused:
             return Observation(Phase.REFUSED)
 
-    def status(self, execution_id: str) -> PodStatus | None:
-        pods = self.api.list_pods(self._selector(execution_id))
-        return pod_status(pods[0]) if len(pods) == 1 else None
+    def status(self, execution_id: str) -> tuple[PodStatus, ...]:
+        return tuple(pod_status(pod) for pod in self.api.list_pods(self._selector(execution_id)))
 
     def kubernetes_create_reconciliation_total(self) -> dict[str, int]:
         return {outcome: self.reconciliations[outcome] for outcome in OUTCOMES}
@@ -111,17 +129,17 @@ class KubernetesTransport:
             return Observation(Phase.UNKNOWN)
         if existing is None:
             return Observation(Phase.UNKNOWN)
-        return self._judge(operation, [existing], "adopted", body["metadata"]["annotations"][SPEC_DIGEST])
+        return self._judge(operation, [existing], "adopted", body)
 
-    def _judge(self, operation: Operation, pods: list[dict], outcome: str, spec_digest: str | None) -> Observation:
-        reasons = [self._mismatch(operation, pod, spec_digest) for pod in pods]
+    def _judge(self, operation: Operation, pods: list[dict], outcome: str, rendered: dict | None) -> Observation:
+        reasons = [self._mismatch(operation, pod, rendered) for pod in pods]
         if reasons == [""]:
             return self._applied(pods[0], outcome)
         for pod, reason in zip(pods, reasons, strict=True):
             self._quarantine(pod, reason or "ambiguous")
         return Observation(Phase.REFUSED)
 
-    def _mismatch(self, operation: Operation, pod: dict, spec_digest: str | None) -> str:
+    def _mismatch(self, operation: Operation, pod: dict, rendered: dict | None) -> str:
         labels = pod["metadata"].get("labels", {})
         notes = pod["metadata"].get("annotations", {})
         if labels.get(OWNER_LABEL) != self.owner:
@@ -132,7 +150,11 @@ class KubernetesTransport:
             return "generation"
         if notes.get(OPERATION_DIGEST) != operation.payload_digest:
             return "operation"
-        if spec_digest is not None and notes.get(SPEC_DIGEST) != spec_digest:
+        if rendered is None:
+            return ""
+        if notes.get(SPEC_DIGEST) != rendered["metadata"]["annotations"][SPEC_DIGEST]:
+            return "spec"
+        if guarded(pod.get("spec", {})) != guarded(rendered["spec"]):
             return "spec"
         return ""
 

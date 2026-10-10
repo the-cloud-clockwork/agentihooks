@@ -4,13 +4,12 @@ import json
 from pathlib import Path
 from unittest import mock
 
-from scripts.swarm_v2.kubernetes.client import AlreadyExists
-from scripts.swarm_v2.kubernetes.runtime import KubernetesTransport
-
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2.controller import Controller
 from scripts.swarm_v2.kubernetes import watch
+from scripts.swarm_v2.kubernetes.client import AlreadyExists
+from scripts.swarm_v2.kubernetes.runtime import KubernetesTransport
 from scripts.swarm_v2.kubernetes.spec import PodTemplate, load_policy
 from scripts.swarm_v2.runtime.operations import OperationRequest
 
@@ -93,7 +92,8 @@ class Source:
         return self._pod(raw) if raw else None
 
     def delete_pod(self, name, uid):
-        self.api.objects.pop(name)
+        if self.api.objects[name]["metadata"]["uid"] == uid:
+            self.api.objects.pop(name)
 
 
 class World:
@@ -105,6 +105,7 @@ class World:
         self.api = ApiServer(policy()["namespace"])
         self.store = self.client()
         self.store.create(SwarmConfig(SLUG, "agentihooks", 1, 0))
+        self.grant = {"allowed": True}
 
     def client(self) -> RedisStore:
         import fakeredis
@@ -117,7 +118,7 @@ class World:
     def controller(self, creation_enabled: bool = True) -> tuple[Controller, KubernetesTransport]:
         transport = KubernetesTransport(self.api, SLUG, PodTemplate(policy()), creation_enabled)
         view = watch.PodView(Source(self.api))
-        return Controller(self.client(), SLUG, [transport], lambda: True, pods=view), transport
+        return Controller(self.client(), SLUG, [transport], lambda: self.grant["allowed"], pods=view), transport
 
     def admit(self, controller: Controller, seat: str = "eng-1") -> AgentRecord:
         target = {"pod_namespace": self.api.namespace, "pod_name": "swarm-pending"}
@@ -137,7 +138,11 @@ class World:
             "execution_id": attempt.execution_id,
             "generation": attempt.generation,
             "seat_id": attempt.seat,
-            "controller_epoch": controller.held.epoch,
+            "controller_epoch": next(
+                intent["controller_epoch"]
+                for intent in controller.intents()
+                if intent["execution_id"] == attempt.execution_id
+            ),
         }
         return OperationRequest(attempt.execution_id, attempt.generation, "spawn", payload, "create")
 
@@ -195,7 +200,8 @@ def _positive() -> tuple[dict, bool]:
         == {"created": 0, "adopted": 1, "observed": 1, "quarantined": 0, "disabled": 0}
         for run in (first, second)
     ]
-    return {"fixture": first, "second_fixture": second}, all(checks)
+    second_input = hashlib.sha256(json.dumps(second_launch(), sort_keys=True).encode()).hexdigest()
+    return {"fixture": first, "second_fixture": second, "second_fixture_input_sha256": second_input}, all(checks)
 
 
 def _rejection() -> tuple[dict, bool]:
@@ -217,9 +223,18 @@ def _rejection() -> tuple[dict, bool]:
         protected = copy.deepcopy(world.api.objects)
         refused = controller.execute(request)
         repeated = controller.execute(request)
+        creates = world.api.create_calls
+        world.grant["allowed"] = False
+        try:
+            controller.execute(request)
+            revoked = "executed"
+        except SwarmError as error:
+            revoked = str(error)
         observed = {
             "phase": refused.phase.value,
             "repeated_phase": repeated.phase.value,
+            "revoked_grant": revoked,
+            "create_calls_after_revoke": world.api.create_calls - creates,
             "result": refused.result,
             "quarantined": sorted(transport.quarantined.values(), key=lambda q: q["uid"]),
             "api_objects_unchanged": world.api.objects == protected,
@@ -228,6 +243,8 @@ def _rejection() -> tuple[dict, bool]:
         }
     checks = [
         observed["phase"] == observed["repeated_phase"] == "refused",
+        observed["revoked_grant"] == "a scoped controller grant is required",
+        observed["create_calls_after_revoke"] == 0,
         observed["result"] == {},
         observed["quarantined"] == [{"name": f"swarm-{attempt.execution_id}", "uid": "uid-1", "reason": "execution"}],
         observed["api_objects_unchanged"],
@@ -236,6 +253,20 @@ def _rejection() -> tuple[dict, bool]:
     ]
     observed["quarantined"] = [{**q, "name": "swarm-<execution>"} for q in observed["quarantined"]]
     return observed, all(checks)
+
+
+def _reaped() -> dict:
+    world = World()
+    with world.clocked():
+        controller, _ = world.controller()
+        assert controller.acquire()
+        attempt = world.admit(controller)
+        request = world.request(controller, attempt)
+        world.api.drop_next_response = True
+        controller.execute(request)
+        world.api.objects.clear()
+        retried = controller.execute(request)
+    return {"retry_phase": retried.phase.value, "create_calls": world.api.create_calls}
 
 
 def _recovery() -> tuple[dict, bool]:
@@ -252,7 +283,7 @@ def _recovery() -> tuple[dict, bool]:
         assert restarted.acquire()
         recovered = world.store.operation_journal.get(SLUG, interrupted.operation_id)
         plan = restarted.reconcile()
-        replay = restarted.execute(request)
+        replay = restarted.execute(world.request(restarted, attempt))
         try:
             crashed.execute(request)
             stale = "executed"
@@ -263,7 +294,7 @@ def _recovery() -> tuple[dict, bool]:
             "phase": "Succeeded",
             "containerStatuses": [{"state": {"terminated": {"reason": "Completed", "exitCode": 0}}}],
         }
-        status = transport.status(attempt.execution_id)
+        (status,) = transport.status(attempt.execution_id)
         execution = world.store.execution(SLUG, attempt.execution_id)
         world.clock[0] += lease.ttl_ms()
         rollback, disabled = world.controller(creation_enabled=False)
@@ -283,22 +314,24 @@ def _recovery() -> tuple[dict, bool]:
             "rollback": {
                 "new_launch_phase": held.phase.value,
                 "create_calls_after_rollback": world.api.create_calls,
-                "existing_pod_still_observed": disabled.status(attempt.execution_id).uid,
+                "existing_pod_still_observed": [found.uid for found in disabled.status(attempt.execution_id)],
                 "kubernetes_create_reconciliation_total": disabled.kubernetes_create_reconciliation_total(),
             },
             "kubernetes_create_reconciliation_total": transport.kubernetes_create_reconciliation_total(),
+            "pod_reaped_after_lost_response": _reaped(),
         }
     checks = [
+        observed["pod_reaped_after_lost_response"] == {"retry_phase": "unknown", "create_calls": 1},
         observed["interrupted_phase"] == "unknown",
         observed["recovered_phase"] == observed["replay_phase"] == "applied",
         observed["recovered_uid"] == observed["reconcile_matched_uid"] == "uid-1",
         observed["create_calls"] == 1,
-        observed["stale_controller"] != "executed",
+        observed["stale_controller"] == "the controller lease is stale",
         observed["pod_status"] == {"phase": "Succeeded", "reasons": ["Completed"], "deleting": False},
         observed["execution_record_unchanged"],
         observed["rollback"]["new_launch_phase"] == "accepted",
         observed["rollback"]["create_calls_after_rollback"] == 1,
-        observed["rollback"]["existing_pod_still_observed"] == "uid-1",
+        observed["rollback"]["existing_pod_still_observed"] == ["uid-1"],
         observed["rollback"]["kubernetes_create_reconciliation_total"]["disabled"] == 1,
     ]
     return observed, all(checks)

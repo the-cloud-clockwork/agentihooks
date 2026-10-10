@@ -1,5 +1,6 @@
 """Pod calls over the Kubernetes API server REST interface: an overloaded or failing server is ambiguous, never absent."""
 
+import http.client
 import json
 import ssl
 import urllib.error
@@ -7,10 +8,11 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 ACCOUNT = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 TIMEOUT_SECONDS = 10
+Opener = Callable[..., Any]
 
 
 class AlreadyExists(Exception):
@@ -35,13 +37,13 @@ class PodApi(Protocol):
 
 class KubeHttp:
     def __init__(
-        self, server: str, token_path: Path, context: ssl.SSLContext, opener: Callable = urllib.request.urlopen
-    ):
+        self, server: str, token_path: Path, context: ssl.SSLContext, opener: Opener = urllib.request.urlopen
+    ) -> None:
         self.server, self.token_path, self.context, self.opener = server, token_path, context, opener
 
     @classmethod
     def in_cluster(
-        cls, environ: Mapping[str, str], account: Path = ACCOUNT, opener: Callable = urllib.request.urlopen
+        cls, environ: Mapping[str, str], account: Path = ACCOUNT, opener: Opener = urllib.request.urlopen
     ) -> "KubeHttp":
         host = environ["KUBERNETES_SERVICE_HOST"]
         host = f"[{host}]" if ":" in host else host
@@ -49,9 +51,13 @@ class KubeHttp:
         return cls(f"https://{host}:{environ['KUBERNETES_SERVICE_PORT']}", account / "token", context, opener)
 
     def send(self, method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
+        try:
+            token = self.token_path.read_text().strip()
+        except OSError:
+            raise ConnectionError("the service account token is unreadable") from None
         data = None if body is None else json.dumps(body).encode()
         request = urllib.request.Request(self.server + path, data=data, method=method)
-        request.add_header("Authorization", f"Bearer {self.token_path.read_text().strip()}")
+        request.add_header("Authorization", f"Bearer {token}")
         request.add_header("Accept", "application/json")
         if data is not None:
             request.add_header("Content-Type", "application/json")
@@ -61,10 +67,12 @@ class KubeHttp:
         except urllib.error.HTTPError as error:
             try:
                 return error.code, json.loads(error.read())
-            except ValueError:
+            except (ValueError, http.client.HTTPException):
                 return error.code, {}
         except urllib.error.URLError as error:
             raise ConnectionError(str(error.reason)) from None
+        except (ValueError, http.client.HTTPException):
+            raise ConnectionError("the API server answer is unreadable") from None
 
 
 def _answer(status: int, body: dict) -> dict:

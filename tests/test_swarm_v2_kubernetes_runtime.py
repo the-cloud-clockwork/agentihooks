@@ -38,7 +38,6 @@ def test_names_and_labels_are_fixed():
     assert runtime.GENERATION_LABEL == "swarm.agentihooks.io/generation"
     assert runtime.SPEC_DIGEST == "swarm.agentihooks.io/spec-digest"
     assert runtime.OPERATION_DIGEST == "swarm.agentihooks.io/operation-digest"
-    assert runtime.pod_name(EXECUTION) == NAME
     assert KubernetesTransport.backend == "kubernetes"
 
 
@@ -305,18 +304,90 @@ def test_pod_status_reports_each_phase(phase):
 
 def test_status_reads_the_labelled_pod_of_one_execution():
     sender = transport()
-    assert sender.status(EXECUTION) is None
+    assert sender.status(EXECUTION) == ()
     sender.apply_operation(operation(), cases.launch())
-    assert sender.status(EXECUTION) == PodStatus(NAME, "uid-1", "Pending", (), False)
+    assert sender.status(EXECUTION) == (PodStatus(NAME, "uid-1", "Pending", (), False),)
 
 
-def test_status_of_an_ambiguous_execution_is_none():
+def test_status_of_an_ambiguous_execution_lists_every_pod():
     sender = transport()
     existing(sender)
     twin = PodTemplate(cases.policy()).render(cases.launch()).pod
     twin["metadata"]["name"] = "swarm-twin"
     sender.api.put(twin)
-    assert sender.status(EXECUTION) is None
+    assert [status.uid for status in sender.status(EXECUTION)] == ["uid-1", "uid-2"]
+
+
+def test_an_unanswered_create_with_no_pod_left_is_unknown_not_absent():
+    sender = transport()
+    unanswered = Operation("op-1", EXECUTION, 3, "spawn", "kubernetes", DIGEST, {}, Phase.UNKNOWN)
+    assert sender.observe_operation(unanswered) == Observation(Phase.UNKNOWN)
+    assert sender.observe_operation(operation()) == Observation(Phase.ABSENT)
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("containers", 0, "image"), "ghcr.io/other/image@sha256:" + "0" * 64),
+        (("containers", 0, "securityContext", "privileged"), True),
+        (("serviceAccountName",), "cluster-admin"),
+        (("automountServiceAccountToken",), True),
+        (("hostNetwork",), True),
+        (("hostPID",), True),
+        (("hostIPC",), True),
+        (("runtimeClassName",), "runc"),
+        (("securityContext", "runAsNonRoot"), False),
+        (("volumes", 0, "hostPath"), {"path": "/"}),
+    ],
+)
+def test_an_already_existing_pod_with_forged_digests_and_a_changed_spec_is_quarantined(path, value):
+    sender = transport()
+    pod = PodTemplate(cases.policy()).render(cases.launch())
+    pod.pod["metadata"]["annotations"].update({runtime.OPERATION_DIGEST: DIGEST, runtime.SPEC_DIGEST: pod.digest})
+    place = pod.pod["spec"]
+    for key in path[:-1]:
+        place = place[key]
+    place[path[-1]] = value
+    sender.api.put(pod.pod)
+    assert sender.apply_operation(operation(), cases.launch()) == Observation(Phase.REFUSED)
+    assert sender.quarantined["uid-1"]["reason"] == "spec"
+
+
+def test_an_already_existing_pod_with_an_extra_container_is_quarantined():
+    sender = transport()
+    pod = existing(sender)
+    pod["spec"]["containers"].append({"name": "sidecar", "image": "busybox"})
+    sender.api.objects[NAME] = pod
+    assert sender.apply_operation(operation(), cases.launch()) == Observation(Phase.REFUSED)
+    assert sender.quarantined["uid-1"]["reason"] == "spec"
+
+
+def test_guarded_reads_an_empty_spec():
+    assert runtime.guarded({}) == {
+        "serviceAccountName": None,
+        "automountServiceAccountToken": None,
+        "hostNetwork": None,
+        "hostPID": None,
+        "hostIPC": None,
+        "runtimeClassName": None,
+        "securityContext": None,
+        "containers": 0,
+        "image": None,
+        "container_security": None,
+        "host_paths": [],
+    }
+
+
+def test_a_created_pod_is_matched_by_the_controller_reconcile():
+    world = cases.World()
+    with world.clocked():
+        controller, _ = world.controller()
+        assert controller.acquire()
+        attempt = world.admit(controller)
+        created = controller.execute(world.request(controller, attempt))
+        plan = controller.reconcile()
+    assert plan.matched == {attempt.execution_id: created.result["uid"]}
+    assert controller.controller_orphans_by_class()["foreign"] == 0
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])

@@ -1,11 +1,12 @@
+import http.client
 import io
 import json
 import urllib.error
 
 import pytest
-from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused, KubeHttp, PodClient
 
 from scripts.swarm_v2.kubernetes import client
+from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused, KubeHttp, PodClient
 
 pytestmark = pytest.mark.unit
 
@@ -65,7 +66,8 @@ def test_send_posts_json_with_a_bearer_token_and_the_bounded_timeout(token):
     assert request.get_header("Authorization") == "Bearer first-token"
     assert request.get_header("Accept") == "application/json"
     assert request.get_header("Content-type") == "application/json"
-    assert (timeout, context) == (client.TIMEOUT_SECONDS, CONTEXT) == (10, CONTEXT)
+    assert timeout == client.TIMEOUT_SECONDS == 10
+    assert context is CONTEXT
 
 
 def test_send_without_a_body_sends_no_data_or_content_type(token):
@@ -103,6 +105,50 @@ def test_send_turns_an_unreachable_server_into_a_connection_error(token):
     with pytest.raises(ConnectionError) as raised:
         api.send("GET", "/p")
     assert str(raised.value) == "connection refused"
+
+
+class RawOpener(Opener):
+    def __call__(self, request, timeout, context):
+        self.calls.append((request, timeout, context))
+        answer = self.answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+
+class Truncated:
+    def read(self):
+        raise http.client.IncompleteRead(b"{")
+
+
+def test_send_turns_an_unreadable_success_body_into_a_connection_error(token):
+    opener = RawOpener(Response(201, b"<html>proxy</html>"))
+    with pytest.raises(ConnectionError) as raised:
+        KubeHttp("https://api.test", token, CONTEXT, opener).send("POST", "/p", {})
+    assert str(raised.value) == "the API server answer is unreadable"
+
+
+def test_send_turns_a_truncated_success_body_into_a_connection_error(token):
+    response = Response(200, b"")
+    response.read = Truncated().read
+    with pytest.raises(ConnectionError) as raised:
+        KubeHttp("https://api.test", token, CONTEXT, RawOpener(response)).send("GET", "/p")
+    assert str(raised.value) == "the API server answer is unreadable"
+
+
+def test_send_returns_an_empty_body_for_a_truncated_http_error(token):
+    error = http_error(409, b"")
+    error.read = Truncated().read
+    api, _ = http(token, error)
+    assert api.send("POST", "/p", {}) == (409, {})
+
+
+def test_send_without_a_readable_token_sends_nothing(tmp_path):
+    opener = Opener((200, {}))
+    with pytest.raises(ConnectionError) as raised:
+        KubeHttp("https://api.test", tmp_path / "missing", CONTEXT, opener).send("GET", "/p")
+    assert str(raised.value) == "the service account token is unreadable"
+    assert opener.calls == []
 
 
 def test_send_lets_a_read_timeout_through_as_a_timeout(token):
