@@ -151,12 +151,13 @@ def extract(execution: Execution, archive: Path, destination: Path) -> Path:
     if target.exists():
         _refuse(f"extraction destination already exists: {destination}")
     with tarfile.open(archive) as bundle:
-        members = bundle.getmembers()
-        if len(members) > ARCHIVE_MEMBERS or sum(member.size for member in members) > ARCHIVE_BYTES:
-            _refuse(f"archive exceeds {ARCHIVE_MEMBERS} members or {ARCHIVE_BYTES} bytes: {archive.name}")
-        absolute = [member.name for member in members if member.name.startswith("/")]
-        if absolute:
-            _refuse(f"archive member leaves its destination: {absolute[0]}")
+        entries = expanded = 0
+        for member in bundle:
+            entries, expanded = entries + 1, expanded + member.size
+            if entries > ARCHIVE_MEMBERS or expanded > ARCHIVE_BYTES:
+                _refuse(f"archive exceeds {ARCHIVE_MEMBERS} members or {ARCHIVE_BYTES} bytes: {archive.name}")
+            if member.name.startswith("/"):
+                _refuse(f"archive member leaves its destination: {member.name}")
         staging = execution.path("scratch") / f"extract-{uuid.uuid4().hex}"
         staging.mkdir(mode=stat.S_IRWXU)
         try:
