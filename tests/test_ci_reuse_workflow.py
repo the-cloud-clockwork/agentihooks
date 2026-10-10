@@ -13,10 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_queue_suites_use_a_precise_reuse_condition():
     jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     condition = "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}"
-    assert jobs["unit"].get("if") in (None, condition)
-    if jobs["unit"].get("if") == condition:
-        assert "reuse" in jobs["unit"]["needs"]
-        assert jobs["reuse"]["outputs"]["reused"] == "${{ steps.decision.outputs.reused || 'false' }}"
+    assert jobs["unit"]["if"] == condition
+    assert "reuse" in jobs["unit"]["needs"]
+    assert jobs["reuse"]["outputs"]["reused"] == "${{ steps.decision.outputs.reused || 'false' }}"
 
 
 @pytest.mark.parametrize("event", ["merge_group", "pull_request", "push", "workflow_dispatch"])
