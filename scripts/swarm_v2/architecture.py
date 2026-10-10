@@ -1,19 +1,24 @@
 import argparse
+import hashlib
+import hmac
 import json
 import sys
 from collections import Counter
+from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 
+from scripts.swarm_v2.auth_context import LaunchKey
 from scripts.swarm_v2.records import _replayed as _replay
 from scripts.swarm_v2.records import _write, digest
+from scripts.swarm_v2.runtime.commands import Principal, Role
 
 SCHEMA = "swarm-v2-architecture/1"
 INVENTORY_SCHEMA = "swarm-v2-design-inventory/1"
 ROLES = ("code_owner", "state_owner", "deployment_owner")
 KINDS = frozenset({"dispatcher", "backlog", "service", "worker_component"})
 CODING_TASKS = "coding_tasks"
-OPERATOR = "operator"
+SIGNED = ("proposal", "sha256", "approved_by", "revision", "reason", "key_id")
 CARRIES = ("changed_content", CODING_TASKS, "none", "transcripts")
 DECLARE = (
     f"a proposal must declare carries as one of {', '.join(CARRIES)}, launches_agents as true or false,"
@@ -61,16 +66,64 @@ def dispatches(component: dict) -> bool:
     )
 
 
-def approved(record: dict, proposal: dict) -> bool:
-    return any(
-        c["proposal"] == proposal["id"] and c["sha256"] == digest(proposal) and c["approved_by"] == OPERATOR
-        for c in record["operator_changes"]
+def _signature(key: LaunchKey, change: dict) -> str:
+    signed = json.dumps({name: change.get(name) for name in SIGNED}, sort_keys=True).encode()
+    return hmac.new(key.secret, signed, hashlib.sha256).hexdigest()
+
+
+def _authentic(key: LaunchKey | None, change: dict) -> bool:
+    signature = change.get("signature")
+    return (
+        key is not None
+        and change.get("key_id") == key.key_id
+        and isinstance(signature, str)
+        and hmac.compare_digest(signature, _signature(key, change))
     )
 
 
-def authorities(record: dict) -> list[str]:
-    changed = {c["proposal"] for c in record["operator_changes"]}
+def _changes(record: dict, key: LaunchKey | None) -> list[dict]:
+    return [c for c in record["operator_changes"] if _authentic(key, c)]
+
+
+def approved(record: dict, proposal: dict, key: LaunchKey | None = None) -> bool:
+    return any(c["proposal"] == proposal["id"] and c["sha256"] == digest(proposal) for c in _changes(record, key))
+
+
+def authorities(record: dict, key: LaunchKey | None = None) -> list[str]:
+    changed = {c["proposal"] for c in _changes(record, key)}
     return [c["name"] for c in record["components"] if dispatches(c) and c.get("proposal") not in changed]
+
+
+def approve(
+    path: Path | str,
+    proposal: dict,
+    reason: str,
+    *,
+    slug: str,
+    credential: str,
+    authenticate: Callable[[str, str], Principal | None],
+    key: LaunchKey,
+) -> dict:
+    principal = authenticate(slug, credential)
+    if not isinstance(principal, Principal) or principal.role is not Role.OPERATOR or not principal.name:
+        raise ArchitectureError("authenticated operator required for an architecture change")
+    record = load_record(path)
+    sha256 = digest(proposal)
+    done = next((c for c in _changes(record, key) if c["proposal"] == proposal["id"] and c["sha256"] == sha256), None)
+    if done:
+        return done
+    change = {
+        "proposal": proposal["id"],
+        "sha256": sha256,
+        "approved_by": principal.name,
+        "revision": record["revision"],
+        "reason": reason,
+        "key_id": key.key_id,
+    }
+    change["signature"] = _signature(key, change)
+    record["operator_changes"].append(change)
+    _write(path, record)
+    return change
 
 
 def _declared(proposal: dict) -> bool:
@@ -102,7 +155,7 @@ def _conflict(record: dict, proposal: dict, repeated: set[str]) -> str:
     return ""
 
 
-def _verdict(record: dict, proposal: dict, repeated: set[str]) -> tuple[str, str]:
+def _verdict(record: dict, proposal: dict, repeated: set[str], key: LaunchKey | None) -> tuple[str, str]:
     kind = proposal.get("kind")
     role = missing_owner(record, proposal)
     if kind not in KINDS:
@@ -113,8 +166,8 @@ def _verdict(record: dict, proposal: dict, repeated: set[str]) -> tuple[str, str
         return "rejected", f"{role} must name exactly one owner from the record"
     if _excluded(record, proposal):
         return "rejected", f"the worker image excludes {proposal['name']} (AD-06)"
-    if dispatches(proposal) and not approved(record, proposal):
-        return "rejected", f"inserts another coding-task queue beside {', '.join(authorities(record))} (AD-05)"
+    if dispatches(proposal) and not approved(record, proposal, key):
+        return "rejected", f"inserts another coding-task queue beside {', '.join(authorities(record, key))} (AD-05)"
     if kind == "backlog" and not (proposal.get("bounded") is True and proposal["carries"] in record["backlog_carries"]):
         return "rejected", f"a backlog must be bounded and carry one of {', '.join(record['backlog_carries'])} (AD-05)"
     if kind == "worker_component" and proposal["name"].casefold() not in {
@@ -134,7 +187,7 @@ def _repeated(proposals: list[dict]) -> set[str]:
     }
 
 
-def review(record: dict, inventory: dict) -> dict:
+def review(record: dict, inventory: dict, key: LaunchKey | None = None) -> dict:
     repeated = _repeated(inventory["proposals"])
     result = {
         "operation": inventory["operation"],
@@ -144,7 +197,7 @@ def review(record: dict, inventory: dict) -> dict:
         "unresolved": [],
     }
     for proposal in inventory["proposals"]:
-        outcome, reason = _verdict(record, proposal, repeated)
+        outcome, reason = _verdict(record, proposal, repeated, key)
         if outcome == "accepted":
             result["accepted"].append(proposal["id"])
         else:
@@ -153,7 +206,7 @@ def review(record: dict, inventory: dict) -> dict:
     return {**result, "unowned": unowned, "measurements": {"architecture_unowned_components": len(unowned)}}
 
 
-def check(record: dict) -> list[str]:
+def check(record: dict, key: LaunchKey | None = None) -> list[str]:
     components = record["components"]
     errors = [
         f"{c['name']}: {missing_owner(record, c)} must name exactly one owner from the record"
@@ -163,7 +216,7 @@ def check(record: dict) -> list[str]:
     names = [c["name"] for c in components]
     errors += [f"{n} is recorded more than once" for n in dict.fromkeys(n for n in names if names.count(n) > 1)]
     errors += [f"{c['name']} is excluded from the worker image" for c in components if _excluded(record, c)]
-    count = len(authorities(record))
+    count = len(authorities(record, key))
     if count != 1:
         errors.append(f"expected one coding-task authority, found {count}")
     return errors
@@ -180,7 +233,7 @@ def _commit(path: Path | str, record: dict, operation: str, sha256: str, result:
     return result
 
 
-def apply_inventory(path: Path | str, inventory: dict) -> dict:
+def apply_inventory(path: Path | str, inventory: dict, key: LaunchKey | None = None) -> dict:
     record = load_record(path)
     operation, sha256 = inventory["operation"], digest(inventory)
     done = _replayed(record, operation, sha256)
@@ -190,7 +243,7 @@ def apply_inventory(path: Path | str, inventory: dict) -> dict:
         raise ArchitectureError(
             f"inventory is based on revision {inventory['base_revision']}; the record is at revision {record['revision']}"
         )
-    result = review(record, inventory)
+    result = review(record, inventory, key)
     revision = record["revision"] + 1
     proposals = {p["id"]: p for p in inventory["proposals"]}
     for pid in result["accepted"]:

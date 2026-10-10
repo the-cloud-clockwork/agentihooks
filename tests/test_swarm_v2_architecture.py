@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 import scripts.swarm_v2.architecture as architecture
+from scripts.swarm_v2.auth_context import LaunchKey
 
 ROOT = Path(__file__).resolve().parents[1]
 RECORD = ROOT / "docs" / "swarm-v2" / "architecture.json"
@@ -14,6 +15,12 @@ MARKDOWN = ROOT / "docs" / "swarm-v2" / "decisions.md"
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2" / "architecture"
 DISPATCHER_REASON = "inserts another coding-task queue beside Swarm reconciliation controller (AD-05)"
 BACKLOG_REASON = "a backlog must be bounded and carry one of transcripts, changed_content (AD-05)"
+KEY = LaunchKey("architecture-1", b"k" * 32)
+
+
+def _signed(change):
+    change = {**change, "key_id": KEY.key_id}
+    return {**change, "signature": architecture._signature(KEY, change)}
 
 
 def _record(tmp_path):
@@ -343,43 +350,47 @@ def test_an_operator_change_in_the_record_admits_that_dispatcher_only(tmp_path):
     data = architecture.load_record(path)
     inventory = _inventory()
     dispatcher = inventory["proposals"][0]
-    change = {
-        "proposal": "duplicate-dispatcher",
-        "sha256": architecture.digest(dispatcher),
-        "approved_by": "operator",
-        "revision": 1,
-        "reason": "operator",
-    }
+    change = _signed(
+        {
+            "proposal": "duplicate-dispatcher",
+            "sha256": architecture.digest(dispatcher),
+            "approved_by": "nestor",
+            "revision": 1,
+            "reason": "operator",
+        }
+    )
     data["operator_changes"] = [change]
     path.write_text(json.dumps(data))
     inventory["proposals"].append(_proposal(id="other", name="Other dispatcher", kind="dispatcher"))
-    result = architecture.apply_inventory(path, inventory)
+    result = architecture.apply_inventory(path, inventory, KEY)
     assert result["accepted"] == ["duplicate-dispatcher", "embedding-backlog"]
     assert result["rejected"] == [{"id": "other", "name": "Other dispatcher", "reason": DISPATCHER_REASON}]
     after = architecture.load_record(path)
-    assert architecture.authorities(after) == ["Swarm reconciliation controller"]
-    assert architecture.check(after) == []
+    assert architecture.authorities(after, KEY) == ["Swarm reconciliation controller"]
+    assert architecture.check(after, KEY) == []
 
 
 def test_an_operator_change_covers_only_the_exact_approved_content():
     record = architecture.load_record(RECORD)
     dispatcher = _inventory()["proposals"][0]
-    change = {
-        "proposal": dispatcher["id"],
-        "sha256": architecture.digest(dispatcher),
-        "approved_by": "operator",
-        "revision": 1,
-        "reason": "x",
-    }
+    change = _signed(
+        {
+            "proposal": dispatcher["id"],
+            "sha256": architecture.digest(dispatcher),
+            "approved_by": "nestor",
+            "revision": 1,
+            "reason": "x",
+        }
+    )
     record["operator_changes"] = [{**change, "approved_by": "engineer@1"}]
-    assert architecture.approved(record, dispatcher) is False
+    assert architecture.approved(record, dispatcher, KEY) is False
     record["operator_changes"] = [change]
-    assert architecture.approved(record, dispatcher) is True
+    assert architecture.approved(record, dispatcher, KEY) is True
     for change in ({"name": "Unrelated second dispatcher"}, {"deployment_owner": "personal installation"}):
         swapped = {**dispatcher, **change}
-        assert architecture.approved(record, swapped) is False
-        assert architecture.review(record, _single(swapped))["rejected"][0]["reason"] == DISPATCHER_REASON
-    assert architecture.approved(record, {**dispatcher, "id": "other"}) is False
+        assert architecture.approved(record, swapped, KEY) is False
+        assert architecture.review(record, _single(swapped), KEY)["rejected"][0]["reason"] == DISPATCHER_REASON
+    assert architecture.approved(record, {**dispatcher, "id": "other"}, KEY) is False
 
 
 def test_a_proposal_cannot_approve_itself():
