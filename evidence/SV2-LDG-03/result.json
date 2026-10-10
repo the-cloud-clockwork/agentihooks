@@ -1,11 +1,7 @@
 {
   "package": "SV2-LDG-03",
-  "dependency": [
-    "SV2-LDG-02"
-  ],
-  "dependents": [
-    "SV2-LDG-04"
-  ],
+  "dependency": ["SV2-LDG-02"],
+  "dependents": ["SV2-LDG-04"],
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2380",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2402",
@@ -35,7 +31,7 @@
     "externally_verified": "None; no production deployment and no live rollout yet"
   },
   "authoritative_objects": [
-    "The ledger document and its task rows and comments are authoritative operator work state and are never deleted as caches; the task_operations receipts in the ledger metadata hold only the current task generation and are replaced when a new generation writes",
+    "The ledger document and its task rows and comments are authoritative operator work state and are never deleted as caches; the task_operations receipts in the ledger metadata are an idempotency cache for the current task generation only: a new generation's first write replaces them, which is safe because the claim check refuses every write from a superseded generation before any receipt is consulted",
     "The Redis task claims and launch registrations from SV2-LDG-02 are authoritative for who may write",
     "The ledger-revision-conflicts counter is a measurement, not state"
   ],

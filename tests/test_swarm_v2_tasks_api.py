@@ -534,6 +534,7 @@ def test_a_comment_replay_is_acknowledged_once(world, worker):
     assert first[0] == 200
     ledger = world.document()
     assert world.call("POST", "/v2/tasks/task/comments", token, body) == first
+    assert world.call("POST", "/v2/tasks/task/progress", token, body) == first
     assert world.document() == ledger
     assert [(entry["by"], entry["text"]) for entry in world.task()["comments"]] == [
         (agent.name, "Asking about the second slice")
