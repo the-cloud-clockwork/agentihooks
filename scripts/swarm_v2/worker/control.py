@@ -1,4 +1,5 @@
 import json
+import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Protocol
@@ -32,7 +33,7 @@ class CommandTransport(Protocol):
 
 
 class RouteTransport:
-    """Speaks the SV2-LDG-05 endpoints through `send(method, path, body) -> (status, reply)`."""
+    """Speaks the worker command endpoints through `send(method, path, body) -> (status, reply)`."""
 
     def __init__(self, execution_id: str, send: Callable[[str, str, dict | None], tuple[int, dict]]) -> None:
         self.base, self.send = f"/v2/executions/{execution_id}/commands", send
@@ -134,7 +135,10 @@ class WorkerControl:
         handler = self.handlers.get(record["kind"])
         if handler is None:
             return {"status": "failed", "detail": "no handler for this command kind"}
-        return handler(record["payload"])
+        try:
+            return handler(record["payload"])
+        except Exception as error:
+            return {"status": "failed", "detail": f"handler raised {type(error).__name__}"}
 
     def _settle(self, record: dict, outcome: dict) -> None:
         record["outcome"] = outcome
@@ -146,5 +150,8 @@ class WorkerControl:
 
     def _save(self) -> None:
         staged = self.path.with_name(f"{self.path.name}.tmp")
-        staged.write_text(json.dumps(self.records), encoding="utf-8")
+        with staged.open("w", encoding="utf-8") as handle:
+            handle.write(json.dumps(self.records))
+            handle.flush()
+            os.fsync(handle.fileno())
         staged.replace(self.path)
