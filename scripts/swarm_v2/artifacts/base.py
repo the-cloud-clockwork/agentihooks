@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import asdict, dataclass
 from typing import NoReturn, Protocol
 
@@ -122,6 +122,22 @@ class ArtifactStore:
         if self.stat(scope, ref) != VERIFIED:
             _refuse(f"artifact {ref.sha256} is not verified in {self.backend.kind}")
         return self.backend.read(scope.key("objects", ref.sha256), start, length)
+
+    def stream(self, scope: Scope, ref: ArtifactRef) -> Iterator[bytes]:
+        key = scope.key("objects", ref.sha256)
+        if self.backend.size(key) != ref.size:
+            _refuse(f"artifact {ref.sha256} is not verified in {self.backend.kind}")
+        digest = hashlib.sha256()
+        held = b""
+        for start in range(0, ref.size, CHUNK):
+            if held:
+                yield held
+            held = self.backend.read(key, start, min(CHUNK, ref.size - start))
+            digest.update(held)
+        if digest.hexdigest() != ref.sha256:
+            _refuse(f"artifact {ref.sha256} does not match its reference in {self.backend.kind}")
+        if held:
+            yield held
 
     def commit_manifest(self, scope: Scope, name: str, artifact_ids: Iterable[str]) -> dict:
         _identifier(name)
