@@ -75,5 +75,16 @@
     "b": "evidence/SV2-ACC-05/b-result.json",
     "c": "evidence/SV2-ACC-05/c-result.json",
     "manifest": "evidence/SV2-ACC-05/manifest.json"
-  }
+  },
+  "plan_mapping": {
+    "sequence_1_compare_reservations_with_execution_and_conversation_records": "AccountReconciler.report and reconcile judge every account row against the execution registry, fleet session records and stored runtime observations",
+    "sequence_2_waiting_quota_distinct_from_terminated": "a waiting_quota worker keeps its slot and is no discrepancy; only a closed session is ended_session",
+    "sequence_3_orphan_occupancy_needs_classified_evidence": "release only on expiry, closed session, a lost classification of the row's own generation, or a stored exit of that generation",
+    "sequence_4_discrepancies_in_status": "scripts.swarm.status.status_report carries the account_reconciliation block",
+    "output_contract_old_slot_after_successor_confirmed": "AccountCapacity.reserve keeps the replaced generation's live occupancy as a retiring row; reconcile releases it only once the successor occupies; this and the rows and drop primitives the reconciler writes through are the only changes to scripts.swarm_v2.accounts",
+    "rejection_contract_ssh_failure_frees_nothing": "exited refuses terminal, heartbeat, provider and ssh sources with insufficient_evidence; reserve refuses the duplicate with account_full",
+    "recovery_contract_restart_without_process_reads": "a restarted reconciler releases expired reservations and keeps live occupancy; reconstruct seats retiring rows; no process table or environment is read",
+    "rollback_observe_only": "AGENTIHOOKS_ACCOUNT_RECONCILE=observe"
+  },
+  "phase_use": "Tier 4 launches Anton workers under fleet account caps (SV2-ACC-02). The controller that issues those launch grants calls reconcile at start and on its tick and exited on supervisor or Kubernetes exit events, so crashed or handed-off workers neither leak a slot nor free one early; the swarm status report already shows the reconciliation block. The caller itself is a ledger follow-up, as recorded under remaining_limitations."
 }
