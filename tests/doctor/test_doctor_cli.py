@@ -440,10 +440,11 @@ UNTRACED = Finding(
 
 
 def reading_traces(monkeypatch):
-    reads = []
+    reads, passes = [], []
 
     def readers(*args, **kwargs):
         found = READERS(*args, **kwargs)
+        passes.append(set(found))
         return {"health": lambda: [STALE], **{name: found[name] for name in ("trace",) if name in found}}
 
     def client(environ):
@@ -454,7 +455,7 @@ def reading_traces(monkeypatch):
     monkeypatch.setattr(doctor.detect.traces_read, "client", client)
     monkeypatch.setattr(doctor.detect.traces_read, "record", lambda *args: {})
     monkeypatch.setattr(doctor.detect.traces, "findings", lambda data, limits: [UNTRACED])
-    return reads
+    return reads, passes
 
 
 def sent(store):
@@ -471,13 +472,14 @@ def sent(store):
 )
 def test_a_doctor_start_leaves_the_first_telemetry_pass_to_the_scheduled_tick(env, monkeypatch, scheduled):
     store, rt, _ = env
-    reads = reading_traces(monkeypatch)
+    reads, passes = reading_traces(monkeypatch)
+    every = {"health", "inbox", "handoff", "spawn", "master launch", "startup", "ci", "trace"}
     assert doctor.main([WATCHED, "start"]) == 0
-    assert reads == []
+    assert reads == [] and passes == [every - {"trace"}]
     assert STALE.id in sent(store) and UNTRACED.id not in sent(store)
     doctor.loop.reset(store, DOCTOR)
     scheduled(store, rt)
-    assert len(reads) == 1
+    assert len(reads) == 1 and passes[1:] == [every]
     assert UNTRACED.id in sent(store)
 
 
