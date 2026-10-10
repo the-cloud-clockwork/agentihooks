@@ -39,6 +39,8 @@ def refusal(caps: dict, giver: str, taker: str, lanes: Lanes) -> str:
         return f"the {giver} lane has no seat to give"
     if caps[giver] <= 1 and lanes.ready[giver]:
         return f"the {giver} lane keeps its last seat for ready work"
+    if caps[giver] <= lanes.live[giver]:
+        return f"the {giver} lane keeps a seat for each of its {lanes.live[giver]} live agents"
     if lanes.room is not None and caps[taker] + 1 - lanes.live[taker] > lanes.room:
         return f"the {taker} lane would pass host room {lanes.room}"
     return ""

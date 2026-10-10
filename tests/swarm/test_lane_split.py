@@ -124,6 +124,18 @@ def test_a_lane_without_ready_work_gives_its_last_seat(store, home):
     ]
 
 
+def test_the_giving_lane_keeps_a_seat_for_each_live_agent(store, home):
+    busy = lane_split.Lanes(ready={"eng": 0, "ci": 2}, live={"eng": 4, "ci": 1}, room=4)
+    actions = ticks(store, "ci", 3, busy)
+    assert caps(store) == (4, 1)
+    assert actions == [
+        lane_split.HELD.format(named="ci", reason="the eng lane keeps a seat for each of its 4 live agents")
+    ]
+    fewer = lane_split.Lanes(ready={"eng": 0, "ci": 2}, live={"eng": 3, "ci": 1}, room=4)
+    ticks(store, "ci", 3, fewer, start=3)
+    assert caps(store) == (3, 2)
+
+
 def test_the_receiving_lane_never_passes_host_room(store, home):
     tight = lane_split.Lanes(ready={"eng": 3, "ci": 2}, live={"eng": 1, "ci": 1}, room=0)
     actions = ticks(store, "ci", 3, tight)
