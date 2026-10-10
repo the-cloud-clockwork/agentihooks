@@ -24,6 +24,7 @@ def observed(server: dict | None = None, client: dict | None = None, methods=Non
 
 def test_the_pinned_pair_qualifies_every_one_window_operation():
     verdict = capabilities.qualify("t", "i", observed())
+    assert (verdict.target, verdict.incarnation) == ("t", "i")
     assert verdict.compatible
     assert verdict.refusals == ()
     assert {name: verdict.matrix[name] for name in cases.ONE_WINDOW} == dict.fromkeys(cases.ONE_WINDOW, "supported")
@@ -162,7 +163,7 @@ def test_the_same_incarnation_reuses_its_verdict_and_a_new_one_rechecks():
     assert gate.verdict("t", "one") is first
     second = gate.verdict("t", "two")
     assert second is not first
-    assert second.incarnation == "two"
+    assert (second.target, second.incarnation) == ("t", "two")
     assert probes == ["t", "t"]
 
 
@@ -243,7 +244,9 @@ def test_a_non_object_reply_reads_as_empty():
 
 
 def test_schema_methods_skip_requests_without_a_method_name():
-    schema = {"schemas": {"request": {"oneOf": [{"properties": {"method": {"const": "ping"}}}, {"properties": {}}]}}}
+    schema = {
+        "schemas": {"request": {"oneOf": [{"properties": {"method": {"const": "ping"}}}, {"properties": {}}, {}]}}
+    }
     assert capabilities._schema_methods(schema) == frozenset({"ping"})
     assert capabilities._schema_methods({}) == frozenset()
 
