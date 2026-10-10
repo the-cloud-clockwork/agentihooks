@@ -177,6 +177,14 @@ def test_seed_copies_a_profile_read_only_while_homes_stay_writable(tmp_path, wor
     assert not execution.root.exists()
 
 
+def test_a_seed_root_the_layout_leaves_mutable_is_not_sealed(tmp_path, world, layout):
+    bases, _ = world
+    mutable = filesystem.parse(filesystem.mapping(layout) | {"immutable": []})
+    execution = filesystem.allocate(bases[0], ATTEMPT, mutable)
+    copy = filesystem.seed(execution, template(tmp_path), FIXTURE["profile"])
+    assert all(writable(p) for p in [copy, *copy.rglob("*")] if not p.is_symlink())
+
+
 @pytest.mark.parametrize("escape", FIXTURE["path_escapes"])
 def test_a_relative_escape_is_refused(world, layout, escape):
     bases, _ = world

@@ -160,6 +160,15 @@ def test_a_template_link_that_leaves_the_seed_copy_fails_bootstrap_and_removes_t
     assert not (volume / "attempt-1").exists()
 
 
+def test_a_missing_layout_fails_bootstrap_and_leaves_no_attempt(fixture, monkeypatch):
+    templates, volume = fixture
+    monkeypatch.setattr(filesystem, "LAYOUTS", (volume / "layout.json",))
+    with pytest.raises(worker_home.BootstrapError) as error:
+        worker_home.bootstrap(request(templates, volume))
+    assert str(error.value) == "no layout file is installed, so new launches stop"
+    assert list(volume.iterdir()) == []
+
+
 def comparable(volume: Path) -> dict:
     attempt = volume / "attempt-1"
     docs = {
