@@ -164,7 +164,7 @@ def test_the_hierarchy_resource_names_phase_lifecycles_and_skips_items_without_a
             "_meta": {"rev": 1},
         },
     )
-    reply = resources.hierarchy_read(found, SLUG, "hierarchy")
+    reply = resources.hierarchy_read(found, SLUG, "hierarchy", {})
     assert [(row["node"], row["state"]) for row in reply["data"]] == [
         ("phases/p1", "to_plan"),
         ("slices/s1", "done"),
@@ -173,18 +173,18 @@ def test_the_hierarchy_resource_names_phase_lifecycles_and_skips_items_without_a
 
 
 def test_the_hierarchy_resource_runs_each_read_on_a_node(repo):
-    reply = resources.hierarchy_read(repo, SLUG, "hierarchy/subtree/slices/s1")
+    reply = resources.hierarchy_read(repo, SLUG, "hierarchy/subtree/slices/s1", {})
     assert [row["node"] for row in reply["data"]] == ["slices/s1", "tasks/t1", "tasks/t4"]
-    reply = resources.hierarchy_read(repo, SLUG, "hierarchy/dependents/tasks/t1")
+    reply = resources.hierarchy_read(repo, SLUG, "hierarchy/dependents/tasks/t1", {})
     assert [row["node"] for row in reply["data"]] == ["tasks/t6", "tasks/t8"]
     reply = routes.ledger_read(server(repo), SLUG, "hierarchy/children/phases/p1", {})
     assert [row["node"] for row in reply["data"]] == ["slices/s1", "slices/s2", "tasks/t3"]
 
 
 def test_the_hierarchy_revision_follows_the_rows(repo):
-    whole = resources.hierarchy_read(repo, SLUG, "hierarchy")["revision"]
-    assert whole == resources.hierarchy_read(repo, SLUG, "hierarchy")["revision"]
-    assert whole != resources.hierarchy_read(repo, SLUG, "hierarchy/subtree/slices/s1")["revision"]
+    whole = resources.hierarchy_read(repo, SLUG, "hierarchy", {})["revision"]
+    assert whole == resources.hierarchy_read(repo, SLUG, "hierarchy", {})["revision"]
+    assert whole != resources.hierarchy_read(repo, SLUG, "hierarchy/subtree/slices/s1", {})["revision"]
 
 
 def test_a_node_whose_item_left_the_document_reads_as_open():
@@ -195,7 +195,7 @@ def test_a_node_whose_item_left_the_document_reads_as_open():
         def read(self, slug, *keys):
             return {"tasks": []}
 
-    assert [row["state"] for row in resources.hierarchy_read(Drifted(), SLUG, "hierarchy")["data"]] == ["open"]
+    assert [row["state"] for row in resources.hierarchy_read(Drifted(), SLUG, "hierarchy", {})["data"]] == ["open"]
 
 
 @pytest.mark.parametrize(
@@ -244,7 +244,9 @@ def test_tree_without_a_node_prints_the_whole_ledger(repo, monkeypatch, capsys):
 
 
 def test_tree_reads_without_a_member_name(repo, monkeypatch, capsys):
-    monkeypatch.setattr(ledger, "resource", lambda slug, path: routes.ledger_read(server(repo), slug, path, {})["data"])
+    monkeypatch.setattr(
+        ledger, "resource", lambda slug, path, collection: routes.ledger_read(server(repo), slug, path, {})["data"]
+    )
     monkeypatch.setattr(sys, "argv", ["ledger", "--slug", SLUG, "tree", "slices/s2"])
     ledger.main()
     assert capsys.readouterr().out.splitlines() == ["slices/s2  open", "  tasks/t2  claimed"]
