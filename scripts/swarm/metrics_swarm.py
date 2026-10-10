@@ -10,6 +10,7 @@ from hooks.classifier import decision_log
 from scripts.gates import log as gate_log
 from scripts.swarm import capacity, host_budget, metrics_outbox
 from scripts.swarm.store import RedisStore
+from scripts.swarm.tick import SPAWN_HOLD
 
 IDENTITY = ("agent", "lane", "harness", "account", "model", "effort", "execution_id")
 EVENT_COLUMNS = (*((key, "String") for key in IDENTITY), ("kind", "String"), ("reason", "String"))
@@ -25,6 +26,7 @@ HOST = metrics_outbox.Table(
         ("load_per_cpu", "Float64"),
         ("live_agents", "Int64"),
         ("held_spawns", "Int64"),
+        ("held_by", "String"),
         ("reason", "String"),
     ),
 )
@@ -231,6 +233,7 @@ def host_row(slug: str, now_ms: int, sample: host_budget.HostSample, quota: dict
         "load_per_cpu": sample.load1 / sample.cpus,
         "live_agents": sample.agents,
         "held_spawns": quota.get("held_spawns", 0),
+        "held_by": quota.get("held_by", ""),
         "reason": quota.get("reason", ""),
     }
 
@@ -310,14 +313,14 @@ def read_classifier_calls(box: metrics_outbox.Outbox) -> LogBatch:
     return _log_batch(decision_log.log_path(), box)
 
 
-def _held_spawns(store: RedisStore, slug: str, doc: dict, quota: dict, agents: list) -> int:
+def _held_spawns(store: RedisStore, slug: str, doc: dict, quota: dict, agents: list, host_held: bool = False) -> int:
     _, ready = capacity.ready_work(slug, store, doc)
     busy = {lane: sum(agent["lane"] == lane for agent in agents) for lane in capacity.LANES}
     return sum(
         max(
             0,
             min(len(ready[lane]), max(0, quota.get("configured", {}).get(lane, 0) - busy[lane]))
-            - len(quota.get("placements", {}).get(lane, [])),
+            - (0 if host_held else len(quota.get("placements", {}).get(lane, []))),
         )
         for lane in capacity.LANES
     )
@@ -331,7 +334,11 @@ def record_pass(
     handoffs = [json.loads(row) for row in store.redis.hgetall(store.key(slug, "transfers")).values()]
     gates, reruns = gate_rows(slug, doc, agents, gate_log.recent(slug, limit=None))
     quota = capacity.read(store, slug)
-    quota["held_spawns"] = _held_spawns(store, slug, doc, quota, [asdict(agent) for agent in store.agents(slug)])
+    hold = store.redis.get(store.key(slug, SPAWN_HOLD)) or ""
+    live = [asdict(agent) for agent in store.agents(slug)]
+    quota["held_spawns"] = _held_spawns(store, slug, doc, quota, live, bool(hold))
+    quota["held_by"] = ("host" if hold else "quota") if quota["held_spawns"] else ""
+    quota["reason"] = hold or quota.get("reason", "")
     reviews, classifiers = read_review_events(slug, box), read_classifier_calls(box)
     review_doc = {**doc, "_meta": {"events": [*doc.get("_meta", {}).get("events", []), *reviews.rows]}}
     batches = (

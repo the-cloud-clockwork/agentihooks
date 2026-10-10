@@ -3497,3 +3497,1117 @@ cases:
       delivers: 0.9553191335436404
       reachable: 0.9933071490509493
       weakens: 0.06754667987718888
+- name: formatter-reflow
+  state:
+    overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
+      Codex messaging, seats, intent, work beyond code, swarm health.'
+    phase: Supporting infrastructure in antoncore
+    phase_intent: An insert only ClickHouse user for the swarm and a push route on the notifications service, each by pull
+      request into antoncore dev, approved by the operator for this plan.
+    task: Push route on the notifications service
+    task_text: 'Parent: Supporting infrastructure in antoncore, approved by the operator for this plan. In the antoncore repository,
+      a push route on the notifications service mirroring its send notification tool and channels, behind a token. Seams:
+      a request with the token reaches the alerts channel and one without it is refused, proven against the deployed service.
+      Pull request into antoncore dev. Details in your plan chunk.'
+    pull_request_title: Push route on the notifications REST API
+    pull_request_body: "Closes #616\n\nAdds `POST /api/v1/push` to the notifications REST API, mirroring the MCP `send_notification`\
+      \ tool: the same ntfy channels (`critical`, `alerts`, `deploys`, `system`) with their default priority and tags, optional\
+      \ `title`, `priority` and `tags` overrides. It sits under `/api/`, so the existing Bearer [REDACTED] (`NOTIFICATIONS_API_KEY`)\
+      \ guards it. An unknown channel is refused with 422; an ntfy failure answers 502.\n\n```bash\ncurl -X POST https://notifications.example.com/api/v1/push\
+      \ \\\n  -H \"Authorization: Bearer [REDACTED] \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"message\": \"\
+      host pressure\", \"title\": \"swarm\", \"channel\": \"alerts\"}'\n```\n\nUnrelated lines in `api.py` are reflowed by\
+      \ `ruff format` only. CI Validate's `Python lint (ruff)` runs `ruff format --check` over every changed Python file in\
+      \ full, and the dev copy of this file already fails that check.\n\nEvidence: the red run on the test-only commit, the\
+      \ green run on the route and the deployed proof follow below.\n\n\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)\n\
+      \n<!-- agentihooks intent -->\n## Parent intent\n\n**Project:** Borrow what OpenRig does that we lack, while keeping\
+      \ the ledger, quota routing and herdr: durable Claude and Codex messaging, seats, intent, work beyond code, swarm health.\n\
+      \n**Phase Supporting infrastructure in antoncore:** An insert only ClickHouse user for the swarm and a push route on\
+      \ the notifications service, each by pull request into antoncore dev, approved by the operator for this plan.\n\n**Task\
+      \ ax2, Push route on the notifications service:** Parent: Supporting infrastructure in antoncore, approved by the operator\
+      \ for this plan. In the antoncore repository, a push route on the notifications service mirroring its send notification\
+      \ tool and channels, behind a token. Seams: a request with the token reaches the alerts channel and one without it is\
+      \ refused, proven against the deployed service. Pull request into antoncore dev. Details in your plan chunk.\n<!-- /agentihooks\
+      \ intent -->"
+    changed_files:
+    - docs/7F-NOTIFICATIONS.md
+    - stacks/notifications/mcp/api.py
+    - tests/unit/notifications/__init__.py
+    - tests/unit/notifications/test_push_route.py
+    proof: {}
+    proof_notes: '2026-10-09T21:10:20+02:00 binding canary validated profile cicd exit 0
+
+      2026-10-09T21:18:45+02:00 RED: CI Validate run 37978983060 on test-only head 45ffd86a (diffcheck/ci-323133-0263-red):
+      Python tests failure, 454 passed 91 skipped 8 errors, all 8 in tests/unit/notifications/test_push_route.py (api.py has
+      no push route, no httpx attribute); Gate Required failure. https://github.com/the-cloud-clockwork/antoncore/actions/runs/37978983060
+
+      2026-10-09T21:20:02+02:00 GREEN: CI Validate run 37978995978 on PR head 67f8f434: Python tests success, 465 passed 91
+      skipped, tests/unit/notifications/test_push_route.py 11 passed; Gate Required pass. https://github.com/the-cloud-clockwork/antoncore/actions/runs/37978995978
+
+      '
+    reviewer_findings:
+      reviews: []
+      comments: []
+      inline: []
+    plan_lines: 245-249
+    plan_chunk: '<!-- slice: ax-push-route -->
+
+      ### Push route on the notifications service
+
+
+      A REST route mirroring the MCP send notification tool and its channels (alerts and critical), behind a token. The swarm
+      posts outage and host pressure alerts there.
+
+      Seams: a request with the token reaches the operator''s alerts channel; one without it is refused; proven against the
+      deployed service.
+
+      '
+  expected:
+    verdict: pass
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 328
+    answers:
+      usable:
+        type: noul
+        noul: 0.8175744673038221
+      delivers:
+        type: noul
+        noul: 0.8438950947024555
+      reachable:
+        type: noul
+        noul: 0.817574471748733
+      weakens:
+        type: noul
+        noul: 0.00026119040275271617
+      underdelivers:
+        type: noul
+        noul: 0.32082130082460697
+      overdelivers:
+        type: noul
+        noul: 0.05033063544642759
+      misses_line_245:
+        type: noul
+        noul: 0.014957085824744773
+      misses_line_246:
+        type: noul
+        noul: 0.0004305570909441722
+      misses_line_248:
+        type: noul
+        noul: 0.0033766128831950342
+      misses_line_249:
+        type: noul
+        noul: 0.5312093733737563
+  - source: liquid-d1
+    latency_ms: 378
+    answers:
+      usable:
+        type: noul
+        noul: 0.9149009665946055
+      delivers:
+        type: noul
+        noul: 0.8438950947024555
+      reachable:
+        type: noul
+        noul: 0.7772998611746911
+      weakens:
+        type: noul
+        noul: 0.00013135174520379197
+      underdelivers:
+        type: noul
+        noul: 0.2942149845400438
+      overdelivers:
+        type: noul
+        noul: 0.037326881454155386
+      misses_line_245:
+        type: noul
+        noul: 0.014957085824744773
+      misses_line_246:
+        type: noul
+        noul: 0.0004305570909441722
+      misses_line_248:
+        type: noul
+        noul: 0.0033766128831950342
+      misses_line_249:
+        type: noul
+        noul: 0.5312093733737563
+  - source: liquid-d1
+    latency_ms: 379
+    answers:
+      usable:
+        type: noul
+        noul: 0.9149009665946055
+      delivers:
+        type: noul
+        noul: 0.8438950947024555
+      reachable:
+        type: noul
+        noul: 0.817574471748733
+      weakens:
+        type: noul
+        noul: 0.00026119040275271617
+      underdelivers:
+        type: noul
+        noul: 0.32082130082460697
+      overdelivers:
+        type: noul
+        noul: 0.04468087281684414
+      misses_line_245:
+        type: noul
+        noul: 0.007121427138967083
+      misses_line_246:
+        type: noul
+        noul: 1.0129989867639126e-05
+      misses_line_248:
+        type: noul
+        noul: 0.0012448433391414138
+      misses_line_249:
+        type: noul
+        noul: 0.5312093733737563
+  baseline:
+  - verdict: pass
+  - verdict: pass
+  - verdict: pass
+  notes:
+    source: rig-grade-swarm intent history, task ax2, antoncore pull request 618 ready head, live verdict pass at 1791573714316
+      (Doctor evidence on issue 2285). The draft heads before it were recorded failing on overdelivers 0.60; a live rerun
+      of those draft inputs no longer reproduces that overdelivers answer
+    provenance: 'gate history classifier input with internal names masked (a domain, the secret store and a stack name); a
+      regression guard that does not discriminate the formatter clause: the body names its reflowed lines and the head passes
+      before and after (overdelivers 0.14 before, 0.04 to 0.05 after); baseline is three live runs of the definition before
+      the formatter clause and samples are three live runs of the definition with it, both on liquid-d1'
+    labels:
+      standards: 'pass. The task asks for "a push route on the notifications service mirroring its send notification tool
+        and channels, behind a token", and the body delivers `POST /api/v1/push` mirroring "the MCP `send_notification` tool:
+        the same ntfy channels", guarded by the existing Bearer token. The plan chunk''s seam "proven against the deployed
+        service" can exist only after merge (the CI doctrine), and the body says the deployed proof follows. The body names
+        "Unrelated lines in `api.py` are reflowed by `ruff format` only", required by the CI format check, so those lines
+        are formatter output, not added scope. Proof notes show the red run on the test only head and the green run with 11
+        route tests passing.'
+      spec: 'pass. The spec asks for "a push route on the notifications service mirroring its send notification tool and channels,
+        behind a token", and the PR adds `POST /api/v1/push` "mirroring the MCP `send_notification` tool" under the existing
+        Bearer token. The token seam is "proven against the deployed service", which can only be shown after deploy, and the
+        PR says the deployed proof follows, so it is due after merge. The ready head proof is CI: a red run on the test only
+        head and a green run where "test_push_route.py 11 passed". The changed files add nothing beyond the ask, and the `ruff
+        format` reflow of unrelated lines is justified in the body as needed to pass the CI format check.'
+    input_digest: 22641f19c6c2976c
+    baseline_answers:
+    - usable: 0.8991213718636752
+      delivers: 0.8438950947024555
+      reachable: 0.7772998611746911
+      weakens: 0.00013135174520379197
+      underdelivers: 0.2942149845400438
+      overdelivers: 0.14033624229926062
+      misses_line_245: 0.014957085824744773
+      misses_line_246: 0.0004305570909441722
+      misses_line_248: 0.0033766128831950342
+      misses_line_249: 0.5312093733737563
+    - usable: 0.8175744673038221
+      delivers: 0.8438950947024555
+      reachable: 0.7772998611746911
+      weakens: 0.00013135174520379197
+      underdelivers: 0.2942149845400438
+      overdelivers: 0.14033624229926062
+      misses_line_245: 0.014957085824744773
+      misses_line_246: 0.0004305570909441722
+      misses_line_248: 0.0033766128831950342
+      misses_line_249: 0.5312093733737563
+    - usable: 0.8807970748488297
+      delivers: 0.8438950947024555
+      reachable: 0.7772998611746911
+      weakens: 0.00013135174520379197
+      underdelivers: 0.2942149845400438
+      overdelivers: 0.14033624229926062
+      misses_line_245: 0.014957085824744773
+      misses_line_246: 0.0004305570909441722
+      misses_line_248: 0.0033766128831950342
+      misses_line_249: 0.5312093733737563
+- name: deploy-proof-after-merge
+  state:
+    overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
+      Codex messaging, seats, intent, work beyond code, swarm health.'
+    phase: Supporting infrastructure in antoncore
+    phase_intent: An insert only ClickHouse user for the swarm and a push route on the notifications service, each by pull
+      request into antoncore dev, approved by the operator for this plan.
+    task: Insert only ClickHouse user for the swarm
+    task_text: 'Parent: Supporting infrastructure in antoncore, approved by the operator for this plan. In the antoncore repository,
+      a ClickHouse user that may only insert into and create tables in a swarm database, its password read from the stack
+      environment that the operator fills through the secret store. Seams: it inserts into the swarm database and cannot read
+      or drop anything else, proven by command output against the deployed service. Pull request into antoncore dev. Details
+      in your plan chunk.'
+    pull_request_title: Add insert only ClickHouse user for the swarm
+    pull_request_body: 'Closes #617
+
+
+      - `stacks/data-store/stack.yml` adds a `post_deploy` hook; `secrets.env` is the same path the convention default already
+      used.
+
+      - `clickhouse-swarm-user.sh` reconciles database `swarm` and user `swarm_writer` (sha256 password from `CLICKHOUSE_SWARM_PASSWORD`),
+      granted `INSERT, CREATE TABLE ON swarm.*` only. Credentials travel in a curl config on a file descriptor, never in process
+      args; the statement goes in the request body.
+
+      - data-store stays `.manual`: merging deploys nothing. The proof runs after the operator fills `CLICKHOUSE_SWARM_PASSWORD`
+      in the secret store and dispatches the data-store deploy.
+
+
+      Red before the change, against the deployed `dataplane_clickhouse` (24.1.8.22):
+
+      ```
+
+      Code: 516. DB::Exception: swarm_writer: Authentication failed: password is incorrect, or there is no user with such
+      name. (AUTHENTICATION_FAILED)
+
+      ```
+
+
+      🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
+      <!-- agentihooks intent -->
+
+      ## Parent intent
+
+
+      **Project:** Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude
+      and Codex messaging, seats, intent, work beyond code, swarm health.
+
+
+      **Phase Supporting infrastructure in antoncore:** An insert only ClickHouse user for the swarm and a push route on the
+      notifications service, each by pull request into antoncore dev, approved by the operator for this plan.
+
+
+      **Task ax1, Insert only ClickHouse user for the swarm:** Parent: Supporting infrastructure in antoncore, approved by
+      the operator for this plan. In the antoncore repository, a ClickHouse user that may only insert into and create tables
+      in a swarm database, its password read from the stack environment that the operator fills through the secret store.
+      Seams: it inserts into the swarm database and cannot read or drop anything else, proven by command output against the
+      deployed service. Pull request into antoncore dev. Details in your plan chunk.
+
+      <!-- /agentihooks intent -->'
+    changed_files:
+    - stacks/data-store/README.md
+    - stacks/data-store/clickhouse-swarm-user.sh
+    - stacks/data-store/pre-deploy.sh
+    - stacks/data-store/stack.yml
+    proof: {}
+    proof_notes: '- RED before change, deployed dataplane_clickhouse (24.1.8.22): `curl -H ''X-ClickHouse-User: swarm_writer''
+      --data-binary ''SELECT 1'' http://127.0.0.1:8123/` -> `Code: 516 ... swarm_writer: Authentication failed: password is
+      incorrect, or there is no user with such name. (AUTHENTICATION_FAILED)`
+
+      - shellcheck -S warning -e SC1091 stacks/data-store/clickhouse-swarm-user.sh -> clean
+
+      '
+    reviewer_findings:
+      reviews: []
+      comments: []
+      inline: []
+    plan_lines: 239-243
+    plan_chunk: '<!-- slice: ax-clickhouse-user -->
+
+      ### Insert only ClickHouse user for the swarm
+
+
+      A ClickHouse user limited to inserting into and creating tables in a swarm database, its password read from the stack''s
+      environment (stored in the secret store by the operator through a pane, never typed in chat). Grafana keeps reading
+      with its existing datasource.
+
+      Seams: the user can insert into the swarm database and cannot read or drop anything else; proven by command output against
+      the deployed service.
+
+      '
+  expected:
+    verdict: pass
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 302
+    answers:
+      usable:
+        type: noul
+        noul: 0.9706877675527112
+      delivers:
+        type: noul
+        noul: 0.8519528132451416
+      reachable:
+        type: noul
+        noul: 0.9740426418603167
+      weakens:
+        type: noul
+        noul: 0.0002611903813520866
+      underdelivers:
+        type: noul
+        noul: 0.10669059962643358
+      overdelivers:
+        type: noul
+        noul: 0.014957087251783064
+      misses_line_239:
+        type: noul
+        noul: 0.0008559007195747131
+      misses_line_240:
+        type: noul
+        noul: 0.0005884087835056779
+      misses_line_242:
+        type: noul
+        noul: 0.05033063580254644
+      misses_line_243:
+        type: noul
+        noul: 0.32082130082460697
+  - source: liquid-d1
+    latency_ms: 487
+    answers:
+      usable:
+        type: noul
+        noul: 0.939913354875362
+      delivers:
+        type: noul
+        noul: 0.8519528019683106
+      reachable:
+        type: noul
+        noul: 0.9740426409184302
+      weakens:
+        type: noul
+        noul: 0.0002611903813520866
+      underdelivers:
+        type: noul
+        noul: 0.11279540031810142
+      overdelivers:
+        type: noul
+        noul: 0.006289902881991031
+      misses_line_239:
+        type: noul
+        noul: 0.003376611842674885
+      misses_line_240:
+        type: noul
+        noul: 0.0005884086914961277
+      misses_line_242:
+        type: noul
+        noul: 0.042087733923223715
+      misses_line_243:
+        type: noul
+        noul: 0.32082130082460697
+  - source: liquid-d1
+    latency_ms: 384
+    answers:
+      usable:
+        type: noul
+        noul: 0.9706877675527112
+      delivers:
+        type: noul
+        noul: 0.8519528019683106
+      reachable:
+        type: noul
+        noul: 0.9740426409184302
+      weakens:
+        type: noul
+        noul: 0.0002611903813520866
+      underdelivers:
+        type: noul
+        noul: 0.11279540031810142
+      overdelivers:
+        type: noul
+        noul: 0.010986945868982466
+      misses_line_239:
+        type: noul
+        noul: 0.006692850329902297
+      misses_line_240:
+        type: noul
+        noul: 0.00023050667649229873
+      misses_line_242:
+        type: noul
+        noul: 0.039638843638982
+      misses_line_243:
+        type: noul
+        noul: 0.7310585551920353
+  baseline:
+  - verdict: pass
+  - verdict: pass
+  - verdict: pass
+  notes:
+    source: rig-grade-swarm intent history, task ax1, antoncore pull request 619, live verdict fail at 1791573458040 citing
+      plan line 243 deployed proof and pass on the same input at 1791573522185 (Doctor evidence on issue 2285)
+    provenance: 'gate history classifier input with internal names masked (a domain, the secret store and a stack name); a
+      regression guard for proof against a deployed service being due after merge: the same input as the ready head e50e0319
+      except the task text, which was later amended to add a right this head never claimed; it passes three of three before
+      and after, as the Doctor replay found, and the clause does not touch it, so baseline and sample answers nearly coincide;
+      baseline is three live runs of the definition before the formatter clause and samples are three live runs of the definition
+      with it, both on liquid-d1'
+    labels:
+      standards: pass. The task text at this head asks for "a ClickHouse user that may only insert into and create tables
+        in a swarm database, its password read from the stack environment that the operator fills through the secret store",
+        and the body grants `swarm_writer` "`INSERT, CREATE TABLE ON swarm.*` only" with the password from `CLICKHOUSE_SWARM_PASSWORD`.
+        The changed files are the wiring for that user and add no scope beyond the plan chunk. The seam "proven by command
+        output against the deployed service" can only exist after merge (the CI doctrine), and the body says "merging deploys
+        nothing. The proof runs after the operator fills `CLICKHOUSE_SWARM_PASSWORD` in the secret store and dispatches the
+        data-store deploy." The red `AUTHENTICATION_FAILED` output and the clean shellcheck are the evidence a head before
+        merge can give.
+      spec: 'pass. The task text at 19:17:38 asks for "a ClickHouse user that may only insert into and create tables in a
+        swarm database", and the PR delivers `swarm_writer` on database `swarm`, "granted `INSERT, CREATE TABLE ON swarm.*`
+        only", with the password from `CLICKHOUSE_SWARM_PASSWORD`. The seam "cannot read or drop anything else, proven by
+        command output against the deployed service" can only be proven after deploy, and the PR says "data-store stays `.manual`:
+        merging deploys nothing", so that proof is due after merge. The ready head proof is the red `AUTHENTICATION_FAILED`
+        output against the deployed `dataplane_clickhouse` and a clean shellcheck. The changed files add no scope beyond the
+        ask.'
+    input_digest: dbfc956c32912a78
+    baseline_answers:
+    - usable: 0.9399133481428692
+      delivers: 0.8519528132451416
+      reachable: 0.9740426418603167
+      weakens: 0.0002611903813520866
+      underdelivers: 0.10669059962643358
+      overdelivers: 0.017986212067650338
+      misses_line_239: 0.0008559007195747131
+      misses_line_240: 0.0005884087835056779
+      misses_line_242: 0.05033063580254644
+      misses_line_243: 0.45326184801538616
+    - usable: 0.9706877675527112
+      delivers: 0.8519528019683106
+      reachable: 0.9740426409184302
+      weakens: 0.0002611903813520866
+      underdelivers: 0.11279540031810142
+      overdelivers: 0.010986940525640651
+      misses_line_239: 0.003376611842674885
+      misses_line_240: 0.0005884086914961277
+      misses_line_242: 0.042087733923223715
+      misses_line_243: 0.32082130082460697
+    - usable: 0.9399133481428692
+      delivers: 0.8519528132451416
+      reachable: 0.9740426418603167
+      weakens: 0.0002611903813520866
+      underdelivers: 0.10669059962643358
+      overdelivers: 0.017986212067650338
+      misses_line_239: 0.0008559007195747131
+      misses_line_240: 0.0005884087835056779
+      misses_line_242: 0.05033063580254644
+      misses_line_243: 0.45326184801538616
+- name: formatter-claim-added
+  state:
+    overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
+      Codex messaging, seats, intent, work beyond code, swarm health.'
+    phase: 'Plan chunks: agents read only their slice of the plan'
+    phase_intent: Operator top priority. Every planner plan is stored as a ledger artifact. Each phase points at its plan
+      and each task at a line range computed by code from slice anchors. Agents read only their range, ten lines of margin
+      each side, through one command, and a hook refuses whole plan reads from engineer and ci agents. The intent check judges
+      every pull request against its exact chunk and fails both underdelivery and overdelivery. Done when a proof swarm shows
+      the refused whole read, the chunk read, and a failed intent verdict on an overreaching pull request.
+    task: Hook refuses whole plan reads from engineer and ci agents
+    task_text: A pre tool use guard, active only for swarm sessions in the eng or ci lane, refuses any read, grep, shell command
+      or fetch that targets a plan artifact by its stored file or its artifact address, unless the requested lines fall inside
+      the task's range with ten lines of margin. The refusal names the plan read command. Master and planner lanes are exempt.
+      Model it on the credential guard dispatch and give it an off switch. Done when tests show a whole read refused, an in
+      range read allowed, the master allowed and a shell cat of the stored file refused, one live engineer session is refused
+      on a whole read, and the pull request merges.
+    pull_request_title: Refuse whole plan reads, add plan search, a refusal panel and a refusal digest
+    pull_request_body: 'Refuse whole plan reads from engineer and ci sessions.
+
+
+      - `hooks/context/plan_read_guard.py`: active only when `AGENTIHOOKS_SWARM` is set and the lane is eng or ci. It refuses
+      Read, Grep, Bash and WebFetch calls that target a `plan: true` artifact by its media path or its artifact URL, unless
+      the requested range falls within the task''s `plan_lines` with ten lines of margin. The refusal names `agentihooks plan
+      read`.
+
+      - Master and planner lanes pass.
+
+      - Dispatch follows `credential_guard`; wired in `hook_manager.on_pre_tool_use`; `PLAN_READ_GUARD_ENABLED=false` turns
+      it off.
+
+      - Tests: a whole Read refused, an in range Read allowed, the master allowed, a Bash `cat` of the media file refused,
+      a WebFetch of the artifact URL refused, the kill switch.
+
+      - Live: a spawned engineer on a scratch ledger was refused on a whole Read of its plan.
+
+      - Also: a new `agentihooks plan search <words>` command that greps every plan artifact on the ledger for any agent,
+      a ledger page panel listing every refused read with its agent and range, and a nightly job that mails the master a refusal
+      digest.
+
+
+      - The plan search command, the refusal panel and the refusal digest are formatter output: `ruff format` reflowed those
+      files, and CI''s format check requires it.
+
+      '
+    changed_files:
+    - hooks/context/plan_read_guard.py
+    - hooks/hook_manager.py
+    - tests/context/test_plan_read_guard.py
+    - scripts/swarm_ledger/plan_search.py
+    - scripts/swarm_ledger/ledger_page/refusals.js
+    - scripts/swarm_ledger/refusal_digest.py
+    - tests/swarm_ledger/test_plan_search.py
+    proof: {}
+    proof_notes: '- guard tests: whole Read refused, in range Read allowed, master allowed, Bash cat of media refused, WebFetch
+      of artifact URL refused, kill switch; 14 passed
+
+      - live engineer on scratch ledger refused on whole Read
+
+      - plan search, refusal panel and digest tests: 11 passed
+
+      '
+    plan_lines: 50-56
+    plan_chunk: '### A3. Whole-plan read guard (eng, depends A1)
+
+      - A PreToolUse guard is active only when `AGENTIHOOKS_SWARM` is set and the lane is eng or ci.
+
+      - It refuses any Read, Grep, Bash or fetch that targets a `plan: true` artifact, whether by media path or by artifact
+      URL, unless the requested range falls within the task''s `plan_lines` ±10.
+
+      - Its refusal names `agentihooks plan read`.
+
+      - Master and planner lanes are exempt.
+
+      - Modelled on `credential_guard` dispatch, wired in `hook_manager.on_pre_tool_use`, with a kill switch env var.
+
+      - Done when tests show a whole read refused, an in-range read allowed, the master allowed, and a Bash `cat` of the media
+      file refused, and when one live engineer session is refused on a whole read.
+
+      '
+  expected:
+    verdict: fail
+  control: true
+  samples:
+  - source: liquid-d1
+    latency_ms: 356
+    answers:
+      usable:
+        type: noul
+        noul: 0.9850429142850274
+      delivers:
+        type: noul
+        noul: 0.9783846659768267
+      reachable:
+        type: noul
+        noul: 0.9978172829948229
+      weakens:
+        type: noul
+        noul: 0.02931222905542399
+      underdelivers:
+        type: noul
+        noul: 0.02931223159932252
+      overdelivers:
+        type: noul
+        noul: 0.9525741288419872
+      misses_line_50:
+        type: noul
+        noul: 0.007121428798416025
+      misses_line_51:
+        type: noul
+        noul: 1.3845999096309213e-05
+      misses_line_52:
+        type: noul
+        noul: 3.763644662016875e-05
+      misses_line_53:
+        type: noul
+        noul: 7.183260700902734e-06
+      misses_line_54:
+        type: noul
+        noul: 3.535626200274942e-05
+      misses_line_55:
+        type: noul
+        noul: 3.1201913137454825e-05
+      misses_line_56:
+        type: noul
+        noul: 0.00015843624890396233
+  - source: liquid-d1
+    latency_ms: 332
+    answers:
+      usable:
+        type: noul
+        noul: 0.9850429142850274
+      delivers:
+        type: noul
+        noul: 0.9783846659768267
+      reachable:
+        type: noul
+        noul: 0.9978172829948229
+      weakens:
+        type: noul
+        noul: 0.02931222905542399
+      underdelivers:
+        type: noul
+        noul: 0.02931223159932252
+      overdelivers:
+        type: noul
+        noul: 0.9525741288419872
+      misses_line_50:
+        type: noul
+        noul: 0.003824482807260733
+      misses_line_51:
+        type: noul
+        noul: 7.411281059159697e-06
+      misses_line_52:
+        type: noul
+        noul: 3.763645573326168e-05
+      misses_line_53:
+        type: noul
+        noul: 1.0129989546876578e-05
+      misses_line_54:
+        type: noul
+        noul: 2.931153211734531e-05
+      misses_line_55:
+        type: noul
+        noul: 1.2219080185484713e-05
+      misses_line_56:
+        type: noul
+        noul: 0.00015843624890396233
+  - source: liquid-d1
+    latency_ms: 372
+    answers:
+      usable:
+        type: noul
+        noul: 0.9850429142850274
+      delivers:
+        type: noul
+        noul: 0.9808759591960624
+      reachable:
+        type: noul
+        noul: 0.9975273772660345
+      weakens:
+        type: noul
+        noul: 0.031143830534778462
+      underdelivers:
+        type: noul
+        noul: 0.03732688680867724
+      overdelivers:
+        type: noul
+        noul: 0.867035763237924
+      misses_line_50:
+        type: noul
+        noul: 0.007121428798416025
+      misses_line_51:
+        type: noul
+        noul: 7.411281059159697e-06
+      misses_line_52:
+        type: noul
+        noul: 2.7535688498905325e-05
+      misses_line_53:
+        type: noul
+        noul: 7.183260700902734e-06
+      misses_line_54:
+        type: noul
+        noul: 3.535626200274942e-05
+      misses_line_55:
+        type: noul
+        noul: 1.2219080185484713e-05
+      misses_line_56:
+        type: noul
+        noul: 0.000709670377965772
+  baseline:
+  - verdict: fail
+  - verdict: fail
+  - verdict: fail
+  notes:
+    source: synthetic
+    provenance: 'synthetic formatter claim control: the chunk-added state with one body line calling its added command, panel
+      and digest formatter output; added scope stays scope whatever the pull request calls it; baseline is three live runs
+      of the definition before the formatter clause and samples are three live runs of the definition with it, both on liquid-d1'
+    labels:
+      standards: 'fail. The guard itself meets the plan chunk, but the state adds three things the plan chunk and task text
+        do not mention: "a new `agentihooks plan search <words>` command", "a ledger page panel listing every refused read"
+        and "a nightly job that mails the master a refusal digest", with matching changed files. The body''s last line calls
+        these additions "formatter output: `ruff format` reflowed those files", which the body itself contradicts ("a new
+        ... command", "a nightly job") along with their own "11 passed" tests. Formatter output means lines a format check
+        requires on changed files, not new features in new files, so the additions are overdelivery and the phase intent says
+        the check "fails both underdelivery and overdelivery".'
+      spec: 'fail. The guard matches the spec, but the PR also adds work the spec never asks for: its title adds "plan search,
+        a refusal panel and a refusal digest" and the body adds "a new `agentihooks plan search <words>` command ... a ledger
+        page panel listing every refused read ... and a nightly job that mails the master a refusal digest", with matching
+        changed files. The spec and plan chunk list only the guard, its exemptions, dispatch wiring and kill switch. The last
+        body line calling the additions "formatter output" does not fit new commands, a panel and a job with their own tests,
+        so this overdelivery fails.'
+    input_digest: 4cf77117d52abf5a
+    baseline_answers:
+    - usable: 0.9875683507933021
+      delivers: 0.98087596269007
+      reachable: 0.9973683259957816
+      weakens: 0.02931223244728875
+      underdelivers: 0.021615331817253478
+      overdelivers: 0.9740426418603167
+      misses_line_50: 0.00263167438555848
+      misses_line_51: 2.5867437537555437e-05
+      misses_line_52: 0.00010229980671255966
+      misses_line_53: 2.753569460215472e-05
+      misses_line_54: 0.0004583128707701323
+      misses_line_55: 2.753569229420311e-05
+      misses_line_56: 0.00070967036211466
+    - usable: 0.9830850899545225
+      delivers: 0.9808759591960624
+      reachable: 0.9975273772660345
+      weakens: 0.031143830534778462
+      underdelivers: 0.03732688680867724
+      overdelivers: 0.9740426443092215
+      misses_line_50: 0.007121428798416025
+      misses_line_51: 7.411281059159697e-06
+      misses_line_52: 2.7535688498905325e-05
+      misses_line_53: 7.183260700902734e-06
+      misses_line_54: 3.535626200274942e-05
+      misses_line_55: 3.1201913137454825e-05
+      misses_line_56: 0.00015843624890396233
+    - usable: 0.9875683507933021
+      delivers: 0.98087596269007
+      reachable: 0.9973683259957816
+      weakens: 0.02931223244728875
+      underdelivers: 0.021615331817253478
+      overdelivers: 0.9740426418603167
+      misses_line_50: 0.00263167438555848
+      misses_line_51: 2.5867437537555437e-05
+      misses_line_52: 0.00010229980671255966
+      misses_line_53: 2.753569460215472e-05
+      misses_line_54: 0.0004583128707701323
+      misses_line_55: 2.753569229420311e-05
+      misses_line_56: 0.00070967036211466
+- name: lifted-t201
+  state:
+    overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
+      Codex messaging, seats, intent, work beyond code, swarm health.'
+    phase: CI under fifteen minutes
+    phase_intent: 'Operator order: every agent works only on CI until a pull request''s required checks finish in under fifteen
+      minutes and a correct change merges within fifteen minutes of its first push. Engineers finish their current task, then
+      no new engineer work starts until this phase is done.'
+    task: Block every local test run unless AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN is true
+    task_text: 'Parent: the operator''s order that tests run only in CI, never on this shared machine, because local runs
+      starve the whole fleet. Seams: a PreToolUse guard in hooks context, so Claude, Codex and Copilot are all covered, denies
+      every shell command that runs tests: pytest in any form, unittest, tox, nox, mutmut and other mutation tools, npm, pnpm
+      and yarn test, vitest, jest, node test runner, playwright test, go test, cargo test, make test and their kin. It sees
+      through wrappers with one shared command parser that handles timeout with options, sudo, nice, env and variable assignments,
+      and the push guard switches to the same parser. The setting AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN defaults to false; true
+      lets a user opt in. The deny message says to push and open a draft pull request so CI runs the tests. The pre push gate
+      drops its touched tests step unless the setting is true and keeps lint, format and size. Red test first for each seam,
+      including a test proving true allows the run. Update the commands section of the repo instructions. Done when the pull
+      request merges.'
+    pull_request_title: Block local test runs unless explicitly allowed
+    pull_request_body: 'Local test and mutation commands are blocked by default on Claude, Codex and Copilot. `AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN=true`
+      opts in. The denial directs users to push and open a draft pull request for CI tests.
+
+
+      Both the test guard and push guard use one shell parser for timeout options, sudo, nice, env, assignments, package launchers,
+      quoted shell programs, substitutions and executable heredocs. Prepush retains lint, format and size and adds touched
+      tests only with the opt in. Repository commands now direct tests to CI.
+
+
+      Validation:
+
+      - Red CI [37910927973](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37910927973) at aa3819d3: missing
+      guards/parser and unguarded harness hooks, including the true opt in regression.
+
+      - All twelve Python unit shards and the coverage ratchet passed in [37913376298](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37913376298)
+      at 836b2314. Later commits add targeted cases for its mutation findings and replace its two regex DoS hotspots with
+      bounded parsing.
+
+      - Cheap gates passed at 5c764b9c. No local tests or mutation runs were executed.
+
+      - Standards and Spec review closed after three rounds; the Standards reader ruled the final substitution finding resolved.
+
+
+      Closes #2094
+
+      '
+    changed_files:
+    - CLAUDE.md
+    - hooks/context/local_test_guard.py
+    - hooks/context/prepush_guard.py
+    - hooks/context/shell_commands.py
+    - hooks/hook_manager.py
+    - scripts/ci_prepush/__init__.py
+    - tests/SIZE_ALLOWLIST.json
+    - tests/context/test_local_test_guard.py
+    - tests/context/test_prepush_guard.py
+    - tests/context/test_shell_commands.py
+    - tests/test_ci_prepush.py
+    proof: {}
+    proof_notes: 'Binding canary a49052031929ac45f8578365 returned state validated, exit zero. Worktree created at base 96493ad8.
+
+      aa3819d3: python -m scripts.ci_prepush printed ruff check passed, 1268 files formatted, 84 units allowed and zero size
+      errors; no tests step ran.
+
+      Red: unit jobs 113755810267 and 113755810391 in run 37910927973 failed with ModuleNotFoundError hooks.context.local_test_guard
+      and Copilot DID NOT RAISE BlockAction; raw logs saved in task folder.
+
+      Implementation commits 43338777 and deccefc2 passed cheap prepush gates with no tests; parser and denial are shared
+      with prepush. Reviews started against base 96493ad8.
+
+      Reviews closed: Standards independent dispatch finding resolved at d19b1c0c. Spec Python env heredoc findings closed;
+      Standards ruled final quote finding resolved at dffff55b. All cheap gates passed at dffff55b.
+
+      Red opt in proof: unit job 113755810283 in run 37910927973 failed test_explicit_true_allows_tests for true and TRUE
+      with missing local guard. Red parser proof: job 113755810245 failed the timeout options parser case with missing shell_commands.
+      These logs are retained in the task folder.
+
+      Run 37912407927 at 24375d4c: unit jobs 113761413533 and 113761413583 failed test_pre_tool_use_blocks_each_harness[codex-exec-args1],
+      DID NOT RAISE BlockAction. Other finished unit shards passed. Full logs retained.
+
+      Mutation artifact from run 37912407927: run.log confirms baseline failed only at Codex exec cmd payload DID NOT RAISE
+      BlockAction, before any mutant was judged.
+
+      CI run 37913376298 at 836b2314: all twelve Python 3.11 and 3.12 unit shards passed. Raw unit log retained; mutation
+      coverage and Sonar still pending.
+
+      Run 37913376298 at 836b2314: all twelve unit shards and coverage ratchet passed, new coverage 95.6 percent. Mutation
+      reported 140 survivors plus one timeout across four modules; Sonar blocked two parser regex DoS hotspots. Logs and mutant
+      AST diffs retained.
+
+      Mutation run 37915685808 at e7857b1e killed 138 local guard, 16 prepush, 275 shell parser, 27 hook dispatch and 9 prepush
+      plan variants. Remaining survivor diffs retained in third-survivor-diffs.json; all fixes are being checked in CI.
+
+      Run 37917253432 at 5c764b9c killed 144 local guard, 16 prepush, 291 shell parser, 27 dispatcher and 9 prepush plan mutants;
+      five survived. Sonar and coverage ratchet passed. Final survivor AST diffs retained.
+
+      '
+    reviewer_findings:
+      reviews: []
+      comments: []
+      inline: []
+  expected:
+    verdict: pass
+  control: false
+  samples:
+  - source: haiku
+    latency_ms: 14259
+    answers:
+      usable:
+        type: noul
+        noul: 0.7
+      delivers:
+        type: noul
+        noul: 0.85
+      reachable:
+        type: noul
+        noul: 0.95
+      weakens:
+        type: noul
+        noul: 0.6
+  - source: liquid-d1
+    latency_ms: 495
+    answers:
+      usable:
+        type: noul
+        noul: 0.10087860651125365
+      delivers:
+        type: noul
+        noul: 0.5312093882168609
+      reachable:
+        type: noul
+        noul: 0.9830850867332734
+      weakens:
+        type: noul
+        noul: 0.015906394977364253
+  - source: liquid-d1
+    latency_ms: 453
+    answers:
+      usable:
+        type: noul
+        noul: 0.12592276483513232
+      delivers:
+        type: noul
+        noul: 0.5312093882168609
+      reachable:
+        type: noul
+        noul: 0.9830850867332734
+      weakens:
+        type: noul
+        noul: 0.015906394977364253
+  baseline:
+  - &id001
+    verdict: fail
+  - *id001
+  - *id001
+  notes:
+    source: rig-grade-swarm intent history, task t201, failed intent on 9 October after two fix rounds
+    provenance: exact masked classifier input with its logged decisions
+    labels:
+      standards: 'The pull request delivers every seam of the task: a shared guard for all three harnesses, the opt in setting,
+        and a pre push gate that drops the touched tests step. It shows red and green runs in CI, and nothing in it slows
+        or weakens the CI phase.'
+      spec: 'The master lifted the failed verdict on 9 October: the change was delivered and the fail came from phase fit.'
+    input_digest: 7b0996e92cb4385a
+    logged_digest: 7b0996e92cb4385a
+- name: lifted-t205
+  state:
+    overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
+      Codex messaging, seats, intent, work beyond code, swarm health.'
+    phase: CI under fifteen minutes
+    phase_intent: 'Operator order: every agent works only on CI until a pull request''s required checks finish in under fifteen
+      minutes and a correct change merges within fifteen minutes of its first push. Engineers finish their current task, then
+      no new engineer work starts until this phase is done.'
+    task: 'CI gate: ledger server writes stay fast on a full size ledger'
+    task_text: 'Parent: the operator''s order for sanity checks so a slow ledger change never merges again; the alert delivery
+      change passed every check and then made each write time out on the live ledger. Seams: a CI check starts a scratch ledger
+      server on a generated ledger the size of this one, about a thousand tasks and five megabytes, with every background
+      sweep running, sends writes alongside reads from ten clients, and fails when write p95 exceeds two seconds or server
+      CPU stays above one core. The ledger size and budgets come from code, not typed by hand. Both ways proof: green on dev,
+      red on a planted copy of the whole ledger expiry sweep. Runs in CI only, never locally, within the fifteen minute budget.
+      Done when the pull request merges with both run ids.'
+    pull_request_title: 'CI gate: ledger server writes stay fast on a full size ledger'
+    pull_request_body: 'Closes #2105
+
+
+      A new `ledger-load` job, a need of Gate Required, starts a scratch ledger server with Redis on a generated ledger the
+      size of the live one (1000 tasks, 5 MB, 50 alerts with a quarter past their quiet hour, 800 followups, 500 chat lines,
+      a full event log). It runs through two passes of every watch loop sweep (90 s, derived from `BIN_SWEEP_EVERY` and the
+      watch interval), holds one event stream open like the operator page, and drives ten agent clients through the v1 resource
+      API. Each client writes a comment, then reads its task and a task page.
+
+
+      It fails when write p95 exceeds 2 s, when any 10 s window of server CPU averages over one core, when any request fails
+      or under 90 % of the expected writes complete, when a background thread dies, or when the expiry sweep leaves an alert
+      past its quiet hour open. The job refuses to run outside CI.
+
+
+      Sizes, load and budgets are constants in `tests/ledger_load/gate.py`, beside the other CI grading scripts (count floor,
+      coverage ratchet), so mutation grading of `hooks/` and `scripts/` does not apply to it. Write pace: the live rig grade
+      swarm ledger''s busiest minute held 29 write revisions (1987 revisions over 27002 s in its event log); ten clients together
+      write twice that, one write per client every 10.3 s. At four times the peak, with the event stream open, the same code
+      measured 0.71 to 1.04 cores across runs, too close to the budget to grade reliably. Budgets are graded from the head
+      until a base-graded follow up lands (filed on the ledger).
+
+
+      ## Both ways proof
+
+
+      | Run | Head | Result | Numbers |
+
+      |---|---|---|---|
+
+      | Green, PR | `6ca8a35e` | run 37919197075, job 113782744103, success, load job 2m04s, whole required run 5m54s | 87
+      writes, p95 0.355 s, max 0.467 s, busiest 10 s window 0.467 cores, 0 errors |
+
+      | Green, repeat | `6ca8a35e` | run 37919943362, job 113785186931, success | 87 writes, p95 0.346 s, busiest 10 s window
+      0.548 cores, 0 errors |
+
+      | Green, repeats at `b658ed60` (same gate logic) | `b658ed60` | jobs 113774148628, 113774050892, 113774048863 | p95
+      0.333, 0.335, 0.408 s; 0.537, 0.539, 0.455 cores |
+
+      | Red, plant `diffcheck/ledger-load-sweep` | `b401d858` | run 37919938467, job 113785170183, failure | 1 write of 87
+      completed, 87 failed requests, 2.42 cores |
+
+
+      The plant copies the pre-fix whole ledger expiry sweep onto every watch pass and every API request, reading each ledger
+      whole from the stored record and rewriting it. A cached variant of the same plant was red once (p95 7.99 s) and green
+      once (p95 0.571 s, 0.823 cores) at this pace, so the stored-record read is what makes the red dependable.
+
+
+      Found on the way: one read per second per client keeps dev above one core with write p95 2.78 s, because every v1 read
+      parses the whole ledger. Filed as a follow up; once fixed, the read pace can rise. A second follow up covers the open
+      event stream, which costs about half a core at two writes a second because each write publishes the whole ledger view.
+
+
+      🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+      '
+    changed_files:
+    - .github/workflows/ledger-load.yml
+    - .github/workflows/test.yml
+    - tests/ledger_load/__init__.py
+    - tests/ledger_load/gate.py
+    - tests/ledger_load/test_gate.py
+    - tests/test_ci_gate_workflow.py
+    - tests/test_ci_pull_request_api.py
+    - tests/test_ledger_load_workflow.py
+    proof: {}
+    proof_notes: '- First CI run of the gate on PR 2108 at 3ba1e780 (run 37912419382, job 113760478533): one write per second
+      per client saturated the dev server. 389 writes, p50 2.073 s, p95 2.180 s, server 1.042 cores, one timeout. Red.
+
+      - Live write rate (from the rig grade swarm ledger event log, 1987 revisions over 27002 s): busiest minute 29 revisions,
+      median 5. Pace set to four times the busiest minute.
+
+      - Run at 1223bf63 (pace from live peak, reads every second): PR run 37913011097 job 113762540578 red, 174 writes p50
+      2.276 s p95 2.784 s, 576 read pairs, 1.063 cores. Plant (expiry sweep reading the whole ledger each pass) run 37913017877
+      job 113762430888 also red, p95 1.633 s but 1.045 cores. Both red from reads: every v1 GET calls get_document on the
+      whole ledger.
+
+      - Run at d953c9e2 (reads follow each write): PR run 37913469405 job 113764055078 green: 174 writes, p50 0.087 s, p95
+      0.128 s, max 0.226 s, read p95 0.070 s, 0.281 cores, 0 errors, job 1m57s. Plant (sweep rewriting every ledger on each
+      API request, plus every watch pass) run 37913505899 job 113764025154 red: p95 2.748 s, max 8.289 s, read p95 2.093 s,
+      0.88 cores, one timeout.
+
+      - Run at 42389f49: PR run 37914143554 job 113766276847 green; plant run 37914147798 job 113766133806 red.
+
+      - Final both ways at gate code ddc306ac: green run 37914906666 job 113768729544 (2m01s): 174 writes, p95 0.254 s, max
+      0.450 s, busiest 10 s window 0.708 cores, 0 errors. Red plant run 37914911019 job 113768622012 at 34162211: p95 8.597
+      s, max 9.087 s, 1.043 cores, 7 errors.
+
+      - Mutation job 113768729435 at ddc306ac failed before mutating: tests/test_ci_gate_workflow.py was selected (it named
+      the module path) and its kind fixture cannot find deploy files in the mutants sandbox. Workflow test moved to tests/test_ledger_load_workflow.py
+      (c1a348fa).
+
+      - Same gate code, event stream open, four times live peak: busiest window 0.868 (job 113766276847), 0.708 (job 113768729544),
+      1.044 red with p95 4.161 s (job 113771703242). Without the stream (job 113764055078) 0.281. Too close to budget, so
+      headroom is now twice the live peak (b658ed60). Mutation job 113771703290 was killed by a hosted runner shutdown signal.
+
+      - Final at b658ed60 (twice live peak): green PR run 37916536171 job 113774148628 (2m09s) p95 0.333 s 0.537 cores; repeats
+      job 113774050892 p95 0.335 s 0.539 cores, job 113774048863 p95 0.408 s 0.455 cores. Red plant run 37916539225 job 113773994472
+      at cdeacbbe: p95 7.989 s, max 8.595 s, 1.055 cores, 4 errors.
+
+      - Plant variant at 98281217 (cached sweep, twice live peak) went green: run 37919201526 job 113782759514, p95 0.571
+      s, 0.823 cores. Plant hardened to read each ledger from the stored record.
+
+      - Final at PR head 6ca8a35e: Tests run 37919197075 green in 5m54s end to end; ledger load job 113782744103 2m04s, 87
+      writes, p95 0.355 s, max 0.467 s, 0.467 cores, 0 errors; mutation job 113782744210 success; Gate Required job 113784661221
+      success. Repeat green run 37919943362 job 113785186931 p95 0.346 s 0.548 cores.
+
+      - Final red plant at b401d858: run 37919938467 job 113785170183, 1 write of 87, 87 failed requests, 2.424 cores.
+
+      '
+    reviewer_findings:
+      reviews: []
+      comments: []
+      inline: []
+  expected:
+    verdict: pass
+  control: false
+  samples:
+  - source: haiku
+    latency_ms: 15193
+    answers:
+      usable:
+        type: noul
+        noul: 0.8
+      delivers:
+        type: noul
+        noul: 0.75
+      reachable:
+        type: noul
+        noul: 0.95
+      weakens:
+        type: noul
+        noul: 0.6
+  - source: haiku
+    latency_ms: 14012
+    answers:
+      usable:
+        type: noul
+        noul: 0.6
+      delivers:
+        type: noul
+        noul: 0.55
+      reachable:
+        type: noul
+        noul: 0.95
+      weakens:
+        type: noul
+        noul: 0.6
+  - source: haiku
+    latency_ms: 14110
+    answers:
+      usable:
+        type: noul
+        noul: 0.8
+      delivers:
+        type: noul
+        noul: 0.7
+      reachable:
+        type: noul
+        noul: 0.92
+      weakens:
+        type: noul
+        noul: 0.5
+  baseline:
+  - &id002
+    verdict: fail
+  - *id002
+  - *id002
+  notes:
+    source: rig-grade-swarm intent history, task t205, failed intent on 9 October after two fix rounds
+    provenance: exact masked classifier input with its logged decisions
+    labels:
+      standards: The pull request adds the ledger load CI gate with both ways proof run ids. It adds a two minute job inside
+        a required run of under six minutes, well under the fifteen minute goal.
+      spec: 'The master lifted the failed verdict on 9 October: the change was delivered and the fail came from phase fit.'
+    input_digest: 57afd2cc673a6def
+    logged_digest: 57afd2cc673a6def
