@@ -46,16 +46,11 @@ def test_record_pass_collects_ledger_rows_before_flushing(spool, monkeypatch, re
         "tasks": [{"id": "t", "lane": "ci", "state": "claimed"}],
         "time_left_minutes": 14,
     }
-    nodes = [{"node": "tasks/t", "kind": "task", "parent": None, "state": "claimed", "depth": 0}]
 
     class Ledger:
         def state(self, slug):
             assert slug == "sw"
             return doc
-
-        def hierarchy(self, slug):
-            assert slug == "sw"
-            return nodes
 
     monkeypatch.setattr(metrics, "LedgerClient", Ledger)
     monkeypatch.setattr(metrics.metrics_ledger, "record", real_ledger_record)
@@ -182,6 +177,20 @@ def test_a_swarm_pass_names_the_bottleneck_after_its_rows_and_ships_it(spool, se
     assert order == ["rows", ("bottleneck", "sw", NOW, tasks)]
     assert bottleneck.read(store, "sw")["bottleneck"] == ""
     assert any(query == "INSERT INTO swarm.bottlenecks FORMAT JSONEachRow" for _, query, _ in sent)
+
+
+def test_ledger_rows_are_collected_before_a_failing_swarm_collector(spool, sent, monkeypatch):
+    order = []
+
+    def broken(*args):
+        order.append("swarm")
+        raise ValueError("bad swarm row")
+
+    monkeypatch.setattr(metrics.metrics_ledger, "record", lambda box, slug, now_ms, ledger: order.append("ledger"))
+    monkeypatch.setattr(metrics.metrics_swarm, "pull_rows", broken)
+    swarm = metrics.metrics_swarm.TickInput(None, {"tasks": []}, [], lambda url: None)
+    assert metrics.record_pass("sw", NOW, 0, ON, swarm) == ["metrics outbox failed: bad swarm row"]
+    assert order == ["ledger", "swarm"]
 
 
 def test_a_ledger_without_tasks_still_names_the_bottleneck(spool, sent, monkeypatch):

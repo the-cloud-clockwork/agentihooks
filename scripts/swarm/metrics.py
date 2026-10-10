@@ -47,9 +47,9 @@ def _ledger(slug, now_ms, errors, box):
 
 
 def _pass(slug, now_ms, swarm, errors, box):
+    _ledger(slug, now_ms, errors, box)
     if swarm is not None:
         _collect(slug, now_ms, swarm, box)
-    _ledger(slug, now_ms, errors, box)
 
 
 def record_pass(
