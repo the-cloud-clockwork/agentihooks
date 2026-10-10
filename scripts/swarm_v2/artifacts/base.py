@@ -4,13 +4,14 @@ import hashlib
 import json
 import re
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
 from typing import NoReturn, Protocol
 
 from scripts.swarm_v2.auth_context import IDENTIFIER, Registration
 
 METRIC = "artifact_upload_verification_failures"
+UNGRANTED = "an artifact store takes its scope only from a launch grant token the launch authority verified"
 CHUNK = 1 << 20
 ABSENT = "absent"
 CORRUPT = "corrupt"
@@ -86,52 +87,59 @@ class Backend(Protocol):
 
 
 class ArtifactStore:
-    def __init__(self, backend: Backend) -> None:
+    """The authorization callback must validate a launch grant token with the launch authority; the scope comes from it."""
+
+    def __init__(self, backend: Backend, authorize: Callable[[str], Registration], token: str) -> None:
+        registration = authorize(token) if isinstance(token, str) and token else None
+        if not isinstance(registration, Registration):
+            _refuse(UNGRANTED)
         self.backend = backend
+        self.scope = Scope.granted(registration)
         self.failures: Counter[str] = Counter()
 
     def metrics(self) -> dict[str, dict[str, int]]:
         return {METRIC: dict(self.failures)}
 
-    def put(self, scope: Scope, artifact_id: str, data: bytes) -> ArtifactRef:
+    def put(self, artifact_id: str, data: bytes) -> ArtifactRef:
         ref = ArtifactRef.of(data)
-        recorded = self.recorded(scope, artifact_id)
+        recorded = self.recorded(artifact_id)
         if recorded not in (None, ref):
             _refuse(f"artifact {artifact_id} is committed with other content")
-        if self.stat(scope, ref) != VERIFIED:
-            self._publish(scope, scope.key("objects", ref.sha256), data)
+        if self.stat(ref) != VERIFIED:
+            self._publish(self.scope.key("objects", ref.sha256), data)
         if recorded is None:
-            record = {**asdict(ref), "execution_id": scope.execution_id, "generation": scope.generation}
-            self._publish(scope, _record_key(scope, artifact_id), _encode(record))
+            record = {**asdict(ref), "execution_id": self.scope.execution_id, "generation": self.scope.generation}
+            self._publish(_record_key(self.scope, artifact_id), _encode(record))
         return ref
 
-    def recorded(self, scope: Scope, artifact_id: str) -> ArtifactRef | None:
-        document = self._document(_record_key(scope, artifact_id))
+    def recorded(self, artifact_id: str) -> ArtifactRef | None:
+        document = self._document(_record_key(self.scope, artifact_id))
         return None if document is None else _reference(document)
 
-    def stat(self, scope: Scope, ref: ArtifactRef) -> str:
-        key = scope.key("objects", ref.sha256)
+    def stat(self, ref: ArtifactRef) -> str:
+        key = self.scope.key("objects", ref.sha256)
         if self.backend.size(key) is None:
             return ABSENT
         return VERIFIED if self._matches(key, ref) else CORRUPT
 
-    def get_range(self, scope: Scope, ref: ArtifactRef, start: int = 0, length: int | None = None) -> bytes:
+    def get_range(self, ref: ArtifactRef, start: int = 0, length: int | None = None) -> bytes:
         length = ref.size - start if length is None else length
         if start < 0 or length < 0 or start + length > ref.size:
             _refuse(f"range {start}+{length} is outside {ref.size} bytes")
-        if self.stat(scope, ref) != VERIFIED:
+        if self.stat(ref) != VERIFIED:
             _refuse(f"artifact {ref.sha256} is not verified in {self.backend.kind}")
-        return self.backend.read(scope.key("objects", ref.sha256), start, length)
+        return self.backend.read(self.scope.key("objects", ref.sha256), start, length)
 
-    def commit_manifest(self, scope: Scope, name: str, artifact_ids: Iterable[str]) -> dict:
+    def commit_manifest(self, name: str, artifact_ids: Iterable[str]) -> dict:
         _identifier(name)
+        scope = self.scope
         artifacts = {}
         for artifact_id in sorted(set(artifact_ids)):
-            ref = self.recorded(scope, artifact_id)
-            if ref is None or self.stat(scope, ref) != VERIFIED:
+            ref = self.recorded(artifact_id)
+            if ref is None or self.stat(ref) != VERIFIED:
                 _refuse(f"artifact {artifact_id} is not committed and verified")
             artifacts[artifact_id] = asdict(ref)
-        newest = max(self._generations(scope, name), default=scope.generation)
+        newest = max(self._generations(name), default=scope.generation)
         if newest > scope.generation:
             _refuse(f"manifest {name} has newer generation {newest}")
         manifest = {
@@ -143,27 +151,27 @@ class ArtifactStore:
         key = scope.key("manifests", name, f"{scope.generation}.json")
         existing = self._document(key)
         if existing is None:
-            self._publish(scope, key, _encode(manifest))
+            self._publish(key, _encode(manifest))
         elif existing != manifest:
             _refuse(f"manifest {name} generation {scope.generation} is committed with other content")
         return manifest
 
-    def delete_if_unreferenced(self, scope: Scope, ref: ArtifactRef) -> bool:
+    def delete_if_unreferenced(self, ref: ArtifactRef) -> bool:
         listed = asdict(ref)
-        for key in self.backend.keys(scope.key("manifests") + "/"):
+        for key in self.backend.keys(self.scope.key("manifests") + "/"):
             if listed in self._document(key)["artifacts"].values():
                 return False
-        records = {key: self._document(key) for key in self.backend.keys(scope.key("artifacts") + "/")}
+        records = {key: self._document(key) for key in self.backend.keys(self.scope.key("artifacts") + "/")}
         owned = [key for key, document in records.items() if _reference(document) == ref]
-        if any(records[key]["generation"] > scope.generation for key in owned):
+        if any(records[key]["generation"] > self.scope.generation for key in owned):
             return False
         for key in owned:
             self.backend.remove(key)
-        self.backend.remove(scope.key("objects", ref.sha256))
+        self.backend.remove(self.scope.key("objects", ref.sha256))
         return True
 
-    def _generations(self, scope: Scope, name: str) -> list[int]:
-        keys = self.backend.keys(scope.key("manifests", name) + "/")
+    def _generations(self, name: str) -> list[int]:
+        keys = self.backend.keys(self.scope.key("manifests", name) + "/")
         return [int(key.rsplit("/", 1)[1].removesuffix(".json")) for key in keys]
 
     def _document(self, key: str) -> dict | None:
@@ -178,9 +186,9 @@ class ArtifactStore:
             digest.update(self.backend.read(key, start, min(CHUNK, ref.size - start)))
         return digest.hexdigest() == ref.sha256
 
-    def _publish(self, scope: Scope, key: str, data: bytes) -> None:
+    def _publish(self, key: str, data: bytes) -> None:
         ref = ArtifactRef.of(data)
-        staging = scope.key("staging", scope.execution_id, ref.sha256)
+        staging = self.scope.key("staging", self.scope.execution_id, ref.sha256)
         try:
             self.backend.write(staging, data)
             self._confirm(staging, ref)
