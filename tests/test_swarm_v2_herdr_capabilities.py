@@ -270,6 +270,56 @@ def test_the_runner_never_reads_stdin_and_is_bounded(monkeypatch):
     }
 
 
+def _command(monkeypatch, server):
+    runner, seen = cases.Runner(server), []
+    monkeypatch.setattr(capabilities, "runner", lambda environ: seen.append(environ) or runner)
+    return runner, seen
+
+
+def test_the_qualify_command_admits_the_pinned_pair_and_prints_its_matrix(monkeypatch, capsys):
+    runner, seen = _command(monkeypatch, cases.fixture()["server"])
+    assert capabilities.main([cases.TARGET, "attempt-1"], {"HOME": "/h"}) == 0
+    out, err = capsys.readouterr()
+    assert (seen, err, len(runner.commands)) == ([{"HOME": "/h"}], "", 3)
+    assert json.loads(out) == {
+        "target": cases.TARGET,
+        "incarnation": "attempt-1",
+        "compatible": True,
+        "refusals": [],
+        "matrix": capabilities.matrix(frozenset(cases.fixture()["methods"])),
+    }
+
+
+def test_the_qualify_command_refuses_a_server_missing_forwarding_capability(monkeypatch, capsys):
+    _command(monkeypatch, cases.fixture()["missing_forwarding_server"])
+    assert capabilities.main([cases.TARGET, "attempt-1"], {}) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["compatible"] is False
+    assert "herdr server lacks surface_interest=true" in report["refusals"]
+
+
+def test_the_qualify_command_reports_an_unreachable_machine(monkeypatch, capsys):
+    runner, _ = _command(monkeypatch, None)
+    assert capabilities.main([cases.TARGET, "attempt-1"], {}) == 2
+    assert capsys.readouterr() == ("", f"ERROR: herdr --machine {cases.TARGET} status: exit 2\n")
+    assert len(runner.commands) == 1
+
+
+@pytest.mark.parametrize("argv", [[], [cases.TARGET], [cases.TARGET, "attempt-1", "extra"]])
+def test_the_qualify_command_needs_a_target_and_an_incarnation(monkeypatch, capsys, argv):
+    runner, seen = _command(monkeypatch, cases.fixture()["server"])
+    assert capabilities.main(argv, {}) == 2
+    assert capsys.readouterr() == ("", capabilities.USAGE + "\n")
+    assert (seen, runner.commands) == ([], [])
+
+
+def test_the_qualify_command_refuses_an_option_like_target_before_any_probe(monkeypatch, capsys):
+    runner, _ = _command(monkeypatch, cases.fixture()["server"])
+    assert capabilities.main(["--all", "attempt-1"], {}) == 2
+    assert capsys.readouterr().err.startswith("ERROR: a remote herdr operation needs a target")
+    assert runner.commands == []
+
+
 def test_the_fixture_is_the_pinned_capture():
     fx = cases.fixture()
     lock = json.loads((Path(__file__).parents[1] / "docker" / "swarm-node" / "versions.lock").read_text())
