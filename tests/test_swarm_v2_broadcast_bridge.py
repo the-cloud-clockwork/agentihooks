@@ -207,7 +207,7 @@ def test_the_bridge_claims_nothing_while_the_fleet_path_is_off_or_a_setting_is_m
 
 
 def unregistered(world, agent, token):
-    return world.start(REMOTE, "task-unregistered")[1]
+    return world.start("eng-9@fixture", "task-unregistered")[1]
 
 
 def superseded(world, agent, token):
