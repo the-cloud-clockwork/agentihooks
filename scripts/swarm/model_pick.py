@@ -53,7 +53,7 @@ def pick(harness: str, lane: dict, task: dict, environ: dict) -> ModelPick:
 def effort(answer: Answer, levels: list, floor: str, confidence: float) -> str | None:
     if answer.confidence < confidence:
         return None
-    return levels[max(levels.index(floor), round(max(0, min(3, answer.score))))]
+    return levels[-1] if round(max(0, min(1, answer.score))) else floor
 
 
 def _verdicts(definition, state, params, answers):
