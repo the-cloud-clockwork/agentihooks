@@ -136,7 +136,7 @@ class StampedContext(Context):
 
 
 def batch_domain():
-    core = domain([])
+    core = domain([], events_kept=10)
     core.Context = StampedContext
 
     def gated(gate, doc, op, ctx):
