@@ -3497,3 +3497,758 @@ cases:
       delivers: 0.9553191335436404
       reachable: 0.9933071490509493
       weakens: 0.06754667987718888
+- name: formatter-reflow
+  state:
+    overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
+      Codex messaging, seats, intent, work beyond code, swarm health.'
+    phase: Supporting infrastructure in antoncore
+    phase_intent: An insert only ClickHouse user for the swarm and a push route on the notifications service, each by pull
+      request into antoncore dev, approved by the operator for this plan.
+    task: Push route on the notifications service
+    task_text: 'Parent: Supporting infrastructure in antoncore, approved by the operator for this plan. In the antoncore repository,
+      a push route on the notifications service mirroring its send notification tool and channels, behind a token. Seams:
+      a request with the token reaches the alerts channel and one without it is refused, proven against the deployed service.
+      Pull request into antoncore dev. Details in your plan chunk.'
+    pull_request_title: Push route on the notifications REST API
+    pull_request_body: "Closes #616\n\nAdds `POST /api/v1/push` to the notifications REST API, mirroring the MCP `send_notification`\
+      \ tool: the same ntfy channels (`critical`, `alerts`, `deploys`, `system`) with their default priority and tags, optional\
+      \ `title`, `priority` and `tags` overrides. It sits under `/api/`, so the existing Bearer [REDACTED] (`NOTIFICATIONS_API_KEY`)\
+      \ guards it. An unknown channel is refused with 422; an ntfy failure answers 502.\n\n```bash\ncurl -X POST https://notifications.example.com/api/v1/push\
+      \ \\\n  -H \"Authorization: Bearer [REDACTED] \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"message\": \"\
+      host pressure\", \"title\": \"swarm\", \"channel\": \"alerts\"}'\n```\n\nUnrelated lines in `api.py` are reflowed by\
+      \ `ruff format` only. CI Validate's `Python lint (ruff)` runs `ruff format --check` over every changed Python file in\
+      \ full, and the dev copy of this file already fails that check.\n\nEvidence: the red run on the test-only commit, the\
+      \ green run on the route and the deployed proof follow below.\n\n\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)\n\
+      \n<!-- agentihooks intent -->\n## Parent intent\n\n**Project:** Borrow what OpenRig does that we lack, while keeping\
+      \ the ledger, quota routing and herdr: durable Claude and Codex messaging, seats, intent, work beyond code, swarm health.\n\
+      \n**Phase Supporting infrastructure in antoncore:** An insert only ClickHouse user for the swarm and a push route on\
+      \ the notifications service, each by pull request into antoncore dev, approved by the operator for this plan.\n\n**Task\
+      \ ax2, Push route on the notifications service:** Parent: Supporting infrastructure in antoncore, approved by the operator\
+      \ for this plan. In the antoncore repository, a push route on the notifications service mirroring its send notification\
+      \ tool and channels, behind a token. Seams: a request with the token reaches the alerts channel and one without it is\
+      \ refused, proven against the deployed service. Pull request into antoncore dev. Details in your plan chunk.\n<!-- /agentihooks\
+      \ intent -->"
+    changed_files:
+    - docs/7F-NOTIFICATIONS.md
+    - stacks/notifications/mcp/api.py
+    - tests/unit/notifications/__init__.py
+    - tests/unit/notifications/test_push_route.py
+    proof: {}
+    proof_notes: '2026-10-09T21:10:20+02:00 binding canary validated profile cicd exit 0
+
+      2026-10-09T21:18:45+02:00 RED: CI Validate run 37978983060 on test-only head 45ffd86a (diffcheck/ci-323133-0263-red):
+      Python tests failure, 454 passed 91 skipped 8 errors, all 8 in tests/unit/notifications/test_push_route.py (api.py has
+      no push route, no httpx attribute); Gate Required failure. https://github.com/the-cloud-clockwork/antoncore/actions/runs/37978983060
+
+      2026-10-09T21:20:02+02:00 GREEN: CI Validate run 37978995978 on PR head 67f8f434: Python tests success, 465 passed 91
+      skipped, tests/unit/notifications/test_push_route.py 11 passed; Gate Required pass. https://github.com/the-cloud-clockwork/antoncore/actions/runs/37978995978
+
+      '
+    reviewer_findings:
+      reviews: []
+      comments: []
+      inline: []
+    plan_lines: 245-249
+    plan_chunk: '<!-- slice: ax-push-route -->
+
+      ### Push route on the notifications service
+
+
+      A REST route mirroring the MCP send notification tool and its channels (alerts and critical), behind a token. The swarm
+      posts outage and host pressure alerts there.
+
+      Seams: a request with the token reaches the operator''s alerts channel; one without it is refused; proven against the
+      deployed service.
+
+      '
+  expected:
+    verdict: pass
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 328
+    answers:
+      usable:
+        type: noul
+        noul: 0.8175744673038221
+      delivers:
+        type: noul
+        noul: 0.8438950947024555
+      reachable:
+        type: noul
+        noul: 0.817574471748733
+      weakens:
+        type: noul
+        noul: 0.00026119040275271617
+      underdelivers:
+        type: noul
+        noul: 0.32082130082460697
+      overdelivers:
+        type: noul
+        noul: 0.05033063544642759
+      misses_line_245:
+        type: noul
+        noul: 0.014957085824744773
+      misses_line_246:
+        type: noul
+        noul: 0.0004305570909441722
+      misses_line_248:
+        type: noul
+        noul: 0.0033766128831950342
+      misses_line_249:
+        type: noul
+        noul: 0.5312093733737563
+  - source: liquid-d1
+    latency_ms: 378
+    answers:
+      usable:
+        type: noul
+        noul: 0.9149009665946055
+      delivers:
+        type: noul
+        noul: 0.8438950947024555
+      reachable:
+        type: noul
+        noul: 0.7772998611746911
+      weakens:
+        type: noul
+        noul: 0.00013135174520379197
+      underdelivers:
+        type: noul
+        noul: 0.2942149845400438
+      overdelivers:
+        type: noul
+        noul: 0.037326881454155386
+      misses_line_245:
+        type: noul
+        noul: 0.014957085824744773
+      misses_line_246:
+        type: noul
+        noul: 0.0004305570909441722
+      misses_line_248:
+        type: noul
+        noul: 0.0033766128831950342
+      misses_line_249:
+        type: noul
+        noul: 0.5312093733737563
+  - source: liquid-d1
+    latency_ms: 379
+    answers:
+      usable:
+        type: noul
+        noul: 0.9149009665946055
+      delivers:
+        type: noul
+        noul: 0.8438950947024555
+      reachable:
+        type: noul
+        noul: 0.817574471748733
+      weakens:
+        type: noul
+        noul: 0.00026119040275271617
+      underdelivers:
+        type: noul
+        noul: 0.32082130082460697
+      overdelivers:
+        type: noul
+        noul: 0.04468087281684414
+      misses_line_245:
+        type: noul
+        noul: 0.007121427138967083
+      misses_line_246:
+        type: noul
+        noul: 1.0129989867639126e-05
+      misses_line_248:
+        type: noul
+        noul: 0.0012448433391414138
+      misses_line_249:
+        type: noul
+        noul: 0.5312093733737563
+  baseline:
+  - verdict: pass
+  - verdict: pass
+  - verdict: pass
+  notes:
+    source: rig-grade-swarm intent history, task ax2, antoncore pull request 618 ready head, live verdict pass at 1791573714316
+      (Doctor evidence on issue 2285). The draft heads before it were recorded failing on overdelivers 0.60; a live rerun
+      of those draft inputs no longer reproduces that overdelivers answer
+    provenance: 'gate history classifier input with internal names masked (a domain, the secret store and a stack name); a
+      regression guard that does not discriminate the formatter clause: the body names its reflowed lines and the head passes
+      before and after (overdelivers 0.14 before, 0.04 to 0.05 after); baseline is three live runs of the definition before
+      the formatter clause and samples are three live runs of the definition with it, both on liquid-d1'
+    labels:
+      standards: 'pass. The task asks for "a push route on the notifications service mirroring its send notification tool
+        and channels, behind a token", and the body delivers `POST /api/v1/push` mirroring "the MCP `send_notification` tool:
+        the same ntfy channels", guarded by the existing Bearer token. The plan chunk''s seam "proven against the deployed
+        service" can exist only after merge (the CI doctrine), and the body says the deployed proof follows. The body names
+        "Unrelated lines in `api.py` are reflowed by `ruff format` only", required by the CI format check, so those lines
+        are formatter output, not added scope. Proof notes show the red run on the test only head and the green run with 11
+        route tests passing.'
+      spec: 'pass. The spec asks for "a push route on the notifications service mirroring its send notification tool and channels,
+        behind a token", and the PR adds `POST /api/v1/push` "mirroring the MCP `send_notification` tool" under the existing
+        Bearer token. The token seam is "proven against the deployed service", which can only be shown after deploy, and the
+        PR says the deployed proof follows, so it is due after merge. The ready head proof is CI: a red run on the test only
+        head and a green run where "test_push_route.py 11 passed". The changed files add nothing beyond the ask, and the `ruff
+        format` reflow of unrelated lines is justified in the body as needed to pass the CI format check.'
+    input_digest: 22641f19c6c2976c
+    baseline_answers:
+    - usable: 0.8991213718636752
+      delivers: 0.8438950947024555
+      reachable: 0.7772998611746911
+      weakens: 0.00013135174520379197
+      underdelivers: 0.2942149845400438
+      overdelivers: 0.14033624229926062
+      misses_line_245: 0.014957085824744773
+      misses_line_246: 0.0004305570909441722
+      misses_line_248: 0.0033766128831950342
+      misses_line_249: 0.5312093733737563
+    - usable: 0.8175744673038221
+      delivers: 0.8438950947024555
+      reachable: 0.7772998611746911
+      weakens: 0.00013135174520379197
+      underdelivers: 0.2942149845400438
+      overdelivers: 0.14033624229926062
+      misses_line_245: 0.014957085824744773
+      misses_line_246: 0.0004305570909441722
+      misses_line_248: 0.0033766128831950342
+      misses_line_249: 0.5312093733737563
+    - usable: 0.8807970748488297
+      delivers: 0.8438950947024555
+      reachable: 0.7772998611746911
+      weakens: 0.00013135174520379197
+      underdelivers: 0.2942149845400438
+      overdelivers: 0.14033624229926062
+      misses_line_245: 0.014957085824744773
+      misses_line_246: 0.0004305570909441722
+      misses_line_248: 0.0033766128831950342
+      misses_line_249: 0.5312093733737563
+- name: deploy-proof-after-merge
+  state:
+    overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
+      Codex messaging, seats, intent, work beyond code, swarm health.'
+    phase: Supporting infrastructure in antoncore
+    phase_intent: An insert only ClickHouse user for the swarm and a push route on the notifications service, each by pull
+      request into antoncore dev, approved by the operator for this plan.
+    task: Insert only ClickHouse user for the swarm
+    task_text: 'Parent: Supporting infrastructure in antoncore, approved by the operator for this plan. In the antoncore repository,
+      a ClickHouse user that may only insert into and create tables in a swarm database, its password read from the stack
+      environment that the operator fills through the secret store. Seams: it inserts into the swarm database and cannot read
+      or drop anything else, proven by command output against the deployed service. Pull request into antoncore dev. Details
+      in your plan chunk.'
+    pull_request_title: Add insert only ClickHouse user for the swarm
+    pull_request_body: 'Closes #617
+
+
+      - `stacks/data-store/stack.yml` adds a `post_deploy` hook; `secrets.env` is the same path the convention default already
+      used.
+
+      - `clickhouse-swarm-user.sh` reconciles database `swarm` and user `swarm_writer` (sha256 password from `CLICKHOUSE_SWARM_PASSWORD`),
+      granted `INSERT, CREATE TABLE ON swarm.*` only. Credentials travel in a curl config on a file descriptor, never in process
+      args; the statement goes in the request body.
+
+      - data-store stays `.manual`: merging deploys nothing. The proof runs after the operator fills `CLICKHOUSE_SWARM_PASSWORD`
+      in the secret store and dispatches the data-store deploy.
+
+
+      Red before the change, against the deployed `dataplane_clickhouse` (24.1.8.22):
+
+      ```
+
+      Code: 516. DB::Exception: swarm_writer: Authentication failed: password is incorrect, or there is no user with such
+      name. (AUTHENTICATION_FAILED)
+
+      ```
+
+
+      🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
+      <!-- agentihooks intent -->
+
+      ## Parent intent
+
+
+      **Project:** Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude
+      and Codex messaging, seats, intent, work beyond code, swarm health.
+
+
+      **Phase Supporting infrastructure in antoncore:** An insert only ClickHouse user for the swarm and a push route on the
+      notifications service, each by pull request into antoncore dev, approved by the operator for this plan.
+
+
+      **Task ax1, Insert only ClickHouse user for the swarm:** Parent: Supporting infrastructure in antoncore, approved by
+      the operator for this plan. In the antoncore repository, a ClickHouse user that may only insert into and create tables
+      in a swarm database, its password read from the stack environment that the operator fills through the secret store.
+      Seams: it inserts into the swarm database and cannot read or drop anything else, proven by command output against the
+      deployed service. Pull request into antoncore dev. Details in your plan chunk.
+
+      <!-- /agentihooks intent -->'
+    changed_files:
+    - stacks/data-store/README.md
+    - stacks/data-store/clickhouse-swarm-user.sh
+    - stacks/data-store/pre-deploy.sh
+    - stacks/data-store/stack.yml
+    proof: {}
+    proof_notes: '- RED before change, deployed dataplane_clickhouse (24.1.8.22): `curl -H ''X-ClickHouse-User: swarm_writer''
+      --data-binary ''SELECT 1'' http://127.0.0.1:8123/` -> `Code: 516 ... swarm_writer: Authentication failed: password is
+      incorrect, or there is no user with such name. (AUTHENTICATION_FAILED)`
+
+      - shellcheck -S warning -e SC1091 stacks/data-store/clickhouse-swarm-user.sh -> clean
+
+      '
+    reviewer_findings:
+      reviews: []
+      comments: []
+      inline: []
+    plan_lines: 239-243
+    plan_chunk: '<!-- slice: ax-clickhouse-user -->
+
+      ### Insert only ClickHouse user for the swarm
+
+
+      A ClickHouse user limited to inserting into and creating tables in a swarm database, its password read from the stack''s
+      environment (stored in the secret store by the operator through a pane, never typed in chat). Grafana keeps reading
+      with its existing datasource.
+
+      Seams: the user can insert into the swarm database and cannot read or drop anything else; proven by command output against
+      the deployed service.
+
+      '
+  expected:
+    verdict: pass
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 302
+    answers:
+      usable:
+        type: noul
+        noul: 0.9706877675527112
+      delivers:
+        type: noul
+        noul: 0.8519528132451416
+      reachable:
+        type: noul
+        noul: 0.9740426418603167
+      weakens:
+        type: noul
+        noul: 0.0002611903813520866
+      underdelivers:
+        type: noul
+        noul: 0.10669059962643358
+      overdelivers:
+        type: noul
+        noul: 0.014957087251783064
+      misses_line_239:
+        type: noul
+        noul: 0.0008559007195747131
+      misses_line_240:
+        type: noul
+        noul: 0.0005884087835056779
+      misses_line_242:
+        type: noul
+        noul: 0.05033063580254644
+      misses_line_243:
+        type: noul
+        noul: 0.32082130082460697
+  - source: liquid-d1
+    latency_ms: 487
+    answers:
+      usable:
+        type: noul
+        noul: 0.939913354875362
+      delivers:
+        type: noul
+        noul: 0.8519528019683106
+      reachable:
+        type: noul
+        noul: 0.9740426409184302
+      weakens:
+        type: noul
+        noul: 0.0002611903813520866
+      underdelivers:
+        type: noul
+        noul: 0.11279540031810142
+      overdelivers:
+        type: noul
+        noul: 0.006289902881991031
+      misses_line_239:
+        type: noul
+        noul: 0.003376611842674885
+      misses_line_240:
+        type: noul
+        noul: 0.0005884086914961277
+      misses_line_242:
+        type: noul
+        noul: 0.042087733923223715
+      misses_line_243:
+        type: noul
+        noul: 0.32082130082460697
+  - source: liquid-d1
+    latency_ms: 384
+    answers:
+      usable:
+        type: noul
+        noul: 0.9706877675527112
+      delivers:
+        type: noul
+        noul: 0.8519528019683106
+      reachable:
+        type: noul
+        noul: 0.9740426409184302
+      weakens:
+        type: noul
+        noul: 0.0002611903813520866
+      underdelivers:
+        type: noul
+        noul: 0.11279540031810142
+      overdelivers:
+        type: noul
+        noul: 0.010986945868982466
+      misses_line_239:
+        type: noul
+        noul: 0.006692850329902297
+      misses_line_240:
+        type: noul
+        noul: 0.00023050667649229873
+      misses_line_242:
+        type: noul
+        noul: 0.039638843638982
+      misses_line_243:
+        type: noul
+        noul: 0.7310585551920353
+  baseline:
+  - verdict: pass
+  - verdict: pass
+  - verdict: pass
+  notes:
+    source: rig-grade-swarm intent history, task ax1, antoncore pull request 619, live verdict fail at 1791573458040 citing
+      plan line 243 deployed proof and pass on the same input at 1791573522185 (Doctor evidence on issue 2285)
+    provenance: 'gate history classifier input with internal names masked (a domain, the secret store and a stack name); a
+      regression guard for proof against a deployed service being due after merge: the same input as the ready head e50e0319
+      except the task text, which was later amended to add a right this head never claimed; it passes three of three before
+      and after, as the Doctor replay found, and the clause does not touch it, so baseline and sample answers nearly coincide;
+      baseline is three live runs of the definition before the formatter clause and samples are three live runs of the definition
+      with it, both on liquid-d1'
+    labels:
+      standards: pass. The task text at this head asks for "a ClickHouse user that may only insert into and create tables
+        in a swarm database, its password read from the stack environment that the operator fills through the secret store",
+        and the body grants `swarm_writer` "`INSERT, CREATE TABLE ON swarm.*` only" with the password from `CLICKHOUSE_SWARM_PASSWORD`.
+        The changed files are the wiring for that user and add no scope beyond the plan chunk. The seam "proven by command
+        output against the deployed service" can only exist after merge (the CI doctrine), and the body says "merging deploys
+        nothing. The proof runs after the operator fills `CLICKHOUSE_SWARM_PASSWORD` in the secret store and dispatches the
+        data-store deploy." The red `AUTHENTICATION_FAILED` output and the clean shellcheck are the evidence a head before
+        merge can give.
+      spec: 'pass. The task text at 19:17:38 asks for "a ClickHouse user that may only insert into and create tables in a
+        swarm database", and the PR delivers `swarm_writer` on database `swarm`, "granted `INSERT, CREATE TABLE ON swarm.*`
+        only", with the password from `CLICKHOUSE_SWARM_PASSWORD`. The seam "cannot read or drop anything else, proven by
+        command output against the deployed service" can only be proven after deploy, and the PR says "data-store stays `.manual`:
+        merging deploys nothing", so that proof is due after merge. The ready head proof is the red `AUTHENTICATION_FAILED`
+        output against the deployed `dataplane_clickhouse` and a clean shellcheck. The changed files add no scope beyond the
+        ask.'
+    input_digest: dbfc956c32912a78
+    baseline_answers:
+    - usable: 0.9399133481428692
+      delivers: 0.8519528132451416
+      reachable: 0.9740426418603167
+      weakens: 0.0002611903813520866
+      underdelivers: 0.10669059962643358
+      overdelivers: 0.017986212067650338
+      misses_line_239: 0.0008559007195747131
+      misses_line_240: 0.0005884087835056779
+      misses_line_242: 0.05033063580254644
+      misses_line_243: 0.45326184801538616
+    - usable: 0.9706877675527112
+      delivers: 0.8519528019683106
+      reachable: 0.9740426409184302
+      weakens: 0.0002611903813520866
+      underdelivers: 0.11279540031810142
+      overdelivers: 0.010986940525640651
+      misses_line_239: 0.003376611842674885
+      misses_line_240: 0.0005884086914961277
+      misses_line_242: 0.042087733923223715
+      misses_line_243: 0.32082130082460697
+    - usable: 0.9399133481428692
+      delivers: 0.8519528132451416
+      reachable: 0.9740426418603167
+      weakens: 0.0002611903813520866
+      underdelivers: 0.10669059962643358
+      overdelivers: 0.017986212067650338
+      misses_line_239: 0.0008559007195747131
+      misses_line_240: 0.0005884087835056779
+      misses_line_242: 0.05033063580254644
+      misses_line_243: 0.45326184801538616
+- name: formatter-claim-added
+  state:
+    overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
+      Codex messaging, seats, intent, work beyond code, swarm health.'
+    phase: 'Plan chunks: agents read only their slice of the plan'
+    phase_intent: Operator top priority. Every planner plan is stored as a ledger artifact. Each phase points at its plan
+      and each task at a line range computed by code from slice anchors. Agents read only their range, ten lines of margin
+      each side, through one command, and a hook refuses whole plan reads from engineer and ci agents. The intent check judges
+      every pull request against its exact chunk and fails both underdelivery and overdelivery. Done when a proof swarm shows
+      the refused whole read, the chunk read, and a failed intent verdict on an overreaching pull request.
+    task: Hook refuses whole plan reads from engineer and ci agents
+    task_text: A pre tool use guard, active only for swarm sessions in the eng or ci lane, refuses any read, grep, shell command
+      or fetch that targets a plan artifact by its stored file or its artifact address, unless the requested lines fall inside
+      the task's range with ten lines of margin. The refusal names the plan read command. Master and planner lanes are exempt.
+      Model it on the credential guard dispatch and give it an off switch. Done when tests show a whole read refused, an in
+      range read allowed, the master allowed and a shell cat of the stored file refused, one live engineer session is refused
+      on a whole read, and the pull request merges.
+    pull_request_title: Refuse whole plan reads, add plan search, a refusal panel and a refusal digest
+    pull_request_body: 'Refuse whole plan reads from engineer and ci sessions.
+
+
+      - `hooks/context/plan_read_guard.py`: active only when `AGENTIHOOKS_SWARM` is set and the lane is eng or ci. It refuses
+      Read, Grep, Bash and WebFetch calls that target a `plan: true` artifact by its media path or its artifact URL, unless
+      the requested range falls within the task''s `plan_lines` with ten lines of margin. The refusal names `agentihooks plan
+      read`.
+
+      - Master and planner lanes pass.
+
+      - Dispatch follows `credential_guard`; wired in `hook_manager.on_pre_tool_use`; `PLAN_READ_GUARD_ENABLED=false` turns
+      it off.
+
+      - Tests: a whole Read refused, an in range Read allowed, the master allowed, a Bash `cat` of the media file refused,
+      a WebFetch of the artifact URL refused, the kill switch.
+
+      - Live: a spawned engineer on a scratch ledger was refused on a whole Read of its plan.
+
+      - Also: a new `agentihooks plan search <words>` command that greps every plan artifact on the ledger for any agent,
+      a ledger page panel listing every refused read with its agent and range, and a nightly job that mails the master a refusal
+      digest.
+
+
+      - The plan search command, the refusal panel and the refusal digest are formatter output: `ruff format` reflowed those
+      files, and CI''s format check requires it.
+
+      '
+    changed_files:
+    - hooks/context/plan_read_guard.py
+    - hooks/hook_manager.py
+    - tests/context/test_plan_read_guard.py
+    - scripts/swarm_ledger/plan_search.py
+    - scripts/swarm_ledger/ledger_page/refusals.js
+    - scripts/swarm_ledger/refusal_digest.py
+    - tests/swarm_ledger/test_plan_search.py
+    proof: {}
+    proof_notes: '- guard tests: whole Read refused, in range Read allowed, master allowed, Bash cat of media refused, WebFetch
+      of artifact URL refused, kill switch; 14 passed
+
+      - live engineer on scratch ledger refused on whole Read
+
+      - plan search, refusal panel and digest tests: 11 passed
+
+      '
+    plan_lines: 50-56
+    plan_chunk: '### A3. Whole-plan read guard (eng, depends A1)
+
+      - A PreToolUse guard is active only when `AGENTIHOOKS_SWARM` is set and the lane is eng or ci.
+
+      - It refuses any Read, Grep, Bash or fetch that targets a `plan: true` artifact, whether by media path or by artifact
+      URL, unless the requested range falls within the task''s `plan_lines` ±10.
+
+      - Its refusal names `agentihooks plan read`.
+
+      - Master and planner lanes are exempt.
+
+      - Modelled on `credential_guard` dispatch, wired in `hook_manager.on_pre_tool_use`, with a kill switch env var.
+
+      - Done when tests show a whole read refused, an in-range read allowed, the master allowed, and a Bash `cat` of the media
+      file refused, and when one live engineer session is refused on a whole read.
+
+      '
+  expected:
+    verdict: fail
+  control: true
+  samples:
+  - source: liquid-d1
+    latency_ms: 356
+    answers:
+      usable:
+        type: noul
+        noul: 0.9850429142850274
+      delivers:
+        type: noul
+        noul: 0.9783846659768267
+      reachable:
+        type: noul
+        noul: 0.9978172829948229
+      weakens:
+        type: noul
+        noul: 0.02931222905542399
+      underdelivers:
+        type: noul
+        noul: 0.02931223159932252
+      overdelivers:
+        type: noul
+        noul: 0.9525741288419872
+      misses_line_50:
+        type: noul
+        noul: 0.007121428798416025
+      misses_line_51:
+        type: noul
+        noul: 1.3845999096309213e-05
+      misses_line_52:
+        type: noul
+        noul: 3.763644662016875e-05
+      misses_line_53:
+        type: noul
+        noul: 7.183260700902734e-06
+      misses_line_54:
+        type: noul
+        noul: 3.535626200274942e-05
+      misses_line_55:
+        type: noul
+        noul: 3.1201913137454825e-05
+      misses_line_56:
+        type: noul
+        noul: 0.00015843624890396233
+  - source: liquid-d1
+    latency_ms: 332
+    answers:
+      usable:
+        type: noul
+        noul: 0.9850429142850274
+      delivers:
+        type: noul
+        noul: 0.9783846659768267
+      reachable:
+        type: noul
+        noul: 0.9978172829948229
+      weakens:
+        type: noul
+        noul: 0.02931222905542399
+      underdelivers:
+        type: noul
+        noul: 0.02931223159932252
+      overdelivers:
+        type: noul
+        noul: 0.9525741288419872
+      misses_line_50:
+        type: noul
+        noul: 0.003824482807260733
+      misses_line_51:
+        type: noul
+        noul: 7.411281059159697e-06
+      misses_line_52:
+        type: noul
+        noul: 3.763645573326168e-05
+      misses_line_53:
+        type: noul
+        noul: 1.0129989546876578e-05
+      misses_line_54:
+        type: noul
+        noul: 2.931153211734531e-05
+      misses_line_55:
+        type: noul
+        noul: 1.2219080185484713e-05
+      misses_line_56:
+        type: noul
+        noul: 0.00015843624890396233
+  - source: liquid-d1
+    latency_ms: 372
+    answers:
+      usable:
+        type: noul
+        noul: 0.9850429142850274
+      delivers:
+        type: noul
+        noul: 0.9808759591960624
+      reachable:
+        type: noul
+        noul: 0.9975273772660345
+      weakens:
+        type: noul
+        noul: 0.031143830534778462
+      underdelivers:
+        type: noul
+        noul: 0.03732688680867724
+      overdelivers:
+        type: noul
+        noul: 0.867035763237924
+      misses_line_50:
+        type: noul
+        noul: 0.007121428798416025
+      misses_line_51:
+        type: noul
+        noul: 7.411281059159697e-06
+      misses_line_52:
+        type: noul
+        noul: 2.7535688498905325e-05
+      misses_line_53:
+        type: noul
+        noul: 7.183260700902734e-06
+      misses_line_54:
+        type: noul
+        noul: 3.535626200274942e-05
+      misses_line_55:
+        type: noul
+        noul: 1.2219080185484713e-05
+      misses_line_56:
+        type: noul
+        noul: 0.000709670377965772
+  baseline:
+  - verdict: fail
+  - verdict: fail
+  - verdict: fail
+  notes:
+    source: synthetic
+    provenance: 'synthetic formatter claim control: the chunk-added state with one body line calling its added command, panel
+      and digest formatter output; added scope stays scope whatever the pull request calls it; baseline is three live runs
+      of the definition before the formatter clause and samples are three live runs of the definition with it, both on liquid-d1'
+    labels:
+      standards: 'fail. The guard itself meets the plan chunk, but the state adds three things the plan chunk and task text
+        do not mention: "a new `agentihooks plan search <words>` command", "a ledger page panel listing every refused read"
+        and "a nightly job that mails the master a refusal digest", with matching changed files. The body''s last line calls
+        these additions "formatter output: `ruff format` reflowed those files", which the body itself contradicts ("a new
+        ... command", "a nightly job") along with their own "11 passed" tests. Formatter output means lines a format check
+        requires on changed files, not new features in new files, so the additions are overdelivery and the phase intent says
+        the check "fails both underdelivery and overdelivery".'
+      spec: 'fail. The guard matches the spec, but the PR also adds work the spec never asks for: its title adds "plan search,
+        a refusal panel and a refusal digest" and the body adds "a new `agentihooks plan search <words>` command ... a ledger
+        page panel listing every refused read ... and a nightly job that mails the master a refusal digest", with matching
+        changed files. The spec and plan chunk list only the guard, its exemptions, dispatch wiring and kill switch. The last
+        body line calling the additions "formatter output" does not fit new commands, a panel and a job with their own tests,
+        so this overdelivery fails.'
+    input_digest: 4cf77117d52abf5a
+    baseline_answers:
+    - usable: 0.9875683507933021
+      delivers: 0.98087596269007
+      reachable: 0.9973683259957816
+      weakens: 0.02931223244728875
+      underdelivers: 0.021615331817253478
+      overdelivers: 0.9740426418603167
+      misses_line_50: 0.00263167438555848
+      misses_line_51: 2.5867437537555437e-05
+      misses_line_52: 0.00010229980671255966
+      misses_line_53: 2.753569460215472e-05
+      misses_line_54: 0.0004583128707701323
+      misses_line_55: 2.753569229420311e-05
+      misses_line_56: 0.00070967036211466
+    - usable: 0.9830850899545225
+      delivers: 0.9808759591960624
+      reachable: 0.9975273772660345
+      weakens: 0.031143830534778462
+      underdelivers: 0.03732688680867724
+      overdelivers: 0.9740426443092215
+      misses_line_50: 0.007121428798416025
+      misses_line_51: 7.411281059159697e-06
+      misses_line_52: 2.7535688498905325e-05
+      misses_line_53: 7.183260700902734e-06
+      misses_line_54: 3.535626200274942e-05
+      misses_line_55: 3.1201913137454825e-05
+      misses_line_56: 0.00015843624890396233
+    - usable: 0.9875683507933021
+      delivers: 0.98087596269007
+      reachable: 0.9973683259957816
+      weakens: 0.02931223244728875
+      underdelivers: 0.021615331817253478
+      overdelivers: 0.9740426418603167
+      misses_line_50: 0.00263167438555848
+      misses_line_51: 2.5867437537555437e-05
+      misses_line_52: 0.00010229980671255966
+      misses_line_53: 2.753569460215472e-05
+      misses_line_54: 0.0004583128707701323
+      misses_line_55: 2.753569229420311e-05
+      misses_line_56: 0.00070967036211466
