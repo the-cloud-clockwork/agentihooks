@@ -727,7 +727,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     agents, actions = store.agents(slug), []
     taken = {a.seat for a in agents}
     held = _held_for_master(slug, store, now_ms)
-    for lane, task in _spawn_order(slug, config, store, agents, rows, doc):
+    for lane, task in _spawn_order(slug, config, store, agents, rows, doc, runtime):
         if held:
             return actions + held
         if stop := _spawn_stop(slug, config, store, runtime, now_ms):
@@ -801,8 +801,8 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     return actions
 
 
-def _spawn_order(slug, config, store, agents, rows, doc):
-    from scripts.swarm import capacity
+def _spawn_order(slug, config, store, agents, rows, doc, runtime):
+    from scripts.swarm import capacity, seat_spawn
 
     decision = capacity.read(store, slug)
     caps = decision.get("effective", {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan})
@@ -812,6 +812,7 @@ def _spawn_order(slug, config, store, agents, rows, doc):
         ready = _launch_order(slug, store, _claimable(slug, store, rows, doc, lane))
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]
+        ready = [task for task in ready if not seat_spawn.placed_elsewhere(runtime, lane, task)]
         ready = ready[: max(cap - busy, 0)]
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
     return [(lane, task) for _, lane, task in sorted(queue, key=lambda entry: entry[0])]
@@ -974,6 +975,8 @@ def _master(slug, config, store, runtime, now_ms):
         return []
     if any(m.name in runtime.live_names() for m in masters):
         return ["the old master is still running, waiting for it to end before starting the next"]
+    if refused := seat_spawn.placed_elsewhere(runtime, MASTER, {}):
+        return [refused]
     if refused := seat_spawn.no_slot(config, runtime, MASTER):
         store.redis.hset(MASTER_WAITING, slug, now_ms)
         return [refused]

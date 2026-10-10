@@ -17,6 +17,11 @@ def no_slot(config, runtime, what: str) -> str:
     return "" if runtime.has_capacity(config) else f"no session slot for the {what}, waiting"
 
 
+def placed_elsewhere(runtime, lane: str, task: dict) -> str:
+    refuses = getattr(runtime, "placement_refusal", None)
+    return refuses(lane, task) if refuses else ""
+
+
 def host_hold(slug: str, store, now_ms: int, what: str) -> str:
     from scripts.swarm import tick
 

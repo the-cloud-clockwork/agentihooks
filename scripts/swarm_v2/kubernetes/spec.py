@@ -22,6 +22,7 @@ SCHEMA = Path(__file__).resolve().parents[3] / "docs" / "swarm-v2" / "schemas" /
 DOMAIN = "swarm.agentihooks.io"
 ATTEMPTS = "/home/worker/attempts"
 LAUNCH_DIR = "/var/run/swarm/launch"
+LAUNCH_RECORD = "launch.json"
 ACCOUNTS_OBJECT = "swarm-claude-creds"
 WORKER_ID = 10001
 TMP_MIB = 1024
@@ -276,7 +277,7 @@ def _container(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
             "python",
             "/opt/swarm-node/supervisor.py",
             f"{ATTEMPTS}/{launch.execution_id}",
-            f"{LAUNCH_DIR}/launch.json",
+            f"{LAUNCH_DIR}/{LAUNCH_RECORD}",
         ],
         "env": [_token(launch)]
         + ([{"name": "BRAIN_URL", "value": policy["brain_url"]}] if "brain_url" in policy else []),
