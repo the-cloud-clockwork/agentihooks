@@ -314,7 +314,7 @@ def test_namespace_is_kept_for_callers():
 DELETE_OPTIONS = {"apiVersion": "v1", "kind": "DeleteOptions", "preconditions": {"uid": "u1"}}
 
 
-@pytest.mark.parametrize("status", [200, 202, 204])
+@pytest.mark.parametrize("status", [200, 201, 202, 204])
 @pytest.mark.parametrize("kind", ["pods", "services"])
 def test_delete_sends_a_uid_precondition_and_answers_deleted(kind, status):
     transport = Http((status, {"metadata": {"uid": "u1"}}))
@@ -338,7 +338,7 @@ def test_delete_overload_is_ambiguous(status):
         PodClient(Http((status, {})), "ns").delete("pods", "swarm-a", "u1")
 
 
-@pytest.mark.parametrize("status", [300, 403])
+@pytest.mark.parametrize("status", [203, 300, 403])
 def test_delete_refusal_raises(status):
     with pytest.raises(ApiRefused) as raised:
         PodClient(Http((status, {"reason": "Forbidden"})), "ns").delete("services", "swarm-a", "u1")

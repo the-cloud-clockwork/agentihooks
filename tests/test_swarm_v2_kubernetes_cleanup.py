@@ -177,8 +177,12 @@ def test_a_pinned_object_stripped_of_every_label_is_never_deleted(ready):
     del world.api.objects[f"swarm-{old.execution_id}"]["metadata"]["labels"]
     _journal(world, old, [])
     result = world.cleanup(controller).run(old.execution_id)
-    assert result.removed["pods"][0] == {"name": f"swarm-{old.execution_id}", "uid": "uid-1", "outcome": "unselected"}
+    assert result.removed["pods"] == [
+        {"name": f"swarm-{old.execution_id}", "uid": "uid-1", "outcome": "unselected"},
+        {"name": "swarm-extra", "uid": "uid-5", "outcome": "absent"},
+    ]
     assert [call for call in world.api.deletes if call[0] == "pods"] == []
+    assert f"swarm-{old.execution_id}" in world.api.objects
 
 
 def test_not_final_and_waiting_results_name_their_execution(ready):

@@ -11,9 +11,9 @@
     "tests/fixtures/swarm_v2/pod-policy.json": "cac05e3a549966cf63b9c00183883ec7087b814eb91fc785dad689df9e66723b",
     "tests/fixtures/swarm_v2/pod-launch.json": "8d1964999c9d4fc4e3bfd4f8aea2938da30b825411e1e5a12f4ea7e432261908",
     "tests/sv2_kub04_cases.py": "60e9e7a6c0a3570e55ce7f4ad12a134c8db17f1d765544de3dd92d7db6ffd9f0",
-    "tests/test_swarm_v2_kubernetes_cleanup.py": "5b9d7159f51086fc0621cf11d5019f183ff12b584210d4815b7f7c0eee7f0034",
-    "tests/test_swarm_v2_retention.py": "25ffc41c53805ae090e37321b6a585aaa796f6f2305d033bf6d4ccdcd0f732c7",
-    "tests/test_swarm_v2_kubernetes_client.py": "2c860a79776484601ec9f910a773580d8fa30004d63ddd7c13aaf03bde76b43e",
+    "tests/test_swarm_v2_kubernetes_cleanup.py": "ceb4736a6f60afa1a036a7871e26e4a80e514ccb80f46323860cd3c118d6c521",
+    "tests/test_swarm_v2_retention.py": "65c2c39391cfb1033a74f739bf5bcbb2ed66037f5c0d88db26a95913996cef15",
+    "tests/test_swarm_v2_kubernetes_client.py": "6cf1fa2d68b53f6dd79bc4218c3d17a80f51ef3d5bdb385f3072fd23ae9bce48",
     "scripts/swarm_v2/kubernetes/cleanup.py": "8c817a95c823de52d52e5335d1d30a1a8d3418a29a30eddf874d7747e1d6f3c3",
     "scripts/swarm_v2/retention.py": "ffe42ea081b243ae2dfe275a107cbac7ad8f7c3f9a623d17297b6731a77be1db",
     "scripts/swarm_v2/kubernetes/client.py": "054bfc85e529c4ab389ed7333fa53f4fd30bedf578bf20d5c89ea45b787bdd1f"

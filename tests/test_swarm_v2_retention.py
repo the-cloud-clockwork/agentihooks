@@ -150,7 +150,12 @@ def test_retain_reads_the_clock_of_its_own_store(attempt, monkeypatch):
     world, record = attempt
     entry = retention.finalize(world.store, SLUG, world.require, record.execution_id, "completed", 0, "ledger:one")
     seen = []
-    monkeypatch.setattr(retention.lease, "now_ms", lambda store: seen.append(store) or 7)
+
+    def clock(store):
+        seen.append(store)
+        return 7
+
+    monkeypatch.setattr(retention.lease, "now_ms", clock)
     assert retention.retain(world.store, SLUG, entry, {})["retained_at_ms"] == 7
     assert seen and all(store is world.store for store in seen)
 
