@@ -87,6 +87,7 @@
       },
       "state": "awaiting-decision"
     },
-    "slots": []
+    "slots": [],
+    "old_state": "fenced"
   }
 }

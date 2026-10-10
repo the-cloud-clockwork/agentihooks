@@ -18,14 +18,14 @@ IMAGE_PULL, APPLICATION_EXIT = "image_pull", "application_exit"
 REASONS = (OOM_KILLED, EVICTED, NODE_LOST, IMAGE_PULL, APPLICATION_EXIT)
 PULL_WAITING = frozenset(("ErrImagePull", "ImagePullBackOff", "InvalidImageName"))
 PULL_GRACE_MS = 120_000
+NODE_NOT_READY = "NodeNotReady"
 RELEASES = ("grant", "account")
 RESUME, FRESH, PENDING = "resume", "fresh", "recovery_pending"
-AWAITING = "awaiting-decision"
+AWAITING, FENCED = "awaiting-decision", "fenced"
 PENDING_POD = "swarm-pending"
 FENCES = "attempt-fences"
 RECOVERIES = "attempt-recoveries"
 LATE = "attempt-late-observations"
-FAILURES = "execution-failures"
 NODES = "attempt-nodes"
 PULLS = "image-pull-since"
 NO_TAIL = "the image never started, so no transcript was written"
@@ -52,23 +52,30 @@ class Decision:
 
 
 def classify(pod: dict, ready: frozenset[str] | None = None) -> str:
-    """Empty when the Pod shows no failure; `ready` names the Ready nodes, or None when node health is unobserved."""
+    """Empty when the Pod shows no failure; `ready` names the Ready nodes, or None when no node listing succeeded."""
     status = pod.get("status", {})
     containers = (*status.get("initContainerStatuses", []), *status.get("containerStatuses", []))
     states = [container.get("state", {}) for container in containers]
     exits = [state["terminated"] for state in states if "terminated" in state]
-    node = pod.get("spec", {}).get("nodeName")
     if any(done.get("reason") == "OOMKilled" for done in exits):
         return OOM_KILLED
     if status.get("reason") == "Evicted":
         return EVICTED
-    if status.get("reason") == "NodeLost" or (ready is not None and node and node not in ready):
+    if _node_lost(status, pod.get("spec", {}).get("nodeName"), ready):
         return NODE_LOST
     if any(state.get("waiting", {}).get("reason") in PULL_WAITING for state in states):
         return IMAGE_PULL
     if status.get("phase") == "Failed" or any(done.get("exitCode") != 0 for done in exits):
         return APPLICATION_EXIT
     return ""
+
+
+def _node_lost(status: dict, node: str | None, ready: frozenset[str] | None) -> bool:
+    if status.get("reason") == "NodeLost":
+        return True
+    if any(condition.get("reason") == NODE_NOT_READY for condition in status.get("conditions", [])):
+        return True
+    return ready is not None and bool(node) and node not in ready
 
 
 def tail(reason: str, session: str, watermark: int) -> str:
@@ -106,10 +113,12 @@ class Recovery:
         self.checkpoints, self.releases = checkpoints, releases
         self.compatibility, self.automatic = compatibility, automatic
 
-    def reconcile(self, pods: Iterable[dict], ready_nodes: Iterable[str]) -> dict[str, str]:
+    def reconcile(self, pods: Iterable[dict], ready_nodes: Iterable[str] | None) -> dict[str, str]:
+        """Pass None for `ready_nodes` when the node listing failed, so no Pod is judged lost on missing evidence."""
         self.controller.require()
         self._resume()
-        ready, groups, seen = frozenset(ready_nodes), {}, {}
+        ready = None if ready_nodes is None else frozenset(ready_nodes)
+        groups, seen = {}, {}
         for pod in pods:
             groups.setdefault(pod["metadata"].get("labels", {}).get(EXECUTION_LABEL, ""), []).append(pod)
         for agent in self.store.execution_occupants(self.slug).values():
@@ -162,18 +171,18 @@ class Recovery:
         return int(self.store.redis.hget(self._key(LATE), execution_id) or 0)
 
     def execution_failures_by_reason(self) -> dict[str, int]:
-        counts = self.store.redis.hgetall(self._key(FAILURES))
-        return {reason: int(counts.get(reason, 0)) for reason in REASONS}
+        reasons = [json.loads(raw)["reason"] for raw in self.store.redis.hvals(self._key(FENCES))]
+        return {reason: reasons.count(reason) for reason in REASONS}
 
     def _key(self, name: str) -> str:
         return self.store.key(self.slug, name)
 
     def _resume(self) -> None:
         decided = set(self.store.redis.hkeys(self._key(RECOVERIES)))
-        for execution_id in sorted(set(self.store.redis.hkeys(self._key(FENCES))) - decided):
+        for execution_id in set(self.store.redis.hkeys(self._key(FENCES))) - decided:
             self.handle(execution_id, self.fence(execution_id)["reason"])
 
-    def _observe(self, agent: AgentRecord, pods: list[dict], ready: frozenset[str]) -> str:
+    def _observe(self, agent: AgentRecord, pods: list[dict], ready: frozenset[str] | None) -> str:
         if self.fence(agent.execution_id):
             return self._late(agent.execution_id, len(pods))
         if len(pods) > 1:
@@ -188,24 +197,27 @@ class Recovery:
 
     def _late(self, execution_id: str, count: int) -> str:
         if count:
+            self.controller.require()
             self.store.redis.hincrby(self._key(LATE), execution_id, count)
         return "retired"
 
-    def _reason(self, execution_id: str, pod: dict, ready: frozenset[str]) -> str:
+    def _reason(self, execution_id: str, pod: dict, ready: frozenset[str] | None) -> str:
         node = pod.get("spec", {}).get("nodeName")
+        reason = classify(pod, ready)
+        self.controller.require()
         if node:
             self.store.redis.hset(self._key(NODES), execution_id, node)
-        reason = classify(pod, ready)
         if reason != IMAGE_PULL:
             self.store.redis.hdel(self._key(PULLS), execution_id)
         return reason
 
-    def _vanished(self, agent: AgentRecord, ready: frozenset[str]) -> str:
+    def _vanished(self, agent: AgentRecord, ready: frozenset[str] | None) -> str:
         node = self.store.redis.hget(self._key(NODES), agent.execution_id)
-        return NODE_LOST if node and node not in ready else ""
+        return NODE_LOST if ready is not None and node and node not in ready else ""
 
     def _pulling(self, execution_id: str) -> bool:
         now, key = lease.now_ms(self.store), self._key(PULLS)
+        self.controller.require()
         self.store.redis.hsetnx(key, execution_id, now)
         return now - int(self.store.redis.hget(key, execution_id)) < PULL_GRACE_MS
 
@@ -231,7 +243,6 @@ class Recovery:
         self.controller.require()
         if not self.store.redis.hsetnx(self._key(FENCES), agent.execution_id, json.dumps(fence)):
             return self.fence(agent.execution_id)
-        self.store.redis.hincrby(self._key(FAILURES), reason)
         return fence
 
     def _decide(self, agent: AgentRecord, reason: str) -> Decision:
@@ -259,6 +270,8 @@ class Recovery:
             if occupant.generation != agent.generation + 1:
                 raise SwarmError("the seat moved past the fenced attempt")
             return occupant.execution_id
+        self.controller.require()
+        self.store.put_agent(self.slug, replace(occupant, state=FENCED))
         target = {"pod_namespace": agent.runtime_target["pod_namespace"], "pod_name": PENDING_POD}
         record = replace(
             agent, execution_id="", generation=0, state="working", conversation_id="", runtime_target=target

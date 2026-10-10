@@ -39,6 +39,8 @@ def test_reason_names_and_pull_states_are_fixed():
     assert failures.PULL_WAITING == frozenset(("ErrImagePull", "ImagePullBackOff", "InvalidImageName"))
     assert failures.RELEASES == ("grant", "account")
     assert failures.PULL_GRACE_MS == 120_000
+    assert failures.NODE_NOT_READY == "NodeNotReady"
+    assert (failures.AWAITING, failures.FENCED) == ("awaiting-decision", "fenced")
 
 
 @pytest.mark.parametrize(
@@ -60,11 +62,24 @@ def test_each_fixture_shape_classifies_by_its_own_signal(shape, reason):
 
 
 def test_node_health_counts_only_when_observed():
-    pod = cases.fixture()["pods"]["node_unreachable"]
+    pod = cases.fixture()["pods"]["running"]
     assert failures.classify(pod) == ""
-    assert failures.classify(pod, frozenset({"worker-a"})) == ""
+    assert failures.classify(pod, frozenset({"worker-b"})) == ""
     assert failures.classify(pod, frozenset()) == "node_lost"
     assert failures.classify(_pod({"phase": "Pending"}), frozenset()) == ""
+    assert failures.classify(cases.fixture()["pods"]["node_unreachable"]) == "node_lost"
+    unready = {"phase": "Running", "conditions": [{"type": "Ready", "status": "False", "reason": "ContainersNotReady"}]}
+    assert failures.classify(_pod(unready, "worker-b")) == ""
+
+
+def test_init_containers_and_a_missing_exit_code_count_as_exits():
+    init = {"phase": "Failed", "initContainerStatuses": [{"name": "home", "state": {"terminated": {}}}]}
+    assert failures.classify(_pod(init)) == "application_exit"
+    init["initContainerStatuses"][0]["state"]["terminated"] = {"reason": "OOMKilled", "exitCode": 137}
+    assert failures.classify(_pod(init)) == "oom_killed"
+    pending = {"phase": "Pending", "initContainerStatuses": [{"state": {"terminated": {"exitCode": 1}}}]}
+    assert failures.classify(_pod(pending)) == "application_exit"
+    assert failures.classify(_pod(_container(terminated={"reason": "Error"}))) == "application_exit"
 
 
 def test_oom_outranks_eviction_node_loss_and_a_failed_phase():
@@ -156,6 +171,44 @@ def test_a_seat_moved_past_the_fenced_attempt_is_refused(world):
         recovery.handle(world.old.execution_id, "oom_killed")
 
 
+def test_a_paused_decision_after_replacement_leaves_the_successor_alone(world):
+    recovery = world.recovery(world.live)
+    successor = recovery.handle(world.old.execution_id, "oom_killed").replacement
+    assert world.store.execution(cases.SLUG, world.old.execution_id).state == "fenced"
+    world.store.redis.hdel(world.store.key(cases.SLUG, "attempt-recoveries"), world.old.execution_id)
+    paused = world.recovery(world.live, automatic=False).handle(world.old.execution_id, "oom_killed")
+    assert (paused.mode, paused.replacement) == ("recovery_pending", "")
+    assert world.occupant().execution_id == successor
+    assert world.occupant().state == "working"
+
+
+def test_a_lost_fence_race_keeps_the_winning_fence(world, monkeypatch):
+    recovery = world.recovery(world.live)
+    winner = {
+        "execution_id": world.old.execution_id,
+        "generation": 1,
+        "seat": world.old.seat,
+        "reason": "evicted",
+        "controller_epoch": world.live.held.epoch,
+        "fenced_at_ms": 7,
+        "native_session": "",
+        "archive_watermark": 0,
+        "tail": "won elsewhere",
+        "released": [],
+    }
+    hset = recovery.store.redis.hset
+
+    def raced(key, field, value):
+        hset(key, field, json.dumps(winner))
+        return False
+
+    monkeypatch.setattr(recovery.store.redis, "hsetnx", raced)
+    decision = recovery.handle(world.old.execution_id, "oom_killed")
+    assert decision.reason == "evicted"
+    assert recovery.fence(world.old.execution_id) == {**winner, "released": ["grant", "account"]}
+    assert recovery.execution_failures_by_reason() == {**dict.fromkeys(failures.REASONS, 0), "evicted": 1}
+
+
 def test_the_latest_complete_compatible_checkpoint_wins(world):
     recovery = world.recovery(world.live)
     world.checkpoints.by_execution[world.old.execution_id] = [
@@ -225,6 +278,15 @@ def test_a_vanished_pod_on_a_ready_node_or_an_unseen_node_is_not_a_failure(world
     world.ready.clear()
     assert world.reconcile(recovery) == {world.old.execution_id: "unobserved"}
     assert recovery.fence(world.old.execution_id) is None
+
+
+def test_a_failed_node_listing_judges_no_pod_lost(world):
+    recovery = world.recovery(world.live)
+    pods = list(world.api.objects.values())
+    assert recovery.reconcile(pods, None) == {world.old.execution_id: "working"}
+    world.api.objects.pop(f"swarm-{world.old.execution_id}")
+    assert recovery.reconcile([], None) == {world.old.execution_id: "unobserved"}
+    assert recovery.reconcile([], []) == {world.old.execution_id: "fenced"}
 
 
 def test_two_live_pods_for_one_attempt_are_left_alone(world):
