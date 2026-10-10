@@ -177,7 +177,7 @@ printf '%s' "$signing_key" | kubectl create secret generic swarm-launch-signing 
   --from-file=signing-key=/dev/stdin | kubectl apply -f -
 unset signing_key
 kubectl create serviceaccount swarm-controller
-kubectl create role swarm-controller --namespace swarm-pod-proof --verb=create,get,list --resource=pods
+kubectl create role swarm-controller --namespace swarm-pod-proof --verb=create,delete,get,list,watch --resource=pods
 kubectl create rolebinding swarm-controller --namespace swarm-pod-proof --role=swarm-controller \
   --serviceaccount=default:swarm-controller
 helm upgrade "$release" "$chart" -f "$chart/ci/kind-values.yaml" "${workers[@]}" "${api[@]}" --wait --timeout 5m
