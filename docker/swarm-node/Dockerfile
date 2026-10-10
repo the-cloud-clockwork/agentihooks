@@ -18,9 +18,11 @@ RUN python /opt/swarm-node/worker_image.py validate --architecture "$TARGETARCH"
     && apt-get update \
     && apt-get install -y --no-install-recommends $(python /opt/swarm-node/worker_image.py shell-packages) \
     && rm -r /var/lib/apt/lists/*
-RUN python -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir --require-hashes -r /opt/swarm-node/requirements.lock \
-    && python /opt/swarm-node/worker_image.py install --architecture "$TARGETARCH"
+RUN --mount=type=cache,target=/var/cache/swarm-node \
+    mkdir -p /var/cache/swarm-node/tools \
+    && python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --cache-dir /var/cache/swarm-node/pip --require-hashes -r /opt/swarm-node/requirements.lock \
+    && python /opt/swarm-node/worker_image.py install --architecture "$TARGETARCH" --cache /var/cache/swarm-node/tools
 COPY pyproject.toml README.md ./
 COPY hooks/ hooks/
 COPY scripts/ scripts/

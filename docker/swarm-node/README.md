@@ -95,8 +95,9 @@ exists. Production rollout remains with antoncore GitOps.
 
 After committing inputs, `bash docker/swarm-node/smoke.sh OUTPUT_DIRECTORY`
 builds an archived clean context, starts two independent containers with network
-disabled, rejects three invalid locks, rebuilds without cache and starts the
-retained image again. It also bootstraps the fixture profiles in
+disabled, rejects three invalid locks, rebuilds without layer cache and starts the
+retained image again. The rebuild reuses pip wheels and tool binaries from a
+BuildKit cache mount, each checked against its locked sha256 before use. It also bootstraps the fixture profiles in
 `fixtures/profiles` inside fresh containers, runs `claude mcp list`, `codex mcp
 list`, `claude -p` and `codex exec` offline so their SessionStart hooks register
 the session, proves refusals, crash recovery and a profile rollback, and writes

@@ -45,13 +45,25 @@ def load_lock(path: Path, architecture: str) -> dict:
     return lock
 
 
-def install_tools(lock: dict, destination: Path) -> None:
+def fetch(name: str, artifact: dict, cache: Path | None) -> bytes:
+    cached = cache / artifact["sha256"] if cache else None
+    if cached and cached.is_file():
+        payload = cached.read_bytes()
+        if hashlib.sha256(payload).hexdigest() == artifact["sha256"]:
+            return payload
+    with urllib.request.urlopen(artifact["url"], timeout=120) as response:
+        payload = response.read()
+    if hashlib.sha256(payload).hexdigest() != artifact["sha256"]:
+        raise ValueError(f"artifact checksum mismatch: {name}")
+    if cached:
+        cached.write_bytes(payload)
+    return payload
+
+
+def install_tools(lock: dict, destination: Path, cache: Path | None = None) -> None:
     binaries = {}
     for name, artifact in lock["tools"].items():
-        with urllib.request.urlopen(artifact["url"], timeout=120) as response:
-            payload = response.read()
-        if hashlib.sha256(payload).hexdigest() != artifact["sha256"]:
-            raise ValueError(f"artifact checksum mismatch: {name}")
+        payload = fetch(name, artifact, cache)
         if "member" in artifact:
             with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
                 payload = archive.extractfile(artifact["member"]).read()
@@ -134,12 +146,13 @@ def main() -> None:
     parser.add_argument("--architecture", default="amd64")
     parser.add_argument("--base-image")
     parser.add_argument("--source-revision", default="unknown")
+    parser.add_argument("--cache", type=Path)
     args = parser.parse_args()
     lock = load_lock(args.lock, args.architecture)
     if args.base_image is not None and args.base_image != lock["base_image"]:
         raise ValueError("base image differs from lock")
     if args.action == "install":
-        install_tools(lock, Path("/usr/local/bin"))
+        install_tools(lock, Path("/usr/local/bin"), args.cache)
     elif args.action == "manifest":
         write_manifest(args.lock, args.architecture, args.source_revision, Path("/opt/agentihooks/templates"))
     elif args.action == "report":

@@ -114,6 +114,47 @@ def test_install_native_binaries_and_reject_wrong_version(locked, tmp_path, monk
     assert str(error.value) == "binary version mismatch: herdr"
 
 
+def test_install_reuses_only_verified_cached_downloads(locked, tmp_path, monkeypatch):
+    _, lock, payloads = locked
+    download = Mock(side_effect=lambda url, timeout: io.BytesIO(payloads[url]))
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", download)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    first = tmp_path / "first"
+    first.mkdir()
+    worker_image.install_tools(lock, first, cache)
+    assert download.call_count == 3
+    assert {p.name: p.read_bytes() for p in cache.iterdir()} == {
+        tool["sha256"]: payloads[tool["url"]] for tool in lock["tools"].values()
+    }
+    herdr = lock["tools"]["herdr"]
+    (cache / herdr["sha256"]).write_bytes(b"tampered")
+    download.reset_mock()
+    second = tmp_path / "second"
+    second.mkdir()
+    worker_image.install_tools(lock, second, cache)
+    assert download.call_args_list == [call(herdr["url"], timeout=120)]
+    assert (cache / herdr["sha256"]).read_bytes() == payloads[herdr["url"]]
+    assert {p.name: p.read_bytes() for p in second.iterdir()} == {p.name: p.read_bytes() for p in first.iterdir()}
+
+
+def test_install_never_caches_a_mismatched_download(locked, tmp_path, monkeypatch):
+    _, lock, payloads = locked
+    codex = lock["tools"]["codex"]
+    payloads[codex["url"]] = b"wrong binary"
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(payloads[url]))
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / codex["sha256"]).write_bytes(b"also wrong")
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    with pytest.raises(ValueError) as error:
+        worker_image.install_tools(lock, destination, cache)
+    assert str(error.value) == "artifact checksum mismatch: codex"
+    assert (cache / codex["sha256"]).read_bytes() == b"also wrong"
+    assert list(destination.iterdir()) == []
+
+
 def test_codex_archive_installs_only_named_binary(locked, tmp_path, monkeypatch):
     _, lock, payloads = locked
     url = lock["tools"]["codex"]["url"]
@@ -308,7 +349,18 @@ def test_build_command_routes_locked_actions(locked, monkeypatch, capsys, action
     path.write_text(json.dumps(lock))
     monkeypatch.setattr(
         "sys.argv",
-        ["worker_image", action, "--lock", str(path), "--architecture", "amd64", "--source-revision", "tested"],
+        [
+            "worker_image",
+            action,
+            "--lock",
+            str(path),
+            "--architecture",
+            "amd64",
+            "--source-revision",
+            "tested",
+            "--cache",
+            "/var/cache/tools",
+        ],
     )
     install = Mock()
     manifest = Mock()
@@ -318,7 +370,7 @@ def test_build_command_routes_locked_actions(locked, monkeypatch, capsys, action
     monkeypatch.setattr(worker_image, "report", report)
     worker_image.main()
     if action == "install":
-        install.assert_called_once_with(lock, Path("/usr/local/bin"))
+        install.assert_called_once_with(lock, Path("/usr/local/bin"), Path("/var/cache/tools"))
     elif action == "manifest":
         manifest.assert_called_once_with(path, "amd64", "tested", Path("/opt/agentihooks/templates"))
     elif action == "report":
