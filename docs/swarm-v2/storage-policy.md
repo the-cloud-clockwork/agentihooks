@@ -42,8 +42,17 @@ corrupt entries. Eviction on a store that attempts only read falls back to publi
 backend is unreachable it returns `paused` with the cause and leaves the attempt files untouched; a retry with the same
 artifact id after the backend returns commits once. A content conflict is still an error.
 
-Rollback: run private local execution with artifact publishing paused until the backend is healthy. Committed artifact
-objects stay authoritative; do not delete them as caches.
+Rollout safety and rollback: set `SWARM_ARTIFACT_PUBLISHING=off` in the worker environment to pause only artifact
+publication; every attempt keeps its files and runs as private local execution. Unset it once the backend is healthy.
+A pod policy without `mounts` renders the private Pod of SV2-KUB-01. Committed artifact objects stay authoritative; do
+not delete them as caches. The rehearsal (pause, resume, attempt files unchanged) runs in CI in the storage layout
+contract tests.
+
+## Reproducing a refusal
+
+The storage layout contract fixtures hold the smallest Pods that reproduce each refusal: a shared writable Codex home,
+the operator home and a writable node cache mount, beside the safe Pod rendered from the shared storage policy. Run
+the checker command on any of them; a failing rejection or recovery case keeps its Pod there.
 
 ## Per execution persistent subdirectories
 
@@ -58,7 +67,10 @@ repository mirrors and backups. Alternatives for state that must outlive a Pod:
 
 Keep active checkouts and worktrees on worker local storage by default.
 
-## Not yet measured
+## Benchmark
 
-Cloud to on-prem artifact throughput and failure behaviour over the WAN path is a live measurement taken at the rollout
-gate; no figure exists yet.
+`python -m scripts.swarm_v2.artifacts.benchmark <mounted folder> --sizes 1,16 --rounds 3` writes artifacts of each size
+through the artifact adapter into a fresh subfolder, reports seconds and MiB per second per size, then takes that
+subfolder away to show that publication pauses with the attempt file intact and resumes once it returns. It removes
+only its own subfolder. Run it from a cloud worker against the on-prem mount at the rollout gate for the WAN figure;
+the only figure so far is a local disk run, which says nothing about the WAN path.
