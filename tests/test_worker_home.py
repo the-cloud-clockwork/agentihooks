@@ -136,6 +136,18 @@ def test_bootstrap_renders_both_targets_into_separate_homes(fixture):
     assert "AH_CC_TOKEN_POOL_A" not in claude_text + codex_text
 
 
+def test_every_home_exports_the_grant_file_path_and_never_a_grant(fixture):
+    templates, volume = fixture
+    worker_home.bootstrap(request(templates, volume))
+    attempt = volume / "attempt-1"
+    grant = str(attempt / "run" / "launch-grant")
+    settings = json.loads((attempt / "homes/claude/.claude/settings.json").read_text())
+    assert settings["env"]["AGENTIHOOKS_LAUNCH_GRANT_FILE"] == grant
+    wrapper = (attempt / "homes/codex/.codex/agentihooks-hook.sh").read_text()
+    assert f'export AGENTIHOOKS_LAUNCH_GRANT_FILE="${{AGENTIHOOKS_LAUNCH_GRANT_FILE:={grant}}}"' in wrapper
+    assert not (attempt / "run" / "launch-grant").exists()
+
+
 def comparable(volume: Path) -> dict:
     attempt = volume / "attempt-1"
     docs = {
