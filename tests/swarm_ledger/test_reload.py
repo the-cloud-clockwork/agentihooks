@@ -50,7 +50,13 @@ class ImportedCode(unittest.TestCase):
         self.dirs = tuple(self.root / d.relative_to(server.ROOT) for d in server.CODE_DIRS)
         self.files = [
             self.root / "scripts" / rel
-            for rel in ("swarm_ledger/ledger_server.py", "inbox/store.py", "swarm/store.py", "swarm/health/verdicts.py")
+            for rel in (
+                "swarm_ledger/ledger_server.py",
+                "inbox/store.py",
+                "swarm/store.py",
+                "swarm/health/verdicts.py",
+                "swarm_v2/runtime/operations.py",
+            )
         ]
         for path in self.files:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -74,6 +80,9 @@ class ImportedCode(unittest.TestCase):
 
     def test_a_nested_swarm_package_change_reloads_the_server(self):
         self.assert_reloads_after(self.files[3])
+
+    def test_an_operation_journal_change_reloads_the_server(self):
+        self.assert_reloads_after(self.files[4])
 
     def test_every_agentihooks_folder_the_server_imports_is_watched(self):
         modules = sorted(
