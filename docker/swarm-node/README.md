@@ -37,6 +37,20 @@ requested, because its hook wrapper must execute. Other relative paths are
 admitted. Rerunning an accepted request is a no-op, an interrupted one is
 rendered again from scratch, and a different request for an accepted attempt is
 refused. The execution record names the digest of each selected profile.
+
+`layout.json` (copied to `/opt/swarm-node/layout.json`) is the SV2-FSY-01 path
+contract, read by `scripts.swarm_v2.filesystem`. Every attempt root holds the
+same private folders: `homes` for writable CLI state, `run` for supervision and
+Unix sockets, `checkouts`, `worktrees`, `spool`, `tmp` for scratch, and
+`profiles` for profile seeds, which bootstrap seals read only. Each folder is
+created mode 0700 under the attempt, so two Pods use the same internal names
+without sharing a mutable file or socket. A path, profile link or archive member
+that resolves outside its attempt root after symlink resolution is refused
+before any write and counted in `execution_path_validation_failures`. The
+execution record carries the layout as relative folder names only;
+`filesystem.restore` recreates an attempt under a new base from that record and
+refuses absolute paths or an unknown layout version, which stops new launches
+while the readers for earlier versions stay in place.
 Rollback selects the prior profile digest for new attempts; existing attempt
 homes are kept for recovery. The supervisor pins both native config homes to
 the selected private home, marks the admitted attempt trusted for Claude, and
