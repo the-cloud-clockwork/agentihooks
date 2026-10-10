@@ -1,7 +1,11 @@
+import json
+
 import pytest
 
 from scripts.doctor import loop, priming
-from scripts.swarm import capacity, freeze
+from scripts.swarm import capacity, freeze, metrics_swarm
+from scripts.swarm.host_budget import HostSample
+from scripts.swarm.metrics_outbox import Outbox, Settings
 from scripts.swarm.ledger_client import LedgerGone
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
@@ -147,3 +151,21 @@ def test_the_capacity_pass_for_the_doctor_counts_no_task_the_watched_focus_holds
     ledger, runtime = doctor(store, [record("plans/a", "focus")]), DemandRuntime()
     capacity.apply("sw", store.config("sw"), store, ledger, runtime, 1_000)
     assert runtime.demand == [{"eng": 1, "ci": 0, "plan": 0}]
+
+
+def test_the_held_spawns_gauge_counts_no_doctor_task_the_watched_focus_holds(store, monkeypatch, tmp_path):
+    ledger = doctor(store, [record("plans/a", "focus")])
+    store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"configured": {"eng": 2}}))
+    monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(1.0, 1, 512, 0))
+    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
+    monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
+    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
+    try:
+        metrics_swarm.record_pass(box, "sw", 1_000, store, ledger.state("sw"), [], {}, ledger)
+        [row] = box.recent("host_samples", 1_000)
+    finally:
+        box.close()
+    assert row["held_spawns"] == 1
+    assert row["held_by"] == "quota"
+    assert "watched" in ledger.read
