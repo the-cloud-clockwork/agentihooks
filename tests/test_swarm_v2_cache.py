@@ -442,7 +442,11 @@ def test_a_failure_after_staging_keeps_every_victim_and_leaves_no_staging(world,
     layer = cache.attach(small, world.first, key())
     fill(layer, {"a.whl": b"x" * 100})
 
-    def refused(path, times):
+    real = os.utime
+
+    def refused(path, times=None, **kwargs):
+        if times is None:
+            return real(path, **kwargs)
         raise OSError(errno.EPERM, os.strerror(errno.EPERM))
 
     monkeypatch.setattr(cache.os, "utime", refused)
