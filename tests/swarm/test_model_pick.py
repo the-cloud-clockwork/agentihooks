@@ -67,13 +67,14 @@ def test_explicit_lane_never_calls_classifier(monkeypatch):
         ("claude", -1, "low"),
         ("claude", 0.49, "low"),
         ("claude", 0.5, "low"),
+        ("claude", float("nan"), "low"),
         ("claude", 0.51, "max"),
         ("claude", 1.6, "max"),
         ("claude", 9, "max"),
         ("codex", 9, "xhigh"),
     ],
 )
-def test_effort_rounds_and_clamps_without_changing_fixed_model(monkeypatch, harness, score, expected):
+def test_effort_takes_the_top_above_one_half_without_changing_fixed_model(monkeypatch, harness, score, expected):
     monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: decision(score=score))
     floor = {f"AGENTIHOOKS_{harness.upper()}_EFFORT": "low"}
     picked = model_pick.pick(harness, {"model": "fixed", "effort": "auto"}, {}, floor)

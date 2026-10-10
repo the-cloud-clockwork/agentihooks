@@ -198,7 +198,7 @@ default, opus for Claude and gpt-6.1-sol for Codex unless
 model and effort values remain unchanged, and master and plan seats never consult
 the classifier. A master always launches on the frontier model at high effort for
 its harness, whatever its lane or the environment names, and records `frontier`.
-Decisions use purpose `model-pick` in the classifier log.
+Each decision it asks for uses purpose `model-pick` in the classifier log.
 
 The `model-pick` definition's `confidence` threshold defaults to 0.6;
 `AGENTIHOOKS_CLASSIFIER_MODEL_PICK_CONFIDENCE` overrides it, and the older
