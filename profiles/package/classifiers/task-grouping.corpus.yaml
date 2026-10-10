@@ -1,8 +1,9 @@
 version: 1
 notes: Seeded from the classifier decision log. Historic states for this classifier could not be rebuilt, so each case state
-  was rebuilt from its ledger and asked once during seeding on 2026-10-09 UTC; its samples are the answers the decision log
-  recorded for that ask. Expected verdicts were written by a separate reader agent that saw only each case state and its question,
-  never the thresholds or the rule. Every case holds one group, so the one verdict is that group's.
+  was rebuilt from its ledger; a case whose notes say it was asked once during seeding on 2026-10-09 UTC takes its samples
+  from that logged ask, and a case whose notes say it matched a state logged before seeding takes the answers logged for it
+  then. Expected verdicts were written by a separate reader agent that saw only each case state and its question, never the
+  thresholds or the rule. Every case holds one group, so the one verdict is that group's.
 cases:
 - name: rig-grade-swarm-tc105,tc111
   state:
@@ -42,7 +43,8 @@ cases:
         type: noul
         noul: 0.11920290324780274
   notes: state digest c4b5f9492d8aeb8b, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
-    decision log recorded it; internal names masked for the package
+    decision log recorded it; internal names masked for the package; the same state was also logged before seeding, first
+    on 2026-10-08
 - name: rig-grade-swarm-sz38,sz40
   state:
     overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
@@ -80,7 +82,7 @@ cases:
         type: noul
         noul: 0.1329642436335826
   notes: state digest 73f9f15d11d4c8ee, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
-    decision log recorded it
+    decision log recorded it; the same state was also logged before seeding, first on 2026-10-08
 - name: rig-grade-swarm-jdg1,jdg2
   state:
     overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and

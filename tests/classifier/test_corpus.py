@@ -474,6 +474,13 @@ def test_every_classifier_corpus_holds_ten_cases(name):
     assert len(evaluation.evaluate(name).cases) >= 10
 
 
+def test_model_pick_expects_each_reader_level_raised_to_the_floor():
+    for case in evaluation.evaluate("model-pick").cases:
+        levels, reader, floor = case.params["levels"], case.notes["reader_level"], case.notes["floor"]
+        assert floor == case.params["floor"]
+        assert case.expected == {"effort": levels[max(levels.index(reader), levels.index(floor))]}
+
+
 def one_line(text):
     return " ".join(text.split())
 

@@ -1,8 +1,9 @@
 version: 1
 notes: Seeded from the classifier decision log. Historic states for this classifier could not be rebuilt, so each case state
-  was rebuilt from its ledger and asked once during seeding on 2026-10-09 UTC; its samples are the answers the decision log
-  recorded for that ask. Expected verdicts were written by a separate reader agent that saw only each case state and its question,
-  never the thresholds or the rule.
+  was rebuilt from its ledger; a case whose notes say it was asked once during seeding on 2026-10-09 UTC takes its samples
+  from that logged ask, and a case whose notes say it matched a state logged before seeding takes the answers logged for it
+  then. Expected verdicts were written by a separate reader agent that saw only each case state and its question, never the
+  thresholds or the rule.
 cases:
 - name: rig-grade-swarm-p21-12
   state:
@@ -1895,7 +1896,7 @@ cases:
       serves_8:
         type: noul
         noul: 0.97
-  notes: state digest e41dff8ac8e55ab9
+  notes: state digest e41dff8ac8e55ab9; matched a state logged before seeding, first on 2026-10-08
 - name: rig-grade-swarm-p24-4
   state:
     phase: Recall from ledgers and swarms
@@ -3074,7 +3075,8 @@ cases:
       serves_11:
         type: noul
         noul: 0.95
-  notes: state digest e7a9c6d0b5cf8261; internal names masked for the package
+  notes: state digest e7a9c6d0b5cf8261; internal names masked for the package; matched a state logged before seeding, first
+    on 2026-10-08
 - name: rig-grade-swarm-p40-6
   state:
     phase: Swarm brain on Kubernetes
@@ -3678,7 +3680,7 @@ cases:
       serves_6:
         type: noul
         noul: 0.96
-  notes: state digest fd3d08fff1bcdca7
+  notes: state digest fd3d08fff1bcdca7; matched a state logged before seeding, first on 2026-10-08
 - name: rig-grade-swarm-p44-3
   state:
     phase: Duplicate check when adding to the ledger

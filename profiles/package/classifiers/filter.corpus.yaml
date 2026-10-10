@@ -1,8 +1,9 @@
 version: 1
 notes: Seeded from the classifier decision log. Historic states for this classifier could not be rebuilt, so each case state
-  was rebuilt from its ledger and asked once during seeding on 2026-10-09 UTC; its samples are the answers the decision log
-  recorded for that ask. Expected verdicts were written by a separate reader agent that saw only each case state and its question,
-  never the thresholds or the rule. Cases share a file state and differ by the findings asked about.
+  was rebuilt from its ledger; a case whose notes say it was asked once during seeding on 2026-10-09 UTC takes its samples
+  from that logged ask, and a case whose notes say it matched a state logged before seeding takes the answers logged for it
+  then. Expected verdicts were written by a separate reader agent that saw only each case state and its question, never the
+  thresholds or the rule. Cases share a file state and differ by the findings asked about.
 cases:
 - name: home-0
   state:
