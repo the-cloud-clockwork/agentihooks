@@ -253,14 +253,12 @@ class AccountCapacity:
     def _confirmed(
         self, registry: FleetRegistry, registration: Callable[[str], Registration | None]
     ) -> dict[str, dict[str, Slot]]:
-        valid = []
-        for record in registry.records():
-            found = registration(record.execution_id) if record.state != CLOSED and record.execution_id else None
-            if found is not None and found.swarm_id == self.slug and self._owns(record, found):
-                valid.append((record, found))
         confirmed: dict[str, dict[str, Slot]] = {}
         seated: set[str] = set()
-        for record, found in sorted(valid, key=lambda pair: pair[0].generation, reverse=True):
+        for record in sorted(registry.records(), key=lambda record: record.generation, reverse=True):
+            found = registration(record.execution_id) if record.state != CLOSED and record.execution_id else None
+            if found is None or found.swarm_id != self.slug or not self._owns(record, found):
+                continue
             holder = self._holder(record.seat)
             if record.seat in seated:
                 holder = retiring(holder, record.generation)
