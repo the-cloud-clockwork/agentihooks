@@ -63,7 +63,7 @@ def test_a_gap_row_names_the_missing_range_and_later_events_skip_the_cursor():
         {"rev": 5, "at": NOW - 9, "by": "w", "kind": "task pr", "target": "tasks/x"},
         {"rev": 6, "at": NOW - 8, "by": "w", "kind": "task done", "target": "tasks/x"},
     ]
-    rows = metrics_ledger.event_rows("sw", events, {}, 3, NOW)
+    rows = metrics_ledger.event_rows("sw", events, {}, 3, NOW, 4)
     gap = rows[0]
     assert gap["event_id"] == "gap:sw:4:4"
     assert (gap["first_missed"], gap["last_missed"], gap["revision"], gap["ts_ms"]) == (4, 4, 4, NOW)
@@ -82,10 +82,10 @@ def test_no_gap_when_history_continues_the_cursor_and_the_cursor_revision_is_ski
         {"rev": 4, "at": NOW, "by": "w", "kind": "task open", "target": "tasks/x"},
         {"rev": 5, "at": NOW, "by": "w", "kind": "task claimed", "target": "tasks/x"},
     ]
-    rows = metrics_ledger.event_rows("sw", events, {}, 4, NOW)
+    rows = metrics_ledger.event_rows("sw", events, {}, 4, NOW, None)
     assert [row["revision"] for row in rows] == [5]
-    assert [row["revision"] for row in metrics_ledger.event_rows("sw", events, {}, 3, NOW)] == [4, 5]
-    assert metrics_ledger.event_rows("sw", events[1:], {}, 3, NOW)[0]["event_id"] == "gap:sw:4:4"
+    assert [row["revision"] for row in metrics_ledger.event_rows("sw", events, {}, 3, NOW, None)] == [4, 5]
+    assert metrics_ledger.event_rows("sw", events[1:], {}, 3, NOW, 4)[0]["event_id"] == "gap:sw:4:4"
 
 
 def test_a_snapshot_row_identity_hashes_its_sorted_fields():
@@ -192,6 +192,9 @@ class Ledger:
     def state(self, slug):
         assert slug == "sw"
         return json.loads(json.dumps(self.doc))
+
+    def ack_events(self, slug, revision):
+        self.doc["_meta"]["events_ack"] = revision
 
 
 def recent(box, table):

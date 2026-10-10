@@ -46,11 +46,15 @@ def test_record_pass_collects_ledger_rows_before_flushing(spool, monkeypatch, re
         "tasks": [{"id": "t", "lane": "ci", "state": "claimed"}],
         "time_left_minutes": 14,
     }
+    acks = []
 
     class Ledger:
         def state(self, slug):
             assert slug == "sw"
             return doc
+
+        def ack_events(self, slug, revision):
+            acks.append((slug, revision))
 
     monkeypatch.setattr(metrics, "LedgerClient", Ledger)
     monkeypatch.setattr(metrics.metrics_ledger, "record", real_ledger_record)
@@ -71,6 +75,7 @@ def test_record_pass_collects_ledger_rows_before_flushing(spool, monkeypatch, re
         for row in snapshots
     )
     assert received["INSERT INTO swarm.ticks FORMAT JSONEachRow"][0]["actions"] == 3
+    assert acks == [("sw", 1)]
 
 
 @pytest.mark.parametrize("error", [OSError, LedgerGone, SwarmError])

@@ -24,6 +24,7 @@ import ledger_alerts
 import ledger_answer
 import ledger_close
 import ledger_comments
+import ledger_events_ack
 import ledger_names
 import ledger_notifications
 import ledger_priorities
@@ -88,6 +89,7 @@ DEFAULT_CHAT_INSTRUCTIONS = (
     "or capital labels. Under 100 words unless the operator asks, in a separate message, to expand."
 )
 EVENTS_KEPT = 2000
+EVENTS_CEILING = 10000
 MAX_TEXT = 20000
 LOG_MAX_BYTES = 5 << 20
 LOCK = threading.Lock()
@@ -112,6 +114,7 @@ EXTENSION_OPS = {
         ledger_verdict,
         ledger_alerts,
         ledger_time_left,
+        ledger_events_ack,
     )
     for name in module.OPS
 }

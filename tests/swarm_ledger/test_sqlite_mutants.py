@@ -227,6 +227,7 @@ def test_write_advances_the_generation_updates_the_row_and_appends_events(tmp_pa
         entry = r._entry(connection, "ledger")
     new_state = json.loads(entry.text)
     new_state["title"] = "Renamed"
+    new_state["_meta"]["events"] = [{"id": "e1", "rev": 1}]
     statements = []
     r.trace = statements.append
     with r.connect() as connection, connection:

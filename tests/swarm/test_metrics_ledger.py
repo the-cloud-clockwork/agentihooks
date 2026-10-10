@@ -37,6 +37,9 @@ class Ledger:
         self.calls.append(("hierarchy", slug))
         return deepcopy(self.nodes)
 
+    def ack_events(self, slug, revision):
+        self.calls.append(("ack", slug, revision))
+
     def move(self, state, revision, at):
         self.doc["tasks"][0]["state"] = state
         self.nodes[-1]["state"] = state
@@ -79,6 +82,7 @@ def test_a_failed_checkpoint_rolls_back_rows_and_retry_records_one_gap(box, monk
     ledger.move("claimed", 1, NOW)
     metrics_ledger.record(box, "example", NOW, ledger)
     ledger.doc["_meta"]["events"] = []
+    ledger.doc["_meta"]["events_trimmed"] = 7
     ledger.move("pr", 8, NOW + 1)
     append = box.append_many
 
@@ -101,6 +105,19 @@ def test_a_failed_checkpoint_rolls_back_rows_and_retry_records_one_gap(box, monk
     assert gaps[0]["first_missed"] == 2 and gaps[0]["last_missed"] == 7
     assert gaps[0]["ts_ms"] == NOW + 3 and gaps[0]["catch_up"] == 0
     assert len(read(box, "ledger_events")) == 3
+
+
+def test_revisions_without_events_after_the_cursor_are_no_gap(box):
+    from scripts.swarm import metrics_ledger
+
+    ledger = Ledger()
+    ledger.doc["_meta"]["rev"] = 3
+    metrics_ledger.record(box, "example", NOW, ledger)
+    ledger.move("claimed", 6, NOW + 1)
+    metrics_ledger.record(box, "example", NOW + 2, ledger)
+    rows = read(box, "ledger_events")
+    assert [row["kind"] for row in rows] == ["task claimed"]
+    assert ledger.calls[-1] == ("ack", "example", 6)
 
 
 def test_snapshot_hierarchy_counts_and_lanes_use_the_same_document(box, monkeypatch):
