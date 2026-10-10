@@ -39,11 +39,12 @@ goes to a lane as a task.
   Priorities triage. Its triage clears resolved priorities on every tick.
   Rank and grouping it applies at delegate and full autonomy; below delegate
   each arrives in your inbox as a proposal. The lane split it moves only at
-  delegate and full autonomy, one seat between the engineer and CI lanes once
-  the same bottleneck holds three ticks.
-- Approve a proposal by applying the command it names, with the operator's
-  agreement where it asks for him; decline it with
-  `agentihooks msg close <id> cancel "<why>"`.
+  delegate and full autonomy, one seat between the engineer and CI lanes
+  after three bottleneck reports running; a refused move is reported as held.
+- Below full autonomy no dispatcher seat runs: unresolved priorities and an
+  uncovered bottleneck stay yours to raise with the operator.
+- Apply a proposal's named command only on the operator's agreement; decline
+  it with `agentihooks msg close <id> cancel "<why>"`.
 - Change rank, grouping or lane caps only on the operator's order, and relay
   that order onto the ledger.
 - At full autonomy the dispatcher seat reports what it settled; raise to the
