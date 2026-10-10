@@ -1,4 +1,6 @@
+import http.client
 import json
+import threading
 from pathlib import Path
 from unittest.mock import patch
 
@@ -529,9 +531,9 @@ def test_a_comment_replay_is_acknowledged_once(world, worker):
     agent, token = worker
     body = {"operation_id": "comment-1", "task_generation": 1, "text": "Asking about the second slice"}
     first = world.call("POST", "/v2/tasks/task/comments", token, body)
+    assert first[0] == 200
     ledger = world.document()
     assert world.call("POST", "/v2/tasks/task/comments", token, body) == first
-    assert first[0] == 200
     assert world.document() == ledger
     assert [(entry["by"], entry["text"]) for entry in world.task()["comments"]] == [
         (agent.name, "Asking about the second slice")
@@ -582,8 +584,6 @@ def test_an_outcome_proposal_names_a_worker_outcome_and_its_proof(world, worker,
 
 @pytest.fixture
 def served(world):
-    import threading
-
     from scripts.swarm_v2.api.server import Routes, serve
 
     server = serve(Routes(world.api, world.tasks_api), "127.0.0.1", 0)
@@ -595,8 +595,6 @@ def served(world):
 
 
 def send(port, method, path, token, body=None):
-    import http.client
-
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
     data = b"" if body is None else json.dumps(body).encode()
     connection.request(method, path, body=data, headers={"Authorization": f"Bearer {token}"})
@@ -621,5 +619,20 @@ def test_the_served_api_carries_task_reads_and_writes_beside_executions(world, s
     assert send(served, "PATCH", "/v2/tasks/task", token, fresh)[0] == 200
     progress = {"operation_id": "progress-1", "task_generation": 1, "text": "Building the first slice"}
     assert send(served, "POST", "/v2/tasks/task/progress", token, progress)[0] == 200
+    comment = {**progress, "operation_id": "comment-1", "text": "Asking about the second slice"}
+    assert send(served, "POST", "/v2/tasks/task/comments", token, comment)[0] == 200
+    outcome = {
+        "operation_id": "outcome-1",
+        "task_generation": 1,
+        "expected_revision": spec_revision(world.task()),
+        "outcome": "done",
+        "proof": "Pull request merged",
+    }
+    assert send(served, "POST", "/v2/tasks/task/outcomes", token, outcome)[0] == 200
+    assert [entry["text"] for entry in world.task()["comments"]] == [
+        "Building the first slice",
+        "Asking about the second slice",
+        "Outcome proposal: done. Pull request merged",
+    ]
     assert send(served, "PATCH", "/v2/swarm/config", token, {"max_eng_agents": 99})[0] == 403
     assert (world.task()["state"], world.task()["pr_url"]) == ("pr", PR)

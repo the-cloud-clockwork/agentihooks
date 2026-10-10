@@ -1,7 +1,11 @@
 {
   "package": "SV2-LDG-03",
-  "dependency": ["SV2-LDG-02"],
-  "dependents": ["SV2-LDG-04"],
+  "dependency": [
+    "SV2-LDG-02"
+  ],
+  "dependents": [
+    "SV2-LDG-04"
+  ],
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2380",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2402",
@@ -11,8 +15,8 @@
   "evidence_class": "Signed fixture launch grants from LaunchAuthority, fakeredis, fixture server clock and a SQLite fixture ledger; served over a loopback HTTP server in tests; no live rollout. Live G3 qualification is separate.",
   "interfaces": [
     "GET /v2/tasks/<task>: the credential's own task, its execution relevant fields and a revision digest over them; another task is forbidden_scope with no detail about it",
-    "PATCH /v2/tasks/<task>: worker fields only (state claimed, blocked or pr; issue, pull request, branch), guarded by expected_revision inside the ledger write; a stale revision is revision_conflict with the current revision and counts in ledger_revision_conflicts_total",
-    "POST /v2/tasks/<task>/progress and POST /v2/tasks/<task>/comments: idempotent per operation_id, need no revision, so progress survives a specification edit; the same id with other content is operation_conflict",
+    "PATCH /v2/tasks/<task>: worker fields only (state claimed, blocked or pr; issue, pull request, branch and its repository), guarded by expected_revision inside the ledger write; a stale revision is revision_conflict with the current revision and counts in ledger_revision_conflicts_total",
+    "POST /v2/tasks/<task>/progress and POST /v2/tasks/<task>/comments: aliases writing the same task comment thread with the same receipt, so a progress line and a comment with one operation_id and text replay each other; idempotent per operation_id, need no revision, so progress survives a specification edit; the same id with other content is operation_conflict",
     "POST /v2/tasks/<task>/outcomes: an outcome proposal (done or blocked, with proof) guarded by expected_revision and idempotent per operation_id; it is written as a task comment and never sets done, which stays the operator's",
     "/v2/swarm/*: swarm controls refuse worker credentials with forbidden_scope",
     "scripts.swarm_v2.api.server.Routes and serve: one loopback HTTP server carries the execution endpoints and the task endpoints",
@@ -31,21 +35,21 @@
     "externally_verified": "None; no production deployment and no live rollout yet"
   },
   "authoritative_objects": [
-    "The ledger document and its task rows, comments and metadata (including task_operations receipts) are authoritative operator work state and are never deleted as caches",
+    "The ledger document and its task rows and comments are authoritative operator work state and are never deleted as caches; the task_operations receipts in the ledger metadata hold only the current task generation and are replaced when a new generation writes",
     "The Redis task claims and launch registrations from SV2-LDG-02 are authoritative for who may write",
     "The ledger-revision-conflicts counter is a measurement, not state"
   ],
   "rollback_rehearsal": {
-    "action": "Construct TasksAPI with writes_enabled=False: reads still answer and every write gets a read only revision_conflict naming the current revision; revision metadata stays in place",
+    "action": "Construct TasksAPI with writes_enabled=False: reads still answer and every write gets a read only revision_conflict naming the current revision. The revision is a digest computed on read from the stored specification fields, so rollback removes no stored metadata",
     "test": "tests/test_swarm_v2_tasks_api.py::test_disabled_writes_answer_read_only_conflicts_and_reads_still_work",
     "case": "T-SV2-LDG-03-C, evidence/SV2-LDG-03/c-result.json rollback block",
     "data_safety": "The ledger document is byte equal before and after the refused writes; nothing is deleted"
   },
   "remaining_limitations": [
-    "No production process starts the v2 HTTP server yet, for the execution endpoints or the task endpoints; deployment belongs to later packages",
+    "No production process starts the v2 HTTP server yet, for the execution endpoints or the task endpoints, so the read only switch is a constructor flag with no operator control until a deployment package adds one",
     "The window between the Redis claim check and the SQLite commit is owned by SV2-LDG-04",
-    "Receipts are kept per task generation, uncapped",
-    "Paused writes answer revision_conflict with read_only true and are not counted in ledger_revision_conflicts_total, because a pause is not a specification conflict"
+    "Receipts for the current task generation grow with each operation, uncapped",
+    "Routes matches the raw request path, so a query string on a task path answers 404, the same as the execution endpoints"
   ],
   "validation": {
     "red": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38049727166 on the tests only commit failed: the task API module did not exist",
@@ -65,5 +69,9 @@
     "b": "evidence/SV2-LDG-03/b-result.json",
     "c": "evidence/SV2-LDG-03/c-result.json",
     "manifest": "evidence/SV2-LDG-03/manifest.json"
-  }
+  },
+  "decisions": [
+    "An outcome proposal requires expected_revision although it writes only a comment: done or blocked is a claim about the task measured against its specification, so a proposal made against an older specification is stale work and is refused like a stale update",
+    "Paused writes answer revision_conflict with read_only true and are not counted in ledger_revision_conflicts_total, because a pause is not a specification conflict"
+  ]
 }

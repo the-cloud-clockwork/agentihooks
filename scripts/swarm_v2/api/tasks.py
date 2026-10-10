@@ -31,7 +31,7 @@ SHOWN = ("id", *SPEC_FIELDS, *WORKER_FIELDS, "claimed_by")
 RECEIPTS = "task_operations"
 REVISION = re.compile(r"[0-9a-f]{64}")
 TASK = re.compile(r"/v2/tasks/([^/]+)")
-PROGRESS = re.compile(r"/v2/tasks/([^/]+)/(?:progress|comments)")
+COMMENTS = re.compile(r"/v2/tasks/([^/]+)/(?:progress|comments)")
 OUTCOMES = re.compile(r"/v2/tasks/([^/]+)/outcomes")
 WORKER_OUTCOMES = ("done", "blocked")
 CONTROLS = re.compile(r"/v2/swarm(/.*)?")
@@ -81,7 +81,7 @@ class TasksAPI:
                 return 200, self.read(token, subject[1])
             if subject and method == "PATCH":
                 return 200, self.update(token, subject[1], body)
-            if (subject := PROGRESS.fullmatch(path)) and method == "POST":
+            if (subject := COMMENTS.fullmatch(path)) and method == "POST":
                 return 200, self.progress(token, subject[1], body)
             if (subject := OUTCOMES.fullmatch(path)) and method == "POST":
                 return 200, self.propose(token, subject[1], body)
