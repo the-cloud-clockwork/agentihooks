@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/worker_health.py:scripts.swarm_v2.worker_health.x_brain_state__mutmut_29:1acd54bff85b1d2a67fb5c181f84dd6d7fdc6c590bb584bbb5340711b40163fc": {
+    "reader": "standards_reader",
+    "reason": "Changes only the case of the header name to 'authorization'. urllib.request.Request passes each header to add_header, which stores key.capitalize(), so the stored header, the wire header and get_header('Authorization') are identical to 'Authorization'. Equivalent mutant."
+  }
+}
