@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from scripts.swarm_v2 import filesystem
+
 
 class LaunchRefused(ValueError):
     pass
@@ -54,13 +56,21 @@ class Budgets:
 
 @dataclass(frozen=True)
 class Launch:
-    attempt: Path
+    execution: filesystem.Execution
     authority: dict
-    home: Path
+    harness: str
     agent: tuple[str, ...]
     exporter: tuple[str, ...]
     herdr: tuple[str, ...]
     budgets: Budgets
+
+    @property
+    def attempt(self) -> Path:
+        return self.execution.root
+
+    @property
+    def home(self) -> Path:
+        return self.execution.path("home") / self.harness
 
     @classmethod
     def load(cls, attempt: Path, path: Path) -> "Launch":
@@ -75,9 +85,9 @@ class Launch:
         harness = spec.get("harness")
         if harness not in ("claude", "codex") or harness not in record.get("homes", {}):
             raise LaunchRefused("missing private home")
-        attempt = attempt.resolve()
-        home = (attempt / record["homes"][harness]).resolve()
-        if not home.is_relative_to(attempt / "homes") or not home.is_dir():
+        execution = filesystem.recorded(attempt.resolve(), record)
+        home = (execution.root / record["homes"][harness]).resolve()
+        if home != execution.path("home") / harness or not home.is_dir():
             raise LaunchRefused("invalid private home")
         budgets = Budgets(
             *(
@@ -86,9 +96,9 @@ class Launch:
             )
         )
         return cls(
-            attempt,
+            execution,
             authority,
-            home,
+            harness,
             _command(spec.get("agent")),
             _command(spec.get("exporter")),
             _command(spec.get("herdr", ["herdr", "server"])),

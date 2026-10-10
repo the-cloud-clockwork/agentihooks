@@ -65,8 +65,8 @@
   "PLR0912": 22
  },
  "hooks/hook_manager.py::on_user_prompt_submit": {
-  "C901": 45,
-  "PLR0912": 45
+  "C901": 44,
+  "PLR0912": 44
  },
  "hooks/hook_manager.py::parse_transcript_metrics": {
   "C901": 17,

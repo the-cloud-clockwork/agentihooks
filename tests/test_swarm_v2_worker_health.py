@@ -129,7 +129,7 @@ def test_healthy_runtime_is_ready_with_every_check_passing(tmp_path, brain):
     assert (tmp_path / "herdr.log").read_text().splitlines() == [
         "workspace list",
         str(home),
-        str(attempt / "tmp"),
+        str(attempt / "run"),
         str(root / "herdr.toml"),
         str(home / ".codex"),
         str(home / ".claude"),

@@ -38,6 +38,11 @@ for tag in "$digest" "@$digest" "$(printf 'b%.0s' $(seq 40))"; do
     exit 1
   fi
 done
+refusal="$(helm template "$release" "$chart" --set ledger.replicas=2 2>&1 >/dev/null || true)"
+if [[ $refusal != *"ledger.replicas must be 1"* ]]; then
+  printf 'the chart did not refuse two ledger writers: %s\n' "$refusal" >&2
+  exit 1
+fi
 docker build -q -t "$image" . >/dev/null &
 build=$!
 trap finish EXIT
