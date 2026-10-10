@@ -138,7 +138,7 @@ def restore(backup: Path, directory: Path) -> Path:
     return database
 
 
-def main(argv=None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dir", type=Path, default=Path(os.environ.get("LEDGER_DIR", "~/development-ledger")))
     commands = parser.add_subparsers(dest="command", required=True)
@@ -151,7 +151,7 @@ def main(argv=None) -> int:
         if args.command == "snapshot":
             print(snapshot(directory / DATABASE, args.target))
         elif args.command == "restore":
-            print(restore(args.backup, directory))
+            print(restore(Path(args.backup), directory))
         else:
             print(json.dumps({"holder": holder(directory), "conflicts": conflicts_total(directory)}))
     except (WriterConflict, OSError, ValueError, sqlite3.Error) as exc:
