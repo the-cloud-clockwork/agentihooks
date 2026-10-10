@@ -59,6 +59,24 @@ class Kinds(unittest.TestCase):
             with self.assertRaises(ValueError):
                 core.check_op(bad)
 
+    def test_the_contract_push_field_takes_only_yes_or_no(self):
+        for value in ("yes", "no"):
+            core.check_op(op("task_add", 1, task="t1", title="a", lane="eng", contract={**CONTRACT, "push": value}))
+            core.check_op(op("task_update", 2, item="tasks/t1", fields={"contract": {"push": value}}))
+        for value in ("Yes", "true", ""):
+            with self.assertRaisesRegex(ValueError, "contract push must be yes or no"):
+                core.check_op(op("task_add", 3, task="t1", title="a", lane="eng", contract={"push": value}))
+
+    def test_a_contract_update_changes_only_the_keys_it_names(self):
+        make_ledger([{"task": "t1", "title": "probe the flake", "lane": "eng", "kind": "troubleshoot"}])
+        update = op("task_update", 1, item="tasks/t1", fields={"contract": {"push": "yes"}})
+        state, rejected = core.sync(SLUG, ops=[update])
+        self.assertEqual((rejected, state["tasks"][0]["contract"]), ([], {"push": "yes"}))
+        state, rejected = core.sync(SLUG, ops=[op("task_update", 2, item="tasks/t1", fields={"contract": CONTRACT})])
+        self.assertEqual((rejected, state["tasks"][0]["contract"]), ([], {**CONTRACT, "push": "yes"}))
+        state, _ = core.sync(SLUG, ops=[op("task_update", 3, item="tasks/t1", fields={"contract": {"push": "no"}})])
+        self.assertEqual(state["tasks"][0]["contract"], {**CONTRACT, "push": "no"})
+
     def test_an_ops_task_cannot_be_done_without_command_evidence(self):
         make_ledger([{"task": "t1", "title": "restart the cache", "lane": "eng", "kind": "ops"}])
         for n, proof in enumerate(({}, {"command": "kubectl get pods"}, {"output": "Running"}), 1):
@@ -117,6 +135,23 @@ class KindCli(unittest.TestCase):
             )
         self.assertEqual((sent[0][1]["kind"], sent[0][1]["contract"]), ("tune", CONTRACT))
         self.assertEqual(sent[1][1]["fields"], {"kind": "ops"})
+
+    def test_task_add_and_set_send_the_contract_push_field(self):
+        import ledger
+
+        sent = []
+        add = ["--slug", SLUG, "--as", "liaison", "task", "add", "t3", "probe", "--kind", "troubleshoot"]
+        with unittest.mock.patch.object(ledger, "send", lambda args, kind, /, **f: sent.append((kind, f))):
+            ledger.cmd_task(ledger.build_parser().parse_args(add + ["--must", CONTRACT["must"], "--push"]))
+            ledger.cmd_task(ledger.build_parser().parse_args(add))
+            ledger.cmd_task(
+                ledger.build_parser().parse_args(
+                    ["--slug", SLUG, "--as", "x", "task", "set", "t3", "contract.push=yes"]
+                )
+            )
+        self.assertEqual(sent[0][1]["contract"], {"must": CONTRACT["must"], "push": "yes"})
+        self.assertNotIn("contract", sent[1][1])
+        self.assertEqual(sent[2][1]["fields"], {"contract": {"push": "yes"}})
 
     def test_task_set_sends_a_dotted_proof_as_one_object_the_ledger_stores(self):
         import ledger

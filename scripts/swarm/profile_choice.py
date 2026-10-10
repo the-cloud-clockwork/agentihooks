@@ -52,6 +52,10 @@ def choose(
         decision = ProfileDecision(task["profile"], "task", "explicit task profile")
     elif lane != CLASSIFIED_LANE or pinned != DEFAULT_PROFILES[lane]:
         decision = ProfileDecision(pinned, "lane", f"{lane} lane")
+    elif needs_ci_push(task):
+        decision = ProfileDecision(
+            DEFAULT_PROFILES[CLASSIFIED_LANE], "proof contract", "proof needs a pushed CI run", anchors=anchors(task)
+        )
     else:
         decision = classify(slug, task, environ)
     if not installed(decision.profile):
@@ -65,6 +69,10 @@ def choose(
         raise ProfileUnresolved(f"task {task.get('id')} overlays are refused: {exc}") from exc
 
 
+def needs_ci_push(task: dict) -> bool:
+    return (task.get("contract") or {}).get("push") == "yes"
+
+
 def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
     params = {"id": task.get("id"), "title": task.get("title", "")}
     try:
@@ -76,7 +84,7 @@ def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
     result, floor = output.raw, output.thresholds["confidence"]
     answer = result.answers["responsibility"]
     confidence = answer.confidence if answer.confidence is not None else 0.0
-    if confidence < floor:
+    if output.verdicts["responsibility"] is None:
         return ProfileDecision(
             DEFAULT_PROFILES[CLASSIFIED_LANE],
             "lane default",
