@@ -8,6 +8,7 @@ from tests.swarm_ledger.ledger_page import (
     fulfill_events,
     is_events,
     ledger_state,
+    loaded,
     page_source,
     serve_modules,
     shell_html,
@@ -133,6 +134,7 @@ class Page:
         self.errors = []
         self.tab.on("pageerror", lambda error: self.errors.append(str(error)))
         self.tab.goto(URL + "#swarm")
+        loaded(self.tab)
         self.tab.locator("#swarm-agents tr").first.wait_for(timeout=3000)
 
     def route(self, route, html):
@@ -518,6 +520,7 @@ def test_the_overlays_box_folds_on_its_header_and_remembers_it(open_page):
     assert not page.tab.locator("#swarm-overlays").is_visible()
     page.tab.wait_for_function("() => Object.values(localStorage).some((v) => v.includes('\"overlays-fold\":false'))")
     page.tab.reload()
+    loaded(page.tab)
     page.tab.locator("#swarm-agents tr").first.wait_for(timeout=3000)
     assert page.tab.eval_on_selector("#overlays-fold", "d => d.open") is False
 

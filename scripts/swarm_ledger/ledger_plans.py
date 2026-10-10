@@ -106,6 +106,25 @@ def phase_refusal(doc: dict, phase: dict) -> str:
     return ""
 
 
+def stale_refusal(phase: dict, fields: dict) -> str:
+    moving = phase.get("plan") and fields.get("plan", phase["plan"]) != phase["plan"]
+    if not moving or "plan_ref" in fields or not (phase.get("plan_ref") or phase.get("plan_url")):
+        return ""
+    return (
+        f"phase {phase['id']} moves to {fields['plan']} without a new plan_ref: "
+        "publish the plan for the phase to move it"
+    )
+
+
+def check_move(phase: dict, fields: dict) -> None:
+    if refusal := stale_refusal(phase, fields):
+        raise ValueError(refusal)
+
+
+def atomic(ops: list[dict]) -> bool:
+    return any(op["op"] == "plan_add" for op in ops)
+
+
 def task_refusal(doc: dict, task: dict) -> str:
     address = task.get("slice")
     if not address:
@@ -148,6 +167,68 @@ def plan_id(file_id: str) -> str:
 
 def slice_id(plan: str, anchor: str) -> str:
     return f"{plan}.{anchor}"
+
+
+def moved(doc: dict, phase: dict) -> dict:
+    address = f"phases/{phase['id']}"
+    plan = next((row for row in doc["plans"] if f"plans/{row['id']}" == phase.get("plan")), None)
+    held = {f"slices/{row['id']}": row["anchor"] for row in doc["slices"] if row.get("phase") == address}
+    if plan is None or all(name.startswith(f"slices/{plan['id']}.") for name in held):
+        return {}
+    from scripts.swarm_ledger import plan_ranges
+
+    fresh = {
+        anchor: {
+            "id": slice_id(plan["id"], anchor),
+            "phase": address,
+            "anchor": anchor,
+            "lines": slice_lines(doc, phase, plan, anchor),
+        }
+        for anchor in plan_ranges.anchors(doc, phase)
+    }
+    slices = [row for row in doc["slices"] if row.get("phase") != address] + list(fresh.values())
+    return {"slices": slices, "tasks": [_follow(task, held, fresh) for task in doc["tasks"]]}
+
+
+def _follow(task: dict, held: dict, fresh: dict) -> dict:
+    if task.get("slice") not in held:
+        return task
+    row = fresh.get(held[task["slice"]])
+    if row is None:
+        return {key: value for key, value in task.items() if key not in ("slice", "plan_slice", "plan_lines")}
+    return {**task, "slice": f"slices/{row['id']}", "plan_lines": row["lines"]}
+
+
+def settle(doc: dict, view: dict, by: str, ctx) -> None:
+    before = {task["id"]: task.get("slice") for task in doc["tasks"]}
+    doc.update(view)
+    for task in view.get("tasks", []):
+        if task.get("slice") != before[task["id"]]:
+            kind = "slice changed" if task.get("slice") else "slice cleared"
+            ctx.record(by, kind, f"tasks/{task['id']}")
+
+
+def drop_unused(doc: dict, address: object, ctx) -> None:
+    added = [event for event in ctx.events if event["kind"] == "added" and event["target"] == address]
+    if not added or any(phase.get("plan") == address for phase in doc["phases"]):
+        return
+    doc["plans"] = [row for row in doc["plans"] if f"plans/{row['id']}" != address]
+    ctx.events[:] = [event for event in ctx.events if event not in added]
+
+
+def drop_refused(doc: dict, ops: list[dict], rejected: list[str], ctx) -> None:
+    for op in ops:
+        if op["op"] in ("phase_add", "phase_update") and op["id"] in rejected:
+            drop_unused(doc, op.get("fields", op).get("plan"), ctx)
+
+
+def resliced(before: list[dict], after: list[dict]) -> dict:
+    held = {task["id"]: task.get("slice") for task in before if task.get("slice")}
+    changed = [task for task in after if task["id"] in held and task.get("slice") != held[task["id"]]]
+    return {
+        "changed": [task["id"] for task in changed if task.get("slice")],
+        "cleared": [task["id"] for task in changed if not task.get("slice")],
+    }
 
 
 def apply(doc: dict, op: dict, ctx) -> bool:
