@@ -4,37 +4,39 @@
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2430",
   "closes_follow_up": "https://github.com/the-cloud-clockwork/agentihooks/issues/2078",
-  "tested_commit": "e29d94c1917cb411d374b4dfbf4c1506d50eae39",
+  "tested_commit": "707fd026cf949611ddca19bd7daa7191a3694ca8",
   "status": "fixture-qualified-awaiting-ci",
   "evidence_class": "Mocked: fakeredis journal and execution registry, a fake lease clock and an in process API server that applies a create, drops its response and then answers AlreadyExists; no Kubernetes API server, node autoscaler or EC2 call was made.",
   "interfaces": [
-    "scripts.swarm_v2.kubernetes.client: KubeHttp(server, token_path, context, opener) and KubeHttp.in_cluster(environ, account) send JSON to the API server with the service account token read per request; an unreachable server, an unreadable token and an unreadable answer raise ConnectionError, a read timeout raises TimeoutError",
+    "scripts.swarm_v2.kubernetes.client: KubeHttp(server, token_path, context, opener) and KubeHttp.in_cluster(environ, account) send JSON to the API server with the service account token read per request; an unreachable server, an unreadable token or a broken exchange raises ConnectionError naming the error type, an unreadable JSON answer raises ConnectionError, a read timeout raises TimeoutError",
     "PodClient(http, namespace): create_pod, read_pod (None on 404), list_pods(selector) without a resourceVersion, so a quorum read; 409 AlreadyExists raises AlreadyExists, 429 and 5xx raise ConnectionError, other refusals raise ApiRefused(status, reason)",
     "scripts.swarm_v2.kubernetes.runtime: KubernetesTransport(api, slug, template, creation_enabled) is the OperationTransport for backend kubernetes and action spawn; apply_operation renders the admitted launch with the SV2-KUB-01 PodTemplate, refuses a render whose owner label is not owner_for(slug), whose execution or generation labels disagree with the operation, or whose namespace is not the client namespace, annotates the Pod with its spec digest and operation payload digest, and creates it under the deterministic name swarm-<execution_id>; the applied result carries the Pod uid, name and namespace",
-    "On AlreadyExists the transport reads the Pod and adopts it only when owner, execution and generation labels, both digests and the guarded live spec fields (service account, token automount, host namespaces, runtime class, Pod and container security context, image, container count, host path volumes) match the render; otherwise the Pod is quarantined in KubernetesTransport.quarantined with its reason (owner, execution, generation, operation, spec or ambiguous) and the operation is refused; a quarantined Pod is never adopted, patched or deleted",
-    "observe_operation lists Pods by the controller-owner and execution-id labels, so Operations.recover in a restarted controller finds the Pod and its uid; an empty list after an unanswered create stays unknown, because a reaped Pod leaves no trace; a second labelled Pod for one execution quarantines both as ambiguous",
+    "On AlreadyExists the transport reads the Pod and adopts it only when the owner, execution and generation labels and both digest annotations match; otherwise the Pod is quarantined in KubernetesTransport.quarantined with its reason (owner, execution, generation, operation, spec or ambiguous) and the operation is refused; a quarantined Pod is never adopted, patched or deleted",
+    "observe_operation lists Pods by the controller-owner and execution-id labels, so Operations.recover in a restarted controller finds the Pod and its uid; a second labelled Pod for one execution quarantines both as ambiguous; an empty list is absent, except after a sent create, when it is unknown",
+    "scripts.swarm_v2.runtime.operations: Operation.attempted is set by Operations.execute before apply_operation and kept by OperationJournal.settle only while the outcome is unknown or applied, so a refused, absent or held create clears it and a later retry may create",
     "status(execution_id) returns every labelled Pod of the execution as PodStatus with the Pod phase, status and container termination or waiting reasons and the deleting flag, kept apart from task state; a Succeeded Pod never marks the ledger outcome committed",
     "kubernetes_create_reconciliation_total() counts events per call: created, adopted, observed, quarantined and disabled"
   ],
   "supported_versions": {
     "python": "3.11 and later",
     "kubernetes": "core v1 Pod REST calls: label selector list, named read and create answering 409 AlreadyExists; exercised only against the in process fake, no live release",
-    "redis": "the runtime operation journal and execution registry from SV2-RUN-04 and SV2-CTL-01",
-    "compatibility": "The local runtime and its transports are unchanged; the transport registers only under backend kubernetes, so a controller without it settles kubernetes operations as unknown, as before"
+    "redis": "the runtime operation journal and execution registry from SV2-RUN-04 and SV2-CTL-01; journal records written before this package decode with attempted false",
+    "compatibility": "The local runtime and its transports are unchanged; the transport registers only under backend kubernetes, so a controller without it settles kubernetes operations as unknown, as before. The operations and controller test modules pass with the attempted field (proofs run 38068093385)."
   },
-  "authority": "The owner label value comes from owner_for(slug), never from a display label or Pod name. Creation runs only through the controller's fenced transport, which calls the controller's authorization callback and lease check before every apply. Case B revokes the grant callback and the next spawn is refused with no create call; case C shows a stale controller refused after takeover. The callback itself validates nothing in these fixtures.",
+  "authority": "The owner label value comes from owner_for(slug), never from a display label or Pod name. Creation runs only through the controller's fenced transport, which calls the controller's authorization callback and lease check before every apply. Case B revokes the grant callback and the next spawn is refused with no create call; case C shows a stale controller refused after takeover. Adoption is bounded by the antoncore RBAC that grants Pod create in the worker namespace only to the swarm controller (SV2-SEC-01) and by the SV2-SEC-02 admission policy on secret references; the digest annotations are self asserted and are not a boundary on their own.",
   "states": {
-    "observed": "Cases A, B and C each passed twice with identical records in proofs run 38066003376 at tested_commit; that run passed the other 86 client and runtime tests and failed only the three evidence comparisons before these records were committed.",
-    "accepted": "A lost create response followed by observation adopts the original Pod uid; the journal path made one create call and a direct retry reaching AlreadyExists adopted the same uid with a second, refused, create call. A squatting Pod with another execution label is quarantined on each attempt and left unchanged. A restarted controller recovers the uid through the label qualified list, matches it in reconcile and re-issues the spawn from the admission intent without a create. A Pod reaped after a lost response leaves the retry unknown with no second create.",
+    "observed": "Cases A, B and C each ran twice with identical records; A and B in proofs run 38066988582 and C, with the reaped Pod check, in proofs run 38068093385 at tested_commit, where the client, runtime, operations and controller modules passed 180 tests and only the then absent case C record comparison failed.",
+    "accepted": "A lost create response followed by observation adopts the original Pod uid; the journal path made one create call and a direct retry reaching AlreadyExists adopted the same uid with a second, refused, create call. A squatting Pod with another execution label is quarantined on each attempt and left unchanged. A restarted controller recovers the uid through the label qualified list, matches it in reconcile and re-issues the spawn from the admission intent without a create. A Pod deleted after a lost response leaves the retry unknown with one create in total.",
     "committed": "Code and fixture inputs are at tested_commit; manifest.json hashes them.",
-    "externally_verified": "None: no live API server or G3 deployment was exercised."
+    "externally_verified": "None: no live API server or G3 deployment was exercised.",
+    "open_obligations": "The package spec asks to derive actor and scope from the fixture grant; the controller authorization callback is opaque here and grant content validation belongs to the controller grant packages."
   },
   "validation": {
     "red": "Mutation preflight run 38063828425 on the tests only commit 30d5da67: its uploaded run log shows ModuleNotFoundError for scripts.swarm_v2.kubernetes.client collecting the runtime tests; the run was later cancelled by the next push",
-    "tests": "proofs run 38066003376 at tested_commit: 86 passed, 3 evidence comparisons failed on the absent records now committed",
+    "tests": "proofs run 38068093385 at tested_commit: 180 passed across the client, runtime, operations and controller modules; the case C comparison failed only because its record was absent and is now committed",
     "lint": "ruff check and ruff format passed through python -m scripts.ci_prepush",
-    "review": "Standards and Spec readers round one: unreadable answers, the reap after a lost response, spec forgery on adoption, ambiguous status, the grant case, the restarted spawn, rollback wording, dead code and import order fixed with tests; observation adoption without a render is recorded as a limitation",
-    "mutation": "pending a preflight scoped to this diff; the stacked branch run 38064457770 skipped every file as over budget"
+    "review": "Standards and Spec readers, three rounds. Fixed: unreadable answers and tokens, ambiguous status, the grant case, the restarted spawn, rollback wording, dead code, import order, counts. A live spec comparison on adoption was tried and withdrawn because API server admission rewrites tolerations, quantities and defaults. A ruling reader closed the held findings: adoption and observation without a live spec check not upheld (bounded by RBAC and admission); the re-create after a reaped Pod upheld and fixed with the journal attempted mark.",
+    "mutation": "Scoped mutation proof run 38066991365: six equivalent header case mutants in KubeHttp.send cleared by the Standards reader in mutation-clearances; the runtime survivors there are killed by tests added after it; the next preflight qualifies"
   },
   "cases": {
     "a": "evidence/SV2-KUB-02/a-result.json",
@@ -45,13 +47,14 @@
   "rollback_rehearsal": {
     "action": "Construct the transport with creation_enabled False: no create call is made while observation, status and the controller's reconcile continue.",
     "authoritative_objects": "The runtime operation journal, the execution registry and the execution Pods themselves; the in memory quarantine list and reconciliation counts are observational.",
-    "proof": "Case C takes over with creation disabled: a new launch settles accepted with no create call and the existing Pod is still listed by uid."
+    "proof": "Case C takes over with creation disabled: a new launch settles accepted with no create call and the existing Pod is still listed by uid; a unit test re-enables creation and the held launch is created once."
   },
   "remaining_limitations": [
-    "Observation has no payload, so a Pod found by observation is matched on labels and the operation digest annotation only, without the guarded spec comparison; Pod creation rights in the swarm namespace (SV2-SEC-01) are the boundary there.",
+    "Adoption and observation trust the owner, execution and generation labels and the digest annotations, not the live spec; a party with Pod create rights in the worker namespace could forge them, which RBAC limits to the controller.",
+    "A spawn whose create was sent and whose Pod is then gone stays unknown; resolving it needs a new execution generation from the controller. A crash between the attempted mark and the create also leaves it unknown.",
     "A matching Pod that is terminating still settles the spawn applied; its deleting flag shows in status and reconcile counts it as terminating.",
-    "An unanswered create whose Pod is gone stays unknown; resolving it needs a new execution generation from the controller.",
     "The execution registry requires a Pod name in the runtime target before admission allocates the execution id, so the target carries a placeholder; the real Pod name and uid live in the operation journal result.",
+    "The spawn payload must carry the controller_epoch recorded in the admission intent, not the current lease epoch, or a restarted controller's retry conflicts on the payload digest.",
     "The quarantine list and reconciliation counts are in memory per transport and count per call; they are not persisted for operator review or exported as telemetry yet.",
     "No PodSource over the Kubernetes watch API exists yet; PodView in the cases relists the same fake API server.",
     "The transport carries spawn only; command, drain, terminate and recover belong to later packages, and the swarm router does not hold a Kubernetes runtime yet.",
