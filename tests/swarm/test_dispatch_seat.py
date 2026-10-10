@@ -360,15 +360,17 @@ def test_triggers_a_departed_seat_left_open_spawn_no_seat_and_a_new_trigger_does
     run(store, runtime, doc(priority()))
     gone = {NAME: [NOW + 10_000]}
     run(store, runtime, crew(doc(priority()), joined=gone), NOW + MINUTE)
+    assert store.redis.smembers(store.key(SLUG, "dispatch-left")) == {"pr1"}
     assert run(store, runtime, crew(doc(priority()), joined=gone), NOW + 2 * MINUTE) == []
     later = priority("pr2", "followups/f1", "Approve the lane cap")
     actions = run(store, runtime, crew(doc(priority(), later), joined=gone), NOW + 3 * MINUTE)
-    assert actions == ["spawned dispatcher dispatcher@a1b2c3-0002 for 1 trigger"]
+    assert actions == ["spawned dispatcher dispatcher@a1b2c3-0002 for 2 triggers"]
     assert runtime.tasks[-1]["triggers"] == [
-        {"id": "pr2", "item": "followups/f1", "text": "Approve the lane cap", "minutes": 15}
+        {"id": "pr1", "item": "questions/q1", "text": "Pick the release day", "minutes": 18},
+        {"id": "pr2", "item": "followups/f1", "text": "Approve the lane cap", "minutes": 18},
     ]
     run(store, runtime, doc(), NOW + 4 * MINUTE)
-    assert not store.redis.exists(store.key(SLUG, dispatch_seat.LEFT))
+    assert not store.redis.exists(store.key(SLUG, "dispatch-left"))
 
 
 def test_a_trigger_that_opened_after_the_last_wake_spawns_a_seat_once_the_departed_seat_ends():
@@ -377,9 +379,31 @@ def test_a_trigger_that_opened_after_the_last_wake_spawns_a_seat_once_the_depart
     later = priority("pr2", "followups/f1", "Approve the lane cap")
     gone = crew(doc(priority(), later), joined={NAME: [NOW + 10_000]})
     assert run(store, runtime, gone, NOW + MINUTE) == [f"ended dispatcher {NAME}: it left the ledger"]
-    assert store.redis.smembers(store.key(SLUG, dispatch_seat.LEFT)) == {"pr1"}
-    assert run(store, runtime, gone, NOW + 2 * MINUTE) == ["spawned dispatcher dispatcher@a1b2c3-0002 for 1 trigger"]
-    assert [t["id"] for t in runtime.tasks[-1]["triggers"]] == ["pr2"]
+    assert store.redis.smembers(store.key(SLUG, "dispatch-left")) == {"pr1"}
+    assert run(store, runtime, gone, NOW + 2 * MINUTE) == ["spawned dispatcher dispatcher@a1b2c3-0002 for 2 triggers"]
+    assert [t["id"] for t in runtime.tasks[-1]["triggers"]] == ["pr1", "pr2"]
+
+
+def test_a_seat_that_left_before_any_trigger_was_sent_is_ended_and_holds_none():
+    store, runtime = swarm(), FakeRuntime()
+    run(store, runtime, doc(priority()))
+    store.redis.delete(store.key(SLUG, dispatch_seat.SENT))
+    gone = crew(doc(priority()), joined={NAME: [NOW + 10_000]})
+    assert run(store, runtime, gone, NOW + MINUTE) == [f"ended dispatcher {NAME}: it left the ledger"]
+    assert not store.redis.exists(store.key(SLUG, "dispatch-left"))
+
+
+def test_a_held_trigger_that_closes_is_forgotten_so_its_return_spawns_a_seat():
+    store, runtime = swarm(), FakeRuntime()
+    later = priority("pr2", "followups/f1", "Approve the lane cap")
+    run(store, runtime, doc(priority(), later))
+    gone = {NAME: [NOW + 10_000]}
+    run(store, runtime, crew(doc(priority(), later), joined=gone), NOW + MINUTE)
+    assert store.redis.smembers(store.key(SLUG, "dispatch-left")) == {"pr1", "pr2"}
+    assert run(store, runtime, crew(doc(priority()), joined=gone), NOW + 2 * MINUTE) == []
+    assert store.redis.smembers(store.key(SLUG, "dispatch-left")) == {"pr1"}
+    actions = run(store, runtime, crew(doc(priority(), later), joined=gone), NOW + 3 * MINUTE)
+    assert actions == ["spawned dispatcher dispatcher@a1b2c3-0002 for 2 triggers"]
 
 
 def test_the_tick_retires_the_process_of_a_seat_that_left_the_ledger_within_two_ticks():

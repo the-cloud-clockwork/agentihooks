@@ -2,7 +2,8 @@
 
 At full autonomy a trigger wakes the live seat through its inbox or spawns it through the seat spawn helper; below
 full, once every trigger closes, or once the seat left the ledger, the seat is marked finished and the reap pass retires
-it; triggers a departed seat was handed spawn no new seat until a new trigger opens. A trigger is a priority
+it. Triggers that a departed seat had received spawn no new seat; a new trigger spawns one primed with every open
+trigger. A trigger is a priority
 the sweep left unresolved for fifteen minutes and no dispatcher seat handed to the operator by raising it again under
 its own name, a bottleneck no lane rule covers held for the lane split's ticks, or a red dev holding blocked tasks,
 where a freeze or focus may be worth proposing.
@@ -89,8 +90,9 @@ def run(slug: str, config, store, runtime, doc: dict, now_ms: int, sleeping: boo
     if seats:
         return _wake(slug, store, seats[0], found)
     held = store.redis.smembers(store.key(slug, LEFT))
-    found = [trigger for trigger in found if trigger["id"] not in held]
-    if not found:
+    if closed := held - {trigger["id"] for trigger in found}:
+        store.redis.srem(store.key(slug, LEFT), *closed)
+    if all(trigger["id"] in held for trigger in found):
         return []
     if refused := seat_spawn.no_slot(config, runtime, SEAT) or seat_spawn.host_hold(slug, store, now_ms, SEAT):
         return [refused]
