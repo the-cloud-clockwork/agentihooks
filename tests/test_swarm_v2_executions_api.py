@@ -657,3 +657,82 @@ def test_a_heartbeat_stalled_past_its_lock_cannot_extend_the_lease(world, worker
     )
     assert world.tasks.current("task").lease_deadline_ms == 1130
     assert stored(world, agent)["renewal_sequence"] == 9
+
+
+@pytest.fixture
+def served(world):
+    import threading
+
+    from scripts.swarm_v2.api.server import serve
+
+    server = serve(world.api, "127.0.0.1", 0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield server.server_address[1]
+    server.shutdown()
+    server.server_close()
+
+
+def call(port, method, path, token="", body=b"", headers=None):
+    import http.client
+
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    sent = {"Authorization": f"Bearer {token}"} if token else {}
+    connection.request(method, path, body=body, headers={**sent, **(headers or {})})
+    response = connection.getresponse()
+    reply = (response.status, response.getheader("Content-Type"), json.loads(response.read()))
+    connection.close()
+    return reply
+
+
+def test_the_served_endpoints_register_and_renew_a_worker_over_http(world, served):
+    agent, token = world.start()
+    registration = json.dumps({"execution_id": agent.execution_id, "generation": 1}).encode()
+    status, kind, ack = call(served, "POST", "/v2/executions/register", token, registration)
+    assert (status, kind, ack["lease_deadline_ms"], ack["task_id"]) == (200, "application/json", 1100, "task")
+    world.clock[0] += 25
+    path = f"/v2/executions/{agent.execution_id}/heartbeat"
+    status, _, ack = call(served, "PUT", path, token, json.dumps(world.beat(agent, 1)).encode())
+    assert (status, ack["lease_deadline_ms"], ack["renewal_sequence"]) == (200, 1125, 1)
+    assert world.tasks.current("task").lease_deadline_ms == 1125
+
+
+def test_the_served_endpoints_refuse_forged_subjects_and_unreadable_bodies(world, served):
+    agent, token = world.start()
+    other, other_token = world.start("eng-2@fixture", "other")
+    for worker, credential in ((agent, token), (other, other_token)):
+        body = json.dumps({"execution_id": worker.execution_id, "generation": 1}).encode()
+        call(served, "POST", "/v2/executions/register", credential, body)
+    forged = json.dumps(world.beat(other, 1)).encode()
+    assert call(served, "PUT", f"/v2/executions/{other.execution_id}/heartbeat", token, forged)[2]["error_class"] == (
+        "forbidden_scope"
+    )
+    status, _, refusal = call(served, "PUT", f"/v2/executions/{agent.execution_id}/heartbeat", token, b"{not json")
+    assert (status, refusal["error_class"]) == (400, "invalid_request")
+    assert call(served, "GET", "/v2/executions", token)[0] == 404
+    assert world.store.redis.hlen(world.store.key("fixture", "heartbeats")) == 0
+
+
+def test_the_served_endpoints_refuse_a_body_over_the_limit_without_reading_it(world, served):
+    import http.client
+
+    agent, token = world.start()
+    path = f"/v2/executions/{agent.execution_id}/heartbeat"
+    connection = http.client.HTTPConnection("127.0.0.1", served, timeout=10)
+    connection.putrequest("PUT", path)
+    connection.putheader("Authorization", f"Bearer {token}")
+    connection.putheader("Content-Length", "65537")
+    connection.endheaders()
+    response = connection.getresponse()
+    refusal = json.loads(response.read())
+    connection.close()
+    assert (response.status, refusal["error_class"], refusal["message"]) == (
+        413,
+        "invalid_request",
+        "the request body is too large",
+    )
+    padded = {**world.beat(agent, 1), "padding": ""}
+    padded["padding"] = "x" * (65_536 - len(json.dumps(padded)))
+    body = json.dumps(padded).encode()
+    assert len(body) == 65_536
+    assert call(served, "PUT", path, token, body)[0] == 401
