@@ -22,7 +22,7 @@ MUTATION = {
                 "properties": {
                     "path": {
                         "type": "string",
-                        "pattern": "^(phases|questions|followups|tasks)/[^/]+/(done|out_of_scope)$",
+                        "pattern": "^((phases|questions|followups|tasks)/[^/]+/(done|out_of_scope)|plans/[^/]+/out_of_scope)$",
                     },
                     "base": {"type": "boolean"},
                     "value": {"type": "boolean"},

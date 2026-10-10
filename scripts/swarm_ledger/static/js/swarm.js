@@ -1,10 +1,12 @@
 import { SLUG } from "./config.js";
-import { $, age, clock, h, span } from "./dom.js";
+import { $, age, clock, h, newId, span } from "./dom.js";
 import { readRouting, writeRouting, writeSwarm } from "./api.js";
 import { renderStats } from "./render.js";
 import { renderChatTo } from "./chat.js";
 import { clearNoteError, renderControls, renderGates, showNote } from "./controls.js";
 import { firstPage, moreButton, wanted } from "./pages.js";
+import { doc, queue } from "./sync.js";
+import { snowflake, targetText } from "./freezes.js";
 
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
 const ROLES = ["master", "engineer", "planner", "qa", "cicd"];
@@ -276,6 +278,7 @@ export function renderSwarm(sw) {
   renderGates(sw);
   renderControls();
   if ($("swarm").hidden) return renderStats();
+  renderFreezes();
   if (!sw) {
     $("swarm-agents").replaceChildren(emptyRow(9, "No agents running. Start the swarm to work the open tasks."));
     renderOverlays(sw);
@@ -332,4 +335,18 @@ function renderHandoffs(rows) {
     r.awaiting ? h("span", { class: "sw-ctl" }, ...["resume", "fresh"].map((choice) => h("button", { class: "sw-btn", type: "button",
       "data-agent": r.awaiting, "data-restore-choice": choice, disabled: !!pending, text: choice }))) : r.successor ? idCell(r.successor) : "—"), `seat-${r.seat}`))
     : [emptyRow(6, "No seats yet. Seats appear when agents start.")]), moreRow("seats", rows.length, "more seats", 6, () => renderHandoffs(rows)) || "");
+}
+
+function freezeRow(r) {
+  const end = r.verb === "focus" ? "end focus" : "unfreeze", target = targetText(doc, r.target);
+  return cells(snowflake(r.verb === "focus" ? "Focus" : "Frozen"), r.verb, target, r.by, r.at ? clock(r.at) : "—",
+    h("button", { class: "sw-btn", type: "button", "aria-label": `${end} ${target}`, text: end,
+      on: { click: () => queue({ op: "freeze_clear", id: newId("freeze"), target: r.target }) } }));
+}
+
+function renderFreezes() {
+  const rows = doc.freezes, count = (verb) => rows.filter((r) => r.verb === verb).length;
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  $("freeze-count").textContent = `${plural(count("freeze"), "freeze", "freezes")} · ${plural(count("focus"), "focus", "focuses")}`;
+  $("swarm-freezes").replaceChildren(...(rows.length ? rows.map(freezeRow) : [emptyRow(6, "Nothing is frozen.")]));
 }

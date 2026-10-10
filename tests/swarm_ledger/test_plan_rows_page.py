@@ -99,7 +99,7 @@ def test_each_plan_numbers_its_own_phases_from_one(tab):
 def test_a_phase_fold_lists_its_slices_with_task_counts(tab):
     show(tab, shell_html(), ledger=ledger_state(DOC))
     slices = tab.evaluate(
-        """(id) => [...document.querySelectorAll(`#${id} .phase-slices .slice`)].map((s) => s.textContent)""",
+        """(id) => [...document.querySelectorAll(`#${id} .phase-slices .slice-name`)].map((s) => s.textContent)""",
         "item-phases-p1",
     )
     assert slices == ["hy-resources 1", "hy-page 2", "hy-empty 0"]
