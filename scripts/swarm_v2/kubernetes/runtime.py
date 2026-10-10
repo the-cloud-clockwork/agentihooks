@@ -51,7 +51,8 @@ class KubernetesTransport:
         except ApiRefused:
             return Observation(Phase.UNKNOWN)
         if not pods:
-            return Observation(Phase.ABSENT)
+            # Once a create was sent, a missing Pod may have run and been deleted, so it proves no absence.
+            return Observation(Phase.UNKNOWN if operation.attempted else Phase.ABSENT)
         return self._judge(operation, pods, "observed", None)
 
     def apply_operation(self, operation: Operation, payload: dict) -> Observation:

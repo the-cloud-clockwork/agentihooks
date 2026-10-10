@@ -255,6 +255,20 @@ def _rejection() -> tuple[dict, bool]:
     return observed, all(checks)
 
 
+def _reaped() -> dict:
+    world = World()
+    with world.clocked():
+        controller, _ = world.controller()
+        assert controller.acquire()
+        attempt = world.admit(controller)
+        request = world.request(controller, attempt)
+        world.api.drop_next_response = True
+        controller.execute(request)
+        world.api.objects.clear()
+        retried = controller.execute(request)
+    return {"retry_phase": retried.phase.value, "create_calls": world.api.create_calls}
+
+
 def _recovery() -> tuple[dict, bool]:
     world = World()
     with world.clocked():
@@ -304,8 +318,10 @@ def _recovery() -> tuple[dict, bool]:
                 "kubernetes_create_reconciliation_total": disabled.kubernetes_create_reconciliation_total(),
             },
             "kubernetes_create_reconciliation_total": transport.kubernetes_create_reconciliation_total(),
+            "pod_reaped_after_lost_response": _reaped(),
         }
     checks = [
+        observed["pod_reaped_after_lost_response"] == {"retry_phase": "unknown", "create_calls": 1},
         observed["interrupted_phase"] == "unknown",
         observed["recovered_phase"] == observed["replay_phase"] == "applied",
         observed["recovered_uid"] == observed["reconcile_matched_uid"] == "uid-1",
