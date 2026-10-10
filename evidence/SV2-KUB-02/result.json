@@ -4,7 +4,7 @@
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2430",
   "closes_follow_up": "https://github.com/the-cloud-clockwork/agentihooks/issues/2078",
-  "tested_commit": "707fd026cf949611ddca19bd7daa7191a3694ca8",
+  "tested_commit": "f488f1c1d43305bdf475414b8820b749897536cd",
   "status": "fixture-qualified-awaiting-ci",
   "evidence_class": "Mocked: fakeredis journal and execution registry, a fake lease clock and an in process API server that applies a create, drops its response and then answers AlreadyExists; no Kubernetes API server, node autoscaler or EC2 call was made.",
   "interfaces": [
@@ -25,7 +25,7 @@
   },
   "authority": "The owner label value comes from owner_for(slug), never from a display label or Pod name. Creation runs only through the controller's fenced transport, which calls the controller's authorization callback and lease check before every apply. Case B revokes the grant callback and the next spawn is refused with no create call; case C shows a stale controller refused after takeover. Adoption is bounded by the antoncore RBAC that grants Pod create in the worker namespace only to the swarm controller (SV2-SEC-01) and by the SV2-SEC-02 admission policy on secret references; the digest annotations are self asserted and are not a boundary on their own.",
   "states": {
-    "observed": "Cases A, B and C each ran twice with identical records; A and B in proofs run 38066988582 and C, with the reaped Pod check, in proofs run 38068093385 at tested_commit, where the client, runtime, operations and controller modules passed 180 tests and only the then absent case C record comparison failed.",
+    "observed": "Cases A, B and C each ran twice with identical records in proofs run 38070797125 at tested_commit, after the restack onto dev with SV2-KUB-01 merged; the client, runtime, spec, operations and controller modules passed 264 tests and only the three case record comparisons failed, on the moved fixture hashes, and those records are now committed.",
     "accepted": "A lost create response followed by observation adopts the original Pod uid; the journal path made one create call and a direct retry reaching AlreadyExists adopted the same uid with a second, refused, create call. A squatting Pod with another execution label is quarantined on each attempt and left unchanged. A restarted controller recovers the uid through the label qualified list, matches it in reconcile and re-issues the spawn from the admission intent without a create. A Pod deleted after a lost response leaves the retry unknown with one create in total.",
     "committed": "Code and fixture inputs are at tested_commit; manifest.json hashes them.",
     "externally_verified": "None: no live API server or G3 deployment was exercised.",
@@ -33,7 +33,7 @@
   },
   "validation": {
     "red": "Mutation preflight run 38063828425 on the tests only commit 30d5da67: its uploaded run log shows ModuleNotFoundError for scripts.swarm_v2.kubernetes.client collecting the runtime tests; the run was later cancelled by the next push",
-    "tests": "proofs run 38068093385 at tested_commit: 180 passed across the client, runtime, operations and controller modules; the case C comparison failed only because its record was absent and is now committed",
+    "tests": "proofs run 38070797125 at tested_commit: 264 passed across the client, runtime, spec, operations and controller modules; the case A, B and C comparisons failed only on the fixture hashes SV2-KUB-01 moved, and the regenerated records are committed",
     "lint": "ruff check and ruff format passed through python -m scripts.ci_prepush",
     "review": "Standards and Spec readers, three rounds. Fixed: unreadable answers and tokens, ambiguous status, the grant case, the restarted spawn, rollback wording, dead code, import order, counts. A live spec comparison on adoption was tried and withdrawn because API server admission rewrites tolerations, quantities and defaults. A ruling reader closed the held findings: adoption and observation without a live spec check not upheld (bounded by RBAC and admission); the re-create after a reaped Pod upheld and fixed with the journal attempted mark.",
     "mutation": "Scoped mutation proof run 38068236817 at tested_commit: runtime 281 killed, client 158 killed, operations 50 killed; seven equivalent survivors (six header name case variants in KubeHttp.send and the attempted override in OperationJournal.settle) cleared by the Standards reader in mutation-clearances; the preflight on the restacked branch qualifies"
