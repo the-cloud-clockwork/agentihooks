@@ -356,6 +356,7 @@ def test_a_red_dev_holding_blocked_tasks_asks_for_a_freeze_or_focus():
     )
     assert dispatch_seat.red_dev(store, SLUG, {**doc(), "tasks": tasks[2:]}) == []
     assert dispatch_seat.red_dev(swarm(), SLUG, found) == []
+    assert dispatch_seat.red_dev(store, SLUG, {}) == []
 
 
 def test_every_trigger_kind_wakes_the_live_seat_once_and_closes_with_its_signal():
