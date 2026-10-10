@@ -90,6 +90,19 @@ promotion, prompt and hand back is a tick journal line and an event on the seat 
 engineer's seat. `swarm status` prints a `promoted` line, `status --json` carries `promotion` and a `promoted` flag
 per agent, and the ledger page marks the agent row promoted.
 
+### Several master seats
+
+`swarm <id> set masters=N` gives a swarm N master seats: `master@<id>` is the lead, the address every single master
+swarm already uses, then `master-2@<id>` up to `master-N@<id>`. A swarm with no count has one seat and routes as
+before. Code gives every ledger phase one owning seat and saves the owners per swarm, so a restart reads the same
+owners. A phase keeps its owner while its seat exists, except that a seat add or removal rebalances: an added seat
+takes the busiest seats' last phases up to an even share, a removed seat's phases go to the seats owning fewest, and
+every other phase keeps its owner. Items already delivered stay with the old owner. An operator write, tick item,
+priority, pull request notice or task health finding about a phase or a task in it reaches the live master owning
+that phase; any other item, and one whose owner seat has no live master, reaches the lead. Unaddressed chat and
+`@master` stay with the lead, which answers the operator; while the lead seat is empty the lowest numbered live
+master answers. The tick does not yet launch masters in seats two and up.
+
 ## Commands
 
 The swarm id is a lowercase slug of letters, digits and dashes, starting with a letter, at most 48 long.
