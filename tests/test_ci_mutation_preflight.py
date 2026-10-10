@@ -22,7 +22,7 @@ def test_preflight_runs_on_task_branch_pushes_only():
         }
     else:
         assert workflow["concurrency"] == {"group": "mutation-preflight-${{ github.ref }}", "cancel-in-progress": True}
-    assert workflow["permissions"] == {"contents": "read", "pull-requests": "read"}
+    assert workflow["permissions"] == {"contents": "read", "pull-requests": "read", "actions": "read"}
 
 
 def test_preflight_skips_a_branch_with_an_open_pull_request():
@@ -56,16 +56,29 @@ def test_preflight_mutates_against_dev_with_the_pull_request_budget():
     names = [step.get("name") for step in steps]
     select = steps[names.index("Select mutation tests before browser setup")]
     mutate = steps[names.index("Mutate changed Python files")]
-    if "workflow_call" in workflow[True]:
-        assert job["env"]["BASE"] == "${{ inputs.base || 'origin/dev' }}"
-        assert select["run"] == 'python -m scripts.ci_mutation.browser --base "$BASE"'
-        assert mutate["run"] == 'python -m scripts.ci_mutation --base "$BASE" --budget 1080'
-    else:
-        assert select["run"] == "python -m scripts.ci_mutation.browser --base origin/dev"
-        assert mutate["run"] == "python -m scripts.ci_mutation --base origin/dev --budget 1080"
+    plan = steps[names.index("Resolve the branch's own mutation bases")]
+    assert job["env"]["BASE"] == "${{ inputs.base || 'origin/dev' }}"
+    assert plan["id"] == "plan"
+    assert plan["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    assert plan["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE"'
+    assert names.index("Resolve the branch's own mutation bases") < names.index(select["name"])
+    for step in (select, mutate):
+        assert step["env"]["BASES"] == "${{ steps.plan.outputs.bases }}"
+    assert select["run"] == "python -m scripts.ci_mutation." + 'browser --bases "$BASES"'
+    assert mutate["run"] == 'python -m scripts.ci_mutation --bases "$BASES" --budget 1080'
     assert names.index("Install the browser that page tests drive") < names.index("Mutate changed Python files")
     scope = steps[names.index("Record the revisions the report grades")]
     assert '"$(git merge-base "$BASE" HEAD)" "$(git rev-parse HEAD)" > .mutation-gate/scope.json' in scope["run"]
     assert names.index("Record the revisions the report grades") < names.index("Mutate changed Python files")
     assert steps[-1]["if"] == "always()"
     assert steps[-1]["with"]["name"] == "mutation-preflight-report"
+
+
+def test_only_the_push_preflight_reports_the_check_that_proves_a_commit_graded():
+    tests = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    assert "name" not in tests["mutation"]
+    assert tests["mutation"]["strategy"]["matrix"] == {"shard": "${{ fromJSON(needs.mutation-plan.outputs.shards) }}"}
+    assert "name" not in _workflow()["jobs"]["mutation"]
+    assert "strategy" not in _workflow()["jobs"]["mutation"]
+    proofs = yaml.safe_load((_ROOT / ".github/workflows/proofs.yml").read_text())["jobs"]
+    assert proofs["mutation"]["uses"] == "./.github/workflows/mutation-preflight.yml"
