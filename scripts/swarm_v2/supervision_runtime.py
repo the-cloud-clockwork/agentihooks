@@ -11,6 +11,7 @@ from pathlib import Path
 from types import FrameType
 
 from hooks.proc import _process
+from scripts.account_names import oauth_env
 from scripts.swarm_v2 import filesystem
 from scripts.swarm_v2 import supervision_processes as trees
 from scripts.swarm_v2.supervision import Launch, LaunchRefused
@@ -36,6 +37,7 @@ class Supervisor:
         self.phase = "startup"
         self.environment = {k: v for k, v in os.environ.items() if not k.startswith("HERDR_")}
         self.environment.update(
+            oauth_env(self.environment),
             filesystem.environment(launch.execution, launch.harness),
             HERDR_CONFIG_PATH=str(self.root / "herdr.toml"),
             SWARM_SUPERVISION_DIR=str(self.root),
