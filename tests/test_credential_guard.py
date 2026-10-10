@@ -21,6 +21,22 @@ CASES = [
     ("read bashrc", {"tool_name": "Read", "tool_input": {"file_path": "~/.bashrc"}}, True),
     ("read netrc", {"tool_name": "Read", "tool_input": {"file_path": "/home/x/.netrc"}}, True),
     ("read aws creds", {"tool_name": "Read", "tool_input": {"file_path": "~/.aws/credentials"}}, True),
+    (
+        "read worker grant",
+        {"tool_name": "Read", "tool_input": {"file_path": "/home/worker/attempts/exe-1/run/launch-grant"}},
+        True,
+    ),
+    ("grep in worker grant", {"tool_name": "Grep", "tool_input": {"pattern": "v2", "path": "run/launch-grant"}}, True),
+    ("cat worker grant", {"tool_name": "Bash", "tool_input": {"command": "cat run/launch-grant"}}, True),
+    ("grep worker grant", {"tool_name": "Bash", "tool_input": {"command": "grep v2 ./launch-grant"}}, True),
+    (
+        "python reads worker grant",
+        {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"print(open('run/launch-grant').read())\""}},
+        True,
+    ),
+    ("cat glob of worker grant", {"tool_name": "Bash", "tool_input": {"command": "cat run/launch-*"}}, True),
+    ("ls worker grant", {"tool_name": "Bash", "tool_input": {"command": "ls -la run/launch-grant"}}, False),
+    ("read launch module", {"tool_name": "Read", "tool_input": {"file_path": "scripts/swarm_v2/launch.py"}}, False),
     ("read source file", {"tool_name": "Read", "tool_input": {"file_path": "hooks/secrets.py"}}, False),
     ("grep in dotenv", {"tool_name": "Grep", "tool_input": {"pattern": "URL", "path": ".env"}}, True),
     ("grep in src", {"tool_name": "Grep", "tool_input": {"pattern": "URL", "path": "src/"}}, False),
@@ -361,6 +377,12 @@ class TestRecursiveRewrite:
         for rc in SHELL_RC:
             assert rc not in GREP_EXCLUDES, rc
             assert rc not in RG_EXCLUDES, rc
+
+    def test_recursive_search_leaves_the_worker_grant_out(self):
+        from scripts.swarm_v2.broadcast_bridge import GRANT_NAME
+
+        assert "--exclude=" + GRANT_NAME in GREP_EXCLUDES.split()
+        assert "'!" + GRANT_NAME + "'" in RG_EXCLUDES.split()
 
     def test_quoted_delimiters_are_data(self):
         cmd = 'echo "a && grep -r x ." && git commit -m "b | rg y ."'
