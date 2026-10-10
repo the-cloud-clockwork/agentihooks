@@ -1,7 +1,9 @@
 import json
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from redis import Redis
 from redis.client import Pipeline
@@ -15,6 +17,7 @@ from scripts.swarm_v2.authority import TaskAuthority, TaskClaim
 from scripts.swarm_v2.runtime.operations import SPAWN, OperationJournal, digest
 
 DEFAULT_LEASE_MS = 60_000
+HEARTBEAT_LOCK_MS = 5_000
 WRITE_ATTEMPTS = 5
 REGISTER = "/v2/executions/register"
 HEARTBEAT = re.compile(r"/v2/executions/([^/]+)/heartbeat")
@@ -93,11 +96,28 @@ class ExecutionsAPI:
             raise GrantRefused("invalid_request", refusal["detail"])
         self._bind(registration, body["authority"])
         fingerprint = digest(body)
-        replay = _order(self._record(self.store.redis, execution_id), body["renewal_sequence"], fingerprint)
-        if replay:
-            return replay
-        claim = _task(lambda: self.tasks.renew(token, body["authority"]["task_generation"], self.lease_ms))
-        return self._commit(claim, body, fingerprint)
+        with self._serialized(execution_id):
+            replay = _order(self._record(self.store.redis, execution_id), body["renewal_sequence"], fingerprint)
+            if replay:
+                return replay
+            claim = _task(lambda: self.tasks.renew(token, body["authority"]["task_generation"], self.lease_ms))
+            return self._commit(claim, body, fingerprint)
+
+    @contextmanager
+    def _serialized(self, execution_id: str) -> Iterator[None]:
+        key = self.store.key(self.slug, "heartbeat-lock", execution_id)
+        holder = uuid4().hex
+        if not self.store.redis.set(key, holder, nx=True, px=HEARTBEAT_LOCK_MS):
+            raise GrantRefused("dependency_unavailable", "another heartbeat for this execution is in flight")
+        try:
+            yield
+        finally:
+            with self.store.redis.pipeline() as pipe:
+                pipe.watch(key)
+                if pipe.get(key) == holder:
+                    pipe.multi()
+                    pipe.delete(key)
+                    pipe.execute()
 
     def _bind(self, registration: Registration, authority: dict) -> None:
         agent = self.store.execution(self.slug, registration.execution_id)

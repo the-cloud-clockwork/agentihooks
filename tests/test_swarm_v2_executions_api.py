@@ -278,40 +278,77 @@ def test_the_archive_watermark_never_moves_backward(world, worker):
     assert higher["lease_deadline_ms"] == 1110
 
 
-def test_a_newer_heartbeat_committed_during_renewal_wins(world, worker, monkeypatch):
-    agent, token = worker
+def during_renewal(world, monkeypatch, step):
     renew = world.tasks.renew
-    raced = []
+    seen = []
 
     def racing(*args):
         claim = renew(*args)
-        if not raced:
-            raced.append(None)
-            raced[0] = world.put(agent.execution_id, token, world.beat(agent, 9))
+        if not seen:
+            seen.append(None)
+            seen[0] = step()
         return claim
 
     monkeypatch.setattr(world.tasks, "renew", racing)
+    return seen
+
+
+def test_a_concurrent_heartbeat_is_refused_before_any_lease_write(world, worker, monkeypatch):
+    agent, token = worker
+    lock = world.store.key("fixture", "heartbeat-lock", agent.execution_id)
+
+    def concurrent():
+        assert world.store.redis.pttl(lock) == 5_000
+        world.clock[0] += 30
+        claim = world.tasks.current("task")
+        refused = world.put(agent.execution_id, token, world.beat(agent, 9))
+        assert world.tasks.current("task") == claim
+        return refused
+
+    seen = during_renewal(world, monkeypatch, concurrent)
+    status, ack = world.put(agent.execution_id, token, world.beat(agent, 8))
+    assert (seen[0][0], seen[0][1]["error_class"], seen[0][1]["retry"]) == (
+        503,
+        "dependency_unavailable",
+        "same_request",
+    )
+    assert (status, ack["lease_deadline_ms"], stored(world, agent)["renewal_sequence"]) == (200, 1100, 8)
+    assert not world.store.redis.exists(lock)
+
+
+def test_a_heartbeat_after_an_expired_lock_cannot_move_the_sequence_backward(world, worker, monkeypatch):
+    agent, token = worker
+    lock = world.store.key("fixture", "heartbeat-lock", agent.execution_id)
+
+    def after_expiry():
+        world.store.redis.delete(lock)
+        return world.put(agent.execution_id, token, world.beat(agent, 9))
+
+    seen = during_renewal(world, monkeypatch, after_expiry)
     status, refusal = world.put(agent.execution_id, token, world.beat(agent, 8))
-    assert raced[0][0] == 200
+    assert seen[0][0] == 200
     assert (status, refusal["error_class"]) == (409, "revision_conflict")
     assert stored(world, agent)["renewal_sequence"] == 9
-    assert world.tasks.current("task").lease_deadline_ms == raced[0][1]["lease_deadline_ms"]
 
 
-def test_the_same_heartbeat_committed_during_renewal_is_returned(world, worker, monkeypatch):
+def test_the_same_heartbeat_committed_after_an_expired_lock_is_returned(world, worker, monkeypatch):
     agent, token = worker
-    renew = world.tasks.renew
-    raced = []
+    lock = world.store.key("fixture", "heartbeat-lock", agent.execution_id)
 
-    def racing(*args):
-        claim = renew(*args)
-        if not raced:
-            raced.append(None)
-            raced[0] = world.put(agent.execution_id, token, world.beat(agent, 8))
-        return claim
+    def after_expiry():
+        world.store.redis.delete(lock)
+        return world.put(agent.execution_id, token, world.beat(agent, 8))
 
-    monkeypatch.setattr(world.tasks, "renew", racing)
-    assert world.put(agent.execution_id, token, world.beat(agent, 8)) == raced[0]
+    seen = during_renewal(world, monkeypatch, after_expiry)
+    assert world.put(agent.execution_id, token, world.beat(agent, 8)) == seen[0]
+
+
+def test_a_heartbeat_never_releases_a_lock_another_heartbeat_holds(world, worker, monkeypatch):
+    agent, token = worker
+    lock = world.store.key("fixture", "heartbeat-lock", agent.execution_id)
+    during_renewal(world, monkeypatch, lambda: world.store.redis.set(lock, "another-heartbeat"))
+    assert world.put(agent.execution_id, token, world.beat(agent, 1))[0] == 200
+    assert world.store.redis.get(lock) == "another-heartbeat"
 
 
 def test_a_heartbeat_commit_that_keeps_conflicting_writes_nothing(world, worker, monkeypatch):
