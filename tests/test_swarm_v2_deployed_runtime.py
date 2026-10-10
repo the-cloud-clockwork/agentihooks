@@ -458,6 +458,7 @@ def test_a_kubernetes_launch_puts_its_grant_in_the_pod_launch_material_and_recor
         },
         "harness": "claude",
         "agent": ["claude"],
+        "control_url": API_URL,
     }
 
 
