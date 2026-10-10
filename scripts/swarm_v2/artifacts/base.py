@@ -37,12 +37,6 @@ def _encode(document: dict) -> bytes:
 
 
 @dataclass(frozen=True)
-class Ack:
-    size: int
-    checksum: str
-
-
-@dataclass(frozen=True)
 class ArtifactRef:
     sha256: str
     size: int
@@ -78,7 +72,7 @@ class Scope:
 class Backend(Protocol):
     kind: str
 
-    def write(self, key: str, data: bytes) -> Ack: ...
+    def write(self, key: str, data: bytes) -> None: ...
 
     def size(self, key: str) -> int | None: ...
 
@@ -95,6 +89,7 @@ class ArtifactStore:
     def __init__(self, backend: Backend) -> None:
         self.backend = backend
         self.failures: Counter[str] = Counter()
+        self.readable: set[str] = set()
 
     def metrics(self) -> dict[str, dict[str, int]]:
         return {METRIC: dict(self.failures)}
@@ -117,17 +112,21 @@ class ArtifactStore:
 
     def stat(self, scope: Scope, ref: ArtifactRef) -> str:
         key = scope.key("objects", ref.sha256)
-        if self.backend.size(key) is None:
-            return ABSENT
-        return VERIFIED if self._matches(key, ref) else CORRUPT
+        if self.backend.size(key) is not None and self._matches(key, ref):
+            return VERIFIED
+        self.readable.discard(key)
+        return ABSENT if self.backend.size(key) is None else CORRUPT
 
     def get_range(self, scope: Scope, ref: ArtifactRef, start: int = 0, length: int | None = None) -> bytes:
         length = ref.size - start if length is None else length
         if start < 0 or length < 0 or start + length > ref.size:
             _refuse(f"range {start}+{length} is outside {ref.size} bytes")
-        if self.stat(scope, ref) != VERIFIED:
-            _refuse(f"artifact {ref.sha256} is not verified in {self.backend.kind}")
-        return self.backend.read(scope.key("objects", ref.sha256), start, length)
+        key = scope.key("objects", ref.sha256)
+        if key not in self.readable:
+            if self.stat(scope, ref) != VERIFIED:
+                _refuse(f"artifact {ref.sha256} is not verified in {self.backend.kind}")
+            self.readable.add(key)
+        return self.backend.read(key, start, length)
 
     def commit_manifest(self, scope: Scope, name: str, artifact_ids: Iterable[str]) -> dict:
         _identifier(name)
@@ -159,10 +158,15 @@ class ArtifactStore:
         for key in self.backend.keys(scope.key("manifests") + "/"):
             if listed in self._document(key)["artifacts"].values():
                 return False
-        for key in self.backend.keys(scope.key("artifacts") + "/"):
-            if _reference(self._document(key)) == ref:
-                self.backend.remove(key)
-        self.backend.remove(scope.key("objects", ref.sha256))
+        records = {key: self._document(key) for key in self.backend.keys(scope.key("artifacts") + "/")}
+        owned = [key for key, document in records.items() if _reference(document) == ref]
+        if any(records[key]["generation"] > scope.generation for key in owned):
+            return False
+        for key in owned:
+            self.backend.remove(key)
+        object_key = scope.key("objects", ref.sha256)
+        self.readable.discard(object_key)
+        self.backend.remove(object_key)
         return True
 
     def _generations(self, scope: Scope, name: str) -> list[int]:
@@ -184,18 +188,21 @@ class ArtifactStore:
     def _publish(self, scope: Scope, key: str, data: bytes) -> None:
         ref = ArtifactRef.of(data)
         staging = scope.key("staging", scope.execution_id, ref.sha256)
-        ack = self.backend.write(staging, data)
-        self._confirm(staging, ref, ack)
-        self.backend.move(staging, key)
-        self._confirm(key, ref, ack)
+        try:
+            self.backend.write(staging, data)
+            self._confirm(staging, ref)
+            self.backend.move(staging, key)
+        finally:
+            self.backend.remove(staging)
+        self._confirm(key, ref)
 
-    def _confirm(self, key: str, ref: ArtifactRef, ack: Ack) -> None:
+    def _confirm(self, key: str, ref: ArtifactRef) -> None:
         if self._matches(key, ref):
             return
         self.failures[self.backend.kind] += 1
         self.backend.remove(key)
         _refuse(
-            f"{self.backend.kind} acknowledged {ack.size} bytes for {key} but the stored object does not match {ref.sha256}"
+            f"{self.backend.kind} acknowledged {ref.size} bytes for {key} but the stored object does not match {ref.sha256}"
         )
 
 

@@ -1,11 +1,10 @@
 """A durable directory backend: atomic replace with fsync, every key contained in its root."""
 
-import hashlib
 import os
 import tempfile
 from pathlib import Path
 
-from scripts.swarm_v2.artifacts.base import Ack, ArtifactError
+from scripts.swarm_v2.artifacts.base import ArtifactError
 from scripts.swarm_v2.filesystem import LayoutError, contain
 
 TEMPORARY = ".partial-"
@@ -31,7 +30,7 @@ class LocalBackend:
         except LayoutError as error:
             raise ArtifactError(str(error)) from error
 
-    def write(self, key: str, data: bytes) -> Ack:
+    def write(self, key: str, data: bytes) -> None:
         path = self._path(key)
         path.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary = tempfile.mkstemp(prefix=TEMPORARY, dir=path.parent)
@@ -44,7 +43,6 @@ class LocalBackend:
         finally:
             Path(temporary).unlink(missing_ok=True)
         _sync(path.parent)
-        return Ack(len(data), hashlib.sha256(data).hexdigest())
 
     def size(self, key: str) -> int | None:
         path = self._path(key)

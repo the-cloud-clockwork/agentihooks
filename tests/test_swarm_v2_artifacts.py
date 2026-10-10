@@ -129,15 +129,18 @@ class World:
             self.backend = object_store.ObjectStoreBackend(self.fake, "bucket", "swarm/")
         self.writes: list[str] = []
         self.cut = 0
+        self.flip = 0
         real = self.backend.write
 
-        def write(key: str, data: bytes) -> base.Ack:
+        def write(key: str, data: bytes) -> None:
             self.writes.append(key)
             if self.cut:
                 self.cut -= 1
-                real(key, data[: len(data) // 2])
-                return base.Ack(len(data), sha(data))
-            return real(key, data)
+                data = data[: len(data) // 2]
+            elif self.flip:
+                self.flip -= 1
+                data = bytes([data[0] ^ 1]) + data[1:]
+            real(key, data)
 
         self.backend.write = write
         self.store = base.ArtifactStore(self.backend)
@@ -273,6 +276,68 @@ def test_retry_after_a_refused_upload_is_a_new_valid_request(world):
     ref = world.store.put(world.scope, "a1", DATA)
     assert world.store.get_range(world.scope, ref) == DATA
     assert world.store.metrics() == {base.METRIC: {world.kind: 1}}
+
+
+def test_same_length_corruption_is_refused(world):
+    world.flip = 1
+    with pytest.raises(base.ArtifactError) as raised:
+        world.store.put(world.scope, "a1", DATA)
+    assert str(raised.value) == (
+        f"{world.kind} acknowledged {len(DATA)} bytes for {staging_key(DATA)} "
+        f"but the stored object does not match {sha(DATA)}"
+    )
+    assert world.keys() == []
+    assert world.store.metrics() == {base.METRIC: {world.kind: 1}}
+
+
+def test_interrupted_upload_leaves_no_staging(world):
+    real = world.backend.write
+
+    def write(key, data):
+        real(key, data)
+        raise OSError("transport reset")
+
+    world.backend.write = write
+    with pytest.raises(OSError):
+        world.store.put(world.scope, "a1", DATA)
+    assert world.keys() == []
+
+
+def test_ranges_reuse_one_verification_until_the_object_changes(world):
+    ref = world.store.put(world.scope, "a1", DATA)
+    reads = []
+    real = world.backend.read
+
+    def read(key, start, length):
+        reads.append((start, length))
+        return real(key, start, length)
+
+    world.backend.read = read
+    world.store.get_range(world.scope, ref, 2, 3)
+    world.store.get_range(world.scope, ref, 2, 3)
+    assert reads == [(0, len(DATA)), (2, 3), (2, 3)]
+    world.backend.write(object_key(DATA), DATA[:-1] + b"X")
+    assert world.store.stat(world.scope, ref) == base.CORRUPT
+    with pytest.raises(base.ArtifactError):
+        world.store.get_range(world.scope, ref, 2, 3)
+
+
+def test_deleted_artifact_is_no_longer_readable(world):
+    ref = world.store.put(world.scope, "a1", DATA)
+    world.store.get_range(world.scope, ref)
+    assert world.store.delete_if_unreferenced(world.scope, ref) is True
+    with pytest.raises(base.ArtifactError) as raised:
+        world.store.get_range(world.scope, ref)
+    assert str(raised.value) == f"artifact {sha(DATA)} is not verified in {world.kind}"
+
+
+def test_stale_generation_cannot_delete_a_newer_record(world):
+    newer = base.Scope.granted(registration(execution="e3", generation=3))
+    ref = world.store.put(newer, "a1", DATA)
+    keys = world.keys()
+    assert world.store.delete_if_unreferenced(world.scope, ref) is False
+    assert world.keys() == keys
+    assert world.store.delete_if_unreferenced(newer, ref) is True
 
 
 def test_truncated_record_keeps_the_verified_object_and_writes_no_record(world):
@@ -511,8 +576,7 @@ def test_local_write_syncs_the_file_and_its_directory(tmp_path, monkeypatch):
 
     monkeypatch.setattr(os, "fsync", fsync)
     descriptors = len(os.listdir("/proc/self/fd"))
-    ack = backend.write("a/b/c", DATA)
-    assert ack == base.Ack(len(DATA), sha(DATA))
+    backend.write("a/b/c", DATA)
     target = tmp_path.resolve() / "durable" / "a" / "b"
     assert [path for path, _ in synced][1:] == [str(target)]
     assert synced[0][0].startswith(str(target / ".partial-"))
@@ -560,8 +624,7 @@ def object_backend(fake=None):
 
 def test_object_store_requests_are_scoped_to_bucket_and_prefix():
     fake, backend = object_backend()
-    ack = backend.write("k", DATA)
-    assert ack == base.Ack(len(DATA), hashlib.md5(DATA).hexdigest())
+    backend.write("k", DATA)
     assert fake.requests[-1] == ("put_object", {"Bucket": "bucket", "Key": "swarm/k", "Body": DATA})
     assert backend.read("k", 2, 3) == DATA[2:5]
     assert fake.requests[-1] == ("get_object", {"Bucket": "bucket", "Key": "swarm/k", "Range": "bytes=2-4"})
@@ -581,15 +644,10 @@ def test_object_store_empty_read_sends_no_request():
     assert fake.calls["get_object"] == 0
 
 
-@pytest.mark.parametrize(("response", "checksum"), [({}, ""), ({"ETag": '"X1X"'}, "X1X")])
-def test_object_store_ack_carries_the_unquoted_etag(response, checksum):
-    class Tagged(FakeObjectStore):
-        def put_object(self, **request):
-            super().put_object(**request)
-            return response
-
-    _, backend = object_backend(Tagged())
-    assert backend.write("k", DATA) == base.Ack(len(DATA), checksum)
+def test_local_directory_key_has_no_size(tmp_path):
+    backend = local.LocalBackend(tmp_path / "durable")
+    backend.write("a/b", DATA)
+    assert backend.size("a") is None
 
 
 @pytest.mark.parametrize("code", ["404", "NoSuchKey", "NotFound"])

@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from scripts.swarm_v2.artifacts.base import Ack, ArtifactError
+from scripts.swarm_v2.artifacts.base import ArtifactError
 
 MISSING = frozenset({"404", "NoSuchKey", "NotFound"})
 PAGES = 10_000
@@ -23,9 +23,8 @@ class ObjectStoreBackend:
     def _request(self, key: str) -> dict:
         return {"Bucket": self.bucket, "Key": self.prefix + key}
 
-    def write(self, key: str, data: bytes) -> Ack:
-        response = self.client.put_object(**self._request(key), Body=data)
-        return Ack(len(data), response.get("ETag", "").strip('"'))
+    def write(self, key: str, data: bytes) -> None:
+        self.client.put_object(**self._request(key), Body=data)
 
     def size(self, key: str) -> int | None:
         try:
