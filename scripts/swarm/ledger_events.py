@@ -1,8 +1,9 @@
 """Agent writes on a swarm ledger as inbox items, sent by the minute tick so the master hears of them asleep or awake.
 
 New ledger events past the swarm's cursor go to the master owning their phase, else the lead. Time rules raise a
-follow-up nobody decided, watch each task's pull request on GitHub and pass every new health finding on for a verdict. Each item is sent once, so a replay
-of the same ledger sends nothing; the wake ladder then carries every item to a reader.
+follow-up nobody decided, watch each task's pull request on GitHub and pass every new health finding on for a verdict.
+Each item is sent once, so a replay of the same ledger sends nothing; the wake ladder then carries every item to a
+reader.
 """
 
 import functools
@@ -21,6 +22,7 @@ from scripts.swarm.store import MASTER, PREFIX
 from scripts.swarm_v2 import masters
 
 MINUTE_MS = 60_000
+TASK_FINDINGS = frozenset({"proof loop", "failed launch", "stale claim"})
 FOLLOWUP_RAISE_MS = 15 * MINUTE_MS
 FOLLOWUP_OPERATOR_MS = 30 * MINUTE_MS
 MERGED_ENGINEER_MS = 10 * MINUTE_MS
@@ -372,8 +374,8 @@ def _settled(found):
     return "turned green" if found.resolved and not found.red else ""
 
 
-def findings_pass(inbox, store, slug, shown):
-    mail, sent = Mail(inbox, store, slug), []
+def findings_pass(inbox, store, slug, shown, doc=None):
+    mail, sent = Mail(inbox, store, slug, doc), []
     for found in shown:
         if found["kind"] == "spawn stall":
             continue
@@ -382,7 +384,8 @@ def findings_pass(inbox, store, slug, shown):
             f"New health finding on swarm {slug}: {found['summary']} ({found['kind']}). Give it a verdict: "
             f'agentihooks swarm {slug} verdict {found["id"]} {"|".join(VERDICTS)} --note "<why>"'
         )
-        sent += mail.send(f"finding:{found['id']}:{judged}", mail.master, text)
+        about = f"tasks/{found.get('subject', '')}" if found["kind"] in TASK_FINDINGS else ""
+        sent += mail.send(f"finding:{found['id']}:{judged}", mail.owner(about), text)
     return sent
 
 

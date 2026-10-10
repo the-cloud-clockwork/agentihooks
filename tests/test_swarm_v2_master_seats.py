@@ -238,6 +238,18 @@ def test_a_new_priority_on_a_task_reaches_its_phase_owner(swarm):
     assert len(texts(inbox, SECOND)) == 1 and texts(inbox, LEAD) == []
 
 
+def test_a_health_finding_about_a_task_reaches_its_phase_owner_and_others_reach_the_lead(swarm):
+    store, inbox = swarm
+    seated(store, FIRST, OTHER)
+    shown = [
+        {"id": "stale-claim/t2", "kind": "stale claim", "subject": "t2", "summary": "quiet"},
+        {"id": "ceremony/sw-eng-1", "kind": "ceremony", "subject": "sw-eng-1", "summary": "busy"},
+    ]
+    ledger_events.findings_pass(inbox, store, SLUG, shown, DOC)
+    assert ["stale claim" in t for t in texts(inbox, SECOND)] == [True]
+    assert ["ceremony" in t for t in texts(inbox, LEAD)] == [True]
+
+
 def test_raising_the_master_count_moves_phases_to_the_new_seat(swarm):
     store, _ = swarm
     seats = masters.MasterSeats(store.redis)
