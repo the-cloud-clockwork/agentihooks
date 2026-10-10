@@ -335,18 +335,21 @@ def shipped(monkeypatch):
 
 def steps(store, monkeypatch, tasks, record=None, spent=0):
     ready = {"eng": [{"id": "r1"}], "ci": [{"id": "r2"}, {"id": "r3"}], "plan": []}
-    monkeypatch.setattr(capacity, "ready_work", lambda slug, saved, doc: (tasks, ready))
+    given = {"tasks": [{"id": "given"}]}
+    asked = []
+    monkeypatch.setattr(capacity, "ready_work", lambda *args: asked.append(args) or (tasks, ready))
     counted = []
     monkeypatch.setattr(
-        capacity, "spawn_counter", lambda saved, now_ms: lambda since: counted.append((since, now_ms)) or spent
+        capacity, "spawn_counter", lambda saved, now_ms: lambda since: counted.append((saved, since, now_ms)) or spent
     )
     host = {"host": {"room": 4, "granted_at": NOW - 5}}
     store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps(host if record is None else record))
     actions = []
     for n in range(3):
         report(store, "ci", NOW + n * 60_000)
-        actions += lane_split.step(SLUG, store.config(SLUG), store, {"tasks": []}, NOW + n * 60_000)
-    assert counted in ([], [(NOW - 5, NOW + 120_000)])
+        actions += lane_split.step(SLUG, store.config(SLUG), store, given, NOW + n * 60_000)
+    assert asked == [(SLUG, store, given)]
+    assert counted in ([], [(store, NOW - 5, NOW + 120_000)])
     return actions
 
 
@@ -357,7 +360,39 @@ def test_the_tick_step_moves_a_seat_and_ships_one_dispatch_row(store, home, ship
     assert caps(store) == (3, 2)
     ((table, rows, at),) = shipped
     assert (table, at) == (dispatcher.TABLE, NOW + 120_000)
-    assert [(r["rule"], r["mode"], r["action"], r["task"]) for r in rows] == [("lane-split", "apply", actions[0], "")]
+    ((row,),) = [rows]
+    assert {k: row[k] for k in ("event_id", "ledger", "ts_ms", "rule", "mode", "action", "task")} == {
+        "event_id": f"dispatch:{SLUG}:lane-split:{NOW + 120_000}:0",
+        "ledger": SLUG,
+        "ts_ms": NOW + 120_000,
+        "rule": "lane-split",
+        "mode": "apply",
+        "action": actions[0],
+        "task": "",
+    }
+    (logged,) = gate_log.recent(SLUG, None, home)
+    assert logged["at"] == NOW + 120_000
+
+
+def test_the_tick_step_counts_ready_work(store, home, shipped, monkeypatch):
+    store.update(SLUG, max_eng=1)
+    assert steps(store, monkeypatch, {}) == [
+        lane_split.HELD.format(named="ci", ticks=3, reason="the eng lane keeps its last seat for ready work")
+    ]
+
+
+def test_the_tick_hands_its_ledger_state_and_clock_to_the_lane_split(monkeypatch):
+    import fakeredis
+
+    from scripts.swarm import tick
+    from tests.swarm.test_tick import FakeLedger, FakeRuntime
+
+    saved = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    saved.create(SwarmConfig(SLUG, "/repo", max_eng=0, max_ci=0))
+    seen = []
+    monkeypatch.setattr(lane_split, "step", lambda *a: seen.append((a[-2]["tasks"], a[-1])) or [])
+    tick.tick(SLUG, saved, FakeLedger([{"id": "a"}]), FakeRuntime(), now_ms=4_321)
+    assert [(tasks[0]["id"], at) for tasks, at in seen] == [("a", 4_321)]
 
 
 def test_the_tick_step_counts_working_agents_as_live(store, home, shipped, monkeypatch):
