@@ -3,6 +3,8 @@ import hashlib
 import json
 import os
 import shutil
+import threading
+import time
 from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,7 +22,7 @@ GIB = 1 << 30
 
 
 class Clock:
-    def __init__(self, now: float = 1_000_000.0):
+    def __init__(self, now: float = 4_000_000_000.0):
         self.now = now
 
     def __call__(self) -> float:
@@ -127,6 +129,8 @@ def test_load_reads_the_installed_policy_when_no_path_is_given(monkeypatch, tmp_
         ({"max_bytes": True}, "cache policy byte limits must be positive integers"),
         ({"store": "relative/cache"}, "cache policy store must be an absolute path"),
         ({"excluded": "x"}, "cache policy excluded patterns must be a list of names"),
+        ({"excluded": [1]}, "cache policy excluded patterns must be a list of names"),
+        ({"kinds": ["pip"]}, "cache policy must name each kind with whether it may hold executables"),
         ({"enabled": "yes"}, "cache policy enabled must be true or false"),
     ],
 )
@@ -135,6 +139,20 @@ def test_parse_refuses_a_malformed_policy(change, message):
     with pytest.raises(cache.CacheError) as error:
         cache.parse(document)
     assert str(error.value) == message
+
+
+def test_parse_accepts_the_smallest_limits_and_reuse_off():
+    document = {**json.loads(POLICY_FILE.read_text()), "max_bytes": 1, "reserve_bytes": 1, "enabled": False}
+    policy = cache.parse(document)
+    assert (policy.max_bytes, policy.reserve_bytes, policy.enabled) == (1, 1, False)
+    assert policy.excluded == tuple(document["excluded"])
+
+
+def test_a_store_defaults_to_the_wall_clock_and_the_real_disk_and_the_image_policy_path():
+    store = cache.Store(cache.load(POLICY_FILE))
+    assert store.clock is time.time
+    assert store.usage is shutil.disk_usage
+    assert cache.POLICIES == (POLICY_FILE, Path("/opt/swarm-node/cache-policy.json"))
 
 
 def test_the_key_digest_covers_every_field():
@@ -208,6 +226,60 @@ def test_publish_records_the_key_the_manifest_and_the_size(world):
         },
         "bytes": 13,
     }
+    assert (world.store.policy.store / key(kind="toolchain").digest()).stat().st_mtime == world.store.clock.now
+    assert world.store.policy.store.stat().st_mode & 0o777 == 0o700
+
+
+def test_publish_refuses_a_kind_outside_the_policy(world):
+    layer = cache.attach(world.store, world.first, key())
+    with pytest.raises(cache.CacheError) as error:
+        cache.publish(world.store, world.first, replace(layer, key=key(kind="cargo")))
+    assert str(error.value) == "cache kind cargo is not in the policy"
+    assert entries(world.store) == []
+
+
+def test_content_that_turns_unsafe_while_copying_is_refused_and_staging_removed(world, monkeypatch):
+    layer = cache.attach(world.store, world.first, key())
+    fill(layer, {"a.whl": b"x"})
+    copy = shutil.copytree
+
+    def planting(source, target, **kwargs):
+        copy(source, target, **kwargs)
+        (Path(target) / "late.db").write_text("planted")
+
+    monkeypatch.setattr(cache.shutil, "copytree", planting)
+    with pytest.raises(cache.CacheError) as error:
+        cache.publish(world.store, world.first, layer)
+    assert str(error.value) == "the cache entry could not be written: cache content holds an excluded file: late.db"
+    assert list(world.store.policy.store.iterdir()) == [world.store.policy.store / ".lock"]
+
+
+def test_a_dangling_link_in_place_of_an_entry_blocks_publish_until_attach_discards_it(world):
+    world.store.policy.store.mkdir(mode=0o700)
+    entry = world.store.policy.store / key().digest()
+    entry.symlink_to(world.tmp / "gone")
+    layer = cache.attach(world.store, world.first, key())
+    assert layer.seed is None and not entry.is_symlink()
+    assert cache.METRICS["cache_corruption_total"] == 1
+    entry.symlink_to(world.tmp / "gone")
+    fill(layer, {"a.whl": b"x"})
+    assert cache.publish(world.store, world.first, layer) == entry / "content"
+    assert entry.is_symlink()
+
+
+def test_publish_waits_for_the_store_lock(world):
+    layer = cache.attach(world.store, world.first, key())
+    fill(layer, {"a.whl": b"x"})
+    result = []
+    with open(world.store.policy.store / ".lock", "a") as handle:
+        cache.fcntl.flock(handle, cache.fcntl.LOCK_EX)
+        worker = threading.Thread(target=lambda: result.append(cache.publish(world.store, world.first, layer)))
+        worker.start()
+        worker.join(timeout=0.5)
+        assert worker.is_alive() and entries(world.store) == []
+    worker.join(timeout=10)
+    assert not worker.is_alive()
+    assert result == [world.store.policy.store / key().digest() / "content"]
 
 
 def test_a_mismatched_dependency_lock_misses_instead_of_reusing(world):
@@ -311,13 +383,18 @@ def test_an_entry_moved_under_another_key_is_discarded_by_its_recorded_key(world
     assert cache.METRICS["cache_corruption_total"] == 1
 
 
-@pytest.mark.parametrize("damage", ["content", "mode", "extra", "missing", "record", "link"])
+@pytest.mark.parametrize("damage", ["content", "mode", "extra", "missing", "record", "fields", "shape", "link"])
 def test_corrupt_content_is_discarded_counted_and_rebuilt(world, damage):
     seed = published(world, key(kind="toolchain"), {"bin/t": b"tool", "lib/a": b"abc"}, executable=("bin/t",))
     entry = seed.parent
     for path in [entry, *entry.rglob("*")]:
         path.chmod(path.stat().st_mode | 0o200)
-    if damage == "content":
+    elsewhere = world.tmp / "elsewhere"
+    if damage == "fields":
+        (entry / "entry.json").write_text("{}")
+    elif damage == "shape":
+        (entry / "entry.json").write_text("[]")
+    elif damage == "content":
         (seed / "lib" / "a").write_bytes(b"abd")
     elif damage == "mode":
         (seed / "lib" / "a").chmod(0o755)
@@ -328,12 +405,12 @@ def test_corrupt_content_is_discarded_counted_and_rebuilt(world, damage):
     elif damage == "record":
         (entry / "entry.json").write_text("{")
     else:
-        shutil.rmtree(entry)
-        entry.symlink_to(world.tmp)
+        entry.rename(elsewhere)
+        entry.symlink_to(elsewhere)
     layer = cache.attach(world.store, world.second, key(kind="toolchain"))
     assert layer.seed is None
     assert not entry.exists() and not entry.is_symlink()
-    assert world.tmp.is_dir()
+    assert elsewhere.is_dir() == (damage == "link")
     assert cache.METRICS == {"cache_hits": 0, "cache_misses": 2, "cache_corruption_total": 1}
     fill(layer, {"bin/t": b"tool", "lib/a": b"abc"}, executable=("bin/t",))
     assert cache.publish(world.store, world.second, layer) == seed
@@ -368,16 +445,25 @@ def test_publish_fits_exactly_at_the_reserve(world):
 
 def test_eviction_removes_least_recently_used_entries_only_as_far_as_needed(world):
     small = replace(world.store, policy=replace(world.store.policy, max_bytes=300))
-    oldest = published(world, key(lock="1" * 64), {"a.whl": b"x" * 100})
-    middle = published(world, key(lock="2" * 64), {"a.whl": b"x" * 100})
-    newest = published(world, key(lock="3" * 64), {"a.whl": b"x" * 100})
+    oldest = published(world, key(lock="1" * 64), {"w/a.whl": b"x" * 100})
+    middle = published(world, key(lock="2" * 64), {"w/a.whl": b"x" * 100})
+    newest = published(world, key(lock="3" * 64), {"w/a.whl": b"x" * 100})
     cache.attach(small, world.second, key(lock="1" * 64))
     layer = cache.attach(small, world.second, key(lock="4" * 64))
-    fill(layer, {"a.whl": b"x" * 100})
+    fill(layer, {"w/a.whl": b"x" * 100})
     cache.publish(small, world.second, layer)
     assert not middle.exists()
     assert oldest.exists() and newest.exists()
     assert len(entries(world.store)) == 3
+
+
+def test_an_entry_that_fills_the_budget_exactly_evicts_nothing(world):
+    small = replace(world.store, policy=replace(world.store.policy, max_bytes=300))
+    kept = published(world, key(lock="1" * 64), {"w/a.whl": b"x" * 200})
+    layer = cache.attach(small, world.second, key(lock="2" * 64))
+    fill(layer, {"w/a.whl": b"x" * 100})
+    assert cache.publish(small, world.second, layer).exists()
+    assert kept.exists()
 
 
 def test_an_entry_larger_than_the_budget_is_refused_with_nothing_evicted(world):
