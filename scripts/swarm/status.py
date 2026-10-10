@@ -188,6 +188,10 @@ def shape_report(tasks: list[dict], max_eng: int) -> dict:
         return {"error": str(exc)}
 
 
+def _ruling(found):
+    return {"state": found.ruling, "reason": found.ruling_reason, "by": found.ruled_by, "at": found.ruled_at}
+
+
 def observation(store, slug, agent):
     found = observe.stored(store, slug, agent.execution_id) if agent.execution_id else None
     if found:
@@ -200,6 +204,7 @@ def observation(store, slug, agent):
             "observed_at": found.observed_at,
             "confirmed_at": found.confirmed_at,
             "sources": found.sources,
+            **({"ruling": _ruling(found)} if found.ruling else {}),
         }
     beat = idle.heartbeat(store.redis, slug, agent.name)
     if not beat:
