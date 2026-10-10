@@ -84,5 +84,75 @@
     "Expiry is derived on read from the stored issue time; an unacknowledged command past its expiry is never delivered or accepted, while an accepted command may still report its outcome after expiry",
     "An answer delivered while a drain holds is acknowledged and reported not_run instead of run, because new instructions would start new work; cancel and stop still run because they only end work",
     "A drain stops holding only when the server refused its acknowledgement as expired and no checkpoint was taken; a refusal for a superseded execution or a refused completion keeps the hold"
-  ]
+  ],
+  "obligations": {
+    "input_preparation": {
+      "met_by": "tests/sv2_ldg05_cases.py builds the fixture from delayed delivery (30 ms of a 50 ms expiry), a duplicated poll response replayed by the fixture network, and a drain whose acknowledgement the network drops",
+      "tests": [
+        "tests/test_swarm_v2_worker_commands.py::test_package_cases_match_their_committed_evidence"
+      ]
+    },
+    "output_contract": {
+      "met_by": "WorkerControl stops mutations on receiving a drain and reports its checkpoint as a separate completion after acceptance",
+      "tests": [
+        "tests/test_swarm_v2_worker_commands.py::test_a_drain_stops_mutations_before_its_acknowledgement_is_confirmed",
+        "tests/test_swarm_v2_worker_commands.py::test_a_checkpoint_taken_before_the_drain_ack_lands_completes_after_it"
+      ]
+    },
+    "rejection_contract": {
+      "met_by": "An expired command is never delivered or accepted, and a superseded execution cannot poll or be issued commands, so an expired answer or stop never reaches a new conversation",
+      "tests": [
+        "tests/test_swarm_v2_worker_commands.py::test_an_expired_command_is_never_accepted",
+        "tests/test_swarm_v2_worker_commands.py::test_an_expired_unacknowledged_command_cannot_be_completed",
+        "tests/test_swarm_v2_worker_commands.py::test_package_cases_match_their_committed_evidence"
+      ]
+    },
+    "recovery_contract": {
+      "met_by": "Acknowledgement and completion are idempotent per command id; the worker state file records what ran, so a lost response returns the stored outcome without a rerun",
+      "tests": [
+        "tests/test_swarm_v2_worker_commands.py::test_ack_records_receipt_once_and_replays_the_stored_acceptance",
+        "tests/test_swarm_v2_worker_commands.py::test_commands_run_only_after_acceptance_and_never_twice",
+        "tests/test_swarm_v2_worker_commands.py::test_a_command_interrupted_while_running_is_reported_not_rerun"
+      ]
+    },
+    "mutation_scope": {
+      "met_by": "Command state lives only in the worker-commands Redis hash per execution; no ledger document is opened or written",
+      "tests": [
+        "tests/test_swarm_v2_worker_commands.py::test_issue_validates_kind_payload_key_and_expiry_before_writing"
+      ]
+    },
+    "compatibility": {
+      "met_by": "With the command API configured, the preceding execution endpoints answer byte for byte as before; without it, command paths answer the preceding 404. The local terminal command path in scripts.swarm_v2.runtime.commands is untouched",
+      "tests": [
+        "tests/test_swarm_v2_worker_commands.py::test_adding_the_command_api_leaves_the_preceding_execution_protocol_unchanged",
+        "tests/test_swarm_v2_worker_commands.py::test_routes_send_command_paths_to_the_command_api"
+      ]
+    },
+    "authority": {
+      "met_by": "Every worker endpoint derives the execution and generation from the signed launch grant bound to its registration (LaunchAuthority.bound), never from the path, body or a display label; a path naming another execution is forbidden_scope. Issuing is the controller's in-process call and is fenced to the current occupant of the seat",
+      "tests": [
+        "tests/test_swarm_v2_worker_commands.py::test_endpoints_refuse_missing_credentials_other_executions_and_unknown_paths",
+        "tests/test_swarm_v2_worker_commands.py::test_issue_validates_kind_payload_key_and_expiry_before_writing"
+      ]
+    },
+    "state": {
+      "met_by": "The states block of this record separates observed, accepted, committed and externally verified; the store keeps accepted_at_ms and completed_at_ms as separate fields",
+      "tests": [
+        "tests/test_swarm_v2_worker_commands.py::test_completion_is_separate_from_acceptance_and_validated_per_kind",
+        "tests/test_swarm_v2_worker_commands.py::test_the_package_record_carries_its_completion_evidence"
+      ]
+    },
+    "data_safety": {
+      "met_by": "The authoritative_objects block names the worker-commands hash and the worker state file as authoritative; rollback deletes nothing and reissuing a key returns the stored command",
+      "tests": [
+        "tests/test_swarm_v2_worker_commands.py::test_rollback_stops_issuing_disabled_kinds_while_existing_commands_finish"
+      ]
+    },
+    "completion_evidence": {
+      "met_by": "interfaces, supported_versions, validation (test outputs), remaining_limitations and rollback_rehearsal blocks of this record",
+      "tests": [
+        "tests/test_swarm_v2_worker_commands.py::test_the_package_record_carries_its_completion_evidence"
+      ]
+    }
+  }
 }
