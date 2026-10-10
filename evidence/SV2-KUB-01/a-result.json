@@ -3,10 +3,10 @@
   "state": "passed",
   "evidence_class": "mocked: in process rendering; Kubernetes schema validity comes from the kind job's strict server side dry run of the committed golden Pods, recorded with its run id in result.json",
   "input_sha256": {
-    "pod-policy.json": "6f10e42c7c8461ea18fe3ae9f0c46001020bd50153665477b415076cf71099f5",
-    "pod-launch.json": "dc9258de4781082cc2abb9a2048ff04db03da0a83ea144f96fe728847b34c809",
-    "pod-rendered.json": "a50787a1f9d90540ada874c745b31de2bd01915593da7189f7f48fcecfdff205",
-    "pod-rendered-wrong-probes.json": "fec706d02fa08d5f7f461a27e7734c2b3ce704bcc0a8fd10b37d8b417d2f1f07"
+    "pod-policy.json": "f8a7cb319094b100d5f09a4e6a6ea5b794c6011cec6443a280f6dc3d1be40085",
+    "pod-launch.json": "8d1964999c9d4fc4e3bfd4f8aea2938da30b825411e1e5a12f4ea7e432261908",
+    "pod-rendered.json": "68922fc8475919b9da88e471672fd93d8daeb6b24069769be2ea108a3d06bec3",
+    "pod-rendered-wrong-probes.json": "24c8efcfbe9cd9417a062701e7888a0cdf8e519d7ec2b237d96abb4917c8f132"
   },
   "observed": {
     "fixture": {
@@ -19,7 +19,8 @@
         "swarm.agentihooks.io/generation": "3",
         "swarm.agentihooks.io/swarm": "rig-grade-swarm",
         "swarm.agentihooks.io/task": "vkub1",
-        "swarm.agentihooks.io/template-version": "kub01-v2"
+        "swarm.agentihooks.io/template-version": "kub01-v2",
+        "swarm.agentihooks.io/provider-account": "claude-fixture"
       },
       "harness": "claude",
       "probe_harness": "claude",
@@ -41,12 +42,12 @@
         "anton.io/pool": "general"
       },
       "secrets": [
-        "swarm-claude-fixture"
+        "swarm-account-claude-fixture"
       ],
       "host_paths": [],
       "privileged": false
     },
-    "fixture_digest": "sha256:1e4461297d7acaf4812cd859cc62b7fcce8eebe1764dfb0e26a9cfe8280cf38a",
+    "fixture_digest": "sha256:0ba1f7e02e4a1106be45c713168171fe80206f3cfa48905f4b5e7740b5e242a3",
     "matches_golden_pod": true,
     "second_fixture": {
       "name": "swarm-exe-a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
@@ -58,7 +59,8 @@
         "swarm.agentihooks.io/generation": "1",
         "swarm.agentihooks.io/swarm": "rig-grade-swarm",
         "swarm.agentihooks.io/task": "vkub2",
-        "swarm.agentihooks.io/template-version": "kub01-v2"
+        "swarm.agentihooks.io/template-version": "kub01-v2",
+        "swarm.agentihooks.io/provider-account": "codex-fixture"
       },
       "harness": "codex",
       "probe_harness": "codex",
@@ -80,12 +82,12 @@
         "anton.io/pool": "general"
       },
       "secrets": [
-        "swarm-codex-fixture"
+        "swarm-account-codex-fixture"
       ],
       "host_paths": [],
       "privileged": false
     },
-    "second_fixture_digest": "sha256:caa02fd21f0e0ad90301246df8bb77fe49185377d3e09bf132983193f4648b34",
+    "second_fixture_digest": "sha256:ed4ddab55f4c69709c2f494fb9bb19518afb658e2ef32f2a6d73273607ab9595",
     "pod_spec_validation_failures_total": {}
   }
 }

@@ -14,7 +14,7 @@ EVIDENCE_CLASS = (
 HOSTILE = {
     "unknown fields": {"privileged": True, "host_mounts": ["/"], "secrets": ["cluster-admin-token"]},
     "yaml in task id": {"task_id": "vkub1\nspec:\n  hostNetwork: true"},
-    "unapproved credential": {"credential_ref": "cluster-admin-token"},
+    "unapproved provider account": {"provider_account": "cluster-admin-token"},
     "unapproved profile": {"profile": "research"},
     "resources over the profile": {"memory_mib": 65536},
     "image by tag": {"image_digest": "latest"},
@@ -67,7 +67,7 @@ def second() -> dict:
         harness="codex",
         memory_mib=2048,
         cpu_millis=1000,
-        credential_ref="swarm-codex-fixture",
+        provider_account="codex-fixture",
         task_payload={"prompt": "A second independent task."},
     )
     return doc

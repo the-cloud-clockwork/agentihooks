@@ -59,6 +59,33 @@ the selected private home, marks the admitted attempt trusted for Claude, and
 passes the admitted attempt as Codex project trust. This image introduces no orchestration service or
 embedded database. The existing ledger service Dockerfile remains separate.
 
+`cache-policy.json` (copied to `/opt/swarm-node/cache-policy.json`) is the
+SV2-FSY-03 cache contract, read by `scripts.swarm_v2.cache`. A cache key covers
+the cache kind, toolchain, dependency lock digest, platform and trust scope, so
+a different lock or another project's scope never reuses an entry. The store
+is built with the attempt's granted scope, its verified project identity: an
+attempt reads entries of that scope or of a policy `shared` scope and publishes
+only into its own, so an untrusted project cannot write a `trusted` toolchain. `attach`
+gives each attempt a writable layer under its own `tmp/cache` and, on a hit, the
+path of a sealed read-only seed in the node store. `publish` copies a writable
+layer into the store as a new seed: it refuses links, special files, the
+excluded credential and session database names, and executables in kinds that
+may not hold them; it never replaces an existing entry and refuses one whose
+recorded files differ, and it evicts least
+recently used entries only when that fits the byte budget and the free-space
+reserve, otherwise nothing changes. An entry whose recorded key or file
+manifest no longer matches is discarded on its next attach and counted in
+`cache_corruption_total`; `cache_hit_rate` is the share of attaches that found a
+seed. Setting `enabled` to false turns reuse off in the module: attaches return
+no seed, publishes write nothing, and no workspace, home or archive is touched.
+No worker launch path calls the module yet, and the granted scope is passed in
+by the caller, so the toolchain rejection holds at this interface only. Seeds
+are sealed by file mode only. Each attach and each publish over an existing
+entry re-hashes its files and checks their execute bits, but a seed edited
+after an attach runs unverified for that holder until the next attach discards
+it. A store owned by another user or mounted read only into attempts is left
+to deployment.
+
 The SV2-IMG-03 launch JSON has schema version one, `authority`, `harness`,
 `agent` and `exporter` argument vectors. Authority must exactly match a
 controller supplied `registration.json` beside the bootstrap execution record;
@@ -110,7 +137,8 @@ Historical supervisor image rollback must be requalified when such an image
 exists. Production rollout remains with antoncore GitOps.
 
 After committing inputs, `bash docker/swarm-node/smoke.sh OUTPUT_DIRECTORY`
-builds an archived clean context, starts two independent containers with network
+builds an archived clean context, scans the built image for credentials with
+`docker/swarm-node/scan.sh`, starts two independent containers with network
 disabled, rejects three invalid locks, rebuilds the worker stage without cache and starts
 the retained image again. The rebuild reuses the pip wheels and tool binaries of the
 `downloads` stage, each checked against its locked sha256 before use. It
@@ -168,7 +196,14 @@ the socket methods cover. Qualification reports
 `worker_image_qualified_targets`. Any refused target, or a manifest naming another
 commit, leaves the image unpromotable and nothing is pushed. The same job builds
 an incompatible herdr fixture and requires its refusal, and qualifies the
-candidate twice in independent containers.
+candidate twice in independent containers. Before the registry login it builds a
+fixture carrying a build-time generated GitHub app token, requires
+`docker/swarm-node/scan.sh` to refuse it, then scans the candidate. The scan runs
+Trivy's secret scanner over every image layer and the image config, fails on any
+finding and fails when the scanner cannot finish. The one exception is a
+`jwt-token` match in an installed Python package's `dist-info/METADATA`, where
+package descriptions quote example tokens; it is recorded in
+`package-examples.txt`, and any other rule in that file still fails.
 
 Only a qualified image is pushed, under the immutable tag `sha-<commit>`, after
 the registry login, which holds the workflow token; build arguments carry only

@@ -1,0 +1,58 @@
+{
+  "package": "SV2-ACC-05",
+  "case": "T-SV2-ACC-05-C",
+  "title": "recovery and replay: a controller restart reconciles expired reservations and live occupancy without reading remote process environments",
+  "tested_commit": "5b2c70a3bd120abda0676c302fe122ca77a5a88b",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064120800",
+  "fixture": "tests/fixtures/swarm_v2/account-reconciliation.json: account fixture with cap 4; seat eng-1 mid handoff (generation 1 occupied, generation 2 reserved), seat eng-2 orphan reservation of a replaced execution, seat eng-3 working with a confirmed terminal loss, and stored runtime observations for supervisor exit, Pod Failed, Pod not found, Pod unreachable and Pod Running",
+  "fixture_clock": "build() from tests/sv2_ctl02_cases.py patches time.time to the fixture clock and issues launch grants; FleetRegistry, AccountCapacity and AccountReconciler read the same list",
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_a_delayed_exit_of_a_replaced_generation_never_frees_the_newer_slot",
+      "job": 114248338046,
+      "output": "PASSED at 2026-10-10T15:36:45.8475814Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_a_lost_current_worker_is_released_and_its_seat_can_be_refilled",
+      "job": 114248338082,
+      "output": "PASSED at 2026-10-10T15:36:33.0186997Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_an_exit_of_the_current_generation_frees_only_its_own_row",
+      "job": 114248338082,
+      "output": "PASSED at 2026-10-10T15:36:33.0887169Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_c_a_restarted_controller_reconciles_expiry_and_occupancy_without_reading_processes",
+      "job": 114248338031,
+      "output": "PASSED at 2026-10-10T15:38:31.8823351Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_status_reports_the_reconciliation_and_releases_nothing",
+      "job": 114248338055,
+      "output": "PASSED at 2026-10-10T15:37:33.9660760Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_the_reconciler_judges_expiry_by_its_own_clock_and_holds_no_grant",
+      "job": 114248338082,
+      "output": "PASSED at 2026-10-10T15:36:33.0163202Z"
+    }
+  ],
+  "recovery": {
+    "restart": "a new AccountReconciler built after the clock passes the reservation TTL releases the expired successor and orphan reservations and keeps the retiring and lost terminal rows; a second pass changes nothing",
+    "no_process_reads": "hooks.proc.processes and the account_sessions environment readers are patched to raise; the restarted pass never calls them",
+    "replay": "a repeated supervisor exit of the same generation returns stale_exit and leaves one release",
+    "ownership": "a delayed Kubernetes exit of generation 1 after the successor occupies returns stale_exit and leaves the generation 2 row byte-equal",
+    "durability": "account rows, the discrepancy hash and the stale exit counter live in Redis; nothing is replaced by a success label"
+  },
+  "account_occupancy_discrepancies": {
+    "after_exit": {
+      "handoff_unconfirmed": 1
+    },
+    "after_settle": {},
+    "dimension": "swarm fixture, account fixture, restarted reconciler"
+  },
+  "cleanup": "fakeredis per test; no live resource mutations",
+  "passed": true
+}

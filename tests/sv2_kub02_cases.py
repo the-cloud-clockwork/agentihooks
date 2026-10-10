@@ -148,7 +148,7 @@ class World:
 
 
 def second_launch() -> dict:
-    return {**launch(), "harness": "codex", "credential_ref": "swarm-codex-fixture", "task_payload": {"prompt": "Two."}}
+    return {**launch(), "harness": "codex", "provider_account": "codex-fixture", "task_payload": {"prompt": "Two."}}
 
 
 def _lost_response(base: dict) -> dict:

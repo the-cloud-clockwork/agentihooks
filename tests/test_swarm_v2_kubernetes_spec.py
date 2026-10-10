@@ -70,6 +70,7 @@ def test_the_fixture_renders_a_pod_bound_to_its_launch_identity():
         "swarm.agentihooks.io/swarm": "rig-grade-swarm",
         "swarm.agentihooks.io/task": "vkub1",
         "swarm.agentihooks.io/template-version": "kub01-v2",
+        "swarm.agentihooks.io/provider-account": "claude-fixture",
     }
     assert meta["annotations"] == {
         "swarm.agentihooks.io/seat": "eng-3@rig-grade-swarm",
@@ -181,7 +182,14 @@ def test_volumes_are_private_scratch_the_launch_record_and_one_approved_credenti
         {"name": "home", "emptyDir": {"sizeLimit": "9216Mi"}},
         {"name": "tmp", "emptyDir": {"sizeLimit": "1024Mi"}},
         {"name": "launch", "configMap": {"name": f"swarm-{EXECUTION}-launch", "defaultMode": 0o444}},
-        {"name": "credential", "secret": {"secretName": "swarm-claude-fixture", "defaultMode": 0o400}},
+        {
+            "name": "credential",
+            "secret": {
+                "secretName": "swarm-account-claude-fixture",
+                "items": [{"key": "token", "path": "token"}],
+                "defaultMode": 0o400,
+            },
+        },
     ]
     assert body["containers"][0]["volumeMounts"] == [
         {"name": "home", "mountPath": "/home/worker"},
@@ -258,7 +266,7 @@ REFUSALS = [
         "launch has unknown fields: host_mounts, secrets",
         "fields",
     ),
-    ("missing field", lambda d: d.pop("credential_ref"), "launch is missing fields: credential_ref", "fields"),
+    ("missing field", lambda d: d.pop("provider_account"), "launch is missing fields: provider_account", "fields"),
     (
         "yaml in task id",
         lambda d: d.update(task_id="vkub1\nspec:\n  hostNetwork: true"),
@@ -307,10 +315,28 @@ REFUSALS = [
     ("text cpu", lambda d: d.update(cpu_millis="1500"), "launch resources must be positive integers", "resources"),
     ("bool cpu", lambda d: d.update(cpu_millis=True), "launch resources must be positive integers", "resources"),
     (
-        "unapproved credential",
-        lambda d: d.update(credential_ref="cluster-admin-token"),
-        "launch credential_ref is not an approved credential",
-        "credential",
+        "unapproved provider account",
+        lambda d: d.update(provider_account="cluster-admin-token"),
+        "launch provider_account is not an approved provider account",
+        "account",
+    ),
+    (
+        "uppercase provider account",
+        lambda d: d.update(provider_account="Claude-fixture"),
+        "launch provider_account is not a valid value",
+        "identity",
+    ),
+    (
+        "provider account ending in a dash",
+        lambda d: d.update(provider_account="claude-"),
+        "launch provider_account is not a valid value",
+        "identity",
+    ),
+    (
+        "provider account past the label bound",
+        lambda d: d.update(provider_account="a" * 49),
+        "launch provider_account is not a valid value",
+        "identity",
     ),
     ("list payload", lambda d: d.update(task_payload=["x"]), "launch task_payload must be a JSON object", "payload"),
     (
@@ -462,14 +488,25 @@ def test_identity_values_at_their_bounds_are_accepted():
     assert rendered.pod["metadata"]["annotations"]["swarm.agentihooks.io/project"] == "unknown"
 
 
-def test_a_codex_launch_names_codex_in_its_probes_and_annotation():
+def test_a_provider_account_at_its_bound_labels_and_mounts_its_own_secret():
+    policy = load_policy(POLICY)
+    policy["provider_accounts"] = ["a" * 48]
     doc = launch_doc()
-    doc.update(harness="codex", credential_ref="swarm-codex-fixture")
+    doc["provider_account"] = "a" * 48
+    _, rendered = render(doc, policy)
+    assert rendered.pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == "a" * 48
+    assert rendered.pod["spec"]["volumes"][3]["secret"]["secretName"] == "swarm-account-" + "a" * 48
+
+
+def test_a_codex_launch_names_codex_in_its_probes_and_binds_its_own_provider_account():
+    doc = launch_doc()
+    doc.update(harness="codex", provider_account="codex-fixture")
     _, rendered = render(doc)
     container = rendered.pod["spec"]["containers"][0]
     assert container["readinessProbe"]["exec"]["command"][5:7] == ["--harness", "codex"]
     assert rendered.pod["metadata"]["annotations"]["swarm.agentihooks.io/harness"] == "codex"
-    assert rendered.pod["spec"]["volumes"][3]["secret"]["secretName"] == "swarm-codex-fixture"
+    assert rendered.pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == "codex-fixture"
+    assert rendered.pod["spec"]["volumes"][3]["secret"]["secretName"] == "swarm-account-codex-fixture"
 
 
 def test_a_probe_initial_delay_comes_from_the_policy():
@@ -499,6 +536,16 @@ POLICY_REFUSALS = [
         lambda d: d.update(image_repository="ghcr.io/x/worker:dev"),
         "pod policy is invalid at image_repository: 'ghcr.io/x/worker:dev' does not match "
         "'^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?(/[a-z0-9]+([._-][a-z0-9]+)*)+$'",
+    ),
+    (
+        "account name past the label bound",
+        lambda d: d.update(provider_accounts=["a" * 49]),
+        "pod policy is invalid at provider_accounts/0: '" + "a" * 49 + "' is too long",
+    ),
+    (
+        "account name ending in a dash",
+        lambda d: d.update(provider_accounts=["claude-"]),
+        "pod policy is invalid at provider_accounts/0: 'claude-' does not match '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'",
     ),
     (
         "unbounded grace",
@@ -593,11 +640,11 @@ def test_the_command_line_renders_the_pod_as_sorted_json(capsys):
 
 def test_the_command_line_refuses_a_hostile_launch_without_output(tmp_path, capsys):
     doc = launch_doc()
-    doc["credential_ref"] = "cluster-admin-token"
+    doc["provider_account"] = "cluster-admin-token"
     assert spec.main(["render", "--policy", str(POLICY), "--launch", str(write(tmp_path, doc, "l.json"))]) == 1
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert captured.err == "launch credential_ref is not an approved credential\n"
+    assert captured.err == "launch provider_account is not an approved provider account\n"
 
 
 def test_the_command_line_refuses_unreadable_inputs(tmp_path, capsys):
