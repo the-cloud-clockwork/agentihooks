@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from scripts.swarm import lease
 from scripts.swarm.store import RedisStore, SwarmError
-from scripts.swarm_v2.auth_context import Registration
+from scripts.swarm_v2.auth_context import TOKEN_PREFIX, Registration
 
 FLAG = "AGENTIHOOKS_FLEET_BROADCASTS"
 ONCE, UNTIL_ACK = "once", "until_ack"
@@ -108,7 +108,7 @@ def _draft(draft: object) -> dict:
     if policy not in (ONCE, UNTIL_ACK) or not isinstance(project, str):
         raise SwarmError("invalid_request")
     return {
-        "broadcast_id": _name(draft.get("broadcast_id") or f"bc-{uuid.uuid4().hex[:16]}", empty=False),
+        "broadcast_id": _name(draft.get("broadcast_id", "")),
         "channel": _name(draft.get("channel", "")),
         "target_role": _name(draft.get("target_role", "")),
         "brain_id": draft.get("brain_id"),
@@ -174,7 +174,8 @@ class FleetBroadcasts:
 
     def publish_operator(self, token: str, draft: object, operation_id: str = "") -> Broadcast:
         fields = _draft(draft)
-        name = self.operator(token) if token else None
+        launch_grant = isinstance(token, str) and token.split(".", 1)[0] == TOKEN_PREFIX
+        name = self.operator(token) if token and not launch_grant else None
         if not isinstance(name, str) or not name:
             raise SwarmError("unauthenticated")
         fields["brain_id"] = _name(fields["brain_id"], empty=False)
@@ -191,6 +192,8 @@ class FleetBroadcasts:
         now = self.clock()
         ttl = fields.pop("ttl_seconds")
         operation = f"{owner_of(author)}:{operation_id}"
+        explicit = fields["broadcast_id"]
+        fields["broadcast_id"] = explicit or f"bc-{uuid.uuid4().hex[:16]}"
 
         def decide(pipe):
             if pipe.exists(frozen):
@@ -198,7 +201,11 @@ class FleetBroadcasts:
             done = pipe.hget(operations, operation) if operation_id else None
             if done:
                 replayed = decode(done)
-                if replayed.content() != _content(fields) or replayed.expires_ms - replayed.published_ms != ttl * 1000:
+                if (
+                    replayed.content() != _content(fields)
+                    or replayed.expires_ms - replayed.published_ms != ttl * 1000
+                    or explicit not in ("", replayed.broadcast_id)
+                ):
                     raise SwarmError("invalid_request")
                 return None, replayed
             raw = pipe.hget(canonical, fields["broadcast_id"])
@@ -247,12 +254,11 @@ class FleetBroadcasts:
         records, claims = self.key("broadcast-deliveries", seat), self.key("broadcast-claims")
 
         def decide(pipe):
+            admitted = self._fence(pipe, grant)
             last = json.loads(pipe.hget(claims, seat) or "{}")
             if claim_id and last.get("claim_id") == claim_id and last.get("generation") == grant.generation:
                 return None, [_delivery(found) for found in last["deliveries"]]
             held = {name: json.loads(raw) for name, raw in pipe.hgetall(records).items()}
-            if any(record["generation"] > grant.generation for record in held.values()):
-                raise SwarmError("stale_generation")
             current = [decode(raw) for raw in pipe.hvals(self.key("broadcasts"))]
             found, changed = [], {}
             for broadcast in sorted(current, key=lambda item: (item.published_ms, item.broadcast_id)):
@@ -279,10 +285,18 @@ class FleetBroadcasts:
                     pipe.hset(records, name, json.dumps(record))
                 if claim_id:
                     pipe.hset(claims, seat, json.dumps(answer))
+                pipe.hset(self.key("broadcast-generations"), seat, grant.generation)
 
-            return (writes if changed or claim_id else None), found
+            return (writes if changed or claim_id or grant.generation > admitted else None), found
 
-        return self._transact([records, claims, self.key("broadcasts")], decide)
+        return self._transact([records, claims, self.key("broadcasts"), self.key("broadcast-generations")], decide)
+
+    def _fence(self, pipe, grant: Registration) -> int:
+        """The highest generation this seat has claimed with; an older attempt is refused before it reads anything."""
+        admitted = int(pipe.hget(self.key("broadcast-generations"), grant.seat_id) or 0)
+        if admitted > grant.generation:
+            raise SwarmError("stale_generation")
+        return admitted
 
     def acknowledge(self, token: str, broadcast_id: str, revision: int) -> bool:
         """False for a duplicate acknowledgement, which leaves the delivery record unchanged and is only counted."""
@@ -290,20 +304,19 @@ class FleetBroadcasts:
         records = self.key("broadcast-deliveries", grant.seat_id)
 
         def decide(pipe):
+            self._fence(pipe, grant)
             raw = pipe.hget(records, broadcast_id)
             record = json.loads(raw) if raw else None
             if record is None or record["revision"] < revision:
                 raise SwarmError("not_delivered")
             if record["revision"] > revision:
                 raise SwarmError("stale_revision")
-            if record["generation"] > grant.generation:
-                raise SwarmError("stale_generation")
             if record["acked"]:
                 return (lambda pipe: pipe.hincrby(self.key("broadcast-duplicate-acks"), grant.seat_id)), False
             acked = {**record, "acked": True, "execution_id": grant.execution_id, "generation": grant.generation}
             return (lambda pipe: pipe.hset(records, broadcast_id, json.dumps(acked))), True
 
-        return self._transact([records], decide)
+        return self._transact([records, self.key("broadcast-generations")], decide)
 
     def delivery(self, seat: str, broadcast_id: str) -> dict | None:
         raw = self.redis.hget(self.key("broadcast-deliveries", seat), broadcast_id)
