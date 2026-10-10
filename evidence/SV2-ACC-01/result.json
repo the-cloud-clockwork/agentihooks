@@ -30,6 +30,12 @@
     "committed": "Redis WATCH/MULTI transaction on the fleet-sessions and fleet-seats hashes",
     "externally_verified": "None; no production writer and no live rollout yet"
   },
+  "recovery_contract": {
+    "obligation": "Registry recovery from persisted state preserves old aliases and current ownership generations",
+    "case": "T-SV2-ACC-01-C, evidence/SV2-ACC-01/c-result.json",
+    "test": "tests/test_swarm_v2_registry.py::test_recovery_from_persisted_state_keeps_aliases_and_generations",
+    "result": "After swarm export, a full Redis flush and restore, the alias fixture-eng-1 still resolves to its canonical name, the seat stays with eng-1@fixture at generation 2, the generation 1 attempt is refused, and an identical replay writes nothing"
+  },
   "validation": {
     "red": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37934418950 on the tests-only commit b8232c19 failed: the registry module did not exist",
     "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37937300304",
@@ -40,6 +46,11 @@
     "sonar": "One python:S4828 hotspot on the signal 0 existence probe reviewed as safe",
     "review": "Standards and Spec readers closed after three rounds",
     "local": "No local tests or mutation ran; static prepush passed on 5c700c83"
+  },
+  "integrated_validation": {
+    "commit": "6d9e41858ad6c6b3799425927d71552c83c08072",
+    "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37940828264",
+    "result": "After merging dev into the branch, all twelve Python unit shards, lint, coverage ratchet, Sonar, mutation and the required gate passed with the registry, broadcast and terminate code unchanged"
   },
   "measurements": {
     "fleet_registry_stale_records": {
