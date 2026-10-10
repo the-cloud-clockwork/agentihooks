@@ -357,13 +357,23 @@ def launcher(namespace=ANTON, table=None):
     return LocalHerdrRuntime(None, namespace=lambda: namespace, table=lambda: rows)
 
 
-def test_a_local_launch_stores_its_process_namespace_number_and_start_time():
+@pytest.mark.parametrize("pid", [PID, 1])
+def test_a_local_launch_stores_its_process_namespace_number_and_start_time(pid):
     store = launch_store()
-    started = launcher().admit(store, "sw", launched(store))
+    table = {pid: proc(pid=pid)}
+    started = launcher(table=table).admit(store, "sw", launched(store, pid))
     stored = store.execution("sw", started.execution_id)
     assert stored.runtime_backend == LOCAL
-    assert stored.runtime_target == {"process_namespace": ANTON, "pid": PID, "pid_start": STARTED}
-    assert process.resolve(stored, ANTON, {PID: proc()}) == PID
+    assert stored.runtime_target == {"process_namespace": ANTON, "pid": pid, "pid_start": STARTED}
+    assert process.resolve(stored, ANTON, table) == pid
+
+
+def test_a_local_relaunch_replaces_the_execution_it_names_on_the_seat():
+    store = launch_store()
+    first = launcher().admit(store, "sw", launched(store))
+    second = launcher().admit(store, "sw", launched(store), first.execution_id)
+    assert (second.seat, second.generation) == ("eng-1@sw", 2)
+    assert store.execution_occupants("sw")["eng-1@sw"].execution_id == second.execution_id
 
 
 @pytest.mark.parametrize(
@@ -374,6 +384,7 @@ def test_a_local_launch_stores_its_process_namespace_number_and_start_time():
         (ANTON, {PID: proc(start=0)}, PID, "start time"),
         (ANTON, None, None, "process number and start time"),
         (ANTON, None, True, "process number and start time"),
+        (ANTON, {-PID: proc(pid=-PID)}, -PID, "process number and start time"),
         ("", {}, None, "process namespace, process number and start time"),
     ],
 )

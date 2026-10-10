@@ -2,11 +2,12 @@
 
 import subprocess
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from typing import Any
 
 from hooks.proc import Process, processes
 from scripts.swarm.runtime import HerdrRuntime
-from scripts.swarm.store import AgentRecord
+from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import SpawnError
 from scripts.swarm_v2.runtime import process
 from scripts.swarm_v2.runtime.base import (
@@ -54,6 +55,13 @@ class LocalHerdrRuntime:
         except SpawnError as exc:
             return _failed("spawn", exc)
         return Outcome("spawn", Status.OK, LOCAL, placed)
+
+    def admit(self, store: RedisStore, slug: str, agent: AgentRecord, previous_execution_id: str = "") -> AgentRecord:
+        pid = agent.profile_decision.get("validation", {}).get("pid")
+        target = process.launch_target(pid, self.namespace(), self.table())
+        return store.start_execution(
+            slug, replace(agent, runtime_backend=LOCAL, runtime_target=target), previous_execution_id
+        )
 
     def observe(self, agent: AgentRecord) -> Outcome:
         refused = foreign(self, "observe", agent)
