@@ -125,6 +125,18 @@ def test_fleet_slots_need_redis():
         assert acc.fleet_held({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}) == {}
 
 
+def test_fleet_slots_fail_open_when_redis_breaks_mid_read():
+    import fakeredis
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    with (
+        patch("hooks._redis.get_redis", return_value=redis),
+        patch.object(redis, "scan_iter", side_effect=RedisConnectionError("down")),
+    ):
+        assert acc.fleet_held({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}) == {}
+
+
 def test_fleet_slots_are_read_from_the_account_store():
     import fakeredis
 
