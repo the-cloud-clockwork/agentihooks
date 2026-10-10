@@ -77,28 +77,10 @@ def test_a_disabled_placement_backend_rolls_placed_spawns_back_to_local():
     assert router.spawn_backend(request("eng")) == LOCAL
 
 
-def test_the_tick_runtime_places_engineer_and_ci_spawns_on_kubernetes_and_keeps_the_rest_local():
-    herdr, remote = Herdr(), Remote()
-    runtime = routed({}, herdr, kubernetes=remote)
-    for lane, name, task in (
-        ("eng", "e1", {}),
-        ("ci", "c1", {}),
-        (MASTER, "m1", {}),
-        ("plan", "p1", {}),
-        ("eng", "f1", {"profile": "frontend"}),
-    ):
-        placed = runtime.spawn(CONFIG, lane, name, {"id": "t1", **task})
-        assert placed.placement == (BACKEND if name in ("e1", "c1") else "")
-    assert remote.spawned == ["e1", "c1"]
-    assert herdr.spawned == ["m1", "p1", "f1"]
-    assert runtime.router.runtimes[BACKEND] is remote
-
-
-def test_the_tick_runtime_spawns_everything_locally_when_kubernetes_is_disabled():
-    herdr, remote = Herdr(), Remote()
-    runtime = routed({"AGENTIHOOKS_RUNTIME_DISABLED": BACKEND}, herdr, kubernetes=remote)
-    runtime.spawn(CONFIG, "eng", "e1", {"id": "t1"})
-    assert (remote.spawned, herdr.spawned) == ([], ["e1"])
+def test_the_tick_runtime_refuses_a_kubernetes_runtime_without_a_distributed_launch():
+    with pytest.raises(ValueError) as raised:
+        routed({}, Herdr(), kubernetes=Remote())
+    assert str(raised.value) == "a Kubernetes runtime needs a distributed launch"
 
 
 def test_the_tick_runtime_without_kubernetes_keeps_every_spawn_local():
@@ -180,14 +162,6 @@ def test_the_kubernetes_runtime_answers_every_other_operation_unsupported():
     }
     for operation, call in calls.items():
         assert call() == Outcome(operation, Status.UNSUPPORTED, BACKEND, None, f"kubernetes lacks {operation}")
-
-
-def test_the_tick_raises_a_refused_kubernetes_spawn_as_a_spawn_error():
-    remote = KubernetesRuntime(Controller(Phase.REFUSED).execute, launch)
-    runtime = routed({}, Herdr(), kubernetes=remote)
-    with pytest.raises(SpawnError) as raised:
-        runtime.spawn(CONFIG, "eng", "e1", {"id": "t1", "execution_id": "exe-1", "generation": 2})
-    assert (str(raised.value), raised.value.status) == ("spawn operation op-1 is refused", "refused")
 
 
 class Launcher:

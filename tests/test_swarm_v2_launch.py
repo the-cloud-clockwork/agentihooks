@@ -2,11 +2,13 @@ import json
 import subprocess
 import sys
 from dataclasses import replace
+from functools import partial
 
 import pytest
 
 from scripts.swarm.keyspace import ROOT
-from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
+from scripts.swarm.tick import Placed
 from scripts.swarm_v2 import broadcast_bridge
 from scripts.swarm_v2 import launch as launch_module
 from scripts.swarm_v2.accounts import OCCUPIED, RESERVED, AccountCapacity, Slot
@@ -15,6 +17,7 @@ from scripts.swarm_v2.controller import Controller
 from scripts.swarm_v2.launch import DistributedLaunch, Launch, LaunchTerms, WorkerHomeCommand
 from scripts.swarm_v2.registry import CLOSED, LIVE, FleetRegistry, Scope, Session
 from scripts.swarm_v2.runtime.base import Capability, Outcome, Placement, RuntimeRouter, SpawnRequest, Status
+from scripts.swarm_v2.runtime.routed import routed
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
@@ -548,3 +551,25 @@ def test_the_swarm_config_keeps_its_api_address(world):
     assert world.store.config(SLUG).api_url == ""
     world.store.update(SLUG, api_url=OTHER_API)
     assert world.store.config(SLUG).api_url == OTHER_API
+
+
+class Herdr:
+    def __init__(self):
+        self.spawned = []
+
+    def spawn(self, config, lane, name, task):
+        self.spawned.append(name)
+        return Placed(f"pane-{name}", "claude")
+
+
+def test_the_tick_runtime_launches_placed_spawns_with_the_swarm_api_address(world):
+    herdr, name = Herdr(), world.store.next_name(SLUG, "eng")
+    runtime = routed({}, herdr, kubernetes=world.runtime, launch=partial(world.launcher.from_tick, terms=world.terms))
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+
+    assert runtime.spawn(config, "eng", name, {"id": "task", "seat": FIRST}) == f"placed-{name}"
+    assert runtime.spawn(config, MASTER, "m1", {"id": "task"}) == Placed("pane-m1", "claude")
+
+    [sent] = world.runtime.requests
+    assert (sent.name, sent.task["endpoints"]) == (name, {broadcast_bridge.API_URL: OTHER_API})
+    assert herdr.spawned == ["m1"]

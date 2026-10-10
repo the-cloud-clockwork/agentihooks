@@ -2469,6 +2469,33 @@ def test_set_refuses_bad_scaling_settings(env, capsys, pair, reason):
     assert store.config("sw") == before
 
 
+def test_set_stores_the_swarm_api_address_and_clears_it(env, capsys):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    assert store.config("sw").api_url == ""
+    assert run("sw", "set", "api-url=https://swarm.example.test:8443") == 0
+    assert store.config("sw").api_url == "https://swarm.example.test:8443"
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["api_url"] == "https://swarm.example.test:8443"
+    assert run("sw", "set", "api-url=http://swarm-api.agentihooks-swarm.svc:8780") == 0
+    assert store.config("sw").api_url == "http://swarm-api.agentihooks-swarm.svc:8780"
+    assert run("sw", "set", "api-url=") == 0
+    assert store.config("sw").api_url == ""
+
+
+@pytest.mark.parametrize(
+    "value", ["ftp://swarm.example.test", "https://", "swarm.example.test", "https://operator@swarm.example.test"]
+)
+def test_set_refuses_an_api_address_that_is_not_a_plain_web_address(env, capsys, value):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    before = store.config("sw")
+    assert run("sw", "set", f"api-url={value}") == 1
+    assert capsys.readouterr().err.strip() == (
+        "swarm: api-url takes an http or https address with a host and no credentials"
+    )
+    assert store.config("sw") == before
+
+
 def test_list_and_status_header_show_the_scaling_mode(env, capsys):
     run("sw", "create", "--repo", "/repo")
     run("sw", "set", "scaling=manual")

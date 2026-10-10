@@ -22,6 +22,7 @@ from scripts.swarm_v2.runtime.base import (
 from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 
 Launcher = Callable[[SpawnRequest], Outcome]
+NO_LAUNCH = "a Kubernetes runtime needs a distributed launch"
 
 
 class RoutedRuntime:
@@ -74,6 +75,8 @@ def routed(
     kubernetes: Runtime | None = None,
     launch: Launcher | None = None,
 ) -> RoutedRuntime:
+    if kubernetes is not None and launch is None:
+        raise ValueError(NO_LAUNCH)
     herdr = HerdrRuntime() if herdr is None else herdr
     runtimes = [LocalHerdrRuntime(herdr), *([kubernetes] if kubernetes else [])]
     placement = Placement(kubernetes.backend) if kubernetes else None
