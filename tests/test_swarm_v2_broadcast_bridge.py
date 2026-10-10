@@ -13,7 +13,7 @@ import pytest
 from hooks import config, hook_manager
 from hooks.context import broadcast as hb
 from scripts.swarm_v2 import broadcast_bridge, broadcasts, worker_home
-from tests.test_swarm_v2_broadcasts import CHANNELS, LOCAL, REMOTE, SLUG
+from tests.test_swarm_v2_broadcasts import CHANNELS, LOCAL, REMOTE, SLUG, Epoch
 from tests.test_swarm_v2_broadcasts_api import EXPIRES_MS, Fleet, foreign, forged
 
 pytestmark = pytest.mark.unit
@@ -30,6 +30,7 @@ def world(monkeypatch, tmp_path):
     found = Fleet(monkeypatch)
     monkeypatch.setattr(hb, "_broadcast_path", lambda: tmp_path / "broadcast.json")
     monkeypatch.setattr(hb, "_sessions_path", lambda: tmp_path / "active-sessions.json")
+    monkeypatch.setattr(hb, "datetime", Epoch)
     monkeypatch.setattr("scripts.swarm.store.connect", no_redis)
     return found
 
