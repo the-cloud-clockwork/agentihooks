@@ -1,5 +1,4 @@
 import os
-import re
 import signal
 import subprocess
 import sys
@@ -120,12 +119,15 @@ def stop_or_report_stack(proc, stderr, timeout):
 
 
 class StopOrReportStack(unittest.TestCase):
-    def test_a_child_that_ignores_sigterm_fails_with_its_stack_and_signal_state(self):
+    def setUp(self):
+        core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
+
+    def test_a_child_that_blocks_sigterm_fails_with_its_stack_and_signal_state(self):
         ready = core.LEDGER_DIR / "hang.ready"
         ready.unlink(missing_ok=True)
         code = (
             "import signal, sys, time\n"
-            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})\n"
             "def hang():\n"
             "    open(sys.argv[1], 'w').close()\n"
             "    time.sleep(60)\n"
@@ -151,8 +153,8 @@ class StopOrReportStack(unittest.TestCase):
         self.assertIn("Fatal Python error: Aborted", message)
         self.assertIn("in hang", message)
         self.assertIn(f"exit code after SIGABRT: {-signal.SIGABRT}", message)
-        ignored = int(re.search(r"SigIgn:\s+([0-9a-f]+)", message).group(1), 16)
-        self.assertTrue(ignored & (1 << (signal.SIGTERM - 1)))
+        self.assertRegex(message, r"SigBlk:\s+0*4000\n")
+        self.assertRegex(message, r"ShdPnd:\s+0*4000\n")
 
 
 class Watch(unittest.TestCase):
