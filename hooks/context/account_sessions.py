@@ -17,6 +17,31 @@ API_MARKER = "AH_ROUTE_API"
 API_ACCOUNT = "api"
 _SHELLS = frozenset({"sh", "bash", "dash", "zsh", "fish", "ksh"})
 _PROC = Path("/proc")
+VALUE_FLAGS = frozenset(
+    {
+        "-c",
+        "--config",
+        "--enable",
+        "--disable",
+        "--remote",
+        "--remote-auth-token-env",
+        "-i",
+        "--image",
+        "-m",
+        "--model",
+        "--local-provider",
+        "-p",
+        "--profile",
+        "-s",
+        "--sandbox",
+        "-C",
+        "--cd",
+        "--add-dir",
+        "-a",
+        "--ask-for-approval",
+    }
+)
+NON_INTERACTIVE = frozenset({"exec", "app-server", "mcp-server"})
 
 
 def account_from_names(names: Iterable[str], prefix: str = TOKEN_PREFIX) -> str:
@@ -129,11 +154,18 @@ def _is_codex(pid: int, proc: Path) -> bool:
     return bool(argv) and (_comm(pid, proc) == "codex" or Path(argv[0]).name == "codex")
 
 
+def _codex_positionals(argv: list[str]) -> list[str]:
+    rest = argv[1:]
+    while rest and rest[0].startswith("-"):
+        rest = rest[2:] if rest[0] in VALUE_FLAGS else rest[1:]
+    return rest
+
+
 def _is_interactive_codex(pid: int, proc: Path) -> bool:
     if not _is_codex(pid, proc):
         return False
     argv = _cmdline(pid, proc)
-    if "app-server" in argv[0] or (len(argv) > 1 and argv[1] in ("exec", "app-server", "mcp-server")):
+    if "app-server" in argv[0] or NON_INTERACTIVE.intersection(_codex_positionals(argv)[:1]):
         return False
     return _comm(_ppid(pid, proc), proc) != "codex"
 

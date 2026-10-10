@@ -1,7 +1,7 @@
 import json
 import os
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -11,6 +11,7 @@ FIVE_HOUR_MINUTES = 300
 TAIL_BYTES = 512 * 1024
 RECENT_ROLLOUTS = 8
 SESSION_ID_LENGTH = 36
+DEFAULT_FAMILY = (None, "codex")
 
 
 @dataclass(frozen=True)
@@ -19,9 +20,12 @@ class CodexQuota:
     plan_type: str
     five_hour: QuotaWindow = field(default_factory=QuotaWindow)
     seven_day: QuotaWindow = field(default_factory=QuotaWindow)
+    reached: str = ""
 
     @property
     def state(self) -> str:
+        if self.reached:
+            return "BLOCKED"
         windows = [w for w in (self.five_hour, self.seven_day) if w.used is not None]
         if not windows:
             return "UNKNOWN"
@@ -32,6 +36,14 @@ class CodexQuota:
     def highest_used(self) -> float | None:
         used = [w.used for w in (self.five_hour, self.seven_day) if w.used is not None]
         return max(used) if used else None
+
+    def state_at(self, now: float) -> str:
+        return replace(self, five_hour=_current(self.five_hour, now), seven_day=_current(self.seven_day, now)).state
+
+
+def _current(window: QuotaWindow, now: float) -> QuotaWindow:
+    passed = window.resets_at is not None and window.resets_at <= now
+    return QuotaWindow(used=0.0) if passed else window
 
 
 def codex_home(environ: dict[str, str]) -> Path:
@@ -57,14 +69,16 @@ def parse_event(line: str) -> CodexQuota | None:
     limits = payload.get("rate_limits") if isinstance(payload, dict) else None
     if not isinstance(limits, dict):
         return None
-    windows = dict(w for w in (_window(limits.get("primary")), _window(limits.get("secondary"))) if w)
-    if not windows:
+    family = [limits.get("primary"), limits.get("secondary")] if limits.get("limit_id") in DEFAULT_FAMILY else []
+    windows = dict(w for w in map(_window, family) if w)
+    reached = str(limits.get("rate_limit_reached_type") or "")
+    if not windows and not reached:
         return None
     try:
         observed = datetime.fromisoformat(str(event.get("timestamp", "")).replace("Z", "+00:00")).timestamp()
     except ValueError:
         return None
-    return CodexQuota(observed_at=observed, plan_type=str(limits.get("plan_type") or "?"), **windows)
+    return CodexQuota(observed_at=observed, plan_type=str(limits.get("plan_type") or "?"), reached=reached, **windows)
 
 
 def _last_in(path: Path) -> CodexQuota | None:
