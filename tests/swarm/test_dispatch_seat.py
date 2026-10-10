@@ -122,6 +122,31 @@ def test_done_from_the_seat_names_every_open_trigger_one_per_line():
     ]
 
 
+HANDED = "dispatcher@a1b2c3-0001"
+
+
+@pytest.mark.parametrize("by", ["master@a1b2c3-0001", "engineer@a1b2c3-0002", "ledger", "dispatcher", None])
+def test_a_priority_the_dispatcher_handed_to_the_operator_is_no_trigger_while_others_stay(by):
+    handed = {**priority("pr2", "tasks/t9", "Release the seven held tasks"), "by": HANDED}
+    other = {**priority("pr3", "followups/f1", "Approve the lane cap"), "by": by}
+    assert dispatch_seat.triggers(doc(handed, other), NOW) == [
+        {"id": "pr3", "item": "followups/f1", "text": "Approve the lane cap", "minutes": 15}
+    ]
+
+
+def test_done_from_the_seat_passes_with_handed_priorities_open_and_refuses_with_an_unsettled_one():
+    store = swarm()
+    handed = [
+        {**priority(f"pr{n}", f"followups/f{n}", f"Rotate token {n}"), "by": HANDED.replace("0001", f"000{n}")}
+        for n in range(1, 4)
+    ]
+    assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, doc(*handed), NOW) == ""
+    unsettled = priority("pr9", "tasks/t9", "Unblock the deploy")
+    assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, doc(*handed, unsettled), NOW).splitlines()[1:] == [
+        "- The priority on tasks/t9 is unresolved after 15 minutes: Unblock the deploy"
+    ]
+
+
 @pytest.mark.parametrize("autonomy, age", [("full", 15 * MINUTE - 1), ("delegate", 15 * MINUTE)])
 def test_done_from_the_seat_passes_once_no_trigger_is_open(autonomy, age):
     store = swarm(autonomy)

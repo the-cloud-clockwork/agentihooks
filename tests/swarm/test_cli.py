@@ -181,14 +181,17 @@ def test_done_from_the_dispatcher_seat_ends_it_without_a_pull_request_once_its_t
     store.put_agent("sw", AgentRecord(seat, "dispatch", "dispatcher", seat="dispatcher@sw"))
     monkeypatch.setattr(cli.ledger_events, "view", lambda url: pytest.fail("a pull request was read"))
     stale = {"id": "pr1", "item": "questions/q1", "text": "Pick the release day", "at": 0}
+    handed = {"id": "pr2", "item": "followups/f1", "text": "Rotate the registry token", "at": 0, "by": seat}
     settled = ledger.state
-    ledger.state = lambda slug: {**settled(slug), "priorities": [stale]}
+    ledger.state = lambda slug: {**settled(slug), "priorities": [stale, handed]}
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", seat)
     capsys.readouterr()
     assert run("sw", "done") == 1
-    assert "dispatcher triggers are still open" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "dispatcher triggers are still open" in err and "Pick the release day" in err
+    assert "Rotate the registry token" not in err
     assert [a.state for a in store.agents("sw") if a.name == seat] == ["working"]
-    ledger.state = lambda slug: {**settled(slug), "priorities": [] if slug == "sw" else [stale]}
+    ledger.state = lambda slug: {**settled(slug), "priorities": [handed] if slug == "sw" else [stale]}
     inbox = InboxStore(store.redis)
     item = inbox.send("master@a1b2c3-0001", seat, "one more look")
     assert run("sw", "done") == 0
