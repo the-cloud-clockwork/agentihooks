@@ -455,6 +455,24 @@ def test_an_occupancy_is_judged_by_the_registry_of_the_swarm_before_its_first_sl
     assert world.capacity.slots(ACCOUNT) == [held, nested]
 
 
+def test_fleet_held_counts_what_a_local_process_table_cannot_see(world):
+    remote = world.running(HELD)
+    world.capacity.reserve(world.launch(FIRST), CAP + 2, TTL)
+    local = Scope("local", "inst-anton", "boot-anton/pid:[1]")
+    token = world.launch(SECOND)
+    world.capacity.reserve(token, CAP + 2, TTL)
+    world.fleet.register(replace(world.session(SECOND), scope=local), token)
+    world.capacity.occupy(token, local, world.session(SECOND).session_id)
+    world.capacity.freeze()
+
+    assert accounts.fleet_held(world.store, world.clock[0]) == {ACCOUNT: 2}
+    world.clock[0] += TTL
+    assert accounts.fleet_held(world.store, world.clock[0]) == {ACCOUNT: 1}
+    world.fleet.close(MACHINE, world.session(HELD).session_id, world.tokens[HELD])
+    assert accounts.fleet_held(world.store, world.clock[0]) == {}
+    assert remote.state == OCCUPIED
+
+
 class Ambiguous(Racing):
     """The commit lands but the reply is lost, as when the transport drops after Redis applied the write."""
 

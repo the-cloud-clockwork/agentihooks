@@ -10,8 +10,9 @@ from scripts.swarm import lease
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2.auth_context import MAX_TTL_SECONDS, Registration
-from scripts.swarm_v2.registry import CLOSED, LIVE, FleetRegistry, Scope, session_key
+from scripts.swarm_v2.registry import CLOSED, LIVE, FleetRegistry, Scope, Session, session_key
 from scripts.swarm_v2.registry import decode as decode_session
+from scripts.swarm_v2.runtime.base import LOCAL
 
 RESERVED, OCCUPIED, ENDED = "reserved", "occupied", "ended"
 WRITE_ATTEMPTS = 5
@@ -46,6 +47,29 @@ def decode(raw: str) -> Slot:
     return Slot(**json.loads(raw))
 
 
+def live_record(store: RedisStore, reader, slot: Slot) -> Session | None:
+    """The occupancy's registry record in its own swarm, unless that record is closed or gone."""
+    raw = reader.hget(store.key(slot.holder.partition("/")[0], "fleet-sessions"), slot.session)
+    record = decode_session(raw) if raw else None
+    return record if record is not None and record.state != CLOSED else None
+
+
+def fleet_held(store: RedisStore, now: int) -> dict[str, int]:
+    """Per account, the slots a local process table cannot see: every live reservation and every occupancy whose
+    registry record runs outside the local backend."""
+    held: dict[str, int] = {}
+    for key in store.redis.scan_iter(match=account_key("*")):
+        for slot in map(decode, store.redis.hvals(key)):
+            if slot.state == OCCUPIED:
+                record = live_record(store, store.redis, slot)
+                remote = record is not None and record.scope.backend != LOCAL
+            else:
+                remote = slot.counts(now)
+            if remote:
+                held[slot.account] = held.get(slot.account, 0) + 1
+    return held
+
+
 class AccountCapacity:
     """The authorization callback must validate a scoped launch grant on every call; the account comes from it."""
 
@@ -73,18 +97,13 @@ class AccountCapacity:
     def _owns(slot: Slot, grant: Registration) -> bool:
         return (slot.execution_id, slot.generation) == (grant.execution_id, grant.generation)
 
-    def _sessions_of(self, slot: Slot) -> str:
-        return self.store.key(slot.holder.partition("/")[0], "fleet-sessions")
-
     def _judge(self, reader, slots: dict[str, Slot]) -> dict[str, Slot]:
         """An occupancy whose registry record is closed or gone no longer counts; a closed record never revives, so
         the judgement needs no watch on the registry."""
         judged = {}
         for holder, slot in slots.items():
-            if slot.state == OCCUPIED:
-                raw = reader.hget(self._sessions_of(slot), slot.session)
-                if not raw or decode_session(raw).state == CLOSED:
-                    slot = replace(slot, state=ENDED)
+            if slot.state == OCCUPIED and live_record(self.store, reader, slot) is None:
+                slot = replace(slot, state=ENDED)
             judged[holder] = slot
         return judged
 
