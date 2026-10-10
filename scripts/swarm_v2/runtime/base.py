@@ -57,8 +57,8 @@ class Placement:
     lanes: frozenset[str] = frozenset(("eng", "ci"))
     local_profiles: frozenset[str] = frozenset(("frontend",))
 
-    def backend_for(self, request: SpawnRequest) -> str:
-        placed = request.lane in self.lanes and request.task.get("profile") not in self.local_profiles
+    def backend_for(self, lane: str, task: dict) -> str:
+        placed = task.get("profile") not in self.local_profiles and lane in self.lanes
         return self.backend if placed else LOCAL
 
 
@@ -125,14 +125,15 @@ class RuntimeRouter:
         disabled = [name.strip() for name in environ.get(DISABLED_VARIABLE, "").split(",") if name.strip()]
         return cls(runtimes, environ.get(BACKEND_VARIABLE) or LOCAL, disabled, placement)
 
-    def placed_backend(self, request: SpawnRequest | None = None) -> str:
-        if self.placement is not None and request is not None:
-            return self.placement.backend_for(request)
-        return self.default
+    def placed_backend(self, lane: str, task: dict) -> str:
+        return self.default if self.placement is None else self.placement.backend_for(lane, task)
+
+    def enabled_backend(self, wanted: str) -> str:
+        return LOCAL if wanted in self.disabled else wanted
 
     def spawn_backend(self, request: SpawnRequest | None = None) -> str:
-        wanted = self.placed_backend(request)
-        return LOCAL if wanted in self.disabled else wanted
+        wanted = self.default if request is None else self.placed_backend(request.lane, request.task)
+        return self.enabled_backend(wanted)
 
     def spawn(self, request: SpawnRequest, needs: Iterable[Capability] = ()) -> Outcome:
         backend = self.spawn_backend(request)

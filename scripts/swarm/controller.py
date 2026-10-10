@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 from scripts.swarm import lease
 from scripts.swarm.store import RedisStore, SwarmError, connect
 from scripts.swarm_v2.runtime.base import LOCAL as WORKSTATION_BACKEND
-from scripts.swarm_v2.runtime.base import SpawnRequest
 
 if TYPE_CHECKING:
     from scripts.swarm_v2.control_service import ControlService
@@ -62,16 +61,16 @@ class FencedRuntime:
         router = getattr(self.runtime, "router", None)
         return "" if getattr(router, "placement", None) is not None else NO_KUBERNETES
 
-    def placement_refusal(self, config, lane: str, task: dict) -> str:
+    def placement_refusal(self, lane: str, task: dict) -> str:
         if refused := self._mode_refusal():
             return refused
         if self.deployment == LOCAL:
             return ""
-        request, router = SpawnRequest(config, lane, "", task), self.runtime.router
-        wanted = router.placed_backend(request)
+        router = self.runtime.router
+        wanted = router.placed_backend(lane, task)
         if wanted == WORKSTATION_BACKEND:
             return WORKSTATION.format(lane=lane)
-        return DISABLED.format(backend=wanted) if router.spawn_backend(request) != wanted else ""
+        return DISABLED.format(backend=wanted) if router.enabled_backend(wanted) != wanted else ""
 
     def has_capacity(self, config) -> bool:
         lease.renew(self.store, self.slug, self.held)
@@ -81,7 +80,7 @@ class FencedRuntime:
 
     def spawn(self, config, lane, name, task):
         lease.renew(self.store, self.slug, self.held)
-        if refused := self.placement_refusal(config, lane, task):
+        if refused := self.placement_refusal(lane, task):
             raise SwarmError(refused)
         return self.runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
 

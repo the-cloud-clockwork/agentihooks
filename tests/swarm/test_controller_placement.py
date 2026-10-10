@@ -76,12 +76,11 @@ def test_seat_placement_refuses_the_dispatcher_and_passes_a_plain_runtime(store)
     from tests.swarm.test_tick import FakeRuntime
 
     held = lease.acquire(store, "sw", "anton")
-    config = store.config("sw")
     fenced = controller.FencedRuntime(store, "sw", held, placed_runtime(), "distributed")
-    assert seat_spawn.placed_elsewhere(config, fenced, dispatch_seat.LANE, {"id": dispatch_seat.SEAT}) == (
+    assert seat_spawn.placed_elsewhere(fenced, dispatch_seat.LANE, {}) == (
         f"the workstation hive spawns {dispatch_seat.LANE} work"
     )
-    assert seat_spawn.placed_elsewhere(config, FakeRuntime(), dispatch_seat.LANE, {"id": dispatch_seat.SEAT}) == ""
+    assert seat_spawn.placed_elsewhere(FakeRuntime(), dispatch_seat.LANE, {}) == ""
 
 
 @pytest.mark.parametrize(
@@ -101,7 +100,7 @@ def test_controller_without_a_kubernetes_placement_spawns_nothing(store, deploym
     runtime = controller.FencedRuntime(store, "sw", held, inner, deployment)
     config = store.config("sw")
     assert runtime.has_capacity(config) is False
-    assert runtime.placement_refusal(config, "eng", {"id": "t"}) == refusal
+    assert runtime.placement_refusal("eng", {"id": "t"}) == refusal
     with pytest.raises(SwarmError) as error:
         runtime.spawn(config, "eng", "one", {"id": "t"})
     assert str(error.value) == refusal
@@ -119,7 +118,7 @@ def test_local_controller_spawns_every_lane(store):
     assert runtime.has_capacity(config) is True
     inner.full = True
     assert runtime.has_capacity(config) is False
-    assert runtime.placement_refusal(config, "plan", {"id": "t"}) == ""
+    assert runtime.placement_refusal("plan", {"id": "t"}) == ""
     runtime.spawn(config, "plan", "one", {"id": "t"})
     assert inner.spawned == [("plan", "one", "t")]
 
@@ -132,11 +131,8 @@ def test_distributed_controller_refuses_a_disabled_kubernetes_backend(store):
     inner = placed_runtime()
     inner.router = RuntimeRouter([], disabled=["kubernetes"], placement=Placement("kubernetes"))
     runtime = controller.FencedRuntime(store, "sw", held, inner, "distributed")
-    config = store.config("sw")
-    assert runtime.placement_refusal(config, "eng", {"id": "t"}) == (
-        "the kubernetes runtime is disabled on this controller"
-    )
-    assert runtime.placement_refusal(config, "plan", {"id": "t"}) == "the workstation hive spawns plan work"
+    assert runtime.placement_refusal("eng", {"id": "t"}) == ("the kubernetes runtime is disabled on this controller")
+    assert runtime.placement_refusal("plan", {"id": "t"}) == "the workstation hive spawns plan work"
 
 
 def test_distributed_capacity_ignores_the_workstation_session_cap(store):
