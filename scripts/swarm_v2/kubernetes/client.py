@@ -13,6 +13,7 @@ from typing import Any, Protocol
 ACCOUNT = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 TIMEOUT_SECONDS = 10
 DELETABLE = ("pods", "services")
+NODES = "/api/v1/nodes"
 Opener = Callable[..., Any]
 
 
@@ -38,6 +39,8 @@ class PodApi(Protocol):
     def read_pod(self, name: str) -> dict | None: ...
 
     def list_pods(self, selector: str) -> list[dict]: ...
+
+    def ready_nodes(self) -> list[str] | None: ...
 
     def create_config_map(self, body: dict) -> dict: ...
 
@@ -98,6 +101,11 @@ def _answer(status: int, body: dict) -> dict:
     raise ApiRefused(status, body.get("reason", ""))
 
 
+def _ready(node: dict) -> bool:
+    conditions = node.get("status", {}).get("conditions", [])
+    return any(condition["type"] == "Ready" and condition["status"] == "True" for condition in conditions)
+
+
 class PodClient:
     """List calls carry no resourceVersion, so the API server answers from a quorum read."""
 
@@ -123,6 +131,16 @@ class PodClient:
     def list_pods(self, selector: str) -> list[dict]:
         query = urllib.parse.urlencode({"labelSelector": selector})
         return _answer(*self.http.send("GET", f"{self._path()}?{query}"))["items"]
+
+    def ready_nodes(self) -> list[str] | None:
+        """None when the nodes cannot be listed, so no Pod is judged lost on missing evidence."""
+        try:
+            status, answer = self.http.send("GET", NODES)
+        except ConnectionError:
+            return None
+        if status != 200:
+            return None
+        return [node["metadata"]["name"] for node in answer["items"] if _ready(node)]
 
     def list_services(self, selector: str) -> list[dict]:
         query = urllib.parse.urlencode({"labelSelector": selector})

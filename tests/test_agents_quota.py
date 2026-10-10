@@ -273,6 +273,7 @@ def test_quota_json_lists_every_row(monkeypatch, capsys):
             "kind": "subscription",
             "weight": None,
             "master": "",
+            "selected": False,
         }
     ]
 

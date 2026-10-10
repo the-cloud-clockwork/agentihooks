@@ -125,6 +125,20 @@ def test_a_second_service_cannot_take_a_held_controller(tmp_path):
     assert second.tick() is False
 
 
+def test_each_tick_runs_the_recovery_pass_only_while_the_controller_is_held(tmp_path):
+    store = _store()
+    key = _cs().launch_key(_environ(tmp_path))
+    service, passes = _cs().ControlService(store, SLUG, key, lambda: True), []
+    assert service.tick() is True
+    service.recover = lambda: passes.append(service.controller.held.epoch) or {}
+    assert service.tick() is True
+    assert passes == [service.controller.held.epoch]
+    other = _cs().ControlService(store, SLUG, key, lambda: True)
+    other.recover = lambda: passes.append("other") or {}
+    assert other.tick() is False
+    assert passes == [service.controller.held.epoch]
+
+
 def _admitted(service, store, seat="eng-1@" + SLUG, task="t1"):
     pod = {"pod_namespace": "swarm", "pod_name": f"worker-{task}"}
     record = AgentRecord(
