@@ -12,10 +12,15 @@ from typing import Any, Protocol
 
 ACCOUNT = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 TIMEOUT_SECONDS = 10
+DELETABLE = ("pods", "services")
 Opener = Callable[..., Any]
 
 
 class AlreadyExists(Exception):
+    pass
+
+
+class PreconditionFailed(Exception):
     pass
 
 
@@ -95,8 +100,8 @@ class PodClient:
     def __init__(self, http: KubeHttp, namespace: str) -> None:
         self.http, self.namespace = http, namespace
 
-    def _path(self, name: str = "") -> str:
-        path = f"/api/v1/namespaces/{self.namespace}/pods"
+    def _path(self, name: str = "", kind: str = "pods") -> str:
+        path = f"/api/v1/namespaces/{self.namespace}/{kind}"
         return f"{path}/{name}" if name else path
 
     def create_pod(self, body: dict) -> dict:
@@ -106,9 +111,30 @@ class PodClient:
         return _answer(status, answer)
 
     def read_pod(self, name: str) -> dict | None:
-        status, answer = self.http.send("GET", self._path(name))
-        return None if status == 404 else _answer(status, answer)
+        return self.read("pods", name)
 
     def list_pods(self, selector: str) -> list[dict]:
         query = urllib.parse.urlencode({"labelSelector": selector})
         return _answer(*self.http.send("GET", f"{self._path()}?{query}"))["items"]
+
+    def list_services(self, selector: str) -> list[dict]:
+        query = urllib.parse.urlencode({"labelSelector": selector})
+        return _answer(*self.http.send("GET", f"{self._path(kind='services')}?{query}"))["items"]
+
+    def read(self, kind: str, name: str) -> dict | None:
+        status, answer = self.http.send("GET", self._path(name, kind))
+        return None if status == 404 else _answer(status, answer)
+
+    def delete(self, kind: str, name: str, uid: str) -> bool:
+        """False when the name is gone; PreconditionFailed when the name now holds another object."""
+        if kind not in DELETABLE:
+            raise ValueError("cleanup deletes only pods and services")
+        options = {"apiVersion": "v1", "kind": "DeleteOptions", "preconditions": {"uid": uid}}
+        status, answer = self.http.send("DELETE", self._path(name, kind), options)
+        if status == 404:
+            return False
+        if status == 409:
+            raise PreconditionFailed(name)
+        if status not in (202, 204):
+            _answer(status, answer)
+        return True
