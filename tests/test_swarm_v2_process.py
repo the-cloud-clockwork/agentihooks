@@ -337,6 +337,58 @@ def test_a_local_target_may_carry_the_pid_start_time():
         )
 
 
+def launch_store():
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
+    return store
+
+
+def launched(store, pid=PID):
+    validation = {"pid": pid} if pid is not None else {}
+    return AgentRecord(
+        store.next_name("sw", "eng"), "eng", "t1", seat="eng-1@sw", profile_decision={"validation": validation}
+    )
+
+
+def launcher(namespace=ANTON, table=None):
+    rows = {PID: proc()} if table is None else table
+    return LocalHerdrRuntime(None, namespace=lambda: namespace, table=lambda: rows)
+
+
+def test_a_local_launch_stores_its_process_namespace_number_and_start_time():
+    store = launch_store()
+    started = launcher().admit(store, "sw", launched(store))
+    stored = store.execution("sw", started.execution_id)
+    assert stored.runtime_backend == LOCAL
+    assert stored.runtime_target == {"process_namespace": ANTON, "pid": PID, "pid_start": STARTED}
+    assert process.resolve(stored, ANTON, {PID: proc()}) == PID
+
+
+@pytest.mark.parametrize(
+    ("namespace", "table", "pid", "missing"),
+    [
+        ("", None, PID, "process namespace"),
+        (ANTON, {}, PID, "start time"),
+        (ANTON, {PID: proc(start=0)}, PID, "start time"),
+        (ANTON, None, None, "process number and start time"),
+        (ANTON, None, True, "process number and start time"),
+        ("", {}, None, "process namespace, process number and start time"),
+    ],
+)
+def test_a_local_launch_that_cannot_read_its_process_identity_is_refused_and_leaves_no_record(
+    namespace, table, pid, missing
+):
+    store = launch_store()
+    with pytest.raises(SwarmError) as refused:
+        launcher(namespace, table).admit(store, "sw", launched(store, pid))
+    assert str(refused.value) == f"local launch refused: its {missing} could not be read"
+    assert store.execution_registry.records("sw") == []
+    assert store.agents("sw") == []
+    assert store.execution_identity_conflicts_total("sw") == 0
+
+
 @pytest.fixture
 def remote_swarm():
     import fakeredis
