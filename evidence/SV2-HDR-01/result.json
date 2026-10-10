@@ -12,7 +12,8 @@
     "scripts.swarm_v2.herdr.capabilities.matrix(methods) names every remote operation the one-window experience needs (workspace create, list and close, tab create, pane launch by split, pane run, send-text, send-keys, wait-output, read, process-info, list, close, agent list, get, prompt, rename) as supported or unsupported with the missing socket method, and the commands machine forwarding never runs (update, server replacement, session management, interactive attach, local fallback)",
     "scripts.swarm_v2.herdr.capabilities.Qualifier.require(target, incarnation, operation) returns the argv herdr --machine <target> <command> or raises Incompatible; it caches one verdict per server incarnation, rechecks a new incarnation, refuses a replaced one and counts herdr_capability_mismatch_total by target and reason",
     "scripts.swarm_v2.herdr.capabilities.machine_probe(run) reads herdr --machine <target> status server, the local client status and, only for the same build, the bundled schema; transport failure raises Unreachable and is never cached",
-    "scripts.swarm_v2.image_attestation now requires surface_interest and detached_server_daemon with endpoint protocol generation one and health_check, plus pane.send_input which pane run calls; scripts.swarm_v2.image_probe starts herdr server in its own session like the supervisor"
+    "scripts.swarm_v2.image_attestation now requires surface_interest and detached_server_daemon with endpoint protocol generation one and health_check, plus pane.send_input which pane run calls; scripts.swarm_v2.image_probe starts herdr server in its own session like the supervisor",
+    "python -m scripts.swarm_v2.herdr.capabilities TARGET INCARNATION: the production admission check. It probes the saved machine through the pinned client, prints the verdict (target, incarnation, compatible, refusals, operation matrix) as JSON and exits 0 when every forwarding capability is present, 1 when the server is incompatible and 2 when the machine is unreachable or the target or incarnation is missing, so a launch path or operator learns before any remote terminal is promised"
   ],
   "supported_versions": {
     "herdr": "0.9.1 linux x86_64, sha256 2a02fed16beb651ef006e1d43f048f652ca4dc58ad053cd2d44450563d5c54b7, protocol 22, endpoint protocol generation 1, client and server the same build",
@@ -96,12 +97,24 @@
     "proof": "Case B refuses a server without surface_interest and a server outside its own session with no command other than the three status and schema reads."
   },
   "remaining_limitations": [
-    "Nothing calls Qualifier.require yet: the rejection contract holds at the command builder only; SV2-HDR-02 to SV2-HDR-05 wire it into the remote runtime.",
+    "The qualify command is the only production caller: remote runtime operations do not call Qualifier.require yet, so the rejection contract holds at the command builder and the admission check until SV2-HDR-02 to SV2-HDR-05 wire it into the remote runtime.",
     "herdr reports no server incarnation; the caller must pass the execution attempt id.",
     "agent prompt was not exercised live because no agent CLI ran in the proof pane; prompting was proven with pane send-text and send-keys.",
     "The live proof ran on the operator workstation over localhost SSH, not on an Anton worker Pod.",
     "Replay is verdict reuse per incarnation; SV2-HDR-01 defines no operation identity."
   ],
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2495",
-  "follow_ups": []
+  "follow_ups": [],
+  "obligations": {
+    "input_preparation": "tests/fixtures/swarm_v2/herdr-capabilities.json holds the compatible client and server pair captured from the pinned binary, a server missing machine forwarding capability (missing_forwarding_server) and a server outside its own session (session_member_server)",
+    "output_contract": "Case A and the live proof: every one window operation runs as herdr --machine TARGET COMMAND with no open TUI, and the live rows remote_installs and same_binary show no installation or server replacement",
+    "rejection_contract": "Case B: a missing capability refuses every operation and the only commands run are the three status and schema reads; update, server replacement, session management, attach and local fallback are unsupported in the matrix and never built",
+    "recovery_contract": "Case C and the live rows new_incarnation, restarted_status and restarted_workspace_list: a new incarnation is probed again and the replaced one is refused",
+    "mutation_scope": "Qualifier.require binds every remote command to one confirmed incarnation and refuses a replaced one; the live row same_incarnation shows one server process through every remote operation. The gate builds no attach, kill or server command, so a viewer detaching cannot cancel work; detachment itself was not exercised live",
+    "compatibility": "The preceding accepted protocol is the local herdr 0.9.1 runtime path held by image attestation (protocol 22, endpoint protocol generation one, health_check and the runtime socket methods). That local path is unchanged; attestation adds surface_interest, detached_server_daemon and pane.send_input. The live rows client_local_socket and stopped_workspace_list show a machine command never opens a local server and fails rather than falling back when the remote server is gone",
+    "authority": "Actor and scope come from the caller: the target is a saved machine the caller registered and the incarnation is the execution attempt id the supervisor issued. The gate grants nothing and never reads a display label",
+    "state": "See states: observed (live proof), accepted (cases A, B and C), committed (records on the branch) and externally verified (not yet on Anton) are recorded separately"
+  },
+  "rollout_safety": "Only the new remote path is gated: an incompatible server refuses remote operations while the local runtime path keeps its last qualified behaviour. The previous qualified image digest stays available because attestation never promotes an image whose herdr fails the contract.",
+  "data_safety": "authoritative_objects names none owned: remote servers, panes and saved machine profiles are runtime objects the gate never mutates, so rollback deletes nothing; only cached verdicts are dropped"
 }

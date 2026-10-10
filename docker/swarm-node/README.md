@@ -194,7 +194,10 @@ forwarding needs: endpoint protocol generation one, `surface_interest`,
 `herdr machine add` refuses any other server as not ready for saved machines; the
 supervisor and the probe both start `herdr server` in a new session.
 `scripts.swarm_v2.herdr.capabilities` (SV2-HDR-01) holds that contract and the
-remote operation matrix; `tests/integration/herdr_remote/run_remote_proof.sh`
+remote operation matrix; `python -m scripts.swarm_v2.herdr.capabilities TARGET
+INCARNATION` qualifies a saved machine before any remote terminal is promised
+(exit 0 compatible, 1 incompatible, 2 unreachable or missing arguments), and
+`tests/integration/herdr_remote/run_remote_proof.sh`
 proves it against the pinned binary behind a private sshd. Qualification reports
 `worker_image_qualified_targets`. Any refused target, or a manifest naming another
 commit, leaves the image unpromotable and nothing is pushed. The same job builds

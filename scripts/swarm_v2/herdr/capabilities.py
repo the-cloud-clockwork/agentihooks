@@ -1,5 +1,7 @@
 import json
+import os
 import subprocess
+import sys
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -42,6 +44,7 @@ STATUS_SERVER = ("status", "server", "--json")
 STATUS_CLIENT = ("status", "client", "--json")
 SCHEMA = ("api", "schema", "--json")
 PROBE_SECONDS = 30
+USAGE = "usage: python -m scripts.swarm_v2.herdr.capabilities TARGET INCARNATION"
 
 
 class Incompatible(RuntimeError):
@@ -180,3 +183,27 @@ class Qualifier:
 
     def herdr_capability_mismatch_total(self) -> int:
         return sum(self.mismatches.values())
+
+
+def main(argv: list[str], environ: dict[str, str]) -> int:
+    if len(argv) != 2:
+        print(USAGE, file=sys.stderr)
+        return 2
+    try:
+        verdict = Qualifier(machine_probe(runner(environ))).verdict(*argv)
+    except (Incompatible, Unreachable) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    report = {
+        "target": verdict.target,
+        "incarnation": verdict.incarnation,
+        "compatible": verdict.compatible,
+        "refusals": list(verdict.refusals),
+        "matrix": verdict.matrix,
+    }
+    print(json.dumps(report))
+    return 0 if verdict.compatible else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:], dict(os.environ)))
