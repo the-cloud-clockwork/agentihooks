@@ -2,6 +2,7 @@
 
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
@@ -17,6 +18,7 @@ from scripts.swarm_v2.runtime.base import Outcome, RuntimeRouter, SpawnRequest, 
 NOT_LAUNCHED = (Status.REFUSED, Status.UNAVAILABLE, Status.UNSUPPORTED)
 GRANT_SECONDS = 30
 NO_API_URL = "the swarm config has no API address"
+Target = Callable[[SpawnRequest], dict]
 
 
 class WorkerHomes(Protocol):
@@ -98,13 +100,17 @@ class DistributedLaunch:
             return Launch(admitted, grant, slot, outcome)
         return Launch(admitted, grant, slot, outcome, self.homes.hand(admitted, grant))
 
-    def from_tick(self, request: SpawnRequest, terms: LaunchTerms) -> Outcome:
-        api_url = request.config.api_url
+    def from_tick(self, request: SpawnRequest, terms: LaunchTerms, target: Target | None = None) -> Outcome:
+        api_url, backend = request.config.api_url, self.router.spawn_backend(request)
         if not api_url:
-            return Outcome("spawn", Status.REFUSED, self.router.spawn_backend(request), detail=NO_API_URL)
-        backend = self.router.spawn_backend(request)
+            return Outcome("spawn", Status.REFUSED, backend, detail=NO_API_URL)
         agent = AgentRecord(
-            request.name, request.lane, request.task["id"], seat=request.task["seat"], runtime_backend=backend
+            request.name,
+            request.lane,
+            request.task["id"],
+            seat=request.task["seat"],
+            runtime_backend=backend,
+            runtime_target=target(request) if target else {},
         )
         return self.spawn(request, agent, replace(terms, api_url=api_url), "").outcome
 

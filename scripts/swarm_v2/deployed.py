@@ -101,6 +101,9 @@ class Workers:
             },
         }
 
+    def target(self, request: SpawnRequest) -> dict:
+        return {"pod_namespace": self.policy["namespace"], "pod_name": f"swarm-{request.task['id']}"}
+
     def transport(self, environ: Mapping[str, str], slug: str) -> KubernetesTransport:
         return KubernetesTransport(pod_api(environ, self.policy["namespace"]), slug, PodTemplate(self.policy))
 
@@ -115,6 +118,8 @@ def tick_runtime(service, workers: Workers, environ: Mapping[str, str]) -> Route
     capacity, fleet = AccountCapacity(controller.store, slug, verify), FleetRegistry(controller.store, slug, verify)
     launcher = DistributedLaunch(controller, grants, capacity, fleet, None, PodGrants())
     kubernetes = KubernetesRuntime(controller.execute, workers.launch)
-    runtime = routed(environ, kubernetes=kubernetes, launch=partial(launcher.from_tick, terms=workers.terms))
+    runtime = routed(
+        environ, kubernetes=kubernetes, launch=partial(launcher.from_tick, terms=workers.terms, target=workers.target)
+    )
     launcher.router = runtime.router
     return runtime

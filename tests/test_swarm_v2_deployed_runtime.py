@@ -142,13 +142,18 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
         service.grants,
         runtime.router,
     )
-    assert runtime.launch.keywords == {"terms": LaunchTerms("claude-fixture", 2, 300_000, (PROJECT,), "swarm", API_URL)}
+    workers = runtime.launch.keywords["target"].__self__
+    assert runtime.launch.keywords == {
+        "terms": LaunchTerms("claude-fixture", 2, 300_000, (PROJECT,), "swarm", API_URL),
+        "target": workers.target,
+    }
     assert store.config(SLUG).api_url == API_URL
     assert (placed.placement, placed.harness, placed.profile) == (BACKEND, "claude", "general")
     [pod] = pods.created
     execution = pod["metadata"]["labels"][EXECUTION_LABEL]
     admitted = store.execution(SLUG, execution)
     assert (admitted.seat, admitted.runtime_backend) == (SEAT, BACKEND)
+    assert admitted.runtime_target == {"pod_namespace": "swarm-pod-proof", "pod_name": "swarm-t1"}
     assert lease.current(store, SLUG) is None
 
 
@@ -230,7 +235,9 @@ def test_a_profile_the_pod_policy_lacks_is_refused(tmp_path):
 
 def test_a_pod_policy_owned_by_another_swarm_is_refused(tmp_path):
     deployed = _deployed()
-    environ = _workers(tmp_path, **{deployed.POLICY_ENV: str(_policy(tmp_path, owner="agentihooks-swarm-other"))})
+    other = tmp_path / "other-policy.json"
+    other.write_text(json.dumps({**json.loads(POLICY.read_text()), "owner": "agentihooks-swarm-other"}))
+    environ = _workers(tmp_path, **{deployed.POLICY_ENV: str(other)})
 
     with pytest.raises(SwarmError) as refused:
         deployed.Workers.from_environ(environ, SLUG)
