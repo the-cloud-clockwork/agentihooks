@@ -169,6 +169,7 @@ def _metadata(policy: dict, launch: AdmittedLaunch, payload: str) -> dict:
             f"{DOMAIN}/swarm": launch.swarm_id,
             f"{DOMAIN}/task": launch.task_id,
             f"{DOMAIN}/template-version": version,
+            f"{DOMAIN}/provider-account": launch.credential_ref,
         },
         "annotations": {
             f"{DOMAIN}/seat": launch.seat_id,
@@ -276,7 +277,14 @@ def _spec(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
             {"name": "home", "emptyDir": {"sizeLimit": f"{profile['limits']['ephemeral_mib'] - TMP_MIB}Mi"}},
             {"name": "tmp", "emptyDir": {"sizeLimit": f"{TMP_MIB}Mi"}},
             {"name": "launch", "configMap": {"name": f"swarm-{launch.execution_id}-launch", "defaultMode": 0o444}},
-            {"name": "credential", "secret": {"secretName": launch.credential_ref, "defaultMode": 0o400}},
+            {
+                "name": "credential",
+                "secret": {
+                    "secretName": f"swarm-account-{launch.credential_ref}",
+                    "items": [{"key": "token", "path": "token"}],
+                    "defaultMode": 0o400,
+                },
+            },
         ],
     }
     if "runtime_class_name" in policy:

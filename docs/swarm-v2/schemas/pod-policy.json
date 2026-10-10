@@ -15,7 +15,7 @@
     "image_repository": {"type": "string", "maxLength": 200, "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?(/[a-z0-9]+([._-][a-z0-9]+)*)+$"},
     "brain_url": {"type": "string", "maxLength": 200, "pattern": "^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$"},
     "termination_grace_seconds": {"type": "integer", "minimum": 1, "maximum": 900},
-    "credentials": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/dns_label"}},
+    "credentials": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/account"}},
     "profiles": {
       "type": "object",
       "minProperties": 1,
@@ -38,6 +38,7 @@
   },
   "$defs": {
     "dns_label": {"type": "string", "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"},
+    "account": {"type": "string", "pattern": "^[a-z0-9]([a-z0-9-]{0,46}[a-z0-9])?$"},
     "label_value": {"type": "string", "pattern": "^[A-Za-z0-9]([A-Za-z0-9._-]{0,61}[A-Za-z0-9])?$"},
     "label_key": {"type": "string", "pattern": "^([a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?/)?[A-Za-z0-9]([A-Za-z0-9._-]{0,61}[A-Za-z0-9])?$"},
     "quantity": {
