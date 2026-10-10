@@ -1,16 +1,28 @@
 {
-  "tested_commit": "f65eea0158a095866491a154df033ad117ae649c",
+  "tested_commit": "f763bba1dda1ca0951fd1ee94f21522e0e42ab66",
   "evidence_class": "mocked fakeredis store, labelled node fixtures and the chart affinity for cases A to C; the worker registration and heartbeat ran live against a deployed controller in a kind cluster",
   "inputs": {
-    "tests/fixtures/swarm_v2/control-nodes.json": "cbed4bac3bbb847e4b34f45648459eab9fa18653103d923d31ec579ee1766ed3",
-    "deploy/helm/agentihooks-swarm/values.yaml": "255413e121fbfb13a872f4901a2d35d4326b1737979942a0198cc97963fe5b6a",
-    "deploy/helm/agentihooks-swarm/templates/controller.yaml": "de27fec4a494f81f5260ced633ad00442b3f84bddf80f8744a253fea48087aec",
-    "deploy/helm/agentihooks-swarm/templates/networkpolicy.yaml": "d367f42c22e7e93cdcc29f5f994c99fbdd335d0f5fe22b327107a0d6d85b7c5e",
-    "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh": "cde42a5a29411bac5f1ea8ef740e92bb3b8d3f23eb0ea20d63a11843c2ffb66b",
+    "tests/fixtures/swarm_v2/control-nodes.json": "b8d05e926dd1722cc6cfa084886dd583d2735676f9bf63c82e415300e4a00dca",
+    "deploy/helm/agentihooks-swarm/values.yaml": "170faadd74c409a8c99f71d6699a09926f50dfb02ec7fdecde67833cdb002709",
+    "deploy/helm/agentihooks-swarm/templates/controller.yaml": "ca5dc0cbd4fef104128325e4657363e3d9a6f33e119721dcd049021e31903120",
+    "deploy/helm/agentihooks-swarm/templates/ledger.yaml": "b41b867adbe244785a794c1da449aad34d155327679fd7c6e55b9f477bbe9d67",
+    "deploy/helm/agentihooks-swarm/templates/networkpolicy.yaml": "c11343b6924f305eebde0c06880fabd588ab8edba63cf9351c50da7567635519",
+    "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh": "5643cb3a3699f9fd115e4944537c7780002b70a4ef7ecf923c7925db4b0745a0",
     "Dockerfile": "69ca8e5b5dbd28d108a551583816570e76eab1ab0912b24a3b59fd745debca1d",
-    "scripts/swarm_v2/control_service.py": "ccaca48dcbae8feb580523ce5f262d45eb7eac36b979ad450516a66413c65a0e",
+    "scripts/swarm_v2/control_service.py": "8bebe4dd25324ce1aed71e89675992e595173f0ca9044677f09f8ab15273af70",
     "scripts/swarm/controller.py": "3488f42d0cf1319a5da73d4c814501ed2d33cb7c658575c2dbff6632d53b9879",
-    "tests/sv2_git01_cases.py": "c9e4228e0b110bd3ef96842104bbb77028864b1e576daf69478a6d0a790d67bd",
-    "tests/test_swarm_v2_control_service.py": "7c5f9d1df997ce660f0ebde8503443494a115bdfcb0683c5a65a0d3b72920b57"
+    "tests/sv2_git01_cases.py": "b9d7577cd12eba498980f25a7339dcaf627293d50b863147f80d9a5953fec524",
+    "tests/test_swarm_v2_control_service.py": "c0f18ff5a6b698da3d251b037b0de9d3ec1aa662888ee2b0affd1004d5124a33",
+    "tests/test_swarm_v2_git01_evidence.py": "1fd4190e61c963f5f68d8f70e6a1c6d637f6b9fd9feaec84ef2277c73503e71b",
+    "tests/test_swarm_chart_placement.py": "6bfa00e2590ceb954efb27fc3533ad076130928e51e886889d9c9b8d48f5395c"
+  },
+  "antoncore": {
+    "tested_commit": "1c8aa8e39a3252c48b32430a69185ce7b0a2a3fc",
+    "inputs": {
+      "k8s/values-overlays/agentihooks-swarm/values.yaml": "3c3c7105da0b9217c215a0d5cf359b000ffc246ecaf60c927c145cab0018a31f",
+      "k8s/manifests/agentihooks-swarm/launch-signing-key.yaml": "40c951469fd114bf13bc6719522a949923c3e16681328f0bc5f6db3477ab0435",
+      "tests/unit/agentihooks_swarm/test_swarm_control.py": "ea5d2266a34d52abda4b58e65aaebc580f1c036eafdf8c3560b72e547fa21cd5",
+      "tests/unit/agentihooks_swarm/test_swarm_stack.py": "ea8129084726763598303c7d642d29f59d1791e061049f04a08a4e77d9070720"
+    }
   }
 }
