@@ -302,6 +302,36 @@ def test_clearance_writer_mixed_with_a_runner_is_blocked(command, monkeypatch):
         check_local_tests(normalize_payload({"tool_name": "exec", "tool_input": {"cmd": command}}))
 
 
+MUTATION_GATE_PATHS = [
+    "python scripts/ci_mutation/__main__.py --base origin/dev",
+    "python3 scripts/ci_mutation/__main__.py --base origin/dev",
+    "python ./scripts/ci_mutation/__main__.py --base origin/dev",
+    "python /home/u/dev/agentihooks/scripts/ci_mutation/__main__.py --base origin/dev",
+    "python scripts/ci_mutation --base origin/dev",
+]
+
+
+@pytest.mark.parametrize("key", ["command", "cmd"])
+@pytest.mark.parametrize("command", MUTATION_GATE_PATHS)
+def test_mutation_gate_run_by_its_file_path_is_blocked(command, key, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    with pytest.raises(BlockAction, match="draft pull request"):
+        check_local_tests({"tool_name": "Bash", "tool_input": {key: command}})
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["python scripts/other.py", "python3 scripts/ci_mutation_notes.py", "python myscripts/ci_mutation/x.py"],
+)
+def test_unrelated_script_paths_pass(command, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    check_local_tests({"tool_name": "Bash", "tool_input": {"command": command}})
+
+
 def test_later_commands_and_substitutions_are_checked(monkeypatch):
     from hooks.context.local_test_guard import check_local_tests
 
