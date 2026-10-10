@@ -1,0 +1,107 @@
+{
+  "package": "SV2-HDR-01",
+  "package_complete": false,
+  "dependency": "SV2-KUB-05",
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2488",
+  "tested_commit": "b81bd919cd87f0c07053dfdd3405db29fa9a81db",
+  "status": "fixture-qualified and live-proven on a workstation; not yet proven on Anton",
+  "evidence_class": "mocked cases replay status and schema replies captured from the pinned herdr 0.9.1 binary; the live proof ran that binary behind a private localhost sshd on the operator workstation",
+  "interfaces": [
+    "scripts.swarm_v2.herdr.capabilities.qualify(target, incarnation, observation) returns a Verdict with refusals and the compatibility matrix",
+    "scripts.swarm_v2.herdr.capabilities.matrix(methods) names every remote operation the one-window experience needs (workspace create, list and close, tab create, pane launch by split, pane run, send-text, send-keys, wait-output, read, process-info, list, close, agent list, get, prompt, rename) as supported or unsupported with the missing socket method, and the commands machine forwarding never runs (update, server replacement, session management, interactive attach, local fallback)",
+    "scripts.swarm_v2.herdr.capabilities.Qualifier.require(target, incarnation, operation) returns the argv herdr --machine <target> <command> or raises Incompatible; it caches one verdict per server incarnation, rechecks a new incarnation, refuses a replaced one and counts herdr_capability_mismatch_total by target and reason",
+    "scripts.swarm_v2.herdr.capabilities.machine_probe(run) reads herdr --machine <target> status server, the local client status and, only for the same build, the bundled schema; transport failure raises Unreachable and is never cached",
+    "scripts.swarm_v2.image_attestation now requires surface_interest and detached_server_daemon with endpoint protocol generation one and health_check, plus pane.send_input which pane run calls; scripts.swarm_v2.image_probe starts herdr server in its own session like the supervisor"
+  ],
+  "supported_versions": {
+    "herdr": "0.9.1 linux x86_64, sha256 2a02fed16beb651ef006e1d43f048f652ca4dc58ad053cd2d44450563d5c54b7, protocol 22, endpoint protocol generation 1, client and server the same build",
+    "server_capabilities": {
+      "endpoint_protocol_generation": 1,
+      "surface_interest": true,
+      "health_check": true,
+      "detached_server_daemon": true
+    },
+    "client_capabilities": {
+      "endpoint_protocol_generation": 1,
+      "remote_host_bridge": true
+    }
+  },
+  "source_facts": [
+    "herdr v0.9.1 docs connecting-machines: saved machine connections need the server surface_interest and health_check capabilities; forwarding never installs, starts or restarts a server and never falls back to Local",
+    "herdr v0.9.1 src/remote/restart_policy.rs refuses saved machines when detached_server_daemon is false; src/platform/mod.rs sets it true only when the server leads its own session",
+    "herdr v0.9.1 src/cli/pane.rs: pane run sends pane.send_input"
+  ],
+  "authority": "The gate grants nothing: it only returns a machine argv for a target and incarnation the caller already holds, and refuses an empty or option-like target. The incarnation is the execution attempt id: SupervisionRuntime.start spawns herdr once per attempt and running() ends the attempt on herdr_failure.",
+  "authoritative_objects": "None owned. Remote herdr servers, panes and saved machine profiles are runtime objects; the gate never mutates them. Cached verdicts are a cache.",
+  "states": {
+    "observed": "Live proof: 39 asserted rows passed with exit 0 (evidence/SV2-HDR-01/live-proof.jsonl); a planted fault starting the server outside its own session failed machine_add, forwarded_status and workspace_create and exited 1.",
+    "accepted": "Cases A, B and C passed twice each with identical records on Python 3.11 and 3.12.",
+    "committed": "Records and live proof committed on the task branch.",
+    "externally_verified": "Not on Anton: the worker Pod terminal endpoint is SV2-HDR-02."
+  },
+  "validation": {
+    "red": "Tests run 38089859402 on the tests only head: ModuleNotFoundError scripts.swarm_v2.herdr",
+    "tests": "Tests run 38091370544 at b81bd919cd87f0c07053dfdd3405db29fa9a81db",
+    "mutation": "Mutation preflight 38091422015: capabilities 259 killed, 0 survived; image_probe 14 killed",
+    "lint": "ruff check, ruff format and size limits through python -m scripts.ci_prepush",
+    "review": "Standards and Spec readers, three rounds; every finding closed"
+  },
+  "measurements": {
+    "herdr_capability_mismatch_total": {
+      "a": 0,
+      "b": {
+        "missing_surface_interest": 2,
+        "session_member_server": 2,
+        "unforwarded_local_fallback": 2,
+        "unforwarded_update": 2
+      },
+      "c": 1
+    }
+  },
+  "cases": {
+    "a": "evidence/SV2-HDR-01/a-result.json",
+    "b": "evidence/SV2-HDR-01/b-result.json",
+    "c": "evidence/SV2-HDR-01/c-result.json",
+    "manifest": "evidence/SV2-HDR-01/manifest.json",
+    "live": "evidence/SV2-HDR-01/live-proof.jsonl"
+  },
+  "compatibility_matrix": {
+    "agent_attach": "unsupported: interactive attachment is not forwarded",
+    "agent_get": "supported",
+    "agent_list": "supported",
+    "agent_prompt": "supported",
+    "agent_rename": "supported",
+    "local_fallback": "unsupported: a machine command never falls back to the local server",
+    "pane_close": "supported",
+    "pane_launch": "supported",
+    "pane_list": "supported",
+    "pane_process_info": "supported",
+    "pane_read": "supported",
+    "pane_run": "supported",
+    "pane_send_keys": "supported",
+    "pane_send_text": "supported",
+    "pane_wait_output": "supported",
+    "server_replace": "unsupported: machine forwarding never installs, starts or restarts a server",
+    "session": "unsupported: session management is not forwarded",
+    "tab_create": "supported",
+    "update": "unsupported: local installation is not forwarded",
+    "workspace_close": "supported",
+    "workspace_create": "supported",
+    "workspace_list": "supported"
+  },
+  "rollback_rehearsal": {
+    "action": "Keep the previous qualified image digest: the attestation refuses any herdr target whose status lacks a forwarding capability, so an incompatible image is never promoted, and Qualifier.require refuses every remote operation against an incompatible server while the local runtime path is untouched.",
+    "test": "tests/contracts/image_manifest/test_image_attestation.py::test_each_herdr_incompatibility_names_its_refusal and tests/test_swarm_v2_herdr_capabilities.py::test_package_cases_match_their_committed_evidence",
+    "proof": "Case B refuses a server without surface_interest and a server outside its own session with no command other than the three status and schema reads."
+  },
+  "remaining_limitations": [
+    "Nothing calls Qualifier.require yet: the rejection contract holds at the command builder only; SV2-HDR-02 to SV2-HDR-05 wire it into the remote runtime.",
+    "herdr reports no server incarnation; the caller must pass the execution attempt id.",
+    "agent prompt was not exercised live because no agent CLI ran in the proof pane; prompting was proven with pane send-text and send-keys.",
+    "The live proof ran on the operator workstation over localhost SSH, not on an Anton worker Pod.",
+    "Replay is verdict reuse per incarnation; SV2-HDR-01 defines no operation identity."
+  ],
+  "pull_request": "pending",
+  "follow_ups": []
+}
