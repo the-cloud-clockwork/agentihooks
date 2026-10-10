@@ -94,7 +94,6 @@ def wait_key(account: str, harness: str) -> str:
 
 
 def latest_all(redis: "Redis", harness: str) -> dict[str, Observation]:
-    """Entries that no longer decode are skipped so one drifted record cannot hide every other account."""
     found = {}
     for account, raw in redis.hgetall(latest_key(harness)).items():
         try:
