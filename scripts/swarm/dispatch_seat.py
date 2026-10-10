@@ -2,15 +2,16 @@
 
 At full autonomy a trigger wakes the live seat through its inbox or spawns it through the seat spawn helper; below
 full, or once every trigger closes, the seat is marked finished and the reap pass retires it. A trigger is a priority
-the sweep left unresolved for fifteen minutes, a bottleneck no lane rule covers held for the lane split's ticks, or a
-red dev holding blocked tasks, where a freeze or focus may be worth proposing.
+the sweep left unresolved for fifteen minutes, unless a dispatcher seat raised it again under its own name to hand it
+to the operator, a bottleneck no lane rule covers held for the lane split's ticks, or a red dev holding blocked tasks,
+where a freeze or focus may be worth proposing.
 """
 
 import json
 from dataclasses import replace
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import bottleneck, dev_red, lane_split, lifetime, seat_spawn
+from scripts.swarm import bottleneck, dev_red, lane_split, lifetime, naming, seat_spawn
 from scripts.swarm.store import DISPATCH, FULL
 
 LANE = DISPATCH
@@ -33,8 +34,13 @@ def triggers(doc: dict, now_ms: int) -> list[dict]:
     return [
         {"id": row["id"], "item": row["item"], "text": row["text"], "minutes": (now_ms - row["at"]) // 60_000}
         for row in doc.get("priorities", [])
-        if now_ms - row["at"] >= STALE_MS
+        if now_ms - row["at"] >= STALE_MS and not handed(row)
     ]
+
+
+def handed(row: dict) -> bool:
+    found = naming.parse(row.get("by"))
+    return found is not None and found.kind == SEAT
 
 
 def uncovered(store, slug: str, now_ms: int) -> list[dict]:
