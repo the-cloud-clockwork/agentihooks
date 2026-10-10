@@ -11,7 +11,7 @@ Reads the latest assistant turn from the transcript JSONL file and XADDs each
 content block (thinking, tool_use, tool_result, text) to:
   agenticore:events:{AGENTICORE_CORRELATION_ID}
 
-A position cursor at agenticore:pos:eventrelay:{session_id} (or file fallback)
+A position cursor at agenticore:{installation_id}:pos:eventrelay:{session_id} (or file fallback)
 prevents duplicate emission across hook firings within a session.
 
 On Stop, emits a final {event_type: "done"} sentinel and EXPIREs the stream
@@ -42,13 +42,25 @@ def _stream_key(correlation_id: str) -> str:
     return f"{STREAM_KEY_PREFIX}:events:{correlation_id}"
 
 
+def _home() -> Path:
+    return Path(os.environ.get("AGENTIHOOKS_HOME", os.path.expanduser("~/.agentihooks")))
+
+
+def _installation_id() -> str:
+    try:
+        return json.loads((_home() / "installation.json").read_text())["installation_id"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return ""
+
+
 def _position_key(session_id: str) -> str:
-    return f"{STREAM_KEY_PREFIX}:pos:eventrelay:{session_id}"
+    scope = _installation_id()
+    middle = f"{scope}:" if scope else ""
+    return f"{STREAM_KEY_PREFIX}:{middle}pos:eventrelay:{session_id}"
 
 
 def _position_file(session_id: str) -> Path:
-    home = Path(os.environ.get("AGENTIHOOKS_HOME", os.path.expanduser("~/.agentihooks")))
-    return home / "event_relay_positions" / f"{session_id}.pos"
+    return _home() / "event_relay_positions" / f"{session_id}.pos"
 
 
 def _get_redis():
