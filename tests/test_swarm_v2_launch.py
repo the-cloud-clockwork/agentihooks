@@ -482,6 +482,9 @@ def test_a_spawn_that_did_not_launch_hands_no_grant(monkeypatch, status):
 
     assert world.homes.calls == []
     assert launch.handed is False
+    assert launch.agent.seat == FIRST
+    assert world.grants.verify(SLUG, launch.grant).execution_id == launch.agent.execution_id
+    assert launch.slot == Slot(ACCOUNT, f"{SLUG}/{FIRST}", launch.agent.execution_id, 1, RESERVED, 1000 + TTL)
 
 
 def test_an_ambiguous_spawn_still_hands_its_grant(monkeypatch):
