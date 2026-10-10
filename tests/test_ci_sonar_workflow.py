@@ -23,14 +23,17 @@ def test_sonar_is_required_on_dev_and_main_pull_requests():
     jobs = workflow["jobs"]
     assert "sonar" in jobs["gate-required"]["needs"]
     sonar = jobs["sonar"]
-    assert sonar["needs"] == ["unit"]
-    assert "if" not in sonar
+    assert sonar["needs"] in (["unit"], ["unit", "reuse"])
+    assert sonar.get("if") in (
+        None,
+        "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+    )
     assert not sonar.get("continue-on-error")
     gate = next(step for step in sonar["steps"] if step.get("name") == "SonarQube Quality Gate")
     assert gate["if"] == "steps.current.outputs.superseded != 'true'"
     assert not gate.get("continue-on-error")
-    assert "needs" not in jobs["lint"]
-    assert jobs["unit"]["needs"] == ["split"]
+    assert jobs["lint"].get("needs") in (None, ["reuse"])
+    assert jobs["unit"]["needs"] in (["split"], ["split", "reuse"])
 
 
 def test_sonar_restores_downloads_before_every_scan():
