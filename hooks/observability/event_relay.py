@@ -57,13 +57,10 @@ def _installation_id() -> str:
         return ""
 
 
-def _legacy_position_key(session_id: str) -> str:
-    return f"{STREAM_KEY_PREFIX}:pos:eventrelay:{session_id}"
-
-
 def _position_key(session_id: str) -> str:
     scope = _installation_id()
-    return f"{STREAM_KEY_PREFIX}:{scope}:pos:eventrelay:{session_id}" if scope else _legacy_position_key(session_id)
+    middle = f"{scope}:" if scope else ""
+    return f"{STREAM_KEY_PREFIX}:{middle}pos:eventrelay:{session_id}"
 
 
 def _position_file(session_id: str) -> Path:
@@ -90,8 +87,6 @@ def _load_position(session_id: str) -> int:
     if r is not None:
         try:
             v = r.get(_position_key(session_id))
-            if v is None:
-                v = r.get(_legacy_position_key(session_id))
             if v is not None:
                 return int(v)
         except Exception:
