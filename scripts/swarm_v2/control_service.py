@@ -126,7 +126,7 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
         raise ControlError(f"the control API needs {SWARM_ENV}")
     if not port.isdigit() or not 0 < int(port) <= MAX_PORT:
         raise ControlError(f"{PORT_ENV} must be a port number")
-    credential = environ.get(CREDENTIAL_ENV) or ""
+    credential = environ.get(CREDENTIAL_ENV)
     service = ControlService(
         store, slug, launch_key(environ), lambda: hive_auth.controller(store.redis, credential), owner=owner
     )

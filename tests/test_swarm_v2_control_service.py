@@ -385,3 +385,79 @@ def test_the_controller_loop_runs_as_before_without_an_api_port(tmp_path, monkey
     assert ticked == [store]
     assert lease.current(store, SLUG) is None
     assert [thread for thread in threading.enumerate() if thread.name == _cs().THREAD] == []
+
+
+@pytest.mark.parametrize("port", ["1", "65535"])
+def test_hosting_takes_each_end_of_the_tcp_range(tmp_path, port):
+    environ = {**_environ(tmp_path), _cs().PORT_ENV: port, _cs().SWARM_ENV: SLUG}
+
+    with pytest.raises(SwarmError, match="scoped controller grant"):
+        _cs().host(environ, _store(), "hive-fixture")
+
+
+def test_a_missing_controller_credential_never_matches_a_stored_grant(tmp_path):
+    store = _store()
+    store.redis.set(f"{hive_auth.PREFIX}:controller", hive_auth._digest("XXXX"))
+    environ = {**_environ(tmp_path), _cs().PORT_ENV: str(_free_port()), _cs().SWARM_ENV: SLUG}
+
+    with pytest.raises(SwarmError, match="scoped controller grant"):
+        _cs().host(environ, store, "hive-fixture")
+
+
+def test_the_api_thread_runs_the_server_loop(tmp_path, monkeypatch):
+    started = []
+
+    class Thread:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def start(self):
+            started.append(self.kwargs)
+
+    monkeypatch.setattr(_cs().threading, "Thread", Thread)
+    service = _cs().ControlService(_store(), SLUG, _cs().launch_key(_environ(tmp_path)), lambda: True)
+    server = service.serve("127.0.0.1", 0)
+    try:
+        assert started == [{"target": server.serve_forever, "name": _cs().THREAD, "daemon": True}]
+    finally:
+        server.server_close()
+
+
+def test_a_tick_observes_at_the_store_clock_in_seconds(tmp_path, monkeypatch):
+    service = _cs().ControlService(_store(), SLUG, _cs().launch_key(_environ(tmp_path)), lambda: True)
+    assert service.start()
+    observed = []
+    monkeypatch.setattr(_cs().lease, "now_ms", lambda store: 5_000_000)
+    monkeypatch.setattr(service, "observe", observed.append)
+
+    assert service.tick() is True
+
+    assert observed == [5000.0]
+
+
+def test_observe_returns_only_the_findings_the_controller_raised(tmp_path, monkeypatch):
+    store = _store()
+    service = _cs().ControlService(store, SLUG, _cs().launch_key(_environ(tmp_path)), lambda: True)
+    assert service.start()
+    _admitted(service, store)
+    _admitted(service, store, seat=f"eng-2@{SLUG}", task="t2")
+    finding = object()
+    answers = iter([finding, None])
+    monkeypatch.setattr(service.controller, "observe", lambda *args: next(answers))
+
+    assert service.observe(1.0) == [finding]
+
+
+def test_the_controller_loop_reports_a_hosting_refusal(monkeypatch, capsys):
+    from scripts.swarm import controller as loop
+
+    def refuse(*args):
+        raise _cs().ControlError("the control API needs AGENTIHOOKS_CONTROL_SWARM")
+
+    monkeypatch.setattr(_cs(), "host", refuse)
+    monkeypatch.setattr(loop, "connect", _store)
+    monkeypatch.setattr("scripts.operator_env.fill", lambda env: None)
+
+    assert loop.main(["run", "--once"]) == 1
+
+    assert capsys.readouterr().err == "controller: the control API needs AGENTIHOOKS_CONTROL_SWARM\n"
