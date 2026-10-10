@@ -373,8 +373,8 @@ def _materialize_attempt(request: Request, profiles: dict[str, str], roots: list
         return accepted
     started = time.monotonic()
     attempt.mkdir(mode=0o700)
-    layout = filesystem.load()
     try:
+        layout = filesystem.load()
         _write(attempt / PENDING, _json({"request": _document(request)}))
         execution = filesystem.allocate(request.root, request.attempt, layout)
         _seed(execution, request)

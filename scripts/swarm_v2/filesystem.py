@@ -139,7 +139,8 @@ def seed(execution: Execution, source: Path, name: str) -> Path:
     except LayoutError:
         shutil.rmtree(copy)
         raise
-    seal(copy)
+    if "seed" in execution.layout.immutable:
+        seal(copy)
     return copy
 
 
