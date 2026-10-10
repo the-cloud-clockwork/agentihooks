@@ -28,7 +28,7 @@
   "states": {
     "observed": "Drafts from operator credentials and launch grants; claims from subscribed seats",
     "accepted": "A draft whose credential or grant validates for this swarm and whose fields pass the draft schema",
-    "committed": "Redis WATCH/MULTI transaction on broadcasts, broadcast-history and broadcast-operations (publish); on broadcast-deliveries, broadcast-claims and broadcast-generations with broadcasts watched (claim); on broadcast-deliveries with broadcast-generations watched, plus broadcast-duplicate-acks inside the same transaction (acknowledge)",
+    "committed": "Redis WATCH/MULTI transaction on broadcasts, broadcast-history and broadcast-operations with broadcasts-frozen watched (publish); on broadcast-deliveries, broadcast-claims and broadcast-generations with broadcasts watched (claim); on broadcast-deliveries with broadcast-generations watched, plus broadcast-duplicate-acks inside the same transaction (acknowledge)",
     "externally_verified": "None; no hook delivers fleet broadcasts yet"
   },
   "recovery_contract": {
