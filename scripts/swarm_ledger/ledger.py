@@ -62,6 +62,7 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       difficulty (S, M or L), artifact (yes or no) or plan_slice of a task;
                                       phase moves it to another phase, from the master or a planner;
                                       plan_slice computes its plan lines from the published plan;
+                                      follow_up=yes marks it a follow up and clears its slice and plan lines;
                                       proof.KEY=VALUE and contract.KEY=VALUE pairs form one object, e.g.
                                       proof.command=C proof.output=O; contract pairs update only the keys they
                                       name, e.g. contract.push=yes
@@ -700,10 +701,10 @@ def cmd_task(args):
     for key in ("depends_on", "territory", "overlays"):
         if key in fields:
             fields[key] = comma_list(fields[key])
-    if "artifact" in fields:
-        if fields["artifact"] not in ("yes", "no"):
-            sys.exit("task set takes artifact=yes or artifact=no")
-        fields["artifact"] = fields["artifact"] == "yes"
+    for key in [key for key in ("artifact", "follow_up") if key in fields]:
+        if fields[key] not in ("yes", "no"):
+            sys.exit(f"task set takes {key}=yes or {key}=no")
+        fields[key] = fields[key] == "yes"
     if "difficulty_confidence" in fields:
         try:
             fields["difficulty_confidence"] = float(fields["difficulty_confidence"])

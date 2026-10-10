@@ -42,6 +42,7 @@ UPDATABLE = (
     "difficulty_confidence",
     "phase",
     "slice",
+    "follow_up",
 )
 BOOL_FIELDS = ("artifact", "follow_up")
 DIFFICULTIES = ("S", "M", "L")
@@ -508,6 +509,18 @@ def _move_plan(doc: dict, task: dict, fields: dict, phase: dict) -> None:
         fields.setdefault("slice", "")
 
 
+def _clear_slice(op: dict, ctx) -> bool:
+    fields = op["fields"]
+    if not fields.get("follow_up"):
+        return True
+    if fields.get("plan_slice") or fields.get("slice"):
+        task_id = op["item"].split("/")[1]
+        ctx.refused.append(f"task {task_id} is a follow up and names no slice: drop plan_slice or follow_up")
+        return False
+    fields.update(plan_slice="", plan_lines="", slice="")
+    return True
+
+
 def _set_slice(doc: dict, op: dict, ctx) -> bool:
     fields = op["fields"]
     supplied_slice = "plan_slice" in fields
@@ -518,7 +531,7 @@ def _set_slice(doc: dict, op: dict, ctx) -> bool:
     target = fields.get("phase", task.get("phase"))
     phase = next((p for p in doc.get("phases", []) if p["id"] == target), {})
     _move_plan(doc, task, fields, phase)
-    if not supplied_slice:
+    if not supplied_slice or fields.get("follow_up"):
         return True
     from scripts.swarm_ledger import plan_ranges
 
@@ -542,7 +555,7 @@ def apply(doc, op, ctx):
     op = {**op, "fields": ledger_plans.with_plan_slice(doc, op["fields"])}
     if "plan_slice" not in op["fields"]:
         op = {**op, "fields": dict(op["fields"])}
-    if not _set_slice(doc, op, ctx):
+    if not _clear_slice(op, ctx) or not _set_slice(doc, op, ctx):
         return False
     if refusal := _parent_refusal(doc, op):
         ctx.refused.append(refusal)
