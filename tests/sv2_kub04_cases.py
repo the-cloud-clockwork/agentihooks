@@ -345,7 +345,7 @@ def _rejection() -> tuple[dict, bool]:
         deletes_before_resume = len(world.api.deletes)
         world.grant["allowed"] = True
         resumed = world.cleanup(current).run(old.execution_id)
-        private = (kub02.launch()["credential_ref"], old.execution_id, replacement.execution_id, old.name)
+        private = (kub02.launch()["provider_account"], old.execution_id, replacement.execution_id, old.name)
         observed = {
             "waiting": waiting,
             "deletes_while_archive_pending": deletes_while_archive_pending,
