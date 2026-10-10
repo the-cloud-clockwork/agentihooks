@@ -552,7 +552,9 @@ def apply(doc, op, ctx):
         t["id"] == op["item"].split("/")[1] and t.get("plan_lines") for t in doc.get("tasks", [])
     ):
         return True
-    op = {**op, "fields": dict(ledger_plans.with_plan_slice(doc, op["fields"]))}
+    op = {**op, "fields": ledger_plans.with_plan_slice(doc, op["fields"])}
+    if "plan_slice" not in op["fields"]:
+        op = {**op, "fields": dict(op["fields"])}
     if not _set_slice(doc, op, ctx):
         return False
     if refusal := _parent_refusal(doc, op):

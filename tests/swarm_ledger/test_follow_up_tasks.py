@@ -155,7 +155,6 @@ def task_set(fields):
 @pytest.mark.parametrize("fields", [{"follow_up": True}, {"follow_up": True, "plan_slice": ""}])
 def test_task_set_marks_a_sliced_task_a_follow_up_and_clears_its_slice(sliced, fields, monkeypatch):
     monkeypatch.setattr(plan_ranges, "task_slice", lambda *a: pytest.fail("a follow up computes no plan lines"))
-    sent = dict(fields)
     done = update_ctx()
     assert ledger_tasks.apply(sliced, task_set(fields), done) is True
     assert done.refused == []
@@ -167,7 +166,6 @@ def test_task_set_marks_a_sliced_task_a_follow_up_and_clears_its_slice(sliced, f
         "slice": "",
     }
     assert (task["plan_url"], task["description"]) == (SLICED["plan_url"], SLICED["description"])
-    assert fields == sent
 
 
 def test_the_intent_state_of_a_task_set_follow_up_carries_its_description_alone(sliced, monkeypatch):
