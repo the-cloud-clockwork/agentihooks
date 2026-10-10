@@ -176,5 +176,5 @@
     "status": "running",
     "version": "0.9.1"
   },
-  "source": "herdr 0.9.1 linux x86_64, sha256 2a02fed16beb651ef006e1d43f048f652ca4dc58ad053cd2d44450563d5c54b7; status responses captured over saved machine forwarding to a private sshd, paths replaced"
+  "source": "herdr 0.9.1 linux x86_64, sha256 2a02fed16beb651ef006e1d43f048f652ca4dc58ad053cd2d44450563d5c54b7; captured by tests/integration/herdr_remote/run_remote_proof.sh with paths replaced: client from herdr status client --json, server from herdr --machine status server --json against a session leader server, session_member_server from herdr status server --json of a server outside its own session, methods from herdr api schema --json of the same binary; missing_forwarding_server is derived from server with surface_interest removed"
 }

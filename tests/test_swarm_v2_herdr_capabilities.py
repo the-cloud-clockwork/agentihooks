@@ -54,7 +54,10 @@ def test_the_matrix_names_every_operation_and_every_unforwarded_command():
             lambda s, c: s["capabilities"].update(endpoint_protocol_generation=2),
             "herdr server lacks endpoint_protocol_generation=1",
         ),
-        (lambda s, c: s.pop("capabilities"), "herdr server lacks endpoint_protocol_generation=1"),
+        (
+            lambda s, c: s.update(version="0.9.2"),
+            "herdr server 0.9.2 is not the client build 0.9.1, so its socket methods are unverified",
+        ),
         (lambda s, c: s.update(running=False), "herdr server is not running"),
         (lambda s, c: s.pop("running"), "herdr server is not running"),
         (lambda s, c: s.update(protocol=21), "herdr protocol is not 22"),
@@ -68,6 +71,43 @@ def test_each_incompatibility_names_its_refusal(change, refusal):
     server, client = copy.deepcopy(fx["server"]), copy.deepcopy(fx["client"])
     change(server, client)
     assert capabilities.refusals(observed(server, client)) == [refusal]
+
+
+def test_a_server_without_capabilities_lacks_every_forwarding_capability():
+    server = copy.deepcopy(cases.fixture()["server"])
+    server.pop("capabilities")
+    assert capabilities.refusals(observed(server)) == [
+        "herdr server lacks endpoint_protocol_generation=1",
+        "herdr server lacks surface_interest=true",
+        "herdr server lacks health_check=true",
+        "herdr server lacks detached_server_daemon=true",
+    ]
+
+
+def test_a_failed_probe_keeps_the_current_incarnation():
+    replies = [observed()]
+
+    def probe(target):
+        if not replies:
+            raise Unreachable("down")
+        return replies.pop()
+
+    gate = Qualifier(probe)
+    gate.verdict("t", "one")
+    with pytest.raises(Unreachable):
+        gate.verdict("t", "two")
+    assert gate.verdicts["t"].incarnation == "one"
+    assert gate.retired == {}
+    assert gate.require("t", "one", "pane_read")[:3] == ["herdr", "--machine", "t"]
+
+
+@pytest.mark.parametrize("failure", [subprocess.TimeoutExpired(["herdr"], 30), FileNotFoundError("herdr")])
+def test_a_stalled_or_missing_herdr_is_unreachable(failure):
+    def run(command):
+        raise failure
+
+    with pytest.raises(Unreachable, match=rf"^herdr --machine t status: {type(failure).__name__}$"):
+        capabilities.machine_probe(run)("t")
 
 
 def test_a_server_without_a_method_disables_only_that_operation():
@@ -84,7 +124,7 @@ def test_require_builds_a_machine_command_for_each_operation():
         assert gate.require("worker", "i", name) == ["herdr", "--machine", "worker", *cli]
 
 
-@pytest.mark.parametrize(("target", "incarnation"), [("", "i"), ("t", "")])
+@pytest.mark.parametrize(("target", "incarnation"), [("", "i"), ("t", ""), ("--session", "i")])
 def test_an_unnamed_target_or_incarnation_is_refused_before_any_probe(target, incarnation):
     probes: list[str] = []
     gate = Qualifier(lambda name: probes.append(name) or observed())

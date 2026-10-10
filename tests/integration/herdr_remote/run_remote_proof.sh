@@ -74,11 +74,16 @@ server_pid=""
 cleanup() {
     [[ -n "$server_pid" ]] && kill "$server_pid" 2>/dev/null || true
     [[ -n "$sshd_pid" ]] && kill "$sshd_pid" 2>/dev/null || true
+    rm -f "$proof_root/sshd/host_key" "$proof_root/client/id"
 }
 trap cleanup EXIT
 
 /usr/sbin/sshd -f "$proof_root/sshd/sshd_config" -D -e 2> "$proof_root/sshd/sshd.log" &
 sshd_pid=$!
+for _ in $(seq 1 50); do
+    grep -q "Server listening" "$proof_root/sshd/sshd.log" && break
+    sleep 0.1
+done
 
 start_server() {
     local leader=()
@@ -86,8 +91,10 @@ start_server() {
     env -i HOME="$proof_root/remote" USER="$proof_user" PATH="$remote_path" TERM=dumb \
         "${leader[@]}" herdr server > "$proof_root/remote/server-$1.log" 2>&1 &
     server_pid=$!
+    local status
     for _ in $(seq 1 100); do
-        remote herdr status server --json 2>/dev/null | grep -q '"running":true' && return 0
+        status="$(remote herdr status server --json 2>/dev/null || true)"
+        [[ "$status" == *'"running":true'* ]] && return 0
         sleep 0.2
     done
     echo "remote herdr server did not start" >&2
@@ -103,39 +110,66 @@ servers() {
     return 0
 }
 
+failures=0
+
 step() {
-    local name="$1"
-    shift
+    local name="$1" expected="$2"
+    shift 2
     local out code=0
     out="$("$@" 2>&1)" || code=$?
     record "$name" "$code" "$out"
-    printf '%s exit=%s\n' "$name" "$code"
+    if [[ "$code" == "$expected" ]]; then
+        printf '%s exit=%s ok\n' "$name" "$code"
+    else
+        printf '%s exit=%s expected=%s FAILED\n' "$name" "$code" "$expected"
+        failures=$((failures + 1))
+    fi
     return 0
+}
+
+check() {
+    local name="$1" detail="$2" held="$3"
+    if [[ "$held" == yes ]]; then
+        record "$name" 0 "$detail"
+        printf '%s ok\n' "$name"
+    else
+        record "$name" 1 "$detail"
+        printf '%s FAILED: %s\n' "$name" "$detail"
+        failures=$((failures + 1))
+    fi
+    return 0
+}
+
+installed() {
+    find "$proof_root/remote" -name herdr -type f -printf '%P\n' 2>/dev/null | sort | tr '\n' ' '
+}
+
+sockets() {
+    find "$proof_root/client" -name '*.sock' -printf '%P\n' 2>/dev/null | sort | tr '\n' ' '
 }
 
 target="ssh://$proof_user@127.0.0.1:$proof_port"
 remote_sum_before="$(sha256sum "$proof_root/bin/herdr" | cut -d' ' -f1)"
-step client_status client status client --json
+step client_status 0 client status client --json
 
 start_server foreground member
 member_pid="$server_pid"
-record remote_server_member 0 "pid=$member_pid"
-step member_status remote herdr status server --json
-step member_machine_add client machine add --label hdr01 "$target"
-step member_machine_list client machine list --json
-record member_after "$(kill -0 "$member_pid" 2>/dev/null && echo 0 || echo 1)" \
-    "pid=$member_pid servers=$(servers)"
+step member_status 0 remote herdr status server --json
+step member_machine_add 1 client machine add --label hdr01 "$target"
+step member_machine_list 0 client machine list --json
+check member_kept "pid=$member_pid servers=$(servers)" "$([[ "$(servers)" == "$member_pid " ]] && echo yes || echo no)"
+saved="$(client machine list --json 2>&1 | tr -d ' \n')"
+check member_not_saved "machines=$saved" "$([[ "$saved" == "[]" ]] && echo yes || echo no)"
 kill "$member_pid"
 wait "$member_pid" 2>/dev/null || true
 
 start_server first leader
 first_pid="$server_pid"
-record remote_server_first 0 "pid=$first_pid"
-step remote_status_local remote herdr status server --json
-step machine_add client machine add --label hdr01 "$target"
-step machine_list client machine list --json
-step forwarded_status client --machine hdr01 status server --json
-step workspace_create client --machine hdr01 workspace create --label "hdr01-$proof_nonce" \
+step remote_status_local 0 remote herdr status server --json
+step machine_add 0 client machine add --label hdr01 "$target"
+step machine_list 0 client machine list --json
+step forwarded_status 0 client --machine hdr01 status server --json
+step workspace_create 0 client --machine hdr01 workspace create --label "hdr01-$proof_nonce" \
     --cwd "$proof_root/remote" --no-focus
 
 field() {
@@ -152,39 +186,43 @@ EOF
 
 workspace="$(field workspace_create workspace.workspace_id)"
 root_pane="$(field workspace_create root_pane.pane_id)"
-step pane_split client --machine hdr01 pane split "$root_pane" --direction right --cwd "$proof_root/remote" --no-focus
+step pane_split 0 client --machine hdr01 pane split "$root_pane" --direction right --cwd "$proof_root/remote" --no-focus
 pane="$(field pane_split pane.pane_id)"
-step pane_run client --machine hdr01 pane run "$pane" "echo launched-$proof_nonce"
-step pane_wait_launch client --machine hdr01 pane wait-output "$pane" --match "launched-$proof_nonce" --timeout 10000
-step pane_send_text client --machine hdr01 pane send-text "$pane" "echo prompted-$proof_nonce"
-step pane_send_keys client --machine hdr01 pane send-keys "$pane" Enter
-step pane_wait_prompt client --machine hdr01 pane wait-output "$pane" --match "prompted-$proof_nonce" --timeout 10000
-step pane_read client --machine hdr01 pane read "$pane" --lines 20
-step pane_process_info client --machine hdr01 pane process-info --pane "$pane"
-step agent_list client --machine hdr01 agent list
-step pane_list client --machine hdr01 pane list
-step pane_close client --machine hdr01 pane close "$pane"
-step workspace_close client --machine hdr01 workspace close "$workspace"
-step unforwarded_update client --machine hdr01 update
-step unforwarded_session client --machine hdr01 session list
-step unforwarded_attach client --machine hdr01 agent attach "$pane"
+step pane_run 0 client --machine hdr01 pane run "$pane" "echo launched-$proof_nonce"
+step pane_wait_launch 0 client --machine hdr01 pane wait-output "$pane" --match "launched-$proof_nonce" \
+    --timeout 10000
+step pane_send_text 0 client --machine hdr01 pane send-text "$pane" "echo prompted-$proof_nonce"
+step pane_send_keys 0 client --machine hdr01 pane send-keys "$pane" Enter
+step pane_wait_prompt 0 client --machine hdr01 pane wait-output "$pane" --match "prompted-$proof_nonce" \
+    --timeout 10000
+step pane_read 0 client --machine hdr01 pane read "$pane" --lines 20
+step pane_process_info 0 client --machine hdr01 pane process-info --pane "$pane"
+step agent_list 0 client --machine hdr01 agent list
+step pane_list 0 client --machine hdr01 pane list
+step pane_close 0 client --machine hdr01 pane close "$pane"
+step workspace_close 0 client --machine hdr01 workspace close "$workspace"
+step unforwarded_update 2 client --machine hdr01 update
+step unforwarded_session 2 client --machine hdr01 session list
+step unforwarded_attach 2 client --machine hdr01 agent attach "$pane"
 
 remote_sum_after="$(sha256sum "$proof_root/bin/herdr" | cut -d' ' -f1)"
-alive="$(kill -0 "$first_pid" 2>/dev/null && echo alive || echo gone)"
-record same_incarnation 0 "pid=$first_pid state=$alive binary_before=$remote_sum_before binary_after=$remote_sum_after"
-record remote_installs 0 "$(find "$proof_root/remote" -name herdr -type f -printf '%P\n' 2>/dev/null | sort | tr '\n' ' ')"
-record client_local_socket 0 "$(find "$proof_root/client" -name '*.sock' -printf '%P\n' 2>/dev/null | sort | tr '\n' ' ')"
+check same_incarnation "pid=$first_pid servers=$(servers)" "$([[ "$(servers)" == "$first_pid " ]] && echo yes || echo no)"
+check same_binary "before=$remote_sum_before after=$remote_sum_after" "$([[ "$remote_sum_before" == "$remote_sum_after" ]] && echo yes || echo no)"
+check remote_installs "installed=$(installed)" "$([[ -z "$(installed)" ]] && echo yes || echo no)"
+check client_local_socket "sockets=$(sockets)" "$([[ -z "$(sockets)" ]] && echo yes || echo no)"
 
 kill "$first_pid"
 wait "$first_pid" 2>/dev/null || true
 server_pid=""
-step stopped_workspace_list client --machine hdr01 workspace list
-step stopped_status client --machine hdr01 status server --json
-record stopped_remote_servers 0 "$(servers)"
-record stopped_client_socket 0 "$(find "$proof_root/client" -name '*.sock' -printf '%P\n' 2>/dev/null | sort | tr '\n' ' ')"
+step stopped_workspace_list 1 client --machine hdr01 workspace list
+step stopped_status 1 client --machine hdr01 status server --json
+check stopped_remote_servers "servers=$(servers)" "$([[ -z "$(servers)" ]] && echo yes || echo no)"
+check stopped_client_socket "sockets=$(sockets)" "$([[ -z "$(sockets)" ]] && echo yes || echo no)"
 
 start_server second leader
-record remote_server_second 0 "pid=$server_pid previous=$first_pid"
-step restarted_status client --machine hdr01 status server --json
-step restarted_workspace_list client --machine hdr01 workspace list
-echo "results: $results"
+check new_incarnation "pid=$server_pid previous=$first_pid" "$([[ "$server_pid" != "$first_pid" ]] && echo yes || echo no)"
+step restarted_status 0 client --machine hdr01 status server --json
+step restarted_workspace_list 0 client --machine hdr01 workspace list
+check member_server_gone "member=$member_pid" "$(kill -0 "$member_pid" 2>/dev/null && echo no || echo yes)"
+echo "results: $results failures: $failures"
+[[ "$failures" == 0 ]]

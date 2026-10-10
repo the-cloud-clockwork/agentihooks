@@ -83,6 +83,11 @@ def refusals(observed: Observation) -> list[str]:
     found = [] if observed.server.get("running") is True else ["herdr server is not running"]
     if observed.client.get("protocol") != PROTOCOL or observed.server.get("protocol") != PROTOCOL:
         found.append(f"herdr protocol is not {PROTOCOL}")
+    if observed.server.get("version") != observed.client.get("version"):
+        found.append(
+            f"herdr server {observed.server.get('version')} is not the client build "
+            f"{observed.client.get('version')}, so its socket methods are unverified"
+        )
     found += _lacking(observed.client, CLIENT_CAPABILITIES, "client")
     return found + _lacking(observed.server.get("capabilities") or {}, SERVER_CAPABILITIES, "server")
 
@@ -100,13 +105,17 @@ def qualify(target: str, incarnation: str, observed: Observation) -> Verdict:
 
 
 def _json(run: Callable[[list[str]], subprocess.CompletedProcess], command: list[str]) -> dict:
-    done = run(command)
+    label = " ".join(command[:4])
+    try:
+        done = run(command)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Unreachable(f"{label}: {type(exc).__name__}") from exc
     if done.returncode != 0:
-        raise Unreachable(f"{' '.join(command[:4])}: {(done.stderr or done.stdout).strip()[:200]}")
+        raise Unreachable(f"{label}: {(done.stderr or done.stdout).strip()[:200]}")
     try:
         document = json.loads(done.stdout)
     except ValueError as exc:
-        raise Unreachable(f"{' '.join(command[:4])}: unreadable reply") from exc
+        raise Unreachable(f"{label}: unreadable reply") from exc
     return document if isinstance(document, dict) else {}
 
 
@@ -144,16 +153,16 @@ class Qualifier:
         self.mismatches: Counter = Counter()
 
     def verdict(self, target: str, incarnation: str) -> Verdict:
-        if not target or not incarnation:
+        if not target or target.startswith("-") or not incarnation:
             raise Incompatible("a remote herdr operation needs a target and a confirmed server incarnation")
         if incarnation in self.retired.get(target, ()):
             raise Incompatible(f"herdr server incarnation {incarnation} on {target} was replaced")
         cached = self.verdicts.get(target)
         if cached is not None and cached.incarnation == incarnation:
             return cached
+        fresh = qualify(target, incarnation, self.probe(target))
         if cached is not None:
             self.retired.setdefault(target, set()).add(cached.incarnation)
-        fresh = qualify(target, incarnation, self.probe(target))
         self.verdicts[target] = fresh
         return fresh
 

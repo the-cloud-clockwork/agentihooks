@@ -67,6 +67,10 @@ def _refused(action) -> str:
     return ""
 
 
+def _labelled(gate: Qualifier) -> list[list]:
+    return sorted([target, reason, count] for (target, reason), count in gate.mismatches.items())
+
+
 def _mutating(commands: list[list[str]]) -> list[list[str]]:
     reads = {capabilities.STATUS_SERVER, capabilities.STATUS_CLIENT, capabilities.SCHEMA}
     return [command for command in commands if tuple(command[-3:]) not in reads]
@@ -82,6 +86,7 @@ def _positive_once() -> dict:
         "probe_commands": runner.commands,
         "matrix": verdict.matrix,
         "herdr_capability_mismatch_total": gate.herdr_capability_mismatch_total(),
+        "mismatches_by_target_and_reason": _labelled(gate),
     }
 
 
@@ -104,6 +109,7 @@ def _reject(server: dict, operation: str = "workspace_create") -> dict:
         "commands_run": runner.commands,
         "mutating_commands": _mutating(runner.commands),
         "herdr_capability_mismatch_total": gate.herdr_capability_mismatch_total(),
+        "mismatches_by_target_and_reason": _labelled(gate),
     }
 
 
@@ -140,6 +146,7 @@ def _recovery() -> tuple[dict, bool]:
     steps["stale_incarnation"] = _refused(lambda: gate.require(TARGET, "incarnation-1", "pane_read"))
     steps["probes"] = sum(1 for command in runner.commands if "--machine" in command)
     steps["herdr_capability_mismatch_total"] = gate.herdr_capability_mismatch_total()
+    steps["mismatches_by_target_and_reason"] = _labelled(gate)
     passed = (
         steps["accepted"] == steps["same_incarnation_cached"] == steps["restarted_compatible"]
         and "surface_interest" in steps["restarted_without_capability"]
