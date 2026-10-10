@@ -454,6 +454,62 @@ def test_reads_large_artifacts_in_chunks(world, monkeypatch):
     assert reads == [(0, 4), (4, 4), (8, 2)]
 
 
+def counted_reads(world):
+    reads = []
+    real = world.backend.read
+
+    def read(key, start, length):
+        reads.append((start, length))
+        return real(key, start, length)
+
+    world.backend.read = read
+    return reads
+
+
+def test_stream_reads_each_piece_once_with_one_checksum_pass(world, monkeypatch):
+    monkeypatch.setattr(base, "CHUNK", 4)
+    reads = counted_reads(world)
+    data = b"0123456789"
+    ref = world.store.put(world.scope, "a1", data)
+    reads.clear()
+    assert list(world.store.stream(world.scope, ref)) == [b"0123", b"4567", b"89"]
+    assert reads == [(0, 4), (4, 4), (8, 2)]
+
+
+@pytest.mark.parametrize("position", [0, 9])
+def test_corrupted_object_fails_the_stream_before_its_last_piece(world, monkeypatch, position):
+    monkeypatch.setattr(base, "CHUNK", 4)
+    data = b"0123456789"
+    ref = world.store.put(world.scope, "a1", data)
+    damaged = bytearray(data)
+    damaged[position] ^= 1
+    world.backend.write(object_key(data), bytes(damaged))
+    received = []
+    with pytest.raises(base.ArtifactError) as raised:
+        for piece in world.store.stream(world.scope, ref):
+            received.append(piece)
+    assert str(raised.value) == f"artifact {sha(data)} does not match its reference in {world.kind}"
+    assert received == [bytes(damaged[:4]), bytes(damaged[4:8])]
+
+
+@pytest.mark.parametrize("damage", [None, DATA[:-1], DATA + b"X"])
+def test_stream_of_a_missing_or_resized_object_is_refused_before_reading(world, damage):
+    ref = world.store.put(world.scope, "a1", DATA)
+    world.backend.remove(object_key(DATA))
+    if damage is not None:
+        world.backend.write(object_key(DATA), damage)
+    reads = counted_reads(world)
+    with pytest.raises(base.ArtifactError) as raised:
+        next(world.store.stream(world.scope, ref))
+    assert str(raised.value) == f"artifact {sha(DATA)} is not verified in {world.kind}"
+    assert reads == []
+
+
+def test_empty_artifact_streams_no_pieces(world):
+    ref = world.store.put(world.scope, "a1", b"")
+    assert list(world.store.stream(world.scope, ref)) == []
+
+
 def committed(world, *pairs):
     for artifact_id, data in pairs:
         world.store.put(world.scope, artifact_id, data)
