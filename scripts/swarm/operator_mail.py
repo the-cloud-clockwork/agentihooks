@@ -1,11 +1,10 @@
 """Operator writes on a swarm ledger as inbox items: a task's to the agent that claimed it, a chat line to its
-addressee (for @swarm and @master the lead master's seat, with an information only copy of @swarm for every other live
-agent), a phase's or an unclaimed task's to the live master owning its phase, everything else to the lead master. An
-addressee that is gone falls back to the lead."""
+addressee (for @swarm and @master the lead master, with an information only copy of @swarm for every other live agent),
+a phase's or an unclaimed task's to the live master owning its phase, everything else to the lead master. The lead is
+the lead seat while it is live, else the lowest numbered live master. An addressee that is gone falls back to the lead."""
 
 import functools
 
-from scripts.inbox.seats import seat_address
 from scripts.inbox.seen import write_ref
 from scripts.swarm.store import MASTER, SwarmError
 from scripts.swarm_ledger.ledger_gate import IGNORED_KINDS, MENTION_RE
@@ -29,7 +28,6 @@ def _live(agents):
 
 
 def addresses(slug, event, doc, agents, owners):
-    """owners is called only when an item falls back to a master, so a write with a live addressee reads no seats."""
     live = _live(agents)
     master = master_address(slug, live)
     if event.get("kind") == SYNC_ORDER:
@@ -48,7 +46,7 @@ def addresses(slug, event, doc, agents, owners):
         task_id = target.split("/")[1]
         claimant = next((t.get("claimed_by") for t in doc.get("tasks", []) if t.get("id") == task_id), "")
         found = [a for a in live if claimant and a.name == claimant]
-    return [a.seat or a.name for a in found] or [masters.route(target, doc, owners(), masters.live_seats(live), master)]
+    return [a.seat or a.name for a in found] or [masters.route(target, doc, owners, masters.live_seats(live), master)]
 
 
 def mentioned(event):
@@ -62,10 +60,7 @@ def informed(event, address, master):
 
 
 def master_address(slug, live):
-    """The lead answers the operator; a lone live master in another seat answers while the lead seat is empty."""
-    lead = seat_address(slug, MASTER)
-    seated = masters.live_seats(live)
-    return seated[0] if len(seated) == 1 else lead
+    return masters.lead_of(slug, masters.live_seats(live))
 
 
 def primed(text, event, address, master):

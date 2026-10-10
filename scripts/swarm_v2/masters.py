@@ -1,12 +1,14 @@
 """Master seats of one swarm and the phases each owns. Seat one is the lead at the address a single master swarm uses."""
 
 import json
+from collections.abc import Callable
 
 from scripts.inbox.seats import seat_address
 from scripts.swarm.store import MASTER, PREFIX, SwarmError
 
 DEFAULT_COUNT = 1
 SAVE_ATTEMPTS = 5
+UNNUMBERED = 10_000
 
 
 class MasterError(SwarmError):
@@ -18,29 +20,44 @@ def seat(index: int) -> str:
 
 
 def seats(slug: str, count: int) -> list[str]:
+    return [seat_address(slug, seat(index)) for index in range(1, _checked(count) + 1)]
+
+
+def _checked(count: int) -> int:
     if count < 1:
         raise MasterError(f"a swarm needs at least one master seat, not {count}")
-    return [seat_address(slug, seat(index)) for index in range(1, count + 1)]
+    return count
+
+
+def lead_of(slug: str, live: list[str]) -> str:
+    """The lead seat answers while it is live, else the lowest numbered live master, so no line waits on an empty seat."""
+    lead = seat_address(slug, MASTER)
+    return lead if lead in live or not live else min(live, key=_number)
+
+
+def _number(address: str) -> int:
+    found = address.split("@", 1)[0].removeprefix(f"{MASTER}-")
+    return int(found) if found.isdecimal() else UNNUMBERED
 
 
 def live_seats(live: list) -> list[str]:
     return [a.seat or a.name for a in live if a.lane == MASTER]
 
 
-def assign(phases: list[str], seat_list: list[str], previous: dict[str, str]) -> dict[str, str]:
-    """A phase keeps a seat that still exists; an unowned phase, in ledger order, goes to the seat owning fewest. Then
-    the last phase of the busiest seat moves to the idlest until loads differ by at most one, so an added seat shares."""
+def assign(phases: list[str], seat_list: list[str], previous: dict[str, str], known: list[str]) -> dict[str, str]:
+    """A phase keeps a seat that still exists; an unowned phase, in ledger order, goes to the seat owning fewest.
+    A seat not in known (added since the last save) then takes the busiest seats' last phases up to an even share."""
     owners = {p: previous[p] for p in phases if previous.get(p) in seat_list}
     rank = {s: i for i, s in enumerate(seat_list)}
     for phase in phases:
         if phase not in owners:
             owners[phase] = min(seat_list, key=lambda s: (_load(owners, s), rank[s]))
-    while True:
-        busiest = max(seat_list, key=lambda s: (_load(owners, s), -rank[s]))
-        idlest = min(seat_list, key=lambda s: (_load(owners, s), rank[s]))
-        if _load(owners, busiest) - _load(owners, idlest) <= 1:
-            return {p: owners[p] for p in phases}
-        owners[[p for p in phases if owners[p] == busiest][-1]] = idlest
+    share = len(phases) // len(seat_list)
+    for added in [s for s in seat_list if s not in known]:
+        while _load(owners, added) < share:
+            busiest = max(seat_list, key=lambda s: (_load(owners, s), -rank[s]))
+            owners[[p for p in phases if owners[p] == busiest][-1]] = added
+    return {p: owners[p] for p in phases}
 
 
 def _load(owners: dict[str, str], seat_id: str) -> int:
@@ -48,10 +65,9 @@ def _load(owners: dict[str, str], seat_id: str) -> int:
 
 
 def count_of(text: str) -> int:
-    if not text.isdigit():
+    if not text.isdecimal():
         raise MasterError(f"masters takes a whole number of master seats, not {text!r}")
-    seats("", int(text))
-    return int(text)
+    return _checked(int(text))
 
 
 def owner_of(target: str, doc: dict, owners: dict[str, str]) -> str:
@@ -64,8 +80,9 @@ def owner_of(target: str, doc: dict, owners: dict[str, str]) -> str:
     return owners.get(item, "")
 
 
-def route(target: str, doc: dict, owners: dict[str, str], live: list[str], lead: str) -> str:
-    owner = owner_of(target, doc, owners)
+def route(target: str, doc: dict, owners: Callable[[], dict[str, str]], live: list[str], lead: str) -> str:
+    """owners is read only for a phase or task target, so other items write no owner state."""
+    owner = owner_of(target, doc, owners()) if target.partition("/")[0] in ("phases", "tasks") else ""
     return owner if owner in live else lead
 
 
@@ -77,8 +94,7 @@ class MasterSeats:
         return f"{PREFIX}:{slug}:masters"
 
     def set_count(self, slug: str, count: int) -> None:
-        seats(slug, count)
-        self.redis.hset(self.key(slug), "count", count)
+        self.redis.hset(self.key(slug), "count", _checked(count))
 
     def count(self, slug: str) -> int:
         return int(self.redis.hget(self.key(slug), "count") or DEFAULT_COUNT)
@@ -93,11 +109,14 @@ class MasterSeats:
                 try:
                     pipe.watch(key)
                     saved = json.loads(pipe.hget(key, "owners") or "{}")
-                    count = int(pipe.hget(key, "count") or DEFAULT_COUNT)
-                    owners = assign(phases, seats(slug, count), saved)
-                    if owners != saved:
+                    known = json.loads(pipe.hget(key, "seats") or "[]")
+                    current = seats(slug, int(pipe.hget(key, "count") or DEFAULT_COUNT))
+                    owners = assign(phases, current, saved, known)
+                    if (owners, current) != (saved, known):
                         pipe.multi()
-                        pipe.hset(key, "owners", json.dumps(owners, sort_keys=True))
+                        pipe.hset(
+                            key, mapping={"owners": json.dumps(owners, sort_keys=True), "seats": json.dumps(current)}
+                        )
                         pipe.execute()
                     return owners
                 except WatchError:

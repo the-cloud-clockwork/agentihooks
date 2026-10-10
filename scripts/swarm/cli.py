@@ -634,17 +634,20 @@ def scaling_value(key, value):
         raise SwarmError(f"{key} takes a number, the one minute load per CPU") from None
 
 
-def _set_masters(store, slug, pairs):
-    """The master seat count lives beside the swarm config, so it is taken out of the pairs and stored first."""
-    counts = [masters.count_of(pair.partition("=")[2]) for pair in pairs if pair.partition("=")[0] == "masters"]
+def _master_counts(pairs):
+    """The master seat count lives beside the swarm config: checked with the other pairs, stored after them."""
+    return [masters.count_of(pair.partition("=")[2]) for pair in pairs if pair.partition("=")[0] == "masters"]
+
+
+def _store_master_counts(store, slug, counts):
     for count in counts:
         masters.MasterSeats(store.redis).set_count(slug, count)
-    return [pair for pair in pairs if pair.partition("=")[0] != "masters"]
 
 
 def cmd_set(store, args):
     changes, lanes = {}, {key: dict(value) for key, value in store.config(args.slug).lanes.items()}
-    for pair in _set_masters(store, args.slug, args.pairs):
+    counts = _master_counts(args.pairs)
+    for pair in [pair for pair in args.pairs if pair.partition("=")[0] != "masters"]:
         key, _, value = pair.partition("=")
         if key in LANE_KEYS:
             lane, field = LANE_KEYS[key]
@@ -679,6 +682,7 @@ def cmd_set(store, args):
             )
         changes[SETTABLE[key]] = int(value)
     config = store.update(args.slug, **changes)
+    _store_master_counts(store, args.slug, counts)
     asked = any(pair.startswith("master-agent=") for pair in args.pairs)
     master = affinity.order(store, args.slug, now_ms()) if asked else affinity.pending(store, args.slug)
     if config.state == "running":

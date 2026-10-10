@@ -94,13 +94,27 @@ def test_four_phases_split_two_and_two_between_two_master_seats(swarm):
 
 def test_assignment_is_sticky_and_gives_a_new_phase_to_the_seat_owning_fewest():
     previous = {"p1": SECOND, "p2": SECOND, "p3": LEAD}
-    owners = masters.assign(["p1", "p2", "p3", "p4", "p5"], [LEAD, SECOND], previous)
+    owners = masters.assign(["p1", "p2", "p3", "p4", "p5"], [LEAD, SECOND], previous, [LEAD, SECOND])
     assert owners == {"p1": SECOND, "p2": SECOND, "p3": LEAD, "p4": LEAD, "p5": LEAD}
 
 
+def test_an_uneven_split_stays_put_when_a_phase_is_added_and_no_seat_is_new():
+    previous = {"p1": LEAD, "p2": LEAD, "p3": LEAD, "p4": SECOND}
+    owners = masters.assign(["p1", "p2", "p3", "p4", "p5"], [LEAD, SECOND], previous, [LEAD, SECOND])
+    assert owners == {**previous, "p5": SECOND}
+
+
 def test_a_dropped_phase_loses_its_owner_and_frees_the_seat():
-    owners = masters.assign(["p1", "p3"], [LEAD, SECOND], {"p1": LEAD, "p2": SECOND, "p3": LEAD})
+    previous = {"p1": LEAD, "p2": SECOND, "p3": LEAD}
+    owners = masters.assign(["p1", "p3"], [LEAD, SECOND], previous, [LEAD, SECOND])
     assert owners == {"p1": LEAD, "p3": LEAD}
+
+
+def test_the_lowest_numbered_live_master_answers_while_the_lead_seat_is_empty():
+    assert masters.lead_of(SLUG, [f"master-3@{SLUG}", SECOND]) == SECOND
+    assert masters.lead_of(SLUG, [SECOND, LEAD]) == LEAD
+    assert masters.lead_of(SLUG, []) == LEAD
+    assert masters.lead_of(SLUG, ["sw-master-9", f"master-3@{SLUG}"]) == f"master-3@{SLUG}"
 
 
 def test_a_removed_seat_hands_its_phases_on_and_every_other_phase_keeps_its_owner(swarm):
@@ -240,12 +254,12 @@ def test_an_operator_line_to_at_master_reaches_only_the_lead(swarm):
     assert len(texts(inbox, LEAD)) == 1 and texts(inbox, SECOND) == []
 
 
-def test_the_lead_seat_answers_the_operator_even_while_two_other_masters_are_live(swarm):
+def test_with_the_lead_seat_empty_the_lowest_numbered_live_master_answers_the_operator(swarm):
     store, inbox = swarm
     third = AgentRecord("sw-master-3", MASTER, MASTER, pane_id="pm3", seat=f"master-3@{SLUG}")
-    seated(store, OTHER, third)
-    relay(swarm, write(5, "chat", text="where are we"))
-    assert len(texts(inbox, LEAD)) == 1 and texts(inbox, SECOND) == []
+    seated(store, third, OTHER)
+    relay(swarm, write(5, "chat", text="where are we"), write(6, "phases/p1"))
+    assert len(texts(inbox, SECOND)) == 2 and texts(inbox, LEAD) == [] and texts(inbox, third.seat) == []
 
 
 def test_a_single_master_swarm_routes_a_phase_item_to_its_one_master_as_before(swarm):
@@ -257,7 +271,11 @@ def test_a_single_master_swarm_routes_a_phase_item_to_its_one_master_as_before(s
     assert len(texts(inbox, lone.name)) == 1 and texts(inbox, LEAD) == []
 
 
-@pytest.mark.parametrize("text", ["0", "two", "-1", ""])
+def test_the_master_count_text_reads_a_whole_number():
+    assert masters.count_of("2") == 2
+
+
+@pytest.mark.parametrize("text", ["0", "two", "-1", "", "²"])
 def test_the_master_count_text_must_be_a_whole_number_of_at_least_one(text):
     with pytest.raises(masters.MasterError):
         masters.count_of(text)
@@ -271,4 +289,5 @@ def test_swarm_set_masters_stores_the_count_and_reports_it(swarm, monkeypatch, c
     assert masters.MasterSeats(store.redis).count("paused-sw") == 3
     assert json.loads(capsys.readouterr().out.splitlines()[-1])["masters"] == 3
     assert cli.main(["paused-sw", "set", "masters=0"]) != 0
+    assert cli.main(["paused-sw", "set", "masters=4", "bogus=1"]) != 0
     assert masters.MasterSeats(store.redis).count("paused-sw") == 3
