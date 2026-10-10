@@ -1,4 +1,6 @@
+import json
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -11,15 +13,6 @@ from scripts.swarm_v2.reconciliation import accounts as reconciliation
 from scripts.swarm_v2.reconciliation.accounts import AccountReconciler
 from scripts.swarm_v2.runtime import observe
 from scripts.swarm_v2.runtime.operations import Observation, OperationRequest, Phase
-from tests.test_swarm_v2_account_reconciliation import (
-    LOST_TERMINAL,
-    ORPHANED,
-    RETIRING,
-    SUCCESSOR,
-    TERMINAL,
-    TTL,
-    World,
-)
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
@@ -671,8 +664,18 @@ def test_reconcile_package_cases_pass_from_independent_state(case):
     assert first["state"] == "passed"
 
 
+RECONCILE = json.loads((Path(__file__).parent / "fixtures/swarm_v2/account-reconciliation.json").read_text())
+TTL, TERMINAL = RECONCILE["ttl_ms"], RECONCILE["terminal_seat"]
+LOST_TERMINAL, ORPHANED, SUCCESSOR = (
+    f"fixture/{RECONCILE[seat]}" for seat in ("terminal_seat", "orphan_seat", "handoff_seat")
+)
+RETIRING = f"{SUCCESSOR}#1"
+
+
 @pytest.fixture
 def accounts(monkeypatch):
+    from tests.test_swarm_v2_account_reconciliation import World
+
     monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", "20")
     world = World(monkeypatch)
     world.scene()
