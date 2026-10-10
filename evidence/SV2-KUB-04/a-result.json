@@ -3,8 +3,8 @@
   "evidence_class": "mocked: fakeredis execution registry, heartbeat archive watermarks, attempt records and cleanup journal, a fake lease clock, an in process API server that enforces delete uid preconditions and can drop a delete response, and in process attach and secret registries; no Kubernetes API server was called",
   "input_sha256": {
     "cleanup-attempts.json": "39a4e5c1dc686133750138a012ddc2d2764666e2562588959752e670ab12d4ce",
-    "pod-launch.json": "8d1964999c9d4fc4e3bfd4f8aea2938da30b825411e1e5a12f4ea7e432261908",
-    "pod-policy.json": "cac05e3a549966cf63b9c00183883ec7087b814eb91fc785dad689df9e66723b"
+    "pod-launch.json": "a3dd9f7083b76f91ac724de6fc3d05d0227424feda9caac8d1c8f50eeede87ae",
+    "pod-policy.json": "fe59695070f986ee8928dcfa9abff5d0a07372f6af03611733a4cdad34772acb"
   },
   "observed": {
     "fixture": {
