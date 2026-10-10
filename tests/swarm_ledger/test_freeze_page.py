@@ -278,12 +278,12 @@ def test_freezing_a_group_lead_holds_its_members(page):
 
 
 @pytest.mark.parametrize("page", [[freeze("phases/p4")]], indirect=True)
-def test_an_out_of_scope_item_that_carries_a_freeze_keeps_its_unfreeze(page):
+def test_an_out_of_scope_item_keeps_its_freeze_button(page):
     tab, sent = page
     assert freeze_text(tab, "#item-phases-p4") == "unfreeze"
     tab.click("#item-phases-p4 .freeze")
     assert sent_ops(tab, sent, "freeze_clear") == [{"op": "freeze_clear", "target": "phases/p4"}]
-    tab.wait_for_function("() => document.querySelector('#item-phases-p4 .freeze') === null")
+    tab.wait_for_function("() => document.querySelector('#item-phases-p4 .freeze').textContent === 'freeze'")
 
 
 @pytest.mark.parametrize("page", [[freeze("lane:ci", verb="focus")]], indirect=True)
