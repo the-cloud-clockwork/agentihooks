@@ -719,10 +719,10 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
     assert checkout["with"]["fetch-depth"] == 0
     assert checkout["with"]["ref"] == "${{ github.event.pull_request.head.sha }}"
     run = next(step for step in steps if step.get("name") == "Mutate changed Python files")
-    assert run["env"]["BASE"] == "${{ github.event.pull_request.base.sha }}"
+    assert run["env"]["BASES"] == "${{ needs.mutation-plan.outputs.bases }}"
     assert (
         run["run"]
-        == 'python -m scripts.ci_mutation --base "$BASE" --budget 1080 --shard "$SHARD" --shards "$SHARDS"'
+        == 'python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard "$SHARD" --shards "$SHARDS"'
         + " --stats .mutation-stats"
     )
     artifact = next(step for step in steps if step.get("uses", "").startswith("actions/upload-artifact"))
@@ -740,6 +740,11 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     step = next(step for step in plan["steps"] if step.get("id") == "plan")
     assert step["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE"'
     assert step["env"]["BASE"] == "${{ github.event.pull_request.base.sha || inputs.base }}"
+    assert plan["outputs"]["bases"] == "${{ steps.plan.outputs.bases }}"
+    for job in (mutation, jobs["mutation-stats"]):
+        select = next(step for step in job["steps"] if step.get("id") == "selection")
+        assert select["env"] == {"BASES": "${{ needs.mutation-plan.outputs.bases }}"}
+        assert select["run"] == 'python -m scripts.ci_mutation.browser --bases "$BASES"'
     checkout = next(step for step in plan["steps"] if step.get("uses", "").startswith("actions/checkout"))
     assert checkout["with"] == {"fetch-depth": 0, "ref": "${{ github.event.pull_request.head.sha }}"}
     assert mutation["strategy"] == {
@@ -767,12 +772,12 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     setup = [step for step in setup if step.get("name") != "Download the shared mutation stats"]
     assert stats["steps"][: len(setup)] == setup
     collect = stats["steps"][len(setup)]
-    assert collect["env"]["BASE"] == "${{ github.event.pull_request.base.sha || inputs.base }}"
+    assert collect["env"]["BASES"] == "${{ needs.mutation-plan.outputs.bases }}"
     assert collect["env"]["PART"] == "${{ matrix.part }}"
     assert collect["env"]["PARTS"] == "${{ strategy.job-total }}"
     assert collect["run"] == (
         'mkdir -p .mutation-stats && touch ".mutation-stats/collected-$PART" && python -m scripts.ci_mutation'
-        ' --base "$BASE" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"'
+        ' --bases "$BASES" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"'
     )
     upload = stats["steps"][len(setup) + 1]
     assert upload["uses"] == "actions/upload-artifact@v4"

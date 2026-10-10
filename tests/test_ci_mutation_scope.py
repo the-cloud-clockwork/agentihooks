@@ -127,3 +127,89 @@ def test_diff_discovers_only_changed_source_python_files(tmp_path):
     git("add", "hooks/gone.py", "hooks/new.py", "scripts/space name.py", "tests/test_other.py", "scripts/note.txt")
     git("commit", "-m", "head")
     assert discover_changes(tmp_path, base, "HEAD") == {"hooks/new.py": {1, 2}, "scripts/space name.py": {1, 2}}
+
+
+def _repo(tmp_path, monkeypatch):
+    import subprocess
+
+    monkeypatch.delenv("GITHUB_HEAD_REF", raising=False)
+    monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
+
+    def git(*args):
+        return subprocess.check_output(["git", *args], cwd=tmp_path).decode().strip()
+
+    def commit(name, text):
+        path = tmp_path / "hooks" / name
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(text)
+        git("add", f"hooks/{name}")
+        git("commit", "-q", "-m", name)
+        return git("rev-parse", "HEAD")
+
+    git("init", "-q", "-b", "dev")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "test")
+    return git, commit
+
+
+def test_a_branch_refreshed_with_dev_grades_only_its_own_lines_against_a_pinned_older_base(tmp_path, monkeypatch):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path, monkeypatch)
+    pinned = commit("dev.py", "a = 1\n")
+    git("checkout", "-q", "-b", "branch")
+    commit("own.py", "def f():\n    return 1\n")
+    git("checkout", "-q", "dev")
+    commit("dev.py", "a = 1\nb = 2\n")
+    git("update-ref", "refs/remotes/origin/dev", "HEAD")
+    git("checkout", "-q", "branch")
+    git("merge", "-q", "--no-edit", "dev")
+    assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/own.py": {1, 2}}
+
+
+def test_a_stacked_branch_grades_only_its_own_lines_after_a_dev_refresh(tmp_path, monkeypatch):
+    from scripts.ci_mutation.scope import discover_changes, own_bases
+
+    git, commit = _repo(tmp_path, monkeypatch)
+    pinned = commit("dev.py", "a = 1\n")
+    git("checkout", "-q", "-b", "earlier")
+    earlier = commit("earlier.py", "def e():\n    return 1\n")
+    git("update-ref", "refs/remotes/origin/earlier", "HEAD")
+    git("checkout", "-q", "-b", "stacked")
+    commit("own.py", "def f():\n    return 1\n")
+    commit("earlier.py", "def e():\n    return 2\n")
+    git("checkout", "-q", "dev")
+    commit("dev.py", "a = 1\nb = 2\n")
+    git("update-ref", "refs/remotes/origin/dev", "HEAD")
+    merged_dev = git("rev-parse", "HEAD")
+    git("checkout", "-q", "stacked")
+    git("merge", "-q", "--no-edit", "dev")
+    assert own_bases(tmp_path, pinned, "HEAD") == sorted([earlier, merged_dev])
+    assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/own.py": {1, 2}, "hooks/earlier.py": {2}}
+
+
+def test_copies_of_the_branch_itself_never_count_as_an_earlier_branch(tmp_path, monkeypatch):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path, monkeypatch)
+    base = commit("dev.py", "a = 1\n")
+    git("update-ref", "refs/remotes/origin/dev", "HEAD")
+    git("checkout", "-q", "-b", "branch")
+    first = commit("one.py", "def f():\n    return 1\n")
+    for ref in ("branch", "diffcheck/branch-red", "wip/branch", "gh-readonly-queue/dev/pr-1", "main"):
+        git("update-ref", f"refs/remotes/origin/{ref}", first)
+    commit("two.py", "def g():\n    return 2\n")
+    monkeypatch.setenv("GITHUB_REF_NAME", "branch")
+    assert discover_changes(tmp_path, base, "HEAD") == {"hooks/one.py": {1, 2}, "hooks/two.py": {1, 2}}
+
+
+def test_resolved_bases_are_graded_without_looking_up_branches_again(tmp_path, monkeypatch):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path, monkeypatch)
+    base = commit("dev.py", "a = 1\n")
+    git("checkout", "-q", "-b", "branch")
+    earlier = commit("one.py", "def f():\n    return 1\n")
+    commit("two.py", "def g():\n    return 2\n")
+    git("update-ref", "refs/remotes/origin/earlier", earlier)
+    assert discover_changes(tmp_path, [base], "HEAD") == {"hooks/one.py": {1, 2}, "hooks/two.py": {1, 2}}

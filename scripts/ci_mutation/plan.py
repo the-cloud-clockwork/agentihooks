@@ -4,7 +4,7 @@ import math
 import os
 from pathlib import Path
 
-from scripts.ci_mutation.scope import discover_changes, select_tests
+from scripts.ci_mutation.scope import discover_changes, own_bases, select_tests
 from scripts.ci_mutation.selection import changed_mutations
 
 # Fitted on Tests runs 37890680008 and 37877992114: a mutant costs a pytest start plus a few covering tests.
@@ -55,7 +55,9 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=10)
     args = parser.parse_args()
     root = Path.cwd()
-    seconds, mutants, stats = estimate(root, discover_changes(root, args.base, args.head))
+    bases = own_bases(root, args.base, args.head)
+    print(f"Mutation bases: {' '.join(bases)}")
+    seconds, mutants, stats = estimate(root, discover_changes(root, bases, args.head))
     count = shard_count(seconds, mutants, args.target, args.limit)
     parts = stats_part_count(stats, args.stats_target, args.limit)
     print(f"Changed line mutants: {mutants}\nEstimated mutation seconds: {seconds:.0f}, stats seconds: {stats:.0f}")
@@ -64,6 +66,7 @@ def main() -> int:
         with Path(output).open("a") as stream:
             stream.write(f"shards={json.dumps(list(range(count)))}\n")
             stream.write(f"stats_parts={json.dumps(list(range(parts)))}\n")
+            stream.write(f"bases={','.join(bases)}\n")
     return 0
 
 

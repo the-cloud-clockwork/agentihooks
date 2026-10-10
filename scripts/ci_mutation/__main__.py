@@ -11,6 +11,7 @@ from scripts.ci_mutation.stats import SharedStats
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", default="origin/dev")
+    parser.add_argument("--bases")
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--output", type=Path, default=Path(".mutation-gate"))
     parser.add_argument("--budget", type=float, default=1080)
@@ -26,7 +27,7 @@ def main() -> int:
         parser.error(f"--stats-part {args.stats_part} needs --stats and is outside 0 to {args.stats_parts - 1}")
     os.environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     root = Path.cwd()
-    changes = discover_changes(root, args.base, args.head)
+    changes = discover_changes(root, args.bases.split(",") if args.bases else args.base, args.head)
     print(f"Changed Python files: {len(changes)}", flush=True)
     stats = None
     if args.stats:

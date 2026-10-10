@@ -1,8 +1,12 @@
 import ast
+import os
 import re
 import subprocess
 from functools import cache
 from pathlib import Path
+
+INTEGRATION = "refs/remotes/origin/dev"
+NOT_EARLIER = ("diffcheck/", "wip/", "gh-readonly-queue/")
 
 
 def changed_lines(diff: str) -> set[int]:
@@ -14,7 +18,34 @@ def changed_lines(diff: str) -> set[int]:
     return lines
 
 
-def discover_changes(root: Path, base: str, head: str) -> dict[str, set[int]]:
+def own_bases(root: Path, base: str, head: str) -> list[str]:
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], cwd=root).decode().strip()
+
+    tip = git("rev-parse", head)
+    candidates = {git("merge-base", base, head)}
+    if git("for-each-ref", INTEGRATION):
+        candidates.add(git("merge-base", INTEGRATION, head))
+    branch = os.environ.get("GITHUB_HEAD_REF") or os.environ.get("GITHUB_REF_NAME", "")
+    pushed = git("for-each-ref", "--merged", head, "--format=%(objectname) %(refname:lstrip=3)", "refs/remotes/origin")
+    for line in pushed.splitlines():
+        sha, name = line.split(" ", 1)
+        if sha != tip and name not in {"HEAD", "dev", "main", branch} and not name.startswith(NOT_EARLIER):
+            candidates.add(sha)
+    return sorted(git("merge-base", "--independent", *candidates).split())
+
+
+def discover_changes(root: Path, base: str | list[str], head: str) -> dict[str, set[int]]:
+    bases = own_bases(root, base, head) if isinstance(base, str) else base
+    found = [changes_since(root, own, head) for own in bases]
+    return {
+        name: set.intersection(*(changes[name] for changes in found))
+        for name in found[0]
+        if all(name in changes for changes in found)
+    }
+
+
+def changes_since(root: Path, base: str, head: str) -> dict[str, set[int]]:
     comparison = f"{base}...{head}"
     names = (
         subprocess.check_output(
