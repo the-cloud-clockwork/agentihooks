@@ -23,6 +23,7 @@ CANARY = "-".join(("leak", "canary", "fixture"))
 class World:
     def __init__(self, monkeypatch):
         self.store, self.authority, _, self.clock, self.start = build(monkeypatch)
+        self.issued = self.clock[0]
         self.accounts = {}
         self.quota = self.observer()
         self.seats = 0
@@ -36,7 +37,9 @@ class World:
 
     def token(self, account=ACCOUNT):
         self.seats += 1
+        now, self.clock[0] = self.clock[0], self.issued
         _, token = self.start(seat=f"eng-{self.seats}@fixture")
+        self.clock[0] = now
         self.accounts[token] = account
         return token
 
