@@ -14,6 +14,52 @@
     ]
   },
   "passed": true,
+  "measurement": {
+    "name": "artifact_upload_verification_failures",
+    "dimensions": {
+      "fixture": "sv2-fsy-04",
+      "backend": [
+        "local",
+        "object-store"
+      ]
+    },
+    "observed_per_backend": {
+      "local": 1,
+      "object-store": 1
+    },
+    "condition": "after one injected truncated upload through each backend; also asserted by test_same_length_corruption_is_refused for a same length hash mismatch and by case_b check counted",
+    "asserted_by": [
+      {
+        "test": "tests/test_swarm_v2_artifacts.py::test_truncated_upload_is_refused_counted_and_leaves_no_state[object-store]",
+        "shard": "unit (3.12, 5)",
+        "output": "PASSED at 2026-10-10T17:23:54.8805424Z"
+      },
+      {
+        "test": "tests/test_swarm_v2_artifacts.py::test_truncated_upload_is_refused_counted_and_leaves_no_state[local]",
+        "shard": "unit (3.12, 5)",
+        "output": "PASSED at 2026-10-10T17:23:55.0178940Z"
+      },
+      {
+        "test": "tests/test_swarm_v2_artifacts.py::test_truncated_upload_is_refused_counted_and_leaves_no_state[local]",
+        "shard": "unit (3.11, 1)",
+        "output": "PASSED at 2026-10-10T17:23:00.4849281Z"
+      },
+      {
+        "test": "tests/test_swarm_v2_artifacts.py::test_truncated_upload_is_refused_counted_and_leaves_no_state[object-store]",
+        "shard": "unit (3.11, 1)",
+        "output": "PASSED at 2026-10-10T17:23:00.4998614Z"
+      }
+    ],
+    "passed": true
+  },
+  "test_counts": {
+    "results": 140,
+    "distinct_tests": 70,
+    "per_python": {
+      "3.11": 70,
+      "3.12": 70
+    }
+  },
   "tests": [
     {
       "test": "tests/test_swarm_v2_artifacts.py::test_every_refused_upload_is_counted[local]",
@@ -52,7 +98,7 @@
       "output": "PASSED at 2026-10-10T17:23:54.4724840Z"
     },
     {
-      "test": "tests/test_swarm_v2_artifacts.py::test_malformed_reference_is_refused[",
+      "test": "tests/test_swarm_v2_artifacts.py::test_malformed_reference_is_refused[ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1]",
       "job": "114268765996",
       "shard": "unit (3.12, 5)",
       "output": "PASSED at 2026-10-10T17:23:54.4905927Z"
@@ -466,7 +512,7 @@
       "output": "PASSED at 2026-10-10T17:23:00.2496527Z"
     },
     {
-      "test": "tests/test_swarm_v2_artifacts.py::test_malformed_reference_is_refused[",
+      "test": "tests/test_swarm_v2_artifacts.py::test_malformed_reference_is_refused[ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1]",
       "job": "114268766014",
       "shard": "unit (3.11, 1)",
       "output": "PASSED at 2026-10-10T17:23:00.2509916Z"

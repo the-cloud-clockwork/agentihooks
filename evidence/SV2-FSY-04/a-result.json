@@ -14,6 +14,52 @@
     ]
   },
   "passed": true,
+  "measurement": {
+    "name": "artifact_upload_verification_failures",
+    "dimensions": {
+      "fixture": "sv2-fsy-04",
+      "backend": [
+        "local",
+        "object-store"
+      ]
+    },
+    "observed_per_backend": {
+      "local": 0,
+      "object-store": 0
+    },
+    "condition": "after a successful put through each backend",
+    "asserted_by": [
+      {
+        "test": "tests/test_swarm_v2_artifacts.py::test_put_verifies_and_retrieves_by_content_reference[local]",
+        "shard": "unit (3.12, 5)",
+        "output": "PASSED at 2026-10-10T17:23:54.7880174Z"
+      },
+      {
+        "test": "tests/test_swarm_v2_artifacts.py::test_put_verifies_and_retrieves_by_content_reference[object-store]",
+        "shard": "unit (3.12, 5)",
+        "output": "PASSED at 2026-10-10T17:23:54.8085549Z"
+      },
+      {
+        "test": "tests/test_swarm_v2_artifacts.py::test_put_verifies_and_retrieves_by_content_reference[object-store]",
+        "shard": "unit (3.11, 1)",
+        "output": "PASSED at 2026-10-10T17:23:00.4325099Z"
+      },
+      {
+        "test": "tests/test_swarm_v2_artifacts.py::test_put_verifies_and_retrieves_by_content_reference[local]",
+        "shard": "unit (3.11, 1)",
+        "output": "PASSED at 2026-10-10T17:23:00.4485457Z"
+      }
+    ],
+    "passed": true
+  },
+  "test_counts": {
+    "results": 70,
+    "distinct_tests": 35,
+    "per_python": {
+      "3.11": 35,
+      "3.12": 35
+    }
+  },
   "tests": [
     {
       "test": "tests/test_swarm_v2_artifacts.py::test_published_names_are_stable",

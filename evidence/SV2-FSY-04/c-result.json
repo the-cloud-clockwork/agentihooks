@@ -14,6 +14,52 @@
     ]
   },
   "passed": true,
+  "measurement": {
+    "name": "artifact_upload_verification_failures",
+    "dimensions": {
+      "fixture": "sv2-fsy-04",
+      "backend": [
+        "local",
+        "object-store"
+      ]
+    },
+    "observed_per_backend": {
+      "local": 1,
+      "object-store": 1
+    },
+    "condition": "after one truncated manifest upload through each backend; the earlier verified objects stay readable",
+    "asserted_by": [
+      {
+        "test": "tests/test_swarm_v2_artifacts.py::test_truncated_manifest_upload_publishes_no_manifest[object-store]",
+        "shard": "unit (3.12, 5)",
+        "output": "PASSED at 2026-10-10T17:23:56.4653358Z"
+      },
+      {
+        "test": "tests/test_swarm_v2_artifacts.py::test_truncated_manifest_upload_publishes_no_manifest[local]",
+        "shard": "unit (3.12, 5)",
+        "output": "PASSED at 2026-10-10T17:23:56.6655475Z"
+      },
+      {
+        "test": "tests/test_swarm_v2_artifacts.py::test_truncated_manifest_upload_publishes_no_manifest[local]",
+        "shard": "unit (3.11, 1)",
+        "output": "PASSED at 2026-10-10T17:23:01.2792177Z"
+      },
+      {
+        "test": "tests/test_swarm_v2_artifacts.py::test_truncated_manifest_upload_publishes_no_manifest[object-store]",
+        "shard": "unit (3.11, 1)",
+        "output": "PASSED at 2026-10-10T17:23:01.3135309Z"
+      }
+    ],
+    "passed": true
+  },
+  "test_counts": {
+    "results": 34,
+    "distinct_tests": 17,
+    "per_python": {
+      "3.11": 17,
+      "3.12": 17
+    }
+  },
   "tests": [
     {
       "test": "tests/test_swarm_v2_artifacts.py::test_identical_content_is_stored_once[object-store]",
@@ -76,25 +122,25 @@
       "output": "PASSED at 2026-10-10T17:23:55.4995807Z"
     },
     {
-      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[local-artifact",
+      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[local-artifact body: 0123456789abcde]",
       "job": "114268765996",
       "shard": "unit (3.12, 5)",
       "output": "PASSED at 2026-10-10T17:23:55.5045816Z"
     },
     {
-      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[local-artifact",
+      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[local-artifact body: 0123456789abcdeX]",
       "job": "114268765996",
       "shard": "unit (3.12, 5)",
       "output": "PASSED at 2026-10-10T17:23:55.5075881Z"
     },
     {
-      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[object-store-artifact",
+      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[object-store-artifact body: 0123456789abcdeX]",
       "job": "114268765996",
       "shard": "unit (3.12, 5)",
       "output": "PASSED at 2026-10-10T17:23:55.5727174Z"
     },
     {
-      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[object-store-artifact",
+      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[object-store-artifact body: 0123456789abcde]",
       "job": "114268765996",
       "shard": "unit (3.12, 5)",
       "output": "PASSED at 2026-10-10T17:23:55.6153718Z"
@@ -178,25 +224,25 @@
       "output": "PASSED at 2026-10-10T17:23:00.7538957Z"
     },
     {
-      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[local-artifact",
+      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[local-artifact body: 0123456789abcde]",
       "job": "114268766014",
       "shard": "unit (3.11, 1)",
       "output": "PASSED at 2026-10-10T17:23:00.7608693Z"
     },
     {
-      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[object-store-artifact",
+      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[object-store-artifact body: 0123456789abcdeX]",
       "job": "114268766014",
       "shard": "unit (3.11, 1)",
       "output": "PASSED at 2026-10-10T17:23:00.7744803Z"
     },
     {
-      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[local-artifact",
+      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[local-artifact body: 0123456789abcdeX]",
       "job": "114268766014",
       "shard": "unit (3.11, 1)",
       "output": "PASSED at 2026-10-10T17:23:00.7909387Z"
     },
     {
-      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[object-store-artifact",
+      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[object-store-artifact body: 0123456789abcde]",
       "job": "114268766014",
       "shard": "unit (3.11, 1)",
       "output": "PASSED at 2026-10-10T17:23:00.8210127Z"

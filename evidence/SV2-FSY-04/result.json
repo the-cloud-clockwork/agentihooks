@@ -49,7 +49,32 @@
     "local": "No local tests or mutation ran; lint, format and size passed in the pre push gate on every head"
   },
   "measurements": {
-    "artifact_upload_verification_failures": "refused uploads per backend kind; case B asserts exactly one per backend after an injected truncated upload, case A asserts none on success"
+    "artifact_upload_verification_failures": {
+      "a": {
+        "observed_per_backend": {
+          "local": 0,
+          "object-store": 0
+        },
+        "condition": "after a successful put through each backend",
+        "passed": true
+      },
+      "b": {
+        "observed_per_backend": {
+          "local": 1,
+          "object-store": 1
+        },
+        "condition": "after one injected truncated upload through each backend; also asserted by test_same_length_corruption_is_refused for a same length hash mismatch and by case_b check counted",
+        "passed": true
+      },
+      "c": {
+        "observed_per_backend": {
+          "local": 1,
+          "object-store": 1
+        },
+        "condition": "after one truncated manifest upload through each backend; the earlier verified objects stay readable",
+        "passed": true
+      }
+    }
   },
   "rollback_rehearsal": {
     "action": "existing object store objects left immutable; future manifest publication switched to the previous local adapter",
@@ -70,19 +95,34 @@
     "T-SV2-FSY-04-A": {
       "title": "successful behavior: an uploaded artifact can be verified and retrieved by its immutable content reference through either supported backend",
       "passed": true,
-      "tests": 70,
+      "results": 70,
+      "distinct_tests": 35,
+      "per_python": {
+        "3.11": 35,
+        "3.12": 35
+      },
       "file": "a-result.json"
     },
     "T-SV2-FSY-04-B": {
       "title": "rejection: a transport acknowledgement with mismatched content hash is not accepted as durability proof",
       "passed": true,
-      "tests": 140,
+      "results": 140,
+      "distinct_tests": 70,
+      "per_python": {
+        "3.11": 70,
+        "3.12": 70
+      },
       "file": "b-result.json"
     },
     "T-SV2-FSY-04-C": {
       "title": "recovery: retrying a completed upload with the same artifact ID returns the committed object without duplication",
       "passed": true,
-      "tests": 34,
+      "results": 34,
+      "distinct_tests": 17,
+      "per_python": {
+        "3.11": 17,
+        "3.12": 17
+      },
       "file": "c-result.json"
     }
   },
@@ -91,5 +131,5 @@
   "fixture": "tests/test_swarm_v2_artifacts.py World(kind, root) and tests/sv2_fsy04_cases.py",
   "compatibility": "No preceding artifact protocol exists; today durable output stays in the attempt's own files. The package writes nothing into an attempt's working files (case A attempt_files_untouched) and keeps every durable key under the granted swarm and task, so the local path runs unchanged until a caller opts in. Rollback to the previous adapter is rehearsed in case C.",
   "phase_use": "Tier 3 workers keep attempt private homes from SV2-FSY-01 and SV2-FSY-02 and publish durable outputs through ArtifactStore with a Scope taken from their launch Registration, against either a node durable directory or the configured object store; the wiring that calls it belongs to a later package",
-  "authority": "The writable scope comes from Scope.granted(registration), never from an artifact id, manifest name or display label; ids and names must be identifiers and every key is contained under swarm/task"
+  "authority": "Every key the store reads or writes is derived from the Scope it is handed, never from an artifact id, manifest name or display label; ids and names must be identifiers and keys stay under swarm/task. Scope.granted(registration) takes swarm, task, execution and generation from a launch Registration, but Scope is publicly constructible and put accepts any Scope, so binding scope to a verified grant holds by convention until a caller is wired (remaining_limitations)."
 }
