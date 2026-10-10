@@ -126,7 +126,7 @@ def test_two_concurrent_controllers_cannot_both_take_the_last_slot(world, run):
     won = []
     racing = world.controller(Racing(world.store, lambda: won.append(world.capacity.reserve(second, CAP, TTL))))
 
-    assert refusal(racing.reserve, first, CAP, TTL) == "account_full"
+    assert refusal(racing.reserve, first, CAP, TTL) == "account_full", run
 
     assert won == [Slot(ACCOUNT, f"{SLUG}/{SECOND}", world.agents[SECOND].execution_id, 1, RESERVED, 1000 + TTL)]
     assert world.holders() == [f"{SLUG}/{HELD}", f"{SLUG}/{SECOND}"]

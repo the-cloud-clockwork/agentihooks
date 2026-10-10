@@ -74,10 +74,11 @@ class AccountCapacity:
         return (slot.execution_id, slot.generation) == (grant.execution_id, grant.generation)
 
     def _sessions_of(self, slot: Slot) -> str:
-        return self.store.key(slot.holder.split("/", 1)[0], "fleet-sessions")
+        return self.store.key(slot.holder.partition("/")[0], "fleet-sessions")
 
     def _judge(self, reader, slots: dict[str, Slot]) -> dict[str, Slot]:
-        """An occupancy whose registry record is closed or gone no longer counts."""
+        """An occupancy whose registry record is closed or gone no longer counts; a closed record never revives, so
+        the judgement needs no watch on the registry."""
         judged = {}
         for holder, slot in slots.items():
             if slot.state == OCCUPIED:
@@ -98,7 +99,6 @@ class AccountCapacity:
                 try:
                     pipe.watch(key, FROZEN, *watched)
                     slots = {holder: decode(raw) for holder, raw in pipe.hgetall(key).items()}
-                    pipe.watch(*{self._sessions_of(slot) for slot in slots.values() if slot.state == OCCUPIED}, key)
                     slots = self._judge(pipe, slots)
                     written, dropped, result = decide(pipe, slots, self.clock())
                     if written or dropped:
