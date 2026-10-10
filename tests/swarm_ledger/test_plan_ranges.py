@@ -51,6 +51,8 @@ def test_issue_publication_always_stores_artifact():
             stderr="",
             stdout=json.dumps({"hasIssuesEnabled": True})
             if argv[1] == "repo"
+            else "[]"
+            if argv[2] == "list"
             else "https://github.com/acme/app/issues/1\n",
         )
 
@@ -64,7 +66,7 @@ def test_issue_publication_always_stores_artifact():
         issue_title="Build",
     )
     assert saved == [("plan.md", "Build")]
-    assert calls[1] == [
+    assert calls[2] == [
         "gh",
         "issue",
         "create",
