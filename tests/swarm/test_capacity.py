@@ -80,7 +80,8 @@ def test_a_reset_window_raises_the_cap_and_the_effective_caps_on_the_next_tick(m
     agents = [AgentRecord("engineer", "eng", "e", harness="claude")]
     (drained,) = capacity.accounts({}, 150)
     (freed,) = capacity.accounts({}, 300)
-    assert (drained.state, drained.cap, drained.week_resets_at) == ("CLOSED", 0, 250)
+    assert (drained.state, drained.cap, drained.week_resets_at, drained.five_resets_at) == ("CLOSED", 0, 250, 200)
+    assert (freed.five_resets_at, freed.week_resets_at) == (None, None)
     assert (freed.state, freed.cap, freed.five_left, freed.week_left) == ("OPEN", 6, 100, 100)
     before = capacity.calculate(config, [drained], agents)
     after = capacity.calculate(config, [freed], agents)
@@ -149,8 +150,8 @@ def test_accounts_judge_every_window_at_the_given_time_and_pass_the_environment(
         capacity.codex_router, "quotas", lambda p, environ: calls.append(("quotas", [a.name for a in p], environ)) or {}
     )
     assert capacity.accounts(env, now) == [
-        capacity.Account("claude", "a", "OPEN", 0, 5.0, 100.0, 2),
-        capacity.Account("codex", "default", "OPEN", 0, 60.0, 100.0, 6),
+        capacity.Account("claude", "a", "OPEN", 0, 5.0, 100.0, 2, five_resets_at=now + 100),
+        capacity.Account("codex", "default", "OPEN", 0, 60.0, 100.0, 6, five_resets_at=now + 100),
         capacity.Account("codex", "x", "UNKNOWN", 1, None, None, None),
     ]
     assert calls == [("pool", env), ("fresh", env, now), ("quotas", ["x"], env)]

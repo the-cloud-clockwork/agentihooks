@@ -995,13 +995,37 @@ def test_api_handoff_launches_the_requested_harness(monkeypatch, tmp_path, capsy
 
 
 @pytest.mark.parametrize("extra", [[], ["--", "--route", "token"], ["--", "--route-timeout", "api"]])
-def test_codex_subscription_handoff_remains_unsupported(monkeypatch, tmp_path, capsys, extra):
+@pytest.mark.parametrize("source,target", [("codex", "claude"), ("claude", "codex")])
+def test_a_subscription_handoff_never_crosses_harnesses(monkeypatch, tmp_path, capsys, extra, source, target):
     monkeypatch.setattr(init_agent.operator_env, "fill", lambda env: None)
     assert (
         init_agent.main(
-            ["--dir", str(tmp_path), "--handoff", "--prompt", "saved task", "--dry-run", *extra],
-            {"HOME": str(tmp_path), "AGENTIHOOKS_TARGET": "codex"},
+            ["--dir", str(tmp_path), "--agent", target, "--handoff", "--prompt", "saved task", "--dry-run", *extra],
+            {"HOME": str(tmp_path), "AGENTIHOOKS_TARGET": source},
         )
         == 2
     )
-    assert "unsupported quota transfer" in capsys.readouterr().err
+    assert (
+        f"unsupported quota transfer: {source.capitalize()} cannot transfer to a {target.capitalize()} account"
+        in capsys.readouterr().err
+    )
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_a_codex_handoff_resumes_the_conversation_on_another_codex_account(monkeypatch, tmp_path, capsys, explicit):
+    binding, profile_env = _profile(monkeypatch, tmp_path, "codex")
+    original = {**profile_env, "AGENTIHOOKS_RUN_MODEL": "gpt-6.1-sol", "AGENTIHOOKS_RUN_EFFORT": "medium"}
+    monkeypatch.setattr(binding, "process", lambda: (123, "codex", original, "alpha"))
+    monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
+    monkeypatch.setattr(init_agent.operator_env, "fill", lambda env: None)
+    argv = ["--dir", str(tmp_path), "--name", "cx-handoff", *(["--agent", "codex"] if explicit else [])]
+    argv += ["--prompt", "saved task", "--handoff", "--resume", "thread-1", "--dry-run"]
+    environ = {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "runtime"), "AGENTIHOOKS_TARGET": "codex"}
+    assert init_agent.main(argv, {**environ, "AH_CX_TOKEN_alpha": "tok", "AH_CX_TOKEN_beta": "tok", **profile_env}) == 0
+    report = capsys.readouterr().out
+    assert "agent=codex\n" in report and "agent_reason=handoff\n" in report
+    launcher = next(line.split("=", 1)[1] for line in report.splitlines() if line.startswith("launcher="))
+    command = Path(launcher).read_text()
+    assert "select-profile engineer --agent codex -- --agentihooks-exclude alpha --agentihooks-report" in command
+    assert " resume thread-1 " in command
+    assert "-m gpt-6.1-sol" in command

@@ -747,3 +747,14 @@ def test_an_unsupported_credential_refuses_the_launch_and_reports_it(monkeypatch
     assert report.read_text() == (
         "status=failed\nerror=AH_CX_TOKEN_bare holds a ChatGPT token with no chatgpt_account_id claim\n"
     )
+
+
+def test_a_handoff_launch_never_routes_back_to_the_account_it_leaves(monkeypatch, tmp_path):
+    quotas = {"default": _quota(90.0), "alpha": _quota(10.0), "beta": _quota(50.0)}
+    rc, seen, report = _launch(monkeypatch, tmp_path, ENV, ["--agentihooks-exclude", "alpha", "-m", "o3"], quotas)
+    assert rc == 0 and report.read_text() == "status=routed\naccount=beta\nplacement=open\n"
+    assert seen["cmd"] == ["/usr/bin/codex", "--no-daemon", "-m", "o3"]
+    assert seen["env"]["CODEX_ACCESS_TOKEN"] == "cx-value-b"
+    quotas = {"default": _quota(99.0), "alpha": _quota(10.0), "beta": _quota(99.0)}
+    rc, seen, report = _launch(monkeypatch, tmp_path, ENV, ["--agentihooks-exclude=alpha"], quotas)
+    assert (rc, seen) == (3, {}) and report.read_text().startswith("status=failed\n")
