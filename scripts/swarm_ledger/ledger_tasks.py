@@ -43,7 +43,7 @@ UPDATABLE = (
     "phase",
     "slice",
 )
-BOOL_FIELDS = ("artifact",)
+BOOL_FIELDS = ("artifact", "follow_up")
 DIFFICULTIES = ("S", "M", "L")
 DIFFICULTY_SOURCES = ("operator", "rule", "classifier", "default")
 DIFFICULTY_FIELDS = ("difficulty", "difficulty_source", "difficulty_confidence")
@@ -229,7 +229,7 @@ def _add(doc, op, ctx):
     if not _known(tasks, op.get("depends_on", [])):
         return False
     appended = {p["id"] for p in doc.get("phases", []) if p.get("added_by") == op["by"]}
-    if refusal := add_refusal(tasks, op, appended) or unsliced_refusal(doc, op, op["by"]):
+    if refusal := add_refusal(tasks, op, appended) or follow_up_refusal(op) or unsliced_refusal(doc, op, op["by"]):
         ctx.refused.append(refusal)
         return False
     task = {
@@ -248,7 +248,17 @@ def _add(doc, op, ctx):
         "done": False,
         "comments": [],
     }
-    for key in ("gain", "contract", "workspace", "artifact", "profile", "overlays", "not_duplicate", "slice"):
+    for key in (
+        "gain",
+        "contract",
+        "workspace",
+        "artifact",
+        "profile",
+        "overlays",
+        "not_duplicate",
+        "slice",
+        "follow_up",
+    ):
         if key in op:
             task[key] = op[key]
     if "rank" in op:
@@ -290,8 +300,16 @@ def add_refusal(tasks, op, appended):
     return ""
 
 
+def follow_up_refusal(op: dict) -> str:
+    if op.get("follow_up") and (op.get("plan_slice") or op.get("slice")):
+        return f"task {op['task']} is a follow up and names no slice: drop --plan-slice or --follow-up"
+    return ""
+
+
 def unsliced_refusal(doc: dict, task: dict, by: str) -> str:
-    if task.get("plan_slice") or task.get("slice") or by == SWARM or ledger_kinds.kind(task) == "plan":
+    if task.get("plan_slice") or task.get("slice") or task.get("follow_up") or by == SWARM:
+        return ""
+    if ledger_kinds.kind(task) == "plan":
         return ""
     from scripts.swarm_ledger import plan_ranges
 

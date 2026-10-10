@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from tests.swarm_ledger.ledger_page import loaded
 from tests.swarm_ledger.test_swarm_layout import Page, status
 from tests.swarm_ledger.test_swarm_layout import browser as chromium_browser
 
@@ -163,6 +164,7 @@ def test_the_quota_box_folds_on_its_header_and_remembers_it(routing_page):
     assert not page.tab.locator("#quota-table").is_visible()
     page.tab.wait_for_function("() => Object.values(localStorage).some((v) => v.includes('\"quota-fold\":false'))")
     page.tab.reload()
+    loaded(page.tab)
     page.tab.locator("#swarm-agents tr").first.wait_for(timeout=3000)
     assert page.tab.eval_on_selector("#quota-fold", "d => d.open") is False
 
