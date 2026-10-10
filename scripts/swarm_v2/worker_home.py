@@ -206,6 +206,7 @@ def render(execution: filesystem.Execution, target: str) -> None:
 
 def materialize(attempt: Path, target: str) -> None:
     from scripts.profiles.render import _is_doc, _settings
+    from scripts.swarm_v2 import broadcast_bridge
     from scripts.targets import get_adapter
     from scripts.targets._common import _install_module
 
@@ -217,7 +218,9 @@ def materialize(attempt: Path, target: str) -> None:
         raise BootstrapError(f"profile did not resolve in the execution scope: {name}")
     adapter = get_adapter(target)
     native = _settings(target, None, dirs)
-    native.setdefault("_agentihooks", {}).setdefault("env", {}).update(request["endpoints"])
+    native.setdefault("_agentihooks", {}).setdefault("env", {}).update(
+        {**request["endpoints"], broadcast_bridge.GRANT_FILE: str(broadcast_bridge.grant_path(attempt))}
+    )
     adapter.write_settings(native)
     for subdir, keep in (
         ("skills", _i._skill_dir_filter()),
@@ -433,7 +436,16 @@ def build_parser() -> argparse.ArgumentParser:
     child = commands.add_parser("render")
     child.add_argument("attempt", type=Path)
     child.add_argument("target", choices=TARGETS)
+    commands.add_parser("grant").add_argument("attempt", type=Path)
     return parser
+
+
+def store_grant(attempt: Path, text: str) -> None:
+    from scripts.swarm_v2 import broadcast_bridge
+
+    if not text.strip():
+        raise BootstrapError("no launch grant on standard input")
+    broadcast_bridge.store_grant(broadcast_bridge.grant_path(attempt), text)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -441,6 +453,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "render":
             materialize(args.attempt, args.target)
+            return 0
+        if args.command == "grant":
+            store_grant(args.attempt, sys.stdin.read())
             return 0
         request = Request(
             root=args.root,
