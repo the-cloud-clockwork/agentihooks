@@ -12,7 +12,6 @@ import pytest
 
 from scripts.swarm_ledger import ledger_link
 from scripts.swarm_ledger import ledger_server as server
-from tests import ledger_guard
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -263,12 +262,11 @@ def served(port, path, host, origin, log):
         pytest.fail(f"{type(error).__name__}: {error}\nledger server log:\n{log.read_text()}")
 
 
-def test_a_failed_request_names_its_error_and_the_server_log(tmp_path):
+def test_a_failed_request_names_its_error_and_the_server_log(tmp_path, ledger_port):
     log = tmp_path / "server.log"
     log.write_text("ledger server said this\n")
-    with ledger_guard.reserve_port() as hold:
-        with pytest.raises(pytest.fail.Exception, match=r"(?s)ConnectionRefusedError: .*ledger server said this"):
-            served(hold.getsockname()[1], "/api/v1/ledgers", "swarm.lan", "http://swarm.lan", log)
+    with pytest.raises(pytest.fail.Exception, match=r"(?s)ConnectionRefusedError: .*ledger server said this"):
+        served(ledger_port, "/api/v1/ledgers", "swarm.lan", "http://swarm.lan", log)
 
 
 @pytest.mark.parametrize(
