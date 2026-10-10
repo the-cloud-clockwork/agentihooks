@@ -81,7 +81,8 @@ def test_a_live_seat_is_woken_once_by_inbox_for_each_new_trigger():
     later = priority("pr2", "followups/f1", "Approve the lane cap", age=20 * MINUTE)
     actions = run(store, runtime, doc(priority(), later), NOW + MINUTE)
     assert actions == [f"woke {seat.name} with 1 new trigger"]
-    [item] = InboxStore(store.redis).inbox(seat.name)
+    [item] = InboxStore(store.redis).inbox(f"dispatcher@{SLUG}")
+    assert InboxStore(store.redis).inbox(seat.name) == []
     assert item.sender == "swarm" and "followups/f1" in item.text and "questions/q1" not in item.text
     assert run(store, runtime, doc(priority(), later), NOW + 2 * MINUTE) == []
     assert len(runtime.spawned) == 1
@@ -203,7 +204,7 @@ def test_the_wake_message_lists_each_new_trigger():
     run(store, runtime, doc(priority()))
     rows = [priority(), priority("pr2", "followups/f1", "A"), priority("pr3", "tasks/t1", "B", age=16 * MINUTE)]
     assert run(store, runtime, doc(*rows)) == [f"woke {NAME} with 2 new triggers"]
-    [item] = InboxStore(store.redis).inbox(NAME)
+    [item] = InboxStore(store.redis).inbox(f"dispatcher@{SLUG}")
     assert item.text == (
         f"New dispatcher triggers in swarm {SLUG}:\n"
         "- The priority on followups/f1 is unresolved after 15 minutes: A\n"
@@ -219,7 +220,7 @@ def test_a_finished_seat_is_never_woken_and_the_closed_triggers_are_forgotten():
     assert not store.redis.exists(store.key(SLUG, dispatch_seat.SENT))
     actions = run(store, runtime, doc(priority()), NOW + 2 * MINUTE)
     assert actions == ["spawned dispatcher dispatcher@a1b2c3-0002 for 1 trigger"]
-    assert InboxStore(store.redis).inbox(NAME) == []
+    assert InboxStore(store.redis).inbox(f"dispatcher@{SLUG}") == []
 
 
 def test_a_stopping_or_sleeping_swarm_spawns_no_seat():

@@ -69,7 +69,7 @@ def _wake(slug, store, seat, found):
     if not new:
         return []
     lines = "\n".join(line(trigger) for trigger in new)
-    InboxStore(store.redis).send(SENDER, seat.name, WAKE.format(slug=slug, lines=lines))
+    InboxStore(store.redis).send(SENDER, seat.seat, WAKE.format(slug=slug, lines=lines))
     _sent(store, slug, new)
     return [f"woke {seat.name} with {_count(new, 'new ')}"]
 
