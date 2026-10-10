@@ -10,7 +10,7 @@
         200,
         {
           "archive_watermark": 12,
-          "command_watermark": 0,
+          "command_watermark": 1,
           "controller_epoch": 1,
           "lease_deadline": "1970-01-01T00:00:01.140Z",
           "lease_deadline_ms": 1140,

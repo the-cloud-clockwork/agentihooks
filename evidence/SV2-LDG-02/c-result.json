@@ -9,6 +9,7 @@
       "heartbeat_rejections": {
         "revision_conflict": 1
       },
+      "heartbeat_rejections_total": 1,
       "out_of_order": [
         409,
         "revision_conflict"
@@ -42,6 +43,7 @@
             "task_id": "task"
           }
         ],
+        "issue_while_disabled": "forbidden_scope",
         "new_registration": [
           401,
           "unauthenticated"

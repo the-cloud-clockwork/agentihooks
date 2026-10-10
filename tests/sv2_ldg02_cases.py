@@ -6,8 +6,8 @@ import fakeredis
 import pytest
 
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
-from scripts.swarm_v2.api.executions import ExecutionsAPI, heartbeat_rejections
-from scripts.swarm_v2.auth_context import LaunchAuthority, LaunchKey
+from scripts.swarm_v2.api.executions import ExecutionsAPI, heartbeat_rejections, heartbeat_rejections_total
+from scripts.swarm_v2.auth_context import GrantRefused, LaunchAuthority, LaunchKey
 from scripts.swarm_v2.authority import TaskAuthority
 from scripts.swarm_v2.controller import Controller
 
@@ -59,6 +59,19 @@ class World:
             **extra,
         }
 
+    def command(self, agent, operation_id):
+        operation = {
+            "operation_id": operation_id,
+            "execution_id": agent.execution_id,
+            "generation": agent.generation,
+            "action": "command",
+            "backend": "local",
+            "payload_digest": "0" * 64,
+            "target": {},
+            "phase": "accepted",
+        }
+        self.store.redis.hset(self.store.key(SLUG, "runtime-operations"), operation_id, json.dumps(operation))
+
     def put(self, execution_id, token, body):
         return self.api.route("PUT", f"/v2/executions/{execution_id}/heartbeat", f"Bearer {token}", body)
 
@@ -79,6 +92,7 @@ def _positive(world):
     registered = world.register(agent, token)
     world.register(other, other_token)
     other_claim = world.tasks.current(INPUTS["other_task"])
+    world.command(agent, "op-fixture-command")
     world.clock[0] += 40
     status, ack = world.put(
         agent.execution_id,
@@ -106,6 +120,10 @@ def _rejection(world):
     world.put(other.execution_id, other_token, world.beat(other, 1))
     before = world.protected()
     forged = world.put(other.execution_id, token, world.beat(other, INPUTS["accepted_sequence"]))
+    generation = world.put(agent.execution_id, token, world.beat(agent, 1, generation=2))
+    epoch = world.beat(agent, 1)
+    epoch["authority"]["controller_epoch"] += 1
+    epoch = world.put(agent.execution_id, token, epoch)
     assert world.protected() == before
     world.start(previous=agent.execution_id)
     before = world.protected()
@@ -113,8 +131,11 @@ def _rejection(world):
     assert world.protected() == before
     return {
         "forged_url_subject": [forged[0], forged[1]["error_class"], forged[1]["retry"]],
+        "stale_task_generation": [generation[0], generation[1]["error_class"], generation[1]["retry"]],
+        "other_controller_epoch": [epoch[0], epoch[1]["error_class"], epoch[1]["retry"]],
         "stale_generation": [stale[0], stale[1]["error_class"], stale[1]["retry"]],
         "heartbeat_rejections": heartbeat_rejections(world.store, SLUG),
+        "heartbeat_rejections_total": heartbeat_rejections_total(world.store, SLUG),
     }
 
 
@@ -138,6 +159,11 @@ def _recovery(world):
     assert world.store.redis.hget(world.store.key(SLUG, "heartbeats"), agent.execution_id) == record
     late, late_token = world.start(INPUTS["other_seat"], INPUTS["other_task"])
     disabled = world.grants.disable(SLUG)
+    try:
+        world.start(f"eng-3@{SLUG}", "late")
+        issued = "issued"
+    except GrantRefused as error:
+        issued = error.error_class
     refused = world.register(late, late_token)
     drained = world.put(agent.execution_id, token, world.beat(agent, INPUTS["accepted_sequence"] + 1))
     return {
@@ -145,10 +171,12 @@ def _recovery(world):
         "out_of_order": [older[0], older[1]["error_class"]],
         "rollback": {
             "revoked_unregistered_grants": len(disabled),
+            "issue_while_disabled": issued,
             "new_registration": [refused[0], refused[1]["error_class"]],
             "draining_heartbeat": [drained[0], stable(drained[1])],
         },
         "heartbeat_rejections": heartbeat_rejections(world.store, SLUG),
+        "heartbeat_rejections_total": heartbeat_rejections_total(world.store, SLUG),
     }
 
 

@@ -13,9 +13,20 @@
       ],
       "heartbeat_rejections": {
         "forbidden_scope": 1,
-        "stale_generation": 1
+        "stale_generation": 3
       },
+      "heartbeat_rejections_total": 4,
+      "other_controller_epoch": [
+        409,
+        "stale_generation",
+        "new_request"
+      ],
       "stale_generation": [
+        409,
+        "stale_generation",
+        "new_request"
+      ],
+      "stale_task_generation": [
         409,
         "stale_generation",
         "new_request"

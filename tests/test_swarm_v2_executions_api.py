@@ -295,6 +295,7 @@ def test_a_newer_heartbeat_committed_during_renewal_wins(world, worker, monkeypa
     assert raced[0][0] == 200
     assert (status, refusal["error_class"]) == (409, "revision_conflict")
     assert stored(world, agent)["renewal_sequence"] == 9
+    assert world.tasks.current("task").lease_deadline_ms == raced[0][1]["lease_deadline_ms"]
 
 
 def test_the_same_heartbeat_committed_during_renewal_is_returned(world, worker, monkeypatch):
@@ -427,4 +428,5 @@ def test_package_cases_match_their_committed_evidence(case):
 
     first, second = run_case(case), run_case(case)
     assert first == second
-    assert json.loads((EVIDENCE / f"{case}-result.json").read_text())["observed"] == first
+    committed = json.loads((EVIDENCE / f"{case}-result.json").read_text())
+    assert committed == {"case": f"T-SV2-LDG-02-{case.upper()}", "independent_runs": 2, "observed": first}
