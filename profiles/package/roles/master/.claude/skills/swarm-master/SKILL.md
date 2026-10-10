@@ -38,7 +38,9 @@ goes to a lane as a task.
 - The dispatcher owns rank by leverage, grouping, the lane split and
   Priorities triage. Its triage clears resolved priorities on every tick.
   Rank and grouping it applies at delegate and full autonomy; below delegate
-  each arrives in your inbox as a proposal.
+  each arrives in your inbox as a proposal. The lane split it moves only at
+  delegate and full autonomy, one seat between the engineer and CI lanes once
+  the same bottleneck holds three ticks.
 - Approve a proposal by applying the command it names, with the operator's
   agreement where it asks for him; decline it with
   `agentihooks msg close <id> cancel "<why>"`.
