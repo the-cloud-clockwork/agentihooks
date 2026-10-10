@@ -62,6 +62,8 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       difficulty (S, M or L), artifact (yes or no) or plan_slice of a task;
                                       phase moves it to another phase, from the master or a planner;
                                       plan_slice computes its plan lines from the published plan;
+                                      follow_up=yes marks it a follow up and clears its slice and plan lines,
+                                      refused while the same write names a plan_slice or slice;
                                       proof.KEY=VALUE and contract.KEY=VALUE pairs form one object, e.g.
                                       proof.command=C proof.output=O; contract pairs update only the keys they
                                       name, e.g. contract.push=yes
@@ -315,6 +317,11 @@ def cmd_events(args):
 
 def cmd_show(args):
     print(SHOW_JSON(call(args.slug)))
+
+
+def cmd_tree(args):
+    for row in resource(args.slug, f"hierarchy/subtree/{args.node}" if args.node else "hierarchy"):
+        print(f"{'  ' * row['depth']}{row['node']}  {row['state']}")
 
 
 def cmd_status(args):
@@ -712,10 +719,10 @@ def cmd_task(args):
     for key in ("depends_on", "territory", "overlays"):
         if key in fields:
             fields[key] = comma_list(fields[key])
-    if "artifact" in fields:
-        if fields["artifact"] not in ("yes", "no"):
-            sys.exit("task set takes artifact=yes or artifact=no")
-        fields["artifact"] = fields["artifact"] == "yes"
+    for key in [key for key in ("artifact", "follow_up") if key in fields]:
+        if fields[key] not in ("yes", "no"):
+            sys.exit(f"task set takes {key}=yes or {key}=no")
+        fields[key] = fields[key] == "yes"
     if "difficulty_confidence" in fields:
         try:
             fields["difficulty_confidence"] = float(fields["difficulty_confidence"])
@@ -820,6 +827,9 @@ def build_parser():
     delete.add_argument("entries", nargs="+")
     sub.add_parser("audit")
     sub.add_parser("show")
+    sub.add_parser("tree", help="print a plan, phase, slice or task and everything under it, with states").add_argument(
+        "node", nargs="?", help="plans/<id>, phases/<id>, slices/<id> or tasks/<id>; default the whole ledger"
+    )
     priority = sub.add_parser("priority")
     priority.add_argument("action", choices=["add", "clear"])
     priority.add_argument("values", nargs="*")
@@ -898,7 +908,7 @@ def main():
     if text := refusal(args.name, Who.from_env()):
         sys.exit(f"agentihooks ledger: {text}")
     args.name = resolve_name(args.name) if args.name else args.name
-    if not args.slug or not (args.name or args.command in ("url", "show", "hierarchy")):
+    if not args.slug or not (args.name or args.command in ("url", "show", "tree", "hierarchy")):
         sys.exit("--slug and --as are required")
     globals()[f"cmd_{args.command.replace('-', '_')}"](args)
 

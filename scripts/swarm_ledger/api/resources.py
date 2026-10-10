@@ -172,3 +172,34 @@ def swarm_read(status: dict | None, path: str, query: dict) -> dict:
         raise APIError(404, "resource_missing", "No such swarm resource")
     rows = collections[name]
     return page(rows, revision(rows), query)
+
+
+def hierarchy_read(repository, slug: str, path: str) -> dict:
+    from ..repository.hierarchy import KINDS, READS, text
+
+    name, _, node = path.removeprefix("hierarchy").removeprefix("/").partition("/")
+    if (name or "subtree") not in READS:
+        raise APIError(404, "resource_missing", "No such hierarchy read")
+    try:
+        rows = repository.nodes(slug, name or "subtree", node or None)
+    except KeyError:
+        raise APIError(404, "resource_missing", "No such node") from None
+    doc = {"tasks": [], **repository.read(slug, *KINDS)}
+    items = {
+        f"{key}/{item['id']}": item
+        for key in KINDS
+        for item in doc.get(key) or []
+        if isinstance(item, dict) and text(item.get("id"))
+    }
+    data = [{**row, "state": node_state(row["kind"], items.get(row["node"], {}), doc)} for row in rows]
+    return bounded({"data": data, "revision": revision(data)})
+
+
+def node_state(kind: str, item: dict, doc: dict) -> str:
+    from scripts.swarm.phase_state import lifecycle
+
+    if kind == "phase":
+        return lifecycle(item, doc)
+    if item.get("out_of_scope"):
+        return "out_of_scope"
+    return item.get("state") or ("done" if item.get("done") else "open")

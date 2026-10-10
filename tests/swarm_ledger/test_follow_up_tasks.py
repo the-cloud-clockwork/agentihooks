@@ -4,8 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from scripts.gates import intent
 from scripts.swarm import phase_state, slice_check
-from scripts.swarm_ledger import ledger, ledger_tasks, plan_backfill, plan_packages, plan_ranges
+from scripts.swarm_ledger import ledger, ledger_tasks, plan_backfill, plan_packages, plan_ranges, plan_read
 
 OP = {"op": "task_add", "id": "a", "by": "master", "task": "f1", "title": "Follow up", "lane": "eng", "phase": "p1"}
 
@@ -114,3 +115,117 @@ def test_task_add_help_names_the_follow_up_mark(monkeypatch, capsys):
         ledger.build_parser().parse_args(["--slug", "s", "--as", "master", "task", "add", "--help"])
     pattern = r"\s--follow-up\s+a follow up task: no slice in a sliced phase, judged by its text\n"
     assert re.search(pattern, capsys.readouterr().out)
+
+
+SLICED = {
+    "id": "t1",
+    "title": "Borrowed",
+    "description": "Fix the stale claim notice",
+    "phase": "p1",
+    "plan_url": "https://example.com/plan",
+    "plan_slice": "first",
+    "plan_lines": "3-5",
+    "slice": "slices/plan-a.first",
+}
+
+
+@pytest.fixture
+def sliced():
+    return {
+        "overview": "Plan hierarchy",
+        "phases": [{"id": "p1", "title": "Phase one", "description": "Slices"}],
+        "slices": [
+            {"id": "plan-a.first", "anchor": "first", "lines": "3-5", "phase": "phases/p1"},
+            {"id": "plan-a.second", "anchor": "second", "phase": "phases/p1"},
+        ],
+        "tasks": [dict(SLICED)],
+    }
+
+
+def update_ctx():
+    return SimpleNamespace(refused=[], record=lambda *a, **k: None, stamp=lambda *a: None, meta={}, dirty=False)
+
+
+def task_set(fields):
+    op = {"op": "task_update", "by": "master", "item": "tasks/t1", "fields": fields}
+    ledger_tasks.check(op)
+    return op
+
+
+@pytest.mark.parametrize("fields", [{"follow_up": True}, {"follow_up": True, "plan_slice": ""}])
+def test_task_set_marks_a_sliced_task_a_follow_up_and_clears_its_slice(sliced, fields, monkeypatch):
+    monkeypatch.setattr(plan_ranges, "task_slice", lambda *a: pytest.fail("a follow up computes no plan lines"))
+    done = update_ctx()
+    assert ledger_tasks.apply(sliced, task_set(fields), done) is True
+    assert done.refused == []
+    task = sliced["tasks"][0]
+    assert {key: task[key] for key in ("follow_up", "plan_slice", "plan_lines", "slice")} == {
+        "follow_up": True,
+        "plan_slice": "",
+        "plan_lines": "",
+        "slice": "",
+    }
+    assert (task["plan_url"], task["description"]) == (SLICED["plan_url"], SLICED["description"])
+
+
+def test_the_intent_state_of_a_task_set_follow_up_carries_its_description_alone(sliced, monkeypatch):
+    monkeypatch.setattr(plan_read, "exact", lambda doc, task: "borrowed plan lines\n")
+    pr = {"title": "Fix it", "body": "Closes 1", "files": ["scripts/x.py"]}
+    before = intent.state_of(sliced, sliced["tasks"][0], pr)
+    assert (before["plan_lines"], before["plan_chunk"]) == ("3-5", "borrowed plan lines\n")
+    assert ledger_tasks.apply(sliced, task_set({"follow_up": True}), update_ctx()) is True
+    state = intent.state_of(sliced, sliced["tasks"][0], pr)
+    assert not {"plan_lines", "plan_chunk"} & set(state)
+    assert state["task_text"] == SLICED["description"]
+
+
+@pytest.mark.parametrize(
+    "named", [{"plan_slice": "first"}, {"slice": "slices/plan-a.first"}, {"slice": "slices/plan-a.second"}]
+)
+def test_task_set_refuses_a_follow_up_that_names_a_slice(sliced, named):
+    refused = update_ctx()
+    assert ledger_tasks.apply(sliced, task_set({"follow_up": True, **named}), refused) is False
+    assert refused.refused == ["task t1 is a follow up and names no slice: drop plan_slice or follow_up"]
+    assert sliced["tasks"][0] == SLICED
+
+
+def test_task_set_unmarking_a_follow_up_keeps_its_slice(sliced):
+    assert ledger_tasks.apply(sliced, task_set({"follow_up": False}), update_ctx()) is True
+    assert sliced["tasks"][0] == {**SLICED, "follow_up": False}
+
+
+def test_task_set_unmarking_a_follow_up_still_computes_a_named_slice(sliced, monkeypatch):
+    asked = []
+    sliced["tasks"][0]["plan_lines"] = ""
+    monkeypatch.setattr(plan_ranges, "task_slice", lambda doc, phase, name, url: asked.append((name, url)) or "3-5")
+    assert ledger_tasks.apply(sliced, task_set({"follow_up": False, "plan_slice": "first"}), update_ctx()) is True
+    assert asked == [("first", SLICED["plan_url"])]
+    assert sliced["tasks"][0] == {**SLICED, "follow_up": False}
+
+
+def test_the_coach_fingerprint_changes_when_task_set_marks_a_follow_up(sliced, monkeypatch):
+    monkeypatch.setattr(plan_read, "exact", lambda doc, task: "borrowed plan lines\n")
+    before = intent._fingerprint(sliced, sliced["tasks"][0])
+    assert ledger_tasks.apply(sliced, task_set({"follow_up": True}), update_ctx()) is True
+    unsliced = {"overview": sliced["overview"], "phases": sliced["phases"], "tasks": []}
+    described = {key: SLICED[key] for key in ("id", "title", "description", "phase")}
+    after = intent._fingerprint(sliced, sliced["tasks"][0])
+    assert after != before
+    assert after == intent._fingerprint(unsliced, described)
+
+
+@pytest.mark.parametrize(("value", "expected"), [("yes", True), ("no", False)])
+def test_task_set_sends_the_follow_up_mark_as_a_boolean(monkeypatch, value, expected):
+    sent = []
+    monkeypatch.setattr(ledger, "send", lambda args, op, **fields: sent.append((op, fields)))
+    argv = ["--slug", "s", "--as", "master", "task", "set", "t1", f"follow_up={value}"]
+    ledger.cmd_task(ledger.build_parser().parse_args(argv))
+    assert sent == [("task_update", {"item": "tasks/t1", "fields": {"follow_up": expected}})]
+
+
+def test_task_set_refuses_a_follow_up_mark_other_than_yes_or_no(monkeypatch):
+    monkeypatch.setattr(ledger, "send", lambda *a, **k: pytest.fail("nothing is sent"))
+    argv = ["--slug", "s", "--as", "master", "task", "set", "t1", "follow_up=true"]
+    with pytest.raises(SystemExit) as refused:
+        ledger.cmd_task(ledger.build_parser().parse_args(argv))
+    assert str(refused.value) == "task set takes follow_up=yes or follow_up=no"

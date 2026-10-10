@@ -84,3 +84,63 @@ def rebuild(connection, slug: str, state: dict) -> dict:
     have, want = stored(connection, slug), project(state)
     apply(connection, slug, have, want)
     return drift(have, want)
+
+
+# Every query using ORDER aliases work_nodes as n.
+ORDER = (
+    "printf('%d.%09d', CASE n.kind WHEN 'plan' THEN 0 WHEN 'phase' THEN 1 WHEN 'slice' THEN 2 ELSE 3 END, n.position)"
+)
+
+
+ROOT = (
+    "(n.parent_id IS :node OR (:node IS NULL AND n.parent_id NOT IN "
+    "(SELECT node_id FROM work_nodes WHERE ledger_slug=:slug)))"
+)
+# The bounds end the walks on a malformed parent or dependency loop; a plan sits at most three levels above a task.
+LEVELS = 3
+CHAIN = 64
+CHILDREN = (
+    f"SELECT n.node_id, n.kind, n.parent_id, :node IS NOT NULL FROM work_nodes n WHERE n.ledger_slug=:slug AND {ROOT} "
+    f"ORDER BY {ORDER}"
+)
+SUBTREE = f"""
+WITH RECURSIVE tree(node_id, kind, parent_id, depth, sort) AS (
+  SELECT n.node_id, n.kind, n.parent_id, 0, {ORDER} FROM work_nodes n
+  WHERE n.ledger_slug=:slug AND (n.node_id=:node OR (:node IS NULL AND {ROOT}))
+  UNION ALL
+  SELECT n.node_id, n.kind, n.parent_id, tree.depth + 1, tree.sort || '/' || {ORDER}
+  FROM work_nodes n JOIN tree ON n.ledger_slug=:slug AND n.parent_id=tree.node_id WHERE tree.depth < {LEVELS}
+)
+SELECT node_id, kind, parent_id, depth FROM tree ORDER BY sort
+"""
+ANCESTORS = f"""
+WITH RECURSIVE up(node_id, kind, parent_id, depth) AS (
+  SELECT node_id, kind, parent_id, 0 FROM work_nodes WHERE ledger_slug=:slug AND node_id=:node
+  UNION ALL
+  SELECT n.node_id, n.kind, n.parent_id, up.depth + 1
+  FROM work_nodes n JOIN up ON n.ledger_slug=:slug AND n.node_id=up.parent_id WHERE up.depth < {LEVELS}
+)
+SELECT node_id, kind, parent_id, depth FROM up WHERE depth > 0 ORDER BY depth DESC
+"""
+DEPENDENTS = f"""
+WITH RECURSIVE down(node_id, depth) AS (
+  SELECT node_id, 1 FROM work_dependencies WHERE ledger_slug=:slug AND requires_id=:node
+  UNION
+  SELECT d.node_id, down.depth + 1
+  FROM work_dependencies d JOIN down ON d.ledger_slug=:slug AND d.requires_id=down.node_id WHERE down.depth < {CHAIN}
+)
+SELECT n.node_id, n.kind, n.parent_id, MIN(down.depth) AS nearest
+FROM down JOIN work_nodes n ON n.ledger_slug=:slug AND n.node_id=down.node_id WHERE n.node_id != :node
+GROUP BY n.node_id ORDER BY nearest, {ORDER}
+"""
+READS = {"children": CHILDREN, "subtree": SUBTREE, "ancestors": ANCESTORS, "dependents": DEPENDENTS}
+NODE = "SELECT 1 FROM work_nodes WHERE ledger_slug=? AND node_id=?"
+
+
+def read(connection, slug: str, name: str, node: str | None = None) -> list:
+    if node is not None and connection.execute(NODE, (slug, node)).fetchone() is None:
+        raise KeyError(node)
+    rows = connection.execute(READS[name], {"slug": slug, "node": node})
+    return [
+        {"node": found, "kind": kind, "parent": parent_id, "depth": depth} for found, kind, parent_id, depth in rows
+    ]
