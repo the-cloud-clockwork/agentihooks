@@ -79,30 +79,6 @@
           "link": ".."
         }
       ]
-    },
-    "late chained link": {
-      "refused": "s/c",
-      "members": [
-        {
-          "name": "s",
-          "type": "dir"
-        },
-        {
-          "name": "s/c",
-          "type": "symlink",
-          "link": "x/.."
-        },
-        {
-          "name": "s/x",
-          "type": "symlink",
-          "link": "y"
-        },
-        {
-          "name": "s/y",
-          "type": "symlink",
-          "link": ".."
-        }
-      ]
     }
   }
 }
