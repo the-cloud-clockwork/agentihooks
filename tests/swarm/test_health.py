@@ -145,9 +145,8 @@ def settled(by, items=24, decided=True):
     return events
 
 
-def cleared(by, n, reason=None):
-    found = ev("priority cleared", f"followups/c{n}", by=by)
-    return {**found, "reason": reason} if reason else found
+def cleared(by, n):
+    return ev("priority cleared", f"followups/c{n}", by=by)
 
 
 def test_a_dispatcher_seat_is_credited_with_each_priority_it_settles_with_a_decision():
@@ -169,20 +168,21 @@ def test_a_dispatcher_seat_settling_without_a_decision_is_still_ceremony():
     ]
 
 
-def test_a_priority_cleared_with_a_reason_or_settled_twice_counts_once_per_item():
-    events = [ev("comment edited", "phases/p1", by=DISPATCHER) for _ in range(24)]
-    events += [cleared(DISPATCHER, 0, "the follow up was answered"), cleared(DISPATCHER, 0, "again")]
-    events.append({**cleared(DISPATCHER, 1), "reason": ""})
+def test_a_priority_cleared_after_the_seat_comment_counts_once_per_item():
+    events = [ev("comment edited", "phases/p1", by=DISPATCHER) for _ in range(22)]
+    events += [ev("comment added", "followups/c0", by=DISPATCHER), cleared(DISPATCHER, 0)]
+    events += [cleared(DISPATCHER, 0), cleared(DISPATCHER, 1)]
     assert [f["evidence"] for f in run({"tasks": [], "_meta": {"events": events}})] == [
-        ["27 ledger transitions", "1 outcome"]
+        ["26 ledger transitions", "1 outcome"]
     ]
 
 
-def test_a_dispatcher_seat_is_graded_on_its_decisions_never_on_tasks_it_closed():
+def test_a_dispatcher_seat_keeps_the_credit_for_a_task_it_closed():
     events = [ev("comment edited", "phases/p1", by=DISPATCHER) for _ in range(24)]
+    events += [ev("comment added", "followups/f0", by=DISPATCHER), ev("checked", "followups/f0", by=DISPATCHER)]
     events.append(ev("task done", "tasks/t1", by=DISPATCHER))
     assert [f["evidence"] for f in run({"tasks": [task("t1")], "_meta": {"events": events}})] == [
-        ["25 ledger transitions", "0 outcomes"]
+        ["27 ledger transitions", "2 outcomes"]
     ]
 
 

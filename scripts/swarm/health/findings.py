@@ -130,11 +130,9 @@ def _is_dispatcher(by):
 def _decided(events):
     commented = {(e["by"], e["target"]) for e in events if e.get("kind") == "comment added"}
     settled = {
-        (e["by"], e["target"])
-        for e in events
-        if e.get("kind") in SETTLED and ((e["by"], e["target"]) in commented or e.get("reason"))
+        (e["by"], e["target"]) for e in events if e.get("kind") in SETTLED and (e["by"], e["target"]) in commented
     }
-    return Counter(by for by, _ in settled)
+    return Counter(by for by, _ in settled if _is_dispatcher(by))
 
 
 def ceremony(events, tasks, limits, green=frozenset(), talk=None):
@@ -147,7 +145,7 @@ def ceremony(events, tasks, limits, green=frozenset(), talk=None):
     for by, count in sorted(moves.items()):
         if not naming.lane_of(by) or by in delivering or (talk is not None and _is_worker(by)):
             continue
-        outcomes = len(finished) if _is_master(by) else decided[by] if _is_dispatcher(by) else closed[by]
+        outcomes = len(finished) if _is_master(by) else closed[by] + decided[by]
         if count >= limits.ceremony_min and count / max(outcomes, 1) > limits.ceremony_ratio:
             found.append(
                 Finding(
