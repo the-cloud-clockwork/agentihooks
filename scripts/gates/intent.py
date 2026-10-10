@@ -444,16 +444,17 @@ class Check:
                 continue
             record = verdicts.read(task["id"])
             judged = record and record["verdict"] != PENDING and not record.get("planned")
-            reused = self.mode != "coach" and judged and _same_phase(record, task)
-            if reused and record.get("inputs") == _fingerprint(doc, task):
+            moved = self.mode != "coach" and judged and record.get("inputs") != _fingerprint(doc, task)
+            if self.mode != "coach" and judged and _same_phase(record, task) and not moved:
                 continue
-            tasks.append((task, record))
+            tasks.append((task, record, moved))
         with ThreadPoolExecutor(max_workers=2) as workers:
             pending = [
-                (task, record, workers.submit(copy_context().run, self._judge, doc, task)) for task, record in tasks
+                (task, record, moved, workers.submit(copy_context().run, self._judge, doc, task))
+                for task, record, moved in tasks
             ]
-            for task, record, future in pending:
-                if not record or not _same_phase(record, task):
+            for task, record, moved, future in pending:
+                if not record or not _same_phase(record, task) or moved:
                     verdicts.write(task["id"], PENDING, RUNNING, self.now_ms, phase=task.get("phase"))
                 judgment = future.result()
                 if judgment is not None:

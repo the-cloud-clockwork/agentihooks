@@ -648,6 +648,16 @@ class TestJudgedInputs:
         assert len(asked) == 1
         assert verdicts(tmp_path).read(TASK)["inputs"] == intent._fingerprint(DOC, DOC["tasks"][0])
 
+    def test_a_verdict_on_changed_inputs_stops_standing_while_it_is_judged_again(self, tmp_path, mode):
+        counted_pass(tmp_path, mode, DOC, [], "pass")
+        check(tmp_path, mode, view=lambda url: None).run(changed(title="Intent gate"))
+        assert verdicts(tmp_path).read(TASK) == {
+            "verdict": "pending",
+            "reason": "intent check running",
+            "at": NOW,
+            "phase": "p8",
+        }
+
 
 class TestModeOf:
     @pytest.mark.parametrize(

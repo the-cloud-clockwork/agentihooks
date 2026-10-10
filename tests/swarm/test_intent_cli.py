@@ -229,10 +229,10 @@ def test_the_tick_stamps_its_own_time_on_the_verdict(started, monkeypatch):
     monkeypatch.setattr(intent, "judge", lambda state: ("pass", "ok"))
     monkeypatch.setattr(cli, "now_ms", lambda: 777)
     cli.run_tick(store, "sw")
-    record = Verdicts("sw", "intent").read("t1")
-    assert {k: record[k] for k in ("verdict", "reason", "at", "phase")} == {
+    assert Verdicts("sw", "intent").read("t1") == {
         "verdict": "pass",
         "reason": "ok",
         "at": 777,
         "phase": "p1",
+        "inputs": intent._fingerprint({"phases": ledger.phases}, ledger.rows["t1"]),
     }
