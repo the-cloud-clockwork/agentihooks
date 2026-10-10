@@ -79,7 +79,7 @@
     "test": "tests/test_swarm_v2_quota.py::test_fleet_observations_are_off_unless_enabled",
     "job": 114222011794,
     "output": "PASSED at 2026-10-10T13:21:10.8691929Z",
-    "data_safety": "Turning the switch off changes only what fleet_observations returns; no code path deletes quota or quota-history keys, and the test reads the stored exhausted observation again once the switch is 1. The records are authoritative and never deleted as caches"
+    "data_safety": "Turning the switch off changes only what fleet_observations returns; no code path deletes quota or quota-history keys, and the test reads the stored exhausted observation again once the switch is 1. The keys are authoritative and never deleted as caches; history is trimmed to the newest 50 entries by design"
   },
   "remaining_limitations": [
     "admit and cap have no production caller yet; the distributed launch path that also calls AccountCapacity.reserve is a later package",
