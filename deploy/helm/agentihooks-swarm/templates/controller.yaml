@@ -20,6 +20,14 @@ spec:
     spec:
       {{- include "swarm.podSecurity" . | nindent 6 }}
       terminationGracePeriodSeconds: {{ .Values.controller.terminationGracePeriodSeconds | default 30 }}
+      {{- with .Values.controller.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controller.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       initContainers:
         - name: wait
           image: {{ include "swarm.image" . }}

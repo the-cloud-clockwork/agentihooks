@@ -52,6 +52,15 @@ redis:
       ephemeral-storage: 256Mi
 
 controller:
+  # Durable capacity only: EC2 nodes carry anton.io/capacity-type and the autoscaler may remove them.
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: anton.io/capacity-type
+                operator: DoesNotExist
+  tolerations: []
   livenessProbe:
     initialDelaySeconds: 60
     periodSeconds: 10
