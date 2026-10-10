@@ -1,0 +1,54 @@
+{
+  "package": "SV2-ACC-02",
+  "case": "T-SV2-ACC-02-C",
+  "title": "recovery and replay: a worker that never starts releases its bounded reservation",
+  "tested_commit": "6ab5b7036792e591123b1f04999b089af814f8d0",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38052074829",
+  "fixture": "tests/fixtures/swarm_v2/account-capacity.json: account fixture with cap 2, seat eng-1 holding one slot, and two simultaneous launch requests from seats eng-2 and eng-3",
+  "fixture_clock": "build() patches time.time to the fixture clock; AccountCapacity reads the same list",
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_accounts.py::test_a_worker_that_never_starts_stops_counting_at_its_reservation_expiry",
+      "job": 114213747917,
+      "output": "PASSED at 2026-10-10T12:36:41.1025469Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_accounts.py::test_a_reservation_retried_after_a_lost_reply_or_restart_has_one_effect",
+      "job": 114213747876,
+      "output": "PASSED at 2026-10-10T12:36:16.1661462Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_accounts.py::test_an_occupancy_stops_counting_when_its_record_closes_or_disappears",
+      "job": 114213747904,
+      "output": "PASSED at 2026-10-10T12:35:52.6423148Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_accounts.py::test_freeze_refuses_new_reservations_and_reconstruct_rebuilds_occupancy",
+      "job": 114213747876,
+      "output": "PASSED at 2026-10-10T12:36:16.0747400Z"
+    },
+    {
+      "test": "tests/context/test_account_sessions.py::test_fleet_slots_stay_out_while_distributed_launches_are_off",
+      "job": 114213747910,
+      "output": "PASSED at 2026-10-10T12:35:51.5310753Z"
+    },
+    {
+      "test": "tests/context/test_account_sessions.py::test_fleet_slots_fail_open_when_redis_breaks_mid_read",
+      "job": 114213747905,
+      "output": "PASSED at 2026-10-10T12:36:25.9409021Z"
+    }
+  ],
+  "recovery": {
+    "expiry": "the unstarted reservation counts until its deadline (TTL - 1) and stops at TTL; the next reservation prunes it",
+    "replay": "a commit whose reply is lost, retried by a new controller instance with the same grant, returns the same slot and leaves one row",
+    "ended_occupancy": "an occupancy whose registry record closes or disappears stops counting",
+    "durability": "reservations, occupancies and conflict counters live in Redis; nothing is replaced by a success label"
+  },
+  "account_reservation_conflicts_total": {
+    "value": 1,
+    "dimension": "account fixture, the refusal before expiry"
+  },
+  "cleanup": "fakeredis per test; no live resource mutations",
+  "passed": true
+}
