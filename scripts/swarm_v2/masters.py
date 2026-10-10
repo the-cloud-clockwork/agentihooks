@@ -89,8 +89,8 @@ def route(target: str, doc: dict, owners: Callable[[], dict[str, str]], live: li
 
 
 def seat_lines(slug: str, task: dict) -> list[str]:
-    """Opening prompt lines for a master in seat two or later; the lead seat gets none."""
-    if task.get("id", MASTER) == MASTER:
+    """Opening prompt lines for a master the scaling pass launched in seat two or later; any other task gets none."""
+    if "masters" not in task:
         return []
     swarm = f"agentihooks swarm {slug}"
     return [
