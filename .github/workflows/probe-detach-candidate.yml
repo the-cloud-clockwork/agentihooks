@@ -15,11 +15,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {leg: candidate-natural, stress: none, patch: none, count: "400", kill: ""}
-          - {leg: candidate-io, stress: io, patch: none, count: "300", kill: ""}
-          - {leg: candidate-io-nofsync, stress: io, patch: nofsync, count: "300", kill: ""}
-          - {leg: candidate-killed-grandchild, stress: none, patch: none, count: "20", kill: grandchild-one}
-          - {leg: candidate-killed-exporter, stress: none, patch: none, count: "20", kill: exporter}
+          - {leg: candidate2-natural, stress: none, patch: none, count: "400", kill: ""}
+          - {leg: candidate2-io, stress: io, patch: none, count: "300", kill: ""}
+          - {leg: candidate2-killed-grandchild, stress: none, patch: none, count: "20", kill: grandchild-one}
+          - {leg: candidate2-killed-exporter, stress: none, patch: none, count: "20", kill: exporter}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

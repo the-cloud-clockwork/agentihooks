@@ -22,10 +22,12 @@ def test_detach_candidate(worker):  # noqa: F811
     before = {role: wait_for(root / f"heartbeat-{role}.json", child)["tick"] for role in ROLES}
     kill = os.environ.get("PROBE_KILL")
     if kill:
-        os.kill(json.loads((root / f"fixture-{kill}.json").read_text())["pid"], signal.SIGKILL)
+        receipt = "exporter.json" if kill == "exporter" else f"fixture-{kill}.json"
+        os.kill(json.loads((root / receipt).read_text())["pid"], signal.SIGKILL)
     begun = time.monotonic()
     viewer = subprocess.Popen([sys.executable, "-c", "pass"])
     assert viewer.wait() == 0
+    before = ticks(root)
     deadline = begun + 5
     after = ticks(root)
     while not all(after[role] > before[role] for role in ROLES) and time.monotonic() < deadline:
