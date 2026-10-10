@@ -23,6 +23,7 @@ RELEASES = ("grant", "account")
 RESUME, FRESH, PENDING = "resume", "fresh", "recovery_pending"
 AWAITING, FENCED = "awaiting-decision", "fenced"
 PENDING_POD = "swarm-pending"
+NEW_ATTEMPT = {"execution_id": "", "generation": 0, "state": "working", "conversation_id": ""}
 FENCES = "attempt-fences"
 RECOVERIES = "attempt-recoveries"
 LATE = "attempt-late-observations"
@@ -121,7 +122,9 @@ class Recovery:
         ready = None if ready_nodes is None else frozenset(ready_nodes)
         groups, seen = {}, {}
         for pod in pods:
-            groups.setdefault(pod["metadata"].get("labels", {}).get(EXECUTION_LABEL, ""), []).append(pod)
+            execution_id = pod["metadata"].get("labels", {}).get(EXECUTION_LABEL)
+            if execution_id:
+                groups.setdefault(execution_id, []).append(pod)
         for agent in self.store.execution_occupants(self.slug).values():
             if agent.runtime_backend == BACKEND:
                 seen[agent.execution_id] = self._observe(agent, groups.pop(agent.execution_id, []), ready)
@@ -164,7 +167,7 @@ class Recovery:
         """The operator's pause outlives a controller restart; the constructor flag stays the deployment default."""
         self.controller.require()
         if paused:
-            self.store.redis.set(self._key(PAUSED), "1")
+            self.store.redis.set(self._key(PAUSED), self.controller.held.epoch)
         else:
             self.store.redis.delete(self._key(PAUSED))
 
@@ -285,9 +288,7 @@ class Recovery:
         self.controller.require()
         self.store.put_agent(self.slug, replace(occupant, state=FENCED))
         target = {"pod_namespace": agent.runtime_target["pod_namespace"], "pod_name": PENDING_POD}
-        record = replace(
-            agent, execution_id="", generation=0, state="working", conversation_id="", runtime_target=target
-        )
+        record = replace(agent, runtime_target=target, **NEW_ATTEMPT)
         return self.controller.admit(record, agent.execution_id).execution_id
 
     def _record(self, decision: Decision) -> Decision:

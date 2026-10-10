@@ -157,7 +157,7 @@ def test_only_the_current_attempt_of_a_seat_can_be_fenced(world):
     newer = world.recovery(world.live)
     world.store.redis.hdel(world.store.key(cases.SLUG, "attempt-fences"), world.old.execution_id)
     world.store.redis.hdel(world.store.key(cases.SLUG, "attempt-recoveries"), world.old.execution_id)
-    with pytest.raises(SwarmError, match="only the current attempt of a seat can be fenced"):
+    with pytest.raises(SwarmError, match="^only the current attempt of a seat can be fenced$"):
         newer.handle(world.old.execution_id, "oom_killed")
     assert world.occupant().execution_id == replacement
 
@@ -169,7 +169,7 @@ def test_a_seat_moved_past_the_fenced_attempt_is_refused(world):
     third = world.live.admit(replace(world.store.execution(cases.SLUG, second), execution_id="", generation=0), second)
     assert third.generation == 3
     world.store.redis.hdel(world.store.key(cases.SLUG, "attempt-recoveries"), world.old.execution_id)
-    with pytest.raises(SwarmError, match="the seat moved past the fenced attempt"):
+    with pytest.raises(SwarmError, match="^the seat moved past the fenced attempt$"):
         recovery.handle(world.old.execution_id, "oom_killed")
 
 
@@ -281,6 +281,84 @@ def test_an_image_pull_never_replaces_automatically(world):
     decision = world.recovery(world.live).handle(world.old.execution_id, "image_pull")
     assert decision.mode == "recovery_pending"
     assert world.attempts() == [[world.old.execution_id, 1]]
+
+
+def test_a_container_without_a_state_shows_no_failure():
+    status = {"phase": "Pending", "initContainerStatuses": [{"name": "init"}], "containerStatuses": [{"name": "a"}]}
+    assert failures.classify(_pod(status)) == ""
+
+
+def test_recovery_replaces_automatically_unless_told_otherwise(world):
+    built = world.recovery(world.live)
+    default = failures.Recovery(
+        built.store, built.slug, built.controller, built.checkpoints, built.releases, built.compatibility
+    )
+    assert default.handle(world.old.execution_id, "oom_killed").mode == "resume"
+
+
+def test_pods_without_an_execution_label_are_ignored(world):
+    recovery = world.recovery(world.live)
+    pods = [*world.api.objects.values(), {"metadata": {}}, {"metadata": {"labels": {"app": "other"}}}]
+    assert recovery.reconcile(pods, sorted(world.ready)) == {world.old.execution_id: "working"}
+
+
+def test_a_pod_without_a_spec_is_observed_without_a_node(world):
+    recovery = world.recovery(world.live)
+    pod = json.loads(json.dumps(world.api.objects[f"swarm-{world.old.execution_id}"]))
+    del pod["spec"]
+    assert recovery.reconcile([pod], sorted(world.ready)) == {world.old.execution_id: "working"}
+    assert world.store.redis.hget(world.store.key(cases.SLUG, "attempt-nodes"), world.old.execution_id) is None
+
+
+def test_a_live_pod_on_a_node_outside_the_ready_set_is_lost(world):
+    recovery = world.recovery(world.live)
+    world.ready.discard(world.fx["first"]["node"])
+    assert world.reconcile(recovery) == {world.old.execution_id: "fenced"}
+    assert recovery.fence(world.old.execution_id)["reason"] == "node_lost"
+
+
+def test_each_reappearing_old_pod_counts_as_one_late_observation(world):
+    recovery = world.recovery(world.live)
+    pod = world.api.objects[f"swarm-{world.old.execution_id}"]
+    recovery.handle(world.old.execution_id, "oom_killed")
+    recovery.reconcile([pod, json.loads(json.dumps(pod))], sorted(world.ready))
+    assert recovery.late_observations(world.old.execution_id) == 2
+
+
+def test_a_settled_decision_is_not_reopened_by_a_later_failure(world):
+    recovery = world.recovery(world.live, automatic=False)
+    recovery.handle(world.old.execution_id, "evicted")
+    settled = recovery.decide(world.old.execution_id, "fresh")
+    assert recovery.handle(world.old.execution_id, "oom_killed") == settled
+    assert len(world.attempts()) == 2
+
+
+def test_the_replacement_starts_on_a_pending_pod_whatever_the_old_target(world):
+    old = world.store.execution(cases.SLUG, world.old.execution_id)
+    world.store.put_agent(cases.SLUG, replace(old, runtime_target={**old.runtime_target, "pod_name": "swarm-old"}))
+    decision = world.recovery(world.live).handle(world.old.execution_id, "oom_killed")
+    replacement = world.store.execution(cases.SLUG, decision.replacement)
+    assert replacement.runtime_target == {"pod_namespace": world.api.namespace, "pod_name": "swarm-pending"}
+
+
+def test_recovery_reads_the_clock_of_its_own_store(world, monkeypatch):
+    def clock(store):
+        assert store.redis.time()
+        return world.clock[0]
+
+    monkeypatch.setattr(failures.lease, "now_ms", clock)
+    recovery = world.recovery(world.live)
+    world.show(world.old, "image_pull")
+    assert world.reconcile(recovery) == {world.old.execution_id: "pulling"}
+    recovery.handle(world.old.execution_id, "image_pull")
+    assert recovery.fence(world.old.execution_id)["fenced_at_ms"] == world.clock[0]
+
+
+def test_the_pause_records_the_controller_epoch_that_set_it(world):
+    recovery = world.recovery(world.live)
+    recovery.pause(True)
+    key = world.store.key(cases.SLUG, "recovery-paused")
+    assert int(world.store.redis.get(key)) == world.live.held.epoch
 
 
 def test_resume_decision_uses_the_checkpoint_and_admits_one_replacement(world):
