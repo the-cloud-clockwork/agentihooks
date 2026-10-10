@@ -8,6 +8,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 import scripts.swarm_v2.architecture as architecture
+from scripts.swarm_v2.runtime.commands import Principal, Role
 
 ROOT = Path(__file__).resolve().parents[1]
 RECORD = ROOT / "docs" / "swarm-v2" / "architecture.json"
@@ -17,6 +18,13 @@ DISPATCHER_REASON = "inserts another coding-task queue beside Swarm reconciliati
 BACKLOG_REASON = "a backlog must be bounded and carry one of transcripts, changed_content (AD-05)"
 SIGNER = Ed25519PrivateKey.from_private_bytes(b"k" * 32)
 KEY = SIGNER.public_key()
+OPERATOR = {
+    "slug": "rig",
+    "credential": "page",
+    "authenticate": lambda slug, credential: (
+        Principal("nestor", Role.OPERATOR) if (slug, credential) == ("rig", "page") else None
+    ),
+}
 
 
 def _signed(change):
@@ -549,7 +557,7 @@ def test_rollback_restores_the_earlier_revision_and_keeps_every_rejection(tmp_pa
     path = _record(tmp_path)
     architecture.apply_inventory(path, _inventory())
     base = architecture.load_record(RECORD)["components"]
-    result = architecture.rollback(path, 1, "rollback-1")
+    result = architecture.rollback(path, 1, "rollback-1", **OPERATOR)
     after = architecture.load_record(path)
     assert result == {
         "operation": "rollback-1",
@@ -589,7 +597,7 @@ def test_rollback_keeps_components_up_to_the_target_revision(tmp_path):
     path = _record(tmp_path)
     architecture.apply_inventory(path, _inventory())
     architecture.apply_inventory(path, _single(_proposal(name="Later service"), operation="op-2", base_revision=2))
-    result = architecture.rollback(path, 2, "rollback-2")
+    result = architecture.rollback(path, 2, "rollback-2", **OPERATOR)
     assert result["rolled_back"] == ["Later service"]
     assert architecture.load_record(path)["components"][-1]["name"] == "Brain arc embedding backlog"
 
@@ -598,8 +606,8 @@ def test_rollback_can_restore_a_later_accepted_revision(tmp_path):
     path = _record(tmp_path)
     architecture.apply_inventory(path, _inventory())
     accepted = architecture.load_record(path)["components"]
-    architecture.rollback(path, 1, "back")
-    result = architecture.rollback(path, 2, "forward")
+    architecture.rollback(path, 1, "back", **OPERATOR)
+    result = architecture.rollback(path, 2, "forward", **OPERATOR)
     after = architecture.load_record(path)
     assert result == {
         "operation": "forward",
@@ -682,28 +690,33 @@ def test_a_corrected_proposal_needs_a_new_operation_at_the_current_revision(tmp_
 def test_rollback_replay_and_refusals(tmp_path):
     path = _record(tmp_path)
     with pytest.raises(architecture.ArchitectureError) as error:
-        architecture.rollback(path, 1, "r")
+        architecture.rollback(path, 1, "r", **OPERATOR)
     assert str(error.value) == "rollback target 1 is not an earlier revision of 1"
     architecture.apply_inventory(path, _inventory())
     for target in (0, 2):
         with pytest.raises(architecture.ArchitectureError) as error:
-            architecture.rollback(path, target, "r")
+            architecture.rollback(path, target, "r", **OPERATOR)
         assert str(error.value) == f"rollback target {target} is not an earlier revision of 2"
-    first = architecture.rollback(path, 1, "r")
+    first = architecture.rollback(path, 1, "r", **OPERATOR)
     before = path.read_bytes()
-    assert architecture.rollback(path, 1, "r") == first
+    assert architecture.rollback(path, 1, "r", **OPERATOR) == first
     assert path.read_bytes() == before
     with pytest.raises(
         architecture.ArchitectureError, match="^operation r was already recorded with different content$"
     ):
-        architecture.rollback(path, 2, "r")
+        architecture.rollback(path, 2, "r", **OPERATOR)
 
 
-def test_cli_rollback_writes_the_record_and_its_markdown(tmp_path, capsys):
+def test_cli_rollback_writes_the_record_and_its_markdown(tmp_path, monkeypatch, capsys):
     path = _record(tmp_path)
     architecture.apply_inventory(path, _inventory())
     markdown = tmp_path / "decisions.md"
+    monkeypatch.setattr(architecture, "_page_credential", {"rig": "page"}.get)
+    monkeypatch.setattr("hooks.context.broadcast.session_name", lambda pid: "")
+    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
     argv = ["rollback", "--record", str(path), "--to", "1", "--operation", "r", "--markdown", str(markdown)]
+    argv += ["--slug", "rig"]
     assert architecture.main(argv) == 0
     expected = {"operation": "r", "revision": 2, "rolled_back": ["Brain arc embedding backlog"], "restored": []}
     assert capsys.readouterr().out == json.dumps(expected, indent=2) + "\n"
@@ -729,6 +742,8 @@ def test_cli_render_writes_markdown_only(tmp_path, monkeypatch, capsys):
         (["record"], "--inventory"),
         (["rollback", "--operation", "r"], "--to"),
         (["rollback", "--to", "1"], "--operation"),
+        (["rollback", "--to", "1", "--operation", "r"], "--slug"),
+        (["approve"], "--inventory, --proposal, --reason, --slug"),
         ([], "command"),
     ],
 )
