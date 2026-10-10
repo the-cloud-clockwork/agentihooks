@@ -320,7 +320,9 @@ def select(
     pool_live = sum(sessions.get(account.name, 0) for account in pool)
     seat = place.place(api, CodexAccountSource(sessions=sessions).offer(pool, quotas, now), weight, pool_live)
     if seat is None:
-        raise RoutingError("no signed in Codex account has a fresh reading and a free session under its quota band")
+        refused = [text for account in token_accounts(environ or {}) if (text := refusal(account, environ or {}))]
+        no_seat = "no signed in Codex account has a fresh reading and a free session under its quota band"
+        raise RoutingError("; ".join([no_seat, *refused]))
     if seat.kind == API:
         return api_account(environ or {}), "open", seat
     return by_name[seat.account], "open", seat
@@ -396,13 +398,7 @@ def _route(environ: Mapping[str, str], route: str, run: Callable) -> tuple[Codex
     pool = routing_pool(environ, run) if route else source.pool(environ)
     now = time.time()
     found = source.readings(pool, environ, now)
-    try:
-        account, placement, seat = select(pool, found, sessions, now, route, environ)
-    except RoutingError as exc:
-        refused = [] if route else [text for account in token_accounts(environ) if (text := refusal(account, environ))]
-        if not refused:
-            raise
-        raise RoutingError("; ".join([str(exc), *refused])) from exc
+    account, placement, seat = select(pool, found, sessions, now, route, environ)
     return account, placement, sessions.get(account.name, 0), str(seat.cap) if seat else "?"
 
 

@@ -712,6 +712,13 @@ def test_an_open_route_with_no_seat_names_each_refused_credential(monkeypatch, t
     )
 
 
+def test_a_forced_route_to_an_unknown_account_never_lists_refused_credentials(monkeypatch, tmp_path):
+    environ = {"HOME": "/home/u", "AH_CX_TOKEN_keyed": "sk-proj-value"}
+    rc, seen, report = _launch(monkeypatch, tmp_path, environ, ["--route", "ghost"])
+    assert (rc, seen) == (3, {})
+    assert report.read_text() == "status=failed\nerror=Codex account 'ghost' not found; available: default, keyed\n"
+
+
 def test_a_refused_token_keeps_its_sessions_out_of_the_default_reading(monkeypatch):
     monkeypatch.setattr(router, "_registry", lambda: {"s-keyed": {"account": "keyed"}, "s-own": {}})
     monkeypatch.setattr(
