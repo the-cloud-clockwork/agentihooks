@@ -234,6 +234,7 @@ def test_scan_reads_every_layer_and_the_image_config_for_secrets(tmp_path):
     assert "--scanners secret --image-config-scanners secret --exit-code 1" in log
     assert "/trivy-secret.yaml:/etc/trivy-secret.yaml:ro" in log and "--secret-config /etc/trivy-secret.yaml" in log
     assert log.rstrip().endswith("candidate:x")
+    assert "no credentials found in candidate:x" in done.stdout
 
 
 def test_the_scan_allows_only_published_python_package_descriptions():
@@ -250,7 +251,6 @@ def test_the_scan_allows_only_published_python_package_descriptions():
         "/opt/venv/lib/python3.12/site-packages/jwt/api_jwt.py",
     ):
         assert not path.search(other)
-    assert "no credentials found in candidate:x" in done.stdout
 
 
 def test_scan_refuses_an_image_holding_a_credential(tmp_path):
