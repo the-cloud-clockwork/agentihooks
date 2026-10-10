@@ -281,7 +281,27 @@ def test_init_containers_are_checked_like_the_agent(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "path", ["/home/iamroot", "/home/iamroot/", "/home", "/root", "/Users/op", "/", "/home/./iamroot"]
+    "path",
+    [
+        "/home/iamroot",
+        "/home/iamroot/",
+        "/home",
+        "/root",
+        "/Users/op",
+        "/Users",
+        "/",
+        "/home/./iamroot",
+        "//home/iamroot",
+        "/home/iamroot/.ssh",
+        "/home/iamroot/dev/.codex/sessions",
+        "/home/iamroot/dev/../.claude",
+        "/root/.kube",
+        "/mnt/c/Users/op",
+        "/mnt/c/Users",
+        "/mnt/c",
+        "/mnt",
+        "/mnt/c/Users/op/.aws",
+    ],
 )
 def test_the_operator_home_from_the_node_is_refused_even_read_only(tmp_path, path):
     checker = MountChecker()
@@ -304,7 +324,9 @@ def test_an_unmounted_operator_home_volume_is_still_refused(tmp_path):
     assert refused(pod).reason == "operator_home"
 
 
-@pytest.mark.parametrize("path", ["/home/iamroot/dev/seed", "/var/lib/swarm-cache", "/Users/op/x"])
+@pytest.mark.parametrize(
+    "path", ["/home/iamroot/dev/seed", "/var/lib/swarm-cache", "/Users/op/x", "/mnt/c/Users/op/seed", "/mnt/data"]
+)
 def test_a_folder_inside_an_operator_home_is_not_the_whole_home(tmp_path, path):
     pod = add(
         safe_pod(tmp_path),
@@ -422,3 +444,79 @@ def test_every_refused_render_is_counted(tmp_path):
             template.render(launch())
     assert template.pod_spec_validation_failures_total() == {"storage": 2}
     assert template.shared_runtime_mount_rejections_total() == {"operator_home": 2}
+
+
+def test_a_host_path_marked_read_only_at_its_source_is_still_writable(tmp_path):
+    pod = add(
+        safe_pod(tmp_path),
+        {"name": "x", "hostPath": {"path": "/var/lib/x", "readOnly": True}},
+        {"name": "x", "mountPath": "/home/worker/.codex", "subPath": EXECUTION},
+    )
+    assert refused(pod).reason == "shared_runtime"
+
+
+@pytest.mark.parametrize("path", ["//home/worker", "/srv/../home/worker/attempts", "//tmp"])
+def test_a_runtime_root_spelled_another_way_is_still_a_runtime_root(tmp_path, path):
+    pod = add(
+        safe_pod(tmp_path),
+        {"name": "x", "persistentVolumeClaim": {"claimName": "x"}},
+        {"name": "x", "mountPath": path, "subPath": EXECUTION},
+    )
+    assert refused(pod).reason == "shared_runtime"
+
+
+def test_a_volume_naming_a_private_and_a_shared_source_is_shared(tmp_path):
+    pod = add(
+        safe_pod(tmp_path),
+        {"name": "x", "emptyDir": {}, "nfs": {"server": "n", "path": "/x"}},
+        {"name": "x", "mountPath": "/srv/x"},
+    )
+    assert refused(pod).reason == "unscoped_shared_write"
+
+
+def test_a_volume_read_only_only_on_one_of_its_sources_is_writable(tmp_path):
+    pod = add(
+        safe_pod(tmp_path),
+        {
+            "name": "x",
+            "persistentVolumeClaim": {"claimName": "x", "readOnly": True},
+            "nfs": {"server": "n", "path": "/x"},
+        },
+        {"name": "x", "mountPath": "/srv/x"},
+    )
+    assert refused(pod).reason == "unscoped_shared_write"
+
+
+def test_a_private_volume_of_the_same_name_hides_neither_a_shared_one_nor_the_operator_home(tmp_path):
+    shared = add(
+        safe_pod(tmp_path), {"name": "x", "nfs": {"server": "n", "path": "/x"}}, {"name": "x", "mountPath": "/srv/x"}
+    )
+    shared["spec"]["volumes"].append({"name": "x", "emptyDir": {}})
+    assert refused(shared).reason == "unscoped_shared_write"
+    home = copy.deepcopy(safe_pod(tmp_path))
+    home["spec"]["volumes"] += [{"name": "op", "hostPath": {"path": "/home/iamroot"}}, {"name": "op", "emptyDir": {}}]
+    assert refused(home).reason == "operator_home"
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        [],
+        {"spec": {"containers": []}},
+        {"metadata": {}, "spec": {}},
+        {"metadata": {}, "spec": {"containers": [{"volumeMounts": [{}]}]}},
+    ],
+)
+def test_the_checker_command_names_a_file_that_is_not_a_pod(tmp_path, capsys, document):
+    path = tmp_path / "pod.json"
+    path.write_text(json.dumps(document))
+    assert storage.main([str(path)]) == 1
+    assert capsys.readouterr().err == f"{path} is not a Pod manifest\n"
+
+
+@pytest.mark.parametrize("field", ["name", "mount_path"])
+def test_the_policy_refuses_mounts_that_repeat_a_name_or_a_path(tmp_path, field):
+    other = {**ARTIFACTS, field: SEED[field]}
+    with pytest.raises(PodSpecRefused) as error:
+        load(tmp_path, policy(SEED, other))
+    assert (error.value.reason, str(error.value)) == ("policy", f"pod policy mounts repeat a {field}")

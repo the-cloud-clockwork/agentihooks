@@ -18,7 +18,7 @@ from tests.contracts.storage_layout.test_pod_storage import (
     policy,
     safe_pod,
 )
-from tests.contracts.storage_layout.test_publication import DATA, SCOPE, lose, restore, snapshot
+from tests.contracts.storage_layout.test_publication import DATA, SCOPE, lose, restore
 from tests.test_swarm_v2_cache import build, fill, key, published, read_only, stamped
 
 DIMENSIONS = {"fixture": "sv2-fsy-05"}
@@ -119,10 +119,10 @@ def case_c() -> dict:
         shared.mkdir()
         (worktree / "diff.patch").write_bytes(DATA)
         store = base.ArtifactStore(LocalBackend(shared))
-        before = snapshot(worktree)
+        before = stamped(worktree)
         lost = lose(shared)
         paused = publication.publish(store, SCOPE, "ckpt-1", worktree / "diff.patch")
-        worktree_intact = snapshot(worktree) == before
+        worktree_intact = stamped(worktree) == before
         restore(shared, lost)
         first = publication.publish(store, SCOPE, "ckpt-1", worktree / "diff.patch")
         keys = store.backend.keys("")
@@ -133,7 +133,7 @@ def case_c() -> dict:
             "published_after_restore": first.state == publication.PUBLISHED,
             "replay_is_the_same_reference": replay == first,
             "no_duplicate_objects": store.backend.keys("") == keys and len(keys) == 2,
-            "worktree_intact_after_replay": snapshot(worktree) == before,
+            "worktree_intact_after_replay": stamped(worktree) == before,
         }
         return {
             "then": "loss of shared artifact storage degrades checkpoint publication without corrupting local worktrees",

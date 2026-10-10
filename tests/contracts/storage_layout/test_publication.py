@@ -5,18 +5,12 @@ import pytest
 from scripts.swarm_v2.artifacts import base, publication
 from scripts.swarm_v2.artifacts.local import LocalBackend
 from scripts.swarm_v2.artifacts.publication import PAUSED, PUBLISHED, Publication
+from tests.test_swarm_v2_cache import stamped
 
 pytestmark = pytest.mark.unit
 
 SCOPE = base.Scope("s1", "t1", "e1", 1)
 DATA = b"uncommitted diff\n"
-
-
-def snapshot(root: Path) -> dict[str, tuple]:
-    return {
-        str(p.relative_to(root)): (p.lstat().st_mode, p.lstat().st_mtime_ns, p.read_bytes() if p.is_file() else None)
-        for p in sorted(root.rglob("*"))
-    }
 
 
 @pytest.fixture
@@ -51,13 +45,13 @@ def test_a_healthy_backend_publishes_the_checkpoint(world):
 
 def test_lost_shared_storage_pauses_publication_and_leaves_the_worktree_untouched(world):
     worktree, shared, store = world
-    before = snapshot(worktree)
+    before = stamped(worktree)
     lose(shared)
     result = publication.publish(store, SCOPE, "ckpt-1", worktree / "diff.patch")
     assert result.state == PAUSED and result.ref is None
     assert result.reason.startswith("artifact storage is unavailable (")
     assert result.reason.endswith("), so publication is paused and the attempt keeps its files")
-    assert snapshot(worktree) == before
+    assert stamped(worktree) == before
 
 
 def test_a_retry_after_the_storage_returns_commits_once(world):

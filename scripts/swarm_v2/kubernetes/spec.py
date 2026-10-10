@@ -115,6 +115,10 @@ def load_policy(path: str | Path) -> dict:
             raise PodSpecRefused(
                 f"{name} probe timeout_seconds must exceed the herdr and brain timeouts together", "policy"
             )
+    mounts = policy.get("mounts", [])
+    for field in ("name", "mount_path"):
+        if len({mount[field] for mount in mounts}) < len(mounts):
+            raise PodSpecRefused(f"pod policy mounts repeat a {field}", "policy")
     return policy
 
 
@@ -215,24 +219,29 @@ def _resources(launch: AdmittedLaunch, limits: dict) -> dict:
     }
 
 
+def _read_only(mount: dict) -> bool:
+    return mount["purpose"] != "artifact"
+
+
 def _shared_volume(mount: dict) -> dict:
-    read_only = mount["purpose"] != "artifact"
     source = mount["source"]
     if "claim" in source:
-        return {"persistentVolumeClaim": {"claimName": source["claim"], "readOnly": read_only}}
+        return {"persistentVolumeClaim": {"claimName": source["claim"], "readOnly": _read_only(mount)}}
     if "host_path" in source:
         return {"hostPath": {"path": source["host_path"], "type": "Directory"}}
-    return {"nfs": {**source["nfs"], "readOnly": read_only}}
+    return {"nfs": {**source["nfs"], "readOnly": _read_only(mount)}}
 
 
-def _shared(policy: dict, launch: AdmittedLaunch) -> tuple[list[dict], list[dict]]:
-    volumes, mounts = [], []
+def _shared_volumes(policy: dict) -> list[dict]:
+    return [{"name": f"shared-{mount['name']}", **_shared_volume(mount)} for mount in policy.get("mounts", [])]
+
+
+def _shared_mounts(policy: dict, launch: AdmittedLaunch) -> list[dict]:
+    mounts = []
     for mount in policy.get("mounts", []):
-        name = f"shared-{mount['name']}"
-        volumes.append({"name": name, **_shared_volume(mount)})
-        at = {"name": name, "mountPath": mount["mount_path"], "readOnly": mount["purpose"] != "artifact"}
-        mounts.append(at | ({"subPath": launch.execution_id} if mount["purpose"] == "artifact" else {}))
-    return volumes, mounts
+        at = {"name": f"shared-{mount['name']}", "mountPath": mount["mount_path"], "readOnly": _read_only(mount)}
+        mounts.append(at if _read_only(mount) else at | {"subPath": launch.execution_id})
+    return mounts
 
 
 def _container(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
@@ -259,7 +268,7 @@ def _container(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
             {"name": "tmp", "mountPath": "/tmp"},  # NOSONAR: a Pod-private emptyDir, never the host /tmp
             {"name": "launch", "mountPath": LAUNCH_DIR, "readOnly": True},
             {"name": "credential", "mountPath": CREDENTIAL_DIR, "readOnly": True},
-            *_shared(policy, launch)[1],
+            *_shared_mounts(policy, launch),
         ],
     }
     for mode in PROBES:
@@ -309,7 +318,7 @@ def _spec(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
                     "defaultMode": 0o400,
                 },
             },
-            *_shared(policy, launch)[0],
+            *_shared_volumes(policy),
         ],
     }
     if "runtime_class_name" in policy:
