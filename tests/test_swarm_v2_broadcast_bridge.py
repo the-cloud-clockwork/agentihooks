@@ -84,7 +84,7 @@ def test_a_remote_worker_prompt_receives_the_fleet_broadcast(world, tmp_path, mo
     delivered.assert_called_once_with("s-remote")
     assert [m["id"] for m in hb.get_critical_broadcasts("s-remote")] == [f"{SLUG}:fleet-warning:1:s-remote"]
     assert hb.get_critical_broadcasts("s-other") == []
-    assert json.loads(world.store.redis.hget(world.fleet.key("broadcast-claims"), REMOTE))["generation"] == 1
+    assert world.fleet.delivery(REMOTE, "fleet-warning")["execution_id"] == world.agents[REMOTE].execution_id
 
 
 def test_the_prompt_hook_claims_before_it_delivers(monkeypatch):
@@ -138,7 +138,7 @@ def test_the_bridge_claims_nothing_while_the_fleet_path_is_off_or_the_grant_is_m
         assert broadcast_bridge.claim("s-local", list(CHANNELS), off) == 0
     missing = {**environ, broadcast_bridge.GRANT_FILE: str(tmp_path / "absent")}
     assert broadcast_bridge.claim("s-local", list(CHANNELS), missing) == 0
-    assert world.store.redis.hget(world.fleet.key("broadcast-claims"), LOCAL) is None
+    assert world.fleet.delivery(LOCAL, "fleet-warning") is None
     assert broadcast_bridge.claim("s-local", list(CHANNELS), environ) == 1
     assert broadcast_bridge.claim("s-local", list(CHANNELS), environ) == 0
 
