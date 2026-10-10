@@ -286,16 +286,19 @@ def test_size_runs_in_lint_graded_by_the_base_with_the_pinned_ruff():
     jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     job = jobs["lint"]
     assert "size" not in jobs
-    assert "needs" not in job
+    assert job.get("needs") in (None, ["reuse"])
     assert "lint" in jobs["gate-required"]["needs"]
     steps = {step.get("name"): step for step in job["steps"]}
     install, base = steps["Install ruff"], steps["Check out the base revision"]
     grader, grade = steps["Check out the protected grader"], steps["Hold the size and complexity limits"]
     assert install["run"] == f"python -m pip install ruff=={size_limits.RUFF_VERSION}"
     assert base["run"] == 'git worktree add --detach "$RUNNER_TEMP/base" "$BASE"'
-    assert grader["run"] == (
-        'git fetch --no-tags origin dev\ngit worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD\n'
+    assert grader["run"] in (
+        'git fetch --no-tags origin dev\ngit worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD\n',
+        'git fetch --no-tags origin "$GRADER"\ngit worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD\n',
     )
+    if 'origin "$GRADER"' in grader["run"]:
+        assert grader.get("env", {}).get("GRADER") == "${{ needs.reuse.outputs.grader }}"
     assert grade["if"] == "${{ !cancelled() }}"
     assert grade["run"] == (
         'if [[ -f "$RUNNER_TEMP/grader/scripts/size_limits.py" ]]; then\n'

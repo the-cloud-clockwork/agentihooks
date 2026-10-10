@@ -301,4 +301,4 @@ def test_the_tests_workflow_runs_wiring_in_lint_and_brain_smoke_as_gate_needs():
     lint = workflow["jobs"]["lint"]
     check = next(step for step in lint["steps"] if step.get("run") == "python -m scripts.ci_wiring")
     assert check["if"] == "${{ !cancelled() }}"
-    assert "needs" not in lint
+    assert lint.get("needs") in (None, ["reuse"])

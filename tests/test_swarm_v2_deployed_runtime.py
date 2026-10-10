@@ -12,6 +12,7 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2 import deployed
 from scripts.swarm_v2.auth_context import GrantRefused
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
+from scripts.swarm_v2.kubernetes.grants import PodGrants
 from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, load_policy
 from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL, owner_for
 from scripts.swarm_v2.launch import DistributedLaunch, LaunchTerms
@@ -37,14 +38,15 @@ def _cs():
 
 class Pods:
     def __init__(self, namespace):
-        self.namespace, self.created, self.nodes_read = namespace, [], 0
+        self.namespace, self.created, self.maps, self.nodes_read = namespace, [], [], 0
 
     def create_pod(self, body):
         self.created.append(body)
-        return {**body, "metadata": {**body["metadata"], "uid": "uid-1"}}
+        return self.read_pod(body["metadata"]["name"])
 
     def read_pod(self, name):
-        return None
+        found = [body for body in self.created if body["metadata"]["name"] == name]
+        return {**found[0], "metadata": {**found[0]["metadata"], "uid": "uid-1"}} if found else None
 
     def list_pods(self, selector):
         return []
@@ -52,6 +54,10 @@ class Pods:
     def ready_nodes(self):
         self.nodes_read += 1
         return []
+
+    def create_config_map(self, body):
+        self.maps.append(body)
+        return body
 
 
 def _store():
@@ -139,7 +145,9 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
     launcher = runtime.launch.func.__self__
     assert isinstance(launcher, DistributedLaunch)
     assert runtime.launch.func == launcher.from_tick
-    assert apis == [(API_URL, "swarm-pod-proof")]
+    assert apis == [(API_URL, "swarm-pod-proof"), (API_URL, "swarm-pod-proof")]
+    assert isinstance(launcher.homes, PodGrants)
+    assert (launcher.homes.api, launcher.homes.owner) == (pods, owner_for(SLUG))
     assert (launcher.capacity.slug, launcher.fleet.slug) == (SLUG, SLUG)
     for authorize in (launcher.capacity.authorize, launcher.fleet.authorize):
         with pytest.raises(GrantRefused) as refused:
@@ -293,8 +301,46 @@ def test_a_scheduled_pass_gives_each_swarm_its_own_runtime_or_the_shared_one(mon
     assert sorted(given) == [(SLUG, "deployed", True), ("other", "shared", True)]
 
 
-def test_a_launch_grant_is_never_reported_handed_to_a_pod():
-    assert deployed.PodGrants().hand(AgentRecord("e1", "eng", "t1"), "grant") is False
+def test_a_kubernetes_launch_puts_its_grant_in_the_pod_launch_material_and_records_it_handed(tmp_path, monkeypatch):
+    store = _store()
+    pods = Pods("swarm-pod-proof")
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: pods)
+    service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    try:
+        runtime = service.runtime
+        launcher = runtime.launch.func.__self__
+        task = {"id": "t1", "seat": SEAT, "controller_epoch": service.controller.held.epoch}
+        request = SpawnRequest(store.config(SLUG), "eng", store.next_name(SLUG, "eng"), task)
+        target = runtime.launch.keywords["target"](request)
+        agent = AgentRecord(request.name, "eng", "t1", seat=SEAT, runtime_backend=BACKEND, runtime_target=target)
+        launch = launcher.spawn(request, agent, runtime.launch.keywords["terms"], "")
+        claims = service.grants.verify(SLUG, pods.maps[0]["data"]["launch-grant"])
+    finally:
+        service.stop()
+
+    assert launch.handed is True
+    execution = launch.agent.execution_id
+    [pod] = pods.created
+    assert pod["metadata"]["name"] == f"swarm-{execution}"
+    assert pods.maps == [
+        {
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": {
+                "name": f"swarm-{execution}-launch",
+                "namespace": "swarm-pod-proof",
+                "labels": {
+                    "swarm.agentihooks.io/controller-owner": owner_for(SLUG),
+                    EXECUTION_LABEL: execution,
+                    "swarm.agentihooks.io/generation": str(launch.agent.generation),
+                },
+                "ownerReferences": [{"apiVersion": "v1", "kind": "Pod", "name": f"swarm-{execution}", "uid": "uid-1"}],
+            },
+            "immutable": True,
+            "data": {"launch-grant": launch.grant},
+        }
+    ]
+    assert claims.execution_id == execution
 
 
 def test_the_pod_api_talks_to_the_in_cluster_server_in_the_policy_namespace(monkeypatch):
