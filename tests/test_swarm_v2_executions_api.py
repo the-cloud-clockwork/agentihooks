@@ -680,9 +680,10 @@ def call(port, method, path, token="", body=b"", headers=None):
     sent = {"Authorization": f"Bearer {token}"} if token else {}
     connection.request(method, path, body=body, headers={**sent, **(headers or {})})
     response = connection.getresponse()
-    reply = (response.status, response.getheader("Content-Type"), json.loads(response.read()))
+    raw = response.read()
     connection.close()
-    return reply
+    assert response.getheader("Content-Length") == str(len(raw))
+    return response.status, response.getheader("Content-Type"), json.loads(raw)
 
 
 def test_the_served_endpoints_register_and_renew_a_worker_over_http(world, served):
@@ -707,10 +708,31 @@ def test_the_served_endpoints_refuse_forged_subjects_and_unreadable_bodies(world
     assert call(served, "PUT", f"/v2/executions/{other.execution_id}/heartbeat", token, forged)[2]["error_class"] == (
         "forbidden_scope"
     )
-    status, _, refusal = call(served, "PUT", f"/v2/executions/{agent.execution_id}/heartbeat", token, b"{not json")
-    assert (status, refusal["error_class"]) == (400, "invalid_request")
-    assert call(served, "GET", "/v2/executions", token)[0] == 404
+    path = f"/v2/executions/{agent.execution_id}/heartbeat"
+    status, _, refusal = call(served, "PUT", path, token, b"{not json")
+    assert (status, refusal["error_class"], refusal["message"]) == (
+        400,
+        "invalid_request",
+        "the request body is not JSON",
+    )
+    status, _, refusal = call(served, "PUT", path, "", json.dumps(world.beat(agent, 1)).encode())
+    assert (status, refusal["message"]) == (401, "a bearer credential is required")
+    assert call(served, "POST", "/v2/executions/missing", token, b"{}")[0] == 404
     assert world.store.redis.hlen(world.store.key("fixture", "heartbeats")) == 0
+
+
+def test_the_served_endpoints_read_no_body_when_no_length_is_sent(world, served):
+    import http.client
+
+    agent, token = world.start()
+    connection = http.client.HTTPConnection("127.0.0.1", served, timeout=5)
+    connection.putrequest("PUT", f"/v2/executions/{agent.execution_id}/heartbeat")
+    connection.putheader("Authorization", f"Bearer {token}")
+    connection.endheaders()
+    response = connection.getresponse()
+    refusal = json.loads(response.read())
+    connection.close()
+    assert (response.status, refusal["message"]) == (400, "the request body is not JSON")
 
 
 def test_the_served_endpoints_refuse_a_body_over_the_limit_without_reading_it(world, served):
