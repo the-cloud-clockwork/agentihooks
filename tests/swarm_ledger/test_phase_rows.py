@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import ledger_state, page_source, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import ledger_state, loaded, page_source, serve_modules, shell_html
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = ROOT / "scripts" / "swarm_ledger" / "template.html"
@@ -86,6 +86,7 @@ def rows(page):
 def test_each_phase_row_shows_its_lifecycle_and_a_waiting_phase_names_its_blockers(context):
     page = context.new_page()
     page.goto(URL)
+    loaded(page)
     assert rows(page) == [
         ["Building", True, "first"],
         ["Planning", True, "second"],
@@ -96,12 +97,14 @@ def test_each_phase_row_shows_its_lifecycle_and_a_waiting_phase_names_its_blocke
 def test_a_folded_phase_row_stays_folded_after_a_reload(context):
     page = context.new_page()
     page.goto(URL)
+    loaded(page)
     page.click("#item-phases-p3 details.phase-fold > summary")
     page.wait_for_function(
         """() => Object.keys(localStorage).some((k) => k.endsWith(":comments")
           && JSON.parse(localStorage.getItem(k)).closed.includes("phases/p3/row"))"""
     )
     page.reload()
+    loaded(page)
     assert [open_ for _, open_, _ in rows(page)] == [True, True, False]
 
 
@@ -132,6 +135,7 @@ def review_page(browser):
     serve_modules(context, ledger_state(REVIEW_DOC))
     page = context.new_page()
     page.goto(URL)
+    loaded(page)
     yield page, sent
     context.close()
 
@@ -193,5 +197,6 @@ def test_a_sent_back_phase_shows_the_buttons_only_once_escalated(browser, escala
     serve_modules(context, ledger_state(doc))
     page = context.new_page()
     page.goto(URL)
+    loaded(page)
     assert page.locator("#item-phases-p1 .phase-review").count() == shown
     context.close()

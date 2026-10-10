@@ -110,7 +110,7 @@ def test_the_queue_baseline_holds_the_exact_base_tree_on_the_app_token():
     hold = _step(steps, "Hold the base tree")
     upload = _step(steps, "Publish the base tree's coverage baseline")
     assert job["needs"] == ["unit"]
-    assert job["if"] == _QUEUE
+    assert job["if"] == "${{ !cancelled() && github.event_name == 'merge_group' }}"
     assert job["permissions"] == {"contents": "read"}
     assert mint["id"] == "app-token"
     assert mint["with"]["permission-actions"] == mint["with"]["permission-contents"] == "read"
@@ -219,7 +219,7 @@ def base_run(tmp_path):
         'printf "%s\\n" "$@" >> "$ARGS"\n'
         'case "$2" in\n'
         '  */commits/*) printf "tree-of-base" ;;\n'
-        '  */runs\\?head_sha=*) [[ -z "$FAIL_RUNS" ]] || exit 1; printf "%s\\n" $FAKE_RUNS ;;\n'
+        '  */runs\\?head_sha=*) [[ -z "$FAIL_RUNS" ]] || exit 1; for r in $FAKE_RUNS; do echo "$r $FAKE_STATUS"; done ;;\n'
         '  */artifacts*) n=$(cat "$POLLS"); echo $((n + 1)) > "$POLLS"; '
         '[[ "$2" == *"/$FAKE_KEPT_BY/"* && $n -ge $FAKE_AFTER ]] && printf 1 || printf 0 ;;\n'
         "esac\n"
@@ -228,7 +228,7 @@ def base_run(tmp_path):
     (tools / "sleep").write_text("#!/usr/bin/env bash\ntrue\n")
     (tools / "sleep").chmod(0o755)
 
-    def run(runs="111 222", kept_by="222", after=0, wait="600", fail_runs=""):
+    def run(runs="111 222", kept_by="222", after=0, wait="600", fail_runs="", status="in_progress"):
         output = tmp_path / "output"
         output.write_text("")
         polls = tmp_path / "polls"
@@ -242,6 +242,7 @@ def base_run(tmp_path):
             FAKE_KEPT_BY=kept_by,
             FAKE_AFTER=str(after),
             FAIL_RUNS=fail_runs,
+            FAKE_STATUS=status,
             WAIT_SECONDS=wait,
             BASE_SHA="b" * 40,
             GITHUB_OUTPUT=str(output),
@@ -285,6 +286,35 @@ def test_the_base_run_is_red_once_the_bounded_wait_ends(base_run, runs):
     assert result.returncode != 0
     assert "::error::" in result.stdout
     assert output == ""
+
+
+def test_a_finished_base_without_a_baseline_is_red_at_once(base_run, tmp_path):
+    result, output, _ = base_run(kept_by="333", status="completed")
+    assert result.returncode != 0
+    assert "finished without a coverage baseline" in result.stdout
+    assert output == ""
+    assert (tmp_path / "polls").read_text().strip() == "2"
+
+
+def test_a_finished_base_that_kept_its_baseline_is_restored(base_run):
+    result, output, _ = base_run(status="completed")
+    assert result.returncode == 0, result.stderr
+    assert output == "id=222\ntree=tree-of-base\n"
+
+
+def test_a_failed_queue_run_publishes_its_baseline_then_stops_red():
+    job = _jobs()["queue-baseline"]
+    steps = job["steps"]
+    upload = _step(steps, "Publish this run's coverage baseline")
+    stop = _step(steps, "Stop when this run's unit shards failed")
+    mint = _step(steps, "Mint the tcc main ci App token")
+    assert "!cancelled()" in job["if"]
+    assert "if" not in upload
+    assert stop["if"] == "needs.unit.result != 'success'"
+    assert steps.index(upload) < steps.index(stop) < steps.index(mint)
+    result = subprocess.run(["bash", "-e", "-c", stop["run"]], capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "::error::" in result.stdout
 
 
 def test_the_lookup_is_red_when_the_dev_run_kept_no_live_durations(lookup):

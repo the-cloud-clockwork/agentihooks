@@ -236,11 +236,18 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
             actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms(), ledger_events.view)
             actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
             actions += skip_refused(priority_sweep.priority_pass, store, slug, doc, ledger, None, view)
-            actions += timing.call(metrics.record_pass, slug, now_ms(), len(actions))
             found = timing.call(
                 findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", [])
             )
             actions += skip_refused(ledger_events.findings_pass, inbox, store, slug, found)
+            actions += timing.call(
+                metrics.record_pass,
+                slug,
+                now_ms(),
+                len(actions),
+                os.environ,
+                metrics.metrics_swarm.TickInput(store, doc, found, view),
+            )
             window = wake.window_ms(os.environ)
             actions += skip_refused(
                 wake.wake_pass, inbox, slug, agents, herdr, ledger, now_ms(), window, wake.quiet_ms(os.environ)
