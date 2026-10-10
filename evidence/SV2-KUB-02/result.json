@@ -5,7 +5,7 @@
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2430",
   "closes_follow_up": "https://github.com/the-cloud-clockwork/agentihooks/issues/2078",
   "tested_commit": "f488f1c1d43305bdf475414b8820b749897536cd",
-  "status": "fixture-qualified-awaiting-ci",
+  "status": "fixture-qualified",
   "evidence_class": "Mocked: fakeredis journal and execution registry, a fake lease clock and an in process API server that applies a create, drops its response and then answers AlreadyExists; no Kubernetes API server, node autoscaler or EC2 call was made.",
   "interfaces": [
     "scripts.swarm_v2.kubernetes.client: KubeHttp(server, token_path, context, opener) and KubeHttp.in_cluster(environ, account) send JSON to the API server with the service account token read per request; an unreachable server, an unreadable token or a broken exchange raises ConnectionError naming the error type, an unreadable JSON answer raises ConnectionError, a read timeout raises TimeoutError",
@@ -60,6 +60,6 @@
     "The transport carries spawn only; command, drain, terminate and recover belong to later packages, and the swarm router does not hold a Kubernetes runtime yet.",
     "The launch ConfigMap and credential Secret the template mounts are not created by this package."
   ],
-  "pull_request": "pending",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2461",
   "follow_ups": []
 }
