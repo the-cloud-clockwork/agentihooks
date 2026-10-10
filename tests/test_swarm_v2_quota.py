@@ -297,54 +297,63 @@ def test_history_is_bounded(world):
     assert (found[0].observed_ms, found[-1].observed_ms) == (1000 + quota.HISTORY + 2, 1003)
 
 
-def test_a_concurrent_newer_publish_wins_the_retry(world, monkeypatch):
+class Racing:
+    """A store whose pipelines run `before` ahead of each commit."""
+
+    def __init__(self, store, before):
+        self.store, self.before = store, before
+
+    @property
+    def redis(self):
+        return self
+
+    def pipeline(self):
+        pipe = self.store.redis.pipeline()
+        real = pipe.execute
+
+        def execute():
+            self.before()
+            return real()
+
+        pipe.execute = execute
+        return pipe
+
+    def __getattr__(self, name):
+        return getattr(self.store.redis, name)
+
+
+def test_a_concurrent_newer_publish_wins_the_retry(world):
     from redis.exceptions import WatchError
 
     token, rival = world.token(), world.token()
-    real = world.store.redis.pipeline
     raced = []
 
-    def pipeline(*args, **kwargs):
-        pipe = real(*args, **kwargs)
-        execute = pipe.execute
+    def race():
+        if not raced:
+            raced.append(1)
+            world.quota.publish(rival, HARNESS, dict(EXHAUSTED))
+            raise WatchError
 
-        def racing(*args, **kwargs):
-            if not raced:
-                raced.append(1)
-                world.quota.publish(rival, HARNESS, dict(EXHAUSTED))
-                raise WatchError
-            return execute(*args, **kwargs)
-
-        pipe.execute = racing
-        return pipe
-
-    monkeypatch.setattr(world.store.redis, "pipeline", pipeline)
-    kept = world.quota.publish(token, HARNESS, dict(STALE_FULL))
+    kept = world.observer(Racing(world.store, race)).publish(token, HARNESS, dict(STALE_FULL))
     assert kept.observed_ms == EXHAUSTED["observed_ms"]
     assert world.quota.stale_reports(ACCOUNT, HARNESS) == 1
 
 
-def test_writes_give_up_after_their_attempts(world, monkeypatch):
+def test_writes_give_up_after_their_attempts(world):
     from redis.exceptions import WatchError
 
     token = world.token()
-    real = world.store.redis.pipeline
     attempts = []
 
-    def pipeline(*args, **kwargs):
-        pipe = real(*args, **kwargs)
+    def fail():
+        attempts.append(1)
+        raise WatchError
 
-        def failing(*args, **kwargs):
-            attempts.append(1)
-            raise WatchError
-
-        pipe.execute = failing
-        return pipe
-
-    monkeypatch.setattr(world.store.redis, "pipeline", pipeline)
-    assert refusal(world.quota.publish, token, HARNESS, dict(STALE_FULL)) == "dependency_unavailable"
-    assert refusal(world.quota.admit, ACCOUNT, HARNESS) == "dependency_unavailable"
+    observer = world.observer(Racing(world.store, fail))
+    assert refusal(observer.publish, token, HARNESS, dict(STALE_FULL)) == "dependency_unavailable"
+    assert refusal(observer.admit, ACCOUNT, HARNESS) == "dependency_unavailable"
     assert len(attempts) == 2 * quota.WRITE_ATTEMPTS
+    assert world.stored() == {}
 
 
 def test_an_observation_round_trips_and_converts_to_a_probe_result(world):
