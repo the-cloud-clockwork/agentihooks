@@ -14,7 +14,7 @@ from scripts.swarm_v2.runtime.operations import digest
 
 KINDS = frozenset(("drain", "cancel", "answer", "stop"))
 OUTCOMES = {"drain": frozenset(("checkpointed", "failed"))}
-SETTLED = frozenset(("succeeded", "failed"))
+SETTLED = frozenset(("succeeded", "failed", "not_run"))
 MAX_EXPIRY_MS = 900_000
 DEFAULT_POLL_INTERVAL_MS = 1000
 DEFAULT_POLL_LIMIT = 10

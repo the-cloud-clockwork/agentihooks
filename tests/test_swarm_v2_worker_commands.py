@@ -464,7 +464,7 @@ def test_an_already_accepted_command_without_local_state_is_reported_not_rerun(w
     control.step()
     assert world.ran == []
     assert world.queue.outcome(agent.execution_id, answer["command_id"])["outcome"] == {
-        "status": "failed",
+        "status": "not_run",
         "detail": "accepted before this worker state existed; not rerun",
     }
     assert world.state(agent, drain) == "accepted"
@@ -605,8 +605,61 @@ def test_a_checkpoint_taken_before_the_drain_ack_lands_completes_after_it(world,
         "status": "checkpointed",
         "checkpoint": "refs/checkpoints/early",
     }
-    assert world.queue.outcome(agent.execution_id, answer["command_id"])["outcome"] == {"status": "succeeded"}
+    assert world.queue.outcome(agent.execution_id, answer["command_id"])["outcome"] == {
+        "status": "not_run",
+        "detail": "refused while draining",
+    }
+    assert world.ran == []
     assert not control.may_mutate()
+
+
+def test_a_drain_refuses_answers_but_still_runs_cancel_and_stop(world, worker):
+    agent, network, control = worker
+    world.issue(agent, "drain", "drain-1")
+    control.step()
+    answer = world.issue(agent, "answer", "answer-1", {"text": "yes"})
+    world.later(1)
+    cancel = world.issue(agent, "cancel", "cancel-1")
+    world.later(1)
+    stop = world.issue(agent, "stop", "stop-1")
+    world.later(10)
+    control.step()
+    world.later(10)
+    control.step()
+    assert world.ran == [["cancel", {}]]
+    assert world.queue.outcome(agent.execution_id, answer["command_id"])["outcome"]["status"] == "not_run"
+    assert world.queue.outcome(agent.execution_id, cancel["command_id"])["outcome"] == {"status": "succeeded"}
+    assert world.state(agent, stop) == "issued"
+    world.later(10)
+    control.step()
+    assert world.ran == [["cancel", {}], ["stop", {}]]
+
+
+def test_a_drain_holds_unless_the_server_voids_it_by_expiry_before_any_checkpoint(world, worker):
+    from scripts.swarm_v2.worker.control import CommandRefused, WorkerControl
+
+    agent, network, control = worker
+    drain = world.issue(agent, "drain", "drain-1")
+    network.drop = {"ack"}
+    control.step()
+    control.checkpointed("refs/checkpoints/taken")
+    world.later(60)
+    network.drop = set()
+    control.step()
+    assert world.state(agent, drain) == "expired"
+    assert not control.may_mutate()
+
+    class Superseded:
+        def poll(self):
+            return [{**drain, "state": "issued"}]
+
+        def ack(self, command_id, payload_digest):
+            raise CommandRefused("stale_generation", "launch grant is for a superseded execution")
+
+    stale = WorkerControl(Superseded(), control.path.with_name("superseded.json"), {})
+    stale.step()
+    assert json.loads(stale.path.read_text(encoding="utf-8"))[drain["command_id"]]["refusal"] == "stale_generation"
+    assert not stale.may_mutate()
 
 
 def test_a_concurrent_poll_that_loses_the_stamp_is_rate_limited(world, worker, monkeypatch):

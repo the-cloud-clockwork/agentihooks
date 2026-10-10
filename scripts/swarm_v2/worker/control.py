@@ -6,7 +6,7 @@ from typing import Protocol
 
 from scripts.swarm_v2.runtime.operations import digest
 
-DRAIN = "drain"
+DRAIN, ANSWER = "drain", "answer"
 RECEIVED, ACCEPTED, RUNNING, DONE, REPORTED, REJECTED = (
     "received",
     "accepted",
@@ -16,6 +16,10 @@ RECEIVED, ACCEPTED, RUNNING, DONE, REPORTED, REJECTED = (
     "rejected",
 )
 UNREACHABLE = (ConnectionError, TimeoutError)
+
+
+def _voided(record: dict) -> bool:
+    return record["state"] == REJECTED and record.get("refusal") == "expired" and record["outcome"] is None
 
 
 class CommandRefused(Exception):
@@ -66,7 +70,7 @@ class WorkerControl:
         self.records = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
 
     def may_mutate(self) -> bool:
-        return not any(record["kind"] == DRAIN and record["state"] != REJECTED for record in self.records.values())
+        return not any(record["kind"] == DRAIN and not _voided(record) for record in self.records.values())
 
     def step(self) -> None:
         for command_id in list(self.records):
@@ -103,7 +107,7 @@ class WorkerControl:
             if command["kind"] != DRAIN:
                 record["state"] = DONE
                 record["outcome"] = {
-                    "status": "failed",
+                    "status": "not_run",
                     "detail": "accepted before this worker state existed; not rerun",
                 }
         self.records[command["command_id"]] = record
@@ -118,6 +122,8 @@ class WorkerControl:
             if record["state"] == RECEIVED:
                 self.transport.ack(command_id, record["payload_digest"])
                 self._move(record, ACCEPTED)
+            if record["state"] == ACCEPTED and record["kind"] == ANSWER and not self.may_mutate():
+                self._settle(record, {"status": "not_run", "detail": "refused while draining"})
             if record["state"] == ACCEPTED and record["kind"] != DRAIN:
                 self._move(record, RUNNING)
                 self._settle(record, self._run(record))
@@ -128,7 +134,8 @@ class WorkerControl:
                 self._move(record, REPORTED)
         except UNREACHABLE:
             return
-        except CommandRefused:
+        except CommandRefused as error:
+            record["refusal"] = error.error_class
             self._move(record, REJECTED)
 
     def _run(self, record: dict) -> dict:

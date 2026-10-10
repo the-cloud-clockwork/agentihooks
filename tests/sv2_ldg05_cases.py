@@ -29,7 +29,8 @@ class Network:
         if self.repeat is not None and endpoint == "commands":
             return self.repeat
         reply = self.world.commands_api.route(method, path, f"Bearer {self.token}", body)
-        self.calls.append([method, endpoint, reply[0]])
+        delivered = len(reply[1]["commands"]) if endpoint == "commands" and reply[0] == 200 else None
+        self.calls.append([method, endpoint, reply[0], delivered])
         if endpoint in self.lose:
             raise ConnectionError("fixture response was lost")
         return reply
