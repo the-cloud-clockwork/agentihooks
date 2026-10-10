@@ -168,10 +168,22 @@ def _payload(launch: AdmittedLaunch) -> str:
         raise PodSpecRefused("launch task_payload must be a JSON object", "payload") from None
 
 
+def pod_name(execution_id: str) -> str:
+    return f"swarm-{execution_id}"
+
+
+def launch_name(execution_id: str) -> str:
+    return f"{pod_name(execution_id)}-launch"
+
+
+def launch_volume(execution_id: str) -> dict:
+    return {"name": "launch", "configMap": {"name": launch_name(execution_id), "defaultMode": 0o444}}
+
+
 def _metadata(policy: dict, launch: AdmittedLaunch, payload: str) -> dict:
     version = policy["template_version"]
     return {
-        "name": f"swarm-{launch.execution_id}",
+        "name": pod_name(launch.execution_id),
         "namespace": policy["namespace"],
         "labels": {
             "app.kubernetes.io/managed-by": "agentihooks",
@@ -320,7 +332,7 @@ def _spec(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
         "volumes": [
             {"name": "home", "emptyDir": {"sizeLimit": f"{profile['limits']['ephemeral_mib'] - TMP_MIB}Mi"}},
             {"name": "tmp", "emptyDir": {"sizeLimit": f"{TMP_MIB}Mi"}},
-            {"name": "launch", "configMap": {"name": f"swarm-{launch.execution_id}-launch", "defaultMode": 0o444}},
+            launch_volume(launch.execution_id),
             *_shared_volumes(policy),
         ],
         "runtimeClassName": policy["runtime_class_name"],

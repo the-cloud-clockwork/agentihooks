@@ -34,6 +34,8 @@ class PodApi(Protocol):
 
     def list_pods(self, selector: str) -> list[dict]: ...
 
+    def create_config_map(self, body: dict) -> dict: ...
+
 
 class KubeHttp:
     def __init__(
@@ -112,3 +114,9 @@ class PodClient:
     def list_pods(self, selector: str) -> list[dict]:
         query = urllib.parse.urlencode({"labelSelector": selector})
         return _answer(*self.http.send("GET", f"{self._path()}?{query}"))["items"]
+
+    def create_config_map(self, body: dict) -> dict:
+        status, answer = self.http.send("POST", f"/api/v1/namespaces/{self.namespace}/configmaps", body)
+        if status == 409 and answer.get("reason") == "AlreadyExists":
+            raise AlreadyExists(body["metadata"]["name"])
+        return _answer(status, answer)

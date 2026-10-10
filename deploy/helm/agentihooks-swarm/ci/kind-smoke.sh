@@ -231,6 +231,160 @@ if [[ $registered != *'"heartbeat": 200'* || $registered != *'"register": 200'* 
 fi
 printf 'a worker registered and heartbeated against the deployed controller API: %s\n' "$registered"
 
+kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: swarm-grant-proof
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: swarm-grant-proof
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [create, get]
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: swarm-grant-proof
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: swarm-grant-proof
+subjects:
+  - kind: ServiceAccount
+    name: swarm-grant-proof
+EOF
+hand_grant="$(cat <<'EOF'
+import json, os, ssl, sys, tempfile
+from pathlib import Path
+
+from scripts.hive import auth as hive_auth
+from scripts.swarm import commands
+from scripts.swarm.store import AgentRecord, connect
+from scripts.swarm_v2 import control_service
+from scripts.swarm_v2.kubernetes.client import KubeHttp, PodClient
+from scripts.swarm_v2.kubernetes.grants import GRANT_KEY, PodGrants
+from scripts.swarm_v2.kubernetes.runtime import GENERATION_LABEL
+from scripts.swarm_v2.kubernetes.spec import LAUNCH_DIR, launch_volume, pod_name
+from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL, OWNER_LABEL, owner_for
+
+access = json.load(sys.stdin)
+env = dict(os.environ)
+for line in Path(env["AGENTIHOOKS_HOME"], "controller", "credential.env").read_text().splitlines():
+    name, _, value = line.partition("=")
+    env[name] = value
+store, slug = connect(), env["SLUG"]
+probe = control_service.ControlService(
+    store,
+    slug,
+    control_service.launch_key(env),
+    lambda: hive_auth.controller(store.redis, env[control_service.CREDENTIAL_ENV]),
+    owner=commands.hive_id(),
+)
+assert probe.start(), "the probe could not share the deployed controller lease"
+token_file = Path(tempfile.mkdtemp()) / "token"
+token_file.write_text(access["token"])
+server = f"https://{env['KUBERNETES_SERVICE_HOST']}:{env['KUBERNETES_SERVICE_PORT']}"
+api = PodClient(KubeHttp(server, token_file, ssl.create_default_context(cadata=access["ca"])), "default")
+record = AgentRecord(store.next_name(slug, "eng"), "eng", "kind-grant", seat=f"eng-2@{slug}", runtime_backend=BACKEND)
+agent = probe.controller.admit(record, "")
+grant = probe.grants.issue(
+    slug, agent.execution_id, project_ids=["github.com/the-cloud-clockwork/agentihooks"], brain_id="swarm", account="kind"
+)
+worker = f"""
+import json, os, urllib.request
+path = "{LAUNCH_DIR}/{GRANT_KEY}"
+grant = open(path).read().strip()
+body = json.dumps({{"execution_id": os.environ["EXECUTION_ID"], "generation": int(os.environ["GENERATION"])}}).encode()
+headers = {{"Authorization": "Bearer " + grant, "Content-Type": "application/json"}}
+request = urllib.request.Request(os.environ["CONTROL_URL"] + "/v2/executions/register", body, headers, method="POST")
+with urllib.request.urlopen(request, timeout=10) as answer:
+    status = answer.status
+print(json.dumps({{"register": status, "uid": os.getuid(), "mode": oct(os.stat(path).st_mode & 0o777)}}, sort_keys=True))
+"""
+name = pod_name(agent.execution_id)
+labels = {
+    OWNER_LABEL: owner_for(slug),
+    EXECUTION_LABEL: agent.execution_id,
+    GENERATION_LABEL: str(agent.generation),
+    "app.kubernetes.io/instance": env["RELEASE"],
+}
+variables = {"CONTROL_URL": env["CONTROL_URL"], "EXECUTION_ID": agent.execution_id, "GENERATION": str(agent.generation)}
+api.create_pod({
+    "apiVersion": "v1",
+    "kind": "Pod",
+    "metadata": {"name": name, "namespace": "default", "labels": labels},
+    "spec": {
+        "restartPolicy": "Never",
+        "automountServiceAccountToken": False,
+        "securityContext": {"runAsNonRoot": True, "runAsUser": 10001, "runAsGroup": 10001, "fsGroup": 10001},
+        "containers": [{
+            "name": "worker",
+            "image": env["IMAGE"],
+            "imagePullPolicy": "Never",
+            "command": ["python", "-c", worker],
+            "env": [{"name": key, "value": value} for key, value in variables.items()],
+            "volumeMounts": [{"name": "launch", "mountPath": LAUNCH_DIR, "readOnly": True}],
+        }],
+        "volumes": [launch_volume(agent.execution_id)],
+    },
+})
+print(json.dumps({"pod": name, "handed": PodGrants(api, slug).hand(agent, grant)}, sort_keys=True))
+EOF
+)"
+handed="$(python3 - <<'EOF' | kubectl exec -i "deployment/$release-controller" -c controller -- env CONTROL_URL="http://$release-controller:8780" SLUG="$slug" RELEASE="$release" IMAGE="$image" python -c "$hand_grant"
+import base64, json, subprocess
+
+
+def run(*command):
+    return subprocess.run(command, check=True, capture_output=True, text=True).stdout
+
+
+token = run("kubectl", "create", "token", "swarm-grant-proof", "--duration", "10m").strip()
+ca = run("kubectl", "config", "view", "--raw", "--minify", "-o", "jsonpath={.clusters[0].cluster.certificate-authority-data}")
+print(json.dumps({"token": token, "ca": base64.b64decode(ca).decode()}))
+EOF
+)"
+worker_pod="$(python3 -c 'import json, sys; print(json.loads(sys.argv[1].splitlines()[-1])["pod"])' "$handed")"
+if [[ $handed != *'"handed": true'* ]]; then
+  printf 'the controller did not hand the launch grant to the worker Pod: %s\n' "$handed" >&2
+  exit 1
+fi
+printf 'launch grant handed into the worker Pod launch ConfigMap: %s\n' "$handed"
+owner="$(kubectl get configmap "$worker_pod-launch" -o jsonpath='{.metadata.ownerReferences[0].kind}/{.metadata.ownerReferences[0].name} immutable={.immutable}')"
+if [[ $owner != "Pod/$worker_pod immutable=true" ]]; then
+  printf 'the launch ConfigMap is not an immutable object owned by its Pod: %s\n' "$owner" >&2
+  exit 1
+fi
+kubectl wait pod "$worker_pod" --for=jsonpath='{.status.phase}'=Succeeded --timeout 2m || kubectl describe pod "$worker_pod"
+read_grant="$(kubectl logs "$worker_pod" 2>&1 || true)"
+if [[ $read_grant != *'"register": 200'* || $read_grant != *'"uid": 10001'* ]]; then
+  printf 'the worker did not read its launch grant and register: %s\n' "$read_grant" >&2
+  exit 1
+fi
+printf 'a worker Pod read its launch grant from %s and registered: %s\n' "/var/run/swarm/launch/launch-grant" "$read_grant"
+kubectl delete pod "$worker_pod" --wait --timeout 1m
+collected=""
+for _ in $(seq 60); do
+  if ! kubectl get configmap "$worker_pod-launch" >/dev/null 2>&1; then
+    collected=yes
+    break
+  fi
+  sleep 1
+done
+if [[ -z $collected ]]; then
+  printf 'the launch ConfigMap outlived its Pod\n' >&2
+  exit 1
+fi
+printf 'the launch ConfigMap was collected with its Pod\n'
+
 node="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')"
 kubectl label node "$node" anton.io/capacity-type=spot --overwrite
 kubectl rollout restart deployment "$release-controller"

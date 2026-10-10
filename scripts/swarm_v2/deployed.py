@@ -3,10 +3,11 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
-from scripts.swarm.store import AgentRecord, SwarmError
+from scripts.swarm.store import SwarmError
 from scripts.swarm_v2.accounts import AccountCapacity
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 from scripts.swarm_v2.kubernetes.client import KubeHttp, PodApi, PodClient
+from scripts.swarm_v2.kubernetes.grants import PodGrants
 from scripts.swarm_v2.kubernetes.runtime import KubernetesTransport
 from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, PodTemplate, load_policy
 from scripts.swarm_v2.kubernetes.watch import owner_for
@@ -33,11 +34,6 @@ HARNESS = "claude"
 
 class WorkerSettingsRefused(SwarmError):
     pass
-
-
-class PodGrants:
-    def hand(self, agent: AgentRecord, grant: str) -> bool:
-        return False
 
 
 def pod_api(environ: Mapping[str, str], namespace: str) -> PodApi:
@@ -115,6 +111,9 @@ class Workers:
     def transport(self, environ: Mapping[str, str], slug: str) -> KubernetesTransport:
         return KubernetesTransport(pod_api(environ, self.policy["namespace"]), slug, PodTemplate(self.policy))
 
+    def grants(self, environ: Mapping[str, str], slug: str) -> PodGrants:
+        return PodGrants(pod_api(environ, self.policy["namespace"]), slug)
+
 
 def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[str, str]) -> RoutedRuntime:
     controller, grants = service.controller, service.grants
@@ -124,7 +123,7 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
         return grants.verify(slug, token)
 
     capacity, fleet = AccountCapacity(controller.store, slug, verify), FleetRegistry(controller.store, slug, verify)
-    launcher = DistributedLaunch(controller, grants, capacity, fleet, None, PodGrants())
+    launcher = DistributedLaunch(controller, grants, capacity, fleet, None, workers.grants(environ, slug))
     kubernetes = KubernetesRuntime(controller.execute, workers.launch)
     runtime = routed(
         environ, kubernetes=kubernetes, launch=partial(launcher.from_tick, terms=workers.terms, target=workers.target)
