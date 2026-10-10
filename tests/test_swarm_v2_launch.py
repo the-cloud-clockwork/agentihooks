@@ -24,6 +24,7 @@ BACKEND = "kubernetes"
 TTL = 30000
 PROJECT = "github.com/the-cloud-clockwork/agentihooks"
 FIRST, SECOND = "eng-1@fixture", "eng-2@fixture"
+API = "http://swarm-api.agentihooks-swarm.svc:8780"
 MACHINE = Scope(BACKEND, "pod-0000000000000000000000000000c003", "boot-worker/pid:[4026531836]")
 
 
@@ -76,7 +77,7 @@ class World:
         self.launcher = DistributedLaunch(
             self.controller, self.grants, self.capacity, self.fleet, self.router, self.homes
         )
-        self.terms = LaunchTerms(ACCOUNT, cap, TTL, (PROJECT,), "swarm")
+        self.terms = LaunchTerms(ACCOUNT, cap, TTL, (PROJECT,), "swarm", API)
 
     def launch(self, seat, previous=""):
         agent = AgentRecord(self.store.next_name(SLUG, "eng"), "eng", "task", seat=seat)
@@ -125,6 +126,7 @@ def test_the_runtime_request_carries_the_grant_the_execution_and_its_generation(
         "launch_grant": launch.grant,
         "execution_id": launch.agent.execution_id,
         "generation": 1,
+        "endpoints": {"AGENTIHOOKS_SWARM_API_URL": API},
     }
     assert (request.lane, request.name) == ("eng", launch.agent.name)
     assert world.grants.verify(SLUG, launch.grant).account == ACCOUNT
