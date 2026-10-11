@@ -273,7 +273,7 @@ if [[ -z $built ]]; then
   exit 1
 fi
 printf 'the deployed controller built the Kubernetes runtime: %s\n' "$built"
-for probe in liveness readiness; do
+for probe in startup liveness readiness; do
   wired="$(kubectl get deployment "$release-controller" -o jsonpath="{.spec.template.spec.containers[0].${probe}Probe.exec.command[*]}")"
   want="agentihooks controller live"
   [[ $probe == readiness ]] && want="agentihooks controller ready"

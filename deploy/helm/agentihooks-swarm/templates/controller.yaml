@@ -151,6 +151,10 @@ spec:
           ports:
             - name: api
               containerPort: {{ $api.port }}
+          startupProbe:
+            exec:
+              command: [agentihooks, controller, live]
+            {{- toYaml .Values.controller.startupProbe | nindent 12 }}
           readinessProbe:
             exec:
               command: [agentihooks, controller, ready]
