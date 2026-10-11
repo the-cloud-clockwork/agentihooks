@@ -153,8 +153,8 @@ def test_route_reads_quotas_for_a_forced_account_and_refreshes_them_otherwise(mo
         "fresh_quotas",
         lambda p, environ, now, run: calls.append(("fresh", p, environ, run)) or {"default": _quota(1.0, time.time())},
     )
-    assert router._route(ENV, "alpha", runner) == (pool[1], "forced", 0, "?")
-    assert router._route(ENV, "", runner) == (pool[0], "open", 0, "6")
+    assert router._route(ENV, "alpha", runner, "") == (pool[1], "forced", 0, "?")
+    assert router._route(ENV, "", runner, "") == (pool[0], "open", 0, "6")
     assert calls == [("quotas", pool, ENV), ("fresh", pool, ENV, runner)]
 
 
@@ -345,7 +345,7 @@ def test_without_token_variables_the_default_login_is_judged_by_its_week(monkeyp
     rc, seen, report = _launch(monkeypatch, tmp_path, environ, [], {"default": _quota(50.0)}, {"default": 6})
     assert rc == 3 and not seen
     monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {"default": 5})
-    assert router._route(environ, "", no_status) == (router.CodexAccount("default"), "open", 5, "6")
+    assert router._route(environ, "", no_status, "") == (router.CodexAccount("default"), "open", 5, "6")
 
 
 def test_the_api_route_is_forced_with_its_own_live_count_and_no_cap(monkeypatch):
@@ -355,9 +355,9 @@ def test_the_api_route_is_forced_with_its_own_live_count_and_no_cap(monkeypatch)
     environ = dict.fromkeys(["CODEX_API_KEY"], "1")
     monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {"api": 2, "default": 5})
     expected = router.CodexAccount("api", key_env="CODEX_API_KEY")
-    assert router._route(environ, "api", no_status) == (expected, "forced", 2, "?")
+    assert router._route(environ, "api", no_status, "") == (expected, "forced", 2, "?")
     monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {"default": 5})
-    assert router._route(environ, "api", no_status) == (expected, "forced", 0, "?")
+    assert router._route(environ, "api", no_status, "") == (expected, "forced", 0, "?")
 
 
 def _weighted(monkeypatch, weight, cap=API_UNBOUNDED):
@@ -747,3 +747,15 @@ def test_an_unsupported_credential_refuses_the_launch_and_reports_it(monkeypatch
     assert report.read_text() == (
         "status=failed\nerror=AH_CX_TOKEN_bare holds a ChatGPT token with no chatgpt_account_id claim\n"
     )
+
+
+def test_a_handoff_launch_never_routes_back_to_the_account_it_leaves(monkeypatch, tmp_path):
+    quotas = {"default": _quota(90.0), "alpha": _quota(10.0), "beta": _quota(50.0)}
+    argv = ["--agentihooks-exclude", "alpha", "resume", "thread-1", "-m", "o3", "handoff"]
+    rc, seen, report = _launch(monkeypatch, tmp_path, ENV, argv, quotas)
+    assert rc == 0 and report.read_text() == "status=routed\naccount=beta\nplacement=open\n"
+    assert seen["cmd"] == ["/usr/bin/codex", "--no-daemon", "resume", "thread-1", "-m", "o3", "handoff"]
+    assert seen["env"]["CODEX_ACCESS_TOKEN"] == "cx-value-b"
+    quotas = {"default": _quota(99.0), "alpha": _quota(10.0), "beta": _quota(99.0)}
+    rc, seen, report = _launch(monkeypatch, tmp_path, ENV, ["--agentihooks-exclude=alpha"], quotas)
+    assert (rc, seen) == (3, {}) and report.read_text().startswith("status=failed\n")
