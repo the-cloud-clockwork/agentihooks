@@ -272,6 +272,46 @@ def test_swarm_push_in_pr_state_uses_its_recorded_branch(repo, swarm_worktree, t
     assert str(blocked.value) == _message(swarm_worktree)
 
 
+@pytest.mark.parametrize("directory", [None, "", "~/development-ledger"])
+def test_default_swarm_ledger_location_resolves_the_task_worktree(
+    repo, swarm_worktree, tmp_path, monkeypatch, directory
+):
+    from tests.swarm_ledger import legacy_page
+
+    task = {"id": "push", "state": "claimed", "claimed_by": "engineer@test", "branch": "task-branch"}
+    legacy_page.store(tmp_path / "development-ledger", "rig", {"tasks": [task]})
+    monkeypatch.setenv("HOME", str(tmp_path))
+    if directory is None:
+        monkeypatch.delenv("LEDGER_DIR")
+    else:
+        monkeypatch.setenv("LEDGER_DIR", directory)
+    _stamp(repo)
+    payload = _bash("git push origin HEAD", repo)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == _message(swarm_worktree)
+
+    _stamp(swarm_worktree)
+    check_prepush(payload)
+
+
+def test_task_without_a_claimant_cannot_supply_the_fallback_directory(repo, swarm_worktree, tmp_path, monkeypatch):
+    from tests.swarm_ledger import legacy_page
+
+    task = {"id": "push", "state": "claimed", "claimed_by": "", "branch": "task-branch"}
+    legacy_page.store(tmp_path / "ledgers", "rig", {"tasks": [task]})
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "")
+    _stamp(swarm_worktree)
+    payload = _bash("git push origin HEAD", repo)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == _message(repo)
+
+    _stamp(repo)
+    _git(swarm_worktree, "commit", "-q", "--allow-empty", "-m", "more")
+    check_prepush(payload)
+
+
 def test_a_later_push_in_the_same_command_is_checked(repo, tmp_path):
     other = _init(tmp_path / "other", guarded=False)
 
