@@ -707,14 +707,14 @@ def test_an_open_route_never_places_an_account_whose_credential_is_refused(monke
 @pytest.mark.parametrize(
     ("tokens", "signed_in", "offered"),
     [
-        ({"AH_CX_TOKEN_alpha": OAUTH, "AH_CX_TOKEN_keyed": "sk-proj-value"}, False, ["alpha"]),
-        ({"AH_CX_TOKEN_alpha": OAUTH, "AH_CX_TOKEN_beta": OAUTH_TWO}, True, ["alpha", "beta"]),
+        ({"AH_CX_TOKEN_alpha": OAUTH, "AH_CX_TOKEN_keyed": "sk-proj-value"}, None, ["alpha"]),
+        ({"AH_CX_TOKEN_alpha": OAUTH, "AH_CX_TOKEN_beta": OAUTH_TWO}, None, ["alpha", "beta"]),
         ({}, True, ["default"]),
         ({}, False, []),
     ],
 )
 def test_the_tick_offers_codex_seats_only_on_accounts_the_launcher_routes(
-    monkeypatch, tmp_path, tokens, signed_in, offered
+    monkeypatch, tmp_path, capsys, tokens, signed_in, offered
 ):
     from scripts.swarm import capacity
 
@@ -738,10 +738,11 @@ def test_the_tick_offers_codex_seats_only_on_accounts_the_launcher_routes(
         rc = router.main(
             ["--route", name],
             environ=environ,
-            execvpe=lambda path, cmd, env: launched.update(cmd=cmd),
+            execvpe=lambda path, cmd, env: launched.update(cmd=cmd, env=env),
             run=status,
         )
-        assert rc == 0 and launched["cmd"][0].endswith("codex")
+        assert rc == 0 and f"account={name} " in capsys.readouterr().out
+        assert launched["env"].get("CODEX_ACCESS_TOKEN") == environ.get(f"AH_CX_TOKEN_{name}")
     if not tokens:
         launched = {}
         rc = router.main(
