@@ -15,6 +15,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The swarm chart's controller API NetworkPolicy admits only the controller's
+  own Pods and `controller.api.ingressFrom`; `networkPolicy.ingressFrom` no
+  longer reaches port `api`. List any other API peer in
+  `controller.api.ingressFrom`.
 - The SessionStart switch from `main`/`master` to `dev` runs only when
   `AGENTIHOOKS_FORCE_DEV_BRANCH` is true (default false).
 

@@ -663,14 +663,19 @@ def _split_master_pairs(pairs):
     return counts, [pair for pair, key, _, _ in split if key != "masters"]
 
 
-def _store_master_counts(store, slug, counts):
+def _store_master_counts(store, slug, counts, owners):
+    seats = masters.MasterSeats(store.redis)
     for count in counts:
-        masters.MasterSeats(store.redis).set_count(slug, count)
+        seats.set_count(slug, count)
+    for hive, owner in owners:
+        seats.own_hive(slug, hive, owner)
 
 
 def cmd_set(store, args):
     changes, lanes = {}, {key: dict(value) for key, value in store.config(args.slug).lanes.items()}
     counts, pairs = _split_master_pairs(args.pairs)
+    hives, pairs = masters.hive_pairs(args.slug, pairs)
+    masters.MasterSeats(store.redis).check_hives(args.slug, counts, hives)
     for pair in pairs:
         key, _, value = pair.partition("=")
         if key in LANE_KEYS:
@@ -700,13 +705,14 @@ def cmd_set(store, args):
             continue
         if key not in SETTABLE or not value.isdigit():
             raise SwarmError(
-                f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, autonomy={'|'.join(AUTONOMY)}, "
+                f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, {masters.HIVE_KEY}<hive id>=<master seat>, "
+                f"autonomy={'|'.join(AUTONOMY)}, "
                 f"effort-min=E, effort-max=E, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, api-url=URL "
                 f"or {', '.join(LANE_KEYS)}=<value>"
             )
         changes[SETTABLE[key]] = int(value)
     config = store.update(args.slug, **changes)
-    _store_master_counts(store, args.slug, counts)
+    _store_master_counts(store, args.slug, counts, hives)
     asked = any(pair.startswith("master-agent=") for pair in args.pairs)
     master = affinity.order(store, args.slug, now_ms()) if asked else affinity.pending(store, args.slug)
     if config.state == "running":
@@ -733,6 +739,7 @@ def cmd_set(store, args):
                 "api_url": config.api_url,
                 "master_affinity": {"desired": affinity.desired(config) or "auto", "order": master},
                 "masters": masters.MasterSeats(store.redis).count(args.slug),
+                "hive_owners": masters.MasterSeats(store.redis).hive_owners(args.slug),
             }
         )
     )

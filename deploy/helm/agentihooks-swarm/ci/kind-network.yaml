@@ -1,0 +1,16 @@
+networkPolicy:
+  ingressFrom:
+    - ipBlock:
+        cidr: 10.10.30.0/24
+    - ipBlock:
+        cidr: 10.42.0.0/16
+controller:
+  api:
+    ingressFrom:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: agentihooks-swarm-workers
+        podSelector:
+          matchExpressions:
+            - key: swarm.agentihooks.io/controller-owner
+              operator: Exists

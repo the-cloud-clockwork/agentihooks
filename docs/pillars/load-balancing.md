@@ -30,6 +30,25 @@ Claude on one of them. The launched session keeps only its own
 `AH_CC_TOKEN_<slug>`; that variable name is how every tool below tells which
 account a session runs on. Token values are never printed or logged.
 
+### Loading accounts from OpenBao
+
+`agentihooks init` adds one line to its managed `~/.bashrc` block that runs
+`eval "$(agentihooks accounts env)"` in every new shell. The command reads the
+KV v2 secret `k8s/swarm-claude-creds` on the `secret` mount with
+`OPENBAO_URL` and `OPENBAO_TOKEN`. Each key is an account email, each value its
+token; it prints one `export AH_CC_TOKEN_<slug>=...` per account, the slug being
+the lower cased email with `@` as `at` and every other symbol as `_`
+(`Nestor.Colt@Gmail.com` becomes `AH_CC_TOKEN_nestor_coltatgmail_com`). Nothing
+is written to disk.
+
+When OpenBao is unset or unreachable it falls back to `~/.agentihooks/accounts/claude.env` (under `AGENTIHOOKS_HOME` when
+set): an operator written file of `AH_CC_TOKEN_*=` lines, used only when no one
+but its owner can read it (`chmod 600`). It sits in a subfolder so the
+`agentienv` and hook env loaders, which read `*.env` at the top level, never load
+it. One short stderr line names the outcome whenever `OPENBAO_URL` is set or the
+fallback file exists; a machine with neither starts its shells silently and
+without accounts.
+
 ## Launch routing
 
 `agenti` probes every account (results cached 60 s in

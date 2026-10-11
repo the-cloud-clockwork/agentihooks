@@ -9,6 +9,7 @@ DELEGATED_CLIS = {
     "quota": "scripts.agents_quota",
     "plan": "scripts.swarm_ledger.plan_read",
     "hive": "scripts.hive.cli",
+    "accounts": "scripts.account_env",
 }
 
 

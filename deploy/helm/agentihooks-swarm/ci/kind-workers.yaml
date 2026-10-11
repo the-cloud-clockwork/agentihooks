@@ -1,5 +1,11 @@
 controller:
   serviceAccountName: swarm-controller
+  api:
+    ingressFrom:
+      - podSelector:
+          matchExpressions:
+            - key: swarm.agentihooks.io/controller-owner
+              operator: Exists
   # The smoke creates this Secret with throwaway CAs; only user_ca may reach the controller.
   terminalCa:
     secretName: swarm-terminal-attach-ca
