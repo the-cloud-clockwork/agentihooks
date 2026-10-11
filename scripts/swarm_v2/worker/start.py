@@ -65,7 +65,7 @@ def _profile(profile: object, templates: Path) -> None:
         raise LaunchRefused("launch record names no profile")
     if not worker_home.NAME.fullmatch(profile):
         raise LaunchRefused("launch record names an invalid profile")
-    if not (templates / profile).is_dir():
+    if (templates / profile).is_symlink() or not (templates / profile).is_dir():
         raise LaunchRefused(f"profile {profile} is not shipped in the worker image")
 
 

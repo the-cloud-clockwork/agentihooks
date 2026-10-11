@@ -165,6 +165,44 @@ def test_the_image_ships_every_role_profile_as_a_template(tmp_path, role):
     assert (templates / "default" / "profile.yml").is_file()
 
 
+@pytest.mark.parametrize("role", ["planner", "qa"])
+def test_a_seeded_role_finds_the_shared_guard_its_conditions_load(tmp_path, role):
+    attempt = tmp_path / "attempts" / EXECUTION
+    controller = Controller((200, ANSWER))
+    launch = material(tmp_path, {**RECORD, "profile": role})
+
+    start.prepare(attempt, launch, controller.send, controller.sleep, templates=image_templates(tmp_path))
+
+    record = json.loads((attempt / "execution.json").read_text())
+    state = json.loads((attempt / record["homes"]["claude"] / ".agentihooks" / "state.json").read_text())
+    [linked] = state["linked_profiles"]
+    conditions = sorted((Path(linked["path"]) / ".claude" / "conditions").glob("*no_code_edits.py"))
+    assert linked["name"] == role and conditions
+    for condition in conditions:
+        assert (condition.parents[3] / "_guards" / "no_code_edits.py").is_file()
+
+
+@pytest.mark.parametrize("kind", ["file", "link"])
+def test_a_profile_template_that_is_not_a_folder_is_not_shipped(tmp_path, kind):
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    (templates / "shipped").mkdir()
+    if kind == "file":
+        (templates / "engineer").write_text("")
+    else:
+        (templates / "engineer").symlink_to(templates / "shipped")
+    controller, boot = Controller((200, ANSWER)), Boot()
+
+    with pytest.raises(LaunchRefused) as refused:
+        start.prepare(
+            tmp_path / "attempts" / EXECUTION, material(tmp_path), controller.send, controller.sleep, boot, templates
+        )
+
+    assert str(refused.value) == "profile engineer is not shipped in the worker image"
+    assert (controller.calls, boot.requests) == ([], [])
+    assert not (tmp_path / "attempts").exists()
+
+
 def test_a_busy_controller_is_asked_again_until_it_answers(tmp_path):
     controller = Controller((503, {}), (503, {}), (200, ANSWER))
 

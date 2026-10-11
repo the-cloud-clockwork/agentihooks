@@ -135,7 +135,7 @@ def remove(tree: Path) -> None:
 
 
 def seed(execution: Execution, source: Path, name: str) -> Path:
-    if not SEGMENT.fullmatch(name):
+    if not SEGMENT.fullmatch(name.removeprefix("_")):
         _refuse(f"invalid profile name: {name}")
     _links(source, source)
     copy = execution.path("seed") / name

@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
 
+from hooks.context.profile_chain import PACKAGE_ROLES
 from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm_v2 import broadcast_bridge
@@ -23,6 +24,7 @@ GRANT_SECONDS = 30
 NO_API_URL = "the swarm config has no API address"
 NOT_HANDED = "launch grant not handed: "
 HANDS = "launch-grant-hands"
+WORKER_DEFAULT = "default"
 Target = Callable[[SpawnRequest], dict]
 
 
@@ -68,6 +70,11 @@ class Launch:
 def seat_profile(request: SpawnRequest) -> str:
     lane = request.config.lanes.get(request.lane, {})
     return request.task.get("profile") or lane.get("profile") or DEFAULT_PROFILES[request.lane]
+
+
+def worker_profiles() -> set[str]:
+    roles = {path.name for path in PACKAGE_ROLES.iterdir() if path.is_dir() and not path.name.startswith("_")}
+    return {WORKER_DEFAULT, *roles}
 
 
 class DistributedLaunch:
@@ -123,6 +130,11 @@ class DistributedLaunch:
         api_url, backend = request.config.api_url, self.router.spawn_backend(request)
         if not api_url:
             return Outcome("spawn", Status.REFUSED, backend, detail=NO_API_URL)
+        profile = seat_profile(request)
+        if profile not in worker_profiles():
+            return Outcome(
+                "spawn", Status.REFUSED, backend, detail=f"profile {profile} is not shipped in the worker image"
+            )
         agent = AgentRecord(
             request.name,
             request.lane,
@@ -130,7 +142,7 @@ class DistributedLaunch:
             seat=request.task["seat"],
             runtime_backend=backend,
             runtime_target=target(request),
-            profile=seat_profile(request),
+            profile=profile,
         )
         return self.spawn(request, agent, replace(terms, api_url=api_url), "").outcome
 

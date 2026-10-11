@@ -18,6 +18,7 @@ from scripts.swarm_v2 import filesystem
 TARGETS = ("claude", "codex")
 RECORD = "execution.json"
 PENDING = ".bootstrap-pending"
+GUARDS = "_guards"
 NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 VARIABLE = re.compile(r"[A-Z][A-Z0-9_]{0,127}")
 SYSTEM_ROOTS = (Path("/usr/bin"), Path("/bin"), Path("/usr/local/bin"))
@@ -330,6 +331,8 @@ def _seed(execution: filesystem.Execution, request: Request) -> None:
     for name in sorted(set(request.profiles.values())):
         copy = filesystem.seed(execution, request.templates / name, name)
         linked.append({"name": name, "path": str(copy)})
+    if (request.templates / GUARDS).is_dir():
+        filesystem.seed(execution, request.templates / GUARDS, GUARDS)
     for target in request.profiles:
         state = execution.path("home") / target / ".agentihooks"
         state.mkdir(parents=True, mode=0o700)
