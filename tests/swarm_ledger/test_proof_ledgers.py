@@ -102,7 +102,7 @@ def test_a_ledger_that_is_not_a_proof_ledger_is_refused_a_remove(live, credentia
     assert repository.exists(SLUG)
 
 
-def test_a_remove_takes_an_empty_body(live, credential):
+def test_a_remove_refuses_a_body_with_fields(live, credential):
     slug = create(live, credential, "tbody")[1]["data"]["slug"]
     status, reply = remove(live, slug, {"x": 1}, **{"X-Controller-Credential": credential})
     assert (status, reply["error"]["code"]) == (400, "schema_invalid")
