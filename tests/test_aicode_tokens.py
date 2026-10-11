@@ -14,9 +14,7 @@ def test_a_slug_turns_hyphens_into_underscores_and_keeps_letters_and_digits():
     assert tokens.slug("2team") == "2team"
 
 
-@pytest.mark.parametrize(
-    "raw", ["", "_x", "-x", "a.b", "a b", "a/b", "ñu", "status", "help", "default", "api", "Status", "API"]
-)
+@pytest.mark.parametrize("raw", ["", "_x", "-x", "@x", ".", "ñu", "status", "help", "default", "api", "Status", "API"])
 def test_a_slug_refuses_empty_underscore_leading_reserved_and_other_characters(raw):
     with pytest.raises(tokens.SlugError):
         tokens.slug(raw)
@@ -104,7 +102,29 @@ def test_a_refused_slug_names_the_rule_and_every_reserved_word():
     with pytest.raises(tokens.SlugError) as refused:
         tokens.slug("Status")
     assert str(refused.value) == (
-        "slug must be letters, digits, '_' or '-', not start with '_' and not be api, default, help, status: 'Status'"
+        "slug must be letters, digits and '_' (an email works: other characters become '_'), "
+        "must not start with '_' and must not be api, default, help, status: 'Status'"
+    )
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("nestor.colt@gmail.com", "nestor_colt_gmail_com"),
+        ("first.last+tag@example.co.uk", "first_last_tag_example_co_uk"),
+        ("a__b--c", "a_b_c"),
+        ("a b/c", "a_b_c"),
+        ("team.", "team_"),
+    ],
+)
+def test_an_email_or_any_other_character_run_becomes_one_underscore(raw, expected):
+    assert tokens.slug(raw) == expected
+
+
+def test_the_slug_note_shows_an_email_turned_into_a_variable_name():
+    assert tokens.SLUG_NOTE == (
+        "Note: use the email of the target account as the slug, so each token is recognisable at a glance "
+        "(nestor.colt@gmail.com becomes AH_CC_TOKEN_nestor_colt_gmail_com)."
     )
 
 

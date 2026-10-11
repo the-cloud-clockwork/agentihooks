@@ -1,6 +1,7 @@
 import fcntl
 import io
 import json
+import sys
 import urllib.error
 import urllib.parse
 from pathlib import Path
@@ -159,6 +160,22 @@ def test_a_failed_grant_names_the_account_and_moves_on(capsys):
     out = capsys.readouterr().out
     assert "alpha: refresh failed: HTTP 400 invalid_grant" in out
     assert "beta: 1.0d left, refreshed" in out
+
+
+def test_a_terminal_sees_failures_in_red_and_warnings_in_yellow(monkeypatch):
+    class Tty(io.StringIO):
+        def isatty(self):
+            return True
+
+    out = Tty()
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(sys, "stdout", out)
+    _account("alpha", 1, refresh="rt-bad")
+    _account("beta", 1)
+    assert _run([], FLAG, Grant(fail={"rt-bad"})) == 1
+    lines = out.getvalue().splitlines()
+    assert lines[0] == "\x1b[31malpha: refresh failed: HTTP 400 invalid_grant\x1b[0m"
+    assert lines[-1] == "\x1b[33mOpenBao not updated: OPENBAO_URL or OPENBAO_TOKEN unset\x1b[0m"
 
 
 def test_the_openbao_store_refuses_to_run_without_credentials(capsys):
