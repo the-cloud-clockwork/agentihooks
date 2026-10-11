@@ -19,21 +19,25 @@ def test_only_a_handed_off_session_closes_at_its_stop(payload, environ, status, 
     assert handoff_close.due(payload, environ, status) is expected
 
 
-@pytest.mark.parametrize(("returncode", "kept"), [(0, False), (1, True)])
-def test_closing_terminates_this_session_after_marking_its_terminal_to_exit(monkeypatch, tmp_path, returncode, kept):
+@pytest.mark.parametrize(("returncode", "present", "kept"), [(0, True, False), (0, False, False), (1, True, True)])
+def test_closing_terminates_this_session_after_marking_its_terminal_to_exit(
+    monkeypatch, tmp_path, returncode, present, kept
+):
     monkeypatch.setattr(handoff_close.shutil, "which", lambda name: "/bin/agentihooks")
     assert handoff_close.close_command(4242) == ["/bin/agentihooks", "terminate-agent", "4242", "--type", "any"]
     ran = []
 
     def run(argv, **kwargs):
-        ran.append(argv)
+        ran.append((argv, kwargs))
         return handoff_close.subprocess.CompletedProcess(argv, returncode)
 
     monkeypatch.setattr(handoff_close.subprocess, "run", run)
     marker, record = tmp_path / "closing-42", tmp_path / "handed-off-42-sid-1"
-    record.touch()
+    if present:
+        record.touch()
     handoff_close.close(["/bin/agentihooks", "terminate-agent", "42"], marker, record)
-    assert marker.exists() and ran == [["/bin/agentihooks", "terminate-agent", "42"]]
+    options = {"stdin": handoff_close.subprocess.DEVNULL, "capture_output": True, "timeout": 120, "check": False}
+    assert marker.exists() and ran == [(["/bin/agentihooks", "terminate-agent", "42"], options)]
     assert record.exists() is kept
 
 
