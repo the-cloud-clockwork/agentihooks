@@ -237,6 +237,22 @@ def test_an_unreachable_capability_probe_while_finding_a_pane_reads_unreachable(
     }
 
 
+def test_a_views_pass_never_mutates_a_pane_or_an_authoritative_record(rig, tmp_path):
+    workers, store, viewer, views = rig
+    registrations = (tmp_path / "registrations.json").read_bytes()
+    views()
+    workers.cut.add(machine(viewer, EXE_B))
+    store.occupants = [remote(ENDPOINT_A, "eng-1", conversation_id="replaced"), remote(ENDPOINT_B, "eng-2")]
+
+    views()
+    viewer.detach()
+    views()
+
+    assert workers.mutations() == [] and workers.launches() == []
+    assert (tmp_path / "registrations.json").read_bytes() == registrations
+    assert not (tmp_path / "deliveries.json").exists()
+
+
 def test_aggregation_off_publishes_unverified_views_without_reading_any_pane(tmp_path):
     import fakeredis
 
