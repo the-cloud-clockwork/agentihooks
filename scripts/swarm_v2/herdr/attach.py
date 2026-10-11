@@ -164,10 +164,10 @@ class Terminal:
         if scope.generation < newest:
             raise EndpointRefused("stale_generation", f"{endpoint.name} already serves generation {newest}")
         address = route(endpoint, self.lookup)
+        _write(recorded, f"{scope.generation}\n")
         _write(home.certificate(endpoint), self.authority.issue(scope, self._client_key()))
         _write(home.known_hosts(endpoint), known_hosts(endpoint, host_public))
         _write(home.block(endpoint), ssh_block(home, endpoint, address))
-        _write(recorded, f"{scope.generation}\n")
         if not home.config.exists():
             _write(home.config, home.include)
         elif home.include not in (current := home.config.read_text()):
