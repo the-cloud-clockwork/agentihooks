@@ -304,32 +304,53 @@ def recover_outages(
 
 
 def _recover_process(store, slug, agent, task, context, text):
-    from scripts.swarm.tick import placed_record, primed
+    from scripts.swarm.tick import SpawnError
 
     worktree = snapshot.worktrees(store.config(slug).repo, [agent.name]).get(agent.name, "")
     why = blocker(agent, worktree)
-    handoff = store.handoff(slug, agent.task) or transfers.last_handoff(store, slug, agent.task)
     if not _recovery_current(store, slug, agent, context):
         return "task ownership changed"
     try:
         if not why:
-            placed = context.runtime.resume(store.config(slug), agent, text)
-            resumed = replace(
-                agent,
-                pane_id=placed.pane_id,
-                started_at=context.at,
-                idle_ticks=0,
-                profile_decision=placed.profile_decision or agent.profile_decision,
-            )
-        else:
-            transfer = transfers.record(store, slug, agent, "outage", handoff, context.at)
-            transfers.attach(store, slug, agent)
-            task = primed(store, slug, agent.seat, {**task, "handoff": handoff, "transfer": transfer["id"]})
-            if not _recovery_current(store, slug, agent, context):
-                return "task ownership changed"
-            placed = context.runtime.spawn(store.config(slug), agent.lane, agent.name, task)
-            resumed = replace(placed_record(agent, placed), conversation_id="", started_at=context.at, idle_ticks=0)
+            try:
+                placed = context.runtime.resume(store.config(slug), agent, text)
+            except SpawnError as error:
+                if error.status != "unsupported":
+                    raise
+            else:
+                store.put_agent(
+                    slug,
+                    replace(
+                        agent,
+                        pane_id=placed.pane_id,
+                        started_at=context.at,
+                        idle_ticks=0,
+                        account=placed.account or agent.account,
+                        model=placed.model or agent.model,
+                        effort=placed.effort or agent.effort,
+                        model_source=placed.model_source or agent.model_source,
+                        profile_decision=placed.profile_decision or agent.profile_decision,
+                    ),
+                )
+                return ""
+        return _restart_from_handoff(store, slug, agent, task, context)
     except Exception as error:
         return str(error) or type(error).__name__
-    store.put_agent(slug, resumed)
+
+
+def _restart_from_handoff(store, slug, agent, task, context):
+    from scripts.swarm.tick import placed_record, primed
+
+    if not _recovery_current(store, slug, agent, context):
+        return "task ownership changed"
+    handoff = store.handoff(slug, agent.task) or transfers.last_handoff(store, slug, agent.task)
+    transfer = transfers.record(store, slug, agent, "outage", handoff, context.at)
+    transfers.attach(store, slug, agent)
+    task = primed(store, slug, agent.seat, {**task, "handoff": handoff, "transfer": transfer["id"]})
+    if not _recovery_current(store, slug, agent, context):
+        return "task ownership changed"
+    placed = context.runtime.spawn(store.config(slug), agent.lane, agent.name, task)
+    store.put_agent(
+        slug, replace(placed_record(agent, placed), conversation_id="", started_at=context.at, idle_ticks=0)
+    )
     return ""
