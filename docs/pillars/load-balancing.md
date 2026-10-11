@@ -52,9 +52,11 @@ without accounts.
 
 Codex accounts load the same way from the KV v2 secret that
 `AGENTIHOOKS_CODEX_CREDS_PATH` names (set it in `~/.agentihooks/.env`; with it
-unset no Codex secret is read). Each lower case `AH_CX_TOKEN_<slug>` key is
-exported under its own name, the slug being the same email rule
-(`Ops.Two@Example.com` becomes `AH_CX_TOKEN_ops_twoatexample_com`), and the
+unset no Codex secret is read). A key holding an account email is exported
+as `account_names.codex_token_env` of it: `AH_CX_TOKEN_` plus the same slug rule
+(`Ops.Two@Example.com` becomes `AH_CX_TOKEN_ops_twoatexample_com`). A lower case
+`AH_CX_TOKEN_<slug>` key, the form `codex login` and the refresher write, is
+exported under its own name and wins when both name the same account. The
 Codex router routes among them. `AH_CX_REFRESH_<slug>` keys and every other key
 are never exported, so a shell holds access tokens only: the one machine with
 `AGENTIHOOKS_AICODE_TOKEN_REFRESH=true` rotates refresh tokens and writes them

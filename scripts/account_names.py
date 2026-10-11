@@ -15,6 +15,10 @@ def token_env(email: str) -> str:
     return TOKEN_PREFIX + secret_key(email).replace("-", "_")
 
 
+def codex_token_env(email: str) -> str:
+    return CODEX_TOKEN_PREFIX + secret_key(email).replace("-", "_")
+
+
 def oauth_env(environ: Mapping[str, str]) -> dict[str, str]:
     tokens = [value for name, value in environ.items() if name.startswith(TOKEN_PREFIX) and value]
     return {OAUTH_ENV: tokens[0]} if len(tokens) == 1 else {}

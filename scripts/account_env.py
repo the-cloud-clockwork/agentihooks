@@ -17,7 +17,7 @@ from typing import NamedTuple
 from urllib.request import Request, urlopen
 
 from scripts import openbao_kv
-from scripts.account_names import CODEX_TOKEN_PREFIX, TOKEN_PREFIX
+from scripts.account_names import CODEX_TOKEN_PREFIX, TOKEN_PREFIX, codex_token_env
 
 TIMEOUT_S = 3
 USAGE = "usage: agentihooks accounts env"
@@ -27,27 +27,33 @@ class Accounts(NamedTuple):
     prefix: str
     fallback: str
     path: Callable[[Mapping[str, str]], str]
+    from_email: Callable[[str], str] | None
 
 
-CLAUDE = Accounts(TOKEN_PREFIX, "claude.env", lambda environ: openbao_kv.CLAUDE_CREDS)
-CODEX = Accounts(CODEX_TOKEN_PREFIX, "codex.env", lambda environ: environ.get(openbao_kv.CODEX_PATH_ENV, ""))
+CLAUDE = Accounts(TOKEN_PREFIX, "claude.env", lambda environ: openbao_kv.CLAUDE_CREDS, None)
+CODEX = Accounts(
+    CODEX_TOKEN_PREFIX, "codex.env", lambda environ: environ.get(openbao_kv.CODEX_PATH_ENV, ""), codex_token_env
+)
 
 
 def _named(name: str, prefix: str) -> bool:
     return bool(re.fullmatch(rf"{prefix}[a-z0-9_]+", name))
 
 
-def from_openbao(environ: Mapping[str, str], path: str, prefix: str) -> dict[str, str] | None:
-    url, bao = environ.get("OPENBAO_URL"), environ.get("OPENBAO_TOKEN")
+def _exported(secret: Mapping[str, object], accounts: Accounts) -> dict[str, str]:
+    values = {key: value for key, value in secret.items() if isinstance(value, str) and value}
+    by_email = {accounts.from_email(key): value for key, value in values.items() if accounts.from_email and "@" in key}
+    return by_email | {key: value for key, value in values.items() if _named(key, accounts.prefix)}
+
+
+def from_openbao(environ: Mapping[str, str], accounts: Accounts) -> dict[str, str] | None:
+    url, bao, path = environ.get("OPENBAO_URL"), environ.get("OPENBAO_TOKEN"), accounts.path(environ)
     if not url or not bao or not path:
         return None
     request = Request(f"{url.removesuffix('/')}/v1/{openbao_kv.MOUNT}/data/{path}", headers={"X-Vault-Token": bao})
     try:
         with urlopen(request, timeout=TIMEOUT_S) as response:
-            accounts = json.load(response)["data"]["data"]
-        tokens = {
-            name: value for name, value in accounts.items() if _named(name, prefix) and isinstance(value, str) and value
-        }
+            tokens = _exported(json.load(response)["data"]["data"], accounts)
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return None
     return tokens or None
@@ -81,13 +87,12 @@ def from_file(path: Path, prefix: str) -> tuple[dict[str, str], str]:
 
 
 def load(environ: Mapping[str, str], accounts: Accounts) -> dict[str, str]:
-    path = accounts.path(environ)
-    tokens = from_openbao(environ, path, accounts.prefix)
+    tokens = from_openbao(environ, accounts)
     if tokens is not None:
         return tokens
     fallback = fallback_path(environ, accounts.fallback)
     tokens, note = from_file(fallback, accounts.prefix)
-    if fallback.exists() or (environ.get("OPENBAO_URL") and path):
+    if fallback.exists() or (environ.get("OPENBAO_URL") and accounts.path(environ)):
         print(f"agentihooks accounts: OpenBao unreachable, {note}", file=sys.stderr)
     return tokens
 
