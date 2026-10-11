@@ -31,6 +31,7 @@ ASK = (
     "the remaining masters."
 )
 HANDED = "Master seat {address} of swarm {slug} retired as the swarm shrank. Its handoff document follows.\n\n"
+EARLY = "Master seat {address} retired; the lead {lead} answers its phases {phases} until the master count falls."
 
 
 def rule_of(text: str) -> str:
@@ -93,8 +94,10 @@ def _resize(slug, store, doc, agents, count, want, now_ms):
     keep = max([want] + [i for i in range(want + 1, count + 1) if _address(slug, i) in occupied])
     for index in range(count, want, -1):
         address = _address(slug, index)
-        if index > keep or (address in retiring and address not in occupied):
+        if index > keep:
             actions.append(_retire(slug, store, address, retiring.pop(address, None), now_ms))
+        elif address in retiring and address not in occupied:
+            actions.append(_retire_early(slug, store, doc, address, retiring.pop(address), now_ms))
     store.redis.hset(key, RETIRING, json.dumps(retiring))
     return actions + (_recount(slug, store, doc, agents, count, keep, now_ms) if keep < count else [])
 
@@ -135,6 +138,15 @@ def _retire(slug, store, address, asked, now_ms):
     seconds = (now_ms - asked[0]) // 1000
     store.redis.rpush(f"{masters.MasterSeats(store.redis).key(slug)}:{RETIRE_SECONDS}", seconds)
     return f"retired master seat {address} after {seconds} seconds"
+
+
+def _retire_early(slug, store, doc, address, asked, now_ms):
+    """A seat below a live higher seat keeps its phases until the count falls; the lead answers them meanwhile."""
+    action = _retire(slug, store, address, asked, now_ms)
+    owned = [p for p, owner in masters.MasterSeats(store.redis).owners(slug, doc).items() if owner == address]
+    text = EARLY.format(address=address, lead=_address(slug, 1), phases=", ".join(owned) or "no phase")
+    MastersChannel(store.redis).announce(slug, text, now_ms / 1000)
+    return action
 
 
 def _withdraw_asks(store, retiring):

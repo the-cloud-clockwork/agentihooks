@@ -43,9 +43,9 @@
   },
   "remaining_limitations": [
     "Measurements are kept in the masters hash and returned by master_scale.measurements; they are not shipped to the metrics outbox yet, proposed as a ledger follow up",
-    "Extra master seats are stored as working rather than starting, because only the lead has a start tracker; a seat that never reports is reaped as lost after the startup grace and relaunched",
+    "Extra master seats are stored as working rather than starting, because only the lead has a start tracker; a seat whose process is gone is reaped as lost once the startup grace from its spawn has passed, then no longer counts as occupied, and its seat refills",
     "Owner fenced writes between masters are SV2-MST-04",
-    "Phases of an emptied lower seat stay assigned to it in the masters hash until the count falls past it; meanwhile masters.route sends their items to the lead, because their owner seat has no live master"
+    "Phases of an emptied lower seat stay assigned to it in the masters hash until the count falls past it; the tick posts on the masters channel that the lead answers them, and masters.route sends their items to the lead, because their owner seat has no live master"
   ],
   "validation": {
     "red": "Tests run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38070883896 on 630a627b4 failed collecting tests/test_swarm_v2_master_scale.py with ImportError for master_scale",

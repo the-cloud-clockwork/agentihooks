@@ -11,7 +11,7 @@ from scripts.swarm import tick as tick_module
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_v2 import master_scale, masters
 from scripts.swarm_v2.masters_channel import MastersChannel
-from tests.swarm.test_tick import FakeRuntime
+from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
@@ -250,7 +250,10 @@ def test_an_emptied_lower_seat_is_not_relaunched_while_a_higher_seat_retires(swa
     assert count(store) == 4 and len(runtime.masters) == 3
     assert any(f"notes of {SECOND}" in item.text for item in inbox.pending_items(LEAD))
     assert inbox.get(question.id).address == LEAD
-    assert masters.route(f"phases/{PHASES[1]}", DOC, owners(store), [LEAD, THIRD, FOURTH], LEAD) == LEAD
+    assert masters.route(f"phases/{PHASES[1]}", DOC, lambda: owners(store), [LEAD, THIRD, FOURTH], LEAD) == LEAD
+    held = ", ".join(p for p in PHASES if owners(store)[p] == SECOND)
+    assert posts(store)[-1].text == master_scale.EARLY.format(address=SECOND, lead=LEAD, phases=held)
+    assert posts(store)[-1].at == (NOW + 2 * MINUTE + HOLD) / 1000 and len(posts(store)) == 2
     assert run(store, runtime, NOW + 3 * MINUTE + HOLD) == []
 
 
@@ -459,22 +462,18 @@ def test_a_seat_without_phases_is_told_it_owns_none_yet():
 
 
 def test_the_tick_runs_the_scaling_pass_with_its_swarm_and_ledger_document(swarm, monkeypatch):
-    from tests.swarm.test_tick import FakeLedger
-
     store, runtime = swarm
     calls = []
     monkeypatch.setattr(master_scale, "run", lambda *args: calls.append(args) or [])
 
     tick_module.tick(SLUG, store, FakeLedger([{"id": "t1", "lane": "eng"}]), runtime, NOW)
 
-    [(slug, config, passed, placed, doc, now)] = calls
-    assert (slug, config.slug, passed, placed, now) == (SLUG, SLUG, store, runtime, NOW)
+    [(slug, config, passed_store, passed_runtime, doc, now)] = calls
+    assert (slug, config.slug, passed_store, passed_runtime, now) == (SLUG, SLUG, store, runtime, NOW)
     assert [t["id"] for t in doc["tasks"]] == ["t1"]
 
 
 def test_an_extra_master_handoff_through_the_swarm_command_reaches_the_lead(swarm):
-    from tests.swarm.test_tick import FakeLedger
-
     store, runtime = swarm
     _, _, fourth = asked(swarm)
     text = "# Handoff v2\n## Intent\nHand master seat four to the lead.\n<!-- handoff complete -->\n"
