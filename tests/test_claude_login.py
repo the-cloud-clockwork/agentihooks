@@ -240,7 +240,8 @@ def test_a_terminating_signal_restores_the_terminal_and_kills_the_child(number, 
 def test_a_child_that_outlives_its_output_is_killed_after_the_wait(monkeypatch, deadline):
     monkeypatch.setattr(claude_login, "WAIT_S", 0.3)
     child = (
-        "import os, time; os.write(1, b'tok'); null = os.open(os.devnull, os.O_RDWR); "
+        "import os, signal, time; signal.signal(signal.SIGHUP, signal.SIG_IGN); os.write(1, b'tok'); "
+        "null = os.open(os.devnull, os.O_RDWR); "
         "[os.dup2(null, fd) for fd in (0, 1, 2)]; time.sleep(5)"
     )
     terminal = claude_login.Terminal(_pipe(), os.pipe()[1], False, 24)
