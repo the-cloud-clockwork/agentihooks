@@ -540,6 +540,15 @@ def test_a_spawn_whose_rendered_spec_changed_since_prepare_conflicts(fixture):
     assert store.redis.hgetall(store.key("fixture", "runtime-operations")) == before
 
 
+def test_a_prepare_without_a_renderer_keeps_the_journaled_spec(fixture):
+    store, agent, _, _ = fixture
+    _, operations = rendering(store)
+    first = operations.execute("fixture", request(agent))
+    again = store.operation_journal.prepare("fixture", request(agent))
+    assert again == first
+    assert again.spec_digest == "sha256:v1:fixture"
+
+
 def test_a_journal_record_written_before_spec_digests_reads_as_empty(fixture):
     import json
 
