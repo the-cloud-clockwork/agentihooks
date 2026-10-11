@@ -134,6 +134,11 @@ class ControlService:
 def anton_client(environ: Mapping[str, str], slug: str, workers: deployed.Workers | None) -> Upkeep | None:
     if workers is None or workers.terminal is None or not switched_on(environ):
         return None
+    if not environ.get(operator_terminal.CA_KEY_ENV):
+        print(
+            f"controller: keeps no saved herdr machines for {slug}: {operator_terminal.CA_KEY_ENV} is unset", flush=True
+        )
+        return None
     home = ClientHome(Path.home())
     return Upkeep(operator_terminal.terminal(slug, environ, home, runner(home.environment(dict(environ)))))
 

@@ -247,11 +247,8 @@ def test_the_command_refuses_an_unknown_execution(operator_shell, monkeypatch, t
 @pytest.mark.parametrize(
     ("failure", "said"),
     [
-        (
-            FileNotFoundError(2, "No such file or directory", "herdr"),
-            "FileNotFoundError: [Errno 2] No such file or directory: 'herdr'",
-        ),
-        (subprocess.TimeoutExpired(["ssh"], 10), "TimeoutExpired: Command '['ssh']' timed out after 10 seconds"),
+        (FileNotFoundError(2, "No such file or directory", "ssh"), "FileNotFoundError"),
+        (subprocess.TimeoutExpired(["ssh"], 10), "TimeoutExpired"),
     ],
 )
 def test_the_command_reports_a_client_that_cannot_run(operator_shell, monkeypatch, capsys, failure, said):
@@ -265,7 +262,9 @@ def test_the_command_reports_a_client_that_cannot_run(operator_shell, monkeypatc
 
     assert cli.main([SWARM, "terminal", EXE_A]) == 1
 
-    assert capsys.readouterr().err == f"swarm: the worker terminal could not be opened: {said}\n"
+    assert capsys.readouterr().err == (
+        f"swarm: the worker terminal was refused: unreachable: {NAME} terminal did not answer the connection: {said}\n"
+    )
 
 
 def test_an_encrypted_user_ca_key_is_refused(monkeypatch, tmp_path):

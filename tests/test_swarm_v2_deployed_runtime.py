@@ -796,6 +796,21 @@ def test_switched_off_the_controller_runs_no_herdr_command_and_reads_no_ca_key(t
         service.stop()
 
 
+def test_a_controller_without_the_terminal_ca_key_says_it_keeps_no_client(tmp_path, monkeypatch, capsys):
+    service, herdr, environments = _anton_client(
+        tmp_path, monkeypatch, _store(), **{operator_terminal.CA_KEY_ENV: None}
+    )
+    try:
+        assert service.controller.terminals is None
+        assert herdr.commands == []
+        assert environments == []
+        assert capsys.readouterr().out.splitlines()[0] == (
+            f"controller: keeps no saved herdr machines for {SLUG}: AGENTIHOOKS_TERMINAL_CA_KEY is unset"
+        )
+    finally:
+        service.stop()
+
+
 def test_a_controller_without_terminal_exposure_keeps_no_client(tmp_path, monkeypatch):
     service, herdr, environments = _anton_client(tmp_path, monkeypatch, _store(), **{deployed.TERMINAL_ENV: None})
     try:
