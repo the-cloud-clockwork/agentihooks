@@ -178,7 +178,11 @@ class Terminal:
         return endpoint
 
     def _connect(self, endpoint: Endpoint) -> None:
-        done = self.run([SSH, "-F", str(self.home.config), endpoint.host, "true"])
+        try:
+            done = self.run([SSH, "-F", str(self.home.config), endpoint.host, "true"])
+        except (OSError, subprocess.SubprocessError) as error:
+            message = f"{endpoint.name} terminal did not answer the connection: {type(error).__name__}"
+            raise EndpointRefused("unreachable", message) from None
         if done.returncode != 0:
             reason = _classify(str(done.stderr))
             raise EndpointRefused(reason, f"{endpoint.name} terminal refused the connection: {reason}")
