@@ -212,6 +212,20 @@ def test_host_keys_are_kept_per_swarm():
     )
 
 
+def test_forgetting_a_host_key_drops_only_that_execution_in_that_swarm():
+    shared = store()
+    keys = HostKeys(shared)
+    keys.record(Scope("grant/x", "fixture-swarm", EXE_A, 2), "ssh-ed25519 AAAA-a")
+    keys.record(Scope("grant/y", "fixture-swarm", "exe-" + "b" * 32, 1), "ssh-ed25519 AAAA-b")
+    keys.record(Scope("grant/z", "other", EXE_A, 1), "ssh-ed25519 AAAA-o")
+
+    keys.forget("fixture-swarm", EXE_A)
+    keys.forget("fixture-swarm", EXE_A)
+
+    assert list(shared.redis.hgetall(shared.key("fixture-swarm", "terminal-host-keys"))) == ["exe-" + "b" * 32]
+    assert keys.launched("other", EXE_A) == Launched(EXE_A, 1, "ssh-ed25519 AAAA-o")
+
+
 EXE_B = "exe-" + "b" * 32
 EXE_C = "exe-" + "c" * 32
 

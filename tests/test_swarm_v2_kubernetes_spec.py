@@ -166,7 +166,7 @@ def test_the_worker_is_hardened_and_never_mounts_a_service_account_token():
     assert body["containers"][0]["securityContext"] == {
         "allowPrivilegeEscalation": False,
         "privileged": False,
-        "readOnlyRootFilesystem": True,
+        "readOnlyRootFilesystem": False,
         "capabilities": {"drop": ["ALL"]},
     }
 
@@ -190,8 +190,29 @@ def test_the_policy_runtime_class_reaches_the_pod():
     assert rendered.pod["spec"]["runtimeClassName"] == "kata-qemu"
 
 
+@pytest.mark.parametrize("runtime", ["kata-fc", "runc"])
+def test_worker_scratch_uses_the_root_disk_only_for_firecracker(runtime):
+    policy = policy_doc()
+    policy["runtime_class_name"] = runtime
+    template, rendered = render(policy=policy)
+    body = rendered.pod["spec"]
+    agent = body["containers"][0]
+    expected = [] if runtime == "kata-fc" else ["home", "tmp"]
+    assert [v["name"] for v in body["volumes"] if "emptyDir" in v] == expected
+    assert [m["name"] for m in agent["volumeMounts"] if m["mountPath"] in ("/home/worker", "/tmp")] == expected
+    assert agent["securityContext"]["readOnlyRootFilesystem"] is (runtime != "kata-fc")
+    assert agent["securityContext"]["allowPrivilegeEscalation"] is False
+    assert agent["securityContext"]["privileged"] is False
+    assert agent["securityContext"]["capabilities"] == {"drop": ["ALL"]}
+    assert body["securityContext"]["runAsUser"] == 10001
+    assert body["automountServiceAccountToken"] is False
+    assert template.shared_runtime_mount_rejections_total() == {}
+
+
 def test_volumes_are_private_scratch_and_the_launch_record_with_no_credential_mount():
-    _, rendered = render()
+    policy = policy_doc()
+    policy["runtime_class_name"] = "runc"
+    _, rendered = render(policy=policy)
     body = rendered.pod["spec"]
     assert body["volumes"] == [
         {"name": "home", "emptyDir": {"sizeLimit": "9216Mi"}},
@@ -948,7 +969,10 @@ def test_a_policy_bundle_is_copied_by_an_init_container_into_a_private_folder(tm
     assert init["imagePullPolicy"] == "Always"
     assert init["command"] == ["cp", "-R", "/bundle", "/linked", "/revision.json", spec.BUNDLE_DIR + "/"]
     assert init["volumeMounts"] == [{"name": "bundle", "mountPath": spec.BUNDLE_DIR}]
-    assert init["securityContext"] == pod["spec"]["containers"][0]["securityContext"]
+    assert init["securityContext"] == {
+        **pod["spec"]["containers"][0]["securityContext"],
+        "readOnlyRootFilesystem": True,
+    }
     assert "env" not in init and "envFrom" not in init
     assert {"name": "bundle", "emptyDir": {"sizeLimit": f"{spec.BUNDLE_MIB}Mi"}} in pod["spec"]["volumes"]
 
