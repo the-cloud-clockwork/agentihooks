@@ -6,11 +6,13 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from scripts.hive import auth as hive_auth
-from scripts.swarm import lease
+from scripts.swarm import ledger_host, lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
-from scripts.swarm_v2 import deployed, telemetry
+from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
+from scripts.swarm_v2 import deployed, ledger_writer, telemetry
 from scripts.swarm_v2.api.executions import ExecutionsAPI
-from scripts.swarm_v2.api.server import serve
+from scripts.swarm_v2.api.server import Routes, serve
+from scripts.swarm_v2.api.tasks import TasksAPI
 from scripts.swarm_v2.auth_context import LaunchAuthority, LaunchKey
 from scripts.swarm_v2.authority import TaskAuthority
 from scripts.swarm_v2.controller import Controller
@@ -87,6 +89,8 @@ class ControlService:
         self.recover: Callable[[], dict[str, str]] | None = None
         self.views: Callable[[], dict] | None = None
         self.viewing: threading.Thread | None = None
+        self.tasks_api: TasksAPI | None = None
+        self.writer: ledger_writer.WriterLease | None = None
 
     def start(self) -> bool:
         if not self.controller.acquire():
@@ -128,16 +132,28 @@ class ControlService:
                 self.controller.store.update(self.controller.slug, api_url=self.api_url)
 
     def serve(self, host: str, port: int) -> ThreadingHTTPServer:
-        self.server = serve(self.executions, host, port)
+        api = self.executions if self.tasks_api is None else Routes(self.executions, self.tasks_api)
+        self.server = serve(api, host, port)
         self.thread = threading.Thread(target=self.server.serve_forever, name=THREAD, daemon=True)
         self.thread.start()
         return self.server
+
+    def mount_ledger(self, folder: Path) -> None:
+        self.writer = ledger_writer.WriterLease(folder)
+        try:
+            self.writer.acquire(ledger_writer.owner())
+        except ledger_writer.WriterConflict as conflict:
+            print(f"controller: serves the tasks API read only for {self.controller.slug}: {conflict}", flush=True)
+        ledger = SQLiteLedgerRepository(folder / DATABASE)
+        self.tasks_api = TasksAPI(self.grants, self.tasks, ledger, self.writer.held)
 
     def stop(self) -> None:
         if self.server is not None:
             if self.thread.is_alive():
                 self.server.shutdown()
             self.server.server_close()
+        if self.writer is not None:
+            self.writer.release()
         if self.controller.held is not None:
             self.controller.release()
 
@@ -183,6 +199,7 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
         if service.controller.terminals is not None:
             service.views = deployed.terminal_views(service.controller, environ)
     try:
+        service.mount_ledger(ledger_host.folder(environ))
         service.start()
     except BaseException:
         service.stop()
