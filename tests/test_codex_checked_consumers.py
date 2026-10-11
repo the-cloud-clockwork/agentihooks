@@ -11,7 +11,7 @@ from scripts.codex_quota import CodexQuota
 @pytest.fixture
 def default_login(monkeypatch):
     for name in os.environ:
-        if name.startswith(codex_router.TOKEN_ENV):
+        if name.startswith(codex_router.CODEX_TOKEN_PREFIX):
             monkeypatch.delenv(name)
     monkeypatch.delenv("AH_ROUTE_API", raising=False)
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
