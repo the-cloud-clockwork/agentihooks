@@ -130,9 +130,8 @@ def _positive() -> tuple[dict, bool]:
     observed = {name: summary(name) for name in INPUTS}
     held = {name: _anton_holds(name) for name in ANTON} | {name: _kind_holds(name) for name in KIND}
     starts = [{(e["pod"], e["at"]) for e in samples(name) if e["outcome"] == stages.STARTED} for name in ANTON]
-    shared = sorted(
-        e["pod"] for e in samples(ANTON[1]) if (e["pod"], e["at"]) in {(s["pod"], s["at"]) for s in samples(ANTON[0])}
-    )
+    first = {(s["pod"], s["at"]) for s in samples(ANTON[0])}
+    shared = sorted(e["pod"] for e in samples(ANTON[1]) if (e["pod"], e["at"]) in first)
     independent = not starts[0] & starts[1]
     observed.update({"each_fixture": held, "independent_reads": independent, "continuing_in_both_reads": shared})
     anton = all(held[name]["cold_rows_split"] and held[name]["cold_claimed"] for name in ANTON)
