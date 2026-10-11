@@ -276,10 +276,8 @@ def recover_outages(
         if not recovery_pending(store, slug, agent) or not _recovery_owner(store, slug, agent, rows, now_ms):
             continue
         record = _recovery_record(store, slug, agent)
-        if record["last_at"] == now_ms:
-            continue
         observed = runtime.observe(agent)
-        if not _recovery_current(store, slug, agent, context):
+        if record["last_at"] == now_ms or not _recovery_current(store, slug, agent, context):
             continue
         if agent.name in live and not observed.provider_error and observed.state == idle.WORKING:
             record["state"] = "done"
