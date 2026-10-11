@@ -120,4 +120,17 @@ Slice 1 removes the restarts behind the canaries. Slices 4 and 5 are the result 
 
 Dispatched Tests runs on a diffcheck branch carrying slice 1's plugin with `--reruns 2`, the canaries set to fail their first attempt:
 
-PROOF_TABLE
+| Run | Plant | Result |
+|---|---|---|
+| [38099973312](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38099973312) | none on purpose: the workflow shape test fails every attempt because the proof adds a step | three attempts, recorded `failed`, shard red: a consistent failure is not masked |
+| [38100556344](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38100556344) | header counts and alerts fold reload (both parameters) fail attempt 1 | each passed on attempt 2 and was recorded `flaky`; all 12 unit shards and both shard checks green; run attempt 1, no rerun |
+
+The ledger lines from run 38100556344:
+
+```json
+{"test": "tests/swarm_ledger/test_section_heads.py::test_every_header_shows_its_counts_folded_and_open", "attempts": 2, "outcome": "flaky", "errors": ["E   AssertionError: planted failure on attempt 1"], "worker": "gw2"}
+{"test": "tests/swarm_ledger/test_alerts_page.py::test_the_panel_fold_is_remembered_after_a_reload[0]", "attempts": 2, "outcome": "flaky", "errors": ["E   AssertionError: planted failure on attempt 1"], "worker": "gw3"}
+{"test": "tests/swarm_ledger/test_alerts_page.py::test_the_panel_fold_is_remembered_after_a_reload[250]", "attempts": 2, "outcome": "flaky", "errors": ["E   AssertionError: planted failure on attempt 1"], "worker": "gw0"}
+```
+
+The plant fails the test's first call before its body runs, so it proves the retry path in CI on the canaries' real fixtures (Chromium, the scratch ledger server). The canaries' real failures are timing races inside one attempt; that a second attempt clears them is a hypothesis until slice 1 runs in the queue, where the flake ledger records each absorbed failure. The proof branch's lint and test count jobs were red because the branch sat behind the dev floor they grade against, which retry does not touch.
