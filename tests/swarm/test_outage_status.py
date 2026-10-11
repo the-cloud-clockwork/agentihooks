@@ -36,7 +36,7 @@ def test_text_status_lists_each_open_outage_even_when_ledger_reads_fail(store, t
     monkeypatch.setattr(cli.LedgerClient, "state", unavailable)
     with pytest.raises(SwarmError):
         cli.cmd_status(store, argparse.Namespace(slug="sw", json=False))
-    assert "worker (claude): API Error: 529" in capsys.readouterr().out
+    assert capsys.readouterr().out == "outage provider since 1000: worker (claude): API Error: 529\n"
 
 
 @pytest.mark.parametrize("as_json", [False, True])
