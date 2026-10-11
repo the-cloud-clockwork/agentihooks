@@ -16,6 +16,7 @@ from types import SimpleNamespace
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from scripts.swarm_v2.herdr.endpoints import Endpoint, HostIdentity, TerminalAuthority, operator_scope
+from scripts.swarm_v2.herdr.reconcile import Report
 from scripts.swarm_v2.operator_auth import OPERATOR
 
 REPO = Path(__file__).resolve().parents[3]
@@ -143,6 +144,19 @@ def main() -> int:
             "c_retired_registration_removed_and_its_server_keeps_running",
             report.retired == [tp.EXE_C] and labels(restarted) == [endpoint_a.name] and running,
             {"retired": report.retired, "labels": labels(restarted), "worker_c_server_running": running},
+        )
+        both = sorted([endpoint_a.name, endpoint_c.name])
+        synced = restarted.sync([(scope(tp.EXE_A), identity_a.public), (scope(tp.EXE_C), identity_c.public)])
+        tp.record(
+            "a_sync_registers_every_live_attempt",
+            synced.refused == {} and sorted(synced.registered) == [tp.EXE_A, tp.EXE_C] and labels(restarted) == both,
+            {"registered": sorted(synced.registered), "drift": synced.drift, "labels": labels(restarted)},
+        )
+        stopped = restarted.sync([], enabled=False)
+        tp.record(
+            "rollback_stopped_registration_leaves_profiles",
+            stopped == Report() and labels(restarted) == both,
+            {"labels": labels(restarted)},
         )
     finally:
         for worker in workers:

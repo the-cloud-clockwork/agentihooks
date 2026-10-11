@@ -13,6 +13,7 @@ from scripts.swarm_v2.herdr.endpoints import Endpoint, EndpointRefused
 
 STORE = "registrations.json"
 VERSION = 1
+ACTORS = ("grant/", "operator/")
 
 
 @dataclass(frozen=True)
@@ -186,6 +187,8 @@ class Registrations:
         return saved.profile_id
 
     def _register(self, endpoint: Endpoint, records: dict[str, Record], machines: tuple[Machine, ...]) -> str:
+        if not endpoint.scope.actor.startswith(ACTORS):
+            raise EndpointRefused("unauthorized", f"{endpoint.name} has no launch grant or operator scope")
         profile_id = self._claim(endpoint, records, machines)
         records[endpoint.scope.execution_id] = self._record(endpoint, profile_id)
         self.store.save(records)

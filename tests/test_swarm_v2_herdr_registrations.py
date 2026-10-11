@@ -12,7 +12,7 @@ import pytest
 from scripts.swarm_v2.herdr import catalog, reconcile
 from scripts.swarm_v2.herdr.capabilities import Incompatible, Unreachable
 from scripts.swarm_v2.herdr.catalog import Catalog, Machine
-from scripts.swarm_v2.herdr.endpoints import EndpointRefused
+from scripts.swarm_v2.herdr.endpoints import Endpoint, EndpointRefused, Scope
 from scripts.swarm_v2.herdr.reconcile import Record, Registrations, Report, Store
 from tests import sv2_hdr03_cases as cases
 
@@ -614,3 +614,23 @@ def test_every_adopted_interrupted_add_is_counted(tmp_path):
     second = registrations.reconcile(desired, Verdicts())
     assert first.refused == {EXE_A: "catalog_unreachable", EXE_B: "catalog_unreachable"}
     assert (second.drift, sorted(second.registered)) == ({"interrupted": 2}, [EXE_A, EXE_B])
+
+
+def test_an_endpoint_without_a_grant_or_operator_scope_is_refused(tmp_path):
+    registrations, herdr, desired = world(tmp_path)
+    scope = desired[0].scope
+    controller = Endpoint(Scope("controller", scope.swarm, scope.execution_id, scope.generation), "swarm-workers")
+    assert refusal(lambda: registrations.register(controller)) == (
+        "unauthorized",
+        f"{NAME_A} has no launch grant or operator scope",
+    )
+    assert herdr.commands == []
+    assert not registrations.store.path.exists()
+
+
+@pytest.mark.parametrize("actor", ["grant/lgr-1", "operator/nestor"])
+def test_grant_and_operator_scopes_may_register(tmp_path, actor):
+    registrations, herdr, desired = world(tmp_path)
+    scope = desired[0].scope
+    endpoint = Endpoint(Scope(actor, scope.swarm, scope.execution_id, scope.generation), "swarm-workers")
+    assert registrations.register(endpoint) == herdr.machines[0]["id"]

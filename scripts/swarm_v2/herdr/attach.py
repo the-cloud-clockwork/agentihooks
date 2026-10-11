@@ -3,7 +3,7 @@ import os
 import socket
 import subprocess
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
@@ -21,7 +21,7 @@ from scripts.swarm_v2.herdr.endpoints import (
     key_pair,
     known_hosts,
 )
-from scripts.swarm_v2.herdr.reconcile import STORE, Registrations, Store
+from scripts.swarm_v2.herdr.reconcile import STORE, Registrations, Report, Store
 
 USER = "worker"
 SSH = "/usr/bin/ssh"
@@ -197,6 +197,22 @@ class Terminal:
         except EndpointRefused as refused:
             self._refuse(refused)
         return verdict
+
+    def sync(self, attachable: Iterable[tuple[Scope, str]], *, enabled: bool = True) -> Report:
+        if not enabled:
+            return Report()
+        ready, refused = [], {}
+        for scope, host_public in attachable:
+            try:
+                endpoint = self.register(scope, host_public)
+                self._connect(endpoint)
+                ready.append(endpoint)
+            except EndpointRefused as refusal:
+                self.failures[refusal.reason] += 1
+                refused[scope.execution_id] = refusal.reason
+        report = self.registrations.reconcile(ready, self.qualifier)
+        report.refused |= refused
+        return report
 
     def _qualified(self, endpoint: Endpoint, fresh: bool) -> Verdict:
         try:
