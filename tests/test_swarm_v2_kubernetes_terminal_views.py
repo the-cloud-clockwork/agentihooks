@@ -5,8 +5,10 @@ import pytest
 
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_v2.herdr import visibility
+from scripts.swarm_v2.herdr.capabilities import Unreachable
 from scripts.swarm_v2.herdr.viewer import Viewer
-from scripts.swarm_v2.herdr.visibility import CACHED, LIVE, UNVERIFIED
+from scripts.swarm_v2.herdr.visibility import CACHED, LIVE, UNVERIFIED, View
+from scripts.swarm_v2.kubernetes import terminal_views
 from scripts.swarm_v2.kubernetes.terminal_views import TerminalViews
 from scripts.swarm_v2.kubernetes.watch import BACKEND
 from scripts.swarm_v2.operator_auth import OPERATOR
@@ -168,16 +170,31 @@ def test_an_agent_that_left_the_swarm_is_no_longer_published(rig):
     assert sorted(published(store, workers)) == [name(EXE_B)]
 
 
-def test_local_agents_and_unregistered_executions_are_not_watched(rig):
+def test_a_local_agent_is_not_published_and_an_unregistered_one_reads_unverified(rig):
     workers, store, viewer, views = rig
     local = AgentRecord("engineer@a1b2c3-0009", "eng", "t9", seat=f"eng-9@{SLUG}", conversation_id="c9")
-    stray = remote(ENDPOINT_A, "eng-3", execution_id="exe-unregistered")
+    stray = AgentRecord(
+        "engineer@a1b2c3-0008",
+        "eng",
+        "t8",
+        seat=f"eng-8@{SLUG}",
+        execution_id="exe-unregistered",
+        generation=1,
+        runtime_backend=BACKEND,
+        conversation_id="c8",
+    )
     store.occupants = [local, stray, remote(ENDPOINT_B, "eng-2")]
 
-    views()
+    returned = views()
 
     assert sorted(viewer.watched) == [name(EXE_B)]
-    assert sorted(published(store, workers)) == [name(EXE_B)]
+    assert published(store, workers) == {
+        "engineer@a1b2c3-0008": (UNVERIFIED, "", "", "unregistered"),
+        name(EXE_B): (LIVE, ENDPOINT_B.name, PANE, ""),
+    }
+    assert returned["engineer@a1b2c3-0008"] == View(
+        "engineer@a1b2c3-0008", "", "", UNVERIFIED, reason="unregistered", fresh_ms=FX["fresh_ms"]
+    )
 
 
 def test_an_agent_without_a_conversation_is_not_watched(rig):
@@ -187,15 +204,39 @@ def test_an_agent_without_a_conversation_is_not_watched(rig):
     views()
 
     assert sorted(viewer.watched) == [name(EXE_B)]
+    assert published(store, workers)[name(EXE_A)] == (UNVERIFIED, "", "", "conversation_required")
 
 
-def test_an_agent_whose_machine_is_cut_before_it_is_found_is_not_watched(rig):
+def test_an_agent_whose_machine_is_cut_before_it_is_found_reads_unverified_and_is_found_later(rig):
     workers, store, viewer, views = rig
     workers.cut.add(machine(viewer, EXE_A))
 
     views()
 
     assert sorted(viewer.watched) == [name(EXE_B)]
+    assert published(store, workers)[name(EXE_A)] == (UNVERIFIED, "", "", "unreachable")
+    workers.cut.clear()
+
+    views()
+
+    assert published(store, workers)[name(EXE_A)] == (LIVE, ENDPOINT_A.name, PANE, "")
+
+
+def test_an_unreachable_capability_probe_while_finding_a_pane_reads_unreachable(rig, monkeypatch):
+    workers, store, _, views = rig
+
+    def unreachable(router, agent):
+        raise Unreachable(f"{agent.name}: TimeoutExpired")
+
+    monkeypatch.setattr(terminal_views, "agent_target", unreachable)
+
+    views()
+
+    assert terminal_views.UNREACHABLE == "unreachable"
+    assert published(store, workers) == {
+        name(EXE_A): (UNVERIFIED, "", "", "unreachable"),
+        name(EXE_B): (UNVERIFIED, "", "", "unreachable"),
+    }
 
 
 def test_aggregation_off_publishes_unverified_views_without_reading_any_pane(tmp_path):
