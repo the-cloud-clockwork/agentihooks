@@ -1,7 +1,14 @@
 {
   "package": "SV2-CKP-01",
-  "dependency": ["SV2-FSY-05", "SV2-CTL-05"],
-  "dependents": ["SV2-CKP-02", "SV2-CKP-03", "SV2-CKP-04"],
+  "dependency": [
+    "SV2-FSY-05",
+    "SV2-CTL-05"
+  ],
+  "dependents": [
+    "SV2-CKP-02",
+    "SV2-CKP-03",
+    "SV2-CKP-04"
+  ],
   "integration_gate": "G8",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2484",
   "tested_commit": "ead685260c72146b4fd30dda03ed38d8edcef0bc",
@@ -56,5 +63,16 @@
     "Checkpoint sequence is recorded and immutable per checkpoint id but not ordered here; SV2-CKP-04 orders it when it promotes the latest pointer.",
     "Materials are verified by content hash and size, not by a semantic check of their contents.",
     "artifact_hashes stays required by the contract and must agree with the inventory at 2.2."
-  ]
+  ],
+  "spec_coverage": {
+    "dependencies": "SV2-FSY-05 supplies the scoped artifact storage: the granted ArtifactStore is the only path Validator reads or writes. SV2-CTL-05 supplies current generation ownership: Validator.commit requires the record authority to equal the attempt's task, execution and generation.",
+    "source_and_materials": "base_commit, head_commit and branch_name stay required; branch_state pushed or bundled, bundled requiring a source_bundle material; native resume material is the native_session material with native_session_id and native_harness_version; the normalized watermark is transcript_durable_cursor with non negative integer sequence and byte_offset plus the normalized_transcript material; exclusions stay required and are carried verbatim.",
+    "reconstruction": "reconstruction carries harness, image_digest, task_revision and execution_generation; schema_version carries the schema; an execution generation unequal to the authority task generation is scope_mismatch.",
+    "completeness": "Verdict.completeness is complete, incomplete or diagnostic_only; Verdict.continuation is native, context or none.",
+    "manifest_commit": "inventory sha256 and size must agree with artifact_hashes; Validator.commit stores the manifest only after every inventoried object reads back verified, under an immutable checkpoint id.",
+    "state_obligation": "See states: observed, accepted, committed and externally verified are separate outcomes, and only verify after commit returns authoritative.",
+    "data_safety": "See rollback_rehearsal.authoritative_objects: the manifest object and the content addressed materials are authoritative, never caches, and rollback deletes neither; case C records the durable keys unchanged after rollback.",
+    "completion_evidence": "interfaces, supported_versions, validation (test and mutation run ids), remaining_limitations and rollback_rehearsal in this record, with the A, B and C case records and manifest.json.",
+    "phase_use": "Spot recovery on Anton workers and SV2-CKP-02 to SV2-CKP-04 call Validator.verify from the replacement attempt to choose native resume or context continuation without reaching the reclaimed node."
+  }
 }
