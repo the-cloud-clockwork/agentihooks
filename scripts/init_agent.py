@@ -233,6 +233,17 @@ def _handoff_exclude(agent: str, environ: dict[str, str]) -> str:
     return "" if current == UNROUTED else current
 
 
+def _mark_handoff(account: str, resumed: str) -> list[str]:
+    from hooks.context.account_sessions import agent_pid
+    from hooks.context.broadcast import mark_handed_off
+    from hooks.lifecycle import handoff_close
+
+    pid = agent_pid()
+    if resumed:
+        handoff_close.marker(pid, resumed).touch()
+    return mark_handed_off(pid, account)
+
+
 def model_effort(agent: str, agent_args: list[str], environ: dict[str, str]) -> tuple[str, str]:
     prefix = f"AGENTIHOOKS_{agent.upper()}"
     model = _flag_value(agent_args, ("--model", "-m")) or environ.get(f"{prefix}_MODEL") or MODEL_DEFAULTS[agent]
@@ -786,14 +797,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         print("\n".join(report))
         return 0
 
-    from hooks.context.account_sessions import agent_pid
-    from hooks.context.broadcast import mark_handed_off
-    from hooks.lifecycle import handoff_close
-
-    pid = agent_pid()
-    marked = mark_handed_off(pid, route["account"])
-    if args.resume:
-        handoff_close.marker(pid, args.resume).touch()
+    marked = _mark_handoff(route["account"], args.resume)
     print("\n".join([*report, "handoff=done", f"handed_off_sessions={','.join(marked) or 'none'}"]))
     return 0
 
