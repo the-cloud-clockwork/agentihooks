@@ -54,7 +54,7 @@ def _qualified(target: object) -> bool:
     return isinstance(target, Target) and all((target.profile_id, target.session, target.incarnation))
 
 
-def _conversation(reply: str) -> tuple[str, str] | None:
+def pane_conversation(reply: str) -> tuple[str, str] | None:
     try:
         document = json.loads(reply)
     except ValueError:
@@ -215,7 +215,7 @@ class Router:
             done = self.run(argv)
         except (OSError, subprocess.TimeoutExpired):
             done = None
-        found = _conversation(done.stdout) if done is not None and done.returncode == 0 else None
+        found = pane_conversation(done.stdout) if done is not None and done.returncode == 0 else None
         if found is None or not found[1]:
             self._refuse("conversation_unconfirmed", f"{target.pane_id} reported no conversation", target.profile_id)
         if found != (target.pane_id, target.conversation_id):

@@ -1037,6 +1037,51 @@ def test_the_kubernetes_runtime_prompts_through_the_controller_terminal(tmp_path
         service.stop()
 
 
+def test_the_controller_publishes_terminal_views_through_its_client_terminal(tmp_path, monkeypatch):
+    from scripts.swarm_v2.herdr import visibility
+    from scripts.swarm_v2.herdr.capabilities import Qualifier
+    from scripts.swarm_v2.herdr.target import DELIVERIES
+    from scripts.swarm_v2.kubernetes.terminal_views import TerminalViews
+
+    store = _store()
+    service, _, _ = _anton_client(tmp_path, monkeypatch, store)
+    try:
+        views, terminal = service.views, service.controller.terminals.terminal
+        assert isinstance(views, TerminalViews)
+        assert (views.store, views.slug) == (store, SLUG)
+        viewer, router = views.viewer, views.viewer.router
+        assert (viewer.run, viewer.aggregation) == (terminal.run, True)
+        assert router.store is terminal.registrations.store
+        assert router.catalog is terminal.registrations.catalog
+        assert (router.run, router.mutations) == (terminal.run, False)
+        assert isinstance(router.qualifier, Qualifier) and router.qualifier is not terminal.qualifier
+        assert router.qualifier.probe.__closure__[0].cell_contents is terminal.run
+        assert router.deliveries.path == terminal.home.terminals / DELIVERIES
+        store.redis.hset(store.key(SLUG, visibility.KEY), "retired", "{}")
+        assert service.tick() is True
+        service.viewing.join(5)
+        assert visibility.read(store, SLUG, 0) == {}
+    finally:
+        service.stop()
+
+
+def test_terminal_aggregation_switched_off_builds_a_viewer_without_aggregation(tmp_path, monkeypatch):
+    service, _, _ = _anton_client(tmp_path, monkeypatch, _store(), **{deployed.AGGREGATION_ENV: "off"})
+    try:
+        assert deployed.AGGREGATION_ENV == "AGENTIHOOKS_TERMINAL_AGGREGATION"
+        assert service.views.viewer.aggregation is False
+    finally:
+        service.stop()
+
+
+def test_a_controller_keeping_no_saved_machines_publishes_no_terminal_views(tmp_path, monkeypatch):
+    service, _, _ = _anton_client(tmp_path, monkeypatch, _store(), **{operator_terminal.CA_KEY_ENV: None})
+    try:
+        assert service.views is None
+    finally:
+        service.stop()
+
+
 def test_a_controller_keeping_no_saved_machines_leaves_kubernetes_command_unsupported(tmp_path, monkeypatch):
     from scripts.swarm_v2.runtime.base import Capability
 

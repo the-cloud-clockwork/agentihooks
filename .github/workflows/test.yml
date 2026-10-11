@@ -1259,6 +1259,54 @@ jobs:
           path: ~/durations-samples
           key: durations-samples-${{ github.sha }}
 
+  flake-budget:
+    needs: [unit]
+    if: ${{ !cancelled() && github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore the flake history
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/flake-history
+          key: flake-history-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: flake-history-
+
+      - name: Download this run's flake reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: flakes-3.*
+          path: ~/flake-reports
+
+      - name: Count flaky tests over seven days
+        shell: bash
+        run: python -m tests.flake_budget --history ~/flake-history/history.jsonl --reports ~/flake-reports --out flake-budget.json | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish the flake budget
+        uses: actions/upload-artifact@v4
+        with:
+          name: flake-budget
+          path: flake-budget.json
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+      - name: Save the flake history
+        uses: actions/cache/save@v4
+        with:
+          path: ~/flake-history
+          key: flake-history-${{ github.run_id }}-${{ github.run_attempt }}
+
   coverage-baseline:
     needs: [unit, gate-required]
     # Any measured dev push publishes: a skipped one leaves the next head with no base to grade against.

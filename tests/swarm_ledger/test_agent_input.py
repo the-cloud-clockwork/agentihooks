@@ -8,7 +8,7 @@ def test_an_agent_at_a_startup_prompt_shows_waiting_in_its_row():
     page = page_source()
     functions = [
         "function " + name + "(" + page.split("  function " + name + "(", 1)[1].split("\n  }\n", 1)[0] + "\n}"
-        for name in ("span", "modelText", "agentRows")
+        for name in ("span", "modelText", "terminalView", "agentRows")
     ]
     js = (
         "\n".join(functions)

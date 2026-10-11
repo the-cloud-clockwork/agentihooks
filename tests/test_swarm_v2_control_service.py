@@ -139,6 +139,51 @@ def test_each_tick_runs_the_recovery_pass_only_while_the_controller_is_held(tmp_
     assert passes == [service.controller.held.epoch]
 
 
+def test_each_tick_publishes_terminal_views_only_while_the_controller_is_held(tmp_path):
+    store = _store()
+    key = _cs().launch_key(_environ(tmp_path))
+    service, passes = _cs().ControlService(store, SLUG, key, lambda: True), []
+    assert (service.views, service.viewing) == (None, None)
+    assert service.tick() is True
+    assert service.viewing is None
+    service.views = lambda: passes.append(service.controller.held.epoch) or {}
+    assert service.tick() is True
+    service.viewing.join(5)
+    assert passes == [service.controller.held.epoch]
+    assert (service.viewing.name, service.viewing.daemon) == (_cs().VIEWS_THREAD, True)
+    other = _cs().ControlService(store, SLUG, key, lambda: True)
+    other.views = lambda: passes.append("other") or {}
+    assert other.tick() is False
+    assert other.viewing is None
+    assert passes == [service.controller.held.epoch]
+
+
+def test_a_slow_views_pass_never_holds_up_the_tick_and_never_overlaps(tmp_path):
+    import threading
+
+    service = _cs().ControlService(_store(), SLUG, _cs().launch_key(_environ(tmp_path)), lambda: True)
+    release, passes = threading.Event(), []
+
+    def slow():
+        passes.append("started")
+        release.wait(5)
+        return {}
+
+    service.views = slow
+    assert service.tick() is True
+    first = service.viewing
+    assert service.tick() is True
+    assert service.viewing is first
+    release.set()
+    first.join(5)
+    assert passes == ["started"]
+    assert service.tick() is True
+    service.viewing.join(5)
+    assert service.viewing is not first
+    assert passes == ["started", "started"]
+    assert _cs().VIEWS_THREAD == "swarm-v2-terminal-views"
+
+
 def _admitted(service, store, seat="eng-1@" + SLUG, task="t1"):
     pod = {"pod_namespace": "swarm", "pod_name": f"worker-{task}"}
     record = AgentRecord(

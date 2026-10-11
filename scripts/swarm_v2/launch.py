@@ -24,6 +24,8 @@ GRANT_SECONDS = 30
 NO_API_URL = "the swarm config has no API address"
 NOT_HANDED = "launch grant not handed: "
 HANDS = "launch-grant-hands"
+ENDINGS = "launch-endings"
+ENDED = "ended"
 WORKER_DEFAULT = "default"
 NO_ACCOUNT = "no approved account has quota and a free launch slot"
 Target = Callable[[SpawnRequest], dict]
@@ -128,8 +130,10 @@ class DistributedLaunch:
         try:
             slot = self.capacity.reserve(grant, terms.cap, terms.ttl_ms)
         except SwarmError as error:
+            ended = self.end_refused(admitted, str(error))
+            self.grants.withdraw(self.slug, grant)
             status = Status.UNAVAILABLE if str(error) == ACCOUNT_FULL else Status.REFUSED
-            return Launch(admitted, grant, None, Outcome("spawn", status, backend, detail=str(error)))
+            return Launch(ended, grant, None, Outcome("spawn", status, backend, detail=str(error)))
         identity = {
             "launch_grant": grant,
             "execution_id": admitted.execution_id,
@@ -176,7 +180,19 @@ class DistributedLaunch:
             runtime_target=target(request),
             profile=profile,
         )
-        return self.spawn(request, agent, replace(terms, api_url=api_url), "").outcome
+        store = self.controller.store
+        occupant = store.execution_occupants(self.slug).get(agent.seat)
+        refused = occupant and store.redis.hexists(store.key(self.slug, ENDINGS), occupant.execution_id)
+        previous = occupant.execution_id if refused else ""
+        return self.spawn(request, agent, replace(terms, api_url=api_url), previous).outcome
+
+    def end_refused(self, agent: AgentRecord, reason: str) -> AgentRecord:
+        store, ended = self.controller.store, replace(agent, state=ENDED)
+        self.controller.require()
+        ending = {"reason": reason, "generation": agent.generation}
+        store.redis.hset(store.key(self.slug, ENDINGS), agent.execution_id, json.dumps(ending))
+        store.put_agent(self.slug, ended)
+        return ended
 
     def registered(self, session: Session, grant: str) -> Slot:
         body = {"execution_id": session.execution_id, "generation": session.generation}
