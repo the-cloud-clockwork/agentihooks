@@ -1,4 +1,5 @@
 import ast
+import builtins
 import re
 import subprocess
 from collections import Counter
@@ -79,15 +80,24 @@ def adds_only_tests(root: Path, base: str, head: str, name: str) -> bool:
     added = after - before
     names = Counter(bound for node in nodes for bound in bindings(node))
     extra = names - Counter(bound for node in previous for bound in bindings(node))
-    used = {
-        node.id if isinstance(node, ast.Name) else node.arg
-        for tree in previous
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Name | ast.arg)
-    }
-    if before - after or any(names[bound] > 1 or bound in used or bound == "*" for bound in extra):
+    taken = shadowable(root, previous)
+    if before - after or any(names[bound] > 1 or bound in taken for bound in extra):
         return False
     return all(is_test(node) for node in nodes if added[ast.dump(node)])
+
+
+def shadowable(root: Path, previous: list[ast.stmt]) -> set[str]:
+    names = set(dir(builtins)) | {"*"}
+    for path in root.glob("tests/**/conftest.py"):
+        names.update(bound for node in ast.parse(path.read_bytes()).body for bound in bindings(node))
+    for node in (inner for tree in previous for inner in ast.walk(tree)):
+        if isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.arg):
+            names.add(node.arg)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            names.add(node.value)
+    return names
 
 
 def blob(root: Path, rev: str, name: str) -> bytes | None:

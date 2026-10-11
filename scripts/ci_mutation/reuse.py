@@ -38,7 +38,7 @@ def report(run: int) -> tuple[bytes, bool] | None:
 def latest(query: str, current: int) -> tuple[dict, tuple[bytes, bool]] | None:
     for row in runs(query, current):
         graded = report(row["id"])
-        if graded:
+        if graded or row["conclusion"] == "failure":
             return row, graded
 
 
@@ -53,9 +53,9 @@ def only_tests_added(source: str, head: str) -> bool:
 def source(head: str, branch: str, current: int) -> tuple[dict, bytes] | None:
     found = latest(f"head_sha={head}", current) or latest(f"branch={quote(branch)}", current)
     if found:
-        row, (archive, green) = found
-        if green and row["conclusion"] == "success" and only_tests_added(row["head_sha"], head):
-            return row, archive
+        row, graded = found
+        if graded and graded[1] and row["conclusion"] == "success" and only_tests_added(row["head_sha"], head):
+            return row, graded[0]
 
 
 def unpack(archive: bytes, row: dict) -> None:

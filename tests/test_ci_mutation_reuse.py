@@ -116,6 +116,16 @@ def test_a_newer_red_report_on_the_same_head_blocks_an_older_green(repo, monkeyp
     assert _main(monkeypatch, root) == "reused=false\n"
 
 
+@pytest.mark.parametrize("same_head", [True, False])
+def test_a_newer_failed_run_without_a_report_blocks_an_older_green(repo, monkeypatch, same_head):
+    root, commit, _ = repo
+    graded = commit(SOURCE)
+    head = graded if same_head else commit(ADDED)
+    runs = [_run(8, graded, "failure"), _run(7, graded)]
+    _github(monkeypatch, head, runs, runs if same_head else [], {7: GREEN})
+    assert _main(monkeypatch, root) == "reused=false\n"
+
+
 @pytest.mark.parametrize("red", REDS)
 def test_a_red_report_on_the_same_head_is_never_reused(repo, monkeypatch, red):
     root, commit, _ = repo
