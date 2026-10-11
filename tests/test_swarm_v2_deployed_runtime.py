@@ -749,3 +749,71 @@ def test_only_the_lease_holder_writes_the_api_address(tmp_path, monkeypatch):
         assert store.config(SLUG).api_url == API_URL
     finally:
         service.stop()
+
+
+def _anton_client(tmp_path, monkeypatch, store, **changes):
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from scripts.swarm_v2.kubernetes import operator_terminal
+    from tests import sv2_hdr03_cases
+
+    key = tmp_path / "terminal-ca"
+    key.write_bytes(
+        Ed25519PrivateKey.generate().private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.OpenSSH, serialization.NoEncryption()
+        )
+    )
+    herdr, environments = sv2_hdr03_cases.Herdr([sv2_hdr03_cases.fixture()["manual"]], set()), []
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: Pods(namespace))
+    monkeypatch.setattr(_cs(), "runner", lambda environment: environments.append(environment) or herdr)
+    settings = {deployed.TERMINAL_ENV: TERMINAL, operator_terminal.CA_KEY_ENV: str(key), **changes}
+    return _cs().host(_environ(tmp_path, store, **settings), store, "hive-fixture"), herdr, environments
+
+
+def test_a_controller_exposing_terminals_reconciles_the_anton_client_at_start(tmp_path, monkeypatch):
+    from scripts.swarm_v2.herdr.upkeep import Upkeep
+
+    service, herdr, environments = _anton_client(tmp_path, monkeypatch, _store())
+    try:
+        assert isinstance(service.controller.terminals, Upkeep)
+        assert service.controller.terminals.terminal.namespace == "swarm-pod-proof"
+        assert herdr.commands == [["herdr", "machine", "list", "--json"]]
+        assert len(environments) == 1
+        assert service.controller.herdr_registration_drift() == 0
+    finally:
+        service.stop()
+
+
+def test_switched_off_the_controller_runs_no_herdr_command_and_reads_no_ca_key(tmp_path, monkeypatch):
+    from scripts.swarm_v2.kubernetes import operator_terminal
+
+    off = {"AGENTIHOOKS_HERDR_REGISTRATIONS": "off", operator_terminal.CA_KEY_ENV: str(tmp_path / "missing")}
+    service, herdr, environments = _anton_client(tmp_path, monkeypatch, _store(), **off)
+    try:
+        assert service.controller.terminals is None
+        assert service.tick()
+        assert herdr.commands == []
+        assert environments == []
+    finally:
+        service.stop()
+
+
+def test_a_controller_without_terminal_exposure_keeps_no_client(tmp_path, monkeypatch):
+    service, herdr, environments = _anton_client(tmp_path, monkeypatch, _store(), **{deployed.TERMINAL_ENV: None})
+    try:
+        assert service.controller.terminals is None
+        assert herdr.commands == []
+        assert environments == []
+    finally:
+        service.stop()
+
+
+def test_a_controller_without_kubernetes_workers_keeps_no_client(tmp_path, monkeypatch):
+    changes = {deployed.API_URL_ENV: None, deployed.POLICY_ENV: None}
+    service, herdr, environments = _anton_client(tmp_path, monkeypatch, _store(), **changes)
+    try:
+        assert service.controller.terminals is None
+        assert herdr.commands == []
+    finally:
+        service.stop()
