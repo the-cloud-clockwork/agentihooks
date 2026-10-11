@@ -1,0 +1,398 @@
+{
+  "events": [
+    {
+      "at": 1791731437000,
+      "pod": "kube-system/coredns-559f6c778d-7tzbf",
+      "reason": "FailedScheduling"
+    },
+    {
+      "at": 1791731448000,
+      "message": "Container image \"registry.k8s.io/coredns/coredns:v1.14.6\" already present on machine and can be accessed by the pod",
+      "pod": "kube-system/coredns-559f6c778d-7tzbf",
+      "reason": "Pulled"
+    },
+    {
+      "at": 1791731448000,
+      "message": "Successfully assigned kube-system/coredns-559f6c778d-7tzbf to startup-control-plane",
+      "pod": "kube-system/coredns-559f6c778d-7tzbf",
+      "reason": "Scheduled"
+    },
+    {
+      "at": 1791731449000,
+      "pod": "kube-system/coredns-559f6c778d-7tzbf",
+      "reason": "Started"
+    },
+    {
+      "at": 1791731437000,
+      "pod": "kube-system/coredns-559f6c778d-tfsgv",
+      "reason": "FailedScheduling"
+    },
+    {
+      "at": 1791731448000,
+      "message": "Container image \"registry.k8s.io/coredns/coredns:v1.14.6\" already present on machine and can be accessed by the pod",
+      "pod": "kube-system/coredns-559f6c778d-tfsgv",
+      "reason": "Pulled"
+    },
+    {
+      "at": 1791731448000,
+      "message": "Successfully assigned kube-system/coredns-559f6c778d-tfsgv to startup-control-plane",
+      "pod": "kube-system/coredns-559f6c778d-tfsgv",
+      "reason": "Scheduled"
+    },
+    {
+      "at": 1791731449000,
+      "pod": "kube-system/coredns-559f6c778d-tfsgv",
+      "reason": "Started"
+    },
+    {
+      "at": 1791731437000,
+      "message": "Container image \"docker.io/kindest/kindnetd:v20260820-69b56db7\" already present on machine and can be accessed by the pod",
+      "pod": "kube-system/kindnet-jsj7g",
+      "reason": "Pulled"
+    },
+    {
+      "at": 1791731437000,
+      "message": "Successfully assigned kube-system/kindnet-jsj7g to startup-control-plane",
+      "pod": "kube-system/kindnet-jsj7g",
+      "reason": "Scheduled"
+    },
+    {
+      "at": 1791731438000,
+      "pod": "kube-system/kindnet-jsj7g",
+      "reason": "Started"
+    },
+    {
+      "at": 1791731441000,
+      "message": "Successfully assigned kube-system/kindnet-m52hh to startup-worker",
+      "pod": "kube-system/kindnet-m52hh",
+      "reason": "Scheduled"
+    },
+    {
+      "at": 1791731443000,
+      "message": "Container image \"docker.io/kindest/kindnetd:v20260820-69b56db7\" already present on machine and can be accessed by the pod",
+      "pod": "kube-system/kindnet-m52hh",
+      "reason": "Pulled"
+    },
+    {
+      "at": 1791731444000,
+      "pod": "kube-system/kindnet-m52hh",
+      "reason": "Started"
+    },
+    {
+      "at": 1791731441000,
+      "message": "Successfully assigned kube-system/kindnet-w4wx7 to startup-worker2",
+      "pod": "kube-system/kindnet-w4wx7",
+      "reason": "Scheduled"
+    },
+    {
+      "at": 1791731443000,
+      "message": "Container image \"docker.io/kindest/kindnetd:v20260820-69b56db7\" already present on machine and can be accessed by the pod",
+      "pod": "kube-system/kindnet-w4wx7",
+      "reason": "Pulled"
+    },
+    {
+      "at": 1791731444000,
+      "pod": "kube-system/kindnet-w4wx7",
+      "reason": "Started"
+    },
+    {
+      "at": 1791731437000,
+      "message": "Container image \"registry.k8s.io/kube-proxy:v1.37.0\" already present on machine and can be accessed by the pod",
+      "pod": "kube-system/kube-proxy-sfhzp",
+      "reason": "Pulled"
+    },
+    {
+      "at": 1791731437000,
+      "message": "Successfully assigned kube-system/kube-proxy-sfhzp to startup-control-plane",
+      "pod": "kube-system/kube-proxy-sfhzp",
+      "reason": "Scheduled"
+    },
+    {
+      "at": 1791731437000,
+      "pod": "kube-system/kube-proxy-sfhzp",
+      "reason": "Started"
+    },
+    {
+      "at": 1791731441000,
+      "message": "Successfully assigned kube-system/kube-proxy-t8r54 to startup-worker2",
+      "pod": "kube-system/kube-proxy-t8r54",
+      "reason": "Scheduled"
+    },
+    {
+      "at": 1791731443000,
+      "message": "Container image \"registry.k8s.io/kube-proxy:v1.37.0\" already present on machine and can be accessed by the pod",
+      "pod": "kube-system/kube-proxy-t8r54",
+      "reason": "Pulled"
+    },
+    {
+      "at": 1791731444000,
+      "pod": "kube-system/kube-proxy-t8r54",
+      "reason": "Started"
+    },
+    {
+      "at": 1791731441000,
+      "message": "Successfully assigned kube-system/kube-proxy-x7p8k to startup-worker",
+      "pod": "kube-system/kube-proxy-x7p8k",
+      "reason": "Scheduled"
+    },
+    {
+      "at": 1791731443000,
+      "message": "Container image \"registry.k8s.io/kube-proxy:v1.37.0\" already present on machine and can be accessed by the pod",
+      "pod": "kube-system/kube-proxy-x7p8k",
+      "reason": "Pulled"
+    },
+    {
+      "at": 1791731444000,
+      "pod": "kube-system/kube-proxy-x7p8k",
+      "reason": "Started"
+    },
+    {
+      "at": 1791731437000,
+      "pod": "local-path-storage/local-path-provisioner-75f7fc7dc5-gq682",
+      "reason": "FailedScheduling"
+    },
+    {
+      "at": 1791731448000,
+      "message": "Container image \"docker.io/kindest/local-path-provisioner:v20260820-69b56db7\" already present on machine and can be accessed by the pod",
+      "pod": "local-path-storage/local-path-provisioner-75f7fc7dc5-gq682",
+      "reason": "Pulled"
+    },
+    {
+      "at": 1791731448000,
+      "message": "Successfully assigned local-path-storage/local-path-provisioner-75f7fc7dc5-gq682 to startup-control-plane",
+      "pod": "local-path-storage/local-path-provisioner-75f7fc7dc5-gq682",
+      "reason": "Scheduled"
+    },
+    {
+      "at": 1791731449000,
+      "pod": "local-path-storage/local-path-provisioner-75f7fc7dc5-gq682",
+      "reason": "Started"
+    },
+    {
+      "at": 1791731467000,
+      "message": "Container image \"kind-registry:5000/agentihooks-worker:startup\" already present on machine and can be accessed by the pod",
+      "pod": "startup-bench/cached-startup-worker",
+      "reason": "Pulled"
+    },
+    {
+      "at": 1791731467000,
+      "message": "Successfully assigned startup-bench/cached-startup-worker to startup-worker",
+      "pod": "startup-bench/cached-startup-worker",
+      "reason": "Scheduled"
+    },
+    {
+      "at": 1791731467000,
+      "pod": "startup-bench/cached-startup-worker",
+      "reason": "Started"
+    },
+    {
+      "at": 1791731482000,
+      "message": "Container image \"kind-registry:5000/agentihooks-worker:startup\" already present on machine and can be accessed by the pod",
+      "pod": "startup-bench/cached-startup-worker2",
+      "reason": "Pulled"
+    },
+    {
+      "at": 1791731482000,
+      "message": "Successfully assigned startup-bench/cached-startup-worker2 to startup-worker2",
+      "pod": "startup-bench/cached-startup-worker2",
+      "reason": "Scheduled"
+    },
+    {
+      "at": 1791731482000,
+      "pod": "startup-bench/cached-startup-worker2",
+      "reason": "Started"
+    },
+    {
+      "at": 1791731485000,
+      "message": "Successfully assigned startup-bench/interrupted-startup-worker to startup-worker",
+      "pod": "startup-bench/interrupted-startup-worker",
+      "reason": "Scheduled"
+    },
+    {
+      "at": 1791731486000,
+      "message": "Failed to pull image \"kind-registry:5000/agentihooks-worker:startup\": failed to pull and unpack image \"kind-registry:5000/agentihooks-worker:startup\": failed to resolve reference \"kind-registry:5000/agentihooks-worker:startup\": failed to do request: Head \"http://kind-registry:5000/v2/agentihooks-worker/manifests/startup\": dial tcp: lookup kind-registry on 172.18.0.1:53: server misbehaving",
+      "pod": "startup-bench/interrupted-startup-worker",
+      "reason": "Failed"
+    },
+    {
+      "at": 1791731486000,
+      "message": "Error: ErrImagePull",
+      "pod": "startup-bench/interrupted-startup-worker",
+      "reason": "Failed"
+    },
+    {
+      "at": 1791731486000,
+      "pod": "startup-bench/interrupted-startup-worker",
+      "reason": "Pulling"
+    },
+    {
+      "at": 1791731487000,
+      "message": "Back-off pulling image \"kind-registry:5000/agentihooks-worker:startup\"",
+      "pod": "startup-bench/interrupted-startup-worker",
+      "reason": "BackOff"
+    },
+    {
+      "at": 1791731487000,
+      "message": "Error: ImagePullBackOff",
+      "pod": "startup-bench/interrupted-startup-worker",
+      "reason": "Failed"
+    },
+    {
+      "at": 1791731511000,
+      "message": "Successfully pulled image \"kind-registry:5000/agentihooks-worker:startup\" in 10.032s (10.032s including waiting). Image size: 510882021 bytes.",
+      "pod": "startup-bench/interrupted-startup-worker",
+      "reason": "Pulled"
+    },
+    {
+      "at": 1791731512000,
+      "pod": "startup-bench/interrupted-startup-worker",
+      "reason": "Started"
+    },
+    {
+      "at": 1791731451000,
+      "pod": "startup-bench/uncached-startup-worker",
+      "reason": "FailedScheduling"
+    },
+    {
+      "at": 1791731455000,
+      "pod": "startup-bench/uncached-startup-worker",
+      "reason": "Pulling"
+    },
+    {
+      "at": 1791731455000,
+      "message": "Successfully assigned startup-bench/uncached-startup-worker to startup-worker",
+      "pod": "startup-bench/uncached-startup-worker",
+      "reason": "Scheduled"
+    },
+    {
+      "at": 1791731465000,
+      "message": "Successfully pulled image \"kind-registry:5000/agentihooks-worker:startup\" in 10.088s (10.088s including waiting). Image size: 510882021 bytes.",
+      "pod": "startup-bench/uncached-startup-worker",
+      "reason": "Pulled"
+    },
+    {
+      "at": 1791731465000,
+      "pod": "startup-bench/uncached-startup-worker",
+      "reason": "Started"
+    },
+    {
+      "at": 1791731469000,
+      "message": "Successfully assigned startup-bench/uncached-startup-worker2 to startup-worker2",
+      "pod": "startup-bench/uncached-startup-worker2",
+      "reason": "Scheduled"
+    },
+    {
+      "at": 1791731470000,
+      "pod": "startup-bench/uncached-startup-worker2",
+      "reason": "Pulling"
+    },
+    {
+      "at": 1791731480000,
+      "message": "Successfully pulled image \"kind-registry:5000/agentihooks-worker:startup\" in 10.538s (10.539s including waiting). Image size: 510882021 bytes.",
+      "pod": "startup-bench/uncached-startup-worker2",
+      "reason": "Pulled"
+    },
+    {
+      "at": 1791731480000,
+      "pod": "startup-bench/uncached-startup-worker2",
+      "reason": "Started"
+    }
+  ],
+  "inputs": {
+    "activities": "b88612c45fe8f13f53f820085de7e5331b31940ffcf2f33cf747cd02f8b9e040",
+    "events": "ff939df2b212c513e92665a6abe5fa85796c2b1a52ddbb08153eb7919491afa9",
+    "instances": "961be52e8769c6968eae18995b5f5624c1bd72a7f1fea94eb15ef5782350ac09",
+    "nodes": "cb48ad4e1e02a1aa8f4f7069910dc21ea9eb8d1404445eae406e9e8cd6c79d22",
+    "pods": "c9f151ce3990771d2db0c5127332781406acc3073b9a4217b25d496ab84487f2"
+  },
+  "launches": {},
+  "nodes": {
+    "startup-control-plane": {
+      "instance": "startup-control-plane",
+      "ready": 1791731448000
+    },
+    "startup-worker": {
+      "instance": "startup-worker",
+      "ready": 1791731454000
+    },
+    "startup-worker2": {
+      "instance": "startup-worker2",
+      "ready": 1791731455000
+    }
+  },
+  "pods": {
+    "kube-system/coredns-559f6c778d-7tzbf": {
+      "created": 1791731437000,
+      "ready": 1791731450000
+    },
+    "kube-system/coredns-559f6c778d-tfsgv": {
+      "created": 1791731437000,
+      "ready": 1791731450000
+    },
+    "kube-system/etcd-startup-control-plane": {
+      "created": 1791731427000,
+      "ready": 1791731442000
+    },
+    "kube-system/kindnet-jsj7g": {
+      "created": 1791731437000,
+      "ready": 1791731438000
+    },
+    "kube-system/kindnet-m52hh": {
+      "created": 1791731441000,
+      "ready": 1791731444000
+    },
+    "kube-system/kindnet-w4wx7": {
+      "created": 1791731441000,
+      "ready": 1791731444000
+    },
+    "kube-system/kube-apiserver-startup-control-plane": {
+      "created": 1791731427000,
+      "ready": 1791731443000
+    },
+    "kube-system/kube-controller-manager-startup-control-plane": {
+      "created": 1791731427000,
+      "ready": 1791731445000
+    },
+    "kube-system/kube-proxy-sfhzp": {
+      "created": 1791731437000,
+      "ready": 1791731437000
+    },
+    "kube-system/kube-proxy-t8r54": {
+      "created": 1791731441000,
+      "ready": 1791731444000
+    },
+    "kube-system/kube-proxy-x7p8k": {
+      "created": 1791731441000,
+      "ready": 1791731444000
+    },
+    "kube-system/kube-scheduler-startup-control-plane": {
+      "created": 1791731428000,
+      "ready": 1791731444000
+    },
+    "local-path-storage/local-path-provisioner-75f7fc7dc5-gq682": {
+      "created": 1791731437000,
+      "ready": 1791731449000
+    },
+    "startup-bench/cached-startup-worker": {
+      "created": 1791731467000,
+      "ready": 1791731468000
+    },
+    "startup-bench/cached-startup-worker2": {
+      "created": 1791731482000,
+      "ready": 1791731484000
+    },
+    "startup-bench/interrupted-startup-worker": {
+      "created": 1791731485000,
+      "ready": 1791731513000
+    },
+    "startup-bench/uncached-startup-worker": {
+      "created": 1791731451000,
+      "ready": 1791731466000
+    },
+    "startup-bench/uncached-startup-worker2": {
+      "created": 1791731469000,
+      "ready": 1791731482000
+    }
+  },
+  "read_at": "2026-10-11T15:11:53Z"
+}

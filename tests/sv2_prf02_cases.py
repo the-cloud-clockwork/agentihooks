@@ -13,7 +13,13 @@ from tests import sv2_kub05_cases as kub05
 
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2" / "startup"
 ANTON = ("anton-read-1.json", "anton-read-2.json")
-KIND = ("kind-run-1.json",)
+KIND = ("kind-run-1.json", "kind-run-2.json")
+SOURCES = {
+    "anton-read-1.json": "read only kubectl and aws read of anton-prod at 2026-10-11T14:57:15Z",
+    "anton-read-2.json": "read only kubectl and aws read of anton-prod, the next hour of events",
+    "kind-run-1.json": "Startup stages run 38150051995 at 570264583, one node interrupted briefly",
+    "kind-run-2.json": "Startup stages run 38150380291 at ec5276308, both nodes behind a 90 second registry outage",
+}
 INPUTS = (*ANTON, *KIND)
 FROM_ZERO_GROUP = "anton-k3s-swarm"
 EVIDENCE_CLASS = (
@@ -50,6 +56,7 @@ def _row(row: dict) -> dict:
 def summary(name: str) -> dict:
     result = stages.report(samples(name))
     return {
+        "source": SOURCES[name],
         "read_at": load(name)["read_at"],
         "startup_stage_p50_p95": {scenario: _row(row) for scenario, row in result["scenarios"].items()},
     }
@@ -140,10 +147,14 @@ def _account_release() -> dict:
 
 
 def _recovery() -> tuple[dict, bool]:
-    interrupted = [e for e in samples(KIND[0]) if e["pod"].split("/")[1].startswith("interrupted-")]
+    interrupted = [e for e in samples(KIND[1]) if e["pod"].split("/")[1].startswith("interrupted-")]
     classified = [e["transient"] or e["outcome"] for e in interrupted]
     observed = {
-        "interrupted": [{key: e[key] for key in ("pod", "outcome", "transient", "image_cache")} for e in interrupted],
+        "interrupted": [
+            {key: e[key] for key in ("pod", "outcome", "transient", "failure_ms", "image_cache")}
+            | {"pod_start_ms": e["stages"]["pod_start"]}
+            for e in interrupted
+        ],
         "classified": classified,
         "unbounded": stages.unbounded(interrupted),
         "grace_ms": failures.PULL_GRACE_MS,
