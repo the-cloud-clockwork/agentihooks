@@ -42,6 +42,7 @@ def _cs():
 class Pods:
     def __init__(self, namespace):
         self.namespace, self.created, self.maps, self.nodes_read = namespace, [], [], 0
+        self.objects = []
 
     def create_pod(self, body):
         self.created.append(body)
@@ -63,6 +64,10 @@ class Pods:
 
     def create_config_map(self, body):
         self.maps.append(body)
+        return body
+
+    def create_object(self, body):
+        self.objects.append(body)
         return body
 
 
@@ -513,6 +518,112 @@ def test_a_malformed_exporter_setting_is_refused(tmp_path, value):
         deployed.Workers.from_environ(_workers(tmp_path, **{deployed.EXPORTER_ENV: value}), SLUG)
 
     assert str(refused.value) == f"{deployed.EXPORTER_ENV} must be a JSON list of command words"
+
+
+TERMINAL_CA = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIALn9mCQtGSdrcOS/cqqJSfiydwdYjJBgSb0Ofwx+lv6"
+TERMINAL = json.dumps(
+    {"clients": {"namespace": "agentihooks-swarm", "labels": {"app": "swarm-operator"}}, "user_ca": TERMINAL_CA}
+)
+
+
+def _spawn(tmp_path, monkeypatch, **changes):
+    store = _store()
+    pods = Pods("swarm-pod-proof")
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: pods)
+    service = _cs().host(_environ(tmp_path, store, **changes), store, "hive-fixture")
+    try:
+        runtime = service.runtime
+        launcher = runtime.launch.func.__self__
+        task = {"id": "t1", "seat": SEAT, "controller_epoch": service.controller.held.epoch}
+        request = SpawnRequest(store.config(SLUG), "eng", store.next_name(SLUG, "eng"), task)
+        target = runtime.launch.keywords["target"](request)
+        agent = AgentRecord(request.name, "eng", "t1", seat=SEAT, runtime_backend=BACKEND, runtime_target=target)
+        launch = launcher.spawn(request, agent, runtime.launch.keywords["terms"], "")
+        claims = service.grants.verify(SLUG, pods.maps[0]["data"]["launch-grant"])
+    finally:
+        service.stop()
+    return store, pods, launch, claims
+
+
+def test_terminal_exposure_mounts_the_pod_and_hands_it_its_secret_service_and_policy(tmp_path, monkeypatch):
+    from cryptography.hazmat.primitives import serialization
+    from scripts.swarm_v2.kubernetes.terminal import HostKeys
+
+    from scripts.swarm_v2.herdr import endpoints
+
+    store, pods, launch, claims = _spawn(tmp_path, monkeypatch, **{deployed.TERMINAL_ENV: TERMINAL})
+
+    assert launch.hand.handed is True
+    execution = launch.agent.execution_id
+    [pod] = pods.created
+    container = pod["spec"]["containers"][0]
+    assert {"name": "terminal", "mountPath": endpoints.MATERIAL_DIR, "readOnly": True} in container["volumeMounts"]
+    assert [volume["secret"]["secretName"] for volume in pod["spec"]["volumes"] if volume["name"] == "terminal"] == [
+        f"swarm-{execution}-terminal"
+    ]
+    assert [(body["kind"], body["metadata"]["name"]) for body in pods.objects] == [
+        ("Secret", f"swarm-{execution}-terminal"),
+        ("Service", f"swarm-{execution}-terminal"),
+        ("NetworkPolicy", f"swarm-{execution}-terminal"),
+    ]
+    secret, _, policy = pods.objects
+    peer = policy["spec"]["ingress"][0]["from"][0]
+    assert peer["namespaceSelector"] == {"matchLabels": {"kubernetes.io/metadata.name": "agentihooks-swarm"}}
+    assert peer["podSelector"] == {"matchLabels": {"app": "swarm-operator"}}
+    assert endpoints.base64.b64decode(secret["data"][endpoints.USER_CA]).decode() == f"{TERMINAL_CA}\n"
+    private = serialization.load_ssh_private_key(endpoints.base64.b64decode(secret["data"][endpoints.HOST_KEY]), None)
+    recorded = HostKeys(store, SLUG).recorded(endpoints.grant_scope(claims))
+    assert recorded == endpoints._public(private.public_key())
+
+
+def test_terminal_exposure_off_creates_no_terminal_object_or_mount(tmp_path, monkeypatch):
+    _, pods, launch, _ = _spawn(tmp_path, monkeypatch)
+
+    assert launch.hand.handed is True
+    [pod] = pods.created
+    assert pods.objects == []
+    assert all(volume["name"] != "terminal" for volume in pod["spec"]["volumes"])
+    assert "ports" not in pod["spec"]["containers"][0]
+
+
+@pytest.mark.parametrize("value", [None, ""])
+def test_an_unset_terminal_setting_turns_exposure_off(tmp_path, value):
+    workers = deployed.Workers.from_environ(_workers(tmp_path, **{deployed.TERMINAL_ENV: value}), SLUG)
+
+    assert workers.terminal is None
+
+
+def test_a_terminal_setting_names_its_clients_and_user_ca(tmp_path):
+    from scripts.swarm_v2.kubernetes.terminal import Exposure
+
+    from scripts.swarm_v2.herdr.endpoints import Clients
+
+    workers = deployed.Workers.from_environ(_workers(tmp_path, **{deployed.TERMINAL_ENV: TERMINAL}), SLUG)
+
+    assert workers.terminal == Exposure(Clients("agentihooks-swarm", {"app": "swarm-operator"}), TERMINAL_CA)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "not json",
+        "[]",
+        '{"user_ca": "' + TERMINAL_CA + '"}',
+        '{"clients": {"namespace": "agentihooks-swarm", "labels": {"app": "x"}}}',
+        '{"clients": [], "user_ca": "' + TERMINAL_CA + '"}',
+        '{"clients": {"namespace": "Bad_Name", "labels": {"app": "x"}}, "user_ca": "' + TERMINAL_CA + '"}',
+        '{"clients": {"namespace": "agentihooks-swarm", "labels": {}}, "user_ca": "' + TERMINAL_CA + '"}',
+        '{"clients": {"namespace": "agentihooks-swarm", "labels": ["x"]}, "user_ca": "' + TERMINAL_CA + '"}',
+        '{"clients": {"namespace": "agentihooks-swarm", "labels": {"app": "x"}}, "user_ca": "not a key"}',
+    ],
+)
+def test_a_malformed_terminal_setting_is_refused(tmp_path, value):
+    with pytest.raises(SwarmError) as refused:
+        deployed.Workers.from_environ(_workers(tmp_path, **{deployed.TERMINAL_ENV: value}), SLUG)
+
+    assert (
+        str(refused.value) == f"{deployed.TERMINAL_ENV} must be a JSON object naming the terminal clients and user CA"
+    )
 
 
 class HandPods(Pods):

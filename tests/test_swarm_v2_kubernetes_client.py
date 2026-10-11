@@ -477,3 +477,39 @@ def test_watch_sends_a_get_read_as_line_delimited_events():
     assert PodClient(transport, "ns").watch_pods("a=b", "9") == [("DELETED", {"metadata": {"uid": "u"}})]
     path = "/api/v1/namespaces/ns/pods?labelSelector=a%3Db&watch=1&resourceVersion=9&timeoutSeconds=1"
     assert transport.calls == [("GET", path, None, client._events)]
+
+
+@pytest.mark.parametrize(
+    ("kind", "path"),
+    [
+        ("Secret", "/api/v1/namespaces/swarm-pods/secrets"),
+        ("Service", "/api/v1/namespaces/swarm-pods/services"),
+        ("NetworkPolicy", "/apis/networking.k8s.io/v1/namespaces/swarm-pods/networkpolicies"),
+    ],
+)
+def test_create_object_posts_each_terminal_kind_to_its_own_collection(kind, path):
+    transport = Http((201, {"metadata": {"name": "swarm-a-terminal"}}))
+    body = {"kind": kind, "metadata": {"name": "swarm-a-terminal"}}
+    assert PodClient(transport, "swarm-pods").create_object(body) == {"metadata": {"name": "swarm-a-terminal"}}
+    assert transport.calls == [("POST", path, body)]
+
+
+def test_create_object_raises_already_exists_naming_it():
+    objects = PodClient(Http((409, {"reason": "AlreadyExists"})), "ns")
+    with pytest.raises(AlreadyExists) as raised:
+        objects.create_object({"kind": "Service", "metadata": {"name": "swarm-a-terminal"}})
+    assert str(raised.value) == "swarm-a-terminal"
+
+
+def test_create_object_treats_a_server_error_as_ambiguous():
+    with pytest.raises(ConnectionError) as raised:
+        PodClient(Http((503, {})), "ns").create_object({"kind": "Secret", "metadata": {"name": "swarm-a-terminal"}})
+    assert str(raised.value) == "API server answered 503"
+
+
+def test_create_object_refuses_a_kind_outside_the_terminal_objects():
+    transport = Http((201, {}))
+    with pytest.raises(ValueError) as raised:
+        PodClient(transport, "ns").create_object({"kind": "ClusterRole", "metadata": {"name": "x"}})
+    assert str(raised.value) == "the controller creates only Secret, Service and NetworkPolicy objects"
+    assert transport.calls == []

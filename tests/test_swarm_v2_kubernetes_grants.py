@@ -306,3 +306,46 @@ def test_a_pod_that_cannot_be_removed_after_a_refused_config_map_says_so(answer)
 
     assert grants(api).hand(agent(), GRANT) == Hand(False, "config_map_refused", False)
     assert api.deleted == [("pods", POD, "uid-1")]
+
+
+class Terminals:
+    def __init__(self, answer="") -> None:
+        self.answer, self.opened = answer, []
+
+    def open(self, registration, pod):
+        self.opened.append((registration, pod))
+        return self.answer
+
+
+def test_exposure_on_opens_the_terminal_for_the_verified_grant_after_the_launch_material():
+    api, terminals = Api(pod()), Terminals()
+
+    assert PodGrants(api, SLUG, verify, Supervision("claude", None), terminals).hand(agent(), GRANT) == Hand(
+        True, "handed", False
+    )
+    assert terminals.opened == [(registration(), pod())]
+    assert api.created == [material()]
+
+
+def test_exposure_off_opens_no_terminal():
+    api = Api(pod())
+
+    assert grants(api).hand(agent(), GRANT) == Hand(True, "handed", False)
+    assert grants(api).terminal is None
+
+
+def test_a_refused_terminal_removes_its_pod_and_names_why():
+    api, terminals = Api(pod()), Terminals("terminal_refused")
+
+    hand = PodGrants(api, SLUG, verify, Supervision("claude", None), terminals).hand(agent(), GRANT)
+
+    assert hand == Hand(False, "terminal_refused", True)
+    assert api.deleted == [("pods", POD, "uid-1")]
+
+
+def test_a_grant_that_takes_no_launch_material_opens_no_terminal():
+    api, terminals = Api(pod(), create_failure=ApiRefused(403, "Forbidden")), Terminals()
+
+    PodGrants(api, SLUG, verify, Supervision("claude", None), terminals).hand(agent(), GRANT)
+
+    assert terminals.opened == []
