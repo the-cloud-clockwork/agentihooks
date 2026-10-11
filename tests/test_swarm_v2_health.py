@@ -67,9 +67,10 @@ def make(store, probe=None, controller=None, limits=LIMITS):
 def occupant(store, seat="eng-1@fixture", task="task") -> AgentRecord:
     from scripts.swarm_v2.controller import Controller as Admitting
 
-    admitting = Admitting(store, SLUG, [], lambda: True)
-    assert admitting.acquire()
-    return admitting.admit(AgentRecord(store.next_name(SLUG, "eng"), "eng", task, seat=seat))
+    if not hasattr(store, "admitting"):
+        store.admitting = Admitting(store, SLUG, [], lambda: True)
+        assert store.admitting.acquire()
+    return store.admitting.admit(AgentRecord(store.next_name(SLUG, "eng"), "eng", task, seat=seat))
 
 
 def heartbeat(store, agent, accepted_at_ms, watermark=10, state="working", advanced_at_ms=None, **extra):

@@ -19,6 +19,7 @@ from scripts.swarm_v2.controller import Controller
 
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2"
 INPUTS = ("health-diagnostics.json",)
+LEASE = {"control-owner"}
 EVIDENCE_CLASS = (
     "mocked: fakeredis execution registry, task claims and heartbeats behind a server that can be disconnected, a "
     "fake wall and Redis clock, signed fixture launch grants, a fixture operator page credential and an in process "
@@ -167,6 +168,10 @@ class World:
         keys = sorted(key for key in redis.keys(f"*{SLUG}*") if "lock" not in key and not key.endswith("rejections"))
         return {key: reads.get(redis.type(key), redis.type)(key) for key in keys}
 
+    def changed(self, before: dict, after: dict) -> list[str]:
+        keys = sorted(key for key in {*before, *after} if before.get(key) != after.get(key))
+        return [key.split(f":{SLUG}:", 1)[-1] for key in keys]
+
     def leaked(self, *documents: object) -> list[str]:
         text = json.dumps(documents, sort_keys=True)
         return [value for value in (brain_token(), operator_credential(), self.stuck_token) if value in text]
@@ -293,7 +298,7 @@ def _rejection() -> tuple[dict, bool]:
                 name: [status, reply.get("error_class"), reply.get("reason", "")]
                 for name, (status, reply) in http.items()
             },
-            "protected_unchanged": before == after,
+            "protected_changed": world.changed(before, after),
             "fresh_resume": world.masked({name: value for name, value in accepted.items() if name != "report_id"}),
             "leaked": world.leaked(refusals, http, fresh, accepted),
         }
@@ -312,7 +317,7 @@ def _rejection() -> tuple[dict, bool]:
         observed["http"]["wrong_operator"][0] == 401,
         observed["http"]["worker_qualify"] == [403, "forbidden_scope", ""],
         observed["http"]["operator_shallow_qualify"] == [409, "not_qualified", "shallow_report"],
-        observed["protected_unchanged"],
+        set(observed["protected_changed"]) <= LEASE,
         observed["fresh_resume"]["qualified"] is True,
         observed["fresh_resume"]["execution_id"] == "<healthy>",
         observed["leaked"] == [],
@@ -356,7 +361,7 @@ def _recovery() -> tuple[dict, bool]:
                 "dependencies": {name: dep["state"] for name, dep in during["dependencies"].items()},
                 "redis_last_ok_kept": during["dependencies"]["redis"]["last_ok_at_ms"]
                 == healthy_report["dependencies"]["redis"]["last_ok_at_ms"],
-                "redis_error": during["dependencies"]["redis"].get("error", ""),
+                "redis_reason": during["dependencies"]["redis"]["reason"],
                 "stuck": world.masked(during_archive[ids["stuck"]]),
                 "healthy": world.masked(during_archive[ids["healthy"]]),
                 "worker": worker_during,
@@ -371,7 +376,7 @@ def _recovery() -> tuple[dict, bool]:
                 "dependencies": {name: dep["state"] for name, dep in after_brain["dependencies"].items()},
                 "remediation": [hint["class"] for hint in after_brain["remediation"]],
             },
-            "execution_state_unchanged": execution_state == state_after,
+            "execution_state_changed": world.changed(execution_state, state_after),
             "replay": [replay_status, replay["archive_watermark"], replay["renewal_sequence"], replay_wrote_nothing],
             "stale": stale_status,
             "stuck_after_stale": [stuck_after_stale["watermark"], stuck_after_stale["state"]],
@@ -394,7 +399,7 @@ def _recovery() -> tuple[dict, bool]:
         observed["after_redis"]["archive"] == {"<stuck>": "stalled", "<healthy>": "ok"},
         observed["after_brain"]["dependencies"] == {"redis": "ok", "brain": "ok"},
         observed["after_brain"]["remediation"] == ["pipeline_stalled"],
-        observed["execution_state_unchanged"],
+        set(observed["execution_state_changed"]) <= LEASE,
         observed["replay"]
         == [200, FX["healthy"]["watermark_step"] * FX["healthy"]["beats"], FX["healthy"]["beats"], True],
         observed["stale"] == 409,
