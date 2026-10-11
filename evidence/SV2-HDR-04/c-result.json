@@ -1,0 +1,84 @@
+{
+  "case": "T-SV2-HDR-04-C",
+  "state": "passed",
+  "evidence_class": "mocked: a recording stand in for the Anton herdr client answers herdr machine commands with the 0.9.1 reply shapes of SV2-HDR-03 and serves agent get, agent prompt and pane send-text for Local and each saved machine from the fixture; no herdr process, SSH connection or cluster runs in these cases",
+  "input_sha256": {
+    "herdr-pane-routing.json": "36a84ba856cd6c2cdc3f57e7ca84227a9908e2de7046ea57056ca2329a8c730d",
+    "herdr-registrations.json": "eb069f75d17862be563e36f558ee14db60cd24d7982bb042f2232db5bb81a57c",
+    "herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940"
+  },
+  "observed": {
+    "checks": {
+      "reconnect_reregistered_a_new_profile": true,
+      "old_profile_refused_before_any_send": true,
+      "refresh_keeps_pane_incarnation_and_conversation": true,
+      "replay_sends_nothing": true,
+      "interrupted_send_is_ambiguous": true,
+      "restart_never_resends_an_ambiguous_prompt": true,
+      "newer_generation_makes_the_old_target_stale": true,
+      "durable_journal_records_what_survived": true,
+      "each_prompt_delivered_once": true,
+      "independent_repeat_identical": true
+    },
+    "first": {
+      "accepted": {
+        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "eda75d4e8494f54c8a6fe05759524de3",
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "eefed520946b717557bfbc5ef89d91ee"
+      },
+      "restored": {
+        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "99110c25f9329529bcac19a3642c2e39",
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "eefed520946b717557bfbc5ef89d91ee"
+      },
+      "old_target": {
+        "reason": "unregistered",
+        "message": "machine eda75d4e8494f54c8a6fe05759524de3 is not registered by this controller"
+      },
+      "refreshed": {
+        "profile_id": "99110c25f9329529bcac19a3642c2e39",
+        "session": "default",
+        "incarnation": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/2",
+        "pane_id": "w1:p1",
+        "conversation_id": "11111111-1111-4111-8111-111111111111"
+      },
+      "replayed": null,
+      "replay_commands": 0,
+      "interrupted": {
+        "reason": "ambiguous_delivery",
+        "message": "op-3 may have reached exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/2/w1:p1"
+      },
+      "retried_after_restart": {
+        "reason": "ambiguous_delivery",
+        "message": "op-3 may have reached exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/2/w1:p1"
+      },
+      "stale_refresh": {
+        "reason": "stale_incarnation",
+        "message": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/2 was replaced"
+      },
+      "journal": {
+        "version": 1,
+        "deliveries": {
+          "op-1": {
+            "target": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/2/w1:p1",
+            "state": "sent"
+          },
+          "op-3": {
+            "target": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/2/w1:p1",
+            "state": "pending"
+          }
+        }
+      },
+      "received": {
+        "local": [],
+        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+          "first prompt"
+        ],
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": []
+      },
+      "prompt_attempts": [
+        "first prompt",
+        "lost prompt"
+      ]
+    },
+    "second_identical": true
+  }
+}

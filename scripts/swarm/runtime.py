@@ -42,6 +42,7 @@ STARTED_ROUTES = ("routed", "bare", "direct")
 AUTO = "auto"
 PICKED_LANES = ("eng", "ci")
 PLAN_MODE = ["--permission-mode", "plan"]
+REMOTE_PANE = "a remote agent's pane lives on its worker herdr server, never on the local one"
 
 
 def codex_plan_mode(environ):
@@ -734,6 +735,9 @@ class HerdrRuntime:
         return self.retire_process(agent, pid, homes)
 
     def retire_process(self, agent, pid, homes=(), start=0):
+        if agent.runtime_backend != "local":
+            self.refusals[agent.name] = {"process": 0, "refusal": REMOTE_PANE}
+            return False
         outcome = self.end(agent.name, pid, list(homes), start)
         if outcome.refusal:
             self.refusals[agent.name] = {"process": outcome.process, "refusal": outcome.refusal}
@@ -781,6 +785,8 @@ class HerdrRuntime:
         return self.observe(agent).state
 
     def observe(self, agent: AgentRecord) -> PaneObservation:
+        if agent.runtime_backend != "local":
+            return PaneObservation("unknown")
         found = self._get(pane_target(agent))
         if found is None or not _owns(found, agent):
             return PaneObservation("unknown")
@@ -806,7 +812,7 @@ class HerdrRuntime:
 
     def name_pane(self, agent):
         """Name the agent's own pane: unnamed and holding its conversation, or carrying the 32 character cut of its name."""
-        found = self._get(agent.pane_id) if agent.pane_id else None
+        found = self._get(agent.pane_id) if agent.pane_id and agent.runtime_backend == "local" else None
         if found is None:
             return False
         name = found.get("name")
@@ -840,6 +846,8 @@ class HerdrRuntime:
     def nudge(self, agent, text):
         from scripts.swarm.delivery import marked
 
+        if agent.runtime_backend != "local":
+            return
         try:
             self.herdr(["agent", "prompt", pane_target(agent), marked(text)])
         except Exception as exc:

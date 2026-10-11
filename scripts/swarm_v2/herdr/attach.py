@@ -23,6 +23,7 @@ from scripts.swarm_v2.herdr.endpoints import (
     known_hosts,
 )
 from scripts.swarm_v2.herdr.reconcile import STORE, Registrations, Report, Store
+from scripts.swarm_v2.herdr.target import DELIVERIES, Router
 
 USER = "worker"
 SSH = "/usr/bin/ssh"
@@ -223,6 +224,11 @@ class Terminal:
         report = self.registrations.reconcile(ready, self.qualifier)
         report.refused |= refused
         return report
+
+    def router(self) -> Router:
+        registrations = self.registrations
+        journal = self.home.terminals / DELIVERIES
+        return Router(registrations.store, registrations.catalog, self.qualifier, self.run, journal)
 
     def _qualified(self, endpoint: Endpoint, fresh: bool) -> Verdict:
         try:

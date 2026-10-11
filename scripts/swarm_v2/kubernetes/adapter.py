@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm.tick import Placed
+from scripts.swarm_v2.kubernetes.prompts import TerminalPrompts
 from scripts.swarm_v2.kubernetes.watch import BACKEND
 from scripts.swarm_v2.runtime.base import Capability, Outcome, Recovery, SpawnRequest, Status, Unqualified
 from scripts.swarm_v2.runtime.operations import SPAWN, Operation, OperationConflict, OperationRequest, Phase
@@ -16,8 +17,15 @@ class KubernetesRuntime:
     backend = BACKEND
     capabilities = frozenset({Capability.SPAWN})
 
-    def __init__(self, execute: Callable[[OperationRequest], Operation], launch: Callable[[SpawnRequest], dict]):
-        self.execute, self.launch = execute, launch
+    def __init__(
+        self,
+        execute: Callable[[OperationRequest], Operation],
+        launch: Callable[[SpawnRequest], dict],
+        prompts: TerminalPrompts | None = None,
+    ):
+        self.execute, self.launch, self.prompts = execute, launch, prompts
+        if prompts is not None:
+            self.capabilities = self.capabilities | {Capability.COMMAND}
 
     def spawn(self, request: SpawnRequest) -> Outcome:
         execution_id, generation = request.task.get("execution_id"), request.task.get("generation")
@@ -39,7 +47,9 @@ class KubernetesRuntime:
         return self._unsupported("observe")
 
     def command(self, agent: AgentRecord, text: str) -> Outcome:
-        return self._unsupported("command")
+        if self.prompts is None:
+            return self._unsupported("command")
+        return self.prompts.command(agent, text)
 
     def drain(self, agent: AgentRecord) -> Outcome:
         return self._unsupported("drain")
