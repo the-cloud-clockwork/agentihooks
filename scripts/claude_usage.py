@@ -13,6 +13,8 @@ from scripts.claude_quota_balancer import ProbeResult, QuotaWindow, _error_resul
 MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 TIMEOUT_S = 20
 HEADER = "anthropic-ratelimit-unified-"
+FIVE_HOUR = "5h"
+SEVEN_DAY = "7d"
 AUTH_HEADER = "Authorization"
 BETA_HEADER = "anthropic-beta"
 VERSION_HEADER = "anthropic-version"
@@ -48,7 +50,7 @@ def _window(headers: Mapping[str, str], name: str) -> QuotaWindow:
 
 
 def result(account: str, headers: Mapping[str, str], body: dict, elapsed_ms: int) -> ProbeResult:
-    five_hour, seven_day = _window(headers, "5h"), _window(headers, "7d")
+    five_hour, seven_day = _window(headers, FIVE_HOUR), _window(headers, SEVEN_DAY)
     status = str(headers.get(f"{HEADER}status") or "unknown")
     state, margin = _state(status, five_hour, seven_day)
     usage = body.get("usage")
