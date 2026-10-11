@@ -10,6 +10,7 @@
   "observed": {
     "checks": {
       "a_replaced_conversation_is_refused": true,
+      "an_older_attempt_cannot_act_for_a_newer_generation": true,
       "an_unreachable_reconnect_is_refused_not_replaced": true,
       "durable_journal_records_the_delivery_once": true,
       "independent_repeat_identical": true,
@@ -41,7 +42,7 @@
           "work": 1
         },
         "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {
-          "conversation_id": "33333333-3333-4333-8333-333333333333",
+          "conversation_id": "22222222-2222-4222-8222-222222222222",
           "pid": 4202,
           "work": 1
         }
@@ -97,7 +98,6 @@
         "agent": "engineer@a1b2c3-0002",
         "checked_at": 1790000010800,
         "fresh_ms": 30000,
-        "incarnation": "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/1",
         "live_at": 1790000010650,
         "machine": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
         "pane_id": "w1:p1",
@@ -109,8 +109,17 @@
         "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "eda75d4e8494f54c8a6fe05759524de3",
         "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "eefed520946b717557bfbc5ef89d91ee"
       },
+      "stale": {
+        "message": "engineer@a1b2c3-0002's original terminal is not confirmed: stale_incarnation",
+        "reason": "stale_incarnation"
+      },
+      "stale_send": {
+        "message": "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/1 was replaced",
+        "reason": "stale_incarnation"
+      },
       "terminal_reconnect_latency_seconds": [
-        0.15
+        0.15,
+        0.1
       ]
     },
     "second_identical": true
