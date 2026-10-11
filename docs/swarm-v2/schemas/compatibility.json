@@ -3,7 +3,8 @@
   "package": "SV2-FND-03",
   "minors": {
     "2.0": "Plan section 22 baseline",
-    "2.1": "Adds the optional trace_id correlation field"
+    "2.1": "Adds the optional trace_id correlation field",
+    "2.2": "SV2-CKP-01 types the checkpoint inventory, reconstruction, continuation and branch_state fields"
   },
   "rules": [
     "A reader accepts a record whose major equals the contract major and whose minor is at least oldest_minor; a newer minor is additive and accepted.",
@@ -17,7 +18,8 @@
     "Schemas fix wire layout; the field tables and examples in plan section 22 list field sets, and their authority fields travel inside the authority object.",
     "These contracts publish checkpoint_sequence and renewal_sequence; SV2-CKP-04 orders checkpoints when it promotes the latest pointer, and SV2-LDG-02 orders heartbeat renewals.",
     "Admission fences each task across every contract: an older task_generation, or another execution at the accepted generation, is refused as stale_generation.",
-    "SV2-LDG-02 types two optional heartbeat fields every 2.x minor already admitted as top-level extension: archive_watermark, the worker-reported durable archive watermark (default 0), and resources, resource telemetry that never schedules or extends a lease (default empty)."
+    "SV2-LDG-02 types two optional heartbeat fields every 2.x minor already admitted as top-level extension: archive_watermark, the worker-reported durable archive watermark (default 0), and resources, resource telemetry that never schedules or extends a lease (default empty).",
+    "SV2-CKP-01 types four optional checkpoint fields: inventory, each material by sha256 and size; reconstruction, the harness, image, task revision and execution generation; continuation, native or context; and branch_state, pushed or bundled. A checkpoint below 2.2 stays readable as diagnostic only, and rollback lowers the checkpoint write_minor to 1, which stops checkpoint promotion."
   ],
   "contracts": {
     "launch": {
@@ -96,8 +98,8 @@
       ],
       "major": 2,
       "oldest_minor": 0,
-      "current_minor": 1,
-      "write_minor": 1,
+      "current_minor": 2,
+      "write_minor": 2,
       "authority": [
         "execution_id",
         "task_id",

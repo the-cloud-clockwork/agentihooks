@@ -415,9 +415,11 @@ naming the account that took over.
 
 ## Codex accounts
 
-Codex routes the same way. Its accounts are the default `codex login` on this
-machine (named `default`, detected with `codex login status`) and one ChatGPT
-workspace access token per `AH_CX_TOKEN_<slug>`.
+Codex routes the same way. Its accounts are one ChatGPT workspace access token
+per `AH_CX_TOKEN_<slug>`. Only when no `AH_CX_TOKEN_*` is set is the account the
+default `codex login` on this machine (named `default`, detected with
+`codex login status`); once any token account exists, `default` leaves the
+routing pool and the `agentihooks quota` rows.
 
 - `agentihooks codex [--route <slug>] [codex args]` picks by the same rule, with
   each Codex account judged on its week alone with the top band (6 sessions, none
@@ -447,6 +449,85 @@ workspace access token per `AH_CX_TOKEN_<slug>`.
   and still routes.
 - `agentihooks balance` and `agentihooks quota` list every Codex account with its
   sessions and quota; a signed-out default login shows `SIGNED_OUT`.
+
+### Logging in an account
+
+`agentihooks codex login <slug> [--device-auth] [--openbao | --no-openbao]` logs
+one ChatGPT workspace in and exports it. A ChatGPT Codex access token lives ten
+days, so the refresher below keeps it alive.
+
+- The slug is letters, digits, `_` and `-`; `-` becomes `_`. An empty slug, one
+  that starts with `_`, and `status`, `help`, `default` and `api` are refused.
+  `agentihooks codex login` with no slug, `login status`, `login help` and
+  `login --<flag>` still go straight to `codex login`.
+- The login runs `codex login -c cli_auth_credentials_store="file"` (browser
+  flow, or the device flow with `--device-auth`) with `CODEX_HOME` set to
+  `~/.agentihooks/codex/<slug>` (mode 0700), `AGENTIHOOKS_INTERNAL_RUN=1`, and
+  no other Codex token, account id or api key in its environment. A failed login
+  exits with Codex's code and writes nothing.
+- On success it writes `export AH_CX_TOKEN_<slug>=<access token>` and
+  `export AGENTIHOOKS_AICODE_TOKEN_REFRESH=true` into the managed block of the
+  shell rc file (`~/.zshrc` on macOS, `~/.bashrc` elsewhere), between
+  `# ===AGENTIHOOKS-AICODING-TOKENS===` and
+  `# ===AGENTIHOOKS-AICODING-TOKENS-END===`. A line is replaced in place, a
+  missing one is added, every other line is kept, and the block is appended
+  when absent; the write is atomic and keeps the file's mode. It then prints the
+  workspace, plan, expiry and the file to `source`, never a token value.
+- OpenBao: `--openbao` stores without asking, `--no-openbao` skips. Otherwise a
+  terminal is asked whether to store them, then whether to use the detected
+  `OPENBAO_URL` and `OPENBAO_TOKEN`, or for a URL and a token typed with no
+  echo; typed credentials serve that one write and are saved nowhere. Off a
+  terminal with neither flag the step is skipped. When the OpenBao write fails
+  or is refused (`--openbao` off a terminal without both variables), the login
+  exits 1 after the block was already written.
+- Every account lives in one KV v2 secret, `secret/agentihooks/codex-creds`,
+  under the keys `AH_CX_TOKEN_<slug>` and `AH_CX_REFRESH_<slug>`. A write merges
+  its keys over the current ones with check-and-set, retried up to three times
+  on a conflict, and reports key names and the key count only.
+
+### Refreshing tokens
+
+`agentihooks codex refresh [--force <slug>] [--days N]` renews each account whose
+access token has fewer than `--days` days left (default
+`AGENTIHOOKS_AICODE_TOKEN_REFRESH_DAYS`, else 3); `--force` renews one account
+now. Each grant returns a new refresh token, so exactly one machine may refresh
+an account: the refresher runs only where `AGENTIHOOKS_AICODE_TOKEN_REFRESH=true`
+and otherwise exits 0. A login sets that flag, so the machine a person logged in
+on becomes the refresh authority.
+
+- `AGENTIHOOKS_AICODE_TOKEN_STORE=local` (default): the accounts are the
+  `~/.agentihooks/codex/<slug>/auth.json` files. A refresh writes that file
+  first, then the rc block, then OpenBao when `OPENBAO_URL` and `OPENBAO_TOKEN`
+  are set; when it saved a new pair locally without them, the run says OpenBao
+  was not updated. A write error on one account is reported and the others
+  still refresh; a pair that could not be saved locally still goes to OpenBao.
+- `AGENTIHOOKS_AICODE_TOKEN_STORE=openbao`: the accounts are the
+  `AH_CX_REFRESH_<slug>` keys of the OpenBao secret, written back there; the rc
+  block is updated only where it already exists. It refuses to run without
+  `OPENBAO_URL` and `OPENBAO_TOKEN`. When the OpenBao write fails after a
+  refresh, the new pair is kept in `~/.agentihooks/codex/<slug>/recovery.json`
+  (0600) and the error names that file. The next run uses that pair when it is
+  newer than the one in OpenBao, stores it and removes the file; an older one
+  holds a spent refresh token and is removed. This store never reads or changes
+  a login's `auth.json`.
+- A new pair that nothing could keep (no local file, no OpenBao) prints
+  `<slug>: new token pair not persisted; run agentihooks codex login <slug>`.
+- Each account prints its days left, then `refreshed` with the new days left and
+  whether the refresh token rotated. A refused grant prints the slug, the HTTP
+  status and the OAuth error and the run moves on, exiting non zero.
+- A second run on the same machine skips while the first holds
+  `<AGENTIHOOKS_HOME>/codex-refresh.lock`.
+- Cadence: every session start on the refresh authority starts
+  `agentihooks codex refresh` detached when `<AGENTIHOOKS_HOME>/codex-refresh.stamp`
+  is older than `AGENTIHOOKS_AICODE_TOKEN_REFRESH_INTERVAL_H` hours (default 6).
+  A machine without the flag only reads it; a start that fails removes the stamp
+  so the next session retries. Without `agentihooks` on `PATH` the kick logs
+  `codex refresh kick skipped: agentihooks is not on PATH` and retries at the
+  next session start. Cron or a Kubernetes CronJob can run the same
+  command.
+- Known gap: when the server rotates the refresh token but its response is lost,
+  the stored refresh token is spent and every later grant is refused. Recover
+  with a fresh `agentihooks codex login <slug>`.
 
 ## Configuration
 

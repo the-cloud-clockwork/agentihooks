@@ -45,9 +45,19 @@ def _accounts(signed_in=True):
     ]
 
 
-def test_accounts_are_the_default_login_and_every_token_variable():
-    assert router.accounts(ENV, run=_status(0)) == _accounts()
-    assert router.accounts(ENV, run=_status(1))[0] == router.CodexAccount("default", signed_in=False)
+def test_accounts_are_the_token_accounts_alone_once_any_token_variable_exists():
+    def no_status(argv, **kwargs):
+        raise AssertionError("no login status check with tokens")
+
+    assert router.accounts(ENV, run=no_status) == _accounts()[1:]
+    assert router.routing_pool(ENV, run=no_status) == _accounts()[1:]
+
+
+def test_without_token_variables_accounts_are_the_default_login_and_the_pool_is_unchecked():
+    environ = {"HOME": "/home/u", "AH_CC_TOKEN_ncgma": "cc-value"}
+    assert router.accounts(environ, run=_status(0)) == [router.CodexAccount("default")]
+    assert router.accounts(environ, run=_status(1)) == [router.CodexAccount("default", signed_in=False)]
+    assert router.routing_pool(environ, run=_status(1)) == [router.CodexAccount("default")]
 
 
 def test_login_status_and_quota_read_the_profile_codex_home(tmp_path):
@@ -685,7 +695,7 @@ def test_an_open_route_never_places_an_account_whose_credential_is_refused(monke
     rc, seen, report = _launch(monkeypatch, tmp_path, environ, ["-m", "o3"], quotas)
     assert rc == 0 and report.read_text() == "status=routed\naccount=alpha\nplacement=open\n"
     pool = router.CodexAccountSource(_status(0)).pool(environ)
-    assert [account.name for account in pool] == ["default", "alpha"]
+    assert [account.name for account in pool] == ["alpha"]
     assert [router.refusal(account, OAUTH_ENV) for account in map(_token, ("alpha", "gamma", "keyed", "ghost"))] == [
         "",
         "",
@@ -716,7 +726,7 @@ def test_a_forced_route_to_an_unknown_account_never_lists_refused_credentials(mo
     environ = {"HOME": "/home/u", "AH_CX_TOKEN_keyed": "sk-proj-value"}
     rc, seen, report = _launch(monkeypatch, tmp_path, environ, ["--route", "ghost"])
     assert (rc, seen) == (3, {})
-    assert report.read_text() == "status=failed\nerror=Codex account 'ghost' not found; available: default, keyed\n"
+    assert report.read_text() == "status=failed\nerror=Codex account 'ghost' not found; available: keyed\n"
 
 
 def test_a_refused_token_keeps_its_sessions_out_of_the_default_reading(monkeypatch):
@@ -759,3 +769,47 @@ def test_a_handoff_launch_never_routes_back_to_the_account_it_leaves(monkeypatch
     quotas = {"default": _quota(99.0), "alpha": _quota(10.0), "beta": _quota(99.0)}
     rc, seen, report = _launch(monkeypatch, tmp_path, ENV, ["--agentihooks-exclude=alpha"], quotas)
     assert (rc, seen) == (3, {}) and report.read_text().startswith("status=failed\n")
+
+
+def test_login_with_a_slug_and_refresh_are_agentihooks_commands(monkeypatch):
+    from scripts import codex_login, codex_refresh
+
+    seen = []
+    monkeypatch.setattr(codex_login, "main", lambda args, environ: seen.append(("login", args, environ)) or 0)
+    monkeypatch.setattr(codex_refresh, "main", lambda args, environ: seen.append(("refresh", args, environ)) or 5)
+
+    def execvpe(*args):
+        raise AssertionError("codex must not start")
+
+    assert router.main(["login", "team-a", "--openbao"], environ=ENV, execvpe=execvpe) == 0
+    assert router.main(["login", "team"], environ=ENV, execvpe=execvpe) == 0
+    assert router.main(["refresh", "--force", "alpha"], environ=ENV, execvpe=execvpe) == 5
+    assert router.main(["refresh"], environ=ENV, execvpe=execvpe) == 5
+    assert seen == [
+        ("login", ["team-a", "--openbao"], ENV),
+        ("login", ["team"], ENV),
+        ("refresh", ["--force", "alpha"], ENV),
+        ("refresh", [], ENV),
+    ]
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["login"],
+        ["login", "status"],
+        ["login", "STATUS"],
+        ["login", "help"],
+        ["login", "--device-auth"],
+        ["refresh", "the", "README"],
+    ],
+)
+def test_login_without_a_slug_and_a_prompt_starting_with_refresh_still_go_to_codex(monkeypatch, tmp_path, argv):
+    from scripts import codex_login, codex_refresh
+
+    monkeypatch.setattr(codex_login, "main", lambda args, environ: pytest.fail("not an agentihooks login"))
+    monkeypatch.setattr(codex_refresh, "main", lambda args, environ: pytest.fail("not an agentihooks refresh"))
+    assert router._own_command(argv, ENV) is None
+    rc, seen, _ = _launch(monkeypatch, tmp_path, ENV, argv, {"alpha": _quota(10.0), "beta": _quota(50.0)})
+    assert rc == 0
+    assert seen["cmd"][-len(argv) :] == argv

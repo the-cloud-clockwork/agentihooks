@@ -1,7 +1,8 @@
 """One reconcile pass over a swarm: retire finished agents, free dead or stalled agents' tasks, spawn up to the caps.
 
 Scaling up is immediate; scaling down happens only as agents finish, so a lowered cap never kills work.
-Each swarm keeps at most one master: an agent the operator talks to, which works no task.
+Each swarm keeps one lead master, the agent the operator talks to, which works no task; master_scale fills any
+further master seats its count holds.
 """
 
 import json
@@ -44,6 +45,7 @@ from scripts.swarm import (
     master_start,
     master_wake,
     phase_state,
+    profile_first,
     reaper,
     retire_watch,
     seat_spawn,
@@ -60,7 +62,7 @@ from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy
-from scripts.swarm_v2 import master_fill
+from scripts.swarm_v2 import master_scale
 from scripts.swarm_v2 import masters as master_seats
 
 LEASE_MS = 10 * 60 * 1000
@@ -208,7 +210,7 @@ def tick(slug, store, ledger, runtime, now_ms):
                 now_ms,
                 lambda: _master(slug, config, store, runtime, now_ms),
             )
-            actions += skip_refused(master_fill.run, slug, config, store, runtime, doc, now_ms)
+            actions += skip_refused(master_scale.run, slug, config, store, runtime, doc, now_ms)
             actions += skip_refused(dispatcher.rank_pass, slug, config, store, ledger, doc, now_ms)
             actions += skip_refused(lane_split.step, slug, config, store, doc, now_ms)
             if config.state == "running":
@@ -805,12 +807,13 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
         _spend_host(store, name, now_ms)
         store.clear_handoff(slug, task["id"])
         store.redis.hdel(store.key(slug, "launch-assignments"), task["id"])
+        profile_first.spawned(slug, store, task["id"])
         actions.append(f"spawned {name} for {task['id']}")
     return actions
 
 
 def _spawn_order(slug, config, store, agents, rows, doc, runtime):
-    from scripts.swarm import capacity, seat_spawn
+    from scripts.swarm import capacity
 
     decision = capacity.read(store, slug)
     caps = decision.get("effective", {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan})
@@ -820,8 +823,7 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
         ready = _launch_order(slug, store, _claimable(slug, store, rows, doc, lane))
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]
-        ready = [task for task in ready if not seat_spawn.placed_elsewhere(runtime, lane, task)]
-        ready = ready[: max(cap - busy, 0)]
+        ready = profile_first.placeable(slug, config, store, runtime, lane, ready, max(cap - busy, 0))
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
     return [(lane, task) for _, lane, task in sorted(queue, key=lambda entry: entry[0])]
 

@@ -161,6 +161,8 @@ class DistributedLaunch:
         if not api_url:
             return Outcome("spawn", Status.REFUSED, backend, detail=NO_API_URL)
         profile = seat_profile(request)
+        if self.router.placement is not None and profile in self.router.placement.local_profiles:
+            return Outcome("spawn", Status.REFUSED, backend, detail=f"profile {profile} runs only on the workstation")
         if not shipped(profile, terms.bundled):
             return Outcome(
                 "spawn", Status.REFUSED, backend, detail=f"profile {profile} is not shipped in the worker image"

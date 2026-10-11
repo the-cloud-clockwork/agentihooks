@@ -6,12 +6,14 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from scripts.hive import auth as hive_auth
-from scripts.swarm import lease
+from scripts.swarm import lease, ledger_host
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
-from scripts.swarm_v2 import deployed, operator_auth, telemetry
+from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
+from scripts.swarm_v2 import deployed, ledger_writer, operator_auth, telemetry
 from scripts.swarm_v2.api import health
 from scripts.swarm_v2.api.executions import ExecutionsAPI
 from scripts.swarm_v2.api.server import Routes, serve
+from scripts.swarm_v2.api.tasks import TasksAPI
 from scripts.swarm_v2.auth_context import LaunchAuthority, LaunchKey
 from scripts.swarm_v2.authority import TaskAuthority
 from scripts.swarm_v2.controller import Controller
@@ -97,6 +99,9 @@ class ControlService:
         self.recover: Callable[[], dict[str, str]] | None = None
         self.views: Callable[[], dict] | None = None
         self.viewing: threading.Thread | None = None
+        self.tasks_api: TasksAPI | None = None
+        self.writer: ledger_writer.WriterLease | None = None
+        self.ledger_folder: Path | None = None
 
     def start(self) -> bool:
         if not self.controller.acquire():
@@ -133,21 +138,34 @@ class ControlService:
 
     def _open(self) -> None:
         if self.listen is not None and self.server is None:
+            if self.ledger_folder is not None and self.tasks_api is None:
+                self.mount_ledger(self.ledger_folder)
             self.serve(*self.listen)
             if self.api_url:
                 self.controller.store.update(self.controller.slug, api_url=self.api_url)
 
     def serve(self, host: str, port: int) -> ThreadingHTTPServer:
-        self.server = serve(Routes(self.executions, None, health=self.health_api), host, port)
+        self.server = serve(Routes(self.executions, self.tasks_api, health=self.health_api), host, port)
         self.thread = threading.Thread(target=self.server.serve_forever, name=THREAD, daemon=True)
         self.thread.start()
         return self.server
+
+    def mount_ledger(self, folder: Path) -> None:
+        self.writer = ledger_writer.WriterLease(folder)
+        try:
+            self.writer.acquire(ledger_writer.owner())
+        except ledger_writer.WriterConflict as conflict:
+            print(f"controller: serves the tasks API read only for {self.controller.slug}: {conflict}", flush=True)
+        ledger = SQLiteLedgerRepository(folder / DATABASE)
+        self.tasks_api = TasksAPI(self.grants, self.tasks, ledger, self.writer.held)
 
     def stop(self) -> None:
         if self.server is not None:
             if self.thread.is_alive():
                 self.server.shutdown()
             self.server.server_close()
+        if self.writer is not None:
+            self.writer.release()
         if self.controller.held is not None:
             self.controller.release()
 
@@ -193,6 +211,7 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
         service.recover = deployed.recovery_pass(service, workers, transports[0].api)
         if service.controller.terminals is not None:
             service.views = deployed.terminal_views(service.controller, environ)
+    service.ledger_folder = ledger_host.folder(environ)
     try:
         service.start()
     except BaseException:

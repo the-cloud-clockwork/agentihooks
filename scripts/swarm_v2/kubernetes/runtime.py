@@ -3,8 +3,9 @@
 from collections import Counter
 from dataclasses import dataclass
 
+from scripts.swarm_v2.kubernetes import adoption
 from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused, PodApi
-from scripts.swarm_v2.kubernetes.spec import DOMAIN, PodSpecRefused, PodTemplate
+from scripts.swarm_v2.kubernetes.spec import DOMAIN, PodSpecRefused, PodTemplate, Rendered
 from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL, OWNER_LABEL, owner_for
 from scripts.swarm_v2.runtime.operations import SPAWN, Observation, Operation, Phase
 
@@ -42,6 +43,7 @@ class KubernetesTransport:
         self.creation_enabled = creation_enabled
         self.reconciliations = Counter()
         self.quarantined: dict[str, dict] = {}
+        self._prepared: tuple[dict, Rendered | PodSpecRefused] | None = None
 
     def observe_operation(self, operation: Operation) -> Observation:
         if operation.action != SPAWN:
@@ -71,6 +73,15 @@ class KubernetesTransport:
         except ApiRefused:
             return Observation(Phase.REFUSED)
 
+    def spec_digest(self, payload: dict) -> str:
+        try:
+            rendered = self.template.render(payload)
+        except PodSpecRefused as refused:
+            self._prepared = (payload, refused)
+            return ""
+        self._prepared = (payload, rendered)
+        return adoption.identity(rendered.digest, rendered.pod["spec"])
+
     def status(self, execution_id: str) -> tuple[PodStatus, ...]:
         return tuple(pod_status(pod) for pod in self.api.list_pods(self._selector(execution_id)))
 
@@ -80,9 +91,18 @@ class KubernetesTransport:
     def _selector(self, execution_id: str) -> str:
         return f"{OWNER_LABEL}={self.owner},{EXECUTION_LABEL}={execution_id}"
 
+    def _render(self, payload: dict) -> Rendered:
+        # The journal renders at prepare; apply reuses that render so one spawn counts one refusal.
+        prepared, self._prepared = self._prepared, None
+        if prepared is None or prepared[0] != payload:
+            return self.template.render(payload)
+        if isinstance(prepared[1], PodSpecRefused):
+            raise prepared[1]
+        return prepared[1]
+
     def _body(self, operation: Operation, payload: dict) -> dict | None:
         try:
-            rendered = self.template.render(payload)
+            rendered = self._render(payload)
         except PodSpecRefused:
             return None
         metadata = rendered.pod["metadata"]
@@ -94,9 +114,10 @@ class KubernetesTransport:
         if (
             metadata["namespace"] != self.api.namespace
             or {key: metadata["labels"][key] for key in expected} != expected
+            or adoption.identity(rendered.digest, rendered.pod["spec"]) != operation.spec_digest
         ):
             return None
-        # The API server defaults the live spec, so a later match compares these digests instead.
+        # The API server defaults the live spec, so a later match compares the digests and the adoption fields.
         metadata["annotations"].update({SPEC_DIGEST: rendered.digest, OPERATION_DIGEST: operation.payload_digest})
         return rendered.pod
 
@@ -128,7 +149,9 @@ class KubernetesTransport:
             return "generation"
         if notes.get(OPERATION_DIGEST) != operation.payload_digest:
             return "operation"
-        if rendered is not None and notes.get(SPEC_DIGEST) != rendered["metadata"]["annotations"][SPEC_DIGEST]:
+        if rendered is not None and (reason := adoption.mismatch(rendered, pod)):
+            return reason
+        if adoption.identity(notes.get(SPEC_DIGEST), pod.get("spec", {})) != operation.spec_digest:
             return "spec"
         return ""
 

@@ -1,0 +1,79 @@
+{
+  "package": "SV2-CKP-01",
+  "dependency": [
+    "SV2-FSY-05",
+    "SV2-CTL-05"
+  ],
+  "dependents": [
+    "SV2-CKP-02",
+    "SV2-CKP-03",
+    "SV2-CKP-04"
+  ],
+  "integration_gate": "G8",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2484",
+  "tested_commit": "ead685260c72146b4fd30dda03ed38d8edcef0bc",
+  "status": "mocked-acceptance-qualified",
+  "package_complete": false,
+  "evidence_class": "mocked: a local durable directory backend behind a granted artifact store and fixture launch registrations; no object store, worker Pod or harness was used. Live G8 qualification belongs to the integration package.",
+  "interfaces": [
+    "Checkpoint contract minor 2.2 types four optional fields: inventory (each material by sha256 and size), reconstruction (harness, image digest, task revision, execution generation), continuation (native or context) and branch_state (pushed or bundled)",
+    "Validator.classify decides completeness (complete, incomplete, diagnostic_only), continuation (native, context, none) and one reason code from the record alone; it never grants authority",
+    "Validator.commit is manifest last: it requires the current attempt's exact task, execution and generation, verifies every inventoried object in the granted ArtifactStore, then stores the manifest under its immutable checkpoint id and re-verifies it",
+    "Validator.verify reads the manifest and every material only through the granted ArtifactStore, so a newer attempt of the same task decides native or context continuation with the dead worker's filesystem gone",
+    "Native continuation requires a qualified native resume capability, a native session id and harness version, a consistent capture method and a native_session material; context continuation requires a normalized_transcript material and a durable transcript watermark",
+    "A path only snapshot is diagnostic_only with the reason path_only; a checkpoint below minor 2.2 is diagnostic_only with the reason legacy_minor and its fixed limitations",
+    "Validator.metrics exposes checkpoint_completeness_by_reason keyed by completeness and reason"
+  ],
+  "supported_versions": {
+    "checkpoint_contract": "2.0 and 2.1 read as diagnostic only; 2.2 is the typed minor and the write minor; major 3 is refused as unsupported_version",
+    "legacy_snapshot": "The swarm snapshot document holding worktree paths and a conversation id is read as path_only and never promoted",
+    "storage": "Any ArtifactStore backend; the cases use the local durable directory backend"
+  },
+  "authority": "Scope comes only from the registration the ArtifactStore takes from its launch grant; commit requires the record authority to equal it exactly and verify requires the same task and a generation no newer than the reader's.",
+  "states": {
+    "observed": "Every verdict is computed from the bytes read back from the granted store",
+    "accepted": "classify returns complete for a record whose materials and metadata are present; this carries no authority",
+    "committed": "commit stores the manifest only after every inventoried object reads back verified",
+    "externally_verified": "verify re-reads the stored manifest and every object by content hash before it returns an authoritative verdict"
+  },
+  "validation": {
+    "red": "Proofs run 38134818570 on the tests only commit 10894903 failed collecting the model tests with ImportError for scripts.swarm_v2.checkpoints.model",
+    "tests": "Proofs run 38137193349 at 0eb82458, which differs from tested_commit only in this evidence: 168 passed across the checkpoint model tests, the case module with its committed A, B and C records, and the swarm v2 contract suites",
+    "mutation": "Mutation preflight 38136175329 left three survivors on the manifest encoding (sort_keys); tested_commit adds a key order replay test, and mutation preflight 38137189889 at 0eb82458 passed",
+    "lint": "ruff check, ruff format and the size gate passed through python -m scripts.ci_prepush",
+    "review": "Standards reader: one boundary test added (an execution generation below the task generation); evidence records were pending at review time. Spec reader: no must fix findings; case C now proves a stale attempt cannot overwrite the committed checkpoint, and a case B key was renamed. Both reviews closed in round one.",
+    "local": "No local tests or mutation runs, per the operator prohibition"
+  },
+  "measurements": {
+    "checkpoint_completeness_by_reason": "Recorded per fixture in each case result; every case runs two independent fixture directories with equal results"
+  },
+  "cases": {
+    "a": "evidence/SV2-CKP-01/a-result.json",
+    "b": "evidence/SV2-CKP-01/b-result.json",
+    "c": "evidence/SV2-CKP-01/c-result.json",
+    "manifest": "evidence/SV2-CKP-01/manifest.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Lower the checkpoint write_minor to 1: producers write 2.1, which reads as diagnostic only, and Validator.commit refuses new promotion with promotion_disabled.",
+    "authoritative_objects": "The stored manifest object under its checkpoint id and the content addressed material objects it inventories; neither is a cache and rollback deletes neither.",
+    "proof": "Case C rolls back after a native checkpoint is committed: a new context commit returns promotion_disabled with the durable keys unchanged, and the committed native checkpoint still verifies as authoritative."
+  },
+  "remaining_limitations": [
+    "No production caller invokes Validator yet: the plan gives the worker capture path to SV2-CKP-02 and SV2-CKP-03 and the recovery and latest pointer path to SV2-CKP-04, which call Validator.commit and Validator.verify; this package ships the contract and its verifier only.",
+    "Source capture, native session capture and the latest pointer belong to SV2-CKP-02 to SV2-CKP-04; this package defines and verifies the manifest only.",
+    "Checkpoint sequence is recorded and immutable per checkpoint id but not ordered here; SV2-CKP-04 orders it when it promotes the latest pointer.",
+    "Materials are verified by content hash and size, not by a semantic check of their contents.",
+    "artifact_hashes stays required by the contract and must agree with the inventory at 2.2."
+  ],
+  "spec_coverage": {
+    "dependencies": "SV2-FSY-05 supplies the scoped artifact storage: the granted ArtifactStore is the only path Validator reads or writes. SV2-CTL-05 supplies current generation ownership: Validator.commit requires the record authority to equal the attempt's task, execution and generation.",
+    "source_and_materials": "base_commit, head_commit and branch_name stay required; branch_state pushed or bundled, bundled requiring a source_bundle material; native resume material is the native_session material with native_session_id and native_harness_version; the normalized watermark is transcript_durable_cursor with non negative integer sequence and byte_offset plus the normalized_transcript material; exclusions stay required and are carried verbatim.",
+    "reconstruction": "reconstruction carries harness, image_digest, task_revision and execution_generation; schema_version carries the schema; an execution generation unequal to the authority task generation is scope_mismatch.",
+    "completeness": "Verdict.completeness is complete, incomplete or diagnostic_only; Verdict.continuation is native, context or none.",
+    "manifest_commit": "inventory sha256 and size must agree with artifact_hashes; Validator.commit stores the manifest only after every inventoried object reads back verified, under an immutable checkpoint id.",
+    "state_obligation": "See states: observed, accepted, committed and externally verified are separate outcomes, and only verify after commit returns authoritative.",
+    "data_safety": "See rollback_rehearsal.authoritative_objects: the manifest object and the content addressed materials are authoritative, never caches, and rollback deletes neither; case C records the durable keys unchanged after rollback.",
+    "completion_evidence": "interfaces, supported_versions, validation (test and mutation run ids), remaining_limitations and rollback_rehearsal in this record, with the A, B and C case records and manifest.json.",
+    "phase_use": "Spot recovery on Anton workers and SV2-CKP-02 to SV2-CKP-04 call Validator.verify from the replacement attempt to choose native resume or context continuation without reaching the reclaimed node."
+  }
+}

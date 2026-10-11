@@ -7,7 +7,7 @@ import uuid
 from collections.abc import Callable
 
 from scripts.hive import registry
-from scripts.swarm import lease
+from scripts.swarm import execution_card, lease
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2.herdr import visibility
 
@@ -93,11 +93,15 @@ def view(store: RedisStore, slug: str) -> dict:
     config = store.config(slug)
     data = json.loads(store.redis.get(store.key(slug, "published")) or "{}")
     status = data.get("status", {"agents": [], "tasks": {}})
+    terminals = visibility.read(store, slug, time.time_ns() // 1_000_000)
+    executions, errors = execution_card.cards(status.get("agents", []), terminals)
     return {
         **status,
         "config": {**status.get("config", config.__dict__), "state": config.state},
         "commands": rows(store, slug),
-        "terminals": visibility.read(store, slug, time.time_ns() // 1_000_000),
+        "terminals": terminals,
+        "executions": executions,
+        "ledger_state_projection_errors": errors,
     }
 
 

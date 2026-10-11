@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/master_scale.py:scripts.swarm_v2.master_scale.x__resize__mutmut_88:764de8a476c51b092b2d13e631de9a6fa4d5eb38853d4e460c14882d2b621a8e": {
+    "reader": "standards_reader",
+    "reason": "range(want - 1, count + 1) only adds want - 1 and want, both at most want, so keep is unchanged; want is at least one. Equivalent."
+  }
+}

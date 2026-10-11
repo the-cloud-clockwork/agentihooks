@@ -89,20 +89,18 @@ CODEX_ENV = {"AH_CX_TOKEN_alpha": "cx-a", "AH_CX_TOKEN_beta": "cx-b", "CODEX_ACC
 
 
 def test_the_codex_source_marks_the_default_login_interactive_and_tokens_subscription(monkeypatch):
-    seen = {}
+    seen = []
 
     def status(argv, **kwargs):
-        seen["status"] = argv[-2:]
+        seen.append(argv[-2:])
         return type("Done", (), {"returncode": 0})()
 
     readings = {"default": _quota(10), "alpha": _quota(97), "beta": _quota(20, 99, NOW - 3600)}
     monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {a.name: readings[a.name] for a in pool})
     source = codex_router.CodexAccountSource(status, {"default": 2}, refresh=False)
-    assert source.slots(CODEX_ENV, NOW) == [
-        Slot("codex", "default", 6, 2, NOW + 600, kind="interactive"),
-        Slot("codex", "alpha", 0, 0, NOW + 600, kind="subscription"),
-    ]
-    assert seen["status"] == ["login", "status"]
+    assert source.slots(CODEX_ENV, NOW) == [Slot("codex", "alpha", 0, 0, NOW + 600, kind="subscription")]
+    assert source.slots({"HOME": "/h"}, NOW) == [Slot("codex", "default", 6, 2, NOW + 600, kind="interactive")]
+    assert seen == []
 
 
 def test_the_codex_source_refreshes_through_fresh_quotas_with_its_runner(monkeypatch):

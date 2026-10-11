@@ -113,20 +113,46 @@ function terminalView(t, now) {
   return { state: t.live_at ? "cached" : "unverified", detail };
 }
 
+const WAIT_TEXT = { scheduling: "scheduling wait", quota: "quota wait", input: "input wait" };
+const OBSERVED_TONES = { working: "working", starting: "pending", pending: "pending", waiting_quota: "waiting", lost: "stalled" };
+
+function executionView(c, now) {
+  if (!c) return null;
+  const where = [c.backend, c.generation ? `gen ${c.generation}` : "", c.pool].filter(Boolean).join(" · ");
+  const seen = c.seen_at ? `seen ${span(now - c.seen_at)} ago` : "not seen";
+  const shown = c.wait ? WAIT_TEXT[c.wait] : c.observed.replace(/_/g, " ");
+  return { shown, tone: c.wait ? "waiting" : OBSERVED_TONES[c.observed] || "unknown", seen, where, behind: !!c.terminal_behind };
+}
+
+function remoteSwarm(sw) {
+  return Object.keys(sw.terminals || {}).length > 0 || Object.values(sw.executions || {}).some((c) => c.backend !== "local");
+}
+
 function agentRows(sw, now) {
   const agents = [...(sw.agents || [])].sort((x, y) => (y.lane === "master") - (x.lane === "master"));
   return agents.map((a) => {
     const master = a.lane === "master";
     return { name: a.name, master, gates: a.gates || [], lane: master ? "—" : a.lane, profile: a.profile || "—", overlays: (a.overlays || []).join(" · ") || "—", model: modelText(a) || "—", task: master ? "" : a.task || "",
       state: master && (a.status || "working") === "working" ? "live" : a.status || "working", promoted: !!a.promoted, age: a.started_at ? span(now - a.started_at) : "—",
-      finished: a.status === "finished", since: a.state_since || 0, terminal: terminalView((sw.terminals || {})[a.name], now) };
+      finished: a.status === "finished", since: a.state_since || 0, terminal: terminalView((sw.terminals || {})[a.name], now),
+      execution: executionView((sw.executions || {})[a.name], now) };
   });
 }
 
 function agentRow(a, remote) {
   return withId(cells(idCell(a.name), a.lane, a.profile, a.overlays, a.model, a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
     a.promoted ? h("span", { class: "sw-promoted" }, label(a.state), label("promoted")) : label(a.state),
-    ...(remote ? [a.terminal ? h("span", {}, label(a.terminal.state, TERMINAL_TONES[a.terminal.state]), a.terminal.detail && ` ${a.terminal.detail}`) : "—"] : []), a.age, a.finished ? h("span") : agentActions(a)), `agent-${a.name}`);
+    ...(remote ? [executionCell(a.execution), terminalCell(a.terminal, a.execution)] : []), a.age, a.finished ? h("span") : agentActions(a)), `agent-${a.name}`);
+}
+
+function executionCell(e) {
+  return e ? h("span", {}, label(e.shown, e.tone), ` ${e.seen}`, h("span", { class: "sw-sub", text: e.where })) : "—";
+}
+
+function terminalCell(t, e) {
+  if (!t) return "—";
+  const detail = [t.detail, e && e.behind ? "behind heartbeat" : ""].filter(Boolean).join(" · ");
+  return h("span", {}, label(t.state, TERMINAL_TONES[t.state]), detail && ` ${detail}`);
 }
 
 function agentActions(a) {
@@ -318,14 +344,14 @@ export function renderSwarm(sw) {
 
 function terminalHead(remote) {
   const head = $("agents-table").querySelector("thead tr"), found = head.querySelector("[data-terminal]");
-  if (remote && !found) head.children[6].after(h("th", { "data-terminal": "", text: "terminal" }));
-  if (!remote && found) found.remove();
+  if (remote && !found) head.children[6].after(h("th", { "data-execution": "", text: "execution" }), h("th", { "data-terminal": "", text: "terminal" }));
+  if (!remote && found) head.querySelectorAll("[data-execution], [data-terminal]").forEach((th) => th.remove());
 }
 
 function renderAgents(sw, now = Date.now()) {
   const agents = agentRows(sw, now), live = agents.filter((a) => !a.finished), finished = agents.filter((a) => a.finished).sort((x, y) => y.since - x.since);
   $("agents-count").textContent = finished.length ? `${live.length} live · ${finished.length} finished` : `${live.length} live`;
-  const remote = Object.keys(sw.terminals || {}).length > 0, columns = remote ? 10 : 9, row = (a) => agentRow(a, remote);
+  const remote = remoteSwarm(sw), columns = remote ? 11 : 9, row = (a) => agentRow(a, remote);
   terminalHead(remote);
   $("swarm-agents").replaceChildren(...(live.length ? live.map(row) : [emptyRow(columns, "No agents running. Start the swarm to work the open tasks.")]),
     ...firstPage("agents", finished, (a) => `agent-${a.name}`).map(row), moreRow("agents", finished.length, "more finished agents", columns, () => renderAgents(swarm)) || "");

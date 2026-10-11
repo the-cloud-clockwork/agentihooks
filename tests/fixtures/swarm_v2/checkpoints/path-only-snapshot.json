@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "slug": "fixture",
+  "taken_at": 1791716400000,
+  "state": {
+    "agents": [
+      "engineer-fixture-0001"
+    ]
+  },
+  "ledger": null,
+  "worktrees": {
+    "engineer-fixture-0001": "/home/operator/dev/worktrees/agentihooks/engineer-fixture-0001"
+  },
+  "conversation_id": "native-session-fixture-0001"
+}

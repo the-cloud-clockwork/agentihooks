@@ -28,7 +28,7 @@ from scripts.swarm_v2.launch import DistributedLaunch, LaunchTerms
 from scripts.swarm_v2.operator_auth import OPERATOR
 from scripts.swarm_v2.quota import QuotaObservations
 from scripts.swarm_v2.registry import FleetRegistry
-from scripts.swarm_v2.runtime.base import SpawnRequest
+from scripts.swarm_v2.runtime.base import LOCAL_PROFILES, SpawnRequest
 from scripts.swarm_v2.runtime.routed import RoutedRuntime, routed
 
 if TYPE_CHECKING:
@@ -126,6 +126,8 @@ class Workers:
         if not image_tag.is_tag(environ[IMAGE_TAG_ENV]):
             raise WorkerSettingsRefused(f"{IMAGE_TAG_ENV} must be an image tag, never a digest")
         policy, profile = pod_policy(environ[POLICY_ENV], slug), environ[PROFILE_ENV]
+        if profile in LOCAL_PROFILES:
+            raise WorkerSettingsRefused(f"{PROFILE_ENV} {profile} runs only on the workstation")
         if profile not in policy["profiles"]:
             raise WorkerSettingsRefused(f"the Pod policy has no {profile} profile")
         projects = tuple(project.strip() for project in environ[PROJECTS_ENV].split(",") if project.strip())

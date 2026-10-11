@@ -12,11 +12,12 @@ SPAWNED = "spawned master {name} in seat {seat}"
 FAILED = "master spawn failed in seat {seat}: {error}"
 
 
-def run(slug: str, config, store, runtime, doc: dict, now_ms: int) -> list[str]:
+def run(slug: str, config, store, runtime, doc: dict, now_ms: int, limit: int | None = None) -> list[str]:
+    """limit caps the seats filled below the count, so a seat the scaling pass is retiring stays empty."""
     if config.state == ENDED:
         return []
     seats = masters.MasterSeats(store.redis)
-    count, live = seats.count(slug), runtime.live_names()
+    count, live = seats.count(slug) if limit is None else limit, runtime.live_names()
     taken = {a.seat for a in store.agents(slug) if a.state != "finished" or a.name in live}
     empty = [masters.seat(i) for i in range(2, count + 1) if seat_address(slug, masters.seat(i)) not in taken]
     actions = []
