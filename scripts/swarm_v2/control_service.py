@@ -8,6 +8,7 @@ from pathlib import Path
 from scripts.hive import auth as hive_auth
 from scripts.swarm import lease, ledger_host
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
+from scripts.swarm_ledger import ledger_link
 from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
 from scripts.swarm_v2 import deployed, ledger_writer, telemetry
 from scripts.swarm_v2.api.executions import ExecutionsAPI
@@ -19,6 +20,7 @@ from scripts.swarm_v2.controller import Controller
 from scripts.swarm_v2.herdr.attach import ClientHome
 from scripts.swarm_v2.herdr.capabilities import runner
 from scripts.swarm_v2.herdr.upkeep import Upkeep, switched_on
+from scripts.swarm_v2.hosted_ledger import HostedLedger
 from scripts.swarm_v2.kubernetes import operator_terminal
 from scripts.swarm_v2.kubernetes.watch import BACKEND
 from scripts.swarm_v2.reconciliation.accounts import Finding
@@ -92,6 +94,7 @@ class ControlService:
         self.tasks_api: TasksAPI | None = None
         self.writer: ledger_writer.WriterLease | None = None
         self.ledger_folder: Path | None = None
+        self.hosted_ledger: HostedLedger | None = None
 
     def start(self) -> bool:
         if not self.controller.acquire():
@@ -128,6 +131,8 @@ class ControlService:
 
     def _open(self) -> None:
         if self.listen is not None and self.server is None:
+            if self.hosted_ledger is not None and self.tasks_api is None:
+                self.tasks_api = TasksAPI(self.grants, self.tasks, self.hosted_ledger)
             if self.ledger_folder is not None and self.tasks_api is None:
                 self.mount_ledger(self.ledger_folder)
             self.serve(*self.listen)
@@ -201,7 +206,10 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
         service.recover = deployed.recovery_pass(service, workers, transports[0].api)
         if service.controller.terminals is not None:
             service.views = deployed.terminal_views(service.controller, environ)
-    service.ledger_folder = ledger_host.folder(environ)
+    if ledger_link.remote(environ):
+        service.hosted_ledger = HostedLedger()
+    else:
+        service.ledger_folder = ledger_host.folder(environ)
     try:
         service.start()
     except BaseException:
