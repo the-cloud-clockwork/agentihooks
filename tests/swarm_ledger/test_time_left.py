@@ -238,6 +238,21 @@ class TestFrozenSplit:
         result = ledger_stats.calculate(self.ledger(("freeze", "phases/p1")), [], NOW, {"slots": 1, "ci_minutes": 5})
         assert (result["minutes"], result["remaining"], result["frozen"], result["frozen_work"]) == (15, 1, 4, 105)
 
+    def test_the_tick_fix_phase_stays_claimable_under_a_focus(self):
+        inputs = {"slots": 1, "ci_minutes": 5, "fix_phase": "p1"}
+        result = ledger_stats.calculate(self.ledger(("focus", "tasks/e")), [], NOW, inputs)
+        assert (result["remaining"], result["frozen"]) == (5, 0)
+
+    def test_a_watched_swarm_focus_holds_open_work_outside_the_fix_phase(self):
+        inputs = {
+            "slots": 1,
+            "ci_minutes": 5,
+            "fix_phase": "p9",
+            "watched": ["the focus on task x in the watched swarm"],
+        }
+        result = ledger_stats.calculate(self.ledger(), [], NOW, inputs)
+        assert (result["remaining"], result["frozen"], result["frozen_work"]) == (1, 4, 105)
+
     def test_only_frozen_work_left_reads_zero_with_the_frozen_remainder_named(self):
         d = doc(task("a", "open", "S"), time_left=30)
         d["freezes"] = [{"verb": "freeze", "target": "tasks/a"}]
@@ -336,7 +351,12 @@ class TestTimeLeftOp:
         from scripts.swarm_ledger.api import schemas
 
         assert ledger_core.EXTENSION_OPS["time_left"].OPS == ("time_left",)
-        assert schemas.FIELDS["time_left"] == "by slots ci_minutes"
+        assert schemas.FIELDS["time_left"] == "by slots ci_minutes fix_phase watched"
+        assert schemas.TYPES["watched"] == {
+            "type": "array",
+            "maxItems": 100,
+            "items": {"type": "string", "maxLength": 2000},
+        }
         assert schemas.TYPES["slots"] == {"type": ["integer", "null"], "minimum": 0}
         assert schemas.TYPES["ci_minutes"] == {"type": ["number", "null"], "minimum": 0}
 
@@ -370,6 +390,32 @@ class TestTimeLeftOp:
         with pytest.raises(ValueError) as refused:
             ledger_time_left.check(op)
         assert str(refused.value) == "time_left takes id, by swarm, slots and ci_minutes"
+
+    def test_check_takes_the_tick_focus_and_refuses_a_malformed_one(self):
+        assert ledger_time_left.check({**self.op(), "fix_phase": "p1", "watched": ["the focus on x"]}) is None
+        for change, message in (
+            ({"fix_phase": 3}, "fix_phase must be text"),
+            ({"watched": "x"}, "watched must be a list of text"),
+            ({"watched": [1]}, "watched must be a list of text"),
+        ):
+            with pytest.raises(ValueError) as refused:
+                ledger_time_left.check({**self.op(), **change})
+            assert str(refused.value) == message
+
+    def test_apply_keeps_the_tick_focus_in_the_inputs(self):
+        d = doc(task("a", "open", "S"), task("b", "open", "S", phase="p2"))
+        ctx = self.ctx()
+        ledger_time_left.apply(d, {**self.op(), "fix_phase": "p2", "watched": ["the focus on x"]}, ctx)
+        assert ctx.meta["time_left"]["inputs"] == {
+            "slots": 1,
+            "ci_minutes": 5,
+            "fix_phase": "p2",
+            "watched": ["the focus on x"],
+        }
+        assert (ctx.meta["time_left"]["calculation"]["remaining"], ctx.meta["time_left"]["calculation"]["frozen"]) == (
+            1,
+            1,
+        )
 
     def test_apply_writes_the_minutes_and_keeps_every_input_beside_them(self):
         d = doc(task("a", "open", "S"), time_left=400)

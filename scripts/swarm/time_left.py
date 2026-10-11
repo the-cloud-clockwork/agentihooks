@@ -17,9 +17,10 @@ def inputs_of(store, slug, runtime) -> dict:
     return {"slots": slots(capacity.read(store, slug)) if observed else None, "ci_minutes": cached.get("minutes")}
 
 
-def refresh(slug, store, ledger, runtime) -> list[str]:
+def refresh(slug, store, ledger, runtime, fix_phase="", watched=None) -> list[str]:
     writer = getattr(ledger, "time_left", None)
     if writer is not None:
         inputs = inputs_of(store, slug, runtime)
-        writer(slug, inputs["slots"], inputs["ci_minutes"])
+        focus = {key: value for key, value in (("fix_phase", fix_phase), ("watched", watched)) if value}
+        writer(slug, inputs["slots"], inputs["ci_minutes"], **focus)
     return []

@@ -43,8 +43,8 @@ class Ledger:
     def __init__(self):
         self.sent = []
 
-    def time_left(self, slug, slots, ci_minutes):
-        self.sent.append((slug, slots, ci_minutes))
+    def time_left(self, slug, slots, ci_minutes, **focus):
+        self.sent.append((slug, slots, ci_minutes, *focus.items()))
 
 
 @pytest.fixture
@@ -91,6 +91,14 @@ def test_every_tick_sends_even_an_unchanged_estimate(store):
     assert ledger.sent == [("sw", 2, 4)] * 3
 
 
+def test_the_tick_focus_rides_with_the_inputs_only_when_set(store):
+    observe(store)
+    ledger = Ledger()
+    time_left.refresh("sw", store, ledger, OBSERVED, "p9", ["the focus on x"])
+    time_left.refresh("sw", store, ledger, OBSERVED, "", None)
+    assert ledger.sent == [("sw", 2, 4, ("fix_phase", "p9"), ("watched", ["the focus on x"])), ("sw", 2, 4)]
+
+
 def test_a_ledger_without_the_write_is_skipped(store):
     assert time_left.refresh("sw", store, object(), OBSERVED) == []
 
@@ -108,3 +116,11 @@ def test_the_client_sends_one_swarm_time_left_op(monkeypatch):
         "slots": 3,
         "ci_minutes": 5.5,
     }
+
+
+def test_the_client_carries_the_tick_focus(monkeypatch):
+    calls = []
+    monkeypatch.setattr(LedgerClient, "_call", lambda self, slug, ops=None: calls.append((slug, ops)))
+    LedgerClient().time_left("sw", 3, None, fix_phase="p9", watched=["the focus on x"])
+    [(_, [op])] = calls
+    assert (op["fix_phase"], op["watched"]) == ("p9", ["the focus on x"])

@@ -119,12 +119,13 @@ def is_stale(shown, computed):
     return abs(shown - computed) > max(STALE_FLOOR_MINUTES, computed / 4)
 
 
-def frozen(doc: dict, pending: dict) -> set:
+def frozen(doc: dict, pending: dict, inputs: dict) -> set:
     from scripts.swarm import freeze
     from scripts.swarm_ledger.repository import hierarchy
 
-    graph = hierarchy.project(doc)[0]
-    held = {tid for tid, t in pending.items() if freeze.held(t, doc, graph, "")}
+    graph, fix = hierarchy.project(doc)[0], inputs.get("fix_phase", "")
+    seen = {**doc, freeze.WATCHED: inputs["watched"]} if inputs.get("watched") else doc
+    held = {tid for tid, t in pending.items() if freeze.held(t, seen, graph, fix)}
     waiting = {tid: t for tid, t in pending.items() if t.get("state") == "open"}
     grown = True
     while grown:
@@ -139,7 +140,7 @@ def calculate(doc: dict, events: list, now: int, inputs: dict | None = None) -> 
     tiers = agent_minutes(doc, events, now)
     pending = {t["id"]: t for t in live(doc, "tasks") if not finished(t)}
     left = {tid: remaining_minutes(t, tiers, ci or 0, events, now) for tid, t in pending.items()}
-    held = frozen(doc, pending)
+    held = frozen(doc, pending, inputs or {})
     unfinished = {tid: t for tid, t in pending.items() if tid not in held}
     chain, work = chain_minutes(unfinished, left), sum(left[tid] for tid in unfinished)
     throughput = work / slots if slots else None
