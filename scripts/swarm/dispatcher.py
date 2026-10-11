@@ -6,9 +6,10 @@ set is a default it reorders; only an operator rank, set by him or relayed with 
 behind that queue. At delegate and full the tick claims from this queue, resumed work first within a rank band and
 clear territory before overlapping, and the dispatcher writes no rank: it comments on a task only when the task
 enters the head of its lane's queue, as many tasks as the lane has seats among those that unblock work or carry an
-operator rank, or leaves it while still open; a lane with no seats keeps its head until seats return. Below delegate
-it proposes each raise to the master. Every action is a gate log row, a dispatch metrics row naming its rule and a
-comment on the task.
+operator rank, or leaves it while still open; a lane with no seats keeps its head until seats return. When a task on
+the critical chain merges, its claimable successor takes the next free seat in its lane ahead of every band, and the
+dispatcher reports the seconds from that merge to the claim on the task. Below delegate it proposes each raise to the
+master. Every action is a gate log row, a dispatch metrics row naming its rule and a comment on the task.
 """
 
 import json
@@ -29,6 +30,13 @@ TOP = 3
 HEAD = "dispatch-head"
 LANES = {"engineering": "eng", "ci": "ci"}
 LEVERAGE, QUEUE, GROUPING, PRIORITIES = "leverage-rank", "queue-head", "grouping", "priority-sweep"
+CHAIN = "chain-guard"
+GUARD = -1
+CHAIN_CLAIM = "chain guard claimed task {task} {elapsed} seconds after task {dep} merged on the critical chain"
+CHAIN_CLAIMED = (
+    "The dispatcher's chain guard gave this task the next free {lane} seat {elapsed} seconds after the task before "
+    "it on the critical chain merged."
+)
 SKIPPED = "skipped "
 WINDOW = (None, "high", "urgent")
 UNCOMMENTED = "; the ledger did not take its comment"
@@ -119,10 +127,40 @@ def queue(doc: dict) -> list[str]:
 def claim_key(config, doc):
     if config.autonomy not in APPLIES:
         return None
-    fixed = _fixed(doc)
+    fixed, guard = _fixed(doc), guarded(doc)
     lined = queue(doc)
     position = {task_id: index for index, task_id in enumerate(lined)}
-    return lambda task: (_band(task, fixed), position.get(task["id"], len(lined)))
+    return lambda task: (
+        GUARD if task["id"] in guard else _band(task, fixed),
+        position.get(task["id"], len(lined)),
+    )
+
+
+def guarded(doc: dict) -> set[str]:
+    depth, known = chains(doc), {t["id"]: t for t in doc["tasks"]}
+    longest = max(depth.values(), default=0)
+    return {task_id for task_id, length in depth.items() if length + 1 >= longest and _merged(known[task_id], known)}
+
+
+def _merged(task, known):
+    return [dep for dep in task.get("depends_on") or [] if known.get(dep, {}).get("state") == "done"]
+
+
+def chain_claimed(slug, config, ledger, doc, task, lane, now_ms):
+    if config.autonomy not in APPLIES or task["id"] not in guarded(doc):
+        return []
+    known, stamps = {t["id"]: t for t in doc["tasks"]}, doc.get("_meta", {}).get("stamps", {})
+    times = [
+        (stamps[f"tasks/{dep}/state"]["at"], dep) for dep in _merged(task, known) if f"tasks/{dep}/state" in stamps
+    ]
+    if not times:
+        return []
+    merged_at, dep = max(times)
+    elapsed = (now_ms - merged_at) // 1000
+    text = CHAIN_CLAIM.format(task=task["id"], elapsed=elapsed, dep=dep)
+    said = _comment(slug, ledger, task, CHAIN_CLAIMED.format(lane=lane, elapsed=elapsed))
+    action = Action(CHAIN, "apply", text + said, task)
+    return [action.text] + log(slug, [action], now_ms)
 
 
 def _band(task, fixed):

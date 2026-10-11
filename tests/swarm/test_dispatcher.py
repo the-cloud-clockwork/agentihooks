@@ -581,7 +581,8 @@ def chain_merge(store, autonomy="delegate"):
     ledger = FakeLedger(
         [
             task("a", phase="", state="done"),
-            task("b", phase="", depends_on=["a"]),
+            task("a2", phase="", state="done"),
+            task("b", phase="", depends_on=["a2", "a"]),
             task("c", phase="", depends_on=["b"]),
             task("x", phase="", rank="urgent"),
             task("r", phase="", branch="engineer-abcdef-0009"),
@@ -591,6 +592,7 @@ def chain_merge(store, autonomy="delegate"):
     found = ledger.state(SLUG)
     found["_meta"]["stamps"] = {
         "tasks/a/state": {"by": "engineer@abcdef-0001", "at": NOW - 30_000},
+        "tasks/a2/state": {"by": "engineer@abcdef-0002", "at": NOW - 90_000},
         "tasks/x/rank": {"by": "operator"},
     }
     return config, ledger, found
@@ -606,7 +608,7 @@ def test_a_critical_chain_successor_takes_the_next_seat_ahead_of_operator_urgent
     config, ledger, found = chain_merge(store)
     assert dispatcher.guarded(found) == {"b"}
     key = dispatcher.claim_key(config, found)
-    assert key(ledger.rows["b"])[0] == dispatcher.GUARD < key(ledger.rows["x"])[0] == 0
+    assert [key(ledger.rows[t]) for t in ("b", "x", "r")] == [(-1, 1), (0, 0), (2, 3)]
     assert spawned(store, config, ledger, found) == [("eng", "b")]
     config, ledger, found = chain_merge(store, "assist")
     assert spawned(store, config, ledger, found) == [("eng", "x")]
