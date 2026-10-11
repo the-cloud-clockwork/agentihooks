@@ -6,7 +6,7 @@ from http.client import IncompleteRead
 
 import pytest
 
-from scripts.swarm_v2.kubernetes import client
+from scripts.swarm_v2.kubernetes import client, watch
 from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused, KubeHttp, PodClient, PreconditionFailed
 
 pytestmark = pytest.mark.unit
@@ -402,3 +402,78 @@ def test_create_config_map_treats_a_server_error_as_ambiguous():
     with pytest.raises(ConnectionError) as raised:
         PodClient(Http((503, {})), "ns").create_config_map({"metadata": {"name": "swarm-a-launch"}})
     assert str(raised.value) == "API server answered 503"
+
+
+def test_snapshot_lists_the_selected_pods_with_their_resource_version():
+    transport = Http((200, {"items": [{"metadata": {"name": "a"}}], "metadata": {"resourceVersion": "9"}}))
+    assert PodClient(transport, "ns").snapshot("owner=x") == ([{"metadata": {"name": "a"}}], "9")
+    assert transport.calls == [("GET", "/api/v1/namespaces/ns/pods?labelSelector=owner%3Dx", None)]
+    assert PodClient(Http((200, {"items": []})), "ns").snapshot("a=b") == ([], "")
+    with pytest.raises(ApiRefused):
+        PodClient(Http((403, {"reason": "Forbidden"})), "ns").snapshot("a=b")
+
+
+def _events(*events) -> bytes:
+    return b"".join(json.dumps(event).encode() + b"\n" for event in events) + b"\n"
+
+
+def watched(token, *answers) -> tuple[PodClient, RawOpener]:
+    opener = RawOpener(*answers)
+    return PodClient(KubeHttp("https://api.test", token, CONTEXT, opener), "ns"), opener
+
+
+def test_watch_reads_the_namespaced_events_after_a_resource_version(token):
+    gone = {"metadata": {"uid": "u2"}, "spec": {"nodeName": "worker-b"}}
+    body = _events(
+        {"type": "MODIFIED", "object": {"metadata": {"uid": "u1"}}},
+        {"type": "BOOKMARK", "object": {"metadata": {"resourceVersion": "12"}}},
+        {"type": "DELETED", "object": gone},
+    )
+    pods, opener = watched(token, Response(200, body))
+    assert pods.watch_pods("owner=x", "9") == [
+        ("MODIFIED", {"metadata": {"uid": "u1"}}),
+        ("BOOKMARK", {"metadata": {"resourceVersion": "12"}}),
+        ("DELETED", gone),
+    ]
+    request, timeout, _ = opener.calls[0]
+    assert request.full_url == (
+        "https://api.test/api/v1/namespaces/ns/pods?labelSelector=owner%3Dx&watch=1&resourceVersion=9&timeoutSeconds=1"
+    )
+    assert (request.get_method(), timeout, client.WATCH_SECONDS) == ("GET", client.TIMEOUT_SECONDS, 1)
+    assert watched(token, Response(200, b""))[0].watch_pods("a=b", "9") == []
+
+
+def test_an_expired_watch_cursor_is_raised_for_a_relist(token):
+    expired = {"type": "ERROR", "object": {"kind": "Status", "code": 410, "reason": "Expired"}}
+    for answer in (Response(200, _events(expired)), http_error(410, b'{"reason": "Gone"}')):
+        with pytest.raises(watch.CursorExpired) as raised:
+            watched(token, answer)[0].watch_pods("a=b", "9")
+        assert str(raised.value) == "9"
+
+
+def test_a_refused_or_unreadable_watch_is_not_an_expired_cursor(token):
+    with pytest.raises(ApiRefused) as raised:
+        watched(token, http_error(403, b'{"reason": "Forbidden"}'))[0].watch_pods("a=b", "9")
+    assert raised.value.status == 403
+    with pytest.raises(ConnectionError) as raised:
+        watched(token, http_error(503, b"{}"))[0].watch_pods("a=b", "9")
+    assert str(raised.value) == "API server answered 503"
+    with pytest.raises(ConnectionError) as raised:
+        watched(token, Response(200, b'{"type": "DELETED"\n'))[0].watch_pods("a=b", "9")
+    assert str(raised.value) == "the API server answer is unreadable"
+
+
+class Streamed:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def send(self, method, path, body=None, read=None):
+        self.calls.append((method, path, body, read))
+        return 200, [{"type": "DELETED", "object": {"metadata": {"uid": "u"}}}]
+
+
+def test_watch_sends_a_get_read_as_line_delimited_events():
+    transport = Streamed()
+    assert PodClient(transport, "ns").watch_pods("a=b", "9") == [("DELETED", {"metadata": {"uid": "u"}})]
+    path = "/api/v1/namespaces/ns/pods?labelSelector=a%3Db&watch=1&resourceVersion=9&timeoutSeconds=1"
+    assert transport.calls == [("GET", path, None, client._events)]

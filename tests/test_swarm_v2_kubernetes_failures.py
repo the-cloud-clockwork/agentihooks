@@ -77,6 +77,35 @@ def test_node_health_counts_only_when_observed():
     assert failures.classify(_pod(unready, "worker-b")) == ""
 
 
+@pytest.mark.parametrize(
+    ("condition", "reason"),
+    [
+        ({"type": "DisruptionTarget", "status": "True", "reason": "DeletionByTaintManager"}, "node_lost"),
+        ({"type": "DisruptionTarget", "status": "True", "reason": "DeletionByPodGC"}, "node_lost"),
+        ({"type": "DisruptionTarget", "status": "False", "reason": "DeletionByTaintManager"}, ""),
+        ({"type": "DisruptionTarget", "status": "True", "reason": "PreemptionByScheduler"}, ""),
+        ({"type": "DisruptionTarget", "status": "True"}, ""),
+        ({"type": "Ready", "status": "True", "reason": "DeletionByTaintManager"}, ""),
+        ({"type": "Ready", "status": "False", "reason": "NodeLost"}, "node_lost"),
+    ],
+)
+def test_a_lost_node_is_read_from_namespaced_pod_conditions(condition, reason):
+    status = {"phase": "Running", "conditions": [condition]}
+    assert failures.classify(_pod(status, "worker-b")) == reason
+    assert failures.classify(_pod(status, "worker-b"), frozenset({"worker-b"})) == reason
+    assert failures.NODE_DISRUPTIONS == frozenset(("DeletionByTaintManager", "DeletionByPodGC"))
+
+
+def test_a_deleted_pod_is_judged_by_its_last_state_then_by_its_last_node():
+    finished = _pod({"phase": "Succeeded"}, "worker-b")
+    assert failures.deleted_reason(finished, None) == ""
+    assert failures.deleted_reason(finished, frozenset({"worker-b"})) == ""
+    assert failures.deleted_reason(finished, frozenset()) == "node_lost"
+    assert failures.deleted_reason({"metadata": {}, "spec": {"nodeName": "worker-b"}}, None) == "node_lost"
+    assert failures.deleted_reason({"metadata": {}, "status": {"phase": "Running"}}, None) == ""
+    assert failures.deleted_reason({"metadata": {}}, None) == ""
+
+
 def test_init_containers_and_a_missing_exit_code_count_as_exits():
     init = {"phase": "Failed", "initContainerStatuses": [{"name": "home", "state": {"terminated": {}}}]}
     assert failures.classify(_pod(init)) == "application_exit"
@@ -407,15 +436,21 @@ class _Grants:
 
 
 class _Cluster:
-    def __init__(self, world):
-        self.world, self.selectors = world, []
+    def __init__(self, world, nodes=True):
+        self.world, self.nodes, self.selectors, self.watches, self.events, self.version = world, nodes, [], [], [], 0
 
-    def list_pods(self, selector):
+    def snapshot(self, selector):
         self.selectors.append(selector)
-        return json.loads(json.dumps(list(self.world.api.objects.values())))
+        self.version += 1
+        return json.loads(json.dumps(list(self.world.api.objects.values()))), str(self.version)
+
+    def watch_pods(self, selector, version):
+        self.watches.append((selector, version))
+        events, self.events = self.events, []
+        return events
 
     def ready_nodes(self):
-        return sorted(self.world.ready)
+        return sorted(self.world.ready) if self.nodes else None
 
 
 def test_the_deployed_pass_fences_an_attempt_whose_node_was_deleted(world):
@@ -438,6 +473,191 @@ def test_the_deployed_pass_fences_an_attempt_whose_node_was_deleted(world):
     assert grants.revoked == [(cases.SLUG, world.old.execution_id)]
     assert world.slots() == []
     assert cluster.selectors == [f"{cases.watch.OWNER_LABEL}={cases.watch.owner_for(cases.SLUG)}"] * 2
+
+
+def test_the_deployed_pass_fences_a_pod_only_the_watch_saw_deleted_while_nodes_are_refused(world):
+    grants, cluster = _Grants(), _Cluster(world, nodes=False)
+    service = SimpleNamespace(controller=world.live, grants=grants)
+    recover = deployed.recovery_pass(service, SimpleNamespace(image_tag="dev"), cluster)
+    last = _gone(world)
+    assert recover() == {world.old.execution_id: "unobserved"}
+    assert cluster.watches == []
+    cluster.events = [("DELETED", last)]
+    assert recover() == {world.old.execution_id: "fenced"}
+    selector = f"{cases.watch.OWNER_LABEL}={cases.watch.owner_for(cases.SLUG)}"
+    assert cluster.watches == [(selector, "1")]
+    fence = world.recovery(world.live).fence(world.old.execution_id)
+    assert (fence["reason"], fence["released"]) == ("node_lost", ["grant", "account"])
+    assert grants.revoked == [(cases.SLUG, world.old.execution_id)]
+
+
+def _gone(world):
+    return world.api.objects.pop(f"swarm-{world.old.execution_id}")
+
+
+def _listed(world):
+    return json.loads(json.dumps(list(world.api.objects.values())))
+
+
+def test_a_deleted_pod_never_seen_live_is_fenced_as_node_lost_without_a_node_listing(world):
+    recovery = world.recovery(world.live)
+    last = _gone(world)
+    assert recovery.reconcile([], None, [last]) == {world.old.execution_id: "fenced"}
+    fence = recovery.fence(world.old.execution_id)
+    assert (fence["reason"], fence["released"]) == ("node_lost", ["grant", "account"])
+    assert world.slots() == []
+    decision = recovery.decision(world.old.execution_id)
+    replacement = world.store.execution(cases.SLUG, decision.replacement)
+    assert (decision.mode, replacement.generation, replacement.seat) == ("resume", 2, world.old.seat)
+    assert recovery.reconcile([], None, [last]) == {decision.replacement: "unobserved"}
+    assert recovery.late_observations(world.old.execution_id) == 0
+
+
+@pytest.mark.parametrize(("shape", "reason"), [("oom_killed", "oom_killed"), ("image_pull", "image_pull")])
+def test_a_deleted_pod_keeps_the_failure_its_last_state_shows(world, shape, reason):
+    recovery = world.recovery(world.live)
+    world.show(world.old, shape)
+    last = _gone(world)
+    assert recovery.reconcile([], None, [last]) == {world.old.execution_id: "fenced"}
+    assert recovery.fence(world.old.execution_id)["reason"] == reason
+
+
+def test_a_finished_or_unscheduled_deleted_pod_is_not_a_node_loss(world):
+    recovery = world.recovery(world.live)
+    world.show(world.old, "clean_exit")
+    finished = _gone(world)
+    unscheduled = {**finished, "spec": {}, "status": {"phase": "Pending"}}
+    for last in (finished, unscheduled):
+        assert recovery.reconcile([], None, [last]) == {world.old.execution_id: "unobserved"}
+    assert recovery.fence(world.old.execution_id) is None
+
+
+def test_a_finished_deleted_pod_on_a_node_the_listing_no_longer_shows_is_node_lost(world):
+    recovery = world.recovery(world.live)
+    world.show(world.old, "clean_exit")
+    last = _gone(world)
+    assert recovery.reconcile([], ["worker-a"], [last]) == {world.old.execution_id: "fenced"}
+    assert recovery.fence(world.old.execution_id)["reason"] == "node_lost"
+
+
+def test_a_live_pod_outranks_a_deleted_state_of_the_same_attempt(world):
+    recovery = world.recovery(world.live)
+    live = _listed(world)
+    last = {**live[0], "metadata": {**live[0]["metadata"], "uid": "older"}}
+    assert recovery.reconcile(live, None, [last]) == {world.old.execution_id: "working"}
+    assert recovery.fence(world.old.execution_id) is None
+
+
+def test_deleted_states_of_unknown_attempts_are_ignored(world):
+    recovery = world.recovery(world.live)
+    stray = {"metadata": {"labels": {cases.watch.EXECUTION_LABEL: "exe-stray"}}, "spec": {"nodeName": "worker-a"}}
+    unlabelled = {"metadata": {}, "spec": {"nodeName": "worker-a"}}
+    assert recovery.reconcile(_listed(world), None, [stray, unlabelled]) == {world.old.execution_id: "working"}
+    assert recovery.fence("exe-stray") is None
+
+
+def test_a_refused_node_listing_never_takes_an_unlisted_node_as_proof(world):
+    recovery = world.recovery(world.live)
+    assert recovery.reconcile(_listed(world), None) == {world.old.execution_id: "working"}
+    world.ready.clear()
+    assert recovery.reconcile(_listed(world), None) == {world.old.execution_id: "working"}
+    _gone(world)
+    assert recovery.reconcile([], None) == {world.old.execution_id: "unobserved"}
+    assert recovery.fence(world.old.execution_id) is None
+
+
+class _Recording:
+    def __init__(self):
+        self.calls = []
+
+    def reconcile(self, pods, ready, deleted):
+        self.calls.append((pods, ready, deleted))
+        return {}
+
+
+class _Scripted:
+    def __init__(self, snapshots, watches):
+        self.snapshots, self.watches, self.calls = list(snapshots), list(watches), []
+
+    def snapshot(self, selector):
+        self.calls.append(("list", selector))
+        return self.snapshots.pop(0)
+
+    def watch_pods(self, selector, version):
+        self.calls.append(("watch", selector, version))
+        answer = self.watches.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    def ready_nodes(self):
+        return None
+
+
+def _uid(uid, node=""):
+    return {"metadata": {"uid": uid}, "spec": {"nodeName": node} if node else {}}
+
+
+def test_each_pass_hands_recovery_the_listed_pods_and_every_pod_deleted_since_the_last_pass(monkeypatch):
+    printed = []
+    monkeypatch.setattr(deployed, "print", lambda *line, **flags: printed.append((line, flags)), raising=False)
+    a, b, c, d, e = (_uid(uid) for uid in "abcde")
+    b_last, c_last = _uid("b", "worker-a"), _uid("c", "worker-b")
+    refused = client.ApiRefused(403, "Forbidden")
+    events = [("DELETED", c_last), ("MODIFIED", a), ("BOOKMARK", {"metadata": {}}), ("DELETED", b_last)]
+    api = _Scripted(
+        [([a, b], "5"), ([a], "9"), ([d], "11"), ([e], "12"), ([], "13"), ([], "14")],
+        [events, cases.watch.CursorExpired(), refused, ConnectionError("down"), TimeoutError()],
+    )
+    recording = _Recording()
+    recover = deployed.RecoveryPass(recording, api, "owner=x")
+    for _ in range(6):
+        assert recover() == {}
+    assert [deleted for _, _, deleted in recording.calls] == [[], [c_last, b_last], [a], [d], [e], []]
+    assert [pods for pods, _, _ in recording.calls] == [[a, b], [a], [d], [e], [], []]
+    assert {ready for _, ready, _ in recording.calls} == {None}
+    watched = [call for call in api.calls if call[0] == "watch"]
+    assert watched == [("watch", "owner=x", version) for version in ("5", "9", "11", "12", "13")]
+    assert api.calls[:3] == [("list", "owner=x"), ("list", "owner=x"), ("watch", "owner=x", "5")]
+    failed = ("CursorExpired", "ApiRefused", "ConnectionError", "TimeoutError")
+    assert printed == [
+        ((f"controller: the Pod watch failed with {name}; using the last listing",), {"flush": True}) for name in failed
+    ]
+
+
+def test_a_pod_deleted_after_the_listing_is_reported_by_the_overlapping_watch():
+    a = _uid("a")
+    a_last = _uid("a", "worker-a")
+    api = _Scripted([([a], "5"), ([a], "9"), ([], "12")], [[("DELETED", a_last)], [("DELETED", a_last)]])
+    recording = _Recording()
+    recover = deployed.RecoveryPass(recording, api, "owner=x")
+    for _ in range(3):
+        recover()
+    assert [deleted for _, _, deleted in recording.calls] == [[], [a_last], [a_last]]
+    assert [call for call in api.calls if call[0] == "watch"] == [("watch", "owner=x", "5"), ("watch", "owner=x", "9")]
+
+
+def test_the_deployed_pass_fences_a_live_pod_on_a_lost_node_while_nodes_are_refused(world):
+    cluster = _Cluster(world, nodes=False)
+    service = SimpleNamespace(controller=world.live, grants=_Grants())
+    recover = deployed.recovery_pass(service, SimpleNamespace(image_tag="dev"), cluster)
+    assert recover() == {world.old.execution_id: "working"}
+    pod = world.api.objects[f"swarm-{world.old.execution_id}"]
+    lost = {"type": "DisruptionTarget", "status": "True", "reason": "DeletionByTaintManager"}
+    pod["status"] = {**pod["status"], "conditions": [lost]}
+    assert recover() == {world.old.execution_id: "fenced"}
+    assert world.recovery(world.live).fence(world.old.execution_id)["reason"] == "node_lost"
+
+
+def test_a_pass_without_a_resource_version_lists_again_instead_of_watching():
+    a = _uid("a")
+    api = _Scripted([([a], ""), ([], "")], [])
+    recording = _Recording()
+    recover = deployed.RecoveryPass(recording, api, "owner=x")
+    recover()
+    recover()
+    assert api.calls == [("list", "owner=x"), ("list", "owner=x")]
+    assert recording.calls[1] == ([], None, [a])
 
 
 def test_resume_decision_uses_the_checkpoint_and_admits_one_replacement(world):
