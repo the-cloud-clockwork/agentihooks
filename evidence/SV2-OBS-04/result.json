@@ -78,5 +78,17 @@
     "failure_evidence": "No contract failed in the final runs. The smallest reproducer is the committed fixture tests/fixtures/swarm_v2/health-diagnostics.json, hashed in manifest.json, with a fake wall and Redis clock.",
     "data_safety": "Authoritative objects identified before rollback: execution registry, task claims, heartbeats, operation journal and the controller lease. Health never writes or deletes them; rollback switches deep checks off and deletes nothing.",
     "completion_evidence": "Recorded here: interfaces, supported_versions, validation, measurements, remaining_limitations and rollback_rehearsal."
+  },
+  "completion_evidence": {
+    "implemented_interfaces": "interfaces above: Health.live, Health.diagnose, Health.qualify, HealthAPI routes /v2/health/live, /v2/health/diagnose and /v2/health/qualify, the heartbeat archive_advanced_at_ms field, Routes health routing and the ControlService wiring",
+    "supported_versions": "supported_versions above: Python 3.11 and 3.12 in CI, Redis keys read only plus one heartbeat field, local execution unchanged",
+    "test_outputs": [
+      "proofs run 38141730406 at 72feec59 (red): ImportError: cannot import name 'health' from 'scripts.swarm_v2.api'",
+      "proofs run 38142649773 at 9114a635: cases T-SV2-OBS-04-A, B and C state passed; records committed",
+      "proofs run 38142921808 at dd547661: 254 passed in 17.00s across health, suite speed, control service, executions, tasks and broadcasts API tests",
+      "mutation preflight 38146905623 at f4f73bf5: executions 21 killed, health 643 killed, server 9 killed, control service 36 killed, none survived"
+    ],
+    "remaining_limitations": "remaining_limitations above",
+    "rollback_rehearsal": "rollback_rehearsal above: AGENTIHOOKS_HEALTH_DEEP=off answers 503 on diagnose and qualify while liveness answers 200, rehearsed in case C and in the hosted control service test"
   }
 }
