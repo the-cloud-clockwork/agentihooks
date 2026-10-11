@@ -470,3 +470,61 @@ def test_command_rejects_unknown_actions(monkeypatch, capsys):
         worker_image.main()
     assert error.value.code == 2
     assert "invalid choice: 'unexpected'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("action", ["download", "install"])
+def test_a_named_tool_limits_download_and_install_to_that_tool(locked, monkeypatch, action):
+    path, lock, _ = locked
+    argv = ["worker_image", action, "--lock", str(path), "--tool", "herdr", "--cache", "/var/cache/tools"]
+    monkeypatch.setattr("sys.argv", argv)
+    fetch = Mock()
+    install = Mock()
+    monkeypatch.setattr(worker_image, "fetch", fetch)
+    monkeypatch.setattr(worker_image, "install_tools", install)
+    worker_image.main()
+    herdr = lock["tools"]["herdr"]
+    if action == "download":
+        assert fetch.call_args_list == [call("herdr", herdr, Path("/var/cache/tools"))]
+    else:
+        install.assert_called_once_with(
+            {**lock, "tools": {"herdr": herdr}}, Path("/usr/local/bin"), Path("/var/cache/tools")
+        )
+
+
+def test_a_named_tool_installs_and_checks_only_that_binary(locked, tmp_path, monkeypatch):
+    path, lock, payloads = locked
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(payloads[url]))
+    installed = Mock(wraps=worker_image.install_tools)
+    monkeypatch.setattr(worker_image, "install_tools", lambda lock, _, cache: installed(lock, tmp_path, cache))
+    monkeypatch.setattr("sys.argv", ["worker_image", "install", "--lock", str(path), "--tool", "herdr"])
+    worker_image.main()
+    assert [entry.name for entry in tmp_path.iterdir() if entry.name in lock["tools"]] == ["herdr"]
+
+
+def test_command_rejects_an_unlocked_tool(locked, monkeypatch, capsys):
+    path, _, _ = locked
+    monkeypatch.setattr("sys.argv", ["worker_image", "install", "--lock", str(path), "--tool", "curl"])
+    with pytest.raises(SystemExit) as error:
+        worker_image.main()
+    assert error.value.code == 2
+    assert "invalid choice: 'curl'" in capsys.readouterr().err
+
+
+def test_a_named_package_limits_shell_packages_to_that_package(locked, monkeypatch, capsys):
+    path, lock, _ = locked
+    lock["shell_packages"].update(bash="5.2", **{"openssh-client": "1:9.2p1-2+deb12u7"})
+    path.write_text(json.dumps(lock))
+    argv = ["worker_image", "shell-packages", "--lock", str(path), "--package", "openssh-client", "--package", "git"]
+    monkeypatch.setattr("sys.argv", argv)
+    worker_image.main()
+    assert capsys.readouterr().out == "openssh-client=1:9.2p1-2+deb12u7 git=1:2.39.5-0+deb12u3\n"
+
+
+def test_an_unlocked_package_is_refused(locked, monkeypatch, capsys):
+    path, _, _ = locked
+    argv = ["worker_image", "shell-packages", "--lock", str(path), "--package", "zsh", "--package", "curl"]
+    monkeypatch.setattr("sys.argv", argv)
+    with pytest.raises(SystemExit) as error:
+        worker_image.main()
+    assert error.value.code == 2
+    assert "--package names packages the lock does not pin: curl, zsh" in capsys.readouterr().err

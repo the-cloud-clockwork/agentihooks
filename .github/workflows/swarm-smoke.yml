@@ -39,3 +39,14 @@ jobs:
           ref: ${{ github.sha }}
       - name: Join a hive container to the Compose stack and hold the controller lease
         run: bash scripts/packaging/compose-hive-smoke.sh
+  terminal-clients:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Build the swarm image
+        run: docker build -t local/agentihooks-swarm:clients-check .
+      - name: Run the pinned herdr and ssh clients inside the swarm image
+        run: bash scripts/packaging/swarm-image-clients.sh local/agentihooks-swarm:clients-check
