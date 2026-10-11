@@ -697,6 +697,28 @@ def test_a_resume_herdr_never_shows_in_its_conversation_is_closed_and_fails(tmp_
     assert ["pane", "close", "w2:p9"] in seen["herdr"]
 
 
+def test_a_resume_whose_launch_fails_terminates_that_agent(tmp_path):
+    from scripts.swarm.tick import SpawnError
+
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    launched = runtime.run
+    refused = "agentihooks init-agent: the harness did not report its route within 90s"
+
+    def failing(argv, **kwargs):
+        if "init-agent" in argv:
+            seen["runs"].append(argv)
+            return SimpleNamespace(returncode=3, stdout="", stderr=refused + "\n")
+        return launched(argv, **kwargs)
+
+    runtime.run = failing
+    with pytest.raises(SpawnError) as error:
+        runtime.resume(config, agent, "you were restored")
+    assert str(error.value) == refused
+    assert [argv[1:] for argv in seen["runs"] if "terminate-agent" in argv] == [
+        ["terminate-agent", "engineer@a1b2c3-0001", "--force-shared"]
+    ]
+
+
 @pytest.mark.parametrize(
     "lane,harness,launch,source",
     [

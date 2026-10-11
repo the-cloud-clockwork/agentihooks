@@ -299,7 +299,7 @@ def test_the_controller_sleeps_one_configured_tick_between_passes(store, monkeyp
     assert slept == [4.0]
 
 
-def renewed(store, clock, wait_s=5.0):
+def renewed(store, clock, wait_s=2.0):
     deadline = time.monotonic() + wait_s
     while time.monotonic() < deadline:
         held = lease.current(store, "sw")
@@ -378,6 +378,8 @@ def test_a_fenced_launch_slower_than_the_lease_keeps_it(store, clock, monkeypatc
         for _ in range(5):
             clock[0] += 20
             beats.append(renewed(store, clock))
+            if not beats[-1]:
+                break
         return "placed"
 
     runtime = controller.FencedRuntime(store, "sw", held, SimpleNamespace(spawn=slow, relaunch=slow), "local")
@@ -398,6 +400,8 @@ def test_a_launch_slower_than_the_lease_keeps_the_intent_pass_in_the_same_tick(e
         for _ in range(5):
             clock[0] += 20
             events.append(renewed(store, clock))
+            if not events[-1]:
+                break
         return spawn(config, lane, name, task)
 
     class Check:
@@ -436,6 +440,8 @@ def test_a_slow_launch_that_never_starts_is_recorded_against_the_launch_not_the_
         for _ in range(5):
             clock[0] += 20
             events.append(renewed(store, clock))
+            if not events[-1]:
+                break
         raise SpawnError(refused)
 
     class Check:
