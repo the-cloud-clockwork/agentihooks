@@ -576,7 +576,7 @@ class HerdrRuntime:
             preserve=preserves_effort(bool(agent.effort), agent.lane),
         )
         argv += ["--resume", agent.conversation_id, "--", *route, *model]
-        placed = self._launch(config, agent.lane, agent.task, agent.name, argv)
+        placed = timing.call(self._launch, config, agent.lane, agent.task, agent.name, argv)
         if not self._holds(placed.pane_id, agent.conversation_id):
             self.retire(
                 replace(agent, pane_id=placed.pane_id, profile_decision=placed.profile_decision),
