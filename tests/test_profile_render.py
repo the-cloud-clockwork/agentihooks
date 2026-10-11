@@ -1598,6 +1598,32 @@ def test_codex_render_links_state_back_to_the_operator_home(world):
     assert (doc["model"], doc["service_tier"], doc["notify"]) == ("gpt-op", "fast", ["py", "-m", "shim"])
 
 
+@pytest.mark.parametrize("token_kind", ["chatgpt", "agent"])
+def test_codex_token_account_role_home_has_no_dangling_login(world, monkeypatch, token_kind):
+    from scripts import codex_router
+    from scripts.profiles import render
+    from tests.codex_fakes import jwt
+
+    claims = (
+        {"https://api.openai.com/auth": {"chatgpt_account_id": "workspace"}}
+        if token_kind == "chatgpt"
+        else {"https://api.openai.com/agent_identity": {}}
+    )
+    token = jwt(claims)
+    monkeypatch.setenv("AH_CX_TOKEN_alpha", token)
+    out = render.render_codex("rb-role")
+    login = out / "auth.json"
+
+    assert not login.is_symlink()
+    assert not login.exists()
+    active = {"CODEX_HOME": str(out), "AH_CX_TOKEN_alpha": token}
+    account = codex_router.credential(codex_router.CodexAccount("alpha", "AH_CX_TOKEN_alpha"), active)
+    child = codex_router.child_environment(account, active)
+    assert child["CODEX_HOME"] == str(out)
+    assert child["CODEX_ACCESS_TOKEN"] == token
+    assert codex_router.command(account, "codex", [])[1] == "--no-daemon"
+
+
 def test_codex_render_follows_operator_changes(world):
     from scripts.profiles import render
 
