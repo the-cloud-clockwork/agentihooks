@@ -199,7 +199,7 @@ def _flag_value(args: list[str], names: tuple[str, ...]) -> str:
 
 
 def _handoff_agent(requested: str, environ: dict[str, str], agent_args: list[str]) -> str:
-    source = environ.get("AGENTIHOOKS_TARGET") or "claude"
+    source = environ.get("AGENTIHOOKS_TARGET") or _live_harness()
     target = requested or source
     if _flag_value(agent_args, ("--route",)) == "api":
         return target
@@ -208,6 +208,16 @@ def _handoff_agent(requested: str, environ: dict[str, str], agent_args: list[str
             f"unsupported quota transfer: {source.capitalize()} cannot transfer to a {target.capitalize()} account"
         )
     return "codex" if source == "codex" else "claude"
+
+
+def _live_harness() -> str:
+    """Only hook processes carry AGENTIHOOKS_TARGET; a handoff typed in a Codex shell finds its harness in /proc."""
+    from scripts.profiles import binding
+
+    try:
+        return binding.process()[1]
+    except (OSError, ValueError):
+        return "claude"
 
 
 def _handoff_exclude(agent: str, environ: dict[str, str]) -> str:
@@ -778,8 +788,12 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
 
     from hooks.context.account_sessions import agent_pid
     from hooks.context.broadcast import mark_handed_off
+    from hooks.lifecycle import handoff_close
 
-    marked = mark_handed_off(agent_pid(), route["account"])
+    pid = agent_pid()
+    marked = mark_handed_off(pid, route["account"])
+    if args.resume:
+        handoff_close.marker(pid, args.resume).touch()
     print("\n".join([*report, "handoff=done", f"handed_off_sessions={','.join(marked) or 'none'}"]))
     return 0
 

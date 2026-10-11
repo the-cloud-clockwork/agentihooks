@@ -421,6 +421,18 @@ def test_handoff_marks_this_session_once_the_new_one_is_routed(monkeypatch, tmp_
     assert "handed_off_sessions=sid-1" in out
 
 
+@pytest.mark.parametrize(("extra", "recorded"), [(("--resume", "sid-9"), ["handed-off-4242-sid-9"]), ((), [])])
+def test_a_resumed_handoff_records_the_process_it_leaves(monkeypatch, tmp_path, extra, recorded):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr("hooks.lifecycle.handoff_close._home", lambda: home)
+    monkeypatch.setattr("hooks.context.account_sessions.agent_pid", lambda start=None: 4242)
+    monkeypatch.setattr("hooks.context.broadcast.mark_handed_off", lambda pid, account: [])
+
+    assert _handoff(monkeypatch, tmp_path, _routed("routed", "beta"), extra) == 0
+    assert sorted(path.name for path in home.iterdir()) == recorded
+
+
 def test_failed_route_fails_the_handoff_and_marks_nothing(monkeypatch, tmp_path, capsys):
     marked = []
     monkeypatch.setattr("hooks.context.broadcast.mark_handed_off", lambda pid, account: marked.append(pid))
