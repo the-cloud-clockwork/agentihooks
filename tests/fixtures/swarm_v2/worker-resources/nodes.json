@@ -1,0 +1,97 @@
+{
+  "read_at": "2026-10-11T12:28:53Z",
+  "inputs": {
+    "nodes": "eb2845f1d3acd8f1f6343d938f3c1e2814975df93d8e152bfa9234e9fd5bfa8c",
+    "pods": "1eb4ba6114f9c57e8b0ebdf6d9af65f8bbf31d05fabc99c35a8fb0583e67d3ab"
+  },
+  "nodes": [
+    {
+      "name": "anton-ec2-0396dfd54e94477e5",
+      "pool": "",
+      "instance_type": "k3s",
+      "allocatable_memory_mib": 15701,
+      "allocatable_cpu_millis": 4000,
+      "allocatable_ephemeral_mib": 93215,
+      "colocated_memory_mib": 56,
+      "colocated_cpu_millis": 16,
+      "colocated_pods": 4
+    },
+    {
+      "name": "anton-ec2-0447e2769b1a3084a",
+      "pool": "",
+      "instance_type": "k3s",
+      "allocatable_memory_mib": 15701,
+      "allocatable_cpu_millis": 4000,
+      "allocatable_ephemeral_mib": 93215,
+      "colocated_memory_mib": 10296,
+      "colocated_cpu_millis": 2516,
+      "colocated_pods": 9
+    },
+    {
+      "name": "anton-ec2-0af3a8fe7769581ef",
+      "pool": "",
+      "instance_type": "k3s",
+      "allocatable_memory_mib": 15701,
+      "allocatable_cpu_millis": 4000,
+      "allocatable_ephemeral_mib": 93215,
+      "colocated_memory_mib": 10808,
+      "colocated_cpu_millis": 2766,
+      "colocated_pods": 10
+    },
+    {
+      "name": "anton-ec2-0c9b3493a0ef846f4",
+      "pool": "",
+      "instance_type": "k3s",
+      "allocatable_memory_mib": 15701,
+      "allocatable_cpu_millis": 4000,
+      "allocatable_ephemeral_mib": 93215,
+      "colocated_memory_mib": 10296,
+      "colocated_cpu_millis": 2516,
+      "colocated_pods": 9
+    },
+    {
+      "name": "k8s-master",
+      "pool": "",
+      "instance_type": "k3s",
+      "allocatable_memory_mib": 7936,
+      "allocatable_cpu_millis": 4000,
+      "allocatable_ephemeral_mib": 74369,
+      "colocated_memory_mib": 1728,
+      "colocated_cpu_millis": 217,
+      "colocated_pods": 15
+    },
+    {
+      "name": "k8s-worker-1",
+      "pool": "",
+      "instance_type": "k3s",
+      "allocatable_memory_mib": 13972,
+      "allocatable_cpu_millis": 4000,
+      "allocatable_ephemeral_mib": 55523,
+      "colocated_memory_mib": 7696,
+      "colocated_cpu_millis": 2638,
+      "colocated_pods": 45
+    },
+    {
+      "name": "k8s-worker-2",
+      "pool": "",
+      "instance_type": "k3s",
+      "allocatable_memory_mib": 13972,
+      "allocatable_cpu_millis": 4000,
+      "allocatable_ephemeral_mib": 55523,
+      "colocated_memory_mib": 3720,
+      "colocated_cpu_millis": 2583,
+      "colocated_pods": 40
+    },
+    {
+      "name": "worker-001",
+      "pool": "",
+      "instance_type": "k3s",
+      "allocatable_memory_mib": 29857,
+      "allocatable_cpu_millis": 16000,
+      "allocatable_ephemeral_mib": 95209,
+      "colocated_memory_mib": 26784,
+      "colocated_cpu_millis": 11588,
+      "colocated_pods": 73
+    }
+  ]
+}

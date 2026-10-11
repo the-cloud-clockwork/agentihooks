@@ -24,7 +24,7 @@ on:
         default: false
 
 concurrency:
-  group: ${{ format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') }}
+  group: ${{ inputs.proof == 'tests' && format('focused-proof-{0}', github.run_id) || format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') }}
   queue: max
   cancel-in-progress: false
 
@@ -76,6 +76,7 @@ jobs:
 
       - name: Require explicit test paths
         run: |
+          [[ "$TEST_PATHS" != *$'\n'* ]] || { echo '::error::Give every test path on one line.'; exit 1; }
           read -r -a paths <<< "$TEST_PATHS"
           [[ ${#paths[@]} -gt 0 ]] || { echo '::error::Choose explicit test paths under tests/.'; exit 1; }
           for path in "${paths[@]}"; do

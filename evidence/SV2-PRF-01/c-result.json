@@ -1,0 +1,67 @@
+{
+  "case": "T-SV2-PRF-01-C",
+  "state": "passed",
+  "evidence_class": "measured: the workloads ran on a GitHub hosted Ubuntu runner in the Worker resources workflow named in measurements.json, repeat.json and update.json, and node capacity was read from the Anton cluster with kubectl as named in nodes.json; derivation, coexistence, promotion and rollback are functions over those committed records run on a temporary accepted file; no worker Pod ran the workloads and no profile was applied to a deployed Pod policy",
+  "input_sha256": {
+    "measurements.json": "a32d3d92a843b1860aeeb20584a3c74ed7f1ab27dcfa4794f2550a92cf834406",
+    "repeat.json": "ede1a4cd1cc69e9351f2001954f5832441aee3d95184c3af05e5a705c4ea7500",
+    "update.json": "73352ce1ac1a4ff3ac10761d296d29fabfdadfa3ce3dc5ec2e961648095791ec",
+    "nodes.json": "74b07c4f56bb476f57707b29aca310d35a40f2841a6bfa685811cd613feb1e7a",
+    "disclosure.json": "5619b504a31319971f751190ca09241f1e9ac8bef2c9454d660f46662d65041c"
+  },
+  "observed": {
+    "accepted_generation": 110,
+    "candidate_generation": 112,
+    "decisions": {
+      "first": "promoted",
+      "workload_update": "requalify",
+      "stale": "stale",
+      "missing_class": "requalify",
+      "replay": "replayed",
+      "requalified": "requalified"
+    },
+    "changes": {
+      "material": [
+        [
+          "memory",
+          "peak_rss_mib",
+          1091.25,
+          1603.12
+        ],
+        [
+          "memory",
+          "peak_cores",
+          0.333,
+          0.404
+        ]
+      ],
+      "missing": [],
+      "tools_changed": {
+        "workload:memory": [
+          "1",
+          "2"
+        ]
+      }
+    },
+    "missing": [
+      "browser"
+    ],
+    "held_file_unchanged": true,
+    "interrupted_install": "interrupted before install",
+    "accepted_survived_interruption": true,
+    "installed_after_requalification": 112,
+    "rollback_restored_generation": 110,
+    "rollback_matches_prior_file": true,
+    "rollback_kept_displaced_report": true,
+    "candidate_memory_limit": {
+      "memory_mib": 3328,
+      "cpu_millis": 750,
+      "ephemeral_mib": 3072
+    },
+    "accepted_memory_limit": {
+      "memory_mib": 2816,
+      "cpu_millis": 500,
+      "ephemeral_mib": 3072
+    }
+  }
+}
