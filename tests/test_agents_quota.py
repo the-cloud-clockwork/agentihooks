@@ -585,7 +585,17 @@ def test_current_lists_discovered_accounts_only_and_a_stale_reading_as_stale(mon
     ]
     assert table[2].split()[11] == "-"
     assert table[3].split() == ["2", "claude", "alpha", "subscription", "STALE", "0/-", "-", "-", *["-"] * 5]
-    assert agents_quota.current_table([], [], {"alpha"}, {}, False, "") == ""
+
+
+def test_current_without_a_claude_account_still_lists_the_codex_rows(monkeypatch):
+    from hooks.context import account_sessions
+
+    codex = agents_quota.QuotaRow("codex", "personal", "NORMAL", 0, 60.0, 70.0, 9000, "log", cap=6, routing_left=70.0)
+    monkeypatch.setattr(agents_quota, "_codex", lambda now: [codex])
+    monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {})
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
+    table = agents_quota.current_table([], [], {"alpha"}, {}, False, "").splitlines()
+    assert [line.split()[1:3] for line in table[2:]] == [["codex", "personal"]]
 
 
 def test_a_signed_out_login_has_no_routing_and_an_expired_one_no_five_hour_window():
