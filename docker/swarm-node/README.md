@@ -17,7 +17,10 @@ Changing requirements also requires updating their checksum in `versions.lock`.
 Template inputs come from the repository's packaged profiles, never a host home
 or credential store. Every package role profile and the shared `_guards` folder
 also sit at the template root, so a role name resolves as a template and a
-seeded role's conditions find the guard beside it. Runtime homes are writable;
+seeded role's conditions find the guard beside it; bootstrap refuses templates
+without that folder. The controller admits a seat profile only when its own
+package ships it as a role, which matches the image built from the same commit;
+an older image ignores the record's `profile` and renders `default`. Runtime homes are writable;
 templates and the environment are owned by root and read only to the worker user.
 
 The default command verifies and reports installed inventory without a network.

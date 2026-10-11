@@ -18,7 +18,6 @@ from scripts.swarm_v2 import filesystem
 TARGETS = ("claude", "codex")
 RECORD = "execution.json"
 PENDING = ".bootstrap-pending"
-GUARDS = "_guards"
 NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 VARIABLE = re.compile(r"[A-Z][A-Z0-9_]{0,127}")
 SYSTEM_ROOTS = (Path("/usr/bin"), Path("/bin"), Path("/usr/local/bin"))
@@ -66,6 +65,9 @@ def _check_profiles(request: Request) -> None:
         source = request.templates / name
         if source.is_symlink() or not source.is_dir():
             raise BootstrapError(f"profile template not found: {name}")
+    shared = request.templates / filesystem.SHARED
+    if shared.is_symlink() or not shared.is_dir():
+        raise BootstrapError(f"shared template not found: {filesystem.SHARED}")
 
 
 def _check_accounts(request: Request) -> None:
@@ -331,8 +333,7 @@ def _seed(execution: filesystem.Execution, request: Request) -> None:
     for name in sorted(set(request.profiles.values())):
         copy = filesystem.seed(execution, request.templates / name, name)
         linked.append({"name": name, "path": str(copy)})
-    if (request.templates / GUARDS).is_dir():
-        filesystem.seed(execution, request.templates / GUARDS, GUARDS)
+    filesystem.seed(execution, request.templates / filesystem.SHARED, filesystem.SHARED)
     for target in request.profiles:
         state = execution.path("home") / target / ".agentihooks"
         state.mkdir(parents=True, mode=0o700)

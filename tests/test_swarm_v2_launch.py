@@ -675,7 +675,7 @@ def test_a_tick_spawn_admits_its_agent_with_the_seat_profile(world, lane, lanes,
     assert world.store.execution(SLUG, sent.task["execution_id"]).profile == profile
 
 
-@pytest.mark.parametrize("profile", ["frontend", "_guards", "../engineer"])
+@pytest.mark.parametrize("profile", ["designer", "_guards", "../engineer"])
 def test_a_tick_spawn_for_a_profile_the_worker_image_lacks_is_refused_before_admission(world, profile):
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
     request = SpawnRequest(config, "eng", "e1", {"id": "task", "seat": FIRST, "profile": profile})

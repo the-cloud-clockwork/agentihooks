@@ -224,7 +224,7 @@ def test_a_profile_that_resolves_outside_its_root_is_refused_before_any_write(tm
     assert failures() == count + 1
 
 
-@pytest.mark.parametrize("name", ["../x", "__x", "_"])
+@pytest.mark.parametrize("name", ["../x", "__x", "_", "_other"])
 def test_an_invalid_seed_name_is_refused(tmp_path, world, layout, name):
     bases, _ = world
     execution = filesystem.allocate(bases[0], ATTEMPT, layout)
@@ -237,8 +237,9 @@ def test_a_shared_folder_seeds_under_its_underscore_name(tmp_path, world, layout
     bases, _ = world
     execution = filesystem.allocate(bases[0], ATTEMPT, layout)
 
-    copy = filesystem.seed(execution, template(tmp_path), "_guards")
+    copy = filesystem.seed(execution, template(tmp_path), filesystem.SHARED)
 
+    assert filesystem.SHARED == "_guards"
     assert copy == execution.path("seed") / "_guards"
     assert (copy / "CLAUDE.md").read_text() == "seed"
 

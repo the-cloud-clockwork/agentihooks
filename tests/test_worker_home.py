@@ -108,7 +108,7 @@ def test_bootstrap_renders_both_targets_into_separate_homes(fixture):
     assert not (attempt / worker_home.PENDING).exists()
     assert (attempt / "run").is_dir() and (attempt / "tmp").is_dir()
     assert oct(attempt.stat().st_mode & 0o777) == "0o700"
-    assert sorted(p.name for p in (attempt / "profiles").iterdir()) == ["fixture-claude", "fixture-codex"]
+    assert sorted(p.name for p in (attempt / "profiles").iterdir()) == ["_guards", "fixture-claude", "fixture-codex"]
 
     settings = json.loads((claude_home / ".claude" / "settings.json").read_text())
     assert settings["enabledPlugins"] == {"fixture@market": True}
@@ -230,6 +230,19 @@ def test_invalid_request_is_refused_before_any_write(fixture, changes, message):
         worker_home.bootstrap(request(templates, volume, **({"attempt": "attempt-2"} | changes)))
     assert str(error.value) == message
     assert snapshot(volume) == before
+
+
+@pytest.mark.parametrize("kind", ["missing", "link"])
+def test_templates_without_the_shared_guard_folder_are_refused_before_any_write(fixture, kind):
+    templates, volume = fixture
+    shared = templates / "_guards"
+    shutil.rmtree(shared)
+    if kind == "link":
+        shared.symlink_to(templates / "fixture-claude")
+    with pytest.raises(worker_home.BootstrapError) as error:
+        worker_home.bootstrap(request(templates, volume))
+    assert str(error.value) == "shared template not found: _guards"
+    assert list(volume.iterdir()) == []
 
 
 def test_profile_pointing_at_a_workstation_venv_fails_bootstrap(fixture):
