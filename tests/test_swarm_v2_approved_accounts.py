@@ -25,11 +25,11 @@ class Secrets:
 
 def test_the_approved_accounts_are_the_key_names_of_the_shared_secret():
     api = Secrets(
-        {"metadata": {"name": "swarm-claude-creds"}, "data": {"bkey": "dG9rZW4tYg==", "akey": "dG9rZW4tYQ=="}}
+        {"metadata": {"name": "swarm-claude-accounts"}, "data": {"bkey": "YXBwcm92ZWQ=", "akey": "YXBwcm92ZWQ="}}
     )
     keys = approved.SecretKeys(api)()
     assert keys == frozenset({"akey", "bkey"})
-    assert api.asked == [("secrets", "swarm-claude-creds")]
+    assert api.asked == [("secrets", "swarm-claude-accounts")]
 
 
 @pytest.mark.parametrize("answer", [None, {"metadata": {}}, {"data": None}])
@@ -41,9 +41,10 @@ def test_a_missing_or_empty_shared_secret_approves_no_account(answer):
     ("error", "name"), [(ApiRefused(403, "Forbidden"), "ApiRefused"), (ConnectionError("down"), "ConnectionError")]
 )
 def test_an_unreadable_shared_secret_approves_no_account_and_says_why(error, name, capsys):
-    assert approved.SecretKeys(Secrets(error), "creds-fixture")() == frozenset()
+    assert approved.SecretKeys(Secrets(error))() == frozenset()
     assert (
-        capsys.readouterr().out == f"controller: Secret creds-fixture is unreadable ({name}); no account is approved\n"
+        capsys.readouterr().out
+        == f"controller: Secret swarm-claude-accounts is unreadable ({name}); no account is approved\n"
     )
 
 

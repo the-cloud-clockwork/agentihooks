@@ -51,7 +51,7 @@ class Pods:
 
     def read(self, kind, name):
         self.reads.append((kind, name))
-        return {"metadata": {"name": name}, "data": dict.fromkeys(self.keys, "dG9rZW4=")}
+        return {"metadata": {"name": name}, "data": dict.fromkeys(self.keys, "YXBwcm92ZWQ=")}
 
     def create_pod(self, body):
         self.created.append(body)
@@ -206,7 +206,7 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
     assert (admitted.seat, admitted.runtime_backend) == (SEAT, BACKEND)
     assert admitted.runtime_target == {"pod_namespace": "swarm-pod-proof", "pod_name": "swarm-t1"}
     assert admitted.account == pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == ACCOUNT
-    assert ("secrets", "swarm-claude-creds") in pods.reads
+    assert ("secrets", "swarm-claude-accounts") in pods.reads
     assert pods.nodes_read == 1
     assert lease.current(store, SLUG) is None
 
@@ -243,7 +243,7 @@ def test_the_worker_pod_admits_a_launch_account_the_shared_secret_holds_and_refu
     pods.keys = ("codex-fixtureatexample-com", ACCOUNT)
     rendered = template.render(record)
     assert rendered.pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == ACCOUNT
-    assert pods.reads == [("secrets", "swarm-claude-creds")] * 2
+    assert pods.reads == [("secrets", "swarm-claude-accounts")] * 2
 
 
 def test_a_tick_launch_with_no_key_in_the_shared_secret_is_refused_before_any_pod(tmp_path, monkeypatch):

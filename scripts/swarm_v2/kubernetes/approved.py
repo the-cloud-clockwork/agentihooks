@@ -1,25 +1,26 @@
-"""The approved launch accounts are the key names of the shared account Secret; its values are dropped unread."""
+"""The approved launch accounts are the key names of Secret swarm-claude-accounts, which external secrets syncs from
+the source of swarm-claude-creds with every value replaced, so the controller never holds a provider credential."""
 
 from collections.abc import Callable, Collection, Mapping
 
 from scripts import session_bands
 from scripts.swarm_v2.kubernetes.client import ApiRefused, PodApi
-from scripts.swarm_v2.kubernetes.spec import ACCOUNTS_OBJECT
 from scripts.swarm_v2.quota import UNKNOWN, QuotaObservations
 
 HARNESS = "claude"
+INDEX = "swarm-claude-accounts"
 
 
 class SecretKeys:
-    def __init__(self, api: PodApi, name: str = ACCOUNTS_OBJECT) -> None:
-        self.api, self.name = api, name
+    def __init__(self, api: PodApi) -> None:
+        self.api = api
 
     def __call__(self) -> frozenset[str]:
         try:
-            secret = self.api.read("secrets", self.name)
+            secret = self.api.read("secrets", INDEX)
         except (ApiRefused, ConnectionError, TimeoutError) as error:
             print(
-                f"controller: Secret {self.name} is unreadable ({type(error).__name__}); no account is approved",
+                f"controller: Secret {INDEX} is unreadable ({type(error).__name__}); no account is approved",
                 flush=True,
             )
             return frozenset()
