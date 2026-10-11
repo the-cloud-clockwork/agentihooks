@@ -948,7 +948,7 @@ def _recover_master(slug, config, store, runtime, now_ms):
     live = runtime.live_names()
     if any(a.state != "finished" and a.name in live for a in agents):
         return []
-    finished = {a.name for a in recorded if a.state == "finished" or not master_seats.is_lead(slug, a)}
+    finished = {a.name for a in recorded}
     seat = seat_address(slug, MASTER)
     occupant = store.seats.occupant(seat).occupant
     candidates = []

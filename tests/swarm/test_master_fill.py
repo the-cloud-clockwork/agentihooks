@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import pytest
 
-from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import MASTER_DOWN, STARTUP_GRACE_MS, tick
 from scripts.swarm_v2 import master_fill
 from scripts.swarm_v2.masters import MasterSeats
@@ -53,10 +53,10 @@ def test_a_seat_two_master_that_crashed_without_finishing_is_dropped_and_refille
         tick("sw", store, ledger, runtime, 1)
     (second,) = [a for a in masters(store) if a.seat == "master-2@sw"]
     assert second.state == "working"
-    seat_checks = [
-        (c.args[1], c.args[2].name, c.args[3]) for c in begun.call_args_list if c.args[2].seat == second.seat
+    seat_checks = [c.args for c in begun.call_args_list if c.args[2].seat == second.seat]
+    assert [(s is store, slug, record.name, at) for s, slug, record, at in seat_checks] == [
+        (True, "sw", second.name, 1)
     ]
-    assert seat_checks == [("sw", second.name, 1)]
     runtime.live.discard(second.name)
     tick("sw", store, ledger, runtime, 2 + STARTUP_GRACE_MS)
     (refilled,) = [a for a in masters(store) if a.seat == "master-2@sw"]
@@ -144,3 +144,70 @@ def test_a_live_seat_two_master_keeps_a_down_lead_from_counting_as_an_outage(sto
     tick("sw", store, ledger, runtime, 1 + STARTUP_GRACE_MS + 5)
     assert MASTER_DOWN not in ledger.notes
     assert tick_master.read(store, "sw") == {}
+
+
+class Recording(FakeRuntime):
+    def __init__(self, refusal=""):
+        super().__init__()
+        self.refusal, self.asked, self.configs = refusal, [], []
+
+    def placement_refusal(self, lane, task):
+        self.asked.append((lane, task))
+        return self.refusal
+
+    def spawn(self, config, lane, name, task):
+        self.configs.append(config)
+        return super().spawn(config, lane, name, task)
+
+
+@pytest.mark.parametrize(
+    ("state", "live", "launched"), [("finished", False, 1), ("finished", True, 0), ("working", False, 0)]
+)
+def test_a_seat_is_free_only_once_its_master_finished_and_left(store, state, live, launched):
+    MasterSeats(store.redis).set_count("sw", 2)
+    store.put_agent("sw", AgentRecord("old", MASTER, "master-2", state=state, seat="master-2@sw"))
+    runtime = Recording()
+    if live:
+        runtime.live.add("old")
+    master_fill.run("sw", store.config("sw"), store, runtime, {}, 1)
+    assert len(runtime.masters) == launched
+
+
+def test_a_seat_launch_gets_the_swarm_config_and_the_phases_and_hives_its_seat_owns(store):
+    seats = MasterSeats(store.redis)
+    seats.set_count("sw", 2)
+    seats.own_hive("sw", "anton-1", "master-2@sw")
+    doc = {"phases": [{"id": "p1"}, {"id": "p2"}]}
+    runtime, config = Recording(), store.config("sw")
+    master_fill.run("sw", config, store, runtime, doc, 1)
+    owned = sorted(item for item, owner in seats.owners("sw", doc).items() if owner == "master-2@sw")
+    ((_, task),) = runtime.masters
+    assert task["owns"] == owned and "hives/anton-1" in owned and {"p1", "p2"} & set(owned)
+    assert runtime.configs == [config]
+
+
+def test_a_placement_refusal_holds_the_seat_and_says_why(store):
+    MasterSeats(store.redis).set_count("sw", 2)
+    runtime = Recording("placed on another host")
+    assert master_fill.run("sw", store.config("sw"), store, runtime, {}, 1) == ["placed on another host"]
+    assert runtime.asked == [(MASTER, {})] and runtime.masters == []
+
+
+def test_no_session_slot_holds_the_seat_and_says_why(store):
+    MasterSeats(store.redis).set_count("sw", 2)
+    runtime = FakeRuntime(full=True)
+    assert master_fill.run("sw", store.config("sw"), store, runtime, {}, 1) == [
+        "no session slot for the master, waiting"
+    ]
+
+
+def test_a_full_host_holds_the_seat_with_the_hold_it_names(store):
+    from unittest.mock import patch
+
+    from scripts.swarm import seat_spawn
+
+    MasterSeats(store.redis).set_count("sw", 2)
+    with patch.object(seat_spawn, "host_hold", return_value="holding the master spawn") as held:
+        actions = master_fill.run("sw", store.config("sw"), store, FakeRuntime(), {}, 7)
+    assert actions == ["holding the master spawn"]
+    assert held.call_args.args == ("sw", store, 7, MASTER)

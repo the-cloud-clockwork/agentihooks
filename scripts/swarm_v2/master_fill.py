@@ -1,8 +1,6 @@
 """Master seats two and up: the tick launches a master in each seat of the count that no unfinished or live master
 holds, so a raised count fills its seats and a seat whose master ended is filled again."""
 
-from dataclasses import replace
-
 from scripts.inbox.seats import seat_address
 from scripts.swarm import launch_check, seat_spawn
 from scripts.swarm.store import MASTER
@@ -19,7 +17,7 @@ def run(slug: str, config, store, runtime, doc: dict, now_ms: int) -> list[str]:
         return []
     seats = masters.MasterSeats(store.redis)
     count, live = seats.count(slug), runtime.live_names()
-    taken = {a.seat for a in store.agents(slug) if a.lane == MASTER and (a.state != "finished" or a.name in live)}
+    taken = {a.seat for a in store.agents(slug) if a.state != "finished" or a.name in live}
     empty = [masters.seat(i) for i in range(2, count + 1) if seat_address(slug, masters.seat(i)) not in taken]
     actions = []
     for seat_name in empty:
@@ -51,7 +49,7 @@ def _place(slug, config, store, runtime, seat_name, now_ms, doc):
     except seat_spawn.SeatFailed as failed:
         store.drop_agent(slug, failed.record.name)
         return FAILED.format(seat=failed.record.seat, error=failed.error)
-    record = replace(tick.placed_record(record, placed), state="working")
+    record = tick.placed_record(record, placed)
     store.put_agent(slug, record)
     launch_check.begin(store, slug, record, now_ms)
     store.clear_handoff(slug, seat_name)

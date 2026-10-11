@@ -25,5 +25,7 @@ def test_the_master_hands_the_operator_the_ledger_link_first_and_on_request():
 
 def test_a_seat_two_master_prompt_says_which_seat_it_holds_and_the_lead_prompt_does_not():
     seat_task = {"id": "master-2", "seat": "master-2@sw", "masters": 2, "owns": ["p2"]}
-    assert "You hold master seat master-2@sw, one of 2 masters" in prompt.build_master("sw", "/repo", "m2", seat_task)
+    assert "You hold master seat master-2@sw, one of 2 masters of swarm sw." in prompt.build_master(
+        "sw", "/repo", "m2", seat_task
+    )
     assert "You hold master seat" not in prompt.build_master("sw", "/repo", "m1", {"seat": "master@sw"})

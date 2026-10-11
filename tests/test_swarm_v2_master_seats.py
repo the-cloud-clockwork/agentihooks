@@ -590,3 +590,51 @@ def test_a_hive_owner_routes_its_hive_and_leaves_phase_owners_untouched(swarm):
     assert masters.route("hives/anton-1", DOC, lambda: after, [LEAD, SECOND], LEAD) == SECOND
     assert masters.owner_of("hives/anton-1/x", DOC, after) == SECOND
     assert json.loads(store.redis.hget(seats.key(SLUG), "owners")) == before
+
+
+def test_hive_pairs_keep_everything_after_the_first_equals_sign_as_the_seat_and_leave_other_pairs():
+    pairs = ["hive.anton-1=master-2=x", "max-eng-agents=3", "hive.anton-2=master-3@sw"]
+    assert masters.hive_pairs(SLUG, pairs) == (
+        [("anton-1", f"master-2=x@{SLUG}"), ("anton-2", f"master-3@{SLUG}")],
+        ["max-eng-agents=3"],
+    )
+
+
+def test_a_hive_nobody_owns_has_no_owner():
+    assert masters.owner_of("hives/anton-9", DOC, {"hives/anton-1": SECOND}) == ""
+
+
+def test_a_seat_task_without_owned_items_says_none_yet():
+    (line_text,) = masters.seat_lines(SLUG, {"seat": SECOND, "masters": 2})
+    assert line_text.endswith("you own: none yet.")
+
+
+def test_hives_are_checked_against_the_stored_count_when_the_command_sets_none(swarm):
+    store, _ = swarm
+    seats = masters.MasterSeats(store.redis)
+    seats.set_count(SLUG, 3)
+    seats.check_hives(SLUG, [], [("anton-1", f"master-3@{SLUG}")])
+    with pytest.raises(masters.MasterError, match=f"master-3@{SLUG} is not a master seat of {SLUG}"):
+        seats.check_hives(SLUG, [2], [("anton-1", f"master-3@{SLUG}")])
+
+
+def test_hive_owners_are_stored_sorted_and_a_refusal_names_the_hive(swarm):
+    store, _ = swarm
+    seats = masters.MasterSeats(store.redis)
+    seats.own_hive(SLUG, "b-hive", SECOND)
+    seats.own_hive(SLUG, "a-hive", LEAD)
+    assert store.redis.hget(seats.key(SLUG), "hives") == json.dumps({"a-hive": LEAD, "b-hive": SECOND})
+    with pytest.raises(masters.MasterError) as refused:
+        seats.own_hive(SLUG, "c-hive", f"master-3@{SLUG}")
+    assert str(refused.value) == f"master-3@{SLUG} is not a master seat of {SLUG}, so it cannot own hive c-hive"
+
+
+def test_control_notices_go_to_the_live_lead_and_never_to_a_working_engineer_or_a_finished_lead(swarm):
+    from scripts.swarm import control_notifications
+
+    store, _ = swarm
+    store.put_agent(SLUG, AgentRecord("sw-eng-1", "eng", "t1", seat=f"eng-1@{SLUG}"))
+    store.put_agent(SLUG, AgentRecord("sw-master-0", MASTER, MASTER, state="finished", seat=LEAD))
+    assert control_notifications.master(store, SLUG) is None
+    store.put_agent(SLUG, FIRST)
+    assert control_notifications.master(store, SLUG).name == FIRST.name
