@@ -51,11 +51,12 @@ class _Context(dict):
         return _Context(value) if isinstance(value, dict) else value
 
 
-def _evaluate(value, **github):
+def _evaluate(value, inputs=None, **github):
     if not isinstance(value, str) or not value.startswith("${{"):
         return value
     names = {
         "github": _Context(github),
+        "inputs": _Context(inputs or {}),
         "endsWith": lambda text, end: str(text).endswith(end),
         "format": lambda template, *args: template.format(*args),
     }
@@ -94,8 +95,8 @@ def _block(where):
     return next(block for name, block in _blocks() if name == where)
 
 
-def _resolve(block, **github):
-    return {key: _evaluate(block.get(key), **github) for key in ("group", "queue", "cancel-in-progress")}
+def _resolve(block, inputs=None, **github):
+    return {key: _evaluate(block.get(key), inputs, **github) for key in ("group", "queue", "cancel-in-progress")}
 
 
 def _triggered(events):
@@ -171,6 +172,19 @@ def test_the_run_id_last_digit_spreads_runs_over_three_lanes():
     block = _block("proofs.yml")
     lanes = [_resolve(block, run_id=run_id)["group"] for run_id in range(1000, 1010)]
     assert lanes == ["hosted-lane-a"] * 3 + ["hosted-lane-b"] * 3 + ["hosted-lane-c"] * 4
+
+
+def test_a_focused_tests_proof_never_waits_on_a_lane_and_every_other_proof_keeps_one():
+    block = _block("proofs.yml")
+    options = _workflow("proofs.yml")[True]["workflow_dispatch"]["inputs"]["proof"]["options"]
+    assert "tests" in options
+    for run_id, proof in product(range(1000, 1010), options):
+        github = {"event_name": "workflow_dispatch", "ref": "refs/heads/diffcheck/plant", "workflow": "Proofs"}
+        resolved = _resolve(block, {"proof": proof}, run_id=run_id, **github)
+        if proof == "tests":
+            assert resolved == {"group": f"focused-proof-{run_id}", "queue": "max", "cancel-in-progress": False}
+        else:
+            assert _is_lane(resolved["group"]), (proof, run_id)
 
 
 @pytest.mark.parametrize("caller", ["Tests", "Proofs"])
