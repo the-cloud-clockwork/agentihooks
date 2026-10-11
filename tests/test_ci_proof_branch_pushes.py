@@ -8,7 +8,7 @@ pytestmark = pytest.mark.unit
 
 _WORKFLOWS = Path(__file__).resolve().parents[1] / ".github/workflows"
 PROOF_BRANCH = "diffcheck/plant"
-_TOKENS = {"**": ".*", "*": "[^/]*", "?": "?", "+": "+"}
+_TOKENS = {"**": "(?:.*)", "*": "(?:[^/]*)", "?": "?", "+": "+"}
 
 
 def _matches(pattern, branch):
@@ -60,6 +60,8 @@ def _push_filters():
         ({"branches": ["dif+check/**"]}, True),
         ({"branches": ["[cd]iffcheck/**"]}, True),
         ({"branches": ["[xy]iffcheck/**"]}, False),
+        ({"branches": ["**+plant"]}, True),
+        ({"branches": ["diffcheck/*?plant"]}, True),
     ],
 )
 def test_the_filter_reader_follows_github_branch_filters(push, runs):
