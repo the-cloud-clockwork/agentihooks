@@ -97,3 +97,67 @@ def test_update_existing_writes_only_a_file_that_already_has_the_block(tmp_path)
     rc.write_text(f"{START}\nexport A=0\n{END}\n")
     assert tokens.update_existing(rc, {"A": "1"}) is True
     assert rc.read_text() == f"{START}\nexport A=1\n{END}\n"
+
+
+def test_a_refused_slug_names_the_rule_and_every_reserved_word():
+    with pytest.raises(tokens.SlugError) as refused:
+        tokens.slug("Status")
+    assert str(refused.value) == (
+        "slug must be letters, digits, '_' or '-', not start with '_' and not be api, default, help, status: 'Status'"
+    )
+
+
+@pytest.mark.parametrize(
+    "environ, expected",
+    [({"AGENTIHOOKS_AICODE_TOKEN_REFRESH": "true"}, True), ({"AGENTIHOOKS_AICODE_TOKEN_REFRESH": "True"}, True)]
+    + [({"AGENTIHOOKS_AICODE_TOKEN_REFRESH": value}, False) for value in ("false", "yes", "1", "")]
+    + [({}, False)],
+)
+def test_the_refresh_authority_is_the_flag_set_to_true_in_any_case(environ, expected):
+    assert tokens.refresh_authority(environ) is expected
+
+
+def test_an_end_marker_before_any_start_marker_is_not_a_block():
+    text = f"{END}\nx\n{START}\nexport A=0\n{END}\n"
+    assert tokens.upsert(text, {"A": "1"}) == f"{END}\nx\n{START}\nexport A=1\n{END}\n"
+    assert tokens.has_block(f"{END}\n{START}\n") is False
+
+
+def test_an_upsert_keeps_one_export_when_the_block_repeats_the_name():
+    text = f"{START}\nexport A=1\n# keep\nexport A=2\n{END}\n"
+    assert tokens.upsert(text, {"A": "3"}) == f"{START}\nexport A=3\n# keep\n{END}\n"
+
+
+def test_write_rc_writes_the_whole_block_into_a_new_file(tmp_path):
+    rc = tmp_path / ".bashrc"
+    tokens.write_rc(rc, {"A": "1"})
+    assert rc.read_text() == f"{START}\nexport A=1\n{END}\n"
+
+
+def test_the_atomic_write_stages_a_hidden_file_beside_the_target(tmp_path, monkeypatch):
+    seen = []
+    real = tokens.tempfile.mkstemp
+
+    def mkstemp(**kwargs):
+        seen.append(kwargs)
+        return real(**kwargs)
+
+    monkeypatch.setattr(tokens.tempfile, "mkstemp", mkstemp)
+    target = tmp_path / "auth.json"
+    tokens.atomic_write(target, b"{}", 0o600)
+    assert seen == [{"dir": tmp_path, "prefix": ".auth.json."}]
+    assert target.read_bytes() == b"{}" and target.stat().st_mode & 0o777 == 0o600
+
+
+def test_a_failed_atomic_write_leaves_the_target_and_no_staged_file(tmp_path, monkeypatch):
+    target = tmp_path / "auth.json"
+    target.write_bytes(b"old")
+
+    def refuse(source, destination):
+        raise OSError(18, "Invalid cross-device link")
+
+    monkeypatch.setattr(tokens.os, "replace", refuse)
+    with pytest.raises(OSError):
+        tokens.atomic_write(target, b"new", 0o600)
+    assert [path.name for path in tmp_path.iterdir()] == ["auth.json"]
+    assert target.read_bytes() == b"old"

@@ -62,3 +62,69 @@ def test_a_failure_to_start_is_swallowed_and_leaves_no_stamp(tmp_path, monkeypat
     monkeypatch.setattr(kick.subprocess, "Popen", boom)
     assert kick.kick(tmp_path, FLAG) is False
     assert not (tmp_path / "codex-refresh.stamp").exists()
+
+
+def test_a_missing_agentihooks_binary_is_logged_and_leaves_no_stamp(tmp_path, monkeypatch):
+    logged = []
+    monkeypatch.setattr(kick.shutil, "which", lambda name: None)
+    monkeypatch.setattr(kick, "log", lambda message, data: logged.append(message))
+    assert kick.kick(tmp_path, FLAG) is False
+    assert logged == ["codex refresh kick skipped: agentihooks is not on PATH"]
+    assert not (tmp_path / "codex-refresh.stamp").exists()
+
+
+NOW = 1_800_000_000.0
+
+
+def _aged(home, seconds, monkeypatch):
+    monkeypatch.setattr(kick.time, "time", lambda: NOW)
+    stamp = home / "codex-refresh.stamp"
+    stamp.touch()
+    os.utime(stamp, (NOW - seconds, NOW - seconds))
+
+
+def test_the_child_is_detached_from_every_stream(tmp_path, spawned):
+    assert kick.kick(tmp_path, FLAG) is True
+    assert spawned == [
+        (
+            ["/usr/bin/agentihooks", "codex", "refresh"],
+            {
+                "stdin": kick.subprocess.DEVNULL,
+                "stdout": kick.subprocess.DEVNULL,
+                "stderr": kick.subprocess.DEVNULL,
+                "start_new_session": True,
+            },
+        )
+    ]
+
+
+def test_a_missing_home_folder_is_created(tmp_path, spawned):
+    home = tmp_path / "a" / "b"
+    assert kick.kick(home, FLAG) is True
+    assert (home / "codex-refresh.stamp").exists()
+
+
+@pytest.mark.parametrize(
+    "interval, age, due",
+    [("1", 3600, True), ("1", 3599.5, False), ("1", 3600.5, True), ("", 6 * 3600, True), ("soon", 5 * 3600, False)]
+    + [("soon", 6 * 3600, True)],
+)
+def test_the_stamp_is_due_at_exactly_the_interval(interval, age, due, tmp_path, spawned, monkeypatch):
+    _aged(tmp_path, age, monkeypatch)
+    environ = {**FLAG, "AGENTIHOOKS_AICODE_TOKEN_REFRESH_INTERVAL_H": interval}
+    assert kick.kick(tmp_path, environ) is due
+
+
+def test_a_failure_is_logged_with_its_error_and_a_quiet_node_logs_nothing(tmp_path, monkeypatch):
+    logged = []
+    monkeypatch.setattr(kick, "log", lambda message, data: logged.append((message, data)))
+    monkeypatch.setattr(kick.shutil, "which", lambda name: "/usr/bin/agentihooks")
+
+    def boom(argv, **kwargs):
+        raise OSError("no fork")
+
+    monkeypatch.setattr(kick.subprocess, "Popen", boom)
+    assert kick.kick(tmp_path, {}) is False
+    assert logged == []
+    assert kick.kick(tmp_path, FLAG) is False
+    assert logged == [("codex refresh kick failed", {"error": "no fork"})]

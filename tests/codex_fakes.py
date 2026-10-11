@@ -37,11 +37,13 @@ class FakeBao:
         self.url, self.token = url, token
         self.fail_writes = fail_writes
         self.garbage_writes = False
+        self.empty_writes = False
         self.requests = []
 
     def __call__(self, request, timeout=None):
         self.requests.append(request)
-        assert request.full_url == f"{self.url}{CREDS_URL}"
+        assert timeout == 20
+        assert request.full_url == f"{self.url.rstrip('/')}{CREDS_URL}"
         assert request.get_header("X-vault-token") == self.token
         if request.get_method() == "GET":
             if not self.version:
@@ -58,6 +60,8 @@ class FakeBao:
             raise http_error(request.full_url, 400, CAS_CONFLICT)
         assert body["options"]["cas"] == self.version
         self.data, self.version = body["data"], self.version + 1
+        if self.empty_writes:
+            return io.BytesIO(b"")
         return io.BytesIO(json.dumps({"data": {"version": self.version}}).encode())
 
     @property

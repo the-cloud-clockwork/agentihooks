@@ -1,7 +1,11 @@
+import io
+import json
+import urllib.error
+
 import pytest
 
 from scripts import openbao_kv
-from tests.codex_fakes import BAO_TOKEN, BAO_URL, FakeBao
+from tests.codex_fakes import BAO_TOKEN, BAO_URL, FakeBao, http_error
 
 
 def _bao(fake):
@@ -62,3 +66,59 @@ def test_credentials_come_from_both_environment_variables_or_not_at_all():
     assert (found.url, found.token) == (BAO_URL, BAO_TOKEN)
     assert openbao_kv.from_env({"OPENBAO_URL": BAO_URL}) is None
     assert openbao_kv.from_env({"OPENBAO_TOKEN": BAO_TOKEN}) is None
+
+
+def _opener(*, raises=None, body=b"{}"):
+    def opener(request, timeout=None):
+        if raises:
+            raise raises
+        return io.BytesIO(body)
+
+    return opener
+
+
+@pytest.mark.parametrize(
+    "opener, message",
+    [
+        (_opener(raises=http_error(BAO_URL, 400, b'{"errors": ["a", "b"]}')), "OpenBao HTTP 400: a; b"),
+        (_opener(raises=http_error(BAO_URL, 503, b"")), "OpenBao HTTP 503: error"),
+        (_opener(raises=urllib.error.URLError("connection refused")), "OpenBao request failed: connection refused"),
+        (_opener(raises=OSError("network down")), "OpenBao request failed: network down"),
+        (_opener(body=b"[1]"), "OpenBao request failed: response is not a JSON object"),
+        (_opener(body=b"<html>"), "OpenBao request failed: Expecting value: line 1 column 1 (char 0)"),
+    ],
+)
+def test_every_failure_becomes_one_openbao_error_with_a_plain_message(opener, message):
+    with pytest.raises(openbao_kv.OpenBaoError) as raised:
+        openbao_kv.read(openbao_kv.OpenBao(BAO_URL, BAO_TOKEN, opener), openbao_kv.CODEX_CREDS)
+    assert str(raised.value) == message
+
+
+def test_an_address_that_is_not_a_url_is_an_openbao_error():
+    with pytest.raises(openbao_kv.OpenBaoError) as raised:
+        openbao_kv.read(openbao_kv.OpenBao("bao.test", BAO_TOKEN), openbao_kv.CODEX_CREDS)
+    assert str(raised.value).startswith("OpenBao request failed: unknown url type")
+
+
+def test_a_trailing_slash_on_the_address_is_dropped():
+    fake = FakeBao(url=f"{BAO_URL}/")
+    assert openbao_kv.merge(openbao_kv.OpenBao(f"{BAO_URL}/", BAO_TOKEN, fake), openbao_kv.CODEX_CREDS, {"A": "1"}) == 1
+
+
+def test_a_secret_without_metadata_reads_as_version_zero():
+    body = json.dumps({"data": {"data": {"A": "1"}}}).encode()
+    bao = openbao_kv.OpenBao(BAO_URL, BAO_TOKEN, _opener(body=body))
+    assert openbao_kv.read(bao, openbao_kv.CODEX_CREDS) == ({"A": "1"}, 0)
+
+
+def test_a_write_answered_with_an_empty_body_succeeds():
+    fake = FakeBao({"KEEP": "k"})
+    fake.empty_writes = True
+    assert openbao_kv.merge(_bao(fake), openbao_kv.CODEX_CREDS, {"A": "1"}) == 2
+
+
+def test_a_refused_write_that_is_not_a_conflict_is_not_retried():
+    fake = FakeBao({"KEEP": "k"}, fail_writes=True)
+    with pytest.raises(openbao_kv.OpenBaoError):
+        openbao_kv.merge(_bao(fake), openbao_kv.CODEX_CREDS, {"A": "1"})
+    assert len(fake.writes) == 1

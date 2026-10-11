@@ -6,7 +6,6 @@ import fcntl
 import hashlib
 import json
 import os
-import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -14,44 +13,74 @@ import urllib.request
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import NamedTuple
 
 from hooks import config
 from hooks.context.account_sessions import CODEX_TOKEN_PREFIX
 from scripts import aicode_tokens, codex_login, codex_router, openbao_kv
 
+PROG = "agentihooks codex refresh"
 TOKEN_URL = "https://auth.openai.com/oauth/token"
 CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 STORE_ENV = "AGENTIHOOKS_AICODE_TOKEN_STORE"
 DAYS_ENV = "AGENTIHOOKS_AICODE_TOKEN_REFRESH_DAYS"
+LOCAL, OPENBAO = "local", "openbao"
 DEFAULT_DAYS = 3.0
 DAY_S = 86400
 TIMEOUT_S = 20
 TOKEN_KEYS = ("access_token", "refresh_token", "id_token")
+RECOVERY_FILE = "recovery.json"
+LOCK_FILE = "codex-refresh.lock"
+STAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+NO_OAUTH_ERROR = "with no OAuth error"
+NOT_AUTHORITY = f"{aicode_tokens.REFRESH_FLAG} is not true: this machine is not the refresh authority"
+BAD_STORE = f"{STORE_ENV} must be {LOCAL} or {OPENBAO}, not {{store!r}}"
+BAO_NEEDED = f"{STORE_ENV}={OPENBAO} needs {openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV}"
+BAO_UNSET = f"OpenBao not updated: {openbao_kv.URL_ENV} or {openbao_kv.TOKEN_ENV} unset"
+BUSY = "another codex refresh is already running on this machine; skipping"
+OK = "{slug}: {left:.1f}d left, ok"
+REFRESHED = "{slug}: {left:.1f}d left, refreshed, {renewed:.1f}d left, refresh token rotated={rotated}"
+FAILED = "{slug}: refresh failed: {reason}"
+NO_REFRESH = "no refresh token"
+NO_ACCESS = "the grant returned no access token"
+WRITE_FAILED = "{slug}: write failed: {error}"
+LOST = "{slug}: new token pair not persisted; run agentihooks codex login {slug}"
+KEPT = "{slug}: the new token pair is kept in {path}; the next refresh stores it in OpenBao"
+USING = "{slug}: using the newer pair kept in {path}"
+STALE = "{slug}: removing {path}, older than the pair in OpenBao"
+UNREADABLE = "{slug}: ignoring unreadable {path}"
+NO_LOCAL_ACCOUNT = "{slug}: no such Codex account under {root}"
+NO_BAO_ACCOUNT = "{slug}: no such Codex account in OpenBao"
 
 
 class GrantError(RuntimeError):
     def __init__(self, status: int, error: str):
-        super().__init__(f"HTTP {status} {error}".rstrip())
+        super().__init__(f"HTTP {status} {error or NO_OAUTH_ERROR}" if status else f"unreachable: {error}")
         self.status = status
         self.error = error
 
 
+def _oauth_error(exc: urllib.error.HTTPError) -> str:
+    try:
+        error = json.loads(exc.read()).get("error")
+    except (ValueError, AttributeError):
+        return ""
+    return error if isinstance(error, str) else ""
+
+
 def grant(refresh_token: str, opener: Callable = urllib.request.urlopen) -> dict:
     form = {"grant_type": "refresh_token", "refresh_token": refresh_token, "client_id": CLIENT_ID}
-    request = urllib.request.Request(TOKEN_URL, data=urllib.parse.urlencode(form).encode(), method="POST")
-    request.add_header("Content-Type", "application/x-www-form-urlencoded")
-    request.add_header("Accept", "application/json")
+    request = urllib.request.Request(TOKEN_URL, data=urllib.parse.urlencode(form).encode())
     try:
         with opener(request, timeout=TIMEOUT_S) as response:
-            return json.loads(response.read())
+            found = json.loads(response.read())
     except urllib.error.HTTPError as exc:
-        try:
-            error = json.loads(exc.read() or b"{}").get("error", "")
-        except (ValueError, AttributeError):
-            error = ""
-        raise GrantError(exc.code, error if isinstance(error, str) else "") from None
-    except (urllib.error.URLError, OSError, ValueError) as exc:
-        raise GrantError(0, str(getattr(exc, "reason", exc))) from None
+        raise GrantError(exc.code, _oauth_error(exc)) from None
+    except urllib.error.URLError as exc:
+        raise GrantError(0, str(exc.reason)) from None
+    except (OSError, ValueError) as exc:
+        raise GrantError(0, str(exc)) from None
+    return found if isinstance(found, dict) else {}
 
 
 @dataclass(frozen=True)
@@ -69,68 +98,67 @@ class Run:
     deps: Deps
 
 
-def _expiry(token: str) -> int:
-    return int(codex_router._claims(token).get("exp") or 0)
+class Outcome(NamedTuple):
+    ok: bool
+    saved: bool = False
 
 
-def _days_left(token: str, now: float) -> float:
-    return (_expiry(token) - now) / DAY_S
+def _expiry(token: str | None) -> int | None:
+    exp = codex_router._claims(str(token)).get("exp")
+    return exp if isinstance(exp, int) else None
+
+
+def _days_left(token: str | None, now: float) -> float:
+    exp = _expiry(token)
+    return 0.0 if exp is None else (exp - now) / DAY_S
 
 
 def _digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-def _renew(slug: str, access: str, refresh: str, run: Run) -> dict | None:
+def _failed(slug: str, reason: str) -> dict:
+    print(FAILED.format(slug=slug, reason=reason))
+    return {}
+
+
+def _renew(slug: str, access: str | None, refresh: str | None, run: Run) -> dict | None:
     now = run.deps.now()
     left = _days_left(access, now)
     if not run.force and left >= run.days:
-        print(f"{slug}: {left:.1f}d left, ok")
+        print(OK.format(slug=slug, left=left))
         return None
     if not refresh:
-        print(f"{slug}: refresh failed: no refresh token")
-        return {}
+        return _failed(slug, NO_REFRESH)
     try:
         fresh = run.deps.grant(refresh)
     except GrantError as exc:
-        print(f"{slug}: refresh failed {exc}")
-        return {}
+        return _failed(slug, str(exc))
     if not fresh.get("access_token"):
-        print(f"{slug}: refresh failed: the grant returned no access token")
-        return {}
+        return _failed(slug, NO_ACCESS)
     fresh = {key: fresh[key] for key in TOKEN_KEYS if fresh.get(key)}
     fresh.setdefault("refresh_token", refresh)
     rotated = _digest(refresh) != _digest(fresh["refresh_token"])
     renewed = _days_left(fresh["access_token"], now)
-    print(f"{slug}: {left:.1f}d left, refreshed, {renewed:.1f}d left, refresh token rotated={rotated}")
+    print(REFRESHED.format(slug=slug, left=left, renewed=renewed, rotated=rotated))
     return fresh
 
 
-def _write_private(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+def _load(path: Path) -> dict:
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            os.fchmod(handle.fileno(), 0o600)
-            json.dump(data, handle, indent=2)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp, path)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
+        found = json.loads(path.read_bytes())
+    except (OSError, ValueError):
+        return {}
+    return found if isinstance(found, dict) else {}
 
 
 def _save_auth(path: Path, fresh: dict, now: float) -> None:
-    try:
-        auth = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        auth = {}
-    auth = auth if isinstance(auth, dict) else {}
+    auth = _load(path)
     tokens = auth.get("tokens") if isinstance(auth.get("tokens"), dict) else {}
     auth["tokens"] = {**tokens, **fresh}
-    auth["last_refresh"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
-    _write_private(path, auth)
+    auth["last_refresh"] = time.strftime(STAMP_FORMAT, time.gmtime(now))
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    aicode_tokens.atomic_write(path, json.dumps(auth).encode(), 0o600)
 
 
 def _entries(slug: str, fresh: dict) -> dict[str, str]:
@@ -150,12 +178,6 @@ def _store(bao: openbao_kv.OpenBao, entries: dict[str, str]) -> bool:
     return True
 
 
-def _local_accounts(force: str) -> list[Path]:
-    root = codex_login.homes()
-    found = sorted(path for path in root.iterdir() if (path / "auth.json").is_file()) if root.is_dir() else []
-    return [path for path in found if _valid(path.name) and (not force or path.name == force)]
-
-
 def _valid(name: str) -> bool:
     try:
         return aicode_tokens.slug(name) == name
@@ -163,32 +185,47 @@ def _valid(name: str) -> bool:
         return False
 
 
-def _refresh_local(run: Run, home: Path) -> bool | None:
-    """None when nothing was refreshed, else whether every write landed."""
+def _local_accounts(force: str) -> list[Path]:
+    root = codex_login.homes()
+    found = sorted(path for path in root.iterdir() if (path / "auth.json").is_file()) if root.is_dir() else []
+    return [path for path in found if _valid(path.name) and (not force or path.name == force)]
+
+
+def _attempt(slug: str, action: Callable[[], object]) -> bool:
+    try:
+        action()
+    except OSError as exc:
+        print(WRITE_FAILED.format(slug=slug, error=exc))
+        return False
+    return True
+
+
+def _refresh_local(run: Run, home: Path) -> Outcome | None:
+    slug = home.name
     tokens = codex_login._tokens(home)
-    fresh = _renew(home.name, tokens.get("access_token", ""), tokens.get("refresh_token", ""), run)
+    fresh = _renew(slug, tokens.get("access_token"), tokens.get("refresh_token"), run)
     if fresh is None:
         return None
     if not fresh:
-        return False
-    try:
-        _save_auth(home / "auth.json", fresh, run.deps.now())
-        aicode_tokens.write_rc(aicode_tokens.rc_file(), {f"{CODEX_TOKEN_PREFIX}{home.name}": fresh["access_token"]})
-    except OSError as exc:
-        print(f"{home.name}: write failed: {exc}")
-        return False
-    return _store(run.bao, _entries(home.name, fresh)) if run.bao else True
+        return Outcome(False)
+    saved = _attempt(slug, lambda: _save_auth(home / "auth.json", fresh, run.deps.now()))
+    rc_entry = {f"{CODEX_TOKEN_PREFIX}{slug}": fresh["access_token"]}
+    block = _attempt(slug, lambda: aicode_tokens.write_rc(aicode_tokens.rc_file(), rc_entry))
+    stored = _store(run.bao, _entries(slug, fresh)) if run.bao else None
+    if not saved and not stored:
+        print(LOST.format(slug=slug))
+    return Outcome(saved and block and stored is not False, saved)
 
 
 def run_local(run: Run) -> int:
     homes = _local_accounts(run.force)
     if run.force and not homes:
-        print(f"{run.force}: no such Codex account under {codex_login.homes()}")
+        print(NO_LOCAL_ACCOUNT.format(slug=run.force, root=codex_login.homes()))
         return 1
-    outcomes = [_refresh_local(run, home) for home in homes]
-    if run.bao is None and any(outcome is not None for outcome in outcomes):
-        print(f"OpenBao not updated: {openbao_kv.URL_ENV} or {openbao_kv.TOKEN_ENV} unset")
-    return outcomes.count(False)
+    outcomes = [outcome for home in homes if (outcome := _refresh_local(run, home)) is not None]
+    if run.bao is None and any(outcome.saved for outcome in outcomes):
+        print(BAO_UNSET)
+    return sum(not outcome.ok for outcome in outcomes)
 
 
 def _bao_accounts(secret: Mapping[str, str], force: str) -> list[str]:
@@ -198,15 +235,21 @@ def _bao_accounts(secret: Mapping[str, str], force: str) -> list[str]:
 
 
 def _recovery(slug: str) -> Path:
-    return codex_login.homes() / slug / "auth.json"
+    return codex_login.homes() / slug / RECOVERY_FILE
 
 
-def _recovered(slug: str, access: str) -> dict | None:
-    """A pair kept after a failed OpenBao write, when it is newer than the one OpenBao holds."""
-    tokens = codex_login._tokens(_recovery(slug).parent)
-    if not (tokens.get("access_token") and tokens.get("refresh_token")):
+def _recovered(slug: str, access: str | None) -> dict | None:
+    path = _recovery(slug)
+    if not path.exists():
         return None
-    if _expiry(tokens["access_token"]) <= _expiry(access):
+    tokens = codex_login._tokens(path.parent, path.name)
+    kept = _expiry(tokens.get("access_token"))
+    if not tokens.get("refresh_token") or kept is None:
+        print(UNREADABLE.format(slug=slug, path=path))
+        return None
+    if kept <= (_expiry(access) or 0):
+        print(STALE.format(slug=slug, path=path))
+        path.unlink()
         return None
     return {key: tokens[key] for key in TOKEN_KEYS if tokens.get(key)}
 
@@ -215,16 +258,18 @@ def _store_or_recover(run: Run, slug: str, fresh: dict) -> bool:
     if _store(run.bao, _entries(slug, fresh)):
         return True
     recovery = _recovery(slug)
-    _save_auth(recovery, fresh, run.deps.now())
-    print(f"{slug}: the new token pair is kept in {recovery}; the next refresh stores it in OpenBao")
+    if _attempt(slug, lambda: _save_auth(recovery, fresh, run.deps.now())):
+        print(KEPT.format(slug=slug, path=recovery))
+    else:
+        print(LOST.format(slug=slug))
     return False
 
 
 def _refresh_bao(run: Run, secret: Mapping[str, str], slug: str) -> bool:
-    access, refresh = secret.get(f"{CODEX_TOKEN_PREFIX}{slug}", ""), secret[f"{codex_login.REFRESH_PREFIX}{slug}"]
+    access, refresh = secret.get(f"{CODEX_TOKEN_PREFIX}{slug}"), secret[f"{codex_login.REFRESH_PREFIX}{slug}"]
     recovered = _recovered(slug, access)
     if recovered:
-        print(f"{slug}: using the newer pair kept in {_recovery(slug)}")
+        print(USING.format(slug=slug, path=_recovery(slug)))
         access, refresh = recovered["access_token"], recovered["refresh_token"]
     fresh = _renew(slug, access, refresh, run)
     if fresh == {}:
@@ -234,9 +279,10 @@ def _refresh_bao(run: Run, secret: Mapping[str, str], slug: str) -> bool:
         return True
     stored = _store_or_recover(run, slug, fresh)
     if stored and recovered:
-        _recovery(slug).unlink(missing_ok=True)
-    aicode_tokens.update_existing(aicode_tokens.rc_file(), {f"{CODEX_TOKEN_PREFIX}{slug}": fresh["access_token"]})
-    return stored
+        _recovery(slug).unlink()
+    rc_entry = {f"{CODEX_TOKEN_PREFIX}{slug}": fresh["access_token"]}
+    block = _attempt(slug, lambda: aicode_tokens.update_existing(aicode_tokens.rc_file(), rc_entry))
+    return stored and block
 
 
 def run_openbao(run: Run) -> int:
@@ -247,15 +293,15 @@ def run_openbao(run: Run) -> int:
         return 1
     slugs = _bao_accounts(secret, run.force)
     if run.force and not slugs:
-        print(f"{run.force}: no such Codex account in OpenBao")
+        print(NO_BAO_ACCOUNT.format(slug=run.force))
         return 1
     return [_refresh_bao(run, secret, slug) for slug in slugs].count(False)
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="agentihooks codex refresh")
-    parser.add_argument("--force", default="", metavar="SLUG", help="refresh this account now")
-    parser.add_argument("--days", type=float, default=None, help=f"refresh under N days left (default {DAYS_ENV})")
+    parser = argparse.ArgumentParser(prog=PROG)
+    parser.add_argument("--force")
+    parser.add_argument("--days", type=float)
     return parser
 
 
@@ -270,7 +316,7 @@ def _days(option: float | None, environ: Mapping[str, str]) -> float:
 
 @contextlib.contextmanager
 def _exclusive() -> Iterator[bool]:
-    path = Path(config.AGENTIHOOKS_HOME) / "codex-refresh.lock"
+    path = Path(config.AGENTIHOOKS_HOME) / LOCK_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+") as lock:
         try:
@@ -284,28 +330,28 @@ def _exclusive() -> Iterator[bool]:
 def _settings(args: list[str], environ: Mapping[str, str], deps: Deps) -> tuple[str, Run]:
     options = _parser().parse_args(args)
     force = aicode_tokens.slug(options.force) if options.force else ""
-    store = (environ.get(STORE_ENV) or "local").strip().lower()
-    if store not in ("local", "openbao"):
-        raise ValueError(f"{STORE_ENV} must be local or openbao, not {store!r}")
+    store = (environ.get(STORE_ENV) or LOCAL).lower()
+    if store not in (LOCAL, OPENBAO):
+        raise ValueError(BAD_STORE.format(store=store))
     return store, Run(force, _days(options.days, environ), openbao_kv.from_env(environ, deps.opener), deps)
 
 
 def main(args: list[str], environ: Mapping[str, str] | None = None, deps: Deps | None = None) -> int:
     environ = os.environ if environ is None else environ
-    if environ.get(codex_login.REFRESH_FLAG, "false").strip().lower() != "true":
-        print(f"{codex_login.REFRESH_FLAG} is not true: this machine is not the refresh authority")
+    if not aicode_tokens.refresh_authority(environ):
+        print(NOT_AUTHORITY)
         return 0
     try:
         store, run = _settings(args, environ, deps or Deps())
     except ValueError as exc:
-        print(f"agentihooks codex refresh: {exc}")
+        print(f"{PROG}: {exc}")
         return 2
-    if store == "openbao" and run.bao is None:
-        print(f"{STORE_ENV}=openbao needs {openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV}")
+    if store == OPENBAO and run.bao is None:
+        print(BAO_NEEDED)
         return 1
     with _exclusive() as held:
         if not held:
-            print("another codex refresh is already running on this machine; skipping")
+            print(BUSY)
             return 0
-        failures = run_openbao(run) if store == "openbao" else run_local(run)
+        failures = run_openbao(run) if store == OPENBAO else run_local(run)
     return 1 if failures else 0

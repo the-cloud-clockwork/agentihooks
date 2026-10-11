@@ -172,7 +172,6 @@ def accounts(environ: Mapping[str, str], run: Callable = subprocess.run) -> list
 
 
 def routing_pool(environ: Mapping[str, str], run: Callable = subprocess.run) -> list[CodexAccount]:
-    """The default login routes unchecked."""
     return token_accounts(environ) or [CodexAccount(CODEX_DEFAULT)]
 
 

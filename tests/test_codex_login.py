@@ -28,8 +28,8 @@ ASK_TYPED = ["OpenBao URL: ", "OpenBao token: "]
 
 
 class Console:
-    def __init__(self, answers=(), tty=True):
-        self.answers, self.prompts, self.is_tty = list(answers), [], tty
+    def __init__(self, answers=(), tty=True, hidden=TYPED):
+        self.answers, self.prompts, self.is_tty, self.secret = list(answers), [], tty, hidden
 
     def ask(self, prompt):
         self.prompts.append(prompt)
@@ -37,7 +37,7 @@ class Console:
 
     def hidden(self, prompt):
         self.prompts.append(prompt)
-        return TYPED
+        return self.secret
 
     def tty(self):
         return self.is_tty
@@ -130,6 +130,7 @@ def test_a_missing_codex_binary_fails_the_login_with_one_line(capsys):
 def test_a_login_that_leaves_no_access_token_fails():
     assert _login(["team", "--no-openbao"], run=_codex(tokens={"refresh_token": REFRESH})[0]) != 0
     assert not aicode_tokens.rc_file().exists()
+    assert not _home("team").exists()
 
 
 def test_a_bad_slug_is_refused_before_codex_runs():
@@ -174,3 +175,69 @@ def test_a_failed_openbao_write_fails_the_login_without_printing_a_value(capsys)
     out = capsys.readouterr()
     assert "OpenBao write failed" in out.out
     assert ACCESS not in out.out + out.err and REFRESH not in out.out + out.err
+
+
+def test_a_login_prints_where_the_token_went_and_what_it_belongs_to(capsys):
+    assert _login(["team", "--openbao"], environ={**ENV, **BAO_ENV}, bao=FakeBao()) == 0
+    rc = aicode_tokens.rc_file()
+    assert capsys.readouterr().out == (
+        f"AH_CX_TOKEN_team written to {rc}\n"
+        "  workspace ws-team, plan team\n"
+        "  expires 2027-01-25 08:00 UTC\n"
+        f"run: source {rc}\n"
+        "OpenBao secret/agentihooks/codex-creds: wrote AH_CX_REFRESH_team, AH_CX_TOKEN_team (2 keys total)\n"
+    )
+
+
+def test_a_token_without_claims_is_described_as_unknown(capsys):
+    assert _login(["team", "--no-openbao"], run=_codex(tokens={"access_token": "opaque"})[0]) == 0
+    assert "  workspace unknown, plan unknown\n  expires unknown\n" in capsys.readouterr().out
+
+
+def test_codex_runs_by_name_when_it_is_not_on_the_path(monkeypatch):
+    monkeypatch.setattr(codex_login.shutil, "which", lambda name: None)
+    run, seen = _codex()
+    assert _login(["team", "--no-openbao"], run=run) == 0
+    assert seen["argv"][0] == "codex"
+
+
+def test_a_bad_slug_is_refused_with_the_rule_on_stderr(capsys):
+    assert _login(["_bad"]) == 2
+    assert capsys.readouterr().err == f"agentihooks codex login: {aicode_tokens.SLUG_RULE}: '_bad'\n"
+
+
+def test_a_typed_url_without_a_token_is_refused(capsys):
+    assert _login(["team"], console=Console(["y", TYPED_URL], hidden="")) == 1
+    assert capsys.readouterr().err == "agentihooks codex login: OpenBao needs both a URL and a token\n"
+
+
+def test_the_refusal_without_openbao_variables_names_both(capsys):
+    assert _login(["team", "--openbao"], console=Console(tty=False)) == 1
+    assert capsys.readouterr().err == (
+        "agentihooks codex login: --openbao needs OPENBAO_URL and OPENBAO_TOKEN off a terminal\n"
+    )
+
+
+def test_a_missing_token_and_a_missing_codex_say_so_on_stderr(capsys):
+    assert _login(["team", "--no-openbao"], run=_codex(tokens={})[0]) == 1
+    home = _home("team")
+    assert capsys.readouterr().err == f"agentihooks codex login: no tokens.access_token in {home / 'auth.json'}\n"
+
+    def run(argv, env, **kwargs):
+        raise FileNotFoundError(2, "No such file or directory", argv[0])
+
+    assert _login(["team", "--no-openbao"], run=run) == 1
+    assert capsys.readouterr().err == "agentihooks codex login: cannot run codex: No such file or directory\n"
+
+
+def test_off_a_terminal_the_skip_is_said_in_full(capsys):
+    assert _login(["team"], environ={**ENV, **BAO_ENV}) == 0
+    assert capsys.readouterr().out.endswith(
+        "not a terminal: skipping OpenBao (pass --openbao to store the tokens there)\n"
+    )
+
+
+def test_an_unknown_flag_shows_the_login_usage(capsys):
+    with pytest.raises(SystemExit):
+        _login(["team", "--bogus"])
+    assert capsys.readouterr().err.startswith("usage: agentihooks codex login")

@@ -10,6 +10,7 @@ URL_ENV = "OPENBAO_URL"
 TOKEN_ENV = "OPENBAO_TOKEN"
 CAS_RETRIES = 3
 TIMEOUT_S = 20
+NOT_AN_OBJECT = "response is not a JSON object"
 
 
 class OpenBaoError(RuntimeError):
@@ -27,46 +28,45 @@ class OpenBaoError(RuntimeError):
 class OpenBao:
     url: str
     token: str = field(repr=False)
-    opener: Callable = urllib.request.urlopen
+    opener: Callable | None = None
 
 
 def from_env(environ: Mapping[str, str], opener: Callable | None = None) -> OpenBao | None:
-    url, token = environ.get(URL_ENV, ""), environ.get(TOKEN_ENV, "")
-    if not (url and token):
-        return None
-    return OpenBao(url, token, opener) if opener else OpenBao(url, token)
+    url, token = environ.get(URL_ENV), environ.get(TOKEN_ENV)
+    return OpenBao(url, token, opener) if url and token else None
 
 
 def _message(exc: urllib.error.HTTPError) -> str:
     try:
-        errors = json.loads(exc.read() or b"{}").get("errors") or []
+        errors = json.loads(exc.read()).get("errors") or []
     except (ValueError, AttributeError):
         errors = []
     return "; ".join(str(error) for error in errors) or str(exc.reason)
 
 
-def _call(bao: OpenBao, method: str, path: str, body: dict | None = None) -> dict:
-    data = json.dumps(body).encode() if body is not None else None
+def _call(bao: OpenBao, path: str, body: dict | None = None) -> dict:
+    data = None if body is None else json.dumps(body).encode()
+    opener = bao.opener or urllib.request.urlopen
     try:
-        request = urllib.request.Request(f"{bao.url.rstrip('/')}/v1/{MOUNT}/data/{path}", data=data, method=method)
+        request = urllib.request.Request(f"{bao.url.rstrip('/')}/v1/{MOUNT}/data/{path}", data=data)
         request.add_header("X-Vault-Token", bao.token)
-        request.add_header("Content-Type", "application/json")
-        with bao.opener(request, timeout=TIMEOUT_S) as response:
-            found = json.loads(response.read() or b"{}")
+        with opener(request, timeout=TIMEOUT_S) as response:
+            raw = response.read()
+        found = json.loads(raw) if raw else {}
     except urllib.error.HTTPError as exc:
         raise OpenBaoError(exc.code, _message(exc)) from None
-    except (urllib.error.URLError, OSError) as exc:
-        raise OpenBaoError(0, str(getattr(exc, "reason", exc))) from None
-    except ValueError as exc:
-        raise OpenBaoError(0, f"unreadable request or response: {type(exc).__name__}") from None
+    except urllib.error.URLError as exc:
+        raise OpenBaoError(0, str(exc.reason)) from None
+    except (OSError, ValueError) as exc:
+        raise OpenBaoError(0, str(exc)) from None
     if not isinstance(found, dict):
-        raise OpenBaoError(0, "unreadable response: not a JSON object")
+        raise OpenBaoError(0, NOT_AN_OBJECT)
     return found
 
 
 def read(bao: OpenBao, path: str) -> tuple[dict[str, str], int]:
     try:
-        found = _call(bao, "GET", path).get("data") or {}
+        found = _call(bao, path).get("data") or {}
     except OpenBaoError as exc:
         if exc.status == 404:
             return {}, 0
@@ -76,16 +76,18 @@ def read(bao: OpenBao, path: str) -> tuple[dict[str, str], int]:
 
 def merge(bao: OpenBao, path: str, entries: Mapping[str, str], stale: Iterable[str] = ()) -> int:
     stale = frozenset(stale)
-    for retry in range(CAS_RETRIES + 1):
+    for _ in range(CAS_RETRIES + 1):
         current, version = read(bao, path)
         merged = {key: value for key, value in current.items() if key not in stale} | dict(entries)
         try:
-            _call(bao, "POST", path, {"options": {"cas": version}, "data": merged})
+            _call(bao, path, {"options": {"cas": version}, "data": merged})
         except OpenBaoError as exc:
-            if exc.conflict and retry < CAS_RETRIES:
-                continue
-            raise
+            if not exc.conflict:
+                raise
+            conflict = exc
+            continue
         return len(merged)
+    raise conflict
 
 
 def summary(path: str, names: Iterable[str], total: int) -> str:

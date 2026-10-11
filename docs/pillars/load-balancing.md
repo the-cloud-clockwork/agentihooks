@@ -479,15 +479,20 @@ on becomes the refresh authority.
 - `AGENTIHOOKS_AICODE_TOKEN_STORE=local` (default): the accounts are the
   `~/.agentihooks/codex/<slug>/auth.json` files. A refresh writes that file
   first, then the rc block, then OpenBao when `OPENBAO_URL` and `OPENBAO_TOKEN`
-  are set; without them the run says OpenBao was not updated. A write error on
-  one account is reported and the others still refresh.
+  are set; when it saved a new pair locally without them, the run says OpenBao
+  was not updated. A write error on one account is reported and the others
+  still refresh; a pair that could not be saved locally still goes to OpenBao.
 - `AGENTIHOOKS_AICODE_TOKEN_STORE=openbao`: the accounts are the
   `AH_CX_REFRESH_<slug>` keys of the OpenBao secret, written back there; the rc
   block is updated only where it already exists. It refuses to run without
   `OPENBAO_URL` and `OPENBAO_TOKEN`. When the OpenBao write fails after a
-  refresh, the new pair is kept in `~/.agentihooks/codex/<slug>/auth.json`
+  refresh, the new pair is kept in `~/.agentihooks/codex/<slug>/recovery.json`
   (0600) and the error names that file. The next run uses that pair when it is
-  newer than the one in OpenBao, stores it and removes the file.
+  newer than the one in OpenBao, stores it and removes the file; an older one
+  holds a spent refresh token and is removed. This store never reads or changes
+  a login's `auth.json`.
+- A new pair that nothing could keep (no local file, no OpenBao) prints
+  `<slug>: new token pair not persisted; run agentihooks codex login <slug>`.
 - Each account prints its days left, then `refreshed` with the new days left and
   whether the refresh token rotated. A refused grant prints the slug, the HTTP
   status and the OAuth error and the run moves on, exiting non zero.

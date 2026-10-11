@@ -775,15 +775,22 @@ def test_login_with_a_slug_and_refresh_are_agentihooks_commands(monkeypatch):
     from scripts import codex_login, codex_refresh
 
     seen = []
-    monkeypatch.setattr(codex_login, "main", lambda args, environ: seen.append(("login", args)) or 0)
-    monkeypatch.setattr(codex_refresh, "main", lambda args, environ: seen.append(("refresh", args)) or 5)
+    monkeypatch.setattr(codex_login, "main", lambda args, environ: seen.append(("login", args, environ)) or 0)
+    monkeypatch.setattr(codex_refresh, "main", lambda args, environ: seen.append(("refresh", args, environ)) or 5)
 
     def execvpe(*args):
         raise AssertionError("codex must not start")
 
     assert router.main(["login", "team-a", "--openbao"], environ=ENV, execvpe=execvpe) == 0
+    assert router.main(["login", "team"], environ=ENV, execvpe=execvpe) == 0
     assert router.main(["refresh", "--force", "alpha"], environ=ENV, execvpe=execvpe) == 5
-    assert seen == [("login", ["team-a", "--openbao"]), ("refresh", ["--force", "alpha"])]
+    assert router.main(["refresh"], environ=ENV, execvpe=execvpe) == 5
+    assert seen == [
+        ("login", ["team-a", "--openbao"], ENV),
+        ("login", ["team"], ENV),
+        ("refresh", ["--force", "alpha"], ENV),
+        ("refresh", [], ENV),
+    ]
 
 
 @pytest.mark.parametrize(
