@@ -111,6 +111,17 @@ def pane_target(agent):
     return agent.pane_id or herdr_target(agent.name)
 
 
+def _launch_records(name):
+    from scripts import herdr_panes
+
+    return [r for r in herdr_panes.load(dict(os.environ)) if r.kind == "init-agent" and r.owner_session == name]
+
+
+def _opened_pane(name):
+    found = sorted(_launch_records(name), key=lambda record: record.launched_at)
+    return found[-1].pane_id if found else ""
+
+
 def _owns(found, agent):
     """A pane belongs to the agent when it carries the agent's herdr name or its 32 character cut, or is unnamed and
     holds no other conversation."""
@@ -662,7 +673,7 @@ class HerdrRuntime:
             )
         except subprocess.TimeoutExpired as exc:
             self._terminate(name)
-            raise SpawnError(f"init-agent timed out for {name}", "ambiguous") from exc
+            raise SpawnError(f"init-agent timed out for {name}", "ambiguous", _opened_pane(name)) from exc
         timings = {
             "launched_at": launched_at,
             "returned_at": int(time.time() * 1000),
@@ -779,6 +790,10 @@ class HerdrRuntime:
     def pane_tail(self, pane_id, lines):
         args = ["pane", "read", pane_id, "--source", "recent", "--lines", str(lines), "--format", "text"]
         return self.herdr(args)["text"]
+
+    def launched_pane(self, pane_id, name):
+        listed = {p["pane_id"]: p.get("terminal_id") for p in self.herdr(["pane", "list"]).get("panes", [])}
+        return any(r.pane_id == pane_id and r.terminal_id == listed.get(pane_id) for r in _launch_records(name))
 
     def close_pane(self, pane_id):
         try:

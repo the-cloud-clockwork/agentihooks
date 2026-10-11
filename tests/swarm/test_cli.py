@@ -1378,14 +1378,14 @@ def test_status_text_lists_a_closed_failed_launch_pane_with_its_lines(env, capsy
     run("sw", "create", "--repo", "/repo")
     failed = AgentRecord("engineer@a1b2c3-0003", "eng", "t1", started_at=10, pane_id="w1:p9")
     store.record_launch("sw", failed, "failed", "Codex account default not found")
-    store.note_launch_pane("sw", failed.name, ["$ agentihooks codex", "Codex account default not found", "$"], 200)
+    store.note_launch_pane("sw", failed.name, ["$ agentihooks codex", "Codex account default not found", "$"])
     store.record_launch("sw", AgentRecord("engineer@a1b2c3-0004", "eng", "t2", pane_id="w1:p8"), "failed", "x")
     capsys.readouterr()
     run("sw", "status")
     out = capsys.readouterr().out.splitlines()
     at = out.index("failed launch  engineer@a1b2c3-0003  t1  pane w1:p9 closed: Codex account default not found")
     assert out[at + 1 : at + 4] == ["  | $ agentihooks codex", "  | Codex account default not found", "  | $"]
-    assert not any("engineer@a1b2c3-0004" in line for line in out)
+    assert [line for line in out if line.startswith("failed launch")] == [out[at]]
     assert [row["agent"] for row in failed_panes.report(store, "sw")] == [failed.name]
 
 

@@ -1,6 +1,5 @@
-"""Panes the tick opened for a launch that failed: held two minutes so the failure stays on screen, then their last
-lines are copied into the launch record and the pane is closed by its own id. Only a held pane id is ever read or
-closed, so operator panes and pairing sessions outside the swarm are never touched."""
+"""Only a pane id held here is ever read or closed, and only while herdr still shows the terminal its launch opened,
+so operator panes and pairing sessions outside the swarm are never touched."""
 
 import json
 
@@ -9,10 +8,10 @@ TAIL_LINES = 20
 HELD = "failed-panes"
 
 
-def hold(store, slug, agent, now_ms):
+def hold(store, slug, agent, now_ms, reason=""):
     if not agent.pane_id:
         return
-    entry = {"agent": agent.name, "task": agent.task, "failed_at": now_ms}
+    entry = {"agent": agent.name, "task": agent.task, "failed_at": now_ms, "reason": reason}
     store.redis.hset(store.key(slug, HELD), agent.pane_id, json.dumps(entry))
 
 
@@ -27,10 +26,8 @@ def lines(text, count):
     return found[-count:]
 
 
-def _holder(store, slug, runtime, pane, entry):
-    if holder := next((a.name for a in store.agents(slug) if a.pane_id == pane), ""):
-        return f"{holder} holds it now"
-    return f"{entry['agent']} is live" if entry["agent"] in runtime.live_names() else ""
+def _holder(store, slug, pane):
+    return next((a.name for a in store.agents(slug) if a.pane_id == pane), "")
 
 
 def _tail(runtime, pane):
@@ -40,20 +37,28 @@ def _tail(runtime, pane):
         return [f"its lines could not be read: {exc}"]
 
 
-def sweep(slug, store, runtime, now_ms):
-    actions = []
-    for pane, entry in held(store, slug).items():
-        if now_ms - entry["failed_at"] < CLOSE_AFTER_MS:
-            continue
-        if reason := _holder(store, slug, runtime, pane, entry):
-            store.redis.hdel(store.key(slug, HELD), pane)
-            actions.append(f"kept pane {pane}: {reason}")
-            continue
-        store.note_launch_pane(slug, entry["agent"], _tail(runtime, pane), now_ms)
+def _close(slug, store, runtime, pane, entry):
+    key, agent = store.key(slug, HELD), entry["agent"]
+    if holder := _holder(store, slug, pane):
+        store.redis.hdel(key, pane)
+        return f"kept pane {pane}: {holder} holds it now"
+    if agent in runtime.live_names():
+        return ""
+    try:
+        if not runtime.launched_pane(pane, agent):
+            store.redis.hdel(key, pane)
+            return f"dropped pane {pane}: herdr no longer shows the failed launch of {agent} there"
+        store.note_launch_pane(slug, agent, _tail(runtime, pane), entry["reason"])
         runtime.close_pane(pane)
-        store.redis.hdel(store.key(slug, HELD), pane)
-        actions.append(f"closed pane {pane} of the failed launch of {entry['agent']} for {entry['task']}")
-    return actions
+    except Exception as exc:
+        return f"could not close pane {pane} of the failed launch of {agent}, retrying next tick: {exc}"
+    store.redis.hdel(key, pane)
+    return f"closed pane {pane} of the failed launch of {agent} for {entry['task']}"
+
+
+def sweep(slug, store, runtime, now_ms):
+    due = [(pane, entry) for pane, entry in held(store, slug).items() if now_ms - entry["failed_at"] >= CLOSE_AFTER_MS]
+    return [said for pane, entry in due if (said := _close(slug, store, runtime, pane, entry))]
 
 
 def report(store, slug):

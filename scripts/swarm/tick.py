@@ -68,6 +68,7 @@ from scripts.swarm_v2 import masters as master_seats
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
+EXITED_BEFORE_LIFE = "its agent process exited before its launch check passed"
 SUSPECT = "suspect"
 MASTER_WAITING = f"{PREFIX}:master-waiting"
 MASTER_WAIT_MS = 10 * 60 * 1000
@@ -148,6 +149,7 @@ class Runtime(Protocol):
     def resume(self, config, agent: AgentRecord, text: str) -> Placed: ...
     def close_space(self, config: SwarmConfig) -> bool: ...
     def pane_tail(self, pane_id: str, lines: int) -> str: ...
+    def launched_pane(self, pane_id: str, name: str) -> bool: ...
     def close_pane(self, pane_id: str) -> None: ...
 
 
@@ -447,7 +449,7 @@ def _retire_launch(slug, store, runtime, agent, now_ms):
     if not runtime.retire(kept, homes=reaper.scratch_homes(slug, agent.task)):
         return False
     if exited:
-        failed_panes.hold(store, slug, agent, now_ms)
+        failed_panes.hold(store, slug, agent, now_ms, EXITED_BEFORE_LIFE)
     return True
 
 

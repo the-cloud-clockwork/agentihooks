@@ -357,11 +357,12 @@ class RedisStore:
         }
         self.redis.hset(self.key(slug, "launches"), agent.name, json.dumps(row))
 
-    def note_launch_pane(self, slug: str, name: str, lines: list[str], closed_at: int) -> None:
+    def note_launch_pane(self, slug: str, name: str, lines: list[str], reason: str = "") -> None:
         raw = self.redis.hget(self.key(slug, "launches"), name)
         if raw is None:
             return
-        row = {**json.loads(raw), "pane_lines": lines, "pane_closed_at": closed_at}
+        row = json.loads(raw)
+        row = {**row, "error": row["error"] or reason, "pane_lines": lines}
         self.redis.hset(self.key(slug, "launches"), name, json.dumps(row))
 
     def launches(self, slug: str) -> list[dict]:

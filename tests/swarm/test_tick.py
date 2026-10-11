@@ -174,6 +174,9 @@ class FakeRuntime:
     def pane_tail(self, pane_id, lines):
         return ""
 
+    def launched_pane(self, pane_id, name):
+        return True
+
     def close_pane(self, pane_id):
         self.closed.append(pane_id)
 

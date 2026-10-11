@@ -1,23 +1,29 @@
+import subprocess
 from types import SimpleNamespace
 
 import pytest
 
+from scripts import herdr_panes
+from scripts.herdr_host import Placement
 from scripts.swarm import failed_panes, launch_check
+from scripts.swarm import tick as tick_module
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
-from scripts.swarm.tick import SpawnError, tick
+from scripts.swarm.tick import EXITED_BEFORE_LIFE, SpawnError, tick
 from tests.swarm.test_tick import FakeRuntime, tasks
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 SCREEN = "$ agentihooks codex --route default\nCodex account default not found\n\n$ \n\n"
 FAILED_AT = 1_000
+DUE = FAILED_AT + failed_panes.CLOSE_AFTER_MS
 
 
 class PaneRuntime(FakeRuntime):
     def __init__(self, screens=None, **kwargs):
         super().__init__(**kwargs)
         self.screens, self.panes_closed, self.read = dict(screens or {}), [], []
+        self.owned, self.close_error = set(self.screens), None
 
     def pane_tail(self, pane_id, lines):
         self.read.append((pane_id, lines))
@@ -25,7 +31,12 @@ class PaneRuntime(FakeRuntime):
             raise RuntimeError(f"pane {pane_id} not found")
         return self.screens[pane_id]
 
+    def launched_pane(self, pane_id, name):
+        return pane_id in self.owned
+
     def close_pane(self, pane_id):
+        if self.close_error:
+            raise RuntimeError(self.close_error)
         self.panes_closed.append(pane_id)
         self.screens.pop(pane_id, None)
 
@@ -54,34 +65,58 @@ def _failed_row(store):
 
 def test_a_failed_launch_records_its_pane_and_keeps_it_open_for_two_minutes(store):
     ledger, runtime = _failed_once(store)
-    tick("sw", store, ledger, runtime, now_ms=FAILED_AT + failed_panes.CLOSE_AFTER_MS - 1)
+    tick("sw", store, ledger, runtime, now_ms=DUE - 1)
     assert failed_panes.CLOSE_AFTER_MS == 120_000
     assert _failed_row(store)["pane_id"] == "w1:p9"
     assert runtime.panes_closed == [] and runtime.read == []
-    assert list(failed_panes.held(store, "sw")) == ["w1:p9"]
+    assert failed_panes.held(store, "sw") == {
+        "w1:p9": {"agent": _failed_row(store)["agent"], "task": "t1", "failed_at": FAILED_AT, "reason": ""}
+    }
 
 
 def test_a_failed_launch_pane_closes_after_two_minutes_with_its_last_lines_kept(store):
     ledger, runtime = _failed_once(store)
-    actions = tick("sw", store, ledger, runtime, now_ms=FAILED_AT + failed_panes.CLOSE_AFTER_MS)
+    actions = tick("sw", store, ledger, runtime, now_ms=DUE)
     assert runtime.read == [("w1:p9", failed_panes.TAIL_LINES)]
     assert failed_panes.TAIL_LINES == 20
     assert runtime.panes_closed == ["w1:p9"]
     row = _failed_row(store)
     assert row["pane_lines"] == ["$ agentihooks codex --route default", "Codex account default not found", "", "$"]
-    assert row["pane_closed_at"] == FAILED_AT + failed_panes.CLOSE_AFTER_MS
+    assert row["error"] == "Codex account default not found"
     assert failed_panes.held(store, "sw") == {}
     assert f"closed pane w1:p9 of the failed launch of {row['agent']} for t1" in actions
     tick("sw", store, ledger, runtime, now_ms=FAILED_AT + 3 * failed_panes.CLOSE_AFTER_MS)
     assert runtime.panes_closed == ["w1:p9"]
 
 
-def test_a_pane_already_gone_still_closes_and_says_its_lines_were_lost(store):
-    ledger, runtime = _failed_once(store)
+def test_a_pane_whose_lines_cannot_be_read_still_closes_and_says_so(store):
+    _, runtime = _failed_once(store)
     runtime.screens.clear()
-    tick("sw", store, ledger, runtime, now_ms=FAILED_AT + failed_panes.CLOSE_AFTER_MS)
+    failed_panes.sweep("sw", store, runtime, DUE)
     assert runtime.panes_closed == ["w1:p9"]
     assert _failed_row(store)["pane_lines"] == ["its lines could not be read: pane w1:p9 not found"]
+
+
+def test_a_pane_that_no_longer_shows_the_launch_is_dropped_untouched(store):
+    _, runtime = _failed_once(store)
+    runtime.owned.clear()
+    actions = failed_panes.sweep("sw", store, runtime, DUE)
+    agent = _failed_row(store)["agent"]
+    assert actions == [f"dropped pane w1:p9: herdr no longer shows the failed launch of {agent} there"]
+    assert runtime.panes_closed == [] and runtime.read == [] and failed_panes.held(store, "sw") == {}
+    assert "pane_lines" not in _failed_row(store)
+
+
+def test_a_pane_herdr_refuses_to_close_stays_held_for_the_next_tick(store):
+    _, runtime = _failed_once(store)
+    runtime.close_error = "server down"
+    agent = _failed_row(store)["agent"]
+    actions = failed_panes.sweep("sw", store, runtime, DUE)
+    assert actions == [f"could not close pane w1:p9 of the failed launch of {agent}, retrying next tick: server down"]
+    assert list(failed_panes.held(store, "sw")) == ["w1:p9"]
+    runtime.close_error = None
+    failed_panes.sweep("sw", store, runtime, DUE + 60_000)
+    assert runtime.panes_closed == ["w1:p9"] and failed_panes.held(store, "sw") == {}
 
 
 def test_a_live_agent_pane_is_never_read_or_closed(store):
@@ -89,18 +124,21 @@ def test_a_live_agent_pane_is_never_read_or_closed(store):
     live = AgentRecord("engineer@a1b2c3-0009", "eng", "t2", started_at=FAILED_AT, pane_id="w1:p9", state="working")
     store.put_agent("sw", live)
     runtime.live.add(live.name)
-    actions = failed_panes.sweep("sw", store, runtime, FAILED_AT + failed_panes.CLOSE_AFTER_MS)
+    actions = failed_panes.sweep("sw", store, runtime, DUE)
     assert runtime.panes_closed == [] and runtime.read == []
     assert failed_panes.held(store, "sw") == {}
-    assert "kept pane w1:p9: engineer@a1b2c3-0009 holds it now" in actions
+    assert actions == ["kept pane w1:p9: engineer@a1b2c3-0009 holds it now"]
 
 
-def test_a_failed_launch_whose_agent_came_up_keeps_its_pane(store):
+def test_a_failed_launch_whose_process_survived_closes_only_once_it_is_gone(store):
     _, runtime = _failed_once(store)
-    runtime.live.add(_failed_row(store)["agent"])
-    actions = failed_panes.sweep("sw", store, runtime, FAILED_AT + failed_panes.CLOSE_AFTER_MS)
-    assert runtime.panes_closed == [] and failed_panes.held(store, "sw") == {}
-    assert actions == [f"kept pane w1:p9: {_failed_row(store)['agent']} is live"]
+    agent = _failed_row(store)["agent"]
+    runtime.live.add(agent)
+    assert failed_panes.sweep("sw", store, runtime, DUE) == []
+    assert runtime.panes_closed == [] and list(failed_panes.held(store, "sw")) == ["w1:p9"]
+    runtime.live.discard(agent)
+    failed_panes.sweep("sw", store, runtime, DUE + 60_000)
+    assert runtime.panes_closed == ["w1:p9"]
 
 
 def test_a_spawn_failure_without_a_pane_holds_nothing(store):
@@ -108,6 +146,12 @@ def test_a_spawn_failure_without_a_pane_holds_nothing(store):
     tick("sw", store, tasks(("t1", "eng")), runtime, now_ms=FAILED_AT)
     assert failed_panes.held(store, "sw") == {}
     assert _failed_row(store)["pane_id"] == ""
+
+
+def test_a_launch_waiting_on_quota_holds_no_pane(store):
+    runtime = PaneRuntime(crash=SpawnError("no seats", "unavailable", pane_id="w1:p9"))
+    tick("sw", store, tasks(("t1", "eng")), runtime, now_ms=FAILED_AT)
+    assert failed_panes.held(store, "sw") == {}
 
 
 def test_a_started_launch_records_its_pane(store):
@@ -126,27 +170,60 @@ def test_a_worker_that_exits_before_its_launch_check_passes_has_its_pane_held_th
     failed = FAILED_AT + launch_check.DEADLINE_MS
     tick("sw", store, ledger, runtime, now_ms=failed)
     assert "w1:p1" not in runtime.closed
-    assert failed_panes.held(store, "sw")["w1:p1"]["agent"] == agent.name
+    assert failed_panes.held(store, "sw")["w1:p1"]["reason"] == EXITED_BEFORE_LIFE
     tick("sw", store, ledger, runtime, now_ms=failed + failed_panes.CLOSE_AFTER_MS)
     assert runtime.panes_closed == ["w1:p1"]
     row = next(r for r in store.launches("sw") if r["agent"] == agent.name)
     assert row["pane_lines"] == ["Error: model not available", "$"]
+    assert failed_panes.status_lines(store, "sw") == [
+        f"failed launch  {agent.name}  t1  pane w1:p1 closed: {EXITED_BEFORE_LIFE}",
+        "  | Error: model not available",
+        "  | $",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("agent", "live"),
+    [
+        (AgentRecord("master@a1b2c3-0001", "master", "", started_at=FAILED_AT, pane_id="w1:m1"), False),
+        (AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w9:p1", runtime_backend="remote"), False),
+        (AgentRecord("engineer@a1b2c3-0002", "eng", "t1", pane_id="w1:p2"), True),
+    ],
+)
+def test_only_an_exited_local_worker_keeps_its_pane_past_retirement(store, agent, live):
+    runtime = PaneRuntime()
+    if live:
+        runtime.live.add(agent.name)
+    assert tick_module._retire_launch("sw", store, runtime, agent, FAILED_AT) is True
+    assert runtime.closed == [agent.pane_id] and failed_panes.held(store, "sw") == {}
+
+
+def test_a_failed_retirement_holds_no_pane(store):
+    runtime = PaneRuntime()
+    agent = AgentRecord("engineer@a1b2c3-0003", "eng", "t1", pane_id="w1:p3")
+    runtime.stuck.add(agent.name)
+    assert tick_module._retire_launch("sw", store, runtime, agent, FAILED_AT) is False
+    assert failed_panes.held(store, "sw") == {}
+
+
+def test_lines_of_an_unknown_launch_are_not_recorded(store):
+    store.note_launch_pane("sw", "nobody", ["x"], "why")
+    assert store.launches("sw") == []
 
 
 def test_status_lists_failed_launches_with_their_lines(store):
     ledger, runtime = _failed_once(store)
-    tick("sw", store, ledger, runtime, now_ms=FAILED_AT + failed_panes.CLOSE_AFTER_MS)
+    tick("sw", store, ledger, runtime, now_ms=DUE)
     rows = failed_panes.report(store, "sw")
     assert [(r["task"], r["pane_id"], r["pane_lines"][-1]) for r in rows] == [("t1", "w1:p9", "$")]
 
 
-def _launch_fails(tmp_path, stdout, returncode=0):
-    calls = []
-
+def _launch_fails(tmp_path, stdout, returncode=0, run_error=None):
     def run(argv, **kwargs):
-        calls.append(argv)
         if "terminate-agent" in argv:
             return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if run_error:
+            raise run_error
         return SimpleNamespace(returncode=returncode, stdout=stdout, stderr="Codex account default not found\n")
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
@@ -170,8 +247,45 @@ def test_a_launch_that_never_reports_its_route_names_its_pane(tmp_path, stdout, 
     assert str(error) == "Codex account default not found"
 
 
+def test_a_launch_whose_profile_validation_fails_names_its_pane(tmp_path):
+    error = _launch_fails(tmp_path, "status=started\nroute_status=routed\npane_id=w1:p9\n")
+    assert error.pane_id == "w1:p9"
+    assert str(error) == "mounted profile validation is missing or failed"
+
+
 def test_a_launch_that_opened_no_pane_names_none(tmp_path):
     assert _launch_fails(tmp_path, "", 2).pane_id == ""
+
+
+def _record(monkeypatch, tmp_path, name, pane, terminal, at):
+    environ = {herdr_panes.ROOT_ENV: str(tmp_path / "panes"), "HERDR_SOCKET_PATH": str(tmp_path / "herdr.sock")}
+    for key, value in environ.items():
+        monkeypatch.setenv(key, value)
+    herdr_panes.record(Placement("w1", "w1:t1", pane, terminal), "init-agent", name, environ, at)
+
+
+def test_a_timed_out_launch_names_the_newest_pane_it_opened(tmp_path, monkeypatch):
+    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0001", "w1:p7", "term_old", 1)
+    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0001", "w1:p9", "term_new", 2)
+    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0002", "w1:p8", "term_other", 3)
+    error = _launch_fails(tmp_path, "", run_error=subprocess.TimeoutExpired("init-agent", 300))
+    assert (error.pane_id, error.status, str(error)) == (
+        "w1:p9",
+        "ambiguous",
+        "init-agent timed out for engineer@a1b2c3-0001",
+    )
+
+
+def test_a_pane_belongs_to_a_launch_only_while_herdr_shows_its_terminal(tmp_path, monkeypatch):
+    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0001", "w1:p9", "term_a", 1)
+    listed = {"panes": [{"pane_id": "w1:p9", "terminal_id": "term_a"}]}
+    runtime = HerdrRuntime(home=tmp_path, herdr=lambda args: listed)
+    assert runtime.launched_pane("w1:p9", "engineer@a1b2c3-0001") is True
+    assert runtime.launched_pane("w1:p9", "engineer@a1b2c3-0002") is False
+    listed["panes"] = [{"pane_id": "w1:p9", "terminal_id": "term_operator"}]
+    assert runtime.launched_pane("w1:p9", "engineer@a1b2c3-0001") is False
+    listed["panes"] = []
+    assert runtime.launched_pane("w1:p9", "engineer@a1b2c3-0001") is False
 
 
 def test_the_runtime_reads_a_pane_tail_and_closes_it_by_its_id(tmp_path):
