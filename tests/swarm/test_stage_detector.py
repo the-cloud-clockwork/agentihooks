@@ -52,7 +52,7 @@ def test_two_equal_windows_show_rising_and_falling_stages():
         tasks.append({"id": task, "state": "done", "branch": f"w{number}"})
         source["agent_events"].append(agent("claim", task, start))
         source["agent_events"].append(agent("spawn", task, start, task, "codex"))
-        source["ledger_events"].append({"kind": "joined", "ts_ms": start, "by": task})
+        source["ledger_events"].append({"kind": "joined", "ts_ms": start, "by": task, "target": ""})
         source["delivery_events"].append(delivery("merge", task, end))
     source["ci_runs"].append(run(5, "w2", NOW - H // 2, NOW, "success"))
     found = stage_detector.report(source, tasks, NOW, H)
@@ -105,3 +105,40 @@ def test_detector_update_keeps_existing_alert_units_threshold_and_detail(store):
         "slow run",
         3,
     )
+
+
+def test_alert_and_detector_updates_do_not_lose_an_interleaved_episode(store, monkeypatch):
+    source, tasks = replay()
+    report = stage_detector.report(source, tasks, NOW)
+    real_pipeline = store.redis.pipeline
+    interleaved = []
+
+    def pipeline(*args, **kwargs):
+        pipe = real_pipeline(*args, **kwargs)
+        real_multi = pipe.multi
+
+        def multi():
+            if not interleaved:
+                interleaved.append(True)
+                standing.fire(
+                    store.redis, "scratch", "ci_overrun", standing.Reading(20, 15, "minutes", "4", "new run"), NOW
+                )
+            return real_multi()
+
+        pipe.multi = multi
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    stage_detector.update_findings(store, "scratch", report, NOW)
+    row = standing.read(store.redis, "scratch")["ci_overrun"]
+    assert (row["fired"], row["value"], row["threshold"], row["unit"], row["detail"]) == (
+        4,
+        20,
+        15,
+        "minutes",
+        "new run",
+    )
+    assert row["detector"]["seconds"] == 2289.0
+    standing.fire(store.redis, "scratch", "ci_overrun", standing.Reading(21, 15, "minutes", "1", "same run"), NOW)
+    assert standing.read(store.redis, "scratch")["ci_overrun"]["fired"] == 4
+    assert standing.read(store.redis, "scratch")["ci_overrun"]["detector"] == row["detector"]

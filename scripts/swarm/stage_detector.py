@@ -1,6 +1,25 @@
-from scripts.swarm import bottleneck, stages
+import json
+import os
+from collections.abc import Mapping
+from dataclasses import dataclass
+
+from scripts.swarm import bottleneck, metrics_outbox, stages
 from scripts.swarm.health import standing
 from scripts.swarm.store import RedisStore
+
+
+@dataclass(frozen=True)
+class Settings:
+    ticks: int = 5
+    window_ms: int = bottleneck.WINDOW_MS
+
+
+def settings(environ: Mapping[str, str] = os.environ) -> Settings:
+    ticks = int(environ.get("AGENTIHOOKS_STAGE_DETECTOR_TICKS", "5"))
+    hours = float(environ.get("AGENTIHOOKS_STAGE_DETECTOR_WINDOW_HOURS", "4"))
+    if ticks < 1 or not 0 < hours <= 12:
+        raise ValueError("stage detector needs positive ticks and a window of at most twelve hours")
+    return Settings(ticks, int(hours * 3_600_000))
 
 
 def _totals(found: dict) -> dict:
@@ -49,3 +68,22 @@ def report(rows: dict, tasks: list, now_ms: int, window_ms: int = bottleneck.WIN
 def update_findings(store: RedisStore, slug: str, found: dict, now_ms: int) -> None:
     for row in found["stages"]:
         standing.update_detector(store.redis, slug, row, now_ms)
+
+
+def record(
+    box: metrics_outbox.Outbox,
+    store: RedisStore,
+    slug: str,
+    now_ms: int,
+    tasks: list,
+    environ: Mapping[str, str] = os.environ,
+) -> dict:
+    config = settings(environ)
+    count = store.redis.incr(store.key(slug, "stage-detector-ticks"))
+    if (count - 1) % config.ticks:
+        return stages.read(store, slug)
+    found = report(stages.read_rows(box, slug, now_ms), tasks, now_ms, config.window_ms)
+    update_findings(store, slug, found, now_ms)
+    box.append(stages.TABLE, stages.stage_rows(slug, found))
+    store.redis.set(store.key(slug, stages.KEY), json.dumps(found))
+    return found

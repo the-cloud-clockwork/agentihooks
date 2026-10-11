@@ -3,7 +3,15 @@ import sqlite3
 from collections.abc import Mapping
 from functools import partial
 
-from scripts.swarm import bottleneck, freeze, metrics_fleet, metrics_ledger, metrics_outbox, metrics_swarm, stages
+from scripts.swarm import (
+    bottleneck,
+    freeze,
+    metrics_fleet,
+    metrics_ledger,
+    metrics_outbox,
+    metrics_swarm,
+    stage_detector,
+)
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import SwarmError
 
@@ -15,12 +23,12 @@ def tick_row(slug, now_ms, actions):
     return {"event_id": f"tick:{slug}:{now_ms}", "ledger": slug, "ts_ms": now_ms, **path, "actions": actions}
 
 
-def _collect(slug, now_ms, swarm, box, errors):
+def _collect(slug, now_ms, swarm, box, errors, environ):
     pulls = metrics_swarm.pull_rows(box, now_ms, swarm)
     watched = freeze.watched(slug, swarm.store, swarm.ledger, swarm.doc)
     metrics_swarm.record_pass(box, slug, now_ms, swarm.store, watched, swarm.findings, pulls)
     bottleneck.record(box, swarm.store, slug, now_ms, swarm.doc.get("tasks", []))
-    stages.record(box, swarm.store, slug, now_ms, swarm.doc.get("tasks", []))
+    stage_detector.record(box, swarm.store, slug, now_ms, swarm.doc.get("tasks", []), environ)
     from redis.exceptions import RedisError
 
     try:
@@ -54,10 +62,10 @@ def _ledger(slug, now_ms, errors, box):
         errors.append(f"ledger metrics failed: {exc}")
 
 
-def _pass(slug, now_ms, swarm, errors, box):
+def _pass(slug, now_ms, swarm, errors, box, environ):
     _ledger(slug, now_ms, errors, box)
     if swarm is not None:
-        _collect(slug, now_ms, swarm, box, errors)
+        _collect(slug, now_ms, swarm, box, errors, environ)
 
 
 def record_pass(
@@ -68,5 +76,5 @@ def record_pass(
     swarm: metrics_swarm.TickInput | None = None,
 ) -> list[str]:
     errors = []
-    extra = partial(_pass, slug, now_ms, swarm, errors)
+    extra = partial(_pass, slug, now_ms, swarm, errors, environ=environ)
     return [*record(TICKS, [tick_row(slug, now_ms, actions)], now_ms, environ, extra), *errors]
