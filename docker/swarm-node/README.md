@@ -24,6 +24,19 @@ the same commit; an older image ignores the record's `profile` and renders
 `default`. Runtime homes are writable; templates and the environment are owned
 by root and read only to the worker user.
 
+The image never carries a private bundle. A Pod policy `bundle` section names a
+private bundle image, its tag and the image pull Secret only the kubelet reads.
+The Pod template then adds an init container that copies the image's `/bundle`
+(the bundle tree), `/linked` (linked profiles such as `brain`) and
+`/revision.json` into a Pod private emptyDir, which the agent mounts read only at
+`/var/run/swarm/bundle`. With that section the controller admits any valid
+profile name, and the start step accepts a profile shipped in either the
+templates or the bundle, refusing one in neither with exit sixty four.
+Bootstrap seeds the bundle and its linked profiles into the attempt and renders
+through the same chain, bundle global layer, persona, settings and MCP rules as
+a local launch; the execution record names the rendered `chains`, the bundle
+`revision` and its `digest`, and the `worker_start` line prints the chains.
+
 The default command verifies and reports installed inventory without a network.
 Every command runs under Tini as PID one, which reaps children. Production
 execution supplies `python /opt/swarm-node/supervisor.py ATTEMPT LAUNCH_JSON`.
