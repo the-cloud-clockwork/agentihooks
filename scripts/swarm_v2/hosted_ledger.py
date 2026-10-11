@@ -1,12 +1,15 @@
 """The controller's ledger in deployed mode: the hosted ledger server holds every task and applies every write."""
 
+import json
 import urllib.error
 
+from scripts.swarm.store import RedisStore
 from scripts.swarm_ledger import ledger
 from scripts.swarm_ledger.api.client import ResourceClient, failure
-from scripts.swarm_v2.api.tasks import RevisionConflict, spec_revision
+from scripts.swarm_v2.api.tasks import RECEIPTS, RevisionConflict, spec_revision
 from scripts.swarm_v2.auth_context import GrantRefused
 
+RECEIPTS_KEY = "hosted-ledger-receipts"
 CHANGED = "the task specification changed; refresh and retry"
 REUSED = "the operation ID was already used for different content"
 
@@ -22,8 +25,8 @@ def _task_key(op: dict) -> str:
 class HostedLedger:
     """Reads and writes tasks through the hosted ledger server with the controller credential; it keeps no folder."""
 
-    def __init__(self, base: str, credential: str) -> None:
-        self.base, self.credential = base, credential
+    def __init__(self, base: str, credential: str, store: RedisStore) -> None:
+        self.base, self.credential, self.store = base, credential, store
 
     def client(self) -> ResourceClient:
         return ResourceClient(self.base, {"X-Controller-Credential": self.credential})
@@ -47,7 +50,12 @@ class HostedLedger:
             key = _task_key(op)
             task, revision = self.fetch(slug, key)
             write = _Write(self, slug, key, revision)
+            task_id, receipts = key.split("/")[1], self.store.key(slug, RECEIPTS_KEY, key)
+            if stored := self.store.redis.get(receipts):
+                write.meta = {RECEIPTS: {task_id: json.loads(stored)}}
             gate.apply({"tasks": [] if task is None else [task]}, op, write, write.send)
+            if (kept := write.meta.get(RECEIPTS, {}).get(task_id)) is not None:
+                self.store.redis.set(receipts, json.dumps(kept))
             rev, rejected = write.rev, rejected + write.rejected
         return {"_meta": {"rev": rev}}, rejected
 

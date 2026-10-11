@@ -9,7 +9,9 @@ import new_ledger
 import pytest
 
 from scripts.hive import auth as hive_auth
-from scripts.swarm_ledger import ledger_server
+from scripts.swarm import ledger_read, profile_choice, prompt
+from scripts.swarm_ledger import ledger, ledger_close, ledger_server
+from scripts.swarm_ledger.api.client import ResourceClient
 from scripts.swarm_ledger.repository import repository
 from scripts.swarm_v2.api.tasks import RevisionConflict, spec_revision
 from scripts.swarm_v2.auth_context import GrantRefused
@@ -58,17 +60,20 @@ def hosted(store, ledger_dir):
     ):
         thread.start()
         try:
-            yield SimpleNamespace(remote=remote, folder=ledger_dir)
+            yield SimpleNamespace(remote=remote, folder=ledger_dir, store=store)
         finally:
             httpd.shutdown()
             httpd.server_close()
             thread.join(timeout=2)
 
 
-def _hold(holder, tmp_path):
+OVERVIEW = "Tasks the hosted ledger server holds for the controller"
+
+
+def _hold(holder, tmp_path, overview=OVERVIEW):
     content = {
         "title": "Hosted ledger fixture",
-        "overview": "Tasks the hosted ledger server holds for the controller",
+        "overview": overview,
         "sources": [],
         "phases": [{"title": "Ledger", "description": "Tasks read through the hosted server"}],
         "tasks": [],
@@ -80,7 +85,7 @@ def _hold(holder, tmp_path):
 
 
 def _hosted_ledger(hosted):
-    return HostedLedger(hosted.remote["LEDGER_URL"], hosted.remote[_cs().CREDENTIAL_ENV])
+    return HostedLedger(hosted.remote["LEDGER_URL"], hosted.remote[_cs().CREDENTIAL_ENV], hosted.store)
 
 
 def _closed():
@@ -308,7 +313,7 @@ def test_an_unreachable_hosted_server_on_write_is_a_dependency_failure(hosted, t
 
 def test_an_unreachable_hosted_server_on_read_is_a_dependency_failure(hosted):
     with pytest.raises(GrantRefused) as raised:
-        HostedLedger(_closed(), hosted.remote[_cs().CREDENTIAL_ENV]).read(SLUG, "tasks/t1")
+        HostedLedger(_closed(), hosted.remote[_cs().CREDENTIAL_ENV], hosted.store).read(SLUG, "tasks/t1")
 
     assert raised.value.error_class == "dependency_unavailable"
     assert str(raised.value) == REFUSED_CONNECTION
@@ -324,7 +329,7 @@ def test_a_refused_controller_credential_on_read_is_a_dependency_failure(hosted,
     _hold("engineer@323133-0300", tmp_path)
 
     with pytest.raises(GrantRefused) as raised:
-        HostedLedger(hosted.remote["LEDGER_URL"], "wrong").read(SLUG, "tasks/t1")
+        HostedLedger(hosted.remote["LEDGER_URL"], "wrong", hosted.store).read(SLUG, "tasks/t1")
 
     assert raised.value.error_class == "dependency_unavailable"
     assert str(raised.value) == (
@@ -374,3 +379,74 @@ def test_a_local_controller_still_mounts_its_own_ledger_folder(store, tmp_path):
         assert (service.hosted_ledger, service.ledger_folder) == (None, folder)
     finally:
         service.stop()
+
+
+def test_a_replayed_progress_after_newer_progress_is_answered_from_the_controller_receipts(deployed):
+    url = f"{deployed.base}/v2/tasks/t1/comments"
+    older = {"operation_id": "op-a", "task_generation": 1, "text": PROGRESS}
+    newer = {"operation_id": "op-b", "task_generation": 1, "text": "Opened the pull request for review"}
+    first = _post(url, deployed.token, older)
+    _post(url, deployed.token, newer)
+
+    with patch.object(ResourceClient, "mutate", side_effect=AssertionError("the replay reached the hosted server")):
+        again = _post(url, deployed.token, older)
+
+    assert again == first
+    assert first[0] == 200
+    assert [entry["text"] for entry in _held_task()["comments"]] == ["Opened the pull request for review"]
+
+
+def test_a_deployed_controller_without_its_credential_is_refused_at_start(hosted, store, tmp_path):
+    environ = {
+        **_environ(tmp_path),
+        **hosted.remote,
+        _cs().PORT_ENV: str(_free_port()),
+        _cs().SWARM_ENV: SLUG,
+        _cs().CREDENTIAL_ENV: "",
+    }
+
+    with pytest.raises(_cs().ControlError) as raised:
+        _cs().host(environ, store, "hive-fixture")
+
+    assert str(raised.value) == "the hosted ledger needs AGENTIHOOKS_CONTROLLER_CREDENTIAL"
+
+
+@pytest.fixture
+def controller_reads(hosted, tmp_path):
+    empty = tmp_path / "controller-ledger"
+    with patch.object(ledger, "BASE", ""), patch.dict(os.environ, {"LEDGER_DIR": str(empty)}):
+        for name in PINNED:
+            os.environ.pop(name, None)
+        yield hosted
+    assert not empty.exists()
+
+
+def test_profile_choice_reads_project_and_phase_intent_through_the_hosted_server(controller_reads, tmp_path):
+    _hold("engineer@323133-0300", tmp_path)
+
+    state = profile_choice.state(SLUG, {"id": "t1", "phase": "p1"})
+
+    assert (state["project_intent"], state["phase_intent"]) == (
+        OVERVIEW,
+        "Ledger: Tasks read through the hosted server",
+    )
+
+
+def test_the_hosted_read_returns_only_the_parts_asked_for(controller_reads, tmp_path):
+    _hold("engineer@323133-0300", tmp_path)
+
+    assert ledger_read.parts(SLUG, "overview") == {"overview": OVERVIEW}
+
+
+def test_the_prompt_summary_reads_the_close_summary_through_the_hosted_server(controller_reads, tmp_path):
+    _hold("engineer@323133-0300", tmp_path, overview=f"{OVERVIEW}{ledger_close.MARK}Stopped after the hosted reads")
+
+    assert prompt.summary_lines(SLUG) == [
+        "Ledger summary from the previous close:",
+        "Summary\nStopped after the hosted reads",
+        "In your first ledger chat line, name this summary and say where the work stopped in plain words.",
+    ]
+
+
+def test_a_ledger_the_hosted_server_lacks_reads_as_empty(controller_reads):
+    assert ledger_read.parts("absent-ledger", "overview", "phases") == {}

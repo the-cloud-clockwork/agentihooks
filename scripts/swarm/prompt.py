@@ -1,7 +1,6 @@
 """The opening prompt of a swarm agent: one task, one life; or the master, who stays for the life of the swarm."""
 
 import json
-import os
 
 from scripts.doctor import priming
 from scripts.handoff.check import section
@@ -173,10 +172,9 @@ def peer_lines(peer):
 
 
 def summary_lines(slug):
-    from scripts.swarm_ledger.repository.folder import ledger_folder
-    from scripts.swarm_ledger.repository.sqlite import read_ledger
+    from scripts.swarm import ledger_read
 
-    overview = str((read_ledger(ledger_folder(os.environ), slug, "overview") or {}).get("overview"))
+    overview = str(ledger_read.parts(slug, "overview").get("overview"))
     _, marker, summary = overview.partition(ledger_close.MARK)
     if not marker:
         return []
