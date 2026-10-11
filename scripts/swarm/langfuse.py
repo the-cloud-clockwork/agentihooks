@@ -1,7 +1,10 @@
+import json
 from collections import defaultdict
+from datetime import datetime, timezone
 
 from scripts.swarm.health import standing
 from scripts.swarm.langfuse_config import Limits
+from scripts.swarm.langfuse_read import read_summary
 
 PREFIX = "langfuse_account_"
 
@@ -43,3 +46,27 @@ def apply(redis, slug: str, summary: dict, bindings: list, now_ms: int, limits: 
         if stage.startswith(PREFIX) and stage.removeprefix(PREFIX) not in grouped:
             standing.clear(redis, slug, stage)
     return len(grouped)
+
+
+def refresh(store, slug: str, now_ms: int, read=read_summary, limits: Limits = Limits()) -> list[str]:
+    key = f"agentihooks:swarm:{slug}:langfuse-summary"
+    raw = store.redis.get(key)
+    cached = json.loads(raw) if raw else {}
+    if "tried_at" in cached and now_ms - cached["tried_at"] < limits.interval_ms:
+        return []
+    window = {
+        "fromTimestamp": datetime.fromtimestamp((now_ms - limits.window_ms) / 1000, timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        ),
+        "toTimestamp": datetime.fromtimestamp(now_ms / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    record = {**cached, "tried_at": now_ms}
+    try:
+        sample = read(slug, window, limits.read_timeout_seconds)
+        count = apply(store.redis, slug, sample, store.execution_registry.records(slug), now_ms, limits)
+    except Exception as exc:
+        record["error"] = type(exc).__name__
+        store.redis.set(key, json.dumps(record))
+        return []
+    store.redis.set(key, json.dumps({"tried_at": now_ms, "at": now_ms, "accounts": count}))
+    return []
