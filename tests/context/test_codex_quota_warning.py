@@ -43,7 +43,6 @@ def codex(tmp_path, monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
     monkeypatch.delenv("AH_ROUTE_API", raising=False)
     monkeypatch.setattr(qp, "AGENTIHOOKS_HOME", tmp_path / "agentihooks")
-    monkeypatch.setattr("scripts.codex_router.default_signed_in", lambda environ, run=None: True)
     monkeypatch.setattr("hooks.context.account_sessions.agent_pid", lambda start=None: 1)
     monkeypatch.setattr("hooks.context.account_sessions.session_account", lambda pid: {1: "alpha"}[pid])
     return home
@@ -144,6 +143,7 @@ def spent(codex, monkeypatch):
     now = time.time()
     _rollout(codex, SID, 10.0, 98.5, int(now + 3600), int(now + 86400))
     _rollout(codex, BETA, 10.0, 30.0, int(now + 3600), int(now + 86400))
+    monkeypatch.setenv("AH_CX_TOKEN_alpha", "alpha-token")
     monkeypatch.setenv("AH_CX_TOKEN_beta", "beta-token")
     monkeypatch.setattr(
         "scripts.codex_router._registry", lambda: {SID: {"account": "alpha"}, BETA: {"account": "beta"}}
@@ -267,6 +267,7 @@ def test_codex_candidates_cover_idle_accounts_and_passed_resets_and_the_default_
     monkeypatch.delenv("AH_CX_TOKEN_gamma")
     monkeypatch.delenv("AH_CX_TOKEN_beta")
     monkeypatch.setattr("hooks.context.account_sessions.codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr("scripts.codex_router.default_signed_in", lambda environ, run=None: True)
     assert [c.account for c in qp._codex_accounts()] == ["default"]
 
 
