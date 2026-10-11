@@ -31,6 +31,8 @@ MERGED_MASTER_MS = 20 * MINUTE_MS
 RED_QUIET_MS = 20 * MINUTE_MS
 SENT_TTL_S = 30 * 24 * 3600
 SENDER = "swarm"
+EVENTS_CURSOR = "events-cursor"
+RELAYED = "agent follow ups, questions and task changes"
 OPERATOR = "operator"
 ASK_WORDS = 12
 RED = {"FAILURE", "ERROR", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"}
@@ -317,10 +319,9 @@ def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
     events = doc.get("_meta", {}).get("events", [])
     tasks = {t["id"]: t for t in doc.get("tasks", [])}
     raised = _raised_for_operator(doc, events)
-    gap = _history_gap(mail, doc, store.redis.get(store.key(slug, "events-cursor")))
     return (
-        gap
-        + _events(mail, new_events(store, slug, doc, "events-cursor"), tasks, raised)
+        _events(mail, new_events(store, slug, doc, EVENTS_CURSOR, RELAYED), tasks, raised)
+        + _history_gaps(mail)
         + _followups(mail, doc, events, ledger, now_ms)
         + _pull_requests(mail, tasks.values(), now_ms, github)
         + _settle_red_notices(mail, github)
@@ -328,16 +329,17 @@ def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
     )
 
 
-def _history_gap(mail, doc, cursor):
-    trimmed = doc.get("_meta", {}).get("events_trimmed")
-    if cursor is None or trimmed is None or trimmed <= int(cursor):
-        return []
-    text = (
-        f"Ledger {mail.slug} trimmed its history after revision {cursor} through revision {trimmed} before the tick "
-        "passed it on, so agent follow ups, questions and task changes in that range reached no one. "
-        "Read the ledger for them."
-    )
-    return mail.send(f"history-gap:{cursor}:{trimmed}", mail.master, text)
+def _history_gaps(mail):
+    key, sent = mail.store.key(mail.slug, "history-gaps"), []
+    for gap, subject in mail.store.redis.hgetall(key).items():
+        _, cursor, trimmed = gap.rsplit(":", 2)
+        text = (
+            f"Ledger {mail.slug} trimmed its history after revision {cursor} through revision {trimmed} before the "
+            f"tick read it, so {subject} in that range reached no one. Read the ledger for them."
+        )
+        sent += mail.send(f"history-gap:{gap}", mail.master, text)
+        mail.store.redis.hdel(key, gap)
+    return sent
 
 
 def _raised_for_operator(doc, events):
@@ -411,12 +413,16 @@ def _finding_owner(mail, found):
     return mail.owner(f"tasks/{task}") if task else mail.master
 
 
-def new_events(store, slug, doc, cursor_name):
+def new_events(store, slug, doc, cursor_name, subject):
+    """Events past the named cursor, which moves to the ledger revision; history trimmed past it is kept as a gap."""
     key, rev = store.key(slug, cursor_name), doc["_meta"]["rev"]
     cursor = store.redis.get(key)
     store.redis.set(key, rev)
     if cursor is None:
         return []
+    trimmed = doc["_meta"].get("events_trimmed")
+    if trimmed is not None and trimmed > int(cursor):
+        store.redis.hset(store.key(slug, "history-gaps"), f"{cursor_name}:{cursor}:{trimmed}", subject)
     return [e for e in doc["_meta"].get("events", []) if int(cursor) < e.get("rev", 0) <= rev]
 
 
