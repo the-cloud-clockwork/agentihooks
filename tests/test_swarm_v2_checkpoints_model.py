@@ -38,7 +38,7 @@ def registration(task: str = "t1", execution: str = "e1", generation: int = 2) -
 
 
 def store(root: Path, **grant) -> base.ArtifactStore:
-    return base.ArtifactStore(local.LocalBackend(root), lambda token: registration(**grant), "grant")
+    return base.ArtifactStore(local.LocalBackend(root / "durable"), lambda token: registration(**grant), "grant")
 
 
 def upload(target: base.ArtifactStore, bundle: dict, skip: tuple[str, ...] = ()) -> None:
@@ -256,7 +256,7 @@ def test_a_corrupt_object_blocks_commit_and_verification(native, tmp_path):
     validator = model.Validator(target)
     assert validator.commit(native["manifest"]).authoritative
     sha = native["manifest"]["inventory"]["native_session"]["sha256"]
-    path = tmp_path / target.scope.key("objects", sha)
+    path = tmp_path / "durable" / target.scope.key("objects", sha)
     path.write_bytes(b"x" * path.stat().st_size)
     expected = verdict(model.INCOMPLETE, model.NONE, "corrupt_object")
     assert validator.verify("ckpt-native-0001") == expected
@@ -269,7 +269,7 @@ def test_a_corrupt_or_unreadable_manifest_is_never_authoritative(native, tmp_pat
     validator = model.Validator(target)
     validator.commit(native["manifest"])
     ref = target.recorded("ckpt-native-0001")
-    path = tmp_path / target.scope.key("objects", ref.sha256)
+    path = tmp_path / "durable" / target.scope.key("objects", ref.sha256)
     path.write_bytes(b"{" * ref.size)
     assert validator.verify("ckpt-native-0001") == verdict(model.INCOMPLETE, model.NONE, "corrupt_manifest")
     target.put("not-json", b"\xff not json")
