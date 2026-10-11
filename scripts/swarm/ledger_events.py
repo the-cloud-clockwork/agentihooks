@@ -387,19 +387,14 @@ def findings_pass(inbox, store, slug, shown, doc=None):
             f"New health finding on swarm {slug}: {found['summary']} ({found['kind']}). Give it a verdict: "
             f'agentihooks swarm {slug} verdict {found["id"]} {"|".join(VERDICTS)} --note "<why>"'
         )
-        sent += mail.send(f"finding:{found['id']}:{judged}", mail.owner(_about(mail, found)), text)
+        sent += mail.send(f"finding:{found['id']}:{judged}", _finding_owner(mail, found), text)
     return sent
 
 
-def _about(mail, found):
-    subject = found.get("subject", "")
-    if found["kind"] in TASK_FINDINGS:
-        task = subject
-    elif found["kind"] in HELD_FINDINGS:
-        task = mail.held.get(subject, "")
-    else:
-        task = ""
-    return f"tasks/{task}" if task else ""
+def _finding_owner(mail, found):
+    kind, subject = found["kind"], found["subject"]
+    task = subject if kind in TASK_FINDINGS else kind in HELD_FINDINGS and mail.held.get(subject)
+    return mail.owner(f"tasks/{task}") if task else mail.master
 
 
 def new_events(store, slug, doc, cursor_name):

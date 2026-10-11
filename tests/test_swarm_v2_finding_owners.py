@@ -91,3 +91,17 @@ def test_an_agent_behaviour_finding_reaches_the_lead_even_while_the_agent_holds_
     store, inbox = swarm
     ledger_events.findings_pass(inbox, store, SLUG, [finding("over monitoring", "sw-eng-2")], DOC)
     assert len(texts(inbox, LEAD)) == 1 and texts(inbox, SECOND) == []
+
+
+def test_the_findings_pass_reports_every_finding_it_sent(swarm):
+    store, inbox = swarm
+    found = [finding("stalled", "sw-eng-2"), finding("stalled", "sw-eng-1")]
+    sent = ledger_events.findings_pass(inbox, store, SLUG, found, DOC)
+    assert sent == [f"told {SECOND}: finding:stalled/sw-eng-2:0", f"told {LEAD}: finding:stalled/sw-eng-1:0"]
+
+
+def test_a_task_finding_reaches_the_lead_when_its_phase_owner_has_finished(swarm):
+    store, inbox = swarm
+    store.put_agent(SLUG, AgentRecord("sw-master-2", MASTER, MASTER, pane_id="pm2", seat=SECOND, state="finished"))
+    ledger_events.findings_pass(inbox, store, SLUG, [finding("stalled", "sw-eng-2")], DOC)
+    assert len(texts(inbox, LEAD)) == 1 and texts(inbox, SECOND) == []
