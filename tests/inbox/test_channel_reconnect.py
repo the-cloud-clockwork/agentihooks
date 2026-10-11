@@ -5,12 +5,12 @@ from scripts.inbox import channel
 pytestmark = [pytest.mark.xdist_group("mcp-sdk"), pytest.mark.usefixtures("recovery_deadline")]
 
 
-def test_running_channel_rechecks_pending_items_after_redis_returns(backend, monkeypatch):
+def test_running_channel_rechecks_pending_items_after_redis_returns(channel_backend, monkeypatch):
     import anyio
 
     from tests.inbox.test_channel_server import _message, session
 
-    server, inbox = backend
+    server, inbox = channel_backend
     monkeypatch.setattr(channel, "SETTLE_S", 0)
     monkeypatch.setattr(channel, "RECHECK_S", 0.02)
     real_sleep = anyio.sleep
@@ -49,13 +49,13 @@ def test_running_channel_rechecks_pending_items_after_redis_returns(backend, mon
         server.connected = True
 
 
-def test_channel_replaces_a_failed_subscriber_and_resets_its_backoff(backend, monkeypatch):
+def test_channel_replaces_a_failed_subscriber_and_resets_its_backoff(channel_backend, monkeypatch):
     import anyio
     from redis.exceptions import ConnectionError
 
     from tests.inbox.test_channel_server import session
 
-    server, inbox = backend
+    server, inbox = channel_backend
     subscriptions, reads = [], []
     real_pubsub, real_sleep = inbox.redis.pubsub, anyio.sleep
     monkeypatch.setattr(channel, "SETTLE_S", 0)
@@ -102,14 +102,14 @@ def test_channel_replaces_a_failed_subscriber_and_resets_its_backoff(backend, mo
     assert all(subscription.connection is None for subscription in subscriptions)
 
 
-def test_channel_opens_while_redis_is_down_and_delivers_after_restore(backend, monkeypatch):
+def test_channel_opens_while_redis_is_down_and_delivers_after_restore(channel_backend, monkeypatch):
     import anyio
     from redis.exceptions import RedisError
 
     from scripts.inbox.store import InboxError
     from tests.inbox.test_channel_server import _message, session
 
-    server, inbox = backend
+    server, inbox = channel_backend
     server.connected = False
     monkeypatch.setattr(channel, "SETTLE_S", 0)
     monkeypatch.setattr(channel, "RECHECK_S", 0.02)
@@ -188,14 +188,14 @@ def test_main_keeps_serving_when_redis_is_unavailable(monkeypatch):
 
 
 @pytest.mark.parametrize("startup", [False, True])
-def test_channel_reconnect_backoff_caps_at_thirty_seconds(backend, monkeypatch, startup):
+def test_channel_reconnect_backoff_caps_at_thirty_seconds(channel_backend, monkeypatch, startup):
     import anyio
     from redis.exceptions import RedisError
 
     from scripts.inbox.store import InboxError
     from tests.inbox.test_channel_server import session
 
-    server, inbox = backend
+    server, inbox = channel_backend
     server.connected = False
     delays, pending = [], []
     real_sleep = anyio.sleep
@@ -231,13 +231,13 @@ def test_channel_reconnect_backoff_caps_at_thirty_seconds(backend, monkeypatch, 
     assert delays == [1, 2, 4, 8, 16, 30, 30]
 
 
-def test_channel_closes_while_startup_reconnect_is_waiting(backend, monkeypatch):
+def test_channel_closes_while_startup_reconnect_is_waiting(channel_backend, monkeypatch):
     import anyio
 
     from scripts.inbox.store import InboxError
     from tests.inbox.test_channel_server import session
 
-    server, inbox = backend
+    server, inbox = channel_backend
     server.connected = False
     monkeypatch.setattr(channel, "SETTLE_S", 0)
 
