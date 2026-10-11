@@ -74,6 +74,13 @@ def test_a_lane_decision_is_recorded_without_the_classifier_and_never_kept(store
     assert cached(store) == {}
 
 
+def test_a_lane_pinned_to_a_profile_decides_it_without_the_classifier(store, asked):
+    config = SimpleNamespace(lanes={"eng": {"profile": "qa"}})
+    task = profile_first.decided("sw", config, store, PLACED, "eng", {"id": "t1"})
+    assert task["profile_decision"] == profile_choice.ProfileDecision("qa", "lane", "eng lane").record()
+    assert asked == []
+
+
 def test_an_explicit_profile_is_recorded_as_the_decision_without_the_classifier(store, asked):
     task = decided(store, {"id": "t1", "profile": "frontend"})
     assert (
@@ -136,7 +143,8 @@ def test_an_incomplete_relaunch_record_falls_back_to_the_handoff_launch(store, a
 
 
 def refusing_frontend(lane, task):
-    return "the workstation hive spawns eng work" if task["profile_decision"]["profile"] == "frontend" else ""
+    local = lane != "eng" or task["profile_decision"]["profile"] == "frontend"
+    return f"the workstation hive spawns {lane} work" if local else ""
 
 
 @pytest.mark.parametrize(
