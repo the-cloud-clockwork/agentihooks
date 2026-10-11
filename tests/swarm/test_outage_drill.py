@@ -247,6 +247,27 @@ def probe_recovery(drill, monkeypatch):
     return calls
 
 
+def test_channel_delivery_after_redis_recovery_is_confirmed_once(drill, monkeypatch):
+    from scripts.inbox import cli
+
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", drill.master.name)
+    drill.stop("redis")
+    assert cli.main(["send", drill.agents[0].name, "drill direct message"]) == 0
+    drill.recover()
+    found = drill.items()
+    assert len(found) == 1
+    [item] = found.values()
+    assert item.address in (drill.agents[0].name, drill.agents[0].seat)
+    drill.confirm()
+    drill.clock += MINUTE
+    drill.tick()
+    drill.confirm()
+    assert drill.confirmed == [item.id]
+    assert drill.inbox.get(item.id).state == "done"
+    states = [entry["state"] for entry in drill.inbox.history(item.id)]
+    assert states.count("delivered") == 1 and states.count("read") == 1
+
+
 @pytest.mark.parametrize("kind", ("redis", "network", "provider"))
 def test_every_sender_survives_an_outage_and_is_delivered_and_confirmed_once(drill, monkeypatch, kind):
     if kind == "provider":
