@@ -1,6 +1,8 @@
 import json
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -153,3 +155,43 @@ def test_restore_command_cannot_gain_operator_role_from_its_name(pending, monkey
     with pytest.raises(SwarmError, match="master or operator"):
         cli.cmd_restore_decision(pending.world.store, args)
     assert pending.world.protected() == before
+
+
+def test_overlapping_restore_decisions_accept_only_the_first_choice(pending, monkeypatch):
+    pending.world.checkpoints.by_execution[pending.old.execution_id] = pending.world.fx["first"]["checkpoints"]
+    read, authorized, released, reread = Event(), Event(), Event(), Event()
+    decide, authorize = pending.recovery.decision, pending.service.recovery_api._authorize
+    reads, callers = [], []
+
+    def stalled(execution_id):
+        known = decide(execution_id)
+        reads.append(execution_id)
+        if len(reads) == 1:
+            read.set()
+            assert released.wait(5)
+        else:
+            reread.set()
+        return known
+
+    def arriving(token, name):
+        authorize(token, name)
+        callers.append(name)
+        if len(callers) == 2:
+            authorized.set()
+
+    monkeypatch.setattr(pending.recovery, "decision", stalled)
+    monkeypatch.setattr(pending.service.recovery_api, "_authorize", arriving)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(post, pending, pending.token, {"agent": "coordinator", "choice": "fresh"})
+        assert read.wait(5)
+        second = pool.submit(post, pending, pending.token, {"agent": "coordinator", "choice": "resume"})
+        assert authorized.wait(5)
+        reread.wait(1)
+        released.set()
+        first_status, first_result = first.result(timeout=5)
+        second_status, second_result = second.result(timeout=5)
+    assert first_status == 200
+    assert first_result["mode"] == "fresh"
+    assert second_status == 409
+    assert second_result["message"] == "no recovery decision is pending for this attempt"
+    assert pending.recovery.decision(pending.old.execution_id).mode == "fresh"
