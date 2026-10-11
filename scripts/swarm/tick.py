@@ -598,14 +598,9 @@ def _claimable(slug, store, rows, doc, lane):
     for t in sorted(rows.values(), key=claim_order.key(rows)):
         if (
             t.get("lane") == lane
-            and t.get("state") == "open"
             and t["id"] not in awaiting
-            and not t.get("out_of_scope")
-            and not t.get("merged_into")
+            and ready(t, rows, doc, graph, fix)
             and store.claimant(slug, t["id"]) is None
-            and phase_state.admits(t, doc)
-            and not freeze.held(t, doc, graph, fix)
-            and _unblocked(t, rows)
         ):
             mine = t.get("territory") or []
             if any(_overlaps(mine, other) for other in held):
@@ -614,6 +609,17 @@ def _claimable(slug, store, rows, doc, lane):
             clear.append(t)
             held.append(mine)
     return clear + overlapping
+
+
+def ready(task, rows, doc, graph, fix):
+    return (
+        task.get("state") == "open"
+        and not task.get("out_of_scope")
+        and not task.get("merged_into")
+        and phase_state.admits(task, doc)
+        and not freeze.held(task, doc, graph, fix)
+        and _unblocked(task, rows)
+    )
 
 
 def _launch_order(slug, store, tasks):

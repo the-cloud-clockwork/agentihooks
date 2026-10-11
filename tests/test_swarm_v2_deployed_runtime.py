@@ -22,9 +22,10 @@ from scripts.swarm_v2.kubernetes import operator_terminal
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 from scripts.swarm_v2.kubernetes.client import ApiRefused
 from scripts.swarm_v2.kubernetes.grants import PodGrants
-from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, load_policy
-from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL, owner_for
+from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, load_policy, pod_name
+from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL, OWNER_LABEL, owner_for
 from scripts.swarm_v2.launch import DistributedLaunch, LaunchTerms
+from scripts.swarm_v2.runtime import observe
 from scripts.swarm_v2.runtime.base import LOCAL, SpawnRequest
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
 from tests import sv2_hdr03_cases
@@ -558,6 +559,32 @@ def test_a_start_without_an_api_address_logs_no_kubernetes_runtime(tmp_path, cap
         assert capsys.readouterr().out == ""
     finally:
         service.stop()
+
+
+def test_the_deployed_controller_adds_each_remote_pod_reading_to_its_observations(tmp_path, monkeypatch):
+    store, pods, listed = _store(), Pods("swarm-pod-proof"), []
+
+    def running(selector):
+        name = pod_name(selector.rsplit("=", 1)[1])
+        return [{"metadata": {"name": name, "uid": "uid-1"}, "status": {"phase": "Running"}}]
+
+    monkeypatch.setattr(pods, "list_pods", lambda selector: listed.append(selector) or running(selector))
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: pods)
+    service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    try:
+        target = {"pod_namespace": "swarm-pod-proof", "pod_name": "worker-t1"}
+        record = AgentRecord(
+            store.next_name(SLUG, "eng"), "eng", "t1", seat=SEAT, runtime_backend=BACKEND, runtime_target=target
+        )
+        agent = service.controller.admit(record, "")
+        service.observe(60.0)
+    finally:
+        service.stop()
+
+    assert observe.stored(store, SLUG, agent.execution_id).sources == {
+        "kubernetes": {"reading": "ok", "observed_at": 60.0, "value": "Running"},
+    }
+    assert f"{OWNER_LABEL}={owner_for(SLUG)},{EXECUTION_LABEL}={agent.execution_id}" in listed
 
 
 def test_the_launch_record_names_the_admitted_execution_and_the_worker_settings(tmp_path, registry):

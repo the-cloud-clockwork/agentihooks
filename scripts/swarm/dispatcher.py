@@ -1,8 +1,9 @@
 """The dispatcher's tick step: rank by the open work each task unblocks, grouping and the priority sweep, by autonomy.
 
-At delegate and full it raises the top leverage tasks to high and never changes a rank someone set; below delegate it
-proposes each to the master. Every action is a gate log row, a dispatch metrics row naming its rule and, for a rank, a
-comment on the task.
+Each tick it orders the claimable tasks in focus by leverage. At delegate and full it raises the top ones to high and
+lowers a high rank it set itself once that task leaves the top, never changing a rank someone else set; below delegate
+it proposes each raise to the master. Every action is a gate log row, a dispatch metrics row naming its rule and, for
+a rank, a comment on the task.
 """
 
 from dataclasses import dataclass
@@ -10,7 +11,7 @@ from functools import partial
 
 from scripts.gates import log as gate_log
 from scripts.inbox.store import InboxStore
-from scripts.swarm import bottleneck, grouping, metrics_outbox, priority_sweep
+from scripts.swarm import bottleneck, freeze, grouping, metrics_outbox, priority_sweep
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import SwarmError
@@ -19,7 +20,7 @@ from scripts.swarm_ledger.repository import hierarchy
 AUTHOR = "dispatcher"
 APPLIES = ("delegate", "full")
 TOP = 3
-RANK = "high"
+RANK, LOWER = "high", "normal"
 LANES = {"engineering": "eng", "ci": "ci"}
 LEVERAGE, GROUPING, PRIORITIES = "leverage-rank", "grouping", "priority-sweep"
 SKIPPED = "skipped "
@@ -27,6 +28,9 @@ WINDOW = (None, "high", "urgent")
 UNCOMMENTED = "; the ledger did not take its comment"
 TABLE = metrics_outbox.Table("dispatch_actions", (("rule", "String"), ("mode", "String"), ("action", "String")))
 RAISED = "The dispatcher raised this task to high rank because it unblocks {work}."
+LOWERED = "The dispatcher lowered this task to normal rank because {why}."
+OUTRANKED = "it unblocks {work} and {top} claimable tasks in focus unblock more"
+UNREADY = "it is no longer a claimable task in focus that unblocks open work"
 PROPOSED = "The dispatcher proposed high rank for this task to the master because it unblocks {work}."
 PROPOSE = (
     "The dispatcher proposes rank high for task {task} titled {title}: it unblocks {work}. If the operator agrees, "
@@ -77,18 +81,30 @@ def ordered(doc: dict, named: str, scores: dict) -> list[str]:
 
 
 def rank_pass(slug, config, store, ledger, doc, now_ms):
-    scores, known = leverage(doc), {t["id"]: t for t in doc["tasks"]}
+    from scripts.swarm import tick
+
+    scores, known, owned = leverage(doc), {t["id"]: t for t in doc["tasks"]}, _owned(doc)
     named = bottleneck.read(store, slug).get("bottleneck")
-    window = [known[task_id] for task_id in ordered(doc, named, scores) if known[task_id].get("rank") in WINDOW]
-    unranked = [(task, _work(scores[task["id"]])) for task in window[:TOP] if "rank" not in task]
+    graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
+    queue = [task_id for task_id in ordered(doc, named, scores) if tick.ready(known[task_id], known, doc, graph, fix)]
+    top = [task_id for task_id in queue if task_id in owned or known[task_id].get("rank") in WINDOW][:TOP]
+    raises = [
+        (known[task_id], _work(scores[task_id]))
+        for task_id in top
+        if known[task_id].get("rank") != RANK and (task_id in owned or "rank" not in known[task_id])
+    ]
     if config.autonomy in APPLIES:
-        step = partial(_raise, slug, ledger)
+        stale = [t for t in doc["tasks"] if t["id"] in owned and t.get("rank") == RANK and _open(t)]
+        lowers = [(t, _why(t["id"], queue, scores)) for t in stale if t["id"] not in top]
+        steps = [partial(_lower, slug, ledger, *row) for row in lowers]
+        steps += [partial(_raise, slug, ledger, *row) for row in raises]
     else:
-        step = partial(_propose, slug, ledger, Mail(InboxStore(store.redis), store, slug))
+        mail = Mail(InboxStore(store.redis), store, slug)
+        steps = [partial(_propose, slug, ledger, mail, *row) for row in raises]
     done = []
     try:
-        for task, work in unranked:
-            if action := step(task, work):
+        for step in steps:
+            if action := step():
                 done.append(action)
     finally:
         errors = log(slug, done, now_ms)
@@ -96,13 +112,26 @@ def rank_pass(slug, config, store, ledger, doc, now_ms):
 
 
 def _raise(slug, ledger, task, work):
+    text = f"ranked task {task['id']} high: it unblocks {work}"
+    return _rank(slug, ledger, task, RANK, text, RAISED.format(work=work))
+
+
+def _lower(slug, ledger, task, why):
+    text = f"lowered task {task['id']} to normal: {why}"
+    return _rank(slug, ledger, task, LOWER, text, LOWERED.format(why=why))
+
+
+def _rank(slug, ledger, task, rank, text, comment):
     try:
-        ledger.rank_task(slug, task["id"], RANK, AUTHOR, if_unranked=True)
+        ledger.rank_task(slug, task["id"], rank, AUTHOR, if_owned=True)
     except LedgerRefused:
         return None
-    task["rank"] = RANK
-    text = f"ranked task {task['id']} high: it unblocks {work}"
-    return Action(LEVERAGE, "apply", text + _comment(slug, ledger, task, RAISED.format(work=work)), task)
+    task["rank"] = rank
+    return Action(LEVERAGE, "apply", text + _comment(slug, ledger, task, comment), task)
+
+
+def _why(task_id, queue, scores):
+    return OUTRANKED.format(work=_work(scores[task_id]), top=TOP) if task_id in queue else UNREADY
 
 
 def _comment(slug, ledger, task, text):
@@ -163,6 +192,13 @@ def dispatch_row(slug, index, action, now_ms):
 
 def _open(task):
     return task.get("state") != "done" and not task.get("out_of_scope")
+
+
+def _owned(doc):
+    stamps = doc.get("_meta", {}).get("stamps", {})
+    return {
+        t["id"] for t in doc["tasks"] if "rank" in t and stamps.get(f"tasks/{t['id']}/rank", {}).get("by") == AUTHOR
+    }
 
 
 def _lineage(node, nodes):

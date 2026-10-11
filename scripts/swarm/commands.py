@@ -20,13 +20,13 @@ def bind(store: RedisStore, slug: str, owner: str) -> bool:
     return lease.acquire(store, slug, owner) is not None
 
 
-def submit(store: RedisStore, slug: str, command: str, argv: list[str], *, epoch: int | None = None) -> dict:
+def prepare(store: RedisStore, slug: str, command: str, argv: list[str], *, epoch: int | None = None) -> dict:
     store.config(slug)
     held = lease.current(store, slug)
     if epoch is not None and (held is None or held.epoch != epoch):
         raise lease.SwarmError("the controller lease is stale")
     payload = json.dumps([command, argv], separators=(",", ":"))
-    row = {
+    return {
         "id": uuid.uuid4().hex,
         "command": command,
         "argv": argv,
@@ -36,10 +36,18 @@ def submit(store: RedisStore, slug: str, command: str, argv: list[str], *, epoch
         "state": "pending",
         "created_at": time.time_ns() // 1_000_000,
     }
+
+
+def enqueue(pipe, store: RedisStore, slug: str, row: dict) -> None:
+    pipe.hset(store.key(slug, "commands"), row["id"], json.dumps(row))
+    pipe.rpush(store.key(slug, "command-pending"), row["id"])
+    pipe.rpush(store.key(slug, "command-order"), row["id"])
+
+
+def submit(store: RedisStore, slug: str, command: str, argv: list[str], *, epoch: int | None = None) -> dict:
+    row = prepare(store, slug, command, argv, epoch=epoch)
     with store.redis.pipeline() as pipe:
-        pipe.hset(store.key(slug, "commands"), row["id"], json.dumps(row))
-        pipe.rpush(store.key(slug, "command-pending"), row["id"])
-        pipe.rpush(store.key(slug, "command-order"), row["id"])
+        enqueue(pipe, store, slug, row)
         pipe.execute()
     return row
 
@@ -90,6 +98,8 @@ def publish(store: RedisStore, slug: str, status: dict, tails: dict) -> None:
 
 
 def view(store: RedisStore, slug: str) -> dict:
+    from scripts.swarm import lifecycle
+
     config = store.config(slug)
     data = json.loads(store.redis.get(store.key(slug, "published")) or "{}")
     status = data.get("status", {"agents": [], "tasks": {}})
@@ -102,6 +112,7 @@ def view(store: RedisStore, slug: str) -> dict:
         "terminals": terminals,
         "executions": executions,
         "ledger_state_projection_errors": errors,
+        "lifecycle": lifecycle.view(store, slug),
     }
 
 

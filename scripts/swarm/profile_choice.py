@@ -1,6 +1,5 @@
 """The typed profile decision made before every swarm launch: explicit task profile, fixed lane, else the classifier."""
 
-import os
 from dataclasses import asdict, dataclass, replace
 
 from hooks.classifier import ClassifierUnavailable, decide, definitions, runner
@@ -152,10 +151,9 @@ def anchors(task: dict) -> tuple:
 
 
 def _ledger(slug: str) -> dict:
-    from scripts.swarm_ledger.repository.folder import ledger_folder
-    from scripts.swarm_ledger.repository.sqlite import read_ledger
+    from scripts.swarm import ledger_read
 
-    return read_ledger(ledger_folder(os.environ), slug, "overview", "phases") or {}
+    return ledger_read.parts(slug, "overview", "phases")
 
 
 def _remedy(slug: str, task: dict) -> str:
