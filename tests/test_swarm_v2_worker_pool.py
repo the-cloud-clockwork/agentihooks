@@ -261,7 +261,14 @@ def test_the_reading_takes_the_quota_when_it_is_tighter_than_the_pool():
 def test_the_reading_takes_the_pool_when_it_is_tighter_than_the_quota():
     found = pool.WorkerPool(Listing([_pod(), _pod()], quotas=[_quota(ANTON)]), POOL, LAUNCH)()
 
+    assert pool.quota_room([_quota(ANTON)], LAUNCH).room == 8
     assert (found.room, found.limit) == (5, "memory")
+
+
+def test_a_fractional_pod_quota_counts_whole_pods():
+    assert pool.quota_room([_quota({"pods": "2.5"})], LAUNCH) == Room(
+        2, "worker namespace quota leaves 2 Pods; 2 more fit at 2000m and 4096 MiB each", "quota pods"
+    )
 
 
 def test_an_undeclared_pool_sizes_the_room_from_the_quota_alone():
