@@ -187,11 +187,12 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             runtime or routed(herdr=HerdrRuntime()),
             os.environ.get("AGENTIHOOKS_DEPLOYMENT", controller.LOCAL),
         )
-        from scripts.swarm.health import spawn_stall
+        from scripts.swarm.health import prompt_backlog, spawn_stall
 
         pressured = skip_refused(incidents.host_pressure, store, slug)
         restarted = pressured + timing.call(ledger_watchdog.watch, store, slug, ledger, runtime)
         probed = restarted + timing.call(ledger_probe.observe, store, slug, ledger, runtime, now_ms())
+        timing.call(prompt_backlog.observe, store, slug, now_ms() // 1000)
         with spawn_stall.watch(store, slug, ledger, now_ms, runtime):
             controls = timing.call(command_runner.consume, store, slug)
             if timing.call(ledger.binned, slug):

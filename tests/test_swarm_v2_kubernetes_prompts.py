@@ -362,6 +362,26 @@ def test_a_prompt_herdr_refuses_is_refused_with_the_exit(tmp_path, monkeypatch):
     )
 
 
+def test_sixty_five_refused_prompts_never_stop_the_next_nudge(tmp_path, monkeypatch):
+    fleet, _, prompts = world(tmp_path)
+    answer = fleet.__call__
+
+    def refused_prompt(command):
+        if command[3:5] == ["agent", "prompt"]:
+            return subprocess.CompletedProcess(command, 3, "", "agent not found")
+        return answer(command)
+
+    monkeypatch.setattr(prompts.router, "run", refused_prompt)
+    refused = {prompts.command(remote(), "wake").status for _ in range(65)}
+    monkeypatch.setattr(prompts.router, "run", fleet)
+
+    outcome = prompts.command(remote(), "wake")
+
+    assert refused == {Status.REFUSED}
+    assert outcome.status == Status.OK
+    assert fleet.received()[EXE_A] == [marked("wake")]
+
+
 def test_an_incompatible_server_is_refused_with_its_verdict(tmp_path, monkeypatch):
     fleet, client, prompts = world(tmp_path)
 

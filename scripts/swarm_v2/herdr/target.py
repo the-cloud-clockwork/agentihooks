@@ -2,6 +2,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
@@ -22,6 +23,8 @@ DELIVERIES = "deliveries.json"
 VERSION = 1
 KEPT = 1024
 PENDING_LIMIT = 64
+EXPIRY_S = 600
+REASON_CHARS = 200
 BARE = "a remote pane operation needs a saved machine profile, a remote session and a server incarnation"
 
 Run = Callable[[list[str]], subprocess.CompletedProcess]
@@ -80,6 +83,33 @@ def _agent_panes(reply: str) -> list[str] | None:
     return [agent["pane_id"] for agent in agents if isinstance(agent, dict) and agent.get("pane_id")]
 
 
+def _expire(entries: dict[str, dict], now: int) -> None:
+    for key, entry in entries.items():
+        if entry.get("state") == "pending" and now - entry.get("since", 0) >= EXPIRY_S:
+            entries[key] = {**entry, "state": "expired"}
+
+
+def _make_room(entries: dict[str, dict]) -> None:
+    pending = sorted((entry.get("since", 0), key) for key, entry in entries.items() if entry.get("state") == "pending")
+    for _, key in pending[: max(len(pending) - PENDING_LIMIT + 1, 0)]:
+        entries[key] = {**entries[key], "state": "expired"}
+
+
+def _refusal(done: subprocess.CompletedProcess) -> str:
+    detail = " ".join((done.stderr or "").split())[:REASON_CHARS]
+    return f"herdr exited {done.returncode}: {detail}" if detail else f"herdr exited {done.returncode}"
+
+
+def listing(entries: Mapping[str, dict], now: int) -> dict[str, list[dict]]:
+    current = dict(entries)
+    _expire(current, now)
+    rows = [{"operation_id": key, **entry} for key, entry in current.items()]
+    return {
+        "pending": [row for row in rows if row.get("state") == "pending"],
+        "settled": [row for row in rows if row.get("state") != "pending"],
+    }
+
+
 class Deliveries:
     """Durable operation ids: a pending entry is a send whose outcome is unknown and is never sent again."""
 
@@ -100,8 +130,8 @@ class Deliveries:
         return entries
 
     def save(self, entries: dict[str, dict]) -> None:
-        sent = [key for key, entry in entries.items() if entry.get("state") == "sent"]
-        dropped = set(sent[: max(len(sent) - KEPT, 0)])
+        settled = [key for key, entry in entries.items() if entry.get("state") != "pending"]
+        dropped = set(settled[: max(len(settled) - KEPT, 0)])
         kept = {key: entry for key, entry in entries.items() if key not in dropped}
         staged = self.path.with_name(f".{self.path.name}.tmp")
         staged.unlink(missing_ok=True)
@@ -128,6 +158,7 @@ class Router:
         self.store, self.catalog, self.qualifier, self.run = store, catalog, qualifier, run
         self.deliveries, self.mutations = Deliveries(journal), mutations
         self.mismatches: Counter = Counter()
+        self.clock: Callable[[], float] = time.time
 
     def _refuse(self, reason: str, message: str, profile_id: str = "bare") -> NoReturn:
         self.mismatches[(profile_id, reason)] += 1
@@ -236,17 +267,20 @@ class Router:
             held = entries.get(operation_id)
             if held is not None:
                 return self._replayed(held, target, key, operation_id)
-            if sum(entry.get("state") != "sent" for entry in entries.values()) >= PENDING_LIMIT:
-                raise EndpointRefused("journal_full", "too many pane sends await an audit of their unknown outcome")
+            now = int(self.clock())
+            _expire(entries, now)
+            _make_room(entries)
             argv = self.command(target, operation, *args)
             self._confirm(target)
-            entries[operation_id] = {"target": key, "state": "pending"}
+            entries[operation_id] = {"target": key, "state": "pending", "since": now}
             self.deliveries.save(entries)
             try:
                 done = self.run(argv)
             except (OSError, subprocess.TimeoutExpired):
                 raise EndpointRefused("ambiguous_delivery", f"{operation_id} may have reached {key}") from None
             if done.returncode != 0:
+                entries[operation_id] = {"target": key, "state": "refused", "reason": _refusal(done)}
+                self.deliveries.save(entries)
                 raise EndpointRefused("send_refused", f"herdr exited {done.returncode} for {operation_id} on {key}")
             entries[operation_id] = {"target": key, "state": "sent"}
             self.deliveries.save(entries)
@@ -255,6 +289,8 @@ class Router:
     def _replayed(self, held: dict, target: Target, key: str, operation_id: str) -> None:
         if held.get("target") != key:
             self._refuse("operation_reused", f"{operation_id} was sent to another pane", target.profile_id)
+        if held.get("state") == "refused":
+            raise EndpointRefused("send_refused", f"{operation_id} was refused on {key}: {held.get('reason')}")
         if held.get("state") != "sent":
             raise EndpointRefused("ambiguous_delivery", f"{operation_id} may have reached {key}")
 
@@ -264,7 +300,7 @@ class Router:
         with self.deliveries.locked():
             entries = self.deliveries.load()
             held = entries.get(operation_id)
-            if held is None or held.get("state") == "sent":
+            if held is None or held.get("state") not in ("pending", "expired"):
                 raise EndpointRefused("not_pending", f"{operation_id} has no unknown outcome to settle")
             if delivered:
                 entries[operation_id] = {**held, "state": "sent"}

@@ -19,6 +19,7 @@ EVIDENCE_CLASS = (
     "shapes of SV2-HDR-03 and serves agent get, agent prompt and pane send-text for Local and each saved machine "
     "from the fixture; no herdr process, SSH connection or cluster runs in these cases"
 )
+CLOCK = 1_000.0
 PANE_COMMANDS = {("agent", "get"), ("agent", "prompt"), ("pane", "send-text"), ("pane", "read")}
 
 
@@ -95,6 +96,7 @@ class Client:
         self.registrations = Registrations(Catalog(fleet), Store(root / "registrations.json"))
         self.qualifier = Qualifier(machine_probe(fleet))
         self.router = Router(self.registrations.store, Catalog(fleet), self.qualifier, fleet, root / DELIVERIES)
+        self.router.clock = lambda: CLOCK
 
     def register(self, desired: list[Endpoint]) -> dict:
         for endpoint in desired:
