@@ -44,6 +44,8 @@ class PodApi(Protocol):
 
     def create_config_map(self, body: dict) -> dict: ...
 
+    def delete(self, kind: str, name: str, uid: str) -> bool: ...
+
 
 class KubeHttp:
     def __init__(

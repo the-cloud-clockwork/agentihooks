@@ -189,12 +189,19 @@ launches `claude -p` and `codex exec` from fixture profiles and counts the
 sessions their SessionStart hooks registered. `scripts.swarm_v2.image_attestation`
 qualifies each target against the image manifest's pinned version and the
 accepted herdr contract of the local herdr 0.9.1 runtime path (protocol 22,
-endpoint protocol generation one and the health check capability, and every
-socket method the runtime calls). The contract leaves out `detached_server_daemon`: that flag
-reports whether a client spawned the server as a background daemon, and the
-supervisor runs `herdr server` in the foreground, where herdr 0.9.1 reports it
-false. Viewers attach and detach over the server socket, which protocol 22 and
-the socket methods cover. Qualification reports
+every socket method the runtime calls, and the server capabilities saved machine
+forwarding needs: endpoint protocol generation one, `surface_interest`,
+`health_check` and `detached_server_daemon`). herdr 0.9.1 reports
+`detached_server_daemon` true only when the server leads its own session, and
+`herdr machine add` refuses any other server as not ready for saved machines; the
+supervisor and the probe both start `herdr server` in a new session.
+`scripts.swarm_v2.herdr.capabilities` (SV2-HDR-01) holds that contract and the
+remote operation matrix; `python -m scripts.swarm_v2.herdr.capabilities TARGET
+INCARNATION` qualifies a saved machine before any remote terminal is promised
+(exit 0 compatible, 1 when the client and server pair is incompatible, 2
+unreachable or missing arguments), and
+`tests/integration/herdr_remote/run_remote_proof.sh`
+proves it against the pinned binary behind a private sshd. Qualification reports
 `worker_image_qualified_targets`. Any refused target, or a manifest naming another
 commit, leaves the image unpromotable and nothing is pushed. The same job builds
 an incompatible herdr fixture and requires its refusal, and qualifies the
