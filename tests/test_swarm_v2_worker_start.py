@@ -265,6 +265,20 @@ def test_the_public_image_ships_no_bundle_profile(tmp_path):
     ).read_text()
 
 
+def test_the_public_image_copies_only_paths_of_this_repository():
+    root = Path(__file__).resolve().parents[1]
+    sources = [
+        word
+        for line in (root / "docker" / "swarm-node" / "Dockerfile").read_text().splitlines()
+        if line.split()[:1] == ["COPY"]
+        for word in line.split()[1:-1]
+        if not word.startswith("--")
+    ]
+
+    assert "profiles/" in sources
+    assert all((root / source).exists() and "bundle" not in source for source in sources)
+
+
 @pytest.mark.parametrize("role", ["engineer", "cicd", "planner", "qa", "master", "dispatcher"])
 def test_the_image_ships_every_role_profile_as_a_template(tmp_path, role):
     templates = image_templates(tmp_path)
