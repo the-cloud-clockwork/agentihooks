@@ -599,8 +599,8 @@ def _claimable(slug, store, rows, doc, lane):
         if (
             t.get("lane") == lane
             and t["id"] not in awaiting
-            and store.claimant(slug, t["id"]) is None
             and ready(t, rows, doc, graph, fix)
+            and store.claimant(slug, t["id"]) is None
         ):
             mine = t.get("territory") or []
             if any(_overlaps(mine, other) for other in held):

@@ -94,7 +94,7 @@ def rank_pass(slug, config, store, ledger, doc, now_ms):
         if known[task_id].get("rank") != RANK and (task_id in owned or "rank" not in known[task_id])
     ]
     if config.autonomy in APPLIES:
-        stale = [t for t in doc["tasks"] if t["id"] in owned and t.get("rank") == RANK and t.get("state") == "open"]
+        stale = [t for t in doc["tasks"] if t["id"] in owned and t.get("rank") == RANK and _open(t)]
         lowers = [(t, _why(t["id"], queue, scores)) for t in stale if t["id"] not in top]
         steps = [partial(_lower, slug, ledger, *row) for row in lowers]
         steps += [partial(_raise, slug, ledger, *row) for row in raises]

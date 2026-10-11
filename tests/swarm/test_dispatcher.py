@@ -111,10 +111,10 @@ def merging():
     ]
 
 
-def stamped(tasks, owners):
+def stamped(tasks, owners, rank="high"):
     for found in tasks:
         if found["id"] in owners:
-            found["rank"] = "high"
+            found["rank"] = rank
     stamps = {f"tasks/{task_id}/rank": {"by": by} for task_id, by in owners.items() if by}
     return doc(tasks, phases=[{"id": "p1", "depends_on": []}], _meta={"stamps": stamps})
 
@@ -335,9 +335,24 @@ def test_ranks_follow_unblocked_work_as_tasks_merge(store, home, shipped):
     ]
     assert ledger.comments[0] == ("c", dispatcher.LOWERED.format(why=why), "dispatcher")
     assert [(r["task"], r["reason"]) for r in gate_log.recent(SLUG, None, home)][-3:] == list(zip("cpq", actions))
+    assert [(r["task"], r["rule"], r["mode"], r["action"]) for r in shipped[-1][1]] == [
+        (t, "leverage-rank", "apply", text) for t, text in zip("cpq", actions)
+    ]
+    steady = merging()
+    steady[0]["state"] = "done"
     again = Ledger()
-    dispatcher.rank_pass(SLUG, store.config(SLUG), store, again, found, NOW + 120_000)
+    dispatcher.rank_pass(
+        SLUG, store.config(SLUG), store, again, stamped(steady, dict.fromkeys("bpq", "dispatcher")), NOW
+    )
     assert again.ranks == []
+
+
+def test_a_task_the_dispatcher_lowered_is_raised_again_when_it_regains_the_top(store, home, shipped):
+    store.update(SLUG, autonomy="delegate")
+    ledger = Ledger()
+    found = stamped(ladder(), {"c": "dispatcher"}, rank="normal")
+    dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
+    assert ledger.ranks == [(t, "high", "dispatcher") for t in "abc"]
 
 
 def test_ranks_the_operator_or_master_set_stay_untouched_while_the_dispatcher_reorders(store, home, shipped):
@@ -353,15 +368,17 @@ def test_ranks_the_operator_or_master_set_stay_untouched_while_the_dispatcher_re
 
 def test_an_own_rank_on_a_task_no_longer_claimable_in_focus_is_lowered(store, home, shipped):
     store.update(SLUG, autonomy="delegate")
-    tasks = ladder() + [task("d"), task("w", depends_on=["d"])]
+    tasks = ladder() + [task("d"), task("w", depends_on=["d"]), task("e", state="claimed")]
     focus = [{"verb": "focus", "target": "tasks/b"}, {"verb": "focus", "target": "tasks/d"}]
-    found = stamped(tasks, dict.fromkeys("ac", "dispatcher"))
+    found = stamped(tasks, dict.fromkeys("ace", "dispatcher"))
     found["freezes"] = [*focus, {"verb": "freeze", "target": "tasks/d"}]
     ledger = Ledger()
     actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
     lowered = f"lowered task {{}} to normal: {dispatcher.UNREADY}"
-    assert ledger.ranks == [("a", "normal", "dispatcher"), ("c", "normal", "dispatcher"), ("b", "high", "dispatcher")]
-    assert actions == [lowered.format("a"), lowered.format("c"), "ranked task b high: it unblocks 2 open tasks"]
+    assert ledger.ranks == [(t, r, "dispatcher") for t, r in (("a", "normal"), ("c", "normal"), ("e", "normal"))] + [
+        ("b", "high", "dispatcher")
+    ]
+    assert actions == [*(lowered.format(t) for t in "ace"), "ranked task b high: it unblocks 2 open tasks"]
 
 
 def test_a_blocked_task_is_never_ranked_however_much_it_unblocks(store, home, shipped):
