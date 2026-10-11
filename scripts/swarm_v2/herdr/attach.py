@@ -160,8 +160,7 @@ class Terminal:
         endpoint = Endpoint(scope, self.namespace)
         home = self.home
         recorded = home.generation(endpoint)
-        newest = int(recorded.read_text()) if recorded.exists() else 0
-        if scope.generation < newest:
+        if recorded.exists() and scope.generation < (newest := int(recorded.read_text())):
             raise EndpointRefused("stale_generation", f"{endpoint.name} already serves generation {newest}")
         address = route(endpoint, self.lookup)
         _write(recorded, f"{scope.generation}\n")
@@ -179,7 +178,7 @@ class Terminal:
     def _connect(self, endpoint: Endpoint) -> None:
         done = self.run([SSH, "-F", str(self.home.config), endpoint.host, "true"])
         if done.returncode != 0:
-            reason = _classify(done.stderr or "")
+            reason = _classify(str(done.stderr))
             raise EndpointRefused(reason, f"{endpoint.name} terminal refused the connection: {reason}")
 
     def _save(self, endpoint: Endpoint) -> None:

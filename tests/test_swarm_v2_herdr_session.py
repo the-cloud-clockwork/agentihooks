@@ -142,3 +142,9 @@ def test_an_attempt_record_without_its_attempt_opens_no_shell(tmp_path, monkeypa
     argv = ["--material", str(material), "--attempts", str(attempts), "--launch", str(launch)]
     assert session.main(argv, {}) == 1
     assert capsys.readouterr().err == "terminal session refused: KeyError: 'attempt'\n"
+
+
+def test_a_wrong_flag_names_the_module_in_its_usage(capsys):
+    with pytest.raises(SystemExit):
+        session.main(["--unknown"], {})
+    assert capsys.readouterr().err.startswith("usage: python -m scripts.swarm_v2.herdr.session [-h] ")

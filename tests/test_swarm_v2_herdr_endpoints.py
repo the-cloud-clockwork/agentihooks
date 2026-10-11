@@ -239,6 +239,7 @@ def _policy(change) -> dict:
     [
         (lambda s: s.update(podSelector={}), ["policy selects another Pod"]),
         (lambda s: s["ingress"][0]["from"].append({"ipBlock": {"cidr": "0.0.0.0/0"}}), [WIDER]),
+        (lambda s: s["ingress"][0]["from"][0].update(ipBlock={"cidr": "10.0.0.0/8"}), [WIDER]),
         (lambda s: s["ingress"][0].update({"from": []}), [WIDER]),
         (lambda s: s["ingress"][0].pop("from"), [WIDER]),
         (lambda s: s["ingress"][0]["from"][0].pop("podSelector"), [WIDER]),
