@@ -46,7 +46,7 @@ def on_stop(payload: dict) -> bool:
     session_id = payload.get("session_id", "")
     pid = agent_pid()
     recorded = session_id and handoff_record(pid, session_id).exists()
-    status = "handed_off" if recorded else _load_sessions().get(session_id, {}).get("status", "")
+    status = "handed_off" if recorded else _load_sessions().get(session_id, {}).get("status")
     if not session_id or not due(payload, dict(os.environ), status):
         return False
     claim = _home() / f"handoff-close-{pid}-{session_id}.claim"

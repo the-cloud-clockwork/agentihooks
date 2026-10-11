@@ -1105,6 +1105,7 @@ def test_a_handoff_outside_any_harness_comes_from_claude(monkeypatch, error):
         raise error
 
     monkeypatch.setattr(binding, "process", missing)
+    assert init_agent._live_harness() == "claude"
     assert init_agent._handoff_agent("", {}, []) == "claude"
     with pytest.raises(ValueError, match="unsupported quota transfer: Claude cannot transfer to a Codex account"):
         init_agent._handoff_agent("codex", {}, [])

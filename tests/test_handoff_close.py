@@ -55,6 +55,12 @@ def test_a_live_session_stop_schedules_nothing(monkeypatch, tmp_path):
     assert scheduled == []
 
 
+def test_an_unregistered_session_stop_schedules_nothing(monkeypatch, tmp_path):
+    scheduled = _stop(monkeypatch, tmp_path, "handed_off")
+    assert handoff_close.on_stop({"session_id": "sid-unknown"}) is False
+    assert scheduled == []
+
+
 def test_a_codex_process_whose_resumed_successor_took_its_session_still_closes(monkeypatch, tmp_path):
     scheduled = _stop(monkeypatch, tmp_path, "alive")
     handoff_close.handoff_record(4242, "sid-1").touch()
