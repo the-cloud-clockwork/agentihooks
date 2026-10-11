@@ -22,7 +22,7 @@ from scripts.swarm_v2.kubernetes import operator_terminal
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 from scripts.swarm_v2.kubernetes.client import ApiRefused
 from scripts.swarm_v2.kubernetes.grants import PodGrants
-from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, load_policy
+from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, load_policy, pod_name
 from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL, OWNER_LABEL, owner_for
 from scripts.swarm_v2.launch import DistributedLaunch, LaunchTerms
 from scripts.swarm_v2.runtime import observe
@@ -563,8 +563,12 @@ def test_a_start_without_an_api_address_logs_no_kubernetes_runtime(tmp_path, cap
 
 def test_the_deployed_controller_adds_each_remote_pod_reading_to_its_observations(tmp_path, monkeypatch):
     store, pods, listed = _store(), Pods("swarm-pod-proof"), []
-    running = {"metadata": {"name": "worker-t1", "uid": "uid-1"}, "status": {"phase": "Running"}}
-    monkeypatch.setattr(pods, "list_pods", lambda selector: listed.append(selector) or [running])
+
+    def running(selector):
+        name = pod_name(selector.rsplit("=", 1)[1])
+        return [{"metadata": {"name": name, "uid": "uid-1"}, "status": {"phase": "Running"}}]
+
+    monkeypatch.setattr(pods, "list_pods", lambda selector: listed.append(selector) or running(selector))
     monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: pods)
     service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
     try:

@@ -11,6 +11,7 @@ from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2.kubernetes.client import ApiRefused
 from scripts.swarm_v2.kubernetes.runtime import PodStatus
+from scripts.swarm_v2.kubernetes.spec import pod_name
 from scripts.swarm_v2.kubernetes.watch import BACKEND
 from scripts.swarm_v2.runtime import observe
 
@@ -330,8 +331,8 @@ def test_a_tick_sends_each_remote_heartbeat_through_the_controller(tmp_path):
     assert observe.stored(store, SLUG, local.execution_id) is None
 
 
-def _pod(phase="Running"):
-    return PodStatus("worker-t1", "uid-1", phase, (), False)
+def _pod(execution_id, phase="Running", name=""):
+    return PodStatus(name or pod_name(execution_id), "uid-1", phase, (), False)
 
 
 def test_a_tick_delivers_each_remote_pod_reading_beside_its_heartbeat(tmp_path):
@@ -342,7 +343,7 @@ def test_a_tick_delivers_each_remote_pod_reading_beside_its_heartbeat(tmp_path):
     silent, _ = _admitted(service, store, seat=f"eng-2@{SLUG}", task="t2")
     local = service.controller.admit(AgentRecord(store.next_name(SLUG, "eng"), "eng", "t3", seat=f"eng-3@{SLUG}"), "")
     asked = []
-    service.pods = lambda execution_id: asked.append(execution_id) or (_pod(),)
+    service.pods = lambda execution_id: asked.append(execution_id) or (_pod(execution_id),)
     service.executions.register(token, {"execution_id": beating.execution_id, "generation": beating.generation})
     service.executions.heartbeat(beating.execution_id, token, _beat(service, beating))
     accepted = json.loads(store.redis.hget(store.key(SLUG, "heartbeats"), beating.execution_id))["accepted_at_ms"]
@@ -374,7 +375,12 @@ def _refused(error):
     ("status", "reading", "value"),
     [
         (lambda execution_id: (), "not_found", ""),
-        (lambda execution_id: (_pod("Pending"), _pod("Running")), "ok", "Pending"),
+        (
+            lambda execution_id: (_pod(execution_id, name="swarm-foreign"), _pod(execution_id, "Pending")),
+            "ok",
+            "Pending",
+        ),
+        (lambda execution_id: (_pod(execution_id, name="swarm-foreign"),), "not_found", ""),
         (_refused(ApiRefused(401, "Unauthorized")), "unauthenticated", ""),
         (_refused(ApiRefused(403, "Forbidden")), "forbidden", ""),
         (_refused(ApiRefused(404, "NotFound")), "unreachable", ""),

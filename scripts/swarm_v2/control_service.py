@@ -23,6 +23,7 @@ from scripts.swarm_v2.herdr.upkeep import Upkeep, switched_on
 from scripts.swarm_v2.kubernetes import operator_terminal
 from scripts.swarm_v2.kubernetes.client import ApiRefused
 from scripts.swarm_v2.kubernetes.runtime import PodStatus
+from scripts.swarm_v2.kubernetes.spec import pod_name
 from scripts.swarm_v2.kubernetes.watch import BACKEND
 from scripts.swarm_v2.reconciliation.accounts import Finding
 from scripts.swarm_v2.runtime.observe import Observer, Reading, Signal, Source, Thresholds
@@ -72,7 +73,7 @@ def _pod(status: Callable[[str], tuple[PodStatus, ...]] | None, agent: AgentReco
     if status is None:
         return []
     try:
-        found = status(agent.execution_id)
+        found = [pod for pod in status(agent.execution_id) if pod.name == pod_name(agent.execution_id)]
     except ApiRefused as refused:
         reading, phase = REFUSED.get(refused.status, Reading.UNREACHABLE), ""
     except (ConnectionError, TimeoutError):
