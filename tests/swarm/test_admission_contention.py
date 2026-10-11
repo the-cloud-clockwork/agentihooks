@@ -60,6 +60,8 @@ def test_admission_commits_during_controller_writes(monkeypatch, operation, writ
         else:
             renewed = authority.renew(token, claim.generation, 100)
             assert renewed == replace(claim, lease_deadline_ms=renewed.lease_deadline_ms)
+            assert renewed.lease_deadline_ms > claim.lease_deadline_ms
+            assert authority.current("task") == renewed
     except SwarmError as error:
         refusal = str(error)
         assert len(attempts) == 5
