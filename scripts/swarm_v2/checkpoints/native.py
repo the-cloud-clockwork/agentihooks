@@ -95,6 +95,10 @@ class NativeCapture:
             "native_resume": {"outcome": CAPTURED, "harness": self.harness},
         }
 
+    @property
+    def outcome(self) -> str:
+        return CAPTURED
+
 
 class Harness(Protocol):
     name: str
@@ -311,6 +315,39 @@ def merged(manifest: dict, native: "NativeCapture | Unavailable") -> dict:
     }
 
 
+def _unqualified(harness: str, version_text: str, qualified: dict[str, tuple[str, ...]]) -> str | None:
+    if harness not in HARNESSES:
+        return "unqualified_harness"
+    return None if line(version_text) in qualified.get(harness, ()) else "unqualified_version"
+
+
+def capture(
+    harness: str,
+    home: Path,
+    session_id: str,
+    cwd: Path,
+    version_text: str,
+    stopped: bool,
+    qualified: dict[str, tuple[str, ...]] = QUALIFIED,
+) -> "NativeCapture | Unavailable":
+    if problem := _unqualified(harness, version_text, qualified):
+        return Unavailable(harness, problem)
+    native = HARNESSES[harness]
+    try:
+        files = native.collect(home, session_id, cwd)
+        found, recorded = native.identity(files)
+    except NativeError as error:
+        return Unavailable(harness, str(error))
+    if found != session_id:
+        return Unavailable(harness, "identity_mismatch")
+    if line(recorded) != line(version_text):
+        return Unavailable(harness, "version_changed")
+    if len(files) > ARCHIVE_MEMBERS or sum(map(len, files.values())) > ARCHIVE_BYTES:
+        return Unavailable(harness, TOO_LARGE)
+    quiescence = "stopped_process" if stopped else "consistent_export"
+    return NativeCapture(harness, recorded, session_id, tuple(sorted(files.items())), quiescence)
+
+
 class Qualifier:
     """Captures and restores one harness conversation through the attempt's granted store, counting each outcome.
     An empty qualification table disables native resume and leaves context continuation as the only path."""
@@ -323,11 +360,6 @@ class Qualifier:
     def metrics(self) -> dict[str, dict[str, int]]:
         return {METRIC: dict(self.outcomes)}
 
-    def _qualified(self, harness: str, version_text: str) -> str | None:
-        if harness not in HARNESSES:
-            return "unqualified_harness"
-        return None if line(version_text) in self.qualified.get(harness, ()) else "unqualified_version"
-
     def _count(self, harness: str, result):
         self.outcomes[f"{harness}/{result.outcome}"] += 1
         return result
@@ -335,24 +367,7 @@ class Qualifier:
     def capture(
         self, harness: str, home: Path, session_id: str, cwd: Path, version_text: str, stopped: bool
     ) -> "NativeCapture | Unavailable":
-        if problem := self._qualified(harness, version_text):
-            return self._count(harness, Unavailable(harness, problem))
-        native = HARNESSES[harness]
-        try:
-            files = native.collect(home, session_id, cwd)
-            found, recorded = native.identity(files)
-        except NativeError as error:
-            return self._count(harness, Unavailable(harness, str(error)))
-        if found != session_id:
-            return self._count(harness, Unavailable(harness, "identity_mismatch"))
-        if line(recorded) != line(version_text):
-            return self._count(harness, Unavailable(harness, "version_changed"))
-        if len(files) > ARCHIVE_MEMBERS or sum(map(len, files.values())) > ARCHIVE_BYTES:
-            return self._count(harness, Unavailable(harness, TOO_LARGE))
-        quiescence = "stopped_process" if stopped else "consistent_export"
-        captured = NativeCapture(harness, recorded, session_id, tuple(sorted(files.items())), quiescence)
-        self.outcomes[f"{harness}/{CAPTURED}"] += 1
-        return captured
+        return self._count(harness, capture(harness, home, session_id, cwd, version_text, stopped, self.qualified))
 
     def checkpoint(self, native: "NativeCapture | Unavailable", manifest: dict) -> model.Verdict:
         """The native material is stored before the manifest; an unavailable capture commits a context continuation."""
@@ -376,7 +391,7 @@ class Qualifier:
             return self._count(harness, Unavailable(harness, "context_only"))
         if line(version_text) != line(doc["native_harness_version"]):
             return self._count(harness, Unavailable(harness, "version_changed"))
-        if problem := self._qualified(harness, version_text):
+        if problem := _unqualified(harness, version_text, self.qualified):
             return self._count(harness, Unavailable(harness, problem))
         try:
             return self._count(harness, self._place(HARNESSES[harness], doc, home, cwd))
