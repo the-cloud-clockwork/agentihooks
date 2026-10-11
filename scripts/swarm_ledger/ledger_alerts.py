@@ -1,6 +1,8 @@
 """Alerts: the server raises one from each new ledger warning and sends it to its target's inbox; anyone claims it
 and closes it done with an outcome."""
 
+from scripts.inbox import outbox
+
 OPS = ("alert_claim", "alert_close")
 SIZE, SYNC = "size", "sync"
 TARGETS = {SIZE: "master", SYNC: "master"}
@@ -132,8 +134,6 @@ def message(slug, alert):
 
 def deliver(inbox, slug, alerts, rev, master, since=None):
     """Send each alert raised from since through rev to its target's inbox, once."""
-    from scripts.inbox import outbox
-
     since = rev if since is None else since
     sent = []
     for alert in alerts:

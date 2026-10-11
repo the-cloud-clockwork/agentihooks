@@ -507,8 +507,14 @@ TRIMMED = (
 
 def record_trimmed(slug, since, trimmed):
     """Tell the operator which unrelayed writes the event window dropped; the relay resumes after them."""
-    text = TRIMMED.format(since=since, trimmed=trimmed)
-    repository.apply_ops(slug, ops=[{"op": "notice", "id": f"trimmed-{since}-{trimmed}", "by": "ledger", "text": text}])
+    notice = {"op": "notice", "id": f"trimmed-{since}-{trimmed}", "by": "ledger", "text": TRIMMED.format(**locals())}
+    try:
+        _, rejected = repository.apply_ops(slug, ops=[notice])
+    except Exception as exc:  # the ledger write stands; the held revisions wait for the next relay
+        sys.stderr.write(f"trimmed notice for {slug}: {exc}\n")
+        return since
+    if rejected:
+        return since
     relayed(RELAY, slug, since, trimmed)
     return trimmed + 1
 
