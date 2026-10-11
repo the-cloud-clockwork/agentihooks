@@ -41,7 +41,8 @@ Commands:
         Capture the one-year token from claude setup-token, write AH_CC_TOKEN_<slug>, and
         optionally store it in OpenBao secret/agentihooks/claude-creds.
 
-        Slugs: use the account email; lowercase, @ becomes at, every other symbol becomes _.
+        Slugs: use the account email; lowercase, @ becomes at, every other symbol becomes _;
+        no leading _, and not api, default, help or status.
 
     agentihooks init-agent [launcher options] [--handoff] -- [claude flags]
         Open a routed Claude session in a new terminal on WSL, macOS, or Linux.

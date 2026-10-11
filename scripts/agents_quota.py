@@ -30,6 +30,8 @@ PAGE_TTL_S = 60
 STALE = "STALE"
 EXPIRED_SOURCE = "token expired: run {login}"
 NEXT_MARK = "(next)"
+CURRENT_MARK = "(current)"
+FABLE_COLUMNS = ["FABLE LEFT", "FABLE RESET"]
 MISSING = "-"
 HARNESSES = ("claude", "codex")
 UNLISTED = "+{count} sessions on unlisted account names"
@@ -72,6 +74,8 @@ class QuotaRow:
     master: str = ""
     selected: bool = False
     routing_left: float | None = None
+    fable_left: float | None = None
+    fable_resets_at: int | None = None
 
 
 def claude_rows(
@@ -80,8 +84,10 @@ def claude_rows(
     source: str,
     observed: dict[str, float] | None = None,
     now: float | None = None,
+    include_fable: bool = False,
 ) -> list[QuotaRow]:
     now = time.time() if now is None else now
+    fresh = {account for account, at in (observed or {}).items() if session_bands.fresh(at, now)}
     return [
         QuotaRow(
             agent="claude",
@@ -94,8 +100,10 @@ def claude_rows(
             source=source,
             five_hour_resets_at=result.five_hour.resets_at,
             observed_at=(observed or {}).get(result.account),
-            cap=account_cap(result, now) if session_bands.fresh((observed or {}).get(result.account), now) else None,
+            cap=account_cap(result, now, include_fable) if result.account in fresh else None,
             routing_left=result.margin,
+            fable_left=result.fable.remaining,
+            fable_resets_at=result.fable.resets_at,
         )
         for result in results
     ]
@@ -134,8 +142,9 @@ def codex_rows(
     for account in accounts:
         quota = quotas.get(account.name)
         fresh = quota is not None and session_bands.fresh(quota.observed_at, now)
-        week = session_bands.left(quota.seven_day.used, quota.seven_day.resets_at, now) if quota else None
-        cap = codex_router.account_cap(quota, now, environ) if account.signed_in else None
+        known = quota is not None and not quota.expired
+        week = session_bands.left(quota.seven_day.used, quota.seven_day.resets_at, now) if known else None
+        cap = codex_router.account_cap(quota, now, environ) if account.signed_in and known else None
         rows.append(
             QuotaRow(
                 agent="codex",
@@ -151,7 +160,7 @@ def codex_rows(
                 five_hour_resets_at=quota.five_hour.resets_at if quota else None,
                 observed_at=quota.observed_at if quota else None,
                 cap=cap,
-                routing_left=week if cap is not None else None,
+                routing_left=week,
             )
         )
     return rows
@@ -170,13 +179,16 @@ def mark_next(rows: list[QuotaRow], account: str) -> list[QuotaRow]:
     return [replace(row, selected=True) if account and row.account == account else row for row in rows]
 
 
-def render(rows: list[QuotaRow], now: int, unlisted: int = 0) -> str:
+def render(rows: list[QuotaRow], now: int, unlisted: int = 0, fable: bool = False, current: str = "") -> str:
+    columns = [*COLUMNS, *(FABLE_COLUMNS if fable else [])]
     table, rank = [], 0
     for row in _ordered(rows):
         rank += row.kind == SUBSCRIPTION
-        table.append(_cells(str(rank) if row.kind == SUBSCRIPTION else MISSING, row, now))
-    widths = [max(len(cell) for cell in column) for column in zip(COLUMNS, *table)]
-    lines = [COLUMNS, ["-" * width for width in widths], *table]
+        cells = _cells(str(rank) if row.kind == SUBSCRIPTION else MISSING, row, now, current)
+        fable_cells = [_left(row.fable_left), _reset(row.fable_left, row.fable_resets_at, now)]
+        table.append([*cells, *(fable_cells if fable else [])])
+    widths = [max(len(cell) for cell in column) for column in zip(columns, *table)]
+    lines = [columns, ["-" * width for width in widths], *table]
     text = "\n".join("  ".join(cell.ljust(width) for cell, width in zip(line, widths)).rstrip() for line in lines)
     return f"{text}\n{UNLISTED.format(count=unlisted)}" if unlisted > 0 else text
 
@@ -197,12 +209,13 @@ def _reset(left: float | None, resets_at: int | None, now: int) -> str:
     return MISSING if left is None or resets_at is None else _duration(resets_at, now)
 
 
-def _cells(rank: str, row: QuotaRow, now: int) -> list[str]:
+def _cells(rank: str, row: QuotaRow, now: int, current: str = "") -> list[str]:
     cap = MISSING if row.cap is None else _cap_text(row.cap)
+    mark = CURRENT_MARK if current and row.agent == "claude" and row.account == current else ""
     return [
         rank,
         row.agent,
-        " ".join(part for part in (row.account, row.master, NEXT_MARK if row.selected else "") if part),
+        " ".join(part for part in (row.account, mark, row.master, NEXT_MARK if row.selected else "") if part),
         row.kind,
         row.state,
         f"{row.sessions}/{cap}",
@@ -315,25 +328,30 @@ def _codex(now: float) -> list[QuotaRow]:
     return mark_next(marked, next_account(pool, quotas, sessions, now, dict(os.environ)))
 
 
-def _table(claude: list[QuotaRow], sessions: dict[str, int], now: float) -> str:
+def _render_live(
+    rows: list[QuotaRow], sessions: dict[str, int], now: float, fable: bool = False, current: str = ""
+) -> str:
     from hooks.context.account_sessions import codex_sessions_by_account
 
-    rows = claude + _codex(now)
-    live = {"claude": sessions, "codex": codex_sessions_by_account()}
-    return render(rows, int(now), unlisted_sessions(rows, live))
+    live = {"claude": sessions, **({} if fable else {"codex": codex_sessions_by_account()})}
+    return render(rows, int(now), unlisted_sessions(rows, live), fable, current)
 
 
 def tokenless_table(master: "MasterAccount | None", sessions: dict[str, int]) -> str:
+    now = time.time()
     claude = [_interactive_row(master, sessions)] if master is not None and master.kind == INTERACTIVE else []
-    return _table(claude, sessions, time.time())
+    return _render_live(claude + _codex(now), sessions, now)
 
 
-def balance_table(results: list, sessions: dict[str, int], source: str, now: float) -> str:
+def balance_table(
+    results: list, sessions: dict[str, int], source: str, now: float, fable: bool = False, current: str = ""
+) -> str:
     from scripts.routing.claude_api import ClaudeApiSource
 
     observed = {result.account: now for result in results}
-    claude = claude_rows(results, sessions, source, observed, now) + api_rows(ClaudeApiSource(sessions), "claude", now)
-    return _table(with_masters(claude, _masters("claude"), sessions), sessions, now)
+    claude = claude_rows(results, sessions, source, observed, now, fable)
+    claude = with_masters(claude + api_rows(ClaudeApiSource(sessions), "claude", now), _masters("claude"), sessions)
+    return _render_live(claude + ([] if fable else _codex(now)), sessions, now, fable, current)
 
 
 def _page_quota(now: float) -> dict:
@@ -380,15 +398,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--refresh", action="store_true", help="Probe Claude accounts instead of using the cache")
     parser.add_argument("--timeout", type=float, default=60.0, help="Seconds per Claude account probe")
     args = parser.parse_args(argv)
-    from hooks.context.account_sessions import codex_sessions_by_account, sessions_by_account
+    from hooks.context.account_sessions import sessions_by_account
 
     now = time.time()
     rows = _claude(args.refresh, args.timeout) + _codex(now)
     if args.json:
         print(json.dumps([{**asdict(row), "harness": row.agent} for row in rows], indent=2))
     elif rows:
-        live = {"claude": sessions_by_account(), "codex": codex_sessions_by_account()}
-        print(render(rows, int(now), unlisted_sessions(rows, live)))
+        print(_render_live(rows, sessions_by_account(), now))
     else:
         print("agentihooks quota: no Claude account and no Codex session log found", file=sys.stderr)
     return 0 if rows else 1

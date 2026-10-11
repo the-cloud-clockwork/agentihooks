@@ -330,7 +330,7 @@ class TestClaudeRouting:
         lines = output.splitlines()
         assert lines[0].split()[-4:] == ["FABLE", "LEFT", "FABLE", "RESET"]
         assert lines[2].split()[:9] == ["1", "claude", "ALPHA", "subscription", "NORMAL", "2/-", "-", "-", "70%"]
-        assert lines[3].split()[:4] == ["-", "claude", "api", "(gateway)"]
+        assert lines[3].split()[:4] == ["-", "claude", "api", "api"]
         assert "codex" not in output and "source=" not in output and "?" not in output
 
     def test_cmd_balance_marks_the_declared_master_on_the_main_and_current_paths(self, monkeypatch, capsys):
@@ -470,7 +470,7 @@ class TestClaudeRouting:
             "70%",
             "-",
         ]
-        assert lines[3].split() == ["-", "claude", "api", "(gateway)", "api", "OPEN", "1/3", "25%", "3", *["-"] * 5]
+        assert lines[3].split() == ["-", "claude", "api", "api", "OPEN", "1/3", "25%", "3", *["-"] * 5]
         assert lines[4:] == ["+1 sessions on unlisted account names"]
 
     def test_balance_set_and_settings_dispatch_from_the_cli(self, monkeypatch):

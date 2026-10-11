@@ -5615,7 +5615,6 @@ def cmd_balance(
         discover_credentials,
         identify_session_account,
         is_routable,
-        render_table,
     )
     from scripts.routing import master_account
 
@@ -5636,21 +5635,11 @@ def cmd_balance(
                 timeout=timeout,
                 claude_bin=shutil.which("claude") or "claude",
             )
-        observations = cached_observations(include_fable=include_fable)
-        rows = {result.account: result for _, result in observations}
-        observed = {result.account: seen for seen, result in observations}
+        rows = {result.account: result for _, result in cached_observations(include_fable=include_fable)}
         rows.update({result.account: result for result in probed})
         print(f"current={session.account or 'none'} method={session.method}")
         if rows:
-            print(
-                render_table(
-                    list(rows.values()),
-                    include_fable=include_fable,
-                    observed=observed,
-                    sessions=live,
-                    marks=master_account.row_marks(session.account),
-                )
-            )
+            print(balance_table(list(rows.values()), live, "cached", time.time(), include_fable, session.account))
         return 0 if session.account else 1
     if not credentials:
         print(tokenless_table(master_account.row_marks().master, live))
@@ -5677,10 +5666,7 @@ def cmd_balance(
         timeout=timeout,
         claude_bin=shutil.which("claude") or "claude",
     )
-    if include_fable:
-        print(render_table(results, include_fable=True, sessions=live, marks=master_account.row_marks()))
-    else:
-        print(balance_table(results, live, source, time.time()))
+    print(balance_table(results, live, source, time.time(), include_fable))
     return 0 if any(is_routable(result) for result in results) else 1
 
 
