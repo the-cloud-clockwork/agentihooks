@@ -59,20 +59,25 @@ def test_the_refusals_name_the_owning_master_in_full():
     )
 
 
+OWN = {"followups/f1/done": {"rev": 5, "by": "master@abcdef-0001"}}
+
+
 @pytest.mark.parametrize(
     ("stamps", "held"),
     [
-        ({}, True),
-        ({"followups/f1/done": {"rev": 5, "by": "master@abcdef-0001"}}, True),
-        ({"followups/f1/done": {"rev": 9, "by": "master@abcdef-0002"}}, True),
-        ({"followups/f1/comments": {"rev": 9, "by": "engineer@abcdef-0005"}}, True),
-        ({"followups/f1/done": {"rev": 4, "by": "operator"}}, True),
-        ({"followups/f12/done": {"rev": 9, "by": "operator"}}, True),
+        (OWN, True),
+        ({**OWN, "followups/f1/needs_operator": {"rev": 9, "by": "master@abcdef-0002"}}, True),
+        ({**OWN, "followups/f1/comments": {"rev": 9, "by": "engineer@abcdef-0005"}}, True),
+        ({**OWN, "followups/f1/text": {"rev": 4, "by": "operator"}}, True),
+        ({**OWN, "followups/f12/done": {"rev": 9, "by": "operator"}}, True),
+        ({**OWN, "followups/f1/needs_operator": {"rev": 6, "by": "operator"}}, False),
+        ({**OWN, "followups/f1/text": {"rev": 6, "by": "engineer@abcdef-0005"}}, False),
         ({"followups/f1/done": {"rev": 6, "by": "operator"}}, False),
-        ({"followups/f1/text": {"rev": 6, "by": "engineer@abcdef-0005"}}, False),
+        ({"followups/f1/done": {"rev": 4, "by": "master@abcdef-0001"}}, False),
+        ({}, False),
     ],
 )
-def test_a_decider_record_lapses_only_on_a_later_write_by_someone_other_than_a_master(stamps, held):
+def test_a_decider_record_holds_while_its_write_stands_and_only_masters_wrote_since(stamps, held):
     assert master_fence.current({"seat": "master@sw", "rev": 5}, "followups/f1", stamps) is held
 
 
@@ -213,6 +218,20 @@ def test_a_ledger_with_no_swarm_is_not_fenced(world):
 
     assert world.decide(SECOND_NAME) == {"accepted": True, "warnings": []}
     assert world.decisions() == {}
+
+
+@pytest.mark.parametrize(("switch", "accepted"), [("off", True), ("on", False), ("", False)])
+def test_the_fence_is_rolled_back_by_turning_its_switch_off(world, monkeypatch, switch, accepted):
+    monkeypatch.setenv("AGENTIHOOKS_MASTER_FENCE", switch)
+
+    assert (
+        world.write(
+            {"op": "set", "id": "s-switch", "by": SECOND_NAME, "path": f"{FOLLOWUP}/done", "value": True},
+            connect=unreachable if accepted else None,
+        )["accepted"]
+        is accepted
+    )
+    assert world.refusals() == int(not accepted)
 
 
 def test_redis_down_lets_the_write_through_with_a_fail_open_row(world, tmp_path):

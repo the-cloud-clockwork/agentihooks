@@ -48,7 +48,7 @@ from scripts.swarm_ledger.events.publishing import publishing  # noqa: E402
 from scripts.swarm_ledger.repository import legacy  # noqa: E402
 from scripts.swarm_ledger.repository import repository as stored  # noqa: E402
 from scripts.swarm_ledger.server_code import CODE_DIRS, code_stamp  # noqa: E402
-from scripts.swarm_v2 import ledger_writer  # noqa: E402
+from scripts.swarm_v2 import ledger_writer, master_fence  # noqa: E402
 
 HOST, PORT = ledger_link.address()
 BASE = f"http://{HOST}:{PORT}"
@@ -523,6 +523,11 @@ def workspace_tails(slug, task_id):
         return {}
 
 
+def write_gate(slug):
+    """Every op write: masters fenced to the items they own, inside the talk budget."""
+    return master_fence.Fence(slug, talk.Budget(slug))
+
+
 def sample_streams():
     """Publish swarm status for every ledger a stream is open on."""
     HUB.evict()
@@ -589,7 +594,7 @@ class Handler(BaseHTTPRequestHandler):
         """Apply a page save and answer with a bounded acknowledgment; the page takes state from the event stream."""
         refusals = refusals or {}
         screen = screen or ledger_task_duplicates.Screen()
-        gate = talk.Budget(slug) if ops else None
+        gate = write_gate(slug) if ops else None
         try:
             state, rejected = repository.apply_ops(
                 slug,
@@ -599,6 +604,8 @@ class Handler(BaseHTTPRequestHandler):
             )
         except (ValueError, OSError) as exc:
             return self.send(500, f"ledger unreadable: {exc}", "text/plain")
+        if gate:
+            gate.publish(rejected)
         if changes or ops:
             relay_to_inbox(slug, state)
             doctor_phrase(slug, state)
