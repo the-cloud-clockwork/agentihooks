@@ -3,7 +3,7 @@ import pytest
 from scripts.inbox import channel
 from scripts.inbox.store import InboxStore
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
+pytestmark = [pytest.mark.xdist_group("fakeredis"), pytest.mark.usefixtures("recovery_deadline")]
 
 
 @pytest.fixture
@@ -57,6 +57,59 @@ def test_running_channel_rechecks_pending_items_after_redis_returns(backend, mon
         session(inbox, scenario)
     finally:
         server.connected = True
+
+
+def test_channel_replaces_a_failed_subscriber_and_resets_its_backoff(backend, monkeypatch):
+    import anyio
+    from redis.exceptions import ConnectionError
+
+    from tests.inbox.test_channel_server import session
+
+    server, inbox = backend
+    subscriptions, reads = [], []
+    real_pubsub, real_sleep = inbox.redis.pubsub, anyio.sleep
+    monkeypatch.setattr(channel, "SETTLE_S", 0)
+    monkeypatch.setattr(channel, "RECHECK_S", 0.02)
+
+    def pubsub():
+        subscription = real_pubsub()
+        subscriptions.append(subscription)
+        if len(subscriptions) == 1:
+
+            def get_message(timeout):
+                reads.append(timeout)
+                if len(reads) == 1:
+                    return None
+                raise ConnectionError("subscriber disconnected")
+
+            monkeypatch.setattr(subscription, "get_message", get_message)
+        return subscription
+
+    async def scenario(send, receive):
+        retrying, resumed = anyio.Event(), anyio.Event()
+
+        async def sleep(delay):
+            if delay >= 1:
+                assert delay == 1
+                retrying.set()
+                await resumed.wait()
+            else:
+                await real_sleep(delay)
+
+        monkeypatch.setattr(anyio, "sleep", sleep)
+        with anyio.fail_after(3):
+            await retrying.wait()
+        assert subscriptions[0].connection is None
+        pending = inbox.send("alice", "bob", "waiting for a new subscriber")
+        resumed.set()
+        with anyio.fail_after(3):
+            shown = await receive()
+        assert shown["params"]["meta"]["item_id"] == pending.id
+        assert len(subscriptions) == 2
+
+    monkeypatch.setattr(inbox.redis, "pubsub", pubsub)
+    session(inbox, scenario)
+    assert all(subscription.connection is None for subscription in subscriptions)
 
 
 def test_channel_opens_while_redis_is_down_and_delivers_after_restore(backend, monkeypatch):

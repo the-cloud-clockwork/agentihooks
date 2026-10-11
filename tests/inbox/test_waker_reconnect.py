@@ -9,7 +9,7 @@ from scripts.inbox import wake, waker
 from scripts.inbox.store import InboxStore, now_ms
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
+pytestmark = [pytest.mark.xdist_group("fakeredis"), pytest.mark.usefixtures("recovery_deadline")]
 
 
 @pytest.fixture
@@ -91,6 +91,7 @@ def restore_during_run(backend, inbox):
 
 def retry_sleep(backend, delay):
     if delay >= 1:
+        assert delay == 1
         backend.retrying.set()
         assert backend.restored.wait(3), "Redis recovery was never released"
     else:

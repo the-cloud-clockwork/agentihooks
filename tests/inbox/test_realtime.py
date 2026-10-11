@@ -232,7 +232,7 @@ class FakePubSub:
         pass
 
 
-def test_the_waker_runs_a_wake_pass_on_each_notify_only(redis, inbox, monkeypatch, capsys):
+def test_the_waker_runs_a_wake_pass_on_each_notify_only(redis, inbox, monkeypatch, capsys, recovery_deadline):
     store = RedisStore(redis)
     pubsub = FakePubSub([None, {"data": "sw-eng-1"}, None])
     monkeypatch.setattr(redis, "pubsub", lambda: pubsub)
