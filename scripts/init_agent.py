@@ -199,7 +199,7 @@ def _flag_value(args: list[str], names: tuple[str, ...]) -> str:
 
 
 def _handoff_agent(requested: str, environ: dict[str, str], agent_args: list[str]) -> str:
-    source = environ.get("AGENTIHOOKS_TARGET") or "claude"
+    source = environ.get("AGENTIHOOKS_TARGET") or _live_harness()
     target = requested or source
     if _flag_value(agent_args, ("--route",)) == "api":
         return target
@@ -208,6 +208,15 @@ def _handoff_agent(requested: str, environ: dict[str, str], agent_args: list[str
             f"unsupported quota transfer: {source.capitalize()} cannot transfer to a {target.capitalize()} account"
         )
     return "codex" if source == "codex" else "claude"
+
+
+def _live_harness() -> str:
+    from scripts.profiles import binding
+
+    try:
+        return binding.process()[1]
+    except (OSError, ValueError):
+        return "claude"
 
 
 def _handoff_exclude(agent: str, environ: dict[str, str]) -> str:
@@ -221,6 +230,17 @@ def _handoff_exclude(agent: str, environ: dict[str, str]) -> str:
         return current
     current = environment_account(environ)
     return "" if current == UNROUTED else current
+
+
+def _mark_handoff(account: str, resumed: str) -> list[str]:
+    from hooks.context.account_sessions import agent_pid
+    from hooks.context.broadcast import mark_handed_off
+    from hooks.lifecycle import handoff_close
+
+    pid = agent_pid()
+    if resumed:
+        handoff_close.handoff_record(pid, resumed).touch()
+    return mark_handed_off(pid, account)
 
 
 def model_effort(agent: str, agent_args: list[str], environ: dict[str, str]) -> tuple[str, str]:
@@ -270,11 +290,11 @@ def _agent_command(
             *(["--agentihooks-exclude", spec.exclude] if spec.exclude else []),
             "--agentihooks-report",
             str(report),
-            *(["resume", spec.resume] if spec.resume else []),
             *_codex_otel_args(environ),
             *_codex_trust_args(directory, environ),
             *_model_args("codex", agent_args, environ),
             *agent_args,
+            *(["resume", spec.resume] if spec.resume else []),
         ]
         return _profile_command(command, spec), ""
     command = [
@@ -609,6 +629,15 @@ def _answer_channel_warning(pane: str, environ: dict[str, str]) -> str:
     return "answered" if herdr_host.answer(pane, channel.WARNING, environ, CHANNEL_WARNING_MS) else "unseen"
 
 
+def _name_in_herdr(pane: str, name: str, agent: str, environ: dict[str, str]) -> list[str]:
+    if not herdr_host.rename_agent(pane, name, environ):
+        return ["agent_name=unset"]
+    named = [f"agent_name={herdr_host.agent_name(name)}"]
+    if agent == "codex":
+        named.append(f"session_name={name if herdr_host.name_session(pane, name, environ) else 'unset'}")
+    return named
+
+
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
     args = _parser().parse_args(argv)
     active_env = dict(os.environ if environ is None else environ)
@@ -755,8 +784,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     pane = next((line.split("=", 1)[1] for line in report if line.startswith("pane_id=")), "")
     herdr_panes.mark(pane, active_env, route_status=route.get("status", "pending"))
     if pane and route.get("status") in STARTED_ROUTES:
-        renamed = herdr_host.rename_agent(pane, name, active_env)
-        report.append(f"agent_name={herdr_host.agent_name(name) if renamed else 'unset'}")
+        report += _name_in_herdr(pane, name, agent, active_env)
         if channel:
             report.append(f"channel_warning={_answer_channel_warning(pane, active_env)}")
     if args.handoff and route.get("status") != "routed":
@@ -776,10 +804,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         print("\n".join(report))
         return 0
 
-    from hooks.context.account_sessions import agent_pid
-    from hooks.context.broadcast import mark_handed_off
-
-    marked = mark_handed_off(agent_pid(), route["account"])
+    marked = _mark_handoff(route["account"], args.resume)
     print("\n".join([*report, "handoff=done", f"handed_off_sessions={','.join(marked) or 'none'}"]))
     return 0
 

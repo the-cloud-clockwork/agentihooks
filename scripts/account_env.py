@@ -1,7 +1,8 @@
-"""`agentihooks accounts env`: one export line per Claude account token, for a shell to evaluate.
+"""`agentihooks accounts env`: one export line per Claude and Codex account token, for a shell to evaluate.
 
-Tokens come from the OpenBao secret every account shares with the swarm, else from an
-owner only fallback file; they are printed, never written anywhere.
+Tokens come from the OpenBao secret each harness's accounts share, else from an owner only fallback file;
+they are printed, never written anywhere. Codex refresh tokens are never exported: only the refresh
+authority rotates them.
 """
 
 import json
@@ -10,41 +11,58 @@ import re
 import shlex
 import stat
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import NamedTuple
 from urllib.request import Request, urlopen
 
-from scripts.account_names import TOKEN_PREFIX
+from scripts import openbao_kv
+from scripts.account_names import CODEX_TOKEN_PREFIX, TOKEN_PREFIX, codex_token_env
 
-SECRET_PATH = "secret/data/agentihooks/claude-creds"
-FALLBACK_NAME = Path("accounts") / "claude.env"
 TIMEOUT_S = 3
 USAGE = "usage: agentihooks accounts env"
-NAME = re.compile(rf"{TOKEN_PREFIX}[a-z0-9_]+")
 
 
-def from_openbao(environ: Mapping[str, str]) -> dict[str, str] | None:
-    url, bao = environ.get("OPENBAO_URL"), environ.get("OPENBAO_TOKEN")
-    if not url or not bao:
+class Accounts(NamedTuple):
+    prefix: str
+    fallback: str
+    path: Callable[[Mapping[str, str]], str]
+    from_email: Callable[[str], str] | None
+
+
+CLAUDE = Accounts(TOKEN_PREFIX, "claude.env", lambda environ: openbao_kv.CLAUDE_CREDS, None)
+CODEX = Accounts(CODEX_TOKEN_PREFIX, "codex.env", openbao_kv.codex_creds, codex_token_env)
+
+
+def _named(name: str, prefix: str) -> bool:
+    return bool(re.fullmatch(rf"{prefix}[a-z0-9_]+", name))
+
+
+def _exported(secret: Mapping[str, object], accounts: Accounts) -> dict[str, str]:
+    values = {key: value for key, value in secret.items() if isinstance(value, str) and value}
+    by_email = {accounts.from_email(key): value for key, value in values.items() if accounts.from_email and "@" in key}
+    return by_email | {key: value for key, value in values.items() if _named(key, accounts.prefix)}
+
+
+def from_openbao(environ: Mapping[str, str], accounts: Accounts) -> dict[str, str] | None:
+    url, bao, path = environ.get("OPENBAO_URL"), environ.get("OPENBAO_TOKEN"), accounts.path(environ)
+    if not url or not bao or not path:
         return None
-    request = Request(f"{url.removesuffix('/')}/v1/{SECRET_PATH}", headers={"X-Vault-Token": bao})
+    request = Request(f"{url.removesuffix('/')}/v1/{openbao_kv.MOUNT}/data/{path}", headers={"X-Vault-Token": bao})
     try:
         with urlopen(request, timeout=TIMEOUT_S) as response:
-            accounts = json.load(response)["data"]["data"]
-        tokens = {
-            name: value for name, value in accounts.items() if NAME.fullmatch(name) and isinstance(value, str) and value
-        }
+            tokens = _exported(json.load(response)["data"]["data"], accounts)
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return None
     return tokens or None
 
 
-def fallback_path(environ: Mapping[str, str]) -> Path:
+def fallback_path(environ: Mapping[str, str], name: str) -> Path:
     home = Path(environ.get("HOME") or Path.home())
-    return Path(environ.get("AGENTIHOOKS_HOME") or home / ".agentihooks") / FALLBACK_NAME
+    return Path(environ.get("AGENTIHOOKS_HOME") or home / ".agentihooks") / "accounts" / name
 
 
-def parse(text: str) -> dict[str, str]:
+def parse(text: str, prefix: str) -> dict[str, str]:
     tokens = {}
     for line in text.splitlines():
         name, sep, raw = line.strip().removeprefix("export ").partition("=")
@@ -52,18 +70,29 @@ def parse(text: str) -> dict[str, str]:
             words = shlex.split(raw)
         except ValueError:
             continue
-        if sep and NAME.fullmatch(name) and len(words) == 1:
+        if sep and _named(name, prefix) and len(words) == 1:
             tokens[name] = words[0]
     return tokens
 
 
-def from_file(path: Path) -> tuple[dict[str, str], str]:
+def from_file(path: Path, prefix: str) -> tuple[dict[str, str], str]:
     try:
         if path.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO):
             return {}, f"{path} is readable by others; chmod 600 it"
-        return parse(path.read_bytes().decode()), f"accounts from {path}"
+        return parse(path.read_bytes().decode(), prefix), f"accounts from {path}"
     except OSError:
         return {}, f"no fallback at {path}"
+
+
+def load(environ: Mapping[str, str], accounts: Accounts) -> dict[str, str]:
+    tokens = from_openbao(environ, accounts)
+    if tokens is not None:
+        return tokens
+    fallback = fallback_path(environ, accounts.fallback)
+    tokens, note = from_file(fallback, accounts.prefix)
+    if fallback.exists() or (environ.get("OPENBAO_URL") and accounts.path(environ)):
+        print(f"agentihooks accounts: OpenBao unreachable, {note}", file=sys.stderr)
+    return tokens
 
 
 def render(tokens: Mapping[str, str]) -> str:
@@ -74,11 +103,5 @@ def main(argv: list[str]) -> int:
     if argv != ["env"]:
         print(USAGE, file=sys.stderr)
         return 2
-    tokens = from_openbao(os.environ)
-    if tokens is None:
-        path = fallback_path(os.environ)
-        tokens, note = from_file(path)
-        if path.exists() or os.environ.get("OPENBAO_URL"):
-            print(f"agentihooks accounts: OpenBao unreachable, {note}", file=sys.stderr)
-    sys.stdout.write(render(tokens))
+    sys.stdout.write(render({**load(os.environ, CLAUDE), **load(os.environ, CODEX)}))
     return 0

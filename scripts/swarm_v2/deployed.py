@@ -29,7 +29,7 @@ from scripts.swarm_v2.launch import DistributedLaunch, LaunchTerms
 from scripts.swarm_v2.operator_auth import OPERATOR
 from scripts.swarm_v2.quota import QuotaObservations
 from scripts.swarm_v2.registry import FleetRegistry
-from scripts.swarm_v2.runtime.base import LOCAL_PROFILES, SpawnRequest
+from scripts.swarm_v2.runtime.base import SpawnRequest
 from scripts.swarm_v2.runtime.routed import RoutedRuntime, routed
 
 if TYPE_CHECKING:
@@ -45,6 +45,7 @@ CAP_ENV = "AGENTIHOOKS_LAUNCH_CAP"
 PROJECTS_ENV = "AGENTIHOOKS_LAUNCH_PROJECTS"
 BRAIN_ENV = "AGENTIHOOKS_LAUNCH_BRAIN"
 EXPORTER_ENV = "AGENTIHOOKS_WORKER_EXPORTER"
+DEFAULT_EXPORTER = ("python", "-m", "scripts.swarm_v2.session_export")
 TERMINAL_ENV = "AGENTIHOOKS_WORKER_TERMINAL"
 AGGREGATION_ENV = "AGENTIHOOKS_TERMINAL_AGGREGATION"
 REQUIRED = (POLICY_ENV, IMAGE_TAG_ENV, PROFILE_ENV, CAP_ENV, PROJECTS_ENV, BRAIN_ENV)
@@ -78,9 +79,9 @@ def pod_policy(path: str) -> dict:
     return policy
 
 
-def _exporter(value: str | None) -> tuple[str, ...] | None:
+def _exporter(value: str | None) -> tuple[str, ...]:
     if not value:
-        return None
+        return DEFAULT_EXPORTER
     refused = WorkerSettingsRefused(f"{EXPORTER_ENV} must be a JSON list of command words")
     try:
         words = json.loads(value)
@@ -109,7 +110,7 @@ class Workers:
     policy: dict
     image_tag: str
     profile: str
-    exporter: tuple[str, ...] | None
+    exporter: tuple[str, ...]
     terminal: Exposure | None
 
     @classmethod
@@ -125,8 +126,6 @@ class Workers:
         if not image_tag.is_tag(environ[IMAGE_TAG_ENV]):
             raise WorkerSettingsRefused(f"{IMAGE_TAG_ENV} must be an image tag, never a digest")
         policy, profile = pod_policy(environ[POLICY_ENV]), environ[PROFILE_ENV]
-        if profile in LOCAL_PROFILES:
-            raise WorkerSettingsRefused(f"{PROFILE_ENV} {profile} runs only on the workstation")
         if profile not in policy["profiles"]:
             raise WorkerSettingsRefused(f"the Pod policy has no {profile} profile")
         projects = tuple(project.strip() for project in environ[PROJECTS_ENV].split(",") if project.strip())
@@ -161,6 +160,7 @@ class Workers:
                 "task_id": task["id"],
                 "lane": request.lane,
                 "name": request.name,
+                "profile": task["profile"],
                 "endpoints": task["endpoints"],
                 **({"checkpoint": task["checkpoint"]} if task.get("checkpoint") else {}),
             },
