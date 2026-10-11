@@ -2,7 +2,6 @@ import io
 import json
 import sqlite3
 import tarfile
-import time
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -355,14 +354,26 @@ def test_an_exclusive_writer_makes_the_capture_unavailable_as_busy(tmp_path):
     writer = sqlite3.connect(home / native.Codex.index)
     try:
         writer.execute("BEGIN EXCLUSIVE")
-        started = time.monotonic()
         result = qualifier(tmp_path).capture("codex", home, CODEX, tmp_path, cases.VERSIONS["codex"], False)
-        waited = time.monotonic() - started
     finally:
         writer.rollback()
         writer.close()
     assert result == native.Unavailable("codex", native.BUSY)
-    assert waited < 0.5
+
+
+def test_the_index_is_opened_read_only_without_waiting_on_a_lock(tmp_path, monkeypatch):
+    home = cases.codex_home(tmp_path)
+    opened = []
+    real = native.sqlite3.connect
+
+    def recording(database, **options):
+        opened.append((database, options))
+        return real(database, **options)
+
+    monkeypatch.setattr(native.sqlite3, "connect", recording)
+    qualifier(tmp_path).capture("codex", home, CODEX, tmp_path, cases.VERSIONS["codex"], True)
+    uri = (home / native.Codex.index).resolve().as_uri()
+    assert opened == [(f"{uri}?mode=ro", {"uri": True, "timeout": 0})]
 
 
 def test_unavailable_fields_commit_a_context_continuation():
