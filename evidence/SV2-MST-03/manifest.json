@@ -14,6 +14,6 @@
   },
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2455",
   "package": "SV2-MST-03",
-  "tested_commit": "pending",
-  "ci_run": "pending"
+  "tested_commit": "386be57aceb9",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38138432694"
 }
