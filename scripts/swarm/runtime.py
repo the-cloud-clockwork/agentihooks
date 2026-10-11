@@ -676,12 +676,13 @@ class HerdrRuntime:
         if proc.returncode or fields.get("status") != "started" or fields.get("route_status") not in STARTED_ROUTES:
             self._terminate(name)
             tail = (proc.stderr or proc.stdout).strip().splitlines()
-            raise SpawnError(tail[-1] if tail else f"init-agent exit {proc.returncode}")
+            message = tail[-1] if tail else f"init-agent exit {proc.returncode}"
+            raise SpawnError(message, pane_id=fields.get("pane_id", ""))
         try:
             validated = binding.fields(fields, argv[argv.index("--profile") + 1], agent)
         except ValueError as exc:
             self._terminate(name)
-            raise SpawnError(str(exc)) from exc
+            raise SpawnError(str(exc), pane_id=fields.get("pane_id", "")) from exc
         return Placed(
             fields.get("pane_id", ""),
             fields.get("agent", agent),
@@ -774,6 +775,17 @@ class HerdrRuntime:
 
         pids = [s.process.pid for s in sessions() if s.name == name]
         return not self.reap(pids).refusal
+
+    def pane_tail(self, pane_id, lines):
+        args = ["pane", "read", pane_id, "--source", "recent", "--lines", str(lines), "--format", "text"]
+        return self.herdr(args)["text"]
+
+    def close_pane(self, pane_id):
+        try:
+            self.herdr(["pane", "close", pane_id])
+        except Exception as exc:
+            if "not found" not in str(exc):
+                raise
 
     def close_space(self, config: SwarmConfig) -> bool:
         try:

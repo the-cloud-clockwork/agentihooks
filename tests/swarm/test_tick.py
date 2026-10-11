@@ -171,6 +171,12 @@ class FakeRuntime:
         self.closed_spaces.append(config.slug)
         return True
 
+    def pane_tail(self, pane_id, lines):
+        return ""
+
+    def close_pane(self, pane_id):
+        self.closed.append(pane_id)
+
 
 @pytest.fixture
 def store():

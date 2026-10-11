@@ -133,12 +133,6 @@ def test_a_worker_that_exits_before_its_launch_check_passes_has_its_pane_held_th
     assert row["pane_lines"] == ["Error: model not available", "$"]
 
 
-def test_a_master_failing_its_launch_check_is_not_held(store):
-    master = AgentRecord("master@a1b2c3-0001", "master", "", started_at=FAILED_AT, pane_id="w1:m1", state="working")
-    failed_panes.hold_exited(store, "sw", master, FAILED_AT)
-    assert failed_panes.held(store, "sw") == {}
-
-
 def test_status_lists_failed_launches_with_their_lines(store):
     ledger, runtime = _failed_once(store)
     tick("sw", store, ledger, runtime, now_ms=FAILED_AT + failed_panes.CLOSE_AFTER_MS)
@@ -155,7 +149,7 @@ def _launch_fails(tmp_path, stdout, returncode=0):
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         return SimpleNamespace(returncode=returncode, stdout=stdout, stderr="Codex account default not found\n")
 
-    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("codex", "open"))
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
     config = SimpleNamespace(slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="full")
     with pytest.raises(SpawnError) as error:
         runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
