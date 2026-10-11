@@ -258,8 +258,6 @@ def test_missing_recovery_and_unavailable_store_are_reported(pending, monkeypatc
 
 
 def test_finished_or_removed_master_cannot_decide_recovery(pending):
-    from dataclasses import replace
-
     slug = pending.recovery.slug
     pending.world.store.put_agent(slug, AgentRecord("coordinator", "master", "", state="finished"))
     status, result = post(pending, pending.token, {"agent": "coordinator", "choice": "fresh"})
@@ -267,7 +265,7 @@ def test_finished_or_removed_master_cannot_decide_recovery(pending):
     pending.world.store.drop_agent(slug, "coordinator")
     status, result = post(pending, pending.token, {"agent": "coordinator", "choice": "fresh"})
     assert (status, result["error_class"]) == (403, "forbidden_scope")
-    pending.world.store.put_agent(slug, replace(pending.old, name="coordinator", lane="master"))
+    pending.world.store.put_agent(slug, AgentRecord("coordinator", "master", ""))
     pending.world.store.redis.delete(f"{auth.PREFIX}:member:fixture")
     status, result = post(pending, pending.token, {"agent": "coordinator", "choice": "fresh"})
     assert (status, result["error_class"]) == (401, "unauthenticated")
