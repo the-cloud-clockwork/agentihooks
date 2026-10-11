@@ -15,8 +15,8 @@ pytestmark = pytest.mark.unit
 LOADER = 'command -v agentihooks >/dev/null && eval "$(agentihooks accounts env)"'
 
 ACCOUNTS = {
-    "NESTOR.COLT@GMAIL.COM": "tok-a",
     "OPS+2026@TCC.DEV": "tok b'quoted",
+    "NESTOR.COLT@GMAIL.COM": "tok-a",
     "EMPTY@X.IO": "",
 }
 
@@ -55,7 +55,7 @@ def _environ(tmp_path, monkeypatch, url="http://bao:8200/", bao="fixture-bao"):
 def _fallback(tmp_path, text, mode=0o600):
     state = tmp_path / ".agentihooks"
     state.mkdir(exist_ok=True)
-    path = state / account_env.FALLBACK_NAME
+    path = state / ".accounts.env"
     path.write_text(text)
     path.chmod(mode)
     return path
@@ -83,12 +83,15 @@ def test_openbao_accounts_print_one_export_per_email_under_its_lower_case_name(t
     assert account_env.main(["env"]) == 0
 
     out, err = capsys.readouterr()
-    assert seen == [("http://bao:8200/v1/secret/data/k8s/swarm-claude-creds", "fixture-bao", account_env.TIMEOUT_S)]
+    assert seen == [("http://bao:8200/v1/secret/data/k8s/swarm-claude-creds", "fixture-bao", 3)]
     assert _evaluated(out) == {
         "AH_CC_TOKEN_nestor_coltatgmail_com": "tok-a",
         "AH_CC_TOKEN_ops_2026attcc_dev": "tok b'quoted",
     }
-    assert out.count("export ") == 2
+    assert [line.partition("=")[0] for line in out.splitlines()] == [
+        "export AH_CC_TOKEN_nestor_coltatgmail_com",
+        "export AH_CC_TOKEN_ops_2026attcc_dev",
+    ]
     assert err == ""
 
 
@@ -113,7 +116,7 @@ def test_unreachable_openbao_falls_back_to_the_owner_only_file(tmp_path, monkeyp
     _fallback(
         tmp_path,
         "# operator written\nexport AH_CC_TOKEN_nestor_coltatgmail_com='tok-a'\n"
-        'AH_CC_TOKEN_second="tok two"\nOTHER_NAME=nope\nAH_CC_TOKEN_bad name=x\n\n',
+        '  AH_CC_TOKEN_second="tok two"\nOTHER_NAME=nope\nAH_CC_TOKEN_bad name=x\nAH_CC_TOKEN_split=tok one\n\n',
     )
 
     assert account_env.main(["env"]) == 0
@@ -125,8 +128,9 @@ def test_unreachable_openbao_falls_back_to_the_owner_only_file(tmp_path, monkeyp
     assert "OpenBao" in err and "tok-a" not in err and "tok two" not in err
 
 
-def test_missing_openbao_settings_go_straight_to_the_fallback(tmp_path, monkeypatch, capsys):
-    _environ(tmp_path, monkeypatch, url="", bao="")
+@pytest.mark.parametrize(("url", "bao"), [("", ""), ("http://bao:8200", ""), ("", "fixture-bao")])
+def test_missing_openbao_settings_go_straight_to_the_fallback(tmp_path, monkeypatch, capsys, url, bao):
+    _environ(tmp_path, monkeypatch, url=url, bao=bao)
     seen = _openbao(monkeypatch, ACCOUNTS)
     _fallback(tmp_path, "AH_CC_TOKEN_one=tok-1\n")
 
@@ -140,7 +144,7 @@ def test_the_fallback_follows_the_agentihooks_home(tmp_path, monkeypatch, capsys
     _environ(tmp_path, monkeypatch, url="", bao="")
     state = tmp_path / "elsewhere"
     state.mkdir()
-    path = state / account_env.FALLBACK_NAME
+    path = state / ".accounts.env"
     path.write_text("AH_CC_TOKEN_one=tok-1\n")
     path.chmod(0o600)
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(state))
