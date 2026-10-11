@@ -1,0 +1,16 @@
+{
+  "tested_commit": "d476e6c3444753a5f25b81b3fed4489d615fd9ec",
+  "evidence_class": "mocked: fixture Claude and Codex homes laid out as the qualified CLIs write them, a local durable directory backend behind a granted artifact store and fixture launch registrations; no CLI, account, worker Pod or object store was used",
+  "inputs": {
+    "tests/fixtures/swarm_v2/checkpoints/context-only.json": "0bef305b2565a336c5021606d2bf4b1a6f4b35f9cade44aee8c6720da27e5fda",
+    "tests/sv2_ckp03_cases.py": "73ce13e79c7addac843a24200a44258c83502ebda34a004a2afc0dcf882b7188",
+    "tests/test_swarm_v2_checkpoints_native.py": "6f0b0f587b24038751dd160081ece5b549071920b2028e7beeef0e7e3f262aa1",
+    "scripts/swarm_v2/checkpoints/native.py": "a77eebc521245b81e959701d3a0a6a40edd567aed8d5865bacfbac0b2ddf01e4",
+    "scripts/swarm_v2/checkpoints/model.py": "760d5dfb8cc76722b87fc3315a9fd7a3fdc21e431e9581b6d0d3d62ff07cda39",
+    "scripts/swarm_v2/artifacts/base.py": "bcc39bf6c81f689e35ce11ceebe9c2994519522fd3e8e337538e4c82dc8b02ea",
+    "scripts/swarm_v2/artifacts/local.py": "57b3baf4a360307b1995f2068aee79370a03863c6902837fe2c0739a938c306d",
+    "scripts/swarm_v2/filesystem.py": "fefd6faab289337d362bf99c94b415a70809e05506fd4f33761ec64ad3b591e6",
+    "tests/integration/native_resume/native_proof.py": "0921d4aa2f502c3897832cfaa25090e37fe5182a9f7013ffca22a88e4faf0cc4",
+    "tests/integration/native_resume/run_native_proof.sh": "d5940862d7e3066ca9e1ebacdac683466945ef0bb82c2bf6dce398eae22c0059"
+  }
+}
