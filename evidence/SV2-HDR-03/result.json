@@ -5,14 +5,16 @@
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2524",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2531",
-  "tested_commit": "6b71b22e6e44c1a14fae87e38eebf04417e7266e",
+  "tested_commit": "983a2787d1a1a700c55cbbbaa94a27b254f3fc4a",
   "status": "fixture-qualified and live-proven on a workstation against herdr 0.9.1; no controller loop calls the reconciler yet, so nothing runs on Anton",
   "evidence_class": "mocked cases run the catalog, the ownership store and the reconciler against a recording stand in for the herdr client; the live proof ran the pinned herdr 0.9.1 client against two worker sshds with supervised herdr servers on the operator workstation",
   "interfaces": [
     "scripts.swarm_v2.herdr.catalog.Catalog(run) changes the client's saved machines only through herdr machine commands: machines() parses herdr machine list --json into Machine(profile_id, label, target, session, enabled) and refuses an unreadable listing (catalog_unreadable) instead of reading it as empty; add(label, target, session) runs herdr machine add --label L --remote-session S TARGET and returns the opaque profile id herdr prints (catalog_ambiguous when it names none, machine_refused when herdr refuses, catalog_unreachable when herdr does not answer); rename(id, label) runs herdr machine rename ID --label L; remove(id) runs herdr machine remove ID. herdr's own catalog file is never read or written",
     "scripts.swarm_v2.herdr.reconcile.Store(path) is the controller ownership record beside the client terminal material (registrations.json, mode 0600, written atomically with fsync, guarded by an exclusive lock file): execution id, generation, label, target, session, profile id, and for an add whose outcome is unknown the profile ids listed before it. Only profiles it names are ever renamed or removed",
     "scripts.swarm_v2.herdr.reconcile.Registrations.register(endpoint) saves one endpoint under its endpoint name with the explicit default remote session, refusing a label or target already held by a machine it does not own (label_collision, target_collision) and a generation older than the recorded one (stale_generation); it adopts an interrupted add only from a profile not listed before that add; withdraw(endpoint) removes the recorded profile; reconcile(desired, qualifier) registers the newest generation of every desired endpoint, removes a registration whose server qualifies incompatible, removes a registration added in this pass whose server cannot be reached (unreachable) and keeps a previously verified one, reporting it in Report.unverified, replaces a managed profile whose target or session moved, renames a drifted managed label back, restores a missing managed registration and removes managed registrations whose attempt is no longer desired, returning Report(registered, refused, retired, drift)",
-    "scripts.swarm_v2.herdr.attach.Terminal.attach(scope, host_public) now saves through Registrations.register and withdraws the registration when the qualifier verdict is incompatible, the incarnation was replaced or, for a registration this attach created, the server cannot be reached"
+    "scripts.swarm_v2.herdr.attach.Terminal.attach(scope, host_public) now saves through Registrations.register and withdraws the registration when the qualifier verdict is incompatible, the incarnation was replaced or, for a registration this attach created, the server cannot be reached; Terminal.sync(attachable, enabled=...) writes the SSH client material and checks the connection for each attachable (scope, host key), then reconciles the client to exactly those endpoints; with enabled false it returns an empty report and runs no herdr command",
+    "scripts.swarm_v2.kubernetes.terminal.HostKeys.attachable(swarm, live) returns the launch recorded host key of every live execution; operator_sync(terminal, keys, principal, swarm, live, enabled=...) builds each scope with operator_scope, so only the operator role can synchronize the Anton herdr client",
+    "Registrations refuses an endpoint whose scope actor is neither a launch grant nor the operator role (unauthorized) before any herdr change"
   ],
   "supported_versions": {
     "herdr": "0.9.1 linux x86_64, the SV2-HDR-01 pinned build; machine rename takes the profile id before --label, verified live (the reverse order exits 2)",
@@ -21,15 +23,15 @@
   "authority": "Actor and scope come from the SV2-HDR-02 terminal scope: a verified launch grant registration or an operator role principal. Registration labels and targets are derived from that scope's execution id; a label never grants ownership, only the controller ownership record does.",
   "authoritative_objects": "The herdr client's saved machine catalog is authoritative for what the operator sees and is changed only through herdr machine commands. The ownership record is authoritative for which saved machines the controller may rename or remove. Removing a machine leaves its remote herdr server and sessions running.",
   "states": {
-    "observed": "Live proof tests/integration/herdr_registrations/registration_proof.py on the operator workstation with the pinned herdr 0.9.1: 11 of 11 rows held (evidence/SV2-HDR-03/live-proof.jsonl), covering a hand saved machine carrying a managed label left in place and the endpoint refused, two workers beside Local each mapped to its execution id, a restart restoring a removed registration without duplicating the other, a hand rename renamed back, a replay with no drift, and a retired registration removed while its worker herdr server kept running. The SV2-HDR-02 live proof tests/integration/herdr_terminal/terminal_proof.py also passed on this code (failures=0). The first live run found the rename argument order defect (evidence/SV2-HDR-03/live-rename-order.jsonl), fixed before these runs; the SV2-HDR-02 rerun rows are evidence/SV2-HDR-03/hdr02-live-rerun.jsonl.",
-    "accepted": "Cases A, B and C passed twice each with identical records in Tests run 38108949260.",
+    "observed": "Live proof tests/integration/herdr_registrations/registration_proof.py on the operator workstation with the pinned herdr 0.9.1: 13 of 13 rows held (evidence/SV2-HDR-03/live-proof.jsonl), covering a hand saved machine carrying a managed label left in place and the endpoint refused, two workers beside Local each mapped to its execution id, a restart restoring a removed registration without duplicating the other, a hand rename renamed back, a replay with no drift, and a retired registration removed while its worker herdr server kept running, Terminal.sync registering every live attempt, and a stopped sync leaving both profiles in place. The SV2-HDR-02 live proof tests/integration/herdr_terminal/terminal_proof.py also passed on this code (failures=0). The first live run found the rename argument order defect (evidence/SV2-HDR-03/live-rename-order.jsonl), fixed before these runs; the SV2-HDR-02 rerun rows are evidence/SV2-HDR-03/hdr02-live-rerun.jsonl.",
+    "accepted": "Cases A, B and C passed twice each with identical records in Tests run 38110039281.",
     "committed": "Case records, live proof rows, manifest and this record committed on the task branch.",
     "externally_verified": "Not on Anton: no controller loop calls the reconciler, so no Anton herdr client is synchronized yet."
   },
   "validation": {
     "red": "Tests run 38106920923 on the tests only commit dc278d364 failed collecting tests/test_swarm_v2_herdr_registrations.py (cannot import catalog)",
-    "tests": "Tests run 38108949260 at 6b71b22e6e44c1a14fae87e38eebf04417e7266e",
-    "mutation": "Mutation preflight 38108945554 on 6b71b22e6",
+    "tests": "Tests run 38110039281 at 983a2787d1a1a700c55cbbbaa94a27b254f3fc4a",
+    "mutation": "Mutation preflight 38110037463 on 983a2787d",
     "lint": "ruff check, ruff format and size limits through python -m scripts.ci_prepush",
     "review": "Standards and Spec readers; findings and rulings on the pull request"
   },
@@ -78,11 +80,11 @@
     "state": "See states"
   },
   "rollback_rehearsal": {
-    "action": "Stop automated registration: no caller runs reconcile, and Terminal.attach is the only other writer. Existing profiles stay intact; the ownership record lists exactly which profiles the controller created so an audit can decide on each.",
-    "proof": "Case B check retired_record_spares_a_same_label_manual_machine and the live rows show the reconciler never touches a machine its record does not name; stopping the caller issues no herdr command."
+    "action": "Stop automated registration: operator_sync and Terminal.sync with enabled false run no herdr command and write nothing. Existing profiles stay intact and the ownership record keeps naming the profiles the controller created, so an audit can decide on each.",
+    "proof": "tests/test_swarm_v2_kubernetes_terminal.py::test_stopping_automated_registration_leaves_existing_profiles_for_audit and test_a_disabled_sync_touches_nothing_on_the_client; live row rollback_stopped_registration_leaves_profiles (both worker registrations still saved after the stopped sync); case B check retired_record_spares_a_same_label_manual_machine."
   },
   "remaining_limitations": [
-    "No controller loop calls Registrations.reconcile yet; wiring it on start and on every attempt change, with the drift gauge and an off switch, is proposed as a ledger follow up.",
+    "operator_sync is the synchronization entry point, but nothing calls it on a schedule yet: running it on controller start and on every attempt change, with the live execution set from the observed runtime and the drift gauge exported, belongs to task t376 (the master split it from this package), which builds on this branch.",
     "Machines saved by the SV2-HDR-02 attach path before this change carry no ownership record and are refused as collisions until the operator removes them; no SV2-HDR-02 client was deployed.",
     "After an add whose reply never arrived, a machine with the identical label, target and session that someone else saves before the retry would be adopted when the controller's own add was in fact lost; two such machines are refused as ambiguous. The label is controller generated, so the window is narrow.",
     "The verdict incarnation is asserted by the caller from the terminal scope (one supervised herdr server per execution attempt, SV2-HDR-01); herdr does not report it, so case A check verdicts_keyed_by_endpoint_incarnation shows each verdict is keyed by its endpoint's incarnation, not that the server confirmed it.",
