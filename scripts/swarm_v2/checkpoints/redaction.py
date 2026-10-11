@@ -33,7 +33,7 @@ def _value(text: str, key: str, found: list[int]) -> str:
     own = _redact(text)
     fragment = json.dumps({key: text})
     keyed = _redact(fragment)
-    if set(MARKER.findall(keyed)) - set(MARKER.findall(own)):
+    if set(MARKER.findall(keyed)) - set(MARKER.findall(own)) - set(MARKER.findall(fragment)):
         own = " ".join(MARKER.findall(keyed))
     found.append(_count(text, own))
     return own
