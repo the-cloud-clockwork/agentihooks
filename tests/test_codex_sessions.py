@@ -66,6 +66,8 @@ def test_a_session_name_becomes_its_thread_id(args, resolved, archived):
         ["--cd", "resume", "engineer@abc-0001"],
         ["--enable", "resume", "engineer@abc-0001"],
         ["--disable", "resume", "engineer@abc-0001"],
+        ["-c"],
+        ["--no-daemon"],
         [],
     ],
 )

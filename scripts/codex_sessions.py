@@ -39,11 +39,13 @@ TIMEOUT_S = 20
 
 
 def _session_at(args: list[str]) -> int | None:
-    at = 0
-    while at < len(args) and args[at].startswith("-"):
-        at += 2 if args[at] in VALUE_FLAGS else 1
-    if at + 1 < len(args) and args[at] in COMMANDS and not args[at + 1].startswith("-"):
-        return at + 1
+    rest = iter(enumerate(args))
+    for at, arg in rest:
+        if arg in VALUE_FLAGS:
+            next(rest, None)
+        elif not arg.startswith("-"):
+            named = at + 1 < len(args) and arg in COMMANDS and not args[at + 1].startswith("-")
+            return at + 1 if named else None
     return None
 
 
