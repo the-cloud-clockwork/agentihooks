@@ -239,6 +239,12 @@ def test_quota_room_takes_the_tightest_of_several_quotas():
     assert found.reason.startswith("worker namespace quota leaves 2 Pods and 102400 MiB memory;")
 
 
+def test_a_quota_that_reports_no_usage_yet_counts_nothing_used():
+    fresh = {"metadata": {"name": "fresh"}, "status": {"hard": {"pods": "3"}}}
+
+    assert pool.quota_room([fresh], LAUNCH).room == 3
+
+
 def test_quota_room_over_its_hard_never_drops_below_zero():
     assert pool.quota_room([_quota({"pods": "8"}, {"pods": "9"})], LAUNCH) == Room(
         0, "worker namespace quota leaves -1 Pods; 0 more fit at 2000m and 4096 MiB each", "quota pods"

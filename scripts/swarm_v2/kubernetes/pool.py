@@ -156,22 +156,20 @@ class WorkerPool:
         try:
             found = quota_room(self.api.list_quotas(), self.launch)
         except (ApiRefused, OSError) as error:
-            return Room(None, f"worker namespace quota cannot be read ({type(error).__name__})", UNKNOWN)
+            return Room(None, f"worker namespace quota cannot be read ({type(error).__name__})")
         except ValueError as error:
-            return Room(None, f"worker namespace quota is {error}", UNKNOWN)
-        return found or Room(None, "worker namespace quota sets no Pod, CPU or memory limit", UNKNOWN)
+            return Room(None, f"worker namespace quota is {error}")
+        return found or Room(None, "worker namespace quota sets no Pod, CPU or memory limit")
 
     def _pool(self) -> Room:
         if self.pool is None:
-            return Room(None, "worker pool undeclared: the Pod policy names no worker_pool", UNKNOWN)
+            return Room(None, "worker pool undeclared: the Pod policy names no worker_pool")
         try:
             pods = self.api.list_pods("")
         except (ApiRefused, OSError) as error:
-            return Room(
-                None, f"worker pool unknown: the worker Pods cannot be listed ({type(error).__name__})", UNKNOWN
-            )
+            return Room(None, f"worker pool unknown: the worker Pods cannot be listed ({type(error).__name__})")
         try:
             used = usage(pods)
         except ValueError as error:
-            return Room(None, f"worker pool unknown: a worker Pod request is {error}", UNKNOWN)
+            return Room(None, f"worker pool unknown: a worker Pod request is {error}")
         return pool_room(self.pool, self.launch, used)
