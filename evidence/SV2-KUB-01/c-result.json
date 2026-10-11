@@ -5,12 +5,12 @@
   "input_sha256": {
     "pod-policy.json": "25a857c36e7d1ea9c579b0a285cf746f9f965064a3dfb770a8ae25502605d610",
     "pod-launch.json": "a3dd9f7083b76f91ac724de6fc3d05d0227424feda9caac8d1c8f50eeede87ae",
-    "pod-rendered.json": "6db732d6d34b9873cb8eaeb6e8143fb01e0722c404de12250beaf49b5932bda0",
-    "pod-rendered-wrong-probes.json": "94631ea9668d46e6344aede03b750c04f38d37930c0e7fc61959d3a0636e9a42"
+    "pod-rendered.json": "ce52d75aaada25368c21fe6fd23ba9fc0092dcd3251d28929aad511c0952e6f7",
+    "pod-rendered-wrong-probes.json": "5720a681392ae68d97579229037f4096f778a454982f4ee7f8ca91ef76fa7faa"
   },
   "observed": {
-    "first_digest": "sha256:103b600c2a0fff44fbc7839b602194eb6dfcfda17a5206dc1a10d0055d72564a",
-    "restarted_digest": "sha256:103b600c2a0fff44fbc7839b602194eb6dfcfda17a5206dc1a10d0055d72564a",
+    "first_digest": "sha256:e67132d845c36b7e9246c1161bdb8aae33b2b4abff8c189f411581ee67d1b8cf",
+    "restarted_digest": "sha256:e67132d845c36b7e9246c1161bdb8aae33b2b4abff8c189f411581ee67d1b8cf",
     "same_digest": true,
     "probe_rollback": {
       "evidence_class": "render level: the wrong and reverted Pods differ only in their probes",

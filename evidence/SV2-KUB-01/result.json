@@ -60,6 +60,14 @@
       "issue_url": "https://github.com/the-cloud-clockwork/agentihooks/issues/2444",
       "pull_request_url": "https://github.com/the-cloud-clockwork/agentihooks/pull/2463",
       "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38067702782"
+    },
+    "kata_storage_amendment": {
+      "issue_url": "https://github.com/the-cloud-clockwork/agentihooks/issues/2678",
+      "tested_commit": "cf6c228461205cdfa610c84d4bfa22c18b3efcec",
+      "tests_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38170573664",
+      "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38170002058",
+      "checker_red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38170457118",
+      "observed": "316 tests passed in CI, including cases A B C; current case records and golden Pods now use writable container root storage for kata-fc. Historical evidence below describes its original renderer."
     }
   },
   "fixture_manifest": "evidence/SV2-KUB-01/manifest.json",
