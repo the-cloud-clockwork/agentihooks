@@ -374,7 +374,20 @@ def _write_launcher(
     return launcher, prompt_file
 
 
-def _plain_codex_handoff(flags: list[str], environ: dict[str, str]) -> list[str]:
+def _codex_session_choices(session_id: str) -> tuple[str, str]:
+    from hooks.observability.transcript import iter_complete_records
+    from hooks.targets.normalizer import codex_rollout_path
+
+    model, effort = "", ""
+    if rollout := codex_rollout_path(session_id):
+        for record, _ in iter_complete_records(rollout, 0):
+            if record and record.get("type") == "turn_context":
+                context = record["payload"]
+                model, effort = context.get("model", ""), context.get("effort", "")
+    return model, effort
+
+
+def _plain_codex_handoff(flags: list[str], environ: dict[str, str], session_id: str) -> list[str]:
     from scripts.profiles import binding
     from scripts.select_profile import _native_options
     from scripts.swarm.launch_model import configured
@@ -384,8 +397,9 @@ def _plain_codex_handoff(flags: list[str], environ: dict[str, str]) -> list[str]
         raise ValueError(f"unsupported quota transfer from {harness} to codex")
     native = configured("codex", codex_home(source or environ))
     model, effort, remaining = _native_options("codex", flags)
-    model = model or source.get("AGENTIHOOKS_RUN_MODEL") or native.get("model", "")
-    effort = effort or source.get("AGENTIHOOKS_RUN_EFFORT") or native.get("effort", "")
+    saved_model, saved_effort = _codex_session_choices(session_id)
+    model = model or saved_model or source.get("AGENTIHOOKS_RUN_MODEL") or native.get("model", "")
+    effort = effort or saved_effort or source.get("AGENTIHOOKS_RUN_EFFORT") or native.get("effort", "")
     return [*model_flags("codex", model, effort), *remaining]
 
 
@@ -400,7 +414,7 @@ def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], env
         args.bundle_revision = environ.get(BUNDLE_REVISION, "")
     if continuing and not args.profile:
         if agent == "codex" and args.handoff:
-            return _plain_codex_handoff(flags, environ)
+            return _plain_codex_handoff(flags, environ, args.resume)
         raise ValueError("unsupported continuation: original required profile is missing; pass --profile")
     if not args.profile:
         return flags
