@@ -175,15 +175,14 @@ class Codex:
     prefix = "rollout"
 
     def _indexed(self, home: Path, session_id: str) -> str | None:
-        """The thread index is read through SQLite's online backup, never by copying a database another process writes."""
+        """The thread index is read inside one read transaction that never waits on a writer's lock, never by copying a
+        database another process writes; SQLite's online backup would retry forever on a locked source."""
         db = home / self.index
         if not db.is_file():
             return None
         try:
             with closing(sqlite3.connect(f"{db.resolve().as_uri()}?mode=ro", uri=True, timeout=0)) as source:
-                with closing(sqlite3.connect(":memory:")) as copy:
-                    source.backup(copy)
-                    row = copy.execute("SELECT rollout_path FROM threads WHERE id = ?", (session_id,)).fetchone()
+                row = source.execute("SELECT rollout_path FROM threads WHERE id = ?", (session_id,)).fetchone()
         except sqlite3.OperationalError as error:
             raise NativeError(BUSY if "locked" in str(error) or "busy" in str(error) else FORMAT) from error
         return row[0] if row else None
