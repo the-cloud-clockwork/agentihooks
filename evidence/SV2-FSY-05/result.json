@@ -12,7 +12,7 @@
   "status": "fixture-qualified",
   "package_complete": false,
   "mocked": true,
-  "evidence_class": "Mocked in CI: rendered Pod manifests checked without a cluster, a cache store whose read only mount is simulated through the store's mount probe, and a local artifact directory replaced by a file to model lost shared storage. No NFS, no Pod and no live rollout proof.",
+  "evidence_class": "Mocked in CI: rendered Pod manifests checked without a cluster, a cache store whose read only mount is simulated through the store's mount probe, and a local artifact directory replaced by a file to model lost shared storage. No NFS mount and no live rollout proof; the one live observation is the network reachability probe from a Pod on a swarm EC2 node in benchmark.wan.",
   "interfaces": [
     "scripts.swarm_v2.kubernetes.storage.MountChecker().check(pod): refuses shared_runtime, unscoped_shared_write and operator_home with StorageRefused(message, reason); shared_runtime_mount_rejections_total() counts every reason",
     "python -m scripts.swarm_v2.kubernetes.storage <pod.json>: exit 0 when the Pod passes, 1 with the refusal, an unreadable file or a non Pod document on stderr, 64 on usage errors",
@@ -32,7 +32,7 @@
     "observed": "Rendered Pod manifests, store trees before and after attach and publish, attempt worktree snapshots before and after a lost backend",
     "accepted": "A Pod that passes MountChecker; a seed read from a read only store; a paused publication that left the worktree unchanged",
     "committed": "An artifact put through the artifact store after the backend returns, once, with the same reference on replay",
-    "externally_verified": "Network reachability only: a Pod on a swarm EC2 node reached the Anton host NFS ports over the tailnet (see benchmark.wan); no cluster, NFS export or node cache owner uses the package yet"
+    "externally_verified": "Network reachability only: a Pod on a swarm EC2 node reached the Anton host NFS ports (see benchmark.wan); no cluster, NFS export or node cache owner uses the package yet"
   },
   "validation": {
     "red": [
@@ -108,7 +108,7 @@
     "wan": {
       "throughput": "not measured; blocked by the gap below, not by the network",
       "reachability": {
-        "command": "kubectl run nfs-reach-probe-t342 -n default --restart=Never --image=busybox:1.36 with nodeSelector anton.io/workload=swarm and the swarm pool tolerations, running: for p in 2049 111; do nc -z -w 5 10.10.30.130 $p; done; ping -c 5 -q 10.10.30.130",
+        "command": "kubectl run nfs-reach-probe-t342 -n default --restart=Never --image=busybox:1.36 --overrides='{\"spec\":{\"nodeSelector\":{\"anton.io/workload\":\"swarm\"},\"tolerations\":[{\"key\":\"anton.io/remote\",\"operator\":\"Equal\",\"value\":\"aws\",\"effect\":\"NoSchedule\"},{\"key\":\"anton.io/workload\",\"operator\":\"Equal\",\"value\":\"swarm\",\"effect\":\"NoSchedule\"}]}}' --command -- sh -c 'for p in 2049 111; do nc -z -w 5 10.10.30.130 $p && echo \"port $p open\" || echo \"port $p closed\"; done; ping -c 5 -q 10.10.30.130 | tail -2'",
         "node": "anton-ec2-0ad35d2621bca80ff (swarm pool, tailnet InternalIP 100.78.174.24)",
         "output": [
           "port 2049 open",
@@ -127,7 +127,26 @@
         ],
         "observed_at": "2026-10-11"
       },
-      "export_scope": "Every export the Anton host declares (antoncore nfs-exports-check monitor and the swarm brain storage declaration) admits only 10.10.30.0/24 or the on-prem node /32s; swarm EC2 nodes register with tailnet 100.x addresses, so none admits them",
+      "export_scope": {
+        "source": "declared exports in antoncore dev: automation/monitors/nfs-exports-check.sh EXPECTED_EXPORTS and automation/swarm-brain-storage/storage.vars; read from source, not from the live /etc/exports",
+        "command": "git show origin/dev:automation/monitors/nfs-exports-check.sh | grep -oE '^  \"/mnt[^|]*\\|[^ ]+ [^ (]+' | sed 's/|.* / admits /'; grep -oE '10\\.10\\.30\\.[0-9]+/32' automation/swarm-brain-storage/storage.vars | sort -u",
+        "output": [
+          "/mnt/user/appdata/obsidian/vault admits 10.10.30.140/32",
+          "/mnt/user/appdata/agenticore/shared admits 10.10.30.140/32",
+          "/mnt/user/appdata/agenticore-dev/shared admits 10.10.30.0/24",
+          "/mnt/user/appdata/openclaw-dev/config admits 10.10.30.0/24",
+          "/mnt/user/appdata/openclaw-dev/workspace admits 10.10.30.0/24",
+          "/mnt/user/appdata/auth-broker-dev/tokens admits 10.10.30.0/24",
+          "/mnt/user/appdata/librechat-dev/uploads admits 10.10.30.0/24",
+          "/mnt/user/appdata/auth-broker/tokens admits 10.10.30.0/24",
+          "/mnt/user/appdata/librechat/uploads admits 10.10.30.0/24",
+          "/mnt/user/appdata/openclaw/config admits 10.10.30.0/24",
+          "/mnt/user/appdata/openclaw/workspace admits 10.10.30.0/24",
+          "/mnt/user/appdata/antoncore/data/transcripts admits 10.10.30.140/32",
+          "10.10.30.140/32 10.10.30.141/32 10.10.30.142/32 10.10.30.143/32"
+        ],
+        "gap": "Every declared export admits only 10.10.30.0/24 or the on-prem node /32s (the first line of each multi-client export shown); swarm EC2 nodes register with tailnet 100.x addresses (kubectl node InternalIP 100.78.174.24 and 100.123.3.87), so none admits them"
+      },
       "next": "Once an export for the swarm pool and an NFS client on its nodes exist, run python -m scripts.swarm_v2.artifacts.benchmark <mounted folder> --sizes 1,16 --rounds 3 from a swarm pool Pod and record its output here"
     }
   },
