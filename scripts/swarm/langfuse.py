@@ -1,11 +1,19 @@
+from __future__ import annotations
+
 import json
 from collections import defaultdict
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Callable
 
 from scripts.swarm.health import standing
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.langfuse_config import Limits
 from scripts.swarm.langfuse_read import read_summary
+
+if TYPE_CHECKING:
+    from redis import Redis
+
+    from scripts.swarm.store import AgentRecord, RedisStore
 
 PREFIX = "langfuse_account_"
 
@@ -19,7 +27,7 @@ def breaches(row: dict, limits: Limits) -> list[tuple[str, float, float, str]]:
     return result
 
 
-def apply(redis, slug: str, summary: dict, bindings: list, now_ms: int, limits: Limits) -> int:
+def apply(redis: Redis, slug: str, summary: dict, bindings: list[AgentRecord], now_ms: int, limits: Limits) -> int:
     if summary["swarm"] != slug:
         raise ValueError("Langfuse summary belongs to another swarm")
     identities = {agent.name: agent for agent in bindings}
@@ -49,7 +57,13 @@ def apply(redis, slug: str, summary: dict, bindings: list, now_ms: int, limits: 
     return len(grouped)
 
 
-def refresh(store, slug: str, now_ms: int, read=read_summary, limits: Limits = Limits()) -> list[str]:
+def refresh(
+    store: RedisStore,
+    slug: str,
+    now_ms: int,
+    read: Callable[[str, dict, float], dict] = read_summary,
+    limits: Limits = Limits(),
+) -> list[str]:
     key = f"{ROOT}:swarm:{slug}:langfuse-summary"
     raw = store.redis.get(key)
     cached = json.loads(raw) if raw else {}
