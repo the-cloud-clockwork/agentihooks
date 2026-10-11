@@ -214,13 +214,14 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AH_CC_TOKEN_<slug>` | — | One Claude subscription OAuth token per account |
+| `AH_CC_TOKEN_<slug>` | — | One Claude subscription OAuth token per account; `agentihooks claude login <slug>` writes it from `claude setup-token` |
+| `NO_COLOR` | — | Set to any value, even empty, turns off the coloured output of `agentihooks claude login`, `codex login` and `codex refresh` |
 | `AH_CX_TOKEN_<slug>` | — | One Codex ChatGPT workspace access token per account; once any is set the default `codex login` account leaves the pool. `agentihooks codex login <slug>` writes it |
 | `AGENTIHOOKS_AICODE_TOKEN_REFRESH` | `false` | `true` makes this machine the refresh authority: `agentihooks codex refresh` and the session-start kick run only here. `agentihooks codex login` sets it |
 | `AGENTIHOOKS_AICODE_TOKEN_STORE` | `local` | Where the refresher reads and writes accounts: `local` (`~/.agentihooks/codex/<slug>/auth.json`, then the rc block, then OpenBao when configured) or `openbao` (the OpenBao secret only) |
 | `AGENTIHOOKS_AICODE_TOKEN_REFRESH_DAYS` | `3` | Refresh an account whose access token has fewer days left |
 | `AGENTIHOOKS_AICODE_TOKEN_REFRESH_INTERVAL_H` | `6` | Hours between the refreshes a session start kicks off |
-| `OPENBAO_URL`, `OPENBAO_TOKEN` | — | OpenBao address and token for the `secret/agentihooks/codex-creds` KV v2 secret written by `codex login` and the refresher |
+| `OPENBAO_URL`, `OPENBAO_TOKEN` | — | OpenBao address and token for the KV v2 secrets `secret/agentihooks/codex-creds` (written by `codex login` and the refresher) and `secret/agentihooks/claude-creds` (written by `claude login`; `accounts env` reads only `k8s/swarm-claude-creds`) |
 | `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` | — | Offer a Claude `api` slot: a `CLAUDE_CODE_USE_*` platform flag, a foreign `ANTHROPIC_BASE_URL` with either credential, or `ANTHROPIC_API_KEY` alone. Token children never inherit them |
 | `CODEX_API_KEY`, `OPENAI_API_KEY` | — | Either offers a Codex `api` slot (first set wins) |
 | `AH_CX_API_BASE_URL`, `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Base URL of the Codex api provider; must carry no user, password, query or fragment |

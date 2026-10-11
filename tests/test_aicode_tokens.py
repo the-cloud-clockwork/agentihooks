@@ -3,21 +3,22 @@ from pathlib import Path
 
 import pytest
 
+from hooks.context import account_sessions
+from scripts import account_names
 from scripts import aicode_tokens as tokens
 
 START, END = tokens.START, tokens.END
 
 
-def test_a_slug_turns_hyphens_into_underscores_and_keeps_letters_and_digits():
+def test_a_slug_turns_hyphens_into_underscores_and_lowercases_letters():
     assert tokens.slug("nestorcolt-gmail-business") == "nestorcolt_gmail_business"
-    assert tokens.slug("Team2") == "Team2"
+    assert tokens.slug("Team2") == "team2"
     assert tokens.slug("2team") == "2team"
+    assert tokens.slug("ncgmaTCC") == "ncgmatcc"
 
 
-@pytest.mark.parametrize(
-    "raw", ["", "_x", "-x", "a.b", "a b", "a/b", "ñu", "status", "help", "default", "api", "Status", "API"]
-)
-def test_a_slug_refuses_empty_underscore_leading_reserved_and_other_characters(raw):
+@pytest.mark.parametrize("raw", ["", "_x", "-x", ".", "ñu", "status", "help", "default", "api", "Status", "API"])
+def test_a_slug_refuses_empty_underscore_leading_and_reserved_results(raw):
     with pytest.raises(tokens.SlugError):
         tokens.slug(raw)
 
@@ -104,7 +105,31 @@ def test_a_refused_slug_names_the_rule_and_every_reserved_word():
     with pytest.raises(tokens.SlugError) as refused:
         tokens.slug("Status")
     assert str(refused.value) == (
-        "slug must be letters, digits, '_' or '-', not start with '_' and not be api, default, help, status: 'Status'"
+        "slug is lowercased, '@' becomes 'at' and every other character outside a-z and 0-9 becomes '_'; "
+        "the result must not start with '_' and must not be api, default, help, status: 'Status'"
+    )
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("nestor.colt@gmail.com", "nestor_coltatgmail_com"),
+        ("first.last+tag@example.co.uk", "first_last_tagatexample_co_uk"),
+        ("a__b--c", "a__b__c"),
+        ("a b/c", "a_b_c"),
+        ("team.", "team_"),
+        ("@x", "atx"),
+    ],
+)
+def test_an_email_follows_the_account_names_rule_one_character_for_one(raw, expected):
+    assert tokens.slug(raw) == expected
+    assert account_sessions.TOKEN_PREFIX + tokens.slug(raw) == account_names.token_env(raw)
+
+
+def test_the_slug_note_shows_an_email_turned_into_a_variable_name():
+    assert tokens.SLUG_NOTE.format(prefix="AH_CC_TOKEN_") == (
+        "Note: use the email of the target account as the slug, so each token is recognisable at a glance "
+        "(nestor.colt@gmail.com becomes AH_CC_TOKEN_nestor_coltatgmail_com)."
     )
 
 

@@ -1,0 +1,4 @@
+{
+  "variable": "SV2_FAKE_CREDENTIAL",
+  "fake_secret_parts": ["fixture", "not", "a", "credential", "4b1f"]
+}
