@@ -383,7 +383,7 @@ jobs:
 
       - name: Download the queued run's dev durations
         if: needs.durations.outputs.queued == 'true'
-        uses: actions/download-artifact@v4
+        uses: ./.github/actions/retry-download
         with:
           name: dev-durations
           path: ~/dev-durations
@@ -485,7 +485,7 @@ jobs:
           echo "CODEX_CLI_REQUIRED=1" >> "$GITHUB_ENV"
 
       - name: Download the durations this run splits on
-        uses: actions/download-artifact@v4
+        uses: ./.github/actions/retry-download
         with:
           name: split-${{ matrix.python-version }}
 
