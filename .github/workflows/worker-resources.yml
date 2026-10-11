@@ -14,8 +14,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: worker-resources-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow == 'Worker resources' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('worker-resources-{0}', github.run_id) }}
+  queue: ${{ github.workflow == 'Worker resources' && 'max' || 'single' }}
 
 jobs:
   measure:
