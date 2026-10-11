@@ -153,6 +153,21 @@ def test_the_event_cursor_is_stored_under_its_own_name(store):
     assert store.redis.get(store.key("sw", "other-cursor")) == "7"
 
 
+def test_history_trimmed_past_the_event_cursor_is_told_to_the_master_once(store):
+    run(store, recorded())
+    caught_up = recorded()
+    caught_up["_meta"]["events_trimmed"] = 10
+    run(store, caught_up)
+    behind = recorded(rev=40)
+    behind["_meta"]["events_trimmed"] = 30
+    run(store, behind)
+    run(store, behind)
+    assert [text for text in texts(store, MASTER_SEAT) if "trimmed" in text] == [
+        "Ledger sw trimmed its history after revision 10 through revision 30 before the tick passed it on, "
+        "so agent follow ups, questions and task changes in that range reached no one. Read the ledger for them."
+    ]
+
+
 def test_items_go_to_the_master_seat_when_no_master_is_live(store):
     store.drop_agent("sw", "sw-master-1")
     run(store, recorded())
