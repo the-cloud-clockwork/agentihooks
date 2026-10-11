@@ -216,6 +216,22 @@ def test_a_runtime_with_a_fleet_source_answers_capacity_before_its_first_sizing_
     assert herdr.has_capacity(None) is False
 
 
+def test_a_runtime_with_a_fleet_source_sees_a_slot_a_launch_took_after_its_sizing(monkeypatch):
+    def local(*args, **kwargs):
+        raise AssertionError("the deployed controller read local accounts")
+
+    monkeypatch.setattr(capacity, "accounts", local)
+    held = {"akey": 1}
+    _, observations = _quota()
+    route = approved.AccountRoute(lambda: frozenset({"akey"}), observations, lambda: dict(held), "claude")
+    herdr = HerdrRuntime(choose=local)
+    herdr.quota_accounts = approved.FleetAccounts(route, 2)
+    _sizing(herdr)
+    assert herdr.has_capacity(None) is True
+    held["akey"] = 2
+    assert herdr.has_capacity(None) is False
+
+
 def test_a_workstation_runtime_still_sizes_its_lanes_from_its_local_accounts(monkeypatch):
     asked = []
     row = capacity.Account("claude", "local", "OPEN", 0, 80.0, 80.0, 3)

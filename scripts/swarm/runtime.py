@@ -172,7 +172,7 @@ class HerdrRuntime:
 
     def has_capacity(self, config):
         environ = dict(os.environ)
-        if self.quota_accounts is not None and not hasattr(self, "_quota_accounts"):
+        if self.quota_accounts is not None:
             self._quota_accounts = self.quota_accounts(environ, time.time(), refresh=False)
         if hasattr(self, "_quota_accounts"):
             from scripts.swarm.capacity import free_seats
