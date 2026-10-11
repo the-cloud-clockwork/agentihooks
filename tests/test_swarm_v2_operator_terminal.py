@@ -200,7 +200,7 @@ def operator_shell(monkeypatch, store, tmp_path):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr("hooks.context.broadcast.session_name", lambda pid: "")
     monkeypatch.setattr(cli, "connect", lambda: store)
-    monkeypatch.setenv("HOME", str(tmp_path / "client"))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "client"))
     for key, value in environ(tmp_path).items():
         monkeypatch.setenv(key, value)
     return store
