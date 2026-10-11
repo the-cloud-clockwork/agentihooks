@@ -179,3 +179,12 @@ def answer(pane_id: str, text: str, environ: dict[str, str], timeout_ms: int) ->
     except (HerdrError, subprocess.TimeoutExpired):
         return False
     return True
+
+
+def name_session(pane_id: str, name: str, environ: dict[str, str]) -> bool:
+    """Codex has no launch option for a session name, so its own rename command is typed into the pane."""
+    try:
+        _cli(["pane", "run", pane_id, f"/rename {name}"], environ)
+    except (HerdrError, subprocess.TimeoutExpired):
+        return False
+    return True
