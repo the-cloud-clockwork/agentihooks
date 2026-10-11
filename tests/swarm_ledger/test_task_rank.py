@@ -175,13 +175,56 @@ def test_order_puts_each_rank_in_its_place(task, position):
     assert ledger_rank.order(task) == position
 
 
-@pytest.mark.parametrize("extra", [{"by": ""}, {"by": 7}, {"by": None}, {"if_unranked": False}, {"if_unranked": 1}])
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"by": ""},
+        {"by": 7},
+        {"by": None},
+        {"if_unranked": False},
+        {"if_unranked": 1},
+        {"if_owned": False},
+        {"if_owned": 1},
+        {"if_owned": True, "if_other": True},
+    ],
+)
 def test_the_page_rank_op_refusal_names_its_shape(extra):
     with pytest.raises(ValueError) as refused:
         ledger_rank.check({"op": "task_rank", "id": "p", "item": "tasks/t1", "rank": "high", **extra})
     assert str(refused.value) == (
-        "task_rank takes an id, an item tasks/<id>, a rank and an optional author by and if_unranked"
+        "task_rank takes an id, an item tasks/<id>, a rank and an optional author by, if_unranked and if_owned"
     )
+
+
+def owned_rank(rank, n, by="dispatcher"):
+    op = {"op": "task_rank", "id": f"o-{n}", "item": "tasks/t1", "rank": rank, "by": by, "if_owned": True}
+    core.check_op(op)
+    return core.sync(SLUG, ops=[op])
+
+
+def test_an_if_owned_rank_lands_on_an_unranked_task_and_reorders_its_own_rank():
+    state, rejected = owned_rank("high", 1)
+    assert (rejected, rank_of(state)) == ([], "high")
+    state, rejected = owned_rank("normal", 2)
+    assert (rejected, rank_of(state), state["_meta"]["stamps"]["tasks/t1/rank"]["by"]) == ([], "normal", "dispatcher")
+
+
+@pytest.mark.parametrize(("by", "named"), [(MASTER, MASTER), ("operator", "operator")])
+def test_an_if_owned_rank_on_a_rank_someone_else_set_is_refused_and_names_who(by, named):
+    owned_rank("high", 1)
+    core.sync(SLUG, ops=[{"op": "task_rank", "id": "g-1", "item": "tasks/t1", "rank": "urgent", "by": by}])
+    state, rejected = owned_rank("normal", 2)
+    assert (rejected, rank_of(state)) == (["o-2"], "urgent")
+    assert state["_meta"]["warnings"][0] == f"task t1 has rank urgent set by {named}"
+
+
+def test_an_if_owned_rank_on_a_rank_with_no_recorded_author_is_refused():
+    op = {"op": "task_add", "id": "add-9", "by": MASTER, "task": "t9", "title": "z", "lane": "eng", "rank": "low"}
+    core.sync(SLUG, ops=[op])
+    guarded = {"op": "task_rank", "id": "o-9", "item": "tasks/t9", "rank": "high", "by": "dispatcher"}
+    state, rejected = core.sync(SLUG, ops=[{**guarded, "if_owned": True}])
+    assert (rejected, rank_of(state, "t9")) == (["o-9"], "low")
+    assert state["_meta"]["warnings"][0] == "task t9 has rank low set by someone else"
 
 
 def test_an_if_unranked_rank_lands_on_a_task_nobody_ranked():
