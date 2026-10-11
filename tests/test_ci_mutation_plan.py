@@ -162,7 +162,7 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
     ("estimated", "shards", "parts"),
     [
         ((0, 0, {}), "[0]", "[0]"),
-        ((962, 500, dict.fromkeys("abcde", 30)), "[0, 1]", "[0, 1]"),
+        ((962, 500, dict.fromkeys("abcde", 15.24)), "[0, 1]", "[0, 1]"),
         ((10**6, 10**4, {f"t{n}": 30 for n in range(40)}), json.dumps(list(range(10))), json.dumps(list(range(10)))),
     ],
 )
