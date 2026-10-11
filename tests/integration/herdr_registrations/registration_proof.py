@@ -146,7 +146,9 @@ def main() -> int:
             {"retired": report.retired, "labels": labels(restarted), "worker_c_server_running": running},
         )
         both = sorted([endpoint_a.name, endpoint_c.name])
-        synced = restarted.sync([(scope(tp.EXE_A), identity_a.public), (scope(tp.EXE_C), identity_c.public)])
+        synced = restarted.sync(
+            [(scope(tp.EXE_A), identity_a.public), (scope(tp.EXE_C), identity_c.public)], enabled=True
+        )
         tp.record(
             "a_sync_registers_every_live_attempt",
             synced.refused == {} and sorted(synced.registered) == [tp.EXE_A, tp.EXE_C] and labels(restarted) == both,

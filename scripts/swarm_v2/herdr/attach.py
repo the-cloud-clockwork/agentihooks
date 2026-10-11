@@ -198,7 +198,7 @@ class Terminal:
             self._refuse(refused)
         return verdict
 
-    def sync(self, attachable: Iterable[tuple[Scope, str]], *, enabled: bool = True) -> Report:
+    def sync(self, attachable: Iterable[tuple[Scope, str]], *, enabled: bool) -> Report:
         if not enabled:
             return Report()
         ready, refused = [], {}

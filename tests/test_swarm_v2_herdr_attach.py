@@ -446,3 +446,29 @@ def test_a_compatible_attach_keeps_its_registration(tmp_path):
     found, runner = terminal(tmp_path)
     found.attach(scope(), HOST_KEY)
     assert not any(command[:3] == ["herdr", "machine", "remove"] for command in runner.commands)
+
+
+EXE_B = "exe-" + "b" * 32
+
+
+def scope_of(execution_id: str, generation: int):
+    record = fixture()["registration"] | {"execution_id": execution_id, "generation": generation}
+    return grant_scope(Registration(**record))
+
+
+def test_sync_counts_every_attempt_it_refuses(tmp_path):
+    found, runner = terminal(tmp_path)
+    for execution_id in (EXE_A, EXE_B):
+        found.register(scope_of(execution_id, 3), HOST_KEY)
+    report = found.sync([(scope_of(EXE_A, 2), HOST_KEY), (scope_of(EXE_B, 2), HOST_KEY)], enabled=True)
+    assert report.refused == {EXE_A: "stale_generation", EXE_B: "stale_generation"}
+    assert found.terminal_endpoint_refusals() == {"stale_generation": 2}
+
+
+def test_sync_reports_connection_and_registration_refusals_together(tmp_path):
+    found, runner = terminal(tmp_path)
+    runner.herdr = sv2_hdr01_cases.Runner(sv2_hdr01_cases.fixture()["missing_forwarding_server"])
+    found.register(scope_of(EXE_A, 3), HOST_KEY)
+    report = found.sync([(scope_of(EXE_A, 2), HOST_KEY), (scope_of(EXE_B, 1), HOST_KEY)], enabled=True)
+    assert report.refused == {EXE_A: "stale_generation", EXE_B: "incompatible"}
+    assert report.registered == {}
