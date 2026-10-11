@@ -88,6 +88,12 @@ def test_a_pod_requests_the_larger_of_its_containers_and_its_largest_init_contai
     assert pool.requests(pod) == (500, 4096)
 
 
+def test_an_init_container_larger_in_memory_sets_the_pod_memory():
+    pod = _pod(cpu="1", memory="64Mi", init={"cpu": "100m", "memory": "1Gi"})
+
+    assert pool.requests(pod) == (1000, 1024)
+
+
 def test_a_container_with_limits_and_no_requests_requests_its_limits():
     limited = {"name": "agent", "resources": {"limits": {"cpu": "1", "memory": "2Gi"}}}
     partial = {"name": "side", "resources": {"requests": {"cpu": "100m"}, "limits": {"cpu": "1", "memory": "64Mi"}}}
@@ -102,9 +108,10 @@ def test_a_container_without_requests_adds_nothing():
 
 
 def test_usage_counts_live_pods_and_skips_finished_ones():
-    pods = [_pod(), _pod("Pending"), _pod("Succeeded"), _pod("Failed"), {**_pod(), "status": {}}]
+    unread = {key: value for key, value in _pod().items() if key != "status"}
+    pods = [_pod(), _pod("Pending"), _pod("Succeeded"), _pod("Failed"), {**_pod(), "status": {}}, unread]
 
-    assert pool.usage(pods) == pool.Usage(3, 6000, 12288)
+    assert pool.usage(pods) == pool.Usage(4, 8000, 16384)
 
 
 def test_room_is_the_fewest_launches_that_fit_and_names_memory_when_memory_binds():
