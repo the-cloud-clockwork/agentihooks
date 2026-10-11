@@ -16,18 +16,11 @@
         "master-2@race-2026-01-01 set tasks/t2: description"
       ],
       "race": {
-        "master@abcdef-0001": [
-          true,
-          []
-        ],
-        "master@abcdef-0002": [
-          false,
-          [
-            "followups/f1 belongs to master@race-2026-01-01, so master-2@race-2026-01-01 cannot decide it"
-          ]
-        ]
+        "master@abcdef-0001": true,
+        "master@abcdef-0002": false
       },
       "refusals": 1,
+      "second_refusal_names_lead": true,
       "task_description": "Updated by master@abcdef-0002"
     },
     "state": "passed"

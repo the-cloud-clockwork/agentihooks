@@ -112,14 +112,42 @@ def test_two_masters_racing_on_one_follow_up_leave_one_decision_by_its_owner(wor
     raced = world.race()
 
     assert raced[LEAD_NAME] == {"accepted": True, "warnings": []}
-    assert raced[SECOND_NAME] == {
-        "accepted": False,
-        "warnings": [f"{FOLLOWUP} belongs to {LEAD}, so {SECOND} cannot decide it"],
-    }
+    assert raced[SECOND_NAME]["accepted"] is False
+    assert cases.names_lead(raced[SECOND_NAME]["warnings"]) is True
     assert world.followup()["done"] is True
     assert world.doc()["_meta"]["stamps"][f"{FOLLOWUP}/done"]["by"] == LEAD_NAME
     assert world.posts() == [f"{LEAD} set {FOLLOWUP}/done to true"]
     assert world.refusals() == 1
+
+
+def test_a_master_that_writes_first_without_owning_the_follow_up_is_refused_by_routing(world):
+    assert world.decide(SECOND_NAME)["warnings"] == [f"{FOLLOWUP} belongs to {LEAD}, so {SECOND} cannot decide it"]
+    assert world.decide(LEAD_NAME) == {"accepted": True, "warnings": []}
+
+
+def test_a_master_that_writes_after_the_owner_is_refused_by_the_decider_record(world):
+    world.decide(LEAD_NAME)
+    rev = world.doc()["_meta"]["stamps"][f"{FOLLOWUP}/done"]["rev"]
+
+    assert world.decide(SECOND_NAME)["warnings"] == [
+        f"{FOLLOWUP} was decided by {LEAD} at revision {rev}, so {SECOND} cannot decide it"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("warnings", "named"),
+    [
+        ([f"{FOLLOWUP} belongs to {LEAD}, so {SECOND} cannot decide it"], True),
+        ([f"{FOLLOWUP} was decided by {LEAD} at revision 4, so {SECOND} cannot decide it"], True),
+        ([f"{FOLLOWUP} was decided by {SECOND} at revision 4, so {SECOND} cannot decide it"], False),
+        ([f"{FOLLOWUP} was decided by {LEAD} at revision 4, so {LEAD} cannot decide it"], False),
+        ([f"{FOLLOWUP} belongs to {SECOND}, so {SECOND} cannot decide it"], False),
+        ([], False),
+        ([f"{FOLLOWUP} belongs to {LEAD}, so {SECOND} cannot decide it"] * 2, False),
+    ],
+)
+def test_the_race_check_accepts_only_a_refusal_naming_the_lead(warnings, named):
+    assert cases.names_lead(warnings) is named
 
 
 def test_an_accepted_decision_records_its_seat_and_revision(world):

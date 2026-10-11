@@ -121,12 +121,21 @@ class World:
         return master_fence.measurements(self.redis, SLUG)["master_write_refusals_total"]
 
 
+def names_lead(warnings):
+    """Master two loses either before the lead writes (routing) or after (the lead's decider record)."""
+    text = warnings[0] if len(warnings) == 1 else ""
+    routed = text == f"{FOLLOWUP} belongs to {LEAD}, so {SECOND} cannot decide it"
+    decided = text.startswith(f"{FOLLOWUP} was decided by {LEAD} at revision ")
+    return routed or (decided and text.endswith(f", so {SECOND} cannot decide it"))
+
+
 def _positive(world):
     raced = world.race()
     own_task = world.set_task(SECOND_NAME, "t2")
     task = next(t for t in world.doc()["tasks"] if t["id"] == "t2")
     return {
-        "race": {name: [result["accepted"], result["warnings"]] for name, result in sorted(raced.items())},
+        "race": {name: result["accepted"] for name, result in sorted(raced.items())},
+        "second_refusal_names_lead": names_lead(raced[SECOND_NAME]["warnings"]),
         "followup_done": world.followup()["done"],
         "deciders": {item: row["seat"] for item, row in world.decisions().items()},
         "own_task_accepted": own_task["accepted"],
@@ -184,8 +193,8 @@ def _recovery(world):
 
 
 def _meets_positive(o):
-    lead_won = o["race"][LEAD_NAME] == [True, []]
-    refused = o["race"][SECOND_NAME] == [False, [f"{FOLLOWUP} belongs to {LEAD}, so {SECOND} cannot decide it"]]
+    lead_won = o["race"] == {LEAD_NAME: True, SECOND_NAME: False}
+    refused = o["second_refusal_names_lead"] is True
     recorded = o["deciders"] == {FOLLOWUP: LEAD}
     posted = o["posts"] == [f"{LEAD} set {FOLLOWUP}/done to true", f"{SECOND} set tasks/t2: description"]
     own = o["own_task_accepted"] and o["task_description"] == f"Updated by {SECOND_NAME}"
