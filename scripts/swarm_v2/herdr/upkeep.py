@@ -20,10 +20,8 @@ class Attempt:
 
 
 class Upkeep:
-    """Disabled, it runs no herdr command and leaves every saved machine in place."""
-
-    def __init__(self, terminal: Terminal, enabled: bool) -> None:
-        self.terminal, self.enabled = terminal, enabled
+    def __init__(self, terminal: Terminal) -> None:
+        self.terminal = terminal
         self.due, self.seen = True, {}
         self.last = Report()
 
@@ -32,8 +30,6 @@ class Upkeep:
         return self.change(attempts)
 
     def change(self, attempts: Iterable[Attempt]) -> Report | None:
-        if not self.enabled:
-            return None
         attempts = tuple(attempts)
         current = {attempt.scope.execution_id: attempt.scope.generation for attempt in attempts}
         if not self.due and current == self.seen:

@@ -33,7 +33,7 @@ def sidebar(herdr) -> list[str]:
 
 def test_start_registers_every_attachable_attempt_beside_the_manual_machine(tmp_path):
     terminal, herdr = client(tmp_path)
-    keeper = Upkeep(terminal, True)
+    keeper = Upkeep(terminal)
 
     report = keeper.start([attempt(EXE_A), attempt(EXE_B)])
 
@@ -47,7 +47,7 @@ def test_start_registers_every_attachable_attempt_beside_the_manual_machine(tmp_
 
 def test_an_unchanged_set_of_attempts_runs_no_herdr_command(tmp_path):
     terminal, herdr = client(tmp_path)
-    keeper = Upkeep(terminal, True)
+    keeper = Upkeep(terminal)
     keeper.start([attempt(EXE_A), attempt(EXE_B)])
     ran = len(herdr.commands)
 
@@ -58,7 +58,7 @@ def test_an_unchanged_set_of_attempts_runs_no_herdr_command(tmp_path):
 
 def test_start_reconciles_even_when_the_attempts_are_unchanged(tmp_path):
     terminal, herdr = client(tmp_path)
-    keeper = Upkeep(terminal, True)
+    keeper = Upkeep(terminal)
     keeper.start([attempt(EXE_A)])
     herdr.machines = [FX["manual"]]
 
@@ -71,7 +71,7 @@ def test_start_reconciles_even_when_the_attempts_are_unchanged(tmp_path):
 
 def test_a_new_attempt_is_registered_on_change(tmp_path):
     terminal, herdr = client(tmp_path)
-    keeper = Upkeep(terminal, True)
+    keeper = Upkeep(terminal)
     keeper.start([attempt(EXE_A)])
 
     report = keeper.change([attempt(EXE_A), attempt(EXE_B)])
@@ -84,7 +84,7 @@ def test_a_new_attempt_is_registered_on_change(tmp_path):
 
 def test_a_new_generation_of_an_attempt_reconciles_again(tmp_path):
     terminal, herdr = client(tmp_path)
-    keeper = Upkeep(terminal, True)
+    keeper = Upkeep(terminal)
     keeper.start([attempt(EXE_A)])
     ran = len(herdr.commands)
 
@@ -97,7 +97,7 @@ def test_a_new_generation_of_an_attempt_reconciles_again(tmp_path):
 
 def test_an_ended_attempt_is_retired_and_the_manual_machine_kept(tmp_path):
     terminal, herdr = client(tmp_path)
-    keeper = Upkeep(terminal, True)
+    keeper = Upkeep(terminal)
     keeper.start([attempt(EXE_A), attempt(EXE_B)])
 
     report = keeper.change([attempt(EXE_A)])
@@ -110,7 +110,7 @@ def test_an_ended_attempt_is_retired_and_the_manual_machine_kept(tmp_path):
 
 def test_an_unroutable_attempt_is_refused_and_never_saved(tmp_path):
     terminal, herdr = client(tmp_path, addresses=())
-    keeper = Upkeep(terminal, True)
+    keeper = Upkeep(terminal)
 
     report = keeper.start([attempt(EXE_A)])
 
@@ -121,7 +121,7 @@ def test_an_unroutable_attempt_is_refused_and_never_saved(tmp_path):
 
 def test_a_refused_attempt_is_retried_on_the_next_change(tmp_path):
     terminal, herdr = client(tmp_path, ready={endpoint(EXE_A).target})
-    keeper = Upkeep(terminal, True)
+    keeper = Upkeep(terminal)
     assert keeper.start([attempt(EXE_A), attempt(EXE_B)]).refused == {EXE_B: "machine_refused"}
     herdr.ready.add(endpoint(EXE_B).target)
 
@@ -135,7 +135,7 @@ def test_a_refused_attempt_is_retried_on_the_next_change(tmp_path):
 
 def test_an_unreadable_client_names_it_and_retries_on_the_next_change(tmp_path):
     terminal, herdr = client(tmp_path)
-    keeper = Upkeep(terminal, True)
+    keeper = Upkeep(terminal)
     keeper.start([attempt(EXE_A)])
     herdr.listing = "{"
 
@@ -148,25 +148,10 @@ def test_an_unreadable_client_names_it_and_retries_on_the_next_change(tmp_path):
     assert report.drift == {}
 
 
-def test_switched_off_no_herdr_command_runs_and_no_client_file_is_written(tmp_path):
-    terminal, herdr = client(tmp_path)
-    owned = {"id": "p-owned", "label": endpoint(EXE_A).name, "target": endpoint(EXE_A).target}
-    herdr.machines.append(owned | {"session": "default", "enabled": True})
-    before = [dict(machine) for machine in herdr.machines]
-    keeper = Upkeep(terminal, False)
-
-    assert keeper.start([attempt(EXE_B)]) is None
-    assert keeper.change([]) is None
-    assert herdr.commands == []
-    assert herdr.machines == before
-    assert not (tmp_path / "client").exists()
-    assert keeper.herdr_registration_drift() == 0
-
-
 def test_a_fresh_upkeep_reconciles_even_an_empty_set_of_attempts(tmp_path):
     terminal, herdr = client(tmp_path)
 
-    report = Upkeep(terminal, True).change([])
+    report = Upkeep(terminal).change([])
 
     assert report == Report()
     assert herdr.commands == [["herdr", "machine", "list", "--json"]]

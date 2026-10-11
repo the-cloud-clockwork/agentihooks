@@ -935,7 +935,7 @@ def test_start_and_an_attempt_change_each_save_the_client_machines(fixture, tmp_
     one = first.admit(agent(store))
     attachable(store, one)
     assert first.release()
-    controller = keeping(store, grant, Upkeep(terminal, True))
+    controller = keeping(store, grant, Upkeep(terminal))
 
     assert controller.acquire()
     assert sorted(terminal.registrations.store.load()) == [one.execution_id]
@@ -949,17 +949,3 @@ def test_start_and_an_attempt_change_each_save_the_client_machines(fixture, tmp_
     assert [machine["label"] for machine in herdr.machines][0] == "devbox"
     assert len(herdr.machines) == 3
     assert controller.herdr_registration_drift() == 1
-
-
-def test_switched_off_the_controller_leaves_the_client_machines_untouched(fixture, tmp_path):
-    store, _controllers, _transport, _clock, grant = fixture
-    terminal, herdr = herdr_client(tmp_path)
-    controller = keeping(store, grant, Upkeep(terminal, False))
-
-    assert controller.acquire()
-    attachable(store, controller.admit(agent(store)))
-    assert controller.renew()
-
-    assert herdr.commands == []
-    assert [machine["label"] for machine in herdr.machines] == ["devbox"]
-    assert controller.herdr_registration_drift() == 0
