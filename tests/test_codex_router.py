@@ -156,7 +156,6 @@ def test_route_reads_quotas_for_a_forced_account_and_refreshes_them_otherwise(mo
     pool = _accounts()
     runner = object()
     monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {})
-    monkeypatch.setattr(router, "routing_pool", lambda environ, run: pool)
     monkeypatch.setattr(router, "accounts", lambda environ, run: pool)
     monkeypatch.setattr(router, "quotas", lambda p, environ: calls.append(("quotas", p, environ)) or {})
     monkeypatch.setattr(

@@ -320,9 +320,9 @@ def select(
     """Split launches between the api and the account pool by weight, then take the free seat with the fewest sessions."""
     if route:
         for account in pool:
-            if account.name == route and not account.signed_in:
-                raise RoutingError(f"Codex account '{route}' is not signed in; run codex login")
             if account.name == route:
+                if not account.signed_in:
+                    raise RoutingError(f"Codex account '{route}' is not signed in; run codex login")
                 return account, "forced", None
         available = ", ".join(account.name for account in pool)
         raise RoutingError(f"Codex account '{route}' not found; available: {available}")
