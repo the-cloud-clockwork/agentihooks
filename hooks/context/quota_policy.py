@@ -312,7 +312,7 @@ def _pct(value: float) -> str:
     return f"{value:.0f}%"
 
 
-def _when(epoch: float | None) -> str:
+def reset_when(epoch: float | None) -> str:
     if epoch is None:
         return "unknown"
     local = datetime.fromtimestamp(epoch).astimezone()
@@ -394,13 +394,13 @@ def render(d: Decision, session_id: str, cwd: str) -> str:
             f"account qualifies ({_others_text(d)}).\n"
             f'1. CronCreate a one-shot job, cron "{cron}" (local time {at.strftime("%a %H:%M")}), recurring '
             f'false, prompt: "The 5-hour quota window has reset. Continue the task from where you stopped."\n'
-            f"2. Tell the operator this session waits until the reset at {_when(d.five_reset)}, then stop. "
+            f"2. Tell the operator this session waits until the reset at {reset_when(d.five_reset)}, then stop. "
             f"Every other tool is blocked until the window resets."
         )
     reset = d.week_reset if d.trigger == "week" else d.five_reset
     prefix = "AH_CX_TOKEN_" if os.environ.get("AGENTIHOOKS_TARGET") == "codex" else "AH_CC_TOKEN_"
     return (
-        f"QUOTA STOP — {head} Resets {_when(reset)}. No other account has room: {_others_text(d)}.\n"
+        f"QUOTA STOP — {head} Resets {reset_when(reset)}. No other account has room: {_others_text(d)}.\n"
         f"Stop working and tell the operator to add another {prefix}<slug> account, or to say "
         f'"keep pushing" to continue on this account until 100%. Every tool is blocked.'
     )
@@ -465,7 +465,7 @@ def _claim_warning(account: str, window: str, reset: float | None) -> bool:
 def _warning_text(account: str, window: str, used: float, reset: float | None, hard: float) -> str:
     return (
         f"QUOTA WARNING — Codex account {account} has {_pct(100 - used)} of its {window} quota left "
-        f"({_pct(used)} used); it resets {_when(reset)}. Tell the operator now. Nothing is blocked: at {hard:g}% "
+        f"({_pct(used)} used); it resets {reset_when(reset)}. Tell the operator now. Nothing is blocked: at {hard:g}% "
         f"used the quota policy moves this conversation to another account with a handoff that resumes it."
     )
 

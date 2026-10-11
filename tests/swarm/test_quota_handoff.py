@@ -311,6 +311,31 @@ def test_the_warning_names_quota_left_and_reset_and_a_new_reset_rearms_it(window
         assert datetime.fromtimestamp(reset).astimezone().strftime("%a %H:%M %Z") in text
 
 
+def test_each_window_warns_once_per_reset_while_the_other_stays_crossed():
+    import fakeredis
+
+    storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    storage.put_agent("sw", AgentRecord("cx", "eng", "e", harness="codex", account="spent", started_at=1))
+    key = storage.key("sw", "quota-capacity")
+
+    def observe(five_reset, five, week):
+        row = replace(account(harness="codex", five=five, week=week), week_resets_at=9_000, five_resets_at=five_reset)
+        storage.redis.set(key, json.dumps({"accounts": [row.__dict__]}))
+        return len(quota_handoff.warn("sw", storage, {}))
+
+    assert [observe(100, 50, 91), observe(100, 96, 91), observe(100, 97, 92)] == [1, 1, 0]
+    assert [observe(200, 20, 92), observe(200, 96, 92), observe(200, 96, 93)] == [0, 1, 0]
+    texts = [item.text for item in InboxStore(storage.redis).pending_items("cx")]
+    assert [text.split(" window,")[0].rsplit(" ", 2)[-2:] for text in texts] == [
+        ["its", "week"],
+        ["five", "hour"],
+        ["five", "hour"],
+    ]
+    storage.put_agent("sw", AgentRecord("both", "eng", "f", harness="codex", account="spent", started_at=2))
+    assert quota_handoff.warn("sw", storage, {}) == ["early quota handoff warning sent to both"] * 2
+    assert storage.redis.hget(storage.key("sw", "quota-warning-lives"), "both") == "2"
+
+
 def test_an_old_warning_does_not_suppress_a_new_lifes_quota_notice():
     import fakeredis
 

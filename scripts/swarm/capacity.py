@@ -102,8 +102,19 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
         week = _left(quota.seven_day, now) if quota else None
         reset = session_bands.upcoming(quota.seven_day.resets_at, now) if quota else None
         five_reset = session_bands.upcoming(quota.five_hour.resets_at, now) if quota else None
-        row = Account("codex", account.name, _state(cap), counts.get(account.name, 0), five, week, cap, reset)
-        rows.append(replace(row, five_resets_at=five_reset))
+        rows.append(
+            Account(
+                "codex",
+                account.name,
+                _state(cap),
+                counts.get(account.name, 0),
+                five,
+                week,
+                cap,
+                reset,
+                five_resets_at=five_reset,
+            )
+        )
     return rows + _api(codex_api.CodexApiSource(counts), "codex", environ, now)
 
 

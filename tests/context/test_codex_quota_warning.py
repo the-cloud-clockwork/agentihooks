@@ -80,7 +80,7 @@ def test_controlled_crossings_give_exactly_one_warning_each_and_a_reset_rearms_i
     week = warn(10.0, 90.0)
     assert week == (
         f"QUOTA WARNING — Codex account alpha has 10% of its 7-day quota left (90% used); it resets "
-        f"{qp._when(week_reset)}. Tell the operator now. Nothing is blocked: at 98% used the quota policy "
+        f"{qp.reset_when(week_reset)}. Tell the operator now. Nothing is blocked: at 98% used the quota policy "
         f"moves this conversation to another account with a handoff that resumes it."
     )
     assert _clock(week_reset) in week
@@ -217,3 +217,32 @@ def test_codex_sees_the_handoff_directive_after_the_tool_call(spent, capsys):
     _post(SID)
     out = capsys.readouterr().out
     assert "QUOTA HANDOFF REQUIRED" in out and f"--resume {SID}" in out
+
+
+def test_a_codex_prompt_carries_the_warning_once(codex):
+    now = time.time()
+    _rollout(codex, SID, 10.0, 91.0, int(now + 3600), int(now + 86400))
+    assert "Codex account alpha has 9% of its 7-day quota left" in qp.prompt_context(SID, "/repo")
+    assert qp.prompt_context(SID, "/repo") is None
+
+
+def test_a_claude_tool_call_gets_no_second_policy_directive(spent, monkeypatch, capsys):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    monkeypatch.setattr(qp, "evaluate", lambda session: pytest.fail("Claude reads the policy at PreToolUse only"))
+    _post(SID)
+    assert "QUOTA" not in capsys.readouterr().out
+
+
+def test_the_old_terminal_never_closes_the_conversation_its_successor_resumed(tmp_path, monkeypatch):
+    from hooks.context import broadcast
+
+    monkeypatch.setattr(broadcast, "BROADCAST_FILE", tmp_path / "broadcast.json")
+    monkeypatch.setattr(broadcast, "_local_namespace", lambda: "host")
+    broadcast.register_session(SID, pid=100, cwd=str(tmp_path), model="gpt", account="alpha")
+    assert broadcast.mark_handed_off(100, "beta") == [SID]
+    broadcast.register_session(SID, pid=200, cwd=str(tmp_path), model="gpt", account="beta")
+    broadcast.mark_session_closed(SID, 100)
+    assert broadcast.session_status(SID)["status"] == "alive"
+    assert qp.handed_off_block(SID) is None
+    broadcast.mark_session_closed(SID, 200)
+    assert broadcast.session_status(SID)["status"] == "closed"

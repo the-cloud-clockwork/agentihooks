@@ -684,9 +684,10 @@ def on_session_end(payload: dict) -> None:
 
     if BROADCAST_ENABLED:
         try:
+            from hooks.context.account_sessions import agent_pid
             from hooks.context.broadcast import heartbeat_sessions, mark_session_closed
 
-            mark_session_closed(session_id)
+            mark_session_closed(session_id, agent_pid())
             heartbeat_sessions()
         except Exception as e:
             log("broadcast session_end failed", {"error": str(e)})
@@ -1040,9 +1041,9 @@ def _inject_quota_posttool(payload: dict) -> None:
 
         session_id = payload.get("session_id", "")
         _, directive = pretool(session_id, payload.get("tool_name", ""), payload.get("cwd", ""))
-        for context in (directive, early_warning(session_id)):
-            if context:
-                inject_context(context, also_log=False, skip_compression=True)
+        context = directive or early_warning(session_id)
+        if context:
+            inject_context(context, also_log=False, skip_compression=True)
     except Exception as e:
         log("quota policy post-tool failed", {"error": str(e)})
 

@@ -202,11 +202,23 @@ def _handoff_agent(requested: str, environ: dict[str, str], agent_args: list[str
     target = requested or source
     if _flag_value(agent_args, ("--route",)) == "api":
         return target
-    if target != source:
+    if "codex" in (requested, source) and target != source:
         raise ValueError(
             f"unsupported quota transfer: {source.capitalize()} cannot transfer to a {target.capitalize()} account"
         )
-    return target
+    return "codex" if source == "codex" else "claude"
+
+
+def _handoff_exclude(agent: str, environ: dict[str, str]) -> str:
+    """The account a quota handoff leaves; a Codex session's own account comes from its process."""
+    from hooks.context.account_sessions import UNROUTED, environment_account
+    from scripts.profiles import binding
+
+    if agent == "codex":
+        _, _, _, current = binding.process()
+        return current
+    current = environment_account(environ)
+    return "" if current == UNROUTED else current
 
 
 def model_effort(agent: str, agent_args: list[str], environ: dict[str, str]) -> tuple[str, str]:
@@ -603,11 +615,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         )
         agent = agent or "claude"
         if args.handoff:
-            from hooks.context.account_sessions import UNROUTED, environment_account
-            from scripts.profiles import binding
-
-            current = binding.process()[3] if agent == "codex" else environment_account(active_env)
-            exclude = "" if current == UNROUTED else current
+            exclude = _handoff_exclude(agent, active_env)
             if not prompt:
                 raise ValueError("--handoff needs the handoff document as --prompt-file")
         claude_args = _prepare_profile(args, agent, claude_args, active_env)

@@ -33,8 +33,6 @@ def is_notice(item: Item) -> bool:
 
 
 def apply(slug: str, store: RedisStore, decision: dict) -> list[str]:
-    from scripts.swarm.quota_handoff import warned
-
     accounts = {(row["harness"], row["name"]): row for row in decision.get("accounts", [])}
     key = store.key(slug, "quota-notices")
     actions = []
@@ -47,7 +45,12 @@ def apply(slug: str, store: RedisStore, decision: dict) -> list[str]:
         kind = level(row)
         life = f"{agent.name}:{agent.started_at}"
         previous = store.redis.hget(key, life)
-        if not kind or previous == kind or previous == "handoff" or warned(store, slug, agent):
+        if (
+            not kind
+            or previous == kind
+            or previous == "handoff"
+            or store.redis.hget(store.key(slug, "quota-warning-lives"), agent.name) == str(agent.started_at)
+        ):
             continue
         text = HANDOFF.format(slug=slug) if kind == "handoff" else HURRY
         InboxStore(store.redis).send("swarm", agent.name, text)

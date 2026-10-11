@@ -1011,6 +1011,14 @@ def test_a_subscription_handoff_never_crosses_harnesses(monkeypatch, tmp_path, c
     )
 
 
+@pytest.mark.parametrize(
+    "requested,source,agent",
+    [("", "copilot", "claude"), ("copilot", "claude", "claude"), ("", "codex", "codex"), ("codex", "codex", "codex")],
+)
+def test_only_codex_sources_hand_off_to_codex(requested, source, agent):
+    assert init_agent._handoff_agent(requested, {"AGENTIHOOKS_TARGET": source}, []) == agent
+
+
 @pytest.mark.parametrize("explicit", [False, True])
 def test_a_codex_handoff_resumes_the_conversation_on_another_codex_account(monkeypatch, tmp_path, capsys, explicit):
     binding, profile_env = _profile(monkeypatch, tmp_path, "codex")

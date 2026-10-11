@@ -881,14 +881,15 @@ def session_status(session_id: str) -> dict:
     return dict(_load_sessions().get(session_id) or {})
 
 
-def mark_session_closed(session_id: str) -> None:
+def mark_session_closed(session_id: str, pid: int | None = None) -> None:
     """Flip a session to status=closed on clean SessionEnd. Keeps the entry
     for the 24h crash-recovery retention window (see SESSION_MAX_AGE_SECONDS)
     instead of deleting it outright."""
     with _file_lock(_sessions_path()):
         sessions = _load_sessions()
         entry = sessions.get(session_id)
-        if entry is None:
+        # A resumed conversation keeps its id under a new process; only that process closes it.
+        if entry is None or (pid is not None and entry.get("pid") not in (None, pid)):
             return
         entry["status"] = "closed"
         entry["last_seen"] = _now_iso()
