@@ -71,6 +71,39 @@ def test_distributed_controller_leaves_workstation_work_unclaimed(store):
     assert master_start.read(store, "sw") == {}
 
 
+def test_distributed_controller_classifies_the_profile_before_it_places_the_task(store, monkeypatch):
+    from scripts.swarm import profile_choice
+    from tests.swarm.test_tick import FakeLedger
+
+    asked = []
+
+    def classify(slug, task, environ):
+        asked.append(task["id"])
+        profile = {"page": "frontend", "build": "engineer"}[task["id"]]
+        return profile_choice.ProfileDecision(profile, "classifier", profile, "m1", 0.9, True)
+
+    monkeypatch.setattr(profile_choice, "classify", classify)
+    runtime = placed_runtime()
+    ledger = FakeLedger([{"id": "page", "lane": "eng"}, {"id": "build", "lane": "eng"}])
+    tick(store, ledger, runtime)
+    tick(store, ledger, runtime)
+    assert [task for _, _, task in runtime.spawned] == ["build"]
+    assert states(ledger) == {"page": "open", "build": "claimed"}
+    assert runtime.tasks[0]["profile_decision"] == {
+        "profile": "engineer",
+        "source": "classifier",
+        "responsibility": "engineer",
+        "model": "m1",
+        "confidence": 0.9,
+        "calibrated": True,
+        "anchors": [],
+        "overlays": [],
+        "bundle_revision": "",
+    }
+    assert sorted(asked) == ["build", "page"]
+    assert store.redis.hkeys(store.key("sw", "profile-decisions")) == ["page"]
+
+
 def test_seat_placement_refuses_the_dispatcher_and_passes_a_plain_runtime(store):
     from scripts.swarm import controller, dispatch_seat, lease, seat_spawn
     from tests.swarm.test_tick import FakeRuntime
