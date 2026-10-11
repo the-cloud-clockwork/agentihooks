@@ -297,6 +297,18 @@ def test_a_committed_identity_cannot_be_rewritten(native, tmp_path):
     assert validator.verify("ckpt-native-0001") == first
 
 
+def test_an_equal_manifest_in_another_key_order_replays_the_commit(native, tmp_path):
+    target = store(tmp_path)
+    upload(target, native)
+    validator = model.Validator(target)
+    first = validator.commit(native["manifest"])
+    before = keys(target)
+    reordered = dict(reversed(list(native["manifest"].items())))
+    assert list(reordered) != list(native["manifest"])
+    assert validator.commit(reordered) == first
+    assert keys(target) == before
+
+
 @pytest.mark.parametrize(
     "grant",
     [
