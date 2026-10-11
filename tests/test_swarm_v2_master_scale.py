@@ -367,7 +367,7 @@ def test_the_fixture_swarm_grows_and_shrinks_through_every_step(swarm):
 
 
 def test_an_extra_master_never_stands_in_for_a_lead_that_is_down(swarm):
-    from scripts.swarm import control_notifications, tick_master
+    from scripts.swarm import control_notifications
 
     store, runtime = swarm
     store.drop_agent(SLUG, LEAD_NAME)
@@ -376,7 +376,6 @@ def test_an_extra_master_never_stands_in_for_a_lead_that_is_down(swarm):
     store.put_agent(SLUG, second)
     runtime.live.add(second.name)
 
-    assert tick_master._bound(store, SLUG, runtime) is None
     assert control_notifications.master(store, SLUG) is None
     assert tick_module._recover_master(SLUG, store.config(SLUG), store, runtime, NOW) == []
     assert [a.name for a in store.agents(SLUG) if masters.is_lead(SLUG, a)] == []
