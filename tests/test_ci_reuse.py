@@ -190,6 +190,18 @@ def test_an_identical_queue_tree_reuses_a_full_passed_run(full_source, tmp_path)
     assert json.loads(output.read_text())["tree"] == git(root, "rev-parse", f"{head}^{{tree}}")
 
 
+def test_a_passed_run_behind_a_hundred_newer_runs_still_reuses(full_source, tmp_path):
+    root, base, head, queue, env, responses, _ = full_source
+    source = responses[RUNS.format(head)]["workflow_runs"][0]
+    newest = [dict(source, id=1000 + n, head_sha=ABSENT) for n in range(100)]
+    responses[RUNS.replace("head_sha={}&", "")] = {"workflow_runs": newest}
+    Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
+    result = invoke(root, base, queue, "merge_group", tmp_path / "older.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=true" in result.stdout
+    assert "run=7\n" in result.stdout
+
+
 def test_a_one_line_difference_runs_fully(full_source, tmp_path):
     root, base, _, _, env, _, _ = full_source
     (root / "code.txt").write_text("planted\n")
