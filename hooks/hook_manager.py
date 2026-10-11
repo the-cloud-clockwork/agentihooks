@@ -1030,29 +1030,16 @@ def _confirm_inbox(session_id: str) -> None:
         log("inbox confirmation failed", {"error": str(e)})
 
 
-def _inject_quota_posttool(payload: dict) -> None:
-    from hooks.config import QUOTA_POLICY_ENABLED
-
-    if not QUOTA_POLICY_ENABLED:
-        return
-    try:
-        from hooks.common import inject_context
-        from hooks.context.quota_policy import early_warning, pretool
-
-        session_id = payload.get("session_id", "")
-        _, directive = pretool(session_id, payload.get("tool_name", ""), payload.get("cwd", ""))
-        context = directive or early_warning(session_id)
-        if context:
-            inject_context(context, also_log=False, skip_compression=True)
-    except Exception as e:
-        log("quota policy post-tool failed", {"error": str(e)})
-
-
 def _inject_after_tool(payload: dict) -> None:
-    session_id = payload.get("session_id", "")
-    _inject_inbox(session_id, payload.get("cwd", ""))
+    from hooks.common import inject_context
+    from hooks.context.quota_policy import posttool_context
+
+    session_id, cwd = payload.get("session_id", ""), payload.get("cwd", "")
+    _inject_inbox(session_id, cwd)
     _inject_refocus(session_id, "tool")
-    _inject_quota_posttool(payload)
+    quota = posttool_context(session_id, payload.get("tool_name"), cwd)
+    if quota:
+        inject_context(quota, also_log=False, skip_compression=True)
 
 
 def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None = None) -> None:

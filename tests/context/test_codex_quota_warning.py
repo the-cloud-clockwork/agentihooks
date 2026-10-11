@@ -44,7 +44,7 @@ def codex(tmp_path, monkeypatch):
     monkeypatch.delenv("AH_ROUTE_API", raising=False)
     monkeypatch.setattr(qp, "AGENTIHOOKS_HOME", tmp_path / "agentihooks")
     monkeypatch.setattr("hooks.context.account_sessions.agent_pid", lambda start=None: 1)
-    monkeypatch.setattr("hooks.context.account_sessions.session_account", lambda pid: "alpha")
+    monkeypatch.setattr("hooks.context.account_sessions.session_account", lambda pid: {1: "alpha"}[pid])
     return home
 
 
@@ -99,8 +99,9 @@ def test_both_windows_crossing_at_once_warn_together_once(codex):
     now = time.time()
     _rollout(codex, SID, 95.0, 90.0, int(now + 3600), int(now + 86400))
     text = qp.early_warning(SID)
-    assert text.count("QUOTA WARNING") == 2
-    assert "7-day" in text and "5-hour" in text
+    week, five = text.split("\n")
+    assert week.startswith("QUOTA WARNING — Codex account alpha has 10% of its 7-day quota left")
+    assert five.startswith("QUOTA WARNING — Codex account alpha has 5% of its 5-hour quota left")
     assert qp.early_warning(SID) is None
 
 
@@ -231,3 +232,107 @@ def test_a_claude_tool_call_gets_no_second_policy_directive(spent, monkeypatch, 
     monkeypatch.setattr(qp, "evaluate", lambda session: pytest.fail("Claude reads the policy at PreToolUse only"))
     _post(SID)
     assert "QUOTA" not in capsys.readouterr().out
+
+
+def test_a_reading_exactly_at_the_stale_limit_still_counts(codex, monkeypatch):
+    now = 1_791_700_000
+    monkeypatch.setattr(qp.time, "time", lambda: now)
+    _rollout(codex, SID, 40.0, 91.0, now + 3600, now + 86400, observed=now - qp.QUOTA_USAGE_STALE_SEC)
+    assert qp._session_windows(SID) == (40.0, 91.0, now + 3600, now + 86400)
+
+
+def test_a_weekly_only_reading_has_an_empty_five_hour_window_and_passed_resets_empty_both(codex):
+    now = time.time()
+    _rollout(codex, SID, None, 91.0, None, int(now + 86400))
+    assert qp._session_windows(SID) == (0.0, 91.0, None, int(now + 86400))
+    _rollout(codex, SID, 97.0, 91.0, int(now - 1), int(now - 1))
+    assert qp._session_windows(SID) == (0.0, 0.0, int(now - 1), int(now - 1))
+
+
+def test_codex_candidates_cover_the_default_login_idle_accounts_and_passed_resets(codex, monkeypatch):
+    now = time.time()
+    _rollout(codex, SID, None, 30.0, None, int(now + 86400))
+    _rollout(codex, PEER, 40.0, 50.0, int(now - 1), int(now - 1))
+    _rollout(codex, BETA, 40.0, 50.0, int(now + 60), int(now + 600))
+    monkeypatch.setenv("AH_CX_TOKEN_gamma", "gamma-token")
+    monkeypatch.setenv("AH_CX_TOKEN_beta", "beta-token")
+    owners = {SID: {"account": "default"}, PEER: {"account": "gamma"}, BETA: {"account": "beta"}}
+    monkeypatch.setattr("scripts.codex_router._registry", lambda: owners)
+    monkeypatch.setattr("hooks.context.account_sessions.codex_sessions_by_account", lambda: {"beta": 2})
+    rows = {c.account: (c.five_used, c.week_used, c.sessions) for c in qp._codex_accounts()}
+    assert rows == {"default": (0.0, 30.0, 0), "gamma": (0.0, 0.0, 0), "beta": (40.0, 50.0, 2)}
+
+
+def test_policy_texts_name_the_resume_the_reset_and_the_token_variable(monkeypatch):
+    five_reset, week_reset = time.time() + 3600, time.time() + 86400
+    target = qp.Candidate("beta", 10, 30, 1, time.time(), 6)
+    handoff = qp.Decision("handoff", "week", "alpha", 10, 98.5, five_reset, week_reset, target, (target,))
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    resumed = "the final account. The new session resumes this conversation on that account. \n1. Write"
+    assert resumed in qp.render(handoff, SID, "/repo")
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    assert "the final account. \n1. Write" in qp.render(handoff, SID, "/repo")
+    wait = qp.Decision("wait", "five_hour", "alpha", 99.5, 50, five_reset, week_reset, None, ())
+    assert f"waits until the reset at {qp.reset_when(five_reset)}, then stop" in qp.render(wait, SID, "/repo")
+    stop = qp.render(qp.Decision("stop", "week", "alpha", 10, 98.5, five_reset, week_reset, None, ()), SID, "/r")
+    assert f"Resets {qp.reset_when(week_reset)}." in stop
+    assert "add another AH_CC_TOKEN_<slug> account" in stop
+
+
+def test_a_reset_moved_by_the_tolerance_or_more_is_a_new_period(codex):
+    assert qp._claim_warning("alpha", "7-day", 1000.0)
+    assert not qp._claim_warning("alpha", "7-day", 1599.0)
+    assert qp._claim_warning("alpha", "7-day", 1600.0)
+    assert (qp.AGENTIHOOKS_HOME / "quota_policy" / "warned" / "codex-alpha-7-day").read_text() == "1600.0"
+    assert qp._claim_warning("alpha", "5-hour", None)
+    assert not qp._claim_warning("alpha", "5-hour", None)
+
+
+def test_posttool_context_follows_the_policy_switch_and_the_wait_tools(monkeypatch):
+    wait = qp.Decision("wait", "five_hour", "alpha", 99.5, 50, time.time() + 3600, None, None, ())
+    monkeypatch.setattr(qp, "evaluate", lambda session: wait)
+    monkeypatch.setattr(qp, "handed_off_block", lambda session: None)
+    monkeypatch.setattr(qp, "early_warning", lambda session: "early")
+    assert qp.posttool_context(SID, "CronCreate", "/repo").startswith("QUOTA WAIT")
+    assert qp.posttool_context(SID, "Bash", "/repo") == "early"
+    monkeypatch.setattr(qp, "QUOTA_POLICY_ENABLED", False)
+    assert qp.posttool_context(SID, "CronCreate", "/repo") is None
+
+
+def test_codex_post_tool_passes_the_tool_name_and_defaults_missing_fields(codex, monkeypatch, capsys):
+    wait = qp.Decision("wait", "five_hour", "alpha", 99.5, 50, time.time() + 3600, None, None, ())
+    monkeypatch.setattr(qp, "evaluate", lambda session: wait)
+    monkeypatch.setattr(qp, "handed_off_block", lambda session: None)
+    monkeypatch.setattr(qp, "early_warning", lambda session: None)
+    hook_manager.on_post_tool_use({"session_id": SID, "tool_name": "CronCreate", "tool_input": {}, "cwd": "/r"})
+    flush("PostToolUse")
+    assert "QUOTA WAIT" in capsys.readouterr().out
+    target = qp.Candidate("beta", 10, 30, 1, time.time(), 6)
+    handoff = qp.Decision("handoff", "week", "alpha", 10, 98.5, None, None, target, (target,))
+    monkeypatch.setattr(qp, "evaluate", lambda session: handoff)
+    hook_manager.on_post_tool_use({"tool_name": "Bash", "tool_input": {}})
+    flush("PostToolUse")
+    out = capsys.readouterr().out
+    assert '--dir ""' in out and 'handoff/.md"' in out
+
+
+def test_the_quota_directive_is_neither_compressed_nor_logged(spent, monkeypatch, capsys):
+    logged = []
+    monkeypatch.setattr("hooks.common.LOG_ENABLED", True)
+    monkeypatch.setattr("hooks.common.log_command", lambda kind, content: logged.append(content))
+    monkeypatch.setattr("hooks.config.CONTEXT_COMPRESSION_SCOPE", "all")
+    monkeypatch.setattr("hooks.context.preprocessor.get_level_from_config", lambda: 1)
+    monkeypatch.setattr("hooks.context.preprocessor.preprocess", lambda content, level: "compressed")
+    _post(SID)
+    assert "QUOTA HANDOFF REQUIRED" in capsys.readouterr().out
+    assert not [content for content in logged if "QUOTA" in content]
+
+
+def test_session_end_closes_only_the_entry_this_process_owns(monkeypatch):
+    closed = []
+    monkeypatch.setattr("hooks.config.BROADCAST_ENABLED", True)
+    monkeypatch.setattr("hooks.context.broadcast.mark_session_closed", lambda sid, pid: closed.append((sid, pid)))
+    monkeypatch.setattr("hooks.context.broadcast.heartbeat_sessions", lambda: None)
+    monkeypatch.setattr("hooks.context.account_sessions.agent_pid", lambda start=None: 4242)
+    hook_manager.on_session_end({"hook_event_name": "SessionEnd", "session_id": SID, "reason": "other"})
+    assert closed == [(SID, 4242)]

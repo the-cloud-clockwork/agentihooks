@@ -1019,6 +1019,15 @@ def test_only_codex_sources_hand_off_to_codex(requested, source, agent):
     assert init_agent._handoff_agent(requested, {"AGENTIHOOKS_TARGET": source}, []) == agent
 
 
+def test_a_handoff_excludes_the_account_it_leaves(monkeypatch):
+    from scripts.profiles import binding
+
+    monkeypatch.setattr(binding, "process", lambda: (123, "codex", {}, "alpha"))
+    assert init_agent._handoff_exclude("codex", {"AH_CX_TOKEN_beta": "b"}) == "alpha"
+    assert init_agent._handoff_exclude("claude", {"AH_CC_TOKEN_beta": "b"}) == "beta"
+    assert init_agent._handoff_exclude("claude", {}) == ""
+
+
 @pytest.mark.parametrize("explicit", [False, True])
 def test_a_codex_handoff_resumes_the_conversation_on_another_codex_account(monkeypatch, tmp_path, capsys, explicit):
     binding, profile_env = _profile(monkeypatch, tmp_path, "codex")

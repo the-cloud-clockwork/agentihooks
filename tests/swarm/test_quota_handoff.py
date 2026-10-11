@@ -327,6 +327,8 @@ def test_each_window_warns_once_per_reset_while_the_other_stays_crossed():
     assert [observe(200, 20, 92), observe(200, 96, 92), observe(200, 96, 93)] == [0, 1, 0]
     items = InboxStore(storage.redis).pending_items("cx")
     assert storage.redis.hget(storage.key("sw", "quota-warnings"), "cx") == items[0].id
+    periods = storage.redis.hgetall(storage.key("sw", "quota-warning-periods"))
+    assert periods == {"cx:week": "1:9000", "cx:five hour": "1:200"}
     assert [item.text.split(" window,")[0].rsplit(" ", 2)[-2:] for item in items] == [
         ["its", "week"],
         ["five", "hour"],

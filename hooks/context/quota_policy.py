@@ -25,6 +25,7 @@ from hooks.config import (
     QUOTA_HANDOFF_5H_PCT,
     QUOTA_HANDOFF_MIN_LEFT,
     QUOTA_HANDOFF_WEEK_PCT,
+    QUOTA_POLICY_ENABLED,
     QUOTA_RESERVE_ACCOUNTS,
     QUOTA_USAGE_STALE_SEC,
     QUOTA_WAIT_MIN_WEEK_LEFT,
@@ -447,10 +448,9 @@ def prompt_context(session_id: str, cwd: str) -> str | None:
 
 
 def _claim_warning(account: str, window: str, reset: float | None) -> bool:
-    safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in f"{account}-{window}")
-    path = AGENTIHOOKS_HOME / "quota_policy" / "warned" / f"codex-{safe}"
+    path = AGENTIHOOKS_HOME / "quota_policy" / "warned" / f"codex-{account}-{window}"
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a+", encoding="utf-8") as handle:
+    with path.open("a+") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
         handle.seek(0)
         seen = handle.read().strip()
@@ -494,3 +494,10 @@ def early_warning(session_id: str) -> str | None:
         return None
     texts = [_warning_text(account, *row) for row in crossed if _claim_warning(account, row[0], row[2])]
     return "\n".join(texts) or None
+
+
+def posttool_context(session_id: str, tool_name: str | None, cwd: str) -> str | None:
+    if not QUOTA_POLICY_ENABLED:
+        return None
+    _, directive = pretool(session_id, tool_name, cwd)
+    return directive or early_warning(session_id)
