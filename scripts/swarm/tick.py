@@ -33,6 +33,7 @@ from scripts.swarm import (
     difficulty,
     dispatch_seat,
     dispatcher,
+    failed_panes,
     freeze,
     grouping,
     lane_split,
@@ -67,6 +68,7 @@ from scripts.swarm_v2 import masters as master_seats
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
+EXITED_BEFORE_LIFE = "its agent process exited before its launch check passed"
 SUSPECT = "suspect"
 MASTER_WAITING = f"{PREFIX}:master-waiting"
 MASTER_WAIT_MS = 10 * 60 * 1000
@@ -96,9 +98,10 @@ NUDGE = (
 
 
 class SpawnError(RuntimeError):
-    def __init__(self, message: str, status: str = "refused"):
+    def __init__(self, message: str, status: str = "refused", pane_id: str = ""):
         super().__init__(message)
         self.status = status
+        self.pane_id = pane_id
 
 
 @dataclass(frozen=True)
@@ -145,6 +148,9 @@ class Runtime(Protocol):
     def conversations(self) -> dict[str, str] | None: ...
     def resume(self, config, agent: AgentRecord, text: str) -> Placed: ...
     def close_space(self, config: SwarmConfig) -> bool: ...
+    def pane_tail(self, pane_id: str, lines: int) -> str: ...
+    def launched_pane(self, pane_id: str, name: str) -> bool: ...
+    def close_pane(self, pane_id: str) -> None: ...
 
 
 def tick(slug, store, ledger, runtime, now_ms):
@@ -167,6 +173,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += skip_refused(_verify, slug, store, ledger, runtime, rows, now_ms)
     actions += skip_refused(_reap, slug, store, ledger, runtime, rows, now_ms)
     actions += skip_refused(_strays, slug, config, store, runtime)
+    actions += skip_refused(failed_panes.sweep, slug, store, runtime, now_ms)
     if config.state not in {"stopped", "stopping"}:
         actions += skip_refused(master_wake.run, slug, store, runtime, doc, now_ms)
     actions += skip_refused(lifetime.retire_idle_master, slug, store, ledger, runtime, rows, now_ms)
@@ -415,7 +422,7 @@ def _failed_launch(slug, store, ledger, runtime, rows, miss, now_ms):
         store, slug, agent, f"its launch check failed on {fields}", agent.name in runtime.live_names(), now_ms
     ):
         return held
-    elif not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
+    elif not _retire_launch(slug, store, runtime, agent, now_ms):
         return f"could not retire {agent.name} after its launch check failed on {fields}, retrying next tick"
     else:
         outcome = "relaunch"
@@ -433,6 +440,17 @@ def _failed_launch(slug, store, ledger, runtime, rows, miss, now_ms):
     if agent.lane == MASTER and pending.get("name") == agent.name:
         master_start.save(store, slug, {**pending, "name": "", "retry": True, "at": now_ms})
     return f"retired {agent.name} after its launch check failed on {fields}" + _drop(slug, store, ledger, rows, agent)
+
+
+def _retire_launch(slug, store, runtime, agent, now_ms):
+    local = agent.runtime_backend == "local"
+    exited = local and agent.lane != MASTER and agent.name not in runtime.live_names()
+    kept = replace(agent, pane_id="") if exited else agent
+    if not runtime.retire(kept, homes=reaper.scratch_homes(slug, agent.task)):
+        return False
+    if exited:
+        failed_panes.hold(store, slug, agent, now_ms, EXITED_BEFORE_LIFE)
+    return True
 
 
 def _reap(slug, store, ledger, runtime, rows, now_ms):
@@ -727,7 +745,7 @@ def _spawn_stop(slug, config, store, runtime, now_ms):
     return ""
 
 
-def _record_spawn_failure(slug, store, record, error):
+def _record_spawn_failure(slug, store, record, error, now_ms):
     if record_failure := timing.ON_FAILURE.get():
         record_failure(f"{__name__}._spawn", error)
     waiting = isinstance(error, SpawnError) and error.status == "unavailable"
@@ -736,7 +754,10 @@ def _record_spawn_failure(slug, store, record, error):
     else:
         transfers.failed(store, slug, record)
         store.note_launch_failure(slug, record.task, str(error))
+    record = replace(record, pane_id=getattr(error, "pane_id", ""))
     store.record_launch(slug, record, "waiting" if waiting else "failed", str(error))
+    if not waiting:
+        failed_panes.hold(store, slug, record, now_ms)
 
 
 def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
@@ -800,13 +821,13 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             placed = runtime.spawn(config, lane, name, primed(store, slug, seat, task))
         except Exception as exc:
             _release_admission(slug, runtime, task)
-            _record_spawn_failure(slug, store, record, exc)
+            _record_spawn_failure(slug, store, record, exc, now_ms)
             actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
             if isinstance(exc, ProfileUnresolved):
                 actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
             continue
         store.count_claim(slug, task["id"])
-        store.record_launch(slug, record, "started")
+        store.record_launch(slug, replace(record, pane_id=placed.pane_id), "started")
         store.put_agent(slug, placed_record(record, placed))
         launch_check.begin(store, slug, record, now_ms)
         store.count_spawn(slug, placed.harness)
