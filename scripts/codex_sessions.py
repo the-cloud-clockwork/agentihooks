@@ -1,8 +1,4 @@
-"""Session names resolve to thread ids before Codex runs.
-
-Codex finds a named session only when its rollout path sits under CODEX_HOME/sessions, and a rendered
-profile home links that folder to the shared one, so every name lookup inside Codex misses.
-"""
+"""Names resolve here: Codex skips sessions whose rollout sits outside CODEX_HOME/sessions, as in profile homes."""
 
 import json
 import re
@@ -76,6 +72,14 @@ def _requests(name: str, archived: bool) -> list[dict]:
     ]
 
 
+def _parsed(line: str) -> dict:
+    try:
+        reply = json.loads(line)
+    except ValueError:
+        return {}
+    return reply if isinstance(reply, dict) else {}
+
+
 def thread_ids(name: str, archived: bool, environ: Mapping[str, str], popen: Callable = subprocess.Popen) -> list[str]:
     try:
         server = popen(
@@ -94,12 +98,12 @@ def thread_ids(name: str, archived: bool, environ: Mapping[str, str], popen: Cal
         server.stdin.write("".join(json.dumps(request) + "\n" for request in _requests(name, archived)))
         server.stdin.flush()
         for line in server.stdout:
-            reply = json.loads(line)
+            reply = _parsed(line)
             if reply.get("id") == LIST_ID:
                 threads = reply.get("result", {}).get("data", [])
                 return [thread["id"] for thread in threads if thread.get("name") == name]
         return []
-    except (OSError, ValueError):
+    except OSError:
         return []
     finally:
         timer.cancel()

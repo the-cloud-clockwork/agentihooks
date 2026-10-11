@@ -86,17 +86,25 @@ def test_a_name_with_no_single_match_is_left_for_codex_to_report(found):
     assert codex_sessions.resolve(["archive", "n"], {}, lookup) == ["archive", "n"]
 
 
+class _Pipe(io.StringIO):
+    flushed = ""
+
+    def flush(self):
+        self.flushed = self.getvalue()
+
+
 class _Process:
     def __init__(self, replies):
-        self.stdin = io.StringIO()
         lines = (reply if isinstance(reply, str) else json.dumps(reply) for reply in replies)
+        self.stdin = _Pipe()
         self.stdout = io.StringIO("".join(line + "\n" for line in lines))
-        self.killed = False
+        self.killed = self.waited = False
 
     def kill(self):
         self.killed = True
 
     def wait(self):
+        self.waited = True
         return 0
 
 
@@ -117,6 +125,8 @@ def test_thread_ids_asks_the_codex_app_server_for_exact_name_matches(monkeypatch
     monkeypatch.setattr(codex_sessions.shutil, "which", lambda name: f"/usr/bin/{name}")
     seen = {}
     replies = [
+        "warning: not json",
+        [1, 2],
         {"method": "configWarning", "params": {}},
         {"id": 0, "result": {"codexHome": "/h"}},
         {"id": 1, "result": {"data": [_thread(THREAD, "eng-a"), _thread(OTHER, "eng-ab"), {"id": "x"}]}},
@@ -147,7 +157,8 @@ def test_thread_ids_asks_the_codex_app_server_for_exact_name_matches(monkeypatch
             },
         },
     ]
-    assert seen["process"].killed
+    assert seen["process"].stdin.flushed == seen["process"].stdin.getvalue()
+    assert seen["process"].killed and seen["process"].waited
 
 
 def test_thread_ids_falls_back_to_codex_on_the_path(monkeypatch):
@@ -182,20 +193,28 @@ def test_thread_ids_finds_nothing_when_codex_cannot_start():
 
 def test_thread_ids_stops_a_server_that_never_answers(monkeypatch):
     timers = []
+    seen = {}
 
     class Timer:
         def __init__(self, seconds, action):
             timers.append(self)
-            self.seconds, self.action, self.cancelled = seconds, action, False
+            self.seconds, self.action, self.started, self.cancelled = seconds, action, False, False
 
         def start(self):
+            self.started = seen["process"].killed is False
             self.action()
 
         def cancel(self):
             self.cancelled = True
 
     monkeypatch.setattr(codex_sessions.threading, "Timer", Timer)
-    seen = {}
     assert codex_sessions.thread_ids("n", False, {}, _server([], seen)) == []
-    assert [(t.seconds, t.cancelled) for t in timers] == [(codex_sessions.TIMEOUT_S, True)]
+    assert [(t.seconds, t.started, t.cancelled) for t in timers] == [(20, True, True)]
     assert seen["process"].killed
+
+
+def test_resolve_asks_the_codex_app_server_by_default(monkeypatch):
+    asked = []
+    monkeypatch.setattr(codex_sessions, "thread_ids", lambda *args: asked.append(args) or [THREAD])
+    assert codex_sessions.resolve(["resume", "n"], {"CODEX_HOME": "/h"}) == ["resume", THREAD]
+    assert asked == [("n", False, {"CODEX_HOME": "/h"})]
