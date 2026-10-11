@@ -295,7 +295,7 @@ def test_a_superseded_attempt_whose_pod_succeeded_is_deleted_too():
         assert f"swarm-{finished.execution_id}" not in world.api.objects
 
 
-def test_a_refused_delete_keeps_the_pod_and_retries_on_the_next_pass(monkeypatch):
+def test_a_refused_delete_keeps_the_pod_and_retries_on_the_next_pass(monkeypatch, capsys):
     world = cases.World()
     with world.clocked():
         controller, _ = world.controller()
@@ -309,6 +309,8 @@ def test_a_refused_delete_keeps_the_pod_and_retries_on_the_next_pass(monkeypatch
 
         monkeypatch.setattr(world.api, "delete", refuse)
         assert complete(_listed(world)) == {finished.execution_id: "refused"}
+        line = f"controller: cleanup of {finished.execution_id} failed with ApiRefused; retrying\n"
+        assert capsys.readouterr().out == line
         assert f"swarm-{finished.execution_id}" in world.api.objects
         monkeypatch.setattr(world.api, "delete", delete)
         assert complete(_listed(world)) == {finished.execution_id: "done"}

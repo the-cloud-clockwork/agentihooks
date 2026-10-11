@@ -25,7 +25,7 @@ class Completion:
             for agent in self.store.execution_registry.records(self.slug)
             if agent.runtime_backend == BACKEND
         }
-        listed = Counter(pod["metadata"].get("labels", {}).get(EXECUTION_LABEL) for pod in pods)
+        listed = Counter(pod["metadata"]["labels"].get(EXECUTION_LABEL) for pod in pods)
         for pod in pods:
             if self._completed(pod, known, listed):
                 self._finalize(pod["metadata"])
@@ -34,10 +34,10 @@ class Completion:
         return {execution_id: self._clean(execution_id) for execution_id in sorted(finals)}
 
     def _completed(self, pod: dict, known: dict[str, int], listed: Counter) -> bool:
-        labels = pod["metadata"].get("labels", {})
+        labels = pod["metadata"]["labels"]
         execution_id = labels.get(EXECUTION_LABEL)
         return (
-            pod.get("status", {}).get("phase") == SUCCEEDED
+            pod["status"].get("phase") == SUCCEEDED
             and execution_id in known
             and listed[execution_id] == 1
             and labels.get(GENERATION_LABEL) == str(known[execution_id])
@@ -55,5 +55,5 @@ class Completion:
         try:
             return self.cleanup.run(execution_id).state
         except (ApiRefused, ConnectionError, TimeoutError) as error:
-            print(f"controller: cleanup of {execution_id} failed with {type(error).__name__}; retrying", flush=True)
+            print(f"controller: cleanup of {execution_id} failed with {type(error).__name__}; retrying")
             return REFUSED
