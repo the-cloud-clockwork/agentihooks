@@ -215,7 +215,7 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AH_CC_TOKEN_<slug>` | — | One Claude subscription OAuth token per account; `agentihooks claude login <slug>` writes it from `claude setup-token` |
-| `NO_COLOR` | — | Any non-empty value turns off the coloured output of `agentihooks claude login`, `codex login` and `codex refresh` |
+| `NO_COLOR` | — | Set to any value, even empty, turns off the coloured output of `agentihooks claude login`, `codex login` and `codex refresh` |
 | `AH_CX_TOKEN_<slug>` | — | One Codex ChatGPT workspace access token per account; once any is set the default `codex login` account leaves the pool. `agentihooks codex login <slug>` writes it |
 | `AGENTIHOOKS_AICODE_TOKEN_REFRESH` | `false` | `true` makes this machine the refresh authority: `agentihooks codex refresh` and the session-start kick run only here. `agentihooks codex login` sets it |
 | `AGENTIHOOKS_AICODE_TOKEN_STORE` | `local` | Where the refresher reads and writes accounts: `local` (`~/.agentihooks/codex/<slug>/auth.json`, then the rc block, then OpenBao when configured) or `openbao` (the OpenBao secret only) |

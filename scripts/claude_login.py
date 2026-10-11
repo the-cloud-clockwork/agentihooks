@@ -6,6 +6,7 @@ import pty
 import re
 import select
 import shutil
+import signal
 import struct
 import subprocess
 import sys
@@ -25,7 +26,8 @@ COLUMNS = 1000
 PIXELS = (0, 0)
 WINSIZE = "HHHH"
 CHUNK = 65536
-MISSING = 127
+WAIT_S = 10
+SIGNALS = (signal.SIGTERM, signal.SIGHUP)
 ASK_SLUG = "Slug (the email of the target account): "
 STEP_SIGN_IN = "Step 1/3: sign in to the account in the browser"
 PRIVATE_WINDOW = "use a private window for the account you want"
@@ -33,7 +35,9 @@ STEP_BLOCK = "Step 2/3: writing the token block"
 STEP_STORE = "Step 3/3: storing it in OpenBao"
 NO_TOKEN = "no token found (claude setup-token exited {code}); nothing written"
 NO_SLUG = "a slug is required off a terminal"
+CANNOT_RUN = "cannot run {binary}: {reason}"
 SUMMARY = "{name} written to {rc} ({length} chars). run: source {rc}"
+_write = os.write
 
 
 @dataclass(frozen=True)
@@ -55,6 +59,15 @@ def extract(captured: bytes) -> str:
     return max(TOKEN.findall(ESCAPES.sub("", captured.decode(errors="replace"))), key=len, default="")
 
 
+def _write_all(fd: int, data: bytes) -> bool:
+    try:
+        while data:
+            data = data[_write(fd, data) :]
+    except OSError:
+        return False
+    return True
+
+
 def _pump(master: int, terminal: Terminal, forward: bool) -> bytes:
     captured = bytearray()
     sources = [master, terminal.stdin] if forward else [master]
@@ -62,9 +75,7 @@ def _pump(master: int, terminal: Terminal, forward: bool) -> bytes:
         ready = select.select(sources, [], [])[0]
         if terminal.stdin in ready:
             data = os.read(terminal.stdin, CHUNK)
-            if data:
-                os.write(master, data)
-            else:
+            if not (data and _write_all(master, data)):
                 sources = [master]
         if master in ready:
             try:
@@ -74,36 +85,54 @@ def _pump(master: int, terminal: Terminal, forward: bool) -> bytes:
             if not data:
                 return bytes(captured)
             captured += data
-            os.write(terminal.stdout, data)
+            _write_all(terminal.stdout, data)
+
+
+def _interrupt(signum: int, frame) -> None:
+    raise SystemExit(128 + signum)
 
 
 def _relay(master: int, terminal: Terminal) -> bytes:
     saved = terminal.get_mode(terminal.stdin) if terminal.tty else None
-    if saved is not None:
-        terminal.raw(terminal.stdin)
+    previous = {number: signal.signal(number, _interrupt) for number in SIGNALS}
     try:
+        if saved is not None:
+            terminal.raw(terminal.stdin)
         return _pump(master, terminal, saved is not None)
     finally:
         if saved is not None:
             terminal.set_mode(terminal.stdin, termios.TCSADRAIN, saved)
+        for number, handler in previous.items():
+            signal.signal(number, handler)
+
+
+def _reap(child: subprocess.Popen) -> int:
+    try:
+        return child.wait(timeout=WAIT_S)
+    except subprocess.TimeoutExpired:
+        child.kill()
+        return child.wait()
 
 
 def run(argv: list[str], terminal: Terminal) -> tuple[int, bytes]:
     """The child's window is COLUMNS wide so the token prints on one line instead of being hard-wrapped."""
     master, slave = pty.openpty()
-    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack(WINSIZE, terminal.rows, COLUMNS, *PIXELS))
     try:
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack(WINSIZE, terminal.rows, COLUMNS, *PIXELS))
         child = subprocess.Popen(argv, preexec_fn=functools.partial(os.login_tty, slave))
-    except OSError:
+    except BaseException:
         os.close(master)
-        return MISSING, b""
+        raise
     finally:
         os.close(slave)
     try:
         captured = _relay(master, terminal)
+    except BaseException:
+        child.kill()
+        raise
     finally:
         os.close(master)
-        code = child.wait()
+        code = _reap(child)
     return code, captured
 
 
@@ -112,7 +141,7 @@ def setup_token(argv: list[str]) -> tuple[int, bytes]:
 
 
 def _fail(message: str) -> None:
-    print(term_colors.red(f"{PROG}: {message}", sys.stderr), file=sys.stderr)
+    print(term_colors.red(f"{PROG}: {message}"), file=sys.stderr)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -125,20 +154,24 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _raw_slug(given: str | None, console: Console, parser: argparse.ArgumentParser) -> str | None:
-    print(term_colors.blue(aicode_tokens.SLUG_NOTE))
-    if given is not None:
-        return given
-    if console.tty():
-        return console.ask(term_colors.yellow(ASK_SLUG)).strip()
-    parser.print_usage(sys.stderr)
-    _fail(NO_SLUG)
-    return None
+    if given is None and not console.tty():
+        parser.print_usage(sys.stderr)
+        _fail(NO_SLUG)
+        return None
+    print(term_colors.blue(aicode_tokens.SLUG_NOTE.format(prefix=TOKEN_PREFIX)))
+    return given if given is not None else console.ask(term_colors.yellow(ASK_SLUG)).strip()
 
 
 def _capture(runner: Callable) -> tuple[int, str]:
     print(term_colors.blue(STEP_SIGN_IN))
     print(term_colors.yellow(PRIVATE_WINDOW))
-    code, captured = runner([shutil.which("claude") or "claude", "setup-token"])
+    sys.stdout.flush()
+    argv = [shutil.which("claude") or "claude", "setup-token"]
+    try:
+        code, captured = runner(argv)
+    except OSError as exc:
+        _fail(CANNOT_RUN.format(binary=argv[0], reason=exc.strerror or exc))
+        return 1, ""
     token = extract(captured)
     failed = code or not token
     if failed:
@@ -185,6 +218,7 @@ def main(
     return openbao_step.store(bao, openbao_kv.CLAUDE_CREDS, {name: token}, stale)
 
 
-def intercept(args: list[str]) -> None:
+def dispatch(args: list[str], fallback: Callable[[list[str]], object]) -> None:
     if args[:1] == ["login"]:
         raise SystemExit(main(args[1:]))
+    fallback(args)

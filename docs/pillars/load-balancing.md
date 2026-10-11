@@ -461,7 +461,10 @@ days, so the refresher below keeps it alive.
   email works (`nestor.colt@gmail.com` becomes `nestor_coltatgmail_com`, `team-a`
   becomes `team_a`) and the login prints a note recommending the email of the
   target account. A result that is empty, starts with `_`, or is `status`,
-  `help`, `default` or `api` is refused. Both logins use this rule.
+  `help`, `default` or `api` is refused. Both logins use this rule. An account
+  stored under an older mixed-case name (`ncgmaTCC`) is skipped by
+  `codex refresh`, which names the `agentihooks codex login <old name>` that
+  stores it again under the new slug.
   `agentihooks codex login` with no slug, `login status`, `login help` and
   `login --<flag>` still go straight to `codex login`.
 - The login runs `codex login -c cli_auth_credentials_store="file"` (browser
@@ -500,10 +503,16 @@ other `agentihooks claude ...` still routes and launches Claude.
 - `claude setup-token` runs in a pseudo-terminal 1000 columns wide, so the token
   prints on one line instead of being wrapped, with keystrokes and output passed
   straight through so the browser sign-in works as usual. The terminal mode is
-  restored however the run ends. `setup-token` signs in whichever account the
-  browser holds, so use a private window for the account you want.
+  restored however the run ends, including on `SIGTERM` or `SIGHUP`, which also
+  kill `setup-token`; a `setup-token` still running ten seconds after its output
+  closes is killed. `setup-token` signs in whichever account the browser holds,
+  so use a private window for the account you want.
+- The `setup-token` screen itself shows the token: that is the child's output,
+  passed through, never agentihooks' own. Run the login in your own terminal,
+  never from an agent tool.
 - The token is the longest `sk-ant-oat01-…` match once escape sequences are
-  stripped. No match or a non-zero exit writes nothing and exits non zero.
+  stripped. No match, a non-zero exit or a `claude` that cannot start (named in
+  the error) writes nothing and exits non zero.
 - On success it writes `export AH_CC_TOKEN_<slug>=<token>` into the managed block
   (no refresh flag: the token lasts a year) and prints the variable, its length
   and the file to `source`, never the token.
@@ -513,8 +522,11 @@ other `agentihooks claude ...` still routes and launches Claude.
   this secret.
 
 Both logins print their steps and notes in blue, questions and warnings in
-yellow and errors in red, but only when the output is a terminal and `NO_COLOR`
-is unset; otherwise the text is plain. `codex refresh` colours its warnings and
+yellow and errors in red, but only when standard output is a terminal and
+`NO_COLOR` is unset (set to any value, even empty, it turns colour off);
+otherwise the text is plain. Errors go to standard error, coloured by the same
+rule. The slug note names the variable of its own command (`AH_CC_TOKEN_` for
+Claude, `AH_CX_TOKEN_` for Codex). `codex refresh` colours its warnings and
 failures the same way.
 
 ### Refreshing tokens

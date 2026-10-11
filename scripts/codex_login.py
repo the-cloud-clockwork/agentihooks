@@ -23,7 +23,6 @@ DESCRIBE = "{name} written to {rc}\n  workspace {workspace}, plan {plan}\n  expi
 STEP_SIGN_IN = "Step 1/3: sign in to the account in the browser"
 STEP_BLOCK = "Step 2/3: writing the token block"
 STEP_STORE = "Step 3/3: storing them in OpenBao"
-__all__ = ["Console", "StoreRefused", "main"]
 
 
 def homes() -> Path:
@@ -31,7 +30,7 @@ def homes() -> Path:
 
 
 def _fail(message: str) -> None:
-    print(term_colors.red(f"{PROG}: {message}", sys.stderr), file=sys.stderr)
+    print(term_colors.red(f"{PROG}: {message}"), file=sys.stderr)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -106,7 +105,7 @@ def main(
 ) -> int:
     environ = os.environ if environ is None else environ
     options = _parser().parse_args(args)
-    print(term_colors.blue(aicode_tokens.SLUG_NOTE))
+    print(term_colors.blue(aicode_tokens.SLUG_NOTE.format(prefix=CODEX_TOKEN_PREFIX)))
     try:
         slug = aicode_tokens.slug(options.slug)
     except aicode_tokens.SlugError as exc:

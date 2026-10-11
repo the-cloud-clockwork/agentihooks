@@ -9,7 +9,7 @@ RED = "31"
 
 
 def enabled(stream: TextIO, environ: Mapping[str, str]) -> bool:
-    return stream.isatty() and not environ.get("NO_COLOR")
+    return stream.isatty() and "NO_COLOR" not in environ
 
 
 def paint(text: str, color: str, stream: TextIO | None = None, environ: Mapping[str, str] | None = None) -> str:

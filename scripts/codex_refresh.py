@@ -51,6 +51,7 @@ STALE = "{slug}: removing {path}, older than the pair in OpenBao"
 UNREADABLE = "{slug}: ignoring unreadable {path}"
 NO_LOCAL_ACCOUNT = "{slug}: no such Codex account under {root}"
 NO_BAO_ACCOUNT = "{slug}: no such Codex account in OpenBao"
+LEGACY = "{name}: skipped, the name is not a slug; run agentihooks codex login {name} to store it as {slug}"
 
 
 class GrantError(RuntimeError):
@@ -182,17 +183,26 @@ def _store(bao: openbao_kv.OpenBao, entries: dict[str, str]) -> bool:
     return True
 
 
-def _valid(name: str) -> bool:
-    try:
-        return aicode_tokens.slug(name) == name
-    except aicode_tokens.SlugError:
-        return False
+def _select(names: list[str], force: str) -> list[str]:
+    kept = []
+    for name in names:
+        try:
+            found = aicode_tokens.slug(name)
+        except aicode_tokens.SlugError:
+            continue
+        if force and found != force:
+            continue
+        if found == name:
+            kept.append(name)
+        else:
+            print(term_colors.yellow(LEGACY.format(name=name, slug=found)))
+    return kept
 
 
 def _local_accounts(force: str) -> list[Path]:
     root = codex_login.homes()
-    found = sorted(path for path in root.iterdir() if (path / "auth.json").is_file()) if root.is_dir() else []
-    return [path for path in found if _valid(path.name) and (not force or path.name == force)]
+    found = sorted(path.name for path in root.iterdir() if (path / "auth.json").is_file()) if root.is_dir() else []
+    return [root / name for name in _select(found, force)]
 
 
 def _attempt(slug: str, action: Callable[[], object]) -> bool:
@@ -235,7 +245,7 @@ def run_local(run: Run) -> int:
 def _bao_accounts(secret: Mapping[str, str], force: str) -> list[str]:
     prefix = codex_login.REFRESH_PREFIX
     found = [key.removeprefix(prefix) for key in sorted(secret) if key.startswith(prefix)]
-    return [slug for slug in found if _valid(slug) and (not force or slug == force)]
+    return _select(found, force)
 
 
 def _recovery(slug: str) -> Path:

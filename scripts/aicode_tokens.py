@@ -18,7 +18,7 @@ SLUG_RULE = (
 )
 SLUG_NOTE = (
     "Note: use the email of the target account as the slug, so each token is recognisable at a glance "
-    "(nestor.colt@gmail.com becomes AH_CC_TOKEN_nestor_coltatgmail_com)."
+    "(nestor.colt@gmail.com becomes {prefix}nestor_coltatgmail_com)."
 )
 _SLUG = re.compile(r"[a-z0-9][a-z0-9_]*")
 _EXPORT = re.compile(r"\s*export\s+([^=\s]+)=")
