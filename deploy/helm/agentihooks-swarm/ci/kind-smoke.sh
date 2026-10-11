@@ -139,7 +139,7 @@ kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/her
 kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/herdr-terminal-objects.json
 printf 'worker terminal Pod, Secret, Service and NetworkPolicy passed server side strict validation\n'
 wait "$build"
-bash scripts/packaging/swarm-image-herdr.sh "$image"
+bash scripts/packaging/swarm-image-clients.sh "$image"
 printf 'FROM %s\nCOPY . /\n' "$image" \
   | docker build -q -t "$bundle_image" -f - tests/fixtures/swarm_v2/worker-bundle >/dev/null
 kind load docker-image "$image" --name "$cluster"

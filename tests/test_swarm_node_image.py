@@ -508,3 +508,21 @@ def test_command_rejects_an_unlocked_tool(locked, monkeypatch, capsys):
         worker_image.main()
     assert error.value.code == 2
     assert "invalid choice: 'curl'" in capsys.readouterr().err
+
+
+def test_a_named_package_limits_shell_packages_to_that_package(locked, monkeypatch, capsys):
+    path, lock, _ = locked
+    lock["shell_packages"].update(bash="5.2", **{"openssh-client": "1:9.2p1-2+deb12u7"})
+    path.write_text(json.dumps(lock))
+    argv = ["worker_image", "shell-packages", "--lock", str(path), "--package", "openssh-client", "--package", "git"]
+    monkeypatch.setattr("sys.argv", argv)
+    worker_image.main()
+    assert capsys.readouterr().out == "openssh-client=1:9.2p1-2+deb12u7 git=1:2.39.5-0+deb12u3\n"
+
+
+def test_an_unlocked_package_is_refused(locked, monkeypatch):
+    path, _, _ = locked
+    monkeypatch.setattr("sys.argv", ["worker_image", "shell-packages", "--lock", str(path), "--package", "curl"])
+    with pytest.raises(KeyError) as error:
+        worker_image.main()
+    assert error.value.args == ("curl",)
