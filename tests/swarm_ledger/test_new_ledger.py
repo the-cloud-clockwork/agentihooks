@@ -38,7 +38,9 @@ def test_a_task_profile_must_be_a_string():
 
 @pytest.mark.parametrize("field", ["title", "description", "phase", "lane", "profile"])
 def test_every_task_text_field_must_be_a_string(field):
-    assert new_ledger.check_types({**CONTENT, "tasks": [{field: 1}]}) == [f"tasks[1].{field} must be a string"]
+    refused = [f"tasks[1].{field} must be a string"] + (["tasks[1].lane must be eng or ci"] if field == "lane" else [])
+
+    assert new_ledger.check_types({**CONTENT, "tasks": [{field: 1}]}) == refused
 
 
 def test_a_built_task_carries_its_fields_and_open_defaults():
