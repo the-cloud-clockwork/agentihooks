@@ -850,5 +850,5 @@ class HerdrRuntime:
             return
         try:
             self.herdr(["agent", "prompt", pane_target(agent), marked(text)])
-        except Exception:
-            pass
+        except Exception as exc:
+            return str(exc) or type(exc).__name__

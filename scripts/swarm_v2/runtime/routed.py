@@ -44,8 +44,9 @@ class RoutedRuntime:
         observed = self.router.observe(agent).value
         return PaneObservation("unknown") if observed is None else observed
 
-    def nudge(self, agent: AgentRecord, text: str) -> None:
-        self.router.command(agent, text)
+    def nudge(self, agent: AgentRecord, text: str) -> str | None:
+        outcome = self.router.command(agent, text)
+        return None if outcome.ok else outcome.detail or outcome.status.value
 
     def retire(self, agent: AgentRecord, homes: Sequence[str] = ()) -> bool:
         outcome = self.router.terminate(agent, tuple(homes))

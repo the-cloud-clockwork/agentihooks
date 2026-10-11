@@ -139,6 +139,23 @@ def test_status_and_nudge_address_the_agents_own_pane_id(tmp_path):
     assert prompts == [["agent", "prompt", "w:p9", "[swarm delivery] wake"]]
 
 
+def test_a_delivered_nudge_reports_no_failure(tmp_path):
+    runtime = HerdrRuntime(home=tmp_path, herdr=lambda args: {})
+    assert runtime.nudge(AgentRecord("engineer@a1b2c3-0001", "eng", "t", pane_id="w:p9"), "wake") is None
+
+
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [(RuntimeError("agent_not_found"), "agent_not_found"), (TimeoutError(), "TimeoutError")],
+)
+def test_a_nudge_herdr_fails_to_deliver_returns_the_failure(tmp_path, error, reason):
+    def herdr(args):
+        raise error
+
+    runtime = HerdrRuntime(home=tmp_path, herdr=herdr)
+    assert runtime.nudge(AgentRecord("engineer@a1b2c3-0001", "eng", "t", pane_id="w:p9"), "wake") == reason
+
+
 class NamedPanes:
     def __init__(self, panes):
         self.panes, self.renamed = panes, []
