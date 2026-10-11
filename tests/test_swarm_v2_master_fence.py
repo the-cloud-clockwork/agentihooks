@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+import scripts.swarm_ledger.repository  # noqa: F401  puts the ledger folder on sys.path before ledger_core loads
 from scripts.swarm.store import MASTER, AgentRecord
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_v2 import master_fence, masters
