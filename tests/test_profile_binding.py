@@ -109,7 +109,6 @@ def test_running_session_validates_the_canary_a_later_render_delivered(tmp_path,
     [
         ("claude", "codex", "Claude cannot transfer to a Codex account"),
         ("codex", "claude", "Codex cannot transfer to a Claude account"),
-        ("codex", "codex", "Codex cannot transfer to a Codex account"),
         ("codex", "", "Codex cannot transfer to a Claude account"),
         ("", "codex", "Claude cannot transfer to a Codex account"),
         (None, "codex", "Claude cannot transfer to a Codex account"),

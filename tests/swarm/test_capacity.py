@@ -476,6 +476,7 @@ def test_finished_agents_do_not_reserve_capacity_and_reason_lists_all_restrictio
             "week_left": 90,
             "cap": cap,
             "week_resets_at": None,
+            "five_resets_at": None,
         }
         for name, state, cap in (("z", "CLOSED", 0), ("a", "OPEN", 3), ("b", "OPEN", 3))
     ]
