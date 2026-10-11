@@ -92,6 +92,9 @@ def test_record_keeps_the_shared_report_and_findings_stable_between_cadence_tick
             ("intent_fix", 600.0),
         ]
         before = standing.read(store.redis, "scratch")
+        assert set(before) == {row["stage"] for row in found["stages"]}
+        assert before["review"]["updated_at"] == 10 * H
+        assert before["review"]["detector"]["seconds"] == 1200.0
         assert stage_detector.record(box, store, "scratch", 10 * H + 60_000, [task], environ) == found
         assert standing.read(store.redis, "scratch") == before
         assert stage_detector.record(box, store, "scratch", 10 * H + 120_000, [task], environ)["at"] == 10 * H + 120_000
@@ -166,12 +169,12 @@ def test_a_stage_that_leaves_the_window_falls_to_zero_and_updates_displayed_hour
         for finding in standing.findings(store.redis, "scratch", NOW + 4 * H)
         if finding.subject == "ci_overrun"
     )
-    assert evidence[-1] == "Current 0 task hours, falling, previously 0.635833 task hours"
+    assert evidence == ("Fired 3 times", "Current 0 task hours, falling, previously 0.635833 task hours")
 
 
 def test_unrelated_overruns_do_not_inflate_the_standing_repeat_count(store):
     source, tasks = replay()
-    source["ci_stages"].append({**stage(99, "orphan", 2000, 1, 0, "ubuntu"), "ts_ms": NOW - H})
+    source["ci_stages"].append({**stage(99, "mutation-stats", 2000, 1, 0, "ubuntu"), "ts_ms": NOW - H})
     source["ci_runs"].append(run(99, "unrelated", NOW - H, NOW, "success"))
     found = stage_detector.report(source, tasks, NOW)
     stage_detector.update_findings(store, "scratch", found, NOW)
@@ -189,6 +192,8 @@ def test_separate_task_observations_count_once_each_for_non_ci_stages(store):
     row = standing.read(store.redis, "scratch")["ci_run"]
     assert row["fired"] == 3
     assert row["value"] == 1.0
+    finding = standing.findings(store.redis, "scratch", NOW)[0]
+    assert finding.evidence == ("Fired 3 times", "Current 1 task hours, rising, previously 0 task hours")
     assert stages.line(found, NOW) == (
         "top stages in the last 4 hours: ci run 1.0 task hours (rising); 1.0 task hours in all, measured 0 minutes ago"
     )
@@ -283,7 +288,7 @@ def test_labels_of_the_same_stage_share_one_rank_and_loss_total():
 def test_identical_windows_are_unchanged_and_one_second_of_new_loss_is_rising(previous, current, trend):
     source = rows()
     tasks = []
-    for number, (end, duration) in enumerate([(NOW - H, previous), (NOW, current)], 1):
+    for number, (end, duration) in enumerate([(NOW - 2 * H, 3600), (NOW - H, previous), (NOW, current)], 1):
         if not duration:
             continue
         task, branch = f"t{number}", f"b{number}"
@@ -299,3 +304,46 @@ def test_identical_windows_are_unchanged_and_one_second_of_new_loss_is_rising(pr
         float(previous),
         trend,
     )
+
+
+def test_two_ready_tasks_count_as_distinct_claim_wait_observations(store):
+    source = rows(
+        ledger_events=[
+            {"kind": "added", "target": f"tasks/{task}", "ts_ms": NOW - H, "by": "operator"} for task in ("a", "b")
+        ]
+    )
+    tasks = [{"id": task, "state": "open"} for task in ("a", "b")]
+    found = stage_detector.report(source, tasks, NOW)
+    stage_detector.update_findings(store, "scratch", found, NOW)
+    row = standing.read(store.redis, "scratch")["claim_wait"]
+    assert (row["fired"], row["value"]) == (2, 2.0)
+
+
+def test_under_budget_runs_do_not_count_as_overruns_but_one_second_does(store):
+    source, tasks = replay()
+    end = NOW - 60_000
+    tasks.append({"id": "t4", "state": "done", "branch": "b4"})
+    source["agent_events"].append(agent("claim", "t4", end - 600_000))
+    source["delivery_events"].append(delivery("merge", "t4", end))
+    source["ci_runs"].append(run(4, "b4", end - 600_000, end, "success"))
+    source["ci_stages"].append({**stage(4, "unit", 300, 500, 0, "ubuntu"), "ts_ms": end})
+    found = stage_detector.report(source, tasks, NOW)
+    stage_detector.update_findings(store, "scratch", found, NOW)
+    assert standing.read(store.redis, "scratch")["ci_overrun"]["fired"] == 3
+    source["ci_stages"][-1]["seconds"] = 501
+    found = stage_detector.report(source, tasks, NOW)
+    stage_detector.update_findings(store, "scratch", found, NOW)
+    assert standing.read(store.redis, "scratch")["ci_overrun"]["fired"] == 4
+
+
+def test_restarted_detector_respects_the_saved_cadence_counter(tmp_path, store):
+    from scripts.swarm.metrics_outbox import Outbox, Settings
+
+    box = Outbox(tmp_path / "restart.db", Settings("http://sink", "writer", ""))
+    store.redis.set(store.key("scratch", "stage-detector-ticks"), 3)
+    try:
+        assert stage_detector.record(box, store, "scratch", NOW, [], {}) == {}
+        assert stage_detector.record(box, store, "scratch", NOW + 60_000, [], {}) == {}
+        assert stage_detector.record(box, store, "scratch", NOW + 120_000, [], {})["at"] == NOW + 120_000
+    finally:
+        box.close()
