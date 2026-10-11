@@ -474,6 +474,8 @@ def relay_to_inbox(slug, state):
     """Operator writes since the oldest revision not yet relayed become inbox items for the swarm on this ledger."""
     meta = state["_meta"]
     since = unrelayed_since(RELAY, slug, meta["rev"])
+    if since <= meta.get("events_trimmed", -1):
+        since = record_trimmed(slug, since, meta["events_trimmed"])
     events = [
         e for e in meta.get("events", []) if since <= e.get("rev", -1) <= meta["rev"] and e.get("by") == "operator"
     ]
@@ -495,6 +497,20 @@ def relay_to_inbox(slug, state):
         return []
     relayed(RELAY, slug, since, meta["rev"])
     return sent
+
+
+TRIMMED = (
+    "Operator writes from revision {since} through {trimmed} left the ledger history before the inbox could take "
+    "them during an outage, so no agent received them. Write them again if they still matter."
+)
+
+
+def record_trimmed(slug, since, trimmed):
+    """Tell the operator which unrelayed writes the event window dropped; the relay resumes after them."""
+    text = TRIMMED.format(since=since, trimmed=trimmed)
+    repository.apply_ops(slug, ops=[{"op": "notice", "id": f"trimmed-{since}-{trimmed}", "by": "ledger", "text": text}])
+    relayed(RELAY, slug, since, trimmed)
+    return trimmed + 1
 
 
 def deliver_alerts(slug, state):

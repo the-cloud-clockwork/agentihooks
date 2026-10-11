@@ -166,3 +166,18 @@ def test_an_alert_raised_while_redis_is_down_reaches_the_master_once_after_recov
     ledger_server.replay_unrelayed()
     ledger_server.replay_unrelayed()
     assert len([text for text in outage.texts(BOSS.seat) if "alert" in text]) == 1
+
+
+def test_operator_writes_trimmed_before_their_relay_leave_one_notice_for_the_operator(outage, monkeypatch):
+    phase, question = make_ledger()
+    monkeypatch.setattr(core, "EVENTS_KEPT", 1)
+    monkeypatch.setattr(core, "EVENTS_CEILING", 1)
+    outage.down()
+    operator_writes(phase, question)
+    outage.down(False)
+    ledger_server.replay_unrelayed()
+    ledger_server.replay_unrelayed()
+    state, _ = core.sync(SLUG)
+    notices = [row for row in state.get("notifications", []) if "trimmed" in row["text"]]
+    assert len(notices) == 1 and ledger_server.unrelayed() == {}
+    assert len(mentions(outage.texts(BOSS.seat), "use the queue")) == 1
