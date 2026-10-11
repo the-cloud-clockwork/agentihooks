@@ -719,6 +719,13 @@ def test_a_resume_whose_launch_fails_terminates_that_agent(tmp_path):
     ]
 
 
+def test_a_codex_launch_must_start_its_harness_inside_the_start_timeout(tmp_path):
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee", harness="codex")
+    runtime.resume(config, agent, "you were restored")
+    argv = seen["runs"][0]
+    assert (argv[argv.index("--start-timeout") + 1], argv[argv.index("--route-timeout") + 1]) == ("30", "30")
+
+
 @pytest.mark.parametrize(
     "lane,harness,launch,source",
     [

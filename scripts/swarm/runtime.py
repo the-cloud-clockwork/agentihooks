@@ -620,7 +620,16 @@ class HerdrRuntime:
             "--dir",
             config.repo,
         ]
-        argv += ["--name", name, "--agent", agent, "--start-timeout", "30", "--route-timeout", "90"]
+        argv += [
+            "--name",
+            name,
+            "--agent",
+            agent,
+            "--start-timeout",
+            "30",
+            "--route-timeout",
+            "30" if agent == "codex" else "90",
+        ]
         argv += ["--inbox-channel"] if agent == "claude" else []
         argv += [arg for overlay in worn for arg in ("--overlay", overlay)]
         return [*argv, "--profile", profile, "--prompt-file", str(path)]
