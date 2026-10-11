@@ -557,6 +557,46 @@ def test_a_tick_observation_of_another_backend_is_unknown_and_touches_nothing():
     assert herdr.calls == []
 
 
+class RefusingRuntime(FakeRuntime):
+    def __init__(self, detail):
+        super().__init__(REMOTE, {Capability.COMMAND})
+        self.detail = detail
+
+    def command(self, agent, text):
+        self.calls.append(("command", agent.name))
+        return Outcome("command", Status.REFUSED, self.backend, detail=self.detail)
+
+
+def remote_tick_runtime(remote, disabled=()):
+    herdr = FakeHerdr()
+    return herdr, RoutedRuntime(herdr, RuntimeRouter([LocalHerdrRuntime(herdr), remote], LOCAL, disabled))
+
+
+REMOTE_AGENT = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", execution_id="exe-1", runtime_backend=REMOTE)
+
+
+def test_an_accepted_remote_tick_nudge_reports_no_refusal():
+    remote = FakeRuntime(REMOTE, {Capability.COMMAND})
+    herdr, runtime = remote_tick_runtime(remote)
+    assert runtime.nudge(REMOTE_AGENT, "wake") is None
+    assert remote.calls == [("command", REMOTE_AGENT.name)] and herdr.calls == []
+
+
+@pytest.mark.parametrize(
+    ("remote", "disabled", "reason"),
+    [
+        (remote_fake(), (), "kubernetes lacks command"),
+        (FakeRuntime(REMOTE, {Capability.COMMAND}), (REMOTE,), "runtime kubernetes is disabled"),
+        (RefusingRuntime("the pane is gone"), (), "the pane is gone"),
+        (RefusingRuntime(""), (), "refused"),
+    ],
+)
+def test_a_refused_remote_tick_nudge_returns_its_reason(remote, disabled, reason):
+    herdr, runtime = remote_tick_runtime(remote, disabled)
+    assert runtime.nudge(REMOTE_AGENT, "wake") == reason
+    assert herdr.calls == []
+
+
 def test_disabling_local_stops_tick_spawns_without_touching_herdr():
     herdr = FakeHerdr()
     runtime = tick_runtime(herdr, {"AGENTIHOOKS_RUNTIME_DISABLED": LOCAL})

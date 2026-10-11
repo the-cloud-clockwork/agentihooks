@@ -86,6 +86,7 @@ class FakeRuntime:
         self.conversation_ids, self.named, self.closed_spaces, self.typed = {}, [], [], {}
         self.capacity_for = []
         self.homes, self.duplicates, self.refusals, self.reaped = {}, set(), {}, []
+        self.nudge_refusals = {}
 
     def has_capacity(self, config):
         self.capacity_for.append(config.slug)
@@ -156,6 +157,7 @@ class FakeRuntime:
 
     def nudge(self, agent, text):
         self.nudged.append(agent.name)
+        return self.nudge_refusals.get(agent.name)
 
     def name_pane(self, agent):
         self.named.append(agent.name)
@@ -635,6 +637,32 @@ def test_an_idle_agent_is_nudged_then_retired_and_its_task_reopened(store):
         if n + 1 == IDLE_NUDGE_TICKS:
             assert runtime.nudged == ["engineer@a1b2c3-0001"]
     assert runtime.killed == ["engineer@a1b2c3-0001"] and ledger.rows["t1"]["state"] == "open"
+
+
+def idle_until_nudged(store, runtime):
+    from scripts.swarm.tick import IDLE_NUDGE_TICKS
+
+    ledger = tasks(("t1", "eng"))
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    runtime.statuses["engineer@a1b2c3-0001"] = "idle"
+    store.update("sw", state="paused")
+    return [tick("sw", store, ledger, runtime, now_ms=2_000 + n) for n in range(IDLE_NUDGE_TICKS)][-1]
+
+
+def test_an_accepted_nudge_is_reported_as_nudged(store):
+    runtime = FakeRuntime()
+    actions = idle_until_nudged(store, runtime)
+    assert "nudged engineer@a1b2c3-0001" in actions and not [a for a in actions if "refused" in a]
+    assert runtime.nudged == ["engineer@a1b2c3-0001"]
+
+
+def test_a_refused_nudge_is_reported_as_refused_with_its_reason(store):
+    runtime = FakeRuntime()
+    runtime.nudge_refusals["engineer@a1b2c3-0001"] = "kubernetes lacks command"
+    actions = idle_until_nudged(store, runtime)
+    assert "nudge to engineer@a1b2c3-0001 refused: kubernetes lacks command" in actions
+    assert "nudged engineer@a1b2c3-0001" not in actions
+    assert runtime.nudged == ["engineer@a1b2c3-0001"]
 
 
 def test_the_nudge_is_skipped_while_the_pane_holds_typed_input(store):
