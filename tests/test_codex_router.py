@@ -2,6 +2,7 @@ import base64
 import json
 import subprocess
 import time
+from dataclasses import replace
 
 import pytest
 
@@ -120,10 +121,10 @@ def test_a_week_under_five_percent_or_a_full_band_takes_no_session():
 
 
 def test_a_signed_out_missing_or_stale_reading_is_never_picked():
-    quotas = {"default": _quota(10.0), "alpha": _quota(10.0, observed_at=NOW - 901), "beta": None}
+    quotas = {"default": _quota(10.0), "alpha": _quota(10.0, observed_at=NOW - 6 * 3600 - 1), "beta": None}
     with pytest.raises(router.RoutingError):
         router.select(_accounts(signed_in=False), quotas, {}, NOW)
-    quotas["alpha"] = _quota(10.0, observed_at=NOW - 900)
+    quotas["alpha"] = _quota(10.0, observed_at=NOW - 6 * 3600)
     assert router.select(_accounts(signed_in=False), quotas, {}, NOW)[0] == _accounts()[1]
 
 
@@ -133,6 +134,40 @@ def test_the_cap_comes_from_the_week_alone_and_a_passed_reset_reads_full():
     assert router.account_cap(spent, NOW + 600) == 6
     assert router.account_cap(_quota(95.0), NOW) == 6
     assert router.account_cap(None, NOW) is None
+
+
+def _aged(seconds, resets_at=NOW + 86_400):
+    return CodexQuota(NOW - seconds, "team", seven_day=QuotaWindow(used=10.0, resets_at=resets_at))
+
+
+def test_a_reading_keeps_its_cap_until_the_max_age_and_a_passed_week_reads_full(monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", raising=False)
+    assert router.account_cap(_aged(3600), NOW) == 6
+    assert router.account_cap(_aged(6 * 3600), NOW) == 6
+    assert router.account_cap(_aged(6 * 3600 + 1), NOW) is None
+    spent = CodexQuota(NOW - 3600, "team", seven_day=QuotaWindow(used=99.0, resets_at=NOW + 600))
+    assert router.account_cap(spent, NOW) == 0
+    assert router.account_cap(replace(spent, seven_day=QuotaWindow(used=99.0, resets_at=NOW)), NOW) == 6
+    assert router.account_cap(_aged(3600, resets_at=None), NOW) == 6
+    monkeypatch.setenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", "0.5")
+    assert router.account_cap(_aged(3600), NOW) is None
+    assert router.account_cap(_aged(1800), NOW) == 6
+    assert router.account_cap(_aged(600), NOW, {"AGENTIHOOKS_CODEX_READING_MAX_AGE_H": "0.1"}) == 6
+    assert router.account_cap(_aged(1800), NOW, {}) == 6
+    assert router.account_cap(_aged(1800), NOW, {"AGENTIHOOKS_CODEX_READING_MAX_AGE_H": "0.25"}) is None
+    monkeypatch.setenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", "soon")
+    assert router.account_cap(_aged(6 * 3600), NOW) == 6
+    assert router.account_cap(_aged(6 * 3600 + 1), NOW) is None
+
+
+def test_a_usable_hour_old_reading_is_still_probed_once_per_freshness_window(monkeypatch):
+    probed = []
+    monkeypatch.setattr(router, "quotas", lambda pool, environ: {"default": _aged(3600)})
+    monkeypatch.setattr(router, "probe", lambda account, environ, run: probed.append(account.name))
+    pool = [router.CodexAccount("default")]
+    router.fresh_quotas(pool, ENV, NOW)
+    router.fresh_quotas(pool, ENV, NOW + 900)
+    assert probed == ["default"]
 
 
 def test_a_forced_route_ignores_quota_and_cap():
@@ -325,6 +360,21 @@ def test_a_routed_launch_reports_the_account_and_never_prints_a_token(monkeypatc
     out = capsys.readouterr()
     assert "account=alpha sessions=0/6 placement=open" in out.out
     assert "cx-value" not in out.out + out.err
+
+
+def test_a_session_name_reaches_codex_as_its_thread_id(monkeypatch, tmp_path):
+    asked = []
+
+    def resolve(args, environ):
+        asked.append((list(args), environ.get("CODEX_HOME"), sorted(k for k in environ if "TOKEN" in k)))
+        return ["archive", "01a12c55-38bc-70c1-be9b-6c5d7fbcdc22"]
+
+    monkeypatch.setattr(router.codex_sessions, "resolve", resolve)
+    environ = {**ENV, "CODEX_HOME": "/profile/codex"}
+    rc, seen, _ = _launch(monkeypatch, tmp_path, environ, ["archive", "engineer@abc-0001"], {"alpha": _quota(10.0)})
+    assert rc == 0
+    assert seen["cmd"][-2:] == ["archive", "01a12c55-38bc-70c1-be9b-6c5d7fbcdc22"]
+    assert asked == [(["archive", "engineer@abc-0001"], "/profile/codex", [])]
 
 
 def test_route_forces_an_account(monkeypatch, tmp_path):
@@ -652,6 +702,7 @@ def test_the_probe_of_a_chatgpt_account_runs_the_bearer_provider_and_skips_an_un
 
     monkeypatch.setattr(router.shutil, "which", lambda name: "/usr/bin/codex")
     monkeypatch.setattr(router.codex_quota, "session_quota", lambda environ, thread: thread)
+    monkeypatch.setattr(router.codex_usage, "read", lambda *a, **k: None)
     assert router.probe(_token("alpha"), OAUTH_ENV, run) == "t-9"
     argv, env = seen[0]
     assert argv == ["/usr/bin/codex", "--no-daemon", *router.bearer_overrides(), *router.PROBE_ARGS]
