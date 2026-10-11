@@ -81,13 +81,26 @@ def test_a_bare_remote_pane_is_refused_before_any_herdr_command(tmp_path, bare):
     assert client.router.mismatches == {("bare", "bare_pane"): 1}
 
 
-@pytest.mark.parametrize("pane", ["-w1:p1", "w1:p1 ", "w1", "p1", "w1:p1:p2", "wx:p1", ""])
+@pytest.mark.parametrize("pane", ["w30:p7K", "w30:p8P", "w3A:p1", "w2:p1"])
+def test_a_pane_id_with_the_capital_letters_herdr_emits_is_routed(tmp_path, pane):
+    client, _, desired = world(tmp_path)
+    found = client.router.resolve(desired[0].name, pane)
+    argv = client.router.command(found, "pane_read")
+    assert argv == ["herdr", "--machine", found.profile_id, "pane", "read", pane]
+
+
+@pytest.mark.parametrize(
+    "pane", ["-w1:p1", "w1:p1 ", "w1", "p1", "w1:p1:p2", "wx:p1", "w30:p7k", "w30:p-1", "w30:p", "w:p1", ""]
+)
 def test_a_malformed_pane_id_is_refused(tmp_path, pane):
     client, fleet, desired = world(tmp_path)
     found = resolved(client, desired[0])
     bad = Target(found.profile_id, found.session, found.incarnation, pane)
     before = len(fleet.commands)
-    assert refusal(lambda: client.router.command(bad, "pane_read"))[0] == "pane_id"
+    assert refusal(lambda: client.router.command(bad, "pane_read")) == (
+        "pane_id",
+        "a herdr pane id reads w<id>:p<id>, each id digits and capital letters",
+    )
     assert len(fleet.commands) == before
     assert client.router.mismatches == {(found.profile_id, "pane_id"): 1}
 
@@ -466,7 +479,7 @@ REFUSALS = {
     ),
     "resolve_pane": (
         lambda c, f, d, t: c.router.resolve(d[0].name, "w1"),
-        lambda d, t: ("pane_id", "a herdr pane id reads w<number>:p<number>", t.profile_id),
+        lambda d, t: ("pane_id", "a herdr pane id reads w<id>:p<id>, each id digits and capital letters", t.profile_id),
     ),
     "refresh_retired": (
         lambda c, f, d, t: (c.register(d[1:]), c.router.refresh(t)),

@@ -97,6 +97,17 @@ def test_an_idle_remote_agent_receives_the_tick_nudge_in_its_own_terminal_pane(t
     assert fleet.mutations() == [["herdr", "--machine", machine, "agent", "prompt", PANE, marked(TEXT)]]
 
 
+def test_an_agent_pane_with_a_letter_pane_id_receives_the_nudge(tmp_path):
+    fleet, client, prompts = world(tmp_path)
+    fleet.remote[EXE_A]["panes"] = {"w30:p7K": {"pane_id": "w30:p7K"}}
+
+    assert prompts.command(remote(), "wake").ok
+
+    machine = profile(client, EXE_A)
+    assert fleet.mutations() == [["herdr", "--machine", machine, "agent", "prompt", "w30:p7K", marked("wake")]]
+    assert fleet.received()[EXE_A] == [marked("wake")]
+
+
 def test_a_command_lists_the_agents_of_its_own_server_before_it_prompts(tmp_path):
     fleet, client, prompts = world(tmp_path)
 
