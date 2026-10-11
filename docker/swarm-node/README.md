@@ -255,8 +255,9 @@ digest; the deployed controller resolves that tag to its digest at each launch. 
 attestation with the registry digest, which is the immutable digest reference
 `agentihooks-worker@sha256:...`, the version manifest, the protocol compatibility
 manifest, the test report and provenance naming the commit and run. Publication
-runs only from dev or a proof branch; a dispatch elsewhere qualifies without
-pushing. `diffcheck/` proof branches publish only to the
+runs only from a dev push or a `publish` dispatch on dev or a proof branch; a
+dispatch elsewhere qualifies without pushing. A push to a `diffcheck/` proof
+branch starts no build. Proof branch publication goes only to the
 `agentihooks-worker-proof` repository. Rollback points deployment at the last
 accepted digest without rebuilding or retagging it; deployment selection belongs
 to antoncore GitOps.
