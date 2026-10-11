@@ -18,7 +18,7 @@ from scripts.inbox.store import Contended, DuplicateItem, InboxError, new_item_i
 NAME = "inbox-outbox.jsonl"
 SKIPPED = "inbox-outbox.skipped.jsonl"
 LOCK = "inbox-outbox.lock"
-OPS = ("send", "reply", "close", "post")
+OPS = ("send", "reply", "close", "post", "say")
 MAX_ENV = "AGENTIHOOKS_INBOX_OUTBOX_MAX_BYTES"
 WARN_ENV = "AGENTIHOOKS_INBOX_OUTBOX_WARN_BYTES"
 DEFAULT_MAX_BYTES = 1_048_576
@@ -248,7 +248,7 @@ def post(store, message: Post):
     args = {"address": message.address, "text": message.text, "ref": message.ref, "fyi": message.fyi}
     entry = record("post", message.sender, {**args, "task": message.task}, item=message.item)
     try:
-        found = submit(store, entry, apply_post)
+        found = submit(store, entry, lambda live, queued: apply_post(live, queued["by"], queued))
     except DuplicateItem:
         return store.get(entry["item"])
     return None if isinstance(found, dict) else found

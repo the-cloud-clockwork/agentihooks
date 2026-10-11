@@ -123,6 +123,7 @@ from scripts.swarm.store import (
     MASTER,
     SwarmConfig,
     SwarmError,
+    Unreachable,
     connect,
 )
 from scripts.swarm.tick import agent_status, primed, skip_refused, spawn_holds, tick
@@ -1666,7 +1667,14 @@ def main(argv):
         return 1
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
-        store = connect()
+        try:
+            store = connect()
+        except Unreachable:
+            if getattr(args, "command", "") != "say" or args.to in ("", delivery.OPERATOR):
+                raise
+            sender = args.name or who.name
+            print(json.dumps(delivery.queue(args.slug, args.text, sender, args.to, fyi=args.fyi)))
+            return 0
         if "slug" in args:
             args.slug = store.names.swarm_slug(args.slug)
         action = getattr(args, "command", "")

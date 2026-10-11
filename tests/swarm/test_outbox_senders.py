@@ -6,7 +6,7 @@ from scripts.inbox import outbox
 from scripts.inbox.seen import write_ref
 from scripts.inbox.store import InboxStore
 from scripts.swarm import control_notifications, delivery, operator_mail
-from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, Unreachable
 from scripts.swarm_ledger import ledger_alerts
 from scripts.swarm_ledger.watch_ledger import line
 
@@ -146,3 +146,32 @@ def test_alerts_since_an_older_revision_are_all_delivered(swarm):
     _, inbox = swarm
     ledger_alerts.deliver(inbox, SLUG, [alert(2), alert(3), alert(4)], 4, BOSS.seat, since=3)
     assert sorted(i.text.split("alert ")[1].split(" ")[0] for i in items(inbox, BOSS.seat)) == ["al-3-0", "al-4-0"]
+
+
+def unreachable():
+    raise Unreachable("Redis is unreachable (connection refused); the swarm refuses to run without it")
+
+
+def test_swarm_say_while_redis_is_fully_down_reaches_its_recipient_once_after_recovery(swarm, monkeypatch):
+    from scripts.swarm import cli
+
+    _, inbox = swarm
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", BOSS.name)
+    monkeypatch.setattr(cli, "connect", unreachable)
+    assert cli.main([SLUG, "say", "the docs build is green", "--to", "eng"]) == 0
+    assert items(inbox, ENG.seat) == [] and outbox.waiting()
+    outbox.flush(inbox)
+    outbox.flush(inbox)
+    [item] = items(inbox, ENG.seat)
+    assert (item.sender, item.text, item.task) == (BOSS.name, "the docs build is green", ENG.task)
+    assert not outbox.waiting()
+
+
+def test_a_queued_swarm_say_naming_nobody_is_set_aside_and_the_next_record_still_lands(swarm):
+    _, inbox = swarm
+    delivery.queue(SLUG, "anyone there", BOSS.name, "ci")
+    delivery.queue(SLUG, "the docs build is green", BOSS.name, ENG.name)
+    report = outbox.flush(inbox)
+    assert report.rejected and not outbox.waiting()
+    [item] = items(inbox, ENG.seat)
+    assert item.text == "the docs build is green"
