@@ -55,17 +55,14 @@ class Occupied(RedisStore):
 
 def remote(endpoint, seat, **fields):
     execution_id = endpoint.scope.execution_id
-    return AgentRecord(
-        FX["agents"][execution_id]["name"],
-        "eng",
-        seat,
-        seat=f"{seat}@{SLUG}",
-        execution_id=execution_id,
-        generation=endpoint.scope.generation,
-        runtime_backend=BACKEND,
-        conversation_id=ROUTING["remote"][execution_id]["conversation_id"],
-        **fields,
-    )
+    defaults = {
+        "seat": f"{seat}@{SLUG}",
+        "execution_id": execution_id,
+        "generation": endpoint.scope.generation,
+        "runtime_backend": BACKEND,
+        "conversation_id": ROUTING["remote"][execution_id]["conversation_id"],
+    }
+    return AgentRecord(FX["agents"][execution_id]["name"], "eng", seat, **(defaults | fields))
 
 
 @pytest.fixture
