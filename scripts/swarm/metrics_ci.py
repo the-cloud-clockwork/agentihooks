@@ -76,9 +76,8 @@ def _pickups(jobs):
         if job.get("started_at") and job.get("conclusion") != "skipped":
             stage = ci_budget.stage_of(job["name"])
             wait = ci_budget.seconds(job["started_at"]) - ci_budget.seconds(job["created_at"])
-            if wait >= pickups.get(stage, 0.0):
-                runners[stage] = ",".join(sorted(job.get("labels") or []))
-            pickups[stage] = max(pickups.get(stage, 0.0), wait)
+            if stage not in pickups or wait > pickups[stage]:
+                pickups[stage], runners[stage] = wait, ",".join(sorted(job.get("labels") or []))
     return pickups, runners
 
 

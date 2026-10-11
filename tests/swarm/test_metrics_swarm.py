@@ -464,9 +464,13 @@ def test_a_queued_pull_request_is_recorded_at_first_sight_of_its_head():
     queued = {TASK["pr_url"]: SimpleNamespace(state="OPEN", merged_at=None, queued=True, head="h1")}
     first = metrics_swarm.queue_rows(SLUG, doc(), [AGENT], queued, NOW)
     later = metrics_swarm.queue_rows(SLUG, doc(), [AGENT], queued, NOW + 60_000)
-    assert [(row["kind"], row["ts_ms"], row["pull_request"]) for row in first] == [
-        ("merge_queued", NOW, TASK["pr_url"])
+    assert [(row["kind"], row["ts_ms"], row["pull_request"], row["agent"]) for row in first] == [
+        ("merge_queued", NOW, TASK["pr_url"], "worker")
     ]
+    quiet = {**TASK, "id": "q", "pr_url": "https://github.com/org/repo/pull/2"}
+    both = {"tasks": [quiet, TASK], "_meta": {"events": []}}
+    queued_only = {**queued, quiet["pr_url"]: SimpleNamespace(state="OPEN", merged_at=None, queued=False, head="h")}
+    assert [row["task"] for row in metrics_swarm.queue_rows(SLUG, both, [AGENT], queued_only, NOW)] == ["t"]
     assert later[0]["event_id"] == first[0]["event_id"]
     requeued = {TASK["pr_url"]: SimpleNamespace(state="OPEN", merged_at=None, queued=True, head="h2")}
     assert metrics_swarm.queue_rows(SLUG, doc(), [AGENT], requeued, NOW)[0]["event_id"] != first[0]["event_id"]
@@ -499,8 +503,10 @@ def test_failed_launches_become_launch_failed_events_with_their_harness():
 
 def test_a_failed_launch_keeps_its_agent_name_when_no_life_was_recorded():
     launch = {"agent": "gone", "task": "t", "at": NOW, "state": "failed", "error": "init-agent exited 1"}
-    (row,) = metrics_swarm.launch_rows(SLUG, doc(), [launch], [])
+    later = {**launch, "at": NOW + 1}
+    row, other = metrics_swarm.launch_rows(SLUG, doc(), [launch, later], [])
     assert (row["agent"], row["harness"]) == ("gone", "")
+    assert row["event_id"] != other["event_id"]
 
 
 def test_record_pass_exports_queue_and_launch_rows(tmp_path, monkeypatch):

@@ -58,66 +58,58 @@ def _ready(task: dict, events: list, before: float) -> float | None:
     return max(marks, default=None)
 
 
-def _lives(task_id: str, rows: dict, end: float) -> list[tuple[Span, Span]]:
+def _lives(task_id: str, rows: dict, end: float) -> list[tuple[tuple, Span]]:
     mine = [event for event in rows["agent_events"] if event["task"] == task_id]
-    starts = {event["agent"]: event for event in mine if event["kind"] == "spawn"}
     stops = {event["agent"]: event["ts_ms"] for event in mine if event["kind"] == "retire"}
     failed = {event["agent"] for event in mine if event["kind"] == "launch_failed"}
     waiting = {event["agent"] for event in mine if event["kind"] == "launch_waiting"}
-    starts = {name: spawn for name, spawn in starts.items() if name not in waiting}
     joins = [event for event in rows["ledger_events"] if event["kind"] == JOINED]
     found = []
-    for name, spawn in sorted(starts.items(), key=lambda item: item[1]["ts_ms"]):
+    for spawn in mine:
+        name = spawn["agent"]
+        if spawn["kind"] != "spawn" or name in waiting:
+            continue
         start, stop = spawn["ts_ms"], min(stops.get(name, end), end)
-        life = Span("life", start, stop, spawn.get("harness", ""))
         if name in failed:
-            found.append((life, Span("launch_failure", start, stop, life.label)))
+            found.append(((start, stop), Span("launch_failure", start, stop, spawn["harness"])))
             continue
         joined = min(
             (event["ts_ms"] for event in joins if event["by"] == name and event["ts_ms"] >= start), default=stop
         )
-        found.append((life, Span("launch", start, min(joined, stop), life.label)))
+        found.append(((start, stop), Span("launch", start, min(joined, stop), spawn["harness"])))
     return found
 
 
-def _gaps(lives: list[Span], start: float, end: float) -> list[Span]:
+def _gaps(lives: list[tuple], start: float, end: float) -> list[Span]:
     gaps, cursor = [], start
-    for life in sorted(lives, key=lambda span: span.start):
-        if life.start > cursor:
-            gaps.append(Span("claim_wait", cursor, min(life.start, end)))
-        cursor = max(cursor, life.end)
-    if cursor < end:
-        gaps.append(Span("claim_wait", cursor, end))
-    return gaps
+    for begin, stop in sorted(lives):
+        gaps.append(Span("claim_wait", cursor, min(begin, end)))
+        cursor = max(cursor, stop)
+    return [*gaps, Span("claim_wait", cursor, end)]
 
 
 def _ci(runs: list, stage_rows: list, pushed: float, green: float) -> list[Span]:
     spans = []
     for run in runs:
         created, ended = bottleneck._created(run), run["ts_ms"]
-        if ended < pushed or created >= green:
-            continue
         mine = [row for row in stage_rows if (row["run_id"], row["attempt"]) == (run["run_id"], run["attempt"])]
         slowest = max(mine, key=lambda row: (row["pickup_s"], row["stage"]), default={})
         queued = (run["queue_s"] + slowest.get("pickup_s", 0.0)) * 1000
         spans.append(Span("ci_queue", created, min(ended, created + queued), slowest.get("runner", "")))
         cursor = ended
         for row in sorted(mine, key=lambda row: (-_over(row), row["stage"])):
-            if _over(row) <= 0 or cursor <= created:
-                break
             spans.append(Span("ci_overrun", max(created, cursor - _over(row) * 1000), cursor, row["stage"]))
             cursor -= _over(row) * 1000
     return [Span(span.stage, max(span.start, pushed), min(span.end, green), span.label) for span in spans]
 
 
 def _over(row: dict) -> float:
-    return row["seconds"] - row["budget"] if row["budget"] else 0.0
+    return max(0.0, row["seconds"] - row["budget"]) if row["budget"] else 0.0
 
 
 def _reviews(task_id: str, rows: dict, end: float) -> list[Span]:
     mine = sorted(
-        (event for event in rows["delivery_events"] if event["task"] == task_id and event["ts_ms"] <= end),
-        key=lambda event: event["ts_ms"],
+        (event for event in rows["delivery_events"] if event["task"] == task_id), key=lambda event: event["ts_ms"]
     )
     verdicts = [event for event in mine if event["kind"] in INTENT]
     spans = [
@@ -130,14 +122,15 @@ def _reviews(task_id: str, rows: dict, end: float) -> list[Span]:
 
 
 def _rounds(task_id: str, rows: dict, green: float, end: float) -> list[Span]:
-    marks = sorted(
+    marks = [
         event["ts_ms"]
         for event in rows["delivery_events"]
-        if event["task"] == task_id and event["kind"] == "review_round" and green < event["ts_ms"] < end
-    )
-    edges = [green, *marks, end]
+        if event["task"] == task_id and event["kind"] == "review_round"
+    ]
+    edges = sorted({green, end, *(min(max(mark, green), end) for mark in marks)})
     return [
-        Span("review", start, stop, f"round {index}") for index, (start, stop) in enumerate(zip(edges, edges[1:]), 1)
+        Span("review", start, stop, f"round {1 + sum(mark <= start for mark in marks)}")
+        for start, stop in zip(edges, edges[1:])
     ]
 
 
@@ -203,12 +196,12 @@ def holds(samples: list, now_ms: int) -> list[Span]:
     held = [
         Span(f"{share}_hold", start, end)
         for share, start, end, count in bottleneck.held_spans(samples, now_ms)
-        if count > 0 and end > start
+        if count > 0
     ]
     merged = []
     for span in held:
-        if merged and merged[-1].stage == span.stage and merged[-1].end >= span.start:
-            merged[-1] = Span(span.stage, merged[-1].start, max(merged[-1].end, span.end))
+        if merged and merged[-1].stage == span.stage and merged[-1].end == span.start:
+            merged[-1] = Span(span.stage, merged[-1].start, span.end)
         else:
             merged.append(span)
     return merged
@@ -216,7 +209,7 @@ def holds(samples: list, now_ms: int) -> list[Span]:
 
 def _stage_at(timeline: Timeline, held: list[Span], at: float) -> tuple[str, str]:
     ranked = sorted(timeline.overlays, key=lambda span: OVERLAYS.index(span.stage))
-    span = next((span for span in (*ranked, *timeline.base) if span.covers(at)), Span("claim_wait", at, at))
+    span = next(span for span in (*ranked, *timeline.base) if span.covers(at))
     if span.stage == "claim_wait":
         hold = next((hold for hold in held if hold.covers(at)), None)
         if hold is not None:
@@ -225,11 +218,10 @@ def _stage_at(timeline: Timeline, held: list[Span], at: float) -> tuple[str, str
 
 
 def attribute(timeline: Timeline, held: list[Span], window: bottleneck.Window) -> dict:
-    low, high = max(timeline.start, window.start), min(timeline.end, window.end)
-    if high <= low:
-        return {}
+    low = max(timeline.start, window.start)
+    high = max(low, min(timeline.end, window.end))
     spans = [*timeline.base, *timeline.overlays, *held]
-    points = sorted({low, high, *(edge for span in spans for edge in (span.start, span.end) if low < edge < high)})
+    points = sorted({low, high, *(min(max(edge, low), high) for span in spans for edge in (span.start, span.end))})
     seconds = {}
     for start, end in zip(points, points[1:]):
         key = _stage_at(timeline, held, (start + end) / 2)
@@ -244,17 +236,13 @@ def report(rows: dict, tasks: list, now_ms: int, window_ms: int = bottleneck.WIN
     for timeline in timelines(rows, tasks, now_ms):
         for key, value in attribute(timeline, held, window).items():
             seconds[key] = seconds.get(key, 0.0) + value
-    found = [
-        {"stage": stage, "label": label, "seconds": round(value, 1)}
-        for (stage, label), value in seconds.items()
-        if round(value, 1) > 0
-    ]
+    found = [{"stage": stage, "label": label, "seconds": value} for (stage, label), value in seconds.items()]
     found.sort(key=lambda row: (-row["seconds"], row["stage"], row["label"]))
     return {
         "at": now_ms,
         "window_hours": window_ms / 3_600_000,
         "stages": found,
-        "total": round(sum(seconds.values()), 1),
+        "total": sum(seconds.values()),
     }
 
 

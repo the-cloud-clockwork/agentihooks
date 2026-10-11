@@ -43,10 +43,26 @@ def test_the_sample_reads_the_registry_admissions_quota_archive_and_feed(store):
     found = metrics_fleet.sample(store, SLUG, NOW, NOW - 30_000)
     attempts = {row["task"]: row for row in found["attempts"]}
     assert {key: row["phase"] for key, row in attempts.items()} == {"t1": "active", "t2": "active", "t3": "pending"}
-    assert attempts["t1"]["terminal"] == "attached" and attempts["t2"]["terminal"] == "detached"
-    assert attempts["t1"]["authority"] == "working" and attempts["t3"]["authority"] == "pending"
-    assert attempts["t1"]["seat"] == f"eng-1@{SLUG}" and attempts["t1"]["execution_id"]
-    assert attempts["t3"]["requested"] == {"cpu_millis": 500, "memory_mib": 512}
+    assert attempts["t1"]["execution_id"]
+    assert attempts["t1"] == {
+        "execution_id": attempts["t1"]["execution_id"],
+        "seat": f"eng-1@{SLUG}",
+        "task": "t1",
+        "phase": "active",
+        "terminal": "attached",
+        "authority": "working",
+    }
+    assert attempts["t2"]["terminal"] == "detached"
+    assert attempts["t3"] == {
+        "execution_id": "",
+        "seat": "",
+        "task": "t3",
+        "phase": "pending",
+        "requested": {"cpu_millis": 500, "memory_mib": 512},
+        "terminal": "detached",
+        "authority": "pending",
+    }
+    assert {row["observed_at_ms"] for row in found["archive"]} == {NOW}
     waiting = {row["account"]: row for row in found["quota"]}
     assert waiting["acct"] == {
         "account": "acct",
@@ -112,8 +128,31 @@ def test_a_missing_brain_feed_is_an_unavailable_source_not_a_fresh_one(tmp_path,
         assert sources["brain_feed"] == (0, 0)
         assert sources["executions"] == (1, 0)
         assert panels[("attempts", "active")] == 0.0
+        assert panels[("knowledge", "cross_scope_denials")] == 0.0
     finally:
         box.close()
+
+
+def test_an_occupant_without_a_heartbeat_is_local_and_an_ended_wait_is_allowed(store):
+    record = AgentRecord(store.next_name(SLUG, "eng"), "eng", "t1", seat=f"eng-1@{SLUG}")
+    store.execution_registry.start(SLUG, record, "")
+    seen = quota.Observation("acct", "claude", "ex1", 1, NOW - 5_000, "allowed", 10.0, 10.0, 1.0, 2.0)
+    store.redis.hset(quota.latest_key("claude"), "acct", quota.encode(seen))
+    store.redis.set(quota.wait_key("acct", "claude"), NOW)
+    found = metrics_fleet.sample(store, SLUG, NOW, NOW)
+    assert [row["authority"] for row in found["attempts"]] == ["local"]
+    assert found["quota"] == [{"account": "acct", "state": "allowed", "since_ms": NOW, "resets_at_ms": NOW}]
+
+
+def test_panel_rows_carry_no_plan_path():
+    rows = metrics_fleet.panel_rows(SLUG, NOW, {"attempts": {"active": {"label": "a", "value": 1}}}, True)
+    assert [(row["plan"], row["phase"], row["slice"], row["task"], row["value"]) for row in rows] == [
+        ("", "", "", "", 1.0)
+    ]
+    found = {"attempts": [], "quota": [], "archive": [], "brain": {"feed_at_ms": 0}}
+    assert {
+        (row["plan"], row["phase"], row["slice"], row["task"]) for row in metrics_fleet.source_rows(SLUG, NOW, found)
+    } == {("", "", "", "")}
 
 
 def test_the_feed_time_is_the_cached_feed_file_time(tmp_path, monkeypatch):

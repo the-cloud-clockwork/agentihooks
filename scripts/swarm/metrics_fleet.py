@@ -36,9 +36,8 @@ def _attempts(store: RedisStore, slug: str) -> tuple[list, list]:
             "seat": seat,
             "task": agent.task,
             "phase": fleet_dashboard.ACTIVE,
-            "pool": agent.runtime_target.get("pool", agent.runtime_backend),
             "terminal": "attached" if agent.pane_id else "detached",
-            "authority": beats.get(agent.execution_id, {}).get("state", "local"),
+            "authority": beats[agent.execution_id]["state"] if agent.execution_id in beats else "local",
         }
         for seat, agent in sorted(store.execution_occupants(slug).items())
     ]
@@ -48,8 +47,7 @@ def _attempts(store: RedisStore, slug: str) -> tuple[list, list]:
             "seat": "",
             "task": task,
             "phase": fleet_dashboard.PENDING,
-            "pool": "",
-            "requested": json.loads(raw).get("resources"),
+            "requested": json.loads(raw)["resources"],
             "terminal": "detached",
             "authority": "pending",
         }
@@ -62,14 +60,14 @@ def _quota(store: RedisStore, now_ms: int) -> list[dict]:
     found = []
     for harness in sorted(quota.HARNESSES):
         for account in sorted(quota.latest_all(store.redis, harness)):
-            until = int(store.redis.get(quota.wait_key(account, harness)) or 0)
+            until = int(store.redis.get(quota.wait_key(account, harness)) or now_ms)
             waiting = until > now_ms
             found.append(
                 {
                     "account": account,
                     "state": "waiting" if waiting else "allowed",
                     "since_ms": until - quota.WAIT_MS if waiting else now_ms,
-                    "resets_at_ms": until if waiting else now_ms,
+                    "resets_at_ms": until,
                 }
             )
     return found
@@ -77,7 +75,7 @@ def _quota(store: RedisStore, now_ms: int) -> list[dict]:
 
 def sample(store: RedisStore, slug: str, now_ms: int, feed_at: int) -> dict:
     active, pending = _attempts(store, slug)
-    archive = Health(store, slug, clock=lambda: now_ms / 1000).diagnose()["pipeline"].get("archive", [])
+    archive = Health(store, slug, clock=lambda: now_ms / 1000).diagnose()["pipeline"]["archive"]
     return {
         "seq": now_ms,
         "at_ms": now_ms,
@@ -93,13 +91,10 @@ def sample(store: RedisStore, slug: str, now_ms: int, feed_at: int) -> dict:
 def _values(panels: dict) -> list[tuple[str, str, str, float]]:
     found = []
     for panel, series in panels.items():
-        if panel == "capacity":
-            found += [
-                (panel, key, row["pool"], float(item["value"])) for row in series for key, item in row["series"].items()
-            ]
+        if not isinstance(series, dict):
             continue
         for key, item in series.items():
-            value = item["value"] if isinstance(item, dict) and "value" in item else item
+            value = item["value"] if isinstance(item, dict) else item
             if isinstance(value, dict):
                 found += [(panel, key, subject, float(count)) for subject, count in value.items()]
             elif isinstance(value, bool | int | float):

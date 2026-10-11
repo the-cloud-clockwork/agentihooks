@@ -199,7 +199,7 @@ def delivery_rows(slug: str, doc: dict, agents: list, pulls: dict) -> list[dict]
 
 def queue_rows(slug: str, doc: dict, agents: list, pulls: dict, now_ms: int) -> list[dict]:
     rows = []
-    for task in doc.get("tasks", []):
+    for task in doc["tasks"]:
         pull = pulls.get(task.get("pr_url"))
         if pull is None or pull.state != "OPEN" or not pull.queued:
             continue
@@ -210,21 +210,17 @@ def queue_rows(slug: str, doc: dict, agents: list, pulls: dict, now_ms: int) -> 
 
 def launch_rows(slug: str, doc: dict, launches: list, agents: list) -> list[dict]:
     kinds = {"failed": "launch_failed", "waiting": "launch_waiting"}
-    return [
-        _with_finding_kind(
-            _event(
-                slug,
-                _task(doc, source["task"]),
-                {**_owner(agents, source["task"], source["at"], source["agent"]), "name": source["agent"]},
-                source["at"],
-                kinds[source["state"]],
-                [source["agent"], source["at"]],
-                source["error"],
-            )
+    rows = []
+    for source in launches:
+        if source["state"] not in kinds:
+            continue
+        agent = {**next((agent for agent in agents if agent["name"] == source["agent"]), {}), "name": source["agent"]}
+        identity = [source["agent"], source["at"]]
+        event = _event(
+            slug, _task(doc, source["task"]), agent, source["at"], kinds[source["state"]], identity, source["error"]
         )
-        for source in launches
-        if source["state"] in kinds
-    ]
+        rows.append(_with_finding_kind(event))
+    return rows
 
 
 def gate_rows(slug: str, doc: dict, agents: list, gates: list) -> tuple[list, list]:
@@ -337,7 +333,6 @@ def read_review_events(slug: str, box: metrics_outbox.Outbox) -> LogBatch:
                     "kind": f"intent {source['verdict']}",
                     "target": f"tasks/{source['task']}",
                     "at": source["at"],
-                    "review_id": source["_source_id"],
                 }
             )
         state = json.loads(source["classifier_input"])["state"]

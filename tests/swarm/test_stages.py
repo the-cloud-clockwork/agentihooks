@@ -271,6 +271,123 @@ def test_a_task_merged_before_the_window_adds_nothing():
     assert found["stages"] == [] and found["total"] == 0.0
 
 
+def test_events_of_other_items_do_not_move_the_ready_time():
+    found = stages.report(
+        rows(
+            ledger_events=[
+                ledger("task done", at(7), "tasks/t0"),
+                ledger("added", at(7, 30), "followups/f1"),
+                ledger("task done", at(7, 40), "tasks/t9"),
+            ],
+            agent_events=[agent("claim", "t1", at(8))],
+        ),
+        [{**TASK, "state": "claimed"}],
+        at(8),
+    )
+    assert seconds_of(found) == {("claim_wait", ""): 3600.0}
+
+
+def test_launch_ends_at_the_agents_own_join_not_another_agents():
+    found = stages.report(
+        rows(
+            agent_events=[agent("claim", "t1", at(9)), agent("spawn", "t1", at(9), "e1", "claude")],
+            ledger_events=[ledger("joined", at(9, 10), by="e9"), ledger("joined", at(9, 30), by="e1")],
+        ),
+        [{**TASK, "state": "claimed"}],
+        NOW,
+    )
+    assert seconds_of(found) == {("launch", "claude"): 1800.0, ("build", ""): 1800.0}
+
+
+def test_a_closed_task_without_a_merge_ends_at_its_last_agent_row():
+    found = stages.report(
+        rows(
+            agent_events=[
+                agent("claim", "t1", at(8)),
+                agent("spawn", "t1", at(8), "e1", "claude"),
+                agent("retire", "t1", at(9), "e1", "claude"),
+            ],
+        ),
+        [TASK],
+        NOW,
+    )
+    assert seconds_of(found) == {("launch", "claude"): 3600.0}
+
+
+def test_a_pull_request_opened_before_its_first_run_is_the_first_push():
+    found = stages.report(
+        rows(
+            agent_events=[agent("claim", "t1", at(8)), agent("spawn", "t1", at(8), "e1", "claude")],
+            ledger_events=[ledger("joined", at(8), by="e1")],
+            ci_runs=[run(1, "b1", at(8, 45), at(9), "success")],
+            delivery_events=[delivery("pull_request_opened", "t1", at(8, 30)), delivery("merge", "t1", at(9, 30))],
+        ),
+        [TASK],
+        NOW,
+    )
+    assert seconds_of(found) == {("build", ""): 1800.0, ("ci_run", ""): 1800.0, ("review", "round 1"): 1800.0}
+
+
+def test_a_run_created_at_the_claim_is_the_first_push():
+    found = stages.report(
+        rows(
+            agent_events=[agent("claim", "t1", at(8)), agent("spawn", "t1", at(8), "e1", "claude")],
+            ledger_events=[ledger("joined", at(8), by="e1")],
+            ci_runs=[run(1, "b1", at(8), at(8, 20), "success")],
+            delivery_events=[delivery("merge", "t1", at(8, 30))],
+        ),
+        [TASK],
+        NOW,
+    )
+    assert seconds_of(found) == {("ci_run", ""): 1200.0, ("review", "round 1"): 600.0}
+
+
+def test_a_claimed_task_missing_from_the_ledger_is_still_measured():
+    found = stages.report(
+        rows(
+            agent_events=[
+                agent("claim", "tx", at(9)),
+                agent("spawn", "tx", at(9), "e1", "claude"),
+                agent("retire", "tx", at(9, 30), "e1", "claude"),
+            ],
+        ),
+        [TASK],
+        NOW,
+    )
+    assert seconds_of(found) == {("launch", "claude"): 1800.0}
+
+
+def test_adjacent_host_and_quota_holds_stay_apart_and_empty_samples_hold_nothing():
+    found = stages.report(
+        rows(
+            ledger_events=[ledger("task done", at(7), "tasks/t0")],
+            host_samples=[sample(at(7), 1, "host"), sample(at(7, 5), 1, "quota"), sample(at(7, 10), 0, "")],
+            agent_events=[agent("claim", "t1", at(8))],
+        ),
+        [{**TASK, "state": "claimed"}],
+        at(8),
+    )
+    assert seconds_of(found) == {("host_hold", ""): 300.0, ("quota_hold", ""): 300.0, ("claim_wait", ""): 3000.0}
+
+
+def test_overruns_that_outgrow_their_run_are_cut_at_the_run_start():
+    found = stages.report(
+        rows(
+            agent_events=[agent("claim", "t1", at(7)), agent("spawn", "t1", at(7), "e1", "claude")],
+            ledger_events=[ledger("joined", at(7), by="e1")],
+            ci_runs=[run(1, "b1", at(8), at(8, 10), "success")],
+            ci_stages=[
+                stage(1, "unit", 980.0, 480, 0.0, "anton-k3s"),
+                stage(1, "lint", 540.0, 240, 0.0, "anton-k3s"),
+            ],
+            delivery_events=[delivery("merge", "t1", at(8, 10))],
+        ),
+        [TASK],
+        NOW,
+    )
+    assert seconds_of(found) == {("build", ""): 3600.0, ("ci_overrun", "unit"): 500.0, ("ci_overrun", "lint"): 100.0}
+
+
 def test_a_life_whose_spawn_waited_for_room_is_claim_wait_not_launch():
     found = stages.report(
         rows(
@@ -320,6 +437,7 @@ def test_ci_after_the_agent_left_stays_ci_and_every_over_budget_job_gets_its_ove
                 stage(1, "unit", 1080.0, 300, 0.0, "anton-k3s"),
                 stage(1, "lint", 290.0, 240, 0.0, "anton-k3s"),
                 stage(1, "sonar", 100.0, 240, 0.0, "anton-k3s"),
+                stage(1, "fresh", 50.0, 0, 0.0, "anton-k3s"),
             ],
             delivery_events=[delivery("merge", "t1", at(9))],
         ),
@@ -398,6 +516,7 @@ def test_record_reads_the_outbox_writes_one_row_per_stage_and_keeps_the_feed(tmp
         assert {(row["stage"], row["label"]): row["seconds"] for row in exported} == seconds_of(recorded)
         assert {row["window_s"] for row in exported} == {4 * 3600.0}
         assert all(row["ts_ms"] == NOW and row["ledger"] == SLUG for row in exported)
+        assert {(row["plan"], row["phase"], row["slice"], row["task"]) for row in exported} == {("", "", "", "")}
         assert len({row["event_id"] for row in exported}) == len(exported)
     finally:
         box.close()
@@ -423,12 +542,12 @@ def test_the_line_names_labels_of_labelled_stages():
         "stages": [
             {"stage": "ci_queue", "label": "anton-k3s", "seconds": 3600.0},
             {"stage": "launch_failure", "label": "codex", "seconds": 1800.0},
-            {"stage": "ci_overrun", "label": "mutation-stats", "seconds": 1800.0},
+            {"stage": "ci_overrun", "label": "mutation-stats", "seconds": 180.0},
         ],
     }
     assert stages.line(found, NOW) == (
         "top stages in the last 4 hours: ci queue on anton-k3s 1.0 task hours, launch failure on codex 0.5 task"
-        " hours, ci overrun in mutation-stats 0.5 task hours; 2.0 task hours in all, measured 0 minutes ago"
+        " hours, ci overrun in mutation-stats 0.1 task hours; 2.0 task hours in all, measured 0 minutes ago"
     )
 
 

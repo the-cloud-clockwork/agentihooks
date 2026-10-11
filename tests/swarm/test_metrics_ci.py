@@ -194,3 +194,14 @@ def test_a_stage_names_the_runner_labels_of_its_slowest_pickup():
     stages = {row["stage"]: row for row in metrics_ci.rows("sw", RUN, jobs, {})[metrics_ci.STAGES]}
     assert stages["unit"]["runner"] == "anton-k3s,self-hosted"
     assert stages["gate-required"]["runner"] == ""
+
+
+def test_the_first_job_names_the_runner_on_a_pickup_tie_and_a_job_never_started_names_none():
+    jobs = [
+        {**_job(21, "lint", "00:40", "00:40", "02:00"), "labels": ["first"]},
+        {**_job(22, "lint", "00:40", "00:40", "02:00"), "labels": ["second"]},
+        {**_job(23, "sonar", "00:40", "00:40", "03:00"), "started_at": None, "labels": ["never"]},
+    ]
+    stages = {row["stage"]: row for row in metrics_ci.rows("sw", RUN, jobs, {})[metrics_ci.STAGES]}
+    assert (stages["lint"]["runner"], stages["lint"]["pickup_s"]) == ("first", 0.0)
+    assert (stages["sonar"]["runner"], stages["sonar"]["pickup_s"]) == ("", 0.0)
