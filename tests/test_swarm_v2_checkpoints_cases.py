@@ -133,7 +133,7 @@ def _rejection_fixture(root: Path) -> dict:
     corrected = validator.commit(native["manifest"])
     return {
         "path_only_snapshot": _shown(path_only),
-        "conversation_id_and_branch_without_materials": _shown(conversation_and_path),
+        "manifest_without_materials": _shown(conversation_and_path),
         "stale_generation_commit": _shown(stale),
         "durable_keys_unchanged_by_rejections": before == after_rejections,
         "diagnostics_name_the_old_path": snapshot["worktrees"]["engineer-fixture-0001"] in text,
@@ -150,7 +150,7 @@ def _rejection() -> tuple[dict, bool]:
     checks = [
         observed["fixture"] == observed["second_fixture"],
         first["path_only_snapshot"]["completeness"] == model.DIAGNOSTIC,
-        first["conversation_id_and_branch_without_materials"]["completeness"] == model.INCOMPLETE,
+        first["manifest_without_materials"]["completeness"] == model.INCOMPLETE,
         first["stale_generation_commit"]["reason"] == "scope_mismatch",
         first["durable_keys_unchanged_by_rejections"],
         not first["diagnostics_name_the_old_path"],
@@ -174,6 +174,8 @@ def _recovery_fixture(root: Path) -> dict:
     keys = _keys(restarted.store)
     replayed = restarted.commit(native["manifest"])
     replay_added = sorted(set(_keys(restarted.store)) - set(keys))
+    stale = model.Validator(_store(durable, generation=1)).commit(native["manifest"])
+    stale_added = sorted(set(_keys(restarted.store)) - set(keys))
     legacy = json.loads(LEGACY.read_text())
     older = model.Validator(_store(root / "legacy", "implement-session-ingestion", "exe-synthetic-0007", 3))
     older.store.put(legacy["checkpoint_id"], json.dumps(legacy).encode())
@@ -191,6 +193,8 @@ def _recovery_fixture(root: Path) -> dict:
         "after_restart": _shown(resumed),
         "replay": _shown(replayed),
         "replay_added_keys": replay_added,
+        "stale_attempt_after_commit": _shown(stale),
+        "stale_attempt_added_keys": stale_added,
         "older_minor_manifest": _shown(older.verify(legacy["checkpoint_id"])),
         "unsupported_version": _shown(unsupported),
         "previous_checkpoint_after_unsupported_version": _shown(restarted.verify("ckpt-native-0001")),
@@ -212,6 +216,8 @@ def _recovery() -> tuple[dict, bool]:
         first["after_restart"]["authoritative"],
         first["replay"] == first["after_restart"],
         first["replay_added_keys"] == [],
+        first["stale_attempt_after_commit"]["reason"] == "scope_mismatch",
+        first["stale_attempt_added_keys"] == [],
         first["older_minor_manifest"]["limitations"] == list(model.LEGACY_LIMITS),
         not first["older_minor_manifest"]["authoritative"],
         first["unsupported_version"]["reason"] == "unsupported_version",
