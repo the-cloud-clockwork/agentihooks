@@ -1,3 +1,4 @@
+import http.client
 import io
 import itertools
 import json
@@ -102,8 +103,6 @@ def test_a_bad_usage_field_leaves_the_context_unknown(value):
 
 
 def test_a_broken_response_is_an_error_for_that_account_only(monkeypatch):
-    import http.client
-
     def opener(request, timeout=None):
         if request.get_header("Authorization") == "Bearer tok-B":
             raise http.client.IncompleteRead(b"")
@@ -123,8 +122,41 @@ def test_a_broken_response_is_an_error_for_that_account_only(monkeypatch):
 def test_a_token_that_is_not_a_valid_header_never_reaches_the_error():
     error = ValueError("Invalid header value b'Bearer abc\\n'")
     found = claude_usage.probe("a", "abc\n", "haiku", _opener(error=error))
-    assert (found.state, found.error) == ("ERROR", "the token is not a valid header value")
+    assert (found.account, found.state, found.error) == ("a", "ERROR", "the token is not a valid header value")
     assert "abc" not in found.error
+
+
+class BrokenBody(io.BytesIO):
+    def __init__(self, error):
+        super().__init__(b"")
+        self.error = error
+
+    def read(self, *args):
+        raise self.error
+
+
+def _failing_body(error):
+    def opener(request, timeout=None):
+        raise urllib.error.HTTPError(request.full_url, 500, "err", Message(), BrokenBody(error))
+
+    return opener
+
+
+@pytest.mark.parametrize(
+    "error, expected",
+    [
+        (http.client.IncompleteRead(b""), "bad response from the API"),
+        (TimeoutError("slow"), "probe timed out after 20s"),
+    ],
+)
+def test_an_error_body_that_breaks_is_an_error_for_that_account(error, expected):
+    found = claude_usage.probe("a", "tok", "haiku", _failing_body(error))
+    assert (found.account, found.state, found.error) == ("a", "ERROR", expected)
+
+
+def test_an_error_body_cut_by_the_network_is_unreachable():
+    with pytest.raises(claude_usage.Unreachable):
+        claude_usage.probe("a", "tok", "haiku", _failing_body(ConnectionResetError("reset")))
 
 
 def test_the_caller_timeout_holds_under_the_ceiling(monkeypatch):
