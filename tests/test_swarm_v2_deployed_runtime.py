@@ -551,7 +551,7 @@ def test_terminal_exposure_mounts_the_pod_and_hands_it_its_secret_service_and_po
     from scripts.swarm_v2.herdr import endpoints
     from scripts.swarm_v2.kubernetes.terminal import HostKeys
 
-    store, pods, launch, claims = _spawn(tmp_path, monkeypatch, **{deployed.TERMINAL_ENV: TERMINAL})
+    store, pods, launch, claims = _spawn(tmp_path, monkeypatch, AGENTIHOOKS_WORKER_TERMINAL=TERMINAL)
 
     assert launch.hand.handed is True
     execution = launch.agent.execution_id
@@ -572,8 +572,8 @@ def test_terminal_exposure_mounts_the_pod_and_hands_it_its_secret_service_and_po
     assert peer["podSelector"] == {"matchLabels": {"app": "swarm-operator"}}
     assert endpoints.base64.b64decode(secret["data"][endpoints.USER_CA]).decode() == f"{TERMINAL_CA}\n"
     private = serialization.load_ssh_private_key(endpoints.base64.b64decode(secret["data"][endpoints.HOST_KEY]), None)
-    recorded = HostKeys(store, SLUG).recorded(endpoints.grant_scope(claims))
-    assert recorded == endpoints._public(private.public_key())
+    launched = HostKeys(store).launched(SLUG, execution)
+    assert (launched.generation, launched.host_public) == (claims.generation, endpoints._public(private.public_key()))
 
 
 def test_terminal_exposure_off_creates_no_terminal_object_or_mount(tmp_path, monkeypatch):
@@ -621,7 +621,8 @@ def test_a_malformed_terminal_setting_is_refused(tmp_path, value):
         deployed.Workers.from_environ(_workers(tmp_path, **{deployed.TERMINAL_ENV: value}), SLUG)
 
     assert (
-        str(refused.value) == f"{deployed.TERMINAL_ENV} must be a JSON object naming the terminal clients and user CA"
+        str(refused.value)
+        == "AGENTIHOOKS_WORKER_TERMINAL must be a JSON object naming the terminal clients and user CA"
     )
 
 

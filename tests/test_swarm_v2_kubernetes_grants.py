@@ -309,21 +309,22 @@ def test_a_pod_that_cannot_be_removed_after_a_refused_config_map_says_so(answer)
 
 
 class Terminals:
-    def __init__(self, answer="") -> None:
-        self.answer, self.opened = answer, []
+    def __init__(self, api, answer="") -> None:
+        self.api, self.answer, self.opened = api, answer, []
 
     def open(self, registration, pod):
-        self.opened.append((registration, pod))
+        self.opened.append((registration, pod, list(self.api.created)))
         return self.answer
 
 
 def test_exposure_on_opens_the_terminal_for_the_verified_grant_after_the_launch_material():
-    api, terminals = Api(pod()), Terminals()
+    api = Api(pod())
+    terminals = Terminals(api)
 
     assert PodGrants(api, SLUG, verify, Supervision("claude", None), terminals).hand(agent(), GRANT) == Hand(
         True, "handed", False
     )
-    assert terminals.opened == [(registration(), pod())]
+    assert terminals.opened == [(registration(), pod(), [material()])]
     assert api.created == [material()]
 
 
@@ -335,7 +336,8 @@ def test_exposure_off_opens_no_terminal():
 
 
 def test_a_refused_terminal_removes_its_pod_and_names_why():
-    api, terminals = Api(pod()), Terminals("terminal_refused")
+    api = Api(pod())
+    terminals = Terminals(api, "terminal_refused")
 
     hand = PodGrants(api, SLUG, verify, Supervision("claude", None), terminals).hand(agent(), GRANT)
 
@@ -344,7 +346,8 @@ def test_a_refused_terminal_removes_its_pod_and_names_why():
 
 
 def test_a_grant_that_takes_no_launch_material_opens_no_terminal():
-    api, terminals = Api(pod(), create_failure=ApiRefused(403, "Forbidden")), Terminals()
+    api = Api(pod(), create_failure=ApiRefused(403, "Forbidden"))
+    terminals = Terminals(api)
 
     PodGrants(api, SLUG, verify, Supervision("claude", None), terminals).hand(agent(), GRANT)
 

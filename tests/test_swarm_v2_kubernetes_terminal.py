@@ -1,10 +1,11 @@
+import base64
 import json
+import struct
 import subprocess
 from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from scripts.swarm_v2.kubernetes.terminal import Exposure, HostKeys, TerminalObjects, TerminalTemplate
 
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2.auth_context import Registration
@@ -21,6 +22,7 @@ from scripts.swarm_v2.herdr.endpoints import (
 from scripts.swarm_v2.kubernetes import terminal
 from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused
 from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, PodTemplate, canonical_digest, load_policy
+from scripts.swarm_v2.kubernetes.terminal import Exposure, HostKeys, Launched, TerminalObjects, TerminalTemplate
 from scripts.swarm_v2.runtime.commands import Principal, Role
 from tests import sv2_hdr01_cases
 
@@ -64,7 +66,7 @@ class Api:
 
 
 def opener(api, keys=None, identity=None):
-    keys = keys or HostKeys(store(), "fixture-swarm")
+    keys = keys or HostKeys(store())
     made = identity or HostIdentity.generate()
     return TerminalObjects(api, exposure(), keys, lambda: made), keys, made
 
@@ -107,7 +109,7 @@ def test_the_host_key_is_recorded_for_the_grant_execution_and_generation():
     objects, keys, identity = opener(api)
     objects.open(registration(), fixture()["pod"])
 
-    assert keys.recorded(grant_scope(registration())) == identity.public
+    assert keys.launched("fixture-swarm", EXE_A) == Launched(EXE_A, 2, identity.public)
 
 
 def test_the_terminal_scope_comes_from_the_verified_grant():
@@ -128,7 +130,7 @@ def test_a_pod_the_grant_does_not_own_takes_no_terminal_object():
 
     assert objects.open(other, fixture()["pod"]) == "terminal_pod_foreign"
     assert api.created == []
-    assert refusal(lambda: keys.recorded(grant_scope(other)))[0] == "host_key_unrecorded"
+    assert refusal(lambda: keys.launched("fixture-swarm", other.execution_id))[0] == "host_key_unrecorded"
 
 
 def test_a_grant_whose_scope_is_invalid_takes_no_terminal_object():
@@ -154,7 +156,7 @@ def test_a_refused_terminal_object_names_why_and_records_no_host_key(failure, re
 
     assert objects.open(registration(), fixture()["pod"]) == reason
     assert len(api.created) == fail_at
-    assert refusal(lambda: keys.recorded(grant_scope(registration())))[0] == "host_key_unrecorded"
+    assert refusal(lambda: keys.launched("fixture-swarm", EXE_A))[0] == "host_key_unrecorded"
 
 
 def test_a_host_key_the_store_cannot_record_names_the_store():
@@ -170,41 +172,41 @@ def test_a_host_key_the_store_cannot_record_names_the_store():
     assert objects.open(registration(), fixture()["pod"]) == "terminal_unavailable"
 
 
-def test_the_default_identity_is_a_fresh_key_per_terminal():
-    keys = HostKeys(store(), "fixture-swarm")
-    objects = TerminalObjects(Api(), exposure(), keys)
+def test_the_default_identity_is_the_host_key_generator():
+    objects = TerminalObjects(Api(), exposure(), HostKeys(store()))
 
     assert objects.identity == HostIdentity.generate
 
 
 def test_an_exposure_needs_an_openssh_user_ca():
+    unsupported = "ssh-foo " + base64.b64encode(struct.pack(">I", 7) + b"ssh-foo").decode()
+
     assert refusal(lambda: Exposure(Clients(**fixture()["clients"]), "not a key")) == (
         "user_ca",
         "terminal user CA is not an OpenSSH public key",
     )
+    assert refusal(lambda: Exposure(Clients(**fixture()["clients"]), unsupported))[0] == "user_ca"
     assert refusal(lambda: Exposure(Clients(**fixture()["clients"]), None))[0] == "user_ca"
 
 
-def test_a_recorded_host_key_answers_only_its_own_generation():
-    keys = HostKeys(store(), "fixture-swarm")
+def test_the_newest_launch_of_an_execution_names_its_generation_and_host_key():
+    keys = HostKeys(store())
     keys.record(Scope("grant/x", "fixture-swarm", EXE_A, 2), "ssh-ed25519 AAAA-two")
+    keys.record(Scope("grant/y", "fixture-swarm", EXE_A, 3), "ssh-ed25519 AAAA-three")
 
-    assert keys.recorded(Scope("operator/operator", "fixture-swarm", EXE_A, 2)) == "ssh-ed25519 AAAA-two"
-    assert refusal(lambda: keys.recorded(Scope("operator/operator", "fixture-swarm", EXE_A, 3))) == (
-        "host_key_unrecorded",
-        f"no host key was recorded at launch for {EXE_A} generation 3",
-    )
+    assert keys.launched("fixture-swarm", EXE_A) == Launched(EXE_A, 3, "ssh-ed25519 AAAA-three")
 
 
 def test_host_keys_are_kept_per_swarm():
     shared = store()
-    HostKeys(shared, "fixture-swarm").record(Scope("grant/x", "fixture-swarm", EXE_A, 2), "ssh-ed25519 AAAA")
+    HostKeys(shared).record(Scope("grant/x", "fixture-swarm", EXE_A, 2), "ssh-ed25519 AAAA")
 
-    assert shared.redis.hgetall(shared.key("fixture-swarm", terminal.HOST_KEYS)) == {
+    assert shared.redis.hgetall(shared.key("fixture-swarm", "terminal-host-keys")) == {
         EXE_A: json.dumps({"generation": 2, "host_public": "ssh-ed25519 AAAA"})
     }
-    assert (
-        refusal(lambda: HostKeys(shared, "other").recorded(Scope("o", "other", EXE_A, 2)))[0] == "host_key_unrecorded"
+    assert refusal(lambda: HostKeys(shared).launched("other", EXE_A)) == (
+        "host_key_unrecorded",
+        f"no host key was recorded at launch for {EXE_A}",
     )
 
 
@@ -229,11 +231,6 @@ class Worker:
         return self.herdr(forwarded)
 
 
-class Execution:
-    execution_id = EXE_A
-    generation = 2
-
-
 def client(tmp_path, presented: str) -> Terminal:
     home = ClientHome(tmp_path / "client")
     authority = TerminalAuthority(Ed25519PrivateKey.generate(), lambda: fixture()["now"])
@@ -245,7 +242,7 @@ def client(tmp_path, presented: str) -> Terminal:
 
 
 def launched(identity: HostIdentity) -> HostKeys:
-    keys = HostKeys(store(), "fixture-swarm")
+    keys = HostKeys(store())
     objects = TerminalObjects(Api(), exposure(), keys, lambda: identity)
     assert objects.open(registration(), fixture()["pod"]) == ""
     return keys
@@ -256,7 +253,7 @@ def test_the_operator_attaches_with_the_host_key_recorded_at_launch(tmp_path):
     keys = launched(identity)
     worker = client(tmp_path, identity.public)
 
-    verdict = terminal.operator_attach(worker, keys, OPERATOR, "fixture-swarm", Execution())
+    verdict = terminal.operator_attach(worker, keys, OPERATOR, "fixture-swarm", EXE_A)
 
     assert (verdict.target, verdict.incarnation, verdict.compatible) == (NAME, f"{EXE_A}/2", True)
     known = (worker.home.terminals / "known_hosts" / NAME).read_text()
@@ -267,7 +264,7 @@ def test_an_attach_to_a_worker_with_a_changed_host_key_is_refused(tmp_path):
     keys = launched(HostIdentity.generate())
     worker = client(tmp_path, HostIdentity.generate().public)
 
-    reason, message = refusal(lambda: terminal.operator_attach(worker, keys, OPERATOR, "fixture-swarm", Execution()))
+    reason, message = refusal(lambda: terminal.operator_attach(worker, keys, OPERATOR, "fixture-swarm", EXE_A))
 
     assert (reason, message) == ("host_key_changed", f"{NAME} terminal refused the connection: host_key_changed")
     assert worker.terminal_endpoint_auth_failures() == {"host_key_changed": 1}
@@ -275,12 +272,22 @@ def test_an_attach_to_a_worker_with_a_changed_host_key_is_refused(tmp_path):
 
 
 def test_an_attach_without_a_recorded_host_key_is_refused_before_any_connection(tmp_path):
-    keys = HostKeys(store(), "fixture-swarm")
+    keys = HostKeys(store())
     worker = client(tmp_path, HostIdentity.generate().public)
 
-    assert refusal(lambda: terminal.operator_attach(worker, keys, OPERATOR, "fixture-swarm", Execution())) == (
+    assert refusal(lambda: terminal.operator_attach(worker, keys, OPERATOR, "fixture-swarm", EXE_A)) == (
         "host_key_unrecorded",
-        f"no host key was recorded at launch for {EXE_A} generation 2",
+        f"no host key was recorded at launch for {EXE_A}",
+    )
+    assert worker.run.commands == []
+
+
+def test_an_attach_reads_the_host_key_of_its_own_swarm_only(tmp_path):
+    keys = launched(HostIdentity.generate())
+    worker = client(tmp_path, HostIdentity.generate().public)
+
+    assert refusal(lambda: terminal.operator_attach(worker, keys, OPERATOR, "other-swarm", EXE_A))[0] == (
+        "host_key_unrecorded"
     )
     assert worker.run.commands == []
 
@@ -291,7 +298,7 @@ def test_only_the_operator_role_attaches(tmp_path):
     worker = client(tmp_path, identity.public)
     master = Principal("master@fixture", Role.MASTER)
 
-    assert refusal(lambda: terminal.operator_attach(worker, keys, master, "fixture-swarm", Execution()))[0] == (
+    assert refusal(lambda: terminal.operator_attach(worker, keys, master, "fixture-swarm", EXE_A))[0] == (
         "unauthorized"
     )
     assert worker.run.commands == []

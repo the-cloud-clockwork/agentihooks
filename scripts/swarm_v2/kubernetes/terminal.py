@@ -14,7 +14,6 @@ from scripts.swarm_v2.herdr.endpoints import (
     Clients,
     Endpoint,
     EndpointRefused,
-    Execution,
     HostIdentity,
     Scope,
     grant_scope,
@@ -52,23 +51,27 @@ class TerminalTemplate:
         return Rendered(pod, canonical_digest(pod))
 
 
+@dataclass(frozen=True)
+class Launched:
+    execution_id: str
+    generation: int
+    host_public: str
+
+
 class HostKeys:
-    def __init__(self, store: RedisStore, slug: str) -> None:
-        self.redis, self.key = store.redis, store.key(slug, HOST_KEYS)
+    def __init__(self, store: RedisStore) -> None:
+        self.store = store
 
     def record(self, scope: Scope, host_public: str) -> None:
         entry = {"generation": scope.generation, "host_public": host_public}
-        self.redis.hset(self.key, scope.execution_id, json.dumps(entry))
+        self.store.redis.hset(self.store.key(scope.swarm, HOST_KEYS), scope.execution_id, json.dumps(entry))
 
-    def recorded(self, scope: Scope) -> str:
-        raw = self.redis.hget(self.key, scope.execution_id)
-        entry = json.loads(raw) if raw else {}
-        if entry.get("generation") != scope.generation:
-            raise EndpointRefused(
-                "host_key_unrecorded",
-                f"no host key was recorded at launch for {scope.execution_id} generation {scope.generation}",
-            )
-        return entry["host_public"]
+    def launched(self, swarm: str, execution_id: str) -> Launched:
+        raw = self.store.redis.hget(self.store.key(swarm, HOST_KEYS), execution_id)
+        if not raw:
+            raise EndpointRefused("host_key_unrecorded", f"no host key was recorded at launch for {execution_id}")
+        entry = json.loads(raw)
+        return Launched(execution_id, entry["generation"], entry["host_public"])
 
 
 class TerminalObjects:
@@ -103,8 +106,6 @@ class TerminalObjects:
         return ""
 
 
-def operator_attach(
-    terminal: Terminal, keys: HostKeys, principal: Principal, swarm: str, execution: Execution
-) -> Verdict:
-    scope = operator_scope(principal, swarm, execution)
-    return terminal.attach(scope, keys.recorded(scope))
+def operator_attach(terminal: Terminal, keys: HostKeys, principal: Principal, swarm: str, execution_id: str) -> Verdict:
+    launched = keys.launched(swarm, execution_id)
+    return terminal.attach(operator_scope(principal, swarm, launched), launched.host_public)

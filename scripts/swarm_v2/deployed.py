@@ -97,7 +97,7 @@ class Workers:
     image_tag: str
     profile: str
     exporter: tuple[str, ...] | None
-    terminal: Exposure | None = None
+    terminal: Exposure | None
 
     @classmethod
     def from_environ(cls, environ: Mapping[str, str], slug: str) -> "Workers | None":
@@ -157,7 +157,7 @@ class Workers:
     ) -> PodGrants:
         supervision = Supervision(HARNESS, self.exporter, self.terms.api_url)
         api = pod_api(environ, self.policy["namespace"])
-        terminal = None if self.terminal is None else TerminalObjects(api, self.terminal, HostKeys(store, slug))
+        terminal = None if self.terminal is None else TerminalObjects(api, self.terminal, HostKeys(store))
         return PodGrants(api, slug, verify, supervision, terminal)
 
 
