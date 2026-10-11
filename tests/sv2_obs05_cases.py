@@ -10,18 +10,20 @@ from scripts.swarm_v2 import fleet_dashboard as fleet
 
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2"
 DEFINITION = Path(__file__).parents[1] / "docs" / "swarm-v2" / "fleet-dashboard.json"
-INPUTS = ("fleet-dashboard.json",)
+INPUTS = ("fleet-dashboard.json", "fleet-dashboard-second.json")
 EVIDENCE_CLASS = (
-    "mocked: two recorded fixture traces shaped like controller, pool, quota, archive, checkpoint and brain readings, "
-    "a fakeredis incident store behind a server that can be disconnected and an in process notification sink that "
-    "can fail; no Kubernetes API server, node, deployed brain or alert backend was used"
+    "mocked: two independent synthetic fixture traces modelled on the scaling canary and shaped like controller, "
+    "pool, quota, archive, checkpoint and brain readings, a fakeredis incident store behind a server that can be "
+    "disconnected and an in process notification sink that can fail; no recorded live canary, Kubernetes API server, "
+    "node, deployed brain or alert backend was used"
 )
 ON: dict[str, str] = {}
 OFF = {fleet.ALERTS_ENV: "off"}
 
 
 def fixture() -> dict:
-    return json.loads((FIXTURES / "fleet-dashboard.json").read_text())
+    first, second = (json.loads((FIXTURES / name).read_text()) for name in INPUTS)
+    return {**first, "traces": {**first["traces"], **second["traces"]}}
 
 
 FX = fixture()
@@ -95,7 +97,7 @@ def _run_trace(name: str) -> dict:
         "archive_lag": [panels["archive_lag"][k]["value"] for k in ("lagging", "worst_lag_ms")],
         "connectivity": {k: panels["connectivity"][k]["value"] for k in ("terminal", "authority")},
         "knowledge_stale": panels["knowledge"]["stale"],
-        "alert_actionability_review": fleet.alert_actionability_review(evaluated),
+        "alert_actionability_review": fleet.alert_actionability_review(evaluated, FOUND),
         "leaked": leaked(world.snapshot(), world.notices, evaluated),
     }
 
@@ -143,16 +145,21 @@ def _rejection() -> tuple[dict, bool]:
     evaluated = fleet.evaluate(last, FOUND, ON)
     observed = {
         "labelled_grant": refused,
-        "swarm_titles": [row["session_title"] for row in swarm["panels"]["knowledge"]["denials"]],
-        "operator_titles": [row["session_title"] for row in operator["panels"]["knowledge"]["denials"]],
+        "swarm_denials": [
+            [row["session_title"], row["target_brain"]] for row in swarm["panels"]["knowledge"]["denials"]
+        ],
+        "operator_sees_title": [
+            row["session_title"] in TITLES and row["target_brain"] == "personal-operator"
+            for row in operator["panels"]["knowledge"]["denials"]
+        ],
         "swarm_leaked": leaked(swarm),
         "alert_leaked": leaked(evaluated, world.snapshot(), world.notices),
         "store_unchanged": world.snapshot() == before,
     }
     checks = [
         observed["labelled_grant"] == "a viewer grant names its brains as a list of brain ids",
-        observed["swarm_titles"] == [fleet.WITHHELD],
-        observed["operator_titles"] == ["Private family medical appointments"],
+        observed["swarm_denials"] == [[fleet.WITHHELD, fleet.WITHHELD]],
+        observed["operator_sees_title"] == [True],
         observed["swarm_leaked"] == [],
         observed["alert_leaked"] == [],
         observed["store_unchanged"],

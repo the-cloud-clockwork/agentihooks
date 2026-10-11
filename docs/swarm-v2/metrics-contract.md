@@ -30,8 +30,8 @@ One observation of the fleet at `at_ms`, numbered by a rising `seq`.
 | `connectivity` | `terminal`, `authority` | Operator terminal transport and worker execution authority, counted apart; a disconnected terminal is not a dead worker |
 | `knowledge` | `feed_age_ms`, `cross_scope_denials`, `stale`, `denials` | Brain feed freshness and the denied cross scope queries |
 
-An age equal to its limit is not stale. A denial's `session_title` is shown only to a viewer
-whose grant names the denial's `target_brain`; every other viewer reads the withheld marker.
+An age equal to its limit is not stale. A denial's `session_title` and `target_brain` are shown
+only to a viewer whose grant names that brain; every other viewer reads the withheld marker.
 The viewer comes from a grant's `brains` list. A display label, a role name or an actor name
 never grants a brain, and a grant without a `brains` list is refused.
 
@@ -44,10 +44,11 @@ never grants a brain, and a grant without a `brains` list is refused.
 | `cross_scope_denial` | A brain query was denied across scopes | `for_ms` 0 |
 
 - At most `limit` alerts per rule per evaluation, longest held first; the rest are counted in
-  `suppressed`.
+  `suppressed` and listed by fingerprint in `held` with the shown ones.
 - An alert carries its subject, sanitized facts, owner and action, and `automatic` false. It
-  never carries a session title.
-- `alert_actionability_review` counts alerts that name an owner, an action and their subject.
+  never carries a session title or a target brain name.
+- `alert_actionability_review` counts alerts whose owner and action match their rule, that name
+  their subject and never act, and lists the rest as `unactionable`.
 
 ## Incidents
 
@@ -56,10 +57,13 @@ never grants a brain, and a grant without a `brains` list is refused.
 
 - An evaluation whose `seq` is not above the recorded one is stale and changes nothing, so a
   replay after an alert backend restart never duplicates an incident.
-- A cleared condition resolves its incident; a condition that returns opens a new one.
+- Only shown alerts open incidents. An open incident resolves only when its fingerprint is no
+  longer in `held`, so a suppressed condition never reads as cleared; a condition that returns
+  after resolving opens a new incident.
 - `deliver` hands each opened incident to the sink once, identified as
   `<fingerprint>:<opened_seq>`; a failing sink leaves it for the next delivery. Delivery only
-  notifies.
+  notifies. Every store write watches its keys and retries up to five times when another
+  writer changed them.
 
 ## Rollback
 

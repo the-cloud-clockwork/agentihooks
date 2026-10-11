@@ -9,7 +9,9 @@ from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2 import fleet_dashboard as fleet
 
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-OBS-05"
-FX = json.loads((Path(__file__).parent / "fixtures" / "swarm_v2" / "fleet-dashboard.json").read_text())
+FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2"
+FX = json.loads((FIXTURES / "fleet-dashboard.json").read_text())
+FX["traces"].update(json.loads((FIXTURES / "fleet-dashboard-second.json").read_text())["traces"])
 FOUND = fleet.definition()
 ON: dict[str, str] = {}
 FIRST, SECOND = FX["traces"]["first"], FX["traces"]["second"]
@@ -18,7 +20,7 @@ SWARM = fleet.viewer(FX["grants"]["swarm"])
 
 @pytest.fixture
 def store():
-    return RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    return RedisStore(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True))
 
 
 def fired(sample, found=FOUND):
@@ -102,15 +104,15 @@ def test_an_allowed_account_is_not_counted_as_waiting():
 
 
 @pytest.mark.parametrize(
-    ("grant", "title"),
+    ("grant", "title", "brain"),
     [
-        (FX["grants"]["swarm"], fleet.WITHHELD),
-        (FX["grants"]["operator"], "Private family medical appointments"),
+        (FX["grants"]["swarm"], fleet.WITHHELD, fleet.WITHHELD),
+        (FX["grants"]["operator"], "Private family medical appointments", "personal-operator"),
     ],
 )
-def test_a_private_session_title_shows_only_to_a_viewer_granted_its_brain(grant, title):
+def test_a_private_session_title_shows_only_to_a_viewer_granted_its_brain(grant, title, brain):
     denials = fleet.dashboard(FIRST[3], fleet.viewer(grant), FOUND)["panels"]["knowledge"]["denials"]
-    assert [row["session_title"] for row in denials] == [title]
+    assert [(row["session_title"], row["target_brain"]) for row in denials] == [(title, brain)]
     assert denials[0]["requester_scope"] == "swarm:canary"
 
 
@@ -217,8 +219,11 @@ def test_an_alert_never_carries_a_session_title_and_never_acts():
 def test_alert_facts_are_sanitized():
     sample = copy.deepcopy(FIRST[3])
     sample["brain"]["denials"][0]["requester_scope"] = "token=abcdefghijklmnopqrstuvwxyz"
-    facts = fleet.evaluate(sample, FOUND, ON)["alerts"][-1]["facts"]
+    alerts = fleet.evaluate(sample, FOUND, ON)["alerts"]
+    facts = next(alert["facts"] for alert in alerts if alert["rule"] == "cross_scope_denial")
     assert "abcdefghijklmnopqrstuvwxyz" not in facts["requester_scope"]
+    denial = fleet.dashboard(sample, fleet.viewer(FX["grants"]["operator"]), FOUND)["panels"]["knowledge"]["denials"]
+    assert "abcdefghijklmnopqrstuvwxyz" not in denial[0]["requester_scope"]
 
 
 @pytest.mark.parametrize(("value", "enabled"), [("off", False), (" OFF ", False), ("on", True), ("", True)])
@@ -242,18 +247,38 @@ def test_disabled_alerts_leave_the_dashboard_and_the_incidents_alone(store):
 
 def test_actionability_review_counts_owner_action_and_subject():
     evaluated = fleet.evaluate(FIRST[5], FOUND, ON)
-    review = fleet.alert_actionability_review(evaluated)
+    review = fleet.alert_actionability_review(evaluated, FOUND)
     assert review == {
         "state": "enabled",
         "alerts": 3,
         "actionable": 3,
+        "unactionable": [],
         "by_rule": {"cross_scope_denial": 1, "impossible_pending": 1, "protected_idle_pod": 1},
         "suppressed": {"cross_scope_denial": 0, "impossible_pending": 0, "protected_idle_pod": 0},
     }
     evaluated["alerts"][0]["owner"] = ""
     evaluated["alerts"][1]["facts"] = {}
     evaluated["alerts"][2]["automatic"] = True
-    assert fleet.alert_actionability_review(evaluated)["actionable"] == 0
+    review = fleet.alert_actionability_review(evaluated, FOUND)
+    assert (review["actionable"], review["unactionable"]) == (
+        0,
+        ["protected_idle_pod:exe-idle-1", "impossible_pending:exe-huge-1", "cross_scope_denial:deny-1"],
+    )
+
+
+@pytest.mark.parametrize(("field", "value"), [("action", "page someone"), ("owner", "operator"), ("action", "")])
+def test_an_alert_that_drifts_from_its_rule_is_not_actionable(field, value):
+    evaluated = fleet.evaluate(FIRST[2], FOUND, ON)
+    evaluated["alerts"][0][field] = value
+    assert fleet.alert_actionability_review(evaluated, FOUND)["unactionable"] == ["impossible_pending:exe-huge-1"]
+
+
+def test_a_rule_without_an_owner_or_action_yields_unactionable_alerts():
+    found = copy.deepcopy(FOUND)
+    for rule in found["alerts"]:
+        rule.update(owner="", action="")
+    evaluated = fleet.evaluate(FIRST[2], found, ON)
+    assert fleet.alert_actionability_review(evaluated, found)["actionable"] == 0
 
 
 def test_an_incident_opens_once_and_resolves_when_its_condition_clears(store):
@@ -327,12 +352,12 @@ def test_a_contended_store_retries_then_refuses(store, monkeypatch):
     incidents = fleet.IncidentStore(store, "fixture")
     calls = []
 
-    def contended(seq, alerts):
+    def contended(seq, alerts, held):
         calls.append(seq)
         raise redis.WatchError("changed")
 
     monkeypatch.setattr(incidents, "_record", contended)
-    with pytest.raises(SwarmError, match="^incident store kept changing; the evaluation was not recorded$"):
+    with pytest.raises(SwarmError, match="^incident store kept changing; the write was not recorded$"):
         incidents.record(fleet.evaluate(FIRST[2], FOUND, ON))
     assert calls == [3] * fleet.WRITE_ATTEMPTS
 
@@ -378,7 +403,6 @@ def test_alert_facts_name_their_subject_exactly():
         "cross_scope_denial": {
             "denial_id": "deny-1",
             "requester_scope": "swarm:canary",
-            "target_brain": "personal-operator",
         },
     }
 
@@ -391,6 +415,7 @@ def test_an_evaluation_names_its_sample():
         "at_ms": sample["at_ms"],
         "state": "disabled",
         "alerts": [],
+        "held": [],
         "suppressed": {},
     }
 
@@ -475,9 +500,8 @@ def racing(store, monkeypatch, command, race):
 
 def test_a_newer_evaluation_racing_the_write_wins(store, monkeypatch):
     incidents = fleet.IncidentStore(store, "fixture")
-    opened = racing(store, monkeypatch, "get", lambda: store.redis.set(incidents.seq_key, 99))
+    racing(store, monkeypatch, "get", lambda: store.redis.set(incidents.seq_key, 99))
     assert incidents.record(fleet.evaluate(FIRST[2], FOUND, ON))["stale"] is True
-    assert len(opened) == 2
     assert incidents.incidents() == {}
 
 
@@ -489,10 +513,50 @@ def test_an_incident_written_during_the_evaluation_is_reread(store, monkeypatch)
     def race():
         store.redis.hset(incidents.key, huge, json.dumps(earlier))
 
-    opened = racing(store, monkeypatch, "hgetall", race)
+    racing(store, monkeypatch, "hgetall", race)
     assert incidents.record(fleet.evaluate(FIRST[2], FOUND, ON))["opened"] == []
-    assert len(opened) == 2
     assert incidents.incidents()[huge]["opened_seq"] == 2
+
+
+def test_a_notice_mark_racing_another_write_is_retried(store, monkeypatch):
+    incidents = fleet.IncidentStore(store, "fixture")
+    incidents.record(fleet.evaluate(FIRST[2], FOUND, ON))
+    huge = fleet.fingerprint("impossible_pending", "exe-huge-1")
+
+    def race():
+        row = json.loads(store.redis.hget(incidents.key, huge))
+        store.redis.hset(incidents.key, huge, json.dumps({**row, "last_seq": 3}))
+
+    racing(store, monkeypatch, "hget", race)
+    seen: list[dict] = []
+    assert incidents.deliver(seen.append, ON) == 1
+    assert incidents.incidents()[huge]["notified"] is True
+    assert incidents.deliver(seen.append, ON) == 0
+    assert len(seen) == 1
+
+
+def test_an_open_incident_pushed_past_the_limit_stays_open(store):
+    incidents = fleet.IncidentStore(store, "fixture")
+    incidents.record(fleet.evaluate(SECOND[1], FOUND, ON))
+    crowded = copy.deepcopy(SECOND[2])
+    older = {
+        **crowded["brain"]["denials"][0],
+        "denial_id": "deny-2-0",
+        "at_ms": crowded["brain"]["denials"][0]["at_ms"] - 1,
+    }
+    crowded["brain"]["denials"].insert(0, older)
+    evaluated = fleet.evaluate(crowded, FOUND, ON)
+    fifth = fleet.fingerprint("cross_scope_denial", "deny-2-5")
+    assert fifth not in [alert["fingerprint"] for alert in evaluated["alerts"]]
+    assert fifth in evaluated["held"]
+    recorded = incidents.record(evaluated)
+    assert recorded["resolved"] == []
+    assert set(recorded["opened"]) == {
+        fleet.fingerprint("cross_scope_denial", "deny-2-0"),
+        fleet.fingerprint("impossible_pending", "exe-full-2"),
+    }
+    assert incidents.incidents()[fifth]["state"] == "open"
+    assert evaluated["suppressed"]["cross_scope_denial"] == 2
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])

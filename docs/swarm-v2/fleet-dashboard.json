@@ -82,7 +82,7 @@
       "for_ms": 120000,
       "limit": 5,
       "owner": "master",
-      "action": "cancel or resize the request, or ask the operator for a pool that can hold it; the alert never cancels it"
+      "action": "find what keeps the request from a node: free room in its permitted pools, resize it, or ask the operator for capacity; the alert never cancels it"
     },
     {
       "id": "cross_scope_denial",

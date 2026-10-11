@@ -110,13 +110,13 @@ def _connectivity(attempts: list[dict]) -> dict:
 
 
 def _denial(row: dict, seen: Viewer) -> dict:
-    title = row["session_title"] if row["target_brain"] in seen.brains else WITHHELD
+    granted = row["target_brain"] in seen.brains
     return {
-        "denial_id": row["denial_id"],
+        "denial_id": telemetry.sanitize_text(str(row["denial_id"])),
         "at_ms": row["at_ms"],
-        "requester_scope": row["requester_scope"],
-        "target_brain": row["target_brain"],
-        "session_title": telemetry.sanitize_text(title),
+        "requester_scope": telemetry.sanitize_text(str(row["requester_scope"])),
+        "target_brain": telemetry.sanitize_text(str(row["target_brain"])) if granted else WITHHELD,
+        "session_title": telemetry.sanitize_text(str(row["session_title"])) if granted else WITHHELD,
     }
 
 
@@ -173,11 +173,7 @@ def _conditions(sample: dict) -> list[tuple[str, str, int, dict]]:
             facts = {"execution_id": row["execution_id"], "seat": row["seat"], "reason": reason}
             found.append(("impossible_pending", row["execution_id"], row["pending_since_ms"], facts))
     for row in sample["brain"]["denials"]:
-        facts = {
-            "denial_id": row["denial_id"],
-            "requester_scope": row["requester_scope"],
-            "target_brain": row["target_brain"],
-        }
+        facts = {"denial_id": row["denial_id"], "requester_scope": row["requester_scope"]}
         found.append(("cross_scope_denial", row["denial_id"], row["at_ms"], facts))
     return found
 
@@ -189,7 +185,8 @@ def fingerprint(rule: str, subject: str) -> str:
 def evaluate(sample: dict, found: dict, environ: Mapping[str, str] = os.environ) -> dict:
     """Alerts whose condition has held for its rule's window, at most limit per rule; session titles never enter."""
     if not alerts_enabled(environ):
-        return {"seq": sample["seq"], "at_ms": sample["at_ms"], "state": "disabled", "alerts": [], "suppressed": {}}
+        disabled = {"state": "disabled", "alerts": [], "held": [], "suppressed": {}}
+        return {"seq": sample["seq"], "at_ms": sample["at_ms"], **disabled}
     by_id = {rule.id: rule for rule in rules(found)}
     held: dict[str, list[dict]] = {rule: [] for rule in by_id}
     for rule_id, subject, since, facts in _conditions(sample):
@@ -221,21 +218,27 @@ def evaluate(sample: dict, found: dict, environ: Mapping[str, str] = os.environ)
         "at_ms": sample["at_ms"],
         "state": "enabled",
         "alerts": alerts,
+        "held": sorted(row["fingerprint"] for rows in held.values() for row in rows),
         "suppressed": suppressed,
     }
 
 
-def alert_actionability_review(evaluated: dict) -> dict:
-    """An alert is actionable when it names an owner, an action and its subject, and never acts itself."""
-    rows = [
-        alert["rule"]
+def alert_actionability_review(evaluated: dict, found: dict) -> dict:
+    """An alert is actionable when it carries its rule's owner and action, names its subject and never acts itself."""
+    by_id = {rule.id: rule for rule in rules(found)}
+    unactionable = [
+        f"{alert['rule']}:{alert['subject']}"
         for alert in evaluated["alerts"]
-        if alert["owner"] and alert["action"] and not alert["automatic"] and alert["subject"] in alert["facts"].values()
+        if (alert["owner"], alert["action"]) != (by_id[alert["rule"]].owner, by_id[alert["rule"]].action)
+        or not (alert["owner"] and alert["action"])
+        or alert["automatic"]
+        or alert["subject"] not in alert["facts"].values()
     ]
     return {
         "state": evaluated["state"],
         "alerts": len(evaluated["alerts"]),
-        "actionable": len(rows),
+        "actionable": len(evaluated["alerts"]) - len(unactionable),
+        "unactionable": unactionable,
         "by_rule": dict(sorted(Counter(alert["rule"] for alert in evaluated["alerts"]).items())),
         "suppressed": dict(sorted(evaluated["suppressed"].items())),
     }
@@ -256,24 +259,27 @@ class IncidentStore:
         seq = evaluated["seq"]
         if evaluated["state"] != "enabled":
             return {"seq": seq, "stale": False, "disabled": True, "opened": [], "resolved": []}
+        return self._retrying(self._record, seq, evaluated["alerts"], set(evaluated["held"]))
+
+    def _retrying(self, write: Callable, *args: object) -> dict | None:
         for _ in range(WRITE_ATTEMPTS):
             try:
-                return self._record(seq, evaluated["alerts"])
+                return write(*args)
             except redis.WatchError:
                 continue
-        raise SwarmError("incident store kept changing; the evaluation was not recorded")
+        raise SwarmError("incident store kept changing; the write was not recorded")
 
-    def _record(self, seq: int, alerts: list[dict]) -> dict:
+    def _record(self, seq: int, alerts: list[dict], held: set[str]) -> dict:
+        """Only the capped alerts open incidents; an open incident resolves only when nothing holds it."""
         with self.store.redis.pipeline() as pipe:
             pipe.watch(self.key, self.seq_key)
             if seq <= int(pipe.get(self.seq_key) or 0):
                 pipe.unwatch()
                 return {"seq": seq, "stale": True, "disabled": False, "opened": [], "resolved": []}
             current = {fp: json.loads(raw) for fp, raw in pipe.hgetall(self.key).items()}
-            firing = {alert["fingerprint"]: alert for alert in alerts}
             writes, opened, resolved = {}, [], []
-            for fp, alert in firing.items():
-                known = current.get(fp)
+            for alert in alerts:
+                fp, known = alert["fingerprint"], current.get(alert["fingerprint"])
                 if known is None or known["state"] == RESOLVED:
                     keep = {key: alert[key] for key in ("rule", "severity", "subject", "owner", "action")}
                     opening = {"state": OPEN, "opened_seq": seq, "last_seq": seq, "notified": False}
@@ -282,7 +288,7 @@ class IncidentStore:
                 else:
                     writes[fp] = {**known, "facts": alert["facts"], "last_seq": seq}
             for fp, known in current.items():
-                if known["state"] == OPEN and fp not in firing:
+                if known["state"] == OPEN and fp not in held:
                     writes[fp] = {**known, "state": RESOLVED, "resolved_seq": seq}
                     resolved.append(fp)
             pipe.multi()
@@ -302,7 +308,7 @@ class IncidentStore:
                 continue
             shown = ("rule", "severity", "subject", "facts", "owner", "action")
             sink({"incident_id": f"{fp}:{row['opened_seq']}", **{key: row[key] for key in shown}})
-            self._notified(fp, row["opened_seq"])
+            self._retrying(self._notified, fp, row["opened_seq"])
             sent += 1
         return sent
 
