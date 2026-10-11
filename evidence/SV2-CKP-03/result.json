@@ -8,7 +8,7 @@
   ],
   "integration_gate": "G8",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2608",
-  "pull_request": null,
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2642",
   "tested_commit": "c3975cc8a2e21c1757086d491e48c5e29160e921",
   "status": "acceptance-qualified: mocked cases A, B and C passed in CI on the final native module; live fresh-home resume passed for both installed CLIs on the final native module",
   "package_complete": false,
@@ -94,7 +94,9 @@
     "Cleanup after a failed placement suppresses its own errors; a path it cannot remove is left behind",
     "The live proof ran on the workstation in fresh homes, not in a worker Pod; the Pod proof belongs to the G8 rollout gate",
     "No production caller yet: SV2-CKP-04 publishes checkpoints through the worker supervisor",
-    "Capture reads through a projects or sessions folder that is itself a link, as in agentihooks profile homes, because it reads the operator's own home; restore refuses that shape"
+    "Capture reads through a projects or sessions folder that is itself a link, as in agentihooks profile homes, because it reads the operator's own home; restore refuses that shape",
+    "The thread index read uses a file: URI with mode=ro; a SQLite build without URI support would take the name literally and the capture would report native_format_changed. Verified on SQLite 3.37.2 on the workstation and on the CI build",
+    "The Claude live proof did not close stdin; Claude waited three seconds for stdin data and warned, then answered correctly"
   ],
   "rollback": "Rehearsed in case C: a Qualifier with an empty qualification table returns native_resume_unavailable and leaves the home untouched while the checkpoint and its transcript material stay authoritative, so context continuation remains available.",
   "compatibility": "SV2-CKP-01 Validator and SV2-CKP-02 source capture are unchanged; a context continuation checkpoint is identical to the earlier path apart from the native_resume extension field",
