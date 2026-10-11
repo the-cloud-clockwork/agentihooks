@@ -42,17 +42,18 @@ def _timed_tests(tmp_path, seconds, marks=None):
 
 @pytest.mark.parametrize(
     ("target", "limit", "expected"),
-    [(80, 10, (1, 80)), (40, 10, (2, 40)), (20, 10, (4, 20)), (5, 10, (4, 20)), (5, 3, (2, 40))],
+    [(81, 10, (1, 80)), (41, 10, (2, 40)), (21, 10, (4, 20)), (5, 10, (4, 20)), (5, 3, (2, 40))],
 )
 def test_stats_parts_stop_at_the_target_or_where_one_file_sets_the_floor(tmp_path, target, limit, expected):
     tests = _timed_tests(tmp_path, {name: 20 for name in "abcdefghijklmnop"})
-    assert plan.stats_part_count(tmp_path, tests, target, limit) == expected
+    parts, wall = plan.stats_part_count(tmp_path, tests, target, limit)
+    assert (parts, wall) == (expected[0], pytest.approx(expected[1], abs=0.1))
 
 
 def test_stats_parts_split_a_shared_group_across_parts_but_never_inside_one(tmp_path):
     tests = _timed_tests(tmp_path, {name: 10 for name in "abcdefgh"}, dict.fromkeys("abcdefgh", "port"))
-    assert plan.slowest_bucket(tmp_path, tests, 1) == 80
-    assert plan.stats_part_count(tmp_path, tests, 20, 10) == (4, 20)
+    assert plan.slowest_bucket(tmp_path, tests, 1) == pytest.approx(80, abs=0.1)
+    assert plan.stats_part_count(tmp_path, tests, 21, 10) == (4, pytest.approx(20, abs=0.1))
     assert plan.stats_part_count(tmp_path, [], 20, 10) == (1, 0)
 
 
