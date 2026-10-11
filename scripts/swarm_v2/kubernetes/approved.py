@@ -49,7 +49,10 @@ class AccountRoute:
         spend = session_bands.spend_by(reading.five_left, resets)
         return session_bands.Seat(self.harness, key, min(cap, self.quota.cap(key, self.harness)), sessions, spend)
 
-    def choose(self, cap: int) -> str | None:
+    def seats(self, cap: int) -> list[session_bands.Seat]:
         held = self.held()
-        seat = session_bands.pick(self._seat(key, cap, held) for key in sorted(self.keys()))
+        return [self._seat(key, cap, held) for key in sorted(self.keys())]
+
+    def choose(self, cap: int) -> str | None:
+        seat = session_bands.pick(self.seats(cap))
         return None if seat is None else seat.account

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/deployed.py:scripts.swarm_v2.deployed.x_tick_runtime__mutmut_19:37dae6ffb86978f15e1ceb6cf813606e60caa1f5e103b8302ccae32005bc87de": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: QuotaObservations reads slug only in _grant (grant.swarm_id != self.slug), and AccountRoute reaches only reading, latest and cap, which key on latest_key(harness) and the clock."
+  }
+}
