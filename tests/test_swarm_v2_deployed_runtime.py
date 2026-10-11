@@ -242,6 +242,7 @@ def _launch_record(workers, account):
         "execution_id": "exe-" + "1" * 32,
         "generation": 1,
         "endpoints": {"api_url": API_URL},
+        "profile": "engineer",
         "account": account,
     }
     record = workers.launch(SpawnRequest(config, "eng", "engineer-1", task))
@@ -536,6 +537,7 @@ def _task(execution="1"):
         "execution_id": "exe-" + execution * 32,
         "generation": 1,
         "account": ACCOUNT,
+        "profile": "engineer",
         "endpoints": {"api_url": API_URL},
     }
 
@@ -655,6 +657,7 @@ def test_the_launch_record_names_the_admitted_execution_and_the_worker_settings(
         "generation": 1,
         "endpoints": {"api_url": API_URL},
         "launch_grant": "never-copied",
+        "profile": "engineer",
         "account": ACCOUNT,
     }
     record = workers.launch(SpawnRequest(config, "eng", "engineer-1", task))
@@ -672,7 +675,13 @@ def test_the_launch_record_names_the_admitted_execution_and_the_worker_settings(
         "memory_mib": 4096,
         "cpu_millis": 2000,
         "provider_account": ACCOUNT,
-        "task_payload": {"task_id": "t1", "lane": "eng", "name": "engineer-1", "endpoints": {"api_url": API_URL}},
+        "task_payload": {
+            "task_id": "t1",
+            "lane": "eng",
+            "name": "engineer-1",
+            "profile": "engineer",
+            "endpoints": {"api_url": API_URL},
+        },
     }
     assert registry[0] == [(REPOSITORY, "dev")]
 
@@ -707,6 +716,7 @@ def test_a_replacement_launch_record_carries_the_checkpoint_it_resumes_from(tmp_
         "task_id": "t1",
         "lane": "eng",
         "name": "engineer-1",
+        "profile": "engineer",
         "endpoints": {"api_url": API_URL},
         "checkpoint": "ckpt-one-2",
     }

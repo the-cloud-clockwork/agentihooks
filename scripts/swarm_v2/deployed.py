@@ -162,6 +162,7 @@ class Workers:
                 "task_id": task["id"],
                 "lane": request.lane,
                 "name": request.name,
+                "profile": task["profile"],
                 "endpoints": task["endpoints"],
                 **({"checkpoint": task["checkpoint"]} if task.get("checkpoint") else {}),
             },
