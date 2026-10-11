@@ -934,7 +934,13 @@ WORKER_BUNDLE = Path(__file__).resolve().parent / "fixtures" / "swarm_v2" / "wor
 
 def test_a_bundle_request_renders_the_bundle_chain_global_layer_and_channels(fixture):
     templates, volume = fixture
-    req = request(templates, volume, profiles={"claude": "frontend"}, accounts={"claude": ACCOUNTS["claude"]}, bundle=WORKER_BUNDLE)
+    req = request(
+        templates,
+        volume,
+        profiles={"claude": "frontend"},
+        accounts={"claude": ACCOUNTS["claude"]},
+        bundle=WORKER_BUNDLE,
+    )
 
     record = worker_home.bootstrap(req)
 
@@ -963,7 +969,15 @@ def test_a_bundle_link_escaping_the_bundle_fails_bootstrap(fixture, tmp_path):
     (bundle / "bundle" / ".claude" / "skills" / "escape").symlink_to(outside)
 
     with pytest.raises(worker_home.BootstrapError) as error:
-        worker_home.bootstrap(request(templates, volume, profiles={"claude": "frontend"}, accounts={"claude": ACCOUNTS["claude"]}, bundle=bundle))
+        worker_home.bootstrap(
+            request(
+                templates,
+                volume,
+                profiles={"claude": "frontend"},
+                accounts={"claude": ACCOUNTS["claude"]},
+                bundle=bundle,
+            )
+        )
 
     assert str(error.value) == f"profile escapes its template: {filesystem.BUNDLE}"
 
