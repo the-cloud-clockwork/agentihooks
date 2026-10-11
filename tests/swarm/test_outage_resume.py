@@ -160,6 +160,7 @@ def test_work_after_outage_closure_excludes_an_agent_that_only_becomes_idle_late
 
 
 def test_overlapping_outages_hold_recovery_and_persistent_errors_retry_three_times_then_count_idle(store):
+    from scripts.swarm import idle
     from scripts.swarm.store import RedisStore
 
     ledger, runtime, agents = three_owners(store)
@@ -176,6 +177,7 @@ def test_overlapping_outages_hold_recovery_and_persistent_errors_retry_three_tim
     for at in (10, 11, 12):
         store = RedisStore(store.redis)
         tick("sw", store, ledger, runtime, at * MINUTE)
+        idle.beat(store.redis, "sw", stuck.name, "idle", at * MINUTE + 1)
     assert runtime.nudged.count(stuck.name) == 3
     tick("sw", store, ledger, runtime, 13 * MINUTE)
     assert runtime.nudged.count(stuck.name) == 3
