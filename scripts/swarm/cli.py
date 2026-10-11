@@ -175,9 +175,6 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
 
     ledger = ledger or LedgerClient()
     runtime = runtime or routed(herdr=HerdrRuntime())
-    outage.providers(store, slug, runtime, now_ms())
-    if isinstance(ledger, ledger_client.LedgerClient) and not outage.ledger_health(slug, now_ms()):
-        return ["Ledger health probe failed"]
     held = lease.acquire(store, slug, commands.hive_id())
     if held is None:
         return ["the swarm belongs to another hive"]
@@ -186,6 +183,11 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
         return ["another tick is running"]
     keeping = timing.BEFORE_STEP.set(lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS))
     try:
+        outage.providers(store, slug, runtime, now_ms())
+        if isinstance(ledger, ledger_client.LedgerClient) and not outage.ledger_health(
+            slug, now_ms(), lambda: isinstance(ledger.metadata(slug), dict)
+        ):
+            return ["Ledger health probe failed"]
         ledger = controller.FencedLedger(store, slug, held, ledger)
         runtime = controller.FencedRuntime(
             store,

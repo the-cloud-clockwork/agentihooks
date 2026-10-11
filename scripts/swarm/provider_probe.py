@@ -140,11 +140,24 @@ def _run(args, *, input, cwd, env, timeout):
         return subprocess.CompletedProcess(args, child.returncode, stdout, stderr)
 
 
+def _frames(output: str) -> list:
+    content = "\n".join(
+        line for line in output.splitlines() if not line.startswith(("[agenti] ", "[agentihooks codex] "))
+    ).strip()
+    decoder = json.JSONDecoder()
+    rows = []
+    while content:
+        row, end = decoder.raw_decode(content)
+        rows.append(row)
+        content = content[end:].lstrip()
+    return rows
+
+
 def _succeeded(harness: str, output: str) -> bool:
     if harness == "copilot":
         return output.strip() == "OK"
     try:
-        rows = [json.loads(line) for line in output.splitlines() if line.strip()]
+        rows = _frames(output)
         if harness == "claude":
             return any(row.get("type") == "result" and not row.get("is_error") and row.get("result") for row in rows)
         completed = any(row.get("type") == "turn.completed" for row in rows)

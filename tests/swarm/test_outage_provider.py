@@ -50,7 +50,7 @@ def test_runtime_carries_provider_evidence_until_an_affirmative_probe_succeeds(t
     assert observed.provider_error == "API Error: 503"
     assert observed.provider_checked
     outage.providers(store, "sw", runtime, 1000)
-    assert outage.open_records("sw")[0]["evidence"] == ["worker (claude): API Error: 503"]
+    assert outage.open_records("sw")[0]["evidence"] == ["worker (claude, account alpha): API Error: 503"]
     monkeypatch.setattr(provider_probe, "check", lambda *args: provider_probe.Result(True, "request succeeded"))
     outage.providers(store, "sw", runtime, 61000)
     assert outage.read("sw")["provider"]["ended_at"] == 61000

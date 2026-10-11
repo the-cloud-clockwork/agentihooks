@@ -82,7 +82,7 @@ def _with_error(record, agent, pane, now_ms):
         "account": agent.account,
         "model": agent.model,
         "error_id": pane.provider_error_id or pane.provider_error,
-        "evidence": f"{agent.name} ({agent.harness}): {pane.provider_error}",
+        "evidence": f"{agent.name} ({agent.harness}, account {agent.account or 'unknown'}): {pane.provider_error}",
     }
     target = provider_probe.Target(agent.harness, agent.account, agent.model)
     probes = record.setdefault("probes", {})
@@ -133,10 +133,13 @@ def providers(store: RedisStore, slug: str, runtime: Runtime, now_ms: int) -> No
         records["provider"] = record
 
 
-def ledger_health(slug: str, now_ms: int) -> bool:
+def ledger_health(slug: str, now_ms: int, probe: Callable[[], bool] | None = None) -> bool:
     from scripts.swarm_ledger import ledger_link
 
-    healthy = bool(ledger_link.serving())
+    try:
+        healthy = probe() if probe is not None else bool(ledger_link.serving())
+    except (SwarmError, OSError, SystemExit):
+        healthy = False
     observe(slug, "ledger", [] if healthy else ["Ledger health probe failed"], now_ms)
     return healthy
 
