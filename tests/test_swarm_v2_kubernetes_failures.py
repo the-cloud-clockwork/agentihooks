@@ -803,7 +803,7 @@ def test_account_slot_releases_only_its_own_attempt(world):
 
 class _Ledger:
     def __init__(self, refusals=0, rows=None):
-        self.calls, self.refusals = [], refusals
+        self.calls, self.reads, self.refusals = [], [], refusals
         self.rows = [{"id": "task", "state": "claimed"}] if rows is None else rows
 
     def _refuse(self):
@@ -813,6 +813,7 @@ class _Ledger:
 
     def state(self, slug):
         self._refuse()
+        self.reads.append(slug)
         return {"tasks": [dict(row) for row in self.rows]}
 
     def update_task(self, slug, task_id, fields):
@@ -1036,6 +1037,7 @@ def test_a_cleared_recovery_mark_restores_the_awaiting_value_the_task_held_befor
     world.reconcile(recovery)
 
     replacements()
+    assert ledger.reads == [cases.SLUG]
     assert _hash(world, "recovery-pending-tasks") == {"task": restored}
     recovery.decide(world.old.execution_id, "fresh")
     replacements()
