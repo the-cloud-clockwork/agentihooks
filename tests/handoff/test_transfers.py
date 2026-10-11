@@ -4,7 +4,7 @@ import pytest
 
 from scripts.handoff import transfers
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
-from scripts.swarm.tick import tick
+from scripts.swarm.tick import SpawnError, tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
@@ -66,6 +66,24 @@ def test_a_failed_launch_stamps_its_absent_binding_when_it_fails(setup, monkeypa
     assert result["binding"] == {"state": "absent", "at": 101, "session": "sw-eng-2", "reason": "Launch failed"}
     retry = next(r for r in transfers.list_transfers(store, "sw") if r.get("retry_of") == transfer["id"])
     assert retry["at"] == 101
+
+
+def test_a_spawn_waiting_on_a_full_account_leaves_its_task_and_transfer_for_the_next_spawn(setup):
+    store, old = setup
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    store.put_handoff("sw", "t1", DOC, seat=old.seat)
+    ledger = FakeLedger([{"id": "t1"}])
+    full = SpawnError("no approved account has quota and a free launch slot", "unavailable")
+    tick("sw", store, ledger, FakeRuntime(crash=full), 10)
+    [row] = transfers.list_transfers(store, "sw")
+    assert (row["id"], row["successor"], row["binding"]) == (transfer["id"], "", {"state": "pending"})
+    assert ledger.rows["t1"]["state"] == "open"
+    assert store.claims("sw", "t1") == 0
+    assert store.launch_failure("sw", "t1") == ""
+    assert [row["state"] for row in store.launches("sw")] == ["waiting"]
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, 20)
+    assert transfers.get(store, "sw", transfer["id"])["successor"] == runtime.spawned[0][1]
 
 
 def test_now_ms_reads_the_wall_clock_in_milliseconds(monkeypatch):
