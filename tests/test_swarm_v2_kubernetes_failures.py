@@ -496,7 +496,10 @@ def test_a_deleted_pod_never_seen_live_is_fenced_as_node_lost_without_a_node_lis
     fence = recovery.fence(world.old.execution_id)
     assert (fence["reason"], fence["released"]) == ("node_lost", ["grant", "account"])
     assert world.slots() == []
-    assert recovery.reconcile([], None, [last]) == {world.old.execution_id: "retired"}
+    decision = recovery.decision(world.old.execution_id)
+    replacement = world.store.execution(cases.SLUG, decision.replacement)
+    assert (decision.mode, replacement.generation, replacement.seat) == ("resume", 2, world.old.seat)
+    assert recovery.reconcile([], None, [last]) == {decision.replacement: "unobserved"}
     assert recovery.late_observations(world.old.execution_id) == 0
 
 

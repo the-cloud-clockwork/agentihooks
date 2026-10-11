@@ -136,7 +136,7 @@ class Recovery:
     def reconcile(
         self, pods: Iterable[dict], ready_nodes: Iterable[str] | None, deleted: Iterable[dict] = ()
     ) -> dict[str, str]:
-        """Pass None for `ready_nodes` when the node listing failed, so an unlisted node is never taken as proof of loss;
+        """Pass None for `ready_nodes` when the node listing failed, so an unlisted node is never proof of loss;
         `deleted` holds the last state of each Pod deleted since the previous pass."""
         self.controller.require()
         self._resume()
