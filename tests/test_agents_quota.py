@@ -548,8 +548,6 @@ def test_the_codex_table_renders_at_the_current_time(monkeypatch):
     assert "2h00m" in table.splitlines()[1]
 
 
-
-
 def test_page_quota_without_a_cached_reading_has_no_probe_time(monkeypatch):
     from hooks.context import account_sessions
     from scripts import claude_quota_balancer, codex_router
