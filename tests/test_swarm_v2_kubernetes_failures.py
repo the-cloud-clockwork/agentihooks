@@ -1,5 +1,5 @@
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -11,6 +11,7 @@ from scripts.swarm.store import SwarmError
 from scripts.swarm_v2 import deployed
 from scripts.swarm_v2.kubernetes import client, failures, replacement
 from scripts.swarm_v2.kubernetes.failures import AccountSlot, Decision
+from scripts.swarm_v2.runtime import observe
 from scripts.swarm_v2.runtime.base import Outcome, Status
 from tests import sv2_kub05_cases as cases
 
@@ -724,6 +725,87 @@ def test_a_failed_node_listing_judges_no_pod_lost(world):
     world.api.objects.pop(f"swarm-{world.old.execution_id}")
     assert recovery.reconcile([], None) == {world.old.execution_id: "unobserved"}
     assert recovery.reconcile([], []) == {world.old.execution_id: "fenced"}
+
+
+def _observed(world, attempt, *ages_s, mode=observe.Mode.STANDARD, **seen):
+    observer, now = observe.Observer(world.store, "kubernetes", observe.Thresholds(mode=mode)), world.clock[0] / 1000
+    kind = {"source": observe.Source.KUBERNETES, "reading": observe.Reading.NOT_FOUND, **seen}
+    for age in ages_s:
+        signal = observe.Signal(
+            kind["source"], kind["reading"], now + age, attempt.execution_id, attempt.generation, kind.get("value", "")
+        )
+        record = observer.observe(cases.SLUG, attempt, [signal], now + age)
+    return record
+
+
+def _stored_for_generation(world, attempt, generation):
+    record, now = None, world.clock[0] / 1000
+    for age in (0, 600):
+        signal = observe.Signal(
+            observe.Source.KUBERNETES, observe.Reading.NOT_FOUND, now + age, attempt.execution_id, generation
+        )
+        record = observe.classify(attempt.execution_id, generation, [signal], record, observe.Thresholds(), now + age)
+    world.store.redis.hset(
+        world.store.key(cases.SLUG, "observations"), attempt.execution_id, json.dumps(asdict(record))
+    )
+    return record
+
+
+def _vanish(world):
+    world.api.objects.pop(f"swarm-{world.old.execution_id}")
+    world.store.redis.hdel(world.store.key(cases.SLUG, "attempt-nodes"), world.old.execution_id)
+    return world.recovery(world.live)
+
+
+def test_a_pod_vanished_unwatched_is_fenced_as_node_lost_once_its_observation_settles_lost(world):
+    recovery = _vanish(world)
+    assert _observed(world, world.old, 0, 600).state is observe.State.LOST
+    assert world.reconcile(recovery) == {world.old.execution_id: "fenced"}
+    assert recovery.fence(world.old.execution_id)["reason"] == "node_lost"
+
+
+def test_a_pod_vanished_unwatched_stays_unobserved_while_its_observation_is_suspect(world):
+    recovery = _vanish(world)
+    assert _observed(world, world.old, 0, 599).state is observe.State.SUSPECT
+    assert world.reconcile(recovery) == {world.old.execution_id: "unobserved"}
+    assert recovery.fence(world.old.execution_id) is None
+
+
+@pytest.mark.parametrize("step", [-1, 1])
+def test_a_lost_observation_of_another_generation_never_fences(world, step):
+    recovery = _vanish(world)
+    assert _stored_for_generation(world, world.old, world.old.generation + step).state is observe.State.LOST
+    assert world.reconcile(recovery) == {world.old.execution_id: "unobserved"}
+    assert recovery.fence(world.old.execution_id) is None
+
+
+@pytest.mark.parametrize(
+    "seen",
+    [
+        {"reading": observe.Reading.OK, "value": "Failed"},
+        {"reading": observe.Reading.OK, "value": "Succeeded"},
+        {"source": observe.Source.SUPERVISOR, "reading": observe.Reading.OK, "value": "exited"},
+    ],
+    ids=["failed", "succeeded", "supervisor-exited"],
+)
+def test_a_lost_observation_proven_by_an_ended_worker_never_fences_a_vanished_pod(world, seen):
+    recovery = _vanish(world)
+    assert _observed(world, world.old, 0, 600, **seen).state is observe.State.LOST
+    assert world.reconcile(recovery) == {world.old.execution_id: "unobserved"}
+    assert recovery.fence(world.old.execution_id) is None
+
+
+def test_an_operator_lost_ruling_fences_a_vanished_pod_and_a_working_ruling_does_not(world):
+    recovery, conservative = _vanish(world), observe.Mode.CONSERVATIVE
+    held = _observed(world, world.old, 0, 600, mode=conservative)
+    assert (held.state, held.needs_operator) == (observe.State.SUSPECT, True)
+    now = world.clock[0] / 1000 + 601
+    observe.rule(world.store, cases.SLUG, world.old.execution_id, "working", "pod moved", "operator", now)
+    assert world.reconcile(recovery) == {world.old.execution_id: "unobserved"}
+    _observed(world, world.old, 602, mode=conservative)
+    observe.rule(world.store, cases.SLUG, world.old.execution_id, "lost", "pod gone", "operator", now + 2)
+    assert world.reconcile(recovery) == {world.old.execution_id: "fenced"}
+    assert recovery.fence(world.old.execution_id)["reason"] == "node_lost"
 
 
 def test_two_live_pods_for_one_attempt_are_left_alone(world):
