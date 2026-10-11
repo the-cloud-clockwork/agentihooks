@@ -319,9 +319,9 @@ def test_the_launch_record_names_the_admitted_execution_and_the_worker_settings(
 
 
 def test_a_pod_policy_that_delivers_a_bundle_admits_bundle_profiles(tmp_path):
-    path = _policy(tmp_path)
+    path = tmp_path / "bundled-pod-policy.json"
     bundle = {"image_repository": "ghcr.io/fixture/agentihooks-bundle", "tag": "dev", "pull_access": "bundle-pull"}
-    path.write_text(json.dumps({**json.loads(path.read_text()), "bundle": bundle}))
+    path.write_text(json.dumps({**json.loads(_policy(tmp_path).read_text()), "bundle": bundle}))
 
     workers = deployed.Workers.from_environ(_workers(tmp_path, **{deployed.POLICY_ENV: str(path)}), SLUG)
 
