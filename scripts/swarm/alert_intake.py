@@ -15,8 +15,6 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import TYPE_CHECKING
 
-from redis.exceptions import RedisError
-
 from scripts.swarm.health import standing
 
 if TYPE_CHECKING:
@@ -139,6 +137,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def do_POST(self):
+        from redis.exceptions import RedisError
+
         if not allowed(self.client_address[0], self.server.networks):
             return self._reply(403, {"error": "source not allowed"})
         if self.path != PATH:
