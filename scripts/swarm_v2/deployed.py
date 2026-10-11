@@ -138,8 +138,14 @@ class Workers:
         exporter, terminal = _exporter(environ.get(EXPORTER_ENV)), _terminal(environ.get(TERMINAL_ENV))
         return cls(terms, policy, environ[IMAGE_TAG_ENV], profile, exporter, terminal)
 
+    @property
+    def requested(self) -> dict:
+        profile = self.policy["profiles"][self.profile]
+        cpu = profile.get("requests", profile["limits"])["cpu_millis"]
+        return {"memory_mib": profile["limits"]["memory_mib"], "cpu_millis": cpu}
+
     def launch(self, request: SpawnRequest) -> dict:
-        task, limits = request.task, self.policy["profiles"][self.profile]["limits"]
+        task, shape = request.task, self.requested
         return {
             "task_id": task["id"],
             "swarm_id": request.config.slug,
@@ -150,8 +156,8 @@ class Workers:
             "harness": HARNESS,
             "image_digest": image_tag.resolve(self.policy["image_repository"], self.image_tag),
             "profile": self.profile,
-            "memory_mib": limits["memory_mib"],
-            "cpu_millis": limits["cpu_millis"],
+            "memory_mib": shape["memory_mib"],
+            "cpu_millis": shape["cpu_millis"],
             "provider_account": task["account"],
             "task_payload": {
                 "task_id": task["id"],
@@ -201,9 +207,7 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
         environ, kubernetes=kubernetes, launch=partial(launcher.from_tick, terms=workers.terms, target=workers.target)
     )
     runtime.herdr_runtime.quota_accounts = FleetAccounts(route, workers.terms.cap)
-    runtime.herdr_runtime.host = WorkerPool(
-        api, workers.policy.get("worker_pool"), workers.policy["profiles"][workers.profile]["limits"]
-    )
+    runtime.herdr_runtime.host = WorkerPool(api, workers.policy.get("worker_pool"), workers.requested)
     launcher.planned = partial(runtime.herdr_runtime.planned_account, agent=HARNESS)
     launcher.router = runtime.router
     runtime.relaunch = partial(launcher.relaunch, terms=workers.terms)

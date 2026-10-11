@@ -137,7 +137,18 @@ def load_policy(path: str | Path) -> dict:
     for field, key in (("name", str), ("mount_path", normal)):
         if len({key(mount[field]) for mount in mounts}) < len(mounts):
             raise PodSpecRefused(f"pod policy mounts repeat a {field}", "policy")
+    _cpu_requests(policy["profiles"])
     return policy
+
+
+def _cpu_requests(profiles: dict) -> None:
+    for name, profile in profiles.items():
+        limit = profile["limits"]["cpu_millis"]
+        asked = profile.get("requests", {"cpu_millis": limit})["cpu_millis"]
+        if asked > limit:
+            raise PodSpecRefused(
+                f"pod policy profile {name} requests {asked}m CPU, more than its {limit}m limit", "policy"
+            )
 
 
 def _count(value: object) -> bool:
