@@ -50,6 +50,19 @@ it. One short stderr line names the outcome whenever `OPENBAO_URL` is set or the
 fallback file exists; a machine with neither starts its shells silently and
 without accounts.
 
+Codex accounts load the same way from the KV v2 secret that
+`AGENTIHOOKS_CODEX_CREDS_PATH` names (set it in `~/.agentihooks/.env`; with it
+unset no Codex secret is read). Each lower case `AH_CX_TOKEN_<slug>` key is
+exported under its own name, the slug being the same email rule
+(`Ops.Two@Example.com` becomes `AH_CX_TOKEN_ops_twoatexample_com`), and the
+Codex router routes among them. `AH_CX_REFRESH_<slug>` keys and every other key
+are never exported, so a shell holds access tokens only: the one machine with
+`AGENTIHOOKS_AICODE_TOKEN_REFRESH=true` rotates refresh tokens and writes them
+back to that secret (see Refreshing tokens). The fallback is
+`~/.agentihooks/accounts/codex.env`, under the same rules as `claude.env`; its
+stderr line shows when the fallback exists or when `OPENBAO_URL` and the path
+setting are both set.
+
 ## Launch routing
 
 `agenti` probes every account (results cached 60 s in
@@ -493,8 +506,8 @@ days, so the refresher below keeps it alive.
   terminal with neither flag the step is skipped. When the OpenBao write fails
   or is refused (`--openbao` off a terminal without both variables), the login
   exits 1 after the block was already written.
-- Every account lives in one KV v2 secret, `secret/agentihooks/codex-creds`,
-  under the keys `AH_CX_TOKEN_<slug>` and `AH_CX_REFRESH_<slug>`. A write merges
+- Every account lives in one KV v2 secret, `secret/agentihooks/codex-creds`
+  unless `AGENTIHOOKS_CODEX_CREDS_PATH` names another path, under the keys `AH_CX_TOKEN_<slug>` and `AH_CX_REFRESH_<slug>`. A write merges
   its keys over the current ones with check-and-set, retried up to three times
   on a conflict, and reports key names and the key count only.
 
@@ -524,8 +537,7 @@ other `agentihooks claude ...` still routes and launches Claude.
   and the file to `source`, never the token.
 - The OpenBao step is the one `codex login` uses, writing the key
   `AH_CC_TOKEN_<slug>` into the KV v2 secret `secret/agentihooks/claude-creds`.
-  `agentihooks accounts env` reads `k8s/swarm-claude-creds` and does not see
-  this secret.
+  `agentihooks accounts env` reads this secret.
 
 Both logins print their steps and notes in blue, questions and warnings in
 yellow and errors in red, but only when standard output is a terminal and
