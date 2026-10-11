@@ -8,7 +8,7 @@ OVERLAY_KEYS = ("quota", "archive", "checkpoints", "brain")
 
 
 def stamp_ms(stamp: str) -> int:
-    return int(datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp() * 1000)
+    return int(datetime.fromisoformat(stamp).timestamp() * 1000)
 
 
 def run_samples(run: dict, overlay: dict, first_seq: int = 1) -> list[dict]:

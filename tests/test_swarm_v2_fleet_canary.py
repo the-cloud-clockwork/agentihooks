@@ -163,6 +163,7 @@ def test_the_entrypoint_refuses_a_grant_without_brains(tmp_path, capsys):
     "argv",
     [
         ["--grant", "g.json"],
+        ["--canary", "c.json", "--overlay", "o.json"],
         ["--canary", "c.json", "--grant", "g.json"],
         ["--canary", "c.json", "--samples", "s.json", "--grant", "g.json"],
     ],
@@ -183,3 +184,43 @@ def test_the_entrypoint_takes_the_definition_it_is_given(tmp_path, capsys):
     assert fleet_view.main(argv, ON) == 0
     view = json.loads(capsys.readouterr().out)[RUNS[0]]
     assert {tuple(entry["alerts"]) for entry in view["timeline"]} == {()}
+
+
+def test_the_entrypoint_help_names_every_input(capsys, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "400")
+    with pytest.raises(SystemExit) as exited:
+        fleet_view.main(["--help"], ON)
+    assert exited.value.code == 0
+    out = " ".join(capsys.readouterr().out.split())
+    for text in (
+        fleet_view.__doc__.strip(),
+        "JSON list of samples in the metrics contract shape",
+        "recorded SV2-CAP-02 scaling canary result",
+        "quota, archive, checkpoint and brain readings for --canary",
+        "viewer grant naming its brains",
+    ):
+        assert text in out
+
+
+def test_a_canary_without_an_overlay_names_the_missing_flag(capsys):
+    with pytest.raises(SystemExit):
+        fleet_view.main(["--canary", str(CANARY), "--grant", "g.json"], ON)
+    assert capsys.readouterr().err.endswith("error: --canary needs --overlay\n")
+
+
+def test_the_entrypoint_prints_indented_json(tmp_path, capsys):
+    grant = write(tmp_path, "grant.json", {"brains": []})
+    assert fleet_view.main(["--canary", str(CANARY), "--overlay", str(OVERLAY), "--grant", str(grant)], ON) == 0
+    assert capsys.readouterr().out.startswith('{\n  "swarm-scaling-a-1791735630": {\n    "alert_actionability_review"')
+
+
+def test_the_timeline_follows_every_sample_and_the_review_reads_the_last(tmp_path, capsys):
+    synthetic = json.loads((FIXTURES / "fleet-dashboard.json").read_text())["traces"]["first"][:4]
+    samples = write(tmp_path, "early.json", synthetic)
+    grant = write(tmp_path, "grant.json", {"brains": []})
+    assert fleet_view.main(["--samples", str(samples), "--grant", str(grant)], ON) == 0
+    view = json.loads(capsys.readouterr().out)["early"]
+    assert [(entry["seq"], entry["at_ms"], len(entry["alerts"])) for entry in view["timeline"]] == [
+        (sample["seq"], sample["at_ms"], count) for sample, count in zip(synthetic, (0, 0, 1, 2))
+    ]
+    assert view["alert_actionability_review"]["alerts"] == 2
