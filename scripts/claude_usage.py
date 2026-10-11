@@ -1,5 +1,6 @@
 """Claude quota from one Messages request's rate-limit headers instead of a Claude CLI run."""
 
+import http.client
 import json
 import math
 import time
@@ -26,6 +27,9 @@ SYSTEM = "You are Claude Code, Anthropic's official CLI for Claude."
 PROMPT = "OK"
 MODELS = {"haiku": "claude-haiku-4-5"}
 NO_WINDOWS = "rate-limit windows unavailable"
+BAD_RESPONSE = "bad response from the API"
+BAD_TOKEN = "the token is not a valid header value"
+REJECTED = "rejected"
 TIMED_OUT = "probe timed out after {seconds}s"
 HTTP_ERROR = "HTTP {status}"
 CONTEXT_KEYS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
@@ -51,10 +55,9 @@ def _window(headers: Mapping[str, str], name: str) -> QuotaWindow:
 
 def result(account: str, headers: Mapping[str, str], body: dict, elapsed_ms: int) -> ProbeResult:
     five_hour, seven_day = _window(headers, FIVE_HOUR), _window(headers, SEVEN_DAY)
-    status = str(headers.get(f"{HEADER}status") or "unknown")
+    windows = [headers.get(f"{HEADER}{name}-status") for name in (FIVE_HOUR, SEVEN_DAY)]
+    status = REJECTED if REJECTED in windows else str(headers.get(f"{HEADER}status") or "unknown")
     state, margin = _state(status, five_hour, seven_day)
-    usage = body.get("usage")
-    context = sum(int(usage.get(key) or 0) for key in CONTEXT_KEYS) if isinstance(usage, dict) else None
     found = ProbeResult(
         account=account,
         provider_status=status,
@@ -63,10 +66,17 @@ def result(account: str, headers: Mapping[str, str], body: dict, elapsed_ms: int
         five_hour=five_hour,
         seven_day=seven_day,
         model=str(body.get("model") or "?"),
-        context_used=context,
+        context_used=_context(body.get("usage")),
         latency_ms=elapsed_ms,
     )
     return replace(found, error=NO_WINDOWS) if state == "UNKNOWN" else found
+
+
+def _context(usage: object) -> int | None:
+    if not isinstance(usage, dict):
+        return None
+    counts = [_number(usage.get(key) or 0) for key in CONTEXT_KEYS]
+    return None if None in counts else int(sum(counts))
 
 
 def _body(raw: bytes) -> dict:
@@ -93,19 +103,26 @@ def _request(token: str, model: str) -> urllib.request.Request:
     return urllib.request.Request(MESSAGES_URL, data=json.dumps(payload).encode(), headers=headers)
 
 
-def probe(account: str, token: str, model: str, opener: Callable | None = None) -> ProbeResult:
+def probe(
+    account: str, token: str, model: str, opener: Callable | None = None, timeout: float = TIMEOUT_S
+) -> ProbeResult:
     started = time.monotonic()
+    timed_out = TIMED_OUT.format(seconds=f"{timeout:g}")
     try:
-        with (opener or urllib.request.urlopen)(_request(token, model), timeout=TIMEOUT_S) as response:
+        with (opener or urllib.request.urlopen)(_request(token, model), timeout=timeout) as response:
             status, headers, raw = response.status, response.headers, response.read()
     except urllib.error.HTTPError as exc:
         status, headers, raw = exc.code, exc.headers, exc.read()
     except urllib.error.URLError as exc:
         if not isinstance(exc.reason, TimeoutError):
             raise Unreachable from None
-        return _error_result(account, TIMED_OUT.format(seconds=TIMEOUT_S))
+        return _error_result(account, timed_out)
     except TimeoutError:
-        return _error_result(account, TIMED_OUT.format(seconds=TIMEOUT_S))
+        return _error_result(account, timed_out)
+    except http.client.HTTPException:
+        return _error_result(account, BAD_RESPONSE)
+    except ValueError:
+        return _error_result(account, BAD_TOKEN)
     except OSError:
         raise Unreachable from None
     elapsed_ms = round((time.monotonic() - started) * 1000)
