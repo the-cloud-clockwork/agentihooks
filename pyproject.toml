@@ -84,6 +84,7 @@ dev = [
     "mutmut==3.6.0",
     "pytest-random-order>=1.2",
     "pytest-reportlog>=1.0",
+    "pytest-rerunfailures>=15.0",
     "detect-test-pollution==1.2.0",
     "uv>=0.5",
     "websockets>=15.0",
