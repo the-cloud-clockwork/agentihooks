@@ -153,8 +153,8 @@ def test_route_reads_quotas_for_a_forced_account_and_refreshes_them_otherwise(mo
         "fresh_quotas",
         lambda p, environ, now, run: calls.append(("fresh", p, environ, run)) or {"default": _quota(1.0, time.time())},
     )
-    assert router._route(ENV, "alpha", runner) == (pool[1], "forced", 0, "?")
-    assert router._route(ENV, "", runner) == (pool[0], "open", 0, "6")
+    assert router._route(ENV, "alpha", runner, "") == (pool[1], "forced", 0, "?")
+    assert router._route(ENV, "", runner, "") == (pool[0], "open", 0, "6")
     assert calls == [("quotas", pool, ENV), ("fresh", pool, ENV, runner)]
 
 
@@ -345,7 +345,7 @@ def test_without_token_variables_the_default_login_is_judged_by_its_week(monkeyp
     rc, seen, report = _launch(monkeypatch, tmp_path, environ, [], {"default": _quota(50.0)}, {"default": 6})
     assert rc == 3 and not seen
     monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {"default": 5})
-    assert router._route(environ, "", no_status) == (router.CodexAccount("default"), "open", 5, "6")
+    assert router._route(environ, "", no_status, "") == (router.CodexAccount("default"), "open", 5, "6")
 
 
 def test_the_api_route_is_forced_with_its_own_live_count_and_no_cap(monkeypatch):
@@ -355,9 +355,9 @@ def test_the_api_route_is_forced_with_its_own_live_count_and_no_cap(monkeypatch)
     environ = dict.fromkeys(["CODEX_API_KEY"], "1")
     monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {"api": 2, "default": 5})
     expected = router.CodexAccount("api", key_env="CODEX_API_KEY")
-    assert router._route(environ, "api", no_status) == (expected, "forced", 2, "?")
+    assert router._route(environ, "api", no_status, "") == (expected, "forced", 2, "?")
     monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {"default": 5})
-    assert router._route(environ, "api", no_status) == (expected, "forced", 0, "?")
+    assert router._route(environ, "api", no_status, "") == (expected, "forced", 0, "?")
 
 
 def _weighted(monkeypatch, weight, cap=API_UNBOUNDED):

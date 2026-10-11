@@ -394,9 +394,7 @@ def _report(path: str, **fields: str) -> None:
         _write_route_report(path, **fields)
 
 
-def _route(
-    environ: Mapping[str, str], route: str, run: Callable, exclude: str = ""
-) -> tuple[CodexAccount, str, int, str]:
+def _route(environ: Mapping[str, str], route: str, run: Callable, exclude: str) -> tuple[CodexAccount, str, int, str]:
     sessions = codex_sessions_by_account()
     if route == API_ACCOUNT:
         return api_account(environ), "forced", sessions.get(API_ACCOUNT, 0), "?"
