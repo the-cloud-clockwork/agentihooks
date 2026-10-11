@@ -76,3 +76,23 @@ def test_probe_backoff_is_per_account_and_capped_at_ten_minutes():
     assert states["claude:alpha"]["succeeded_at"] == 2101000
     assert provider_probe.advance(states, 2701000, unavailable)
     assert calls == ["alpha"] * 5
+
+
+@pytest.mark.parametrize(
+    ("harness", "output"),
+    [
+        (
+            "claude",
+            '[agenti] account=alpha route=forced\n{\n  "type": "result",\n  "is_error": false,\n  "result": "OK"\n}',
+        ),
+        (
+            "codex",
+            '[agentihooks codex] account=alpha sessions=1/6 placement=forced\n{"type":"item.completed","item":{"type":"agent_message","text":"OK"}}\n{"type":"turn.completed"}',
+        ),
+    ],
+)
+def test_probe_accepts_existing_router_banners_and_multiline_json(tmp_path, harness, output):
+    def run(args, **kwargs):
+        return subprocess.CompletedProcess(args, 0, output, "")
+
+    assert provider_probe.check(provider_probe.Target(harness, "alpha", "model"), tmp_path, run=run).ok
