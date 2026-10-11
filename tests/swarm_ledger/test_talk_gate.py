@@ -283,9 +283,9 @@ def test_the_server_gates_only_requests_that_carry_ops(monkeypatch, ops, gated):
     handler.path = f"/api/{SLUG}?view=agent"
     handler.send = lambda code, body, ctype: code
     assert handler.reply_state(SLUG, changes=changes, ops=ops) == 200
-    assert [type(gate).__name__ for gate in seen] == (["Budget"] if gated else ["NoneType"])
+    assert [type(gate).__name__ for gate in seen] == (["Fence"] if gated else ["NoneType"])
     assert seen_changes == [changes]
-    assert not gated or seen[0].slug == SLUG
+    assert not gated or (seen[0].slug, type(seen[0].inner).__name__, seen[0].inner.slug) == (SLUG, "Budget", SLUG)
 
 
 @pytest.mark.parametrize(
