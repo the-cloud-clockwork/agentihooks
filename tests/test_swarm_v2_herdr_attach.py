@@ -472,3 +472,36 @@ def test_sync_reports_connection_and_registration_refusals_together(tmp_path):
     report = found.sync([(scope_of(EXE_A, 2), HOST_KEY), (scope_of(EXE_B, 1), HOST_KEY)], enabled=True)
     assert report.refused == {EXE_A: "stale_generation", EXE_B: "incompatible"}
     assert report.registered == {}
+
+
+class SilentSsh(Runner):
+    def __init__(self, home: ClientHome, failure: Exception) -> None:
+        super().__init__(home)
+        self.failure = failure
+
+    def __call__(self, command: list[str]) -> subprocess.CompletedProcess:
+        if command[0] == attach.SSH:
+            self.commands.append(list(command))
+            raise self.failure
+        return super().__call__(command)
+
+
+@pytest.mark.parametrize(
+    ("failure", "named"),
+    [
+        (subprocess.TimeoutExpired([attach.SSH], 10), "TimeoutExpired"),
+        (FileNotFoundError(2, "No such file or directory"), "FileNotFoundError"),
+    ],
+)
+def test_a_connection_probe_that_never_answers_is_refused_as_unreachable(tmp_path, failure, named):
+    found, _ = terminal(tmp_path)
+    found.run = SilentSsh(found.home, failure)
+    endpoint = Endpoint(scope_of(EXE_A, 1), "swarm-workers")
+
+    assert refusal(lambda: found._connect(endpoint)) == (
+        "unreachable",
+        f"{endpoint.name} terminal did not answer the connection: {named}",
+    )
+    report = found.sync([(scope_of(EXE_A, 1), HOST_KEY)], enabled=True)
+    assert report.refused == {EXE_A: "unreachable"}
+    assert found.terminal_endpoint_refusals() == {"unreachable": 1}
