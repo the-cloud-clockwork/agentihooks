@@ -355,8 +355,6 @@ def current_table(
     now = time.time()
     seen = {result.account: (at, result) for at, result in observations if result.account in names}
     seen.update({result.account: (now, result) for result in probed})
-    if not seen:
-        return ""
     observed = {account: at for account, (at, _) in seen.items()}
     results = [result for _, result in seen.values()]
     return balance_table(results, sessions, "cached", now, fable, current, observed)
