@@ -98,7 +98,7 @@ FIELDS = {
     "artifact_purge": "by",
     "alert_claim": "by target",
     "alert_close": "by target outcome",
-    "time_left": "by slots ci_minutes",
+    "time_left": "by slots ci_minutes fix_phase watched",
     "freeze_set": "by verb target reason quote",
     "freeze_clear": "by target reason quote",
     "events_ack": "by rev",
@@ -131,7 +131,7 @@ TYPES = {
     "attachments": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
 }
 KIND_TYPES = {"artifact_add": {"plan": {"type": "boolean"}}, "task_rank": {"if_owned": {"type": "boolean"}}}
-for _field in ("depends_on", "territory", "if_state", "members"):
+for _field in ("depends_on", "territory", "if_state", "members", "watched"):
     TYPES[_field] = {"type": "array", "maxItems": 100, "items": {"type": "string", "maxLength": 2000}}
 
 

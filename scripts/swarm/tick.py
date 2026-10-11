@@ -196,7 +196,7 @@ def tick(slug, store, ledger, runtime, now_ms):
         actions += skip_refused(ci_speed.refresh, slug, config, store, now_ms)
         actions += skip_refused(ci_defects.refresh, slug, config, store, ledger, now_ms)
         actions += skip_refused(ci_flakes.refresh, slug, config, store, ledger, now_ms)
-        actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, doc, now_ms)
+        actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, config, doc)
         if not sleeping:
             actions += skip_refused(_codex_hook_order)
             actions += skip_refused(_master_down, slug, config, store, ledger, runtime, now_ms)
