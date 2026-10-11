@@ -195,15 +195,15 @@ def test_an_email_slug_and_its_raw_form_cleanup():
     rc.write_text(f"{aicode_tokens.START}\nexport AH_CC_TOKEN_me@x.io=old\n{aicode_tokens.END}\n")
     bao = FakeBao({"AH_CC_TOKEN_me@x.io": "old", "OTHER": "o"}, path=CLAUDE_URL)
     assert _login(["me@x.io", "--openbao"], environ=BAO_ENV, bao=bao) == 0
-    assert rc.read_text() == f"{aicode_tokens.START}\nexport AH_CC_TOKEN_me_x_io={TOKEN}\n{aicode_tokens.END}\n"
-    assert bao.data == {"OTHER": "o", "AH_CC_TOKEN_me_x_io": TOKEN}
+    assert rc.read_text() == f"{aicode_tokens.START}\nexport AH_CC_TOKEN_meatx_io={TOKEN}\n{aicode_tokens.END}\n"
+    assert bao.data == {"OTHER": "o", "AH_CC_TOKEN_meatx_io": TOKEN}
 
 
 def test_without_a_slug_a_terminal_is_asked_for_one(capsys):
     console = Prompts(["nestor.colt@gmail.com", "n"])
     assert _login([], console=console) == 0
     assert console.prompts == ["Slug (the email of the target account): ", ASK_STORE]
-    assert "export AH_CC_TOKEN_nestor_colt_gmail_com=" in aicode_tokens.rc_file().read_text()
+    assert "export AH_CC_TOKEN_nestor_coltatgmail_com=" in aicode_tokens.rc_file().read_text()
 
 
 def test_without_a_slug_off_a_terminal_the_usage_is_shown_and_nothing_runs(capsys):
