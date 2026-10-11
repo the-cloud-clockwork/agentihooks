@@ -103,7 +103,7 @@ let doc = {phases: [{done: true}, {done: false}], followups: [], questions: [], 
         script += function_source("span") + function_source("timeLeftInputs") + function_source("renderStats")
         script += """
 const assert = require("node:assert/strict");
-const timeLeft = () => { renderStats(); return $("stats").textContent.split(" · ")[2]; };
+const timeLeft = () => { renderStats(); return $("stats").textContent.split(" · ").find(row => row.startsWith("Time left ")); };
 assert.equal(timeLeft(), "Time left 3h 20m");
 meta.created_at -= 86400000;
 doc.phases[1].done = true;
