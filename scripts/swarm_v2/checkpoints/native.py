@@ -29,6 +29,7 @@ EXCLUSIONS = (
 )
 FORMAT = "native_format_changed"
 BUSY = "database_busy"
+TOO_LARGE = "native_too_large"
 ESCAPE = "native_member_escapes_home"
 VERSION = re.compile(r"(\d+)\.(\d+)\.\d+")
 MEMBER_MODE = 0o600
@@ -108,7 +109,7 @@ class Harness(Protocol):
 
 
 def line(version_text: str) -> str | None:
-    found = VERSION.search(version_text or "")
+    found = VERSION.search(version_text)
     return f"{found[1]}.{found[2]}" if found else None
 
 
@@ -153,7 +154,9 @@ class Claude:
         return files
 
     def identity(self, files: dict[str, bytes]) -> tuple[str, str]:
-        records = _records(files.get(self.conversation, b""))
+        if self.conversation not in files:
+            raise NativeError(FORMAT)
+        records = _records(files[self.conversation])
         named = [r["sessionId"] for r in records if "sessionId" in r]
         if not all(isinstance(session, str) for session in named):
             raise NativeError(FORMAT)
@@ -201,7 +204,7 @@ class Codex:
             with closing(sqlite3.connect(f"{db.resolve().as_uri()}?mode=ro", uri=True, timeout=0)) as source:
                 row = source.execute("SELECT rollout_path FROM threads WHERE id = ?", (session_id,)).fetchone()
         except sqlite3.DatabaseError as error:
-            raise NativeError(BUSY if "locked" in str(error) or "busy" in str(error) else FORMAT) from error
+            raise NativeError(BUSY if "locked" in str(error) else FORMAT) from error
         return row[0] if row else None
 
     def _rollout(self, home: Path, session_id: str) -> Path:
@@ -249,7 +252,7 @@ def _members(data: bytes) -> dict[str, bytes]:
                 expanded += info.size
                 parts = PurePosixPath(info.name).parts
                 if len(found) >= ARCHIVE_MEMBERS or expanded > ARCHIVE_BYTES:
-                    raise NativeError(FORMAT)
+                    raise NativeError(TOO_LARGE)
                 if not info.isreg() or info.name.startswith("/") or ".." in parts:
                     raise NativeError(ESCAPE)
                 found[info.name] = archive.extractfile(info).read()  # NOSONAR: bounded above
@@ -276,7 +279,7 @@ def _remove(created: list[Path]) -> None:
             if path.is_dir() and not path.is_symlink():
                 path.rmdir()
             else:
-                path.unlink(missing_ok=True)
+                path.unlink()
 
 
 def _linked(root: Path, relative: PurePosixPath) -> bool:
@@ -345,7 +348,7 @@ class Qualifier:
         if line(recorded) != line(version_text):
             return self._count(harness, Unavailable(harness, "version_changed"))
         if len(files) > ARCHIVE_MEMBERS or sum(map(len, files.values())) > ARCHIVE_BYTES:
-            return self._count(harness, Unavailable(harness, "native_too_large"))
+            return self._count(harness, Unavailable(harness, TOO_LARGE))
         quiescence = "stopped_process" if stopped else "consistent_export"
         captured = NativeCapture(harness, recorded, session_id, tuple(sorted(files.items())), quiescence)
         self.outcomes[f"{harness}/{CAPTURED}"] += 1
@@ -390,12 +393,7 @@ class Qualifier:
             placed = [(native.placed(session_id, cwd, name), data) for name, data in members.items()]
         except ValueError as error:
             raise NativeError(ESCAPE) from error
-        if any(_linked(home, relative) for relative, _ in placed):
-            raise NativeError(ESCAPE)
-        try:
-            targets = [(contain(home, relative), data) for relative, data in placed]
-        except LayoutError as error:
-            raise NativeError(ESCAPE) from error
+        targets = [(_unlinked(home, home / relative), data) for relative, data in placed]
         if any(path.exists() for path, _ in targets):
             raise NativeError("conversation_present")
         created: list[Path] = []
