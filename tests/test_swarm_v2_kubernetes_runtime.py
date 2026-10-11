@@ -20,8 +20,11 @@ DIGEST = "payload-digest"
 ZERO = {"created": 0, "adopted": 0, "observed": 0, "quarantined": 0, "disabled": 0}
 
 
-def operation(action="spawn", generation=3, execution_id=EXECUTION, payload_digest=DIGEST) -> Operation:
-    return Operation("op-1", execution_id, generation, action, "kubernetes", payload_digest, {})
+def operation(
+    action="spawn", generation=3, execution_id=EXECUTION, payload_digest=DIGEST, spec_digest=None
+) -> Operation:
+    spec = PodTemplate(cases.policy()).render(cases.launch()).digest if spec_digest is None else spec_digest
+    return Operation("op-1", execution_id, generation, action, "kubernetes", payload_digest, {}, spec_digest=spec)
 
 
 def transport(api=None, slug="fixture", creation_enabled=True) -> KubernetesTransport:
@@ -259,10 +262,128 @@ def test_an_already_existing_pod_without_labels_or_annotations_is_quarantined_as
     assert sender.quarantined == {"uid-1": {"name": NAME, "uid": "uid-1", "reason": "owner"}}
 
 
-def test_observation_ignores_the_spec_digest_of_a_matching_pod():
+def test_observation_quarantines_a_pod_whose_spec_digest_differs_from_the_journal():
     sender = transport()
     existing(sender, **{runtime.SPEC_DIGEST: "sha256:older-template"})
-    assert sender.observe_operation(operation()) == applied()
+    assert sender.observe_operation(operation()) == Observation(Phase.REFUSED)
+    assert sender.quarantined["uid-1"]["reason"] == "spec"
+
+
+def test_observation_refuses_a_matching_pod_when_the_journal_holds_no_spec_digest():
+    sender = transport()
+    existing(sender)
+    assert sender.observe_operation(operation(spec_digest="")) == Observation(Phase.REFUSED)
+    assert sender.quarantined["uid-1"]["reason"] == "spec"
+
+
+def test_observation_trusts_the_journaled_digest_over_the_pod_annotation():
+    sender = transport()
+    existing(sender, **{runtime.SPEC_DIGEST: "sha256:journaled"})
+    assert sender.observe_operation(operation(spec_digest="sha256:journaled")) == applied()
+
+
+def test_spec_digest_is_the_rendered_template_digest():
+    sender = transport()
+    assert sender.spec_digest(cases.launch()) == PodTemplate(cases.policy()).render(cases.launch()).digest
+
+
+def test_spec_digest_of_a_refused_launch_is_empty():
+    hostile = {**cases.launch(), "provider_account": "cluster-admin-token"}
+    assert transport().spec_digest(hostile) == ""
+
+
+def test_apply_refuses_a_launch_whose_render_differs_from_the_journal():
+    sender = transport()
+    assert sender.apply_operation(operation(spec_digest="sha256:journaled"), cases.launch()) == Observation(
+        Phase.REFUSED
+    )
+    assert sender.api.create_calls == 0
+
+
+def defaulted(pod: dict) -> dict:
+    live = json.loads(json.dumps(pod))
+    spec = live["spec"]
+    spec.update(
+        {
+            "dnsPolicy": "ClusterFirst",
+            "schedulerName": "default-scheduler",
+            "serviceAccount": spec["serviceAccountName"],
+            "priority": 0,
+            "preemptionPolicy": "PreemptLowerPriority",
+            "imagePullSecrets": [{"name": "service-account-pull"}],
+        }
+    )
+    for key in ("hostNetwork", "hostPID", "hostIPC"):
+        spec.pop(key)
+    spec["securityContext"]["seLinuxOptions"] = {"level": "s0:c1,c2"}
+    spec["tolerations"].append({"key": "node.kubernetes.io/not-ready", "operator": "Exists", "effect": "NoExecute"})
+    for container in spec["containers"]:
+        container.update({"terminationMessagePath": "/dev/termination-log", "terminationMessagePolicy": "File"})
+        container["securityContext"]["procMount"] = "Default"
+    return live
+
+
+def test_an_admission_defaulted_pod_is_adopted():
+    sender = transport()
+    pod = existing(sender)
+    sender.api.objects[NAME] = defaulted(pod)
+    assert sender.apply_operation(operation(), cases.launch()) == applied()
+    assert sender.kubernetes_create_reconciliation_total() == {**ZERO, "adopted": 1}
+
+
+def tamper_image(spec):
+    spec["containers"][0]["image"] = "registry.example/agent@sha256:" + "f" * 64
+
+
+def tamper_arguments(spec):
+    spec["containers"][0]["args"].append("--debug")
+
+
+def tamper_secret(spec):
+    spec["containers"][0]["env"][0]["valueFrom"]["secretKeyRef"]["name"] = "cluster-admin"
+
+
+def tamper_account(spec):
+    spec["serviceAccountName"] = "controller"
+
+
+def tamper_security(spec):
+    spec["containers"][0]["securityContext"]["privileged"] = True
+
+
+@pytest.mark.parametrize(
+    ("tamper", "reason"),
+    [
+        (tamper_image, "image"),
+        (tamper_arguments, "arguments"),
+        (tamper_secret, "secrets"),
+        (tamper_account, "service-account"),
+        (tamper_security, "security-context"),
+    ],
+)
+def test_an_already_existing_pod_whose_live_fields_differ_is_quarantined(tamper, reason):
+    sender = transport()
+    pod = defaulted(existing(sender))
+    tamper(pod["spec"])
+    sender.api.objects[NAME] = pod
+    assert sender.apply_operation(operation(), cases.launch()) == Observation(Phase.REFUSED)
+    assert sender.quarantined == {"uid-1": {"name": NAME, "uid": "uid-1", "reason": reason}}
+    assert sender.kubernetes_create_reconciliation_total() == {**ZERO, "quarantined": 1}
+
+
+def test_a_controller_spawn_journals_the_rendered_spec_digest():
+    world = cases.World()
+    with world.clocked():
+        controller, transport = world.controller()
+        assert controller.acquire()
+        attempt = world.admit(controller)
+        request = world.request(controller, attempt)
+        created = controller.execute(request)
+        journaled = world.store.operation_journal.get(cases.SLUG, created.operation_id)
+    assert created.phase is Phase.APPLIED
+    assert journaled.spec_digest == PodTemplate(cases.policy()).render(request.payload).digest
+    pod = world.api.objects[f"swarm-{attempt.execution_id}"]
+    assert pod["metadata"]["annotations"][runtime.SPEC_DIGEST] == journaled.spec_digest
 
 
 def test_observation_quarantines_a_labelled_pod_of_another_generation():
@@ -278,6 +399,7 @@ def test_two_matching_pods_for_one_execution_are_both_quarantined():
     twin = PodTemplate(cases.policy()).render(cases.launch()).pod
     twin["metadata"]["name"] = "swarm-twin"
     twin["metadata"]["annotations"][runtime.OPERATION_DIGEST] = DIGEST
+    twin["metadata"]["annotations"][runtime.SPEC_DIGEST] = PodTemplate(cases.policy()).render(cases.launch()).digest
     sender.api.put(twin)
     assert sender.observe_operation(operation()) == Observation(Phase.REFUSED)
     assert {uid: q["reason"] for uid, q in sender.quarantined.items()} == {"uid-1": "ambiguous", "uid-2": "ambiguous"}

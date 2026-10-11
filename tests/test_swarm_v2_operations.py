@@ -486,3 +486,67 @@ def test_untyped_observation_generation_cannot_prove_applied_state(fixture, gene
     assert rejected.phase is Phase.REFUSED
     assert rejected.result == {}
     assert transport.creations == 1
+
+
+class RendersSpecs(LostAcknowledgement):
+    def __init__(self):
+        super().__init__()
+        self.lose_ack = False
+        self.version = "v1"
+        self.rendered = []
+
+    def spec_digest(self, payload):
+        self.rendered.append(payload)
+        return f"sha256:{self.version}:{payload['prompt']}"
+
+
+def rendering(store):
+    transport = RendersSpecs()
+    return transport, Operations(store, [transport])
+
+
+def test_a_spawn_journals_the_spec_digest_its_backend_renders(fixture):
+    store, agent, _, _ = fixture
+    transport, operations = rendering(store)
+    applied = operations.execute("fixture", request(agent))
+    assert applied.spec_digest == "sha256:v1:fixture"
+    assert store.operation_journal.get("fixture", applied.operation_id).spec_digest == "sha256:v1:fixture"
+    assert transport.rendered == [{"prompt": "fixture"}]
+
+
+def test_a_spawn_on_a_backend_without_specs_journals_an_empty_digest(fixture):
+    store, agent, _, operations = fixture
+    first = operations.execute("fixture", request(agent))
+    assert store.operation_journal.get("fixture", first.operation_id).spec_digest == ""
+
+
+def test_an_action_other_than_spawn_renders_no_spec(fixture):
+    store, agent, _, _ = fixture
+    transport, operations = rendering(store)
+    command = operations.execute("fixture", request(agent, "command", key="command"))
+    assert command.spec_digest == ""
+    assert transport.rendered == []
+
+
+def test_a_spawn_whose_rendered_spec_changed_since_prepare_conflicts(fixture):
+    store, agent, _, _ = fixture
+    transport, operations = rendering(store)
+    transport.apply_operation = lambda operation, payload: Observation(Phase.UNKNOWN)
+    operations.execute("fixture", request(agent))
+    before = store.redis.hgetall(store.key("fixture", "runtime-operations"))
+    transport.version = "v2"
+    with pytest.raises(OperationConflict, match="^operation spec changed since it was journaled$"):
+        operations.execute("fixture", request(agent))
+    assert store.redis.hgetall(store.key("fixture", "runtime-operations")) == before
+
+
+def test_a_journal_record_written_before_spec_digests_reads_as_empty(fixture):
+    import json
+
+    store, agent, _, operations = fixture
+    first = operations.execute("fixture", request(agent))
+    key = store.key("fixture", "runtime-operations")
+    legacy = json.loads(store.redis.hget(key, first.operation_id))
+    del legacy["spec_digest"]
+    store.redis.hset(key, first.operation_id, json.dumps(legacy))
+    assert store.operation_journal.get("fixture", first.operation_id) == first
