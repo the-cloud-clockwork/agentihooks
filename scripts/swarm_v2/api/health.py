@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping
@@ -163,6 +164,7 @@ class Health:
         }
         self.readings: dict = {}
         self.issued: dict[str, str] = {}
+        self.lock = threading.Lock()
 
     def _now(self) -> int:
         return int(self.clock() * 1000)
@@ -196,9 +198,10 @@ class Health:
             "pipeline": pipeline,
             "remediation": remediation,
         }
-        self.issued[report["report_id"]] = _digest(report)
-        while len(self.issued) > ISSUED_LIMIT:
-            del self.issued[next(iter(self.issued))]
+        with self.lock:
+            self.issued[report["report_id"]] = _digest(report)
+            while len(self.issued) > ISSUED_LIMIT:
+                del self.issued[next(iter(self.issued))]
         return report
 
     def qualify(self, report: dict, purpose: str, execution_id: str = "") -> dict:
@@ -206,7 +209,9 @@ class Health:
             raise HealthRefused("unsupported_purpose")
         if report.get("probe") != DEEP:
             raise HealthRefused("shallow_report")
-        if self.issued.get(report.get("report_id")) != _digest(report):
+        with self.lock:
+            issued = self.issued.get(report.get("report_id"))
+        if issued != _digest(report):
             raise HealthRefused("unrecognized_report")
         if self._now() - report["checked_at_ms"] > self.limits.report_ms:
             raise HealthRefused("stale_report")
@@ -362,16 +367,16 @@ class HealthAPI:
         if not authorization.startswith(BEARER):
             raise GrantRefused("unauthenticated", "a bearer credential is required")
         token = authorization.removeprefix(BEARER)
-        if self.operator is not None and self.operator(self.health.slug, token):
-            return ""
-        if self.grants is None:
-            raise GrantRefused("unauthenticated", "the credential is not recognized")
         try:
+            if self.operator is not None and self.operator(self.health.slug, token):
+                return ""
+            if self.grants is None:
+                raise GrantRefused("unauthenticated", "the credential is not recognized")
             return self.grants.bound(self.health.slug, token).execution_id
         except GrantRefused:
             raise
         except Exception:
-            raise GrantRefused("dependency_unavailable", "the grant store is unavailable") from None
+            raise GrantRefused("dependency_unavailable", "the credential store is unavailable") from None
 
     def _qualify(self, body: object) -> tuple[int, dict]:
         fields = body if isinstance(body, dict) else {}

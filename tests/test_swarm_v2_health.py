@@ -413,6 +413,25 @@ def test_a_worker_grant_reads_its_own_execution_scope(api):
     assert (status, reply["scope"]) == (200, "execution")
 
 
+def test_an_unreachable_operator_credential_store_answers_unavailable(store):
+    def broken(slug, credential):
+        raise OSError("ledger store unreachable")
+
+    api = health.HealthAPI(make(store), Grants(), broken)
+    status, reply = api.route("GET", health.DIAGNOSE_PATH, "Bearer operator", None)
+    assert (status, reply["error_class"], reply["message"]) == (
+        503,
+        "dependency_unavailable",
+        "the credential store is unavailable",
+    )
+
+
+def test_a_missing_grant_authority_refuses_a_non_operator_credential(store):
+    api = health.HealthAPI(make(store), None, operator)
+    status, reply = api.route("GET", health.DIAGNOSE_PATH, "Bearer worker", None)
+    assert (status, reply["message"]) == (401, "the credential is not recognized")
+
+
 def test_switched_off_deep_checks_answer_unavailable_and_keep_liveness(store):
     api = health.HealthAPI(make(store), Grants(), operator, deep=False)
     status, reply = api.route("GET", health.DIAGNOSE_PATH, "Bearer operator", None)
