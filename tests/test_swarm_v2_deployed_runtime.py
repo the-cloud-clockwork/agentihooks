@@ -362,15 +362,18 @@ def _worker_pod(phase):
 def test_the_deployed_controller_sizes_spawn_room_from_worker_namespace_usage_and_never_reads_its_own_node(
     tmp_path, monkeypatch
 ):
+    node_reads = []
+
     def own_node(*args, **kwargs):
-        raise AssertionError("the deployed controller read its own node")
+        node_reads.append(args)
+        return host_budget.HostSample(load1=9.0, cpus=1, available_mb=10, agents=5)
 
     monkeypatch.setattr(host_budget, "read_host", own_node)
     pods = PoolPods("swarm-pod-proof", [_worker_pod("Running"), _worker_pod("Pending"), _worker_pod("Succeeded")])
     monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: pods)
     pool = {"pods": 8, "cpu_millis": 18000, "memory_mib": 30000}
-    policy = _policy(tmp_path)
-    policy.write_text(json.dumps({**json.loads(policy.read_text()), "worker_pool": pool}))
+    policy = tmp_path / "pool-policy.json"
+    policy.write_text(json.dumps({**json.loads(_policy(tmp_path).read_text()), "worker_pool": pool}))
     store = _store()
     service = _cs().host(_environ(tmp_path, store, **{deployed.POLICY_ENV: str(policy)}), store, "hive-fixture")
     try:
@@ -378,6 +381,7 @@ def test_the_deployed_controller_sizes_spawn_room_from_worker_namespace_usage_an
     finally:
         service.stop()
 
+    assert node_reads == []
     assert "" in pods.selectors
     assert {name: decision["host"][name] for name in ("room", "reason", "limit", "held")} == {
         "room": 5,

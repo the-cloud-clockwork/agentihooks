@@ -30,7 +30,22 @@ class Listing:
 
 @pytest.mark.parametrize(
     ("quantity", "millis"),
-    [("2", 2000), ("500m", 500), ("1.5", 1500), ("0.1", 100), ("250001u", 251), ("1k", 1_000_000)],
+    [
+        ("2", 2000),
+        ("500m", 500),
+        ("1.5", 1500),
+        ("0.1", 100),
+        (".5", 500),
+        ("250001u", 251),
+        ("1n", 1),
+        ("1000001n", 2),
+        ("1k", 1_000_000),
+        ("1M", 1_000_000_000),
+        ("1e3", 1_000_000),
+        ("1E3", 1_000_000),
+        ("15e-2", 150),
+        ("2e+0", 2000),
+    ],
 )
 def test_a_cpu_quantity_reads_as_whole_millicores_rounded_up(quantity, millis):
     assert pool.cpu_millis(quantity) == millis
@@ -38,16 +53,32 @@ def test_a_cpu_quantity_reads_as_whole_millicores_rounded_up(quantity, millis):
 
 @pytest.mark.parametrize(
     ("quantity", "mib"),
-    [("4Gi", 4096), ("64Mi", 64), ("1536Mi", 1536), ("1048576", 1), ("1048577", 2), ("1Ki", 1), ("1G", 954)],
+    [
+        ("4Gi", 4096),
+        ("64Mi", 64),
+        ("1536Mi", 1536),
+        ("1048576", 1),
+        ("1048577", 2),
+        ("1024Ki", 1),
+        ("1025Ki", 2),
+        ("1G", 954),
+        ("1T", 953675),
+        ("1P", 953674317),
+        ("1E", 953674316407),
+        ("1Ti", 1048576),
+        ("1Pi", 1073741824),
+        ("1Ei", 1099511627776),
+    ],
 )
 def test_a_memory_quantity_reads_as_whole_mebibytes_rounded_up(quantity, mib):
     assert pool.memory_mib(quantity) == mib
 
 
-@pytest.mark.parametrize("quantity", ["", "two", "4Qi", "-1", "1e3"])
+@pytest.mark.parametrize("quantity", ["", "two", "4Qi", "-1", "1e", "1Mie3", "."])
 def test_a_quantity_that_is_not_a_kubernetes_quantity_is_refused(quantity):
-    with pytest.raises(ValueError, match="^not a resource quantity: "):
+    with pytest.raises(ValueError) as refused:
         pool.cpu_millis(quantity)
+    assert str(refused.value) == f"not a resource quantity: {quantity!r}"
 
 
 def test_a_pod_requests_the_larger_of_its_containers_and_its_largest_init_container_per_resource():
@@ -55,6 +86,13 @@ def test_a_pod_requests_the_larger_of_its_containers_and_its_largest_init_contai
     pod["spec"]["containers"].append({"name": "side", "resources": {"requests": {"cpu": "100m"}}})
 
     assert pool.requests(pod) == (500, 4096)
+
+
+def test_a_container_with_limits_and_no_requests_requests_its_limits():
+    limited = {"name": "agent", "resources": {"limits": {"cpu": "1", "memory": "2Gi"}}}
+    partial = {"name": "side", "resources": {"requests": {"cpu": "100m"}, "limits": {"cpu": "1", "memory": "64Mi"}}}
+
+    assert pool.requests({"spec": {"containers": [limited, partial]}}) == (1100, 2112)
 
 
 def test_a_container_without_requests_adds_nothing():
@@ -81,8 +119,12 @@ def test_room_is_the_fewest_launches_that_fit_and_names_memory_when_memory_binds
 
 
 def test_room_names_cpu_when_cpu_binds():
-    assert pool.pool_room(POOL, LAUNCH, pool.Usage(2, 14000, 0)).limit == "cpu"
-    assert pool.pool_room(POOL, LAUNCH, pool.Usage(2, 14000, 0)).room == 2
+    assert pool.pool_room(POOL, LAUNCH, pool.Usage(2, 14000, 0)) == Room(
+        2,
+        "worker pool: 2 of 8 Pods, 14000m of 18000m CPU and 0 MiB of 30000 MiB memory requested; "
+        "2 more fit at 2000m and 4096 MiB each",
+        "cpu",
+    )
 
 
 def test_room_names_pods_when_the_pod_count_binds_and_on_a_tie():
@@ -92,16 +134,36 @@ def test_room_names_pods_when_the_pod_count_binds_and_on_a_tie():
         "1 more fit at 2000m and 4096 MiB each",
         "pods",
     )
-    assert pool.pool_room({**POOL, "memory_mib": 24576}, LAUNCH, pool.Usage(2, 0, 0)).limit == "pods"
+    assert pool.pool_room({**POOL, "memory_mib": 24576}, LAUNCH, pool.Usage(2, 0, 0)) == Room(
+        6,
+        "worker pool: 2 of 8 Pods, 0m of 18000m CPU and 0 MiB of 24576 MiB memory requested; "
+        "6 more fit at 2000m and 4096 MiB each",
+        "pods",
+    )
 
 
 def test_room_exactly_full_is_zero():
-    assert pool.pool_room(POOL, LAUNCH, pool.Usage(8, 0, 0)).room == 0
-    assert pool.pool_room(POOL, LAUNCH, pool.Usage(0, 18000, 0)).room == 0
+    assert pool.pool_room(POOL, LAUNCH, pool.Usage(8, 0, 0)) == Room(
+        0,
+        "worker pool: 8 of 8 Pods, 0m of 18000m CPU and 0 MiB of 30000 MiB memory requested; "
+        "0 more fit at 2000m and 4096 MiB each",
+        "pods",
+    )
+    assert pool.pool_room(POOL, LAUNCH, pool.Usage(0, 18000, 0)) == Room(
+        0,
+        "worker pool: 0 of 8 Pods, 18000m of 18000m CPU and 0 MiB of 30000 MiB memory requested; "
+        "0 more fit at 2000m and 4096 MiB each",
+        "cpu",
+    )
 
 
 def test_room_over_the_pool_never_drops_below_zero():
-    assert pool.pool_room(POOL, LAUNCH, pool.Usage(9, 20000, 40000)).room == 0
+    assert pool.pool_room(POOL, LAUNCH, pool.Usage(9, 20000, 40000)) == Room(
+        0,
+        "worker pool: 9 of 8 Pods, 20000m of 18000m CPU and 40000 MiB of 30000 MiB memory requested; "
+        "0 more fit at 2000m and 4096 MiB each",
+        "memory",
+    )
 
 
 def test_the_reading_lists_every_pod_in_the_worker_namespace_and_sizes_the_room():
@@ -142,5 +204,7 @@ def test_a_pod_request_that_is_not_a_quantity_has_unknown_room():
     found = pool.WorkerPool(Listing([_pod(cpu="lots")]), POOL, LAUNCH)()
 
     assert found == Room(
-        None, "worker pool unknown: the worker Pods cannot be listed (ValueError), so spawns pass", "unknown"
+        None,
+        "worker pool unknown: a worker Pod request is not a resource quantity: 'lots', so spawns pass",
+        "unknown",
     )

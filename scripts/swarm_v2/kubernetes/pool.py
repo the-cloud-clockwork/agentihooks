@@ -1,5 +1,4 @@
-"""Spawn room of the worker namespace: the Pods there against the worker pool the Pod policy declares. It reads only
-the Pod list in the worker namespace, never a node."""
+"""Reads only the worker namespace's Pod list, never a node."""
 
 import math
 import re
@@ -11,7 +10,7 @@ from scripts.swarm_v2.kubernetes.client import ApiRefused, PodApi
 
 FINISHED = ("Succeeded", "Failed")
 PODS, CPU, MEMORY = "pods", "cpu", "memory"
-QUANTITY = re.compile(r"([0-9]+(?:\.[0-9]*)?|\.[0-9]+)(Ki|Mi|Gi|Ti|Pi|Ei|n|u|m|k|M|G|T|P|E|)")
+QUANTITY = re.compile(r"([0-9]+(?:\.[0-9]*)?|\.[0-9]+)(Ki|Mi|Gi|Ti|Pi|Ei|n|u|m|k|M|G|T|P|E|[eE][+-]?[0-9]+|)")
 SUFFIXES = {
     "n": Decimal("1e-9"),
     "u": Decimal("1e-6"),
@@ -39,7 +38,8 @@ def _amount(quantity: str) -> Decimal:
     found = QUANTITY.fullmatch(quantity)
     if found is None:
         raise ValueError(f"not a resource quantity: {quantity!r}")
-    return Decimal(found[1]) * SUFFIXES[found[2]]
+    scale = SUFFIXES.get(found[2]) or Decimal(10) ** int(found[2][1:])
+    return Decimal(found[1]) * scale
 
 
 def cpu_millis(quantity: str) -> int:
@@ -51,7 +51,9 @@ def memory_mib(quantity: str) -> int:
 
 
 def _requested(containers: list[dict]) -> list[tuple[int, int]]:
-    asked = [container.get("resources", {}).get("requests", {}) for container in containers]
+    """A resource with a limit and no request requests its limit, as Kubernetes defaults it."""
+    resources = [container.get("resources", {}) for container in containers]
+    asked = [{**row.get("limits", {}), **row.get("requests", {})} for row in resources]
     return [(cpu_millis(row.get(CPU, "0")), memory_mib(row.get(MEMORY, "0"))) for row in asked]
 
 
@@ -87,7 +89,7 @@ def pool_room(pool: dict, launch: dict, used: Usage) -> Room:
 
 
 class WorkerPool:
-    """Every Pod in the worker namespace counts, because the declared pool and the namespace quota bound them all."""
+    """Lists every Pod in the worker namespace, with no label selector."""
 
     def __init__(self, api: PodApi, pool: dict | None, launch: dict) -> None:
         self.api, self.pool, self.launch = api, pool, launch
@@ -96,11 +98,15 @@ class WorkerPool:
         if self.pool is None:
             return Room(None, "worker pool undeclared: the Pod policy names no worker_pool, so spawns pass", UNKNOWN)
         try:
-            used = usage(self.api.list_pods(""))
-        except (ApiRefused, OSError, ValueError) as error:
+            pods = self.api.list_pods("")
+        except (ApiRefused, OSError) as error:
             return Room(
                 None,
                 f"worker pool unknown: the worker Pods cannot be listed ({type(error).__name__}), so spawns pass",
                 UNKNOWN,
             )
+        try:
+            used = usage(pods)
+        except ValueError as error:
+            return Room(None, f"worker pool unknown: a worker Pod request is {error}, so spawns pass", UNKNOWN)
         return pool_room(self.pool, self.launch, used)
