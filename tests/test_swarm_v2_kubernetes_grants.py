@@ -321,7 +321,7 @@ def test_exposure_on_opens_the_terminal_for_the_verified_grant_after_the_launch_
     api = Api(pod())
     terminals = Terminals(api)
 
-    assert PodGrants(api, SLUG, verify, Supervision("claude", None), terminals).hand(agent(), GRANT) == Hand(
+    assert PodGrants(api, SLUG, verify, Supervision("claude", None, CONTROL), terminals).hand(agent(), GRANT) == Hand(
         True, "handed", False
     )
     assert terminals.opened == [(registration(), pod(), [material()])]
@@ -339,7 +339,7 @@ def test_a_refused_terminal_removes_its_pod_and_names_why():
     api = Api(pod())
     terminals = Terminals(api, "terminal_refused")
 
-    hand = PodGrants(api, SLUG, verify, Supervision("claude", None), terminals).hand(agent(), GRANT)
+    hand = PodGrants(api, SLUG, verify, Supervision("claude", None, CONTROL), terminals).hand(agent(), GRANT)
 
     assert hand == Hand(False, "terminal_refused", True)
     assert api.deleted == [("pods", POD, "uid-1")]
@@ -349,6 +349,6 @@ def test_a_grant_that_takes_no_launch_material_opens_no_terminal():
     api = Api(pod(), create_failure=ApiRefused(403, "Forbidden"))
     terminals = Terminals(api)
 
-    PodGrants(api, SLUG, verify, Supervision("claude", None), terminals).hand(agent(), GRANT)
+    PodGrants(api, SLUG, verify, Supervision("claude", None, CONTROL), terminals).hand(agent(), GRANT)
 
     assert terminals.opened == []
