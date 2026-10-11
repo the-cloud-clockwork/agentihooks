@@ -43,7 +43,7 @@ def _decision(slug: str, config: SwarmConfig, store: RedisStore, lane: str, task
     saved = relaunch or (store.handoff_envelope(slug, task["id"]) or {}).get("launch") or {}
     if kept := profile_choice.kept(task, saved, relaunch):
         return kept.record()
-    if cached := store.redis.hget(store.key(slug, KEY), task["id"]):
+    if not task.get("profile") and (cached := store.redis.hget(store.key(slug, KEY), task["id"])):
         return json.loads(cached)
     decision = profile_choice.pick(slug, lane, config.lanes.get(lane, {}), task, dict(os.environ))
     if decision.model:

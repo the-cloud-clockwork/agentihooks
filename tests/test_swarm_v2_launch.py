@@ -903,6 +903,22 @@ def test_a_tick_spawn_for_a_profile_the_worker_image_lacks_is_refused_before_adm
     assert world.rows() == {}
 
 
+def test_a_launch_whose_model_answer_turned_front_end_is_refused_before_admission(world, monkeypatch):
+    from scripts.swarm import profile_choice
+
+    decision = profile_choice.ProfileDecision("frontend", "classifier", "frontend", "m1", 0.9, True)
+    monkeypatch.setattr(profile_choice, "classify", lambda slug, task, environ: decision)
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+    request = SpawnRequest(config, "eng", "e1", {"id": "task", "seat": FIRST})
+    world.launcher.router = RuntimeRouter([world.runtime], placement=Placement(BACKEND))
+
+    outcome = world.launcher.from_tick(request, replace(world.terms, bundled=True), pod_target)
+
+    assert outcome == Outcome("spawn", Status.REFUSED, BACKEND, None, "profile frontend runs only on the workstation")
+    assert world.runtime.requests == []
+    assert world.rows() == {}
+
+
 def test_the_worker_image_profiles_are_the_default_and_every_package_role():
     assert launch_module.worker_profiles() == {"default", "cicd", "dispatcher", "engineer", "master", "planner", "qa"}
 

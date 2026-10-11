@@ -13,6 +13,7 @@ DECISION = profile_choice.ProfileDecision("frontend", "classifier", "frontend", 
 ENGINEER = profile_choice.ProfileDecision("engineer", "classifier", "engineer", "m1", 0.8, True)
 LAUNCH = {"profile": "qa", "harness": "claude", "model": "opus", "effort": "high", "overlays": ["o1"]}
 KEPT = profile_choice.ProfileDecision("qa", "handoff", "original seat profile", overlays=("o1",)).record()
+EXPLICIT = profile_choice.ProfileDecision("frontend", "task", "explicit task profile").record()
 
 
 @pytest.fixture
@@ -80,6 +81,13 @@ def test_an_explicit_profile_is_recorded_as_the_decision_without_the_classifier(
     )
     assert asked == []
     assert cached(store) == {}
+
+
+def test_an_explicit_profile_set_after_a_cached_answer_wins(store, asked):
+    store.redis.hset(store.key("sw", profile_first.KEY), "e1", json.dumps(ENGINEER.record()))
+    task = decided(store, {"id": "e1", "profile": "frontend"})
+    assert task["profile_decision"] == EXPLICIT
+    assert asked == []
 
 
 @pytest.mark.parametrize(
