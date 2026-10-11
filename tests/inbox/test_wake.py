@@ -133,7 +133,7 @@ def test_the_original_overdue_item_replayed_at_nine_minutes(pane, step):
 
     item = SimpleNamespace(state="pending", sender="sw-eng-2", fyi=False, ref="")
     history = [{"state": "pending", "by": "sw-eng-2", "reason": "", "at": ORIGINAL_SENT}]
-    assert wake.decide(item, pane, history, ORIGINAL_SENT + ORIGINAL_AGE, W) == step
+    assert wake.decide(item, pane, history, ORIGINAL_SENT + ORIGINAL_AGE, W, "sw") == step
 
 
 def test_retries_stop_at_three_then_the_master_gets_an_item(inbox):
