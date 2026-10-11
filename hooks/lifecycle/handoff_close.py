@@ -33,9 +33,11 @@ def close_command(pid: int) -> list[str]:
     return [exe, "terminate-agent", str(pid), "--type", "any"]
 
 
-def close(command: list[str], marker: Path) -> None:
+def close(command: list[str], marker: Path, record: Path) -> None:
     marker.touch()
-    subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, timeout=120, check=False)
+    done = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, timeout=120, check=False)
+    if done.returncode == 0:
+        record.unlink(missing_ok=True)
 
 
 def on_stop(payload: dict) -> bool:
@@ -54,11 +56,11 @@ def on_stop(payload: dict) -> bool:
         os.close(os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
     except FileExistsError:
         return False
-    handoff_record(pid, session_id).unlink(missing_ok=True)
     fork_and_call(
         close,
         close_command(pid),
         _closing_marker(pid, dict(os.environ)),
+        handoff_record(pid, session_id),
         timeout_sec=180,
         task_name="handoff-close",
     )

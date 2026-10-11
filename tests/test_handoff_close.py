@@ -19,14 +19,22 @@ def test_only_a_handed_off_session_closes_at_its_stop(payload, environ, status, 
     assert handoff_close.due(payload, environ, status) is expected
 
 
-def test_closing_terminates_this_session_after_marking_its_terminal_to_exit(monkeypatch, tmp_path):
+@pytest.mark.parametrize(("returncode", "kept"), [(0, False), (1, True)])
+def test_closing_terminates_this_session_after_marking_its_terminal_to_exit(monkeypatch, tmp_path, returncode, kept):
     monkeypatch.setattr(handoff_close.shutil, "which", lambda name: "/bin/agentihooks")
     assert handoff_close.close_command(4242) == ["/bin/agentihooks", "terminate-agent", "4242", "--type", "any"]
     ran = []
-    monkeypatch.setattr(handoff_close.subprocess, "run", lambda argv, **kwargs: ran.append(argv))
-    marker = tmp_path / "closing-42"
-    handoff_close.close(["/bin/agentihooks", "terminate-agent", "sid-1"], marker)
-    assert marker.exists() and ran == [["/bin/agentihooks", "terminate-agent", "sid-1"]]
+
+    def run(argv, **kwargs):
+        ran.append(argv)
+        return handoff_close.subprocess.CompletedProcess(argv, returncode)
+
+    monkeypatch.setattr(handoff_close.subprocess, "run", run)
+    marker, record = tmp_path / "closing-42", tmp_path / "handed-off-42-sid-1"
+    record.touch()
+    handoff_close.close(["/bin/agentihooks", "terminate-agent", "42"], marker, record)
+    assert marker.exists() and ran == [["/bin/agentihooks", "terminate-agent", "42"]]
+    assert record.exists() is kept
 
 
 def _stop(monkeypatch, tmp_path, status, pid=4242):
@@ -45,8 +53,11 @@ def test_a_handed_off_stop_schedules_the_close_once(monkeypatch, tmp_path):
     assert handoff_close.on_stop({"session_id": "sid-1"}) is True
     assert handoff_close.on_stop({"session_id": "sid-1"}) is False
     assert len(scheduled) == 1
-    command, marker = scheduled[0]
-    assert command[-3:] == ["4242", "--type", "any"] and marker == tmp_path / "closing-4242"
+    assert scheduled[0] == (
+        [handoff_close.close_command(4242)[0], "terminate-agent", "4242", "--type", "any"],
+        tmp_path / "closing-4242",
+        tmp_path / "handed-off-4242-sid-1",
+    )
 
 
 def test_a_live_session_stop_schedules_nothing(monkeypatch, tmp_path):
@@ -66,8 +77,8 @@ def test_a_codex_process_whose_resumed_successor_took_its_session_still_closes(m
     handoff_close.handoff_record(4242, "sid-1").touch()
     assert handoff_close.handoff_record(4242, "sid-1") == tmp_path / "handed-off-4242-sid-1"
     assert handoff_close.on_stop({"session_id": "sid-1"}) is True
-    assert [command[-3:] for command, _ in scheduled] == [["4242", "--type", "any"]]
-    assert not handoff_close.handoff_record(4242, "sid-1").exists()
+    assert [command[-3:] for command, _, _ in scheduled] == [["4242", "--type", "any"]]
+    assert handoff_close.handoff_record(4242, "sid-1").exists()
 
 
 def test_a_handoff_recorded_for_another_process_or_session_closes_nothing(monkeypatch, tmp_path):
@@ -84,4 +95,4 @@ def test_each_process_of_a_resumed_conversation_closes_once(monkeypatch, tmp_pat
     second = _stop(monkeypatch, tmp_path, "handed_off", pid=5151)
     assert handoff_close.on_stop({"session_id": "sid-1"}) is True
     assert handoff_close.on_stop({"session_id": "sid-1"}) is False
-    assert [command[-3] for command, _ in first + second] == ["4242", "5151"]
+    assert [command[-3] for command, _, _ in first + second] == ["4242", "5151"]
