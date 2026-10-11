@@ -12,20 +12,42 @@ TIMEOUT = 10
 
 
 def call(path: str, payload: dict, environ) -> dict:
-    credential = environ.get("AGENTIHOOKS_CONTROLLER_CREDENTIAL")
-    if not credential:
-        sys.exit("AGENTIHOOKS_CONTROLLER_CREDENTIAL is not set")
     request = urllib.request.Request(
         f"{ledger_link.base(environ)}/api/v1/proof-ledgers{path}",
         data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json", "X-Controller-Credential": credential},
+        headers={"Content-Type": "application/json", "X-Controller-Credential": _credential(environ)},
     )
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
             return json.loads(response.read())["data"]
     except urllib.error.HTTPError as exc:
-        message = json.loads(exc.read())["error"]["message"]
-        sys.exit(f"server refused: {exc.code} {message}")
+        _refused(exc)
+
+
+def _credential(environ) -> str:
+    credential = environ.get("AGENTIHOOKS_CONTROLLER_CREDENTIAL")
+    if not credential:
+        sys.exit("AGENTIHOOKS_CONTROLLER_CREDENTIAL is not set")
+    return credential
+
+
+def _refused(exc: urllib.error.HTTPError) -> None:
+    message = json.loads(exc.read())["error"]["message"]
+    sys.exit(f"server refused: {exc.code} {message}")
+
+
+def exists(slug: str, environ=os.environ) -> bool:
+    request = urllib.request.Request(
+        f"{ledger_link.base(environ)}/api/v1/ledgers/{slug}/metadata",
+        headers={"X-Controller-Credential": _credential(environ)},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT):
+            return True
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return False
+        _refused(exc)
 
 
 def create(content: dict, environ=os.environ) -> dict:
