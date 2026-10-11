@@ -909,7 +909,7 @@ def test_the_controller_reports_the_registration_drift(fixture):
     store, (first, _second), _transport, _clock, grant = fixture
 
     assert keeping(store, grant, Keeper()).herdr_registration_drift() == 3
-    assert first.herdr_registration_drift() == 0
+    assert first.herdr_registration_drift() is None
     grant["allowed"] = False
     with pytest.raises(SwarmError) as refused:
         keeping(store, grant, Keeper()).herdr_registration_drift()

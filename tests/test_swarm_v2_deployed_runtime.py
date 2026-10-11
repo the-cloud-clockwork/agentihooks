@@ -789,6 +789,7 @@ def test_switched_off_the_controller_runs_no_herdr_command_and_reads_no_ca_key(t
     try:
         assert service.controller.terminals is None
         assert service.tick()
+        assert service.controller.herdr_registration_drift() is None
         assert herdr.commands == []
         assert herdr.machines == [sv2_hdr03_cases.fixture()["manual"]]
         assert environments == []
@@ -802,6 +803,7 @@ def test_a_controller_without_the_terminal_ca_key_says_it_keeps_no_client(tmp_pa
     )
     try:
         assert service.controller.terminals is None
+        assert service.controller.herdr_registration_drift() is None
         assert herdr.commands == []
         assert environments == []
         assert capsys.readouterr().out.splitlines()[0] == (

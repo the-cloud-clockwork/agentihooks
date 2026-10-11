@@ -163,6 +163,6 @@ class Controller:
     def _attempts(self) -> list[Attempt]:
         return self.host_keys.attempts(self.slug, self.store.execution_occupants(self.slug).values(), OPERATOR)
 
-    def herdr_registration_drift(self) -> int:
+    def herdr_registration_drift(self) -> int | None:
         self._authorize()
-        return 0 if self.terminals is None else self.terminals.herdr_registration_drift()
+        return None if self.terminals is None else self.terminals.herdr_registration_drift()
