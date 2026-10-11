@@ -80,10 +80,10 @@ api=(
   --set controller.api.signingKey.secretName=swarm-launch-signing
 )
 network=("$chart/values.yaml" "$chart/ci/kind-network.yaml")
-helm template "$release" "$chart" -f "$chart/ci/kind-network.yaml" "${api[@]}" | python3 tests/chart_network.py "${network[@]}"
+helm template "$release" "$chart" -f "$chart/ci/kind-network.yaml" "${api[@]}" | python3 tests/chart_network.py "$release" "${network[@]}"
 planted="$(helm template "$release" "$chart" -f "$chart/ci/kind-network.yaml" "${api[@]}" \
   --set-json 'controller.api.ingressFrom=[{"ipBlock":{"cidr":"0.0.0.0/0"}}]' \
-  | python3 tests/chart_network.py "${network[@]}" 2>&1 >/dev/null || true)"
+  | python3 tests/chart_network.py "$release" "${network[@]}" 2>&1 >/dev/null || true)"
 if [[ $planted != *'the controller API policy admits {"ipBlock": {"cidr": "0.0.0.0/0"}} beyond its peers'* ]]; then
   printf 'the chart check did not flag a planted controller API peer outside its values: %s\n' "$planted" >&2
   exit 1

@@ -22,27 +22,32 @@ def peers_problems(policy: dict, expected: list, label: str) -> list[str]:
     return problems
 
 
-def main(values_paths: list[str], rendered: str) -> list[str]:
+def main(release: str, values_paths: list[str], rendered: str) -> list[str]:
     values: dict = {}
     for path in values_paths:
         values = merged(values, yaml.safe_load(Path(path).read_text()))
     documents = [d for d in yaml.safe_load_all(rendered) if d]
     api = find(documents, "NetworkPolicy", "-controller-api")
     ledger = find(documents, "NetworkPolicy", "-ledger")
-    release = {
+    controller = {
         "podSelector": {
-            "matchLabels": {"app.kubernetes.io/instance": api["metadata"]["labels"]["app.kubernetes.io/instance"]}
+            "matchLabels": {
+                "app.kubernetes.io/name": "agentihooks-swarm",
+                "app.kubernetes.io/instance": release,
+                "app.kubernetes.io/component": "controller",
+            }
         }
     }
-    problems = peers_problems(api, [release, *values["controller"]["api"]["ingressFrom"]], "controller API")
+    problems = peers_problems(api, [controller, *values["controller"]["api"]["ingressFrom"]], "controller API")
     if api["spec"]["ingress"][0].get("ports") != [{"port": "api"}]:
         problems.append("the controller API policy admits ports other than api")
-    problems += peers_problems(ledger, [release, *values["networkPolicy"]["ingressFrom"]], "ledger")
+    in_release = {"podSelector": {"matchLabels": {"app.kubernetes.io/instance": release}}}
+    problems += peers_problems(ledger, [in_release, *values["networkPolicy"]["ingressFrom"]], "ledger")
     return problems
 
 
 if __name__ == "__main__":
-    found = main(sys.argv[1:], sys.stdin.read())
+    found = main(sys.argv[1], sys.argv[2:], sys.stdin.read())
     for problem in found:
         print(problem, file=sys.stderr)
     if found:
