@@ -332,7 +332,7 @@ def test_a_contended_store_retries_then_refuses(store, monkeypatch):
         raise redis.WatchError("changed")
 
     monkeypatch.setattr(incidents, "_record", contended)
-    with pytest.raises(SwarmError, match="kept changing"):
+    with pytest.raises(SwarmError, match="^incident store kept changing; the evaluation was not recorded$"):
         incidents.record(fleet.evaluate(FIRST[2], FOUND, ON))
     assert calls == [3] * fleet.WRITE_ATTEMPTS
 
@@ -340,6 +340,159 @@ def test_a_contended_store_retries_then_refuses(store, monkeypatch):
 def test_incidents_are_kept_per_swarm(store):
     fleet.IncidentStore(store, "one").record(fleet.evaluate(FIRST[5], FOUND, ON))
     assert fleet.IncidentStore(store, "two").incidents() == {}
+
+
+def test_the_dashboard_names_its_sample_and_viewer():
+    view = fleet.dashboard(FIRST[0], SWARM, FOUND)
+    assert {key: view[key] for key in ("seq", "at_ms", "viewer")} == {
+        "seq": 1,
+        "at_ms": FIRST[0]["at_ms"],
+        "viewer": "swarm viewer",
+    }
+    assert sorted(view) == ["at_ms", "panels", "seq", "viewer"]
+    assert fleet.viewer({"brains": []}).actor == ""
+
+
+def test_a_denial_row_shows_the_scoped_fields():
+    denials = fleet.dashboard(FIRST[3], fleet.viewer(FX["grants"]["operator"]), FOUND)["panels"]["knowledge"]["denials"]
+    assert denials == [
+        {
+            "denial_id": "deny-1",
+            "at_ms": FIRST[3]["brain"]["denials"][0]["at_ms"],
+            "requester_scope": "swarm:canary",
+            "target_brain": "personal-operator",
+            "session_title": "Private family medical appointments",
+        }
+    ]
+
+
+def test_alert_facts_name_their_subject_exactly():
+    facts = {alert["rule"]: alert["facts"] for alert in fleet.evaluate(FIRST[4], FOUND, ON)["alerts"]}
+    assert facts == {
+        "protected_idle_pod": {"execution_id": "exe-idle-1", "seat": "eng-3@canary", "pool": "on-demand"},
+        "impossible_pending": {
+            "execution_id": "exe-huge-1",
+            "seat": "eng-2@canary",
+            "reason": "no_permitted_template_fits",
+        },
+        "cross_scope_denial": {
+            "denial_id": "deny-1",
+            "requester_scope": "swarm:canary",
+            "target_brain": "personal-operator",
+        },
+    }
+
+
+def test_an_evaluation_names_its_sample():
+    sample = FIRST[5]
+    assert fleet.evaluate(sample, FOUND, ON)["at_ms"] == sample["at_ms"]
+    assert fleet.evaluate(sample, FOUND, {fleet.ALERTS_ENV: "off"}) == {
+        "seq": 6,
+        "at_ms": sample["at_ms"],
+        "state": "disabled",
+        "alerts": [],
+        "suppressed": {},
+    }
+
+
+@pytest.mark.parametrize(("cpu", "memory"), [(4000, 16384), (4000, 1024), (1000, 16384)])
+def test_a_request_equal_to_a_template_fits(cpu, memory):
+    sample = copy.deepcopy(FIRST[2])
+    sample["attempts"][1]["requested"] = {"cpu_millis": cpu, "memory_mib": memory}
+    assert ("impossible_pending", "exe-huge-1") not in fired(sample)
+
+
+def test_a_fingerprint_is_sixteen_hex_digits_of_rule_and_subject():
+    assert fleet.fingerprint("impossible_pending", "exe-huge-1") == "391f187750bd3590"
+
+
+def test_record_reports_what_it_did(store):
+    incidents = fleet.IncidentStore(store, "fixture")
+    applied = {"seq": 1, "stale": False, "disabled": False, "opened": [], "resolved": []}
+    assert incidents.record(fleet.evaluate(FIRST[0], FOUND, ON)) == applied
+    assert incidents.record(fleet.evaluate(FIRST[0], FOUND, ON)) == {**applied, "stale": True}
+    off = fleet.evaluate(FIRST[1], FOUND, {fleet.ALERTS_ENV: "off"})
+    assert incidents.record(off) == {**applied, "seq": 2, "disabled": True}
+    assert sorted(store.redis.keys()) == sorted([store.key("fixture", "fleet-incidents-seq")])
+    incidents.record(fleet.evaluate(FIRST[2], FOUND, ON))
+    assert sorted(store.redis.keys()) == sorted(
+        [store.key("fixture", "fleet-incidents"), store.key("fixture", "fleet-incidents-seq")]
+    )
+
+
+def test_a_refreshed_incident_keeps_its_opening_and_takes_new_facts(store):
+    incidents = fleet.IncidentStore(store, "fixture")
+    incidents.record(fleet.evaluate(FIRST[4], FOUND, ON))
+    moved = copy.deepcopy(FIRST[5])
+    moved["attempts"][2]["pool"] = "general-spot"
+    incidents.record(fleet.evaluate(moved, FOUND, ON))
+    row = incidents.incidents()[fleet.fingerprint("protected_idle_pod", "exe-idle-1")]
+    assert row["facts"]["pool"] == "general-spot"
+    assert (row["opened_seq"], row["last_seq"], row["state"]) == (5, 6, "open")
+    assert sorted(row) == [
+        "action",
+        "facts",
+        "last_seq",
+        "notified",
+        "opened_seq",
+        "owner",
+        "rule",
+        "severity",
+        "state",
+        "subject",
+    ]
+
+
+def test_delivery_follows_the_order_incidents_opened(store):
+    incidents = fleet.IncidentStore(store, "fixture")
+    for sample in FIRST[2:5]:
+        incidents.record(fleet.evaluate(sample, FOUND, ON))
+    seen: list[dict] = []
+    incidents.deliver(seen.append, ON)
+    assert [notice["rule"] for notice in seen] == ["impossible_pending", "cross_scope_denial", "protected_idle_pod"]
+
+
+def racing(store, monkeypatch, command, race):
+    real, opened = store.redis.pipeline, []
+
+    def pipeline(*args, **kwargs):
+        pipe = real(*args, **kwargs)
+        read = getattr(pipe, command)
+
+        def read_then_race(*keys):
+            value = read(*keys)
+            if len(opened) == 1:
+                race()
+            return value
+
+        setattr(pipe, command, read_then_race)
+        opened.append(pipe)
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    return opened
+
+
+def test_a_newer_evaluation_racing_the_write_wins(store, monkeypatch):
+    incidents = fleet.IncidentStore(store, "fixture")
+    opened = racing(store, monkeypatch, "get", lambda: store.redis.set(incidents.seq_key, 99))
+    assert incidents.record(fleet.evaluate(FIRST[2], FOUND, ON))["stale"] is True
+    assert len(opened) == 2
+    assert incidents.incidents() == {}
+
+
+def test_an_incident_written_during_the_evaluation_is_reread(store, monkeypatch):
+    incidents = fleet.IncidentStore(store, "fixture")
+    huge = fleet.fingerprint("impossible_pending", "exe-huge-1")
+    earlier = {"state": "open", "opened_seq": 2, "last_seq": 2, "notified": True, "facts": {}}
+
+    def race():
+        store.redis.hset(incidents.key, huge, json.dumps(earlier))
+
+    opened = racing(store, monkeypatch, "hgetall", race)
+    assert incidents.record(fleet.evaluate(FIRST[2], FOUND, ON))["opened"] == []
+    assert len(opened) == 2
+    assert incidents.incidents()[huge]["opened_seq"] == 2
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])

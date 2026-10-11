@@ -59,7 +59,8 @@ def rules(found: dict) -> tuple[Rule, ...]:
 
 
 def alerts_enabled(environ: Mapping[str, str] = os.environ) -> bool:
-    return environ.get(ALERTS_ENV, "on").strip().lower() != "off"
+    value = environ.get(ALERTS_ENV)
+    return value is None or value.strip().lower() != "off"
 
 
 def _series(found: dict, panel: str, values: dict) -> dict:
@@ -286,7 +287,7 @@ class IncidentStore:
                     resolved.append(fp)
             pipe.multi()
             if writes:
-                pipe.hset(self.key, mapping={fp: json.dumps(row, sort_keys=True) for fp, row in writes.items()})
+                pipe.hset(self.key, mapping={fp: json.dumps(row) for fp, row in writes.items()})
             pipe.set(self.seq_key, seq)
             pipe.execute()
         return {"seq": seq, "stale": False, "disabled": False, "opened": sorted(opened), "resolved": sorted(resolved)}
@@ -314,5 +315,5 @@ class IncidentStore:
                 pipe.unwatch()
                 return
             pipe.multi()
-            pipe.hset(self.key, fp, json.dumps({**row, "notified": True}, sort_keys=True))
+            pipe.hset(self.key, fp, json.dumps({**row, "notified": True}))
             pipe.execute()
