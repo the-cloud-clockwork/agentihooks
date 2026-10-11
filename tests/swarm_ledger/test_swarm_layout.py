@@ -408,7 +408,7 @@ def test_agents_table_lists_the_master_first_with_overlays_and_stats_carry_the_t
 
 def test_agents_table_shows_live_terminals_and_never_shows_an_aged_or_failed_view_as_live(open_page):
     payload = status()
-    fresh = {"state": "live", "checked_at": NOW_MS - 5_000, "live_at": NOW_MS - 5_000, "fresh_ms": 30_000}
+    fresh = {"state": "live", "checked_at": NOW_MS - 30_000, "live_at": NOW_MS - 30_000, "fresh_ms": 30_000}
     payload["terminals"] = {
         "master-1": {**fresh, "checked_at": NOW_MS - 31_000, "live_at": NOW_MS - 31_000, "reason": ""},
         "eng-58": fresh | {"reason": ""},
