@@ -1,0 +1,17 @@
+# Shared ingress ranges like the Anton overlay's office network and pod CIDR, and the worker peer of the control API.
+networkPolicy:
+  ingressFrom:
+    - ipBlock:
+        cidr: 10.10.30.0/24
+    - ipBlock:
+        cidr: 10.42.0.0/16
+controller:
+  api:
+    ingressFrom:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: swarm-workers
+        podSelector:
+          matchExpressions:
+            - key: swarm.agentihooks.io/controller-owner
+              operator: Exists
