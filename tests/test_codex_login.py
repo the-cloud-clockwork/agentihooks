@@ -6,8 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from scripts import aicode_tokens, codex_login
+from scripts import aicode_tokens, codex_login, openbao_step
 from tests.codex_fakes import BAO_TOKEN, BAO_URL, FakeBao, access_token
+
+NOTE = aicode_tokens.SLUG_NOTE.format(prefix="AH_CX_TOKEN_")
 
 ACCESS = access_token(10, workspace="ws-team", plan="team")
 REFRESH = "rt-value-1"
@@ -66,7 +68,7 @@ def _which(monkeypatch):
 def _login(args, environ=ENV, run=None, console=None, bao=None):
     run = run or _codex()[0]
     console = console or Console(tty=False)
-    return codex_login.main(args, environ, run, codex_login.Console(console.ask, console.hidden, console.tty), bao)
+    return codex_login.main(args, environ, run, openbao_step.Console(console.ask, console.hidden, console.tty), bao)
 
 
 def _home(slug):
@@ -192,7 +194,7 @@ def test_a_login_prints_where_the_token_went_and_what_it_belongs_to(capsys):
     assert _login(["team", "--openbao"], environ={**ENV, **BAO_ENV}, bao=FakeBao()) == 0
     rc = aicode_tokens.rc_file()
     assert capsys.readouterr().out == (
-        f"{aicode_tokens.SLUG_NOTE}\n"
+        f"{NOTE}\n"
         "Step 1/3: sign in to the account in the browser\n"
         "Step 2/3: writing the token block\n"
         f"AH_CX_TOKEN_team written to {rc}\n"
@@ -269,18 +271,18 @@ def test_a_terminal_sees_a_blue_note_a_red_error_and_yellow_prompts(monkeypatch)
     monkeypatch.setattr(sys, "stdout", out)
     monkeypatch.setattr(sys, "stderr", err)
     assert _login(["_bad"]) == 2
-    assert out.getvalue() == f"\x1b[34m{aicode_tokens.SLUG_NOTE}\x1b[0m\n"
+    assert out.getvalue() == f"\x1b[34m{NOTE}\x1b[0m\n"
     assert err.getvalue() == f"\x1b[31magentihooks codex login: {aicode_tokens.SLUG_RULE}: '_bad'\x1b[0m\n"
     console = Console(["n"])
     assert _login(["team"], console=console) == 0
     assert console.prompts == ["\x1b[33mDo you want to store them in OpenBao? [y/N] \x1b[0m"]
 
 
-def test_errors_are_coloured_by_whether_stderr_is_a_terminal(monkeypatch):
-    out, err = io.StringIO(), _Tty()
+@pytest.mark.parametrize("out, err, painted", [(_Tty(), io.StringIO(), True), (io.StringIO(), _Tty(), False)])
+def test_errors_are_coloured_only_when_stdout_is_a_terminal(out, err, painted, monkeypatch):
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setattr(sys, "stdout", out)
     monkeypatch.setattr(sys, "stderr", err)
     assert _login(["_bad"]) == 2
-    assert err.getvalue() == f"\x1b[31magentihooks codex login: {aicode_tokens.SLUG_RULE}: '_bad'\x1b[0m\n"
-    assert out.getvalue() == f"{aicode_tokens.SLUG_NOTE}\n"
+    message = f"agentihooks codex login: {aicode_tokens.SLUG_RULE}: '_bad'"
+    assert err.getvalue() == (f"\x1b[31m{message}\x1b[0m\n" if painted else f"{message}\n")

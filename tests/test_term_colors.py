@@ -21,8 +21,8 @@ def test_a_pipe_or_no_color_gets_the_plain_text(stream, environ):
     assert colors.red("hi", stream, environ) == "hi"
 
 
-def test_an_empty_no_color_still_colours():
-    assert colors.blue("hi", Tty(), {"NO_COLOR": ""}) == "\x1b[34mhi\x1b[0m"
+def test_an_empty_no_color_also_turns_colour_off():
+    assert colors.blue("hi", Tty(), {"NO_COLOR": ""}) == "hi"
 
 
 def test_the_defaults_are_read_at_call_time(monkeypatch):

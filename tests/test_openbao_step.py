@@ -79,6 +79,15 @@ def test_a_flagged_store_without_credentials_is_refused(tty, hidden, message):
         _target(True, {}, Prompts(["https://typed.test"], tty=tty, hidden=hidden))
 
 
+def test_typed_credentials_write_through_the_default_opener(monkeypatch):
+    fake = FakeBao()
+    monkeypatch.setattr(openbao_kv.urllib.request, "urlopen", fake)
+    prompts = Prompts(["y", BAO_URL], hidden=BAO_TOKEN)
+    bao = openbao_step.target(None, {}, openbao_step.Console(prompts.ask, prompts.hidden, prompts.tty), None)
+    assert openbao_step.store(bao, openbao_kv.CODEX_CREDS, {"A": "1"}, ()) == 0
+    assert fake.data == {"A": "1"}
+
+
 def test_a_store_reports_the_written_keys_or_the_failure(capsys):
     bao = openbao_kv.OpenBao(BAO_URL, BAO_TOKEN, FakeBao({"OLD": "o", "KEEP": "k"}))
     assert openbao_step.store(bao, openbao_kv.CODEX_CREDS, {"A": "1"}, ("OLD",)) == 0

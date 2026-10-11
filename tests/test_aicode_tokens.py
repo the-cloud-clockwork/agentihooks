@@ -127,7 +127,7 @@ def test_an_email_follows_the_account_names_rule_one_character_for_one(raw, expe
 
 
 def test_the_slug_note_shows_an_email_turned_into_a_variable_name():
-    assert tokens.SLUG_NOTE == (
+    assert tokens.SLUG_NOTE.format(prefix="AH_CC_TOKEN_") == (
         "Note: use the email of the target account as the slug, so each token is recognisable at a glance "
         "(nestor.colt@gmail.com becomes AH_CC_TOKEN_nestor_coltatgmail_com)."
     )

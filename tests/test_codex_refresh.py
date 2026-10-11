@@ -124,12 +124,36 @@ def test_force_refreshes_that_one_account_now():
     assert grant.calls == ["rt-beta"]
 
 
-def test_folders_that_are_not_valid_slugs_are_ignored():
+def test_folders_that_are_not_valid_slugs_are_ignored(capsys):
     _account("_hidden", 1)
     _account("alpha", 1)
     grant = Grant()
     assert _run([], FLAG, grant) == 0
     assert grant.calls == ["rt-alpha"]
+    assert "_hidden" not in capsys.readouterr().out
+
+
+LEGACY = "ncgmaTCC: skipped, the name is not a slug; run agentihooks codex login ncgmaTCC to store it as ncgmatcc\n"
+
+
+def test_a_legacy_mixed_case_account_is_skipped_with_the_command_that_renames_it(capsys):
+    _account("ncgmaTCC", 1)
+    _account("alpha", 1)
+    grant = Grant()
+    assert _run([], FLAG, grant) == 0
+    assert grant.calls == ["rt-alpha"]
+    assert LEGACY in capsys.readouterr().out
+    assert _run(["--force", "ncgmaTCC"], FLAG, Grant()) == 1
+    assert capsys.readouterr().out == LEGACY + f"ncgmatcc: no such Codex account under {_home('x').parent}\n"
+
+
+def test_a_legacy_openbao_key_is_skipped_with_the_command_that_renames_it(capsys):
+    bao = FakeBao({"AH_CX_TOKEN_ncgmaTCC": access_token(1), "AH_CX_REFRESH_ncgmaTCC": "rt-legacy"})
+    grant = Grant()
+    assert _run(["--force", "ncgmatcc"], {**FLAG, **BAO_ENV, **OPENBAO_STORE}, grant, bao) == 1
+    assert _run([], {**FLAG, **BAO_ENV, **OPENBAO_STORE}, grant, bao) == 0
+    assert not grant.calls
+    assert capsys.readouterr().out == LEGACY + "ncgmatcc: no such Codex account in OpenBao\n" + LEGACY
 
 
 def test_the_local_store_writes_auth_json_then_the_block_then_openbao(monkeypatch):
