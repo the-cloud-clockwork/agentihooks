@@ -5578,6 +5578,9 @@ def cmd_claude(extra_args: list[str]) -> None:
     The api endpoint or the account with a free place under its session band and the
     fewest live sessions wins, split by the api weight; --route forces one account or api.
     """
+    from scripts.claude_login import intercept
+
+    intercept(extra_args)
     import fcntl
 
     from hooks.context.account_sessions import sessions_by_account

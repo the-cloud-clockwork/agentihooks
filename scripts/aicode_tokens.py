@@ -10,8 +10,16 @@ START = "# ===AGENTIHOOKS-AICODING-TOKENS==="
 END = "# ===AGENTIHOOKS-AICODING-TOKENS-END==="
 REFRESH_FLAG = "AGENTIHOOKS_AICODE_TOKEN_REFRESH"
 RESERVED = ("api", "default", "help", "status")
-SLUG_RULE = f"slug must be letters, digits, '_' or '-', not start with '_' and not be {', '.join(RESERVED)}"
+SLUG_RULE = (
+    "slug must be letters, digits and '_' (an email works: other characters become '_'), "
+    f"must not start with '_' and must not be {', '.join(RESERVED)}"
+)
+SLUG_NOTE = (
+    "Note: use the email of the target account as the slug, so each token is recognisable at a glance "
+    "(nestor.colt@gmail.com becomes AH_CC_TOKEN_nestor_colt_gmail_com)."
+)
 _SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_]*")
+_OTHER = re.compile(r"[^A-Za-z0-9]+")
 _EXPORT = re.compile(r"\s*export\s+([^=\s]+)=")
 _write = os.write
 
@@ -21,7 +29,7 @@ class SlugError(ValueError):
 
 
 def slug(raw: str) -> str:
-    found = raw.replace("-", "_")
+    found = _OTHER.sub("_", raw)
     if not _SLUG.fullmatch(found) or found.lower() in RESERVED:
         raise SlugError(f"{SLUG_RULE}: {raw!r}")
     return found

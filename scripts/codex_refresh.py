@@ -17,7 +17,7 @@ from typing import NamedTuple
 
 from hooks import config
 from hooks.context.account_sessions import CODEX_TOKEN_PREFIX
-from scripts import aicode_tokens, codex_login, codex_router, openbao_kv
+from scripts import aicode_tokens, codex_login, codex_router, openbao_kv, term_colors
 
 PROG = "agentihooks codex refresh"
 TOKEN_URL = "https://auth.openai.com/oauth/token"
@@ -122,7 +122,7 @@ def _digest(value: str) -> str:
 
 
 def _failed(slug: str, reason: str) -> dict:
-    print(FAILED.format(slug=slug, reason=reason))
+    print(term_colors.red(FAILED.format(slug=slug, reason=reason)))
     return {}
 
 
@@ -176,7 +176,7 @@ def _store(bao: openbao_kv.OpenBao, entries: dict[str, str]) -> bool:
     try:
         total = openbao_kv.merge(bao, openbao_kv.CODEX_CREDS, entries)
     except Exception as exc:
-        print(f"OpenBao write failed: {exc}")
+        print(term_colors.red(f"OpenBao write failed: {exc}"))
         return False
     print(openbao_kv.summary(openbao_kv.CODEX_CREDS, entries, total))
     return True
@@ -199,7 +199,7 @@ def _attempt(slug: str, action: Callable[[], object]) -> bool:
     try:
         action()
     except OSError as exc:
-        print(WRITE_FAILED.format(slug=slug, error=exc))
+        print(term_colors.red(WRITE_FAILED.format(slug=slug, error=exc)))
         return False
     return True
 
@@ -217,18 +217,18 @@ def _refresh_local(run: Run, home: Path) -> Outcome | None:
     block = _attempt(slug, lambda: aicode_tokens.write_rc(aicode_tokens.rc_file(), rc_entry))
     stored = _store(run.bao, _entries(slug, fresh)) if run.bao else None
     if not saved and not stored:
-        print(LOST.format(slug=slug))
+        print(term_colors.red(LOST.format(slug=slug)))
     return Outcome(saved and block and stored is not False, saved)
 
 
 def run_local(run: Run) -> int:
     homes = _local_accounts(run.force)
     if run.force and not homes:
-        print(NO_LOCAL_ACCOUNT.format(slug=run.force, root=codex_login.homes()))
+        print(term_colors.red(NO_LOCAL_ACCOUNT.format(slug=run.force, root=codex_login.homes())))
         return 1
     outcomes = [outcome for home in homes if (outcome := _refresh_local(run, home)) is not None]
     if run.bao is None and any(outcome.saved for outcome in outcomes):
-        print(BAO_UNSET)
+        print(term_colors.yellow(BAO_UNSET))
     return sum(not outcome.ok for outcome in outcomes)
 
 
@@ -249,11 +249,11 @@ def _recovered(slug: str, access: str | None) -> dict | None:
     tokens = codex_login._tokens(path.parent, path.name)
     kept = _expiry(tokens.get("access_token"))
     if not tokens.get("refresh_token") or kept is None:
-        print(UNREADABLE.format(slug=slug, path=path))
+        print(term_colors.yellow(UNREADABLE.format(slug=slug, path=path)))
         return None
     current = _expiry(access)
     if current is not None and kept <= current:
-        print(STALE.format(slug=slug, path=path))
+        print(term_colors.yellow(STALE.format(slug=slug, path=path)))
         _attempt(slug, path.unlink)
         return None
     return {key: tokens[key] for key in TOKEN_KEYS if tokens.get(key)}
@@ -266,7 +266,7 @@ def _store_or_recover(run: Run, slug: str, fresh: dict) -> bool:
     if _attempt(slug, lambda: _save_auth(recovery, fresh, run.deps.now())):
         print(KEPT.format(slug=slug, path=recovery))
     else:
-        print(LOST.format(slug=slug))
+        print(term_colors.red(LOST.format(slug=slug)))
     return False
 
 
@@ -294,11 +294,11 @@ def run_openbao(run: Run) -> int:
     try:
         secret, _ = openbao_kv.read(run.bao, openbao_kv.CODEX_CREDS)
     except openbao_kv.OpenBaoError as exc:
-        print(f"OpenBao read failed: {exc}")
+        print(term_colors.red(f"OpenBao read failed: {exc}"))
         return 1
     slugs = _bao_accounts(secret, run.force)
     if run.force and not slugs:
-        print(NO_BAO_ACCOUNT.format(slug=run.force))
+        print(term_colors.red(NO_BAO_ACCOUNT.format(slug=run.force)))
         return 1
     return [_refresh_bao(run, secret, slug) for slug in slugs].count(False)
 
@@ -349,14 +349,14 @@ def main(args: list[str], environ: Mapping[str, str] | None = None, deps: Deps |
     try:
         store, run = _settings(args, environ, deps or Deps())
     except ValueError as exc:
-        print(f"{PROG}: {exc}")
+        print(term_colors.red(f"{PROG}: {exc}"))
         return 2
     if store == OPENBAO and run.bao is None:
-        print(BAO_NEEDED)
+        print(term_colors.red(BAO_NEEDED))
         return 1
     with _exclusive() as held:
         if not held:
-            print(BUSY)
+            print(term_colors.yellow(BUSY))
             return 0
         failures = run_openbao(run) if store == OPENBAO else run_local(run)
     return 1 if failures else 0
