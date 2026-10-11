@@ -111,7 +111,8 @@ def test_the_operator_attaches_through_the_controller_with_the_recorded_host_key
 def test_the_terminal_is_built_from_the_pod_policy_namespace_and_the_operator_user_ca(tmp_path):
     key = Ed25519PrivateKey.generate()
     home, run = client(tmp_path, "")
-    settings = environ(tmp_path, **{operator_terminal.CA_KEY_ENV: str(ca_key(tmp_path, key))})
+    (tmp_path / "chosen").mkdir()
+    settings = environ(tmp_path, **{operator_terminal.CA_KEY_ENV: str(ca_key(tmp_path / "chosen", key))})
 
     built = operator_terminal.terminal(SWARM, settings, home, run, lookup)
 
