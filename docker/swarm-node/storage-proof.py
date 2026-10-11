@@ -51,6 +51,7 @@ def main() -> None:
                         sample = memory()
                         peak = {key: max(peak[key], value) for key, value in sample.items()}
                 after = memory()
+                peak = {key: max(peak[key], value) for key, value in after.items()}
                 result = {
                     "path": str(folder),
                     "bytes": file.stat().st_size,
