@@ -101,30 +101,43 @@ class Drill:
         }
 
     def confirm(self):
-        from scripts.inbox.dispatch import Dispatcher
+        import anyio
 
-        dispatcher = Dispatcher(self.inbox)
-        for agent in [self.master, *self.agents]:
-            owner = f"drill:{agent.name}"
-            dispatcher.own(agent.name, owner, takeover=True)
-            for delivery in dispatcher.reserve(agent.name, owner):
-                relevant = delivery.item in self.items()
-                dispatcher.receipts.submitting(delivery.id, owner)
-                receipt = dispatcher.receipts.accept(delivery.id, owner, delivery.digest)
-                assert receipt.state == "accepted" and receipt.committed
-                self.inbox.read(delivery.item, agent.name)
-                self.inbox.close(delivery.item, agent.name, "done", "drill receiver confirmed")
-                if relevant:
-                    self.confirmed.append(delivery.item)
-            assert not dispatcher.reserve(agent.name, owner)
-            dispatcher.release(agent.name, owner)
+        from scripts.inbox import channel
+
+        rig = self
+
+        class Receiver:
+            def __init__(self, agent):
+                self.agent = agent
+
+            async def send(self, message):
+                params = message.message.root.params
+                item_id = params["meta"]["item_id"]
+                assert rig.inbox.get(item_id).state == "delivered"
+                rig.inbox.read(item_id, self.agent.name)
+                rig.inbox.close(item_id, self.agent.name, "done", "drill receiver confirmed")
+                if item_id in rig.items():
+                    rig.confirmed.append(item_id)
+
+        async def deliver():
+            for agent in [rig.master, *rig.agents]:
+                await channel._deliver(rig.inbox, agent.name, Receiver(agent))
+
+        anyio.run(deliver)
 
 
 def fake_ledger():
+    from scripts.swarm.ledger_client import LedgerClient
     from scripts.swarm.store import SwarmError
     from tests.swarm.test_tick import FakeLedger
 
-    class Ledger(FakeLedger):
+    class Ledger(FakeLedger, LedgerClient):
+        metadata = time_left = None
+
+        def _call(self, slug, ops=None):
+            raise AssertionError("unexpected ledger transport")
+
         def __init__(self):
             super().__init__([{"id": f"t{index}", "lane": "eng"} for index in range(3)])
             self.online, self.log = True, []
@@ -151,12 +164,13 @@ def fake_runtime():
     class Runtime(FakeRuntime):
         def __init__(self):
             super().__init__()
-            self.errors, self.resumed, self.healthy = {}, [], False
+            self.errors, self.resumed, self.continued, self.healthy = {}, [], [], False
 
         def observe(self, agent):
             return PaneObservation(self.status(agent), provider_error=self.errors.get(agent.name, ""))
 
         def nudge(self, agent, text):
+            self.continued.append((agent.name, text))
             result = super().nudge(agent, text)
             if not result:
                 self.statuses[agent.name] = "working"
@@ -209,6 +223,7 @@ def drill(tmp_path, monkeypatch):
     monkeypatch.setattr(outage, "HOME", tmp_path / "outages")
     monkeypatch.setattr(ledger_server, "unrelayed_path", lambda: tmp_path / "unrelayed.json")
     monkeypatch.setattr(ledger_server.repository, "get_document", ledger.state)
+    monkeypatch.setattr(ledger_link, "serving", lambda: ledger.online)
     monkeypatch.setattr(snapshot, "worktrees", lambda repo, names: {name: str(tmp_path) for name in names})
     monkeypatch.setenv("AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES", "0")
     monkeypatch.setenv("AGENTIHOOKS_INBOX_QUIET_S", "0")
@@ -224,8 +239,8 @@ def probe_recovery(drill, monkeypatch):
 
     calls = []
 
-    def check(agent):
-        calls.append((agent.name, drill.runtime.healthy))
+    def check(target, directory):
+        calls.append((target, drill.runtime.healthy))
         return provider_probe.Result(drill.runtime.healthy, "drill account request")
 
     monkeypatch.setattr(provider_probe, "check", check)
@@ -244,6 +259,9 @@ def test_every_sender_survives_an_outage_and_is_delivered_and_confirmed_once(dri
         sender for item in found.values() for sender in SENDERS if f"drill {sender}" in item.text
     ) == Counter(SENDERS), drill.errors
     assert drill.accepted[0] == 0
+    for item in found.values():
+        receiver = drill.master if "drill tick notice" in item.text else drill.agents[0]
+        assert item.address in (receiver.name, receiver.seat)
     drill.confirm()
     assert Counter(drill.confirmed) == Counter(found.keys())
     for item_id in found:
@@ -276,5 +294,11 @@ def test_outage_stalled_owners_resume_within_three_ticks_without_a_new_claim(dri
         (drill.agents[2].name, drill.agents[2].task, "conversation-2")
     ]
     assert Counter(drill.runtime.nudged) == Counter(a.name for a in drill.agents[:2])
+    owners = {a.name: a for a in drill.agents}
+    for name, text in drill.runtime.continued:
+        assert "Service is back" in text
+        assert f"continue your own task {owners[name].task}" in text
+        assert "steering.md" in text and "progress.md" in text and "proof.md" in text
+        assert "agentihooks msg inbox" in text and "Keep your existing claim" in text
     if kind == "provider":
         assert any(healthy for _, healthy in calls)
