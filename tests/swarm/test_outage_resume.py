@@ -68,7 +68,11 @@ def test_error_idle_and_dead_owners_resume_their_tasks_within_three_recovery_tic
     outage.observe("sw", "provider", [], 9 * MINUTE)
     for step in range(3):
         tick("sw", store, ledger, runtime, (9 + step) * MINUTE)
-    assert all(runtime.statuses[agent.name] == "working" for agent in agents)
+    assert all(runtime.statuses[agent.name] == "working" for agent in agents), (
+        runtime.statuses,
+        runtime.resumed,
+        runtime.spawned,
+    )
     assert {agent.task: store.claimant("sw", agent.task) for agent in agents} == claims
     assert runtime.spawned == launches
     assert runtime.nudged == [agents[0].name, agents[1].name]
