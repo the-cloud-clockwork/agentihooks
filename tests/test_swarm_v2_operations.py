@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 
 import pytest
@@ -549,13 +550,25 @@ def test_a_prepare_without_a_renderer_keeps_the_journaled_spec(fixture):
     assert again.spec_digest == "sha256:v1:fixture"
 
 
-def test_a_journal_record_written_before_spec_digests_reads_as_empty(fixture):
-    import json
+def strip_spec(store, operation_id):
+    key = store.key("fixture", "runtime-operations")
+    legacy = json.loads(store.redis.hget(key, operation_id))
+    del legacy["spec_digest"]
+    store.redis.hset(key, operation_id, json.dumps(legacy))
 
+
+def test_a_journal_record_written_before_spec_digests_reads_as_empty(fixture):
     store, agent, _, operations = fixture
     first = operations.execute("fixture", request(agent))
-    key = store.key("fixture", "runtime-operations")
-    legacy = json.loads(store.redis.hget(key, first.operation_id))
-    del legacy["spec_digest"]
-    store.redis.hset(key, first.operation_id, json.dumps(legacy))
+    strip_spec(store, first.operation_id)
     assert store.operation_journal.get("fixture", first.operation_id) == first
+
+
+def test_a_spawn_journaled_before_spec_digests_replays_without_a_conflict(fixture):
+    store, agent, _, _ = fixture
+    transport, operations = rendering(store)
+    applied = operations.execute("fixture", request(agent))
+    strip_spec(store, applied.operation_id)
+    replayed = operations.execute("fixture", request(agent))
+    assert replayed == replace(applied, spec_digest="")
+    assert transport.creations == 1

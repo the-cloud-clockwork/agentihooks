@@ -138,7 +138,7 @@ class OperationJournal:
                 expected, controller_epoch=previous.controller_epoch, spec_digest=""
             ):
                 raise OperationConflict(_ERRORS["payload"])
-            if agent.runtime_backend in (specs or {}) and previous.spec_digest != expected.spec_digest:
+            if agent.runtime_backend in (specs or {}) and previous.spec_digest not in ("", expected.spec_digest):
                 raise OperationConflict(_ERRORS["spec"])
             return previous
 

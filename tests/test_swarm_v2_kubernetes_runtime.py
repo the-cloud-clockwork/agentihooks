@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.swarm_v2.kubernetes import runtime, watch
+from scripts.swarm_v2.kubernetes import adoption, runtime, watch
 from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused
 from scripts.swarm_v2.kubernetes.runtime import KubernetesTransport, PodStatus, pod_status
 from scripts.swarm_v2.kubernetes.spec import PodTemplate
@@ -20,10 +20,15 @@ DIGEST = "payload-digest"
 ZERO = {"created": 0, "adopted": 0, "observed": 0, "quarantined": 0, "disabled": 0}
 
 
+def journaled(launch=None) -> str:
+    rendered = PodTemplate(cases.policy()).render(launch or cases.launch())
+    return adoption.identity(rendered.digest, rendered.pod["spec"])
+
+
 def operation(
     action="spawn", generation=3, execution_id=EXECUTION, payload_digest=DIGEST, spec_digest=None
 ) -> Operation:
-    spec = PodTemplate(cases.policy()).render(cases.launch()).digest if spec_digest is None else spec_digest
+    spec = journaled() if spec_digest is None else spec_digest
     return Operation("op-1", execution_id, generation, action, "kubernetes", payload_digest, {}, spec_digest=spec)
 
 
@@ -276,15 +281,56 @@ def test_observation_refuses_a_matching_pod_when_the_journal_holds_no_spec_diges
     assert sender.quarantined["uid-1"]["reason"] == "spec"
 
 
-def test_observation_trusts_the_journaled_digest_over_the_pod_annotation():
+def test_observation_refuses_a_pod_whose_live_fields_changed_after_creation():
     sender = transport()
-    existing(sender, **{runtime.SPEC_DIGEST: "sha256:journaled"})
-    assert sender.observe_operation(operation(spec_digest="sha256:journaled")) == applied()
+    pod = existing(sender)
+    pod["spec"]["containers"][0]["image"] = "registry.example/agent@sha256:" + "f" * 64
+    sender.api.objects[NAME] = pod
+    assert sender.observe_operation(operation()) == Observation(Phase.REFUSED)
+    assert sender.quarantined["uid-1"]["reason"] == "spec"
 
 
-def test_spec_digest_is_the_rendered_template_digest():
+def test_observation_matches_an_admission_defaulted_pod():
     sender = transport()
-    assert sender.spec_digest(cases.launch()) == PodTemplate(cases.policy()).render(cases.launch()).digest
+    sender.api.objects[NAME] = defaulted(existing(sender))
+    assert sender.observe_operation(operation()) == applied()
+
+
+def test_spec_digest_is_the_identity_of_the_rendered_pod_and_its_fields():
+    sender = transport()
+    assert sender.spec_digest(cases.launch()) == journaled()
+    assert journaled() != PodTemplate(cases.policy()).render(cases.launch()).digest
+
+
+def test_a_refused_launch_counts_one_refusal_across_prepare_and_apply():
+    sender = transport()
+    hostile = {**cases.launch(), "provider_account": "cluster-admin-token"}
+    assert sender.spec_digest(hostile) == ""
+    assert sender.apply_operation(operation(spec_digest=""), hostile) == Observation(Phase.REFUSED)
+    assert sender.template.pod_spec_validation_failures_total() == {"account": 1}
+    assert sender.api.create_calls == 0
+
+
+def test_apply_reuses_the_prepared_render_only_once():
+    sender = transport()
+    render, renders = sender.template.render, []
+    sender.template.render = lambda payload: renders.append(payload) or render(payload)
+    sender.spec_digest(cases.launch())
+    assert sender.apply_operation(operation(), cases.launch()) == applied()
+    assert len(renders) == 1
+    sender.apply_operation(operation(), cases.launch())
+    assert len(renders) == 2
+
+
+def test_a_prepared_render_of_another_payload_is_not_reused():
+    sender = transport()
+    other = {**cases.launch(), "task_payload": {"prompt": "Other."}}
+    sender.spec_digest(other)
+    assert sender.apply_operation(operation(), cases.launch()) == applied()
+    pod = sender.api.objects[NAME]
+    assert (
+        pod["metadata"]["annotations"][runtime.SPEC_DIGEST] == PodTemplate(cases.policy()).render(cases.launch()).digest
+    )
 
 
 def test_spec_digest_of_a_refused_launch_is_empty():
@@ -301,6 +347,7 @@ def test_apply_refuses_a_launch_whose_render_differs_from_the_journal():
 
 
 def defaulted(pod: dict) -> dict:
+    # The fields anton-prod's API server, LimitRange and RuntimeClass admission added in a server dry run.
     live = json.loads(json.dumps(pod))
     spec = live["spec"]
     spec.update(
@@ -310,16 +357,24 @@ def defaulted(pod: dict) -> dict:
             "serviceAccount": spec["serviceAccountName"],
             "priority": 0,
             "preemptionPolicy": "PreemptLowerPriority",
-            "imagePullSecrets": [{"name": "service-account-pull"}],
+            "overhead": {"cpu": "250m", "memory": "130Mi"},
+            "nodeName": "anton-node-1",
         }
     )
     for key in ("hostNetwork", "hostPID", "hostIPC"):
         spec.pop(key)
-    spec["securityContext"]["seLinuxOptions"] = {"level": "s0:c1,c2"}
-    spec["tolerations"].append({"key": "node.kubernetes.io/not-ready", "operator": "Exists", "effect": "NoExecute"})
+    spec["nodeSelector"]["katacontainers.io/kata-runtime"] = "true"
+    spec["tolerations"].append(
+        {"key": "node.kubernetes.io/not-ready", "operator": "Exists", "effect": "NoExecute", "tolerationSeconds": 300}
+    )
+    for volume in spec["volumes"]:
+        if "emptyDir" in volume:
+            volume["emptyDir"]["sizeLimit"] = "9Gi"
     for container in spec["containers"]:
         container.update({"terminationMessagePath": "/dev/termination-log", "terminationMessagePolicy": "File"})
-        container["securityContext"]["procMount"] = "Default"
+        container["resources"]["limits"]["cpu"] = "2"
+        for mode in ("startup", "readiness", "liveness"):
+            container[f"{mode}Probe"]["successThreshold"] = 1
     return live
 
 
@@ -381,9 +436,10 @@ def test_a_controller_spawn_journals_the_rendered_spec_digest():
         created = controller.execute(request)
         journaled = world.store.operation_journal.get(cases.SLUG, created.operation_id)
     assert created.phase is Phase.APPLIED
-    assert journaled.spec_digest == PodTemplate(cases.policy()).render(request.payload).digest
+    rendered = PodTemplate(cases.policy()).render(request.payload)
+    assert journaled.spec_digest == adoption.identity(rendered.digest, rendered.pod["spec"])
     pod = world.api.objects[f"swarm-{attempt.execution_id}"]
-    assert pod["metadata"]["annotations"][runtime.SPEC_DIGEST] == journaled.spec_digest
+    assert pod["metadata"]["annotations"][runtime.SPEC_DIGEST] == rendered.digest
 
 
 def test_observation_quarantines_a_labelled_pod_of_another_generation():

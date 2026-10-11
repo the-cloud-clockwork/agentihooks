@@ -1,73 +1,66 @@
-"""Compare a live Pod with the Pod rendered for its operation, tolerating the fields the API server and admission add."""
+"""The security relevant fields of a Pod spec, compared exactly; admission may default every other field."""
 
-HOST_NAMESPACES = ("hostNetwork", "hostPID", "hostIPC")
+from scripts.swarm_v2.kubernetes.spec import canonical_digest
+
+GROUPS = ("image", "arguments", "secrets", "environment", "service-account", "volumes", "security-context")
+HOST_SHARING = ("hostNetwork", "hostPID", "hostIPC", "shareProcessNamespace")
+KINDS = ("initContainers", "containers", "ephemeralContainers")
 
 
 def _containers(spec: dict) -> list[dict]:
-    return [*spec.get("initContainers", []), *spec.get("containers", [])]
+    return [container for kind in KINDS for container in spec.get(kind, [])]
 
 
-def _images(spec: dict) -> dict:
-    return {container.get("name"): container.get("image") for container in _containers(spec)}
+def _named(spec: dict, *keys: str) -> dict:
+    return {container.get("name", ""): [container.get(key) for key in keys] for container in _containers(spec)}
 
 
-def _arguments(spec: dict) -> dict:
-    return {container.get("name"): (container.get("command"), container.get("args")) for container in _containers(spec)}
-
-
-def _secret_refs(spec: dict) -> list[tuple]:
-    refs = []
+def _secret_refs(spec: dict) -> list[list]:
+    refs = [["pull", ref.get("name")] for ref in spec.get("imagePullSecrets", [])]
     for container in _containers(spec):
         for env in container.get("env", []):
             if ref := env.get("valueFrom", {}).get("secretKeyRef"):
-                refs.append(("env", container.get("name"), env.get("name"), ref.get("name"), ref.get("key")))
+                refs.append(["env", container.get("name", ""), env.get("name"), ref.get("name"), ref.get("key")])
         for source in container.get("envFrom", []):
             if "secretRef" in source:
-                refs.append(("envFrom", container.get("name"), source["secretRef"].get("name")))
+                refs.append(["envFrom", container.get("name", ""), source["secretRef"].get("name")])
     for volume in spec.get("volumes", []):
         if "secret" in volume:
-            refs.append(("volume", volume.get("name"), volume["secret"].get("secretName")))
+            refs.append(["volume", volume.get("name"), volume["secret"].get("secretName")])
         for source in volume.get("projected", {}).get("sources", []):
             if "secret" in source:
-                refs.append(("projected", volume.get("name"), source["secret"].get("name")))
+                refs.append(["projected", volume.get("name"), source["secret"].get("name")])
     return sorted(refs, key=repr)
 
 
-def _pull_secrets(expected: dict, live: dict) -> bool:
-    # ServiceAccount admission adds the account's pull secrets only to a Pod that names none.
-    return "imagePullSecrets" not in expected or live.get("imagePullSecrets") == expected["imagePullSecrets"]
+def _volume(volume: dict) -> dict:
+    # The API server rewrites an emptyDir size into its canonical quantity.
+    if "emptyDir" not in volume:
+        return volume
+    return {**volume, "emptyDir": {key: value for key, value in volume["emptyDir"].items() if key != "sizeLimit"}}
 
 
-def _account(spec: dict) -> tuple:
-    return spec.get("serviceAccountName"), spec.get("automountServiceAccountToken")
+def fields(spec: dict) -> dict:
+    return {
+        "image": _named(spec, "image"),
+        "arguments": _named(spec, "command", "args"),
+        "secrets": _secret_refs(spec),
+        "environment": _named(spec, "env", "envFrom"),
+        "service-account": [spec.get("serviceAccountName"), spec.get("automountServiceAccountToken")],
+        "volumes": [[_volume(volume) for volume in spec.get("volumes", [])], _named(spec, "volumeMounts")],
+        "security-context": {
+            "pod": spec.get("securityContext"),
+            "containers": _named(spec, "securityContext"),
+            "host": [bool(spec.get(key)) for key in HOST_SHARING],
+            "runtimeClassName": spec.get("runtimeClassName"),
+        },
+    }
 
 
-def _covers(expected: dict, live: object) -> bool:
-    return isinstance(live, dict) and all(live.get(key) == value for key, value in expected.items())
-
-
-def _secured(expected: dict, live: dict) -> bool:
-    if not _covers(expected.get("securityContext", {}), live.get("securityContext", {})):
-        return False
-    if any(bool(live.get(key, False)) != bool(expected.get(key, False)) for key in HOST_NAMESPACES):
-        return False
-    running = {container.get("name"): container for container in _containers(live)}
-    return all(
-        _covers(container.get("securityContext", {}), running.get(container.get("name"), {}).get("securityContext"))
-        for container in _containers(expected)
-    )
+def identity(pod_digest: object, spec: dict) -> str:
+    return canonical_digest({"pod": pod_digest, "fields": fields(spec)})
 
 
 def mismatch(rendered: dict, live: dict) -> str:
-    expected, actual = rendered.get("spec", {}), live.get("spec", {})
-    if _images(expected) != _images(actual):
-        return "image"
-    if _arguments(expected) != _arguments(actual):
-        return "arguments"
-    if _secret_refs(expected) != _secret_refs(actual) or not _pull_secrets(expected, actual):
-        return "secrets"
-    if _account(expected) != _account(actual):
-        return "service-account"
-    if not _secured(expected, actual):
-        return "security-context"
-    return ""
+    expected, actual = fields(rendered.get("spec", {})), fields(live.get("spec", {}))
+    return next((group for group in GROUPS if expected[group] != actual[group]), "")
