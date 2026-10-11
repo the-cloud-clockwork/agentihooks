@@ -839,6 +839,24 @@ def test_each_container_owns_its_hardened_security_context(tmp_path):
     assert spec.HARDENED["capabilities"] == {"drop": ["ALL"]}
 
 
+def test_a_bundle_only_adds_its_init_container_folder_mount_and_pull_access(tmp_path):
+    bundled, plain = bundled_pod(tmp_path)["spec"], render()[1].pod["spec"]
+
+    def without(body: dict, *keys: str) -> dict:
+        return {key: value for key, value in body.items() if key not in keys}
+
+    def unbundled(items: list) -> list:
+        return [item for item in items if item["name"] != "bundle"]
+
+    assert without(bundled, "initContainers", "imagePullSecrets", "volumes", "containers") == without(
+        plain, "volumes", "containers"
+    )
+    assert unbundled(bundled["volumes"]) == plain["volumes"]
+    [agent], [base] = bundled["containers"], plain["containers"]
+    assert without(agent, "volumeMounts") == without(base, "volumeMounts")
+    assert unbundled(agent["volumeMounts"]) == base["volumeMounts"]
+
+
 def test_a_policy_without_a_bundle_renders_no_init_container_and_no_pull_access():
     pod = render()[1].pod
 
