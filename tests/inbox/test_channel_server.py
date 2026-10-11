@@ -344,13 +344,12 @@ def test_main_serves_this_sessions_identity(store, monkeypatch):
     assert ran == [(channel.serve, store, "bob")]
 
 
-def test_main_without_redis_exits_with_the_reason(monkeypatch, capsys):
-    def down():
-        raise InboxError("Redis is unreachable")
+def test_main_without_identity_exits_with_the_reason(monkeypatch, capsys):
+    def missing():
+        raise InboxError("no session identity")
 
-    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "bob")
-    monkeypatch.setattr(channel, "connect", down)
+    monkeypatch.setattr(channel, "identity", missing)
     with pytest.raises(SystemExit) as stopped:
         channel.main()
     assert stopped.value.code == 1
-    assert capsys.readouterr().err == "agentihooks inbox channel: Redis is unreachable\n"
+    assert capsys.readouterr().err == "agentihooks inbox channel: no session identity\n"
