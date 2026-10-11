@@ -199,6 +199,7 @@ jobs:
         with:
           path: ~/dev-durations
           key: durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || github.sha }}
+          restore-keys: durations-merged-
           lookup-only: true
 
       # Queue refs and dispatched branches cannot read caches saved on dev, so they fetch dev's artifacts on the App's own API quota.
