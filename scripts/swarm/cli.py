@@ -1517,6 +1517,14 @@ def cmd_say(store, args):
     print(json.dumps({"sent": sent}))
 
 
+def queued_say(args, who) -> bool:
+    """A swarm say to agents that met a Redis outage is queued in the outbox, its recipients looked up on replay."""
+    if getattr(args, "command", "") != "say" or args.to in ("", delivery.OPERATOR):
+        return False
+    print(json.dumps(delivery.queue(args.slug, args.text, args.name or who.name, args.to, fyi=args.fyi)))
+    return True
+
+
 def cmd_terminal(store, args):
     from scripts.swarm_v2.kubernetes import operator_terminal
 
@@ -1666,15 +1674,10 @@ def main(argv):
         print(f"swarm: {text}", file=sys.stderr)
         return 1
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+    from redis.exceptions import RedisError
+
     try:
-        try:
-            store = connect()
-        except Unreachable:
-            if getattr(args, "command", "") != "say" or args.to in ("", delivery.OPERATOR):
-                raise
-            sender = args.name or who.name
-            print(json.dumps(delivery.queue(args.slug, args.text, sender, args.to, fyi=args.fyi)))
-            return 0
+        store = connect()
         if "slug" in args:
             args.slug = store.names.swarm_slug(args.slug)
         action = getattr(args, "command", "")
@@ -1685,6 +1688,13 @@ def main(argv):
             handler(store, args)
         if action in control_notifications.CONTROLS:
             control_notifications.notify(store, args, LedgerClient(), before, action)
+    except Unreachable as exc:
+        if not queued_say(args, who):
+            print(f"swarm: {exc}", file=sys.stderr)
+            return 1
+    except RedisError:
+        if not queued_say(args, who):
+            raise
     except (SwarmError, InboxError) as exc:
         print(f"swarm: {exc}", file=sys.stderr)
         return 1

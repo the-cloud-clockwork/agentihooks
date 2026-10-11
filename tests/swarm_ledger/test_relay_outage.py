@@ -99,14 +99,43 @@ def assert_each_write_reached_its_agent_once(outage):
     assert mentions(boss, "please rebase onto dev") == [] and mentions(eng, "use the queue") == []
 
 
-def test_writes_made_while_redis_is_down_reach_their_agents_once_after_recovery(outage):
+def test_writes_made_while_redis_is_down_reach_their_agents_once_after_recovery(outage, monkeypatch):
     phase, question = make_ledger()
     outage.down()
     operator_writes(phase, question)
+    swarm_say(monkeypatch)
     outage.down(False)
     ledger_server.replay_unrelayed()
     ledger_server.replay_unrelayed()
+    replay_outbox(outage)
     assert_each_write_reached_its_agent_once(outage)
+    assert len(mentions(outage.texts(ENG.seat), "the docs build is green")) == 1
+
+
+def swarm_say(monkeypatch):
+    from scripts.swarm import cli
+
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", BOSS.name)
+    assert cli.main([SLUG, "say", "the docs build is green", "--to", "eng"]) == 0
+
+
+def replay_outbox(outage):
+    from scripts.inbox import outbox
+
+    outbox.flush(InboxStore(outage.redis))
+    outbox.flush(InboxStore(outage.redis))
+    assert not outbox.waiting()
+
+
+def test_a_swarm_say_whose_recipient_lookup_loses_redis_reaches_its_agent_once_after_recovery(outage, monkeypatch):
+    from scripts.swarm import cli
+
+    monkeypatch.setattr(cli, "connect", lambda: RedisStore(outage.redis))
+    outage.down()
+    swarm_say(monkeypatch)
+    outage.down(False)
+    replay_outbox(outage)
+    assert len(mentions(outage.texts(ENG.seat), "the docs build is green")) == 1
 
 
 def test_the_next_write_after_recovery_replays_every_revision_it_could_not_relay(outage):
