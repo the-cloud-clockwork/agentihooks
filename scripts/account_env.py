@@ -20,7 +20,7 @@ SECRET_PATH = "secret/data/agentihooks/claude-creds"
 FALLBACK_NAME = Path("accounts") / "claude.env"
 TIMEOUT_S = 3
 USAGE = "usage: agentihooks accounts env"
-NAME = re.compile(rf"{TOKEN_PREFIX}[A-Za-z0-9_]+")
+NAME = re.compile(rf"{TOKEN_PREFIX}[a-z0-9_]+")
 
 
 def from_openbao(environ: Mapping[str, str]) -> dict[str, str] | None:

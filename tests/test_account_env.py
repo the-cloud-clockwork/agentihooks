@@ -18,8 +18,9 @@ ACCOUNTS = {
     "AH_CC_TOKEN_ops_2026attcc_dev": "tok b'quoted",
     "AH_CC_TOKEN_sv2_alphaatexample_com": "tok-a",
     "AH_CC_TOKEN_emptyatx_io": "",
-    "OPS+2026@TCC.DEV": "tok-email",
+    "ops+2026@example.com": "tok-email",
     "AH_CC_TOKEN_bad name": "tok-bad",
+    "AH_CC_TOKEN_Upper_x": "tok-upper",
     "OTHER_NAME": "tok-other",
 }
 
