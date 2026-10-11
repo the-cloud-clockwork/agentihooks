@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import shutil
 import subprocess
 import time
 from datetime import UTC, datetime
@@ -145,8 +146,8 @@ def test_a_routed_launch_counts_by_its_subcommand_after_the_router_options(tmp_p
     _proc(root, 406, "codex", 1, ["codex", "--no-daemon", "exec", "x"], alpha)
     _proc(root, 407, "codex", 1, ["codex", "resume", "exec"], {})
     _proc(root, 408, "codex", 1, ["codex", "--config=x=1", "exec"], {})
-    assert account_sessions.codex_sessions_by_account(root) == {"alpha": 2, "default": 2}
-    assert account_sessions.live_codex_sessions(root) == 4
+    assert account_sessions.codex_sessions_by_account(root) == {"alpha": 4, "default": 3}
+    assert account_sessions.live_codex_sessions(root) == 7
 
 
 @pytest.mark.parametrize(
@@ -174,9 +175,9 @@ def test_a_routed_launch_counts_by_its_subcommand_after_the_router_options(tmp_p
         "--ask-for-approval",
     ],
 )
-def test_an_option_value_ahead_of_exec_is_not_taken_for_the_subcommand(flag, tmp_path):
+def test_an_option_value_ahead_of_a_server_is_not_taken_for_the_subcommand(flag, tmp_path):
     root = tmp_path / "proc"
-    _proc(root, 420, "codex", 1, ["codex", flag, "value", "exec", "ok"], {"AH_CX_TOKEN_alpha": "a"})
+    _proc(root, 420, "codex", 1, ["codex", flag, "value", "mcp-server"], {"AH_CX_TOKEN_alpha": "a"})
     assert account_sessions.codex_sessions_by_account(root) == {}
 
 
@@ -332,7 +333,7 @@ def test_two_concurrent_accounts_read_count_and_place_apart(tmp_path, monkeypatc
     readings = codex_router.quotas(pool, env)
     assert (readings["alpha"].seven_day.used, readings["alpha"].seven_day.resets_at) == (97.0, int(now) + 86400)
     assert (readings["beta"].seven_day.used, readings["beta"].five_hour.resets_at) == (40.0, int(now) + 1800)
-    assert codex_router.codex_sessions_by_account() == {"alpha": 1, "beta": 2}
+    assert codex_router.codex_sessions_by_account() == {"alpha": 1, "beta": 3}
     launched = {}
     status = codex_router.main(["exec", "ok"], env, lambda *args: launched.update(argv=args[1], env=args[2]), run)
     assert status == 0
@@ -341,3 +342,36 @@ def test_two_concurrent_accounts_read_count_and_place_apart(tmp_path, monkeypatc
     assert launched["env"][codex_router.ACCOUNT_ID_ENV] == "acct-b"
     assert launched["argv"][-2:] == ["exec", "ok"]
     assert [argv[-2:] for argv in probes] == [["login", "status"]]
+
+
+def test_two_concurrent_exec_launches_land_on_two_accounts_and_an_ended_run_frees_its_slot(tmp_path, monkeypatch):
+    now = time.time()
+    home = tmp_path / "h"
+    limits = _windows(10.0, 20.0, int(now) + 3600, int(now) + 400000)
+    _rollout(home, ALPHA, [_event(now - 60, limits)], mtime=now - 60)
+    _rollout(home, BETA, [_event(now - 60, limits)], mtime=now - 60)
+    monkeypatch.setattr(codex_router, "_registry", lambda: {ALPHA: {"account": "alpha"}, BETA: {"account": "beta"}})
+    root = tmp_path / "proc"
+    root.mkdir()
+    monkeypatch.setattr(
+        codex_router, "codex_sessions_by_account", lambda: account_sessions.codex_sessions_by_account(root)
+    )
+    env = {"HOME": str(home), "AH_CX_TOKEN_alpha": _jwt("acct-a"), "AH_CX_TOKEN_beta": _jwt("acct-b")}
+
+    def run(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 1, "", "")
+
+    def launch(pid):
+        launched = {}
+        status = codex_router.main(["exec", "ok"], env, lambda *args: launched.update(argv=args[1], env=args[2]), run)
+        assert status == 0
+        _proc(root, pid, "codex", 1, launched["argv"], launched["env"])
+        return account_sessions.session_account(pid, root)
+
+    first = launch(600)
+    second = launch(601)
+    assert {first, second} == {"alpha", "beta"}
+    assert account_sessions.codex_sessions_by_account(root) == {"alpha": 1, "beta": 1}
+    shutil.rmtree(root / "600")
+    assert account_sessions.codex_sessions_by_account(root) == {second: 1}
+    assert launch(602) == first
