@@ -277,8 +277,7 @@
   "PLR0912": 15
  },
  "scripts/swarm_ledger/ledger_server.py::Handler.do_GET": {
-  "C901": 16,
-  "PLR0912": 15
+  "C901": 13
  },
  "scripts/swarm_ledger/ledger_server.py::Handler.do_POST": {
   "C901": 14,
