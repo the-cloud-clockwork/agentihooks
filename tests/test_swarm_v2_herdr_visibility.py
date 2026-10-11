@@ -75,7 +75,7 @@ def test_publish_replaces_every_row_without_screen_text(store):
 
 
 def test_read_judges_every_row_at_the_reader_clock_in_agent_order(store):
-    visibility.publish(store, "sw", [View("b", "m", "w1:p1", "i", LIVE, NOW, NOW), live()])
+    visibility.publish(store, "sw", [live(), View("b", "m", "w1:p1", "i", LIVE, NOW, NOW)])
     rows = visibility.read(store, "sw", NOW + FRESH_MS + 1)
     assert list(rows) == ["b", AGENT]
     assert rows[AGENT] == asdict(judged(live(), NOW + FRESH_MS + 1))
