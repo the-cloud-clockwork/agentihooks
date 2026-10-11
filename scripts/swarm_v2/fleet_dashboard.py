@@ -8,8 +8,6 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-import redis
-
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2 import telemetry
 
@@ -265,10 +263,12 @@ class IncidentStore:
         return self._retrying(self._record, seq, evaluated["alerts"], set(evaluated["held"]))
 
     def _retrying(self, write: Callable[..., dict | None], *args: object) -> dict | None:
+        from redis.exceptions import WatchError
+
         for _ in range(WRITE_ATTEMPTS):
             try:
                 return write(*args)
-            except redis.WatchError:
+            except WatchError:
                 continue
         raise SwarmError("incident store kept changing; the write was not recorded")
 

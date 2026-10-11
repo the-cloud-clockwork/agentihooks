@@ -2,11 +2,12 @@ import copy
 import json
 from pathlib import Path
 
-import fakeredis
 import pytest
 
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2 import fleet_dashboard as fleet
+
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-OBS-05"
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2"
@@ -20,6 +21,8 @@ SWARM = fleet.viewer(FX["grants"]["swarm"])
 
 @pytest.fixture
 def store():
+    import fakeredis
+
     return RedisStore(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True))
 
 
