@@ -877,6 +877,7 @@ def test_the_kubernetes_runtime_prompts_through_the_controller_terminal(tmp_path
 
 def test_the_controller_publishes_terminal_views_through_its_client_terminal(tmp_path, monkeypatch):
     from scripts.swarm_v2.herdr import visibility
+    from scripts.swarm_v2.herdr.capabilities import Qualifier
     from scripts.swarm_v2.herdr.target import DELIVERIES
     from scripts.swarm_v2.kubernetes.terminal_views import TerminalViews
 
@@ -890,7 +891,9 @@ def test_the_controller_publishes_terminal_views_through_its_client_terminal(tmp
         assert (viewer.run, viewer.aggregation) == (terminal.run, True)
         assert router.store is terminal.registrations.store
         assert router.catalog is terminal.registrations.catalog
-        assert (router.qualifier, router.run) == (terminal.qualifier, terminal.run)
+        assert (router.run, router.mutations) == (terminal.run, False)
+        assert isinstance(router.qualifier, Qualifier) and router.qualifier is not terminal.qualifier
+        assert router.qualifier.probe.__closure__[0].cell_contents is terminal.run
         assert router.deliveries.path == terminal.home.terminals / DELIVERIES
         store.redis.hset(store.key(SLUG, visibility.KEY), "retired", "{}")
         assert service.tick() is True
@@ -900,7 +903,7 @@ def test_the_controller_publishes_terminal_views_through_its_client_terminal(tmp
         service.stop()
 
 
-def test_terminal_aggregation_switched_off_builds_a_viewer_that_never_refreshes(tmp_path, monkeypatch):
+def test_terminal_aggregation_switched_off_builds_a_viewer_without_aggregation(tmp_path, monkeypatch):
     service, _, _ = _anton_client(tmp_path, monkeypatch, _store(), **{deployed.AGGREGATION_ENV: "off"})
     try:
         assert deployed.AGGREGATION_ENV == "AGENTIHOOKS_TERMINAL_AGGREGATION"

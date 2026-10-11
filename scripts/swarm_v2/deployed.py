@@ -8,7 +8,9 @@ from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2 import image_tag
 from scripts.swarm_v2.accounts import AccountCapacity
 from scripts.swarm_v2.auth_context import Registration
+from scripts.swarm_v2.herdr.capabilities import Qualifier, machine_probe
 from scripts.swarm_v2.herdr.endpoints import Clients
+from scripts.swarm_v2.herdr.target import DELIVERIES, Router
 from scripts.swarm_v2.herdr.viewer import Viewer
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 from scripts.swarm_v2.kubernetes.client import ApiRefused, KubeHttp, PodApi, PodClient
@@ -191,8 +193,11 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
 
 def terminal_views(controller: "Controller", environ: Mapping[str, str]) -> TerminalViews:
     terminal = controller.terminals.terminal
+    registrations, journal = terminal.registrations, terminal.home.terminals / DELIVERIES
+    qualifier = Qualifier(machine_probe(terminal.run))
+    router = Router(registrations.store, registrations.catalog, qualifier, terminal.run, journal, mutations=False)
     aggregation = environ.get(AGGREGATION_ENV) != "off"
-    viewer = Viewer(terminal.router(), terminal.run, OPERATOR, aggregation=aggregation)
+    viewer = Viewer(router, terminal.run, OPERATOR, aggregation=aggregation)
     return TerminalViews(controller.store, controller.slug, viewer)
 
 
