@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
 
+from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import serialization
 
 from scripts.swarm_v2.herdr.capabilities import Incompatible, Qualifier, Unreachable, Verdict, machine_probe
@@ -153,7 +154,12 @@ class Terminal:
             private, public = key_pair()
             _write(self.home.identity, private)
             return public
-        key = serialization.load_ssh_private_key(self.home.identity.read_bytes(), None)
+        try:
+            key = serialization.load_ssh_private_key(self.home.identity.read_bytes(), None)
+        except (OSError, ValueError, TypeError, UnsupportedAlgorithm):
+            raise EndpointRefused(
+                "client_key", "terminal client identity is not a readable OpenSSH private key"
+            ) from None
         return (
             key.public_key().public_bytes(serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH).decode()
         )
