@@ -326,6 +326,7 @@ def test_the_grant_posts_the_refresh_form_to_the_openai_token_endpoint():
     assert codex_refresh.grant("rt-one", opener=opener) == {"access_token": FRESH}
     request, timeout = seen[0]
     assert (request.full_url, request.get_method(), timeout) == ("https://auth.openai.com/oauth/token", "POST", 20)
+    assert request.get_header("Accept") == "application/json"
     assert urllib.parse.parse_qs(request.data.decode()) == {
         "grant_type": ["refresh_token"],
         "refresh_token": ["rt-one"],
@@ -499,7 +500,7 @@ def test_messages_for_a_missing_authority_openbao_settings_and_a_busy_machine(ca
 def test_the_lock_folder_is_created_when_missing(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "AGENTIHOOKS_HOME", str(tmp_path / "fresh" / "home"))
     _account("alpha", 8)
-    assert _run([], {**FLAG, "AGENTIHOOKS_AICODE_TOKEN_STORE": "LOCAL"}) == 0
+    assert _run([], {**FLAG, "AGENTIHOOKS_AICODE_TOKEN_STORE": " LOCAL "}) == 0
     assert (tmp_path / "fresh" / "home" / "codex-refresh.lock").exists()
 
 
@@ -572,3 +573,28 @@ def test_a_failed_pair_save_names_the_account_and_the_error(store, monkeypatch, 
     out = capsys.readouterr().out
     assert "OpenBao write failed: OpenBao HTTP 503: sealed\n" in out
     assert "alpha: write failed: [Errno 28] No space left on device\n" in out
+
+
+def _locked_recovery(monkeypatch):
+    unlink = Path.unlink
+
+    def guarded(self, *args, **kwargs):
+        if self.name == "recovery.json":
+            raise PermissionError(13, "Permission denied", str(self))
+        return unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", guarded)
+
+
+@pytest.mark.parametrize("kept_days, openbao_days", [(1, 8), (9, 1)])
+def test_a_recovery_file_that_cannot_be_removed_is_reported_and_the_run_continues(
+    kept_days, openbao_days, monkeypatch, capsys
+):
+    path = _recovery_file("alpha", {"access_token": access_token(kept_days), "refresh_token": "rt-kept"})
+    _locked_recovery(monkeypatch)
+    secret = {"AH_CX_TOKEN_alpha": access_token(openbao_days), "AH_CX_REFRESH_alpha": "rt-alpha"}
+    secret |= {"AH_CX_TOKEN_beta": access_token(1), "AH_CX_REFRESH_beta": "rt-beta"}
+    grant = Grant()
+    assert _run([], {**FLAG, **BAO_ENV, **OPENBAO_STORE}, grant, FakeBao(secret)) == 0
+    assert grant.calls == ["rt-beta"]
+    assert f"alpha: write failed: [Errno 13] Permission denied: '{path}'\n" in capsys.readouterr().out

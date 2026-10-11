@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -109,7 +110,7 @@ def test_a_refused_slug_names_the_rule_and_every_reserved_word():
 
 @pytest.mark.parametrize(
     "environ, expected",
-    [({"AGENTIHOOKS_AICODE_TOKEN_REFRESH": "true"}, True), ({"AGENTIHOOKS_AICODE_TOKEN_REFRESH": "True"}, True)]
+    [({"AGENTIHOOKS_AICODE_TOKEN_REFRESH": value}, True) for value in ("true", "True", " true ")]
     + [({"AGENTIHOOKS_AICODE_TOKEN_REFRESH": value}, False) for value in ("false", "yes", "1", "")]
     + [({}, False)],
 )
@@ -168,3 +169,31 @@ def test_a_failed_atomic_write_leaves_the_target_and_no_staged_file(tmp_path, mo
         tokens.atomic_write(target, b"new", 0o600)
     assert [path.name for path in tmp_path.iterdir()] == ["auth.json"]
     assert target.read_bytes() == b"old"
+
+
+@pytest.mark.parametrize("written", [OSError(28, "No space left on device"), 1])
+def test_a_failed_or_short_write_closes_the_staged_file_and_removes_it(written, tmp_path, monkeypatch):
+    folder = tmp_path / "account"
+    folder.mkdir()
+    descriptors = []
+    real = tokens.tempfile.mkstemp
+
+    def mkstemp(**kwargs):
+        found = real(**kwargs)
+        descriptors.append(found[0])
+        return found
+
+    def write(fd, data):
+        if isinstance(written, OSError):
+            raise written
+        return written
+
+    monkeypatch.setattr(tokens.tempfile, "mkstemp", mkstemp)
+    monkeypatch.setattr(tokens, "_write", write)
+    with pytest.raises(OSError) as raised:
+        tokens.atomic_write(folder / "auth.json", b"{}", 0o600)
+    with pytest.raises(OSError):
+        os.fstat(descriptors[0])
+    assert list(folder.iterdir()) == []
+    if written == 1:
+        assert str(raised.value).startswith("short write to ")

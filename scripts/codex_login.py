@@ -90,7 +90,7 @@ def _login(slug: str, device_auth: bool, environ: Mapping[str, str], run: Callab
         _fail(f"no tokens.access_token in {home / 'auth.json'}")
         code = 1
     if code and created:
-        shutil.rmtree(home)
+        shutil.rmtree(home, ignore_errors=True)
     return code, {} if code else tokens
 
 

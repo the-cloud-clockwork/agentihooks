@@ -70,7 +70,8 @@ def _oauth_error(exc: urllib.error.HTTPError) -> str:
 
 def grant(refresh_token: str, opener: Callable = urllib.request.urlopen) -> dict:
     form = {"grant_type": "refresh_token", "refresh_token": refresh_token, "client_id": CLIENT_ID}
-    request = urllib.request.Request(TOKEN_URL, data=urllib.parse.urlencode(form).encode())
+    data = urllib.parse.urlencode(form).encode()
+    request = urllib.request.Request(TOKEN_URL, data=data, headers={"Accept": "application/json"})
     try:
         with opener(request, timeout=TIMEOUT_S) as response:
             found = json.loads(response.read())
@@ -253,7 +254,7 @@ def _recovered(slug: str, access: str | None) -> dict | None:
     current = _expiry(access)
     if current is not None and kept <= current:
         print(STALE.format(slug=slug, path=path))
-        path.unlink()
+        _attempt(slug, path.unlink)
         return None
     return {key: tokens[key] for key in TOKEN_KEYS if tokens.get(key)}
 
@@ -283,7 +284,7 @@ def _refresh_bao(run: Run, secret: Mapping[str, str], slug: str) -> bool:
         return True
     stored = _store_or_recover(run, slug, fresh)
     if stored and recovered:
-        _recovery(slug).unlink()
+        _attempt(slug, _recovery(slug).unlink)
     rc_entry = {f"{CODEX_TOKEN_PREFIX}{slug}": fresh["access_token"]}
     block = _attempt(slug, lambda: aicode_tokens.update_existing(aicode_tokens.rc_file(), rc_entry))
     return stored and block
@@ -334,7 +335,7 @@ def _exclusive() -> Iterator[bool]:
 def _settings(args: list[str], environ: Mapping[str, str], deps: Deps) -> tuple[str, Run]:
     options = _parser().parse_args(args)
     force = aicode_tokens.slug(options.force) if options.force else ""
-    store = (environ.get(STORE_ENV) or LOCAL).lower()
+    store = (environ.get(STORE_ENV) or LOCAL).strip().lower()
     if store not in (LOCAL, OPENBAO):
         raise ValueError(BAD_STORE.format(store=store))
     return store, Run(force, _days(options.days, environ), openbao_kv.from_env(environ, deps.opener), deps)

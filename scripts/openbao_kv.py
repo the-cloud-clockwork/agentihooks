@@ -48,8 +48,8 @@ def _call(bao: OpenBao, path: str, body: dict | None = None) -> dict:
     data = None if body is None else json.dumps(body).encode()
     opener = bao.opener or urllib.request.urlopen
     try:
-        request = urllib.request.Request(f"{bao.url.rstrip('/')}/v1/{MOUNT}/data/{path}", data=data)
-        request.add_header("X-Vault-Token", bao.token)
+        headers = {"X-Vault-Token": bao.token, "Content-Type": "application/json"}
+        request = urllib.request.Request(f"{bao.url.rstrip('/')}/v1/{MOUNT}/data/{path}", data=data, headers=headers)
         with opener(request, timeout=TIMEOUT_S) as response:
             raw = response.read()
         found = json.loads(raw) if raw else {}

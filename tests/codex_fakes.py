@@ -53,6 +53,7 @@ class FakeBao:
             raise http_error(request.full_url, 503, b'{"errors": ["sealed"]}')
         if self.garbage_writes:
             return io.BytesIO(b"<html>proxy</html>")
+        assert request.get_header("Content-type") == "application/json"
         body = json.loads(request.data)
         if self.conflicts:
             self.conflicts -= 1

@@ -13,6 +13,7 @@ RESERVED = ("api", "default", "help", "status")
 SLUG_RULE = f"slug must be letters, digits, '_' or '-', not start with '_' and not be {', '.join(RESERVED)}"
 _SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_]*")
 _EXPORT = re.compile(r"\s*export\s+([^=\s]+)=")
+_write = os.write
 
 
 class SlugError(ValueError):
@@ -27,7 +28,7 @@ def slug(raw: str) -> str:
 
 
 def refresh_authority(environ: Mapping[str, str]) -> bool:
-    return str(environ.get(REFRESH_FLAG)).lower() == "true"
+    return str(environ.get(REFRESH_FLAG)).strip().lower() == "true"
 
 
 def rc_file(platform: str | None = None) -> Path:
@@ -37,9 +38,12 @@ def rc_file(platform: str | None = None) -> Path:
 def atomic_write(path: Path, data: bytes, mode: int) -> None:
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
-        with os.fdopen(fd, "wb") as handle:
-            os.fchmod(handle.fileno(), mode)
-            handle.write(data)
+        try:
+            os.fchmod(fd, mode)
+            if _write(fd, data) != len(data):
+                raise OSError(f"short write to {tmp}")
+        finally:
+            os.close(fd)
         os.replace(tmp, path)
     except BaseException:
         os.unlink(tmp)

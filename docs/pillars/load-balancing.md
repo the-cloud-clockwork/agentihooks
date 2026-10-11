@@ -502,7 +502,9 @@ on becomes the refresh authority.
   `agentihooks codex refresh` detached when `<AGENTIHOOKS_HOME>/codex-refresh.stamp`
   is older than `AGENTIHOOKS_AICODE_TOKEN_REFRESH_INTERVAL_H` hours (default 6).
   A machine without the flag only reads it; a start that fails removes the stamp
-  so the next session retries. Cron or a Kubernetes CronJob can run the same
+  so the next session retries. Without `agentihooks` on `PATH` the kick logs
+  `codex refresh kick skipped: agentihooks is not on PATH` and retries at the
+  next session start. Cron or a Kubernetes CronJob can run the same
   command.
 - Known gap: when the server rotates the refresh token but its response is lost,
   the stored refresh token is spent and every later grant is refused. Recover

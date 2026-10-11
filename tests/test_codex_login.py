@@ -127,6 +127,15 @@ def test_a_missing_codex_binary_fails_the_login_with_one_line(capsys):
     assert not _home("team").exists()
 
 
+def test_a_home_that_cannot_be_removed_after_a_failed_login_does_not_crash(monkeypatch):
+    def rmtree(path, ignore_errors=False):
+        if not ignore_errors:
+            raise PermissionError(13, "Permission denied", str(path))
+
+    monkeypatch.setattr(codex_login.shutil, "rmtree", rmtree)
+    assert _login(["team", "--no-openbao"], run=_codex(returncode=7)[0]) == 7
+
+
 def test_a_login_that_leaves_no_access_token_fails():
     assert _login(["team", "--no-openbao"], run=_codex(tokens={"refresh_token": REFRESH})[0]) != 0
     assert not aicode_tokens.rc_file().exists()
