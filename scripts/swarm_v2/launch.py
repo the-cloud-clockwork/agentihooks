@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Protocol
 
 from scripts.swarm.store import AgentRecord, SwarmError
+from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm_v2 import broadcast_bridge
 from scripts.swarm_v2.accounts import AccountCapacity, Slot
 from scripts.swarm_v2.auth_context import LaunchAuthority
@@ -62,6 +63,11 @@ class Launch:
     slot: Slot | None
     outcome: Outcome
     hand: Hand | None = None
+
+
+def seat_profile(request: SpawnRequest) -> str:
+    lane = request.config.lanes.get(request.lane, {})
+    return request.task.get("profile") or lane.get("profile") or DEFAULT_PROFILES[request.lane]
 
 
 class DistributedLaunch:
@@ -124,6 +130,7 @@ class DistributedLaunch:
             seat=request.task["seat"],
             runtime_backend=backend,
             runtime_target=target(request),
+            profile=seat_profile(request),
         )
         return self.spawn(request, agent, replace(terms, api_url=api_url), "").outcome
 

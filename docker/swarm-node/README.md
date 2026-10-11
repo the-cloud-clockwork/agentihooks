@@ -15,7 +15,8 @@ checksums, and the hashed Python requirements closure. The agentihooks source
 wheel uses version zero with its tested source revision recorded in the manifest.
 Changing requirements also requires updating their checksum in `versions.lock`.
 Template inputs come from the repository's packaged profiles, never a host home
-or credential store. Runtime homes are writable; templates and the environment
+or credential store; every package role profile also sits at the template root,
+so a role name resolves as a template. Runtime homes are writable; templates and the environment
 are owned by root and read only to the worker user.
 
 The default command verifies and reports installed inventory without a network.
@@ -24,8 +25,9 @@ execution supplies `python /opt/swarm-node/supervisor.py ATTEMPT LAUNCH_JSON`.
 That entry first prepares the attempt under a private umask: it reads the
 launch record and the launch grant beside it, registers with the control API
 the record names, bootstraps the attempt for the record's harness from the
-`default` template and writes the record's authority as `registration.json`
-once the answer has confirmed its execution, task and grant. A missing or malformed record or grant, a refused
+template the record's `profile` names and writes the record's authority as `registration.json`
+once the answer has confirmed its execution, task and grant. A missing or malformed record or grant, a record naming no profile or one the
+image does not ship, a refused
 registration or an answer naming another execution, task or grant exits
 sixty four before the attempt is touched; a bootstrap refusal, an
 unreadable file or a failed probe exits sixty four too. The supervisor never starts after a refusal. A prepared start prints one

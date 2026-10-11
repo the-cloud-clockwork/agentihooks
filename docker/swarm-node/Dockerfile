@@ -37,6 +37,7 @@ COPY scripts/ scripts/
 COPY profiles/ profiles/
 RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS=0.0.0 pip install --no-cache-dir --no-deps --no-build-isolation .
 COPY profiles/ /opt/agentihooks/templates/
+COPY profiles/package/roles/ /opt/agentihooks/templates/
 RUN python /opt/swarm-node/worker_image.py manifest --architecture "$TARGETARCH" --source-revision "$SOURCE_REVISION" \
     && chmod -R a-w /opt/agentihooks/templates /opt/swarm-node /opt/venv \
     && chmod a+x /opt/swarm-node/entrypoint.sh \
