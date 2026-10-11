@@ -13,7 +13,6 @@ NODE_STAGES = ("trigger", "instance", "join")
 IMAGE_STAGES = ("image", "pod_start")
 COLD_LABEL = "cold_scale_from_zero"
 STARTED, PENDING = "started", "pending"
-FAILURE_REASONS = ("Failed", "BackOff", "FailedCreatePodSandBox")
 EXISTING, NEW_INSTANCE, WARM_POOL = "existing", "new_instance", "warm_pool"
 CACHED, UNCACHED, PARTIAL, UNKNOWN = "cached", "uncached", "partial", "unknown"
 REGISTRY_UNAVAILABLE, IMAGE_NOT_FOUND, UNAUTHORIZED = "registry_unavailable", "image_not_found", "registry_unauthorized"
@@ -131,18 +130,32 @@ def _first(events: Sequence[Mapping], reason: str) -> Mapping | None:
     return next((e for e in events if e["reason"] == reason), None)
 
 
+def failure(events: Sequence[Mapping]) -> tuple[str, int | None]:
+    """The start failure class and the time of the first event that shows it; ("", None) when there is none."""
+    pulls = [
+        e
+        for e in events
+        if (e["reason"] == "Failed" and "pull" in e.get("message", "").lower())
+        or (e["reason"] == "BackOff" and "pulling image" in e.get("message", ""))
+    ]
+    failed = next((e for e in pulls if e["reason"] == "Failed"), None)
+    if failed:
+        name = next((name for name, pattern in PULL_FAILURES if pattern.search(failed["message"])), IMAGE_PULL)
+        return name, min(e["at"] for e in pulls)
+    if pulls:
+        return IMAGE_PULL, min(e["at"] for e in pulls)
+    sandbox = _first(events, "FailedCreatePodSandBox")
+    if sandbox:
+        return SANDBOX, sandbox["at"]
+    waited = _first(events, "FailedScheduling")
+    if waited and not _first(events, "Scheduled"):
+        return UNSCHEDULABLE, waited["at"]
+    return "", None
+
+
 def failure_class(events: Sequence[Mapping]) -> str:
     """Empty when the Pod's events show no start failure."""
-    for event in events:
-        if event["reason"] == "Failed" and "pull" in event.get("message", "").lower():
-            return next((name for name, pattern in PULL_FAILURES if pattern.search(event["message"])), IMAGE_PULL)
-    if any(e["reason"] == "BackOff" and "pulling image" in e.get("message", "") for e in events):
-        return IMAGE_PULL
-    if _first(events, "FailedCreatePodSandBox"):
-        return SANDBOX
-    if not _first(events, "Scheduled") and _first(events, "FailedScheduling"):
-        return UNSCHEDULABLE
-    return ""
+    return failure(events)[0]
 
 
 def _cache(pulls: Sequence[int]) -> str:
@@ -204,8 +217,8 @@ def sample(name: str, events: Sequence[Mapping], read: Mapping, ups: Mapping) ->
     as `transient` rather than as its outcome. A listed Pod created after the scheduling event is a later incarnation
     of the same name, so its creation and readiness are not used."""
     placed = _first(events, "Scheduled")
-    failure = failure_class(events)
-    if not placed and not failure:
+    kind, failed = failure(events)
+    if not placed and not kind:
         return None
     started = _first(events, "Started") is not None
     node_name = ASSIGNED.search(placed["message"])["node"] if placed else ""
@@ -222,7 +235,6 @@ def sample(name: str, events: Sequence[Mapping], read: Mapping, ups: Mapping) ->
     image, pulls = _image_stages(events, scheduled, pod)
     stages.update(image)
     begun = scheduled if placed else _first(events, "Pulling")["at"] if _first(events, "Pulling") else None
-    failed = next((e["at"] for e in events if e["reason"] in FAILURE_REASONS), None)
     return {
         "pod": name,
         "at": begun if begun is not None else events[0]["at"],
@@ -231,10 +243,10 @@ def sample(name: str, events: Sequence[Mapping], read: Mapping, ups: Mapping) ->
         "node_source": launch["source"] if cold else EXISTING,
         "from_zero": from_zero,
         "image_cache": _cache(pulls),
-        "outcome": STARTED if started else failure or PENDING,
-        "transient": failure if started else "",
+        "outcome": STARTED if started else kind or PENDING,
+        "transient": kind if started else "",
         "sandbox_retries": sum(1 for e in events if e["reason"] == "FailedCreatePodSandBox"),
-        "failure_ms": _gap(failed, begun) if failure else None,
+        "failure_ms": _gap(failed, begun),
         "stages": {stage: stages.get(stage) for stage in STAGES},
     }
 
@@ -296,6 +308,8 @@ def report(samples: Sequence[Mapping]) -> dict:
 def _cold_refusal(entry: Mapping) -> str:
     if entry["node_kind"] != "cold":
         return "the Pod landed on a node that existed before it waited"
+    if entry["node_source"] != NEW_INSTANCE:
+        return "the instance came from a warm pool"
     if not entry["from_zero"]:
         return "the scale up did not start from an empty pool"
     if entry["image_cache"] != UNCACHED:

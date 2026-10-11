@@ -136,6 +136,10 @@ def main() -> None:
         kubectl("delete", "namespace", NAMESPACE, "--wait=false", check=False)
     (args.output / "fixture.json").write_text(json.dumps(outcome, indent=2, sort_keys=True) + "\n")
     print(json.dumps(outcome, sort_keys=True))
+    interruption = outcome["interruption"]
+    checks = [*outcome["ready"].values(), *interruption["classified_within_grace"].values()]
+    if not all([*checks, *interruption["recovered"].values()]):
+        raise SystemExit("a fixture Pod did not become ready, classify its pull failure in grace, or recover")
 
 
 if __name__ == "__main__":

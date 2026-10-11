@@ -20,6 +20,7 @@
     "cold_not_from_zero": {
       "count": 15,
       "reasons": [
+        "the instance came from a warm pool",
         "the scale up did not start from an empty pool"
       ],
       "refused": "a warm sample cannot be advertised as cold scale from zero"

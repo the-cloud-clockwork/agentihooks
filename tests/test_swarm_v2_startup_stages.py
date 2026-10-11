@@ -533,3 +533,28 @@ def test_each_sample_records_when_it_began():
     assert stages.attribute(read(pulled))[0]["at"] == T0 + 1000
     untimed = [ev("p/y", "Failed", 4, "Error: ImagePullBackOff")]
     assert stages.attribute(read(untimed))[0]["at"] == T0 + 4000
+
+
+def test_a_warm_pool_instance_cannot_carry_the_cold_label():
+    samples = stages.attribute(read(cold_events(), source=stages.WARM_POOL))
+    assert samples[0]["from_zero"] is True
+    with pytest.raises(ClaimRefused) as refused:
+        stages.claim(samples, stages.COLD_LABEL)
+    assert refused.value.refused == {"default/a": "the instance came from a warm pool"}
+
+
+def test_failure_time_is_the_first_event_of_the_failure_class_it_names():
+    events = [
+        ev("p/x", "Scheduled", 1, f"Successfully assigned p/x to {OLD}"),
+        ev("p/x", "FailedCreatePodSandBox", 2),
+        ev("p/x", "BackOff", 3, "Back-off restarting failed container"),
+        ev("p/x", "BackOff", 5, 'Back-off pulling image "x"'),
+        ev("p/x", "Failed", 7, 'Failed to pull image "x": connection refused'),
+    ]
+    assert stages.failure(events) == ("registry_unavailable", T0 + 5000)
+    [entry] = stages.attribute(read(events))
+    assert (entry["outcome"], entry["failure_ms"]) == ("registry_unavailable", 4000)
+    assert stages.failure(events[:3]) == ("sandbox", T0 + 2000)
+    assert stages.failure(events[:1]) == ("", None)
+    waited = [ev("p/y", "FailedScheduling", 9)]
+    assert stages.failure(waited) == ("unschedulable", T0 + 9000)
