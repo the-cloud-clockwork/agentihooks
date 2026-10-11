@@ -490,8 +490,19 @@ it by name, so every Codex seat the tick offers is one `agentihooks codex
   Quota per account is the newest of the usage read and the rate-limit event in
   the session logs the session registry attributes to it; a token with neither
   shows no quota and still routes.
-- `agentihooks balance` and `agentihooks quota` list every Codex account with its
-  sessions and quota; a signed-out default login shows `SIGNED_OUT`.
+- `agentihooks balance` and `agentihooks quota` print one table for every Claude
+  and Codex account: `# HARNESS ACCOUNT KIND STATE SESSIONS WEIGHT CAP ROUTING
+  LEFT 5H LEFT 5H RESET 7D LEFT 7D RESET`, Claude rows first, then Codex, each
+  harness sorted by routing left, subscription rows numbered 1..N across the
+  whole table (api and interactive rows unnumbered), `-` for any missing value.
+  Codex routing left is its week left whenever the week is known. A signed-out
+  default login shows `SIGNED_OUT` and a cancelled token `EXPIRED` with `-`
+  values. `balance --current` marks this session's account `(current)`. Sessions on
+  names that are not listed accounts are counted in one last line,
+  `+N sessions on unlisted account names`, only when there are any. `quota
+  --json` gives the same fields per row with `harness`. `balance --fable` prints
+  the Claude rows (api slot included) with `FABLE LEFT` and `FABLE RESET`
+  columns.
 - The swarm tick, the controller and `init-agent` never source the shell rc, so
   they read the `AH_CC_TOKEN_*` and `AH_CX_TOKEN_*` export lines of the managed
   token block that `codex login` and `claude login` write, and nothing else in
