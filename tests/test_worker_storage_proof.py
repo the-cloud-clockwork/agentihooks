@@ -24,17 +24,45 @@ def test_the_storage_check_resolves_both_paths_to_the_root_block_device(probe, m
         assert probe.filesystem(folder) == {"device": "254:0", "mount": "/", "type": "ext4", "source": "/dev/vda"}
 
 
-def test_the_storage_check_rejects_memory_growth_in_the_final_sample(probe, monkeypatch, tmp_path):
+@pytest.mark.parametrize("device,source", [("0:44", "/dev/vda"), ("254:0", "tmpfs")])
+def test_the_storage_check_requires_both_a_block_device_number_and_source(probe, monkeypatch, device, source):
+    monkeypatch.setattr(Path, "read_text", lambda self: f"30 20 {device} / / rw - ext4 {source} rw\n")
+    with pytest.raises(RuntimeError, match="not on a block device"):
+        probe.filesystem(Path("/tmp"))
+
+
+def test_the_storage_check_sees_a_tmpfs_mount_below_the_root_disk(probe, monkeypatch):
+    monkeypatch.setattr(
+        Path,
+        "read_text",
+        lambda self: "30 20 254:0 / / rw - ext4 /dev/vda rw\n31 30 0:44 / /tmp rw - tmpfs tmpfs rw\n",
+    )
+    with pytest.raises(RuntimeError, match="not on a block device"):
+        probe.filesystem(Path("/tmp"))
+
+
+@pytest.mark.parametrize(
+    "growth,tolerance,rejected", [(100, 64, True), (67108864, None, False), (67108865, None, True)]
+)
+def test_the_storage_check_rejects_memory_growth_in_the_final_sample(
+    probe, monkeypatch, tmp_path, growth, tolerance, rejected
+):
     root = tmp_path / "home"
     root.mkdir()
     monkeypatch.setattr(probe, "Path", lambda value: root)
     monkeypatch.setattr(probe, "MIB", 1024)
     monkeypatch.setattr(probe, "SIZE", 16 * 1024)
-    monkeypatch.setattr(probe, "TOLERANCE", 64)
+    if tolerance is not None:
+        monkeypatch.setattr(probe, "TOLERANCE", tolerance)
     monkeypatch.setattr(probe, "filesystem", lambda path: {"type": "ext4"})
-    samples = iter([{"used": 100}, {"used": 100}, {"used": 200}])
+    baseline = {"used": 100, "anonymous": 20, "shmem": 4}
+    grown = {**baseline, "used": 100 + growth}
+    samples = iter([baseline, baseline, grown, baseline, grown])
     monkeypatch.setattr(probe, "memory", lambda: next(samples))
-    with pytest.raises(RuntimeError, match="increased guest memory"):
+    if rejected:
+        with pytest.raises(RuntimeError, match="increased guest memory"):
+            probe.main()
+    else:
         probe.main()
     assert list(root.iterdir()) == []
 
@@ -86,6 +114,7 @@ def test_the_default_workload_writes_one_gibibyte_per_path_and_flushes_every_six
 
         def write(self, chunk):
             self.size += len(chunk)
+            assert self.size <= 1073741824
             return len(chunk)
 
         def fileno(self):
@@ -128,4 +157,20 @@ def test_the_default_workload_writes_one_gibibyte_per_path_and_flushes_every_six
     ]
     for folder in ("/home/worker", "/tmp"):
         assert [size for path, size in flushes if path == folder] == list(range(16777216, 1073741825, 16777216))
-    assert capsys.readouterr().out.endswith("storage proof passed\n")
+    output = capsys.readouterr().out.splitlines()
+    assert output[-1] == "storage proof passed"
+    import json
+
+    records = [json.loads(line) for line in output[:-1]]
+    baseline = {"used": 100, "anonymous": 20, "shmem": 4}
+    assert records[0] == {"baseline": baseline}
+    assert len(records) == 5
+    for index, path in ((1, "/home/worker"), (3, "/tmp")):
+        assert records[index] == {"path": path, "filesystem": {"type": "ext4"}}
+        assert records[index + 1] == {
+            "path": path,
+            "bytes": 1073741824,
+            "before": baseline,
+            "after": baseline,
+            "peak": baseline,
+        }
