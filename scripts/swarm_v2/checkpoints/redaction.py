@@ -37,10 +37,17 @@ def _plain(text: str, found: list[int]) -> str:
     return redacted
 
 
-def _value(text: str, key: str, found: list[int]) -> str:
-    """A match that needs the record key hides the whole value."""
+def _nested(path: tuple[str, ...], text: str) -> str:
+    fragment: object = text
+    for key in reversed(path):
+        fragment = {key: fragment}
+    return json.dumps(fragment)
+
+
+def _value(text: str, path: tuple[str, ...], found: list[int]) -> str:
+    """A match that needs the keys above the value hides the whole value."""
     own = _redact(text)
-    fragment = json.dumps({key: own})
+    fragment = _nested(path, own)
     keyed = _redact(fragment)
     if keyed != fragment:
         own = " ".join(MARKER.findall(keyed))
@@ -48,21 +55,21 @@ def _value(text: str, key: str, found: list[int]) -> str:
     return own
 
 
-def _fields(record: dict, found: list[int]) -> dict:
+def _fields(record: dict, path: tuple[str, ...], found: list[int]) -> dict:
     safe = {name: _plain(name, found) for name in record}
-    return {safe[name]: _redacted(item, safe[name], found) for name, item in record.items()}
+    return {safe[name]: _redacted(item, (*path, safe[name]), found) for name, item in record.items()}
 
 
-def _redacted(value: object, key: str, found: list[int]) -> object:
+def _redacted(value: object, path: tuple[str, ...], found: list[int]) -> object:
     if isinstance(value, dict):
-        return _fields(value, found)
+        return _fields(value, path, found)
     if isinstance(value, list):
-        return [_redacted(item, key, found) for item in value]
-    return _value(value, key, found) if isinstance(value, str) else value
+        return [_redacted(item, path, found) for item in value]
+    return _value(value, path, found) if isinstance(value, str) else value
 
 
 def _rewritten(line: str, record: object, found: list[int]) -> str:
-    cleaned = _redacted(record, "", found)
+    cleaned = _redacted(record, (), found)
     if cleaned == record:
         return line
     return json.dumps(cleaned, separators=(",", ":")) + line[len(line.rstrip()) :]
