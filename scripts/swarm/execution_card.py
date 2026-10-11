@@ -13,10 +13,10 @@ def _ms(seconds) -> int:
     return int(round(float(seconds) * 1000)) if seconds else 0
 
 
-def _seen_at(observation: Mapping) -> tuple[int, int]:
+def _seen_at(observation: Mapping) -> tuple[int, int | None]:
     sources = observation.get("sources") or {}
     times = {name: _ms(entry.get("observed_at")) for name, entry in sources.items() if name != TERMINAL_SOURCE}
-    return max(times.values(), default=0), times.get("heartbeat", 0)
+    return max(times.values(), default=0), times.get("heartbeat")
 
 
 def _observed(observation: Mapping) -> str:

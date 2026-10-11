@@ -105,3 +105,47 @@ def test_an_unreadable_row_without_a_backend_never_claims_local():
     built, errors = execution_card.cards([{"name": "eng-7", "observation": {"sources": {"heartbeat": 3}}}], {})
     assert errors == 1
     assert (built["eng-7"]["backend"], built["eng-7"]["observed"]) == ("unknown", "unreadable")
+
+
+def observed(**observation):
+    return {"name": "eng-9", "runtime_backend": "kubernetes", "generation": 1, "observation": observation}
+
+
+@pytest.mark.parametrize(
+    ("observation", "wait"),
+    [
+        ({"failure": "pod_scheduling", "state": "suspect"}, "scheduling"),
+        ({"failure": "none", "state": "pending"}, "scheduling"),
+        ({"failure": "provider_wait", "state": "suspect"}, "quota"),
+        ({"failure": "none", "state": "waiting_quota"}, "quota"),
+        ({"failure": "none", "state": "working"}, ""),
+    ],
+)
+def test_either_the_failure_or_the_state_alone_names_the_wait(observation, wait):
+    assert execution_card.card(observed(**observation), None)["wait"] == wait
+
+
+def test_a_source_seen_at_time_zero_reads_as_never_seen():
+    beat = {"heartbeat": {"reading": "ok", "observed_at": 0, "value": "working"}}
+    assert execution_card.card(observed(state="working", sources=beat), None)["seen_at"] == 0
+
+
+def test_a_terminal_view_is_behind_only_when_checked_strictly_before_the_heartbeat():
+    beat = {"heartbeat": {"reading": "ok", "observed_at": 0.001, "value": "working"}}
+    agent = observed(state="working", sources=beat)
+    assert execution_card.card(agent, {"checked_at": 1})["terminal_behind"] is False
+    assert execution_card.card(agent, {"state": "unverified"})["terminal_behind"] is True
+
+
+def test_without_a_heartbeat_no_terminal_view_is_behind():
+    pod = {"kubernetes": {"reading": "ok", "observed_at": 5.0, "value": "Running"}}
+    assert execution_card.card(observed(state="working", sources=pod), {"checked_at": 0})["terminal_behind"] is False
+
+
+def test_a_remote_agent_without_a_profile_names_no_pool():
+    assert execution_card.card(observed(state="working"), None)["pool"] == ""
+
+
+def test_every_unreadable_row_is_counted():
+    rows = [{"name": name, "observation": {"sources": {"heartbeat": 3}}} for name in ("eng-5", "eng-6", "eng-7")]
+    assert execution_card.cards(rows, {})[1] == 3
