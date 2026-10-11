@@ -634,7 +634,7 @@ def test_todays_accounts_get_band_caps_and_the_next_session_rotates(monkeypatch,
         "tccgma": 6,
     }
     monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: (TODAY, "live"))
-    env = {f"AH_CC_TOKEN_{result.account}": "secret" for result in TODAY}
+    env = {f"AH_CC_TOKEN_{result.account}": f"tok-{result.account}" for result in TODAY}
     live = {"ncgma": 4, "nchotma": 2, "tccgma": 3}
     order = []
     for _ in range(4):

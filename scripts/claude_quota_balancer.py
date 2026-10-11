@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from hooks.context.account_sessions import API_ACCOUNT
-from scripts import session_bands
+from scripts import operator_env, session_bands
 from scripts.claude_config import claude_home
 from scripts.routing import claude_api, envs, place
 from scripts.routing.envs import subscription_child
@@ -113,11 +113,12 @@ class RoutingError(RuntimeError):
 
 
 def discover_credentials(environ: Mapping[str, str]) -> list[Credential]:
-    return [
-        Credential(name, environ[name])
-        for name in sorted(environ)
+    names = [
+        name
+        for name in environ
         if name.startswith(TOKEN_PREFIX) and name.removeprefix(TOKEN_PREFIX) not in ("", API_ACCOUNT) and environ[name]
     ]
+    return [Credential(name, environ[name]) for name in operator_env.distinct(environ, names)]
 
 
 def credential_for_slug(credentials: list[Credential], slug: str) -> Credential:

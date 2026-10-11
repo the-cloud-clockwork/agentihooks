@@ -104,7 +104,10 @@ def stored_ledger(slug):
 
 def worktrees(repo, names, run=subprocess.run):
     """Each agent's worktree path: the worktree of repo checked out on the branch named after the agent."""
-    proc = run(["git", "-C", repo, "worktree", "list", "--porcelain"], capture_output=True, text=True, timeout=30)
+    try:
+        proc = run(["git", "-C", repo, "worktree", "list", "--porcelain"], capture_output=True, text=True, timeout=30)
+    except FileNotFoundError:
+        return dict.fromkeys(names, "")
     found, current = {}, ""
     for line in proc.stdout.splitlines() if proc.returncode == 0 else []:
         if line.startswith("worktree "):

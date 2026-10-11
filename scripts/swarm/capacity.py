@@ -97,7 +97,7 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
     rows = []
     for account in pool + live:
         quota = found.get(account.name)
-        cap = codex_router.account_cap(quota, now) if account.name in known else None
+        cap = codex_router.account_cap(quota, now, environ) if account.name in known else None
         five = _left(quota.five_hour, now) if quota else None
         week = _left(quota.seven_day, now) if quota else None
         reset = session_bands.upcoming(quota.seven_day.resets_at, now) if quota else None

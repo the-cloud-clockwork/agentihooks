@@ -5,7 +5,7 @@ import shutil
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -14,6 +14,7 @@ from scripts.claude_quota_balancer import (
     MASTERS_ONLY,
     NOT_APPLICABLE,
     OPEN,
+    QuotaWindow,
     RowMarks,
     _cap_text,
     _duration,
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
 
 PAGE_TTL_S = 60
 STALE = "STALE"
+EXPIRED_SOURCE = "token expired: run {login}"
 NEXT_MARK = "(next)"
 REFRESH_MIN_S = 60
 _page_cache: dict = {}
@@ -83,42 +85,56 @@ def claude_rows(
     ]
 
 
-def _codex_state(account: "codex_router.CodexAccount", quota: "CodexQuota | None", now: float) -> str:
+def _codex_state(
+    account: "codex_router.CodexAccount", quota: "CodexQuota | None", now: float, environ: Mapping[str, str] | None
+) -> str:
     if not account.signed_in:
         return "SIGNED_OUT"
     if quota is None:
         return "UNKNOWN"
-    return quota.state_at(now) if session_bands.fresh(quota.observed_at, now) else STALE
+    if quota.expired:
+        return quota.state
+    if not codex_router.usable(quota, now, environ):
+        return STALE
+    current = quota if session_bands.fresh(quota.observed_at, now) else replace(quota, five_hour=QuotaWindow())
+    return current.state_at(now)
 
 
-def _codex_source(quota: "CodexQuota | None", now: float) -> str:
+def _codex_source(account: "codex_router.CodexAccount", quota: "CodexQuota | None", now: float) -> str:
     if quota is None:
         return "no session log"
+    if quota.expired:
+        return EXPIRED_SOURCE.format(
+            login=f"agentihooks codex login {account.name}" if account.is_token else "codex login"
+        )
     seen = f"session-log {_duration(int(now), int(quota.observed_at))} ago"
     return f"{seen}, {quota.reached}" if quota.reached else seen
 
 
-def codex_rows(accounts: list, quotas: dict, sessions: dict[str, int], now: float) -> list[QuotaRow]:
+def codex_rows(
+    accounts: list, quotas: dict, sessions: dict[str, int], now: float, environ: Mapping[str, str] | None = None
+) -> list[QuotaRow]:
     rows = []
     for account in accounts:
         quota = quotas.get(account.name)
+        fresh = quota is not None and session_bands.fresh(quota.observed_at, now)
         rows.append(
             QuotaRow(
                 agent="codex",
                 account=account.name,
-                state=_codex_state(account, quota, now),
+                state=_codex_state(account, quota, now, environ),
                 sessions=sessions.get(account.name, 0),
                 five_hour_left=session_bands.left(quota.five_hour.used, quota.five_hour.resets_at, now)
-                if quota
+                if fresh
                 else None,
                 seven_day_left=session_bands.left(quota.seven_day.used, quota.seven_day.resets_at, now)
                 if quota
                 else None,
                 seven_day_resets_at=quota.seven_day.resets_at if quota else None,
-                source=_codex_source(quota, now),
+                source=_codex_source(account, quota, now),
                 five_hour_resets_at=quota.five_hour.resets_at if quota else None,
                 observed_at=quota.observed_at if quota else None,
-                cap=codex_router.account_cap(quota, now) if account.signed_in else None,
+                cap=codex_router.account_cap(quota, now, environ) if account.signed_in else None,
             )
         )
     return rows

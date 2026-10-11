@@ -2,6 +2,7 @@ import re
 from collections.abc import Mapping
 
 TOKEN_PREFIX = "AH_CC_TOKEN_"
+CODEX_TOKEN_PREFIX = "AH_CX_TOKEN_"
 OAUTH_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 SYMBOL = re.compile(r"[^a-z0-9]")
 
@@ -12,6 +13,10 @@ def secret_key(email: str) -> str:
 
 def token_env(email: str) -> str:
     return TOKEN_PREFIX + secret_key(email).replace("-", "_")
+
+
+def codex_token_env(email: str) -> str:
+    return CODEX_TOKEN_PREFIX + secret_key(email).replace("-", "_")
 
 
 def oauth_env(environ: Mapping[str, str]) -> dict[str, str]:

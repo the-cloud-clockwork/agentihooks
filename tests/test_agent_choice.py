@@ -123,7 +123,7 @@ def test_one_codex_account_quota_uses_its_week_band(monkeypatch):
     assert agent_choice.account_has_quota("codex", codex_router.CODEX_DEFAULT, {}) is False
     readings["seen"] = CodexQuota(observed_at=now, plan_type="pro", seven_day=QuotaWindow(used=95.0))
     assert agent_choice.account_has_quota("codex", codex_router.CODEX_DEFAULT, {}) is True
-    readings["seen"] = CodexQuota(observed_at=now - 901, plan_type="pro", seven_day=QuotaWindow(used=50.0))
+    readings["seen"] = CodexQuota(observed_at=now - 6 * 3600 - 1, plan_type="pro", seven_day=QuotaWindow(used=50.0))
     assert agent_choice.account_has_quota("codex", codex_router.CODEX_DEFAULT, {}) is None
     assert agent_choice.account_has_quota("codex", "nobody", {}) is None
 

@@ -421,6 +421,18 @@ def test_handoff_marks_this_session_once_the_new_one_is_routed(monkeypatch, tmp_
     assert "handed_off_sessions=sid-1" in out
 
 
+@pytest.mark.parametrize(("extra", "recorded"), [(("--resume", "sid-9"), ["handed-off-4242-sid-9"]), ((), [])])
+def test_a_resumed_handoff_records_the_process_it_leaves(monkeypatch, tmp_path, extra, recorded):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr("hooks.lifecycle.handoff_close._home", lambda: home)
+    monkeypatch.setattr("hooks.context.account_sessions.agent_pid", lambda start=None: 4242)
+    monkeypatch.setattr("hooks.context.broadcast.mark_handed_off", lambda pid, account: [])
+
+    assert _handoff(monkeypatch, tmp_path, _routed("routed", "beta"), extra) == 0
+    assert sorted(path.name for path in home.iterdir()) == recorded
+
+
 def test_failed_route_fails_the_handoff_and_marks_nothing(monkeypatch, tmp_path, capsys):
     marked = []
     monkeypatch.setattr("hooks.context.broadcast.mark_handed_off", lambda pid, account: marked.append(pid))
@@ -688,11 +700,11 @@ def test_a_claude_resume_reopens_that_conversation(tmp_path):
     assert "--name m --resume c0ffee" in _resume_line(tmp_path, "claude")
 
 
-def test_a_codex_resume_runs_the_resume_subcommand_before_any_flag(tmp_path):
+def test_a_codex_resume_puts_every_flag_before_the_resume_subcommand(tmp_path):
     words = _resume_line(tmp_path, "codex").split()
-    at = words.index("resume")
-    assert words[at + 1] == "c0ffee"
-    assert words[at - 1] != "--agentihooks-report" and words.index("-m") > at
+    assert words[-2:] == ["resume", "c0ffee"]
+    assert words.count("resume") == 1
+    assert "-m" in words and "-c" in words
 
 
 def test_init_agent_passes_resume_through_to_the_launch(monkeypatch, tmp_path, capsys):
@@ -941,6 +953,26 @@ def test_the_channel_warning_is_answered_in_the_agents_pane(monkeypatch, seen, s
     assert calls == [("w1:p2", channel.WARNING, {"K": "v"}, init_agent.CHANNEL_WARNING_MS)]
 
 
+@pytest.mark.parametrize(
+    ("agent", "detected", "typed", "named"),
+    [
+        ("codex", True, True, ["agent_name=engineer-abc-0001", "session_name=engineer@abc-0001"]),
+        ("codex", True, False, ["agent_name=engineer-abc-0001", "session_name=unset"]),
+        ("codex", False, True, ["agent_name=unset"]),
+        ("claude", True, True, ["agent_name=engineer-abc-0001"]),
+    ],
+)
+def test_herdr_names_the_agent_and_a_codex_session_by_its_raw_name(monkeypatch, agent, detected, typed, named):
+    calls = []
+    monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: calls.append(("agent", *args)) or detected)
+    monkeypatch.setattr(init_agent.herdr_host, "name_session", lambda *args: calls.append(("session", *args)) or typed)
+    assert init_agent._name_in_herdr("w1:p2", "engineer@abc-0001", agent, {"K": "v"}) == named
+    expected = [("agent", "w1:p2", "engineer@abc-0001", {"K": "v"})]
+    if agent == "codex" and detected:
+        expected.append(("session", "w1:p2", "engineer@abc-0001", {"K": "v"}))
+    assert calls == expected
+
+
 def test_a_channel_dry_run_writes_the_negotiation_pin_into_its_launcher(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "requested"))
     monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, directory, title, environ: ("linux", ["t"]))
@@ -1067,6 +1099,36 @@ def test_a_subscription_handoff_never_crosses_harnesses(monkeypatch, tmp_path, c
 )
 def test_only_codex_sources_hand_off_to_codex(requested, source, agent):
     assert init_agent._handoff_agent(requested, {"AGENTIHOOKS_TARGET": source}, []) == agent
+
+
+@pytest.mark.parametrize(
+    "requested,environ,harness,agent",
+    [
+        ("codex", {}, "codex", "codex"),
+        ("", {}, "codex", "codex"),
+        ("", {}, "claude", "claude"),
+        ("", {"AGENTIHOOKS_TARGET": "codex"}, "claude", "codex"),
+    ],
+)
+def test_a_handoff_without_a_target_takes_the_live_harness(monkeypatch, requested, environ, harness, agent):
+    from scripts.profiles import binding
+
+    monkeypatch.setattr(binding, "process", lambda: (123, harness, {}, "alpha"))
+    assert init_agent._handoff_agent(requested, environ, []) == agent
+
+
+@pytest.mark.parametrize("error", [ValueError("no supported live harness ancestor"), OSError("process vanished")])
+def test_a_handoff_outside_any_harness_comes_from_claude(monkeypatch, error):
+    from scripts.profiles import binding
+
+    def missing():
+        raise error
+
+    monkeypatch.setattr(binding, "process", missing)
+    assert init_agent._live_harness() == "claude"
+    assert init_agent._handoff_agent("", {}, []) == "claude"
+    with pytest.raises(ValueError, match="unsupported quota transfer: Claude cannot transfer to a Codex account"):
+        init_agent._handoff_agent("codex", {}, [])
 
 
 def test_a_handoff_excludes_the_account_it_leaves(monkeypatch):
