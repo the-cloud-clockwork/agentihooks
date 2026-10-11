@@ -1,8 +1,8 @@
 """A ledger's overview and phases: from the ledger folder on a local host, through the hosted ledger server when deployed."""
 
 import os
-import urllib.error
 
+from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger_link
 
 
@@ -23,8 +23,8 @@ def _hosted(slug: str, keys: tuple) -> dict:
         found = {key: metadata[key] for key in keys if key in metadata}
         if "phases" in keys:
             found["phases"] = ledger.resource(slug, "phases", collection=True)
-    except urllib.error.HTTPError as error:
-        if error.code != 404:
-            raise
+    except (OSError, SystemExit) as error:
+        if getattr(error, "code", None) != 404:
+            raise SwarmError(f"the hosted ledger is unavailable for {slug}: {error}") from None
         return {}
     return found

@@ -10,6 +10,7 @@ import pytest
 
 from scripts.hive import auth as hive_auth
 from scripts.swarm import ledger_read, profile_choice, prompt
+from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger, ledger_close, ledger_server
 from scripts.swarm_ledger.api.client import ResourceClient
 from scripts.swarm_ledger.repository import repository
@@ -450,3 +451,14 @@ def test_the_prompt_summary_reads_the_close_summary_through_the_hosted_server(co
 
 def test_a_ledger_the_hosted_server_lacks_reads_as_empty(controller_reads):
     assert ledger_read.parts("absent-ledger", "overview", "phases") == {}
+
+
+def test_an_unreachable_hosted_server_fails_the_intent_read_as_a_swarm_error(controller_reads):
+    os.environ["LEDGER_URL"] = _closed()
+
+    with pytest.raises(SwarmError) as raised:
+        ledger_read.parts(SLUG, "overview", "phases")
+
+    assert str(raised.value) == (
+        f"the hosted ledger is unavailable for {SLUG}: <urlopen error [Errno 111] Connection refused>"
+    )
