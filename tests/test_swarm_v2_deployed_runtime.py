@@ -54,6 +54,9 @@ class Pods:
     def list_pods(self, selector):
         return []
 
+    def snapshot(self, selector):
+        return [], ""
+
     def ready_nodes(self):
         self.nodes_read += 1
         return []
