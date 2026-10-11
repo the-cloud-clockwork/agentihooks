@@ -274,3 +274,13 @@ def test_a_terminal_sees_a_blue_note_a_red_error_and_yellow_prompts(monkeypatch)
     console = Console(["n"])
     assert _login(["team"], console=console) == 0
     assert console.prompts == ["\x1b[33mDo you want to store them in OpenBao? [y/N] \x1b[0m"]
+
+
+def test_errors_are_coloured_by_whether_stderr_is_a_terminal(monkeypatch):
+    out, err = io.StringIO(), _Tty()
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(sys, "stderr", err)
+    assert _login(["_bad"]) == 2
+    assert err.getvalue() == f"\x1b[31magentihooks codex login: {aicode_tokens.SLUG_RULE}: '_bad'\x1b[0m\n"
+    assert out.getvalue() == f"{aicode_tokens.SLUG_NOTE}\n"

@@ -31,3 +31,9 @@ def test_the_defaults_are_read_at_call_time(monkeypatch):
     assert colors.yellow("hi") == "\x1b[33mhi\x1b[0m"
     monkeypatch.setenv("NO_COLOR", "1")
     assert colors.yellow("hi") == "hi"
+
+
+@pytest.mark.parametrize("paint, code", [(colors.blue, "34"), (colors.yellow, "33"), (colors.red, "31")])
+def test_an_explicit_environment_wins_over_the_process_one(paint, code, monkeypatch):
+    monkeypatch.setenv("NO_COLOR", "1")
+    assert paint("hi", Tty(), {}) == f"\x1b[{code}mhi\x1b[0m"

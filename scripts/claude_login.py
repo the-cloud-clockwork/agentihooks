@@ -23,6 +23,7 @@ TOKEN = re.compile(r"sk-ant-oat01-[A-Za-z0-9_\-]{20,}")
 ESCAPES = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]")
 COLUMNS = 1000
 PIXELS = (0, 0)
+WINSIZE = "HHHH"
 CHUNK = 65536
 MISSING = 127
 ASK_SLUG = "Slug (the email of the target account): "
@@ -69,7 +70,7 @@ def _pump(master: int, terminal: Terminal, forward: bool) -> bytes:
             try:
                 data = os.read(master, CHUNK)
             except OSError:
-                return bytes(captured)
+                data = b""
             if not data:
                 return bytes(captured)
             captured += data
@@ -90,7 +91,7 @@ def _relay(master: int, terminal: Terminal) -> bytes:
 def run(argv: list[str], terminal: Terminal) -> tuple[int, bytes]:
     """The child's window is COLUMNS wide so the token prints on one line instead of being hard-wrapped."""
     master, slave = pty.openpty()
-    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", terminal.rows, COLUMNS, *PIXELS))
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack(WINSIZE, terminal.rows, COLUMNS, *PIXELS))
     try:
         child = subprocess.Popen(argv, preexec_fn=functools.partial(os.login_tty, slave))
     except OSError:
@@ -139,10 +140,10 @@ def _capture(runner: Callable) -> tuple[int, str]:
     print(term_colors.yellow(PRIVATE_WINDOW))
     code, captured = runner([shutil.which("claude") or "claude", "setup-token"])
     token = extract(captured)
-    if code or not token:
+    failed = code or not token
+    if failed:
         _fail(NO_TOKEN.format(code=code))
-        return code or 1, ""
-    return 0, token
+    return (code or 1) if failed else 0, token
 
 
 def main(

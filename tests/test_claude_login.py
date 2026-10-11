@@ -1,5 +1,6 @@
 import io
 import os
+import signal
 import sys
 import termios
 
@@ -89,30 +90,49 @@ def _pipe(data=b"", close=False):
     return read
 
 
-def test_the_child_runs_in_a_wide_controlling_terminal_and_its_output_passes_through():
+@pytest.fixture
+def deadline():
+    def expired(signum, frame):
+        raise TimeoutError("the pty relay hung")
+
+    previous = signal.signal(signal.SIGALRM, expired)
+    signal.alarm(20)
+    yield
+    signal.alarm(0)
+    signal.signal(signal.SIGALRM, previous)
+
+
+def test_the_child_runs_in_a_wide_controlling_terminal_and_its_output_passes_through(deadline):
     out_read, out_write = os.pipe()
     child = (
-        "import os, sys; s = os.get_terminal_size(); open('/dev/tty').close(); print(s.columns, s.lines); sys.exit(3)"
+        "import os, sys, time; s = os.get_terminal_size(); open('/dev/tty').close(); "
+        "print(s.columns, s.lines, flush=True); time.sleep(0.3); print('end'); sys.exit(3)"
     )
     terminal = claude_login.Terminal(_pipe(b"zzz"), out_write, False, 33)
     code, captured = claude_login.run([sys.executable, "-c", child], terminal)
-    assert (code, captured) == (3, b"1000 33\r\n")
+    assert (code, captured) == (3, b"1000 33\r\nend\r\n")
     assert os.read(out_read, 1024) == captured
 
 
-def test_on_a_terminal_keys_are_forwarded_in_raw_mode_and_the_mode_is_restored():
+def test_on_a_terminal_keys_are_forwarded_in_raw_mode_and_the_mode_is_restored(deadline):
     seen = []
     stdin = _pipe(b"hello\n", close=True)
     out_read, out_write = os.pipe()
     terminal = claude_login.Terminal(
-        stdin, out_write, True, 24, lambda fd: "saved", lambda *args: seen.append(args), lambda fd: seen.append(fd)
+        stdin,
+        out_write,
+        True,
+        24,
+        lambda fd: seen.append(("get", fd)) or "saved",
+        lambda *args: seen.append(args),
+        lambda fd: seen.append(fd),
     )
     code, captured = claude_login.run([sys.executable, "-c", "print('got', input())"], terminal)
     assert code == 0 and b"got hello" in captured
-    assert seen == [stdin, (stdin, termios.TCSADRAIN, "saved")]
+    assert seen == [("get", stdin), stdin, (stdin, termios.TCSADRAIN, "saved")]
 
 
-def test_the_terminal_mode_is_restored_when_relaying_fails():
+def test_the_terminal_mode_is_restored_when_relaying_fails(deadline):
     seen = []
     unwritable, _ = os.pipe()
     terminal = claude_login.Terminal(
@@ -246,6 +266,23 @@ def test_a_terminal_sees_blue_steps_a_yellow_warning_and_a_red_error(monkeypatch
     assert err.getvalue() == (
         "\x1b[31magentihooks claude login: no token found (claude setup-token exited 5); nothing written\x1b[0m\n"
     )
+
+
+def test_errors_are_coloured_by_whether_stderr_is_a_terminal(monkeypatch):
+    out, err = io.StringIO(), Tty()
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(sys, "stderr", err)
+    assert _login(["_x"]) == 2
+    assert err.getvalue() == f"\x1b[31magentihooks claude login: {aicode_tokens.SLUG_RULE}: '_x'\x1b[0m\n"
+    assert out.getvalue() == f"{aicode_tokens.SLUG_NOTE}\n"
+
+
+def test_no_openbao_on_a_terminal_asks_nothing(capsys):
+    console = Prompts(tty=True)
+    assert _login(["team", "--no-openbao"], console=console) == 0
+    assert console.prompts == []
+    assert capsys.readouterr().out == STEPS + _summary("AH_CC_TOKEN_team")
 
 
 def test_login_is_intercepted_and_everything_else_passes_through(monkeypatch):
