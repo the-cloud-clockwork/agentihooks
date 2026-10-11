@@ -166,6 +166,7 @@ done
 if [[ $attached != *"registered 1, refused {}"* ]]; then
   kubectl logs "${controller[@]}" -c controller --tail 50 || true
   kubectl logs -n "$namespace" "$worker_pod" || true
+  kubectl exec -n "$namespace" "$worker_pod" -- cat /home/worker/.terminal/sshd.log || true
   printf 'the controller start pass did not attach to the worker attempt: %s\n' "$attached" >&2
   exit 1
 fi
