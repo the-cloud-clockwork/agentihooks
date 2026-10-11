@@ -470,3 +470,57 @@ def test_command_rejects_unknown_actions(monkeypatch, capsys):
         worker_image.main()
     assert error.value.code == 2
     assert "invalid choice: 'unexpected'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("action", ["download", "install"])
+def test_a_named_tool_limits_download_and_install_to_that_tool(locked, monkeypatch, action):
+    path, lock, _ = locked
+    argv = ["worker_image", action, "--lock", str(path), "--tool", "herdr", "--cache", "/var/cache/tools"]
+    monkeypatch.setattr("sys.argv", argv)
+    fetch = Mock()
+    install = Mock()
+    monkeypatch.setattr(worker_image, "fetch", fetch)
+    monkeypatch.setattr(worker_image, "install_tools", install)
+    worker_image.main()
+    herdr = lock["tools"]["herdr"]
+    if action == "download":
+        assert fetch.call_args_list == [call("herdr", herdr, Path("/var/cache/tools"))]
+    else:
+        install.assert_called_once_with(
+            {**lock, "tools": {"herdr": herdr}}, Path("/usr/local/bin"), Path("/var/cache/tools")
+        )
+
+
+def test_a_named_tool_installs_and_checks_only_that_binary(locked, tmp_path, monkeypatch):
+    path, lock, payloads = locked
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(payloads[url]))
+    installed = Mock(wraps=worker_image.install_tools)
+    monkeypatch.setattr(worker_image, "install_tools", lambda lock, _, cache: installed(lock, tmp_path, cache))
+    monkeypatch.setattr("sys.argv", ["worker_image", "install", "--lock", str(path), "--tool", "herdr"])
+    worker_image.main()
+    assert [entry.name for entry in tmp_path.iterdir() if entry.name in lock["tools"]] == ["herdr"]
+
+
+def test_command_rejects_an_unlocked_tool(locked, monkeypatch, capsys):
+    path, _, _ = locked
+    monkeypatch.setattr("sys.argv", ["worker_image", "install", "--lock", str(path), "--tool", "curl"])
+    with pytest.raises(SystemExit) as error:
+        worker_image.main()
+    assert error.value.code == 2
+    assert "invalid choice: 'curl'" in capsys.readouterr().err
+
+
+def test_the_swarm_image_installs_the_herdr_client_the_worker_lock_pins():
+    root = Path(__file__).resolve().parents[1]
+    dockerfile = (root / "Dockerfile").read_text()
+    ignored = (root / ".dockerignore").read_text().splitlines()
+    assert "!docker/swarm-node/versions.lock" in ignored
+    assert "!docker/swarm-node/requirements.lock" in ignored
+    assert "COPY docker/swarm-node/versions.lock docker/swarm-node/requirements.lock /opt/swarm-node/" in dockerfile
+    assert 'worker_image.py install --tool herdr --architecture "$TARGETARCH"' in dockerfile
+    assert "COPY --from=herdr /usr/local/bin/herdr /usr/local/bin/herdr" in dockerfile
+    assert "herdrdev/herdr" not in dockerfile
+    assert "sha256:" not in dockerfile.split("AS herdr")[1]
+    due = (root / "deploy/helm/agentihooks-swarm/ci/kind-due.sh").read_text().splitlines()
+    assert "  docker/swarm-node/versions.lock" in due
+    assert "  docker/swarm-node/requirements.lock" in due
