@@ -193,6 +193,8 @@ def test_thread_ids_falls_back_to_codex_on_the_path(monkeypatch):
         ["not json"],
         [{"id": 1, "error": {"message": "no"}}],
         [{"id": 1, "result": {}}],
+        [{"id": 1, "result": None}],
+        [{"id": 1, "result": {"data": None}}],
     ],
 )
 def test_thread_ids_finds_nothing_when_the_server_gives_no_list(replies):

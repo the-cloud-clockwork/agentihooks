@@ -110,7 +110,7 @@ def thread_ids(name: str, archived: bool, environ: Mapping[str, str], popen: Cal
         for line in server.stdout:
             reply = _parsed(line)
             if reply.get("id") == LIST_ID:
-                threads = reply.get("result", {}).get("data", [])
+                threads = (reply.get("result") or {}).get("data") or []
                 return [thread["id"] for thread in threads if thread.get("name") == name]
         return []
     except OSError:
