@@ -371,12 +371,13 @@ def test_beat_keeps_beating_through_a_redis_error(store, clock, monkeypatch):
 
 def test_a_fenced_launch_slower_than_the_lease_keeps_it(store, clock, monkeypatch):
     store.create(SwarmConfig("sw", ".", 1, 0))
-    monkeypatch.setattr(lease, "tick_ms", lambda: 10)
+    monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
+    monkeypatch.setattr(lease, "beat_s", lambda: 0.01)
     held, beats = lease.acquire(store, "sw", "home"), []
 
     def slow(*args):
         for _ in range(5):
-            clock[0] += 20
+            clock[0] += 120000
             beats.append(renewed(store, clock))
             if not beats[-1]:
                 break
@@ -386,19 +387,20 @@ def test_a_fenced_launch_slower_than_the_lease_keeps_it(store, clock, monkeypatc
     assert runtime.spawn(store.config("sw"), "eng", "one", {"id": "t"}) == "placed"
     assert runtime.relaunch("one") == "placed"
     assert beats == [True] * 10
-    assert lease.current(store, "sw") == lease.Lease("home", 1, clock[0] + 30)
+    assert lease.current(store, "sw") == lease.Lease("home", 1, clock[0] + lease.ttl_ms())
 
 
 def test_a_launch_slower_than_the_lease_keeps_the_intent_pass_in_the_same_tick(env, clock, monkeypatch):  # noqa: F811
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo", "--max-eng-agents", "1", "--max-ci-agents", "0")
     store.update("sw", state="running")
-    monkeypatch.setattr(lease, "tick_ms", lambda: 10)
+    monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
+    monkeypatch.setattr(lease, "beat_s", lambda: 0.01)
     spawn, events = rt.spawn, []
 
     def slow(config, lane, name, task):
         for _ in range(5):
-            clock[0] += 20
+            clock[0] += 120000
             events.append(renewed(store, clock))
             if not events[-1]:
                 break
@@ -430,7 +432,8 @@ def test_a_slow_launch_that_never_starts_is_recorded_against_the_launch_not_the_
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo", "--max-eng-agents", "1", "--max-ci-agents", "0")
     store.update("sw", state="running")
-    monkeypatch.setattr(lease, "tick_ms", lambda: 10)
+    monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
+    monkeypatch.setattr(lease, "beat_s", lambda: 0.01)
     spawn, events = rt.spawn, []
     refused = "agentihooks init-agent: the harness did not report its route within 90s"
 
@@ -438,7 +441,7 @@ def test_a_slow_launch_that_never_starts_is_recorded_against_the_launch_not_the_
         if task.get("id") != "t1":
             return spawn(config, lane, name, task)
         for _ in range(5):
-            clock[0] += 20
+            clock[0] += 120000
             events.append(renewed(store, clock))
             if not events[-1]:
                 break

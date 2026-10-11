@@ -30,6 +30,10 @@ def ttl_ms() -> int:
     return 3 * tick_ms()
 
 
+def beat_s() -> float:
+    return tick_ms() / 1000
+
+
 @dataclass(frozen=True)
 class Lease:
     owner: str
@@ -106,7 +110,7 @@ def renew(store: RedisStore, slug: str, held: Lease) -> Lease:
 def beat(store: RedisStore, slug: str, held: Lease, stop: threading.Event) -> None:
     from redis.exceptions import RedisError
 
-    while not stop.wait(tick_ms() / 1000):
+    while not stop.wait(beat_s()):
         try:
             renew(store, slug, held)
         except SwarmError:
