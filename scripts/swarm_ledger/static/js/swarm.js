@@ -103,19 +103,29 @@ function modelText(a) {
   return [model, a.effort].filter(Boolean).join(" ");
 }
 
+const TERMINAL_TONES = { live: "live", cached: "stalled", unverified: "unknown" };
+
+function terminalView(t, now) {
+  if (!t) return null;
+  if (t.state === "live" && t.live_at === t.checked_at && Math.abs(now - t.checked_at) <= t.fresh_ms) return { state: "live", detail: "" };
+  const detail = [t.live_at ? `live ${span(now - t.live_at)} ago` : "", (t.reason || "").replace(/_/g, " ")].filter(Boolean).join(" · ");
+  return { state: t.live_at ? "cached" : "unverified", detail };
+}
+
 function agentRows(sw, now) {
   const agents = [...(sw.agents || [])].sort((x, y) => (y.lane === "master") - (x.lane === "master"));
   return agents.map((a) => {
     const master = a.lane === "master";
     return { name: a.name, master, gates: a.gates || [], lane: master ? "—" : a.lane, profile: a.profile || "—", overlays: (a.overlays || []).join(" · ") || "—", model: modelText(a) || "—", task: master ? "" : a.task || "",
       state: master && (a.status || "working") === "working" ? "live" : a.status || "working", promoted: !!a.promoted, age: a.started_at ? span(now - a.started_at) : "—",
-      finished: a.status === "finished", since: a.state_since || 0 };
+      finished: a.status === "finished", since: a.state_since || 0, terminal: terminalView((sw.terminals || {})[a.name], now) };
   });
 }
 
 function agentRow(a) {
   return withId(cells(idCell(a.name), a.lane, a.profile, a.overlays, a.model, a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
-    a.promoted ? h("span", { class: "sw-promoted" }, label(a.state), label("promoted")) : label(a.state), a.age, a.finished ? h("span") : agentActions(a)), `agent-${a.name}`);
+    a.promoted ? h("span", { class: "sw-promoted" }, label(a.state), label("promoted")) : label(a.state),
+    a.terminal ? h("span", {}, label(a.terminal.state, TERMINAL_TONES[a.terminal.state]), a.terminal.detail && ` ${a.terminal.detail}`) : "—", a.age, a.finished ? h("span") : agentActions(a)), `agent-${a.name}`);
 }
 
 function agentActions(a) {
@@ -280,7 +290,7 @@ export function renderSwarm(sw) {
   if ($("swarm").hidden) return renderStats();
   renderFreezes();
   if (!sw) {
-    $("swarm-agents").replaceChildren(emptyRow(9, "No agents running. Start the swarm to work the open tasks."));
+    $("swarm-agents").replaceChildren(emptyRow(10, "No agents running. Start the swarm to work the open tasks."));
     renderOverlays(sw);
     return;
   }
@@ -307,8 +317,8 @@ export function renderSwarm(sw) {
 function renderAgents(sw, now = Date.now()) {
   const agents = agentRows(sw, now), live = agents.filter((a) => !a.finished), finished = agents.filter((a) => a.finished).sort((x, y) => y.since - x.since);
   $("agents-count").textContent = finished.length ? `${live.length} live · ${finished.length} finished` : `${live.length} live`;
-  $("swarm-agents").replaceChildren(...(live.length ? live.map(agentRow) : [emptyRow(9, "No agents running. Start the swarm to work the open tasks.")]),
-    ...firstPage("agents", finished, (a) => `agent-${a.name}`).map(agentRow), moreRow("agents", finished.length, "more finished agents", 9, () => renderAgents(swarm)) || "");
+  $("swarm-agents").replaceChildren(...(live.length ? live.map(agentRow) : [emptyRow(10, "No agents running. Start the swarm to work the open tasks.")]),
+    ...firstPage("agents", finished, (a) => `agent-${a.name}`).map(agentRow), moreRow("agents", finished.length, "more finished agents", 10, () => renderAgents(swarm)) || "");
 }
 
 function renderHealth(findings, now = Date.now()) {
