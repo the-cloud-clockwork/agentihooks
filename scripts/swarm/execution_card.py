@@ -5,7 +5,7 @@ from collections.abc import Iterable, Mapping
 
 LOCAL, KUBERNETES = "local", "kubernetes"
 SCHEDULING, QUOTA, INPUT = "scheduling", "quota", "input"
-UNOBSERVED, UNREADABLE = "unobserved", "unreadable"
+UNOBSERVED, UNREADABLE, UNKNOWN = "unobserved", "unreadable", "unknown"
 TERMINAL_SOURCE = "terminal"
 
 
@@ -66,7 +66,7 @@ def cards(agents: Iterable[Mapping], terminals: Mapping[str, Mapping]) -> tuple[
             errors += 1
             built[name] = {
                 **card({"name": name}, None),
-                "backend": str(agent.get("runtime_backend") or LOCAL),
+                "backend": str(agent.get("runtime_backend") or UNKNOWN),
                 "observed": UNREADABLE,
             }
     return built, errors

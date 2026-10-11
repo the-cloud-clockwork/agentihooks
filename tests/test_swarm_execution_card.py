@@ -99,3 +99,9 @@ def test_reloading_the_view_restores_the_latest_state_without_replaying_anything
     assert again["executions"] == first["executions"]
     assert again["commands"] == first["commands"] == []
     assert snapshot(store) == before
+
+
+def test_an_unreadable_row_without_a_backend_never_claims_local():
+    built, errors = execution_card.cards([{"name": "eng-7", "observation": {"sources": {"heartbeat": 3}}}], {})
+    assert errors == 1
+    assert (built["eng-7"]["backend"], built["eng-7"]["observed"]) == ("unknown", "unreadable")
