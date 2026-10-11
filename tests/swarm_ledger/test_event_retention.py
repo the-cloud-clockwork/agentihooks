@@ -174,6 +174,14 @@ def test_retained_keeps_every_event_inside_the_horizon():
     assert events.retained(rows, None, 2, 3, horizon=-1) == 3
     assert events.retained(rows, 1, 2, 9, horizon=60) == 1
     assert events.retained([{"rev": 1}, *rows], None, 2, 9, horizon=9) == 1
+    assert events.retained([{"rev": 1}, *rows], None, 2, 9, horizon=0) == 1
+
+
+def test_keep_events_trims_by_the_window_behind_the_write_time_and_marks_the_highest_trimmed():
+    core = SimpleNamespace(EVENTS_KEPT=1, EVENTS_CEILING=9, EVENTS_WINDOW_MS=100)
+    meta = {"events": [{"rev": 1, "at": 0}, {"rev": 2, "at": 950}]}
+    events.keep_events(meta, [{"rev": 3, "at": 1000}], core, 1000)
+    assert meta == {"events": [{"rev": 2, "at": 950}, {"rev": 3, "at": 1000}], "events_trimmed": 1}
 
 
 def test_a_trim_at_an_event_without_a_revision_marks_revision_zero(repo):

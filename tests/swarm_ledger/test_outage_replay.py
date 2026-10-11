@@ -1,14 +1,10 @@
-import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
-import watch_ledger  # noqa: E402
-
-from scripts.swarm_ledger.repository import sqlite  # noqa: E402
-from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository  # noqa: E402
+from scripts.swarm_ledger import watch_ledger
+from scripts.swarm_ledger.repository import sqlite
+from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 
 pytestmark = pytest.mark.unit
 
