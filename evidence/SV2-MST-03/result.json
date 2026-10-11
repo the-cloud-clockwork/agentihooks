@@ -44,7 +44,8 @@
   "remaining_limitations": [
     "Measurements are kept in the masters hash and returned by master_scale.measurements; they are not shipped to the metrics outbox yet, proposed as a ledger follow up",
     "Extra master seats are stored as working rather than starting, because only the lead has a start tracker; a seat that never reports is reaped as lost after the startup grace and relaunched",
-    "Owner fenced writes between masters are SV2-MST-04"
+    "Owner fenced writes between masters are SV2-MST-04",
+    "Phases of an emptied lower seat stay assigned to it in the masters hash until the count falls past it; meanwhile masters.route sends their items to the lead, because their owner seat has no live master"
   ],
   "validation": {
     "red": "Tests run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38070883896 on 630a627b4 failed collecting tests/test_swarm_v2_master_scale.py with ImportError for master_scale",
@@ -53,7 +54,7 @@
     "mutation": "pending",
     "review": "Standards reader closed every finding after two rounds and accepted extra seats stored as working; Spec reader closed every finding except this evidence record",
     "local": "No local tests or mutation ran; static prepush passed on every commit",
-    "measurements": "case C of Tests run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38133520913 on 581dd49ef: twenty agents back to five at one seat per five, each extra master handing off one minute after its ask"
+    "measurements": "Fixture clock values from case C of Tests run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38133520913 on 581dd49ef: each extra master hands off one fixture minute after its ask, so master_retire_seconds reads the fake clock step, not a live latency; live values come with G10 qualification"
   },
   "measurements": {
     "master_seat_count": 1,
@@ -73,7 +74,8 @@
     "A grow raises the count at once; a shrink waits HOLD_MS so a brief dip never cycles masters",
     "The count falls only to the highest extra seat that still holds a live master, so no seat is cut mid answer",
     "A retired seat moves every open item to the lead, read ones included, because an item a departed master read but never closed would otherwise be stranded",
-    "Regrowth after the asks withdraws them and keeps every seat"
+    "Regrowth after the asks withdraws them and keeps every seat",
+    "An extra seat below a live higher seat that empties after its ask forwards its handoff and open items to the lead at once; the count still falls only past seats whose master left"
   ],
   "obligations": {
     "input_preparation": {
@@ -87,7 +89,10 @@
       "met_by": "Twenty agents at one seat per five give four seats, three launched masters, four phases each and one announcement",
       "tests": [
         "tests/test_swarm_v2_master_scale.py::test_growing_from_five_to_twenty_agents_launches_a_master_in_each_new_seat_and_posts_the_owners",
-        "tests/test_swarm_v2_master_scale.py::test_the_fixture_wants_one_master_seat_per_five_working_agents"
+        "tests/test_swarm_v2_master_scale.py::test_the_fixture_wants_one_master_seat_per_five_working_agents",
+        "tests/test_swarm_v2_master_scale.py::test_the_tick_runs_the_scaling_pass_with_its_swarm_and_ledger_document",
+        "tests/test_swarm_v2_master_scale.py::test_a_launched_seat_is_primed_with_its_seat_handoff",
+        "tests/test_swarm_v2_master_scale.py::test_growing_from_two_to_four_seats_keeps_every_phase_the_new_seats_do_not_take"
       ]
     },
     "rejection_contract": {
@@ -95,7 +100,8 @@
       "tests": [
         "tests/test_swarm_v2_master_scale.py::test_any_other_rule_is_refused",
         "tests/test_swarm_v2_master_scale.py::test_a_shrink_inside_the_hold_window_asks_nobody_and_a_regrowth_restarts_the_window",
-        "tests/test_swarm_v2_master_scale.py::test_a_retire_ask_goes_once_and_a_live_extra_master_keeps_its_seat"
+        "tests/test_swarm_v2_master_scale.py::test_a_retire_ask_goes_once_and_a_live_extra_master_keeps_its_seat",
+        "tests/test_swarm_v2_master_scale.py::test_swarm_set_stores_a_rule_and_refuses_an_unknown_one"
       ]
     },
     "recovery_contract": {
@@ -103,7 +109,9 @@
       "tests": [
         "tests/test_swarm_v2_master_scale.py::test_twenty_back_to_five_retires_extra_seats_through_their_handoffs",
         "tests/test_swarm_v2_master_scale.py::test_a_retired_seat_moves_items_its_master_read_but_never_closed",
-        "tests/test_swarm_v2_master_scale.py::test_regrowth_after_the_asks_withdraws_them_and_keeps_every_seat"
+        "tests/test_swarm_v2_master_scale.py::test_regrowth_after_the_asks_withdraws_them_and_keeps_every_seat",
+        "tests/test_swarm_v2_master_scale.py::test_an_emptied_lower_seat_is_not_relaunched_while_a_higher_seat_retires",
+        "tests/test_swarm_v2_master_scale.py::test_an_extra_master_handoff_through_the_swarm_command_reaches_the_lead"
       ]
     },
     "mutation_scope": {

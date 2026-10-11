@@ -1,11 +1,13 @@
 import hashlib
 import json
 import re
+from argparse import Namespace
 from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 
 from scripts.inbox.store import InboxStore
+from scripts.swarm import cli
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_v2 import master_scale, masters
 from scripts.swarm_v2.masters_channel import MastersChannel
@@ -114,7 +116,7 @@ def _negative(world):
     asks = world.tick(start + master_scale.HOLD_MS)
     repeat = world.tick(start + master_scale.HOLD_MS + MINUTE)
     return {
-        "unknown_rule": _refusal(lambda: master_scale.rule_of("lots")),
+        "unknown_rule": _refusal(lambda: cli.cmd_set(world.store, Namespace(slug=SLUG, pairs=["master-per=lots"]))),
         "rule_kept": master_scale.rule(world.store.redis, SLUG),
         "actions_inside_hold": inside,
         "count_inside_hold": count_inside,

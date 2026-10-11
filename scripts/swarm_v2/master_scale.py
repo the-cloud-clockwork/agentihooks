@@ -91,9 +91,10 @@ def _resize(slug, store, doc, agents, count, want, now_ms):
     occupied = {a.seat: a for a in agents if a.lane == MASTER}
     actions = _ask(slug, store, occupied, retiring, range(count, want, -1), want, now_ms)
     keep = max([want] + [i for i in range(want + 1, count + 1) if _address(slug, i) in occupied])
-    for index in range(count, keep, -1):
+    for index in range(count, want, -1):
         address = _address(slug, index)
-        actions.append(_retire(slug, store, address, retiring.pop(address, None), now_ms))
+        if index > keep or (address in retiring and address not in occupied):
+            actions.append(_retire(slug, store, address, retiring.pop(address, None), now_ms))
     store.redis.hset(key, RETIRING, json.dumps(retiring))
     return actions + (_recount(slug, store, doc, agents, count, keep, now_ms) if keep < count else [])
 

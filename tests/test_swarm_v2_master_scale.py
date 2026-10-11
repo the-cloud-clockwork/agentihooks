@@ -239,13 +239,19 @@ def test_a_retire_ask_goes_once_and_a_live_extra_master_keeps_its_seat(swarm):
 
 def test_an_emptied_lower_seat_is_not_relaunched_while_a_higher_seat_retires(swarm):
     store, runtime = swarm
+    inbox = InboxStore(store.redis)
     second, _, _ = asked(swarm)
+    question = inbox.send(f"{SLUG}-eng-1", SECOND, "a question for seat two")
     hand_off(store, runtime, second)
 
     actions = run(store, runtime, NOW + 2 * MINUTE + HOLD)
 
-    assert actions == []
+    assert actions == [f"retired master seat {SECOND} after 60 seconds"]
     assert count(store) == 4 and len(runtime.masters) == 3
+    assert any(f"notes of {SECOND}" in item.text for item in inbox.pending_items(LEAD))
+    assert inbox.get(question.id).address == LEAD
+    assert masters.route(f"phases/{PHASES[1]}", DOC, owners(store), [LEAD, THIRD, FOURTH], LEAD) == LEAD
+    assert run(store, runtime, NOW + 3 * MINUTE + HOLD) == []
 
 
 def test_twenty_back_to_five_retires_extra_seats_through_their_handoffs(swarm):
@@ -450,6 +456,61 @@ def test_only_a_master_record_in_the_lead_seat_is_the_lead():
 def test_a_seat_without_phases_is_told_it_owns_none_yet():
     text = prompt.build(SLUG, "/repo", MASTER, "m2", {"id": "master-2", "seat": SECOND, "phases": [], "masters": 2})
     assert "you own: none yet." in text
+
+
+def test_the_tick_runs_the_scaling_pass_with_its_swarm_and_ledger_document(swarm, monkeypatch):
+    from tests.swarm.test_tick import FakeLedger
+
+    store, runtime = swarm
+    calls = []
+    monkeypatch.setattr(master_scale, "run", lambda *args: calls.append(args) or [])
+
+    tick_module.tick(SLUG, store, FakeLedger([{"id": "t1", "lane": "eng"}]), runtime, NOW)
+
+    [(slug, config, passed, placed, doc, now)] = calls
+    assert (slug, config.slug, passed, placed, now) == (SLUG, SLUG, store, runtime, NOW)
+    assert [t["id"] for t in doc["tasks"]] == ["t1"]
+
+
+def test_an_extra_master_handoff_through_the_swarm_command_reaches_the_lead(swarm):
+    from tests.swarm.test_tick import FakeLedger
+
+    store, runtime = swarm
+    _, _, fourth = asked(swarm)
+    text = "# Handoff v2\n## Intent\nHand master seat four to the lead.\n<!-- handoff complete -->\n"
+
+    cli._hand_off(store, SLUG, fourth, text, "exit", FakeLedger([]))
+    runtime.live.discard(fourth.name)
+    run(store, runtime, NOW + 2 * MINUTE + HOLD)
+
+    forwarded = [i.text for i in InboxStore(store.redis).pending_items(LEAD) if i.sender == "swarm"]
+    assert forwarded == [master_scale.HANDED.format(address=FOURTH, slug=SLUG) + text]
+
+
+def test_a_launched_seat_is_primed_with_its_seat_handoff(swarm):
+    store, runtime = swarm
+    store.put_handoff(SLUG, "master-2", "# Handoff v2\nseat two notes", seat=SECOND)
+    grown(swarm)
+
+    name, task = runtime.masters[0]
+
+    assert task["handoff"] == "# Handoff v2\nseat two notes"
+    assert "seat two notes" in prompt.build(SLUG, "/repo", MASTER, name, task)
+    assert store.handoff(SLUG, "master-2") == ""
+
+
+def test_growing_from_two_to_four_seats_keeps_every_phase_the_new_seats_do_not_take(swarm):
+    store, runtime = swarm
+    staffed(store, 10)
+    run(store, runtime)
+    before = owners(store)
+    staffed(store, 20)
+
+    run(store, runtime, NOW + MINUTE)
+
+    after = owners(store)
+    assert Counter(after.values()) == {LEAD: 4, SECOND: 4, THIRD: 4, FOURTH: 4}
+    assert all(after[p] == before[p] for p in PHASES if after[p] in (LEAD, SECOND))
 
 
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-MST-03"
