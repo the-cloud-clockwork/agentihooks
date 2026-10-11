@@ -1,9 +1,10 @@
 """The dispatcher's tick step: rank by the open work each task unblocks, grouping and the priority sweep, by autonomy.
 
 Each tick it orders the claimable tasks in focus by leverage. At delegate and full it raises the top ones to high and
-lowers a high rank it set itself once that task leaves the top, never changing a rank someone else set; below delegate
-it proposes each raise to the master. Every action is a gate log row, a dispatch metrics row naming its rule and, for
-a rank, a comment on the task.
+lowers a high or urgent rank once that task leaves the top. A rank the master or the swarm set is a default it
+reorders; only an operator rank, set by him or relayed with his quoted words, stays fixed. Below delegate it proposes
+each raise to the master. Every action is a gate log row, a dispatch metrics row naming its rule and, for a rank, a
+comment on the task.
 """
 
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from scripts.swarm import bottleneck, freeze, grouping, metrics_outbox, priority
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import SwarmError
+from scripts.swarm_ledger import ledger_rank
 from scripts.swarm_ledger.repository import hierarchy
 
 AUTHOR = "dispatcher"
@@ -31,6 +33,7 @@ RAISED = "The dispatcher raised this task to high rank because it unblocks {work
 LOWERED = "The dispatcher lowered this task to normal rank because {why}."
 OUTRANKED = "it unblocks {work} and {top} claimable tasks in focus unblock more"
 UNREADY = "it is no longer a claimable task in focus that unblocks open work"
+IDLE = "it unblocks no open work"
 PROPOSED = "The dispatcher proposed high rank for this task to the master because it unblocks {work}."
 PROPOSE = (
     "The dispatcher proposes rank high for task {task} titled {title}: it unblocks {work}. If the operator agrees, "
@@ -83,19 +86,22 @@ def ordered(doc: dict, named: str, scores: dict) -> list[str]:
 def rank_pass(slug, config, store, ledger, doc, now_ms):
     from scripts.swarm import tick
 
-    scores, known, owned = leverage(doc), {t["id"]: t for t in doc["tasks"]}, _owned(doc)
+    scores, known, owned, fixed = leverage(doc), {t["id"]: t for t in doc["tasks"]}, _owned(doc), _fixed(doc)
     named = bottleneck.read(store, slug).get("bottleneck")
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
-    queue = [task_id for task_id in ordered(doc, named, scores) if tick.ready(known[task_id], known, doc, graph, fix)]
-    top = [task_id for task_id in queue if task_id in owned or known[task_id].get("rank") in WINDOW][:TOP]
+    claimable = {task_id for task_id, t in known.items() if tick.ready(t, known, doc, graph, fix)}
+    queue = [task_id for task_id in ordered(doc, named, scores) if task_id in claimable]
+    top = [task_id for task_id in queue if task_id not in fixed or known[task_id].get("rank") in WINDOW][:TOP]
     raises = [
         (known[task_id], _work(scores[task_id]))
         for task_id in top
-        if known[task_id].get("rank") != RANK and (task_id in owned or "rank" not in known[task_id])
+        if known[task_id].get("rank") not in WINDOW[1:] and task_id not in fixed
     ]
     if config.autonomy in APPLIES:
-        stale = [t for t in doc["tasks"] if t["id"] in owned and t.get("rank") == RANK and _open(t)]
-        lowers = [(t, _why(t["id"], queue, scores)) for t in stale if t["id"] not in top]
+        mine = owned | (claimable - fixed)
+        held = partial(_claimable_lowered, known, doc, graph, fix)
+        stale = [t for t in doc["tasks"] if t["id"] in mine and _open(t) and _lowerable(t, held)]
+        lowers = [(t, _why(t["id"], queue, scores, claimable)) for t in stale if t["id"] not in top]
         steps = [partial(_lower, slug, ledger, *row) for row in lowers]
         steps += [partial(_raise, slug, ledger, *row) for row in raises]
     else:
@@ -130,8 +136,20 @@ def _rank(slug, ledger, task, rank, text, comment):
     return Action(LEVERAGE, "apply", text + _comment(slug, ledger, task, comment), task)
 
 
-def _why(task_id, queue, scores):
-    return OUTRANKED.format(work=_work(scores[task_id]), top=TOP) if task_id in queue else UNREADY
+def _why(task_id, queue, scores, claimable):
+    if task_id in queue:
+        return OUTRANKED.format(work=_work(scores[task_id]), top=TOP)
+    return IDLE if task_id in claimable else UNREADY
+
+
+def _lowerable(task, claimable_at_lower):
+    return task.get("rank") == RANK or task.get("rank") == "urgent" and claimable_at_lower(task)
+
+
+def _claimable_lowered(known, doc, graph, fix, task):
+    from scripts.swarm import tick
+
+    return tick.ready({**task, "rank": LOWER}, known, doc, graph, fix)
 
 
 def _comment(slug, ledger, task, text):
@@ -195,9 +213,17 @@ def _open(task):
 
 
 def _owned(doc):
+    return _ranked_by(doc, AUTHOR)
+
+
+def _fixed(doc):
+    return _ranked_by(doc, ledger_rank.OPERATOR)
+
+
+def _ranked_by(doc, author):
     stamps = doc.get("_meta", {}).get("stamps", {})
     return {
-        t["id"] for t in doc["tasks"] if "rank" in t and stamps.get(f"tasks/{t['id']}/rank", {}).get("by") == AUTHOR
+        t["id"] for t in doc["tasks"] if "rank" in t and stamps.get(f"tasks/{t['id']}/rank", {}).get("by") == author
     }
 
 

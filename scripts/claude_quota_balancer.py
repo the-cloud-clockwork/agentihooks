@@ -414,6 +414,15 @@ def probe_credential(
     include_fable: bool = False,
     claude_bin: str = "claude",
 ) -> ProbeResult:
+    if not include_fable:
+        from scripts import claude_usage  # claude_usage imports this module
+
+        try:
+            return claude_usage.probe(
+                credential.account, credential.token, model, timeout=min(timeout, claude_usage.TIMEOUT_S)
+            )
+        except claude_usage.Unreachable:
+            pass
     started = time.monotonic()
     try:
         completed = subprocess.run(

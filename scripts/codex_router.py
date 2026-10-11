@@ -25,7 +25,7 @@ from hooks.context.account_sessions import (
     INTERNAL_RUN,
     codex_sessions_by_account,
 )
-from scripts import codex_quota, codex_usage, operator_env, session_bands
+from scripts import codex_quota, codex_sessions, codex_usage, operator_env, session_bands
 from scripts.codex_quota import CodexQuota
 from scripts.routing import codex_api, envs, place
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, Slot
@@ -497,6 +497,7 @@ def main(
     report, args = _take(argv, "--agentihooks-report")
     route, args = _take(args, "--route")
     exclude, args = _take(args, "--agentihooks-exclude")
+    args = codex_sessions.resolve(args, _without_tokens(active))
     lock_path = Path(active.get("HOME", str(Path.home()))) / ".agentihooks" / "codex-route.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     # Held until exec: the descriptor is close-on-exec, so the next launch counts this one as a live session.

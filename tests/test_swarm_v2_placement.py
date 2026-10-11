@@ -135,7 +135,13 @@ class Controller:
 
 
 def launch(request):
-    return {"task_id": request.task["id"], "harness": "codex", "profile": "general", "execution_id": "forged"}
+    return {
+        "task_id": request.task["id"],
+        "harness": "codex",
+        "profile": "general",
+        "task_payload": {"profile": "cicd"},
+        "execution_id": "forged",
+    }
 
 
 def admitted(**task):
@@ -146,9 +152,16 @@ def test_the_kubernetes_runtime_spawns_one_journaled_create_for_the_admitted_exe
     controller = Controller()
     runtime = KubernetesRuntime(controller.execute, launch)
     outcome = runtime.spawn(admitted())
-    payload = {"task_id": "t1", "harness": "codex", "profile": "general", "execution_id": "exe-1", "generation": 2}
+    payload = {
+        "task_id": "t1",
+        "harness": "codex",
+        "profile": "general",
+        "task_payload": {"profile": "cicd"},
+        "execution_id": "exe-1",
+        "generation": 2,
+    }
     assert controller.requests == [OperationRequest("exe-1", 2, "spawn", payload, "create")]
-    assert outcome == Outcome("spawn", Status.OK, BACKEND, Placed("", "codex", placement=BACKEND, profile="general"))
+    assert outcome == Outcome("spawn", Status.OK, BACKEND, Placed("", "codex", placement=BACKEND, profile="cicd"))
     assert runtime.backend == BACKEND
     assert runtime.capabilities == frozenset({Capability.SPAWN})
 
