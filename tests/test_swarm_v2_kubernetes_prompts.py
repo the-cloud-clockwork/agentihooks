@@ -8,7 +8,7 @@ from scripts.swarm.store import AgentRecord
 from scripts.swarm.tick import NUDGE
 from scripts.swarm_v2.herdr.capabilities import Incompatible, Unreachable
 from scripts.swarm_v2.herdr.endpoints import EndpointRefused
-from scripts.swarm_v2.herdr.target import Target
+from scripts.swarm_v2.herdr.target import BARE, Target
 from scripts.swarm_v2.kubernetes import prompts as prompts_module
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 from scripts.swarm_v2.kubernetes.prompts import TerminalPrompts
@@ -342,7 +342,7 @@ def test_the_agent_pane_listing_needs_a_server_qualified_target(tmp_path):
     with pytest.raises(EndpointRefused) as refused:
         client.router.agent_panes(Target("", "default", ENDPOINT_A.incarnation, ""))
 
-    assert refused.value.reason == "bare_pane"
+    assert (refused.value.reason, str(refused.value)) == ("bare_pane", BARE)
 
 
 def test_the_agent_pane_listing_names_only_the_saved_machine_of_the_target(tmp_path):
@@ -352,6 +352,20 @@ def test_the_agent_pane_listing_names_only_the_saved_machine_of_the_target(tmp_p
 
     assert client.router.agent_panes(target) == [PANE]
     assert fleet.commands[-1] == ["herdr", "--machine", record.profile_id, "agent", "list"]
+
+
+def test_the_agent_listing_target_names_the_server_and_no_pane(tmp_path, monkeypatch):
+    _, client, prompts = world(tmp_path)
+    listed, agent_panes = [], client.router.agent_panes
+
+    def recorded(target):
+        listed.append(target)
+        return agent_panes(target)
+
+    monkeypatch.setattr(client.router, "agent_panes", recorded)
+
+    assert prompts.command(remote(), "wake").ok
+    assert listed == [Target(profile(client, EXE_A), "default", ENDPOINT_A.incarnation, "")]
 
 
 def test_a_kubernetes_runtime_with_terminal_prompts_advertises_command(tmp_path):
