@@ -478,6 +478,7 @@ def test_evaluate_detects_api_for_its_harness(monkeypatch, harness, available, l
     monkeypatch.setenv("AGENTIHOOKS_TARGET", harness)
     monkeypatch.setattr(qp, "_session_windows", lambda session: (100, 50, time.time() + 3600, None))
     monkeypatch.setattr("scripts.claude_quota_balancer.cached_observations", lambda: [])
+    monkeypatch.setattr(qp, "_codex_accounts", lambda: [])
     monkeypatch.setattr("hooks.context.account_sessions.agent_pid", lambda: 1)
     monkeypatch.setattr("hooks.context.account_sessions.session_account", lambda pid: "alpha")
     monkeypatch.setattr(

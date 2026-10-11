@@ -31,7 +31,7 @@ def _deadline(value: object) -> float:
     return float(value)
 
 
-def _authority(value: object) -> dict:
+def checked_authority(value: object) -> dict:
     if not isinstance(value, dict):
         raise LaunchRefused("invalid authority")
     if any(k not in value for k in AUTHORITY):
@@ -78,10 +78,10 @@ class Launch:
     def load(cls, attempt: Path, path: Path) -> "Launch":
         spec = json.loads(path.read_text())
         record = json.loads((attempt / "execution.json").read_text())
-        registered = _authority(json.loads((attempt / "registration.json").read_text()))
+        registered = checked_authority(json.loads((attempt / "registration.json").read_text()))
         if not isinstance(spec, dict) or spec.get("schema_version") != SCHEMA_VERSION:
             raise LaunchRefused("unsupported launch")
-        authority = _authority(spec.get("authority"))
+        authority = checked_authority(spec.get("authority"))
         if authority != registered or record["attempt"] != authority["execution_id"]:
             raise LaunchRefused("authority mismatch")
         harness = spec.get("harness")

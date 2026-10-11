@@ -279,6 +279,71 @@ def test_a_restarted_agent_gets_a_new_warning_for_its_new_life():
     assert latest in {item.id for item in messages}
 
 
+@pytest.mark.parametrize(
+    "window,used,field",
+    [("week", {"week": 91}, "week_resets_at"), ("five hour", {"five": 96, "week": 10}, "five_resets_at")],
+)
+def test_the_warning_names_quota_left_and_reset_and_a_new_reset_rearms_it(window, used, field):
+    import time
+    from datetime import datetime
+
+    import fakeredis
+
+    storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    storage.put_agent("sw", AgentRecord("cx", "eng", "e", harness="codex", account="spent", started_at=1))
+    key = storage.key("sw", "quota-capacity")
+
+    def observe(reset, **quota):
+        row = replace(account(harness="codex", **quota), **{field: reset})
+        storage.redis.set(key, json.dumps({"accounts": [row.__dict__]}))
+        return quota_handoff.warn("sw", storage, {})
+
+    first, second = int(time.time()) + 3600, int(time.time()) + 7200
+    assert observe(first, **used) == ["early quota handoff warning sent to cx"]
+    assert observe(first, **used) == []
+    assert observe(second, **used) == ["early quota handoff warning sent to cx"]
+    assert observe(second, **used) == []
+    texts = [item.text for item in InboxStore(storage.redis).pending_items("cx")]
+    left = 100 - max(used.values()) if window == "week" else 4
+    assert len(texts) == 2
+    for text, reset in zip(texts, (first, second), strict=True):
+        assert f"codex account spent has used {100 - left}% of its {window} window, {left}% left; it resets " in text
+        assert datetime.fromtimestamp(reset).astimezone().strftime("%a %H:%M %Z") in text
+
+
+def test_each_window_warns_once_per_reset_while_the_other_stays_crossed():
+    import fakeredis
+
+    storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    storage.put_agent("sw", AgentRecord("cx", "eng", "e", harness="codex", account="spent", started_at=1))
+    key = storage.key("sw", "quota-capacity")
+
+    def observe(five_reset, five, week):
+        row = replace(account(harness="codex", five=five, week=week), week_resets_at=9_000, five_resets_at=five_reset)
+        storage.redis.set(key, json.dumps({"accounts": [row.__dict__]}))
+        return len(quota_handoff.warn("sw", storage, {}))
+
+    assert [observe(100, 50, 91), observe(100, 96, 91), observe(100, 97, 92)] == [1, 1, 0]
+    assert [observe(200, 20, 92), observe(200, 96, 92), observe(200, 96, 93)] == [0, 1, 0]
+    items = InboxStore(storage.redis).pending_items("cx")
+    assert storage.redis.hget(storage.key("sw", "quota-warnings"), "cx") == items[0].id
+    periods = storage.redis.hgetall(storage.key("sw", "quota-warning-periods"))
+    assert periods == {"cx:week": "1:9000", "cx:five hour": "1:200"}
+    assert [item.text.split(" window,")[0].rsplit(" ", 2)[-2:] for item in items] == [
+        ["its", "week"],
+        ["five", "hour"],
+        ["five", "hour"],
+    ]
+    storage.put_agent("sw", AgentRecord("both", "eng", "f", harness="codex", account="spent", started_at=2))
+    assert quota_handoff.warn("sw", storage, {}) == ["early quota handoff warning sent to both"]
+    assert quota_handoff.warn("sw", storage, {}) == []
+    (both,) = InboxStore(storage.redis).pending_items("both")
+    assert "has used 93% of its week window, 7% left; it resets " in both.text
+    assert ". It has used 96% of its five hour window, 4% left; it resets " in both.text
+    assert both.text.count("Submit it with") == 1
+    assert storage.redis.hget(storage.key("sw", "quota-warning-lives"), "both") == "2"
+
+
 def test_an_old_warning_does_not_suppress_a_new_lifes_quota_notice():
     import fakeredis
 
@@ -323,7 +388,8 @@ def test_tick_warns_once_per_agent_without_retiring_it(monkeypatch):
     messages = InboxStore(storage.redis).pending_items(agent.name)
     assert len(messages) == 1
     assert messages[0].text == (
-        "QUOTA HANDOFF WARNING: claude account spent has used 90% of its week window. "
+        "QUOTA HANDOFF WARNING: claude account spent has used 90% of its week window, 10% left; "
+        "its reset time is unknown. "
         "Finish your current step and write your Handoff v2 with the handoff skill while quota remains. "
         "Submit it with agentihooks swarm sw handoff DOC --reason quota, then stop. "
         "The tick keeps your seat and task and routes the successor to an account with room. "

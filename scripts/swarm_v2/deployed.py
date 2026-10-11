@@ -134,7 +134,7 @@ class Workers:
         return KubernetesTransport(pod_api(environ, self.policy["namespace"]), slug, PodTemplate(self.policy))
 
     def grants(self, environ: Mapping[str, str], slug: str, verify: Callable[[str], Registration]) -> PodGrants:
-        supervision = Supervision(HARNESS, self.exporter)
+        supervision = Supervision(HARNESS, self.exporter, self.terms.api_url)
         return PodGrants(pod_api(environ, self.policy["namespace"]), slug, verify, supervision)
 
 
