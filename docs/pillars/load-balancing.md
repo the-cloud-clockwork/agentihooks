@@ -50,9 +50,10 @@ it. One short stderr line names the outcome whenever `OPENBAO_URL` is set or the
 fallback file exists; a machine with neither starts its shells silently and
 without accounts.
 
-Codex accounts load the same way from the KV v2 secret that
-`AGENTIHOOKS_CODEX_CREDS_PATH` names (set it in `~/.agentihooks/.env`; with it
-unset no Codex secret is read). A key holding an account email is exported
+Codex accounts load the same way from the KV v2 secret
+`agentihooks/codex-creds`, the one `codex login` and the refresher write
+(`AGENTIHOOKS_CODEX_CREDS_PATH` in `~/.agentihooks/.env` names another path for
+all three). A key holding an account email is exported
 as `account_names.codex_token_env` of it: `AH_CX_TOKEN_` plus the same slug rule
 (`Ops.Two@Example.com` becomes `AH_CX_TOKEN_ops_twoatexample_com`). A lower case
 `AH_CX_TOKEN_<slug>` key, the form `codex login` and the refresher write, is
@@ -62,8 +63,7 @@ are never exported, so a shell holds access tokens only: the one machine with
 `AGENTIHOOKS_AICODE_TOKEN_REFRESH=true` rotates refresh tokens and writes them
 back to that secret (see Refreshing tokens). The fallback is
 `~/.agentihooks/accounts/codex.env`, under the same rules as `claude.env`; its
-stderr line shows when the fallback exists or when `OPENBAO_URL` and the path
-setting are both set.
+stderr line shows under the same rule.
 
 ## Launch routing
 

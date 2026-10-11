@@ -31,9 +31,7 @@ class Accounts(NamedTuple):
 
 
 CLAUDE = Accounts(TOKEN_PREFIX, "claude.env", lambda environ: openbao_kv.CLAUDE_CREDS, None)
-CODEX = Accounts(
-    CODEX_TOKEN_PREFIX, "codex.env", lambda environ: environ.get(openbao_kv.CODEX_PATH_ENV, ""), codex_token_env
-)
+CODEX = Accounts(CODEX_TOKEN_PREFIX, "codex.env", openbao_kv.codex_creds, codex_token_env)
 
 
 def _named(name: str, prefix: str) -> bool:

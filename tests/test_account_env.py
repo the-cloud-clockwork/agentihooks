@@ -7,7 +7,7 @@ from urllib.error import URLError
 
 import pytest
 
-from scripts import account_env, account_names, aicode_tokens, codex_refresh, codex_router, install
+from scripts import account_env, account_names, aicode_tokens, codex_refresh, codex_router, install, openbao_kv
 from scripts.cli_delegates import delegated_cli
 
 pytestmark = pytest.mark.unit
@@ -15,6 +15,7 @@ pytestmark = pytest.mark.unit
 CODEX_PATH_ENV = "AGENTIHOOKS_CODEX_CREDS_PATH"
 CODEX_PATH = "ops/codex-accounts"
 CODEX_TWO = "AH_CX_TOKEN_" + aicode_tokens.slug("Ops.Two@Example.com")
+CODEX_BASE = {"AH_CX_TOKEN_baseatx_io": "cxB"}
 CODEX_ACCOUNTS = {
     CODEX_TWO: "cx2",
     "AH_CX_TOKEN_teamatx_io": "cx t'",
@@ -53,7 +54,7 @@ def _openbao(monkeypatch, payload=None, error=None, codex=None):
         seen.append((request.full_url, request.get_header("X-vault-token"), timeout))
         if error:
             raise error
-        found = codex if request.full_url.endswith(CODEX_PATH) else payload
+        found = (CODEX_BASE if codex is None else codex) if "codex" in request.full_url else payload
         return _Response(json.dumps({"data": {"data": found, "metadata": {"version": 1}}}).encode())
 
     monkeypatch.setattr(account_env, "urlopen", fake)
@@ -91,7 +92,11 @@ def _shell(script: str) -> dict[str, str]:
 
 
 def _evaluated(script: str) -> dict[str, str]:
-    return {name: value for name, value in _shell(script).items() if name.startswith(("AH_CC_", "AH_CX_"))}
+    return {name: value for name, value in _shell(script).items() if name.startswith("AH_CC_TOKEN_")}
+
+
+def _codex_vars(script: str) -> dict[str, str]:
+    return {name: value for name, value in _shell(script).items() if name.startswith("AH_CX_")}
 
 
 def _files(root: Path) -> dict[str, bytes]:
@@ -105,7 +110,10 @@ def test_openbao_token_names_print_one_export_each_under_the_same_name(tmp_path,
     assert account_env.main(["env"]) == 0
 
     out, err = capsys.readouterr()
-    assert seen == [("http://bao:8200/v1/secret/data/agentihooks/claude-creds", "fixture-bao", 3)]
+    assert seen == [
+        ("http://bao:8200/v1/secret/data/agentihooks/claude-creds", "fixture-bao", 3),
+        ("http://bao:8200/v1/secret/data/agentihooks/codex-creds", "fixture-bao", 3),
+    ]
     assert _evaluated(out) == {
         "AH_CC_TOKEN_ops_2026attcc_dev": "tok b'quoted",
         "AH_CC_TOKEN_sv2_alphaatexample_com": "tok-a",
@@ -113,6 +121,7 @@ def test_openbao_token_names_print_one_export_each_under_the_same_name(tmp_path,
     assert [line.partition("=")[0] for line in out.splitlines()] == [
         "export AH_CC_TOKEN_ops_2026attcc_dev",
         "export AH_CC_TOKEN_sv2_alphaatexample_com",
+        "export AH_CX_TOKEN_baseatx_io",
     ]
     assert err == ""
 
@@ -152,7 +161,7 @@ def test_unreachable_openbao_falls_back_to_the_owner_only_file(tmp_path, monkeyp
         "AH_CC_TOKEN_padded": "tok==",
     }
     assert "OTHER_NAME" not in out
-    assert len(err.strip().splitlines()) == 1
+    assert len(err.strip().splitlines()) == 2
     assert "OpenBao" in err and "tok-a" not in err and "tok two" not in err
 
 
@@ -217,7 +226,7 @@ def test_no_openbao_and_no_fallback_fails_quietly(tmp_path, monkeypatch, capsys)
 
     out, err = capsys.readouterr()
     assert out == ""
-    assert len(err.strip().splitlines()) == 1
+    assert len(err.strip().splitlines()) == 2
 
 
 def test_a_machine_without_openbao_or_fallback_stays_silent(tmp_path, monkeypatch, capsys):
@@ -340,15 +349,14 @@ def test_codex_token_names_load_from_the_secret_the_setting_names(tmp_path, monk
     assert _evaluated(out) == {
         "AH_CC_TOKEN_ops_2026attcc_dev": "tok b'quoted",
         "AH_CC_TOKEN_sv2_alphaatexample_com": "tok-a",
-        CODEX_TWO: "cx2",
-        "AH_CX_TOKEN_teamatx_io": "cx t'",
     }
+    assert _codex_vars(out) == {CODEX_TWO: "cx2", "AH_CX_TOKEN_teamatx_io": "cx t'"}
     assert err == ""
     assert _files(tmp_path) == before
 
 
 @pytest.mark.parametrize("setting", [None, ""])
-def test_without_a_named_codex_path_no_codex_secret_is_read(tmp_path, monkeypatch, capsys, setting):
+def test_an_unset_codex_path_reads_the_secret_codex_login_writes(tmp_path, monkeypatch, capsys, setting):
     _environ(tmp_path, monkeypatch)
     if setting is not None:
         monkeypatch.setenv(CODEX_PATH_ENV, setting)
@@ -357,8 +365,10 @@ def test_without_a_named_codex_path_no_codex_secret_is_read(tmp_path, monkeypatc
     account_env.main(["env"])
 
     out, err = capsys.readouterr()
-    assert len(seen) == 1
-    assert "AH_CX_" not in out and err == ""
+    assert seen[1][0] == f"http://bao:8200/v1/secret/data/{openbao_kv.CODEX_CREDS}"
+    assert openbao_kv.CODEX_CREDS == "agentihooks/codex-creds"
+    assert _codex_vars(out) == {CODEX_TWO: "cx2", "AH_CX_TOKEN_teamatx_io": "cx t'"}
+    assert err == ""
 
 
 def test_a_loaded_shell_holds_codex_access_tokens_but_no_refresh_token_or_authority(tmp_path, monkeypatch, capsys):
@@ -406,7 +416,7 @@ def test_unreachable_openbao_falls_back_to_the_owner_only_codex_file(tmp_path, m
     assert account_env.main(["env"]) == 0
 
     out, err = capsys.readouterr()
-    assert _evaluated(out) == {"AH_CX_TOKEN_oneatx_io": "cx1"}
+    assert _codex_vars(out) == {"AH_CX_TOKEN_oneatx_io": "cx1"}
     assert len(err.strip().splitlines()) == 2
     assert "codex.env" in err and "cx1" not in err
 
@@ -418,7 +428,7 @@ def test_a_machine_without_openbao_loads_the_codex_file(tmp_path, monkeypatch, c
     account_env.main(["env"])
 
     out, err = capsys.readouterr()
-    assert _evaluated(out) == {"AH_CX_TOKEN_oneatx_io": "cx1"}
+    assert _codex_vars(out) == {"AH_CX_TOKEN_oneatx_io": "cx1"}
     assert len(err.strip().splitlines()) == 1
 
 
