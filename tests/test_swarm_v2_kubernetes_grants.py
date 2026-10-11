@@ -187,9 +187,10 @@ def test_a_set_exporter_is_copied_into_the_launch_record():
     assert api.created == [material({**RECORD, "exporter": ["python", "-m", "exporter"]})]
 
 
-def test_the_supervisor_loads_the_handed_record_against_the_registered_authority(tmp_path):
+@pytest.mark.parametrize("budgets", [Budgets(), Budgets(3, 7, 11, 4)])
+def test_the_supervisor_loads_the_handed_record_against_the_registered_authority(tmp_path, budgets):
     api = Api(pod())
-    grants(api).hand(agent(), GRANT)
+    PodGrants(api, SLUG, verify, Supervision("claude", None, CONTROL, budgets)).hand(agent(), GRANT)
     attempt = tmp_path / EXECUTION
     (attempt / "homes" / "claude").mkdir(parents=True)
     (attempt / "execution.json").write_text(json.dumps({"attempt": EXECUTION, "homes": {"claude": "homes/claude"}}))
@@ -200,6 +201,7 @@ def test_the_supervisor_loads_the_handed_record_against_the_registered_authority
     launch = Launch.load(attempt, path)
 
     assert (launch.authority, launch.harness, launch.agent, launch.exporter) == (AUTHORITY, "claude", ("claude",), None)
+    assert launch.budgets == budgets
 
 
 @pytest.mark.parametrize("budgets", [Budgets(), Budgets(3, 7, 11, 4)])
