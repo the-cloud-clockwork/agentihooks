@@ -192,6 +192,14 @@ def test_no_openbao_and_no_fallback_fails_quietly(tmp_path, monkeypatch, capsys)
     assert len(err.strip().splitlines()) == 1
 
 
+def test_a_machine_without_openbao_or_fallback_stays_silent(tmp_path, monkeypatch, capsys):
+    _environ(tmp_path, monkeypatch, url="", bao="")
+
+    assert account_env.main(["env"]) == 0
+
+    assert capsys.readouterr() == ("", "")
+
+
 @pytest.mark.parametrize("payload", [None, [], "text", {"X@Y.IO": 7}])
 def test_a_malformed_secret_falls_back(tmp_path, monkeypatch, capsys, payload):
     _environ(tmp_path, monkeypatch)

@@ -74,7 +74,9 @@ def main(argv: list[str]) -> int:
         return 2
     tokens = from_openbao(os.environ)
     if tokens is None:
-        tokens, note = from_file(fallback_path(os.environ))
-        print(f"agentihooks accounts: OpenBao unreachable, {note}", file=sys.stderr)
+        path = fallback_path(os.environ)
+        tokens, note = from_file(path)
+        if path.exists() or os.environ.get("OPENBAO_URL"):
+            print(f"agentihooks accounts: OpenBao unreachable, {note}", file=sys.stderr)
     sys.stdout.write(render(tokens))
     return 0

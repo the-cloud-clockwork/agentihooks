@@ -41,12 +41,13 @@ the lower cased email with `@` as `at` and every other symbol as `_`
 (`Nestor.Colt@Gmail.com` becomes `AH_CC_TOKEN_nestor_coltatgmail_com`). Nothing
 is written to disk.
 
-When OpenBao is unset or unreachable it prints one short line on stderr and falls
-back to `~/.agentihooks/accounts/claude.env` (under `AGENTIHOOKS_HOME` when
+When OpenBao is unset or unreachable it falls back to `~/.agentihooks/accounts/claude.env` (under `AGENTIHOOKS_HOME` when
 set): an operator written file of `AH_CC_TOKEN_*=` lines, used only when no one
 but its owner can read it (`chmod 600`). It sits in a subfolder so the
 `agentienv` and hook env loaders, which read `*.env` at the top level, never load
-it. With neither source the shell starts without accounts.
+it. One short stderr line names the outcome whenever `OPENBAO_URL` is set or the
+fallback file exists; a machine with neither starts its shells silently and
+without accounts.
 
 ## Launch routing
 
