@@ -320,6 +320,17 @@ def test_the_qualify_command_refuses_an_option_like_target_before_any_probe(monk
     assert runner.commands == []
 
 
+@pytest.mark.parametrize("variable", ["AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM"])
+def test_the_raw_target_command_is_operator_only(monkeypatch, capsys, variable):
+    runner, seen = _command(monkeypatch, cases.fixture()["server"])
+    assert capabilities.main([cases.TARGET, "attempt-1"], {variable: "engineer@fixture"}) == 2
+    assert capsys.readouterr() == (
+        "",
+        "ERROR: a raw machine target is operator only; an agent qualifies through its terminal scope\n",
+    )
+    assert (seen, runner.commands) == ([], [])
+
+
 def test_the_fixture_is_the_pinned_capture():
     fx = cases.fixture()
     lock = json.loads((Path(__file__).parents[1] / "docker" / "swarm-node" / "versions.lock").read_text())
