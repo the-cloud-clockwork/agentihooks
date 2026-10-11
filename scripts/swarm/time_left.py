@@ -1,6 +1,6 @@
 """Each tick sends the ledger its live slots and CI median, so time left and its refresh age stay current."""
 
-from scripts.swarm import capacity, ci_speed
+from scripts.swarm import capacity, ci_speed, freeze
 
 WATCHED_KEPT = 100
 WATCHED_LENGTH = 2000
@@ -20,11 +20,14 @@ def inputs_of(store, slug, runtime) -> dict:
     return {"slots": slots(capacity.read(store, slug)) if observed else None, "ci_minutes": cached.get("minutes")}
 
 
-def refresh(slug, store, ledger, runtime, fix_phase="", watched=None) -> list[str]:
+def focus(config, doc: dict) -> dict:
+    watched = [name[:WATCHED_LENGTH] for name in (doc.get(freeze.WATCHED) or [])[:WATCHED_KEPT]]
+    return {key: value for key, value in (("fix_phase", freeze.fix_phase(config)), ("watched", watched)) if value}
+
+
+def refresh(slug, store, ledger, runtime, config, doc) -> list[str]:
     writer = getattr(ledger, "time_left", None)
     if writer is not None:
         inputs = inputs_of(store, slug, runtime)
-        kept = [name[:WATCHED_LENGTH] for name in (watched or [])[:WATCHED_KEPT]]
-        focus = {key: value for key, value in (("fix_phase", fix_phase), ("watched", kept)) if value}
-        writer(slug, inputs["slots"], inputs["ci_minutes"], **focus)
+        writer(slug, inputs["slots"], inputs["ci_minutes"], **focus(config, doc))
     return []

@@ -3,12 +3,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm import ci_speed, time_left
+from scripts.doctor import loop, priming
+from scripts.swarm import ci_speed, freeze, time_left
 from scripts.swarm.ledger_client import LedgerClient
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 OBSERVED = SimpleNamespace(quota_capacity=lambda *args: {})
+PLAIN = SimpleNamespace(template="")
+DOCTOR = SimpleNamespace(template=priming.TEMPLATE)
 
 
 def decision(effective, allocation, placeable, configured=None):
@@ -66,20 +69,20 @@ def observe(store):
 def test_refresh_sends_the_slots_and_the_cached_ci_median(store):
     observe(store)
     ledger = Ledger()
-    assert time_left.refresh("sw", store, ledger, OBSERVED) == []
+    assert time_left.refresh("sw", store, ledger, OBSERVED, PLAIN, {}) == []
     assert ledger.sent == [("sw", 2, 4)]
 
 
 def test_a_runtime_without_a_quota_reader_sends_unobserved_slots(store):
     observe(store)
     ledger = Ledger()
-    time_left.refresh("sw", store, ledger, object())
+    time_left.refresh("sw", store, ledger, object(), PLAIN, {})
     assert ledger.sent == [("sw", None, 4)]
 
 
 def test_refresh_without_a_ci_median_or_capacity_sends_none(store):
     ledger = Ledger()
-    time_left.refresh("sw", store, ledger, OBSERVED)
+    time_left.refresh("sw", store, ledger, OBSERVED, PLAIN, {})
     assert ledger.sent == [("sw", None, None)]
 
 
@@ -87,29 +90,34 @@ def test_every_tick_sends_even_an_unchanged_estimate(store):
     observe(store)
     ledger = Ledger()
     for _ in range(3):
-        assert time_left.refresh("sw", store, ledger, OBSERVED) == []
+        assert time_left.refresh("sw", store, ledger, OBSERVED, PLAIN, {}) == []
     assert ledger.sent == [("sw", 2, 4)] * 3
 
 
 def test_the_tick_focus_rides_with_the_inputs_only_when_set(store):
     observe(store)
     ledger = Ledger()
-    time_left.refresh("sw", store, ledger, OBSERVED, "p9", ["the focus on x"])
-    time_left.refresh("sw", store, ledger, OBSERVED, "", None)
-    assert ledger.sent == [("sw", 2, 4, ("fix_phase", "p9"), ("watched", ["the focus on x"])), ("sw", 2, 4)]
+    time_left.refresh("sw", store, ledger, OBSERVED, DOCTOR, {freeze.WATCHED: ["the focus on x"]})
+    time_left.refresh("sw", store, ledger, OBSERVED, PLAIN, {})
+    assert ledger.sent == [("sw", 2, 4, ("fix_phase", loop.FIX_PHASE), ("watched", ["the focus on x"])), ("sw", 2, 4)]
 
 
-def test_only_as_many_watched_focus_names_as_the_op_schema_takes_are_sent(store):
-    observe(store)
-    ledger = Ledger()
-    time_left.refresh("sw", store, ledger, OBSERVED, "p9", ["x" * 2500] + [f"focus {n}" for n in range(250)])
-    [(_, _, _, _, (_, watched))] = ledger.sent
-    assert watched == ["x" * 2000] + [f"focus {n}" for n in range(99)]
+def test_the_focus_reads_the_fix_phase_from_the_template_and_the_watched_focus_from_the_doc():
+    assert time_left.focus(PLAIN, {}) == {}
+    assert time_left.focus(PLAIN, {freeze.WATCHED: ["a"]}) == {"watched": ["a"]}
+    assert time_left.focus(DOCTOR, {"tasks": []}) == {"fix_phase": loop.FIX_PHASE}
+
+
+def test_only_as_many_watched_focus_names_as_the_op_schema_takes_are_sent():
+    names = ["x" * 2500] + [f"focus {n}" for n in range(250)]
+    assert time_left.focus(PLAIN, {freeze.WATCHED: names})["watched"] == ["x" * 2000] + [
+        f"focus {n}" for n in range(99)
+    ]
     assert (time_left.WATCHED_KEPT, time_left.WATCHED_LENGTH) == (100, 2000)
 
 
 def test_a_ledger_without_the_write_is_skipped(store):
-    assert time_left.refresh("sw", store, object(), OBSERVED) == []
+    assert time_left.refresh("sw", store, object(), OBSERVED, PLAIN, {}) == []
 
 
 def test_the_client_sends_one_swarm_time_left_op(monkeypatch):

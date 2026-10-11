@@ -258,6 +258,10 @@ class TestFrozenSplit:
         result = ledger_stats.calculate(d, [], NOW, {"slots": 1, "ci_minutes": 5})
         assert (result["remaining"], result["work"], result["frozen"]) == (1, 15, 0)
 
+    def test_frozen_work_rounds_to_one_decimal(self):
+        result = ledger_stats.calculate(self.ledger(("freeze", "tasks/e")), [], NOW, {"slots": 1, "ci_minutes": 5.37})
+        assert result["frozen_work"] == 15.4
+
     def test_only_frozen_work_left_reads_zero_with_the_frozen_remainder_named(self):
         d = doc(task("a", "open", "S"), time_left=30)
         d["freezes"] = [{"verb": "freeze", "target": "tasks/a"}]
