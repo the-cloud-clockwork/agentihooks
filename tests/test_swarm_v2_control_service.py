@@ -653,9 +653,11 @@ def test_the_controller_holds_the_ledger_writer_lease_until_it_stops(tmp_path):
     after.release()
 
 
-def test_a_ledger_folder_another_writer_holds_serves_tasks_read_only(tmp_path, capsys):
+def test_a_ledger_folder_another_writer_holds_serves_tasks_read_only(tmp_path, monkeypatch):
     from scripts.swarm_v2 import ledger_writer
 
+    printed = []
+    monkeypatch.setattr(_cs(), "print", lambda *args, **kwargs: printed.append((args[0], kwargs)), raising=False)
     store = _store()
     port = _free_port()
     environ, folder = _ledger_hosted(tmp_path, store, port)
@@ -681,7 +683,25 @@ def test_a_ledger_folder_another_writer_holds_serves_tasks_read_only(tmp_path, c
     assert status == 200
     assert (refused_status, refused["error_class"], refused["read_only"]) == (409, "revision_conflict", True)
     assert service.tasks_api.writes_enabled is False
-    assert capsys.readouterr().out.splitlines()[0] == (
+    assert printed[0] == (
         f"controller: serves the tasks API read only for {SLUG}: ledger folder {folder} already has an active "
-        f"writer, pid {ledger_writer.owner()['pid']} on {ledger_writer.owner()['host']}; a second writer is refused"
+        f"writer, pid {ledger_writer.owner()['pid']} on {ledger_writer.owner()['host']}; a second writer is refused",
+        {"flush": True},
     )
+
+
+def test_a_service_without_a_ledger_folder_serves_only_the_worker_api(tmp_path):
+    store = _store()
+    port = _free_port()
+    service = _cs().ControlService(store, SLUG, _cs().launch_key(_environ(tmp_path)), lambda: True)
+    service.listen = ("127.0.0.1", port)
+    try:
+        assert service.start() is True
+        agent, token = _admitted(service, store)
+        (registered, _), _ = _register_and_beat(f"http://127.0.0.1:{port}", service, agent, token)
+        status, refused = _get(f"http://127.0.0.1:{port}/v2/tasks/t1", token)
+    finally:
+        service.stop()
+
+    assert (service.ledger_folder, service.tasks_api, service.writer) == (None, None, None)
+    assert (registered, status, refused["message"]) == (200, 404, "no such execution endpoint")
