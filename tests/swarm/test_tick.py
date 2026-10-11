@@ -342,21 +342,21 @@ def test_rank_precedes_launch_failures_when_selecting_a_lane_task(store):
 
 
 @pytest.mark.parametrize(
-    ("error", "failure"),
+    ("error", "failure", "launch"),
     [
-        (SpawnError("no claude account has placeable quota seats", "unavailable"), ""),
-        (SpawnError("profile canary timeout", "refused"), "profile canary timeout"),
-        (OSError("worktree timer"), "worktree timer"),
+        (SpawnError("no claude account has placeable quota seats", "unavailable"), "", "waiting"),
+        (SpawnError("profile canary timeout", "refused"), "profile canary timeout", "failed"),
+        (OSError("worktree timer"), "worktree timer", "failed"),
     ],
 )
-def test_quota_seat_refusal_does_not_mark_a_task_launch_failure(store, error, failure):
+def test_quota_seat_refusal_does_not_mark_a_task_launch_failure(store, error, failure, launch):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime(crash=error)
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert store.launch_failure("sw", "t1") == failure
     assert ledger.rows["t1"]["state"] == "open"
     assert store.claimant("sw", "t1") is None
     assert store.claims("sw", "t1") == 0
-    assert [(row["state"], row["error"]) for row in store.launches("sw")] == [("failed", str(error))]
+    assert [(row["state"], row["error"]) for row in store.launches("sw")] == [(launch, str(error))]
 
 
 def test_a_launch_is_pending_while_the_runtime_spawns_it(store):

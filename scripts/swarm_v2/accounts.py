@@ -20,6 +20,7 @@ WRITE_ATTEMPTS = 5
 MAX_RESERVATION_MS = MAX_TTL_SECONDS * 1000
 FROZEN = f"{ROOT}:accounts-frozen"
 CONFLICTS = f"{ROOT}:account-reservation-conflicts"
+ACCOUNT_FULL = "account_full"
 
 
 @dataclass(frozen=True)
@@ -175,7 +176,7 @@ class AccountCapacity:
         slot = self._write(grant.account, decide)
         if slot is None:
             self.store.redis.hincrby(CONFLICTS, grant.account)
-            raise SwarmError("account_full")
+            raise SwarmError(ACCOUNT_FULL)
         return slot
 
     def occupy(self, token: str, scope: Scope, session_id: str) -> Slot:

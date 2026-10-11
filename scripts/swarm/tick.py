@@ -718,9 +718,10 @@ def _record_spawn_failure(slug, store, record, error):
     if record_failure := timing.ON_FAILURE.get():
         record_failure(f"{__name__}._spawn", error)
     transfers.failed(store, slug, record)
-    if not isinstance(error, SpawnError) or error.status != "unavailable":
+    waiting = isinstance(error, SpawnError) and error.status == "unavailable"
+    if not waiting:
         store.note_launch_failure(slug, record.task, str(error))
-    store.record_launch(slug, record, "failed", str(error))
+    store.record_launch(slug, record, "waiting" if waiting else "failed", str(error))
 
 
 def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):

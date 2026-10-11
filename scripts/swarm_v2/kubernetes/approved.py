@@ -4,7 +4,7 @@ the source of swarm-claude-creds with every value replaced, so the controller ne
 from collections.abc import Callable, Collection, Mapping
 
 from scripts import session_bands
-from scripts.swarm.capacity import Account
+from scripts.swarm.capacity import Account, offered
 from scripts.swarm_v2.kubernetes.client import ApiRefused, PodApi
 from scripts.swarm_v2.kubernetes.spec import KEY
 from scripts.swarm_v2.quota import UNKNOWN, QuotaObservations
@@ -42,18 +42,30 @@ class AccountRoute:
     ) -> None:
         self.keys, self.quota, self.held, self.harness = keys, quota, held, harness
 
-    def _seat(self, key: str, cap: int, held: Mapping[str, int]) -> session_bands.Seat:
-        sessions = held.get(key, 0)
+    def _row(self, key: str, cap: int, sessions: int, now: float) -> Account:
         reading = self.quota.reading(key, self.harness)
         if reading.state == UNKNOWN:
-            return session_bands.Seat(self.harness, key, cap, sessions)
-        resets = self.quota.latest(key, self.harness).week_reset
-        spend = session_bands.spend_by(reading.five_left, resets)
-        return session_bands.Seat(self.harness, key, min(cap, self.quota.cap(key, self.harness)), sessions, spend)
+            return Account(self.harness, key, OPEN, sessions, None, None, cap)
+        banded = min(cap, self.quota.cap(key, self.harness))
+        latest = self.quota.latest(key, self.harness)
+        return Account(
+            self.harness,
+            key,
+            OPEN if banded else CLOSED,
+            sessions,
+            reading.five_left,
+            reading.week_left,
+            banded,
+            session_bands.upcoming(latest.week_reset, now),
+            five_resets_at=session_bands.upcoming(latest.five_reset, now),
+        )
+
+    def rows(self, cap: int, now: float) -> list[Account]:
+        held = self.held()
+        return [self._row(key, cap, held.get(key, 0), now) for key in sorted(self.keys())]
 
     def choose(self, cap: int) -> str | None:
-        held = self.held()
-        seat = session_bands.pick(self._seat(key, cap, held) for key in sorted(self.keys()))
+        seat = session_bands.pick(offered(self.rows(cap, self.quota.clock() / 1000)))
         return None if seat is None else seat.account
 
 
@@ -65,24 +77,4 @@ class FleetAccounts:
         self.route, self.cap = route, cap
 
     def __call__(self, environ: Mapping[str, str], now: float, refresh: bool = True) -> list[Account]:
-        held = self.route.held()
-        return [self._row(key, held.get(key, 0), now) for key in sorted(self.route.keys())]
-
-    def _row(self, key: str, sessions: int, now: float) -> Account:
-        quota, harness = self.route.quota, self.route.harness
-        reading = quota.reading(key, harness)
-        if reading.state == UNKNOWN:
-            return Account(harness, key, OPEN, sessions, None, None, self.cap)
-        cap = min(self.cap, quota.cap(key, harness))
-        latest = quota.latest(key, harness)
-        return Account(
-            harness,
-            key,
-            OPEN if cap else CLOSED,
-            sessions,
-            reading.five_left,
-            reading.week_left,
-            cap,
-            session_bands.upcoming(latest.week_reset, now),
-            five_resets_at=session_bands.upcoming(latest.five_reset, now),
-        )
+        return self.route.rows(self.cap, now)

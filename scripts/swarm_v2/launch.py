@@ -12,7 +12,7 @@ from hooks.context.profile_chain import PACKAGE_ROLES
 from scripts.swarm import live_binding, profile_choice
 from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_v2 import broadcast_bridge, worker_home
-from scripts.swarm_v2.accounts import AccountCapacity, Slot
+from scripts.swarm_v2.accounts import ACCOUNT_FULL, AccountCapacity, Slot
 from scripts.swarm_v2.auth_context import LaunchAuthority
 from scripts.swarm_v2.controller import Controller
 from scripts.swarm_v2.hand import HANDED, Hand
@@ -26,7 +26,6 @@ NOT_HANDED = "launch grant not handed: "
 HANDS = "launch-grant-hands"
 WORKER_DEFAULT = "default"
 NO_ACCOUNT = "no approved account has quota and a free launch slot"
-ACCOUNT_FULL = "account_full"
 Target = Callable[[SpawnRequest], dict]
 AccountChooser = Callable[[int], str | None]
 

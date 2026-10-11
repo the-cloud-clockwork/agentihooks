@@ -849,3 +849,4 @@ def test_a_tick_spawn_on_a_full_account_waits_and_records_no_launch_failure(worl
     assert full.value.status == Status.UNAVAILABLE
     tick_module._record_spawn_failure(SLUG, world.store, AgentRecord(name, "eng", "task-2"), full.value)
     assert world.store.launch_failure(SLUG, "task-2") == ""
+    assert [row["state"] for row in world.store.launches(SLUG)] == ["waiting"]

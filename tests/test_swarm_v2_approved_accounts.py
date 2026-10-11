@@ -177,6 +177,22 @@ def test_a_runtime_with_a_fleet_source_sizes_its_lanes_without_reading_local_acc
     assert [(row["name"], row["sessions"]) for row in decision["accounts"]] == [("akey", 1), ("bkey", 0)]
 
 
+def test_a_runtime_with_a_fleet_source_answers_capacity_before_its_first_sizing_from_fleet_rows(monkeypatch):
+    def local(*args, **kwargs):
+        raise AssertionError("the deployed controller read local accounts")
+
+    monkeypatch.setattr(capacity, "accounts", local)
+    monkeypatch.setattr(account_sessions, "sessions_by_account", local)
+    _, route = _route({"akey"}, {"akey": 1})
+    herdr = HerdrRuntime(choose=local)
+    herdr.quota_accounts = approved.FleetAccounts(route, 2)
+    assert herdr.has_capacity(None) is True
+    _, full = _route({"akey"}, {"akey": 2})
+    herdr = HerdrRuntime(choose=local)
+    herdr.quota_accounts = approved.FleetAccounts(full, 2)
+    assert herdr.has_capacity(None) is False
+
+
 def test_a_workstation_runtime_still_sizes_its_lanes_from_its_local_accounts(monkeypatch):
     asked = []
     row = capacity.Account("claude", "local", "OPEN", 0, 80.0, 80.0, 3)
