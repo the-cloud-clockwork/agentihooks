@@ -6,12 +6,21 @@ import tempfile
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
+from scripts import account_names
+
 START = "# ===AGENTIHOOKS-AICODING-TOKENS==="
 END = "# ===AGENTIHOOKS-AICODING-TOKENS-END==="
 REFRESH_FLAG = "AGENTIHOOKS_AICODE_TOKEN_REFRESH"
 RESERVED = ("api", "default", "help", "status")
-SLUG_RULE = f"slug must be letters, digits, '_' or '-', not start with '_' and not be {', '.join(RESERVED)}"
-_SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_]*")
+SLUG_RULE = (
+    "slug is lowercased, '@' becomes 'at' and every other character outside a-z and 0-9 becomes '_'; "
+    f"the result must not start with '_' and must not be {', '.join(RESERVED)}"
+)
+SLUG_NOTE = (
+    "Note: use the email of the target account as the slug, so each token is recognisable at a glance "
+    "(nestor.colt@gmail.com becomes {prefix}nestor_coltatgmail_com)."
+)
+_SLUG = re.compile(r"[a-z0-9][a-z0-9_]*")
 _EXPORT = re.compile(r"\s*export\s+([^=\s]+)=")
 _write = os.write
 
@@ -21,8 +30,8 @@ class SlugError(ValueError):
 
 
 def slug(raw: str) -> str:
-    found = raw.replace("-", "_")
-    if not _SLUG.fullmatch(found) or found.lower() in RESERVED:
+    found = account_names.secret_key(raw).replace("-", "_")
+    if not _SLUG.fullmatch(found) or found in RESERVED:
         raise SlugError(f"{SLUG_RULE}: {raw!r}")
     return found
 

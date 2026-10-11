@@ -1,11 +1,15 @@
+import io
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-from scripts import aicode_tokens, codex_login
+from scripts import aicode_tokens, codex_login, openbao_step
 from tests.codex_fakes import BAO_TOKEN, BAO_URL, FakeBao, access_token
+
+NOTE = aicode_tokens.SLUG_NOTE.format(prefix="AH_CX_TOKEN_")
 
 ACCESS = access_token(10, workspace="ws-team", plan="team")
 REFRESH = "rt-value-1"
@@ -64,7 +68,7 @@ def _which(monkeypatch):
 def _login(args, environ=ENV, run=None, console=None, bao=None):
     run = run or _codex()[0]
     console = console or Console(tty=False)
-    return codex_login.main(args, environ, run, codex_login.Console(console.ask, console.hidden, console.tty), bao)
+    return codex_login.main(args, environ, run, openbao_step.Console(console.ask, console.hidden, console.tty), bao)
 
 
 def _home(slug):
@@ -190,10 +194,14 @@ def test_a_login_prints_where_the_token_went_and_what_it_belongs_to(capsys):
     assert _login(["team", "--openbao"], environ={**ENV, **BAO_ENV}, bao=FakeBao()) == 0
     rc = aicode_tokens.rc_file()
     assert capsys.readouterr().out == (
+        f"{NOTE}\n"
+        "Step 1/3: sign in to the account in the browser\n"
+        "Step 2/3: writing the token block\n"
         f"AH_CX_TOKEN_team written to {rc}\n"
         "  workspace ws-team, plan team\n"
         "  expires 2027-01-25 08:00 UTC\n"
         f"run: source {rc}\n"
+        "Step 3/3: storing them in OpenBao\n"
         "OpenBao secret/agentihooks/codex-creds: wrote AH_CX_REFRESH_team, AH_CX_TOKEN_team (2 keys total)\n"
     )
 
@@ -250,3 +258,31 @@ def test_an_unknown_flag_shows_the_login_usage(capsys):
     with pytest.raises(SystemExit):
         _login(["team", "--bogus"])
     assert capsys.readouterr().err.startswith("usage: agentihooks codex login")
+
+
+class _Tty(io.StringIO):
+    def isatty(self):
+        return True
+
+
+def test_a_terminal_sees_a_blue_note_a_red_error_and_yellow_prompts(monkeypatch):
+    out, err = _Tty(), _Tty()
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(sys, "stderr", err)
+    assert _login(["_bad"]) == 2
+    assert out.getvalue() == f"\x1b[34m{NOTE}\x1b[0m\n"
+    assert err.getvalue() == f"\x1b[31magentihooks codex login: {aicode_tokens.SLUG_RULE}: '_bad'\x1b[0m\n"
+    console = Console(["n"])
+    assert _login(["team"], console=console) == 0
+    assert console.prompts == ["\x1b[33mDo you want to store them in OpenBao? [y/N] \x1b[0m"]
+
+
+@pytest.mark.parametrize("out, err, painted", [(_Tty(), io.StringIO(), True), (io.StringIO(), _Tty(), False)])
+def test_errors_are_coloured_only_when_stdout_is_a_terminal(out, err, painted, monkeypatch):
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(sys, "stderr", err)
+    assert _login(["_bad"]) == 2
+    message = f"agentihooks codex login: {aicode_tokens.SLUG_RULE}: '_bad'"
+    assert err.getvalue() == (f"\x1b[31m{message}\x1b[0m\n" if painted else f"{message}\n")
