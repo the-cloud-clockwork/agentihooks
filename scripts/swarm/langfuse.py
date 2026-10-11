@@ -3,6 +3,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 from scripts.swarm.health import standing
+from scripts.swarm.keyspace import ROOT
 from scripts.swarm.langfuse_config import Limits
 from scripts.swarm.langfuse_read import read_summary
 
@@ -49,7 +50,7 @@ def apply(redis, slug: str, summary: dict, bindings: list, now_ms: int, limits: 
 
 
 def refresh(store, slug: str, now_ms: int, read=read_summary, limits: Limits = Limits()) -> list[str]:
-    key = f"agentihooks:swarm:{slug}:langfuse-summary"
+    key = f"{ROOT}:swarm:{slug}:langfuse-summary"
     raw = store.redis.get(key)
     cached = json.loads(raw) if raw else {}
     if "tried_at" in cached and now_ms - cached["tried_at"] < limits.interval_ms:
