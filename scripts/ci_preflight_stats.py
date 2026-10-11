@@ -14,7 +14,7 @@ def api(path: str):
 
 
 def when(text: str) -> datetime:
-    return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    return datetime.fromisoformat(text)
 
 
 def merged(pages: int) -> list[dict]:

@@ -119,6 +119,13 @@ def test_no_matching_merge_reports_and_fails(github, monkeypatch, capsys):
     )
 
 
+def test_an_unknown_mode_is_refused(github, monkeypatch, capsys):
+    with pytest.raises(SystemExit) as refused:
+        _main(monkeypatch, capsys, "during", "2026-10-11T12:00:00Z", "2", "2")
+    assert refused.value.code == 2
+    assert "invalid choice: 'during'" in capsys.readouterr().err
+
+
 def test_the_api_reads_the_repository_through_gh(monkeypatch):
     seen = []
 
