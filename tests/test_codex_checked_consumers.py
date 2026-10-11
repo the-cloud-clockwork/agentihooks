@@ -39,6 +39,10 @@ def test_quota_handoff_excludes_signed_out_default_and_keeps_signed_in_default(m
     assert decision.action == "handoff"
     assert decision.target.account == "default"
     assert [candidate.account for candidate in decision.others] == ["default"]
+    monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {account.name: None for account in pool})
+    decision = quota_policy.evaluate("session")
+    assert decision.action == "stop"
+    assert decision.others == ()
 
 
 @pytest.mark.parametrize("surface", ["page", "table"])
