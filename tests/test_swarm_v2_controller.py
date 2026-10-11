@@ -747,6 +747,36 @@ def test_a_renew_tick_whose_account_reconcile_fails_leaves_admission_closed(acco
     assert controller.ready is False
 
 
+def test_a_grant_revoked_while_the_lease_renews_releases_nothing_and_closes_admission(accounts, monkeypatch):
+    controller = accounts.authority.controller
+    renew = lease.renew
+    accounts.clock[0] += TTL
+    before = accounts.rows()
+
+    def revoked(store, slug, held):
+        monkeypatch.setattr(controller, "authorize", lambda: False)
+        return renew(store, slug, held)
+
+    monkeypatch.setattr(lease, "renew", revoked)
+    with pytest.raises(SwarmError, match="^a scoped controller grant is required$"):
+        controller.renew()
+    assert controller.ready is False
+    assert accounts.rows() == before
+
+
+def test_an_interrupted_renewal_leaves_admission_closed(fixture, monkeypatch):
+    store, (first, _), _, _, _ = fixture
+    assert first.acquire()
+
+    def interrupted(*args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(lease, "renew", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        first.renew()
+    assert first.ready is False
+
+
 def test_a_refused_renew_tick_releases_nothing(accounts):
     controller = accounts.authority.controller
     accounts.clock[0] += lease.ttl_ms()
