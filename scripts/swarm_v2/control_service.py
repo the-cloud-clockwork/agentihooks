@@ -9,6 +9,7 @@ from scripts.hive import auth as hive_auth
 from scripts.swarm import lease, ledger_host
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
+from scripts.swarm_ledger import ledger_link
 from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
 from scripts.swarm_v2 import deployed, ledger_writer, operator_auth, telemetry
 from scripts.swarm_v2.api import health
@@ -21,7 +22,11 @@ from scripts.swarm_v2.controller import Controller
 from scripts.swarm_v2.herdr.attach import ClientHome
 from scripts.swarm_v2.herdr.capabilities import runner
 from scripts.swarm_v2.herdr.upkeep import Upkeep, switched_on
+from scripts.swarm_v2.hosted_ledger import HostedLedger
 from scripts.swarm_v2.kubernetes import operator_terminal
+from scripts.swarm_v2.kubernetes.client import ApiRefused
+from scripts.swarm_v2.kubernetes.runtime import PodStatus
+from scripts.swarm_v2.kubernetes.spec import pod_name
 from scripts.swarm_v2.kubernetes.watch import BACKEND
 from scripts.swarm_v2.reconciliation.accounts import Finding
 from scripts.swarm_v2.runtime.observe import Observer, Reading, Signal, Source, Thresholds
@@ -38,6 +43,7 @@ THREAD = "swarm-v2-api"
 VIEWS_THREAD = "swarm-v2-terminal-views"
 ISSUER = "controller"
 AUDIENCE = "workers"
+REFUSED = {401: Reading.UNAUTHENTICATED, 403: Reading.FORBIDDEN}
 
 
 class ControlError(SwarmError):
@@ -72,6 +78,20 @@ def _heartbeat(agent: AgentRecord, raw: str | None) -> list[Signal]:
     return [Signal(Source.HEARTBEAT, Reading.OK, seen, agent.execution_id, agent.generation, beat["state"])]
 
 
+def _pod(status: Callable[[str], tuple[PodStatus, ...]] | None, agent: AgentRecord, now: float) -> list[Signal]:
+    if status is None:
+        return []
+    try:
+        found = [pod for pod in status(agent.execution_id) if pod.name == pod_name(agent.execution_id)]
+    except ApiRefused as refused:
+        reading, phase = REFUSED.get(refused.status, Reading.UNREACHABLE), ""
+    except (ConnectionError, TimeoutError):
+        reading, phase = Reading.UNREACHABLE, ""
+    else:
+        reading, phase = (Reading.OK, found[0].phase) if found else (Reading.NOT_FOUND, "")
+    return [Signal(Source.KUBERNETES, reading, now, agent.execution_id, agent.generation, phase)]
+
+
 class ControlService:
     def __init__(
         self,
@@ -96,6 +116,7 @@ class ControlService:
         self.server: ThreadingHTTPServer | None = None
         self.listen: tuple[str, int] | None = None
         self.runtime = None
+        self.pods: Callable[[str], tuple[PodStatus, ...]] | None = None
         self.api_url = ""
         self.recover: Callable[[], dict[str, str]] | None = None
         self.views: Callable[[], dict] | None = None
@@ -103,6 +124,7 @@ class ControlService:
         self.tasks_api: TasksAPI | None = None
         self.writer: ledger_writer.WriterLease | None = None
         self.ledger_folder: Path | None = None
+        self.hosted_ledger: HostedLedger | None = None
 
     def start(self) -> bool:
         if not self.controller.acquire():
@@ -132,13 +154,20 @@ class ControlService:
         beats = store.redis.hgetall(store.key(slug, "heartbeats"))
         remote = [agent for agent in store.execution_occupants(slug).values() if agent.runtime_backend == BACKEND]
         found = [
-            self.controller.observe(self.observer, agent, _heartbeat(agent, beats.get(agent.execution_id)), now)
+            self.controller.observe(
+                self.observer,
+                agent,
+                _heartbeat(agent, beats.get(agent.execution_id)) + _pod(self.pods, agent, now),
+                now,
+            )
             for agent in remote
         ]
         return [finding for finding in found if finding is not None]
 
     def _open(self) -> None:
         if self.listen is not None and self.server is None:
+            if self.hosted_ledger is not None and self.tasks_api is None:
+                self.tasks_api = TasksAPI(self.grants, self.tasks, self.hosted_ledger)
             if self.ledger_folder is not None and self.tasks_api is None:
                 self.mount_ledger(self.ledger_folder)
             self.serve(*self.listen)
@@ -193,6 +222,9 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
     if not port.isdigit() or not 0 < int(port) <= MAX_PORT:
         raise ControlError(f"{PORT_ENV} must be a port number")
     credential = environ.get(CREDENTIAL_ENV)
+    hosted = ledger_link.remote(environ)
+    if hosted and not credential:
+        raise ControlError(f"the hosted ledger needs {CREDENTIAL_ENV}")
     workers = deployed.Workers.from_environ(environ, slug)
     transports = () if workers is None else (workers.transport(environ, slug),)
     service = ControlService(
@@ -209,10 +241,14 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
     if workers is not None:
         service.api_url = workers.terms.api_url
         service.runtime = deployed.tick_runtime(service, workers, environ)
+        service.pods = transports[0].status
         service.recover = deployed.recovery_pass(service, workers, transports[0].api, LedgerClient())
         if service.controller.terminals is not None:
             service.views = deployed.terminal_views(service.controller, environ)
-    service.ledger_folder = ledger_host.folder(environ)
+    if hosted:
+        service.hosted_ledger = HostedLedger(ledger_link.base(environ), credential, store)
+    else:
+        service.ledger_folder = ledger_host.folder(environ)
     try:
         service.start()
     except BaseException:

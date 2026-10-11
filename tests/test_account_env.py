@@ -15,9 +15,13 @@ pytestmark = pytest.mark.unit
 LOADER = 'command -v agentihooks >/dev/null && eval "$(agentihooks accounts env)"'
 
 ACCOUNTS = {
-    "OPS+2026@TCC.DEV": "tok b'quoted",
-    "NESTOR.COLT@GMAIL.COM": "tok-a",
-    "EMPTY@X.IO": "",
+    "AH_CC_TOKEN_ops_2026attcc_dev": "tok b'quoted",
+    "AH_CC_TOKEN_sv2_alphaatexample_com": "tok-a",
+    "AH_CC_TOKEN_emptyatx_io": "",
+    "ops+2026@example.com": "tok-email",
+    "AH_CC_TOKEN_bad name": "tok-bad",
+    "AH_CC_TOKEN_Upper_x": "tok-upper",
+    "OTHER_NAME": "tok-other",
 }
 
 
@@ -76,21 +80,21 @@ def _files(root: Path) -> dict[str, bytes]:
     return {str(path): path.read_bytes() for path in sorted(root.rglob("*")) if path.is_file()}
 
 
-def test_openbao_accounts_print_one_export_per_email_under_its_lower_case_name(tmp_path, monkeypatch, capsys):
+def test_openbao_token_names_print_one_export_each_under_the_same_name(tmp_path, monkeypatch, capsys):
     _environ(tmp_path, monkeypatch)
     seen = _openbao(monkeypatch, ACCOUNTS)
 
     assert account_env.main(["env"]) == 0
 
     out, err = capsys.readouterr()
-    assert seen == [("http://bao:8200/v1/secret/data/k8s/swarm-claude-creds", "fixture-bao", 3)]
+    assert seen == [("http://bao:8200/v1/secret/data/agentihooks/claude-creds", "fixture-bao", 3)]
     assert _evaluated(out) == {
-        "AH_CC_TOKEN_nestor_coltatgmail_com": "tok-a",
         "AH_CC_TOKEN_ops_2026attcc_dev": "tok b'quoted",
+        "AH_CC_TOKEN_sv2_alphaatexample_com": "tok-a",
     }
     assert [line.partition("=")[0] for line in out.splitlines()] == [
-        "export AH_CC_TOKEN_nestor_coltatgmail_com",
         "export AH_CC_TOKEN_ops_2026attcc_dev",
+        "export AH_CC_TOKEN_sv2_alphaatexample_com",
     ]
     assert err == ""
 
@@ -206,7 +210,7 @@ def test_a_machine_without_openbao_or_fallback_stays_silent(tmp_path, monkeypatc
     assert capsys.readouterr() == ("", "")
 
 
-@pytest.mark.parametrize("payload", [None, [], "text", {"X@Y.IO": 7}])
+@pytest.mark.parametrize("payload", [None, [], "text", {"AH_CC_TOKEN_x": 7}, {"X@Y.IO": "tok"}])
 def test_a_malformed_secret_falls_back(tmp_path, monkeypatch, capsys, payload):
     _environ(tmp_path, monkeypatch)
     _openbao(monkeypatch, payload)

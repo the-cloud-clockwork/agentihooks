@@ -2,6 +2,7 @@ import { $, h } from "./dom.js";
 import { writeSwarm } from "./api.js";
 import { setChatTo, showChat } from "./chat.js";
 import { capDraft, doctorOn, overlayChanges, pending, renderSwarm, saveRouting, swarm, swarmControl, toggleOverlay } from "./swarm.js";
+import { lifecycleBody, sendLifecycle, unresolved } from "./lifecycle.js";
 
 const GATE_MODES = ["enforce", "observe", "off"];
 const GATE_LABELS = { enforce: "deny", observe: "log only", off: "skip" };
@@ -90,7 +91,8 @@ function opNote(phase, action, error) {
   const name = { start: "Start", pause: "Pause", stop: "Stop", stop_now: "Stop now", close: "Close ledger", terminate: "Terminate", reopen: "Reopen", doctor_start: "Start doctor", doctor_stop: "Stop doctor", autonomy: "Set autonomy", gate: "Set gate mode",
     eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", plan_down: "Lower planner cap", plan_up: "Raise planner cap",
     compact_down: "Lower compact limit", compact_up: "Raise compact limit",
-    effort_min_down: "Lower effort floor", effort_min_up: "Raise effort floor", effort_max_down: "Lower effort ceiling", effort_max_up: "Raise effort ceiling", apply: "Apply capacity", overlays: "Apply overlays", verdict: "Verdict", lift: "Lift the gate", quota_refresh: "Refresh quota", routing: "Set routing" }[action] || action;
+    effort_min_down: "Lower effort floor", effort_min_up: "Raise effort floor", effort_max_down: "Lower effort ceiling", effort_max_up: "Raise effort ceiling", apply: "Apply capacity", overlays: "Apply overlays", verdict: "Verdict", lift: "Lift the gate", quota_refresh: "Refresh quota", routing: "Set routing",
+    attach: "Attach", drain: "Drain", cancel: "Cancel", force_stop: "Force stop" }[action] || action;
   if (phase === "pending") return { cls: "pending", text: `${name}: sending` };
   if (phase === "queued") return { cls: "pending", text: `${name}: pending, waiting for the hive tick` };
   if (phase === "accepted") return { cls: "pending", text: `${name}: accepted by the hive tick` };
@@ -216,6 +218,13 @@ export function wireSwarm() {
       const name = terminate.dataset.terminate;
       if (confirm(`Terminate ${name}? Work in progress stays in its worktree.`)) swarmControl({ action: "terminate", name }, "terminate");
       return;
+    }
+    const life = event.target.closest("button[data-lifecycle]");
+    if (life && !life.disabled) {
+      const agent = life.dataset.agent, control = swarm.lifecycle.controls.find((c) => c.action === life.dataset.lifecycle);
+      if (pending || unresolved()[agent] || !swarm.lifecycle.agents[agent]) return;
+      if (control.destructive && !confirm(`${control.label} ${agent}? ${control.consequence}`)) return;
+      return sendLifecycle(lifecycleBody(swarm, agent, control.action));
     }
     const lift = event.target.closest("button[data-lift]");
     if (lift && !lift.disabled) return swarmControl({ action: "lift", agent: lift.dataset.agent, gate: lift.dataset.lift });
