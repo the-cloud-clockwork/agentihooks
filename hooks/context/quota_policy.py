@@ -409,10 +409,13 @@ def render(d: Decision, session_id: str, cwd: str) -> str:
 
 
 def handed_off_block(session_id: str) -> str | None:
+    from hooks.context.account_sessions import agent_pid
     from hooks.context.broadcast import session_status
+    from hooks.lifecycle import handoff_close
 
     info = session_status(session_id)
-    if info.get("status") != "handed_off":
+    resumed = bool(session_id) and handoff_close.handoff_record(agent_pid(), session_id).exists()
+    if info.get("status") != "handed_off" and not resumed:
         return None
     return (
         f"BLOCKED: this session handed its task off to account {info.get('handed_off_to') or '?'} at "

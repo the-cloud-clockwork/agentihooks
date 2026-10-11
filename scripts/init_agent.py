@@ -211,7 +211,6 @@ def _handoff_agent(requested: str, environ: dict[str, str], agent_args: list[str
 
 
 def _live_harness() -> str:
-    """Only hook processes carry AGENTIHOOKS_TARGET; a handoff typed in a Codex shell finds its harness in /proc."""
     from scripts.profiles import binding
 
     try:
@@ -240,7 +239,7 @@ def _mark_handoff(account: str, resumed: str) -> list[str]:
 
     pid = agent_pid()
     if resumed:
-        handoff_close.marker(pid, resumed).touch()
+        handoff_close.handoff_record(pid, resumed).touch()
     return mark_handed_off(pid, account)
 
 

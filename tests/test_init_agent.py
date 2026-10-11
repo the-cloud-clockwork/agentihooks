@@ -1097,11 +1097,12 @@ def test_a_handoff_without_a_target_takes_the_live_harness(monkeypatch, requeste
     assert init_agent._handoff_agent(requested, environ, []) == agent
 
 
-def test_a_handoff_outside_any_harness_comes_from_claude(monkeypatch):
+@pytest.mark.parametrize("error", [ValueError("no supported live harness ancestor"), OSError("process vanished")])
+def test_a_handoff_outside_any_harness_comes_from_claude(monkeypatch, error):
     from scripts.profiles import binding
 
     def missing():
-        raise ValueError("profile canary has no supported live harness ancestor")
+        raise error
 
     monkeypatch.setattr(binding, "process", missing)
     assert init_agent._handoff_agent("", {}, []) == "claude"

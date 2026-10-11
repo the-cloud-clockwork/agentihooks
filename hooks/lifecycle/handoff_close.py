@@ -24,14 +24,13 @@ def due(payload: dict, environ: dict, status: str) -> bool:
     return environ.get(CLOSE_ENV, "1") != "0" and status == "handed_off"
 
 
-def marker(pid: int, session_id: str) -> Path:
-    """A resumed Codex successor re-registers the same session id, so the handoff is recorded by the old pid."""
+def handoff_record(pid: int, session_id: str) -> Path:
     return _home() / f"handed-off-{pid}-{session_id}"
 
 
-def close_command(pid: int, target: str) -> list[str]:
+def close_command(pid: int) -> list[str]:
     exe = shutil.which("agentihooks") or "agentihooks"
-    return [exe, "terminate-agent", str(pid), "--type", target]
+    return [exe, "terminate-agent", str(pid), "--type", "any"]
 
 
 def close(command: list[str], marker: Path) -> None:
@@ -46,7 +45,7 @@ def on_stop(payload: dict) -> bool:
 
     session_id = payload.get("session_id", "")
     pid = agent_pid()
-    recorded = session_id and marker(pid, session_id).exists()
+    recorded = session_id and handoff_record(pid, session_id).exists()
     status = "handed_off" if recorded else _load_sessions().get(session_id, {}).get("status", "")
     if not session_id or not due(payload, dict(os.environ), status):
         return False
@@ -55,9 +54,10 @@ def on_stop(payload: dict) -> bool:
         os.close(os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
     except FileExistsError:
         return False
+    handoff_record(pid, session_id).unlink(missing_ok=True)
     fork_and_call(
         close,
-        close_command(pid, os.environ.get("AGENTIHOOKS_TARGET") or "claude"),
+        close_command(pid),
         _closing_marker(pid, dict(os.environ)),
         timeout_sec=180,
         task_name="handoff-close",
