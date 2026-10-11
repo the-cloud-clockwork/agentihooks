@@ -9,7 +9,6 @@ FIELD = "secret_redactions"
 MODE = "strict"
 MARK = "[REDACTED:"
 MARKER = re.compile(r"\[REDACTED:\w+\]")
-LINE = re.compile(r"[^\n]*\n|[^\n]+")
 OPENING = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
 CLOSING = re.compile(r"-----END [A-Z ]*PRIVATE KEY-----")
 UNREDACTABLE = "secret_unredactable"
@@ -89,7 +88,8 @@ def scrub(data: bytes) -> tuple[bytes, int]:
     found: list[int] = []
     out: list[str] = []
     block: list[str] = []
-    for line in LINE.findall(data.decode(errors=CODEC_ERRORS)):
+    *whole, last = data.decode(errors=CODEC_ERRORS).split("\n")
+    for line in [*(text + "\n" for text in whole), last]:
         record = _record(line)
         if record is None:
             block.append(line)
