@@ -7,7 +7,6 @@ owners on the masters channel. Without a rule the count stays the manual one and
 """
 
 import json
-from dataclasses import replace
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
@@ -211,6 +210,6 @@ def _launch(slug, config, store, runtime, doc, index, now_ms):
     except seat_spawn.SeatFailed as failed:
         store.drop_agent(slug, failed.record.name)
         return f"master spawn failed in seat {failed.record.seat}: {failed.error}"
-    store.put_agent(slug, replace(tick.placed_record(record, placed), state="working"))
+    store.put_agent(slug, tick.placed_record(record, placed))
     store.clear_handoff(slug, seat_name)
     return f"spawned master {record.name} in seat {record.seat}"
