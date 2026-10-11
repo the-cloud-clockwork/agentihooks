@@ -2,12 +2,12 @@ import socket
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from scripts.swarm_v2.herdr.upkeep import Attempt, Upkeep
 
 from scripts.swarm_v2.herdr import upkeep
 from scripts.swarm_v2.herdr.attach import ClientHome, Terminal
 from scripts.swarm_v2.herdr.endpoints import Endpoint, Scope, TerminalAuthority
 from scripts.swarm_v2.herdr.reconcile import Report
+from scripts.swarm_v2.herdr.upkeep import Attempt, Upkeep
 from tests import sv2_hdr03_cases as cases
 
 pytestmark = pytest.mark.unit

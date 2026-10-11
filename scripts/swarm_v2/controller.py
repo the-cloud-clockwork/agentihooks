@@ -4,6 +4,8 @@ from uuid import uuid4
 
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
+from scripts.swarm_v2.herdr.upkeep import Attempt, Upkeep
+from scripts.swarm_v2.kubernetes.terminal import HostKeys
 from scripts.swarm_v2.kubernetes.watch import BACKEND, CLASSES, Plan, Pod, PodView, Reconciler, owner_for
 from scripts.swarm_v2.reconciliation.accounts import AccountReconciler, Finding, exit_source
 from scripts.swarm_v2.runtime.observe import Observer, Signal
@@ -35,7 +37,9 @@ class Controller:
         admission_enabled: bool = True,
         pods: PodView | None = None,
         orphan_cleanup: bool = True,
+        terminals: Upkeep | None = None,
     ) -> None:
+        self.terminals, self.host_keys = terminals, HostKeys(store)
         self.store, self.slug, self.authorize = store, slug, authorize
         self.pods, self.reconciler = pods, Reconciler(owner_for(slug), orphan_cleanup)
         self.accounts = AccountReconciler(store, slug)
@@ -59,6 +63,8 @@ class Controller:
         self._authority()
         self.accounts.reconcile()
         self._authority()
+        if self.terminals is not None:
+            self.terminals.start(self._attempts())
         self.reconciled_epoch = self.held.epoch
         self.ready = True
         return True
@@ -76,6 +82,8 @@ class Controller:
         if self.reconciled_epoch == self.held.epoch:
             self._authority()
             self.accounts.reconcile()
+            if self.terminals is not None:
+                self.terminals.change(self._attempts())
             self.ready = True
         return self.ready
 
@@ -150,3 +158,10 @@ class Controller:
         self._authorize()
         counts = self.store.redis.hgetall(self.store.key(self.slug, "controller-orphans"))
         return {name: int(counts.get(name, 0)) for name in CLASSES}
+
+    def _attempts(self) -> list[Attempt]:
+        return self.host_keys.attempts(self.slug, self.store.execution_occupants(self.slug).values())
+
+    def herdr_registration_drift(self) -> int:
+        self._authorize()
+        return 0 if self.terminals is None else self.terminals.herdr_registration_drift()

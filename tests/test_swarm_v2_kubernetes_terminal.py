@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from scripts.swarm_v2.herdr.upkeep import Attempt
 
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_v2.auth_context import Registration
@@ -21,6 +20,7 @@ from scripts.swarm_v2.herdr.endpoints import (
     TerminalAuthority,
     grant_scope,
 )
+from scripts.swarm_v2.herdr.upkeep import Attempt
 from scripts.swarm_v2.kubernetes import terminal
 from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused
 from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, PodTemplate, canonical_digest, load_policy

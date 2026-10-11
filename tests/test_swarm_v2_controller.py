@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from scripts.swarm_v2.herdr.upkeep import Attempt, Upkeep
 
 import scripts.swarm.execution as execution
 from scripts.swarm import lease
@@ -13,6 +12,7 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2.controller import Controller
 from scripts.swarm_v2.herdr.attach import ClientHome, Terminal
 from scripts.swarm_v2.herdr.endpoints import Scope, TerminalAuthority
+from scripts.swarm_v2.herdr.upkeep import Attempt, Upkeep
 from scripts.swarm_v2.kubernetes import watch
 from scripts.swarm_v2.kubernetes.terminal import HostKeys
 from scripts.swarm_v2.reconciliation import accounts as reconciliation
