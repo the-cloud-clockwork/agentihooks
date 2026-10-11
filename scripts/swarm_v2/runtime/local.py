@@ -73,7 +73,9 @@ class LocalHerdrRuntime:
         refused = foreign(self, "command", agent)
         if refused:
             return refused
-        self.herdr.nudge(agent, text)
+        failed = self.herdr.nudge(agent, text)
+        if failed:
+            return Outcome("command", Status.REFUSED, LOCAL, detail=failed)
         return Outcome("command", Status.OK, LOCAL, "accepted")
 
     def drain(self, agent: AgentRecord) -> Outcome:
