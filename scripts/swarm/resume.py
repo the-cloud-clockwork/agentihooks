@@ -3,12 +3,16 @@
 import json
 import os
 from dataclasses import asdict, dataclass, replace
+from typing import TYPE_CHECKING
 
 from scripts import agent_choice
 from scripts.handoff import transfers
 from scripts.swarm import idle, outage, snapshot
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
+
+if TYPE_CHECKING:
+    from scripts.swarm.tick import Ledger, Runtime
 
 AWAITING = "awaiting-decision"
 RESUMED, FRESH = "resumed", "fresh"
@@ -201,7 +205,7 @@ def _recovery_identity(store, slug, agent):
     return [agent.task, agent.seat, agent.execution_id, agent.generation, generation]
 
 
-def track_outages(slug: str, store: RedisStore, runtime: object, rows: dict, now_ms: int) -> None:
+def track_outages(slug: str, store: RedisStore, runtime: "Runtime", rows: dict, now_ms: int) -> None:
     records = outage.read(slug)
     key = store.key(slug, RECOVERY)
     live = runtime.live_names()
@@ -265,7 +269,7 @@ def _recovery_text(slug, agent, task):
 
 
 def recover_outages(
-    slug: str, store: RedisStore, ledger: object, runtime: object, rows: dict, now_ms: int
+    slug: str, store: RedisStore, ledger: "Ledger", runtime: "Runtime", rows: dict, now_ms: int
 ) -> list[str]:
     if outage.open_records(slug):
         return []
