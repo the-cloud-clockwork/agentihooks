@@ -15,11 +15,11 @@ HOST_KEY = cases.HOST_KEY
 
 
 def attempt(execution_id: str, generation: int = 1) -> Attempt:
-    return Attempt(Scope("controller", FX["swarm"], execution_id, generation), HOST_KEY)
+    return Attempt(Scope("operator/operator", FX["swarm"], execution_id, generation), HOST_KEY)
 
 
 def endpoint(execution_id: str) -> Endpoint:
-    return Endpoint(Scope("controller", FX["swarm"], execution_id, 1), FX["namespace"])
+    return Endpoint(Scope("operator/operator", FX["swarm"], execution_id, 1), FX["namespace"])
 
 
 def client(tmp_path, ready=None, addresses=("10.43.12.7",)):

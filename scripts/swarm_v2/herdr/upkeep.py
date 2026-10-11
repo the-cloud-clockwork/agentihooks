@@ -2,7 +2,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from scripts.swarm_v2.herdr.attach import Terminal
-from scripts.swarm_v2.herdr.endpoints import Endpoint, EndpointRefused, Scope
+from scripts.swarm_v2.herdr.endpoints import EndpointRefused, Scope
 from scripts.swarm_v2.herdr.reconcile import Report
 
 SWITCH = "AGENTIHOOKS_HERDR_REGISTRATIONS"
@@ -38,25 +38,14 @@ class Upkeep:
         current = {attempt.scope.execution_id: attempt.scope.generation for attempt in attempts}
         if not self.due and current == self.seen:
             return None
-        desired, refused = self._routed(attempts)
         try:
-            report = self.terminal.registrations.reconcile(desired, self.terminal.qualifier)
+            report = self.terminal.sync(((attempt.scope, attempt.host_public) for attempt in attempts), enabled=True)
         except EndpointRefused as failure:
             self.due = True
             return Report(refused={CLIENT: failure.reason})
-        report.refused.update(refused)
         self.due, self.seen = bool(report.refused), current
         self.last = report
         return report
-
-    def _routed(self, attempts: tuple[Attempt, ...]) -> tuple[list[Endpoint], dict[str, str]]:
-        desired, refused = [], {}
-        for attempt in attempts:
-            try:
-                desired.append(self.terminal.register(attempt.scope, attempt.host_public))
-            except EndpointRefused as failure:
-                refused[attempt.scope.execution_id] = failure.reason
-        return desired, refused
 
     def herdr_registration_drift(self) -> int:
         return self.last.herdr_registration_drift()

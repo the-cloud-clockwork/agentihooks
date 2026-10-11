@@ -236,8 +236,8 @@ def test_attachable_attempts_are_kubernetes_occupants_at_their_recorded_generati
         occupant("exe-" + "e" * 32, 1),
     ]
 
-    assert keys.attempts("fixture-swarm", occupants) == [
-        Attempt(Scope("controller", "fixture-swarm", EXE_A, 2), "ssh-ed25519 AAAA-a")
+    assert keys.attempts("fixture-swarm", occupants, OPERATOR) == [
+        Attempt(Scope("operator/operator", "fixture-swarm", EXE_A, 2), "ssh-ed25519 AAAA-a")
     ]
 
 
@@ -245,7 +245,7 @@ def test_no_occupant_means_no_attachable_attempt():
     keys = HostKeys(store())
     keys.record(Scope("grant/x", "fixture-swarm", EXE_A, 2), "ssh-ed25519 AAAA-a")
 
-    assert keys.attempts("fixture-swarm", []) == []
+    assert keys.attempts("fixture-swarm", [], OPERATOR) == []
 
 
 class Worker:

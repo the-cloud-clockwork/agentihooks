@@ -865,7 +865,7 @@ def keeping(store, grant, terminals):
 
 def attachable(store, attempt) -> Attempt:
     HostKeys(store).record(Scope("grant/x", "fixture", attempt.execution_id, attempt.generation), HOST_KEY)
-    return Attempt(Scope("controller", "fixture", attempt.execution_id, attempt.generation), HOST_KEY)
+    return Attempt(Scope("operator/operator", "fixture", attempt.execution_id, attempt.generation), HOST_KEY)
 
 
 def test_a_starting_controller_reconciles_the_attachable_attempts(fixture):

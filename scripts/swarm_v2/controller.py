@@ -7,6 +7,7 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_v2.herdr.upkeep import Attempt, Upkeep
 from scripts.swarm_v2.kubernetes.terminal import HostKeys
 from scripts.swarm_v2.kubernetes.watch import BACKEND, CLASSES, Plan, Pod, PodView, Reconciler, owner_for
+from scripts.swarm_v2.operator_auth import OPERATOR
 from scripts.swarm_v2.reconciliation.accounts import AccountReconciler, Finding, exit_source
 from scripts.swarm_v2.runtime.observe import Observer, Signal
 from scripts.swarm_v2.runtime.operations import Observation, Operation, OperationRequest, Operations, OperationTransport
@@ -160,7 +161,7 @@ class Controller:
         return {name: int(counts.get(name, 0)) for name in CLASSES}
 
     def _attempts(self) -> list[Attempt]:
-        return self.host_keys.attempts(self.slug, self.store.execution_occupants(self.slug).values())
+        return self.host_keys.attempts(self.slug, self.store.execution_occupants(self.slug).values(), OPERATOR)
 
     def herdr_registration_drift(self) -> int:
         self._authorize()

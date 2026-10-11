@@ -82,14 +82,13 @@ class HostKeys:
         entries = [(ids[index], json.loads(raw)) for index, raw in enumerate(raws) if raw]
         return [Launched(execution_id, entry["generation"], entry["host_public"]) for execution_id, entry in entries]
 
-    def attempts(self, swarm: str, occupants: Iterable[AgentRecord]) -> list[Attempt]:
+    def attempts(self, swarm: str, occupants: Iterable[AgentRecord], principal: Principal) -> list[Attempt]:
         recorded = self.store.redis.hgetall(self.store.key(swarm, HOST_KEYS))
         found = []
         for agent in occupants:
             entry = json.loads(recorded.get(agent.execution_id) or "{}")
             if agent.runtime_backend == BACKEND and entry.get("generation") == agent.generation:
-                scope = Scope("controller", swarm, agent.execution_id, agent.generation)
-                found.append(Attempt(scope, entry["host_public"]))
+                found.append(Attempt(operator_scope(principal, swarm, agent), entry["host_public"]))
         return found
 
 
