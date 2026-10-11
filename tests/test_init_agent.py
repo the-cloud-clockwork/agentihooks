@@ -1140,7 +1140,7 @@ def test_a_codex_handoff_resumes_the_conversation_on_another_codex_account(monke
     assert "-m gpt-6.1-sol" in command
 
 
-@pytest.mark.parametrize("source_flags", [False, True])
+@pytest.mark.parametrize("source_flags", [False, True, "session"])
 def test_a_plain_codex_quota_handoff_preserves_native_choices(monkeypatch, tmp_path, capsys, source_flags):
     from scripts.profiles import binding
 
@@ -1148,8 +1148,17 @@ def test_a_plain_codex_quota_handoff_preserves_native_choices(monkeypatch, tmp_p
     home.mkdir()
     (home / "config.toml").write_text('model = "gpt-6-astra"\nmodel_reasoning_effort = "low"\n')
     source = {"CODEX_HOME": str(home)}
-    if source_flags:
+    if source_flags is True:
         source.update(AGENTIHOOKS_RUN_MODEL="gpt-6.1-sol", AGENTIHOOKS_RUN_EFFORT="high")
+    rollout = tmp_path / "rollout.jsonl"
+    rollout.write_text(
+        '{"type":"turn_context","payload":{"model":"gpt-6-astra","effort":"low"}}\n'
+        '{"type":"turn_context","payload":{"model":"gpt-6-sol","effort":"medium"}}\n'
+    )
+    monkeypatch.setattr(
+        "hooks.targets.normalizer.codex_rollout_path",
+        lambda session: str(rollout) if source_flags == "session" and session == "thread-1" else "",
+    )
     monkeypatch.setattr(binding, "process", lambda: (123, "codex", source, "alpha"))
     monkeypatch.setattr(init_agent.operator_env, "fill", lambda env: None)
     monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, *args: ("linux", ["terminal", str(launcher)]))
@@ -1196,7 +1205,11 @@ def test_a_plain_codex_quota_handoff_preserves_native_choices(monkeypatch, tmp_p
     assert "select-profile" not in command
     assert "AGENTIHOOKS_PROFILE_REPORT" not in successor
     assert not successor.get("AGENTIHOOKS_PROFILE")
-    expected_model, expected_effort = ("gpt-6.1-sol", "high") if source_flags else ("gpt-6-astra", "low")
+    expected_model, expected_effort = {
+        False: ("gpt-6-astra", "low"),
+        True: ("gpt-6.1-sol", "high"),
+        "session": ("gpt-6-sol", "medium"),
+    }[source_flags]
     assert f"-m {expected_model}" in command
     assert f'model_reasoning_effort="{expected_effort}"' in command
     report = capsys.readouterr().out
