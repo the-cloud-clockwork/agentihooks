@@ -201,7 +201,7 @@ def _recovery_identity(store, slug, agent):
     return [agent.task, agent.seat, agent.execution_id, agent.generation, generation]
 
 
-def track_outages(slug: str, store: RedisStore, runtime, rows: dict, now_ms: int) -> None:
+def track_outages(slug: str, store: RedisStore, runtime: object, rows: dict, now_ms: int) -> None:
     records = outage.read(slug)
     key = store.key(slug, RECOVERY)
     live = runtime.live_names()
@@ -245,6 +245,16 @@ def recovery_exhausted(store: RedisStore, slug: str, agent: AgentRecord) -> bool
     return record.get("state") == "exhausted" and record["identity"] == _recovery_identity(store, slug, agent)
 
 
+def _recovery_current(store, slug, agent, context):
+    rows = {task["id"]: task for task in context.ledger.state(slug)["tasks"]}
+    record = _recovery_record(store, slug, agent)
+    return (
+        record.get("state") == "pending"
+        and record["identity"] == _recovery_identity(store, slug, agent)
+        and _recovery_owner(store, slug, agent, rows, context.at)
+    )
+
+
 def _recovery_text(slug, agent, task):
     folder = task.get("workspace") or str(ledger_workspace.folder(slug, agent.task))
     return (
@@ -254,10 +264,13 @@ def _recovery_text(slug, agent, task):
     )
 
 
-def recover_outages(slug: str, store: RedisStore, ledger, runtime, rows: dict, now_ms: int) -> list[str]:
+def recover_outages(
+    slug: str, store: RedisStore, ledger: object, runtime: object, rows: dict, now_ms: int
+) -> list[str]:
     if outage.open_records(slug):
         return []
     actions, live = [], runtime.live_names()
+    context = RestoreContext(runtime, now_ms, ledger)
     key = store.key(slug, RECOVERY)
     for agent in store.agents(slug):
         if not recovery_pending(store, slug, agent) or not _recovery_owner(store, slug, agent, rows, now_ms):
@@ -266,6 +279,8 @@ def recover_outages(slug: str, store: RedisStore, ledger, runtime, rows: dict, n
         if record["last_at"] == now_ms:
             continue
         observed = runtime.observe(agent)
+        if not _recovery_current(store, slug, agent, context):
+            continue
         if agent.name in live and not observed.provider_error and observed.state == idle.WORKING:
             record["state"] = "done"
         elif agent.name in live and (observed.typed or observed.state not in {idle.IDLE, idle.WORKING}):
@@ -280,7 +295,7 @@ def recover_outages(slug: str, store: RedisStore, ledger, runtime, rows: dict, n
                 if not why and not observed.provider_error:
                     record["state"] = "done"
             else:
-                why = _recover_process(store, slug, agent, rows[agent.task], runtime, text, now_ms)
+                why = _recover_process(store, slug, agent, rows[agent.task], context, text)
                 if not why:
                     record["state"] = "done"
             if record["state"] == "pending" and record["attempts"] >= RECOVERY_ATTEMPTS:
@@ -290,28 +305,32 @@ def recover_outages(slug: str, store: RedisStore, ledger, runtime, rows: dict, n
     return actions
 
 
-def _recover_process(store, slug, agent, task, runtime, text, now_ms):
+def _recover_process(store, slug, agent, task, context, text):
     from scripts.swarm.tick import placed_record, primed
 
     worktree = snapshot.worktrees(store.config(slug).repo, [agent.name]).get(agent.name, "")
     why = blocker(agent, worktree)
     handoff = store.handoff(slug, agent.task) or transfers.last_handoff(store, slug, agent.task)
+    if not _recovery_current(store, slug, agent, context):
+        return "task ownership changed"
     try:
         if not why:
-            placed = runtime.resume(store.config(slug), agent, text)
+            placed = context.runtime.resume(store.config(slug), agent, text)
             resumed = replace(
                 agent,
                 pane_id=placed.pane_id,
-                started_at=now_ms,
+                started_at=context.at,
                 idle_ticks=0,
                 profile_decision=placed.profile_decision or agent.profile_decision,
             )
         else:
-            transfer = transfers.record(store, slug, agent, "outage", handoff, now_ms)
+            transfer = transfers.record(store, slug, agent, "outage", handoff, context.at)
             transfers.attach(store, slug, agent)
             task = primed(store, slug, agent.seat, {**task, "handoff": handoff, "transfer": transfer["id"]})
-            placed = runtime.spawn(store.config(slug), agent.lane, agent.name, task)
-            resumed = replace(placed_record(agent, placed), conversation_id="", started_at=now_ms, idle_ticks=0)
+            if not _recovery_current(store, slug, agent, context):
+                return "task ownership changed"
+            placed = context.runtime.spawn(store.config(slug), agent.lane, agent.name, task)
+            resumed = replace(placed_record(agent, placed), conversation_id="", started_at=context.at, idle_ticks=0)
     except Exception as error:
         return str(error) or type(error).__name__
     store.put_agent(slug, resumed)
