@@ -21,9 +21,12 @@ class CodexQuota:
     five_hour: QuotaWindow = field(default_factory=QuotaWindow)
     seven_day: QuotaWindow = field(default_factory=QuotaWindow)
     reached: str = ""
+    expired: bool = False
 
     @property
     def state(self) -> str:
+        if self.expired:
+            return "EXPIRED"
         if self.reached:
             return "BLOCKED"
         windows = [w for w in (self.five_hour, self.seven_day) if w.used is not None]

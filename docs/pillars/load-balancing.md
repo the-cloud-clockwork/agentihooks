@@ -424,9 +424,14 @@ routing pool and the `agentihooks quota` rows.
 
 - `agentihooks codex [--route <slug>] [codex args]` picks by the same rule, with
   each Codex account judged on its week alone with the top band (6 sessions, none
-  under 5% of the week). A reading older than fifteen minutes is refreshed by one
-  tiny `codex exec` on that account before placing, at most once per fifteen
-  minutes per account. Until then the cap keeps reading an older one while it
+  under 5% of the week). A reading older than fifteen minutes is refreshed
+  before placing, at most once per fifteen minutes per account: a ChatGPT token
+  account, or a default login whose `auth.json` holds its token, gets a free
+  read of the ChatGPT usage endpoint (`/backend-api/wham/usage`, no inference
+  spent), cached in `~/.agentihooks/codex-usage.json` with the windows, plan and
+  limit only; any other account gets one tiny `codex exec`. A read answered
+  `401 token_expired` marks the account `EXPIRED`: no seats, and `agentihooks
+  quota` names the login that renews it. Until then the cap keeps reading an older one while it
   is younger than `AGENTIHOOKS_CODEX_READING_MAX_AGE_H` hours (default 6), so an
   idle account keeps its seats; a 7-day window that has reset in the meantime
   reads 100% left. `agentihooks quota` shows `STALE` only past that age, and
@@ -452,9 +457,9 @@ routing pool and the `agentihooks quota` rows.
   it counts even when started inside one of them. A Codex process whose parent
   is a Codex process belongs to that session. A run started through a shell,
   even inside a Codex session, holds its own slot.
-  Quota per account is the newest rate-limit event in the session logs the
-  session registry attributes to it; a token with no session yet shows no quota
-  and still routes.
+  Quota per account is the newest of the usage read and the rate-limit event in
+  the session logs the session registry attributes to it; a token with neither
+  shows no quota and still routes.
 - `agentihooks balance` and `agentihooks quota` list every Codex account with its
   sessions and quota; a signed-out default login shows `SIGNED_OUT`.
 - The swarm tick, the controller and `init-agent` never source the shell rc, so

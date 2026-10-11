@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
 PAGE_TTL_S = 60
 STALE = "STALE"
+EXPIRED_SOURCE = "token expired: run {login}"
 NEXT_MARK = "(next)"
 REFRESH_MIN_S = 60
 _page_cache: dict = {}
@@ -89,15 +90,21 @@ def _codex_state(account: "codex_router.CodexAccount", quota: "CodexQuota | None
         return "SIGNED_OUT"
     if quota is None:
         return "UNKNOWN"
+    if quota.expired:
+        return quota.state
     if not codex_router.usable(quota, now):
         return STALE
     current = quota if session_bands.fresh(quota.observed_at, now) else replace(quota, five_hour=QuotaWindow())
     return current.state_at(now)
 
 
-def _codex_source(quota: "CodexQuota | None", now: float) -> str:
+def _codex_source(account: "codex_router.CodexAccount", quota: "CodexQuota | None", now: float) -> str:
     if quota is None:
         return "no session log"
+    if quota.expired:
+        return EXPIRED_SOURCE.format(
+            login=f"agentihooks codex login {account.name}" if account.is_token else "codex login"
+        )
     seen = f"session-log {_duration(int(now), int(quota.observed_at))} ago"
     return f"{seen}, {quota.reached}" if quota.reached else seen
 
@@ -119,7 +126,7 @@ def codex_rows(accounts: list, quotas: dict, sessions: dict[str, int], now: floa
                 if quota
                 else None,
                 seven_day_resets_at=quota.seven_day.resets_at if quota else None,
-                source=_codex_source(quota, now),
+                source=_codex_source(account, quota, now),
                 five_hour_resets_at=quota.five_hour.resets_at if quota else None,
                 observed_at=quota.observed_at if quota else None,
                 cap=codex_router.account_cap(quota, now) if account.signed_in else None,

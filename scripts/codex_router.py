@@ -25,7 +25,7 @@ from hooks.context.account_sessions import (
     INTERNAL_RUN,
     codex_sessions_by_account,
 )
-from scripts import codex_quota, operator_env, session_bands
+from scripts import codex_quota, codex_usage, operator_env, session_bands
 from scripts.codex_quota import CodexQuota
 from scripts.routing import codex_api, envs, place
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, Slot
@@ -197,7 +197,13 @@ def quotas(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, Co
             return lambda session_id: True
         return lambda session_id: session_id in owner and owner[session_id] not in tokens
 
-    return {account.name: codex_quota.latest_codex_quota(dict(environ), keep(account)) for account in pool}
+    usage = codex_usage.cached()
+    readings = {account.name: codex_quota.latest_codex_quota(dict(environ), keep(account)) for account in pool}
+    return {name: _newest(found, usage.get(name)) for name, found in readings.items()}
+
+
+def _newest(*readings: CodexQuota | None) -> CodexQuota | None:
+    return max((found for found in readings if found is not None), key=lambda found: found.observed_at, default=None)
 
 
 def _reading_max_age(environ: Mapping[str, str]) -> float:
@@ -215,7 +221,11 @@ def usable(quota: CodexQuota, now: float, environ: Mapping[str, str] | None = No
 
 def account_cap(quota: CodexQuota | None, now: float, environ: Mapping[str, str] | None = None) -> int | None:
     """Live sessions under the session bands: the week alone sets it; None without a usable reading."""
-    if quota is None or not usable(quota, now, environ):
+    if quota is None:
+        return None
+    if quota.expired:
+        return 0
+    if not usable(quota, now, environ):
         return None
     if quota.reached:
         return 0
@@ -231,10 +241,34 @@ def _thread(stdout: str) -> str:
     return ""
 
 
+def _default_token(environ: Mapping[str, str]) -> str:
+    try:
+        tokens = json.loads((codex_quota.codex_home(dict(environ)) / "auth.json").read_text()).get("tokens")
+    except (OSError, ValueError, AttributeError):
+        return ""
+    found = tokens.get("access_token") if isinstance(tokens, dict) else None
+    return found if isinstance(found, str) else ""
+
+
+def _bearer(account: CodexAccount, environ: Mapping[str, str]) -> tuple[str, str] | None:
+    if account.is_token:
+        token = environ[account.env_name] if credential_kind(account, environ) == OAUTH_KIND else ""
+    else:
+        token = "" if account.is_api else _default_token(environ)
+    claim = _chatgpt_account_id(_claims(token))
+    return (token, claim) if claim else None
+
+
 def probe(account: CodexAccount, environ: Mapping[str, str], run: Callable = subprocess.run) -> CodexQuota | None:
-    """A fresh reading from one tiny exec on the account, read from the rollout it writes."""
+    """A fresh reading: the free usage read for a ChatGPT token, else one tiny exec read from its rollout."""
     codex_bin = shutil.which(CODEX_BIN) or CODEX_BIN
     try:
+        bearer = _bearer(account, environ)
+        if bearer:
+            found = codex_usage.read(*bearer, time.time())
+            if found:
+                codex_usage.store(account.name, found)
+            return found
         account = credential(account, environ)
         done = run(
             command(account, codex_bin, PROBE_ARGS),
