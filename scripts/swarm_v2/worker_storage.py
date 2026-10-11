@@ -37,7 +37,7 @@ def main() -> None:
     chunk = bytes(MIB)
     baseline = memory()
     print(json.dumps({"baseline": baseline}), flush=True)
-    for folder in (Path("/home/worker"), Path("/tmp")):
+    for folder in (Path("/home/worker"), Path("/tmp")):  # NOSONAR: this workload runs on a worker Pod private root disk
         print(json.dumps({"path": str(folder), "filesystem": filesystem(folder)}), flush=True)
         file = folder / f"storage-proof-{os.getpid()}"
         try:

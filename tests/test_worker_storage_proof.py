@@ -1,19 +1,15 @@
-import importlib.util
 from pathlib import Path
 
 import pytest
+
+from scripts.swarm_v2 import worker_storage
 
 pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
 def probe():
-    spec = importlib.util.spec_from_file_location(
-        "worker_storage_proof", Path(__file__).parents[1] / "docker/swarm-node/storage-proof.py"
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return worker_storage
 
 
 def test_the_storage_check_rejects_guest_tmpfs(probe, monkeypatch):
@@ -41,3 +37,25 @@ def test_the_storage_check_rejects_memory_growth_in_the_final_sample(probe, monk
     with pytest.raises(RuntimeError, match="increased guest memory"):
         probe.main()
     assert list(root.iterdir()) == []
+
+
+def test_the_storage_check_finishes_both_writes_and_removes_its_files(probe, monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(probe, "Path", lambda value: tmp_path)
+    monkeypatch.setattr(probe, "MIB", 1024)
+    monkeypatch.setattr(probe, "SIZE", 16 * 1024)
+    monkeypatch.setattr(probe, "filesystem", lambda path: {"type": "ext4"})
+    monkeypatch.setattr(probe, "memory", lambda: {"used": 100, "anonymous": 20, "shmem": 4})
+    probe.main()
+    output = capsys.readouterr().out
+    assert output.count('"bytes": 16384') == 2
+    assert output.endswith("storage proof passed\n")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_the_guest_memory_reading_separates_usage_anonymous_and_shared_pages(probe, monkeypatch):
+    monkeypatch.setattr(
+        Path,
+        "read_text",
+        lambda self: "MemTotal: 2048 kB\nMemAvailable: 1024 kB\nAnonPages: 128 kB\nShmem: 64 kB\n",
+    )
+    assert probe.memory() == {"used": 1048576, "anonymous": 131072, "shmem": 65536}
