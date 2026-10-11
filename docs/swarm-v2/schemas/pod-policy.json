@@ -4,12 +4,11 @@
   "title": "Approved execution Pod policy",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "template_version", "namespace", "owner", "service_account", "runtime_class_name", "image_repository", "termination_grace_seconds", "provider_accounts", "profiles", "probes"],
+  "required": ["schema_version", "template_version", "namespace", "service_account", "runtime_class_name", "image_repository", "termination_grace_seconds", "provider_accounts", "profiles", "probes"],
   "properties": {
     "schema_version": {"const": 1},
     "template_version": {"$ref": "#/$defs/label_value"},
     "namespace": {"$ref": "#/$defs/dns_label"},
-    "owner": {"$ref": "#/$defs/label_value"},
     "service_account": {"$ref": "#/$defs/dns_label"},
     "runtime_class_name": {"$ref": "#/$defs/dns_label"},
     "image_repository": {"type": "string", "maxLength": 200, "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?(/[a-z0-9]+([._-][a-z0-9]+)*)+$"},

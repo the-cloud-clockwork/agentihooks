@@ -199,7 +199,7 @@ def _flag_value(args: list[str], names: tuple[str, ...]) -> str:
 
 
 def _handoff_agent(requested: str, environ: dict[str, str], agent_args: list[str]) -> str:
-    source = environ.get("AGENTIHOOKS_TARGET") or "claude"
+    source = environ.get("AGENTIHOOKS_TARGET") or _live_harness()
     target = requested or source
     if _flag_value(agent_args, ("--route",)) == "api":
         return target
@@ -208,6 +208,15 @@ def _handoff_agent(requested: str, environ: dict[str, str], agent_args: list[str
             f"unsupported quota transfer: {source.capitalize()} cannot transfer to a {target.capitalize()} account"
         )
     return "codex" if source == "codex" else "claude"
+
+
+def _live_harness() -> str:
+    from scripts.profiles import binding
+
+    try:
+        return binding.process()[1]
+    except (OSError, ValueError):
+        return "claude"
 
 
 def _handoff_exclude(agent: str, environ: dict[str, str]) -> str:
@@ -221,6 +230,17 @@ def _handoff_exclude(agent: str, environ: dict[str, str]) -> str:
         return current
     current = environment_account(environ)
     return "" if current == UNROUTED else current
+
+
+def _mark_handoff(account: str, resumed: str) -> list[str]:
+    from hooks.context.account_sessions import agent_pid
+    from hooks.context.broadcast import mark_handed_off
+    from hooks.lifecycle import handoff_close
+
+    pid = agent_pid()
+    if resumed:
+        handoff_close.handoff_record(pid, resumed).touch()
+    return mark_handed_off(pid, account)
 
 
 def model_effort(agent: str, agent_args: list[str], environ: dict[str, str]) -> tuple[str, str]:
@@ -784,10 +804,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         print("\n".join(report))
         return 0
 
-    from hooks.context.account_sessions import agent_pid
-    from hooks.context.broadcast import mark_handed_off
-
-    marked = mark_handed_off(agent_pid(), route["account"])
+    marked = _mark_handoff(route["account"], args.resume)
     print("\n".join([*report, "handoff=done", f"handed_off_sessions={','.join(marked) or 'none'}"]))
     return 0
 
