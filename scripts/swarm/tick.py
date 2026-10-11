@@ -598,6 +598,8 @@ def _conversations(slug, store, runtime):
     for agent in store.agents(slug):
         if agent.state in {"finished", "awaiting-decision"} or not agent.pane_id:
             continue
+        if agent.pane_id not in found and resume.recovery_pending(store, slug, agent):
+            continue
         current = found.get(agent.pane_id, "")
         if current != agent.conversation_id:
             store.put_agent(slug, replace(agent, conversation_id=current))
