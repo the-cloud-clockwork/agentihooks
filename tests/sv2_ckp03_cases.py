@@ -388,7 +388,8 @@ def _recovery_fixture(root: Path) -> dict:
         "previous_checkpoint": shown(previous),
         "interruption": error,
         "interrupted_manifest": shown(absent),
-        "native_material_durable_while_manifest_absent": material is not None,
+        "native_material_durable_while_manifest_absent": material is not None
+        and restarted.validator.store.stat(material) == base.VERIFIED,
         "previous_checkpoint_while_interrupted": shown(current),
         "after_restart": shown(resumed),
         "replay": shown(replay),

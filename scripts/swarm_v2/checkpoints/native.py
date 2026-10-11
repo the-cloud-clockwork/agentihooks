@@ -7,7 +7,7 @@ import re
 import sqlite3
 import tarfile
 from collections import Counter
-from contextlib import closing
+from contextlib import closing, suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import Protocol
@@ -194,6 +194,8 @@ class Codex:
         sessions = home / "sessions"
         indexed = self._indexed(home, session_id)
         if indexed:
+            if Path(indexed).is_symlink():
+                raise NativeError("conversation_absent")
             try:
                 return contain(sessions, indexed)
             except LayoutError as error:
@@ -264,10 +266,20 @@ def _write_new(path: Path, data: bytes, created: list[Path]) -> None:
 
 def _remove(created: list[Path]) -> None:
     for path in reversed(created):
-        if path.is_dir() and not path.is_symlink():
-            path.rmdir()
-        else:
-            path.unlink(missing_ok=True)
+        with suppress(OSError):
+            if path.is_dir() and not path.is_symlink():
+                path.rmdir()
+            else:
+                path.unlink(missing_ok=True)
+
+
+def _linked(root: Path, relative: PurePosixPath) -> bool:
+    current = root
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False
 
 
 def _granted(scope: Scope, authority: dict) -> bool:
@@ -369,7 +381,10 @@ class Qualifier:
         if native.identity(members)[0] != session_id:
             raise NativeError("identity_mismatch")
         try:
-            targets = [(contain(home, native.placed(session_id, cwd, name)), data) for name, data in members.items()]
+            placed = [(native.placed(session_id, cwd, name), data) for name, data in members.items()]
+            if any(_linked(home, relative) for relative, _ in placed):
+                raise NativeError(ESCAPE)
+            targets = [(contain(home, relative), data) for relative, data in placed]
         except (LayoutError, ValueError) as error:
             raise NativeError(ESCAPE) from error
         if any(path.exists() or path.is_symlink() for path, _ in targets):
@@ -380,7 +395,10 @@ class Qualifier:
                 _write_new(path, data, created)
             if native.identity(native.collect(home, session_id, cwd))[0] != session_id:
                 raise NativeError("identity_mismatch")
-        except (OSError, NativeError) as error:
+        except NativeError:
             _remove(created)
-            raise error if isinstance(error, NativeError) else NativeError("placement_failed") from error
+            raise
+        except OSError as error:
+            _remove(created)
+            raise NativeError("placement_failed") from error
         return Resumed(native.name, session_id, native.command(session_id))

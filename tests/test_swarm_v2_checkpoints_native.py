@@ -542,6 +542,34 @@ def test_a_write_failure_removes_what_was_placed_and_reports_placement_failed(tm
     assert list(home.iterdir()) == []
 
 
+def test_restore_never_writes_through_a_link_inside_the_home(tmp_path):
+    committed(tmp_path, "codex")
+    home = tmp_path / "fresh"
+    (home / "elsewhere").mkdir(parents=True)
+    (home / "sessions").symlink_to(home / "elsewhere")
+    result = reader(tmp_path).restore("ckpt-1", home, tmp_path, cases.VERSIONS["codex"])
+    assert result == native.Unavailable("codex", native.ESCAPE)
+    assert list((home / "elsewhere").iterdir()) == []
+
+
+def test_an_indexed_rollout_that_is_a_link_is_not_read(tmp_path):
+    home = cases.codex_home(tmp_path)
+    rollout = home / "sessions" / cases.ROLLOUT.format(CODEX)
+    kept = rollout.with_name("kept.jsonl")
+    rollout.rename(kept)
+    rollout.symlink_to(kept)
+    result = qualifier(tmp_path).capture("codex", home, CODEX, tmp_path, cases.VERSIONS["codex"], True)
+    assert result == native.Unavailable("codex", "conversation_absent")
+
+
+def test_cleanup_ignores_a_folder_that_gained_other_files(tmp_path):
+    folder = tmp_path / "made"
+    folder.mkdir()
+    (folder / "other.txt").write_text("kept")
+    native._remove([folder])
+    assert (folder / "other.txt").read_text() == "kept"
+
+
 def test_restore_never_follows_a_link_already_at_a_target(tmp_path):
     committed(tmp_path, "codex")
     home = tmp_path / "fresh"
