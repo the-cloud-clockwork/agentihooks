@@ -232,10 +232,21 @@ def stable_id(*parts: str) -> str:
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:12]
 
 
-def post(store, sender: str, address: str, text: str, ref="", fyi=False, task="", item=""):
+@dataclass(frozen=True)
+class Post:
+    sender: str
+    address: str
+    text: str
+    ref: str = ""
+    fyi: bool = False
+    task: str = ""
+    item: str = ""
+
+
+def post(store, message: Post):
     """A send from swarm code, written now or queued on a Redis error; the live item, or None while it waits queued."""
-    args = {"address": address, "text": text, "ref": ref, "fyi": fyi, "task": task}
-    entry = record("post", sender, args, item=item)
+    args = {"address": message.address, "text": message.text, "ref": message.ref, "fyi": message.fyi}
+    entry = record("post", message.sender, {**args, "task": message.task}, item=message.item)
     try:
         found = submit(store, entry, apply_post)
     except DuplicateItem:

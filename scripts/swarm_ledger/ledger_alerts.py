@@ -143,9 +143,8 @@ def deliver(inbox, slug, alerts, rev, master, since=None):
         if inbox.redis.exists(mark):
             continue
         address = master if alert["target"] in ("master", OPERATOR) else alert["target"]
-        item = outbox.post(
-            inbox, SENDER, address, message(slug, alert), item=outbox.stable_id("alert", slug, alert["id"])
-        )
+        notice = outbox.Post(SENDER, address, message(slug, alert), item=outbox.stable_id("alert", slug, alert["id"]))
+        item = outbox.post(inbox, notice)
         inbox.redis.set(mark, 1, ex=SENT_TTL_S)
         sent += [item] if item else []
     return sent

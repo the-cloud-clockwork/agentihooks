@@ -94,7 +94,8 @@ def relay(inbox, store, slug, doc, events, line):
         for address in addresses(slug, event, doc, agents, owners):
             primer = primed(text, event, address, master)
             fyi = informed(event, address, master)
-            item = outbox.post(inbox, OPERATOR, address, primer, ref=ref, fyi=fyi, item=outbox.stable_id(ref, address))
+            mail = outbox.Post(OPERATOR, address, primer, ref=ref, fyi=fyi, item=outbox.stable_id(ref, address))
+            item = outbox.post(inbox, mail)
             sent += [item] if item else []
         inbox.redis.set(mark, 1, ex=SENT_TTL_S)
     return sent
