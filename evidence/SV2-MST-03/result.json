@@ -52,11 +52,16 @@
     "unit": "pending",
     "mutation": "pending",
     "review": "Standards reader closed every finding after two rounds and accepted extra seats stored as working; Spec reader closed every finding except this evidence record",
-    "local": "No local tests or mutation ran; static prepush passed on every commit"
+    "local": "No local tests or mutation ran; static prepush passed on every commit",
+    "measurements": "case C of Tests run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38133520913 on 581dd49ef: twenty agents back to five at one seat per five, each extra master handing off one minute after its ask"
   },
   "measurements": {
-    "master_seat_count": "pending",
-    "master_retire_seconds": "pending"
+    "master_seat_count": 1,
+    "master_retire_seconds": [
+      60,
+      60,
+      60
+    ]
   },
   "cases": {
     "a": "evidence/SV2-MST-03/a-result.json",
