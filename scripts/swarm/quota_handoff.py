@@ -45,15 +45,19 @@ def _reset(account: capacity.Account, window: str) -> int | None:
     return account.week_resets_at if window == "week" else account.five_resets_at
 
 
-def directive(slug: str, account: capacity.Account, window: str) -> str:
+def _window_text(account: capacity.Account, window: str) -> str:
     from hooks.context.quota_policy import reset_when
 
     left = account.week_left if window == "week" else account.five_left
     reset = _reset(account, window)
     when = f"it resets {reset_when(reset)}" if reset else "its reset time is unknown"
+    return f"has used {100 - left:g}% of its {window} window, {left:g}% left; {when}"
+
+
+def directive(slug: str, account: capacity.Account, crossed: list[str]) -> str:
     return (
-        f"QUOTA HANDOFF WARNING: {account.harness} account {account.name} has used {100 - left:g}% of its {window} "
-        f"window, {left:g}% left; {when}. "
+        f"QUOTA HANDOFF WARNING: {account.harness} account {account.name} "
+        f"{'. It '.join(_window_text(account, window) for window in crossed)}. "
         "Finish your current step and write your Handoff v2 with the handoff skill while quota remains. "
         f"Submit it with agentihooks swarm {slug} handoff DOC --reason quota, then stop. "
         "The tick keeps your seat and task and routes the successor to an account with room. "
@@ -72,17 +76,20 @@ def warn(slug: str, store: RedisStore, environ: dict) -> list[str]:
         account = accounts.get((agent.harness, agent.account))
         if agent.state == "finished" or account is None:
             continue
-        life = str(agent.started_at)
+        life, due = str(agent.started_at), []
         for window in windows(account, thresholds):
             field, period = f"{agent.name}:{window}", f"{life}:{_reset(account, window)}"
-            if store.redis.hget(periods, field) == period:
-                continue
-            item = InboxStore(store.redis).send("swarm", agent.name, directive(slug, account, window))
-            if store.redis.hget(lives, agent.name) != life:
-                store.redis.hset(key, agent.name, item.id)
-            store.redis.hset(lives, agent.name, life)
-            store.redis.hset(periods, field, period)
-            actions.append(f"early quota handoff warning sent to {agent.name}")
+            if store.redis.hget(periods, field) != period:
+                due.append((window, field, period))
+        if not due:
+            continue
+        crossed = [window for window, _, _ in due]
+        item = InboxStore(store.redis).send("swarm", agent.name, directive(slug, account, crossed))
+        if store.redis.hget(lives, agent.name) != life:
+            store.redis.hset(key, agent.name, item.id)
+        store.redis.hset(lives, agent.name, life)
+        store.redis.hset(periods, mapping={field: period for _, field, period in due})
+        actions.append(f"early quota handoff warning sent to {agent.name}")
     return actions
 
 

@@ -325,14 +325,20 @@ def test_each_window_warns_once_per_reset_while_the_other_stays_crossed():
 
     assert [observe(100, 50, 91), observe(100, 96, 91), observe(100, 97, 92)] == [1, 1, 0]
     assert [observe(200, 20, 92), observe(200, 96, 92), observe(200, 96, 93)] == [0, 1, 0]
-    texts = [item.text for item in InboxStore(storage.redis).pending_items("cx")]
-    assert [text.split(" window,")[0].rsplit(" ", 2)[-2:] for text in texts] == [
+    items = InboxStore(storage.redis).pending_items("cx")
+    assert storage.redis.hget(storage.key("sw", "quota-warnings"), "cx") == items[0].id
+    assert [item.text.split(" window,")[0].rsplit(" ", 2)[-2:] for item in items] == [
         ["its", "week"],
         ["five", "hour"],
         ["five", "hour"],
     ]
     storage.put_agent("sw", AgentRecord("both", "eng", "f", harness="codex", account="spent", started_at=2))
-    assert quota_handoff.warn("sw", storage, {}) == ["early quota handoff warning sent to both"] * 2
+    assert quota_handoff.warn("sw", storage, {}) == ["early quota handoff warning sent to both"]
+    assert quota_handoff.warn("sw", storage, {}) == []
+    (both,) = InboxStore(storage.redis).pending_items("both")
+    assert "has used 93% of its week window, 7% left; it resets " in both.text
+    assert ". It has used 96% of its five hour window, 4% left; it resets " in both.text
+    assert both.text.count("Submit it with") == 1
     assert storage.redis.hget(storage.key("sw", "quota-warning-lives"), "both") == "2"
 
 
