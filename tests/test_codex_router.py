@@ -2,6 +2,7 @@ import base64
 import json
 import subprocess
 import time
+from dataclasses import replace
 
 import pytest
 
@@ -139,17 +140,21 @@ def _aged(seconds, resets_at=NOW + 86_400):
     return CodexQuota(NOW - seconds, "team", seven_day=QuotaWindow(used=10.0, resets_at=resets_at))
 
 
-def test_a_reading_keeps_its_cap_inside_its_week_until_the_max_age(monkeypatch):
+def test_a_reading_keeps_its_cap_until_the_max_age_and_a_passed_week_reads_full(monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", raising=False)
     assert router.account_cap(_aged(3600), NOW) == 6
     assert router.account_cap(_aged(6 * 3600), NOW) == 6
     assert router.account_cap(_aged(6 * 3600 + 1), NOW) is None
-    assert router.account_cap(_aged(3600, resets_at=NOW), NOW) is None
-    assert router.account_cap(_aged(3600, resets_at=None), NOW) is None
-    assert router.account_cap(_aged(600, resets_at=None), NOW) == 6
+    spent = CodexQuota(NOW - 3600, "team", seven_day=QuotaWindow(used=99.0, resets_at=NOW + 600))
+    assert router.account_cap(spent, NOW) == 0
+    assert router.account_cap(replace(spent, seven_day=QuotaWindow(used=99.0, resets_at=NOW)), NOW) == 6
+    assert router.account_cap(_aged(3600, resets_at=None), NOW) == 6
     monkeypatch.setenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", "0.5")
     assert router.account_cap(_aged(3600), NOW) is None
     assert router.account_cap(_aged(1800), NOW) == 6
+    assert router.account_cap(_aged(600), NOW, {"AGENTIHOOKS_CODEX_READING_MAX_AGE_H": "0.1"}) == 6
+    assert router.account_cap(_aged(1800), NOW, {}) == 6
+    assert router.account_cap(_aged(1800), NOW, {"AGENTIHOOKS_CODEX_READING_MAX_AGE_H": "0.25"}) is None
     monkeypatch.setenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", "soon")
     assert router.account_cap(_aged(6 * 3600), NOW) == 6
     assert router.account_cap(_aged(6 * 3600 + 1), NOW) is None

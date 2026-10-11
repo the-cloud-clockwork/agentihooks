@@ -192,7 +192,34 @@ def test_codex_token_accounts_from_the_rc_block_get_seats_and_default_none(monke
     assert capacity._codex(environ, 100 + 3600, True) == [
         capacity.Account("codex", "alpha", "OPEN", 0, None, 90, 6, 10**10)
     ]
-    assert [credential.account for credential in balancer.discover_credentials(environ)] == ["ncgma"]
+    assert [credential.account for credential in balancer.discover_credentials(environ)] == ["mail"]
+
+
+def test_tick_capacity_balance_and_quota_list_the_same_accounts_and_caps(monkeypatch, tmp_path):
+    from scripts import agents_quota, aicode_tokens, operator_env
+    from scripts.codex_quota import CodexQuota
+
+    monkeypatch.delenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", raising=False)
+    aicode_tokens.rc_file().write_text(
+        f"{aicode_tokens.START}\nexport AH_CX_TOKEN_alpha=cx1\nexport AH_CX_TOKEN_beta=cx2\n"
+        f"export AH_CC_TOKEN_mail=cc1\n{aicode_tokens.END}\n"
+    )
+    environ = {"HOME": str(tmp_path), "AH_CC_TOKEN_ncgma": "cc1", "AH_CC_TOKEN_other": "cc2"}
+    operator_env.fill(environ)
+    readings = {
+        "alpha": CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=10, resets_at=10**10)),
+        "beta": CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=97, resets_at=10**10)),
+    }
+    monkeypatch.setattr(
+        capacity.codex_router, "quotas", lambda accounts, env: {a.name: readings[a.name] for a in accounts}
+    )
+    monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: None)
+    now = 100 + 3600
+    tick = [(row.name, row.cap) for row in capacity._codex(environ, now, True)]
+    pool = capacity.codex_router.routing_pool(environ)
+    quota = [(row.account, row.cap) for row in agents_quota.codex_rows(pool, readings, {}, now)]
+    assert tick == quota == [("alpha", 6), ("beta", 0)]
+    assert [credential.account for credential in balancer.discover_credentials(environ)] == ["mail", "other"]
 
 
 def test_quota_capacity_with_all_zero_demand_never_refreshes_codex(tmp_path, monkeypatch):
