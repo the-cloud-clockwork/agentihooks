@@ -119,6 +119,13 @@ class DistributedLaunch:
 
     def spawn(self, request: SpawnRequest, agent: AgentRecord, terms: LaunchTerms, previous: str) -> Launch:
         admitted = self.controller.admit(replace(agent, account=terms.account), previous)
+        return self._place(request, admitted, terms, True)
+
+    def relaunch(self, request: SpawnRequest, admitted: AgentRecord, terms: LaunchTerms) -> Outcome:
+        """A refused relaunch leaves its replacement unended, so the next recovery pass places it again."""
+        return self._place(request, admitted, replace(terms, account=admitted.account), False).outcome
+
+    def _place(self, request: SpawnRequest, admitted: AgentRecord, terms: LaunchTerms, end: bool) -> Launch:
         grant = self.grants.issue(
             self.slug,
             admitted.execution_id,
@@ -130,7 +137,7 @@ class DistributedLaunch:
         try:
             slot = self.capacity.reserve(grant, terms.cap, terms.ttl_ms)
         except SwarmError as error:
-            ended = self.end_refused(admitted, str(error))
+            ended = self.end_refused(admitted, str(error)) if end else admitted
             self.grants.withdraw(self.slug, grant)
             status = Status.UNAVAILABLE if str(error) == ACCOUNT_FULL else Status.REFUSED
             return Launch(ended, grant, None, Outcome("spawn", status, backend, detail=str(error)))

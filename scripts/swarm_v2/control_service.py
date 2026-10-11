@@ -7,6 +7,7 @@ from pathlib import Path
 
 from scripts.hive import auth as hive_auth
 from scripts.swarm import lease
+from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_v2 import deployed, telemetry
 from scripts.swarm_v2.api.executions import ExecutionsAPI
@@ -179,7 +180,7 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
     if workers is not None:
         service.api_url = workers.terms.api_url
         service.runtime = deployed.tick_runtime(service, workers, environ)
-        service.recover = deployed.recovery_pass(service, workers, transports[0].api)
+        service.recover = deployed.recovery_pass(service, workers, transports[0].api, LedgerClient())
         if service.controller.terminals is not None:
             service.views = deployed.terminal_views(service.controller, environ)
     try:
