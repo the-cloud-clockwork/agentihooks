@@ -690,12 +690,16 @@ def test_a_nudge_the_routed_runtime_refuses_is_reported_with_the_router_reason(s
     assert actions == ["nudge to engineer@a1b2c3-0001 refused: local lacks command"] and herdr.nudged == []
 
 
-def test_a_local_nudge_herdr_fails_to_deliver_is_reported_as_refused_with_the_failure(store):
+def test_a_local_nudge_herdr_fails_to_deliver_is_reported_as_refused_with_the_failure(store, tmp_path):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    def failing(args):
+        raise RuntimeError("agent_not_found")
+
     herdr = FakeRuntime()
-    herdr.nudge_refusals["engineer@a1b2c3-0001"] = "agent_not_found"
+    herdr.nudge = HerdrRuntime(home=tmp_path, herdr=failing).nudge
     actions = idle_until_nudged(store, routed_tick_runtime(herdr))
     assert actions == ["nudge to engineer@a1b2c3-0001 refused: agent_not_found"]
-    assert herdr.nudged == ["engineer@a1b2c3-0001"]
 
 
 def test_the_nudge_is_skipped_while_the_pane_holds_typed_input(store):
