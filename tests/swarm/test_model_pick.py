@@ -238,6 +238,13 @@ def test_a_fixed_lane_model_never_takes_the_sonnet_step(monkeypatch):
     assert picked == ModelPick("opus", "medium", "band")
 
 
+@pytest.mark.parametrize("difficulty", ["S", "M", "L"])
+def test_a_fixed_sonnet_lane_on_auto_effort_always_runs_at_xhigh(monkeypatch, difficulty):
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("a fixed Sonnet lane asked the classifier"))
+    picked = model_pick.pick("claude", {"model": "sonnet", "effort": "auto"}, {"difficulty": difficulty}, {})
+    assert picked == ModelPick("sonnet", "xhigh", "band")
+
+
 @pytest.mark.parametrize("harness", ["claude", "codex"])
 def test_an_environment_model_replaces_the_frontier_model_in_the_band(monkeypatch, harness):
     monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: decision("higher"))
@@ -330,6 +337,12 @@ def test_a_range_below_xhigh_launches_the_band_floor_instead_of_sonnet(tmp_path,
 def test_an_explicit_sonnet_lane_keeps_sonnet_at_its_own_effort(tmp_path, monkeypatch):
     lanes = {"eng": {"agent": "claude", "model": "sonnet", "effort": "high"}}
     assert _launched(tmp_path, monkeypatch, "eng", TASK, lanes) == ["--model", "sonnet", "--effort", "high"]
+
+
+def test_a_sonnet_lane_on_auto_effort_launches_sonnet_at_xhigh(tmp_path, monkeypatch):
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("a fixed Sonnet lane asked the classifier"))
+    lanes = {"eng": {"agent": "claude", "model": "sonnet", "effort": "auto"}}
+    assert _launched(tmp_path, monkeypatch, "eng", TASK, lanes) == ["--model", "sonnet", "--effort", "xhigh"]
 
 
 def test_spawn_records_and_stores_classifier_choice(tmp_path, monkeypatch):
