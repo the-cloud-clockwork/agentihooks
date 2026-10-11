@@ -700,11 +700,11 @@ def test_a_claude_resume_reopens_that_conversation(tmp_path):
     assert "--name m --resume c0ffee" in _resume_line(tmp_path, "claude")
 
 
-def test_a_codex_resume_runs_the_resume_subcommand_before_any_flag(tmp_path):
+def test_a_codex_resume_puts_every_flag_before_the_resume_subcommand(tmp_path):
     words = _resume_line(tmp_path, "codex").split()
-    at = words.index("resume")
-    assert words[at + 1] == "c0ffee"
-    assert words[at - 1] != "--agentihooks-report" and words.index("-m") > at
+    assert words[-2:] == ["resume", "c0ffee"]
+    assert words.count("resume") == 1
+    assert "-m" in words and "-c" in words
 
 
 def test_init_agent_passes_resume_through_to_the_launch(monkeypatch, tmp_path, capsys):
@@ -951,6 +951,26 @@ def test_the_channel_warning_is_answered_in_the_agents_pane(monkeypatch, seen, s
     monkeypatch.setattr(init_agent.herdr_host, "answer", lambda *args: calls.append(args) or seen)
     assert init_agent._answer_channel_warning("w1:p2", {"K": "v"}) == said
     assert calls == [("w1:p2", channel.WARNING, {"K": "v"}, init_agent.CHANNEL_WARNING_MS)]
+
+
+@pytest.mark.parametrize(
+    ("agent", "detected", "typed", "named"),
+    [
+        ("codex", True, True, ["agent_name=engineer-abc-0001", "session_name=engineer@abc-0001"]),
+        ("codex", True, False, ["agent_name=engineer-abc-0001", "session_name=unset"]),
+        ("codex", False, True, ["agent_name=unset"]),
+        ("claude", True, True, ["agent_name=engineer-abc-0001"]),
+    ],
+)
+def test_herdr_names_the_agent_and_a_codex_session_by_its_raw_name(monkeypatch, agent, detected, typed, named):
+    calls = []
+    monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: calls.append(("agent", *args)) or detected)
+    monkeypatch.setattr(init_agent.herdr_host, "name_session", lambda *args: calls.append(("session", *args)) or typed)
+    assert init_agent._name_in_herdr("w1:p2", "engineer@abc-0001", agent, {"K": "v"}) == named
+    expected = [("agent", "w1:p2", "engineer@abc-0001", {"K": "v"})]
+    if agent == "codex" and detected:
+        expected.append(("session", "w1:p2", "engineer@abc-0001", {"K": "v"}))
+    assert calls == expected
 
 
 def test_a_channel_dry_run_writes_the_negotiation_pin_into_its_launcher(monkeypatch, tmp_path, capsys):

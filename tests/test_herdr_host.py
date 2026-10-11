@@ -1,5 +1,6 @@
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -115,8 +116,8 @@ def test_host_selection(monkeypatch, tmp_path, flag, env, binary, state, expecte
     assert init_agent._select_host(flag, {"AGENTIHOOKS_HOME": str(tmp_path), **env}) == expected
 
 
-def _main(monkeypatch, tmp_path, *extra):
-    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
+def _main(monkeypatch, tmp_path, *extra, agent="claude"):
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: (agent, "rotation"))
     monkeypatch.setattr(herdr_host, "binary", lambda: "/bin/herdr")
     monkeypatch.setattr(herdr_host, "ensure_server", lambda environ: False)
     monkeypatch.setattr(init_agent.shutil, "which", lambda name: None)
@@ -212,6 +213,39 @@ def test_the_agent_is_named_in_herdr_once_it_reports_its_route(monkeypatch, tmp_
     assert "account=ncgma" in out and "agent_name=eng-a" in out
 
 
+@pytest.mark.parametrize(
+    ("agent", "detected", "typed", "reported"),
+    [
+        ("codex", True, True, "session_name=eng-a"),
+        ("codex", True, False, "session_name=unset"),
+        ("codex", False, True, None),
+        ("claude", True, True, None),
+    ],
+)
+def test_a_codex_launch_names_its_session_after_herdr_detects_it(
+    monkeypatch, tmp_path, capsys, agent, detected, typed, reported
+):
+    named = []
+    monkeypatch.setattr(herdr_host, "open_pane", lambda *a: herdr_host.Placement("w1", "w1:t3", "w1:p7"))
+
+    def run(pane, launcher, environ):
+        launcher.with_suffix(".started").touch()
+        launcher.with_suffix(".route").write_text("status=routed\naccount=alpha\n")
+
+    monkeypatch.setattr(herdr_host, "run", run)
+    monkeypatch.setattr(herdr_host, "rename_agent", lambda pane, name, environ: detected)
+    monkeypatch.setattr(
+        herdr_host, "name_session", lambda pane, name, environ: named.append((pane, name, environ["HOME"])) or typed
+    )
+
+    rc, _ = _main(monkeypatch, tmp_path, agent=agent)
+
+    lines = capsys.readouterr().out.splitlines()
+    assert rc == 0
+    assert [line for line in lines if line.startswith("session_name=")] == ([reported] if reported else [])
+    assert named == ([("w1:p7", "eng-a", str(tmp_path))] if reported else [])
+
+
 def test_a_channel_launch_reports_the_warning_answered_in_its_pane(monkeypatch, tmp_path, capsys):
     answered = []
     monkeypatch.setattr(herdr_host, "open_pane", lambda *a: herdr_host.Placement("w1", "w1:t3", "w1:p7"))
@@ -273,3 +307,19 @@ def test_answer_presses_nothing_when_the_text_never_shows(monkeypatch):
     monkeypatch.setattr(herdr_host, "_cli", cli)
     assert not herdr_host.answer("w1:p2", "local development", {}, 5000)
     assert [c[1] for c in calls] == ["wait-output"]
+
+
+def test_name_session_types_the_codex_rename_command_into_the_pane(monkeypatch):
+    calls = []
+    monkeypatch.setattr(herdr_host, "_cli", lambda args, environ: calls.append((args, environ)) or {})
+    assert herdr_host.name_session("w1:p2", "engineer@abc-0001", {"K": "v"}) is True
+    assert calls == [(["pane", "run", "w1:p2", "/rename engineer@abc-0001"], {"K": "v"})]
+
+
+@pytest.mark.parametrize("error", [herdr_host.HerdrError("no pane"), subprocess.TimeoutExpired("herdr", 5)])
+def test_name_session_reports_a_pane_it_could_not_type_into(monkeypatch, error):
+    def cli(args, environ):
+        raise error
+
+    monkeypatch.setattr(herdr_host, "_cli", cli)
+    assert herdr_host.name_session("w1:p2", "engineer@abc-0001", {}) is False
