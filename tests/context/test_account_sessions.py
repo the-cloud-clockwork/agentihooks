@@ -195,3 +195,9 @@ def test_a_codex_child_of_a_codex_process_is_part_of_its_session_and_a_shell_run
     _proc(root, 711, "codex", 710, ["codex", "--no-daemon", "exec", "ok"], {"AH_CX_TOKEN_beta": "b"})
     assert acc.codex_sessions_by_account(root) == {"alpha": 2, "beta": 1}
     assert acc.live_codex_sessions(root) == 3
+
+
+def test_an_exec_run_whose_prompt_names_a_server_still_counts(tmp_path):
+    root = tmp_path / "proc"
+    _proc(root, 720, "codex", 1, ["codex", "exec", "mcp-server"], {"AH_CX_TOKEN_alpha": "a"})
+    assert acc.codex_sessions_by_account(root) == {"alpha": 1}
