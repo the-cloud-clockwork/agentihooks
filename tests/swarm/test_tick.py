@@ -24,12 +24,13 @@ class FakeLedger:
         return []
 
     def state(self, slug):
-        log = getattr(self, "log", [])
+        log, tasks = getattr(self, "log", []), self.tasks(slug)
+        stamps = {f"tasks/{t['id']}/rank": {"by": "operator"} for t in tasks if "rank" in t}
         return {
             "overview": "Project intent",
-            "tasks": self.tasks(slug),
+            "tasks": tasks,
             "phases": getattr(self, "phases", []),
-            "_meta": {"rev": len(log), "events": log},
+            "_meta": {"rev": len(log), "events": log, "stamps": stamps},
             "followups": [],
         }
 
