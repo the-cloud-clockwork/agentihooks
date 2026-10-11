@@ -70,6 +70,19 @@ app.kubernetes.io/component: {{ .component }}
 {{- end }}
 {{- end -}}
 
+{{- define "swarm.controllerSecretEnv" -}}
+{{- range .Values.controller.secretEnv }}
+- name: {{ .name }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ .secretName }}
+      key: {{ .key }}
+      {{- if .optional }}
+      optional: true
+      {{- end }}
+{{- end }}
+{{- end -}}
+
 {{- define "swarm.extraEnv" -}}
 {{- range $name, $value := . }}
 - name: {{ $name }}

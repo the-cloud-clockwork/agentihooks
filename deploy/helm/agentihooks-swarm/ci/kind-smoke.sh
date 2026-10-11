@@ -25,6 +25,21 @@ finish() {
 
 helm lint --strict "$chart"
 helm lint --strict "$chart" -f "$chart/ci/kind-values.yaml"
+secrets=(-f "$chart/ci/kind-values.yaml")
+helm template "$release" "$chart" "${secrets[@]}" | python3 tests/chart_secrets.py "$chart/ci/kind-values.yaml"
+planted="$(helm template "$release" "$chart" "${secrets[@]}" --set 'secretEnv[0].name=AGENTIHOOKS_WORKER_TERMINAL' \
+  --set 'secretEnv[0].secretName=swarm-worker-terminal' --set 'secretEnv[0].key=setting' \
+  | python3 tests/chart_secrets.py "$chart/ci/kind-values.yaml" 2>&1 >/dev/null || true)"
+if [[ $planted != *"StatefulSet $release-ledger container ledger references the controller only Secret swarm-worker-terminal"* ]]; then
+  printf 'the chart check did not flag a planted shared reference to the controller only Secret: %s\n' "$planted" >&2
+  exit 1
+fi
+planted="$(helm template "$release" "$chart" "${secrets[@]}" --set 'controller.secretEnv[0].optional=false' \
+  | python3 tests/chart_secrets.py "$chart/ci/kind-values.yaml" 2>&1 >/dev/null || true)"
+if [[ $planted != *"the controller container references swarm-worker-terminal as"* ]]; then
+  printf 'the chart check did not flag a required reference where the values say optional: %s\n' "$planted" >&2
+  exit 1
+fi
 digest="sha256:$(printf 'a%.0s' $(seq 64))"
 rendered="$(helm template "$release" "$chart" --set image.tag="dev@$digest")"
 if [[ $rendered != *":dev@$digest"* ]]; then
