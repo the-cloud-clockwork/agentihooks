@@ -176,6 +176,25 @@ def test_a_stale_codex_reading_gets_no_seat(monkeypatch):
     assert seen == [capacity.Account("codex", "a", "UNKNOWN", 0, None, 90, None)]
 
 
+def test_codex_token_accounts_from_the_rc_block_get_seats_and_default_none(monkeypatch, tmp_path):
+    from scripts import aicode_tokens, operator_env
+    from scripts.codex_quota import CodexQuota
+
+    monkeypatch.delenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", raising=False)
+    aicode_tokens.rc_file().write_text(
+        f"{aicode_tokens.START}\nexport AH_CX_TOKEN_alpha=cx1\nexport AH_CC_TOKEN_mail=cc1\n{aicode_tokens.END}\n"
+    )
+    environ = {"HOME": str(tmp_path), "AH_CC_TOKEN_ncgma": "cc1"}
+    operator_env.fill(environ)
+    weekly = CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=10, resets_at=10**10))
+    monkeypatch.setattr(capacity.codex_router, "quotas", lambda accounts, env: {a.name: weekly for a in accounts})
+    monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: None)
+    assert capacity._codex(environ, 100 + 3600, True) == [
+        capacity.Account("codex", "alpha", "OPEN", 0, None, 90, 6, 10**10)
+    ]
+    assert [credential.account for credential in balancer.discover_credentials(environ)] == ["ncgma"]
+
+
 def test_quota_capacity_with_all_zero_demand_never_refreshes_codex(tmp_path, monkeypatch):
     from scripts.swarm import runtime as module
 

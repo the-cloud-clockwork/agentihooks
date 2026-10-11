@@ -135,6 +135,36 @@ def test_the_cap_comes_from_the_week_alone_and_a_passed_reset_reads_full():
     assert router.account_cap(None, NOW) is None
 
 
+def _aged(seconds, resets_at=NOW + 86_400):
+    return CodexQuota(NOW - seconds, "team", seven_day=QuotaWindow(used=10.0, resets_at=resets_at))
+
+
+def test_a_reading_keeps_its_cap_inside_its_week_until_the_max_age(monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", raising=False)
+    assert router.account_cap(_aged(3600), NOW) == 6
+    assert router.account_cap(_aged(6 * 3600), NOW) == 6
+    assert router.account_cap(_aged(6 * 3600 + 1), NOW) is None
+    assert router.account_cap(_aged(3600, resets_at=NOW), NOW) is None
+    assert router.account_cap(_aged(3600, resets_at=None), NOW) is None
+    assert router.account_cap(_aged(600, resets_at=None), NOW) == 6
+    monkeypatch.setenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", "0.5")
+    assert router.account_cap(_aged(3600), NOW) is None
+    assert router.account_cap(_aged(1800), NOW) == 6
+    monkeypatch.setenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", "soon")
+    assert router.account_cap(_aged(6 * 3600), NOW) == 6
+    assert router.account_cap(_aged(6 * 3600 + 1), NOW) is None
+
+
+def test_a_usable_hour_old_reading_is_still_probed_once_per_freshness_window(monkeypatch):
+    probed = []
+    monkeypatch.setattr(router, "quotas", lambda pool, environ: {"default": _aged(3600)})
+    monkeypatch.setattr(router, "probe", lambda account, environ, run: probed.append(account.name))
+    pool = [router.CodexAccount("default")]
+    router.fresh_quotas(pool, ENV, NOW)
+    router.fresh_quotas(pool, ENV, NOW + 900)
+    assert probed == ["default"]
+
+
 def test_a_forced_route_ignores_quota_and_cap():
     quotas = {"default": _quota(1.0), "alpha": _quota(99.0), "beta": _quota(1.0)}
     assert router.select(_accounts(), quotas, {"alpha": 9}, NOW, route="alpha") == (_accounts()[1], "forced", None)
