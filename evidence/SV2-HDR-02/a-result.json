@@ -1,0 +1,119 @@
+{
+  "case": "T-SV2-HDR-02-A",
+  "evidence_class": "mocked: a recording runner stands in for ssh and herdr; it admits a connection only when the client's pinned known_hosts key matches the key the fixture server serves and the client certificate, verified against the fixture user CA, names the server's execution principal; herdr status and schema replies are the SV2-HDR-01 captures of the pinned 0.9.1 binary. No sshd, herdr process or cluster runs in these cases.",
+  "input_sha256": {
+    "herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940",
+    "herdr-terminal-objects.json": "14bedb92d7b8d06eec222780bd5ae9ae5e3f29b6c4e1286218801ca631b1f83f",
+    "herdr-terminal.json": "096cb6a1bc81149885ad765e80d3d42536bcd01982f41b2c21eea22b2fd4ecfe"
+  },
+  "observed": {
+    "first": {
+      "certificate": {
+        "key_id": "grant/lgr-cccccccccccccccccccccccccccccccc",
+        "principals": [
+          "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      },
+      "client_files": [
+        ".ssh",
+        ".ssh/config",
+        ".ssh/swarm-terminals",
+        ".ssh/swarm-terminals/bin",
+        ".ssh/swarm-terminals/bin/ssh",
+        ".ssh/swarm-terminals/certificates",
+        ".ssh/swarm-terminals/certificates/swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal-cert.pub",
+        ".ssh/swarm-terminals/endpoints",
+        ".ssh/swarm-terminals/endpoints/swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.conf",
+        ".ssh/swarm-terminals/generations",
+        ".ssh/swarm-terminals/generations/swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+        ".ssh/swarm-terminals/id_ed25519",
+        ".ssh/swarm-terminals/known_hosts",
+        ".ssh/swarm-terminals/known_hosts/swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal"
+      ],
+      "commands": [
+        [
+          "/usr/bin/ssh",
+          "-F",
+          "<home>/.ssh/config",
+          "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local",
+          "true"
+        ],
+        [
+          "herdr",
+          "machine",
+          "list",
+          "--json"
+        ],
+        [
+          "herdr",
+          "machine",
+          "add",
+          "--label",
+          "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "ssh://swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local"
+        ],
+        [
+          "herdr",
+          "--machine",
+          "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "status",
+          "server",
+          "--json"
+        ],
+        [
+          "herdr",
+          "status",
+          "client",
+          "--json"
+        ],
+        [
+          "herdr",
+          "api",
+          "schema",
+          "--json"
+        ]
+      ],
+      "machines": [
+        {
+          "label": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "target": "ssh://swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local"
+        }
+      ],
+      "other_endpoint_admits_this_certificate": false,
+      "rendered": {
+        "exposure_findings": [
+          [],
+          [],
+          []
+        ],
+        "kinds": [
+          "Secret",
+          "Service",
+          "NetworkPolicy"
+        ],
+        "matches_golden": true,
+        "names": [
+          "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal"
+        ],
+        "policy_client_namespaces": [
+          "swarm-control"
+        ],
+        "secret_principals": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "service_selector": {
+          "swarm.agentihooks.io/controller-owner": "agentihooks-swarm-fixture-swarm",
+          "swarm.agentihooks.io/execution-id": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "swarm.agentihooks.io/generation": "2"
+        },
+        "service_type": "ClusterIP"
+      },
+      "terminal_endpoint_auth_failures": {},
+      "verdict": {
+        "compatible": true,
+        "incarnation": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/2",
+        "target": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal"
+      }
+    },
+    "second_identical": true
+  },
+  "state": "passed"
+}

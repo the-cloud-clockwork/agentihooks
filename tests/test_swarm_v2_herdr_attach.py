@@ -200,10 +200,12 @@ def test_written_client_files_are_private_from_creation_and_replace_atomically(t
 
 
 def test_a_stale_staged_file_is_replaced(tmp_path):
-    target = tmp_path / "file"
-    (tmp_path / ".file.tmp").write_text("stale")
+    folder = tmp_path / "staged"
+    folder.mkdir()
+    target = folder / "file"
+    (folder / ".file.tmp").write_text("stale")
     attach._write(target, "fresh")
-    assert (target.read_text(), sorted(path.name for path in tmp_path.iterdir())) == ("fresh", ["file"])
+    assert (target.read_text(), sorted(path.name for path in folder.iterdir())) == ("fresh", ["file"])
 
 
 def test_register_writes_the_pinned_client_configuration(tmp_path):
