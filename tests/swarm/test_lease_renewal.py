@@ -316,6 +316,9 @@ class Stop:
     def wait(self, seconds):
         self.waits.append(seconds)
         self.clock[0] += self.step
+        return self.is_set()
+
+    def is_set(self):
         return len(self.waits) > self.stops_after
 
 

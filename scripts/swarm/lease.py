@@ -110,7 +110,9 @@ def renew(store: RedisStore, slug: str, held: Lease) -> Lease:
 def beat(store: RedisStore, slug: str, held: Lease, stop: threading.Event) -> None:
     from redis.exceptions import RedisError
 
-    while not stop.wait(beat_s()):
+    while not stop.is_set():
+        if stop.wait(beat_s()):
+            return
         try:
             renew(store, slug, held)
         except SwarmError:
