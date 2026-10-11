@@ -221,13 +221,29 @@ def test_the_command_opens_the_terminal_in_the_operator_home(operator_shell, mon
     assert (home.terminals / "known_hosts" / NAME).read_text().split()[1:] == identity.public.split()
 
 
-def test_the_command_refuses_an_unknown_execution(operator_shell, monkeypatch, capsys):
-    monkeypatch.setattr(operator_terminal, "runner", lambda environment: pytest.fail("no command may run"))
+def test_the_command_refuses_an_unknown_execution(operator_shell, monkeypatch, tmp_path, capsys):
+    _, run = client(tmp_path, HostIdentity.generate().public)
+    monkeypatch.setattr(operator_terminal, "runner", lambda environment: run)
 
     assert cli.main([SWARM, "terminal", EXE_A]) == 1
 
     assert capsys.readouterr().err == (
         f"swarm: the worker terminal was refused: host_key_unrecorded: no host key was recorded at launch for {EXE_A}\n"
+    )
+    assert run.commands == []
+
+
+def test_an_encrypted_user_ca_key_is_refused(monkeypatch, tmp_path):
+    home, run = client(tmp_path, "")
+
+    def encrypted(data, password):
+        assert (data, password) == ((tmp_path / "user-ca").read_bytes(), None)
+        raise TypeError("Password was not given but private key is encrypted.")
+
+    monkeypatch.setattr(operator_terminal.serialization, "load_ssh_private_key", encrypted)
+
+    assert swarm_error(lambda: operator_terminal.terminal(SWARM, environ(tmp_path), home, run, lookup)) == (
+        "the terminal user CA key is encrypted, and the command reads only an unencrypted key"
     )
 
 

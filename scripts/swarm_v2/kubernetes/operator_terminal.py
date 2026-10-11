@@ -35,6 +35,10 @@ def authority(environ: Mapping[str, str]) -> TerminalAuthority:
         key = serialization.load_ssh_private_key(Path(_setting(environ, CA_KEY_ENV)).read_bytes(), None)
     except OSError as error:
         raise SwarmError(f"the terminal user CA key is unreadable: {error.strerror}") from None
+    except TypeError:
+        raise SwarmError(
+            "the terminal user CA key is encrypted, and the command reads only an unencrypted key"
+        ) from None
     except (ValueError, UnsupportedAlgorithm):
         raise SwarmError("the terminal user CA key is not an OpenSSH private key") from None
     if not isinstance(key, Ed25519PrivateKey):
