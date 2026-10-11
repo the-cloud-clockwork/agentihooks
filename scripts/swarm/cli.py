@@ -1377,7 +1377,12 @@ def cmd_confirm_handoff(store, args):
 
 def cmd_restore_decision(store, args):
     from scripts.swarm import resume
+    from scripts.swarm_v2 import restore_decisions
 
+    target = next((a for a in store.agents(args.slug) if a.name == store.names.resolve(args.agent)), None)
+    if target is not None and target.runtime_backend == "kubernetes":
+        print(json.dumps(restore_decisions.decide(store, args.slug, target, args.choice, Who.from_env())))
+        return
     name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
     if name not in {"", "operator"} and _me(store, args).lane != MASTER:
         raise SwarmError("Only the master or operator can choose resume or fresh")
