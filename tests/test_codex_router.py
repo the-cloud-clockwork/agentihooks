@@ -362,6 +362,21 @@ def test_a_routed_launch_reports_the_account_and_never_prints_a_token(monkeypatc
     assert "cx-value" not in out.out + out.err
 
 
+def test_a_session_name_reaches_codex_as_its_thread_id(monkeypatch, tmp_path):
+    asked = []
+
+    def resolve(args, environ):
+        asked.append((list(args), environ.get("CODEX_HOME"), sorted(k for k in environ if "TOKEN" in k)))
+        return ["archive", "01a12c55-38bc-70c1-be9b-6c5d7fbcdc22"]
+
+    monkeypatch.setattr(router.codex_sessions, "resolve", resolve)
+    environ = {**ENV, "CODEX_HOME": "/profile/codex"}
+    rc, seen, _ = _launch(monkeypatch, tmp_path, environ, ["archive", "engineer@abc-0001"], {"alpha": _quota(10.0)})
+    assert rc == 0
+    assert seen["cmd"][-2:] == ["archive", "01a12c55-38bc-70c1-be9b-6c5d7fbcdc22"]
+    assert asked == [(["archive", "engineer@abc-0001"], "/profile/codex", [])]
+
+
 def test_route_forces_an_account(monkeypatch, tmp_path):
     rc, seen, report = _launch(monkeypatch, tmp_path, ENV, ["--route", "beta", "-m", "o3"])
     assert rc == 0 and seen["env"]["CODEX_ACCESS_TOKEN"] == "cx-value-b"
