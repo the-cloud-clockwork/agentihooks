@@ -227,7 +227,7 @@ def test_the_probe_runs_one_tiny_exec_on_the_account_and_reads_its_rollout(monke
     assert router.probe(_accounts()[1], ENV, run) == "t-1"
     assert seen["argv"] == ["/usr/bin/codex", "--no-daemon", *router.PROBE_ARGS]
     assert seen["kwargs"] == {
-        "env": router.child_environment(_accounts()[1], ENV),
+        "env": {**router.child_environment(_accounts()[1], ENV), router.INTERNAL_RUN: "1"},
         "capture_output": True,
         "text": True,
         "stdin": subprocess.DEVNULL,

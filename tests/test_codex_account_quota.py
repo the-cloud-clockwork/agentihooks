@@ -375,3 +375,28 @@ def test_two_concurrent_exec_launches_land_on_two_accounts_and_an_ended_run_free
     shutil.rmtree(root / "600")
     assert account_sessions.codex_sessions_by_account(root) == {second: 1}
     assert launch(602) == first
+
+
+def test_a_quota_probe_and_a_classifier_call_hold_no_account_slot(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from hooks.classifier import fallbacks
+    from hooks.classifier.errors import BackendFailure
+
+    launched = []
+
+    def run(argv, **kwargs):
+        launched.append((argv, kwargs["env"]))
+        return subprocess.CompletedProcess(argv, 1, "", "")
+
+    env = {"HOME": str(tmp_path), "AH_CX_TOKEN_alpha": _jwt("acct-a")}
+    assert codex_router.probe(CodexAccount("alpha", "AH_CX_TOKEN_alpha"), env, run) is None
+    monkeypatch.setattr(fallbacks.subprocess, "run", run)
+    with pytest.raises(BackendFailure):
+        fallbacks._run(["codex", "--no-daemon", "exec", "ok"], SimpleNamespace(wire=dict), tmp_path)
+    root = tmp_path / "proc"
+    for pid, (argv, child) in enumerate(launched, start=800):
+        _proc(root, pid, "codex", 1, argv, child)
+    _proc(root, 810, "codex", 1, ["codex", "--no-daemon", "exec", "ok"], {"AH_CX_TOKEN_alpha": "a"})
+    assert len(launched) == 2
+    assert account_sessions.codex_sessions_by_account(root) == {"alpha": 1}
