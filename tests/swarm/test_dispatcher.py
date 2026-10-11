@@ -615,14 +615,12 @@ def test_a_critical_chain_successor_takes_the_next_seat_ahead_of_operator_urgent
     assert spawned(store, config, ledger, found) == [("eng", "x")]
 
 
+def chain_of(*ids):
+    return [task(task_id, phase="", depends_on=list(ids[index - 1 : index])) for index, task_id in enumerate(ids)]
+
+
 def test_only_a_merged_predecessors_successor_on_the_critical_chain_is_guarded():
-    tasks = [
-        task("a", phase="", state="done"),
-        task("b", phase="", depends_on=["a"]),
-        task("p", phase=""),
-        task("q", phase="", depends_on=["p"]),
-        task("s", phase="", depends_on=["q"]),
-    ]
+    tasks = [task("a", phase="", state="done"), task("b", phase="", depends_on=["a"]), *chain_of("p", "q", "s")]
     assert dispatcher.guarded(doc(tasks, phases=[])) == set()
     tasks.append(task("c", phase="", depends_on=["b"]))
     assert dispatcher.guarded(doc(tasks, phases=[])) == {"b"}
@@ -663,7 +661,11 @@ def test_an_unguarded_claim_below_delegate_or_without_a_merge_time_reports_nothi
     assert dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["b"], "eng", NOW) == []
     config = store.update(SLUG, autonomy="delegate")
     assert dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["y"], "eng", NOW) == []
-    del found["_meta"]["stamps"]["tasks/a/state"]
+    off = [task("a", phase="", state="done"), task("b", phase="", depends_on=["a"]), *chain_of("p", "q", "s")]
+    stamps = {"tasks/a/state": {"by": "engineer@abcdef-0001", "at": NOW - 30_000}}
+    off_chain = doc(off, phases=[], _meta={"stamps": stamps})
+    assert dispatcher.chain_claimed(SLUG, config, ledger, off_chain, off[1], "eng", NOW) == []
+    del found["_meta"]["stamps"]["tasks/a/state"], found["_meta"]["stamps"]["tasks/a2/state"]
     assert dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["b"], "eng", NOW) == []
     assert (ledger.comments, shipped, gate_log.recent(SLUG, None, home)) == ([], [], [])
 
