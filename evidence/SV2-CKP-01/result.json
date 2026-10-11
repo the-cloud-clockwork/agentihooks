@@ -59,6 +59,7 @@
     "proof": "Case C rolls back after a native checkpoint is committed: a new context commit returns promotion_disabled with the durable keys unchanged, and the committed native checkpoint still verifies as authoritative."
   },
   "remaining_limitations": [
+    "No production caller invokes Validator yet: the plan gives the worker capture path to SV2-CKP-02 and SV2-CKP-03 and the recovery and latest pointer path to SV2-CKP-04, which call Validator.commit and Validator.verify; this package ships the contract and its verifier only.",
     "Source capture, native session capture and the latest pointer belong to SV2-CKP-02 to SV2-CKP-04; this package defines and verifies the manifest only.",
     "Checkpoint sequence is recorded and immutable per checkpoint id but not ordered here; SV2-CKP-04 orders it when it promotes the latest pointer.",
     "Materials are verified by content hash and size, not by a semantic check of their contents.",
