@@ -1037,9 +1037,10 @@ def _replacement(world, seat=FIRST):
 def test_a_relaunch_places_the_admitted_replacement_on_its_own_account_without_a_second_admission(world):
     admitted, request = _replacement(world)
 
-    outcome = world.launcher.relaunch(request, admitted, replace(world.terms, account="elsewhere"))
+    launch = world.launcher.relaunch(request, admitted, replace(world.terms, account="elsewhere"))
 
-    assert outcome == Outcome("spawn", Status.OK, BACKEND, f"placed-{admitted.name}")
+    assert launch.outcome == Outcome("spawn", Status.OK, BACKEND, f"placed-{admitted.name}")
+    assert launch.agent == admitted
     assert [agent.execution_id for agent in world.store.executions(SLUG, FIRST)] == [admitted.execution_id]
     [sent] = world.runtime.requests
     assert sent.task["checkpoint"] == "ckpt-one-2"
@@ -1053,9 +1054,10 @@ def test_a_relaunch_on_a_full_account_keeps_its_replacement_for_the_next_pass(wo
     held = world.launch(SECOND)
     admitted, request = _replacement(world)
 
-    outcome = world.launcher.relaunch(request, admitted, world.terms)
+    launch = world.launcher.relaunch(request, admitted, world.terms)
 
-    assert outcome == Outcome("spawn", Status.UNAVAILABLE, BACKEND, detail="account_full")
+    assert launch.outcome == Outcome("spawn", Status.UNAVAILABLE, BACKEND, detail="account_full")
+    assert launch.agent == admitted
     assert world.endings() == {}
     assert world.store.execution(SLUG, admitted.execution_id) == admitted
     assert [request.name for request in world.runtime.requests] == [held.agent.name]

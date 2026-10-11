@@ -2,12 +2,15 @@
 attempt's task waits on recovery on the ledger."""
 
 from collections.abc import Callable
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_v2.kubernetes.failures import FENCES, PENDING, Decision, Recovery
-from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
+from scripts.swarm_v2.runtime.base import SpawnRequest, Status
+
+if TYPE_CHECKING:
+    from scripts.swarm_v2.launch import Launch
 
 LAUNCHED = "attempt-replacement-launches"
 MARKED = "recovery-pending-tasks"
@@ -20,7 +23,7 @@ class TaskLedger(Protocol):
     def update_task(self, slug: str, task_id: str, fields: dict) -> dict: ...
 
 
-Relaunch = Callable[[SpawnRequest, AgentRecord], Outcome]
+Relaunch = Callable[[SpawnRequest, AgentRecord], "Launch"]
 
 
 class Replacements:
@@ -59,7 +62,7 @@ class Replacements:
             "checkpoint": decision.checkpoint,
         }
         request = SpawnRequest(self.store.config(self.slug), successor.lane, successor.name, task)
-        outcome = self.relaunch(request, successor)
+        outcome = self.relaunch(request, successor).outcome
         if outcome.status in STARTED:
             self._launched(decision)
         return outcome.status.value

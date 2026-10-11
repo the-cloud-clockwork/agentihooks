@@ -820,7 +820,7 @@ class _Relaunch:
     def __call__(self, request, agent):
         self.calls.append((request, agent))
         status = self.statuses.pop(0) if self.statuses else Status.OK
-        return Outcome("spawn", status, "kubernetes")
+        return SimpleNamespace(outcome=Outcome("spawn", status, "kubernetes"))
 
 
 def _hash(world, name):
