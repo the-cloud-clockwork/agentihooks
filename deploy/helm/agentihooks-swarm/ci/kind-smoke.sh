@@ -371,13 +371,13 @@ seed = (
 )
 
 
-def launch(profile):
+def launch(profile, seat):
     target = {"pod_namespace": "default", "pod_name": f"swarm-kind-{profile}"}
     record = AgentRecord(
         store.next_name(slug, "eng"),
         "eng",
         f"kind-{profile}",
-        seat=f"eng-2@{slug}",
+        seat=f"{seat}@{slug}",
         runtime_backend=BACKEND,
         runtime_target=target,
         profile=profile,
@@ -444,7 +444,7 @@ def launch(profile):
     return {"pod": name, "profile": profile, "handed": hand.handed, "reason": hand.reason}
 
 
-launched = [launch(profile) for profile in ("engineer", "frontend")]
+launched = [launch("engineer", "eng-2"), launch("frontend", "eng-3")]
 scratch.cleanup()
 for launched_pod in launched:
     print(json.dumps(launched_pod, sort_keys=True))
