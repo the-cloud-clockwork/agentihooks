@@ -70,6 +70,7 @@ OWN = {"followups/f1/done": {"rev": 5, "by": "master@abcdef-0001"}}
         ({**OWN, "followups/f1/needs_operator": {"rev": 9, "by": "master@abcdef-0002"}}, True),
         ({**OWN, "followups/f1/comments": {"rev": 9, "by": "engineer@abcdef-0005"}}, True),
         ({**OWN, "followups/f1/text": {"rev": 4, "by": "operator"}}, True),
+        ({**OWN, "followups/f1/text": {"rev": 5, "by": "operator"}}, True),
         ({**OWN, "followups/f12/done": {"rev": 9, "by": "operator"}}, True),
         ({**OWN, "followups/f1/needs_operator": {"rev": 6, "by": "operator"}}, False),
         ({**OWN, "followups/f1/text": {"rev": 6, "by": "engineer@abcdef-0005"}}, False),
@@ -217,6 +218,34 @@ def test_a_decider_whose_seat_is_gone_no_longer_fences_the_item(world):
 
     assert world.decide(LEAD_NAME, value=False) == {"accepted": True, "warnings": []}
     assert world.decisions()[FOLLOWUP]["seat"] == LEAD
+
+
+def test_a_decider_record_outlives_its_master_while_its_seat_remains(world):
+    world.down(LEAD_NAME)
+    world.decide(SECOND_NAME)
+    rev = world.decisions()[FOLLOWUP]["rev"]
+    world.down(SECOND_NAME)
+    world.seat(cases.SUCCESSOR, LEAD)
+
+    assert world.decide(cases.SUCCESSOR, value=False)["warnings"] == [
+        f"{FOLLOWUP} was decided by {SECOND} at revision {rev}, so {LEAD} cannot decide it"
+    ]
+
+
+def test_repeating_a_decision_posts_it_once(world):
+    world.decide(LEAD_NAME)
+
+    assert world.decide(LEAD_NAME, n=1) == {"accepted": True, "warnings": []}
+    assert world.posts() == [f"{LEAD} set {FOLLOWUP}/done to true"]
+
+
+def test_a_posted_decision_carries_its_seat_author_and_write_time(world):
+    world.decide(LEAD_NAME)
+    at = world.doc()["_meta"]["stamps"][f"{FOLLOWUP}/done"]["at"]
+
+    assert MastersChannel(world.redis).read(SLUG, LEAD_NAME) == [
+        Post(1, LEAD, LEAD_NAME, f"{LEAD} set {FOLLOWUP}/done to true", at / 1000)
+    ]
 
 
 def test_a_single_master_swarm_decides_as_before_and_posts_nothing(world):

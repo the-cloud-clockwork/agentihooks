@@ -19,7 +19,7 @@ SWITCH = "AGENTIHOOKS_MASTER_FENCE"
 OFF = "off"
 DECISIONS = "master_decisions"
 REFUSALS = "write_refusals"
-DECIDED = ("questions", "followups")
+DECIDED = ("questions/", "followups/")
 VERBS = {"answer": "answer", "set": "decide", "task_update": "set"}
 
 
@@ -27,9 +27,11 @@ def decision(op: dict) -> str:
     """The item a covered master write acts on, '' for every other op."""
     kind = op.get("op")
     if kind in ("answer", "task_update"):
-        return str(op.get("item", ""))
-    item = str(op.get("path", "")).rpartition("/")[0]
-    return item if kind == "set" and item.partition("/")[0] in DECIDED else ""
+        return op["item"]
+    if kind != "set":
+        return ""
+    item = op["path"].rpartition("/")[0]
+    return item if item.startswith(DECIDED) else ""
 
 
 def verb(op: dict) -> str:
@@ -66,7 +68,8 @@ def announcement(seat: str, op: dict) -> str:
 
 
 def measurements(redis, slug: str) -> dict:
-    return {"master_write_refusals_total": int(redis.hget(masters.MasterSeats(redis).key(slug), REFUSALS) or 0)}
+    table = masters.MasterSeats(redis)
+    return {"master_write_refusals_total": int(table.redis.hget(table.key(slug), REFUSALS) or 0)}
 
 
 def _connect():
@@ -126,7 +129,7 @@ class Fence:
         owner, rev = seats.owner(item, ctx.meta)
         if writer != owner:
             ctx.refused.append(refusal(item, owner, writer, verb(op), rev))
-            self._redis.hincrby(seats.table.key(self.slug), REFUSALS, 1)
+            self._redis.hincrby(seats.table.key(self.slug), REFUSALS)
             return False
         before = _fields(ctx.stamps, item)
         done = self._inner(doc, op, ctx, apply)
@@ -135,7 +138,7 @@ class Fence:
         return done
 
     def _decided(self, op, item, writer, by, count, ctx) -> None:
-        if item.partition("/")[0] in DECIDED:
+        if item.startswith(DECIDED):
             ctx.meta.setdefault(DECISIONS, {})[item] = {"seat": writer, "rev": ctx.rev}
         if count > 1:
             self.decided.append((op["id"], writer, by, announcement(writer, op), ctx.at / 1000))
