@@ -309,7 +309,9 @@ def test_a_name_already_in_the_environment_wins_over_the_block(tmp_path):
 def test_a_block_token_already_present_under_another_name_is_not_counted_twice(tmp_path):
     from scripts import claude_quota_balancer as balancer
 
-    _block("export AH_CC_TOKEN_nestor_coltatgmail_com=cc1", "export AH_CC_TOKEN_other=cc2")
+    _block(
+        "export AH_CC_TOKEN_nestor_coltatgmail_com=cc1", "export AH_CC_TOKEN_other=cc2", "export AH_CC_TOKEN_twin=cc2"
+    )
     environ = {"HOME": str(tmp_path), "AH_CC_TOKEN_ncgma": "cc1"}
     assert operator_env.fill(environ) == ["AH_CC_TOKEN_other"]
     assert [credential.account for credential in balancer.discover_credentials(environ)] == ["ncgma", "other"]

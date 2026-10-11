@@ -35,6 +35,9 @@ PROBE_ARGS = ["exec", "--json", "--skip-git-repo-check", "Reply with the single 
 PROBE_TIMEOUT_S = 90
 CODEX_BIN = "codex"
 ATTEMPTS_FILE = "codex-probe-attempts.json"
+READING_MAX_AGE_ENV = "AGENTIHOOKS_CODEX_READING_MAX_AGE_H"
+READING_MAX_AGE_H = 6.0
+HOUR_S = 3600
 # A running app-server daemon answers account/read with its own auth, so a token session must not attach to it.
 NO_DAEMON = "--no-daemon"
 ACCOUNT_ID_ENV = envs.CHATGPT_ACCOUNT_ID_ENV
@@ -196,9 +199,23 @@ def quotas(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, Co
     return {account.name: codex_quota.latest_codex_quota(dict(environ), keep(account)) for account in pool}
 
 
+def _reading_max_age(environ: Mapping[str, str]) -> float:
+    try:
+        return float(environ.get(READING_MAX_AGE_ENV) or READING_MAX_AGE_H) * HOUR_S
+    except ValueError:
+        return READING_MAX_AGE_H * HOUR_S
+
+
+def usable(quota: CodexQuota, now: float) -> bool:
+    if session_bands.fresh(quota.observed_at, now):
+        return True
+    resets = quota.seven_day.resets_at
+    return resets is not None and now < resets and now - quota.observed_at <= _reading_max_age(os.environ)
+
+
 def account_cap(quota: CodexQuota | None, now: float) -> int | None:
-    """Live sessions under the session bands: the week alone sets it; None without a fresh reading."""
-    if quota is None or not session_bands.fresh(quota.observed_at, now):
+    """Live sessions under the session bands: the week alone sets it; None without a usable reading."""
+    if quota is None or not usable(quota, now):
         return None
     if quota.reached:
         return 0

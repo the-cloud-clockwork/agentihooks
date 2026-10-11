@@ -5,10 +5,13 @@ import subprocess
 from collections.abc import Mapping, MutableMapping
 from pathlib import Path
 
+from scripts import aicode_tokens
+
 SHELL_NAMES = frozenset({"PWD", "OLDPWD", "SHLVL", "_"})
 SOURCE = 'set -a; for f in "$@"; do . "$f" 2>/dev/null; done; set +a'
 ACCOUNT_PREFIX = "AH_CC_TOKEN_"
 ACCOUNTS_MARK = "agentihooks-accounts"
+TOKEN_PREFIXES = (ACCOUNT_PREFIX, "AH_CX_TOKEN_")
 
 
 def files(environ: Mapping[str, str]) -> list[Path]:
@@ -34,10 +37,26 @@ def values(environ: Mapping[str, str]) -> dict[str, str]:
 
 
 def fill(environ: MutableMapping[str, str]) -> list[str]:
-    loaded = values(environ)
-    added = [key for key in loaded if key not in environ]
-    environ.update({key: loaded[key] for key in added})
+    loaded = {**values(environ), **block_tokens()}
+    seen = {value for key, value in environ.items() if key.startswith(TOKEN_PREFIXES)}
+    added = []
+    for key, value in loaded.items():
+        token = key.startswith(TOKEN_PREFIXES)
+        if key in environ or (token and value in seen):
+            continue
+        environ[key] = value
+        added.append(key)
+        if token:
+            seen.add(value)
     return added
+
+
+def block_tokens() -> dict[str, str]:
+    try:
+        text = aicode_tokens.rc_file().read_text()
+    except (OSError, UnicodeDecodeError):
+        return {}
+    return {name: value for name, value in aicode_tokens.exports(text).items() if name.startswith(TOKEN_PREFIXES)}
 
 
 def source_line(environ: Mapping[str, str]) -> str:

@@ -66,6 +66,22 @@ def has_block(text: str) -> bool:
     return bool(_blocks(text.splitlines()))
 
 
+def exports(text: str) -> dict[str, str]:
+    lines = text.splitlines(keepends=True)
+    found = {}
+    for start, end in _blocks(lines):
+        for line in lines[start + 1 : end]:
+            try:
+                words = shlex.split(line)
+            except ValueError:
+                continue
+            if len(words) == 2 and words[0] == "export":
+                name, assigned, value = words[1].partition("=")
+                if assigned:
+                    found[name] = value
+    return found
+
+
 def _exported(line: str) -> str | None:
     found = _EXPORT.match(line)
     return found and found.group(1)

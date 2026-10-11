@@ -88,7 +88,7 @@ def _codex_state(account: "codex_router.CodexAccount", quota: "CodexQuota | None
         return "SIGNED_OUT"
     if quota is None:
         return "UNKNOWN"
-    return quota.state_at(now) if session_bands.fresh(quota.observed_at, now) else STALE
+    return quota.state_at(now) if codex_router.usable(quota, now) else STALE
 
 
 def _codex_source(quota: "CodexQuota | None", now: float) -> str:
