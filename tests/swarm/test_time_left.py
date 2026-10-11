@@ -102,10 +102,10 @@ def test_the_tick_focus_rides_with_the_inputs_only_when_set(store):
 def test_only_as_many_watched_focus_names_as_the_op_schema_takes_are_sent(store):
     observe(store)
     ledger = Ledger()
-    time_left.refresh("sw", store, ledger, OBSERVED, "p9", [f"focus {n}" for n in range(250)])
+    time_left.refresh("sw", store, ledger, OBSERVED, "p9", ["x" * 2500] + [f"focus {n}" for n in range(250)])
     [(_, _, _, _, (_, watched))] = ledger.sent
-    assert watched == [f"focus {n}" for n in range(100)]
-    assert time_left.WATCHED_KEPT == 100
+    assert watched == ["x" * 2000] + [f"focus {n}" for n in range(99)]
+    assert (time_left.WATCHED_KEPT, time_left.WATCHED_LENGTH) == (100, 2000)
 
 
 def test_a_ledger_without_the_write_is_skipped(store):

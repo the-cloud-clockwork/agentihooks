@@ -3,6 +3,7 @@
 from scripts.swarm import capacity, ci_speed
 
 WATCHED_KEPT = 100
+WATCHED_LENGTH = 2000
 
 
 def slots(decision: dict) -> int | None:
@@ -23,7 +24,7 @@ def refresh(slug, store, ledger, runtime, fix_phase="", watched=None) -> list[st
     writer = getattr(ledger, "time_left", None)
     if writer is not None:
         inputs = inputs_of(store, slug, runtime)
-        kept = (watched or [])[:WATCHED_KEPT]
+        kept = [name[:WATCHED_LENGTH] for name in (watched or [])[:WATCHED_KEPT]]
         focus = {key: value for key, value in (("fix_phase", fix_phase), ("watched", kept)) if value}
         writer(slug, inputs["slots"], inputs["ci_minutes"], **focus)
     return []
