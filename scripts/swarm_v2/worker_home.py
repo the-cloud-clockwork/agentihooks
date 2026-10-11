@@ -251,7 +251,11 @@ def materialize(attempt: Path, target: str) -> None:
     _i = _install_module()
     request = json.loads(_text(attempt / PENDING))["request"]
     name = request["profiles"][target]
-    bundle, dirs = _bundle(), _chain(name)
+    bundle = _bundle()
+    try:
+        dirs = _chain(name)
+    except ValueError:
+        dirs = []
     names = [n for n, _ in dirs]
     if name not in names:
         raise BootstrapError(f"profile did not resolve in the execution scope: {name}")
