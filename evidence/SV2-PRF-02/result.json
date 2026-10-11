@@ -286,7 +286,7 @@
       "Ondemand new instances join in 36 to 37 s after EC2 launch, warm pool instances in 22 s, the swarm pool c7i-flex instances in 46 and 56 s.",
       "On the swarm pool the Pod waited a further 75 and 96 s after the node turned Ready: the scheduler reported the Pod's node affinity or selector unmatched on the new node for that time. A node label applied after join is the likely cause; it is a hypothesis, filed as a ledger follow up.",
       "Every ondemand cold start in read 1 hit one FailedCreatePodSandBox retry, and its Pod start ran 30 to 70 s beyond the pull.",
-      "A pull blocked by a 90 s registry outage spent up to 175 s in failed pulls before the pull that succeeded, up to 85 s past the registry's return, because kubelet pull back off keeps growing during the outage; that time now counts in the image phase."
+      "Behind a 90 s registry outage, the four interrupted pulls across both kind runs spent 89.9, 168.6, 169.8 and 173.4 s in failed pulls before the pull that succeeded, against 10.1 to 12.6 s for the successful pull itself; that time counts in the image phase. Hypothesis, not shown: kubelet image pull back off, which grows during the outage, delays the retry past the registry's return."
     ]
   },
   "limitations": [
@@ -297,7 +297,8 @@
     "The kind registry runs on the same runner, so its pull times reflect image size and unpack, not registry distance.",
     "With two cold samples in read 2 the p95 equals the maximum.",
     "The kind fixture has no cold node: a kind cluster cannot add a node, so cold node stages come only from the Anton reads, which held no registry interruption.",
-    "The native harness handshake (SV2-PRF-02 step 3) is not measured, so the package is not complete."
+    "The native harness handshake (SV2-PRF-02 step 3) is not measured, so the package is not complete.",
+    "The committed reads keep EC2 instance ids, node names and Pod names, which identify capacity and workloads but carry no credential; the outage start and stop times live only in each run's fixture.json artifact."
   ],
   "rollback": "Use the previous qualified image and reduce launch concurrency: this package changes no deployed image, concurrency or autoscaler setting, so its rollback is reverting the pull request, which removes the measurement workflow with it. The previous image rollback and a concurrency reduction were not rehearsed here because nothing deployed changed. The fixture did show both Pods recovering from the outage without a manual step, and the mocked recovery case shows the account slot released past the pull grace with nothing left reserved."
 }
