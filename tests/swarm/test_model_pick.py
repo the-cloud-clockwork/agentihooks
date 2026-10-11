@@ -184,16 +184,23 @@ def test_an_unsized_unranked_task_is_asked_as_medium_and_normal(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "effort,expected",
+    "option,expected",
     [
         (
-            "xhigh",
+            ("opus", "xhigh"),
             "Opus at extra high effort: an unknown cause across several components, or a redesign of a core concept",
         ),
+        (("opus", "high"), "Opus at high effort: several seams, or a cause to find inside one component"),
+        (("opus", "medium"), "Opus at medium effort: the task names what to change and how to check it"),
+        (
+            ("sonnet", "xhigh"),
+            "Sonnet at extra high effort: a small change the task fully specifies, with no design choice left",
+        ),
+        (("gpt-6.1-sol", "high"), "Sol at high effort: several seams, or a cause to find inside one component"),
     ],
 )
-def test_the_top_option_is_described_in_plain_words(effort, expected):
-    assert model_pick.described(ModelPick("opus", effort)) == expected
+def test_every_option_is_described_in_plain_words(option, expected):
+    assert model_pick.described(ModelPick(*option)) == expected
 
 
 def test_a_model_without_a_label_is_described_by_its_own_name():

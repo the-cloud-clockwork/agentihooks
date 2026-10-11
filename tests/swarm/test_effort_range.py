@@ -207,6 +207,14 @@ def test_a_codex_effort_clamps_inside_its_own_levels(effort, clamped):
     assert effort_range.clamp("codex", effort, ("low", "max")) == clamped
 
 
+@pytest.mark.parametrize(
+    "effort,clamped",
+    [("low", "medium"), ("medium", "medium"), ("high", "high"), ("xhigh", "xhigh"), ("max", "xhigh")],
+)
+def test_every_claude_level_clamps_into_the_default_range(effort, clamped):
+    assert effort_range.clamp("claude", effort, effort_range.DEFAULT) == clamped
+
+
 def test_a_preserved_effort_is_compared_by_its_name_on_the_launching_harness():
     from scripts.swarm import runtime
 

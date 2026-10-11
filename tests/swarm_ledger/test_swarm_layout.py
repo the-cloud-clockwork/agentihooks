@@ -278,6 +278,9 @@ def test_the_effort_range_shows_in_the_caps_row_and_apply_sends_it(open_page):
     assert (floor.input_value(), ceiling.input_value()) == ("medium", "high")
     assert floor.bounding_box()["y"] == page.tab.locator("#cap-eng").bounding_box()["y"]
     page.tab.get_by_role("button", name="Raise effort ceiling").click()
+    assert ceiling.input_value() == "xhigh"
+    assert not page.tab.get_by_role("button", name="Raise effort ceiling").is_disabled()
+    page.tab.get_by_role("button", name="Raise effort ceiling").click()
     assert page.tab.get_by_role("button", name="Raise effort ceiling").is_disabled()
     floor.fill("low")
     page.tab.get_by_role("button", name="Apply capacity").click()
