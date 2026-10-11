@@ -805,12 +805,23 @@ class _Ledger:
     def __init__(self, refusals=0):
         self.calls, self.refusals = [], refusals
 
-    def update_task(self, slug, task_id, fields):
+    def update_task(self, slug, task_id, fields, if_state=()):
         if self.refusals:
             self.refusals -= 1
             raise SwarmError("ledger fixture refused")
-        self.calls.append((slug, task_id, fields, lease.EPOCH.get()))
+        self.calls.append((slug, task_id, fields, lease.EPOCH.get(), if_state))
         return {}
+
+
+class _Stdout:
+    def __init__(self):
+        self.text, self.flushes = "", 0
+
+    def write(self, text):
+        self.text += text
+
+    def flush(self):
+        self.flushes += 1
 
 
 class _Relaunch:
@@ -828,7 +839,7 @@ def _hash(world, name):
 
 
 def _marks(ledger):
-    return [fields for _, _, fields, _ in ledger.calls]
+    return [call[2] for call in ledger.calls]
 
 
 def test_a_pending_recovery_marks_its_task_until_the_resumed_replacement_launches_from_its_checkpoint(world):
@@ -840,7 +851,7 @@ def test_a_pending_recovery_marks_its_task_until_the_resumed_replacement_launche
 
     assert replacements() == {}
     assert replacements() == {}
-    assert ledger.calls == [(cases.SLUG, "task", {"awaiting": "recovery_pending"}, epoch)]
+    assert ledger.calls == [(cases.SLUG, "task", {"awaiting": "recovery_pending"}, epoch, ("claimed",))]
     assert _hash(world, "recovery-pending-tasks") == {"task": "recovery_pending"}
     assert relaunch.calls == []
 
@@ -857,7 +868,7 @@ def test_a_pending_recovery_marks_its_task_until_the_resumed_replacement_launche
         "controller_epoch": epoch,
         "checkpoint": "ckpt-one-2",
     }
-    assert ledger.calls[1:] == [(cases.SLUG, "task", {"awaiting": ""}, epoch)]
+    assert ledger.calls[1:] == [(cases.SLUG, "task", {"awaiting": ""}, epoch, ("claimed",))]
     assert _hash(world, "recovery-pending-tasks") == {}
     assert _hash(world, "attempt-replacement-launches") == {world.old.execution_id: decision.replacement}
 
@@ -881,18 +892,20 @@ def test_a_refused_replacement_launch_keeps_its_task_waiting_and_launches_on_a_l
     assert relaunch.calls[1][0].task["checkpoint"] == "ckpt-one-2"
 
 
-def test_a_fresh_replacement_launches_without_a_checkpoint_and_a_refused_mark_waits_for_the_next_pass(world, capsys):
+def test_a_fresh_replacement_launches_without_a_checkpoint_and_a_refused_mark_waits_for_the_next_pass(
+    world, monkeypatch
+):
     recovery, ledger, relaunch = world.recovery(world.live, automatic=False), _Ledger(refusals=1), _Relaunch()
     replacements = replacement.Replacements(recovery, relaunch, ledger)
     world.show(world.old, "oom_killed")
     world.reconcile(recovery)
+    stdout = _Stdout()
+    monkeypatch.setattr("sys.stdout", stdout)
 
     assert replacements() == {}
     assert (ledger.calls, _hash(world, "recovery-pending-tasks")) == ([], {})
-    assert (
-        capsys.readouterr().out
-        == "controller: the ledger refused the recovery mark on task task: ledger fixture refused\n"
-    )
+    assert stdout.text == "controller: the ledger refused the recovery mark on task task: ledger fixture refused\n"
+    assert stdout.flushes == 1
     replacements()
     assert _marks(ledger) == [{"awaiting": "recovery_pending"}]
 
@@ -936,6 +949,23 @@ def test_a_stale_controller_writes_no_pending_mark(world):
     with pytest.raises(SwarmError, match="stale"):
         replacements()
     assert (_hash(world, "recovery-pending-tasks"), ledger.calls) == ({}, [])
+
+
+def test_a_controller_that_loses_its_lease_during_the_launch_records_no_launch(world):
+    recovery, ledger = world.recovery(world.live), _Ledger()
+    world.show(world.old, "oom_killed")
+    world.reconcile(recovery)
+
+    def stale():
+        raise SwarmError("the controller lease is stale")
+
+    def losing(request, agent):
+        world.live.require = stale
+        return SimpleNamespace(outcome=Outcome("spawn", Status.OK, "kubernetes"))
+
+    with pytest.raises(SwarmError, match="stale"):
+        replacement.Replacements(recovery, losing, ledger)()
+    assert (_hash(world, "attempt-replacement-launches"), ledger.calls) == ({}, [])
 
 
 def test_an_ambiguous_replacement_launch_counts_as_launched_and_is_never_placed_twice(world):

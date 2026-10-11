@@ -17,10 +17,11 @@ MARKED = "recovery-pending-tasks"
 CLEARED = ""
 SUPERSEDED = "superseded"
 STARTED = (Status.OK, Status.AMBIGUOUS)
+MARKABLE = ("claimed",)
 
 
 class TaskLedger(Protocol):
-    def update_task(self, slug: str, task_id: str, fields: dict) -> dict: ...
+    def update_task(self, slug: str, task_id: str, fields: dict, if_state: tuple = ()) -> dict: ...
 
 
 Relaunch = Callable[[SpawnRequest, AgentRecord], "Launch"]
@@ -68,6 +69,7 @@ class Replacements:
         return outcome.status.value
 
     def _launched(self, decision: Decision) -> None:
+        self.controller.require()
         self.store.redis.hset(self._key(LAUNCHED), decision.execution_id, decision.replacement)
 
     def _mark(self) -> None:
@@ -82,7 +84,7 @@ class Replacements:
         self.controller.require()
         try:
             with lease.fencing(self.controller.held.epoch):
-                self.ledger.update_task(self.slug, task, {"awaiting": state})
+                self.ledger.update_task(self.slug, task, {"awaiting": state}, if_state=MARKABLE)
         except SwarmError as error:
             print(f"controller: the ledger refused the recovery mark on task {task}: {error}", flush=True)
             return
