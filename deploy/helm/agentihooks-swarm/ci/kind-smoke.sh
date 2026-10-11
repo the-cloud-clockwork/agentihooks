@@ -76,6 +76,17 @@ api=(
 )
 workers=(-f "$chart/ci/kind-workers.yaml")
 helm template "$release" "$chart" "${workers[@]}" "${api[@]}" | python3 tests/chart_workers.py "$chart/ci/kind-workers.yaml"
+secrets+=("${workers[@]}" "${api[@]}")
+both=("$chart/ci/kind-values.yaml" "$chart/ci/kind-workers.yaml")
+helm template "$release" "$chart" "${secrets[@]}" | python3 tests/chart_secrets.py "${both[@]}"
+planted="$(helm template "$release" "$chart" "${secrets[@]}" --set 'secretEnv[0].name=AGENTIHOOKS_TERMINAL_CA_KEY' \
+  --set 'secretEnv[0].secretName=swarm-terminal-attach-ca' --set 'secretEnv[0].key=user_ca' \
+  | python3 tests/chart_secrets.py "${both[@]}" 2>&1 >/dev/null || true)"
+if [[ $planted != *"StatefulSet $release-ledger container ledger references the terminal CA Secret swarm-terminal-attach-ca"* ]]; then
+  printf 'the chart check did not flag a planted ledger reference to the terminal CA Secret: %s\n' "$planted" >&2
+  exit 1
+fi
+printf 'the chart check flagged a planted ledger reference to the terminal CA Secret\n'
 policy_map=(-f "$chart/ci/kind-policy-configmap.yaml")
 helm template "$release" "$chart" "${workers[@]}" "${policy_map[@]}" "${api[@]}" \
   | python3 tests/chart_workers.py "$chart/ci/kind-workers.yaml" "$chart/ci/kind-policy-configmap.yaml"
@@ -100,6 +111,10 @@ refuse_workers "controller.workers.podPolicy or podPolicyConfigMap is required" 
 refuse_workers "set controller.workers.podPolicy or podPolicyConfigMap, not both" \
   --set controller.workers.podPolicyConfigMap=swarm-pod-policy
 refuse_workers "controller.serviceAccountName is required" --set controller.serviceAccountName=
+for setting in secretName key; do
+  refuse_workers "controller.terminalCa needs secretName and key with controller.workers.apiUrl" \
+    --set controller.terminalCa."$setting"=
+done
 printf 'the chart refused every incomplete or pinned worker setting\n'
 docker build -q -t "$image" . >/dev/null &
 build=$!
