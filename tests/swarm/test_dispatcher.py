@@ -608,7 +608,8 @@ def test_a_critical_chain_successor_takes_the_next_seat_ahead_of_operator_urgent
     config, ledger, found = chain_merge(store)
     assert dispatcher.guarded(found) == {"b"}
     key = dispatcher.claim_key(config, found)
-    assert [key(ledger.rows[t]) for t in ("b", "x", "r")] == [(-1, 1), (0, 0), (2, 3)]
+    assert dispatcher.queue(found) == ["b", "x", "c", "r", "y"]
+    assert [key(ledger.rows[t]) for t in ("b", "x", "r")] == [(-1, 0), (0, 1), (2, 3)]
     assert spawned(store, config, ledger, found) == [("eng", "b")]
     config, ledger, found = chain_merge(store, "assist")
     assert spawned(store, config, ledger, found) == [("eng", "x")]
