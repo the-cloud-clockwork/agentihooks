@@ -108,3 +108,48 @@ def test_master_resume_with_compatible_checkpoint_replaces_the_attempt(pending):
     assert result["mode"] == "resume"
     assert result["checkpoint"]
     assert result["replacement"] == pending.world.occupant().execution_id
+
+
+@pytest.mark.parametrize("choice", ["fresh", "resume"])
+def test_restore_command_delivers_master_decision_to_anton(pending, monkeypatch, capsys, choice):
+    from scripts.gates import Who
+    from scripts.swarm import cli, resume
+    from scripts.swarm_ledger import ledger
+
+    slug = pending.recovery.slug
+    pending.world.store.update(slug, api_url=pending.url.split("/v1/")[0])
+    monkeypatch.setattr(cli.Who, "from_env", lambda: Who("coordinator", slug, "master"))
+    monkeypatch.delenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", raising=False)
+    minted = []
+    monkeypatch.setattr(ledger, "launch_token", lambda slug, name: minted.append((slug, name)) or pending.token)
+    monkeypatch.setattr(
+        resume, "decide", lambda *args: pytest.fail("Anton decisions must not reach workstation recovery")
+    )
+    if choice == "resume":
+        pending.world.checkpoints.by_execution[pending.old.execution_id] = pending.world.fx["first"]["checkpoints"]
+    args = SimpleNamespace(slug=slug, name="operator", agent=pending.old.name, choice=choice)
+    cli.cmd_restore_decision(pending.world.store, args)
+    result = json.loads(capsys.readouterr().out)
+    assert result["mode"] == choice
+    assert result["execution_id"] == pending.old.execution_id
+    assert pending.recovery.decision(pending.old.execution_id).mode == choice
+    assert minted == [(slug, "coordinator")]
+
+
+def test_restore_command_cannot_gain_operator_role_from_its_name(pending, monkeypatch):
+    from scripts.gates import Who
+    from scripts.swarm import cli
+    from scripts.swarm.store import SwarmError
+
+    slug = pending.recovery.slug
+    name = "worker"
+    pending.world.store.put_agent(slug, AgentRecord(name, "eng", "task"))
+    token = auth.issue_agent(pending.world.store.redis, "fixture", slug, name)
+    pending.world.store.update(slug, api_url=pending.url.split("/v1/")[0])
+    monkeypatch.setattr(cli.Who, "from_env", lambda: Who(name, slug, "eng"))
+    monkeypatch.setenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", token)
+    args = SimpleNamespace(slug=slug, name="operator", agent=pending.old.name, choice="fresh")
+    before = pending.world.protected()
+    with pytest.raises(SwarmError, match="master or operator"):
+        cli.cmd_restore_decision(pending.world.store, args)
+    assert pending.world.protected() == before
