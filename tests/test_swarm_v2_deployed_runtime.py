@@ -145,7 +145,10 @@ def _environ(tmp_path, store, **changes):
     }
 
 
-def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_distributed_launch(tmp_path, monkeypatch):
+@pytest.mark.parametrize(("lane", "profile"), [("eng", "engineer"), ("ci", "cicd")])
+def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_distributed_launch(
+    tmp_path, monkeypatch, lane, profile
+):
     store = _store()
     for name, value in {**_environ(tmp_path, store), "SWARM_HIVE_ID": "hive-fixture"}.items():
         monkeypatch.setenv(name, value)
@@ -164,7 +167,14 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
         service = hosted[0]
         runtime = runtimes[SLUG]
         task = {"id": "t1", "seat": SEAT, "controller_epoch": service.controller.held.epoch}
-        placed = runtime.spawn(store.config(SLUG), "eng", store.next_name(SLUG, "eng"), task)
+        task["profile_decision"] = {
+            "profile": profile,
+            "source": "classifier",
+            "responsibility": "task",
+            "anchors": [],
+            "overlays": [],
+        }
+        placed = runtime.spawn(store.config(SLUG), lane, store.next_name(SLUG, lane), task)
         seen.append((given, list(runtimes), service, runtime, placed))
         return {SLUG: ["ticked"]}
 
@@ -206,13 +216,18 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
     assert service.recover.replacements.relaunch == runtime.relaunch
     assert isinstance(service.recover.replacements.ledger, LedgerClient)
     assert store.config(SLUG).api_url == API_URL
-    assert (placed.placement, placed.harness, placed.profile) == (BACKEND, "claude", "general")
+    assert (placed.placement, placed.harness, placed.profile) == (BACKEND, "claude", profile)
     [pod] = pods.created
     execution = pod["metadata"]["labels"][EXECUTION_LABEL]
     admitted = store.execution(SLUG, execution)
     assert (admitted.seat, admitted.runtime_backend) == (SEAT, BACKEND)
     assert admitted.runtime_target == {"pod_namespace": "swarm-pod-proof", "pod_name": "swarm-t1"}
     assert admitted.account == pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == ACCOUNT
+    assert admitted.profile == profile
+    assert pod["metadata"]["labels"]["swarm.agentihooks.io/profile"] == "general"
+    operation = store.operation_journal.records(SLUG)[0]
+    assert operation.payload["task_payload"]["profile"] == profile
+    assert json.loads(pods.maps[0]["data"]["launch.json"])["profile"] == profile
     assert ("secrets", "swarm-claude-accounts") in pods.reads
     assert pods.nodes_read == 1
     assert lease.current(store, SLUG) is None
