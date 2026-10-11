@@ -17,6 +17,7 @@ from scripts.swarm_v2.kubernetes.approved import INDEX, AccountRoute, FleetAccou
 from scripts.swarm_v2.kubernetes.client import ApiRefused, KubeHttp, PodApi, PodClient
 from scripts.swarm_v2.kubernetes.failures import AccountSlot, Recovery
 from scripts.swarm_v2.kubernetes.grants import PodGrants, Supervision
+from scripts.swarm_v2.kubernetes.pool import WorkerPool
 from scripts.swarm_v2.kubernetes.prompts import TerminalPrompts
 from scripts.swarm_v2.kubernetes.runtime import KubernetesTransport
 from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, PodTemplate, load_policy
@@ -186,7 +187,8 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
     launcher = DistributedLaunch(
         controller, grants, capacity, fleet, None, workers.grants(environ, slug, verify, controller.store)
     )
-    keys = SecretKeys(pod_api(environ, workers.policy["namespace"]))
+    api = pod_api(environ, workers.policy["namespace"])
+    keys = SecretKeys(api)
     route = AccountRoute(keys, QuotaObservations(controller.store, slug, verify), partial(_held, capacity), HARNESS)
     launcher.accounts = route.choose
     prompts = None if controller.terminals is None else TerminalPrompts(controller.terminals.terminal.router())
@@ -195,6 +197,9 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
         environ, kubernetes=kubernetes, launch=partial(launcher.from_tick, terms=workers.terms, target=workers.target)
     )
     runtime.herdr_runtime.quota_accounts = FleetAccounts(route, workers.terms.cap)
+    runtime.herdr_runtime.host = WorkerPool(
+        api, workers.policy.get("worker_pool"), workers.policy["profiles"][workers.profile]["limits"]
+    )
     launcher.planned = partial(runtime.herdr_runtime.planned_account, agent=HARNESS)
     launcher.router = runtime.router
     return runtime
