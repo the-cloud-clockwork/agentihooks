@@ -33,7 +33,7 @@ BUDGETS = {
     "gate-required": 60,
     "refresh-durations": 120,
     "coverage-baseline": 120,
-    "flake-budget": 60,
+    "flake-budget": 120,
     "stage-budget": 60,
 }
 

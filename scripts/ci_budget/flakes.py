@@ -8,7 +8,6 @@ from __future__ import annotations
 import io
 import json
 import subprocess
-import sys
 import zipfile
 from collections.abc import Callable
 from pathlib import PurePosixPath
@@ -54,7 +53,8 @@ def read_budget(repo_dir: str, branch: str, run: Callable) -> dict | None:
 def text(test: dict) -> str:
     path, _, name = test["test"].partition("::")
     function = name.split("::")[-1].removeprefix("test_").replace("_", " ").lower()
-    module = PurePosixPath(path).stem.removeprefix("test_").replace("_", " ").lower()
+    folders = PurePosixPath(path).parent.parts[1:]
+    module = " ".join([*folders, PurePosixPath(path).stem.removeprefix("test_")]).replace("_", " ").lower()
     return (
         f"The test {function} in the {module} tests passed only on a retry in {len(test['runs'])} dev runs "
         "within seven days. Fix what makes it flaky."
@@ -77,14 +77,18 @@ def refresh(
     try:
         found = read_budget(config.repo, branch, run)
     except READ_ERRORS as exc:
-        print(f"flake budget skipped: {getattr(exc, 'stderr', None) or exc}", file=sys.stderr)
+        defects._skipped("reading the flake budget", exc)
         return []
     actions = []
     for test in (found or {}).get("over_budget", []):
         raised = defects.key(slug, "flaky", test["test"])
         if redis.exists(raised):
             continue
-        sent = ledger.followup(slug, text(test))
+        try:
+            sent = ledger.followup(slug, text(test))
+        except READ_ERRORS as exc:
+            defects._skipped("one flaky test", exc)
+            continue
         redis.set(raised, now_ms, ex=RAISED_TTL_S)
         if sent is not False:
             actions.append("filed a ledger follow up for a test flaky in two dev runs within seven days")

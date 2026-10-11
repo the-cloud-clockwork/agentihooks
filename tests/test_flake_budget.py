@@ -106,8 +106,10 @@ def test_a_dev_push_keeps_the_flake_history_and_publishes_the_budget():
         "python -m tests.flake_budget --history ~/flake-history/history.jsonl --reports ~/flake-reports"
         " --out flake-budget.json"
     )
+    assert steps["Count flaky tests over seven days"]["shell"] == "bash"
     assert steps["Publish the flake budget"]["with"]["name"] == "flake-budget"
     assert steps["Publish the flake budget"]["with"]["path"] == "flake-budget.json"
+    assert steps["Publish the flake budget"]["with"]["if-no-files-found"] == "error"
     assert steps["Save the flake history"]["uses"] == "actions/cache/save@v4"
     assert steps["Save the flake history"]["with"] == {"path": "~/flake-history", "key": key}
     order = [

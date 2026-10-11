@@ -1289,6 +1289,7 @@ jobs:
           path: ~/flake-reports
 
       - name: Count flaky tests over seven days
+        shell: bash
         run: python -m tests.flake_budget --history ~/flake-history/history.jsonl --reports ~/flake-reports --out flake-budget.json | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Publish the flake budget
@@ -1296,6 +1297,7 @@ jobs:
         with:
           name: flake-budget
           path: flake-budget.json
+          if-no-files-found: error
           retention-days: 14
           overwrite: true
 

@@ -15,10 +15,10 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 
 NOW_MS = 1_791_700_000_000
 TEST = "tests/swarm_ledger/test_alerts_page.py::test_the_panel_fold_is_remembered_after_a_reload"
-OTHER = "tests/test_inbox.py::TestNotify::test_notify_within_budget"
+OTHER = "tests/Inbox_Cases/test_Notify.py::TestNotify::test_Notify_Within_Budget"
 TEXT = (
-    "The test the panel fold is remembered after a reload in the alerts page tests passed only on a retry"
-    " in 2 dev runs within seven days. Fix what makes it flaky."
+    "The test the panel fold is remembered after a reload in the swarm ledger alerts page tests passed only"
+    " on a retry in 2 dev runs within seven days. Fix what makes it flaky."
 )
 LISTING = "repos/{owner}/{repo}/actions/artifacts?name=flake-budget&per_page=100"
 JQ = '[.artifacts[] | select((.expired | not) and .workflow_run.head_branch == "dev")][0].id // empty'
@@ -86,16 +86,16 @@ def test_a_test_flaky_in_two_runs_is_filed_once_in_plain_words(swarm):
         ("sw", TEXT),
         (
             "sw",
-            "The test notify within budget in the inbox tests passed only on a retry in 2 dev runs"
+            "The test notify within budget in the inbox cases notify tests passed only on a retry in 2 dev runs"
             " within seven days. Fix what makes it flaky.",
         ),
     ]
     assert all(ledger_comments.problems(text, "item") == [] and plain(text, "item") == text for _, text in ledger.added)
     assert actions == ["filed a ledger follow up for a test flaky in two dev runs within seven days"] * 2
-    assert calls[0][1]["cwd"] == "/repo"
+    assert calls[0][0][4] == JQ and calls[0][1]["cwd"] == "/repo"
     raised = f"{PREFIX}:sw:ci-budget:flaky:{TEST}"
-    assert 0 < store.redis.ttl(raised) <= flakes.RAISED_TTL_S
-    assert store.redis.ttl(raised) > flakes.RAISED_TTL_S - 60
+    assert flakes.RAISED_TTL_S == 604800
+    assert 604800 - 60 < store.redis.ttl(raised) <= 604800
 
     later = NOW_MS + defects.REFRESH_MS
     assert flakes.refresh("sw", config, store, ledger, later, run=_gh(calls, _budget(TEST, OTHER))) == []
@@ -116,8 +116,10 @@ def test_the_budget_is_read_at_most_once_per_refresh_interval(swarm):
 
 def test_a_branch_with_no_budget_files_nothing(swarm):
     store, config, ledger = swarm
-    assert flakes.refresh("sw", config, store, ledger, NOW_MS, run=_gh([], artifact="")) == []
+    calls = []
+    assert flakes.refresh("sw", config, store, ledger, NOW_MS, run=_gh(calls, artifact=""), branch="diffcheck/x") == []
     assert ledger.added == []
+    assert calls[0][0][4] == JQ.replace('"dev"', '"diffcheck/x"')
 
 
 def _github_down(command, **kwargs):
@@ -132,7 +134,7 @@ def test_an_unreadable_budget_files_nothing_and_retries_next_interval(swarm, cap
     store, config, ledger = swarm
     assert flakes.refresh("sw", config, store, ledger, NOW_MS, run=broken) == []
     assert ledger.added == []
-    assert capsys.readouterr().err.startswith("flake budget skipped: ")
+    assert capsys.readouterr().err.startswith("ci budget skipped reading the flake budget: ")
     flakes.refresh("sw", config, store, ledger, NOW_MS + defects.REFRESH_MS, run=_gh([], _budget(TEST)))
     assert ledger.added == [("sw", TEXT)]
 
@@ -140,7 +142,7 @@ def test_an_unreadable_budget_files_nothing_and_retries_next_interval(swarm, cap
 def test_a_read_error_names_what_github_said(swarm, capsys):
     store, config, ledger = swarm
     flakes.refresh("sw", config, store, ledger, NOW_MS, run=_github_down)
-    assert capsys.readouterr().err == "flake budget skipped: HTTP 502\n"
+    assert capsys.readouterr().err == "ci budget skipped reading the flake budget: HTTP 502\n"
 
 
 def test_a_followup_the_ledger_refuses_is_not_sent_again(swarm):
@@ -157,15 +159,15 @@ def test_a_followup_the_ledger_refuses_is_not_sent_again(swarm):
     assert refused == [TEXT]
 
 
-def test_a_followup_that_fails_to_reach_the_ledger_is_retried_next_interval(swarm):
+def test_a_followup_that_fails_to_reach_the_ledger_is_retried_next_interval(swarm, capsys):
     store, config, ledger = swarm
 
     def unreachable(slug, text):
-        raise OSError("ledger down")
+        raise ConnectionRefusedError("ledger down")
 
     ledger.followup = unreachable
-    with pytest.raises(OSError):
-        flakes.refresh("sw", config, store, ledger, NOW_MS, run=_gh([], _budget(TEST)))
+    assert flakes.refresh("sw", config, store, ledger, NOW_MS, run=_gh([], _budget(TEST, OTHER))) == []
+    assert capsys.readouterr().err == "ci budget skipped one flaky test: ledger down\n" * 2
     ledger.followup = lambda slug, text: ledger.added.append((slug, text))
     flakes.refresh("sw", config, store, ledger, NOW_MS + defects.REFRESH_MS, run=_gh([], _budget(TEST)))
     assert ledger.added == [("sw", TEXT)]
