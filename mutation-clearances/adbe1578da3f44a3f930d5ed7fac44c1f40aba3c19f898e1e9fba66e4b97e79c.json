@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/restore_decisions.py:scripts.swarm_v2.restore_decisions.x_decide__mutmut_32:047d712c5f1c092607c2e93a03f1984a99932314b5f95d30e9eac388d98b3fbf": {
+    "reader": "standards-reader",
+    "reason": "urllib.request.Request.get_method returns POST when encoded JSON data exists, including when method is None."
+  }
+}

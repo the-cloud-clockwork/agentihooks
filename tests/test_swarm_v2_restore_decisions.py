@@ -38,7 +38,7 @@ def pending():
             slug,
             LaunchKey("fixture", b"synthetic signing material" * 4),
             lambda: True,
-            operator=authenticator(lambda _: "fixture operator credential"),
+            operator=authenticator(lambda requested: "fixture operator credential" if requested == slug else None),
         )
         service.recover = SimpleNamespace(recovery=recovery)
         server = service.serve("127.0.0.1", 0)
@@ -81,6 +81,7 @@ def test_authenticated_worker_display_labels_cannot_authorize_recovery(pending, 
     status, result = post(pending, token, {"agent": name, "choice": "fresh"})
     assert status == 403
     assert result["error_class"] == "forbidden_scope"
+    assert result["message"] == "only the master or operator can choose resume or fresh"
     assert pending.world.protected() == before
 
 
@@ -228,6 +229,9 @@ def test_invalid_decision_requests_write_nothing(pending):
     for method, path, header, body, expected, message in cases:
         status, result = api.route(method, path or "/v1/" + pending.url.split("/v1/")[1], header, body)
         assert (status, result["message"]) == (expected, message)
+        assert (
+            result["error_class"] == {400: "invalid_request", 401: "unauthenticated", 404: "invalid_request"}[expected]
+        )
     assert pending.world.protected() == before
 
 
@@ -243,6 +247,7 @@ def test_missing_recovery_and_unavailable_store_are_reported(pending, monkeypatc
         {"agent": "coordinator", "choice": "fresh"},
     )
     assert (status, result["message"]) == (503, "controller recovery is unavailable")
+    assert result["error_class"] == "dependency_unavailable"
 
     def unavailable(*args):
         raise RedisError("synthetic outage")
@@ -255,6 +260,7 @@ def test_missing_recovery_and_unavailable_store_are_reported(pending, monkeypatc
         {"agent": "coordinator", "choice": "fresh"},
     )
     assert (status, result["message"]) == (503, "the recovery store is unavailable")
+    assert result["error_class"] == "dependency_unavailable"
 
 
 def test_finished_or_removed_master_cannot_decide_recovery(pending):
@@ -277,13 +283,13 @@ def test_command_refuses_missing_controller_or_operator_credential(pending, monk
     from scripts.swarm_v2 import control_service
 
     slug = pending.recovery.slug
-    with pytest.raises(SwarmError, match="controller API address is unavailable"):
+    with pytest.raises(SwarmError, match="^the Anton controller API address is unavailable$"):
         decide(pending.world.store, slug, pending.old, "fresh", Who())
     pending.world.store.update(slug, api_url=pending.url.split("/v1/")[0])
     monkeypatch.setattr(control_service, "page_credential", lambda _: None)
-    with pytest.raises(SwarmError, match="master or operator credential"):
+    with pytest.raises(SwarmError, match="^the restore decision needs a master or operator credential$"):
         decide(pending.world.store, slug, pending.old, "fresh", Who())
-    with pytest.raises(SwarmError, match="master or operator credential"):
+    with pytest.raises(SwarmError, match="^the restore decision needs a master or operator credential$"):
         decide(pending.world.store, slug, pending.old, "fresh", Who("worker"))
 
 
@@ -294,7 +300,11 @@ def test_operator_command_reaches_anton_and_connection_errors_are_named(pending,
 
     slug = pending.recovery.slug
     pending.world.store.update(slug, api_url=pending.url.split("/v1/")[0] + "/")
-    monkeypatch.setattr(control_service, "page_credential", lambda _: "fixture operator credential")
+    monkeypatch.setattr(
+        control_service,
+        "page_credential",
+        lambda requested: "fixture operator credential" if requested == slug else None,
+    )
     result = decide(pending.world.store, slug, pending.old, "fresh", Who())
     assert result["mode"] == "fresh"
 
@@ -304,3 +314,86 @@ def test_operator_command_reaches_anton_and_connection_errors_are_named(pending,
     monkeypatch.setattr(urllib.request, "urlopen", unreachable)
     with pytest.raises(SwarmError, match="controller could not be reached: TimeoutError"):
         decide(pending.world.store, slug, pending.old, "fresh", Who())
+
+
+def test_routes_dispatch_recovery_and_preserve_sibling_endpoints(pending):
+    from scripts.swarm_v2.api.server import Routes
+
+    routes = Routes(
+        pending.service.executions,
+        None,
+        health=pending.service.health_api,
+        recovery=pending.service.recovery_api,
+    )
+    path = "/v1/" + pending.url.split("/v1/")[1]
+    status, result = routes.route("POST", path, f"Bearer {pending.token}", {"agent": "coordinator", "choice": "fresh"})
+    assert (status, result["mode"]) == (200, "fresh")
+    status, result = routes.route("GET", "/v2/health/live", "", {})
+    assert status == 200
+    without_recovery = Routes(pending.service.executions, None)
+    status, result = without_recovery.route("POST", path, f"Bearer {pending.token}", {"choice": "fresh"})
+    assert status == 404
+
+
+def test_unconfigured_controller_recovery_answers_unavailable(pending):
+    pending.service.recover = None
+    status, result = post(pending, pending.token, {"agent": "coordinator", "choice": "fresh"})
+    assert (status, result["error_class"], result["message"]) == (
+        503,
+        "dependency_unavailable",
+        "controller recovery is unavailable",
+    )
+
+
+def test_missing_caller_name_never_uses_a_display_label_default(pending):
+    slug = pending.recovery.slug
+    name = "XXXX"
+    pending.world.store.put_agent(slug, AgentRecord(name, "master", ""))
+    token = auth.issue_agent(pending.world.store.redis, "fixture", slug, name)
+    status, result = post(pending, token, {"choice": "fresh"})
+    assert (status, result["error_class"]) == (401, "unauthenticated")
+    assert pending.recovery.decision(pending.old.execution_id).mode == "recovery_pending"
+
+
+def test_restore_transport_uses_json_a_canonical_url_and_a_bounded_deadline(pending, monkeypatch):
+    from scripts.gates import Who
+    from scripts.swarm_v2 import control_service
+
+    slug = pending.recovery.slug
+    base = pending.url.split("/v1/")[0]
+    pending.world.store.update(slug, api_url=base + "/")
+    monkeypatch.setattr(
+        control_service,
+        "page_credential",
+        lambda requested: "fixture operator credential" if requested == slug else None,
+    )
+    opening = urllib.request.urlopen
+    sent = []
+
+    def checked(request, timeout):
+        sent.append(request.full_url)
+        assert request.full_url == pending.url
+        assert request.get_method() == "POST"
+        assert request.get_header("Content-type") == "application/json"
+        assert timeout == 10
+        return opening(request, timeout=timeout)
+
+    monkeypatch.setattr(urllib.request, "urlopen", checked)
+    result = decide(pending.world.store, slug, pending.old, "fresh", Who())
+    assert result["mode"] == "fresh"
+    assert sent == [pending.url]
+    pending.world.store.update(slug, api_url="https://controller.example/X")
+    monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout: pytest.fail(request.full_url))
+    with pytest.raises(pytest.fail.Exception, match="controller.example/X/v1/"):
+        decide(pending.world.store, slug, pending.old, "fresh", Who())
+
+
+def test_a_malformed_caller_is_rejected_before_the_credential_store(pending, monkeypatch):
+    from redis.exceptions import RedisError
+
+    def unavailable(*args):
+        raise RedisError("synthetic outage")
+
+    monkeypatch.setattr(auth, "agent_member", unavailable)
+    status, result = post(pending, pending.token, {"agent": 5, "choice": "fresh"})
+    assert (status, result["error_class"]) == (401, "unauthenticated")

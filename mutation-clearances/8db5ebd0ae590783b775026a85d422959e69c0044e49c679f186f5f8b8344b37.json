@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/restore_decisions.py:scripts.swarm_v2.restore_decisions.x_decide__mutmut_46:8c028ad7a53dec6131d76575494db0a0637ed976eb047fd5d6e49bc9f813460a": {
+    "reader": "standards-reader",
+    "reason": "urllib.request.Request.add_header applies key.capitalize(), so authorization and Authorization yield identical stored headers and transmitted bytes."
+  }
+}
