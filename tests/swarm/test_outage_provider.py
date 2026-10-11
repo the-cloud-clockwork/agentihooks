@@ -1,6 +1,5 @@
 from dataclasses import replace
 
-import fakeredis
 import pytest
 
 from scripts.swarm import outage, pane, provider_probe
@@ -32,6 +31,8 @@ def test_provider_errors_are_matched_only_for_their_harness(harness, text, match
 
 
 def test_runtime_carries_provider_evidence_until_an_affirmative_probe_succeeds(tmp_path, monkeypatch):
+    import fakeredis
+
     monkeypatch.setattr(outage, "HOME", tmp_path)
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", 1, 1))
@@ -60,6 +61,8 @@ def test_runtime_carries_provider_evidence_until_an_affirmative_probe_succeeds(t
 
 
 def test_an_unreadable_or_remote_pane_cannot_clear_a_provider_outage(tmp_path, monkeypatch):
+    import fakeredis
+
     monkeypatch.setattr(outage, "HOME", tmp_path)
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", 1, 1))
@@ -81,6 +84,8 @@ def test_an_unreadable_or_remote_pane_cannot_clear_a_provider_outage(tmp_path, m
 
 @pytest.mark.parametrize("finished", [False, True])
 def test_pane_changes_never_close_provider_records_without_a_successful_probe(tmp_path, monkeypatch, finished):
+    import fakeredis
+
     monkeypatch.setattr(outage, "HOME", tmp_path)
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", 1, 1))
