@@ -100,6 +100,7 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
         "path": "~/dev-durations",
         "key": "durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
         " || github.event.before || github.sha }}",
+        "restore-keys": "durations-merged-",
         "lookup-only": True,
     }
     assert {"durations", "split"} <= set(jobs["gate-required"]["needs"])
