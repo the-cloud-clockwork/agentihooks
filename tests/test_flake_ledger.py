@@ -153,3 +153,30 @@ def test_unit_shards_retry_on_the_command_line_and_upload_the_ledger():
     assert upload["with"]["name"] == "flakes-${{ matrix.python-version }}-${{ matrix.shard }}"
     assert upload["with"]["path"] == "flakes.jsonl"
     assert upload["with"]["if-no-files-found"] == "error"
+
+
+def test_every_absorbed_flake_raises_a_warning_on_the_run(tmp_path):
+    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]["steps"]
+    record = next(step for step in steps if step.get("name") == "Record flaky tests")
+    lines = [
+        {"test": "tests/test_a.py::test_once", "run": "7", "attempts": 2, "outcome": "flaky", "errors": ["E"]},
+        {"test": "tests/test_b.py::test_always", "run": "7", "attempts": 3, "outcome": "failed", "errors": ["E"] * 3},
+    ]
+    (tmp_path / "flakes.jsonl").write_text("".join(json.dumps(line) + "\n" for line in lines))
+    summary = tmp_path / "summary.md"
+    result = subprocess.run(
+        ["bash", "-e", "-c", record["run"]],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "GITHUB_STEP_SUMMARY": str(summary)},
+    )
+    assert result.returncode == 0, result.stderr
+    warnings = [line for line in result.stdout.splitlines() if line.startswith("::warning")]
+    assert warnings == ["::warning title=Flaky test::tests/test_a.py::test_once passed on attempt 2 in run 7"]
+    assert summary.read_text().splitlines() == [
+        "Tests retried in place: 2",
+        "flaky after 2 attempts: tests/test_a.py::test_once",
+        "failed after 3 attempts: tests/test_b.py::test_always",
+    ]
