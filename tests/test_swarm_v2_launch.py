@@ -150,6 +150,7 @@ def test_the_runtime_request_carries_the_grant_the_execution_and_its_generation(
         "execution_id": launch.agent.execution_id,
         "generation": 1,
         "account": ACCOUNT,
+        "profile": launch.agent.profile,
         "endpoints": {"AGENTIHOOKS_SWARM_API_URL": API},
     }
     assert (request.lane, request.name) == ("eng", launch.agent.name)

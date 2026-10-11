@@ -224,7 +224,7 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
     assert admitted.runtime_target == {"pod_namespace": "swarm-pod-proof", "pod_name": "swarm-t1"}
     assert admitted.account == pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == ACCOUNT
     assert admitted.profile == profile
-    assert pod["metadata"]["labels"]["swarm.agentihooks.io/profile"] == "general"
+    assert pod["metadata"]["annotations"]["swarm.agentihooks.io/profile"] == "general"
     operation = store.operation_journal.records(SLUG)[0]
     assert operation.payload["task_payload"]["profile"] == profile
     assert json.loads(pods.maps[0]["data"]["launch.json"])["profile"] == profile
@@ -699,6 +699,7 @@ def test_a_launch_requests_the_profile_cpu_request_and_its_whole_memory_limit(tm
         "generation": 1,
         "endpoints": {"api_url": API_URL},
         "account": ACCOUNT,
+        "profile": "engineer",
     }
     record = workers.launch(SpawnRequest(config, "eng", "engineer-1", task))
 
@@ -794,12 +795,12 @@ def test_a_profile_the_pod_policy_lacks_is_refused(tmp_path):
     assert str(refused.value) == "the Pod policy has no gpu profile"
 
 
-def test_a_worker_profile_that_runs_only_on_the_workstation_is_refused(tmp_path):
+def test_an_agent_profile_without_an_approved_resource_class_is_refused(tmp_path):
 
     with pytest.raises(SwarmError) as refused:
         deployed.Workers.from_environ(_workers(tmp_path, **{deployed.PROFILE_ENV: "frontend"}), SLUG)
 
-    assert str(refused.value) == f"{deployed.PROFILE_ENV} frontend runs only on the workstation"
+    assert str(refused.value) == "the Pod policy has no frontend profile"
 
 
 def test_one_pod_policy_serves_two_swarms_each_rendering_its_own_owner(tmp_path, monkeypatch):
