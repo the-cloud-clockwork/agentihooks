@@ -120,19 +120,9 @@ class Drill:
             dispatcher.release(agent.name, owner)
 
 
-@pytest.fixture
-def drill(tmp_path, monkeypatch):
-    import fakeredis
-
-    from scripts.inbox import cli as inbox_cli
-    from scripts.inbox import outbox
-    from scripts.inbox.store import InboxStore, Unreachable
-    from scripts.swarm import outage, snapshot
-    from scripts.swarm.pane import PaneObservation
-    from scripts.swarm.runtime import Placed
-    from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
-    from scripts.swarm_ledger import ledger_server
-    from tests.swarm.test_tick import FakeLedger, FakeRuntime
+def fake_ledger():
+    from scripts.swarm.store import SwarmError
+    from tests.swarm.test_tick import FakeLedger
 
     class Ledger(FakeLedger):
         def __init__(self):
@@ -149,6 +139,14 @@ def drill(tmp_path, monkeypatch):
             self.log.append(
                 {"rev": rev, "at": at, "by": by, "kind": kind, "target": target, "id": f"drill-{rev}", "text": text}
             )
+
+    return Ledger()
+
+
+def fake_runtime():
+    from scripts.swarm.pane import PaneObservation
+    from scripts.swarm.runtime import Placed
+    from tests.swarm.test_tick import FakeRuntime
 
     class Runtime(FakeRuntime):
         def __init__(self):
@@ -180,11 +178,25 @@ def drill(tmp_path, monkeypatch):
         def prompt(self, agent, text):
             return "provider unavailable" if not self.healthy else None
 
+    return Runtime()
+
+
+@pytest.fixture
+def drill(tmp_path, monkeypatch):
+    import fakeredis
+
+    from scripts.inbox import cli as inbox_cli
+    from scripts.inbox import outbox
+    from scripts.inbox.store import InboxStore, Unreachable
+    from scripts.swarm import outage, snapshot
+    from scripts.swarm.store import RedisStore, SwarmConfig
+    from scripts.swarm_ledger import ledger_server
+
     server = fakeredis.FakeServer()
     redis = fakeredis.FakeRedis(server=server, decode_responses=True)
     store = RedisStore(redis)
     store.create(SwarmConfig("sw", str(tmp_path), max_eng=3, max_ci=0))
-    ledger, runtime = Ledger(), Runtime()
+    ledger, runtime = fake_ledger(), fake_runtime()
 
     def connect():
         if not server.connected:
