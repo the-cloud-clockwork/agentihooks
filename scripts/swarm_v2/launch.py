@@ -24,6 +24,8 @@ GRANT_SECONDS = 30
 NO_API_URL = "the swarm config has no API address"
 NOT_HANDED = "launch grant not handed: "
 HANDS = "launch-grant-hands"
+ENDINGS = "launch-endings"
+ENDED = "ended"
 WORKER_DEFAULT = "default"
 NO_ACCOUNT = "no approved account has quota and a free launch slot"
 Target = Callable[[SpawnRequest], dict]
@@ -117,7 +119,9 @@ class DistributedLaunch:
         try:
             slot = self.capacity.reserve(grant, terms.cap, terms.ttl_ms)
         except SwarmError as error:
-            return Launch(admitted, grant, None, Outcome("spawn", Status.REFUSED, backend, detail=str(error)))
+            ended = self.ended(admitted, str(error))
+            self.grants.withdraw(self.slug, grant)
+            return Launch(ended, grant, None, Outcome("spawn", Status.REFUSED, backend, detail=str(error)))
         identity = {
             "launch_grant": grant,
             "execution_id": admitted.execution_id,
@@ -163,7 +167,16 @@ class DistributedLaunch:
             runtime_target=target(request),
             profile=profile,
         )
-        return self.spawn(request, agent, replace(terms, api_url=api_url), "").outcome
+        occupant = self.controller.store.execution_occupants(self.slug).get(agent.seat)
+        previous = occupant.execution_id if occupant and occupant.state == ENDED else ""
+        return self.spawn(request, agent, replace(terms, api_url=api_url), previous).outcome
+
+    def ended(self, agent: AgentRecord, reason: str) -> AgentRecord:
+        store, ended = self.controller.store, replace(agent, state=ENDED)
+        store.put_agent(self.slug, ended)
+        ending = {"reason": reason, "generation": agent.generation}
+        store.redis.hset(store.key(self.slug, ENDINGS), agent.execution_id, json.dumps(ending))
+        return ended
 
     def registered(self, session: Session, grant: str) -> Slot:
         body = {"execution_id": session.execution_id, "generation": session.generation}
