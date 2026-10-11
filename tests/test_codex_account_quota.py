@@ -380,7 +380,7 @@ def test_two_concurrent_exec_launches_land_on_two_accounts_and_an_ended_run_free
     assert launch(602) == first
 
 
-def test_a_quota_probe_and_a_classifier_call_hold_no_account_slot(tmp_path, monkeypatch):
+def test_probes_and_classifier_calls_hold_no_slot_while_a_routed_launch_inside_one_does(tmp_path, monkeypatch):
     internal = []
 
     def run(argv, **kwargs):
@@ -392,7 +392,6 @@ def test_a_quota_probe_and_a_classifier_call_hold_no_account_slot(tmp_path, monk
     monkeypatch.setattr(fallbacks.subprocess, "run", run)
     with pytest.raises(BackendFailure):
         fallbacks._run(["codex", "--no-daemon", "exec", "ok"], SimpleNamespace(wire=dict), tmp_path)
-    assert len(internal) == 2
     monkeypatch.setattr(codex_router, "_registry", dict)
     routed = {}
     inside = {**env, account_sessions.INTERNAL_RUN: "1"}
@@ -400,10 +399,8 @@ def test_a_quota_probe_and_a_classifier_call_hold_no_account_slot(tmp_path, monk
     def launch(*args):
         routed.update(argv=args[1], env=args[2])
 
-    def login(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, 1, "", "")
-
-    assert codex_router.main(["--route", "alpha", "exec", "ok"], inside, launch, login) == 0
+    assert codex_router.main(["--route", "alpha", "exec", "ok"], inside, launch, run) == 0
+    assert [argv[-2:] for argv, _ in internal][2:] == [["login", "status"]]
     root = tmp_path / "proc"
     for pid, (argv, child) in enumerate([*internal, (routed["argv"], routed["env"])], start=800):
         _proc(root, pid, "codex", 1, argv, child)

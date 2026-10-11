@@ -416,8 +416,9 @@ workspace access token per `AH_CX_TOKEN_<slug>`.
 - Live sessions are counted per account from `/proc`: a Codex process with
   exactly one `AH_CX_TOKEN_<slug>` is on that account, any other on `default`.
   An interactive session and a `codex exec` run each hold one slot until the
-  process ends. The router's quota probes and classifier calls carry
-  `AGENTIHOOKS_INTERNAL_RUN` and hold none, nor do `app-server` and
+  process ends. The router's quota probes, login checks and classifier calls
+  carry `AGENTIHOOKS_INTERNAL_RUN` and hold none, nor does a bare `codex` they
+  start, which inherits it, nor do `app-server` and
   `mcp-server` processes; a routed launch drops that marker from its child, so
   it counts even when started inside one of them. A Codex process whose parent
   is a Codex process belongs to that session. A run started through a shell,

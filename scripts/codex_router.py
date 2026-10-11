@@ -157,7 +157,7 @@ def default_signed_in(environ: Mapping[str, str], run: Callable = subprocess.run
     try:
         status = run(
             [shutil.which("codex") or "codex", "login", "status"],
-            env=_without_tokens(environ),
+            env={**_without_tokens(environ), INTERNAL_RUN: "1"},
             capture_output=True,
             timeout=30,
         )
