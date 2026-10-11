@@ -592,14 +592,15 @@ def _registered_read(service, store, port):
 
 
 def test_the_controller_start_serves_ledger_tasks_beside_the_worker_api(tmp_path):
-    from scripts.swarm_v2.api.tasks import REVISION
+    from scripts.swarm_v2.api.tasks import spec_revision
 
     store = _store()
     port = _free_port()
     environ, _ = _ledger_hosted(tmp_path, store, port)
     service = _cs().host(environ, store, "hive-fixture")
     try:
-        registered, _, (status, body) = _registered_read(service, store, port)
+        registered, token, (status, body) = _registered_read(service, store, port)
+        controls = _get(f"http://127.0.0.1:{port}/v2/swarm", token)
     finally:
         service.stop()
 
@@ -607,8 +608,32 @@ def test_the_controller_start_serves_ledger_tasks_beside_the_worker_api(tmp_path
     assert {name: body["task"][name] for name in ("id", "title", "description", "phase", "lane", "state")} == {
         name: LEDGER_TASK[name] for name in ("id", "title", "description", "phase", "lane", "state")
     }
-    assert REVISION.fullmatch(body["revision"])
+    assert body["revision"] == spec_revision(body["task"])
+    assert (controls[0], controls[1]["error_class"], controls[1]["message"]) == (
+        403,
+        "forbidden_scope",
+        "swarm controls need the operator",
+    )
     assert service.tasks_api.writes_enabled is True
+
+
+def test_the_ledger_writer_lease_waits_until_the_controller_holds_its_lease(tmp_path):
+    from scripts.swarm_v2 import ledger_writer
+
+    store = _store()
+    environ, folder = _ledger_hosted(tmp_path, store, _free_port())
+    rival = lease.acquire(store, SLUG, "hive-rival")
+    service = _cs().host(environ, store, "hive-fixture")
+    try:
+        probe = ledger_writer.WriterLease(folder).acquire(ledger_writer.owner())
+        probe.release()
+        assert (service.tasks_api, service.writer) == (None, None)
+        lease.release(store, SLUG, rival)
+
+        assert service.tick() is True
+        assert (service.writer.held, service.tasks_api.writes_enabled) == (True, True)
+    finally:
+        service.stop()
 
 
 def test_the_controller_holds_the_ledger_writer_lease_until_it_stops(tmp_path):

@@ -91,6 +91,7 @@ class ControlService:
         self.viewing: threading.Thread | None = None
         self.tasks_api: TasksAPI | None = None
         self.writer: ledger_writer.WriterLease | None = None
+        self.ledger_folder: Path | None = None
 
     def start(self) -> bool:
         if not self.controller.acquire():
@@ -127,6 +128,8 @@ class ControlService:
 
     def _open(self) -> None:
         if self.listen is not None and self.server is None:
+            if self.ledger_folder is not None and self.tasks_api is None:
+                self.mount_ledger(self.ledger_folder)
             self.serve(*self.listen)
             if self.api_url:
                 self.controller.store.update(self.controller.slug, api_url=self.api_url)
@@ -198,8 +201,8 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
         service.recover = deployed.recovery_pass(service, workers, transports[0].api)
         if service.controller.terminals is not None:
             service.views = deployed.terminal_views(service.controller, environ)
+    service.ledger_folder = ledger_host.folder(environ)
     try:
-        service.mount_ledger(ledger_host.folder(environ))
         service.start()
     except BaseException:
         service.stop()
