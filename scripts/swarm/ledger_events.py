@@ -331,8 +331,8 @@ def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
 
 def _history_gaps(mail):
     key, sent = mail.store.key(mail.slug, "history-gaps"), []
-    for gap, subject in mail.store.redis.hgetall(key).items():
-        _, cursor, trimmed = gap.rsplit(":", 2)
+    for gap, value in mail.store.redis.hgetall(key).items():
+        cursor, trimmed, subject = json.loads(value)
         text = (
             f"Ledger {mail.slug} trimmed its history after revision {cursor} through revision {trimmed} before the "
             f"tick read it, so {subject} in that range reached no one. Read the ledger for them."
@@ -422,7 +422,8 @@ def new_events(store, slug, doc, cursor_name, subject):
         return []
     trimmed = doc["_meta"].get("events_trimmed")
     if trimmed is not None and trimmed > int(cursor):
-        store.redis.hset(store.key(slug, "history-gaps"), f"{cursor_name}:{cursor}:{trimmed}", subject)
+        gap = json.dumps([cursor, trimmed, subject])
+        store.redis.hset(store.key(slug, "history-gaps"), f"{cursor_name}:{cursor}:{trimmed}", gap)
     return [e for e in doc["_meta"].get("events", []) if int(cursor) < e.get("rev", 0) <= rev]
 
 
