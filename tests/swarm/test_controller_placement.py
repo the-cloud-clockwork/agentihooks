@@ -16,6 +16,14 @@ def store(monkeypatch):
     return saved
 
 
+@pytest.fixture(autouse=True)
+def engineer_classified(monkeypatch):
+    from scripts.swarm import profile_choice
+
+    decision = profile_choice.ProfileDecision("engineer", "classifier", "engineer", "m1", 0.9, True)
+    monkeypatch.setattr(profile_choice, "classify", lambda slug, task, environ: decision)
+
+
 def placed_runtime():
     from scripts.swarm_v2.runtime.base import Placement, RuntimeRouter
     from tests.swarm.test_tick import FakeRuntime
