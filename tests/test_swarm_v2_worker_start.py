@@ -196,6 +196,7 @@ def test_a_bundle_seat_renders_the_local_overlay_chain_in_the_pod_home(tmp_path,
     assert (home / ".claude" / "skills" / "fixture-global-skill" / "SKILL.md").is_file()
     settings = json.loads((home / ".claude" / "settings.json").read_text())
     assert ("FIXTURE_FRONTEND" in settings["env"]) is (profile == "frontend")
+    assert "brain" in settings["env"]["AGENTIHOOKS_BASE_CHANNELS"].split(",")
 
 
 def test_a_bundle_seat_records_the_delivered_bundle_revision_and_digest(tmp_path):

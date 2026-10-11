@@ -242,7 +242,7 @@ def render(execution: filesystem.Execution, target: str) -> None:
 
 def materialize(attempt: Path, target: str) -> None:
     from scripts.profiles import browser
-    from scripts.profiles.render import _bundle, _chain, _is_doc, _settings
+    from scripts.profiles.render import _bundle, _chain, _is_doc, _settings, claude_environment
     from scripts.swarm_v2 import broadcast_bridge
     from scripts.targets import get_adapter
     from scripts.targets._common import _install_module
@@ -258,6 +258,8 @@ def materialize(attempt: Path, target: str) -> None:
     roots = ([bundle] if bundle is not None else []) + [path for _, path in dirs]
     adapter = get_adapter(target)
     native = _settings(target, bundle, dirs)
+    if target == "claude":
+        claude_environment(native, dirs)
     native.setdefault("_agentihooks", {}).setdefault("env", {}).update(
         {**request["endpoints"], broadcast_bridge.GRANT_FILE: str(broadcast_bridge.grant_path(attempt))}
     )
