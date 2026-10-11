@@ -1,5 +1,6 @@
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -409,6 +410,178 @@ def test_the_operator_audit_settles_an_unknown_outcome(tmp_path):
     for operation_id in ("op-delivered", "op-unknown"):
         reason = refusal(lambda operation_id=operation_id: client.router.settle(operation_id, delivered=False))[0]
         assert reason == "not_pending"
+
+
+def _drop_machine(fleet, found):
+    fleet.machines = [machine for machine in fleet.machines if machine["id"] != found.profile_id]
+
+
+def _lose_prompts(client, fleet):
+    real = fleet.__call__
+
+    def lose(command):
+        if command[3:5] == ["agent", "prompt"]:
+            raise subprocess.TimeoutExpired(command, 30)
+        return real(command)
+
+    client.router.run = lose
+
+
+REFUSALS = {
+    "bare_command": (
+        lambda c, f, d, t: c.router.command(Target("", "default", t.incarnation, PANE), "pane_read"),
+        lambda d, t: ("bare_pane", target_module.BARE, "bare"),
+    ),
+    "bare_refresh": (
+        lambda c, f, d, t: c.router.refresh(Target(t.profile_id, "", t.incarnation, PANE)),
+        lambda d, t: ("bare_pane", target_module.BARE, "bare"),
+    ),
+    "bare_send": (
+        lambda c, f, d, t: c.router.send(PANE, "agent_prompt", "op", "x"),
+        lambda d, t: ("bare_pane", target_module.BARE, "bare"),
+    ),
+    "command_operation": (
+        lambda c, f, d, t: c.router.command(t, "pane_list"),
+        lambda d, t: ("operation", "pane_list does not address one pane", t.profile_id),
+    ),
+    "send_operation": (
+        lambda c, f, d, t: c.router.send(t, "pane_read", "op"),
+        lambda d, t: ("operation", "pane_read is not a pane mutation", t.profile_id),
+    ),
+    "session_mismatch": (
+        lambda c, f, d, t: c.router.command(Target(t.profile_id, "other", t.incarnation, PANE), "pane_read"),
+        lambda d, t: ("session_mismatch", f"{d[0].name} is saved for another remote session", t.profile_id),
+    ),
+    "foreign_profile": (
+        lambda c, f, d, t: c.router.command(Target("foreign", "default", t.incarnation, PANE), "pane_read"),
+        lambda d, t: ("unregistered", "machine foreign is not registered by this controller", "foreign"),
+    ),
+    "machine_missing": (
+        lambda c, f, d, t: (_drop_machine(f, t), c.router.command(t, "pane_read")),
+        lambda d, t: ("unregistered", f"{d[0].name} is not saved on this herdr client", t.profile_id),
+    ),
+    "unknown_label": (
+        lambda c, f, d, t: c.router.resolve("unknown", PANE),
+        lambda d, t: ("unregistered", "unknown is not one machine this controller registered", "bare"),
+    ),
+    "resolve_pane": (
+        lambda c, f, d, t: c.router.resolve(d[0].name, "w1"),
+        lambda d, t: ("pane_id", "a herdr pane id reads w<number>:p<number>", t.profile_id),
+    ),
+    "refresh_retired": (
+        lambda c, f, d, t: (c.register(d[1:]), c.router.refresh(t)),
+        lambda d, t: ("unregistered", f"{EXE_A} has no registered terminal", t.profile_id),
+    ),
+    "refresh_malformed_incarnation": (
+        lambda c, f, d, t: c.router.refresh(Target(t.profile_id, "default", f"{EXE_A}/extra/2", PANE)),
+        lambda d, t: ("unregistered", f"{EXE_A}/extra has no registered terminal", t.profile_id),
+    ),
+    "refresh_stale": (
+        lambda c, f, d, t: (c.register(sv2_hdr03_cases.endpoints(3)), c.router.refresh(t)),
+        lambda d, t: ("stale_incarnation", f"{t.incarnation} was replaced", t.profile_id),
+    ),
+    "command_stale": (
+        lambda c, f, d, t: (c.register(sv2_hdr03_cases.endpoints(3)), c.router.command(t, "pane_read")),
+        lambda d, t: ("stale_incarnation", f"{t.incarnation} was replaced", t.profile_id),
+    ),
+    "unconfirmed": (
+        lambda c, f, d, t: (
+            f.remote[EXE_A]["panes"][PANE].pop("agent_session"),
+            c.router.send(replace(t, conversation_id=CONVERSATION_A), "agent_prompt", "op", "x"),
+        ),
+        lambda d, t: ("conversation_unconfirmed", f"{PANE} reported no conversation", t.profile_id),
+    ),
+    "mismatch": (
+        lambda c, f, d, t: c.router.send(replace(t, conversation_id="other"), "agent_prompt", "op", "x"),
+        lambda d, t: ("conversation_mismatch", f"{PANE} holds another conversation", t.profile_id),
+    ),
+    "reused": (
+        lambda c, f, d, t: (
+            c.router.send(t, "agent_prompt", "op-1", "x"),
+            c.router.send(replace(t, pane_id="w1:p2"), "agent_prompt", "op-1", "x"),
+        ),
+        lambda d, t: ("operation_reused", "op-1 was sent to another pane", t.profile_id),
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(REFUSALS))
+def test_every_refusal_names_its_reason_message_and_counted_profile(tmp_path, case):
+    client, fleet, desired = world(tmp_path)
+    found = resolved(client, desired[0])
+    action, expected = REFUSALS[case]
+    reason, message, profile_id = expected(desired, found)
+    assert refusal(lambda: action(client, fleet, desired, found)) == (reason, message)
+    assert client.router.mismatches == {(profile_id, reason): 1}
+
+
+UNCOUNTED = {
+    "read_only": (
+        lambda c, f, t: Router(
+            c.registrations.store, c.router.catalog, c.qualifier, f, c.root / "r", mutations=False
+        ).send(t, "agent_prompt", "op", "x"),
+        "pane mutations are switched off; only read only inspection runs",
+    ),
+    "operation_id": (
+        lambda c, f, t: c.router.send(t, "agent_prompt", "", "x"),
+        "a pane mutation needs an operation id",
+    ),
+    "journal_unreadable": (
+        lambda c, f, t: ((c.root / DELIVERIES).write_text("{"), c.router.send(t, "agent_prompt", "op", "x")),
+        "the pane delivery journal is unreadable",
+    ),
+    "not_pending": (
+        lambda c, f, t: c.router.settle("op-unknown", delivered=True),
+        "op-unknown has no unknown outcome to settle",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(UNCOUNTED))
+def test_a_refusal_that_names_no_target_carries_its_exact_message(tmp_path, case):
+    client, fleet, desired = world(tmp_path)
+    action, message = UNCOUNTED[case]
+    assert refusal(lambda: action(client, fleet, resolved(client, desired[0]))) == (case, message)
+    assert client.router.mismatches == {}
+
+
+def test_a_full_journal_names_the_audit_it_waits_on(tmp_path, monkeypatch):
+    monkeypatch.setattr(target_module, "PENDING_LIMIT", 1)
+    client, fleet, desired = world(tmp_path)
+    found = resolved(client, desired[0])
+    _lose_prompts(client, fleet)
+    refusal(lambda: client.router.send(found, "agent_prompt", "op-0", "x"))
+    expected = ("journal_full", "too many pane sends await an audit of their unknown outcome")
+    assert refusal(lambda: client.router.send(found, "agent_prompt", "op-1", "x")) == expected
+
+
+def test_sent_deliveries_never_count_toward_the_pending_limit(tmp_path, monkeypatch):
+    monkeypatch.setattr(target_module, "PENDING_LIMIT", 2)
+    client, fleet, desired = world(tmp_path)
+    found = resolved(client, desired[0])
+    for number in range(3):
+        client.router.send(found, "agent_prompt", f"op-{number}", f"m{number}")
+    assert fleet.received()[EXE_A] == ["m0", "m1", "m2"]
+
+
+def test_an_incompatible_server_is_refused_with_the_qualifier_reasons(tmp_path):
+    client, fleet, desired = world(tmp_path)
+    found = resolved(client, desired[0])
+    fleet.servers[found.profile_id] = sv2_hdr03_cases.sv2_hdr01_cases.fixture()["missing_forwarding_server"]
+    reason, message = refusal(lambda: client.router.command(found, "pane_read"))
+    assert reason == "incompatible" and message.startswith("herdr server lacks")
+    assert client.router.mismatches == {(found.profile_id, "incompatible"): 1}
+
+
+def test_refresh_takes_the_session_saved_now(tmp_path):
+    client, _, desired = world(tmp_path)
+    found = resolved(client, desired[0])
+    assert client.router.refresh(replace(found, session="old")) == found
+
+
+def test_resolve_expects_no_conversation_unless_one_is_named(tmp_path):
+    client, _, desired = world(tmp_path)
+    assert client.router.resolve(desired[0].name, PANE).conversation_id == ""
 
 
 @pytest.mark.parametrize(

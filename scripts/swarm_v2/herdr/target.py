@@ -59,7 +59,7 @@ def _conversation(reply: str) -> tuple[str, str] | None:
     except ValueError:
         return None
     result = document.get("result") if isinstance(document, dict) else None
-    agent = result.get("agent", result) if isinstance(result, dict) else None
+    agent = result.get("agent") if isinstance(result, dict) else None
     if not isinstance(agent, dict):
         return None
     session = agent.get("agent_session")
@@ -93,7 +93,7 @@ class Deliveries:
         staged = self.path.with_name(f".{self.path.name}.tmp")
         staged.unlink(missing_ok=True)
         with os.fdopen(os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as handle:
-            handle.write(json.dumps({"version": VERSION, "deliveries": kept}, indent=2) + "\n")
+            handle.write(json.dumps({"version": VERSION, "deliveries": kept}) + "\n")
             handle.flush()
             os.fsync(handle.fileno())
         staged.replace(self.path)
@@ -116,31 +116,31 @@ class Router:
         self.deliveries, self.mutations = Deliveries(journal), mutations
         self.mismatches: Counter = Counter()
 
-    def _refuse(self, profile_id: str, reason: str, message: str) -> NoReturn:
-        self.mismatches[(profile_id or "bare", reason)] += 1
+    def _refuse(self, reason: str, message: str, profile_id: str = "bare") -> NoReturn:
+        self.mismatches[(profile_id, reason)] += 1
         raise EndpointRefused(reason, message)
 
     def _pane(self, profile_id: str, pane_id: str) -> None:
         if not isinstance(pane_id, str) or not PANE.fullmatch(pane_id):
-            self._refuse(profile_id, "pane_id", "a herdr pane id reads w<number>:p<number>")
+            self._refuse("pane_id", "a herdr pane id reads w<number>:p<number>", profile_id)
 
     def _listed(self, record: Record) -> None:
         saved = next((machine for machine in self.catalog.machines() if machine.profile_id == record.profile_id), None)
         wanted = (record.label, record.target, record.session, True)
         if saved is None or (saved.label, saved.target, saved.session, saved.enabled) != wanted:
-            self._refuse(record.profile_id, "unregistered", f"{record.label} is not saved on this herdr client")
+            self._refuse("unregistered", f"{record.label} is not saved on this herdr client", record.profile_id)
 
     def _owned(self, profile_id: str) -> Record:
         record = next((entry for entry in self.store.load().values() if entry.profile_id == profile_id), None)
         if record is None:
-            self._refuse(profile_id, "unregistered", f"machine {profile_id} is not registered by this controller")
+            self._refuse("unregistered", f"machine {profile_id} is not registered by this controller", profile_id)
         self._listed(record)
         return record
 
     def resolve(self, label: str, pane_id: str, conversation_id: str = "") -> Target:
         found = [entry for entry in self.store.load().values() if entry.label == label and entry.profile_id]
         if len(found) != 1:
-            self._refuse("", "unregistered", f"{label} is not one machine this controller registered")
+            self._refuse("unregistered", f"{label} is not one machine this controller registered")
         record = found[0]
         self._pane(record.profile_id, pane_id)
         self._listed(record)
@@ -148,31 +148,31 @@ class Router:
 
     def refresh(self, target: Target) -> Target:
         if not _qualified(target):
-            self._refuse("", "bare_pane", BARE)
+            self._refuse("bare_pane", BARE)
         execution_id = target.incarnation.rpartition("/")[0]
         record = self.store.load().get(execution_id)
         if record is None or record.profile_id is None:
-            self._refuse(target.profile_id, "unregistered", f"{execution_id} has no registered terminal")
+            self._refuse("unregistered", f"{execution_id} has no registered terminal", target.profile_id)
         if _incarnation(record) != target.incarnation:
-            self._refuse(target.profile_id, "stale_incarnation", f"{target.incarnation} was replaced")
+            self._refuse("stale_incarnation", f"{target.incarnation} was replaced", target.profile_id)
         self._listed(record)
         return replace(target, profile_id=record.profile_id, session=record.session)
 
     def command(self, target: Target, operation: str, *args: str) -> list[str]:
         if not _qualified(target):
-            self._refuse("", "bare_pane", BARE)
+            self._refuse("bare_pane", BARE)
         if operation not in READS | MUTATIONS:
-            self._refuse(target.profile_id, "operation", f"{operation} does not address one pane")
+            self._refuse("operation", f"{operation} does not address one pane", target.profile_id)
         self._pane(target.profile_id, target.pane_id)
         record = self._owned(target.profile_id)
         if record.session != target.session:
-            self._refuse(target.profile_id, "session_mismatch", f"{record.label} is saved for another remote session")
+            self._refuse("session_mismatch", f"{record.label} is saved for another remote session", target.profile_id)
         if _incarnation(record) != target.incarnation:
-            self._refuse(target.profile_id, "stale_incarnation", f"{target.incarnation} was replaced")
+            self._refuse("stale_incarnation", f"{target.incarnation} was replaced", target.profile_id)
         try:
             base = self.qualifier.require(target.profile_id, target.incarnation, operation)
         except Incompatible as exc:
-            self._refuse(target.profile_id, "incompatible", str(exc))
+            self._refuse("incompatible", str(exc), target.profile_id)
         return [*base, target.pane_id, *args]
 
     def _confirm(self, target: Target) -> None:
@@ -185,17 +185,17 @@ class Router:
             done = None
         found = _conversation(done.stdout) if done is not None and done.returncode == 0 else None
         if found is None or not found[1]:
-            self._refuse(target.profile_id, "conversation_unconfirmed", f"{target.pane_id} reported no conversation")
+            self._refuse("conversation_unconfirmed", f"{target.pane_id} reported no conversation", target.profile_id)
         if found != (target.pane_id, target.conversation_id):
-            self._refuse(target.profile_id, "conversation_mismatch", f"{target.pane_id} holds another conversation")
+            self._refuse("conversation_mismatch", f"{target.pane_id} holds another conversation", target.profile_id)
 
     def send(self, target: Target, operation: str, operation_id: str, *args: str) -> subprocess.CompletedProcess | None:
         if not self.mutations:
             raise EndpointRefused("read_only", "pane mutations are switched off; only read only inspection runs")
         if not _qualified(target):
-            self._refuse("", "bare_pane", BARE)
+            self._refuse("bare_pane", BARE)
         if operation not in MUTATIONS:
-            self._refuse(target.profile_id, "operation", f"{operation} is not a pane mutation")
+            self._refuse("operation", f"{operation} is not a pane mutation", target.profile_id)
         if not isinstance(operation_id, str) or not operation_id:
             raise EndpointRefused("operation_id", "a pane mutation needs an operation id")
         key = f"{target.incarnation}/{target.pane_id}"
@@ -222,7 +222,7 @@ class Router:
 
     def _replayed(self, held: dict, target: Target, key: str, operation_id: str) -> None:
         if held.get("target") != key:
-            self._refuse(target.profile_id, "operation_reused", f"{operation_id} was sent to another pane")
+            self._refuse("operation_reused", f"{operation_id} was sent to another pane", target.profile_id)
         if held.get("state") != "sent":
             raise EndpointRefused("ambiguous_delivery", f"{operation_id} may have reached {key}")
 
