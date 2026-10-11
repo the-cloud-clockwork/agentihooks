@@ -66,13 +66,11 @@ def pod_api(environ: Mapping[str, str], namespace: str) -> PodApi:
     return PodClient(http, namespace)
 
 
-def pod_policy(path: str, slug: str) -> dict:
+def pod_policy(path: str) -> dict:
     try:
         policy = load_policy(path)
     except PodSpecRefused as refused:
         raise WorkerSettingsRefused(str(refused)) from None
-    if policy["owner"] != owner_for(slug):
-        raise WorkerSettingsRefused(f"the Pod policy owner must be {owner_for(slug)}")
     if policy["provider_accounts"]:
         raise WorkerSettingsRefused(
             f"the Pod policy must name no provider account: the approved accounts are the keys of Secret {INDEX}"
@@ -126,7 +124,7 @@ class Workers:
             raise WorkerSettingsRefused(f"{CAP_ENV} must be a whole number above zero")
         if not image_tag.is_tag(environ[IMAGE_TAG_ENV]):
             raise WorkerSettingsRefused(f"{IMAGE_TAG_ENV} must be an image tag, never a digest")
-        policy, profile = pod_policy(environ[POLICY_ENV], slug), environ[PROFILE_ENV]
+        policy, profile = pod_policy(environ[POLICY_ENV]), environ[PROFILE_ENV]
         if profile in LOCAL_PROFILES:
             raise WorkerSettingsRefused(f"{PROFILE_ENV} {profile} runs only on the workstation")
         if profile not in policy["profiles"]:
@@ -173,7 +171,7 @@ class Workers:
 
     def transport(self, environ: Mapping[str, str], slug: str) -> KubernetesTransport:
         api = pod_api(environ, self.policy["namespace"])
-        template = PodTemplate(self.policy, SecretKeys(api))
+        template = PodTemplate(self.policy, owner_for(slug), SecretKeys(api))
         mounted = template if self.terminal is None else TerminalTemplate(template)
         return KubernetesTransport(api, slug, mounted)
 

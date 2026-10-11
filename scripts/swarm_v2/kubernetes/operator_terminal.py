@@ -50,7 +50,7 @@ def authority(environ: Mapping[str, str]) -> TerminalAuthority:
 def terminal(
     slug: str, environ: Mapping[str, str], home: ClientHome, run: Run, lookup: Lookup | None = None
 ) -> Terminal:
-    namespace = pod_policy(_setting(environ, POLICY_ENV), slug)["namespace"]
+    namespace = pod_policy(_setting(environ, POLICY_ENV))["namespace"]
     return Terminal(home, authority(environ), namespace, run, lookup)
 
 

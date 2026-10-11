@@ -827,14 +827,19 @@ def test_a_difference_outside_the_probes_is_reported():
 
 
 def test_the_command_line_renders_the_pod_as_sorted_json(capsys):
-    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(LAUNCH)]) == 0
+    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(LAUNCH), "--swarm", "fixture"]) == 0
     assert capsys.readouterr().out == json.dumps(render()[1].pod, sort_keys=True) + "\n"
 
 
 def test_the_command_line_refuses_a_hostile_launch_without_output(tmp_path, capsys):
     doc = launch_doc()
     doc["provider_account"] = "cluster-admin@token.io"
-    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(write(tmp_path, doc, "l.json"))]) == 1
+    assert (
+        spec.main(
+            ["render", "--policy", str(POLICY), "--launch", str(write(tmp_path, doc, "l.json")), "--swarm", "fixture"]
+        )
+        == 1
+    )
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == "launch provider_account is not an approved provider account\n"
@@ -844,9 +849,9 @@ def test_the_command_line_refuses_unreadable_inputs(tmp_path, capsys):
     missing = tmp_path / "missing.json"
     broken = tmp_path / "broken.json"
     broken.write_text("{not json")
-    assert spec.main(["render", "--policy", str(missing), "--launch", str(LAUNCH)]) == 1
+    assert spec.main(["render", "--policy", str(missing), "--launch", str(LAUNCH), "--swarm", "fixture"]) == 1
     assert capsys.readouterr().err == f"{missing} is not a readable JSON file\n"
-    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(broken)]) == 1
+    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(broken), "--swarm", "fixture"]) == 1
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == f"{broken} is not a readable JSON file\n"
@@ -863,20 +868,26 @@ def test_an_unreadable_policy_is_refused_as_input(tmp_path):
 
 
 def test_the_command_line_digest_action_prints_the_spec_digest(capsys):
-    assert spec.main(["digest", "--policy", str(POLICY), "--launch", str(LAUNCH)]) == 0
+    assert spec.main(["digest", "--policy", str(POLICY), "--launch", str(LAUNCH), "--swarm", "fixture"]) == 0
     assert capsys.readouterr().out == render()[1].digest + "\n"
 
 
 def test_the_command_line_refuses_an_unknown_action(capsys):
-    assert spec.main(["apply", "--policy", str(POLICY), "--launch", str(LAUNCH)]) == 64
+    assert spec.main(["apply", "--policy", str(POLICY), "--launch", str(LAUNCH), "--swarm", "fixture"]) == 64
     assert " ".join(capsys.readouterr().err.split()).startswith(
-        "usage: python -m scripts.swarm_v2.kubernetes.spec [-h] --policy POLICY --launch LAUNCH {render,digest}"
+        "usage: python -m scripts.swarm_v2.kubernetes.spec [-h] --policy POLICY --launch LAUNCH --swarm SWARM {render,digest}"
     )
 
 
-@pytest.mark.parametrize("missing", ["--policy", "--launch"])
-def test_the_command_line_requires_both_inputs(missing):
-    argv = ["render", "--policy", str(POLICY), "--launch", str(LAUNCH)]
+def test_the_command_line_labels_the_pod_with_the_named_swarms_owner(capsys):
+    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(LAUNCH), "--swarm", "other"]) == 0
+    labels = json.loads(capsys.readouterr().out)["metadata"]["labels"]
+    assert labels["swarm.agentihooks.io/controller-owner"] == "agentihooks-swarm-other"
+
+
+@pytest.mark.parametrize("missing", ["--policy", "--launch", "--swarm"])
+def test_the_command_line_requires_every_input(missing):
+    argv = ["render", "--policy", str(POLICY), "--launch", str(LAUNCH), "--swarm", "fixture"]
     index = argv.index(missing)
     del argv[index : index + 2]
     assert spec.main(argv) == 64
