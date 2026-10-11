@@ -153,7 +153,7 @@ def _positive() -> tuple[dict, bool]:
         second["knowledge_stale"],
         all(
             o["alert_actionability_review"]["actionable"] == o["alert_actionability_review"]["alerts"]
-            for o in observed.values()
+            for o in (first, second)
         ),
         first["leaked"] == [] and second["leaked"] == [],
         len(recorded) == 2,
