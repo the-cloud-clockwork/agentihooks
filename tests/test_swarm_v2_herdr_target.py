@@ -131,7 +131,7 @@ def test_a_stale_server_incarnation_is_refused_before_any_pane_command(tmp_path)
     reason, message = refusal(lambda: client.router.send(found, "agent_prompt", "op", "x"))
     assert reason == "stale_incarnation"
     assert desired[0].incarnation in message
-    assert len(fleet.commands) == before
+    assert fleet.commands[before:] == [["herdr", "machine", "list", "--json"]]
 
 
 def test_an_incompatible_server_is_refused_and_counted(tmp_path):
