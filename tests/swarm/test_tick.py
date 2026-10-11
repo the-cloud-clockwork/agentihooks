@@ -86,7 +86,7 @@ class FakeRuntime:
         self.conversation_ids, self.named, self.closed_spaces, self.typed = {}, [], [], {}
         self.capacity_for = []
         self.homes, self.duplicates, self.refusals, self.reaped = {}, set(), {}, []
-        self.nudge_refusals = {}
+        self.nudge_refusals, self.nudge_calls = {}, []
 
     def has_capacity(self, config):
         self.capacity_for.append(config.slug)
@@ -157,6 +157,7 @@ class FakeRuntime:
 
     def nudge(self, agent, text):
         self.nudged.append(agent.name)
+        self.nudge_calls.append((agent.idle_ticks, text))
         return self.nudge_refusals.get(agent.name)
 
     def name_pane(self, agent):
@@ -649,33 +650,52 @@ def idle_until_nudged(store, runtime):
     return [tick("sw", store, ledger, runtime, now_ms=2_000 + n) for n in range(IDLE_NUDGE_TICKS)][-1]
 
 
-def test_an_accepted_nudge_is_reported_as_nudged(store):
+@pytest.mark.parametrize("answer", [None, ""])
+def test_an_accepted_nudge_is_reported_as_nudged(store, answer):
+    from scripts.swarm.tick import IDLE_NUDGE_TICKS, NUDGE
+
     runtime = FakeRuntime()
-    actions = idle_until_nudged(store, runtime)
-    assert "nudged engineer@a1b2c3-0001" in actions and not [a for a in actions if "refused" in a]
-    assert runtime.nudged == ["engineer@a1b2c3-0001"]
+    runtime.nudge_refusals["engineer@a1b2c3-0001"] = answer
+    assert idle_until_nudged(store, runtime) == ["nudged engineer@a1b2c3-0001"]
+    assert runtime.nudge_calls == [(IDLE_NUDGE_TICKS, NUDGE.format(slug="sw"))]
 
 
 def test_a_refused_nudge_is_reported_as_refused_with_its_reason(store):
+    from scripts.swarm.tick import IDLE_NUDGE_TICKS, NUDGE
+
     runtime = FakeRuntime()
     runtime.nudge_refusals["engineer@a1b2c3-0001"] = "kubernetes lacks command"
     actions = idle_until_nudged(store, runtime)
-    assert "nudge to engineer@a1b2c3-0001 refused: kubernetes lacks command" in actions
-    assert "nudged engineer@a1b2c3-0001" not in actions
-    assert runtime.nudged == ["engineer@a1b2c3-0001"]
+    assert actions == ["nudge to engineer@a1b2c3-0001 refused: kubernetes lacks command"]
+    assert runtime.nudge_calls == [(IDLE_NUDGE_TICKS, NUDGE.format(slug="sw"))]
 
 
-def test_a_nudge_the_routed_runtime_refuses_is_reported_with_the_router_reason(store):
-    from scripts.swarm_v2.runtime.base import Capability, RuntimeRouter
+def routed_tick_runtime(herdr, capabilities=None):
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
     from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
     from scripts.swarm_v2.runtime.routed import RoutedRuntime
 
-    herdr = FakeRuntime()
     local = LocalHerdrRuntime(herdr)
-    local.capabilities = LocalHerdrRuntime.capabilities - {Capability.COMMAND}
-    actions = idle_until_nudged(store, RoutedRuntime(herdr, RuntimeRouter([local])))
-    assert "nudge to engineer@a1b2c3-0001 refused: local lacks command" in actions
-    assert "nudged engineer@a1b2c3-0001" not in actions and herdr.nudged == []
+    local.capabilities = local.capabilities if capabilities is None else capabilities
+    return RoutedRuntime(herdr, RuntimeRouter([local]))
+
+
+def test_a_nudge_the_routed_runtime_refuses_is_reported_with_the_router_reason(store):
+    from scripts.swarm_v2.runtime.base import Capability
+    from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
+
+    herdr = FakeRuntime()
+    runtime = routed_tick_runtime(herdr, LocalHerdrRuntime.capabilities - {Capability.COMMAND})
+    actions = idle_until_nudged(store, runtime)
+    assert actions == ["nudge to engineer@a1b2c3-0001 refused: local lacks command"] and herdr.nudged == []
+
+
+def test_a_local_nudge_herdr_fails_to_deliver_is_reported_as_refused_with_the_failure(store):
+    herdr = FakeRuntime()
+    herdr.nudge_refusals["engineer@a1b2c3-0001"] = "agent_not_found"
+    actions = idle_until_nudged(store, routed_tick_runtime(herdr))
+    assert actions == ["nudge to engineer@a1b2c3-0001 refused: agent_not_found"]
+    assert herdr.nudged == ["engineer@a1b2c3-0001"]
 
 
 def test_the_nudge_is_skipped_while_the_pane_holds_typed_input(store):
