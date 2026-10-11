@@ -204,7 +204,7 @@ def drill(tmp_path, monkeypatch):
     from scripts.inbox.store import InboxStore, Unreachable
     from scripts.swarm import outage, snapshot
     from scripts.swarm.store import RedisStore, SwarmConfig
-    from scripts.swarm_ledger import ledger_server
+    from scripts.swarm_ledger import ledger_link, ledger_server
 
     server = fakeredis.FakeServer()
     redis = fakeredis.FakeRedis(server=server, decode_responses=True)
