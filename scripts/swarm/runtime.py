@@ -402,9 +402,11 @@ class HerdrRuntime:
         return self.choose(saved["harness"], environ)
 
     def _profile_decision(self, config, lane, chosen, task, saved, relaunch, environ):
-        decision = profile_choice.kept(task, saved, relaunch) or timing.call(
-            profile_choice.choose, config.slug, lane, chosen, task, environ, getattr(config, "overlays", {})
-        )
+        decision = profile_choice.kept(task, saved, relaunch)
+        if decision is None:
+            decision = timing.call(
+                profile_choice.choose, config.slug, lane, chosen, task, environ, getattr(config, "overlays", {})
+            )
         if not decision.bundle_revision:
             kept = _recorded_revision(saved) if saved.get("profile") == decision.profile else ""
             decision = replace(decision, bundle_revision=kept or overlays.revision())

@@ -1,7 +1,6 @@
 """The capacity and registry given here must authorize with LaunchAuthority.verify, never register."""
 
 import json
-import os
 import subprocess
 import sys
 from collections.abc import Callable
@@ -73,7 +72,7 @@ def seat_profile(request: SpawnRequest) -> str:
     relaunch = live_binding.complete(task.get("launch_assignment"))
     saved = relaunch or profile_choice.transfer(task)
     decision = profile_choice.kept(task, saved, relaunch) or profile_choice.pick(
-        request.config.slug, request.lane, lane, task, dict(os.environ)
+        request.config.slug, request.lane, lane, task
     )
     return decision.profile
 

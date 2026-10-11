@@ -59,7 +59,7 @@ def choose(
         raise ProfileUnresolved(f"task {task.get('id')} overlays are refused: {exc}") from exc
 
 
-def pick(slug: str, lane: str, lane_config: dict, task: dict, environ: dict) -> ProfileDecision:
+def pick(slug: str, lane: str, lane_config: dict, task: dict, environ: dict | None = None) -> ProfileDecision:
     pinned = lane_config.get("profile") or DEFAULT_PROFILES[lane]
     if task.get("profile"):
         return ProfileDecision(task["profile"], "task", "explicit task profile")
