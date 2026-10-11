@@ -229,7 +229,7 @@ def sample(name: str, events: Sequence[Mapping], read: Mapping, ups: Mapping) ->
         "outcome": STARTED if started else failure or PENDING,
         "transient": failure if started else "",
         "sandbox_retries": sum(1 for e in events if e["reason"] == "FailedCreatePodSandBox"),
-        "failure_ms": _gap(failed, begun) if failure and not started else None,
+        "failure_ms": _gap(failed, begun) if failure else None,
         "stages": {stage: stages.get(stage) for stage in STAGES},
     }
 
@@ -267,7 +267,7 @@ def summarize(group: Sequence[Mapping]) -> dict:
         "pending": sum(1 for e in group if e["outcome"] == PENDING),
         "failures": dict(sorted(Counter(e["outcome"] for e in failed).items())),
         "transient": dict(sorted(Counter(e["transient"] for e in started if e["transient"]).items())),
-        "failure_ms": _spread(e["failure_ms"] for e in failed),
+        "failure_ms": _spread(e["failure_ms"] for e in group),
         "from_zero": sum(1 for e in group if e["from_zero"]),
         "node_sources": dict(sorted(Counter(e["node_source"] for e in group).items())),
         "stages": {stage: spread for stage, spread in stages.items() if spread},
@@ -311,8 +311,11 @@ def claim(samples: Sequence[Mapping], label: str) -> list[Mapping]:
 
 
 def unbounded(samples: Sequence[Mapping], grace_ms: int = PULL_GRACE_MS) -> list[str]:
-    """Pull failures classified later than the grace, or never timed, are unbounded."""
+    """Pull failures, final or transient, classified later than the grace or never timed are unbounded."""
     pulls = (REGISTRY_UNAVAILABLE, IMAGE_NOT_FOUND, UNAUTHORIZED, IMAGE_PULL)
     return [
-        e["pod"] for e in samples if e["outcome"] in pulls and (e["failure_ms"] is None or e["failure_ms"] > grace_ms)
+        e["pod"]
+        for e in samples
+        if (e["outcome"] in pulls or e.get("transient") in pulls)
+        and (e["failure_ms"] is None or e["failure_ms"] > grace_ms)
     ]

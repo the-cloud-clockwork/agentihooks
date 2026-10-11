@@ -183,7 +183,7 @@ def test_a_failure_the_pod_started_past_is_transient_and_counted():
     events = warm_events() + [ev("anton-prod/web", "FailedCreatePodSandBox", 1.5)] * 2
     [entry] = stages.attribute(read(sorted(events, key=lambda e: e["at"])))
     assert (entry["outcome"], entry["transient"], entry["sandbox_retries"]) == ("started", "sandbox", 2)
-    assert entry["failure_ms"] is None
+    assert entry["failure_ms"] == 500
 
 
 @pytest.mark.parametrize(
@@ -260,6 +260,7 @@ def test_the_report_counts_pending_and_transient_separately():
     row = stages.report(stages.attribute(read(pending + retried)))["scenarios"]
     assert row["warm-node/unknown-image"]["pending"] == 1 and row["warm-node/unknown-image"]["failures"] == {}
     assert row["warm-node/cached-image"]["transient"] == {"sandbox": 1}
+    assert row["warm-node/cached-image"]["failure_ms"]["p50"] == 500
 
 
 def test_percentiles_use_nearest_rank_over_started_samples():
@@ -315,9 +316,12 @@ def test_pull_failures_past_the_grace_or_never_timed_are_unbounded():
         {"pod": "d", "outcome": "sandbox", "failure_ms": None},
         {"pod": "e", "outcome": "started", "failure_ms": None},
         {"pod": "f", "outcome": "registry_unauthorized", "failure_ms": 1},
+        {"pod": "g", "outcome": "started", "transient": "registry_unavailable", "failure_ms": 120_001},
+        {"pod": "h", "outcome": "started", "transient": "sandbox", "failure_ms": 120_001},
+        {"pod": "i", "outcome": "started", "transient": "image_pull", "failure_ms": 2},
     ]
-    assert stages.unbounded(samples) == ["b", "c"]
-    assert stages.unbounded(samples, grace_ms=0) == ["a", "b", "c", "f"]
+    assert stages.unbounded(samples) == ["b", "c", "g"]
+    assert stages.unbounded(samples, grace_ms=0) == ["a", "b", "c", "f", "g", "i"]
 
 
 def raw_capture():

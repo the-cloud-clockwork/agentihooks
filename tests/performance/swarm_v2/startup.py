@@ -96,24 +96,28 @@ def capture(output: Path, removed: list[dict]) -> None:
     (output / "instances.json").write_text(json.dumps({"Reservations": []}))
 
 
-def scenario(image: str, nodes: list[str], grace: int, output: Path) -> dict:
-    """Each node pulls uncached then cached; the first node then pulls with the registry stopped and recovers."""
+def scenario(image: str, nodes: list[str], grace: int, outage: int, output: Path) -> dict:
+    """Each node pulls uncached then cached; every node then pulls with the registry stopped for `outage` seconds,
+    and each Pod must start once the registry returns."""
     kubectl("create", "namespace", NAMESPACE)
-    outcome = {"nodes": nodes, "ready": {}, "interruption": {}}
+    outcome = {"nodes": nodes, "ready": {}, "interruption": {"outage_seconds": outage}}
     for node in nodes:
         for phase in ("uncached", "cached"):
             name = f"{phase}-{node}"
             launch(name, node, image)
             outcome["ready"][name] = wait_ready(name, 300)
-    interrupted = nodes[0]
     removed = remove_pods([f"{phase}-{node}" for node in nodes for phase in ("uncached", "cached")])
-    forget_image(interrupted, image)
+    for node in nodes:
+        forget_image(node, image)
     run("docker", "stop", REGISTRY)
-    name = f"interrupted-{interrupted}"
-    launch(name, interrupted, image)
-    outcome["interruption"]["classified_within_grace"] = wait_pull_failure(name, grace)
+    stopped = time.monotonic()
+    names = [f"interrupted-{node}" for node in nodes]
+    for name, node in zip(names, nodes, strict=True):
+        launch(name, node, image)
+    outcome["interruption"]["classified_within_grace"] = {name: wait_pull_failure(name, grace) for name in names}
+    time.sleep(max(outage - (time.monotonic() - stopped), 0))
     run("docker", "start", REGISTRY)
-    outcome["interruption"]["recovered"] = wait_ready(name, 420)
+    outcome["interruption"]["recovered"] = {name: wait_ready(name, 420) for name in names}
     capture(output, removed)
     return outcome
 
@@ -123,10 +127,11 @@ def main() -> None:
     parser.add_argument("--image", required=True, help="the image reference the kind nodes pull")
     parser.add_argument("--nodes", nargs="+", required=True)
     parser.add_argument("--grace", type=int, default=120)
+    parser.add_argument("--outage", type=int, default=90)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
-        outcome = scenario(args.image, args.nodes, args.grace, args.output)
+        outcome = scenario(args.image, args.nodes, args.grace, args.outage, args.output)
     finally:
         kubectl("delete", "namespace", NAMESPACE, "--wait=false", check=False)
     (args.output / "fixture.json").write_text(json.dumps(outcome, indent=2, sort_keys=True) + "\n")
