@@ -94,7 +94,7 @@ def quota_predecessor(task: dict) -> tuple[str, str] | None:
     """The account a quota handoff leaves, read as ``HerdrRuntime.quota_requirements`` reads it."""
     envelope = task.get("handoff_envelope") or {}
     saved = task.get("launch_assignment") or envelope.get("launch") or {}
-    if envelope.get("reason") != "quota" or not saved.get("account"):
+    if envelope.get("reason") != "quota" or not saved.get("harness") or not saved.get("account"):
         return None
     return saved["harness"], saved["account"]
 

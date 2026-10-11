@@ -680,6 +680,7 @@ def test_a_tick_spawn_launches_on_the_account_its_route_chooses_for_the_launch_c
         ({"reason": "quota"}, {"harness": "claude", "account": "assigned-key"}, ("claude", "assigned-key")),
         ({"reason": "recycle", "launch": {"harness": "claude", "account": "spent-key"}}, {}, None),
         ({"reason": "quota", "launch": {"harness": "claude"}}, {}, None),
+        ({"reason": "quota", "launch": {"account": "spent-key"}}, {}, None),
         ({}, {}, None),
     ],
 )
