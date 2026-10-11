@@ -107,6 +107,12 @@ def route(target: str, doc: dict, owners: Callable[[], dict[str, str]], live: li
     return owner if owner in live else lead
 
 
+def hive_targets(saved: str | None, current: list[str]) -> dict[str, str]:
+    """A hive whose owning seat was removed by a lower count goes back to the lead."""
+    hives = json.loads(saved or "{}")
+    return {f"{HIVES}/{hive}": owner for hive, owner in hives.items() if owner in current}
+
+
 class MasterSeats:
     def __init__(self, redis) -> None:
         self.redis = redis
@@ -127,10 +133,7 @@ class MasterSeats:
         self.redis.hset(self.key(slug), HIVES, json.dumps({**hives, hive_id: owner}, sort_keys=True))
 
     def hive_owners(self, slug: str) -> dict[str, str]:
-        """A hive whose owning seat was removed by a lower count goes back to the lead."""
-        current = seats(slug, self.count(slug))
-        hives = json.loads(self.redis.hget(self.key(slug), HIVES) or "{}")
-        return {f"{HIVES}/{hive}": owner for hive, owner in hives.items() if owner in current}
+        return hive_targets(self.redis.hget(self.key(slug), HIVES), seats(slug, self.count(slug)))
 
     def owners(self, slug: str, doc: dict) -> dict[str, str]:
         from redis.exceptions import WatchError
@@ -144,6 +147,7 @@ class MasterSeats:
                     saved = json.loads(pipe.hget(key, "owners") or "{}")
                     known = json.loads(pipe.hget(key, "seats") or "[]")
                     current = seats(slug, int(pipe.hget(key, "count") or DEFAULT_COUNT))
+                    hives = hive_targets(pipe.hget(key, HIVES), current)
                     owners = assign(phases, current, saved, known)
                     if (owners, current) != (saved, known):
                         pipe.multi()
@@ -151,7 +155,7 @@ class MasterSeats:
                             key, mapping={"owners": json.dumps(owners, sort_keys=True), "seats": json.dumps(current)}
                         )
                         pipe.execute()
-                    return {**owners, **self.hive_owners(slug)}
+                    return {**owners, **hives}
                 except WatchError:
                     continue
         raise MasterError(f"master seats of {slug} kept changing; phase owners were not saved")
