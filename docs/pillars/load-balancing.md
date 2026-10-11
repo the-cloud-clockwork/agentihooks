@@ -507,7 +507,8 @@ days, so the refresher below keeps it alive.
   or is refused (`--openbao` off a terminal without both variables), the login
   exits 1 after the block was already written.
 - Every account lives in one KV v2 secret, `secret/agentihooks/codex-creds`
-  unless `AGENTIHOOKS_CODEX_CREDS_PATH` names another path, under the keys `AH_CX_TOKEN_<slug>` and `AH_CX_REFRESH_<slug>`. A write merges
+  unless `AGENTIHOOKS_CODEX_CREDS_PATH` names another path, under the keys
+  `AH_CX_TOKEN_<slug>` and `AH_CX_REFRESH_<slug>`. A write merges
   its keys over the current ones with check-and-set, retried up to three times
   on a conflict, and reports key names and the key count only.
 
