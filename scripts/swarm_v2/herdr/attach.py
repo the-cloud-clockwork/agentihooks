@@ -22,9 +22,9 @@ REFUSALS = (("Host key verification failed", "host_key_changed"), ("Permission d
 Run = Callable[[list[str]], subprocess.CompletedProcess]
 
 
-def route(endpoint: Endpoint, lookup: Callable = socket.getaddrinfo) -> str:
+def route(endpoint: Endpoint, lookup: Callable | None = None) -> str:
     try:
-        found = lookup(endpoint.host, PORT, type=socket.SOCK_STREAM)
+        found = (lookup or socket.getaddrinfo)(endpoint.host, PORT, type=socket.SOCK_STREAM)
     except OSError:
         found = []
     addresses = sorted({info[4][0] for info in found})
@@ -37,33 +37,48 @@ def route(endpoint: Endpoint, lookup: Callable = socket.getaddrinfo) -> str:
 
 @dataclass(frozen=True)
 class ClientHome:
+    """herdr's -F config includes $HOME/.ssh/config, but its no -F health check reads the passwd home's config."""
+
     root: Path
     user: str = USER
     port: int = PORT
 
     @property
     def config(self) -> Path:
-        return self.root / "ssh_config"
+        return self.root / ".ssh" / "config"
 
     @property
-    def ssh(self) -> Path:
-        return self.root / "bin" / "ssh"
+    def terminals(self) -> Path:
+        return self.root / ".ssh" / "swarm-terminals"
 
     @property
     def identity(self) -> Path:
-        return self.root / "id_ed25519"
+        return self.terminals / "id_ed25519"
 
     def known_hosts(self, endpoint: Endpoint) -> Path:
-        return self.root / "known_hosts" / endpoint.name
+        return self.terminals / "known_hosts" / endpoint.name
 
     def certificate(self, endpoint: Endpoint) -> Path:
-        return self.root / "certificates" / f"{endpoint.name}-cert.pub"
+        return self.terminals / "certificates" / f"{endpoint.name}-cert.pub"
 
     def block(self, endpoint: Endpoint) -> Path:
-        return self.root / "endpoints" / f"{endpoint.name}.conf"
+        return self.terminals / "endpoints" / f"{endpoint.name}.conf"
+
+    @property
+    def include(self) -> str:
+        return f'Include "{self.terminals}/endpoints/*.conf"\n'
+
+    @property
+    def ssh(self) -> Path:
+        return self.terminals / "bin" / "ssh"
+
+    @property
+    def wrapper(self) -> str:
+        return f'#!/bin/sh\ncase " $* " in *" -F "*) exec {SSH} "$@";; esac\nexec {SSH} -F "{self.config}" "$@"\n'
 
     def environment(self, base: dict[str, str]) -> dict[str, str]:
-        return {**base, "PATH": f"{self.ssh.parent}{os.pathsep}{base.get('PATH', os.defpath)}"}
+        path = f"{self.ssh.parent}{os.pathsep}{base.get('PATH', os.defpath)}"
+        return {**base, "HOME": str(self.root), "PATH": path}
 
 
 def ssh_block(home: ClientHome, endpoint: Endpoint, address: str) -> str:
@@ -107,7 +122,7 @@ class Terminal:
         authority: TerminalAuthority,
         namespace: str,
         run: Run,
-        lookup: Callable = socket.getaddrinfo,
+        lookup: Callable | None = None,
     ) -> None:
         self.home, self.authority, self.namespace = home, authority, namespace
         self.run, self.lookup = run, lookup
@@ -133,13 +148,15 @@ class Terminal:
         _write(home.certificate(endpoint), self.authority.issue(scope, self._client_key()))
         _write(home.known_hosts(endpoint), f"{endpoint.host} {host_public}\n")
         _write(home.block(endpoint), ssh_block(home, endpoint, address))
-        _write(home.config, f'Include "{home.block(endpoint).parent}/*.conf"\n')
-        _write(home.ssh, f'#!/bin/sh\nexec {SSH} -F "{home.config}" "$@"\n')
+        current = home.config.read_text() if home.config.exists() else ""
+        if home.include not in current:
+            _write(home.config, home.include + current)
+        _write(home.ssh, home.wrapper)
         home.ssh.chmod(0o700)
         return endpoint
 
     def _connect(self, endpoint: Endpoint) -> None:
-        done = self.run([str(self.home.ssh), endpoint.host, "true"])
+        done = self.run([SSH, "-F", str(self.home.config), endpoint.host, "true"])
         if done.returncode != 0:
             reason = _classify(done.stderr or "")
             raise EndpointRefused(reason, f"{endpoint.name} terminal refused the connection: {reason}")

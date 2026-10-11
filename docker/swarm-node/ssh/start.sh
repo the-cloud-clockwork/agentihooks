@@ -8,6 +8,7 @@ listen="${SWARM_TERMINAL_LISTEN:-0.0.0.0}"
 attempts="${SWARM_TERMINAL_ATTEMPTS:-/home/worker/attempts}"
 launch="${SWARM_TERMINAL_LAUNCH:-/var/run/swarm/launch/launch.json}"
 python="${SWARM_TERMINAL_PYTHON:-/opt/venv/bin/python}"
+session_path="${SWARM_TERMINAL_PATH:-/usr/local/bin:/usr/bin:/bin}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 for name in host_key user_ca.pub principals; do
@@ -21,6 +22,6 @@ umask 077
 mkdir -p "$state"
 install -m 0600 "$material/host_key" "$state/host_key"
 sed -e "s|@PORT@|$port|" -e "s|@LISTEN@|$listen|" -e "s|@STATE@|$state|g" -e "s|@MATERIAL@|$material|g" \
-    -e "s|@USER@|$(id -un)|" -e "s|@PYTHON@|$python|" -e "s|@ATTEMPTS@|$attempts|" -e "s|@LAUNCH@|$launch|" \
+    -e "s|@USER@|$(id -un)|" -e "s|@PYTHON@|$python|" -e "s|@ATTEMPTS@|$attempts|" -e "s|@LAUNCH@|$launch|" -e "s|@PATH@|$session_path|" \
     "$here/sshd_config" > "$state/sshd_config"
 exec /usr/sbin/sshd -f "$state/sshd_config" -E "$state/sshd.log"

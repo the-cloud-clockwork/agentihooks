@@ -6,6 +6,7 @@ AuthorizedKeysFile none
 TrustedUserCAKeys @MATERIAL@/user_ca.pub
 AuthorizedPrincipalsFile @MATERIAL@/principals
 AllowUsers @USER@
+SetEnv PATH=@PATH@
 ForceCommand @PYTHON@ -m scripts.swarm_v2.herdr.session --material @MATERIAL@ --attempts @ATTEMPTS@ --launch @LAUNCH@
 PermitRootLogin no
 PubkeyAuthentication yes

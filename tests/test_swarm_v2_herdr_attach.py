@@ -59,7 +59,7 @@ class Runner:
 
     def __call__(self, command: list[str]) -> subprocess.CompletedProcess:
         self.commands.append(list(command))
-        if command[0] == str(self.home.ssh):
+        if command[0] == attach.SSH:
             return self.ssh
         if command[:3] == ["herdr", "machine", "list"]:
             return self.listed
@@ -107,31 +107,50 @@ def test_a_route_with_any_public_address_is_refused():
     )
 
 
-def test_the_default_lookup_is_the_system_resolver():
-    assert attach.route.__defaults__ == (socket.getaddrinfo,)
-    assert Terminal.__init__.__defaults__ == (socket.getaddrinfo,)
+def test_the_default_lookup_is_the_system_resolver(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(attach.socket, "getaddrinfo", lookup_of(["10.43.12.8"], seen))
+    assert attach.route(endpoint()) == "10.43.12.8"
+    home = ClientHome(tmp_path)
+    authority = TerminalAuthority(Ed25519PrivateKey.generate(), lambda: fixture()["now"])
+    assert Terminal(home, authority, "swarm-workers", Runner(home)).register(scope(), HOST_KEY) == endpoint()
+    assert "  HostName 10.43.12.8" in home.block(endpoint()).read_text().splitlines()
+    assert seen == [(HOST, 2222, socket.SOCK_STREAM)] * 2
 
 
 def test_the_client_home_lays_out_one_file_set_per_endpoint(tmp_path):
     home = ClientHome(tmp_path)
     assert (home.user, home.port) == ("worker", 2222)
-    assert (home.config, home.ssh, home.identity) == (
-        tmp_path / "ssh_config",
-        tmp_path / "bin/ssh",
-        tmp_path / "id_ed25519",
+    terminals = tmp_path / ".ssh" / "swarm-terminals"
+    assert (home.config, home.terminals, home.ssh, home.identity) == (
+        tmp_path / ".ssh" / "config",
+        terminals,
+        terminals / "bin" / "ssh",
+        terminals / "id_ed25519",
     )
-    assert home.known_hosts(endpoint()) == tmp_path / "known_hosts" / NAME
-    assert home.certificate(endpoint()) == tmp_path / "certificates" / f"{NAME}-cert.pub"
-    assert home.block(endpoint()) == tmp_path / "endpoints" / f"{NAME}.conf"
+    assert home.known_hosts(endpoint()) == terminals / "known_hosts" / NAME
+    assert home.certificate(endpoint()) == terminals / "certificates" / f"{NAME}-cert.pub"
+    assert home.block(endpoint()) == terminals / "endpoints" / f"{NAME}.conf"
+    assert home.include == f'Include "{terminals}/endpoints/*.conf"\n'
 
 
-def test_the_client_path_puts_the_pinned_ssh_first(tmp_path):
+def test_the_client_runs_herdr_in_its_own_home_with_its_ssh_first(tmp_path):
     home = ClientHome(tmp_path)
-    assert home.environment({"PATH": "/usr/bin", "HOME": "/h"}) == {
-        "PATH": f"{tmp_path / 'bin'}{os.pathsep}/usr/bin",
-        "HOME": "/h",
+    bin_dir = tmp_path / ".ssh" / "swarm-terminals" / "bin"
+    assert home.environment({"PATH": "/usr/bin", "HOME": "/h", "TERM": "dumb"}) == {
+        "PATH": f"{bin_dir}{os.pathsep}/usr/bin",
+        "HOME": str(tmp_path),
+        "TERM": "dumb",
     }
-    assert home.environment({}) == {"PATH": f"{tmp_path / 'bin'}{os.pathsep}{os.defpath}"}
+    assert home.environment({}) == {"HOME": str(tmp_path), "PATH": f"{bin_dir}{os.pathsep}{os.defpath}"}
+
+
+def test_the_ssh_wrapper_adds_the_client_config_only_when_herdr_passes_none(tmp_path):
+    home = ClientHome(tmp_path)
+    assert home.wrapper == (
+        '#!/bin/sh\ncase " $* " in *" -F "*) exec /usr/bin/ssh "$@";; esac\n'
+        f'exec /usr/bin/ssh -F "{tmp_path}/.ssh/config" "$@"\n'
+    )
 
 
 def test_the_ssh_block_pins_address_host_key_identity_and_certificate(tmp_path):
@@ -142,15 +161,15 @@ def test_the_ssh_block_pins_address_host_key_identity_and_certificate(tmp_path):
         "  Port 22506",
         "  User iamroot",
         f"  HostKeyAlias {HOST}",
-        f'  UserKnownHostsFile "{tmp_path}/known_hosts/{NAME}"',
+        f'  UserKnownHostsFile "{tmp_path}/.ssh/swarm-terminals/known_hosts/{NAME}"',
         "  GlobalKnownHostsFile /dev/null",
         "  StrictHostKeyChecking yes",
         "  CheckHostIP no",
         "  UpdateHostKeys no",
         "  BatchMode yes",
         "  IdentitiesOnly yes",
-        f'  IdentityFile "{tmp_path}/id_ed25519"',
-        f'  CertificateFile "{tmp_path}/certificates/{NAME}-cert.pub"',
+        f'  IdentityFile "{tmp_path}/.ssh/swarm-terminals/id_ed25519"',
+        f'  CertificateFile "{tmp_path}/.ssh/swarm-terminals/certificates/{NAME}-cert.pub"',
         "  ForwardAgent no",
         "  ClearAllForwardings yes",
     ]
@@ -175,8 +194,8 @@ def test_register_writes_the_pinned_client_configuration(tmp_path):
     assert found.register(scope(), HOST_KEY) == endpoint()
     assert home.known_hosts(endpoint()).read_text() == f"{HOST} {HOST_KEY}\n"
     assert home.block(endpoint()).read_text() == attach.ssh_block(home, endpoint(), "10.43.12.7")
-    assert home.config.read_text() == f'Include "{home.root}/endpoints/*.conf"\n'
-    assert home.ssh.read_text() == f'#!/bin/sh\nexec /usr/bin/ssh -F "{home.config}" "$@"\n'
+    assert home.config.read_text() == home.include
+    assert home.ssh.read_text() == home.wrapper
     assert _mode(home.ssh) == 0o700
     certificate = serialization.load_ssh_public_identity(home.certificate(endpoint()).read_bytes())
     key = serialization.load_ssh_private_key(home.identity.read_bytes(), None).public_key()
@@ -185,6 +204,14 @@ def test_register_writes_the_pinned_client_configuration(tmp_path):
         serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH
     ) == key.public_bytes(serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH)
     assert runner.commands == []
+
+
+def test_an_existing_client_ssh_config_keeps_its_lines_after_one_include(tmp_path):
+    found, _ = terminal(tmp_path)
+    attach._write(found.home.config, "Host other\n  User me\n")
+    found.register(scope(), HOST_KEY)
+    found.register(scope(), HOST_KEY)
+    assert found.home.config.read_text() == found.home.include + "Host other\n  User me\n"
 
 
 def test_the_client_key_is_made_once_and_reused(tmp_path):
@@ -201,7 +228,7 @@ def test_attach_connects_saves_the_machine_and_qualifies_its_incarnation(tmp_pat
     verdict = found.attach(scope(), HOST_KEY)
     assert (verdict.target, verdict.incarnation, verdict.compatible) == (NAME, EXE_A, True)
     assert runner.commands[:3] == [
-        [str(found.home.ssh), HOST, "true"],
+        ["/usr/bin/ssh", "-F", str(found.home.config), HOST, "true"],
         ["herdr", "machine", "list", "--json"],
         ["herdr", "machine", "add", "--label", NAME, f"ssh://{HOST}"],
     ]
@@ -253,7 +280,7 @@ def test_a_refused_connection_is_classified_counted_and_ends_the_attach(tmp_path
         reason,
         f"{NAME} terminal refused the connection: {reason}",
     )
-    assert runner.commands == [[str(found.home.ssh), HOST, "true"]]
+    assert runner.commands == [["/usr/bin/ssh", "-F", str(found.home.config), HOST, "true"]]
     assert found.terminal_endpoint_auth_failures() == {reason: 1}
 
 

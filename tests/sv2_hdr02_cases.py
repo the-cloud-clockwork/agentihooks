@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from scripts.swarm_v2.auth_context import Registration
-from scripts.swarm_v2.herdr import endpoints
+from scripts.swarm_v2.herdr import attach, endpoints
 from scripts.swarm_v2.herdr.attach import ClientHome, Terminal
 from scripts.swarm_v2.herdr.endpoints import (
     Clients,
@@ -67,11 +67,11 @@ class World:
     def _ssh(self, host: str) -> subprocess.CompletedProcess:
         server = self.servers[host]
         name = host.split(".", 1)[0]
-        pinned = (self.home.root / "known_hosts" / name).read_text().split(" ", 1)[1].strip()
+        pinned = (self.home.terminals / "known_hosts" / name).read_text().split(" ", 1)[1].strip()
         if pinned != server["key"]:
             return subprocess.CompletedProcess([], 255, "", "Host key verification failed.\r\n")
         certificate = serialization.load_ssh_public_identity(
-            (self.home.root / "certificates" / f"{name}-cert.pub").read_bytes()
+            (self.home.terminals / "certificates" / f"{name}-cert.pub").read_bytes()
         )
         certificate.verify_cert_signature()
         trusted = _openssh(certificate.signature_key()) == self.user_ca
@@ -81,8 +81,8 @@ class World:
 
     def __call__(self, command: list[str]) -> subprocess.CompletedProcess:
         self.commands.append([part.replace(str(self.home.root), "<home>") for part in command])
-        if command[0] == str(self.home.ssh):
-            return self._ssh(command[1])
+        if command[0] == attach.SSH:
+            return self._ssh(command[3])
         if command[:3] == ["herdr", "machine", "list"]:
             return subprocess.CompletedProcess([], 0, json.dumps(self.machines), "")
         if command[:3] == ["herdr", "machine", "add"]:
