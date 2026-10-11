@@ -750,7 +750,11 @@ def test_the_tick_offers_codex_seats_only_on_accounts_the_launcher_routes(
         assert (rc, bool(launched)) == ((0, True) if signed_in else (3, False))
 
 
-def test_a_forced_route_to_a_signed_out_default_is_refused_by_name():
+def test_a_forced_route_to_a_signed_out_default_is_refused_by_name(monkeypatch):
+    monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(router, "quotas", lambda pool, environ: {})
+    with pytest.raises(router.RoutingError, match="'default' is not signed in"):
+        router._route({"HOME": "/home/u"}, "default", _status(1), "")
     pool = [router.CodexAccount("default", signed_in=False)]
     with pytest.raises(router.RoutingError) as refused:
         router.select(pool, {"default": _quota(10.0)}, {}, NOW, route="default")
