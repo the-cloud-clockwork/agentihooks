@@ -549,7 +549,7 @@ def test_restore_never_follows_a_link_already_at_a_target(tmp_path):
     target.parent.mkdir(parents=True)
     target.symlink_to(tmp_path / "dangling.jsonl")
     result = reader(tmp_path).restore("ckpt-1", home, tmp_path, cases.VERSIONS["codex"])
-    assert result == native.Unavailable("codex", "conversation_present")
+    assert result == native.Unavailable("codex", native.ESCAPE)
     assert not (tmp_path / "dangling.jsonl").exists()
 
 

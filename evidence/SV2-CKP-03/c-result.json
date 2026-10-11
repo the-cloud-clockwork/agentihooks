@@ -55,6 +55,7 @@
         "reason": "manifest_absent"
       },
       "interruption": "worker stopped",
+      "native_material_durable_while_manifest_absent": true,
       "native_resume_disabled": {
         "cause": "unqualified_version",
         "decision": [
@@ -160,6 +161,7 @@
         "reason": "manifest_absent"
       },
       "interruption": "worker stopped",
+      "native_material_durable_while_manifest_absent": true,
       "native_resume_disabled": {
         "cause": "unqualified_version",
         "decision": [
