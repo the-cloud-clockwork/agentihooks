@@ -158,6 +158,8 @@ def _predecessor(task):
 
 
 class HerdrRuntime:
+    quota_accounts: Callable[..., list] | None = None
+
     def __init__(self, home=SWARM_HOME, run=subprocess.run, choose=None, herdr=herdr_call):
         self.home, self.run, self.herdr = home, run, herdr
         self.choose = choose or agent_choice.choose
@@ -170,6 +172,8 @@ class HerdrRuntime:
 
     def has_capacity(self, config):
         environ = dict(os.environ)
+        if self.quota_accounts is not None:
+            self._quota_accounts = self.quota_accounts(environ, time.time(), refresh=False)
         if hasattr(self, "_quota_accounts"):
             from scripts.swarm.capacity import free_seats
 
@@ -213,7 +217,8 @@ class HerdrRuntime:
         from scripts.swarm import capacity
 
         placing = demand is None or any(demand.values())
-        self._quota_accounts = capacity.accounts(dict(os.environ), now, refresh=placing and refresh)
+        read = self.quota_accounts or capacity.accounts
+        self._quota_accounts = read(dict(os.environ), now, refresh=placing and refresh)
         self._quota_held = {}
         accounts = self._quota_successor_accounts(requirements) if requirements else None
         if requirements:
@@ -413,7 +418,7 @@ class HerdrRuntime:
             decision = replace(decision, bundle_revision=kept or overlays.revision())
         return decision
 
-    def _planned_account(self, task_id, agent):
+    def planned_account(self, task_id, agent):
         planned = getattr(self, "_quota_tasks", {}).get(task_id)
         return getattr(self, "_quota_task_accounts", {}).get(task_id) if planned == agent else None
 
@@ -506,7 +511,7 @@ class HerdrRuntime:
         route = ["--route", saved["account"]] if saved.get("account") else []
         account = None
         if hasattr(self, "_quota_accounts"):
-            account = self._quota_account(agent, saved.get("account") or self._planned_account(task["id"], agent), None)
+            account = self._quota_account(agent, saved.get("account") or self.planned_account(task["id"], agent), None)
             route = ["--route", account.name]
         placed = timing.call(
             self._launch,

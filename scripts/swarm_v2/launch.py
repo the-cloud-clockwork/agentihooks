@@ -12,7 +12,7 @@ from hooks.context.profile_chain import PACKAGE_ROLES
 from scripts.swarm import live_binding, profile_choice
 from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_v2 import broadcast_bridge, worker_home
-from scripts.swarm_v2.accounts import AccountCapacity, Slot
+from scripts.swarm_v2.accounts import ACCOUNT_FULL, AccountCapacity, Slot
 from scripts.swarm_v2.auth_context import LaunchAuthority
 from scripts.swarm_v2.controller import Controller
 from scripts.swarm_v2.hand import HANDED, Hand
@@ -29,7 +29,8 @@ ENDED = "ended"
 WORKER_DEFAULT = "default"
 NO_ACCOUNT = "no approved account has quota and a free launch slot"
 Target = Callable[[SpawnRequest], dict]
-AccountChooser = Callable[[int], str | None]
+AccountChooser = Callable[[int, str | None, tuple[str, str] | None], str | None]
+PlannedAccount = Callable[[str], str | None]
 
 
 class WorkerHomes(Protocol):
@@ -91,6 +92,15 @@ def shipped(profile: str, bundled: bool) -> bool:
     return profile in worker_profiles() or (bundled and worker_home.NAME.fullmatch(profile) is not None)
 
 
+def quota_predecessor(task: dict) -> tuple[str, str] | None:
+    """The account a quota handoff leaves, read as ``HerdrRuntime.quota_requirements`` reads it."""
+    envelope = task.get("handoff_envelope") or {}
+    saved = task.get("launch_assignment") or envelope.get("launch") or {}
+    if envelope.get("reason") != "quota" or not saved.get("harness") or not saved.get("account"):
+        return None
+    return saved["harness"], saved["account"]
+
+
 class DistributedLaunch:
     def __init__(
         self,
@@ -105,6 +115,7 @@ class DistributedLaunch:
         self.fleet, self.router, self.homes = fleet, router, homes
         self.slug = capacity.slug
         self.accounts: AccountChooser | None = None
+        self.planned: PlannedAccount | None = None
 
     def spawn(self, request: SpawnRequest, agent: AgentRecord, terms: LaunchTerms, previous: str) -> Launch:
         admitted = self.controller.admit(replace(agent, account=terms.account), previous)
@@ -121,7 +132,8 @@ class DistributedLaunch:
         except SwarmError as error:
             ended = self.end_refused(admitted, str(error))
             self.grants.withdraw(self.slug, grant)
-            return Launch(ended, grant, None, Outcome("spawn", Status.REFUSED, backend, detail=str(error)))
+            status = Status.UNAVAILABLE if str(error) == ACCOUNT_FULL else Status.REFUSED
+            return Launch(ended, grant, None, Outcome("spawn", status, backend, detail=str(error)))
         identity = {
             "launch_grant": grant,
             "execution_id": admitted.execution_id,
@@ -154,9 +166,10 @@ class DistributedLaunch:
                 "spawn", Status.REFUSED, backend, detail=f"profile {profile} is not shipped in the worker image"
             )
         if self.accounts is not None:
-            account = self.accounts(terms.cap)
+            planned = None if self.planned is None else self.planned(request.task["id"])
+            account = self.accounts(terms.cap, planned, quota_predecessor(request.task))
             if account is None:
-                return Outcome("spawn", Status.REFUSED, backend, detail=NO_ACCOUNT)
+                return Outcome("spawn", Status.UNAVAILABLE, backend, detail=NO_ACCOUNT)
             terms = replace(terms, account=account)
         agent = AgentRecord(
             request.name,

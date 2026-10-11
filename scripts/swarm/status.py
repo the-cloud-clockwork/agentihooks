@@ -26,7 +26,7 @@ from scripts.swarm import (
     snapshot,
     tick_master,
 )
-from scripts.swarm.health import activity, checks, spawn_stall, verdicts
+from scripts.swarm.health import activity, checks, prompt_backlog, spawn_stall, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.naming import swarm_name
 from scripts.swarm.store import ASSIST, SwarmError
@@ -96,6 +96,7 @@ def findings(store, slug, config, tasks, events):
         + drain_watch.findings(store, slug, limits, now_ms())
         + launch_check.findings(store, slug)
         + spawn_stall.findings(store, slug)
+        + prompt_backlog.findings(store, slug)
     )
     if ledger_probe.holding(store, slug):
         found = [f for f in found if f.kind not in PAUSED_WHILE_SLOW]

@@ -13,7 +13,7 @@ from scripts.swarm_v2.herdr.endpoints import Clients
 from scripts.swarm_v2.herdr.target import DELIVERIES, Router
 from scripts.swarm_v2.herdr.viewer import Viewer
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
-from scripts.swarm_v2.kubernetes.approved import INDEX, AccountRoute, SecretKeys
+from scripts.swarm_v2.kubernetes.approved import INDEX, AccountRoute, FleetAccounts, SecretKeys
 from scripts.swarm_v2.kubernetes.client import ApiRefused, KubeHttp, PodApi, PodClient
 from scripts.swarm_v2.kubernetes.failures import AccountSlot, Recovery
 from scripts.swarm_v2.kubernetes.grants import PodGrants, Supervision
@@ -194,6 +194,8 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
     runtime = routed(
         environ, kubernetes=kubernetes, launch=partial(launcher.from_tick, terms=workers.terms, target=workers.target)
     )
+    runtime.herdr_runtime.quota_accounts = FleetAccounts(route, workers.terms.cap)
+    launcher.planned = partial(runtime.herdr_runtime.planned_account, agent=HARNESS)
     launcher.router = runtime.router
     return runtime
 

@@ -68,6 +68,10 @@ class ClientHome:
         return self.root / ".ssh" / "swarm-terminals"
 
     @property
+    def journal(self) -> Path:
+        return self.terminals / DELIVERIES
+
+    @property
     def identity(self) -> Path:
         return self.terminals / "id_ed25519"
 
@@ -227,8 +231,7 @@ class Terminal:
 
     def router(self) -> Router:
         registrations = self.registrations
-        journal = self.home.terminals / DELIVERIES
-        return Router(registrations.store, registrations.catalog, self.qualifier, self.run, journal)
+        return Router(registrations.store, registrations.catalog, self.qualifier, self.run, self.home.journal)
 
     def _qualified(self, endpoint: Endpoint, fresh: bool) -> Verdict:
         try:

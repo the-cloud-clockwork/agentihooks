@@ -8,9 +8,10 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from hooks.context import account_sessions
 from scripts.hive import auth as hive_auth
+from scripts.swarm import capacity, lease
 from scripts.swarm import controller as loop
-from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import SpawnError
 from scripts.swarm_v2 import deployed, image_tag, quota
@@ -279,6 +280,24 @@ def test_a_tick_launch_skips_an_approved_key_whose_fleet_slots_are_full(tmp_path
     assert pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == other
 
 
+def test_a_tick_launch_takes_the_account_the_capacity_plan_placed_its_task_on(tmp_path, monkeypatch):
+    store = _store()
+    other = "codex-fixtureatexample-com"
+    pods = Pods("swarm-pod-proof", keys=(ACCOUNT, other))
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: pods)
+    service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    try:
+        herdr = service.runtime.herdr_runtime
+        herdr._quota_tasks, herdr._quota_task_accounts = {"t1": "claude"}, {"t1": other}
+        task = {"id": "t1", "seat": SEAT, "controller_epoch": service.controller.held.epoch}
+        service.runtime.spawn(store.config(SLUG), "eng", store.next_name(SLUG, "eng"), task)
+    finally:
+        service.stop()
+
+    [pod] = pods.created
+    assert pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == other
+
+
 def test_a_tick_launch_skips_an_approved_key_whose_newest_fleet_quota_is_rejected(tmp_path, monkeypatch):
     store = _store()
     other = "codex-fixtureatexample-com"
@@ -295,6 +314,33 @@ def test_a_tick_launch_skips_an_approved_key_whose_newest_fleet_quota_is_rejecte
 
     [pod] = pods.created
     assert pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == other
+
+
+def test_a_controller_with_no_local_accounts_sizes_engineer_and_ci_lanes_from_fleet_accounts(tmp_path, monkeypatch):
+    def local(*args, **kwargs):
+        raise AssertionError("the deployed controller read local accounts")
+
+    monkeypatch.setattr(capacity, "accounts", local)
+    monkeypatch.setattr(account_sessions, "sessions_by_account", local)
+    store = _store()
+    other = "codex-fixtureatexample-com"
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: Pods("swarm-pod-proof", keys=(ACCOUNT, other)))
+    held = Slot(ACCOUNT, "eng-9@elsewhere", "exe-" + "9" * 32, 1, RESERVED, expires_ms=10**15)
+    store.redis.hset(account_key(ACCOUNT), held.holder, encode(held))
+    service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    try:
+        config = replace(store.config(SLUG), max_eng=2, max_ci=1)
+        service.runtime.herdr_runtime.host = lambda: None
+        decision = service.runtime.quota_capacity(config, [], 1_800_000_000, {"eng": 2, "ci": 1, "plan": 0})
+    finally:
+        service.stop()
+
+    assert decision["effective"] == {"eng": 2, "ci": 1, "plan": 0}
+    assert decision["placeable"] == {"claude": 3, "codex": 0}
+    assert [(row["name"], row["sessions"], row["cap"]) for row in decision["accounts"]] == [
+        (ACCOUNT, 1, 2),
+        (other, 0, 2),
+    ]
 
 
 def test_a_pod_policy_that_names_a_provider_account_is_refused(tmp_path):
