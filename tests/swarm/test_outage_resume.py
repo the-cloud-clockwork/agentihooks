@@ -4,7 +4,7 @@ import pytest
 
 from scripts.swarm import outage
 from scripts.swarm.pane import PaneObservation
-from scripts.swarm.tick import Placed, tick
+from scripts.swarm.tick import Placed, SpawnError, tick
 from tests.swarm.test_tick import FakeRuntime, tasks
 from tests.swarm.test_tick import store as store
 
@@ -107,3 +107,36 @@ def test_a_successor_claim_during_restart_prevents_resuming_the_old_owner(store,
     assert runtime.spawned == launches
     assert store.claimant("sw", old.task) == "successor"
     assert ledger.rows[old.task]["claimed_by"] == "successor"
+
+
+@pytest.mark.parametrize("failure", ["unsupported", "ambiguous"])
+def test_a_definite_resume_blocker_uses_the_handoff_but_an_ambiguous_launch_does_not_duplicate_it(
+    store, tmp_path, monkeypatch, failure
+):
+    from scripts.swarm import snapshot
+
+    ledger, runtime, agents = three_owners(store)
+    old = agents[2]
+    monkeypatch.setattr(snapshot, "worktrees", lambda repo, names: {name: str(tmp_path) for name in names})
+    handoff = "## Next\nContinue the current task from its recorded proof.\n"
+    store.put_handoff("sw", old.task, handoff, seat=old.seat)
+    outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
+    runtime.live.remove(old.name)
+    tick("sw", store, ledger, runtime, 8 * MINUTE)
+    outage.observe("sw", "provider", [], 9 * MINUTE)
+
+    def blocked(config, agent, text):
+        raise SpawnError("conversation resume blocked", failure)
+
+    monkeypatch.setattr(runtime, "resume", blocked)
+    launches = len(runtime.spawned)
+    tick("sw", store, ledger, runtime, 9 * MINUTE)
+    if failure == "unsupported":
+        assert len(runtime.spawned) == launches + 1
+        assert runtime.spawned[-1] == ("eng", old.name, old.task)
+        assert runtime.tasks[-1]["handoff"] == handoff
+        assert next(agent for agent in store.agents("sw") if agent.name == old.name).seat == old.seat
+    else:
+        assert len(runtime.spawned) == launches
+    assert store.claimant("sw", old.task) == old.name
+    assert ledger.rows[old.task]["claimed_by"] == old.name
