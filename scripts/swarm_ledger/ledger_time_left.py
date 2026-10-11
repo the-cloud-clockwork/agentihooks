@@ -19,9 +19,8 @@ def check(op):
 def apply(doc, op, ctx):
     inputs = {"slots": op["slots"], "ci_minutes": op["ci_minutes"]}
     result = ledger_stats.calculate(doc, ctx.meta["events"] + ctx.events, ctx.at, inputs)
-    if ctx.meta.get("time_left", {}).get("calculation") != result:
-        ctx.meta["time_left"] = {"at": ctx.at, "inputs": inputs, "calculation": result}
-        ctx.dirty = True
+    ctx.meta["time_left"] = {"at": ctx.at, "inputs": inputs, "calculation": result}
+    ctx.dirty = True
     if result["minutes"] is not None and doc.get("time_left_minutes") != result["minutes"]:
         doc["time_left_minutes"] = result["minutes"]
         ctx.stamp("time_left_minutes", "stats")
