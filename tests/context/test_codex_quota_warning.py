@@ -43,6 +43,7 @@ def codex(tmp_path, monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
     monkeypatch.delenv("AH_ROUTE_API", raising=False)
     monkeypatch.setattr(qp, "AGENTIHOOKS_HOME", tmp_path / "agentihooks")
+    monkeypatch.setattr("scripts.codex_router.default_signed_in", lambda environ, run=None: True)
     monkeypatch.setattr("hooks.context.account_sessions.agent_pid", lambda start=None: 1)
     monkeypatch.setattr("hooks.context.account_sessions.session_account", lambda pid: {1: "alpha"}[pid])
     return home

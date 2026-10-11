@@ -11,7 +11,7 @@ def account_has_quota(agent: str, account: str, environ: dict[str, str]) -> bool
     if agent == "codex":
         from scripts import codex_router
 
-        pool = [found for found in codex_router.routing_pool(environ) if found.name == account]
+        pool = [found for found in codex_router.CodexAccountSource().pool(environ) if found.name == account]
         quota = codex_router.quotas(pool, environ).get(account) if pool else None
         cap = codex_router.account_cap(quota, time.time())
         return None if cap is None else bool(cap)
