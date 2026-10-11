@@ -154,13 +154,18 @@ def test_the_fallback_follows_the_agentihooks_home(tmp_path, monkeypatch, capsys
     assert _evaluated(capsys.readouterr().out) == {"AH_CC_TOKEN_one": "tok-1"}
 
 
-def test_neither_env_loader_reads_the_fallback(tmp_path):
+def test_neither_env_loader_reads_the_fallback(tmp_path, monkeypatch):
+    from hooks import config
     from scripts import operator_env
 
     path = _fallback(tmp_path, "AH_CC_TOKEN_one=tok-1\n")
     (path.parent.parent / ".env").write_text("MAIN=1\n")
+    (path.parent.parent / "other.env").write_text("OTHER=1\n")
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(path.parent.parent))
 
-    assert path not in set(path.parent.parent.glob("*.env"))
+    names = {name for name, _ in config._env_files_fingerprint()}
+    assert "other.env" in names
+    assert not any(name.endswith("claude.env") for name in names)
     assert path not in operator_env.files({"HOME": str(tmp_path)})
 
 
