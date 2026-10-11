@@ -109,7 +109,8 @@ def _provider_record(record, observed, now_ms):
             episode = _with_error(episode, agent, pane, now_ms)
     if episode:
         episode["observed_errors"] = seen
-        episode["evidence"] = [actor["evidence"] for actor in episode.get("affected_agents", {}).values()]
+        if affected := episode.get("affected_agents"):
+            episode["evidence"] = [actor["evidence"] for actor in affected.values()]
         return episode
     if record:
         record["observed_errors"] = seen
@@ -128,7 +129,7 @@ def providers(store: RedisStore, slug: str, runtime: Runtime, now_ms: int) -> No
         if record["ended_at"] is None and probes:
             directory = home() / slug / "provider-probes"
             if provider_probe.advance(probes, now_ms, lambda target: provider_probe.check(target, directory)):
-                record["ended_at"] = now_ms
+                record["ended_at"] = max(state["succeeded_at"] for state in probes.values())
         records["provider"] = record
 
 

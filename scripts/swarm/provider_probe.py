@@ -2,6 +2,7 @@ import json
 import os
 import signal
 import subprocess
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
@@ -24,6 +25,11 @@ class Target:
 class Result:
     ok: bool
     evidence: str
+    observed_at: int | None = None
+
+
+def _result(ok: bool, evidence: str) -> Result:
+    return Result(ok, evidence, time.time_ns() // 1_000_000)
 
 
 def key(target: Target) -> str:
@@ -40,12 +46,13 @@ def advance(states: dict, now_ms: int, probe: Callable[[Target], Result]) -> boo
         with ThreadPoolExecutor(max_workers=3) as pool:
             results = list(pool.map(probe, [Target(**state["target"]) for state in due]))
         for state, result in zip(due, results):
+            at = result.observed_at if result.observed_at is not None else now_ms
             state["evidence"] = result.evidence
             if result.ok:
-                state["succeeded_at"] = now_ms
+                state["succeeded_at"] = at
             else:
                 state["delay_ms"] = min(state["delay_ms"] * 2, MAX_MS)
-                state["next_at"] = now_ms + state["delay_ms"]
+                state["next_at"] = at + state["delay_ms"]
     return bool(states) and all(state["succeeded_at"] is not None for state in states.values())
 
 
@@ -157,7 +164,7 @@ def check(target: Target, directory: Path, run: Callable = _run) -> Result:
 
     args = _arguments(target) if target.account else []
     if not args:
-        return Result(False, "Provider account route unavailable")
+        return _result(False, "Provider account route unavailable")
     directory.mkdir(parents=True, exist_ok=True)
     env = {
         name: value
@@ -169,6 +176,6 @@ def check(target: Target, directory: Path, run: Callable = _run) -> Result:
     try:
         result = run(args, input=PROMPT, cwd=directory, env=env, timeout=TIMEOUT_S)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return Result(False, f"Provider request failed: {type(exc).__name__}")
+        return _result(False, f"Provider request failed: {type(exc).__name__}")
     ok = result.returncode == 0 and _succeeded(target.harness, result.stdout)
-    return Result(ok, "Provider request succeeded" if ok else f"Provider request failed: status {result.returncode}")
+    return _result(ok, "Provider request succeeded" if ok else f"Provider request failed: status {result.returncode}")

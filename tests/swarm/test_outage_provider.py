@@ -7,7 +7,7 @@ from scripts.swarm import outage, pane, provider_probe
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group(name="fakeredis")]
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
 
 @pytest.mark.parametrize(

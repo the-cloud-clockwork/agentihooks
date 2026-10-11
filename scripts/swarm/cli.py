@@ -1648,6 +1648,12 @@ def build_parser():
     return parser
 
 
+def _tick_store():
+    if why := timer.installed_refusal():
+        raise SwarmError(f"the tick refused to run: {why}")
+    return outage.connect_tick(connect, now_ms)
+
+
 def main(argv):
     if argv and argv[0] in ("list", "tick", "templates", "rename", "waker"):
         handler, args = globals()[f"cmd_{argv[0]}"], argparse.Namespace()
@@ -1670,7 +1676,7 @@ def main(argv):
         return 1
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
-        store = outage.connect_tick(connect, now_ms) if handler is cmd_tick else connect()
+        store = _tick_store() if handler is cmd_tick else connect()
         if store is None:
             return 0
         if "slug" in args:
