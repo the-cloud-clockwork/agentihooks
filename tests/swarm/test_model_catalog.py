@@ -265,14 +265,14 @@ def test_the_cache_answers_inside_the_hour_and_refreshes_after_it(monkeypatch, r
     assert calls == [{"A": "1"}, {"A": "1"}]
     assert model_catalog.cached("claude", {"A": "1"}, redis, 1000.0 + 3601) == TWO
     assert len(calls) == 2
-    assert redis.ttl("agentihooks:swarm:models:claude") == 3600
+    assert redis.ttl(f"{model_catalog.KEY}:claude") == 3600
 
 
 def test_an_empty_catalog_is_never_cached(monkeypatch, redis):
     read, calls = counting([[], ONE])
     monkeypatch.setitem(model_catalog.READERS, "codex", read)
     assert model_catalog.cached("codex", {}, redis, 1000.0) == []
-    assert redis.get("agentihooks:swarm:models:codex") is None
+    assert redis.get(f"{model_catalog.KEY}:codex") is None
     assert model_catalog.cached("codex", {}, redis, 1001.0) == ONE
     assert len(calls) == 2
 
@@ -281,7 +281,7 @@ def test_each_harness_has_its_own_cache_entry(monkeypatch, redis):
     monkeypatch.setitem(model_catalog.READERS, "claude", lambda environ: ONE)
     monkeypatch.setitem(model_catalog.READERS, "codex", lambda environ: TWO)
     assert model_catalog.catalog({}, redis, 1000.0) == {"claude": ONE, "codex": TWO}
-    assert json.loads(redis.get("agentihooks:swarm:models:codex")) == {"at": 1000.0, "models": TWO}
+    assert json.loads(redis.get(f"{model_catalog.KEY}:codex")) == {"at": 1000.0, "models": TWO}
 
 
 def test_without_redis_every_call_reads_the_source(monkeypatch):
@@ -289,3 +289,10 @@ def test_without_redis_every_call_reads_the_source(monkeypatch):
     monkeypatch.setitem(model_catalog.READERS, "codex", read)
     assert model_catalog.cached("codex", {}, None, 1000.0) == ONE
     assert model_catalog.cached("codex", {}, None, 1001.0) == TWO
+
+
+def test_the_cache_lives_under_the_swarm_key_root():
+    from scripts.swarm import keyspace
+
+    assert model_catalog.KEY == f"{keyspace.ROOT}:swarm:models"
+    assert model_catalog.TTL == 3600

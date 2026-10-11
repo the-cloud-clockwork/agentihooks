@@ -172,7 +172,7 @@ class SwarmPanel(unittest.TestCase):
             first, second = server.swarm_models(), server.swarm_models()
         self.assertEqual(first, {"claude": [{"model": "opus"}], "codex": []})
         self.assertEqual((second, reads), (first, ["claude"]))
-        self.assertIsNotNone(store.redis.get("agentihooks:swarm:models:claude"))
+        self.assertIsNotNone(store.redis.get(f"{model_catalog.KEY}:claude"))
 
     def test_swarm_models_reads_the_sources_when_redis_is_down(self):
         from scripts.swarm import model_catalog
