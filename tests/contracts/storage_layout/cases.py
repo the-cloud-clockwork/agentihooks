@@ -44,7 +44,10 @@ def _deployment() -> dict:
             "seed_read_only": mounts["shared-profiles"]["readOnly"] is True,
             "artifact_scoped_to_execution": mounts["shared-artifacts"].get("subPath") == launch()["execution_id"],
             "node_cache_read_only": mounts["shared-node-cache"]["readOnly"] is True,
-            "runtime_homes_private": [v["name"] for v in safe["spec"]["volumes"][:2]] == ["home", "tmp"],
+            "runtime_homes_private": not any(
+                mount["mountPath"] in ("/home/worker", "/tmp")
+                for mount in safe["spec"]["containers"][0]["volumeMounts"]
+            ),
             "shared_writable_codex_home_refused": reason == "shared_runtime",
         }
         run["passed"] = all(run.values())

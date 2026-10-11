@@ -163,6 +163,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/flake_budget.py",
         "tests/integration/swarm_node/run_health_proof.sh",
         "tests/js_lcov.py",
+        "tests/kind_request.py",
         "tests/ledger_load/gate.py",
         "tests/refresh_durations.py",
         "tests/shard_budget.py",

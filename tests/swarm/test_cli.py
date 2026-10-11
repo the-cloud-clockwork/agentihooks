@@ -1371,6 +1371,24 @@ def test_status_text_logs_enforced_and_passed_launch_checks(env, capsys):
     )
 
 
+def test_status_text_lists_a_closed_failed_launch_pane_with_its_lines(env, capsys):
+    from scripts.swarm import failed_panes
+
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    failed = AgentRecord("engineer@a1b2c3-0003", "eng", "t1", started_at=10, pane_id="w1:p9")
+    store.record_launch("sw", failed, "failed", "Codex account default not found")
+    store.note_launch_pane("sw", failed.name, ["$ agentihooks codex", "Codex account default not found", "$"])
+    store.record_launch("sw", AgentRecord("engineer@a1b2c3-0004", "eng", "t2", pane_id="w1:p8"), "failed", "x")
+    capsys.readouterr()
+    run("sw", "status")
+    out = capsys.readouterr().out.splitlines()
+    at = out.index("failed launch  engineer@a1b2c3-0003  t1  pane w1:p9 closed: Codex account default not found")
+    assert out[at + 1 : at + 4] == ["  | $ agentihooks codex", "  | Codex account default not found", "  | $"]
+    assert [line for line in out if line.startswith("failed launch")] == [out[at]]
+    assert [row["agent"] for row in failed_panes.report(store, "sw")] == [failed.name]
+
+
 def test_status_text_lists_each_phase_lifecycle_and_the_tasks_it_holds(env, capsys):
     _, ledger, _ = env
     ledger.rows["t1"]["phase"], ledger.rows["t2"]["phase"] = "p1", "p2"
