@@ -210,7 +210,8 @@ def _handoff_agent(requested: str, environ: dict[str, str], agent_args: list[str
 
 
 def _handoff_exclude(agent: str, environ: dict[str, str]) -> str:
-    """The account a quota handoff leaves; a Codex session's own account comes from its process."""
+    """The account a quota handoff leaves; for Codex it comes from the live process because the
+    operator environment can carry every AH_CX_TOKEN_*, which hides the session's own account."""
     from hooks.context.account_sessions import UNROUTED, environment_account
     from scripts.profiles import binding
 

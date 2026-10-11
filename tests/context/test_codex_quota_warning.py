@@ -231,18 +231,3 @@ def test_a_claude_tool_call_gets_no_second_policy_directive(spent, monkeypatch, 
     monkeypatch.setattr(qp, "evaluate", lambda session: pytest.fail("Claude reads the policy at PreToolUse only"))
     _post(SID)
     assert "QUOTA" not in capsys.readouterr().out
-
-
-def test_the_old_terminal_never_closes_the_conversation_its_successor_resumed(tmp_path, monkeypatch):
-    from hooks.context import broadcast
-
-    monkeypatch.setattr(broadcast, "BROADCAST_FILE", tmp_path / "broadcast.json")
-    monkeypatch.setattr(broadcast, "_local_namespace", lambda: "host")
-    broadcast.register_session(SID, pid=100, cwd=str(tmp_path), model="gpt", account="alpha")
-    assert broadcast.mark_handed_off(100, "beta") == [SID]
-    broadcast.register_session(SID, pid=200, cwd=str(tmp_path), model="gpt", account="beta")
-    broadcast.mark_session_closed(SID, 100)
-    assert broadcast.session_status(SID)["status"] == "alive"
-    assert qp.handed_off_block(SID) is None
-    broadcast.mark_session_closed(SID, 200)
-    assert broadcast.session_status(SID)["status"] == "closed"

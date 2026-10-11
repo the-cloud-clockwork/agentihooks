@@ -78,7 +78,8 @@ def warn(slug: str, store: RedisStore, environ: dict) -> list[str]:
             if store.redis.hget(periods, field) == period:
                 continue
             item = InboxStore(store.redis).send("swarm", agent.name, directive(slug, account, window))
-            store.redis.hset(key, agent.name, item.id)
+            if store.redis.hget(lives, agent.name) != life:
+                store.redis.hset(key, agent.name, item.id)
             store.redis.hset(lives, agent.name, life)
             store.redis.hset(periods, field, period)
             actions.append(f"early quota handoff warning sent to {agent.name}")
