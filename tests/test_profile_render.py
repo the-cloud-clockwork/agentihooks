@@ -1586,6 +1586,7 @@ def test_codex_render_links_state_back_to_the_operator_home(world):
 
     home = world["home"]
     _operator_codex(home)
+    _write(home / ".codex" / "auth.json", "{}")
 
     out = render.render_codex("rb-role")
 
@@ -1624,6 +1625,27 @@ def test_codex_token_account_role_home_has_no_dangling_login(world, monkeypatch,
     assert codex_router.command(account, "codex", [])[1] == "--no-daemon"
 
 
+def test_codex_render_refreshes_when_the_operator_login_appears_or_disappears(world):
+    from scripts.profiles import render
+
+    absent = render.render_codex("rb-role")
+    assert render.render_codex("rb-role") is None
+    login = _write(world["home"] / ".codex" / "auth.json", "{}")
+
+    present = render.render_codex("rb-role")
+    assert present not in (None, absent)
+    assert (present / "auth.json").is_file()
+    assert (present / "auth.json").resolve() == login
+    assert render.render_codex("rb-role") is None
+
+    login.unlink()
+    removed = render.render_codex("rb-role")
+    assert removed not in (None, present)
+    assert not (removed / "auth.json").is_symlink()
+    assert not (removed / "auth.json").exists()
+    assert render.render_codex("rb-role") is None
+
+
 def test_codex_render_follows_operator_changes(world):
     from scripts.profiles import render
 
@@ -1640,6 +1662,7 @@ def test_codex_render_from_inside_a_profile_codex_home(world, monkeypatch):
     from scripts.profiles import render
 
     home = world["home"]
+    _write(home / ".codex" / "auth.json", "{}")
     monkeypatch.setenv("CODEX_HOME", str(render.rendered_root() / "rb-other" / "codex"))
 
     out = render.render_codex("rb-role")
