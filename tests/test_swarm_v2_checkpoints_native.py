@@ -398,7 +398,7 @@ def test_a_conversation_the_capture_cannot_read_is_unavailable_not_an_error(tmp_
 
     monkeypatch.setattr(native, "_regular", unreadable)
     found = native.capture("claude", home, cases.SESSIONS["claude"], tmp_path / "cwd", cases.VERSIONS["claude"], False)
-    assert (found.outcome, found.cause) == (native.UNAVAILABLE, "native_unreadable")
+    assert (found.harness, found.outcome, found.cause) == ("claude", native.UNAVAILABLE, "native_unreadable")
 
 
 def test_merged_replaces_native_material_and_keeps_every_other_material():

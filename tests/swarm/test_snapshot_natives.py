@@ -191,3 +191,60 @@ def test_an_agent_with_no_folder_to_look_in_is_recorded_absent(tmp_path):
     home = cases.claude_home(tmp_path, tmp_path / "repo")
     found = snapshot.natives("sw", [_agent(CLAUDE, "claude", home)], "", {}, {}, Cli())
     assert found[CLAUDE]["native_resume"]["cause"] == "conversation_absent"
+    assert found[CLAUDE]["native_resume"]["harness"] == "claude"
+
+
+def test_the_version_is_read_with_captured_decoded_output_and_a_bounded_wait():
+    seen = []
+
+    def run(argv, **kw):
+        seen.append((argv, kw))
+        return subprocess.CompletedProcess(argv, 0, "2.1.296 (Claude Code)\n", "")
+
+    assert snapshot.cli_version("claude", run) == "2.1.296 (Claude Code)\n"
+    assert seen == [
+        (["claude", "--version"], {"capture_output": True, "text": True, "errors": "replace", "timeout": 30})
+    ]
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        subprocess.CompletedProcess(["claude"], 1, "2.1.296 (Claude Code)\n", ""),
+        FileNotFoundError("claude"),
+        subprocess.TimeoutExpired("claude", 30),
+    ],
+)
+def test_a_failed_version_read_is_empty(outcome):
+    def run(argv, **kw):
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    assert snapshot.cli_version("claude", run) == ""
+
+
+def test_the_snapshot_captures_running_conversations_as_a_consistent_export(tmp_path, monkeypatch):
+    calls = []
+    real = native.capture
+
+    def spy(*args, **kw):
+        calls.append(kw)
+        return real(*args, **kw)
+
+    monkeypatch.setattr(native, "capture", spy)
+    repo = tmp_path / "repo"
+    found = snapshot.natives(
+        "sw", [_agent(CLAUDE, "claude", cases.claude_home(tmp_path, repo))], str(repo), {}, {}, Cli()
+    )
+    assert [kw["stopped"] is False for kw in calls] == [True]
+    assert found[CLAUDE]["quiescence_method"] == "consistent_export"
+
+
+def test_a_skipped_agent_does_not_stop_the_agents_after_it(tmp_path):
+    repo = tmp_path / "repo"
+    agents = [
+        AgentRecord("engineer@a1b2c3-0004", "eng", "t1", harness="claude"),
+        _agent(CLAUDE, "claude", cases.claude_home(tmp_path, repo)),
+    ]
+    assert list(snapshot.natives("sw", agents, str(repo), {}, {}, Cli())) == [CLAUDE]
