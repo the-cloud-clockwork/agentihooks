@@ -119,6 +119,7 @@ def test_one_codex_account_quota_uses_its_week_band(monkeypatch):
 
     now = time.time()
     readings = {"seen": CodexQuota(observed_at=now, plan_type="pro", seven_day=QuotaWindow(used=95.1))}
+    monkeypatch.setattr(codex_router, "default_signed_in", lambda environ, run=None: True)
     monkeypatch.setattr("scripts.codex_quota.latest_codex_quota", lambda environ=None, keep=None: readings["seen"])
     assert agent_choice.account_has_quota("codex", codex_router.CODEX_DEFAULT, {}) is False
     readings["seen"] = CodexQuota(observed_at=now, plan_type="pro", seven_day=QuotaWindow(used=95.0))
