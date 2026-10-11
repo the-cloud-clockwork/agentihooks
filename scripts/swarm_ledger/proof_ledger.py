@@ -5,7 +5,6 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
-from urllib.parse import quote
 
 from scripts.swarm_ledger import ledger_link
 
@@ -20,7 +19,6 @@ def call(path: str, payload: dict, environ) -> dict:
         f"{ledger_link.base(environ)}/api/v1/proof-ledgers{path}",
         data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json", "X-Controller-Credential": credential},
-        method="POST",
     )
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
@@ -31,12 +29,12 @@ def call(path: str, payload: dict, environ) -> dict:
 
 
 def create(content: dict, environ=os.environ) -> dict:
-    agent, task = environ.get("AGENTIHOOKS_AGENT_NAME", ""), environ.get("AGENTIHOOKS_SWARM_TASK", "")
+    agent, task = environ.get("AGENTIHOOKS_AGENT_NAME"), environ.get("AGENTIHOOKS_SWARM_TASK")
     return call("", {"agent": agent, "task": task, "content": content}, environ)
 
 
 def remove(slug: str, environ=os.environ) -> dict:
-    return call(f"/{quote(slug, safe='')}/remove", {}, environ)
+    return call(f"/{slug}/remove", {}, environ)
 
 
 def main(argv: list[str] | None = None) -> None:

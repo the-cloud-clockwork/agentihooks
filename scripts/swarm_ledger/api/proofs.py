@@ -47,9 +47,10 @@ def remove(handler: object, server: ModuleType, slug: str) -> dict:
     if not handler.exists(slug):
         raise APIError(404, "ledger_missing", "No such ledger")
     server.ledger_bin.delete(slug)
-    error = None
+    data = {"slug": slug, "removed_at": server.ledger_bin.entries()[slug]}
     if server.swarm_status(slug) is not None:
         _, error = server.swarm_control(slug, ["stop", "--now"])
-    removed_at = server.ledger_bin.entries()[slug]
-    sys.stderr.write(f"controller removed proof ledger {slug} at {removed_at}\n")
-    return {"data": {"slug": slug, "removed_at": removed_at, **({"swarm_error": error} if error else {})}}
+        if error:
+            data["swarm_error"] = error
+    sys.stderr.write(f"controller removed proof ledger {slug} at {data['removed_at']}\n")
+    return {"data": data}

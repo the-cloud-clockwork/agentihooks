@@ -143,7 +143,7 @@ def test_a_create_whose_slug_was_taken_meanwhile_is_a_conflict(live, credential)
 
 def test_removing_a_missing_proof_ledger_is_not_found(live, credential):
     status, reply = remove(live, "proof-323133-t399-99", **{"X-Controller-Credential": credential})
-    assert (status, reply["error"]["code"]) == (404, "ledger_missing")
+    assert (status, reply["error"]) == (404, {"code": "ledger_missing", "message": "No such ledger"})
 
 
 @pytest.mark.parametrize(("error", "extra"), [(None, {}), ("stop failed", {"swarm_error": "stop failed"})])
@@ -152,10 +152,11 @@ def test_removing_stops_the_proof_ledgers_swarm_and_reports_a_failed_stop(live, 
     from scripts.swarm_ledger import ledger_server
 
     with (
-        patch.object(ledger_server, "swarm_status", return_value={"state": "running"}),
+        patch.object(ledger_server, "swarm_status", return_value={"state": "running"}) as swarm,
         patch.object(ledger_server, "swarm_control", return_value=(None, error)) as control,
     ):
         status, reply = remove(live, slug, **{"X-Controller-Credential": credential})
+    swarm.assert_called_once_with(slug)
     control.assert_called_once_with(slug, ["stop", "--now"])
     assert (status, reply["data"]) == (200, {"slug": slug, "removed_at": ledger_bin.entries()[slug], **extra})
 
