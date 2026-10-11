@@ -493,7 +493,6 @@ def _relay_rank(doc, op, ctx):
     ctx.stamp(f"{op['item']}/rank", ledger_rank.OPERATOR)
     marks = {"relayed_by": op["by"], "relayed_from": RELAYED_FROM, "quote": words}
     ctx.record(ledger_rank.OPERATOR, "rank set", op["item"], text=rank, **marks)
-    ctx.dirty = True
     return True
 
 

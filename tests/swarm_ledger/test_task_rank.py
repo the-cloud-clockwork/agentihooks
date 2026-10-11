@@ -280,9 +280,10 @@ def test_a_rank_the_master_relays_with_the_operators_words_is_his_and_stays_fixe
 
     operator_words.record(MASTER, "Rank the login fix high, it blocks everything")
     core.sync(SLUG, ops=[{"op": "join", "id": "j1", "by": MASTER, "role": "orchestrator"}])
-    core.sync(SLUG, ops=[{"op": "task_rank", "id": "g-1", "item": "tasks/t1", "rank": "low"}])
-    relayed("rank the login fix high")
+    update(MASTER, "low")
+    _, rejected = relayed("rank the login fix high")
     state, _ = core.sync(SLUG)
+    assert rejected == []
     assert (rank_of(state), state["_meta"]["stamps"]["tasks/t1/rank"]["by"]) == ("high", "operator")
     event = state["_meta"]["events"][-1]
     assert {k: event[k] for k in ("by", "kind", "target", "text", "relayed_by", "relayed_from", "quote")} == {
