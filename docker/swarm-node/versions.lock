@@ -11,6 +11,7 @@
     "coreutils": "9.1-1",
     "git": "1:2.39.5-0+deb12u3",
     "openssh-client": "1:9.2p1-2+deb12u7",
+    "openssh-server": "1:9.2p1-2+deb12u7",
     "ripgrep": "13.0.0-4+b2",
     "curl": "7.88.1-10+deb12u14",
     "procps": "2:4.0.2-3",

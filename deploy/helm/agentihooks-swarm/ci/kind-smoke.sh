@@ -96,6 +96,10 @@ printf 'apiVersion: node.k8s.io/v1\nkind: RuntimeClass\nmetadata:\n  name: kata-
 kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/pod-rendered.json
 kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/pod-rendered-wrong-probes.json
 printf 'rendered execution Pods passed server side strict validation\n'
+kubectl create namespace swarm-workers
+kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/herdr-terminal-pod.json
+kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/herdr-terminal-objects.json
+printf 'worker terminal Pod, Secret, Service and NetworkPolicy passed server side strict validation\n'
 wait "$build"
 kind load docker-image "$image" --name "$cluster"
 helm install "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m

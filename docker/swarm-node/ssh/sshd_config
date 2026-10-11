@@ -1,0 +1,25 @@
+Port @PORT@
+ListenAddress @LISTEN@
+HostKey @STATE@/host_key
+PidFile @STATE@/sshd.pid
+AuthorizedKeysFile none
+TrustedUserCAKeys @MATERIAL@/user_ca.pub
+AuthorizedPrincipalsFile @MATERIAL@/principals
+AllowUsers @USER@
+ForceCommand @PYTHON@ -m scripts.swarm_v2.herdr.session --material @MATERIAL@ --attempts @ATTEMPTS@ --launch @LAUNCH@
+PermitRootLogin no
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+HostbasedAuthentication no
+UsePAM no
+StrictModes no
+PermitUserEnvironment no
+AllowAgentForwarding no
+AllowTcpForwarding no
+AllowStreamLocalForwarding no
+X11Forwarding no
+PermitTunnel no
+GatewayPorts no
+PrintMotd no
+LogLevel VERBOSE

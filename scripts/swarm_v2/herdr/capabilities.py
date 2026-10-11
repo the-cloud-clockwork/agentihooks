@@ -6,6 +6,8 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from scripts.gates.base import Who
+
 PROTOCOL = 22
 SERVER_CAPABILITIES = {
     "endpoint_protocol_generation": 1,
@@ -45,6 +47,7 @@ STATUS_CLIENT = ("status", "client", "--json")
 SCHEMA = ("api", "schema", "--json")
 PROBE_SECONDS = 30
 USAGE = "usage: python -m scripts.swarm_v2.herdr.capabilities TARGET INCARNATION"
+AGENT_REFUSAL = "a raw machine target is operator only; an agent qualifies through its terminal scope"
 
 
 class Incompatible(RuntimeError):
@@ -188,6 +191,10 @@ class Qualifier:
 def main(argv: list[str], environ: dict[str, str]) -> int:
     if len(argv) != 2:
         print(USAGE, file=sys.stderr)
+        return 2
+    who = Who.from_env(environ)
+    if who.name or who.swarm:
+        print(f"ERROR: {AGENT_REFUSAL}", file=sys.stderr)
         return 2
     try:
         verdict = Qualifier(machine_probe(runner(environ))).verdict(*argv)

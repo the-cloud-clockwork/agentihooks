@@ -20,12 +20,14 @@ WORKDIR /build
 COPY docker/swarm-node/versions.lock docker/swarm-node/requirements.lock /opt/swarm-node/
 COPY scripts/swarm_v2/worker_image.py /opt/swarm-node/worker_image.py
 COPY docker/swarm-node/supervisor.py docker/swarm-node/health.py docker/swarm-node/entrypoint.sh docker/swarm-node/layout.json docker/swarm-node/cache-policy.json /opt/swarm-node/
+COPY docker/swarm-node/ssh/ /opt/swarm-node/ssh/
 RUN python /opt/swarm-node/worker_image.py validate --architecture "$TARGETARCH" --base-image "$BASE_IMAGE" \
     && python -c 'import json; from pathlib import Path; s=json.loads(Path("/opt/swarm-node/versions.lock").read_text())["debian_snapshot"]; Path("/etc/apt/sources.list").write_text(f"deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/{s} bookworm main\ndeb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/{s} bookworm-security main\n")' \
     && rm /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
     && apt-get install -y --no-install-recommends $(python /opt/swarm-node/worker_image.py shell-packages) \
-    && rm -r /var/lib/apt/lists/*
+    && rm -r /var/lib/apt/lists/* \
+    && rm -f /etc/ssh/ssh_host_*
 RUN --mount=type=bind,from=downloads,source=/downloads,target=/downloads \
     python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --no-index --find-links /downloads/pip --require-hashes \
@@ -39,7 +41,7 @@ RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS=0.0.0 pip install --no-cache-
 COPY profiles/ /opt/agentihooks/templates/
 RUN python /opt/swarm-node/worker_image.py manifest --architecture "$TARGETARCH" --source-revision "$SOURCE_REVISION" \
     && chmod -R a-w /opt/agentihooks/templates /opt/swarm-node /opt/venv \
-    && chmod a+x /opt/swarm-node/entrypoint.sh \
+    && chmod a+x /opt/swarm-node/entrypoint.sh /opt/swarm-node/ssh/start.sh \
     && groupadd --gid 10001 worker \
     && useradd --uid 10001 --gid worker --create-home worker \
     && chown worker:worker /home/worker \
