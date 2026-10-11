@@ -1,8 +1,9 @@
 import pytest
 
-from scripts.swarm import stage_detector, stages
+from scripts.swarm import stage_detector
 from scripts.swarm.health import standing
-from tests.swarm.test_stages import agent, delivery, rows, run, stage, store as store
+from tests.swarm.test_stages import agent, delivery, rows, run, stage
+from tests.swarm.test_stages import store as store
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
