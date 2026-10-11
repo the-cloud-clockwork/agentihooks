@@ -72,7 +72,7 @@ FIELDS = {
     "notification_clear": "target",
     "notice": "by text",
     "task_add": "by task title lane phase description depends_on territory kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate slice follow_up",
-    "task_update": "by item fields if_state if_plan_lines_missing",
+    "task_update": "by item fields if_state if_plan_lines_missing quote",
     "task_rank": "by item rank if_owned",
     "task_group": "by item members",
     "task_ungroup": "by item",
