@@ -1,0 +1,81 @@
+import json
+
+import pytest
+
+from scripts.swarm_v2.checkpoints import redaction
+
+pytestmark = pytest.mark.unit
+
+TOKEN = "ghp_" + "Z9" * 18
+OTHER = "ghs_" + "A1" * 18
+WORD = "pass" + "word"
+KEY = "api" + "_key"
+HIDDEN = "[REDACTED:github_token]"
+GENERIC = "[REDACTED:generic_secret]"
+
+
+def compact(record: dict) -> str:
+    return json.dumps(record, separators=(",", ":"))
+
+
+CASES = {
+    "value": (json.dumps({"t": f"ran {TOKEN}"}) + "\n", compact({"t": f"ran {HIDDEN}"}) + "\n", 1),
+    "keyed": (json.dumps({KEY: "abcd" + "1234efgh"}) + "\n", compact({KEY: GENERIC}) + "\n", 1),
+    "keyed and own": (
+        json.dumps({WORD: "hunter2hunter2 " + TOKEN}) + "\n",
+        compact({WORD: f"{GENERIC} {HIDDEN}"}) + "\n",
+        2,
+    ),
+    "keyed despite nosecret": (
+        json.dumps({WORD: "hunter2hunter2 # nosecret"}) + "\n",
+        compact({WORD: GENERIC}) + "\n",
+        1,
+    ),
+    "key": (json.dumps({TOKEN: [1, "x"]}) + "\r\n", compact({HIDDEN: [1, "x"]}) + "\r\n", 1),
+    "colliding keys": (json.dumps({TOKEN: 1, OTHER: 2}) + "\n", compact({HIDDEN: 2}) + "\n", 2),
+    "nested": (
+        json.dumps({"items": [TOKEN, {"text": f"{TOKEN} and {TOKEN}"}], "n": 3}) + "\n",
+        compact({"items": [HIDDEN, {"text": f"{HIDDEN} and {HIDDEN}"}], "n": 3}) + "\n",
+        3,
+    ),
+    "escaped beside a text line": (
+        '{"t":"\\u0067hp_' + "Z9" * 18 + '"}\n{broken\n',
+        compact({"t": HIDDEN}) + "\n{broken\n",
+        1,
+    ),
+    "blank line kept": (
+        json.dumps({"t": TOKEN}) + '\n\n{"a": 1}\n',
+        compact({"t": HIDDEN}) + '\n\n{"a": 1}\n',
+        1,
+    ),
+    "no final newline": (json.dumps({"t": TOKEN}), compact({"t": HIDDEN}), 1),
+    "lone surrogate escape": ('{"t":"\\ud800 ' + TOKEN + '"}\n', '{"t":"\\ud800 ' + HIDDEN + '"}\n', 1),
+    "non ascii rewritten as escapes": (json.dumps({"t": f"é {TOKEN}"}) + "\n", '{"t":"\\u00e9 ' + HIDDEN + '"}\n', 1),
+    "text": (f"token {TOKEN}\n{{broken\n", f"token {HIDDEN}\n{{broken\n", 1),
+    "marker already present": (f"[REDACTED:x] {TOKEN}\n", f"[REDACTED:x] {HIDDEN}\n", 1),
+    "strict only pattern": ("xoxb-" + "1" * 12 + "\n", "[REDACTED:slack_token]\n", 1),
+    "key across lines": (
+        "-----BEGIN RSA PRIVATE" + " KEY-----\nabc\n-----END RSA PRIVATE" + " KEY-----\n",
+        "[REDACTED:private_key]\n",
+        1,
+    ),
+    "clean": ('{"type": "user"}\nplain\n', '{"type": "user"}\nplain\n', 0),
+    "empty": ("", "", 0),
+}
+
+
+@pytest.mark.parametrize("case", sorted(CASES))
+def test_scrub_hides_every_match_and_counts_each_once(case):
+    given, expected, count = CASES[case]
+    assert redaction.scrub(given.encode()) == (expected.encode(), count)
+
+
+@pytest.mark.parametrize("case", sorted(CASES))
+def test_a_second_scrub_changes_nothing(case):
+    once, _ = redaction.scrub(CASES[case][0].encode())
+    assert redaction.scrub(once) == (once, 0)
+
+
+def test_bytes_that_are_not_text_pass_through_unchanged():
+    given = b"\xff " + TOKEN.encode() + b"\n\xfe\n"
+    assert redaction.scrub(given) == (b"\xff " + HIDDEN.encode() + b"\n\xfe\n", 1)

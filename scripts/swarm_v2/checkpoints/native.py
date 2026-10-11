@@ -13,7 +13,7 @@ from pathlib import Path, PurePosixPath
 from typing import Protocol
 
 from scripts.swarm_v2.artifacts.base import ArtifactRef, Scope
-from scripts.swarm_v2.checkpoints import model
+from scripts.swarm_v2.checkpoints import model, redaction
 from scripts.swarm_v2.filesystem import ARCHIVE_BYTES, ARCHIVE_MEMBERS, LayoutError, contain
 
 METRIC = "native_resume_success_by_target"
@@ -88,12 +88,14 @@ class NativeCapture:
     session_id: str
     files: tuple[tuple[str, bytes], ...]
     quiescence: str
+    redactions: int = 0
 
     def material(self) -> bytes:
         return archive(self.files)
 
     def fields(self) -> dict:
         ref = asdict(ArtifactRef.of(self.material()))
+        counted = {redaction.FIELD: self.redactions} if self.redactions else {}
         return {
             "continuation": model.NATIVE,
             "native_resume_capability": "qualified",
@@ -103,6 +105,7 @@ class NativeCapture:
             "inventory": {model.NATIVE_SESSION: ref},
             "artifact_hashes": {model.NATIVE_SESSION: "sha256:" + ref["sha256"]},
             "native_resume": {"outcome": CAPTURED, "harness": self.harness},
+            **counted,
         }
 
     @property
@@ -357,7 +360,10 @@ def capture(
     if len(files) > ARCHIVE_MEMBERS or sum(map(len, files.values())) > ARCHIVE_BYTES:
         return Unavailable(harness, TOO_LARGE)
     quiescence = "stopped_process" if stopped else "consistent_export"
-    return NativeCapture(harness, recorded, session_id, tuple(sorted(files.items())), quiescence)
+    scrubbed = {name: redaction.scrub(data) for name, data in sorted(files.items())}
+    kept = tuple((name, data) for name, (data, _) in scrubbed.items())
+    count = sum(found for _, found in scrubbed.values())
+    return NativeCapture(harness, recorded, session_id, kept, quiescence, count)
 
 
 class Qualifier:

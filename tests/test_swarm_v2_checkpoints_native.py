@@ -808,6 +808,41 @@ def test_an_index_path_under_the_resolved_home_is_found_through_a_linked_home(tm
     assert result.session_id == CODEX
 
 
+TOKEN = "ghp_" + "Z9" * 18
+
+
+def planted(root: Path) -> tuple[native.Qualifier, object]:
+    cwd = root / "repo"
+    common = {"sessionId": CLAUDE, "version": "2.1.296", "cwd": cases.LOGICAL_CWD}
+    printed = {"type": "user", **common, "toolUseResult": {"stdout": f"token {TOKEN}"}}
+    home = cases.claude_home(root, cwd, [*cases.claude_records(CLAUDE), printed])
+    writer = qualifier(root)
+    return writer, writer.capture("claude", home, CLAUDE, cwd, cases.VERSIONS["claude"], True)
+
+
+def test_a_capture_keeps_no_secret_a_tool_printed_and_counts_it(tmp_path):
+    writer, result = planted(tmp_path)
+    assert TOKEN.encode() not in result.material()
+    assert result.fields()["secret_redactions"] == 1
+    assert cases.commit(writer, result, "ckpt-1", "claude").authoritative
+    stored = [path.read_bytes() for path in (tmp_path / "durable").rglob("*") if path.is_file()]
+    assert stored
+    assert all(TOKEN.encode() not in data for data in stored)
+    store = writer.validator.store
+    assert json.loads(store.get_range(store.recorded("ckpt-1")))["secret_redactions"] == 1
+
+
+def test_a_redacted_conversation_restores_with_its_marker(tmp_path):
+    writer, result = planted(tmp_path)
+    assert cases.commit(writer, result, "ckpt-1", "claude").authoritative
+    home, cwd = tmp_path / "fresh", tmp_path / "fresh-repo"
+    restored = reader(tmp_path).restore("ckpt-1", home, cwd, cases.VERSIONS["claude"])
+    assert restored == native.Resumed("claude", CLAUDE, native.HARNESSES["claude"].command(CLAUDE))
+    placed = (home / "projects" / native.encoded(cwd) / f"{CLAUDE}.jsonl").read_text()
+    assert "token [REDACTED:github_token]" in placed
+    assert TOKEN not in placed
+
+
 @pytest.mark.parametrize("case", ["a", "b", "c"])
 def test_package_cases_match_their_committed_evidence(case):
     first, second = cases.run_case(case), cases.run_case(case)

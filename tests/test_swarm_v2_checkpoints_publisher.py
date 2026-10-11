@@ -555,3 +555,12 @@ def test_a_checkpoint_without_native_material_records_no_redaction_count(root):
     pub = make(root)
     assert pub.publish(*checkpoint(1)).promoted
     assert "secret_redactions" not in _committed(pub)
+
+
+def test_publication_adds_its_count_to_the_capture_count(root):
+    pub = make(root)
+    doc, materials = checkpoint(1)
+    doc["secret_redactions"] = 2
+    materials[model.NATIVE_SESSION] = _native({"history.txt": f"token {TOKEN}\n"})
+    assert pub.publish(doc, materials).promoted
+    assert _committed(pub)["secret_redactions"] == 3
