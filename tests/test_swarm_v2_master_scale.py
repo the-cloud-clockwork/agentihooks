@@ -528,6 +528,157 @@ def test_growing_from_two_to_four_seats_keeps_every_phase_the_new_seats_do_not_t
     assert all(after[p] == before[p] for p in PHASES if after[p] in (LEAD, SECOND))
 
 
+def test_one_agent_per_master_is_a_rule():
+    assert master_scale.rule_of("1") == "1"
+
+
+def test_the_rule_and_measurements_live_in_this_swarms_masters_hash(swarm):
+    store, runtime = swarm
+    key = masters.MasterSeats(store.redis).key(SLUG)
+    assert store.redis.hget(key, master_scale.RULE) == FIXTURE["rule"]
+    grown(swarm)
+    assert master_scale.measurements(store.redis, SLUG) == {"master_seat_count": 4, "master_retire_seconds": []}
+
+
+def test_the_count_change_is_posted_at_the_tick_time(swarm):
+    store, runtime = swarm
+    staffed(store, 10)
+    run(store, runtime, NOW)
+    [post] = posts(store)
+    assert post.at == NOW / 1000
+
+
+def test_launched_extra_masters_are_recorded_working(swarm):
+    seated = grown(swarm)
+    assert [a.state for a in seated] == ["working"] * 3
+
+
+def test_the_launch_hands_the_swarm_config_to_the_runtime(swarm):
+    store, runtime = swarm
+    seen = []
+    spawn = runtime.spawn
+    runtime.spawn = lambda config, lane, name, task: seen.append(config) or spawn(config, lane, name, task)
+    grown(swarm)
+    assert seen == [store.config(SLUG)] * 3
+
+
+def test_a_recorded_master_that_is_not_live_still_holds_its_seat(swarm):
+    store, runtime = swarm
+    master_scale.set_rule(store.redis, SLUG, "")
+    masters.MasterSeats(store.redis).set_count(SLUG, 2)
+    store.put_agent(SLUG, AgentRecord(f"{SLUG}-master-2", MASTER, "master-2", seat=SECOND))
+    assert run(store, runtime) == []
+
+
+def test_a_full_runtime_holds_the_master_launch(swarm):
+    store, runtime = swarm
+    master_scale.set_rule(store.redis, SLUG, "")
+    masters.MasterSeats(store.redis).set_count(SLUG, 2)
+    runtime.full = True
+    assert run(store, runtime) == ["no session slot for the master, waiting"]
+
+
+def test_a_full_host_holds_the_master_launch(swarm, monkeypatch):
+    store, runtime = swarm
+    master_scale.set_rule(store.redis, SLUG, "")
+    masters.MasterSeats(store.redis).set_count(SLUG, 2)
+    asked = []
+    monkeypatch.setattr(tick_module, "_host_full", lambda slug, s, now: asked.append((slug, now)) or "memory low")
+    assert run(store, runtime) == ["holding the master spawn: memory low"]
+    assert asked == [(SLUG, NOW)] and runtime.masters == []
+
+
+def test_a_regrowth_clears_the_retire_state_and_names_why(swarm):
+    store, runtime = swarm
+    inbox = InboxStore(store.redis)
+    seated = asked(swarm)
+    asks = [item for agent in seated for item in inbox.pending_items(agent.seat)]
+    staffed(store, 20)
+    run(store, runtime, NOW + 2 * MINUTE + HOLD)
+    assert store.redis.hget(masters.MasterSeats(store.redis).key(SLUG), master_scale.RETIRING) is None
+    assert [inbox.history(i.id)[-1]["reason"] for i in asks] == [
+        f"the swarm grew again, so seat {a.seat} stays" for a in seated
+    ]
+
+
+def test_a_regrowth_leaves_an_ask_that_moved_elsewhere(swarm):
+    store, runtime = swarm
+    inbox = InboxStore(store.redis)
+    _, _, fourth = asked(swarm)
+    [ask] = inbox.pending_items(FOURTH)
+    inbox.redirect(ask.id, "swarm", LEAD, "moved by hand")
+    staffed(store, 20)
+    run(store, runtime, NOW + 2 * MINUTE + HOLD)
+    assert (inbox.get(ask.id).address, inbox.get(ask.id).state) == (LEAD, "pending")
+
+
+def test_a_retired_seat_names_why_it_moved_and_withdrew_items_and_skips_closed_ones(swarm):
+    store, _ = swarm
+    inbox = InboxStore(store.redis)
+    done = inbox.send(f"{SLUG}-eng-1", THIRD, "already answered")
+    inbox.withdraw(done.id, "swarm", "answered elsewhere")
+    waiting = inbox.send(f"{SLUG}-eng-1", THIRD, "still open")
+    ask = inbox.send("swarm", THIRD, "please retire")
+
+    master_scale._retire(SLUG, store, THIRD, [NOW, ask.id], NOW + MINUTE)
+
+    assert inbox.get(waiting.id).address == LEAD
+    assert inbox.history(waiting.id)[-1]["reason"] == f"master seat {THIRD} retired"
+    assert inbox.history(ask.id)[-1]["reason"] == f"master seat {THIRD} retired"
+
+
+def test_an_extra_seat_that_emptied_before_its_ask_is_closed_and_the_count_falls_past_it(swarm):
+    store, runtime = swarm
+    _, _, fourth = grown(swarm)
+    store.drop_agent(SLUG, fourth.name)
+    runtime.live.discard(fourth.name)
+    staffed(store, 5)
+    run(store, runtime, NOW + MINUTE)
+
+    actions = run(store, runtime, NOW + MINUTE + HOLD)
+
+    assert f"closed empty master seat {FOURTH}" in actions and count(store) == 3
+
+
+def test_a_live_master_above_the_count_never_keeps_the_count_up(swarm):
+    store, runtime = swarm
+    seated = asked(swarm)
+    above = AgentRecord(f"{SLUG}-master-5", MASTER, "master-5", seat=f"master-5@{SLUG}")
+    store.put_agent(SLUG, above)
+    runtime.live.add(above.name)
+    for agent in seated:
+        hand_off(store, runtime, agent)
+
+    run(store, runtime, NOW + 2 * MINUTE + HOLD)
+
+    assert count(store) == 1
+
+
+def test_an_announcement_names_a_seat_that_owns_no_phase():
+    text = master_scale.announcement(SLUG, 2, 6, {"p1": LEAD})
+    assert text == f"Master seats are now 2 for 6 working agents. Phase owners: {LEAD} owns p1; {SECOND} owns no phase."
+
+
+def test_the_seat_lines_tell_an_extra_master_its_seat_phases_channel_and_retirement():
+    swarm = f"agentihooks swarm {SLUG}"
+    assert masters.seat_lines(SLUG, {"seat": SECOND, "masters": 2}) == [
+        f"You hold master seat {SECOND}, one of 2 masters of swarm {SLUG}. The lead seat {LEAD} answers the operator "
+        "and his chat; you act on the inbox items for the phases you own: none yet.",
+        f"The tick assigns phases by code and posts every change on the masters channel. Read it with {swarm} "
+        f'masters-channel read and coordinate with the other masters with {swarm} masters-channel say "<text>".',
+        f"When the swarm shrinks the tick asks you to retire: write your Handoff v2 for the lead master, run {swarm} "
+        "handoff <doc> and stop.",
+    ]
+
+
+def test_a_finished_lead_is_no_master_to_notify(swarm):
+    from scripts.swarm import control_notifications
+
+    store, _ = swarm
+    store.put_agent(SLUG, AgentRecord(LEAD_NAME, MASTER, MASTER, pane_id="pm1", seat=LEAD, state="finished"))
+    assert control_notifications.master(store, SLUG) is None
+
+
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-MST-03"
 
 
