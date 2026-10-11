@@ -36,8 +36,10 @@ def _refused(exc: urllib.error.HTTPError) -> None:
     sys.exit(f"server refused: {exc.code} {message}")
 
 
-def live(slug: str, environ=os.environ) -> bool:
-    return _found(f"ledgers/{slug}/metadata", environ) and not _found(f"bin/{slug}", environ)
+def state(slug: str, environ=os.environ) -> str:
+    if not _found(f"ledgers/{slug}/metadata", environ):
+        return "missing"
+    return "binned" if _found(f"bin/{slug}", environ) else "live"
 
 
 def _found(path: str, environ) -> bool:

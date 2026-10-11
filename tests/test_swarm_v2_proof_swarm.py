@@ -26,15 +26,15 @@ def store():
 
 
 class Ledger:
-    def __init__(self, named=SLUG, live=(), fail=None):
-        self.named, self.alive, self.fail = named, set(live), fail
+    def __init__(self, named=SLUG, live=(), binned=(), fail=None):
+        self.named, self.alive, self.binned, self.fail = named, set(live), set(binned), fail
         self.created, self.removed, self.asked = [], [], []
 
-    def live(self, slug, environ):
+    def state(self, slug, environ):
         if self.fail:
             raise self.fail
         self.asked.append(slug)
-        return slug in self.alive
+        return "live" if slug in self.alive else "binned" if slug in self.binned else "missing"
 
     def create(self, content, environ):
         self.created.append((content, environ))
@@ -75,6 +75,17 @@ def test_a_restart_after_the_ledger_was_created_only_creates_the_swarm(store):
     assert store.slugs() == [SLUG]
 
 
+def test_a_binned_served_ledger_is_refused_without_creating_another(store):
+    ledger = Ledger(binned={SLUG})
+
+    with pytest.raises(SwarmError) as refused:
+        proof_swarm.reconcile(ENV, store, SLUG, ledger)
+
+    assert str(refused.value) == f"the proof ledger {SLUG} is in the bin: name a new proof or restore it"
+    assert (ledger.created, ledger.removed) == ([], [])
+    assert store.slugs() == []
+
+
 def test_a_served_proof_swarm_that_exists_is_kept_without_a_ledger_call(store):
     swarm(store, SLUG)
     ledger = Ledger()
@@ -108,7 +119,7 @@ def test_a_served_swarm_without_a_proof_name_is_refused_before_any_ledger_call(s
 def test_a_cleared_setting_removes_every_proof_swarm_and_only_live_ledgers(store):
     for slug in (SLUG, OTHER, "rig-grade-swarm"):
         swarm(store, slug)
-    ledger = Ledger(live={SLUG})
+    ledger = Ledger(live={SLUG}, binned={OTHER})
 
     assert proof_swarm.reconcile(CLEARED, store, SLUG, ledger) == [
         f"controller: removed proof swarm {SLUG}",
@@ -135,7 +146,7 @@ def test_a_proof_swarm_with_agents_waits_after_its_ledger_is_removed(store):
     ledger = Ledger(live={SLUG})
 
     assert proof_swarm.reconcile(CLEARED, store, SLUG, ledger) == [
-        f"controller: proof swarm {SLUG} waits for its agents to end before removal"
+        f"controller: proof swarm {SLUG} has its ledger removed and waits for its agents to end"
     ]
     assert ledger.removed == [(SLUG, CLEARED)]
     assert store.slugs() == [SLUG]
@@ -220,16 +231,13 @@ def test_the_controller_runs_a_pass_at_start_and_after_each_tick(store, monkeypa
     assert order == [("proof", store), ("host", store), ("tick", store), ("proof", store)]
 
 
-def test_a_refused_pass_stops_the_controller(store, monkeypatch, capsys):
-    from scripts import operator_env
-    from scripts.swarm import controller
+def test_a_failed_pass_is_reported_and_the_controller_keeps_running(store, capsys):
+    environ = {**ENV, "AGENTIHOOKS_DEPLOYMENT": "distributed", "AGENTIHOOKS_CONTROL_SWARM": SLUG}
 
-    def refuse(environ, given):
-        raise SwarmError("the proof ledger route failed: down")
+    proof_swarm.run({**environ, "AGENTIHOOKS_CONTROL_PROOF": "{"}, store)
 
-    monkeypatch.setattr(operator_env, "fill", lambda environ: None)
-    monkeypatch.setattr(controller, "connect", lambda: store)
-    monkeypatch.setattr(proof_swarm, "run", refuse)
-
-    assert controller.main(["run", "--once"]) == 1
-    assert capsys.readouterr().err == "controller: the proof ledger route failed: down\n"
+    assert capsys.readouterr() == (
+        "",
+        "controller: the proof swarm pass failed and runs again after the next tick: "
+        "AGENTIHOOKS_CONTROL_PROOF must be a JSON object naming an agent and a task\n",
+    )

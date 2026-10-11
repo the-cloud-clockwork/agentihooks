@@ -1,4 +1,5 @@
 import json
+import sys
 from collections.abc import Callable, Mapping
 from types import ModuleType
 
@@ -27,9 +28,19 @@ CONTENT = {
 def run(environ: Mapping[str, str], store: RedisStore) -> None:
     from scripts.swarm_ledger import ledger_link, proof_ledger
 
-    if ledger_link.remote(environ):
-        for line in reconcile(environ, store, environ.get(SWARM_ENV, ""), proof_ledger):
-            print(line, flush=True)
+    if not ledger_link.remote(environ):
+        return
+    try:
+        lines = reconcile(environ, store, environ.get(SWARM_ENV, ""), proof_ledger)
+    except SwarmError as exc:
+        print(
+            f"controller: the proof swarm pass failed and runs again after the next tick: {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return
+    for line in lines:
+        print(line, flush=True)
 
 
 def reconcile(environ: Mapping[str, str], store: RedisStore, slug: str, ledger: ModuleType) -> list[str]:
@@ -58,7 +69,10 @@ def _create(environ: Mapping[str, str], store: RedisStore, slug: str, ledger: Mo
     if not naming.PROOF_RE.fullmatch(slug):
         raise SwarmError(f"the controller serves {slug!r}, which is not a proof swarm name")
     repo = _repo(environ)
-    if not _call(ledger.live, slug, environ):
+    found = _call(ledger.state, slug, environ)
+    if found == "binned":
+        raise SwarmError(f"the proof ledger {slug} is in the bin: name a new proof or restore it")
+    if found == "missing":
         named = {**environ, "AGENTIHOOKS_AGENT_NAME": asked["agent"], "AGENTIHOOKS_SWARM_TASK": asked["task"]}
         created = _call(ledger.create, CONTENT, named)["slug"]
         if created != slug:
@@ -69,10 +83,10 @@ def _create(environ: Mapping[str, str], store: RedisStore, slug: str, ledger: Mo
 
 
 def _remove(environ: Mapping[str, str], store: RedisStore, slug: str, ledger: ModuleType) -> str:
-    if _call(ledger.live, slug, environ):
+    if _call(ledger.state, slug, environ) == "live":
         _call(ledger.remove, slug, environ)
     if store.agents(slug):
-        return f"controller: proof swarm {slug} waits for its agents to end before removal"
+        return f"controller: proof swarm {slug} has its ledger removed and waits for its agents to end"
     store.remove(slug)
     return f"controller: removed proof swarm {slug}"
 

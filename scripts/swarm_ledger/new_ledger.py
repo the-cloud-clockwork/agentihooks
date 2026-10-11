@@ -157,17 +157,14 @@ def build_doc(content, size="small"):
         "followups": items("followups", "f", ("text",)),
         "tasks": [
             {
-                **task,
-                **({"profile": item["profile"]} if item.get("profile") else {}),
+                **{key: value for key, value in task.items() if value or key != "profile"},
                 "lane": task["lane"] or "eng",
                 "state": "open",
                 "claimed_by": "",
                 "issue_url": "",
                 "pr_url": "",
             }
-            for task, item in zip(
-                items("tasks", "t", ("title", "description", "phase", "lane")), content.get("tasks", [])
-            )
+            for task in items("tasks", "t", ("title", "description", "phase", "lane", "profile"))
         ],
     }
 
