@@ -299,7 +299,7 @@ def test_the_controller_sleeps_one_configured_tick_between_passes(store, monkeyp
     assert slept == [4.0]
 
 
-def renewed(store, clock, wait_s=1.0):
+def renewed(store, clock, wait_s=5.0):
     deadline = time.monotonic() + wait_s
     while time.monotonic() < deadline:
         held = lease.current(store, "sw")
@@ -338,16 +338,35 @@ def test_beat_stops_once_the_lease_is_lost(store, clock, monkeypatch):
     assert lease.current(store, "sw") is None
 
 
-def test_kept_renews_the_lease_only_while_its_block_runs(store, clock, monkeypatch):
-    monkeypatch.setattr(lease, "tick_ms", lambda: 10)
-    held = lease.acquire(store, "sw", "home")
+def test_kept_beats_only_while_its_block_runs(store, clock, monkeypatch):
+    held, calls = lease.acquire(store, "sw", "home"), []
+
+    def beat(*args):
+        calls.append(args[:3])
+        calls.append(args[3].wait(5))
+
+    monkeypatch.setattr(lease, "beat", beat)
     with lease.kept(store, "sw", held):
-        for _ in range(4):
-            clock[0] += 20
-            assert renewed(store, clock)
-    clock[0] += 20
-    time.sleep(0.05)
-    assert lease.current(store, "sw") == lease.Lease("home", 1, clock[0] + 10)
+        deadline = time.monotonic() + 5
+        while not calls and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert calls == [(store, "sw", held)]
+    assert calls == [(store, "sw", held), True]
+
+
+def test_beat_keeps_beating_through_a_redis_error(store, clock, monkeypatch):
+    from redis.exceptions import ConnectionError as RedisDown
+
+    held, renewals = lease.acquire(store, "sw", "home"), []
+
+    def renew(*args):
+        renewals.append(args)
+        if len(renewals) == 1:
+            raise RedisDown("redis restarting")
+
+    monkeypatch.setattr(lease, "renew", renew)
+    assert lease.beat(store, "sw", held, Stop(clock, 0, 2)) is None
+    assert renewals == [(store, "sw", held)] * 2
 
 
 def test_a_fenced_launch_slower_than_the_lease_keeps_it(store, clock, monkeypatch):
@@ -399,3 +418,39 @@ def test_a_launch_slower_than_the_lease_keeps_the_intent_pass_in_the_same_tick(e
     assert "judged" in actions
     assert lease.current(store, "sw").epoch == 1
     assert store.redis.get(store.key("sw", "last-tick"))
+
+
+def test_a_slow_launch_that_never_starts_is_recorded_against_the_launch_not_the_tick(env, clock, monkeypatch):  # noqa: F811
+    from scripts.swarm.tick import SpawnError
+
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo", "--max-eng-agents", "1", "--max-ci-agents", "0")
+    store.update("sw", state="running")
+    monkeypatch.setattr(lease, "tick_ms", lambda: 10)
+    spawn, events = rt.spawn, []
+    refused = "agentihooks init-agent: the harness did not report its route within 90s"
+
+    def slow(config, lane, name, task):
+        if task.get("id") != "t1":
+            return spawn(config, lane, name, task)
+        for _ in range(5):
+            clock[0] += 20
+            events.append(renewed(store, clock))
+        raise SpawnError(refused)
+
+    class Check:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self, doc):
+            events.append("intent")
+            return []
+
+    monkeypatch.setattr(rt, "spawn", slow)
+    monkeypatch.setattr(cli.intent, "Check", Check)
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert events == [True] * 5 + ["intent"]
+    assert [(row["state"], row["error"]) for row in store.launches("sw") if row["task"] == "t1"] == [
+        ("failed", refused)
+    ]
+    assert lease.current(store, "sw").epoch == 1

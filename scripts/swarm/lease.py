@@ -103,12 +103,16 @@ def renew(store: RedisStore, slug: str, held: Lease) -> Lease:
                 continue
 
 
-def beat(store: RedisStore, slug: str, held: Lease, stop) -> None:
+def beat(store: RedisStore, slug: str, held: Lease, stop: threading.Event) -> None:
+    from redis.exceptions import RedisError
+
     while not stop.wait(tick_ms() / 1000):
         try:
             renew(store, slug, held)
         except SwarmError:
             return
+        except RedisError:
+            continue
 
 
 @contextmanager

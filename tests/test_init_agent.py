@@ -192,8 +192,19 @@ def test_a_profiled_launch_with_no_route_report_fails_at_the_route_timeout(tmp_p
     with pytest.raises(ValueError) as error:
         init_agent._route_reported(env, 90.0, {})
     assert str(error.value) == "the harness did not report its route within 90s"
-    assert init_agent._route_reported(env, 90.0, {"status": "routed"}) is None
+    with pytest.raises(ValueError) as empty:
+        init_agent._route_reported(env, 0.5, {"status": ""})
+    assert str(empty.value) == "the harness did not report its route within 0.5s"
+    with pytest.raises(ValueError) as failed:
+        init_agent._route_reported(env, 90.0, {"status": "failed", "error": "no Codex account has room"})
+    assert str(failed.value) == "the harness route is failed: no Codex account has room"
+    with pytest.raises(ValueError) as silent:
+        init_agent._route_reported(env, 90.0, {"status": "failed"})
+    assert str(silent.value) == "the harness route is failed: no error given"
+    for started in ("routed", "bare", "direct"):
+        assert init_agent._route_reported(env, 90.0, {"status": started}) is None
     assert init_agent._route_reported({}, 90.0, {}) is None
+    assert init_agent._route_reported({binding.REPORT: ""}, 90.0, {}) is None
     binding.refuse(report, "selection refused")
     assert init_agent._route_reported(env, 90.0, {}) is None
 

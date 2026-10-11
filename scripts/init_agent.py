@@ -185,6 +185,7 @@ MODEL_DEFAULTS = {"claude": "opus", "codex": "gpt-6.1-sol"}
 EFFORT_DEFAULT = "high"
 AGENT_HELP = "Agent to open; default the harness of the account with a free session and the fewest live sessions"
 LAUNCH_GRACE_S = 3
+STARTED_ROUTES = ("routed", "bare", "direct")
 
 
 def _flag_value(args: list[str], names: tuple[str, ...]) -> str:
@@ -411,8 +412,12 @@ def _selection_refused(environ: dict[str, str]) -> bool:
 def _route_reported(environ: dict[str, str], timeout: float, route: dict) -> None:
     from scripts.profiles import binding
 
-    if environ.get(binding.REPORT) and not route.get("status") and not _selection_refused(environ):
+    status = route.get("status")
+    if not environ.get(binding.REPORT) or status in STARTED_ROUTES or _selection_refused(environ):
+        return
+    if not status:
         raise ValueError(f"the harness did not report its route within {timeout:g}s")
+    raise ValueError(f"the harness route is {status}: {route.get('error', 'no error given')}")
 
 
 def _binding_export(environ: dict[str, str]) -> str:
