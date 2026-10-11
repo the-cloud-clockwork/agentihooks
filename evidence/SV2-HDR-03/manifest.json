@@ -1,0 +1,26 @@
+{
+  "cases": [
+    "T-SV2-HDR-03-A",
+    "T-SV2-HDR-03-B",
+    "T-SV2-HDR-03-C"
+  ],
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38108949260",
+  "evidence_class": "mocked cases run the catalog, the ownership store and the reconciler against a recording stand in for the herdr client; the live proof ran the pinned herdr 0.9.1 client against two worker sshds with supervised herdr servers on the operator workstation",
+  "inputs": {
+    "scripts/swarm_v2/herdr/catalog.py": "a68a92c73e374f550f13f5586b9610c2724d5dec2b38943e81f6b1836d26afdc",
+    "scripts/swarm_v2/herdr/reconcile.py": "4a49a3057f573094bf5e015467af4ae44b3307535e22ba48a6fcd24770675ca7",
+    "scripts/swarm_v2/herdr/attach.py": "f37f7208fc9a90c0f8b96931379f2bab60b52b1a90fa5a7ec642535f49954dd9",
+    "tests/fixtures/swarm_v2/herdr-registrations.json": "eb069f75d17862be563e36f558ee14db60cd24d7982bb042f2232db5bb81a57c",
+    "tests/fixtures/swarm_v2/herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940",
+    "tests/sv2_hdr03_cases.py": "c38dbbcd1ab17fa79220fc35d5c8e12bba349b4ee773989850d49391ef8f2b93",
+    "tests/test_swarm_v2_herdr_registrations.py": "3c03f113d9a0468fd4fa817f095961a37399a73fa651668d43da3d018b499120",
+    "tests/test_swarm_v2_herdr_attach.py": "7d62a5704d9482a547be2e4f71562e7c03601ae24a5a326d382d68fac27e4cbc",
+    "tests/integration/herdr_registrations/registration_proof.py": "18c7838b43fd42606d4ce53d1b4097ad4068c70dbb42aa4db07c98e654526c44",
+    "evidence/SV2-HDR-03/live-proof.jsonl": "6c2850ba692a688c20f997a5a137e98efda0c0e1884cde487a46e738339a4e6c",
+    "evidence/SV2-HDR-03/live-rename-order.jsonl": "52ab047c307139a0c0bcf1f078cdc318bf7b435af8706bbb002993fcee9927cf",
+    "evidence/SV2-HDR-03/hdr02-live-rerun.jsonl": "aa8c97f42fe1a3ab1fc46163b9a62d66ad5b58e0d75a9620a360dca9fc8b5eb0"
+  },
+  "mutation_preflight": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38108945554",
+  "live_proof_commit": "de046c244638196e78006be8c2a0ad83dab96db6",
+  "tested_commit": "6b71b22e6e44c1a14fae87e38eebf04417e7266e"
+}
