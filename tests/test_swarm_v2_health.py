@@ -338,7 +338,7 @@ def test_a_redis_outage_before_any_reading_reports_no_stage(store, server):
 def test_a_dependency_error_is_sanitized(store, monkeypatch):
     secret = "Bear" + "er abcdefghijklmnop"
 
-    def refuse():
+    def refuse(key):
         raise ConnectionError(f"refused with {secret}")
 
     monkeypatch.setattr(store.redis, "hgetall", refuse)
