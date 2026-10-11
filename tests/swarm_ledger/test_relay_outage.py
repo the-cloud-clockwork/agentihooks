@@ -178,6 +178,6 @@ def test_operator_writes_trimmed_before_their_relay_leave_one_notice_for_the_ope
     ledger_server.replay_unrelayed()
     ledger_server.replay_unrelayed()
     state, _ = core.sync(SLUG)
-    notices = [row for row in state.get("notifications", []) if "trimmed" in row["text"]]
+    notices = [row for row in state.get("notifications", []) if "left the ledger history" in row["text"]]
     assert len(notices) == 1 and ledger_server.unrelayed() == {}
     assert len(mentions(outage.texts(BOSS.seat), "use the queue")) == 1
