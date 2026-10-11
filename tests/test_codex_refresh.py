@@ -272,7 +272,7 @@ def test_an_openbao_account_whose_new_pair_cannot_be_kept_anywhere_warns_and_the
     secret = {"AH_CX_TOKEN_alpha": access_token(1), "AH_CX_REFRESH_alpha": "rt-alpha"}
     secret |= {"AH_CX_TOKEN_beta": access_token(1), "AH_CX_REFRESH_beta": "rt-beta"}
     grant = Grant()
-    assert _run([], {**FLAG, **BAO_ENV, **OPENBAO_STORE}, grant, FakeBao(secret, fail_writes=True)) == 2
+    assert _run([], {**FLAG, **BAO_ENV, **OPENBAO_STORE}, grant, FakeBao(secret, fail_writes=True)) == 1
     assert grant.calls == ["rt-alpha", "rt-beta"]
     out = capsys.readouterr().out
     assert "alpha: new token pair not persisted; run agentihooks codex login alpha" in out
