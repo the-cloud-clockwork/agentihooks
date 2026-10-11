@@ -10,7 +10,8 @@ from scripts.swarm import lease, ledger_host
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
-from scripts.swarm_v2 import deployed, ledger_writer, telemetry
+from scripts.swarm_v2 import deployed, ledger_writer, operator_auth, telemetry
+from scripts.swarm_v2.api import health
 from scripts.swarm_v2.api.executions import ExecutionsAPI
 from scripts.swarm_v2.api.server import Routes, serve
 from scripts.swarm_v2.api.tasks import TasksAPI
@@ -41,6 +42,12 @@ AUDIENCE = "workers"
 
 class ControlError(SwarmError):
     pass
+
+
+def page_credential(slug: str) -> str | None:
+    from scripts.swarm_ledger.repository import repository
+
+    return repository.token(slug)
 
 
 def launch_key(environ: Mapping[str, str]) -> LaunchKey:
@@ -74,6 +81,7 @@ class ControlService:
         authorize: Callable[[], bool],
         transports: Iterable[OperationTransport] = (),
         owner: str = "",
+        operator: Callable[[str, str], object] | None = None,
     ) -> None:
         self.controller = Controller(store, slug, transports, authorize)
         self.controller.telemetry = telemetry.Telemetry(store, slug, telemetry.configured_exporter(os.environ))
@@ -83,6 +91,8 @@ class ControlService:
         self.grants = LaunchAuthority(store, key, ISSUER, AUDIENCE)
         self.tasks = TaskAuthority(store, self.controller, lambda token: self.grants.bound(slug, token))
         self.executions = ExecutionsAPI(self.grants, self.tasks)
+        self.health = health.Health(store, slug, health.brain_probe(os.environ), self.controller)
+        self.health_api = health.HealthAPI(self.health, self.grants, operator, health.deep_enabled())
         self.server: ThreadingHTTPServer | None = None
         self.listen: tuple[str, int] | None = None
         self.runtime = None
@@ -136,8 +146,7 @@ class ControlService:
                 self.controller.store.update(self.controller.slug, api_url=self.api_url)
 
     def serve(self, host: str, port: int) -> ThreadingHTTPServer:
-        api = self.executions if self.tasks_api is None else Routes(self.executions, self.tasks_api)
-        self.server = serve(api, host, port)
+        self.server = serve(Routes(self.executions, self.tasks_api, health=self.health_api), host, port)
         self.thread = threading.Thread(target=self.server.serve_forever, name=THREAD, daemon=True)
         self.thread.start()
         return self.server
@@ -193,6 +202,7 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
         lambda: hive_auth.controller(store.redis, credential),
         transports,
         owner=owner,
+        operator=operator_auth.authenticator(page_credential),
     )
     service.controller.terminals = anton_client(environ, slug, workers)
     service.listen = (HOST, int(port))
