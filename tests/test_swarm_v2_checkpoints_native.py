@@ -212,11 +212,39 @@ def test_a_record_that_is_not_json_is_a_changed_format(tmp_path):
     assert result == native.Unavailable("claude", native.FORMAT)
 
 
-def test_a_conversation_written_by_another_cli_line_is_a_changed_format(tmp_path):
+def test_a_conversation_written_by_another_cli_line_is_a_version_change(tmp_path):
     cwd = tmp_path / "repo"
     home = cases.claude_home(tmp_path, cwd, records=cases.claude_records(CLAUDE, version="2.0.9"))
     result = qualifier(tmp_path).capture("claude", home, CLAUDE, cwd, cases.VERSIONS["claude"], True)
+    assert result == native.Unavailable("claude", "version_changed")
+
+
+@pytest.mark.parametrize("session", [["list"], {"a": 1}, 7])
+def test_a_session_id_that_is_not_text_is_a_changed_format(tmp_path, session):
+    cwd = tmp_path / "repo"
+    records = [{"type": "user", "sessionId": session, "version": "2.1.296"}]
+    home = cases.claude_home(tmp_path, cwd, records=records)
+    result = qualifier(tmp_path).capture("claude", home, CLAUDE, cwd, cases.VERSIONS["claude"], True)
     assert result == native.Unavailable("claude", native.FORMAT)
+
+
+def test_a_capture_past_the_archive_bounds_is_unavailable(tmp_path, monkeypatch):
+    monkeypatch.setattr(native, "ARCHIVE_MEMBERS", 1)
+    _, result = captured(tmp_path / "members", "claude")
+    assert result == native.Unavailable("claude", "native_too_large")
+    monkeypatch.setattr(native, "ARCHIVE_MEMBERS", 10)
+    monkeypatch.setattr(native, "ARCHIVE_BYTES", 10)
+    _, result = captured(tmp_path / "bytes", "codex")
+    assert result == native.Unavailable("codex", "native_too_large")
+
+
+def test_a_capture_at_the_archive_bounds_is_taken(tmp_path, monkeypatch):
+    _, first = captured(tmp_path / "probe", "claude")
+    size = sum(len(data) for _, data in first.files)
+    monkeypatch.setattr(native, "ARCHIVE_MEMBERS", 2)
+    monkeypatch.setattr(native, "ARCHIVE_BYTES", size)
+    _, result = captured(tmp_path / "bounded", "claude")
+    assert isinstance(result, native.NativeCapture)
 
 
 def test_a_file_holding_another_session_is_an_identity_mismatch(tmp_path):
@@ -261,6 +289,34 @@ def test_an_index_pointing_outside_the_sessions_folder_is_refused(tmp_path):
         conn.execute("UPDATE threads SET rollout_path = ?", (str(tmp_path / "outside.jsonl"),))
     result = qualifier(tmp_path).capture("codex", home, CODEX, tmp_path, cases.VERSIONS["codex"], True)
     assert result == native.Unavailable("codex", native.ESCAPE)
+
+
+def test_a_linked_rollout_found_by_name_is_not_read(tmp_path):
+    home = cases.codex_home(tmp_path, index=False)
+    rollout = home / "sessions" / cases.ROLLOUT.format(CODEX)
+    target = tmp_path / "outside.jsonl"
+    target.write_bytes(rollout.read_bytes())
+    rollout.unlink()
+    rollout.symlink_to(target)
+    result = qualifier(tmp_path).capture("codex", home, CODEX, tmp_path, cases.VERSIONS["codex"], True)
+    assert result == native.Unavailable("codex", "conversation_absent")
+
+
+def test_a_rollout_under_a_linked_folder_outside_the_home_is_refused(tmp_path):
+    home = cases.codex_home(tmp_path / "source", index=False)
+    day = home / "sessions" / "2026" / "10" / "11"
+    outside = tmp_path / "outside"
+    day.rename(outside)
+    day.symlink_to(outside)
+    result = qualifier(tmp_path).capture("codex", home, CODEX, tmp_path, cases.VERSIONS["codex"], True)
+    assert result == native.Unavailable("codex", native.ESCAPE)
+
+
+def test_an_index_that_is_not_a_database_is_a_changed_format(tmp_path):
+    home = cases.codex_home(tmp_path, index=False)
+    (home / native.Codex.index).write_bytes(b"not a database" * 100)
+    result = qualifier(tmp_path).capture("codex", home, CODEX, tmp_path, cases.VERSIONS["codex"], True)
+    assert result == native.Unavailable("codex", native.FORMAT)
 
 
 def test_an_index_without_the_threads_table_is_a_changed_format(tmp_path):
@@ -436,6 +492,65 @@ def test_restore_never_overwrites_a_conversation_already_in_the_home(tmp_path):
     result = reader(tmp_path).restore("ckpt-1", home, tmp_path, cases.VERSIONS["codex"])
     assert result == native.Unavailable("codex", "conversation_present")
     assert target.read_bytes() == b"kept\n"
+
+
+def test_a_failed_read_back_removes_everything_the_restore_placed(tmp_path, monkeypatch):
+    committed(tmp_path, "claude")
+    home = tmp_path / "fresh"
+    home.mkdir()
+
+    def absent(self, home, session_id, cwd):
+        raise native.NativeError("conversation_absent")
+
+    monkeypatch.setattr(native.Claude, "collect", absent)
+    result = reader(tmp_path).restore("ckpt-1", home, tmp_path / "fresh-repo", cases.VERSIONS["claude"])
+    assert result == native.Unavailable("claude", "conversation_absent")
+    assert list(home.iterdir()) == []
+
+
+def test_a_read_back_of_another_session_is_an_identity_mismatch(tmp_path, monkeypatch):
+    committed(tmp_path, "codex")
+    home = tmp_path / "fresh"
+    monkeypatch.setattr(native.Codex, "collect", lambda self, home, session_id, cwd: {"rollout/x": b""})
+    monkeypatch.setattr(
+        native.Codex,
+        "identity",
+        lambda self, files: (cases.OTHER["codex"] if files == {"rollout/x": b""} else CODEX, "0.162.1"),
+    )
+    result = reader(tmp_path).restore("ckpt-1", home, tmp_path, cases.VERSIONS["codex"])
+    assert result == native.Unavailable("codex", "identity_mismatch")
+    assert not any(path.is_file() for path in home.rglob("*"))
+
+
+def test_a_write_failure_removes_what_was_placed_and_reports_placement_failed(tmp_path, monkeypatch):
+    committed(tmp_path, "claude")
+    home = tmp_path / "fresh"
+    home.mkdir()
+    opened = []
+    real = native.os.open
+
+    def failing(path, flags, mode):
+        opened.append(path)
+        if len(opened) == 2:
+            raise OSError("disk full")
+        return real(path, flags, mode)
+
+    monkeypatch.setattr(native.os, "open", failing)
+    result = reader(tmp_path).restore("ckpt-1", home, tmp_path / "fresh-repo", cases.VERSIONS["claude"])
+    assert result == native.Unavailable("claude", "placement_failed")
+    assert len(opened) == 2
+    assert list(home.iterdir()) == []
+
+
+def test_restore_never_follows_a_link_already_at_a_target(tmp_path):
+    committed(tmp_path, "codex")
+    home = tmp_path / "fresh"
+    target = home / "sessions" / cases.ROLLOUT.format(CODEX)
+    target.parent.mkdir(parents=True)
+    target.symlink_to(tmp_path / "dangling.jsonl")
+    result = reader(tmp_path).restore("ckpt-1", home, tmp_path, cases.VERSIONS["codex"])
+    assert result == native.Unavailable("codex", "conversation_present")
+    assert not (tmp_path / "dangling.jsonl").exists()
 
 
 @pytest.mark.parametrize(

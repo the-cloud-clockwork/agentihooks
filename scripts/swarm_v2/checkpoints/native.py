@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import re
 import sqlite3
 import tarfile
@@ -153,7 +154,10 @@ class Claude:
 
     def identity(self, files: dict[str, bytes]) -> tuple[str, str]:
         records = _records(files.get(self.conversation, b""))
-        sessions = {r["sessionId"] for r in records if "sessionId" in r}
+        named = [r["sessionId"] for r in records if "sessionId" in r]
+        if not all(isinstance(session, str) for session in named):
+            raise NativeError(FORMAT)
+        sessions = set(named)
         versions = [r["version"] for r in records if isinstance(r.get("version"), str)]
         if len(sessions) != 1 or not versions:
             raise NativeError(FORMAT)
@@ -175,15 +179,14 @@ class Codex:
     prefix = "rollout"
 
     def _indexed(self, home: Path, session_id: str) -> str | None:
-        """The thread index is read inside one read transaction that never waits on a writer's lock, never by copying a
-        database another process writes; SQLite's online backup would retry forever on a locked source."""
+        """One read that never waits on a writer's lock; SQLite's online backup retries forever on a locked source."""
         db = home / self.index
         if not db.is_file():
             return None
         try:
             with closing(sqlite3.connect(f"{db.resolve().as_uri()}?mode=ro", uri=True, timeout=0)) as source:
                 row = source.execute("SELECT rollout_path FROM threads WHERE id = ?", (session_id,)).fetchone()
-        except sqlite3.OperationalError as error:
+        except sqlite3.DatabaseError as error:
             raise NativeError(BUSY if "locked" in str(error) or "busy" in str(error) else FORMAT) from error
         return row[0] if row else None
 
@@ -196,9 +199,12 @@ class Codex:
             except LayoutError as error:
                 raise NativeError(ESCAPE) from error
         found = sorted(sessions.glob(f"*/*/*/rollout-*-{session_id}.jsonl"))
-        if len(found) != 1:
+        if len(found) != 1 or found[0].is_symlink():
             raise NativeError("conversation_absent")
-        return found[0].resolve()
+        try:
+            return contain(sessions, found[0].relative_to(sessions))
+        except LayoutError as error:
+            raise NativeError(ESCAPE) from error
 
     def collect(self, home: Path, session_id: str, cwd: Path) -> dict[str, bytes]:
         path = self._rollout(home, session_id)
@@ -244,6 +250,26 @@ def _members(data: bytes) -> dict[str, bytes]:
     return found
 
 
+def _write_new(path: Path, data: bytes, created: list[Path]) -> None:
+    """Every directory and file this creates is appended to created, so a failed placement removes exactly them."""
+    missing = [parent for parent in reversed(path.parents) if not parent.exists()]
+    for folder in missing:
+        folder.mkdir()
+        created.append(folder)
+    handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, MEMBER_MODE)
+    created.append(path)
+    with os.fdopen(handle, "wb") as out:
+        out.write(data)
+
+
+def _remove(created: list[Path]) -> None:
+    for path in reversed(created):
+        if path.is_dir() and not path.is_symlink():
+            path.rmdir()
+        else:
+            path.unlink(missing_ok=True)
+
+
 def _granted(scope: Scope, authority: dict) -> bool:
     claimed = (authority.get("task_id"), authority.get("execution_id"), authority.get("task_generation"))
     return claimed == (scope.task_id, scope.execution_id, scope.generation)
@@ -285,7 +311,9 @@ class Qualifier:
         self.outcomes[f"{harness}/{result.outcome}"] += 1
         return result
 
-    def capture(self, harness: str, home: Path, session_id: str, cwd: Path, version_text: str, stopped: bool):
+    def capture(
+        self, harness: str, home: Path, session_id: str, cwd: Path, version_text: str, stopped: bool
+    ) -> "NativeCapture | Unavailable":
         if problem := self._qualified(harness, version_text):
             return self._count(harness, Unavailable(harness, problem))
         native = HARNESSES[harness]
@@ -297,7 +325,9 @@ class Qualifier:
         if found != session_id:
             return self._count(harness, Unavailable(harness, "identity_mismatch"))
         if line(recorded) != line(version_text):
-            return self._count(harness, Unavailable(harness, FORMAT))
+            return self._count(harness, Unavailable(harness, "version_changed"))
+        if len(files) > ARCHIVE_MEMBERS or sum(map(len, files.values())) > ARCHIVE_BYTES:
+            return self._count(harness, Unavailable(harness, "native_too_large"))
         quiescence = "stopped_process" if stopped else "consistent_export"
         captured = NativeCapture(harness, recorded, session_id, tuple(sorted(files.items())), quiescence)
         self.outcomes[f"{harness}/{CAPTURED}"] += 1
@@ -342,13 +372,15 @@ class Qualifier:
             targets = [(contain(home, native.placed(session_id, cwd, name)), data) for name, data in members.items()]
         except (LayoutError, ValueError) as error:
             raise NativeError(ESCAPE) from error
-        if any(path.exists() for path, _ in targets):
+        if any(path.exists() or path.is_symlink() for path, _ in targets):
             raise NativeError("conversation_present")
-        for path, data in targets:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(data)
-            path.chmod(MEMBER_MODE)
-        found, _ = native.identity(native.collect(home, session_id, cwd))
-        if found != session_id:
-            raise NativeError("identity_mismatch")
+        created: list[Path] = []
+        try:
+            for path, data in targets:
+                _write_new(path, data, created)
+            if native.identity(native.collect(home, session_id, cwd))[0] != session_id:
+                raise NativeError("identity_mismatch")
+        except (OSError, NativeError) as error:
+            _remove(created)
+            raise error if isinstance(error, NativeError) else NativeError("placement_failed") from error
         return Resumed(native.name, session_id, native.command(session_id))

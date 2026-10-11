@@ -359,7 +359,7 @@ def _recovery_fixture(root: Path) -> dict:
     session = home / "projects" / native.encoded(cwd) / f"{SESSIONS['claude']}.jsonl"
     session.write_bytes(session.read_bytes().replace(TORN, b"") + jsonl(claude_records(SESSIONS["claude"])[:1]))
     second = first.capture("claude", home, SESSIONS["claude"], cwd, VERSIONS["claude"], True)
-    interrupted = native.Qualifier(model.Validator(store(durable, backend=Interrupted(durable, writes=1))))
+    interrupted = native.Qualifier(model.Validator(store(durable, backend=Interrupted(durable, writes=3))))
     try:
         commit(interrupted, second, "ckpt-n-2", "claude")
         error = None
@@ -367,6 +367,7 @@ def _recovery_fixture(root: Path) -> dict:
         error = str(raised)
     restarted = native.Qualifier(model.Validator(store(durable)))
     absent = restarted.validator.verify("ckpt-n-2")
+    material = restarted.validator.store.recorded(f"ckpt-n-2.{model.NATIVE_SESSION}")
     current = restarted.validator.verify("ckpt-n-1")
     resumed = commit(restarted, second, "ckpt-n-2", "claude")
     held = sorted(restarted.validator.store.backend.keys(""))
@@ -387,6 +388,7 @@ def _recovery_fixture(root: Path) -> dict:
         "previous_checkpoint": shown(previous),
         "interruption": error,
         "interrupted_manifest": shown(absent),
+        "native_material_durable_while_manifest_absent": material is not None,
         "previous_checkpoint_while_interrupted": shown(current),
         "after_restart": shown(resumed),
         "replay": shown(replay),
@@ -414,6 +416,7 @@ def _recovery() -> tuple[dict, bool]:
         first["previous_checkpoint"]["authoritative"],
         first["interruption"] == "worker stopped",
         first["interrupted_manifest"]["reason"] == "manifest_absent",
+        first["native_material_durable_while_manifest_absent"],
         first["previous_checkpoint_while_interrupted"]["authoritative"],
         first["after_restart"]["authoritative"],
         first["replay"] == first["after_restart"],
