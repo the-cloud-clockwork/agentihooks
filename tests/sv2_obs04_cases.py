@@ -104,6 +104,7 @@ class World:
                     health.brain_probe(self.brain.environ),
                     self.controller,
                     health.Limits(**FX["limits"]),
+                    self.now,
                 )
                 self.routes = health.HealthAPI(
                     self.health, self.grants, operator_auth.authenticator(lambda slug: operator_credential())
@@ -208,7 +209,7 @@ def _story() -> tuple[dict, list[bool]]:
             "shallow_without_redis": shallow_without_redis,
             "shallow_touched_brain": brain_before != 0,
             "diagnose": [status, report["probe"], report["status"], report["scope"]],
-            "process": report["process"],
+            "process": {name: value for name, value in report["process"].items() if name != "pid"},
             "dependencies": {name: dep["state"] for name, dep in report["dependencies"].items()},
             "brain_reason": report["dependencies"]["brain"]["reason"],
             "redis_last_ok": report["dependencies"]["redis"]["last_ok_at_ms"] - world.started_ms,
@@ -293,7 +294,7 @@ def _rejection() -> tuple[dict, bool]:
                 for name, (status, reply) in http.items()
             },
             "protected_unchanged": before == after,
-            "fresh_resume": world.masked(accepted),
+            "fresh_resume": world.masked({name: value for name, value in accepted.items() if name != "report_id"}),
             "leaked": world.leaked(refusals, http, fresh, accepted),
         }
     checks = [

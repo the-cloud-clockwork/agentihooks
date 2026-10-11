@@ -65,9 +65,11 @@ def make(store, probe=None, controller=None, limits=LIMITS):
 
 
 def occupant(store, seat="eng-1@fixture", task="task") -> AgentRecord:
-    record = AgentRecord(store.next_name(SLUG, "eng"), "eng", task, seat=seat, execution_id=f"exe-{seat[:5]}")
-    store.put_agent(SLUG, record)
-    return store.execution_occupants(SLUG)[seat]
+    from scripts.swarm_v2.controller import Controller as Admitting
+
+    admitting = Admitting(store, SLUG, [], lambda: True)
+    assert admitting.acquire()
+    return admitting.admit(AgentRecord(store.next_name(SLUG, "eng"), "eng", task, seat=seat))
 
 
 def heartbeat(store, agent, accepted_at_ms, watermark=10, state="working", advanced_at_ms=None, **extra):
@@ -281,7 +283,7 @@ def test_a_dependency_error_is_sanitized(store, monkeypatch):
 
     monkeypatch.setattr(store.redis, "ping", refuse)
     reason = make(store).diagnose()["dependencies"]["redis"]["reason"]
-    assert reason == "ConnectionError: refused with Bearer [redacted]"
+    assert reason == "ConnectionError: refused with [redacted]"
 
 
 def test_only_the_last_issued_reports_are_recognized(store):
@@ -314,7 +316,7 @@ def test_a_recent_report_qualifies_backup(store):
     [
         (lambda report: report.pop("report_id"), "unrecognized_report"),
         (lambda report: report.update(probe="shallow"), "shallow_report"),
-        (lambda report: report.update(status="ok"), "unrecognized_report"),
+        (lambda report: report.update(status="forged"), "unrecognized_report"),
     ],
 )
 def test_an_altered_report_is_refused(store, mutate, reason):
