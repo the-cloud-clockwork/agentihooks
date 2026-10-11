@@ -103,16 +103,23 @@ def _request(token: str, model: str) -> urllib.request.Request:
     return urllib.request.Request(MESSAGES_URL, data=json.dumps(payload).encode(), headers=headers)
 
 
+def _exchange(
+    opener: Callable, request: urllib.request.Request, timeout: float
+) -> tuple[int, Mapping[str, str], bytes]:
+    try:
+        with opener(request, timeout=timeout) as response:
+            return response.status, response.headers, response.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.headers, exc.read()
+
+
 def probe(
     account: str, token: str, model: str, opener: Callable | None = None, timeout: float = TIMEOUT_S
 ) -> ProbeResult:
     started = time.monotonic()
     timed_out = TIMED_OUT.format(seconds=f"{timeout:g}")
     try:
-        with (opener or urllib.request.urlopen)(_request(token, model), timeout=timeout) as response:
-            status, headers, raw = response.status, response.headers, response.read()
-    except urllib.error.HTTPError as exc:
-        status, headers, raw = exc.code, exc.headers, exc.read()
+        status, headers, raw = _exchange(opener or urllib.request.urlopen, _request(token, model), timeout)
     except urllib.error.URLError as exc:
         if not isinstance(exc.reason, TimeoutError):
             raise Unreachable from None
