@@ -21,7 +21,14 @@ RUNS = metrics_outbox.Table(
 )
 STAGES = metrics_outbox.Table(
     "ci_stages",
-    (*RUN_KEYS, ("stage", "String"), ("seconds", "Float64"), ("budget", "Int64"), ("pickup_s", "Float64")),
+    (
+        *RUN_KEYS,
+        ("stage", "String"),
+        ("seconds", "Float64"),
+        ("budget", "Int64"),
+        ("pickup_s", "Float64"),
+        ("runner", "String"),
+    ),
 )
 FAILURES = metrics_outbox.Table(
     "ci_failures",
@@ -64,13 +71,14 @@ def _failures(log):
 
 
 def _pickups(jobs):
-    pickups = {}
+    pickups, runners = {}, {}
     for job in jobs:
         if job.get("started_at") and job.get("conclusion") != "skipped":
             stage = ci_budget.stage_of(job["name"])
             wait = ci_budget.seconds(job["started_at"]) - ci_budget.seconds(job["created_at"])
-            pickups[stage] = max(pickups.get(stage, 0.0), wait)
-    return pickups
+            if stage not in pickups or wait > pickups[stage]:
+                pickups[stage], runners[stage] = wait, ",".join(sorted(job.get("labels") or []))
+    return pickups, runners
 
 
 def rows(slug: str, item: dict, jobs: list[dict], logs: dict) -> dict:
@@ -92,7 +100,7 @@ def rows(slug: str, item: dict, jobs: list[dict], logs: dict) -> dict:
         "queue_s": started - ci_budget.seconds(item["created_at"]),
         "run_s": ci_budget.seconds(end) - started,
     }
-    pickups = _pickups(jobs)
+    pickups, runners = _pickups(jobs)
     stage_rows = [
         {
             **_base(slug, item, ts_ms, f"ci-stage:{key}:{stage}"),
@@ -101,6 +109,7 @@ def rows(slug: str, item: dict, jobs: list[dict], logs: dict) -> dict:
             "seconds": spent,
             "budget": ci_budget.BUDGETS.get(stage, 0),
             "pickup_s": pickups.get(stage, 0.0),
+            "runner": runners.get(stage, ""),
         }
         for stage, spent in ci_budget.stages(jobs).items()
     ]

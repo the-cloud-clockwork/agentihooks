@@ -227,7 +227,7 @@ def test_caught_spawn_failures_keep_the_error_without_resetting_the_clock(stalle
     store, ledger, _, clock, _ = stalled
     record = AgentRecord("failed", "eng", "t1", started_at=clock[0])
     with timing.tick("sw"), spawn_stall.watch(store, "sw", ledger, lambda: clock[0], stalled[2]):
-        tick._record_spawn_failure("sw", store, record, RuntimeError("forced launch failure"))
+        tick._record_spawn_failure("sw", store, record, RuntimeError("forced launch failure"), clock[0])
     clock[0] += 600_000
     with timing.tick("sw"), spawn_stall.watch(store, "sw", ledger, lambda: clock[0], stalled[2]):
         pass

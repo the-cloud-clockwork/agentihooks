@@ -76,6 +76,9 @@ class HostKeys:
         entry = json.loads(raw)
         return Launched(execution_id, entry["generation"], entry["host_public"])
 
+    def forget(self, swarm: str, execution_id: str) -> None:
+        self.store.redis.hdel(self.store.key(swarm, HOST_KEYS), execution_id)
+
     def attachable(self, swarm: str, live: Iterable[str]) -> list[Launched]:
         ids = sorted(set(live))
         raws = self.store.redis.hmget(self.store.key(swarm, HOST_KEYS), ids) if ids else []

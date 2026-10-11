@@ -296,7 +296,6 @@ def test_every_quota_reader_appends_the_api_row_of_its_harness(monkeypatch):
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"api": 1})
     monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {"api": 3})
     monkeypatch.setattr(codex_router, "accounts", lambda environ: [])
-    monkeypatch.setattr(codex_router, "routing_pool", lambda environ: [])
     monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {})
     monkeypatch.setattr(agents_quota.time, "time", lambda: 42.0)
     codex_nows = []
@@ -342,7 +341,7 @@ def test_page_quota_reads_the_balance_cache_and_codex_logs_without_probing(monke
     monkeypatch.setattr(claude_quota_balancer, "collect_results", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"tccgma": 2})
     monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {"default": 1})
-    monkeypatch.setattr(codex_router, "routing_pool", lambda environ: [CodexAccount("default")])
+    monkeypatch.setattr(codex_router, "accounts", lambda environ: [CodexAccount("default")])
     monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {"default": None})
     quota = agents_quota.page_quota(now=100.0)
     assert [(r["agent"], r["account"], r["sessions"], r["cap"]) for r in quota["rows"]] == [
@@ -433,7 +432,6 @@ def test_every_quota_reader_marks_the_declared_masters(monkeypatch):
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"home": 1})
     monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
     monkeypatch.setattr(codex_router, "accounts", lambda environ: [CodexAccount("default")])
-    monkeypatch.setattr(codex_router, "routing_pool", lambda environ: [CodexAccount("default")])
     monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {})
 
     assert [(row.account, row.master) for row in agents_quota._claude(False, 1.0)] == [("home", "MASTER")]
@@ -496,7 +494,7 @@ def test_page_quota_routes_the_environment_and_names_each_source(monkeypatch):
     monkeypatch.setattr(claude_quota_balancer, "cached_observations", lambda: [(1.0, claude)])
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
     monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
-    monkeypatch.setattr(codex_router, "routing_pool", lambda environ: seen.append(environ) or pool)
+    monkeypatch.setattr(codex_router, "accounts", lambda environ: seen.append(environ) or pool)
     monkeypatch.setattr(codex_router, "quotas", lambda p, environ: seen.append((p, environ)) or {"default": quota})
     rows = agents_quota.page_quota(now=quota.observed_at + 120)["rows"]
     assert seen == [os.environ, (pool, os.environ)]
@@ -558,7 +556,7 @@ def test_page_quota_without_a_cached_reading_has_no_probe_time(monkeypatch):
     monkeypatch.setattr(claude_quota_balancer, "cached_observations", lambda: [])
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
     monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
-    monkeypatch.setattr(codex_router, "routing_pool", lambda environ: [])
+    monkeypatch.setattr(codex_router, "accounts", lambda environ: [])
     monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {})
     assert agents_quota.page_quota(now=100.0) == {"probed_at": None, "rows": []}
 

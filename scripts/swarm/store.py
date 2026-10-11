@@ -347,8 +347,23 @@ class RedisStore:
         return self.redis.hget(self.key(slug, "launch-failures"), task) or ""
 
     def record_launch(self, slug: str, agent: AgentRecord, state: str, error: str = "") -> None:
-        row = {"agent": agent.name, "task": agent.task, "at": agent.started_at, "state": state, "error": error}
+        row = {
+            "agent": agent.name,
+            "task": agent.task,
+            "at": agent.started_at,
+            "state": state,
+            "error": error,
+            "pane_id": agent.pane_id,
+        }
         self.redis.hset(self.key(slug, "launches"), agent.name, json.dumps(row))
+
+    def note_launch_pane(self, slug: str, name: str, lines: list[str], reason: str = "") -> None:
+        raw = self.redis.hget(self.key(slug, "launches"), name)
+        if raw is None:
+            return
+        row = json.loads(raw)
+        row = {**row, "error": row["error"] or reason, "pane_lines": lines}
+        self.redis.hset(self.key(slug, "launches"), name, json.dumps(row))
 
     def launches(self, slug: str) -> list[dict]:
         rows = {name: json.loads(raw) for name, raw in self.redis.hgetall(self.key(slug, "launches")).items()}

@@ -12,6 +12,8 @@ ledger_pod="$release-ledger-0"
 controller=(-l "app.kubernetes.io/instance=$release,app.kubernetes.io/component=controller")
 ca_dir=""
 
+python3 tests/kind_request.py
+
 finish() {
   status=$?
   if [[ -n $ca_dir ]]; then
@@ -323,7 +325,7 @@ if [[ $restarts != 0 ]]; then
 fi
 printf 'controller with the control API on is Ready under the health probes, restarts: 0\n'
 registered="$(kubectl exec -i "deployment/$release-controller" -c controller -- env CONTROL_URL="http://$release-controller:8780" SLUG="$slug" python - <<'EOF'
-import json, os, time, urllib.request
+import json, os, sys, time, urllib.error, urllib.request
 from pathlib import Path
 
 from scripts.hive import auth as hive_auth
@@ -359,8 +361,12 @@ token = probe.grants.issue(
 def send(path, body, method):
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     request = urllib.request.Request(base + path, json.dumps(body).encode(), headers, method=method)
-    with urllib.request.urlopen(request, timeout=10) as response:
-        return response.status, json.loads(response.read())
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        print(f"{method} {path}: HTTP {error.code}: {error.read().decode(errors='replace')}", file=sys.stderr)
+        raise
 
 
 status, ack = send("/v2/executions/register", {"execution_id": agent.execution_id, "generation": agent.generation}, "POST")

@@ -65,7 +65,7 @@ from scripts.handoff import check as handoff_check
 from scripts.handoff import envelope as handoff_envelope
 from scripts.handoff import transfers
 from scripts.handoff.resolve import Resolver
-from scripts.inbox import exits, wake
+from scripts.inbox import exits, outbox, wake
 from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
@@ -80,6 +80,7 @@ from scripts.swarm import (
     dispatch_seat,
     dispatcher,
     done_gate,
+    failed_panes,
     idle,
     launch_check,
     ledger_client,
@@ -101,6 +102,7 @@ from scripts.swarm import (
     reaper,
     snapshot,
     stack,
+    stages,
     take_master,
     templates,
     tick_master,
@@ -174,6 +176,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
     from scripts.swarm import command_runner, commands, controller, incidents, lease
 
     ledger = ledger or LedgerClient()
+    outbox.flush(InboxStore(store.redis))
     runtime = runtime or routed(herdr=HerdrRuntime())
     held = lease.acquire(store, slug, commands.hive_id())
     if held is None:
@@ -849,9 +852,11 @@ def cmd_status(store, args):
     from scripts.swarm_ledger import ledger_freezes
 
     quota = quota_view.lines(capacity.read(store, args.slug), now_ms())
-    for line in ledger_freezes.lines(doc) + quota + spawn_holds(store, args.slug):
+    held = spawn_holds(store, args.slug) + failed_panes.status_lines(store, args.slug)
+    for line in ledger_freezes.lines(doc) + quota + held:
         print(line)
     print(bottleneck.line(bottleneck.read(store, args.slug), now_ms()))
+    print(stages.line(stages.read(store, args.slug), now_ms()))
     print(_snapshot_line(auto_snapshot(config)))
     print(_affinity_line(affinity.report(store, args.slug, config, agents)))
     if promotion := tick_master.status_line(tick_master.read(store, args.slug)):
