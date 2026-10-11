@@ -89,54 +89,56 @@ def test_the_guest_memory_reading_separates_usage_anonymous_and_shared_pages(pro
     assert probe.memory() == {"used": 1048576, "anonymous": 131072, "shmem": 65536}
 
 
-def test_the_default_workload_writes_one_gibibyte_per_path_and_flushes_every_sixteen_mib(probe, monkeypatch, capsys):
-    from types import SimpleNamespace
+class ProbeFile:
+    def __init__(self, folder, files):
+        self.folder = folder
+        self.size = 0
+        self.removed = False
+        files.append(self)
 
-    files = []
-    flushes = []
+    def open(self, mode, buffering):
+        assert (mode, buffering) == ("xb", 0)
+        return self
 
-    class File:
-        def __init__(self, folder):
-            self.folder = folder
-            self.size = 0
-            self.removed = False
-            files.append(self)
+    def __enter__(self):
+        return self
 
-        def open(self, mode, buffering):
-            assert (mode, buffering) == ("xb", 0)
-            return self
+    def __exit__(self, *args):
+        return None
 
-        def __enter__(self):
-            return self
+    def write(self, chunk):
+        self.size += len(chunk)
+        assert self.size <= 1073741824
+        return len(chunk)
 
-        def __exit__(self, *args):
-            return None
+    def fileno(self):
+        return 17
 
-        def write(self, chunk):
-            self.size += len(chunk)
-            assert self.size <= 1073741824
-            return len(chunk)
+    def stat(self):
+        from types import SimpleNamespace
 
-        def fileno(self):
-            return 17
+        return SimpleNamespace(st_size=self.size)
 
-        def stat(self):
-            return SimpleNamespace(st_size=self.size)
+    def unlink(self, missing_ok):
+        assert missing_ok is True
+        self.removed = True
 
-        def unlink(self, missing_ok):
-            assert missing_ok is True
-            self.removed = True
 
-    class Folder:
-        def __init__(self, path):
-            self.path = path
+class ProbeFolder:
+    def __init__(self, path, files):
+        self.path, self.files = path, files
 
-        def __str__(self):
-            return self.path
+    def __str__(self):
+        return self.path
 
-        def __truediv__(self, name):
-            assert name.startswith("storage-proof-")
-            return File(self.path)
+    def __truediv__(self, name):
+        assert name.startswith("storage-proof-")
+        return ProbeFile(self.path, self.files)
+
+
+@pytest.fixture
+def default_filesystem(probe, monkeypatch):
+    files, flushes = [], []
 
     def sync(fd):
         assert fd == 17
@@ -145,11 +147,20 @@ def test_the_default_workload_writes_one_gibibyte_per_path_and_flushes_every_six
         assert (fd, offset, length, flag) == (17, 0, 0, probe.os.POSIX_FADV_DONTNEED)
         flushes.append((files[-1].folder, files[-1].size))
 
-    monkeypatch.setattr(probe, "Path", Folder)
+    monkeypatch.setattr(probe, "Path", lambda path: ProbeFolder(path, files))
     monkeypatch.setattr(probe, "filesystem", lambda path: {"type": "ext4"})
     monkeypatch.setattr(probe, "memory", lambda: {"used": 100, "anonymous": 20, "shmem": 4})
     monkeypatch.setattr(probe.os, "fsync", sync)
     monkeypatch.setattr(probe.os, "posix_fadvise", evict)
+    return files, flushes
+
+
+def test_the_default_workload_writes_one_gibibyte_per_path_and_flushes_every_sixteen_mib(
+    probe, default_filesystem, capsys
+):
+    import json
+
+    files, flushes = default_filesystem
     probe.main()
     assert [(file.folder, file.size, file.removed) for file in files] == [
         ("/home/worker", 1073741824, True),
@@ -159,8 +170,6 @@ def test_the_default_workload_writes_one_gibibyte_per_path_and_flushes_every_six
         assert [size for path, size in flushes if path == folder] == list(range(16777216, 1073741825, 16777216))
     output = capsys.readouterr().out.splitlines()
     assert output[-1] == "storage proof passed"
-    import json
-
     records = [json.loads(line) for line in output[:-1]]
     baseline = {"used": 100, "anonymous": 20, "shmem": 4}
     assert records[0] == {"baseline": baseline}
