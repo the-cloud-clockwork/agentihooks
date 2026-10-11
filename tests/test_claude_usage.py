@@ -1,4 +1,5 @@
 import io
+import itertools
 import json
 import subprocess
 import threading
@@ -82,8 +83,59 @@ def test_a_missing_status_reads_as_unknown_status():
 
 @pytest.fixture
 def clock(monkeypatch):
-    ticks = iter([10.0, 12.5])
+    ticks = itertools.count(10.0, 2.5)
     monkeypatch.setattr(claude_usage.time, "monotonic", lambda: next(ticks))
+
+
+@pytest.mark.parametrize("window", ["5h", "7d"])
+def test_a_rejected_window_is_blocked_whatever_the_aggregate_says(window):
+    headers = _headers(**{f"{window}-status": "rejected"})
+    assert claude_usage.result("a", headers, {}, 5).state == "BLOCKED"
+    del headers[f"{PREFIX}status"]
+    assert claude_usage.result("a", headers, {}, 5).provider_status == "rejected"
+
+
+@pytest.mark.parametrize("value", ["n/a", float("inf")])
+def test_a_bad_usage_field_leaves_the_context_unknown(value):
+    found = claude_usage.result("a", _headers(), {"usage": {"input_tokens": value}}, 5)
+    assert (found.state, found.context_used) == ("NORMAL", None)
+
+
+def test_a_broken_response_is_an_error_for_that_account_only(monkeypatch):
+    import http.client
+
+    def opener(request, timeout=None):
+        if request.get_header("Authorization") == "Bearer tok-B":
+            raise http.client.IncompleteRead(b"")
+        return Response(200, _headers(), BODY)
+
+    monkeypatch.setattr(claude_usage.urllib.request, "urlopen", opener)
+    monkeypatch.setattr(balancer.subprocess, "run", _no_cli)
+    credentials = [balancer.Credential(f"AH_CC_TOKEN_{name}", f"tok-{name}") for name in ("A", "B", "C")]
+    found = balancer.probe_credentials(credentials, "haiku", 60, {})
+    assert [(item.account, item.state, item.error) for item in found] == [
+        ("A", "NORMAL", ""),
+        ("B", "ERROR", "bad response from the API"),
+        ("C", "NORMAL", ""),
+    ]
+
+
+def test_a_token_that_is_not_a_valid_header_never_reaches_the_error():
+    error = ValueError("Invalid header value b'Bearer abc\\n'")
+    found = claude_usage.probe("a", "abc\n", "haiku", _opener(error=error))
+    assert (found.state, found.error) == ("ERROR", "the token is not a valid header value")
+    assert "abc" not in found.error
+
+
+def test_the_caller_timeout_holds_under_the_ceiling(monkeypatch):
+    seen = []
+    monkeypatch.setattr(claude_usage.urllib.request, "urlopen", _opener(seen=seen))
+    credential = balancer.Credential("AH_CC_TOKEN_A", "tok-a")
+    balancer.probe_credential(credential, "haiku", 5, {})
+    balancer.probe_credential(credential, "haiku", 60, {})
+    assert [timeout for _, timeout in seen] == [5, 20]
+    found = claude_usage.probe("a", "tok", "haiku", _opener(error=TimeoutError("slow")), timeout=5)
+    assert found.error == "probe timed out after 5s"
 
 
 def test_the_probe_sends_one_messages_request_with_the_oauth_headers(clock):
