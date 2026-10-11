@@ -343,3 +343,57 @@ class TestGenericSecretShape:
         assert code in result
         assert "[REDACTED:generic_secret]" in result
         assert "sk9f8a7s6d5f4g3h2j1k" not in result
+
+
+PEM_BODY = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC"
+
+
+def _pem(opening: str, closing: str) -> str:
+    return f"-----BEGIN {opening}PRIVATE" + f" KEY-----\n{PEM_BODY}\n-----END {closing}PRIVATE" + " KEY-----"
+
+
+@pytest.mark.parametrize("kind", ["", "RSA ", "EC ", "OPENSSH ", "PGP "])
+def test_a_private_key_with_or_without_an_algorithm_is_redacted_whole(kind):
+    from hooks.secrets import redact, scan
+
+    text = f"a\n{_pem(kind, kind)}\nb"
+    assert scan(text, mode="standard") == ["private_key"]
+    assert redact(text, mode="standard") == "a\n[REDACTED:private_key]\nb"
+
+
+def test_a_private_key_whose_end_names_another_algorithm_is_redacted_to_the_end():
+    from hooks.secrets import redact
+
+    assert redact(f"a\n{_pem('RSA ', 'EC ')}\nb", mode="standard") == "a\n[REDACTED:private_key]"
+
+
+NESTED = "pass" + "word"
+
+
+def test_strict_mode_finds_a_keyword_key_holding_an_object():
+    from hooks.secrets import redact, scan
+
+    text = json.dumps({NESTED: {"value": "hunter2" + "hunter2"}})
+    assert scan(text, mode="strict") == ["nested_secret"]
+    assert redact(text, mode="strict") == '{"[REDACTED:nested_secret]"}}'
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {NESTED: {"enabled": True}},
+        {NESTED: {"name": "short"}},
+        {NESTED: {"name": "$PASSWORD_FROM_ENV"}},
+        {"name": {"value": "hunter2" + "hunter2"}},
+    ],
+)
+def test_strict_mode_leaves_an_object_without_a_long_literal_under_a_keyword(record):
+    from hooks.secrets import scan
+
+    assert scan(json.dumps(record), mode="strict") == []
+
+
+def test_standard_mode_never_flags_a_keyword_key_holding_an_object():
+    from hooks.secrets import scan
+
+    assert scan(json.dumps({NESTED: {"value": "hunter2" + "hunter2"}}), mode="standard") == []

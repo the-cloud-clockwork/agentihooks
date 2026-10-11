@@ -48,6 +48,11 @@ CASES = {
         compact([GENERIC + '"']) + "\n",
         1,
     ),
+    "keyword two levels up": (
+        json.dumps({WORD: {"value": "hunter2hunter2", "n": [1]}}) + "\n",
+        compact({WORD: {"value": "[REDACTED:nested_secret]", "n": [1]}}) + "\n",
+        1,
+    ),
     "escaped in an array line": ('["\\u0067hp_' + "Z9" * 18 + '", 1]\n', f'["{HIDDEN}",1]\n', 1),
     "escaped in a string line": ('"\\u0067hp_' + "Z9" * 18 + '"\n', f'"{HIDDEN}"\n', 1),
     "keyed despite nosecret": (
