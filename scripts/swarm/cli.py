@@ -1677,17 +1677,7 @@ def main(argv):
     from redis.exceptions import RedisError
 
     try:
-        store = connect()
-        if "slug" in args:
-            args.slug = store.names.swarm_slug(args.slug)
-        action = getattr(args, "command", "")
-        before = control_notifications.master(store, args.slug) if action in control_notifications.CONTROLS else None
-        if action in clearance.COMMANDS:
-            run_control(store, args, who, handler)
-        else:
-            handler(store, args)
-        if action in control_notifications.CONTROLS:
-            control_notifications.notify(store, args, LedgerClient(), before, action)
+        dispatch(args, who, handler)
     except Unreachable as exc:
         if not queued_say(args, who):
             print(f"swarm: {exc}", file=sys.stderr)
@@ -1699,3 +1689,17 @@ def main(argv):
         print(f"swarm: {exc}", file=sys.stderr)
         return 1
     return 0
+
+
+def dispatch(args, who, handler):
+    store = connect()
+    if "slug" in args:
+        args.slug = store.names.swarm_slug(args.slug)
+    action = getattr(args, "command", "")
+    before = control_notifications.master(store, args.slug) if action in control_notifications.CONTROLS else None
+    if action in clearance.COMMANDS:
+        run_control(store, args, who, handler)
+    else:
+        handler(store, args)
+    if action in control_notifications.CONTROLS:
+        control_notifications.notify(store, args, LedgerClient(), before, action)
