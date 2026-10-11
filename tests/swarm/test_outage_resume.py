@@ -82,3 +82,28 @@ def test_error_idle_and_dead_owners_resume_their_tasks_within_three_recovery_tic
         assert "steering.md" in text and "progress.md" in text and "proof.md" in text
         assert "agentihooks msg inbox" in text
         assert "continue your own task" in text
+
+
+def test_a_successor_claim_during_restart_prevents_resuming_the_old_owner(store, tmp_path, monkeypatch):
+    from scripts.swarm import snapshot
+
+    ledger, runtime, agents = three_owners(store)
+    old = agents[2]
+    outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
+    runtime.live.remove(old.name)
+    tick("sw", store, ledger, runtime, 8 * MINUTE)
+    outage.observe("sw", "provider", [], 9 * MINUTE)
+
+    def takeover(repo, names):
+        assert store.release("sw", old.task, old.name)
+        assert store.claim("sw", old.task, "successor", 600_000)
+        ledger.rows[old.task]["claimed_by"] = "successor"
+        return {old.name: str(tmp_path)}
+
+    monkeypatch.setattr(snapshot, "worktrees", takeover)
+    launches = list(runtime.spawned)
+    tick("sw", store, ledger, runtime, 9 * MINUTE)
+    assert not runtime.resumed
+    assert runtime.spawned == launches
+    assert store.claimant("sw", old.task) == "successor"
+    assert ledger.rows[old.task]["claimed_by"] == "successor"
