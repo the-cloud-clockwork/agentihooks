@@ -26,6 +26,7 @@ NOT_HANDED = "launch grant not handed: "
 HANDS = "launch-grant-hands"
 WORKER_DEFAULT = "default"
 NO_ACCOUNT = "no approved account has quota and a free launch slot"
+ACCOUNT_FULL = "account_full"
 Target = Callable[[SpawnRequest], dict]
 AccountChooser = Callable[[int], str | None]
 
@@ -117,7 +118,8 @@ class DistributedLaunch:
         try:
             slot = self.capacity.reserve(grant, terms.cap, terms.ttl_ms)
         except SwarmError as error:
-            return Launch(admitted, grant, None, Outcome("spawn", Status.REFUSED, backend, detail=str(error)))
+            status = Status.UNAVAILABLE if str(error) == ACCOUNT_FULL else Status.REFUSED
+            return Launch(admitted, grant, None, Outcome("spawn", status, backend, detail=str(error)))
         identity = {
             "launch_grant": grant,
             "execution_id": admitted.execution_id,
@@ -152,7 +154,7 @@ class DistributedLaunch:
         if self.accounts is not None:
             account = self.accounts(terms.cap)
             if account is None:
-                return Outcome("spawn", Status.REFUSED, backend, detail=NO_ACCOUNT)
+                return Outcome("spawn", Status.UNAVAILABLE, backend, detail=NO_ACCOUNT)
             terms = replace(terms, account=account)
         agent = AgentRecord(
             request.name,

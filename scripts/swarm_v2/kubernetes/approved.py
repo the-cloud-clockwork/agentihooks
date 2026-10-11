@@ -4,11 +4,13 @@ the source of swarm-claude-creds with every value replaced, so the controller ne
 from collections.abc import Callable, Collection, Mapping
 
 from scripts import session_bands
+from scripts.swarm.capacity import Account
 from scripts.swarm_v2.kubernetes.client import ApiRefused, PodApi
 from scripts.swarm_v2.kubernetes.spec import KEY
 from scripts.swarm_v2.quota import UNKNOWN, QuotaObservations
 
 INDEX = "swarm-claude-accounts"
+OPEN, CLOSED = "OPEN", "CLOSED"
 
 
 class SecretKeys:
@@ -53,3 +55,34 @@ class AccountRoute:
         held = self.held()
         seat = session_bands.pick(self._seat(key, cap, held) for key in sorted(self.keys()))
         return None if seat is None else seat.account
+
+
+class FleetAccounts:
+    """The deployed controller's quota capacity rows, read like ``capacity.accounts`` but from the approved keys, the
+    fleet quota observations and the fleet reservations, never from local tokens or the local process table."""
+
+    def __init__(self, route: AccountRoute, cap: int) -> None:
+        self.route, self.cap = route, cap
+
+    def __call__(self, environ: Mapping[str, str], now: float, refresh: bool = True) -> list[Account]:
+        held = self.route.held()
+        return [self._row(key, held.get(key, 0), now) for key in sorted(self.route.keys())]
+
+    def _row(self, key: str, sessions: int, now: float) -> Account:
+        quota, harness = self.route.quota, self.route.harness
+        reading = quota.reading(key, harness)
+        if reading.state == UNKNOWN:
+            return Account(harness, key, OPEN, sessions, None, None, self.cap)
+        cap = min(self.cap, quota.cap(key, harness))
+        latest = quota.latest(key, harness)
+        return Account(
+            harness,
+            key,
+            OPEN if cap else CLOSED,
+            sessions,
+            reading.five_left,
+            reading.week_left,
+            cap,
+            session_bands.upcoming(latest.week_reset, now),
+            five_resets_at=session_bands.upcoming(latest.five_reset, now),
+        )

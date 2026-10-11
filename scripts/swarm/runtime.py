@@ -158,6 +158,8 @@ def _predecessor(task):
 
 
 class HerdrRuntime:
+    quota_accounts: Callable[..., list] | None = None
+
     def __init__(self, home=SWARM_HOME, run=subprocess.run, choose=None, herdr=herdr_call):
         self.home, self.run, self.herdr = home, run, herdr
         self.choose = choose or agent_choice.choose
@@ -213,7 +215,8 @@ class HerdrRuntime:
         from scripts.swarm import capacity
 
         placing = demand is None or any(demand.values())
-        self._quota_accounts = capacity.accounts(dict(os.environ), now, refresh=placing and refresh)
+        read = self.quota_accounts or capacity.accounts
+        self._quota_accounts = read(dict(os.environ), now, refresh=placing and refresh)
         self._quota_held = {}
         accounts = self._quota_successor_accounts(requirements) if requirements else None
         if requirements:
