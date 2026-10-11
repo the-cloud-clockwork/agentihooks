@@ -72,6 +72,14 @@ def pick(slug: str, lane: str, lane_config: dict, task: dict, environ: dict) -> 
     return classify(slug, task, environ)
 
 
+def kept(task: dict, saved: dict, relaunch: dict) -> ProfileDecision | None:
+    if not saved.get("profile") or (task.get("profile") and not relaunch):
+        return None
+    return ProfileDecision(
+        saved["profile"], "handoff", "original seat profile", overlays=tuple(saved.get("overlays", ()))
+    )
+
+
 def needs_ci_push(task: dict) -> bool:
     return (task.get("contract") or {}).get("push") == "yes"
 

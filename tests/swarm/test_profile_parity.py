@@ -105,3 +105,44 @@ def test_the_shared_pick_decides_without_the_local_install_or_overlays(monkeypat
     decision = profile_choice.pick(SLUG, "eng", {}, TASK, {})
 
     assert (decision.profile, decision.source, decision.overlays) == ("frontend", "classifier", ())
+
+
+def refuse_classifier(*args, **kwargs):
+    pytest.fail("a kept seat profile asked the classifier")
+
+
+LAUNCH = {"profile": "qa", "harness": "claude", "model": "opus", "effort": "high"}
+
+
+@pytest.mark.parametrize(
+    "task",
+    [
+        {**TASK, "profile": "engineer", "launch_assignment": LAUNCH},
+        {**TASK, "handoff": True, "handoff_envelope": {"launch": LAUNCH}},
+    ],
+    ids=["relaunch", "handoff"],
+)
+def test_a_pod_launch_keeps_the_saved_seat_profile_without_the_classifier(monkeypatch, task):
+    monkeypatch.setattr(profile_choice, "decide", refuse_classifier)
+
+    assert pod(World(monkeypatch), task, {}) == "qa"
+
+
+@pytest.mark.parametrize(
+    ("task", "profile"),
+    [
+        ({**TASK, "profile": "engineer", "handoff_envelope": {"launch": LAUNCH}}, "engineer"),
+        ({**TASK, "launch_assignment": {**LAUNCH, "effort": ""}}, "frontend"),
+        ({**TASK, "handoff_envelope": {"launch": {**LAUNCH, "profile": ""}}}, "frontend"),
+    ],
+    ids=["task-over-handoff", "incomplete-relaunch", "handoff-without-profile"],
+)
+def test_a_pod_launch_without_a_kept_profile_picks_afresh(monkeypatch, asked, task, profile):
+    assert pod(World(monkeypatch), task, {}) == profile
+
+
+def test_a_pod_launch_reads_the_classifier_floor_from_its_environment(monkeypatch, asked):
+    monkeypatch.setenv("AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE", "0.95")
+
+    assert pod(World(monkeypatch), TASK, {}) == "engineer"
+    assert asked == ["t1"]

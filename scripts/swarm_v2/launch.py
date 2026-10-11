@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Protocol
 
 from hooks.context.profile_chain import PACKAGE_ROLES
-from scripts.swarm import profile_choice
+from scripts.swarm import live_binding, profile_choice
 from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_v2 import broadcast_bridge
 from scripts.swarm_v2.accounts import AccountCapacity, Slot
@@ -69,8 +69,13 @@ class Launch:
 
 
 def seat_profile(request: SpawnRequest) -> str:
-    lane = request.config.lanes.get(request.lane, {})
-    return profile_choice.pick(request.config.slug, request.lane, lane, request.task, dict(os.environ)).profile
+    task, lane = request.task, request.config.lanes.get(request.lane, {})
+    relaunch = live_binding.complete(task.get("launch_assignment"))
+    saved = relaunch or (task.get("handoff_envelope") or {}).get("launch") or {}
+    decision = profile_choice.kept(task, saved, relaunch) or profile_choice.pick(
+        request.config.slug, request.lane, lane, task, dict(os.environ)
+    )
+    return decision.profile
 
 
 def worker_profiles() -> set[str]:
