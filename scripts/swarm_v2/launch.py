@@ -119,7 +119,7 @@ class DistributedLaunch:
         try:
             slot = self.capacity.reserve(grant, terms.cap, terms.ttl_ms)
         except SwarmError as error:
-            ended = self.ended(admitted, str(error))
+            ended = self.end_refused(admitted, str(error))
             self.grants.withdraw(self.slug, grant)
             return Launch(ended, grant, None, Outcome("spawn", Status.REFUSED, backend, detail=str(error)))
         identity = {
@@ -167,15 +167,18 @@ class DistributedLaunch:
             runtime_target=target(request),
             profile=profile,
         )
-        occupant = self.controller.store.execution_occupants(self.slug).get(agent.seat)
-        previous = occupant.execution_id if occupant and occupant.state == ENDED else ""
+        store = self.controller.store
+        occupant = store.execution_occupants(self.slug).get(agent.seat)
+        ended = occupant and store.redis.hexists(store.key(self.slug, ENDINGS), occupant.execution_id)
+        previous = occupant.execution_id if ended else ""
         return self.spawn(request, agent, replace(terms, api_url=api_url), previous).outcome
 
-    def ended(self, agent: AgentRecord, reason: str) -> AgentRecord:
+    def end_refused(self, agent: AgentRecord, reason: str) -> AgentRecord:
         store, ended = self.controller.store, replace(agent, state=ENDED)
-        store.put_agent(self.slug, ended)
+        self.controller.require()
         ending = {"reason": reason, "generation": agent.generation}
         store.redis.hset(store.key(self.slug, ENDINGS), agent.execution_id, json.dumps(ending))
+        store.put_agent(self.slug, ended)
         return ended
 
     def registered(self, session: Session, grant: str) -> Slot:
