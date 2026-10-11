@@ -130,30 +130,45 @@ def test_folders_that_are_not_valid_slugs_are_ignored(capsys):
     grant = Grant()
     assert _run([], FLAG, grant) == 0
     assert grant.calls == ["rt-alpha"]
-    assert "_hidden" not in capsys.readouterr().out
+    assert capsys.readouterr().out.startswith(UNUSABLE)
 
 
-LEGACY = "ncgmaTCC: skipped, the name is not a slug; run agentihooks codex login ncgmaTCC to store it as ncgmatcc\n"
+UNUSABLE = "_hidden: not refreshed, the name cannot become a slug; sign in again with agentihooks codex login <slug>\n"
+LEGACY = (
+    "ncgmaTCC: not refreshed, the name is not a slug; sign in again with agentihooks codex login ncgmaTCC "
+    "to store it as ncgmatcc\n"
+)
+FORCED = "ncgmaTCC: refreshed under its old name; agentihooks codex login ncgmaTCC stores it as ncgmatcc\n"
 
 
-def test_a_legacy_mixed_case_account_is_skipped_with_the_command_that_renames_it(capsys):
+def test_a_legacy_mixed_case_account_is_named_and_refreshed_only_when_forced(capsys):
     _account("ncgmaTCC", 1)
     _account("alpha", 1)
+    _account("_hidden", 1)
     grant = Grant()
     assert _run([], FLAG, grant) == 0
     assert grant.calls == ["rt-alpha"]
-    assert LEGACY in capsys.readouterr().out
-    assert _run(["--force", "ncgmaTCC"], FLAG, Grant()) == 1
-    assert capsys.readouterr().out == LEGACY + f"ncgmatcc: no such Codex account under {_home('x').parent}\n"
-
-
-def test_a_legacy_openbao_key_is_skipped_with_the_command_that_renames_it(capsys):
-    bao = FakeBao({"AH_CX_TOKEN_ncgmaTCC": access_token(1), "AH_CX_REFRESH_ncgmaTCC": "rt-legacy"})
+    out = capsys.readouterr().out
+    assert out.startswith(UNUSABLE + LEGACY)
     grant = Grant()
-    assert _run(["--force", "ncgmatcc"], {**FLAG, **BAO_ENV, **OPENBAO_STORE}, grant, bao) == 1
-    assert _run([], {**FLAG, **BAO_ENV, **OPENBAO_STORE}, grant, bao) == 0
+    assert _run(["--force", "ncgmaTCC"], FLAG, grant) == 0
+    assert grant.calls == ["rt-ncgmaTCC"]
+    assert capsys.readouterr().out.startswith(FORCED + "ncgmaTCC: 1.0d left, refreshed")
+    assert "export AH_CX_TOKEN_ncgmaTCC=" in aicode_tokens.rc_file().read_text()
+
+
+def test_a_legacy_openbao_key_is_named_and_refreshed_only_when_forced(capsys):
+    secret = {"AH_CX_TOKEN_ncgmaTCC": access_token(1), "AH_CX_REFRESH_ncgmaTCC": "rt-legacy"}
+    bao = FakeBao(secret | {"AH_CX_REFRESH__hidden": "rt-hidden"})
+    environ = {**FLAG, **BAO_ENV, **OPENBAO_STORE}
+    grant = Grant()
+    assert _run([], environ, grant, bao) == 0
     assert not grant.calls
-    assert capsys.readouterr().out == LEGACY + "ncgmatcc: no such Codex account in OpenBao\n" + LEGACY
+    assert capsys.readouterr().out == UNUSABLE + LEGACY
+    assert _run(["--force", "ncgmatcc"], environ, grant, bao) == 0
+    assert grant.calls == ["rt-legacy"]
+    assert bao.data["AH_CX_REFRESH_ncgmaTCC"] == "rt-legacy-next"
+    assert capsys.readouterr().out.startswith(FORCED)
 
 
 def test_the_local_store_writes_auth_json_then_the_block_then_openbao(monkeypatch):
