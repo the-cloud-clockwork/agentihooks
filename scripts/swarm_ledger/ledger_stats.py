@@ -7,6 +7,9 @@ import math
 import statistics
 from typing import TYPE_CHECKING
 
+from scripts.swarm import freeze
+from scripts.swarm_ledger.repository import hierarchy
+
 if TYPE_CHECKING:
     from ledger_core import Context
 
@@ -120,9 +123,6 @@ def is_stale(shown, computed):
 
 
 def frozen(doc: dict, pending: dict, inputs: dict) -> set:
-    from scripts.swarm import freeze
-    from scripts.swarm_ledger.repository import hierarchy
-
     graph, fix = hierarchy.project(doc)[0], inputs.get("fix_phase", "")
     seen = {**doc, freeze.WATCHED: inputs["watched"]} if inputs.get("watched") else doc
     held = {tid for tid, t in pending.items() if freeze.held(t, seen, graph, fix)}
@@ -138,7 +138,7 @@ def frozen(doc: dict, pending: dict, inputs: dict) -> set:
 def calculate(doc: dict, events: list, now: int, inputs: dict | None = None) -> dict:
     slots, ci = (inputs or {}).get("slots"), (inputs or {}).get("ci_minutes")
     tiers = agent_minutes(doc, events, now)
-    pending = {t["id"]: t for t in live(doc, "tasks") if not finished(t)}
+    pending = {t["id"]: t for t in live(doc, "tasks") if not finished(t) and not t.get("merged_into")}
     left = {tid: remaining_minutes(t, tiers, ci or 0, events, now) for tid, t in pending.items()}
     held = frozen(doc, pending, inputs or {})
     unfinished = {tid: t for tid, t in pending.items() if tid not in held}

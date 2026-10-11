@@ -253,6 +253,11 @@ class TestFrozenSplit:
         result = ledger_stats.calculate(self.ledger(), [], NOW, inputs)
         assert (result["remaining"], result["frozen"], result["frozen_work"]) == (1, 4, 105)
 
+    def test_a_member_merged_into_a_group_is_not_counted_twice(self):
+        d = doc(task("g", "open", "S", group_members=["m"]), task("m", "open", "S", merged_into="g"))
+        result = ledger_stats.calculate(d, [], NOW, {"slots": 1, "ci_minutes": 5})
+        assert (result["remaining"], result["work"], result["frozen"]) == (1, 15, 0)
+
     def test_only_frozen_work_left_reads_zero_with_the_frozen_remainder_named(self):
         d = doc(task("a", "open", "S"), time_left=30)
         d["freezes"] = [{"verb": "freeze", "target": "tasks/a"}]
@@ -442,7 +447,7 @@ class TestTimeLeftOp:
         assert ctx.stamps == {}
         assert ctx.meta["time_left"]["at"] == NOW
 
-    def test_the_refresh_age_stays_under_two_ticks(self):
+    def test_every_tick_write_stamps_its_own_refresh_time(self):
         d = doc(task("a", "open", "S"), time_left=15)
         meta = {"rev": 0, "stamps": {}, "events": [], "members": {}}
         for tick in range(3):
