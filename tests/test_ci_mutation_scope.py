@@ -321,6 +321,7 @@ FIXTURED = PASSING + "\n\n@pytest.fixture\ndef thing():\n    return 1\n"
         ("tests/test_x.json", "{}\n", '{"a": 1}\n', False),
         ("tests/test_x.py", PASSING, PASSING + "\nimport os\n\n\ndef test_c():\n    assert os.sep\n", False),
         ("tests/test_x.py", None, "import os\n\n\ndef test_c():\n    assert os.sep\n", True),
+        ("tests/test_x.py", None, "from os import path\n\n\ndef test_c():\n    assert path\n", True),
         ("tests/test_x.py", PASSING, PASSING + "\nfrom os.path import *\n", False),
         (
             "tests/test_x.py",

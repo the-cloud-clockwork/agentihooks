@@ -24,9 +24,9 @@ ADDED = {"tests/test_a.py": "def test_one():\n    pass\n\n\ndef test_two():\n   
 def _archive(report):
     data = io.BytesIO()
     with zipfile.ZipFile(data, "w") as zipped:
-        zipped.writestr("report.json", json.dumps(report))
-        zipped.writestr("scope.json", json.dumps({"base": "old", "head": "old"}))
-        zipped.writestr("mutants.log", "graded\n")
+        zipped.writestr(zipfile.ZipInfo("report.json"), json.dumps(report))
+        zipped.writestr(zipfile.ZipInfo("scope.json"), json.dumps({"base": "old", "head": "old"}))
+        zipped.writestr(zipfile.ZipInfo("mutants.log"), "graded\n")
     return data.getvalue()
 
 
@@ -274,7 +274,7 @@ def test_the_newest_unexpired_report_artifact_is_read(monkeypatch):
 
 
 @pytest.mark.parametrize("red", REDS)
-def test_any_failure_mark_in_a_report_reads_red(monkeypatch, red):
+def test_a_report_with_any_red_mark_reads_red(monkeypatch, red):
     answers = {
         "actions/runs/1/artifacts?per_page=100": {
             "artifacts": [{"id": 3, "name": "mutation-preflight-report", "expired": False}]

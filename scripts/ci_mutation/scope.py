@@ -81,7 +81,10 @@ def adds_only_tests(root: Path, base: str, head: str, name: str) -> bool:
     extra = names - Counter(bound for node in previous for bound in bindings(node))
     if before - after or any(names[bound] > 1 for bound in extra):
         return False
-    return all(is_test(node, old is None) for node in nodes if added[ast.dump(node)])
+    imports = ast.Import | ast.ImportFrom
+    return all(
+        is_test(node) and (old is None or not isinstance(node, imports)) for node in nodes if added[ast.dump(node)]
+    )
 
 
 def blob(root: Path, rev: str, name: str) -> bytes | None:
@@ -89,9 +92,9 @@ def blob(root: Path, rev: str, name: str) -> bytes | None:
     return shown.stdout if shown.returncode == 0 else None
 
 
-def is_test(node: ast.stmt, new_file: bool = False) -> bool:
+def is_test(node: ast.stmt) -> bool:
     if isinstance(node, ast.Import | ast.ImportFrom):
-        return new_file
+        return True
     if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
         return node.name.startswith("test_") and marked(node)
     if isinstance(node, ast.ClassDef):
