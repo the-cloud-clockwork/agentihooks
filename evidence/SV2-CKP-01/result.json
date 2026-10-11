@@ -4,7 +4,7 @@
   "dependents": ["SV2-CKP-02", "SV2-CKP-03", "SV2-CKP-04"],
   "integration_gate": "G8",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2484",
-  "tested_commit": "f7e9d8d2a97b699d2e251df853c3d866d8fff53a",
+  "tested_commit": "ead685260c72146b4fd30dda03ed38d8edcef0bc",
   "status": "mocked-acceptance-qualified",
   "package_complete": false,
   "evidence_class": "mocked: a local durable directory backend behind a granted artifact store and fixture launch registrations; no object store, worker Pod or harness was used. Live G8 qualification belongs to the integration package.",
