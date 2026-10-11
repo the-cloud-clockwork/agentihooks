@@ -106,6 +106,13 @@ def test_snapshot_writes_one_document_with_the_ledger_and_worktrees(store, tmp_p
     assert _values(doc["state"]) == _values(json.loads(json.dumps(store.export("sw"))))
 
 
+def test_a_host_without_git_finds_no_worktrees():
+    def missing(argv, **kw):
+        raise FileNotFoundError(2, "No such file or directory", "git")
+
+    assert snapshot.worktrees("github.com/o/r", ["engineer@a1b2c3-0001"], missing) == {"engineer@a1b2c3-0001": ""}
+
+
 def test_restore_refuses_while_an_agent_of_the_swarm_is_live(store):
     seed(store, "sw")
     snapshot.take(store, "sw", 99, run=_no_git)
