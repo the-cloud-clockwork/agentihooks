@@ -618,8 +618,8 @@ while read -r line; do
     printf 'the launch ConfigMap is not an immutable object owned by its Pod: %s\n' "$owner" >&2
     exit 1
   fi
-  recorded="$(kubectl get configmap "$worker_pod-launch" -o jsonpath='{.data.launch\.json}' | python3 -c 'import json, sys; print(json.load(sys.stdin).get("exporter"))')"
-  if [[ $recorded != "['python', '-m', 'scripts.swarm_v2.session_export']" ]]; then
+  recorded="$(kubectl get configmap "$worker_pod-launch" -o jsonpath='{.data.launch\.json}' | python3 -c 'import json, sys; print(json.dumps(json.load(sys.stdin).get("exporter")))')"
+  if [[ $recorded != '["python", "-m", "scripts.swarm_v2.session_export"]' ]]; then
     printf 'the %s launch record does not name the image session exporter: %s\n' "$profile" "$recorded" >&2
     exit 1
   fi

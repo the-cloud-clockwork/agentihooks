@@ -136,11 +136,15 @@ incomplete. The image's own exporter is `python -m
 scripts.swarm_v2.session_export`, which the controller's
 `AGENTIHOOKS_WORKER_EXPORTER` setting names when unset or empty. Once its
 incarnation is quiesced it copies the agent's native session files, Claude
-`projects/**/*.jsonl` or Codex `sessions/**/*.jsonl` from the private home and
-regular files only, under `checkpoints/<incarnation>/session`, writes a
-manifest bound to the supervision scope with each file's sha256 and size and
-the newest native session id, and acknowledges it complete. No native session,
-or a forced quiescence, is acknowledged incomplete with its reason. SIGTERM or SIGINT publishes
+`projects/**/*.jsonl` or Codex `sessions/**/*.jsonl` from the private home,
+regular files only and never through a link, under
+`checkpoints/<incarnation>/session`, syncs them, writes a manifest bound to the
+supervision scope with each file's sha256 and size and the newest main
+transcript's session id, and acknowledges it complete. No main transcript or a
+linked session folder is acknowledged incomplete with its reason; a forced
+quiescence exports nothing and the supervisor reports it incomplete. The
+exporter exits without a checkpoint if its supervisor goes away.
+SIGTERM or SIGINT publishes
 `drain.json`, stops the agent and herdr process trees including escaped
 grandchildren, and publishes `quiesced.json`. The exporter remains alive to
 flush. No task reconciliation, authority renewal or second swarm timer runs

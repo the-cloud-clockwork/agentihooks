@@ -173,3 +173,81 @@ def test_a_forced_quiescence_is_never_exported(supervised):
         "reason": "forced_quiescence",
     }
     assert not (attempt / "checkpoints").exists()
+
+
+def test_a_linked_claude_home_is_never_exported(tmp_path):
+    attempt, home, environ = _home(tmp_path, "claude")
+    outside = tmp_path / "outside"
+    _session(outside / "projects" / "p" / f"{CLAUDE_ID}.jsonl", b"{}\n", 1_000)
+    home.mkdir(parents=True)
+    (home / ".claude").symlink_to(outside, target_is_directory=True)
+
+    fields = session_export.export(attempt, _scope(), environ)
+
+    assert fields == {"status": "incomplete", "reason": "linked_session_folder"}
+    assert not (attempt / "checkpoints").exists()
+
+
+def test_a_linked_session_folder_is_never_exported(tmp_path):
+    attempt, home, environ = _home(tmp_path, "claude")
+    outside = tmp_path / "outside"
+    _session(outside / "p" / f"{CLAUDE_ID}.jsonl", b"{}\n", 1_000)
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / "projects").symlink_to(outside, target_is_directory=True)
+
+    fields = session_export.export(attempt, _scope(), environ)
+
+    assert fields == {"status": "incomplete", "reason": "linked_session_folder"}
+    assert not (attempt / "checkpoints").exists()
+
+
+def test_linked_folders_inside_the_session_folder_are_not_followed(tmp_path):
+    attempt, home, environ = _home(tmp_path, "claude")
+    projects = home / ".claude" / "projects"
+    _session(projects / "p" / f"{CLAUDE_ID}.jsonl", b"{}\n", 1_000)
+    _session(tmp_path / "outside" / f"{OLDER_ID}.jsonl", b"{}\n", 2_000)
+    (projects / "linked").symlink_to(tmp_path / "outside", target_is_directory=True)
+
+    fields = session_export.export(attempt, _scope(), environ)
+
+    manifest = json.loads((attempt / fields["manifest"]).read_text())
+    assert [entry["path"] for entry in manifest["files"]] == [f"p/{CLAUDE_ID}.jsonl"]
+
+
+def test_only_subagent_transcripts_report_incomplete(tmp_path):
+    attempt, home, environ = _home(tmp_path, "claude")
+    _session(home / ".claude" / "projects" / "p" / CLAUDE_ID / "subagents" / "agent-1.jsonl", b"{}\n", 1_000)
+
+    fields = session_export.export(attempt, _scope(), environ)
+
+    assert fields == {"status": "incomplete", "reason": "no_native_session"}
+    assert not (attempt / "checkpoints").exists()
+
+
+def test_every_copied_session_file_is_synced_before_the_manifest(tmp_path, monkeypatch):
+    attempt, home, environ = _home(tmp_path, "claude")
+    _session(home / ".claude" / "projects" / "p" / f"{CLAUDE_ID}.jsonl", b"{}\n", 1_000)
+    _session(home / ".claude" / "projects" / "p" / f"{OLDER_ID}.jsonl", b"{}\n", 900)
+    synced = []
+    real = os.fsync
+
+    def fsync(descriptor):
+        synced.append(Path(os.readlink(f"/proc/self/fd/{descriptor}")).name)
+        real(descriptor)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+
+    session_export.export(attempt, _scope(), environ)
+
+    assert synced[:3] == [f"{CLAUDE_ID}.jsonl", f"{OLDER_ID}.jsonl", "manifest.pending"]
+
+
+def test_the_exporter_leaves_without_a_checkpoint_when_its_supervisor_is_gone(supervised, monkeypatch):
+    _, _, root, _ = supervised
+    parents = iter([41, 1])
+    monkeypatch.setattr(session_export.os, "getppid", lambda: next(parents))
+    monkeypatch.setattr(session_export.time, "sleep", lambda seconds: pytest.fail("waited after the supervisor left"))
+
+    assert session_export.main() == 1
+
+    assert not (root / "exporter.checkpoint.json").exists()
