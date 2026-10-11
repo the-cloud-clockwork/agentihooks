@@ -103,6 +103,9 @@ class Outcome(NamedTuple):
     saved: bool = False
 
 
+GRANT_FAILED = Outcome(ok=False)
+
+
 def _expiry(token: str | None) -> int | None:
     exp = codex_router._claims(str(token)).get("exp")
     return exp if isinstance(exp, int) else None
@@ -207,7 +210,7 @@ def _refresh_local(run: Run, home: Path) -> Outcome | None:
     if fresh is None:
         return None
     if not fresh:
-        return Outcome(False)
+        return GRANT_FAILED
     saved = _attempt(slug, lambda: _save_auth(home / "auth.json", fresh, run.deps.now()))
     rc_entry = {f"{CODEX_TOKEN_PREFIX}{slug}": fresh["access_token"]}
     block = _attempt(slug, lambda: aicode_tokens.write_rc(aicode_tokens.rc_file(), rc_entry))
@@ -247,7 +250,8 @@ def _recovered(slug: str, access: str | None) -> dict | None:
     if not tokens.get("refresh_token") or kept is None:
         print(UNREADABLE.format(slug=slug, path=path))
         return None
-    if kept <= (_expiry(access) or 0):
+    current = _expiry(access)
+    if current is not None and kept <= current:
         print(STALE.format(slug=slug, path=path))
         path.unlink()
         return None

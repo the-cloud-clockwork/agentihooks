@@ -92,6 +92,7 @@ def test_every_failure_becomes_one_openbao_error_with_a_plain_message(opener, me
     with pytest.raises(openbao_kv.OpenBaoError) as raised:
         openbao_kv.read(openbao_kv.OpenBao(BAO_URL, BAO_TOKEN, opener), openbao_kv.CODEX_CREDS)
     assert str(raised.value) == message
+    assert raised.value.status == (int(message.split()[2].rstrip(":")) if " HTTP " in message else 0)
 
 
 def test_an_address_that_is_not_a_url_is_an_openbao_error():
@@ -100,9 +101,10 @@ def test_an_address_that_is_not_a_url_is_an_openbao_error():
     assert str(raised.value).startswith("OpenBao request failed: unknown url type")
 
 
-def test_a_trailing_slash_on_the_address_is_dropped():
-    fake = FakeBao(url=f"{BAO_URL}/")
-    assert openbao_kv.merge(openbao_kv.OpenBao(f"{BAO_URL}/", BAO_TOKEN, fake), openbao_kv.CODEX_CREDS, {"A": "1"}) == 1
+@pytest.mark.parametrize("url", [f"{BAO_URL}/", "https://bao.testX/"])
+def test_only_a_trailing_slash_is_dropped_from_the_address(url):
+    fake = FakeBao(url=url)
+    assert openbao_kv.merge(openbao_kv.OpenBao(url, BAO_TOKEN, fake), openbao_kv.CODEX_CREDS, {"A": "1"}) == 1
 
 
 def test_a_secret_without_metadata_reads_as_version_zero():

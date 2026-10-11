@@ -123,6 +123,11 @@ def test_an_end_marker_before_any_start_marker_is_not_a_block():
     assert tokens.has_block(f"{END}\n{START}\n") is False
 
 
+def test_a_stray_end_marker_after_a_block_opens_nothing():
+    text = f"{START}\nexport A=0\n{END}\n{END}\n"
+    assert tokens.upsert(text, {"A": "1"}) == f"{START}\nexport A=1\n{END}\n{END}\n"
+
+
 def test_an_upsert_keeps_one_export_when_the_block_repeats_the_name():
     text = f"{START}\nexport A=1\n# keep\nexport A=2\n{END}\n"
     assert tokens.upsert(text, {"A": "3"}) == f"{START}\nexport A=3\n# keep\n{END}\n"

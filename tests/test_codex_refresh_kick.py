@@ -67,9 +67,9 @@ def test_a_failure_to_start_is_swallowed_and_leaves_no_stamp(tmp_path, monkeypat
 def test_a_missing_agentihooks_binary_is_logged_and_leaves_no_stamp(tmp_path, monkeypatch):
     logged = []
     monkeypatch.setattr(kick.shutil, "which", lambda name: None)
-    monkeypatch.setattr(kick, "log", lambda message, data: logged.append(message))
+    monkeypatch.setattr(kick, "log", lambda message, data: logged.append((message, data)))
     assert kick.kick(tmp_path, FLAG) is False
-    assert logged == ["codex refresh kick skipped: agentihooks is not on PATH"]
+    assert logged == [("codex refresh kick skipped: agentihooks is not on PATH", {})]
     assert not (tmp_path / "codex-refresh.stamp").exists()
 
 

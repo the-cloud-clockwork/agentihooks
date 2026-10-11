@@ -67,22 +67,20 @@ def _exported(line: str) -> str | None:
     return found and found.group(1)
 
 
-def _rewrite(
-    lines: list[str], span: tuple[int, int], name: str, line: str, stale: Iterable[str], place: bool
-) -> list[str]:
-    start, end = span
+def _drop(body: list[str], names: Iterable[str]) -> list[str]:
+    names = set(names)
+    return [item for item in body if _exported(item) not in names]
+
+
+def _place(body: list[str], name: str, line: str, stale: Iterable[str]) -> list[str]:
+    found = [_exported(item) for item in body]
+    if name not in found:
+        return [*_drop(body, stale), line]
+    at = found.index(name)
     dropped = {name, *stale}
-    body = []
-    for item in lines[start + 1 : end]:
-        found = _exported(item)
-        if found == name and place:
-            body.append(line)
-            place = False
-        elif found not in dropped:
-            body.append(item)
-    if place:
-        body.append(line)
-    return lines[: start + 1] + body + lines[end:]
+    return [
+        line if index == at else item for index, item in enumerate(body) if index == at or found[index] not in dropped
+    ]
 
 
 def upsert(text: str, entries: Mapping[str, str], stale: Iterable[str] = ()) -> str:
@@ -93,11 +91,11 @@ def upsert(text: str, entries: Mapping[str, str], stale: Iterable[str] = ()) -> 
         lines += [f"{START}\n", f"{END}\n"]
     stale = tuple(stale)
     for name, value in entries.items():
-        line = f"export {name}={shlex.quote(value)}\n"
-        first, *later = _blocks(lines)
-        for span in reversed(later):
-            lines = _rewrite(lines, span, name, line, stale, place=False)
-        lines = _rewrite(lines, first, name, line, stale, place=True)
+        (start, end), *later = _blocks(lines)
+        for inner, outer in reversed(later):
+            lines = lines[: inner + 1] + _drop(lines[inner + 1 : outer], [name, *stale]) + lines[outer:]
+        body = _place(lines[start + 1 : end], name, f"export {name}={shlex.quote(value)}\n", stale)
+        lines = lines[: start + 1] + body + lines[end:]
     return "".join(lines)
 
 

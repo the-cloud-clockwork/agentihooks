@@ -364,6 +364,7 @@ def test_every_grant_failure_says_what_happened(opener, message):
     with pytest.raises(codex_refresh.GrantError) as raised:
         codex_refresh.grant("rt-one", opener=opener)
     assert str(raised.value) == message
+    assert raised.value.status == (int(message.split()[1]) if message.startswith("HTTP") else 0)
 
 
 def test_a_grant_answer_that_is_not_an_object_has_no_tokens():
@@ -522,3 +523,46 @@ def test_the_openbao_summary_follows_each_local_refresh(capsys):
     assert "OpenBao secret/agentihooks/codex-creds: wrote AH_CX_REFRESH_alpha, AH_CX_TOKEN_alpha (2 keys total)\n" in (
         capsys.readouterr().out
     )
+
+
+def _plan(force="", bao=None, grant=None):
+    return codex_refresh.Run(force, 3.0, bao, codex_refresh.Deps(grant=grant or Grant(), now=lambda: NOW))
+
+
+def test_the_store_runs_count_one_failure_for_a_missing_account_or_an_unreadable_secret():
+    assert codex_refresh.run_local(_plan("ghost")) == 1
+    bao = openbao_kv.OpenBao(BAO_URL, BAO_TOKEN, _sealed())
+    assert codex_refresh.run_openbao(_plan(bao=bao)) == 1
+    bao = openbao_kv.OpenBao(BAO_URL, BAO_TOKEN, FakeBao({"OTHER": "o"}))
+    assert codex_refresh.run_openbao(_plan("ghost", bao)) == 1
+
+
+def test_recovery_messages_name_the_account_and_the_file(capsys):
+    path = _home("alpha") / "recovery.json"
+    environ = {**FLAG, **BAO_ENV, **OPENBAO_STORE}
+    _recovery_file("alpha", {"access_token": access_token(2), "refresh_token": "rt-kept"})
+    _run([], environ, Grant(), FakeBao({"AH_CX_REFRESH_alpha": "rt-alpha"}))
+    assert f"alpha: using the newer pair kept in {path}\n" in capsys.readouterr().out
+    _recovery_file("alpha", {"access_token": access_token(1), "refresh_token": "rt-spent"})
+    _run([], environ, Grant(), FakeBao({"AH_CX_TOKEN_alpha": access_token(1), "AH_CX_REFRESH_alpha": "rt-alpha"}))
+    assert f"alpha: removing {path}, older than the pair in OpenBao\n" in capsys.readouterr().out
+    path.write_text("not json")
+    _run([], environ, Grant(), FakeBao({"AH_CX_TOKEN_alpha": access_token(8), "AH_CX_REFRESH_alpha": "rt-alpha"}))
+    assert capsys.readouterr().out.startswith(f"alpha: ignoring unreadable {path}\n")
+
+
+def test_write_failures_name_the_account_and_the_error(monkeypatch, capsys):
+    def full(*args, **kwargs):
+        raise OSError(28, "No space left on device")
+
+    bao = FakeBao({"AH_CX_TOKEN_alpha": access_token(1), "AH_CX_REFRESH_alpha": "rt-alpha"})
+    aicode_tokens.rc_file().write_text(f"{aicode_tokens.START}\n{aicode_tokens.END}\n")
+    monkeypatch.setattr(aicode_tokens, "write_rc", full)
+    assert _run([], {**FLAG, **BAO_ENV, **OPENBAO_STORE}, Grant(), bao) == 1
+    assert "alpha: write failed: [Errno 28] No space left on device\n" in capsys.readouterr().out
+    monkeypatch.setattr(codex_refresh, "_save_auth", full)
+    bao = FakeBao({"AH_CX_TOKEN_alpha": access_token(1), "AH_CX_REFRESH_alpha": "rt-alpha"}, fail_writes=True)
+    assert _run([], {**FLAG, **BAO_ENV, **OPENBAO_STORE}, Grant(), bao) == 1
+    out = capsys.readouterr().out
+    assert "OpenBao write failed: OpenBao HTTP 503: sealed\n" in out
+    assert "alpha: write failed: [Errno 28] No space left on device\n" in out
