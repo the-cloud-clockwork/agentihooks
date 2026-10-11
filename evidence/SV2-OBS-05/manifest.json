@@ -1,14 +1,15 @@
 {
-  "tested_commit": "9f83839bf95c3fae0ca5beb4908d86f4f95e515c",
-  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38149860889",
-  "evidence_class": "mocked: two recorded fixture traces shaped like controller, pool, quota, archive, checkpoint and brain readings, a fakeredis incident store behind a server that can be disconnected and an in process notification sink that can fail; no Kubernetes API server, node, deployed brain or alert backend was used",
+  "tested_commit": "60f6f452ec79ca387d48acf9078c59b644ca114a",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38155608685",
+  "evidence_class": "mocked: two independent synthetic fixture traces modelled on the scaling canary and shaped like controller, pool, quota, archive, checkpoint and brain readings, a fakeredis incident store behind a server that can be disconnected and an in process notification sink that can fail; no recorded live canary, Kubernetes API server, node, deployed brain or alert backend was used",
   "cases": [
     "T-SV2-OBS-05-A",
     "T-SV2-OBS-05-B",
     "T-SV2-OBS-05-C"
   ],
   "inputs": {
-    "tests/fixtures/swarm_v2/fleet-dashboard.json": "c8dcc7cf7dba5c2968c8a7257e089ec2525a05cb030a09babb723c67a3648f76",
-    "docs/swarm-v2/fleet-dashboard.json": "fb1bef60d6442e205757445a96d6f5246bd5402832eeff411d2a4163f76ace79"
+    "tests/fixtures/swarm_v2/fleet-dashboard.json": "6cd33879f00facc2cdb1e1cadb945fd61f2532e397ba19e34b7a781a395b0c2b",
+    "tests/fixtures/swarm_v2/fleet-dashboard-second.json": "dfc4eeee2456710da17662a2a2587c0ee7b02670b9cce302b5d9ab32f9b1178e",
+    "docs/swarm-v2/fleet-dashboard.json": "f7826a42001d932b93c7ebadba3c55bba5c048e085d8011f4484aad186f3be09"
   }
 }

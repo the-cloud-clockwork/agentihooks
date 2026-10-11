@@ -1,8 +1,9 @@
 {
   "case": "T-SV2-OBS-05-C",
-  "evidence_class": "mocked: two recorded fixture traces shaped like controller, pool, quota, archive, checkpoint and brain readings, a fakeredis incident store behind a server that can be disconnected and an in process notification sink that can fail; no Kubernetes API server, node, deployed brain or alert backend was used",
+  "evidence_class": "mocked: two independent synthetic fixture traces modelled on the scaling canary and shaped like controller, pool, quota, archive, checkpoint and brain readings, a fakeredis incident store behind a server that can be disconnected and an in process notification sink that can fail; no recorded live canary, Kubernetes API server, node, deployed brain or alert backend was used",
   "input_sha256": {
-    "fleet-dashboard.json": "c8dcc7cf7dba5c2968c8a7257e089ec2525a05cb030a09babb723c67a3648f76"
+    "fleet-dashboard-second.json": "dfc4eeee2456710da17662a2a2587c0ee7b02670b9cce302b5d9ab32f9b1178e",
+    "fleet-dashboard.json": "6cd33879f00facc2cdb1e1cadb945fd61f2532e397ba19e34b7a781a395b0c2b"
   },
   "observed": {
     "after_restore": true,
