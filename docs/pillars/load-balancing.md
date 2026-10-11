@@ -39,8 +39,8 @@ KV v2 secret `agentihooks/claude-creds` on the `secret` mount with
 `account_names.token_env` of its email: `AH_CC_TOKEN_<slug>`, the slug being the
 lower cased email with `@` as `at` and every other symbol as `_`
 (`Ops.Two@Example.com` becomes `AH_CC_TOKEN_ops_twoatexample_com`). It prints one
-`export <key>=...` per key under that same name; keys that are not
-`AH_CC_TOKEN_` names are skipped. Nothing is written to disk.
+`export <key>=...` per key under that same name; keys that are not lower
+case `AH_CC_TOKEN_` names are skipped. Nothing is written to disk.
 
 When OpenBao is unset or unreachable it falls back to `~/.agentihooks/accounts/claude.env` (under `AGENTIHOOKS_HOME` when
 set): an operator written file of `AH_CC_TOKEN_*=` lines, used only when no one
