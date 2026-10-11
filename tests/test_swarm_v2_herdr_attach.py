@@ -505,3 +505,22 @@ def test_a_connection_probe_that_never_answers_is_refused_as_unreachable(tmp_pat
     report = found.sync([(scope_of(EXE_A, 1), HOST_KEY)], enabled=True)
     assert report.refused == {EXE_A: "unreachable"}
     assert found.terminal_endpoint_refusals() == {"unreachable": 1}
+
+
+@pytest.mark.parametrize("identity", [b"not a key\n", None])
+def test_an_unreadable_client_identity_refuses_each_attempt(tmp_path, identity):
+    found, runner = terminal(tmp_path)
+    found.home.identity.parent.mkdir(parents=True, exist_ok=True)
+    if identity is None:
+        found.home.identity.mkdir()
+    else:
+        found.home.identity.write_bytes(identity)
+
+    assert refusal(lambda: found.register(scope_of(EXE_A, 1), HOST_KEY)) == (
+        "client_key",
+        "terminal client identity is not a readable OpenSSH private key",
+    )
+    report = found.sync([(scope_of(EXE_A, 1), HOST_KEY), (scope_of(EXE_B, 1), HOST_KEY)], enabled=True)
+    assert report.refused == {EXE_A: "client_key", EXE_B: "client_key"}
+    assert found.terminal_endpoint_refusals() == {"client_key": 2}
+    assert not any(command[0] == attach.SSH for command in runner.commands)
