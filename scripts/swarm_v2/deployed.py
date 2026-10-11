@@ -9,6 +9,7 @@ from scripts.swarm_v2 import image_tag
 from scripts.swarm_v2.accounts import AccountCapacity
 from scripts.swarm_v2.auth_context import Registration
 from scripts.swarm_v2.herdr.endpoints import Clients
+from scripts.swarm_v2.herdr.viewer import Viewer
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 from scripts.swarm_v2.kubernetes.client import ApiRefused, KubeHttp, PodApi, PodClient
 from scripts.swarm_v2.kubernetes.failures import AccountSlot, Recovery
@@ -17,8 +18,10 @@ from scripts.swarm_v2.kubernetes.prompts import TerminalPrompts
 from scripts.swarm_v2.kubernetes.runtime import KubernetesTransport
 from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, PodTemplate, load_policy
 from scripts.swarm_v2.kubernetes.terminal import Exposure, HostKeys, TerminalObjects, TerminalTemplate
+from scripts.swarm_v2.kubernetes.terminal_views import TerminalViews
 from scripts.swarm_v2.kubernetes.watch import OWNER_LABEL, CursorExpired, owner_for
 from scripts.swarm_v2.launch import DistributedLaunch, LaunchTerms
+from scripts.swarm_v2.operator_auth import OPERATOR
 from scripts.swarm_v2.registry import FleetRegistry
 from scripts.swarm_v2.runtime.base import SpawnRequest
 from scripts.swarm_v2.runtime.routed import RoutedRuntime, routed
@@ -26,6 +29,7 @@ from scripts.swarm_v2.runtime.routed import RoutedRuntime, routed
 if TYPE_CHECKING:
     from scripts.swarm_v2.auth_context import LaunchAuthority
     from scripts.swarm_v2.control_service import ControlService
+    from scripts.swarm_v2.controller import Controller
 
 API_URL_ENV = "AGENTIHOOKS_CONTROL_API_URL"
 POLICY_ENV = "AGENTIHOOKS_POD_POLICY_FILE"
@@ -37,6 +41,7 @@ PROJECTS_ENV = "AGENTIHOOKS_LAUNCH_PROJECTS"
 BRAIN_ENV = "AGENTIHOOKS_LAUNCH_BRAIN"
 EXPORTER_ENV = "AGENTIHOOKS_WORKER_EXPORTER"
 TERMINAL_ENV = "AGENTIHOOKS_WORKER_TERMINAL"
+AGGREGATION_ENV = "AGENTIHOOKS_TERMINAL_AGGREGATION"
 REQUIRED = (POLICY_ENV, IMAGE_TAG_ENV, PROFILE_ENV, ACCOUNT_ENV, CAP_ENV, PROJECTS_ENV, BRAIN_ENV)
 RESERVATION_MS = 300_000
 HARNESS = "claude"
@@ -182,6 +187,13 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
     )
     launcher.router = runtime.router
     return runtime
+
+
+def terminal_views(controller: "Controller", environ: Mapping[str, str]) -> TerminalViews:
+    terminal = controller.terminals.terminal
+    aggregation = environ.get(AGGREGATION_ENV) != "off"
+    viewer = Viewer(terminal.router(), terminal.run, OPERATOR, aggregation=aggregation)
+    return TerminalViews(controller.store, controller.slug, viewer)
 
 
 class GrantRelease:

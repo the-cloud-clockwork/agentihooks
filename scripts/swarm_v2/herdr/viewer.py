@@ -121,5 +121,8 @@ class Viewer:
     def detach(self) -> None:
         self.watched.clear()
 
+    def forget(self, agent: str) -> None:
+        self.watched.pop(agent, None)
+
     def terminal_reconnect_latency_seconds(self) -> list[float]:
         return list(self.latencies)

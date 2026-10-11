@@ -83,6 +83,7 @@ class ControlService:
         self.runtime = None
         self.api_url = ""
         self.recover: Callable[[], dict[str, str]] | None = None
+        self.views: Callable[[], dict] | None = None
 
     def start(self) -> bool:
         if not self.controller.acquire():
@@ -98,6 +99,8 @@ class ControlService:
         self.observe(lease.now_ms(store) / 1000 if now is None else now)
         if self.recover is not None:
             self.recover()
+        if self.views is not None:
+            self.views()
         return True
 
     def observe(self, now: float) -> list[Finding]:
@@ -169,6 +172,8 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
         service.api_url = workers.terms.api_url
         service.runtime = deployed.tick_runtime(service, workers, environ)
         service.recover = deployed.recovery_pass(service, workers, transports[0].api)
+        if service.controller.terminals is not None:
+            service.views = deployed.terminal_views(service.controller, environ)
     try:
         service.start()
     except BaseException:

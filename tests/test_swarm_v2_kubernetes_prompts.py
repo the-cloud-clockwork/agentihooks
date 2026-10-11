@@ -122,6 +122,16 @@ def test_a_command_lists_the_agents_of_its_own_server_before_it_prompts(tmp_path
     assert fleet.received() == {"local": [], EXE_A: [], EXE_B: [marked("wake")]}
 
 
+def test_an_agent_target_is_its_one_agent_pane_with_its_machine_label(tmp_path):
+    _, client, _ = world(tmp_path)
+    record = client.router.store.load()[EXE_B]
+
+    found = prompts_module.agent_target(client.router, remote(EXE_B, ENDPOINT_B.scope.generation, conversation_id="c"))
+
+    incarnation = f"{EXE_B}/{ENDPOINT_B.scope.generation}"
+    assert found == (Target(record.profile_id, record.session, incarnation, PANE, "c"), ENDPOINT_B.name)
+
+
 def test_each_nudge_takes_a_new_operation_id_so_a_later_idle_streak_is_typed_again(tmp_path):
     fleet, _, prompts = world(tmp_path)
 
