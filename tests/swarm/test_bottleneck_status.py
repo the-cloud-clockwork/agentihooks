@@ -116,7 +116,7 @@ def test_interrupted_notification_commit_retries_without_duplicates(store, monke
 
 def test_status_json_and_text_share_stage_trend_and_action(env, monkeypatch, capsys):
     store, _, _ = env
-    cli.main(["sw", "create"])
+    cli.main(["sw", "create", "--repo", "/repo"])
     capsys.readouterr()
     monkeypatch.setattr(status, "now_ms", lambda: NOW)
     monkeypatch.setattr(cli, "now_ms", lambda: NOW)
