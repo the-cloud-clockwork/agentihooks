@@ -108,6 +108,15 @@ def test_the_swarm_view_carries_terminals_judged_now(store):
         assert commands.view(store, "sw")["terminals"][AGENT]["state"] == CACHED
 
 
+def test_the_swarm_view_reads_whole_milliseconds(store):
+    from scripts.swarm import commands
+
+    visibility.publish(store, "sw", [live()])
+    edge = SimpleNamespace(time_ns=lambda: (NOW + FRESH_MS) * 1_000_000 + 999_999)
+    with patch.object(commands, "time", edge):
+        assert commands.view(store, "sw")["terminals"][AGENT]["state"] == LIVE
+
+
 def test_the_ledger_swarm_status_shows_a_published_live_view_as_cached_once_it_ages(store):
     from scripts.swarm import commands
     from scripts.swarm_ledger import ledger_server

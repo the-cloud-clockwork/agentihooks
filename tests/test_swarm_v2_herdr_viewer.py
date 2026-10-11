@@ -77,7 +77,9 @@ def test_watch_resolves_the_target_through_the_registration_record_and_starts_un
     endpoint = r.desired[0]
     assert view == View(AGENT_A, endpoint.name, PANE, UNVERIFIED, fresh_ms=FX["fresh_ms"])
     target = r.client.router.resolve(endpoint.name, PANE, CONVERSATION[EXE_A])
-    assert r.viewer.watched[AGENT_A] == Watched(target, endpoint.name, view)
+    assert r.viewer.watched[AGENT_A] == Watched(target, view)
+    narrow = Viewer(r.client.router, r.workers, OPERATOR, r.clock, fresh_ms=10)
+    assert narrow.watch(AGENT_A, r.label[EXE_A], PANE, CONVERSATION[EXE_A]).fresh_ms == 10
 
 
 def test_watch_needs_a_conversation_and_a_registered_machine(tmp_path):
@@ -119,6 +121,10 @@ def test_a_lost_machine_is_cached_with_its_last_screen_while_the_other_stays_liv
     assert lost.checked_at > lost.live_at
     assert r.viewer.screen(AGENT_B) == (f"{AGENT_B} work 0\n", lost)
     assert r.viewer.screen(AGENT_A)[0] == f"{AGENT_A} work 1\n"
+    assert r.viewer.watched[AGENT_B].view.state == CACHED
+    r.workers.cut.clear()
+    back = r.viewer.refresh()[AGENT_B]
+    assert (back.state, back.reason) == (LIVE, "")
 
 
 def test_a_view_that_never_answered_reads_unverified_with_its_reason(tmp_path):
@@ -144,9 +150,16 @@ def broken(command):
 
 
 @pytest.mark.parametrize(
-    "failure", [broken, lambda command: subprocess.CompletedProcess(command, 1, "", "pane not found")]
+    ("failure", "message"),
+    [
+        (broken, f"{PANE} did not answer pane_read"),
+        (
+            lambda command: subprocess.CompletedProcess(command, 1, "", "pane not found"),
+            f"herdr exited 1 for pane_read on {PANE}",
+        ),
+    ],
 )
-def test_a_failed_or_refused_read_is_unreachable(tmp_path, failure):
+def test_a_failed_or_refused_read_is_unreachable(tmp_path, failure, message):
     holder = {}
 
     def run(command):
@@ -159,17 +172,22 @@ def test_a_failed_or_refused_read_is_unreachable(tmp_path, failure):
     watch(r, EXE_A)
     view = r.viewer.refresh()[AGENT_A]
     assert (view.state, view.reason) == (UNVERIFIED, "unreachable")
+    assert refused(lambda: r.viewer.reconnect(AGENT_A)) == ("unreachable", message)
 
 
 @pytest.mark.parametrize(
-    ("session", "reason"),
+    ("session", "reason", "message"),
     [
-        ({"kind": "none"}, "conversation_unconfirmed"),
-        ({"kind": "id", "value": ""}, "conversation_unconfirmed"),
-        ({"kind": "id", "value": "44444444-4444-4444-8444-444444444444"}, "conversation_mismatch"),
+        ({"kind": "none"}, "conversation_unconfirmed", f"{PANE} reported no conversation"),
+        ({"kind": "id", "value": ""}, "conversation_unconfirmed", f"{PANE} reported no conversation"),
+        (
+            {"kind": "id", "value": "44444444-4444-4444-8444-444444444444"},
+            "conversation_mismatch",
+            f"{PANE} holds another conversation",
+        ),
     ],
 )
-def test_a_pane_without_the_expected_conversation_is_not_live(tmp_path, session, reason):
+def test_a_pane_without_the_expected_conversation_is_not_live(tmp_path, session, reason, message):
     r = rig(tmp_path)
     watch(r, EXE_A)
     r.workers.remote[EXE_A]["panes"][PANE]["agent_session"] = session
@@ -177,6 +195,7 @@ def test_a_pane_without_the_expected_conversation_is_not_live(tmp_path, session,
     view = r.viewer.refresh()[AGENT_A]
     assert (view.state, view.reason) == (UNVERIFIED, reason)
     assert [verb[1:] for verb in remote_verbs(r.workers, since)] == [("agent", "get")]
+    assert refused(lambda: r.viewer.reconnect(AGENT_A)) == (reason, message)
 
 
 def test_a_reply_that_is_not_json_is_unconfirmed(tmp_path):
@@ -233,10 +252,7 @@ def test_reconnect_confirms_the_original_pane_and_measures_its_latency(tmp_path)
     r.viewer.refresh()
     r.workers.cut.add(r.registered[EXE_B])
     r.viewer.refresh()
-    assert refused(lambda: r.viewer.reconnect(AGENT_B)) == (
-        "unreachable",
-        f"{AGENT_B}'s original terminal is not confirmed: unreachable",
-    )
+    assert refused(lambda: r.viewer.reconnect(AGENT_B)) == ("unreachable", f"{PANE} did not answer agent_get")
     assert r.viewer.terminal_reconnect_latency_seconds() == []
     r.workers.cut.clear()
     target = r.viewer.reconnect(AGENT_B)

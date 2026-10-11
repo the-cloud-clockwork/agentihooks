@@ -13,7 +13,6 @@ from scripts.swarm_v2.runtime.commands import Principal, Role
 @dataclass(frozen=True)
 class Watched:
     target: Target
-    machine: str
     view: View
     screen: str = ""
 
@@ -54,39 +53,41 @@ class Viewer:
             raise EndpointRefused("conversation_required", f"{agent}'s terminal view needs its conversation id")
         target = self.router.resolve(machine, pane_id, conversation_id)
         view = View(agent, machine, target.pane_id, UNVERIFIED, fresh_ms=self.fresh_ms)
-        self.watched[agent] = Watched(target, machine, view)
+        self.watched[agent] = Watched(target, view)
         return view
 
     def _read(self, target: Target, operation: str) -> str:
         try:
             done = self.run(self.router.command(target, operation))
         except (OSError, subprocess.TimeoutExpired, Unreachable):
-            raise EndpointRefused("unreachable", operation) from None
+            raise EndpointRefused("unreachable", f"{target.pane_id} did not answer {operation}") from None
         if done.returncode != 0:
-            raise EndpointRefused("unreachable", operation)
+            raise EndpointRefused("unreachable", f"herdr exited {done.returncode} for {operation} on {target.pane_id}")
         return done.stdout
 
     def _probe(self, target: Target) -> tuple[Target, str]:
         target = self.router.refresh(target)
         found = pane_conversation(self._read(target, "agent_get"))
         if found is None or not found[1]:
-            raise EndpointRefused("conversation_unconfirmed", target.pane_id)
+            raise EndpointRefused("conversation_unconfirmed", f"{target.pane_id} reported no conversation")
         if found != (target.pane_id, target.conversation_id):
-            raise EndpointRefused("conversation_mismatch", target.pane_id)
+            raise EndpointRefused("conversation_mismatch", f"{target.pane_id} holds another conversation")
         return target, self._read(target, "pane_read")
 
-    def _check(self, agent: str) -> View:
+    def _check(self, agent: str) -> EndpointRefused | None:
         held = self._held(agent)
         now = self._now()
         try:
             target, screen = self._probe(held.target)
         except EndpointRefused as refused:
-            view = replace(held.view, state=CACHED, checked_at=now, reason=refused.reason)
-            self.watched[agent] = replace(held, view=view)
-            return view
-        view = replace(held.view, state=LIVE, checked_at=now, live_at=now, reason="")
-        self.watched[agent] = Watched(target, held.machine, view, screen)
-        return view
+            self.watched[agent] = replace(
+                held, view=replace(held.view, state=CACHED, checked_at=now, reason=refused.reason)
+            )
+            return refused
+        self.watched[agent] = Watched(
+            target, replace(held.view, state=LIVE, checked_at=now, live_at=now, reason=""), screen
+        )
+        return None
 
     def refresh(self) -> dict[str, View]:
         if self.aggregation:
@@ -111,9 +112,9 @@ class Viewer:
 
     def reconnect(self, agent: str) -> Target:
         started = self._now()
-        view = self._check(agent)
-        if view.state != LIVE:
-            raise EndpointRefused(view.reason, f"{agent}'s original terminal is not confirmed: {view.reason}")
+        refused = self._check(agent)
+        if refused is not None:
+            raise refused
         self.latencies.append((self._now() - started) / 1000)
         return self.watched[agent].target
 
