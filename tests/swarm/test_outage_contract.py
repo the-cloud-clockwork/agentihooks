@@ -201,3 +201,18 @@ def test_a_fresh_error_rearms_a_recovered_account_in_an_open_episode(tmp_path, m
     assert record["probes"]["claude:alpha"]["succeeded_at"] is None
     assert record["probes"]["claude:alpha"]["next_at"] == 122000
     assert record["probes"]["claude:beta"]["next_at"] == 181000
+
+
+def test_a_closed_provider_record_never_launches_its_pending_probe(tmp_path, monkeypatch):
+    monkeypatch.setattr(outage, "HOME", tmp_path)
+    agent = actor("affected")
+    store = SimpleNamespace(agents=lambda slug: [agent])
+    runtime = SimpleNamespace(observe=lambda agent: observed())
+    check = MagicMock(return_value=provider_probe.Result(True, "confirmed", 62000))
+    monkeypatch.setattr(provider_probe, "check", check)
+    outage.providers(store, "sw", runtime, 1000)
+    outage.observe("sw", "provider", [], 2000)
+    closed = outage.read("sw")["provider"]
+    outage.providers(store, "sw", runtime, 61000)
+    assert outage.read("sw")["provider"] == closed
+    check.assert_not_called()
