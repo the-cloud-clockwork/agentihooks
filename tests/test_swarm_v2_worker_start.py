@@ -429,3 +429,14 @@ def test_the_image_supervisor_entry_is_the_worker_start_step():
     spec.loader.exec_module(module)
 
     assert module.main is start.main
+
+
+def test_the_image_supervisor_entry_runs_the_start_step_as_a_script():
+    root = Path(__file__).resolve().parents[1]
+    entry = root / "docker" / "swarm-node" / "supervisor.py"
+    environ = {**os.environ, "PYTHONPATH": str(root)}
+
+    done = subprocess.run([sys.executable, str(entry)], env=environ, capture_output=True, text=True, timeout=60)
+
+    assert (done.returncode, done.stdout) == (64, "")
+    assert done.stderr == "ERROR worker start requires attempt directory and launch record\n"

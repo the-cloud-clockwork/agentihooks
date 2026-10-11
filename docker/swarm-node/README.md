@@ -27,8 +27,8 @@ the record names, bootstraps the attempt for the record's harness from the
 `default` template and writes the record's authority as `registration.json`
 once the answer has confirmed its execution, task and grant. A missing or malformed record or grant, a refused
 registration or an answer naming another execution, task or grant exits
-sixty four before the attempt is touched; a failed bootstrap exits sixty four
-too. The supervisor never starts after a refusal. A prepared start prints one
+sixty four before the attempt is touched; a bootstrap refusal, an
+unreadable file or a failed probe exits sixty four too. The supervisor never starts after a refusal. A prepared start prints one
 `worker_start` line naming the attempt and the worker uid.
 The supervisor owns a headless herdr server, an exporter and one main agent in
 a herdr pane. Viewers can attach and detach without owning those processes.
