@@ -1,6 +1,7 @@
 import pytest
 
 from hooks.context import account_sessions
+from scripts import session_bands
 from scripts.swarm import capacity
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import RedisStore, SwarmConfig
@@ -130,6 +131,22 @@ def test_a_week_that_already_reset_is_not_spent_before_one_still_to_come():
 def test_equally_held_unobserved_keys_are_taken_in_name_order():
     _, route = _route({"bkey", "akey"})
     assert route.choose(1) == "akey"
+
+
+def test_each_approved_key_is_offered_as_a_claude_seat_with_its_cap_held_slots_and_week_reset():
+    store, route = _route({"bkey", "akey"}, {"akey": 1})
+    _observe(store, "bkey", five_used=60.0, week_reset=NOW_MS // 1000 + 24 * HOUR)
+    assert route.seats(5) == [
+        session_bands.Seat("claude", "akey", 5, 1),
+        session_bands.Seat("claude", "bkey", 4, 0, NOW_MS / 1000 + 24 * HOUR),
+    ]
+
+
+def test_a_key_at_the_last_five_hour_band_waits_behind_a_key_whose_week_resets_later():
+    store, route = _route({"akey", "bkey"})
+    _observe(store, "akey", five_used=95.0, week_reset=NOW_MS // 1000 + 24 * HOUR)
+    _observe(store, "bkey", week_reset=NOW_MS // 1000 + 72 * HOUR)
+    assert route.choose(2) == "bkey"
 
 
 def test_no_approved_key_chooses_no_account():

@@ -14,7 +14,7 @@ from scripts.swarm import capacity, lease
 from scripts.swarm import controller as loop
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import SpawnError
-from scripts.swarm_v2 import deployed, image_tag
+from scripts.swarm_v2 import deployed, image_tag, quota
 from scripts.swarm_v2.accounts import RESERVED, Slot, account_key, encode
 from scripts.swarm_v2.auth_context import GrantRefused
 from scripts.swarm_v2.kubernetes import operator_terminal
@@ -289,6 +289,24 @@ def test_a_tick_launch_takes_the_account_the_capacity_plan_placed_its_task_on(tm
     try:
         herdr = service.runtime.herdr_runtime
         herdr._quota_tasks, herdr._quota_task_accounts = {"t1": "claude"}, {"t1": other}
+        task = {"id": "t1", "seat": SEAT, "controller_epoch": service.controller.held.epoch}
+        service.runtime.spawn(store.config(SLUG), "eng", store.next_name(SLUG, "eng"), task)
+    finally:
+        service.stop()
+
+    [pod] = pods.created
+    assert pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == other
+
+
+def test_a_tick_launch_skips_an_approved_key_whose_newest_fleet_quota_is_rejected(tmp_path, monkeypatch):
+    store = _store()
+    other = "codex-fixtureatexample-com"
+    pods = Pods("swarm-pod-proof", keys=(ACCOUNT, other))
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: pods)
+    seen = quota.Observation(ACCOUNT, "claude", "exe-" + "9" * 32, 1, lease.now_ms(store), "rejected", 1.0, 1.0)
+    store.redis.hset(quota.latest_key("claude"), ACCOUNT, quota.encode(seen))
+    service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    try:
         task = {"id": "t1", "seat": SEAT, "controller_epoch": service.controller.held.epoch}
         service.runtime.spawn(store.config(SLUG), "eng", store.next_name(SLUG, "eng"), task)
     finally:
