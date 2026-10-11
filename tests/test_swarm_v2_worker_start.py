@@ -3,6 +3,7 @@ import http.client
 import importlib.util
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -38,6 +39,7 @@ RECORD = {
     "harness": "claude",
     "agent": ["claude"],
     "control_url": CONTROL,
+    "profile": "engineer",
 }
 ANSWER = {
     "execution_id": EXECUTION,
@@ -80,9 +82,25 @@ class Boot:
         return {}
 
 
+def shipped(tmp_path: Path) -> Path:
+    templates = tmp_path / "templates"
+    (templates / "engineer").mkdir(parents=True, exist_ok=True)
+    return templates
+
+
+def image_templates(tmp_path: Path) -> Path:
+    root = Path(__file__).resolve().parents[1]
+    templates = tmp_path / "image-templates"
+    for line in (root / "docker" / "swarm-node" / "Dockerfile").read_text().splitlines():
+        words = line.split()
+        if words[:1] == ["COPY"] and words[-1] == f"{start.TEMPLATES}/":
+            shutil.copytree(root / words[1], templates, dirs_exist_ok=True)
+    return templates
+
+
 def prepare(tmp_path, launch, controller, boot=None):
     boot = boot or Boot()
-    start.prepare(tmp_path / "attempts" / EXECUTION, launch, controller.send, controller.sleep, boot)
+    start.prepare(tmp_path / "attempts" / EXECUTION, launch, controller.send, controller.sleep, boot, shipped(tmp_path))
     return boot
 
 
@@ -114,8 +132,8 @@ def test_a_prepared_attempt_holds_the_registration_record_only_the_worker_can_re
         worker_home.Request(
             tmp_path / "attempts",
             EXECUTION,
-            Path("/opt/agentihooks/templates"),
-            {"claude": "default"},
+            tmp_path / "templates",
+            {"claude": "engineer"},
             Path(sys.executable),
             {},
             {API_URL: CONTROL},
@@ -123,6 +141,66 @@ def test_a_prepared_attempt_holds_the_registration_record_only_the_worker_can_re
             os.getgid(),
         )
     ]
+
+
+def test_an_engineer_launch_record_renders_the_engineer_profile_in_the_pod_home(tmp_path):
+    attempt = tmp_path / "attempts" / EXECUTION
+    controller = Controller((200, ANSWER))
+
+    start.prepare(attempt, material(tmp_path), controller.send, controller.sleep, templates=image_templates(tmp_path))
+
+    record = json.loads((attempt / "execution.json").read_text())
+    assert record["profiles"] == {"claude": "engineer"}
+    home = attempt / record["homes"]["claude"] / ".claude"
+    assert "# Role: Swarm Engineer\n" in (home / "CLAUDE.md").read_text()
+    assert (home / "rules" / "engineer-role.md").is_file()
+    assert (home / "skills" / "swarm-engineer" / "SKILL.md").is_file()
+
+
+@pytest.mark.parametrize("role", ["engineer", "cicd", "planner", "qa", "master", "dispatcher"])
+def test_the_image_ships_every_role_profile_as_a_template(tmp_path, role):
+    templates = image_templates(tmp_path)
+
+    assert (templates / role / "profile.yml").is_file()
+    assert (templates / "default" / "profile.yml").is_file()
+
+
+@pytest.mark.parametrize("role", ["planner", "qa"])
+def test_a_seeded_role_finds_the_shared_guard_its_conditions_load(tmp_path, role):
+    attempt = tmp_path / "attempts" / EXECUTION
+    controller = Controller((200, ANSWER))
+    launch = material(tmp_path, {**RECORD, "profile": role})
+
+    start.prepare(attempt, launch, controller.send, controller.sleep, templates=image_templates(tmp_path))
+
+    record = json.loads((attempt / "execution.json").read_text())
+    state = json.loads((attempt / record["homes"]["claude"] / ".agentihooks" / "state.json").read_text())
+    [linked] = state["linked_profiles"]
+    conditions = sorted((Path(linked["path"]) / ".claude" / "conditions").glob("*no_code_edits.py"))
+    assert linked["name"] == role and conditions
+    for condition in conditions:
+        assert (condition.parents[3] / "_guards" / "no_code_edits.py").is_file()
+
+
+@pytest.mark.parametrize("kind", ["file", "link"])
+def test_a_profile_template_that_is_not_a_folder_is_not_shipped(tmp_path, kind):
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    (templates / "shipped").mkdir()
+    if kind == "file":
+        (templates / "engineer").write_text("")
+    else:
+        (templates / "engineer").symlink_to(templates / "shipped")
+    controller, boot = Controller((200, ANSWER)), Boot()
+
+    with pytest.raises(LaunchRefused) as refused:
+        start.prepare(
+            tmp_path / "attempts" / EXECUTION, material(tmp_path), controller.send, controller.sleep, boot, templates
+        )
+
+    assert str(refused.value) == "profile engineer is not shipped in the worker image"
+    assert (controller.calls, boot.requests) == ([], [])
+    assert not (tmp_path / "attempts").exists()
 
 
 def test_a_busy_controller_is_asked_again_until_it_answers(tmp_path):
@@ -156,6 +234,11 @@ def test_a_controller_busy_on_every_attempt_refuses_the_start(tmp_path):
         ({**RECORD, "control_url": "http://"}, "invalid control url"),
         ({**RECORD, "control_url": 8780}, "invalid control url"),
         ({**RECORD, "control_url": "http://controller.swarm.invalid:port"}, "invalid control url"),
+        ({key: value for key, value in RECORD.items() if key != "profile"}, "launch record names no profile"),
+        ({**RECORD, "profile": ""}, "launch record names no profile"),
+        ({**RECORD, "profile": 7}, "launch record names no profile"),
+        ({**RECORD, "profile": "../engineer"}, "launch record names an invalid profile"),
+        ({**RECORD, "profile": "frontend"}, "profile frontend is not shipped in the worker image"),
     ],
 )
 def test_a_malformed_launch_record_refuses_before_anything_is_written(tmp_path, record, message):
@@ -422,7 +505,9 @@ def test_the_started_supervisor_loads_a_prepared_attempt_only_the_worker_can_rea
     attempt = tmp_path / "attempts" / EXECUTION
     controller = Controller((200, ANSWER))
     loaded = []
-    prepared = functools.partial(start.prepare, send=controller.send, sleep=controller.sleep, boot=Bootstrap())
+    prepared = functools.partial(
+        start.prepare, send=controller.send, sleep=controller.sleep, boot=Bootstrap(), templates=shipped(tmp_path)
+    )
     monkeypatch.setattr(start, "prepare", prepared)
     monkeypatch.setattr(
         start.supervision_runtime, "main", lambda argv: loaded.append(Launch.load(*map(Path, argv))) or 70

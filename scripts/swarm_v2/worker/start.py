@@ -18,7 +18,6 @@ from scripts.swarm_v2.broadcast_bridge import API_URL, AUTHORIZATION, GRANT_NAME
 from scripts.swarm_v2.supervision import SCHEMA_VERSION, LaunchRefused, checked_authority
 
 TEMPLATES = Path("/opt/agentihooks/templates")
-PROFILE = "default"
 REGISTER = "/v2/executions/register"
 RECORD = "registration.json"
 BUSY = 503
@@ -46,7 +45,7 @@ def post(url: str, grant: str, body: dict) -> tuple[int, object]:
         return status, {}
 
 
-def _launch(path: Path) -> dict:
+def _launch(path: Path, templates: Path) -> dict:
     try:
         spec = json.loads(path.read_text())
     except (OSError, ValueError):
@@ -57,7 +56,18 @@ def _launch(path: Path) -> dict:
     if spec.get("harness") not in worker_home.TARGETS:
         raise LaunchRefused("unsupported harness")
     _control_url(spec.get("control_url"))
+    _profile(spec.get("profile"), templates)
     return spec
+
+
+def _profile(profile: object, templates: Path) -> None:
+    if not isinstance(profile, str) or not profile:
+        raise LaunchRefused("launch record names no profile")
+    if not worker_home.NAME.fullmatch(profile):
+        raise LaunchRefused("launch record names an invalid profile")
+    template = templates / profile
+    if template.is_symlink() or not template.is_dir():
+        raise LaunchRefused(f"profile {profile} is not shipped in the worker image")
 
 
 def _control_url(url: object) -> None:
@@ -112,8 +122,9 @@ def prepare(
     send: Send = post,
     sleep: Callable[[float], None] = time.sleep,
     boot: Callable[[worker_home.Request], dict] = worker_home.bootstrap,
+    templates: Path = TEMPLATES,
 ) -> None:
-    spec = _launch(launch)
+    spec = _launch(launch, templates)
     if attempt.name != spec["authority"]["execution_id"]:
         raise LaunchRefused("attempt folder does not name the launch execution")
     grant = _grant(launch.parent)
@@ -123,8 +134,8 @@ def prepare(
         worker_home.Request(
             attempt.parent,
             attempt.name,
-            TEMPLATES,
-            {spec["harness"]: PROFILE},
+            templates,
+            {spec["harness"]: spec["profile"]},
             Path(sys.executable),
             {},
             {API_URL: spec["control_url"]},

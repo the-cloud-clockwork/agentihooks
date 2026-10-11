@@ -10,10 +10,14 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
+from scripts.swarm_v2.kubernetes.watch import CursorExpired
+
 ACCOUNT = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 TIMEOUT_SECONDS = 10
 DELETABLE = ("pods", "services")
 NODES = "/api/v1/nodes"
+WATCH_SECONDS = 1
+GONE = 410
 Opener = Callable[..., Any]
 
 
@@ -40,6 +44,10 @@ class PodApi(Protocol):
 
     def list_pods(self, selector: str) -> list[dict]: ...
 
+    def snapshot(self, selector: str) -> tuple[list[dict], str]: ...
+
+    def watch_pods(self, selector: str, version: str) -> list[tuple[str, dict]]: ...
+
     def ready_nodes(self) -> list[str] | None: ...
 
     def create_config_map(self, body: dict) -> dict: ...
@@ -62,7 +70,9 @@ class KubeHttp:
         context = ssl.create_default_context(cafile=str(account / "ca.crt"))
         return cls(f"https://{host}:{environ['KUBERNETES_SERVICE_PORT']}", account / "token", context, opener)
 
-    def send(self, method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
+    def send(
+        self, method: str, path: str, body: dict | None = None, read: Callable[[bytes], Any] = json.loads
+    ) -> tuple[int, Any]:
         try:
             token = self.token_path.read_text().strip()
         except OSError:
@@ -88,7 +98,7 @@ class KubeHttp:
         except (OSError, http.client.HTTPException) as error:
             raise ConnectionError(f"the API server exchange failed: {type(error).__name__}") from None
         try:
-            return status, json.loads(raw)
+            return status, read(raw)
         except ValueError:
             raise ConnectionError("the API server answer is unreadable") from None
 
@@ -99,6 +109,10 @@ def _answer(status: int, body: dict) -> dict:
     if status == 429 or status >= 500:
         raise ConnectionError(f"API server answered {status}")
     raise ApiRefused(status, body.get("reason", ""))
+
+
+def _events(raw: bytes) -> list[dict]:
+    return [json.loads(line) for line in raw.splitlines() if line.strip()]
 
 
 def _ready(node: dict) -> bool:
@@ -129,11 +143,29 @@ class PodClient:
         return self.read("pods", name)
 
     def list_pods(self, selector: str) -> list[dict]:
+        return self.snapshot(selector)[0]
+
+    def snapshot(self, selector: str) -> tuple[list[dict], str]:
+        """The resource version is empty when the answer names none, so the caller lists again instead of watching."""
         query = urllib.parse.urlencode({"labelSelector": selector})
-        return _answer(*self.http.send("GET", f"{self._path()}?{query}"))["items"]
+        answer = _answer(*self.http.send("GET", f"{self._path()}?{query}"))
+        return answer["items"], answer.get("metadata", {}).get("resourceVersion", "")
+
+    def watch_pods(self, selector: str, version: str) -> list[tuple[str, dict]]:
+        """Raises CursorExpired when the API server no longer holds events after `version`."""
+        query = urllib.parse.urlencode(
+            {"labelSelector": selector, "watch": "1", "resourceVersion": version, "timeoutSeconds": WATCH_SECONDS}
+        )
+        status, events = self.http.send("GET", f"{self._path()}?{query}", read=_events)
+        if status == GONE:
+            raise CursorExpired(version)
+        events = _answer(status, events)
+        if any(event["type"] == "ERROR" for event in events):
+            raise CursorExpired(version)
+        return [(event["type"], event["object"]) for event in events]
 
     def ready_nodes(self) -> list[str] | None:
-        """None when the nodes cannot be listed, so no Pod is judged lost on missing evidence."""
+        """None when the nodes cannot be listed, so an unlisted node is never taken as proof of loss."""
         try:
             status, answer = self.http.send("GET", NODES)
         except ConnectionError:

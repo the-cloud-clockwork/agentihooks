@@ -207,6 +207,7 @@ def test_committed_image_inputs_pin_base_and_keep_profiles_outside_home():
     assert "FROM ${BASE_IMAGE}" in dockerfile
     assert '--base-image "$BASE_IMAGE"' in dockerfile
     assert "COPY profiles/ /opt/agentihooks/templates/" in dockerfile
+    assert "COPY profiles/package/roles/ /opt/agentihooks/templates/" in dockerfile
     assert "USER 10001:10001" in dockerfile
     assert "DISABLE_AUTOUPDATER=1" in dockerfile
     assert "--require-hashes" in dockerfile

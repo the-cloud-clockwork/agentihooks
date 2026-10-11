@@ -21,7 +21,7 @@ class Supervision:
     exporter: tuple[str, ...] | None
     control_url: str
 
-    def record(self, registration: Registration) -> str:
+    def record(self, registration: Registration, profile: str) -> str:
         record = {
             "schema_version": SCHEMA_VERSION,
             "execution_id": registration.execution_id,
@@ -30,6 +30,7 @@ class Supervision:
             "harness": self.harness,
             "agent": [self.harness],
             "control_url": self.control_url,
+            "profile": profile,
         }
         if self.exporter:
             record["exporter"] = list(self.exporter)
@@ -68,7 +69,7 @@ class PodGrants:
         from redis.exceptions import RedisError
 
         try:
-            record = self.supervision.record(self.verify(grant))
+            record = self.supervision.record(self.verify(grant), agent.profile)
         except (GrantRefused, RedisError):
             return Hand(False, "grant_unverified")
         labels = {

@@ -65,6 +65,9 @@ def _check_profiles(request: Request) -> None:
         source = request.templates / name
         if source.is_symlink() or not source.is_dir():
             raise BootstrapError(f"profile template not found: {name}")
+    shared = request.templates / filesystem.SHARED
+    if shared.is_symlink() or not shared.is_dir():
+        raise BootstrapError(f"shared template not found: {filesystem.SHARED}")
 
 
 def _check_accounts(request: Request) -> None:
@@ -330,6 +333,7 @@ def _seed(execution: filesystem.Execution, request: Request) -> None:
     for name in sorted(set(request.profiles.values())):
         copy = filesystem.seed(execution, request.templates / name, name)
         linked.append({"name": name, "path": str(copy)})
+    filesystem.seed(execution, request.templates / filesystem.SHARED, filesystem.SHARED)
     for target in request.profiles:
         state = execution.path("home") / target / ".agentihooks"
         state.mkdir(parents=True, mode=0o700)

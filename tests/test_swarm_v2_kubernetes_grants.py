@@ -38,6 +38,7 @@ RECORD = {
     "harness": "claude",
     "agent": ["claude"],
     "control_url": CONTROL,
+    "profile": "engineer",
 }
 LABELS = {
     "swarm.agentihooks.io/controller-owner": OWNER,
@@ -46,8 +47,8 @@ LABELS = {
 }
 
 
-def agent(execution_id=EXECUTION, generation=3) -> AgentRecord:
-    return AgentRecord("engineer-1", "eng", "t1", execution_id=execution_id, generation=generation)
+def agent(execution_id=EXECUTION, generation=3, profile="engineer") -> AgentRecord:
+    return AgentRecord("engineer-1", "eng", "t1", execution_id=execution_id, generation=generation, profile=profile)
 
 
 def pod(labels=None, **metadata) -> dict:
@@ -163,6 +164,14 @@ def test_the_config_map_holds_the_grant_and_the_launch_record_beside_it():
     assert sorted(created["data"]) == [GRANT_NAME, LAUNCH_RECORD]
     assert created["data"][GRANT_NAME] == GRANT
     assert json.loads(created["data"][LAUNCH_RECORD]) == RECORD
+
+
+def test_the_launch_record_names_the_seat_profile_of_the_handed_agent():
+    api = Api(pod())
+
+    assert grants(api).hand(agent(profile="cicd"), GRANT) == Hand(True, "handed", False)
+
+    assert api.created == [material({**RECORD, "profile": "cicd"})]
 
 
 def test_a_set_exporter_is_copied_into_the_launch_record():

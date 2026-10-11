@@ -9,12 +9,12 @@ from scripts.swarm_v2 import image_tag
 from scripts.swarm_v2.accounts import AccountCapacity
 from scripts.swarm_v2.auth_context import Registration
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
-from scripts.swarm_v2.kubernetes.client import KubeHttp, PodApi, PodClient
+from scripts.swarm_v2.kubernetes.client import ApiRefused, KubeHttp, PodApi, PodClient
 from scripts.swarm_v2.kubernetes.failures import AccountSlot, Recovery
 from scripts.swarm_v2.kubernetes.grants import PodGrants, Supervision
 from scripts.swarm_v2.kubernetes.runtime import KubernetesTransport
 from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, PodTemplate, load_policy
-from scripts.swarm_v2.kubernetes.watch import OWNER_LABEL, owner_for
+from scripts.swarm_v2.kubernetes.watch import OWNER_LABEL, CursorExpired, owner_for
 from scripts.swarm_v2.launch import DistributedLaunch, LaunchTerms
 from scripts.swarm_v2.registry import FleetRegistry
 from scripts.swarm_v2.runtime.base import SpawnRequest
@@ -170,14 +170,38 @@ class NoCheckpoints:
         return []
 
 
-@dataclass(frozen=True)
 class RecoveryPass:
-    recovery: Recovery
-    api: PodApi
-    selector: str
+    """Each pass lists first, then watches from the previous listing's version, so consecutive watches overlap and
+    leave no gap; when the watch fails, Pods missing since the last listing stand in for its deletions."""
+
+    def __init__(self, recovery: Recovery, api: PodApi, selector: str) -> None:
+        self.recovery, self.api, self.selector = recovery, api, selector
+        self.version, self.listed = "", {}
 
     def __call__(self) -> dict[str, str]:
-        return self.recovery.reconcile(self.api.list_pods(self.selector), self.api.ready_nodes())
+        pods, version = self.api.snapshot(self.selector)
+        gone = self._deleted()
+        self.version = version
+        live = {_uid(pod) for pod in pods}
+        for uid, pod in self.listed.items():
+            if uid not in live:
+                gone.setdefault(uid, pod)
+        self.listed = {_uid(pod): pod for pod in pods}
+        return self.recovery.reconcile(pods, self.api.ready_nodes(), list(gone.values()))
+
+    def _deleted(self) -> dict[str, dict]:
+        if not self.version:
+            return {}
+        try:
+            events = self.api.watch_pods(self.selector, self.version)
+        except (CursorExpired, ApiRefused, ConnectionError, TimeoutError) as error:
+            print(f"controller: the Pod watch failed with {type(error).__name__}; using the last listing", flush=True)
+            return {}
+        return {_uid(pod): pod for kind, pod in events if kind == "DELETED"}
+
+
+def _uid(pod: dict) -> str:
+    return pod["metadata"]["uid"]
 
 
 def recovery_pass(service: "ControlService", workers: Workers, api: PodApi) -> RecoveryPass:

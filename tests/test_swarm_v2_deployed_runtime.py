@@ -54,6 +54,9 @@ class Pods:
     def list_pods(self, selector):
         return []
 
+    def snapshot(self, selector):
+        return [], ""
+
     def ready_nodes(self):
         self.nodes_read += 1
         return []
@@ -417,7 +420,9 @@ def test_a_kubernetes_launch_puts_its_grant_in_the_pod_launch_material_and_recor
         task = {"id": "t1", "seat": SEAT, "controller_epoch": service.controller.held.epoch}
         request = SpawnRequest(store.config(SLUG), "eng", store.next_name(SLUG, "eng"), task)
         target = runtime.launch.keywords["target"](request)
-        agent = AgentRecord(request.name, "eng", "t1", seat=SEAT, runtime_backend=BACKEND, runtime_target=target)
+        agent = AgentRecord(
+            request.name, "eng", "t1", seat=SEAT, runtime_backend=BACKEND, runtime_target=target, profile="engineer"
+        )
         launch = launcher.spawn(request, agent, runtime.launch.keywords["terms"], "")
         claims = service.grants.verify(SLUG, pods.maps[0]["data"]["launch-grant"])
     finally:
@@ -461,6 +466,7 @@ def test_a_kubernetes_launch_puts_its_grant_in_the_pod_launch_material_and_recor
         "harness": "claude",
         "agent": ["claude"],
         "control_url": API_URL,
+        "profile": "engineer",
     }
 
 
