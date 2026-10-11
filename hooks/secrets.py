@@ -51,7 +51,7 @@ _STANDARD_PATTERNS: list[_Pattern] = [
     _Pattern(
         "private_key",
         re.compile(
-            r"-----BEGIN\s+((?:(?:RSA|EC|OPENSSH|PGP)\s+)?)PRIVATE KEY-----(?:.*?-----END\s+\1PRIVATE KEY-----|.*)",
+            r"-----BEGIN\s+((?:[A-Z0-9]+\s+)?)PRIVATE KEY-----(?:.*?-----END\s+\1PRIVATE KEY-----|.*)",
             re.DOTALL,
         ),
     ),
@@ -80,7 +80,8 @@ _STRICT_PATTERNS: list[_Pattern] = [
     _Pattern(
         "nested_secret",
         re.compile(
-            r"""(?:PASSWORD|PASSWD|SECRET|API_KEY|PRIVATE_KEY|ACCESS_TOKEN)["']\s*:\s*\{[^{}]*?["']\s*:\s*["'][^\s"'$<{]{8,}""",
+            r"""(?:PASSWORD|PASSWD|SECRET|API_KEY|PRIVATE_KEY|ACCESS_TOKEN)["']\s*:\s*\{[^{}]*"""
+            r"""["'](?:VALUE|PASSWORD|PASSWD|TOKEN|SECRET)["']\s*:\s*["'][^\s"'$<{]{8,}""",
             re.IGNORECASE,
         ),
     ),
