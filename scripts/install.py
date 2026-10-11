@@ -5659,14 +5659,14 @@ def cmd_balance(
         )
         print(json.dumps(metadata, indent=2, sort_keys=True))
         return 0 if all(account["return_code"] == 0 for account in metadata["accounts"]) else 1
-    results, source = collect_results(
+    results, _ = collect_results(
         credentials,
         include_fable=include_fable,
         refresh=refresh,
         timeout=timeout,
         claude_bin=shutil.which("claude") or "claude",
     )
-    print(balance_table(results, live, source, time.time(), include_fable))
+    print(balance_table(results, live, time.time(), include_fable))
     return 0 if any(is_routable(result) for result in results) else 1
 
 

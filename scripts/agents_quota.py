@@ -31,6 +31,8 @@ STALE = "STALE"
 EXPIRED_SOURCE = "token expired: run {login}"
 NEXT_MARK = "(next)"
 CURRENT_MARK = "(current)"
+NO_CURRENT = ""
+CACHED = "cached"
 FABLE_COLUMNS = ["FABLE LEFT", "FABLE RESET"]
 MISSING = "-"
 HARNESSES = ("claude", "codex")
@@ -185,7 +187,7 @@ def mark_next(rows: list[QuotaRow], account: str) -> list[QuotaRow]:
     return [replace(row, selected=True) if account and row.account == account else row for row in rows]
 
 
-def render(rows: list[QuotaRow], now: int, unlisted: int = 0, fable: bool = False, current: str = "") -> str:
+def render(rows: list[QuotaRow], now: int, unlisted: int = 0, fable: bool = False, current: str = NO_CURRENT) -> str:
     columns = [*COLUMNS, *(FABLE_COLUMNS if fable else [])]
     table, rank = [], 0
     for row in _ordered(rows):
@@ -215,7 +217,7 @@ def _reset(left: float | None, resets_at: int | None, now: int) -> str:
     return MISSING if left is None or resets_at is None or resets_at <= now else _duration(resets_at, now)
 
 
-def _cells(rank: str, row: QuotaRow, now: int, current: str = "") -> list[str]:
+def _cells(rank: str, row: QuotaRow, now: int, current: str) -> list[str]:
     cap = MISSING if row.cap is None else _cap_text(row.cap)
     mark = CURRENT_MARK if current and row.agent == "claude" and row.account == current else ""
     return [
@@ -335,7 +337,7 @@ def _codex(now: float) -> list[QuotaRow]:
 
 
 def _render_live(
-    rows: list[QuotaRow], sessions: dict[str, int], now: float, fable: bool = False, current: str = ""
+    rows: list[QuotaRow], sessions: dict[str, int], now: float, fable: bool = False, current: str = NO_CURRENT
 ) -> str:
     from hooks.context.account_sessions import codex_sessions_by_account
 
@@ -357,22 +359,21 @@ def current_table(
     seen.update({result.account: (now, result) for result in probed})
     observed = {account: at for account, (at, _) in seen.items()}
     results = [result for _, result in seen.values()]
-    return balance_table(results, sessions, "cached", now, fable, current, observed)
+    return balance_table(results, sessions, now, fable, current, observed)
 
 
 def balance_table(
     results: list,
     sessions: dict[str, int],
-    source: str,
     now: float,
     fable: bool = False,
-    current: str = "",
+    current: str = NO_CURRENT,
     observed: dict[str, float] | None = None,
 ) -> str:
     from scripts.routing.claude_api import ClaudeApiSource
 
     observed = {result.account: now for result in results} if observed is None else observed
-    claude = claude_rows(results, sessions, source, observed, now, fable)
+    claude = claude_rows(results, sessions, CACHED, observed, now, fable)
     claude = with_masters(claude + api_rows(ClaudeApiSource(sessions), "claude", now), _masters("claude"), sessions)
     return _render_live(claude + ([] if fable else _codex(now)), sessions, now, fable, current)
 

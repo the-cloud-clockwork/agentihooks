@@ -671,3 +671,76 @@ def test_an_hour_old_codex_reading_shows_its_state_and_cap_until_the_max_age(mon
     assert (row.state, row.cap) == ("NORMAL", 6)
     [old] = agents_quota.codex_rows([CodexAccount("default")], {"default": quota}, {}, now=1000 + 6 * 3600 + 1)
     assert (old.state, old.cap) == ("STALE", None)
+
+
+def test_claude_rows_carry_the_fable_window_and_a_stale_reading_drops_it():
+    fable = QuotaWindow(60.0, 8000)
+    result = ProbeResult("alpha", "allowed", "NORMAL", 70.0, QuotaWindow(20.0, 9000), QuotaWindow(30.0, 9000), fable)
+    [fresh] = agents_quota.claude_rows([result], {}, "probe", {"alpha": 1000.0}, 1000.0, True)
+    assert (fresh.fable_left, fresh.fable_resets_at) == (40.0, 8000)
+    [stale] = agents_quota.claude_rows([result], {}, "probe", {"alpha": 1000.0}, 1000.0 + 3 * 3600, True)
+    assert (stale.state, stale.fable_left, stale.fable_resets_at) == ("STALE", None, 8000)
+
+
+def test_the_fable_view_shows_the_fable_window_under_a_dash_rule_without_trailing_spaces():
+    row = agents_quota.QuotaRow(
+        "claude", "alpha", "NORMAL", 0, None, None, None, "probe", cap=6, fable_left=40.0, fable_resets_at=4600
+    )
+    table = agents_quota.render([row], now=1000, fable=True).splitlines()
+    reset = agents_quota._duration(4600, 1000).split()
+    assert table[2].split()[-len(reset) - 1 :] == ["40%", *reset]
+    assert set(table[1]) == {"-", " "}
+    assert not any(line.endswith(" ") for line in table)
+
+
+def test_a_zero_routing_left_sorts_after_a_small_positive_one():
+    empty = agents_quota.QuotaRow("codex", "empty", "NORMAL", 0, None, None, None, "log", routing_left=0.0)
+    some = agents_quota.QuotaRow("codex", "some", "NORMAL", 0, None, None, None, "log", routing_left=0.5)
+    assert [row.account for row in agents_quota._ordered([empty, some])] == ["some", "empty"]
+
+
+def test_a_reset_due_now_shows_a_dash():
+    assert agents_quota._reset(50.0, 1000, 1000) == "-"
+    assert agents_quota._reset(50.0, 1060, 1000) == agents_quota._duration(1060, 1000)
+
+
+def test_live_tables_count_only_unlisted_codex_sessions_and_none_in_the_fable_view(monkeypatch):
+    from hooks.context import account_sessions
+
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {"alpha": 2, "ghost": 1})
+    row = agents_quota.QuotaRow("codex", "alpha", "NORMAL", 0, None, None, None, "log")
+    assert agents_quota._render_live([row], {}, 1000).splitlines()[-1] == "+1 sessions on unlisted account names"
+    assert "unlisted" not in agents_quota._render_live([row], {}, 1000, fable=True)
+
+
+def test_current_in_the_fable_view_adds_the_fable_columns(monkeypatch):
+    monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {})
+    fresh = ProbeResult("beta", "allowed", "NORMAL", 60.0, QuotaWindow(20.0, 10**10), QuotaWindow(40.0, 10**10))
+    table = agents_quota.current_table([], [fresh], {"beta"}, {}, True, "beta").splitlines()
+    assert table[0].split() == [*HEADER, "FABLE", "LEFT", "FABLE", "RESET"]
+
+
+def test_balance_table_defaults_to_the_codex_rows_at_its_own_time_and_counts_master_sessions(monkeypatch):
+    from hooks.context import account_sessions
+    from scripts.routing.master_account import MasterAccount
+
+    seen = []
+    codex = agents_quota.QuotaRow("codex", "personal", "NORMAL", 0, 60.0, 70.0, None, "log", cap=6, routing_left=70.0)
+    master = MasterAccount("claude", "home", "", INTERACTIVE)
+    monkeypatch.setattr(agents_quota, "_codex", lambda now: seen.append(now) or [codex])
+    monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {"claude": master})
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
+    result = ProbeResult("alpha", "allowed", "NORMAL", 70.0, QuotaWindow(20.0, 30_000), QuotaWindow(30.0, 90_000))
+    cells = [line.split() for line in agents_quota.balance_table([result], {"home": 2}, 20_000.0).splitlines()[2:]]
+    assert seen == [20_000.0]
+    assert any(row[2] == "alpha" and "NORMAL" in row for row in cells)
+    assert any("home" in row and "2/-" in row for row in cells)
+    assert any(row[1:3] == ["codex", "personal"] for row in cells)
+
+
+def test_quota_json_is_indented_two_spaces(monkeypatch, capsys):
+    row = agents_quota.QuotaRow("codex", "alpha", "NORMAL", 0, None, 80.0, None, "log")
+    monkeypatch.setattr(agents_quota, "_claude", lambda refresh, timeout: [])
+    monkeypatch.setattr(agents_quota, "_codex", lambda now: [row])
+    assert agents_quota.main(["--json"]) == 0
+    assert capsys.readouterr().out.startswith('[\n  {\n    "agent": "codex",')
