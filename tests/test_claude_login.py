@@ -179,6 +179,13 @@ def test_a_key_that_cannot_reach_the_child_stops_forwarding_and_output_still_arr
     assert tried == [b"a"]
 
 
+def test_a_plain_end_of_file_from_the_child_side_ends_the_capture(deadline):
+    out_read, out_write = os.pipe()
+    terminal = claude_login.Terminal(_pipe(), out_write, False, 24)
+    assert claude_login._pump(_pipe(b"tail", close=True), terminal, False) == b"tail"
+    assert os.read(out_read, 64) == b"tail"
+
+
 def test_output_that_cannot_be_shown_is_still_captured(deadline):
     unwritable, _ = os.pipe()
     terminal = claude_login.Terminal(_pipe(), unwritable, False, 24)
