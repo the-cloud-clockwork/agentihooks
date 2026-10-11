@@ -1,3 +1,4 @@
+import json
 import os
 import threading
 from http.server import ThreadingHTTPServer
@@ -16,7 +17,7 @@ from scripts.swarm_ledger.api.client import ResourceClient
 from scripts.swarm_ledger.repository import repository
 from scripts.swarm_v2.api.tasks import RevisionConflict, spec_revision
 from scripts.swarm_v2.auth_context import GrantRefused
-from scripts.swarm_v2.hosted_ledger import HostedLedger
+from scripts.swarm_v2.hosted_ledger import RECEIPTS_KEY, HostedLedger
 from tests.test_swarm_v2_control_service import (
     LEDGER_TASK,
     SLUG,
@@ -71,12 +72,15 @@ def hosted(store, ledger_dir):
 OVERVIEW = "Tasks the hosted ledger server holds for the controller"
 
 
-def _hold(holder, tmp_path, overview=OVERVIEW):
+LEDGER_PHASE = {"title": "Ledger", "description": "Tasks read through the hosted server"}
+
+
+def _hold(holder, tmp_path, overview=OVERVIEW, phases=(LEDGER_PHASE,)):
     content = {
         "title": "Hosted ledger fixture",
         "overview": overview,
         "sources": [],
-        "phases": [{"title": "Ledger", "description": "Tasks read through the hosted server"}],
+        "phases": list(phases),
         "tasks": [],
     }
     document = new_ledger.build_doc(content)
@@ -382,7 +386,7 @@ def test_a_local_controller_still_mounts_its_own_ledger_folder(store, tmp_path):
         service.stop()
 
 
-def test_a_replayed_progress_after_newer_progress_is_answered_from_the_controller_receipts(deployed):
+def test_a_replayed_progress_after_newer_progress_is_answered_from_the_controller_receipts(deployed, store):
     url = f"{deployed.base}/v2/tasks/t1/comments"
     older = {"operation_id": "op-a", "task_generation": 1, "text": PROGRESS}
     newer = {"operation_id": "op-b", "task_generation": 1, "text": "Opened the pull request for review"}
@@ -395,6 +399,8 @@ def test_a_replayed_progress_after_newer_progress_is_answered_from_the_controlle
     assert again == first
     assert first[0] == 200
     assert [entry["text"] for entry in _held_task()["comments"]] == ["Opened the pull request for review"]
+    stored = store.redis.get(store.key(SLUG, RECEIPTS_KEY, "tasks/t1"))
+    assert set(json.loads(stored)["operations"]) == {"op-a", "op-b"}
 
 
 def test_a_deployed_controller_without_its_credential_is_refused_at_start(hosted, store, tmp_path):
@@ -462,3 +468,37 @@ def test_an_unreachable_hosted_server_fails_the_intent_read_as_a_swarm_error(con
     assert str(raised.value) == (
         f"the hosted ledger is unavailable for {SLUG}: <urlopen error [Errno 111] Connection refused>"
     )
+
+
+def test_an_operation_id_the_hosted_server_already_holds_for_other_content_is_an_operation_conflict(hosted, tmp_path):
+    _hold("engineer@323133-0300", tmp_path)
+    hosted_ledger = _hosted_ledger(hosted)
+    hosted_ledger.apply_ops(SLUG, ops=[_update({"state": "pr"})], gate=Passing())
+
+    with pytest.raises(GrantRefused) as raised:
+        hosted_ledger.apply_ops(SLUG, ops=[_update({"state": "blocked"})], gate=Passing())
+
+    assert (raised.value.error_class, str(raised.value)) == (
+        "operation_conflict",
+        "the operation ID was already used for different content",
+    )
+    assert _held_task()["state"] == "pr"
+
+
+def test_the_hosted_read_returns_every_phase_past_the_first_page(controller_reads, tmp_path):
+    phases = [{"title": f"Phase {n}", "description": "One of many phases"} for n in range(1, 53)]
+    _hold("engineer@323133-0300", tmp_path, phases=phases)
+
+    read = ledger_read.parts(SLUG, "phases")["phases"]
+
+    assert [phase["title"] for phase in read] == [phase["title"] for phase in phases]
+
+
+def test_a_local_host_reads_intent_from_its_ledger_folder(hosted, tmp_path):
+    _hold("engineer@323133-0300", tmp_path)
+    with patch.dict(os.environ):
+        os.environ.pop("AGENTIHOOKS_DEPLOYMENT")
+        read = ledger_read.parts(SLUG, "overview", "phases")
+        absent = ledger_read.parts("absent-ledger", "overview")
+
+    assert (read["overview"], [phase["title"] for phase in read["phases"]], absent) == (OVERVIEW, ["Ledger"], {})
