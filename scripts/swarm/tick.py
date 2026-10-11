@@ -45,6 +45,7 @@ from scripts.swarm import (
     master_retire,
     master_start,
     master_wake,
+    outage,
     phase_state,
     profile_first,
     reaper,
@@ -531,13 +532,14 @@ def agent_status(agent):
 def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     observed = runtime.observe(agent)
     store.redis.set(store.key(slug, "pane-state", agent.name), observed.state, ex=idle_state.BEAT_TTL_S)
+    outage.mark_pane(store, slug, agent.name, observed.provider_error)
     if observed.state == idle_state.WAITING:
         title = observed.prompt_title or "Waiting on input"
         ticks = agent.input_ticks + 1 if agent.input_prompt == title else 1
         store.put_agent(slug, replace(agent, input_prompt=title, input_ticks=ticks, idle_ticks=0))
         return []
     agent = replace(agent, input_prompt="", input_ticks=0)
-    if agent.lane == MASTER:
+    if agent.lane == MASTER or outage.held(store, slug, agent.name):
         store.put_agent(slug, agent)
         return []
     state = idle_state.verdict(

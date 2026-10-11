@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from scripts.inbox import exits
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
-from scripts.swarm import master_retire, reaper
+from scripts.swarm import master_retire, outage, reaper
 from scripts.swarm.store import MASTER, RedisStore
 
 if TYPE_CHECKING:
@@ -20,7 +20,7 @@ def retire_idle_master(
     slug: str, store: RedisStore, ledger: Ledger, runtime: Runtime, rows: dict, now_ms: int
 ) -> list[str]:
     agents = store.agents(slug)
-    if not agents or any(a.lane != MASTER for a in agents):
+    if not agents or any(a.lane != MASTER for a in agents) or outage.open_records(slug):
         return []
     inbox = InboxStore(store.redis)
     events = ledger.events(slug)
