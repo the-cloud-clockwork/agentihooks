@@ -312,8 +312,8 @@ def test_codex_post_tool_passes_the_tool_name_and_defaults_missing_fields(codex,
     monkeypatch.setattr(qp, "evaluate", lambda session: handoff)
     hook_manager.on_post_tool_use({"tool_name": "Bash", "tool_input": {}})
     flush("PostToolUse")
-    out = capsys.readouterr().out
-    assert '--dir ""' in out and 'handoff/.md"' in out
+    context = json.loads(capsys.readouterr().out)["hookSpecificOutput"]["additionalContext"]
+    assert '--dir ""' in context and 'handoff/.md"' in context
 
 
 def test_the_quota_directive_is_neither_compressed_nor_logged(spent, monkeypatch, capsys):
