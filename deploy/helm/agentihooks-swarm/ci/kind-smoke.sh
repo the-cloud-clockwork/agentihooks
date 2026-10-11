@@ -372,7 +372,7 @@ api.create_pod({
             "image": env["IMAGE"],
             "imagePullPolicy": "Never",
             "command": ["python", "-c", seed],
-            "volumeMounts": [{"name": "templates", "mountPath": str(TEMPLATES)}],
+            "volumeMounts": [{"name": "templates", "mountPath": str(TEMPLATES.parent)}],
         }],
         "containers": [{
             "name": "worker",
@@ -382,7 +382,7 @@ api.create_pod({
             "volumeMounts": [
                 {"name": "launch", "mountPath": LAUNCH_DIR, "readOnly": True},
                 {"name": "home", "mountPath": "/home/worker"},
-                {"name": "templates", "mountPath": str(TEMPLATES), "readOnly": True},
+                {"name": "templates", "mountPath": str(TEMPLATES.parent), "readOnly": True},
             ],
         }],
         "volumes": [launch_volume(agent.execution_id), {"name": "home", "emptyDir": {}}, {"name": "templates", "emptyDir": {}}],
@@ -427,6 +427,7 @@ supervised="$(kubectl logs "$worker_pod" || true)"
 exit_code="$(kubectl get pod "$worker_pod" -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}')"
 if [[ $phase != Succeeded && $phase != Failed ]] || [[ $exit_code == 64 ]] || grep -q '^ERROR .*refused' <<< "$supervised"; then
   kubectl describe pod "$worker_pod"
+  kubectl logs "$worker_pod" -c templates || true
   printf 'the worker Pod start step did not hand a prepared attempt to its supervisor (phase %s, exit %s): %s\n' "$phase" "$exit_code" "$supervised" >&2
   exit 1
 fi
