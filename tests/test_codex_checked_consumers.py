@@ -60,9 +60,13 @@ def test_quota_rows_exclude_signed_out_default_and_keep_signed_in_default(monkey
     assert "default" in rows()
 
 
-def test_agent_choice_quota_excludes_signed_out_default_and_keeps_signed_in_default(default_login):
+def test_agent_choice_quota_excludes_signed_out_default_and_keeps_signed_in_default(monkeypatch, default_login):
     from scripts import agent_choice
+    from scripts.swarm import capacity
 
+    monkeypatch.setattr(capacity, "_claude", lambda environ, now: [])
     assert agent_choice.account_has_quota("codex", "default", dict(os.environ)) is None
+    assert agent_choice.choose("", dict(os.environ)) == ("", agent_choice.ALL_FULL)
     default_login["signed_in"] = True
     assert agent_choice.account_has_quota("codex", "default", dict(os.environ)) is True
+    assert agent_choice.choose("", dict(os.environ)) == ("codex", "rotation")
