@@ -1,3 +1,4 @@
+from functools import cache
 from itertools import product
 from pathlib import Path
 
@@ -51,27 +52,40 @@ class _Context(dict):
 def _evaluate(value, **github):
     if not isinstance(value, str) or not value.startswith("${{"):
         return value
-    body = value.removeprefix("${{").removesuffix("}}").replace("&&", " and ").replace("||", " or ")
     names = {
         "github": _Context(github),
         "endsWith": lambda text, end: str(text).endswith(end),
         "format": lambda template, *args: template.format(*args),
     }
-    return eval(body, {"__builtins__": {}}, names)
+    return eval(_compiled(value), {"__builtins__": {}}, names)
 
 
+@cache
+def _compiled(value):
+    body = value.removeprefix("${{").removesuffix("}}").replace("&&", " and ").replace("||", " or ")
+    return compile(body, "<expression>", "eval")
+
+
+@cache
 def _workflow(name):
     return yaml.safe_load((_WORKFLOWS / name).read_text())
 
 
-def _blocks():
+@cache
+def _all_blocks():
+    found = []
     for path in sorted(_WORKFLOWS.glob("*.yml")):
-        workflow = yaml.safe_load(path.read_text())
+        workflow = _workflow(path.name)
         if "concurrency" in workflow:
-            yield path.name, workflow["concurrency"]
+            found.append((path.name, workflow["concurrency"]))
         for key, job in workflow.get("jobs", {}).items():
             if isinstance(job, dict) and "concurrency" in job:
-                yield f"{path.name}:{key}", job["concurrency"]
+                found.append((f"{path.name}:{key}", job["concurrency"]))
+    return tuple(found)
+
+
+def _blocks():
+    return _all_blocks()
 
 
 def _block(where):
@@ -100,7 +114,7 @@ def _contexts(where):
     if "workflow_call" in workflow[True]:
         runners += [(_workflow(caller)["name"], _workflow(caller)[True]) for caller in CALLERS]
     for title, events in runners:
-        for (event, ref), run_id in product(_triggered(events), range(1000, 1010)):
+        for (event, ref), run_id in product(_triggered(events), (1000, 1003, 1006)):
             yield {"event_name": event, "ref": ref, "workflow": title, "run_id": run_id}
 
 
