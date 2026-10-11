@@ -2,6 +2,7 @@ import re
 from collections.abc import Mapping
 
 TOKEN_PREFIX = "AH_CC_TOKEN_"
+CODEX_TOKEN_PREFIX = "AH_CX_TOKEN_"
 OAUTH_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 SYMBOL = re.compile(r"[^a-z0-9]")
 
