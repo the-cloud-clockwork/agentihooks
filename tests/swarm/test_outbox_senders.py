@@ -1,7 +1,6 @@
 from argparse import Namespace
 
 import pytest
-import redis
 
 from scripts.inbox import outbox
 from scripts.inbox.seen import write_ref
@@ -33,6 +32,8 @@ def swarm(monkeypatch):
 @pytest.fixture
 def lost(monkeypatch):
     """The next n inbox writes lose their Redis connection before they land."""
+    import redis
+
     original = InboxStore.send
     left = []
 
