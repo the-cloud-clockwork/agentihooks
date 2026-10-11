@@ -1,0 +1,102 @@
+{
+  "package": "SV2-HDR-02",
+  "package_complete": false,
+  "dependency": "SV2-HDR-01",
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2506",
+  "tested_commit": "244b33e365a3071269bc257a23490b4ab2eab81a",
+  "status": "fixture-qualified and live-proven on a workstation; not yet proven on Anton",
+  "evidence_class": "mocked cases run the endpoint renderers, the client home and the attach path against a recording command runner and an injected resolver; the live proof ran the worker image sshd template, start script and session entry with the pinned herdr 0.9.1 behind a private localhost sshd on the operator workstation",
+  "interfaces": [
+    "scripts.swarm_v2.herdr.endpoints.grant_scope(registration) builds a terminal Scope (actor grant/<grant id>, swarm, execution id, generation) only from a verified launch grant registration; operator_scope(principal, swarm, execution) builds one only for a principal with the operator role and refuses any other role as unauthorized. Endpoint names, targets and incarnations come from that scope and never from a caller supplied string",
+    "scripts.swarm_v2.herdr.endpoints.Endpoint(scope, namespace) names the per execution terminal: Service name <worker pod name>-terminal, host <name>.<namespace>.svc.cluster.local, target ssh://<host>, incarnation <execution id>/<generation>, selector labels controller owner, execution id and generation",
+    "scripts.swarm_v2.herdr.endpoints.objects(endpoint, pod, identity, user_ca, clients, enabled=...) renders nothing when terminal exposure is disabled; enabled, it requires the live Pod of that execution (name, namespace, uid, identity labels, not deleting) and renders an immutable host key Secret (per execution host key, user CA public key, the execution id as the only principal), a ClusterIP Service on port 2222 selecting the immutable execution identity, and an ingress NetworkPolicy admitting only the labelled client Pods of one namespace, all owned by the Pod; public_exposure(endpoint, manifest) refuses any NodePort, LoadBalancer, external IP or name, other port, foreign selector, ipBlock or unlabelled peer",
+    "scripts.swarm_v2.herdr.endpoints.with_terminal(pod, endpoint, enabled=...) returns the Pod unchanged when disabled; enabled, it mounts the Secret optionally and read only at /var/run/swarm/terminal and names container port 2222",
+    "scripts.swarm_v2.herdr.endpoints.TerminalAuthority(key).issue(scope, client_public) signs a five minute OpenSSH user certificate whose only principal is the execution id and whose key id is the scope actor",
+    "scripts.swarm_v2.herdr.attach.route(endpoint) resolves the cluster DNS name and refuses no_route when it does not resolve and public_route when any address is outside the private ranges",
+    "scripts.swarm_v2.herdr.attach.Terminal.attach(scope, host_public) refuses a generation older than the one this client home recorded (stale_generation), checks the route, records the generation, writes the certificate, the pinned known hosts entry under the endpoint name and a per endpoint ssh block into a self contained client home with its own ssh config and PATH ssh wrapper, connects once, saves the herdr machine only if its label is absent, then returns the SV2-HDR-01 verdict for the scope's endpoint name and incarnation; terminal_endpoint_auth_failures() counts host_key_changed, host_key_unverified, unauthorized and client_key refusals and terminal_endpoint_refusals() counts every refusal",
+    "python -m scripts.swarm_v2.herdr.session is the sshd forced command: it reads the execution id from the mounted principal, loads that attempt's launch record and enters the supervised herdr environment, running the requested command or a login shell",
+    "docker/swarm-node/ssh: an unprivileged sshd template on port 2222 with certificate only login for the worker user, no authorized keys file, no root login, no passwords, no agent, TCP, stream local or X11 forwarding, StrictModes on, and a start script that copies the mounted material with strict modes and starts sshd in the background with a bounded wait; the worker image installs openssh-server and removes its baked host keys",
+    "python -m scripts.swarm_v2.herdr.capabilities TARGET INCARNATION is narrowed to operator use: any agent identity (AGENTIHOOKS_AGENT_NAME or AGENTIHOOKS_SWARM set) is refused with exit 2 before any probe; agents qualify through Terminal.attach and their scope"
+  ],
+  "supported_versions": {
+    "herdr": "0.9.1 linux x86_64, the SV2-HDR-01 pinned build, client and server the same build",
+    "openssh_server": "1:9.2p1-2+deb12u7, pinned in docker/swarm-node/versions.lock",
+    "kubernetes_objects": "v1 Secret and Service, networking.k8s.io/v1 NetworkPolicy, validated by kubectl create with server dry run and strict validation in the helm kind smoke"
+  },
+  "authority": "Actor and scope come from a verified launch grant registration (the controller acting for that launch) or an operator role principal; a display label, endpoint name or caller supplied target never grants access. The certificate binds the client to one execution id, which is the only principal the worker sshd accepts.",
+  "access_surface": [
+    "A holder of a valid certificate for the execution gets a shell in that worker through the forced session command; herdr machine forwarding needs that shell for platform detection and its bridge.",
+    "The grant actor is the controller acting for that launch; the operator role opens the terminal of any execution it names.",
+    "The client receives only the host public key; the host private key lives only in the per execution Secret mounted into that Pod."
+  ],
+  "authoritative_objects": "None owned beyond the per execution Secret, Service and NetworkPolicy, which the Pod owns and garbage collection removes with it. Task execution, the launch record and the ledger are never touched. The client home and the saved herdr machine are client side caches rebuilt by attach.",
+  "states": {
+    "observed": "Live proof run of tests/integration/herdr_terminal/terminal_proof.py on the operator workstation: all 22 rows held (sanitized rows in evidence/SV2-HDR-02/live-proof.jsonl). A planted fault setting AuthorizedPrincipalsFile none in the worker sshd template refused the authorized attach and turned the proof red. In a kind cluster: helm-kind in Tests run 38101928886 at e2b773462 (deploy/helm/agentihooks-swarm/ci/terminal-route-proof.sh): the rendered terminal Secret, Service and NetworkPolicy, owned by a live worker Pod with the execution identity labels listening on 2222; from a client Pod with the controller labels in swarm-control the name swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local resolved to the private ClusterIP 10.96.2.190 and the TCP connection succeeded; the same labels in swarm-other and an unlabelled Pod in swarm-control were refused three times each; an execution with no Service was refused as no_route.",
+    "accepted": "Cases A, B and C passed twice each with identical records in Tests run 38101226814.",
+    "committed": "Case records, manifest and live proof committed on the task branch.",
+    "externally_verified": "Routing, cluster DNS and the namespace principal were verified in a kind cluster (kindnet NetworkPolicy), not on Anton: the controller does not yet render these objects for a real worker Pod, so no Anton client has attached through Anton cluster DNS."
+  },
+  "validation": {
+    "red": "Tests run 38098789654 on the tests only commit f4bb68489 failed collecting the three new test modules; Tests run 38099481269 on dev plus the capabilities test failed exactly the two operator only cases",
+    "tests": "Tests run 38101226814 at 244b33e365a3071269bc257a23490b4ab2eab81a",
+    "mutation": "Mutation preflight 38101055930 on 244b33e36: attach 258 killed, endpoints 520, session 94, capabilities 8, no survivors; mutation shards green in Tests 38101226814; the earlier preflight 38100809382 found 8 survivors, killed by commit 244b33e36",
+    "kind": "helm kind smoke creates the golden Secret, Service and NetworkPolicy by server dry run with strict validation (Tests 38101226814) and proves the route, DNS and namespace principal against live objects (Tests 38101928886)",
+    "lint": "ruff check, ruff format and size limits through python -m scripts.ci_prepush",
+    "review": "Standards and Spec readers, three rounds; open items are recorded limitations below"
+  },
+  "measurements": {
+    "terminal_endpoint_auth_failures": {
+      "a": {},
+      "b": {
+        "certificate_for_another_execution": {
+          "unauthorized": 1
+        },
+        "changed_host_key": {
+          "host_key_changed": 1
+        },
+        "missing_cluster_dns_route": {},
+        "public_route": {},
+        "unauthorized_client": {
+          "unauthorized": 1
+        }
+      },
+      "c": {
+        "host_key_changed": 1
+      }
+    }
+  },
+  "cases": {
+    "a": "evidence/SV2-HDR-02/a-result.json",
+    "b": "evidence/SV2-HDR-02/b-result.json",
+    "c": "evidence/SV2-HDR-02/c-result.json",
+    "manifest": "evidence/SV2-HDR-02/manifest.json",
+    "live": "evidence/SV2-HDR-02/live-proof.jsonl"
+  },
+  "rollback_rehearsal": {
+    "action": "Disable worker terminal exposure: objects(..., enabled=False) renders no Secret, Service or NetworkPolicy and with_terminal(..., enabled=False) returns the Pod unchanged, so task execution and ledger control keep running. The Secret mount is optional and the entrypoint starts the terminal in the background, where the start script exits 0 with 'terminal endpoint off' when no material arrives within its bounded wait, so an enabled Pod whose Secret is gone still runs its agent.",
+    "test": "tests/test_swarm_v2_herdr_endpoints.py::test_disabled_exposure_renders_nothing_and_leaves_the_pod_alone and the golden Pod fixture herdr-terminal-pod.json carrying optional: true on the terminal Secret volume",
+    "proof": "Rehearsed at render level in CI (Tests run 38101226814): the disabled render is empty and the disabled Pod equals its input. No cluster rollback was executed: no terminal endpoint is deployed on Anton yet."
+  },
+  "remaining_limitations": [
+    "The controller does not yet call the renderers or Terminal.attach for real launches; wiring them is proposed as a ledger follow up, so the Spec items for the Anton client route and namespace principal on a live cluster stay open until then.",
+    "The raw target qualify command refuses agent identities by environment but requires no positive operator credential.",
+    "The stale generation guard covers one client home; two client homes can each pin a different generation.",
+    "Refused certificates (wrong principal, expired) fold into the unauthorized reason.",
+    "An existing client ssh config is edited in place to add the include line, not atomically.",
+    "The sshd and herdr live proof ran on the operator workstation over localhost SSH with an injected resolver; the kind proof covers routing, DNS and the namespace principal at the network layer with a plain TCP listener, not sshd, because the kind smoke builds the swarm image, not the worker image.",
+    "The kind client probe mirrors attach.route with the standard library because the swarm image carries no cryptography; attach.route itself is covered by unit tests and case B."
+  ],
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2515",
+  "obligations": {
+    "input_preparation": "tests/fixtures/swarm_v2/herdr-terminal.json holds the launch grant registration, the live Pod, the private service route, an unauthorized client, a changed host key and a missing cluster DNS route; herdr-terminal-objects.json and herdr-terminal-pod.json are the golden rendered objects",
+    "output_contract": "Routing and DNS from a client location and the namespace principal: helm-kind in Tests run 38101928886 at e2b773462 (deploy/helm/agentihooks-swarm/ci/terminal-route-proof.sh): the rendered terminal Secret, Service and NetworkPolicy, owned by a live worker Pod with the execution identity labels listening on 2222; from a client Pod with the controller labels in swarm-control the name swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local resolved to the private ClusterIP 10.96.2.190 and the TCP connection succeeded; the same labels in swarm-other and an unlabelled Pod in swarm-control were refused three times each; an execution with no Service was refused as no_route. Certificate binding: case B and live row b_certificate_for_another_execution refuse a certificate for another execution; live rows a_attach_qualified, a_work_survives_client_exit and a_second_independent_client attach the intended worker",
+    "rejection_contract": "Case B: ClusterIP only, no NodePort or LoadBalancer, no host root login, no authorized keys file, and a per execution host key in its own Secret instead of an image key; the worker image removes baked host keys",
+    "recovery_contract": "Case C and live rows c_changed_host_key_refused, c_new_generation_verified, c_stale_generation_cannot_overwrite_the_newer_pin, c_replacement_verified and c_old_identity_not_accepted: a replacement Pod gets a new verified endpoint and an old host identity is never accepted",
+    "mutation_scope": "Every operation is bound to one incarnation, execution id and generation, through the SV2-HDR-01 qualifier; a client exit leaves work running (a_work_survives_client_exit)",
+    "compatibility": "With exposure disabled, the Pod spec and the local runtime are unchanged from the preceding accepted behaviour. The raw target qualify command keeps its operator behaviour and refuses agents.",
+    "authority": "See authority and access_surface",
+    "state": "See states"
+  },
+  "rollout_safety": "Exposure is off unless enabled per render, so only the new terminal path is affected; the local runtime and the last qualified local execution behaviour are unchanged."
+}

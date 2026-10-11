@@ -217,7 +217,20 @@ INCARNATION` qualifies a saved machine before any remote terminal is promised
 (exit 0 compatible, 1 when the client and server pair is incompatible, 2
 unreachable or missing arguments), and
 `tests/integration/herdr_remote/run_remote_proof.sh`
-proves it against the pinned binary behind a private sshd. Qualification reports
+proves it against the pinned binary behind a private sshd. That raw target
+command is operator only; agents qualify a worker through its terminal scope.
+`docker/swarm-node/ssh` is the worker terminal endpoint (SV2-HDR-02): when the Pod
+mounts its terminal Secret at `/var/run/swarm/terminal`, the entrypoint starts an
+unprivileged sshd on port 2222 that loads that execution's host key, trusts only
+the mounted user CA and admits only certificates naming the execution, with every
+forwarding off; its forced command, `scripts.swarm_v2.herdr.session`, enters the
+supervised herdr environment of the attempt. The start script waits in the
+background up to `SWARM_TERMINAL_WAIT_SECONDS` (180) for the Secret; without it the
+endpoint stays off for that attempt and the agent still runs. The image keeps no host key of its own.
+`scripts.swarm_v2.herdr.endpoints` renders the Secret, a ClusterIP Service and a
+NetworkPolicy per execution, and `scripts.swarm_v2.herdr.attach` connects the
+client; `tests/integration/herdr_terminal/terminal_proof.py` proves the pair
+against the pinned herdr on localhost. Qualification reports
 `worker_image_qualified_targets`. Any refused target, or a manifest naming another
 commit, leaves the image unpromotable and nothing is pushed. The same job builds
 an incompatible herdr fixture and requires its refusal, and qualifies the
