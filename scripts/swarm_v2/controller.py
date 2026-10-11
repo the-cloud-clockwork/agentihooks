@@ -81,7 +81,13 @@ class Controller:
         return True
 
     def renew(self) -> bool:
-        self.ready = False
+        try:
+            return self._renew()
+        except BaseException:
+            self.ready = False
+            raise
+
+    def _renew(self) -> bool:
         self._authorize()
         if self.held is None:
             return False
@@ -89,14 +95,17 @@ class Controller:
             self.held = lease.renew(self.store, self.slug, self.held)
         except SwarmError:
             self.held = None
+            self.ready = False
             return False
-        if self.reconciled_epoch == self.held.epoch:
-            self._authority()
-            self.accounts.reconcile()
-            if self.terminals is not None:
-                self.terminals.change(self._attempts())
-            self.ready = True
-        return self.ready
+        if self.reconciled_epoch != self.held.epoch:
+            self.ready = False
+            return False
+        self._authority()
+        self.accounts.reconcile()
+        if self.terminals is not None:
+            self.terminals.change(self._attempts())
+        self.ready = True
+        return True
 
     def _authorize(self) -> None:
         if self.authorize() is not True:

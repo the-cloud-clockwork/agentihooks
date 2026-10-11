@@ -14,7 +14,9 @@ from scripts.swarm_v2.herdr.target import DELIVERIES, Router
 from scripts.swarm_v2.herdr.viewer import Viewer
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 from scripts.swarm_v2.kubernetes.approved import INDEX, AccountRoute, FleetAccounts, SecretKeys
+from scripts.swarm_v2.kubernetes.cleanup import Cleanup
 from scripts.swarm_v2.kubernetes.client import ApiRefused, KubeHttp, PodApi, PodClient
+from scripts.swarm_v2.kubernetes.completion import Completion
 from scripts.swarm_v2.kubernetes.failures import AccountSlot, Recovery
 from scripts.swarm_v2.kubernetes.grants import PodGrants, Supervision
 from scripts.swarm_v2.kubernetes.pool import WorkerPool
@@ -234,6 +236,16 @@ class GrantRelease:
         self.grants.revoke(self.slug, execution_id)
 
 
+class AttachRelease:
+    """Herdr upkeep attaches only to attempts with a recorded host key, so forgetting the key releases the attach."""
+
+    def __init__(self, keys: HostKeys, slug: str) -> None:
+        self.keys, self.slug = keys, slug
+
+    def release(self, execution_id: str) -> None:
+        self.keys.forget(self.slug, execution_id)
+
+
 class NoCheckpoints:
     """No checkpoint store is deployed yet, so every failure waits for an explicit fresh or resume decision."""
 
@@ -250,6 +262,7 @@ class RecoveryPass:
         self.version, self.listed = "", {}
         self.replacements: Replacements | None = None
         self.choose: Callable[[], list[str]] | None = None
+        self.completion: Completion | None = None
 
     def __call__(self) -> dict[str, str]:
         pods, version = self.api.snapshot(self.selector)
@@ -266,6 +279,8 @@ class RecoveryPass:
                 print(line, flush=True)
         if self.replacements is not None:
             self.replacements()
+        if self.completion is not None:
+            self.completion(pods)
         return seen
 
     def _deleted(self) -> dict[str, dict]:
@@ -300,6 +315,9 @@ def recovery_pass(
     releases = {"grant": GrantRelease(grants, slug), "account": AccountSlot(controller.store, slug, capacity)}
     recovery = Recovery(controller.store, slug, controller, NoCheckpoints(), releases, workers.image_tag)
     recovering = RecoveryPass(recovery, api, f"{OWNER_LABEL}={owner_for(slug)}")
+    attach = AttachRelease(HostKeys(controller.store), slug)
+    cleanup = Cleanup(controller.store, slug, api, controller.require, attach, releases["grant"])
+    recovering.completion = Completion(controller.store, slug, cleanup)
     if ledger is not None:
         recovering.replacements = Replacements(recovery, service.runtime.relaunch, ledger)
     if environ is not None:
