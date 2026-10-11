@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from scripts import claude_quota_balancer as balancer
+from scripts import claude_usage
 from scripts.routing import place
 from scripts.routing.slots import API, API_UNBOUNDED, INTERACTIVE, SUBSCRIPTION
 
@@ -119,6 +120,10 @@ def test_probe_passes_only_selected_oauth_token(monkeypatch):
         observed["env"] = kwargs["env"]
         return subprocess.CompletedProcess(command, 0, _stream(0.20, 0.30), "")
 
+    def unreachable(*args, **kwargs):
+        raise claude_usage.Unreachable
+
+    monkeypatch.setattr(claude_usage, "probe", unreachable)
     monkeypatch.setattr(balancer.subprocess, "run", run)
     credential = balancer.Credential("AH_CC_TOKEN_ALPHA", "selected-secret")
     result = balancer.probe_credential(
