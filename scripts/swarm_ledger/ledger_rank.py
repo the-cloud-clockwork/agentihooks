@@ -10,6 +10,7 @@ ALIASES = {"next": "urgent"}
 DEFAULT = "normal"
 OPERATOR = "operator"
 OPS = ("task_rank",)
+GUARDS = ("if_unranked", "if_owned")
 ITEM_RE = re.compile(r"^tasks/[^/]+$")
 
 
@@ -27,9 +28,12 @@ def order(task: dict) -> int:
 
 def check(op):
     by = op.get("by", OPERATOR)
-    shape = set(op) - {"by", "if_unranked"} == {"op", "id", "item", "rank"} and op.get("if_unranked", True) is True
+    guards = set(op) & set(GUARDS)
+    shape = set(op) - {"by", *guards} == {"op", "id", "item", "rank"} and all(op[guard] is True for guard in guards)
     if not shape or not ITEM_RE.match(str(op["item"])) or not _named(by):
-        raise ValueError("task_rank takes an id, an item tasks/<id>, a rank and an optional author by and if_unranked")
+        raise ValueError(
+            "task_rank takes an id, an item tasks/<id>, a rank and an optional author by, if_unranked and if_owned"
+        )
     canonical(op["rank"])
 
 
@@ -51,6 +55,10 @@ def apply(doc, op, ctx):
     rank = canonical(op["rank"])
     if op.get("if_unranked") and "rank" in task:
         ctx.refused.append(f"task {task_id} already has rank {task['rank']}")
+        return False
+    owner = ctx.stamps.get(f"{op['item']}/rank", {}).get("by") if op.get("if_owned") and "rank" in task else by
+    if owner != by:
+        ctx.refused.append(f"task {task_id} has rank {task['rank']} set by {owner or 'someone else'}")
         return False
     if task.get("rank") != rank:
         task["rank"] = rank
