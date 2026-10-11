@@ -4,7 +4,7 @@
   "dependency": "SV2-HDR-03",
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2536",
-  "pull_request": "pending",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2545",
   "tested_commit": "617b95cfb335795a9e22374228678268ca769910",
   "status": "fixture-qualified: remote pane operations route only through a server qualified target and the local runtime refuses remote agents; no controller or operator UI calls the router yet, so nothing runs on Anton",
   "evidence_class": "mocked: a recording stand in for the Anton herdr client serves Local and two saved worker machines that share pane w1:p1 and the agent label; no herdr process, SSH connection or cluster runs in these cases",
