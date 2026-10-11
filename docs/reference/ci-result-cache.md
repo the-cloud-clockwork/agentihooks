@@ -8,7 +8,7 @@ nav_order: 5
 
 One CI algorithm for every repo and workflow: a check whose real inputs did not change reuses its last green result, and a check that fails is retried in place a bounded number of times inside the same job. No run is ever restarted from zero because one test flaked.
 
-Status: design. Issue [#2365](https://github.com/the-cloud-clockwork/agentihooks/issues/2365). Slices are listed in [Slices](#slices); each one is a separate pull request.
+Status: slice 1 delivered ([#2516](https://github.com/the-cloud-clockwork/agentihooks/issues/2516), see [Slice 1 as delivered](#slice-1-as-delivered)); slices 2 to 7 are design. Issue [#2365](https://github.com/the-cloud-clockwork/agentihooks/issues/2365). Slices are listed in [Slices](#slices); each one is a separate pull request.
 
 ## Before numbers
 
@@ -134,3 +134,14 @@ The ledger lines from run 38100556344:
 ```
 
 The plant fails the test's first call before its body runs, so it proves the retry path in CI on the canaries' real fixtures (Chromium, the scratch ledger server). The canaries' real failures are timing races inside one attempt; that a second attempt clears them is a hypothesis until slice 1 runs in the queue, where the flake ledger records each absorbed failure. The proof branch's lint and test count jobs were red because the branch sat behind the dev floor they grade against, which retry does not touch.
+
+## Slice 1 as delivered
+
+The unit job's Run tests command line carries `-p tests.flake_ledger --reruns 2`. `tests.flake_ledger` runs on the xdist controller and writes one line per retried test to `CI_FLAKES`, after the test's last attempt. Each shard uploads it as `flakes-<python>-<shard>` and prints outcome, attempts and test id to its step summary.
+
+| Run | Plant on the delivered code | Result |
+|---|---|---|
+| [38103409208](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38103409208) | one test fails its first attempt | all 12 unit shards green on run attempt 1; `flakes-3.11-1` and `flakes-3.12-5` record it `flaky`, 2 attempts, run 38103409208 |
+| [38103411818](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38103411818) | one test fails every attempt | exactly the two shards that ran it failed, `unit (3.11, 4)` and `unit (3.12, 8)`; each records it `failed`, 3 attempts, run 38103411818; the other 10 shards green |
+
+Cost to the phase: a retry spends time only on a failing test, at most two more runs of it. The pull request run of this slice (38103509370) took 160 to 276 s per unit shard against the 7 minute job timeout, with an empty flake report on every shard. A flake absorbed in the queue saves the replacement queue run, about 6 minutes each, 32 of them last week.
