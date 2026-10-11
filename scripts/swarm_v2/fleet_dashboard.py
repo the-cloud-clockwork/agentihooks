@@ -13,7 +13,7 @@ import redis
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2 import telemetry
 
-DEFINITION = Path(__file__).resolve().parents[2] / "observability" / "swarm-v2.json"
+DEFINITION = Path(__file__).resolve().parents[2] / "docs" / "swarm-v2" / "fleet-dashboard.json"
 ALERTS_ENV = "AGENTIHOOKS_FLEET_ALERTS"
 INCIDENTS = "fleet-incidents"
 EVALUATED = "fleet-incidents-seq"

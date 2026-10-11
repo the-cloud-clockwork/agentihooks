@@ -9,7 +9,7 @@ from scripts.swarm.store import RedisStore
 from scripts.swarm_v2 import fleet_dashboard as fleet
 
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2"
-DEFINITION = Path(__file__).parents[1] / "observability" / "swarm-v2.json"
+DEFINITION = Path(__file__).parents[1] / "docs" / "swarm-v2" / "fleet-dashboard.json"
 INPUTS = ("fleet-dashboard.json",)
 EVIDENCE_CLASS = (
     "mocked: two recorded fixture traces shaped like controller, pool, quota, archive, checkpoint and brain readings, "

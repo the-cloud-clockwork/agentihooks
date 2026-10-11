@@ -2,7 +2,7 @@
 
 The fleet dashboard is a projection of recorded observations. It holds no authority, starts no
 work and never acts on an alert. Panels, labels, limits and alert rules live in
-`observability/swarm-v2.json`; `scripts.swarm_v2.fleet_dashboard` reads them.
+`docs/swarm-v2/fleet-dashboard.json`; `scripts.swarm_v2.fleet_dashboard` reads them.
 
 ## Sample
 

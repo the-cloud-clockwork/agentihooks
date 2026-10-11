@@ -9,6 +9,6 @@
   ],
   "inputs": {
     "tests/fixtures/swarm_v2/fleet-dashboard.json": "c8dcc7cf7dba5c2968c8a7257e089ec2525a05cb030a09babb723c67a3648f76",
-    "observability/swarm-v2.json": "fb1bef60d6442e205757445a96d6f5246bd5402832eeff411d2a4163f76ace79"
+    "docs/swarm-v2/fleet-dashboard.json": "fb1bef60d6442e205757445a96d6f5246bd5402832eeff411d2a4163f76ace79"
   }
 }
