@@ -861,6 +861,13 @@ def test_a_policy_bundle_missing_a_field_is_refused(tmp_path, missing):
         load_policy(write(tmp_path, {**policy_doc(), "bundle": bundle}))
 
 
+def test_the_golden_bundled_pod_is_the_current_render():
+    policy = load_policy(FIXTURES / "pod-policy-bundle.json")
+
+    assert json.loads((FIXTURES / "pod-rendered-bundle.json").read_text()) == render(policy=policy)[1].pod
+    assert policy["bundle"] == BUNDLE
+
+
 @pytest.mark.parametrize("case", ["a", "b", "c"])
 def test_package_cases_match_their_committed_evidence(case):
     from tests.sv2_kub01_cases import run_case

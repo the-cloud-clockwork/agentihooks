@@ -631,6 +631,17 @@ def test_the_started_supervisor_loads_a_prepared_attempt_only_the_worker_can_rea
     assert capsys.readouterr().out == json.dumps(printed) + "\n"
 
 
+def test_the_start_prints_the_rendered_chain_when_bootstrap_names_one(monkeypatch, capsys):
+    chains = {"claude": ["anton-base", "package:engineer", "engineer", "frontend", "brain"]}
+    monkeypatch.setattr(start, "prepare", lambda attempt, launch: {"chains": chains})
+    monkeypatch.setattr(start.supervision_runtime, "main", lambda argv: 70)
+
+    assert start.main(["/home/worker/attempts/a", "/var/run/swarm/launch/launch.json"]) == 70
+
+    printed = {"worker_start": "prepared", "attempt": "a", "uid": os.getuid(), "chains": chains}
+    assert capsys.readouterr().out == json.dumps(printed) + "\n"
+
+
 def test_the_image_supervisor_entry_is_the_worker_start_step():
     entry = Path(__file__).resolve().parents[1] / "docker" / "swarm-node" / "supervisor.py"
     spec = importlib.util.spec_from_file_location("swarm_node_supervisor", entry)

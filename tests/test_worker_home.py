@@ -880,6 +880,7 @@ def test_parser_defaults_and_types():
         "profile": [],
         "account": [],
         "endpoint": [],
+        "bundle": None,
     }
     args = parser.parse_args(
         ["bootstrap", "--attempt=a", "--root=/r", "--templates=/t", "--interpreter=/i", "--uid=5", "--gid=6"]

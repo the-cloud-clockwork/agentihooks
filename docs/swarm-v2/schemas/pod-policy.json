@@ -16,6 +16,17 @@
     "brain_url": {"type": "string", "maxLength": 200, "pattern": "^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$"},
     "termination_grace_seconds": {"type": "integer", "minimum": 1, "maximum": 900},
     "mounts": {"type": "array", "maxItems": 8, "items": {"$ref": "#/$defs/mount"}, "description": "Shared storage. A seed and the node cache mount read only; an artifact mount is writable only in the subPath of its execution. The rendered Pod passes the storage checker or is refused."},
+    "bundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image_repository", "tag", "pull_access"],
+      "properties": {
+        "image_repository": {"type": "string", "maxLength": 200, "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?(/[a-z0-9]+([._-][a-z0-9]+)*)+$"},
+        "tag": {"type": "string", "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$"},
+        "pull_access": {"allOf": [{"$ref": "#/$defs/dns_label"}, {"not": {"pattern": "^swarm-account-"}}], "description": "The image pull Secret only the kubelet reads; never a provider account Secret."}
+      },
+      "description": "The private bundle image. An init container copies its /bundle, /linked and /revision.json into a Pod private folder the agent mounts read only."
+    },
     "provider_accounts": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/account"}},
     "profiles": {
       "type": "object",

@@ -1,0 +1,6 @@
+{
+  "env": {
+    "_comment_ide": "--- prose: /ide still connects by hand ---",
+    "FIXTURE_BASE": "1"
+  }
+}

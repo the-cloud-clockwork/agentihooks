@@ -117,7 +117,9 @@ class Workers:
         projects = tuple(project.strip() for project in environ[PROJECTS_ENV].split(",") if project.strip())
         if not projects:
             raise WorkerSettingsRefused(f"{PROJECTS_ENV} names no project")
-        terms = LaunchTerms(environ[ACCOUNT_ENV], int(cap), RESERVATION_MS, projects, environ[BRAIN_ENV], api_url)
+        terms = LaunchTerms(
+            environ[ACCOUNT_ENV], int(cap), RESERVATION_MS, projects, environ[BRAIN_ENV], api_url, "bundle" in policy
+        )
         exporter, terminal = _exporter(environ.get(EXPORTER_ENV)), _terminal(environ.get(TERMINAL_ENV))
         return cls(terms, policy, environ[IMAGE_TAG_ENV], profile, exporter, terminal)
 

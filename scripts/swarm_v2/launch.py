@@ -11,7 +11,7 @@ from typing import Protocol
 from hooks.context.profile_chain import PACKAGE_ROLES
 from scripts.swarm import live_binding, profile_choice
 from scripts.swarm.store import AgentRecord, SwarmError
-from scripts.swarm_v2 import broadcast_bridge
+from scripts.swarm_v2 import broadcast_bridge, worker_home
 from scripts.swarm_v2.accounts import AccountCapacity, Slot
 from scripts.swarm_v2.auth_context import LaunchAuthority
 from scripts.swarm_v2.controller import Controller
@@ -56,6 +56,7 @@ class LaunchTerms:
     project_ids: tuple[str, ...]
     brain_id: str
     api_url: str
+    bundled: bool = False
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,10 @@ def seat_profile(request: SpawnRequest) -> str:
 def worker_profiles() -> set[str]:
     roles = {path.name for path in PACKAGE_ROLES.iterdir() if path.is_dir() and not path.name.startswith("_")}
     return {WORKER_DEFAULT, *roles}
+
+
+def shipped(profile: str, bundled: bool) -> bool:
+    return profile in worker_profiles() or (bundled and worker_home.NAME.fullmatch(profile) is not None)
 
 
 class DistributedLaunch:
@@ -136,7 +141,7 @@ class DistributedLaunch:
         if not api_url:
             return Outcome("spawn", Status.REFUSED, backend, detail=NO_API_URL)
         profile = seat_profile(request)
-        if profile not in worker_profiles():
+        if not shipped(profile, terms.bundled):
             return Outcome(
                 "spawn", Status.REFUSED, backend, detail=f"profile {profile} is not shipped in the worker image"
             )
