@@ -153,6 +153,7 @@ def test_ordered_uses_the_scores_it_is_given_below_the_chain():
     assert dispatcher.ordered(found, "", dispatcher.leverage(found)) == ["x", "y", "w", "v", "u"]
     assert dispatcher.ordered(found, "", {"x": 1, "y": 2}) == ["y", "x", "w", "v", "u"]
     assert dispatcher.ordered(found, "", {"x": 1, "y": 2, "v": 9}) == ["y", "x", "v", "w", "u"]
+    assert dispatcher.ordered(found, "", {"x": 1, "y": 2, "u": 1}) == ["y", "x", "u", "w", "v"]
 
 
 def test_chains_count_the_longest_open_path_of_waiters_behind_each_task():
