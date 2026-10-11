@@ -23,7 +23,9 @@ REFUSED = {
 
 
 def test_the_committed_safe_pod_is_what_the_shared_policy_renders():
-    rendered = PodTemplate(load_policy(FIXTURES / "pod-policy-shared.json")).render(json.loads(LAUNCH.read_text()))
+    rendered = PodTemplate(load_policy(FIXTURES / "pod-policy-shared.json"), "agentihooks-swarm-fixture").render(
+        json.loads(LAUNCH.read_text())
+    )
     assert rendered.pod == json.loads((FIXTURES / "safe-pod.json").read_text())
 
 

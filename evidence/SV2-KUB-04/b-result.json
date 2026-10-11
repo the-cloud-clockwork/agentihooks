@@ -4,7 +4,7 @@
   "input_sha256": {
     "cleanup-attempts.json": "39a4e5c1dc686133750138a012ddc2d2764666e2562588959752e670ab12d4ce",
     "pod-launch.json": "a3dd9f7083b76f91ac724de6fc3d05d0227424feda9caac8d1c8f50eeede87ae",
-    "pod-policy.json": "fe59695070f986ee8928dcfa9abff5d0a07372f6af03611733a4cdad34772acb"
+    "pod-policy.json": "25a857c36e7d1ea9c579b0a285cf746f9f965064a3dfb770a8ae25502605d610"
   },
   "observed": {
     "deletes": [

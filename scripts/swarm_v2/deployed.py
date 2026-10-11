@@ -29,7 +29,7 @@ from scripts.swarm_v2.launch import DistributedLaunch, LaunchTerms
 from scripts.swarm_v2.operator_auth import OPERATOR
 from scripts.swarm_v2.quota import QuotaObservations
 from scripts.swarm_v2.registry import FleetRegistry
-from scripts.swarm_v2.runtime.base import LOCAL_PROFILES, SpawnRequest
+from scripts.swarm_v2.runtime.base import SpawnRequest
 from scripts.swarm_v2.runtime.routed import RoutedRuntime, routed
 
 if TYPE_CHECKING:
@@ -45,6 +45,7 @@ CAP_ENV = "AGENTIHOOKS_LAUNCH_CAP"
 PROJECTS_ENV = "AGENTIHOOKS_LAUNCH_PROJECTS"
 BRAIN_ENV = "AGENTIHOOKS_LAUNCH_BRAIN"
 EXPORTER_ENV = "AGENTIHOOKS_WORKER_EXPORTER"
+DEFAULT_EXPORTER = ("python", "-m", "scripts.swarm_v2.session_export")
 TERMINAL_ENV = "AGENTIHOOKS_WORKER_TERMINAL"
 AGGREGATION_ENV = "AGENTIHOOKS_TERMINAL_AGGREGATION"
 REQUIRED = (POLICY_ENV, IMAGE_TAG_ENV, PROFILE_ENV, CAP_ENV, PROJECTS_ENV, BRAIN_ENV)
@@ -66,13 +67,11 @@ def pod_api(environ: Mapping[str, str], namespace: str) -> PodApi:
     return PodClient(http, namespace)
 
 
-def pod_policy(path: str, slug: str) -> dict:
+def pod_policy(path: str) -> dict:
     try:
         policy = load_policy(path)
     except PodSpecRefused as refused:
         raise WorkerSettingsRefused(str(refused)) from None
-    if policy["owner"] != owner_for(slug):
-        raise WorkerSettingsRefused(f"the Pod policy owner must be {owner_for(slug)}")
     if policy["provider_accounts"]:
         raise WorkerSettingsRefused(
             f"the Pod policy must name no provider account: the approved accounts are the keys of Secret {INDEX}"
@@ -80,9 +79,9 @@ def pod_policy(path: str, slug: str) -> dict:
     return policy
 
 
-def _exporter(value: str | None) -> tuple[str, ...] | None:
+def _exporter(value: str | None) -> tuple[str, ...]:
     if not value:
-        return None
+        return DEFAULT_EXPORTER
     refused = WorkerSettingsRefused(f"{EXPORTER_ENV} must be a JSON list of command words")
     try:
         words = json.loads(value)
@@ -111,7 +110,7 @@ class Workers:
     policy: dict
     image_tag: str
     profile: str
-    exporter: tuple[str, ...] | None
+    exporter: tuple[str, ...]
     terminal: Exposure | None
 
     @classmethod
@@ -126,9 +125,7 @@ class Workers:
             raise WorkerSettingsRefused(f"{CAP_ENV} must be a whole number above zero")
         if not image_tag.is_tag(environ[IMAGE_TAG_ENV]):
             raise WorkerSettingsRefused(f"{IMAGE_TAG_ENV} must be an image tag, never a digest")
-        policy, profile = pod_policy(environ[POLICY_ENV], slug), environ[PROFILE_ENV]
-        if profile in LOCAL_PROFILES:
-            raise WorkerSettingsRefused(f"{PROFILE_ENV} {profile} runs only on the workstation")
+        policy, profile = pod_policy(environ[POLICY_ENV]), environ[PROFILE_ENV]
         if profile not in policy["profiles"]:
             raise WorkerSettingsRefused(f"the Pod policy has no {profile} profile")
         projects = tuple(project.strip() for project in environ[PROJECTS_ENV].split(",") if project.strip())
@@ -138,8 +135,14 @@ class Workers:
         exporter, terminal = _exporter(environ.get(EXPORTER_ENV)), _terminal(environ.get(TERMINAL_ENV))
         return cls(terms, policy, environ[IMAGE_TAG_ENV], profile, exporter, terminal)
 
+    @property
+    def requested(self) -> dict:
+        profile = self.policy["profiles"][self.profile]
+        cpu = profile.get("requests", profile["limits"])["cpu_millis"]
+        return {"memory_mib": profile["limits"]["memory_mib"], "cpu_millis": cpu}
+
     def launch(self, request: SpawnRequest) -> dict:
-        task, limits = request.task, self.policy["profiles"][self.profile]["limits"]
+        task, shape = request.task, self.requested
         return {
             "task_id": task["id"],
             "swarm_id": request.config.slug,
@@ -150,13 +153,14 @@ class Workers:
             "harness": HARNESS,
             "image_digest": image_tag.resolve(self.policy["image_repository"], self.image_tag),
             "profile": self.profile,
-            "memory_mib": limits["memory_mib"],
-            "cpu_millis": limits["cpu_millis"],
+            "memory_mib": shape["memory_mib"],
+            "cpu_millis": shape["cpu_millis"],
             "provider_account": task["account"],
             "task_payload": {
                 "task_id": task["id"],
                 "lane": request.lane,
                 "name": request.name,
+                "profile": task["profile"],
                 "endpoints": task["endpoints"],
                 **({"checkpoint": task["checkpoint"]} if task.get("checkpoint") else {}),
             },
@@ -167,7 +171,7 @@ class Workers:
 
     def transport(self, environ: Mapping[str, str], slug: str) -> KubernetesTransport:
         api = pod_api(environ, self.policy["namespace"])
-        template = PodTemplate(self.policy, SecretKeys(api))
+        template = PodTemplate(self.policy, owner_for(slug), SecretKeys(api))
         mounted = template if self.terminal is None else TerminalTemplate(template)
         return KubernetesTransport(api, slug, mounted)
 
@@ -201,9 +205,7 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
         environ, kubernetes=kubernetes, launch=partial(launcher.from_tick, terms=workers.terms, target=workers.target)
     )
     runtime.herdr_runtime.quota_accounts = FleetAccounts(route, workers.terms.cap)
-    runtime.herdr_runtime.host = WorkerPool(
-        api, workers.policy.get("worker_pool"), workers.policy["profiles"][workers.profile]["limits"]
-    )
+    runtime.herdr_runtime.host = WorkerPool(api, workers.policy.get("worker_pool"), workers.requested)
     launcher.planned = partial(runtime.herdr_runtime.planned_account, agent=HARNESS)
     launcher.router = runtime.router
     runtime.relaunch = partial(launcher.relaunch, terms=workers.terms)

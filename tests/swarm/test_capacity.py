@@ -49,7 +49,7 @@ def test_routed_session_reads_quota_for_every_occupied_account(monkeypatch, tmp_
         },
     )
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"a": 1, "b": 2, "c": 1})
-    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: [])
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     seen = capacity.accounts(env, 100)
     assert sorted((r.name, r.sessions, r.week_left) for r in seen) == [("a", 1, 90), ("b", 2, 90), ("c", 1, 90)]
 
@@ -64,7 +64,7 @@ def test_band_caps_follow_the_claude_five_hour_window_left(monkeypatch, five_use
     )
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(100, result)])
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
-    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: [])
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     (row,) = capacity.accounts({}, 100)
     assert (row.cap, row.five_left, row.week_left) == (expected_cap, 100 - five_used, 100)
     assert row.state == ("CLOSED" if expected_cap == 0 else "OPEN")
@@ -75,7 +75,7 @@ def test_a_reset_window_raises_the_cap_and_the_effective_caps_on_the_next_tick(m
     result = balancer.ProbeResult("a", "allowed", "NORMAL", 2, five, week)
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(100, result)])
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"a": 1})
-    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: [])
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     config = SwarmConfig("sw", "/repo", max_eng=3, max_ci=1, max_plan=0)
     agents = [AgentRecord("engineer", "eng", "e", harness="claude")]
     (drained,) = capacity.accounts({}, 150)
@@ -105,7 +105,7 @@ def test_a_stale_claude_reading_gets_no_seat(monkeypatch):
     )
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(100, result)])
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
-    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: [])
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     from scripts import session_bands
 
     stale_at = 100 + session_bands.FRESH_SECONDS + 1
@@ -119,7 +119,7 @@ def test_a_fresh_codex_reading_with_only_the_week_gets_the_top_band(monkeypatch)
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
     pool = [capacity.codex_router.CodexAccount("a", "AH_CX_TOKEN_a")]
-    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: pool)
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: pool)
     weekly = CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=10, resets_at=500))
     monkeypatch.setattr(capacity.codex_router, "quotas", lambda accounts, env: {"a": weekly})
     monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: pytest.fail("reached the real codex probe"))
@@ -140,7 +140,7 @@ def test_accounts_judge_every_window_at_the_given_time_and_pass_the_environment(
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(now, claude)])
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
     monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {"x": 1})
-    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda environ: calls.append(("pool", environ)) or pool)
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda environ: calls.append(("pool", environ)) or pool)
     monkeypatch.setattr(
         capacity.codex_router,
         "fresh_quotas",
@@ -161,19 +161,75 @@ def test_accounts_judge_every_window_at_the_given_time_and_pass_the_environment(
 
 
 def test_a_stale_codex_reading_gets_no_seat(monkeypatch):
-    from scripts import session_bands
     from scripts.codex_quota import CodexQuota
 
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
     pool = [capacity.codex_router.CodexAccount("a", "AH_CX_TOKEN_a")]
-    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: pool)
-    stale_at = 100 + session_bands.FRESH_SECONDS + 1
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: pool)
+    stale_at = 100 + 6 * 3600 + 1
     stale = CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=10))
     monkeypatch.setattr(capacity.codex_router, "quotas", lambda accounts, env: {"a": stale})
     monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: None)
     seen = capacity.accounts({"AH_CX_TOKEN_a": "fake-a"}, stale_at)
     assert seen == [capacity.Account("codex", "a", "UNKNOWN", 0, None, 90, None)]
+
+
+def test_codex_token_accounts_from_the_rc_block_get_seats_and_default_none(monkeypatch, tmp_path):
+    from scripts import aicode_tokens, operator_env
+    from scripts.codex_quota import CodexQuota
+
+    monkeypatch.delenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", raising=False)
+    aicode_tokens.rc_file().write_text(
+        f"{aicode_tokens.START}\nexport AH_CX_TOKEN_alpha=cx1\nexport AH_CC_TOKEN_mail=cc1\n{aicode_tokens.END}\n"
+    )
+    environ = {"HOME": str(tmp_path), "AH_CC_TOKEN_ncgma": "cc1"}
+    operator_env.fill(environ)
+    weekly = CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=10, resets_at=10**10))
+    monkeypatch.setattr(capacity.codex_router, "quotas", lambda accounts, env: {a.name: weekly for a in accounts})
+    monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: None)
+    assert capacity._codex(environ, 100 + 3600, True) == [
+        capacity.Account("codex", "alpha", "OPEN", 0, None, 90, 6, 10**10)
+    ]
+    assert [credential.account for credential in balancer.discover_credentials(environ)] == ["mail"]
+
+
+def test_tick_capacity_reads_the_reading_age_from_its_own_environment(monkeypatch):
+    from scripts.codex_quota import CodexQuota
+
+    monkeypatch.delenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", raising=False)
+    weekly = CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=10, resets_at=10**10))
+    monkeypatch.setattr(capacity.codex_router, "quotas", lambda accounts, env: {a.name: weekly for a in accounts})
+    monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: None)
+    environ = {"AH_CX_TOKEN_alpha": "cx1", "AGENTIHOOKS_CODEX_READING_MAX_AGE_H": "0.5"}
+    assert [row.cap for row in capacity._codex(environ, 100 + 3600, True)] == [None]
+
+
+def test_tick_capacity_balance_and_quota_list_the_same_accounts_and_caps(monkeypatch, tmp_path):
+    from scripts import agents_quota, aicode_tokens, codex_usage, operator_env
+    from scripts.codex_quota import CodexQuota
+
+    monkeypatch.delenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", raising=False)
+    environ = {"HOME": str(tmp_path), "AH_CC_TOKEN_ncgma": "cc1", "AH_CC_TOKEN_other": "cc2"}
+
+    aicode_tokens.rc_file().write_text(
+        f"{aicode_tokens.START}\nexport AH_CX_TOKEN_alpha=cx1\nexport AH_CX_TOKEN_beta=cx2\nexport AH_CX_TOKEN_gamma=cx3\n"
+        f"export AH_CC_TOKEN_mail=cc1\n{aicode_tokens.END}\n"
+    )
+    operator_env.fill(environ)
+    codex_usage.store("alpha", CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=10, resets_at=10**10)))
+    codex_usage.store("beta", CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=97, resets_at=10**10)))
+    codex_usage.store("gamma", CodexQuota(100 - 6 * 3600, "pro", seven_day=balancer.QuotaWindow(used=10)))
+    monkeypatch.setattr(capacity.codex_router.codex_quota, "latest_codex_quota", lambda environ, keep: None)
+    monkeypatch.setattr(capacity.codex_router, "_registry", lambda: {})
+    monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: None)
+    now = 100 + 3600
+    tick = [(row.name, row.cap) for row in capacity._codex(environ, now, True)]
+    pool = capacity.codex_router.accounts(environ)
+    rows = agents_quota.codex_rows(pool, capacity.codex_router.quotas(pool, environ), {}, now)
+    assert tick == [(row.account, row.cap) for row in rows] == [("alpha", 6), ("beta", 0), ("gamma", None)]
+    assert [row.state for row in rows][2] == "STALE"
+    assert [credential.account for credential in balancer.discover_credentials(environ)] == ["mail", "other"]
 
 
 def test_quota_capacity_with_all_zero_demand_never_refreshes_codex(tmp_path, monkeypatch):
@@ -184,7 +240,7 @@ def test_quota_capacity_with_all_zero_demand_never_refreshes_codex(tmp_path, mon
     monkeypatch.setattr(balancer, "collect_results", lambda *a, **kw: ([], "none"))
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
-    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: [])
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     monkeypatch.setattr(capacity.codex_router, "fresh_quotas", lambda *a, **kw: calls.append(1) or {})
     monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: pytest.fail("reached the real codex probe"))
     rt = module.HerdrRuntime(home=tmp_path)
@@ -201,7 +257,7 @@ def test_quota_capacity_with_nonzero_demand_refreshes_codex(tmp_path, monkeypatc
     monkeypatch.setattr(balancer, "collect_results", lambda *a, **kw: ([], "none"))
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
-    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: [])
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     monkeypatch.setattr(capacity.codex_router, "fresh_quotas", lambda *a, **kw: calls.append(1) or {})
     rt = module.HerdrRuntime(home=tmp_path)
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
@@ -286,7 +342,7 @@ def test_each_tick_refreshes_the_balance_source_for_all_available_accounts(monke
     )
     monkeypatch.setattr(balancer, "cached_observations", lambda **kwargs: [])
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
-    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda _: [])
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda _: [])
     capacity.accounts(environ, 123)
     assert seen == [(["a", "b"], {"environ": environ, "now": 123})]
 
@@ -366,7 +422,7 @@ def test_codex_accounts_with_live_sessions_keep_their_own_quotas(monkeypatch):
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
     monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {"a": 1, "b": 2})
     monkeypatch.setattr(
-        capacity.codex_router, "routing_pool", lambda _: [capacity.codex_router.CodexAccount("a", "AH_CX_TOKEN_a")]
+        capacity.codex_router, "accounts", lambda _: [capacity.codex_router.CodexAccount("a", "AH_CX_TOKEN_a")]
     )
 
     def quotas(pool, environ):
@@ -416,7 +472,7 @@ def test_failed_fresh_probe_does_not_leave_a_stale_healthy_account_placeable(mon
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(100, healthy)])
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
     monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {})
-    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda _: [])
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda _: [])
     seen = capacity.accounts({"AH_CC_TOKEN_a": "fake-a"}, 200)
     assert seen[0].state == "CLOSED"
     assert capacity.free_seats(seen[0]) == 0
@@ -446,7 +502,7 @@ def test_profile_and_saved_handoff_harnesses_are_reserved_before_automatic_work(
 def test_unobserved_live_account_stays_visible_and_unplaceable(monkeypatch):
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"unknown": 2})
-    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: [])
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     assert capacity.accounts({}, 100) == [capacity.Account("claude", "unknown", "UNKNOWN", 2, None, None)]
 
 
@@ -855,7 +911,7 @@ def test_a_missing_signed_in_default_does_not_create_a_fake_token_account(monkey
     monkeypatch.setattr(balancer, "cached_observations", lambda **kwargs: [])
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
     monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {"default": 1})
-    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: [])
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
 
     def quotas(pool, env):
         assert pool == []
@@ -1726,7 +1782,7 @@ def test_live_api_sessions_count_on_the_api_row_only_and_keep_accounts_known(mon
 def test_live_api_sessions_without_an_api_endpoint_show_as_a_closed_api_row(monkeypatch):
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"api": 1})
-    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: [])
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     assert capacity.accounts({}, 100) == [
         capacity.Account("claude", "api", "CLOSED", 1, None, None, 0, kind="api"),
     ]
@@ -1794,7 +1850,7 @@ def test_accounts_ask_each_harness_api_side_with_the_environment_and_time(monkey
     monkeypatch.setattr(capacity.place, "api_side", api_side)
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
-    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: [])
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     capacity.accounts({"A": "1"}, 100)
     assert calls == [
         ("ClaudeApiSource", "claude", {"A": "1"}, 100),

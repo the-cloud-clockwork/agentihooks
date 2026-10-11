@@ -1,6 +1,20 @@
 {{- $api := .Values.controller.api }}
 {{- $workers := .Values.controller.workers }}
 {{- $ca := .Values.controller.terminalCa | default dict }}
+{{- with $api.proof }}
+{{- if not $api.enabled }}
+{{- fail "controller.api.proof needs controller.api.enabled: the setting reaches the controller only with its API" }}
+{{- end }}
+{{- if not (and .agent .task) }}
+{{- fail "controller.api.proof needs agent and task: the controller names the proof swarm from them" }}
+{{- end }}
+{{- if not $workers.apiUrl }}
+{{- fail "controller.api.proof needs controller.workers.apiUrl: the proof swarm launches on the Kubernetes runtime" }}
+{{- end }}
+{{- if not (regexMatch "^proof-[0-9a-f]{6}-[a-z0-9]+-[0-9]+$" (toString $api.swarm)) }}
+{{- fail "controller.api.proof needs controller.api.swarm to name the proof swarm, proof-<code>-<task>-<n>" }}
+{{- end }}
+{{- end }}
 {{- if and (or $ca.secretName $workers.apiUrl) (not (and $ca.secretName $ca.key)) }}
 {{- fail "controller.terminalCa needs secretName and key with controller.workers.apiUrl: the controller signs operator certificates with that key" }}
 {{- end }}
@@ -187,6 +201,10 @@ spec:
               value: {{ $api.signingKey.keyId | quote }}
             - name: AGENTIHOOKS_LAUNCH_SIGNING_KEY_FILE
               value: /run/secrets/launch-signing/{{ $api.signingKey.secretKey }}
+            {{- with $api.proof }}
+            - name: AGENTIHOOKS_CONTROL_PROOF
+              value: {{ toJson . | quote }}
+            {{- end }}
             {{- end }}
             {{- if $workers.apiUrl }}
             - name: AGENTIHOOKS_CONTROL_API_URL

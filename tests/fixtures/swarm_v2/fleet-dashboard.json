@@ -1,0 +1,916 @@
+{
+ "schema_version": "1.0",
+ "package": "SV2-OBS-05",
+ "evidence_class": "synthetic traces modelled on the Anton scaling canary, a stale checkpoint, a quota wait and a denied cross brain query, shaped like the controller, pool, quota, archive, checkpoint and brain readings; not recorded from a live cluster",
+ "grants": {
+  "swarm": {
+   "actor": "swarm viewer",
+   "label": "operator",
+   "brains": [
+    "swarm-canary"
+   ]
+  },
+  "operator": {
+   "actor": "operator",
+   "brains": [
+    "swarm-canary",
+    "personal-operator"
+   ]
+  },
+  "labelled": {
+   "actor": "operator",
+   "label": "operator",
+   "role": "operator"
+  }
+ },
+ "traces": {
+  "first": [
+   {
+    "seq": 1,
+    "at_ms": 1000000000,
+    "pools": [
+     {
+      "pool": "on-demand",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 1
+     },
+     {
+      "pool": "general-spot",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 0
+     },
+     {
+      "pool": "research",
+      "configured_maximum": 10,
+      "template": {
+       "cpu_millis": 8000,
+       "memory_mib": 16384
+      },
+      "nodes": 0
+     }
+    ],
+    "attempts": [
+     {
+      "execution_id": "exe-scale-1",
+      "seat": "eng-1@canary",
+      "task": "scale",
+      "phase": "pending",
+      "pool": "general-spot",
+      "permitted_pools": [
+       "general-spot",
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 1000000000,
+      "protected": false,
+      "idle_since_ms": null,
+      "terminal": "unknown",
+      "authority": "unknown"
+     },
+     {
+      "execution_id": "exe-huge-1",
+      "seat": "eng-2@canary",
+      "task": "huge",
+      "phase": "pending",
+      "pool": null,
+      "permitted_pools": [
+       "general-spot",
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 65536
+      },
+      "pending_since_ms": 1000000000,
+      "protected": false,
+      "idle_since_ms": null,
+      "terminal": "unknown",
+      "authority": "unknown"
+     },
+     {
+      "execution_id": "exe-idle-1",
+      "seat": "eng-3@canary",
+      "task": "idle",
+      "phase": "active",
+      "pool": "on-demand",
+      "permitted_pools": [
+       "general-spot",
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 999100000,
+      "protected": true,
+      "idle_since_ms": 999640000,
+      "terminal": "disconnected",
+      "authority": "held"
+     }
+    ],
+    "quota": [
+     {
+      "account": "acct-a",
+      "state": "waiting",
+      "since_ms": 999970000,
+      "resets_at_ms": 1003600000
+     },
+     {
+      "account": "acct-b",
+      "state": "allowed",
+      "since_ms": 999970000,
+      "resets_at_ms": 1003600000
+     }
+    ],
+    "archive": [
+     {
+      "execution_id": "exe-idle-1",
+      "seat": "eng-3@canary",
+      "process": "live",
+      "activity": "idle",
+      "heartbeat_at_ms": 1000000000,
+      "watermark": 2048,
+      "advanced_at_ms": 999600000,
+      "state": "ok",
+      "observed_at_ms": 1000000000
+     }
+    ],
+    "checkpoints": [
+     {
+      "execution_id": "exe-idle-1",
+      "seat": "eng-3@canary",
+      "taken_at_ms": 998000000
+     }
+    ],
+    "brain": {
+     "feed_at_ms": 999900000,
+     "denials": []
+    }
+   },
+   {
+    "seq": 2,
+    "at_ms": 1000060000,
+    "pools": [
+     {
+      "pool": "on-demand",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 1
+     },
+     {
+      "pool": "general-spot",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 0
+     },
+     {
+      "pool": "research",
+      "configured_maximum": 10,
+      "template": {
+       "cpu_millis": 8000,
+       "memory_mib": 16384
+      },
+      "nodes": 0
+     }
+    ],
+    "attempts": [
+     {
+      "execution_id": "exe-scale-1",
+      "seat": "eng-1@canary",
+      "task": "scale",
+      "phase": "pending",
+      "pool": "general-spot",
+      "permitted_pools": [
+       "general-spot",
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 1000000000,
+      "protected": false,
+      "idle_since_ms": null,
+      "terminal": "unknown",
+      "authority": "unknown"
+     },
+     {
+      "execution_id": "exe-huge-1",
+      "seat": "eng-2@canary",
+      "task": "huge",
+      "phase": "pending",
+      "pool": null,
+      "permitted_pools": [
+       "general-spot",
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 65536
+      },
+      "pending_since_ms": 1000000000,
+      "protected": false,
+      "idle_since_ms": null,
+      "terminal": "unknown",
+      "authority": "unknown"
+     },
+     {
+      "execution_id": "exe-idle-1",
+      "seat": "eng-3@canary",
+      "task": "idle",
+      "phase": "active",
+      "pool": "on-demand",
+      "permitted_pools": [
+       "general-spot",
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 999100000,
+      "protected": true,
+      "idle_since_ms": 999640000,
+      "terminal": "disconnected",
+      "authority": "held"
+     }
+    ],
+    "quota": [
+     {
+      "account": "acct-a",
+      "state": "waiting",
+      "since_ms": 999970000,
+      "resets_at_ms": 1003600000
+     },
+     {
+      "account": "acct-b",
+      "state": "allowed",
+      "since_ms": 999970000,
+      "resets_at_ms": 1003600000
+     }
+    ],
+    "archive": [
+     {
+      "execution_id": "exe-idle-1",
+      "seat": "eng-3@canary",
+      "process": "live",
+      "activity": "idle",
+      "heartbeat_at_ms": 1000060000,
+      "watermark": 2048,
+      "advanced_at_ms": 999600000,
+      "state": "ok",
+      "observed_at_ms": 1000060000
+     }
+    ],
+    "checkpoints": [
+     {
+      "execution_id": "exe-idle-1",
+      "seat": "eng-3@canary",
+      "taken_at_ms": 998000000
+     }
+    ],
+    "brain": {
+     "feed_at_ms": 999900000,
+     "denials": []
+    }
+   },
+   {
+    "seq": 3,
+    "at_ms": 1000120000,
+    "pools": [
+     {
+      "pool": "on-demand",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 1
+     },
+     {
+      "pool": "general-spot",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 1
+     },
+     {
+      "pool": "research",
+      "configured_maximum": 10,
+      "template": {
+       "cpu_millis": 8000,
+       "memory_mib": 16384
+      },
+      "nodes": 0
+     }
+    ],
+    "attempts": [
+     {
+      "execution_id": "exe-scale-1",
+      "seat": "eng-1@canary",
+      "task": "scale",
+      "phase": "active",
+      "pool": "general-spot",
+      "permitted_pools": [
+       "general-spot",
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 1000000000,
+      "protected": true,
+      "idle_since_ms": null,
+      "terminal": "connected",
+      "authority": "held"
+     },
+     {
+      "execution_id": "exe-huge-1",
+      "seat": "eng-2@canary",
+      "task": "huge",
+      "phase": "pending",
+      "pool": null,
+      "permitted_pools": [
+       "general-spot",
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 65536
+      },
+      "pending_since_ms": 1000000000,
+      "protected": false,
+      "idle_since_ms": null,
+      "terminal": "unknown",
+      "authority": "unknown"
+     },
+     {
+      "execution_id": "exe-idle-1",
+      "seat": "eng-3@canary",
+      "task": "idle",
+      "phase": "active",
+      "pool": "on-demand",
+      "permitted_pools": [
+       "general-spot",
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 999100000,
+      "protected": true,
+      "idle_since_ms": 999640000,
+      "terminal": "disconnected",
+      "authority": "held"
+     }
+    ],
+    "quota": [
+     {
+      "account": "acct-a",
+      "state": "waiting",
+      "since_ms": 999970000,
+      "resets_at_ms": 1003600000
+     },
+     {
+      "account": "acct-b",
+      "state": "allowed",
+      "since_ms": 999970000,
+      "resets_at_ms": 1003600000
+     }
+    ],
+    "archive": [
+     {
+      "execution_id": "exe-idle-1",
+      "seat": "eng-3@canary",
+      "process": "live",
+      "activity": "idle",
+      "heartbeat_at_ms": 1000120000,
+      "watermark": 2048,
+      "advanced_at_ms": 999600000,
+      "state": "ok",
+      "observed_at_ms": 1000120000
+     },
+     {
+      "execution_id": "exe-scale-1",
+      "seat": "eng-1@canary",
+      "process": "live",
+      "activity": "working",
+      "heartbeat_at_ms": 1000120000,
+      "watermark": 1536,
+      "advanced_at_ms": 1000120000,
+      "state": "ok",
+      "observed_at_ms": 1000120000
+     }
+    ],
+    "checkpoints": [
+     {
+      "execution_id": "exe-idle-1",
+      "seat": "eng-3@canary",
+      "taken_at_ms": 998000000
+     },
+     {
+      "execution_id": "exe-scale-1",
+      "seat": "eng-1@canary",
+      "taken_at_ms": 1000120000
+     }
+    ],
+    "brain": {
+     "feed_at_ms": 999900000,
+     "denials": []
+    }
+   },
+   {
+    "seq": 4,
+    "at_ms": 1000180000,
+    "pools": [
+     {
+      "pool": "on-demand",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 1
+     },
+     {
+      "pool": "general-spot",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 1
+     },
+     {
+      "pool": "research",
+      "configured_maximum": 10,
+      "template": {
+       "cpu_millis": 8000,
+       "memory_mib": 16384
+      },
+      "nodes": 0
+     }
+    ],
+    "attempts": [
+     {
+      "execution_id": "exe-scale-1",
+      "seat": "eng-1@canary",
+      "task": "scale",
+      "phase": "active",
+      "pool": "general-spot",
+      "permitted_pools": [
+       "general-spot",
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 1000000000,
+      "protected": true,
+      "idle_since_ms": null,
+      "terminal": "connected",
+      "authority": "held"
+     },
+     {
+      "execution_id": "exe-huge-1",
+      "seat": "eng-2@canary",
+      "task": "huge",
+      "phase": "pending",
+      "pool": null,
+      "permitted_pools": [
+       "general-spot",
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 65536
+      },
+      "pending_since_ms": 1000000000,
+      "protected": false,
+      "idle_since_ms": null,
+      "terminal": "unknown",
+      "authority": "unknown"
+     },
+     {
+      "execution_id": "exe-idle-1",
+      "seat": "eng-3@canary",
+      "task": "idle",
+      "phase": "active",
+      "pool": "on-demand",
+      "permitted_pools": [
+       "general-spot",
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 999100000,
+      "protected": true,
+      "idle_since_ms": 999640000,
+      "terminal": "disconnected",
+      "authority": "held"
+     }
+    ],
+    "quota": [
+     {
+      "account": "acct-a",
+      "state": "waiting",
+      "since_ms": 999970000,
+      "resets_at_ms": 1003600000
+     },
+     {
+      "account": "acct-b",
+      "state": "allowed",
+      "since_ms": 999970000,
+      "resets_at_ms": 1003600000
+     }
+    ],
+    "archive": [
+     {
+      "execution_id": "exe-idle-1",
+      "seat": "eng-3@canary",
+      "process": "live",
+      "activity": "idle",
+      "heartbeat_at_ms": 1000180000,
+      "watermark": 2048,
+      "advanced_at_ms": 999600000,
+      "state": "ok",
+      "observed_at_ms": 1000180000
+     },
+     {
+      "execution_id": "exe-scale-1",
+      "seat": "eng-1@canary",
+      "process": "live",
+      "activity": "working",
+      "heartbeat_at_ms": 1000180000,
+      "watermark": 2048,
+      "advanced_at_ms": 1000180000,
+      "state": "ok",
+      "observed_at_ms": 1000180000
+     }
+    ],
+    "checkpoints": [
+     {
+      "execution_id": "exe-idle-1",
+      "seat": "eng-3@canary",
+      "taken_at_ms": 998000000
+     },
+     {
+      "execution_id": "exe-scale-1",
+      "seat": "eng-1@canary",
+      "taken_at_ms": 1000120000
+     }
+    ],
+    "brain": {
+     "feed_at_ms": 999900000,
+     "denials": [
+      {
+       "denial_id": "deny-1",
+       "at_ms": 1000180000,
+       "requester_scope": "swarm:canary",
+       "target_brain": "personal-operator",
+       "session_title": "Private family medical appointments"
+      }
+     ]
+    }
+   },
+   {
+    "seq": 5,
+    "at_ms": 1000240000,
+    "pools": [
+     {
+      "pool": "on-demand",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 1
+     },
+     {
+      "pool": "general-spot",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 1
+     },
+     {
+      "pool": "research",
+      "configured_maximum": 10,
+      "template": {
+       "cpu_millis": 8000,
+       "memory_mib": 16384
+      },
+      "nodes": 0
+     }
+    ],
+    "attempts": [
+     {
+      "execution_id": "exe-scale-1",
+      "seat": "eng-1@canary",
+      "task": "scale",
+      "phase": "active",
+      "pool": "general-spot",
+      "permitted_pools": [
+       "general-spot",
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 1000000000,
+      "protected": true,
+      "idle_since_ms": null,
+      "terminal": "connected",
+      "authority": "held"
+     },
+     {
+      "execution_id": "exe-huge-1",
+      "seat": "eng-2@canary",
+      "task": "huge",
+      "phase": "pending",
+      "pool": null,
+      "permitted_pools": [
+       "general-spot",
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 65536
+      },
+      "pending_since_ms": 1000000000,
+      "protected": false,
+      "idle_since_ms": null,
+      "terminal": "unknown",
+      "authority": "unknown"
+     },
+     {
+      "execution_id": "exe-idle-1",
+      "seat": "eng-3@canary",
+      "task": "idle",
+      "phase": "active",
+      "pool": "on-demand",
+      "permitted_pools": [
+       "general-spot",
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 999100000,
+      "protected": true,
+      "idle_since_ms": 999640000,
+      "terminal": "disconnected",
+      "authority": "held"
+     }
+    ],
+    "quota": [
+     {
+      "account": "acct-a",
+      "state": "waiting",
+      "since_ms": 999970000,
+      "resets_at_ms": 1003600000
+     },
+     {
+      "account": "acct-b",
+      "state": "allowed",
+      "since_ms": 999970000,
+      "resets_at_ms": 1003600000
+     }
+    ],
+    "archive": [
+     {
+      "execution_id": "exe-idle-1",
+      "seat": "eng-3@canary",
+      "process": "live",
+      "activity": "idle",
+      "heartbeat_at_ms": 1000240000,
+      "watermark": 2048,
+      "advanced_at_ms": 999600000,
+      "state": "ok",
+      "observed_at_ms": 1000240000
+     },
+     {
+      "execution_id": "exe-scale-1",
+      "seat": "eng-1@canary",
+      "process": "live",
+      "activity": "working",
+      "heartbeat_at_ms": 1000240000,
+      "watermark": 2560,
+      "advanced_at_ms": 1000240000,
+      "state": "ok",
+      "observed_at_ms": 1000240000
+     }
+    ],
+    "checkpoints": [
+     {
+      "execution_id": "exe-idle-1",
+      "seat": "eng-3@canary",
+      "taken_at_ms": 998000000
+     },
+     {
+      "execution_id": "exe-scale-1",
+      "seat": "eng-1@canary",
+      "taken_at_ms": 1000120000
+     }
+    ],
+    "brain": {
+     "feed_at_ms": 999900000,
+     "denials": [
+      {
+       "denial_id": "deny-1",
+       "at_ms": 1000180000,
+       "requester_scope": "swarm:canary",
+       "target_brain": "personal-operator",
+       "session_title": "Private family medical appointments"
+      }
+     ]
+    }
+   },
+   {
+    "seq": 6,
+    "at_ms": 1000300000,
+    "pools": [
+     {
+      "pool": "on-demand",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 1
+     },
+     {
+      "pool": "general-spot",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 1
+     },
+     {
+      "pool": "research",
+      "configured_maximum": 10,
+      "template": {
+       "cpu_millis": 8000,
+       "memory_mib": 16384
+      },
+      "nodes": 0
+     }
+    ],
+    "attempts": [
+     {
+      "execution_id": "exe-scale-1",
+      "seat": "eng-1@canary",
+      "task": "scale",
+      "phase": "active",
+      "pool": "general-spot",
+      "permitted_pools": [
+       "general-spot",
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 1000000000,
+      "protected": true,
+      "idle_since_ms": null,
+      "terminal": "connected",
+      "authority": "held"
+     },
+     {
+      "execution_id": "exe-huge-1",
+      "seat": "eng-2@canary",
+      "task": "huge",
+      "phase": "pending",
+      "pool": null,
+      "permitted_pools": [
+       "general-spot",
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 65536
+      },
+      "pending_since_ms": 1000000000,
+      "protected": false,
+      "idle_since_ms": null,
+      "terminal": "unknown",
+      "authority": "unknown"
+     },
+     {
+      "execution_id": "exe-idle-1",
+      "seat": "eng-3@canary",
+      "task": "idle",
+      "phase": "active",
+      "pool": "on-demand",
+      "permitted_pools": [
+       "general-spot",
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 999100000,
+      "protected": true,
+      "idle_since_ms": 999640000,
+      "terminal": "disconnected",
+      "authority": "held"
+     }
+    ],
+    "quota": [
+     {
+      "account": "acct-a",
+      "state": "waiting",
+      "since_ms": 999970000,
+      "resets_at_ms": 1003600000
+     },
+     {
+      "account": "acct-b",
+      "state": "allowed",
+      "since_ms": 999970000,
+      "resets_at_ms": 1003600000
+     }
+    ],
+    "archive": [
+     {
+      "execution_id": "exe-idle-1",
+      "seat": "eng-3@canary",
+      "process": "live",
+      "activity": "idle",
+      "heartbeat_at_ms": 1000300000,
+      "watermark": 2048,
+      "advanced_at_ms": 999600000,
+      "state": "ok",
+      "observed_at_ms": 1000300000
+     },
+     {
+      "execution_id": "exe-scale-1",
+      "seat": "eng-1@canary",
+      "process": "live",
+      "activity": "working",
+      "heartbeat_at_ms": 1000300000,
+      "watermark": 3072,
+      "advanced_at_ms": 1000300000,
+      "state": "ok",
+      "observed_at_ms": 1000300000
+     }
+    ],
+    "checkpoints": [
+     {
+      "execution_id": "exe-idle-1",
+      "seat": "eng-3@canary",
+      "taken_at_ms": 998000000
+     },
+     {
+      "execution_id": "exe-scale-1",
+      "seat": "eng-1@canary",
+      "taken_at_ms": 1000120000
+     }
+    ],
+    "brain": {
+     "feed_at_ms": 999900000,
+     "denials": [
+      {
+       "denial_id": "deny-1",
+       "at_ms": 1000180000,
+       "requester_scope": "swarm:canary",
+       "target_brain": "personal-operator",
+       "session_title": "Private family medical appointments"
+      }
+     ]
+    }
+   }
+  ]
+ }
+}
