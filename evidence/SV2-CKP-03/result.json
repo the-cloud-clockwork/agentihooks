@@ -9,7 +9,7 @@
   "integration_gate": "G8",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2608",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2642",
-  "tested_commit": "46b2af09538e6f8fd121d9dc288274b31750be98",
+  "tested_commit": "f5d141c2e38c2a82af70d50831b65d8baca4364b",
   "status": "acceptance-qualified: mocked cases A, B and C passed in CI; live fresh-home resume and fresh-container resume passed for both installed CLIs; the swarm snapshot captures each agent's native conversation in production",
   "package_complete": false,
   "evidence_class": {
@@ -107,7 +107,7 @@
     "green": "Proofs run 38160034825 on 113d332a (native.py identical to the tested commit) passed the native unit tests, and the case A, B and C records committed here matched; earlier records were lifted from runs 38151824986 and 38153418291",
     "live": "run_native_proof.sh passed for claude (codeword PLUM-7902) and codex (codeword PLUM-7537) with native.py as of c3975cc8; the codex run closed stdin, the only script change after that commit",
     "review": "Standards and Spec readers, three rounds; findings fixed: unhashable session ids, corrupt index, linked rollouts on both branches, capture bounds, placement written new and removed on failure, account names kept out of the live records, version_changed cause, case C durability by read back. Disputed and closed: forged native commits are refused at restore (consumer_rule); round four on the snapshot and container delta: unreadable conversations, an agent with no folder, undecodable --version output, the decision field, script harness and token checks, authority and mocked labels",
-    "mutation": "Preflight 38158655576 left 38 survivors, killed by tests in 113d332a; preflight 38160034917 left 5: the three uri mutants are killed by a test pinning the read-only, no-wait connection, and two SQL case-only mutants are cleared by the Standards reader's equivalence ruling",
+    "mutation": "Preflight 38158655576 left 38 survivors, killed by tests in 113d332a; preflight 38160034917 left 5: the three uri mutants are killed by a test pinning the read-only, no-wait connection, and two SQL case-only mutants are cleared by the Standards reader's equivalence ruling; PR run 38172978687 on d2274eec left 19 survivors in the snapshot natives and native capture, killed by tests in the tested commit",
     "snapshot_red": "Proofs run 38171923315 on the tests only commit 486ea25d failed: the snapshot natives tests found no natives section",
     "snapshot_green": "Proofs run 38171925588 on 317b2f4d: 66 passed across the snapshot natives, snapshot sources, snapshot and resume tests",
     "container": "run_native_proof.sh with NATIVE_PROOF_IMAGE on 0a43bcff passed for claude (codeword PLUM-5031) and codex (codeword PLUM-3352), resumed in the mounted project checkout; account name count 0 in both records"
