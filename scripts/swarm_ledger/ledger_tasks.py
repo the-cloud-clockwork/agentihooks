@@ -439,7 +439,7 @@ def _update(doc, op, ctx):
         if refusal := slice_refusal(op["item"], after, doc):
             ctx.refused.append(refusal)
             return False
-    changed = {k: v for k, v in fields.items() if task.get(k) != v}
+    changed = _changed(task, fields, op, ctx)
     if "kind" in changed and after.get("workspace"):
         from scripts.swarm_ledger import ledger_workspace
 
@@ -454,6 +454,13 @@ def _update(doc, op, ctx):
         ctx.stamp(f"{op['item']}/{key}", op["by"])
     ctx.dirty = ctx.dirty or bool(changed)
     return True
+
+
+def _changed(task, fields, op, ctx):
+    changed = {k: v for k, v in fields.items() if task.get(k) != v}
+    if "rank" in fields and ledger_rank.author(ctx, f"{op['item']}/rank") != op["by"]:
+        changed["rank"] = fields["rank"]
+    return changed
 
 
 def complete_outcome(doc: dict, op: dict, ctx: object, outcome: dict, actor: str) -> bool:

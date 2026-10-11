@@ -32,19 +32,49 @@ def test_preflight_skips_a_branch_with_an_open_pull_request():
     if "workflow_call" in workflow[True]:
         assert check["if"] == "${{ github.event_name == 'push' && !github.event.deleted }}"
         assert jobs["mutation"]["if"] == (
-            "${{ !cancelled() && (github.event_name != 'push' || needs.pull-request.outputs.open == 'false') }}"
+            "${{ !cancelled() && (github.event_name != 'push' || (needs.pull-request.outputs.open == 'false'"
+            " && needs.pull-request.outputs.reused != 'true')) }}"
         )
     else:
         assert check["if"] == "${{ !github.event.deleted }}"
         assert jobs["mutation"]["if"] == "${{ needs.pull-request.outputs.open == 'false' }}"
-    assert check["outputs"] == {"open": "${{ steps.open.outputs.open }}"}
-    [step] = check["steps"]
+    assert check["outputs"] == {
+        "open": "${{ steps.open.outputs.open }}",
+        "reused": "${{ steps.reuse.outputs.reused }}",
+    }
+    step = check["steps"][0]
     assert step["id"] == "open"
     assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
     assert "head=$GITHUB_REPOSITORY_OWNER:$GITHUB_REF_NAME" in step["run"]
     assert "state=open" in step["run"]
     assert """--jq '[.[] | select(.base.ref == "dev")] | length'""" in step["run"]
     assert jobs["mutation"]["needs"] == "pull-request"
+
+
+def test_preflight_reuses_a_green_report_before_the_mutation_job_takes_a_lane():
+    check = _workflow()["jobs"]["pull-request"]
+    steps = check["steps"]
+    names = [step.get("name") for step in steps]
+    assert "runs-on" in check and "concurrency" not in check
+    for step in steps[1:4]:
+        assert step["if"] == "steps.open.outputs.open == 'false'"
+    assert steps[1]["uses"] == "actions/checkout@v4"
+    assert steps[1]["with"] == {"fetch-depth": 0, "persist-credentials": False}
+    scope = steps[names.index("Record the revisions the report grades")]
+    assert '"$(git merge-base origin/dev HEAD)" "$(git rev-parse HEAD)" > .mutation-gate/scope.json' in scope["run"]
+    reuse = steps[names.index("Reuse a green report when this head only adds tests to it")]
+    assert reuse["id"] == "reuse"
+    assert reuse["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    assert reuse["run"] == "python3 -m scripts.ci_mutation." + 'reuse "$GITHUB_REF_NAME" "$GITHUB_RUN_ID"'
+    upload = steps[-1]
+    assert upload["if"] == "steps.reuse.outputs.reused == 'true'"
+    assert upload["uses"] == "actions/upload-artifact@v4"
+    assert upload["with"] == {
+        "name": "mutation-preflight-report",
+        "path": ".mutation-gate/",
+        "include-hidden-files": True,
+        "retention-days": 7,
+    }
 
 
 def test_preflight_mutates_against_dev_with_the_pull_request_budget():
