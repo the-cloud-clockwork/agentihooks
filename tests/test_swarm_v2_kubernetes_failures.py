@@ -368,7 +368,7 @@ def test_a_settled_decision_is_not_reopened_by_a_later_failure(world):
 def test_the_replacement_starts_on_a_pending_pod_whatever_the_old_target(world):
     old = world.store.execution(cases.SLUG, world.old.execution_id)
     bound = replace(old, runtime_target={**old.runtime_target, "pod_name": "swarm-old"})
-    replacement = world.store.execution(cases.SLUG, world.recovery(world.live)._replace(bound))
+    replacement = world.store.execution(cases.SLUG, world.recovery(world.live)._replace(bound).execution_id)
     assert replacement.runtime_target == {"pod_namespace": world.api.namespace, "pod_name": "swarm-pending"}
 
 
@@ -671,6 +671,20 @@ def test_resume_decision_uses_the_checkpoint_and_admits_one_replacement(world):
     assert (replacement.generation, replacement.state, replacement.conversation_id) == (2, "working", "")
     assert replacement.runtime_target == {"pod_namespace": world.api.namespace, "pod_name": "swarm-pending"}
     assert recovery.decision(world.old.execution_id) == decision
+
+
+def test_each_recovery_event_reads_the_generation_holding_the_seat(world):
+    world.checkpoints.by_execution[world.old.execution_id] = []
+    recovery = world.recovery(world.live)
+    recovery.handle(world.old.execution_id, "evicted")
+    world.checkpoints.by_execution[world.old.execution_id] = world.fx["first"]["checkpoints"]
+    decision = recovery.decide(world.old.execution_id, "resume")
+
+    rows = [
+        (e["mode"], e["expected_generation"], e["observed_generation"], e.get("replacement", ""))
+        for e in world.live.telemetry.events(transition="recovery")
+    ]
+    assert rows == [("recovery_pending", 1, 1, ""), ("resume", 1, 2, decision.replacement)]
 
 
 def test_a_pull_that_recovers_restarts_its_grace(world):

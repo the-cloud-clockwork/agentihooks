@@ -766,6 +766,31 @@ def test_an_exit_observation_reaches_the_account_exit_call(accounts, source, val
     assert observer.get("fixture", lost.execution_id).sources[source.value]["value"] == value
 
 
+def test_an_exit_observation_records_its_heartbeat_and_outcome_transitions(accounts):
+    controller, lost = accounts.authority.controller, accounts.agents[TERMINAL]
+    observer = observe.Observer(accounts.store, "local", observe.Thresholds())
+    now = accounts.clock[0] / 1000
+
+    found = controller.observe(observer, lost, [exit_signal(lost, observe.Source.SUPERVISOR, observe.EXITED, now)], now)
+
+    rows = [
+        (
+            e["transition"],
+            e["result"],
+            e.get("task", ""),
+            e.get("seat", ""),
+            e["expected_generation"],
+            e["observed_generation"],
+        )
+        for e in controller.telemetry.events(execution_id=lost.execution_id)
+        if e["transition"] in ("heartbeat", "outcome")
+    ]
+    identity = (lost.task, lost.seat, lost.generation, lost.generation)
+    assert rows == [("heartbeat", "accepted", *identity), ("outcome", "accepted", *identity)]
+    outcome = controller.telemetry.events(transition="outcome")[0]
+    assert (outcome["reason"], outcome["controller_epoch"]) == (found.evidence, controller.held.epoch)
+
+
 @pytest.mark.parametrize("stored", (True, False))
 def test_a_repeated_exit_observation_reaches_the_exit_call_once(accounts, stored):
     controller, lost = accounts.authority.controller, accounts.agents[TERMINAL]

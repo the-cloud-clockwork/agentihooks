@@ -8,7 +8,7 @@ from pathlib import Path
 from scripts.hive import auth as hive_auth
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
-from scripts.swarm_v2 import deployed
+from scripts.swarm_v2 import deployed, telemetry
 from scripts.swarm_v2.api.executions import ExecutionsAPI
 from scripts.swarm_v2.api.server import serve
 from scripts.swarm_v2.auth_context import LaunchAuthority, LaunchKey
@@ -73,6 +73,7 @@ class ControlService:
         owner: str = "",
     ) -> None:
         self.controller = Controller(store, slug, transports, authorize)
+        self.controller.telemetry = telemetry.Telemetry(store, slug, telemetry.configured_exporter(os.environ))
         if owner:
             self.controller.owner = owner
         self.observer = Observer(store, BACKEND, Thresholds.from_environ(os.environ))

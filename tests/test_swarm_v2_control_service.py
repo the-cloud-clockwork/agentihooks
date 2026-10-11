@@ -113,6 +113,21 @@ def test_the_service_holds_the_controller_and_renews_it_each_tick(tmp_path):
     assert service.controller.held.epoch == epoch
 
 
+@pytest.mark.parametrize(("setting", "exporting"), (("stdout", True), ("", False)))
+def test_the_service_hands_its_controller_the_configured_transition_exporter(tmp_path, monkeypatch, setting, exporting):
+    from scripts.swarm_v2 import telemetry
+
+    monkeypatch.setenv(telemetry.EXPORT_ENV, setting)
+    store = _store()
+
+    recorder = (
+        _cs().ControlService(store, SLUG, _cs().launch_key(_environ(tmp_path)), lambda: True).controller.telemetry
+    )
+
+    assert recorder.exporter is (telemetry.stdout if exporting else None)
+    assert (recorder.store, recorder.slug) == (store, SLUG)
+
+
 def test_a_second_service_cannot_take_a_held_controller(tmp_path):
     store = _store()
     key = _cs().launch_key(_environ(tmp_path))

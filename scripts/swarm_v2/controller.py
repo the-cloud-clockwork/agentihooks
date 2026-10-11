@@ -11,6 +11,7 @@ from scripts.swarm_v2.operator_auth import OPERATOR
 from scripts.swarm_v2.reconciliation.accounts import AccountReconciler, Finding, exit_source
 from scripts.swarm_v2.runtime.observe import Observer, Signal
 from scripts.swarm_v2.runtime.operations import Observation, Operation, OperationRequest, Operations, OperationTransport
+from scripts.swarm_v2.telemetry import Telemetry
 
 
 class FencedTransport:
@@ -40,6 +41,7 @@ class Controller:
         orphan_cleanup: bool = True,
     ) -> None:
         self.store, self.slug, self.authorize = store, slug, authorize
+        self.telemetry = Telemetry(store, slug)
         self.terminals: Upkeep | None = None
         self.host_keys = HostKeys(store)
         self.pods, self.reconciler = pods, Reconciler(owner_for(slug), orphan_cleanup)
@@ -128,23 +130,46 @@ class Controller:
         self.pods.source.delete_pod(pod.name, pod.uid)
 
     def observe(self, observer: Observer, agent: AgentRecord, signals: Iterable[Signal], now: float) -> Finding | None:
-        self._authority()
-        seen = observer.observe(self.slug, agent, signals, now)
-        source = exit_source(seen)
-        if source is None or not self.accounts.holds(seen.execution_id, seen.generation):
+        identity = {"task": agent.task, "seat": agent.seat, "execution_id": agent.execution_id}
+        with self.telemetry.timed("heartbeat", **identity, expected_generation=agent.generation) as seen:
+            self._authority()
+            seen["controller_epoch"] = self.held.epoch
+            before = observer.get(self.slug, agent.execution_id)
+            found = observer.observe(self.slug, agent, signals, now)
+            changed = before is None or before.state != found.state
+            seen.update(observed_generation=found.generation, reason=found.state.value, audit=changed)
+        source = exit_source(found)
+        if source is None or not self.accounts.holds(found.execution_id, found.generation):
             return None
-        self._authority()
-        return self.accounts.exited(seen.execution_id, seen.generation, source)
+        with self.telemetry.timed("outcome", **identity, expected_generation=agent.generation) as seen:
+            self._authority()
+            finding = self.accounts.exited(found.execution_id, found.generation, source)
+            seen.update(controller_epoch=self.held.epoch, observed_generation=found.generation, reason=source)
+            return finding
 
     def admit(self, agent: AgentRecord, previous_execution_id: str = "") -> AgentRecord:
-        self.require()
-        with lease.fencing(self.held.epoch):
-            return self.store.start_execution(self.slug, agent, previous_execution_id)
+        identity = {"task": agent.task, "seat": agent.seat, "previous_execution_id": previous_execution_id}
+        with self.telemetry.timed("admission", **identity) as seen:
+            occupant = self.store.execution_occupants(self.slug).get(agent.seat)
+            seen["expected_generation"] = occupant.generation + 1 if occupant else 1
+            self.require()
+            seen["controller_epoch"] = self.held.epoch
+            with lease.fencing(self.held.epoch):
+                admitted = self.store.start_execution(self.slug, agent, previous_execution_id)
+            seen.update(execution_id=admitted.execution_id, observed_generation=admitted.generation)
+            return admitted
 
     def execute(self, request: OperationRequest) -> Operation:
-        self.require()
-        with lease.fencing(self.held.epoch):
-            return self.operations.execute(self.slug, request)
+        identity = {"execution_id": request.execution_id, "action": request.action}
+        with self.telemetry.timed("command", **identity, expected_generation=request.generation) as seen:
+            self.require()
+            seen["controller_epoch"] = self.held.epoch
+            with lease.fencing(self.held.epoch):
+                operation = self.operations.execute(self.slug, request)
+            seen.update(
+                operation_id=operation.operation_id, observed_generation=operation.generation, reason=operation.phase
+            )
+            return operation
 
     def release(self) -> bool:
         self.ready = False
