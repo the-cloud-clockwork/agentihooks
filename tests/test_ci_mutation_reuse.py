@@ -273,6 +273,18 @@ def test_the_newest_unexpired_report_artifact_is_read(monkeypatch):
     assert reuse.report(1) is None
 
 
+@pytest.mark.parametrize("red", REDS)
+def test_any_failure_mark_in_a_report_reads_red(monkeypatch, red):
+    answers = {
+        "actions/runs/1/artifacts?per_page=100": {
+            "artifacts": [{"id": 3, "name": "mutation-preflight-report", "expired": False}]
+        },
+        "actions/artifacts/3/zip": _archive(red),
+    }
+    monkeypatch.setattr(reuse, "api", lambda path, binary=False: answers[path])
+    assert reuse.report(1) == (_archive(red), False)
+
+
 def test_the_api_reads_the_repository_through_gh(monkeypatch):
     seen = []
 

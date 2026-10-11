@@ -263,8 +263,8 @@ FIXTURED = PASSING + "\n\n@pytest.fixture\ndef thing():\n    return 1\n"
         ),
         ("tests/test_x.py", PASSING, PASSING + "\n\nasync def test_c():\n    assert 3\n", True),
         ("tests/test_x.py", PASSING, PASSING + "\n\nclass TestC:\n    def test_c(self):\n        assert 3\n", True),
-        ("tests/test_x.py", PASSING, "import os\n" + PASSING, True),
-        ("tests/test_x.py", PASSING, "from os import path\n" + PASSING, True),
+        ("tests/test_x.py", PASSING, "import os\n" + PASSING, False),
+        ("tests/test_x.py", PASSING, "from os import path\n" + PASSING, False),
         ("tests/test_x.py", PASSING, PASSING.replace("def test_a", "@pytest.mark.skip\ndef test_a"), False),
         ("tests/test_x.py", PASSING, PASSING.replace("assert 2", "assert 2 or True"), False),
         ("tests/test_x.py", PASSING, PASSING + "\n\ndef helper():\n    return 3\n", False),
@@ -319,7 +319,8 @@ FIXTURED = PASSING + "\n\n@pytest.fixture\ndef thing():\n    return 1\n"
         ("tests/test_x.py", PASSING, None, False),
         ("tests/cases.py", PASSING, PASSING + "\n\ndef test_c():\n    assert 3\n", False),
         ("tests/test_x.json", "{}\n", '{"a": 1}\n', False),
-        ("tests/test_x.py", PASSING, PASSING + "\nimport os\n\n\ndef test_c():\n    assert os.sep\n", True),
+        ("tests/test_x.py", PASSING, PASSING + "\nimport os\n\n\ndef test_c():\n    assert os.sep\n", False),
+        ("tests/test_x.py", None, "import os\n\n\ndef test_c():\n    assert os.sep\n", True),
         ("tests/test_x.py", PASSING, PASSING + "\nfrom os.path import *\n", False),
         (
             "tests/test_x.py",
@@ -359,25 +360,6 @@ def test_a_test_file_change_counts_as_harmless_only_when_it_adds_tests(tmp_path,
         git("add", name)
     commit("dev.py", "a = 2\n")
     assert adds_only_tests(tmp_path, base, "HEAD", name) is expected
-
-
-@pytest.mark.parametrize(("folder", "expected"), [("tests", False), ("tests/inner", False), ("other", True)])
-def test_an_added_import_named_like_a_conftest_fixture_is_not_an_added_test(tmp_path, folder, expected):
-    from scripts.ci_mutation.scope import adds_only_tests
-
-    git, commit = _repo(tmp_path)
-    (tmp_path / folder).mkdir(parents=True)
-    (tmp_path / folder / "conftest.py").write_text(
-        "import pytest\n\n\n@pytest.fixture(autouse=True)\ndef isolate():\n    pass\n"
-    )
-    (tmp_path / "tests").mkdir(exist_ok=True)
-    (tmp_path / "tests/test_x.py").write_text(PASSING)
-    git("add", ".")
-    base = commit("dev.py", "a = 1\n")
-    (tmp_path / "tests/test_x.py").write_text(PASSING + "\nfrom os import sep as isolate\n")
-    git("add", "tests/test_x.py")
-    commit("dev.py", "a = 2\n")
-    assert adds_only_tests(tmp_path, base, "HEAD", "tests/test_x.py") is expected
 
 
 def test_weakened_tests_name_every_test_change_beyond_added_tests(tmp_path):

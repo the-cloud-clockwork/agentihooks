@@ -39,6 +39,7 @@ jobs:
         if: steps.open.outputs.open == 'false'
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Record the revisions the report grades
         if: steps.open.outputs.open == 'false'

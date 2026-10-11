@@ -59,7 +59,7 @@ def test_preflight_reuses_a_green_report_before_the_mutation_job_takes_a_lane():
     for step in steps[1:4]:
         assert step["if"] == "steps.open.outputs.open == 'false'"
     assert steps[1]["uses"] == "actions/checkout@v4"
-    assert steps[1]["with"] == {"fetch-depth": 0}
+    assert steps[1]["with"] == {"fetch-depth": 0, "persist-credentials": False}
     scope = steps[names.index("Record the revisions the report grades")]
     assert '"$(git merge-base origin/dev HEAD)" "$(git rev-parse HEAD)" > .mutation-gate/scope.json' in scope["run"]
     reuse = steps[names.index("Reuse a green report when this head only adds tests to it")]
