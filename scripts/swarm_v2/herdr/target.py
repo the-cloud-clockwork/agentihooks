@@ -192,11 +192,12 @@ class Router:
     def send(self, target: Target, operation: str, operation_id: str, *args: str) -> subprocess.CompletedProcess | None:
         if not self.mutations:
             raise EndpointRefused("read_only", "pane mutations are switched off; only read only inspection runs")
+        if not _qualified(target):
+            self._refuse("", "bare_pane", BARE)
         if operation not in MUTATIONS:
-            self._refuse(getattr(target, "profile_id", ""), "operation", f"{operation} is not a pane mutation")
+            self._refuse(target.profile_id, "operation", f"{operation} is not a pane mutation")
         if not isinstance(operation_id, str) or not operation_id:
             raise EndpointRefused("operation_id", "a pane mutation needs an operation id")
-        argv = self.command(target, operation, *args)
         key = f"{target.incarnation}/{target.pane_id}"
         with self.deliveries.locked():
             entries = self.deliveries.load()
@@ -205,6 +206,7 @@ class Router:
                 return self._replayed(held, target, key, operation_id)
             if sum(entry.get("state") != "sent" for entry in entries.values()) >= PENDING_LIMIT:
                 raise EndpointRefused("journal_full", "too many pane sends await an audit of their unknown outcome")
+            argv = self.command(target, operation, *args)
             self._confirm(target)
             entries[operation_id] = {"target": key, "state": "pending"}
             self.deliveries.save(entries)
@@ -223,6 +225,20 @@ class Router:
             self._refuse(target.profile_id, "operation_reused", f"{operation_id} was sent to another pane")
         if held.get("state") != "sent":
             raise EndpointRefused("ambiguous_delivery", f"{operation_id} may have reached {key}")
+
+    def settle(self, operation_id: str, delivered: bool) -> None:
+        """The operator's audit of a send whose outcome was unknown: delivered keeps its id as sent, otherwise the id
+        is released so a new request may use it."""
+        with self.deliveries.locked():
+            entries = self.deliveries.load()
+            held = entries.get(operation_id)
+            if held is None or held.get("state") == "sent":
+                raise EndpointRefused("not_pending", f"{operation_id} has no unknown outcome to settle")
+            if delivered:
+                entries[operation_id] = {**held, "state": "sent"}
+            else:
+                del entries[operation_id]
+            self.deliveries.save(entries)
 
     def herdr_target_mismatch_total(self) -> int:
         return sum(self.mismatches.values())

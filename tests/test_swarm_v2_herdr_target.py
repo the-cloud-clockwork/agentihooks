@@ -387,6 +387,30 @@ def test_a_journal_full_of_unknown_outcomes_refuses_new_sends(tmp_path, monkeypa
     assert PENDING_LIMIT == 64
 
 
+def test_the_operator_audit_settles_an_unknown_outcome(tmp_path):
+    client, fleet, desired = world(tmp_path)
+    found = resolved(client, desired[0])
+    real = fleet.__call__
+    client.router.run = lambda command: (
+        subprocess.CompletedProcess(command, 1, "", "") if command[3:5] == ["agent", "prompt"] else real(command)
+    )
+    for operation_id in ("op-delivered", "op-lost"):
+        refusal(lambda operation_id=operation_id: client.router.send(found, "agent_prompt", operation_id, "x"))
+    client.router.run = fleet
+    before = list(fleet.commands)
+    client.router.settle("op-delivered", delivered=True)
+    client.router.settle("op-lost", delivered=False)
+    assert fleet.commands == before
+    entries = json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]
+    assert entries == {"op-delivered": {"target": f"{found.incarnation}/{PANE}", "state": "sent"}}
+    assert client.router.send(found, "agent_prompt", "op-delivered", "x") is None
+    client.router.send(found, "agent_prompt", "op-lost", "again")
+    assert fleet.received()[EXE_A] == ["again"]
+    for operation_id in ("op-delivered", "op-unknown"):
+        reason = refusal(lambda operation_id=operation_id: client.router.settle(operation_id, delivered=False))[0]
+        assert reason == "not_pending"
+
+
 @pytest.mark.parametrize(
     "text", ["{", "[]", '{"version": 2, "deliveries": {}}', '{"version": 1}', '{"version": 1, "deliveries": []}']
 )
