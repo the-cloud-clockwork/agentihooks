@@ -725,6 +725,27 @@ def test_a_full_account_launch_whose_withdraw_is_refused_still_ends_and_frees_th
     assert world.tick(SECOND).ok
 
 
+def test_a_full_account_launch_whose_state_write_fails_still_frees_the_seat(world, monkeypatch):
+    first = world.launch(FIRST)
+    world.launcher.registered(world.session(first), first.grant)
+    put_agent = world.store.put_agent
+
+    def lose(slug, agent):
+        raise SwarmError("execution history kept changing; update was not committed")
+
+    monkeypatch.setattr(world.store, "put_agent", lose)
+    with pytest.raises(SwarmError):
+        world.tick(SECOND)
+    monkeypatch.setattr(world.store, "put_agent", put_agent)
+
+    stuck = world.store.execution_occupants(SLUG)[SECOND]
+    assert stuck.state == "working"
+    assert world.endings() == {stuck.execution_id: {"reason": "account_full", "generation": 1}}
+    world.launcher.exited(first.agent)
+    assert world.tick(SECOND).ok
+    assert world.store.execution_occupants(SLUG)[SECOND].generation == 2
+
+
 def test_the_tick_runtime_places_a_task_again_once_its_full_account_frees(world):
     first = world.launch(FIRST)
     world.launcher.registered(world.session(first), first.grant)
