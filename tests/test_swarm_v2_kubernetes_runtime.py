@@ -368,8 +368,9 @@ def defaulted(pod: dict) -> dict:
         {"key": "node.kubernetes.io/not-ready", "operator": "Exists", "effect": "NoExecute", "tolerationSeconds": 300}
     )
     for volume in spec["volumes"]:
-        if "emptyDir" in volume:
-            volume["emptyDir"]["sizeLimit"] = "9Gi"
+        size = volume.get("emptyDir", {}).get("sizeLimit", "")
+        if size.endswith("Mi") and int(size[:-2]) % 1024 == 0:
+            volume["emptyDir"]["sizeLimit"] = f"{int(size[:-2]) // 1024}Gi"
     for container in spec["containers"]:
         container.update({"terminationMessagePath": "/dev/termination-log", "terminationMessagePolicy": "File"})
         container["resources"]["limits"]["cpu"] = "2"

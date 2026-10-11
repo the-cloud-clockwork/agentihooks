@@ -1,10 +1,29 @@
 """The security relevant fields of a Pod spec, compared exactly; admission may default every other field."""
 
+import re
+
 from scripts.swarm_v2.kubernetes.spec import canonical_digest
 
-GROUPS = ("image", "arguments", "secrets", "environment", "service-account", "volumes", "security-context")
+GROUPS = (
+    "image",
+    "arguments",
+    "secrets",
+    "environment",
+    "service-account",
+    "volumes",
+    "network",
+    "security-context",
+)
 HOST_SHARING = ("hostNetwork", "hostPID", "hostIPC", "shareProcessNamespace")
 KINDS = ("initContainers", "containers", "ephemeralContainers")
+PROBES = ("startupProbe", "readinessProbe", "livenessProbe")
+HANDLERS = ("exec", "httpGet", "tcpSocket", "grpc")
+QUANTITY = re.compile(r"(\d+)([KMGTPE]i|[kMGTPE]?)")
+UNITS = (
+    {"": 1}
+    | {f"{p}i": 1024 ** (i + 1) for i, p in enumerate("KMGTPE")}
+    | {p: 1000 ** (i + 1) for i, p in enumerate("kMGTPE")}
+)
 
 
 def _containers(spec: dict) -> list[dict]:
@@ -33,25 +52,49 @@ def _secret_refs(spec: dict) -> list[list]:
     return sorted(refs, key=repr)
 
 
+def _commands(spec: dict) -> dict:
+    return {
+        container.get("name", ""): [
+            *(container.get(key) for key in ("command", "args", "workingDir", "lifecycle")),
+            {probe: {key: (container.get(probe) or {}).get(key) for key in HANDLERS} for probe in PROBES},
+        ]
+        for container in _containers(spec)
+    }
+
+
+def _bytes(quantity: object) -> object:
+    match = QUANTITY.fullmatch(str(quantity))
+    return int(match[1]) * UNITS[match[2]] if match else quantity
+
+
 def _volume(volume: dict) -> dict:
     # The API server rewrites an emptyDir size into its canonical quantity.
-    if "emptyDir" not in volume:
+    if "sizeLimit" not in volume.get("emptyDir", {}):
         return volume
-    return {**volume, "emptyDir": {key: value for key, value in volume["emptyDir"].items() if key != "sizeLimit"}}
+    return {**volume, "emptyDir": {**volume["emptyDir"], "sizeLimit": _bytes(volume["emptyDir"]["sizeLimit"])}}
+
+
+def _host_ports(spec: dict) -> dict:
+    return {
+        container.get("name", ""): [port.get("hostPort") for port in container.get("ports", [])]
+        for container in _containers(spec)
+    }
 
 
 def fields(spec: dict) -> dict:
     return {
         "image": _named(spec, "image"),
-        "arguments": _named(spec, "command", "args"),
+        "arguments": _commands(spec),
         "secrets": _secret_refs(spec),
         "environment": _named(spec, "env", "envFrom"),
         "service-account": [spec.get("serviceAccountName"), spec.get("automountServiceAccountToken")],
         "volumes": [[_volume(volume) for volume in spec.get("volumes", [])], _named(spec, "volumeMounts")],
+        "network": [spec.get("hostAliases"), spec.get("dnsConfig"), _host_ports(spec)],
         "security-context": {
             "pod": spec.get("securityContext"),
             "containers": _named(spec, "securityContext"),
             "host": [bool(spec.get(key)) for key in HOST_SHARING],
+            "hostUsers": spec.get("hostUsers"),
             "runtimeClassName": spec.get("runtimeClassName"),
         },
     }

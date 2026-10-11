@@ -31,13 +31,14 @@ def rendered() -> dict:
                     ],
                     "envFrom": [{"secretRef": {"name": "extra"}}, {"configMapRef": {"name": "plain"}}],
                     "volumeMounts": [{"name": "home", "mountPath": "/home/worker"}],
+                    "livenessProbe": {"exec": {"command": ["python", "health.py"]}, "periodSeconds": 10},
                     "securityContext": HARDENED,
                 }
             ],
             "volumes": [
                 {"name": "keys", "secret": {"secretName": "keys"}},
                 {"name": "mixed", "projected": {"sources": [{"secret": {"name": "projected"}}, {"configMap": {}}]}},
-                {"name": "home", "emptyDir": {}},
+                {"name": "home", "emptyDir": {"sizeLimit": "1024Mi"}},
             ],
         }
     }
@@ -52,6 +53,7 @@ def live() -> dict:
     for container in spec["containers"] + spec["initContainers"]:
         container["terminationMessagePath"] = "/dev/termination-log"
         container["resources"] = {"limits": {"ephemeral-storage": "2Gi"}}
+    spec["containers"][0]["livenessProbe"].update(successThreshold=1, timeoutSeconds=1)
     return pod
 
 
@@ -85,9 +87,24 @@ def test_fields_names_every_group_in_comparison_order():
             "environment",
             "service-account",
             "volumes",
+            "network",
             "security-context",
         )
     )
+
+
+@pytest.mark.parametrize(
+    ("quantity", "size"),
+    [("1Gi", 1024**3), ("1024Mi", 1024**3), ("2k", 2000), ("3M", 3 * 1000**2), ("512", 512), ("1.5Gi", "1.5Gi")],
+)
+def test_emptydir_sizes_compare_as_bytes(quantity, size):
+    spec = {"volumes": [{"name": "v", "emptyDir": {"sizeLimit": quantity}}]}
+    assert fields(spec)["volumes"][0] == [{"name": "v", "emptyDir": {"sizeLimit": size}}]
+
+
+def test_a_volume_without_a_size_is_compared_as_written():
+    spec = {"volumes": [{"name": "v", "emptyDir": {"medium": "Memory"}}, {"name": "c", "configMap": {"name": "x"}}]}
+    assert fields(spec)["volumes"][0] == spec["volumes"]
 
 
 def change(path, value):
@@ -147,6 +164,16 @@ def change(path, value):
         (lambda spec: spec["containers"][0]["volumeMounts"].append({"name": "root", "mountPath": "/host"}), "volumes"),
         (lambda spec: spec.update(ephemeralContainers=[{"name": "debug", "image": "busybox"}]), "image"),
         (change(("containers", 0, "env", 1, "value"), "http://attacker"), "environment"),
+        (change(("containers", 0, "livenessProbe", "exec", "command"), ["sh", "-c", "curl evil"]), "arguments"),
+        (change(("containers", 0, "livenessProbe", "httpGet"), {"port": 80}), "arguments"),
+        (change(("containers", 0, "lifecycle"), {"postStart": {"exec": {"command": ["id"]}}}), "arguments"),
+        (change(("containers", 0, "workingDir"), "/tmp"), "arguments"),
+        (change(("volumes", 2, "emptyDir", "sizeLimit"), "1Ti"), "volumes"),
+        (change(("volumes", 2, "emptyDir", "sizeLimit"), "1.5Gi"), "volumes"),
+        (change(("hostAliases",), [{"ip": "10.0.0.9", "hostnames": ["brain"]}]), "network"),
+        (change(("dnsConfig",), {"nameservers": ["10.0.0.9"]}), "network"),
+        (change(("containers", 0, "ports"), [{"containerPort": 80, "hostPort": 80}]), "network"),
+        (change(("hostUsers",), True), "security-context"),
         (change(("containers", 0, "envFrom", 1, "configMapRef", "name"), "other"), "environment"),
     ],
 )
