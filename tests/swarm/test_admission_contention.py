@@ -115,3 +115,20 @@ def test_execution_admission_refuses_changed_controller_at_commit(monkeypatch, c
     assert not store.redis.hexists(store.key("fixture", "agents"), candidate.name)
     assert not store.redis.hexists(store.key("fixture", "state-since"), candidate.name)
     assert len(store.redis.hgetall(store.key("fixture", "controller-intents"))) == 1
+
+
+def test_fenced_admission_preserves_projections_timestamps_and_other_agents(monkeypatch):
+    from scripts.swarm.store import AgentRecord
+    from tests.sv2_ctl02_cases import build
+
+    store, authority, controller, clock, start = build(monkeypatch)
+    legacy = AgentRecord("XXXX", "eng", "legacy")
+    store.put_agent("fixture", legacy)
+    candidate = AgentRecord(store.next_name("fixture", "eng"), "eng", "task", seat="eng-1@fixture")
+    admitted_at = clock[0]
+    admitted = controller.admit(candidate)
+    assert {agent.name: agent for agent in store.agents("fixture")} == {
+        legacy.name: legacy,
+        admitted.name: admitted,
+    }
+    assert int(store.redis.hget(store.key("fixture", "state-since"), admitted.name)) == admitted_at
