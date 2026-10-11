@@ -81,7 +81,7 @@ def refused(pod: dict, checker: MountChecker | None = None) -> StorageRefused:
 
 def test_a_policy_without_shared_mounts_renders_only_the_private_volumes(tmp_path):
     pod = PodTemplate(load(tmp_path, policy()), "agentihooks-swarm-fixture").render(launch()).pod
-    assert [found["name"] for found in pod["spec"]["volumes"]] == ["home", "tmp", "launch"]
+    assert [found["name"] for found in pod["spec"]["volumes"]] == ["launch"]
     MountChecker().check(pod)
 
 
