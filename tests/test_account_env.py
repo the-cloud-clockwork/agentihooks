@@ -7,10 +7,23 @@ from urllib.error import URLError
 
 import pytest
 
-from scripts import account_env, install
+from scripts import account_env, aicode_tokens, codex_refresh, codex_router, install
 from scripts.cli_delegates import delegated_cli
 
 pytestmark = pytest.mark.unit
+
+CODEX_PATH_ENV = "AGENTIHOOKS_CODEX_CREDS_PATH"
+CODEX_PATH = "ops/codex-accounts"
+CODEX_TWO = "AH_CX_TOKEN_" + aicode_tokens.slug("Ops.Two@Example.com")
+CODEX_ACCOUNTS = {
+    CODEX_TWO: "cx2",
+    "AH_CX_TOKEN_teamatx_io": "cx t'",
+    "AH_CX_REFRESH_teamatx_io": "rt1",
+    "AH_CX_TOKEN_emptyatx_io": "",
+    "AH_CX_TOKEN_Upper_x": "cxU",
+    "AH_CC_TOKEN_crossatx_io": "ccX",
+    "AGENTIHOOKS_AICODE_TOKEN_REFRESH": "true",
+}
 
 LOADER = 'command -v agentihooks >/dev/null && eval "$(agentihooks accounts env)"'
 
@@ -33,21 +46,22 @@ class _Response(io.BytesIO):
         return False
 
 
-def _openbao(monkeypatch, payload=None, error=None):
+def _openbao(monkeypatch, payload=None, error=None, codex=None):
     seen = []
 
     def fake(request, timeout):
         seen.append((request.full_url, request.get_header("X-vault-token"), timeout))
         if error:
             raise error
-        return _Response(json.dumps({"data": {"data": payload, "metadata": {"version": 1}}}).encode())
+        found = codex if request.full_url.endswith(CODEX_PATH) else payload
+        return _Response(json.dumps({"data": {"data": found, "metadata": {"version": 1}}}).encode())
 
     monkeypatch.setattr(account_env, "urlopen", fake)
     return seen
 
 
 def _environ(tmp_path, monkeypatch, url="http://bao:8200/", bao="fixture-bao"):
-    for name in ("OPENBAO_URL", "OPENBAO_TOKEN", "AGENTIHOOKS_HOME"):
+    for name in ("OPENBAO_URL", "OPENBAO_TOKEN", "AGENTIHOOKS_HOME", CODEX_PATH_ENV):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
     if url:
@@ -65,7 +79,7 @@ def _fallback(tmp_path, text, mode=0o600):
     return path
 
 
-def _evaluated(script: str) -> dict[str, str]:
+def _shell(script: str) -> dict[str, str]:
     done = subprocess.run(
         ["bash", "--noprofile", "--norc", "-c", 'eval "$1"; env -0', "_", script],
         env={"PATH": os.environ["PATH"]},
@@ -73,7 +87,11 @@ def _evaluated(script: str) -> dict[str, str]:
         check=True,
     )
     pairs = (item.decode().partition("=") for item in done.stdout.split(b"\0") if item)
-    return {name: value for name, _, value in pairs if name.startswith("AH_CC_TOKEN_")}
+    return {name: value for name, _, value in pairs}
+
+
+def _evaluated(script: str) -> dict[str, str]:
+    return {name: value for name, value in _shell(script).items() if name.startswith(("AH_CC_", "AH_CX_"))}
 
 
 def _files(root: Path) -> dict[str, bytes]:
@@ -284,3 +302,132 @@ def test_a_shell_without_the_cli_still_starts(tmp_path, monkeypatch):
     )
 
     assert shell.stdout.decode().strip().endswith("started")
+
+
+def _codex_environ(tmp_path, monkeypatch, **kwargs):
+    _environ(tmp_path, monkeypatch, **kwargs)
+    monkeypatch.setenv(CODEX_PATH_ENV, CODEX_PATH)
+
+
+def _codex_fallback(tmp_path, text, mode=0o600):
+    path = tmp_path / ".agentihooks" / "accounts" / "codex.env"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    path.chmod(mode)
+    return path
+
+
+def _codex_shell(tmp_path, monkeypatch, capsys) -> dict[str, str]:
+    _codex_environ(tmp_path, monkeypatch)
+    _openbao(monkeypatch, ACCOUNTS, codex=CODEX_ACCOUNTS)
+    account_env.main(["env"])
+    return _shell(capsys.readouterr().out)
+
+
+def test_codex_token_names_load_from_the_secret_the_setting_names(tmp_path, monkeypatch, capsys):
+    _codex_environ(tmp_path, monkeypatch)
+    seen = _openbao(monkeypatch, ACCOUNTS, codex=CODEX_ACCOUNTS)
+    before = _files(tmp_path)
+
+    assert account_env.main(["env"]) == 0
+
+    out, err = capsys.readouterr()
+    assert [url for url, _, _ in seen] == [
+        "http://bao:8200/v1/secret/data/agentihooks/claude-creds",
+        f"http://bao:8200/v1/secret/data/{CODEX_PATH}",
+    ]
+    assert CODEX_TWO == "AH_CX_TOKEN_ops_twoatexample_com"
+    assert _evaluated(out) == {
+        "AH_CC_TOKEN_ops_2026attcc_dev": "tok b'quoted",
+        "AH_CC_TOKEN_sv2_alphaatexample_com": "tok-a",
+        CODEX_TWO: "cx2",
+        "AH_CX_TOKEN_teamatx_io": "cx t'",
+    }
+    assert err == ""
+    assert _files(tmp_path) == before
+
+
+@pytest.mark.parametrize("setting", [None, ""])
+def test_without_a_named_codex_path_no_codex_secret_is_read(tmp_path, monkeypatch, capsys, setting):
+    _environ(tmp_path, monkeypatch)
+    if setting is not None:
+        monkeypatch.setenv(CODEX_PATH_ENV, setting)
+    seen = _openbao(monkeypatch, ACCOUNTS, codex=CODEX_ACCOUNTS)
+
+    account_env.main(["env"])
+
+    out, err = capsys.readouterr()
+    assert len(seen) == 1
+    assert "AH_CX_" not in out and err == ""
+
+
+def test_a_loaded_shell_holds_codex_access_tokens_but_no_refresh_token_or_authority(tmp_path, monkeypatch, capsys):
+    shell = _codex_shell(tmp_path, monkeypatch, capsys)
+
+    assert shell["AH_CX_TOKEN_teamatx_io"] == "cx t'"
+    assert not [name for name in shell if name.startswith("AH_CX_REFRESH_")]
+    assert "rt1" not in shell.values()
+    assert "AGENTIHOOKS_AICODE_TOKEN_REFRESH" not in shell
+
+
+def test_codex_refresh_in_a_loaded_shell_makes_no_grant_and_no_openbao_call(tmp_path, monkeypatch, capsys):
+    shell = _codex_shell(tmp_path, monkeypatch, capsys)
+    grants, requests = [], []
+    environ = {
+        **shell,
+        "OPENBAO_URL": "http://bao:8200",
+        "OPENBAO_TOKEN": "fixture-bao",
+        "AGENTIHOOKS_AICODE_TOKEN_STORE": "openbao",
+        CODEX_PATH_ENV: CODEX_PATH,
+    }
+    deps = codex_refresh.Deps(grant=grants.append, opener=lambda request, timeout=None: requests.append(request))
+
+    assert codex_refresh.main([], environ, deps) == 0
+
+    assert shell[CODEX_TWO] == "cx2"
+    assert grants == [] and requests == []
+    assert "not the refresh authority" in capsys.readouterr().out
+
+
+def test_the_router_routes_among_every_codex_account_a_shell_loads(tmp_path, monkeypatch, capsys):
+    shell = _codex_shell(tmp_path, monkeypatch, capsys)
+
+    assert sorted(account.env_name for account in codex_router.token_accounts(shell)) == [
+        CODEX_TWO,
+        "AH_CX_TOKEN_teamatx_io",
+    ]
+
+
+def test_unreachable_openbao_falls_back_to_the_owner_only_codex_file(tmp_path, monkeypatch, capsys):
+    _codex_environ(tmp_path, monkeypatch)
+    _openbao(monkeypatch, error=URLError("refused"))
+    _codex_fallback(tmp_path, "export AH_CX_TOKEN_oneatx_io='cx1'\nAH_CX_REFRESH_oneatx_io=rt1\nAH_CC_TOKEN_x=cc1\n")
+
+    assert account_env.main(["env"]) == 0
+
+    out, err = capsys.readouterr()
+    assert _evaluated(out) == {"AH_CX_TOKEN_oneatx_io": "cx1"}
+    assert len(err.strip().splitlines()) == 2
+    assert "codex.env" in err and "cx1" not in err
+
+
+def test_a_machine_without_openbao_loads_the_codex_file(tmp_path, monkeypatch, capsys):
+    _environ(tmp_path, monkeypatch, url="", bao="")
+    _codex_fallback(tmp_path, "AH_CX_TOKEN_oneatx_io=cx1\n")
+
+    account_env.main(["env"])
+
+    out, err = capsys.readouterr()
+    assert _evaluated(out) == {"AH_CX_TOKEN_oneatx_io": "cx1"}
+    assert len(err.strip().splitlines()) == 1
+
+
+def test_a_codex_file_others_can_read_is_refused(tmp_path, monkeypatch, capsys):
+    _environ(tmp_path, monkeypatch, url="", bao="")
+    _codex_fallback(tmp_path, "AH_CX_TOKEN_oneatx_io=cx1\n", 0o644)
+
+    account_env.main(["env"])
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert "600" in err and "codex.env" in err
