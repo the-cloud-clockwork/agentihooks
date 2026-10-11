@@ -1,18 +1,8 @@
 import pytest
 
 from scripts.inbox import channel
-from scripts.inbox.store import InboxStore
 
 pytestmark = [pytest.mark.xdist_group("mcp-sdk"), pytest.mark.usefixtures("recovery_deadline")]
-
-
-@pytest.fixture
-def backend():
-    import fakeredis
-
-    server = fakeredis.FakeServer()
-    client = fakeredis.FakeRedis(server=server, decode_responses=True)
-    return server, InboxStore(client)
 
 
 def test_running_channel_rechecks_pending_items_after_redis_returns(backend, monkeypatch):

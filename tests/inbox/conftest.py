@@ -15,3 +15,14 @@ def recovery_deadline():
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous)
+
+
+@pytest.fixture
+def channel_backend():
+    import fakeredis
+
+    from scripts.inbox.store import InboxStore
+
+    server = fakeredis.FakeServer()
+    client = fakeredis.FakeRedis(server=server, decode_responses=True)
+    return server, InboxStore(client)
