@@ -31,6 +31,7 @@ NO_ACCOUNT = "no approved account has quota and a free launch slot"
 Target = Callable[[SpawnRequest], dict]
 AccountChooser = Callable[[int, str | None, tuple[str, str] | None], str | None]
 PlannedAccount = Callable[[str], str | None]
+Ending = Callable[[AgentRecord, str], AgentRecord]
 
 
 class WorkerHomes(Protocol):
@@ -101,6 +102,10 @@ def quota_predecessor(task: dict) -> tuple[str, str] | None:
     return saved["harness"], saved["account"]
 
 
+def kept(agent: AgentRecord, reason: str) -> AgentRecord:
+    return agent
+
+
 class DistributedLaunch:
     def __init__(
         self,
@@ -119,6 +124,13 @@ class DistributedLaunch:
 
     def spawn(self, request: SpawnRequest, agent: AgentRecord, terms: LaunchTerms, previous: str) -> Launch:
         admitted = self.controller.admit(replace(agent, account=terms.account), previous)
+        return self._place(request, admitted, terms, self.end_refused)
+
+    def relaunch(self, request: SpawnRequest, admitted: AgentRecord, terms: LaunchTerms) -> Launch:
+        """A refused relaunch leaves its replacement unended, so the next recovery pass places it again."""
+        return self._place(request, admitted, replace(terms, account=admitted.account), kept)
+
+    def _place(self, request: SpawnRequest, admitted: AgentRecord, terms: LaunchTerms, refused: Ending) -> Launch:
         grant = self.grants.issue(
             self.slug,
             admitted.execution_id,
@@ -130,7 +142,7 @@ class DistributedLaunch:
         try:
             slot = self.capacity.reserve(grant, terms.cap, terms.ttl_ms)
         except SwarmError as error:
-            ended = self.end_refused(admitted, str(error))
+            ended = refused(admitted, str(error))
             self.grants.withdraw(self.slug, grant)
             status = Status.UNAVAILABLE if str(error) == ACCOUNT_FULL else Status.REFUSED
             return Launch(ended, grant, None, Outcome("spawn", status, backend, detail=str(error)))
@@ -161,6 +173,8 @@ class DistributedLaunch:
         if not api_url:
             return Outcome("spawn", Status.REFUSED, backend, detail=NO_API_URL)
         profile = seat_profile(request)
+        if self.router.placement is not None and profile in self.router.placement.local_profiles:
+            return Outcome("spawn", Status.REFUSED, backend, detail=f"profile {profile} runs only on the workstation")
         if not shipped(profile, terms.bundled):
             return Outcome(
                 "spawn", Status.REFUSED, backend, detail=f"profile {profile} is not shipped in the worker image"

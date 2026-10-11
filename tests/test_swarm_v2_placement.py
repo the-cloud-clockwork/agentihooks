@@ -57,6 +57,10 @@ def request(lane, name="a1", **task):
         ("eng", {"profile": "engineer"}, BACKEND),
         ("eng", {"profile": "frontend"}, LOCAL),
         ("ci", {"profile": "frontend"}, LOCAL),
+        ("eng", {"profile_decision": {"profile": "frontend"}}, LOCAL),
+        ("eng", {"profile_decision": {"profile": "engineer"}}, BACKEND),
+        ("eng", {"profile": "engineer", "profile_decision": {"profile": "frontend"}}, LOCAL),
+        ("eng", {"profile": "frontend", "profile_decision": {}}, LOCAL),
         (MASTER, {}, LOCAL),
         ("plan", {}, LOCAL),
         ("dispatch", {}, LOCAL),
@@ -99,6 +103,20 @@ def test_the_tick_runtime_without_kubernetes_keeps_every_spawn_local():
     assert herdr.spawned == ["e1"]
     assert list(runtime.router.runtimes) == [LOCAL]
     assert runtime.router.placement is None
+
+
+def test_the_tick_runtime_places_a_task_by_the_profile_the_tick_decided():
+    herdr, launched = Herdr(), []
+
+    def launch(request):
+        launched.append(request.name)
+        return Outcome("spawn", Status.OK, BACKEND, Placed("", "claude", placement=BACKEND))
+
+    runtime = routed({}, herdr, kubernetes=Remote(), launch=launch)
+    runtime.spawn(CONFIG, "eng", "page", {"id": "t1", "profile_decision": {"profile": "frontend"}})
+    runtime.spawn(CONFIG, "eng", "build", {"id": "t2", "profile_decision": {"profile": "engineer"}})
+    assert herdr.spawned == ["page"]
+    assert launched == ["build"]
 
 
 def operation(phase):

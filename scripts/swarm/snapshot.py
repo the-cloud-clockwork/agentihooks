@@ -7,17 +7,22 @@ A restore reopens each agent in its own conversation where it can and leaves the
 marked finished, so the next tick retires it, reopens its task and primes the successor with seat memory and handoffs.
 """
 
+import hashlib
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
 
 from scripts.swarm import naming, resume
 from scripts.swarm.store import SwarmError
+from scripts.swarm_v2.checkpoints import git_capture
 
 VERSION = 1
 KEEP = 10
 MINUTES = 30
+SOURCE_SWITCH = "AGENTIHOOKS_SWARM_SOURCE_CAPTURE"
+SOURCE_REF = "AGENTIHOOKS_SWARM_SOURCE_REF"
 
 
 def path(slug):
@@ -59,9 +64,10 @@ def auto(store, slug, now_ms, environ, run=subprocess.run):
     minutes = interval_minutes(config, environ)
     if config.state != "running" or minutes <= 0 or (last is not None and now_ms - last < minutes * 60_000):
         return None
-    taken = take(store, slug, now_ms, run, auto_dir(slug) / f"auto-{now_ms}.json")
+    taken = take(store, slug, now_ms, run, auto_dir(slug) / f"auto-{now_ms}.json", environ)
     for old in automatic(slug)[:-KEEP]:
         old.unlink(missing_ok=True)
+    prune_sources(slug)
     return taken
 
 
@@ -108,15 +114,69 @@ def worktrees(repo, names, run=subprocess.run):
     return {name: found.get(naming.plain(name), "") for name in names}
 
 
-def take(store, slug, now_ms, run=subprocess.run, target=None):
+def sources_dir(slug):
+    return path(slug).parent / "sources"
+
+
+def _keep(folder, data):
+    """Objects are named by their sha256, so a torn write is found by its name and written again."""
+    target = folder / hashlib.sha256(data).hexdigest()
+    if target.exists() and hashlib.sha256(target.read_bytes()).hexdigest() == target.name:
+        return
+    folder.mkdir(parents=True, exist_ok=True)
+    target.touch(mode=0o600)
+    target.write_bytes(data)
+
+
+def sources(slug, found, environ):
+    """Each agent worktree's committed, staged, unstaged and permitted untracked work, kept beside its path.
+
+    The switch set to 0 keeps paths only, as before; restore still reopens the saved worktree paths."""
+    if environ.get(SOURCE_SWITCH) == "0":
+        return {}
+    ref, captured = environ.get(SOURCE_REF) or "origin/dev", {}
+    for name, worktree in found.items():
+        if not worktree:
+            continue
+        try:
+            source = git_capture.capture(Path(worktree), ref)
+        except git_capture.SourceError as error:
+            captured[name] = {"error": str(error)}
+            continue
+        for data in source.materials.values():
+            _keep(sources_dir(slug), data)
+        captured[name] = source.fields()
+    return captured
+
+
+def referenced(slug):
+    """Every source object a kept snapshot still names."""
+    held = set()
+    for file in (path(slug), *automatic(slug)):
+        if file.exists():
+            for fields in json.loads(file.read_bytes()).get("sources", {}).values():
+                held.update(ref["sha256"] for ref in fields.get("inventory", {}).values())
+    return held
+
+
+def prune_sources(slug):
+    held = referenced(slug)
+    for file in sources_dir(slug).glob("*"):
+        if file.name not in held:
+            file.unlink()
+
+
+def take(store, slug, now_ms, run=subprocess.run, target=None, environ=None):
     config, state = store.config(slug), store.export(slug)
+    found = worktrees(config.repo, [a.name for a in store.agents(slug)], run)
     doc = {
         "version": VERSION,
         "slug": slug,
         "taken_at": now_ms,
         "state": state,
         "ledger": stored_ledger(slug),
-        "worktrees": worktrees(config.repo, [a.name for a in store.agents(slug)], run),
+        "worktrees": found,
+        "sources": sources(slug, found, os.environ if environ is None else environ),
     }
     target = target or path(slug)
     target.parent.mkdir(parents=True, exist_ok=True)

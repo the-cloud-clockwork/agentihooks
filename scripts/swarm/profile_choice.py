@@ -63,6 +63,8 @@ def pick(slug: str, lane: str, lane_config: dict, task: dict, environ: dict | No
     pinned = lane_config.get("profile") or DEFAULT_PROFILES[lane]
     if task.get("profile"):
         return ProfileDecision(task["profile"], "task", "explicit task profile")
+    if saved := task.get("profile_decision"):
+        return ProfileDecision(**{**saved, "anchors": tuple(saved["anchors"]), "overlays": tuple(saved["overlays"])})
     if lane != CLASSIFIED_LANE or pinned != DEFAULT_PROFILES[lane]:
         return ProfileDecision(pinned, "lane", f"{lane} lane")
     if needs_ci_push(task):

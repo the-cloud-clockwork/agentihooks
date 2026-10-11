@@ -77,6 +77,18 @@ def test_explicit_task_profile_wins_without_classifier(monkeypatch):
     assert decision == profile_choice.ProfileDecision("qa", "task", "explicit task profile")
 
 
+def test_the_decision_the_tick_recorded_is_reused_without_the_classifier(monkeypatch):
+    monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("recorded decision asked classifier"))
+    saved = profile_choice.ProfileDecision(
+        "frontend", "classifier", "frontend", "m1", 0.8, True, ("task:t9", "phase:p1"), ("o1",), "rev1"
+    )
+    task = {**TASK, "profile_decision": saved.record()}
+    assert profile_choice.pick("sw", "eng", {}, task) == saved
+    assert profile_choice.pick("sw", "eng", {}, {**task, "profile": "qa"}) == profile_choice.ProfileDecision(
+        "qa", "task", "explicit task profile"
+    )
+
+
 @pytest.mark.parametrize(
     "lane,lanes,expected",
     [

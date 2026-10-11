@@ -12,6 +12,7 @@ from hooks.context import account_sessions
 from scripts.hive import auth as hive_auth
 from scripts.swarm import capacity, host_budget, lease
 from scripts.swarm import controller as loop
+from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import SpawnError
 from scripts.swarm_v2 import deployed, image_tag, quota
@@ -199,6 +200,10 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
         "terms": LaunchTerms("", 2, 300_000, (PROJECT,), "swarm", API_URL),
         "target": workers.target,
     }
+    assert runtime.relaunch.func == launcher.relaunch
+    assert runtime.relaunch.keywords == {"terms": runtime.launch.keywords["terms"]}
+    assert service.recover.replacements.relaunch == runtime.relaunch
+    assert isinstance(service.recover.replacements.ledger, LedgerClient)
     assert store.config(SLUG).api_url == API_URL
     assert (placed.placement, placed.harness, placed.profile) == (BACKEND, "claude", "general")
     [pod] = pods.created
@@ -588,6 +593,24 @@ def test_the_launch_record_names_the_admitted_execution_and_the_worker_settings(
     assert registry[0] == [(REPOSITORY, "dev")]
 
 
+def test_a_replacement_launch_record_carries_the_checkpoint_it_resumes_from(tmp_path, registry):
+    workers = deployed.Workers.from_environ(_workers(tmp_path), SLUG)
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=API_URL)
+    task = {**_task(), "checkpoint": "ckpt-one-2"}
+
+    record = workers.launch(SpawnRequest(config, "eng", "engineer-1", task))
+
+    assert record["task_payload"] == {
+        "task_id": "t1",
+        "lane": "eng",
+        "name": "engineer-1",
+        "endpoints": {"api_url": API_URL},
+        "checkpoint": "ckpt-one-2",
+    }
+    fresh = workers.launch(SpawnRequest(config, "eng", "engineer-1", {**task, "checkpoint": ""}))
+    assert "checkpoint" not in fresh["task_payload"]
+
+
 def test_a_pod_policy_that_delivers_a_bundle_admits_bundle_profiles(tmp_path):
     path = tmp_path / "bundled-pod-policy.json"
     bundle = {"image_repository": "ghcr.io/fixture/agentihooks-bundle", "tag": "dev", "pull_access": "bundle-pull"}
@@ -656,6 +679,14 @@ def test_a_profile_the_pod_policy_lacks_is_refused(tmp_path):
         deployed.Workers.from_environ(_workers(tmp_path, **{deployed.PROFILE_ENV: "gpu"}), SLUG)
 
     assert str(refused.value) == "the Pod policy has no gpu profile"
+
+
+def test_a_worker_profile_that_runs_only_on_the_workstation_is_refused(tmp_path):
+
+    with pytest.raises(SwarmError) as refused:
+        deployed.Workers.from_environ(_workers(tmp_path, **{deployed.PROFILE_ENV: "frontend"}), SLUG)
+
+    assert str(refused.value) == f"{deployed.PROFILE_ENV} frontend runs only on the workstation"
 
 
 def test_a_pod_policy_owned_by_another_swarm_is_refused(tmp_path):
