@@ -26,10 +26,6 @@ def lines(text, count):
     return found[-count:]
 
 
-def _holder(store, slug, pane):
-    return next((a.name for a in store.agents(slug) if a.pane_id == pane), "")
-
-
 def _tail(runtime, pane):
     try:
         return lines(runtime.pane_tail(pane, TAIL_LINES), TAIL_LINES)
@@ -39,9 +35,9 @@ def _tail(runtime, pane):
 
 def _close(slug, store, runtime, pane, entry):
     key, agent = store.key(slug, HELD), entry["agent"]
-    if holder := _holder(store, slug, pane):
+    if holders := [a.name for a in store.agents(slug) if a.pane_id == pane]:
         store.redis.hdel(key, pane)
-        return f"kept pane {pane}: {holder} holds it now"
+        return f"kept pane {pane}: {holders[0]} holds it now"
     if agent in runtime.live_names():
         return ""
     try:

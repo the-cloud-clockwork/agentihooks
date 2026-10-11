@@ -25,7 +25,7 @@ class PaneRuntime(FakeRuntime):
     def __init__(self, screens=None, **kwargs):
         super().__init__(**kwargs)
         self.screens, self.panes_closed, self.read = dict(screens or {}), [], []
-        self.owned, self.close_error, self.list_error = set(self.screens), None, None
+        self.owned, self.close_error, self.list_error, self.asked = set(self.screens), None, None, []
 
     def pane_tail(self, pane_id, lines):
         self.read.append((pane_id, lines))
@@ -34,6 +34,7 @@ class PaneRuntime(FakeRuntime):
         return self.screens[pane_id]
 
     def launched_pane(self, pane_id, name):
+        self.asked.append((pane_id, name))
         if self.list_error:
             raise RuntimeError(self.list_error)
         return pane_id in self.owned
@@ -95,6 +96,7 @@ def test_a_failed_launch_pane_closes_after_two_minutes_with_its_last_lines_kept(
     row = _failed_row(store)
     assert row["pane_lines"] == ["$ agentihooks codex --route default", "Codex account default not found", "", "$"]
     assert row["error"] == "Codex account default not found"
+    assert runtime.asked == [("w1:p9", row["agent"])]
     assert failed_panes.held(store, "sw") == {}
     assert f"closed pane w1:p9 of the failed launch of {row['agent']} for t1" in actions
     tick("sw", store, ledger, runtime, now_ms=FAILED_AT + 3 * failed_panes.CLOSE_AFTER_MS)
@@ -182,6 +184,13 @@ def test_a_spawn_failure_without_a_pane_holds_nothing(store):
     assert _failed_row(store)["pane_id"] == ""
 
 
+def test_a_crash_that_is_no_spawn_error_records_no_pane(store):
+    runtime = PaneRuntime(crash=OSError("worktree timer"))
+    tick("sw", store, tasks(("t1", "eng")), runtime, now_ms=FAILED_AT)
+    assert failed_panes.held(store, "sw") == {}
+    assert _failed_row(store)["pane_id"] == ""
+
+
 def test_a_launch_waiting_on_quota_holds_no_pane(store):
     runtime = PaneRuntime(crash=SpawnError("no seats", "unavailable", pane_id="w1:p9"))
     tick("sw", store, tasks(("t1", "eng")), runtime, now_ms=FAILED_AT)
@@ -203,7 +212,7 @@ def test_a_worker_that_exits_before_its_launch_check_passes_has_its_pane_held_th
     store.update("sw", state="paused")
     failed = FAILED_AT + launch_check.DEADLINE_MS
     tick("sw", store, ledger, runtime, now_ms=failed)
-    assert "w1:p1" not in runtime.closed
+    assert "w1:p1" not in runtime.closed and runtime.closed.count("") == 1
     assert failed_panes.held(store, "sw")["w1:p1"]["reason"] == EXITED_BEFORE_LIFE
     tick("sw", store, ledger, runtime, now_ms=failed + failed_panes.CLOSE_AFTER_MS)
     assert runtime.panes_closed == ["w1:p1"]
@@ -243,6 +252,12 @@ def test_a_failed_retirement_holds_no_pane(store):
 def test_lines_of_an_unknown_launch_are_not_recorded(store):
     store.note_launch_pane("sw", "nobody", ["x"], "why")
     assert store.launches("sw") == []
+
+
+def test_lines_without_a_reason_keep_an_empty_error(store):
+    store.record_launch("sw", AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w1:p1"), "started")
+    store.note_launch_pane("sw", "engineer@a1b2c3-0001", ["x"])
+    assert [(r["error"], r["pane_lines"]) for r in store.launches("sw")] == [("", ["x"])]
 
 
 def test_status_lists_failed_launches_with_their_lines(store):
@@ -291,6 +306,10 @@ def test_a_launch_that_opened_no_pane_names_none(tmp_path):
     assert _launch_fails(tmp_path, "", 2).pane_id == ""
 
 
+def test_a_launch_whose_profile_validation_fails_without_a_pane_names_none(tmp_path):
+    assert _launch_fails(tmp_path, "status=started\nroute_status=routed\n").pane_id == ""
+
+
 def _record(monkeypatch, tmp_path, name, pane, terminal, at):
     environ = {herdr_panes.ROOT_ENV: str(tmp_path / "panes"), "HERDR_SOCKET_PATH": str(tmp_path / "herdr.sock")}
     for key, value in environ.items():
@@ -300,9 +319,10 @@ def _record(monkeypatch, tmp_path, name, pane, terminal, at):
 
 def test_a_timed_out_launch_names_the_newest_pane_it_opened(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_module.time, "time", lambda: 5.0)
-    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0001", "w1:p7", "term_old", 5_000)
-    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0001", "w1:p9", "term_new", 5_001)
-    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0002", "w1:p8", "term_other", 5_002)
+    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0001", "w1:p6", "term_first", 5_000)
+    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0001", "w1:p7", "term_old", 5_001)
+    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0001", "w1:p9", "term_new", 5_002)
+    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0002", "w1:p8", "term_other", 5_003)
     error = _launch_fails(tmp_path, "", run_error=subprocess.TimeoutExpired("init-agent", 300))
     assert (error.pane_id, error.status, str(error)) == (
         "w1:p9",
@@ -318,15 +338,29 @@ def test_a_timed_out_launch_never_adopts_a_pane_opened_before_it(tmp_path, monke
     assert error.pane_id == ""
 
 
+def test_a_timed_out_launch_adopts_a_pane_opened_the_moment_it_started(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_module.time, "time", lambda: 5.0)
+    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0001", "w1:p7", "term_now", 5_000)
+    error = _launch_fails(tmp_path, "", run_error=subprocess.TimeoutExpired("init-agent", 300))
+    assert error.pane_id == "w1:p7"
+
+
 def test_a_pane_belongs_to_a_launch_only_while_herdr_shows_its_terminal(tmp_path, monkeypatch):
     _record(monkeypatch, tmp_path, "engineer@a1b2c3-0001", "w1:p9", "term_a", 1)
     listed = {"panes": [{"pane_id": "w1:p9", "terminal_id": "term_a"}]}
-    runtime = HerdrRuntime(home=tmp_path, herdr=lambda args: listed)
+
+    def herdr(args):
+        assert args == ["pane", "list"]
+        return listed
+
+    runtime = HerdrRuntime(home=tmp_path, herdr=herdr)
     assert runtime.launched_pane("w1:p9", "engineer@a1b2c3-0001") is True
     assert runtime.launched_pane("w1:p9", "engineer@a1b2c3-0002") is False
     listed["panes"] = [{"pane_id": "w1:p9", "terminal_id": "term_operator"}]
     assert runtime.launched_pane("w1:p9", "engineer@a1b2c3-0001") is False
     listed["panes"] = []
+    assert runtime.launched_pane("w1:p9", "engineer@a1b2c3-0001") is False
+    del listed["panes"]
     assert runtime.launched_pane("w1:p9", "engineer@a1b2c3-0001") is False
 
 
