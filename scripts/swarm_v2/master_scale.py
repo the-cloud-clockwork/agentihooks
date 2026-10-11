@@ -31,7 +31,7 @@ ASK = (
     "the remaining masters."
 )
 HANDED = "Master seat {address} of swarm {slug} retired as the swarm shrank. Its handoff document follows.\n\n"
-EARLY = "Master seat {address} retired; the lead {lead} answers its phases {phases} until the master count falls."
+EARLY = "Master seat {address} retired; the lead {lead} answers {held} until the count falls or the seat refills."
 
 
 def rule_of(text: str) -> str:
@@ -144,7 +144,8 @@ def _retire_early(slug, store, doc, address, asked, now_ms):
     """A seat below a live higher seat keeps its phases until the count falls; the lead answers them meanwhile."""
     action = _retire(slug, store, address, asked, now_ms)
     owned = [p for p, owner in masters.MasterSeats(store.redis).owners(slug, doc).items() if owner == address]
-    text = EARLY.format(address=address, lead=_address(slug, 1), phases=", ".join(owned) or "no phase")
+    held = f"its phases {', '.join(owned)}" if owned else "no phase (the seat owned none)"
+    text = EARLY.format(address=address, lead=_address(slug, 1), held=held)
     MastersChannel(store.redis).announce(slug, text, now_ms / 1000)
     return action
 

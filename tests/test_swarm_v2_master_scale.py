@@ -251,10 +251,23 @@ def test_an_emptied_lower_seat_is_not_relaunched_while_a_higher_seat_retires(swa
     assert any(f"notes of {SECOND}" in item.text for item in inbox.pending_items(LEAD))
     assert inbox.get(question.id).address == LEAD
     assert masters.route(f"phases/{PHASES[1]}", DOC, lambda: owners(store), [LEAD, THIRD, FOURTH], LEAD) == LEAD
-    held = ", ".join(p for p in PHASES if owners(store)[p] == SECOND)
-    assert posts(store)[-1].text == master_scale.EARLY.format(address=SECOND, lead=LEAD, phases=held)
+    held = "its phases " + ", ".join(p for p in PHASES if owners(store)[p] == SECOND)
+    assert posts(store)[-1].text == master_scale.EARLY.format(address=SECOND, lead=LEAD, held=held)
     assert posts(store)[-1].at == (NOW + 2 * MINUTE + HOLD) / 1000 and len(posts(store)) == 2
     assert run(store, runtime, NOW + 3 * MINUTE + HOLD) == []
+
+
+def test_an_early_retired_seat_that_owns_no_phase_says_so(swarm):
+    store, _ = swarm
+    empty = {**DOC, "phases": []}
+
+    action = master_scale._retire_early(SLUG, store, empty, THIRD, [NOW, "none"], NOW + MINUTE)
+
+    assert action == f"retired master seat {THIRD} after 60 seconds"
+    assert posts(store)[-1].text == (
+        f"Master seat {THIRD} retired; the lead {LEAD} answers no phase (the seat owned none) until the count falls "
+        "or the seat refills."
+    )
 
 
 def test_twenty_back_to_five_retires_extra_seats_through_their_handoffs(swarm):

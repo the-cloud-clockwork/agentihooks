@@ -657,7 +657,7 @@ def config_value(key, value):
 
 
 def _split_master_pairs(pairs, key, parse):
-    """The master count and its scaling rule live beside the swarm config: checked with the other pairs, stored after."""
+    """The master count and its scaling rule sit beside the swarm config: checked with the other pairs, stored after."""
     split = [(pair, *pair.partition("=")) for pair in pairs]
     values = [parse(value) for _, name, _, value in split if name == key]
     return values, [pair for pair, name, _, _ in split if name != key]
