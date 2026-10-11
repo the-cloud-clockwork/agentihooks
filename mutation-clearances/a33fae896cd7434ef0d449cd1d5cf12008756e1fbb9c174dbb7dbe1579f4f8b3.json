@@ -1,6 +1,0 @@
-{
-  "scripts/swarm/cli.py:scripts.swarm.cli.x_cmd_status__mutmut_2:8b6b5a2c5825c365bcc1ec4232a4cd90613cefcf2e99f232992581e1c9b3487b": {
-    "reader": "Standards reader for swarm outage detector",
-    "reason": "show only truth-tests as_json; False and None select identical text output and return."
-  }
-}
