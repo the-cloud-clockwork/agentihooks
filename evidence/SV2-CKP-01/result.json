@@ -31,7 +31,8 @@
   },
   "validation": {
     "red": "Proofs run 38134818570 on the tests only commit 10894903 failed collecting the model tests with ImportError for scripts.swarm_v2.checkpoints.model",
-    "tests": "Proofs run 38135330957 at tested_commit: 165 passed across the checkpoint model tests, the case module and the swarm v2 contract suites; the B and C comparisons failed only on the records the review changes moved, and the regenerated records are committed",
+    "tests": "Proofs run 38137193349 at 0eb82458, which differs from tested_commit only in this evidence: 168 passed across the checkpoint model tests, the case module with its committed A, B and C records, and the swarm v2 contract suites",
+    "mutation": "Mutation preflight 38136175329 left three survivors on the manifest encoding (sort_keys); tested_commit adds a key order replay test, and mutation preflight 38137189889 at 0eb82458 passed",
     "lint": "ruff check, ruff format and the size gate passed through python -m scripts.ci_prepush",
     "review": "Standards reader: one boundary test added (an execution generation below the task generation); evidence records were pending at review time. Spec reader: no must fix findings; case C now proves a stale attempt cannot overwrite the committed checkpoint, and a case B key was renamed. Both reviews closed in round one.",
     "local": "No local tests or mutation runs, per the operator prohibition"
