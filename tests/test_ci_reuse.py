@@ -17,7 +17,8 @@ pytestmark = pytest.mark.unit
 PROGRAM = Path(__file__).resolve().parents[1] / "scripts/ci_reuse.py"
 FETCH = "Fetch the evidence of recent passed runs"
 QUEUE_REF = "refs/heads/gh-readonly-queue/dev/pr-5-0123abcd"
-RUNS = "repos/o/r/actions/workflows/test.yml/runs?event=pull_request&status=success&per_page=100"
+RUNS = "repos/o/r/actions/workflows/test.yml/runs?event=pull_request&status=success&head_sha={}&per_page=100"
+PULL = "repos/o/r/pulls/5"
 JOBS = "repos/o/r/actions/runs/7/attempts/1/jobs?per_page=100"
 ARTIFACTS = "repos/o/r/actions/runs/7/artifacts?per_page=100"
 
@@ -140,7 +141,8 @@ def full_source(reuse_repo, tmp_path):
     artifacts.append({"id": 51, "name": "coverage-3.12-1", "expired": False})
     artifacts.append({"id": 52, "name": "split-3.12", "expired": False})
     responses = {
-        RUNS: {"workflow_runs": [source]},
+        PULL: {"number": 5, "head": {"sha": head}},
+        RUNS.format(head): {"workflow_runs": [source]},
         JOBS: {"total_count": len(jobs), "jobs": jobs},
         ARTIFACTS: {"total_count": len(artifacts), "artifacts": artifacts},
         "repos/o/r/actions/artifacts/42/zip": {"binary": base64.b64encode(archive.getvalue()).decode()},
@@ -253,6 +255,7 @@ def test_incompatible_authenticated_source_metadata_runs_fully(full_source, tmp_
     result = invoke(root, base, queue, "merge_group", tmp_path / "different.json", env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "reused=false" in result.stdout
+    assert f"Refused run 7: {field} differed\n" in result.stdout
 
 
 @pytest.mark.parametrize("field", ["base", "grader", "workflow", "day"])
@@ -262,6 +265,16 @@ def test_any_changed_trusted_grading_input_runs_fully(full_source, tmp_path, fie
     publish_record(env, responses, record)
     result = invoke(root, base, queue, "merge_group", tmp_path / "inputs.json", env)
     assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=false" in result.stdout
+    assert f"Refused run 7: inputs.{field} differed\n" in result.stdout
+
+
+def test_a_head_with_no_passed_run_says_so(full_source, tmp_path):
+    root, base, head, queue, env, responses, _ = full_source
+    responses[RUNS.format(head)]["workflow_runs"] = []
+    Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
+    result = invoke(root, base, queue, "merge_group", tmp_path / "none.json", env)
+    assert "No passed pull request run for this head\n" in result.stdout
     assert "reused=false" in result.stdout
 
 
@@ -290,11 +303,13 @@ def test_every_required_source_job_must_have_passed(full_source, tmp_path, name,
         "unlisted-artifacts",
         "missing-archive",
         "unlisted-jobs",
+        "unlisted-pull",
     ],
 )
 def test_unavailable_source_evidence_runs_fully(full_source, tmp_path, kind):
-    root, base, _, queue, env, responses, _ = full_source
-    unlisted = {"unlisted-runs": RUNS, "unlisted-artifacts": ARTIFACTS, "unlisted-jobs": JOBS}
+    root, base, head, queue, env, responses, _ = full_source
+    unlisted = {"unlisted-runs": RUNS.format(head), "unlisted-artifacts": ARTIFACTS, "unlisted-jobs": JOBS}
+    unlisted["unlisted-pull"] = PULL
     if kind in unlisted:
         responses.pop(unlisted[kind])
     elif kind == "missing-archive":
@@ -323,13 +338,14 @@ def test_unavailable_source_evidence_runs_fully(full_source, tmp_path, kind):
 
 @pytest.mark.parametrize("field, value", [("event", "push"), ("status", "in_progress"), ("conclusion", "failure")])
 def test_a_source_run_must_be_a_completed_successful_required_run(full_source, tmp_path, field, value):
-    root, base, _, queue, env, responses, _ = full_source
-    source = responses[RUNS]["workflow_runs"][0]
+    root, base, head, queue, env, responses, _ = full_source
+    source = responses[RUNS.format(head)]["workflow_runs"][0]
     source[field] = value
     Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
     result = invoke(root, base, queue, "merge_group", tmp_path / "run.json", env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "reused=false" in result.stdout
+    assert f"Refused run 7: {field} is {value}\n" in result.stdout
 
 
 def test_the_protected_script_runs_in_isolated_cli_mode(reuse_repo, tmp_path):
@@ -414,8 +430,8 @@ def test_the_record_names_every_trusted_grading_input(reuse_repo, tmp_path, monk
 
 
 def test_an_unreadable_run_list_names_why_it_runs_fully(full_source, tmp_path):
-    root, base, _, queue, env, responses, _ = full_source
-    responses.pop(RUNS)
+    root, base, head, queue, env, responses, _ = full_source
+    responses.pop(RUNS.format(head))
     Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
     result = invoke(root, base, queue, "merge_group", tmp_path / "unread.json", env)
     assert "No reusable full result: FileNotFoundError\n" in result.stdout
@@ -545,6 +561,7 @@ def test_a_queue_tree_that_changes_workflows_runs_fully(full_source, tmp_path):
     result = invoke(root, base, planted, "merge_group", tmp_path / "planted.json", env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "reused=false" in result.stdout
+    assert "No reuse: the queue tree changes workflow files\n" in result.stdout
 
 
 DECOYS = ["valid", "event", "evidence", "head", "workflow", "metadata", "record", "commit", "tree", "coverage", "jobs"]
@@ -553,8 +570,8 @@ ABSENT = "0123456789abcdef0123456789abcdef01234567"
 
 @pytest.mark.parametrize("decoy", DECOYS)
 def test_a_rejected_newer_run_still_lets_an_older_full_pass_reuse(full_source, tmp_path, decoy):
-    root, base, _, queue, env, responses, record = full_source
-    decoy_source = dict(responses[RUNS]["workflow_runs"][0], id=8)
+    root, base, head, queue, env, responses, record = full_source
+    decoy_source = dict(responses[RUNS.format(head)]["workflow_runs"][0], id=8)
     artifacts = [dict(item, id=item["id"] + 100) for item in responses[ARTIFACTS]["artifacts"]]
     jobs = [dict(job, id=job["id"] + 100) for job in responses[JOBS]["jobs"]]
     decoy_record = dict(record, run=8)
@@ -585,7 +602,7 @@ def test_a_rejected_newer_run_still_lets_an_older_full_pass_reuse(full_source, t
         zipped.writestr("provenance.json", json.dumps(decoy_record))
     digest = hashlib.sha256(json.dumps(decoy_record, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     log = f"2026-10-09T11:00:00.000Z required-tree-sha256={digest}\n"
-    responses[RUNS]["workflow_runs"].insert(0, decoy_source)
+    responses[RUNS.format(head)]["workflow_runs"].insert(0, decoy_source)
     responses["repos/o/r/actions/runs/8/artifacts?per_page=100"] = {"artifacts": artifacts}
     responses["repos/o/r/actions/runs/8/attempts/1/jobs?per_page=100"] = {"jobs": jobs}
     responses["repos/o/r/actions/artifacts/142/zip"] = {"binary": base64.b64encode(archive.getvalue()).decode()}
@@ -600,8 +617,8 @@ def test_a_rejected_newer_run_still_lets_an_older_full_pass_reuse(full_source, t
 
 @pytest.mark.parametrize("pulls", [[{"number": 6}], [], None])
 def test_only_the_queued_pull_requests_runs_are_fetched(full_source, tmp_path, pulls):
-    root, base, _, queue, env, responses, _ = full_source
-    source = responses[RUNS]["workflow_runs"][0]
+    root, base, head, queue, env, responses, _ = full_source
+    source = responses[RUNS.format(head)]["workflow_runs"][0]
     if pulls is None:
         del source["pull_requests"]
     else:
