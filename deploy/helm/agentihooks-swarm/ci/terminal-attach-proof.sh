@@ -107,7 +107,7 @@ pod = {
     "spec": {
         "restartPolicy": "Never",
         "automountServiceAccountToken": False,
-        "securityContext": {"runAsNonRoot": True, "runAsUser": 10001, "runAsGroup": 10001},
+        "securityContext": {"runAsNonRoot": True, "runAsUser": 10001, "runAsGroup": 10001, "fsGroup": 10001},
         "containers": [{
             "name": "worker",
             "image": env["WORKER_IMAGE"],
