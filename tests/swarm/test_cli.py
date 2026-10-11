@@ -283,6 +283,16 @@ def test_the_tick_hands_the_metrics_pass_its_ledger(env, monkeypatch):
     assert [state["tasks"] for state in seen] == [ledger.state("sw")["tasks"]]
 
 
+def test_the_tick_hands_the_findings_pass_its_ledger(env, monkeypatch):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    seen = []
+    monkeypatch.setattr(cli.ledger_events, "findings_pass", lambda *args: seen.append(args[-1]) or [])
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    state = ledger.state("sw")
+    assert [(doc["tasks"], doc["phases"]) for doc in seen] == [(state["tasks"], state["phases"])]
+
+
 @pytest.mark.parametrize("dependencies", [None, [], ["done"]])
 def test_block_comments_parks_and_finishes(env, dependencies, capsys):
     from scripts.swarm import idle
