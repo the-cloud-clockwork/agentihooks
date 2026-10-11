@@ -215,23 +215,43 @@ def track_outages(slug: str, store: RedisStore, runtime: "Runtime", rows: dict, 
             if previous:
                 store.redis.hdel(key, agent.name)
             continue
+        heartbeat = idle.heartbeat(store.redis, slug, agent.name)
+        last_work = max(agent.started_at, (heartbeat or {}).get("at", 0))
         episodes = sorted(
             [record["kind"], record["started_at"]]
             for record in records.values()
-            if record["ended_at"] is None or record["ended_at"] >= agent.started_at
+            if record["ended_at"] is None or record["ended_at"] >= last_work
         )
         if not episodes:
+            if previous.get("state") == "pending":
+                previous["state"] = "done"
+                store.redis.hset(key, agent.name, json.dumps(previous))
             continue
         identity = _recovery_identity(store, slug, agent)
         if previous.get("episodes") == episodes and previous.get("identity") == identity:
             continue
         observed = runtime.observe(agent)
-        if agent.name in live and observed.state != idle.IDLE and not observed.provider_error:
+        state = idle.verdict(
+            observed.state,
+            heartbeat,
+            idle.wait(store.redis, slug, agent.name),
+            now_ms,
+        )
+        stalled = agent.name not in live or bool(observed.provider_error) or state == idle.IDLE
+        if not stalled and any(record["ended_at"] is None for record in records.values()):
             continue
         store.redis.hset(
             key,
             agent.name,
-            json.dumps({"identity": identity, "episodes": episodes, "attempts": 0, "state": "pending", "last_at": 0}),
+            json.dumps(
+                {
+                    "identity": identity,
+                    "episodes": episodes,
+                    "attempts": 0,
+                    "state": "pending" if stalled else "done",
+                    "last_at": 0,
+                }
+            ),
         )
 
 
