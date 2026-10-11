@@ -2,6 +2,7 @@ import io
 import json
 import subprocess
 import urllib.error
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -104,7 +105,7 @@ def test_the_default_opener_is_urlopen(monkeypatch):
 
 
 def test_readings_are_cached_by_account_without_any_identity():
-    first = codex_usage.parse(PRO, NOW)
+    first = replace(codex_usage.parse(PRO, NOW), reached="workspace")
     expired = CodexQuota(NOW + 5, "?", expired=True)
     assert codex_usage.cached() == {}
     codex_usage.store("alpha", first)
@@ -122,6 +123,13 @@ def test_an_unreadable_cache_reads_as_empty(content):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
     assert codex_usage.cached() == {}
+
+
+def test_the_cache_folder_is_created_when_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", str(tmp_path / "fresh" / "home"))
+    reading = codex_usage.parse(PRO, NOW)
+    codex_usage.store("alpha", reading)
+    assert codex_usage.cached() == {"alpha": reading}
 
 
 def test_a_cache_that_cannot_be_written_is_skipped(monkeypatch, tmp_path):

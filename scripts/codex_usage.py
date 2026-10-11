@@ -15,6 +15,9 @@ from scripts.codex_quota import CodexQuota
 
 USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 USER_AGENT = "codex_cli_rs"
+AUTH_HEADER = "Authorization"
+ACCOUNT_HEADER = "chatgpt-account-id"
+AGENT_HEADER = "User-Agent"
 TIMEOUT_S = 20
 FIVE_HOUR_SECONDS = 18000
 EXPIRED_CODE = "token_expired"
@@ -41,25 +44,25 @@ def parse(body: dict, now: float) -> CodexQuota | None:
     return CodexQuota(now, str(body.get("plan_type") or "?"), reached=reached, **windows)
 
 
-def _code(exc: urllib.error.HTTPError) -> str:
+def _expired(exc: urllib.error.HTTPError) -> bool:
     try:
         found = json.loads(exc.read())
     except ValueError:
-        return ""
+        return False
     if not isinstance(found, dict):
-        return ""
+        return False
     nested = found.get("error")
-    return str((nested if isinstance(nested, dict) else found).get("code") or "")
+    return (nested if isinstance(nested, dict) else found).get("code") == EXPIRED_CODE
 
 
 def read(token: str, account_id: str, now: float, opener: Callable | None = None) -> CodexQuota | None:
-    headers = {"Authorization": f"Bearer {token}", "chatgpt-account-id": account_id, "User-Agent": USER_AGENT}
+    headers = {AUTH_HEADER: f"Bearer {token}", ACCOUNT_HEADER: account_id, AGENT_HEADER: USER_AGENT}
     request = urllib.request.Request(USAGE_URL, headers=headers)
     try:
         with (opener or urllib.request.urlopen)(request, timeout=TIMEOUT_S) as response:
             body = json.loads(response.read())
     except urllib.error.HTTPError as exc:
-        return CodexQuota(now, "?", expired=True) if exc.code == 401 and _code(exc) == EXPIRED_CODE else None
+        return CodexQuota(now, "?", expired=True) if exc.code == 401 and _expired(exc) else None
     except (OSError, ValueError):
         return None
     try:

@@ -47,7 +47,7 @@ def fill(environ: MutableMapping[str, str]) -> list[str]:
 
 def block_tokens() -> dict[str, str]:
     try:
-        text = aicode_tokens.rc_file().read_text(encoding="utf-8")
+        text = aicode_tokens.rc_file().read_bytes().decode()
     except (OSError, UnicodeDecodeError):
         return {}
     return aicode_tokens.token_exports(text)
