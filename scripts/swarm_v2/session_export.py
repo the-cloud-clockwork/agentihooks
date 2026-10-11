@@ -39,7 +39,8 @@ def export(attempt: Path, scope: dict, environ: Mapping[str, str]) -> dict:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(raw)
         files.append({"path": str(relative), "sha256": hashlib.sha256(raw).hexdigest(), "size": len(raw)})
-    newest = max(found, key=lambda path: path.stat().st_mtime_ns)
+    transcripts = [path for path in found if "subagents" not in path.relative_to(root).parts]
+    newest = max(transcripts, key=lambda path: path.stat().st_mtime_ns)
     manifest = checkpoint / "manifest.json"
     write(
         attempt / manifest,

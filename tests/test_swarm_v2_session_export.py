@@ -47,7 +47,7 @@ def test_claude_sessions_are_copied_into_a_manifest_the_supervisor_accepts(tmp_p
     projects = home / ".claude" / "projects" / "-home-worker-attempts-exe"
     _session(projects / f"{CLAUDE_ID}.jsonl", b'{"type": "user"}\n', 2_000)
     _session(projects / f"{OLDER_ID}.jsonl", b'{"type": "old"}\n', 1_000)
-    _session(projects / CLAUDE_ID / "subagents" / "agent-1.jsonl", b'{"type": "sub"}\n', 1_500)
+    _session(projects / CLAUDE_ID / "subagents" / "agent-1.jsonl", b'{"type": "sub"}\n', 2_500)
     _session(projects / "notes.txt", b"not a session", 3_000)
     _session(home / ".claude" / ".credentials.json", b'{"token": "never"}', 3_000)
     (projects / "linked.jsonl").symlink_to(home / ".claude" / ".credentials.json")

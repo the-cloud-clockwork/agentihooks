@@ -112,7 +112,7 @@ class Workers:
     policy: dict
     image_tag: str
     profile: str
-    exporter: tuple[str, ...] | None
+    exporter: tuple[str, ...]
     terminal: Exposure | None
 
     @classmethod
