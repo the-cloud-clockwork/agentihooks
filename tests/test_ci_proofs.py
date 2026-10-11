@@ -1,5 +1,7 @@
+import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -27,6 +29,22 @@ def test_proofs_dispatch_cannot_satisfy_required_tests():
     assert {"pull_request", "push", "merge_group", "workflow_dispatch"} <= set(required[True])
     assert required["jobs"]["gate-required"]["name"] == "Gate — Required"
     assert "proof" not in required[True]["workflow_dispatch"]["inputs"]
+
+
+@pytest.mark.parametrize(
+    ("paths", "code"),
+    [
+        ("tests/test_a.py tests/test_b.py::test_c", 0),
+        ("", 1),
+        ("tests/test_a.py\ntests/test_b.py", 1),
+        ("tests/../hooks", 1),
+        ("hooks/test_a.py", 1),
+    ],
+)
+def test_a_focused_proof_is_red_unless_every_test_path_is_on_one_line_under_tests(paths, code):
+    step = next(s for s in _workflow()["jobs"]["tests"]["steps"] if s.get("name") == "Require explicit test paths")
+    result = subprocess.run(["bash", "-e", "-c", step["run"]], env={"TEST_PATHS": paths}, capture_output=True)
+    assert result.returncode == code, result.stdout
 
 
 def test_proofs_reuse_selected_mutation_and_smoke_execution():

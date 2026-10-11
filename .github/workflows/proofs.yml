@@ -76,6 +76,7 @@ jobs:
 
       - name: Require explicit test paths
         run: |
+          [[ "$TEST_PATHS" != *$'\n'* ]] || { echo '::error::Give every test path on one line.'; exit 1; }
           read -r -a paths <<< "$TEST_PATHS"
           [[ ${#paths[@]} -gt 0 ]] || { echo '::error::Choose explicit test paths under tests/.'; exit 1; }
           for path in "${paths[@]}"; do
