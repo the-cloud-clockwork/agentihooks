@@ -20,7 +20,10 @@
     "Publisher.sequence() gives this generation's highest pointer sequence; Publisher.reclaim(checkpoint_id) removes the manifest and material records of the named checkpoint when no pointer names it, never a newer generation's record, and removes each object no other record names once; publish calls it for its own id before a first upload, and no sweep reclaims other unpointed checkpoints",
     "Publisher.metrics() exposes checkpoint_publish_failures by reason",
     "worker.supervisor.Schedule.tick() captures and publishes when due, then stretches the next interval so capture time stays within Budget.overhead of it; a lost acknowledgement counts interrupted and the same captured checkpoint is republished under its identity on the next tick; superseded_generation stops periodic promotion",
-    "Schedule.drain() publishes off schedule under its own Budget.drain deadline and Budget.drain_attempts, refusing drain_budget_exceeded when capture overruns the deadline; Schedule.metrics() adds checkpoint_age_seconds"
+    "Schedule.drain() publishes off schedule under its own Budget.drain deadline and Budget.drain_attempts, refusing drain_budget_exceeded when capture overruns the deadline; Schedule.metrics() adds checkpoint_age_seconds",
+    "redaction.scrub(data) runs the strict secret scan over a native conversation file: JSON object, array and string lines value by value (a value whose key makes the redacted value match again is hidden whole), every other run of lines as one text; it returns the redacted bytes and the number of markers placed, and raises secret_unredactable when a value or text opens more private keys than it closes",
+    "native.capture scrubs every collected file before NativeCapture is built, so the snapshot path and the native checkpoint keep only redacted bytes; NativeCapture.fields() adds secret_redactions when it is above zero; the archive bound applies to the redacted files",
+    "Publisher.publish scrubs native_session material again before any upload and records secret_redactions on the manifest as the capture count plus its own; it refuses native_format_changed, native_too_large or secret_unredactable before any upload"
   ],
   "cases": {
     "T-SV2-CKP-04-A": "evidence/SV2-CKP-04/a-result.json",
@@ -43,7 +46,9 @@
     "The rollback was rehearsed on the local backend only, not against a deployed worker",
     "The fence reads pointers, not grants: a newer generation that holds its grant but has written no pointer yet does not fence an older attempt, and latest can still return the older generation's checkpoint until it writes",
     "A refused publish after its uploads leaves orphan materials until the next publish of the same checkpoint id reclaims them; there is no background sweep",
-    "Each publish lists every pointer up to four times; pointers grow by one per promoted checkpoint with no compaction"
+    "Each publish lists every pointer up to four times; pointers grow by one per promoted checkpoint with no compaction",
+    "Redaction inherits the shared scanner's policy: a keyword key whose value is a nested object and a private key header that names no algorithm are not matched; filed as a scanner follow-up",
+    "Two record keys that are themselves secrets and redact to the same marker collapse to one field; the count stays exact and no value is kept"
   ],
   "mutation": "graded against the SV2-CKP-03 branch because the diff against dev still carries that open dependency; the branch preflight 38156178282 left every file not mutated, over budget, for that reason. Survivor history: 20 and 1 at 36edb88c6 (run 38160365501), 3 equivalent at 304abf546 (run 38161072329), none at the tested commit"
 }
