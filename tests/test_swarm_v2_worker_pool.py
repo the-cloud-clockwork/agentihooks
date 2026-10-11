@@ -74,7 +74,7 @@ def test_a_memory_quantity_reads_as_whole_mebibytes_rounded_up(quantity, mib):
     assert pool.memory_mib(quantity) == mib
 
 
-@pytest.mark.parametrize("quantity", ["", "two", "4Qi", "-1", "1e", "1Mie3", "."])
+@pytest.mark.parametrize("quantity", ["", "two", "4Qi", "-1", "1e", "1Mie3", ".", "1e999999999"])
 def test_a_quantity_that_is_not_a_kubernetes_quantity_is_refused(quantity):
     with pytest.raises(ValueError) as refused:
         pool.cpu_millis(quantity)

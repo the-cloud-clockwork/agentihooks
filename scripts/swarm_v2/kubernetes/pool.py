@@ -36,10 +36,13 @@ class Usage:
 
 def _amount(quantity: str) -> Decimal:
     found = QUANTITY.fullmatch(quantity)
+    refused = ValueError(f"not a resource quantity: {quantity!r}")
     if found is None:
-        raise ValueError(f"not a resource quantity: {quantity!r}")
-    scale = SUFFIXES.get(found[2]) or Decimal(10) ** int(found[2][1:])
-    return Decimal(found[1]) * scale
+        raise refused
+    try:
+        return Decimal(found[1]) * (SUFFIXES.get(found[2]) or Decimal(10) ** int(found[2][1:]))
+    except ArithmeticError:
+        raise refused from None
 
 
 def cpu_millis(quantity: str) -> int:
@@ -51,7 +54,7 @@ def memory_mib(quantity: str) -> int:
 
 
 def _requested(containers: list[dict]) -> list[tuple[int, int]]:
-    """A resource with a limit and no request requests its limit, as Kubernetes defaults it."""
+    """Kubernetes defaults a missing request to its limit."""
     resources = [container.get("resources", {}) for container in containers]
     asked = [{**row.get("limits", {}), **row.get("requests", {})} for row in resources]
     return [(cpu_millis(row.get(CPU, "0")), memory_mib(row.get(MEMORY, "0"))) for row in asked]
