@@ -1,0 +1,6 @@
+{
+  "scripts/account_env.py:scripts.account_env.x_from_openbao__mutmut_16:20bc1e7201dca5f43464fc405134d7d45100caa0e0bf0744fc4bc05d09cf6d89": {
+    "reader": "standards_reader",
+    "reason": "urllib.request.Request.add_header stores key.capitalize(), so X-Vault-Token, x-vault-token and X-VAULT-TOKEN all become the stored header X-vault-token with the same value; the request sent is identical."
+  }
+}
