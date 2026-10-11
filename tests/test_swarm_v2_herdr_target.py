@@ -9,7 +9,16 @@ from scripts.swarm.store import AgentRecord
 from scripts.swarm_v2.herdr import target as target_module
 from scripts.swarm_v2.herdr.endpoints import EndpointRefused
 from scripts.swarm_v2.herdr.reconcile import Record
-from scripts.swarm_v2.herdr.target import CALLER, DELIVERIES, KEPT, Router, Target, client_runner, remote_environ
+from scripts.swarm_v2.herdr.target import (
+    CALLER,
+    DELIVERIES,
+    KEPT,
+    PENDING_LIMIT,
+    Router,
+    Target,
+    client_runner,
+    remote_environ,
+)
 from tests import sv2_hdr03_cases, sv2_hdr04_cases
 from tests.sv2_hdr04_cases import Client, Fleet
 
@@ -354,6 +363,28 @@ def test_the_journal_keeps_only_the_newest_deliveries(tmp_path, monkeypatch):
     assert list(entries) == ["op-pending", "op-1", "op-2"]
     assert entries["op-pending"]["state"] == "pending"
     assert KEPT == 1024
+
+
+def test_a_journal_full_of_unknown_outcomes_refuses_new_sends(tmp_path, monkeypatch):
+    monkeypatch.setattr(target_module, "PENDING_LIMIT", 2)
+    client, fleet, desired = world(tmp_path)
+    found = resolved(client, desired[0])
+    real = fleet.__call__
+
+    def lose(command):
+        if command[3:5] == ["agent", "prompt"]:
+            raise subprocess.TimeoutExpired(command, 30)
+        return real(command)
+
+    client.router.run = lose
+    for number in range(2):
+        refusal(lambda number=number: client.router.send(found, "agent_prompt", f"op-{number}", "x"))
+    client.router.run = fleet
+    before = list(fleet.commands)
+    assert refusal(lambda: client.router.send(found, "agent_prompt", "op-new", "x"))[0] == "journal_full"
+    assert fleet.commands == before
+    assert sorted(json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]) == ["op-0", "op-1"]
+    assert PENDING_LIMIT == 64
 
 
 @pytest.mark.parametrize(

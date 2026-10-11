@@ -20,6 +20,7 @@ MUTATIONS = frozenset({"pane_run", "pane_send_text", "pane_send_keys", "pane_clo
 DELIVERIES = "deliveries.json"
 VERSION = 1
 KEPT = 1024
+PENDING_LIMIT = 64
 BARE = "a remote pane operation needs a saved machine profile, a remote session and a server incarnation"
 
 Run = Callable[[list[str]], subprocess.CompletedProcess]
@@ -105,8 +106,8 @@ class Deliveries:
 
 class Router:
     """Every remote pane operation names one saved machine profile owned by the controller and one confirmed server
-    incarnation; it never falls back to the local server. A pane whose agent reports no id session is admitted on its
-    pane id and incarnation, because herdr exposes no conversation to compare."""
+    incarnation; it never falls back to the local server. A target without an expected conversation is sent on its pane
+    id and incarnation alone."""
 
     def __init__(
         self, store: Store, catalog: Catalog, qualifier: Qualifier, run: Run, journal: Path, *, mutations: bool = True
@@ -202,6 +203,8 @@ class Router:
             held = entries.get(operation_id)
             if held is not None:
                 return self._replayed(held, target, key, operation_id)
+            if sum(entry.get("state") != "sent" for entry in entries.values()) >= PENDING_LIMIT:
+                raise EndpointRefused("journal_full", "too many pane sends await an audit of their unknown outcome")
             self._confirm(target)
             entries[operation_id] = {"target": key, "state": "pending"}
             self.deliveries.save(entries)

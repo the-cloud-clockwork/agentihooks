@@ -13,7 +13,7 @@
       "both_targets_share_the_pane_id": true,
       "targets_carry_profile_session_and_incarnation": true,
       "every_mutation_names_its_machine": true,
-      "local_pane_identity_not_inherited": true,
+      "remote_environment_drops_the_caller_pane_and_socket": true,
       "no_target_mismatch": true,
       "independent_repeat_identical": true
     },

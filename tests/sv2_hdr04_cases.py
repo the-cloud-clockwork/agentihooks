@@ -151,7 +151,7 @@ def _positive() -> tuple[dict, bool]:
         ],
         "every_mutation_names_its_machine": [command[:3] for command in first["mutations"]]
         == [["herdr", "--machine", first["registered"][exe_a]], ["herdr", "--machine", first["registered"][exe_b]]],
-        "local_pane_identity_not_inherited": first["environment"] == ["PATH"],
+        "remote_environment_drops_the_caller_pane_and_socket": first["environment"] == ["PATH"],
         "no_target_mismatch": first["herdr_target_mismatch_total"] == 0,
         "independent_repeat_identical": first == second,
     }
