@@ -9,9 +9,13 @@ slug=kind-proof
 cluster="swarm-kind-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:8])')"
 ledger_pod="$release-ledger-0"
 controller=(-l "app.kubernetes.io/instance=$release,app.kubernetes.io/component=controller")
+ca_dir=""
 
 finish() {
   status=$?
+  if [[ -n $ca_dir ]]; then
+    rm -rf "$ca_dir"
+  fi
   if [[ $status -ne 0 ]]; then
     kubectl get pods -o wide || true
     kubectl logs "${controller[@]}" --tail 100 || true
@@ -115,6 +119,8 @@ for setting in secretName key; do
   refuse_workers "controller.terminalCa needs secretName and key with controller.workers.apiUrl" \
     --set controller.terminalCa."$setting"=
 done
+refuse_workers "controller.terminalCa needs secretName and key with controller.workers.apiUrl" \
+  --set controller.terminalCa=null
 printf 'the chart refused every incomplete or pinned worker setting\n'
 docker build -q -t "$image" . >/dev/null &
 build=$!
@@ -562,14 +568,14 @@ printf 'controller sent the host pressure alert without a restart: %s\n' "$alert
 
 mounted="$(kubectl exec "deployment/$release-controller" -c controller -- sh -c \
   'ls /run/secrets/terminal-ca && stat -L -c "%a %u:%g" "$AGENTIHOOKS_TERMINAL_CA_KEY" && echo "$AGENTIHOOKS_TERMINAL_CA_KEY"')"
-if [[ $mounted != $'user_ca\n'*$'\n/run/secrets/terminal-ca/user_ca' ]]; then
-  printf 'the controller does not hold only the user CA key at its setting path: %s\n' "$mounted" >&2
+# fsGroup adds group read to a Secret file, so 0400 lands as 440 owned by root and the controller's group.
+if [[ $mounted != $'user_ca\n440 0:10001\n/run/secrets/terminal-ca/user_ca' && $mounted != $'user_ca\n400 '*$'\n/run/secrets/terminal-ca/user_ca' ]]; then
+  printf 'the controller does not hold only the user CA key, read only, at its setting path: %s\n' "$mounted" >&2
   exit 1
 fi
 printf 'the controller holds only the user CA key at its setting path: %s\n' "${mounted//$'\n'/ }"
 python3 -c 'import json, sys; print(json.dumps({"clients": {"namespace": "default", "labels": {"app.kubernetes.io/instance": sys.argv[2], "app.kubernetes.io/component": "controller"}}, "user_ca": open(sys.argv[1]).read().strip()}))' \
   "$ca_dir/user_ca.pub" "$release" | kubectl create secret generic swarm-worker-terminal --from-file=setting=/dev/stdin
-rm -rf "${ca_dir:?}"
 kubectl rollout restart deployment "$release-controller"
 kubectl rollout status deployment "$release-controller" --timeout 2m
 kept=""

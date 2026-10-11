@@ -892,7 +892,7 @@ class Reporting(Keeper):
 
 
 def test_a_starting_controller_logs_the_machines_it_registered(fixture, capsys):
-    store, (first, _second), _transport, _clock, grant = fixture
+    store, _controllers, _transport, _clock, grant = fixture
     capsys.readouterr()
 
     assert keeping(store, grant, Reporting()).acquire()
@@ -909,7 +909,7 @@ def test_a_controller_without_a_herdr_client_logs_no_machines(fixture, capsys):
 
     assert first.acquire()
 
-    assert "herdr" not in capsys.readouterr().out
+    assert capsys.readouterr().out == ""
 
 
 def test_every_renewal_passes_the_attachable_attempts_for_change(fixture):

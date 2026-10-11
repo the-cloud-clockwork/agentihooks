@@ -1,6 +1,6 @@
 {{- $api := .Values.controller.api }}
 {{- $workers := .Values.controller.workers }}
-{{- $ca := .Values.controller.terminalCa }}
+{{- $ca := .Values.controller.terminalCa | default dict }}
 {{- if and (or $ca.secretName $workers.apiUrl) (not (and $ca.secretName $ca.key)) }}
 {{- fail "controller.terminalCa needs secretName and key with controller.workers.apiUrl: the controller signs operator certificates with that key" }}
 {{- end }}

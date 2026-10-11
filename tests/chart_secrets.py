@@ -35,14 +35,7 @@ def references(pod: dict, container: dict, secret: str) -> list[dict]:
         if item.get("valueFrom", {}).get("secretKeyRef", {}).get("name") == secret
     ]
     found += [item for item in container.get("envFrom", []) if item.get("secretRef", {}).get("name") == secret]
-    volumes = {
-        volume["name"]
-        for volume in pod.get("volumes", [])
-        if volume.get("secret", {}).get("secretName") == secret
-        or any(
-            source.get("secret", {}).get("name") == secret for source in volume.get("projected", {}).get("sources", [])
-        )
-    }
+    volumes = {volume["name"] for volume in pod.get("volumes", []) if holds(volume, secret)}
     found += [mount for mount in container.get("volumeMounts", []) if mount["name"] in volumes]
     return found
 
@@ -78,8 +71,14 @@ def entry_problems(documents: list, entry: dict, others: set[str]) -> list[str]:
     return problems
 
 
+def holds(volume: dict, secret: str) -> bool:
+    return volume.get("secret", {}).get("secretName") == secret or any(
+        source.get("secret", {}).get("name") == secret for source in volume.get("projected", {}).get("sources", [])
+    )
+
+
 def pod_volumes(pod: dict, secret: str) -> list[dict]:
-    return [volume for volume in pod.get("volumes", []) if volume.get("secret", {}).get("secretName") == secret]
+    return [volume for volume in pod.get("volumes", []) if holds(volume, secret)]
 
 
 def terminal_ca_problems(documents: list, ca: dict) -> list[str]:
@@ -134,4 +133,4 @@ if __name__ == "__main__":
         print(problem, file=sys.stderr)
     if found:
         sys.exit(1)
-    print("only the controller container references each controller only Secret")
+    print("only the controller container references each Secret reserved for it")

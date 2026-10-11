@@ -68,8 +68,7 @@ class Controller:
             report = self.terminals.start(self._attempts())
             print(
                 f"controller: kept saved herdr machines for {self.slug} on start: registered "
-                f"{len(report.registered)}, refused {dict(sorted(report.refused.items()))}",
-                flush=True,
+                f"{len(report.registered)}, refused {dict(sorted(report.refused.items()))}"
             )
         self.reconciled_epoch = self.held.epoch
         self.ready = True

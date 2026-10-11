@@ -19,6 +19,10 @@ class Attempt:
     host_public: str
 
 
+def _current(attempts: tuple[Attempt, ...]) -> dict[str, int]:
+    return {attempt.scope.execution_id: attempt.scope.generation for attempt in attempts}
+
+
 class Upkeep:
     def __init__(self, terminal: Terminal) -> None:
         self.terminal = terminal
@@ -26,20 +30,21 @@ class Upkeep:
         self.last = Report()
 
     def start(self, attempts: Iterable[Attempt]) -> Report:
-        self.due = True
-        return self.change(attempts)
+        return self._sync(tuple(attempts))
 
     def change(self, attempts: Iterable[Attempt]) -> Report | None:
         attempts = tuple(attempts)
-        current = {attempt.scope.execution_id: attempt.scope.generation for attempt in attempts}
-        if not self.due and current == self.seen:
+        if not self.due and _current(attempts) == self.seen:
             return None
+        return self._sync(attempts)
+
+    def _sync(self, attempts: tuple[Attempt, ...]) -> Report:
         try:
             report = self.terminal.sync(((attempt.scope, attempt.host_public) for attempt in attempts), enabled=True)
         except EndpointRefused as failure:
             self.due = True
             return Report(refused={CLIENT: failure.reason})
-        self.due, self.seen = bool(report.refused), current
+        self.due, self.seen = bool(report.refused), _current(attempts)
         self.last = report
         return report
 
