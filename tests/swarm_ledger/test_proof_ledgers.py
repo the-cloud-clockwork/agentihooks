@@ -8,7 +8,7 @@ import pytest
 from scripts.hive import auth
 from scripts.swarm.naming import PROOF_RE
 from scripts.swarm_ledger import ledger_authority as authority
-from scripts.swarm_ledger import ledger_bin, proof_ledger
+from scripts.swarm_ledger import ledger_bin, proof_ledger, run
 from scripts.swarm_ledger.api import proofs
 from scripts.swarm_ledger.repository import repository
 from tests.swarm_ledger.test_ledger_authority import SLUG, WORKER, send
@@ -103,7 +103,7 @@ def test_a_ledger_that_is_not_a_proof_ledger_is_refused_a_remove(live, credentia
     status, reply = remove(live, SLUG, **{"X-Controller-Credential": credential})
     assert (status, reply["error"]) == (
         403,
-        {"code": "forbidden", "message": "Only a proof ledger is removed with the controller credential"},
+        {"code": "forbidden", "message": "Not a proof ledger"},
     )
     assert SLUG not in ledger_bin.entries()
     assert repository.exists(SLUG)
@@ -176,7 +176,7 @@ def test_the_remote_client_reports_a_refusal(live, credential):
     environ = client_env(live, "wrong")
     with pytest.raises(SystemExit, match="server refused: 403 Proof ledgers need the controller credential"):
         proof_ledger.create(CONTENT, environ)
-    with pytest.raises(SystemExit, match="server refused: 403 Only a proof ledger"):
+    with pytest.raises(SystemExit, match="server refused: 403 Not a proof ledger"):
         proof_ledger.remove(SLUG, client_env(live, credential))
 
 
@@ -186,5 +186,5 @@ def test_the_proof_command_creates_and_removes_through_the_client(live, credenti
     with patch.dict(os.environ, client_env(live, credential)):
         proof_ledger.main(["new", "--content", str(path)])
         slug = json.loads(capsys.readouterr().out)["slug"]
-        proof_ledger.main(["remove", slug])
+        run(["proof", "remove", slug])
     assert json.loads(capsys.readouterr().out) == {"slug": slug, "removed_at": ledger_bin.entries()[slug]}
