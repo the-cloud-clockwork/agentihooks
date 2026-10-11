@@ -243,21 +243,21 @@ def _thread(stdout: str) -> str:
     return ""
 
 
-def _default_token(environ: Mapping[str, str]) -> str:
+def _default_token(environ: Mapping[str, str]) -> str | None:
     try:
         tokens = json.loads((codex_quota.codex_home(dict(environ)) / "auth.json").read_text()).get("tokens")
     except (OSError, ValueError, AttributeError):
-        return ""
+        return None
     found = tokens.get("access_token") if isinstance(tokens, dict) else None
-    return found if isinstance(found, str) else ""
+    return found if isinstance(found, str) else None
 
 
 def _bearer(account: CodexAccount, environ: Mapping[str, str]) -> tuple[str, str] | None:
     if account.is_token:
-        token = environ[account.env_name] if credential_kind(account, environ) == OAUTH_KIND else ""
+        token = environ[account.env_name] if credential_kind(account, environ) == OAUTH_KIND else None
     else:
-        token = "" if account.is_api else _default_token(environ)
-    claim = _chatgpt_account_id(_claims(token))
+        token = None if account.is_api else _default_token(environ)
+    claim = _chatgpt_account_id(_claims(token)) if token else ""
     return (token, claim) if claim else None
 
 

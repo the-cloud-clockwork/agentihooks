@@ -77,7 +77,7 @@ def has_block(text: str) -> bool:
 
 
 def token_exports(text: str) -> dict[str, str]:
-    lines = text.splitlines(keepends=True)
+    lines = text.splitlines()
     found = {}
     for start, end in _blocks(lines):
         for line in lines[start + 1 : end]:

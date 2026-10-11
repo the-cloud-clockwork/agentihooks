@@ -1,0 +1,6 @@
+{
+  "scripts/codex_usage.py:scripts.codex_usage.x_read__mutmut_9:7b027db69955bb0fad761304d111e2980fca1e867cf1ddf99e786af9cfa4da93": {
+    "reader": "standards_reader",
+    "reason": "User-Agent becomes USER-AGENT. urllib.request.Request stores every header name through str.capitalize(), so both spell User-agent and the request is identical. Same ruling as the Content-Type spelling mutants the Standards reader cleared on PR 2578."
+  }
+}

@@ -194,6 +194,17 @@ def test_codex_token_accounts_from_the_rc_block_get_seats_and_default_none(monke
     assert [credential.account for credential in balancer.discover_credentials(environ)] == ["mail"]
 
 
+def test_tick_capacity_reads_the_reading_age_from_its_own_environment(monkeypatch):
+    from scripts.codex_quota import CodexQuota
+
+    monkeypatch.delenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", raising=False)
+    weekly = CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=10, resets_at=10**10))
+    monkeypatch.setattr(capacity.codex_router, "quotas", lambda accounts, env: {a.name: weekly for a in accounts})
+    monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: None)
+    environ = {"AH_CX_TOKEN_alpha": "cx1", "AGENTIHOOKS_CODEX_READING_MAX_AGE_H": "0.5"}
+    assert [row.cap for row in capacity._codex(environ, 100 + 3600, True)] == [None]
+
+
 def test_tick_capacity_balance_and_quota_list_the_same_accounts_and_caps(monkeypatch, tmp_path):
     from scripts import agents_quota, aicode_tokens, codex_usage, operator_env
     from scripts.codex_quota import CodexQuota

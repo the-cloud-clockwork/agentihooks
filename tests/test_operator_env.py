@@ -283,13 +283,13 @@ def _block(*lines, before="", after=""):
 
 def test_fill_loads_only_the_token_exports_inside_the_managed_block(tmp_path, capsys):
     _block(
+        "export AH_CX_TOKEN_open='c1",
         "export AH_CX_TOKEN_alpha=cx1",
         "export AH_CC_TOKEN_beta='cc 2'",
         "export AGENTIHOOKS_AICODE_TOKEN_REFRESH=true",
         "export OPENAI_API_KEY=k1",
         "AH_CX_TOKEN_bare=b1",
         "export AH_CX_TOKEN_split=a b",
-        "export AH_CX_TOKEN_open='c1",
         before="export AH_CX_TOKEN_outside=o1\n",
         after="export AH_CC_TOKEN_after=a1\n",
     )
