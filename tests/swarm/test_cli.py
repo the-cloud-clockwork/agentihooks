@@ -781,6 +781,20 @@ def test_the_tick_hands_the_wake_pass_its_clock_window_and_quiet_window(env, mon
     assert calls == [(9_000_000, 60_000, 7_000)]
 
 
+def test_only_scheduled_ticks_sample_langfuse(env, monkeypatch):
+    from scripts.swarm import langfuse
+
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    called = []
+    monkeypatch.setattr(langfuse, "refresh", lambda *args: called.append(args) or [])
+    monkeypatch.setattr(cli, "now_ms", lambda: 9000000)
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert called == []
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}), scheduled=True)
+    assert called == [(store, "sw", 9000000)]
+
+
 def test_timer_units_and_enable(tmp_path):
     calls = []
     ok = timer.ensure(
