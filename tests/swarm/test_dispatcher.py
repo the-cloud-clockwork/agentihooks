@@ -139,16 +139,95 @@ def test_leverage_order_breaks_ties_by_the_bottleneck_lane_then_the_focus():
     ]
     focus = [{"id": "f1", "verb": "focus", "target": "tasks/z"}, {"id": "f2", "verb": "freeze", "target": "tasks/x"}]
     found = doc(tasks, phases=[], freezes=focus)
-    assert dispatcher.ordered(found, "ci", dispatcher.leverage(found)) == ["y", "z", "x"]
-    assert dispatcher.ordered(found, "engineering", dispatcher.leverage(found)) == ["z", "x", "y"]
-    assert dispatcher.ordered(found, "review", dispatcher.leverage(found)) == ["z", "x", "y"]
-    assert dispatcher.ordered(doc(tasks, phases=[]), "", dispatcher.leverage(doc(tasks, phases=[]))) == ["x", "y", "z"]
+    assert dispatcher.ordered(found, "ci", dispatcher.leverage(found)) == ["y", "z", "x", "w", "v"]
+    assert dispatcher.ordered(found, "engineering", dispatcher.leverage(found)) == ["z", "x", "y", "w", "v"]
+    assert dispatcher.ordered(found, "review", dispatcher.leverage(found)) == ["z", "x", "y", "w", "v"]
+    plain = doc(tasks, phases=[])
+    assert dispatcher.ordered(plain, "", dispatcher.leverage(plain)) == ["x", "y", "z", "w", "v"]
 
 
-def test_ordered_uses_the_scores_it_is_given():
-    found = doc([task("x", phase=""), task("y", phase=""), task("w", phase="", depends_on=["x"])], phases=[])
-    assert dispatcher.ordered(found, "", dispatcher.leverage(found)) == ["x"]
-    assert dispatcher.ordered(found, "", {"x": 1, "y": 2, "w": 0}) == ["y", "x"]
+def test_ordered_uses_the_scores_it_is_given_below_the_chain():
+    tasks = [task(t, phase="") for t in "xy"] + [task("w", phase="", depends_on=["x"]), task("v", phase="")]
+    tasks.append(task("u", phase="", depends_on=["y"]))
+    found = doc(tasks, phases=[])
+    assert dispatcher.ordered(found, "", dispatcher.leverage(found)) == ["x", "y", "w", "v", "u"]
+    assert dispatcher.ordered(found, "", {"x": 1, "y": 2}) == ["y", "x", "w", "v", "u"]
+    assert dispatcher.ordered(found, "", {"x": 1, "y": 2, "v": 9}) == ["y", "x", "v", "w", "u"]
+    assert dispatcher.ordered(found, "", {"x": 1, "y": 2, "u": 1}) == ["y", "x", "u", "w", "v"]
+
+
+def test_chains_count_the_longest_open_path_of_waiters_behind_each_task():
+    diamond = [task("a"), task("b", depends_on=["a"]), task("c", depends_on=["a"]), task("d", depends_on=["b", "c"])]
+    assert dispatcher.chains(doc(diamond)) == {"a": 2, "b": 1, "c": 1, "d": 0}
+    assert dispatcher.leverage(doc(diamond)) == {"a": 3, "b": 1, "c": 1, "d": 0}
+    assert dispatcher.chains(doc(chain())) == {"a": 3, "b": 2, "c": 1, "e": 0}
+    looped = [task("a", depends_on=["b"]), task("b", depends_on=["a"])]
+    assert dispatcher.chains(doc(looped)) == {"a": 1, "b": 1}
+    tangled = [task("a"), task("b", depends_on=["a", "c"]), task("c", depends_on=["a", "b"]), task("d")]
+    tangled.append(task("e", depends_on=["c", "d"]))
+    assert dispatcher.chains(doc(tangled)) == {"a": 3, "b": 2, "c": 2, "d": 1, "e": 0}
+    assert dispatcher.ordered(doc(tangled), "", dispatcher.leverage(doc(tangled))) == ["a", "b", "c", "d", "e"]
+    knot = {"t0": ["t3"], "t1": ["t0", "t2", "t3", "t4"], "t2": ["t0", "t1", "t3", "t4"], "t3": ["t0", "t2"]}
+    knot["t4"] = ["t1", "t2", "t3"]
+    knotted = doc([task(t, depends_on=deps) for t, deps in knot.items()] + [task("t5", depends_on=["t4"])])
+    assert dispatcher.chains(knotted) == {**dict.fromkeys(knot, 5), "t5": 0}
+    long = [task("c0", phase="")] + [task(f"c{i}", phase="", depends_on=[f"c{i - 1}"]) for i in range(1, 1500)]
+    assert dispatcher.chains(doc(long, phases=[]))["c0"] == 1499
+
+
+def deep_and_wide():
+    return [
+        task("l1", phase=""),
+        task("s", phase=""),
+        *(task(f"s{i}", phase="", depends_on=["s"]) for i in range(6)),
+        task("h1", phase=""),
+        *(task(f"h{i}", phase="", depends_on=[f"h{i - 1}"]) for i in range(2, 6)),
+        task("l2", phase=""),
+    ]
+
+
+def test_a_five_deep_chain_head_is_ordered_before_a_wide_shallow_task():
+    found = doc(deep_and_wide(), phases=[])
+    assert dispatcher.leverage(found)["s"] > dispatcher.leverage(found)["h1"]
+    assert dispatcher.ordered(found, "", dispatcher.leverage(found)) == [
+        "h1",
+        "h2",
+        "h3",
+        "s",
+        "h4",
+        "l1",
+        *(f"s{i}" for i in range(6)),
+        "h5",
+        "l2",
+    ]
+
+
+def test_claimable_leaves_are_ordered_by_the_bottleneck_lane_then_the_focus_order_then_the_ledger():
+    tasks = [task("l1", phase=""), task("l2", phase="", lane="ci"), task("l3", phase=""), task("l4", phase="")]
+    focus = [{"verb": "focus", "target": "tasks/l4"}, {"verb": "focus", "target": "tasks/l3"}]
+    found = doc(tasks, phases=[], freezes=focus)
+    assert dispatcher.ordered(found, "ci", dispatcher.leverage(found)) == ["l2", "l4", "l3", "l1"]
+    assert dispatcher.ordered(found, "", dispatcher.leverage(found)) == ["l4", "l3", "l1", "l2"]
+    covered = doc([task("p", phase=""), task("q", phase="")], phases=[])
+    covered["freezes"] = [{"verb": "focus", "target": "tasks/q"}, {"verb": "focus", "target": "lane:eng"}]
+    assert dispatcher.ordered(covered, "", dispatcher.leverage(covered)) == ["q", "p"]
+
+
+def test_the_order_and_the_ranks_hold_across_ticks_with_no_input_change(store, home, shipped):
+    store.update(SLUG, autonomy="delegate")
+    found = doc(deep_and_wide(), phases=[])
+    first = dispatcher.ordered(found, "", dispatcher.leverage(found))
+    assert all(dispatcher.ordered(found, "", dispatcher.leverage(found)) == first for _ in range(3))
+    ledger = Ledger()
+    dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
+    assert ledger.ranks == [("h1", "high", "dispatcher"), ("s", "high", "dispatcher")]
+    held = stamped(deep_and_wide(), {"h1": "dispatcher", "s": "dispatcher"})
+    held["phases"] = []
+    for tick in range(1, 4):
+        again = Ledger()
+        assert dispatcher.rank_pass(SLUG, store.config(SLUG), store, again, held, NOW + tick * 60_000) == []
+        assert (again.ranks, again.comments) == ([], [])
+    assert dispatcher.ordered(held, "", dispatcher.leverage(held)) == first
 
 
 @pytest.mark.parametrize(
@@ -160,7 +239,7 @@ def test_focus_on_an_ancestor_or_a_selector_lifts_its_task_above_ledger_order(ta
     tasks = [other, focused, task("w", phase="", depends_on=["x", "y"])]
     phases = [{"id": "p1", "depends_on": [], "plan": "plans/pl"}]
     found = doc(tasks, phases=phases, plans=[{"id": "pl"}], freezes=[{"verb": "focus", "target": target}])
-    assert dispatcher.ordered(found, "", dispatcher.leverage(found)) == [focused["id"], other["id"]]
+    assert dispatcher.ordered(found, "", dispatcher.leverage(found)) == [focused["id"], other["id"], "w"]
 
 
 def test_below_delegate_a_high_leverage_task_yields_one_master_proposal_and_no_rank(store, home, shipped):
@@ -329,7 +408,7 @@ def test_ranks_follow_unblocked_work_as_tasks_merge(store, home, shipped):
     ledger = Ledger()
     found = stamped(after, dict.fromkeys("abc", "dispatcher"))
     actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW + 60_000)
-    why = "it unblocks 1 open task and 3 claimable tasks in focus unblock more"
+    why = "it unblocks 1 open task and 3 claimable tasks in focus lead longer chains or unblock more"
     assert ledger.ranks == [("c", "normal", "dispatcher"), ("p", "high", "dispatcher"), ("q", "high", "dispatcher")]
     assert actions == [
         f"lowered task c to normal: {why}",
@@ -532,7 +611,7 @@ def test_the_ledger_client_ranks_a_task_as_its_author(monkeypatch):
 
 def test_a_task_merged_into_a_group_lead_is_never_ranked():
     found = doc([task("x", phase=""), task("y", phase="", merged_into="x"), task("w", phase="", depends_on=["x", "y"])])
-    assert dispatcher.ordered(found, "", dispatcher.leverage(found)) == ["x"]
+    assert dispatcher.ordered(found, "", dispatcher.leverage(found)) == ["x", "w"]
 
 
 def test_the_dispatch_row_carries_the_task_path_or_empty_strings():
