@@ -111,16 +111,16 @@ def ordered(doc: dict, named: str, scores: dict) -> list[str]:
     ]
 
 
-def queue(doc: dict, named: str | None) -> list[str]:
+def queue(doc: dict) -> list[str]:
     fixed, known = _fixed(doc), {t["id"]: t for t in doc["tasks"]}
-    return sorted(ordered(doc, named, leverage(doc)), key=lambda task_id: _band(known[task_id], fixed))
+    return sorted(ordered(doc, None, leverage(doc)), key=lambda task_id: _band(known[task_id], fixed))
 
 
 def claim_key(slug, config, store, doc):
     if config.autonomy not in APPLIES:
         return None
     fixed = _fixed(doc)
-    lined = queue(doc, bottleneck.read(store, slug).get("bottleneck"))
+    lined = queue(doc)
     position = {task_id: index for index, task_id in enumerate(lined)}
     return lambda task: (_band(task, fixed), position.get(task["id"], len(lined)))
 
@@ -138,7 +138,7 @@ def rank_pass(slug, config, store, ledger, doc, now_ms):
     scores, fixed = leverage(doc), _fixed(doc)
     if config.autonomy in APPLIES:
         before = _saved_heads(store, slug)
-        leading = [t for t in queue(doc, named) if t in claimable and (scores[t] or t in fixed)]
+        leading = [t for t in queue(doc) if t in claimable and (scores[t] or t in fixed)]
         heads = _heads(store, slug, config, leading, known, before)
         landed = {
             lane: [t for t in before.get(lane, []) if t in head or known.get(t, {}).get("state") == "open"]

@@ -1115,6 +1115,15 @@ def test_capacity_places_ready_tasks_in_the_claim_order():
     assert capacity.read(store, "sw")["tasks"] == {"deep": "claude"}
 
 
+def test_ready_work_orders_a_lane_by_the_dispatcher_queue_at_delegate():
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=0, max_plan=0))
+    store.update("sw", autonomy="delegate")
+    ledger = FakeLedger([{"id": "leaf"}, {"id": "head"}, {"id": "after", "depends_on": ["head"]}])
+    _, ready = capacity.ready_work("sw", store, ledger.state("sw"))
+    assert [t["id"] for t in ready["eng"]] == ["head", "leaf"]
+
+
 def test_allocation_skips_a_harness_whose_only_room_is_on_accounts_the_handoff_cannot_take():
     seats = [session_bands.Seat("claude", "a", 1, 0), session_bands.Seat("codex", "x", 5, 0)]
     allocation, placements = capacity._allocate(

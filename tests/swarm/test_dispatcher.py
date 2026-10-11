@@ -339,6 +339,7 @@ def test_the_queue_head_follows_claims_operator_ranks_and_freezes_with_one_comme
     ledger = Ledger()
     dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW + 60_000)
     assert ledger.comments == [entered("l1", leads("1 open task", "1 open task"))]
+    assert json.loads(store.redis.get(store.key(SLUG, "dispatch-head")))["eng"] == ["s", "l1"]
     tasks[-2]["rank"] = "high"
     found["_meta"] = {"stamps": {"tasks/l2/rank": {"by": "operator"}}}
     ledger = Ledger()
@@ -536,7 +537,7 @@ def spawned(store, config, ledger, found):
 @pytest.mark.parametrize("autonomy", ["delegate", "full"])
 def test_a_tick_with_four_free_seats_claims_the_top_four_of_the_dispatcher_queue(store, autonomy):
     config, ledger, found = queue_ledger(store, autonomy)
-    assert dispatcher.queue(found, None)[:6] == ["l4", "h1", "h2", "h3", "s", "h4"]
+    assert dispatcher.queue(found)[:6] == ["l4", "h1", "h2", "h3", "s", "h4"]
     assert spawned(store, config, ledger, found) == [("eng", t) for t in ("l4", "h1", "s", "l1")]
 
 
@@ -569,7 +570,7 @@ def test_the_claim_key_bands_only_operator_ranks_ahead_of_the_queue_position(sto
     key = dispatcher.claim_key(SLUG, config, store, found)
     rows = {t["id"]: t for t in found["tasks"]}
     assert [key(rows[t]) for t in ("l4", "h1", "l3")] == [(1, 0), (2, 1), (2, 15)]
-    assert key({"id": "missing"}) == (2, len(dispatcher.queue(found, None)))
+    assert key({"id": "missing"}) == (2, len(dispatcher.queue(found)))
     assert dispatcher.claim_key(SLUG, store.update(SLUG, autonomy="assist"), store, found) is None
 
 
@@ -636,6 +637,13 @@ def test_two_operator_high_ranks_take_the_two_head_places_at_delegate(store, hom
     dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, doc(tasks, phases=[], _meta={"stamps": stamps}), NOW)
     assert ledger.ranks == []
     assert ledger.comments == [entered(t, "the operator ranked it high") for t in ("t0", "t1")]
+
+
+def test_below_delegate_a_top_task_already_ranked_high_is_not_proposed_again(store, home, shipped):
+    store.update(SLUG, autonomy="assist")
+    tasks = ladder()
+    tasks[0]["rank"] = "high"
+    assert proposed(dispatcher.rank_pass(SLUG, store.config(SLUG), store, Ledger(), doc(tasks), NOW)) == ["b", "c"]
 
 
 def test_below_delegate_an_own_rank_is_never_lowered(store, home, shipped):
