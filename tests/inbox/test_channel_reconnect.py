@@ -3,7 +3,7 @@ import pytest
 from scripts.inbox import channel
 from scripts.inbox.store import InboxStore
 
-pytestmark = [pytest.mark.xdist_group("fakeredis"), pytest.mark.usefixtures("recovery_deadline")]
+pytestmark = [pytest.mark.xdist_group("mcp-sdk"), pytest.mark.usefixtures("recovery_deadline")]
 
 
 @pytest.fixture

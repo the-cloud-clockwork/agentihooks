@@ -10,8 +10,6 @@ import json
 import sys
 from pathlib import Path
 
-from redis.exceptions import RedisError
-
 from scripts.inbox.cli import check_for_operator, identity
 from scripts.inbox.seen import claim
 from scripts.inbox.store import NOTIFY, InboxError, connect
@@ -70,6 +68,7 @@ def _tool():
 
 async def _recheck(store, me, pubsub):
     import anyio
+    from redis.exceptions import RedisError
 
     finished, error = anyio.Event(), None
 
@@ -113,6 +112,7 @@ async def _deliver(store, me, write):
 
 async def _push(store, me, write, ready):
     import anyio
+    from redis.exceptions import RedisError
 
     pubsub, delay = None, 1.0
     try:

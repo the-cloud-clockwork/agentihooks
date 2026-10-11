@@ -4,8 +4,6 @@ inbox item lands, instead of at the next minute tick. Runs as the agentihooks-in
 import os
 import time
 
-from redis.exceptions import RedisError
-
 from scripts.inbox import wake
 from scripts.inbox.store import NOTIFY, InboxStore
 
@@ -24,6 +22,8 @@ def wake_all(store, inbox, herdr, now_ms, window, quiet=wake.DEFAULT_QUIET_S * 1
 
 
 def run(store, herdr, now_ms, environ=None):
+    from redis.exceptions import RedisError
+
     env = os.environ if environ is None else environ
     inbox = InboxStore(store.redis)
     pubsub, delay = None, 1.0
