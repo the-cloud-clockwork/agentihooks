@@ -31,9 +31,9 @@ def _plain(text: str, found: list[int]) -> str:
 def _value(text: str, key: str, found: list[int]) -> str:
     """A match that needs the record key hides the whole value."""
     own = _redact(text)
-    fragment = json.dumps({key: text})
+    fragment = json.dumps({key: own})
     keyed = _redact(fragment)
-    if set(MARKER.findall(keyed)) - set(MARKER.findall(own)) - set(MARKER.findall(fragment)):
+    if keyed != fragment:
         own = " ".join(MARKER.findall(keyed))
     found.append(_count(text, own))
     return own
@@ -52,24 +52,24 @@ def _redacted(value: object, key: str, found: list[int]) -> object:
     return _value(value, key, found) if isinstance(value, str) else value
 
 
-def _rewritten(line: str, record: dict, found: list[int]) -> str:
-    cleaned = _fields(record, found)
+def _rewritten(line: str, record: object, found: list[int]) -> str:
+    cleaned = _redacted(record, "", found)
     if cleaned == record:
         return line
     return json.dumps(cleaned, separators=(",", ":")) + END.search(line).group()
 
 
-def _record(line: str) -> dict | None:
+def _record(line: str) -> object:
     try:
         record = json.loads(line)
     except ValueError:
         return None
-    return record if isinstance(record, dict) else None
+    return record if isinstance(record, (dict, list, str)) else None
 
 
 def scrub(data: bytes) -> tuple[bytes, int]:
-    """JSON object lines are redacted field by field; each run of other lines is redacted as one text. The count is
-    the number of markers placed."""
+    """JSON object, array and string lines are redacted value by value; each run of other lines is redacted as one
+    text. The count is the number of markers placed."""
     found: list[int] = []
     out: list[str] = []
     block: list[str] = []

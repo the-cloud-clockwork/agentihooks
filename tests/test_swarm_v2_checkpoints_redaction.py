@@ -28,6 +28,28 @@ CASES = {
     ),
     "own before keyed": (json.dumps({WORD: TOKEN + " hunter2hunter2"}) + "\n", compact({WORD: GENERIC}) + "\n", 1),
     "keyed merged with own": (json.dumps({KEY: "plain1234" + TOKEN}) + "\n", compact({KEY: GENERIC}) + "\n", 1),
+    "keyed beside an own match of the same pattern": (
+        json.dumps({KEY: "hunter2hunter2 " + WORD + "=abcd1234efgh"}) + "\n",
+        compact({KEY: f"{GENERIC} {GENERIC}"}) + "\n",
+        2,
+    ),
+    "keyed after an own match of the same pattern": (
+        json.dumps({KEY: WORD.upper() + "=abcd1234efgh and hunter2hunter2"}) + "\n",
+        compact({KEY: GENERIC}) + "\n",
+        1,
+    ),
+    "keyed beside a marker already in the value": (
+        json.dumps({WORD: GENERIC + " hunter2hunter2"}) + "\n",
+        compact({WORD: GENERIC}) + "\n",
+        0,
+    ),
+    "quoted assignment in an array line": (
+        json.dumps([WORD.upper() + '="hunter2hunter2"']) + "\n",
+        compact([GENERIC + '"']) + "\n",
+        1,
+    ),
+    "escaped in an array line": ('["\\u0067hp_' + "Z9" * 18 + '", 1]\n', f'["{HIDDEN}",1]\n', 1),
+    "escaped in a string line": ('"\\u0067hp_' + "Z9" * 18 + '"\n', f'"{HIDDEN}"\n', 1),
     "keyed despite nosecret": (
         json.dumps({WORD: "hunter2hunter2 # nosecret"}) + "\n",
         compact({WORD: GENERIC}) + "\n",
