@@ -15,6 +15,7 @@ def test_admission_commits_during_controller_writes(monkeypatch, operation, writ
 
     store, authority, controller, clock, start = build(monkeypatch)
     agent, token = start()
+    authority.authorize(token)
     claim = authority.admit(token, 100) if operation == "renewal" else None
     lock = take_tick_lock(store, "fixture", controller.held, 1000)
     ledger = FencedLedger(store, "fixture", controller.held, SimpleNamespace(read=lambda: None))
@@ -47,6 +48,7 @@ def test_admission_commits_during_controller_writes(monkeypatch, operation, writ
 
     candidate = AgentRecord(store.next_name("fixture", "eng"), "eng", "other", seat="eng-2@fixture")
     monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    clock[0] += 10
     refusal = ""
     try:
         if operation == "execution":
