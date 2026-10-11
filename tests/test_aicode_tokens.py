@@ -13,7 +13,9 @@ def test_a_slug_turns_hyphens_into_underscores_and_keeps_letters_and_digits():
     assert tokens.slug("2team") == "2team"
 
 
-@pytest.mark.parametrize("raw", ["", "_x", "-x", "a.b", "a b", "a/b", "ñu", "status", "help", "default", "api"])
+@pytest.mark.parametrize(
+    "raw", ["", "_x", "-x", "a.b", "a b", "a/b", "ñu", "status", "help", "default", "api", "Status", "API"]
+)
 def test_a_slug_refuses_empty_underscore_leading_reserved_and_other_characters(raw):
     with pytest.raises(tokens.SlugError):
         tokens.slug(raw)
@@ -52,13 +54,31 @@ def test_an_upsert_quotes_a_value_the_shell_would_split():
 
 
 def test_write_rc_replaces_the_file_atomically_and_keeps_its_mode(tmp_path):
-    rc = tmp_path / ".bashrc"
+    folder = tmp_path / "rc"
+    folder.mkdir()
+    rc = folder / ".bashrc"
     rc.write_text("x\n")
     rc.chmod(0o644)
     tokens.write_rc(rc, {"A": "1"})
     assert rc.read_text() == f"x\n{START}\nexport A=1\n{END}\n"
     assert rc.stat().st_mode & 0o777 == 0o644
-    assert [path.name for path in tmp_path.iterdir()] == [".bashrc"]
+    assert [path.name for path in folder.iterdir()] == [".bashrc"]
+
+
+def test_write_rc_writes_through_a_symlinked_rc_file(tmp_path):
+    target = tmp_path / "dotfiles" / "bashrc"
+    target.parent.mkdir()
+    target.write_text("x\n")
+    link = tmp_path / ".bashrc"
+    link.symlink_to(target)
+    tokens.write_rc(link, {"A": "1"})
+    assert link.is_symlink()
+    assert target.read_text() == f"x\n{START}\nexport A=1\n{END}\n"
+
+
+def test_an_upsert_leaves_a_duplicate_block_without_the_export():
+    text = f"{START}\nexport A=old\n{END}\nmid\n{START}\nexport A=older\nexport B=2\n{END}\n"
+    assert tokens.upsert(text, {"A": "new"}) == f"{START}\nexport A=new\n{END}\nmid\n{START}\nexport B=2\n{END}\n"
 
 
 def test_write_rc_creates_a_missing_file_readable_only_by_its_owner(tmp_path):

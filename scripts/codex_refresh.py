@@ -1,7 +1,4 @@
-"""`agentihooks codex refresh`: renew Codex accounts before their access token expires, on the refresh authority only.
-
-Every grant rotates the refresh token, so exactly one machine may refresh a given account. No value is printed.
-"""
+"""Every grant rotates the refresh token, so exactly one machine may refresh a given account."""
 
 import argparse
 import contextlib
@@ -18,6 +15,7 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from hooks import config
 from hooks.context.account_sessions import CODEX_TOKEN_PREFIX
 from scripts import aicode_tokens, codex_login, codex_router, openbao_kv
 
@@ -71,8 +69,12 @@ class Run:
     deps: Deps
 
 
+def _expiry(token: str) -> int:
+    return int(codex_router._claims(token).get("exp") or 0)
+
+
 def _days_left(token: str, now: float) -> float:
-    return (int(codex_router._claims(token).get("exp") or 0) - now) / DAY_S
+    return (_expiry(token) - now) / DAY_S
 
 
 def _digest(value: str) -> str:
@@ -141,7 +143,7 @@ def _entries(slug: str, fresh: dict) -> dict[str, str]:
 def _store(bao: openbao_kv.OpenBao, entries: dict[str, str]) -> bool:
     try:
         total = openbao_kv.merge(bao, openbao_kv.CODEX_CREDS, entries)
-    except openbao_kv.OpenBaoError as exc:
+    except Exception as exc:
         print(f"OpenBao write failed: {exc}")
         return False
     print(openbao_kv.summary(openbao_kv.CODEX_CREDS, entries, total))
@@ -161,25 +163,32 @@ def _valid(name: str) -> bool:
         return False
 
 
+def _refresh_local(run: Run, home: Path) -> bool | None:
+    """None when nothing was refreshed, else whether every write landed."""
+    tokens = codex_login._tokens(home)
+    fresh = _renew(home.name, tokens.get("access_token", ""), tokens.get("refresh_token", ""), run)
+    if fresh is None:
+        return None
+    if not fresh:
+        return False
+    try:
+        _save_auth(home / "auth.json", fresh, run.deps.now())
+        aicode_tokens.write_rc(aicode_tokens.rc_file(), {f"{CODEX_TOKEN_PREFIX}{home.name}": fresh["access_token"]})
+    except OSError as exc:
+        print(f"{home.name}: write failed: {exc}")
+        return False
+    return _store(run.bao, _entries(home.name, fresh)) if run.bao else True
+
+
 def run_local(run: Run) -> int:
     homes = _local_accounts(run.force)
     if run.force and not homes:
         print(f"{run.force}: no such Codex account under {codex_login.homes()}")
         return 1
-    failures = 0
-    for home in homes:
-        tokens = codex_login._tokens(home)
-        fresh = _renew(home.name, tokens.get("access_token", ""), tokens.get("refresh_token", ""), run)
-        if fresh is None:
-            continue
-        if not fresh:
-            failures += 1
-            continue
-        _save_auth(home / "auth.json", fresh, run.deps.now())
-        aicode_tokens.write_rc(aicode_tokens.rc_file(), {f"{CODEX_TOKEN_PREFIX}{home.name}": fresh["access_token"]})
-        if run.bao and not _store(run.bao, _entries(home.name, fresh)):
-            failures += 1
-    return failures
+    outcomes = [_refresh_local(run, home) for home in homes]
+    if run.bao is None and any(outcome is not None for outcome in outcomes):
+        print(f"OpenBao not updated: {openbao_kv.URL_ENV} or {openbao_kv.TOKEN_ENV} unset")
+    return outcomes.count(False)
 
 
 def _bao_accounts(secret: Mapping[str, str], force: str) -> list[str]:
@@ -188,13 +197,46 @@ def _bao_accounts(secret: Mapping[str, str], force: str) -> list[str]:
     return [slug for slug in found if _valid(slug) and (not force or slug == force)]
 
 
+def _recovery(slug: str) -> Path:
+    return codex_login.homes() / slug / "auth.json"
+
+
+def _recovered(slug: str, access: str) -> dict | None:
+    """A pair kept after a failed OpenBao write, when it is newer than the one OpenBao holds."""
+    tokens = codex_login._tokens(_recovery(slug).parent)
+    if not (tokens.get("access_token") and tokens.get("refresh_token")):
+        return None
+    if _expiry(tokens["access_token"]) <= _expiry(access):
+        return None
+    return {key: tokens[key] for key in TOKEN_KEYS if tokens.get(key)}
+
+
 def _store_or_recover(run: Run, slug: str, fresh: dict) -> bool:
     if _store(run.bao, _entries(slug, fresh)):
         return True
-    recovery = codex_login.homes() / slug / "auth.json"
+    recovery = _recovery(slug)
     _save_auth(recovery, fresh, run.deps.now())
-    print(f"{slug}: the new token pair is kept in {recovery}; store it in OpenBao before the next refresh")
+    print(f"{slug}: the new token pair is kept in {recovery}; the next refresh stores it in OpenBao")
     return False
+
+
+def _refresh_bao(run: Run, secret: Mapping[str, str], slug: str) -> bool:
+    access, refresh = secret.get(f"{CODEX_TOKEN_PREFIX}{slug}", ""), secret[f"{codex_login.REFRESH_PREFIX}{slug}"]
+    recovered = _recovered(slug, access)
+    if recovered:
+        print(f"{slug}: using the newer pair kept in {_recovery(slug)}")
+        access, refresh = recovered["access_token"], recovered["refresh_token"]
+    fresh = _renew(slug, access, refresh, run)
+    if fresh == {}:
+        return False
+    fresh = fresh or recovered
+    if not fresh:
+        return True
+    stored = _store_or_recover(run, slug, fresh)
+    if stored and recovered:
+        _recovery(slug).unlink(missing_ok=True)
+    aicode_tokens.update_existing(aicode_tokens.rc_file(), {f"{CODEX_TOKEN_PREFIX}{slug}": fresh["access_token"]})
+    return stored
 
 
 def run_openbao(run: Run) -> int:
@@ -207,18 +249,7 @@ def run_openbao(run: Run) -> int:
     if run.force and not slugs:
         print(f"{run.force}: no such Codex account in OpenBao")
         return 1
-    failures = 0
-    for slug in slugs:
-        refresh = secret[f"{codex_login.REFRESH_PREFIX}{slug}"]
-        fresh = _renew(slug, secret.get(f"{CODEX_TOKEN_PREFIX}{slug}", ""), refresh, run)
-        if fresh is None:
-            continue
-        if not fresh:
-            failures += 1
-            continue
-        failures += not _store_or_recover(run, slug, fresh)
-        aicode_tokens.update_existing(aicode_tokens.rc_file(), {f"{CODEX_TOKEN_PREFIX}{slug}": fresh["access_token"]})
-    return failures
+    return [_refresh_bao(run, secret, slug) for slug in slugs].count(False)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -239,7 +270,7 @@ def _days(option: float | None, environ: Mapping[str, str]) -> float:
 
 @contextlib.contextmanager
 def _exclusive() -> Iterator[bool]:
-    path = Path.home() / ".agentihooks" / "codex-refresh.lock"
+    path = Path(config.AGENTIHOOKS_HOME) / "codex-refresh.lock"
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+") as lock:
         try:

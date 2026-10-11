@@ -23,13 +23,24 @@ def test_a_merge_keeps_other_keys_drops_the_stale_ones_and_writes_at_the_read_ve
 
 
 def test_a_check_and_set_conflict_rereads_and_retries_up_to_three_times():
-    fake = FakeBao({"KEEP": "k"}, version=1, conflicts=2)
-    assert openbao_kv.merge(_bao(fake), openbao_kv.CODEX_CREDS, {"A": "1"}) == 2
-    assert len(fake.writes) == 3
     fake = FakeBao({"KEEP": "k"}, version=1, conflicts=3)
+    assert openbao_kv.merge(_bao(fake), openbao_kv.CODEX_CREDS, {"A": "1"}) == 2
+    assert len(fake.writes) == 4
+    fake = FakeBao({"KEEP": "k"}, version=1, conflicts=4)
     with pytest.raises(openbao_kv.OpenBaoError):
         openbao_kv.merge(_bao(fake), openbao_kv.CODEX_CREDS, {"A": "1"})
-    assert len(fake.writes) == 3
+    assert len(fake.writes) == 4
+
+
+def test_a_response_that_is_not_json_raises_an_openbao_error():
+    fake = FakeBao({"KEEP": "k"})
+    fake.garbage_writes = True
+    with pytest.raises(openbao_kv.OpenBaoError):
+        openbao_kv.merge(_bao(fake), openbao_kv.CODEX_CREDS, {"A": "1"})
+
+
+def test_the_token_stays_out_of_the_repr():
+    assert BAO_TOKEN not in repr(_bao(FakeBao()))
 
 
 def test_a_failed_request_raises_with_its_status_and_never_a_value():

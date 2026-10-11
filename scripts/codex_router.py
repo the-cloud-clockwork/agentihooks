@@ -168,13 +168,12 @@ def default_signed_in(environ: Mapping[str, str], run: Callable = subprocess.run
 
 
 def accounts(environ: Mapping[str, str], run: Callable = subprocess.run) -> list[CodexAccount]:
-    """Token accounts replace the default login once any exists."""
     return token_accounts(environ) or [CodexAccount(CODEX_DEFAULT, signed_in=default_signed_in(environ, run))]
 
 
 def routing_pool(environ: Mapping[str, str], run: Callable = subprocess.run) -> list[CodexAccount]:
-    """Without token variables only the default login routes, unchecked, exactly as before tokens existed."""
-    return accounts(environ, run) if token_accounts(environ) else [CodexAccount(CODEX_DEFAULT)]
+    """The default login routes unchecked."""
+    return token_accounts(environ) or [CodexAccount(CODEX_DEFAULT)]
 
 
 def _registry() -> dict:
@@ -412,16 +411,19 @@ def _route(environ: Mapping[str, str], route: str, run: Callable, exclude: str) 
 
 
 def _own_command(args: list[str], environ: Mapping[str, str]) -> int | None:
-    """`login <slug>` and `refresh` are agentihooks commands; every other login form is Codex's own."""
-    if args[:1] == ["refresh"]:
+    if args[:1] == ["refresh"] and (len(args) == 1 or args[1].startswith("-")):
         from scripts import codex_refresh
 
         return codex_refresh.main(args[1:], environ)
-    if args[:1] == ["login"] and len(args) > 1 and args[1] not in LOGIN_PASSTHROUGH and not args[1].startswith("-"):
+    if args[:1] == ["login"] and len(args) > 1 and not _passthrough_login(args[1]):
         from scripts import codex_login
 
         return codex_login.main(args[1:], environ)
     return None
+
+
+def _passthrough_login(word: str) -> bool:
+    return word.lower() in LOGIN_PASSTHROUGH or word.startswith("-")
 
 
 def main(

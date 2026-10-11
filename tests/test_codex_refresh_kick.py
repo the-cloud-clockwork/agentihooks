@@ -53,7 +53,7 @@ def test_the_interval_comes_from_the_environment(tmp_path, spawned):
     assert len(spawned) == 1
 
 
-def test_a_failure_to_start_is_swallowed(tmp_path, monkeypatch):
+def test_a_failure_to_start_is_swallowed_and_leaves_no_stamp(tmp_path, monkeypatch):
     monkeypatch.setattr(kick.shutil, "which", lambda name: "/usr/bin/agentihooks")
 
     def boom(argv, **kwargs):
@@ -61,3 +61,4 @@ def test_a_failure_to_start_is_swallowed(tmp_path, monkeypatch):
 
     monkeypatch.setattr(kick.subprocess, "Popen", boom)
     assert kick.kick(tmp_path, FLAG) is False
+    assert not (tmp_path / "codex-refresh.stamp").exists()

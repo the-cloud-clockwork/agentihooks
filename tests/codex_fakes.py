@@ -36,6 +36,7 @@ class FakeBao:
         self.conflicts = conflicts
         self.url, self.token = url, token
         self.fail_writes = fail_writes
+        self.garbage_writes = False
         self.requests = []
 
     def __call__(self, request, timeout=None):
@@ -48,6 +49,8 @@ class FakeBao:
             return io.BytesIO(json.dumps({"data": {"data": self.data, "metadata": {"version": self.version}}}).encode())
         if self.fail_writes:
             raise http_error(request.full_url, 503, b'{"errors": ["sealed"]}')
+        if self.garbage_writes:
+            return io.BytesIO(b"<html>proxy</html>")
         body = json.loads(request.data)
         if self.conflicts:
             self.conflicts -= 1

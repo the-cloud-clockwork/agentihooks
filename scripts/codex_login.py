@@ -1,8 +1,3 @@
-"""`agentihooks codex login <slug>`: one ChatGPT login in its own Codex home, exported as AH_CX_TOKEN_<slug>.
-
-No token value is printed. Typed OpenBao credentials serve one write and are kept nowhere.
-"""
-
 import argparse
 import getpass
 import json
@@ -19,7 +14,7 @@ from hooks.context.account_sessions import CODEX_TOKEN_PREFIX, INTERNAL_RUN
 from scripts import aicode_tokens, codex_router, openbao_kv
 from scripts.routing import envs
 
-REFRESH_FLAG = "AGENTIHOOKS_AICODE_TOKEN_REFRESH"
+REFRESH_FLAG = aicode_tokens.REFRESH_FLAG
 REFRESH_PREFIX = "AH_CX_REFRESH_"
 FILE_STORE = ["-c", 'cli_auth_credentials_store="file"']
 
@@ -56,7 +51,11 @@ def _parser() -> argparse.ArgumentParser:
 def _codex_login(home: Path, device_auth: bool, environ: Mapping[str, str], run: Callable) -> int:
     child = {**envs.codex_subscription_child(environ), "CODEX_HOME": str(home), INTERNAL_RUN: "1"}
     argv = [shutil.which("codex") or "codex", "login", *(["--device-auth"] if device_auth else []), *FILE_STORE]
-    return run(argv, env=child).returncode
+    try:
+        return run(argv, env=child).returncode
+    except OSError as exc:
+        print(f"agentihooks codex login: cannot run codex: {exc.strerror or exc}", file=sys.stderr)
+        return 1
 
 
 def _tokens(home: Path) -> dict:
@@ -69,10 +68,13 @@ def _tokens(home: Path) -> dict:
 
 def _login(slug: str, device_auth: bool, environ: Mapping[str, str], run: Callable) -> tuple[int, dict]:
     home = homes() / slug
+    created = not home.exists()
     home.mkdir(parents=True, exist_ok=True, mode=0o700)
     home.chmod(0o700)
     code = _codex_login(home, device_auth, environ, run)
     if code:
+        if created:
+            shutil.rmtree(home, ignore_errors=True)
         return code, {}
     tokens = _tokens(home)
     if not tokens.get("access_token"):

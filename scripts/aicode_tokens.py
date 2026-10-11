@@ -1,5 +1,3 @@
-"""The managed block of agent token exports in the operator's shell rc file, for any agent harness."""
-
 import os
 import re
 import shlex
@@ -10,6 +8,7 @@ from pathlib import Path
 
 START = "# ===AGENTIHOOKS-AICODING-TOKENS==="
 END = "# ===AGENTIHOOKS-AICODING-TOKENS-END==="
+REFRESH_FLAG = "AGENTIHOOKS_AICODE_TOKEN_REFRESH"
 RESERVED = frozenset({"status", "help", "default", "api"})
 _SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_]*")
 _EXPORT = re.compile(r"\s*export\s+([^=\s]+)=")
@@ -21,7 +20,7 @@ class SlugError(ValueError):
 
 def slug(raw: str) -> str:
     found = raw.replace("-", "_")
-    if not _SLUG.fullmatch(found) or found in RESERVED:
+    if not _SLUG.fullmatch(found) or found.lower() in RESERVED:
         reserved = ", ".join(sorted(RESERVED))
         raise SlugError(f"slug must be letters, digits, '_' or '-', not start with '_' and not be {reserved}: {raw!r}")
     return found
@@ -31,16 +30,20 @@ def rc_file(platform: str | None = None) -> Path:
     return Path.home() / (".zshrc" if (platform or sys.platform) == "darwin" else ".bashrc")
 
 
-def _block(lines: list[str]) -> tuple[int, int] | None:
-    start = next((index for index, line in enumerate(lines) if line.rstrip() == START), None)
-    if start is None:
-        return None
-    end = next((index for index in range(start + 1, len(lines)) if lines[index].rstrip() == END), None)
-    return None if end is None else (start, end)
+def _blocks(lines: list[str]) -> list[tuple[int, int]]:
+    spans, start = [], None
+    for index, line in enumerate(lines):
+        marker = line.rstrip()
+        if marker == START:
+            start = index
+        elif marker == END and start is not None:
+            spans.append((start, index))
+            start = None
+    return spans
 
 
 def has_block(text: str) -> bool:
-    return _block(text.splitlines(keepends=True)) is not None
+    return bool(_blocks(text.splitlines(keepends=True)))
 
 
 def _exported(line: str) -> str:
@@ -48,11 +51,10 @@ def _exported(line: str) -> str:
     return found.group(1) if found else ""
 
 
-def _upsert_one(lines: list[str], span: tuple[int, int], name: str, value: str, stale: Iterable[str]) -> list[str]:
+def _rewrite(lines: list[str], span: tuple[int, int], name: str, line: str, stale: Iterable[str]) -> list[str]:
     start, end = span
-    line = f"export {name}={shlex.quote(value)}\n"
     dropped = {name, *stale}
-    body, placed = [], False
+    body, placed = [], not line
     for item in lines[start + 1 : end]:
         found = _exported(item)
         if found == name and not placed:
@@ -66,18 +68,23 @@ def _upsert_one(lines: list[str], span: tuple[int, int], name: str, value: str, 
 
 
 def upsert(text: str, entries: Mapping[str, str], stale: Iterable[str] = ()) -> str:
+    """The first block holds each export; later duplicate blocks lose it so they cannot override it."""
     lines = text.splitlines(keepends=True)
-    if _block(lines) is None:
-        sep = "\n" if text and not text.endswith("\n") else ""
-        lines = [*lines[:-1], lines[-1] + sep] if lines else []
+    if not _blocks(lines):
+        if lines and not lines[-1].endswith("\n"):
+            lines[-1] += "\n"
         lines += [f"{START}\n", f"{END}\n"]
     stale = tuple(stale)
     for name, value in entries.items():
-        lines = _upsert_one(lines, _block(lines), name, value, stale)
+        first, *later = _blocks(lines)
+        for span in reversed(later):
+            lines = _rewrite(lines, span, name, "", stale)
+        lines = _rewrite(lines, first, name, f"export {name}={shlex.quote(value)}\n", stale)
     return "".join(lines)
 
 
 def write_rc(path: Path, entries: Mapping[str, str], stale: Iterable[str] = ()) -> None:
+    path = path.resolve()
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     mode = path.stat().st_mode & 0o777 if path.exists() else 0o600
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")

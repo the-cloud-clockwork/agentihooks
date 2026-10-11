@@ -695,7 +695,7 @@ def test_an_open_route_never_places_an_account_whose_credential_is_refused(monke
     rc, seen, report = _launch(monkeypatch, tmp_path, environ, ["-m", "o3"], quotas)
     assert rc == 0 and report.read_text() == "status=routed\naccount=alpha\nplacement=open\n"
     pool = router.CodexAccountSource(_status(0)).pool(environ)
-    assert [account.name for account in pool] == ["default", "alpha"]
+    assert [account.name for account in pool] == ["alpha"]
     assert [router.refusal(account, OAUTH_ENV) for account in map(_token, ("alpha", "gamma", "keyed", "ghost"))] == [
         "",
         "",
@@ -726,7 +726,7 @@ def test_a_forced_route_to_an_unknown_account_never_lists_refused_credentials(mo
     environ = {"HOME": "/home/u", "AH_CX_TOKEN_keyed": "sk-proj-value"}
     rc, seen, report = _launch(monkeypatch, tmp_path, environ, ["--route", "ghost"])
     assert (rc, seen) == (3, {})
-    assert report.read_text() == "status=failed\nerror=Codex account 'ghost' not found; available: default, keyed\n"
+    assert report.read_text() == "status=failed\nerror=Codex account 'ghost' not found; available: keyed\n"
 
 
 def test_a_refused_token_keeps_its_sessions_out_of_the_default_reading(monkeypatch):
@@ -786,11 +786,23 @@ def test_login_with_a_slug_and_refresh_are_agentihooks_commands(monkeypatch):
     assert seen == [("login", ["team-a", "--openbao"]), ("refresh", ["--force", "alpha"])]
 
 
-@pytest.mark.parametrize("argv", [["login"], ["login", "status"], ["login", "help"], ["login", "--device-auth"]])
-def test_login_without_a_slug_still_goes_to_codex(monkeypatch, tmp_path, argv):
-    from scripts import codex_login
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["login"],
+        ["login", "status"],
+        ["login", "STATUS"],
+        ["login", "help"],
+        ["login", "--device-auth"],
+        ["refresh", "the", "README"],
+    ],
+)
+def test_login_without_a_slug_and_a_prompt_starting_with_refresh_still_go_to_codex(monkeypatch, tmp_path, argv):
+    from scripts import codex_login, codex_refresh
 
     monkeypatch.setattr(codex_login, "main", lambda args, environ: pytest.fail("not an agentihooks login"))
+    monkeypatch.setattr(codex_refresh, "main", lambda args, environ: pytest.fail("not an agentihooks refresh"))
+    assert router._own_command(argv, ENV) is None
     rc, seen, _ = _launch(monkeypatch, tmp_path, ENV, argv, {"alpha": _quota(10.0), "beta": _quota(50.0)})
     assert rc == 0
     assert seen["cmd"][-len(argv) :] == argv

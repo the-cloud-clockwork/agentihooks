@@ -249,7 +249,9 @@ def test_a_weekly_only_reading_has_an_empty_five_hour_window_and_passed_resets_e
     assert qp._session_windows(SID) == (0.0, 0.0, int(now - 1), int(now - 1))
 
 
-def test_codex_candidates_cover_the_default_login_idle_accounts_and_passed_resets(codex, monkeypatch):
+def test_codex_candidates_cover_idle_accounts_and_passed_resets_and_the_default_login_only_without_tokens(
+    codex, monkeypatch
+):
     now = time.time()
     _rollout(codex, SID, None, 30.0, None, int(now + 86400))
     _rollout(codex, PEER, 40.0, 50.0, int(now - 1), int(now - 1))
@@ -260,7 +262,11 @@ def test_codex_candidates_cover_the_default_login_idle_accounts_and_passed_reset
     monkeypatch.setattr("scripts.codex_router._registry", lambda: owners)
     monkeypatch.setattr("hooks.context.account_sessions.codex_sessions_by_account", lambda: {"beta": 2})
     rows = {c.account: (c.five_used, c.week_used, c.sessions) for c in qp._codex_accounts()}
-    assert rows == {"default": (0.0, 30.0, 0), "gamma": (0.0, 0.0, 0), "beta": (40.0, 50.0, 2)}
+    assert rows == {"gamma": (0.0, 0.0, 0), "beta": (40.0, 50.0, 2)}
+    monkeypatch.delenv("AH_CX_TOKEN_gamma")
+    monkeypatch.delenv("AH_CX_TOKEN_beta")
+    monkeypatch.setattr("hooks.context.account_sessions.codex_sessions_by_account", lambda: {})
+    assert [c.account for c in qp._codex_accounts()] == ["default"]
 
 
 def test_policy_texts_name_the_resume_the_reset_and_the_token_variable(monkeypatch):

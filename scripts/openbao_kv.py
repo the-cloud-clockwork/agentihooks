@@ -1,22 +1,20 @@
-"""A KV v2 secret on OpenBao, merged key by key under check-and-set. Only key names and counts are reported."""
-
 import json
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 MOUNT = "secret"
 CODEX_CREDS = "agentihooks/codex-creds"
 URL_ENV = "OPENBAO_URL"
 TOKEN_ENV = "OPENBAO_TOKEN"
-ATTEMPTS = 3
+CAS_RETRIES = 3
 TIMEOUT_S = 20
 
 
 class OpenBaoError(RuntimeError):
     def __init__(self, status: int, message: str):
-        super().__init__(f"OpenBao HTTP {status}: {message}" if status else f"OpenBao unreachable: {message}")
+        super().__init__(f"OpenBao HTTP {status}: {message}" if status else f"OpenBao request failed: {message}")
         self.status = status
         self.message = message
 
@@ -28,7 +26,7 @@ class OpenBaoError(RuntimeError):
 @dataclass(frozen=True)
 class OpenBao:
     url: str
-    token: str
+    token: str = field(repr=False)
     opener: Callable = urllib.request.urlopen
 
 
@@ -49,16 +47,21 @@ def _message(exc: urllib.error.HTTPError) -> str:
 
 def _call(bao: OpenBao, method: str, path: str, body: dict | None = None) -> dict:
     data = json.dumps(body).encode() if body is not None else None
-    request = urllib.request.Request(f"{bao.url.rstrip('/')}/v1/{MOUNT}/data/{path}", data=data, method=method)
-    request.add_header("X-Vault-Token", bao.token)
-    request.add_header("Content-Type", "application/json")
     try:
+        request = urllib.request.Request(f"{bao.url.rstrip('/')}/v1/{MOUNT}/data/{path}", data=data, method=method)
+        request.add_header("X-Vault-Token", bao.token)
+        request.add_header("Content-Type", "application/json")
         with bao.opener(request, timeout=TIMEOUT_S) as response:
-            return json.loads(response.read() or b"{}")
+            found = json.loads(response.read() or b"{}")
     except urllib.error.HTTPError as exc:
         raise OpenBaoError(exc.code, _message(exc)) from None
     except (urllib.error.URLError, OSError) as exc:
         raise OpenBaoError(0, str(getattr(exc, "reason", exc))) from None
+    except ValueError as exc:
+        raise OpenBaoError(0, f"unreadable request or response: {type(exc).__name__}") from None
+    if not isinstance(found, dict):
+        raise OpenBaoError(0, "unreadable response: not a JSON object")
+    return found
 
 
 def read(bao: OpenBao, path: str) -> tuple[dict[str, str], int]:
@@ -72,15 +75,14 @@ def read(bao: OpenBao, path: str) -> tuple[dict[str, str], int]:
 
 
 def merge(bao: OpenBao, path: str, entries: Mapping[str, str], stale: Iterable[str] = ()) -> int:
-    """Writes entries over the current keys minus stale ones; returns the total key count."""
     stale = frozenset(stale)
-    for attempt in range(ATTEMPTS):
+    for retry in range(CAS_RETRIES + 1):
         current, version = read(bao, path)
         merged = {key: value for key, value in current.items() if key not in stale} | dict(entries)
         try:
             _call(bao, "POST", path, {"options": {"cas": version}, "data": merged})
         except OpenBaoError as exc:
-            if exc.conflict and attempt < ATTEMPTS - 1:
+            if exc.conflict and retry < CAS_RETRIES:
                 continue
             raise
         return len(merged)

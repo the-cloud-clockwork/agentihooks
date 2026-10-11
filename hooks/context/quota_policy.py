@@ -216,10 +216,11 @@ def _codex_accounts() -> list[Candidate]:
 
     environ = dict(os.environ)
     sessions = codex_sessions_by_account()
-    names = {account.name for account in codex_router.token_accounts(environ)} | set(sessions)
-    pool = [codex_router.CodexAccount(CODEX_DEFAULT)] + [
+    pool = codex_router.routing_pool(environ)
+    known = {account.name for account in pool}
+    pool += [
         codex_router.CodexAccount(name, f"{CODEX_TOKEN_PREFIX}{name}")
-        for name in sorted(names - {CODEX_DEFAULT, API_ACCOUNT})
+        for name in sorted(set(sessions) - known - {CODEX_DEFAULT, API_ACCOUNT})
     ]
     now = time.time()
     candidates = []

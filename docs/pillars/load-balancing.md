@@ -458,7 +458,9 @@ days, so the refresher below keeps it alive.
   terminal is asked whether to store them, then whether to use the detected
   `OPENBAO_URL` and `OPENBAO_TOKEN`, or for a URL and a token typed with no
   echo; typed credentials serve that one write and are saved nowhere. Off a
-  terminal with neither flag the step is skipped.
+  terminal with neither flag the step is skipped. When the OpenBao write fails
+  or is refused (`--openbao` off a terminal without both variables), the login
+  exits 1 after the block was already written.
 - Every account lives in one KV v2 secret, `secret/agentihooks/codex-creds`,
   under the keys `AH_CX_TOKEN_<slug>` and `AH_CX_REFRESH_<slug>`. A write merges
   its keys over the current ones with check-and-set, retried up to three times
@@ -477,23 +479,29 @@ on becomes the refresh authority.
 - `AGENTIHOOKS_AICODE_TOKEN_STORE=local` (default): the accounts are the
   `~/.agentihooks/codex/<slug>/auth.json` files. A refresh writes that file
   first, then the rc block, then OpenBao when `OPENBAO_URL` and `OPENBAO_TOKEN`
-  are set.
+  are set; without them the run says OpenBao was not updated. A write error on
+  one account is reported and the others still refresh.
 - `AGENTIHOOKS_AICODE_TOKEN_STORE=openbao`: the accounts are the
   `AH_CX_REFRESH_<slug>` keys of the OpenBao secret, written back there; the rc
   block is updated only where it already exists. It refuses to run without
   `OPENBAO_URL` and `OPENBAO_TOKEN`. When the OpenBao write fails after a
   refresh, the new pair is kept in `~/.agentihooks/codex/<slug>/auth.json`
-  (0600) and the error names that file.
+  (0600) and the error names that file. The next run uses that pair when it is
+  newer than the one in OpenBao, stores it and removes the file.
 - Each account prints its days left, then `refreshed` with the new days left and
   whether the refresh token rotated. A refused grant prints the slug, the HTTP
   status and the OAuth error and the run moves on, exiting non zero.
 - A second run on the same machine skips while the first holds
-  `~/.agentihooks/codex-refresh.lock`.
+  `<AGENTIHOOKS_HOME>/codex-refresh.lock`.
 - Cadence: every session start on the refresh authority starts
   `agentihooks codex refresh` detached when `<AGENTIHOOKS_HOME>/codex-refresh.stamp`
   is older than `AGENTIHOOKS_AICODE_TOKEN_REFRESH_INTERVAL_H` hours (default 6).
-  A machine without the flag only reads it. Cron or a Kubernetes CronJob can run
-  the same command.
+  A machine without the flag only reads it; a start that fails removes the stamp
+  so the next session retries. Cron or a Kubernetes CronJob can run the same
+  command.
+- Known gap: when the server rotates the refresh token but its response is lost,
+  the stored refresh token is spent and every later grant is refused. Recover
+  with a fresh `agentihooks codex login <slug>`.
 
 ## Configuration
 

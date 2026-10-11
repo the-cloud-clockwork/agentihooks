@@ -112,6 +112,19 @@ def test_a_failed_login_exits_with_the_codex_code_and_writes_nothing():
     bao = FakeBao()
     assert _login(["team", "--openbao"], environ={**ENV, **BAO_ENV}, run=_codex(returncode=7)[0], bao=bao) == 7
     assert not aicode_tokens.rc_file().exists() and not bao.requests
+    assert not _home("team").exists()
+    _home("kept").mkdir(parents=True)
+    assert _login(["kept", "--no-openbao"], run=_codex(returncode=7)[0]) == 7
+    assert _home("kept").is_dir()
+
+
+def test_a_missing_codex_binary_fails_the_login_with_one_line(capsys):
+    def run(argv, env, **kwargs):
+        raise FileNotFoundError(2, "No such file or directory", argv[0])
+
+    assert _login(["team", "--no-openbao"], run=run) == 1
+    assert "cannot run codex" in capsys.readouterr().err
+    assert not _home("team").exists()
 
 
 def test_a_login_that_leaves_no_access_token_fails():

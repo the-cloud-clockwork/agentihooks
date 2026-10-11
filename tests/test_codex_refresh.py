@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from hooks import config
 from scripts import aicode_tokens, codex_refresh, openbao_kv
 from tests.codex_fakes import BAO_TOKEN, BAO_URL, NOW, FakeBao, access_token, http_error
 
@@ -79,6 +80,38 @@ def test_days_come_from_the_flag_then_the_environment_then_three(capsys):
     grant = Grant()
     assert _run([], {**FLAG, "AGENTIHOOKS_AICODE_TOKEN_REFRESH_DAYS": "9"}, grant) == 0
     assert grant.calls == ["rt-alpha", "rt-beta"]
+    _account("alpha", 2.9)
+    _account("beta", 3.1)
+    grant = Grant()
+    assert _run([], FLAG, grant) == 0
+    assert grant.calls == ["rt-alpha"]
+
+
+def test_a_refresh_without_openbao_credentials_says_openbao_was_not_updated(capsys):
+    _account("alpha", 1)
+    assert _run([], FLAG) == 0
+    assert "OpenBao not updated: OPENBAO_URL or OPENBAO_TOKEN unset" in capsys.readouterr().out
+    _account("beta", 8)
+    _run(["--force", "beta"], {**FLAG, **BAO_ENV}, bao=FakeBao())
+    assert "OpenBao not updated" not in capsys.readouterr().out
+
+
+def test_a_write_error_on_one_account_is_reported_and_the_others_still_refresh(monkeypatch, capsys):
+    _account("alpha", 1)
+    _account("beta", 1)
+    write_rc = aicode_tokens.write_rc
+
+    def failing(path, entries, stale=()):
+        if "AH_CX_TOKEN_alpha" in entries:
+            raise OSError(28, "No space left on device")
+        write_rc(path, entries, stale)
+
+    monkeypatch.setattr(aicode_tokens, "write_rc", failing)
+    grant = Grant()
+    assert _run([], FLAG, grant) == 1
+    assert grant.calls == ["rt-alpha", "rt-beta"]
+    assert "alpha: write failed" in capsys.readouterr().out
+    assert f"export AH_CX_TOKEN_beta={FRESH}\n" in aicode_tokens.rc_file().read_text()
 
 
 def test_force_refreshes_that_one_account_now():
@@ -162,9 +195,29 @@ def test_a_failed_openbao_write_after_a_refresh_keeps_the_new_pair_in_a_recovery
     assert str(recovery) in out and "rt-alpha-next" not in out
 
 
+def test_a_write_answered_with_something_other_than_json_keeps_the_new_pair_in_a_recovery_file():
+    bao = FakeBao({"AH_CX_TOKEN_alpha": access_token(1), "AH_CX_REFRESH_alpha": "rt-alpha"})
+    bao.garbage_writes = True
+    assert _run([], {**FLAG, **BAO_ENV, **OPENBAO_STORE}, Grant(), bao) == 1
+    assert json.loads((_home("alpha") / "auth.json").read_text())["tokens"]["refresh_token"] == "rt-alpha-next"
+
+
+def test_the_next_openbao_run_stores_a_newer_recovery_pair_and_removes_the_file(capsys):
+    bao = FakeBao({"AH_CX_TOKEN_alpha": access_token(1), "AH_CX_REFRESH_alpha": "rt-alpha"}, fail_writes=True)
+    environ = {**FLAG, **BAO_ENV, **OPENBAO_STORE}
+    assert _run([], environ, Grant(), bao) == 1
+    bao.fail_writes = False
+    grant = Grant()
+    assert _run([], environ, grant, bao) == 0
+    assert not grant.calls
+    assert bao.data == {"AH_CX_TOKEN_alpha": FRESH, "AH_CX_REFRESH_alpha": "rt-alpha-next"}
+    assert not (_home("alpha") / "auth.json").exists()
+    assert "using the newer pair kept in" in capsys.readouterr().out
+
+
 def test_a_second_concurrent_run_on_the_same_machine_skips(capsys):
     _account("alpha", 1)
-    lock = (Path.home() / ".agentihooks" / "codex-refresh.lock").open("a+")
+    lock = (Path(config.AGENTIHOOKS_HOME) / "codex-refresh.lock").open("a+")
     fcntl.flock(lock, fcntl.LOCK_EX)
     grant = Grant()
     try:
