@@ -9,8 +9,8 @@
   "integration_gate": "G8",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2608",
   "pull_request": null,
-  "tested_commit": "d476e6c3444753a5f25b81b3fed4489d615fd9ec",
-  "status": "acceptance-qualified: mocked cases A, B and C passed in CI; live fresh-home resume passed for both installed CLIs",
+  "tested_commit": "c3975cc8a2e21c1757086d491e48c5e29160e921",
+  "status": "acceptance-qualified: mocked cases A, B and C passed in CI on the final native module; live fresh-home resume passed for both installed CLIs on the final native module",
   "package_complete": false,
   "evidence_class": {
     "cases": "mocked: fixture Claude and Codex homes laid out as the qualified CLIs write them, a local durable directory backend behind a granted artifact store and fixture launch registrations; no CLI, account, worker Pod or object store was used. Mocked.",
@@ -80,9 +80,10 @@
   "validation": {
     "red": "Proofs run 38149669076 on the tests only commit c7108dd4 failed collecting the native tests with ImportError for native",
     "first_green_attempt": "Proofs run 38149709947 on d03a46c1 hung: sqlite3 online backup retries forever on a locked source; cancelled and replaced by a read transaction on a connection that never waits",
-    "green": "Proofs run 38151824986 on d476e6c3 passed 70 unit tests; the three cases reported passed and their records were lifted from that run",
-    "live": "run_native_proof.sh passed for claude (live-claude.jsonl) and for codex on d476e6c3 (live-codex.jsonl)",
-    "review": "Standards and Spec readers, three rounds; findings fixed: unhashable session ids, corrupt index, linked rollouts on both branches, capture bounds, placement written new and removed on failure, account names kept out of the live records, version_changed cause, case C durability by read back. Disputed and closed: forged native commits are refused at restore (consumer_rule)"
+    "green": "Proofs run 38160034825 on 113d332a (native.py identical to the tested commit) passed the native unit tests, and the case A, B and C records committed here matched; earlier records were lifted from runs 38151824986 and 38153418291",
+    "live": "run_native_proof.sh passed for claude (codeword PLUM-7902) and codex (codeword PLUM-7537) with native.py as of c3975cc8; the codex run closed stdin, the only script change after that commit",
+    "review": "Standards and Spec readers, three rounds; findings fixed: unhashable session ids, corrupt index, linked rollouts on both branches, capture bounds, placement written new and removed on failure, account names kept out of the live records, version_changed cause, case C durability by read back. Disputed and closed: forged native commits are refused at restore (consumer_rule)",
+    "mutation": "Preflight 38158655576 left 38 survivors, killed by tests in 113d332a; preflight 38160034917 left 5: the three uri mutants are killed by a test pinning the read-only, no-wait connection, and two SQL case-only mutants are cleared by the Standards reader's equivalence ruling"
   },
   "limitations": [
     "Qualification is per CLI minor line; a new line needs a live proof run and a QUALIFIED entry",
@@ -92,7 +93,8 @@
     "A restore home whose projects or sessions folder is a link, as in agentihooks profile homes, is refused as an escape; restores target fresh homes",
     "Cleanup after a failed placement suppresses its own errors; a path it cannot remove is left behind",
     "The live proof ran on the workstation in fresh homes, not in a worker Pod; the Pod proof belongs to the G8 rollout gate",
-    "No production caller yet: SV2-CKP-04 publishes checkpoints through the worker supervisor"
+    "No production caller yet: SV2-CKP-04 publishes checkpoints through the worker supervisor",
+    "Capture reads through a projects or sessions folder that is itself a link, as in agentihooks profile homes, because it reads the operator's own home; restore refuses that shape"
   ],
   "rollback": "Rehearsed in case C: a Qualifier with an empty qualification table returns native_resume_unavailable and leaves the home untouched while the checkpoint and its transcript material stay authoritative, so context continuation remains available.",
   "compatibility": "SV2-CKP-01 Validator and SV2-CKP-02 source capture are unchanged; a context continuation checkpoint is identical to the earlier path apart from the native_resume extension field",

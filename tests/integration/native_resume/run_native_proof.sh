@@ -28,7 +28,7 @@ run_cli() {
         (cd "$cwd" && CLAUDE_CONFIG_DIR="$home" CLAUDE_CODE_OAUTH_TOKEN="${!account}" timeout 300 claude -p "$@")
     else
         local route="${NATIVE_PROOF_CODEX_ROUTE:?name the Codex account slug to route}"
-        (cd "$cwd" && CODEX_HOME="$home" timeout 300 agentihooks codex --route "$route" exec --skip-git-repo-check "$@")
+        (cd "$cwd" && CODEX_HOME="$home" timeout 300 agentihooks codex --route "$route" exec --skip-git-repo-check "$@" < /dev/null)
     fi
 }
 
