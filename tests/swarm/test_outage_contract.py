@@ -32,7 +32,7 @@ def test_status_output_preserves_all_evidence_and_empty_result(tmp_path, monkeyp
     outage.observe("sw", "ledger", ["health failed"], 2000)
     assert outage.show("sw", False) is True
     assert capsys.readouterr().out == (
-        "outage ledger since 2000: health failed\noutage redis since 1000: connection failed ; ping failed\n"
+        "outage redis since 1000: connection failed ; ping failed\noutage ledger since 2000: health failed\n"
     )
     assert outage.show("sw", True) is True
     assert json.loads(capsys.readouterr().out) == {"outages": outage.open_records("sw")}
@@ -52,7 +52,7 @@ def test_default_ledger_probe_records_failure_then_affirmative_recovery(tmp_path
 
 
 def test_redis_failure_evidence_and_recovery_timestamp(tmp_path, monkeypatch, capsys):
-    from scripts.swarm.errors import SwarmError
+    from scripts.swarm.store import SwarmError
 
     monkeypatch.setattr(outage, "HOME", tmp_path)
     (tmp_path / "sw").mkdir()
@@ -164,9 +164,8 @@ def test_provider_fingerprint_uses_only_normalized_error_lines():
 
 @pytest.mark.parametrize("state", ["idle", "blocked"])
 def test_runtime_carries_checked_error_identity_even_when_waiting(state):
-    from scripts.swarm.models import AgentRecord
-
     from scripts.swarm.runtime import HerdrRuntime
+    from scripts.swarm.store import AgentRecord
 
     agent = AgentRecord("worker", "eng", "task", pane_id="p1", harness="claude")
     text = "API Error: 503 unavailable"
