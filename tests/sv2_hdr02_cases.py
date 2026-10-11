@@ -100,10 +100,10 @@ def _registration(execution_id: str, generation: int) -> Registration:
     return Registration(**record)
 
 
-def _setup(root: Path, authority: TerminalAuthority | None = None, user_ca: str | None = None):
-    authority = authority or TerminalAuthority(Ed25519PrivateKey.generate(), lambda: fixture()["now"])
+def _setup(root: Path):
+    authority = TerminalAuthority(Ed25519PrivateKey.generate(), lambda: fixture()["now"])
     home = ClientHome(root / "client")
-    world = World(home, user_ca or authority.user_ca)
+    world = World(home, authority.user_ca)
     return Terminal(home, authority, fixture()["namespace"], world, world.lookup), world
 
 

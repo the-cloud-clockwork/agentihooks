@@ -10,10 +10,17 @@ from pathlib import Path
 from typing import NoReturn
 
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from scripts.swarm_v2.herdr.capabilities import Qualifier, Verdict, machine_probe
-from scripts.swarm_v2.herdr.endpoints import PORT, Endpoint, EndpointRefused, Scope, TerminalAuthority, known_hosts
+from scripts.swarm_v2.herdr.endpoints import (
+    PORT,
+    Endpoint,
+    EndpointRefused,
+    Scope,
+    TerminalAuthority,
+    key_pair,
+    known_hosts,
+)
 
 USER = "worker"
 SSH = "/usr/bin/ssh"
@@ -25,9 +32,10 @@ REFUSALS = (
 AUTH_FAILURES = frozenset({"host_key_changed", "host_key_unverified", "unauthorized", "client_key"})
 
 Run = Callable[[list[str]], subprocess.CompletedProcess]
+Lookup = Callable[..., list[tuple]]
 
 
-def route(endpoint: Endpoint, lookup: Callable | None = None) -> str:
+def route(endpoint: Endpoint, lookup: Lookup | None = None) -> str:
     try:
         found = (lookup or socket.getaddrinfo)(endpoint.host, PORT, type=socket.SOCK_STREAM)
     except OSError:
@@ -111,8 +119,9 @@ def ssh_block(home: ClientHome, endpoint: Endpoint, address: str) -> str:
 def _write(path: Path, text: str | bytes) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     staged = path.with_name(f".{path.name}.tmp")
-    staged.write_bytes(text if isinstance(text, bytes) else text.encode())
-    staged.chmod(0o600)
+    staged.unlink(missing_ok=True)
+    with os.fdopen(os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as handle:
+        handle.write(text if isinstance(text, bytes) else text.encode())
     staged.replace(path)
 
 
@@ -127,7 +136,7 @@ class Terminal:
         authority: TerminalAuthority,
         namespace: str,
         run: Run,
-        lookup: Callable | None = None,
+        lookup: Lookup | None = None,
     ) -> None:
         self.home, self.authority, self.namespace = home, authority, namespace
         self.run, self.lookup = run, lookup
@@ -135,16 +144,14 @@ class Terminal:
         self.failures: Counter = Counter()
 
     def _client_key(self) -> str:
-        if self.home.identity.exists():
-            key = serialization.load_ssh_private_key(self.home.identity.read_bytes(), None)
-        else:
-            key = Ed25519PrivateKey.generate()
-            private = key.private_bytes(
-                serialization.Encoding.PEM, serialization.PrivateFormat.OpenSSH, serialization.NoEncryption()
-            )
+        if not self.home.identity.exists():
+            private, public = key_pair()
             _write(self.home.identity, private)
-        public = key.public_key().public_bytes(serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH)
-        return public.decode()
+            return public
+        key = serialization.load_ssh_private_key(self.home.identity.read_bytes(), None)
+        return (
+            key.public_key().public_bytes(serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH).decode()
+        )
 
     def register(self, scope: Scope, host_public: str) -> Endpoint:
         endpoint = Endpoint(scope, self.namespace)

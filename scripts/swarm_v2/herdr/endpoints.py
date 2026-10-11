@@ -5,6 +5,7 @@ import secrets
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import serialization
@@ -61,7 +62,12 @@ def grant_scope(registration: Registration) -> Scope:
     return _scope(actor, registration.swarm_id, registration.execution_id, registration.generation)
 
 
-def operator_scope(principal: Principal, swarm: str, execution) -> Scope:
+class Execution(Protocol):
+    execution_id: str
+    generation: int
+
+
+def operator_scope(principal: Principal, swarm: str, execution: Execution) -> Scope:
     if principal.role is not Role.OPERATOR:
         raise EndpointRefused("unauthorized", "only a launch grant or the operator role opens a worker terminal")
     return _scope(f"operator/{principal.name}", swarm, execution.execution_id, execution.generation)
@@ -126,6 +132,14 @@ def known_hosts(endpoint: Endpoint, host_public: str) -> str:
     return f"{endpoint.host} {host_public}\n"
 
 
+def key_pair() -> tuple[bytes, str]:
+    key = Ed25519PrivateKey.generate()
+    private = key.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.OpenSSH, serialization.NoEncryption()
+    )
+    return private, _public(key.public_key())
+
+
 @dataclass(frozen=True)
 class HostIdentity:
     private: bytes = field(repr=False)
@@ -133,14 +147,7 @@ class HostIdentity:
 
     @classmethod
     def generate(cls) -> "HostIdentity":
-        key = Ed25519PrivateKey.generate()
-        private = key.private_bytes(
-            serialization.Encoding.PEM, serialization.PrivateFormat.OpenSSH, serialization.NoEncryption()
-        )
-        return cls(private, _public(key.public_key()))
-
-    def known_hosts(self, endpoint: Endpoint) -> str:
-        return known_hosts(endpoint, self.public)
+        return cls(*key_pair())
 
 
 class TerminalAuthority:
@@ -180,6 +187,7 @@ def _owned(endpoint: Endpoint, pod: dict) -> dict:
         metadata.get("name") != pod_name(endpoint.scope.execution_id)
         or metadata.get("namespace") != endpoint.namespace
         or "deletionTimestamp" in metadata
+        or not metadata.get("uid")
         or {key: found.get(key) for key in endpoint.labels} != endpoint.labels
     ):
         raise EndpointRefused("pod_foreign", "the Pod is not this execution's live attempt")

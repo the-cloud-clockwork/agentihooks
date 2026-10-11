@@ -173,6 +173,14 @@ def test_only_the_live_attempt_pod_owns_a_terminal(change):
     )
 
 
+def test_a_pod_without_a_uid_owns_no_terminal():
+    pod = _pod(lambda m: m.pop("uid"))
+    assert refusal(lambda: endpoints.objects(endpoint(), pod, IDENTITY, USER_CA, clients(), enabled=True)) == (
+        "pod_foreign",
+        "the Pod is not this execution's live attempt",
+    )
+
+
 def test_a_pod_without_metadata_owns_no_terminal():
     assert (
         refusal(lambda: endpoints.objects(endpoint(), {}, IDENTITY, USER_CA, clients(), enabled=True))[0]
@@ -319,12 +327,6 @@ def test_a_host_identity_is_a_fresh_ed25519_key_pair():
     assert public.decode() == first.public
     assert first.public != second.public
     assert "fixture host key" not in repr(IDENTITY)
-
-
-def test_known_hosts_pins_the_key_to_the_endpoint_host():
-    assert IDENTITY.known_hosts(endpoint()) == (
-        f"swarm-{EXE_A}-terminal.swarm-workers.svc.cluster.local ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureHostKey\n"
-    )
 
 
 def _authority(seconds=None):

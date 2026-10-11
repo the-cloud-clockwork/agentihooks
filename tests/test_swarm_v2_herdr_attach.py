@@ -180,12 +180,29 @@ def _mode(path: Path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
 
 
-def test_written_client_files_are_private_and_replace_atomically(tmp_path):
+def test_written_client_files_are_private_from_creation_and_replace_atomically(tmp_path, monkeypatch):
     target = tmp_path / "a" / "b" / "file"
-    attach._write(target, "one")
-    attach._write(target, b"two")
+    opened = []
+    real_open = attach.os.open
+    monkeypatch.setattr(
+        attach.os, "open", lambda path, flags, mode: opened.append((flags, mode)) or real_open(path, flags, mode)
+    )
+    previous = os.umask(0)
+    try:
+        attach._write(target, "one")
+        attach._write(target, b"two")
+    finally:
+        os.umask(previous)
     assert (target.read_text(), _mode(target), _mode(target.parent)) == ("two", 0o600, 0o700)
+    assert opened == [(os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)] * 2
     assert sorted(path.name for path in target.parent.iterdir()) == ["file"]
+
+
+def test_a_stale_staged_file_is_replaced(tmp_path):
+    target = tmp_path / "file"
+    (tmp_path / ".file.tmp").write_text("stale")
+    attach._write(target, "fresh")
+    assert (target.read_text(), sorted(path.name for path in tmp_path.iterdir())) == ("fresh", ["file"])
 
 
 def test_register_writes_the_pinned_client_configuration(tmp_path):

@@ -1,8 +1,8 @@
 """Live SV2-HDR-02 proof: the worker sshd from docker/swarm-node/ssh and the pinned herdr behind it on localhost.
 
 Usage: PYTHONPATH=<worktree> python tests/integration/herdr_terminal/terminal_proof.py WORK_DIR
-Worker attempt trees live in a short /tmp folder removed at exit, because the herdr client socket path under an
-attempt home must fit the 107 byte unix socket limit; results and client homes stay in WORK_DIR.
+Worker attempt trees live in one short folder directly under $HOME, removed at exit, because the herdr client
+socket path under an attempt home must fit the 107 byte unix socket limit; results and client homes stay in WORK_DIR.
 """
 
 import getpass
@@ -46,7 +46,8 @@ TOOLS = f"{HERDR.parent}:/usr/bin:/bin"
 
 root = Path(sys.argv[1]).resolve()
 root.mkdir(parents=True, exist_ok=True)
-WORKERS = Path(tempfile.mkdtemp(prefix="vh2", dir="/tmp"))
+WORKERS = Path(tempfile.mkdtemp(prefix="v", dir=Path.home()))
+ATTEMPTS = WORKERS / "x"
 rows: list[dict] = []
 failures = 0
 
@@ -72,8 +73,9 @@ def refused(action) -> str:
 
 def write(path: Path, text: str | bytes, mode: int = 0o644) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(text if isinstance(text, bytes) else text.encode())
-    path.chmod(mode)
+    path.unlink(missing_ok=True)
+    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode), "wb") as handle:
+        handle.write(text if isinstance(text, bytes) else text.encode())
 
 
 class Worker:
@@ -82,7 +84,7 @@ class Worker:
     def __init__(self, name: str, exe: str, identity: HostIdentity, user_ca: str) -> None:
         self.base = WORKERS / name
         self.exe, self.identity, self.user_ca = exe, identity, user_ca
-        self.attempts = self.base / "x"
+        self.attempts = ATTEMPTS
         attempt = self.attempts / exe
         self.home = attempt / "homes" / "codex"
         self.run = attempt / "run"
@@ -375,11 +377,7 @@ def main() -> int:
         for worker in workers:
             worker.stop_sshd()
             worker.stop_herdr()
-            for key in worker.material.glob("host_key"):
-                key.unlink()
-            for key in worker.state.glob("host_key"):
-                key.unlink()
-        for key in root.glob("client-*/id_ed25519"):
+        for key in root.glob("client-*/.ssh/swarm-terminals/id_ed25519"):
             key.unlink()
         shutil.rmtree(WORKERS)
         (root / "results.jsonl").write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in rows))
