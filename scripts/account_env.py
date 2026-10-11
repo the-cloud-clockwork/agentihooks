@@ -14,13 +14,13 @@ from collections.abc import Mapping
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from scripts.account_names import TOKEN_PREFIX, token_env
+from scripts.account_names import TOKEN_PREFIX
 
-SECRET_PATH = "secret/data/k8s/swarm-claude-creds"
+SECRET_PATH = "secret/data/agentihooks/claude-creds"
 FALLBACK_NAME = Path("accounts") / "claude.env"
 TIMEOUT_S = 3
 USAGE = "usage: agentihooks accounts env"
-NAME = re.compile(rf"{TOKEN_PREFIX}[A-Za-z0-9_]+")
+NAME = re.compile(rf"{TOKEN_PREFIX}[a-z0-9_]+")
 
 
 def from_openbao(environ: Mapping[str, str]) -> dict[str, str] | None:
@@ -31,7 +31,9 @@ def from_openbao(environ: Mapping[str, str]) -> dict[str, str] | None:
     try:
         with urlopen(request, timeout=TIMEOUT_S) as response:
             accounts = json.load(response)["data"]["data"]
-        tokens = {token_env(email): value for email, value in accounts.items() if isinstance(value, str) and value}
+        tokens = {
+            name: value for name, value in accounts.items() if NAME.fullmatch(name) and isinstance(value, str) and value
+        }
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return None
     return tokens or None

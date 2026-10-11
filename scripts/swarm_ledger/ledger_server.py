@@ -48,7 +48,7 @@ from scripts.swarm_ledger.events.publishing import publishing  # noqa: E402
 from scripts.swarm_ledger.repository import legacy  # noqa: E402
 from scripts.swarm_ledger.repository import repository as stored  # noqa: E402
 from scripts.swarm_ledger.server_code import CODE_DIRS, code_stamp  # noqa: E402
-from scripts.swarm_v2 import ledger_writer  # noqa: E402
+from scripts.swarm_v2 import ledger_writer, master_fence  # noqa: E402
 
 HOST, PORT = ledger_link.address()
 BASE = f"http://{HOST}:{PORT}"
@@ -440,6 +440,21 @@ def swarm_control(slug, argv, command="swarm"):
         return None, str(exc)
 
 
+def lifecycle_control(slug, body, operator):
+    from scripts.swarm import lifecycle
+    from scripts.swarm.store import SwarmError
+
+    try:
+        stamps = repository.read(slug, "_meta.stamps").get("_meta", {}).get("stamps", {})
+    except KeyError:
+        return None, "no such ledger"
+    try:
+        lifecycle.request(swarm_store(), slug, body, operator=operator, task_revisions=lifecycle.revisions(stamps))
+    except SwarmError as exc:
+        return None, str(exc)
+    return swarm_status(slug), ""
+
+
 def refresh_quota(slug: str) -> tuple[dict | None, str]:
     return swarm_control(slug, [], "quota")
 
@@ -523,6 +538,11 @@ def workspace_tails(slug, task_id):
         return {}
 
 
+def write_gate(slug):
+    """Every op write: masters fenced to the items they own, inside the talk budget."""
+    return master_fence.Fence(slug, talk.Budget(slug))
+
+
 def sample_streams():
     """Publish swarm status for every ledger a stream is open on."""
     HUB.evict()
@@ -589,7 +609,7 @@ class Handler(BaseHTTPRequestHandler):
         """Apply a page save and answer with a bounded acknowledgment; the page takes state from the event stream."""
         refusals = refusals or {}
         screen = screen or ledger_task_duplicates.Screen()
-        gate = talk.Budget(slug) if ops else None
+        gate = write_gate(slug) if ops else None
         try:
             state, rejected = repository.apply_ops(
                 slug,
@@ -599,6 +619,8 @@ class Handler(BaseHTTPRequestHandler):
             )
         except (ValueError, OSError) as exc:
             return self.send(500, f"ledger unreadable: {exc}", "text/plain")
+        if gate:
+            gate.publish(rejected)
         if changes or ops:
             relay_to_inbox(slug, state)
             doctor_phrase(slug, state)
@@ -675,14 +697,21 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("body size out of range")
             body = core.loads(self.rfile.read(length) or b"{}")
             action = body.get("action") if isinstance(body, dict) else None
-            if action == "quota_refresh":
+            if action == "lifecycle":
+                control = functools.partial(lifecycle_control, slug, body, not self.principal)
+            elif action == "quota_refresh":
                 control = functools.partial(refresh_quota, slug)
             else:
                 command, argv = ("doctor", DOCTOR[action]) if action in DOCTOR else ("swarm", control_argv(body))
                 control = functools.partial(swarm_control, slug, argv, command)
         except ValueError as exc:
             return self.send(400, str(exc), "text/plain")
-        status, error = control()
+        from scripts.swarm.lifecycle import Refused
+
+        try:
+            status, error = control()
+        except Refused as refused:
+            return self.send(refused.status, str(refused), "text/plain")
         if error:
             return self.send(502, error, "text/plain")
         return self.send(200, json.dumps(status), "application/json")

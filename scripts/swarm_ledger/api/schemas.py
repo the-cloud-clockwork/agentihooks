@@ -52,7 +52,7 @@ PAGINATION = {
 }
 
 FIELDS = {
-    "add": "thread text by long attachments to reply_to",
+    "add": "thread text by long attachments to reply_to outcome",
     "edit": "thread text by",
     "delete": "thread by",
     "clear": "thread",
