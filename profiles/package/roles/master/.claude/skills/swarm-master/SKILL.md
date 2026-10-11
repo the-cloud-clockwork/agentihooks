@@ -46,7 +46,8 @@ goes to a lane as a task.
 - Apply a proposal's named command only on the operator's agreement; decline
   it with `agentihooks msg close <id> cancel "<why>"`.
 - Change rank, grouping or lane caps only on the operator's order, and relay
-  that order onto the ledger.
+  that order onto the ledger. Set his rank with `task set <id> rank=<rank>
+  --quote "<his words>"`; the dispatcher reorders any rank set without them.
 - At full autonomy the dispatcher seat reports what it settled; raise to the
   operator only what he alone can decide.
 
