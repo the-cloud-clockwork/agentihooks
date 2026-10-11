@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.swarm_v2.controller import FencedTransport
 from scripts.swarm_v2.kubernetes import adoption, runtime, watch
 from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused
 from scripts.swarm_v2.kubernetes.runtime import KubernetesTransport, PodStatus, pod_status
@@ -294,6 +295,24 @@ def test_observation_matches_an_admission_defaulted_pod():
     sender = transport()
     sender.api.objects[NAME] = defaulted(existing(sender))
     assert sender.observe_operation(operation()) == applied()
+
+
+def test_observation_quarantines_a_labelled_pod_without_a_spec():
+    sender = transport()
+    pod = existing(sender)
+    del pod["spec"]
+    sender.api.objects[NAME] = pod
+    assert sender.observe_operation(operation()) == Observation(Phase.REFUSED)
+    assert sender.quarantined["uid-1"]["reason"] == "spec"
+
+
+class Bare:
+    backend = "kubernetes"
+
+
+def test_a_fenced_transport_passes_the_spec_digest_through_or_answers_empty():
+    assert FencedTransport(transport(), lambda: None).spec_digest(cases.launch()) == journaled()
+    assert FencedTransport(Bare(), lambda: None).spec_digest(cases.launch()) == ""
 
 
 def test_spec_digest_is_the_identity_of_the_rendered_pod_and_its_fields():

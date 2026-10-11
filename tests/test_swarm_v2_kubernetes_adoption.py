@@ -3,6 +3,7 @@ import copy
 import pytest
 
 from scripts.swarm_v2.kubernetes.adoption import GROUPS, fields, identity, mismatch
+from scripts.swarm_v2.kubernetes.spec import canonical_digest
 
 pytestmark = pytest.mark.unit
 
@@ -186,3 +187,73 @@ def test_each_live_field_difference_is_named(tamper, reason):
 
 def test_a_pod_without_a_spec_differs_by_image():
     assert mismatch(rendered(), {}) == "image"
+
+
+def test_a_render_without_a_spec_matches_a_pod_without_one():
+    assert mismatch({}, {}) == ""
+
+
+NO_HANDLERS = {"exec": None, "httpGet": None, "tcpSocket": None, "grpc": None}
+SNAPSHOT_SPEC = {
+    "imagePullSecrets": [{"name": "pull"}],
+    "containers": [
+        {
+            "image": "i",
+            "env": [
+                {"name": "A", "valueFrom": {"secretKeyRef": {"name": "s", "key": "k"}}},
+                {"valueFrom": {"secretKeyRef": {"name": "s", "key": "k2"}}},
+            ],
+            "envFrom": [{"secretRef": {"name": "ef"}}],
+            "ports": [{"hostPort": 1, "hostIP": "h"}],
+            "securityContext": {"a": 1},
+        }
+    ],
+    "volumes": [
+        {"name": "v", "secret": {"secretName": "vs"}},
+        {"name": "p", "projected": {"sources": [{"secret": {"name": "ps"}}]}},
+    ],
+    "securityContext": {"b": 2},
+    "hostUsers": False,
+    "runtimeClassName": "r",
+    "serviceAccountName": "sa",
+    "automountServiceAccountToken": False,
+}
+
+
+def test_fields_project_an_unnamed_container_exactly():
+    container = SNAPSHOT_SPEC["containers"][0]
+    assert fields(SNAPSHOT_SPEC) == {
+        "image": {"": ["i"]},
+        "arguments": {
+            "": [
+                None,
+                None,
+                None,
+                None,
+                {probe: NO_HANDLERS for probe in ("startupProbe", "readinessProbe", "livenessProbe")},
+            ]
+        },
+        "secrets": [
+            ["env", "", "A", "s", "k"],
+            ["env", "", None, "s", "k2"],
+            ["envFrom", "", "ef"],
+            ["projected", "p", "ps"],
+            ["pull", "pull"],
+            ["volume", "v", "vs"],
+        ],
+        "environment": {"": [container["env"], container["envFrom"]]},
+        "service-account": ["sa", False],
+        "volumes": [SNAPSHOT_SPEC["volumes"], {"": [None]}],
+        "network": [None, None, {"": [[1, "h"]]}],
+        "security-context": {
+            "pod": {"b": 2},
+            "containers": {"": [{"a": 1}]},
+            "host": [False, False, False, False],
+            "hostUsers": False,
+            "runtimeClassName": "r",
+        },
+    }
+
+
+def test_identity_digests_the_pod_digest_and_the_fields():
+    assert identity("p", SNAPSHOT_SPEC) == canonical_digest({"pod": "p", "fields": fields(SNAPSHOT_SPEC)})
