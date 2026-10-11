@@ -22,7 +22,7 @@ def write(path: Path, entries: dict = JOURNAL) -> Path:
 
 
 def test_the_listing_shows_pending_and_settled_prompts(tmp_path, capsys):
-    assert deliveries.main(["--journal", str(write(tmp_path / DELIVERIES))]) == 0
+    assert deliveries.main(["--journal", str(write(tmp_path / DELIVERIES))], clock=lambda: 1599.9) == 0
     assert json.loads(capsys.readouterr().out) == {
         "pending": [{"operation_id": "op-pending", "target": KEY, "state": "pending", "since": 1000}],
         "settled": [
@@ -33,10 +33,20 @@ def test_the_listing_shows_pending_and_settled_prompts(tmp_path, capsys):
     }
 
 
+def test_a_prompt_pending_past_the_window_is_listed_as_expired(tmp_path, capsys):
+    path = write(tmp_path / DELIVERIES, {"op-pending": JOURNAL["op-pending"]})
+    assert deliveries.main(["--journal", str(path)], clock=lambda: 1600.0) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "pending": [],
+        "settled": [{"operation_id": "op-pending", "target": KEY, "state": "expired", "since": 1000}],
+    }
+    assert json.loads(path.read_text())["deliveries"] == {"op-pending": JOURNAL["op-pending"]}
+
+
 def test_the_listing_never_writes_beside_the_journal(tmp_path):
     path = write(tmp_path / DELIVERIES)
     before = (path.read_bytes(), path.stat().st_mtime_ns)
-    deliveries.main(["--journal", str(path)])
+    deliveries.main(["--journal", str(path)], clock=lambda: 1600.0)
     assert (path.read_bytes(), path.stat().st_mtime_ns) == before
     assert [found.name for found in tmp_path.iterdir()] == [DELIVERIES]
 
@@ -47,7 +57,7 @@ def test_the_listing_reads_the_controller_journal_by_default(tmp_path, monkeypat
     folder.mkdir(parents=True)
     write(folder / DELIVERIES, {"op-pending": JOURNAL["op-pending"]})
     assert deliveries.journal() == folder / DELIVERIES
-    assert deliveries.main([]) == 0
+    assert deliveries.main([], clock=lambda: 1000.0) == 0
     assert [row["operation_id"] for row in json.loads(capsys.readouterr().out)["pending"]] == ["op-pending"]
 
 
@@ -74,6 +84,9 @@ def test_the_help_names_the_command_and_what_it_reads(capsys):
     with pytest.raises(SystemExit) as stopped:
         deliveries.main(["--help"])
     assert stopped.value.code == 0
-    out = capsys.readouterr().out
-    assert out.startswith("usage: python -m scripts.swarm_v2.herdr.deliveries [-h] [--journal JOURNAL]\n")
-    assert "List the pending and settled remote prompts in a pane delivery journal; it reads only." in out
+    assert " ".join(capsys.readouterr().out.split()) == (
+        "usage: python -m scripts.swarm_v2.herdr.deliveries [-h] [--journal JOURNAL] "
+        "List the pending and settled remote prompts in a pane delivery journal; it reads only. "
+        "options: -h, --help show this help message and exit "
+        "--journal JOURNAL the journal file, by default this controller's own"
+    )

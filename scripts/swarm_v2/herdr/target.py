@@ -94,8 +94,10 @@ def _refusal(done: subprocess.CompletedProcess) -> str:
     return f"herdr exited {done.returncode}: {detail}" if detail else f"herdr exited {done.returncode}"
 
 
-def listing(entries: Mapping[str, dict]) -> dict[str, list[dict]]:
-    rows = [{"operation_id": key, **entry} for key, entry in entries.items()]
+def listing(entries: Mapping[str, dict], now: int) -> dict[str, list[dict]]:
+    current = dict(entries)
+    _expire(current, now)
+    rows = [{"operation_id": key, **entry} for key, entry in current.items()]
     return {
         "pending": [row for row in rows if row.get("state") == "pending"],
         "settled": [row for row in rows if row.get("state") != "pending"],
@@ -293,7 +295,7 @@ class Router:
         with self.deliveries.locked():
             entries = self.deliveries.load()
             held = entries.get(operation_id)
-            if held is None or held.get("state") != "pending":
+            if held is None or held.get("state") not in ("pending", "expired"):
                 raise EndpointRefused("not_pending", f"{operation_id} has no unknown outcome to settle")
             if delivered:
                 entries[operation_id] = {**held, "state": "sent"}

@@ -385,8 +385,12 @@ def test_a_prompt_pending_past_the_window_is_settled_as_expired(tmp_path):
     client.router.send(found, "agent_prompt", "op-late", "b")
     entries = json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]
     assert entries["op-lost"] == {"target": key, "state": "expired", "since": 1000}
-    assert refusal(lambda: client.router.send(found, "agent_prompt", "op-lost", "x"))[0] == "ambiguous_delivery"
+    replayed = refusal(lambda: client.router.send(found, "agent_prompt", "op-lost", "x"))
+    assert replayed == ("ambiguous_delivery", f"op-lost may have reached {key}")
     assert fleet.received()[EXE_A] == ["a", "b"]
+    client.router.settle("op-lost", delivered=True)
+    entries = json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]
+    assert entries["op-lost"] == {"target": key, "state": "sent", "since": 1000}
     assert EXPIRY_S == 600
 
 
@@ -400,7 +404,8 @@ def test_a_journal_full_of_unknown_outcomes_reopens_once_they_expire(tmp_path, m
     for number in range(2):
         refusal(lambda number=number: client.router.send(found, "agent_prompt", f"op-{number}", "x"))
     client.router.run = fleet
-    assert refusal(lambda: client.router.send(found, "agent_prompt", "op-new", "x"))[0] == "journal_full"
+    full = ("journal_full", "too many pane sends await an audit of their unknown outcome")
+    assert refusal(lambda: client.router.send(found, "agent_prompt", "op-new", "x")) == full
     clock[0] += EXPIRY_S
     client.router.send(found, "agent_prompt", "op-new", "x")
     assert fleet.received()[EXE_A] == ["x"]

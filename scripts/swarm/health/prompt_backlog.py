@@ -3,6 +3,8 @@ from pathlib import Path
 
 from scripts.swarm import timing
 from scripts.swarm.health.findings import Finding
+from scripts.swarm_v2.herdr import deliveries
+from scripts.swarm_v2.herdr.endpoints import EndpointRefused
 
 RISES = 3
 
@@ -12,13 +14,10 @@ def read(store, slug: str) -> list[int]:
     return json.loads(raw) if raw else []
 
 
-def observe(store, slug: str, path: Path | None = None) -> list[int]:
-    from scripts.swarm_v2.herdr import deliveries
-    from scripts.swarm_v2.herdr.endpoints import EndpointRefused
-
+def observe(store, slug: str, now: int, path: Path | None = None) -> list[int]:
     samples = read(store, slug)
     try:
-        pending = len(deliveries.read(path or deliveries.journal())["pending"])
+        pending = len(deliveries.read(path or deliveries.journal(), now)["pending"])
     except EndpointRefused:
         return samples
     if samples and samples[-1] == pending:

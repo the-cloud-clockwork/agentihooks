@@ -22,8 +22,8 @@ def store():
     return RedisStore(fakeredis.FakeRedis(decode_responses=True))
 
 
-def journal(path, pending):
-    entries = {f"op-{n}": {"target": "exe-a/2/w1:p1", "state": "pending", "since": 1000} for n in range(pending)}
+def journal(path, pending, since=1000):
+    entries = {f"op-{n}": {"target": "exe-a/2/w1:p1", "state": "pending", "since": since} for n in range(pending)}
     entries["op-done"] = {"target": "exe-a/2/w1:p1", "state": "refused", "reason": "herdr exited 1"}
     path.write_text(json.dumps({"version": 1, "deliveries": entries}))
 
@@ -31,7 +31,7 @@ def journal(path, pending):
 def observed(store, path, counts):
     for count in counts:
         journal(path, count)
-        prompt_backlog.observe(store, "sw", path)
+        prompt_backlog.observe(store, "sw", 1000, path)
     return prompt_backlog.findings(store, "sw")
 
 
@@ -70,34 +70,49 @@ def test_an_unreadable_journal_keeps_the_samples(store, tmp_path):
     path = tmp_path / DELIVERIES
     observed(store, path, [0, 1, 2])
     path.write_text("{")
-    assert prompt_backlog.observe(store, "sw", path) == [0, 1, 2]
+    assert prompt_backlog.observe(store, "sw", 1000, path) == [0, 1, 2]
     assert observed(store, path, [3])[0].measure == 3
 
 
 def test_a_missing_journal_counts_no_pending_prompt(store, tmp_path):
-    assert prompt_backlog.observe(store, "sw", tmp_path / DELIVERIES) == [0]
+    assert prompt_backlog.observe(store, "sw", 1000, tmp_path / DELIVERIES) == [0]
+
+
+def test_prompts_pending_past_the_window_are_not_counted(store, tmp_path):
+    journal(tmp_path / DELIVERIES, 2)
+    assert prompt_backlog.observe(store, "sw", 1599, tmp_path / DELIVERIES) == [2]
+    assert prompt_backlog.observe(store, "sw", 1600, tmp_path / DELIVERIES) == [2, 0]
 
 
 def test_the_controller_journal_is_read_by_default(store, tmp_path, monkeypatch):
     path = controller_home(tmp_path, monkeypatch)
     for count in [0, 1, 2, 3]:
         journal(path, count)
-        prompt_backlog.observe(store, "sw")
+        prompt_backlog.observe(store, "sw", 1000)
     assert prompt_backlog.findings(store, "sw")[0].measure == 3
 
 
 def test_the_tick_samples_the_controller_journal(stalled, tmp_path, monkeypatch):
-    store, ledger, runtime, _, _ = stalled
-    journal(controller_home(tmp_path, monkeypatch), 2)
-    with pytest.raises(RuntimeError):
+    store, ledger, runtime, clock, error = stalled
+    journal(controller_home(tmp_path, monkeypatch), 2, since=clock[0] // 1000)
+    with pytest.raises(RuntimeError) as caught:
         cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
+    assert caught.value is error
     assert prompt_backlog.read(store, "sw") == [2]
 
 
 def test_swarm_status_shows_the_backlog_finding(stalled, tmp_path):
-    store, ledger, _, _, _ = stalled
+    store, ledger, _, clock, _ = stalled
     observed(store, tmp_path / DELIVERIES, [0, 1, 2, 3])
     rows = status.findings(store, "sw", store.config("sw"), ledger.tasks("sw"), [])
     (found,) = [row for row in rows if row["kind"] == "prompt backlog"]
-    assert found["id"] == "prompt-backlog/sw"
-    assert found["evidence"] == ["Pending prompts rose 0 to 1 to 2 to 3"]
+    assert found == {
+        "kind": "prompt backlog",
+        "subject": "sw",
+        "summary": "Remote prompts awaiting an outcome keep growing",
+        "evidence": ["Pending prompts rose 0 to 1 to 2 to 3"],
+        "threshold": "three rises in a row",
+        "id": "prompt-backlog/sw",
+        "verdict": None,
+        "seen_at": clock[0],
+    }
