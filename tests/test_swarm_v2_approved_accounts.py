@@ -1,6 +1,9 @@
 import pytest
 
-from scripts.swarm.store import RedisStore
+from hooks.context import account_sessions
+from scripts.swarm import capacity
+from scripts.swarm.runtime import HerdrRuntime
+from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm_v2 import quota
 from scripts.swarm_v2.kubernetes import approved
 from scripts.swarm_v2.kubernetes.client import ApiRefused
@@ -125,3 +128,62 @@ def test_equally_held_unobserved_keys_are_taken_in_name_order():
 def test_no_approved_key_chooses_no_account():
     _, route = _route(set())
     assert route.choose(2) is None
+
+
+def test_the_fleet_rows_are_one_claude_row_per_approved_key_with_its_fleet_held_slots():
+    _, route = _route({"bkey", "akey"}, {"akey": 1, "elsewhere": 3})
+    rows = approved.FleetAccounts(route, 2)({}, NOW_MS / 1000, refresh=True)
+    assert rows == [
+        capacity.Account("claude", "akey", "OPEN", 1, None, None, 2),
+        capacity.Account("claude", "bkey", "OPEN", 0, None, None, 2),
+    ]
+
+
+def test_an_observed_key_offers_its_quota_band_under_the_launch_cap_with_its_windows():
+    store, route = _route({"akey"})
+    _observe(store, "akey", five_used=93.0, week_used=40.0)
+    [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000)
+    assert row == capacity.Account(
+        "claude", "akey", "OPEN", 0, 7.0, 60.0, 2, NOW_MS // 1000 + 48 * HOUR, five_resets_at=NOW_MS // 1000 + HOUR
+    )
+    _observe(store, "akey", five_used=10.0)
+    assert approved.FleetAccounts(route, 4)({}, NOW_MS / 1000)[0].cap == 4
+
+
+def test_an_exhausted_key_is_a_closed_row():
+    store, route = _route({"akey"})
+    _observe(store, "akey", status="rejected")
+    [row] = approved.FleetAccounts(route, 2)({}, NOW_MS / 1000)
+    assert (row.state, row.cap) == ("CLOSED", 0)
+
+
+def _sizing(runtime):
+    config = SwarmConfig(SLUG, "agentihooks", max_eng=2, max_ci=1)
+    return runtime.quota_capacity(config, [], NOW_MS / 1000, {"eng": 2, "ci": 1, "plan": 0})
+
+
+def test_a_runtime_with_a_fleet_source_sizes_its_lanes_without_reading_local_accounts(monkeypatch):
+    def local(*args, **kwargs):
+        raise AssertionError("the deployed controller read local accounts")
+
+    monkeypatch.setattr(capacity, "accounts", local)
+    monkeypatch.setattr(account_sessions, "sessions_by_account", local)
+    _, route = _route({"akey", "bkey"}, {"akey": 1})
+    herdr = HerdrRuntime()
+    herdr.quota_accounts = approved.FleetAccounts(route, 2)
+    decision = _sizing(herdr)
+    assert decision["effective"] == {"eng": 2, "ci": 1, "plan": 0}
+    assert decision["placeable"] == {"claude": 3, "codex": 0}
+    assert [(row["name"], row["sessions"]) for row in decision["accounts"]] == [("akey", 1), ("bkey", 0)]
+
+
+def test_a_workstation_runtime_still_sizes_its_lanes_from_its_local_accounts(monkeypatch):
+    asked = []
+    row = capacity.Account("claude", "local", "OPEN", 0, 80.0, 80.0, 3)
+    monkeypatch.setattr(capacity, "accounts", lambda environ, now, refresh=True: asked.append((now, refresh)) or [row])
+    herdr = HerdrRuntime()
+    assert herdr.quota_accounts is None
+    decision = _sizing(herdr)
+    assert asked == [(NOW_MS / 1000, True)]
+    assert decision["effective"] == {"eng": 2, "ci": 1, "plan": 0}
+    assert decision["placeable"] == {"claude": 3, "codex": 0}

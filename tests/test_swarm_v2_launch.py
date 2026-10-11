@@ -6,6 +6,7 @@ from functools import partial
 
 import pytest
 
+from scripts.swarm import tick as tick_module
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import Placed, SpawnError
@@ -212,7 +213,7 @@ def test_a_second_exit_releases_nothing(world):
     assert world.rows() == {}
 
 
-def test_a_second_simultaneous_launch_on_a_full_account_is_refused(monkeypatch):
+def test_a_second_simultaneous_launch_on_a_full_account_is_unavailable(monkeypatch):
     second = []
     world = World(monkeypatch, runtime=Remote(during=lambda _: second.append(world.launch(SECOND))))
 
@@ -220,7 +221,7 @@ def test_a_second_simultaneous_launch_on_a_full_account_is_refused(monkeypatch):
 
     assert first.outcome.ok
     [refused] = second
-    assert refused.outcome == Outcome("spawn", Status.REFUSED, BACKEND, detail="account_full")
+    assert refused.outcome == Outcome("spawn", Status.UNAVAILABLE, BACKEND, detail="account_full")
     assert refused.slot is None
     assert world.grants.verify(SLUG, refused.grant).execution_id == refused.agent.execution_id
     assert [request.name for request in world.runtime.requests] == [first.agent.name]
@@ -638,7 +639,7 @@ def test_a_refused_launch_names_the_backend_its_spawn_was_placed_on(monkeypatch)
 
     launch = world.launch(FIRST)
 
-    assert launch.outcome == Outcome("spawn", Status.REFUSED, BACKEND, None, "account_full")
+    assert launch.outcome == Outcome("spawn", Status.UNAVAILABLE, BACKEND, None, "account_full")
 
 
 def test_a_tick_spawn_hands_the_worker_the_api_address_of_its_swarm_config(world):
@@ -672,14 +673,14 @@ def test_a_tick_spawn_launches_on_the_account_its_route_chooses_for_the_launch_c
     assert world.grants.verify(SLUG, sent.task["launch_grant"]).account == "routed-key"
 
 
-def test_a_tick_spawn_whose_route_finds_no_account_is_refused_before_admission(world):
+def test_a_tick_spawn_whose_route_finds_no_account_is_unavailable_before_admission(world):
     world.launcher.accounts = lambda cap: None
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
     request = SpawnRequest(config, "eng", "e1", {"id": "task", "seat": FIRST})
 
     outcome = world.launcher.from_tick(request, world.terms, pod_target)
 
-    assert outcome == Outcome("spawn", Status.REFUSED, BACKEND, None, launch_module.NO_ACCOUNT)
+    assert outcome == Outcome("spawn", Status.UNAVAILABLE, BACKEND, None, launch_module.NO_ACCOUNT)
     assert launch_module.NO_ACCOUNT == "no approved account has quota and a free launch slot"
     assert world.runtime.requests == []
     assert world.store.executions(SLUG, FIRST) == []
@@ -826,3 +827,25 @@ def test_a_tick_spawn_whose_grant_is_not_handed_fails_with_the_reason_and_record
         sent.task["execution_id"]: {"handed": False, "reason": "config_map_refused", "removed": True}
     }
     assert world.rows() == {}
+
+
+@pytest.mark.parametrize("chooser", [None, lambda cap: None], ids=["reservation full", "no account with room"])
+def test_a_tick_spawn_on_a_full_account_waits_and_records_no_launch_failure(world, chooser):
+    world.launch(FIRST)
+    if chooser is not None:
+        world.launcher.accounts = chooser
+    name = world.store.next_name(SLUG, "eng")
+    runtime = routed(
+        {},
+        Herdr(),
+        kubernetes=world.runtime,
+        launch=partial(world.launcher.from_tick, terms=world.terms, target=pod_target),
+    )
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+
+    with pytest.raises(SpawnError) as full:
+        runtime.spawn(config, "eng", name, {"id": "task-2", "seat": SECOND})
+
+    assert full.value.status == Status.UNAVAILABLE
+    tick_module._record_spawn_failure(SLUG, world.store, AgentRecord(name, "eng", "task-2"), full.value)
+    assert world.store.launch_failure(SLUG, "task-2") == ""
