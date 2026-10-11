@@ -1,0 +1,176 @@
+{
+  "case": "T-SV2-OBS-05-A",
+  "evidence_class": "mocked: two recorded fixture traces shaped like controller, pool, quota, archive, checkpoint and brain readings, a fakeredis incident store behind a server that can be disconnected and an in process notification sink that can fail; no Kubernetes API server, node, deployed brain or alert backend was used",
+  "input_sha256": {
+    "fleet-dashboard.json": "c8dcc7cf7dba5c2968c8a7257e089ec2525a05cb030a09babb723c67a3648f76"
+  },
+  "observed": {
+    "first": {
+      "alert_actionability_review": {
+        "actionable": 3,
+        "alerts": 3,
+        "by_rule": {
+          "cross_scope_denial": 1,
+          "impossible_pending": 1,
+          "protected_idle_pod": 1
+        },
+        "state": "enabled",
+        "suppressed": {
+          "cross_scope_denial": 0,
+          "impossible_pending": 0,
+          "protected_idle_pod": 0
+        }
+      },
+      "archive_lag": [
+        1,
+        700000
+      ],
+      "attempts": [
+        2,
+        1
+      ],
+      "capacity": [
+        [
+          "on-demand",
+          20,
+          1,
+          1,
+          0
+        ],
+        [
+          "general-spot",
+          20,
+          1,
+          1,
+          0
+        ],
+        [
+          "research",
+          10,
+          0,
+          0,
+          0
+        ]
+      ],
+      "capacity_labels_distinct": true,
+      "checkpoint_age": [
+        1,
+        2300000
+      ],
+      "connectivity": {
+        "authority": {
+          "held": 2,
+          "unknown": 1
+        },
+        "terminal": {
+          "connected": 1,
+          "disconnected": 1,
+          "unknown": 1
+        }
+      },
+      "first_fired_seq": {
+        "cross_scope_denial:deny-1": 4,
+        "impossible_pending:exe-huge-1": 3,
+        "protected_idle_pod:exe-idle-1": 5
+      },
+      "knowledge_stale": false,
+      "leaked": [],
+      "notices": [
+        "cross_scope_denial",
+        "impossible_pending",
+        "protected_idle_pod"
+      ],
+      "opened": 3,
+      "quota_wait": [
+        1,
+        330000
+      ]
+    },
+    "second": {
+      "alert_actionability_review": {
+        "actionable": 6,
+        "alerts": 6,
+        "by_rule": {
+          "cross_scope_denial": 5,
+          "impossible_pending": 1
+        },
+        "state": "enabled",
+        "suppressed": {
+          "cross_scope_denial": 1,
+          "impossible_pending": 0,
+          "protected_idle_pod": 0
+        }
+      },
+      "archive_lag": [
+        0,
+        0
+      ],
+      "attempts": [
+        1,
+        1
+      ],
+      "capacity": [
+        [
+          "on-demand",
+          20,
+          20,
+          1,
+          0
+        ],
+        [
+          "general-spot",
+          20,
+          0,
+          0,
+          0
+        ],
+        [
+          "research",
+          10,
+          0,
+          0,
+          0
+        ]
+      ],
+      "capacity_labels_distinct": true,
+      "checkpoint_age": [
+        0,
+        300000
+      ],
+      "connectivity": {
+        "authority": {
+          "expired": 1,
+          "unknown": 1
+        },
+        "terminal": {
+          "connected": 1,
+          "unknown": 1
+        }
+      },
+      "first_fired_seq": {
+        "cross_scope_denial:deny-2-1": 2,
+        "cross_scope_denial:deny-2-2": 2,
+        "cross_scope_denial:deny-2-3": 2,
+        "cross_scope_denial:deny-2-4": 2,
+        "cross_scope_denial:deny-2-5": 2,
+        "impossible_pending:exe-full-2": 3
+      },
+      "knowledge_stale": true,
+      "leaked": [],
+      "notices": [
+        "cross_scope_denial",
+        "cross_scope_denial",
+        "cross_scope_denial",
+        "cross_scope_denial",
+        "cross_scope_denial",
+        "impossible_pending"
+      ],
+      "opened": 6,
+      "quota_wait": [
+        1,
+        900000
+      ]
+    }
+  },
+  "state": "passed"
+}

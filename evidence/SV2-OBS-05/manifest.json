@@ -1,0 +1,14 @@
+{
+  "tested_commit": "9f83839bf95c3fae0ca5beb4908d86f4f95e515c",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38149860889",
+  "evidence_class": "mocked: two recorded fixture traces shaped like controller, pool, quota, archive, checkpoint and brain readings, a fakeredis incident store behind a server that can be disconnected and an in process notification sink that can fail; no Kubernetes API server, node, deployed brain or alert backend was used",
+  "cases": [
+    "T-SV2-OBS-05-A",
+    "T-SV2-OBS-05-B",
+    "T-SV2-OBS-05-C"
+  ],
+  "inputs": {
+    "tests/fixtures/swarm_v2/fleet-dashboard.json": "c8dcc7cf7dba5c2968c8a7257e089ec2525a05cb030a09babb723c67a3648f76",
+    "observability/swarm-v2.json": "fb1bef60d6442e205757445a96d6f5246bd5402832eeff411d2a4163f76ace79"
+  }
+}

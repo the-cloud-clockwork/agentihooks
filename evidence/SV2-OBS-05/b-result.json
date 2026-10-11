@@ -1,0 +1,20 @@
+{
+  "case": "T-SV2-OBS-05-B",
+  "evidence_class": "mocked: two recorded fixture traces shaped like controller, pool, quota, archive, checkpoint and brain readings, a fakeredis incident store behind a server that can be disconnected and an in process notification sink that can fail; no Kubernetes API server, node, deployed brain or alert backend was used",
+  "input_sha256": {
+    "fleet-dashboard.json": "c8dcc7cf7dba5c2968c8a7257e089ec2525a05cb030a09babb723c67a3648f76"
+  },
+  "observed": {
+    "alert_leaked": [],
+    "labelled_grant": "a viewer grant names its brains as a list of brain ids",
+    "operator_titles": [
+      "Private family medical appointments"
+    ],
+    "store_unchanged": true,
+    "swarm_leaked": [],
+    "swarm_titles": [
+      "[withheld outside the viewer's brain grant]"
+    ]
+  },
+  "state": "passed"
+}

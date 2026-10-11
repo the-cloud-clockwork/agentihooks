@@ -1,0 +1,43 @@
+{
+  "case": "T-SV2-OBS-05-C",
+  "evidence_class": "mocked: two recorded fixture traces shaped like controller, pool, quota, archive, checkpoint and brain readings, a fakeredis incident store behind a server that can be disconnected and an in process notification sink that can fail; no Kubernetes API server, node, deployed brain or alert backend was used",
+  "input_sha256": {
+    "fleet-dashboard.json": "c8dcc7cf7dba5c2968c8a7257e089ec2525a05cb030a09babb723c67a3648f76"
+  },
+  "observed": {
+    "after_restore": true,
+    "delivered_after_restore": [
+      1,
+      0
+    ],
+    "failed_delivery": "raised",
+    "incidents": 3,
+    "last_seq": [
+      5
+    ],
+    "notices_per_incident": [
+      1,
+      1,
+      1
+    ],
+    "older_stale": true,
+    "outage": "refused",
+    "replay_stale": true,
+    "rollback": {
+      "dashboard": [
+        "archive_lag",
+        "attempts",
+        "capacity",
+        "checkpoint_age",
+        "connectivity",
+        "knowledge",
+        "quota_wait"
+      ],
+      "deliver": 0,
+      "evaluate": "disabled",
+      "record": true,
+      "store_unchanged": true
+    }
+  },
+  "state": "passed"
+}
