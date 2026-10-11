@@ -54,17 +54,43 @@ def test_the_durations_downloads_retry_in_place(job, name, given):
 
 
 def _deploys(workflow, job):
-    granted = {**(workflow.get("permissions") or {}), **(job.get("permissions") or {})}
-    return "environment" in job or granted.get("id-token") == "write"
+    granted = job.get("permissions", workflow.get("permissions")) or {}
+    oidc = granted == "write-all" or (isinstance(granted, dict) and granted.get("id-token") == "write")
+    return "environment" in job or oidc
 
 
-def test_no_deploying_job_retries():
+def _retries(job):
+    called = job.get("uses", "")
+    if called.startswith("./.github/workflows/"):
+        return any(_retries(inner) for inner in yaml.safe_load((_ROOT / called).read_text())["jobs"].values())
+    return any(_step_retries(step) for step in job.get("steps", []))
+
+
+def _step_retries(step):
+    action = step.get("uses", "")
+    if action.rstrip("/") == _RETRY:
+        return True
+    if not action.startswith("./.github/actions/"):
+        return False
+    return any(
+        _step_retries(inner) for inner in yaml.safe_load((_ROOT / action / "action.yml").read_text())["runs"]["steps"]
+    )
+
+
+def test_no_job_with_an_environment_or_oidc_grant_retries():
     deploying = 0
-    for path in sorted((_ROOT / ".github/workflows").glob("*.yml")):
+    for path in sorted((_ROOT / ".github/workflows").glob("*.y*ml")):
         workflow = yaml.safe_load(path.read_text())
         for name, job in workflow["jobs"].items():
-            if not _deploys(workflow, job):
-                continue
-            deploying += 1
-            assert all(step.get("uses") != _RETRY for step in job.get("steps", [])), f"{path.name} {name}"
+            if _deploys(workflow, job):
+                deploying += 1
+                assert not _retries(job), f"{path.name} {name}"
     assert deploying >= 3
+
+
+def test_the_guard_sees_a_retry_behind_a_reusable_workflow_or_a_composite_action():
+    assert _retries({"uses": "./.github/workflows/test.yml"})
+    assert _step_retries({"uses": f"{_RETRY}/"})
+    assert not _retries({"steps": [{"uses": "./.github/actions/browser-cache"}]})
+    assert _deploys({"permissions": "write-all"}, {})
+    assert not _deploys({"permissions": {"id-token": "write"}}, {"permissions": {"contents": "read"}})
