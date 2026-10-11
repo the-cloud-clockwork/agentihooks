@@ -299,3 +299,12 @@ def test_the_api_reads_the_repository_through_gh(monkeypatch):
         (["gh", "api", "repos/{owner}/{repo}/x"], {"capture_output": True, "check": True}),
         (["gh", "api", "repos/{owner}/{repo}/y"], {"capture_output": True, "check": True}),
     ]
+
+
+def test_a_reused_report_never_brings_the_source_scope(repo, monkeypatch):
+    root, commit, _ = repo
+    head = commit(SOURCE)
+    _github(monkeypatch, head, [], [_run(7, head, branch="other")], {7: GREEN})
+    assert _main(monkeypatch, root) == "reused=true\n"
+    names = sorted(path.name for path in (root / ".mutation-gate").iterdir())
+    assert names == ["mutants.log", "report.json", "reuse.json"]
