@@ -1,0 +1,221 @@
+import json
+import os
+import re
+import subprocess
+from collections import Counter
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
+from pathlib import Path
+from typing import NoReturn
+
+from scripts.swarm_v2.herdr.capabilities import Incompatible, Qualifier, runner
+from scripts.swarm_v2.herdr.catalog import Catalog
+from scripts.swarm_v2.herdr.endpoints import EndpointRefused
+from scripts.swarm_v2.herdr.reconcile import Record, Store
+
+PANE = re.compile(r"w[0-9]+:p[0-9]+")
+CALLER = ("HERDR_PANE_ID", "HERDR_WORKSPACE_ID", "HERDR_TAB_ID")
+READS = frozenset({"pane_read", "pane_wait_output", "pane_process_info", "agent_get"})
+MUTATIONS = frozenset({"pane_run", "pane_send_text", "pane_send_keys", "pane_close", "agent_prompt", "agent_rename"})
+DELIVERIES = "deliveries.json"
+VERSION = 1
+KEPT = 1024
+BARE = "a remote pane operation needs a saved machine profile, a remote session and a server incarnation"
+
+Run = Callable[[list[str]], subprocess.CompletedProcess]
+
+
+@dataclass(frozen=True)
+class Target:
+    """The incarnation is the execution id and generation of the one herdr server that owns the pane."""
+
+    profile_id: str
+    session: str
+    incarnation: str
+    pane_id: str
+    conversation_id: str = ""
+
+
+def remote_environ(environ: Mapping[str, str]) -> dict[str, str]:
+    return {name: value for name, value in environ.items() if name not in CALLER}
+
+
+def client_runner(environ: Mapping[str, str]) -> Run:
+    return runner(remote_environ(environ))
+
+
+def _incarnation(record: Record) -> str:
+    return f"{record.execution_id}/{record.generation}"
+
+
+def _qualified(target: object) -> bool:
+    return isinstance(target, Target) and all((target.profile_id, target.session, target.incarnation))
+
+
+def _conversation(reply: str) -> tuple[str, str] | None:
+    try:
+        document = json.loads(reply)
+    except ValueError:
+        return None
+    result = document.get("result") if isinstance(document, dict) else None
+    agent = result.get("agent", result) if isinstance(result, dict) else None
+    if not isinstance(agent, dict):
+        return None
+    session = agent.get("agent_session")
+    found = session.get("value") if isinstance(session, dict) and session.get("kind") == "id" else ""
+    return str(agent.get("pane_id")), found or ""
+
+
+class Deliveries:
+    """Durable operation ids: a pending entry is a send whose outcome is unknown and is never sent again."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.locked = Store(path).locked
+
+    def load(self) -> dict[str, dict]:
+        if not self.path.exists():
+            return {}
+        try:
+            document = json.loads(self.path.read_text())
+            entries = document["deliveries"]
+            if document["version"] != VERSION or not isinstance(entries, dict):
+                raise ValueError
+        except (OSError, ValueError, TypeError, KeyError):
+            raise EndpointRefused("journal_unreadable", "the pane delivery journal is unreadable") from None
+        return entries
+
+    def save(self, entries: dict[str, dict]) -> None:
+        kept = dict(list(entries.items())[-KEPT:])
+        staged = self.path.with_name(f".{self.path.name}.tmp")
+        staged.unlink(missing_ok=True)
+        with os.fdopen(os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as handle:
+            handle.write(json.dumps({"version": VERSION, "deliveries": kept}, indent=2) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        staged.replace(self.path)
+
+
+class Router:
+    """Every remote pane operation names one saved machine profile owned by the controller and one confirmed server
+    incarnation; it never falls back to the local server."""
+
+    def __init__(
+        self, store: Store, catalog: Catalog, qualifier: Qualifier, run: Run, journal: Path, *, mutations: bool = True
+    ) -> None:
+        self.store, self.catalog, self.qualifier, self.run = store, catalog, qualifier, run
+        self.deliveries, self.mutations = Deliveries(journal), mutations
+        self.mismatches: Counter = Counter()
+
+    def _refuse(self, profile_id: str, reason: str, message: str) -> NoReturn:
+        self.mismatches[(profile_id or "bare", reason)] += 1
+        raise EndpointRefused(reason, message)
+
+    def _pane(self, profile_id: str, pane_id: str) -> None:
+        if not isinstance(pane_id, str) or not PANE.fullmatch(pane_id):
+            self._refuse(profile_id, "pane_id", "a herdr pane id reads w<number>:p<number>")
+
+    def _listed(self, record: Record) -> None:
+        saved = next((machine for machine in self.catalog.machines() if machine.profile_id == record.profile_id), None)
+        wanted = (record.label, record.target, record.session, True)
+        if saved is None or (saved.label, saved.target, saved.session, saved.enabled) != wanted:
+            self._refuse(record.profile_id, "unregistered", f"{record.label} is not saved on this herdr client")
+
+    def _owned(self, profile_id: str) -> Record:
+        record = next((entry for entry in self.store.load().values() if entry.profile_id == profile_id), None)
+        if record is None:
+            self._refuse(profile_id, "unregistered", f"machine {profile_id} is not registered by this controller")
+        self._listed(record)
+        return record
+
+    def resolve(self, label: str, pane_id: str, conversation_id: str = "") -> Target:
+        records = self.store.load().values()
+        record = next((entry for entry in records if entry.label == label and entry.profile_id), None)
+        if record is None:
+            self._refuse("", "unregistered", f"{label} is not a machine this controller registered")
+        self._pane(record.profile_id, pane_id)
+        self._listed(record)
+        return Target(record.profile_id, record.session, _incarnation(record), pane_id, conversation_id)
+
+    def refresh(self, target: Target) -> Target:
+        if not _qualified(target):
+            self._refuse("", "bare_pane", BARE)
+        execution_id = target.incarnation.rpartition("/")[0]
+        record = self.store.load().get(execution_id)
+        if record is None or record.profile_id is None:
+            self._refuse(target.profile_id, "unregistered", f"{execution_id} has no registered terminal")
+        if _incarnation(record) != target.incarnation:
+            self._refuse(target.profile_id, "stale_incarnation", f"{target.incarnation} was replaced")
+        self._listed(record)
+        return replace(target, profile_id=record.profile_id, session=record.session)
+
+    def command(self, target: Target, operation: str, *args: str) -> list[str]:
+        if not _qualified(target):
+            self._refuse("", "bare_pane", BARE)
+        if operation not in READS | MUTATIONS:
+            self._refuse(target.profile_id, "operation", f"{operation} does not address one pane")
+        self._pane(target.profile_id, target.pane_id)
+        record = self._owned(target.profile_id)
+        if record.session != target.session:
+            self._refuse(target.profile_id, "session_mismatch", f"{record.label} is saved for another remote session")
+        if _incarnation(record) != target.incarnation:
+            self._refuse(target.profile_id, "stale_incarnation", f"{target.incarnation} was replaced")
+        try:
+            base = self.qualifier.require(target.profile_id, target.incarnation, operation)
+        except Incompatible as exc:
+            self._refuse(target.profile_id, "incompatible", str(exc))
+        return [*base, target.pane_id, *args]
+
+    def _confirm(self, target: Target) -> None:
+        if not target.conversation_id:
+            return
+        argv = self.command(target, "agent_get")
+        try:
+            done = self.run(argv)
+        except (OSError, subprocess.TimeoutExpired):
+            done = None
+        found = _conversation(done.stdout) if done is not None and done.returncode == 0 else None
+        if found is None:
+            self._refuse(target.profile_id, "conversation_unconfirmed", f"{target.pane_id} did not report its agent")
+        pane_id, conversation_id = found
+        if pane_id != target.pane_id or conversation_id not in ("", target.conversation_id):
+            self._refuse(target.profile_id, "conversation_mismatch", f"{target.pane_id} holds another conversation")
+
+    def send(self, target: Target, operation: str, operation_id: str, *args: str) -> subprocess.CompletedProcess | None:
+        if not self.mutations:
+            raise EndpointRefused("read_only", "pane mutations are switched off; only read only inspection runs")
+        if operation not in MUTATIONS:
+            self._refuse(getattr(target, "profile_id", ""), "operation", f"{operation} is not a pane mutation")
+        argv = self.command(target, operation, *args)
+        if not isinstance(operation_id, str) or not operation_id:
+            raise EndpointRefused("operation_id", "a pane mutation needs an operation id")
+        key = f"{target.incarnation}/{target.pane_id}"
+        with self.deliveries.locked():
+            entries = self.deliveries.load()
+            held = entries.get(operation_id)
+            if held is not None:
+                return self._replayed(held, key, operation_id)
+            self._confirm(target)
+            entries[operation_id] = {"target": key, "state": "pending"}
+            self.deliveries.save(entries)
+            try:
+                done = self.run(argv)
+            except (OSError, subprocess.TimeoutExpired):
+                raise EndpointRefused("ambiguous_delivery", f"{operation_id} may have reached {key}") from None
+            if done.returncode != 0:
+                del entries[operation_id]
+                self.deliveries.save(entries)
+                raise EndpointRefused("send_refused", f"herdr refused {operation} on {target.pane_id}")
+            entries[operation_id] = {"target": key, "state": "sent"}
+            self.deliveries.save(entries)
+        return done
+
+    def _replayed(self, held: dict, key: str, operation_id: str) -> None:
+        if held.get("target") != key:
+            raise EndpointRefused("operation_reused", f"{operation_id} was sent to another pane")
+        if held.get("state") != "sent":
+            raise EndpointRefused("ambiguous_delivery", f"{operation_id} may have reached {key}")
+        return None
+
+    def herdr_target_mismatch_total(self) -> int:
+        return sum(self.mismatches.values())

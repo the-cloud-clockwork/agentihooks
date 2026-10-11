@@ -388,6 +388,19 @@ def test_the_router_runs_through_its_injected_runner(tmp_path):
     assert router.run is fleet and router.herdr_target_mismatch_total() == 0
 
 
+def test_rollback_keeps_read_only_inspection_and_refuses_every_pane_mutation(tmp_path):
+    client, fleet, desired = world(tmp_path)
+    store, catalog = client.registrations.store, client.router.catalog
+    router = Router(store, catalog, client.qualifier, fleet, tmp_path / DELIVERIES, mutations=False)
+    found = router.resolve(desired[0].name, PANE)
+    before = len(fleet.commands)
+    assert refusal(lambda: router.send(found, "agent_prompt", "op", "x"))[0] == "read_only"
+    assert len(fleet.commands) == before and not (tmp_path / DELIVERIES).exists()
+    argv = router.command(found, "pane_read")
+    assert fleet(argv).returncode == 0
+    assert fleet.mutations() == [] and fleet.received()[EXE_A] == []
+
+
 def remote_agent(**changes):
     fields = {"runtime_backend": "kubernetes", "pane_id": PANE, "execution_id": EXE_A, "generation": 2}
     return AgentRecord(FX["agent"], "eng", "t1", **(fields | changes))
