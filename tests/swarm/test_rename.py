@@ -127,6 +127,36 @@ def test_rename_is_idempotent_and_preserves_claim_seat_and_crew(store):
     assert len(store.names.names("sw")) == 1
 
 
+@pytest.mark.parametrize(("harness", "typed"), [("codex", True), ("claude", False), ("", False)])
+def test_rename_names_a_running_codex_session_after_its_new_name(store, harness, typed):
+    from scripts.swarm.rename import rename_swarm
+    from scripts.swarm.runtime import HerdrRuntime
+
+    old = "sw-eng-1"
+    store.put_agent("sw", AgentRecord(old, "eng", "t1", pane_id="w1:p1", harness=harness))
+    pane = {"pane_id": "w1:p1", "name": old, "workspace_id": "w1"}
+    mutations = []
+
+    def herdr(args):
+        if args == ["agent", "list"]:
+            return {"agents": [pane]}
+        if args == ["workspace", "list"]:
+            return {"workspaces": []}
+        mutations.append(args)
+        if args[:2] == ["agent", "rename"]:
+            pane["name"] = args[3]
+        return {}
+
+    ledger = SimpleNamespace(tasks=lambda slug: [], rename_agent=lambda slug, old, new: None)
+    rename_swarm(store, "sw", ledger, HerdrRuntime(herdr=herdr), 10)
+    new = store.agents("sw")[0].name
+    assert [m for m in mutations if m[:2] == ["pane", "run"]] == (
+        [["pane", "run", "w1:p1", f"/rename {new}"]] if typed else []
+    )
+    assert rename_swarm(store, "sw", ledger, HerdrRuntime(herdr=herdr), 20) == []
+    assert len([m for m in mutations if m[:2] == ["pane", "run"]]) == (1 if typed else 0)
+
+
 def test_rename_refuses_an_unrelated_pane_before_changing_ownership(store):
     from scripts.swarm.rename import rename_swarm
     from scripts.swarm.runtime import HerdrRuntime

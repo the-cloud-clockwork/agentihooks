@@ -688,11 +688,11 @@ def test_a_claude_resume_reopens_that_conversation(tmp_path):
     assert "--name m --resume c0ffee" in _resume_line(tmp_path, "claude")
 
 
-def test_a_codex_resume_runs_the_resume_subcommand_before_any_flag(tmp_path):
+def test_a_codex_resume_puts_every_flag_before_the_resume_subcommand(tmp_path):
     words = _resume_line(tmp_path, "codex").split()
-    at = words.index("resume")
-    assert words[at + 1] == "c0ffee"
-    assert words[at - 1] != "--agentihooks-report" and words.index("-m") > at
+    assert words[-2:] == ["resume", "c0ffee"]
+    assert words.count("resume") == 1
+    assert "-m" in words and "-c" in words
 
 
 def test_init_agent_passes_resume_through_to_the_launch(monkeypatch, tmp_path, capsys):
