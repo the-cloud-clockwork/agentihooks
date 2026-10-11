@@ -352,7 +352,7 @@ def _pem(opening: str, closing: str) -> str:
     return f"-----BEGIN {opening}PRIVATE" + f" KEY-----\n{PEM_BODY}\n-----END {closing}PRIVATE" + " KEY-----"
 
 
-@pytest.mark.parametrize("kind", ["", "RSA ", "EC ", "OPENSSH ", "PGP "])
+@pytest.mark.parametrize("kind", ["", "RSA ", "EC ", "OPENSSH ", "PGP ", "DSA ", "ENCRYPTED "])
 def test_a_private_key_with_or_without_an_algorithm_is_redacted_whole(kind):
     from hooks.secrets import redact, scan
 
@@ -370,11 +370,21 @@ def test_a_private_key_whose_end_names_another_algorithm_is_redacted_to_the_end(
 NESTED = "pass" + "word"
 
 
-def test_strict_mode_finds_a_keyword_key_holding_an_object():
+@pytest.mark.parametrize("keyword", [NESTED, "passwd", "Secret", "api_key", "private_key", "ACCESS_TOKEN"])
+@pytest.mark.parametrize("inner", ["value", "password", "passwd", "token", "secret"])
+def test_strict_mode_finds_a_keyword_key_holding_an_object(keyword, inner):
     from hooks.secrets import redact, scan
 
-    text = json.dumps({NESTED: {"value": "hunter2" + "hunter2"}})
-    assert scan(text, mode="strict") == ["nested_secret"]
+    value = "hunter2" + "h"
+    text = json.dumps({keyword: {"name": "x", inner: value}})
+    assert "nested_secret" in scan(text, mode="strict")
+    assert value not in redact(text, mode="strict")
+
+
+def test_strict_mode_hides_every_credential_value_of_the_object():
+    from hooks.secrets import redact
+
+    text = json.dumps({NESTED: {"value": "hunter2" + "hunter2", "token": "abcdefghijk"}})
     assert redact(text, mode="strict") == '{"[REDACTED:nested_secret]"}}'
 
 
@@ -382,12 +392,15 @@ def test_strict_mode_finds_a_keyword_key_holding_an_object():
     "record",
     [
         {NESTED: {"enabled": True}},
-        {NESTED: {"name": "short"}},
-        {NESTED: {"name": "$PASSWORD_FROM_ENV"}},
+        {NESTED: {"value": "hunter2"}},
+        {NESTED: {"value": "$PASSWORD_FROM_ENV"}},
+        {NESTED: {"path": "secret/data/prod"}},
+        {"secret": {"secretName": "anton-db-credentials"}},
+        {"secret": {"name": "db-credentials", "key": "password"}},
         {"name": {"value": "hunter2" + "hunter2"}},
     ],
 )
-def test_strict_mode_leaves_an_object_without_a_long_literal_under_a_keyword(record):
+def test_strict_mode_leaves_an_object_without_a_credential_literal_under_a_keyword(record):
     from hooks.secrets import scan
 
     assert scan(json.dumps(record), mode="strict") == []
