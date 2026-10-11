@@ -93,7 +93,7 @@ plant_network() {
 }
 plant_network 'the controller API policy admits {"ipBlock": {"cidr": "0.0.0.0/0"}} beyond its peers' \
   --set-json 'controller.api.ingressFrom=[{"ipBlock":{"cidr":"0.0.0.0/0"}}]'
-plant_network 'the controller API policy does not admit {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "swarm-workers"}}' \
+plant_network 'the controller API policy does not admit {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "agentihooks-swarm-workers"}}' \
   --set-json 'controller.api.ingressFrom=[]'
 plant_network 'the ledger policy does not admit {"ipBlock": {"cidr": "10.10.30.0/24"}}' \
   --set-json 'networkPolicy.ingressFrom=[]'

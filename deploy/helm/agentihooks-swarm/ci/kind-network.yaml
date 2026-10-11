@@ -9,7 +9,7 @@ controller:
     ingressFrom:
       - namespaceSelector:
           matchLabels:
-            kubernetes.io/metadata.name: swarm-workers
+            kubernetes.io/metadata.name: agentihooks-swarm-workers
         podSelector:
           matchExpressions:
             - key: swarm.agentihooks.io/controller-owner
