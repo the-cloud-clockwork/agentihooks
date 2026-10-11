@@ -62,6 +62,31 @@ def summary(name: str) -> dict:
     }
 
 
+NOTES = (
+    "Node provision is trigger plus instance plus join; image initialization is the pull plus the Pod start less the"
+    " pull. They are reported apart and never summed into one launch figure.",
+    "Only samples from a scale up of an empty pool onto a new instance that pulled uncached may be labelled cold"
+    " scale from zero; the ondemand scale ups in these reads started from a non empty pool and are refused that label.",
+    "Kubernetes keeps events for about an hour, so each Anton read covers the hour before it; Pods whose events"
+    " expired are absent rather than counted as fast.",
+    "EC2 launch times have one second precision and the join stage ends at the node's Ready transition.",
+    "Bootstrap is the worker image's own report followed by a readiness file in the kind fixture; the native harness"
+    " handshake needs a controller grant and provider credentials and is not measured here.",
+    "The kind fixture pulls from a registry on the same runner, so its pull times show image size and unpack cost,"
+    " not registry distance; the Anton reads show the production registry path.",
+    "With few cold samples the p95 equals the maximum.",
+)
+
+
+def results_page() -> str:
+    sections = [
+        bench.markdown(stages.report(samples(name)), SOURCES[name]).replace("# Swarm v2 startup stages", f"## {name}")
+        for name in INPUTS
+    ]
+    notes = "\n".join(f"- {note}" for note in NOTES)
+    return "# Swarm v2 startup stages\n\n" + "\n".join(sections) + "\n## Limits of this measurement\n\n" + notes + "\n"
+
+
 def _refusal(chosen: list[dict]) -> dict:
     try:
         stages.claim(chosen, stages.COLD_LABEL)
