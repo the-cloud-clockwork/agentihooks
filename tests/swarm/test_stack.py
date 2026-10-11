@@ -108,7 +108,7 @@ def _refused(parked, capsys, says):
     assert park(doc) == 1
     assert capsys.readouterr().err == f"swarm: {says}\n"
     assert "parked_on" not in ledger.rows["t1"] and "stacked_base" not in ledger.rows["t1"]
-    assert ledger.comments == [] and shell.comments() == []
+    assert [row for row in ledger.comments if row[-1] != "dispatcher"] == [] and shell.comments() == []
     assert REMOVE not in shell.calls
     assert store.handoff("sw", "t1") == ""
     assert [a.state for a in store.agents("sw") if a.name == AGENT] == ["working"]

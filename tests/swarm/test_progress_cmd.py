@@ -32,7 +32,7 @@ def test_progress_reports_the_status_line_and_clears_the_quiet_flag(started, cap
     assert run("sw", "--as", ME, "progress", "--doing", "writing tests", "--ends-when", "they pass") == 0
     line = "Doing writing tests. Done when they pass."
     assert json.loads(capsys.readouterr().out) == {"agent": ME, "task": "t1", "progress": line}
-    assert ledger.comments == [("t1", line, ME)]
+    assert [row for row in ledger.comments if row[-1] != "dispatcher"] == [("t1", line, ME)]
     assert (ledger_workspace.folder("sw", "t1") / "progress.md").read_text().endswith(f" {line}\n")
     assert Progress(store.redis, "sw").read(ME).outcome_at == 1_000
     assert Verdicts("sw", "quiet").read(ME) is None

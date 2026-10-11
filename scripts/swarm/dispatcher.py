@@ -5,8 +5,8 @@ then the open work it unblocks, the bottleneck lane, focus order and ledger posi
 set is a default it reorders; only an operator rank, set by him or relayed with his quoted words, orders ahead of or
 behind that queue. At delegate and full the tick claims from this queue, resumed work first within a rank band and
 clear territory before overlapping, and the dispatcher writes no rank: it comments on a task only when the task
-enters the head of its lane's queue, as many tasks as the lane has seats, or leaves it while still open; a lane with
-no seats keeps its head until seats return. Below delegate it proposes each raise to the master. Every action is a
+enters the head of its lane's queue, as many tasks as the lane has seats among those that unblock work or carry an
+operator rank, or leaves it while still open; a lane with no seats keeps its head until seats return. Below delegate it proposes each raise to the master. Every action is a
 gate log row, a dispatch metrics row naming its rule and a comment on the task.
 """
 
@@ -40,6 +40,7 @@ OUTRANKED = "it was outranked by {ahead} in focus with longer chains, more unblo
 ENTER = (ENTERED, "put task {} at the head of")
 LEAVE = (LEFT, "moved task {} out of the head of")
 UNREADY = "it is no longer a claimable task in focus"
+IDLE = "it unblocks no open work"
 PROPOSED = "The dispatcher proposed high rank for this task to the master because it unblocks {work}."
 PROPOSE = (
     "The dispatcher proposes rank high for task {task} titled {title}: it unblocks {work}. If the operator agrees, "
@@ -133,16 +134,18 @@ def rank_pass(slug, config, store, ledger, doc, now_ms):
     known, named = {t["id"]: t for t in doc["tasks"]}, bottleneck.read(store, slug).get("bottleneck")
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
     claimable = {task_id for task_id, t in known.items() if tick.ready(t, known, doc, graph, fix)}
+    scores, fixed = leverage(doc), _fixed(doc)
     if config.autonomy in APPLIES:
         before = _saved_heads(store, slug)
-        heads = _heads(store, slug, config, [t for t in queue(doc, named) if t in claimable], known, before)
+        leading = [t for t in queue(doc, named) if t in claimable and (scores[t] or t in fixed)]
+        heads = _heads(store, slug, config, leading, known, before)
         landed = {
             lane: [t for t in before.get(lane, []) if t in head or known.get(t, {}).get("state") == "open"]
             for lane, head in heads.items()
         }
-        steps = _head_steps(slug, ledger, doc, before, heads, claimable, landed)
+        standing = {task_id: task_id in leading for task_id in claimable}
+        steps = _head_steps(slug, ledger, doc, before, heads, standing, landed)
     else:
-        scores, fixed = leverage(doc), _fixed(doc)
         lined = [t for t in ordered(doc, named, scores) if t in claimable and scores[t]]
         top = [t for t in lined if t not in fixed or known[t].get("rank") in WINDOW][:TOP]
         raises = [
@@ -175,12 +178,12 @@ def _saved_heads(store, slug):
     return json.loads(saved) if saved else {}
 
 
-def _head_steps(slug, ledger, doc, before, heads, claimable, landed):
+def _head_steps(slug, ledger, doc, before, heads, standing, landed):
     known, depth, scores, fixed = {t["id"]: t for t in doc["tasks"]}, chains(doc), leverage(doc), _fixed(doc)
     steps = []
     for lane, head in heads.items():
         earlier = before.get(lane, [])
-        why = partial(_left_why, claimable, len(head))
+        why = partial(_left_why, standing, len(head))
         steps += [
             partial(_head, slug, ledger, lane, known[t], LEAVE, why(t), landed)
             for t in earlier
@@ -200,9 +203,11 @@ def _entered_why(task, fixed, depth, scores):
     return LEADS.format(chain=_work(depth[task["id"]]), work=_work(scores[task["id"]]))
 
 
-def _left_why(claimable, seats, task_id):
+def _left_why(standing, seats, task_id):
     ahead = "1 claimable task" if seats == 1 else f"{seats} claimable tasks"
-    return OUTRANKED.format(ahead=ahead) if task_id in claimable else UNREADY
+    if task_id not in standing:
+        return UNREADY
+    return OUTRANKED.format(ahead=ahead) if standing[task_id] else IDLE
 
 
 def _head(slug, ledger, lane, task, kind, why, landed):
