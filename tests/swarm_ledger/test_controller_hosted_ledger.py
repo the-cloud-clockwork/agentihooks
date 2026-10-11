@@ -9,7 +9,7 @@ import new_ledger
 import pytest
 
 from scripts.hive import auth as hive_auth
-from scripts.swarm_ledger import ledger_server
+from scripts.swarm_ledger import ledger, ledger_server
 from scripts.swarm_ledger.repository import repository
 from scripts.swarm_v2 import ledger_writer
 from scripts.swarm_v2.api.tasks import RevisionConflict, spec_revision
@@ -54,6 +54,7 @@ def hosted(store, ledger_dir):
         patch.object(ledger_server, "relay_to_inbox", return_value=None),
         patch.object(ledger_server, "doctor_phrase", return_value=None),
         patch.object(ledger_server, "ALLOWED_HOSTS", {host}),
+        patch.object(ledger, "BASE", ""),
         patch.dict(os.environ, remote),
     ):
         for name in UNPINNED:
@@ -323,10 +324,17 @@ def test_a_refused_controller_credential_on_read_is_a_dependency_failure(hosted,
 
 
 def test_a_local_controller_still_mounts_its_own_ledger_folder(store, tmp_path):
-    environ = {**_environ(tmp_path), _cs().PORT_ENV: str(_free_port()), _cs().SWARM_ENV: SLUG}
-    environ["LEDGER_DIR"] = str(tmp_path / "local-ledger")
+    folder = tmp_path / "local-ledger"
+    folder.mkdir()
+    environ = {
+        **_environ(tmp_path),
+        _cs().PORT_ENV: str(_free_port()),
+        _cs().SWARM_ENV: SLUG,
+        _cs().CREDENTIAL_ENV: hive_auth.issue_controller(store.redis),
+        "LEDGER_DIR": str(folder),
+    }
     service = _cs().host(environ, store, "hive-fixture")
     try:
-        assert (service.hosted_ledger, service.ledger_folder) == (None, tmp_path / "local-ledger")
+        assert (service.hosted_ledger, service.ledger_folder) == (None, folder)
     finally:
         service.stop()
