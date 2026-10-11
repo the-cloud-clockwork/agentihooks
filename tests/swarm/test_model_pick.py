@@ -196,6 +196,18 @@ def test_the_top_option_is_described_in_plain_words(effort, expected):
     assert model_pick.described(ModelPick("opus", effort)) == expected
 
 
+def test_a_model_without_a_label_is_described_by_its_own_name():
+    assert model_pick.described(ModelPick("named", "high")) == (
+        "named at high effort: several seams, or a cause to find inside one component"
+    )
+
+
+def test_a_lane_with_no_model_counts_as_auto_and_may_take_the_sonnet_step(monkeypatch):
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: decision("lower"))
+    picked = model_pick.pick("claude", {"effort": "auto"}, {"difficulty": "S"}, {})
+    assert (picked.model, picked.effort) == ("sonnet", "xhigh")
+
+
 def test_an_explicit_lane_effort_never_calls_the_classifier(monkeypatch):
     monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("explicit lane called classifier"))
     picked = model_pick.pick("claude", {"model": "opus", "effort": "high"}, {"difficulty": "S"}, {})
@@ -355,6 +367,34 @@ def test_spawn_records_and_stores_classifier_choice(tmp_path, monkeypatch):
         "pplx-decider-v1-27b",
         0.9,
     )
+
+
+def test_spawn_offers_the_sonnet_step_only_inside_the_configured_range(tmp_path, monkeypatch):
+    from scripts.swarm.runtime import HerdrRuntime
+    from tests.swarm.test_runtime import _passed
+
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: decision("lower"))
+    for key in ("AGENTIHOOKS_CLAUDE_MODEL", "AGENTIHOOKS_CLAUDE_EFFORT"):
+        monkeypatch.delenv(key, raising=False)
+    seen = []
+
+    def launch(argv, **kwargs):
+        seen.append(argv)
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=launch, choose=lambda *a: ("claude", "quota"))
+    config = SimpleNamespace(
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={"eng": AUTO},
+        autonomy="delegate",
+        effort_min="medium",
+        effort_max="high",
+    )
+    runtime.spawn(config, "eng", "engineer@a1b2c3-0001", TASK)
+    assert _passed(seen[-1]) == ["--model", "opus", "--effort", "medium"]
 
 
 def test_status_shows_model_source_and_confidence(monkeypatch, capsys):
