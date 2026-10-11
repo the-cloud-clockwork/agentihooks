@@ -69,12 +69,10 @@ def main() -> int:
     root, scope = context()
     supervisor = os.getppid()
     acknowledge("exporter", pid=os.getpid(), status="ready")
-    quiesced = read(root / "quiesced.json")
-    while not matches(quiesced, scope):
+    while not matches(quiesced := read(root / "quiesced.json"), scope):
         if os.getppid() != supervisor:
             return 1
         time.sleep(0.05)
-        quiesced = read(root / "quiesced.json")
     if quiesced.get("status") == "quiesced":
         fields = export(Path.cwd(), scope, os.environ)
     else:

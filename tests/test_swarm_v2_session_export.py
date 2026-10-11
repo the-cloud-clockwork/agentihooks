@@ -136,6 +136,7 @@ def supervised(tmp_path, monkeypatch):
         monkeypatch.setenv(name, value)
     monkeypatch.setenv("SWARM_SUPERVISION_DIR", str(root))
     monkeypatch.chdir(attempt)
+    monkeypatch.setattr(session_export.time, "sleep", lambda seconds: pytest.fail("waited on a quiesced incarnation"))
     return attempt, home, root, scope
 
 
@@ -146,6 +147,7 @@ def test_the_exporter_reports_ready_then_exports_once_its_incarnation_is_quiesce
     pauses = []
 
     def pause(seconds):
+        assert not pauses, "the exporter waited again after its incarnation was quiesced"
         pauses.append(seconds)
         assert protocol.read(root / "exporter.json") == {**scope, "pid": os.getpid(), "status": "ready"}
         assert not (root / "exporter.checkpoint.json").exists()
