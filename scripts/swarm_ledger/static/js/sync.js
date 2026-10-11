@@ -23,12 +23,14 @@ function lastSync(kind) {
   return [...(meta.events || [])].reverse().find((e) => e.kind === kind);
 }
 
-function statsCheck(events, local, refresh) {
+function statsCheck(events, local, refresh, ticked) {
   if (local && (!refresh || local.id !== refresh.id) && !events.some((e) => e.id === local.id))
     return local.state === "failed" ? local : { state: "pending", at: local.at };
-  if (refresh) return refresh;
+  const at = (ticked && ticked.at) || 0;
+  if (refresh) return refresh.state === "refreshed" && at > refresh.completed_at ? { ...refresh, completed_at: at, calculation: ticked.calculation } : refresh;
   const sent = [...events].reverse().find((e) => e.kind === "stats sync requested");
-  return sent ? { state: "pending", at: sent.at } : null;
+  if (sent) return { state: "pending", at: sent.at };
+  return at ? { state: "refreshed", at, completed_at: at, calculation: ticked.calculation } : null;
 }
 
 function statsCheckText(check) {
@@ -53,7 +55,7 @@ export function renderSync() {
   const waiting = pending ? `${pending} of ${crew.length} agents have not synced yet` : "";
   $("sync").ariaLabel = [waiting, wait ? `Sync ${wait}` : "Sync the crew"].filter(Boolean).join(" · ");
   const statsWait = cooldown("stats_sync", "stats sync requested");
-  const check = statsCheck(meta.events || [], statsSent, meta.stats_refresh);
+  const check = statsCheck(meta.events || [], statsSent, meta.stats_refresh, meta.time_left);
   const failed = check && check.state === "failed";
   $("stats-sync").disabled = !failed && !!statsWait;
   const checked = check ? `Stats check ${statsCheckText(check)}` : "";

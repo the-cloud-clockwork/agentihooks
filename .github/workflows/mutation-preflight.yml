@@ -22,9 +22,10 @@ jobs:
   pull-request:
     if: ${{ github.event_name == 'push' && !github.event.deleted }}
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 5
     outputs:
       open: ${{ steps.open.outputs.open }}
+      reused: ${{ steps.reuse.outputs.reused }}
     steps:
       - name: Skip when the branch already has an open pull request into dev
         id: open
@@ -34,9 +35,37 @@ jobs:
           count=$(gh api -X GET "repos/$GITHUB_REPOSITORY/pulls" -f state=open -f "head=$GITHUB_REPOSITORY_OWNER:$GITHUB_REF_NAME" --jq '[.[] | select(.base.ref == "dev")] | length')
           if [[ $count == 0 ]]; then echo open=false; else echo open=true; fi >> "$GITHUB_OUTPUT"
 
+      - uses: actions/checkout@v4
+        if: steps.open.outputs.open == 'false'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Record the revisions the report grades
+        if: steps.open.outputs.open == 'false'
+        run: |
+          mkdir -p .mutation-gate
+          printf '{"base": "%s", "head": "%s"}\n' "$(git merge-base origin/dev HEAD)" "$(git rev-parse HEAD)" > .mutation-gate/scope.json
+
+      - name: Reuse a green report when this head only adds tests to it
+        id: reuse
+        if: steps.open.outputs.open == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -m scripts.ci_mutation.reuse "$GITHUB_REF_NAME" "$GITHUB_RUN_ID"
+
+      - name: Upload the reused mutation evidence
+        if: steps.reuse.outputs.reused == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-preflight-report
+          path: .mutation-gate/
+          include-hidden-files: true
+          retention-days: 7
+
   mutation:
     needs: pull-request
-    if: ${{ !cancelled() && (github.event_name != 'push' || needs.pull-request.outputs.open == 'false') }}
+    if: ${{ !cancelled() && (github.event_name != 'push' || (needs.pull-request.outputs.open == 'false' && needs.pull-request.outputs.reused != 'true')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:

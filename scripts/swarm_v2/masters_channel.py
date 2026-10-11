@@ -44,6 +44,10 @@ class MastersChannel:
         """A post by the swarm tick itself, which holds no seat."""
         return self._append(slug, SWARM, SWARM, text, at)
 
+    def decision(self, slug: str, seat: str, by: str, text: str, at: float) -> Post:
+        """A decision the master fence already admitted for this seat."""
+        return self._append(slug, seat, by, text, at)
+
     def _append(self, slug: str, seat: str, by: str, text: str, at: float) -> Post:
         fields = {"seat": seat, "by": by, "text": text, "at": at}
         return Post(self.redis.rpush(self.key(slug), json.dumps(fields)), **fields)
