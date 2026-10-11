@@ -242,6 +242,25 @@ def test_writes_it_does_not_cover_pass_without_reading_redis(world, op):
     assert world.write(op, connect=unreachable)["accepted"] is True
 
 
+def test_a_covered_op_with_no_author_passes_without_reading_redis():
+    fence = master_fence.Fence(SLUG, connect=unreachable)
+
+    assert fence.apply({}, {"op": "answer", "item": QUESTION}, object(), lambda doc, op, ctx: "applied") == "applied"
+
+
+def test_the_author_is_resolved_once_through_the_write_context(world, monkeypatch):
+    calls = []
+
+    def resolve(name):
+        calls.append(name)
+        return name
+
+    monkeypatch.setattr("scripts.swarm.naming.resolve_name", resolve)
+    world.decide(LEAD_NAME)
+
+    assert calls == [LEAD_NAME]
+
+
 def test_a_ledger_with_no_swarm_is_not_fenced(world):
     world.store.redis.delete(world.store.key(SLUG, "config"))
 

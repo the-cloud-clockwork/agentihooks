@@ -106,10 +106,13 @@ class Fence:
         self._redis = None
 
     def apply(self, doc, op, ctx, apply):
-        from scripts.swarm.naming import lane_of, resolve_name
+        from scripts.swarm.naming import lane_of
 
-        item, by = decision(op), resolve_name(str(op.get("by", "")))
-        if not item or lane_of(by) != MASTER or os.environ.get(SWITCH) == OFF:
+        item = decision(op)
+        if not item or "by" not in op or os.environ.get(SWITCH) == OFF:
+            return self._inner(doc, op, ctx, apply)
+        by = ctx.author(op["by"])
+        if lane_of(by) != MASTER:
             return self._inner(doc, op, ctx, apply)
         try:
             seats = self._seats(doc)
