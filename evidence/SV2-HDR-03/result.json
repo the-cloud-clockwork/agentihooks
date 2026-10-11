@@ -5,7 +5,7 @@
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2524",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2531",
-  "tested_commit": "983a2787d1a1a700c55cbbbaa94a27b254f3fc4a",
+  "tested_commit": "fa6353c1786016d7d72e0b4e0ff5bed454360d4b",
   "status": "fixture-qualified and live-proven on a workstation against herdr 0.9.1; no controller loop calls the reconciler yet, so nothing runs on Anton",
   "evidence_class": "mocked cases run the catalog, the ownership store and the reconciler against a recording stand in for the herdr client; the live proof ran the pinned herdr 0.9.1 client against two worker sshds with supervised herdr servers on the operator workstation",
   "interfaces": [
@@ -24,14 +24,14 @@
   "authoritative_objects": "The herdr client's saved machine catalog is authoritative for what the operator sees and is changed only through herdr machine commands. The ownership record is authoritative for which saved machines the controller may rename or remove. Removing a machine leaves its remote herdr server and sessions running.",
   "states": {
     "observed": "Live proof tests/integration/herdr_registrations/registration_proof.py on the operator workstation with the pinned herdr 0.9.1: 13 of 13 rows held (evidence/SV2-HDR-03/live-proof.jsonl), covering a hand saved machine carrying a managed label left in place and the endpoint refused, two workers beside Local each mapped to its execution id, a restart restoring a removed registration without duplicating the other, a hand rename renamed back, a replay with no drift, and a retired registration removed while its worker herdr server kept running, Terminal.sync registering every live attempt, and a stopped sync leaving both profiles in place. The SV2-HDR-02 live proof tests/integration/herdr_terminal/terminal_proof.py also passed on this code (failures=0). The first live run found the rename argument order defect (evidence/SV2-HDR-03/live-rename-order.jsonl), fixed before these runs; the SV2-HDR-02 rerun rows are evidence/SV2-HDR-03/hdr02-live-rerun.jsonl.",
-    "accepted": "Cases A, B and C passed twice each with identical records in Tests run 38110039281.",
+    "accepted": "Cases A, B and C passed twice each with identical records in Tests run 38110628677.",
     "committed": "Case records, live proof rows, manifest and this record committed on the task branch.",
     "externally_verified": "Not on Anton: no controller loop calls the reconciler, so no Anton herdr client is synchronized yet."
   },
   "validation": {
     "red": "Tests run 38106920923 on the tests only commit dc278d364 failed collecting tests/test_swarm_v2_herdr_registrations.py (cannot import catalog)",
-    "tests": "Tests run 38110039281 at 983a2787d1a1a700c55cbbbaa94a27b254f3fc4a",
-    "mutation": "Mutation preflight 38110037463 on 983a2787d",
+    "tests": "Tests run 38110628677 at fa6353c1786016d7d72e0b4e0ff5bed454360d4b",
+    "mutation": "Mutation preflight 38110626282 on fa6353c17",
     "lint": "ruff check, ruff format and size limits through python -m scripts.ci_prepush",
     "review": "Standards and Spec readers; findings and rulings on the pull request"
   },
