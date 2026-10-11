@@ -130,6 +130,29 @@ def test_no_approved_key_chooses_no_account():
     assert route.choose(2) is None
 
 
+def test_the_planned_account_is_kept_while_it_has_a_free_slot():
+    _, route = _route({"akey", "bkey"}, {"bkey": 1})
+    assert route.choose(2, planned="bkey") == "bkey"
+    _, route = _route({"akey", "bkey"}, {"bkey": 2})
+    assert route.choose(2, planned="bkey") == "akey"
+    assert route.choose(2, planned="gone") == "akey"
+
+
+def test_a_quota_successor_never_lands_on_the_account_handing_off_or_an_unread_one():
+    store, route = _route({"akey", "bkey", "ckey"}, {"bkey": 1})
+    _observe(store, "akey")
+    _observe(store, "bkey")
+    assert route.choose(2, predecessor=("claude", "akey")) == "bkey"
+    assert route.choose(2, planned="akey", predecessor=("claude", "akey")) == "bkey"
+    assert route.choose(2, planned="ckey", predecessor=("claude", "akey")) == "bkey"
+
+
+def test_a_quota_successor_finds_no_account_when_only_the_predecessor_is_read():
+    store, route = _route({"akey", "bkey"})
+    _observe(store, "akey")
+    assert route.choose(2, predecessor=("claude", "akey")) is None
+
+
 def test_the_fleet_rows_are_one_claude_row_per_approved_key_with_its_fleet_held_slots():
     _, route = _route({"bkey", "akey"}, {"akey": 1, "elsewhere": 3})
     rows = approved.FleetAccounts(route, 2)({}, NOW_MS / 1000, refresh=True)

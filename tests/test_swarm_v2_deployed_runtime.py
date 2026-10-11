@@ -280,6 +280,24 @@ def test_a_tick_launch_skips_an_approved_key_whose_fleet_slots_are_full(tmp_path
     assert pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == other
 
 
+def test_a_tick_launch_takes_the_account_the_capacity_plan_placed_its_task_on(tmp_path, monkeypatch):
+    store = _store()
+    other = "codex-fixtureatexample-com"
+    pods = Pods("swarm-pod-proof", keys=(ACCOUNT, other))
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: pods)
+    service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    try:
+        herdr = service.runtime.herdr_runtime
+        herdr._quota_tasks, herdr._quota_task_accounts = {"t1": "claude"}, {"t1": other}
+        task = {"id": "t1", "seat": SEAT, "controller_epoch": service.controller.held.epoch}
+        service.runtime.spawn(store.config(SLUG), "eng", store.next_name(SLUG, "eng"), task)
+    finally:
+        service.stop()
+
+    [pod] = pods.created
+    assert pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == other
+
+
 def test_a_controller_with_no_local_accounts_sizes_engineer_and_ci_lanes_from_fleet_accounts(tmp_path, monkeypatch):
     def local(*args, **kwargs):
         raise AssertionError("the deployed controller read local accounts")

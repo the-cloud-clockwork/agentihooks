@@ -659,7 +659,7 @@ def test_a_tick_spawn_hands_the_worker_the_api_address_of_its_swarm_config(world
 
 def test_a_tick_spawn_launches_on_the_account_its_route_chooses_for_the_launch_cap(world):
     asked = []
-    world.launcher.accounts = lambda cap: asked.append(cap) or "routed-key"
+    world.launcher.accounts = lambda cap, planned, predecessor: asked.append(cap) or "routed-key"
     name = world.store.next_name(SLUG, "eng")
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
     request = SpawnRequest(config, "eng", name, {"id": "task", "seat": FIRST})
@@ -673,8 +673,44 @@ def test_a_tick_spawn_launches_on_the_account_its_route_chooses_for_the_launch_c
     assert world.grants.verify(SLUG, sent.task["launch_grant"]).account == "routed-key"
 
 
+@pytest.mark.parametrize(
+    ("envelope", "assignment", "predecessor"),
+    [
+        ({"reason": "quota", "launch": {"harness": "claude", "account": "spent-key"}}, {}, ("claude", "spent-key")),
+        ({"reason": "quota"}, {"harness": "claude", "account": "assigned-key"}, ("claude", "assigned-key")),
+        ({"reason": "recycle", "launch": {"harness": "claude", "account": "spent-key"}}, {}, None),
+        ({"reason": "quota", "launch": {"harness": "claude"}}, {}, None),
+        ({}, {}, None),
+    ],
+)
+def test_a_tick_spawn_hands_its_route_the_planned_account_and_the_quota_handoff_predecessor(
+    world, envelope, assignment, predecessor
+):
+    asked = []
+    world.launcher.accounts = lambda cap, planned, left: asked.append((cap, planned, left)) or "routed-key"
+    world.launcher.planned = {"task": "planned-key"}.get
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+    task = {"id": "task", "seat": FIRST, "handoff_envelope": envelope, "launch_assignment": assignment}
+    request = SpawnRequest(config, "eng", world.store.next_name(SLUG, "eng"), task)
+
+    world.launcher.from_tick(request, world.terms, pod_target)
+
+    assert asked == [(world.terms.cap, "planned-key", predecessor)]
+
+
+def test_a_tick_spawn_without_a_plan_reader_hands_its_route_no_planned_account(world):
+    asked = []
+    world.launcher.accounts = lambda cap, planned, left: asked.append(planned) or "routed-key"
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+    request = SpawnRequest(config, "eng", world.store.next_name(SLUG, "eng"), {"id": "task", "seat": FIRST})
+
+    world.launcher.from_tick(request, world.terms, pod_target)
+
+    assert asked == [None]
+
+
 def test_a_tick_spawn_whose_route_finds_no_account_is_unavailable_before_admission(world):
-    world.launcher.accounts = lambda cap: None
+    world.launcher.accounts = lambda cap, planned, predecessor: None
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
     request = SpawnRequest(config, "eng", "e1", {"id": "task", "seat": FIRST})
 
@@ -829,7 +865,9 @@ def test_a_tick_spawn_whose_grant_is_not_handed_fails_with_the_reason_and_record
     assert world.rows() == {}
 
 
-@pytest.mark.parametrize("chooser", [None, lambda cap: None], ids=["reservation full", "no account with room"])
+@pytest.mark.parametrize(
+    "chooser", [None, lambda cap, planned, predecessor: None], ids=["reservation full", "no account with room"]
+)
 def test_a_tick_spawn_on_a_full_account_waits_and_records_no_launch_failure(world, chooser):
     world.launch(FIRST)
     if chooser is not None:
