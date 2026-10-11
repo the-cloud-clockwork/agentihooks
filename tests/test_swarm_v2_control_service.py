@@ -465,6 +465,18 @@ def test_the_hosted_api_serves_shallow_liveness_and_guards_diagnostics(tmp_path,
     assert probed == [worker_health.BRAIN_TIMEOUT]
 
 
+def test_the_hosted_api_honours_the_deep_diagnostics_switch(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_HEALTH_DEEP", "off")
+    store = _store()
+    port = _free_port()
+    service = _cs().host(_hosted_environ(tmp_path, store, port), store, "hive-fixture")
+    try:
+        status, refused = _post(f"http://127.0.0.1:{port}/v2/health/qualify", "anyone", {})
+    finally:
+        service.stop()
+    assert (status, refused["message"]) == (503, "deep diagnostics are switched off")
+
+
 def test_the_page_credential_comes_from_the_ledger_repository(monkeypatch):
     from scripts.swarm_ledger.repository import repository
 
