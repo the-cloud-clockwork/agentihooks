@@ -398,9 +398,9 @@ api.create_pod({
         "volumes": [launch_volume(agent.execution_id), {"name": "home", "emptyDir": {}}, {"name": "templates", "emptyDir": {}}, {"name": "node", "emptyDir": {}}],
     },
 })
-handed = PodGrants(api, slug, lambda token: probe.grants.verify(slug, token), Supervision("claude", None, env["CONTROL_URL"])).hand(agent, grant)
+hand = PodGrants(api, slug, lambda token: probe.grants.verify(slug, token), Supervision("claude", None, env["CONTROL_URL"])).hand(agent, grant)
 scratch.cleanup()
-print(json.dumps({"pod": name, "handed": handed}, sort_keys=True))
+print(json.dumps({"pod": name, "handed": hand.handed, "reason": hand.reason}, sort_keys=True))
 EOF
 )"
 handed="$(python3 - <<'EOF' | kubectl exec -i "deployment/$release-controller" -c controller -- env CONTROL_URL="http://$release-controller:8780" SLUG="$slug" RELEASE="$release" IMAGE="$image" LAYOUT="$(cat docker/swarm-node/layout.json)" python -c "$hand_grant"
