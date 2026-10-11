@@ -12,33 +12,45 @@ def probe():
     return worker_storage
 
 
-def test_the_storage_check_rejects_guest_tmpfs(probe, monkeypatch):
-    monkeypatch.setattr(Path, "read_text", lambda self: "30 20 0:44 / / rw - tmpfs tmpfs rw\n")
+@pytest.fixture
+def proc_files(monkeypatch):
+    files = {}
+    monkeypatch.setattr(Path, "read_text", lambda path: files[str(path)])
+    return files
+
+
+def test_the_storage_check_rejects_guest_tmpfs(probe, proc_files):
+    proc_files["/proc/self/mountinfo"] = "30 20 0:44 / / rw - tmpfs tmpfs rw\n"
     with pytest.raises(RuntimeError, match="not on a block device"):
         probe.filesystem(Path("/home/worker"))
 
 
-def test_the_storage_check_resolves_both_paths_to_the_root_block_device(probe, monkeypatch):
-    monkeypatch.setattr(Path, "read_text", lambda self: "30 20 254:0 / / rw - ext4 /dev/vda rw\n")
+def test_the_storage_check_resolves_both_paths_to_the_root_block_device(probe, proc_files):
+    proc_files["/proc/self/mountinfo"] = "30 20 254:0 / / rw - ext4 /dev/vda rw\n"
     for folder in (Path("/home/worker"), Path("/tmp")):
         assert probe.filesystem(folder) == {"device": "254:0", "mount": "/", "type": "ext4", "source": "/dev/vda"}
 
 
 @pytest.mark.parametrize("device,source", [("0:44", "/dev/vda"), ("254:0", "tmpfs")])
-def test_the_storage_check_requires_both_a_block_device_number_and_source(probe, monkeypatch, device, source):
-    monkeypatch.setattr(Path, "read_text", lambda self: f"30 20 {device} / / rw - ext4 {source} rw\n")
+def test_the_storage_check_requires_both_a_block_device_number_and_source(probe, proc_files, device, source):
+    proc_files["/proc/self/mountinfo"] = f"30 20 {device} / / rw - ext4 {source} rw\n"
     with pytest.raises(RuntimeError, match="not on a block device"):
         probe.filesystem(Path("/tmp"))
 
 
-def test_the_storage_check_sees_a_tmpfs_mount_below_the_root_disk(probe, monkeypatch):
-    monkeypatch.setattr(
-        Path,
-        "read_text",
-        lambda self: "30 20 254:0 / / rw - ext4 /dev/vda rw\n31 30 0:44 / /tmp rw - tmpfs tmpfs rw\n",
+def test_the_storage_check_sees_a_tmpfs_mount_below_the_root_disk(probe, proc_files):
+    proc_files["/proc/self/mountinfo"] = (
+        "30 20 254:0 / / rw - ext4 /dev/vda rw\n31 30 0:44 / /tmp rw - tmpfs tmpfs rw\n"
     )
     with pytest.raises(RuntimeError, match="not on a block device"):
         probe.filesystem(Path("/tmp"))
+
+
+def test_mounts_with_equal_depth_do_not_compare_metadata_dictionaries(probe, proc_files):
+    proc_files["/proc/self/mountinfo"] = (
+        "30 20 254:0 / / rw - ext4 /dev/vda rw\n31 20 254:1 / / rw - ext4 /dev/vdb rw\n"
+    )
+    assert probe.filesystem(Path("/home/worker"))["source"] == "/dev/vda"
 
 
 @pytest.mark.parametrize(
@@ -60,7 +72,7 @@ def test_the_storage_check_rejects_memory_growth_in_the_final_sample(
     samples = iter([baseline, baseline, grown, baseline, grown])
     monkeypatch.setattr(probe, "memory", lambda: next(samples))
     if rejected:
-        with pytest.raises(RuntimeError, match="increased guest memory"):
+        with pytest.raises(RuntimeError, match="^large file write increased guest memory beyond 64 MiB$"):
             probe.main()
     else:
         probe.main()
@@ -82,12 +94,23 @@ def test_the_storage_check_finishes_both_writes_and_removes_its_files(probe, mon
     assert list(root.iterdir()) == []
 
 
-def test_the_guest_memory_reading_separates_usage_anonymous_and_shared_pages(probe, monkeypatch):
-    monkeypatch.setattr(
-        Path,
-        "read_text",
-        lambda self: "MemTotal: 2048 kB\nMemAvailable: 1024 kB\nAnonPages: 128 kB\nShmem: 64 kB\n",
-    )
+def test_storage_measurement_preserves_an_existing_file_with_a_predictable_name(probe, monkeypatch, tmp_path):
+    root = tmp_path / "writes"
+    root.mkdir()
+    original = root / f"storage-proof-{probe.os.getpid()}"
+    original.write_bytes(b"existing worker data")
+    monkeypatch.setattr(probe, "Path", lambda value: root)
+    monkeypatch.setattr(probe, "MIB", 1024)
+    monkeypatch.setattr(probe, "SIZE", 16 * 1024)
+    monkeypatch.setattr(probe, "filesystem", lambda path: {"type": "ext4"})
+    monkeypatch.setattr(probe, "memory", lambda: {"used": 100, "anonymous": 20, "shmem": 4})
+    probe.main()
+    assert original.read_bytes() == b"existing worker data"
+    assert list(root.iterdir()) == [original]
+
+
+def test_the_guest_memory_reading_separates_usage_anonymous_and_shared_pages(probe, proc_files):
+    proc_files["/proc/meminfo"] = "MemTotal: 2048 kB\nMemAvailable: 1024 kB\nAnonPages: 128 kB\nShmem: 64 kB\n"
     assert probe.memory() == {"used": 1048576, "anonymous": 131072, "shmem": 65536}
 
 
@@ -142,6 +165,10 @@ class ProbeFolder:
 def default_filesystem(probe, monkeypatch):
     files, flushes = [], []
 
+    def device(path):
+        assert str(path) in ("/home/worker", "/tmp")
+        return {"type": "ext4"}
+
     def sync(fd):
         assert fd == 17
 
@@ -150,7 +177,7 @@ def default_filesystem(probe, monkeypatch):
         flushes.append((files[-1].folder, files[-1].size))
 
     monkeypatch.setattr(probe, "Path", lambda path: ProbeFolder(path, files))
-    monkeypatch.setattr(probe, "filesystem", lambda path: {"type": "ext4"})
+    monkeypatch.setattr(probe, "filesystem", device)
     monkeypatch.setattr(probe, "memory", lambda: {"used": 100, "anonymous": 20, "shmem": 4})
     monkeypatch.setattr(probe.os, "fsync", sync)
     monkeypatch.setattr(probe.os, "posix_fadvise", evict)
