@@ -60,6 +60,8 @@ from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy
+from scripts.swarm_v2 import master_fill
+from scripts.swarm_v2 import masters as master_seats
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
@@ -206,6 +208,7 @@ def tick(slug, store, ledger, runtime, now_ms):
                 now_ms,
                 lambda: _master(slug, config, store, runtime, now_ms),
             )
+            actions += skip_refused(master_fill.run, slug, config, store, runtime, doc, now_ms)
             actions += skip_refused(dispatcher.rank_pass, slug, config, store, ledger, doc, now_ms)
             actions += skip_refused(lane_split.step, slug, config, store, doc, now_ms)
             if config.state == "running":
@@ -940,11 +943,12 @@ def placed_record(record, placed):
 
 
 def _recover_master(slug, config, store, runtime, now_ms):
-    agents = [a for a in store.agents(slug) if a.lane == MASTER]
+    recorded = [a for a in store.agents(slug) if a.lane == MASTER]
+    agents = [a for a in recorded if master_seats.is_lead(slug, a)]
     live = runtime.live_names()
     if any(a.state != "finished" and a.name in live for a in agents):
         return []
-    finished = {a.name for a in agents if a.state == "finished"}
+    finished = {a.name for a in recorded}
     seat = seat_address(slug, MASTER)
     occupant = store.seats.occupant(seat).occupant
     candidates = []
@@ -975,6 +979,7 @@ def _master(slug, config, store, runtime, now_ms):
         if any(a.lane != MASTER for a in agents):
             return []
         return [_retire_master(slug, store, runtime, m, now_ms) for m in masters]
+    masters = [m for m in masters if master_seats.is_lead(slug, m)]
     pending = master_start.read(store, slug)
     if any(m.state != "finished" for m in masters) or pending.get("name") or pending.get("alerted"):
         return []

@@ -34,14 +34,41 @@
   },
   "validation": {
     "red": "proofs run 38135150563 on tests only commit 42d908129: 3 failed, 1 collection error, KUB-05 suite unchanged",
-    "tests": "proofs run 38135830892 at tested_commit: 272 passed; the three case records failed only because none was committed, and one KUB-05 test call site that read the old _replace return value is fixed in the evidence commit",
+    "tests": "proofs run 38135830892 at tested_commit produced the case records; proofs run 38137696953 at 217bcd1ab: 279 passed with the committed records",
     "lint": "ruff check and ruff format passed through python -m scripts.ci_prepush",
-    "review": "Standards and Spec readers, three rounds and two rounds; every finding fixed or ruled, rulings in the task proof"
+    "review": "Standards and Spec readers, three rounds and two rounds; every finding fixed or ruled, rulings in the task proof",
+    "mutation": "mutation preflight 38137689711 at 217bcd1ab: 703 mutants killed, none survived, after 28 survivors from preflight 38136209144 were killed by tests or removed in code"
   },
   "measurements": {
     "execution_transition_latency_seconds": {
-      "a": {"admission": {"accepted": 2, "refused": 1}, "command": {"accepted": 2}, "fence": {"accepted": 1}, "heartbeat": {"accepted": 2}, "recovery": {"accepted": 1}},
-      "b": {"admission": {"accepted": 4, "refused": 1}, "command": {"accepted": 1, "failed": 2}}
+      "a": {
+        "admission": {
+          "accepted": 2,
+          "refused": 1
+        },
+        "command": {
+          "accepted": 2
+        },
+        "fence": {
+          "accepted": 1
+        },
+        "heartbeat": {
+          "accepted": 2
+        },
+        "recovery": {
+          "accepted": 1
+        }
+      },
+      "b": {
+        "admission": {
+          "accepted": 4,
+          "refused": 1
+        },
+        "command": {
+          "accepted": 1,
+          "failed": 2
+        }
+      }
     }
   },
   "cases": {
@@ -63,6 +90,12 @@
     "The status report reads the whole audit list once per call to build the per seat timelines.",
     "Code task and pull request evidence is in the pull request; no G10 live canary has run."
   ],
-  "pull_request": "pending",
-  "follow_ups": []
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2584",
+  "follow_ups": [],
+  "obligations": {
+    "compatibility": "Compared with the accepted SV2-KUB-05 and controller protocol: admit, execute, observe and every recovery call commit or refuse exactly as before and re-raise the same exception; the controller, control service, KUB-05 failures and account reconciliation suites pass unchanged in proofs run 38137696953, with one KUB-05 call site reading execution_id from the record Recovery._replace now returns. The local runtime path is not touched.",
+    "failure_evidence": "No rejection or recovery contract failed in the final runs, so no failing seed exists to keep. The smallest reproducer for each contract is the committed fixture tests/fixtures/swarm_v2/transition-telemetry.json with the SV2-KUB-05 inputs, hashed in manifest.json; a fixed step telemetry clock and the fake lease clock make each case deterministic, and every proof runs each case twice and compares the records. Earlier failures and their fixes are in the validation record: the red run, and 28 mutation survivors from preflight 38136209144.",
+    "data_safety": "Authoritative objects identified before rollback: the execution registry, operation journal, fence records and recovery decisions. Telemetry never writes or deletes them. Its own keys transitions, transition-seq, transition-exported, transition-latency and observability are operational and bounded. Rollback removes only the optional exporter and deletes nothing.",
+    "completion_evidence": "Recorded here: interfaces, supported_versions, validation (red, case, green and mutation runs), measurements, remaining_limitations and rollback_rehearsal."
+  }
 }

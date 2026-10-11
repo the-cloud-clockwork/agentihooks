@@ -48,6 +48,7 @@ DEFAULT_KIND = "default"
 API_KIND = "api"
 OAUTH_KIND = "chatgpt-oauth"
 ACCESS_TOKEN_KIND = "codex-access-token"
+LOGIN_PASSTHROUGH = ("status", "help")
 
 
 @dataclass(frozen=True)
@@ -167,12 +168,11 @@ def default_signed_in(environ: Mapping[str, str], run: Callable = subprocess.run
 
 
 def accounts(environ: Mapping[str, str], run: Callable = subprocess.run) -> list[CodexAccount]:
-    return [CodexAccount(CODEX_DEFAULT, signed_in=default_signed_in(environ, run)), *token_accounts(environ)]
+    return token_accounts(environ) or [CodexAccount(CODEX_DEFAULT, signed_in=default_signed_in(environ, run))]
 
 
 def routing_pool(environ: Mapping[str, str], run: Callable = subprocess.run) -> list[CodexAccount]:
-    """Without token variables only the default login routes, unchecked, exactly as before tokens existed."""
-    return accounts(environ, run) if token_accounts(environ) else [CodexAccount(CODEX_DEFAULT)]
+    return token_accounts(environ) or [CodexAccount(CODEX_DEFAULT)]
 
 
 def _registry() -> dict:
@@ -409,6 +409,22 @@ def _route(environ: Mapping[str, str], route: str, run: Callable, exclude: str) 
     return account, placement, sessions.get(account.name, 0), str(seat.cap) if seat else "?"
 
 
+def _own_command(args: list[str], environ: Mapping[str, str]) -> int | None:
+    if args[:1] == ["refresh"] and (len(args) == 1 or args[1].startswith("-")):
+        from scripts import codex_refresh
+
+        return codex_refresh.main(args[1:], environ)
+    if args[:1] == ["login"] and len(args) > 1 and not _passthrough_login(args[1]):
+        from scripts import codex_login
+
+        return codex_login.main(args[1:], environ)
+    return None
+
+
+def _passthrough_login(word: str) -> bool:
+    return word.lower() in LOGIN_PASSTHROUGH or word.startswith("-")
+
+
 def main(
     argv: list[str],
     environ: Mapping[str, str] | None = None,
@@ -416,6 +432,9 @@ def main(
     run: Callable = subprocess.run,
 ) -> int:
     active = dict(os.environ if environ is None else environ)
+    own = _own_command(argv, active)
+    if own is not None:
+        return own
     report, args = _take(argv, "--agentihooks-report")
     route, args = _take(args, "--route")
     exclude, args = _take(args, "--agentihooks-exclude")

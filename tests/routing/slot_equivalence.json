@@ -103,17 +103,6 @@
         },
         {
           "cap": 6,
-          "five_left": 80.0,
-          "five_resets_at": 1900001000,
-          "harness": "codex",
-          "name": "default",
-          "sessions": 1,
-          "state": "OPEN",
-          "week_left": 70.0,
-          "week_resets_at": 1900005000
-        },
-        {
-          "cap": 6,
           "five_left": 3.0,
           "five_resets_at": 1900001000,
           "harness": "codex",
@@ -174,8 +163,8 @@
           "codex": 1
         },
         "eng": {
-          "claude": 2,
-          "codex": 1
+          "claude": 3,
+          "codex": 0
         },
         "plan": {
           "claude": 1,
@@ -194,7 +183,7 @@
       },
       "placeable": {
         "claude": 18,
-        "codex": 15
+        "codex": 10
       },
       "placements": {
         "ci": [
@@ -211,12 +200,12 @@
             "index": 0
           },
           {
-            "account": "default",
-            "harness": "codex",
+            "account": "DELTA",
+            "harness": "claude",
             "index": 1
           },
           {
-            "account": "DELTA",
+            "account": "GOLF",
             "harness": "claude",
             "index": 2
           }
@@ -229,7 +218,7 @@
           }
         ]
       },
-      "reason": "accounts are closed, unknown; Claude has 18 free seats and Codex has 15 free seats"
+      "reason": "accounts are closed, unknown; Claude has 18 free seats and Codex has 10 free seats"
     },
     "claude_only": {
       "accounts": [
@@ -523,17 +512,6 @@
         },
         {
           "cap": 6,
-          "five_left": 80.0,
-          "five_resets_at": 1900001000,
-          "harness": "codex",
-          "name": "default",
-          "sessions": 0,
-          "state": "OPEN",
-          "week_left": 70.0,
-          "week_resets_at": 1900005000
-        },
-        {
-          "cap": 6,
           "five_left": 3.0,
           "five_resets_at": 1900001000,
           "harness": "codex",
@@ -579,12 +557,12 @@
       ],
       "allocation": {
         "ci": {
-          "claude": 0,
-          "codex": 1
+          "claude": 1,
+          "codex": 0
         },
         "eng": {
-          "claude": 4,
-          "codex": 0
+          "claude": 3,
+          "codex": 1
         },
         "plan": {
           "claude": 0,
@@ -603,13 +581,13 @@
       },
       "placeable": {
         "claude": 22,
-        "codex": 18
+        "codex": 12
       },
       "placements": {
         "ci": [
           {
-            "account": "default",
-            "harness": "codex",
+            "account": "DELTA",
+            "harness": "claude",
             "index": 0
           }
         ],
@@ -620,24 +598,24 @@
             "index": 0
           },
           {
-            "account": "DELTA",
+            "account": "GOLF",
             "harness": "claude",
             "index": 1
           },
           {
-            "account": "GOLF",
+            "account": "BRAVO",
             "harness": "claude",
             "index": 2
           },
           {
-            "account": "BRAVO",
-            "harness": "claude",
+            "account": "alpha",
+            "harness": "codex",
             "index": 3
           }
         ],
         "plan": []
       },
-      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 18 free seats"
+      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 12 free seats"
     },
     "lane_agent": {
       "accounts": [
@@ -731,17 +709,6 @@
         },
         {
           "cap": 6,
-          "five_left": 80.0,
-          "five_resets_at": 1900001000,
-          "harness": "codex",
-          "name": "default",
-          "sessions": 0,
-          "state": "OPEN",
-          "week_left": 70.0,
-          "week_resets_at": 1900005000
-        },
-        {
-          "cap": 6,
           "five_left": 3.0,
           "five_resets_at": 1900001000,
           "harness": "codex",
@@ -811,7 +778,7 @@
       },
       "placeable": {
         "claude": 22,
-        "codex": 18
+        "codex": 12
       },
       "placements": {
         "ci": [
@@ -828,22 +795,22 @@
         ],
         "eng": [
           {
-            "account": "default",
+            "account": "alpha",
             "harness": "codex",
             "index": 0
           },
           {
-            "account": "alpha",
+            "account": "beta",
             "harness": "codex",
             "index": 1
           },
           {
-            "account": "beta",
+            "account": "alpha",
             "harness": "codex",
             "index": 2
           },
           {
-            "account": "default",
+            "account": "beta",
             "harness": "codex",
             "index": 3
           },
@@ -866,7 +833,7 @@
           }
         ]
       },
-      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 18 free seats"
+      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 12 free seats"
     },
     "no_refresh": {
       "accounts": [
@@ -960,17 +927,6 @@
         },
         {
           "cap": 6,
-          "five_left": 80.0,
-          "five_resets_at": 1900001000,
-          "harness": "codex",
-          "name": "default",
-          "sessions": 0,
-          "state": "OPEN",
-          "week_left": 70.0,
-          "week_resets_at": 1900005000
-        },
-        {
-          "cap": 6,
           "five_left": 3.0,
           "five_resets_at": 1900001000,
           "harness": "codex",
@@ -1016,12 +972,12 @@
       ],
       "allocation": {
         "ci": {
-          "claude": 0,
-          "codex": 1
+          "claude": 1,
+          "codex": 0
         },
         "eng": {
-          "claude": 3,
-          "codex": 0
+          "claude": 2,
+          "codex": 1
         },
         "plan": {
           "claude": 1,
@@ -1040,13 +996,13 @@
       },
       "placeable": {
         "claude": 22,
-        "codex": 18
+        "codex": 12
       },
       "placements": {
         "ci": [
           {
-            "account": "default",
-            "harness": "codex",
+            "account": "DELTA",
+            "harness": "claude",
             "index": 0
           }
         ],
@@ -1057,25 +1013,25 @@
             "index": 0
           },
           {
-            "account": "GOLF",
+            "account": "BRAVO",
             "harness": "claude",
             "index": 1
           },
           {
-            "account": "BRAVO",
-            "harness": "claude",
+            "account": "alpha",
+            "harness": "codex",
             "index": 2
           }
         ],
         "plan": [
           {
-            "account": "DELTA",
+            "account": "GOLF",
             "harness": "claude",
             "index": 0
           }
         ]
       },
-      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 18 free seats"
+      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 12 free seats"
     },
     "open": {
       "accounts": [
@@ -1169,17 +1125,6 @@
         },
         {
           "cap": 6,
-          "five_left": 80.0,
-          "five_resets_at": 1900001000,
-          "harness": "codex",
-          "name": "default",
-          "sessions": 0,
-          "state": "OPEN",
-          "week_left": 70.0,
-          "week_resets_at": 1900005000
-        },
-        {
-          "cap": 6,
           "five_left": 3.0,
           "five_resets_at": 1900001000,
           "harness": "codex",
@@ -1225,12 +1170,12 @@
       ],
       "allocation": {
         "ci": {
-          "claude": 0,
-          "codex": 1
+          "claude": 1,
+          "codex": 0
         },
         "eng": {
-          "claude": 3,
-          "codex": 0
+          "claude": 2,
+          "codex": 1
         },
         "plan": {
           "claude": 1,
@@ -1249,13 +1194,13 @@
       },
       "placeable": {
         "claude": 22,
-        "codex": 18
+        "codex": 12
       },
       "placements": {
         "ci": [
           {
-            "account": "default",
-            "harness": "codex",
+            "account": "DELTA",
+            "harness": "claude",
             "index": 0
           }
         ],
@@ -1266,25 +1211,25 @@
             "index": 0
           },
           {
-            "account": "GOLF",
+            "account": "BRAVO",
             "harness": "claude",
             "index": 1
           },
           {
-            "account": "BRAVO",
-            "harness": "claude",
+            "account": "alpha",
+            "harness": "codex",
             "index": 2
           }
         ],
         "plan": [
           {
-            "account": "DELTA",
+            "account": "GOLF",
             "harness": "claude",
             "index": 0
           }
         ]
       },
-      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 18 free seats"
+      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 12 free seats"
     },
     "requirements": {
       "accounts": [
@@ -1378,17 +1323,6 @@
         },
         {
           "cap": 6,
-          "five_left": 80.0,
-          "five_resets_at": 1900001000,
-          "harness": "codex",
-          "name": "default",
-          "sessions": 0,
-          "state": "OPEN",
-          "week_left": 70.0,
-          "week_resets_at": 1900005000
-        },
-        {
-          "cap": 6,
           "five_left": 3.0,
           "five_resets_at": 1900001000,
           "harness": "codex",
@@ -1458,12 +1392,12 @@
       },
       "placeable": {
         "claude": 22,
-        "codex": 18
+        "codex": 12
       },
       "placements": {
         "ci": [
           {
-            "account": "default",
+            "account": "alpha",
             "harness": "codex",
             "index": 0
           },
@@ -1480,7 +1414,7 @@
             "index": 0
           },
           {
-            "account": "alpha",
+            "account": "beta",
             "harness": "codex",
             "index": 1
           },
@@ -1490,7 +1424,7 @@
             "index": 2
           },
           {
-            "account": "beta",
+            "account": "alpha",
             "harness": "codex",
             "index": 3
           },
@@ -1508,7 +1442,7 @@
           }
         ]
       },
-      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 18 free seats"
+      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 12 free seats"
     }
   },
   "codex_select": {

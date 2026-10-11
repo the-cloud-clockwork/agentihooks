@@ -63,10 +63,7 @@ spec:
     - from:
         - podSelector:
             matchLabels:
-              {{- toYaml $release | nindent 14 }}
-        {{- with .Values.networkPolicy.ingressFrom }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
+              {{- include "swarm.selector" (dict "root" . "component" "controller") | nindent 14 }}
         {{- with .Values.controller.api.ingressFrom }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

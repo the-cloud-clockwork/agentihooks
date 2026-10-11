@@ -561,3 +561,17 @@ def test_page_quota_without_a_cached_reading_has_no_probe_time(monkeypatch):
     monkeypatch.setattr(codex_router, "routing_pool", lambda environ: [])
     monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {})
     assert agents_quota.page_quota(now=100.0) == {"probed_at": None, "rows": []}
+
+
+def test_codex_quota_rows_drop_the_default_login_once_token_accounts_exist(monkeypatch):
+    from hooks.context import account_sessions
+    from scripts import codex_router
+
+    monkeypatch.setenv("AH_CX_TOKEN_alpha", "cx-value")
+    monkeypatch.setattr(codex_router, "default_signed_in", lambda environ, run=None: pytest.fail("no default row"))
+    monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {})
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {})
+    monkeypatch.setattr(agents_quota, "api_rows", lambda source, harness, now: [])
+    monkeypatch.setattr(agents_quota, "next_account", lambda *args: "")
+    assert [row.account for row in agents_quota._codex(5.0)] == ["alpha"]

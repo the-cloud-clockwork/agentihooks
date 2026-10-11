@@ -1,0 +1,94 @@
+{
+  "case": "T-SV2-CKP-01-B",
+  "evidence_class": "mocked: a local durable directory backend behind a granted artifact store and fixture launch registrations; no object store, worker Pod or harness was used",
+  "input_sha256": {
+    "context-only.json": "0bef305b2565a336c5021606d2bf4b1a6f4b35f9cade44aee8c6720da27e5fda",
+    "native-resume.json": "c39dc9e0d89ee5d0f846ab5bca487ab16cc187c77077c6d9d1bde8e3723f2349",
+    "path-only-snapshot.json": "44c0b83757dc61441a2872c8e416393e12a6db4cd8b63befd97f2638ea331b39"
+  },
+  "observed": {
+    "fixture": {
+      "checkpoint_completeness_by_reason": {
+        "complete/native": 1,
+        "diagnostic_only/path_only": 1,
+        "incomplete/missing_material": 1
+      },
+      "diagnostics_name_the_conversation": false,
+      "diagnostics_name_the_old_path": false,
+      "durable_keys_unchanged_by_rejections": true,
+      "manifest_without_materials": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "continuation": "none",
+        "limitations": [],
+        "reason": "missing_material"
+      },
+      "new_valid_request": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "limitations": [],
+        "reason": "native"
+      },
+      "path_only_snapshot": {
+        "authoritative": false,
+        "completeness": "diagnostic_only",
+        "continuation": "none",
+        "limitations": [
+          "a saved worktree path is not a saved checkout",
+          "a conversation id is not a saved conversation"
+        ],
+        "reason": "path_only"
+      },
+      "stale_generation_commit": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "continuation": "none",
+        "limitations": [],
+        "reason": "scope_mismatch"
+      }
+    },
+    "second_fixture": {
+      "checkpoint_completeness_by_reason": {
+        "complete/native": 1,
+        "diagnostic_only/path_only": 1,
+        "incomplete/missing_material": 1
+      },
+      "diagnostics_name_the_conversation": false,
+      "diagnostics_name_the_old_path": false,
+      "durable_keys_unchanged_by_rejections": true,
+      "manifest_without_materials": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "continuation": "none",
+        "limitations": [],
+        "reason": "missing_material"
+      },
+      "new_valid_request": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "limitations": [],
+        "reason": "native"
+      },
+      "path_only_snapshot": {
+        "authoritative": false,
+        "completeness": "diagnostic_only",
+        "continuation": "none",
+        "limitations": [
+          "a saved worktree path is not a saved checkout",
+          "a conversation id is not a saved conversation"
+        ],
+        "reason": "path_only"
+      },
+      "stale_generation_commit": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "continuation": "none",
+        "limitations": [],
+        "reason": "scope_mismatch"
+      }
+    }
+  },
+  "state": "passed"
+}

@@ -79,6 +79,25 @@ api=(
   --set controller.api.signingKey.keyId=kind-launch
   --set controller.api.signingKey.secretName=swarm-launch-signing
 )
+network=("$chart/values.yaml" "$chart/ci/kind-network.yaml")
+helm template "$release" "$chart" -f "$chart/ci/kind-network.yaml" "${api[@]}" | python3 tests/chart_network.py "$release" "${network[@]}"
+plant_network() {
+  local expected=$1 planted
+  shift
+  planted="$(helm template "$release" "$chart" -f "$chart/ci/kind-network.yaml" "${api[@]}" "$@" \
+    | python3 tests/chart_network.py "$release" "${network[@]}" 2>&1 >/dev/null || true)"
+  if [[ $planted != *"$expected"* ]]; then
+    printf 'the chart check did not flag planted network peers %s with "%s": %s\n' "$*" "$expected" "$planted" >&2
+    exit 1
+  fi
+}
+plant_network 'the controller API policy admits {"ipBlock": {"cidr": "0.0.0.0/0"}} beyond its peers' \
+  --set-json 'controller.api.ingressFrom=[{"ipBlock":{"cidr":"0.0.0.0/0"}}]'
+plant_network 'the controller API policy does not admit {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "agentihooks-swarm-workers"}}' \
+  --set-json 'controller.api.ingressFrom=[]'
+plant_network 'the ledger policy does not admit {"ipBlock": {"cidr": "10.10.30.0/24"}}' \
+  --set-json 'networkPolicy.ingressFrom=[]'
+printf 'the chart check flagged planted controller API and ledger peers that differ from their values\n'
 workers=(-f "$chart/ci/kind-workers.yaml")
 helm template "$release" "$chart" "${workers[@]}" "${api[@]}" | python3 tests/chart_workers.py "$chart/ci/kind-workers.yaml"
 secrets+=("${workers[@]}" "${api[@]}")

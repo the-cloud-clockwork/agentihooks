@@ -344,7 +344,7 @@ def test_two_concurrent_accounts_read_count_and_place_apart(tmp_path, monkeypatc
     assert "AH_CX_TOKEN_alpha" not in launched["env"]
     assert launched["env"][codex_router.ACCOUNT_ID_ENV] == "acct-b"
     assert launched["argv"][-2:] == ["exec", "ok"]
-    assert [argv[-2:] for argv in probes] == [["login", "status"]]
+    assert probes == []
 
 
 def test_two_concurrent_exec_launches_land_on_two_accounts_and_an_ended_run_frees_its_slot(tmp_path, monkeypatch):
@@ -400,7 +400,7 @@ def test_probes_and_classifier_calls_hold_no_slot_while_a_routed_launch_inside_o
         routed.update(argv=args[1], env=args[2])
 
     assert codex_router.main(["--route", "alpha", "exec", "ok"], inside, launch, run) == 0
-    assert [argv[-2:] for argv, _ in internal][2:] == [["login", "status"]]
+    assert [argv[-2:] for argv, _ in internal][2:] == []
     root = tmp_path / "proc"
     for pid, (argv, child) in enumerate([*internal, (routed["argv"], routed["env"])], start=800):
         _proc(root, pid, "codex", 1, argv, child)

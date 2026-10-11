@@ -8,6 +8,7 @@ from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm import master_alarm, master_start
 from scripts.swarm.store import MASTER
+from scripts.swarm_v2 import masters
 
 KEY = "master-outage"
 SENDER = "swarm"
@@ -111,7 +112,7 @@ def _save(store, slug, state):
 
 
 def _masters(store, slug):
-    return [a for a in store.agents(slug) if a.lane == MASTER and a.state != "finished"]
+    return [a for a in store.agents(slug) if masters.is_lead(slug, a) and a.state != "finished"]
 
 
 def _starting(store, slug):
@@ -119,8 +120,9 @@ def _starting(store, slug):
 
 
 def _bound(store, slug, runtime):
+    """Any live working master seat ends an outage: with the lead down, operator chat reaches the lowest live seat."""
     live = runtime.live_names()
-    return next((a for a in _masters(store, slug) if a.state == "working" and a.name in live), None)
+    return next((a for a in store.agents(slug) if a.lane == MASTER and a.state == "working" and a.name in live), None)
 
 
 def _engineer(store, slug, name):
