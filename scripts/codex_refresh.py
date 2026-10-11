@@ -103,6 +103,7 @@ class Run:
     days: float
     bao: openbao_kv.OpenBao | None
     deps: Deps
+    creds: str = openbao_kv.CODEX_CREDS
 
 
 class Outcome(NamedTuple):
@@ -178,13 +179,13 @@ def _entries(slug: str, fresh: dict) -> dict[str, str]:
     }
 
 
-def _store(bao: openbao_kv.OpenBao, entries: dict[str, str]) -> bool:
+def _store(run: Run, entries: dict[str, str]) -> bool:
     try:
-        total = openbao_kv.merge(bao, openbao_kv.CODEX_CREDS, entries)
+        total = openbao_kv.merge(run.bao, run.creds, entries)
     except Exception as exc:
         print(term_colors.red(f"OpenBao write failed: {exc}"))
         return False
-    print(openbao_kv.summary(openbao_kv.CODEX_CREDS, entries, total))
+    print(openbao_kv.summary(run.creds, entries, total))
     return True
 
 
@@ -232,7 +233,7 @@ def _refresh_local(run: Run, home: Path) -> Outcome | None:
     saved = _attempt(slug, lambda: _save_auth(home / "auth.json", fresh, run.deps.now()))
     rc_entry = {f"{CODEX_TOKEN_PREFIX}{slug}": fresh["access_token"]}
     block = _attempt(slug, lambda: aicode_tokens.write_rc(aicode_tokens.rc_file(), rc_entry))
-    stored = _store(run.bao, _entries(slug, fresh)) if run.bao else None
+    stored = _store(run, _entries(slug, fresh)) if run.bao else None
     if not saved and not stored:
         print(term_colors.red(LOST.format(slug=slug)))
     return Outcome(saved and block and stored is not False, saved)
@@ -277,7 +278,7 @@ def _recovered(slug: str, access: str | None) -> dict | None:
 
 
 def _store_or_recover(run: Run, slug: str, fresh: dict) -> bool:
-    if _store(run.bao, _entries(slug, fresh)):
+    if _store(run, _entries(slug, fresh)):
         return True
     recovery = _recovery(slug)
     if _attempt(slug, lambda: _save_auth(recovery, fresh, run.deps.now())):
@@ -309,7 +310,7 @@ def _refresh_bao(run: Run, secret: Mapping[str, str], slug: str) -> bool:
 
 def run_openbao(run: Run) -> int:
     try:
-        secret, _ = openbao_kv.read(run.bao, openbao_kv.CODEX_CREDS)
+        secret, _ = openbao_kv.read(run.bao, run.creds)
     except openbao_kv.OpenBaoError as exc:
         print(term_colors.red(f"OpenBao read failed: {exc}"))
         return 1
@@ -355,7 +356,8 @@ def _settings(args: list[str], environ: Mapping[str, str], deps: Deps) -> tuple[
     store = (environ.get(STORE_ENV) or LOCAL).strip().lower()
     if store not in (LOCAL, OPENBAO):
         raise ValueError(BAD_STORE.format(store=store))
-    return store, Run(force, _days(options.days, environ), openbao_kv.from_env(environ, deps.opener), deps)
+    bao = openbao_kv.from_env(environ, deps.opener)
+    return store, Run(force, _days(options.days, environ), bao, deps, openbao_kv.codex_creds(environ))
 
 
 def main(args: list[str], environ: Mapping[str, str] | None = None, deps: Deps | None = None) -> int:

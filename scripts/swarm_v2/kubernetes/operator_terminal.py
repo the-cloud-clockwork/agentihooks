@@ -47,10 +47,8 @@ def authority(environ: Mapping[str, str]) -> TerminalAuthority:
     return TerminalAuthority(key)
 
 
-def terminal(
-    slug: str, environ: Mapping[str, str], home: ClientHome, run: Run, lookup: Lookup | None = None
-) -> Terminal:
-    namespace = pod_policy(_setting(environ, POLICY_ENV), slug)["namespace"]
+def terminal(environ: Mapping[str, str], home: ClientHome, run: Run, lookup: Lookup | None = None) -> Terminal:
+    namespace = pod_policy(_setting(environ, POLICY_ENV))["namespace"]
     return Terminal(home, authority(environ), namespace, run, lookup)
 
 
@@ -67,7 +65,7 @@ def command(store: RedisStore, slug: str, execution_id: str, environ: Mapping[st
     home = ClientHome(Path.home())
 
     def build() -> Terminal:
-        return terminal(slug, environ, home, runner(home.environment(dict(environ))))
+        return terminal(environ, home, runner(home.environment(dict(environ))))
 
     try:
         verdict = attach(store, slug, caller, execution_id, build)

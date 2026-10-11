@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 MOUNT = "secret"
 CODEX_CREDS = "agentihooks/codex-creds"
 CLAUDE_CREDS = "agentihooks/claude-creds"
+CODEX_PATH_ENV = "AGENTIHOOKS_CODEX_CREDS_PATH"
 URL_ENV = "OPENBAO_URL"
 TOKEN_ENV = "OPENBAO_TOKEN"
 CAS_RETRIES = 3
@@ -35,6 +36,10 @@ class OpenBao:
 def from_env(environ: Mapping[str, str], opener: Callable | None = None) -> OpenBao | None:
     url, token = environ.get(URL_ENV), environ.get(TOKEN_ENV)
     return OpenBao(url, token, opener) if url and token else None
+
+
+def codex_creds(environ: Mapping[str, str]) -> str:
+    return environ.get(CODEX_PATH_ENV) or CODEX_CREDS
 
 
 def _message(exc: urllib.error.HTTPError) -> str:

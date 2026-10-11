@@ -25,7 +25,7 @@ from hooks.context.account_sessions import (
     INTERNAL_RUN,
     codex_sessions_by_account,
 )
-from scripts import codex_quota, session_bands
+from scripts import codex_quota, codex_sessions, codex_usage, operator_env, session_bands
 from scripts.codex_quota import CodexQuota
 from scripts.routing import codex_api, envs, place
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, Slot
@@ -35,6 +35,9 @@ PROBE_ARGS = ["exec", "--json", "--skip-git-repo-check", "Reply with the single 
 PROBE_TIMEOUT_S = 90
 CODEX_BIN = "codex"
 ATTEMPTS_FILE = "codex-probe-attempts.json"
+READING_MAX_AGE_ENV = "AGENTIHOOKS_CODEX_READING_MAX_AGE_H"
+READING_MAX_AGE_H = 6.0
+HOUR_S = 3600
 # A running app-server daemon answers account/read with its own auth, so a token session must not attach to it.
 NO_DAEMON = "--no-daemon"
 ACCOUNT_ID_ENV = envs.CHATGPT_ACCOUNT_ID_ENV
@@ -141,13 +144,14 @@ def bearer_overrides() -> list[str]:
 
 
 def token_accounts(environ: Mapping[str, str]) -> list[CodexAccount]:
-    return [
-        CodexAccount(name.removeprefix(CODEX_TOKEN_PREFIX), name)
-        for name in sorted(environ)
+    names = [
+        name
+        for name in environ
         if name.startswith(CODEX_TOKEN_PREFIX)
         and name.removeprefix(CODEX_TOKEN_PREFIX) not in ("", API_ACCOUNT)
         and environ[name]
     ]
+    return [CodexAccount(name.removeprefix(CODEX_TOKEN_PREFIX), name) for name in operator_env.distinct(environ, names)]
 
 
 def _without_tokens(environ: Mapping[str, str]) -> dict[str, str]:
@@ -193,14 +197,39 @@ def quotas(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, Co
             return lambda session_id: True
         return lambda session_id: session_id in owner and owner[session_id] not in tokens
 
-    return {account.name: codex_quota.latest_codex_quota(dict(environ), keep(account)) for account in pool}
+    usage = codex_usage.cached()
+    readings = {account.name: codex_quota.latest_codex_quota(dict(environ), keep(account)) for account in pool}
+    return {name: _newest(found, usage.get(name)) for name, found in readings.items()}
 
 
-def account_cap(quota: CodexQuota | None, now: float) -> int | None:
-    """Live sessions under the session bands: the week alone sets it; None without a fresh reading."""
-    if quota is None or not session_bands.fresh(quota.observed_at, now):
+def _newest(found: CodexQuota | None, cached: CodexQuota | None) -> CodexQuota | None:
+    if found is None or cached is None:
+        return found or cached
+    return max(found, cached, key=lambda reading: reading.observed_at)
+
+
+def _reading_max_age(environ: Mapping[str, str]) -> float:
+    try:
+        return float(environ.get(READING_MAX_AGE_ENV) or READING_MAX_AGE_H) * HOUR_S
+    except ValueError:
+        return READING_MAX_AGE_H * HOUR_S
+
+
+def usable(quota: CodexQuota, now: float, environ: Mapping[str, str] | None = None) -> bool:
+    if session_bands.fresh(quota.observed_at, now):
+        return True
+    return now - quota.observed_at <= _reading_max_age(os.environ if environ is None else environ)
+
+
+def account_cap(quota: CodexQuota | None, now: float, environ: Mapping[str, str] | None = None) -> int | None:
+    """Live sessions under the session bands: the week alone sets it; None without a usable reading."""
+    if quota is None:
         return None
-    if quota.reached:
+    if quota.expired:
+        return 0
+    if not usable(quota, now, environ):
+        return None
+    if quota.reached and not codex_quota.passed(quota.seven_day, now):
         return 0
     return session_bands.week_cap(session_bands.left(quota.seven_day.used, quota.seven_day.resets_at, now))
 
@@ -214,10 +243,34 @@ def _thread(stdout: str) -> str:
     return ""
 
 
+def _default_token(environ: Mapping[str, str]) -> str | None:
+    try:
+        tokens = json.loads((codex_quota.codex_home(dict(environ)) / "auth.json").read_text()).get("tokens")
+    except (OSError, ValueError, AttributeError):
+        return None
+    found = tokens.get("access_token") if isinstance(tokens, dict) else None
+    return found if isinstance(found, str) else None
+
+
+def _bearer(account: CodexAccount, environ: Mapping[str, str]) -> tuple[str, str] | None:
+    if account.is_token:
+        token = environ[account.env_name] if credential_kind(account, environ) == OAUTH_KIND else None
+    else:
+        token = None if account.is_api else _default_token(environ)
+    claim = _chatgpt_account_id(_claims(token)) if token else ""
+    return (token, claim) if claim else None
+
+
 def probe(account: CodexAccount, environ: Mapping[str, str], run: Callable = subprocess.run) -> CodexQuota | None:
-    """A fresh reading from one tiny exec on the account, read from the rollout it writes."""
+    """A fresh reading: the free usage read for a ChatGPT token, else one tiny exec read from its rollout."""
     codex_bin = shutil.which(CODEX_BIN) or CODEX_BIN
     try:
+        bearer = _bearer(account, environ)
+        if bearer:
+            found = codex_usage.read(*bearer, time.time())
+            if found:
+                codex_usage.store(account.name, found)
+                return found
         account = credential(account, environ)
         done = run(
             command(account, codex_bin, PROBE_ARGS),
@@ -270,7 +323,11 @@ class CodexAccountSource:
         return () if self.run is None else (self.run,)
 
     def pool(self, environ: Mapping[str, str]) -> list[CodexAccount]:
-        return [account for account in routing_pool(environ, *self._run()) if not refusal(account, environ)]
+        return [
+            account
+            for account in accounts(environ, *self._run())
+            if account.signed_in and not refusal(account, environ)
+        ]
 
     def readings(
         self, pool: list[CodexAccount], environ: Mapping[str, str], now: float
@@ -317,6 +374,8 @@ def select(
     if route:
         for account in pool:
             if account.name == route:
+                if not account.signed_in:
+                    raise RoutingError(f"Codex account '{route}' is not signed in; run codex login")
                 return account, "forced", None
         available = ", ".join(account.name for account in pool)
         raise RoutingError(f"Codex account '{route}' not found; available: {available}")
@@ -401,7 +460,7 @@ def _route(environ: Mapping[str, str], route: str, run: Callable, exclude: str) 
     if route == API_ACCOUNT:
         return api_account(environ), "forced", sessions.get(API_ACCOUNT, 0), "?"
     source = CodexAccountSource(run, refresh=not route)
-    pool = routing_pool(environ, run) if route else source.pool(environ)
+    pool = accounts(environ, run) if route else source.pool(environ)
     pool = [account for account in pool if route or account.name != exclude]
     now = time.time()
     found = source.readings(pool, environ, now)
@@ -438,6 +497,7 @@ def main(
     report, args = _take(argv, "--agentihooks-report")
     route, args = _take(args, "--route")
     exclude, args = _take(args, "--agentihooks-exclude")
+    args = codex_sessions.resolve(args, _without_tokens(active))
     lock_path = Path(active.get("HOME", str(Path.home()))) / ".agentihooks" / "codex-route.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     # Held until exec: the descriptor is close-on-exec, so the next launch counts this one as a live session.
