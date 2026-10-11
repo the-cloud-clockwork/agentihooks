@@ -24,7 +24,8 @@ class SecretKeys:
                 flush=True,
             )
             return frozenset()
-        return frozenset(key for key in (secret or {}).get("data") or {} if KEY.fullmatch(key))
+        data = (secret or {}).get("data") or {}
+        return frozenset(key for key in data if KEY.fullmatch(key))
 
 
 class AccountRoute:

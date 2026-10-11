@@ -287,7 +287,7 @@ def test_a_pod_policy_that_names_a_provider_account_is_refused(tmp_path):
         deployed.Workers.from_environ(_workers(tmp_path, **{deployed.POLICY_ENV: str(path)}), SLUG)
 
     assert str(refused.value) == (
-        "the Pod policy must name no provider account: the approved accounts are the keys of Secret swarm-claude-creds"
+        "the Pod policy must name no provider account: the approved accounts are the keys of Secret swarm-claude-accounts"
     )
 
 

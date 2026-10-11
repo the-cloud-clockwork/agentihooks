@@ -10,13 +10,13 @@ from scripts.swarm_v2.accounts import AccountCapacity, fleet_held
 from scripts.swarm_v2.auth_context import Registration
 from scripts.swarm_v2.herdr.endpoints import Clients
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
-from scripts.swarm_v2.kubernetes.approved import AccountRoute, SecretKeys
+from scripts.swarm_v2.kubernetes.approved import INDEX, AccountRoute, SecretKeys
 from scripts.swarm_v2.kubernetes.client import ApiRefused, KubeHttp, PodApi, PodClient
 from scripts.swarm_v2.kubernetes.failures import AccountSlot, Recovery
 from scripts.swarm_v2.kubernetes.grants import PodGrants, Supervision
 from scripts.swarm_v2.kubernetes.prompts import TerminalPrompts
 from scripts.swarm_v2.kubernetes.runtime import KubernetesTransport
-from scripts.swarm_v2.kubernetes.spec import ACCOUNTS_OBJECT, PodSpecRefused, PodTemplate, load_policy
+from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, PodTemplate, load_policy
 from scripts.swarm_v2.kubernetes.terminal import Exposure, HostKeys, TerminalObjects, TerminalTemplate
 from scripts.swarm_v2.kubernetes.watch import OWNER_LABEL, CursorExpired, owner_for
 from scripts.swarm_v2.launch import DistributedLaunch, LaunchTerms
@@ -66,7 +66,7 @@ def pod_policy(path: str, slug: str) -> dict:
         raise WorkerSettingsRefused(f"the Pod policy owner must be {owner_for(slug)}")
     if policy["provider_accounts"]:
         raise WorkerSettingsRefused(
-            f"the Pod policy must name no provider account: the approved accounts are the keys of Secret {ACCOUNTS_OBJECT}"
+            f"the Pod policy must name no provider account: the approved accounts are the keys of Secret {INDEX}"
         )
     return policy
 
