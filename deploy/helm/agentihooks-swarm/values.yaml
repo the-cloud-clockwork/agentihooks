@@ -103,6 +103,8 @@ controller:
     failureThreshold: 3
   terminationGracePeriodSeconds: 30
   env: {}
+  # Secret env only the controller container reads, unlike secretEnv; optional: true lets it start before the Secret exists.
+  secretEnv: []
   resources:
     requests:
       cpu: 50m

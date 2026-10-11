@@ -220,12 +220,7 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
 
     workflow = yaml.safe_load((PROGRAM.parents[1] / ".github/workflows/test.yml").read_text())
     assert workflow["jobs"]["gate-required"]["steps"] == ci_reuse.gate_steps()
-    canonical = ci_reuse.reuse_job()
-    previous = ci_reuse.reuse_job()
-    [step] = [step for step in previous["steps"] if step.get("name") == FETCH]
-    assert step["run"].count("gh api --allow-escape-sequences ") == 1
-    step["run"] = step["run"].replace("gh api --allow-escape-sequences ", "gh api ")
-    assert workflow["jobs"]["reuse"] in (canonical, previous)
+    assert workflow["jobs"]["reuse"] == ci_reuse.reuse_job()
 
 
 @pytest.mark.parametrize("reuse_repo", ["dynamic"], indirect=True)

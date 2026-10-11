@@ -693,6 +693,34 @@ def test_the_worker_image_profiles_are_the_default_and_every_package_role():
     assert launch_module.worker_profiles() == {"default", "cicd", "dispatcher", "engineer", "master", "planner", "qa"}
 
 
+@pytest.mark.parametrize("profile", ["frontend", "engineer", "anton-base"])
+def test_a_tick_spawn_with_a_delivered_bundle_admits_a_bundle_profile(world, profile):
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+    name = world.store.next_name(SLUG, "eng")
+    request = SpawnRequest(config, "eng", name, {"id": "task", "seat": FIRST, "profile": profile})
+
+    world.launcher.from_tick(request, replace(world.terms, bundled=True), pod_target)
+
+    [sent] = world.runtime.requests
+    assert world.store.execution(SLUG, sent.task["execution_id"]).profile == profile
+
+
+@pytest.mark.parametrize("profile", ["_guards", "../engineer", "Frontend"])
+def test_a_tick_spawn_with_a_delivered_bundle_still_refuses_an_invalid_profile_name(world, profile):
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+    request = SpawnRequest(config, "eng", "e1", {"id": "task", "seat": FIRST, "profile": profile})
+    world.launcher.router = RuntimeRouter([world.runtime], placement=Placement(BACKEND))
+
+    outcome = world.launcher.from_tick(request, replace(world.terms, bundled=True), pod_target)
+
+    assert outcome.detail == f"profile {profile} is not shipped in the worker image"
+    assert world.runtime.requests == []
+
+
+def test_launch_terms_carry_no_bundle_unless_the_policy_delivers_one():
+    assert LaunchTerms(ACCOUNT, 1, TTL, (PROJECT,), "swarm", API).bundled is False
+
+
 def test_a_tick_spawn_without_a_swarm_api_address_is_refused_before_admission(world):
     request = SpawnRequest(SwarmConfig(SLUG, "agentihooks", 2, 0), "eng", "e1", {"id": "task", "seat": FIRST})
     world.launcher.router = RuntimeRouter([world.runtime], placement=Placement(BACKEND))

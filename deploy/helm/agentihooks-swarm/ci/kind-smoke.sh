@@ -5,6 +5,7 @@ cd "$(dirname "$0")/../../../.."
 chart=deploy/helm/agentihooks-swarm
 release=agentihooks-swarm
 image=local/agentihooks-swarm:dev
+bundle_image=local/agentihooks-bundle:fixture
 slug=kind-proof
 cluster="swarm-kind-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:8])')"
 ledger_pod="$release-ledger-0"
@@ -25,6 +26,21 @@ finish() {
 
 helm lint --strict "$chart"
 helm lint --strict "$chart" -f "$chart/ci/kind-values.yaml"
+secrets=(-f "$chart/ci/kind-values.yaml")
+helm template "$release" "$chart" "${secrets[@]}" | python3 tests/chart_secrets.py "$chart/ci/kind-values.yaml"
+planted="$(helm template "$release" "$chart" "${secrets[@]}" --set 'secretEnv[0].name=AGENTIHOOKS_WORKER_TERMINAL' \
+  --set 'secretEnv[0].secretName=swarm-worker-terminal' --set 'secretEnv[0].key=setting' \
+  | python3 tests/chart_secrets.py "$chart/ci/kind-values.yaml" 2>&1 >/dev/null || true)"
+if [[ $planted != *"StatefulSet $release-ledger container ledger references the controller only Secret swarm-worker-terminal"* ]]; then
+  printf 'the chart check did not flag a planted shared reference to the controller only Secret: %s\n' "$planted" >&2
+  exit 1
+fi
+planted="$(helm template "$release" "$chart" "${secrets[@]}" --set 'controller.secretEnv[0].optional=false' \
+  | python3 tests/chart_secrets.py "$chart/ci/kind-values.yaml" 2>&1 >/dev/null || true)"
+if [[ $planted != *"the controller container references swarm-worker-terminal as"* ]]; then
+  printf 'the chart check did not flag a required reference where the values say optional: %s\n' "$planted" >&2
+  exit 1
+fi
 digest="sha256:$(printf 'a%.0s' $(seq 64))"
 rendered="$(helm template "$release" "$chart" --set image.tag="dev@$digest")"
 if [[ $rendered != *":dev@$digest"* ]]; then
@@ -95,13 +111,17 @@ kubectl create serviceaccount swarm-worker --namespace swarm-pod-proof
 printf 'apiVersion: node.k8s.io/v1\nkind: RuntimeClass\nmetadata:\n  name: kata-fc\nhandler: kata-fc\n' | kubectl create -f -
 kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/pod-rendered.json
 kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/pod-rendered-wrong-probes.json
+kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/pod-rendered-bundle.json
 printf 'rendered execution Pods passed server side strict validation\n'
 kubectl create namespace swarm-workers
 kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/herdr-terminal-pod.json
 kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/herdr-terminal-objects.json
 printf 'worker terminal Pod, Secret, Service and NetworkPolicy passed server side strict validation\n'
 wait "$build"
+printf 'FROM %s\nCOPY . /\n' "$image" \
+  | docker build -q -t "$bundle_image" -f - tests/fixtures/swarm_v2/worker-bundle >/dev/null
 kind load docker-image "$image" --name "$cluster"
+kind load docker-image "$bundle_image" --name "$cluster"
 bash "$chart/ci/terminal-route-proof.sh" "$image"
 helm install "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m
 helm test "$release" --logs --timeout 2m
@@ -326,7 +346,16 @@ from scripts.swarm_v2.filesystem import LAYOUTS
 from scripts.swarm_v2.kubernetes.client import KubeHttp, PodClient
 from scripts.swarm_v2.kubernetes.grants import PodGrants, Supervision
 from scripts.swarm_v2.kubernetes.runtime import GENERATION_LABEL
-from scripts.swarm_v2.kubernetes.spec import ATTEMPTS, LAUNCH_DIR, LAUNCH_RECORD, launch_volume, pod_name
+from scripts.swarm_v2.kubernetes.spec import (
+    ATTEMPTS,
+    BUNDLE_CONTENT,
+    BUNDLE_DIR,
+    BUNDLE_VOLUME,
+    LAUNCH_DIR,
+    LAUNCH_RECORD,
+    launch_volume,
+    pod_name,
+)
 from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL, OWNER_LABEL, owner_for
 from scripts.swarm_v2.worker.start import TEMPLATES
 
@@ -349,73 +378,94 @@ token_file = Path(scratch.name) / "token"
 token_file.write_text(access["token"])
 server = f"https://{env['KUBERNETES_SERVICE_HOST']}:{env['KUBERNETES_SERVICE_PORT']}"
 api = PodClient(KubeHttp(server, token_file, ssl.create_default_context(cadata=access["ca"])), "default")
-target = {"pod_namespace": "default", "pod_name": "swarm-kind-grant"}
-record = AgentRecord(
-    store.next_name(slug, "eng"),
-    "eng",
-    "kind-grant",
-    seat=f"eng-2@{slug}",
-    runtime_backend=BACKEND,
-    runtime_target=target,
-    profile="engineer",
-)
-agent = probe.controller.admit(record, "")
-grant = probe.grants.issue(
-    slug, agent.execution_id, project_ids=["github.com/the-cloud-clockwork/agentihooks"], brain_id="swarm", account="kind"
-)
 seed = (
     "import os, profiles, shutil; from pathlib import Path; "
     f"shutil.copytree(Path(profiles.__file__).parent, {str(TEMPLATES)!r}, dirs_exist_ok=True); "
     f"shutil.copytree(Path(profiles.__file__).parent / 'package' / 'roles', {str(TEMPLATES)!r}, dirs_exist_ok=True); "
     f"Path({str(LAYOUTS[1])!r}).write_text(os.environ['LAYOUT'])"
 )
-name = pod_name(agent.execution_id)
-labels = {
-    OWNER_LABEL: owner_for(slug),
-    EXECUTION_LABEL: agent.execution_id,
-    GENERATION_LABEL: str(agent.generation),
-    "app.kubernetes.io/instance": env["RELEASE"],
-}
-api.create_pod({
-    "apiVersion": "v1",
-    "kind": "Pod",
-    "metadata": {"name": name, "namespace": "default", "labels": labels},
-    "spec": {
-        "restartPolicy": "Never",
-        "automountServiceAccountToken": False,
-        "securityContext": {"runAsNonRoot": True, "runAsUser": 10001, "runAsGroup": 10001, "fsGroup": 10001},
-        "initContainers": [{
-            "name": "templates",
-            "image": env["IMAGE"],
-            "imagePullPolicy": "Never",
-            "command": ["python", "-c", seed],
-            "env": [{"name": "LAYOUT", "value": env["LAYOUT"]}],
-            "volumeMounts": [
-                {"name": "templates", "mountPath": str(TEMPLATES.parent)},
-                {"name": "node", "mountPath": str(LAYOUTS[1].parent)},
+
+
+def launch(profile, seat):
+    target = {"pod_namespace": "default", "pod_name": f"swarm-kind-{profile}"}
+    record = AgentRecord(
+        store.next_name(slug, "eng"),
+        "eng",
+        f"kind-{profile}",
+        seat=f"{seat}@{slug}",
+        runtime_backend=BACKEND,
+        runtime_target=target,
+        profile=profile,
+    )
+    agent = probe.controller.admit(record, "")
+    grant = probe.grants.issue(
+        slug, agent.execution_id, project_ids=["github.com/the-cloud-clockwork/agentihooks"], brain_id="swarm", account="kind"
+    )
+    name = pod_name(agent.execution_id)
+    labels = {
+        OWNER_LABEL: owner_for(slug),
+        EXECUTION_LABEL: agent.execution_id,
+        GENERATION_LABEL: str(agent.generation),
+        "app.kubernetes.io/instance": env["RELEASE"],
+    }
+    api.create_pod({
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {"name": name, "namespace": "default", "labels": labels},
+        "spec": {
+            "restartPolicy": "Never",
+            "automountServiceAccountToken": False,
+            "securityContext": {"runAsNonRoot": True, "runAsUser": 10001, "runAsGroup": 10001, "fsGroup": 10001},
+            "initContainers": [{
+                "name": "templates",
+                "image": env["IMAGE"],
+                "imagePullPolicy": "Never",
+                "command": ["python", "-c", seed],
+                "env": [{"name": "LAYOUT", "value": env["LAYOUT"]}],
+                "volumeMounts": [
+                    {"name": "templates", "mountPath": str(TEMPLATES.parent)},
+                    {"name": "node", "mountPath": str(LAYOUTS[1].parent)},
+                ],
+            }, {
+                "name": BUNDLE_VOLUME,
+                "image": env["BUNDLE_IMAGE"],
+                "imagePullPolicy": "Never",
+                "command": ["cp", "-R", *BUNDLE_CONTENT, BUNDLE_DIR + "/"],
+                "volumeMounts": [{"name": BUNDLE_VOLUME, "mountPath": BUNDLE_DIR}],
+            }],
+            "containers": [{
+                "name": "worker",
+                "image": env["IMAGE"],
+                "imagePullPolicy": "Never",
+                "args": ["python", "-m", "scripts.swarm_v2.worker.start", f"{ATTEMPTS}/{agent.execution_id}", f"{LAUNCH_DIR}/{LAUNCH_RECORD}"],
+                "volumeMounts": [
+                    {"name": "launch", "mountPath": LAUNCH_DIR, "readOnly": True},
+                    {"name": "home", "mountPath": "/home/worker"},
+                    {"name": "templates", "mountPath": str(TEMPLATES.parent), "readOnly": True},
+                    {"name": "node", "mountPath": str(LAYOUTS[1].parent), "readOnly": True},
+                    {"name": BUNDLE_VOLUME, "mountPath": BUNDLE_DIR, "readOnly": True},
+                ],
+            }],
+            "volumes": [
+                launch_volume(agent.execution_id),
+                {"name": "home", "emptyDir": {}},
+                {"name": "templates", "emptyDir": {}},
+                {"name": "node", "emptyDir": {}},
+                {"name": BUNDLE_VOLUME, "emptyDir": {}},
             ],
-        }],
-        "containers": [{
-            "name": "worker",
-            "image": env["IMAGE"],
-            "imagePullPolicy": "Never",
-            "args": ["python", "-m", "scripts.swarm_v2.worker.start", f"{ATTEMPTS}/{agent.execution_id}", f"{LAUNCH_DIR}/{LAUNCH_RECORD}"],
-            "volumeMounts": [
-                {"name": "launch", "mountPath": LAUNCH_DIR, "readOnly": True},
-                {"name": "home", "mountPath": "/home/worker"},
-                {"name": "templates", "mountPath": str(TEMPLATES.parent), "readOnly": True},
-                {"name": "node", "mountPath": str(LAYOUTS[1].parent), "readOnly": True},
-            ],
-        }],
-        "volumes": [launch_volume(agent.execution_id), {"name": "home", "emptyDir": {}}, {"name": "templates", "emptyDir": {}}, {"name": "node", "emptyDir": {}}],
-    },
-})
-hand = PodGrants(api, slug, lambda token: probe.grants.verify(slug, token), Supervision("claude", None, env["CONTROL_URL"])).hand(agent, grant)
+        },
+    })
+    hand = PodGrants(api, slug, lambda token: probe.grants.verify(slug, token), Supervision("claude", None, env["CONTROL_URL"])).hand(agent, grant)
+    return {"pod": name, "profile": profile, "handed": hand.handed, "reason": hand.reason}
+
+
+launched = [launch("engineer", "eng-2"), launch("frontend", "eng-3")]
 scratch.cleanup()
-print(json.dumps({"pod": name, "handed": hand.handed, "reason": hand.reason}, sort_keys=True))
+for launched_pod in launched:
+    print(json.dumps(launched_pod, sort_keys=True))
 EOF
 )"
-handed="$(python3 - <<'EOF' | kubectl exec -i "deployment/$release-controller" -c controller -- env CONTROL_URL="http://$release-controller:8780" SLUG="$slug" RELEASE="$release" IMAGE="$image" LAYOUT="$(cat docker/swarm-node/layout.json)" python -c "$hand_grant"
+handed="$(python3 - <<'EOF' | kubectl exec -i "deployment/$release-controller" -c controller -- env CONTROL_URL="http://$release-controller:8780" SLUG="$slug" RELEASE="$release" IMAGE="$image" BUNDLE_IMAGE="$bundle_image" LAYOUT="$(cat docker/swarm-node/layout.json)" python -c "$hand_grant"
 import base64, json, subprocess
 
 
@@ -428,53 +478,62 @@ ca = run("kubectl", "config", "view", "--raw", "--minify", "-o", "jsonpath={.clu
 print(json.dumps({"token": token, "ca": base64.b64decode(ca).decode()}))
 EOF
 )"
-worker_pod="$(python3 -c 'import json, sys; print(json.loads(sys.argv[1].splitlines()[-1])["pod"])' "$handed")"
-if [[ $handed != *'"handed": true'* ]]; then
-  printf 'the controller did not hand the launch grant to the worker Pod: %s\n' "$handed" >&2
+declare -A chains=(
+  [engineer]='"chains": {"claude": ["anton-base", "package:engineer", "engineer", "brain"]}'
+  [frontend]='"chains": {"claude": ["anton-base", "package:engineer", "engineer", "frontend", "brain"]}'
+)
+launched="$(grep '^{"handed"' <<< "$handed" || true)"
+if [[ $(grep -c '"handed": true' <<< "$launched") != 2 ]]; then
+  printf 'the controller did not hand the launch grant to both worker Pods: %s\n' "$handed" >&2
   exit 1
 fi
-printf 'launch grant handed into the worker Pod launch ConfigMap: %s\n' "$handed"
-owner="$(kubectl get configmap "$worker_pod-launch" -o jsonpath='{.metadata.ownerReferences[0].kind}/{.metadata.ownerReferences[0].name} immutable={.immutable}')"
-if [[ $owner != "Pod/$worker_pod immutable=true" ]]; then
-  printf 'the launch ConfigMap is not an immutable object owned by its Pod: %s\n' "$owner" >&2
-  exit 1
-fi
-phase=""
-for _ in $(seq 120); do
-  phase="$(kubectl get pod "$worker_pod" -o jsonpath='{.status.phase}')"
-  [[ $phase == Succeeded || $phase == Failed ]] && break
-  sleep 1
-done
-supervised="$(kubectl logs "$worker_pod" || true)"
-exit_code="$(kubectl get pod "$worker_pod" -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}')"
-if [[ $phase != Succeeded && $phase != Failed ]] || [[ $exit_code == 64 ]] || grep -q '^ERROR .*refused' <<< "$supervised"; then
-  kubectl describe pod "$worker_pod"
-  kubectl logs "$worker_pod" -c templates || true
-  printf 'the worker Pod start step did not hand a prepared attempt to its supervisor (phase %s, exit %s): %s\n' "$phase" "$exit_code" "$supervised" >&2
-  exit 1
-fi
-execution="${worker_pod#swarm-}"
-prepared='{"worker_start": "prepared", "attempt": "'"$execution"'", "uid": 10001}'
-if [[ $supervised != *"$prepared"* || $supervised != *'"execution_id": "'"$execution"'"'* || $supervised != *'"supervisor_pid":'* ]]; then
-  printf 'the worker supervisor did not run against the registered authority: %s\n' "$supervised" >&2
-  exit 1
-fi
-printf 'the worker Pod start step registered, prepared its attempt and started its supervisor without refusal (exit %s): %s\n' "$exit_code" "$supervised"
-kubectl delete pod "$worker_pod" --wait --timeout 1m
-collected=""
-for _ in $(seq 60); do
-  remaining="$(kubectl get configmap "$worker_pod-launch" --ignore-not-found -o name)"
-  if [[ -z $remaining ]]; then
-    collected=yes
-    break
+while read -r line; do
+  worker_pod="$(python3 -c 'import json, sys; print(json.loads(sys.argv[1])["pod"])' "$line")"
+  profile="$(python3 -c 'import json, sys; print(json.loads(sys.argv[1])["profile"])' "$line")"
+  printf 'launch grant handed into the %s worker Pod launch ConfigMap: %s\n' "$profile" "$line"
+  owner="$(kubectl get configmap "$worker_pod-launch" -o jsonpath='{.metadata.ownerReferences[0].kind}/{.metadata.ownerReferences[0].name} immutable={.immutable}')"
+  if [[ $owner != "Pod/$worker_pod immutable=true" ]]; then
+    printf 'the launch ConfigMap is not an immutable object owned by its Pod: %s\n' "$owner" >&2
+    exit 1
   fi
-  sleep 1
-done
-if [[ -z $collected ]]; then
-  printf 'the launch ConfigMap outlived its Pod\n' >&2
-  exit 1
-fi
-printf 'the launch ConfigMap was collected with its Pod\n'
+  phase=""
+  for _ in $(seq 120); do
+    phase="$(kubectl get pod "$worker_pod" -o jsonpath='{.status.phase}')"
+    [[ $phase == Succeeded || $phase == Failed ]] && break
+    sleep 1
+  done
+  supervised="$(kubectl logs "$worker_pod" || true)"
+  exit_code="$(kubectl get pod "$worker_pod" -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}')"
+  if [[ $phase != Succeeded && $phase != Failed ]] || [[ $exit_code == 64 ]] || grep -q '^ERROR .*refused' <<< "$supervised"; then
+    kubectl describe pod "$worker_pod"
+    kubectl logs "$worker_pod" -c templates || true
+    kubectl logs "$worker_pod" -c bundle || true
+    printf 'the %s worker Pod start step did not hand a prepared attempt to its supervisor (phase %s, exit %s): %s\n' "$profile" "$phase" "$exit_code" "$supervised" >&2
+    exit 1
+  fi
+  execution="${worker_pod#swarm-}"
+  prepared='{"worker_start": "prepared", "attempt": "'"$execution"'", "uid": 10001, '"${chains[$profile]}"'}'
+  if [[ $supervised != *"$prepared"* || $supervised != *'"execution_id": "'"$execution"'"'* || $supervised != *'"supervisor_pid":'* ]]; then
+    printf 'the %s worker did not render its bundle chain and run its supervisor against the registered authority: %s\n' "$profile" "$supervised" >&2
+    exit 1
+  fi
+  printf 'the %s worker Pod rendered its bundle chain and started its supervisor without refusal (exit %s): %s\n' "$profile" "$exit_code" "$supervised"
+  kubectl delete pod "$worker_pod" --wait --timeout 1m
+  collected=""
+  for _ in $(seq 60); do
+    remaining="$(kubectl get configmap "$worker_pod-launch" --ignore-not-found -o name)"
+    if [[ -z $remaining ]]; then
+      collected=yes
+      break
+    fi
+    sleep 1
+  done
+  if [[ -z $collected ]]; then
+    printf 'the launch ConfigMap outlived its Pod\n' >&2
+    exit 1
+  fi
+  printf 'the launch ConfigMap was collected with its Pod\n'
+done <<< "$launched"
 
 node="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')"
 kubectl label node "$node" anton.io/capacity-type=spot --overwrite

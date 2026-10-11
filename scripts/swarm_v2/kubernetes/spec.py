@@ -24,6 +24,16 @@ ATTEMPTS = "/home/worker/attempts"
 LAUNCH_DIR = "/var/run/swarm/launch"
 LAUNCH_RECORD = "launch.json"
 ACCOUNTS_OBJECT = "swarm-claude-creds"
+BUNDLE_DIR = "/var/run/swarm/bundle"
+BUNDLE_VOLUME = "bundle"
+BUNDLE_MIB = 256
+BUNDLE_CONTENT = ("/bundle", "/linked", "/revision.json")
+HARDENED = {
+    "allowPrivilegeEscalation": False,
+    "privileged": False,
+    "readOnlyRootFilesystem": True,
+    "capabilities": {"drop": ["ALL"]},
+}
 WORKER_ID = 10001
 TMP_MIB = 1024
 PROBES = ("startup", "readiness", "liveness")
@@ -282,17 +292,13 @@ def _container(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
         "env": [_token(launch)]
         + ([{"name": "BRAIN_URL", "value": policy["brain_url"]}] if "brain_url" in policy else []),
         "resources": _resources(launch, profile["limits"]),
-        "securityContext": {
-            "allowPrivilegeEscalation": False,
-            "privileged": False,
-            "readOnlyRootFilesystem": True,
-            "capabilities": {"drop": ["ALL"]},
-        },
+        "securityContext": copy.deepcopy(HARDENED),
         "volumeMounts": [
             {"name": "home", "mountPath": "/home/worker"},
             {"name": "tmp", "mountPath": "/tmp"},  # NOSONAR: a Pod-private emptyDir, never the host /tmp
             {"name": "launch", "mountPath": LAUNCH_DIR, "readOnly": True},
             *_shared_mounts(policy, launch),
+            *([{"name": BUNDLE_VOLUME, "mountPath": BUNDLE_DIR, "readOnly": True}] if "bundle" in policy else []),
         ],
     }
     for mode in PROBES:
@@ -338,7 +344,25 @@ def _spec(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
         ],
         "runtimeClassName": policy["runtime_class_name"],
     }
+    if "bundle" in policy:
+        _deliver(body, policy["bundle"])
     return body
+
+
+def _deliver(body: dict, bundle: dict) -> None:
+    body["initContainers"] = [
+        {
+            "name": BUNDLE_VOLUME,
+            "image": f"{bundle['image_repository']}:{bundle['tag']}",
+            "imagePullPolicy": "Always",
+            "command": ["cp", "-R", *BUNDLE_CONTENT, BUNDLE_DIR + "/"],
+            "resources": {"requests": {"cpu": "100m", "memory": "64Mi"}, "limits": {"cpu": "500m", "memory": "128Mi"}},
+            "securityContext": copy.deepcopy(HARDENED),
+            "volumeMounts": [{"name": BUNDLE_VOLUME, "mountPath": BUNDLE_DIR}],
+        }
+    ]
+    body["imagePullSecrets"] = [{"name": bundle["pull_access"]}]
+    body["volumes"].append({"name": BUNDLE_VOLUME, "emptyDir": {"sizeLimit": f"{BUNDLE_MIB}Mi"}})
 
 
 class PodTemplate:

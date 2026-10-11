@@ -1,15 +1,19 @@
 import copy
 import hashlib
 import json
+import socket
 import subprocess
 import tempfile
 from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+from scripts.swarm_v2.herdr.attach import SSH, ClientHome, Terminal
 from scripts.swarm_v2.herdr.capabilities import Qualifier, machine_probe
 from scripts.swarm_v2.herdr.catalog import Catalog
-from scripts.swarm_v2.herdr.endpoints import Endpoint, EndpointRefused, operator_scope
+from scripts.swarm_v2.herdr.endpoints import Endpoint, EndpointRefused, TerminalAuthority, operator_scope
 from scripts.swarm_v2.herdr.reconcile import Record, Registrations, Report, Store
 from scripts.swarm_v2.operator_auth import OPERATOR
 from tests import sv2_hdr01_cases
@@ -465,3 +469,18 @@ def run_case(case: str) -> dict:
         "input_sha256": {name: hashlib.sha256((FIXTURES / name).read_bytes()).hexdigest() for name in INPUTS},
         "observed": observed,
     }
+
+
+HOST_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureHostKey"
+
+
+def client_terminal(root: Path, herdr: Herdr, namespace: str, addresses=("10.43.12.7",)) -> Terminal:
+    authority = TerminalAuthority(Ed25519PrivateKey.generate(), lambda: 1_800_000_000)
+
+    def lookup(host, port, type):
+        return [(socket.AF_INET, type, 6, "", (address, port)) for address in addresses]
+
+    def run(command: list[str]) -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess(command, 0, "", "") if command[0] == SSH else herdr(command)
+
+    return Terminal(ClientHome(root), authority, namespace, run, lookup)

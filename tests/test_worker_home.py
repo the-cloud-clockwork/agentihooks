@@ -880,6 +880,7 @@ def test_parser_defaults_and_types():
         "profile": [],
         "account": [],
         "endpoint": [],
+        "bundle": None,
     }
     args = parser.parse_args(
         ["bootstrap", "--attempt=a", "--root=/r", "--templates=/t", "--interpreter=/i", "--uid=5", "--gid=6"]
@@ -926,3 +927,65 @@ def test_cli_prints_the_record_as_sorted_indented_json(fixture, capsys):
     assert worker_home.main(argv) == 0
     record = json.loads((volume / "attempt-1" / worker_home.RECORD).read_text())
     assert capsys.readouterr().out == json.dumps({**record, "reused": False}, indent=2, sort_keys=True) + "\n"
+
+
+WORKER_BUNDLE = Path(__file__).resolve().parent / "fixtures" / "swarm_v2" / "worker-bundle"
+
+
+def test_a_bundle_request_renders_the_bundle_chain_global_layer_and_channels(fixture):
+    templates, volume = fixture
+    req = request(
+        templates,
+        volume,
+        profiles={"claude": "frontend"},
+        accounts={"claude": ACCOUNTS["claude"]},
+        bundle=WORKER_BUNDLE,
+    )
+
+    record = worker_home.bootstrap(req)
+
+    assert record["chains"] == {"claude": ["anton-base", "package:engineer", "engineer", "frontend", "brain"]}
+    home = volume / "attempt-1" / record["homes"]["claude"] / ".claude"
+    assert "Fixture bundle global persona" in (home / "CLAUDE.md").read_text()
+    assert (home / "rules" / "fixture-global-rule.md").is_file()
+    env = json.loads((home / "settings.json").read_text())["env"]
+    assert (env["FIXTURE_BUNDLE_GLOBAL"], env["FIXTURE_FRONTEND"]) == ("1", "1")
+    assert "brain" in env["AGENTIHOOKS_BASE_CHANNELS"].split(",")
+
+
+def test_the_request_document_names_the_delivered_bundle(fixture):
+    templates, volume = fixture
+
+    document = worker_home._document(request(templates, volume, bundle=WORKER_BUNDLE))
+
+    assert document["bundle"] == str(WORKER_BUNDLE)
+
+
+def test_a_bundle_link_escaping_the_bundle_fails_bootstrap(fixture, tmp_path):
+    templates, volume = fixture
+    bundle, outside = tmp_path / "bundle", tmp_path / "outside"
+    shutil.copytree(WORKER_BUNDLE, bundle)
+    outside.mkdir()
+    (bundle / "bundle" / ".claude" / "skills" / "escape").symlink_to(outside)
+
+    with pytest.raises(worker_home.BootstrapError) as error:
+        worker_home.bootstrap(
+            request(
+                templates,
+                volume,
+                profiles={"claude": "frontend"},
+                accounts={"claude": ACCOUNTS["claude"]},
+                bundle=bundle,
+            )
+        )
+
+    assert str(error.value) == f"profile escapes its template: {filesystem.BUNDLE}"
+
+
+def test_cli_passes_the_bundle_flag_to_bootstrap_as_a_path(monkeypatch, capsys):
+    requests = []
+    monkeypatch.setattr(worker_home, "bootstrap", lambda req: requests.append(req) or {})
+
+    assert worker_home.main(["bootstrap", "--attempt=a", "--bundle=/var/run/swarm/bundle"]) == 0
+
+    assert requests[0].bundle == Path("/var/run/swarm/bundle")

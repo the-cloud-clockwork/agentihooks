@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from scripts.swarm.store import RedisStore
+from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_v2.auth_context import Registration
 from scripts.swarm_v2.herdr import attach, endpoints
 from scripts.swarm_v2.herdr.attach import ClientHome, Terminal
@@ -20,6 +20,7 @@ from scripts.swarm_v2.herdr.endpoints import (
     TerminalAuthority,
     grant_scope,
 )
+from scripts.swarm_v2.herdr.upkeep import Attempt
 from scripts.swarm_v2.kubernetes import terminal
 from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused
 from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, PodTemplate, canonical_digest, load_policy
@@ -209,6 +210,42 @@ def test_host_keys_are_kept_per_swarm():
         "host_key_unrecorded",
         f"no host key was recorded at launch for {EXE_A}",
     )
+
+
+EXE_B = "exe-" + "b" * 32
+EXE_C = "exe-" + "c" * 32
+
+
+def occupant(execution_id: str, generation: int, backend: str = "kubernetes") -> AgentRecord:
+    return AgentRecord(
+        "eng-1", "eng", "task", execution_id=execution_id, generation=generation, runtime_backend=backend
+    )
+
+
+def test_attachable_attempts_are_kubernetes_occupants_at_their_recorded_generation():
+    keys = HostKeys(store())
+    keys.record(Scope("grant/x", "fixture-swarm", EXE_A, 2), "ssh-ed25519 AAAA-a")
+    keys.record(Scope("grant/y", "fixture-swarm", EXE_B, 1), "ssh-ed25519 AAAA-b")
+    keys.record(Scope("grant/z", "fixture-swarm", EXE_C, 1), "ssh-ed25519 AAAA-c")
+    keys.record(Scope("grant/w", "other", "exe-" + "d" * 32, 1), "ssh-ed25519 AAAA-d")
+    occupants = [
+        occupant(EXE_A, 2),
+        occupant(EXE_B, 2),
+        occupant(EXE_C, 1, "local"),
+        occupant("exe-" + "d" * 32, 1),
+        occupant("exe-" + "e" * 32, 1),
+    ]
+
+    assert keys.attempts("fixture-swarm", occupants, OPERATOR) == [
+        Attempt(Scope("operator/operator", "fixture-swarm", EXE_A, 2), "ssh-ed25519 AAAA-a")
+    ]
+
+
+def test_no_occupant_means_no_attachable_attempt():
+    keys = HostKeys(store())
+    keys.record(Scope("grant/x", "fixture-swarm", EXE_A, 2), "ssh-ed25519 AAAA-a")
+
+    assert keys.attempts("fixture-swarm", [], OPERATOR) == []
 
 
 class Worker:

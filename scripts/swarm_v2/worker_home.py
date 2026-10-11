@@ -13,16 +13,23 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from hooks.context.profile_chain import BUNDLE_PROFILES
 from scripts.swarm_v2 import filesystem
 
 TARGETS = ("claude", "codex")
 RECORD = "execution.json"
 PENDING = ".bootstrap-pending"
+CHAIN = ".render-chain"
 NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 VARIABLE = re.compile(r"[A-Z][A-Z0-9_]{0,127}")
 SYSTEM_ROOTS = (Path("/usr/bin"), Path("/bin"), Path("/usr/local/bin"))
 PROBE_SECONDS = 30
 SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*")
+BUNDLE_TREE = "bundle"
+LINKED = "linked"
+REVISION = "revision.json"
+COMMENT = "_comment"
+HEADERS = frozenset({"headers", "http_headers", "env_http_headers"})
 
 
 class BootstrapError(ValueError):
@@ -40,10 +47,11 @@ class Request:
     endpoints: dict[str, str]
     uid: int
     gid: int
+    bundle: Path | None = None
 
 
 def _document(request: Request) -> dict:
-    return {
+    document = {
         "attempt": request.attempt,
         "profiles": request.profiles,
         "interpreter": str(request.interpreter),
@@ -52,6 +60,28 @@ def _document(request: Request) -> dict:
         "uid": request.uid,
         "gid": request.gid,
     }
+    return document | ({"bundle": str(request.bundle)} if request.bundle else {})
+
+
+def folder(path: Path) -> bool:
+    return path.is_dir() and not path.is_symlink()
+
+
+def bundle_profiles(bundle: Path) -> Path:
+    return bundle / BUNDLE_TREE / BUNDLE_PROFILES
+
+
+def _from_bundle(request: Request, name: str) -> bool:
+    return request.bundle is not None and folder(bundle_profiles(request.bundle) / name)
+
+
+def _linked(bundle: Path) -> list[Path]:
+    root = bundle / LINKED
+    return sorted(path for path in root.iterdir() if folder(path)) if folder(root) else []
+
+
+def bundle_digest(bundle: Path) -> str:
+    return _tree_digest(bundle)
 
 
 def _check_profiles(request: Request) -> None:
@@ -62,8 +92,7 @@ def _check_profiles(request: Request) -> None:
             raise BootstrapError(f"unsupported target: {target}")
         if not NAME.fullmatch(name):
             raise BootstrapError(f"invalid profile name: {name}")
-        source = request.templates / name
-        if source.is_symlink() or not source.is_dir():
+        if not folder(request.templates / name) and not _from_bundle(request, name):
             raise BootstrapError(f"profile template not found: {name}")
     shared = request.templates / filesystem.SHARED
     if shared.is_symlink() or not shared.is_dir():
@@ -168,8 +197,13 @@ def _tree_digest(source: Path) -> str:
     return digest.hexdigest()
 
 
+def _templated(request: Request) -> list[str]:
+    return [name for name in sorted(set(request.profiles.values())) if not _from_bundle(request, name)]
+
+
 def _profile_digests(request: Request) -> dict[str, str]:
-    return {name: _tree_digest(request.templates / name) for name in sorted(set(request.profiles.values()))}
+    digests = {name: _tree_digest(request.templates / name) for name in _templated(request)}
+    return digests | ({filesystem.BUNDLE: bundle_digest(request.bundle)} if request.bundle is not None else {})
 
 
 def _digest(request: Request, profiles: dict[str, str]) -> str:
@@ -208,7 +242,8 @@ def render(execution: filesystem.Execution, target: str) -> None:
 
 
 def materialize(attempt: Path, target: str) -> None:
-    from scripts.profiles.render import _is_doc, _settings
+    from scripts.profiles import browser
+    from scripts.profiles.render import _bundle, _chain, _is_doc, _settings, claude_environment
     from scripts.swarm_v2 import broadcast_bridge
     from scripts.targets import get_adapter
     from scripts.targets._common import _install_module
@@ -216,11 +251,20 @@ def materialize(attempt: Path, target: str) -> None:
     _i = _install_module()
     request = json.loads(_text(attempt / PENDING))["request"]
     name = request["profiles"][target]
-    dirs = _i._resolve_profile_chain(name)
-    if not dirs or dirs[0][0] != name:
+    bundle = _bundle()
+    try:
+        dirs = _chain(name)
+    except ValueError:
+        dirs = []
+    names = [n for n, _ in dirs]
+    if name not in names:
         raise BootstrapError(f"profile did not resolve in the execution scope: {name}")
+    _write(attempt / f"{CHAIN}-{target}.json", _json(names))
+    roots = ([bundle] if bundle is not None else []) + [path for _, path in dirs]
     adapter = get_adapter(target)
-    native = _settings(target, None, dirs)
+    native = _settings(target, bundle, dirs)
+    if target == "claude":
+        claude_environment(native, dirs)
     native.setdefault("_agentihooks", {}).setdefault("env", {}).update(
         {**request["endpoints"], broadcast_bridge.GRANT_FILE: str(broadcast_bridge.grant_path(attempt))}
     )
@@ -232,21 +276,23 @@ def materialize(attempt: Path, target: str) -> None:
         ("rules", _is_doc),
     ):
         layers = [(subdir, _i.PACKAGE_FEATURES_DIR / subdir)]
-        layers += [(n, p / ".claude" / subdir) for n, p in dirs if (p / ".claude" / subdir).is_dir()]
+        layers += [(root.name, root / ".claude" / subdir) for root in roots if (root / ".claude" / subdir).is_dir()]
         adapter.install_features(subdir, layers, keep)
-    adapter.install_persona(dirs, [n for n, _ in dirs], None)
+    adapter.install_persona(dirs, names, bundle)
     adapter.register_hooks_utils(name)
-    for _, path in dirs:
-        layer = _i._native_layer_path(path, target, _i._NATIVE_MCP_NAME) or _i._native_layer_path(
-            path, "claude", _i._NATIVE_MCP_NAME
+    servers: dict = {}
+    for root in roots:
+        layer = _i._native_layer_path(root, target, _i._NATIVE_MCP_NAME) or _i._native_layer_path(
+            root, "claude", _i._NATIVE_MCP_NAME
         )
         if layer:
-            adapter.register_mcp(_i._load_native_layer(layer).get("mcpServers") or {})
+            servers.update(_i._load_native_layer(layer).get("mcpServers") or {})
+    adapter.register_mcp(browser.configure(servers, names))
 
 
 def _strings(value: object) -> list[str]:
     if isinstance(value, dict):
-        return [s for item in value.values() for s in _strings(item)]
+        return [s for key, item in value.items() if not str(key).startswith(COMMENT) for s in _strings(item)]
     if isinstance(value, list):
         return [s for item in value for s in _strings(item)]
     return [value] if isinstance(value, str) else []
@@ -256,7 +302,18 @@ def _claude_surfaces(home: Path) -> dict[str, list[str]]:
     settings = json.loads(_text(home / ".claude" / "settings.json"))
     servers = json.loads(_text(home / ".claude.json")).get("mcpServers")
     surfaces = {f"setting {key}": _strings(value) for key, value in settings.items() if key != "permissions"}
-    return surfaces | {"MCP server": _strings(servers)}
+    return surfaces | {"MCP server": _strings(_unheaded(servers))}
+
+
+def _unheaded(servers: object) -> object:
+    if not isinstance(servers, dict):
+        return servers
+    return {
+        name: {key: value for key, value in server.items() if key not in HEADERS}
+        if isinstance(server, dict)
+        else server
+        for name, server in servers.items()
+    }
 
 
 def _wrapper(text: str) -> tuple[list[str], list[str]]:
@@ -278,7 +335,7 @@ def _codex_surfaces(home: Path) -> dict[str, list[str]]:
     exports, commands = _wrapper(_text(codex / "agentihooks-hook.sh"))
     surfaces = {f"setting {key}": _strings(value) for key, value in config.items() if key != "mcp_servers"}
     return surfaces | {
-        "MCP server": _strings(config.get("mcp_servers")),
+        "MCP server": _strings(_unheaded(config.get("mcp_servers"))),
         "hook command": _strings(hooks) + commands,
         "environment value": exports,
     }
@@ -330,14 +387,20 @@ def _check_home(home: Path, target: str, roots: list[Path], owner: tuple[int, in
 
 def _seed(execution: filesystem.Execution, request: Request) -> None:
     linked = []
-    for name in sorted(set(request.profiles.values())):
+    for name in _templated(request):
         copy = filesystem.seed(execution, request.templates / name, name)
         linked.append({"name": name, "path": str(copy)})
     filesystem.seed(execution, request.templates / filesystem.SHARED, filesystem.SHARED)
+    state: dict = {}
+    if request.bundle is not None:
+        tree = filesystem.seed(execution, request.bundle / BUNDLE_TREE, filesystem.BUNDLE)
+        state["bundle"] = {"path": str(tree)}
+        for source in _linked(request.bundle):
+            linked.append({"name": source.name, "path": str(filesystem.seed(execution, source, source.name))})
     for target in request.profiles:
-        state = execution.path("home") / target / ".agentihooks"
-        state.mkdir(parents=True, mode=0o700)
-        _write(state / "state.json", _json({"linked_profiles": linked}))
+        home = execution.path("home") / target / ".agentihooks"
+        home.mkdir(parents=True, mode=0o700)
+        _write(home / "state.json", _json({**state, "linked_profiles": linked}))
 
 
 def _accepted(attempt: Path, digest: str) -> dict | None:
@@ -356,7 +419,7 @@ def _accepted(attempt: Path, digest: str) -> dict | None:
 
 
 def _record(request: Request, digest: str, profiles: dict[str, str], seconds: float, layout: filesystem.Layout) -> dict:
-    return {
+    record = {
         "schema_version": 1,
         "package": "SV2-IMG-02",
         "attempt": request.attempt,
@@ -370,6 +433,13 @@ def _record(request: Request, digest: str, profiles: dict[str, str], seconds: fl
         "worker_profile_materialization_seconds": round(seconds, 3),
         "layout": filesystem.mapping(layout),
     }
+    if request.bundle is not None:
+        revision = request.bundle / REVISION
+        record["bundle"] = {
+            "revision": json.loads(_text(revision)) if revision.is_file() else None,
+            "digest": bundle_digest(request.bundle),
+        }
+    return record
 
 
 def _materialize_attempt(request: Request, profiles: dict[str, str], roots: list[Path]) -> dict:
@@ -392,6 +462,7 @@ def _materialize_attempt(request: Request, profiles: dict[str, str], roots: list
         filesystem.remove(attempt)
         raise BootstrapError(str(error)) from error
     record = _record(request, digest, profiles, time.monotonic() - started, layout)
+    record["chains"] = {target: _chain_of(attempt, target) for target in request.profiles}
     staged = attempt / f"{RECORD}.tmp"
     _write(staged, _json(record))
     staged.replace(attempt / RECORD)
@@ -399,11 +470,20 @@ def _materialize_attempt(request: Request, profiles: dict[str, str], roots: list
     return {**record, "reused": False}
 
 
+def _chain_of(attempt: Path, target: str) -> list[str]:
+    path = attempt / f"{CHAIN}-{target}.json"
+    chain = json.loads(_text(path))
+    path.unlink()
+    return chain
+
+
 def bootstrap(request: Request) -> dict:
     _validate(request)
     _check_volume(request)
-    for name in set(request.profiles.values()):
+    for name in _templated(request):
         _check_template(request.templates / name, name)
+    if request.bundle is not None:
+        _check_template(request.bundle, filesystem.BUNDLE)
     roots = [request.root.resolve(), interpreter_prefix(request.interpreter), *code_roots(), *SYSTEM_ROOTS]
     profiles = _profile_digests(request)
     lock = os.open(request.root, os.O_RDONLY)
@@ -437,6 +517,7 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--profile", action="append", default=[])
     start.add_argument("--account", action="append", default=[])
     start.add_argument("--endpoint", action="append", default=[])
+    start.add_argument("--bundle", type=Path)
     child = commands.add_parser("render")
     child.add_argument("attempt", type=Path)
     child.add_argument("target", choices=TARGETS)
@@ -471,6 +552,7 @@ def main(argv: list[str] | None = None) -> int:
             endpoints=_pairs(args.endpoint, "--endpoint"),
             uid=args.uid,
             gid=args.gid,
+            bundle=args.bundle,
         )
         print(_json(bootstrap(request)), end="")
     except BootstrapError as error:

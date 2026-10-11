@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import serialization
 
-from scripts.swarm.store import RedisStore
+from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_v2.auth_context import Registration
 from scripts.swarm_v2.herdr import endpoints
 from scripts.swarm_v2.herdr.attach import Terminal
@@ -20,8 +20,10 @@ from scripts.swarm_v2.herdr.endpoints import (
     operator_scope,
 )
 from scripts.swarm_v2.herdr.reconcile import Report
+from scripts.swarm_v2.herdr.upkeep import Attempt
 from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused, PodApi
 from scripts.swarm_v2.kubernetes.spec import AdmittedLaunch, PodTemplate, Rendered, canonical_digest
+from scripts.swarm_v2.kubernetes.watch import BACKEND
 from scripts.swarm_v2.runtime.commands import Principal
 
 HOST_KEYS = "terminal-host-keys"
@@ -79,6 +81,14 @@ class HostKeys:
         raws = self.store.redis.hmget(self.store.key(swarm, HOST_KEYS), ids) if ids else []
         entries = [(ids[index], json.loads(raw)) for index, raw in enumerate(raws) if raw]
         return [Launched(execution_id, entry["generation"], entry["host_public"]) for execution_id, entry in entries]
+
+    def attempts(self, swarm: str, occupants: Iterable[AgentRecord], principal: Principal) -> list[Attempt]:
+        current = {agent.execution_id: agent.generation for agent in occupants if agent.runtime_backend == BACKEND}
+        return [
+            Attempt(operator_scope(principal, swarm, launched), launched.host_public)
+            for launched in self.attachable(swarm, current)
+            if launched.generation == current[launched.execution_id]
+        ]
 
 
 class TerminalObjects:

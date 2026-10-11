@@ -18,6 +18,7 @@ from scripts.swarm_v2.broadcast_bridge import API_URL, AUTHORIZATION, GRANT_NAME
 from scripts.swarm_v2.supervision import SCHEMA_VERSION, LaunchRefused, checked_authority
 
 TEMPLATES = Path("/opt/agentihooks/templates")
+BUNDLE = Path("/var/run/swarm/bundle")
 REGISTER = "/v2/executions/register"
 RECORD = "registration.json"
 BUSY = 503
@@ -45,7 +46,7 @@ def post(url: str, grant: str, body: dict) -> tuple[int, object]:
         return status, {}
 
 
-def _launch(path: Path, templates: Path) -> dict:
+def _launch(path: Path, templates: Path, bundle: Path | None) -> dict:
     try:
         spec = json.loads(path.read_text())
     except (OSError, ValueError):
@@ -56,18 +57,25 @@ def _launch(path: Path, templates: Path) -> dict:
     if spec.get("harness") not in worker_home.TARGETS:
         raise LaunchRefused("unsupported harness")
     _control_url(spec.get("control_url"))
-    _profile(spec.get("profile"), templates)
+    _profile(spec.get("profile"), templates, bundle)
     return spec
 
 
-def _profile(profile: object, templates: Path) -> None:
+def _profile(profile: object, templates: Path, bundle: Path | None) -> None:
     if not isinstance(profile, str) or not profile:
         raise LaunchRefused("launch record names no profile")
     if not worker_home.NAME.fullmatch(profile):
         raise LaunchRefused("launch record names an invalid profile")
-    template = templates / profile
-    if template.is_symlink() or not template.is_dir():
+    if worker_home.folder(templates / profile):
+        return
+    if bundle is None:
         raise LaunchRefused(f"profile {profile} is not shipped in the worker image")
+    if not worker_home.folder(worker_home.bundle_profiles(bundle) / profile):
+        raise LaunchRefused(f"profile {profile} is not shipped in the worker image or the bundle")
+
+
+def delivered(bundle: Path) -> Path | None:
+    return bundle if worker_home.folder(bundle / worker_home.BUNDLE_TREE) else None
 
 
 def _control_url(url: object) -> None:
@@ -123,14 +131,16 @@ def prepare(
     sleep: Callable[[float], None] = time.sleep,
     boot: Callable[[worker_home.Request], dict] = worker_home.bootstrap,
     templates: Path = TEMPLATES,
-) -> None:
-    spec = _launch(launch, templates)
+    bundle: Path = BUNDLE,
+) -> dict:
+    bundle = delivered(bundle)
+    spec = _launch(launch, templates, bundle)
     if attempt.name != spec["authority"]["execution_id"]:
         raise LaunchRefused("attempt folder does not name the launch execution")
     grant = _grant(launch.parent)
     authority = register(spec, grant, send, sleep)
     attempt.parent.mkdir(mode=0o700, exist_ok=True)
-    boot(
+    record = boot(
         worker_home.Request(
             attempt.parent,
             attempt.name,
@@ -141,10 +151,12 @@ def prepare(
             {API_URL: spec["control_url"]},
             os.getuid(),
             os.getgid(),
+            bundle,
         )
     )
     worker_home.store_grant(attempt, grant)
     _private(attempt / RECORD, authority)
+    return record
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -154,11 +166,12 @@ def main(argv: list[str] | None = None) -> int:
         return 64
     os.umask(0o077)
     try:
-        prepare(Path(args[0]), Path(args[1]))
+        record = prepare(Path(args[0]), Path(args[1])) or {}
     except (OSError, ValueError, KeyError, TypeError, SubprocessError) as refused:
         print(f"ERROR worker start refused: {refused}", file=sys.stderr)
         return 64
-    print(json.dumps({"worker_start": "prepared", "attempt": Path(args[0]).name, "uid": os.getuid()}))
+    chains = {"chains": record["chains"]} if record.get("chains") else {}
+    print(json.dumps({"worker_start": "prepared", "attempt": Path(args[0]).name, "uid": os.getuid(), **chains}))
     return supervision_runtime.main(args)
 
 

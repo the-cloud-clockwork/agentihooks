@@ -16,6 +16,7 @@ LAYOUTS = (
 ROOTS = ("home", "runtime", "checkout", "worktree", "spool", "scratch", "seed")
 SEGMENT = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 SHARED = "_guards"
+BUNDLE = "_bundle"
 SOCKET_BYTES = 107
 ARCHIVE_MEMBERS = 100_000
 ARCHIVE_BYTES = 8 * 2**30
@@ -136,7 +137,7 @@ def remove(tree: Path) -> None:
 
 
 def seed(execution: Execution, source: Path, name: str) -> Path:
-    if name != SHARED and not SEGMENT.fullmatch(name):
+    if name not in (SHARED, BUNDLE) and not SEGMENT.fullmatch(name):
         _refuse(f"invalid profile name: {name}")
     _links(source, source)
     copy = execution.path("seed") / name

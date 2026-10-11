@@ -14,6 +14,10 @@ from scripts.swarm_v2.api.server import serve
 from scripts.swarm_v2.auth_context import LaunchAuthority, LaunchKey
 from scripts.swarm_v2.authority import TaskAuthority
 from scripts.swarm_v2.controller import Controller
+from scripts.swarm_v2.herdr.attach import ClientHome
+from scripts.swarm_v2.herdr.capabilities import runner
+from scripts.swarm_v2.herdr.upkeep import Upkeep, switched_on
+from scripts.swarm_v2.kubernetes import operator_terminal
 from scripts.swarm_v2.kubernetes.watch import BACKEND
 from scripts.swarm_v2.reconciliation.accounts import Finding
 from scripts.swarm_v2.runtime.observe import Observer, Reading, Signal, Source, Thresholds
@@ -127,6 +131,18 @@ class ControlService:
             self.controller.release()
 
 
+def anton_client(environ: Mapping[str, str], slug: str, workers: deployed.Workers | None) -> Upkeep | None:
+    if workers is None or workers.terminal is None or not switched_on(environ):
+        return None
+    if not environ.get(operator_terminal.CA_KEY_ENV):
+        print(
+            f"controller: keeps no saved herdr machines for {slug}: {operator_terminal.CA_KEY_ENV} is unset", flush=True
+        )
+        return None
+    home = ClientHome(Path.home())
+    return Upkeep(operator_terminal.terminal(slug, environ, home, runner(home.environment(dict(environ)))))
+
+
 def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlService | None:
     port = environ.get(PORT_ENV)
     if not port:
@@ -147,6 +163,7 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
         transports,
         owner=owner,
     )
+    service.controller.terminals = anton_client(environ, slug, workers)
     service.listen = (HOST, int(port))
     if workers is not None:
         service.api_url = workers.terms.api_url

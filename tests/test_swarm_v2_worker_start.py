@@ -157,6 +157,128 @@ def test_an_engineer_launch_record_renders_the_engineer_profile_in_the_pod_home(
     assert (home / "skills" / "swarm-engineer" / "SKILL.md").is_file()
 
 
+BUNDLE = Path(__file__).parent / "fixtures" / "swarm_v2" / "worker-bundle"
+
+
+def bundled(tmp_path: Path, profile: str) -> tuple[dict, Path]:
+    attempt = tmp_path / "attempts" / EXECUTION
+    controller = Controller((200, ANSWER))
+    launch = material(tmp_path, {**RECORD, "profile": profile})
+
+    start.prepare(
+        attempt, launch, controller.send, controller.sleep, templates=image_templates(tmp_path), bundle=BUNDLE
+    )
+
+    record = json.loads((attempt / "execution.json").read_text())
+    return record, attempt / record["homes"]["claude"]
+
+
+@pytest.mark.parametrize(
+    ("profile", "chain"),
+    [
+        ("engineer", ["anton-base", "package:engineer", "engineer", "brain"]),
+        ("frontend", ["anton-base", "package:engineer", "engineer", "frontend", "brain"]),
+    ],
+)
+def test_a_bundle_seat_renders_the_local_overlay_chain_in_the_pod_home(tmp_path, profile, chain):
+    record, home = bundled(tmp_path, profile)
+
+    assert record["chains"] == {"claude": chain}
+    persona = (home / ".claude" / "CLAUDE.md").read_text()
+    for text in ("Fixture bundle global persona", "Fixture anton base persona", "# Role: Swarm Engineer"):
+        assert text in persona
+    assert "Fixture bundle engineer persona" in persona
+    assert "Fixture brain persona" in persona
+    assert ("Fixture bundle frontend persona" in persona) is (profile == "frontend")
+    rules = home / ".claude" / "rules"
+    for rule in ("fixture-global-rule.md", "fixture-base-rule.md", "engineer-role.md"):
+        assert (rules / rule).is_file()
+    assert (home / ".claude" / "skills" / "fixture-global-skill" / "SKILL.md").is_file()
+    settings = json.loads((home / ".claude" / "settings.json").read_text())
+    assert ("FIXTURE_FRONTEND" in settings["env"]) is (profile == "frontend")
+    assert "brain" in settings["env"]["AGENTIHOOKS_BASE_CHANNELS"].split(",")
+
+
+def test_a_bundle_seat_records_the_delivered_bundle_revision_and_digest(tmp_path):
+    record, _ = bundled(tmp_path, "frontend")
+
+    assert record["bundle"]["revision"] == json.loads((BUNDLE / "revision.json").read_text())
+    assert record["bundle"]["digest"] == worker_home.bundle_digest(BUNDLE)
+    assert "frontend" not in record["profile_digests"]
+
+
+def test_a_bundle_seat_runs_the_local_browser_server_and_keeps_its_header_references(tmp_path):
+    _, home = bundled(tmp_path, "engineer")
+
+    servers = json.loads((home / ".claude.json").read_text())["mcpServers"]
+    assert servers["playwright-cmd"]["command"] != "cmd.exe"
+    assert servers["gateway-tools"]["headers"] == {"Authorization": "Bearer ${MCP_KEY_FIXTURE}"}
+
+
+def test_a_profile_in_neither_the_image_nor_the_bundle_is_refused(tmp_path):
+    controller, boot = Controller((200, ANSWER)), Boot()
+    launch = material(tmp_path, {**RECORD, "profile": "designer"})
+
+    with pytest.raises(LaunchRefused) as refused:
+        start.prepare(
+            tmp_path / "attempts" / EXECUTION,
+            launch,
+            controller.send,
+            controller.sleep,
+            boot,
+            shipped(tmp_path),
+            BUNDLE,
+        )
+
+    assert str(refused.value) == "profile designer is not shipped in the worker image or the bundle"
+    assert boot.requests == []
+
+
+def test_a_bundle_profile_reaches_bootstrap_with_the_delivered_bundle(tmp_path):
+    controller = Controller((200, ANSWER))
+    launch = material(tmp_path, {**RECORD, "profile": "frontend"})
+    boot = Boot()
+
+    start.prepare(
+        tmp_path / "attempts" / EXECUTION, launch, controller.send, controller.sleep, boot, shipped(tmp_path), BUNDLE
+    )
+
+    [request] = boot.requests
+    assert (request.profiles, request.bundle) == ({"claude": "frontend"}, BUNDLE)
+
+
+def test_without_a_delivered_bundle_bootstrap_gets_none(tmp_path):
+    boot = prepare(tmp_path, material(tmp_path), Controller((200, ANSWER)))
+
+    assert boot.requests[0].bundle is None
+
+
+def test_the_public_image_ships_no_bundle_profile(tmp_path):
+    templates = image_templates(tmp_path)
+
+    assert sorted(p.name for p in (BUNDLE / "bundle" / "profiles").iterdir() if (templates / p.name).exists()) == [
+        "engineer"
+    ]
+    assert not (templates / "frontend").exists() and not (templates / "anton-base").exists()
+    assert (templates / "engineer" / "profile.yml").read_text() != (
+        BUNDLE / "bundle" / "profiles" / "engineer" / "profile.yml"
+    ).read_text()
+
+
+def test_the_public_image_copies_only_paths_of_this_repository():
+    root = Path(__file__).resolve().parents[1]
+    sources = [
+        word
+        for line in (root / "docker" / "swarm-node" / "Dockerfile").read_text().splitlines()
+        if line.split()[:1] == ["COPY"]
+        for word in line.split()[1:-1]
+        if not word.startswith("--")
+    ]
+
+    assert "profiles/" in sources
+    assert all((root / source).exists() and "bundle" not in source for source in sources)
+
+
 @pytest.mark.parametrize("role", ["engineer", "cicd", "planner", "qa", "master", "dispatcher"])
 def test_the_image_ships_every_role_profile_as_a_template(tmp_path, role):
     templates = image_templates(tmp_path)
@@ -521,6 +643,17 @@ def test_the_started_supervisor_loads_a_prepared_attempt_only_the_worker_can_rea
         assert stat.S_IMODE(path.stat().st_mode) == 0o600, path
     assert stat.S_IMODE(attempt.parent.stat().st_mode) == 0o700
     printed = {"worker_start": "prepared", "attempt": EXECUTION, "uid": os.getuid()}
+    assert capsys.readouterr().out == json.dumps(printed) + "\n"
+
+
+def test_the_start_prints_the_rendered_chain_when_bootstrap_names_one(monkeypatch, capsys):
+    chains = {"claude": ["anton-base", "package:engineer", "engineer", "frontend", "brain"]}
+    monkeypatch.setattr(start, "prepare", lambda attempt, launch: {"chains": chains})
+    monkeypatch.setattr(start.supervision_runtime, "main", lambda argv: 70)
+
+    assert start.main(["/home/worker/attempts/a", "/var/run/swarm/launch/launch.json"]) == 70
+
+    printed = {"worker_start": "prepared", "attempt": "a", "uid": os.getuid(), "chains": chains}
     assert capsys.readouterr().out == json.dumps(printed) + "\n"
 
 

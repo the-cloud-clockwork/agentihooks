@@ -8,13 +8,18 @@ import scripts.swarm.execution as execution
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2.controller import Controller
+from scripts.swarm_v2.herdr.endpoints import Endpoint, Scope
+from scripts.swarm_v2.herdr.upkeep import Attempt, Upkeep
 from scripts.swarm_v2.kubernetes import watch
+from scripts.swarm_v2.kubernetes.terminal import HostKeys
 from scripts.swarm_v2.reconciliation import accounts as reconciliation
 from scripts.swarm_v2.reconciliation.accounts import AccountReconciler
 from scripts.swarm_v2.runtime import observe
 from scripts.swarm_v2.runtime.operations import Observation, OperationRequest, Phase
+from tests import sv2_hdr03_cases
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+HOST_KEY = sv2_hdr03_cases.HOST_KEY
 
 
 class Transport:
@@ -836,3 +841,114 @@ def test_an_exit_observation_needs_the_controller_lease(accounts):
 
     assert accounts.rows() == before
     assert observer.get("fixture", lost.execution_id) == seen
+
+
+class Keeper:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, list]] = []
+
+    def start(self, attempts):
+        self.calls.append(("start", list(attempts)))
+
+    def change(self, attempts):
+        self.calls.append(("change", list(attempts)))
+
+    def herdr_registration_drift(self) -> int:
+        return 3
+
+
+def keeping(store, grant, terminals):
+    controller = Controller(store, "fixture", [Transport()], lambda: grant["allowed"])
+    controller.terminals = terminals
+    return controller
+
+
+def attachable(store, attempt) -> Attempt:
+    HostKeys(store).record(Scope("grant/x", "fixture", attempt.execution_id, attempt.generation), HOST_KEY)
+    return Attempt(Scope("operator/operator", "fixture", attempt.execution_id, attempt.generation), HOST_KEY)
+
+
+def test_a_starting_controller_reconciles_the_attachable_attempts(fixture):
+    store, (first, _second), _transport, _clock, grant = fixture
+    assert first.acquire()
+    wanted = attachable(store, first.admit(agent(store)))
+    assert first.release()
+    keeper = Keeper()
+
+    assert keeping(store, grant, keeper).acquire()
+
+    assert keeper.calls == [("start", [wanted])]
+
+
+def test_every_renewal_passes_the_attachable_attempts_for_change(fixture):
+    store, _controllers, _transport, _clock, grant = fixture
+    keeper = Keeper()
+    controller = keeping(store, grant, keeper)
+    assert controller.acquire()
+    wanted = attachable(store, controller.admit(agent(store)))
+
+    assert controller.renew()
+
+    assert keeper.calls == [("start", []), ("change", [wanted])]
+
+
+def test_a_controller_that_lost_its_lease_reconciles_nothing(fixture):
+    store, (first, _second), _transport, clock, grant = fixture
+    keeper = Keeper()
+    controller = keeping(store, grant, keeper)
+    assert controller.acquire()
+    clock[0] += lease.ttl_ms()
+    assert first.acquire()
+
+    assert not controller.renew()
+
+    assert keeper.calls == [("start", [])]
+
+
+def test_the_controller_reports_the_registration_drift(fixture):
+    store, (first, _second), _transport, _clock, grant = fixture
+
+    assert keeping(store, grant, Keeper()).herdr_registration_drift() == 3
+    assert first.herdr_registration_drift() is None
+    grant["allowed"] = False
+    with pytest.raises(SwarmError) as refused:
+        keeping(store, grant, Keeper()).herdr_registration_drift()
+    assert str(refused.value) == "a scoped controller grant is required"
+
+
+class ReadyHerdr(sv2_hdr03_cases.Herdr):
+    def __call__(self, command):
+        if command[:3] == ["herdr", "machine", "add"]:
+            self.ready.add(command[-1])
+        return super().__call__(command)
+
+
+def herdr_client(tmp_path):
+    herdr = ReadyHerdr([sv2_hdr03_cases.fixture()["manual"]], set())
+    return sv2_hdr03_cases.client_terminal(tmp_path / "client", herdr, "workers"), herdr
+
+
+def test_start_and_an_attempt_change_each_save_the_client_machines(fixture, tmp_path):
+    store, (first, _second), _transport, _clock, grant = fixture
+    terminal, herdr = herdr_client(tmp_path)
+    assert first.acquire()
+    one = first.admit(agent(store))
+    attachable(store, one)
+    assert first.release()
+    controller = keeping(store, grant, Upkeep(terminal))
+
+    assert controller.acquire()
+    assert sorted(terminal.registrations.store.load()) == [one.execution_id]
+    assert controller.herdr_registration_drift() == 1
+    target = {"pod_namespace": "workers", "pod_name": "attempt-two"}
+    two = controller.admit(replace(agent(store), seat="eng-2@fixture", runtime_target=target))
+    attachable(store, two)
+    assert controller.renew()
+
+    assert sorted(terminal.registrations.store.load()) == sorted([one.execution_id, two.execution_id])
+    assert [machine["label"] for machine in herdr.machines] == [
+        "devbox",
+        Endpoint(Scope("operator/operator", "fixture", one.execution_id, one.generation), "workers").name,
+        Endpoint(Scope("operator/operator", "fixture", two.execution_id, two.generation), "workers").name,
+    ]
+    assert controller.herdr_registration_drift() == 1

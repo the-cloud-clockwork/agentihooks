@@ -12,5 +12,11 @@ controller:
     timeoutSeconds: 5
     failureThreshold: 2
   terminationGracePeriodSeconds: 1
+  # Never created in kind; optional lets the controller start without it.
+  secretEnv:
+    - name: AGENTIHOOKS_WORKER_TERMINAL
+      secretName: swarm-worker-terminal
+      key: setting
+      optional: true
   env:
     AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "2"

@@ -795,6 +795,106 @@ def test_the_pod_and_its_launch_material_are_named_after_the_execution():
     }
 
 
+BUNDLE = {
+    "image_repository": "ghcr.io/fixture/agentihooks-bundle",
+    "tag": "dev",
+    "pull_access": "swarm-bundle-pull",
+}
+
+
+def bundled_pod(tmp_path) -> dict:
+    policy = load_policy(write(tmp_path, {**policy_doc(), "bundle": BUNDLE}))
+    return render(policy=policy)[1].pod
+
+
+def test_a_policy_bundle_is_copied_by_an_init_container_into_a_private_folder(tmp_path):
+    pod = bundled_pod(tmp_path)
+
+    [init] = pod["spec"]["initContainers"]
+    assert init["name"] == "bundle"
+    assert init["image"] == "ghcr.io/fixture/agentihooks-bundle:dev"
+    assert init["imagePullPolicy"] == "Always"
+    assert init["command"] == ["cp", "-R", "/bundle", "/linked", "/revision.json", spec.BUNDLE_DIR + "/"]
+    assert init["volumeMounts"] == [{"name": "bundle", "mountPath": spec.BUNDLE_DIR}]
+    assert init["securityContext"] == pod["spec"]["containers"][0]["securityContext"]
+    assert "env" not in init and "envFrom" not in init
+    assert {"name": "bundle", "emptyDir": {"sizeLimit": f"{spec.BUNDLE_MIB}Mi"}} in pod["spec"]["volumes"]
+
+
+def test_the_agent_reads_the_bundle_read_only_and_the_kubelet_pulls_it_with_the_policy_access(tmp_path):
+    pod = bundled_pod(tmp_path)
+
+    [agent] = pod["spec"]["containers"]
+    assert {"name": "bundle", "mountPath": spec.BUNDLE_DIR, "readOnly": True} in agent["volumeMounts"]
+    assert pod["spec"]["imagePullSecrets"] == [{"name": "swarm-bundle-pull"}]
+    assert spec.BUNDLE_DIR == "/var/run/swarm/bundle"
+
+
+def test_each_container_owns_its_hardened_security_context(tmp_path):
+    pod = bundled_pod(tmp_path)
+
+    for container in (*pod["spec"]["initContainers"], *pod["spec"]["containers"]):
+        container["securityContext"]["capabilities"]["drop"].append("NONE")
+
+    assert spec.HARDENED["capabilities"] == {"drop": ["ALL"]}
+
+
+def test_a_bundle_only_adds_its_init_container_folder_mount_and_pull_access(tmp_path):
+    bundled, plain = bundled_pod(tmp_path)["spec"], render()[1].pod["spec"]
+
+    def without(body: dict, *keys: str) -> dict:
+        return {key: value for key, value in body.items() if key not in keys}
+
+    def unbundled(items: list) -> list:
+        return [item for item in items if item["name"] != "bundle"]
+
+    assert without(bundled, "initContainers", "imagePullSecrets", "volumes", "containers") == without(
+        plain, "volumes", "containers"
+    )
+    assert unbundled(bundled["volumes"]) == plain["volumes"]
+    [agent], [base] = bundled["containers"], plain["containers"]
+    assert without(agent, "volumeMounts") == without(base, "volumeMounts")
+    assert unbundled(agent["volumeMounts"]) == base["volumeMounts"]
+
+
+def test_a_policy_without_a_bundle_renders_no_init_container_and_no_pull_access():
+    pod = render()[1].pod
+
+    assert "initContainers" not in pod["spec"] and "imagePullSecrets" not in pod["spec"]
+    assert all(volume["name"] != "bundle" for volume in pod["spec"]["volumes"])
+
+
+@pytest.mark.parametrize(
+    ("change", "where"),
+    [
+        ({"pull_access": "swarm-account-ncsmgma"}, "bundle/pull_access"),
+        ({"tag": "dev@sha256:" + "a" * 64}, "bundle/tag"),
+        ({"image_repository": "ghcr.io/fixture/bundle:dev"}, "bundle/image_repository"),
+        ({"extra": True}, "bundle"),
+    ],
+)
+def test_a_malformed_policy_bundle_is_refused(tmp_path, change, where):
+    with pytest.raises(PodSpecRefused) as refused:
+        load_policy(write(tmp_path, {**policy_doc(), "bundle": {**BUNDLE, **change}}))
+
+    assert str(refused.value).startswith(f"pod policy is invalid at {where}")
+
+
+@pytest.mark.parametrize("missing", sorted(BUNDLE))
+def test_a_policy_bundle_missing_a_field_is_refused(tmp_path, missing):
+    bundle = {key: value for key, value in BUNDLE.items() if key != missing}
+
+    with pytest.raises(PodSpecRefused, match="pod policy is invalid at bundle"):
+        load_policy(write(tmp_path, {**policy_doc(), "bundle": bundle}))
+
+
+def test_the_golden_bundled_pod_is_the_current_render():
+    policy = load_policy(FIXTURES / "pod-policy-bundle.json")
+
+    assert json.loads((FIXTURES / "pod-rendered-bundle.json").read_text()) == render(policy=policy)[1].pod
+    assert policy["bundle"] == BUNDLE
+
+
 @pytest.mark.parametrize("case", ["a", "b", "c"])
 def test_package_cases_match_their_committed_evidence(case):
     from tests.sv2_kub01_cases import run_case
