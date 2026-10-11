@@ -144,3 +144,21 @@ def test_threshold_boundaries_and_minimum_sample_counts():
     row.update(observations=10, turns=3)
     assert langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 3, limits) == 1
     assert len(standing.read(redis, "rig-grade-swarm")) == 1
+
+
+def test_unavailable_turn_latency_keeps_error_breaches_and_other_accounts():
+    from scripts.swarm import langfuse
+    from scripts.swarm.health import standing
+
+    redis, summary, bindings, limits = recorded_case()
+    langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 2000000, limits)
+    summary["agents"][0]["turn_latency_ms"]["p95"] = None
+    summary["agents"][0]["error_rate"] = 0.4
+    assert langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 2000001, limits) == 2
+    rows = standing.read(redis, "rig-grade-swarm")
+    assert "error rate 0.4" in rows["langfuse_account_nestorcoltathotmail_com"]["detail"]
+    assert "turn latency p95" in rows["langfuse_account_nestor_coltatthecloudclockwork_com"]["detail"]
+    summary["agents"][0]["error_rate"] = 0
+    before = rows["langfuse_account_nestorcoltathotmail_com"]
+    langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 2000002, limits)
+    assert standing.read(redis, "rig-grade-swarm")["langfuse_account_nestorcoltathotmail_com"] == before
