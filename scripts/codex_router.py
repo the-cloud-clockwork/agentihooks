@@ -345,6 +345,7 @@ def _spend_by(quota: CodexQuota, now: float) -> float | None:
 
 
 def child_environment(account: CodexAccount, environ: Mapping[str, str]) -> dict[str, str]:
+    environ = {name: value for name, value in environ.items() if name != INTERNAL_RUN}
     if account.is_api:
         return envs.codex_api_child(environ)
     child = _without_tokens(environ)

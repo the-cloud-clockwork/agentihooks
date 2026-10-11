@@ -5,9 +5,12 @@ import shutil
 import subprocess
 import time
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 
+from hooks.classifier import fallbacks
+from hooks.classifier.errors import BackendFailure
 from hooks.context import account_sessions
 from scripts import agents_quota, codex_quota, codex_router
 from scripts.claude_quota_balancer import QuotaWindow
@@ -378,15 +381,10 @@ def test_two_concurrent_exec_launches_land_on_two_accounts_and_an_ended_run_free
 
 
 def test_a_quota_probe_and_a_classifier_call_hold_no_account_slot(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-
-    from hooks.classifier import fallbacks
-    from hooks.classifier.errors import BackendFailure
-
-    launched = []
+    internal = []
 
     def run(argv, **kwargs):
-        launched.append((argv, kwargs["env"]))
+        internal.append((argv, kwargs["env"]))
         return subprocess.CompletedProcess(argv, 1, "", "")
 
     env = {"HOME": str(tmp_path), "AH_CX_TOKEN_alpha": _jwt("acct-a")}
@@ -394,9 +392,19 @@ def test_a_quota_probe_and_a_classifier_call_hold_no_account_slot(tmp_path, monk
     monkeypatch.setattr(fallbacks.subprocess, "run", run)
     with pytest.raises(BackendFailure):
         fallbacks._run(["codex", "--no-daemon", "exec", "ok"], SimpleNamespace(wire=dict), tmp_path)
+    assert len(internal) == 2
+    monkeypatch.setattr(codex_router, "_registry", dict)
+    routed = {}
+    inside = {**env, account_sessions.INTERNAL_RUN: "1"}
+
+    def launch(*args):
+        routed.update(argv=args[1], env=args[2])
+
+    def login(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 1, "", "")
+
+    assert codex_router.main(["--route", "alpha", "exec", "ok"], inside, launch, login) == 0
     root = tmp_path / "proc"
-    for pid, (argv, child) in enumerate(launched, start=800):
+    for pid, (argv, child) in enumerate([*internal, (routed["argv"], routed["env"])], start=800):
         _proc(root, pid, "codex", 1, argv, child)
-    _proc(root, 810, "codex", 1, ["codex", "--no-daemon", "exec", "ok"], {"AH_CX_TOKEN_alpha": "a"})
-    assert len(launched) == 2
     assert account_sessions.codex_sessions_by_account(root) == {"alpha": 1}

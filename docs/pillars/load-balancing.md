@@ -418,9 +418,10 @@ workspace access token per `AH_CX_TOKEN_<slug>`.
   An interactive session and a `codex exec` run each hold one slot until the
   process ends. The router's quota probes and classifier calls carry
   `AGENTIHOOKS_INTERNAL_RUN` and hold none, nor do `app-server` and
-  `mcp-server` processes. A Codex process whose
-  parent is a Codex process belongs to that session. A run started through a
-  shell, even inside a Codex session, holds its own slot.
+  `mcp-server` processes; a routed launch drops that marker from its child, so
+  it counts even when started inside one of them. A Codex process whose parent
+  is a Codex process belongs to that session. A run started through a shell,
+  even inside a Codex session, holds its own slot.
   Quota per account is the newest rate-limit event in the session logs the
   session registry attributes to it; a token with no session yet shows no quota
   and still routes.
