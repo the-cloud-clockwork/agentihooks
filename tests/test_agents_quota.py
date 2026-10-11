@@ -559,6 +559,45 @@ def test_codex_routing_left_is_the_week_whenever_the_week_is_known():
     assert (row.state, row.cap, row.routing_left) == ("STALE", None, 70.0)
 
 
+def test_current_lists_discovered_accounts_only_and_a_stale_reading_as_stale(monkeypatch):
+    from hooks.context import account_sessions
+
+    monkeypatch.setattr(agents_quota.time, "time", lambda: 20_000.0)
+    monkeypatch.setattr(agents_quota, "_codex", lambda now: [])
+    monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {})
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
+    old = ProbeResult("alpha", "allowed", "NORMAL", 70.0, QuotaWindow(20.0, 30_000), QuotaWindow(30.0, 90_000))
+    gone = ProbeResult("nctcc", "allowed", "NORMAL", 90.0, QuotaWindow(10.0, 30_000), QuotaWindow(10.0, 90_000))
+    fresh = ProbeResult("beta", "allowed", "NORMAL", 60.0, QuotaWindow(20.0, 19_000), QuotaWindow(40.0, 90_000))
+    observations = [(20_000.0 - 3 * 3600, old), (20_000.0 - 3 * 3600, gone)]
+    table = agents_quota.current_table(observations, [fresh], {"alpha", "beta"}, {}, False, "beta").splitlines()
+    assert [line.split()[2] for line in table[2:]] == ["beta", "alpha"]
+    assert table[2].split()[:11] == [
+        "1",
+        "claude",
+        "beta",
+        "(current)",
+        "subscription",
+        "NORMAL",
+        "0/6",
+        "-",
+        "6",
+        "60%",
+        "80%",
+    ]
+    assert table[2].split()[11] == "-"
+    assert table[3].split() == ["2", "claude", "alpha", "subscription", "STALE", "0/-", "-", "-", *["-"] * 5]
+    assert agents_quota.current_table([], [], {"alpha"}, {}, False, "") == ""
+
+
+def test_a_signed_out_login_has_no_routing_and_an_expired_one_no_five_hour_window():
+    week = codex_quota.CodexQuota(1000, "pro", QuotaWindow(20.0, 2000), QuotaWindow(30.0, 9000))
+    expired = codex_quota.CodexQuota(1000, "?", QuotaWindow(20.0, 2000), QuotaWindow(30.0, 9000), expired=True)
+    accounts = [CodexAccount("default", signed_in=False), CodexAccount("alpha", "AH_CX_TOKEN_alpha")]
+    rows = agents_quota.codex_rows(accounts, {"default": week, "alpha": expired}, {}, now=1000)
+    assert [(row.routing_left, row.five_hour_left) for row in rows] == [(None, 80.0), (None, None)]
+
+
 def test_a_reset_without_its_window_shows_a_dash():
     row = agents_quota.QuotaRow("codex", "alpha", "STALE", 0, None, None, 9000, "log", five_hour_resets_at=2000)
     assert agents_quota.render([row], now=1000).splitlines()[2].split()[-4:] == ["-", "-", "-", "-"]
