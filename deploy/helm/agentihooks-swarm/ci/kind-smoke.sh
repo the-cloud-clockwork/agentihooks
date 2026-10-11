@@ -12,7 +12,7 @@ ledger_pod="$release-ledger-0"
 controller=(-l "app.kubernetes.io/instance=$release,app.kubernetes.io/component=controller")
 ca_dir=""
 
-python3 "$chart/ci/kind-request-proof.py"
+python3 tests/kind_request.py
 
 finish() {
   status=$?

@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 
 def main() -> None:
-    script = Path(__file__).with_name("kind-smoke.sh").read_text()
+    script = (Path(__file__).resolve().parents[1] / "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh").read_text()
     embedded = script.split("python - <<'EOF'\n", 1)[1].split("\nEOF", 1)[0]
     tree = ast.parse(embedded)
     helper = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "send")
