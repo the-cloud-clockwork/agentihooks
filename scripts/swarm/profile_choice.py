@@ -47,17 +47,7 @@ def preferred(profile: str) -> tuple[str, ...]:
 def choose(
     slug: str, lane: str, lane_config: dict, task: dict, environ: dict, role_overlays: dict | None = None
 ) -> ProfileDecision:
-    pinned = lane_config.get("profile") or DEFAULT_PROFILES[lane]
-    if task.get("profile"):
-        decision = ProfileDecision(task["profile"], "task", "explicit task profile")
-    elif lane != CLASSIFIED_LANE or pinned != DEFAULT_PROFILES[lane]:
-        decision = ProfileDecision(pinned, "lane", f"{lane} lane")
-    elif needs_ci_push(task):
-        decision = ProfileDecision(
-            DEFAULT_PROFILES[CLASSIFIED_LANE], "proof contract", "proof needs a pushed CI run", anchors=anchors(task)
-        )
-    else:
-        decision = classify(slug, task, environ)
+    decision = pick(slug, lane, lane_config, task, environ)
     if not installed(decision.profile):
         raise ProfileUnresolved(
             f"task {task.get('id')} needs profile {decision.profile}, which is not installed: install it with "
@@ -67,6 +57,19 @@ def choose(
         return replace(decision, overlays=overlays.chosen(decision.profile, task, role_overlays or {}))
     except ValueError as exc:
         raise ProfileUnresolved(f"task {task.get('id')} overlays are refused: {exc}") from exc
+
+
+def pick(slug: str, lane: str, lane_config: dict, task: dict, environ: dict) -> ProfileDecision:
+    pinned = lane_config.get("profile") or DEFAULT_PROFILES[lane]
+    if task.get("profile"):
+        return ProfileDecision(task["profile"], "task", "explicit task profile")
+    if lane != CLASSIFIED_LANE or pinned != DEFAULT_PROFILES[lane]:
+        return ProfileDecision(pinned, "lane", f"{lane} lane")
+    if needs_ci_push(task):
+        return ProfileDecision(
+            DEFAULT_PROFILES[CLASSIFIED_LANE], "proof contract", "proof needs a pushed CI run", anchors=anchors(task)
+        )
+    return classify(slug, task, environ)
 
 
 def needs_ci_push(task: dict) -> bool:

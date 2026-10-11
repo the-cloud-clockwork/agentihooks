@@ -1,6 +1,7 @@
 """The capacity and registry given here must authorize with LaunchAuthority.verify, never register."""
 
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Callable
@@ -9,8 +10,8 @@ from pathlib import Path
 from typing import Protocol
 
 from hooks.context.profile_chain import PACKAGE_ROLES
+from scripts.swarm import profile_choice
 from scripts.swarm.store import AgentRecord, SwarmError
-from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm_v2 import broadcast_bridge
 from scripts.swarm_v2.accounts import AccountCapacity, Slot
 from scripts.swarm_v2.auth_context import LaunchAuthority
@@ -69,7 +70,7 @@ class Launch:
 
 def seat_profile(request: SpawnRequest) -> str:
     lane = request.config.lanes.get(request.lane, {})
-    return request.task.get("profile") or lane.get("profile") or DEFAULT_PROFILES[request.lane]
+    return profile_choice.pick(request.config.slug, request.lane, lane, request.task, dict(os.environ)).profile
 
 
 def worker_profiles() -> set[str]:
