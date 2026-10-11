@@ -1,20 +1,28 @@
 import json
+import socket
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from scripts.swarm_v2.herdr.upkeep import Attempt, Upkeep
 
 import scripts.swarm.execution as execution
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2.controller import Controller
+from scripts.swarm_v2.herdr.attach import ClientHome, Terminal
+from scripts.swarm_v2.herdr.endpoints import Scope, TerminalAuthority
 from scripts.swarm_v2.kubernetes import watch
+from scripts.swarm_v2.kubernetes.terminal import HostKeys
 from scripts.swarm_v2.reconciliation import accounts as reconciliation
 from scripts.swarm_v2.reconciliation.accounts import AccountReconciler
 from scripts.swarm_v2.runtime import observe
 from scripts.swarm_v2.runtime.operations import Observation, OperationRequest, Phase
+from tests import sv2_hdr03_cases
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+HOST_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureHostKey"
 
 
 class Transport:
@@ -836,3 +844,120 @@ def test_an_exit_observation_needs_the_controller_lease(accounts):
 
     assert accounts.rows() == before
     assert observer.get("fixture", lost.execution_id) == seen
+
+
+class Keeper:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, list]] = []
+
+    def start(self, attempts):
+        self.calls.append(("start", list(attempts)))
+
+    def change(self, attempts):
+        self.calls.append(("change", list(attempts)))
+
+    def herdr_registration_drift(self) -> int:
+        return 3
+
+
+def keeping(store, grant, terminals):
+    return Controller(store, "fixture", [Transport()], lambda: grant["allowed"], terminals=terminals)
+
+
+def attachable(store, attempt) -> Attempt:
+    HostKeys(store).record(Scope("grant/x", "fixture", attempt.execution_id, attempt.generation), HOST_KEY)
+    return Attempt(Scope("controller", "fixture", attempt.execution_id, attempt.generation), HOST_KEY)
+
+
+def test_a_starting_controller_reconciles_the_attachable_attempts(fixture):
+    store, (first, _second), _transport, _clock, grant = fixture
+    assert first.acquire()
+    wanted = attachable(store, first.admit(agent(store)))
+    assert first.release()
+    keeper = Keeper()
+
+    assert keeping(store, grant, keeper).acquire()
+
+    assert keeper.calls == [("start", [wanted])]
+
+
+def test_every_renewal_passes_the_attachable_attempts_for_change(fixture):
+    store, _controllers, _transport, _clock, grant = fixture
+    keeper = Keeper()
+    controller = keeping(store, grant, keeper)
+    assert controller.acquire()
+    wanted = attachable(store, controller.admit(agent(store)))
+
+    assert controller.renew()
+
+    assert keeper.calls == [("start", []), ("change", [wanted])]
+
+
+def test_a_controller_that_lost_its_lease_reconciles_nothing(fixture):
+    store, (first, _second), _transport, clock, grant = fixture
+    keeper = Keeper()
+    controller = keeping(store, grant, keeper)
+    assert controller.acquire()
+    clock[0] += lease.ttl_ms()
+    assert first.acquire()
+
+    assert not controller.renew()
+
+    assert keeper.calls == [("start", [])]
+
+
+def test_the_controller_reports_the_registration_drift(fixture):
+    store, (first, _second), _transport, _clock, grant = fixture
+
+    assert keeping(store, grant, Keeper()).herdr_registration_drift() == 3
+    assert first.herdr_registration_drift() == 0
+    grant["allowed"] = False
+    with pytest.raises(SwarmError, match="^a scoped controller grant is required$"):
+        keeping(store, grant, Keeper()).herdr_registration_drift()
+
+
+def herdr_client(tmp_path):
+    herdr = sv2_hdr03_cases.Herdr([sv2_hdr03_cases.fixture()["manual"]], set())
+    authority = TerminalAuthority(Ed25519PrivateKey.generate(), lambda: 1_800_000_000)
+
+    def lookup(host, port, type):  # noqa: A002
+        herdr.ready.add(f"ssh://{host}")
+        return [(socket.AF_INET, type, 6, "", ("10.43.12.7", port))]
+
+    return Terminal(ClientHome(tmp_path / "client"), authority, "workers", herdr, lookup), herdr
+
+
+def test_start_and_an_attempt_change_each_save_the_client_machines(fixture, tmp_path):
+    store, (first, _second), _transport, _clock, grant = fixture
+    terminal, herdr = herdr_client(tmp_path)
+    assert first.acquire()
+    one = first.admit(agent(store))
+    attachable(store, one)
+    assert first.release()
+    controller = keeping(store, grant, Upkeep(terminal, True))
+
+    assert controller.acquire()
+    assert sorted(terminal.registrations.store.load()) == [one.execution_id]
+    assert controller.herdr_registration_drift() == 1
+    two = controller.admit(agent(store))
+    attachable(store, two)
+    assert controller.renew()
+
+    assert sorted(terminal.registrations.store.load()) == sorted([one.execution_id, two.execution_id])
+    assert [machine["label"] for machine in herdr.machines][0] == "devbox"
+    assert len(herdr.machines) == 3
+    assert controller.herdr_registration_drift() == 1
+
+
+def test_switched_off_the_controller_leaves_the_client_machines_untouched(fixture, tmp_path):
+    store, _controllers, _transport, _clock, grant = fixture
+    terminal, herdr = herdr_client(tmp_path)
+    controller = keeping(store, grant, Upkeep(terminal, False))
+
+    assert controller.acquire()
+    attachable(store, controller.admit(agent(store)))
+    assert controller.renew()
+
+    assert herdr.commands == []
+    assert [machine["label"] for machine in herdr.machines] == ["devbox"]
+    assert controller.herdr_registration_drift() == 0
