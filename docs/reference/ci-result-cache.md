@@ -8,7 +8,7 @@ nav_order: 5
 
 One CI algorithm for every repo and workflow: a check whose real inputs did not change reuses its last green result, and a check that fails is retried in place a bounded number of times inside the same job. No run is ever restarted from zero because one test flaked.
 
-Status: slice 1 delivered ([#2516](https://github.com/the-cloud-clockwork/agentihooks/issues/2516), see [Slice 1 as delivered](#slice-1-as-delivered)); slices 2 to 7 are design. Issue [#2365](https://github.com/the-cloud-clockwork/agentihooks/issues/2365). Slices are listed in [Slices](#slices); each one is a separate pull request.
+Status: slices 1 to 3 delivered (see [Slice 1 as delivered](#slice-1-as-delivered), [Slice 2 as delivered](#slice-2-as-delivered) and [Slice 3 as delivered](#slice-3-as-delivered)); slices 4 to 7 are design. Issue [#2365](https://github.com/the-cloud-clockwork/agentihooks/issues/2365). Slices are listed in [Slices](#slices); each one is a separate pull request.
 
 ## Before numbers
 
@@ -158,3 +158,19 @@ The 10 queue failures counted above all ran on 2026-10-08 in the unit job's olde
 | [38108215538](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38108215538) | `unit` asks for a durations artifact that does not exist | 12 of 12 unit shards red in the download step after three `Artifact not found` attempts and two warnings; Run tests skipped |
 
 Cost: nothing when the first attempt succeeds; 30 s plus the attempts when an artifact is missing for good.
+
+## Slice 3 as delivered
+
+The `flake-budget` job runs on every dev push after `unit`. It restores the newest `flake-history-` cache, downloads the run's `flakes-3.*` reports and runs `python -m tests.flake_budget`. That keeps one line per test and run for every `flaky` outcome, folds parameters into the test function, drops lines older than seven days, and writes `flake-budget.json`: the count of flaky test ids in the window, the number this slice moves, and every test flaky in two or more separate runs. The job prints the count to its step summary, raises a `Flake budget` warning per test over budget, uploads the `flake-budget` artifact and saves the history under `flake-history-<run>-<attempt>`. A job that cannot count or publish is red.
+
+CI runners cannot reach the ledger, so the follow up is filed by the swarm's minute tick, beside the CI budget defects pass. `scripts.ci_budget.flakes.refresh` reads the newest dev `flake-budget` artifact every five minutes and adds one follow up per test over budget, in plain words naming the test, its folder and the number of runs. A test that has been raised is not raised again for seven days; a test still flaky twice in a later window gets a new follow up. A ledger that cannot be reached skips that test until the next pass.
+
+| Run | Plant: one test fails its first attempt | Result |
+|---|---|---|
+| [38122887391](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38122887391) | first run on a fresh history | no cache found; 1 flaky test id; nothing over budget; the tick pass filed nothing |
+| [38123717172](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38123717172) | second run | history restored from the first run; the planted test over budget with both run ids; the tick pass filed exactly one follow up on a scratch ledger |
+| [38124767888](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38124767888) | third run | the planted test listed with three runs; the tick pass filed nothing new; the ledger still held one follow up |
+
+The proof branch ran the job on dispatch instead of push; everything else is the delivered code.
+
+Known limits: two dev pushes whose `flake-budget` jobs overlap restore the same history, and the later save drops the earlier run's lines, so the count can undercount. A job concurrency group would instead cancel a pending dev push run, so it is not used. A follow up whose write lands but whose reply times out is filed again on the next pass.

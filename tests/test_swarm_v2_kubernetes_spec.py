@@ -327,8 +327,8 @@ REFUSALS = [
         "account",
     ),
     (
-        "provider account without an at sign",
-        lambda d: d.update(provider_account="claude-fixture"),
+        "provider account that is neither an email nor a secret key",
+        lambda d: d.update(provider_account="claude_fixture"),
         "launch provider_account is not a valid value",
         "identity",
     ),
@@ -563,6 +563,62 @@ def test_a_codex_launch_names_codex_in_its_probes_and_binds_its_own_provider_acc
             "valueFrom": {"secretKeyRef": {"name": "swarm-claude-creds", "key": "codex-fixtureatexample-com"}},
         }
     ]
+
+
+KEY = "claude-fixtureatexample-com"
+
+
+def keyed(*keys: str) -> PodTemplate:
+    policy = load_policy(POLICY)
+    policy["provider_accounts"] = []
+    return PodTemplate(policy, lambda: frozenset(keys))
+
+
+def test_a_launch_whose_account_key_the_shared_secret_holds_is_admitted():
+    doc = launch_doc()
+    doc["provider_account"] = KEY
+    rendered = keyed(KEY, "codex-fixtureatexample-com").render(doc)
+    assert rendered.pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == KEY
+    assert token_env(rendered.pod) == [TOKEN_ENV]
+
+
+def test_a_launch_whose_account_key_the_shared_secret_lacks_is_refused():
+    template = keyed("codex-fixtureatexample-com")
+    doc = launch_doc()
+    doc["provider_account"] = KEY
+    with pytest.raises(PodSpecRefused) as refused:
+        template.render(doc)
+    assert str(refused.value) == "launch provider_account is not an approved provider account"
+    assert refused.value.reason == "account"
+    assert template.pod_spec_validation_failures_total() == {"account": 1}
+
+
+def test_against_the_shared_secret_keys_an_account_email_is_never_approved():
+    with pytest.raises(PodSpecRefused) as refused:
+        keyed(KEY).render(launch_doc())
+    assert refused.value.reason == "account"
+
+
+def test_the_shared_secret_keys_are_read_again_at_each_render():
+    keys = {KEY}
+    policy = load_policy(POLICY)
+    template = PodTemplate(policy, lambda: frozenset(keys))
+    doc = launch_doc()
+    doc["provider_account"] = KEY
+    template.render(doc)
+    keys.clear()
+    with pytest.raises(PodSpecRefused) as refused:
+        template.render(doc)
+    assert refused.value.reason == "account"
+
+
+@pytest.mark.parametrize("account", ["Claude-fixtureatexample-com", "-claudeatexample-com", "a" * 64, "claude_at_x"])
+def test_an_account_that_is_neither_an_email_nor_a_secret_key_is_refused(account):
+    doc = launch_doc()
+    doc["provider_account"] = account
+    with pytest.raises(PodSpecRefused) as refused:
+        keyed(account).render(doc)
+    assert (str(refused.value), refused.value.reason) == ("launch provider_account is not a valid value", "identity")
 
 
 def test_a_probe_initial_delay_comes_from_the_policy():

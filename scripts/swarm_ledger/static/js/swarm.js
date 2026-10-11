@@ -103,19 +103,30 @@ function modelText(a) {
   return [model, a.effort].filter(Boolean).join(" ");
 }
 
+const TERMINAL_TONES = { live: "live", cached: "stalled", unverified: "unknown" };
+
+function terminalView(t, now) {
+  if (!t) return null;
+  if (t.state === "live" && t.live_at === t.checked_at && Math.abs(now - t.checked_at) <= t.fresh_ms) return { state: "live", detail: "" };
+  const reason = (t.reason || (t.live_at ? "stale" : "never live")).replace(/_/g, " ");
+  const detail = [t.live_at ? `live ${span(now - t.live_at)} ago` : "", reason].filter(Boolean).join(" · ");
+  return { state: t.live_at ? "cached" : "unverified", detail };
+}
+
 function agentRows(sw, now) {
   const agents = [...(sw.agents || [])].sort((x, y) => (y.lane === "master") - (x.lane === "master"));
   return agents.map((a) => {
     const master = a.lane === "master";
     return { name: a.name, master, gates: a.gates || [], lane: master ? "—" : a.lane, profile: a.profile || "—", overlays: (a.overlays || []).join(" · ") || "—", model: modelText(a) || "—", task: master ? "" : a.task || "",
       state: master && (a.status || "working") === "working" ? "live" : a.status || "working", promoted: !!a.promoted, age: a.started_at ? span(now - a.started_at) : "—",
-      finished: a.status === "finished", since: a.state_since || 0 };
+      finished: a.status === "finished", since: a.state_since || 0, terminal: terminalView((sw.terminals || {})[a.name], now) };
   });
 }
 
-function agentRow(a) {
+function agentRow(a, remote) {
   return withId(cells(idCell(a.name), a.lane, a.profile, a.overlays, a.model, a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
-    a.promoted ? h("span", { class: "sw-promoted" }, label(a.state), label("promoted")) : label(a.state), a.age, a.finished ? h("span") : agentActions(a)), `agent-${a.name}`);
+    a.promoted ? h("span", { class: "sw-promoted" }, label(a.state), label("promoted")) : label(a.state),
+    ...(remote ? [a.terminal ? h("span", {}, label(a.terminal.state, TERMINAL_TONES[a.terminal.state]), a.terminal.detail && ` ${a.terminal.detail}`) : "—"] : []), a.age, a.finished ? h("span") : agentActions(a)), `agent-${a.name}`);
 }
 
 function agentActions(a) {
@@ -280,6 +291,7 @@ export function renderSwarm(sw) {
   if ($("swarm").hidden) return renderStats();
   renderFreezes();
   if (!sw) {
+    terminalHead(false);
     $("swarm-agents").replaceChildren(emptyRow(9, "No agents running. Start the swarm to work the open tasks."));
     renderOverlays(sw);
     return;
@@ -304,11 +316,19 @@ export function renderSwarm(sw) {
   renderStats();
 }
 
+function terminalHead(remote) {
+  const head = $("agents-table").querySelector("thead tr"), found = head.querySelector("[data-terminal]");
+  if (remote && !found) head.children[6].after(h("th", { "data-terminal": "", text: "terminal" }));
+  if (!remote && found) found.remove();
+}
+
 function renderAgents(sw, now = Date.now()) {
   const agents = agentRows(sw, now), live = agents.filter((a) => !a.finished), finished = agents.filter((a) => a.finished).sort((x, y) => y.since - x.since);
   $("agents-count").textContent = finished.length ? `${live.length} live · ${finished.length} finished` : `${live.length} live`;
-  $("swarm-agents").replaceChildren(...(live.length ? live.map(agentRow) : [emptyRow(9, "No agents running. Start the swarm to work the open tasks.")]),
-    ...firstPage("agents", finished, (a) => `agent-${a.name}`).map(agentRow), moreRow("agents", finished.length, "more finished agents", 9, () => renderAgents(swarm)) || "");
+  const remote = Object.keys(sw.terminals || {}).length > 0, columns = remote ? 10 : 9, row = (a) => agentRow(a, remote);
+  terminalHead(remote);
+  $("swarm-agents").replaceChildren(...(live.length ? live.map(row) : [emptyRow(columns, "No agents running. Start the swarm to work the open tasks.")]),
+    ...firstPage("agents", finished, (a) => `agent-${a.name}`).map(row), moreRow("agents", finished.length, "more finished agents", columns, () => renderAgents(swarm)) || "");
 }
 
 function renderHealth(findings, now = Date.now()) {

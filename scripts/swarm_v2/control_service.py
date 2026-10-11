@@ -31,6 +31,7 @@ CREDENTIAL_ENV = "AGENTIHOOKS_CONTROLLER_CREDENTIAL"
 HOST = "0.0.0.0"
 MAX_PORT = 65535
 THREAD = "swarm-v2-api"
+VIEWS_THREAD = "swarm-v2-terminal-views"
 ISSUER = "controller"
 AUDIENCE = "workers"
 
@@ -83,6 +84,8 @@ class ControlService:
         self.runtime = None
         self.api_url = ""
         self.recover: Callable[[], dict[str, str]] | None = None
+        self.views: Callable[[], dict] | None = None
+        self.viewing: threading.Thread | None = None
 
     def start(self) -> bool:
         if not self.controller.acquire():
@@ -98,7 +101,14 @@ class ControlService:
         self.observe(lease.now_ms(store) / 1000 if now is None else now)
         if self.recover is not None:
             self.recover()
+        self._view()
         return True
+
+    def _view(self) -> None:
+        if self.views is None or (self.viewing is not None and self.viewing.is_alive()):
+            return
+        self.viewing = threading.Thread(target=self.views, name=VIEWS_THREAD, daemon=True)
+        self.viewing.start()
 
     def observe(self, now: float) -> list[Finding]:
         store, slug = self.controller.store, self.controller.slug
@@ -169,6 +179,8 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
         service.api_url = workers.terms.api_url
         service.runtime = deployed.tick_runtime(service, workers, environ)
         service.recover = deployed.recovery_pass(service, workers, transports[0].api)
+        if service.controller.terminals is not None:
+            service.views = deployed.terminal_views(service.controller, environ)
     try:
         service.start()
     except BaseException:

@@ -1,0 +1,20 @@
+{
+  "source": "SV2-HDR-05 fixture: two remote agents on the SV2-HDR-03 managed endpoints, one lost SSH path and one fully closed operator TUI on the Anton herdr client",
+  "agents": {
+    "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+      "name": "engineer@a1b2c3-0001",
+      "pid": 4101
+    },
+    "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {
+      "name": "engineer@a1b2c3-0002",
+      "pid": 4202
+    }
+  },
+  "lost": "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "replacement_conversation_id": "33333333-3333-4333-8333-333333333333",
+  "start_ms": 1790000000000,
+  "tick_ms": 10000,
+  "command_ms": 50,
+  "fresh_ms": 30000,
+  "ticks_while_closed": 3
+}

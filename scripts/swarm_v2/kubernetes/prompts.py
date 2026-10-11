@@ -19,6 +19,17 @@ def operation_id() -> str:
     return f"prompt-{uuid.uuid4().hex}"
 
 
+def agent_target(router: Router, agent: AgentRecord) -> tuple[Target, str]:
+    record = router.store.load().get(agent.execution_id)
+    if record is None or record.profile_id is None:
+        raise EndpointRefused("unregistered", f"{agent.execution_id} has no saved herdr machine")
+    server = Target(record.profile_id, record.session, f"{agent.execution_id}/{agent.generation}", "")
+    panes = router.agent_panes(server)
+    if len(panes) != 1:
+        raise EndpointRefused("agent_pane", f"{server.incarnation} lists {len(panes)} agent panes, not one")
+    return replace(server, pane_id=panes[0], conversation_id=agent.conversation_id), record.label
+
+
 class TerminalPrompts:
     """A remote agent is prompted only on the saved machine the controller registered for its execution and
     generation, in the one agent pane that machine's server lists."""
@@ -41,11 +52,4 @@ class TerminalPrompts:
         return Outcome(COMMAND, Status.OK, BACKEND, "accepted")
 
     def _target(self, agent: AgentRecord) -> Target:
-        record = self.router.store.load().get(agent.execution_id)
-        if record is None or record.profile_id is None:
-            raise EndpointRefused("unregistered", f"{agent.execution_id} has no saved herdr machine")
-        server = Target(record.profile_id, record.session, f"{agent.execution_id}/{agent.generation}", "")
-        panes = self.router.agent_panes(server)
-        if len(panes) != 1:
-            raise EndpointRefused("agent_pane", f"{server.incarnation} lists {len(panes)} agent panes, not one")
-        return replace(server, pane_id=panes[0], conversation_id=agent.conversation_id)
+        return agent_target(self.router, agent)[0]

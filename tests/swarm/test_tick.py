@@ -1137,6 +1137,16 @@ def test_the_tick_hands_the_ci_budget_pass_its_ledger(store, monkeypatch):
     assert [(args[0], args[3], args[4]) for args in seen] == [("sw", ledger, 1)]
 
 
+def test_the_tick_hands_the_flake_budget_pass_its_ledger(store, monkeypatch):
+    from scripts.ci_budget import flakes
+
+    seen = []
+    monkeypatch.setattr(flakes, "refresh", lambda *args: seen.append(args) or ["filed"])
+    ledger = tasks(("t1", "eng"))
+    assert "filed" in tick("sw", store, ledger, FakeRuntime(), 1)
+    assert [(args[0], args[3], args[4]) for args in seen] == [("sw", ledger, 1)]
+
+
 def test_an_operator_write_to_a_stopped_swarm_starts_its_master_and_no_engineers(store):
     from scripts.inbox.store import InboxStore
 

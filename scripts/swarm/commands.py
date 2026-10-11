@@ -9,6 +9,7 @@ from collections.abc import Callable
 from scripts.hive import registry
 from scripts.swarm import lease
 from scripts.swarm.store import RedisStore
+from scripts.swarm_v2.herdr import visibility
 
 
 def hive_id() -> str:
@@ -96,6 +97,7 @@ def view(store: RedisStore, slug: str) -> dict:
         **status,
         "config": {**status.get("config", config.__dict__), "state": config.state},
         "commands": rows(store, slug),
+        "terminals": visibility.read(store, slug, time.time_ns() // 1_000_000),
     }
 
 

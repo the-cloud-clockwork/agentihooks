@@ -103,6 +103,15 @@ class World:
     def hands(self):
         return {key: json.loads(raw) for key, raw in self.store.redis.hgetall(self.store.key(SLUG, HANDS)).items()}
 
+    def endings(self):
+        raw = self.store.redis.hgetall(self.store.key(SLUG, launch_module.ENDINGS))
+        return {key: json.loads(value) for key, value in raw.items()}
+
+    def tick(self, seat):
+        config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+        request = SpawnRequest(config, "eng", self.store.next_name(SLUG, "eng"), {"id": "task", "seat": seat})
+        return self.launcher.from_tick(request, self.terms, pod_target)
+
 
 @pytest.fixture
 def world(monkeypatch):
@@ -138,6 +147,7 @@ def test_the_runtime_request_carries_the_grant_the_execution_and_its_generation(
         "launch_grant": launch.grant,
         "execution_id": launch.agent.execution_id,
         "generation": 1,
+        "account": ACCOUNT,
         "endpoints": {"AGENTIHOOKS_SWARM_API_URL": API},
     }
     assert (request.lane, request.name) == ("eng", launch.agent.name)
@@ -221,7 +231,8 @@ def test_a_second_simultaneous_launch_on_a_full_account_is_refused(monkeypatch):
     [refused] = second
     assert refused.outcome == Outcome("spawn", Status.REFUSED, BACKEND, detail="account_full")
     assert refused.slot is None
-    assert world.grants.verify(SLUG, refused.grant).execution_id == refused.agent.execution_id
+    with pytest.raises(GrantRefused, match="^launch grant was revoked$"):
+        world.grants.verify(SLUG, refused.grant)
     assert [request.name for request in world.runtime.requests] == [first.agent.name]
     assert list(world.rows()) == [f"{SLUG}/{FIRST}"]
     assert world.capacity.account_reservation_conflicts_total() == 1
@@ -631,6 +642,131 @@ def test_a_launch_refused_on_a_full_account_hands_no_grant(world):
     assert len(world.homes.calls) == 1
 
 
+def test_a_launch_refused_on_a_full_account_withdraws_its_grant_and_ends_its_execution(world):
+    first = world.launch(FIRST)
+
+    refused = world.launch(SECOND)
+
+    with pytest.raises(GrantRefused) as revoked:
+        world.grants.verify(SLUG, refused.grant)
+    assert str(revoked.value) == "launch grant was revoked"
+    assert (launch_module.ENDED, launch_module.ENDINGS) == ("ended", "launch-endings")
+    assert refused.agent.state == "ended"
+    assert world.store.execution(SLUG, refused.agent.execution_id).state == "ended"
+    assert world.store.execution_occupants(SLUG)[SECOND].state == "ended"
+    assert world.store.execution(SLUG, first.agent.execution_id).state == "working"
+    assert world.endings() == {refused.agent.execution_id: {"reason": "account_full", "generation": 1}}
+    assert list(world.rows()) == [f"{SLUG}/{FIRST}"]
+
+
+def test_a_launch_that_reserves_its_slot_records_no_ending(world):
+    launch = world.launch(FIRST)
+
+    assert launch.agent.state == "working"
+    assert world.endings() == {}
+    assert world.grants.verify(SLUG, launch.grant).execution_id == launch.agent.execution_id
+
+
+def test_the_next_tick_places_a_task_whose_launch_found_its_account_full(world):
+    first = world.launch(FIRST)
+    world.launcher.registered(world.session(first), first.grant)
+    assert world.tick(SECOND) == Outcome("spawn", Status.REFUSED, BACKEND, None, "account_full")
+    ended = world.store.execution_occupants(SLUG)[SECOND]
+    world.launcher.exited(first.agent)
+
+    placed = world.tick(SECOND)
+
+    assert placed.ok
+    occupant = world.store.execution_occupants(SLUG)[SECOND]
+    assert occupant.execution_id != ended.execution_id
+    assert (occupant.generation, occupant.state, occupant.account) == (2, "working", ACCOUNT)
+    assert [slot.holder for slot in world.capacity.slots(ACCOUNT)] == [f"{SLUG}/{SECOND}"]
+
+
+def test_a_tick_never_replaces_a_seat_whose_execution_is_still_live(world):
+    assert world.tick(FIRST).ok
+
+    with pytest.raises(SwarmError) as conflict:
+        world.tick(FIRST)
+
+    assert str(conflict.value) == "replacement does not match the current execution"
+
+
+def test_a_launch_that_lost_its_lease_before_the_refusal_records_no_ending(world, monkeypatch):
+    def refuse(grant, cap, ttl_ms):
+        world.controller.release()
+        raise SwarmError("account_full")
+
+    monkeypatch.setattr(world.capacity, "reserve", refuse)
+
+    with pytest.raises(SwarmError):
+        world.launch(FIRST)
+
+    assert world.endings() == {}
+    assert world.store.execution_occupants(SLUG)[FIRST].state == "working"
+
+
+def test_a_full_account_launch_whose_withdraw_is_refused_still_ends_and_frees_the_seat(world, monkeypatch):
+    first = world.launch(FIRST)
+    world.launcher.registered(world.session(first), first.grant)
+
+    def refuse(slug, token):
+        raise GrantRefused("dependency_unavailable", "launch grants kept changing; the grant was not withdrawn")
+
+    monkeypatch.setattr(world.grants, "withdraw", refuse)
+
+    with pytest.raises(GrantRefused):
+        world.tick(SECOND)
+
+    ended = world.store.execution_occupants(SLUG)[SECOND]
+    assert ended.state == "ended"
+    assert world.endings() == {ended.execution_id: {"reason": "account_full", "generation": 1}}
+    world.launcher.exited(first.agent)
+    assert world.tick(SECOND).ok
+
+
+def test_a_full_account_launch_whose_state_write_fails_still_frees_the_seat(world, monkeypatch):
+    first = world.launch(FIRST)
+    world.launcher.registered(world.session(first), first.grant)
+    put_agent = world.store.put_agent
+
+    def lose(slug, agent):
+        raise SwarmError("execution history kept changing; update was not committed")
+
+    monkeypatch.setattr(world.store, "put_agent", lose)
+    with pytest.raises(SwarmError):
+        world.tick(SECOND)
+    monkeypatch.setattr(world.store, "put_agent", put_agent)
+
+    stuck = world.store.execution_occupants(SLUG)[SECOND]
+    assert stuck.state == "working"
+    assert world.endings() == {stuck.execution_id: {"reason": "account_full", "generation": 1}}
+    world.launcher.exited(first.agent)
+    assert world.tick(SECOND).ok
+    assert world.store.execution_occupants(SLUG)[SECOND].generation == 2
+
+
+def test_the_tick_runtime_places_a_task_again_once_its_full_account_frees(world):
+    first = world.launch(FIRST)
+    world.launcher.registered(world.session(first), first.grant)
+    runtime = routed(
+        {},
+        Herdr(),
+        kubernetes=world.runtime,
+        launch=partial(world.launcher.from_tick, terms=world.terms, target=pod_target),
+    )
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+    retry = world.store.next_name(SLUG, "eng")
+
+    with pytest.raises(SpawnError) as failed:
+        runtime.spawn(config, "eng", world.store.next_name(SLUG, "eng"), {"id": "task", "seat": SECOND})
+    assert (str(failed.value), failed.value.status) == ("account_full", Status.REFUSED)
+    world.launcher.exited(first.agent)
+
+    assert runtime.spawn(config, "eng", retry, {"id": "task", "seat": SECOND}) == f"placed-{retry}"
+    assert world.store.execution_occupants(SLUG)[SECOND].generation == 2
+
+
 def test_a_refused_launch_names_the_backend_its_spawn_was_placed_on(monkeypatch):
     world = World(monkeypatch, cap=0)
     world.launcher.router = RuntimeRouter([world.runtime], placement=Placement(BACKEND))
@@ -653,6 +789,45 @@ def test_a_tick_spawn_hands_the_worker_the_api_address_of_its_swarm_config(world
     agent = world.store.execution(SLUG, sent.task["execution_id"])
     assert (agent.name, agent.lane, agent.task, agent.seat, agent.account) == (name, "eng", "task", FIRST, ACCOUNT)
     assert (agent.runtime_backend, agent.runtime_target) == (BACKEND, pod_target(request))
+
+
+def test_a_tick_spawn_launches_on_the_account_its_route_chooses_for_the_launch_cap(world):
+    asked = []
+    world.launcher.accounts = lambda cap: asked.append(cap) or "routed-key"
+    name = world.store.next_name(SLUG, "eng")
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+    request = SpawnRequest(config, "eng", name, {"id": "task", "seat": FIRST})
+
+    outcome = world.launcher.from_tick(request, replace(world.terms, account="", cap=3), pod_target)
+
+    assert outcome == Outcome("spawn", Status.OK, BACKEND, f"placed-{name}")
+    assert asked == [3]
+    [sent] = world.runtime.requests
+    assert world.store.execution(SLUG, sent.task["execution_id"]).account == "routed-key"
+    assert world.grants.verify(SLUG, sent.task["launch_grant"]).account == "routed-key"
+
+
+def test_a_tick_spawn_whose_route_finds_no_account_is_refused_before_admission(world):
+    world.launcher.accounts = lambda cap: None
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+    request = SpawnRequest(config, "eng", "e1", {"id": "task", "seat": FIRST})
+
+    outcome = world.launcher.from_tick(request, world.terms, pod_target)
+
+    assert outcome == Outcome("spawn", Status.REFUSED, BACKEND, None, launch_module.NO_ACCOUNT)
+    assert launch_module.NO_ACCOUNT == "no approved account has quota and a free launch slot"
+    assert world.runtime.requests == []
+    assert world.store.executions(SLUG, FIRST) == []
+
+
+def test_a_launcher_built_without_a_route_keeps_the_account_of_its_terms(world):
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+    request = SpawnRequest(config, "eng", world.store.next_name(SLUG, "eng"), {"id": "task", "seat": FIRST})
+
+    world.launcher.from_tick(request, world.terms, pod_target)
+
+    [sent] = world.runtime.requests
+    assert world.store.execution(SLUG, sent.task["execution_id"]).account == ACCOUNT
 
 
 @pytest.mark.parametrize(

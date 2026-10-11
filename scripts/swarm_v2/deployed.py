@@ -6,10 +6,14 @@ from typing import TYPE_CHECKING
 
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2 import image_tag
-from scripts.swarm_v2.accounts import AccountCapacity
+from scripts.swarm_v2.accounts import AccountCapacity, fleet_held
 from scripts.swarm_v2.auth_context import Registration
+from scripts.swarm_v2.herdr.capabilities import Qualifier, machine_probe
 from scripts.swarm_v2.herdr.endpoints import Clients
+from scripts.swarm_v2.herdr.target import DELIVERIES, Router
+from scripts.swarm_v2.herdr.viewer import Viewer
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
+from scripts.swarm_v2.kubernetes.approved import INDEX, AccountRoute, SecretKeys
 from scripts.swarm_v2.kubernetes.client import ApiRefused, KubeHttp, PodApi, PodClient
 from scripts.swarm_v2.kubernetes.failures import AccountSlot, Recovery
 from scripts.swarm_v2.kubernetes.grants import PodGrants, Supervision
@@ -17,8 +21,11 @@ from scripts.swarm_v2.kubernetes.prompts import TerminalPrompts
 from scripts.swarm_v2.kubernetes.runtime import KubernetesTransport
 from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, PodTemplate, load_policy
 from scripts.swarm_v2.kubernetes.terminal import Exposure, HostKeys, TerminalObjects, TerminalTemplate
+from scripts.swarm_v2.kubernetes.terminal_views import TerminalViews
 from scripts.swarm_v2.kubernetes.watch import OWNER_LABEL, CursorExpired, owner_for
 from scripts.swarm_v2.launch import DistributedLaunch, LaunchTerms
+from scripts.swarm_v2.operator_auth import OPERATOR
+from scripts.swarm_v2.quota import QuotaObservations
 from scripts.swarm_v2.registry import FleetRegistry
 from scripts.swarm_v2.runtime.base import SpawnRequest
 from scripts.swarm_v2.runtime.routed import RoutedRuntime, routed
@@ -26,18 +33,19 @@ from scripts.swarm_v2.runtime.routed import RoutedRuntime, routed
 if TYPE_CHECKING:
     from scripts.swarm_v2.auth_context import LaunchAuthority
     from scripts.swarm_v2.control_service import ControlService
+    from scripts.swarm_v2.controller import Controller
 
 API_URL_ENV = "AGENTIHOOKS_CONTROL_API_URL"
 POLICY_ENV = "AGENTIHOOKS_POD_POLICY_FILE"
 IMAGE_TAG_ENV = "AGENTIHOOKS_WORKER_IMAGE_TAG"
 PROFILE_ENV = "AGENTIHOOKS_WORKER_PROFILE"
-ACCOUNT_ENV = "AGENTIHOOKS_LAUNCH_ACCOUNT"
 CAP_ENV = "AGENTIHOOKS_LAUNCH_CAP"
 PROJECTS_ENV = "AGENTIHOOKS_LAUNCH_PROJECTS"
 BRAIN_ENV = "AGENTIHOOKS_LAUNCH_BRAIN"
 EXPORTER_ENV = "AGENTIHOOKS_WORKER_EXPORTER"
 TERMINAL_ENV = "AGENTIHOOKS_WORKER_TERMINAL"
-REQUIRED = (POLICY_ENV, IMAGE_TAG_ENV, PROFILE_ENV, ACCOUNT_ENV, CAP_ENV, PROJECTS_ENV, BRAIN_ENV)
+AGGREGATION_ENV = "AGENTIHOOKS_TERMINAL_AGGREGATION"
+REQUIRED = (POLICY_ENV, IMAGE_TAG_ENV, PROFILE_ENV, CAP_ENV, PROJECTS_ENV, BRAIN_ENV)
 RESERVATION_MS = 300_000
 HARNESS = "claude"
 
@@ -63,6 +71,10 @@ def pod_policy(path: str, slug: str) -> dict:
         raise WorkerSettingsRefused(str(refused)) from None
     if policy["owner"] != owner_for(slug):
         raise WorkerSettingsRefused(f"the Pod policy owner must be {owner_for(slug)}")
+    if policy["provider_accounts"]:
+        raise WorkerSettingsRefused(
+            f"the Pod policy must name no provider account: the approved accounts are the keys of Secret {INDEX}"
+        )
     return policy
 
 
@@ -118,9 +130,7 @@ class Workers:
         projects = tuple(project.strip() for project in environ[PROJECTS_ENV].split(",") if project.strip())
         if not projects:
             raise WorkerSettingsRefused(f"{PROJECTS_ENV} names no project")
-        terms = LaunchTerms(
-            environ[ACCOUNT_ENV], int(cap), RESERVATION_MS, projects, environ[BRAIN_ENV], api_url, "bundle" in policy
-        )
+        terms = LaunchTerms("", int(cap), RESERVATION_MS, projects, environ[BRAIN_ENV], api_url, "bundle" in policy)
         exporter, terminal = _exporter(environ.get(EXPORTER_ENV)), _terminal(environ.get(TERMINAL_ENV))
         return cls(terms, policy, environ[IMAGE_TAG_ENV], profile, exporter, terminal)
 
@@ -138,7 +148,7 @@ class Workers:
             "profile": self.profile,
             "memory_mib": limits["memory_mib"],
             "cpu_millis": limits["cpu_millis"],
-            "provider_account": self.terms.account,
+            "provider_account": task["account"],
             "task_payload": {
                 "task_id": task["id"],
                 "lane": request.lane,
@@ -151,9 +161,10 @@ class Workers:
         return {"pod_namespace": self.policy["namespace"], "pod_name": f"swarm-{request.task['id']}"}
 
     def transport(self, environ: Mapping[str, str], slug: str) -> KubernetesTransport:
-        template = PodTemplate(self.policy)
+        api = pod_api(environ, self.policy["namespace"])
+        template = PodTemplate(self.policy, SecretKeys(api))
         mounted = template if self.terminal is None else TerminalTemplate(template)
-        return KubernetesTransport(pod_api(environ, self.policy["namespace"]), slug, mounted)
+        return KubernetesTransport(api, slug, mounted)
 
     def grants(
         self, environ: Mapping[str, str], slug: str, verify: Callable[[str], Registration], store: RedisStore
@@ -175,6 +186,9 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
     launcher = DistributedLaunch(
         controller, grants, capacity, fleet, None, workers.grants(environ, slug, verify, controller.store)
     )
+    keys = SecretKeys(pod_api(environ, workers.policy["namespace"]))
+    route = AccountRoute(keys, QuotaObservations(controller.store, slug, verify), partial(_held, capacity), HARNESS)
+    launcher.accounts = route.choose
     prompts = None if controller.terminals is None else TerminalPrompts(controller.terminals.terminal.router())
     kubernetes = KubernetesRuntime(controller.execute, workers.launch, prompts)
     runtime = routed(
@@ -182,6 +196,20 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
     )
     launcher.router = runtime.router
     return runtime
+
+
+def terminal_views(controller: "Controller", environ: Mapping[str, str]) -> TerminalViews:
+    terminal = controller.terminals.terminal
+    registrations, journal = terminal.registrations, terminal.home.terminals / DELIVERIES
+    qualifier = Qualifier(machine_probe(terminal.run))
+    router = Router(registrations.store, registrations.catalog, qualifier, terminal.run, journal, mutations=False)
+    aggregation = environ.get(AGGREGATION_ENV) != "off"
+    viewer = Viewer(router, terminal.run, OPERATOR, aggregation=aggregation)
+    return TerminalViews(controller.store, controller.slug, viewer)
+
+
+def _held(capacity: AccountCapacity) -> dict[str, int]:
+    return fleet_held(capacity.store, capacity.clock())
 
 
 class GrantRelease:

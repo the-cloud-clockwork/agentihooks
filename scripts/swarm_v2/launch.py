@@ -24,8 +24,12 @@ GRANT_SECONDS = 30
 NO_API_URL = "the swarm config has no API address"
 NOT_HANDED = "launch grant not handed: "
 HANDS = "launch-grant-hands"
+ENDINGS = "launch-endings"
+ENDED = "ended"
 WORKER_DEFAULT = "default"
+NO_ACCOUNT = "no approved account has quota and a free launch slot"
 Target = Callable[[SpawnRequest], dict]
+AccountChooser = Callable[[int], str | None]
 
 
 class WorkerHomes(Protocol):
@@ -100,6 +104,7 @@ class DistributedLaunch:
         self.controller, self.grants, self.capacity = controller, grants, capacity
         self.fleet, self.router, self.homes = fleet, router, homes
         self.slug = capacity.slug
+        self.accounts: AccountChooser | None = None
 
     def spawn(self, request: SpawnRequest, agent: AgentRecord, terms: LaunchTerms, previous: str) -> Launch:
         admitted = self.controller.admit(replace(agent, account=terms.account), previous)
@@ -114,11 +119,14 @@ class DistributedLaunch:
         try:
             slot = self.capacity.reserve(grant, terms.cap, terms.ttl_ms)
         except SwarmError as error:
-            return Launch(admitted, grant, None, Outcome("spawn", Status.REFUSED, backend, detail=str(error)))
+            ended = self.end_refused(admitted, str(error))
+            self.grants.withdraw(self.slug, grant)
+            return Launch(ended, grant, None, Outcome("spawn", Status.REFUSED, backend, detail=str(error)))
         identity = {
             "launch_grant": grant,
             "execution_id": admitted.execution_id,
             "generation": admitted.generation,
+            "account": terms.account,
             "endpoints": {broadcast_bridge.API_URL: terms.api_url},
         }
         outcome = self.router.spawn(replace(request, task={**request.task, **identity}))
@@ -145,6 +153,11 @@ class DistributedLaunch:
             return Outcome(
                 "spawn", Status.REFUSED, backend, detail=f"profile {profile} is not shipped in the worker image"
             )
+        if self.accounts is not None:
+            account = self.accounts(terms.cap)
+            if account is None:
+                return Outcome("spawn", Status.REFUSED, backend, detail=NO_ACCOUNT)
+            terms = replace(terms, account=account)
         agent = AgentRecord(
             request.name,
             request.lane,
@@ -154,7 +167,19 @@ class DistributedLaunch:
             runtime_target=target(request),
             profile=profile,
         )
-        return self.spawn(request, agent, replace(terms, api_url=api_url), "").outcome
+        store = self.controller.store
+        occupant = store.execution_occupants(self.slug).get(agent.seat)
+        refused = occupant and store.redis.hexists(store.key(self.slug, ENDINGS), occupant.execution_id)
+        previous = occupant.execution_id if refused else ""
+        return self.spawn(request, agent, replace(terms, api_url=api_url), previous).outcome
+
+    def end_refused(self, agent: AgentRecord, reason: str) -> AgentRecord:
+        store, ended = self.controller.store, replace(agent, state=ENDED)
+        self.controller.require()
+        ending = {"reason": reason, "generation": agent.generation}
+        store.redis.hset(store.key(self.slug, ENDINGS), agent.execution_id, json.dumps(ending))
+        store.put_agent(self.slug, ended)
+        return ended
 
     def registered(self, session: Session, grant: str) -> Slot:
         body = {"execution_id": session.execution_id, "generation": session.generation}

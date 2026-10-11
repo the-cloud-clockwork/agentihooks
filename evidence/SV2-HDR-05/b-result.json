@@ -1,0 +1,114 @@
+{
+  "case": "T-SV2-HDR-05-B",
+  "evidence_class": "mocked: a recording stand in for the Anton herdr client serves two worker herdr servers whose agents keep working on every fixture tick, answers agent get, pane read and agent prompt with the 0.9.1 reply shapes of SV2-HDR-04, times out every command to a machine whose SSH path is cut while that worker's control heartbeat continues, and advances a fake clock by a fixed time per remote command; the operator TUI is a Viewer that is closed by detach; no herdr process, SSH connection or cluster runs in these cases",
+  "input_sha256": {
+    "herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940",
+    "herdr-pane-routing.json": "36a84ba856cd6c2cdc3f57e7ca84227a9908e2de7046ea57056ca2329a8c730d",
+    "herdr-registrations.json": "eb069f75d17862be563e36f558ee14db60cd24d7982bb042f2232db5bb81a57c",
+    "herdr-terminal-reconnect.json": "32abd57e558c817dac8ed2be158b56f845d0a6b6f2c59b604f390d65c2b136dc"
+  },
+  "observed": {
+    "checks": {
+      "a_corrected_input_needs_a_new_request": true,
+      "a_cut_path_reads_cached": true,
+      "a_live_view_past_its_window_reads_cached": true,
+      "a_never_checked_view_reads_unverified": true,
+      "every_send_into_an_unverified_view_is_refused": true,
+      "independent_repeat_identical": true,
+      "no_screen_text_in_refusals": true,
+      "only_the_operator_role_opens_a_view": true,
+      "the_ledger_judges_freshness_at_read": true,
+      "the_refused_send_mutated_nothing": true
+    },
+    "first": {
+      "cached": {
+        "engineer@a1b2c3-0001": {
+          "agent": "engineer@a1b2c3-0001",
+          "checked_at": 1790000000400,
+          "fresh_ms": 30000,
+          "live_at": 1790000000400,
+          "machine": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "pane_id": "w1:p1",
+          "reason": "",
+          "state": "live"
+        },
+        "engineer@a1b2c3-0002": {
+          "agent": "engineer@a1b2c3-0002",
+          "checked_at": 1790000000500,
+          "fresh_ms": 30000,
+          "live_at": 1790000000250,
+          "machine": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
+          "pane_id": "w1:p1",
+          "reason": "unreachable",
+          "state": "cached"
+        }
+      },
+      "cached_send": {
+        "message": "engineer@a1b2c3-0002's terminal is cached; reconnect before sending input",
+        "reason": "unverified"
+      },
+      "cached_send_mutated_nothing": true,
+      "corrected_returncode": 0,
+      "expired": {
+        "engineer@a1b2c3-0001": {
+          "agent": "engineer@a1b2c3-0001",
+          "checked_at": 1790000000400,
+          "fresh_ms": 30000,
+          "live_at": 1790000000400,
+          "machine": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "pane_id": "w1:p1",
+          "reason": "stale",
+          "state": "cached"
+        },
+        "engineer@a1b2c3-0002": {
+          "agent": "engineer@a1b2c3-0002",
+          "checked_at": 1790000000500,
+          "fresh_ms": 30000,
+          "live_at": 1790000000250,
+          "machine": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
+          "pane_id": "w1:p1",
+          "reason": "unreachable",
+          "state": "cached"
+        }
+      },
+      "expired_send": {
+        "message": "engineer@a1b2c3-0001's terminal is cached; reconnect before sending input",
+        "reason": "unverified"
+      },
+      "never_live_send": {
+        "message": "engineer@a1b2c3-0001's terminal is unverified; reconnect before sending input",
+        "reason": "unverified"
+      },
+      "published_after_window": {
+        "engineer@a1b2c3-0001": {
+          "agent": "engineer@a1b2c3-0001",
+          "checked_at": 1790000000400,
+          "fresh_ms": 30000,
+          "live_at": 1790000000400,
+          "machine": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "pane_id": "w1:p1",
+          "reason": "stale",
+          "state": "cached"
+        }
+      },
+      "received": {
+        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [],
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": [
+          "after reconnect"
+        ],
+        "local": []
+      },
+      "restored_without_a_check": {
+        "message": "engineer@a1b2c3-0002's terminal is cached; reconnect before sending input",
+        "reason": "unverified"
+      },
+      "unauthorized_view": {
+        "commands": 0,
+        "message": "only the operator role opens a terminal view",
+        "reason": "unauthorized"
+      }
+    },
+    "second_identical": true
+  },
+  "state": "passed"
+}

@@ -7,7 +7,7 @@ import json
 import re
 import sys
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, fields
 from pathlib import Path
 
@@ -41,6 +41,7 @@ HARNESSES = ("claude", "codex")
 LABEL_VALUE = re.compile(r"[A-Za-z0-9]([A-Za-z0-9._-]{0,61}[A-Za-z0-9])?")
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,127}")
 ACCOUNT = re.compile(r"(?=.{3,62}\Z)[A-Za-z0-9]([A-Za-z0-9._+-]*[A-Za-z0-9])?@[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?")
+KEY = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
 PROJECT = re.compile(r"github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+|local:[A-Za-z0-9._-]+|unknown")
 IDENTITY = {
     "execution_id": re.compile(r"exe-[0-9a-f]{32}"),
@@ -49,7 +50,7 @@ IDENTITY = {
     "seat_id": IDENTIFIER,
     "grant_ref": IDENTIFIER,
     "project_id": PROJECT,
-    "provider_account": ACCOUNT,
+    "provider_account": re.compile(f"{ACCOUNT.pattern}|{KEY.pattern}"),
 }
 COUNTS = ("generation", "controller_epoch")
 
@@ -157,7 +158,13 @@ def _identity(launch: AdmittedLaunch) -> None:
         raise PodSpecRefused("launch image_digest must be a sha256 digest", "image")
 
 
-def _profile(policy: dict, launch: AdmittedLaunch) -> dict:
+def _approved(policy: dict, launch: AdmittedLaunch, keys: Collection[str] | None) -> bool:
+    if keys is not None:
+        return launch.provider_account in keys
+    return launch.provider_account.lower() in {account.lower() for account in policy["provider_accounts"]}
+
+
+def _profile(policy: dict, launch: AdmittedLaunch, keys: Collection[str] | None) -> dict:
     if not isinstance(launch.profile, str) or launch.profile not in policy["profiles"]:
         raise PodSpecRefused("launch profile is not an approved resource profile", "profile")
     limits = policy["profiles"][launch.profile]["limits"]
@@ -165,7 +172,7 @@ def _profile(policy: dict, launch: AdmittedLaunch) -> dict:
         raise PodSpecRefused("launch resources must be positive integers", "resources")
     if launch.memory_mib > limits["memory_mib"] or launch.cpu_millis > limits["cpu_millis"]:
         raise PodSpecRefused(f"launch resources exceed the {launch.profile} profile limits", "resources")
-    if launch.provider_account.lower() not in {account.lower() for account in policy["provider_accounts"]}:
+    if not _approved(policy, launch, keys):
         raise PodSpecRefused("launch provider_account is not an approved provider account", "account")
     return policy["profiles"][launch.profile]
 
@@ -366,8 +373,8 @@ def _deliver(body: dict, bundle: dict) -> None:
 
 
 class PodTemplate:
-    def __init__(self, policy: dict) -> None:
-        self.policy = policy
+    def __init__(self, policy: dict, accounts: Callable[[], Collection[str]] | None = None) -> None:
+        self.policy, self.accounts = policy, accounts
         self.failures = Counter()
         self.storage = MountChecker()
 
@@ -375,7 +382,7 @@ class PodTemplate:
         try:
             launch = AdmittedLaunch.from_record(record)
             _identity(launch)
-            profile = _profile(self.policy, launch)
+            profile = _profile(self.policy, launch, None if self.accounts is None else self.accounts())
             payload = _payload(launch)
         except PodSpecRefused as refused:
             self.failures[refused.reason] += 1
