@@ -434,6 +434,56 @@ def test_the_api_opens_only_once_the_controller_holds_the_lease(tmp_path):
         service.stop()
 
 
+def test_the_hosted_api_serves_shallow_liveness_and_guards_diagnostics(tmp_path, monkeypatch):
+    from scripts.swarm_v2 import worker_health
+
+    probed = []
+    monkeypatch.setattr(_cs(), "page_credential", lambda slug: "operator-fixture")
+    monkeypatch.setattr(
+        worker_health, "brain_state", lambda environ, timeout: probed.append(timeout) or "brain_http_401"
+    )
+    store = _store()
+    port = _free_port()
+    service = _cs().host(_hosted_environ(tmp_path, store, port), store, "hive-fixture")
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/v2/health/live", timeout=5) as response:
+            live = json.loads(response.read())
+        status, refused = _post(f"http://127.0.0.1:{port}/v2/health/qualify", "stranger", {})
+        found, report = _post(
+            f"http://127.0.0.1:{port}/v2/health/qualify",
+            "operator-fixture",
+            {"purpose": "backup", "report": live},
+        )
+    finally:
+        service.stop()
+    assert (live["probe"], live["status"]) == ("shallow", "live")
+    assert (status, refused["error_class"]) == (401, "unauthenticated")
+    assert (found, report["reason"]) == (409, "shallow_report")
+    assert service.health.controller is service.controller
+    assert (service.health.store, service.health_api.grants) == (store, service.grants)
+    assert service.health.diagnose()["dependencies"]["brain"]["state"] == "auth_failed"
+    assert probed == [worker_health.BRAIN_TIMEOUT]
+
+
+def test_the_hosted_api_honours_the_deep_diagnostics_switch(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_HEALTH_DEEP", "off")
+    store = _store()
+    port = _free_port()
+    service = _cs().host(_hosted_environ(tmp_path, store, port), store, "hive-fixture")
+    try:
+        status, refused = _post(f"http://127.0.0.1:{port}/v2/health/qualify", "anyone", {})
+    finally:
+        service.stop()
+    assert (status, refused["message"]) == (503, "deep diagnostics are switched off")
+
+
+def test_the_page_credential_comes_from_the_ledger_repository(monkeypatch):
+    from scripts.swarm_ledger.repository import repository
+
+    monkeypatch.setattr(repository, "token", lambda slug: f"token-for-{slug}")
+    assert _cs().page_credential(SLUG) == f"token-for-{SLUG}"
+
+
 def test_a_port_it_cannot_bind_releases_the_lease(tmp_path):
     store = _store()
     with socket.socket() as taken:

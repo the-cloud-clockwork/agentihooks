@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from scripts.swarm_v2.api.broadcasts import BroadcastsAPI
 from scripts.swarm_v2.api.commands import CommandsAPI
 from scripts.swarm_v2.api.executions import ExecutionsAPI
+from scripts.swarm_v2.api.health import HealthAPI
 from scripts.swarm_v2.api.tasks import TasksAPI
 from scripts.swarm_v2.auth_context import GrantRefused
 
@@ -17,24 +18,29 @@ NOT_JSON = ("invalid_request", "the request body is not JSON")
 TASK_PATHS = re.compile(r"/v2/(?:tasks|swarm)(?:/.*)?")
 BROADCAST_PATHS = re.compile(r"/v2/broadcasts(?:/.*)?")
 COMMAND_PATHS = re.compile(r"/v2/executions/[^/]+/commands(?:/.*)?")
+HEALTH_PATHS = re.compile(r"/v2/health/.*")
 
 
 class Routes:
     def __init__(
         self,
         executions: ExecutionsAPI,
-        tasks: TasksAPI,
+        tasks: TasksAPI | None,
         commands: CommandsAPI | None = None,
         broadcasts: BroadcastsAPI | None = None,
+        health: HealthAPI | None = None,
     ) -> None:
         self.executions, self.tasks, self.commands, self.broadcasts = executions, tasks, commands, broadcasts
+        self.health = health
 
     def route(self, method: str, path: str, authorization: str, body: object) -> tuple[int, dict]:
-        api = self.tasks if TASK_PATHS.fullmatch(path) else self.executions
+        api = self.tasks if self.tasks is not None and TASK_PATHS.fullmatch(path) else self.executions
         if self.broadcasts is not None and BROADCAST_PATHS.fullmatch(path):
             api = self.broadcasts
         if self.commands is not None and COMMAND_PATHS.fullmatch(path):
             api = self.commands
+        if self.health is not None and HEALTH_PATHS.fullmatch(path):
+            api = self.health
         return api.route(method, path, authorization, body)
 
 

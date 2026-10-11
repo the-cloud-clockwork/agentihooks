@@ -161,6 +161,10 @@ class ExecutionsAPI:
                         return replay
                     archive = max(body.get("archive_watermark", 0), record["archive_watermark"] if record else 0)
                     ack = {**self._ack(claim, archive), "renewal_sequence": body["renewal_sequence"]}
+                    now = lease.now_ms(self.store)
+                    advanced = now
+                    if record and archive == record["archive_watermark"]:
+                        advanced = record.get("archive_advanced_at_ms", record["accepted_at_ms"])
                     accepted = {
                         "renewal_sequence": body["renewal_sequence"],
                         "digest": fingerprint,
@@ -168,7 +172,8 @@ class ExecutionsAPI:
                         "observed_at": body["observed_at"],
                         "resources": body.get("resources", {}),
                         "archive_watermark": archive,
-                        "accepted_at_ms": lease.now_ms(self.store),
+                        "accepted_at_ms": now,
+                        "archive_advanced_at_ms": advanced,
                         "ack": ack,
                     }
                     pipe.multi()
