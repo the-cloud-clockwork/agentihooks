@@ -151,6 +151,7 @@ class DistributedLaunch:
             "execution_id": admitted.execution_id,
             "generation": admitted.generation,
             "account": terms.account,
+            "profile": admitted.profile,
             "endpoints": {broadcast_bridge.API_URL: terms.api_url},
         }
         outcome = self.router.spawn(replace(request, task={**request.task, **identity}))
