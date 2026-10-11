@@ -195,7 +195,7 @@ def test_rows_say_stale_unknown_and_blocked_and_never_carry_a_stale_cap():
         ("alpha", "BLOCKED", 0, 1),
         ("beta", "UNKNOWN", None, 0),
     ]
-    assert [(row.five_hour_left, row.seven_day_left) for row in rows] == [(90.0, 80.0), (None, None), (None, None)]
+    assert [(row.five_hour_left, row.seven_day_left) for row in rows] == [(None, 80.0), (None, None), (None, None)]
     assert rows[0].source == "session-log 6h00m ago"
     assert rows[1].source == f"session-log 2m ago, {DEPLETED}"
     assert rows[2].source == "no session log"
