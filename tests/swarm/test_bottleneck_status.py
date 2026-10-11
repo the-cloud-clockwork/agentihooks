@@ -131,3 +131,27 @@ def test_status_json_and_text_share_stage_trend_and_action(env, monkeypatch, cap
         "Top bottleneck ci overrun; trend unknown; last action Proposed a faster mutation run"
         in capsys.readouterr().out
     )
+
+
+def test_tick_delivers_new_metric_stage_once_before_status_publication(env, monkeypatch):
+    from tests.inbox.test_wake import FakeHerdr
+
+    store, ledger, runtime = env
+    cli.main(["sw", "create", "--repo", "/repo"])
+    monkeypatch.setattr(cli, "now_ms", lambda: NOW)
+    samples = iter(["ci_overrun", "build", "build"])
+
+    def collect(*_):
+        stage = next(samples)
+        fire(store, stage, 8 if stage == "build" else 3)
+        return []
+
+    monkeypatch.setattr(cli.metrics, "record_pass", collect)
+    for _ in range(3):
+        cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
+    items = [
+        item for item in InboxStore(store.redis).pending_mail("master@sw") if item.ref.startswith("top-bottleneck:")
+    ]
+    assert len(items) == 2
+    assert {item.text.split(";", 1)[0] for item in items} == {"Top bottleneck ci overrun", "Top bottleneck build"}
+    assert bottleneck_status.read(store, "sw")["stage"] == "build"
