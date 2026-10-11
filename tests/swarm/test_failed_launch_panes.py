@@ -14,6 +14,7 @@ from scripts.swarm.tick import EXITED_BEFORE_LIFE, SpawnError, tick
 from tests.swarm.test_tick import FakeRuntime, tasks
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
+LAUNCH_CHECKED = True
 
 SCREEN = "$ agentihooks codex --route default\nCodex account default not found\n\n$ \n\n"
 FAILED_AT = 1_000
@@ -42,6 +43,14 @@ class PaneRuntime(FakeRuntime):
             raise RuntimeError(self.close_error)
         self.panes_closed.append(pane_id)
         self.screens.pop(pane_id, None)
+
+
+@pytest.fixture(autouse=True)
+def unbundled(monkeypatch):
+    from hooks.context import profile_chain
+
+    monkeypatch.setattr(profile_chain, "read_state", lambda: {})
+    monkeypatch.setattr(launch_check, "declared", lambda profile, worn=(): [])
 
 
 @pytest.fixture
