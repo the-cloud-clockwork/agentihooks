@@ -188,6 +188,9 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
     if not port.isdigit() or not 0 < int(port) <= MAX_PORT:
         raise ControlError(f"{PORT_ENV} must be a port number")
     credential = environ.get(CREDENTIAL_ENV)
+    hosted = ledger_link.remote(environ)
+    if hosted and not credential:
+        raise ControlError(f"the hosted ledger needs {CREDENTIAL_ENV}")
     workers = deployed.Workers.from_environ(environ, slug)
     transports = () if workers is None else (workers.transport(environ, slug),)
     service = ControlService(
@@ -206,9 +209,7 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
         service.recover = deployed.recovery_pass(service, workers, transports[0].api)
         if service.controller.terminals is not None:
             service.views = deployed.terminal_views(service.controller, environ)
-    if ledger_link.remote(environ):
-        if not credential:
-            raise ControlError(f"the hosted ledger needs {CREDENTIAL_ENV}")
+    if hosted:
         service.hosted_ledger = HostedLedger(ledger_link.base(environ), credential, store)
     else:
         service.ledger_folder = ledger_host.folder(environ)
