@@ -62,7 +62,7 @@ from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig, SwarmE
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy
 from scripts.swarm_v2 import master_scale
-from scripts.swarm_v2.masters import is_lead
+from scripts.swarm_v2 import masters as master_seats
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
@@ -276,7 +276,7 @@ def _master_down(slug, config, store, ledger, runtime, now_ms):
     """Operator lines waiting at a master seat nobody holds: tell the chat once per line, and return any line a dead
     master took but never closed to pending so the next master receives it."""
     live = runtime.live_names()
-    masters = [a for a in store.agents(slug) if is_lead(slug, a) and a.state != "finished"]
+    masters = [a for a in store.agents(slug) if master_seats.is_lead(slug, a) and a.state != "finished"]
     if config.state == "stopping" or any(m.name in live or now_ms - m.started_at <= STARTUP_GRACE_MS for m in masters):
         return []
     inbox, seat = InboxStore(store.redis), seat_address(slug, MASTER)
@@ -945,11 +945,11 @@ def placed_record(record, placed):
 
 def _recover_master(slug, config, store, runtime, now_ms):
     recorded = [a for a in store.agents(slug) if a.lane == MASTER]
-    agents = [a for a in recorded if is_lead(slug, a)]
+    agents = [a for a in recorded if master_seats.is_lead(slug, a)]
     live = runtime.live_names()
     if any(a.state != "finished" and a.name in live for a in agents):
         return []
-    finished = {a.name for a in recorded if a.state == "finished" or not is_lead(slug, a)}
+    finished = {a.name for a in recorded}
     seat = seat_address(slug, MASTER)
     occupant = store.seats.occupant(seat).occupant
     candidates = []
@@ -980,7 +980,7 @@ def _master(slug, config, store, runtime, now_ms):
         if any(a.lane != MASTER for a in agents):
             return []
         return [_retire_master(slug, store, runtime, m, now_ms) for m in masters]
-    masters = [m for m in masters if is_lead(slug, m)]
+    masters = [m for m in masters if master_seats.is_lead(slug, m)]
     pending = master_start.read(store, slug)
     if any(m.state != "finished" for m in masters) or pending.get("name") or pending.get("alerted"):
         return []

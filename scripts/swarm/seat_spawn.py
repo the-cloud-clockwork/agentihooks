@@ -30,16 +30,16 @@ def host_hold(slug: str, store, now_ms: int, what: str) -> str:
     return tick._hold(slug, store, f"holding the {what} spawn: {host}") if host else ""
 
 
-@dataclass(frozen=True)
-class Seat:
-    lane: str
-    name: str
-
-
 def place(slug: str, config, store, runtime, lane: str, now_ms: int, prepare: Callable[[AgentRecord], dict]):
     """Name, record and launch the lane's seat; prepare(record) returns the task its prompt is built from. A failure
     raises SeatFailed with the record still stored, so the caller settles what it began before dropping it."""
     return place_seat(slug, config, store, runtime, Seat(lane, TYPES[lane]), now_ms, prepare)
+
+
+@dataclass(frozen=True)
+class Seat:
+    lane: str
+    name: str
 
 
 def place_seat(slug: str, config, store, runtime, seat: Seat, now_ms: int, prepare: Callable[[AgentRecord], dict]):

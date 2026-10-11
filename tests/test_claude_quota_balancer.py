@@ -97,6 +97,20 @@ def test_fable_mode_includes_separate_quota_in_margin_and_table():
     assert "15%" in table
 
 
+def test_an_email_named_account_is_discovered_routed_and_shown():
+    from scripts.account_names import token_env
+
+    name = token_env("NESTOR.COLT@GMAIL.COM")
+    credentials = balancer.discover_credentials({name: "tok-a", "AH_CC_TOKEN_other": "tok-b"})
+
+    assert [credential.account for credential in credentials] == ["nestor_coltatgmail_com", "other"]
+    assert balancer.credential_for_slug(credentials, "nestor_coltatgmail_com").env_name == name
+    result = balancer.parse_probe("nestor_coltatgmail_com", _stream(0.20, 0.30), 100)
+    table = balancer.render_table([result], now=1000, sessions={"nestor_coltatgmail_com": 2})
+    row = next(line for line in table.splitlines() if " nestor_coltatgmail_com " in line)
+    assert " 2/" in row and "80%" in row
+
+
 def test_probe_passes_only_selected_oauth_token(monkeypatch):
     observed = {}
 

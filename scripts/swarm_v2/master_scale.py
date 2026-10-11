@@ -1,6 +1,6 @@
 """The master count follows the swarm size: one master seat per configured number of working agents, or per hive.
 
-A larger swarm raises the count at once and the tick launches a master in each empty seat. A smaller one, once it has
+A larger swarm raises the count at once and master_fill launches a master in each empty seat. A smaller one, once it has
 stayed smaller for the hold window, asks each extra seat's master to hand off; the count falls only past seats whose
 master has left, so no seat is cut mid answer. Each count change rebalances phase ownership by code and posts the new
 owners on the masters channel. Without a rule the count stays the manual one and the tick still fills its seats.
@@ -10,9 +10,8 @@ import json
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
-from scripts.swarm import seat_spawn
 from scripts.swarm.store import MASTER
-from scripts.swarm_v2 import masters
+from scripts.swarm_v2 import master_fill, masters
 from scripts.swarm_v2.masters_channel import SWARM, MastersChannel
 
 OFF = "off"
@@ -65,15 +64,13 @@ def wanted(rule: str, agents: list) -> int:
 
 
 def run(slug: str, config, store, runtime, doc: dict, now_ms: int) -> list[str]:
-    if config.state in ENDED:
-        return []
+    seats, found = masters.MasterSeats(store.redis), rule(store.redis, slug)
+    if not found or config.state in ENDED:
+        return master_fill.run(slug, config, store, runtime, doc, now_ms)
     agents = [a for a in store.agents(slug) if a.state != "finished"]
-    count = masters.MasterSeats(store.redis).count(slug)
-    found = rule(store.redis, slug)
-    want = wanted(found, agents) if found else count
-    actions = _resize(slug, store, doc, agents, count, want, now_ms)
-    limit = min(masters.MasterSeats(store.redis).count(slug), want)
-    return actions + _fill(slug, config, store, runtime, doc, limit, now_ms)
+    want = wanted(found, agents)
+    actions = _resize(slug, store, doc, agents, seats.count(slug), want, now_ms)
+    return actions + master_fill.run(slug, config, store, runtime, doc, now_ms, min(seats.count(slug), want))
 
 
 def _resize(slug, store, doc, agents, count, want, now_ms):
@@ -177,39 +174,3 @@ def announcement(slug: str, count: int, size: int, owners: dict[str, str]) -> st
         for address in masters.seats(slug, count)
     ]
     return f"Master seats are now {count} for {size} working agents. Phase owners: {'; '.join(held)}."
-
-
-def _fill(slug, config, store, runtime, doc, limit, now_ms):
-    live = runtime.live_names()
-    taken = {a.seat for a in store.agents(slug) if a.lane == MASTER and (a.state != "finished" or a.name in live)}
-    actions = []
-    for index in range(2, limit + 1):
-        if _address(slug, index) in taken:
-            continue
-        if refused := seat_spawn.no_slot(config, runtime, MASTER) or seat_spawn.host_hold(slug, store, now_ms, MASTER):
-            return actions + [refused]
-        actions.append(_launch(slug, config, store, runtime, doc, index, now_ms))
-    return actions
-
-
-def _launch(slug, config, store, runtime, doc, index, now_ms):
-    from scripts.swarm import tick
-
-    seats, seat_name = masters.MasterSeats(store.redis), masters.seat(index)
-    owners, count = seats.owners(slug, doc), seats.count(slug)
-
-    def prepare(record):
-        phases = [p for p, owner in owners.items() if owner == record.seat]
-        task = {"id": seat_name, "handoff": store.handoff(slug, seat_name), "phases": phases, "masters": count}
-        return tick.primed(store, slug, record.seat, task)
-
-    try:
-        record, placed = seat_spawn.place_seat(
-            slug, config, store, runtime, seat_spawn.Seat(MASTER, seat_name), now_ms, prepare
-        )
-    except seat_spawn.SeatFailed as failed:
-        store.drop_agent(slug, failed.record.name)
-        return f"master spawn failed in seat {failed.record.seat}: {failed.error}"
-    store.put_agent(slug, tick.placed_record(record, placed))
-    store.clear_handoff(slug, seat_name)
-    return f"spawned master {record.name} in seat {record.seat}"

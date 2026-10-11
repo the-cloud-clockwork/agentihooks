@@ -148,10 +148,10 @@ def test_growing_from_five_to_twenty_agents_launches_a_master_in_each_new_seat_a
 
     name, task = runtime.masters[0]
     assert (task["id"], task["seat"]) == ("master-2", SECOND)
-    assert task["phases"] == [p for p in PHASES if found[p] == SECOND]
+    assert task["owns"] == sorted(p for p in PHASES if found[p] == SECOND)
     text = prompt.build(SLUG, "/repo", MASTER, name, task)
     assert f"You hold master seat {SECOND}, one of 4 masters of swarm {SLUG}." in text
-    assert ", ".join(task["phases"]) in text
+    assert ", ".join(task["owns"]) in text
     assert f"agentihooks swarm {SLUG} masters-channel read" in text
 
     assert run(store, runtime, NOW + 2 * MINUTE) == []
@@ -663,7 +663,7 @@ def test_the_seat_lines_tell_an_extra_master_its_seat_phases_channel_and_retirem
     swarm = f"agentihooks swarm {SLUG}"
     assert masters.seat_lines(SLUG, {"seat": SECOND, "masters": 2}) == [
         f"You hold master seat {SECOND}, one of 2 masters of swarm {SLUG}. The lead seat {LEAD} answers the operator "
-        "and his chat; you act on the inbox items for the phases you own: none yet.",
+        "and his chat; you act on the inbox items for the phases and hives you own: none yet.",
         f"The tick assigns phases by code and posts every change on the masters channel. Read it with {swarm} "
         f'masters-channel read and coordinate with the other masters with {swarm} masters-channel say "<text>".',
         f"When the swarm shrinks the tick asks you to retire: write your Handoff v2 for the lead master, run {swarm} "
