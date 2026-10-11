@@ -39,3 +39,22 @@ def test_quota_handoff_excludes_signed_out_default_and_keeps_signed_in_default(m
     assert decision.action == "handoff"
     assert decision.target.account == "default"
     assert [candidate.account for candidate in decision.others] == ["default"]
+
+
+@pytest.mark.parametrize("surface", ["page", "table"])
+def test_quota_rows_exclude_signed_out_default_and_keep_signed_in_default(monkeypatch, default_login, surface):
+    from scripts import agents_quota, claude_quota_balancer
+
+    monkeypatch.setattr(claude_quota_balancer, "cached_observations", list)
+    monkeypatch.setattr(agents_quota, "_masters", lambda *args: {})
+    monkeypatch.setattr(agents_quota, "api_rows", lambda *args: [])
+
+    def rows():
+        if surface == "table":
+            return agents_quota.codex_table()
+        agents_quota._page_cache.clear()
+        return [row["account"] for row in agents_quota.page_quota(now=1000.0)["rows"]]
+
+    assert "default" not in rows()
+    default_login["signed_in"] = True
+    assert "default" in rows()
