@@ -9,7 +9,8 @@
   "stacked_on": "SV2-OBS-01, merged into dev by pull request 2584 before this package was rebased onto dev",
   "integration_gate": "G10",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2585",
-  "tested_commit": "a46b8e125cbe46af1e5474a29c288c03649b27f5",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2634",
+  "tested_commit": "c69fb66a1ef99a8cd56d37d30dcfe310a1ece97d",
   "measured_commit": "99ab72b5d4f2aee4d7e86327d2388c788f08027a",
   "status": "measured on a CI runner, coexistence computed against a read of Anton node capacity",
   "evidence_class": "Measured: the workload suite, an independent repeat and an update suite ran on a GitHub hosted Ubuntu runner (4 CPUs, 15989 MiB) in Worker resources run 38149855138; Anton node capacity and the requests of every scheduled Pod were read read only with kubectl get nodes -o json and kubectl get pods -A -o json at 2026-10-11T12:28:53Z and reduced with resource_bench nodes; only the reduced numbers and the sha256 of both listings are committed, because the Pod listing holds environment values. Derivation, coexistence, promotion and rollback are pure functions over those committed records. No worker Pod ran the workloads and no profile was applied to a deployed Pod policy.",
@@ -40,8 +41,8 @@
   },
   "validation": {
     "red": "Proofs run 38139509083 on tests only commit d3fae5797: the three new test modules failed collection with ImportError",
-    "tests": "Proofs run 38148825663 at tested_commit: 95 passed across the three resource test modules, case records a, b and c matched; Proofs run 38148349275 passed the same modules at 3dc94e0d4, the same tree before the rebase onto dev",
-    "mutation": "Mutation preflight on the pull request head against dev; scoped mutation proof 38145001123 at c9cf291ab killed every mutant but the sampler timeout boundary, which a fake clock test now kills",
+    "tests": "Proofs run 38154739013 at tested_commit: 100 passed across the three resource test modules, case records a, b and c matched",
+    "mutation": "Mutation preflight 38154729501 at tested_commit against dev: resource_bench 514 killed, resource_profiles 690 killed, resource_sampling 312 killed, no survivor or timeout",
     "lint": "ruff check and ruff format passed through python -m scripts.ci_prepush",
     "earlier_runs": "Worker resources run 38139549078 refused every class because the suite path was relative; run 38139693400 refused the general class because its generated suite failed and showed peak cores above the runner's 4 CPUs, which led to whole second core windows; run 38140098792 measured the first committed record, replaced after the readers' fixes by run 38147758574, which in turn was replaced by run 38149855138 once the sampler split CPU and process count between parent and children"
   },

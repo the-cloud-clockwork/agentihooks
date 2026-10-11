@@ -1,6 +1,6 @@
 {
   "package": "SV2-PRF-01",
-  "tested_commit": "a46b8e125cbe46af1e5474a29c288c03649b27f5",
+  "tested_commit": "c69fb66a1ef99a8cd56d37d30dcfe310a1ece97d",
   "measured_commit": "99ab72b5d4f2aee4d7e86327d2388c788f08027a",
   "inputs": {
     "tests/fixtures/swarm_v2/worker-resources/measurements.json": "a32d3d92a843b1860aeeb20584a3c74ed7f1ab27dcfa4794f2550a92cf834406",
