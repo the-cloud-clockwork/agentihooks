@@ -161,3 +161,28 @@ def test_a_snapshot_carries_each_agent_native_capture(store, tmp_path):
     assert doc["natives"][CLAUDE]["native_session_id"] == cases.SESSIONS["claude"]
     assert set(_kept("sw")) <= snapshot.referenced("sw")
     assert Path(home, "projects").is_dir()
+
+
+def test_an_unreadable_conversation_is_recorded_and_the_snapshot_goes_on(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    agents = [
+        _agent(CLAUDE, "claude", cases.claude_home(tmp_path, repo)),
+        _agent(CODEX, "codex", cases.codex_home(tmp_path)),
+    ]
+    real = native._regular
+
+    def unreadable(path):
+        if path.name == f"{cases.SESSIONS['claude']}.jsonl":
+            raise PermissionError(path)
+        return real(path)
+
+    monkeypatch.setattr(native, "_regular", unreadable)
+    found = snapshot.natives("sw", agents, str(repo), {}, {}, Cli())
+    assert found[CLAUDE]["native_resume"]["cause"] == "native_unreadable"
+    assert found[CODEX]["native_resume"]["outcome"] == native.CAPTURED
+
+
+def test_an_agent_with_no_folder_to_look_in_is_recorded_absent(tmp_path):
+    home = cases.claude_home(tmp_path, tmp_path / "repo")
+    found = snapshot.natives("sw", [_agent(CLAUDE, "claude", home)], "", {}, {}, Cli())
+    assert found[CLAUDE]["native_resume"]["cause"] == "conversation_absent"

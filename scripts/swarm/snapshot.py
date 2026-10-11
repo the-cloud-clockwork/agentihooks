@@ -12,11 +12,12 @@ import json
 import os
 import subprocess
 import time
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from scripts.profiles import binding
 from scripts.swarm import naming, resume
-from scripts.swarm.store import SwarmError
+from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_v2.checkpoints import git_capture, native
 
 VERSION = 1
@@ -151,7 +152,7 @@ def sources(slug, found, environ):
     return captured
 
 
-def native_home(agent, environ):
+def native_home(agent: AgentRecord, environ: Mapping[str, str]) -> Path:
     """The home the agent was validated in, else the harness's own variable, else its default under the user home."""
     recorded = agent.profile_decision.get("validation", {}).get("home")
     if recorded:
@@ -159,9 +160,9 @@ def native_home(agent, environ):
     return Path(environ.get(binding.HOMES[agent.harness]) or Path.home() / f".{agent.harness}")
 
 
-def cli_version(harness, run):
+def cli_version(harness: str, run: Callable) -> str:
     try:
-        proc = run([harness, "--version"], capture_output=True, text=True, timeout=30)
+        proc = run([harness, "--version"], capture_output=True, text=True, errors="replace", timeout=30)
     except (OSError, subprocess.TimeoutExpired):
         return ""
     return proc.stdout if proc.returncode == 0 else ""
@@ -169,6 +170,7 @@ def cli_version(harness, run):
 
 def _native(agent, home, cwds, version):
     """Claude keys a conversation by its launch folder, the agent's worktree or the swarm repo; Codex ignores it."""
+    found = native.Unavailable(agent.harness, "conversation_absent")
     for cwd in cwds:
         found = native.capture(agent.harness, home, agent.conversation_id, Path(cwd), version, stopped=False)
         if isinstance(found, native.NativeCapture) or found.cause != "conversation_absent":
@@ -176,7 +178,9 @@ def _native(agent, home, cwds, version):
     return found
 
 
-def natives(slug, agents, repo, found, environ, run):
+def natives(
+    slug: str, agents: list[AgentRecord], repo: str, found: dict[str, str], environ: Mapping[str, str], run: Callable
+) -> dict[str, dict]:
     """Each agent's conversation files as its installed CLI wrote them, kept by hash; never its account state.
 
     The switch set to 0 records none, and restore reopens conversations from the CLI homes as before."""

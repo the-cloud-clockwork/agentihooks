@@ -31,6 +31,7 @@ FORMAT = "native_format_changed"
 BUSY = "database_busy"
 TOO_LARGE = "native_too_large"
 ESCAPE = "native_member_escapes_home"
+UNREADABLE = "native_unreadable"
 VERSION = re.compile(r"(\d+)\.(\d+)\.\d+")
 MEMBER_MODE = 0o600
 
@@ -53,7 +54,12 @@ class Unavailable:
             "continuation": model.CONTEXT,
             "native_resume_capability": "unsupported",
             "native_session_id": None,
-            "native_resume": {"outcome": self.outcome, "harness": self.harness, "cause": self.cause},
+            "native_resume": {
+                "outcome": self.outcome,
+                "harness": self.harness,
+                "cause": self.cause,
+                "decision": list(self.decision),
+            },
         }
 
 
@@ -338,6 +344,8 @@ def capture(
         found, recorded = native.identity(files)
     except NativeError as error:
         return Unavailable(harness, str(error))
+    except OSError:
+        return Unavailable(harness, UNREADABLE)
     if found != session_id:
         return Unavailable(harness, "identity_mismatch")
     if line(recorded) != line(version_text):

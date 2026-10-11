@@ -4,10 +4,12 @@ set -euo pipefail
 # The fresh home receives the account only through the environment: NATIVE_PROOF_CLAUDE_ACCOUNT names an
 # AH_CC_TOKEN_<slug> variable, NATIVE_PROOF_CODEX_ROUTE a Codex account slug, since a fresh home holds no quota readings.
 # NATIVE_PROOF_IMAGE restores and resumes inside a fresh container of that image: only the durable store and this
-# checkout are mounted, and the restored home and cwd exist only inside the container.
+# checkout are mounted, the restored home exists only inside the container, and the conversation reopens in the
+# mounted project checkout.
 
 proof_root="${1:?work directory required}"
 harness="${2:?harness required: claude or codex}"
+[[ "$harness" == "claude" || "$harness" == "codex" ]] || { echo "harness must be claude or codex" >&2; exit 2; }
 proof_python="${NATIVE_PROOF_PYTHON:-python3}"
 proof_repo="$(git rev-parse --show-toplevel)"
 codeword="PLUM-$("$proof_python" -c 'import secrets; print(secrets.randbelow(9000) + 1000)')"
@@ -34,8 +36,11 @@ run_cli() {
     fi
 }
 
+tested="$(git -C "$proof_repo" rev-parse HEAD)"
+git -C "$proof_repo" diff --quiet HEAD -- scripts tests || tested="$tested with uncommitted changes"
 version="$("$harness" --version 2>&1)"
 version="${version%%$'\n'*}"
+record tested_commit 0 "$tested"
 record installed_version 0 "$version"
 if [[ -n "${NATIVE_PROOF_CLAUDE_ACCOUNT:-}${NATIVE_PROOF_CODEX_ROUTE:-}" ]]; then
     record account 0 "named by the operator environment, never written to the record or the carried material"
@@ -80,12 +85,11 @@ else
     container_version="${container_version%%$'\n'*}"
     record container_version 0 "$container_version"
     inside='set -euo pipefail
-mkdir -p "$HOME" /tmp/fresh-home /tmp/fresh-cwd
+mkdir -p "$HOME" /tmp/fresh-home
 cd /src
-python3 -m tests.integration.native_resume.native_proof restore "$1" /tmp/fresh-home /tmp/fresh-cwd /durable "$2" > /tmp/restore.json
+python3 -m tests.integration.native_resume.native_proof restore "$1" /tmp/fresh-home /src /durable "$2" > /tmp/restore.json
 cat /tmp/restore.json
 python3 -c "import json, sys; sys.exit(json.load(open(\"/tmp/restore.json\"))[\"restore\"][\"outcome\"] != \"resumed\")"
-cd /tmp/fresh-cwd
 if [[ "$1" == "claude" ]]; then
     CLAUDE_CONFIG_DIR=/tmp/fresh-home timeout 300 claude -p --resume "$3" "$4" < /dev/null
 else
@@ -99,7 +103,9 @@ fi'
         route=""
     else
         route="${NATIVE_PROOF_CODEX_ROUTE:?name the Codex account slug to route}"
-        passed+=(-e "AH_CX_TOKEN_$route")
+        token="AH_CX_TOKEN_$route"
+        : "${!token:?the route $route has no token in the environment}"
+        passed+=(-e "$token")
     fi
     set +e
     answer="$(docker run --rm --memory 1g --user "$(id -u):$(id -g)" --entrypoint bash "${passed[@]}" \
@@ -107,7 +113,7 @@ fi'
         -c "$inside" proof "$harness" "$container_version" "$session" "$question" "$route" 2>&1)"
     answer_exit=$?
     set -e
-    answer="$(grep -v '^\[agentihooks codex\]' <<< "$answer")"
+    answer="$(grep -v '^\[agentihooks codex\]' <<< "$answer" || true)"
     record fresh_container_resume "$answer_exit" "$(tail -c 1600 <<< "$answer")"
 fi
 grep -q "$codeword" <<< "$answer" && recalled=0 || recalled=1

@@ -381,8 +381,24 @@ def test_unavailable_fields_commit_a_context_continuation():
         "continuation": "context",
         "native_resume_capability": "unsupported",
         "native_session_id": None,
-        "native_resume": {"outcome": "native_resume_unavailable", "harness": "codex", "cause": "unqualified_version"},
+        "native_resume": {
+            "outcome": "native_resume_unavailable",
+            "harness": "codex",
+            "cause": "unqualified_version",
+            "decision": ["continue_from_context", "start_fresh"],
+        },
     }
+
+
+def test_a_conversation_the_capture_cannot_read_is_unavailable_not_an_error(tmp_path, monkeypatch):
+    home = cases.claude_home(tmp_path, tmp_path / "cwd")
+
+    def unreadable(path):
+        raise PermissionError(path)
+
+    monkeypatch.setattr(native, "_regular", unreadable)
+    found = native.capture("claude", home, cases.SESSIONS["claude"], tmp_path / "cwd", cases.VERSIONS["claude"], False)
+    assert (found.outcome, found.cause) == (native.UNAVAILABLE, "native_unreadable")
 
 
 def test_merged_replaces_native_material_and_keeps_every_other_material():
