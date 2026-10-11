@@ -99,6 +99,15 @@ def test_the_tick_focus_rides_with_the_inputs_only_when_set(store):
     assert ledger.sent == [("sw", 2, 4, ("fix_phase", "p9"), ("watched", ["the focus on x"])), ("sw", 2, 4)]
 
 
+def test_only_as_many_watched_focus_names_as_the_op_schema_takes_are_sent(store):
+    observe(store)
+    ledger = Ledger()
+    time_left.refresh("sw", store, ledger, OBSERVED, "p9", [f"focus {n}" for n in range(250)])
+    [(_, _, _, _, (_, watched))] = ledger.sent
+    assert watched == [f"focus {n}" for n in range(100)]
+    assert time_left.WATCHED_KEPT == 100
+
+
 def test_a_ledger_without_the_write_is_skipped(store):
     assert time_left.refresh("sw", store, object(), OBSERVED) == []
 

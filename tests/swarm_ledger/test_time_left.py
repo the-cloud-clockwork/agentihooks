@@ -374,8 +374,8 @@ class TestTimeLeftOp:
     @pytest.mark.parametrize(
         ("change", "message"),
         [
-            ({"by": "eng"}, "time_left takes id, by swarm, slots and ci_minutes"),
-            ({"extra": 1}, "time_left takes id, by swarm, slots and ci_minutes"),
+            ({"by": "eng"}, "time_left takes id, by swarm, slots and ci_minutes, and optionally fix_phase and watched"),
+            ({"extra": 1}, "time_left takes id, by swarm, slots and ci_minutes, and optionally fix_phase and watched"),
             ({"slots": -1}, "slots must be a nonnegative integer or null"),
             ({"slots": True}, "slots must be a nonnegative integer or null"),
             ({"slots": 1.0}, "slots must be a nonnegative integer or null"),
@@ -394,7 +394,10 @@ class TestTimeLeftOp:
         del op["ci_minutes"]
         with pytest.raises(ValueError) as refused:
             ledger_time_left.check(op)
-        assert str(refused.value) == "time_left takes id, by swarm, slots and ci_minutes"
+        assert (
+            str(refused.value)
+            == "time_left takes id, by swarm, slots and ci_minutes, and optionally fix_phase and watched"
+        )
 
     def test_check_takes_the_tick_focus_and_refuses_a_malformed_one(self):
         assert ledger_time_left.check({**self.op(), "fix_phase": "p1", "watched": ["the focus on x"]}) is None

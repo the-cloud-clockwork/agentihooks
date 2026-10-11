@@ -9,7 +9,7 @@ FOCUS = ("fix_phase", "watched")
 
 def check(op):
     if not FIELDS <= set(op) <= FIELDS | set(FOCUS) or op["by"] != "swarm":
-        raise ValueError("time_left takes id, by swarm, slots and ci_minutes")
+        raise ValueError("time_left takes id, by swarm, slots and ci_minutes, and optionally fix_phase and watched")
     if not isinstance(op.get("fix_phase", ""), str):
         raise ValueError("fix_phase must be text")
     watched = op.get("watched", [])
