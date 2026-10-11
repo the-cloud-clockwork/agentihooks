@@ -10,7 +10,7 @@ CLIENT = "herdr"
 
 
 def switched_on(environ: Mapping[str, str]) -> bool:
-    return environ.get(SWITCH, "on") != "off"
+    return environ.get(SWITCH) != "off"
 
 
 @dataclass(frozen=True)
@@ -24,11 +24,11 @@ class Upkeep:
 
     def __init__(self, terminal: Terminal, enabled: bool) -> None:
         self.terminal, self.enabled = terminal, enabled
-        self.seen: dict[str, int] | None = None
+        self.due, self.seen = True, {}
         self.last = Report()
 
     def start(self, attempts: Iterable[Attempt]) -> Report | None:
-        self.seen = None
+        self.due = True
         return self.change(attempts)
 
     def change(self, attempts: Iterable[Attempt]) -> Report | None:
@@ -36,15 +36,16 @@ class Upkeep:
             return None
         attempts = tuple(attempts)
         current = {attempt.scope.execution_id: attempt.scope.generation for attempt in attempts}
-        if current == self.seen:
+        if not self.due and current == self.seen:
             return None
         desired, refused = self._routed(attempts)
         try:
             report = self.terminal.registrations.reconcile(desired, self.terminal.qualifier)
         except EndpointRefused as failure:
+            self.due = True
             return Report(refused={CLIENT: failure.reason})
         report.refused.update(refused)
-        self.seen = None if report.refused else current
+        self.due, self.seen = bool(report.refused), current
         self.last = report
         return report
 

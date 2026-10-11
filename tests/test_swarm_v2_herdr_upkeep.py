@@ -42,6 +42,7 @@ def test_start_registers_every_attachable_attempt_beside_the_manual_machine(tmp_
     assert report.drift == {"missing": 2}
     assert sidebar(herdr) == ["Local", "devbox", endpoint(EXE_A).name, endpoint(EXE_B).name]
     assert keeper.herdr_registration_drift() == 2
+    assert HOST_KEY in terminal.home.known_hosts(endpoint(EXE_A)).read_text()
 
 
 def test_an_unchanged_set_of_attempts_runs_no_herdr_command(tmp_path):
@@ -141,9 +142,10 @@ def test_an_unreadable_client_names_it_and_retries_on_the_next_change(tmp_path):
     assert keeper.change([attempt(EXE_A), attempt(EXE_B)]) == Report(refused={"herdr": "catalog_unreadable"})
     assert keeper.herdr_registration_drift() == 1
     herdr.listing = None
-    report = keeper.change([attempt(EXE_A), attempt(EXE_B)])
+    report = keeper.change([attempt(EXE_A)])
 
-    assert sorted(report.registered) == [EXE_A, EXE_B]
+    assert list(report.registered) == [EXE_A]
+    assert report.drift == {}
 
 
 def test_switched_off_no_herdr_command_runs_and_no_client_file_is_written(tmp_path):
