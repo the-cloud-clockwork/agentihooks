@@ -802,14 +802,25 @@ def test_account_slot_releases_only_its_own_attempt(world):
 
 
 class _Ledger:
-    def __init__(self, refusals=0):
+    def __init__(self, refusals=0, rows=None):
         self.calls, self.refusals = [], refusals
+        self.rows = [{"id": "task", "state": "claimed"}] if rows is None else rows
 
-    def update_task(self, slug, task_id, fields, if_state=()):
+    def _refuse(self):
         if self.refusals:
             self.refusals -= 1
             raise SwarmError("ledger fixture refused")
-        self.calls.append((slug, task_id, fields, lease.EPOCH.get(), if_state))
+
+    def state(self, slug):
+        self._refuse()
+        return {"tasks": [dict(row) for row in self.rows]}
+
+    def update_task(self, slug, task_id, fields):
+        self._refuse()
+        self.calls.append((slug, task_id, fields, lease.EPOCH.get()))
+        for row in self.rows:
+            if row["id"] == task_id:
+                row.update(fields)
         return {}
 
 
@@ -851,8 +862,8 @@ def test_a_pending_recovery_marks_its_task_until_the_resumed_replacement_launche
 
     assert replacements() == {}
     assert replacements() == {}
-    assert ledger.calls == [(cases.SLUG, "task", {"awaiting": "recovery_pending"}, epoch, ("claimed",))]
-    assert _hash(world, "recovery-pending-tasks") == {"task": "recovery_pending"}
+    assert ledger.calls == [(cases.SLUG, "task", {"awaiting": "recovery_pending"}, epoch)]
+    assert _hash(world, "recovery-pending-tasks") == {"task": ""}
     assert relaunch.calls == []
 
     decision = recovery.decide(world.old.execution_id, "resume")
@@ -868,7 +879,7 @@ def test_a_pending_recovery_marks_its_task_until_the_resumed_replacement_launche
         "controller_epoch": epoch,
         "checkpoint": "ckpt-one-2",
     }
-    assert ledger.calls[1:] == [(cases.SLUG, "task", {"awaiting": ""}, epoch, ("claimed",))]
+    assert ledger.calls[1:] == [(cases.SLUG, "task", {"awaiting": ""}, epoch)]
     assert _hash(world, "recovery-pending-tasks") == {}
     assert _hash(world, "attempt-replacement-launches") == {world.old.execution_id: decision.replacement}
 
@@ -914,7 +925,7 @@ def test_a_fresh_replacement_launches_without_a_checkpoint_and_a_refused_mark_wa
     assert replacements() == {world.old.execution_id: "ok"}
     [(request, _)] = relaunch.calls
     assert request.task["checkpoint"] == ""
-    assert _hash(world, "recovery-pending-tasks") == {"task": "recovery_pending"}
+    assert _hash(world, "recovery-pending-tasks") == {"task": ""}
     assert replacements() == {}
     assert _marks(ledger) == [{"awaiting": "recovery_pending"}, {"awaiting": ""}]
     assert _hash(world, "recovery-pending-tasks") == {}
@@ -1007,6 +1018,29 @@ def test_a_fence_whose_decision_is_not_written_yet_waits_without_a_launch(world)
     assert replacements() == {}
     assert relaunch.calls == []
     assert _marks(ledger) == [{"awaiting": "recovery_pending"}]
+
+
+@pytest.mark.parametrize(
+    ("rows", "restored"),
+    [
+        ([{"id": "task", "state": "pr", "awaiting": "approval"}], "approval"),
+        ([{"id": "task", "state": "claimed", "awaiting": "recovery_pending"}], ""),
+        ([{"id": "task", "state": "claimed"}], ""),
+        ([], ""),
+    ],
+)
+def test_a_cleared_recovery_mark_restores_the_awaiting_value_the_task_held_before(world, rows, restored):
+    recovery, ledger = world.recovery(world.live, automatic=False), _Ledger(rows=rows)
+    replacements = replacement.Replacements(recovery, _Relaunch(), ledger)
+    world.show(world.old, "oom_killed")
+    world.reconcile(recovery)
+
+    replacements()
+    assert _hash(world, "recovery-pending-tasks") == {"task": restored}
+    recovery.decide(world.old.execution_id, "fresh")
+    replacements()
+    assert _marks(ledger) == [{"awaiting": "recovery_pending"}, {"awaiting": restored}]
+    assert _hash(world, "recovery-pending-tasks") == {}
 
 
 def test_the_deployed_pass_launches_a_decided_replacement_after_it_reconciles(world):

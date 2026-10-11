@@ -17,11 +17,12 @@ MARKED = "recovery-pending-tasks"
 CLEARED = ""
 SUPERSEDED = "superseded"
 STARTED = (Status.OK, Status.AMBIGUOUS)
-MARKABLE = ("claimed",)
 
 
 class TaskLedger(Protocol):
-    def update_task(self, slug: str, task_id: str, fields: dict, if_state: tuple = ()) -> dict: ...
+    def state(self, slug: str) -> dict: ...
+
+    def update_task(self, slug: str, task_id: str, fields: dict) -> dict: ...
 
 
 Relaunch = Callable[[SpawnRequest, AgentRecord], "Launch"]
@@ -76,19 +77,26 @@ class Replacements:
         waiting = {self.store.execution(self.slug, execution_id).task for execution_id in self._unlaunched()}
         marked = set(self.store.redis.hkeys(self._key(MARKED)))
         for task in sorted(waiting - marked):
-            self._await(task, PENDING)
+            self._ledgered(task, self._hold)
         for task in sorted(marked - waiting):
-            self._await(task, CLEARED)
+            self._ledgered(task, self._release)
 
-    def _await(self, task: str, state: str) -> None:
+    def _ledgered(self, task: str, write: Callable[[str], None]) -> None:
         self.controller.require()
         try:
             with lease.fencing(self.controller.held.epoch):
-                self.ledger.update_task(self.slug, task, {"awaiting": state}, if_state=MARKABLE)
+                write(task)
         except SwarmError as error:
             print(f"controller: the ledger refused the recovery mark on task {task}: {error}", flush=True)
-            return
-        if state:
-            self.store.redis.hset(self._key(MARKED), task, state)
-        else:
-            self.store.redis.hdel(self._key(MARKED), task)
+
+    def _hold(self, task: str) -> None:
+        """The task's own awaiting value is kept, so the operator's merge approval prompt comes back after recovery."""
+        rows = {row["id"]: row.get("awaiting", CLEARED) for row in self.ledger.state(self.slug)["tasks"]}
+        prior = rows.get(task, CLEARED)
+        self.ledger.update_task(self.slug, task, {"awaiting": PENDING})
+        self.store.redis.hset(self._key(MARKED), task, CLEARED if prior == PENDING else prior)
+
+    def _release(self, task: str) -> None:
+        prior = self.store.redis.hget(self._key(MARKED), task)
+        self.ledger.update_task(self.slug, task, {"awaiting": prior})
+        self.store.redis.hdel(self._key(MARKED), task)
