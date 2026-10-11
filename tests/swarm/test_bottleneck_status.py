@@ -92,6 +92,28 @@ def test_each_top_transition_sends_one_master_item_and_repeats_send_none(store):
     assert len({item.ref for item in items}) == 4
 
 
+@pytest.mark.parametrize("committed", [False, True])
+def test_interrupted_notification_commit_retries_without_duplicates(store, monkeypatch, committed):
+    from redis.exceptions import ConnectionError
+
+    fire(store)
+    pipeline_type = type(store.redis.pipeline())
+    execute = pipeline_type.execute
+
+    def interrupted(pipe, *args, **kwargs):
+        if committed:
+            execute(pipe, *args, **kwargs)
+        raise ConnectionError("interrupted transaction")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(pipeline_type, "execute", interrupted)
+        with pytest.raises(ConnectionError):
+            bottleneck_status.refresh("sw", store, NOW)
+    bottleneck_status.refresh("sw", store, NOW + 1)
+    assert len(InboxStore(store.redis).pending_mail("master@sw")) == 1
+    assert bottleneck_status.read(store, "sw")["transition"] == 1
+
+
 def test_status_json_and_text_share_stage_trend_and_action(env, monkeypatch, capsys):
     store, _, _ = env
     cli.main(["sw", "create"])

@@ -63,9 +63,19 @@ def refresh(slug: str, store: RedisStore, at: int) -> list[str]:
     found = top(store, slug, rows)
     changed = found["stage"] != previous.get("stage", "")
     transition = previous.get("transition", 0) + int(changed)
+    snapshot = json.dumps({**found, "readings": rows, "transition": transition})
+
+    def persist(pipe):
+        pipe.set(store.key(slug, KEY), snapshot)
+
     if changed:
         InboxStore(store.redis).send(
-            "swarm", seat_address(slug, "master"), line(found), ref=f"top-bottleneck:{slug}:{transition}"
+            "swarm",
+            seat_address(slug, "master"),
+            line(found),
+            ref=f"top-bottleneck:{slug}:{transition}",
+            persist=persist,
         )
-    store.redis.set(store.key(slug, KEY), json.dumps({**found, "readings": rows, "transition": transition}))
+    else:
+        persist(store.redis)
     return [line(found)] if changed else []

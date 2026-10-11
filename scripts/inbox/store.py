@@ -128,7 +128,7 @@ class InboxStore:
             "",
         )
 
-    def send(self, sender, address, text, ref="", fyi=False, task="", item_id=""):
+    def send(self, sender, address, text, ref="", fyi=False, task="", item_id="", *, persist=None):
         """ref names the ledger write an operator item carries, for the seen marks; fyi marks an item that needs no
         work, so a bare close names no outcome; a given item_id refuses a second write of that item."""
         if not (sender and address and text.strip()):
@@ -162,6 +162,8 @@ class InboxStore:
             pipe.incr(self.key("open-size", address))
             pipe.sadd(self.key("waiting"), address)
             pipe.rpush(self.key("history", item.id), _entry("pending", sender, "", at))
+            if persist is not None:
+                persist(pipe)
             pipe.publish(NOTIFY, address)
             pipe.execute()
         return item
