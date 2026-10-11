@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from hooks.context.profile_chain import BUNDLE_PROFILES
 from scripts.swarm_v2 import filesystem
 
 TARGETS = ("claude", "codex")
@@ -67,7 +68,7 @@ def folder(path: Path) -> bool:
 
 
 def bundle_profiles(bundle: Path) -> Path:
-    return bundle / BUNDLE_TREE / "profiles"
+    return bundle / BUNDLE_TREE / BUNDLE_PROFILES
 
 
 def _from_bundle(request: Request, name: str) -> bool:
