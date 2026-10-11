@@ -42,7 +42,7 @@ def load_lock(path: Path, architecture: str) -> dict:
         raise ValueError("base image requires a sha256 digest")
     if checksum(path.with_name("requirements.lock")) != lock["requirements_sha256"]:
         raise ValueError("Python requirements checksum mismatch")
-    for name in ("herdr", "claude", "codex"):
+    for name in TOOLS:
         validate_artifact(name, lock["tools"].get(name, {}))
     return lock
 
