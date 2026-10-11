@@ -6,7 +6,7 @@ import yaml
 from chart_workers import merged
 
 
-def pods(node) -> Iterator[dict]:
+def pods(node: object) -> Iterator[dict]:
     if isinstance(node, dict):
         if isinstance(node.get("containers"), list):
             yield node
@@ -31,7 +31,14 @@ def references(pod: dict, container: dict, secret: str) -> list[dict]:
         if item.get("valueFrom", {}).get("secretKeyRef", {}).get("name") == secret
     ]
     found += [item for item in container.get("envFrom", []) if item.get("secretRef", {}).get("name") == secret]
-    volumes = {v["name"] for v in pod.get("volumes", []) if v.get("secret", {}).get("secretName") == secret}
+    volumes = {
+        volume["name"]
+        for volume in pod.get("volumes", [])
+        if volume.get("secret", {}).get("secretName") == secret
+        or any(
+            source.get("secret", {}).get("name") == secret for source in volume.get("projected", {}).get("sources", [])
+        )
+    }
     found += [mount for mount in container.get("volumeMounts", []) if mount["name"] in volumes]
     return found
 
@@ -51,12 +58,12 @@ def is_controller(document: dict, container: dict) -> bool:
     )
 
 
-def entry_problems(documents: list, entry: dict) -> list[str]:
+def entry_problems(documents: list, entry: dict, others: set[str]) -> list[str]:
     secret, held, problems = entry["secretName"], [], []
     for document, pod, container in containers(documents):
         found = references(pod, container, secret)
         if found and is_controller(document, container):
-            held += [item for item in found if item.get("name") == entry["name"]]
+            held += [item for item in found if item.get("name") not in others]
         elif found:
             owner = f"{document['kind']} {document['metadata']['name']} container {container['name']}"
             problems.append(f"{owner} references the controller only Secret {secret}")
@@ -75,7 +82,8 @@ def main(values_paths: list[str], rendered: str) -> list[str]:
     if not entries:
         return ["controller.secretEnv names no Secret to check"]
     documents = [d for d in yaml.safe_load_all(rendered) if d]
-    return [problem for entry in entries for problem in entry_problems(documents, entry)]
+    names = {entry["name"] for entry in entries}
+    return [problem for entry in entries for problem in entry_problems(documents, entry, names - {entry["name"]})]
 
 
 if __name__ == "__main__":

@@ -192,7 +192,7 @@ spec:
             - name: AGENTIHOOKS_LAUNCH_BRAIN
               value: {{ $workers.brain | quote }}
             {{- end }}
-            {{- include "swarm.secretEnv" .Values.controller.secretEnv | nindent 12 }}
+            {{- include "swarm.controllerSecretEnv" . | nindent 12 }}
             {{- include "swarm.extraEnv" .Values.controller.env | nindent 12 }}
           {{- include "swarm.envFrom" . | nindent 10 }}
           resources:

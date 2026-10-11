@@ -61,11 +61,17 @@ app.kubernetes.io/component: {{ .component }}
 - name: SWARM_HIVE_ID
   value: {{ .Values.hive.id | default (include "swarm.fullname" .) | quote }}
 {{ include "swarm.redisEnv" . }}
-{{- include "swarm.secretEnv" .Values.secretEnv }}
+{{- range .Values.secretEnv }}
+- name: {{ .name }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ .secretName }}
+      key: {{ .key }}
+{{- end }}
 {{- end -}}
 
-{{- define "swarm.secretEnv" -}}
-{{- range . }}
+{{- define "swarm.controllerSecretEnv" -}}
+{{- range .Values.controller.secretEnv }}
 - name: {{ .name }}
   valueFrom:
     secretKeyRef:
