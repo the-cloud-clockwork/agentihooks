@@ -479,7 +479,7 @@ def test_a_lane_without_an_entry_falls_back_to_the_automatic_choice(tmp_path):
 
 def test_a_lane_model_goes_to_the_automatically_chosen_agent(tmp_path):
     seen = _spawn_seen(tmp_path, {"eng": {"agent": "auto", "model": "sonnet", "effort": "auto"}})
-    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "sonnet", "--effort", "medium"]
+    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "sonnet", "--effort", "xhigh"]
 
 
 def test_the_lane_role_replaces_the_default_role_in_the_prompt(tmp_path):
@@ -947,7 +947,7 @@ def test_a_swarm_config_model_launches_as_named_with_the_classifier_live(tmp_pat
         "--model",
         "sonnet",
         "--effort",
-        "medium",
+        "xhigh",
     ]
 
 
