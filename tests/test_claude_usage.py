@@ -82,7 +82,7 @@ def test_a_missing_status_reads_as_unknown_status():
 
 @pytest.fixture
 def clock(monkeypatch):
-    ticks = iter([10.0, 10.25])
+    ticks = iter([10.0, 12.5])
     monkeypatch.setattr(claude_usage.time, "monotonic", lambda: next(ticks))
 
 
@@ -90,7 +90,7 @@ def test_the_probe_sends_one_messages_request_with_the_oauth_headers(clock):
     seen = []
     found = claude_usage.probe("a", "tok-1", "haiku", _opener(seen=seen))
     assert (found.account, found.state, found.five_hour.used) == ("a", "NORMAL", 20.0)
-    assert (found.model, found.context_used, found.latency_ms) == (BODY["model"], 1000, 250)
+    assert (found.model, found.context_used, found.latency_ms) == (BODY["model"], 1000, 2500)
     [(request, timeout)] = seen
     assert (request.full_url, request.get_method(), timeout) == ("https://api.anthropic.com/v1/messages", "POST", 20)
     assert request.get_header("Authorization") == "Bearer tok-1"
@@ -119,7 +119,7 @@ def test_a_429_with_rate_limit_headers_reads_like_a_200():
 @pytest.mark.parametrize("status, headers", [(401, Message()), (403, Message()), (429, Message()), (500, _headers())])
 def test_any_other_answer_is_an_error_naming_the_status(status, headers, clock):
     found = claude_usage.probe("a", "tok", "haiku", _opener(status, headers))
-    assert (found.account, found.state, found.error, found.latency_ms) == ("a", "ERROR", f"HTTP {status}", 250)
+    assert (found.account, found.state, found.error, found.latency_ms) == ("a", "ERROR", f"HTTP {status}", 2500)
 
 
 @pytest.mark.parametrize("error", [TimeoutError("slow"), urllib.error.URLError(TimeoutError("slow"))])
