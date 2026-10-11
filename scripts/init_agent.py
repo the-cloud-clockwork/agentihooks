@@ -290,11 +290,11 @@ def _agent_command(
             *(["--agentihooks-exclude", spec.exclude] if spec.exclude else []),
             "--agentihooks-report",
             str(report),
-            *(["resume", spec.resume] if spec.resume else []),
             *_codex_otel_args(environ),
             *_codex_trust_args(directory, environ),
             *_model_args("codex", agent_args, environ),
             *agent_args,
+            *(["resume", spec.resume] if spec.resume else []),
         ]
         return _profile_command(command, spec), ""
     command = [
@@ -629,6 +629,15 @@ def _answer_channel_warning(pane: str, environ: dict[str, str]) -> str:
     return "answered" if herdr_host.answer(pane, channel.WARNING, environ, CHANNEL_WARNING_MS) else "unseen"
 
 
+def _name_in_herdr(pane: str, name: str, agent: str, environ: dict[str, str]) -> list[str]:
+    if not herdr_host.rename_agent(pane, name, environ):
+        return ["agent_name=unset"]
+    named = [f"agent_name={herdr_host.agent_name(name)}"]
+    if agent == "codex":
+        named.append(f"session_name={name if herdr_host.name_session(pane, name, environ) else 'unset'}")
+    return named
+
+
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
     args = _parser().parse_args(argv)
     active_env = dict(os.environ if environ is None else environ)
@@ -775,8 +784,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     pane = next((line.split("=", 1)[1] for line in report if line.startswith("pane_id=")), "")
     herdr_panes.mark(pane, active_env, route_status=route.get("status", "pending"))
     if pane and route.get("status") in STARTED_ROUTES:
-        renamed = herdr_host.rename_agent(pane, name, active_env)
-        report.append(f"agent_name={herdr_host.agent_name(name) if renamed else 'unset'}")
+        report += _name_in_herdr(pane, name, agent, active_env)
         if channel:
             report.append(f"channel_warning={_answer_channel_warning(pane, active_env)}")
     if args.handoff and route.get("status") != "routed":
