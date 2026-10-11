@@ -513,6 +513,27 @@ def test_agents_table_shows_each_agents_execution_identity_beside_its_terminal(o
     ]
 
 
+def test_a_remote_agent_without_a_terminal_view_still_shows_the_execution_column(open_page):
+    payload = status()
+    payload["executions"] = {
+        "eng-58": {
+            "backend": "kubernetes",
+            "generation": 2,
+            "pool": "standard",
+            "observed": "starting",
+            "wait": "",
+            "seen_at": NOW_MS - 60_000,
+            "terminal_behind": False,
+        }
+    }
+    page = open_page(payload, clock=True)
+    assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 11
+    assert [row[7:9] for row in page.table("swarm-agents")] == [
+        ["—", "—"],
+        ["STARTING seen 1m ago\nkubernetes · gen 2 · standard", "—"],
+    ]
+
+
 def test_a_local_only_swarm_keeps_the_familiar_agents_table(open_page):
     payload = status()
     payload["executions"] = {

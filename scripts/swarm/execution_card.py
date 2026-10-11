@@ -65,13 +65,8 @@ def cards(agents: Iterable[Mapping], terminals: Mapping[str, Mapping]) -> tuple[
         except (AttributeError, TypeError, ValueError):
             errors += 1
             built[name] = {
-                "agent": name,
+                **card({"name": name}, None),
                 "backend": str(agent.get("runtime_backend") or LOCAL),
-                "generation": 0,
-                "pool": "",
                 "observed": UNREADABLE,
-                "wait": "",
-                "seen_at": 0,
-                "terminal_behind": False,
             }
     return built, errors
