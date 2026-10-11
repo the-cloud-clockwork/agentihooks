@@ -110,7 +110,12 @@ def test_an_unqualified_or_missing_cli_records_native_resume_unavailable_and_kee
     found = snapshot.natives(
         "sw", [_agent(CLAUDE, "claude", cases.claude_home(tmp_path, repo))], str(repo), {}, {}, Cli(versions)
     )
-    assert found[CLAUDE]["native_resume"] == {"outcome": native.UNAVAILABLE, "harness": "claude", "cause": cause}
+    assert found[CLAUDE]["native_resume"] == {
+        "outcome": native.UNAVAILABLE,
+        "harness": "claude",
+        "cause": cause,
+        "decision": list(native.DECISION),
+    }
     assert found[CLAUDE]["continuation"] == native.model.CONTEXT
     assert _kept("sw") == {}
 
