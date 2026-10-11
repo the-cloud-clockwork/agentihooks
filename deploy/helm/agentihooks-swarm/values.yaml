@@ -99,7 +99,15 @@ controller:
   livenessProbe:
     initialDelaySeconds: 60
     periodSeconds: 10
-    timeoutSeconds: 5
+    timeoutSeconds: 8
+    failureThreshold: 3
+  startupProbe:
+    periodSeconds: 5
+    timeoutSeconds: 8
+    failureThreshold: 60
+  readinessProbe:
+    periodSeconds: 10
+    timeoutSeconds: 8
     failureThreshold: 3
   terminationGracePeriodSeconds: 30
   env: {}

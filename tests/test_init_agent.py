@@ -183,6 +183,56 @@ def test_a_route_report_removed_before_it_is_read_reads_as_no_route(tmp_path):
     assert init_agent._take_route_report(tmp_path / "gone.route") == ({}, None)
 
 
+def test_a_profiled_launch_with_no_route_report_fails_at_the_route_timeout(tmp_path):
+    from scripts.profiles import binding
+
+    report = tmp_path / "report.json"
+    binding.request(report, "engineer", "codex")
+    env = {binding.REPORT: str(report)}
+    with pytest.raises(ValueError) as error:
+        init_agent._route_reported(env, 90.0, {})
+    assert str(error.value) == "the harness did not report its route within 90s"
+    with pytest.raises(ValueError) as empty:
+        init_agent._route_reported(env, 0.5, {"status": ""})
+    assert str(empty.value) == "the harness did not report its route within 0.5s"
+    with pytest.raises(ValueError) as failed:
+        init_agent._route_reported(env, 90.0, {"status": "failed", "error": "no Codex account has room"})
+    assert str(failed.value) == "the harness route is failed: no Codex account has room"
+    with pytest.raises(ValueError) as silent:
+        init_agent._route_reported(env, 90.0, {"status": "failed"})
+    assert str(silent.value) == "the harness route is failed: no error given"
+    for started in ("routed", "bare", "direct"):
+        assert init_agent._route_reported(env, 90.0, {"status": started}) is None
+    assert init_agent._route_reported({}, 90.0, {}) is None
+    assert init_agent._route_reported({binding.REPORT: ""}, 90.0, {}) is None
+    binding.refuse(report, "selection refused")
+    assert init_agent._route_reported(env, 90.0, {}) is None
+
+
+def test_a_codex_launch_that_never_reports_its_route_fails_without_the_binding_wait(monkeypatch, tmp_path, capsys):
+    from scripts.swarm.runtime import parse_fields
+
+    binding, _ = _profile(monkeypatch, tmp_path, "codex")
+    waited = []
+    monkeypatch.setattr(binding, "wait", lambda *args: waited.append(args))
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda *a: ("codex", "explicit"))
+
+    def launch(launcher, directory, name, args, agent, environ):
+        init_agent._started_marker(launcher).touch()
+        assert Path(environ[binding.REPORT]).is_file()
+        return []
+
+    monkeypatch.setattr(init_agent, "_start_herdr", launch)
+    argv = ["--host", "herdr", "--agent", "codex", "--profile", "engineer", "--dir", str(tmp_path)]
+    rc = init_agent.main([*argv, "--route-timeout", "0.1"], {"XDG_RUNTIME_DIR": str(tmp_path / "runtime")})
+    output = capsys.readouterr()
+    fields = parse_fields(output.out)
+    assert rc == 3
+    assert waited == []
+    assert (fields["status"], fields["route_status"], fields["profile_validation"]) == ("started", "pending", "failed")
+    assert output.err == "agentihooks init-agent: the harness did not report its route within 0.1s\n"
+
+
 def test_terminal_that_never_starts_the_launcher_fails_and_discards_it(monkeypatch, tmp_path, capsys):
     rc = _launch(monkeypatch, tmp_path, lambda command, **kwargs: None)
 

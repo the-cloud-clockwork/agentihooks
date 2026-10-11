@@ -1,0 +1,75 @@
+{
+  "package": "SV2-CKP-02",
+  "dependency": [
+    "SV2-CKP-01"
+  ],
+  "dependents": [
+    "SV2-CKP-03"
+  ],
+  "integration_gate": "G8",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2590",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2601",
+  "tested_commit": "109b465a18ffc229ad8f0314ffb24ae1032b404c",
+  "status": "mocked-acceptance-qualified",
+  "package_complete": false,
+  "evidence_class": "mocked: local git repositories, a local durable directory backend behind a granted artifact store and fixture launch registrations; no object store, worker Pod or harness was used. Live G8 qualification belongs to the integration package.",
+  "interfaces": [
+    "git_capture.capture(worktree, remote_ref, policy) records the merge base with a ref the remote holds, the head, the branch, and the materials staged_patch (index against HEAD), unstaged_patch (work tree against index), untracked_archive and, when commits exist past the base, source_bundle (base..HEAD as a git bundle); branch_state is pushed when HEAD is already in the caller's remote ref",
+    "Policy names the untracked exclusion rules (ignored files, cache folders, compiled files, credential files by name, secret content, links and other non regular files, a per file and a total size limit); the manifest exclusions carry the rules and per kind counts, never a file name or value",
+    "SourceCapture.fields gives the manifest fields; merged adds them to a checkpoint manifest that already carries its transcript material and drops any source material the manifest carried from an earlier capture",
+    "git_capture.checkpoint refuses an archive member that is absolute, climbs out, enters .git or is not a regular file, stores nothing unless the manifest authority equals the granted store scope, stores every material before Validator.commit stores the manifest, so an interruption leaves no manifest and the earlier checkpoint current",
+    "git_capture.restore(validator, checkpoint_id, target) takes a Validator so authority comes from Validator.verify; it reads every material from the granted store, refuses a missing source material, a dirty target, a target without the base, a branch name git rejects, and an archive member on or under a link of the head tree or created by either patch, all before it checks anything out; then it fetches the bundle, checks out the head on the recorded branch, applies the staged patch to index and work tree and the unstaged patch to the work tree, places every member inside the target and only then writes them with their executable bits",
+    "SourceCapture.metrics exposes checkpoint_source_bytes keyed by material role",
+    "Production entrypoint: scripts.swarm.snapshot.take (the swarm snapshot command, stop and the tick's automatic snapshots) records each agent worktree's capture fields under sources beside its saved worktree path and keeps every material once, by sha256, in the swarm's sources folder; automatic snapshots prune objects no kept snapshot names; a worktree git cannot read is recorded as a sanitized error and the snapshot continues"
+  ],
+  "supported_versions": {
+    "checkpoint_contract": "2.2, the typed minor from SV2-CKP-01; source checkpoints use branch_state pushed or bundled",
+    "git": "CI ubuntu-latest git; the capture forces its diff format so repository diff settings do not change the patches"
+  },
+  "authority": "Capture writes only through the ArtifactStore granted to the attempt and only when the manifest authority equals that grant; restore reads only through the reader's granted store, and only a checkpoint Validator.verify calls authoritative is restored.",
+  "states": {
+    "observed": "Materials are the bytes git produced in the worktree at capture time",
+    "accepted": "Each material is stored and read back verified before the manifest is written",
+    "committed": "Validator.commit stores the manifest only after every inventoried object reads back verified",
+    "externally_verified": "restore re-verifies the manifest and every material by content hash before it changes the target"
+  },
+  "measurements": {
+    "checkpoint_source_bytes": {
+      "a": {
+        "source_bundle": 437,
+        "staged_patch": 401,
+        "unstaged_patch": 400,
+        "untracked_archive": 10240
+      },
+      "b": {
+        "source_bundle": 437,
+        "staged_patch": 401,
+        "unstaged_patch": 400,
+        "untracked_archive": 10240
+      },
+      "c": {
+        "source_bundle": 437,
+        "staged_patch": 416,
+        "unstaged_patch": 400,
+        "untracked_archive": 10240
+      }
+    }
+  },
+  "validation": {
+    "red": "Proofs run 38142838894 on the tests only commit 85650947 failed collecting the git capture tests with ImportError for git_capture",
+    "green": "Proofs run 38144459473 on 109b465a passed 35 unit tests; the three cases reported passed and their records were lifted from that run"
+  },
+  "limitations": [
+    "A detached HEAD is refused; a worker must capture on a branch",
+    "Tracked changes are captured as they are; only untracked files are screened for credentials and secret content",
+    "Submodule contents and git configuration are not captured",
+    "The legacy swarm snapshot still records worktree paths only; no worker path calls capture yet",
+    "Restore needs a clean clone that already holds the base commit",
+    "Residual, accepted for this package: an attempt whose own authority matches its own store grant can commit a checkpoint while a newer generation of the task exists, and if it commits an id first the newer commit under that id is refused with identity_conflict. Fencing depends on the launch lease (INV-R08); the store checks no lease and restore takes an explicit checkpoint id. A ledger follow-up is filed for a store side generation fence",
+    "Link names that git quotes in apply summaries are not matched by the patch link check; contain() still refuses such a member before any file is written",
+    "Snapshot capture runs while agents may still be writing, so it is diagnostic recovery material, not a quiesced checkpoint; quiesced capture and publication through the worker supervisor belong to SV2-CKP-04"
+  ],
+  "rollback": "Rehearsed in case C: an interrupted capture writes no manifest, the previous complete source checkpoint stays authoritative, and the interrupted materials stay in the store for diagnostics. Disabling source capture means not calling git_capture; SV2-CKP-01 readers are unchanged.",
+  "compatibility": "Compared with the preceding local path: snapshot documents keep version 1 and every existing key, restore and resume still reopen the saved worktree paths, older snapshots without sources load unchanged, and the SV2-CKP-01 validator still reads a snapshot document as path_only diagnostic material",
+  "rollout_safety": "AGENTIHOOKS_SWARM_SOURCE_CAPTURE=0 disables only the new capture and keeps the snapshot exactly as the last qualified local behaviour (worktree paths only); AGENTIHOOKS_SWARM_SOURCE_REF sets the remote ref the base is measured against, default origin/dev"
+}

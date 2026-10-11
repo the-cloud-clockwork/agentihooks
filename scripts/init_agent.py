@@ -185,6 +185,7 @@ MODEL_DEFAULTS = {"claude": "opus", "codex": "gpt-6.1-sol"}
 EFFORT_DEFAULT = "high"
 AGENT_HELP = "Agent to open; default the harness of the account with a free session and the fewest live sessions"
 LAUNCH_GRACE_S = 3
+STARTED_ROUTES = ("routed", "bare", "direct")
 
 
 def _flag_value(args: list[str], names: tuple[str, ...]) -> str:
@@ -406,6 +407,17 @@ def _selection_refused(environ: dict[str, str]) -> bool:
     from scripts.profiles import binding
 
     return bool(environ.get(binding.REPORT)) and binding.refused(Path(environ[binding.REPORT]))
+
+
+def _route_reported(environ: dict[str, str], timeout: float, route: dict) -> None:
+    from scripts.profiles import binding
+
+    status = route.get("status")
+    if not environ.get(binding.REPORT) or status in STARTED_ROUTES or _selection_refused(environ):
+        return
+    if not status:
+        raise ValueError(f"the harness did not report its route within {timeout:g}s")
+    raise ValueError(f"the harness route is {status}: {route.get('error', 'no error given')}")
 
 
 def _binding_export(environ: dict[str, str]) -> str:
@@ -742,7 +754,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         report.append(f"route_error={route['error']}")
     pane = next((line.split("=", 1)[1] for line in report if line.startswith("pane_id=")), "")
     herdr_panes.mark(pane, active_env, route_status=route.get("status", "pending"))
-    if pane and route.get("status") in ("routed", "bare", "direct"):
+    if pane and route.get("status") in STARTED_ROUTES:
         renamed = herdr_host.rename_agent(pane, name, active_env)
         report.append(f"agent_name={herdr_host.agent_name(name) if renamed else 'unset'}")
         if channel:
@@ -754,6 +766,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         )
         return 3
     try:
+        _route_reported(active_env, args.route_timeout, route)
         report += _binding_result(active_env, args.route_timeout, route)
     except (OSError, ValueError) as exc:
         print("\n".join([*report, "profile_validation=failed"]))

@@ -7,6 +7,9 @@ import math
 import statistics
 from typing import TYPE_CHECKING
 
+from scripts.swarm import freeze
+from scripts.swarm_ledger.repository import hierarchy
+
 if TYPE_CHECKING:
     from ledger_core import Context
 
@@ -119,12 +122,24 @@ def is_stale(shown, computed):
     return abs(shown - computed) > max(STALE_FLOOR_MINUTES, computed / 4)
 
 
+def frozen(doc: dict, pending: dict, inputs: dict) -> set:
+    graph, fix = hierarchy.project(doc)[0], inputs.get("fix_phase")
+    seen = {**doc, freeze.WATCHED: inputs["watched"]} if inputs.get("watched") else doc
+    held = {tid for tid, t in pending.items() if freeze.held(t, seen, graph, fix)}
+    waiting = {tid: t for tid, t in pending.items() if t.get("state") == "open"}
+    for _ in waiting:
+        held |= {tid for tid, t in waiting.items() if held & set(t.get("depends_on") or [])}
+    return held
+
+
 def calculate(doc: dict, events: list, now: int, inputs: dict | None = None) -> dict:
     slots, ci = (inputs or {}).get("slots"), (inputs or {}).get("ci_minutes")
     tiers = agent_minutes(doc, events, now)
-    unfinished = {t["id"]: t for t in live(doc, "tasks") if not finished(t)}
-    left = {tid: remaining_minutes(t, tiers, ci or 0, events, now) for tid, t in unfinished.items()}
-    chain, work = chain_minutes(unfinished, left), sum(left.values())
+    pending = {t["id"]: t for t in live(doc, "tasks") if not finished(t) and not t.get("merged_into")}
+    left = {tid: remaining_minutes(t, tiers, ci or 0, events, now) for tid, t in pending.items()}
+    held = frozen(doc, pending, inputs or {})
+    unfinished = {tid: t for tid, t in pending.items() if tid not in held}
+    chain, work = chain_minutes(unfinished, left), sum(left[tid] for tid in unfinished)
     throughput = work / slots if slots else None
     if not unfinished:
         minutes, gap = 0, ""
@@ -143,6 +158,8 @@ def calculate(doc: dict, events: list, now: int, inputs: dict | None = None) -> 
         "tiers": tiers,
         "stale": is_stale(doc.get("time_left_minutes"), minutes),
         "gap": gap,
+        "frozen": len(held),
+        "frozen_work": round(sum(left[tid] for tid in held), 1),
     }
 
 
@@ -153,18 +170,27 @@ def clock(minutes):
 def time_left_line(doc, events, now, calculation=None):
     result = calculate(doc, events, now) if calculation is None else calculation
     shown, computed = doc.get("time_left_minutes"), result["minutes"]
+    held = left_out(result)
     if computed is None:
-        return f"the page shows {clock(shown)}, code cannot compute it: {result['gap']}"
+        return f"the page shows {clock(shown)}, code cannot compute it: {result['gap']}{held}"
     verdict = "stale" if result["stale"] else "current"
     if not result["remaining"]:
-        return f"the page shows {clock(shown)}, computed 0h 0m with no task remaining, {verdict}"
+        return f"the page shows {clock(shown)}, computed 0h 0m with no task remaining{held}, {verdict}"
     tiers = ", ".join(f"{name} {entry['minutes']:g}m" for name, entry in result["tiers"].items())
     ci = "no CI median yet" if result["ci_minutes"] is None else f"{result['ci_minutes']:g}m of CI"
     return (
         f"the page shows {clock(shown)}, computed {clock(computed)} as the larger of a {result['chain']:g}m chain "
         f"and {result['work']:g}m of work over {result['slots']} slots, for {result['remaining']} remaining tasks "
-        f"at {tiers} and {ci}, {verdict}"
+        f"at {tiers} and {ci}{held}, {verdict}"
     )
+
+
+def left_out(result):
+    count = result.get("frozen")
+    if not count:
+        return ""
+    noun = "task" if count == 1 else "tasks"
+    return f", with {count} frozen {noun} holding {result['frozen_work']:g}m of work left out"
 
 
 def listed(items):
