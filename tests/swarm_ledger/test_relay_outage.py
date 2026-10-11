@@ -84,7 +84,7 @@ def write(op, refused=()):
 def operator_writes(phase, question):
     write({"op": "add", "thread": "chat", "id": "m-1", "text": "@ro-eng-1 please rebase onto dev"})
     write({"op": "add", "thread": f"phases/{phase}/comments", "id": "c-1", "text": "the phase needs a doc"})
-    write({"op": "answer", "id": "an-1", "item": question, "text": "use the queue"})
+    write({"op": "add", "thread": f"{question}/answers", "id": "an-1", "text": "use the queue"})
 
 
 def mentions(texts, words):
