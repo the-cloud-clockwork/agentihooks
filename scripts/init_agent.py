@@ -293,7 +293,7 @@ def _agent_command(
             *(["resume", spec.resume] if spec.resume else []),
             *_codex_otel_args(environ),
             *_codex_trust_args(directory, environ),
-            *_model_args("codex", agent_args, environ),
+            *(_model_args("codex", agent_args, environ) if spec.profile or spec.fallback_bare else []),
             *agent_args,
         ]
         return _profile_command(command, spec), ""
@@ -374,6 +374,21 @@ def _write_launcher(
     return launcher, prompt_file
 
 
+def _plain_codex_handoff(flags: list[str], environ: dict[str, str]) -> list[str]:
+    from scripts.profiles import binding
+    from scripts.select_profile import _native_options
+    from scripts.swarm.launch_model import configured
+
+    _, harness, source, _ = binding.process()
+    if harness != "codex":
+        raise ValueError(f"unsupported quota transfer from {harness} to codex")
+    native = configured("codex", codex_home(source or environ))
+    model, effort, remaining = _native_options("codex", flags)
+    model = model or source.get("AGENTIHOOKS_RUN_MODEL") or native.get("model", "")
+    effort = effort or source.get("AGENTIHOOKS_RUN_EFFORT") or native.get("effort", "")
+    return [*model_flags("codex", model, effort), *remaining]
+
+
 def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], environ: dict[str, str]) -> list[str]:
     from scripts.profiles import binding
     from scripts.select_profile import BUNDLE_REVISION, OVERLAYS, prepare
@@ -384,6 +399,8 @@ def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], env
         args.overlay = [o for o in environ.get(OVERLAYS, "").split(",") if o]
         args.bundle_revision = environ.get(BUNDLE_REVISION, "")
     if continuing and not args.profile:
+        if agent == "codex" and args.handoff:
+            return _plain_codex_handoff(flags, environ)
         raise ValueError("unsupported continuation: original required profile is missing; pass --profile")
     if not args.profile:
         return flags
