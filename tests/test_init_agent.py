@@ -1138,3 +1138,68 @@ def test_a_codex_handoff_resumes_the_conversation_on_another_codex_account(monke
     assert "select-profile engineer --agent codex -- --agentihooks-exclude alpha --agentihooks-report" in command
     assert " resume thread-1 " in command
     assert "-m gpt-6.1-sol" in command
+
+
+@pytest.mark.parametrize("source_flags", [False, True])
+def test_a_plain_codex_quota_handoff_preserves_native_choices(monkeypatch, tmp_path, capsys, source_flags):
+    from scripts.profiles import binding
+
+    home = tmp_path / "codex"
+    home.mkdir()
+    (home / "config.toml").write_text('model = "gpt-6-astra"\nmodel_reasoning_effort = "low"\n')
+    source = {"CODEX_HOME": str(home)}
+    if source_flags:
+        source.update(AGENTIHOOKS_RUN_MODEL="gpt-6.1-sol", AGENTIHOOKS_RUN_EFFORT="high")
+    monkeypatch.setattr(binding, "process", lambda: (123, "codex", source, "alpha"))
+    monkeypatch.setattr(init_agent.operator_env, "fill", lambda env: None)
+    monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, *args: ("linux", ["terminal", str(launcher)]))
+    launched = []
+
+    def popen(command, **kwargs):
+        launcher = Path(command[-1])
+        launched.append((launcher.read_text(), kwargs["env"]))
+        _routed("routed", "beta")(command, **kwargs)
+
+    monkeypatch.setattr(init_agent.subprocess, "Popen", popen)
+    monkeypatch.setattr(init_agent, "_mark_handoff", lambda account, resume: ["thread-1"])
+    env = {
+        "HOME": str(tmp_path),
+        "XDG_RUNTIME_DIR": str(tmp_path / "runtime"),
+        "AGENTIHOOKS_TARGET": "codex",
+        "CODEX_HOME": str(home),
+        "AH_CX_TOKEN_alpha": "tok",
+    }
+    assert (
+        init_agent.main(
+            [
+                "--dir",
+                str(tmp_path),
+                "--name",
+                "plain-handoff",
+                "--prompt",
+                "saved task",
+                "--handoff",
+                "--resume",
+                "thread-1",
+                "--start-timeout",
+                "0",
+                "--route-timeout",
+                "0",
+            ],
+            env,
+        )
+        == 0
+    )
+    command, successor = launched[0]
+    assert "--agentihooks-exclude alpha" in command
+    assert "resume thread-1" in command
+    assert "select-profile" not in command
+    assert "AGENTIHOOKS_PROFILE_REPORT" not in successor
+    assert not successor.get("AGENTIHOOKS_PROFILE")
+    expected_model, expected_effort = ("gpt-6.1-sol", "high") if source_flags else ("gpt-6-astra", "low")
+    assert f"-m {expected_model}" in command
+    assert f'model_reasoning_effort="{expected_effort}"' in command
+    report = capsys.readouterr().out
+    assert "handoff=done" in report
+    assert "account=beta" in report
+    assert "profile_validation" not in report
