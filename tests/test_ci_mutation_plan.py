@@ -27,9 +27,34 @@ def test_shard_count_fills_each_shard_to_its_target_and_stays_within_the_limit(s
     assert plan.shard_count(seconds, mutants, 240, 10) == expected
 
 
-@pytest.mark.parametrize(("stats", "expected"), [(0, 1), (1, 1), (360, 1), (361, 2), (1920, 6), (10**6, 10)])
-def test_stats_parts_split_the_stats_pass_to_its_target_and_stay_within_the_limit(stats, expected):
-    assert plan.stats_part_count(stats, 90, 10) == expected
+def _timed_tests(tmp_path, seconds, marks=None):
+    (tmp_path / "tests").mkdir(exist_ok=True)
+    for name in seconds:
+        mark = (
+            f'import pytest\n\npytestmark = pytest.mark.xdist_group("{marks[name]}")\n' if name in (marks or {}) else ""
+        )
+        (tmp_path / f"tests/test_{name}.py").write_text(mark + "def test_x():\n    pass\n")
+    (tmp_path / ".test_durations").write_text(
+        json.dumps({f"tests/test_{name}.py::test_x": value for name, value in seconds.items()})
+    )
+    return [f"tests/test_{name}.py" for name in sorted(seconds)]
+
+
+@pytest.mark.parametrize(
+    ("target", "limit", "expected"),
+    [(81, 10, (1, 80)), (41, 10, (2, 40)), (21, 10, (4, 20)), (5, 10, (4, 20)), (5, 3, (2, 40))],
+)
+def test_stats_parts_stop_at_the_target_or_where_one_file_sets_the_floor(tmp_path, target, limit, expected):
+    tests = _timed_tests(tmp_path, {name: 20 for name in "abcdefghijklmnop"})
+    parts, wall = plan.stats_part_count(tmp_path, tests, target, limit)
+    assert (parts, wall) == (expected[0], pytest.approx(expected[1], abs=0.1))
+
+
+def test_stats_parts_split_a_shared_group_across_parts_but_never_inside_one(tmp_path):
+    tests = _timed_tests(tmp_path, {name: 10 for name in "abcdefgh"}, dict.fromkeys("abcdefgh", "port"))
+    assert plan.slowest_bucket(tmp_path, tests, 1) == pytest.approx(80, abs=0.1)
+    assert plan.stats_part_count(tmp_path, tests, 21, 10) == (4, pytest.approx(20, abs=0.1))
+    assert plan.stats_part_count(tmp_path, [], 20, 10) == (1, 0)
 
 
 def _project(tmp_path, durations):
@@ -57,19 +82,23 @@ def test_estimate_weighs_each_changed_line_mutant_by_its_selected_test_timings(t
     per_mutant = plan.MUTANT_SECONDS + plan.TEST_WEIGHT * 0.4
     for lines in ({2}, {2, 6}):
         _, mutations = changed_mutations("scripts/sample.py", source, lines)
-        seconds, mutants, stats = plan.estimate(tmp_path, {"scripts/sample.py": lines})
+        seconds, mutants, tests = plan.estimate(tmp_path, {"scripts/sample.py": lines})
         assert mutants == len(mutations) > 0
         assert seconds == pytest.approx(mutants * per_mutant)
-        assert stats == pytest.approx(0.8)
+        assert tests == ["tests/test_sample.py"]
     sample = plan.estimate(tmp_path, {"scripts/sample.py": {2}})
     other = plan.estimate(tmp_path, {"scripts/other.py": {2}})
     both = plan.estimate(tmp_path, {"scripts/plain.py": {1}, "scripts/sample.py": {2}, "scripts/other.py": {2}})
     assert other[1] > 0
-    assert both == (pytest.approx(sample[0] + other[0]), sample[1] + other[1], pytest.approx(2.8))
-    assert plan.estimate(tmp_path, {"scripts/sample.py": {3}}) == (0, 0, pytest.approx(0.8))
+    assert both == (
+        pytest.approx(sample[0] + other[0]),
+        sample[1] + other[1],
+        ["tests/test_other.py", "tests/test_sample.py"],
+    )
+    assert plan.estimate(tmp_path, {"scripts/sample.py": {3}}) == (0, 0, ["tests/test_sample.py"])
     assert changed_mutations("scripts/sample.py", source, {9})[1]
-    assert plan.estimate(tmp_path, {"scripts/sample.py": {9}}) == (0, 0, pytest.approx(0.8))
-    assert plan.estimate(tmp_path, {"scripts/plain.py": {1}}) == (0, 0, 0)
+    assert plan.estimate(tmp_path, {"scripts/sample.py": {9}}) == (0, 0, ["tests/test_sample.py"])
+    assert plan.estimate(tmp_path, {"scripts/plain.py": {1}}) == (0, 0, [])
 
 
 def test_estimate_names_the_file_whose_pragma_is_broken(tmp_path, monkeypatch):
@@ -106,30 +135,42 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
     )
     monkeypatch.setattr(
         "scripts.ci_mutation.plan.estimate",
-        lambda root, changes: (1601.4, 50, 1201) if (root, changes) == (tmp_path, {"scripts/sample.py": {2}}) else None,
+        lambda root, changes: (
+            (1601.4, 50, ["tests/test_sample.py"])
+            if (root, changes) == (tmp_path, {"scripts/sample.py": {2}})
+            else None
+        ),
+    )
+    monkeypatch.setattr(
+        "scripts.ci_mutation.plan.stats_part_count",
+        lambda root, tests, target, limit: (
+            (3, 120.6) if (root, tests, target, limit) == (tmp_path, ["tests/test_sample.py"], 100, 4) else None
+        ),
     )
     monkeypatch.setattr("sys.argv", [*__import__("sys").argv, "--stats-target", "100"])
     assert plan.main() == 0
     assert calls == [(tmp_path, ["earlier", "merged"], "HEAD")]
-    assert output.read_text() == "shards=[0, 1, 2, 3]\nstats_parts=[0, 1, 2, 3]\nbases=earlier,merged\n"
+    assert output.read_text() == "shards=[0, 1, 2, 3]\nstats_parts=[0, 1, 2]\nbases=earlier,merged\n"
     assert capsys.readouterr().out == (
         "Mutation bases: earlier merged\n"
-        "Changed line mutants: 50\nEstimated mutation seconds: 1601, stats seconds: 1201\n"
-        "Mutation shards: 4\nStats parts: 4\n"
+        "Changed line mutants: 50\nEstimated mutation seconds: 1601, slowest stats bucket: 121\n"
+        "Mutation shards: 4\nStats parts: 3\n"
     )
 
 
 @pytest.mark.parametrize(
     ("estimated", "shards", "parts"),
     [
-        ((0, 0, 0), "[0]", "[0]"),
-        ((962, 500, 361), "[0, 1]", "[0, 1]"),
-        ((10**6, 10**4, 10**6), json.dumps(list(range(10))), json.dumps(list(range(10)))),
+        ((0, 0, {}), "[0]", "[0]"),
+        ((962, 500, dict.fromkeys("abcde", 15.24)), "[0, 1]", "[0, 1]"),
+        ((10**6, 10**4, {f"t{n}": 30 for n in range(40)}), json.dumps(list(range(10))), json.dumps(list(range(10)))),
     ],
 )
-def test_main_defaults_to_origin_dev_a_four_minute_target_and_ten_shards(
+def test_main_defaults_to_origin_dev_a_four_minute_target_a_half_minute_stats_bucket_and_ten_shards(
     tmp_path, monkeypatch, estimated, shards, parts
 ):
+    seconds, mutants, timed = estimated
+    estimated = (seconds, mutants, _timed_tests(tmp_path, timed))
     output = tmp_path / "github-output"
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
