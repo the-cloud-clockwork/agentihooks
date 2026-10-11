@@ -18,6 +18,11 @@ DELETABLE = ("pods", "services")
 NODES = "/api/v1/nodes"
 WATCH_SECONDS = 1
 GONE = 410
+OBJECTS = {
+    "Secret": ("api/v1", "secrets"),
+    "Service": ("api/v1", "services"),
+    "NetworkPolicy": ("apis/networking.k8s.io/v1", "networkpolicies"),
+}
 Opener = Callable[..., Any]
 
 
@@ -51,6 +56,8 @@ class PodApi(Protocol):
     def ready_nodes(self) -> list[str] | None: ...
 
     def create_config_map(self, body: dict) -> dict: ...
+
+    def create_object(self, body: dict) -> dict: ...
 
     def delete(self, kind: str, name: str, uid: str) -> bool: ...
 
@@ -134,10 +141,19 @@ class PodClient:
         return self._create("pods", body)
 
     def _create(self, kind: str, body: dict) -> dict:
-        status, answer = self.http.send("POST", self._path(kind=kind), body)
+        return self._post(self._path(kind=kind), body)
+
+    def _post(self, path: str, body: dict) -> dict:
+        status, answer = self.http.send("POST", path, body)
         if status == 409 and answer.get("reason") == "AlreadyExists":
             raise AlreadyExists(body["metadata"]["name"])
         return _answer(status, answer)
+
+    def create_object(self, body: dict) -> dict:
+        if body.get("kind") not in OBJECTS:
+            raise ValueError("the controller creates only Secret, Service and NetworkPolicy objects")
+        group, plural = OBJECTS[body["kind"]]
+        return self._post(f"/{group}/namespaces/{self.namespace}/{plural}", body)
 
     def read_pod(self, name: str) -> dict | None:
         return self.read("pods", name)

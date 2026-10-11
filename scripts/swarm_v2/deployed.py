@@ -4,16 +4,18 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
-from scripts.swarm.store import SwarmError
+from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2 import image_tag
 from scripts.swarm_v2.accounts import AccountCapacity
 from scripts.swarm_v2.auth_context import Registration
+from scripts.swarm_v2.herdr.endpoints import Clients
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 from scripts.swarm_v2.kubernetes.client import ApiRefused, KubeHttp, PodApi, PodClient
 from scripts.swarm_v2.kubernetes.failures import AccountSlot, Recovery
 from scripts.swarm_v2.kubernetes.grants import PodGrants, Supervision
 from scripts.swarm_v2.kubernetes.runtime import KubernetesTransport
 from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, PodTemplate, load_policy
+from scripts.swarm_v2.kubernetes.terminal import Exposure, HostKeys, TerminalObjects, TerminalTemplate
 from scripts.swarm_v2.kubernetes.watch import OWNER_LABEL, CursorExpired, owner_for
 from scripts.swarm_v2.launch import DistributedLaunch, LaunchTerms
 from scripts.swarm_v2.registry import FleetRegistry
@@ -33,6 +35,7 @@ CAP_ENV = "AGENTIHOOKS_LAUNCH_CAP"
 PROJECTS_ENV = "AGENTIHOOKS_LAUNCH_PROJECTS"
 BRAIN_ENV = "AGENTIHOOKS_LAUNCH_BRAIN"
 EXPORTER_ENV = "AGENTIHOOKS_WORKER_EXPORTER"
+TERMINAL_ENV = "AGENTIHOOKS_WORKER_TERMINAL"
 REQUIRED = (POLICY_ENV, IMAGE_TAG_ENV, PROFILE_ENV, ACCOUNT_ENV, CAP_ENV, PROJECTS_ENV, BRAIN_ENV)
 RESERVATION_MS = 300_000
 HARNESS = "claude"
@@ -75,6 +78,18 @@ def _exporter(value: str | None) -> tuple[str, ...] | None:
     return tuple(words)
 
 
+def _terminal(value: str | None) -> Exposure | None:
+    if not value:
+        return None
+    try:
+        setting = json.loads(value)
+        return Exposure(Clients(**setting["clients"]), setting["user_ca"])
+    except (ValueError, TypeError, KeyError, AttributeError):
+        raise WorkerSettingsRefused(
+            f"{TERMINAL_ENV} must be a JSON object naming the terminal clients and user CA"
+        ) from None
+
+
 @dataclass(frozen=True)
 class Workers:
     terms: LaunchTerms
@@ -82,6 +97,7 @@ class Workers:
     image_tag: str
     profile: str
     exporter: tuple[str, ...] | None
+    terminal: Exposure | None = None
 
     @classmethod
     def from_environ(cls, environ: Mapping[str, str], slug: str) -> "Workers | None":
@@ -102,7 +118,8 @@ class Workers:
         if not projects:
             raise WorkerSettingsRefused(f"{PROJECTS_ENV} names no project")
         terms = LaunchTerms(environ[ACCOUNT_ENV], int(cap), RESERVATION_MS, projects, environ[BRAIN_ENV], api_url)
-        return cls(terms, policy, environ[IMAGE_TAG_ENV], profile, _exporter(environ.get(EXPORTER_ENV)))
+        exporter, terminal = _exporter(environ.get(EXPORTER_ENV)), _terminal(environ.get(TERMINAL_ENV))
+        return cls(terms, policy, environ[IMAGE_TAG_ENV], profile, exporter, terminal)
 
     def launch(self, request: SpawnRequest) -> dict:
         task, limits = request.task, self.policy["profiles"][self.profile]["limits"]
@@ -131,11 +148,17 @@ class Workers:
         return {"pod_namespace": self.policy["namespace"], "pod_name": f"swarm-{request.task['id']}"}
 
     def transport(self, environ: Mapping[str, str], slug: str) -> KubernetesTransport:
-        return KubernetesTransport(pod_api(environ, self.policy["namespace"]), slug, PodTemplate(self.policy))
+        template = PodTemplate(self.policy)
+        mounted = template if self.terminal is None else TerminalTemplate(template)
+        return KubernetesTransport(pod_api(environ, self.policy["namespace"]), slug, mounted)
 
-    def grants(self, environ: Mapping[str, str], slug: str, verify: Callable[[str], Registration]) -> PodGrants:
+    def grants(
+        self, environ: Mapping[str, str], slug: str, verify: Callable[[str], Registration], store: RedisStore
+    ) -> PodGrants:
         supervision = Supervision(HARNESS, self.exporter, self.terms.api_url)
-        return PodGrants(pod_api(environ, self.policy["namespace"]), slug, verify, supervision)
+        api = pod_api(environ, self.policy["namespace"])
+        terminal = None if self.terminal is None else TerminalObjects(api, self.terminal, HostKeys(store, slug))
+        return PodGrants(api, slug, verify, supervision, terminal)
 
 
 def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[str, str]) -> RoutedRuntime:
@@ -146,7 +169,9 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
         return grants.verify(slug, token)
 
     capacity, fleet = AccountCapacity(controller.store, slug, verify), FleetRegistry(controller.store, slug, verify)
-    launcher = DistributedLaunch(controller, grants, capacity, fleet, None, workers.grants(environ, slug, verify))
+    launcher = DistributedLaunch(
+        controller, grants, capacity, fleet, None, workers.grants(environ, slug, verify, controller.store)
+    )
     kubernetes = KubernetesRuntime(controller.execute, workers.launch)
     runtime = routed(
         environ, kubernetes=kubernetes, launch=partial(launcher.from_tick, terms=workers.terms, target=workers.target)

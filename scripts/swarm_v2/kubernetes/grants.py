@@ -3,6 +3,7 @@
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Protocol
 
 from scripts.swarm.store import AgentRecord
 from scripts.swarm_v2.auth_context import GrantRefused, Registration
@@ -60,18 +61,30 @@ def _material(pod: dict, labels: dict[str, str], grant: str, record: str) -> dic
     }
 
 
+class Terminals(Protocol):
+    def open(self, registration: Registration, pod: dict) -> str: ...
+
+
 class PodGrants:
-    def __init__(self, api: PodApi, slug: str, verify: Callable[[str], Registration], supervision: Supervision) -> None:
+    def __init__(
+        self,
+        api: PodApi,
+        slug: str,
+        verify: Callable[[str], Registration],
+        supervision: Supervision,
+        terminal: Terminals | None = None,
+    ) -> None:
         self.api, self.owner = api, owner_for(slug)
-        self.verify, self.supervision = verify, supervision
+        self.verify, self.supervision, self.terminal = verify, supervision, terminal
 
     def hand(self, agent: AgentRecord, grant: str) -> Hand:
         from redis.exceptions import RedisError
 
         try:
-            record = self.supervision.record(self.verify(grant), agent.profile)
+            registration = self.verify(grant)
         except (GrantRefused, RedisError):
             return Hand(False, "grant_unverified")
+        record = self.supervision.record(registration, agent.profile)
         labels = {
             OWNER_LABEL: self.owner,
             EXECUTION_LABEL: agent.execution_id,
@@ -93,6 +106,8 @@ class PodGrants:
             return Hand(False, "config_map_refused", self._remove(pod))
         except OSError:
             return Hand(False, "config_map_unavailable", self._remove(pod))
+        if self.terminal is not None and (refused := self.terminal.open(registration, pod)):
+            return Hand(False, refused, self._remove(pod))
         return HANDED
 
     def _remove(self, pod: dict) -> bool:
