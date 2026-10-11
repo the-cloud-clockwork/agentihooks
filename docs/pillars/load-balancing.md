@@ -456,8 +456,11 @@ routing pool and the `agentihooks quota` rows.
 one ChatGPT workspace in and exports it. A ChatGPT Codex access token lives ten
 days, so the refresher below keeps it alive.
 
-- The slug is letters, digits, `_` and `-`; `-` becomes `_`. An empty slug, one
-  that starts with `_`, and `status`, `help`, `default` and `api` are refused.
+- The slug is letters, digits and `_`; every run of other characters becomes one
+  `_`, so an email works (`nestor.colt@gmail.com` becomes `nestor_colt_gmail_com`)
+  and the login prints a note recommending the email of the target account. An
+  empty slug, one that starts with `_`, and `status`, `help`, `default` and `api`
+  in any case are refused.
   `agentihooks codex login` with no slug, `login status`, `login help` and
   `login --<flag>` still go straight to `codex login`.
 - The login runs `codex login -c cli_auth_credentials_store="file"` (browser
@@ -484,6 +487,32 @@ days, so the refresher below keeps it alive.
   under the keys `AH_CX_TOKEN_<slug>` and `AH_CX_REFRESH_<slug>`. A write merges
   its keys over the current ones with check-and-set, retried up to three times
   on a conflict, and reports key names and the key count only.
+
+### Logging in a Claude account
+
+`agentihooks claude login [slug] [--openbao | --no-openbao]` captures the
+one-year token `claude setup-token` prints and stores it the same way; every
+other `agentihooks claude ...` still routes and launches Claude.
+
+- With no slug, a terminal is asked for one (the email of the target account);
+  off a terminal the command prints its usage and exits 2.
+- `claude setup-token` runs in a pseudo-terminal 1000 columns wide, so the token
+  prints on one line instead of being wrapped, with keystrokes and output passed
+  straight through so the browser sign-in works as usual. The terminal mode is
+  restored however the run ends. `setup-token` signs in whichever account the
+  browser holds, so use a private window for the account you want.
+- The token is the longest `sk-ant-oat01-…` match once escape sequences are
+  stripped. No match or a non-zero exit writes nothing and exits non zero.
+- On success it writes `export AH_CC_TOKEN_<slug>=<token>` into the managed block
+  (no refresh flag: the token lasts a year) and prints the variable, its length
+  and the file to `source`, never the token.
+- The OpenBao step is the one `codex login` uses, writing the key
+  `AH_CC_TOKEN_<slug>` into the KV v2 secret `secret/agentihooks/claude-creds`.
+
+Both logins print their steps and notes in blue, questions and warnings in
+yellow and errors in red, but only when the output is a terminal and `NO_COLOR`
+is unset; otherwise the text is plain. `codex refresh` colours its warnings and
+failures the same way.
 
 ### Refreshing tokens
 
