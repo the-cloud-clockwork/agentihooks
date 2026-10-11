@@ -95,6 +95,11 @@ CASES = {
     "lone surrogate escape": ('{"t":"\\ud800 ' + TOKEN + '"}\n', '{"t":"\\ud800 ' + HIDDEN + '"}\n', 1),
     "non ascii rewritten as escapes": (json.dumps({"t": f"é {TOKEN}"}) + "\n", '{"t":"\\u00e9 ' + HIDDEN + '"}\n', 1),
     "text": (f"token {TOKEN}\n{{broken\n", f"token {HIDDEN}\n{{broken\n", 1),
+    "text lines before a record": (
+        "plain\n{broken\n" + json.dumps({"t": TOKEN}) + "\n",
+        "plain\n{broken\n" + compact({"t": HIDDEN}) + "\n",
+        1,
+    ),
     "marker already present": (f"[REDACTED:x] {TOKEN}\n", f"[REDACTED:x] {HIDDEN}\n", 1),
     "strict only pattern": ("xoxb-" + "1" * 12 + "\n", "[REDACTED:slack_token]\n", 1),
     "key across lines": (
