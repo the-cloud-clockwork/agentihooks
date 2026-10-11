@@ -21,6 +21,11 @@ EXE_A = "exe-" + "a" * 32
 NAME = f"swarm-{EXE_A}-terminal"
 HOST = f"{NAME}.swarm-workers.svc.cluster.local"
 HOST_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureHostKey"
+PROFILE = "dfc82003987b56c2d3094030456bbd11"
+
+
+def saved(profile_id: str, label: str, target: str) -> dict:
+    return {"id": profile_id, "label": label, "target": target, "session": "default", "enabled": True}
 
 
 def fixture() -> dict:
@@ -54,7 +59,7 @@ class Runner:
         self.commands: list[list[str]] = []
         self.ssh = subprocess.CompletedProcess([], 0, "", "")
         self.listed = subprocess.CompletedProcess([], 0, "[]", "")
-        self.added = subprocess.CompletedProcess([], 0, "saved", "")
+        self.added = subprocess.CompletedProcess([], 0, f"Saved SSH machine {PROFILE}. Remote server is ready.\n", "")
         self.herdr = sv2_hdr01_cases.Runner(sv2_hdr01_cases.fixture()["server"])
 
     def __call__(self, command: list[str]) -> subprocess.CompletedProcess:
@@ -64,7 +69,13 @@ class Runner:
         if command[:3] == ["herdr", "machine", "list"]:
             return self.listed
         if command[:3] == ["herdr", "machine", "add"]:
+            if self.added.returncode == 0:
+                listing = json.dumps([saved(PROFILE, NAME, f"ssh://{HOST}")])
+                self.listed = subprocess.CompletedProcess([], 0, listing, "")
             return self.added
+        if command[:3] == ["herdr", "machine", "remove"]:
+            self.listed = subprocess.CompletedProcess([], 0, "[]", "")
+            return subprocess.CompletedProcess(command, 0, "", "")
         forwarded = [*command[:2], sv2_hdr01_cases.TARGET, *command[3:]] if "--machine" in command else command
         return self.herdr(forwarded)
 
@@ -295,31 +306,47 @@ def test_attach_connects_saves_the_machine_and_qualifies_its_incarnation(tmp_pat
     assert runner.commands[:3] == [
         ["/usr/bin/ssh", "-F", str(found.home.config), HOST, "true"],
         ["herdr", "machine", "list", "--json"],
-        ["herdr", "machine", "add", "--label", NAME, f"ssh://{HOST}"],
+        ["herdr", "machine", "add", "--label", NAME, "--remote-session", "default", f"ssh://{HOST}"],
     ]
     assert runner.commands[3] == ["herdr", "--machine", NAME, *capabilities.STATUS_SERVER]
+    assert found.registrations.store.path == found.home.terminals / "registrations.json"
+    assert [record.profile_id for record in found.registrations.store.load().values()] == [PROFILE]
     assert found.terminal_endpoint_auth_failures() == {}
 
 
-def test_a_saved_machine_is_not_added_again(tmp_path):
+def test_a_machine_this_client_saved_is_not_added_again(tmp_path):
     found, runner = terminal(tmp_path)
-    runner.listed = subprocess.CompletedProcess([], 0, json.dumps(["other", {"label": "x"}, {"label": NAME}]), "")
     found.attach(scope(), HOST_KEY)
-    assert ["herdr", "machine", "add", "--label", NAME, f"ssh://{HOST}"] not in runner.commands
+    runner.listed = subprocess.CompletedProcess([], 0, json.dumps([saved(PROFILE, NAME, f"ssh://{HOST}")]), "")
+    found.attach(scope(), HOST_KEY)
+    assert sum(command[:3] == ["herdr", "machine", "add"] for command in runner.commands) == 1
+
+
+def test_a_manual_machine_with_the_same_label_is_refused_not_adopted(tmp_path):
+    found, runner = terminal(tmp_path)
+    runner.listed = subprocess.CompletedProcess([], 0, json.dumps([saved("m1", NAME, "ssh://devbox")]), "")
+    assert refusal(lambda: found.attach(scope(), HOST_KEY)) == (
+        "label_collision",
+        f"{NAME} is the label of a machine this controller does not own; "
+        "audit it and remove it with herdr machine remove before this endpoint registers",
+    )
+    assert not any(command[:3] == ["herdr", "machine", "add"] for command in runner.commands)
+    assert found.registrations.store.load() == {}
+    assert found.terminal_endpoint_refusals() == {"label_collision": 1}
 
 
 @pytest.mark.parametrize(
-    "listed",
+    ("listed", "message"),
     [
-        subprocess.CompletedProcess([], 1, json.dumps([{"label": NAME}]), ""),
-        subprocess.CompletedProcess([], 0, "{", ""),
+        (subprocess.CompletedProcess([], 1, json.dumps([{"label": NAME}]), ""), "herdr machine list failed"),
+        (subprocess.CompletedProcess([], 0, "{", ""), "herdr machine list is not JSON"),
     ],
 )
-def test_an_unreadable_machine_list_still_adds_the_machine(tmp_path, listed):
+def test_an_unreadable_machine_list_refuses_the_save(tmp_path, listed, message):
     found, runner = terminal(tmp_path)
     runner.listed = listed
-    found.attach(scope(), HOST_KEY)
-    assert runner.commands[2] == ["herdr", "machine", "add", "--label", NAME, f"ssh://{HOST}"]
+    assert refusal(lambda: found.attach(scope(), HOST_KEY)) == ("catalog_unreadable", message)
+    assert not any(command[:3] == ["herdr", "machine", "add"] for command in runner.commands)
 
 
 def test_a_refused_machine_save_is_counted(tmp_path):
@@ -384,4 +411,64 @@ def test_an_incompatible_server_is_a_verdict_not_an_auth_failure(tmp_path):
     runner.herdr = sv2_hdr01_cases.Runner(sv2_hdr01_cases.fixture()["missing_forwarding_server"])
     verdict = found.attach(scope(), HOST_KEY)
     assert "herdr server lacks surface_interest=true" in verdict.refusals
+    assert runner.commands[-1] == ["herdr", "machine", "remove", PROFILE]
+    assert found.registrations.store.load() == {}
     assert found.terminal_endpoint_auth_failures() == {}
+
+
+@pytest.mark.parametrize("server", [None, "replaced"])
+def test_a_server_that_cannot_be_qualified_loses_its_registration(tmp_path, server):
+    found, runner = terminal(tmp_path)
+    if server is None:
+        runner.herdr = lambda command: subprocess.CompletedProcess(command, 2, "", "")
+        raised = capabilities.Unreachable
+    else:
+        found.qualifier.retired[NAME] = {f"{EXE_A}/2"}
+        raised = capabilities.Incompatible
+    with pytest.raises(raised):
+        found.attach(scope(), HOST_KEY)
+    assert runner.commands[-1] == ["herdr", "machine", "remove", PROFILE]
+    assert found.registrations.store.load() == {}
+
+
+def test_a_verified_registration_survives_an_unreachable_probe(tmp_path):
+    found, runner = terminal(tmp_path)
+    found.attach(scope(), HOST_KEY)
+    found.qualifier.verdicts.clear()
+    runner.herdr = lambda command: subprocess.CompletedProcess(command, 2, "", "")
+    with pytest.raises(capabilities.Unreachable):
+        found.attach(scope(), HOST_KEY)
+    assert not any(command[:3] == ["herdr", "machine", "remove"] for command in runner.commands)
+    assert [record.profile_id for record in found.registrations.store.load().values()] == [PROFILE]
+
+
+def test_a_compatible_attach_keeps_its_registration(tmp_path):
+    found, runner = terminal(tmp_path)
+    found.attach(scope(), HOST_KEY)
+    assert not any(command[:3] == ["herdr", "machine", "remove"] for command in runner.commands)
+
+
+EXE_B = "exe-" + "b" * 32
+
+
+def scope_of(execution_id: str, generation: int):
+    record = fixture()["registration"] | {"execution_id": execution_id, "generation": generation}
+    return grant_scope(Registration(**record))
+
+
+def test_sync_counts_every_attempt_it_refuses(tmp_path):
+    found, runner = terminal(tmp_path)
+    for execution_id in (EXE_A, EXE_B):
+        found.register(scope_of(execution_id, 3), HOST_KEY)
+    report = found.sync([(scope_of(EXE_A, 2), HOST_KEY), (scope_of(EXE_B, 2), HOST_KEY)], enabled=True)
+    assert report.refused == {EXE_A: "stale_generation", EXE_B: "stale_generation"}
+    assert found.terminal_endpoint_refusals() == {"stale_generation": 2}
+
+
+def test_sync_reports_connection_and_registration_refusals_together(tmp_path):
+    found, runner = terminal(tmp_path)
+    runner.herdr = sv2_hdr01_cases.Runner(sv2_hdr01_cases.fixture()["missing_forwarding_server"])
+    found.register(scope_of(EXE_A, 3), HOST_KEY)
+    report = found.sync([(scope_of(EXE_A, 2), HOST_KEY), (scope_of(EXE_B, 1), HOST_KEY)], enabled=True)
+    assert report.refused == {EXE_A: "stale_generation", EXE_B: "incompatible"}
+    assert report.registered == {}

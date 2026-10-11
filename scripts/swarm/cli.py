@@ -22,6 +22,7 @@ agentihooks swarm <id> save-template NAME                         write this swa
 agentihooks swarm <id> send-message TEXT                          message to every live agent's inbox
 agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]     master or operator judges a health finding
 agentihooks swarm <id> classify EXECUTION lost|working --reason TEXT  master or operator classifies a suspect execution attempt
+agentihooks swarm <id> terminal EXECUTION                         operator opens the worker terminal of an execution in herdr
 agentihooks swarm <id> lift AGENT GATE                            operator or master lets one agent past a gate for one hour
 agentihooks swarm <id> freeze | focus | unfreeze TARGET [--reason TEXT] [--quote WORDS]   operator, or master with his words
 agentihooks swarm <id> learned                                    list every seat's learned notes with seat and number
@@ -1483,6 +1484,12 @@ def cmd_say(store, args):
     print(json.dumps({"sent": sent}))
 
 
+def cmd_terminal(store, args):
+    from scripts.swarm_v2.kubernetes import operator_terminal
+
+    print(json.dumps(operator_terminal.command(store, args.slug, args.execution, os.environ, Who.from_env())))
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="agentihooks swarm", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -1528,6 +1535,7 @@ def build_parser():
     verdict.add_argument("finding")
     verdict.add_argument("verdict")
     verdict.add_argument("--note", default="")
+    sub.add_parser("terminal").add_argument("execution")
     classify = sub.add_parser("classify")
     classify.add_argument("execution_id")
     classify.add_argument("ruling", choices=("lost", "working"))

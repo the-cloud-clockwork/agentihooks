@@ -89,8 +89,11 @@ class World:
         if command[:3] == ["herdr", "machine", "list"]:
             return subprocess.CompletedProcess([], 0, json.dumps(self.machines), "")
         if command[:3] == ["herdr", "machine", "add"]:
-            self.machines.append({"label": command[4], "target": command[5]})
-            return subprocess.CompletedProcess([], 0, "", "")
+            label, session = command[command.index("--label") + 1], command[command.index("--remote-session") + 1]
+            profile = hashlib.sha256(f"{label}/{len(self.machines)}".encode()).hexdigest()[:32]
+            saved = {"id": profile, "label": label, "target": command[-1], "session": session, "enabled": True}
+            self.machines.append(saved)
+            return subprocess.CompletedProcess([], 0, f"Saved SSH machine {profile}.\n", "")
         forwarded = [*command[:2], sv2_hdr01_cases.TARGET, *command[3:]] if "--machine" in command else command
         return self.herdr(forwarded)
 

@@ -1,36 +1,42 @@
 {
   "case": "T-SV2-HDR-02-C",
+  "state": "passed",
   "evidence_class": "mocked: a recording runner stands in for ssh and herdr; it admits a connection only when the client's pinned known_hosts key matches the key the fixture server serves and the client certificate, verified against the fixture user CA, names the server's execution principal; herdr status and schema replies are the SV2-HDR-01 captures of the pinned 0.9.1 binary. No sshd, herdr process or cluster runs in these cases.",
   "input_sha256": {
-    "herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940",
+    "herdr-terminal.json": "096cb6a1bc81149885ad765e80d3d42536bcd01982f41b2c21eea22b2fd4ecfe",
     "herdr-terminal-objects.json": "14bedb92d7b8d06eec222780bd5ae9ae5e3f29b6c4e1286218801ca631b1f83f",
-    "herdr-terminal.json": "096cb6a1bc81149885ad765e80d3d42536bcd01982f41b2c21eea22b2fd4ecfe"
+    "herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940"
   },
   "observed": {
     "accepted": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/2",
-    "machine_adds": 2,
-    "machines": [
-      {
-        "label": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
-        "target": "ssh://swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local"
-      },
-      {
-        "label": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
-        "target": "ssh://swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal.swarm-workers.svc.cluster.local"
-      }
-    ],
-    "new_generation": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/3",
-    "newer_pin_kept": true,
     "old_name_with_new_key": "host_key_changed",
-    "old_pin_after_replacement": true,
     "old_pin_kept": true,
     "replacement": "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/1",
     "replayed": "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/1",
+    "machines": [
+      {
+        "id": "7d2a16cc5dab54913e910fea0fa50e63",
+        "label": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+        "target": "ssh://swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local",
+        "session": "default",
+        "enabled": true
+      },
+      {
+        "id": "63f4cd8f16013cdd0e78c95b4aeff3eb",
+        "label": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
+        "target": "ssh://swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal.swarm-workers.svc.cluster.local",
+        "session": "default",
+        "enabled": true
+      }
+    ],
+    "machine_adds": 2,
+    "old_pin_after_replacement": true,
+    "new_generation": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/3",
     "stale_attach": "stale_generation",
+    "newer_pin_kept": true,
     "stale_generation": "herdr server incarnation exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/2 on swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal was replaced",
     "terminal_endpoint_auth_failures": {
       "host_key_changed": 1
     }
-  },
-  "state": "passed"
+  }
 }

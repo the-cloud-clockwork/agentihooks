@@ -146,7 +146,10 @@ def full_source(reuse_repo, tmp_path):
         "repos/o/r/actions/artifacts/42/zip": {"binary": base64.b64encode(archive.getvalue()).decode()},
         "repos/o/r/actions/jobs/91/logs": {
             "binary": base64.b64encode(
-                "".join(f"2026-10-09T11:00:00.000Z {line}\n" for line in result.stdout.splitlines()).encode()
+                (
+                    "2026-10-09T11:00:00.000Z \x1b[36;1mpython -I scripts/ci_reuse.py\x1b[0m\n"
+                    + "".join(f"2026-10-09T11:00:00.000Z {line}\n" for line in result.stdout.splitlines())
+                ).encode()
             ).decode()
         },
     }
@@ -158,9 +161,14 @@ def full_source(reuse_repo, tmp_path):
         "#!/usr/bin/env python3\n"
         "import base64, json, os, sys\n"
         "from pathlib import Path\n"
-        "args = [arg for arg in sys.argv[2:] if arg != '--paginate']\n"
+        "allow = '--allow-escape-sequences' in sys.argv\n"
+        "args = [arg for arg in sys.argv[2:] if arg not in ('--paginate', '--allow-escape-sequences')]\n"
         "value = json.loads(Path(os.environ['REUSE_FIXTURE']).read_text())[args[0]]\n"
-        "if 'binary' in value: sys.stdout.buffer.write(base64.b64decode(value['binary']))\n"
+        "data = base64.b64decode(value.get('binary', ''))\n"
+        "if args[0].endswith('/logs') and b'\\x1b' in data and not allow:\n"
+        "    sys.exit('the response contains terminal escape sequences; '\n"
+        "             'pass --allow-escape-sequences to output it anyway')\n"
+        "if 'binary' in value: sys.stdout.buffer.write(data)\n"
         "elif args[1:2] == ['--jq']: print(*(json.dumps(item) for item in value[args[2][1:-2]]), sep='\\n')\n"
         "else: print(json.dumps(value))\n"
     )
@@ -212,7 +220,12 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
 
     workflow = yaml.safe_load((PROGRAM.parents[1] / ".github/workflows/test.yml").read_text())
     assert workflow["jobs"]["gate-required"]["steps"] == ci_reuse.gate_steps()
-    assert workflow["jobs"]["reuse"] == ci_reuse.reuse_job()
+    canonical = ci_reuse.reuse_job()
+    previous = ci_reuse.reuse_job()
+    [step] = [step for step in previous["steps"] if step.get("name") == FETCH]
+    assert step["run"].count("gh api --allow-escape-sequences ") == 1
+    step["run"] = step["run"].replace("gh api --allow-escape-sequences ", "gh api ")
+    assert workflow["jobs"]["reuse"] in (canonical, previous)
 
 
 @pytest.mark.parametrize("reuse_repo", ["dynamic"], indirect=True)

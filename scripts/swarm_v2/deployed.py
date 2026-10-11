@@ -55,7 +55,7 @@ def pod_api(environ: Mapping[str, str], namespace: str) -> PodApi:
     return PodClient(http, namespace)
 
 
-def _policy(path: str, slug: str) -> dict:
+def pod_policy(path: str, slug: str) -> dict:
     try:
         policy = load_policy(path)
     except PodSpecRefused as refused:
@@ -111,7 +111,7 @@ class Workers:
             raise WorkerSettingsRefused(f"{CAP_ENV} must be a whole number above zero")
         if not image_tag.is_tag(environ[IMAGE_TAG_ENV]):
             raise WorkerSettingsRefused(f"{IMAGE_TAG_ENV} must be an image tag, never a digest")
-        policy, profile = _policy(environ[POLICY_ENV], slug), environ[PROFILE_ENV]
+        policy, profile = pod_policy(environ[POLICY_ENV], slug), environ[PROFILE_ENV]
         if profile not in policy["profiles"]:
             raise WorkerSettingsRefused(f"the Pod policy has no {profile} profile")
         projects = tuple(project.strip() for project in environ[PROJECTS_ENV].split(",") if project.strip())

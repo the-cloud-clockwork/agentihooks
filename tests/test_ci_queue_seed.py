@@ -154,7 +154,7 @@ def test_every_unit_shard_downloads_the_one_republished_dev_durations():
     download = _step(steps, "Download the queued run's dev durations")
     adopt = _step(steps, "Adopt latest dev durations")
     assert download["if"] == "needs.durations.outputs.queued == 'true'"
-    assert download["uses"] == "actions/download-artifact@v4"
+    assert download["uses"] == "./.github/actions/retry-download"
     assert download["with"] == {"name": "dev-durations", "path": "~/dev-durations"}
     assert steps.index(download) < steps.index(adopt)
 

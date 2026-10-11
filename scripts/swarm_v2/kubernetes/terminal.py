@@ -1,5 +1,5 @@
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from cryptography.exceptions import UnsupportedAlgorithm
@@ -19,6 +19,7 @@ from scripts.swarm_v2.herdr.endpoints import (
     grant_scope,
     operator_scope,
 )
+from scripts.swarm_v2.herdr.reconcile import Report
 from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused, PodApi
 from scripts.swarm_v2.kubernetes.spec import AdmittedLaunch, PodTemplate, Rendered, canonical_digest
 from scripts.swarm_v2.runtime.commands import Principal
@@ -73,6 +74,12 @@ class HostKeys:
         entry = json.loads(raw)
         return Launched(execution_id, entry["generation"], entry["host_public"])
 
+    def attachable(self, swarm: str, live: Iterable[str]) -> list[Launched]:
+        ids = sorted(set(live))
+        raws = self.store.redis.hmget(self.store.key(swarm, HOST_KEYS), ids) if ids else []
+        entries = [(ids[index], json.loads(raw)) for index, raw in enumerate(raws) if raw]
+        return [Launched(execution_id, entry["generation"], entry["host_public"]) for execution_id, entry in entries]
+
 
 class TerminalObjects:
     def __init__(
@@ -109,3 +116,12 @@ class TerminalObjects:
 def operator_attach(terminal: Terminal, keys: HostKeys, principal: Principal, swarm: str, execution_id: str) -> Verdict:
     launched = keys.launched(swarm, execution_id)
     return terminal.attach(operator_scope(principal, swarm, launched), launched.host_public)
+
+
+def operator_sync(
+    terminal: Terminal, keys: HostKeys, principal: Principal, swarm: str, live: Iterable[str], *, enabled: bool
+) -> Report:
+    attachable = [
+        (operator_scope(principal, swarm, launched), launched.host_public) for launched in keys.attachable(swarm, live)
+    ]
+    return terminal.sync(attachable, enabled=enabled)

@@ -13,6 +13,7 @@ from scripts.swarm_v2.herdr import attach, endpoints
 from scripts.swarm_v2.herdr.attach import ClientHome, Terminal
 from scripts.swarm_v2.herdr.endpoints import (
     Clients,
+    Endpoint,
     EndpointRefused,
     HostIdentity,
     Scope,
@@ -226,7 +227,7 @@ class Worker:
         if command[:3] == ["herdr", "machine", "list"]:
             return subprocess.CompletedProcess(command, 0, "[]", "")
         if command[:3] == ["herdr", "machine", "add"]:
-            return subprocess.CompletedProcess(command, 0, "saved", "")
+            return subprocess.CompletedProcess(command, 0, "Saved SSH machine p1. Remote server is ready.\n", "")
         forwarded = [*command[:2], sv2_hdr01_cases.TARGET, *command[3:]] if "--machine" in command else command
         return self.herdr(forwarded)
 
@@ -341,3 +342,85 @@ def test_the_terminal_template_refuses_what_the_pod_template_refuses():
     with pytest.raises(PodSpecRefused):
         TerminalTemplate(template).render({**launch(), "extra": 1})
     assert template.pod_spec_validation_failures_total() == {"fields": 1}
+
+
+def test_attachable_lists_only_live_attempts_with_a_recorded_host_key():
+    keys = HostKeys(store())
+    for exe in (EXE_A, "exe-" + "b" * 32):
+        keys.record(Scope("grant/x", "fixture-swarm", exe, 2), f"key-{exe[-1]}")
+    live = ["exe-" + "c" * 32, "exe-" + "b" * 32, EXE_A, EXE_A]
+    assert keys.attachable("fixture-swarm", live) == [
+        Launched(EXE_A, 2, "key-a"),
+        Launched("exe-" + "b" * 32, 2, "key-b"),
+    ]
+    assert keys.attachable("fixture-swarm", []) == []
+    assert keys.attachable("other-swarm", [EXE_A]) == []
+
+
+def test_operator_sync_registers_each_live_attempt_on_the_client(tmp_path):
+    identity = HostIdentity.generate()
+    keys = launched(identity)
+    worker = client(tmp_path, identity.public)
+
+    report = terminal.operator_sync(worker, keys, OPERATOR, "fixture-swarm", [EXE_A], enabled=True)
+
+    assert (report.registered, report.refused, report.retired) == ({EXE_A: "p1"}, {}, [])
+    assert worker.registrations.recorded(worker_endpoint()) == "p1"
+    adds = [command for command in worker.run.commands if command[:3] == ["herdr", "machine", "add"]]
+    assert adds == [
+        ["herdr", "machine", "add", "--label", NAME, "--remote-session", "default", worker_endpoint().target]
+    ]
+
+
+def test_operator_sync_reports_an_attempt_whose_terminal_refuses(tmp_path):
+    keys = launched(HostIdentity.generate())
+    worker = client(tmp_path, HostIdentity.generate().public)
+
+    report = terminal.operator_sync(worker, keys, OPERATOR, "fixture-swarm", [EXE_A], enabled=True)
+
+    assert (report.registered, report.refused) == ({}, {EXE_A: "host_key_changed"})
+    assert worker.terminal_endpoint_refusals() == {"host_key_changed": 1}
+    assert not [command for command in worker.run.commands if command[:3] == ["herdr", "machine", "add"]]
+
+
+def test_operator_sync_refuses_a_principal_without_the_operator_role(tmp_path):
+    identity = HostIdentity.generate()
+    keys = launched(identity)
+    worker = client(tmp_path, identity.public)
+
+    master = Principal("master@fixture", Role.MASTER)
+    assert refusal(lambda: terminal.operator_sync(worker, keys, master, "fixture-swarm", [EXE_A], enabled=True)) == (
+        "unauthorized",
+        "only a launch grant or the operator role opens a worker terminal",
+    )
+    assert worker.run.commands == []
+
+
+def test_stopping_automated_registration_leaves_existing_profiles_for_audit(tmp_path):
+    identity = HostIdentity.generate()
+    keys = launched(identity)
+    worker = client(tmp_path, identity.public)
+    terminal.operator_sync(worker, keys, OPERATOR, "fixture-swarm", [EXE_A], enabled=True)
+    seen = len(worker.run.commands)
+    owned = worker.registrations.store.path.read_text()
+
+    report = terminal.operator_sync(worker, keys, OPERATOR, "fixture-swarm", [], enabled=False)
+
+    assert report == terminal.Report()
+    assert len(worker.run.commands) == seen
+    assert worker.registrations.store.path.read_text() == owned
+    assert worker.registrations.recorded(worker_endpoint()) == "p1"
+
+
+def test_a_disabled_sync_touches_nothing_on_the_client(tmp_path):
+    identity = HostIdentity.generate()
+    keys = launched(identity)
+    worker = client(tmp_path, identity.public)
+
+    assert terminal.operator_sync(worker, keys, OPERATOR, "fixture-swarm", [EXE_A], enabled=False) == terminal.Report()
+    assert worker.run.commands == []
+    assert not worker.home.root.exists()
+
+
+def worker_endpoint() -> Endpoint:
+    return Endpoint(Scope("operator/x", "fixture-swarm", EXE_A, 2), fixture()["namespace"])

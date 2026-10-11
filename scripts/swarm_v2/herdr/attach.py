@@ -1,17 +1,17 @@
 import ipaddress
-import json
 import os
 import socket
 import subprocess
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
 
 from cryptography.hazmat.primitives import serialization
 
-from scripts.swarm_v2.herdr.capabilities import Qualifier, Verdict, machine_probe
+from scripts.swarm_v2.herdr.capabilities import Incompatible, Qualifier, Unreachable, Verdict, machine_probe
+from scripts.swarm_v2.herdr.catalog import Catalog
 from scripts.swarm_v2.herdr.endpoints import (
     PORT,
     Endpoint,
@@ -21,6 +21,7 @@ from scripts.swarm_v2.herdr.endpoints import (
     key_pair,
     known_hosts,
 )
+from scripts.swarm_v2.herdr.reconcile import STORE, Registrations, Report, Store
 
 USER = "worker"
 SSH = "/usr/bin/ssh"
@@ -144,6 +145,7 @@ class Terminal:
         self.home, self.authority, self.namespace = home, authority, namespace
         self.run, self.lookup = run, lookup
         self.qualifier = Qualifier(machine_probe(run))
+        self.registrations = Registrations(Catalog(run), Store(home.terminals / STORE))
         self.failures: Counter = Counter()
 
     def _client_key(self) -> str:
@@ -181,18 +183,6 @@ class Terminal:
             reason = _classify(str(done.stderr))
             raise EndpointRefused(reason, f"{endpoint.name} terminal refused the connection: {reason}")
 
-    def _save(self, endpoint: Endpoint) -> None:
-        listed = self.run(["herdr", "machine", "list", "--json"])
-        try:
-            machines = json.loads(listed.stdout) if listed.returncode == 0 else []
-        except ValueError:
-            machines = []
-        if any(machine.get("label") == endpoint.name for machine in machines if isinstance(machine, dict)):
-            return
-        done = self.run(["herdr", "machine", "add", "--label", endpoint.name, endpoint.target])
-        if done.returncode != 0:
-            raise EndpointRefused("machine_refused", f"herdr could not save {endpoint.name}")
-
     def _refuse(self, refused: EndpointRefused) -> NoReturn:
         self.failures[refused.reason] += 1
         raise refused
@@ -201,10 +191,42 @@ class Terminal:
         try:
             endpoint = self.register(scope, host_public)
             self._connect(endpoint)
-            self._save(endpoint)
+            recorded = self.registrations.recorded(endpoint)
+            fresh = self.registrations.register(endpoint) != recorded
+            verdict = self._qualified(endpoint, fresh)
         except EndpointRefused as refused:
             self._refuse(refused)
-        return self.qualifier.verdict(endpoint.name, endpoint.incarnation)
+        return verdict
+
+    def sync(self, attachable: Iterable[tuple[Scope, str]], *, enabled: bool) -> Report:
+        if not enabled:
+            return Report()
+        ready, refused = [], {}
+        for scope, host_public in attachable:
+            try:
+                endpoint = self.register(scope, host_public)
+                self._connect(endpoint)
+                ready.append(endpoint)
+            except EndpointRefused as refusal:
+                self.failures[refusal.reason] += 1
+                refused[scope.execution_id] = refusal.reason
+        report = self.registrations.reconcile(ready, self.qualifier)
+        report.refused |= refused
+        return report
+
+    def _qualified(self, endpoint: Endpoint, fresh: bool) -> Verdict:
+        try:
+            verdict = self.qualifier.verdict(endpoint.name, endpoint.incarnation)
+        except Unreachable:
+            if fresh:
+                self.registrations.withdraw(endpoint)
+            raise
+        except Incompatible:
+            self.registrations.withdraw(endpoint)
+            raise
+        if not verdict.compatible:
+            self.registrations.withdraw(endpoint)
+        return verdict
 
     def terminal_endpoint_auth_failures(self) -> dict[str, int]:
         return {reason: count for reason, count in self.failures.items() if reason in AUTH_FAILURES}
