@@ -145,6 +145,74 @@ class SwarmPanel(unittest.TestCase):
         self.assertEqual(code, 403)
         run.assert_not_called()
 
+    def test_models_route_serves_the_catalog_of_both_harnesses(self):
+        catalog = {"claude": [{"model": "opus", "label": "Claude Opus 5.5", "efforts": ["high"]}], "codex": []}
+        with patch.object(server, "swarm_models", return_value=catalog) as models:
+            code, body = self.get(f"{SLUG}/models")
+            missing = self.get("no-such-ledger-2026-01-01/models")[0]
+            other = self.get(f"{SLUG}/other")[0]
+            refused = self.get(f"{SLUG}/models", token=False)[0]
+        self.assertEqual((code, json.loads(body)), (200, catalog))
+        self.assertEqual((missing, other, refused), (404, 404, 403))
+        models.assert_called_once_with()
+
+    def fetch(self, path):
+        headers = {"Host": f"127.0.0.1:{server.PORT}", "X-Ledger-Token": self.token}
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}/api/swarm/{path}", headers=headers)
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, resp.read().decode(), resp.headers["Content-Type"]
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read().decode(), exc.headers["Content-Type"]
+
+    def test_swarm_routes_answer_with_their_bodies_and_content_types(self):
+        with (
+            patch.object(server, "swarm_models", return_value={"claude": [], "codex": []}),
+            patch.object(server, "swarm_status", side_effect=[{"agents": []}, None]),
+        ):
+            replies = [self.fetch(f"{SLUG}/models"), self.fetch(SLUG), self.fetch(SLUG), self.fetch(f"{SLUG}/other")]
+        self.assertEqual(
+            replies,
+            [
+                (200, '{"claude": [], "codex": []}', "application/json"),
+                (200, '{"agents": []}', "application/json"),
+                (404, "no swarm for this ledger", "text/plain"),
+                (404, "no such ledger", "text/plain"),
+            ],
+        )
+
+    def test_swarm_models_caches_in_the_swarm_redis(self):
+        import fakeredis
+
+        from scripts.swarm import model_catalog
+        from scripts.swarm.store import RedisStore
+
+        store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+        reads = []
+        readers = {"claude": lambda environ: reads.append("claude") or [{"model": "opus"}], "codex": lambda e: []}
+        with (
+            patch.dict(model_catalog.READERS, readers),
+            patch.object(server, "swarm_store", return_value=store),
+        ):
+            first, second = server.swarm_models(), server.swarm_models()
+        self.assertEqual(first, {"claude": [{"model": "opus"}], "codex": []})
+        self.assertEqual((second, reads), (first, ["claude"]))
+        self.assertIsNotNone(store.redis.get(f"{model_catalog.KEY}:claude"))
+
+    def test_swarm_models_reads_the_sources_when_redis_is_down(self):
+        from scripts.swarm import model_catalog
+        from scripts.swarm.store import SwarmError
+
+        environs = []
+        readers = {"claude": lambda environ: environs.append(environ) or [], "codex": lambda environ: []}
+        with (
+            patch.dict(model_catalog.READERS, readers),
+            patch.object(server, "swarm_store", side_effect=SwarmError("down")),
+            patch.dict(server.os.environ, {"AH_CC_TOKEN_one": "routed"}),
+        ):
+            self.assertEqual(server.swarm_models(), {"claude": [], "codex": []})
+        self.assertEqual(environs[0]["AH_CC_TOKEN_one"], "routed")
+
     def put(self, body, token=True):
         headers = {"Host": f"127.0.0.1:{server.PORT}", "Content-Type": "application/json"}
         if token:
