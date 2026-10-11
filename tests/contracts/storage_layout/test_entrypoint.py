@@ -23,8 +23,8 @@ from tests.test_swarm_v2_cache import stamped
 pytestmark = pytest.mark.unit
 
 
-def spawn() -> Operation:
-    return Operation("op-1", EXECUTION, 3, "spawn", "kubernetes", "payload-digest", {})
+def spawn(spec_digest: str = "") -> Operation:
+    return Operation("op-1", EXECUTION, 3, "spawn", "kubernetes", "payload-digest", {}, spec_digest=spec_digest)
 
 
 def sender(tmp_path, *mounts) -> KubernetesTransport:
@@ -42,7 +42,7 @@ def test_the_pod_create_path_refuses_an_operator_home_mount_without_calling_the_
 
 def test_the_pod_create_path_creates_a_pod_with_a_read_only_seed_and_a_scoped_artifact_mount(tmp_path):
     safe = sender(tmp_path, SEED, ARTIFACTS, CACHE)
-    assert safe.apply_operation(spawn(), launch()).phase == Phase.APPLIED
+    assert safe.apply_operation(spawn(safe.spec_digest(launch())), launch()).phase == Phase.APPLIED
     (pod,) = safe.api.objects.values()
     mounts = {m["name"]: m for m in pod["spec"]["containers"][0]["volumeMounts"]}
     assert mounts["shared-profiles"]["readOnly"] is True

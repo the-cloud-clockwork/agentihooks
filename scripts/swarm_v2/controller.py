@@ -26,6 +26,10 @@ class FencedTransport:
         self.require()
         return self.transport.apply_operation(operation, payload)
 
+    def spec_digest(self, payload: dict) -> str:
+        render = getattr(self.transport, "spec_digest", None)
+        return render(payload) if render else ""
+
 
 class Controller:
     """The authorization callback must validate a scoped controller credential, never a display label."""
