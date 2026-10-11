@@ -25,7 +25,7 @@ class Upkeep:
         self.due, self.seen = True, {}
         self.last = Report()
 
-    def start(self, attempts: Iterable[Attempt]) -> Report | None:
+    def start(self, attempts: Iterable[Attempt]) -> Report:
         self.due = True
         return self.change(attempts)
 

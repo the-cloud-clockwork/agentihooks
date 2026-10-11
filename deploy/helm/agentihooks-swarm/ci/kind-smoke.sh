@@ -223,6 +223,11 @@ kubectl create rolebinding swarm-controller --namespace swarm-pod-proof --role=s
 python3 -c 'import json, pathlib, sys, yaml; print(json.dumps(yaml.safe_load(pathlib.Path(sys.argv[1]).read_text())["controller"]["workers"]["podPolicy"]))' \
   "$chart/ci/kind-workers.yaml" | kubectl create configmap swarm-pod-policy --from-file=pod-policy.json=/dev/stdin \
   --dry-run=client -o yaml | kubectl apply -f -
+ca_dir="$(mktemp -d)"
+ssh-keygen -q -t ed25519 -N "" -C "kind user ca" -f "$ca_dir/user_ca"
+ssh-keygen -q -t ed25519 -N "" -C "kind host ca" -f "$ca_dir/host_ca"
+kubectl create secret generic swarm-terminal-attach-ca --from-file=user_ca="$ca_dir/user_ca" \
+  --from-file=host_ca="$ca_dir/host_ca"
 helm upgrade "$release" "$chart" -f "$chart/ci/kind-values.yaml" "${workers[@]}" "${policy_map[@]}" "${api[@]}" \
   --wait --timeout 5m
 kubectl rollout status deployment "$release-controller" --timeout 2m
@@ -554,4 +559,28 @@ if [[ $after != "$before" ]]; then
   exit 1
 fi
 printf 'controller sent the host pressure alert without a restart: %s\n' "$alert"
+
+mounted="$(kubectl exec "deployment/$release-controller" -c controller -- sh -c \
+  'ls /run/secrets/terminal-ca && stat -L -c "%a %u:%g" "$AGENTIHOOKS_TERMINAL_CA_KEY" && echo "$AGENTIHOOKS_TERMINAL_CA_KEY"')"
+if [[ $mounted != $'user_ca\n'*$'\n/run/secrets/terminal-ca/user_ca' ]]; then
+  printf 'the controller does not hold only the user CA key at its setting path: %s\n' "$mounted" >&2
+  exit 1
+fi
+printf 'the controller holds only the user CA key at its setting path: %s\n' "${mounted//$'\n'/ }"
+python3 -c 'import json, sys; print(json.dumps({"clients": {"namespace": "default", "labels": {"app.kubernetes.io/instance": sys.argv[2], "app.kubernetes.io/component": "controller"}}, "user_ca": open(sys.argv[1]).read().strip()}))' \
+  "$ca_dir/user_ca.pub" "$release" | kubectl create secret generic swarm-worker-terminal --from-file=setting=/dev/stdin
+rm -rf "${ca_dir:?}"
+kubectl rollout restart deployment "$release-controller"
+kubectl rollout status deployment "$release-controller" --timeout 2m
+kept=""
+for _ in $(seq 60); do
+  kept="$(kubectl logs "deployment/$release-controller" -c controller | grep -F "controller: kept saved herdr machines for $slug on start" || true)"
+  [[ -n $kept ]] && break
+  sleep 1
+done
+if [[ -z $kept ]]; then
+  printf 'the controller never logged its saved herdr machines on start with the terminal CA key mounted\n' >&2
+  exit 1
+fi
+printf 'the controller loaded the mounted terminal CA key and logged its saved herdr machines on start: %s\n' "$kept"
 printf 'Helm chart kind proof passed\n'
