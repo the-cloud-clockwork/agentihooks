@@ -270,7 +270,11 @@ class CodexAccountSource:
         return () if self.run is None else (self.run,)
 
     def pool(self, environ: Mapping[str, str]) -> list[CodexAccount]:
-        return [account for account in accounts(environ, *self._run()) if not refusal(account, environ)]
+        return [
+            account
+            for account in accounts(environ, *self._run())
+            if account.signed_in and not refusal(account, environ)
+        ]
 
     def readings(
         self, pool: list[CodexAccount], environ: Mapping[str, str], now: float
@@ -316,6 +320,8 @@ def select(
     """Split launches between the api and the account pool by weight, then take the free seat with the fewest sessions."""
     if route:
         for account in pool:
+            if account.name == route and not account.signed_in:
+                raise RoutingError(f"Codex account '{route}' is not signed in; run codex login")
             if account.name == route:
                 return account, "forced", None
         available = ", ".join(account.name for account in pool)
@@ -401,7 +407,7 @@ def _route(environ: Mapping[str, str], route: str, run: Callable, exclude: str) 
     if route == API_ACCOUNT:
         return api_account(environ), "forced", sessions.get(API_ACCOUNT, 0), "?"
     source = CodexAccountSource(run, refresh=not route)
-    pool = routing_pool(environ, run) if route else source.pool(environ)
+    pool = accounts(environ, run) if route else source.pool(environ)
     pool = [account for account in pool if route or account.name != exclude]
     now = time.time()
     found = source.readings(pool, environ, now)

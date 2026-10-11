@@ -742,6 +742,20 @@ def test_the_tick_offers_codex_seats_only_on_accounts_the_launcher_routes(
             run=status,
         )
         assert rc == 0 and launched["cmd"][0].endswith("codex")
+    if not tokens:
+        launched = {}
+        rc = router.main(
+            ["--route", "default"], environ=environ, execvpe=lambda *args: launched.update(go=1), run=status
+        )
+        assert (rc, bool(launched)) == ((0, True) if signed_in else (3, False))
+
+
+def test_a_forced_route_to_a_signed_out_default_is_refused_by_name():
+    pool = [router.CodexAccount("default", signed_in=False)]
+    with pytest.raises(router.RoutingError) as refused:
+        router.select(pool, {"default": _quota(10.0)}, {}, NOW, route="default")
+    assert str(refused.value) == "Codex account 'default' is not signed in; run codex login"
+    assert router.select(_accounts(), {}, {}, NOW, route="default") == (_accounts()[0], "forced", None)
 
 
 def test_an_open_route_with_no_seat_names_each_refused_credential(monkeypatch, tmp_path, capsys):

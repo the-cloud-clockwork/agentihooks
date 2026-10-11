@@ -84,7 +84,7 @@ def _api(source, harness: str, environ: dict, now: float) -> list[Account]:
 
 def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
     source = codex_router.CodexAccountSource(refresh=refresh)
-    pool = [account for account in source.pool(environ) if account.signed_in]
+    pool = source.pool(environ)
     counts = account_sessions.codex_sessions_by_account()
     found = source.readings(pool, environ, now)
     known = {account.name for account in pool}
