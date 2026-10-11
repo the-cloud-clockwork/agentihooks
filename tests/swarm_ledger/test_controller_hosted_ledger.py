@@ -15,9 +15,7 @@ from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger, ledger_close, ledger_server
 from scripts.swarm_ledger.api.client import ResourceClient
 from scripts.swarm_ledger.repository import repository
-from scripts.swarm_v2.api.tasks import RevisionConflict, spec_revision
 from scripts.swarm_v2.auth_context import GrantRefused
-from scripts.swarm_v2.hosted_ledger import RECEIPTS_KEY, HostedLedger
 from tests.test_swarm_v2_control_service import (
     LEDGER_TASK,
     SLUG,
@@ -37,6 +35,12 @@ PINNED = {"AGENTIHOOKS_SWARM": "rig-grade-swarm", "AGENTIHOOKS_AGENT_NAME": "eng
 MASTER = "master@323133-0001"
 PROGRESS = "Reading the task through the hosted ledger"
 REFUSED_CONNECTION = "the hosted ledger is unavailable: <urlopen error [Errno 111] Connection refused>"
+
+
+def _hl():
+    from scripts.swarm_v2 import hosted_ledger
+
+    return hosted_ledger
 
 
 @pytest.fixture
@@ -90,7 +94,7 @@ def _hold(holder, tmp_path, overview=OVERVIEW, phases=(LEDGER_PHASE,)):
 
 
 def _hosted_ledger(hosted):
-    return HostedLedger(hosted.remote["LEDGER_URL"], hosted.remote[_cs().CREDENTIAL_ENV], hosted.store)
+    return _hl().HostedLedger(hosted.remote["LEDGER_URL"], hosted.remote[_cs().CREDENTIAL_ENV], hosted.store)
 
 
 def _closed():
@@ -141,8 +145,8 @@ def test_the_deployed_controller_serves_a_task_the_hosted_server_holds(deployed)
         name: LEDGER_TASK[name] for name in ("id", "title", "description", "phase", "lane", "state")
     }
     assert body["task"]["claimed_by"] == deployed.agent.name
-    assert body["revision"] == spec_revision(body["task"])
-    assert isinstance(deployed.service.tasks_api.ledger, HostedLedger)
+    assert body["revision"] == _hl().spec_revision(body["task"])
+    assert isinstance(deployed.service.tasks_api.ledger, _hl().HostedLedger)
     assert deployed.service.tasks_api.writes_enabled is True
 
 
@@ -270,7 +274,7 @@ def test_a_task_changed_between_read_and_write_is_a_revision_conflict(hosted, tm
         changed = {"op": "task_update", "id": "race-1", "by": MASTER, "item": "tasks/t1"}
         repository.apply_ops(SLUG, ops=[{**changed, "fields": {"title": "Changed meanwhile"}}])
 
-    with pytest.raises(RevisionConflict) as raised:
+    with pytest.raises(_hl().RevisionConflict) as raised:
         _hosted_ledger(hosted).apply_ops(SLUG, ops=[_update({"state": "pr"})], gate=Passing(race))
 
     current = _hosted_ledger(hosted).read(SLUG, "tasks/t1")["tasks"][0]
@@ -282,7 +286,7 @@ def test_a_task_changed_between_read_and_write_is_a_revision_conflict(hosted, tm
         "retry": "new_request",
         "message": "the task specification changed; refresh and retry",
         "task_id": "t1",
-        "current_revision": spec_revision(current),
+        "current_revision": _hl().spec_revision(current),
     }
 
 
@@ -318,7 +322,7 @@ def test_an_unreachable_hosted_server_on_write_is_a_dependency_failure(hosted, t
 
 def test_an_unreachable_hosted_server_on_read_is_a_dependency_failure(hosted):
     with pytest.raises(GrantRefused) as raised:
-        HostedLedger(_closed(), hosted.remote[_cs().CREDENTIAL_ENV], hosted.store).read(SLUG, "tasks/t1")
+        _hl().HostedLedger(_closed(), hosted.remote[_cs().CREDENTIAL_ENV], hosted.store).read(SLUG, "tasks/t1")
 
     assert raised.value.error_class == "dependency_unavailable"
     assert str(raised.value) == REFUSED_CONNECTION
@@ -334,7 +338,7 @@ def test_a_refused_controller_credential_on_read_is_a_dependency_failure(hosted,
     _hold("engineer@323133-0300", tmp_path)
 
     with pytest.raises(GrantRefused) as raised:
-        HostedLedger(hosted.remote["LEDGER_URL"], "wrong", hosted.store).read(SLUG, "tasks/t1")
+        _hl().HostedLedger(hosted.remote["LEDGER_URL"], "wrong", hosted.store).read(SLUG, "tasks/t1")
 
     assert raised.value.error_class == "dependency_unavailable"
     assert str(raised.value) == (
@@ -399,7 +403,7 @@ def test_a_replayed_progress_after_newer_progress_is_answered_from_the_controlle
     assert again == first
     assert first[0] == 200
     assert [entry["text"] for entry in _held_task()["comments"]] == ["Opened the pull request for review"]
-    stored = store.redis.get(store.key(SLUG, RECEIPTS_KEY, "tasks/t1"))
+    stored = store.redis.get(store.key(SLUG, _hl().RECEIPTS_KEY, "tasks/t1"))
     assert set(json.loads(stored)["operations"]) == {"op-a", "op-b"}
 
 
