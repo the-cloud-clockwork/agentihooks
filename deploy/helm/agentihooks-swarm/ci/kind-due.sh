@@ -17,6 +17,7 @@ paths=(
   profiles/
   media/
   docs/swarm-v2/schemas/
+  tests/chart_secrets.py
   tests/chart_workers.py
 )
 changed="$(git diff --name-only "$base...$head" -- "${paths[@]}")"

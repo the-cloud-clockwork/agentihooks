@@ -1,0 +1,74 @@
+import sys
+from pathlib import Path
+
+import yaml
+from chart_workers import merged
+
+
+def containers(documents: list):
+    for document in documents:
+        spec = document.get("spec", {})
+        pod = spec if document["kind"] == "Pod" else spec.get("template", {}).get("spec")
+        for container in (pod or {}).get("initContainers", []) + (pod or {}).get("containers", []):
+            yield document, container
+
+
+def references(container: dict, secret: str) -> list[dict]:
+    found = [
+        item
+        for item in container.get("env", [])
+        if item.get("valueFrom", {}).get("secretKeyRef", {}).get("name") == secret
+    ]
+    found += [item for item in container.get("envFrom", []) if item.get("secretRef", {}).get("name") == secret]
+    return found
+
+
+def expected_reference(entry: dict) -> dict:
+    ref = {"name": entry["secretName"], "key": entry["key"]}
+    if entry.get("optional"):
+        ref["optional"] = True
+    return {"name": entry["name"], "valueFrom": {"secretKeyRef": ref}}
+
+
+def is_controller(document: dict, container: dict) -> bool:
+    return (
+        document["kind"] == "Deployment"
+        and document["metadata"]["name"].endswith("-controller")
+        and container["name"] == "controller"
+    )
+
+
+def entry_problems(documents: list, entry: dict) -> list[str]:
+    secret, held, problems = entry["secretName"], [], []
+    for document, container in containers(documents):
+        found = references(container, secret)
+        if found and is_controller(document, container):
+            held += found
+        elif found:
+            owner = f"{document['kind']} {document['metadata']['name']} container {container['name']}"
+            problems.append(f"{owner} references the controller only Secret {secret}")
+    if held != [expected_reference(entry)]:
+        problems.append(
+            f"the controller container references {secret} as {held}, expected {[expected_reference(entry)]}"
+        )
+    return problems
+
+
+def main(values_paths: list[str], rendered: str) -> list[str]:
+    values: dict = {}
+    for path in values_paths:
+        values = merged(values, yaml.safe_load(Path(path).read_text()))
+    entries = values.get("controller", {}).get("secretEnv") or []
+    if not entries:
+        return ["controller.secretEnv names no Secret to check"]
+    documents = [d for d in yaml.safe_load_all(rendered) if d]
+    return [problem for entry in entries for problem in entry_problems(documents, entry)]
+
+
+if __name__ == "__main__":
+    found = main(sys.argv[1:], sys.stdin.read())
+    for problem in found:
+        print(problem, file=sys.stderr)
+    if found:
+        sys.exit(1)
+    print("only the controller container references each controller.secretEnv Secret")
