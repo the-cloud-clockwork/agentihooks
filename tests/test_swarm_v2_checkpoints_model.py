@@ -205,6 +205,7 @@ def _set(value, *path):
         (_set("sha256:" + "0" * 64, "artifact_hashes", "native_session"), "inventory_mismatch"),
         (_drop("artifact_hashes", "native_session"), "inventory_mismatch"),
         (_set(3, "reconstruction", "execution_generation"), "scope_mismatch"),
+        (_set(1, "reconstruction", "execution_generation"), "scope_mismatch"),
     ],
 )
 def test_a_native_manifest_lacking_a_requirement_is_incomplete(native, change, reason):
