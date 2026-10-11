@@ -144,7 +144,6 @@ SCALING_KEYS = {
     "memory-per-agent": "memory_per_agent_mb",
 }
 ADDRESS_KEYS = {"api-url": "api_url"}
-HIVE_KEY = "hive."
 NO_API_ADDRESS = "api-url takes an http or https address with a host and no credentials"
 CONFIG_KEYS = {**SCALING_KEYS, **ADDRESS_KEYS}
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
@@ -658,23 +657,10 @@ def config_value(key, value):
 
 
 def _split_master_pairs(pairs):
-    """The master seat count and hive owners live beside the swarm config: checked with the other pairs, stored
-    after them, so a count raised in the same command makes its seats valid owners."""
+    """The master seat count lives beside the swarm config: checked with the other pairs, stored after them."""
     split = [(pair, *pair.partition("=")) for pair in pairs]
     counts = [masters.count_of(value) for _, key, _, value in split if key == "masters"]
-    hives = [(key.removeprefix(HIVE_KEY), value) for _, key, _, value in split if key.startswith(HIVE_KEY)]
-    if any(not hive or not seat for hive, seat in hives):
-        raise SwarmError(f"a hive owner is set as {HIVE_KEY}<hive id>=<master seat>")
-    return counts, hives, [pair for pair, key, _, _ in split if key != "masters" and not key.startswith(HIVE_KEY)]
-
-
-def _hive_owners(store, slug, counts, hives):
-    """Each hive seat is checked against the count this command leaves before anything is written."""
-    final = counts[-1] if counts else masters.MasterSeats(store.redis).count(slug)
-    owners = [(hive, seat_address(slug, seat.removesuffix(f"@{slug}"))) for hive, seat in hives]
-    for hive, owner in owners:
-        masters.check_hive_owner(slug, final, hive, owner)
-    return owners
+    return counts, [pair for pair, key, _, _ in split if key != "masters"]
 
 
 def _store_master_counts(store, slug, counts, owners):
@@ -687,8 +673,9 @@ def _store_master_counts(store, slug, counts, owners):
 
 def cmd_set(store, args):
     changes, lanes = {}, {key: dict(value) for key, value in store.config(args.slug).lanes.items()}
-    counts, hives, pairs = _split_master_pairs(args.pairs)
-    hives = _hive_owners(store, args.slug, counts, hives)
+    counts, pairs = _split_master_pairs(args.pairs)
+    hives, pairs = masters.hive_pairs(args.slug, pairs)
+    masters.MasterSeats(store.redis).check_hives(args.slug, counts, hives)
     for pair in pairs:
         key, _, value = pair.partition("=")
         if key in LANE_KEYS:
@@ -718,7 +705,7 @@ def cmd_set(store, args):
             continue
         if key not in SETTABLE or not value.isdigit():
             raise SwarmError(
-                f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, {HIVE_KEY}<hive id>=<master seat>, "
+                f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, {masters.HIVE_KEY}<hive id>=<master seat>, "
                 f"autonomy={'|'.join(AUTONOMY)}, "
                 f"effort-min=E, effort-max=E, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, api-url=URL "
                 f"or {', '.join(LANE_KEYS)}=<value>"

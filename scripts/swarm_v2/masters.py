@@ -10,6 +10,8 @@ DEFAULT_COUNT = 1
 SAVE_ATTEMPTS = 5
 UNNUMBERED = 10_000
 HIVES = "hives"
+HIVE_KEY = "hive."
+HIVE_PAIR = f"a hive owner is set as {HIVE_KEY}<hive id>=<master seat>"
 
 
 class MasterError(SwarmError):
@@ -118,6 +120,21 @@ def check_hive_owner(slug: str, count: int, hive_id: str, owner: str) -> None:
         raise MasterError(f"{owner} is not a master seat of {slug}, so it cannot own hive {hive_id}")
 
 
+def hive_pairs(slug: str, pairs: list[str]) -> tuple[list[tuple[str, str]], list[str]]:
+    """hive.<id>=<seat> pairs as (hive id, seat address), and every other pair untouched."""
+    hives, rest = [], []
+    for pair in pairs:
+        key, _, seat_text = pair.partition("=")
+        if not key.startswith(HIVE_KEY):
+            rest.append(pair)
+            continue
+        hive = key.removeprefix(HIVE_KEY)
+        if not hive or not seat_text:
+            raise MasterError(HIVE_PAIR)
+        hives.append((hive, seat_address(slug, seat_text.removesuffix(f"@{slug}"))))
+    return hives, rest
+
+
 class MasterSeats:
     def __init__(self, redis) -> None:
         self.redis = redis
@@ -135,6 +152,12 @@ class MasterSeats:
         check_hive_owner(slug, self.count(slug), hive_id, owner)
         hives = json.loads(self.redis.hget(self.key(slug), HIVES) or "{}")
         self.redis.hset(self.key(slug), HIVES, json.dumps({**hives, hive_id: owner}, sort_keys=True))
+
+    def check_hives(self, slug: str, counts: list[int], hives: list[tuple[str, str]]) -> None:
+        """Checked against the count a command leaves, before that command writes anything."""
+        final = counts[-1] if counts else self.count(slug)
+        for hive, owner in hives:
+            check_hive_owner(slug, final, hive, owner)
 
     def hive_owners(self, slug: str) -> dict[str, str]:
         return hive_targets(self.redis.hget(self.key(slug), HIVES), seats(slug, self.count(slug)))
