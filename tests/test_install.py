@@ -298,8 +298,13 @@ class TestClaudeRouting:
         assert "AGENTIHOOKS_ROUTE_ACCOUNT" not in observed["environ"]
         assert "launching bare Claude" in capsys.readouterr().err
 
-    def test_cmd_balance_prints_ranked_capacity(self, monkeypatch, capsys):
+    def test_cmd_balance_prints_ranked_capacity(self, monkeypatch, tmp_path, capsys):
         from scripts import claude_quota_balancer as balancer
+        from scripts.routing.settings import FileSettings
+
+        store = FileSettings(tmp_path / "routing-settings.json")
+        store.set("claude-api-max-sessions", 3, "operator", 1.0)
+        monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
 
         credential = balancer.Credential("AH_CC_TOKEN_ALPHA", "secret")
         result = balancer.ProbeResult(
@@ -317,13 +322,16 @@ class TestClaudeRouting:
 
         monkeypatch.setattr("hooks.context.account_sessions.sessions_by_account", lambda: {"ALPHA": 2})
 
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://gateway.example")
+        monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "gateway-secret")
+        monkeypatch.setattr("scripts.routing.place._client", lambda environ: None)
         assert install.cmd_balance(include_fable=True, refresh=False, timeout=10) == 0
         output = capsys.readouterr().out
-        assert "ROUTING LEFT" in output
-        assert "FABLE LEFT" in output
-        assert " 2/? " in output
-        assert "70%" in output
-        assert "source=" not in output
+        lines = output.splitlines()
+        assert lines[0].split()[-4:] == ["FABLE", "LEFT", "FABLE", "RESET"]
+        assert lines[2].split()[:9] == ["1", "claude", "ALPHA", "subscription", "NORMAL", "2/-", "-", "-", "70%"]
+        assert lines[3].split()[:4] == ["-", "claude", "api", "(gateway)"]
+        assert "codex" not in output and "source=" not in output and "?" not in output
 
     def test_cmd_balance_marks_the_declared_master_on_the_main_and_current_paths(self, monkeypatch, capsys):
         from scripts import claude_quota_balancer as balancer
@@ -353,7 +361,9 @@ class TestClaudeRouting:
         assert capsys.readouterr().out.splitlines()[2].split()[1:5] == ["claude", "ALPHA", "MASTER", "max"]
         assert install.cmd_balance(include_fable=False, refresh=False, timeout=10, current=True) == 0
         lines = capsys.readouterr().out.splitlines()
-        assert lines[3].split()[1:5] == ["ALPHA", "(current)", "MASTER", "max"]
+        assert lines[0] == "current=ALPHA method=token"
+        assert lines[3].split()[1:6] == ["claude", "ALPHA", "(current)", "MASTER", "max"]
+        assert "?" not in "\n".join(lines) and "AGE" not in lines[1]
 
     def test_cmd_balance_lists_every_codex_account_even_without_claude_tokens(self, monkeypatch, capsys):
         from scripts import agents_quota

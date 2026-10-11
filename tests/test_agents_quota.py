@@ -234,6 +234,10 @@ def test_quota_json_lists_every_row(monkeypatch, capsys):
             "weight": None,
             "master": "",
             "selected": False,
+            "routing_left": None,
+            "fable_left": None,
+            "fable_resets_at": None,
+            "harness": "claude",
         }
     ]
 
@@ -542,9 +546,22 @@ def test_one_table_sorts_each_harness_by_routing_left_and_shows_dashes_for_missi
         "93%",
         "2h13m",
     ]
-    assert table[6].split() == ["4", "codex", "gone", "subscription", "EXPIRED", "0/0", "-", "0", *["-"] * 5]
+    assert table[6].split() == ["4", "codex", "gone", "subscription", "EXPIRED", "0/-", "-", "-", *["-"] * 5]
     assert "?" not in "\n".join(table)
     assert [row.routing_left for row in rows] == [40.0, 80.0, None, None, 93.0]
+
+
+def test_codex_routing_left_is_the_week_whenever_the_week_is_known():
+    old = codex_quota.CodexQuota(1000, "pro", seven_day=QuotaWindow(30.0, 10**10))
+    [row] = agents_quota.codex_rows(
+        [CodexAccount("alpha", "AH_CX_TOKEN_alpha")], {"alpha": old}, {}, now=1000 + 7 * 3600
+    )
+    assert (row.state, row.cap, row.routing_left) == ("STALE", None, 70.0)
+
+
+def test_a_reset_without_its_window_shows_a_dash():
+    row = agents_quota.QuotaRow("codex", "alpha", "STALE", 0, None, None, 9000, "log", five_hour_resets_at=2000)
+    assert agents_quota.render([row], now=1000).splitlines()[2].split()[-4:] == ["-", "-", "-", "-"]
 
 
 def test_the_unlisted_sessions_line_shows_only_a_positive_count():

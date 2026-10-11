@@ -27,3 +27,5 @@ def test_the_codex_quota_and_balance_lines_describe_today(monkeypatch, capsys):
     assert "Route to an AH_CX_TOKEN account (the default login only when none is set) and launch Codex" in text
     assert "One table for every Claude and Codex account" in text
     assert "Route to the default login or an AH_CX_TOKEN account" not in text
+    assert "Probe and rank Claude OAuth accounts" not in text
+    assert "no leading _, and not api, default, help or status" in text
