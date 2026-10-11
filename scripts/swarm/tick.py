@@ -60,6 +60,7 @@ from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy
+from scripts.swarm_v2 import masters as master_seats
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
@@ -206,6 +207,7 @@ def tick(slug, store, ledger, runtime, now_ms):
                 now_ms,
                 lambda: _master(slug, config, store, runtime, now_ms),
             )
+            actions += skip_refused(_master_seats, slug, config, store, runtime, doc, now_ms)
             actions += skip_refused(dispatcher.rank_pass, slug, config, store, ledger, doc, now_ms)
             actions += skip_refused(lane_split.step, slug, config, store, doc, now_ms)
             if config.state == "running":
@@ -272,7 +274,7 @@ def _master_down(slug, config, store, ledger, runtime, now_ms):
     """Operator lines waiting at a master seat nobody holds: tell the chat once per line, and return any line a dead
     master took but never closed to pending so the next master receives it."""
     live = runtime.live_names()
-    masters = [a for a in store.agents(slug) if a.lane == MASTER and a.state != "finished"]
+    masters = [a for a in store.agents(slug) if master_seats.is_lead(slug, a) and a.state != "finished"]
     if config.state == "stopping" or any(m.name in live or now_ms - m.started_at <= STARTUP_GRACE_MS for m in masters):
         return []
     inbox, seat = InboxStore(store.redis), seat_address(slug, MASTER)
@@ -940,11 +942,12 @@ def placed_record(record, placed):
 
 
 def _recover_master(slug, config, store, runtime, now_ms):
-    agents = [a for a in store.agents(slug) if a.lane == MASTER]
+    recorded = [a for a in store.agents(slug) if a.lane == MASTER]
+    agents = [a for a in recorded if master_seats.is_lead(slug, a)]
     live = runtime.live_names()
     if any(a.state != "finished" and a.name in live for a in agents):
         return []
-    finished = {a.name for a in agents if a.state == "finished"}
+    finished = {a.name for a in recorded if a.state == "finished" or not master_seats.is_lead(slug, a)}
     seat = seat_address(slug, MASTER)
     occupant = store.seats.occupant(seat).occupant
     candidates = []
@@ -975,6 +978,7 @@ def _master(slug, config, store, runtime, now_ms):
         if any(a.lane != MASTER for a in agents):
             return []
         return [_retire_master(slug, store, runtime, m, now_ms) for m in masters]
+    masters = [m for m in masters if master_seats.is_lead(slug, m)]
     pending = master_start.read(store, slug)
     if any(m.state != "finished" for m in masters) or pending.get("name") or pending.get("alerted"):
         return []
@@ -1026,6 +1030,44 @@ def _master(slug, config, store, runtime, now_ms):
         store.clear_handoff(slug, MASTER)
     store.redis.hdel(store.key(slug, "launch-assignments"), MASTER)
     return [f"spawned master {record.name}"]
+
+
+def _master_seats(slug, config, store, runtime, doc, now_ms):
+    """Seats two and up of the master count: launch a master in each seat no unfinished or live master holds, so a
+    raised count fills its seats and a seat whose master ended is filled again."""
+    if config.state == "stopping":
+        return []
+    seats = master_seats.MasterSeats(store.redis)
+    count, live = seats.count(slug), runtime.live_names()
+    taken = {a.seat for a in store.agents(slug) if a.lane == MASTER and (a.state != "finished" or a.name in live)}
+    empty = [master_seats.seat(i) for i in range(2, count + 1) if seat_address(slug, master_seats.seat(i)) not in taken]
+    actions = []
+    for seat_name in empty:
+        if refused := seat_spawn.no_slot(config, runtime, MASTER) or seat_spawn.host_hold(slug, store, now_ms, MASTER):
+            return [*actions, refused]
+        actions.append(_place_master_seat(slug, config, store, runtime, seat_name, now_ms, doc))
+    return actions
+
+
+def _place_master_seat(slug, config, store, runtime, seat_name, now_ms, doc):
+    seats = master_seats.MasterSeats(store.redis)
+    owners, count = seats.owners(slug, doc), seats.count(slug)
+
+    def prepare(record):
+        owns = sorted(item for item, owner in owners.items() if owner == record.seat)
+        task = {"id": seat_name, "handoff": store.handoff(slug, seat_name), "owns": owns, "masters": count}
+        return primed(store, slug, record.seat, task)
+
+    try:
+        record, placed = seat_spawn.place_seat(
+            slug, config, store, runtime, seat_spawn.Seat(MASTER, seat_name), now_ms, prepare
+        )
+    except seat_spawn.SeatFailed as failed:
+        store.drop_agent(slug, failed.record.name)
+        return f"master spawn failed in seat {failed.record.seat}: {failed.error}"
+    store.put_agent(slug, replace(placed_record(record, placed), state="working"))
+    store.clear_handoff(slug, seat_name)
+    return f"spawned master {record.name} in seat {record.seat}"
 
 
 def _retire_master(slug, store, runtime, master, now_ms):

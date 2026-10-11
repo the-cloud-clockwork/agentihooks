@@ -71,6 +71,25 @@ def test_seat_one_is_the_lead_at_the_single_master_address_and_later_seats_are_n
     assert masters.seats(SLUG, 3) == [LEAD, SECOND, f"master-3@{SLUG}"]
 
 
+@pytest.mark.parametrize(
+    ("lane", "seat", "lead"),
+    [(MASTER, LEAD, True), (MASTER, "", True), (MASTER, SECOND, False), ("eng", LEAD, False), ("eng", "", False)],
+)
+def test_only_a_master_record_in_the_lead_seat_or_with_no_seat_is_the_lead(lane, seat, lead):
+    assert masters.is_lead(SLUG, AgentRecord("sw-a", lane, lane, seat=seat)) is lead
+
+
+def test_a_seat_two_master_prompt_names_its_seat_the_count_the_lead_and_what_it_owns():
+    task = {"seat": SECOND, "masters": 3, "owns": ["hives/anton-1", "p2"]}
+    (line_text,) = masters.seat_lines(SLUG, task)
+    assert line_text == (
+        f"You hold master seat {SECOND}, one of 3 masters of swarm {SLUG}. The lead seat {LEAD} answers the operator "
+        "and his chat; you act on the inbox items for the phases and hives you own: hives/anton-1, p2."
+    )
+    assert masters.seat_lines(SLUG, {**task, "owns": []})[0].endswith("you own: none yet.")
+    assert masters.seat_lines(SLUG, {"seat": LEAD}) == []
+
+
 @pytest.mark.parametrize("count", [0, -1])
 def test_a_master_count_below_one_is_refused(swarm, count):
     store, _ = swarm

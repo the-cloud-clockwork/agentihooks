@@ -20,6 +20,22 @@ def seat(index: int) -> str:
     return MASTER if index == 1 else f"{MASTER}-{index}"
 
 
+def is_lead(slug: str, agent) -> bool:
+    """A master record with no seat predates seats and holds the lead."""
+    return agent.lane == MASTER and agent.seat in ("", seat_address(slug, MASTER))
+
+
+def seat_lines(slug: str, task: dict) -> list[str]:
+    """Opening prompt lines for a master launched in seat two or later; the lead's task carries no masters count."""
+    if "masters" not in task:
+        return []
+    return [
+        f"You hold master seat {task['seat']}, one of {task['masters']} masters of swarm {slug}. The lead seat "
+        f"{seat_address(slug, MASTER)} answers the operator and his chat; you act on the inbox items for the phases "
+        f"and hives you own: {', '.join(task.get('owns', [])) or 'none yet'}."
+    ]
+
+
 def seats(slug: str, count: int) -> list[str]:
     return [seat_address(slug, seat(index)) for index in range(1, _checked(count) + 1)]
 

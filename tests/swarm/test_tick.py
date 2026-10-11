@@ -1117,6 +1117,83 @@ def test_a_master_that_ended_in_seat_two_is_respawned_in_seat_two(store):
     assert len(runtime.masters) == 3
 
 
+def test_a_live_seat_two_master_neither_blocks_nor_stands_in_for_an_ended_lead(store):
+    from scripts.swarm_v2.masters import MasterSeats
+
+    MasterSeats(store.redis).set_count("sw", 2)
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, 1)
+    (lead,) = [a for a in masters(store) if a.seat == "master@sw"]
+    (second,) = [a for a in masters(store) if a.seat == "master-2@sw"]
+    store.put_agent("sw", replace(lead, state="finished"))
+    runtime.live.discard(lead.name)
+    tick("sw", store, ledger, runtime, 2 + STARTUP_GRACE_MS)
+    live = {a.seat: a.name for a in masters(store) if a.state != "finished"}
+    assert live["master-2@sw"] == second.name
+    assert live["master@sw"] not in {lead.name, second.name}
+    assert len(runtime.masters) == 3
+
+
+def test_a_seat_two_master_is_told_its_seat_count_and_owned_phases(store):
+    from scripts.swarm_v2.masters import MasterSeats
+
+    MasterSeats(store.redis).set_count("sw", 2)
+    runtime = FakeRuntime()
+    tick("sw", store, tasks(("t1", "eng")), runtime, 1)
+    (lead_task,) = [task for _, task in runtime.masters if task["id"] == MASTER]
+    (seat_task,) = [task for _, task in runtime.masters if task["id"] == "master-2"]
+    assert (seat_task["seat"], seat_task["masters"], seat_task["handoff"]) == ("master-2@sw", 2, "")
+    assert isinstance(seat_task["owns"], list)
+    assert "masters" not in lead_task
+
+
+def test_a_seat_two_master_starts_from_its_seat_handoff_and_the_handoff_is_cleared(store):
+    from scripts.swarm_v2.masters import MasterSeats
+
+    MasterSeats(store.redis).set_count("sw", 2)
+    store.put_handoff("sw", "master-2", "seat two handoff")
+    runtime = FakeRuntime()
+    tick("sw", store, tasks(("t1", "eng")), runtime, 1)
+    (seat_task,) = [task for _, task in runtime.masters if task["id"] == "master-2"]
+    assert seat_task["handoff"] == "seat two handoff"
+    assert store.handoff("sw", "master-2") == ""
+
+
+def test_no_seat_two_master_starts_without_a_session_slot(store):
+    from scripts.swarm_v2.masters import MasterSeats
+
+    MasterSeats(store.redis).set_count("sw", 2)
+    runtime = FakeRuntime(full=True)
+    actions = tick("sw", store, tasks(("t1", "eng")), runtime, 1)
+    assert not [a for a in masters(store) if a.seat == "master-2@sw"]
+    assert "no session slot for the master, waiting" in actions
+
+
+def test_a_failed_seat_two_launch_leaves_no_record_and_says_why(store):
+    from scripts.swarm_v2.masters import MasterSeats
+
+    MasterSeats(store.redis).set_count("sw", 2)
+    runtime = FakeRuntime()
+    tick("sw", store, tasks(("t1", "eng")), runtime, 1)
+    (second,) = [a for a in masters(store) if a.seat == "master-2@sw"]
+    store.put_agent("sw", replace(second, state="finished"))
+    runtime.live.discard(second.name)
+    runtime.fail = True
+    actions = tick("sw", store, tasks(("t1", "eng")), runtime, 2 + STARTUP_GRACE_MS)
+    assert "master spawn failed in seat master-2@sw: herdr down" in actions
+    assert not [a for a in masters(store) if a.seat == "master-2@sw" and a.state != "finished"]
+
+
+def test_a_stopping_swarm_launches_no_seat_two_master(store):
+    from scripts.swarm_v2.masters import MasterSeats
+
+    MasterSeats(store.redis).set_count("sw", 2)
+    store.update("sw", state="stopping")
+    runtime = FakeRuntime()
+    tick("sw", store, tasks(("t1", "eng")), runtime, 1)
+    assert runtime.masters == []
+
+
 def test_a_paused_or_drained_swarm_keeps_its_master_and_a_stopped_one_has_none(store):
     store.update("sw", state="paused")
     runtime = FakeRuntime()
