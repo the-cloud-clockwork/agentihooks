@@ -116,9 +116,9 @@ def test_a_create_cannot_name_its_own_ledger(live, credential):
 
 def test_a_create_needs_a_swarm_agent_and_task(live, credential):
     message = "a proof swarm is named from its swarm agent and task: create it from a swarm task session"
-    for fields in ({"agent": "someone"}, {"task": ""}):
-        status, reply = create(live, credential, "tagent", **fields)
-        assert (status, reply["error"]) == (400, {"code": "schema_invalid", "message": message}), fields
+    for task, fields in (("tagent", {"agent": "someone"}), ("", {})):
+        status, reply = create(live, credential, task, **fields)
+        assert (status, reply["error"]) == (400, {"code": "schema_invalid", "message": message}), task
 
 
 @pytest.mark.parametrize(
