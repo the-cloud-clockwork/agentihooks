@@ -6,6 +6,7 @@ from scripts.swarm import outage
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.tick import Placed, tick
 from tests.swarm.test_tick import FakeRuntime, tasks
+from tests.swarm.test_tick import store as store
 
 pytestmark = pytest.mark.unit
 
