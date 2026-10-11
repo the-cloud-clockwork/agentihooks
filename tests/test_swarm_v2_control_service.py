@@ -434,6 +434,28 @@ def test_the_api_opens_only_once_the_controller_holds_the_lease(tmp_path):
         service.stop()
 
 
+def test_the_hosted_api_serves_shallow_liveness_and_guards_diagnostics(tmp_path, monkeypatch):
+    monkeypatch.setattr(_cs(), "page_credential", lambda slug: "operator-fixture")
+    store = _store()
+    port = _free_port()
+    service = _cs().host(_hosted_environ(tmp_path, store, port), store, "hive-fixture")
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/v2/health/live", timeout=5) as response:
+            live = json.loads(response.read())
+        status, refused = _post(f"http://127.0.0.1:{port}/v2/health/qualify", "stranger", {})
+        found, report = _post(
+            f"http://127.0.0.1:{port}/v2/health/qualify",
+            "operator-fixture",
+            {"purpose": "backup", "report": live},
+        )
+    finally:
+        service.stop()
+    assert (live["probe"], live["status"]) == ("shallow", "live")
+    assert (status, refused["error_class"]) == (401, "unauthenticated")
+    assert (found, report["reason"]) == (409, "shallow_report")
+    assert service.health.controller is service.controller
+
+
 def test_a_port_it_cannot_bind_releases_the_lease(tmp_path):
     store = _store()
     with socket.socket() as taken:

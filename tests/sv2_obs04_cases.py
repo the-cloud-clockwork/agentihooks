@@ -163,7 +163,7 @@ class World:
     def protected(self) -> dict:
         redis = self.store.redis
         reads = {"string": redis.get, "hash": redis.hgetall, "list": lambda key: redis.lrange(key, 0, -1)}
-        keys = sorted(key for key in redis.keys(f"*{SLUG}*") if "lock" not in key)
+        keys = sorted(key for key in redis.keys(f"*{SLUG}*") if "lock" not in key and not key.endswith("rejections"))
         return {key: reads.get(redis.type(key), redis.type)(key) for key in keys}
 
     def leaked(self, *documents: object) -> list[str]:

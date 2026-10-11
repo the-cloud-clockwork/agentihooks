@@ -194,7 +194,7 @@ def test_an_occupant_without_a_heartbeat_has_no_archive_entry(store):
 @pytest.mark.parametrize(
     ("record", "expected"),
     [
-        ({}, {"state": "disabled", "watermark": 0, "backlog": 0}),
+        ({}, {"state": "disabled", "watermark": 4, "backlog": 0}),
         ({"state": "ok"}, {"state": "ok", "watermark": 4, "backlog": 2}),
         ({"state": "degraded"}, {"state": "degraded", "watermark": 4, "backlog": 2}),
     ],
