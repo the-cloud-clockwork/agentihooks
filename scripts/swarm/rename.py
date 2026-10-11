@@ -26,6 +26,8 @@ def rename_swarm(store, slug, ledger, runtime, at):
             new = _new_name(store, slug, agent, at)
             if pane.get("name") != herdr_target(new):
                 runtime.herdr(["agent", "rename", agent.pane_id, herdr_target(new)])
+                if agent.harness == "codex":
+                    runtime.herdr(["pane", "run", agent.pane_id, f"/rename {new}"])
                 actions.append(f"renamed {agent.name} to {new}")
             store.names.alias(agent.name, new)
             _move_agent(store, slug, agent, new, at)
