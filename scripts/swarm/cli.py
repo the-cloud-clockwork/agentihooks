@@ -668,17 +668,27 @@ def _split_master_pairs(pairs):
     return counts, hives, [pair for pair, key, _, _ in split if key != "masters" and not key.startswith(HIVE_KEY)]
 
 
-def _store_master_counts(store, slug, counts, hives):
+def _hive_owners(store, slug, counts, hives):
+    """Each hive seat is checked against the count this command leaves before anything is written."""
+    final = counts[-1] if counts else masters.MasterSeats(store.redis).count(slug)
+    owners = [(hive, seat_address(slug, seat.removesuffix(f"@{slug}"))) for hive, seat in hives]
+    for hive, owner in owners:
+        masters.check_hive_owner(slug, final, hive, owner)
+    return owners
+
+
+def _store_master_counts(store, slug, counts, owners):
     seats = masters.MasterSeats(store.redis)
     for count in counts:
         seats.set_count(slug, count)
-    for hive, seat in hives:
-        seats.own_hive(slug, hive, seat_address(slug, seat.removesuffix(f"@{slug}")))
+    for hive, owner in owners:
+        seats.own_hive(slug, hive, owner)
 
 
 def cmd_set(store, args):
     changes, lanes = {}, {key: dict(value) for key, value in store.config(args.slug).lanes.items()}
     counts, hives, pairs = _split_master_pairs(args.pairs)
+    hives = _hive_owners(store, args.slug, counts, hives)
     for pair in pairs:
         key, _, value = pair.partition("=")
         if key in LANE_KEYS:

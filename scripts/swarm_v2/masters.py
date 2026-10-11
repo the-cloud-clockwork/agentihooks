@@ -113,6 +113,11 @@ def hive_targets(saved: str | None, current: list[str]) -> dict[str, str]:
     return {f"{HIVES}/{hive}": owner for hive, owner in hives.items() if owner in current}
 
 
+def check_hive_owner(slug: str, count: int, hive_id: str, owner: str) -> None:
+    if owner not in seats(slug, count):
+        raise MasterError(f"{owner} is not a master seat of {slug}, so it cannot own hive {hive_id}")
+
+
 class MasterSeats:
     def __init__(self, redis) -> None:
         self.redis = redis
@@ -127,8 +132,7 @@ class MasterSeats:
         return int(self.redis.hget(self.key(slug), "count") or DEFAULT_COUNT)
 
     def own_hive(self, slug: str, hive_id: str, owner: str) -> None:
-        if owner not in seats(slug, self.count(slug)):
-            raise MasterError(f"{owner} is not a master seat of {slug}, so it cannot own hive {hive_id}")
+        check_hive_owner(slug, self.count(slug), hive_id, owner)
         hives = json.loads(self.redis.hget(self.key(slug), HIVES) or "{}")
         self.redis.hset(self.key(slug), HIVES, json.dumps({**hives, hive_id: owner}, sort_keys=True))
 

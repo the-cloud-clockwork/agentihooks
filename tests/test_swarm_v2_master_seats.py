@@ -360,9 +360,11 @@ def test_swarm_set_refuses_a_hive_without_an_id_or_a_seat_outside_the_count(swar
     store, _ = swarm
     store.create(SwarmConfig("paused-sw", "/repo", 1, 1, state="paused"))
     monkeypatch.setattr(cli, "connect", lambda: store)
-    assert cli.main(["paused-sw", "set", "masters=2", pair]) == 1
+    assert cli.main(["paused-sw", "set", "masters=2", "max-eng-agents=5", pair]) == 1
     assert capsys.readouterr().err.splitlines()[-1] == error
     assert masters.MasterSeats(store.redis).hive_owners("paused-sw") == {}
+    assert masters.MasterSeats(store.redis).count("paused-sw") == 1
+    assert store.config("paused-sw").max_eng == 1
 
 
 def test_refusals_name_the_count_they_refused():
