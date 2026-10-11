@@ -36,6 +36,8 @@ class TerminalPrompts:
             return Outcome(COMMAND, status, BACKEND, detail=f"terminal {refused.reason}: {refused}")
         except Unreachable as error:
             return Outcome(COMMAND, Status.REFUSED, BACKEND, detail=f"terminal unreachable: {error}")
+        except OSError as error:
+            return Outcome(COMMAND, Status.AMBIGUOUS, BACKEND, detail=f"terminal journal: {error}")
         return Outcome(COMMAND, Status.OK, BACKEND, "accepted")
 
     def _target(self, agent: AgentRecord) -> Target:

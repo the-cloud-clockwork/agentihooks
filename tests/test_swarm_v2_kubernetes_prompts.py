@@ -139,6 +139,43 @@ def test_an_unreachable_terminal_is_refused_with_its_reason(tmp_path):
     assert fleet.received()[EXE_A] == []
 
 
+def test_a_herdr_client_that_cannot_start_is_unreachable(tmp_path, monkeypatch):
+    fleet, _, prompts = world(tmp_path)
+    answer = fleet.__call__
+
+    def broken(command):
+        if command[3:5] == ["agent", "list"]:
+            raise OSError("herdr is not installed")
+        return answer(command)
+
+    monkeypatch.setattr(prompts.router, "run", broken)
+
+    outcome = prompts.command(remote(), "wake")
+
+    assert outcome == Outcome(
+        "command",
+        Status.REFUSED,
+        BACKEND,
+        detail=f"terminal unreachable: {ENDPOINT_A.incarnation} did not list its agents",
+    )
+
+
+def test_a_delivery_journal_that_cannot_be_written_is_ambiguous(tmp_path, monkeypatch):
+    fleet, _, prompts = world(tmp_path)
+
+    def unwritable(entries):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(prompts.router.deliveries, "save", unwritable)
+
+    outcome = prompts.command(remote(), "wake")
+
+    assert outcome == Outcome(
+        "command", Status.AMBIGUOUS, BACKEND, detail="terminal journal: [Errno 13] Permission denied"
+    )
+    assert fleet.mutations() == []
+
+
 def test_the_tick_reports_a_nudge_to_an_unreachable_terminal_as_refused_with_the_reason(tmp_path):
     fleet, client, prompts = world(tmp_path)
     fleet.lost.add(profile(client, EXE_A))
