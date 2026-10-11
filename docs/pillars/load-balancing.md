@@ -34,12 +34,13 @@ account a session runs on. Token values are never printed or logged.
 
 `agentihooks init` adds one line to its managed `~/.bashrc` block that runs
 `eval "$(agentihooks accounts env)"` in every new shell. The command reads the
-KV v2 secret `k8s/swarm-claude-creds` on the `secret` mount with
-`OPENBAO_URL` and `OPENBAO_TOKEN`. Each key is an account email, each value its
-token; it prints one `export AH_CC_TOKEN_<slug>=...` per account, the slug being
-the lower cased email with `@` as `at` and every other symbol as `_`
-(`Nestor.Colt@Gmail.com` becomes `AH_CC_TOKEN_nestor_coltatgmail_com`). Nothing
-is written to disk.
+KV v2 secret `agentihooks/claude-creds` on the `secret` mount with
+`OPENBAO_URL` and `OPENBAO_TOKEN`. Each key is an account's variable name,
+`account_names.token_env` of its email: `AH_CC_TOKEN_<slug>`, the slug being the
+lower cased email with `@` as `at` and every other symbol as `_`
+(`Ops.Two@Example.com` becomes `AH_CC_TOKEN_ops_twoatexample_com`). It prints one
+`export <key>=...` per key under that same name; keys that are not lower
+case `AH_CC_TOKEN_` names are skipped. Nothing is written to disk.
 
 When OpenBao is unset or unreachable it falls back to `~/.agentihooks/accounts/claude.env` (under `AGENTIHOOKS_HOME` when
 set): an operator written file of `AH_CC_TOKEN_*=` lines, used only when no one

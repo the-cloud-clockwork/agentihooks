@@ -175,60 +175,82 @@ def test_order_puts_each_rank_in_its_place(task, position):
     assert ledger_rank.order(task) == position
 
 
-@pytest.mark.parametrize("extra", [{"by": ""}, {"by": 7}, {"by": None}, {"if_unranked": False}, {"if_unranked": 1}])
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"by": ""},
+        {"by": 7},
+        {"by": None},
+        {"if_owned": False},
+        {"if_owned": 1},
+        {"if_unranked": True},
+        {"if_owned": True, "if_unranked": True},
+    ],
+)
 def test_the_page_rank_op_refusal_names_its_shape(extra):
     with pytest.raises(ValueError) as refused:
         ledger_rank.check({"op": "task_rank", "id": "p", "item": "tasks/t1", "rank": "high", **extra})
     assert str(refused.value) == (
-        "task_rank takes an id, an item tasks/<id>, a rank and an optional author by and if_unranked"
+        "task_rank takes an id, an item tasks/<id>, a rank and an optional author by and if_owned"
     )
 
 
-def test_an_if_unranked_rank_lands_on_a_task_nobody_ranked():
-    doc, ctx = {"tasks": [{"id": "t1"}]}, FakeContext()
-    op = {**page_rank("high"), "by": "dispatcher", "if_unranked": True}
-    ledger_rank.check(op)
-    assert ledger_rank.apply(doc, op, ctx) is True
-    assert (doc["tasks"][0], ctx.dirty, ctx.stamps) == (
-        {"id": "t1", "rank": "high"},
-        True,
-        [("tasks/t1/rank", "dispatcher")],
-    )
+def owned_rank(rank, n, by="dispatcher"):
+    op = {"op": "task_rank", "id": f"o-{n}", "item": "tasks/t1", "rank": rank, "by": by, "if_owned": True}
+    core.check_op(op)
+    return core.sync(SLUG, ops=[op])
 
 
-@pytest.mark.parametrize("held", ["low", "high"])
-def test_an_if_unranked_rank_on_a_ranked_task_is_refused_and_names_the_rank(held):
-    op = {"op": "task_rank", "id": "g-1", "item": "tasks/t1", "rank": "low", "by": MASTER}
-    core.sync(SLUG, ops=[{**op, "rank": held}])
-    guarded = {
-        "op": "task_rank",
-        "id": "g-2",
-        "item": "tasks/t1",
-        "rank": "high",
-        "by": "dispatcher",
-        "if_unranked": True,
-    }
-    core.check_op(guarded)
-    state, rejected = core.sync(SLUG, ops=[guarded])
-    assert (rejected, rank_of(state)) == (["g-2"], held)
-    assert state["_meta"]["warnings"][0] == f"task t1 already has rank {held}"
-    assert state["_meta"]["stamps"]["tasks/t1/rank"]["by"] == MASTER
+def test_an_if_owned_rank_lands_on_an_unranked_task_and_reorders_its_own_rank():
+    state, rejected = owned_rank("high", 1)
+    assert (rejected, rank_of(state)) == ([], "high")
+    state, rejected = owned_rank("normal", 2)
+    assert (rejected, rank_of(state), state["_meta"]["stamps"]["tasks/t1/rank"]["by"]) == ([], "normal", "dispatcher")
+
+
+@pytest.mark.parametrize(("by", "named"), [(MASTER, MASTER), ("operator", "operator")])
+def test_an_if_owned_rank_on_a_rank_someone_else_set_is_refused_and_names_who(by, named):
+    owned_rank("high", 1)
+    core.sync(SLUG, ops=[{"op": "task_rank", "id": "g-1", "item": "tasks/t1", "rank": "urgent", "by": by}])
+    state, rejected = owned_rank("normal", 2)
+    assert (rejected, rank_of(state)) == (["o-2"], "urgent")
+    assert state["_meta"]["warnings"][0] == f"task t1 has rank urgent set by {named}"
+
+
+def test_an_if_owned_rank_on_a_rank_with_no_recorded_author_is_refused():
+    op = {"op": "task_add", "id": "add-9", "by": MASTER, "task": "t9", "title": "z", "lane": "eng", "rank": "low"}
+    core.sync(SLUG, ops=[op])
+    guarded = {"op": "task_rank", "id": "o-9", "item": "tasks/t9", "rank": "high", "by": "dispatcher"}
+    state, rejected = core.sync(SLUG, ops=[{**guarded, "if_owned": True}])
+    assert (rejected, rank_of(state, "t9")) == (["o-9"], "low")
+    assert state["_meta"]["warnings"][0] == "task t9 has rank low set by someone else"
+
+
+def test_the_master_setting_the_same_rank_takes_it_from_the_dispatcher():
+    owned_rank("high", 1)
+    state, rejected = update(MASTER, "high")
+    assert (rejected, state["_meta"]["stamps"]["tasks/t1/rank"]["by"]) == ([], MASTER)
+    state, rejected = owned_rank("normal", 2)
+    assert (rejected, rank_of(state)) == (["o-2"], "high")
+    held = state["_meta"]["stamps"]["tasks/t1/rank"]
+    state, rejected = update(MASTER, "high", 2)
+    assert (rejected, state["_meta"]["stamps"]["tasks/t1/rank"]) == ([], held)
 
 
 def test_the_rank_op_by_a_refused_author_changes_nothing_and_names_why():
     doc, ctx = {"tasks": [{"id": "t1"}]}, FakeContext()
     ctx.refused = []
     assert ledger_rank.apply(doc, {**page_rank("high"), "by": ENGINEER}, ctx) is False
-    assert (doc["tasks"][0], ctx.stamps, ctx.events, ctx.dirty) == ({"id": "t1"}, [], [], False)
+    assert (doc["tasks"][0], ctx.stamps, ctx.events, ctx.dirty) == ({"id": "t1"}, {}, [], False)
     assert ctx.refused == [f"{ENGINEER} cannot set a task rank: {ledger_tasks.PROPOSE}"]
 
 
 class FakeContext:
-    def __init__(self):
-        self.stamps, self.events, self.dirty = [], [], False
+    def __init__(self, stamps=None):
+        self.stamps, self.events, self.dirty = dict(stamps or {}), [], False
 
     def stamp(self, path, by):
-        self.stamps.append((path, by))
+        self.stamps[path] = {"by": by}
 
     def record(self, by, kind, target, **extra):
         self.events.append((by, kind, target, extra))
@@ -242,7 +264,7 @@ def test_the_page_rank_op_records_the_operator_and_marks_the_ledger_changed():
     doc, ctx = {"tasks": [{"id": "t0"}, {"id": "t1"}]}, FakeContext()
     assert ledger_rank.apply(doc, page_rank("next"), ctx) is True
     assert doc["tasks"][1] == {"id": "t1", "rank": "urgent"} and doc["tasks"][0] == {"id": "t0"}
-    assert ctx.stamps == [("tasks/t1/rank", "operator")]
+    assert ctx.stamps == {"tasks/t1/rank": {"by": "operator"}}
     assert ctx.events == [("operator", "rank set", "tasks/t1", {"text": "urgent"})]
     assert ctx.dirty is True
 
@@ -250,10 +272,22 @@ def test_the_page_rank_op_records_the_operator_and_marks_the_ledger_changed():
 @pytest.mark.parametrize(
     ("task", "rank"), [({"id": "t1", "rank": "normal"}, "normal"), ({"id": "t1", "rank": "low"}, "low")]
 )
-def test_setting_the_rank_a_task_already_has_changes_nothing(task, rank):
-    doc, ctx = {"tasks": [task]}, FakeContext()
+def test_setting_the_rank_a_task_already_has_from_the_same_author_changes_nothing(task, rank):
+    held = {"tasks/t1/rank": {"by": "operator"}}
+    doc, ctx = {"tasks": [task]}, FakeContext(held)
     assert ledger_rank.apply(doc, page_rank(rank), ctx) is True
-    assert (doc["tasks"][0], ctx.stamps, ctx.events, ctx.dirty) == (dict(task), [], [], False)
+    assert (doc["tasks"][0], ctx.stamps, ctx.events, ctx.dirty) == (dict(task), held, [], False)
+
+
+@pytest.mark.parametrize("held", [{}, {"tasks/t1/rank": {"by": "dispatcher"}}])
+def test_setting_the_same_rank_as_another_author_takes_the_rank_over(held):
+    doc, ctx = {"tasks": [{"id": "t1", "rank": "high"}]}, FakeContext(held)
+    assert ledger_rank.apply(doc, page_rank("high"), ctx) is True
+    assert (doc["tasks"][0], ctx.stamps, ctx.dirty) == (
+        {"id": "t1", "rank": "high"},
+        {"tasks/t1/rank": {"by": "operator"}},
+        True,
+    )
 
 
 def test_an_explicit_normal_on_an_unranked_task_is_stored_so_the_dispatcher_leaves_it():
@@ -261,7 +295,7 @@ def test_an_explicit_normal_on_an_unranked_task_is_stored_so_the_dispatcher_leav
     assert ledger_rank.apply(doc, page_rank("normal"), ctx) is True
     assert (doc["tasks"][0], ctx.stamps, ctx.dirty) == (
         {"id": "t1", "rank": "normal"},
-        [("tasks/t1/rank", "operator")],
+        {"tasks/t1/rank": {"by": "operator"}},
         True,
     )
 
