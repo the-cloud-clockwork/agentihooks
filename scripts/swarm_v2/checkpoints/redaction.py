@@ -10,7 +10,12 @@ MODE = "strict"
 MARK = "[REDACTED:"
 MARKER = re.compile(r"\[REDACTED:\w+\]")
 LINE = re.compile(r"[^\n]*\n|[^\n]+")
+ENDINGS = ("\r\n", "\n")
 CODEC_ERRORS = "surrogateescape"
+
+
+def _redact(text: str) -> str:
+    return secrets.redact(text, mode=MODE)
 
 
 def _count(before: str, after: str) -> int:
@@ -18,16 +23,16 @@ def _count(before: str, after: str) -> int:
 
 
 def _plain(text: str, found: list[int]) -> str:
-    redacted = secrets.redact(text, mode=MODE)
+    redacted = _redact(text)
     found.append(_count(text, redacted))
     return redacted
 
 
 def _value(text: str, key: str, found: list[int]) -> str:
     """A match that needs the record key hides the whole value."""
-    own = secrets.redact(text, mode=MODE)
+    own = _redact(text)
     fragment = json.dumps({key: text})
-    keyed = secrets.redact(fragment, mode=MODE)
+    keyed = _redact(fragment)
     if _count(fragment, keyed) > _count(text, own):
         own = " ".join(MARKER.findall(keyed))
     found.append(_count(text, own))
@@ -36,19 +41,22 @@ def _value(text: str, key: str, found: list[int]) -> str:
 
 def _redacted(value: object, key: str, found: list[int]) -> object:
     if isinstance(value, dict):
-        safe = {name: _value(name, "", found) for name in value}
+        safe = {name: _plain(name, found) for name in value}
         return {safe[name]: _redacted(item, safe[name], found) for name, item in value.items()}
     if isinstance(value, list):
         return [_redacted(item, key, found) for item in value]
     return _value(value, key, found) if isinstance(value, str) else value
 
 
+def _ending(line: str) -> str:
+    return next((end for end in ENDINGS if line.endswith(end)), "")
+
+
 def _rewritten(line: str, record: object, found: list[int]) -> str:
     cleaned = _redacted(record, "", found)
     if cleaned == record:
         return line
-    body = line.rstrip("\r\n")
-    return json.dumps(cleaned, separators=(",", ":")) + line[len(body) :]
+    return json.dumps(cleaned, separators=(",", ":")) + _ending(line)
 
 
 def scrub(data: bytes) -> tuple[bytes, int]:

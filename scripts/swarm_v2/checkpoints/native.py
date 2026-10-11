@@ -73,7 +73,7 @@ class Resumed:
 
 def archive(files: tuple[tuple[str, bytes], ...]) -> bytes:
     buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w", format=tarfile.PAX_FORMAT) as written:  # NOSONAR: writes only
+    with tarfile.open(fileobj=buffer, mode="w") as written:  # NOSONAR: writes only
         for name, data in files:
             info = tarfile.TarInfo(name)
             info.size, info.mode = len(data), MEMBER_MODE

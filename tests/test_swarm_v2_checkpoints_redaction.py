@@ -31,7 +31,9 @@ CASES = {
         compact({WORD: GENERIC}) + "\n",
         1,
     ),
+    "keyed list": (json.dumps({KEY: ["abcd" + "1234efgh", 7]}) + "\n", compact({KEY: [GENERIC, 7]}) + "\n", 1),
     "key": (json.dumps({TOKEN: [1, "x"]}) + "\r\n", compact({HIDDEN: [1, "x"]}) + "\r\n", 1),
+    "space before the line end": (json.dumps({"t": TOKEN}) + " \n", compact({"t": HIDDEN}) + "\n", 1),
     "colliding keys": (json.dumps({TOKEN: 1, OTHER: 2}) + "\n", compact({HIDDEN: 2}) + "\n", 2),
     "nested": (
         json.dumps({"items": [TOKEN, {"text": f"{TOKEN} and {TOKEN}"}], "n": 3}) + "\n",
