@@ -492,6 +492,19 @@ def test_a_full_journal_expires_its_oldest_unknown_outcome_and_sends(tmp_path, m
     assert PENDING_LIMIT == 64
 
 
+def test_making_room_counts_an_entry_without_a_time_as_the_oldest(tmp_path, monkeypatch):
+    monkeypatch.setattr(target_module, "PENDING_LIMIT", 2)
+    client, fleet, desired = world(tmp_path)
+    found = resolved(client, desired[0])
+    key = f"{found.incarnation}/{PANE}"
+    old = {"op-a": {"target": key, "state": "pending"}, "op-b": {"target": key, "state": "pending", "since": 0}}
+    (tmp_path / DELIVERIES).write_text(json.dumps({"version": 1, "deliveries": old}))
+    client.router.clock = lambda: EXPIRY_S - 100.0
+    client.router.send(found, "agent_prompt", "op-new", "x")
+    entries = json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]
+    assert (entries["op-a"]["state"], entries["op-b"]["state"]) == ("expired", "pending")
+
+
 def test_the_operator_audit_settles_an_unknown_outcome(tmp_path):
     client, fleet, desired = world(tmp_path)
     found = resolved(client, desired[0])
