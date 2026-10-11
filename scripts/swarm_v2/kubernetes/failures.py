@@ -12,6 +12,7 @@ from scripts.swarm_v2.accounts import AccountCapacity
 from scripts.swarm_v2.controller import Controller
 from scripts.swarm_v2.kubernetes.cleanup import Release
 from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL
+from scripts.swarm_v2.runtime import observe
 
 OOM_KILLED, EVICTED, NODE_LOST = "oom_killed", "evicted", "node_lost"
 IMAGE_PULL, APPLICATION_EXIT = "image_pull", "application_exit"
@@ -229,6 +230,9 @@ class Recovery:
             return self._late(agent.execution_id, len(pods))
         if len(pods) > 1:
             return "ambiguous"
+        final = retention.final(self.store, self.slug, agent.execution_id)
+        if final:
+            return final.state
         reason = self._reason(agent.execution_id, pods[0], ready) if pods else self._vanished(agent, ready, last)
         if reason == IMAGE_PULL and pods and self._pulling(agent.execution_id):
             return "pulling"
@@ -257,7 +261,15 @@ class Recovery:
         if last:
             return deleted_reason(last, ready)
         node = self.store.redis.hget(self._key(NODES), agent.execution_id)
-        return NODE_LOST if ready is not None and node and node not in ready else ""
+        if ready is not None and node and node not in ready:
+            return NODE_LOST
+        return NODE_LOST if self._observed_gone(agent) else ""
+
+    def _observed_gone(self, agent: AgentRecord) -> bool:
+        seen = observe.stored(self.store, self.slug, agent.execution_id)
+        if seen is None or seen.generation != agent.generation or seen.state is not observe.State.LOST:
+            return False
+        return seen.sources.get(observe.Source.KUBERNETES, {}).get("reading") == observe.Reading.NOT_FOUND
 
     def _pulling(self, execution_id: str) -> bool:
         now, key = lease.now_ms(self.store), self._key(PULLS)

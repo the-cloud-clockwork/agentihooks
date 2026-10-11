@@ -210,3 +210,23 @@ def test_a_ledger_without_tasks_still_names_the_bottleneck(spool, sent, monkeypa
     swarm = metrics.metrics_swarm.TickInput(store, {}, [], lambda url: None, None)
     assert metrics.record_pass("sw", NOW, 0, ON, swarm) == []
     assert bottleneck.read(store, "sw")["bottleneck"] == ""
+
+
+def test_a_swarm_pass_measures_the_stages_of_the_ledger_tasks_and_reports_a_fleet_failure(spool, sent, monkeypatch):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    seen = []
+
+    def broken(*args):
+        raise SwarmError("registry down")
+
+    monkeypatch.setattr(metrics.metrics_swarm, "pull_rows", lambda box, now_ms, swarm: {})
+    monkeypatch.setattr(metrics.metrics_swarm, "record_pass", lambda *args: None)
+    monkeypatch.setattr(metrics.stages, "record", lambda box, store, slug, now_ms, tasks: seen.append(tasks))
+    monkeypatch.setattr(metrics.metrics_fleet, "record", broken)
+    tasks = [{"id": "t1", "state": "open"}]
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": tasks}, [], lambda url: None, None)
+    assert metrics.record_pass("sw", NOW, 0, ON, swarm) == ["fleet metrics failed: registry down"]
+    assert seen == [tasks]
