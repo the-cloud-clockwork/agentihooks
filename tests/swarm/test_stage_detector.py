@@ -142,3 +142,49 @@ def test_alert_and_detector_updates_do_not_lose_an_interleaved_episode(store, mo
     standing.fire(store.redis, "scratch", "ci_overrun", standing.Reading(21, 15, "minutes", "1", "same run"), NOW)
     assert standing.read(store.redis, "scratch")["ci_overrun"]["fired"] == 4
     assert standing.read(store.redis, "scratch")["ci_overrun"]["detector"] == row["detector"]
+
+
+def test_a_stage_that_leaves_the_window_falls_to_zero_and_updates_displayed_hours(store):
+    source, tasks = replay()
+    initial = stage_detector.report(source, tasks, NOW, 4 * H)
+    stage_detector.update_findings(store, "scratch", initial, NOW)
+    later = stage_detector.report(source, tasks, NOW + 4 * H, 4 * H)
+    row = next(row for row in later["stages"] if row["stage"] == "ci_overrun")
+    assert (row["seconds"], row["previous_seconds"], row["trend"]) == (0.0, 2289.0, "falling")
+    stage_detector.update_findings(store, "scratch", later, NOW + 4 * H)
+    updated = standing.read(store.redis, "scratch")["ci_overrun"]
+    assert updated["value"] == 0.0
+    assert updated["fired"] == 3
+    evidence = next(
+        finding.evidence
+        for finding in standing.findings(store.redis, "scratch", NOW + 4 * H)
+        if finding.subject == "ci_overrun"
+    )
+    assert evidence[-1] == "Current 0 task hours, falling, previously 0.635833 task hours"
+
+
+def test_unrelated_overruns_do_not_inflate_the_standing_repeat_count(store):
+    source, tasks = replay()
+    source["ci_stages"].append({**stage(99, "orphan", 2000, 1, 0, "ubuntu"), "ts_ms": NOW - H})
+    source["ci_runs"].append(run(99, "unrelated", NOW - H, NOW, "success"))
+    found = stage_detector.report(source, tasks, NOW)
+    stage_detector.update_findings(store, "scratch", found, NOW)
+    assert standing.read(store.redis, "scratch")["ci_overrun"]["fired"] == 3
+
+
+def test_separate_task_observations_count_once_each_for_non_ci_stages(store):
+    from scripts.swarm import stages
+
+    source, tasks = replay()
+    for row in source["ci_stages"]:
+        row["budget"] = 0
+    found = stage_detector.report(source, tasks, NOW)
+    stage_detector.update_findings(store, "scratch", found, NOW)
+    row = standing.read(store.redis, "scratch")["ci_run"]
+    assert row["fired"] == 3
+    assert row["value"] == 1.0
+    assert stages.line(found, NOW) == (
+        "top stages in the last 4 hours: ci run 1.0 task hours (rising); 1.0 task hours in all, measured 0 minutes ago"
+    )
+    stage_detector.update_findings(store, "scratch", found, NOW + 60_000)
+    assert standing.read(store.redis, "scratch")["ci_run"] == row

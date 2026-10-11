@@ -72,7 +72,7 @@ def _detector(old, reading, now_ms):
         return old
     known = {*old.get("episodes", []), *old.get("detector", {}).get("episodes", [])}
     added = [episode for episode in reading["episodes"] if episode not in known]
-    return {
+    row = {
         "stage": reading["stage"],
         "value": reading["seconds"] / 3600,
         "threshold": 0.0,
@@ -85,6 +85,9 @@ def _detector(old, reading, now_ms):
         "detector": reading,
         "updated_at": now_ms,
     }
+    if row["unit"] == "task hours":
+        row["value"] = reading["seconds"] / 3600
+    return row
 
 
 def fire(redis: Redis, slug: str, stage: str, reading: Reading, now_ms: int) -> dict:
@@ -102,6 +105,12 @@ def clear(redis: Redis, slug: str, stage: str) -> bool:
 def _finding(row: dict) -> Finding:
     times = "time" if row["fired"] == 1 else "times"
     evidence = (f"Fired {row['fired']} {times}", row["detail"]) if row["detail"] else (f"Fired {row['fired']} {times}",)
+    detector = row.get("detector")
+    if detector:
+        evidence += (
+            f"Current {detector['seconds'] / 3600:g} task hours, {detector['trend']},"
+            f" previously {detector['previous_seconds'] / 3600:g} task hours",
+        )
     return Finding(
         KIND,
         row["stage"],

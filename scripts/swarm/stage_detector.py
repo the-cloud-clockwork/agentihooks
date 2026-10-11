@@ -33,23 +33,16 @@ def _totals(found: dict) -> dict:
     return totals
 
 
-def _episodes(rows: dict, stage: str, now_ms: int, window_ms: int) -> list[str]:
-    if stage == "ci_overrun":
-        return sorted(
-            {
-                str(row["run_id"])
-                for row in rows["ci_stages"]
-                if now_ms - window_ms < row["ts_ms"] <= now_ms and row["budget"] > 0 and row["seconds"] > row["budget"]
-            }
-        )
-    return [stage]
-
-
 def report(rows: dict, tasks: list, now_ms: int, window_ms: int = bottleneck.WINDOW_MS) -> dict:
     current = stages.report(rows, tasks, now_ms, window_ms)
     previous = _totals(stages.report(rows, tasks, now_ms - window_ms, window_ms))
+    totals = _totals(current)
+    episodes = stages.observations(rows, tasks, now_ms, window_ms)
     ranked = []
-    for stage, row in _totals(current).items():
+    for stage in totals.keys() | previous.keys():
+        row = (
+            totals[stage] if stage in totals else {"stage": stage, "seconds": 0.0, "labels": previous[stage]["labels"]}
+        )
         before = previous.get(stage, {}).get("seconds", 0.0)
         change = row["seconds"] - before
         ranked.append(
@@ -58,7 +51,7 @@ def report(rows: dict, tasks: list, now_ms: int, window_ms: int = bottleneck.WIN
                 "label": ", ".join(sorted(row["labels"])),
                 "previous_seconds": before,
                 "trend": "rising" if change > 0 else "falling" if change < 0 else "unchanged",
-                "episodes": _episodes(rows, stage, now_ms, window_ms),
+                "episodes": episodes.get(stage, []),
             }
         )
     ranked.sort(key=lambda row: (-row["seconds"], row["stage"]))
