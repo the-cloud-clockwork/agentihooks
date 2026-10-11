@@ -6,8 +6,9 @@ set is a default it reorders; only an operator rank, set by him or relayed with 
 behind that queue. At delegate and full the tick claims from this queue, resumed work first within a rank band and
 clear territory before overlapping, and the dispatcher writes no rank: it comments on a task only when the task
 enters the head of its lane's queue, as many tasks as the lane has seats among those that unblock work or carry an
-operator rank, or leaves it while still open; a lane with no seats keeps its head until seats return. Below delegate it proposes each raise to the master. Every action is a
-gate log row, a dispatch metrics row naming its rule and a comment on the task.
+operator rank, or leaves it while still open; a lane with no seats keeps its head until seats return. Below delegate
+it proposes each raise to the master. Every action is a gate log row, a dispatch metrics row naming its rule and a
+comment on the task.
 """
 
 import json
@@ -143,7 +144,8 @@ def rank_pass(slug, config, store, ledger, doc, now_ms):
             lane: [t for t in before.get(lane, []) if t in head or known.get(t, {}).get("state") == "open"]
             for lane, head in heads.items()
         }
-        standing = {task_id: task_id in leading for task_id in claimable}
+        led = set(leading)
+        standing = {task_id: task_id in led for task_id in claimable}
         steps = _head_steps(slug, ledger, doc, before, heads, standing, landed)
     else:
         lined = [t for t in ordered(doc, named, scores) if t in claimable and scores[t]]

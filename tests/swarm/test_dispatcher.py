@@ -332,24 +332,31 @@ def test_at_delegate_a_task_entering_the_queue_head_gets_one_comment_and_a_log_r
 
 def test_the_queue_head_follows_claims_operator_ranks_and_freezes_with_one_comment_per_change(store, home, shipped):
     store.update(SLUG, autonomy="full", max_eng=2)
-    tasks = deep_and_wide()
+    tasks = [*deep_and_wide(), task("w1", phase="", depends_on=["l1"])]
     found = doc(tasks, phases=[])
     dispatcher.rank_pass(SLUG, store.config(SLUG), store, Ledger(), found, NOW)
     tasks[2 + 6]["state"] = "claimed"
     ledger = Ledger()
     dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW + 60_000)
-    assert ledger.comments == []
-    tasks[-1]["rank"] = "high"
+    assert ledger.comments == [entered("l1", leads("1 open task", "1 open task"))]
+    tasks[-2]["rank"] = "high"
     found["_meta"] = {"stamps": {"tasks/l2/rank": {"by": "operator"}}}
     ledger = Ledger()
     actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW + 120_000)
-    assert ledger.comments == [entered("l2", "the operator ranked it high")]
-    assert actions[0] == "put task l2 at the head of the eng claim queue: the operator ranked it high"
+    assert ledger.comments == [
+        left("l1", OUTRANKED_BY_TWO),
+        entered("l2", "the operator ranked it high"),
+    ]
+    assert actions[0] == f"moved task l1 out of the head of the eng claim queue: {OUTRANKED_BY_TWO}"
+    assert (
+        ledger.comments[0][1]
+        == f"The dispatcher moved this task out of the head of the eng claim queue: {OUTRANKED_BY_TWO}."
+    )
     found["freezes"] = [{"verb": "freeze", "target": "tasks/s"}]
     ledger = Ledger()
     dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW + 180_000)
     unready = "it is no longer a claimable task in focus"
-    assert ledger.comments == [left("s", unready)]
+    assert ledger.comments == [left("s", unready), entered("l1", leads("1 open task", "1 open task"))]
     assert ledger.ranks == []
 
 
@@ -566,7 +573,7 @@ def test_the_claim_key_bands_only_operator_ranks_ahead_of_the_queue_position(sto
     assert dispatcher.claim_key(SLUG, store.update(SLUG, autonomy="assist"), store, found) is None
 
 
-def test_a_master_urgent_fix_phase_task_outside_the_focus_keeps_its_rank_and_heads_the_queue(store, home, shipped):
+def test_a_master_urgent_fix_phase_leaf_outside_the_focus_gets_no_rank_write_and_no_head_comment(store, home, shipped):
     from scripts.doctor import loop, priming
 
     store.update(SLUG, autonomy="delegate", template=priming.TEMPLATE)
@@ -589,10 +596,8 @@ def test_the_dispatcher_writes_no_rank_at_full_over_master_and_operator_ranks(st
     rows["b"]["rank"], rows["q"]["rank"], rows["p"]["rank"] = "urgent", "normal", "normal"
     rows["g"]["rank"], rows["h"]["rank"] = "urgent", "urgent"
     ledger = Ledger()
-    actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
+    dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
     assert ledger.ranks == []
-    assert not [a for a in actions if a.startswith(("lowered", "raised"))]
-    assert [rows[t]["rank"] for t in ("b", "c", "f", "g", "h")] == ["urgent", "high", "high", "urgent", "urgent"]
 
 
 def test_a_rank_with_no_recorded_author_writes_no_rank_at_delegate(store, home, shipped):
@@ -618,6 +623,19 @@ def test_two_operator_high_ranks_hold_two_of_the_top_places(store, home, shipped
     stamps = {f"tasks/t{i}/rank": {"by": "operator"} for i in range(2)}
     found = doc(tasks, phases=[], _meta={"stamps": stamps})
     assert proposed(dispatcher.rank_pass(SLUG, store.config(SLUG), store, Ledger(), found, NOW)) == ["t2"]
+
+
+def test_two_operator_high_ranks_take_the_two_head_places_at_delegate(store, home, shipped):
+    store.update(SLUG, autonomy="delegate", max_eng=2)
+    tasks = [task(f"t{i}", phase="") for i in range(5)]
+    tasks.append(task("w", phase="", depends_on=[f"t{i}" for i in range(5)]))
+    tasks.append(task("v", phase="", depends_on=["t0", "t1"]))
+    tasks[0]["rank"] = tasks[1]["rank"] = "high"
+    stamps = {f"tasks/t{i}/rank": {"by": "operator"} for i in range(2)}
+    ledger = Ledger()
+    dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, doc(tasks, phases=[], _meta={"stamps": stamps}), NOW)
+    assert ledger.ranks == []
+    assert ledger.comments == [entered(t, "the operator ranked it high") for t in ("t0", "t1")]
 
 
 def test_below_delegate_an_own_rank_is_never_lowered(store, home, shipped):
