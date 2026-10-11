@@ -206,22 +206,12 @@ def _other_accounts(sessions: dict[str, int], fleet: Iterable[tuple[float, "Prob
 
 
 def _codex_accounts() -> list[Candidate]:
-    from hooks.context.account_sessions import (
-        API_ACCOUNT,
-        CODEX_DEFAULT,
-        CODEX_TOKEN_PREFIX,
-        codex_sessions_by_account,
-    )
+    from hooks.context.account_sessions import codex_sessions_by_account
     from scripts import codex_router
 
     environ = dict(os.environ)
     sessions = codex_sessions_by_account()
-    pool = codex_router.routing_pool(environ)
-    known = {account.name for account in pool}
-    pool += [
-        codex_router.CodexAccount(name, f"{CODEX_TOKEN_PREFIX}{name}")
-        for name in sorted(set(sessions) - known - {CODEX_DEFAULT, API_ACCOUNT})
-    ]
+    pool = codex_router.CodexAccountSource().pool(environ)
     now = time.time()
     candidates = []
     for name, quota in codex_router.quotas(pool, environ).items():
