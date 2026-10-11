@@ -10,6 +10,8 @@ import tarfile
 import urllib.request
 from pathlib import Path
 
+TOOLS = ("herdr", "claude", "codex")
+
 
 def checksum(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -147,10 +149,13 @@ def main() -> None:
     parser.add_argument("--base-image")
     parser.add_argument("--source-revision", default="unknown")
     parser.add_argument("--cache", type=Path)
+    parser.add_argument("--tool", action="append", choices=TOOLS)
     args = parser.parse_args()
     lock = load_lock(args.lock, args.architecture)
     if args.base_image is not None and args.base_image != lock["base_image"]:
         raise ValueError("base image differs from lock")
+    if args.tool:
+        lock = {**lock, "tools": {name: lock["tools"][name] for name in args.tool}}
     if args.action == "download":
         for name, artifact in lock["tools"].items():
             fetch(name, artifact, args.cache)

@@ -12,6 +12,8 @@ paths=(
   pyproject.toml
   README.md
   docker/swarm/requirements.lock
+  docker/swarm-node/versions.lock
+  docker/swarm-node/requirements.lock
   hooks/
   scripts/
   profiles/

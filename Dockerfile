@@ -9,6 +9,12 @@ COPY profiles/ profiles/
 ARG VERSION=0.0.0
 RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS="$VERSION" /opt/venv/bin/pip install --no-cache-dir --no-deps .
 
+FROM mirror.gcr.io/library/python:3.12-slim AS herdr
+ARG TARGETARCH=amd64
+COPY docker/swarm-node/versions.lock docker/swarm-node/requirements.lock /opt/swarm-node/
+COPY scripts/swarm_v2/worker_image.py /opt/swarm-node/worker_image.py
+RUN python /opt/swarm-node/worker_image.py install --tool herdr --architecture "$TARGETARCH"
+
 FROM mirror.gcr.io/library/python:3.12-slim
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -19,6 +25,7 @@ ENV PATH=/opt/venv/bin:$PATH \
     SWARM_RELOAD=0
 RUN groupadd --gid 10001 swarm && useradd --uid 10001 --gid swarm --create-home swarm && mkdir /data && chown swarm:swarm /data
 COPY --from=build /opt/venv /opt/venv
+COPY --from=herdr /usr/local/bin/herdr /usr/local/bin/herdr
 COPY media/agentihooks-logo.png /opt/venv/lib/python3.12/site-packages/media/agentihooks-logo.png
 COPY docs/swarm-v2/schemas/ /opt/venv/lib/python3.12/site-packages/docs/swarm-v2/schemas/
 USER 10001:10001
