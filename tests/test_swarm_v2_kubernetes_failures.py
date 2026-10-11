@@ -841,19 +841,25 @@ def test_a_pending_recovery_marks_its_task_until_the_resumed_replacement_launche
     assert replacements() == {}
     assert replacements() == {}
     assert ledger.calls == [(cases.SLUG, "task", {"awaiting": "recovery_pending"}, epoch)]
-    assert _hash(world, replacement.MARKED) == {"task": "recovery_pending"}
+    assert _hash(world, "recovery-pending-tasks") == {"task": "recovery_pending"}
     assert relaunch.calls == []
 
     decision = recovery.decide(world.old.execution_id, "resume")
-    assert replacements() == {world.old.execution_id: "launched"}
+    assert replacements() == {world.old.execution_id: "ok"}
     [(request, agent)] = relaunch.calls
     successor = world.store.execution(cases.SLUG, decision.replacement)
     assert agent == successor
     assert (request.config, request.lane, request.name) == (world.store.config(cases.SLUG), "eng", successor.name)
-    assert request.task == {"id": "task", "seat": successor.seat, "controller_epoch": epoch, "checkpoint": "ckpt-one-2"}
+    assert request.task == {
+        "id": "task",
+        "seat": successor.seat,
+        "profile": successor.profile,
+        "controller_epoch": epoch,
+        "checkpoint": "ckpt-one-2",
+    }
     assert ledger.calls[1:] == [(cases.SLUG, "task", {"awaiting": ""}, epoch)]
-    assert _hash(world, replacement.MARKED) == {}
-    assert _hash(world, replacement.LAUNCHED) == {world.old.execution_id: decision.replacement}
+    assert _hash(world, "recovery-pending-tasks") == {}
+    assert _hash(world, "attempt-replacement-launches") == {world.old.execution_id: decision.replacement}
 
     assert replacements() == {}
     assert (len(relaunch.calls), len(ledger.calls)) == (1, 2)
@@ -868,8 +874,8 @@ def test_a_refused_replacement_launch_keeps_its_task_waiting_and_launches_on_a_l
 
     assert replacements() == {world.old.execution_id: "unavailable"}
     assert _marks(ledger) == [{"awaiting": "recovery_pending"}]
-    assert _hash(world, replacement.LAUNCHED) == {}
-    assert replacements() == {world.old.execution_id: "launched"}
+    assert _hash(world, "attempt-replacement-launches") == {}
+    assert replacements() == {world.old.execution_id: "ok"}
     assert _marks(ledger) == [{"awaiting": "recovery_pending"}, {"awaiting": ""}]
     assert [agent.execution_id for _, agent in relaunch.calls] == [successor, successor]
     assert relaunch.calls[1][0].task["checkpoint"] == "ckpt-one-2"
@@ -882,7 +888,7 @@ def test_a_fresh_replacement_launches_without_a_checkpoint_and_a_refused_mark_wa
     world.reconcile(recovery)
 
     assert replacements() == {}
-    assert (ledger.calls, _hash(world, replacement.MARKED)) == ([], {})
+    assert (ledger.calls, _hash(world, "recovery-pending-tasks")) == ([], {})
     assert (
         capsys.readouterr().out
         == "controller: the ledger refused the recovery mark on task task: ledger fixture refused\n"
@@ -892,13 +898,13 @@ def test_a_fresh_replacement_launches_without_a_checkpoint_and_a_refused_mark_wa
 
     recovery.decide(world.old.execution_id, "fresh")
     ledger.refusals = 1
-    assert replacements() == {world.old.execution_id: "launched"}
+    assert replacements() == {world.old.execution_id: "ok"}
     [(request, _)] = relaunch.calls
     assert request.task["checkpoint"] == ""
-    assert _hash(world, replacement.MARKED) == {"task": "recovery_pending"}
+    assert _hash(world, "recovery-pending-tasks") == {"task": "recovery_pending"}
     assert replacements() == {}
     assert _marks(ledger) == [{"awaiting": "recovery_pending"}, {"awaiting": ""}]
-    assert _hash(world, replacement.MARKED) == {}
+    assert _hash(world, "recovery-pending-tasks") == {}
 
 
 def test_a_stale_controller_records_no_launch_and_writes_no_mark(world):
@@ -913,8 +919,8 @@ def test_a_stale_controller_records_no_launch_and_writes_no_mark(world):
     world.live.require = stale
     with pytest.raises(SwarmError, match="stale"):
         replacements()
-    assert len(relaunch.calls) == 1
-    assert (_hash(world, replacement.LAUNCHED), ledger.calls) == ({}, [])
+    assert relaunch.calls == []
+    assert (_hash(world, "attempt-replacement-launches"), ledger.calls) == ({}, [])
 
 
 def test_a_stale_controller_writes_no_pending_mark(world):
@@ -929,7 +935,48 @@ def test_a_stale_controller_writes_no_pending_mark(world):
     world.live.require = stale
     with pytest.raises(SwarmError, match="stale"):
         replacements()
-    assert (_hash(world, replacement.MARKED), ledger.calls) == ({}, [])
+    assert (_hash(world, "recovery-pending-tasks"), ledger.calls) == ({}, [])
+
+
+def test_an_ambiguous_replacement_launch_counts_as_launched_and_is_never_placed_twice(world):
+    recovery, ledger, relaunch = world.recovery(world.live), _Ledger(), _Relaunch(Status.AMBIGUOUS)
+    replacements = replacement.Replacements(recovery, relaunch, ledger)
+    world.show(world.old, "oom_killed")
+    world.reconcile(recovery)
+    successor = recovery.decision(world.old.execution_id).replacement
+
+    assert replacements() == {world.old.execution_id: "ambiguous"}
+    assert replacements() == {}
+    assert len(relaunch.calls) == 1
+    assert _hash(world, "attempt-replacement-launches") == {world.old.execution_id: successor}
+    assert ledger.calls == []
+
+
+def test_a_replacement_the_seat_has_moved_past_is_never_launched_and_its_task_stops_waiting(world):
+    recovery, ledger, relaunch = world.recovery(world.live, automatic=False), _Ledger(), _Relaunch()
+    replacements = replacement.Replacements(recovery, relaunch, ledger)
+    world.show(world.old, "oom_killed")
+    world.reconcile(recovery)
+    replacements()
+    decision = recovery.decide(world.old.execution_id, "resume")
+    successor = world.store.execution(cases.SLUG, decision.replacement)
+    world.live.admit(replace(successor, **failures.NEW_ATTEMPT), successor.execution_id)
+
+    assert replacements() == {world.old.execution_id: "superseded"}
+    assert relaunch.calls == []
+    assert _hash(world, "attempt-replacement-launches") == {world.old.execution_id: decision.replacement}
+    assert _marks(ledger) == [{"awaiting": "recovery_pending"}, {"awaiting": ""}]
+
+
+def test_a_fence_whose_decision_is_not_written_yet_waits_without_a_launch(world):
+    recovery, ledger, relaunch = world.recovery(world.live), _Ledger(), _Relaunch()
+    replacements = replacement.Replacements(recovery, relaunch, ledger)
+    fence = {"execution_id": world.old.execution_id, "reason": "oom_killed", "released": []}
+    world.store.redis.hset(world.store.key(cases.SLUG, "attempt-fences"), world.old.execution_id, json.dumps(fence))
+
+    assert replacements() == {}
+    assert relaunch.calls == []
+    assert _marks(ledger) == [{"awaiting": "recovery_pending"}]
 
 
 def test_the_deployed_pass_launches_a_decided_replacement_after_it_reconciles(world):

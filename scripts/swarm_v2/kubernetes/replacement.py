@@ -7,11 +7,13 @@ from typing import Protocol
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_v2.kubernetes.failures import FENCES, PENDING, Decision, Recovery
-from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest
+from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
 
 LAUNCHED = "attempt-replacement-launches"
 MARKED = "recovery-pending-tasks"
 CLEARED = ""
+SUPERSEDED = "superseded"
+STARTED = (Status.OK, Status.AMBIGUOUS)
 
 
 class TaskLedger(Protocol):
@@ -44,19 +46,26 @@ class Replacements:
 
     def _launch(self, decision: Decision) -> str:
         successor = self.store.execution(self.slug, decision.replacement)
+        occupant = self.store.execution_occupants(self.slug)[successor.seat]
+        self.controller.require()
+        if occupant.execution_id != successor.execution_id:
+            self._launched(decision)
+            return SUPERSEDED
         task = {
             "id": successor.task,
             "seat": successor.seat,
+            "profile": successor.profile,
             "controller_epoch": self.controller.held.epoch,
             "checkpoint": decision.checkpoint,
         }
         request = SpawnRequest(self.store.config(self.slug), successor.lane, successor.name, task)
         outcome = self.relaunch(request, successor)
-        if not outcome.ok:
-            return outcome.status.value
-        self.controller.require()
+        if outcome.status in STARTED:
+            self._launched(decision)
+        return outcome.status.value
+
+    def _launched(self, decision: Decision) -> None:
         self.store.redis.hset(self._key(LAUNCHED), decision.execution_id, decision.replacement)
-        return "launched"
 
     def _mark(self) -> None:
         waiting = {self.store.execution(self.slug, execution_id).task for execution_id in self._unlaunched()}
