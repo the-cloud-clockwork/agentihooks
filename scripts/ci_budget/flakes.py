@@ -52,8 +52,8 @@ def read_budget(repo_dir: str, branch: str, run: Callable) -> dict | None:
 
 
 def text(test: dict) -> str:
-    path, _, name = test["test"].partition("::")
-    function = name.split("::")[-1].removeprefix("test_").replace("_", " ").lower()
+    path, *_, name = test["test"].split("::")
+    function = name.removeprefix("test_").replace("_", " ").lower()
     folders = PurePosixPath(path).parent.parts[1:]
     module = " ".join([*folders, PurePosixPath(path).stem.removeprefix("test_")]).replace("_", " ").lower()
     return (

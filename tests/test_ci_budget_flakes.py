@@ -101,6 +101,11 @@ def test_a_test_flaky_in_two_runs_is_filed_once_in_plain_words(swarm):
     later = NOW_MS + defects.REFRESH_MS
     assert flakes.refresh("sw", config, store, ledger, later, run=_gh(calls, _budget(TEST, OTHER))) == []
     assert len(ledger.added) == 2
+    newer = "tests/test_page.py::test_reload"
+    flakes.refresh("sw", config, store, ledger, later + defects.REFRESH_MS, run=_gh(calls, _budget(TEST, newer)))
+    assert [text for _, text in ledger.added[2:]] == [
+        "The test reload in the page tests passed only on a retry in 2 dev runs within seven days."
+    ]
 
 
 def test_the_budget_is_read_at_most_once_per_refresh_interval(swarm):
