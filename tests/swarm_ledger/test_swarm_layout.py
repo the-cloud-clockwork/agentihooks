@@ -500,16 +500,16 @@ def test_agents_table_shows_each_agents_execution_identity_beside_its_terminal(o
     ]
     rows = page.table("swarm-agents")
     assert [row[:2] + row[6:9] for row in rows] == [
-        ["master-1", "—", "LIVE", "WORKING local · gen 1 · seen 1m ago", "—"],
-        ["eng-58", "eng", "IDLE", "INPUT WAIT local · gen 3 · not seen", "—"],
+        ["master-1", "—", "LIVE", "WORKING seen 1m ago\nlocal · gen 1", "—"],
+        ["eng-58", "eng", "IDLE", "INPUT WAIT not seen\nlocal · gen 3", "—"],
         [
             "eng-60",
             "eng",
             "WORKING",
-            "WORKING kubernetes · gen 2 · standard · seen 2m ago",
+            "WORKING seen 2m ago\nkubernetes · gen 2 · standard",
             "CACHED live 5m ago · stale · behind heartbeat",
         ],
-        ["ci-61", "ci", "WORKING", "SCHEDULING WAIT kubernetes · gen 1 · memory · seen 3m ago", "—"],
+        ["ci-61", "ci", "WORKING", "SCHEDULING WAIT seen 3m ago\nkubernetes · gen 1 · memory", "—"],
     ]
 
 
