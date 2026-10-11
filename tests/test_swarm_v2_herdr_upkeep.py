@@ -1,11 +1,9 @@
-import socket
+import dataclasses
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from scripts.swarm_v2.herdr import upkeep
-from scripts.swarm_v2.herdr.attach import ClientHome, Terminal
-from scripts.swarm_v2.herdr.endpoints import Endpoint, Scope, TerminalAuthority
+from scripts.swarm_v2.herdr.endpoints import Endpoint, Scope
 from scripts.swarm_v2.herdr.reconcile import Report
 from scripts.swarm_v2.herdr.upkeep import Attempt, Upkeep
 from tests import sv2_hdr03_cases as cases
@@ -13,7 +11,7 @@ from tests import sv2_hdr03_cases as cases
 pytestmark = pytest.mark.unit
 FX = cases.fixture()
 EXE_A, EXE_B = (entry["execution_id"] for entry in FX["managed"])
-HOST_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureHostKey"
+HOST_KEY = cases.HOST_KEY
 
 
 def attempt(execution_id: str, generation: int = 1) -> Attempt:
@@ -26,12 +24,7 @@ def endpoint(execution_id: str) -> Endpoint:
 
 def client(tmp_path, ready=None, addresses=("10.43.12.7",)):
     herdr = cases.Herdr([FX["manual"]], {endpoint(e).target for e in (EXE_A, EXE_B)} if ready is None else ready)
-    authority = TerminalAuthority(Ed25519PrivateKey.generate(), lambda: 1_800_000_000)
-
-    def lookup(host, port, type):  # noqa: A002
-        return [(socket.AF_INET, type, 6, "", (address, port)) for address in addresses]
-
-    return Terminal(ClientHome(tmp_path / "client"), authority, FX["namespace"], herdr, lookup), herdr
+    return cases.client_terminal(tmp_path / "client", herdr, FX["namespace"], addresses), herdr
 
 
 def sidebar(herdr) -> list[str]:
@@ -166,6 +159,20 @@ def test_switched_off_no_herdr_command_runs_and_no_client_file_is_written(tmp_pa
     assert herdr.machines == before
     assert not (tmp_path / "client").exists()
     assert keeper.herdr_registration_drift() == 0
+
+
+def test_a_fresh_upkeep_reconciles_even_an_empty_set_of_attempts(tmp_path):
+    terminal, herdr = client(tmp_path)
+
+    report = Upkeep(terminal, True).change([])
+
+    assert report == Report()
+    assert herdr.commands == [["herdr", "machine", "list", "--json"]]
+
+
+def test_an_attempt_is_a_frozen_value():
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        attempt(EXE_A).host_public = "ssh-ed25519 AAAA-other"
 
 
 @pytest.mark.parametrize(

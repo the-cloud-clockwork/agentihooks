@@ -20,7 +20,7 @@ class Attempt:
 
 
 class Upkeep:
-    """Switched off it runs no herdr command, so every saved machine stays as it is until ownership is audited."""
+    """Disabled, it runs no herdr command and leaves every saved machine in place."""
 
     def __init__(self, terminal: Terminal, enabled: bool) -> None:
         self.terminal, self.enabled = terminal, enabled

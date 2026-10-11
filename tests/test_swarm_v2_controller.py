@@ -1,17 +1,14 @@
 import json
-import socket
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 import scripts.swarm.execution as execution
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2.controller import Controller
-from scripts.swarm_v2.herdr.attach import ClientHome, Terminal
-from scripts.swarm_v2.herdr.endpoints import Scope, TerminalAuthority
+from scripts.swarm_v2.herdr.endpoints import Scope
 from scripts.swarm_v2.herdr.upkeep import Attempt, Upkeep
 from scripts.swarm_v2.kubernetes import watch
 from scripts.swarm_v2.kubernetes.terminal import HostKeys
@@ -22,7 +19,7 @@ from scripts.swarm_v2.runtime.operations import Observation, OperationRequest, P
 from tests import sv2_hdr03_cases
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
-HOST_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureHostKey"
+HOST_KEY = sv2_hdr03_cases.HOST_KEY
 
 
 class Transport:
@@ -914,19 +911,21 @@ def test_the_controller_reports_the_registration_drift(fixture):
     assert keeping(store, grant, Keeper()).herdr_registration_drift() == 3
     assert first.herdr_registration_drift() == 0
     grant["allowed"] = False
-    with pytest.raises(SwarmError, match="^a scoped controller grant is required$"):
+    with pytest.raises(SwarmError) as refused:
         keeping(store, grant, Keeper()).herdr_registration_drift()
+    assert str(refused.value) == "a scoped controller grant is required"
+
+
+class ReadyHerdr(sv2_hdr03_cases.Herdr):
+    def __call__(self, command):
+        if command[:3] == ["herdr", "machine", "add"]:
+            self.ready.add(command[-1])
+        return super().__call__(command)
 
 
 def herdr_client(tmp_path):
-    herdr = sv2_hdr03_cases.Herdr([sv2_hdr03_cases.fixture()["manual"]], set())
-    authority = TerminalAuthority(Ed25519PrivateKey.generate(), lambda: 1_800_000_000)
-
-    def lookup(host, port, type):  # noqa: A002
-        herdr.ready.add(f"ssh://{host}")
-        return [(socket.AF_INET, type, 6, "", ("10.43.12.7", port))]
-
-    return Terminal(ClientHome(tmp_path / "client"), authority, "workers", herdr, lookup), herdr
+    herdr = ReadyHerdr([sv2_hdr03_cases.fixture()["manual"]], set())
+    return sv2_hdr03_cases.client_terminal(tmp_path / "client", herdr, "workers"), herdr
 
 
 def test_start_and_an_attempt_change_each_save_the_client_machines(fixture, tmp_path):

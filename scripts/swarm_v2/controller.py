@@ -38,9 +38,9 @@ class Controller:
         pods: PodView | None = None,
         orphan_cleanup: bool = True,
     ) -> None:
+        self.store, self.slug, self.authorize = store, slug, authorize
         self.terminals: Upkeep | None = None
         self.host_keys = HostKeys(store)
-        self.store, self.slug, self.authorize = store, slug, authorize
         self.pods, self.reconciler = pods, Reconciler(owner_for(slug), orphan_cleanup)
         self.accounts = AccountReconciler(store, slug)
         self.owner = f"controller-{uuid4().hex}"
