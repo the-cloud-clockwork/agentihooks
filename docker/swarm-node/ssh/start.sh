@@ -32,7 +32,9 @@ done
 
 umask 077
 mkdir -p "$state"
-install -m 0600 "$material/host_key" "$state/host_key"
+for name in host_key user_ca.pub principals; do
+    install -m 0600 "$material/$name" "$state/$name"
+done
 sed -e "s|@PORT@|$port|" -e "s|@LISTEN@|$listen|" -e "s|@STATE@|$state|g" -e "s|@MATERIAL@|$material|g" \
     -e "s|@USER@|$(id -un)|" -e "s|@PYTHON@|$python|" -e "s|@ATTEMPTS@|$attempts|" -e "s|@LAUNCH@|$launch|" -e "s|@PATH@|$session_path|" \
     "$here/sshd_config" > "$state/sshd_config"

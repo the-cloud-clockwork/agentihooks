@@ -74,6 +74,9 @@ class ClientHome:
     def certificate(self, endpoint: Endpoint) -> Path:
         return self.terminals / "certificates" / f"{endpoint.name}-cert.pub"
 
+    def generation(self, endpoint: Endpoint) -> Path:
+        return self.terminals / "generations" / endpoint.name
+
     def block(self, endpoint: Endpoint) -> Path:
         return self.terminals / "endpoints" / f"{endpoint.name}.conf"
 
@@ -155,14 +158,20 @@ class Terminal:
 
     def register(self, scope: Scope, host_public: str) -> Endpoint:
         endpoint = Endpoint(scope, self.namespace)
-        address = route(endpoint, self.lookup)
         home = self.home
+        recorded = home.generation(endpoint)
+        newest = int(recorded.read_text()) if recorded.exists() else 0
+        if scope.generation < newest:
+            raise EndpointRefused("stale_generation", f"{endpoint.name} already serves generation {newest}")
+        address = route(endpoint, self.lookup)
         _write(home.certificate(endpoint), self.authority.issue(scope, self._client_key()))
         _write(home.known_hosts(endpoint), known_hosts(endpoint, host_public))
         _write(home.block(endpoint), ssh_block(home, endpoint, address))
-        current = home.config.read_text() if home.config.exists() else ""
-        if home.include not in current:
-            _write(home.config, home.include + current)
+        _write(recorded, f"{scope.generation}\n")
+        if not home.config.exists():
+            _write(home.config, home.include)
+        elif home.include not in (current := home.config.read_text()):
+            home.config.write_text(home.include + current)
         _write(home.ssh, home.wrapper)
         home.ssh.chmod(0o700)
         return endpoint

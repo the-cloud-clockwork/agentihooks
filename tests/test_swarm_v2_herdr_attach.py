@@ -131,6 +131,7 @@ def test_the_client_home_lays_out_one_file_set_per_endpoint(tmp_path):
     assert home.known_hosts(endpoint()) == terminals / "known_hosts" / NAME
     assert home.certificate(endpoint()) == terminals / "certificates" / f"{NAME}-cert.pub"
     assert home.block(endpoint()) == terminals / "endpoints" / f"{NAME}.conf"
+    assert home.generation(endpoint()) == terminals / "generations" / NAME
     assert home.include == f'Include "{terminals}/endpoints/*.conf"\n'
 
 
@@ -229,6 +230,51 @@ def test_an_existing_client_ssh_config_keeps_its_lines_after_one_include(tmp_pat
     found.register(scope(), HOST_KEY)
     found.register(scope(), HOST_KEY)
     assert found.home.config.read_text() == found.home.include + "Host other\n  User me\n"
+
+
+def test_an_existing_ssh_config_is_edited_in_place_keeping_its_mode_and_link(tmp_path):
+    found, _ = terminal(tmp_path)
+    real = tmp_path / "operator-ssh-config"
+    real.write_text("Host other\n")
+    real.chmod(0o644)
+    found.home.config.parent.mkdir(parents=True)
+    found.home.config.symlink_to(real)
+    found.register(scope(), HOST_KEY)
+    assert (found.home.config.is_symlink(), _mode(real)) == (True, 0o644)
+    assert real.read_text() == found.home.include + "Host other\n"
+
+
+def test_a_new_ssh_config_is_private(tmp_path):
+    found, _ = terminal(tmp_path)
+    found.register(scope(), HOST_KEY)
+    assert _mode(found.home.config) == 0o600
+
+
+def test_register_records_the_newest_generation(tmp_path):
+    found, _ = terminal(tmp_path)
+    found.register(scope(), HOST_KEY)
+    assert found.home.generation(endpoint()).read_text() == "2\n"
+
+
+def test_an_older_generation_cannot_overwrite_the_newer_pin(tmp_path):
+    found, runner = terminal(tmp_path)
+    newer = grant_scope(Registration(**(fixture()["registration"] | {"generation": 3})))
+    found.register(newer, "ssh-ed25519 NEWER")
+    before = sorted(path.read_bytes() for path in found.home.terminals.rglob("*") if path.is_file())
+    assert refusal(lambda: found.attach(scope(), HOST_KEY)) == (
+        "stale_generation",
+        f"{NAME} already serves generation 3",
+    )
+    after = sorted(path.read_bytes() for path in found.home.terminals.rglob("*") if path.is_file())
+    assert (before, runner.commands) == (after, [])
+    assert found.terminal_endpoint_refusals() == {"stale_generation": 1}
+    assert found.terminal_endpoint_auth_failures() == {}
+
+
+def test_the_same_generation_may_attach_again(tmp_path):
+    found, _ = terminal(tmp_path)
+    found.register(scope(), HOST_KEY)
+    assert found.register(scope(), HOST_KEY) == endpoint()
 
 
 def test_the_client_key_is_made_once_and_reused(tmp_path):

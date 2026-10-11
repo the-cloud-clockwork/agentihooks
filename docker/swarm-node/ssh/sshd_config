@@ -3,8 +3,8 @@ ListenAddress @LISTEN@
 HostKey @STATE@/host_key
 PidFile @STATE@/sshd.pid
 AuthorizedKeysFile none
-TrustedUserCAKeys @MATERIAL@/user_ca.pub
-AuthorizedPrincipalsFile @MATERIAL@/principals
+TrustedUserCAKeys @STATE@/user_ca.pub
+AuthorizedPrincipalsFile @STATE@/principals
 AllowUsers @USER@
 SetEnv PATH=@PATH@
 ForceCommand @PYTHON@ -m scripts.swarm_v2.herdr.session --material @MATERIAL@ --attempts @ATTEMPTS@ --launch @LAUNCH@
@@ -14,7 +14,7 @@ PasswordAuthentication no
 KbdInteractiveAuthentication no
 HostbasedAuthentication no
 UsePAM no
-StrictModes no
+StrictModes yes
 PermitUserEnvironment no
 AllowAgentForwarding no
 AllowTcpForwarding no

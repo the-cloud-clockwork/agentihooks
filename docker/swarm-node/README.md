@@ -208,8 +208,9 @@ mounts its terminal Secret at `/var/run/swarm/terminal`, the entrypoint starts a
 unprivileged sshd on port 2222 that loads that execution's host key, trusts only
 the mounted user CA and admits only certificates naming the execution, with every
 forwarding off; its forced command, `scripts.swarm_v2.herdr.session`, enters the
-supervised herdr environment of the attempt. Without the Secret the endpoint stays
-off and the agent still runs. The image keeps no host key of its own.
+supervised herdr environment of the attempt. The start script waits in the
+background up to `SWARM_TERMINAL_WAIT_SECONDS` (180) for the Secret; without it the
+endpoint stays off for that attempt and the agent still runs. The image keeps no host key of its own.
 `scripts.swarm_v2.herdr.endpoints` renders the Secret, a ClusterIP Service and a
 NetworkPolicy per execution, and `scripts.swarm_v2.herdr.attach` connects the
 client; `tests/integration/herdr_terminal/terminal_proof.py` proves the pair

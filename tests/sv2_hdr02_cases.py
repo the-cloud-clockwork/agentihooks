@@ -307,6 +307,9 @@ def _recovery() -> tuple[dict, bool]:
         regenerated = HostIdentity.generate()
         world.servers[old.host]["key"] = regenerated.public
         steps["new_generation"] = terminal.attach(bumped, regenerated.public).incarnation
+        newer_pin = terminal.home.known_hosts(old).read_text()
+        steps["stale_attach"] = _refused(lambda: terminal.attach(first, old_identity.public))
+        steps["newer_pin_kept"] = terminal.home.known_hosts(old).read_text() == newer_pin
         try:
             terminal.qualifier.require(old.name, f"{first.execution_id}/2", "pane_read")
             steps["stale_generation"] = ""
@@ -323,6 +326,8 @@ def _recovery() -> tuple[dict, bool]:
             and steps["old_pin_after_replacement"]
             and steps["new_generation"] == f"{exe_a}/3"
             and "was replaced" in steps["stale_generation"]
+            and steps["stale_attach"] == "stale_generation"
+            and steps["newer_pin_kept"]
             and steps["terminal_endpoint_auth_failures"] == {"host_key_changed": 1}
         )
         return steps, passed

@@ -192,6 +192,7 @@ class Worker:
             "permituserenvironment",
             "trustedusercakeys",
             "authorizedprincipalsfile",
+            "strictmodes",
         )
         found = dict(line.split(" ", 1) for line in done.stdout.splitlines() if " " in line)
         return {key: found.get(key) for key in wanted}
@@ -218,8 +219,8 @@ def client(name: str, authority: TerminalAuthority, resolver=lookup) -> Terminal
     return Terminal(home, authority, NAMESPACE, capabilities.runner(home.environment(base)), resolver)
 
 
-def grant(exe: str):
-    return grant_scope(Registration(**(FIXTURE["registration"] | {"execution_id": exe, "generation": 1})))
+def grant(exe: str, generation: int = 1):
+    return grant_scope(Registration(**(FIXTURE["registration"] | {"execution_id": exe, "generation": generation})))
 
 
 def run(terminal: Terminal, argv: list[str]) -> subprocess.CompletedProcess:
@@ -254,8 +255,9 @@ def main() -> int:
                 "x11forwarding": "no",
                 "permittunnel": "no",
                 "permituserenvironment": "no",
-                "trustedusercakeys": str(worker_a.material / "user_ca.pub"),
-                "authorizedprincipalsfile": str(worker_a.material / "principals"),
+                "trustedusercakeys": str(worker_a.state / "user_ca.pub"),
+                "authorizedprincipalsfile": str(worker_a.state / "principals"),
+                "strictmodes": "yes",
             },
             effective,
         )
@@ -272,14 +274,24 @@ def main() -> int:
         )
         create = operator.qualifier.require(endpoint_a.name, endpoint_a.incarnation, "workspace_create")
         made = run(operator, [*create, "--label", f"hdr02-{nonce}", "--cwd", str(worker_a.home), "--no-focus"])
-        record("a_workspace_created", made.returncode == 0, made.stdout[-400:] or made.stderr[-400:])
-        pane = json.loads(made.stdout)["result"]["root_pane"]["pane_id"]
+        reply = json.loads(made.stdout)["result"] if made.returncode == 0 else {}
+        pane = reply.get("root_pane", {}).get("pane_id", "")
+        record(
+            "a_workspace_created",
+            made.returncode == 0 and bool(pane),
+            {"exit": made.returncode, "workspace": reply.get("workspace", {}).get("workspace_id"), "pane": pane},
+        )
         launch = operator.qualifier.require(endpoint_a.name, endpoint_a.incarnation, "pane_run")
         ran = run(operator, [*launch, pane, f"echo started-{nonce}; sleep 120"])
-        record("a_pane_run", ran.returncode == 0, ran.stdout[-300:] or ran.stderr[-300:])
+        record("a_pane_run", ran.returncode == 0, {"exit": ran.returncode, "pane": pane})
         wait = operator.qualifier.require(endpoint_a.name, endpoint_a.incarnation, "pane_wait_output")
         waited = run(operator, [*wait, pane, "--match", f"started-{nonce}", "--timeout", "10000"])
-        record("a_work_survives_client_exit", waited.returncode == 0, waited.stdout[-300:] or waited.stderr[-300:])
+        matched = f"started-{nonce}" in waited.stdout
+        record(
+            "a_work_survives_client_exit",
+            waited.returncode == 0 and matched,
+            {"exit": waited.returncode, "marker_read_by_a_later_client": matched},
+        )
         second = client("client-second", authority)
         again = second.attach(scope_a, identity_a.public)
         record(
@@ -332,6 +344,19 @@ def main() -> int:
         worker_a.start_sshd(replaced)
         reason = refused(lambda: operator.attach(scope_a, identity_a.public))
         record("c_changed_host_key_refused", reason == "host_key_changed", {"reason": reason})
+        bumped = operator.attach(grant(EXE_A, 2), replaced.public)
+        record(
+            "c_new_generation_verified",
+            bumped.compatible and bumped.incarnation == f"{EXE_A}/2",
+            {"target": bumped.target, "incarnation": bumped.incarnation},
+        )
+        pinned = operator.home.known_hosts(endpoint_a).read_text()
+        reason = refused(lambda: operator.attach(scope_a, identity_a.public))
+        record(
+            "c_stale_generation_cannot_overwrite_the_newer_pin",
+            reason == "stale_generation" and operator.home.known_hosts(endpoint_a).read_text() == pinned,
+            {"reason": reason, "pin_unchanged": operator.home.known_hosts(endpoint_a).read_text() == pinned},
+        )
         worker_a.stop_sshd()
         worker_a.stop_herdr()
 
@@ -358,7 +383,7 @@ def main() -> int:
             labels,
         )
         reason = refused(lambda: operator.attach(scope_a, identity_a.public))
-        record("c_old_identity_not_accepted", reason == "host_key_changed", {"reason": reason})
+        record("c_old_identity_not_accepted", reason == "stale_generation", {"reason": reason})
         record(
             "terminal_endpoint_auth_failures",
             True,
