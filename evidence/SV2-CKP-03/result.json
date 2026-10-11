@@ -18,10 +18,10 @@
   },
   "interfaces": [
     "native.Qualifier(validator, qualified=QUALIFIED): capture, checkpoint and restore through the attempt's granted store; metrics() exposes native_resume_success_by_target keyed harness/outcome (captured, resumed, native_resume_unavailable)",
-    "Qualifier.capture(harness, home, session_id, cwd, version_text, stopped) returns NativeCapture or Unavailable. Claude: projects/<cwd with every non alphanumeric character a dash>/<id>.jsonl and its companion folder. Codex: the rollout under sessions, located through the threads index read in one read transaction that never waits on a lock (a held exclusive lock yields database_busy), else by file name. Conversation files are read up to their last complete record. Account stores, environment and harness databases are never read into the material",
-    "Unavailable(harness, cause): outcome native_resume_unavailable, decision (continue_from_context, start_fresh) left to the operator; causes unqualified_harness, unqualified_version, native_format_changed, database_busy, conversation_absent, identity_mismatch, native_member_escapes_home, version_changed, context_only, conversation_present, or the Validator refusal reason",
+    "Qualifier.capture(harness, home, session_id, cwd, version_text, stopped) returns NativeCapture or Unavailable. Claude: projects/<cwd with every non alphanumeric character a dash>/<id>.jsonl and its companion folder. Codex: the rollout under sessions, located through the threads index read in one read transaction that never waits on a lock (a held exclusive lock yields database_busy), else by file name; a link anywhere on the rollout path under sessions is refused as an escape. Conversation files are read up to their last complete record. Account stores, environment and harness databases are never read into the material",
+    "Unavailable(harness, cause): outcome native_resume_unavailable, decision (continue_from_context, start_fresh) left to the operator; causes unqualified_harness, unqualified_version, version_changed, native_format_changed, native_too_large, database_busy, conversation_absent, identity_mismatch, native_member_escapes_home, context_only, conversation_present, placement_failed, or the Validator refusal reason. A checkpoint that is not authoritative is counted under the harness unknown, since its manifest cannot be trusted to name one",
     "Qualifier.checkpoint(native, manifest) stores <checkpoint_id>.native_session before Validator.commit stores the manifest and only when the manifest authority equals the store grant; an Unavailable commits a context continuation with native_resume_capability unsupported; native.merged replaces only the native_session material",
-    "Qualifier.restore(checkpoint_id, home, cwd, version_text) returns Resumed(harness, session_id, command) only for an authoritative native checkpoint whose recorded CLI line equals the installed qualified line; it reads every member bounded, checks identity, refuses escapes and existing conversations, and writes nothing before all checks pass; it re-reads the placed files to report the identity",
+    "Qualifier.restore(checkpoint_id, home, cwd, version_text) returns Resumed(harness, session_id, command) only for an authoritative native checkpoint whose recorded CLI line equals the installed qualified line. It reads every member bounded, checks identity in memory, refuses a link on any unresolved target path, an escape or an existing conversation, then writes each file new (O_EXCL, O_NOFOLLOW, mode 0600) and re-reads the placed files to report the identity. A failed write or read back removes every file and folder it created; placement_failed names an OSError, any other refusal keeps its own cause",
     "tests/integration/native_resume/run_native_proof.sh <dir> claude|codex: the live fresh-home proof"
   ],
   "supported_versions": {
@@ -81,16 +81,21 @@
     "red": "Proofs run 38149669076 on the tests only commit c7108dd4 failed collecting the native tests with ImportError for native",
     "first_green_attempt": "Proofs run 38149709947 on d03a46c1 hung: sqlite3 online backup retries forever on a locked source; cancelled and replaced by a read transaction on a connection that never waits",
     "green": "Proofs run 38151824986 on d476e6c3 passed 70 unit tests; the three cases reported passed and their records were lifted from that run",
-    "live": "run_native_proof.sh passed for claude (live-claude.jsonl) and for codex on d476e6c3 (live-codex.jsonl)"
+    "live": "run_native_proof.sh passed for claude (live-claude.jsonl) and for codex on d476e6c3 (live-codex.jsonl)",
+    "review": "Standards and Spec readers, three rounds; findings fixed: unhashable session ids, corrupt index, linked rollouts on both branches, capture bounds, placement written new and removed on failure, account names kept out of the live records, version_changed cause, case C durability by read back. Disputed and closed: forged native commits are refused at restore (consumer_rule)"
   },
   "limitations": [
     "Qualification is per CLI minor line; a new line needs a live proof run and a QUALIFIED entry",
     "A capture while the CLI runs is labelled consistent_export: it ends at the last complete record, which may sit mid turn",
     "Codex databases are not carried; Codex rebuilds its thread index from the rollout, observed live on 0.162.1",
-    "The live proof ran on the workstation, not in a worker Pod; the Pod proof belongs to the G8 rollout gate",
+    "Capture bounds (ARCHIVE_MEMBERS, ARCHIVE_BYTES) are checked after the conversation files are read; an oversized conversation is read once, then refused as native_too_large",
+    "A restore home whose projects or sessions folder is a link, as in agentihooks profile homes, is refused as an escape; restores target fresh homes",
+    "Cleanup after a failed placement suppresses its own errors; a path it cannot remove is left behind",
+    "The live proof ran on the workstation in fresh homes, not in a worker Pod; the Pod proof belongs to the G8 rollout gate",
     "No production caller yet: SV2-CKP-04 publishes checkpoints through the worker supervisor"
   ],
   "rollback": "Rehearsed in case C: a Qualifier with an empty qualification table returns native_resume_unavailable and leaves the home untouched while the checkpoint and its transcript material stay authoritative, so context continuation remains available.",
   "compatibility": "SV2-CKP-01 Validator and SV2-CKP-02 source capture are unchanged; a context continuation checkpoint is identical to the earlier path apart from the native_resume extension field",
-  "rollout_safety": "Disabling native resume is Qualifier(validator, qualified={}); every other checkpoint path is unchanged"
+  "rollout_safety": "Disabling native resume is Qualifier(validator, qualified={}); every other checkpoint path is unchanged",
+  "consumer_rule": "SV2-CKP-04 and SV2-CKP-05 decide native resume from the restore outcome, never from the commit verdict: Validator.commit checks inventory and hashes, not native format, so a manifest written by another writer can commit as native and still restore to native_resume_unavailable (case B)"
 }
