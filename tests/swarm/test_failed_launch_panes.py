@@ -154,6 +154,18 @@ def test_a_failed_launch_whose_process_survived_closes_only_once_it_is_gone(stor
     assert runtime.panes_closed == ["w1:p9"]
 
 
+def test_the_tick_reaps_a_surviving_failed_launch_and_then_closes_its_pane(store):
+    ledger, runtime = _failed_once(store)
+    agent = _failed_row(store)["agent"]
+    runtime.live.add(agent)
+    actions = tick("sw", store, ledger, runtime, now_ms=DUE)
+    assert runtime.reaped == [agent]
+    assert actions.index(f"reaped stray {agent}") < actions.index(
+        f"closed pane w1:p9 of the failed launch of {agent} for t1"
+    )
+    assert runtime.panes_closed == ["w1:p9"]
+
+
 def test_a_spawn_failure_without_a_pane_holds_nothing(store):
     runtime = PaneRuntime(crash=SpawnError("init-agent exit 2"))
     tick("sw", store, tasks(("t1", "eng")), runtime, now_ms=FAILED_AT)
