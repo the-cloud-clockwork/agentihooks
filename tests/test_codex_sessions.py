@@ -86,6 +86,23 @@ def test_a_name_with_no_single_match_is_left_for_codex_to_report(found):
     assert codex_sessions.resolve(["archive", "n"], {}, lookup) == ["archive", "n"]
 
 
+def test_delete_finds_an_archived_session_when_no_active_one_matches():
+    calls = []
+
+    def lookup(name, archived, environ):
+        calls.append(archived)
+        return [THREAD] if archived else []
+
+    assert codex_sessions.resolve(["delete", "n"], {}, lookup) == ["delete", THREAD]
+    assert calls == [False, True]
+
+
+def test_delete_leaves_a_name_found_nowhere_for_codex_to_report():
+    calls = []
+    assert codex_sessions.resolve(["delete", "n"], {}, lambda *args: calls.append(args[1]) or []) == ["delete", "n"]
+    assert calls == [False, True]
+
+
 class _Pipe(io.StringIO):
     flushed = ""
 

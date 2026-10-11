@@ -8,7 +8,13 @@ import threading
 from collections.abc import Callable, Mapping
 
 CODEX = "codex"
-COMMANDS = {"resume": False, "fork": False, "archive": False, "delete": False, "unarchive": True}
+COMMANDS = {
+    "resume": (False,),
+    "fork": (False,),
+    "archive": (False,),
+    "unarchive": (True,),
+    "delete": (False, True),
+}
 VALUE_FLAGS = frozenset(
     {
         "-c",
@@ -50,7 +56,11 @@ def resolve(args: list[str], environ: Mapping[str, str], lookup: Callable | None
     at = _session_at(args)
     if at is None or THREAD_ID.fullmatch(args[at]):
         return args
-    found = (lookup or thread_ids)(args[at], COMMANDS[args[at - 1]], environ)
+    found = []
+    for archived in COMMANDS[args[at - 1]]:
+        found = (lookup or thread_ids)(args[at], archived, environ)
+        if found:
+            break
     return [*args[:at], found[0], *args[at + 1 :]] if len(found) == 1 else args
 
 
