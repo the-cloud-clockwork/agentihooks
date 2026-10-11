@@ -341,9 +341,10 @@ def _recovery_once() -> dict:
         replaced = _refused(lambda: reopened.reconnect(lost_agent))
         replaced_view = asdict(reopened.views()[lost_agent])
         pane["agent_session"] = {"kind": "id", "value": routing_conversation(fx["lost"])}
+        reopened.reconnect(lost_agent)
         restarted.register(sv2_hdr03_cases.endpoints(desired[0].scope.generation, desired[1].scope.generation + 1))
-        stale = _refused(lambda: reopened.reconnect(lost_agent))
         stale_send = _refused(lambda: reopened.send(lost_agent, "agent_prompt", "op-4", "from the old attempt"))
+        stale = _refused(lambda: reopened.reconnect(lost_agent))
         return {
             "registered": registered,
             "accepted": accepted,
@@ -384,14 +385,14 @@ def _recovery() -> tuple[dict, bool]:
         and first["replaced_view"]["state"] == visibility.CACHED,
         "nothing_launched_stopped_or_closed": first["launches"] == [],
         "an_older_attempt_cannot_act_for_a_newer_generation": first["stale"].get("reason") == "stale_incarnation"
-        and first["stale_send"].get("reason") == "unverified"
+        and first["stale_send"].get("reason") == "stale_incarnation"
         and first["received"][lost] == ["first prompt"],
         "durable_journal_records_the_delivery_once": {
             key: entry["state"] for key, entry in first["journal"]["deliveries"].items()
         }
         == {"op-1": "sent"},
         "latency_measured_on_the_fixture_clock": first["terminal_reconnect_latency_seconds"]
-        == [3 * fx["command_ms"] / 1000],
+        == [3 * fx["command_ms"] / 1000, 2 * fx["command_ms"] / 1000],
         "independent_repeat_identical": first == second,
     }
     return {"checks": checks, "first": first, "second_identical": first == second}, all(checks.values())
