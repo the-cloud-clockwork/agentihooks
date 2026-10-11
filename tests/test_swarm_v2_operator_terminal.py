@@ -137,6 +137,15 @@ def test_a_master_is_refused_before_the_terminal_is_built(store, tmp_path):
     assert built == []
 
 
+def test_the_principal_reads_the_given_environment(store, monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    named = {"AGENTIHOOKS_AGENT_NAME": ENGINEER}
+    refused = f"only the operator or the master of swarm {SWARM} uses its swarm controls, and  is neither"
+
+    assert swarm_error(lambda: operator_terminal.principal(store, SWARM, Who(), named)) == refused
+    assert swarm_error(lambda: operator_terminal.command(store, SWARM, EXE_A, named, Who())) == refused
+
+
 def test_an_engineer_session_has_no_terminal_principal(store):
     who = Who(ENGINEER, SWARM)
 
