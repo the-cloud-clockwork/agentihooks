@@ -292,10 +292,11 @@ def test_controller_rejects_unknown_actions_with_its_own_usage(capsys, monkeypat
     assert error.value.code == 2
     text = capsys.readouterr().err
     assert text in (
-        "usage: agentihooks controller [-h] [--once] {run}\n"
-        "agentihooks controller: error: argument action: invalid choice: 'invalid' (choose from 'run')\n",
-        "usage: agentihooks controller [-h] [--once] {run}\n"
-        "agentihooks controller: error: argument action: invalid choice: 'invalid' (choose from run)\n",
+        "usage: agentihooks controller [-h] [--once] {run,live,ready}\n"
+        "agentihooks controller: error: argument action: invalid choice: 'invalid' "
+        "(choose from 'run', 'live', 'ready')\n",
+        "usage: agentihooks controller [-h] [--once] {run,live,ready}\n"
+        "agentihooks controller: error: argument action: invalid choice: 'invalid' (choose from run, live, ready)\n",
     )
 
 
