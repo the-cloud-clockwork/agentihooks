@@ -5,6 +5,7 @@ import os
 import subprocess
 import zipfile
 from pathlib import Path
+from urllib.parse import quote
 
 from scripts.ci_mutation.scope import PREFLIGHT, weakened_tests
 
@@ -34,24 +35,27 @@ def report(run: int) -> tuple[bytes, bool] | None:
     return archive, not (graded["failed"] or graded["not_mutated"] or failures)
 
 
-def only_tests_added(root: Path, source: str, head: str) -> bool:
-    if subprocess.run(["git", "merge-base", "--is-ancestor", source, head], cwd=root).returncode:
-        return False
-    names = subprocess.check_output(["git", "diff", "--name-only", "-z", source, head], cwd=root).decode().split("\0")
-    return all(name.startswith("tests/") for name in names if name) and not weakened_tests(root, source, head)
-
-
-def source(root: Path, head: str, branch: str, current: int) -> tuple[dict, bytes] | None:
-    for row in runs(f"head_sha={head}", current):
-        graded = report(row["id"])
-        if graded and graded[1]:
-            return row, graded[0]
-    for row in runs(f"branch={branch}", current):
+def latest(query: str, current: int) -> tuple[dict, tuple[bytes, bool]] | None:
+    for row in runs(query, current):
         graded = report(row["id"])
         if graded:
-            if graded[1] and only_tests_added(root, row["head_sha"], head):
-                return row, graded[0]
-            break
+            return row, graded
+
+
+def only_tests_added(source: str, head: str) -> bool:
+    if subprocess.run(["git", "merge-base", "--is-ancestor", source, head]).returncode:
+        return False
+    command = ["git", "diff", "--name-only", "--no-renames", "-z", source, head]
+    names = subprocess.check_output(command).decode().split("\0")
+    return all(name.startswith("tests/") for name in names if name) and not weakened_tests(Path.cwd(), source, head)
+
+
+def source(head: str, branch: str, current: int) -> tuple[dict, bytes] | None:
+    found = latest(f"head_sha={head}", current) or latest(f"branch={quote(branch)}", current)
+    if found:
+        row, (archive, green) = found
+        if green and row["conclusion"] == "success" and only_tests_added(row["head_sha"], head):
+            return row, archive
 
 
 def unpack(archive: bytes, row: dict) -> None:
@@ -63,9 +67,9 @@ def unpack(archive: bytes, row: dict) -> None:
     (EVIDENCE / "reuse.json").write_text(json.dumps({"run": row["id"], "head": row["head_sha"]}) + "\n")
 
 
-def reuse(root: Path, head: str, branch: str, current: int) -> dict | None:
+def reuse(head: str, branch: str, current: int) -> dict | None:
     try:
-        found = source(root, head, branch, current)
+        found = source(head, branch, current)
         if found:
             unpack(found[1], found[0])
             return found[0]
@@ -78,15 +82,14 @@ def main() -> int:
     parser.add_argument("branch")
     parser.add_argument("run", type=int)
     args = parser.parse_args()
-    root = Path.cwd()
-    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root).decode().strip()
-    row = reuse(root, head, args.branch, args.run)
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
+    row = reuse(head, args.branch, args.run)
     if row:
-        print(f"Reused the green mutation report of run {row['id']} for {row['head_sha']}: only tests were added since")
+        print(f"Reused the green mutation report of run {row['id']} for {row['head_sha']}")
     else:
         print("No green mutation report covers this head; mutating")
     with Path(os.environ["GITHUB_OUTPUT"]).open("a") as stream:
-        stream.write(f"reused={'true' if row else 'false'}\nsource={row['id'] if row else ''}\n")
+        stream.write(f"reused={'true' if row else 'false'}\n")
     return 0
 
 

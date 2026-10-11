@@ -319,6 +319,20 @@ FIXTURED = PASSING + "\n\n@pytest.fixture\ndef thing():\n    return 1\n"
         ("tests/test_x.py", PASSING, None, False),
         ("tests/cases.py", PASSING, PASSING + "\n\ndef test_c():\n    assert 3\n", False),
         ("tests/test_x.json", "{}\n", '{"a": 1}\n', False),
+        ("tests/test_x.py", PASSING, PASSING + "\nimport os\n\n\ndef test_c():\n    assert os.sep\n", True),
+        ("tests/test_x.py", PASSING, PASSING + "\nfrom os.path import *\n", False),
+        (
+            "tests/test_x.py",
+            PASSING + "\n\ndef test_c(repo):\n    assert repo\n",
+            PASSING + "\n\ndef test_c(repo):\n    assert repo\n\nfrom os import path as repo\n",
+            False,
+        ),
+        (
+            "tests/test_x.py",
+            PASSING + "\n\ndef test_c():\n    assert sorted([1])\n",
+            PASSING + "\n\ndef test_c():\n    assert sorted([1])\n\nfrom os import sep as sorted\n",
+            False,
+        ),
     ],
 )
 def test_a_test_file_change_counts_as_harmless_only_when_it_adds_tests(tmp_path, name, old, new, expected):
