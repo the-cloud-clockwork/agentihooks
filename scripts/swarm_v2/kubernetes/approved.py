@@ -86,5 +86,5 @@ class FleetAccounts:
     def __init__(self, route: AccountRoute, cap: int) -> None:
         self.route, self.cap = route, cap
 
-    def __call__(self, environ: Mapping[str, str], now: float, refresh: bool = True) -> list[Account]:
+    def __call__(self, environ: Mapping[str, str], now: float, refresh: bool) -> list[Account]:
         return self.route.rows(self.cap, now)

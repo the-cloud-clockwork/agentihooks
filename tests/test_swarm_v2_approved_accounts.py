@@ -120,6 +120,13 @@ def test_among_equally_held_keys_the_week_that_resets_soonest_is_spent_first():
     assert route.choose(2) == "bkey"
 
 
+def test_a_week_that_already_reset_is_not_spent_before_one_still_to_come():
+    store, route = _route({"akey", "bkey"})
+    _observe(store, "akey", week_reset=NOW_MS // 1000 - HOUR)
+    _observe(store, "bkey")
+    assert route.choose(2) == "bkey"
+
+
 def test_equally_held_unobserved_keys_are_taken_in_name_order():
     _, route = _route({"bkey", "akey"})
     assert route.choose(1) == "akey"
@@ -165,18 +172,18 @@ def test_the_fleet_rows_are_one_claude_row_per_approved_key_with_its_fleet_held_
 def test_an_observed_key_offers_its_quota_band_under_the_launch_cap_with_its_windows():
     store, route = _route({"akey"})
     _observe(store, "akey", five_used=93.0, week_used=40.0)
-    [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000)
+    [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)
     assert row == capacity.Account(
         "claude", "akey", "OPEN", 0, 7.0, 60.0, 2, NOW_MS // 1000 + 48 * HOUR, five_resets_at=NOW_MS // 1000 + HOUR
     )
     _observe(store, "akey", five_used=10.0)
-    assert approved.FleetAccounts(route, 4)({}, NOW_MS / 1000)[0].cap == 4
+    assert approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)[0].cap == 4
 
 
 def test_an_exhausted_key_is_a_closed_row():
     store, route = _route({"akey"})
     _observe(store, "akey", status="rejected")
-    [row] = approved.FleetAccounts(route, 2)({}, NOW_MS / 1000)
+    [row] = approved.FleetAccounts(route, 2)({}, NOW_MS / 1000, refresh=False)
     assert (row.state, row.cap) == ("CLOSED", 0)
 
 
@@ -230,6 +237,20 @@ def test_a_runtime_with_a_fleet_source_sees_a_slot_a_launch_took_after_its_sizin
     assert herdr.has_capacity(None) is True
     held["akey"] = 2
     assert herdr.has_capacity(None) is False
+
+
+def test_a_capacity_check_reads_the_fleet_source_with_the_environment_and_clock_and_no_refresh(monkeypatch):
+    def local(*args, **kwargs):
+        raise AssertionError("the deployed controller read local accounts")
+
+    calls = []
+    monkeypatch.setenv("AGENTIHOOKS_FLEET_PROBE", "seen")
+    monkeypatch.setattr("scripts.swarm.runtime.time.time", lambda: 1234.5)
+    herdr = HerdrRuntime(choose=local)
+    herdr.quota_accounts = lambda environ, now, refresh: calls.append((environ, now, refresh)) or []
+    assert herdr.has_capacity(None) is False
+    [(environ, now, refresh)] = calls
+    assert (environ["AGENTIHOOKS_FLEET_PROBE"], now, refresh) == ("seen", 1234.5, False)
 
 
 def test_a_workstation_runtime_still_sizes_its_lanes_from_its_local_accounts(monkeypatch):

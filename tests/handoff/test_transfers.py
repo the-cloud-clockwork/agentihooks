@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 
 import pytest
@@ -66,6 +67,26 @@ def test_a_failed_launch_stamps_its_absent_binding_when_it_fails(setup, monkeypa
     assert result["binding"] == {"state": "absent", "at": 101, "session": "sw-eng-2", "reason": "Launch failed"}
     retry = next(r for r in transfers.list_transfers(store, "sw") if r.get("retry_of") == transfer["id"])
     assert retry["at"] == 101
+
+
+def test_detach_frees_only_the_waiting_spawns_unbound_transfers(setup):
+    store, old = setup
+    other = transfers.record(store, "sw", old, "recycle", DOC, 10)
+    live = transfers.record(store, "sw", old, "recycle", DOC, 20)
+    waiting = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    rows = {
+        other["id"]: {**other, "successor": "sw-eng-9"},
+        live["id"]: {**live, "successor": "sw-eng-2", "binding": {"state": "live"}},
+        waiting["id"]: {**waiting, "successor": "sw-eng-2"},
+    }
+    for row in rows.values():
+        store.redis.hset(store.key("sw", "transfers"), row["id"], json.dumps(row))
+    transfers.detach(store, "sw", replace(old, name="sw-eng-2"))
+    assert transfers.list_transfers(store, "sw") == [
+        rows[other["id"]],
+        rows[live["id"]],
+        {**rows[waiting["id"]], "successor": ""},
+    ]
 
 
 def test_a_spawn_waiting_on_a_full_account_leaves_its_task_and_transfer_for_the_next_spawn(setup):
