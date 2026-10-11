@@ -91,24 +91,25 @@ def test_probe_environment_keeps_account_route_and_removes_parent_identity(tmp_p
         "PATH": "route-bin",
         "LANG": "C",
     }
-    monkeypatch.setattr(provider_probe.os, "environ", values)
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
     calls = []
 
     def run(args, **kwargs):
+        child_env = kwargs.pop("env")
+        names = set(child_env)
+        assert names.isdisjoint(set(values) - {"PATH", "LANG"})
+        safe_values = {
+            name: child_env.get(name) for name in ["PATH", "LANG", "AGENTIHOOKS_CLASSIFIER_CHILD", INTERNAL_RUN]
+        }
+        assert safe_values == {"PATH": "route-bin", "LANG": "C", "AGENTIHOOKS_CLASSIFIER_CHILD": "1", INTERNAL_RUN: "1"}
         calls.append(kwargs)
         return subprocess.CompletedProcess(args, 0, '{"type":"result","result":"OK"}', "")
 
     directory = tmp_path / "nested" / "requests"
     result = provider_probe.check(provider_probe.Target("claude", "alpha", ""), directory, run)
     assert directory.is_dir()
-    assert calls == [
-        {
-            "input": "Reply with exactly OK.",
-            "cwd": directory,
-            "timeout": 30,
-            "env": {"PATH": "route-bin", "LANG": "C", "AGENTIHOOKS_CLASSIFIER_CHILD": "1", INTERNAL_RUN: "1"},
-        }
-    ]
+    assert calls == [{"input": "Reply with exactly OK.", "cwd": directory, "timeout": 30}]
     assert result.ok is True
     assert result.evidence == "Provider request succeeded"
     assert provider_probe.check(provider_probe.Target("claude", "alpha", ""), directory, run).ok is True
@@ -123,7 +124,7 @@ def test_probe_environment_keeps_account_route_and_removes_parent_identity(tmp_p
     ],
 )
 def test_missing_native_route_never_launches_a_request(tmp_path, monkeypatch, target):
-    monkeypatch.setattr(provider_probe.time, "time_ns", lambda: 987_654_321)
+    monkeypatch.setattr(provider_probe.time, "time_ns", lambda: 987_000_000)
     run = MagicMock()
     result = provider_probe.check(target, tmp_path / "unused", run)
     assert result == provider_probe.Result(False, "Provider account route unavailable", 987)
@@ -133,7 +134,7 @@ def test_missing_native_route_never_launches_a_request(tmp_path, monkeypatch, ta
 
 @pytest.mark.parametrize("error", [OSError("unavailable"), subprocess.TimeoutExpired("request", 30)])
 def test_request_exception_retains_failure_evidence_and_completion_time(tmp_path, monkeypatch, error):
-    monkeypatch.setattr(provider_probe.time, "time_ns", lambda: 987_654_321)
+    monkeypatch.setattr(provider_probe.time, "time_ns", lambda: 987_000_000)
     run = MagicMock(side_effect=error)
     result = provider_probe.check(provider_probe.Target("claude", "alpha", ""), tmp_path, run)
     assert result == provider_probe.Result(False, f"Provider request failed: {type(error).__name__}", 987)
@@ -141,7 +142,7 @@ def test_request_exception_retains_failure_evidence_and_completion_time(tmp_path
 
 @pytest.mark.parametrize("returncode", [0, 9])
 def test_request_result_records_exact_outcome_and_completion_time(tmp_path, monkeypatch, returncode):
-    monkeypatch.setattr(provider_probe.time, "time_ns", lambda: 987_654_321)
+    monkeypatch.setattr(provider_probe.time, "time_ns", lambda: 987_000_000)
     run = MagicMock(return_value=subprocess.CompletedProcess([], returncode, "OK", ""))
     result = provider_probe.check(provider_probe.Target("copilot", "default", ""), tmp_path, run)
     expected = "Provider request succeeded" if returncode == 0 else "Provider request failed: status 9"
@@ -178,6 +179,7 @@ def test_transport_pipe_contract_and_timeout_result(tmp_path, monkeypatch, timeo
     monkeypatch.setattr(provider_probe.subprocess, "Popen", popen)
     monkeypatch.setattr(provider_probe.os, "killpg", kill)
     result = provider_probe.check(provider_probe.Target("claude", "alpha", ""), tmp_path)
+    assert popen.call_args.args[0][:4] == ["agentihooks", "claude", "--route", "alpha"]
     options = popen.call_args.kwargs
     assert options["stdin"] == subprocess.PIPE
     assert options["stdout"] == subprocess.PIPE
