@@ -54,7 +54,7 @@ These two tests stay unfixed until slice 1 lands, so they keep proving the retry
 | Durations and coverage baselines: `durations-merged-<sha>`, `coverage-baseline-<tree>` | data | commit or tree | not results |
 | Mutation reuse of the preflight result: `own_bases` and `graded_green` in `scripts/ci_mutation/scope.py` | mutation scope | ancestor commit whose preflight `mutation` job passed | per commit, not per input |
 | Helm kind due check: `kind-due` | one job | chart paths changed | path rule written by hand |
-| Dev push | whole run | none | always runs everything |
+| Dev push | whole run | none | always runs everything; `ci_reuse.py` decides reuse only for `merge_group`, so the dev push reuse named in the task does not exist yet |
 
 Nothing retries. A failed test fails its shard, the shard fails `Gate — Required`, and the only recovery is a rerun of failed jobs on a pull request or a new queue entry.
 
@@ -78,7 +78,7 @@ Every check, whether a test or a job, is a unit with an id and an input key.
 
 ### Input fingerprints for tests
 
-A static import closure does not work in this repo. Over the last 40 dev merges, a test file counted as unchanged when nothing it imports, directly or transitively, nor its conftest chain changed. Mean reusable share was 30 to 35 %, median 0: the root `tests/conftest.py` imports the installer and the swarm modules, so most merges reach every file through it.
+A static import closure does not work in this repo. Over the last 40 dev merges, a test file counted as unchanged when nothing it imports, directly or transitively, nor its conftest chain changed. Averaged per merge, the reusable share was 34.9 % counting imports only and 29.9 % also counting changed data files, median 0; a merge that changed `.github`, `pyproject.toml` or the stored durations counts as nothing reusable (6 of 40). The root `tests/conftest.py` imports the installer and the swarm modules, so most merges reach every file through it.
 
 The pytest adapter therefore fingerprints what a test actually executed:
 
@@ -91,8 +91,8 @@ Other languages plug in an adapter with the same contract: list units, compute a
 
 ### The store
 
-- **Writers.** Only runs of protected code write records: dev pushes and scheduled full runs. Pull request and queue runs read only. A pull request cannot write a green record for its own code.
-- **Readers.** Pull request and queue runs read the newest dev record through the Actions cache, which is readable from branches based on dev and needs no Actions API quota. Each record holds the dependency manifest of every test: functions, files, environment key.
+- **Writers.** Only runs of protected code write records. The save step sits in a job that needs `Gate — Required` to succeed and runs only when `github.event_name == 'push' && github.ref == 'refs/heads/dev'`, or on the scheduled full run on dev. GitHub scopes every cache entry to the ref that saved it, so an entry a pull request or queue run saves is visible only to later runs of that same ref and never to dev or to other pull requests. The planner runs from the protected grader checkout, as the `reuse` job does, and accepts a record only when its `run` field names a successful dev push or scheduled run of the Tests workflow, checked with one API call. A pull request can at most mislead its own runs, which already run its own code.
+- **Readers.** Pull request runs read the newest dev record through the Actions cache, which a `pull_request` run can restore from its base branch scope without Actions API quota. Queue runs execute on a `gh-readonly-queue/dev/...` ref, and GitHub does not document that ref restoring from dev's scope; the default branch here is `main`. Queue runs therefore fetch the record as an artifact of the newest dev push run with the App token, the path the `reuse` job already uses. Slice 4 starts with a planted cache read on a real queue run and moves queue runs to the cache only if it resolves. Each record holds the dependency manifest of every test: functions, files, environment key.
 - **Queue.** The queue runs every test whose fingerprint differs from the dev record, which always includes the pull request's own tests. The whole tree reuse in `ci_reuse.py` stays as the faster path when the tree is identical.
 - **Dev.** A dev push runs everything and writes the next record. It is the freshness backstop for the cache and the source of truth for coverage.
 
@@ -123,7 +123,7 @@ Dispatched Tests runs on a diffcheck branch carrying slice 1's plugin with `--re
 | Run | Plant | Result |
 |---|---|---|
 | [38099973312](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38099973312) | none on purpose: the workflow shape test fails every attempt because the proof adds a step | three attempts, recorded `failed`, shard red: a consistent failure is not masked |
-| [38100556344](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38100556344) | header counts and alerts fold reload (both parameters) fail attempt 1 | each passed on attempt 2 and was recorded `flaky`; all 12 unit shards and both shard checks green; run attempt 1, no rerun |
+| [38100556344](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38100556344) | header counts and alerts fold reload (both parameters) fail attempt 1 | each passed on attempt 2 and was recorded `flaky`; all 12 unit shards and both shard checks green; run attempt 1, no rerun. The run concluded failure only on `lint` and `test-count`, see below |
 
 The ledger lines from run 38100556344:
 
