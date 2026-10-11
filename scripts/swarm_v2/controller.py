@@ -65,7 +65,11 @@ class Controller:
         self.accounts.reconcile()
         self._authority()
         if self.terminals is not None:
-            self.terminals.start(self._attempts())
+            report = self.terminals.start(self._attempts())
+            print(
+                f"controller: kept saved herdr machines for {self.slug} on start: registered "
+                f"{len(report.registered)}, refused {dict(sorted(report.refused.items()))}"
+            )
         self.reconciled_epoch = self.held.epoch
         self.ready = True
         return True

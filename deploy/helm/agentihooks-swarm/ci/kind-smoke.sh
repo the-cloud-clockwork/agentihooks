@@ -10,9 +10,13 @@ slug=kind-proof
 cluster="swarm-kind-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:8])')"
 ledger_pod="$release-ledger-0"
 controller=(-l "app.kubernetes.io/instance=$release,app.kubernetes.io/component=controller")
+ca_dir=""
 
 finish() {
   status=$?
+  if [[ -n $ca_dir ]]; then
+    rm -rf "$ca_dir"
+  fi
   if [[ $status -ne 0 ]]; then
     kubectl get pods -o wide || true
     kubectl logs "${controller[@]}" --tail 100 || true
@@ -77,6 +81,17 @@ api=(
 )
 workers=(-f "$chart/ci/kind-workers.yaml")
 helm template "$release" "$chart" "${workers[@]}" "${api[@]}" | python3 tests/chart_workers.py "$chart/ci/kind-workers.yaml"
+secrets+=("${workers[@]}" "${api[@]}")
+both=("$chart/ci/kind-values.yaml" "$chart/ci/kind-workers.yaml")
+helm template "$release" "$chart" "${secrets[@]}" | python3 tests/chart_secrets.py "${both[@]}"
+planted="$(helm template "$release" "$chart" "${secrets[@]}" --set 'secretEnv[0].name=AGENTIHOOKS_TERMINAL_CA_KEY' \
+  --set 'secretEnv[0].secretName=swarm-terminal-attach-ca' --set 'secretEnv[0].key=user_ca' \
+  | python3 tests/chart_secrets.py "${both[@]}" 2>&1 >/dev/null || true)"
+if [[ $planted != *"StatefulSet $release-ledger container ledger references the terminal CA Secret swarm-terminal-attach-ca"* ]]; then
+  printf 'the chart check did not flag a planted ledger reference to the terminal CA Secret: %s\n' "$planted" >&2
+  exit 1
+fi
+printf 'the chart check flagged a planted ledger reference to the terminal CA Secret\n'
 policy_map=(-f "$chart/ci/kind-policy-configmap.yaml")
 helm template "$release" "$chart" "${workers[@]}" "${policy_map[@]}" "${api[@]}" \
   | python3 tests/chart_workers.py "$chart/ci/kind-workers.yaml" "$chart/ci/kind-policy-configmap.yaml"
@@ -101,6 +116,12 @@ refuse_workers "controller.workers.podPolicy or podPolicyConfigMap is required" 
 refuse_workers "set controller.workers.podPolicy or podPolicyConfigMap, not both" \
   --set controller.workers.podPolicyConfigMap=swarm-pod-policy
 refuse_workers "controller.serviceAccountName is required" --set controller.serviceAccountName=
+for setting in secretName key; do
+  refuse_workers "controller.terminalCa needs secretName and key with controller.workers.apiUrl" \
+    --set controller.terminalCa."$setting"=
+done
+refuse_workers "controller.terminalCa needs secretName and key with controller.workers.apiUrl" \
+  --set controller.terminalCa=null
 printf 'the chart refused every incomplete or pinned worker setting\n'
 docker build -q -t "$image" . >/dev/null &
 build=$!
@@ -213,6 +234,11 @@ kubectl create rolebinding swarm-controller --namespace swarm-pod-proof --role=s
 python3 -c 'import json, pathlib, sys, yaml; print(json.dumps(yaml.safe_load(pathlib.Path(sys.argv[1]).read_text())["controller"]["workers"]["podPolicy"]))' \
   "$chart/ci/kind-workers.yaml" | kubectl create configmap swarm-pod-policy --from-file=pod-policy.json=/dev/stdin \
   --dry-run=client -o yaml | kubectl apply -f -
+ca_dir="$(mktemp -d)"
+ssh-keygen -q -t ed25519 -N "" -C "kind user ca" -f "$ca_dir/user_ca"
+ssh-keygen -q -t ed25519 -N "" -C "kind host ca" -f "$ca_dir/host_ca"
+kubectl create secret generic swarm-terminal-attach-ca --from-file=user_ca="$ca_dir/user_ca" \
+  --from-file=host_ca="$ca_dir/host_ca"
 helm upgrade "$release" "$chart" -f "$chart/ci/kind-values.yaml" "${workers[@]}" "${policy_map[@]}" "${api[@]}" \
   --wait --timeout 5m
 kubectl rollout status deployment "$release-controller" --timeout 2m
@@ -583,4 +609,28 @@ if [[ $after != "$before" ]]; then
   exit 1
 fi
 printf 'controller sent the host pressure alert without a restart: %s\n' "$alert"
+
+mounted="$(kubectl exec "deployment/$release-controller" -c controller -- sh -c \
+  'ls /run/secrets/terminal-ca && stat -L -c "%a %u:%g" "$AGENTIHOOKS_TERMINAL_CA_KEY" && echo "$AGENTIHOOKS_TERMINAL_CA_KEY"')"
+# fsGroup adds group read to a Secret file, so 0400 lands as 440 owned by root and the controller's group.
+if [[ $mounted != $'user_ca\n440 0:10001\n/run/secrets/terminal-ca/user_ca' && $mounted != $'user_ca\n400 '*$'\n/run/secrets/terminal-ca/user_ca' ]]; then
+  printf 'the controller does not hold only the user CA key, read only, at its setting path: %s\n' "$mounted" >&2
+  exit 1
+fi
+printf 'the controller holds only the user CA key at its setting path: %s\n' "${mounted//$'\n'/ }"
+python3 -c 'import json, sys; print(json.dumps({"clients": {"namespace": "default", "labels": {"app.kubernetes.io/instance": sys.argv[2], "app.kubernetes.io/component": "controller"}}, "user_ca": open(sys.argv[1]).read().strip()}))' \
+  "$ca_dir/user_ca.pub" "$release" | kubectl create secret generic swarm-worker-terminal --from-file=setting=/dev/stdin
+kubectl rollout restart deployment "$release-controller"
+kubectl rollout status deployment "$release-controller" --timeout 2m
+kept=""
+for _ in $(seq 60); do
+  kept="$(kubectl logs "deployment/$release-controller" -c controller | grep -F "controller: kept saved herdr machines for $slug on start" || true)"
+  [[ -n $kept ]] && break
+  sleep 1
+done
+if [[ -z $kept ]]; then
+  printf 'the controller never logged its saved herdr machines on start with the terminal CA key mounted\n' >&2
+  exit 1
+fi
+printf 'the controller loaded the mounted terminal CA key and logged its saved herdr machines on start: %s\n' "$kept"
 printf 'Helm chart kind proof passed\n'

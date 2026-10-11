@@ -105,6 +105,11 @@ controller:
   env: {}
   # Secret env only the controller container reads, unlike secretEnv; optional: true lets it start before the Secret exists.
   secretEnv: []
+  # The terminal user CA private key: only that key of the Secret, a read only file on the controller container.
+  # Required with workers.apiUrl; never list it in secretEnv, which every swarm container reads.
+  terminalCa:
+    secretName: ""
+    key: ""
   resources:
     requests:
       cpu: 50m

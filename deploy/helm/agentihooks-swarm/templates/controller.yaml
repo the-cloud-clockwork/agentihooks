@@ -1,5 +1,9 @@
 {{- $api := .Values.controller.api }}
 {{- $workers := .Values.controller.workers }}
+{{- $ca := .Values.controller.terminalCa | default dict }}
+{{- if and (or $ca.secretName $workers.apiUrl) (not (and $ca.secretName $ca.key)) }}
+{{- fail "controller.terminalCa needs secretName and key with controller.workers.apiUrl: the controller signs operator certificates with that key" }}
+{{- end }}
 {{- if $workers.apiUrl }}
 {{- $tag := toString $workers.imageTag }}
 {{- if or (eq $tag "") (contains "@" $tag) (contains "sha256" $tag) (regexMatch "^[0-9a-f]{40}$" $tag) }}
@@ -192,6 +196,10 @@ spec:
             - name: AGENTIHOOKS_LAUNCH_BRAIN
               value: {{ $workers.brain | quote }}
             {{- end }}
+            {{- if $ca.secretName }}
+            - name: AGENTIHOOKS_TERMINAL_CA_KEY
+              value: /run/secrets/terminal-ca/{{ $ca.key }}
+            {{- end }}
             {{- include "swarm.controllerSecretEnv" . | nindent 12 }}
             {{- include "swarm.extraEnv" .Values.controller.env | nindent 12 }}
           {{- include "swarm.envFrom" . | nindent 10 }}
@@ -210,6 +218,11 @@ spec:
               mountPath: /etc/agentihooks/pod-policy
               readOnly: true
             {{- end }}
+            {{- if $ca.secretName }}
+            - name: terminal-ca
+              mountPath: /run/secrets/terminal-ca
+              readOnly: true
+            {{- end }}
       volumes:
         - name: home
           emptyDir:
@@ -224,4 +237,13 @@ spec:
         - name: pod-policy
           configMap:
             name: {{ $workers.podPolicyConfigMap | default (printf "%s-pod-policy" (include "swarm.fullname" .)) | quote }}
+        {{- end }}
+        {{- if $ca.secretName }}
+        - name: terminal-ca
+          secret:
+            secretName: {{ $ca.secretName }}
+            defaultMode: 0400
+            items:
+              - key: {{ $ca.key }}
+                path: {{ $ca.key }}
         {{- end }}
