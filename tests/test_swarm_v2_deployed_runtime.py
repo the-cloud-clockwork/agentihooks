@@ -101,9 +101,9 @@ def _free_port():
         return probe.getsockname()[1]
 
 
-def _policy(tmp_path, owner=owner_for(SLUG)):
+def _policy(tmp_path):
     path = tmp_path / "pod-policy.json"
-    path.write_text(json.dumps({**json.loads(POLICY.read_text()), "owner": owner, "provider_accounts": []}))
+    path.write_text(json.dumps({**json.loads(POLICY.read_text()), "provider_accounts": []}))
     return path
 
 
@@ -777,15 +777,32 @@ def test_a_worker_profile_that_runs_only_on_the_workstation_is_refused(tmp_path)
     assert str(refused.value) == f"{deployed.PROFILE_ENV} frontend runs only on the workstation"
 
 
-def test_a_pod_policy_owned_by_another_swarm_is_refused(tmp_path):
+def test_one_pod_policy_serves_two_swarms_each_rendering_its_own_owner(tmp_path, monkeypatch):
+    pods = Pods("swarm-pod-proof", keys=(ACCOUNT,))
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: pods)
+    owners = {}
+    for slug in (SLUG, "other-swarm"):
+        workers = deployed.Workers.from_environ(_workers(tmp_path), slug)
+        transport = workers.transport({}, slug)
+        rendered = transport.template.render(_launch_record(workers, ACCOUNT))
+        owners[slug] = (transport.owner, rendered.pod["metadata"]["labels"][OWNER_LABEL])
+    assert owners == {
+        SLUG: (owner_for(SLUG), owner_for(SLUG)),
+        "other-swarm": ("agentihooks-swarm-other-swarm", "agentihooks-swarm-other-swarm"),
+    }
+
+
+def test_a_pod_policy_naming_an_owner_is_refused(tmp_path):
     other = tmp_path / "other-policy.json"
-    other.write_text(json.dumps({**json.loads(POLICY.read_text()), "owner": "agentihooks-swarm-other"}))
+    other.write_text(json.dumps({**json.loads(POLICY.read_text()), "owner": owner_for(SLUG)}))
     environ = _workers(tmp_path, **{deployed.POLICY_ENV: str(other)})
 
     with pytest.raises(SwarmError) as refused:
         deployed.Workers.from_environ(environ, SLUG)
 
-    assert str(refused.value) == f"the Pod policy owner must be {owner_for(SLUG)}"
+    with pytest.raises(PodSpecRefused) as expected:
+        load_policy(other)
+    assert str(refused.value) == str(expected.value)
 
 
 def test_an_invalid_pod_policy_is_refused(tmp_path):
