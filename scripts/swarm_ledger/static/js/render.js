@@ -356,6 +356,11 @@ export function renderStats() {
   const pct = total ? Math.round(100 * done / total) : 0;
   const next = phases.find((p) => !p.done), counts = (swarm && swarm.tasks) || {}, figure = (value) => (swarm ? String(value || 0) : "—");
   const row = (label, value, extra) => h("div", { class: "stat", title: label === "Time left" ? timeLeftInputs(calc) : undefined, style: gap && label === "Time left" ? "grid-template-columns:75px minmax(0,1fr)" : "" }, h("dt", { text: label }), h("dd", {}, value, extra));
+  const top = swarm && swarm.top_bottleneck;
+  const bottleneck = h("div", { class: "stat top-bottleneck" }, h("dt", { text: "Top bottleneck" }),
+    h("dd", {}, h("div", { class: "bottleneck-stage", text: top ? top.label || "none" : "unavailable" }),
+      h("div", { text: `Trend ${top && top.trend || "unknown"}` }),
+      h("div", { text: `Last action ${top && top.last_action || "none recorded"}` })));
   $("stats").replaceChildren(
     row("Started", started ? when(started) : "—"),
     row("Elapsed", elapsed === null ? "—" : span(elapsed)),
@@ -375,6 +380,7 @@ export function renderStats() {
     ...(out ? [row("Out of scope", String(out))] : []),
     row("Agents · 2 h", String(activeAgents())),
     row("Last activity", last ? `${span(Date.now() - last)} ago` : "—"));
+  $("stats").prepend(bottleneck);
 }
 
 export function editTitle(on) {

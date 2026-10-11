@@ -15,6 +15,7 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import (
     affinity,
     bottleneck,
+    bottleneck_status,
     drain_watch,
     failed_panes,
     idle,
@@ -276,6 +277,7 @@ def status_report(store, slug, state):
         "execution_transition_latency_seconds": telemetry.Telemetry(store, slug).execution_transition_latency_seconds(),
         "transitions": telemetry.timelines(store, slug, [a.seat for a in store.agents(slug)]),
         "bottleneck": bottleneck.read(store, slug),
+        "top_bottleneck": bottleneck_status.report(store, slug, now_ms()),
         "gates": [{**row, "kind": modes.label(row["kind"])} for row in gate_log.decisions(slug)],
         "gate_modes": {name: modes.label(mode) for name, mode in catalog.current(config.gates).items()},
         "master_affinity": affinity.report(store, slug, config, store.agents(slug)),
