@@ -1140,24 +1140,33 @@ def test_a_codex_handoff_resumes_the_conversation_on_another_codex_account(monke
     assert "-m gpt-6.1-sol" in command
 
 
-@pytest.mark.parametrize("source_flags", [False, True, "session"])
+@pytest.mark.parametrize("source_flags", [False, True, "session", "single", "partial", "defaults", "override"])
 def test_a_plain_codex_quota_handoff_preserves_native_choices(monkeypatch, tmp_path, capsys, source_flags):
     from scripts.profiles import binding
 
     home = tmp_path / "codex"
     home.mkdir()
-    (home / "config.toml").write_text('model = "gpt-6-astra"\nmodel_reasoning_effort = "low"\n')
+    config = 'model = "gpt-6-astra"\nmodel_reasoning_effort = "low"\n'
+    (home / "config.toml").write_text("" if source_flags == "defaults" else config)
     source = {"CODEX_HOME": str(home)}
     if source_flags is True:
         source.update(AGENTIHOOKS_RUN_MODEL="gpt-6.1-sol", AGENTIHOOKS_RUN_EFFORT="high")
     rollout = tmp_path / "rollout.jsonl"
-    rollout.write_text(
-        '{"type":"turn_context","payload":{"model":"gpt-6-astra","effort":"low"}}\n'
-        '{"type":"turn_context","payload":{"model":"gpt-6-sol","effort":"medium"}}\n'
-    )
+    latest = '{"type":"turn_context","payload":{"model":"gpt-6-sol","effort":"medium"}}\n'
+    transcripts = {
+        "single": latest,
+        "partial": '{"type":"turn_context","payload":{}}\n',
+        "session": (
+            '{"type":"turn_context","payload":{"model":"gpt-6-astra","effort":"low"}}\n'
+            + latest
+            + '{"type":"event_msg","payload":{"model":"unrelated","effort":"low"}}\n'
+            + "not-json\n"
+        ),
+    }
+    rollout.write_text(transcripts.get(source_flags, ""))
     monkeypatch.setattr(
         "hooks.targets.normalizer.codex_rollout_path",
-        lambda session: str(rollout) if source_flags == "session" and session == "thread-1" else "",
+        lambda session: str(rollout) if source_flags in transcripts and session == "thread-1" else "",
     )
     monkeypatch.setattr(binding, "process", lambda: (123, "codex", source, "alpha"))
     monkeypatch.setattr(init_agent.operator_env, "fill", lambda env: None)
@@ -1178,6 +1187,7 @@ def test_a_plain_codex_quota_handoff_preserves_native_choices(monkeypatch, tmp_p
         "CODEX_HOME": str(home),
         "AH_CX_TOKEN_alpha": "tok",
     }
+    flags = ["--", "-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="xhigh"', "--no-alt-screen"]
     assert (
         init_agent.main(
             [
@@ -1194,6 +1204,7 @@ def test_a_plain_codex_quota_handoff_preserves_native_choices(monkeypatch, tmp_p
                 "0",
                 "--route-timeout",
                 "0",
+                *(flags if source_flags == "override" else []),
             ],
             env,
         )
@@ -1209,10 +1220,37 @@ def test_a_plain_codex_quota_handoff_preserves_native_choices(monkeypatch, tmp_p
         False: ("gpt-6-astra", "low"),
         True: ("gpt-6.1-sol", "high"),
         "session": ("gpt-6-sol", "medium"),
+        "single": ("gpt-6-sol", "medium"),
+        "partial": ("gpt-6-astra", "low"),
+        "defaults": ("", ""),
+        "override": ("gpt-6.1-sol", "xhigh"),
     }[source_flags]
-    assert f"-m {expected_model}" in command
-    assert f'model_reasoning_effort="{expected_effort}"' in command
+    if expected_model:
+        assert f"-m {expected_model}" in command
+        assert f'model_reasoning_effort="{expected_effort}"' in command
+        assert command.count("model_reasoning_effort=") == 1
+    else:
+        assert " -m " not in command
+        assert "model_reasoning_effort=" not in command
+    if source_flags == "override":
+        assert "--no-alt-screen" in command
     report = capsys.readouterr().out
     assert "handoff=done" in report
     assert "account=beta" in report
     assert "profile_validation" not in report
+
+
+def test_a_plain_codex_handoff_refuses_a_different_live_harness(monkeypatch, tmp_path, capsys):
+    from scripts.profiles import binding
+
+    monkeypatch.setattr(binding, "process", lambda: (123, "claude", {}, "alpha"))
+    monkeypatch.setattr(init_agent.operator_env, "fill", lambda env: None)
+    monkeypatch.setattr(init_agent.subprocess, "Popen", lambda *args, **kwargs: pytest.fail("must not launch"))
+    assert (
+        init_agent.main(
+            ["--dir", str(tmp_path), "--agent", "codex", "--prompt", "saved task", "--handoff"],
+            {"HOME": str(tmp_path), "AGENTIHOOKS_TARGET": "codex"},
+        )
+        == 2
+    )
+    assert "unsupported quota transfer from claude to codex" in capsys.readouterr().err
