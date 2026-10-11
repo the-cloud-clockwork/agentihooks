@@ -288,7 +288,8 @@ checked, who judges it) that the agent's prompt carries.
 A systemd user timer (`agentihooks-swarm.timer`) runs `agentihooks swarm tick` every minute. `start` installs
 and enables it. Every swarm ticks in its own thread; while one swarm's tick runs long, a quicker swarm ticks
 again each minute until every swarm's first tick of the pass ends; no extra tick starts after seven minutes.
-Each tick, per swarm:
+An outage holds the affected idle and delivery decisions until recovery (see
+[Outage holds and recovery](#outage-holds-and-recovery)). Each tick, per swarm:
 
 1. Retire agents that finished, and pass on the messages they left (see [Safe retire](#safe-retire)).
 2. Free the tasks of agents whose pane is gone, or that stayed idle for 10 ticks. An idle agent is nudged at 3.
@@ -423,11 +424,12 @@ The default is `redis://127.0.0.1:6379/0`; set `AGENTIHOOKS_SWARM_REDIS_URL` to 
   `agentihooks swarm <id> say --to operator "<text>"`.
 - Agents: `agentihooks swarm <id> say "<text>"`, optionally `--to <agent name>`, `master`, `eng` or `ci`.
 
-Every message goes through the agent inbox. An addressed line leaves one pending inbox item per recipient,
-sent by the real author; an unaddressed agent line only shows on the page. The receiver gets the item at its
-next tool call, an idle pane is prompted by the next tick, and unread items climb to the master, then to the
-operator. A reply to the operator is posted on the page chat and its item closed. The page keeps the whole
-conversation.
+Every addressed message goes through the agent inbox, with one item per recipient, sent by the real author;
+an unaddressed agent line only shows on the page. Items pass from pending to delivered, then confirmed by
+the receiver; delivery alone leaves them eligible for redelivery. The receiver gets the item through its
+inbox channel or next tool call, an idle pane is prompted by the next tick, and unread items climb to the
+master, then to the operator. A reply to the operator is posted on the page chat and its item closed. The
+page keeps the whole conversation.
 
 Every operator write on the page reaches the inbox the moment the ledger server applies it: a comment or reply,
 an answer, a note, a check or uncheck, a chat line. A write on a task goes to the agent that claimed it, a chat
@@ -437,5 +439,66 @@ images; the page shows it once, marked as sent to the whole swarm. Only the mast
 every other agent's copy is information only and asks for no reply. With no live master the item waits at the
 master seat for the next one, and the tick tells the page chat that the master is down.
 A stopped swarm whose master seat holds a pending item is paused, so the tick starts its master and no engineer.
-The ledger hook, the ledger watch and the inbox share one seen mark per agent and write, so each write reaches each
-agent once, through whichever path shows it first.
+The ledger hook, the ledger watch and the inbox share one seen mark per agent and write. Stable item ids keep
+relay retries from creating a second item; an unconfirmed delivery may still be shown again.
+
+### Delivered then confirmed
+
+The inbox keeps an item and its history until it is closed. A hook or channel claims a pending item and marks
+it delivered. A later hook confirms items delivered to that receiver before the hook began: the session has
+continued past delivery. `agentihooks msg read <id>` records receipt as read; `msg reply` or `msg close`
+settles the work. Confirmation proves receipt, and leaves the agent responsible for answering or closing it.
+
+If delivery remains unconfirmed for `AGENTIHOOKS_INBOX_REDELIVER_S` (default 300 seconds), the inbox returns
+the same item to pending. Whichever transport claims next can deliver it: the channel, hook or wake path.
+A failed channel write returns its unsent items to pending immediately. The redelivery window is separate
+from `AGENTIHOOKS_INBOX_RETRY_WINDOW_S` (default 300 seconds), which controls idle wakes and escalation.
+Agents should read the item's current state before repeating work after redelivery.
+
+### Local outbox and limits
+
+When Redis is unavailable, inbox operations queue in `inbox-outbox.jsonl` under the AgentiHooks home. Records
+are checksummed and fsynced before the sender reports them queued. A queued result means accepted locally;
+the receiver sees it after replay. While records wait, new operations queue behind them to preserve order.
+Each inbox connection and swarm tick attempts replay. Replay stops on a Redis failure and retains that
+record and everything after it; stable item ids make a retry safe when Redis accepted a send before its
+response was lost.
+
+| Setting | Default | Behaviour |
+|---|---|---|
+| `AGENTIHOOKS_INBOX_OUTBOX_MAX_BYTES` | 1048576 bytes (1 MiB) | Refuse an operation that would exceed the limit, with an error; retain everything already queued. |
+| `AGENTIHOOKS_INBOX_OUTBOX_WARN_BYTES` | 786432 bytes (768 KiB) | Warn when the queued bytes reach this threshold. |
+
+Corrupt records and operations refused during replay are preserved in `inbox-outbox.skipped.jsonl`, with
+the reason reported; later valid records can continue. Inspect and resolve those refusals rather than
+treating them as delivered. The outbox depends on the local disk surviving and having space, and its limit
+is a refusal boundary. Restoring Redis lets replay free space; a send refused before queuing must be retried.
+
+Operator ledger writes and alerts retain their oldest unrelayed revision in `ledger-unrelayed.json` when
+neither Redis nor the outbox accepts them. The next write to that ledger retries the intervening events;
+the ledger watch also retries every five passes, about ten seconds at its default interval. Stable ids
+prevent duplicate inbox items. Ledger replay is limited to its retained history of 2000 events: writes
+older than that history cannot be reconstructed by replay.
+
+### Outage holds and recovery
+
+The tick records Redis, ledger and provider outages locally under the swarm home, so the evidence remains
+available when Redis is down. `agentihooks swarm <id> status` shows open outages and their evidence. A failed
+Redis check ends the pass cleanly; a failed ledger probe holds decisions that need the ledger. Provider
+error signatures in an agent pane open a provider outage. Recovery requires an affirmative service check:
+for a provider, one minimal request per affected provider account on a backoff from one to ten minutes.
+The first successful probe closes that provider record; pane text alone cannot prove recovery.
+
+While a swarm outage is open, or an agent's own pane shows a provider error, its idle count stays where it
+was. The tick sends no idle nudge, retires no affected worker or idle master, and reclaims no affected task.
+The wake ladder pauses wakes and escalations during the outage, then subtracts outage time from its
+deadlines so it continues from where it stopped. Idle and stale claim findings for held agents carry the
+outage evidence and send no finding notice to the master. Once the hold lifts, idle counting resumes from
+the held count.
+
+When service returns, the tick sends one marked resume prompt to each stalled agent that still owns its
+task. The prompt tells it to read its task folder and inbox and continue the same work. A pane still showing
+the provider error is retried for up to three ticks before normal idle rules apply. An agent whose process
+died reopens its own conversation in the same seat; if that cannot resume, the handoff supplies its
+successor's context. Recovery preserves the existing task claim. A changed claim owner or execution
+generation fences out the old agent, so recovery cannot resume work already taken by a successor.
