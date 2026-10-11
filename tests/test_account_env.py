@@ -7,7 +7,7 @@ from urllib.error import URLError
 
 import pytest
 
-from scripts import account_env, aicode_tokens, codex_refresh, codex_router, install
+from scripts import account_env, account_names, aicode_tokens, codex_refresh, codex_router, install
 from scripts.cli_delegates import delegated_cli
 
 pytestmark = pytest.mark.unit
@@ -431,3 +431,36 @@ def test_a_codex_file_others_can_read_is_refused(tmp_path, monkeypatch, capsys):
     out, err = capsys.readouterr()
     assert out == ""
     assert "600" in err and "codex.env" in err
+
+
+def test_codex_accounts_keyed_by_email_export_under_the_shared_naming_form(tmp_path, monkeypatch, capsys):
+    _codex_environ(tmp_path, monkeypatch)
+    keyed = {
+        "Ops.Two@Example.com": "cx2",
+        "TEAM@X.IO": "cxT",
+        "AH_CX_TOKEN_teamatx_io": "cxN",
+        "no-at-sign": "cxZ",
+        "Empty@X.IO": "",
+        "AH_CX_REFRESH_teamatx_io": "rt1",
+    }
+    _openbao(monkeypatch, {}, codex=keyed)
+
+    assert account_env.main(["env"]) == 0
+
+    shell = _shell(capsys.readouterr().out)
+    loaded = {name: value for name, value in shell.items() if name.startswith("AH_CX_")}
+    assert account_names.codex_token_env("Ops.Two@Example.com") == CODEX_TWO
+    assert loaded == {CODEX_TWO: "cx2", "AH_CX_TOKEN_teamatx_io": "cxN"}
+    assert sorted(account.env_name for account in codex_router.token_accounts(shell)) == [
+        CODEX_TWO,
+        "AH_CX_TOKEN_teamatx_io",
+    ]
+
+
+def test_claude_accounts_keyed_by_email_stay_skipped(tmp_path, monkeypatch, capsys):
+    _environ(tmp_path, monkeypatch)
+    _openbao(monkeypatch, {"Ops@X.IO": "tok-e", "AH_CC_TOKEN_one": "tok-1"})
+
+    account_env.main(["env"])
+
+    assert _evaluated(capsys.readouterr().out) == {"AH_CC_TOKEN_one": "tok-1"}
