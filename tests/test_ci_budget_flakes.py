@@ -7,8 +7,9 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.ci_budget import defects, flakes
+from scripts.swarm.ledger_client import LedgerGone
 from scripts.swarm.notice_text import plain
-from scripts.swarm.store import PREFIX
+from scripts.swarm.store import PREFIX, SwarmError
 from scripts.swarm_ledger import ledger_comments
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -18,7 +19,7 @@ TEST = "tests/swarm_ledger/test_alerts_page.py::test_the_panel_fold_is_remembere
 OTHER = "tests/Inbox_Cases/test_Notify.py::TestNotify::test_Notify_Within_Budget"
 TEXT = (
     "The test the panel fold is remembered after a reload in the swarm ledger alerts page tests passed only"
-    " on a retry in 2 dev runs within seven days. Fix what makes it flaky."
+    " on a retry in 2 dev runs within seven days."
 )
 LISTING = "repos/{owner}/{repo}/actions/artifacts?name=flake-budget&per_page=100"
 JQ = '[.artifacts[] | select((.expired | not) and .workflow_run.head_branch == "dev")][0].id // empty'
@@ -87,7 +88,7 @@ def test_a_test_flaky_in_two_runs_is_filed_once_in_plain_words(swarm):
         (
             "sw",
             "The test notify within budget in the inbox cases notify tests passed only on a retry in 2 dev runs"
-            " within seven days. Fix what makes it flaky.",
+            " within seven days.",
         ),
     ]
     assert all(ledger_comments.problems(text, "item") == [] and plain(text, "item") == text for _, text in ledger.added)
@@ -159,11 +160,12 @@ def test_a_followup_the_ledger_refuses_is_not_sent_again(swarm):
     assert refused == [TEXT]
 
 
-def test_a_followup_that_fails_to_reach_the_ledger_is_retried_next_interval(swarm, capsys):
+@pytest.mark.parametrize("error", [ConnectionRefusedError, LedgerGone, SwarmError])
+def test_a_followup_that_fails_to_reach_the_ledger_is_retried_next_interval(swarm, capsys, error):
     store, config, ledger = swarm
 
     def unreachable(slug, text):
-        raise ConnectionRefusedError("ledger down")
+        raise error("ledger down")
 
     ledger.followup = unreachable
     assert flakes.refresh("sw", config, store, ledger, NOW_MS, run=_gh([], _budget(TEST, OTHER))) == []

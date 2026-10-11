@@ -14,6 +14,7 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from scripts.ci_budget import defects
+from scripts.swarm.store import SwarmError
 
 if TYPE_CHECKING:
     from scripts.swarm.ledger_client import LedgerClient
@@ -57,7 +58,7 @@ def text(test: dict) -> str:
     module = " ".join([*folders, PurePosixPath(path).stem.removeprefix("test_")]).replace("_", " ").lower()
     return (
         f"The test {function} in the {module} tests passed only on a retry in {len(test['runs'])} dev runs "
-        "within seven days. Fix what makes it flaky."
+        "within seven days."
     )
 
 
@@ -86,7 +87,7 @@ def refresh(
             continue
         try:
             sent = ledger.followup(slug, text(test))
-        except READ_ERRORS as exc:
+        except (*READ_ERRORS, SwarmError) as exc:
             defects._skipped("one flaky test", exc)
             continue
         redis.set(raised, now_ms, ex=RAISED_TTL_S)
