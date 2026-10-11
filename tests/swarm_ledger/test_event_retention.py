@@ -166,6 +166,16 @@ def test_retained_drops_only_a_prefix_bounded_by_the_ceiling():
     assert events.retained([{}, {"rev": 3}], 0, 0, 9) == 1
 
 
+def test_retained_keeps_every_event_inside_the_horizon():
+    rows = [{"rev": n, "at": n * 10} for n in range(1, 7)]
+    assert events.retained(rows, None, 2, 9, horizon=29) == 2
+    assert events.retained(rows, None, 2, 9, horizon=30) == 3
+    assert events.retained(rows, None, 2, 9, horizon=60) == 4
+    assert events.retained(rows, None, 2, 3, horizon=-1) == 3
+    assert events.retained(rows, 1, 2, 9, horizon=60) == 1
+    assert events.retained([{"rev": 1}, *rows], None, 2, 9, horizon=9) == 1
+
+
 def test_a_trim_at_an_event_without_a_revision_marks_revision_zero(repo):
     state, _ = write(repo, 1, 2, 3, 4)
     state["_meta"]["events"][0] = {"kind": "legacy"}

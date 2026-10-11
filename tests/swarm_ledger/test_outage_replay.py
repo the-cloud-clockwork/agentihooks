@@ -7,7 +7,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
 import watch_ledger  # noqa: E402
 
-from scripts.swarm_ledger.repository import events, sqlite  # noqa: E402
+from scripts.swarm_ledger.repository import sqlite  # noqa: E402
 from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository  # noqa: E402
 
 pytestmark = pytest.mark.unit
@@ -69,31 +69,22 @@ def test_events_older_than_the_window_fall_back_to_the_kept_count(repo, clock, m
 
 
 def test_a_watcher_behind_the_trimmed_history_is_told_which_revisions_it_lost(repo, monkeypatch, capsys):
-    monkeypatch.setattr(repo.domain, "EVENTS_KEPT", 3)
     monkeypatch.setattr(repo.domain, "EVENTS_CEILING", 6)
     cursor = say(repo, "before")["_meta"]["rev"]
     revisions = [say(repo, f"m{n}")["_meta"]["rev"] for n in range(10)]
     lines = replay(repo, cursor, capsys)
     assert shown(lines) == [f"m{n}" for n in range(4, 10)]
-    lost = f"WARNING ledger history trimmed revisions {cursor + 1} to {revisions[3]} before this watcher read them"
+    lost = (
+        f"WARNING ledger history trimmed events after revision {cursor}"
+        f" through revision {revisions[3]} before this watcher read them"
+    )
     assert lines.count(lost) == 1
     assert lines.index(lost) < next(i for i, line in enumerate(lines) if line.startswith("OPERATOR"))
 
 
 def test_a_watcher_ahead_of_the_trim_hears_no_warning(repo, monkeypatch, capsys):
-    monkeypatch.setattr(repo.domain, "EVENTS_KEPT", 3)
     monkeypatch.setattr(repo.domain, "EVENTS_CEILING", 6)
     revisions = [say(repo, f"m{n}")["_meta"]["rev"] for n in range(10)]
     lines = replay(repo, revisions[3], capsys)
     assert shown(lines) == [f"m{n}" for n in range(4, 10)]
     assert not [line for line in lines if line.startswith("WARNING")]
-
-
-def test_retained_keeps_every_event_inside_the_horizon():
-    rows = [{"rev": n, "at": n * 10} for n in range(1, 7)]
-    assert events.retained(rows, None, 2, 9, horizon=29) == 2
-    assert events.retained(rows, None, 2, 9, horizon=30) == 3
-    assert events.retained(rows, None, 2, 9, horizon=60) == 4
-    assert events.retained(rows, None, 2, 3, horizon=-1) == 3
-    assert events.retained(rows, 1, 2, 9, horizon=60) == 1
-    assert events.retained([{"rev": 1}, *rows], None, 2, 9, horizon=9) == 1
