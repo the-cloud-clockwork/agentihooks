@@ -150,6 +150,8 @@ def test_the_atomic_write_stages_a_hidden_file_beside_the_target(tmp_path, monke
 
 
 def test_a_failed_atomic_write_leaves_the_target_and_no_staged_file(tmp_path, monkeypatch):
+    tmp_path = tmp_path / "account"
+    tmp_path.mkdir()
     target = tmp_path / "auth.json"
     target.write_bytes(b"old")
 
