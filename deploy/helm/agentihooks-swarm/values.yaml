@@ -80,8 +80,7 @@ controller:
       keyId: ""
       secretName: ""
       secretKey: signing-key
-    # The only peers beside the controller's own Pods, the operator's kubectl exec path, such as worker Pods in their
-    # own namespace; networkPolicy.ingressFrom never reaches the API.
+    # Peers beside the controller's own Pods, such as worker Pods; networkPolicy.ingressFrom never reaches the API.
     ingressFrom: []
   # Kubernetes runtime settings, rendered once apiUrl is set and read while the API is on. The worker
   # image stays on a floating tag; the controller resolves its digest at each launch. No launch account

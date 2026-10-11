@@ -1,4 +1,3 @@
-# Shared ingress ranges like the Anton overlay's office network and pod CIDR, and the worker peer of the control API.
 networkPolicy:
   ingressFrom:
     - ipBlock:
