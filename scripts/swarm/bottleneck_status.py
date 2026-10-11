@@ -1,8 +1,8 @@
 import json
 
+from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm.health import standing
-from scripts.swarm.naming import seat_address
 from scripts.swarm.store import RedisStore
 
 KEY = "top-bottleneck"

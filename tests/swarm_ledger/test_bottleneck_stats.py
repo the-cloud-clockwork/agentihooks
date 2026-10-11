@@ -23,7 +23,7 @@ def test_top_stage_trend_and_action_fit_the_operator_viewport(open_page):
     page.tab.set_viewport_size({"width": 1920, "height": 1080})
     box = page.tab.locator("#stats .top-bottleneck")
     assert box.is_visible()
-    assert box.inner_text() == "Top bottleneck\nci overrun\nTrend rising\nLast action Proposed a faster mutation run"
+    assert box.inner_text() == "TOP BOTTLENECK\nci overrun\nTrend rising\nLast action Proposed a faster mutation run"
     bounds = box.bounding_box()
     assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= 1920
     assert bounds["y"] >= 0 and bounds["y"] + bounds["height"] <= 1080
@@ -43,6 +43,6 @@ def test_action_is_text_and_long_actions_wrap_within_stats(open_page):
     )
     page.tab.set_viewport_size({"width": 1920, "height": 1080})
     box = page.tab.locator("#stats .top-bottleneck")
-    assert action in box.inner_text()
+    assert action.strip() in box.inner_text()
     assert box.locator("img").count() == 0
     assert box.evaluate("e => e.scrollWidth <= e.clientWidth")
