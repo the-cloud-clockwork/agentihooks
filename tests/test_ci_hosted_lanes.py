@@ -42,7 +42,7 @@ EXCLUDED = {
 }
 CALLERS = ("test.yml", "proofs.yml")
 REQUIRED = ("pull_request", "merge_group", "pull_request_target")
-REFS = ("refs/heads/dev", "refs/heads/diffcheck/plant", "refs/heads/task-branch")
+REFS = ("refs/heads/dev", "refs/heads/main", "refs/heads/diffcheck/plant", "refs/heads/task-branch")
 
 
 class _Context(dict):
