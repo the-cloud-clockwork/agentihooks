@@ -77,7 +77,7 @@ def test_publish_replaces_every_row_without_screen_text(store):
 def test_read_judges_every_row_at_the_reader_clock_in_agent_order(store):
     visibility.publish(store, "sw", [View("b", "m", "w1:p1", "i", LIVE, NOW, NOW), live()])
     rows = visibility.read(store, "sw", NOW + FRESH_MS + 1)
-    assert list(rows) == [AGENT, "b"]
+    assert list(rows) == ["b", AGENT]
     assert rows[AGENT] == asdict(judged(live(), NOW + FRESH_MS + 1))
     assert rows["b"]["state"] == CACHED
     assert visibility.read(store, "sw", NOW)[AGENT] == asdict(live())
@@ -90,7 +90,7 @@ def test_read_judges_every_row_at_the_reader_clock_in_agent_order(store):
         "not json",
         "[1, 2]",
         json.dumps({**asdict(live()), "screen": "secret"}),
-        json.dumps({**asdict(live()), "checked_at": "soon"}),
+        json.dumps({**asdict(live()), "checked_at": "soon", "live_at": "soon"}),
     ],
 )
 def test_an_unreadable_row_reads_unverified(store, raw):
