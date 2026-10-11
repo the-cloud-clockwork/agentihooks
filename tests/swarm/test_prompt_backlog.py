@@ -61,6 +61,11 @@ def test_pending_prompts_that_stop_growing_raise_nothing(store, tmp_path, counts
     assert observed(store, tmp_path / DELIVERIES, counts) == []
 
 
+def test_a_repeated_sample_breaks_the_rise(store):
+    store.redis.set(store.key("sw", "prompt-backlog"), json.dumps([0, 1, 1, 2]))
+    assert prompt_backlog.findings(store, "sw") == []
+
+
 def test_the_samples_keep_only_the_last_rises(store, tmp_path):
     observed(store, tmp_path / DELIVERIES, [0, 1, 2, 3, 4, 5])
     assert prompt_backlog.read(store, "sw") == [2, 3, 4, 5]

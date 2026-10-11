@@ -1,5 +1,6 @@
 import json
 import subprocess
+import time
 from collections import Counter
 from dataclasses import replace
 from pathlib import Path
@@ -418,6 +419,7 @@ def test_a_pending_entry_written_before_its_time_was_kept_expires_at_once(tmp_pa
     key = f"{found.incarnation}/{PANE}"
     old = {"version": 1, "deliveries": {"op-old": {"target": key, "state": "pending"}}}
     (tmp_path / DELIVERIES).write_text(json.dumps(old))
+    client.router.clock = lambda: float(EXPIRY_S)
     client.router.send(found, "agent_prompt", "op-new", "x")
     entries = json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]
     assert entries["op-old"] == {"target": key, "state": "expired"}
@@ -763,6 +765,7 @@ def test_the_router_runs_through_its_injected_runner(tmp_path):
     client, fleet, _ = world(tmp_path)
     router = Router(client.registrations.store, client.router.catalog, client.qualifier, fleet, tmp_path / DELIVERIES)
     assert router.run is fleet and router.herdr_target_mismatch_total() == 0
+    assert router.clock is time.time
 
 
 def test_rollback_keeps_read_only_inspection_and_refuses_every_pane_mutation(tmp_path):
