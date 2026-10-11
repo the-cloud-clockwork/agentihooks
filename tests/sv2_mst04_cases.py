@@ -61,6 +61,8 @@ class World:
     def seat(self, name, address):
         self.store.put_agent(SLUG, AgentRecord(name, MASTER, MASTER, pane_id=f"p-{name}", seat=address))
         self.store.seats.occupy(address, name, 1)
+        if address == LEAD:
+            self.lead = name
 
     def down(self, name):
         agent = next(a for a in self.store.agents(SLUG) if a.name == name)
@@ -112,7 +114,7 @@ class World:
         return self.doc()["_meta"].get(master_fence.DECISIONS, {})
 
     def posts(self):
-        return [post.text for post in MastersChannel(self.redis).read(SLUG, LEAD_NAME)]
+        return [post.text for post in MastersChannel(self.redis).read(SLUG, self.lead)]
 
     def refusals(self):
         return master_fence.measurements(self.redis, SLUG)["master_write_refusals_total"]
