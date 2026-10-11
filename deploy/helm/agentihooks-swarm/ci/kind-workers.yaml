@@ -4,9 +4,6 @@ controller:
   terminalCa:
     secretName: swarm-terminal-attach-ca
     key: user_ca
-  env:
-    # No account email lives in git; the runtime build reads the launch account as an opaque name.
-    AGENTIHOOKS_LAUNCH_ACCOUNT: kind-fixture
   workers:
     apiUrl: http://agentihooks-swarm-controller.default.svc:8780
     imageTag: dev

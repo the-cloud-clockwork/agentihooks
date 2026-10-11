@@ -138,6 +138,7 @@ def test_the_runtime_request_carries_the_grant_the_execution_and_its_generation(
         "launch_grant": launch.grant,
         "execution_id": launch.agent.execution_id,
         "generation": 1,
+        "account": ACCOUNT,
         "endpoints": {"AGENTIHOOKS_SWARM_API_URL": API},
     }
     assert (request.lane, request.name) == ("eng", launch.agent.name)
@@ -653,6 +654,45 @@ def test_a_tick_spawn_hands_the_worker_the_api_address_of_its_swarm_config(world
     agent = world.store.execution(SLUG, sent.task["execution_id"])
     assert (agent.name, agent.lane, agent.task, agent.seat, agent.account) == (name, "eng", "task", FIRST, ACCOUNT)
     assert (agent.runtime_backend, agent.runtime_target) == (BACKEND, pod_target(request))
+
+
+def test_a_tick_spawn_launches_on_the_account_its_route_chooses_for_the_launch_cap(world):
+    asked = []
+    world.launcher.accounts = lambda cap: asked.append(cap) or "routed-key"
+    name = world.store.next_name(SLUG, "eng")
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+    request = SpawnRequest(config, "eng", name, {"id": "task", "seat": FIRST})
+
+    outcome = world.launcher.from_tick(request, replace(world.terms, account="", cap=3), pod_target)
+
+    assert outcome == Outcome("spawn", Status.OK, BACKEND, f"placed-{name}")
+    assert asked == [3]
+    [sent] = world.runtime.requests
+    assert world.store.execution(SLUG, sent.task["execution_id"]).account == "routed-key"
+    assert world.grants.verify(SLUG, sent.task["launch_grant"]).account == "routed-key"
+
+
+def test_a_tick_spawn_whose_route_finds_no_account_is_refused_before_admission(world):
+    world.launcher.accounts = lambda cap: None
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+    request = SpawnRequest(config, "eng", "e1", {"id": "task", "seat": FIRST})
+
+    outcome = world.launcher.from_tick(request, world.terms, pod_target)
+
+    assert outcome == Outcome("spawn", Status.REFUSED, BACKEND, None, launch_module.NO_ACCOUNT)
+    assert launch_module.NO_ACCOUNT == "no approved account has quota and a free launch slot"
+    assert world.runtime.requests == []
+    assert world.store.executions(SLUG, FIRST) == []
+
+
+def test_a_launcher_built_without_a_route_keeps_the_account_of_its_terms(world):
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+    request = SpawnRequest(config, "eng", world.store.next_name(SLUG, "eng"), {"id": "task", "seat": FIRST})
+
+    world.launcher.from_tick(request, world.terms, pod_target)
+
+    [sent] = world.runtime.requests
+    assert world.store.execution(SLUG, sent.task["execution_id"]).account == ACCOUNT
 
 
 @pytest.mark.parametrize(

@@ -139,6 +139,7 @@ kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/her
 kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/herdr-terminal-objects.json
 printf 'worker terminal Pod, Secret, Service and NetworkPolicy passed server side strict validation\n'
 wait "$build"
+bash scripts/packaging/swarm-image-clients.sh "$image"
 printf 'FROM %s\nCOPY . /\n' "$image" \
   | docker build -q -t "$bundle_image" -f - tests/fixtures/swarm_v2/worker-bundle >/dev/null
 kind load docker-image "$image" --name "$cluster"
@@ -633,4 +634,10 @@ if [[ -z $kept ]]; then
   exit 1
 fi
 printf 'the controller loaded the mounted terminal CA key and logged its saved herdr machines on start: %s\n' "$kept"
+if [[ $kept != *"refused {}"* ]]; then
+  printf 'the controller start pass did not reach the herdr client: %s\n' "$kept" >&2
+  exit 1
+fi
+printf 'the controller start pass reached the herdr client and refused nothing\n'
+bash "$chart/ci/terminal-attach-proof.sh" "$image" "$cluster" "$release" "$slug"
 printf 'Helm chart kind proof passed\n'

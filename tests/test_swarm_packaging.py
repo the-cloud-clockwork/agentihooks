@@ -23,3 +23,22 @@ def test_swarm_image_installs_every_ledger_dependency_from_its_hashed_lock():
     dockerfile = (root / "Dockerfile").read_text()
     assert "--require-hashes -r requirements.lock" in dockerfile
     assert "!docker/swarm/requirements.lock" in (root / ".dockerignore").read_text().splitlines()
+
+
+def test_the_swarm_image_installs_the_herdr_client_the_worker_lock_pins():
+    root = Path(__file__).parents[1]
+    dockerfile = (root / "Dockerfile").read_text()
+    ignored = (root / ".dockerignore").read_text().splitlines()
+    assert "!docker/swarm-node/versions.lock" in ignored
+    assert "!docker/swarm-node/requirements.lock" in ignored
+    assert "COPY docker/swarm-node/versions.lock docker/swarm-node/requirements.lock /opt/swarm-node/" in dockerfile
+    assert 'worker_image.py install --tool herdr --architecture "$TARGETARCH"' in dockerfile
+    assert "COPY --from=herdr /usr/local/bin/herdr /usr/local/bin/herdr" in dockerfile
+    assert "herdrdev/herdr" not in dockerfile
+    assert "sha256:" not in dockerfile.split("AS herdr")[1]
+    assert dockerfile.count("FROM mirror.gcr.io/library/python:3.12-slim-bookworm") == 3
+    assert "worker_image.py shell-packages --package openssh-client)" in dockerfile
+    assert '["debian_snapshot"]' in dockerfile
+    due = (root / "deploy/helm/agentihooks-swarm/ci/kind-due.sh").read_text().splitlines()
+    assert "  docker/swarm-node/versions.lock" in due
+    assert "  docker/swarm-node/requirements.lock" in due

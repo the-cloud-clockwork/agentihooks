@@ -69,7 +69,7 @@ def ca_key(tmp_path: Path, key=None) -> Path:
 def environ(tmp_path: Path, **changes) -> dict[str, str]:
     policy = json.loads((FIXTURES / "pod-policy.json").read_text())
     path = tmp_path / "policy.json"
-    path.write_text(json.dumps({**policy, "owner": owner_for(SWARM), "namespace": NAMESPACE}))
+    path.write_text(json.dumps({**policy, "owner": owner_for(SWARM), "namespace": NAMESPACE, "provider_accounts": []}))
     return {deployed.POLICY_ENV: str(path), operator_terminal.CA_KEY_ENV: str(ca_key(tmp_path)), **changes}
 
 
