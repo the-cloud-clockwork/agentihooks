@@ -1375,6 +1375,23 @@ def test_an_operator_line_for_a_live_master_posts_no_down_notice(store):
     assert MASTER_DOWN not in ledger.notes
 
 
+def test_a_live_seat_two_master_keeps_a_down_lead_from_counting_as_an_outage(store):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import tick_master
+    from scripts.swarm_v2.masters import MasterSeats
+
+    MasterSeats(store.redis).set_count("sw", 2)
+    runtime, ledger = FakeRuntime(), tasks()
+    tick("sw", store, ledger, runtime, 1)
+    (lead,) = [a for a in masters(store) if a.seat == "master@sw"]
+    runtime.live.discard(lead.name)
+    runtime.full = True
+    InboxStore(store.redis).send("operator", "master@sw", "anyone there")
+    tick("sw", store, ledger, runtime, 1 + STARTUP_GRACE_MS + 5)
+    assert MASTER_DOWN not in ledger.notes
+    assert tick_master.read(store, "sw") == {}
+
+
 def test_a_master_still_starting_posts_no_down_notice(store):
     from scripts.inbox.store import InboxStore
 

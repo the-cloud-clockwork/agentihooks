@@ -274,7 +274,7 @@ def _master_down(slug, config, store, ledger, runtime, now_ms):
     """Operator lines waiting at a master seat nobody holds: tell the chat once per line, and return any line a dead
     master took but never closed to pending so the next master receives it."""
     live = runtime.live_names()
-    masters = [a for a in store.agents(slug) if master_seats.is_lead(slug, a) and a.state != "finished"]
+    masters = [a for a in store.agents(slug) if a.lane == MASTER and a.state != "finished"]
     if config.state == "stopping" or any(m.name in live or now_ms - m.started_at <= STARTUP_GRACE_MS for m in masters):
         return []
     inbox, seat = InboxStore(store.redis), seat_address(slug, MASTER)
