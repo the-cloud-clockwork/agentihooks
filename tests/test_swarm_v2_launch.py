@@ -103,6 +103,15 @@ class World:
     def hands(self):
         return {key: json.loads(raw) for key, raw in self.store.redis.hgetall(self.store.key(SLUG, HANDS)).items()}
 
+    def endings(self):
+        raw = self.store.redis.hgetall(self.store.key(SLUG, "launch-endings"))
+        return {key: json.loads(value) for key, value in raw.items()}
+
+    def tick(self, seat):
+        config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+        request = SpawnRequest(config, "eng", self.store.next_name(SLUG, "eng"), {"id": "task", "seat": seat})
+        return self.launcher.from_tick(request, self.terms, pod_target)
+
 
 @pytest.fixture
 def world(monkeypatch):
@@ -222,7 +231,8 @@ def test_a_second_simultaneous_launch_on_a_full_account_is_refused(monkeypatch):
     [refused] = second
     assert refused.outcome == Outcome("spawn", Status.REFUSED, BACKEND, detail="account_full")
     assert refused.slot is None
-    assert world.grants.verify(SLUG, refused.grant).execution_id == refused.agent.execution_id
+    with pytest.raises(GrantRefused, match="^launch grant was revoked$"):
+        world.grants.verify(SLUG, refused.grant)
     assert [request.name for request in world.runtime.requests] == [first.agent.name]
     assert list(world.rows()) == [f"{SLUG}/{FIRST}"]
     assert world.capacity.account_reservation_conflicts_total() == 1
@@ -630,6 +640,56 @@ def test_a_launch_refused_on_a_full_account_hands_no_grant(world):
     assert refused.outcome.detail == "account_full"
     assert refused.hand is None
     assert len(world.homes.calls) == 1
+
+
+def test_a_launch_refused_on_a_full_account_withdraws_its_grant_and_ends_its_execution(world):
+    first = world.launch(FIRST)
+
+    refused = world.launch(SECOND)
+
+    with pytest.raises(GrantRefused) as revoked:
+        world.grants.verify(SLUG, refused.grant)
+    assert str(revoked.value) == "launch grant was revoked"
+    assert launch_module.ENDED == "ended"
+    assert refused.agent.state == "ended"
+    assert world.store.execution(SLUG, refused.agent.execution_id).state == "ended"
+    assert world.store.execution_occupants(SLUG)[SECOND].state == "ended"
+    assert world.store.execution(SLUG, first.agent.execution_id).state == "working"
+    assert world.endings() == {refused.agent.execution_id: {"reason": "account_full", "generation": 1}}
+    assert list(world.rows()) == [f"{SLUG}/{FIRST}"]
+
+
+def test_a_launch_that_reserves_its_slot_records_no_ending(world):
+    launch = world.launch(FIRST)
+
+    assert launch.agent.state == "working"
+    assert world.endings() == {}
+    assert world.grants.verify(SLUG, launch.grant).execution_id == launch.agent.execution_id
+
+
+def test_the_next_tick_places_a_task_whose_launch_found_its_account_full(world):
+    first = world.launch(FIRST)
+    world.launcher.registered(world.session(first), first.grant)
+    assert world.tick(SECOND) == Outcome("spawn", Status.REFUSED, BACKEND, None, "account_full")
+    ended = world.store.execution_occupants(SLUG)[SECOND]
+    world.launcher.exited(first.agent)
+
+    placed = world.tick(SECOND)
+
+    assert placed.ok
+    occupant = world.store.execution_occupants(SLUG)[SECOND]
+    assert occupant.execution_id != ended.execution_id
+    assert (occupant.generation, occupant.state, occupant.account) == (2, "working", ACCOUNT)
+    assert [slot.holder for slot in world.capacity.slots(ACCOUNT)] == [f"{SLUG}/{SECOND}"]
+
+
+def test_a_tick_never_replaces_a_seat_whose_execution_is_still_live(world):
+    assert world.tick(FIRST).ok
+
+    with pytest.raises(SwarmError) as conflict:
+        world.tick(FIRST)
+
+    assert str(conflict.value) == "replacement does not match the current execution"
 
 
 def test_a_refused_launch_names_the_backend_its_spawn_was_placed_on(monkeypatch):
