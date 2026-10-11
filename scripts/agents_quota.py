@@ -12,16 +12,12 @@ from typing import TYPE_CHECKING
 from scripts import codex_router, session_bands
 from scripts.claude_quota_balancer import (
     MASTERS_ONLY,
-    NOT_APPLICABLE,
     OPEN,
     QuotaWindow,
-    RowMarks,
     _cap_text,
     _duration,
-    _percent,
     _weight_text,
     account_cap,
-    render_table,
 )
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, Slot
 
@@ -34,6 +30,24 @@ PAGE_TTL_S = 60
 STALE = "STALE"
 EXPIRED_SOURCE = "token expired: run {login}"
 NEXT_MARK = "(next)"
+MISSING = "-"
+HARNESSES = ("claude", "codex")
+UNLISTED = "+{count} sessions on unlisted account names"
+COLUMNS = [
+    "#",
+    "HARNESS",
+    "ACCOUNT",
+    "KIND",
+    "STATE",
+    "SESSIONS",
+    "WEIGHT",
+    "CAP",
+    "ROUTING LEFT",
+    "5H LEFT",
+    "5H RESET",
+    "7D LEFT",
+    "7D RESET",
+]
 REFRESH_MIN_S = 60
 _page_cache: dict = {}
 _last_refresh: dict = {}
@@ -57,6 +71,7 @@ class QuotaRow:
     weight: int | None = None
     master: str = ""
     selected: bool = False
+    routing_left: float | None = None
 
 
 def claude_rows(
@@ -80,6 +95,7 @@ def claude_rows(
             five_hour_resets_at=result.five_hour.resets_at,
             observed_at=(observed or {}).get(result.account),
             cap=account_cap(result, now) if session_bands.fresh((observed or {}).get(result.account), now) else None,
+            routing_left=result.margin,
         )
         for result in results
     ]
@@ -118,6 +134,8 @@ def codex_rows(
     for account in accounts:
         quota = quotas.get(account.name)
         fresh = quota is not None and session_bands.fresh(quota.observed_at, now)
+        week = session_bands.left(quota.seven_day.used, quota.seven_day.resets_at, now) if quota else None
+        cap = codex_router.account_cap(quota, now, environ) if account.signed_in else None
         rows.append(
             QuotaRow(
                 agent="codex",
@@ -127,14 +145,13 @@ def codex_rows(
                 five_hour_left=session_bands.left(quota.five_hour.used, quota.five_hour.resets_at, now)
                 if fresh
                 else None,
-                seven_day_left=session_bands.left(quota.seven_day.used, quota.seven_day.resets_at, now)
-                if quota
-                else None,
+                seven_day_left=week,
                 seven_day_resets_at=quota.seven_day.resets_at if quota else None,
                 source=_codex_source(account, quota, now),
                 five_hour_resets_at=quota.five_hour.resets_at if quota else None,
                 observed_at=quota.observed_at if quota else None,
-                cap=codex_router.account_cap(quota, now, environ) if account.signed_in else None,
+                cap=cap,
+                routing_left=week if cap is not None else None,
             )
         )
     return rows
@@ -153,47 +170,56 @@ def mark_next(rows: list[QuotaRow], account: str) -> list[QuotaRow]:
     return [replace(row, selected=True) if account and row.account == account else row for row in rows]
 
 
-def render(rows: list[QuotaRow], now: int) -> str:
-    headers = [
-        "AGENT",
-        "ACCOUNT",
-        "KIND",
-        "STATE",
-        "SESSIONS",
-        "WEIGHT",
-        "CAP",
-        "5H LEFT",
-        "5H RESET",
-        "7D LEFT",
-        "7D RESET",
-        "SOURCE",
+def render(rows: list[QuotaRow], now: int, unlisted: int = 0) -> str:
+    table, rank = [], 0
+    for row in _ordered(rows):
+        rank += row.kind == SUBSCRIPTION
+        table.append(_cells(str(rank) if row.kind == SUBSCRIPTION else MISSING, row, now))
+    widths = [max(len(cell) for cell in column) for column in zip(COLUMNS, *table)]
+    lines = [COLUMNS, ["-" * width for width in widths], *table]
+    text = "\n".join("  ".join(cell.ljust(width) for cell, width in zip(line, widths)).rstrip() for line in lines)
+    return f"{text}\n{UNLISTED.format(count=unlisted)}" if unlisted > 0 else text
+
+
+def _ordered(rows: list[QuotaRow]) -> list[QuotaRow]:
+    def key(row: QuotaRow) -> tuple:
+        harness = HARNESSES.index(row.agent) if row.agent in HARNESSES else len(HARNESSES)
+        return harness, row.kind != SUBSCRIPTION, row.routing_left is None, -(row.routing_left or 0)
+
+    return sorted(rows, key=key)
+
+
+def _left(value: float | None) -> str:
+    return MISSING if value is None else f"{value:.0f}%"
+
+
+def _reset(left: float | None, resets_at: int | None, now: int) -> str:
+    return MISSING if left is None or resets_at is None else _duration(resets_at, now)
+
+
+def _cells(rank: str, row: QuotaRow, now: int) -> list[str]:
+    cap = MISSING if row.cap is None else _cap_text(row.cap)
+    return [
+        rank,
+        row.agent,
+        " ".join(part for part in (row.account, row.master, NEXT_MARK if row.selected else "") if part),
+        row.kind,
+        row.state,
+        f"{row.sessions}/{cap}",
+        _weight_text(row.weight),
+        cap,
+        _left(row.routing_left),
+        _left(row.five_hour_left),
+        _reset(row.five_hour_left, row.five_hour_resets_at, now),
+        _left(row.seven_day_left),
+        _reset(row.seven_day_left, row.seven_day_resets_at, now),
     ]
-    table = [
-        [
-            row.agent,
-            " ".join(part for part in (row.account, row.master, NEXT_MARK if row.selected else "") if part),
-            row.kind,
-            row.state,
-            f"{row.sessions}/{_cap_text(row.cap)}",
-            _weight_text(row.weight),
-            _cap_text(row.cap),
-            *(
-                [NOT_APPLICABLE] * 4
-                if row.kind == API
-                else [
-                    _percent(row.five_hour_left),
-                    _duration(row.five_hour_resets_at, now),
-                    _percent(row.seven_day_left),
-                    _duration(row.seven_day_resets_at, now),
-                ]
-            ),
-            row.source,
-        ]
-        for row in rows
-    ]
-    widths = [max(len(cell) for cell in column) for column in zip(headers, *table)]
-    return "\n".join(
-        "  ".join(cell.ljust(width) for cell, width in zip(line, widths)).rstrip() for line in [headers, *table]
+
+
+def unlisted_sessions(rows: list[QuotaRow], sessions: Mapping[str, Mapping[str, int]]) -> int:
+    listed = {(row.agent, row.account) for row in rows}
+    return sum(
+        count for harness, live in sessions.items() for name, count in live.items() if (harness, name) not in listed
     )
 
 
@@ -289,16 +315,25 @@ def _codex(now: float) -> list[QuotaRow]:
     return mark_next(marked, next_account(pool, quotas, sessions, now, dict(os.environ)))
 
 
-def codex_table() -> str:
-    now = time.time()
-    return render(_codex(now), int(now))
+def _table(claude: list[QuotaRow], sessions: dict[str, int], now: float) -> str:
+    from hooks.context.account_sessions import codex_sessions_by_account
+
+    rows = claude + _codex(now)
+    live = {"claude": sessions, "codex": codex_sessions_by_account()}
+    return render(rows, int(now), unlisted_sessions(rows, live))
 
 
 def tokenless_table(master: "MasterAccount | None", sessions: dict[str, int]) -> str:
-    table = codex_table()
-    if master is None or master.kind != INTERACTIVE:
-        return table
-    return f"{render_table([], sessions=sessions, marks=RowMarks(master=master))}\n{table}"
+    claude = [_interactive_row(master, sessions)] if master is not None and master.kind == INTERACTIVE else []
+    return _table(claude, sessions, time.time())
+
+
+def balance_table(results: list, sessions: dict[str, int], source: str, now: float) -> str:
+    from scripts.routing.claude_api import ClaudeApiSource
+
+    observed = {result.account: now for result in results}
+    claude = claude_rows(results, sessions, source, observed, now) + api_rows(ClaudeApiSource(sessions), "claude", now)
+    return _table(with_masters(claude, _masters("claude"), sessions), sessions, now)
 
 
 def _page_quota(now: float) -> dict:
@@ -345,12 +380,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--refresh", action="store_true", help="Probe Claude accounts instead of using the cache")
     parser.add_argument("--timeout", type=float, default=60.0, help="Seconds per Claude account probe")
     args = parser.parse_args(argv)
+    from hooks.context.account_sessions import codex_sessions_by_account, sessions_by_account
+
     now = time.time()
     rows = _claude(args.refresh, args.timeout) + _codex(now)
     if args.json:
-        print(json.dumps([asdict(row) for row in rows], indent=2))
+        print(json.dumps([{**asdict(row), "harness": row.agent} for row in rows], indent=2))
     elif rows:
-        print(render(rows, int(now)))
+        live = {"claude": sessions_by_account(), "codex": codex_sessions_by_account()}
+        print(render(rows, int(now), unlisted_sessions(rows, live)))
     else:
         print("agentihooks quota: no Claude account and no Codex session log found", file=sys.stderr)
     return 0 if rows else 1
