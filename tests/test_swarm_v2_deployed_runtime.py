@@ -66,6 +66,9 @@ class Pods:
     def list_pods(self, selector):
         return []
 
+    def list_quotas(self):
+        return []
+
     def snapshot(self, selector):
         return [], ""
 
@@ -409,7 +412,38 @@ def test_a_deployed_controller_whose_policy_declares_no_pool_passes_spawns_witho
 
     assert (decision["host"]["room"], decision["host"]["reason"]) == (
         None,
+        "worker namespace quota sets no Pod, CPU or memory limit; "
         "worker pool undeclared: the Pod policy names no worker_pool, so spawns pass",
+    )
+
+
+class QuotaPods(PoolPods):
+    def list_quotas(self):
+        hard = {"pods": "8", "requests.cpu": "18", "requests.memory": "34Gi"}
+        return [{"metadata": {"name": "swarm-worker-execution"}, "status": {"hard": hard, "used": {"pods": "6"}}}]
+
+
+def test_the_deployed_controller_sizes_spawn_room_from_the_worker_namespace_quota_with_no_pool_declared(
+    tmp_path, monkeypatch
+):
+    def own_node(*args, **kwargs):
+        raise AssertionError("the deployed controller read its own node")
+
+    monkeypatch.setattr(host_budget, "read_host", own_node)
+    pods = QuotaPods("swarm-pod-proof", [])
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: pods)
+    store = _store()
+    service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    try:
+        decision = service.runtime.quota_capacity(store.config(SLUG), [], 1_800_000_000, {"eng": 1, "ci": 0, "plan": 0})
+    finally:
+        service.stop()
+
+    assert pods.selectors == []
+    assert (decision["host"]["room"], decision["host"]["limit"], decision["host"]["reason"]) == (
+        2,
+        "quota pods",
+        "worker namespace quota leaves 2 Pods, 18000m CPU and 34816 MiB memory; 2 more fit at 2000m and 4096 MiB each",
     )
 
 

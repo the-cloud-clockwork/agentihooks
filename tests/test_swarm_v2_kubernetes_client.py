@@ -359,6 +359,18 @@ def test_list_services_selects_by_label():
     assert transport.calls == [("GET", "/api/v1/namespaces/ns/services?labelSelector=owner%3Dx", None)]
 
 
+def test_list_quotas_lists_the_namespace_resource_quotas():
+    transport = Http((200, {"items": [{"metadata": {"name": "q"}}]}))
+    assert PodClient(transport, "ns").list_quotas() == [{"metadata": {"name": "q"}}]
+    assert transport.calls == [("GET", "/api/v1/namespaces/ns/resourcequotas", None)]
+
+
+def test_list_quotas_refused_raises():
+    with pytest.raises(ApiRefused) as raised:
+        PodClient(Http((403, {"reason": "Forbidden"})), "ns").list_quotas()
+    assert raised.value.status == 403
+
+
 @pytest.mark.parametrize("kind", ["pods", "services"])
 def test_read_gets_the_named_object_and_answers_none_when_absent(kind):
     transport = Http((200, {"metadata": {"uid": "u1"}}), (404, {"reason": "NotFound"}))

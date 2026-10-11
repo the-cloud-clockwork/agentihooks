@@ -18,14 +18,28 @@ def _pod(phase="Running", cpu="2", memory="4Gi", init=None):
 
 
 class Listing:
-    def __init__(self, pods=(), error=None):
+    def __init__(self, pods=(), error=None, quotas=(), quota_error=None):
         self.pods, self.error, self.selectors = list(pods), error, []
+        self.quotas, self.quota_error, self.quota_reads = list(quotas), quota_error, 0
 
     def list_pods(self, selector):
         self.selectors.append(selector)
         if self.error is not None:
             raise self.error
         return self.pods
+
+    def list_quotas(self):
+        self.quota_reads += 1
+        if self.quota_error is not None:
+            raise self.quota_error
+        return self.quotas
+
+
+def _quota(hard, used=None, name="swarm-worker-execution"):
+    return {"metadata": {"name": name}, "status": {"hard": hard, "used": used or {}}}
+
+
+ANTON = {"pods": "8", "requests.cpu": "18", "requests.memory": "34Gi", "limits.cpu": "18", "count/jobs.batch": "0"}
 
 
 @pytest.mark.parametrize(
@@ -173,6 +187,58 @@ def test_room_over_the_pool_never_drops_below_zero():
     )
 
 
+def test_quota_room_is_the_fewest_launches_its_hard_less_used_still_fits():
+    used = {"pods": "2", "requests.cpu": "4", "requests.memory": "8Gi", "limits.cpu": "4"}
+
+    assert pool.quota_room([_quota(ANTON, used)], LAUNCH) == Room(
+        6,
+        "worker namespace quota leaves 6 Pods, 14000m CPU and 26624 MiB memory; 6 more fit at 2000m and 4096 MiB each",
+        "quota pods",
+    )
+
+
+def test_quota_room_names_cpu_or_memory_when_it_binds():
+    cpu = pool.quota_room([_quota(ANTON, {"pods": "1", "requests.cpu": "15"})], LAUNCH)
+    memory = pool.quota_room([_quota(ANTON, {"requests.memory": "30Gi"})], LAUNCH)
+
+    assert (cpu.room, cpu.limit) == (1, "quota cpu")
+    assert (memory.room, memory.limit) == (1, "quota memory")
+    assert memory.reason == (
+        "worker namespace quota leaves 8 Pods, 18000m CPU and 4096 MiB memory; 1 more fit at 2000m and 4096 MiB each"
+    )
+
+
+def test_quota_room_reads_the_short_cpu_and_memory_names_as_requests():
+    found = pool.quota_room([_quota({"cpu": "3", "memory": "9Gi"}, {"cpu": "500m"})], LAUNCH)
+
+    assert found == Room(
+        1,
+        "worker namespace quota leaves 2500m CPU and 9216 MiB memory; 1 more fit at 2000m and 4096 MiB each",
+        "quota cpu",
+    )
+
+
+def test_quota_room_takes_the_tightest_of_several_quotas():
+    loose = _quota({"pods": "20", "requests.memory": "100Gi"}, name="loose")
+    tight = _quota({"pods": "3"}, {"pods": "1"}, name="tight")
+
+    found = pool.quota_room([loose, tight], LAUNCH)
+
+    assert (found.room, found.limit) == (2, "quota pods")
+    assert found.reason.startswith("worker namespace quota leaves 2 Pods and 102400 MiB memory;")
+
+
+def test_quota_room_over_its_hard_never_drops_below_zero():
+    assert pool.quota_room([_quota({"pods": "8"}, {"pods": "9"})], LAUNCH) == Room(
+        0, "worker namespace quota leaves -1 Pods; 0 more fit at 2000m and 4096 MiB each", "quota pods"
+    )
+
+
+def test_quotas_without_pod_cpu_or_memory_give_no_quota_room():
+    assert pool.quota_room([_quota({"count/jobs.batch": "0"}), {"metadata": {"name": "new"}}], LAUNCH) is None
+    assert pool.quota_room([], LAUNCH) is None
+
+
 def test_the_reading_lists_every_pod_in_the_worker_namespace_and_sizes_the_room():
     listing = Listing([_pod(), _pod(), _pod("Succeeded")])
 
@@ -182,13 +248,76 @@ def test_the_reading_lists_every_pod_in_the_worker_namespace_and_sizes_the_room(
     assert (found.room, found.limit) == (5, "memory")
 
 
-def test_an_undeclared_pool_lists_nothing_and_has_unknown_room():
+def test_the_reading_takes_the_quota_when_it_is_tighter_than_the_pool():
+    used = {"pods": "7", "requests.cpu": "14", "requests.memory": "28Gi"}
+    listing = Listing([_pod(), _pod()], quotas=[_quota(ANTON, used)])
+
+    found = pool.WorkerPool(listing, POOL, LAUNCH)()
+
+    assert listing.quota_reads == 1
+    assert (found.room, found.limit) == (1, "quota pods")
+
+
+def test_the_reading_takes_the_pool_when_it_is_tighter_than_the_quota():
+    found = pool.WorkerPool(Listing([_pod(), _pod()], quotas=[_quota(ANTON)]), POOL, LAUNCH)()
+
+    assert (found.room, found.limit) == (5, "memory")
+
+
+def test_an_undeclared_pool_sizes_the_room_from_the_quota_alone():
+    listing = Listing([_pod()], quotas=[_quota(ANTON, {"pods": "2"})])
+
+    found = pool.WorkerPool(listing, None, LAUNCH)()
+
+    assert listing.selectors == []
+    assert (found.room, found.limit) == (6, "quota pods")
+
+
+def test_an_unreadable_quota_falls_back_to_the_pool():
+    listing = Listing([_pod(), _pod()], quota_error=ApiRefused(403, "Forbidden"))
+
+    assert pool.WorkerPool(listing, POOL, LAUNCH)().room == 5
+
+
+def test_no_quota_and_an_undeclared_pool_has_unknown_room():
     listing = Listing([_pod()])
 
     found = pool.WorkerPool(listing, None, LAUNCH)()
 
     assert listing.selectors == []
-    assert found == Room(None, "worker pool undeclared: the Pod policy names no worker_pool, so spawns pass", "unknown")
+    assert found == Room(
+        None,
+        "worker namespace quota sets no Pod, CPU or memory limit; "
+        "worker pool undeclared: the Pod policy names no worker_pool, so spawns pass",
+        "unknown",
+    )
+
+
+@pytest.mark.parametrize(
+    ("error", "name"),
+    [(ApiRefused(403, "Forbidden"), "ApiRefused"), (ConnectionError("down"), "ConnectionError")],
+)
+def test_an_unreadable_quota_and_an_undeclared_pool_has_unknown_room_naming_both(error, name):
+    found = pool.WorkerPool(Listing(quota_error=error), None, LAUNCH)()
+
+    assert found == Room(
+        None,
+        f"worker namespace quota cannot be read ({name}); "
+        "worker pool undeclared: the Pod policy names no worker_pool, so spawns pass",
+        "unknown",
+    )
+
+
+def test_a_quota_quantity_that_is_not_a_quantity_falls_back_to_the_pool():
+    listing = Listing([_pod(), _pod()], quotas=[_quota({"pods": "many"})])
+
+    assert pool.WorkerPool(listing, POOL, LAUNCH)().room == 5
+    assert pool.WorkerPool(listing, None, LAUNCH)() == Room(
+        None,
+        "worker namespace quota is not a resource quantity: 'many'; "
+        "worker pool undeclared: the Pod policy names no worker_pool, so spawns pass",
+        "unknown",
+    )
 
 
 @pytest.mark.parametrize(
@@ -203,7 +332,10 @@ def test_a_pod_list_that_fails_has_unknown_room_and_names_the_failure(error, nam
     found = pool.WorkerPool(Listing(error=error), POOL, LAUNCH)()
 
     assert found == Room(
-        None, f"worker pool unknown: the worker Pods cannot be listed ({name}), so spawns pass", "unknown"
+        None,
+        "worker namespace quota sets no Pod, CPU or memory limit; "
+        f"worker pool unknown: the worker Pods cannot be listed ({name}), so spawns pass",
+        "unknown",
     )
 
 
@@ -212,6 +344,7 @@ def test_a_pod_request_that_is_not_a_quantity_has_unknown_room():
 
     assert found == Room(
         None,
+        "worker namespace quota sets no Pod, CPU or memory limit; "
         "worker pool unknown: a worker Pod request is not a resource quantity: 'lots', so spawns pass",
         "unknown",
     )
