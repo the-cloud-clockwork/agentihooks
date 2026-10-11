@@ -328,6 +328,22 @@ def test_drain_reports_acknowledged_material_only(supervisor, monkeypatch, clean
     assert result["child_exits"] == {"agent": 0}
     assert result["supervisor_child_exit_total"] == 2
     assert protocol.read(supervisor.root / "result.json") == result
+    launch_record = protocol.read(supervisor.root / "launch.json")
+    assert result["launch_record"] == launch_record
+    assert launch_record["authority"] == supervisor.launch.authority
+    assert launch_record["startup_seconds"] == 2
+    assert launch_record["quiesce_seconds"] == 1
+    assert launch_record["checkpoint_seconds"] == 1
+    assert launch_record["kill_seconds"] == 1
+    launch_ack = launch_record["checkpoint_acknowledgement"]
+    assert launch_ack == {
+        **supervisor.scope,
+        "status": result["checkpoint_status"],
+        "checkpoint_id": identifier,
+        "quiescence": result["quiescence"],
+        "acknowledged_at_ms": launch_ack["acknowledged_at_ms"],
+    }
+    assert type(launch_ack["acknowledged_at_ms"]) is int
     assert protocol.read(supervisor.root / "drain.json") == {
         **supervisor.scope,
         "reason": "termination",
@@ -368,6 +384,12 @@ def test_run_restores_handlers_and_returns_observed_outcome(supervisor, monkeypa
     )
     assert protocol.read(supervisor.root / "context.json") == supervisor.scope
     assert (supervisor.root.parent / "owner.lock").exists()
+    record = protocol.read(supervisor.root / "launch.json")
+    assert record["authority"] == supervisor.launch.authority
+    assert record["checkpoint_acknowledgement"] == {"status": "pending"}
+    assert record["quiesce_seconds"] == 1
+    assert record["checkpoint_seconds"] == 1
+    assert record["kill_seconds"] == 1
     assert [call.args for call in handlers.call_args_list[:3]] == [
         (sig, supervisor.signal) for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGCHLD)
     ]
