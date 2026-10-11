@@ -658,6 +658,14 @@ def test_a_profile_the_pod_policy_lacks_is_refused(tmp_path):
     assert str(refused.value) == "the Pod policy has no gpu profile"
 
 
+def test_a_worker_profile_that_runs_only_on_the_workstation_is_refused(tmp_path):
+
+    with pytest.raises(SwarmError) as refused:
+        deployed.Workers.from_environ(_workers(tmp_path, **{deployed.PROFILE_ENV: "frontend"}), SLUG)
+
+    assert str(refused.value) == f"{deployed.PROFILE_ENV} frontend runs only on the workstation"
+
+
 def test_a_pod_policy_owned_by_another_swarm_is_refused(tmp_path):
     other = tmp_path / "other-policy.json"
     other.write_text(json.dumps({**json.loads(POLICY.read_text()), "owner": "agentihooks-swarm-other"}))

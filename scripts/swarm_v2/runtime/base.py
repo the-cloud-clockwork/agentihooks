@@ -11,6 +11,7 @@ from scripts.swarm.store import AgentRecord
 LOCAL = "local"
 BACKEND_VARIABLE = "AGENTIHOOKS_RUNTIME_BACKEND"
 DISABLED_VARIABLE = "AGENTIHOOKS_RUNTIME_DISABLED"
+LOCAL_PROFILES = frozenset(("frontend",))
 
 
 class Capability(StrEnum):
@@ -55,7 +56,7 @@ class SpawnRequest:
 class Placement:
     backend: str
     lanes: frozenset[str] = frozenset(("eng", "ci"))
-    local_profiles: frozenset[str] = frozenset(("frontend",))
+    local_profiles: frozenset[str] = LOCAL_PROFILES
 
     def backend_for(self, lane: str, task: dict) -> str:
         profile = (task.get("profile_decision") or {}).get("profile") or task.get("profile")
