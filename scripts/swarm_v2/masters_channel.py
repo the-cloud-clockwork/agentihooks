@@ -3,11 +3,10 @@
 import json
 from dataclasses import asdict, dataclass
 
+from hooks.context.broadcast import MASTERS_CHANNEL_PREFIX as CHANNEL_PREFIX
 from scripts.inbox.seats import SeatRegistry
 from scripts.swarm.store import PREFIX
 from scripts.swarm_v2.masters import MasterError, MasterSeats, seats
-
-CHANNEL_PREFIX = "masters."
 
 
 @dataclass(frozen=True)

@@ -119,18 +119,50 @@ def test_channel_publish_refuses_a_masters_channel(monkeypatch):
 
             return keep
 
-    published = []
-    monkeypatch.setattr("hooks.context.broadcast.create_broadcast", lambda **kw: published.append(kw) or "id")
+    saved = _broadcast_file(monkeypatch)
     channels.register(Mcp())
 
     answer = json.loads(tools["channel_publish"]("masters.sw", "secret"))
 
-    assert answer == {
-        "success": False,
-        "error": "masters.sw is a masters channel: master seats post with agentihooks swarm sw masters-channel say",
-    }
-    assert published == []
+    assert answer == {"success": False, "error": REFUSAL}
+    assert saved == []
     assert json.loads(tools["channel_publish"]("brain", "hello"))["success"] is True
+    assert [m["channel"] for m in saved[-1]] == ["brain"]
+
+
+def _broadcast_file(monkeypatch):
+    from hooks.context import broadcast
+
+    saved = []
+    monkeypatch.setattr(broadcast, "_read_broadcasts", lambda: [])
+    monkeypatch.setattr(broadcast, "_save_broadcasts", saved.append)
+    return saved
+
+
+REFUSAL = "masters.sw is a masters channel: master seats post with agentihooks swarm sw masters-channel say"
+
+
+def test_every_broadcast_publish_refuses_a_masters_channel(monkeypatch, capsys):
+    import argparse
+
+    from hooks.context.broadcast import create_broadcast
+    from scripts import install
+
+    saved = _broadcast_file(monkeypatch)
+
+    with pytest.raises(ValueError) as refused:
+        create_broadcast("secret", channel="masters.sw")
+    assert str(refused.value) == REFUSAL
+    args = argparse.Namespace(
+        action="publish", channel_name="masters.sw", chan_message=["secret"], ttl=None, severity="info"
+    )
+    with pytest.raises(ValueError) as refused:
+        install._cmd_channel(args)
+    assert str(refused.value) == REFUSAL
+    assert capsys.readouterr().out == ""
+    assert saved == []
+    assert create_broadcast("hello", channel="ops-masters.sw")
+    assert [m["channel"] for m in saved[-1]] == ["ops-masters.sw"]
 
 
 def test_swarm_masters_channel_command_lets_masters_talk_and_refuses_the_engineer(monkeypatch, capsys):

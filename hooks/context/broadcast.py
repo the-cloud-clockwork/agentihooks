@@ -415,6 +415,9 @@ def _build_broadcast(
     return entry
 
 
+MASTERS_CHANNEL_PREFIX = "masters."
+
+
 def create_broadcast(
     message: str,
     severity: str = "info",
@@ -443,6 +446,11 @@ def create_broadcast(
     Returns:
         The 12-char message ID on success, or ``None`` for empty input.
     """
+    if channel and channel.startswith(MASTERS_CHANNEL_PREFIX):
+        slug = channel.removeprefix(MASTERS_CHANNEL_PREFIX)
+        raise ValueError(
+            f"{channel} is a masters channel: master seats post with agentihooks swarm {slug} masters-channel say"
+        )
     entry = _build_broadcast(message, severity, ttl_seconds, source, persistent, channel)
     if entry is None:
         return None
