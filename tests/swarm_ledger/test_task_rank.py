@@ -232,8 +232,9 @@ def test_the_master_setting_the_same_rank_takes_it_from_the_dispatcher():
     assert (rejected, state["_meta"]["stamps"]["tasks/t1/rank"]["by"]) == ([], MASTER)
     state, rejected = owned_rank("normal", 2)
     assert (rejected, rank_of(state)) == (["o-2"], "high")
+    held = state["_meta"]["stamps"]["tasks/t1/rank"]
     state, rejected = update(MASTER, "high", 2)
-    assert (rejected, state["_meta"]["stamps"]["tasks/t1/rank"]["by"]) == ([], MASTER)
+    assert (rejected, state["_meta"]["stamps"]["tasks/t1/rank"]) == ([], held)
 
 
 def test_the_rank_op_by_a_refused_author_changes_nothing_and_names_why():

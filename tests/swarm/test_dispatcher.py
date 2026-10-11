@@ -359,10 +359,11 @@ def test_ranks_the_operator_or_master_set_stay_untouched_while_the_dispatcher_re
     tasks = merging()
     tasks[0]["state"] = "done"
     found = stamped(tasks, {"b": "master@abcdef-0001", "c": "operator", "p": None})
+    tasks[1]["rank"] = "urgent"
     ledger = Ledger()
     dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
     assert ledger.ranks == [("q", "high", "dispatcher")]
-    assert [t.get("rank") for t in tasks[1:5]] == ["high", "high", "high", "high"]
+    assert [t.get("rank") for t in tasks[1:5]] == ["urgent", "high", "high", "high"]
 
 
 def test_an_own_rank_on_a_task_no_longer_claimable_in_focus_is_lowered(store, home, shipped):
