@@ -181,6 +181,7 @@ def test_a_local_agent_is_not_published_and_an_unregistered_one_reads_unverified
         conversation_id="c8",
     )
     store.occupants = [local, stray, remote(ENDPOINT_B, "eng-2")]
+    viewer.fresh_ms = FX["fresh_ms"] + 5_000
 
     returned = views()
 
@@ -190,7 +191,7 @@ def test_a_local_agent_is_not_published_and_an_unregistered_one_reads_unverified
         name(EXE_B): (LIVE, ENDPOINT_B.name, PANE, ""),
     }
     assert returned["engineer@a1b2c3-0008"] == View(
-        "engineer@a1b2c3-0008", "", "", UNVERIFIED, reason="unregistered", fresh_ms=FX["fresh_ms"]
+        "engineer@a1b2c3-0008", "", "", UNVERIFIED, reason="unregistered", fresh_ms=FX["fresh_ms"] + 5_000
     )
 
 

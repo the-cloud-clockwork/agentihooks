@@ -299,3 +299,15 @@ def test_detach_runs_no_herdr_command_and_forgets_every_target(tmp_path):
     assert r.viewer.views() == {}
     assert r.viewer.refresh() == {}
     assert refused(lambda: r.viewer.screen(AGENT_A))[0] == "unwatched"
+
+
+def test_forget_drops_one_target_without_a_herdr_command_and_ignores_an_unwatched_agent(tmp_path):
+    r = rig(tmp_path)
+    watch(r)
+    since = len(r.workers.commands)
+
+    r.viewer.forget(AGENT_A)
+    r.viewer.forget(AGENT_A)
+
+    assert len(r.workers.commands) == since
+    assert sorted(r.viewer.watched) == [AGENT_B]
