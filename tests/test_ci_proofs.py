@@ -1,3 +1,4 @@
+import os
 import subprocess
 from pathlib import Path
 
@@ -43,8 +44,10 @@ def test_proofs_dispatch_cannot_satisfy_required_tests():
 )
 def test_a_focused_proof_is_red_unless_every_test_path_is_on_one_line_under_tests(paths, code):
     step = next(s for s in _workflow()["jobs"]["tests"]["steps"] if s.get("name") == "Require explicit test paths")
-    result = subprocess.run(["bash", "-e", "-c", step["run"]], env={"TEST_PATHS": paths}, capture_output=True)
-    assert result.returncode == code, result.stdout
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]], env={**os.environ, "TEST_PATHS": paths}, capture_output=True
+    )
+    assert result.returncode == code, result.stdout + result.stderr
 
 
 def test_proofs_reuse_selected_mutation_and_smoke_execution():
