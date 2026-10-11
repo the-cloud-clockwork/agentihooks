@@ -1,5 +1,6 @@
 import json
 import socket
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 
@@ -14,7 +15,7 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import SpawnError
 from scripts.swarm_v2 import deployed, image_tag
 from scripts.swarm_v2.auth_context import GrantRefused
-from scripts.swarm_v2.kubernetes import operator_terminal
+from scripts.swarm_v2.kubernetes import approved, operator_terminal
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 from scripts.swarm_v2.kubernetes.client import ApiRefused
 from scripts.swarm_v2.kubernetes.grants import PodGrants
@@ -33,7 +34,7 @@ API_URL = "http://swarm-api.agentihooks-swarm.svc:8780"
 IMAGE = "sha256:" + "4b" * 32
 REPOSITORY = "ghcr.io/the-cloud-clockwork/agentihooks-worker"
 PROJECT = "github.com/the-cloud-clockwork/agentihooks"
-ACCOUNT = "claude-fixture@example.com"
+ACCOUNT = "claude-fixtureatexample-com"
 POLICY = Path(__file__).parent / "fixtures" / "swarm_v2" / "pod-policy.json"
 
 
@@ -44,9 +45,13 @@ def _cs():
 
 
 class Pods:
-    def __init__(self, namespace):
+    def __init__(self, namespace, keys=(ACCOUNT,)):
         self.namespace, self.created, self.maps, self.nodes_read = namespace, [], [], 0
-        self.objects = []
+        self.objects, self.keys, self.reads = [], keys, []
+
+    def read(self, kind, name):
+        self.reads.append((kind, name))
+        return {"metadata": {"name": name}, "data": dict.fromkeys(self.keys, "dG9rZW4=")}
 
     def create_pod(self, body):
         self.created.append(body)
@@ -91,7 +96,7 @@ def _free_port():
 
 def _policy(tmp_path, owner=owner_for(SLUG)):
     path = tmp_path / "pod-policy.json"
-    path.write_text(json.dumps({**json.loads(POLICY.read_text()), "owner": owner}))
+    path.write_text(json.dumps({**json.loads(POLICY.read_text()), "owner": owner, "provider_accounts": []}))
     return path
 
 
@@ -113,7 +118,6 @@ def _workers(tmp_path, **changes):
         deployed.POLICY_ENV: str(_policy(tmp_path)),
         deployed.IMAGE_TAG_ENV: "dev",
         deployed.PROFILE_ENV: "general",
-        deployed.ACCOUNT_ENV: ACCOUNT,
         deployed.CAP_ENV: "2",
         deployed.PROJECTS_ENV: f" {PROJECT} ,",
         deployed.BRAIN_ENV: "swarm",
@@ -172,10 +176,14 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
     launcher = runtime.launch.func.__self__
     assert isinstance(launcher, DistributedLaunch)
     assert runtime.launch.func == launcher.from_tick
-    assert apis == [(API_URL, "swarm-pod-proof"), (API_URL, "swarm-pod-proof")]
+    assert apis == [(API_URL, "swarm-pod-proof")] * 3
     assert isinstance(launcher.homes, PodGrants)
     assert (launcher.homes.api, launcher.homes.owner) == (pods, owner_for(SLUG))
     assert (launcher.capacity.slug, launcher.fleet.slug) == (SLUG, SLUG)
+    route = launcher.accounts.__self__
+    assert isinstance(route, approved.AccountRoute)
+    assert route.keys.api is pods
+    assert route.quota.slug == SLUG
     for authorize in (launcher.capacity.authorize, launcher.fleet.authorize):
         with pytest.raises(GrantRefused) as refused:
             authorize("not-a-grant")
@@ -187,7 +195,7 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
     )
     workers = runtime.launch.keywords["target"].__self__
     assert runtime.launch.keywords == {
-        "terms": LaunchTerms(ACCOUNT, 2, 300_000, (PROJECT,), "swarm", API_URL),
+        "terms": LaunchTerms("", 2, 300_000, (PROJECT,), "swarm", API_URL),
         "target": workers.target,
     }
     assert store.config(SLUG).api_url == API_URL
@@ -197,8 +205,80 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
     admitted = store.execution(SLUG, execution)
     assert (admitted.seat, admitted.runtime_backend) == (SEAT, BACKEND)
     assert admitted.runtime_target == {"pod_namespace": "swarm-pod-proof", "pod_name": "swarm-t1"}
+    assert admitted.account == pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == ACCOUNT
+    assert ("secrets", "swarm-claude-creds") in pods.reads
     assert pods.nodes_read == 1
     assert lease.current(store, SLUG) is None
+
+
+def _launch_record(workers, account):
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=API_URL)
+    task = {
+        "id": "t1",
+        "seat": SEAT,
+        "controller_epoch": 4,
+        "execution_id": "exe-" + "1" * 32,
+        "generation": 1,
+        "endpoints": {"api_url": API_URL},
+        "account": account,
+    }
+    record = workers.launch(SpawnRequest(config, "eng", "engineer-1", task))
+    return {**record, "execution_id": task["execution_id"], "generation": 1}
+
+
+def test_the_worker_pod_admits_a_launch_account_the_shared_secret_holds_and_refuses_one_it_lacks(tmp_path, monkeypatch):
+    pods = Pods("swarm-pod-proof", keys=("codex-fixtureatexample-com",))
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: pods)
+    workers = deployed.Workers.from_environ(_workers(tmp_path), SLUG)
+    template = workers.transport({}, SLUG).template
+    record = _launch_record(workers, ACCOUNT)
+
+    with pytest.raises(PodSpecRefused) as refused:
+        template.render(record)
+    assert (str(refused.value), refused.value.reason) == (
+        "launch provider_account is not an approved provider account",
+        "account",
+    )
+
+    pods.keys = ("codex-fixtureatexample-com", ACCOUNT)
+    rendered = template.render(record)
+    assert rendered.pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == ACCOUNT
+    assert pods.reads == [("secrets", "swarm-claude-creds")] * 2
+
+
+def test_a_tick_launch_with_no_key_in_the_shared_secret_is_refused_before_any_pod(tmp_path, monkeypatch):
+    store = _store()
+    pods = Pods("swarm-pod-proof", keys=())
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: pods)
+    service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    try:
+        task = {"id": "t1", "seat": SEAT, "controller_epoch": service.controller.held.epoch}
+        with pytest.raises(SpawnError) as refused:
+            service.runtime.spawn(store.config(SLUG), "eng", store.next_name(SLUG, "eng"), task)
+    finally:
+        service.stop()
+
+    assert str(refused.value) == "no approved account has quota and a free launch slot"
+    assert pods.created == []
+    assert store.executions(SLUG, SEAT) == []
+
+
+def test_a_pod_policy_that_names_a_provider_account_is_refused(tmp_path):
+    path = tmp_path / "named-pod-policy.json"
+    path.write_text(json.dumps({**json.loads(_policy(tmp_path).read_text()), "provider_accounts": ["a@example.com"]}))
+
+    with pytest.raises(SwarmError) as refused:
+        deployed.Workers.from_environ(_workers(tmp_path, **{deployed.POLICY_ENV: str(path)}), SLUG)
+
+    assert str(refused.value) == (
+        "the Pod policy must name no provider account: the approved accounts are the keys of Secret swarm-claude-creds"
+    )
+
+
+def test_the_worker_settings_take_no_launch_account(tmp_path):
+    workers = deployed.Workers.from_environ(_workers(tmp_path), SLUG)
+    assert workers.terms.account == ""
+    assert "AGENTIHOOKS_LAUNCH_ACCOUNT" not in deployed.REQUIRED
 
 
 def _task(execution="1"):
@@ -301,6 +381,7 @@ def test_the_launch_record_names_the_admitted_execution_and_the_worker_settings(
         "generation": 1,
         "endpoints": {"api_url": API_URL},
         "launch_grant": "never-copied",
+        "account": ACCOUNT,
     }
     record = workers.launch(SpawnRequest(config, "eng", "engineer-1", task))
 
@@ -443,7 +524,7 @@ def test_a_kubernetes_launch_puts_its_grant_in_the_pod_launch_material_and_recor
         agent = AgentRecord(
             request.name, "eng", "t1", seat=SEAT, runtime_backend=BACKEND, runtime_target=target, profile="engineer"
         )
-        launch = launcher.spawn(request, agent, runtime.launch.keywords["terms"], "")
+        launch = launcher.spawn(request, agent, replace(runtime.launch.keywords["terms"], account=ACCOUNT), "")
         claims = service.grants.verify(SLUG, pods.maps[0]["data"]["launch-grant"])
     finally:
         service.stop()
@@ -503,7 +584,7 @@ def test_the_exporter_worker_setting_reaches_the_launch_record(tmp_path, monkeyp
         request = SpawnRequest(store.config(SLUG), "eng", store.next_name(SLUG, "eng"), task)
         target = runtime.launch.keywords["target"](request)
         agent = AgentRecord(request.name, "eng", "t1", seat=SEAT, runtime_backend=BACKEND, runtime_target=target)
-        launch = launcher.spawn(request, agent, runtime.launch.keywords["terms"], "")
+        launch = launcher.spawn(request, agent, replace(runtime.launch.keywords["terms"], account=ACCOUNT), "")
     finally:
         service.stop()
 
@@ -553,7 +634,7 @@ def _spawn(tmp_path, monkeypatch, **changes):
         request = SpawnRequest(store.config(SLUG), "eng", store.next_name(SLUG, "eng"), task)
         target = runtime.launch.keywords["target"](request)
         agent = AgentRecord(request.name, "eng", "t1", seat=SEAT, runtime_backend=BACKEND, runtime_target=target)
-        launch = launcher.spawn(request, agent, runtime.launch.keywords["terms"], "")
+        launch = launcher.spawn(request, agent, replace(runtime.launch.keywords["terms"], account=ACCOUNT), "")
         claims = service.grants.verify(SLUG, pods.maps[0]["data"]["launch-grant"])
     finally:
         service.stop()
