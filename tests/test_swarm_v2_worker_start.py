@@ -1,6 +1,10 @@
+import functools
+import http.client
+import importlib.util
 import json
 import os
 import stat
+import subprocess
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -10,7 +14,7 @@ import pytest
 
 from scripts.swarm_v2 import worker_home
 from scripts.swarm_v2.broadcast_bridge import API_URL, GRANT_NAME
-from scripts.swarm_v2.supervision import LaunchRefused
+from scripts.swarm_v2.supervision import Launch, LaunchRefused
 from scripts.swarm_v2.worker import start
 
 pytestmark = pytest.mark.unit
@@ -151,6 +155,8 @@ def test_a_controller_busy_on_every_attempt_refuses_the_start(tmp_path):
         ({**RECORD, "control_url": "file:///etc/passwd"}, "invalid control url"),
         ({**RECORD, "control_url": "http://"}, "invalid control url"),
         ({**RECORD, "control_url": 8780}, "invalid control url"),
+        ({**RECORD, "control_url": CONTROL + "/"}, "invalid control url"),
+        ({**RECORD, "control_url": "http://controller.swarm.invalid:port"}, "invalid control url"),
     ],
 )
 def test_a_malformed_launch_record_refuses_before_anything_is_written(tmp_path, record, message):
@@ -299,3 +305,119 @@ def test_post_reports_an_unreachable_controller_as_busy(server):
     closed = server.rsplit(":", 1)[0] + ":1"
 
     assert start.post(closed, GRANT, {}) == (503, {})
+
+
+def test_an_https_control_url_reaches_the_controller_and_the_worker_settings(tmp_path):
+    secure = "https://controller.swarm.invalid"
+    controller = Controller((200, ANSWER))
+
+    boot = prepare(tmp_path, material(tmp_path, {**RECORD, "control_url": secure}), controller)
+
+    assert controller.calls[0][0] == secure
+    assert boot.requests[0].endpoints == {API_URL: secure}
+
+
+def test_a_stale_staged_record_never_loosens_the_registration_record(tmp_path):
+    staged = tmp_path / "attempts" / EXECUTION / "registration.json.tmp"
+    staged.parent.mkdir(parents=True)
+    staged.write_text("stale")
+    staged.chmod(0o644)
+
+    prepare(tmp_path, material(tmp_path), Controller((200, ANSWER)), lambda request: {})
+
+    record = staged.with_name("registration.json")
+    assert stat.S_IMODE(record.stat().st_mode) == 0o600
+    assert json.loads(record.read_text()) == AUTHORITY
+    assert not staged.exists()
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (OSError("disk full"), "disk full"),
+        (KeyError("homes"), "'homes'"),
+        (TypeError("bad record"), "bad record"),
+        (subprocess.TimeoutExpired("python", 30), "Command 'python' timed out after 30 seconds"),
+    ],
+)
+def test_any_start_failure_refuses_without_the_supervisor(monkeypatch, capsys, error, message):
+    def broken(attempt, launch):
+        raise error
+
+    monkeypatch.setattr(start.os, "umask", lambda mask: 0o022)
+    monkeypatch.setattr(start, "prepare", broken)
+    monkeypatch.setattr(start.supervision_runtime, "main", lambda argv: pytest.fail("supervisor ran"))
+
+    assert start.main(["a", "b"]) == 64
+
+    assert tuple(capsys.readouterr()) == ("", f"ERROR worker start refused: {message}\n")
+
+
+def test_post_waits_at_most_its_timeout_for_the_controller(monkeypatch):
+    seen = []
+
+    def unreachable(request, timeout):
+        seen.append(timeout)
+        raise ConnectionRefusedError("refused")
+
+    monkeypatch.setattr(start.urllib.request, "urlopen", unreachable)
+
+    assert start.post(CONTROL, GRANT, {}) == (503, {})
+    assert seen == [10]
+
+
+def test_post_reports_a_broken_http_answer_as_busy(monkeypatch):
+    def broken(request, timeout):
+        raise http.client.BadStatusLine("garbage")
+
+    monkeypatch.setattr(start.urllib.request, "urlopen", broken)
+
+    assert start.post(CONTROL, GRANT, {}) == (503, {})
+
+
+class Bootstrap(Boot):
+    def __call__(self, request: worker_home.Request) -> dict:
+        super().__call__(request)
+        attempt = request.root / request.attempt
+        (attempt / "homes" / "claude").mkdir(parents=True)
+        record = {"attempt": request.attempt, "homes": {"claude": "homes/claude"}}
+        (attempt / "execution.json").write_text(json.dumps(record))
+        return record
+
+
+@pytest.fixture
+def umask():
+    previous = os.umask(0o022)
+    yield
+    os.umask(previous)
+
+
+def test_the_started_supervisor_loads_a_prepared_attempt_only_the_worker_can_read(tmp_path, monkeypatch, capsys, umask):
+    launch = material(tmp_path)
+    attempt = tmp_path / "attempts" / EXECUTION
+    controller = Controller((200, ANSWER))
+    loaded = []
+    prepared = functools.partial(start.prepare, send=controller.send, sleep=controller.sleep, boot=Bootstrap())
+    monkeypatch.setattr(start, "prepare", prepared)
+    monkeypatch.setattr(
+        start.supervision_runtime, "main", lambda argv: loaded.append(Launch.load(*map(Path, argv))) or 70
+    )
+
+    assert start.main([str(attempt), str(launch)]) == 70
+
+    [run] = loaded
+    assert (run.authority, run.harness, run.home) == (AUTHORITY, "claude", attempt.resolve() / "homes" / "claude")
+    for path in (attempt / "execution.json", attempt / "registration.json", attempt / "run" / GRANT_NAME):
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600, path
+    assert stat.S_IMODE(attempt.parent.stat().st_mode) == 0o700
+    printed = {"worker_start": "prepared", "attempt": EXECUTION, "uid": os.getuid()}
+    assert capsys.readouterr().out == json.dumps(printed) + "\n"
+
+
+def test_the_image_supervisor_entry_is_the_worker_start_step():
+    entry = Path(__file__).resolve().parents[1] / "docker" / "swarm-node" / "supervisor.py"
+    spec = importlib.util.spec_from_file_location("swarm_node_supervisor", entry)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.main is start.main

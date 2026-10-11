@@ -322,6 +322,7 @@ from scripts.swarm_v2.kubernetes.grants import PodGrants, Supervision
 from scripts.swarm_v2.kubernetes.runtime import GENERATION_LABEL
 from scripts.swarm_v2.kubernetes.spec import ATTEMPTS, LAUNCH_DIR, LAUNCH_RECORD, launch_volume, pod_name
 from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL, OWNER_LABEL, owner_for
+from scripts.swarm_v2.worker.start import TEMPLATES
 
 access = json.load(sys.stdin)
 env = dict(os.environ)
@@ -350,6 +351,7 @@ agent = probe.controller.admit(record, "")
 grant = probe.grants.issue(
     slug, agent.execution_id, project_ids=["github.com/the-cloud-clockwork/agentihooks"], brain_id="swarm", account="kind"
 )
+seed = f"import profiles, shutil; from pathlib import Path; shutil.copytree(Path(profiles.__file__).parent, {str(TEMPLATES)!r}, dirs_exist_ok=True)"
 name = pod_name(agent.execution_id)
 labels = {
     OWNER_LABEL: owner_for(slug),
@@ -365,14 +367,25 @@ api.create_pod({
         "restartPolicy": "Never",
         "automountServiceAccountToken": False,
         "securityContext": {"runAsNonRoot": True, "runAsUser": 10001, "runAsGroup": 10001, "fsGroup": 10001},
+        "initContainers": [{
+            "name": "templates",
+            "image": env["IMAGE"],
+            "imagePullPolicy": "Never",
+            "command": ["python", "-c", seed],
+            "volumeMounts": [{"name": "templates", "mountPath": str(TEMPLATES)}],
+        }],
         "containers": [{
             "name": "worker",
             "image": env["IMAGE"],
             "imagePullPolicy": "Never",
-            "args": ["python", "/opt/swarm-node/supervisor.py", f"{ATTEMPTS}/{agent.execution_id}", f"{LAUNCH_DIR}/{LAUNCH_RECORD}"],
-            "volumeMounts": [{"name": "launch", "mountPath": LAUNCH_DIR, "readOnly": True}],
+            "args": ["python", "-m", "scripts.swarm_v2.worker.start", f"{ATTEMPTS}/{agent.execution_id}", f"{LAUNCH_DIR}/{LAUNCH_RECORD}"],
+            "volumeMounts": [
+                {"name": "launch", "mountPath": LAUNCH_DIR, "readOnly": True},
+                {"name": "home", "mountPath": "/home/worker"},
+                {"name": "templates", "mountPath": str(TEMPLATES), "readOnly": True},
+            ],
         }],
-        "volumes": [launch_volume(agent.execution_id)],
+        "volumes": [launch_volume(agent.execution_id), {"name": "home", "emptyDir": {}}, {"name": "templates", "emptyDir": {}}],
     },
 })
 handed = PodGrants(api, slug, lambda token: probe.grants.verify(slug, token), Supervision("claude", None, env["CONTROL_URL"])).hand(agent, grant)
@@ -412,13 +425,14 @@ for _ in $(seq 120); do
 done
 supervised="$(kubectl logs "$worker_pod" || true)"
 exit_code="$(kubectl get pod "$worker_pod" -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}')"
-if [[ $phase != Succeeded && $phase != Failed ]] || [[ $exit_code == 64 || $supervised == *"refused"* ]]; then
+if [[ $phase != Succeeded && $phase != Failed ]] || [[ $exit_code == 64 || $supervised == *"ERROR "*"refused"* ]]; then
   kubectl describe pod "$worker_pod"
   printf 'the worker Pod start step did not hand a prepared attempt to its supervisor (phase %s, exit %s): %s\n' "$phase" "$exit_code" "$supervised" >&2
   exit 1
 fi
 execution="${worker_pod#swarm-}"
-if [[ $supervised != *'"execution_id": "'"$execution"'"'* || $supervised != *'"supervisor_pid":'* ]]; then
+prepared='{"worker_start": "prepared", "attempt": "'"$execution"'", "uid": 10001}'
+if [[ $supervised != *"$prepared"* || $supervised != *'"execution_id": "'"$execution"'"'* || $supervised != *'"supervisor_pid":'* ]]; then
   printf 'the worker supervisor did not run against the registered authority: %s\n' "$supervised" >&2
   exit 1
 fi

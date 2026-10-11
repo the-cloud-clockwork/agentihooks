@@ -8,12 +8,14 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from http.client import HTTPException
 from pathlib import Path
+from subprocess import SubprocessError
 from urllib.parse import urlsplit
 
 from scripts.swarm_v2 import supervision_runtime, worker_home
 from scripts.swarm_v2.broadcast_bridge import API_URL, GRANT_NAME
-from scripts.swarm_v2.supervision import SCHEMA_VERSION, LaunchRefused, _authority
+from scripts.swarm_v2.supervision import SCHEMA_VERSION, LaunchRefused, checked_authority
 
 TEMPLATES = Path("/opt/agentihooks/templates")
 PROFILE = "default"
@@ -36,7 +38,7 @@ def post(url: str, grant: str, body: dict) -> tuple[int, object]:
             status, text = answer.status, answer.read()
     except urllib.error.HTTPError as error:
         return error.code, {}
-    except OSError:
+    except (OSError, HTTPException):
         return BUSY, {}
     try:
         return status, json.loads(text)
@@ -51,13 +53,24 @@ def _launch(path: Path) -> dict:
         raise LaunchRefused("missing or unreadable launch record") from None
     if not isinstance(spec, dict) or spec.get("schema_version") != SCHEMA_VERSION:
         raise LaunchRefused("unsupported launch")
-    _authority(spec.get("authority"))
+    checked_authority(spec.get("authority"))
     if spec.get("harness") not in worker_home.TARGETS:
         raise LaunchRefused("unsupported harness")
-    url = spec.get("control_url")
-    if not isinstance(url, str) or urlsplit(url).scheme not in ("http", "https") or not urlsplit(url).hostname:
-        raise LaunchRefused("invalid control url")
+    _control_url(spec.get("control_url"))
     return spec
+
+
+def _control_url(url: object) -> None:
+    refused = LaunchRefused("invalid control url")
+    if not isinstance(url, str) or url.endswith("/"):
+        raise refused
+    try:
+        parts = urlsplit(url)
+        parts.port
+    except ValueError:
+        raise refused from None
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise refused
 
 
 def _grant(folder: Path) -> str:
@@ -87,7 +100,8 @@ def register(spec: dict, grant: str, send: Send, sleep: Callable[[float], None])
 
 def _private(path: Path, document: dict) -> None:
     staged = path.with_name(f"{path.name}.tmp")
-    with os.fdopen(os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as handle:
+    staged.unlink(missing_ok=True)
+    with os.fdopen(os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as handle:
         json.dump(document, handle, sort_keys=True)
     staged.replace(path)
 
@@ -130,9 +144,10 @@ def main(argv: list[str] | None = None) -> int:
     os.umask(0o077)
     try:
         prepare(Path(args[0]), Path(args[1]))
-    except (OSError, ValueError) as refused:
+    except (OSError, ValueError, KeyError, TypeError, SubprocessError) as refused:
         print(f"ERROR worker start refused: {refused}", file=sys.stderr)
         return 64
+    print(json.dumps({"worker_start": "prepared", "attempt": Path(args[0]).name, "uid": os.getuid()}), flush=True)
     return supervision_runtime.main(args)
 
 
