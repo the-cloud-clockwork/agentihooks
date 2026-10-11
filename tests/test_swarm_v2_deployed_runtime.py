@@ -152,7 +152,15 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
     store = _store()
     for name, value in {**_environ(tmp_path, store), "SWARM_HIVE_ID": "hive-fixture"}.items():
         monkeypatch.setenv(name, value)
-    pods, hosted, seen, apis = Pods("swarm-pod-proof"), [], [], []
+    pods, hosted, seen, apis, launches = Pods("swarm-pod-proof"), [], [], [], []
+    real_launch = deployed.Workers.launch
+
+    def launch(workers, request):
+        payload = real_launch(workers, request)
+        launches.append(payload)
+        return payload
+
+    monkeypatch.setattr(deployed.Workers, "launch", launch)
     monkeypatch.setattr(
         deployed,
         "pod_api",
@@ -225,8 +233,8 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
     assert admitted.account == pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == ACCOUNT
     assert admitted.profile == profile
     assert pod["metadata"]["annotations"]["swarm.agentihooks.io/profile"] == "general"
-    operation = store.operation_journal.records(SLUG)[0]
-    assert operation.payload["task_payload"]["profile"] == profile
+    assert launches[0]["profile"] == "general"
+    assert launches[0]["task_payload"]["profile"] == profile
     assert json.loads(pods.maps[0]["data"]["launch.json"])["profile"] == profile
     assert ("secrets", "swarm-claude-accounts") in pods.reads
     assert pods.nodes_read == 1
