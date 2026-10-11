@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -94,7 +95,7 @@ def test_liveness_is_shallow_and_reads_no_dependency(store, server):
     assert checker.live() == {
         "probe": "shallow",
         "status": "live",
-        "pid": checker.pid,
+        "pid": os.getpid(),
         "started_at_ms": NOW,
         "checked_at_ms": NOW + 250,
         "qualifies": [],
@@ -191,25 +192,83 @@ def test_a_heartbeat_without_an_advance_time_counts_from_its_acceptance(store):
 
 def test_an_occupant_without_a_heartbeat_has_no_archive_entry(store):
     occupant(store)
-    assert make(store).diagnose()["pipeline"]["archive"] == []
+    beating = occupant(store, "eng-2@fixture", "other")
+    heartbeat(store, beating, NOW)
+    entries = make(store).diagnose()["pipeline"]["archive"]
+    assert [entry["execution_id"] for entry in entries] == [beating.execution_id]
+
+
+def test_an_absent_lease_is_a_standby_hint(store):
+    report = make(store, Probe(), Controller(None)).diagnose()
+    assert report["remediation"] == [
+        {
+            "component": "process",
+            "condition": "lease_absent",
+            "class": "controller_standby",
+            "hint": health.HINTS[("process", "lease_absent")][1],
+            "automatic": False,
+        }
+    ]
+    assert health.HINTS[("process", "lease_absent")] == (
+        "controller_standby",
+        "This controller holds no swarm lease, so it admits and recovers nothing; check which controller holds it.",
+    )
+
+
+def test_the_issued_cache_keeps_exactly_its_limit(store):
+    checker = make(store)
+    first = checker.diagnose()
+    for _ in range(health.ISSUED_LIMIT - 1):
+        checker.diagnose()
+    assert checker.qualify(first, "backup")["qualified"] is True
+    assert len(checker.issued) == health.ISSUED_LIMIT
+
+
+def test_a_report_with_reordered_keys_still_qualifies(store):
+    checker = make(store)
+    report = checker.diagnose()
+    reordered = dict(reversed(list(report.items())))
+    assert checker.qualify(reordered, "backup")["report_id"] == report["report_id"]
+
+
+def test_an_execution_scoped_report_cannot_qualify_backup(store):
+    agent = occupant(store)
+    heartbeat(store, agent, NOW, 5, "working", NOW)
+    checker = make(store)
+    report = checker.diagnose(agent.execution_id)
+    with pytest.raises(health.HealthRefused) as refused:
+        checker.qualify(report, "backup")
+    assert refused.value.reason == "pipeline_not_ok"
+    assert checker.qualify(report, "native_resume", agent.execution_id)["qualified"] is True
 
 
 @pytest.mark.parametrize(
-    ("record", "expected"),
+    ("record", "exported", "expected"),
     [
-        ({}, {"state": "disabled", "watermark": 4, "backlog": 0}),
-        ({"state": "ok"}, {"state": "ok", "watermark": 4, "backlog": 2}),
-        ({"state": "degraded"}, {"state": "degraded", "watermark": 4, "backlog": 2}),
+        ({}, 4, {"state": "disabled", "watermark": 4, "backlog": 0}),
+        ({"state": "ok"}, 4, {"state": "ok", "watermark": 4, "backlog": 2}),
+        ({"state": "ok"}, None, {"state": "ok", "watermark": 0, "backlog": 6}),
+        ({"state": "degraded"}, 4, {"state": "degraded", "watermark": 4, "backlog": 2}),
     ],
 )
-def test_the_transition_export_stage_reports_its_durable_watermark(store, record, expected):
+def test_the_transition_export_stage_reports_its_durable_watermark(store, record, exported, expected):
     store.redis.set(store.key(SLUG, telemetry.SEQUENCE), 6)
-    store.redis.set(store.key(SLUG, telemetry.EXPORTED), 4)
+    if exported is not None:
+        store.redis.set(store.key(SLUG, telemetry.EXPORTED), exported)
     if record:
-        store.redis.hset(store.key(SLUG, telemetry.OBSERVABILITY), mapping=record)
+        store.redis.hset(
+            store.key(SLUG, telemetry.OBSERVABILITY),
+            mapping={**record, "exported_at_ms": 7, "failed_at_ms": 8, "last_error": "E: x"},
+        )
     stage = make(store).diagnose()["pipeline"]["transition_export"]
-    assert {name: stage[name] for name in expected} == expected
-    assert stage["observed_at_ms"] == NOW
+    seen = (7, 8, "E: x") if record else (0, 0, "")
+    assert stage == {
+        **expected,
+        "exported_at_ms": seen[0],
+        "failed_at_ms": seen[1],
+        "last_error": seen[2],
+        "observed_at_ms": NOW,
+    }
 
 
 def test_remediation_is_classified_ordered_and_never_automatic(store, server):
@@ -282,7 +341,7 @@ def test_a_dependency_error_is_sanitized(store, monkeypatch):
     def refuse():
         raise ConnectionError(f"refused with {secret}")
 
-    monkeypatch.setattr(store.redis, "ping", refuse)
+    monkeypatch.setattr(store.redis, "hgetall", refuse)
     reason = make(store).diagnose()["dependencies"]["redis"]["reason"]
     assert reason == "ConnectionError: refused with [redacted]"
 
@@ -349,6 +408,16 @@ def test_native_resume_needs_the_named_execution_entry(store):
 @pytest.mark.parametrize(("value", "expected"), [("off", False), ("OFF", False), ("on", True), ("", True)])
 def test_deep_checks_switch_off_only_by_the_setting(value, expected):
     assert health.deep_enabled({health.DEEP_ENV: value}) is expected
+    assert health.deep_enabled({}) is True
+
+
+def test_the_brain_probe_passes_the_environment_and_timeout(monkeypatch):
+    from scripts.swarm_v2 import worker_health
+
+    seen = []
+    monkeypatch.setattr(worker_health, "brain_state", lambda environ, timeout: seen.append((environ, timeout)) or "ok")
+    assert health.brain_probe({"BRAIN_URL": "http://brain"}, 1.5)() == "ok"
+    assert seen == [({"BRAIN_URL": "http://brain"}, 1.5)]
 
 
 def test_pipeline_stage_health_counts_states_per_stage():
@@ -379,7 +448,7 @@ class Grants:
 def operator(slug, credential):
     from scripts.swarm_v2.operator_auth import OPERATOR
 
-    return OPERATOR if credential == "operator" else None
+    return OPERATOR if (slug, credential) == (SLUG, "operator") else None
 
 
 @pytest.fixture
@@ -397,16 +466,27 @@ def test_the_live_route_needs_no_credential(api):
     [("POST", health.LIVE_PATH), ("GET", "/v2/health/other"), ("GET", health.QUALIFY_PATH)],
 )
 def test_an_unknown_health_route_is_not_found(api, method, path):
-    assert api.route(method, path, "Bearer operator", None)[0] == 404
+    assert api.route(method, path, "Bearer operator", None) == (
+        404,
+        {
+            "error_class": "invalid_request",
+            "operation_id": "unknown",
+            "retry": "new_request",
+            "message": "no such health endpoint",
+        },
+    )
 
 
 @pytest.mark.parametrize(
     ("authorization", "status", "error"),
-    [("None", 401, "unauthenticated"), ("Bearer stranger", 401, "unauthenticated")],
+    [
+        ("None", 401, "a bearer credential is required"),
+        ("Bearer stranger", 401, "launch grant is not registered"),
+    ],
 )
 def test_diagnostics_need_a_credential(api, authorization, status, error):
     found, reply = api.route("GET", health.DIAGNOSE_PATH, authorization, None)
-    assert (found, reply["error_class"]) == (status, error)
+    assert (found, reply["error_class"], reply["message"]) == (status, "unauthenticated", error)
 
 
 def test_a_worker_grant_reads_its_own_execution_scope(api):
@@ -447,20 +527,70 @@ def test_switched_off_deep_checks_answer_unavailable_and_keep_liveness(store):
 @pytest.mark.parametrize("body", [None, [], {"purpose": "backup"}, {"purpose": 1, "report": {}}])
 def test_a_malformed_qualify_request_is_invalid(api, body):
     status, reply = api.route("POST", health.QUALIFY_PATH, "Bearer operator", body)
-    assert (status, reply["error_class"]) == (400, "invalid_request")
+    assert (status, reply["error_class"], reply["message"]) == (
+        400,
+        "invalid_request",
+        "a qualify request needs a purpose, a report and an execution id",
+    )
 
 
 def test_qualify_answers_the_gate_decision(api):
     report = api.health.diagnose()
     status, reply = api.route("POST", health.QUALIFY_PATH, "Bearer operator", {"purpose": "backup", "report": report})
-    assert (status, reply["qualified"]) == (200, True)
+    assert (status, reply) == (
+        200,
+        {
+            "purpose": "backup",
+            "qualified": True,
+            "execution_id": "",
+            "report_id": report["report_id"],
+            "checked_at_ms": NOW,
+        },
+    )
+
+
+def test_qualify_resumes_the_execution_named_in_the_request(api, store):
+    agent = occupant(store)
+    heartbeat(store, agent, NOW, 5, "working", NOW)
+    report = api.health.diagnose()
+    body = {"purpose": "native_resume", "report": report, "execution_id": agent.execution_id}
+    status, reply = api.route("POST", health.QUALIFY_PATH, "Bearer operator", body)
+    assert (status, reply["execution_id"]) == (200, agent.execution_id)
+
+
+def test_a_refused_qualify_names_its_reason_and_message(api):
+    live = api.health.live()
+    status, reply = api.route("POST", health.QUALIFY_PATH, "Bearer operator", {"purpose": "backup", "report": live})
+    assert (status, reply) == (
+        409,
+        {
+            "error_class": "not_qualified",
+            "reason": "shallow_report",
+            "message": "a shallow liveness report cannot qualify backup or native resume",
+        },
+    )
+
+
+def test_a_worker_grant_cannot_qualify(api):
+    report = api.health.diagnose()
+    status, reply = api.route("POST", health.QUALIFY_PATH, "Bearer worker", {"purpose": "backup", "report": report})
+    assert (status, reply["error_class"], reply["message"]) == (
+        403,
+        "forbidden_scope",
+        "only the operator can qualify backup or native resume",
+    )
 
 
 def test_routes_send_health_paths_to_the_health_api(api):
     from scripts.swarm_v2.api.server import Routes
 
-    routes = Routes(None, None, health=api)
+    class Executions:
+        def route(self, method, path, authorization, body):
+            return 404, {"path": path}
+
+    routes = Routes(Executions(), None, health=api)
     assert routes.route("GET", health.LIVE_PATH, "None", None)[0] == 200
+    assert routes.route("GET", "/v2/executions/x", "None", None) == (404, {"path": "/v2/executions/x"})
 
 
 def test_routes_without_a_tasks_api_answer_task_paths_from_executions():
@@ -491,6 +621,23 @@ def test_the_heartbeat_records_when_the_archive_watermark_last_advanced(monkeypa
     world.put(agent.execution_id, token, world.beat(agent, 4, archive_watermark=6))
     raw = world.store.redis.hget(world.store.key("fixture", "heartbeats"), agent.execution_id)
     assert json.loads(raw)["archive_advanced_at_ms"] == started + 30
+
+
+def test_a_heartbeat_over_a_record_without_an_advance_time_keeps_its_acceptance(monkeypatch):
+    from tests.sv2_ldg02_cases import World
+
+    world = World(monkeypatch)
+    agent, token = world.start()
+    assert world.register(agent, token)[0] == 200
+    started = world.clock[0]
+    world.put(agent.execution_id, token, world.beat(agent, 1, archive_watermark=5))
+    key = world.store.key("fixture", "heartbeats")
+    legacy = json.loads(world.store.redis.hget(key, agent.execution_id))
+    del legacy["archive_advanced_at_ms"]
+    world.store.redis.hset(key, agent.execution_id, json.dumps(legacy))
+    world.clock[0] += 10
+    world.put(agent.execution_id, token, world.beat(agent, 2, archive_watermark=5))
+    assert json.loads(world.store.redis.hget(key, agent.execution_id))["archive_advanced_at_ms"] == started
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])

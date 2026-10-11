@@ -89,7 +89,7 @@ class Limits:
 
 
 def deep_enabled(environ: Mapping[str, str] = os.environ) -> bool:
-    return environ.get(DEEP_ENV, "").lower() != "off"
+    return str(environ.get(DEEP_ENV)).lower() != "off"
 
 
 def brain_probe(environ: Mapping[str, str], timeout: float = worker_health.BRAIN_TIMEOUT) -> Callable[[], str]:
@@ -158,11 +158,9 @@ class Health:
         )
         self.pid = os.getpid()
         self.started_ms = self._now()
-        self.dependencies = {
-            name: {"state": UNKNOWN, "reason": "", "checked_at_ms": 0, "last_ok_at_ms": 0}
-            for name in ("redis", "brain")
-        }
-        self.readings: dict = {}
+        self.dependencies = {name: {"last_ok_at_ms": 0} for name in ("redis", "brain")}
+        self.brain_at: int | None = None
+        self.readings: dict | None = None
         self.issued: dict[str, str] = {}
         self.lock = threading.Lock()
 
@@ -182,7 +180,7 @@ class Health:
     def diagnose(self, execution_id: str = "") -> dict:
         now = self._now()
         self._check_brain(now)
-        pipeline = self._pipeline(now) if self._check_redis(now) else self._last_readings()
+        pipeline = self._pipeline(now)
         if execution_id:
             pipeline = {"archive": [e for e in pipeline["archive"] if e["execution_id"] == execution_id]}
         process = self._process()
@@ -221,7 +219,7 @@ class Health:
         if purpose == NATIVE_RESUME:
             ready = any(e["execution_id"] == execution_id and e["state"] == OK for e in archive)
         else:
-            export = report["pipeline"].get("transition_export", {}).get("state", UNKNOWN)
+            export = report["pipeline"].get("transition_export", {}).get("state")
             ready = export in (OK, DISABLED) and all(e["state"] == OK for e in archive)
         if not ready:
             raise HealthRefused("pipeline_not_ok")
@@ -239,32 +237,25 @@ class Health:
         if state == OK:
             found["last_ok_at_ms"] = now
 
-    def _check_redis(self, now: int) -> bool:
-        try:
-            self.store.redis.ping()
-        except Exception as error:
-            self._record("redis", UNAVAILABLE, telemetry.sanitize_error(error), now)
-            return False
-        self._record("redis", OK, "", now)
-        return True
-
     def _check_brain(self, now: int) -> None:
-        checked = self.dependencies["brain"]["checked_at_ms"]
-        if checked and now - checked < self.limits.brain_interval_ms:
+        if self.brain_at is not None and now - self.brain_at < self.limits.brain_interval_ms:
             return
+        self.brain_at = now
         answer = self.brain() if self.brain is not None else UNCONFIGURED
         self._record("brain", classify_brain(answer), answer, now)
 
     def _pipeline(self, now: int) -> dict:
         try:
-            self.readings = {"transition_export": self._export(now), "archive": self._archive(now)}
+            readings = {"transition_export": self._export(now), "archive": self._archive(now)}
         except Exception as error:
             self._record("redis", UNAVAILABLE, telemetry.sanitize_error(error), now)
             return self._last_readings()
-        return self.readings
+        self._record("redis", OK, "", now)
+        self.readings = readings
+        return readings
 
     def _last_readings(self) -> dict:
-        if not self.readings:
+        if self.readings is None:
             return {"archive": [], "transition_export": {"state": UNKNOWN}}
         return {
             "transition_export": _unknown(self.readings["transition_export"]),

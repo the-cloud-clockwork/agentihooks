@@ -89,7 +89,7 @@ class ControlService:
         self.tasks = TaskAuthority(store, self.controller, lambda token: self.grants.bound(slug, token))
         self.executions = ExecutionsAPI(self.grants, self.tasks)
         self.health = health.Health(store, slug, health.brain_probe(os.environ), self.controller)
-        self.health_api = health.HealthAPI(self.health, self.grants, operator, health.deep_enabled(os.environ))
+        self.health_api = health.HealthAPI(self.health, self.grants, operator, health.deep_enabled())
         self.server: ThreadingHTTPServer | None = None
         self.listen: tuple[str, int] | None = None
         self.runtime = None

@@ -435,7 +435,13 @@ def test_the_api_opens_only_once_the_controller_holds_the_lease(tmp_path):
 
 
 def test_the_hosted_api_serves_shallow_liveness_and_guards_diagnostics(tmp_path, monkeypatch):
+    from scripts.swarm_v2 import worker_health
+
+    probed = []
     monkeypatch.setattr(_cs(), "page_credential", lambda slug: "operator-fixture")
+    monkeypatch.setattr(
+        worker_health, "brain_state", lambda environ, timeout: probed.append(timeout) or "brain_http_401"
+    )
     store = _store()
     port = _free_port()
     service = _cs().host(_hosted_environ(tmp_path, store, port), store, "hive-fixture")
@@ -454,6 +460,16 @@ def test_the_hosted_api_serves_shallow_liveness_and_guards_diagnostics(tmp_path,
     assert (status, refused["error_class"]) == (401, "unauthenticated")
     assert (found, report["reason"]) == (409, "shallow_report")
     assert service.health.controller is service.controller
+    assert (service.health.store, service.health_api.grants) == (store, service.grants)
+    assert service.health.diagnose()["dependencies"]["brain"]["state"] == "auth_failed"
+    assert probed == [worker_health.BRAIN_TIMEOUT]
+
+
+def test_the_page_credential_comes_from_the_ledger_repository(monkeypatch):
+    from scripts.swarm_ledger.repository import repository
+
+    monkeypatch.setattr(repository, "token", lambda slug: f"token-for-{slug}")
+    assert _cs().page_credential(SLUG) == f"token-for-{SLUG}"
 
 
 def test_a_port_it_cannot_bind_releases_the_lease(tmp_path):
