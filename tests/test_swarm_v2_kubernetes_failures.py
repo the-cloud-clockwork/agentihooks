@@ -577,7 +577,7 @@ def _uid(uid, node=""):
     return {"metadata": {"uid": uid}, "spec": {"nodeName": node} if node else {}}
 
 
-def test_each_pass_hands_recovery_the_listed_pods_and_every_pod_deleted_since_the_last_pass():
+def test_each_pass_hands_recovery_the_listed_pods_and_every_pod_deleted_since_the_last_pass(capsys):
     a, b, c, d, e = (_uid(uid) for uid in "abcde")
     b_last, c_last = _uid("b", "worker-a"), _uid("c", "worker-b")
     refused = client.ApiRefused(403, "Forbidden")
@@ -595,7 +595,35 @@ def test_each_pass_hands_recovery_the_listed_pods_and_every_pod_deleted_since_th
     assert {ready for _, ready, _ in recording.calls} == {None}
     watched = [call for call in api.calls if call[0] == "watch"]
     assert watched == [("watch", "owner=x", version) for version in ("5", "9", "11", "12", "13")]
-    assert api.calls[:3] == [("list", "owner=x"), ("watch", "owner=x", "5"), ("list", "owner=x")]
+    assert api.calls[:3] == [("list", "owner=x"), ("list", "owner=x"), ("watch", "owner=x", "5")]
+    failed = ("CursorExpired", "ApiRefused", "ConnectionError", "TimeoutError")
+    assert capsys.readouterr().out.splitlines() == [
+        f"controller: the Pod watch failed with {name}; using the last listing" for name in failed
+    ]
+
+
+def test_a_pod_deleted_after_the_listing_is_reported_by_the_overlapping_watch():
+    a = _uid("a")
+    a_last = _uid("a", "worker-a")
+    api = _Scripted([([a], "5"), ([a], "9"), ([], "12")], [[("DELETED", a_last)], [("DELETED", a_last)]])
+    recording = _Recording()
+    recover = deployed.RecoveryPass(recording, api, "owner=x")
+    for _ in range(3):
+        recover()
+    assert [deleted for _, _, deleted in recording.calls] == [[], [a_last], [a_last]]
+    assert [call for call in api.calls if call[0] == "watch"] == [("watch", "owner=x", "5"), ("watch", "owner=x", "9")]
+
+
+def test_the_deployed_pass_fences_a_live_pod_on_a_lost_node_while_nodes_are_refused(world):
+    cluster = _Cluster(world, nodes=False)
+    service = SimpleNamespace(controller=world.live, grants=_Grants())
+    recover = deployed.recovery_pass(service, SimpleNamespace(image_tag="dev"), cluster)
+    assert recover() == {world.old.execution_id: "working"}
+    pod = world.api.objects[f"swarm-{world.old.execution_id}"]
+    lost = {"type": "DisruptionTarget", "status": "True", "reason": "DeletionByTaintManager"}
+    pod["status"] = {**pod["status"], "conditions": [lost]}
+    assert recover() == {world.old.execution_id: "fenced"}
+    assert world.recovery(world.live).fence(world.old.execution_id)["reason"] == "node_lost"
 
 
 def test_a_pass_without_a_resource_version_lists_again_instead_of_watching():

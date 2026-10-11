@@ -171,16 +171,17 @@ class NoCheckpoints:
 
 
 class RecoveryPass:
-    """A Pod deleted between passes reaches recovery from the namespaced watch; when the watch fails, from the last
-    listing, so only a Pod created and deleted inside one failed watch window goes unseen."""
+    """Each pass lists first, then watches from the previous listing's version, so consecutive watches overlap and
+    leave no gap; when the watch fails, Pods missing since the last listing stand in for its deletions."""
 
     def __init__(self, recovery: Recovery, api: PodApi, selector: str) -> None:
         self.recovery, self.api, self.selector = recovery, api, selector
         self.version, self.listed = "", {}
 
     def __call__(self) -> dict[str, str]:
+        pods, version = self.api.snapshot(self.selector)
         gone = self._deleted()
-        pods, self.version = self.api.snapshot(self.selector)
+        self.version = version
         live = {_uid(pod) for pod in pods}
         for uid, pod in self.listed.items():
             if uid not in live:
@@ -193,7 +194,8 @@ class RecoveryPass:
             return {}
         try:
             events = self.api.watch_pods(self.selector, self.version)
-        except (CursorExpired, ApiRefused, ConnectionError, TimeoutError):
+        except (CursorExpired, ApiRefused, ConnectionError, TimeoutError) as error:
+            print(f"controller: the Pod watch failed with {type(error).__name__}; using the last listing", flush=True)
             return {}
         return {_uid(pod): pod for kind, pod in events if kind == "DELETED"}
 

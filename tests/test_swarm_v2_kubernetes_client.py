@@ -446,15 +446,18 @@ def test_watch_reads_the_namespaced_events_after_a_resource_version(token):
 def test_an_expired_watch_cursor_is_raised_for_a_relist(token):
     expired = {"type": "ERROR", "object": {"kind": "Status", "code": 410, "reason": "Expired"}}
     for answer in (Response(200, _events(expired)), http_error(410, b'{"reason": "Gone"}')):
-        with pytest.raises(watch.CursorExpired):
+        with pytest.raises(watch.CursorExpired) as raised:
             watched(token, answer)[0].watch_pods("a=b", "9")
+        assert str(raised.value) == "9"
 
 
 def test_a_refused_or_unreadable_watch_is_not_an_expired_cursor(token):
     with pytest.raises(ApiRefused) as raised:
         watched(token, http_error(403, b'{"reason": "Forbidden"}'))[0].watch_pods("a=b", "9")
     assert raised.value.status == 403
-    with pytest.raises(ConnectionError):
+    with pytest.raises(ConnectionError) as raised:
         watched(token, http_error(503, b"{}"))[0].watch_pods("a=b", "9")
-    with pytest.raises(ConnectionError):
+    assert str(raised.value) == "API server answered 503"
+    with pytest.raises(ConnectionError) as raised:
         watched(token, Response(200, b'{"type": "DELETED"\n'))[0].watch_pods("a=b", "9")
+    assert str(raised.value) == "the API server answer is unreadable"
