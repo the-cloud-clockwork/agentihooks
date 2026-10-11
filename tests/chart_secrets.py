@@ -8,18 +8,20 @@ from chart_workers import merged
 def containers(documents: list):
     for document in documents:
         spec = document.get("spec", {})
-        pod = spec if document["kind"] == "Pod" else spec.get("template", {}).get("spec")
-        for container in (pod or {}).get("initContainers", []) + (pod or {}).get("containers", []):
-            yield document, container
+        pod = (spec if document["kind"] == "Pod" else spec.get("template", {}).get("spec")) or {}
+        for container in pod.get("initContainers", []) + pod.get("containers", []):
+            yield document, pod, container
 
 
-def references(container: dict, secret: str) -> list[dict]:
+def references(pod: dict, container: dict, secret: str) -> list[dict]:
     found = [
         item
         for item in container.get("env", [])
         if item.get("valueFrom", {}).get("secretKeyRef", {}).get("name") == secret
     ]
     found += [item for item in container.get("envFrom", []) if item.get("secretRef", {}).get("name") == secret]
+    volumes = {v["name"] for v in pod.get("volumes", []) if v.get("secret", {}).get("secretName") == secret}
+    found += [mount for mount in container.get("volumeMounts", []) if mount["name"] in volumes]
     return found
 
 
@@ -40,10 +42,10 @@ def is_controller(document: dict, container: dict) -> bool:
 
 def entry_problems(documents: list, entry: dict) -> list[str]:
     secret, held, problems = entry["secretName"], [], []
-    for document, container in containers(documents):
-        found = references(container, secret)
+    for document, pod, container in containers(documents):
+        found = references(pod, container, secret)
         if found and is_controller(document, container):
-            held += found
+            held += [item for item in found if item.get("name") == entry["name"]]
         elif found:
             owner = f"{document['kind']} {document['metadata']['name']} container {container['name']}"
             problems.append(f"{owner} references the controller only Secret {secret}")
