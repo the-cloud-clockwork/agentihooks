@@ -227,6 +227,7 @@ def test_overwritten_metadata_cannot_claim_the_planted_tree_passed(full_source, 
     result = invoke(root, base, plant, "merge_group", tmp_path / "forged.json", env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "reused=false" in result.stdout
+    assert "Refused run 7: its reuse log does not attest the record\n" in result.stdout
 
 
 def test_the_required_workflow_uses_the_protected_canonical_aggregation():
@@ -655,6 +656,48 @@ def test_a_rejected_newer_run_still_lets_an_older_full_pass_reuse(full_source, t
     assert result.returncode == 0, result.stdout + result.stderr
     assert "reused=true" in result.stdout
     assert f"run={8 if decoy == 'valid' else 7}\n" in result.stdout
+    reasons = {
+        "event": "event is push",
+        "evidence": "no reuse.log evidence",
+        "head": "head commit unavailable",
+        "workflow": "workflow files differ at its head",
+        "metadata": "not exactly one required-tree-1 artifact",
+        "record": "run differed",
+        "commit": "commit.tree differed",
+        "tree": "commit.tree differed",
+        "coverage": "no coverage-3.12-1 artifact",
+        "jobs": "a required job did not pass",
+        "archive": "BadZipFile",
+    }
+    if decoy in reasons:
+        assert f"Refused run 8: {reasons[decoy]}\n" in result.stdout
+
+
+def test_every_differing_key_is_named_together(full_source, tmp_path):
+    root, base, _, queue, env, responses, record = full_source
+    record["run"] = 8
+    record["inputs"]["base"] = "different"
+    publish_record(env, responses, record)
+    result = invoke(root, base, queue, "merge_group", tmp_path / "keys.json", env)
+    assert "Refused run 7: inputs.base, run differed\n" in result.stdout
+
+
+def test_every_missing_coverage_shard_is_named_together(full_source, tmp_path):
+    root, base, _, queue, env, _, _ = full_source
+    path = root / ".github/workflows/test.yml"
+    workflow = yaml.safe_load(path.read_text())
+    workflow["jobs"]["unit"]["strategy"]["matrix"]["shard"] = [1, 2, 3]
+    path.write_text(yaml.safe_dump(workflow))
+    result = invoke(root, base, queue, "merge_group", tmp_path / "shards.json", env)
+    assert "Refused run 7: no coverage-3.12-2, coverage-3.12-3 artifact\n" in result.stdout
+
+
+def test_differing_keys_cover_both_sides_and_nest_only_dicts():
+    from scripts import ci_reuse
+
+    expected = {"a": 1, "b": {"c": 1}, "d": 2, "f": {"g": 1}, "h": False}
+    actual = {"a": 1, "b": {"c": 2}, "e": 3, "f": None, "h": 0}
+    assert ci_reuse._differs(expected, actual) == ["b.c", "d", "e", "f", "h"]
 
 
 @pytest.mark.parametrize("pulls", [[{"number": 6}], [], None])
