@@ -59,3 +59,73 @@ def test_the_guest_memory_reading_separates_usage_anonymous_and_shared_pages(pro
         lambda self: "MemTotal: 2048 kB\nMemAvailable: 1024 kB\nAnonPages: 128 kB\nShmem: 64 kB\n",
     )
     assert probe.memory() == {"used": 1048576, "anonymous": 131072, "shmem": 65536}
+
+
+def test_the_default_workload_writes_one_gibibyte_per_path_and_flushes_every_sixteen_mib(probe, monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    files = []
+    flushes = []
+
+    class File:
+        def __init__(self, folder):
+            self.folder = folder
+            self.size = 0
+            self.removed = False
+            files.append(self)
+
+        def open(self, mode, buffering):
+            assert (mode, buffering) == ("xb", 0)
+            return self
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def write(self, chunk):
+            self.size += len(chunk)
+            return len(chunk)
+
+        def fileno(self):
+            return 17
+
+        def stat(self):
+            return SimpleNamespace(st_size=self.size)
+
+        def unlink(self, missing_ok):
+            assert missing_ok is True
+            self.removed = True
+
+    class Folder:
+        def __init__(self, path):
+            self.path = path
+
+        def __str__(self):
+            return self.path
+
+        def __truediv__(self, name):
+            assert name.startswith("storage-proof-")
+            return File(self.path)
+
+    def sync(fd):
+        assert fd == 17
+
+    def evict(fd, offset, length, flag):
+        assert (fd, offset, length, flag) == (17, 0, 0, probe.os.POSIX_FADV_DONTNEED)
+        flushes.append((files[-1].folder, files[-1].size))
+
+    monkeypatch.setattr(probe, "Path", Folder)
+    monkeypatch.setattr(probe, "filesystem", lambda path: {"type": "ext4"})
+    monkeypatch.setattr(probe, "memory", lambda: {"used": 100, "anonymous": 20, "shmem": 4})
+    monkeypatch.setattr(probe.os, "fsync", sync)
+    monkeypatch.setattr(probe.os, "posix_fadvise", evict)
+    probe.main()
+    assert [(file.folder, file.size, file.removed) for file in files] == [
+        ("/home/worker", 1073741824, True),
+        ("/tmp", 1073741824, True),
+    ]
+    for folder in ("/home/worker", "/tmp"):
+        assert [size for path, size in flushes if path == folder] == list(range(16777216, 1073741825, 16777216))
+    assert capsys.readouterr().out.endswith("storage proof passed\n")
