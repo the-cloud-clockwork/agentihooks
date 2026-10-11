@@ -131,7 +131,7 @@ EOF
 )"
 token="$(kubectl create token swarm-grant-proof --duration 10m)"
 ca="$(kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d)"
-opened="$(python3 -c 'import json, sys; print(json.dumps({"token": sys.argv[1], "ca": sys.argv[2]}))' "$token" "$ca" \
+opened="$(TOKEN="$token" CA="$ca" python3 -c 'import json, os; print(json.dumps({"token": os.environ["TOKEN"], "ca": os.environ["CA"]}))' \
   | kubectl exec -i "deployment/$release-controller" -c controller -- \
     env SLUG="$slug" NAMESPACE="$namespace" WORKER_IMAGE="$worker_image" python -c "$open_terminal" | tail -1)"
 unset token

@@ -36,7 +36,7 @@ def test_the_swarm_image_installs_the_herdr_client_the_worker_lock_pins():
     assert "COPY --from=herdr /usr/local/bin/herdr /usr/local/bin/herdr" in dockerfile
     assert "herdrdev/herdr" not in dockerfile
     assert "sha256:" not in dockerfile.split("AS herdr")[1]
-    assert dockerfile.count("FROM mirror.gcr.io/library/python:3.12-slim-bookworm") == 2
+    assert dockerfile.count("FROM mirror.gcr.io/library/python:3.12-slim-bookworm") == 3
     assert "worker_image.py shell-packages --package openssh-client)" in dockerfile
     assert '["debian_snapshot"]' in dockerfile
     due = (root / "deploy/helm/agentihooks-swarm/ci/kind-due.sh").read_text().splitlines()

@@ -158,6 +158,8 @@ def main() -> None:
     if args.tool:
         lock = {**lock, "tools": {name: lock["tools"][name] for name in args.tool}}
     if args.package:
+        if unlocked := sorted(set(args.package) - set(lock["shell_packages"])):
+            parser.error(f"--package names packages the lock does not pin: {', '.join(unlocked)}")
         lock = {**lock, "shell_packages": {name: lock["shell_packages"][name] for name in args.package}}
     if args.action == "download":
         for name, artifact in lock["tools"].items():

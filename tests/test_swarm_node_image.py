@@ -520,9 +520,11 @@ def test_a_named_package_limits_shell_packages_to_that_package(locked, monkeypat
     assert capsys.readouterr().out == "openssh-client=1:9.2p1-2+deb12u7 git=1:2.39.5-0+deb12u3\n"
 
 
-def test_an_unlocked_package_is_refused(locked, monkeypatch):
+def test_an_unlocked_package_is_refused(locked, monkeypatch, capsys):
     path, _, _ = locked
-    monkeypatch.setattr("sys.argv", ["worker_image", "shell-packages", "--lock", str(path), "--package", "curl"])
-    with pytest.raises(KeyError) as error:
+    argv = ["worker_image", "shell-packages", "--lock", str(path), "--package", "zsh", "--package", "curl"]
+    monkeypatch.setattr("sys.argv", argv)
+    with pytest.raises(SystemExit) as error:
         worker_image.main()
-    assert error.value.args == ("curl",)
+    assert error.value.code == 2
+    assert "--package names packages the lock does not pin: curl, zsh" in capsys.readouterr().err

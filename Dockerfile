@@ -9,7 +9,7 @@ COPY profiles/ profiles/
 ARG VERSION=0.0.0
 RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS="$VERSION" /opt/venv/bin/pip install --no-cache-dir --no-deps .
 
-FROM mirror.gcr.io/library/python:3.12-slim AS herdr
+FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS herdr
 ARG TARGETARCH=amd64
 COPY docker/swarm-node/versions.lock docker/swarm-node/requirements.lock /opt/swarm-node/
 COPY scripts/swarm_v2/worker_image.py /opt/swarm-node/worker_image.py
