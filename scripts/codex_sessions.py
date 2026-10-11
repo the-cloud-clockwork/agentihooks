@@ -39,16 +39,11 @@ TIMEOUT_S = 20
 
 
 def _session_at(args: list[str]) -> int | None:
-    expects_value = False
-    for at, arg in enumerate(args):
-        if expects_value:
-            expects_value = False
-        elif arg.startswith("-"):
-            expects_value = arg in VALUE_FLAGS
-        elif arg in COMMANDS and at + 1 < len(args) and not args[at + 1].startswith("-"):
-            return at + 1
-        else:
-            return None
+    at = 0
+    while at < len(args) and args[at].startswith("-"):
+        at += 2 if args[at] in VALUE_FLAGS else 1
+    if at + 1 < len(args) and args[at] in COMMANDS and not args[at + 1].startswith("-"):
+        return at + 1
     return None
 
 
@@ -56,7 +51,6 @@ def resolve(args: list[str], environ: Mapping[str, str], lookup: Callable | None
     at = _session_at(args)
     if at is None or THREAD_ID.fullmatch(args[at]):
         return args
-    found = []
     for archived in COMMANDS[args[at - 1]]:
         found = (lookup or thread_ids)(args[at], archived, environ)
         if found:

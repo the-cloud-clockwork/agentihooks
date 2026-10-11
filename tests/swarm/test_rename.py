@@ -150,6 +150,7 @@ def test_rename_names_a_running_codex_session_after_its_new_name(store, harness,
     ledger = SimpleNamespace(tasks=lambda slug: [], rename_agent=lambda slug, old, new: None)
     rename_swarm(store, "sw", ledger, HerdrRuntime(herdr=herdr), 10)
     new = store.agents("sw")[0].name
+    assert store.redis.get(store.key("sw", "session-name", "w1:p1")) == (new if typed else None)
     assert [m for m in mutations if m[:2] == ["pane", "run"]] == (
         [["pane", "run", "w1:p1", f"/rename {new}"]] if typed else []
     )
