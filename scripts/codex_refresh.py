@@ -17,7 +17,7 @@ from typing import NamedTuple
 
 from hooks import config
 from hooks.context.account_sessions import CODEX_TOKEN_PREFIX
-from scripts import aicode_tokens, codex_login, codex_router, openbao_kv
+from scripts import aicode_tokens, codex_login, codex_router, openbao_kv, term_colors
 
 PROG = "agentihooks codex refresh"
 TOKEN_URL = "https://auth.openai.com/oauth/token"
@@ -51,6 +51,12 @@ STALE = "{slug}: removing {path}, older than the pair in OpenBao"
 UNREADABLE = "{slug}: ignoring unreadable {path}"
 NO_LOCAL_ACCOUNT = "{slug}: no such Codex account under {root}"
 NO_BAO_ACCOUNT = "{slug}: no such Codex account in OpenBao"
+LEGACY = (
+    "{name}: not refreshed, the name is not a slug; sign in again with agentihooks codex login {name} "
+    "to store it as {slug}"
+)
+FORCED = "{name}: refreshed under its old name; agentihooks codex login {name} stores it as {slug}"
+UNUSABLE = "{name}: not refreshed, the name cannot become a slug; sign in again with agentihooks codex login <slug>"
 
 
 class GrantError(RuntimeError):
@@ -122,7 +128,7 @@ def _digest(value: str) -> str:
 
 
 def _failed(slug: str, reason: str) -> dict:
-    print(FAILED.format(slug=slug, reason=reason))
+    print(term_colors.red(FAILED.format(slug=slug, reason=reason)))
     return {}
 
 
@@ -176,30 +182,41 @@ def _store(bao: openbao_kv.OpenBao, entries: dict[str, str]) -> bool:
     try:
         total = openbao_kv.merge(bao, openbao_kv.CODEX_CREDS, entries)
     except Exception as exc:
-        print(f"OpenBao write failed: {exc}")
+        print(term_colors.red(f"OpenBao write failed: {exc}"))
         return False
     print(openbao_kv.summary(openbao_kv.CODEX_CREDS, entries, total))
     return True
 
 
-def _valid(name: str) -> bool:
-    try:
-        return aicode_tokens.slug(name) == name
-    except aicode_tokens.SlugError:
-        return False
+def _select(names: list[str], force: str) -> list[str]:
+    kept = []
+    for name in names:
+        try:
+            found = aicode_tokens.slug(name)
+        except aicode_tokens.SlugError:
+            if not force:
+                print(term_colors.yellow(UNUSABLE.format(name=name)))
+            continue
+        if force and found != force:
+            continue
+        if found != name:
+            print(term_colors.yellow((FORCED if force else LEGACY).format(name=name, slug=found)))
+        if force or found == name:
+            kept.append(name)
+    return kept
 
 
 def _local_accounts(force: str) -> list[Path]:
     root = codex_login.homes()
-    found = sorted(path for path in root.iterdir() if (path / "auth.json").is_file()) if root.is_dir() else []
-    return [path for path in found if _valid(path.name) and (not force or path.name == force)]
+    found = sorted(path.name for path in root.iterdir() if (path / "auth.json").is_file()) if root.is_dir() else []
+    return [root / name for name in _select(found, force)]
 
 
 def _attempt(slug: str, action: Callable[[], object]) -> bool:
     try:
         action()
     except OSError as exc:
-        print(WRITE_FAILED.format(slug=slug, error=exc))
+        print(term_colors.red(WRITE_FAILED.format(slug=slug, error=exc)))
         return False
     return True
 
@@ -217,25 +234,25 @@ def _refresh_local(run: Run, home: Path) -> Outcome | None:
     block = _attempt(slug, lambda: aicode_tokens.write_rc(aicode_tokens.rc_file(), rc_entry))
     stored = _store(run.bao, _entries(slug, fresh)) if run.bao else None
     if not saved and not stored:
-        print(LOST.format(slug=slug))
+        print(term_colors.red(LOST.format(slug=slug)))
     return Outcome(saved and block and stored is not False, saved)
 
 
 def run_local(run: Run) -> int:
     homes = _local_accounts(run.force)
     if run.force and not homes:
-        print(NO_LOCAL_ACCOUNT.format(slug=run.force, root=codex_login.homes()))
+        print(term_colors.red(NO_LOCAL_ACCOUNT.format(slug=run.force, root=codex_login.homes())))
         return 1
     outcomes = [outcome for home in homes if (outcome := _refresh_local(run, home)) is not None]
     if run.bao is None and any(outcome.saved for outcome in outcomes):
-        print(BAO_UNSET)
+        print(term_colors.yellow(BAO_UNSET))
     return sum(not outcome.ok for outcome in outcomes)
 
 
 def _bao_accounts(secret: Mapping[str, str], force: str) -> list[str]:
     prefix = codex_login.REFRESH_PREFIX
     found = [key.removeprefix(prefix) for key in sorted(secret) if key.startswith(prefix)]
-    return [slug for slug in found if _valid(slug) and (not force or slug == force)]
+    return _select(found, force)
 
 
 def _recovery(slug: str) -> Path:
@@ -249,11 +266,11 @@ def _recovered(slug: str, access: str | None) -> dict | None:
     tokens = codex_login._tokens(path.parent, path.name)
     kept = _expiry(tokens.get("access_token"))
     if not tokens.get("refresh_token") or kept is None:
-        print(UNREADABLE.format(slug=slug, path=path))
+        print(term_colors.yellow(UNREADABLE.format(slug=slug, path=path)))
         return None
     current = _expiry(access)
     if current is not None and kept <= current:
-        print(STALE.format(slug=slug, path=path))
+        print(term_colors.yellow(STALE.format(slug=slug, path=path)))
         _attempt(slug, path.unlink)
         return None
     return {key: tokens[key] for key in TOKEN_KEYS if tokens.get(key)}
@@ -266,7 +283,7 @@ def _store_or_recover(run: Run, slug: str, fresh: dict) -> bool:
     if _attempt(slug, lambda: _save_auth(recovery, fresh, run.deps.now())):
         print(KEPT.format(slug=slug, path=recovery))
     else:
-        print(LOST.format(slug=slug))
+        print(term_colors.red(LOST.format(slug=slug)))
     return False
 
 
@@ -294,11 +311,11 @@ def run_openbao(run: Run) -> int:
     try:
         secret, _ = openbao_kv.read(run.bao, openbao_kv.CODEX_CREDS)
     except openbao_kv.OpenBaoError as exc:
-        print(f"OpenBao read failed: {exc}")
+        print(term_colors.red(f"OpenBao read failed: {exc}"))
         return 1
     slugs = _bao_accounts(secret, run.force)
     if run.force and not slugs:
-        print(NO_BAO_ACCOUNT.format(slug=run.force))
+        print(term_colors.red(NO_BAO_ACCOUNT.format(slug=run.force)))
         return 1
     return [_refresh_bao(run, secret, slug) for slug in slugs].count(False)
 
@@ -349,14 +366,14 @@ def main(args: list[str], environ: Mapping[str, str] | None = None, deps: Deps |
     try:
         store, run = _settings(args, environ, deps or Deps())
     except ValueError as exc:
-        print(f"{PROG}: {exc}")
+        print(term_colors.red(f"{PROG}: {exc}"))
         return 2
     if store == OPENBAO and run.bao is None:
-        print(BAO_NEEDED)
+        print(term_colors.red(BAO_NEEDED))
         return 1
     with _exclusive() as held:
         if not held:
-            print(BUSY)
+            print(term_colors.yellow(BUSY))
             return 0
         failures = run_openbao(run) if store == OPENBAO else run_local(run)
     return 1 if failures else 0
