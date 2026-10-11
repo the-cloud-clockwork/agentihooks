@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/bottleneck_status.py:scripts.swarm.bottleneck_status.x_observations__mutmut_17:9132e15de04baa5c1b892c52ba7477d9d7df8e95c324b1a49ba73c526fea9009": {
+    "reader": "/root/standards",
+    "reason": "Omitting the dictionary get default yields None. The trend falsy guard returns the same unknown result as an empty dictionary."
+  }
+}

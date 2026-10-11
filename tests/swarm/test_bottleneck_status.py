@@ -26,13 +26,20 @@ def fire(store, stage="ci_overrun", value=3, threshold=1, at=NOW, unit="minutes"
 def test_top_compares_threshold_ratios_and_breaks_ties_by_stage(store):
     fire(store, "build", 100, 50, unit="task hours")
     fire(store)
-    assert bottleneck_status.report(store, "sw", NOW)["stage"] == "ci_overrun"
+    found = bottleneck_status.report(store, "sw", NOW)
+    assert (found["stage"], found["value"], found["threshold"], found["unit"]) == ("ci_overrun", 3, 1, "minutes")
     fire(store, "claim_wait", 6, 2)
     assert bottleneck_status.report(store, "sw", NOW)["stage"] == "ci_overrun"
 
 
 def test_empty_expired_and_nonpositive_thresholds_show_no_top(store):
-    assert bottleneck_status.report(store, "sw", NOW)["stage"] == ""
+    assert bottleneck_status.report(store, "sw", NOW) == {
+        "stage": "",
+        "label": "none",
+        "trend": "unknown",
+        "last_action": "none recorded",
+        "action_at": 0,
+    }
     fire(store, threshold=0)
     assert bottleneck_status.report(store, "sw", NOW)["stage"] == ""
     fire(store, at=NOW - standing.STALE_MS)
@@ -90,6 +97,7 @@ def test_each_top_transition_sends_one_master_item_and_repeats_send_none(store):
         "Top bottleneck none",
     ]
     assert len({item.ref for item in items}) == 4
+    assert {item.sender for item in items} == {"swarm"}
 
 
 @pytest.mark.parametrize("committed", [False, True])
