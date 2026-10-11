@@ -777,7 +777,7 @@ def test_a_controller_exposing_terminals_reconciles_the_anton_client_at_start(tm
         assert isinstance(service.controller.terminals, Upkeep)
         assert service.controller.terminals.terminal.namespace == "swarm-pod-proof"
         assert herdr.commands == [["herdr", "machine", "list", "--json"]]
-        assert len(environments) == 1
+        assert [environment["HOME"] for environment in environments] == [str(Path.home())]
         assert service.controller.herdr_registration_drift() == 0
     finally:
         service.stop()
@@ -809,6 +809,17 @@ def test_a_controller_without_the_terminal_ca_key_says_it_keeps_no_client(tmp_pa
         assert capsys.readouterr().out.splitlines()[0] == (
             f"controller: keeps no saved herdr machines for {SLUG}: AGENTIHOOKS_TERMINAL_CA_KEY is unset"
         )
+    finally:
+        service.stop()
+
+
+def test_the_missing_ca_key_line_is_flushed_so_the_container_log_shows_it_at_once(tmp_path, monkeypatch):
+    printed = []
+    monkeypatch.setattr(_cs(), "print", lambda *args, **kwargs: printed.append((args[0][:41], kwargs)), raising=False)
+
+    service, _, _ = _anton_client(tmp_path, monkeypatch, _store(), **{operator_terminal.CA_KEY_ENV: None})
+    try:
+        assert printed[0] == ("controller: keeps no saved herdr machines", {"flush": True})
     finally:
         service.stop()
 

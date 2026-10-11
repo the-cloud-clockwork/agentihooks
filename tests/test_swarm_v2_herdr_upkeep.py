@@ -157,6 +157,13 @@ def test_a_fresh_upkeep_reconciles_even_an_empty_set_of_attempts(tmp_path):
     assert herdr.commands == [["herdr", "machine", "list", "--json"]]
 
 
+def test_an_upkeep_that_has_not_reconciled_reports_no_drift(tmp_path):
+    terminal, herdr = client(tmp_path)
+
+    assert Upkeep(terminal).herdr_registration_drift() == 0
+    assert herdr.commands == []
+
+
 def test_an_attempt_is_a_frozen_value():
     with pytest.raises(dataclasses.FrozenInstanceError):
         attempt(EXE_A).host_public = "ssh-ed25519 AAAA-other"
