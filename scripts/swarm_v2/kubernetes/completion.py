@@ -1,17 +1,17 @@
-"""An attempt completes when its current Pod succeeded: with restartPolicy Never no container of it runs again, so the
-transcript archived by then is the whole transcript and the succeeded Pod is the outcome reference."""
+"""A Succeeded Pod runs no container again (restartPolicy Never), so its archive watermark is the transcript end."""
 
+from collections import Counter
 from collections.abc import Iterable
 
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2 import retention
 from scripts.swarm_v2.kubernetes.cleanup import Cleanup
+from scripts.swarm_v2.kubernetes.client import ApiRefused
 from scripts.swarm_v2.kubernetes.failures import FENCES
 from scripts.swarm_v2.kubernetes.runtime import GENERATION_LABEL
 from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL
 
-SUCCEEDED = "Succeeded"
-COMPLETED = "completed"
+SUCCEEDED, COMPLETED, REFUSED = "Succeeded", "completed", "refused"
 
 
 class Completion:
@@ -19,26 +19,28 @@ class Completion:
         self.store, self.slug, self.cleanup = store, slug, cleanup
 
     def __call__(self, pods: Iterable[dict]) -> dict[str, str]:
-        """Finalizes each attempt whose current Pod succeeded, then runs cleanup for every final attempt not retained."""
-        current = {
+        pods = list(pods)
+        known = {
             agent.execution_id: agent.generation
-            for agent in self.store.execution_occupants(self.slug).values()
+            for agent in self.store.execution_registry.records(self.slug)
             if agent.runtime_backend == BACKEND
         }
+        listed = Counter(pod["metadata"].get("labels", {}).get(EXECUTION_LABEL) for pod in pods)
         for pod in pods:
-            if self._completed(pod, current):
+            if self._completed(pod, known, listed):
                 self._finalize(pod["metadata"])
         finals = set(self.store.redis.hkeys(self.store.key(self.slug, "attempt-finals")))
         finals -= set(self.store.redis.hkeys(self.store.key(self.slug, "attempt-retained")))
-        return {execution_id: self.cleanup.run(execution_id).state for execution_id in sorted(finals)}
+        return {execution_id: self._clean(execution_id) for execution_id in sorted(finals)}
 
-    def _completed(self, pod: dict, current: dict[str, int]) -> bool:
+    def _completed(self, pod: dict, known: dict[str, int], listed: Counter) -> bool:
         labels = pod["metadata"].get("labels", {})
         execution_id = labels.get(EXECUTION_LABEL)
         return (
             pod.get("status", {}).get("phase") == SUCCEEDED
-            and execution_id in current
-            and labels.get(GENERATION_LABEL) == str(current[execution_id])
+            and execution_id in known
+            and listed[execution_id] == 1
+            and labels.get(GENERATION_LABEL) == str(known[execution_id])
             and not self.store.redis.hexists(self.store.key(self.slug, FENCES), execution_id)
             and retention.final(self.store, self.slug, execution_id) is None
         )
@@ -48,3 +50,10 @@ class Completion:
         end = retention.archive_watermark(self.store, self.slug, execution_id)
         outcome = f"pods/{metadata['name']}/{metadata['uid']}"
         retention.finalize(self.store, self.slug, self.cleanup.require, execution_id, COMPLETED, end, outcome)
+
+    def _clean(self, execution_id: str) -> str:
+        try:
+            return self.cleanup.run(execution_id).state
+        except (ApiRefused, ConnectionError, TimeoutError) as error:
+            print(f"controller: cleanup of {execution_id} failed with {type(error).__name__}; retrying", flush=True)
+            return REFUSED

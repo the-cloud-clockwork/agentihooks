@@ -25,7 +25,6 @@ NODE_DISRUPTIONS = frozenset(("DeletionByTaintManager", "DeletionByPodGC"))
 RELEASES = ("grant", "account")
 RESUME, FRESH, PENDING = "resume", "fresh", "recovery_pending"
 AWAITING, FENCED = "awaiting-decision", "fenced"
-COMPLETED = "completed"
 PENDING_POD = "swarm-pending"
 NEW_ATTEMPT = {"execution_id": "", "generation": 0, "state": "working", "conversation_id": ""}
 FENCES = "attempt-fences"
@@ -228,10 +227,11 @@ class Recovery:
     ) -> str:
         if self.fence(agent.execution_id):
             return self._late(agent.execution_id, len(pods))
-        if retention.final(self.store, self.slug, agent.execution_id):
-            return COMPLETED
         if len(pods) > 1:
             return "ambiguous"
+        final = retention.final(self.store, self.slug, agent.execution_id)
+        if final:
+            return final.state
         reason = self._reason(agent.execution_id, pods[0], ready) if pods else self._vanished(agent, ready, last)
         if reason == IMAGE_PULL and pods and self._pulling(agent.execution_id):
             return "pulling"
