@@ -205,7 +205,7 @@ def test_a_pane_holding_another_conversation_receives_nothing(tmp_path):
     reason, _ = refusal(lambda: client.router.send(wrong, "agent_prompt", "op", "x"))
     assert reason == "conversation_mismatch"
     assert fleet.mutations() == [] and fleet.received()[EXE_A] == []
-    assert not json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]
+    assert not (tmp_path / DELIVERIES).exists()
 
 
 def test_the_expected_conversation_admits_the_prompt(tmp_path):
