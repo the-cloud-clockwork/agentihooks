@@ -4,9 +4,9 @@
   "dependency": "SV2-HDR-04",
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2551",
-  "pull_request": "pending",
-  "tested_commit": "pending",
-  "status": "fixture-qualified: closing the operator view, losing one SSH path and reconnecting leave both remote agents working on their original panes and conversations, cached terminal data never reads live or takes input, and the ledger shows cached versus live terminals; no controller loop builds a Viewer or publishes views yet, so nothing runs on Anton",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2558",
+  "tested_commit": "72bf66f52",
+  "status": "fixture-qualified: closing the operator view, losing one SSH path and reconnecting leave both remote agents working on their original panes and conversations, cached terminal data never reads live or takes input, and the ledger shows cached versus live terminals; the controller builds the viewer from its client terminal router and publishes the views on every tick it holds the lease, but no Anton rollout of this commit has been observed",
   "evidence_class": "mocked: a recording stand in for the Anton herdr client serves two worker herdr servers whose agents keep working on every fixture tick, times out every command to a machine whose SSH path is cut while that worker's control heartbeat continues, and advances a fake clock per remote command; the operator TUI is a Viewer closed by detach; no herdr process, SSH connection or cluster runs in these cases",
   "interfaces": [
     "scripts.swarm_v2.herdr.viewer.Viewer(router, run, clock=time.time, *, fresh_ms=30000, aggregation=True) is the operator's view of remote agent panes; it addresses panes only through the SV2-HDR-04 Router, so every read names one saved machine profile and one confirmed server incarnation and never falls back to the local server",
@@ -19,7 +19,9 @@
     "scripts.swarm_v2.herdr.visibility: View carries agent, machine label, pane id, incarnation, state, checked_at, live_at, reason and fresh_ms and no screen text; publish(store, slug, views) replaces the swarm's terminals hash; read(store, slug, now_ms) judges every row at the reader's clock and reads an unreadable row as unverified",
     "scripts.swarm.commands.view(store, slug) carries terminals judged at the ledger server's clock, which the ledger server returns from /api/swarm/<slug>",
     "The ledger swarm panel adds a terminal column to the Agents table when the swarm publishes terminals: LIVE, CACHED with its last live time and reason, or UNVERIFIED with its reason; the page re judges freshness itself and never shows a view past its window as live; a swarm with no terminals keeps its nine column table",
-    "scripts.swarm_v2.herdr.target.pane_conversation is the router's agent get reply parser, renamed from a private name so the viewer shares it"
+    "scripts.swarm_v2.herdr.target.pane_conversation is the router's agent get reply parser, renamed from a private name so the viewer shares it",
+    "scripts.swarm_v2.kubernetes.terminal_views.TerminalViews(store, slug, viewer) is the controller pass: for each remote agent occupant it finds the one agent pane the machine registered for the agent's execution and generation lists (prompts.agent_target, shared with TerminalPrompts), watches it with its conversation, refreshes the viewer and replaces the terminals hash; an agent whose pane is not found keeps its last view, or reads unverified with the refusal reason (unregistered, conversation_required, unreachable) when it has none, a new conversation or generation is found again, and only an agent that left the swarm is dropped (Viewer.forget)",
+    "ControlService starts ControlService.views in its own daemon thread after the recovery pass on every tick that renewed or took the controller lease, never while an earlier pass still runs, so herdr timeouts never delay the lease renewal; scripts.swarm_v2.deployed.terminal_views builds it whenever the controller keeps saved herdr machines, with the operator principal and the controller's client terminal router and run"
   ],
   "supported_versions": {
     "herdr": "0.9.1 reply shapes for agent get and pane read, as recorded in SV2-HDR-04",
@@ -30,15 +32,15 @@
   "authority": "The viewer holds no authority of its own: every target comes from the controller's registration record, which SV2-HDR-03 builds only from a verified launch grant or the operator role, and Router.resolve refuses a display label that is not exactly one confirmed record. Input goes through Router.send, which keeps the SV2-HDR-04 conversation and journal checks.",
   "authoritative_objects": "The registration ownership record and the delivery journal stay authoritative (SV2-HDR-03, SV2-HDR-04). The terminals hash is a projection that publish replaces whole; the viewer's screens are caches. Neither the viewer nor its rollback removes a registration, a journal entry, a pane or an agent.",
   "states": {
-    "observed": "Cases A, B and C run the viewer against the recording client (evidence/SV2-HDR-05/a-result.json, b-result.json, c-result.json).",
-    "accepted": "pending",
-    "committed": "Case records, result and manifest committed on the task branch",
-    "externally_verified": "Not on Anton: no controller loop builds a Viewer or calls visibility.publish yet"
+    "observed": "Cases A, B and C run the viewer against the recording client (evidence/SV2-HDR-05/a-result.json, b-result.json, c-result.json); the controller wiring runs TerminalViews against the same recording client with a fake Redis store (tests/test_swarm_v2_kubernetes_terminal_views.py, the views tests in tests/test_swarm_v2_control_service.py and tests/test_swarm_v2_deployed_runtime.py)",
+    "accepted": "Standards and Spec readers closed every finding; rulings are on pull request 2558",
+    "committed": "Case records, result and manifest committed at 72bf66f52 on pull request https://github.com/the-cloud-clockwork/agentihooks/pull/2558",
+    "externally_verified": "Not on Anton: the controller tick publishes terminal views, but no Anton rollout of this commit has been observed"
   },
   "validation": {
-    "red": "Tests run 38120107847 on the tests only commit 20dd55e43 failed collecting tests/e2e/swarm_v2/test_terminal_reconnect.py because scripts.swarm_v2.herdr.viewer did not exist",
-    "tests": "pending",
-    "mutation": "pending",
+    "red": "Tests run 38120107847 on the tests only commit 20dd55e43 failed collecting tests/e2e/swarm_v2/test_terminal_reconnect.py because scripts.swarm_v2.herdr.viewer did not exist; for the controller wiring, Tests run 38122750674 on the tests only commit 5f926ef8d failed exactly the new wiring tests (TerminalViews took no arguments, ControlService had no views, deployed had no AGGREGATION_ENV)",
+    "tests": "Tests 38124698613 on 72bf66f52 succeeded: every unit shard on Python 3.11 and 3.12, mutation shards and Gate Required",
+    "mutation": "Mutation preflight 38124698228 on 72bf66f52 succeeded with no surviving mutant on the changed modules (viewer, visibility, target, commands, terminal_views, prompts, deployed, control_service)",
     "lint": "ruff check, ruff format and size limits through python -m scripts.ci_prepush",
     "page": "The ledger page at 1920 by 1080 on a scratch ledger with a fake Redis showed LIVE, CACHED live 3m ago unreachable and UNVERIFIED conversation unconfirmed in the terminal column; the capture is on the task proof",
     "review": "Standards and Spec readers; findings and rulings on the pull request"
@@ -72,15 +74,16 @@
     "state": "See states"
   },
   "rollback_rehearsal": {
-    "action": "Turn off aggregation refresh while preserving direct explicit attach and task execution: Viewer(..., aggregation=False) runs no herdr command on refresh, so every view reads unverified or cached, while reconnect still attaches the original pane and send works on the reconnected live view; the agents keep running because the viewer never addresses them otherwise.",
-    "proof": "tests/test_swarm_v2_herdr_viewer.py::test_aggregation_off_refreshes_nothing_while_explicit_attach_and_input_still_work"
+    "action": "Turn off aggregation refresh while preserving direct explicit attach and task execution: AGENTIHOOKS_TERMINAL_AGGREGATION=off on the controller builds Viewer(..., aggregation=False), which runs no agent get or pane read on refresh, so every published view reads unverified or cached, while reconnect still attaches the original pane and send works on the reconnected live view; the agents keep running because the viewer never addresses them otherwise.",
+    "proof": "tests/test_swarm_v2_herdr_viewer.py::test_aggregation_off_refreshes_nothing_while_explicit_attach_and_input_still_work, tests/test_swarm_v2_kubernetes_terminal_views.py::test_aggregation_off_publishes_unverified_views_without_reading_any_pane, tests/test_swarm_v2_deployed_runtime.py::test_terminal_aggregation_switched_off_keeps_the_views_without_refreshing_them"
   },
   "remaining_limitations": [
-    "No production caller: the controller loop does not build a Viewer or call visibility.publish, because the controller does not learn a remote agent's herdr pane id; the ledger column therefore stays hidden on Anton until that wiring lands (filed as a ledger follow up).",
+    "No live proof on Anton: the controller tick builds the viewer and publishes views, proven against the recording client and fake Redis only; the ledger column shows on Anton once a controller holding saved herdr machines runs this commit.",
     "Reconnect identity is the pane and the native conversation id herdr agent get reports; the fixture also shows the process id unchanged, but the viewer itself does not read a process id.",
     "The server incarnation is asserted from the ownership record (SV2-HDR-01, SV2-HDR-04): a herdr server restarted inside the same execution attempt is not detected here.",
     "No live proof against the pinned herdr or a real SSH path: the cases use the recorded 0.9.1 reply shapes and a fake clock, so terminal_reconnect_latency_seconds is a fixture figure.",
-    "Freshness compares the controller's check time with the ledger server's clock; clock skew between them counts against the fresh window in either direction."
+    "Freshness compares the controller's check time with the ledger server's clock; clock skew between them counts against the fresh window in either direction.",
+    "The views pass runs beside the lease: a controller whose lease lapses mid pass can publish one last snapshot, which the next holder's pass replaces whole; readers judge freshness from checked_at, so it never reads live once past its window."
   ],
   "heartbeat": "fixture-asserted: the worker control heartbeat in cases A and C is advanced by the recording stand in, not read by product code; the product claim is INV-R02, that the viewer marks a lost SSH path cached and never reports the agent gone (lost_path_view_is_cached_never_gone)"
 }
