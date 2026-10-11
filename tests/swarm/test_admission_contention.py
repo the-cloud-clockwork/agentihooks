@@ -68,3 +68,50 @@ def test_admission_commits_during_controller_writes(monkeypatch, operation, writ
         assert authority.current("task") == claim
         assert store.execution_occupants("fixture").get(candidate.seat) is None
     assert refusal == "", f"writer={writer}; operation={operation}; attempts={len(attempts)}; refusal={refusal}"
+
+
+@pytest.mark.parametrize("change", ["owner", "epoch", "expiry", "missing"])
+def test_execution_admission_refuses_changed_controller_at_commit(monkeypatch, change):
+    import json
+
+    from scripts.swarm.execution import ADMIT
+    from scripts.swarm.store import AgentRecord, SwarmError
+    from tests.sv2_ctl02_cases import build
+
+    store, authority, controller, clock, start = build(monkeypatch)
+    agent, token = start()
+    candidate = AgentRecord(store.next_name("fixture", "eng"), "eng", "other", seat="eng-2@fixture")
+    key = store.key("fixture", "control-owner")
+    before = store.executions("fixture", agent.seat)
+    original = store.redis.pipeline
+    changed = []
+
+    def pipeline(*args, **kwargs):
+        pipe = original(*args, **kwargs)
+        execute = pipe.execute
+
+        def run(*args, **kwargs):
+            if any(command[0][:2] == ("EVAL", ADMIT) for command in pipe.command_stack):
+                changed.append(change)
+                leader = json.loads(store.redis.get(key))
+                if change == "missing":
+                    store.redis.delete(key)
+                elif change == "expiry":
+                    clock[0] = leader["expires_at"]
+                else:
+                    leader[change] = "another" if change == "owner" else leader["epoch"] + 1
+                    store.redis.set(key, json.dumps(leader))
+            return execute(*args, **kwargs)
+
+        pipe.execute = run
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    with pytest.raises(SwarmError, match="^the controller lease is stale$"):
+        controller.admit(candidate)
+    assert changed == [change]
+    assert store.executions("fixture", agent.seat) == before
+    assert candidate.seat not in store.execution_occupants("fixture")
+    assert not store.redis.hexists(store.key("fixture", "agents"), candidate.name)
+    assert not store.redis.hexists(store.key("fixture", "state-since"), candidate.name)
+    assert len(store.redis.hgetall(store.key("fixture", "controller-intents"))) == 1
