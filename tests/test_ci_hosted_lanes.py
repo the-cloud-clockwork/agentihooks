@@ -63,7 +63,7 @@ def _evaluate(value, **github):
 @cache
 def _compiled(value):
     body = value.removeprefix("${{").removesuffix("}}").replace("&&", " and ").replace("||", " or ")
-    return compile(body, "<expression>", "eval")
+    return compile(body.strip(), "<expression>", "eval")
 
 
 @cache
