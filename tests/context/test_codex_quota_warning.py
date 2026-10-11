@@ -336,3 +336,13 @@ def test_session_end_closes_only_the_entry_this_process_owns(monkeypatch):
     monkeypatch.setattr("hooks.context.account_sessions.agent_pid", lambda start=None: 4242)
     hook_manager.on_session_end({"hook_event_name": "SessionEnd", "session_id": SID, "reason": "other"})
     assert closed == [(SID, 4242)]
+
+
+def test_codex_post_tool_hands_the_session_and_folder_to_the_inbox(monkeypatch):
+    seen = []
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.setattr(hook_manager, "_inject_inbox", lambda session, cwd: seen.append((session, cwd)))
+    monkeypatch.setattr(qp, "posttool_context", lambda session, tool, cwd: None)
+    hook_manager.on_post_tool_use({"session_id": SID, "tool_name": "Bash", "tool_input": {}, "cwd": "/r"})
+    flush("PostToolUse")
+    assert seen == [(SID, "/r")]
