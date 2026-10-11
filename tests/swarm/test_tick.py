@@ -1118,14 +1118,21 @@ def test_a_master_that_ended_in_seat_two_is_respawned_in_seat_two(store):
 
 
 def test_a_seat_two_master_that_crashed_without_finishing_is_dropped_and_refilled(store):
+    from unittest.mock import patch
+
     from scripts.swarm import launch_check
     from scripts.swarm_v2.masters import MasterSeats
 
     MasterSeats(store.redis).set_count("sw", 2)
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
-    tick("sw", store, ledger, runtime, 1)
+    with patch.object(launch_check, "begin") as begun:
+        tick("sw", store, ledger, runtime, 1)
     (second,) = [a for a in masters(store) if a.seat == "master-2@sw"]
-    assert second.state == "working" and second.name in launch_check.pending(store, "sw")
+    assert second.state == "working"
+    seat_checks = [
+        (c.args[1], c.args[2].name, c.args[3]) for c in begun.call_args_list if c.args[2].seat == second.seat
+    ]
+    assert seat_checks == [("sw", second.name, 1)]
     runtime.live.discard(second.name)
     tick("sw", store, ledger, runtime, 2 + STARTUP_GRACE_MS)
     (refilled,) = [a for a in masters(store) if a.seat == "master-2@sw"]
