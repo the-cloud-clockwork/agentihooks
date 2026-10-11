@@ -335,6 +335,36 @@ def test_swarm_set_refuses_a_master_count_holding_another_equals_sign(swarm, mon
     assert masters.MasterSeats(store.redis).count("paused-sw") == 1
 
 
+def test_swarm_set_gives_a_hive_to_a_seat_the_same_command_raised_the_count_for(swarm, monkeypatch, capsys):
+    store, _ = swarm
+    store.create(SwarmConfig("paused-sw", "/repo", 1, 1, state="paused"))
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    assert cli.main(["paused-sw", "set", "hive.anton-1=master-3", "masters=3", "hive.anton-2=master-2@paused-sw"]) == 0
+    owners = {"hives/anton-1": "master-3@paused-sw", "hives/anton-2": "master-2@paused-sw"}
+    assert masters.MasterSeats(store.redis).hive_owners("paused-sw") == owners
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["hive_owners"] == owners
+
+
+@pytest.mark.parametrize(
+    ("pair", "error"),
+    [
+        ("hive.=master-2", "swarm: a hive owner is set as hive.<hive id>=<master seat>"),
+        ("hive.anton-1=", "swarm: a hive owner is set as hive.<hive id>=<master seat>"),
+        (
+            "hive.anton-1=master-5",
+            "swarm: master-5@paused-sw is not a master seat of paused-sw, so it cannot own hive anton-1",
+        ),
+    ],
+)
+def test_swarm_set_refuses_a_hive_without_an_id_or_a_seat_outside_the_count(swarm, monkeypatch, capsys, pair, error):
+    store, _ = swarm
+    store.create(SwarmConfig("paused-sw", "/repo", 1, 1, state="paused"))
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    assert cli.main(["paused-sw", "set", "masters=2", pair]) == 1
+    assert capsys.readouterr().err.splitlines()[-1] == error
+    assert masters.MasterSeats(store.redis).hive_owners("paused-sw") == {}
+
+
 def test_refusals_name_the_count_they_refused():
     with pytest.raises(masters.MasterError) as below:
         masters.seats(SLUG, 0)

@@ -1117,6 +1117,21 @@ def test_a_master_that_ended_in_seat_two_is_respawned_in_seat_two(store):
     assert len(runtime.masters) == 3
 
 
+def test_a_seat_two_master_that_crashed_without_finishing_is_dropped_and_refilled(store):
+    from scripts.swarm import launch_check
+    from scripts.swarm_v2.masters import MasterSeats
+
+    MasterSeats(store.redis).set_count("sw", 2)
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, 1)
+    (second,) = [a for a in masters(store) if a.seat == "master-2@sw"]
+    assert second.state == "working" and second.name in launch_check.pending(store, "sw")
+    runtime.live.discard(second.name)
+    tick("sw", store, ledger, runtime, 2 + STARTUP_GRACE_MS)
+    (refilled,) = [a for a in masters(store) if a.seat == "master-2@sw"]
+    assert refilled.name != second.name and refilled.name in runtime.live
+
+
 def test_a_live_seat_two_master_neither_blocks_nor_stands_in_for_an_ended_lead(store):
     from scripts.swarm_v2.masters import MasterSeats
 

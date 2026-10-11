@@ -1043,7 +1043,11 @@ def _master_seats(slug, config, store, runtime, doc, now_ms):
     empty = [master_seats.seat(i) for i in range(2, count + 1) if seat_address(slug, master_seats.seat(i)) not in taken]
     actions = []
     for seat_name in empty:
-        if refused := seat_spawn.no_slot(config, runtime, MASTER) or seat_spawn.host_hold(slug, store, now_ms, MASTER):
+        if refused := (
+            seat_spawn.placed_elsewhere(runtime, MASTER, {})
+            or seat_spawn.no_slot(config, runtime, MASTER)
+            or seat_spawn.host_hold(slug, store, now_ms, MASTER)
+        ):
             return [*actions, refused]
         actions.append(_place_master_seat(slug, config, store, runtime, seat_name, now_ms, doc))
     return actions
@@ -1065,8 +1069,11 @@ def _place_master_seat(slug, config, store, runtime, seat_name, now_ms, doc):
     except seat_spawn.SeatFailed as failed:
         store.drop_agent(slug, failed.record.name)
         return f"master spawn failed in seat {failed.record.seat}: {failed.error}"
-    store.put_agent(slug, replace(placed_record(record, placed), state="working"))
+    record = replace(placed_record(record, placed), state="working")
+    store.put_agent(slug, record)
+    launch_check.begin(store, slug, record, now_ms)
     store.clear_handoff(slug, seat_name)
+    store.redis.hdel(store.key(slug, "launch-assignments"), seat_name)
     return f"spawned master {record.name} in seat {record.seat}"
 
 
