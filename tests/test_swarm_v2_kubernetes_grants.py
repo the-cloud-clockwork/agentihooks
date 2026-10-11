@@ -5,7 +5,8 @@ import pytest
 from scripts.swarm.store import AgentRecord
 from scripts.swarm_v2.auth_context import GrantRefused, Registration
 from scripts.swarm_v2.broadcast_bridge import GRANT_NAME
-from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused
+from scripts.swarm_v2.hand import Hand
+from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused, PreconditionFailed
 from scripts.swarm_v2.kubernetes.grants import PodGrants, Supervision
 from scripts.swarm_v2.kubernetes.spec import LAUNCH_DIR, LAUNCH_RECORD, PodTemplate, launch_name
 from scripts.swarm_v2.supervision import Launch
@@ -60,10 +61,10 @@ def pod(labels=None, **metadata) -> dict:
 
 
 class Api:
-    def __init__(self, found=None, failure=None, create_failure=None) -> None:
+    def __init__(self, found=None, failure=None, create_failure=None, delete_answer=True) -> None:
         self.namespace, self.found = NAMESPACE, found
-        self.failure, self.create_failure = failure, create_failure
-        self.reads, self.created = [], []
+        self.failure, self.create_failure, self.delete_answer = failure, create_failure, delete_answer
+        self.reads, self.created, self.deleted = [], [], []
 
     def read_pod(self, name):
         self.reads.append(name)
@@ -76,6 +77,12 @@ class Api:
             raise self.create_failure
         self.created.append(body)
         return body
+
+    def delete(self, kind, name, uid):
+        self.deleted.append((kind, name, uid))
+        if isinstance(self.delete_answer, Exception):
+            raise self.delete_answer
+        return self.delete_answer
 
 
 def registration() -> Registration:
@@ -120,10 +127,11 @@ def material(record=None, **changes) -> dict:
 def test_the_grant_lands_in_the_launch_config_map_its_pod_owns():
     api = Api(pod())
 
-    assert grants(api).hand(agent(), GRANT) is True
+    assert grants(api).hand(agent(), GRANT) == Hand(True, "handed", False)
 
     assert api.reads == [POD]
     assert api.created == [material()]
+    assert api.deleted == []
 
 
 def test_the_config_map_is_the_one_the_pod_template_mounts_at_the_launch_folder():
@@ -147,7 +155,7 @@ def test_the_launch_record_sits_where_the_pod_template_starts_the_supervisor():
 def test_the_config_map_holds_the_grant_and_the_launch_record_beside_it():
     api = Api(pod())
 
-    assert grants(api).hand(agent(), GRANT) is True
+    assert grants(api).hand(agent(), GRANT) == Hand(True, "handed", False)
 
     [created] = api.created
     assert sorted(created["data"]) == [GRANT_NAME, LAUNCH_RECORD]
@@ -158,7 +166,7 @@ def test_the_config_map_holds_the_grant_and_the_launch_record_beside_it():
 def test_a_set_exporter_is_copied_into_the_launch_record():
     api = Api(pod())
 
-    assert grants(api, ("python", "-m", "exporter")).hand(agent(), GRANT) is True
+    assert grants(api, ("python", "-m", "exporter")).hand(agent(), GRANT) == Hand(True, "handed", False)
 
     assert api.created == [material({**RECORD, "exporter": ["python", "-m", "exporter"]})]
 
@@ -181,7 +189,7 @@ def test_the_supervisor_loads_the_handed_record_against_the_registered_authority
 def test_a_grant_the_controller_did_not_issue_takes_no_config_map():
     api = Api(pod())
 
-    assert grants(api).hand(agent(), "sv2.forged") is False
+    assert grants(api).hand(agent(), "sv2.forged") == Hand(False, "grant_unverified", False)
 
     assert (api.reads, api.created) == ([], [])
 
@@ -194,7 +202,9 @@ def test_a_grant_the_store_cannot_check_takes_no_config_map():
 
     api = Api(pod())
 
-    assert PodGrants(api, SLUG, unreachable, Supervision("claude", None)).hand(agent(), GRANT) is False
+    assert PodGrants(api, SLUG, unreachable, Supervision("claude", None)).hand(agent(), GRANT) == Hand(
+        False, "grant_unverified", False
+    )
 
     assert (api.reads, api.created) == ([], [])
 
@@ -202,8 +212,9 @@ def test_a_grant_the_store_cannot_check_takes_no_config_map():
 def test_a_missing_pod_takes_no_grant():
     api = Api(None)
 
-    assert grants(api).hand(agent(), GRANT) is False
+    assert grants(api).hand(agent(), GRANT) == Hand(False, "pod_missing", False)
     assert api.created == []
+    assert api.deleted == []
 
 
 @pytest.mark.parametrize(
@@ -219,8 +230,9 @@ def test_a_missing_pod_takes_no_grant():
 def test_a_pod_another_execution_or_controller_owns_takes_no_grant(labels):
     api = Api(pod(labels))
 
-    assert grants(api).hand(agent(), GRANT) is False
+    assert grants(api).hand(agent(), GRANT) == Hand(False, "pod_foreign", False)
     assert api.created == []
+    assert api.deleted == []
 
 
 def test_a_pod_without_labels_takes_no_grant():
@@ -228,15 +240,17 @@ def test_a_pod_without_labels_takes_no_grant():
     del found["metadata"]["labels"]
     api = Api(found)
 
-    assert grants(api).hand(agent(), GRANT) is False
+    assert grants(api).hand(agent(), GRANT) == Hand(False, "pod_foreign", False)
     assert api.created == []
+    assert api.deleted == []
 
 
 def test_a_deleting_pod_takes_no_grant():
     api = Api(pod(deletionTimestamp="2026-10-10T20:00:00Z"))
 
-    assert grants(api).hand(agent(), GRANT) is False
+    assert grants(api).hand(agent(), GRANT) == Hand(False, "pod_foreign", False)
     assert api.created == []
+    assert api.deleted == []
 
 
 @pytest.mark.parametrize(
@@ -245,20 +259,39 @@ def test_a_deleting_pod_takes_no_grant():
 def test_an_unreadable_pod_takes_no_grant(failure):
     api = Api(pod(), failure=failure)
 
-    assert grants(api).hand(agent(), GRANT) is False
+    assert grants(api).hand(agent(), GRANT) == Hand(False, "pod_unreadable", False)
     assert api.created == []
+    assert api.deleted == []
 
 
 @pytest.mark.parametrize(
-    "failure",
+    ("failure", "reason"),
     [
-        AlreadyExists(f"swarm-{EXECUTION}-launch"),
-        ApiRefused(403, "Forbidden"),
-        ConnectionError("API server answered 503"),
-        TimeoutError("read"),
+        (AlreadyExists(f"swarm-{EXECUTION}-launch"), "config_map_exists"),
+        (ApiRefused(403, "Forbidden"), "config_map_refused"),
+        (ConnectionError("API server answered 503"), "config_map_unavailable"),
+        (TimeoutError("read"), "config_map_unavailable"),
     ],
 )
-def test_a_config_map_that_exists_or_is_refused_is_not_handed(failure):
+def test_a_config_map_that_exists_or_is_refused_removes_its_pod_and_names_why(failure, reason):
     api = Api(pod(), create_failure=failure)
 
-    assert grants(api).hand(agent(), GRANT) is False
+    assert grants(api).hand(agent(), GRANT) == Hand(False, reason, True)
+    assert api.deleted == [("pods", POD, "uid-1")]
+
+
+def test_a_pod_already_gone_after_a_refused_config_map_counts_as_removed():
+    api = Api(pod(), create_failure=ApiRefused(403, "Forbidden"), delete_answer=False)
+
+    assert grants(api).hand(agent(), GRANT) == Hand(False, "config_map_refused", True)
+    assert api.deleted == [("pods", POD, "uid-1")]
+
+
+@pytest.mark.parametrize(
+    "answer", [PreconditionFailed(POD), ApiRefused(403, "Forbidden"), ConnectionError("API server answered 503")]
+)
+def test_a_pod_that_cannot_be_removed_after_a_refused_config_map_says_so(answer):
+    api = Api(pod(), create_failure=ApiRefused(403, "Forbidden"), delete_answer=answer)
+
+    assert grants(api).hand(agent(), GRANT) == Hand(False, "config_map_refused", False)
+    assert api.deleted == [("pods", POD, "uid-1")]
