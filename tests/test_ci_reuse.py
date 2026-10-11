@@ -607,6 +607,19 @@ DECOYS = [
     "archive",
 ]
 ABSENT = "0123456789abcdef0123456789abcdef01234567"
+DECOY_REASONS = {
+    "event": "event is push",
+    "evidence": "no reuse.log evidence",
+    "head": "head commit unavailable",
+    "workflow": "workflow files differ at its head",
+    "metadata": "not exactly one required-tree-1 artifact",
+    "record": "run differed",
+    "commit": "commit.tree differed",
+    "tree": "commit.tree differed",
+    "coverage": "no coverage-3.12-1 artifact",
+    "jobs": "a required job did not pass",
+    "archive": "BadZipFile",
+}
 
 
 @pytest.mark.parametrize("decoy", DECOYS)
@@ -656,21 +669,7 @@ def test_a_rejected_newer_run_still_lets_an_older_full_pass_reuse(full_source, t
     assert result.returncode == 0, result.stdout + result.stderr
     assert "reused=true" in result.stdout
     assert f"run={8 if decoy == 'valid' else 7}\n" in result.stdout
-    reasons = {
-        "event": "event is push",
-        "evidence": "no reuse.log evidence",
-        "head": "head commit unavailable",
-        "workflow": "workflow files differ at its head",
-        "metadata": "not exactly one required-tree-1 artifact",
-        "record": "run differed",
-        "commit": "commit.tree differed",
-        "tree": "commit.tree differed",
-        "coverage": "no coverage-3.12-1 artifact",
-        "jobs": "a required job did not pass",
-        "archive": "BadZipFile",
-    }
-    if decoy in reasons:
-        assert f"Refused run 8: {reasons[decoy]}\n" in result.stdout
+    assert decoy == "valid" or f"Refused run 8: {DECOY_REASONS[decoy]}\n" in result.stdout
 
 
 def test_every_differing_key_is_named_together(full_source, tmp_path):
@@ -680,6 +679,15 @@ def test_every_differing_key_is_named_together(full_source, tmp_path):
     publish_record(env, responses, record)
     result = invoke(root, base, queue, "merge_group", tmp_path / "keys.json", env)
     assert "Refused run 7: inputs.base, run differed\n" in result.stdout
+
+
+def test_a_proof_that_is_not_an_object_refuses_only_its_run(full_source, tmp_path):
+    root, base, _, queue, env, responses, _ = full_source
+    publish_record(env, responses, [1])
+    result = invoke(root, base, queue, "merge_group", tmp_path / "list.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Refused run 7: AttributeError\n" in result.stdout
+    assert "reused=false" in result.stdout
 
 
 def test_every_missing_coverage_shard_is_named_together(full_source, tmp_path):
@@ -755,4 +763,24 @@ def test_an_unreadable_pull_request_head_lists_no_runs(full_source, tmp_path, pu
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == "No reuse: cannot read the head of pull request 5\n"
+    assert not (temp / "evidence/runs.json").exists()
+
+
+def test_an_unreadable_run_list_says_which_head(full_source, tmp_path):
+    from scripts import ci_reuse
+
+    _, _, head, _, env, responses, _ = full_source
+    responses.pop(RUNS.format(head))
+    Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
+    [step] = [step for step in ci_reuse.reuse_job()["steps"] if step.get("name") == FETCH]
+    temp = tmp_path / "runner"
+    temp.mkdir()
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        env=dict(env, GITHUB_REPOSITORY="o/r", RUNNER_TEMP=str(temp), QUEUE_REF=QUEUE_REF),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == f"No reuse: cannot list the passed runs of head {head}\n"
     assert not (temp / "evidence/runs.json").exists()

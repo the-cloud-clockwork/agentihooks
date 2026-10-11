@@ -6,12 +6,24 @@ import os
 import re
 import subprocess
 import zipfile
+import zlib
 from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
 
 EVIDENCE = ("artifacts.jsonl", "proof.zip", "jobs.jsonl", "reuse.log")
+UNUSABLE = (
+    subprocess.CalledProcessError,
+    KeyError,
+    ValueError,
+    OSError,
+    zipfile.BadZipFile,
+    zlib.error,
+    NotImplementedError,
+    AttributeError,
+    TypeError,
+)
 
 
 def gate_steps() -> list[dict]:
@@ -195,7 +207,7 @@ def _find(args, current):
     for run in runs:
         try:
             reason = _refusal(args, current, workflow, run)
-        except (subprocess.CalledProcessError, KeyError, ValueError, OSError, zipfile.BadZipFile) as exc:
+        except UNUSABLE as exc:
             reason = type(exc).__name__
         if reason:
             print(f"Refused run {run['id']}: {reason}")
@@ -220,7 +232,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.event == "merge_group":
         try:
             source = _find(args, record)
-        except (subprocess.CalledProcessError, KeyError, ValueError, OSError, zipfile.BadZipFile) as exc:
+        except UNUSABLE as exc:
             print(f"No reusable full result: {type(exc).__name__}")
     record["reused"] = source is not None
     args.record.write_text(json.dumps(record))
