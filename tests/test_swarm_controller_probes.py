@@ -38,22 +38,37 @@ class Fetch:
             raise self.error
 
 
-def held(store):
+def held(store, owner="hive-fixture"):
     from scripts.swarm import lease
 
-    assert lease.acquire(store, SLUG, "hive-fixture") is not None
+    assert lease.acquire(store, SLUG, owner) is not None
 
 
 def test_live_passes_when_the_open_endpoint_answers_and_every_lease_is_held(store, capsys):
     held(store)
     fetch = Fetch()
 
-    assert controller_probes.live(ENV, store, fetch) == 0
-    assert fetch.calls == [("http://127.0.0.1:8780/v2/health/live", controller_probes.LIVE_TIMEOUT)]
+    assert controller_probes.live(ENV, store, fetch, "hive-fixture") == 0
+    assert fetch.calls == [("http://127.0.0.1:8780/v2/health/live", 3)]
     assert capsys.readouterr().out == "controller: live\n"
 
 
-def test_live_fails_when_the_open_endpoint_does_not_answer(store, capsys):
+def test_live_fails_when_the_lease_holder_does_not_answer(store, capsys):
+    held(store)
+
+    assert controller_probes.live(ENV, store, Fetch(OSError("connection refused")), "hive-fixture") == 1
+    assert capsys.readouterr().out == "controller: the health endpoint did not answer: OSError: connection refused\n"
+
+
+def test_live_passes_a_standby_while_another_hive_holds_the_lease(store, capsys):
+    held(store, "hive-rival")
+
+    assert controller_probes.live(ENV, store, Fetch(OSError("connection refused")), "hive-fixture") == 0
+    assert capsys.readouterr().out == "controller: standby while hive-rival holds the fixture lease\n"
+
+
+def test_live_takes_its_own_hive_from_the_controller_environment(store, monkeypatch, capsys):
+    monkeypatch.setenv("SWARM_HIVE_ID", "hive-fixture")
     held(store)
 
     assert controller_probes.live(ENV, store, Fetch(OSError("connection refused"))) == 1
@@ -63,26 +78,32 @@ def test_live_fails_when_the_open_endpoint_does_not_answer(store, capsys):
 def test_live_fails_when_a_swarm_has_no_live_controller_lease(store, capsys):
     fetch = Fetch()
 
-    assert controller_probes.live(ENV, store, fetch) == 1
+    assert controller_probes.live(ENV, store, fetch, "hive-fixture") == 1
+    assert fetch.calls == []
     assert capsys.readouterr().out == "controller: no live controller lease for ['fixture']\n"
 
 
-def test_ready_passes_on_the_deep_report_while_redis_answers(store, capsys):
-    assert controller_probes.ready(ENV, store, lambda: "brain_unreachable") == 0
-    report = json.loads(capsys.readouterr().out)
-    assert report["probe"] == "deep"
-    assert report["redis"] == "ok"
-    assert report["brain"] == "unavailable"
-    assert report["status"] == "degraded"
+def test_ready_passes_on_the_deep_report_while_the_api_and_redis_answer(store, capsys):
+    fetch = Fetch()
+
+    assert controller_probes.ready(ENV, store, fetch) == 0
+    assert fetch.calls == [("http://127.0.0.1:8780/v2/health/live", 3)]
+    assert json.loads(capsys.readouterr().out) == {"probe": "deep", "status": "ok", "redis": "ok", "remediation": []}
 
 
-def test_ready_fails_when_redis_is_unavailable(store, server, capsys):
+def test_ready_fails_while_the_control_api_does_not_answer(store, capsys):
+    assert controller_probes.ready(ENV, store, Fetch(OSError("connection refused"))) == 1
+    assert capsys.readouterr().out == "controller: the control API does not answer: OSError: connection refused\n"
+
+
+def test_ready_fails_with_its_hint_when_redis_is_unavailable(store, server, capsys):
     server.connected = False
 
-    assert controller_probes.ready(ENV, store, lambda: "ok") == 1
+    assert controller_probes.ready(ENV, store, Fetch()) == 1
     report = json.loads(capsys.readouterr().out)
-    assert report["redis"] == "unavailable"
-    assert report["brain"] == "ok"
+    assert (report["status"], report["redis"]) == ("degraded", "unavailable")
+    assert [hint["class"] for hint in report["remediation"]] == ["dependency_unavailable"]
+    assert all(hint["hint"] for hint in report["remediation"])
 
 
 @pytest.mark.parametrize("action", ["live", "ready"])
@@ -93,3 +114,16 @@ def test_the_controller_command_runs_each_probe(monkeypatch, action):
 
     assert main([action]) == 3
     assert calls == ["store"]
+
+
+@pytest.mark.parametrize("action", ["live", "ready"])
+def test_the_controller_command_fails_its_probe_when_redis_refuses_the_connection(monkeypatch, capsys, action):
+    from scripts.swarm.store import SwarmError
+
+    def refused():
+        raise SwarmError("Redis is unreachable")
+
+    monkeypatch.setattr("scripts.swarm.controller.connect", refused)
+
+    assert main([action]) == 1
+    assert capsys.readouterr().out == "controller: Redis is unreachable\n"

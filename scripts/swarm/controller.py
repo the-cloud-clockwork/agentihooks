@@ -164,7 +164,12 @@ def main(argv: list[str]) -> int:
     if args.action != "run":
         from scripts.swarm import controller_probes
 
-        return getattr(controller_probes, args.action)(os.environ, connect())
+        try:
+            store = connect()
+        except SwarmError as exc:
+            print(f"controller: {exc}")
+            return 1
+        return getattr(controller_probes, args.action)(os.environ, store)
     from scripts import operator_env
     from scripts.swarm import commands
     from scripts.swarm_v2 import control_service

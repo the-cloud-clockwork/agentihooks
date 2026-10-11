@@ -101,7 +101,6 @@ controller:
     periodSeconds: 10
     timeoutSeconds: 5
     failureThreshold: 3
-  # Used with controller.api.enabled: the deep diagnostics report, failing while Redis is unavailable.
   readinessProbe:
     periodSeconds: 10
     timeoutSeconds: 8

@@ -274,14 +274,15 @@ if [[ -z $built ]]; then
 fi
 printf 'the deployed controller built the Kubernetes runtime: %s\n' "$built"
 for probe in liveness readiness; do
-  wired="$(kubectl get deployment "$release-controller" -o jsonpath="{.spec.template.spec.containers[0].${probe}Probe.exec.command[2]}")"
-  want="live"
-  [[ $probe == readiness ]] && want="ready"
-  if [[ $wired != *"main([\"$want\"])"* ]]; then
-    printf 'the controller %s probe does not run controller %s: %s\n' "$probe" "$want" "$wired" >&2
+  wired="$(kubectl get deployment "$release-controller" -o jsonpath="{.spec.template.spec.containers[0].${probe}Probe.exec.command[*]}")"
+  want="agentihooks controller live"
+  [[ $probe == readiness ]] && want="agentihooks controller ready"
+  if [[ $wired != "$want" ]]; then
+    printf 'the controller %s probe runs %s, not %s\n' "$probe" "$wired" "$want" >&2
     exit 1
   fi
-  if ! answer="$(kubectl exec "deployment/$release-controller" -c controller -- python -c "$wired")"; then
+  read -r -a command <<<"$wired"
+  if ! answer="$(kubectl exec "deployment/$release-controller" -c controller -- "${command[@]}")"; then
     printf 'the controller %s probe failed: %s\n' "$probe" "$answer" >&2
     exit 1
   fi
