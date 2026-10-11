@@ -121,14 +121,11 @@ class ProbeFile:
         self.removed = False
         files.append(self)
 
-    def open(self, mode, buffering):
-        assert (mode, buffering) == ("xb", 0)
-        return self
-
     def __enter__(self):
         return self
 
     def __exit__(self, *args):
+        self.removed = True
         return None
 
     def write(self, chunk):
@@ -139,35 +136,24 @@ class ProbeFile:
     def fileno(self):
         return 17
 
-    def stat(self):
-        from types import SimpleNamespace
-
-        return SimpleNamespace(st_size=self.size)
-
-    def unlink(self, missing_ok):
-        assert missing_ok is True
-        self.removed = True
-
-
-class ProbeFolder:
-    def __init__(self, path, files):
-        self.path, self.files = path, files
-
-    def __str__(self):
-        return self.path
-
-    def __truediv__(self, name):
-        assert name.startswith("storage-proof-")
-        return ProbeFile(self.path, self.files)
-
 
 @pytest.fixture
 def default_filesystem(probe, monkeypatch):
+    from types import SimpleNamespace
+
     files, flushes = [], []
 
     def device(path):
         assert str(path) in ("/home/worker", "/tmp")
         return {"type": "ext4"}
+
+    def create(dir, buffering):
+        assert buffering == 0
+        return ProbeFile(str(dir), files)
+
+    def stat(fd):
+        assert fd == 17
+        return SimpleNamespace(st_size=files[-1].size)
 
     def sync(fd):
         assert fd == 17
@@ -176,9 +162,10 @@ def default_filesystem(probe, monkeypatch):
         assert (fd, offset, length, flag) == (17, 0, 0, probe.os.POSIX_FADV_DONTNEED)
         flushes.append((files[-1].folder, files[-1].size))
 
-    monkeypatch.setattr(probe, "Path", lambda path: ProbeFolder(path, files))
+    monkeypatch.setattr(probe.tempfile, "TemporaryFile", create)
     monkeypatch.setattr(probe, "filesystem", device)
     monkeypatch.setattr(probe, "memory", lambda: {"used": 100, "anonymous": 20, "shmem": 4})
+    monkeypatch.setattr(probe.os, "fstat", stat)
     monkeypatch.setattr(probe.os, "fsync", sync)
     monkeypatch.setattr(probe.os, "posix_fadvise", evict)
     return files, flushes
