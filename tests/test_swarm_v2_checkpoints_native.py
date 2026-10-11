@@ -302,8 +302,8 @@ def test_a_linked_rollout_found_by_name_is_not_read(tmp_path):
     assert result == native.Unavailable("codex", native.ESCAPE)
 
 
-def test_a_rollout_under_a_linked_folder_inside_the_sessions_is_refused(tmp_path):
-    home = cases.codex_home(tmp_path, index=False)
+def test_an_indexed_rollout_under_a_linked_folder_inside_the_sessions_is_refused(tmp_path):
+    home = cases.codex_home(tmp_path)
     day = home / "sessions" / "2026" / "10" / "11"
     day.rename(day.with_name("12"))
     day.symlink_to(day.with_name("12"))
