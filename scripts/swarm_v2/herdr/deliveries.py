@@ -7,11 +7,11 @@ from pathlib import Path
 
 from scripts.swarm_v2.herdr.attach import ClientHome
 from scripts.swarm_v2.herdr.endpoints import EndpointRefused
-from scripts.swarm_v2.herdr.target import DELIVERIES, Deliveries, listing
+from scripts.swarm_v2.herdr.target import Deliveries, listing
 
 
 def journal() -> Path:
-    return ClientHome(Path.home()).terminals / DELIVERIES
+    return ClientHome(Path.home()).journal
 
 
 def read(path: Path, now: int) -> dict[str, list[dict]]:

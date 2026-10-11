@@ -89,6 +89,12 @@ def _expire(entries: dict[str, dict], now: int) -> None:
             entries[key] = {**entry, "state": "expired"}
 
 
+def _make_room(entries: dict[str, dict]) -> None:
+    pending = sorted((entry.get("since", 0), key) for key, entry in entries.items() if entry.get("state") == "pending")
+    for _, key in pending[: max(len(pending) - PENDING_LIMIT + 1, 0)]:
+        entries[key] = {**entries[key], "state": "expired"}
+
+
 def _refusal(done: subprocess.CompletedProcess) -> str:
     detail = " ".join((done.stderr or "").split())[:REASON_CHARS]
     return f"herdr exited {done.returncode}: {detail}" if detail else f"herdr exited {done.returncode}"
@@ -263,8 +269,7 @@ class Router:
                 return self._replayed(held, target, key, operation_id)
             now = int(self.clock())
             _expire(entries, now)
-            if sum(entry.get("state") == "pending" for entry in entries.values()) >= PENDING_LIMIT:
-                raise EndpointRefused("journal_full", "too many pane sends await an audit of their unknown outcome")
+            _make_room(entries)
             argv = self.command(target, operation, *args)
             self._confirm(target)
             entries[operation_id] = {"target": key, "state": "pending", "since": now}

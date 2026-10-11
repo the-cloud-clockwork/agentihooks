@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from scripts.swarm_v2.auth_context import Registration
-from scripts.swarm_v2.herdr import attach, capabilities
+from scripts.swarm_v2.herdr import attach, capabilities, deliveries
 from scripts.swarm_v2.herdr.attach import ClientHome, Terminal
 from scripts.swarm_v2.herdr.endpoints import Endpoint, EndpointRefused, TerminalAuthority, grant_scope
 from tests import sv2_hdr01_cases
@@ -85,6 +85,13 @@ def terminal(tmp_path, addresses=("10.43.12.7",), namespace="swarm-workers"):
     runner = Runner(home)
     authority = TerminalAuthority(Ed25519PrivateKey.generate(), lambda: fixture()["now"])
     return Terminal(home, authority, namespace, runner, lookup_of(addresses)), runner
+
+
+def test_the_controller_router_journals_where_the_listing_and_health_pass_read(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "client"))
+    built, _ = terminal(tmp_path)
+    expected = tmp_path / "client" / ".ssh" / "swarm-terminals" / "deliveries.json"
+    assert built.router().deliveries.path == deliveries.journal() == expected
 
 
 def refusal(action) -> tuple[str, str]:
