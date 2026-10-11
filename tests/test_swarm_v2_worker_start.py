@@ -245,6 +245,18 @@ def test_the_start_needs_an_attempt_and_a_launch_record(argv, capsys):
     assert capsys.readouterr().err == "ERROR worker start requires attempt directory and launch record\n"
 
 
+def test_the_start_reads_its_operands_from_the_command_line(monkeypatch):
+    calls = []
+    monkeypatch.setattr(start.sys, "argv", ["start", "/home/worker/attempts/a", "/launch.json"])
+    monkeypatch.setattr(start.os, "umask", lambda mask: 0o022)
+    monkeypatch.setattr(start, "prepare", lambda attempt, launch: calls.append((attempt, launch)))
+    monkeypatch.setattr(start.supervision_runtime, "main", lambda argv: 70)
+
+    assert start.main() == 70
+
+    assert calls == [(Path("/home/worker/attempts/a"), Path("/launch.json"))]
+
+
 class Recorder(BaseHTTPRequestHandler):
     status, answer, seen = 200, b"{}", []
 
@@ -286,12 +298,17 @@ def test_post_registers_with_the_grant_as_bearer(server, monkeypatch):
     ]
 
 
-def test_post_registers_on_the_same_path_for_a_slash_terminated_control_url(server, monkeypatch):
-    monkeypatch.setattr(Recorder, "answer", json.dumps(ANSWER).encode())
+def test_post_registers_on_the_same_path_for_a_slash_terminated_control_url(monkeypatch):
+    seen = []
 
-    assert start.post(server + "/", GRANT, {}) == (200, ANSWER)
+    def unreachable(request, timeout):
+        seen.append(request.full_url)
+        raise ConnectionRefusedError("refused")
 
-    assert [seen[0] for seen in Recorder.seen] == ["/v2/executions/register"]
+    monkeypatch.setattr(start.urllib.request, "urlopen", unreachable)
+
+    assert start.post("http://controller.swarm.invalid/apiX/", GRANT, {}) == (503, {})
+    assert seen == ["http://controller.swarm.invalid/apiX/v2/executions/register"]
 
 
 def test_post_reports_a_refusal_status_without_its_body(server, monkeypatch):

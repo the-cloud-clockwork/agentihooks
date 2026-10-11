@@ -14,7 +14,7 @@ from subprocess import SubprocessError
 from urllib.parse import urlsplit
 
 from scripts.swarm_v2 import supervision_runtime, worker_home
-from scripts.swarm_v2.broadcast_bridge import API_URL, GRANT_NAME
+from scripts.swarm_v2.broadcast_bridge import API_URL, AUTHORIZATION, GRANT_NAME, JSON_HEADERS
 from scripts.swarm_v2.supervision import SCHEMA_VERSION, LaunchRefused, checked_authority
 
 TEMPLATES = Path("/opt/agentihooks/templates")
@@ -31,8 +31,8 @@ Send = Callable[[str, str, dict], tuple[int, object]]
 
 
 def post(url: str, grant: str, body: dict) -> tuple[int, object]:
-    headers = {"Authorization": f"Bearer {grant}", "Content-Type": "application/json"}
-    request = urllib.request.Request(url.rstrip("/") + REGISTER, json.dumps(body).encode(), headers, method="POST")
+    headers = {**JSON_HEADERS, AUTHORIZATION: f"Bearer {grant}"}
+    request = urllib.request.Request(url.rstrip("/") + REGISTER, json.dumps(body).encode(), headers)
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as answer:
             status, text = answer.status, answer.read()
@@ -77,7 +77,7 @@ def _grant(folder: Path) -> str:
     try:
         grant = (folder / GRANT_NAME).read_text().strip()
     except OSError:
-        grant = ""
+        raise LaunchRefused("missing launch grant") from None
     if not grant:
         raise LaunchRefused("missing launch grant")
     return grant
@@ -102,7 +102,7 @@ def _private(path: Path, document: dict) -> None:
     staged = path.with_name(f"{path.name}.tmp")
     staged.unlink(missing_ok=True)
     with os.fdopen(os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as handle:
-        json.dump(document, handle, sort_keys=True)
+        json.dump(document, handle)
     staged.replace(path)
 
 
@@ -118,7 +118,7 @@ def prepare(
         raise LaunchRefused("attempt folder does not name the launch execution")
     grant = _grant(launch.parent)
     authority = register(spec, grant, send, sleep)
-    attempt.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    attempt.parent.mkdir(mode=0o700, exist_ok=True)
     boot(
         worker_home.Request(
             attempt.parent,
@@ -147,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, KeyError, TypeError, SubprocessError) as refused:
         print(f"ERROR worker start refused: {refused}", file=sys.stderr)
         return 64
-    print(json.dumps({"worker_start": "prepared", "attempt": Path(args[0]).name, "uid": os.getuid()}), flush=True)
+    print(json.dumps({"worker_start": "prepared", "attempt": Path(args[0]).name, "uid": os.getuid()}))
     return supervision_runtime.main(args)
 
 
