@@ -6,10 +6,12 @@ from unittest import mock
 
 import pytest
 
+from scripts.swarm import lease
 from scripts.swarm.store import SwarmError
 from scripts.swarm_v2 import deployed
-from scripts.swarm_v2.kubernetes import client, failures
+from scripts.swarm_v2.kubernetes import client, failures, replacement
 from scripts.swarm_v2.kubernetes.failures import AccountSlot, Decision
+from scripts.swarm_v2.runtime.base import Outcome, Status
 from tests import sv2_kub05_cases as cases
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
@@ -797,6 +799,156 @@ def test_account_slot_releases_only_its_own_attempt(world):
     world.store.put_agent(cases.SLUG, unaccounted)
     AccountSlot(world.client(), cases.SLUG, capacity).release(other.execution_id)
     assert world.slots() == [other.execution_id]
+
+
+class _Ledger:
+    def __init__(self, refusals=0):
+        self.calls, self.refusals = [], refusals
+
+    def update_task(self, slug, task_id, fields):
+        if self.refusals:
+            self.refusals -= 1
+            raise SwarmError("ledger fixture refused")
+        self.calls.append((slug, task_id, fields, lease.EPOCH.get()))
+        return {}
+
+
+class _Relaunch:
+    def __init__(self, *statuses):
+        self.statuses, self.calls = list(statuses), []
+
+    def __call__(self, request, agent):
+        self.calls.append((request, agent))
+        status = self.statuses.pop(0) if self.statuses else Status.OK
+        return Outcome("spawn", status, "kubernetes")
+
+
+def _hash(world, name):
+    return world.store.redis.hgetall(world.store.key(cases.SLUG, name))
+
+
+def _marks(ledger):
+    return [fields for _, _, fields, _ in ledger.calls]
+
+
+def test_a_pending_recovery_marks_its_task_until_the_resumed_replacement_launches_from_its_checkpoint(world):
+    recovery, ledger, relaunch = world.recovery(world.live, automatic=False), _Ledger(), _Relaunch()
+    replacements = replacement.Replacements(recovery, relaunch, ledger)
+    world.show(world.old, "oom_killed")
+    assert world.reconcile(recovery) == {world.old.execution_id: "fenced"}
+    epoch = world.live.held.epoch
+
+    assert replacements() == {}
+    assert replacements() == {}
+    assert ledger.calls == [(cases.SLUG, "task", {"awaiting": "recovery_pending"}, epoch)]
+    assert _hash(world, replacement.MARKED) == {"task": "recovery_pending"}
+    assert relaunch.calls == []
+
+    decision = recovery.decide(world.old.execution_id, "resume")
+    assert replacements() == {world.old.execution_id: "launched"}
+    [(request, agent)] = relaunch.calls
+    successor = world.store.execution(cases.SLUG, decision.replacement)
+    assert agent == successor
+    assert (request.config, request.lane, request.name) == (world.store.config(cases.SLUG), "eng", successor.name)
+    assert request.task == {"id": "task", "seat": successor.seat, "controller_epoch": epoch, "checkpoint": "ckpt-one-2"}
+    assert ledger.calls[1:] == [(cases.SLUG, "task", {"awaiting": ""}, epoch)]
+    assert _hash(world, replacement.MARKED) == {}
+    assert _hash(world, replacement.LAUNCHED) == {world.old.execution_id: decision.replacement}
+
+    assert replacements() == {}
+    assert (len(relaunch.calls), len(ledger.calls)) == (1, 2)
+
+
+def test_a_refused_replacement_launch_keeps_its_task_waiting_and_launches_on_a_later_pass(world):
+    recovery, ledger, relaunch = world.recovery(world.live), _Ledger(), _Relaunch(Status.UNAVAILABLE)
+    replacements = replacement.Replacements(recovery, relaunch, ledger)
+    world.show(world.old, "oom_killed")
+    world.reconcile(recovery)
+    successor = recovery.decision(world.old.execution_id).replacement
+
+    assert replacements() == {world.old.execution_id: "unavailable"}
+    assert _marks(ledger) == [{"awaiting": "recovery_pending"}]
+    assert _hash(world, replacement.LAUNCHED) == {}
+    assert replacements() == {world.old.execution_id: "launched"}
+    assert _marks(ledger) == [{"awaiting": "recovery_pending"}, {"awaiting": ""}]
+    assert [agent.execution_id for _, agent in relaunch.calls] == [successor, successor]
+    assert relaunch.calls[1][0].task["checkpoint"] == "ckpt-one-2"
+
+
+def test_a_fresh_replacement_launches_without_a_checkpoint_and_a_refused_mark_waits_for_the_next_pass(world, capsys):
+    recovery, ledger, relaunch = world.recovery(world.live, automatic=False), _Ledger(refusals=1), _Relaunch()
+    replacements = replacement.Replacements(recovery, relaunch, ledger)
+    world.show(world.old, "oom_killed")
+    world.reconcile(recovery)
+
+    assert replacements() == {}
+    assert (ledger.calls, _hash(world, replacement.MARKED)) == ([], {})
+    assert (
+        capsys.readouterr().out
+        == "controller: the ledger refused the recovery mark on task task: ledger fixture refused\n"
+    )
+    replacements()
+    assert _marks(ledger) == [{"awaiting": "recovery_pending"}]
+
+    recovery.decide(world.old.execution_id, "fresh")
+    ledger.refusals = 1
+    assert replacements() == {world.old.execution_id: "launched"}
+    [(request, _)] = relaunch.calls
+    assert request.task["checkpoint"] == ""
+    assert _hash(world, replacement.MARKED) == {"task": "recovery_pending"}
+    assert replacements() == {}
+    assert _marks(ledger) == [{"awaiting": "recovery_pending"}, {"awaiting": ""}]
+    assert _hash(world, replacement.MARKED) == {}
+
+
+def test_a_stale_controller_records_no_launch_and_writes_no_mark(world):
+    recovery, ledger, relaunch = world.recovery(world.live), _Ledger(), _Relaunch()
+    replacements = replacement.Replacements(recovery, relaunch, ledger)
+    world.show(world.old, "oom_killed")
+    world.reconcile(recovery)
+
+    def stale():
+        raise SwarmError("the controller lease is stale")
+
+    world.live.require = stale
+    with pytest.raises(SwarmError, match="stale"):
+        replacements()
+    assert len(relaunch.calls) == 1
+    assert (_hash(world, replacement.LAUNCHED), ledger.calls) == ({}, [])
+
+
+def test_a_stale_controller_writes_no_pending_mark(world):
+    recovery, ledger = world.recovery(world.live, automatic=False), _Ledger()
+    replacements = replacement.Replacements(recovery, _Relaunch(), ledger)
+    world.show(world.old, "oom_killed")
+    world.reconcile(recovery)
+
+    def stale():
+        raise SwarmError("the controller lease is stale")
+
+    world.live.require = stale
+    with pytest.raises(SwarmError, match="stale"):
+        replacements()
+    assert (_hash(world, replacement.MARKED), ledger.calls) == ({}, [])
+
+
+def test_the_deployed_pass_launches_a_decided_replacement_after_it_reconciles(world):
+    ledger, relaunch = _Ledger(), _Relaunch()
+    service = SimpleNamespace(controller=world.live, grants=_Grants(), runtime=SimpleNamespace(relaunch=relaunch))
+    recover = deployed.recovery_pass(service, SimpleNamespace(image_tag="dev"), _Cluster(world), ledger)
+    passing = recover.replacements
+    assert (passing.recovery, passing.relaunch, passing.ledger) == (recover.recovery, relaunch, ledger)
+    assert recover() == {world.old.execution_id: "working"}
+    assert ledger.calls == []
+    world.ready.discard(world.fx["first"]["node"])
+    _gone(world)
+
+    assert recover() == {world.old.execution_id: "fenced"}
+    assert _marks(ledger) == [{"awaiting": "recovery_pending"}]
+    decision = recover.recovery.decide(world.old.execution_id, "fresh")
+    assert recover() == {decision.replacement: "unobserved"}
+    assert [agent.execution_id for _, agent in relaunch.calls] == [decision.replacement]
+    assert _marks(ledger) == [{"awaiting": "recovery_pending"}, {"awaiting": ""}]
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])
