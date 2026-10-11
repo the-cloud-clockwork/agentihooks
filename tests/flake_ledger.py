@@ -1,4 +1,8 @@
-"""Writes one JSON line per test that needed a retry to the file named by CI_FLAKES."""
+"""Writes one JSON line per test that needed a retry to the file named by CI_FLAKES.
+
+pytest-rerunfailures wraps every attempt in its own logstart and logfinish, so a test is final
+at the first logfinish whose attempt logged no rerun report.
+"""
 
 import json
 import os
@@ -14,25 +18,38 @@ def _error(report) -> str:
 class FlakeLedger:
     def __init__(self, path: Path):
         self.path = path
+        self.attempts: dict[str, int] = {}
         self.errors: dict[str, list[str]] = {}
+        self.retrying: set[str] = set()
+        self.failed: set[str] = set()
 
     def pytest_runtest_logreport(self, report):
         if report.outcome == "rerun":
-            self.errors.setdefault(report.nodeid, []).append(_error(report))
+            self.retrying.add(report.nodeid)
+        elif report.failed:
+            self.failed.add(report.nodeid)
+        else:
             return
-        if report.when != "call" and not report.failed:
+        self.errors.setdefault(report.nodeid, []).append(_error(report))
+
+    def pytest_runtest_logfinish(self, nodeid):
+        self.attempts[nodeid] = self.attempts.get(nodeid, 0) + 1
+        if nodeid in self.retrying:
+            self.retrying.discard(nodeid)
+            self.failed.discard(nodeid)
             return
-        errors = self.errors.pop(report.nodeid, None)
-        if errors is None:
+        attempts = self.attempts.pop(nodeid)
+        errors = self.errors.pop(nodeid, [])
+        failed = nodeid in self.failed
+        self.failed.discard(nodeid)
+        if attempts == 1:
             return
-        if report.failed:
-            errors.append(_error(report))
         record = {
-            "test": report.nodeid,
+            "test": nodeid,
             "run": os.environ.get("GITHUB_RUN_ID"),
             "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
-            "attempts": len(errors) + report.passed,
-            "outcome": "flaky" if report.passed else "failed",
+            "attempts": attempts,
+            "outcome": "failed" if failed else "flaky",
             "errors": errors,
         }
         with self.path.open("a") as ledger:

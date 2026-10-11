@@ -72,7 +72,7 @@ Every check, whether a test or a job, is a unit with an id and an input key.
 
 - Bounded: three attempts in total, set once per repo. A consistent failure stays red. Proven: the workflow shape test failed all three attempts in run 38099973312 and its shard stayed red.
 - In place: the retry runs inside the same pytest worker with function fixtures rebuilt and wider fixtures kept. A broken session fixture, such as a dead browser, fails again and stays red.
-- Counted: every retry is a ledger line. A unit flaky on two separate runs within seven days raises a ledger follow up naming it. Retry absorbs a flake; it does not remove the follow up to fix it.
+- Counted: every retried test is one ledger line with its attempts and each failure line. A unit flaky on two separate runs within seven days raises a ledger follow up naming it. Retry absorbs a flake; it does not remove the follow up to fix it.
 - Off where kills matter: mutation runs and the leak detector run without retry, because a retried test can let a mutant survive or hide an order dependent leak. The retry flags go on the pytest command line of the unit step, never in `PYTEST_ADDOPTS`, so nested runners do not inherit them.
 - Jobs: a job step retries in place only when its workflow declares it idempotent, such as an artifact download, a registry pull or a Sonar server call. Deploys never retry. The durations download race (10 queue failures) is the first such step.
 

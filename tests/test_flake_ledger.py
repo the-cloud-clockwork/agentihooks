@@ -37,6 +37,28 @@ def broken():
 
 def test_setup_always_fails(broken):
     pass
+
+
+@pytest.fixture
+def teardown_breaks_once():
+    yield
+    CALLS["teardown"] = CALLS.get("teardown", 0) + 1
+    if CALLS["teardown"] == 1:
+        raise RuntimeError("teardown breaks the first attempt")
+
+
+def test_teardown_fails_once(teardown_breaks_once):
+    pass
+
+
+@pytest.fixture
+def teardown_breaks():
+    yield
+    raise RuntimeError("teardown breaks every attempt")
+
+
+def test_teardown_always_fails(teardown_breaks):
+    pass
 """
 
 
@@ -90,9 +112,16 @@ def test_a_test_failing_every_attempt_fails_after_three_attempts(tmp_path, worke
         "test_probes.py::test_fails_once",
         "test_probes.py::test_always_fails",
         "test_probes.py::test_setup_always_fails",
+        "test_probes.py::test_teardown_fails_once",
+        "test_probes.py::test_teardown_always_fails",
     }
-    assert by_test["test_probes.py::test_fails_once"]["outcome"] == "flaky"
-    for name in ("test_always_fails", "test_setup_always_fails"):
+    for name in ("test_fails_once", "test_teardown_fails_once"):
+        assert by_test[f"test_probes.py::{name}"]["outcome"] == "flaky"
+        assert by_test[f"test_probes.py::{name}"]["attempts"] == 2
+    assert by_test["test_probes.py::test_teardown_fails_once"]["errors"] == [
+        "RuntimeError: teardown breaks the first attempt"
+    ]
+    for name in ("test_always_fails", "test_setup_always_fails", "test_teardown_always_fails"):
         record = by_test[f"test_probes.py::{name}"]
         assert record["outcome"] == "failed"
         assert record["attempts"] == 3
@@ -108,7 +137,10 @@ def test_a_run_without_retries_writes_no_ledger(tmp_path):
 
 
 def test_unit_shards_retry_on_the_command_line_and_upload_the_ledger():
-    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]["steps"]
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    for scope in (workflow, workflow["jobs"]["unit"]):
+        assert "reruns" not in str(scope.get("env", {}))
+    steps = workflow["jobs"]["unit"]["steps"]
     names = [step.get("name") for step in steps]
     run = steps[names.index("Run tests")]
     assert "-p tests.flake_ledger --reruns 2 " in run["run"]
