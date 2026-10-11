@@ -267,6 +267,29 @@ def test_the_command_reports_a_client_that_cannot_run(operator_shell, monkeypatc
     )
 
 
+@pytest.mark.parametrize(
+    ("failure", "said"),
+    [
+        (
+            FileNotFoundError(2, "No such file or directory", "herdr"),
+            "FileNotFoundError: [Errno 2] No such file or directory: 'herdr'",
+        ),
+        (subprocess.TimeoutExpired(["herdr"], 10), "TimeoutExpired: Command '['herdr']' timed out after 10 seconds"),
+    ],
+)
+def test_the_command_reports_a_herdr_client_that_cannot_run(operator_shell, monkeypatch, capsys, failure, said):
+    launched(operator_shell, HostIdentity.generate())
+
+    def broken(*args):
+        raise failure
+
+    monkeypatch.setattr(operator_terminal, "attach", broken)
+
+    assert cli.main([SWARM, "terminal", EXE_A]) == 1
+
+    assert capsys.readouterr().err == f"swarm: the worker terminal could not be opened: {said}\n"
+
+
 def test_an_encrypted_user_ca_key_is_refused(monkeypatch, tmp_path):
     home, run = client(tmp_path, "")
 
