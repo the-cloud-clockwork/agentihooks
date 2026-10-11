@@ -196,6 +196,14 @@ def test_a_render_without_a_spec_matches_a_pod_without_one():
 NO_HANDLERS = {"exec": None, "httpGet": None, "tcpSocket": None, "grpc": None}
 SNAPSHOT_SPEC = {
     "imagePullSecrets": [{"name": "pull"}],
+    "initContainers": [
+        {
+            "name": "c",
+            "env": [{"name": "B", "valueFrom": {"secretKeyRef": {"name": "t", "key": "j"}}}],
+            "envFrom": [{"secretRef": {"name": "eg"}}],
+            "ports": [{"hostPort": 2}],
+        }
+    ],
     "containers": [
         {
             "image": "i",
@@ -220,34 +228,29 @@ SNAPSHOT_SPEC = {
 }
 
 
-def test_fields_project_an_unnamed_container_exactly():
-    container = SNAPSHOT_SPEC["containers"][0]
+def test_fields_project_named_and_unnamed_containers_exactly():
+    init, container = SNAPSHOT_SPEC["initContainers"][0], SNAPSHOT_SPEC["containers"][0]
+    probes = {probe: NO_HANDLERS for probe in ("startupProbe", "readinessProbe", "livenessProbe")}
     assert fields(SNAPSHOT_SPEC) == {
-        "image": {"": ["i"]},
-        "arguments": {
-            "": [
-                None,
-                None,
-                None,
-                None,
-                {probe: NO_HANDLERS for probe in ("startupProbe", "readinessProbe", "livenessProbe")},
-            ]
-        },
+        "image": {"": ["i"], "c": [None]},
+        "arguments": {"c": [None, None, None, None, probes], "": [None, None, None, None, probes]},
         "secrets": [
             ["env", "", "A", "s", "k"],
             ["env", "", None, "s", "k2"],
+            ["env", "c", "B", "t", "j"],
             ["envFrom", "", "ef"],
+            ["envFrom", "c", "eg"],
             ["projected", "p", "ps"],
             ["pull", "pull"],
             ["volume", "v", "vs"],
         ],
-        "environment": {"": [container["env"], container["envFrom"]]},
+        "environment": {"": [container["env"], container["envFrom"]], "c": [init["env"], init["envFrom"]]},
         "service-account": ["sa", False],
-        "volumes": [SNAPSHOT_SPEC["volumes"], {"": [None]}],
-        "network": [None, None, {"": [[1, "h"]]}],
+        "volumes": [SNAPSHOT_SPEC["volumes"], {"": [None], "c": [None]}],
+        "network": [None, None, {"": [[1, "h"]], "c": [[2, None]]}],
         "security-context": {
             "pod": {"b": 2},
-            "containers": {"": [{"a": 1}]},
+            "containers": {"": [{"a": 1}], "c": [None]},
             "host": [False, False, False, False],
             "hostUsers": False,
             "runtimeClassName": "r",
