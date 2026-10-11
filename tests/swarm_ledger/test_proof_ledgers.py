@@ -1,12 +1,11 @@
 import json
-import logging
 import os
+import urllib.request
 from unittest.mock import patch
 
 import pytest
 
 from scripts.hive import auth
-from scripts.swarm.naming import PROOF_RE
 from scripts.swarm_ledger import ledger_authority as authority
 from scripts.swarm_ledger import ledger_bin, proof_ledger, run
 from scripts.swarm_ledger.api import proofs
@@ -40,32 +39,27 @@ def post(live, path, payload, **headers):
     return status, json.loads(data)
 
 
-def create(live, credential, **fields):
-    payload = {"agent": WORKER, "task": "t399", "content": CONTENT, **fields}
+def create(live, credential, task, **fields):
+    payload = {"agent": WORKER, "task": task, "content": CONTENT, **fields}
     return post(live, "/api/v1/proof-ledgers", payload, **{"X-Controller-Credential": credential})
 
 
-def remove(live, slug, **headers):
-    return post(live, f"/api/v1/proof-ledgers/{slug}/remove", {}, **headers)
+def remove(live, slug, payload=None, **headers):
+    return post(live, f"/api/v1/proof-ledgers/{slug}/remove", payload or {}, **headers)
 
 
 def test_the_controller_credential_creates_a_proof_ledger_named_by_code(live, credential):
-    status, reply = create(live, credential)
-    slug = reply["data"]["slug"]
-    assert (status, reply["data"]["created"]) == (200, True)
-    assert PROOF_RE.fullmatch(slug) and slug.startswith("proof-323133-t399-")
-    assert repository.get_document(slug)["title"] == "Anton launch proof"
-    status, again = create(live, credential)
-    assert status == 200 and again["data"]["slug"] not in (slug, "") and PROOF_RE.fullmatch(again["data"]["slug"])
+    assert create(live, credential, "tcreate") == (200, {"data": {"slug": "proof-323133-tcreate-1", "created": True}})
+    assert repository.get_document("proof-323133-tcreate-1")["title"] == "Anton launch proof"
+    assert create(live, credential, "tcreate") == (200, {"data": {"slug": "proof-323133-tcreate-2", "created": True}})
 
 
-def test_the_controller_credential_removes_a_proof_ledger_and_the_removal_is_recorded(live, credential, caplog):
-    slug = create(live, credential)[1]["data"]["slug"]
-    with caplog.at_level(logging.INFO, logger=proofs.__name__):
-        status, reply = remove(live, slug, **{"X-Controller-Credential": credential})
+def test_the_controller_credential_removes_a_proof_ledger_and_the_removal_is_recorded(live, credential, capsys):
+    slug = create(live, credential, "tremove")[1]["data"]["slug"]
+    status, reply = remove(live, slug, **{"X-Controller-Credential": credential})
     removed_at = ledger_bin.entries()[slug]
     assert (status, reply["data"]) == (200, {"slug": slug, "removed_at": removed_at})
-    assert f"controller removed proof ledger {slug}" in caplog.text
+    assert f"controller removed proof ledger {slug} at {removed_at}" in capsys.readouterr().err.splitlines()
     status, again = remove(live, slug, **{"X-Controller-Credential": credential})
     assert (status, again["data"]) == (200, {"slug": slug, "removed_at": removed_at})
     assert ledger_bin.entries()[slug] == removed_at
@@ -84,15 +78,17 @@ def other_credentials(live):
 def test_any_other_credential_is_refused_a_create(live, credential):
     before = {row["slug"] for row in repository.list_summaries()}
     for headers in other_credentials(live):
-        payload = {"agent": WORKER, "task": "t399", "content": CONTENT}
+        payload = {"agent": WORKER, "task": "trefused", "content": CONTENT}
         status, reply = post(live, "/api/v1/proof-ledgers", payload, **headers)
-        assert (status, reply["error"]["code"]) == (403, "forbidden"), headers
-        assert reply["error"]["message"] == "Proof ledgers need the controller credential"
+        assert (status, reply["error"]) == (
+            403,
+            {"code": "forbidden", "message": "Proof ledgers need the controller credential"},
+        ), headers
     assert {row["slug"] for row in repository.list_summaries()} == before
 
 
 def test_any_other_credential_is_refused_a_remove(live, credential):
-    slug = create(live, credential)[1]["data"]["slug"]
+    slug = create(live, credential, "tkept")[1]["data"]["slug"]
     for headers in other_credentials(live):
         status, reply = remove(live, slug, **headers)
         assert (status, reply["error"]["code"]) == (403, "forbidden"), headers
@@ -101,30 +97,48 @@ def test_any_other_credential_is_refused_a_remove(live, credential):
 
 def test_a_ledger_that_is_not_a_proof_ledger_is_refused_a_remove(live, credential):
     status, reply = remove(live, SLUG, **{"X-Controller-Credential": credential})
-    assert (status, reply["error"]) == (
-        403,
-        {"code": "forbidden", "message": "Not a proof ledger"},
-    )
+    assert (status, reply["error"]) == (403, {"code": "forbidden", "message": "Not a proof ledger"})
     assert SLUG not in ledger_bin.entries()
     assert repository.exists(SLUG)
 
 
+def test_a_remove_takes_an_empty_body(live, credential):
+    slug = create(live, credential, "tbody")[1]["data"]["slug"]
+    status, reply = remove(live, slug, {"x": 1}, **{"X-Controller-Credential": credential})
+    assert (status, reply["error"]["code"]) == (400, "schema_invalid")
+    assert slug not in ledger_bin.entries()
+
+
 def test_a_create_cannot_name_its_own_ledger(live, credential):
-    status, reply = create(live, credential, slug=SLUG)
+    status, reply = create(live, credential, "tnamed", slug=SLUG)
     assert (status, reply["error"]["code"]) == (400, "schema_invalid")
 
 
 def test_a_create_needs_a_swarm_agent_and_task(live, credential):
+    message = "a proof swarm is named from its swarm agent and task: create it from a swarm task session"
     for fields in ({"agent": "someone"}, {"task": ""}):
-        status, reply = create(live, credential, **fields)
-        assert (status, reply["error"]["code"]) == (400, "schema_invalid"), fields
-        assert "named from its swarm agent and task" in reply["error"]["message"]
+        status, reply = create(live, credential, "tagent", **fields)
+        assert (status, reply["error"]) == (400, {"code": "schema_invalid", "message": message}), fields
 
 
-def test_rejected_content_is_a_bad_request_and_the_server_keeps_serving(live, credential):
-    status, reply = create(live, credential, content={"title": "No phases"})
-    assert (status, reply["error"]) == (400, {"code": "schema_invalid", "message": "Content rejected: no phases"})
-    assert create(live, credential)[0] == 200
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        ({"title": "", "overview": "x"}, "Content rejected: title is empty; no phases"),
+        ({**CONTENT, "orchestrator": 5}, "Content rejected: orchestrator must be a string"),
+    ],
+)
+def test_rejected_content_is_a_bad_request_and_the_server_keeps_serving(live, credential, content, message):
+    status, reply = create(live, credential, "tcontent", content=content)
+    assert (status, reply["error"]) == (400, {"code": "schema_invalid", "message": message})
+    assert create(live, credential, "tcontent")[0] == 200
+
+
+def test_a_create_whose_slug_was_taken_meanwhile_is_a_conflict(live, credential):
+    slug = create(live, credential, "trace")[1]["data"]["slug"]
+    with patch.object(proofs.naming, "proof_slug", return_value=slug):
+        status, reply = create(live, credential, "trace")
+    assert (status, reply["error"]) == (409, {"code": "ledger_exists", "message": "Ledger exists"})
 
 
 def test_removing_a_missing_proof_ledger_is_not_found(live, credential):
@@ -132,59 +146,68 @@ def test_removing_a_missing_proof_ledger_is_not_found(live, credential):
     assert (status, reply["error"]["code"]) == (404, "ledger_missing")
 
 
-def test_removing_stops_the_proof_ledgers_swarm(live, credential):
-    slug = create(live, credential)[1]["data"]["slug"]
+@pytest.mark.parametrize(("error", "extra"), [(None, {}), ("stop failed", {"swarm_error": "stop failed"})])
+def test_removing_stops_the_proof_ledgers_swarm_and_reports_a_failed_stop(live, credential, error, extra):
+    slug = create(live, credential, "tswarm")[1]["data"]["slug"]
     from scripts.swarm_ledger import ledger_server
 
     with (
         patch.object(ledger_server, "swarm_status", return_value={"state": "running"}),
-        patch.object(ledger_server, "swarm_control", return_value=(None, None)) as control,
+        patch.object(ledger_server, "swarm_control", return_value=(None, error)) as control,
     ):
-        assert remove(live, slug, **{"X-Controller-Credential": credential})[0] == 200
+        status, reply = remove(live, slug, **{"X-Controller-Credential": credential})
     control.assert_called_once_with(slug, ["stop", "--now"])
+    assert (status, reply["data"]) == (200, {"slug": slug, "removed_at": ledger_bin.entries()[slug], **extra})
 
 
-def client_env(live, credential, **extra):
+def client_env(live, credential, task):
     return {
         "AGENTIHOOKS_DEPLOYMENT": "compose",
         "LEDGER_URL": f"http://{live['host']}",
         "AGENTIHOOKS_CONTROLLER_CREDENTIAL": credential,
         "AGENTIHOOKS_AGENT_NAME": WORKER,
-        "AGENTIHOOKS_SWARM_TASK": "t399",
-        **extra,
+        "AGENTIHOOKS_SWARM_TASK": task,
     }
 
 
 def test_the_remote_client_creates_and_removes_a_proof_ledger_with_the_controller_credential(live, credential):
-    environ = client_env(live, credential)
-    created = proof_ledger.create(CONTENT, environ)
-    assert created["created"] is True and PROOF_RE.fullmatch(created["slug"])
-    removed = proof_ledger.remove(created["slug"], environ)
-    assert removed == {"slug": created["slug"], "removed_at": ledger_bin.entries()[created["slug"]]}
+    environ = client_env(live, credential, "tclient")
+    with patch.object(proof_ledger.urllib.request, "urlopen", wraps=urllib.request.urlopen) as opened:
+        assert proof_ledger.create(CONTENT, environ) == {"slug": "proof-323133-tclient-1", "created": True}
+    assert opened.call_args.kwargs == {"timeout": 10}
+    removed = proof_ledger.remove("proof-323133-tclient-1", environ)
+    assert removed == {"slug": "proof-323133-tclient-1", "removed_at": ledger_bin.entries()["proof-323133-tclient-1"]}
 
 
 def test_the_remote_client_needs_the_controller_credential(live, credential):
-    environ = client_env(live, credential)
+    environ = client_env(live, credential, "tnone")
     environ.pop("AGENTIHOOKS_CONTROLLER_CREDENTIAL")
-    with pytest.raises(SystemExit, match="AGENTIHOOKS_CONTROLLER_CREDENTIAL"):
+    with pytest.raises(SystemExit, match="^AGENTIHOOKS_CONTROLLER_CREDENTIAL is not set$"):
         proof_ledger.create(CONTENT, environ)
-    with pytest.raises(SystemExit, match="AGENTIHOOKS_CONTROLLER_CREDENTIAL"):
+    with pytest.raises(SystemExit, match="^AGENTIHOOKS_CONTROLLER_CREDENTIAL is not set$"):
         proof_ledger.remove("proof-323133-t399-1", environ)
 
 
 def test_the_remote_client_reports_a_refusal(live, credential):
-    environ = client_env(live, "wrong")
-    with pytest.raises(SystemExit, match="server refused: 403 Proof ledgers need the controller credential"):
-        proof_ledger.create(CONTENT, environ)
-    with pytest.raises(SystemExit, match="server refused: 403 Not a proof ledger"):
-        proof_ledger.remove(SLUG, client_env(live, credential))
+    with pytest.raises(SystemExit, match="^server refused: 403 Proof ledgers need the controller credential$"):
+        proof_ledger.create(CONTENT, client_env(live, "wrong", "twrong"))
+    with pytest.raises(SystemExit, match="^server refused: 403 Not a proof ledger$"):
+        proof_ledger.remove(SLUG, client_env(live, credential, "twrong"))
 
 
 def test_the_proof_command_creates_and_removes_through_the_client(live, credential, tmp_path, capsys):
     path = tmp_path / "content.json"
     path.write_text(json.dumps(CONTENT))
-    with patch.dict(os.environ, client_env(live, credential)):
+    with patch.dict(os.environ, client_env(live, credential, "tcommand")):
         proof_ledger.main(["new", "--content", str(path)])
-        slug = json.loads(capsys.readouterr().out)["slug"]
-        run(["proof", "remove", slug])
-    assert json.loads(capsys.readouterr().out) == {"slug": slug, "removed_at": ledger_bin.entries()[slug]}
+        assert json.loads(capsys.readouterr().out) == {"slug": "proof-323133-tcommand-1", "created": True}
+        run(["proof", "remove", "proof-323133-tcommand-1"])
+    removed_at = ledger_bin.entries()["proof-323133-tcommand-1"]
+    assert json.loads(capsys.readouterr().out) == {"slug": "proof-323133-tcommand-1", "removed_at": removed_at}
+
+
+@pytest.mark.parametrize("argv", [[], ["new"]])
+def test_the_proof_command_needs_an_action_and_its_content(argv):
+    with pytest.raises(SystemExit) as exited:
+        proof_ledger.main(argv)
+    assert exited.value.code == 2

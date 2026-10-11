@@ -1,4 +1,4 @@
-import logging
+import sys
 from types import ModuleType
 
 from scripts.swarm import naming
@@ -32,7 +32,12 @@ def create(server: ModuleType, payload: dict) -> dict:
     errors = new_ledger.check(payload["content"])
     if errors:
         raise APIError(400, "schema_invalid", "Content rejected: " + "; ".join(errors))
-    server.repository.create(slug, payload["content"])
+    try:
+        created = server.repository.create(slug, payload["content"])
+    except ValueError as exc:
+        raise APIError(400, "schema_invalid", f"Content rejected: {exc}") from None
+    if not created:
+        raise APIError(409, "ledger_exists", "Ledger exists")
     return {"data": {"slug": slug, "created": True}}
 
 
@@ -42,8 +47,9 @@ def remove(handler: object, server: ModuleType, slug: str) -> dict:
     if not handler.exists(slug):
         raise APIError(404, "ledger_missing", "No such ledger")
     server.ledger_bin.delete(slug)
+    error = None
     if server.swarm_status(slug) is not None:
-        server.swarm_control(slug, ["stop", "--now"])
+        _, error = server.swarm_control(slug, ["stop", "--now"])
     removed_at = server.ledger_bin.entries()[slug]
-    logging.getLogger(__name__).info("controller removed proof ledger %s at %s", slug, removed_at)
-    return {"data": {"slug": slug, "removed_at": removed_at}}
+    sys.stderr.write(f"controller removed proof ledger {slug} at {removed_at}\n")
+    return {"data": {"slug": slug, "removed_at": removed_at, **({"swarm_error": error} if error else {})}}
