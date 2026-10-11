@@ -897,10 +897,10 @@ def test_the_exporter_worker_setting_reaches_the_launch_record(tmp_path, monkeyp
 
 
 @pytest.mark.parametrize("value", [None, ""])
-def test_an_unset_exporter_setting_records_no_exporter(tmp_path, value):
+def test_an_unset_exporter_setting_names_the_image_session_exporter(tmp_path, value):
     workers = deployed.Workers.from_environ(_workers(tmp_path, **{deployed.EXPORTER_ENV: value}), SLUG)
 
-    assert workers.exporter is None
+    assert workers.exporter == ("python", "-m", "scripts.swarm_v2.session_export")
 
 
 def test_an_exporter_setting_becomes_its_command_words(tmp_path):
