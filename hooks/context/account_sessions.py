@@ -42,6 +42,7 @@ VALUE_FLAGS = frozenset(
     }
 )
 SERVERS = frozenset({"app-server", "mcp-server"})
+INTERNAL_RUN = "AGENTIHOOKS_INTERNAL_RUN"
 
 
 def account_from_names(names: Iterable[str], prefix: str = TOKEN_PREFIX) -> str:
@@ -166,6 +167,8 @@ def _is_codex_session(pid: int, proc: Path) -> bool:
         return False
     argv = _cmdline(pid, proc)
     if "app-server" in argv[0] or SERVERS.intersection(_codex_positionals(argv)[:1]):
+        return False
+    if INTERNAL_RUN in _env_names(pid, proc):
         return False
     return _comm(_ppid(pid, proc), proc) != "codex"
 

@@ -22,6 +22,7 @@ from hooks.context.account_sessions import (
     API_ACCOUNT,
     CODEX_DEFAULT,
     CODEX_TOKEN_PREFIX,
+    INTERNAL_RUN,
     codex_sessions_by_account,
 )
 from scripts import codex_quota, session_bands
@@ -220,7 +221,7 @@ def probe(account: CodexAccount, environ: Mapping[str, str], run: Callable = sub
         account = credential(account, environ)
         done = run(
             command(account, codex_bin, PROBE_ARGS),
-            env=child_environment(account, environ),
+            env={**child_environment(account, environ), INTERNAL_RUN: "1"},
             capture_output=True,
             text=True,
             stdin=subprocess.DEVNULL,
