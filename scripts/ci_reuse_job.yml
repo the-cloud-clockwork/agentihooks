@@ -61,7 +61,7 @@ steps:
         gh api --paginate "$actions/runs/$1/attempts/$2/jobs?per_page=100" --jq '.jobs[]' > "$folder/jobs.jsonl" || { rm -f "$folder/jobs.jsonl"; return 0; }
         job="$(jq -r 'select(.name == "reuse" and .conclusion == "success") | .id' "$folder/jobs.jsonl" | head -n 1)"
         [[ -n "$job" ]] || return 0
-        gh api "$actions/jobs/$job/logs" > "$folder/reuse.log" || rm -f "$folder/reuse.log"
+        gh api --allow-escape-sequences "$actions/jobs/$job/logs" > "$folder/reuse.log" || rm -f "$folder/reuse.log"
       }
       export -f fetch
       export evidence actions
