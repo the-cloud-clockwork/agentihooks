@@ -3,7 +3,7 @@ import json
 import pytest
 
 from scripts.inbox.seats import SeatRegistry
-from scripts.swarm_v2 import masters, masters_channel
+from scripts.swarm_v2 import masters
 from scripts.swarm_v2.masters_channel import MastersChannel, Post
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
@@ -86,7 +86,7 @@ def test_unread_moves_each_seats_cursor_and_a_successor_continues(channel):
 
     SeatRegistry(channel.redis).occupy(SECOND, "sw-master-3", 2)
 
-    assert [p.text for p in channel.unread(SLUG, "sw-master-3")] == ["two"]
+    assert [(p.number, p.text) for p in channel.unread(SLUG, "sw-master-3")] == [(2, "two")]
     assert [p.text for p in channel.unread(SLUG, "sw-master-1")] == ["one", "two"]
     with pytest.raises(masters.MasterError):
         channel.read(SLUG, "sw-master-2")
@@ -97,13 +97,6 @@ def test_an_empty_post_is_refused(channel):
         channel.post(SLUG, "sw-master-1", "  ", 10)
     assert str(refused.value) == "a masters channel post needs text"
     assert channel.read(SLUG, "sw-master-1") == []
-
-
-def test_masters_channel_names_are_reserved():
-    assert masters_channel.channel_name(SLUG) == "masters.sw"
-    assert masters_channel.reserved("masters.sw")
-    assert not masters_channel.reserved("brain")
-    assert not masters_channel.reserved("ops-masters.sw")
 
 
 def test_channel_publish_refuses_a_masters_channel(monkeypatch):

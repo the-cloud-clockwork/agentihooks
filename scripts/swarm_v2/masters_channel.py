@@ -1,9 +1,8 @@
 """The masters channel of one swarm: only its master seats post and read; posts stay until the swarm is removed."""
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 
-from hooks.context.broadcast import MASTERS_CHANNEL_PREFIX as CHANNEL_PREFIX
 from scripts.inbox.seats import SeatRegistry
 from scripts.swarm.store import PREFIX
 from scripts.swarm_v2.masters import MasterError, MasterSeats, seats
@@ -16,14 +15,6 @@ class Post:
     by: str
     text: str
     at: float
-
-
-def channel_name(slug: str) -> str:
-    return f"{CHANNEL_PREFIX}{slug}"
-
-
-def reserved(channel: str) -> bool:
-    return channel.startswith(CHANNEL_PREFIX)
 
 
 class MastersChannel:
@@ -46,10 +37,8 @@ class MastersChannel:
         if not text.strip():
             raise MasterError("a masters channel post needs text")
         held = self.member(slug, name)
-        number = self.redis.incr(f"{self.key(slug)}:count")
-        entry = Post(number, held, name, text, at)
-        self.redis.rpush(self.key(slug), json.dumps(asdict(entry)))
-        return entry
+        fields = {"seat": held, "by": name, "text": text, "at": at}
+        return Post(self.redis.rpush(self.key(slug), json.dumps(fields)), **fields)
 
     def read(self, slug: str, name: str) -> list[Post]:
         self.member(slug, name)
@@ -65,4 +54,5 @@ class MastersChannel:
         return posts
 
     def _posts(self, slug: str, start: int) -> list[Post]:
-        return [Post(**json.loads(raw)) for raw in self.redis.lrange(self.key(slug), start, -1)]
+        raws = self.redis.lrange(self.key(slug), start, -1)
+        return [Post(number, **json.loads(raw)) for number, raw in enumerate(raws, start + 1)]
