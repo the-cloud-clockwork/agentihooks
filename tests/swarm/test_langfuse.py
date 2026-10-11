@@ -5,10 +5,10 @@ from types import SimpleNamespace
 
 def test_recorded_turn_sample_yields_one_standing_finding_per_breaching_account():
     import fakeredis
-    from scripts.swarm.langfuse_config import Limits
 
     from scripts.swarm import langfuse
     from scripts.swarm.health import standing
+    from scripts.swarm.langfuse_config import Limits
 
     sample = json.loads((Path(__file__).parents[1] / "fixtures/swarm/langfuse-summary.json").read_text())
     bindings = [SimpleNamespace(**row) for row in sample["bindings"]]
