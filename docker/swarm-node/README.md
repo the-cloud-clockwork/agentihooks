@@ -143,10 +143,9 @@ supervision scope with each file's sha256 and size and the newest main
 transcript's session id, and acknowledges it complete. No main transcript or a
 linked session folder is acknowledged incomplete with its reason; a forced
 quiescence exports nothing and the supervisor reports it incomplete. The
-exporter exits without a checkpoint if its supervisor goes away.
-SIGTERM or SIGINT publishes
-`drain.json`, stops the agent and herdr process trees including escaped
-grandchildren, and publishes `quiesced.json`. The exporter remains alive to
+exporter exits without a checkpoint if its supervisor goes away. SIGTERM or
+SIGINT publishes `drain.json`, stops the agent and herdr process trees
+including escaped grandchildren, and publishes `quiesced.json`. The exporter remains alive to
 flush. No task reconciliation, authority renewal or second swarm timer runs
 in the supervisor.
 
