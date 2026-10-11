@@ -217,6 +217,8 @@ def track_outages(slug: str, store: RedisStore, runtime: "Runtime", rows: dict, 
             continue
         heartbeat = idle.heartbeat(store.redis, slug, agent.name)
         last_work = max(agent.started_at, (heartbeat or {}).get("at", 0))
+        if previous.get("state") == "pending":
+            last_work = agent.started_at
         episodes = sorted(
             [record["kind"], record["started_at"]]
             for record in records.values()
