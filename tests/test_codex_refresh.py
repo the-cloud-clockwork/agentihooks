@@ -551,18 +551,24 @@ def test_recovery_messages_name_the_account_and_the_file(capsys):
     assert capsys.readouterr().out.startswith(f"alpha: ignoring unreadable {path}\n")
 
 
-def test_write_failures_name_the_account_and_the_error(monkeypatch, capsys):
-    def full(*args, **kwargs):
-        raise OSError(28, "No space left on device")
+def _full(*args, **kwargs):
+    raise OSError(28, "No space left on device")
 
+
+def test_a_failed_block_write_names_the_account_and_the_error(monkeypatch, capsys):
     bao = FakeBao({"AH_CX_TOKEN_alpha": access_token(1), "AH_CX_REFRESH_alpha": "rt-alpha"})
     aicode_tokens.rc_file().write_text(f"{aicode_tokens.START}\n{aicode_tokens.END}\n")
-    monkeypatch.setattr(aicode_tokens, "write_rc", full)
+    monkeypatch.setattr(aicode_tokens, "write_rc", _full)
     assert _run([], {**FLAG, **BAO_ENV, **OPENBAO_STORE}, Grant(), bao) == 1
     assert "alpha: write failed: [Errno 28] No space left on device\n" in capsys.readouterr().out
-    monkeypatch.setattr(codex_refresh, "_save_auth", full)
+
+
+@pytest.mark.parametrize("store", [OPENBAO_STORE, {}])
+def test_a_failed_pair_save_names_the_account_and_the_error(store, monkeypatch, capsys):
+    monkeypatch.setattr(codex_refresh, "_save_auth", _full)
+    _account("alpha", 1)
     bao = FakeBao({"AH_CX_TOKEN_alpha": access_token(1), "AH_CX_REFRESH_alpha": "rt-alpha"}, fail_writes=True)
-    assert _run([], {**FLAG, **BAO_ENV, **OPENBAO_STORE}, Grant(), bao) == 1
+    assert _run([], {**FLAG, **BAO_ENV, **store}, Grant(), bao) == 1
     out = capsys.readouterr().out
     assert "OpenBao write failed: OpenBao HTTP 503: sealed\n" in out
     assert "alpha: write failed: [Errno 28] No space left on device\n" in out

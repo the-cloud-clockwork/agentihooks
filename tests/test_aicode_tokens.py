@@ -77,7 +77,7 @@ def test_write_rc_writes_through_a_symlinked_rc_file(tmp_path):
 
 
 def test_an_upsert_leaves_a_duplicate_block_without_the_export():
-    text = f"{START}\nexport A=old\n{END}\nmid\n{START}\nexport A=older\nexport B=2\n{END}\n"
+    text = f"{START}\nexport A=old\n{END}\nmid\n{START}\nexport B=2\nexport A=older\n{END}\n"
     assert tokens.upsert(text, {"A": "new"}) == f"{START}\nexport A=new\n{END}\nmid\n{START}\nexport B=2\n{END}\n"
 
 
