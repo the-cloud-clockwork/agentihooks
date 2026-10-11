@@ -1,5 +1,7 @@
 import json
 import subprocess
+import time
+from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 
@@ -13,6 +15,7 @@ from scripts.swarm_v2.herdr.reconcile import Record
 from scripts.swarm_v2.herdr.target import (
     CALLER,
     DELIVERIES,
+    EXPIRY_S,
     KEPT,
     PENDING_LIMIT,
     Router,
@@ -320,20 +323,105 @@ def test_a_send_needs_an_operation_id(tmp_path, operation_id):
     assert fleet.commands == before
 
 
-def test_a_send_herdr_refuses_stays_pending_and_needs_a_new_operation_id(tmp_path):
+@pytest.mark.parametrize(
+    ("stderr", "recorded"),
+    [
+        ("", "herdr exited 1"),
+        (" pane\n  busy ", "herdr exited 1: pane busy"),
+        ("x" * 300, "herdr exited 1: " + "x" * 200),
+    ],
+)
+def test_a_send_herdr_refuses_is_settled_with_its_reason(tmp_path, stderr, recorded):
+    client, fleet, desired = world(tmp_path)
+    found = resolved(client, desired[0])
+    key = f"{found.incarnation}/{PANE}"
+    real = fleet.__call__
+    client.router.run = lambda command: (
+        subprocess.CompletedProcess(command, 1, "", stderr) if command[3:5] == ["agent", "prompt"] else real(command)
+    )
+    reason, message = refusal(lambda: client.router.send(found, "agent_prompt", "op-1", "x"))
+    assert (reason, message) == ("send_refused", f"herdr exited 1 for op-1 on {key}")
+    entries = json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]
+    assert entries == {"op-1": {"target": key, "state": "refused", "reason": recorded}}
+    client.router.run = fleet
+    replayed = refusal(lambda: client.router.send(found, "agent_prompt", "op-1", "x"))
+    assert replayed == ("send_refused", f"op-1 was refused on {key}: {recorded}")
+    client.router.send(found, "agent_prompt", "op-2", "x")
+    assert fleet.received()[EXE_A] == ["x"]
+
+
+def test_sixty_five_refused_prompts_never_stop_the_next_nudge(tmp_path):
     client, fleet, desired = world(tmp_path)
     found = resolved(client, desired[0])
     real = fleet.__call__
     client.router.run = lambda command: (
         subprocess.CompletedProcess(command, 1, "", "busy") if command[3:5] == ["agent", "prompt"] else real(command)
     )
-    reason, message = refusal(lambda: client.router.send(found, "agent_prompt", "op-1", "x"))
-    assert (reason, message) == ("send_refused", f"herdr exited 1 for op-1 on {found.incarnation}/{PANE}")
-    entries = json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]
-    assert entries == {"op-1": {"target": f"{found.incarnation}/{PANE}", "state": "pending"}}
+
+    def nudge(operation_id):
+        return refusal(lambda: client.router.send(found, "agent_prompt", operation_id, "x"))[0]
+
+    assert {nudge(f"op-{number}") for number in range(PENDING_LIMIT + 1)} == {"send_refused"}
     client.router.run = fleet
-    assert refusal(lambda: client.router.send(found, "agent_prompt", "op-1", "x"))[0] == "ambiguous_delivery"
-    client.router.send(found, "agent_prompt", "op-2", "x")
+    client.router.send(found, "agent_prompt", "op-next", "wake")
+    assert fleet.received()[EXE_A] == ["wake"]
+    entries = json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]
+    assert Counter(entry["state"] for entry in entries.values()) == {"refused": 65, "sent": 1}
+
+
+def test_a_prompt_pending_past_the_window_is_settled_as_expired(tmp_path):
+    client, fleet, desired = world(tmp_path)
+    found = resolved(client, desired[0])
+    key = f"{found.incarnation}/{PANE}"
+    clock = [1_000.0]
+    client.router.clock = lambda: clock[0]
+    _lose_prompts(client, fleet)
+    refusal(lambda: client.router.send(found, "agent_prompt", "op-lost", "x"))
+    client.router.run = fleet
+    clock[0] += EXPIRY_S - 1
+    client.router.send(found, "agent_prompt", "op-early", "a")
+    entries = json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]
+    assert entries["op-lost"] == {"target": key, "state": "pending", "since": 1000}
+    clock[0] += 1
+    client.router.send(found, "agent_prompt", "op-late", "b")
+    entries = json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]
+    assert entries["op-lost"] == {"target": key, "state": "expired", "since": 1000}
+    replayed = refusal(lambda: client.router.send(found, "agent_prompt", "op-lost", "x"))
+    assert replayed == ("ambiguous_delivery", f"op-lost may have reached {key}")
+    assert fleet.received()[EXE_A] == ["a", "b"]
+    client.router.settle("op-lost", delivered=True)
+    entries = json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]
+    assert entries["op-lost"] == {"target": key, "state": "sent", "since": 1000}
+    assert EXPIRY_S == 600
+
+
+def test_sixty_five_unknown_outcomes_never_stop_the_next_nudge(tmp_path):
+    client, fleet, desired = world(tmp_path)
+    found = resolved(client, desired[0])
+    _lose_prompts(client, fleet)
+
+    def nudge(operation_id):
+        return refusal(lambda: client.router.send(found, "agent_prompt", operation_id, "x"))[0]
+
+    assert {nudge(f"op-{number}") for number in range(PENDING_LIMIT + 1)} == {"ambiguous_delivery"}
+    client.router.run = fleet
+    client.router.send(found, "agent_prompt", "op-next", "wake")
+    assert fleet.received()[EXE_A] == ["wake"]
+    entries = json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]
+    assert Counter(entry["state"] for entry in entries.values()) == {"pending": 63, "expired": 2, "sent": 1}
+
+
+def test_a_pending_entry_written_before_its_time_was_kept_expires_at_once(tmp_path, monkeypatch):
+    monkeypatch.setattr(target_module, "PENDING_LIMIT", 2)
+    client, fleet, desired = world(tmp_path)
+    found = resolved(client, desired[0])
+    key = f"{found.incarnation}/{PANE}"
+    old = {"version": 1, "deliveries": {"op-old": {"target": key, "state": "pending"}}}
+    (tmp_path / DELIVERIES).write_text(json.dumps(old))
+    client.router.clock = lambda: float(EXPIRY_S)
+    client.router.send(found, "agent_prompt", "op-new", "x")
+    entries = json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]
+    assert entries["op-old"] == {"target": key, "state": "expired"}
     assert fleet.received()[EXE_A] == ["x"]
 
 
@@ -354,7 +442,7 @@ def test_a_send_with_an_unknown_outcome_stays_pending_and_is_never_resent(tmp_pa
     client.router.run = fleet
     assert refusal(lambda: client.router.send(found, "agent_prompt", "op-1", "x"))[0] == "ambiguous_delivery"
     entries = json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]
-    assert entries == {"op-1": {"target": f"{found.incarnation}/{PANE}", "state": "pending"}}
+    assert entries == {"op-1": {"target": f"{found.incarnation}/{PANE}", "state": "pending", "since": 1000}}
     assert len(fleet.mutations()) == 1
 
 
@@ -367,10 +455,13 @@ def test_the_journal_keeps_only_the_newest_deliveries(tmp_path, monkeypatch):
     def lose(command):
         if command[-1] == "lost":
             raise subprocess.TimeoutExpired(command, 30)
+        if command[-1] == "refused":
+            return subprocess.CompletedProcess(command, 1, "", "")
         return real(command)
 
     client.router.run = lose
     refusal(lambda: client.router.send(found, "agent_prompt", "op-pending", "lost"))
+    refusal(lambda: client.router.send(found, "agent_prompt", "op-refused", "refused"))
     for number in range(3):
         client.router.send(found, "agent_prompt", f"op-{number}", "x")
     entries = json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]
@@ -379,26 +470,39 @@ def test_the_journal_keeps_only_the_newest_deliveries(tmp_path, monkeypatch):
     assert KEPT == 1024
 
 
-def test_a_journal_full_of_unknown_outcomes_refuses_new_sends(tmp_path, monkeypatch):
+def test_a_full_journal_expires_its_oldest_unknown_outcome_and_sends(tmp_path, monkeypatch):
     monkeypatch.setattr(target_module, "PENDING_LIMIT", 2)
     client, fleet, desired = world(tmp_path)
     found = resolved(client, desired[0])
-    real = fleet.__call__
-
-    def lose(command):
-        if command[3:5] == ["agent", "prompt"]:
-            raise subprocess.TimeoutExpired(command, 30)
-        return real(command)
-
-    client.router.run = lose
-    for number in range(2):
-        refusal(lambda number=number: client.router.send(found, "agent_prompt", f"op-{number}", "x"))
+    key = f"{found.incarnation}/{PANE}"
+    clock = [1_000.0]
+    client.router.clock = lambda: clock[0]
+    _lose_prompts(client, fleet)
+    for operation_id in ("op-b", "op-a"):
+        refusal(lambda operation_id=operation_id: client.router.send(found, "agent_prompt", operation_id, "x"))
+        clock[0] += 1
     client.router.run = fleet
-    before = list(fleet.commands)
-    assert refusal(lambda: client.router.send(found, "agent_prompt", "op-new", "x"))[0] == "journal_full"
-    assert fleet.commands == before
-    assert sorted(json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]) == ["op-0", "op-1"]
+    client.router.send(found, "agent_prompt", "op-new", "x")
+    assert fleet.received()[EXE_A] == ["x"]
+    assert json.loads((tmp_path / DELIVERIES).read_text())["deliveries"] == {
+        "op-b": {"target": key, "state": "expired", "since": 1000},
+        "op-a": {"target": key, "state": "pending", "since": 1001},
+        "op-new": {"target": key, "state": "sent"},
+    }
     assert PENDING_LIMIT == 64
+
+
+def test_making_room_counts_an_entry_without_a_time_as_the_oldest(tmp_path, monkeypatch):
+    monkeypatch.setattr(target_module, "PENDING_LIMIT", 2)
+    client, fleet, desired = world(tmp_path)
+    found = resolved(client, desired[0])
+    key = f"{found.incarnation}/{PANE}"
+    old = {"op-a": {"target": key, "state": "pending"}, "op-b": {"target": key, "state": "pending", "since": 0}}
+    (tmp_path / DELIVERIES).write_text(json.dumps({"version": 1, "deliveries": old}))
+    client.router.clock = lambda: EXPIRY_S - 100.0
+    client.router.send(found, "agent_prompt", "op-new", "x")
+    entries = json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]
+    assert (entries["op-a"]["state"], entries["op-b"]["state"]) == ("expired", "pending")
 
 
 def test_the_operator_audit_settles_an_unknown_outcome(tmp_path):
@@ -406,8 +510,10 @@ def test_the_operator_audit_settles_an_unknown_outcome(tmp_path):
     found = resolved(client, desired[0])
     real = fleet.__call__
     client.router.run = lambda command: (
-        subprocess.CompletedProcess(command, 1, "", "") if command[3:5] == ["agent", "prompt"] else real(command)
+        subprocess.CompletedProcess(command, 1, "", "") if command[-1] == "refused" else real(command)
     )
+    refusal(lambda: client.router.send(found, "agent_prompt", "op-refused", "refused"))
+    _lose_prompts(client, fleet)
     for operation_id in ("op-delivered", "op-lost"):
         refusal(lambda operation_id=operation_id: client.router.send(found, "agent_prompt", operation_id, "x"))
     client.router.run = fleet
@@ -416,7 +522,8 @@ def test_the_operator_audit_settles_an_unknown_outcome(tmp_path):
     client.router.settle("op-lost", delivered=False)
     assert fleet.commands == before
     entries = json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]
-    assert entries == {"op-delivered": {"target": f"{found.incarnation}/{PANE}", "state": "sent"}}
+    assert entries.pop("op-refused")["state"] == "refused"
+    assert entries == {"op-delivered": {"target": f"{found.incarnation}/{PANE}", "state": "sent", "since": 1000}}
     assert client.router.send(found, "agent_prompt", "op-delivered", "x") is None
     client.router.send(found, "agent_prompt", "op-lost", "again")
     assert fleet.received()[EXE_A] == ["again"]
@@ -558,16 +665,6 @@ def test_a_refusal_that_names_no_target_carries_its_exact_message(tmp_path, case
     assert client.router.mismatches == {}
 
 
-def test_a_full_journal_names_the_audit_it_waits_on(tmp_path, monkeypatch):
-    monkeypatch.setattr(target_module, "PENDING_LIMIT", 1)
-    client, fleet, desired = world(tmp_path)
-    found = resolved(client, desired[0])
-    _lose_prompts(client, fleet)
-    refusal(lambda: client.router.send(found, "agent_prompt", "op-0", "x"))
-    expected = ("journal_full", "too many pane sends await an audit of their unknown outcome")
-    assert refusal(lambda: client.router.send(found, "agent_prompt", "op-1", "x")) == expected
-
-
 def test_sent_deliveries_never_count_toward_the_pending_limit(tmp_path, monkeypatch):
     monkeypatch.setattr(target_module, "PENDING_LIMIT", 2)
     client, fleet, desired = world(tmp_path)
@@ -670,6 +767,7 @@ def test_the_router_runs_through_its_injected_runner(tmp_path):
     client, fleet, _ = world(tmp_path)
     router = Router(client.registrations.store, client.router.catalog, client.qualifier, fleet, tmp_path / DELIVERIES)
     assert router.run is fleet and router.herdr_target_mismatch_total() == 0
+    assert router.clock is time.time
 
 
 def test_rollback_keeps_read_only_inspection_and_refuses_every_pane_mutation(tmp_path):
