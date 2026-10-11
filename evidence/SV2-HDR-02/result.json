@@ -32,16 +32,16 @@
   ],
   "authoritative_objects": "None owned beyond the per execution Secret, Service and NetworkPolicy, which the Pod owns and garbage collection removes with it. Task execution, the launch record and the ledger are never touched. The client home and the saved herdr machine are client side caches rebuilt by attach.",
   "states": {
-    "observed": "Live proof run of tests/integration/herdr_terminal/terminal_proof.py on the operator workstation: all 22 rows held (sanitized rows in evidence/SV2-HDR-02/live-proof.jsonl). A planted fault setting AuthorizedPrincipalsFile none in the worker sshd template refused the authorized attach and turned the proof red.",
+    "observed": "Live proof run of tests/integration/herdr_terminal/terminal_proof.py on the operator workstation: all 22 rows held (sanitized rows in evidence/SV2-HDR-02/live-proof.jsonl). A planted fault setting AuthorizedPrincipalsFile none in the worker sshd template refused the authorized attach and turned the proof red. In a kind cluster: helm-kind in Tests run 38101928886 at e2b773462 (deploy/helm/agentihooks-swarm/ci/terminal-route-proof.sh): the rendered terminal Secret, Service and NetworkPolicy, owned by a live worker Pod with the execution identity labels listening on 2222; from a client Pod with the controller labels in swarm-control the name swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local resolved to the private ClusterIP 10.96.2.190 and the TCP connection succeeded; the same labels in swarm-other and an unlabelled Pod in swarm-control were refused three times each; an execution with no Service was refused as no_route.",
     "accepted": "Cases A, B and C passed twice each with identical records in Tests run 38101226814.",
     "committed": "Case records, manifest and live proof committed on the task branch.",
-    "externally_verified": "Not on Anton: the controller does not yet render these objects for a real worker Pod, so no Anton client has attached through cluster DNS."
+    "externally_verified": "Routing, cluster DNS and the namespace principal were verified in a kind cluster (kindnet NetworkPolicy), not on Anton: the controller does not yet render these objects for a real worker Pod, so no Anton client has attached through Anton cluster DNS."
   },
   "validation": {
     "red": "Tests run 38098789654 on the tests only commit f4bb68489 failed collecting the three new test modules; Tests run 38099481269 on dev plus the capabilities test failed exactly the two operator only cases",
     "tests": "Tests run 38101226814 at 244b33e365a3071269bc257a23490b4ab2eab81a",
     "mutation": "Mutation preflight 38101055930 on 244b33e36: attach 258 killed, endpoints 520, session 94, capabilities 8, no survivors; mutation shards green in Tests 38101226814; the earlier preflight 38100809382 found 8 survivors, killed by commit 244b33e36",
-    "kind": "helm kind smoke creates the golden Secret, Service and NetworkPolicy by server dry run with strict validation in Tests run 38101226814",
+    "kind": "helm kind smoke creates the golden Secret, Service and NetworkPolicy by server dry run with strict validation (Tests 38101226814) and proves the route, DNS and namespace principal against live objects (Tests 38101928886)",
     "lint": "ruff check, ruff format and size limits through python -m scripts.ci_prepush",
     "review": "Standards and Spec readers, three rounds; open items are recorded limitations below"
   },
@@ -84,12 +84,13 @@
     "The stale generation guard covers one client home; two client homes can each pin a different generation.",
     "Refused certificates (wrong principal, expired) fold into the unauthorized reason.",
     "An existing client ssh config is edited in place to add the include line, not atomically.",
-    "The live proof ran on the operator workstation over localhost SSH with an injected resolver, not on an Anton worker Pod through cluster DNS."
+    "The sshd and herdr live proof ran on the operator workstation over localhost SSH with an injected resolver; the kind proof covers routing, DNS and the namespace principal at the network layer with a plain TCP listener, not sshd, because the kind smoke builds the swarm image, not the worker image.",
+    "The kind client probe mirrors attach.route with the standard library because the swarm image carries no cryptography; attach.route itself is covered by unit tests and case B."
   ],
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2515",
   "obligations": {
     "input_preparation": "tests/fixtures/swarm_v2/herdr-terminal.json holds the launch grant registration, the live Pod, the private service route, an unauthorized client, a changed host key and a missing cluster DNS route; herdr-terminal-objects.json and herdr-terminal-pod.json are the golden rendered objects",
-    "output_contract": "Case A and the live rows a_attach_qualified, a_work_survives_client_exit and a_second_independent_client: the client attaches to the intended worker; case B and b_certificate_for_another_execution: a certificate for another execution is refused",
+    "output_contract": "Routing and DNS from a client location and the namespace principal: helm-kind in Tests run 38101928886 at e2b773462 (deploy/helm/agentihooks-swarm/ci/terminal-route-proof.sh): the rendered terminal Secret, Service and NetworkPolicy, owned by a live worker Pod with the execution identity labels listening on 2222; from a client Pod with the controller labels in swarm-control the name swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local resolved to the private ClusterIP 10.96.2.190 and the TCP connection succeeded; the same labels in swarm-other and an unlabelled Pod in swarm-control were refused three times each; an execution with no Service was refused as no_route. Certificate binding: case B and live row b_certificate_for_another_execution refuse a certificate for another execution; live rows a_attach_qualified, a_work_survives_client_exit and a_second_independent_client attach the intended worker",
     "rejection_contract": "Case B: ClusterIP only, no NodePort or LoadBalancer, no host root login, no authorized keys file, and a per execution host key in its own Secret instead of an image key; the worker image removes baked host keys",
     "recovery_contract": "Case C and live rows c_changed_host_key_refused, c_new_generation_verified, c_stale_generation_cannot_overwrite_the_newer_pin, c_replacement_verified and c_old_identity_not_accepted: a replacement Pod gets a new verified endpoint and an old host identity is never accepted",
     "mutation_scope": "Every operation is bound to one incarnation, execution id and generation, through the SV2-HDR-01 qualifier; a client exit leaves work running (a_work_survives_client_exit)",
