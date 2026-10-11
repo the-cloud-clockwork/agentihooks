@@ -547,9 +547,9 @@ def _spawn(tmp_path, monkeypatch, **changes):
 
 def test_terminal_exposure_mounts_the_pod_and_hands_it_its_secret_service_and_policy(tmp_path, monkeypatch):
     from cryptography.hazmat.primitives import serialization
-    from scripts.swarm_v2.kubernetes.terminal import HostKeys
 
     from scripts.swarm_v2.herdr import endpoints
+    from scripts.swarm_v2.kubernetes.terminal import HostKeys
 
     store, pods, launch, claims = _spawn(tmp_path, monkeypatch, **{deployed.TERMINAL_ENV: TERMINAL})
 
@@ -594,9 +594,8 @@ def test_an_unset_terminal_setting_turns_exposure_off(tmp_path, value):
 
 
 def test_a_terminal_setting_names_its_clients_and_user_ca(tmp_path):
-    from scripts.swarm_v2.kubernetes.terminal import Exposure
-
     from scripts.swarm_v2.herdr.endpoints import Clients
+    from scripts.swarm_v2.kubernetes.terminal import Exposure
 
     workers = deployed.Workers.from_environ(_workers(tmp_path, **{deployed.TERMINAL_ENV: TERMINAL}), SLUG)
 
