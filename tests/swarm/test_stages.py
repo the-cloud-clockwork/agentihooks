@@ -370,6 +370,35 @@ def test_adjacent_host_and_quota_holds_stay_apart_and_empty_samples_hold_nothing
     assert seconds_of(found) == {("host_hold", ""): 300.0, ("quota_hold", ""): 300.0, ("claim_wait", ""): 3000.0}
 
 
+def test_holds_separated_by_a_sample_gap_do_not_cover_the_gap():
+    found = stages.report(
+        rows(
+            ledger_events=[ledger("task done", at(7), "tasks/t0")],
+            host_samples=[
+                sample(at(7), 1, "quota"),
+                sample(at(7, 20), 1, "quota"),
+                sample(at(7, 25), 0, ""),
+            ],
+            agent_events=[agent("claim", "t1", at(8))],
+        ),
+        [{**TASK, "state": "claimed"}],
+        at(8),
+    )
+    assert seconds_of(found) == {("quota_hold", ""): 600.0, ("claim_wait", ""): 3000.0}
+
+
+def test_a_reopen_at_the_claim_instant_is_the_ready_time():
+    found = stages.report(
+        rows(
+            ledger_events=[ledger("added", at(7), "tasks/t1"), ledger("task open", at(8), "tasks/t1")],
+            agent_events=[agent("claim", "t1", at(8))],
+        ),
+        [{**TASK, "state": "claimed"}],
+        at(8),
+    )
+    assert found["stages"] == [] and found["total"] == 0.0
+
+
 def test_overruns_that_outgrow_their_run_are_cut_at_the_run_start():
     found = stages.report(
         rows(
