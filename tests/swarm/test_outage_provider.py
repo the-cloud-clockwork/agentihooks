@@ -110,3 +110,38 @@ def test_pane_changes_never_close_provider_records_without_a_successful_probe(tm
     monkeypatch.setattr(provider_probe, "check", lambda *args: provider_probe.Result(True, "request succeeded"))
     outage.providers(store, "sw", runtime, 61000)
     assert outage.read("sw")["provider"]["ended_at"] == 61000
+
+
+def test_each_affected_account_is_probed_once_and_the_last_success_closes_the_episode(tmp_path, monkeypatch):
+    import fakeredis
+
+    monkeypatch.setattr(outage, "HOME", tmp_path)
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 1, 1))
+    for name, harness, account in [("a", "claude", "alpha"), ("b", "claude", "alpha"), ("c", "codex", "beta")]:
+        store.put_agent("sw", AgentRecord(name, "eng", name, harness=harness, account=account, model="model"))
+    runtime = HerdrRuntime()
+    monkeypatch.setattr(
+        runtime,
+        "observe",
+        lambda agent: pane.PaneObservation("idle", provider_error="connection failed", provider_checked=True),
+    )
+    calls = []
+
+    def probe(target, directory):
+        calls.append((target.harness, target.account))
+        return provider_probe.Result(target.account == "alpha", "request outcome")
+
+    monkeypatch.setattr(provider_probe, "check", probe)
+    outage.providers(store, "sw", runtime, 1000)
+    outage.providers(store, "sw", runtime, 61000)
+    assert sorted(calls) == [("claude", "alpha"), ("codex", "beta")]
+    assert outage.read("sw")["provider"]["ended_at"] is None
+    monkeypatch.setattr(provider_probe, "check", lambda target, directory: provider_probe.Result(True, "succeeded"))
+    outage.providers(store, "sw", runtime, 181000)
+    record = outage.read("sw")["provider"]
+    assert record["started_at"] == 1000
+    assert record["ended_at"] == 181000
+    assert set(record["affected_agents"]) == {"a", "b", "c"}
+    assert record["probes"]["claude:alpha"]["succeeded_at"] == 61000
+    assert record["probes"]["codex:beta"]["succeeded_at"] == 181000

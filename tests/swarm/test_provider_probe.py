@@ -96,3 +96,51 @@ def test_probe_accepts_existing_router_banners_and_multiline_json(tmp_path, harn
         return subprocess.CompletedProcess(args, 0, output, "")
 
     assert provider_probe.check(provider_probe.Target(harness, "alpha", "model"), tmp_path, run=run).ok
+
+
+@pytest.mark.parametrize("timeout", [False, True])
+def test_default_probe_transport_bounds_and_reaps_its_process_group(tmp_path, monkeypatch, timeout):
+    import signal
+
+    killed = []
+    options = []
+
+    class Child:
+        pid = 123
+        returncode = 0
+
+        def __init__(self):
+            self.calls = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def communicate(self, value=None, timeout=None):
+            self.calls += 1
+            if self.calls == 1 and fail:
+                raise subprocess.TimeoutExpired("probe", timeout)
+            return ('{"type":"result","is_error":false,"result":"OK"}', "")
+
+    fail = timeout
+    child = Child()
+
+    def popen(args, **kwargs):
+        options.append(kwargs)
+        return child
+
+    monkeypatch.setattr(provider_probe.subprocess, "Popen", popen)
+    monkeypatch.setattr(provider_probe.os, "killpg", lambda pid, sig: killed.append((pid, sig)))
+    result = provider_probe.check(provider_probe.Target("claude", "alpha", "model"), tmp_path)
+    assert result.ok is not timeout
+    assert options[0]["start_new_session"]
+    assert killed == ([(123, signal.SIGKILL)] if timeout else [])
+    assert child.calls == (2 if timeout else 1)
+
+
+def test_probe_records_completion_time_instead_of_request_start_time():
+    states = {"claude:alpha": provider_probe.schedule(provider_probe.Target("claude", "alpha", "model"), 1000)}
+    assert provider_probe.advance(states, 61000, lambda target: provider_probe.Result(True, "succeeded", 70000))
+    assert states["claude:alpha"]["succeeded_at"] == 70000
