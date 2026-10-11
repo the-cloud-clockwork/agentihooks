@@ -54,7 +54,13 @@ without accounts.
 
 `agenti` probes every account (results cached 60 s in
 `~/.agentihooks/claude-router-cache.json`) and places the session by one rule,
-the same one the swarm uses for its seats:
+the same one the swarm uses for its seats. Each probe is one 1-token Messages
+request with the account's token (`POST /v1/messages`, 20 s timeout, accounts
+in parallel) whose `anthropic-ratelimit-unified-5h-*` / `-7d-*` / `-status`
+headers give the windows, about 1 s for all accounts; a 429 carrying those
+headers reads like a 200. Only a network failure falls back to a `claude -p`
+run, and `--include-fable` keeps the `claude -p` probe, since no response header
+carries the fable window.
 
 1. Each account's cap of live sessions comes from its five hour window alone:
    6 at 60% or more left, 4 at 40 to 60%, 3 at 10 to 40%, 2 at 5 to 10%, none
