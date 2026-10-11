@@ -17,6 +17,7 @@ LANE = (
     "((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || "
     "((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c')"
 )
+MUTATION_LANE = LANE.replace("hosted-lane", "mutation-lane")
 
 DIRECT = {
     "helm-kind.yml": ("Helm chart in kind", "helm-kind"),
@@ -30,9 +31,9 @@ LANE_USERS = {
     "proofs.yml",
     "test-leaks.yml",
     "swarm-node-image.yml",
-    "mutation-preflight.yml:mutation",
     *DIRECT,
 }
+MUTATION_LANE_USERS = {"mutation-preflight.yml:mutation"}
 EXCLUDED = {
     "coverage-stability.yml": "a manual dispatch runs one short job that only reads dev run data",
     "pages.yml": "a rare manual docs build and deploy; the github-pages environment decides which branches deploy",
@@ -51,11 +52,12 @@ class _Context(dict):
         return _Context(value) if isinstance(value, dict) else value
 
 
-def _evaluate(value, **github):
+def _evaluate(value, inputs=None, **github):
     if not isinstance(value, str) or not value.startswith("${{"):
         return value
     names = {
         "github": _Context(github),
+        "inputs": _Context(inputs or {}),
         "endsWith": lambda text, end: str(text).endswith(end),
         "format": lambda template, *args: template.format(*args),
     }
@@ -94,8 +96,8 @@ def _block(where):
     return next(block for name, block in _blocks() if name == where)
 
 
-def _resolve(block, **github):
-    return {key: _evaluate(block.get(key), **github) for key in ("group", "queue", "cancel-in-progress")}
+def _resolve(block, inputs=None, **github):
+    return {key: _evaluate(block.get(key), inputs, **github) for key in ("group", "queue", "cancel-in-progress")}
 
 
 def _triggered(events):
@@ -119,7 +121,7 @@ def _contexts(where):
 
 
 def _is_lane(group):
-    return str(group).startswith("hosted-lane-")
+    return str(group).startswith(("hosted-lane-", "mutation-lane-"))
 
 
 def _open(events):
@@ -129,18 +131,20 @@ def _open(events):
 
 def test_every_non_required_trigger_is_on_a_lane_or_excluded_with_a_reason():
     open_triggers = {path.name for path in _WORKFLOWS.glob("*.yml") if _open(yaml.safe_load(path.read_text())[True])}
-    users = {where.split(":")[0] for where in LANE_USERS}
+    users = {where.split(":")[0] for where in LANE_USERS | MUTATION_LANE_USERS}
     assert not users & set(EXCLUDED)
     assert set(EXCLUDED) <= open_triggers
     assert open_triggers <= users | set(EXCLUDED)
     assert {where for where, block in _blocks() if "hosted-lane" in str(block["group"])} == LANE_USERS
+    assert {where for where, block in _blocks() if "mutation-lane" in str(block["group"])} == MUTATION_LANE_USERS
 
 
 def test_every_lane_user_names_the_same_three_lanes():
     for where, block in _blocks():
-        if "hosted-lane" in str(block["group"]):
-            assert str(block["group"]).count("hosted-lane") == 1, where
-            assert LANE in block["group"], where
+        for name, lane in (("hosted-lane", LANE), ("mutation-lane", MUTATION_LANE)):
+            if name in str(block["group"]):
+                assert str(block["group"]).count(name) == 1, where
+                assert lane in block["group"], where
 
 
 def test_a_run_on_a_lane_queues_and_is_never_cancelled():
@@ -154,7 +158,7 @@ def test_a_run_on_a_lane_queues_and_is_never_cancelled():
                 assert not resolved["cancel-in-progress"], (where, github)
             else:
                 assert resolved["queue"] in (None, "single"), (where, github)
-    assert seen == LANE_USERS
+    assert seen == LANE_USERS | MUTATION_LANE_USERS
 
 
 def test_no_required_run_or_its_callee_ever_reaches_a_lane():
@@ -171,6 +175,36 @@ def test_the_run_id_last_digit_spreads_runs_over_three_lanes():
     block = _block("proofs.yml")
     lanes = [_resolve(block, run_id=run_id)["group"] for run_id in range(1000, 1010)]
     assert lanes == ["hosted-lane-a"] * 3 + ["hosted-lane-b"] * 3 + ["hosted-lane-c"] * 4
+
+
+def test_a_focused_tests_proof_never_waits_on_a_lane_and_every_other_proof_keeps_one():
+    block = _block("proofs.yml")
+    options = _workflow("proofs.yml")[True]["workflow_dispatch"]["inputs"]["proof"]["options"]
+    assert "tests" in options
+    github = {"event_name": "workflow_dispatch", "ref": "refs/heads/diffcheck/plant", "workflow": "Proofs"}
+    for run_id, proof in product(range(1000, 1010), options):
+        resolved = _resolve(block, inputs={"proof": proof}, run_id=run_id, **github)
+        if proof == "tests":
+            assert resolved == {"group": f"focused-proof-{run_id}", "queue": "max", "cancel-in-progress": False}
+        else:
+            assert _is_lane(resolved["group"]), (proof, run_id)
+
+
+def test_a_branch_mutation_job_never_holds_a_lane_that_proofs_or_dispatches_wait_on():
+    push = {"event_name": "push", "ref": "refs/heads/task-branch", "workflow": "Mutation preflight"}
+    mutation = {
+        _resolve(_block("mutation-preflight.yml:mutation"), run_id=run_id, **push)["group"]
+        for run_id in range(1000, 1010)
+    }
+    assert mutation == {"mutation-lane-a", "mutation-lane-b", "mutation-lane-c"}
+    shared = {
+        _resolve(block, **github)["group"]
+        for where, block in _blocks()
+        if where in LANE_USERS
+        for github in _contexts(where)
+    }
+    assert {"hosted-lane-a", "hosted-lane-b", "hosted-lane-c"} <= shared
+    assert not mutation & shared
 
 
 @pytest.mark.parametrize("caller", ["Tests", "Proofs"])
@@ -200,7 +234,7 @@ def test_direct_dispatches_and_branch_pushes_queue_on_a_lane():
     assert _is_lane(_resolve(_block("test-leaks.yml"), workflow="Test leaks", **dispatch)["group"])
     assert _is_lane(_resolve(_block("swarm-node-image.yml"), workflow="Swarm worker image", **dispatch)["group"])
     push = {"event_name": "push", "ref": "refs/heads/task-branch", "workflow": "Mutation preflight", "run_id": 1000}
-    assert _is_lane(_resolve(_block("mutation-preflight.yml:mutation"), **push)["group"])
+    assert _resolve(_block("mutation-preflight.yml:mutation"), **push)["group"] == "mutation-lane-a"
     schedule = {"event_name": "schedule", "ref": "refs/heads/dev", "workflow": "Test leaks", "run_id": 1000}
     assert _resolve(_block("test-leaks.yml"), **schedule) == {
         "group": "test-leaks-refs/heads/dev",

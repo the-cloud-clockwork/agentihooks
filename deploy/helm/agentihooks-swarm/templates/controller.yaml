@@ -151,13 +151,20 @@ spec:
           ports:
             - name: api
               containerPort: {{ $api.port }}
+          startupProbe:
+            exec:
+              command: [agentihooks, controller, live]
+            {{- toYaml .Values.controller.startupProbe | nindent 12 }}
           readinessProbe:
-            tcpSocket:
-              port: api
-            periodSeconds: 2
+            exec:
+              command: [agentihooks, controller, ready]
+            {{- toYaml .Values.controller.readinessProbe | nindent 12 }}
           {{- end }}
           livenessProbe:
             exec:
+              {{- if $api.enabled }}
+              command: [agentihooks, controller, live]
+              {{- else }}
               command:
                 - python
                 - -c
@@ -165,6 +172,7 @@ spec:
                   from scripts.swarm import lease; from scripts.swarm.store import connect;
                   store = connect(); stale = [slug for slug in store.slugs() if not lease.current(store, slug)];
                   assert not stale, f"no live controller lease for {stale}"
+              {{- end }}
             {{- toYaml .Values.controller.livenessProbe | nindent 12 }}
           env:
             {{- include "swarm.env" . | nindent 12 }}
