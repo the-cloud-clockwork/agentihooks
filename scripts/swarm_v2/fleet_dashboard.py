@@ -261,7 +261,7 @@ class IncidentStore:
             return {"seq": seq, "stale": False, "disabled": True, "opened": [], "resolved": []}
         return self._retrying(self._record, seq, evaluated["alerts"], set(evaluated["held"]))
 
-    def _retrying(self, write: Callable, *args: object) -> dict | None:
+    def _retrying(self, write: Callable[..., dict | None], *args: object) -> dict | None:
         for _ in range(WRITE_ATTEMPTS):
             try:
                 return write(*args)

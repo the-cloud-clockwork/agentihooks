@@ -63,7 +63,8 @@ window is taken as one the existing nodes cannot place.
   replay after an alert backend restart never duplicates an incident.
 - Only shown alerts open incidents. An open incident resolves only when its fingerprint is no
   longer in `held`, so a suppressed condition never reads as cleared; a condition that returns
-  after resolving opens a new incident.
+  after resolving opens a new incident. A suppressed incident keeps the `facts` and `last_seq` of the last
+  evaluation that showed it.
 - `deliver` hands each opened incident to the sink once, identified as
   `<fingerprint>:<opened_seq>`; a failing sink leaves it for the next delivery. Delivery only
   notifies. Every store write watches its keys and retries up to five times when another

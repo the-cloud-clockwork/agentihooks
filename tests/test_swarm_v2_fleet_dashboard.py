@@ -336,30 +336,35 @@ def test_a_failing_sink_leaves_the_incident_for_the_next_delivery(store):
     assert incidents.deliver(seen.append, ON) == 1
 
 
-def test_a_notification_mark_skips_a_reopened_incident(store):
+@pytest.mark.parametrize("change", ["reopened", "removed"])
+def test_a_notification_mark_skips_an_incident_changed_after_its_notice(store, monkeypatch, change):
     incidents = fleet.IncidentStore(store, "fixture")
     incidents.record(fleet.evaluate(FIRST[2], FOUND, ON))
     huge = fleet.fingerprint("impossible_pending", "exe-huge-1")
-    incidents._notified(huge, 99)
-    incidents._notified("absent", 3)
-    assert incidents.incidents()[huge]["notified"] is False
-    assert "absent" not in incidents.incidents()
+
+    def race():
+        if change == "removed":
+            store.redis.hdel(incidents.key, huge)
+            return
+        row = json.loads(store.redis.hget(incidents.key, huge))
+        store.redis.hset(incidents.key, huge, json.dumps({**row, "opened_seq": 99}))
+
+    racing(store, monkeypatch, "hget", race)
+    seen: list[dict] = []
+    assert incidents.deliver(seen.append, ON) == 1
+    after = incidents.incidents()
+    if change == "removed":
+        assert huge not in after
+    else:
+        assert (after[huge]["opened_seq"], after[huge]["notified"]) == (99, False)
 
 
-def test_a_contended_store_retries_then_refuses(store, monkeypatch):
-    import redis
-
+def test_a_store_that_keeps_changing_refuses_the_write(store, monkeypatch):
     incidents = fleet.IncidentStore(store, "fixture")
-    calls = []
-
-    def contended(seq, alerts, held):
-        calls.append(seq)
-        raise redis.WatchError("changed")
-
-    monkeypatch.setattr(incidents, "_record", contended)
+    racing(store, monkeypatch, "get", lambda: store.redis.set(incidents.seq_key, 0), every=True)
     with pytest.raises(SwarmError, match="^incident store kept changing; the write was not recorded$"):
         incidents.record(fleet.evaluate(FIRST[2], FOUND, ON))
-    assert calls == [3] * fleet.WRITE_ATTEMPTS
+    assert incidents.incidents() == {}
 
 
 def test_incidents_are_kept_per_swarm(store):
@@ -477,7 +482,7 @@ def test_delivery_follows_the_order_incidents_opened(store):
     assert [notice["rule"] for notice in seen] == ["impossible_pending", "cross_scope_denial", "protected_idle_pod"]
 
 
-def racing(store, monkeypatch, command, race):
+def racing(store, monkeypatch, command, race, every=False):
     real, opened = store.redis.pipeline, []
 
     def pipeline(*args, **kwargs):
@@ -486,7 +491,7 @@ def racing(store, monkeypatch, command, race):
 
         def read_then_race(*keys):
             value = read(*keys)
-            if len(opened) == 1:
+            if every or len(opened) == 1:
                 race()
             return value
 
