@@ -56,6 +56,19 @@ def test_tick_recovers_a_master_whose_seat_was_restored_to_a_dead_occupant(store
     assert store.seats.occupant("master@sw").occupant == live
 
 
+def test_a_live_lead_in_its_seat_keeps_recovery_from_adopting_another_master_pane(store):  # noqa: F811
+    lead = store.next_name("sw", MASTER)
+    store.put_agent("sw", AgentRecord(lead, MASTER, MASTER, seat="master@sw"))
+    store.seats.occupy("master@sw", lead, 1)
+    runtime = RecoveryRuntime()
+    runtime.live.update({lead, "sw-master-7"})
+
+    actions = tick("sw", store, tasks(), runtime, STARTUP_GRACE_MS + 2)
+
+    assert not [a for a in actions if a.startswith("adopted live master")]
+    assert [a.name for a in masters(store)] == [lead]
+
+
 @pytest.mark.parametrize("name", ["hand-opened-master", "sw-master-7"])
 def test_recovery_uses_the_live_seat_occupant_without_a_registered_name(store, name):  # noqa: F811
     store.seats.occupy("master@sw", name, 1)

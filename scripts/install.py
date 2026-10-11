@@ -2357,11 +2357,11 @@ def _update_bashrc_block() -> None:
         f"}}\n"
         f"agentienv\n"
         f'case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac\n'
+        f'command -v agentihooks >/dev/null && eval "$(agentihooks accounts env)"\n'
         f'alias agenti="agentihooks claude"\n'
         f"{_BLOCK_END}\n"
     )
 
-    # Always remove first, then append at the end
     _remove_bashrc_block()
     bashrc_text = _BASHRC.read_text(encoding="utf-8") if _BASHRC.exists() else ""
     sep = "\n" if bashrc_text and not bashrc_text.endswith("\n") else ""

@@ -9,6 +9,9 @@ from scripts.swarm.store import MASTER, PREFIX, SwarmError
 DEFAULT_COUNT = 1
 SAVE_ATTEMPTS = 5
 UNNUMBERED = 10_000
+HIVES = "hives"
+HIVE_KEY = "hive."
+HIVE_PAIR = f"a hive owner is set as {HIVE_KEY}<hive id>=<master seat>"
 
 
 class MasterError(SwarmError):
@@ -17,6 +20,22 @@ class MasterError(SwarmError):
 
 def seat(index: int) -> str:
     return MASTER if index == 1 else f"{MASTER}-{index}"
+
+
+def is_lead(slug: str, agent) -> bool:
+    """A master record with no seat predates seats and holds the lead."""
+    return agent.lane == MASTER and agent.seat in ("", seat_address(slug, MASTER))
+
+
+def seat_lines(slug: str, task: dict) -> list[str]:
+    """Opening prompt lines for a master launched in seat two or later; the lead's task carries no masters count."""
+    if "masters" not in task:
+        return []
+    return [
+        f"You hold master seat {task['seat']}, one of {task['masters']} masters of swarm {slug}. The lead seat "
+        f"{seat_address(slug, MASTER)} answers the operator and his chat; you act on the inbox items for the phases "
+        f"and hives you own: {', '.join(task.get('owns', [])) or 'none yet'}."
+    ]
 
 
 def seats(slug: str, count: int) -> list[str]:
@@ -73,6 +92,8 @@ def count_of(text: str) -> int:
 def owner_of(target: str, doc: dict, owners: dict[str, str]) -> str:
     kind, _, rest = target.partition("/")
     item = rest.partition("/")[0]
+    if kind == HIVES:
+        return owners.get(f"{HIVES}/{item}", "")
     if kind == "tasks":
         item = {t.get("id"): t.get("phase") for t in doc.get("tasks", [])}.get(item)
     elif kind != "phases":
@@ -81,11 +102,37 @@ def owner_of(target: str, doc: dict, owners: dict[str, str]) -> str:
 
 
 def route(target: str, doc: dict, owners: Callable[[], dict[str, str]], live: list[str], lead: str) -> str:
-    """owners is read only for a phase or task target, so other items write no owner state."""
-    if target.partition("/")[0] not in ("phases", "tasks"):
+    """owners is read only for a phase, task or hive target, so other items write no owner state."""
+    if target.partition("/")[0] not in ("phases", "tasks", HIVES):
         return lead
     owner = owner_of(target, doc, owners())
     return owner if owner in live else lead
+
+
+def hive_targets(saved: str | None, current: list[str]) -> dict[str, str]:
+    """A hive whose owning seat was removed by a lower count goes back to the lead."""
+    hives = json.loads(saved or "{}")
+    return {f"{HIVES}/{hive}": owner for hive, owner in hives.items() if owner in current}
+
+
+def check_hive_owner(slug: str, count: int, hive_id: str, owner: str) -> None:
+    if owner not in seats(slug, count):
+        raise MasterError(f"{owner} is not a master seat of {slug}, so it cannot own hive {hive_id}")
+
+
+def hive_pairs(slug: str, pairs: list[str]) -> tuple[list[tuple[str, str]], list[str]]:
+    """hive.<id>=<seat> pairs as (hive id, seat address), and every other pair untouched."""
+    hives, rest = [], []
+    for pair in pairs:
+        key, _, seat_text = pair.partition("=")
+        if not key.startswith(HIVE_KEY):
+            rest.append(pair)
+            continue
+        hive = key.removeprefix(HIVE_KEY)
+        if not hive or not seat_text:
+            raise MasterError(HIVE_PAIR)
+        hives.append((hive, seat_address(slug, seat_text.removesuffix(f"@{slug}"))))
+    return hives, rest
 
 
 class MasterSeats:
@@ -101,6 +148,20 @@ class MasterSeats:
     def count(self, slug: str) -> int:
         return int(self.redis.hget(self.key(slug), "count") or DEFAULT_COUNT)
 
+    def own_hive(self, slug: str, hive_id: str, owner: str) -> None:
+        check_hive_owner(slug, self.count(slug), hive_id, owner)
+        hives = json.loads(self.redis.hget(self.key(slug), HIVES) or "{}")
+        self.redis.hset(self.key(slug), HIVES, json.dumps({**hives, hive_id: owner}, sort_keys=True))
+
+    def check_hives(self, slug: str, counts: list[int], hives: list[tuple[str, str]]) -> None:
+        """Checked against the count a command leaves, before that command writes anything."""
+        final = counts[-1] if counts else self.count(slug)
+        for hive, owner in hives:
+            check_hive_owner(slug, final, hive, owner)
+
+    def hive_owners(self, slug: str) -> dict[str, str]:
+        return hive_targets(self.redis.hget(self.key(slug), HIVES), seats(slug, self.count(slug)))
+
     def owners(self, slug: str, doc: dict) -> dict[str, str]:
         from redis.exceptions import WatchError
 
@@ -113,6 +174,7 @@ class MasterSeats:
                     saved = json.loads(pipe.hget(key, "owners") or "{}")
                     known = json.loads(pipe.hget(key, "seats") or "[]")
                     current = seats(slug, int(pipe.hget(key, "count") or DEFAULT_COUNT))
+                    hives = hive_targets(pipe.hget(key, HIVES), current)
                     owners = assign(phases, current, saved, known)
                     if (owners, current) != (saved, known):
                         pipe.multi()
@@ -120,7 +182,7 @@ class MasterSeats:
                             key, mapping={"owners": json.dumps(owners, sort_keys=True), "seats": json.dumps(current)}
                         )
                         pipe.execute()
-                    return owners
+                    return {**owners, **hives}
                 except WatchError:
                     continue
         raise MasterError(f"master seats of {slug} kept changing; phase owners were not saved")
