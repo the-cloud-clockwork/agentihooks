@@ -18,7 +18,7 @@ PROGRAM = Path(__file__).resolve().parents[1] / "scripts/ci_reuse.py"
 FETCH = "Fetch the evidence of recent passed runs"
 QUEUE_REF = "refs/heads/gh-readonly-queue/dev/pr-5-0123abcd"
 RUNS = "repos/o/r/actions/workflows/test.yml/runs?event=pull_request&status=success&head_sha={}&per_page=100"
-PULL = "repos/o/r/pulls/5"
+PULL_REF = "refs/pull/5/head"
 JOBS = "repos/o/r/actions/runs/7/attempts/1/jobs?per_page=100"
 ARTIFACTS = "repos/o/r/actions/runs/7/artifacts?per_page=100"
 
@@ -141,7 +141,6 @@ def full_source(reuse_repo, tmp_path):
     artifacts.append({"id": 51, "name": "coverage-3.12-1", "expired": False})
     artifacts.append({"id": 52, "name": "split-3.12", "expired": False})
     responses = {
-        PULL: {"number": 5, "head": {"sha": head}},
         RUNS.format(head): {"workflow_runs": [source]},
         JOBS: {"total_count": len(jobs), "jobs": jobs},
         ARTIFACTS: {"total_count": len(artifacts), "artifacts": artifacts},
@@ -175,7 +174,10 @@ def full_source(reuse_repo, tmp_path):
         "else: print(json.dumps(value))\n"
     )
     (bin_dir / "gh").chmod(0o755)
+    git(root, "remote", "add", "origin", str(root))
+    git(root, "update-ref", PULL_REF, head)
     env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", REUSE_FIXTURE=str(fixture))
+    env["GIT_DIR"] = str(root / ".git")
     env.pop("GITHUB_OUTPUT", None)
     return root, base, head, queue, env, responses, record
 
@@ -322,8 +324,9 @@ def test_every_required_source_job_must_have_passed(full_source, tmp_path, name,
 def test_unavailable_source_evidence_runs_fully(full_source, tmp_path, kind):
     root, base, head, queue, env, responses, _ = full_source
     unlisted = {"unlisted-runs": RUNS.format(head), "unlisted-artifacts": ARTIFACTS, "unlisted-jobs": JOBS}
-    unlisted["unlisted-pull"] = PULL
-    if kind in unlisted:
+    if kind == "unlisted-pull":
+        git(root, "update-ref", "-d", PULL_REF)
+    elif kind in unlisted:
         responses.pop(unlisted[kind])
     elif kind == "missing-archive":
         responses.pop("repos/o/r/actions/artifacts/42/zip")
@@ -751,17 +754,16 @@ def test_a_queue_ref_naming_no_pull_request_fetches_nothing(full_source, tmp_pat
     assert list(temp.iterdir()) == []
 
 
-@pytest.mark.parametrize("pull", [{"number": 5, "head": {}}, {"number": 5, "head": {"sha": "main"}}, None])
-def test_an_unreadable_pull_request_head_lists_no_runs(full_source, tmp_path, pull):
+@pytest.mark.parametrize("remote", ["origin", "absent"])
+def test_an_unreadable_pull_request_head_lists_no_runs(full_source, tmp_path, remote):
     from scripts import ci_reuse
 
-    _, _, _, _, env, responses, _ = full_source
-    if pull is None:
-        responses.pop(PULL)
+    root, _, _, _, env, responses, _ = full_source
+    if remote == "origin":
+        git(root, "update-ref", "-d", PULL_REF)
     else:
-        responses[PULL] = pull
-    for head in ("", "main", "null"):
-        responses[RUNS.format(head)] = {"workflow_runs": []}
+        git(root, "remote", "remove", "origin")
+    responses[RUNS.format("")] = {"workflow_runs": []}
     Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
     [step] = [step for step in ci_reuse.reuse_job()["steps"] if step.get("name") == FETCH]
     temp = tmp_path / "runner"
