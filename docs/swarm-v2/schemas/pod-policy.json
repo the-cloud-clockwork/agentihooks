@@ -92,6 +92,13 @@
       "required": ["limits", "node_selector", "tolerations", "excluded_nodes"],
       "properties": {
         "limits": {"$ref": "#/$defs/quantity"},
+        "requests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cpu_millis"],
+          "description": "A CPU request below the CPU limit lets a worker burst; memory has no request here, so a worker always requests its whole memory limit and never overcommits node memory.",
+          "properties": {"cpu_millis": {"type": "integer", "minimum": 100, "maximum": 64000}}
+        },
         "node_selector": {
           "type": "object",
           "maxProperties": 8,

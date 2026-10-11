@@ -30,7 +30,10 @@ def http_error(url: str, code: int, body: bytes = b"{}") -> urllib.error.HTTPErr
 class FakeBao:
     """A KV v2 secret behind a urlopen-shaped callable."""
 
-    def __init__(self, data=None, version=0, conflicts=0, url=BAO_URL, token=BAO_TOKEN, fail_writes=False):
+    def __init__(
+        self, data=None, version=0, conflicts=0, url=BAO_URL, token=BAO_TOKEN, fail_writes=False, path=CREDS_URL
+    ):
+        self.path = path
         self.data = dict(data or {})
         self.version = version if data is None else max(version, 1)
         self.conflicts = conflicts
@@ -43,7 +46,7 @@ class FakeBao:
     def __call__(self, request, timeout=None):
         self.requests.append(request)
         assert timeout == 20
-        assert request.full_url == f"{self.url.rstrip('/')}{CREDS_URL}"
+        assert request.full_url == f"{self.url.rstrip('/')}{self.path}"
         assert request.get_header("X-vault-token") == self.token
         if request.get_method() == "GET":
             if not self.version:

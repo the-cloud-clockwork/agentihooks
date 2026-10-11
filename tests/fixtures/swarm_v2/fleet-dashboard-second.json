@@ -1,0 +1,854 @@
+{
+ "schema_version": "1.0",
+ "package": "SV2-OBS-05",
+ "evidence_class": "synthetic traces modelled on the Anton scaling canary, a stale checkpoint, a quota wait and a denied cross brain query, shaped like the controller, pool, quota, archive, checkpoint and brain readings; not recorded from a live cluster",
+ "traces": {
+  "second": [
+   {
+    "seq": 1,
+    "at_ms": 1050000000,
+    "pools": [
+     {
+      "pool": "on-demand",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 20
+     },
+     {
+      "pool": "general-spot",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 0
+     },
+     {
+      "pool": "research",
+      "configured_maximum": 10,
+      "template": {
+       "cpu_millis": 8000,
+       "memory_mib": 16384
+      },
+      "nodes": 0
+     }
+    ],
+    "attempts": [
+     {
+      "execution_id": "exe-full-2",
+      "seat": "eng-4@second",
+      "task": "full",
+      "phase": "pending",
+      "pool": null,
+      "permitted_pools": [
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 1050000000,
+      "protected": false,
+      "idle_since_ms": null,
+      "terminal": "unknown",
+      "authority": "unknown"
+     },
+     {
+      "execution_id": "exe-busy-2",
+      "seat": "eng-5@second",
+      "task": "busy",
+      "phase": "active",
+      "pool": "on-demand",
+      "permitted_pools": [
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 1049400000,
+      "protected": true,
+      "idle_since_ms": 1049700000,
+      "terminal": "connected",
+      "authority": "held"
+     }
+    ],
+    "quota": [
+     {
+      "account": "acct-c",
+      "state": "waiting",
+      "since_ms": 1049400000,
+      "resets_at_ms": 1050600000
+     }
+    ],
+    "archive": [
+     {
+      "execution_id": "exe-busy-2",
+      "seat": "eng-5@second",
+      "process": "live",
+      "activity": "working",
+      "heartbeat_at_ms": 1050000000,
+      "watermark": 100,
+      "advanced_at_ms": 1050000000,
+      "state": "ok",
+      "observed_at_ms": 1050000000
+     }
+    ],
+    "checkpoints": [
+     {
+      "execution_id": "exe-busy-2",
+      "seat": "eng-5@second",
+      "taken_at_ms": 1050000000
+     }
+    ],
+    "brain": {
+     "feed_at_ms": 1046000000,
+     "denials": []
+    }
+   },
+   {
+    "seq": 2,
+    "at_ms": 1050060000,
+    "pools": [
+     {
+      "pool": "on-demand",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 20
+     },
+     {
+      "pool": "general-spot",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 0
+     },
+     {
+      "pool": "research",
+      "configured_maximum": 10,
+      "template": {
+       "cpu_millis": 8000,
+       "memory_mib": 16384
+      },
+      "nodes": 0
+     }
+    ],
+    "attempts": [
+     {
+      "execution_id": "exe-full-2",
+      "seat": "eng-4@second",
+      "task": "full",
+      "phase": "pending",
+      "pool": null,
+      "permitted_pools": [
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 1050000000,
+      "protected": false,
+      "idle_since_ms": null,
+      "terminal": "unknown",
+      "authority": "unknown"
+     },
+     {
+      "execution_id": "exe-busy-2",
+      "seat": "eng-5@second",
+      "task": "busy",
+      "phase": "active",
+      "pool": "on-demand",
+      "permitted_pools": [
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 1049400000,
+      "protected": true,
+      "idle_since_ms": 1049700000,
+      "terminal": "connected",
+      "authority": "held"
+     }
+    ],
+    "quota": [
+     {
+      "account": "acct-c",
+      "state": "waiting",
+      "since_ms": 1049400000,
+      "resets_at_ms": 1050600000
+     }
+    ],
+    "archive": [
+     {
+      "execution_id": "exe-busy-2",
+      "seat": "eng-5@second",
+      "process": "live",
+      "activity": "working",
+      "heartbeat_at_ms": 1050060000,
+      "watermark": 200,
+      "advanced_at_ms": 1050060000,
+      "state": "ok",
+      "observed_at_ms": 1050060000
+     }
+    ],
+    "checkpoints": [
+     {
+      "execution_id": "exe-busy-2",
+      "seat": "eng-5@second",
+      "taken_at_ms": 1050000000
+     }
+    ],
+    "brain": {
+     "feed_at_ms": 1046000000,
+     "denials": [
+      {
+       "denial_id": "deny-2-1",
+       "at_ms": 1050001000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 1"
+      },
+      {
+       "denial_id": "deny-2-2",
+       "at_ms": 1050002000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 2"
+      },
+      {
+       "denial_id": "deny-2-3",
+       "at_ms": 1050003000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 3"
+      },
+      {
+       "denial_id": "deny-2-4",
+       "at_ms": 1050004000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 4"
+      },
+      {
+       "denial_id": "deny-2-5",
+       "at_ms": 1050005000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 5"
+      },
+      {
+       "denial_id": "deny-2-6",
+       "at_ms": 1050006000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 6"
+      }
+     ]
+    }
+   },
+   {
+    "seq": 3,
+    "at_ms": 1050120000,
+    "pools": [
+     {
+      "pool": "on-demand",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 20
+     },
+     {
+      "pool": "general-spot",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 0
+     },
+     {
+      "pool": "research",
+      "configured_maximum": 10,
+      "template": {
+       "cpu_millis": 8000,
+       "memory_mib": 16384
+      },
+      "nodes": 0
+     }
+    ],
+    "attempts": [
+     {
+      "execution_id": "exe-full-2",
+      "seat": "eng-4@second",
+      "task": "full",
+      "phase": "pending",
+      "pool": null,
+      "permitted_pools": [
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 1050000000,
+      "protected": false,
+      "idle_since_ms": null,
+      "terminal": "unknown",
+      "authority": "unknown"
+     },
+     {
+      "execution_id": "exe-busy-2",
+      "seat": "eng-5@second",
+      "task": "busy",
+      "phase": "active",
+      "pool": "on-demand",
+      "permitted_pools": [
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 1049400000,
+      "protected": true,
+      "idle_since_ms": 1049700000,
+      "terminal": "connected",
+      "authority": "held"
+     }
+    ],
+    "quota": [
+     {
+      "account": "acct-c",
+      "state": "waiting",
+      "since_ms": 1049400000,
+      "resets_at_ms": 1050600000
+     }
+    ],
+    "archive": [
+     {
+      "execution_id": "exe-busy-2",
+      "seat": "eng-5@second",
+      "process": "live",
+      "activity": "working",
+      "heartbeat_at_ms": 1050120000,
+      "watermark": 300,
+      "advanced_at_ms": 1050120000,
+      "state": "ok",
+      "observed_at_ms": 1050120000
+     }
+    ],
+    "checkpoints": [
+     {
+      "execution_id": "exe-busy-2",
+      "seat": "eng-5@second",
+      "taken_at_ms": 1050000000
+     }
+    ],
+    "brain": {
+     "feed_at_ms": 1046000000,
+     "denials": [
+      {
+       "denial_id": "deny-2-1",
+       "at_ms": 1050001000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 1"
+      },
+      {
+       "denial_id": "deny-2-2",
+       "at_ms": 1050002000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 2"
+      },
+      {
+       "denial_id": "deny-2-3",
+       "at_ms": 1050003000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 3"
+      },
+      {
+       "denial_id": "deny-2-4",
+       "at_ms": 1050004000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 4"
+      },
+      {
+       "denial_id": "deny-2-5",
+       "at_ms": 1050005000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 5"
+      },
+      {
+       "denial_id": "deny-2-6",
+       "at_ms": 1050006000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 6"
+      }
+     ]
+    }
+   },
+   {
+    "seq": 4,
+    "at_ms": 1050180000,
+    "pools": [
+     {
+      "pool": "on-demand",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 20
+     },
+     {
+      "pool": "general-spot",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 0
+     },
+     {
+      "pool": "research",
+      "configured_maximum": 10,
+      "template": {
+       "cpu_millis": 8000,
+       "memory_mib": 16384
+      },
+      "nodes": 0
+     }
+    ],
+    "attempts": [
+     {
+      "execution_id": "exe-full-2",
+      "seat": "eng-4@second",
+      "task": "full",
+      "phase": "pending",
+      "pool": null,
+      "permitted_pools": [
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 1050000000,
+      "protected": false,
+      "idle_since_ms": null,
+      "terminal": "unknown",
+      "authority": "unknown"
+     },
+     {
+      "execution_id": "exe-busy-2",
+      "seat": "eng-5@second",
+      "task": "busy",
+      "phase": "active",
+      "pool": "on-demand",
+      "permitted_pools": [
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 1049400000,
+      "protected": true,
+      "idle_since_ms": null,
+      "terminal": "connected",
+      "authority": "held"
+     }
+    ],
+    "quota": [
+     {
+      "account": "acct-c",
+      "state": "waiting",
+      "since_ms": 1049400000,
+      "resets_at_ms": 1050600000
+     }
+    ],
+    "archive": [
+     {
+      "execution_id": "exe-busy-2",
+      "seat": "eng-5@second",
+      "process": "live",
+      "activity": "working",
+      "heartbeat_at_ms": 1050180000,
+      "watermark": 400,
+      "advanced_at_ms": 1050180000,
+      "state": "ok",
+      "observed_at_ms": 1050180000
+     }
+    ],
+    "checkpoints": [
+     {
+      "execution_id": "exe-busy-2",
+      "seat": "eng-5@second",
+      "taken_at_ms": 1050000000
+     }
+    ],
+    "brain": {
+     "feed_at_ms": 1046000000,
+     "denials": [
+      {
+       "denial_id": "deny-2-1",
+       "at_ms": 1050001000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 1"
+      },
+      {
+       "denial_id": "deny-2-2",
+       "at_ms": 1050002000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 2"
+      },
+      {
+       "denial_id": "deny-2-3",
+       "at_ms": 1050003000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 3"
+      },
+      {
+       "denial_id": "deny-2-4",
+       "at_ms": 1050004000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 4"
+      },
+      {
+       "denial_id": "deny-2-5",
+       "at_ms": 1050005000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 5"
+      },
+      {
+       "denial_id": "deny-2-6",
+       "at_ms": 1050006000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 6"
+      }
+     ]
+    }
+   },
+   {
+    "seq": 5,
+    "at_ms": 1050240000,
+    "pools": [
+     {
+      "pool": "on-demand",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 20
+     },
+     {
+      "pool": "general-spot",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 0
+     },
+     {
+      "pool": "research",
+      "configured_maximum": 10,
+      "template": {
+       "cpu_millis": 8000,
+       "memory_mib": 16384
+      },
+      "nodes": 0
+     }
+    ],
+    "attempts": [
+     {
+      "execution_id": "exe-full-2",
+      "seat": "eng-4@second",
+      "task": "full",
+      "phase": "pending",
+      "pool": null,
+      "permitted_pools": [
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 1050000000,
+      "protected": false,
+      "idle_since_ms": null,
+      "terminal": "unknown",
+      "authority": "unknown"
+     },
+     {
+      "execution_id": "exe-busy-2",
+      "seat": "eng-5@second",
+      "task": "busy",
+      "phase": "active",
+      "pool": "on-demand",
+      "permitted_pools": [
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 1049400000,
+      "protected": true,
+      "idle_since_ms": null,
+      "terminal": "connected",
+      "authority": "expired"
+     }
+    ],
+    "quota": [
+     {
+      "account": "acct-c",
+      "state": "waiting",
+      "since_ms": 1049400000,
+      "resets_at_ms": 1050600000
+     }
+    ],
+    "archive": [
+     {
+      "execution_id": "exe-busy-2",
+      "seat": "eng-5@second",
+      "process": "live",
+      "activity": "working",
+      "heartbeat_at_ms": 1050240000,
+      "watermark": 500,
+      "advanced_at_ms": 1050240000,
+      "state": "ok",
+      "observed_at_ms": 1050240000
+     }
+    ],
+    "checkpoints": [
+     {
+      "execution_id": "exe-busy-2",
+      "seat": "eng-5@second",
+      "taken_at_ms": 1050000000
+     }
+    ],
+    "brain": {
+     "feed_at_ms": 1046000000,
+     "denials": [
+      {
+       "denial_id": "deny-2-1",
+       "at_ms": 1050001000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 1"
+      },
+      {
+       "denial_id": "deny-2-2",
+       "at_ms": 1050002000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 2"
+      },
+      {
+       "denial_id": "deny-2-3",
+       "at_ms": 1050003000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 3"
+      },
+      {
+       "denial_id": "deny-2-4",
+       "at_ms": 1050004000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 4"
+      },
+      {
+       "denial_id": "deny-2-5",
+       "at_ms": 1050005000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 5"
+      },
+      {
+       "denial_id": "deny-2-6",
+       "at_ms": 1050006000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 6"
+      }
+     ]
+    }
+   },
+   {
+    "seq": 6,
+    "at_ms": 1050300000,
+    "pools": [
+     {
+      "pool": "on-demand",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 20
+     },
+     {
+      "pool": "general-spot",
+      "configured_maximum": 20,
+      "template": {
+       "cpu_millis": 4000,
+       "memory_mib": 16384
+      },
+      "nodes": 0
+     },
+     {
+      "pool": "research",
+      "configured_maximum": 10,
+      "template": {
+       "cpu_millis": 8000,
+       "memory_mib": 16384
+      },
+      "nodes": 0
+     }
+    ],
+    "attempts": [
+     {
+      "execution_id": "exe-full-2",
+      "seat": "eng-4@second",
+      "task": "full",
+      "phase": "pending",
+      "pool": null,
+      "permitted_pools": [
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 1050000000,
+      "protected": false,
+      "idle_since_ms": null,
+      "terminal": "unknown",
+      "authority": "unknown"
+     },
+     {
+      "execution_id": "exe-busy-2",
+      "seat": "eng-5@second",
+      "task": "busy",
+      "phase": "active",
+      "pool": "on-demand",
+      "permitted_pools": [
+       "on-demand"
+      ],
+      "requested": {
+       "cpu_millis": 2000,
+       "memory_mib": 8192
+      },
+      "pending_since_ms": 1049400000,
+      "protected": true,
+      "idle_since_ms": null,
+      "terminal": "connected",
+      "authority": "expired"
+     }
+    ],
+    "quota": [
+     {
+      "account": "acct-c",
+      "state": "waiting",
+      "since_ms": 1049400000,
+      "resets_at_ms": 1050600000
+     }
+    ],
+    "archive": [
+     {
+      "execution_id": "exe-busy-2",
+      "seat": "eng-5@second",
+      "process": "live",
+      "activity": "working",
+      "heartbeat_at_ms": 1050300000,
+      "watermark": 600,
+      "advanced_at_ms": 1050300000,
+      "state": "ok",
+      "observed_at_ms": 1050300000
+     }
+    ],
+    "checkpoints": [
+     {
+      "execution_id": "exe-busy-2",
+      "seat": "eng-5@second",
+      "taken_at_ms": 1050000000
+     }
+    ],
+    "brain": {
+     "feed_at_ms": 1046000000,
+     "denials": [
+      {
+       "denial_id": "deny-2-1",
+       "at_ms": 1050001000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 1"
+      },
+      {
+       "denial_id": "deny-2-2",
+       "at_ms": 1050002000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 2"
+      },
+      {
+       "denial_id": "deny-2-3",
+       "at_ms": 1050003000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 3"
+      },
+      {
+       "denial_id": "deny-2-4",
+       "at_ms": 1050004000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 4"
+      },
+      {
+       "denial_id": "deny-2-5",
+       "at_ms": 1050005000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 5"
+      },
+      {
+       "denial_id": "deny-2-6",
+       "at_ms": 1050006000,
+       "requester_scope": "swarm:second",
+       "target_brain": "personal-operator",
+       "session_title": "Private journal entry 6"
+      }
+     ]
+    }
+   }
+  ]
+ }
+}

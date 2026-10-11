@@ -154,6 +154,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "docs",
         ".github",
         "evidence",
+        "observability",
         "docker/swarm-node",
         ".agentihooks/conditions",
     ):
@@ -177,6 +178,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "docs/",
         ".github/",
         "evidence/",
+        "observability/",
         "docker/swarm-node/",
         ".agentihooks/conditions/",
         ".test_durations",
@@ -202,6 +204,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "docs",
         ".github",
         "evidence",
+        "observability",
         "docker/swarm-node",
         ".agentihooks/conditions",
     ):

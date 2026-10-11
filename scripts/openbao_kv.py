@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 MOUNT = "secret"
 CODEX_CREDS = "agentihooks/codex-creds"
+CLAUDE_CREDS = "agentihooks/claude-creds"
 URL_ENV = "OPENBAO_URL"
 TOKEN_ENV = "OPENBAO_TOKEN"
 CAS_RETRIES = 3
