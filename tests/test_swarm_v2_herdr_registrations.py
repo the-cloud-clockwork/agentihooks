@@ -624,7 +624,7 @@ def test_an_endpoint_without_a_grant_or_operator_scope_is_refused(tmp_path):
         "unauthorized",
         f"{NAME_A} has no launch grant or operator scope",
     )
-    assert herdr.commands == []
+    assert herdr.commands == [["herdr", "machine", "list", "--json"]]
     assert not registrations.store.path.exists()
 
 
