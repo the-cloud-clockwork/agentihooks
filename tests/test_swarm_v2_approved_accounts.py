@@ -32,6 +32,11 @@ def test_the_approved_accounts_are_the_key_names_of_the_shared_secret():
     assert api.asked == [("secrets", "swarm-claude-accounts")]
 
 
+def test_a_secret_key_that_no_pod_could_carry_is_never_approved():
+    data = dict.fromkeys(["okkey", "Upper", "under_score", "dot.ted", "-lead", "a" * 64, "a" * 63], "YXBwcm92ZWQ=")
+    assert approved.SecretKeys(Secrets({"data": data}))() == frozenset({"okkey", "a" * 63})
+
+
 @pytest.mark.parametrize("answer", [None, {"metadata": {}}, {"data": None}])
 def test_a_missing_or_empty_shared_secret_approves_no_account(answer):
     assert approved.SecretKeys(Secrets(answer))() == frozenset()
@@ -71,7 +76,7 @@ def _observe(store, account, five_used=10.0, week_used=10.0, week_reset=NOW_MS /
 
 def _route(keys, held=None):
     store, observations = _quota()
-    route = approved.AccountRoute(lambda: frozenset(keys), observations, lambda: dict(held or {}))
+    route = approved.AccountRoute(lambda: frozenset(keys), observations, lambda: dict(held or {}), "claude")
     return store, route
 
 

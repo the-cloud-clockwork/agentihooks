@@ -686,7 +686,13 @@ def test_a_tick_spawn_whose_route_finds_no_account_is_refused_before_admission(w
 
 
 def test_a_launcher_built_without_a_route_keeps_the_account_of_its_terms(world):
-    assert world.launcher.accounts is None
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+    request = SpawnRequest(config, "eng", world.store.next_name(SLUG, "eng"), {"id": "task", "seat": FIRST})
+
+    world.launcher.from_tick(request, world.terms, pod_target)
+
+    [sent] = world.runtime.requests
+    assert world.store.execution(SLUG, sent.task["execution_id"]).account == ACCOUNT
 
 
 @pytest.mark.parametrize(

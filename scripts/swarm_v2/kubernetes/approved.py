@@ -5,9 +5,9 @@ from collections.abc import Callable, Collection, Mapping
 
 from scripts import session_bands
 from scripts.swarm_v2.kubernetes.client import ApiRefused, PodApi
+from scripts.swarm_v2.kubernetes.spec import KEY
 from scripts.swarm_v2.quota import UNKNOWN, QuotaObservations
 
-HARNESS = "claude"
 INDEX = "swarm-claude-accounts"
 
 
@@ -24,25 +24,29 @@ class SecretKeys:
                 flush=True,
             )
             return frozenset()
-        return frozenset((secret or {}).get("data") or {})
+        return frozenset(key for key in (secret or {}).get("data") or {} if KEY.fullmatch(key))
 
 
 class AccountRoute:
     """An unobserved key keeps the launch cap; an observed key's quota band can only lower it."""
 
     def __init__(
-        self, keys: Callable[[], Collection[str]], quota: QuotaObservations, held: Callable[[], Mapping[str, int]]
+        self,
+        keys: Callable[[], Collection[str]],
+        quota: QuotaObservations,
+        held: Callable[[], Mapping[str, int]],
+        harness: str,
     ) -> None:
-        self.keys, self.quota, self.held = keys, quota, held
+        self.keys, self.quota, self.held, self.harness = keys, quota, held, harness
 
     def _seat(self, key: str, cap: int, held: Mapping[str, int]) -> session_bands.Seat:
         sessions = held.get(key, 0)
-        reading = self.quota.reading(key, HARNESS)
+        reading = self.quota.reading(key, self.harness)
         if reading.state == UNKNOWN:
-            return session_bands.Seat(HARNESS, key, cap, sessions)
-        resets = self.quota.latest(key, HARNESS).week_reset
+            return session_bands.Seat(self.harness, key, cap, sessions)
+        resets = self.quota.latest(key, self.harness).week_reset
         spend = session_bands.spend_by(reading.five_left, resets)
-        return session_bands.Seat(HARNESS, key, min(cap, self.quota.cap(key, HARNESS)), sessions, spend)
+        return session_bands.Seat(self.harness, key, min(cap, self.quota.cap(key, self.harness)), sessions, spend)
 
     def choose(self, cap: int) -> str | None:
         held = self.held()

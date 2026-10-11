@@ -14,8 +14,9 @@ from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import SpawnError
 from scripts.swarm_v2 import deployed, image_tag
+from scripts.swarm_v2.accounts import RESERVED, Slot, account_key, encode
 from scripts.swarm_v2.auth_context import GrantRefused
-from scripts.swarm_v2.kubernetes import approved, operator_terminal
+from scripts.swarm_v2.kubernetes import operator_terminal
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 from scripts.swarm_v2.kubernetes.client import ApiRefused
 from scripts.swarm_v2.kubernetes.grants import PodGrants
@@ -180,10 +181,6 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
     assert isinstance(launcher.homes, PodGrants)
     assert (launcher.homes.api, launcher.homes.owner) == (pods, owner_for(SLUG))
     assert (launcher.capacity.slug, launcher.fleet.slug) == (SLUG, SLUG)
-    route = launcher.accounts.__self__
-    assert isinstance(route, approved.AccountRoute)
-    assert route.keys.api is pods
-    assert route.quota.slug == SLUG
     for authorize in (launcher.capacity.authorize, launcher.fleet.authorize):
         with pytest.raises(GrantRefused) as refused:
             authorize("not-a-grant")
@@ -261,6 +258,25 @@ def test_a_tick_launch_with_no_key_in_the_shared_secret_is_refused_before_any_po
     assert str(refused.value) == "no approved account has quota and a free launch slot"
     assert pods.created == []
     assert store.executions(SLUG, SEAT) == []
+
+
+def test_a_tick_launch_skips_an_approved_key_whose_fleet_slots_are_full(tmp_path, monkeypatch):
+    store = _store()
+    other = "codex-fixtureatexample-com"
+    pods = Pods("swarm-pod-proof", keys=(ACCOUNT, other))
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: pods)
+    for seat in ("eng-8@elsewhere", "eng-9@elsewhere"):
+        held = Slot(ACCOUNT, seat, "exe-" + "9" * 32, 1, RESERVED, expires_ms=10**15)
+        store.redis.hset(account_key(ACCOUNT), seat, encode(held))
+    service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    try:
+        task = {"id": "t1", "seat": SEAT, "controller_epoch": service.controller.held.epoch}
+        service.runtime.spawn(store.config(SLUG), "eng", store.next_name(SLUG, "eng"), task)
+    finally:
+        service.stop()
+
+    [pod] = pods.created
+    assert pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == other
 
 
 def test_a_pod_policy_that_names_a_provider_account_is_refused(tmp_path):

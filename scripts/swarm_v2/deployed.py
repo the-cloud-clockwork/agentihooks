@@ -180,7 +180,7 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
         controller, grants, capacity, fleet, None, workers.grants(environ, slug, verify, controller.store)
     )
     keys = SecretKeys(pod_api(environ, workers.policy["namespace"]))
-    route = AccountRoute(keys, QuotaObservations(controller.store, slug, verify), partial(_held, capacity))
+    route = AccountRoute(keys, QuotaObservations(controller.store, slug, verify), partial(_held, capacity), HARNESS)
     launcher.accounts = route.choose
     prompts = None if controller.terminals is None else TerminalPrompts(controller.terminals.terminal.router())
     kubernetes = KubernetesRuntime(controller.execute, workers.launch, prompts)
