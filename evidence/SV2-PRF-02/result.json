@@ -9,15 +9,15 @@
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2613",
   "tested_commit": "f49241dc520bf8eeb84cb0816a2880e43a85e787",
   "status": "measured on Anton by read only reads and on a CI runner by a kind fixture with an interrupted registry",
-  "evidence_class": "Measured: two read only Anton reads (kubectl get nodes, events and Pods; aws describe scaling activities and instances) at 2026-10-11T14:57:15Z and 15:59:13Z, each covering the hour of events Kubernetes keeps; three Startup stages runs (38150051995, 38150380291, 38153743721) on GitHub hosted runners pulled the published worker image through a local registry, the later two behind a 90 second outage on both kind workers. Attribution, report, claim and the account release are functions over committed reads; the account release runs the KUB-05 recovery over fakeredis and is mocked. No antoncore object, autoscaler setting or deployed Pod was changed.",
+  "evidence_class": "Measured: two read only Anton reads (kubectl get nodes, events and Pods; aws describe scaling activities and instances) at 2026-10-11T14:57:15Z and 15:59:13Z, each covering the hour of events Kubernetes keeps; two Startup stages runs (38150380291 at ec5276308, 38153743721 at f49241dc5) on GitHub hosted runners pulled the published worker image through a local registry with the committed driver, each behind a 90 second outage on both kind workers; an earlier run, 38150051995, used an older driver and is not committed. Attribution, report, claim and the account release are functions over committed reads; the account release runs the KUB-05 recovery over fakeredis and is mocked. No antoncore object, autoscaler setting or deployed Pod was changed.",
   "interfaces": [
     "scripts.swarm_v2.startup_stages.reduce(raw) keeps only the event reasons, node Ready transitions, Pod creation and readiness, and successful ASG launch activities joined to EC2 launch times that attribution reads",
-    "startup_stages.attribute(read) gives one sample per Pod with scheduling or failure evidence: node kind (cold when an instance requested after the Pod waited served it), node source (existing, new_instance, warm_pool), from_zero from the scale up that requested that instance, image cache (cached, uncached, partial, unknown), outcome (started, pending or a failure class), transient failure the Pod started past, sandbox retries, time to first failure and stages trigger, instance, join, schedule, image, pod_start, bootstrap; a Pod listed after its scheduling event is a later incarnation and its listing is ignored",
-    "startup_stages.report(samples) gives startup_stage_p50_p95 per scenario with failures, pending and transient counts beside the starts, node_provision_ms (trigger plus instance plus join) apart from image_init_ms (pull plus Pod start)",
+    "startup_stages.attribute(read) gives one sample per Pod with scheduling or failure evidence: node kind (cold when an instance requested after the Pod waited served it), node source (existing, new_instance, warm_pool), from_zero from the scale up that requested that instance, image cache (cached, uncached, partial, unknown), outcome (started, pending or a failure class), transient failure the Pod started past, sandbox retries, time to first failure and stages trigger, instance, join, schedule, image, pull_retry (time lost to failed pulls before the pull that succeeded), pod_start, bootstrap; a Pod listed after its scheduling event is a later incarnation and its listing is ignored",
+    "startup_stages.report(samples) gives startup_stage_p50_p95 per scenario with failures, pending and transient counts beside the starts, node_provision_ms (trigger, instance, join and schedule: the Pod waiting until the new node accepts it) apart from image_init_ms (the successful pull plus failed pulls before it); the rendered page shows failures and transient failures in their own columns",
     "startup_stages.claim(samples, cold_scale_from_zero) raises ClaimRefused naming every sample that landed on an existing node, came from a non empty pool or did not pull uncached",
     "startup_stages.unbounded(samples, grace) lists pull failures, final or transient, classified later than the KUB-05 pull grace or never timed",
     "python -m scripts.swarm_v2.startup_bench reduce, report and claim expose those on the command line; claim exits 2 with the refusal and writes nothing",
-    "tests/performance/swarm_v2/startup.py drives the kind fixture: uncached then cached worker image on each node, then every node pulling while the local registry is stopped for --outage seconds, recovery waited, capture written for reduce",
+    "tests/performance/swarm_v2/startup.py kind drives the kind fixture: uncached then cached worker image on each node, then every node pulling while the local registry is stopped for --outage seconds, recovery waited, capture written for reduce, and a non zero exit when a Pod is not ready, not classified within grace or not recovered; startup.py anton writes the read only Anton listings the committed reads were reduced from",
     ".github/workflows/startup-stages.yml runs the fixture on dispatch, on call and on branch pushes touching the fixture or the startup modules, and uploads the startup-stages artifact"
   ],
   "supported_versions": {
@@ -30,15 +30,16 @@
   "authoritative_objects": "None are written. Raw listings stay outside the repository; only reduced reads with the sha256 of every listing are committed. The fixture deletes only its own namespace in its own kind cluster.",
   "states": {
     "observed": "Anton read 1: 846 samples, 845 started, 16 cold, 15 of them on the ondemand pool scaled from a non empty pool and 1 on the swarm pool scaled from zero; read 2: 598 samples, 595 started, 2 cold, 1 from zero. Kind runs: uncached worker image pulls 10.0 to 11.1 s, cached pulls 0, every interrupted pull classified registry_unavailable within the scheduling second, every interrupted Pod started after the registry returned.",
-    "accepted": "Case A: both reads split node provision from image initialization for every cold row; the from zero sample of each read is accepted as cold_scale_from_zero; the two reads share no started sample, only the plane-0 pull failure continuing through both; a second attribution of read 1 matches. Case B: the 15 ondemand cold samples, 50 warm samples and 11 cached kind samples are each refused the cold label with their reason; the claim command exits 2 and leaves its read byte identical. Case C: both kind Pods behind the 90 second outage were classified registry_unavailable at 0 ms and started, none unbounded; in the KUB-05 recovery an image pull holds the account slot only within the 120 s grace, past it the attempt is fenced with grant and account released, no slot remains and a replayed pass changes neither fence nor decision.",
+    "accepted": "Case A: each fixture passes on its own: both Anton reads split node provision from image pull for every cold row and accept their from zero sample as cold_scale_from_zero; both kind runs started every sample with the uncached pull measured; the two Anton reads share no started sample, only the plane-0 pull failure continuing through both. Case B: the ondemand cold samples (from a non empty pool, or a warm pool instance), 50 warm samples and 11 cached kind samples are each refused the cold label with their reason; the claim command exits 2 and leaves its read byte identical. Case C: both kind Pods behind the 90 second outage were classified registry_unavailable one second after scheduling, the outage was charged to the image phase as failed pulls, and both started; none is unbounded. In the KUB-05 recovery an image pull holds the account slot only within the 120 s grace; past it the attempt is fenced with grant and account released, no slot remains and a replayed pass leaves fence and decision unchanged.",
     "committed": "Code, workflow, fixture driver, four reduced reads, case records a, b and c, the results page and manifest.json at tested_commit.",
     "externally_verified": "None: no worker Pod was launched by the swarm controller on Anton for this package; the Anton samples are other workloads and the SV2-CAP-02 scale from zero probes. G10 live evidence is outstanding."
   },
   "validation": {
     "red": "Proofs run 38149987978 on tests only commit b7f1e1191: tests/test_swarm_v2_startup_stages.py failed collection with ImportError for startup_bench",
-    "tests": "Proofs run 38151908976 at 835ebbc77: 40 passed in the stage tests; Proofs run 38153748934 at tested_commit: 136 passed across the stage tests, the case record tests and the KUB-05 failure tests",
-    "mutation": "pending: Mutation preflight run 38153743666 at tested_commit",
-    "lint": "ruff check, ruff format and size limits passed through python -m scripts.ci_prepush"
+    "tests": "pending on the head after the review fixes; earlier: Proofs run 38151908976 (40 passed) and 38153748934 at f49241dc5 (136 passed across the stage tests, the case record tests and the KUB-05 failure tests)",
+    "mutation": "pending: Mutation preflight on the head after the review fixes",
+    "lint": "ruff check, ruff format and size limits passed through python -m scripts.ci_prepush",
+    "review": "Standards and Spec readers on the diff since the SV2-PRF-01 head: warm pool cold labels, failure timing, a silent fixture exit, outage time charged to the Pod phase, the image total including Pod start, the schedule stage outside node provision, hidden transient failures, a tautological repeat check and kind provenance were fixed in code; the remaining points are recorded as limitations"
   },
   "measurements": {
     "startup_stage_p50_p95": {
@@ -48,13 +49,13 @@
         "from_zero": 1,
         "image_init_ms": {
           "n": 16,
-          "p50": 87783,
-          "p95": 89790
+          "p50": 24523,
+          "p95": 31360
         },
         "node_provision_ms": {
           "n": 16,
-          "p50": 54303,
-          "p95": 73638
+          "p50": 55387,
+          "p95": 163058
         },
         "node_sources": {
           "new_instance": 15,
@@ -83,6 +84,11 @@
             "p50": 62413,
             "p95": 70485
           },
+          "pull_retry": {
+            "n": 16,
+            "p50": 0,
+            "p95": 0
+          },
           "schedule": {
             "n": 16,
             "p50": 1099,
@@ -104,13 +110,13 @@
         "from_zero": 1,
         "image_init_ms": {
           "n": 2,
-          "p50": 6068,
-          "p95": 95521
+          "p50": 554,
+          "p95": 30034
         },
         "node_provision_ms": {
           "n": 2,
-          "p50": 29443,
-          "p95": 75685
+          "p50": 29922,
+          "p95": 150617
         },
         "node_sources": {
           "new_instance": 1,
@@ -144,6 +150,11 @@
             "p50": 5514,
             "p95": 65487
           },
+          "pull_retry": {
+            "n": 2,
+            "p50": 0,
+            "p95": 0
+          },
           "schedule": {
             "n": 2,
             "p50": 479,
@@ -166,8 +177,8 @@
           "from_zero": 0,
           "image_init_ms": {
             "n": 11,
-            "p50": 2000,
-            "p95": 4000
+            "p50": 0,
+            "p95": 0
           },
           "node_provision_ms": null,
           "node_sources": {
@@ -189,12 +200,17 @@
             "pod_start": {
               "n": 11,
               "p50": 2000,
-              "p95": 4000
+              "p95": 3000
+            },
+            "pull_retry": {
+              "n": 11,
+              "p50": 0,
+              "p95": 0
             },
             "schedule": {
               "n": 11,
               "p50": 0,
-              "p95": 11000
+              "p95": 10000
             }
           },
           "started": 11,
@@ -205,8 +221,8 @@
           "from_zero": 0,
           "image_init_ms": {
             "n": 4,
-            "p50": 12000,
-            "p95": 180000
+            "p50": 11420,
+            "p95": 186000
           },
           "node_provision_ms": null,
           "node_sources": {
@@ -217,23 +233,28 @@
           "stages": {
             "bootstrap": {
               "n": 4,
-              "p50": 1000,
-              "p95": 2000
+              "p50": 0,
+              "p95": 1000
             },
             "image": {
               "n": 4,
-              "p50": 10144,
-              "p95": 11070
+              "p50": 11420,
+              "p95": 12557
             },
             "pod_start": {
               "n": 4,
-              "p50": 930,
-              "p95": 169839
+              "p50": 698,
+              "p95": 2000
+            },
+            "pull_retry": {
+              "n": 4,
+              "p50": 0,
+              "p95": 173443
             },
             "schedule": {
               "n": 4,
               "p50": 0,
-              "p95": 3000
+              "p95": 1000
             }
           },
           "started": 4,
@@ -265,7 +286,7 @@
       "Ondemand new instances join in 36 to 37 s after EC2 launch, warm pool instances in 22 s, the swarm pool c7i-flex instances in 46 and 56 s.",
       "On the swarm pool the Pod waited a further 75 and 96 s after the node turned Ready: the scheduler reported the Pod's node affinity or selector unmatched on the new node for that time. A node label applied after join is the likely cause; it is a hypothesis, filed as a ledger follow up.",
       "Every ondemand cold start in read 1 hit one FailedCreatePodSandBox retry, and its Pod start ran 30 to 70 s beyond the pull.",
-      "A pull blocked by a 90 s registry outage started 90 to 175 s after scheduling, up to 85 s after the registry returned, because kubelet pull back off keeps growing during the outage."
+      "A pull blocked by a 90 s registry outage spent up to 175 s in failed pulls before the pull that succeeded, up to 85 s past the registry's return, because kubelet pull back off keeps growing during the outage; that time now counts in the image phase."
     ]
   },
   "limitations": [
@@ -274,7 +295,9 @@
     "Events older than an hour are gone, so each read only sees the hour before it.",
     "EC2 launch times have one second precision.",
     "The kind registry runs on the same runner, so its pull times reflect image size and unpack, not registry distance.",
-    "With two cold samples in read 2 the p95 equals the maximum."
+    "With two cold samples in read 2 the p95 equals the maximum.",
+    "The kind fixture has no cold node: a kind cluster cannot add a node, so cold node stages come only from the Anton reads, which held no registry interruption.",
+    "The native harness handshake (SV2-PRF-02 step 3) is not measured, so the package is not complete."
   ],
-  "rollback": "Use the previous qualified image and reduce launch concurrency: this package changes no deployed image, concurrency or autoscaler setting, so rollback is reverting its pull request; the measurement workflow is removed with it. Rehearsed in the fixture: the registry outage left both Pods recovering to start without a manual step, and the recovery case shows the account slot released past the pull grace with nothing left reserved."
+  "rollback": "Use the previous qualified image and reduce launch concurrency: this package changes no deployed image, concurrency or autoscaler setting, so its rollback is reverting the pull request, which removes the measurement workflow with it. The previous image rollback and a concurrency reduction were not rehearsed here because nothing deployed changed. The fixture did show both Pods recovering from the outage without a manual step, and the mocked recovery case shows the account slot released past the pull grace with nothing left reserved."
 }

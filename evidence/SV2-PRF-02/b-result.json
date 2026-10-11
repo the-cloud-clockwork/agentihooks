@@ -4,8 +4,8 @@
   "input_sha256": {
     "anton-read-1.json": "850d67d30fb7ec52e89277b2e467c6a9785fba87e56dcff3e2dcd94dc4f9695a",
     "anton-read-2.json": "4ae6cdceb5cfe22509ba51da0efa04b6a57c8770189b0f2c35e2e6825741e7c4",
-    "kind-run-1.json": "e4786b8f9831092279d730cf62165c4fc3b9de953558d4c1162eb8b72eaafbe2",
-    "kind-run-2.json": "9cdad8aecf741089cc741a5424792136f103c038982b54886cc0db5898fecc17"
+    "kind-run-1.json": "9cdad8aecf741089cc741a5424792136f103c038982b54886cc0db5898fecc17",
+    "kind-run-2.json": "a2b14c83b40160e2de8be5c949f78c28e7ec73cc82a2e175ffa2959a091b1b16"
   },
   "observed": {
     "cached_image": {

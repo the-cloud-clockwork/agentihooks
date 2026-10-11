@@ -17,7 +17,8 @@ STAGE_NAMES = {
     "join": "EC2 launch to node Ready",
     "schedule": "Node Ready or Pod creation to Scheduled",
     "image": "Image pull",
-    "pod_start": "Scheduled to last container start, less the pull",
+    "pull_retry": "Failed pulls before the pull that succeeded",
+    "pod_start": "Scheduled to last container start, less pulls and retries",
     "bootstrap": "Last container start to Pod Ready",
 }
 
@@ -37,23 +38,26 @@ def _cell(spread: dict | None) -> str:
     return f"{spread['p50'] / 1000:.1f} / {spread['p95'] / 1000:.1f} (n {spread['n']})"
 
 
+def _counts(counts: dict) -> str:
+    return ", ".join(f"{kind} {count}" for kind, count in counts.items()) or "none"
+
+
 def markdown(result: dict, source: str) -> str:
     lines = [
         "# Swarm v2 startup stages",
         "",
         f"Source: {source}. Cells are p50 / p95 in seconds with the sample count.",
         "",
-        "| Scenario | Samples | Started | Failures | Node provision | Image init | "
-        + " | ".join(STAGE_NAMES.values())
-        + " |",
-        "|" + "---|" * (6 + len(STAGE_NAMES)),
+        "| Scenario | Samples | Started | Failures | Transient failures | Node provision to schedulable | "
+        "Image pull with retries | " + " | ".join(STAGE_NAMES.values()) + " |",
+        "|" + "---|" * (7 + len(STAGE_NAMES)),
     ]
     for name, row in result["scenarios"].items():
-        failures = ", ".join(f"{kind} {count}" for kind, count in row["failures"].items()) or "none"
         stages = " | ".join(_cell(row["stages"].get(stage)) for stage in STAGE_NAMES)
         lines.append(
-            f"| {name} | {row['samples']} | {row['started']} | {failures} | "
-            f"{_cell(row['node_provision_ms'])} | {_cell(row['image_init_ms'])} | {stages} |"
+            f"| {name} | {row['samples']} | {row['started']} | {_counts(row['failures'])} | "
+            f"{_counts(row['transient'])} | {_cell(row['node_provision_ms'])} | {_cell(row['image_init_ms'])} | "
+            f"{stages} |"
         )
     return "\n".join(lines) + "\n"
 

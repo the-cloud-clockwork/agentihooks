@@ -92,6 +92,7 @@ def test_a_scale_from_zero_attributes_every_stage_separately():
         "join": 46000,
         "schedule": 3000,
         "image": 20000,
+        "pull_retry": 0,
         "pod_start": 5000,
         "bootstrap": 2000,
     }
@@ -244,8 +245,8 @@ def test_the_report_keeps_failures_beside_starts_and_splits_node_from_image_time
     result = stages.report(samples)
     assert result["metric"] == "startup_stage_p50_p95" and result["unit"] == "ms"
     cold = result["scenarios"]["cold-node/uncached-image"]
-    assert cold["node_provision_ms"]["p50"] == 9000 + 12000 + 46000
-    assert cold["image_init_ms"]["p50"] == 20000 + 5000
+    assert cold["node_provision_ms"]["p50"] == 9000 + 12000 + 46000 + 3000
+    assert cold["image_init_ms"]["p50"] == 20000
     assert cold["from_zero"] == 1 and cold["node_sources"] == {"new_instance": 1}
     unknown = result["scenarios"]["warm-node/unknown-image"]
     assert (unknown["samples"], unknown["started"], unknown["failures"]) == (1, 0, {"registry_unavailable": 1})
@@ -512,7 +513,7 @@ def test_markdown_renders_seconds_with_counts_and_marks_missing_cells():
     result = stages.report(stages.attribute(read(cold_events() + warm_events())))
     page = bench.markdown(result, "Anton read")
     row = next(line for line in page.splitlines() if line.startswith("| cold-node/uncached-image"))
-    assert "| 67.0 / 67.0 (n 1) | 25.0 / 25.0 (n 1) |" in row
+    assert "| none | none | 70.0 / 70.0 (n 1) | 20.0 / 20.0 (n 1) |" in row
     warm = next(line for line in page.splitlines() if line.startswith("| warm-node/cached-image"))
     assert warm.count("n/a") == 6
 
@@ -558,3 +559,41 @@ def test_failure_time_is_the_first_event_of_the_failure_class_it_names():
     assert stages.failure(events[:1]) == ("", None)
     waited = [ev("p/y", "FailedScheduling", 9)]
     assert stages.failure(waited) == ("unschedulable", T0 + 9000)
+
+
+def test_time_lost_to_failed_pulls_is_charged_to_the_image_not_the_pod():
+    events = [
+        ev("p/x", "Scheduled", 1, f"Successfully assigned p/x to {OLD}"),
+        ev("p/x", "Pulling", 1.2),
+        ev("p/x", "Failed", 2, 'Failed to pull image "x": connection refused'),
+        ev("p/x", "BackOff", 3, 'Back-off pulling image "x"'),
+        ev("p/x", "Pulled", 40, 'Successfully pulled image "x" in 10s (10s including waiting)'),
+        ev("p/x", "Started", 41),
+    ]
+    [entry] = stages.attribute(read(events))
+    assert (entry["outcome"], entry["transient"]) == ("started", "registry_unavailable")
+    assert entry["stages"]["image"] == 10000
+    assert entry["stages"]["pull_retry"] == 28800
+    assert entry["stages"]["pod_start"] == 1200
+    row = stages.report([entry])["scenarios"]["warm-node/uncached-image"]
+    assert row["image_init_ms"]["p50"] == 38800
+    page = bench.markdown(stages.report([entry]), "s")
+    assert "| 1 | 1 | none | registry_unavailable 1 |" in page
+
+
+def test_a_failed_pull_without_a_recorded_attempt_or_success_has_no_retry_time():
+    failed = [
+        ev("p/x", "Scheduled", 1, f"Successfully assigned p/x to {OLD}"),
+        ev("p/x", "Failed", 2, 'Failed to pull image "x": connection refused'),
+        ev("p/x", "Pulled", 40, 'Successfully pulled image "x" in 10s'),
+    ]
+    assert stages.attribute(read(failed))[0]["stages"]["pull_retry"] == 0
+    never = [ev("p/y", "Scheduled", 1, f"Successfully assigned p/y to {OLD}"), ev("p/y", "Pulling", 1)]
+    assert stages.attribute(read(never))[0]["stages"]["pull_retry"] is None
+    early = [
+        ev("p/z", "Scheduled", 1, f"Successfully assigned p/z to {OLD}"),
+        ev("p/z", "Pulling", 30),
+        ev("p/z", "Failed", 31, 'Failed to pull image "x": EOF'),
+        ev("p/z", "Pulled", 35, 'Successfully pulled image "x" in 10s'),
+    ]
+    assert stages.attribute(read(early))[0]["stages"]["pull_retry"] == 0

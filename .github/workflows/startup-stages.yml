@@ -8,6 +8,8 @@ on:
     paths:
       - tests/performance/swarm_v2/startup.py
       - scripts/swarm_v2/startup_*.py
+      - scripts/swarm_v2/resource_profiles.py
+      - scripts/swarm_v2/kubernetes/failures.py
       - .github/workflows/startup-stages.yml
 
 permissions:
@@ -76,7 +78,7 @@ jobs:
 
       - name: Measure uncached, cached and interrupted pulls
         run: |
-          python tests/performance/swarm_v2/startup.py --image "$FIXTURE_IMAGE" \
+          python tests/performance/swarm_v2/startup.py kind --image "$FIXTURE_IMAGE" \
             --nodes startup-worker startup-worker2 --output "$EVIDENCE/capture"
 
       - name: Reduce and report

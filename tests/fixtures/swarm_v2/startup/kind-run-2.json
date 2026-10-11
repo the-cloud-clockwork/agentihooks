@@ -1,497 +1,453 @@
 {
   "events": [
     {
-      "at": 1791731715000,
-      "pod": "kube-system/coredns-559f6c778d-7z49b",
+      "at": 1791734618000,
+      "pod": "kube-system/coredns-559f6c778d-fzwxc",
       "reason": "FailedScheduling"
     },
     {
-      "at": 1791731726000,
-      "message": "Successfully assigned kube-system/coredns-559f6c778d-7z49b to startup-control-plane",
-      "pod": "kube-system/coredns-559f6c778d-7z49b",
+      "at": 1791734628000,
+      "message": "Successfully assigned kube-system/coredns-559f6c778d-fzwxc to startup-control-plane",
+      "pod": "kube-system/coredns-559f6c778d-fzwxc",
       "reason": "Scheduled"
     },
     {
-      "at": 1791731727000,
+      "at": 1791734629000,
       "message": "Container image \"registry.k8s.io/coredns/coredns:v1.14.6\" already present on machine and can be accessed by the pod",
-      "pod": "kube-system/coredns-559f6c778d-7z49b",
+      "pod": "kube-system/coredns-559f6c778d-fzwxc",
       "reason": "Pulled"
     },
     {
-      "at": 1791731728000,
-      "pod": "kube-system/coredns-559f6c778d-7z49b",
+      "at": 1791734630000,
+      "pod": "kube-system/coredns-559f6c778d-fzwxc",
       "reason": "Started"
     },
     {
-      "at": 1791731715000,
-      "pod": "kube-system/coredns-559f6c778d-qsz2l",
+      "at": 1791734618000,
+      "pod": "kube-system/coredns-559f6c778d-rp22l",
       "reason": "FailedScheduling"
     },
     {
-      "at": 1791731726000,
-      "message": "Successfully assigned kube-system/coredns-559f6c778d-qsz2l to startup-control-plane",
-      "pod": "kube-system/coredns-559f6c778d-qsz2l",
+      "at": 1791734628000,
+      "message": "Successfully assigned kube-system/coredns-559f6c778d-rp22l to startup-control-plane",
+      "pod": "kube-system/coredns-559f6c778d-rp22l",
       "reason": "Scheduled"
     },
     {
-      "at": 1791731727000,
+      "at": 1791734629000,
       "message": "Container image \"registry.k8s.io/coredns/coredns:v1.14.6\" already present on machine and can be accessed by the pod",
-      "pod": "kube-system/coredns-559f6c778d-qsz2l",
+      "pod": "kube-system/coredns-559f6c778d-rp22l",
       "reason": "Pulled"
     },
     {
-      "at": 1791731728000,
-      "pod": "kube-system/coredns-559f6c778d-qsz2l",
+      "at": 1791734630000,
+      "pod": "kube-system/coredns-559f6c778d-rp22l",
       "reason": "Started"
     },
     {
-      "at": 1791731702000,
-      "message": "Container image \"registry.k8s.io/etcd:3.7.0-0\" already present on machine and can be accessed by the pod",
-      "pod": "kube-system/etcd-startup-control-plane",
-      "reason": "Pulled"
+      "at": 1791734621000,
+      "message": "Successfully assigned kube-system/kindnet-9f4h2 to startup-worker",
+      "pod": "kube-system/kindnet-9f4h2",
+      "reason": "Scheduled"
     },
     {
-      "at": 1791731703000,
-      "pod": "kube-system/etcd-startup-control-plane",
-      "reason": "Started"
-    },
-    {
-      "at": 1791731715000,
+      "at": 1791734623000,
       "message": "Container image \"docker.io/kindest/kindnetd:v20260820-69b56db7\" already present on machine and can be accessed by the pod",
-      "pod": "kube-system/kindnet-2972d",
+      "pod": "kube-system/kindnet-9f4h2",
       "reason": "Pulled"
     },
     {
-      "at": 1791731715000,
-      "message": "Successfully assigned kube-system/kindnet-2972d to startup-control-plane",
-      "pod": "kube-system/kindnet-2972d",
-      "reason": "Scheduled"
-    },
-    {
-      "at": 1791731716000,
-      "pod": "kube-system/kindnet-2972d",
+      "at": 1791734624000,
+      "pod": "kube-system/kindnet-9f4h2",
       "reason": "Started"
     },
     {
-      "at": 1791731719000,
-      "message": "Successfully assigned kube-system/kindnet-48g4z to startup-worker2",
-      "pod": "kube-system/kindnet-48g4z",
+      "at": 1791734621000,
+      "message": "Successfully assigned kube-system/kindnet-d4l66 to startup-worker2",
+      "pod": "kube-system/kindnet-d4l66",
       "reason": "Scheduled"
     },
     {
-      "at": 1791731721000,
+      "at": 1791734622000,
       "message": "Container image \"docker.io/kindest/kindnetd:v20260820-69b56db7\" already present on machine and can be accessed by the pod",
-      "pod": "kube-system/kindnet-48g4z",
+      "pod": "kube-system/kindnet-d4l66",
       "reason": "Pulled"
     },
     {
-      "at": 1791731721000,
-      "pod": "kube-system/kindnet-48g4z",
+      "at": 1791734624000,
+      "pod": "kube-system/kindnet-d4l66",
       "reason": "Started"
     },
     {
-      "at": 1791731719000,
-      "message": "Successfully assigned kube-system/kindnet-7bbw5 to startup-worker",
-      "pod": "kube-system/kindnet-7bbw5",
+      "at": 1791734617000,
+      "message": "Successfully assigned kube-system/kindnet-z8t2s to startup-control-plane",
+      "pod": "kube-system/kindnet-z8t2s",
       "reason": "Scheduled"
     },
     {
-      "at": 1791731722000,
+      "at": 1791734618000,
       "message": "Container image \"docker.io/kindest/kindnetd:v20260820-69b56db7\" already present on machine and can be accessed by the pod",
-      "pod": "kube-system/kindnet-7bbw5",
+      "pod": "kube-system/kindnet-z8t2s",
       "reason": "Pulled"
     },
     {
-      "at": 1791731723000,
-      "pod": "kube-system/kindnet-7bbw5",
+      "at": 1791734618000,
+      "pod": "kube-system/kindnet-z8t2s",
       "reason": "Started"
     },
     {
-      "at": 1791731703000,
-      "message": "Container image \"registry.k8s.io/kube-apiserver:v1.37.0\" already present on machine and can be accessed by the pod",
-      "pod": "kube-system/kube-apiserver-startup-control-plane",
-      "reason": "Pulled"
-    },
-    {
-      "at": 1791731703000,
-      "pod": "kube-system/kube-apiserver-startup-control-plane",
-      "reason": "Started"
-    },
-    {
-      "at": 1791731703000,
-      "message": "Container image \"registry.k8s.io/kube-controller-manager:v1.37.0\" already present on machine and can be accessed by the pod",
-      "pod": "kube-system/kube-controller-manager-startup-control-plane",
-      "reason": "Pulled"
-    },
-    {
-      "at": 1791731703000,
-      "pod": "kube-system/kube-controller-manager-startup-control-plane",
-      "reason": "Started"
-    },
-    {
-      "at": 1791731719000,
-      "message": "Successfully assigned kube-system/kube-proxy-2ds74 to startup-worker2",
-      "pod": "kube-system/kube-proxy-2ds74",
+      "at": 1791734617000,
+      "message": "Successfully assigned kube-system/kube-proxy-tdj5v to startup-control-plane",
+      "pod": "kube-system/kube-proxy-tdj5v",
       "reason": "Scheduled"
     },
     {
-      "at": 1791731721000,
+      "at": 1791734618000,
       "message": "Container image \"registry.k8s.io/kube-proxy:v1.37.0\" already present on machine and can be accessed by the pod",
-      "pod": "kube-system/kube-proxy-2ds74",
+      "pod": "kube-system/kube-proxy-tdj5v",
       "reason": "Pulled"
     },
     {
-      "at": 1791731721000,
-      "pod": "kube-system/kube-proxy-2ds74",
+      "at": 1791734618000,
+      "pod": "kube-system/kube-proxy-tdj5v",
       "reason": "Started"
     },
     {
-      "at": 1791731715000,
-      "message": "Container image \"registry.k8s.io/kube-proxy:v1.37.0\" already present on machine and can be accessed by the pod",
-      "pod": "kube-system/kube-proxy-4cpp8",
-      "reason": "Pulled"
-    },
-    {
-      "at": 1791731715000,
-      "message": "Successfully assigned kube-system/kube-proxy-4cpp8 to startup-control-plane",
-      "pod": "kube-system/kube-proxy-4cpp8",
+      "at": 1791734621000,
+      "message": "Successfully assigned kube-system/kube-proxy-vw4lp to startup-worker",
+      "pod": "kube-system/kube-proxy-vw4lp",
       "reason": "Scheduled"
     },
     {
-      "at": 1791731716000,
-      "pod": "kube-system/kube-proxy-4cpp8",
+      "at": 1791734622000,
+      "message": "Container image \"registry.k8s.io/kube-proxy:v1.37.0\" already present on machine and can be accessed by the pod",
+      "pod": "kube-system/kube-proxy-vw4lp",
+      "reason": "Pulled"
+    },
+    {
+      "at": 1791734624000,
+      "pod": "kube-system/kube-proxy-vw4lp",
       "reason": "Started"
     },
     {
-      "at": 1791731719000,
-      "message": "Successfully assigned kube-system/kube-proxy-hqvb5 to startup-worker",
-      "pod": "kube-system/kube-proxy-hqvb5",
+      "at": 1791734621000,
+      "message": "Successfully assigned kube-system/kube-proxy-zmt2w to startup-worker2",
+      "pod": "kube-system/kube-proxy-zmt2w",
       "reason": "Scheduled"
     },
     {
-      "at": 1791731722000,
+      "at": 1791734622000,
       "message": "Container image \"registry.k8s.io/kube-proxy:v1.37.0\" already present on machine and can be accessed by the pod",
-      "pod": "kube-system/kube-proxy-hqvb5",
+      "pod": "kube-system/kube-proxy-zmt2w",
       "reason": "Pulled"
     },
     {
-      "at": 1791731722000,
-      "pod": "kube-system/kube-proxy-hqvb5",
+      "at": 1791734623000,
+      "pod": "kube-system/kube-proxy-zmt2w",
       "reason": "Started"
     },
     {
-      "at": 1791731703000,
-      "message": "Container image \"registry.k8s.io/kube-scheduler:v1.37.0\" already present on machine and can be accessed by the pod",
-      "pod": "kube-system/kube-scheduler-startup-control-plane",
-      "reason": "Pulled"
-    },
-    {
-      "at": 1791731703000,
-      "pod": "kube-system/kube-scheduler-startup-control-plane",
-      "reason": "Started"
-    },
-    {
-      "at": 1791731715000,
-      "pod": "local-path-storage/local-path-provisioner-75f7fc7dc5-l5cmt",
+      "at": 1791734618000,
+      "pod": "local-path-storage/local-path-provisioner-75f7fc7dc5-s64vp",
       "reason": "FailedScheduling"
     },
     {
-      "at": 1791731726000,
-      "message": "Successfully assigned local-path-storage/local-path-provisioner-75f7fc7dc5-l5cmt to startup-control-plane",
-      "pod": "local-path-storage/local-path-provisioner-75f7fc7dc5-l5cmt",
+      "at": 1791734628000,
+      "message": "Successfully assigned local-path-storage/local-path-provisioner-75f7fc7dc5-s64vp to startup-control-plane",
+      "pod": "local-path-storage/local-path-provisioner-75f7fc7dc5-s64vp",
       "reason": "Scheduled"
     },
     {
-      "at": 1791731727000,
+      "at": 1791734629000,
       "message": "Container image \"docker.io/kindest/local-path-provisioner:v20260820-69b56db7\" already present on machine and can be accessed by the pod",
-      "pod": "local-path-storage/local-path-provisioner-75f7fc7dc5-l5cmt",
+      "pod": "local-path-storage/local-path-provisioner-75f7fc7dc5-s64vp",
       "reason": "Pulled"
     },
     {
-      "at": 1791731727000,
-      "pod": "local-path-storage/local-path-provisioner-75f7fc7dc5-l5cmt",
+      "at": 1791734630000,
+      "pod": "local-path-storage/local-path-provisioner-75f7fc7dc5-s64vp",
       "reason": "Started"
     },
     {
-      "at": 1791731744000,
+      "at": 1791734646000,
       "message": "Successfully assigned startup-bench/cached-startup-worker to startup-worker",
       "pod": "startup-bench/cached-startup-worker",
       "reason": "Scheduled"
     },
     {
-      "at": 1791731745000,
+      "at": 1791734647000,
       "message": "Container image \"kind-registry:5000/agentihooks-worker:startup\" already present on machine and can be accessed by the pod",
       "pod": "startup-bench/cached-startup-worker",
       "reason": "Pulled"
     },
     {
-      "at": 1791731745000,
+      "at": 1791734647000,
       "pod": "startup-bench/cached-startup-worker",
       "reason": "Started"
     },
     {
-      "at": 1791731759000,
+      "at": 1791734661000,
       "message": "Successfully assigned startup-bench/cached-startup-worker2 to startup-worker2",
       "pod": "startup-bench/cached-startup-worker2",
       "reason": "Scheduled"
     },
     {
-      "at": 1791731760000,
+      "at": 1791734662000,
       "message": "Container image \"kind-registry:5000/agentihooks-worker:startup\" already present on machine and can be accessed by the pod",
       "pod": "startup-bench/cached-startup-worker2",
       "reason": "Pulled"
     },
     {
-      "at": 1791731760000,
+      "at": 1791734662000,
       "pod": "startup-bench/cached-startup-worker2",
       "reason": "Started"
     },
     {
-      "at": 1791731764000,
-      "message": "Back-off pulling image \"kind-registry:5000/agentihooks-worker:startup\"",
-      "pod": "startup-bench/interrupted-startup-worker",
-      "reason": "BackOff"
-    },
-    {
-      "at": 1791731764000,
-      "message": "Failed to pull image \"kind-registry:5000/agentihooks-worker:startup\": failed to pull and unpack image \"kind-registry:5000/agentihooks-worker:startup\": failed to resolve reference \"kind-registry:5000/agentihooks-worker:startup\": failed to do request: Head \"http://kind-registry:5000/v2/agentihooks-worker/manifests/startup\": dial tcp: lookup kind-registry on 172.18.0.1:53: server misbehaving",
-      "pod": "startup-bench/interrupted-startup-worker",
-      "reason": "Failed"
-    },
-    {
-      "at": 1791731764000,
-      "message": "Error: ErrImagePull",
-      "pod": "startup-bench/interrupted-startup-worker",
-      "reason": "Failed"
-    },
-    {
-      "at": 1791731764000,
-      "message": "Error: ImagePullBackOff",
-      "pod": "startup-bench/interrupted-startup-worker",
-      "reason": "Failed"
-    },
-    {
-      "at": 1791731764000,
-      "pod": "startup-bench/interrupted-startup-worker",
-      "reason": "Pulling"
-    },
-    {
-      "at": 1791731764000,
+      "at": 1791734665000,
       "message": "Successfully assigned startup-bench/interrupted-startup-worker to startup-worker",
       "pod": "startup-bench/interrupted-startup-worker",
       "reason": "Scheduled"
     },
     {
-      "at": 1791731944000,
-      "message": "Successfully pulled image \"kind-registry:5000/agentihooks-worker:startup\" in 10.161s (10.161s including waiting). Image size: 510882021 bytes.",
+      "at": 1791734666000,
+      "message": "Back-off pulling image \"kind-registry:5000/agentihooks-worker:startup\"",
+      "pod": "startup-bench/interrupted-startup-worker",
+      "reason": "BackOff"
+    },
+    {
+      "at": 1791734666000,
+      "message": "Failed to pull image \"kind-registry:5000/agentihooks-worker:startup\": failed to pull and unpack image \"kind-registry:5000/agentihooks-worker:startup\": failed to resolve reference \"kind-registry:5000/agentihooks-worker:startup\": failed to do request: Head \"http://kind-registry:5000/v2/agentihooks-worker/manifests/startup\": dial tcp: lookup kind-registry on 172.18.0.1:53: server misbehaving",
+      "pod": "startup-bench/interrupted-startup-worker",
+      "reason": "Failed"
+    },
+    {
+      "at": 1791734666000,
+      "message": "Error: ErrImagePull",
+      "pod": "startup-bench/interrupted-startup-worker",
+      "reason": "Failed"
+    },
+    {
+      "at": 1791734666000,
+      "message": "Error: ImagePullBackOff",
+      "pod": "startup-bench/interrupted-startup-worker",
+      "reason": "Failed"
+    },
+    {
+      "at": 1791734666000,
+      "pod": "startup-bench/interrupted-startup-worker",
+      "reason": "Pulling"
+    },
+    {
+      "at": 1791734847000,
+      "message": "Successfully pulled image \"kind-registry:5000/agentihooks-worker:startup\" in 12.438s (12.438s including waiting). Image size: 511009032 bytes.",
       "pod": "startup-bench/interrupted-startup-worker",
       "reason": "Pulled"
     },
     {
-      "at": 1791731944000,
+      "at": 1791734848000,
       "pod": "startup-bench/interrupted-startup-worker",
       "reason": "Started"
     },
     {
-      "at": 1791731764000,
-      "message": "Back-off pulling image \"kind-registry:5000/agentihooks-worker:startup\"",
-      "pod": "startup-bench/interrupted-startup-worker2",
-      "reason": "BackOff"
-    },
-    {
-      "at": 1791731764000,
-      "message": "Failed to pull image \"kind-registry:5000/agentihooks-worker:startup\": failed to pull and unpack image \"kind-registry:5000/agentihooks-worker:startup\": failed to resolve reference \"kind-registry:5000/agentihooks-worker:startup\": failed to do request: Head \"http://kind-registry:5000/v2/agentihooks-worker/manifests/startup\": dial tcp: lookup kind-registry on 172.18.0.1:53: server misbehaving",
-      "pod": "startup-bench/interrupted-startup-worker2",
-      "reason": "Failed"
-    },
-    {
-      "at": 1791731764000,
-      "message": "Error: ErrImagePull",
-      "pod": "startup-bench/interrupted-startup-worker2",
-      "reason": "Failed"
-    },
-    {
-      "at": 1791731764000,
-      "message": "Error: ImagePullBackOff",
-      "pod": "startup-bench/interrupted-startup-worker2",
-      "reason": "Failed"
-    },
-    {
-      "at": 1791731764000,
-      "pod": "startup-bench/interrupted-startup-worker2",
-      "reason": "Pulling"
-    },
-    {
-      "at": 1791731764000,
+      "at": 1791734665000,
       "message": "Successfully assigned startup-bench/interrupted-startup-worker2 to startup-worker2",
       "pod": "startup-bench/interrupted-startup-worker2",
       "reason": "Scheduled"
     },
     {
-      "at": 1791731864000,
-      "message": "Successfully pulled image \"kind-registry:5000/agentihooks-worker:startup\" in 10.065s (10.065s including waiting). Image size: 510882021 bytes.",
+      "at": 1791734666000,
+      "message": "Back-off pulling image \"kind-registry:5000/agentihooks-worker:startup\"",
+      "pod": "startup-bench/interrupted-startup-worker2",
+      "reason": "BackOff"
+    },
+    {
+      "at": 1791734666000,
+      "message": "Failed to pull image \"kind-registry:5000/agentihooks-worker:startup\": failed to pull and unpack image \"kind-registry:5000/agentihooks-worker:startup\": failed to resolve reference \"kind-registry:5000/agentihooks-worker:startup\": failed to do request: Head \"http://kind-registry:5000/v2/agentihooks-worker/manifests/startup\": dial tcp: lookup kind-registry on 172.18.0.1:53: server misbehaving",
+      "pod": "startup-bench/interrupted-startup-worker2",
+      "reason": "Failed"
+    },
+    {
+      "at": 1791734666000,
+      "message": "Error: ErrImagePull",
+      "pod": "startup-bench/interrupted-startup-worker2",
+      "reason": "Failed"
+    },
+    {
+      "at": 1791734666000,
+      "message": "Error: ImagePullBackOff",
+      "pod": "startup-bench/interrupted-startup-worker2",
+      "reason": "Failed"
+    },
+    {
+      "at": 1791734666000,
+      "pod": "startup-bench/interrupted-startup-worker2",
+      "reason": "Pulling"
+    },
+    {
+      "at": 1791734852000,
+      "message": "Successfully pulled image \"kind-registry:5000/agentihooks-worker:startup\" in 12.557s (12.557s including waiting). Image size: 511009032 bytes.",
       "pod": "startup-bench/interrupted-startup-worker2",
       "reason": "Pulled"
     },
     {
-      "at": 1791731864000,
+      "at": 1791734853000,
       "pod": "startup-bench/interrupted-startup-worker2",
       "reason": "Started"
     },
     {
-      "at": 1791731730000,
+      "at": 1791734633000,
       "pod": "startup-bench/uncached-startup-worker",
       "reason": "FailedScheduling"
     },
     {
-      "at": 1791731732000,
+      "at": 1791734634000,
       "pod": "startup-bench/uncached-startup-worker",
       "reason": "FailedScheduling"
     },
     {
-      "at": 1791731733000,
-      "pod": "startup-bench/uncached-startup-worker",
-      "reason": "Pulling"
-    },
-    {
-      "at": 1791731733000,
+      "at": 1791734634000,
       "message": "Successfully assigned startup-bench/uncached-startup-worker to startup-worker",
       "pod": "startup-bench/uncached-startup-worker",
       "reason": "Scheduled"
     },
     {
-      "at": 1791731743000,
-      "message": "Successfully pulled image \"kind-registry:5000/agentihooks-worker:startup\" in 10.144s (10.144s including waiting). Image size: 510882021 bytes.",
+      "at": 1791734635000,
+      "pod": "startup-bench/uncached-startup-worker",
+      "reason": "Pulling"
+    },
+    {
+      "at": 1791734645000,
+      "message": "Successfully pulled image \"kind-registry:5000/agentihooks-worker:startup\" in 10.302s (10.302s including waiting). Image size: 511009032 bytes.",
       "pod": "startup-bench/uncached-startup-worker",
       "reason": "Pulled"
     },
     {
-      "at": 1791731743000,
+      "at": 1791734645000,
       "pod": "startup-bench/uncached-startup-worker",
       "reason": "Started"
     },
     {
-      "at": 1791731746000,
+      "at": 1791734648000,
       "message": "Successfully assigned startup-bench/uncached-startup-worker2 to startup-worker2",
       "pod": "startup-bench/uncached-startup-worker2",
       "reason": "Scheduled"
     },
     {
-      "at": 1791731747000,
+      "at": 1791734649000,
       "pod": "startup-bench/uncached-startup-worker2",
       "reason": "Pulling"
     },
     {
-      "at": 1791731758000,
-      "message": "Successfully pulled image \"kind-registry:5000/agentihooks-worker:startup\" in 11.07s (11.07s including waiting). Image size: 510882021 bytes.",
+      "at": 1791734660000,
+      "message": "Successfully pulled image \"kind-registry:5000/agentihooks-worker:startup\" in 11.42s (11.42s including waiting). Image size: 511009032 bytes.",
       "pod": "startup-bench/uncached-startup-worker2",
       "reason": "Pulled"
     },
     {
-      "at": 1791731758000,
+      "at": 1791734660000,
       "pod": "startup-bench/uncached-startup-worker2",
       "reason": "Started"
     }
   ],
   "inputs": {
     "activities": "b88612c45fe8f13f53f820085de7e5331b31940ffcf2f33cf747cd02f8b9e040",
-    "events": "4540814036ee10516dd481ab08a95ab1b6418f6aa2a75f1fe897997653d396d5",
+    "events": "8bf7525eec9a91eaf874f932e1f62946dc7eeeeaa04e542782427a102b34354a",
     "instances": "961be52e8769c6968eae18995b5f5624c1bd72a7f1fea94eb15ef5782350ac09",
-    "nodes": "9cffb1def8aa7fc8a1a702ef9d6e9a611e8d4781a2f30d9931b4e49ddccb43b8",
-    "pods": "bf2753290af7488adeacf141b765c08d3856d215ccb9d7d2bc527f108083ca67"
+    "nodes": "8af55173a63b4e94bcf9ffb847e63bbd79f17b6b13a60d615871cffa0993ed4f",
+    "pods": "e5c3ce0447ef9910ac7fa31ae6509f7cc939d3de531cf882782071c68a5d51ec"
   },
   "launches": {},
   "nodes": {
     "startup-control-plane": {
       "instance": "startup-control-plane",
-      "ready": 1791731726000
+      "ready": 1791734628000
     },
     "startup-worker": {
       "instance": "startup-worker",
-      "ready": 1791731733000
+      "ready": 1791734634000
     },
     "startup-worker2": {
       "instance": "startup-worker2",
-      "ready": 1791731732000
+      "ready": 1791734634000
     }
   },
   "pods": {
-    "kube-system/coredns-559f6c778d-7z49b": {
-      "created": 1791731715000,
-      "ready": 1791731728000
+    "kube-system/coredns-559f6c778d-fzwxc": {
+      "created": 1791734618000,
+      "ready": 1791734630000
     },
-    "kube-system/coredns-559f6c778d-qsz2l": {
-      "created": 1791731715000,
-      "ready": 1791731728000
+    "kube-system/coredns-559f6c778d-rp22l": {
+      "created": 1791734618000,
+      "ready": 1791734630000
     },
     "kube-system/etcd-startup-control-plane": {
-      "created": 1791731707000,
-      "ready": 1791731727000
+      "created": 1791734609000,
+      "ready": 1791734626000
     },
-    "kube-system/kindnet-2972d": {
-      "created": 1791731715000,
-      "ready": 1791731716000
+    "kube-system/kindnet-9f4h2": {
+      "created": 1791734621000,
+      "ready": 1791734624000
     },
-    "kube-system/kindnet-48g4z": {
-      "created": 1791731719000,
-      "ready": 1791731721000
+    "kube-system/kindnet-d4l66": {
+      "created": 1791734621000,
+      "ready": 1791734624000
     },
-    "kube-system/kindnet-7bbw5": {
-      "created": 1791731719000,
-      "ready": 1791731723000
+    "kube-system/kindnet-z8t2s": {
+      "created": 1791734617000,
+      "ready": 1791734618000
     },
     "kube-system/kube-apiserver-startup-control-plane": {
-      "created": 1791731707000,
-      "ready": 1791731724000
+      "created": 1791734609000,
+      "ready": 1791734628000
     },
     "kube-system/kube-controller-manager-startup-control-plane": {
-      "created": 1791731707000,
-      "ready": 1791731722000
+      "created": 1791734609000,
+      "ready": 1791734620000
     },
-    "kube-system/kube-proxy-2ds74": {
-      "created": 1791731719000,
-      "ready": 1791731721000
+    "kube-system/kube-proxy-tdj5v": {
+      "created": 1791734617000,
+      "ready": 1791734618000
     },
-    "kube-system/kube-proxy-4cpp8": {
-      "created": 1791731715000,
-      "ready": 1791731716000
+    "kube-system/kube-proxy-vw4lp": {
+      "created": 1791734621000,
+      "ready": 1791734624000
     },
-    "kube-system/kube-proxy-hqvb5": {
-      "created": 1791731719000,
-      "ready": 1791731722000
+    "kube-system/kube-proxy-zmt2w": {
+      "created": 1791734621000,
+      "ready": 1791734623000
     },
     "kube-system/kube-scheduler-startup-control-plane": {
-      "created": 1791731707000,
-      "ready": 1791731719000
+      "created": 1791734609000,
+      "ready": 1791734624000
     },
-    "local-path-storage/local-path-provisioner-75f7fc7dc5-l5cmt": {
-      "created": 1791731715000,
-      "ready": 1791731727000
+    "local-path-storage/local-path-provisioner-75f7fc7dc5-s64vp": {
+      "created": 1791734618000,
+      "ready": 1791734630000
     },
     "startup-bench/cached-startup-worker": {
-      "created": 1791731744000,
-      "ready": 1791731746000
+      "created": 1791734646000,
+      "ready": 1791734648000
     },
     "startup-bench/cached-startup-worker2": {
-      "created": 1791731759000,
-      "ready": 1791731761000
+      "created": 1791734661000,
+      "ready": 1791734663000
     },
     "startup-bench/interrupted-startup-worker": {
-      "created": 1791731764000,
-      "ready": 1791731946000
+      "created": 1791734665000,
+      "ready": 1791734848000
     },
     "startup-bench/interrupted-startup-worker2": {
-      "created": 1791731764000,
-      "ready": 1791731865000
+      "created": 1791734665000,
+      "ready": 1791734853000
     },
     "startup-bench/uncached-startup-worker": {
-      "created": 1791731730000,
-      "ready": 1791731744000
+      "created": 1791734633000,
+      "ready": 1791734646000
     },
     "startup-bench/uncached-startup-worker2": {
-      "created": 1791731746000,
-      "ready": 1791731759000
+      "created": 1791734648000,
+      "ready": 1791734661000
     }
   },
-  "read_at": "2026-10-11T15:19:06Z"
+  "read_at": "2026-10-11T16:07:33Z"
 }

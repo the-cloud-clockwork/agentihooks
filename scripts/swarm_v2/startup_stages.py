@@ -8,15 +8,16 @@ from datetime import datetime
 from scripts.swarm_v2.kubernetes.failures import PULL_GRACE_MS
 from scripts.swarm_v2.resource_profiles import ClaimRefused, distribution
 
-STAGES = ("trigger", "instance", "join", "schedule", "image", "pod_start", "bootstrap")
-NODE_STAGES = ("trigger", "instance", "join")
-IMAGE_STAGES = ("image", "pod_start")
+STAGES = ("trigger", "instance", "join", "schedule", "image", "pull_retry", "pod_start", "bootstrap")
+NODE_STAGES = ("trigger", "instance", "join", "schedule")
+IMAGE_STAGES = ("image", "pull_retry")
 COLD_LABEL = "cold_scale_from_zero"
 STARTED, PENDING = "started", "pending"
 EXISTING, NEW_INSTANCE, WARM_POOL = "existing", "new_instance", "warm_pool"
 CACHED, UNCACHED, PARTIAL, UNKNOWN = "cached", "uncached", "partial", "unknown"
 REGISTRY_UNAVAILABLE, IMAGE_NOT_FOUND, UNAUTHORIZED = "registry_unavailable", "image_not_found", "registry_unauthorized"
 IMAGE_PULL, SANDBOX, UNSCHEDULABLE = "image_pull", "sandbox", "unschedulable"
+PULL_CLASSES = (REGISTRY_UNAVAILABLE, IMAGE_NOT_FOUND, UNAUTHORIZED, IMAGE_PULL)
 KEPT_REASONS = frozenset(
     (
         "Scheduled",
@@ -199,14 +200,28 @@ def _node_stages(events, scheduled, node, launch, scale_ups) -> tuple[dict, bool
     return stages, before == 0
 
 
-def _image_stages(events, scheduled, pod) -> tuple[dict, list[int]]:
+def _pull_retry(events, failed_pull: bool) -> int | None:
+    """Time from the first pull attempt to the start of the pull that succeeded, when an earlier pull failed."""
+    pulled = [e for e in events if e["reason"] == "Pulled" and pull_ms(e["message"]) is not None]
+    first = _first(events, "Pulling")
+    if not pulled:
+        return None
+    if not (failed_pull and first):
+        return 0
+    last = pulled[-1]
+    return max(last["at"] - pull_ms(last["message"]) - first["at"], 0)
+
+
+def _image_stages(events, scheduled, pod, failed_pull: bool) -> tuple[dict, list[int]]:
     pulls = [ms for e in events if e["reason"] == "Pulled" for ms in [pull_ms(e["message"])] if ms is not None]
     started = max((e["at"] for e in events if e["reason"] == "Started"), default=None)
     image = sum(pulls) if pulls else None
+    retry = _pull_retry(events, failed_pull)
     start = _gap(started, scheduled)
     stages = {
         "image": image,
-        "pod_start": None if start is None else max(start - (image or 0), 0),
+        "pull_retry": retry,
+        "pod_start": None if start is None else max(start - (image or 0) - (retry or 0), 0),
         "bootstrap": _gap(pod.get("ready"), started) if started and (pod.get("ready") or 0) >= started else None,
     }
     return stages, pulls
@@ -232,9 +247,10 @@ def sample(name: str, events: Sequence[Mapping], read: Mapping, ups: Mapping) ->
     cold = bool(stages)
     if not cold:
         stages = {"schedule": _gap(scheduled, pod.get("created"))}
-    image, pulls = _image_stages(events, scheduled, pod)
+    image, pulls = _image_stages(events, scheduled, pod, kind in PULL_CLASSES)
     stages.update(image)
-    begun = scheduled if placed else _first(events, "Pulling")["at"] if _first(events, "Pulling") else None
+    pulling = _first(events, "Pulling")
+    begun = scheduled if placed else pulling["at"] if pulling else None
     return {
         "pod": name,
         "at": begun if begun is not None else events[0]["at"],
@@ -331,10 +347,9 @@ def claim(samples: Sequence[Mapping], label: str) -> list[Mapping]:
 
 def unbounded(samples: Sequence[Mapping], grace_ms: int = PULL_GRACE_MS) -> list[str]:
     """Pull failures, final or transient, classified later than the grace or never timed are unbounded."""
-    pulls = (REGISTRY_UNAVAILABLE, IMAGE_NOT_FOUND, UNAUTHORIZED, IMAGE_PULL)
     return [
         e["pod"]
         for e in samples
-        if (e["outcome"] in pulls or e.get("transient") in pulls)
+        if (e["outcome"] in PULL_CLASSES or e.get("transient") in PULL_CLASSES)
         and (e["failure_ms"] is None or e["failure_ms"] > grace_ms)
     ]

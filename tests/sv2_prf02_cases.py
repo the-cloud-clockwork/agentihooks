@@ -17,8 +17,10 @@ KIND = ("kind-run-1.json", "kind-run-2.json")
 SOURCES = {
     "anton-read-1.json": "read only kubectl and aws read of anton-prod at 2026-10-11T14:57:15Z",
     "anton-read-2.json": "read only kubectl and aws read of anton-prod, the next hour of events",
-    "kind-run-1.json": "Startup stages run 38150051995 at 570264583, one node interrupted briefly",
-    "kind-run-2.json": "Startup stages run 38150380291 at ec5276308, both nodes behind a 90 second registry outage",
+    "kind-run-1.json": "Startup stages run 38150380291 at ec5276308ced2ea1c182dbce76c6e81a239a9d48, both nodes behind a"
+    " 90 second registry outage",
+    "kind-run-2.json": "Startup stages run 38153743721 at f49241dc520bf8eeb84cb0816a2880e43a85e787, both nodes behind a"
+    " 90 second registry outage",
 }
 INPUTS = (*ANTON, *KIND)
 FROM_ZERO_GROUP = "anton-k3s-swarm"
@@ -63,8 +65,9 @@ def summary(name: str) -> dict:
 
 
 NOTES = (
-    "Node provision is trigger plus instance plus join; image initialization is the pull plus the Pod start less the"
-    " pull. They are reported apart and never summed into one launch figure.",
+    "Node provision runs from the Pod waiting to the new node accepting it: trigger, instance, join and schedule. Image"
+    " pull with retries is the successful pull plus the time lost to failed pulls before it. Pod start (sandbox,"
+    " containers, init containers) and bootstrap are separate columns. No column sums them into one launch figure.",
     "Only samples from a scale up of an empty pool onto a new instance that pulled uncached may be labelled cold"
     " scale from zero; the ondemand scale ups in these reads started from a non empty pool and are refused that label.",
     "Kubernetes keeps events for about an hour, so each Anton read covers the hour before it; Pods whose events"
@@ -103,31 +106,43 @@ def _from_zero(entries: list[dict]) -> list[dict]:
     return [entry for entry in entries if entry["from_zero"]]
 
 
+def _anton_holds(name: str) -> dict:
+    rows = summary(name)["startup_stage_p50_p95"]
+    cold = [row for scenario, row in rows.items() if scenario.startswith("cold-node") and row["started"]]
+    zero = _from_zero(samples(name))
+    return {
+        "cold_rows_split": bool(cold) and all(row["node_provision_ms"] and row["image_init_ms"] for row in cold),
+        "cold_claimed": len(stages.claim(zero, stages.COLD_LABEL)) if zero else 0,
+    }
+
+
+def _kind_holds(name: str) -> dict:
+    rows = summary(name)["startup_stage_p50_p95"]
+    wanted = ("warm-node/cached-image", "warm-node/uncached-image")
+    return {
+        "scenarios": sorted(rows),
+        "all_started": all(rows[s]["samples"] == rows[s]["started"] for s in wanted if s in rows),
+        "uncached_pull_measured": "image" in rows.get(wanted[1], {}).get("stages", {}),
+    }
+
+
 def _positive() -> tuple[dict, bool]:
     observed = {name: summary(name) for name in INPUTS}
-    cold = {name: _from_zero(samples(name)) for name in ANTON}
-    claimed = {name: len(stages.claim(entries, stages.COLD_LABEL)) for name, entries in cold.items() if entries}
-    split = all(
-        row["node_provision_ms"] and row["image_init_ms"]
-        for name in ANTON
-        for scenario, row in observed[name]["startup_stage_p50_p95"].items()
-        if scenario.startswith("cold-node") and row["started"]
-    )
+    held = {name: _anton_holds(name) for name in ANTON} | {name: _kind_holds(name) for name in KIND}
     starts = [{(e["pod"], e["at"]) for e in samples(name) if e["outcome"] == stages.STARTED} for name in ANTON]
-    independent = not starts[0] & starts[1]
     shared = sorted(
         e["pod"] for e in samples(ANTON[1]) if (e["pod"], e["at"]) in {(s["pod"], s["at"]) for s in samples(ANTON[0])}
     )
-    repeat = summary(ANTON[0]) == observed[ANTON[0]]
-    observed.update(
-        {
-            "cold_claims": claimed,
-            "independent_reads": independent,
-            "continuing_in_both_reads": shared,
-            "repeat_equal": repeat,
-        }
+    independent = not starts[0] & starts[1]
+    observed.update({"each_fixture": held, "independent_reads": independent, "continuing_in_both_reads": shared})
+    anton = all(held[name]["cold_rows_split"] and held[name]["cold_claimed"] for name in ANTON)
+    kind = all(
+        held[name]["all_started"]
+        and held[name]["uncached_pull_measured"]
+        and {"warm-node/cached-image", "warm-node/uncached-image"} <= set(held[name]["scenarios"])
+        for name in KIND
     )
-    return observed, split and bool(claimed) and independent and repeat
+    return observed, anton and kind and independent
 
 
 def _rejection() -> tuple[dict, bool]:

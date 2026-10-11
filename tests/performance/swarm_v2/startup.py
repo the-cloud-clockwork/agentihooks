@@ -122,17 +122,27 @@ def scenario(image: str, nodes: list[str], grace: int, outage: int, output: Path
     return outcome
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--image", required=True, help="the image reference the kind nodes pull")
-    parser.add_argument("--nodes", nargs="+", required=True)
-    parser.add_argument("--grace", type=int, default=120)
-    parser.add_argument("--outage", type=int, default=90)
-    parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
+def read_anton(output: Path) -> None:
+    """The read only Anton listings the committed anton reads were reduced from."""
+    output.mkdir(parents=True, exist_ok=True)
+    (output / "read_at").write_text(datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ") + "\n")
+    for name in ("nodes", "events", "pods"):
+        scope = ("-A",) if name != "nodes" else ()
+        (output / f"{name}.json").write_text(kubectl("get", name, *scope, "-o", "json"))
+    (output / "activities.json").write_text(
+        run("aws", "autoscaling", "describe-scaling-activities", "--max-items", "200", "--output", "json")
+    )
+    groups = json.loads(run("aws", "autoscaling", "describe-auto-scaling-groups", "--output", "json"))
+    ids = [i["InstanceId"] for group in groups["AutoScalingGroups"] for i in group["Instances"]]
+    found = run("aws", "ec2", "describe-instances", "--instance-ids", *ids, "--output", "json") if ids else ""
+    (output / "instances.json").write_text(found or json.dumps({"Reservations": []}))
+
+
+def kind(args: argparse.Namespace) -> None:
     try:
         outcome = scenario(args.image, args.nodes, args.grace, args.outage, args.output)
     finally:
+        run("docker", "start", REGISTRY, check=False)
         kubectl("delete", "namespace", NAMESPACE, "--wait=false", check=False)
     (args.output / "fixture.json").write_text(json.dumps(outcome, indent=2, sort_keys=True) + "\n")
     print(json.dumps(outcome, sort_keys=True))
@@ -140,6 +150,24 @@ def main() -> None:
     checks = [*outcome["ready"].values(), *interruption["classified_within_grace"].values()]
     if not all([*checks, *interruption["recovered"].values()]):
         raise SystemExit("a fixture Pod did not become ready, classify its pull failure in grace, or recover")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    modes = parser.add_subparsers(dest="mode", required=True)
+    fixture = modes.add_parser("kind")
+    fixture.add_argument("--image", required=True, help="the image reference the kind nodes pull")
+    fixture.add_argument("--nodes", nargs="+", required=True)
+    fixture.add_argument("--grace", type=int, default=120)
+    fixture.add_argument("--outage", type=int, default=90)
+    fixture.add_argument("--output", type=Path, required=True)
+    anton = modes.add_parser("anton")
+    anton.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    if args.mode == "anton":
+        read_anton(args.output)
+    else:
+        kind(args)
 
 
 if __name__ == "__main__":
