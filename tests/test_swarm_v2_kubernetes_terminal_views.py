@@ -152,6 +152,7 @@ def test_a_new_generation_whose_machine_is_not_registered_keeps_its_last_view(ri
 
     views()
 
+    assert dict(viewer.router.mismatches) == {(machine(viewer, EXE_A), "stale_incarnation"): 1}
     assert viewer.watched[name(EXE_A)].target.incarnation == f"{EXE_A}/{ENDPOINT_A.scope.generation}"
     assert published(store, workers)[name(EXE_A)] == (LIVE, ENDPOINT_A.name, PANE, "")
 

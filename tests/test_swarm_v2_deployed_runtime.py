@@ -894,12 +894,13 @@ def test_the_controller_publishes_terminal_views_through_its_client_terminal(tmp
         assert router.deliveries.path == terminal.home.terminals / DELIVERIES
         store.redis.hset(store.key(SLUG, visibility.KEY), "retired", "{}")
         assert service.tick() is True
+        service.viewing.join(5)
         assert visibility.read(store, SLUG, 0) == {}
     finally:
         service.stop()
 
 
-def test_terminal_aggregation_switched_off_keeps_the_views_without_refreshing_them(tmp_path, monkeypatch):
+def test_terminal_aggregation_switched_off_builds_a_viewer_that_never_refreshes(tmp_path, monkeypatch):
     service, _, _ = _anton_client(tmp_path, monkeypatch, _store(), **{deployed.AGGREGATION_ENV: "off"})
     try:
         assert deployed.AGGREGATION_ENV == "AGENTIHOOKS_TERMINAL_AGGREGATION"

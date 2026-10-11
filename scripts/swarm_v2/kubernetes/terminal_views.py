@@ -36,4 +36,4 @@ class TerminalViews:
             target, label = agent_target(self.viewer.router, agent)
             self.viewer.watch(agent.name, label, target.pane_id, agent.conversation_id)
         except (EndpointRefused, Unreachable):
-            return
+            pass
