@@ -71,7 +71,7 @@
     "hooks/memory has no HTTP surface, so no memory health endpoint is published.",
     "No antoncore probe wiring and no G10 live canary yet."
   ],
-  "pull_request": "",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2604",
   "follow_ups": [],
   "obligations": {
     "compatibility": "Compared with the accepted SV2-LDG-02 heartbeat and SV2-OBS-01 observability protocols: acknowledgements, renewal ordering and replay are unchanged and the executions API suite passes in proofs run 38142921808; the stored heartbeat gains one field.",
