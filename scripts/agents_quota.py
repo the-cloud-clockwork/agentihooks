@@ -87,26 +87,32 @@ def claude_rows(
     include_fable: bool = False,
 ) -> list[QuotaRow]:
     now = time.time() if now is None else now
-    fresh = {account for account, at in (observed or {}).items() if session_bands.fresh(at, now)}
-    return [
-        QuotaRow(
-            agent="claude",
-            account=result.account,
-            state=result.state,
-            sessions=sessions.get(result.account, 0),
-            five_hour_left=result.five_hour.remaining,
-            seven_day_left=result.seven_day.remaining,
-            seven_day_resets_at=result.seven_day.resets_at,
-            source=source,
-            five_hour_resets_at=result.five_hour.resets_at,
-            observed_at=(observed or {}).get(result.account),
-            cap=account_cap(result, now, include_fable) if result.account in fresh else None,
-            routing_left=result.margin,
-            fable_left=result.fable.remaining,
-            fable_resets_at=result.fable.resets_at,
-        )
-        for result in results
-    ]
+    seen = observed or {}
+    return [_claude_row(result, sessions, source, seen.get(result.account), now, include_fable) for result in results]
+
+
+def _claude_row(
+    result, sessions: dict[str, int], source: str, seen: float | None, now: float, include_fable: bool
+) -> QuotaRow:
+    row = QuotaRow(
+        agent="claude",
+        account=result.account,
+        state=result.state,
+        sessions=sessions.get(result.account, 0),
+        five_hour_left=result.five_hour.remaining,
+        seven_day_left=result.seven_day.remaining,
+        seven_day_resets_at=result.seven_day.resets_at,
+        source=source,
+        five_hour_resets_at=result.five_hour.resets_at,
+        observed_at=seen,
+        cap=account_cap(result, now, include_fable) if session_bands.fresh(seen, now) else None,
+        routing_left=result.margin,
+        fable_left=result.fable.remaining,
+        fable_resets_at=result.fable.resets_at,
+    )
+    if seen is None or session_bands.fresh(seen, now):
+        return row
+    return replace(row, state=STALE, five_hour_left=None, seven_day_left=None, routing_left=None, fable_left=None)
 
 
 def _codex_state(
@@ -141,8 +147,8 @@ def codex_rows(
     rows = []
     for account in accounts:
         quota = quotas.get(account.name)
-        fresh = quota is not None and session_bands.fresh(quota.observed_at, now)
         known = quota is not None and not quota.expired
+        fresh = known and session_bands.fresh(quota.observed_at, now)
         week = session_bands.left(quota.seven_day.used, quota.seven_day.resets_at, now) if known else None
         cap = codex_router.account_cap(quota, now, environ) if account.signed_in and known else None
         rows.append(
@@ -160,7 +166,7 @@ def codex_rows(
                 five_hour_resets_at=quota.five_hour.resets_at if quota else None,
                 observed_at=quota.observed_at if quota else None,
                 cap=cap,
-                routing_left=week,
+                routing_left=week if account.signed_in else None,
             )
         )
     return rows
@@ -206,7 +212,7 @@ def _left(value: float | None) -> str:
 
 
 def _reset(left: float | None, resets_at: int | None, now: int) -> str:
-    return MISSING if left is None or resets_at is None else _duration(resets_at, now)
+    return MISSING if left is None or resets_at is None or resets_at <= now else _duration(resets_at, now)
 
 
 def _cells(rank: str, row: QuotaRow, now: int, current: str = "") -> list[str]:
@@ -343,12 +349,31 @@ def tokenless_table(master: "MasterAccount | None", sessions: dict[str, int]) ->
     return _render_live(claude + _codex(now), sessions, now)
 
 
+def current_table(
+    observations: list, probed: list, names: set[str], sessions: dict[str, int], fable: bool, current: str
+) -> str:
+    now = time.time()
+    seen = {result.account: (at, result) for at, result in observations if result.account in names}
+    seen.update({result.account: (now, result) for result in probed})
+    if not seen:
+        return ""
+    observed = {account: at for account, (at, _) in seen.items()}
+    results = [result for _, result in seen.values()]
+    return balance_table(results, sessions, "cached", now, fable, current, observed)
+
+
 def balance_table(
-    results: list, sessions: dict[str, int], source: str, now: float, fable: bool = False, current: str = ""
+    results: list,
+    sessions: dict[str, int],
+    source: str,
+    now: float,
+    fable: bool = False,
+    current: str = "",
+    observed: dict[str, float] | None = None,
 ) -> str:
     from scripts.routing.claude_api import ClaudeApiSource
 
-    observed = {result.account: now for result in results}
+    observed = {result.account: now for result in results} if observed is None else observed
     claude = claude_rows(results, sessions, source, observed, now, fable)
     claude = with_masters(claude + api_rows(ClaudeApiSource(sessions), "claude", now), _masters("claude"), sessions)
     return _render_live(claude + ([] if fable else _codex(now)), sessions, now, fable, current)

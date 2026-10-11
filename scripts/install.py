@@ -5604,7 +5604,7 @@ def cmd_balance(
     import time
 
     from hooks.context.account_sessions import sessions_by_account
-    from scripts.agents_quota import balance_table, tokenless_table
+    from scripts.agents_quota import balance_table, current_table, tokenless_table
     from scripts.claude_quota_balancer import (
         RoutingError,
         ancestor_oauth_token,
@@ -5635,11 +5635,11 @@ def cmd_balance(
                 timeout=timeout,
                 claude_bin=shutil.which("claude") or "claude",
             )
-        rows = {result.account: result for _, result in cached_observations(include_fable=include_fable)}
-        rows.update({result.account: result for result in probed})
+        cached = cached_observations(include_fable=include_fable)
         print(f"current={session.account or 'none'} method={session.method}")
-        if rows:
-            print(balance_table(list(rows.values()), live, "cached", time.time(), include_fable, session.account))
+        table = current_table(cached, probed, {c.account for c in known}, live, include_fable, session.account)
+        if table:
+            print(table)
         return 0 if session.account else 1
     if not credentials:
         print(tokenless_table(master_account.row_marks().master, live))
