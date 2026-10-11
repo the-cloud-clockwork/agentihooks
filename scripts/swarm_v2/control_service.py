@@ -14,6 +14,7 @@ from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerReposit
 from scripts.swarm_v2 import deployed, ledger_writer, operator_auth, telemetry
 from scripts.swarm_v2.api import health
 from scripts.swarm_v2.api.executions import ExecutionsAPI
+from scripts.swarm_v2.api.recovery import RecoveryAPI
 from scripts.swarm_v2.api.server import Routes, serve
 from scripts.swarm_v2.api.tasks import TasksAPI
 from scripts.swarm_v2.auth_context import LaunchAuthority, LaunchKey
@@ -119,6 +120,7 @@ class ControlService:
         self.pods: Callable[[str], tuple[PodStatus, ...]] | None = None
         self.api_url = ""
         self.recover: Callable[[], dict[str, str]] | None = None
+        self.recovery_api = RecoveryAPI(store, slug, lambda: getattr(self.recover, "recovery", None), operator)
         self.views: Callable[[], dict] | None = None
         self.viewing: threading.Thread | None = None
         self.tasks_api: TasksAPI | None = None
@@ -175,7 +177,9 @@ class ControlService:
                 self.controller.store.update(self.controller.slug, api_url=self.api_url)
 
     def serve(self, host: str, port: int) -> ThreadingHTTPServer:
-        self.server = serve(Routes(self.executions, self.tasks_api, health=self.health_api), host, port)
+        self.server = serve(
+            Routes(self.executions, self.tasks_api, health=self.health_api, recovery=self.recovery_api), host, port
+        )
         self.thread = threading.Thread(target=self.server.serve_forever, name=THREAD, daemon=True)
         self.thread.start()
         return self.server
