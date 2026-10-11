@@ -165,7 +165,7 @@ class PodClient:
         return [(event["type"], event["object"]) for event in events]
 
     def ready_nodes(self) -> list[str] | None:
-        """None when the nodes cannot be listed, so no Pod is judged lost on missing evidence."""
+        """None when the nodes cannot be listed, so an unlisted node is never taken as proof of loss."""
         try:
             status, answer = self.http.send("GET", NODES)
         except ConnectionError:

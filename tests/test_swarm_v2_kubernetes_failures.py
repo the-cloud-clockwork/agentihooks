@@ -577,7 +577,9 @@ def _uid(uid, node=""):
     return {"metadata": {"uid": uid}, "spec": {"nodeName": node} if node else {}}
 
 
-def test_each_pass_hands_recovery_the_listed_pods_and_every_pod_deleted_since_the_last_pass(capsys):
+def test_each_pass_hands_recovery_the_listed_pods_and_every_pod_deleted_since_the_last_pass(monkeypatch):
+    printed = []
+    monkeypatch.setattr(deployed, "print", lambda *line, **flags: printed.append((line, flags)), raising=False)
     a, b, c, d, e = (_uid(uid) for uid in "abcde")
     b_last, c_last = _uid("b", "worker-a"), _uid("c", "worker-b")
     refused = client.ApiRefused(403, "Forbidden")
@@ -597,8 +599,8 @@ def test_each_pass_hands_recovery_the_listed_pods_and_every_pod_deleted_since_th
     assert watched == [("watch", "owner=x", version) for version in ("5", "9", "11", "12", "13")]
     assert api.calls[:3] == [("list", "owner=x"), ("list", "owner=x"), ("watch", "owner=x", "5")]
     failed = ("CursorExpired", "ApiRefused", "ConnectionError", "TimeoutError")
-    assert capsys.readouterr().out.splitlines() == [
-        f"controller: the Pod watch failed with {name}; using the last listing" for name in failed
+    assert printed == [
+        ((f"controller: the Pod watch failed with {name}; using the last listing",), {"flush": True}) for name in failed
     ]
 
 
