@@ -41,6 +41,10 @@ never grants a brain, and a grant without a `brains` list is refused.
 |---|---|---|
 | `protected_idle_pod` | An active attempt carries scale down protection and has been idle since `idle_since_ms` | `for_ms` 600000 |
 | `impossible_pending` | A pending attempt's request fits no permitted pool template (`no_permitted_template_fits`), or every fitting permitted pool is at its configured maximum (`permitted_pools_at_configured_maximum`) | `for_ms` 120000 |
+
+A pool sample reports its node count, not free room on each node. `permitted_pools_at_configured_maximum`
+is therefore a proxy: the autoscaler can add no node, and a request still pending after the
+window is taken as one the existing nodes cannot place.
 | `cross_scope_denial` | A brain query was denied across scopes | `for_ms` 0 |
 
 - At most `limit` alerts per rule per evaluation, longest held first; the rest are counted in
@@ -63,7 +67,9 @@ never grants a brain, and a grant without a `brains` list is refused.
 - `deliver` hands each opened incident to the sink once, identified as
   `<fingerprint>:<opened_seq>`; a failing sink leaves it for the next delivery. Delivery only
   notifies. Every store write watches its keys and retries up to five times when another
-  writer changed them.
+  writer changed them. Delivery is at least once at one edge: when the notified mark still
+  fails after those retries, `deliver` raises after the sink ran and the next delivery sends
+  the same `incident_id` again, so a sink deduplicates by it.
 
 ## Rollback
 
