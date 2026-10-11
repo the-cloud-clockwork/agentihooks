@@ -358,3 +358,54 @@ def test_an_extra_master_never_stands_in_for_a_lead_that_is_down(swarm):
     assert control_notifications.master(store, SLUG) is None
     assert tick_module._recover_master(SLUG, store.config(SLUG), store, runtime, NOW) == []
     assert [a.name for a in store.agents(SLUG) if masters.is_lead(SLUG, a)] == []
+
+
+EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-MST-03"
+
+
+@pytest.mark.parametrize("case", ["a", "b", "c"])
+def test_package_cases_match_their_committed_evidence(case):
+    from tests.sv2_mst03_cases import run_case
+
+    first, second = run_case(case), run_case(case)
+    assert first == second
+    assert first["state"] == "passed", json.dumps(first, indent=2, sort_keys=True)
+    committed = json.loads((EVIDENCE / f"{case}-result.json").read_text(encoding="utf-8"))
+    assert committed == {"case": f"T-SV2-MST-03-{case.upper()}", "independent_runs": 2, "observed": first}, json.dumps(
+        first, indent=2, sort_keys=True
+    )
+
+
+def test_the_manifest_names_the_hash_of_every_case_input():
+    import hashlib
+
+    manifest = json.loads((EVIDENCE / "manifest.json").read_text(encoding="utf-8"))
+    root = Path(__file__).parents[1]
+    assert manifest["inputs"] == {
+        path: hashlib.sha256((root / path).read_bytes()).hexdigest()
+        for path in ["tests/fixtures/swarm_v2/master-scaling.json"]
+    }
+    assert manifest["cases"] == ["T-SV2-MST-03-A", "T-SV2-MST-03-B", "T-SV2-MST-03-C"]
+
+
+def test_the_package_record_carries_its_completion_evidence():
+    record = json.loads((EVIDENCE / "result.json").read_text(encoding="utf-8"))
+    assert (record["package"], record["package_complete"], record["integration_gate"]) == ("SV2-MST-03", False, "G10")
+    assert set(record["states"]) == {"observed", "committed", "externally_verified"}
+    for name in ("interfaces", "supported_versions", "authoritative_objects", "remaining_limitations", "validation"):
+        assert record[name], name
+    assert set(record["measurements"]) == {"master_seat_count", "master_retire_seconds"}
+    assert record["cases"] == {
+        **{case: f"evidence/SV2-MST-03/{case}-result.json" for case in "abc"},
+        "manifest": "evidence/SV2-MST-03/manifest.json",
+    }
+    source = Path(__file__).read_text(encoding="utf-8")
+    path, name = record["rollback_rehearsal"]["test"].split("::")
+    assert path == "tests/test_swarm_v2_master_scale.py"
+    assert f"\ndef {name}(" in source
+    for obligation in record["obligations"].values():
+        assert obligation["met_by"]
+        for test in obligation["tests"]:
+            path, function = test.split("::")
+            assert path == "tests/test_swarm_v2_master_scale.py"
+            assert f"\ndef {function}(" in source, test
