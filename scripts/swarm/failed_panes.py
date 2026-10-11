@@ -45,10 +45,14 @@ def _close(slug, store, runtime, pane, entry):
     if agent in runtime.live_names():
         return ""
     try:
-        if not runtime.launched_pane(pane, agent):
-            store.redis.hdel(key, pane)
-            return f"dropped pane {pane}: herdr no longer shows the failed launch of {agent} there"
-        store.note_launch_pane(slug, agent, _tail(runtime, pane), entry["reason"])
+        launched = runtime.launched_pane(pane, agent)
+    except Exception as exc:
+        return f"could not read pane {pane} of the failed launch of {agent}, retrying next tick: {exc}"
+    if not launched:
+        store.redis.hdel(key, pane)
+        return f"dropped pane {pane}: herdr no longer shows the failed launch of {agent} there"
+    store.note_launch_pane(slug, agent, _tail(runtime, pane), entry["reason"])
+    try:
         runtime.close_pane(pane)
     except Exception as exc:
         return f"could not close pane {pane} of the failed launch of {agent}, retrying next tick: {exc}"
@@ -57,8 +61,11 @@ def _close(slug, store, runtime, pane, entry):
 
 
 def sweep(slug, store, runtime, now_ms):
-    due = [(pane, entry) for pane, entry in held(store, slug).items() if now_ms - entry["failed_at"] >= CLOSE_AFTER_MS]
-    return [said for pane, entry in due if (said := _close(slug, store, runtime, pane, entry))]
+    actions = []
+    for pane, entry in held(store, slug).items():
+        if now_ms - entry["failed_at"] >= CLOSE_AFTER_MS and (said := _close(slug, store, runtime, pane, entry)):
+            actions.append(said)
+    return actions
 
 
 def report(store, slug):

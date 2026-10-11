@@ -117,8 +117,10 @@ def _launch_records(name):
     return [r for r in herdr_panes.load(dict(os.environ)) if r.kind == "init-agent" and r.owner_session == name]
 
 
-def _opened_pane(name):
-    found = sorted(_launch_records(name), key=lambda record: record.launched_at)
+def _opened_pane(name, since_ms):
+    found = sorted(
+        (r for r in _launch_records(name) if r.launched_at >= since_ms), key=lambda record: record.launched_at
+    )
     return found[-1].pane_id if found else ""
 
 
@@ -673,7 +675,7 @@ class HerdrRuntime:
             )
         except subprocess.TimeoutExpired as exc:
             self._terminate(name)
-            raise SpawnError(f"init-agent timed out for {name}", "ambiguous", _opened_pane(name)) from exc
+            raise SpawnError(f"init-agent timed out for {name}", "ambiguous", _opened_pane(name, launched_at)) from exc
         timings = {
             "launched_at": launched_at,
             "returned_at": int(time.time() * 1000),

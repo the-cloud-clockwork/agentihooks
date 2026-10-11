@@ -6,6 +6,7 @@ import pytest
 from scripts import herdr_panes
 from scripts.herdr_host import Placement
 from scripts.swarm import failed_panes, launch_check
+from scripts.swarm import runtime as runtime_module
 from scripts.swarm import tick as tick_module
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
@@ -23,7 +24,7 @@ class PaneRuntime(FakeRuntime):
     def __init__(self, screens=None, **kwargs):
         super().__init__(**kwargs)
         self.screens, self.panes_closed, self.read = dict(screens or {}), [], []
-        self.owned, self.close_error = set(self.screens), None
+        self.owned, self.close_error, self.list_error = set(self.screens), None, None
 
     def pane_tail(self, pane_id, lines):
         self.read.append((pane_id, lines))
@@ -32,6 +33,8 @@ class PaneRuntime(FakeRuntime):
         return self.screens[pane_id]
 
     def launched_pane(self, pane_id, name):
+        if self.list_error:
+            raise RuntimeError(self.list_error)
         return pane_id in self.owned
 
     def close_pane(self, pane_id):
@@ -119,6 +122,16 @@ def test_a_pane_herdr_refuses_to_close_stays_held_for_the_next_tick(store):
     assert runtime.panes_closed == ["w1:p9"] and failed_panes.held(store, "sw") == {}
 
 
+def test_a_pane_herdr_cannot_list_stays_held_unread_for_the_next_tick(store):
+    _, runtime = _failed_once(store)
+    runtime.list_error = "server down"
+    agent = _failed_row(store)["agent"]
+    actions = failed_panes.sweep("sw", store, runtime, DUE)
+    assert actions == [f"could not read pane w1:p9 of the failed launch of {agent}, retrying next tick: server down"]
+    assert list(failed_panes.held(store, "sw")) == ["w1:p9"]
+    assert runtime.read == [] and runtime.panes_closed == [] and "pane_lines" not in _failed_row(store)
+
+
 def test_a_live_agent_pane_is_never_read_or_closed(store):
     _, runtime = _failed_once(store)
     live = AgentRecord("engineer@a1b2c3-0009", "eng", "t2", started_at=FAILED_AT, pane_id="w1:p9", state="working")
@@ -190,7 +203,7 @@ def test_a_worker_that_exits_before_its_launch_check_passes_has_its_pane_held_th
         (AgentRecord("engineer@a1b2c3-0002", "eng", "t1", pane_id="w1:p2"), True),
     ],
 )
-def test_only_an_exited_local_worker_keeps_its_pane_past_retirement(store, agent, live):
+def test_a_master_remote_or_live_launch_closes_its_pane_on_retirement(store, agent, live):
     runtime = PaneRuntime()
     if live:
         runtime.live.add(agent.name)
@@ -265,15 +278,23 @@ def _record(monkeypatch, tmp_path, name, pane, terminal, at):
 
 
 def test_a_timed_out_launch_names_the_newest_pane_it_opened(tmp_path, monkeypatch):
-    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0001", "w1:p7", "term_old", 1)
-    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0001", "w1:p9", "term_new", 2)
-    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0002", "w1:p8", "term_other", 3)
+    monkeypatch.setattr(runtime_module.time, "time", lambda: 5.0)
+    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0001", "w1:p7", "term_old", 5_000)
+    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0001", "w1:p9", "term_new", 5_001)
+    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0002", "w1:p8", "term_other", 5_002)
     error = _launch_fails(tmp_path, "", run_error=subprocess.TimeoutExpired("init-agent", 300))
     assert (error.pane_id, error.status, str(error)) == (
         "w1:p9",
         "ambiguous",
         "init-agent timed out for engineer@a1b2c3-0001",
     )
+
+
+def test_a_timed_out_launch_never_adopts_a_pane_opened_before_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_module.time, "time", lambda: 5.0)
+    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0001", "w1:p7", "term_old", 4_999)
+    error = _launch_fails(tmp_path, "", run_error=subprocess.TimeoutExpired("init-agent", 300))
+    assert error.pane_id == ""
 
 
 def test_a_pane_belongs_to_a_launch_only_while_herdr_shows_its_terminal(tmp_path, monkeypatch):
