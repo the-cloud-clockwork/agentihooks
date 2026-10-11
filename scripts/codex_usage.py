@@ -64,7 +64,7 @@ def read(token: str, account_id: str, now: float, opener: Callable | None = None
         return None
     try:
         return parse(body, now) if isinstance(body, dict) else None
-    except (TypeError, ValueError, KeyError):
+    except (TypeError, ValueError, KeyError, OverflowError):
         return None
 
 
