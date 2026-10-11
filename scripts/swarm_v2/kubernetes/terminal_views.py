@@ -44,4 +44,6 @@ class TerminalViews:
             return None
         if agent.name in self.viewer.watched:
             return None
-        return View(agent.name, "", "", UNVERIFIED, reason=reason, fresh_ms=self.viewer.fresh_ms)
+        record = self.viewer.router.store.load().get(agent.execution_id)
+        machine = "" if record is None else record.label
+        return View(agent.name, machine, "", UNVERIFIED, reason=reason, fresh_ms=self.viewer.fresh_ms)

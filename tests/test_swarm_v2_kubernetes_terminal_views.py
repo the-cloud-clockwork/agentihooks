@@ -204,7 +204,7 @@ def test_an_agent_without_a_conversation_is_not_watched(rig):
     views()
 
     assert sorted(viewer.watched) == [name(EXE_B)]
-    assert published(store, workers)[name(EXE_A)] == (UNVERIFIED, "", "", "conversation_required")
+    assert published(store, workers)[name(EXE_A)] == (UNVERIFIED, ENDPOINT_A.name, "", "conversation_required")
 
 
 def test_an_agent_whose_machine_is_cut_before_it_is_found_reads_unverified_and_is_found_later(rig):
@@ -214,7 +214,7 @@ def test_an_agent_whose_machine_is_cut_before_it_is_found_reads_unverified_and_i
     views()
 
     assert sorted(viewer.watched) == [name(EXE_B)]
-    assert published(store, workers)[name(EXE_A)] == (UNVERIFIED, "", "", "unreachable")
+    assert published(store, workers)[name(EXE_A)] == (UNVERIFIED, ENDPOINT_A.name, "", "unreachable")
     workers.cut.clear()
 
     views()
@@ -234,8 +234,8 @@ def test_an_unreachable_capability_probe_while_finding_a_pane_reads_unreachable(
 
     assert terminal_views.UNREACHABLE == "unreachable"
     assert published(store, workers) == {
-        name(EXE_A): (UNVERIFIED, "", "", "unreachable"),
-        name(EXE_B): (UNVERIFIED, "", "", "unreachable"),
+        name(EXE_A): (UNVERIFIED, ENDPOINT_A.name, "", "unreachable"),
+        name(EXE_B): (UNVERIFIED, ENDPOINT_B.name, "", "unreachable"),
     }
 
 
