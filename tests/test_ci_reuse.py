@@ -686,8 +686,19 @@ def test_a_proof_that_is_not_an_object_refuses_only_its_run(full_source, tmp_pat
     publish_record(env, responses, [1])
     result = invoke(root, base, queue, "merge_group", tmp_path / "list.json", env)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Refused run 7: AttributeError\n" in result.stdout
+    assert "Refused run 7: ValueError\n" in result.stdout
     assert "reused=false" in result.stdout
+
+
+def test_source_metadata_must_be_an_object(tmp_path):
+    from scripts import ci_reuse
+
+    path = tmp_path / "proof.zip"
+    with zipfile.ZipFile(path, "w") as zipped:
+        zipped.writestr("provenance.json", "[1]")
+    with pytest.raises(ValueError) as error:
+        ci_reuse._proof(path)
+    assert str(error.value) == "The source metadata is not an object"
 
 
 def test_every_missing_coverage_shard_is_named_together(full_source, tmp_path):

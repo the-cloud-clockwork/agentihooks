@@ -21,8 +21,6 @@ UNUSABLE = (
     zipfile.BadZipFile,
     zlib.error,
     NotImplementedError,
-    AttributeError,
-    TypeError,
 )
 
 
@@ -141,7 +139,10 @@ def _proof(path):
         entry = archive.getinfo("provenance.json")
         if entry.file_size > 65536:
             raise ValueError("The source metadata is too large")
-        return json.loads(archive.read(entry))
+        record = json.loads(archive.read(entry))
+    if not isinstance(record, dict):
+        raise ValueError("The source metadata is not an object")
+    return record
 
 
 def _differs(expected, actual, prefix=""):
