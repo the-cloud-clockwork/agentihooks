@@ -1069,6 +1069,34 @@ def test_only_codex_sources_hand_off_to_codex(requested, source, agent):
     assert init_agent._handoff_agent(requested, {"AGENTIHOOKS_TARGET": source}, []) == agent
 
 
+@pytest.mark.parametrize(
+    "requested,environ,harness,agent",
+    [
+        ("codex", {}, "codex", "codex"),
+        ("", {}, "codex", "codex"),
+        ("", {}, "claude", "claude"),
+        ("", {"AGENTIHOOKS_TARGET": "codex"}, "claude", "codex"),
+    ],
+)
+def test_a_handoff_without_a_target_takes_the_live_harness(monkeypatch, requested, environ, harness, agent):
+    from scripts.profiles import binding
+
+    monkeypatch.setattr(binding, "process", lambda: (123, harness, {}, "alpha"))
+    assert init_agent._handoff_agent(requested, environ, []) == agent
+
+
+def test_a_handoff_outside_any_harness_comes_from_claude(monkeypatch):
+    from scripts.profiles import binding
+
+    def missing():
+        raise ValueError("profile canary has no supported live harness ancestor")
+
+    monkeypatch.setattr(binding, "process", missing)
+    assert init_agent._handoff_agent("", {}, []) == "claude"
+    with pytest.raises(ValueError, match="unsupported quota transfer: Claude cannot transfer to a Codex account"):
+        init_agent._handoff_agent("codex", {}, [])
+
+
 def test_a_handoff_excludes_the_account_it_leaves(monkeypatch):
     from scripts.profiles import binding
 
