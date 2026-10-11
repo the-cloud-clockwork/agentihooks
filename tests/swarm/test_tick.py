@@ -665,6 +665,19 @@ def test_a_refused_nudge_is_reported_as_refused_with_its_reason(store):
     assert runtime.nudged == ["engineer@a1b2c3-0001"]
 
 
+def test_a_nudge_the_routed_runtime_refuses_is_reported_with_the_router_reason(store):
+    from scripts.swarm_v2.runtime.base import Capability, RuntimeRouter
+    from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    herdr = FakeRuntime()
+    local = LocalHerdrRuntime(herdr)
+    local.capabilities = LocalHerdrRuntime.capabilities - {Capability.COMMAND}
+    actions = idle_until_nudged(store, RoutedRuntime(herdr, RuntimeRouter([local])))
+    assert "nudge to engineer@a1b2c3-0001 refused: local lacks command" in actions
+    assert "nudged engineer@a1b2c3-0001" not in actions and herdr.nudged == []
+
+
 def test_the_nudge_is_skipped_while_the_pane_holds_typed_input(store):
     from scripts.swarm.tick import IDLE_NUDGE_TICKS
 
