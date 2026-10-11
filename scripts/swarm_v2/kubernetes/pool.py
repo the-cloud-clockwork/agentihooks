@@ -97,10 +97,13 @@ def _count(quantity: str) -> int:
 
 QUOTA_KEYS = (
     (PODS, "pods", _count),
+    (PODS, "count/pods", _count),
     (CPU, "requests.cpu", cpu_millis),
     (CPU, "cpu", cpu_millis),
+    (CPU, "limits.cpu", cpu_millis),
     (MEMORY, "requests.memory", memory_mib),
     (MEMORY, "memory", memory_mib),
+    (MEMORY, "limits.memory", memory_mib),
 )
 UNITS = {PODS: "{} Pods", CPU: "{}m CPU", MEMORY: "{} MiB memory"}
 

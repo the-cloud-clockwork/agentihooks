@@ -218,6 +218,17 @@ def test_quota_room_reads_the_short_cpu_and_memory_names_as_requests():
     )
 
 
+def test_quota_room_reads_limit_quotas_and_counted_pods_too():
+    hard = {"count/pods": "4", "limits.cpu": "5", "limits.memory": "20Gi"}
+    used = {"count/pods": "1", "limits.cpu": "1", "limits.memory": "16Gi"}
+
+    assert pool.quota_room([_quota(hard, used)], LAUNCH) == Room(
+        1,
+        "worker namespace quota leaves 3 Pods, 4000m CPU and 4096 MiB memory; 1 more fit at 2000m and 4096 MiB each",
+        "quota memory",
+    )
+
+
 def test_quota_room_takes_the_tightest_of_several_quotas():
     loose = _quota({"pods": "20", "requests.memory": "100Gi"}, name="loose")
     tight = _quota({"pods": "3"}, {"pods": "1"}, name="tight")
