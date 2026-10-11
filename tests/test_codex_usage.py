@@ -91,6 +91,7 @@ def test_an_expired_token_reads_as_expired(body):
         (None, json.dumps({"rate_limit": {"primary_window": {**WEEK, "used_percent": "x"}}}).encode()),
         (None, json.dumps({"rate_limit": {"primary_window": {**WEEK, "reset_at": "soon"}}}).encode()),
         (None, json.dumps({"rate_limit": {"primary_window": {**WEEK, "used_percent": [1]}}}).encode()),
+        (None, json.dumps({"rate_limit": {"primary_window": {**WEEK, "reset_at": float("inf")}}}).encode()),
     ],
 )
 def test_any_other_failure_reads_as_nothing(error, body):
