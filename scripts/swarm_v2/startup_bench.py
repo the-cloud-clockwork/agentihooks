@@ -13,7 +13,7 @@ from scripts.swarm_v2.resource_profiles import ClaimRefused
 LISTINGS = ("nodes", "events", "pods", "activities", "instances")
 STAGE_NAMES = {
     "trigger": "Unschedulable to scale up",
-    "instance": "ASG request to EC2 launch",
+    "instance": "Scale up to EC2 launch",
     "join": "EC2 launch to node Ready",
     "schedule": "Node Ready or Pod creation to Scheduled",
     "image": "Image pull",

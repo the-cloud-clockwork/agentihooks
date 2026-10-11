@@ -113,9 +113,20 @@ def _positive() -> tuple[dict, bool]:
         for scenario, row in observed[name]["startup_stage_p50_p95"].items()
         if scenario.startswith("cold-node") and row["started"]
     )
-    independent = not {e["pod"] for e in samples(ANTON[0])} & {e["pod"] for e in samples(ANTON[1])}
+    starts = [{(e["pod"], e["at"]) for e in samples(name) if e["outcome"] == stages.STARTED} for name in ANTON]
+    independent = not starts[0] & starts[1]
+    shared = sorted(
+        e["pod"] for e in samples(ANTON[1]) if (e["pod"], e["at"]) in {(s["pod"], s["at"]) for s in samples(ANTON[0])}
+    )
     repeat = summary(ANTON[0]) == observed[ANTON[0]]
-    observed.update({"cold_claims": claimed, "independent_reads": independent, "repeat_equal": repeat})
+    observed.update(
+        {
+            "cold_claims": claimed,
+            "independent_reads": independent,
+            "continuing_in_both_reads": shared,
+            "repeat_equal": repeat,
+        }
+    )
     return observed, split and bool(claimed) and independent and repeat
 
 
@@ -148,25 +159,39 @@ def _rejection() -> tuple[dict, bool]:
 
 
 def _account_release() -> dict:
+    """An unavailable registry holds the account slot only through the pull grace; past it the attempt is fenced, the
+    slot released once, and a replayed pass changes nothing."""
     world = kub05.World()
     with world.clocked():
         controller, _ = world.controller()
         assert controller.acquire()
         world.live = controller
         world.old = world.launch(controller, world.fx["first"])
+        recovery = world.recovery(controller)
         held = world.slots()
         world.show(world.old, "image_pull")
-        recovery = world.recovery(controller)
-        first = world.reconcile(recovery)
+        within = world.reconcile(recovery)
+        during = world.slots()
+        world.clock[0] += failures.PULL_GRACE_MS
+        assert controller.renew()
+        past = world.reconcile(recovery)
+        fence = recovery.fence(world.old.execution_id)
         decision = recovery.decision(world.old.execution_id)
+        after = world.slots()
         replay = world.reconcile(recovery)
         return {
             "slots_before": len(held),
-            "slots_after": world.slots(),
-            "fence_reason": recovery.fence(world.old.execution_id)["reason"],
-            "released": recovery.fence(world.old.execution_id)["released"],
+            "within_grace": within[world.old.execution_id],
+            "slots_within_grace": len(during),
+            "past_grace": past[world.old.execution_id],
+            "slots_after": after,
+            "fence_reason": fence["reason"],
+            "released": fence["released"],
             "decision": decision.mode,
-            "replay_equal": first == replay and recovery.decision(world.old.execution_id) == decision,
+            "replay_status": replay[world.old.execution_id],
+            "replay_equal": recovery.decision(world.old.execution_id) == decision
+            and recovery.fence(world.old.execution_id) == fence,
+            "slots_after_replay": world.slots(),
             "attempts": len(world.attempts()),
         }
 
@@ -191,8 +216,8 @@ def _recovery() -> tuple[dict, bool]:
         and set(classified) == {stages.REGISTRY_UNAVAILABLE}
         and not observed["unbounded"]
         and all(e["outcome"] == stages.STARTED for e in interrupted)
-        and account["slots_before"] == 1
-        and account["slots_after"] == []
+        and account["slots_before"] == account["slots_within_grace"] == 1
+        and account["slots_after"] == account["slots_after_replay"] == []
         and account["released"] == ["grant", "account"]
         and account["replay_equal"]
     )

@@ -515,3 +515,21 @@ def test_markdown_renders_seconds_with_counts_and_marks_missing_cells():
     assert "| 67.0 / 67.0 (n 1) | 25.0 / 25.0 (n 1) |" in row
     warm = next(line for line in page.splitlines() if line.startswith("| warm-node/cached-image"))
     assert warm.count("n/a") == 6
+
+
+def test_a_pod_listed_after_its_scheduling_event_is_a_later_incarnation():
+    later = {"anton-prod/web": {"created": T0 + 1_001, "ready": T0 + 3_000}}
+    [entry] = stages.attribute(read(warm_events(), later))
+    assert entry["stages"]["schedule"] is None and entry["stages"]["bootstrap"] is None
+    same = {"anton-prod/web": {"created": T0 + 1_000, "ready": T0 + 3_000}}
+    [entry] = stages.attribute(read(warm_events(), same))
+    assert entry["stages"]["schedule"] == 0 and entry["stages"]["bootstrap"] == 500
+
+
+def test_each_sample_records_when_it_began():
+    [cold] = stages.attribute(read(cold_events()))
+    assert cold["at"] == T0 + 70_000
+    pulled = [ev("p/x", "Pulling", 1), ev("p/x", "Failed", 4, 'Failed to pull image "x": EOF')]
+    assert stages.attribute(read(pulled))[0]["at"] == T0 + 1000
+    untimed = [ev("p/y", "Failed", 4, "Error: ImagePullBackOff")]
+    assert stages.attribute(read(untimed))[0]["at"] == T0 + 4000

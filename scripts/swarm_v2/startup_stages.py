@@ -201,7 +201,8 @@ def _image_stages(events, scheduled, pod) -> tuple[dict, list[int]]:
 
 def sample(name: str, events: Sequence[Mapping], read: Mapping, ups: Mapping) -> dict | None:
     """None when the read holds no scheduling or failure evidence for the Pod; a failure the Pod started past is kept
-    as `transient` rather than as its outcome."""
+    as `transient` rather than as its outcome. A listed Pod created after the scheduling event is a later incarnation
+    of the same name, so its creation and readiness are not used."""
     placed = _first(events, "Scheduled")
     failure = failure_class(events)
     if not placed and not failure:
@@ -211,16 +212,20 @@ def sample(name: str, events: Sequence[Mapping], read: Mapping, ups: Mapping) ->
     node = read["nodes"].get(node_name, {})
     launch = read["launches"].get(node.get("instance", ""))
     scheduled = placed["at"] if placed else None
+    pod = read["pods"].get(name, {})
+    if scheduled is not None and (pod.get("created") or 0) > scheduled:
+        pod = {}
     stages, from_zero = _node_stages(events, scheduled, node, launch, ups)
     cold = bool(stages)
     if not cold:
-        stages = {"schedule": _gap(scheduled, read["pods"].get(name, {}).get("created"))}
-    image, pulls = _image_stages(events, scheduled, read["pods"].get(name, {}))
+        stages = {"schedule": _gap(scheduled, pod.get("created"))}
+    image, pulls = _image_stages(events, scheduled, pod)
     stages.update(image)
     begun = scheduled if placed else _first(events, "Pulling")["at"] if _first(events, "Pulling") else None
     failed = next((e["at"] for e in events if e["reason"] in FAILURE_REASONS), None)
     return {
         "pod": name,
+        "at": begun if begun is not None else events[0]["at"],
         "node": node_name,
         "node_kind": "cold" if cold else "warm",
         "node_source": launch["source"] if cold else EXISTING,
