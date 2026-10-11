@@ -4,6 +4,8 @@ from functools import partial
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from scripts.hive import auth as hive_auth
 from scripts.swarm import controller as loop
@@ -12,6 +14,7 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import SpawnError
 from scripts.swarm_v2 import deployed, image_tag
 from scripts.swarm_v2.auth_context import GrantRefused
+from scripts.swarm_v2.kubernetes import operator_terminal
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 from scripts.swarm_v2.kubernetes.client import ApiRefused
 from scripts.swarm_v2.kubernetes.grants import PodGrants
@@ -20,6 +23,7 @@ from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL, owner_fo
 from scripts.swarm_v2.launch import DistributedLaunch, LaunchTerms
 from scripts.swarm_v2.runtime.base import LOCAL, SpawnRequest
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
+from tests import sv2_hdr03_cases
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
@@ -752,12 +756,6 @@ def test_only_the_lease_holder_writes_the_api_address(tmp_path, monkeypatch):
 
 
 def _anton_client(tmp_path, monkeypatch, store, **changes):
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-
-    from scripts.swarm_v2.kubernetes import operator_terminal
-    from tests import sv2_hdr03_cases
-
     key = tmp_path / "terminal-ca"
     key.write_bytes(
         Ed25519PrivateKey.generate().private_bytes(
@@ -786,14 +784,13 @@ def test_a_controller_exposing_terminals_reconciles_the_anton_client_at_start(tm
 
 
 def test_switched_off_the_controller_runs_no_herdr_command_and_reads_no_ca_key(tmp_path, monkeypatch):
-    from scripts.swarm_v2.kubernetes import operator_terminal
-
     off = {"AGENTIHOOKS_HERDR_REGISTRATIONS": "off", operator_terminal.CA_KEY_ENV: str(tmp_path / "missing")}
     service, herdr, environments = _anton_client(tmp_path, monkeypatch, _store(), **off)
     try:
         assert service.controller.terminals is None
         assert service.tick()
         assert herdr.commands == []
+        assert herdr.machines == [sv2_hdr03_cases.fixture()["manual"]]
         assert environments == []
     finally:
         service.stop()

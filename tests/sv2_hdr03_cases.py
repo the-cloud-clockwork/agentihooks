@@ -477,7 +477,7 @@ HOST_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureHostKey"
 def client_terminal(root: Path, herdr: Herdr, namespace: str, addresses=("10.43.12.7",)) -> Terminal:
     authority = TerminalAuthority(Ed25519PrivateKey.generate(), lambda: 1_800_000_000)
 
-    def lookup(host, port, type):  # noqa: A002
+    def lookup(host, port, type):
         return [(socket.AF_INET, type, 6, "", (address, port)) for address in addresses]
 
     return Terminal(ClientHome(root), authority, namespace, herdr, lookup)

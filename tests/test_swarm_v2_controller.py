@@ -8,7 +8,7 @@ import scripts.swarm.execution as execution
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2.controller import Controller
-from scripts.swarm_v2.herdr.endpoints import Scope
+from scripts.swarm_v2.herdr.endpoints import Endpoint, Scope
 from scripts.swarm_v2.herdr.upkeep import Attempt, Upkeep
 from scripts.swarm_v2.kubernetes import watch
 from scripts.swarm_v2.kubernetes.terminal import HostKeys
@@ -946,6 +946,9 @@ def test_start_and_an_attempt_change_each_save_the_client_machines(fixture, tmp_
     assert controller.renew()
 
     assert sorted(terminal.registrations.store.load()) == sorted([one.execution_id, two.execution_id])
-    assert [machine["label"] for machine in herdr.machines][0] == "devbox"
-    assert len(herdr.machines) == 3
+    assert [machine["label"] for machine in herdr.machines] == [
+        "devbox",
+        Endpoint(Scope("operator/operator", "fixture", one.execution_id, one.generation), "workers").name,
+        Endpoint(Scope("operator/operator", "fixture", two.execution_id, two.generation), "workers").name,
+    ]
     assert controller.herdr_registration_drift() == 1

@@ -83,13 +83,12 @@ class HostKeys:
         return [Launched(execution_id, entry["generation"], entry["host_public"]) for execution_id, entry in entries]
 
     def attempts(self, swarm: str, occupants: Iterable[AgentRecord], principal: Principal) -> list[Attempt]:
-        recorded = self.store.redis.hgetall(self.store.key(swarm, HOST_KEYS))
-        found = []
-        for agent in occupants:
-            entry = json.loads(recorded.get(agent.execution_id) or "{}")
-            if agent.runtime_backend == BACKEND and entry.get("generation") == agent.generation:
-                found.append(Attempt(operator_scope(principal, swarm, agent), entry["host_public"]))
-        return found
+        current = {agent.execution_id: agent.generation for agent in occupants if agent.runtime_backend == BACKEND}
+        return [
+            Attempt(operator_scope(principal, swarm, launched), launched.host_public)
+            for launched in self.attachable(swarm, current)
+            if launched.generation == current[launched.execution_id]
+        ]
 
 
 class TerminalObjects:
