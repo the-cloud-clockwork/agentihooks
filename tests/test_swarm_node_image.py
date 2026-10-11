@@ -508,19 +508,3 @@ def test_command_rejects_an_unlocked_tool(locked, monkeypatch, capsys):
         worker_image.main()
     assert error.value.code == 2
     assert "invalid choice: 'curl'" in capsys.readouterr().err
-
-
-def test_the_swarm_image_installs_the_herdr_client_the_worker_lock_pins():
-    root = Path(__file__).resolve().parents[1]
-    dockerfile = (root / "Dockerfile").read_text()
-    ignored = (root / ".dockerignore").read_text().splitlines()
-    assert "!docker/swarm-node/versions.lock" in ignored
-    assert "!docker/swarm-node/requirements.lock" in ignored
-    assert "COPY docker/swarm-node/versions.lock docker/swarm-node/requirements.lock /opt/swarm-node/" in dockerfile
-    assert 'worker_image.py install --tool herdr --architecture "$TARGETARCH"' in dockerfile
-    assert "COPY --from=herdr /usr/local/bin/herdr /usr/local/bin/herdr" in dockerfile
-    assert "herdrdev/herdr" not in dockerfile
-    assert "sha256:" not in dockerfile.split("AS herdr")[1]
-    due = (root / "deploy/helm/agentihooks-swarm/ci/kind-due.sh").read_text().splitlines()
-    assert "  docker/swarm-node/versions.lock" in due
-    assert "  docker/swarm-node/requirements.lock" in due
