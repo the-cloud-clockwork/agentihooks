@@ -19,6 +19,7 @@ from scripts.swarm_v2.kubernetes.failures import AccountSlot, Recovery
 from scripts.swarm_v2.kubernetes.grants import PodGrants, Supervision
 from scripts.swarm_v2.kubernetes.pool import WorkerPool
 from scripts.swarm_v2.kubernetes.prompts import TerminalPrompts
+from scripts.swarm_v2.kubernetes.replacement import Replacements, TaskLedger
 from scripts.swarm_v2.kubernetes.runtime import KubernetesTransport
 from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, PodTemplate, load_policy
 from scripts.swarm_v2.kubernetes.terminal import Exposure, HostKeys, TerminalObjects, TerminalTemplate
@@ -157,6 +158,7 @@ class Workers:
                 "lane": request.lane,
                 "name": request.name,
                 "endpoints": task["endpoints"],
+                **({"checkpoint": task["checkpoint"]} if task.get("checkpoint") else {}),
             },
         }
 
@@ -204,6 +206,7 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
     )
     launcher.planned = partial(runtime.herdr_runtime.planned_account, agent=HARNESS)
     launcher.router = runtime.router
+    runtime.relaunch = partial(launcher.relaunch, terms=workers.terms)
     return runtime
 
 
@@ -243,6 +246,7 @@ class RecoveryPass:
     def __init__(self, recovery: Recovery, api: PodApi, selector: str) -> None:
         self.recovery, self.api, self.selector = recovery, api, selector
         self.version, self.listed = "", {}
+        self.replacements: Replacements | None = None
 
     def __call__(self) -> dict[str, str]:
         pods, version = self.api.snapshot(self.selector)
@@ -253,7 +257,10 @@ class RecoveryPass:
             if uid not in live:
                 gone.setdefault(uid, pod)
         self.listed = {_uid(pod): pod for pod in pods}
-        return self.recovery.reconcile(pods, self.api.ready_nodes(), list(gone.values()))
+        seen = self.recovery.reconcile(pods, self.api.ready_nodes(), list(gone.values()))
+        if self.replacements is not None:
+            self.replacements()
+        return seen
 
     def _deleted(self) -> dict[str, dict]:
         if not self.version:
@@ -270,7 +277,9 @@ def _uid(pod: dict) -> str:
     return pod["metadata"]["uid"]
 
 
-def recovery_pass(service: "ControlService", workers: Workers, api: PodApi) -> RecoveryPass:
+def recovery_pass(
+    service: "ControlService", workers: Workers, api: PodApi, ledger: TaskLedger | None = None
+) -> RecoveryPass:
     controller, grants = service.controller, service.grants
     slug = controller.slug
 
@@ -280,4 +289,7 @@ def recovery_pass(service: "ControlService", workers: Workers, api: PodApi) -> R
     capacity = AccountCapacity(controller.store, slug, verify)
     releases = {"grant": GrantRelease(grants, slug), "account": AccountSlot(controller.store, slug, capacity)}
     recovery = Recovery(controller.store, slug, controller, NoCheckpoints(), releases, workers.image_tag)
-    return RecoveryPass(recovery, api, f"{OWNER_LABEL}={owner_for(slug)}")
+    recovering = RecoveryPass(recovery, api, f"{OWNER_LABEL}={owner_for(slug)}")
+    if ledger is not None:
+        recovering.replacements = Replacements(recovery, service.runtime.relaunch, ledger)
+    return recovering

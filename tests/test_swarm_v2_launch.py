@@ -1041,3 +1041,39 @@ def test_a_tick_spawn_on_a_full_account_waits_and_records_no_launch_failure(worl
     tick_module._record_spawn_failure(SLUG, world.store, AgentRecord(name, "eng", "task-2"), full.value)
     assert world.store.launch_failure(SLUG, "task-2") == ""
     assert [row["state"] for row in world.store.launches(SLUG)] == ["waiting"]
+
+
+def _replacement(world, seat=FIRST):
+    agent = AgentRecord(world.store.next_name(SLUG, "eng"), "eng", "task", account=ACCOUNT, seat=seat)
+    admitted = world.controller.admit(agent)
+    task = {"id": "task", "seat": seat, "checkpoint": "ckpt-one-2"}
+    return admitted, SpawnRequest(None, "eng", admitted.name, task)
+
+
+def test_a_relaunch_places_the_admitted_replacement_on_its_own_account_without_a_second_admission(world):
+    admitted, request = _replacement(world)
+
+    launch = world.launcher.relaunch(request, admitted, replace(world.terms, account="elsewhere"))
+
+    assert launch.outcome == Outcome("spawn", Status.OK, BACKEND, f"placed-{admitted.name}")
+    assert launch.agent == admitted
+    assert [agent.execution_id for agent in world.store.executions(SLUG, FIRST)] == [admitted.execution_id]
+    [sent] = world.runtime.requests
+    assert sent.task["checkpoint"] == "ckpt-one-2"
+    assert (sent.task["execution_id"], sent.task["generation"]) == (admitted.execution_id, 1)
+    assert (sent.task["account"], sent.task["endpoints"]) == (ACCOUNT, {broadcast_bridge.API_URL: API})
+    assert world.rows()[f"{SLUG}/{FIRST}"]["execution_id"] == admitted.execution_id
+    assert world.homes.calls == [(admitted.execution_id, sent.task["launch_grant"])]
+
+
+def test_a_relaunch_on_a_full_account_keeps_its_replacement_for_the_next_pass(world):
+    held = world.launch(SECOND)
+    admitted, request = _replacement(world)
+
+    launch = world.launcher.relaunch(request, admitted, world.terms)
+
+    assert launch.outcome == Outcome("spawn", Status.UNAVAILABLE, BACKEND, detail="account_full")
+    assert launch.agent == admitted
+    assert world.endings() == {}
+    assert world.store.execution(SLUG, admitted.execution_id) == admitted
+    assert [request.name for request in world.runtime.requests] == [held.agent.name]
