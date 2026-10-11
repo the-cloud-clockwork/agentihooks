@@ -362,6 +362,7 @@ export function renderStats() {
       h("div", { text: `Trend ${top && top.trend || "unknown"}` }),
       h("div", { text: `Last action ${top && top.last_action || "none recorded"}` })));
   $("stats").replaceChildren(
+    bottleneck,
     row("Started", started ? when(started) : "—"),
     row("Elapsed", elapsed === null ? "—" : span(elapsed)),
     row("Time left", leftText),
@@ -380,7 +381,6 @@ export function renderStats() {
     ...(out ? [row("Out of scope", String(out))] : []),
     row("Agents · 2 h", String(activeAgents())),
     row("Last activity", last ? `${span(Date.now() - last)} ago` : "—"));
-  $("stats").prepend(bottleneck);
 }
 
 export function editTitle(on) {

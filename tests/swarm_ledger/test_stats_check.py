@@ -163,9 +163,9 @@ def test_the_stats_card_counts_unfrozen_and_frozen_work_apart():
         + function_source("renderStats")
         + "\nconst assert = require('node:assert/strict');\n"
         "renderStats();\n"
-        "assert.deepEqual(nodes.stats.rows.slice(2, 5), ['Time left 30m', 'Unfrozen 2', 'Frozen 3 · 1h 30m of work']);\n"
+        "assert.deepEqual(nodes.stats.rows.slice(3, 6), ['Time left 30m', 'Unfrozen 2', 'Frozen 3 · 1h 30m of work']);\n"
         "meta = {created_at: 1, events: []};\n"
         "renderStats();\n"
-        "assert.deepEqual(nodes.stats.rows.slice(3, 5), ['Unfrozen —', 'Frozen —']);\n"
+        "assert.deepEqual(nodes.stats.rows.slice(4, 6), ['Unfrozen —', 'Frozen —']);\n"
     )
     subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
