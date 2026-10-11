@@ -10,6 +10,7 @@ from scripts.hive import auth as hive_auth
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2.kubernetes.client import ApiRefused
+from scripts.swarm_v2.kubernetes.runtime import PodStatus
 from scripts.swarm_v2.kubernetes.watch import BACKEND
 from scripts.swarm_v2.runtime import observe
 
@@ -330,8 +331,6 @@ def test_a_tick_sends_each_remote_heartbeat_through_the_controller(tmp_path):
 
 
 def _pod(phase="Running"):
-    from scripts.swarm_v2.kubernetes.runtime import PodStatus
-
     return PodStatus("worker-t1", "uid-1", phase, (), False)
 
 
