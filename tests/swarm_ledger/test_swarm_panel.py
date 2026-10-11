@@ -156,6 +156,31 @@ class SwarmPanel(unittest.TestCase):
         self.assertEqual((missing, other, refused), (404, 404, 403))
         models.assert_called_once_with()
 
+    def fetch(self, path):
+        headers = {"Host": f"127.0.0.1:{server.PORT}", "X-Ledger-Token": self.token}
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}/api/swarm/{path}", headers=headers)
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, resp.read().decode(), resp.headers["Content-Type"]
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read().decode(), exc.headers["Content-Type"]
+
+    def test_swarm_routes_answer_with_their_bodies_and_content_types(self):
+        with (
+            patch.object(server, "swarm_models", return_value={"claude": [], "codex": []}),
+            patch.object(server, "swarm_status", side_effect=[{"agents": []}, None]),
+        ):
+            replies = [self.fetch(f"{SLUG}/models"), self.fetch(SLUG), self.fetch(SLUG), self.fetch(f"{SLUG}/other")]
+        self.assertEqual(
+            replies,
+            [
+                (200, '{"claude": [], "codex": []}', "application/json"),
+                (200, '{"agents": []}', "application/json"),
+                (404, "no swarm for this ledger", "text/plain"),
+                (404, "no such ledger", "text/plain"),
+            ],
+        )
+
     def test_swarm_models_caches_in_the_swarm_redis(self):
         import fakeredis
 

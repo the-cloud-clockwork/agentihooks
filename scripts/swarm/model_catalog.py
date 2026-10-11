@@ -12,6 +12,7 @@ from scripts.swarm.keyspace import ROOT
 TTL = 3600
 KEY = f"{ROOT}:swarm:models"
 MODELS_URL = "https://api.anthropic.com/v1/models?limit=1000"
+AUTHORIZATION = "Authorization"
 HEADERS = {"anthropic-version": "2023-06-01", "anthropic-beta": "oauth-2025-04-20"}
 HELP_MODEL = re.compile(r"--model <model>(.*?)\n  --", re.S)
 HELP_EFFORT = re.compile(r"--effort <level>(.*?)\n  --", re.S)
@@ -25,7 +26,7 @@ def entry(model, label, efforts):
 
 def codex(environ):
     try:
-        models = json.loads((codex_home(environ) / "models_cache.json").read_text(encoding="utf-8"))["models"]
+        models = json.loads((codex_home(environ) / "models_cache.json").read_bytes())["models"]
         listed = sorted((m for m in models if m["visibility"] == "list"), key=lambda m: m["priority"])
         return [
             entry(
@@ -40,7 +41,7 @@ def codex(environ):
 
 
 def fetch_models(token):
-    request = urllib.request.Request(MODELS_URL, headers={"Authorization": f"Bearer {token}", **HEADERS})
+    request = urllib.request.Request(MODELS_URL, headers={AUTHORIZATION: f"Bearer {token}", **HEADERS})
     with urllib.request.urlopen(request, timeout=10) as reply:
         return json.load(reply)["data"]
 
@@ -77,18 +78,23 @@ def from_help(text):
     return [entry(alias, alias, efforts) for alias in ALIAS.findall(model.group(1))] if model else []
 
 
-def claude(environ):
+def from_account(environ):
     token = oauth_env(environ).get(OAUTH_ENV) or environ.get(OAUTH_ENV)
     try:
-        listed = from_api(fetch_models(token)) if token else []
+        return from_api(fetch_models(token)) if token else []
     except (OSError, ValueError, KeyError, TypeError):
-        listed = []
-    if listed:
-        return listed
+        return []
+
+
+def documented():
     try:
         return from_help(cli_help())
     except (OSError, subprocess.SubprocessError):
         return []
+
+
+def claude(environ):
+    return from_account(environ) or documented()
 
 
 READERS = {"claude": claude, "codex": codex}

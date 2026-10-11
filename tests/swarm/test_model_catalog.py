@@ -209,6 +209,28 @@ def test_the_effort_levels_come_only_from_the_effort_option_itself():
     ]
 
 
+def test_the_first_listed_model_wins_a_tie_on_its_line():
+    twin = {**CLAUDE_MODELS[2], "id": "claude-opus-5-5-twin", "display_name": "Claude Opus Twin"}
+    assert model_catalog.from_api([CLAUDE_MODELS[2], twin]) == [
+        {"model": "opus", "label": "Claude Opus 5.5", "efforts": ["low", "medium", "high", "xhigh", "max"]}
+    ]
+
+
+@pytest.mark.parametrize(
+    "environ,fetch",
+    [({}, unreachable), ({"AH_CC_TOKEN_one": "routed-credential"}, unreachable), ({"OTHER": "x"}, missing_data)],
+)
+def test_an_unread_account_lists_nothing(monkeypatch, environ, fetch):
+    monkeypatch.setattr(model_catalog, "fetch_models", fetch)
+    assert model_catalog.from_account(environ) == []
+
+
+@pytest.mark.parametrize("cli_help", [no_claude, slow_claude])
+def test_an_unreadable_help_documents_nothing(monkeypatch, cli_help):
+    monkeypatch.setattr(model_catalog, "cli_help", cli_help)
+    assert model_catalog.documented() == []
+
+
 def test_fetch_models_asks_the_anthropic_models_endpoint_with_the_oauth_bearer(monkeypatch):
     sent = {}
 
