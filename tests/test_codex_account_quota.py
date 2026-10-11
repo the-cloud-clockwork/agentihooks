@@ -317,6 +317,7 @@ def test_next_account_hands_select_the_usable_pool_and_the_environment(monkeypat
 
 
 def test_the_codex_rows_mark_the_account_placement_picks_from_live_readings(monkeypatch):
+    monkeypatch.setenv("AH_CX_TOKEN_alpha", "alpha-token")
     pool = [CodexAccount("default"), CodexAccount("alpha", "AH_CX_TOKEN_alpha")]
     quotas = {"alpha": CodexQuota(NOW, "pro", seven_day=QuotaWindow(10.0, NOW + 6000))}
     seen = []
