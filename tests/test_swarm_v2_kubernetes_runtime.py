@@ -346,6 +346,12 @@ def test_apply_refuses_a_launch_whose_render_differs_from_the_journal():
     assert sender.api.create_calls == 0
 
 
+def test_apply_refuses_a_valid_launch_when_the_journal_holds_no_spec_digest():
+    sender = transport()
+    assert sender.apply_operation(operation(spec_digest=""), cases.launch()) == Observation(Phase.REFUSED)
+    assert sender.api.create_calls == 0
+
+
 def defaulted(pod: dict) -> dict:
     # The fields anton-prod's API server, LimitRange and RuntimeClass admission added in a server dry run.
     live = json.loads(json.dumps(pod))

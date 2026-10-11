@@ -173,6 +173,7 @@ def change(path, value):
         (change(("hostAliases",), [{"ip": "10.0.0.9", "hostnames": ["brain"]}]), "network"),
         (change(("dnsConfig",), {"nameservers": ["10.0.0.9"]}), "network"),
         (change(("containers", 0, "ports"), [{"containerPort": 80, "hostPort": 80}]), "network"),
+        (change(("containers", 0, "ports"), [{"containerPort": 80, "hostIP": "0.0.0.0"}]), "network"),
         (change(("hostUsers",), True), "security-context"),
         (change(("containers", 0, "envFrom", 1, "configMapRef", "name"), "other"), "environment"),
     ],

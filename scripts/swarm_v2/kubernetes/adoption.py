@@ -76,7 +76,7 @@ def _volume(volume: dict) -> dict:
 
 def _host_ports(spec: dict) -> dict:
     return {
-        container.get("name", ""): [port.get("hostPort") for port in container.get("ports", [])]
+        container.get("name", ""): [[port.get("hostPort"), port.get("hostIP")] for port in container.get("ports", [])]
         for container in _containers(spec)
     }
 
