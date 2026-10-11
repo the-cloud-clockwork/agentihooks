@@ -71,6 +71,25 @@ def test_seat_one_is_the_lead_at_the_single_master_address_and_later_seats_are_n
     assert masters.seats(SLUG, 3) == [LEAD, SECOND, f"master-3@{SLUG}"]
 
 
+@pytest.mark.parametrize(
+    ("lane", "seat", "lead"),
+    [(MASTER, LEAD, True), (MASTER, "", True), (MASTER, SECOND, False), ("eng", LEAD, False), ("eng", "", False)],
+)
+def test_only_a_master_record_in_the_lead_seat_or_with_no_seat_is_the_lead(lane, seat, lead):
+    assert masters.is_lead(SLUG, AgentRecord("sw-a", lane, lane, seat=seat)) is lead
+
+
+def test_a_seat_two_master_prompt_names_its_seat_the_count_the_lead_and_what_it_owns():
+    task = {"seat": SECOND, "masters": 3, "owns": ["hives/anton-1", "p2"]}
+    (line_text,) = masters.seat_lines(SLUG, task)
+    assert line_text == (
+        f"You hold master seat {SECOND}, one of 3 masters of swarm {SLUG}. The lead seat {LEAD} answers the operator "
+        "and his chat; you act on the inbox items for the phases and hives you own: hives/anton-1, p2."
+    )
+    assert masters.seat_lines(SLUG, {**task, "owns": []})[0].endswith("you own: none yet.")
+    assert masters.seat_lines(SLUG, {"seat": LEAD}) == []
+
+
 @pytest.mark.parametrize("count", [0, -1])
 def test_a_master_count_below_one_is_refused(swarm, count):
     store, _ = swarm
@@ -316,6 +335,38 @@ def test_swarm_set_refuses_a_master_count_holding_another_equals_sign(swarm, mon
     assert masters.MasterSeats(store.redis).count("paused-sw") == 1
 
 
+def test_swarm_set_gives_a_hive_to_a_seat_the_same_command_raised_the_count_for(swarm, monkeypatch, capsys):
+    store, _ = swarm
+    store.create(SwarmConfig("paused-sw", "/repo", 1, 1, state="paused"))
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    assert cli.main(["paused-sw", "set", "hive.anton-1=master-3", "masters=3", "hive.anton-2=master-2@paused-sw"]) == 0
+    owners = {"hives/anton-1": "master-3@paused-sw", "hives/anton-2": "master-2@paused-sw"}
+    assert masters.MasterSeats(store.redis).hive_owners("paused-sw") == owners
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["hive_owners"] == owners
+
+
+@pytest.mark.parametrize(
+    ("pair", "error"),
+    [
+        ("hive.=master-2", "swarm: a hive owner is set as hive.<hive id>=<master seat>"),
+        ("hive.anton-1=", "swarm: a hive owner is set as hive.<hive id>=<master seat>"),
+        (
+            "hive.anton-1=master-5",
+            "swarm: master-5@paused-sw is not a master seat of paused-sw, so it cannot own hive anton-1",
+        ),
+    ],
+)
+def test_swarm_set_refuses_a_hive_without_an_id_or_a_seat_outside_the_count(swarm, monkeypatch, capsys, pair, error):
+    store, _ = swarm
+    store.create(SwarmConfig("paused-sw", "/repo", 1, 1, state="paused"))
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    assert cli.main(["paused-sw", "set", "masters=2", "max-eng-agents=5", pair]) == 1
+    assert capsys.readouterr().err.splitlines()[-1] == error
+    assert masters.MasterSeats(store.redis).hive_owners("paused-sw") == {}
+    assert masters.MasterSeats(store.redis).count("paused-sw") == 1
+    assert store.config("paused-sw").max_eng == 1
+
+
 def test_refusals_name_the_count_they_refused():
     with pytest.raises(masters.MasterError) as below:
         masters.seats(SLUG, 0)
@@ -493,3 +544,97 @@ def test_an_added_seat_that_took_a_new_phase_takes_only_what_its_share_still_lac
     previous = {"p1": LEAD, "p2": LEAD, "p3": SECOND}
     owners = masters.assign(PHASES, [LEAD, SECOND, third], previous, [LEAD, SECOND])
     assert owners == {"p1": LEAD, "p2": LEAD, "p3": SECOND, "p4": third}
+
+
+def test_a_master_seat_owns_a_hive_and_receives_its_items(swarm):
+    store, inbox = swarm
+    seated(store, FIRST, OTHER)
+    masters.MasterSeats(store.redis).own_hive(SLUG, "anton-1", SECOND)
+    assert masters.MasterSeats(store.redis).hive_owners(SLUG) == {"hives/anton-1": SECOND}
+    relay(swarm, write(5, "hives/anton-1"))
+    assert texts(inbox, SECOND) and not texts(inbox, LEAD)
+
+
+def test_a_hive_item_goes_to_the_lead_while_its_owner_is_not_live(swarm):
+    store, inbox = swarm
+    seated(store, FIRST)
+    masters.MasterSeats(store.redis).own_hive(SLUG, "anton-1", SECOND)
+    relay(swarm, write(6, "hives/anton-1"))
+    assert texts(inbox, LEAD) and not texts(inbox, SECOND)
+
+
+def test_a_seat_outside_the_master_count_cannot_own_a_hive(swarm):
+    store, _ = swarm
+    seats = masters.MasterSeats(store.redis)
+    with pytest.raises(masters.MasterError, match="is not a master seat"):
+        seats.own_hive(SLUG, "anton-1", f"master-3@{SLUG}")
+    assert seats.hive_owners(SLUG) == {}
+
+
+def test_a_hive_owned_by_a_removed_seat_returns_to_the_lead(swarm):
+    store, _ = swarm
+    seats = masters.MasterSeats(store.redis)
+    seats.own_hive(SLUG, "anton-1", SECOND)
+    seats.set_count(SLUG, 1)
+    assert seats.hive_owners(SLUG) == {}
+    assert masters.route("hives/anton-1", DOC, lambda: seats.owners(SLUG, DOC), [LEAD], LEAD) == LEAD
+
+
+def test_a_hive_owner_routes_its_hive_and_leaves_phase_owners_untouched(swarm):
+    store, _ = swarm
+    seats = masters.MasterSeats(store.redis)
+    before = seats.owners(SLUG, DOC)
+    seats.own_hive(SLUG, "anton-1", SECOND)
+    after = seats.owners(SLUG, DOC)
+    assert after == {**before, "hives/anton-1": SECOND}
+    assert masters.route("hives/anton-1", DOC, lambda: after, [LEAD, SECOND], LEAD) == SECOND
+    assert masters.owner_of("hives/anton-1/x", DOC, after) == SECOND
+    assert json.loads(store.redis.hget(seats.key(SLUG), "owners")) == before
+
+
+def test_hive_pairs_keep_everything_after_the_first_equals_sign_as_the_seat_and_leave_other_pairs():
+    pairs = ["hive.anton-1=master-2=x", "max-eng-agents=3", "hive.anton-2=master-3@sw"]
+    assert masters.hive_pairs(SLUG, pairs) == (
+        [("anton-1", f"master-2=x@{SLUG}"), ("anton-2", f"master-3@{SLUG}")],
+        ["max-eng-agents=3"],
+    )
+
+
+def test_a_hive_nobody_owns_has_no_owner():
+    assert masters.owner_of("hives/anton-9", DOC, {"hives/anton-1": SECOND}) == ""
+
+
+def test_a_seat_task_without_owned_items_says_none_yet():
+    (line_text,) = masters.seat_lines(SLUG, {"seat": SECOND, "masters": 2})
+    assert line_text.endswith("you own: none yet.")
+
+
+def test_hives_are_checked_against_the_stored_count_when_the_command_sets_none(swarm):
+    store, _ = swarm
+    seats = masters.MasterSeats(store.redis)
+    seats.set_count(SLUG, 3)
+    seats.check_hives(SLUG, [], [("anton-1", f"master-3@{SLUG}")])
+    with pytest.raises(masters.MasterError, match=f"master-3@{SLUG} is not a master seat of {SLUG}"):
+        seats.check_hives(SLUG, [2], [("anton-1", f"master-3@{SLUG}")])
+
+
+def test_hive_owners_are_stored_sorted_and_a_refusal_names_the_hive(swarm):
+    store, _ = swarm
+    seats = masters.MasterSeats(store.redis)
+    seats.own_hive(SLUG, "b-hive", SECOND)
+    seats.own_hive(SLUG, "a-hive", LEAD)
+    assert store.redis.hget(seats.key(SLUG), "hives") == json.dumps({"a-hive": LEAD, "b-hive": SECOND})
+    with pytest.raises(masters.MasterError) as refused:
+        seats.own_hive(SLUG, "c-hive", f"master-3@{SLUG}")
+    assert str(refused.value) == f"master-3@{SLUG} is not a master seat of {SLUG}, so it cannot own hive c-hive"
+
+
+def test_control_notices_go_to_the_live_lead_and_never_to_a_working_engineer_or_a_finished_lead(swarm):
+    from scripts.swarm import control_notifications
+
+    store, _ = swarm
+    store.put_agent(SLUG, AgentRecord("sw-eng-1", "eng", "t1", seat=f"eng-1@{SLUG}"))
+    store.put_agent(SLUG, AgentRecord("sw-master-0", MASTER, MASTER, state="finished", seat=LEAD))
+    assert control_notifications.master(store, SLUG) is None
+    store.put_agent(SLUG, FIRST)
+    assert control_notifications.master(store, SLUG).name == FIRST.name

@@ -52,6 +52,12 @@ def test_account_comes_from_the_single_token_name():
     assert acc.environment_account({"AH_CC_TOKEN_alpha": ""}) == acc.UNROUTED
 
 
+def test_an_email_named_token_counts_under_its_email_slug():
+    from scripts.account_names import token_env
+
+    assert acc.account_from_names(["HOME", token_env("NESTOR.COLT@GMAIL.COM")]) == "nestor_coltatgmail_com"
+
+
 def test_the_route_marker_attributes_an_api_session():
     assert acc.account_from_names(iter(["HOME", acc.API_MARKER])) == acc.API_ACCOUNT == "api"
     assert acc.account_from_names([acc.API_MARKER, "AH_CC_TOKEN_alpha"]) == "api"

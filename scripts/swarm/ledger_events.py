@@ -23,6 +23,7 @@ from scripts.swarm_v2 import masters
 
 MINUTE_MS = 60_000
 TASK_FINDINGS = frozenset({"proof loop", "failed launch", "stale claim"})
+HELD_FINDINGS = frozenset({"idle with claim", "waiting on input", "stalled", "working on drain"})
 FOLLOWUP_RAISE_MS = 15 * MINUTE_MS
 FOLLOWUP_OPERATOR_MS = 30 * MINUTE_MS
 MERGED_ENGINEER_MS = 10 * MINUTE_MS
@@ -267,8 +268,10 @@ def tick_view(inbox: object, store: object, slug: str, doc: dict) -> Callable[[s
 class Mail:
     def __init__(self, inbox, store, slug, doc=None):
         self.inbox, self.store, self.slug, self.doc = inbox, store, slug, doc or {}
-        live = [a for a in store.agents(slug) if a.state != "finished"]
+        agents = store.agents(slug)
+        live = [a for a in agents if a.state != "finished"]
         self.seats = {a.name: a.seat or a.name for a in live}
+        self.held = {a.name: a.task for a in agents if a.lane != MASTER}
         self.has_master = any(a.lane == MASTER for a in live)
         self.master = operator_mail.master_address(slug, live)
         self.masters = masters.live_seats(live)
@@ -384,9 +387,14 @@ def findings_pass(inbox, store, slug, shown, doc=None):
             f"New health finding on swarm {slug}: {found['summary']} ({found['kind']}). Give it a verdict: "
             f'agentihooks swarm {slug} verdict {found["id"]} {"|".join(VERDICTS)} --note "<why>"'
         )
-        owner = mail.owner(f"tasks/{found['subject']}") if found["kind"] in TASK_FINDINGS else mail.master
-        sent += mail.send(f"finding:{found['id']}:{judged}", owner, text)
+        sent += mail.send(f"finding:{found['id']}:{judged}", _finding_owner(mail, found), text)
     return sent
+
+
+def _finding_owner(mail, found):
+    kind, subject = found["kind"], found["subject"]
+    task = subject if kind in TASK_FINDINGS else kind in HELD_FINDINGS and mail.held.get(subject)
+    return mail.owner(f"tasks/{task}") if task else mail.master
 
 
 def new_events(store, slug, doc, cursor_name):
