@@ -596,33 +596,6 @@ def test_hosting_takes_each_end_of_the_tcp_range(tmp_path, port):
         _cs().host(environ, _store(), "hive-fixture")
 
 
-@pytest.mark.parametrize(("deployment", "reconciled"), [("distributed", True), ("local", False)])
-def test_a_hosted_controller_reconciles_its_proof_swarm_before_it_starts(
-    tmp_path, monkeypatch, capsys, deployment, reconciled
-):
-    from scripts.swarm_ledger import proof_ledger
-    from scripts.swarm_v2 import proof_swarm
-
-    seen = []
-    monkeypatch.setattr(proof_swarm, "reconcile", lambda *args: seen.append(args) or "controller: proof line")
-    store = _store()
-    environ = {
-        **_environ(tmp_path),
-        _cs().PORT_ENV: "8780",
-        _cs().SWARM_ENV: SLUG,
-        _cs().CREDENTIAL_ENV: "not-issued",
-        "AGENTIHOOKS_DEPLOYMENT": deployment,
-        "LEDGER_URL": "http://ledger:8765",
-        "LEDGER_DIR": str(tmp_path),
-    }
-
-    with pytest.raises(SwarmError, match="scoped controller grant"):
-        _cs().host(environ, store, "hive-fixture")
-
-    assert seen == ([(environ, store, SLUG, proof_ledger)] if reconciled else [])
-    assert ("controller: proof line\n" in capsys.readouterr().out) is reconciled
-
-
 def test_a_missing_controller_credential_never_matches_a_stored_grant(tmp_path):
     store = _store()
     store.redis.set(f"{hive_auth.PREFIX}:controller", hive_auth._digest("XXXX"))

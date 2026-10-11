@@ -36,9 +36,13 @@ def _refused(exc: urllib.error.HTTPError) -> None:
     sys.exit(f"server refused: {exc.code} {message}")
 
 
-def exists(slug: str, environ=os.environ) -> bool:
+def live(slug: str, environ=os.environ) -> bool:
+    return _found(f"ledgers/{slug}/metadata", environ) and not _found(f"bin/{slug}", environ)
+
+
+def _found(path: str, environ) -> bool:
     request = urllib.request.Request(
-        f"{ledger_link.base(environ)}/api/v1/ledgers/{slug}/metadata",
+        f"{ledger_link.base(environ)}/api/v1/{path}",
         headers={"X-Controller-Credential": _credential(environ)},
     )
     try:

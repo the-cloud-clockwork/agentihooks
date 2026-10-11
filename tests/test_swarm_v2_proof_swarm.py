@@ -2,18 +2,20 @@ import json
 
 import pytest
 
-from scripts.swarm.store import RedisStore, SwarmError
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2 import proof_swarm
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 SLUG = "proof-323133-t351-1"
+OTHER = "proof-323133-t351-2"
 SETTING = json.dumps({"agent": "engineer@323133-1068", "task": "t351"})
 PROJECT = "github.com/the-cloud-clockwork/agentihooks"
 ENV = {
     "AGENTIHOOKS_CONTROL_PROOF": SETTING,
-    "AGENTIHOOKS_LAUNCH_PROJECTS": f"{PROJECT},github.com/the-cloud-clockwork/antoncore",
+    "AGENTIHOOKS_LAUNCH_PROJECTS": f" {PROJECT} ,github.com/the-cloud-clockwork/antoncore",
     "LEDGER_URL": "http://ledger:8765",
 }
+CLEARED = {key: value for key, value in ENV.items() if key != "AGENTIHOOKS_CONTROL_PROOF"}
 
 
 @pytest.fixture
@@ -24,8 +26,15 @@ def store():
 
 
 class Ledger:
-    def __init__(self, named=SLUG):
-        self.named, self.created, self.removed = named, [], []
+    def __init__(self, named=SLUG, live=(), fail=None):
+        self.named, self.alive, self.fail = named, set(live), fail
+        self.created, self.removed, self.asked = [], [], []
+
+    def live(self, slug, environ):
+        if self.fail:
+            raise self.fail
+        self.asked.append(slug)
+        return slug in self.alive
 
     def create(self, content, environ):
         self.created.append((content, environ))
@@ -36,65 +45,191 @@ class Ledger:
         return {"slug": slug, "removed_at": 1}
 
 
+def swarm(store, slug):
+    store.create(SwarmConfig(slug, PROJECT, 1, 0))
+
+
 def test_a_set_proof_creates_its_ledger_and_a_one_engineer_swarm(store):
     ledger = Ledger()
 
-    assert proof_swarm.reconcile(ENV, store, SLUG, ledger) == (
+    assert proof_swarm.reconcile(ENV, store, SLUG, ledger) == [
         f"controller: created proof swarm {SLUG} with one engineer task"
-    )
+    ]
     ((content, environ),) = ledger.created
     assert (environ["AGENTIHOOKS_AGENT_NAME"], environ["AGENTIHOOKS_SWARM_TASK"]) == ("engineer@323133-1068", "t351")
     assert environ["LEDGER_URL"] == "http://ledger:8765"
     assert content == proof_swarm.CONTENT
-    assert [task["lane"] for task in content["tasks"]] == ["eng"]
-    assert [task["phase"] for task in content["tasks"]] == ["p1"]
+    assert [(task["lane"], task["phase"], task["profile"]) for task in content["tasks"]] == [("eng", "p1", "engineer")]
     config = store.config(SLUG)
     assert (config.repo, config.max_eng, config.max_ci, config.state) == (PROJECT, 1, 0, "running")
-    assert store.redis.get(proof_swarm.RECORD) == SLUG
+    assert store.slugs() == [SLUG]
 
 
-def test_a_recorded_proof_is_kept_across_restarts(store):
+def test_a_restart_after_the_ledger_was_created_only_creates_the_swarm(store):
+    ledger = Ledger(live={SLUG})
+
+    assert proof_swarm.reconcile(ENV, store, SLUG, ledger) == [
+        f"controller: created proof swarm {SLUG} with one engineer task"
+    ]
+    assert (ledger.asked, ledger.created, ledger.removed) == ([SLUG], [], [])
+    assert store.slugs() == [SLUG]
+
+
+def test_a_served_proof_swarm_that_exists_is_kept_without_a_ledger_call(store):
+    swarm(store, SLUG)
     ledger = Ledger()
-    proof_swarm.reconcile(ENV, store, SLUG, ledger)
 
-    assert proof_swarm.reconcile(ENV, store, SLUG, ledger) == f"controller: kept proof swarm {SLUG}"
-    assert len(ledger.created) == 1
+    assert proof_swarm.reconcile(ENV, store, SLUG, ledger) == []
+    assert (ledger.asked, ledger.created, ledger.removed) == ([], [], [])
+    assert store.slugs() == [SLUG]
 
 
 def test_a_proof_named_other_than_the_served_swarm_is_removed_and_refused(store):
-    ledger = Ledger("proof-323133-t351-2")
+    ledger = Ledger(OTHER)
 
     with pytest.raises(SwarmError) as refused:
         proof_swarm.reconcile(ENV, store, SLUG, ledger)
 
-    assert str(refused.value) == f"the proof ledger is named proof-323133-t351-2 but the controller serves {SLUG}"
-    assert [slug for slug, _ in ledger.removed] == ["proof-323133-t351-2"]
+    assert str(refused.value) == f"the proof ledger is named {OTHER} but the controller serves {SLUG}"
+    assert ledger.removed == [(OTHER, ENV)]
     assert store.slugs() == []
-    assert store.redis.get(proof_swarm.RECORD) is None
 
 
-def test_a_cleared_setting_removes_the_recorded_proof(store):
+def test_a_served_swarm_without_a_proof_name_is_refused_before_any_ledger_call(store):
     ledger = Ledger()
-    proof_swarm.reconcile(ENV, store, SLUG, ledger)
-    cleared = {key: value for key, value in ENV.items() if key != "AGENTIHOOKS_CONTROL_PROOF"}
 
-    assert proof_swarm.reconcile(cleared, store, "rig-grade-swarm", ledger) == f"controller: removed proof swarm {SLUG}"
-    assert ledger.removed == [(SLUG, cleared)]
+    with pytest.raises(SwarmError) as refused:
+        proof_swarm.reconcile(ENV, store, "rig-grade-swarm", ledger)
+
+    assert str(refused.value) == "the controller serves 'rig-grade-swarm', which is not a proof swarm name"
+    assert (ledger.asked, ledger.created) == ([], [])
+
+
+def test_a_cleared_setting_removes_every_proof_swarm_and_only_live_ledgers(store):
+    for slug in (SLUG, OTHER, "rig-grade-swarm"):
+        swarm(store, slug)
+    ledger = Ledger(live={SLUG})
+
+    assert proof_swarm.reconcile(CLEARED, store, SLUG, ledger) == [
+        f"controller: removed proof swarm {SLUG}",
+        f"controller: removed proof swarm {OTHER}",
+    ]
+    assert ledger.asked == [SLUG, OTHER]
+    assert ledger.removed == [(SLUG, CLEARED)]
+    assert store.slugs() == ["rig-grade-swarm"]
+
+
+def test_a_set_proof_removes_other_proof_swarms_and_keeps_the_served_one(store):
+    swarm(store, SLUG)
+    swarm(store, OTHER)
+    ledger = Ledger(live={OTHER})
+
+    assert proof_swarm.reconcile(ENV, store, SLUG, ledger) == [f"controller: removed proof swarm {OTHER}"]
+    assert ledger.removed == [(OTHER, ENV)]
+    assert store.slugs() == [SLUG]
+
+
+def test_a_proof_swarm_with_agents_waits_after_its_ledger_is_removed(store):
+    swarm(store, SLUG)
+    store.put_agent(SLUG, AgentRecord("engineer@323133-0001", "eng", "t1", started_at=1_000))
+    ledger = Ledger(live={SLUG})
+
+    assert proof_swarm.reconcile(CLEARED, store, SLUG, ledger) == [
+        f"controller: proof swarm {SLUG} waits for its agents to end before removal"
+    ]
+    assert ledger.removed == [(SLUG, CLEARED)]
+    assert store.slugs() == [SLUG]
+
+
+def test_nothing_happens_without_a_setting_or_a_proof_swarm(store):
+    swarm(store, "rig-grade-swarm")
+    ledger = Ledger()
+
+    assert proof_swarm.reconcile(CLEARED, store, SLUG, ledger) == []
+    assert (ledger.asked, ledger.created, ledger.removed) == ([], [], [])
+
+
+@pytest.mark.parametrize(
+    "setting", ["{", "[]", json.dumps({"agent": "engineer@323133-1068"}), json.dumps({"task": "t351"})]
+)
+def test_a_malformed_setting_is_refused(store, setting):
+    with pytest.raises(SwarmError) as refused:
+        proof_swarm.reconcile({**ENV, "AGENTIHOOKS_CONTROL_PROOF": setting}, store, SLUG, Ledger())
+
+    assert str(refused.value) == "AGENTIHOOKS_CONTROL_PROOF must be a JSON object naming an agent and a task"
+
+
+@pytest.mark.parametrize("projects", [None, " , "])
+def test_a_proof_without_launch_projects_is_refused(store, projects):
+    environ = {key: value for key, value in ENV.items() if key != "AGENTIHOOKS_LAUNCH_PROJECTS"}
+    if projects is not None:
+        environ["AGENTIHOOKS_LAUNCH_PROJECTS"] = projects
+
+    with pytest.raises(SwarmError) as refused:
+        proof_swarm.reconcile(environ, store, SLUG, Ledger())
+
+    assert str(refused.value) == "a proof swarm needs AGENTIHOOKS_LAUNCH_PROJECTS"
     assert store.slugs() == []
-    assert store.redis.get(proof_swarm.RECORD) is None
 
 
-def test_a_cleared_setting_finishes_a_removal_whose_swarm_is_already_gone(store):
-    store.redis.set(proof_swarm.RECORD, SLUG)
-    ledger = Ledger()
+@pytest.mark.parametrize("fail", [SystemExit("server refused: 403 nope"), ConnectionRefusedError("refused")])
+def test_a_failing_ledger_route_is_a_swarm_error(store, fail):
+    with pytest.raises(SwarmError) as refused:
+        proof_swarm.reconcile(ENV, store, SLUG, Ledger(fail=fail))
 
-    assert proof_swarm.reconcile({}, store, "rig-grade-swarm", ledger) == f"controller: removed proof swarm {SLUG}"
-    assert [slug for slug, _ in ledger.removed] == [SLUG]
-    assert store.redis.get(proof_swarm.RECORD) is None
+    assert str(refused.value) == f"the proof ledger route failed: {fail}"
 
 
-def test_nothing_happens_without_a_setting_or_a_record(store):
-    ledger = Ledger()
+@pytest.mark.parametrize(("deployment", "called"), [("distributed", True), ("local", False)])
+def test_a_pass_runs_only_against_a_hosted_ledger_and_prints_each_line(store, monkeypatch, capsys, deployment, called):
+    from scripts.swarm_ledger import proof_ledger
 
-    assert proof_swarm.reconcile({}, store, "rig-grade-swarm", ledger) == ""
-    assert (ledger.created, ledger.removed) == ([], [])
+    seen = []
+    monkeypatch.setattr(proof_swarm, "reconcile", lambda *args: seen.append(args) or ["controller: a", "controller: b"])
+    environ = {**ENV, "AGENTIHOOKS_DEPLOYMENT": deployment, "AGENTIHOOKS_CONTROL_SWARM": SLUG}
+
+    proof_swarm.run(environ, store)
+
+    assert seen == ([(environ, store, SLUG, proof_ledger)] if called else [])
+    assert capsys.readouterr().out == ("controller: a\ncontroller: b\n" if called else "")
+
+
+def test_a_pass_without_a_served_swarm_reconciles_the_empty_name(store, monkeypatch):
+    seen = []
+    monkeypatch.setattr(proof_swarm, "reconcile", lambda *args: seen.append(args[2]) or [])
+
+    proof_swarm.run({"AGENTIHOOKS_DEPLOYMENT": "distributed"}, store)
+
+    assert seen == [""]
+
+
+def test_the_controller_runs_a_pass_at_start_and_after_each_tick(store, monkeypatch):
+    from scripts import operator_env
+    from scripts.swarm import commands, controller
+    from scripts.swarm_v2 import control_service
+
+    order = []
+    monkeypatch.setattr(operator_env, "fill", lambda environ: None)
+    monkeypatch.setattr(commands, "hive_id", lambda: "hive-fixture")
+    monkeypatch.setattr(controller, "connect", lambda: store)
+    monkeypatch.setattr(proof_swarm, "run", lambda environ, given: order.append(("proof", given)))
+    monkeypatch.setattr(control_service, "host", lambda *args: order.append(("host", args[1])))
+    monkeypatch.setattr(controller, "tick_once", lambda given, service: order.append(("tick", given)) or {})
+
+    assert controller.main(["run", "--once"]) == 0
+    assert order == [("proof", store), ("host", store), ("tick", store), ("proof", store)]
+
+
+def test_a_refused_pass_stops_the_controller(store, monkeypatch, capsys):
+    from scripts import operator_env
+    from scripts.swarm import controller
+
+    def refuse(environ, given):
+        raise SwarmError("the proof ledger route failed: down")
+
+    monkeypatch.setattr(operator_env, "fill", lambda environ: None)
+    monkeypatch.setattr(controller, "connect", lambda: store)
+    monkeypatch.setattr(proof_swarm, "run", refuse)
+
+    assert controller.main(["run", "--once"]) == 1
+    assert capsys.readouterr().err == "controller: the proof ledger route failed: down\n"

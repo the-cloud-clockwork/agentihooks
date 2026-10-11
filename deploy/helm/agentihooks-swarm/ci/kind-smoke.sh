@@ -142,17 +142,27 @@ done
 refuse_workers "controller.terminalCa needs secretName and key with controller.workers.apiUrl" \
   --set controller.terminalCa=null
 printf 'the chart refused every incomplete or pinned worker setting\n'
-proof="$(helm template "$release" "$chart" "${api[@]}" --set controller.api.proof.agent=engineer@323133-0001 \
-  --set controller.api.proof.task=t1 | grep -A1 'name: AGENTIHOOKS_CONTROL_PROOF' | tail -1)"
-if [[ $proof != *'value: "{\"agent\":\"engineer@323133-0001\",\"task\":\"t1\"}"' ]]; then
-  printf 'the chart did not render the proof setting: %s\n' "$proof" >&2
+proof=(--set controller.api.proof.agent=engineer@323133-0001 --set controller.api.proof.task=t1)
+rendered="$(helm template "$release" "$chart" "${workers[@]}" "${api[@]}" "${proof[@]}")"
+expected='- name: AGENTIHOOKS_CONTROL_PROOF
+              value: "{\"agent\":\"engineer@323133-0001\",\"task\":\"t1\"}"'
+if [[ $rendered != *"$expected"* ]]; then
+  printf 'the chart did not render the proof setting\n' >&2
   exit 1
 fi
-if helm template "$release" "$chart" "${api[@]}" | grep -q AGENTIHOOKS_CONTROL_PROOF; then
+rendered="$(helm template "$release" "$chart" "${workers[@]}" "${api[@]}")"
+if [[ $rendered == *AGENTIHOOKS_CONTROL_PROOF* ]]; then
   printf 'the chart rendered a proof setting nobody set\n' >&2
   exit 1
 fi
-printf 'the chart renders the proof setting only when set: %s\n' "$proof"
+refuse_workers "controller.api.proof needs agent and task" --set controller.api.proof.agent=engineer@323133-0001
+refuse_workers "controller.api.proof needs agent and task" --set controller.api.proof.task=t1
+refusal="$(helm template "$release" "$chart" "${api[@]}" "${proof[@]}" 2>&1 >/dev/null || true)"
+if [[ $refusal != *"controller.api.proof needs controller.workers.apiUrl"* ]]; then
+  printf 'the chart did not refuse a proof without the Kubernetes runtime: %s\n' "$refusal" >&2
+  exit 1
+fi
+printf 'the chart renders the proof setting only when set and refuses an incomplete proof\n'
 docker build -q -t "$image" . >/dev/null &
 build=$!
 trap finish EXIT

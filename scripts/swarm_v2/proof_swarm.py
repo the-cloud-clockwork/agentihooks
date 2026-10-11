@@ -1,12 +1,13 @@
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from types import ModuleType
 
-from scripts.swarm.store import PREFIX, RedisStore, SwarmConfig, SwarmError
+from scripts.swarm import naming
+from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 
 PROOF_ENV = "AGENTIHOOKS_CONTROL_PROOF"
 PROJECTS_ENV = "AGENTIHOOKS_LAUNCH_PROJECTS"
-RECORD = f"{PREFIX}:controller-proof"
+SWARM_ENV = "AGENTIHOOKS_CONTROL_SWARM"
 CONTENT = {
     "title": "Anton launch proof",
     "overview": "One engineer Pod launches on Anton and registers with the controller.",
@@ -17,32 +18,74 @@ CONTENT = {
             "description": "Run agentihooks swarm progress with a short line saying the Pod started, then stop.",
             "phase": "p1",
             "lane": "eng",
+            "profile": "engineer",
         }
     ],
 }
 
 
-def reconcile(environ: Mapping[str, str], store: RedisStore, slug: str, ledger: ModuleType) -> str:
-    recorded = store.redis.get(RECORD)
+def run(environ: Mapping[str, str], store: RedisStore) -> None:
+    from scripts.swarm_ledger import ledger_link, proof_ledger
+
+    if ledger_link.remote(environ):
+        for line in reconcile(environ, store, environ.get(SWARM_ENV, ""), proof_ledger):
+            print(line, flush=True)
+
+
+def reconcile(environ: Mapping[str, str], store: RedisStore, slug: str, ledger: ModuleType) -> list[str]:
+    asked = _asked(environ)
+    stale = [other for other in store.slugs() if naming.PROOF_RE.fullmatch(other) and (asked is None or other != slug)]
+    lines = [_remove(environ, store, other, ledger) for other in stale]
+    if asked is not None and slug not in store.slugs():
+        lines.append(_create(environ, store, slug, ledger, asked))
+    return lines
+
+
+def _asked(environ: Mapping[str, str]) -> dict | None:
     setting = environ.get(PROOF_ENV)
     if not setting:
-        return _remove(environ, store, recorded, ledger) if recorded else ""
-    if recorded == slug:
-        return f"controller: kept proof swarm {slug}"
-    asked = json.loads(setting)
-    named = {**environ, "AGENTIHOOKS_AGENT_NAME": asked["agent"], "AGENTIHOOKS_SWARM_TASK": asked["task"]}
-    created = ledger.create(CONTENT, named)["slug"]
-    if created != slug:
-        ledger.remove(created, environ)
-        raise SwarmError(f"the proof ledger is named {created} but the controller serves {slug}")
-    store.redis.set(RECORD, slug)
-    store.create(SwarmConfig(slug, environ[PROJECTS_ENV].split(",")[0], 1, 0))
+        return None
+    try:
+        asked = json.loads(setting)
+    except json.JSONDecodeError:
+        asked = None
+    if not isinstance(asked, dict) or not asked.get("agent") or not asked.get("task"):
+        raise SwarmError(f"{PROOF_ENV} must be a JSON object naming an agent and a task")
+    return asked
+
+
+def _create(environ: Mapping[str, str], store: RedisStore, slug: str, ledger: ModuleType, asked: dict) -> str:
+    if not naming.PROOF_RE.fullmatch(slug):
+        raise SwarmError(f"the controller serves {slug!r}, which is not a proof swarm name")
+    repo = _repo(environ)
+    if not _call(ledger.live, slug, environ):
+        named = {**environ, "AGENTIHOOKS_AGENT_NAME": asked["agent"], "AGENTIHOOKS_SWARM_TASK": asked["task"]}
+        created = _call(ledger.create, CONTENT, named)["slug"]
+        if created != slug:
+            _call(ledger.remove, created, environ)
+            raise SwarmError(f"the proof ledger is named {created} but the controller serves {slug}")
+    store.create(SwarmConfig(slug, repo, 1, 0))
     return f"controller: created proof swarm {slug} with one engineer task"
 
 
 def _remove(environ: Mapping[str, str], store: RedisStore, slug: str, ledger: ModuleType) -> str:
-    ledger.remove(slug, environ)
-    if slug in store.slugs():
-        store.remove(slug)
-    store.redis.delete(RECORD)
+    if _call(ledger.live, slug, environ):
+        _call(ledger.remove, slug, environ)
+    if store.agents(slug):
+        return f"controller: proof swarm {slug} waits for its agents to end before removal"
+    store.remove(slug)
     return f"controller: removed proof swarm {slug}"
+
+
+def _repo(environ: Mapping[str, str]) -> str:
+    projects = [project.strip() for project in environ.get(PROJECTS_ENV, "").split(",") if project.strip()]
+    if not projects:
+        raise SwarmError(f"a proof swarm needs {PROJECTS_ENV}")
+    return projects[0]
+
+
+def _call(action: Callable, *args: object):
+    try:
+        return action(*args)
+    except (SystemExit, OSError) as error:
+        raise SwarmError(f"the proof ledger route failed: {error}") from None

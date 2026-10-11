@@ -19,6 +19,21 @@ def test_a_created_ledgers_shell_fills_every_placeholder(ledger_dir):
     assert "<title>Upgrade &lt;record&gt;</title>" in page
 
 
+def test_a_task_keeps_its_profile_only_when_the_content_names_one():
+    tasks = [{"title": "a", "phase": "p1", "profile": "engineer"}, {"title": "b", "phase": "p1", "profile": ""}]
+
+    doc = new_ledger.build_doc({**CONTENT, "tasks": tasks})
+
+    assert [task.get("profile") for task in doc["tasks"]] == ["engineer", None]
+    assert [task["id"] for task in doc["tasks"]] == ["t1", "t2"]
+
+
+def test_a_task_profile_must_be_a_string():
+    assert new_ledger.check_types({**CONTENT, "tasks": [{"title": "a", "profile": 1}]}) == [
+        "tasks[1].profile must be a string"
+    ]
+
+
 def test_creating_a_stored_slug_reports_it_exists_and_changes_nothing(ledger_dir, tmp_path, monkeypatch, capsys):
     import json
     import sys

@@ -74,7 +74,7 @@ def check_types(content):
         ("phases", ("title", "description")),
         ("questions", ("text",)),
         ("followups", ("text",)),
-        ("tasks", ("title", "description", "phase", "lane")),
+        ("tasks", ("title", "description", "phase", "lane", "profile")),
     ):
         items = content.get(key, [])
         if not isinstance(items, list) or not all(isinstance(i, dict) for i in items):
@@ -156,8 +156,18 @@ def build_doc(content, size="small"):
         "chat": [],
         "followups": items("followups", "f", ("text",)),
         "tasks": [
-            {**task, "lane": task["lane"] or "eng", "state": "open", "claimed_by": "", "issue_url": "", "pr_url": ""}
-            for task in items("tasks", "t", ("title", "description", "phase", "lane"))
+            {
+                **task,
+                **({"profile": item["profile"]} if item.get("profile") else {}),
+                "lane": task["lane"] or "eng",
+                "state": "open",
+                "claimed_by": "",
+                "issue_url": "",
+                "pr_url": "",
+            }
+            for task, item in zip(
+                items("tasks", "t", ("title", "description", "phase", "lane")), content.get("tasks", [])
+            )
         ],
     }
 

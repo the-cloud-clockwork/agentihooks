@@ -196,6 +196,21 @@ def test_the_remote_client_reports_a_refusal(live, credential):
         proof_ledger.remove(SLUG, client_env(live, credential, "twrong"))
 
 
+def test_the_remote_client_tells_a_live_proof_ledger_from_a_binned_or_missing_one(live, credential):
+    environ = client_env(live, credential, "tlive")
+    slug = proof_ledger.create(CONTENT, environ)["slug"]
+
+    assert proof_ledger.live(slug, environ) is True
+    assert proof_ledger.live("proof-323133-tmissing-1", environ) is False
+    proof_ledger.remove(slug, environ)
+    assert proof_ledger.live(slug, environ) is False
+
+
+def test_the_live_check_reports_a_refusal(live, credential):
+    with pytest.raises(SystemExit, match="^server refused: 403 Missing or wrong ledger credential$"):
+        proof_ledger.live(SLUG, client_env(live, "wrong", "twrong"))
+
+
 def test_the_proof_command_creates_and_removes_through_the_client(live, credential, tmp_path, capsys):
     path = tmp_path / "content.json"
     path.write_text(json.dumps(CONTENT))

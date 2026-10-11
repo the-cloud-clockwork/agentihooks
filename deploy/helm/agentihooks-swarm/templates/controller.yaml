@@ -49,6 +49,14 @@ data:
 {{- if not (and $api.signingKey.keyId $api.signingKey.secretName) }}
 {{- fail "controller.api.signingKey needs keyId and secretName: workers verify launch grants with that key" }}
 {{- end }}
+{{- with $api.proof }}
+{{- if not (and .agent .task) }}
+{{- fail "controller.api.proof needs agent and task: the controller names the proof swarm from them" }}
+{{- end }}
+{{- if not $workers.apiUrl }}
+{{- fail "controller.api.proof needs controller.workers.apiUrl: the proof swarm launches on the Kubernetes runtime" }}
+{{- end }}
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
