@@ -575,3 +575,12 @@ def test_codex_quota_rows_drop_the_default_login_once_token_accounts_exist(monke
     monkeypatch.setattr(agents_quota, "api_rows", lambda source, harness, now: [])
     monkeypatch.setattr(agents_quota, "next_account", lambda *args: "")
     assert [row.account for row in agents_quota._codex(5.0)] == ["alpha"]
+
+
+def test_an_hour_old_codex_reading_shows_its_state_and_cap_until_the_max_age(monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", raising=False)
+    quota = codex_quota.CodexQuota(1000, "pro", seven_day=QuotaWindow(used=10.0, resets_at=10**10))
+    [row] = agents_quota.codex_rows([CodexAccount("default")], {"default": quota}, {}, now=1000 + 3600)
+    assert (row.state, row.cap) == ("NORMAL", 6)
+    [old] = agents_quota.codex_rows([CodexAccount("default")], {"default": quota}, {}, now=1000 + 6 * 3600 + 1)
+    assert (old.state, old.cap) == ("STALE", None)

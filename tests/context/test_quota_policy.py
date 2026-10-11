@@ -525,6 +525,30 @@ def test_subscription_handoff_command_preserves_the_launcher_arguments():
     assert parsed.claude_args == []
 
 
+@pytest.mark.parametrize(
+    ("pid", "session", "blocked"), [(4242, "thread", True), (4243, "thread", False), (4242, "", False)]
+)
+def test_a_process_that_handed_its_resumed_conversation_on_is_blocked(tmp_path, monkeypatch, pid, session, blocked):
+    from hooks.lifecycle import handoff_close
+
+    monkeypatch.setattr(handoff_close, "_home", lambda: tmp_path)
+    monkeypatch.setattr("hooks.context.account_sessions.agent_pid", lambda: pid)
+    monkeypatch.setattr("hooks.context.broadcast.session_status", lambda session_id: {"status": "alive"})
+    handoff_close.handoff_record(4242, "thread").touch()
+    handoff_close.handoff_record(4242, "").touch()
+    expected = "BLOCKED: this session handed its task off to account ? at ?. Stop working here and tell the operator where the work continues."
+    assert qp.handed_off_block(session) == (expected if blocked else None)
+
+
+def test_a_prompt_to_a_handed_off_process_gets_its_block_instead_of_a_new_handoff(monkeypatch):
+    def handoff(session_id):
+        raise AssertionError("a handed off process must not evaluate a new handoff")
+
+    monkeypatch.setattr(qp, "handed_off_block", lambda session_id: f"BLOCKED: {session_id} moved")
+    monkeypatch.setattr(qp, "evaluate", handoff)
+    assert qp.prompt_context("thread", "/repo") == "BLOCKED: thread moved"
+
+
 @pytest.mark.parametrize("harness", [None, "claude", "codex"])
 def test_api_slot_uses_its_harness_settings_namespace(tmp_path, monkeypatch, harness):
     from scripts.routing import claude_api, codex_api, place

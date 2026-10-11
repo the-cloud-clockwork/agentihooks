@@ -132,4 +132,4 @@ def main(
         entries[f"{REFRESH_PREFIX}{slug}"] = tokens["refresh_token"]
     print(term_colors.blue(STEP_STORE))
     stale = _names(CODEX_TOKEN_PREFIX, old) + _names(REFRESH_PREFIX, old)
-    return openbao_step.store(bao, openbao_kv.CODEX_CREDS, entries, stale)
+    return openbao_step.store(bao, openbao_kv.codex_creds(environ), entries, stale)

@@ -439,6 +439,7 @@ from scripts.hive import auth as hive_auth
 from scripts.swarm import commands
 from scripts.swarm.store import AgentRecord, connect
 from scripts.swarm_v2 import control_service
+from scripts.swarm_v2.deployed import DEFAULT_EXPORTER
 from scripts.swarm_v2.filesystem import LAYOUTS
 from scripts.swarm_v2.kubernetes.client import KubeHttp, PodClient
 from scripts.swarm_v2.kubernetes.grants import PodGrants, Supervision
@@ -480,6 +481,21 @@ seed = (
     f"shutil.copytree(Path(profiles.__file__).parent, {str(TEMPLATES)!r}, dirs_exist_ok=True); "
     f"shutil.copytree(Path(profiles.__file__).parent / 'package' / 'roles', {str(TEMPLATES)!r}, dirs_exist_ok=True); "
     f"Path({str(LAYOUTS[1])!r}).write_text(os.environ['LAYOUT'])"
+)
+stub_claude = "\n".join([
+    "#!/usr/bin/env python3",
+    "import json, os, uuid",
+    "from pathlib import Path",
+    "cwd = Path.cwd()",
+    "folder = Path(os.environ['CLAUDE_CONFIG_DIR']) / 'projects' / ''.join(c if c.isalnum() else '-' for c in str(cwd))",
+    "folder.mkdir(parents=True, exist_ok=True)",
+    "session = str(uuid.uuid4())",
+    "line = {'type': 'user', 'sessionId': session, 'cwd': str(cwd), 'message': {'role': 'user', 'content': 'kind proof'}}",
+    "(folder / f'{session}.jsonl').write_text(json.dumps(line) + '\\n')",
+])
+stub = (
+    "import os; from pathlib import Path; "
+    f"path = Path('/opt/agent-bin/claude'); path.write_text({stub_claude!r} + '\\n'); os.chmod(path, 0o755)"
 )
 
 
@@ -524,6 +540,12 @@ def launch(profile, seat):
                     {"name": "node", "mountPath": str(LAYOUTS[1].parent)},
                 ],
             }, {
+                "name": "agent",
+                "image": env["IMAGE"],
+                "imagePullPolicy": "Never",
+                "command": ["python", "-c", stub],
+                "volumeMounts": [{"name": "agent-bin", "mountPath": "/opt/agent-bin"}],
+            }, {
                 "name": BUNDLE_VOLUME,
                 "image": env["BUNDLE_IMAGE"],
                 "imagePullPolicy": "Never",
@@ -535,7 +557,9 @@ def launch(profile, seat):
                 "image": env["IMAGE"],
                 "imagePullPolicy": "Never",
                 "args": ["python", "-m", "scripts.swarm_v2.worker.start", f"{ATTEMPTS}/{agent.execution_id}", f"{LAUNCH_DIR}/{LAUNCH_RECORD}"],
+                "env": [{"name": "PATH", "value": "/opt/agent-bin:/opt/venv/bin:/usr/local/bin:/usr/bin:/bin"}],
                 "volumeMounts": [
+                    {"name": "agent-bin", "mountPath": "/opt/agent-bin", "readOnly": True},
                     {"name": "launch", "mountPath": LAUNCH_DIR, "readOnly": True},
                     {"name": "home", "mountPath": "/home/worker"},
                     {"name": "templates", "mountPath": str(TEMPLATES.parent), "readOnly": True},
@@ -549,10 +573,11 @@ def launch(profile, seat):
                 {"name": "templates", "emptyDir": {}},
                 {"name": "node", "emptyDir": {}},
                 {"name": BUNDLE_VOLUME, "emptyDir": {}},
+                {"name": "agent-bin", "emptyDir": {}},
             ],
         },
     })
-    hand = PodGrants(api, slug, lambda token: probe.grants.verify(slug, token), Supervision("claude", None, env["CONTROL_URL"])).hand(agent, grant)
+    hand = PodGrants(api, slug, lambda token: probe.grants.verify(slug, token), Supervision("claude", DEFAULT_EXPORTER, env["CONTROL_URL"])).hand(agent, grant)
     return {"pod": name, "profile": profile, "handed": hand.handed, "reason": hand.reason}
 
 
@@ -593,6 +618,12 @@ while read -r line; do
     printf 'the launch ConfigMap is not an immutable object owned by its Pod: %s\n' "$owner" >&2
     exit 1
   fi
+  recorded="$(kubectl get configmap "$worker_pod-launch" -o jsonpath='{.data.launch\.json}' | python3 -c 'import json, sys; print(json.dumps(json.load(sys.stdin).get("exporter")))')"
+  if [[ $recorded != '["python", "-m", "scripts.swarm_v2.session_export"]' ]]; then
+    printf 'the %s launch record does not name the image session exporter: %s\n' "$profile" "$recorded" >&2
+    exit 1
+  fi
+  printf 'the %s launch record names the session exporter: %s\n' "$profile" "$recorded"
   phase=""
   for _ in $(seq 120); do
     phase="$(kubectl get pod "$worker_pod" -o jsonpath='{.status.phase}')"
@@ -615,6 +646,11 @@ while read -r line; do
     exit 1
   fi
   printf 'the %s worker Pod rendered its bundle chain and started its supervisor without refusal (exit %s): %s\n' "$profile" "$exit_code" "$supervised"
+  if [[ $exit_code != 0 || $supervised != *'"checkpoint_status": "complete"'* || $supervised != *'"checkpoint_id": "ckp-'* || $supervised != *'"reason": "agent_completed"'* ]]; then
+    printf 'the %s worker supervisor did not report the exported session checkpoint complete (exit %s): %s\n' "$profile" "$exit_code" "$supervised" >&2
+    exit 1
+  fi
+  printf 'the %s worker exporter exported the agent session and its supervisor reported the checkpoint complete\n' "$profile"
   kubectl delete pod "$worker_pod" --wait --timeout 1m
   collected=""
   for _ in $(seq 60); do
