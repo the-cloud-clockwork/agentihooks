@@ -696,7 +696,8 @@ def test_the_worker_image_profiles_are_the_default_and_every_package_role():
 @pytest.mark.parametrize("profile", ["frontend", "engineer", "anton-base"])
 def test_a_tick_spawn_with_a_delivered_bundle_admits_a_bundle_profile(world, profile):
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
-    request = SpawnRequest(config, "eng", "e1", {"id": "task", "seat": FIRST, "profile": profile})
+    name = world.store.next_name(SLUG, "eng")
+    request = SpawnRequest(config, "eng", name, {"id": "task", "seat": FIRST, "profile": profile})
 
     world.launcher.from_tick(request, replace(world.terms, bundled=True), pod_target)
 
