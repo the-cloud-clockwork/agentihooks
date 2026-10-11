@@ -68,7 +68,9 @@ def test_the_storage_check_rejects_memory_growth_in_the_final_sample(
 
 
 def test_the_storage_check_finishes_both_writes_and_removes_its_files(probe, monkeypatch, tmp_path, capsys):
-    monkeypatch.setattr(probe, "Path", lambda value: tmp_path)
+    root = tmp_path / "writes"
+    root.mkdir()
+    monkeypatch.setattr(probe, "Path", lambda value: root)
     monkeypatch.setattr(probe, "MIB", 1024)
     monkeypatch.setattr(probe, "SIZE", 16 * 1024)
     monkeypatch.setattr(probe, "filesystem", lambda path: {"type": "ext4"})
@@ -77,7 +79,7 @@ def test_the_storage_check_finishes_both_writes_and_removes_its_files(probe, mon
     output = capsys.readouterr().out
     assert output.count('"bytes": 16384') == 2
     assert output.endswith("storage proof passed\n")
-    assert list(tmp_path.iterdir()) == []
+    assert list(root.iterdir()) == []
 
 
 def test_the_guest_memory_reading_separates_usage_anonymous_and_shared_pages(probe, monkeypatch):
