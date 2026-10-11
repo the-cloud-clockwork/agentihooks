@@ -28,10 +28,12 @@ def channel():
 def test_two_masters_post_and_read_each_others_posts(channel):
     channel.post(SLUG, "sw-master-1", "I take the deploy phase", 10)
     channel.post(SLUG, "sw-master-2", "agreed", 11)
+    channel.post(SLUG, "sw-master-1", "starting", 12)
 
     expected = [
         Post(1, LEAD, "sw-master-1", "I take the deploy phase", 10),
         Post(2, SECOND, "sw-master-2", "agreed", 11),
+        Post(3, LEAD, "sw-master-1", "starting", 12),
     ]
     assert channel.read(SLUG, "sw-master-1") == expected
     assert channel.read(SLUG, "sw-master-2") == expected
@@ -171,6 +173,7 @@ def test_swarm_masters_channel_command_lets_masters_talk_and_refuses_the_enginee
     for seat, name in ((LEAD, "sw-master-1"), (SECOND, "sw-master-2"), (ENG, "sw-eng-1")):
         store.seats.occupy(seat, name, 1)
     monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setattr(cli.time, "time", lambda: 42.5)
 
     def act(name, *argv):
         monkeypatch.setattr(Who, "from_env", classmethod(lambda cls, environ=None: cls(name=name)))
@@ -179,7 +182,17 @@ def test_swarm_masters_channel_command_lets_masters_talk_and_refuses_the_enginee
 
     code, said = act("sw-master-1", "say", "split the phases")
     assert code == 0
-    assert json.loads(said.out)["seat"] == LEAD
+    assert json.loads(said.out) == {
+        "number": 1,
+        "seat": LEAD,
+        "by": "sw-master-1",
+        "text": "split the phases",
+        "at": 42.5,
+    }
+    with pytest.raises(SystemExit) as bare:
+        act("sw-master-1")
+    assert bare.value.code == 2
+    assert "the following arguments are required: action" in capsys.readouterr().err
     code, read = act("sw-master-2", "read")
     assert (code, [p["text"] for p in json.loads(read.out)]) == (0, ["split the phases"])
     assert json.loads(act("sw-master-2", "read")[1].out) == []
