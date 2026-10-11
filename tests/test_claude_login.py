@@ -262,9 +262,13 @@ def test_login_is_intercepted_and_everything_else_passes_through(monkeypatch):
 def test_agentihooks_claude_checks_for_login_before_routing(monkeypatch):
     from scripts import install
 
-    def intercept(args):
-        raise RuntimeError(f"intercepted {args}")
-
-    monkeypatch.setattr(claude_login, "intercept", intercept)
-    with pytest.raises(RuntimeError, match=r"intercepted \['-p', 'hi'\]"):
-        install.cmd_claude(["-p", "hi"])
+    seen = []
+    monkeypatch.setattr(claude_login, "main", lambda args: seen.append(("login", args)) or 6)
+    monkeypatch.setattr(install, "cmd_claude", lambda args: seen.append(("claude", args)))
+    monkeypatch.setattr(sys, "argv", ["agentihooks", "claude", "login", "team"])
+    with pytest.raises(SystemExit) as raised:
+        install.main()
+    monkeypatch.setattr(sys, "argv", ["agentihooks", "claude", "-p", "hi"])
+    install.main()
+    assert raised.value.code == 6
+    assert seen == [("login", ["team"]), ("claude", ["-p", "hi"])]

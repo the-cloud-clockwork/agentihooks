@@ -5578,9 +5578,6 @@ def cmd_claude(extra_args: list[str]) -> None:
     The api endpoint or the account with a free place under its session band and the
     fewest live sessions wins, split by the api weight; --route forces one account or api.
     """
-    from scripts.claude_login import intercept
-
-    intercept(extra_args)
     import fcntl
 
     from hooks.context.account_sessions import sessions_by_account
@@ -6407,7 +6404,7 @@ def main() -> None:
     # Fast path: "agentihooks claude ..." bypasses argparse entirely
     # so that any claude flags (-r, --resume, -p, etc.) pass through untouched
     if _argv and _argv[0] == "claude":
-        cmd_claude(_argv[1:])
+        __import__("scripts.claude_login").claude_login.intercept(_argv[1:]) or cmd_claude(_argv[1:])
         return
     if _argv and _argv[0] == "codex":
         from scripts.codex_router import main as codex_main
