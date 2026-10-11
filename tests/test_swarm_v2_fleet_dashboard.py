@@ -273,10 +273,11 @@ def test_an_alert_that_drifts_from_its_rule_is_not_actionable(field, value):
     assert fleet.alert_actionability_review(evaluated, FOUND)["unactionable"] == ["impossible_pending:exe-huge-1"]
 
 
-def test_a_rule_without_an_owner_or_action_yields_unactionable_alerts():
+@pytest.mark.parametrize(("owner", "action"), [("", ""), ("master", ""), ("", "drain it")])
+def test_a_rule_without_an_owner_or_action_yields_unactionable_alerts(owner, action):
     found = copy.deepcopy(FOUND)
     for rule in found["alerts"]:
-        rule.update(owner="", action="")
+        rule.update(owner=owner, action=action)
     evaluated = fleet.evaluate(FIRST[2], found, ON)
     assert fleet.alert_actionability_review(evaluated, found)["actionable"] == 0
 
