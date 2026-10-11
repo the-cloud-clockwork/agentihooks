@@ -1,4 +1,4 @@
-"""A Succeeded Pod runs no container again (restartPolicy Never), so its archive watermark is the transcript end."""
+"""Worker Pods run with restartPolicy Never: once a Pod has Succeeded its archive watermark cannot advance."""
 
 from collections import Counter
 from collections.abc import Iterable
