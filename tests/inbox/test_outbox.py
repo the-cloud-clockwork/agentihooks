@@ -438,6 +438,7 @@ def test_a_live_reply_and_a_repeated_close_report_what_happened(outage, monkeypa
     assert run("reply", asked.id, "on it") == 0
     answer = store.inbox("alice")[0].id
     assert json.loads(capsys.readouterr().out) == {"id": answer, "to": "alice", "closed": asked.id}
+    store.read(told.id, "bob")
     assert run("close", told.id, "done", "rebased", "cleanly") == 0
     capsys.readouterr()
     assert run("close", told.id, "done", "rebased", "cleanly") == 1
@@ -469,3 +470,16 @@ def test_connect_reaches_redis_with_the_given_environment(outage):
     environ = {"REDIS_URL": "redis://elsewhere:6379"}
     connect(environ)
     assert outage.environs[-1] is environ
+
+
+def test_a_kept_tail_is_staged_beside_the_outbox_so_its_replace_is_atomic(outage, monkeypatch):
+    outage.down = True
+    assert run("send", "bob", "kept") == 0
+    staged = []
+    mkstemp = outbox.tempfile.mkstemp
+    monkeypatch.setattr(outbox.tempfile, "mkstemp", lambda **kwargs: staged.append(kwargs) or mkstemp(**kwargs))
+    outage.failures = ["before"]
+    outage.down = False
+    assert outbox.flush(InboxStore(outage.redis)).left == 1
+    assert staged == [{"dir": outbox.home()}]
+    assert list(outbox.home().glob("tmp*")) == []

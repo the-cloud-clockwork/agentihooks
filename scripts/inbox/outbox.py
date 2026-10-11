@@ -62,7 +62,7 @@ def bounds(environ=None) -> tuple[int, int]:
 
 
 def checksum(body: dict) -> str:
-    return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+    return hashlib.sha256(json.dumps(body).encode()).hexdigest()
 
 
 def record(op: str, by: str, args: dict, item: str = "") -> dict:
@@ -174,7 +174,7 @@ def _replay(store, report: Report) -> None:
             print(f"agentihooks msg: outbox replay stopped ({type(exc).__name__}: {exc})", file=sys.stderr)
             _keep(lines[index:], report)
             return
-    _rewrite([])
+    _clear()
 
 
 def _keep(lines: list[str], report: Report) -> None:
@@ -188,11 +188,12 @@ def _set_aside(line: str, reason: str) -> None:
         _sync(handle)
 
 
+def _clear() -> None:
+    path().unlink()
+    _sync_home()
+
+
 def _rewrite(lines: list[str]) -> None:
-    if not lines:
-        path().unlink()
-        _sync_home()
-        return
     descriptor, staged = tempfile.mkstemp(dir=home())
     with os.fdopen(descriptor, "w") as handle:
         handle.write("".join(lines))
