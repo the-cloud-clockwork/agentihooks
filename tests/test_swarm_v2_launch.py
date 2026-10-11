@@ -655,6 +655,26 @@ def test_a_tick_spawn_hands_the_worker_the_api_address_of_its_swarm_config(world
     assert (agent.runtime_backend, agent.runtime_target) == (BACKEND, pod_target(request))
 
 
+@pytest.mark.parametrize(
+    ("lane", "lanes", "chosen", "profile"),
+    [
+        ("eng", {}, {}, "engineer"),
+        ("ci", {}, {}, "cicd"),
+        ("eng", {"eng": {"profile": "qa"}}, {}, "qa"),
+        ("eng", {"eng": {"profile": "qa"}}, {"profile": "frontend"}, "frontend"),
+    ],
+)
+def test_a_tick_spawn_admits_its_agent_with_the_seat_profile(world, lane, lanes, chosen, profile):
+    name = world.store.next_name(SLUG, lane)
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API, lanes=lanes)
+    request = SpawnRequest(config, lane, name, {"id": "task", "seat": FIRST, **chosen})
+
+    world.launcher.from_tick(request, world.terms, pod_target)
+
+    [sent] = world.runtime.requests
+    assert world.store.execution(SLUG, sent.task["execution_id"]).profile == profile
+
+
 def test_a_tick_spawn_without_a_swarm_api_address_is_refused_before_admission(world):
     request = SpawnRequest(SwarmConfig(SLUG, "agentihooks", 2, 0), "eng", "e1", {"id": "task", "seat": FIRST})
     world.launcher.router = RuntimeRouter([world.runtime], placement=Placement(BACKEND))
