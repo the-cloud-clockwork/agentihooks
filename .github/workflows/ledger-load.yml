@@ -1,8 +1,6 @@
 name: Ledger server load
 
 on:
-  push:
-    branches: ["diffcheck/**"]
   workflow_call:
   workflow_dispatch:
 

@@ -7,7 +7,7 @@ on:
         type: string
         required: true
   push:
-    branches-ignore: [dev, main, "gh-readonly-queue/**", "wip/**"]
+    branches-ignore: [dev, main, "gh-readonly-queue/**", "wip/**", "diffcheck/**"]
 
 concurrency:
   group: mutation-preflight-${{ github.event_name == 'push' && github.ref || github.run_id }}

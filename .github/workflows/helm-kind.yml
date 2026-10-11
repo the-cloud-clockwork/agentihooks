@@ -1,8 +1,6 @@
 name: Helm chart in kind
 
 on:
-  push:
-    branches: ["diffcheck/**"]
   workflow_call:
   workflow_dispatch:
 

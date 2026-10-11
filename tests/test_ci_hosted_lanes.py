@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.test_ci_proof_branch_pushes import _runs_on
+
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -40,7 +42,7 @@ EXCLUDED = {
 }
 CALLERS = ("test.yml", "proofs.yml")
 REQUIRED = ("pull_request", "merge_group", "pull_request_target")
-REFS = ("refs/heads/dev", "refs/heads/diffcheck/plant", "refs/heads/task-branch")
+REFS = ("refs/heads/dev", "refs/heads/main", "refs/heads/diffcheck/plant", "refs/heads/task-branch")
 
 
 class _Context(dict):
@@ -101,11 +103,9 @@ def _triggered(events):
         if event == "workflow_call":
             continue
         spec = spec if event == "push" and spec else {}
-        refs = [f"refs/heads/{b.replace('**', 'plant')}" for b in spec.get("branches", [])] or [
-            ref for ref in REFS if ref.removeprefix("refs/heads/") not in spec.get("branches-ignore", [])
-        ]
-        for ref in refs:
-            yield event, ref
+        for ref in REFS:
+            if _runs_on(spec, ref.removeprefix("refs/heads/")):
+                yield event, ref
 
 
 def _contexts(where):
