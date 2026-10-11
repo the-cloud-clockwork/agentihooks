@@ -104,7 +104,7 @@ def test_the_header_shows_the_check_beside_the_refresh_button():
     page = page_source()
     assert '<span class="sync-state end" id="stats-state"></span><button class="mini-sync" id="stats-sync"' in page
     render = function_source("renderSync")
-    assert "statsCheck(meta.events || [], statsSent, meta.stats_refresh)" in render
+    assert "statsCheck(meta.events || [], statsSent, meta.stats_refresh, meta.time_left)" in render
     assert 'const checked = check ? `Stats check ${statsCheckText(check)}` : "";' in render
     assert '$("stats-sync").ariaLabel = [checked, ' in render
     assert '$("stats-state").textContent = check ? statsCheckText(check) : "";' in render
@@ -131,3 +131,41 @@ def test_the_stats_card_has_no_stats_check_row():
     )
     subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
     assert "showReply" not in page_source()
+
+
+def test_a_tick_refresh_newer_than_the_stats_check_sets_the_refresh_age():
+    run(
+        EVENTS
+        + 'const refresh = {id: "s1", state: "refreshed", at: 100, completed_at: 120, calculation: {gap: "old"}};\n'
+        + 'const ticked = {at: 900, calculation: {gap: ""}};\n'
+        + "assert.deepEqual(statsCheck([sent], null, refresh, ticked),"
+        + " {...refresh, completed_at: 900, calculation: ticked.calculation});\n"
+        + "assert.deepEqual(statsCheck([sent], null, refresh, {at: 110}), refresh);\n"
+        + 'const failed = {...refresh, state: "failed"};\n'
+        + "assert.deepEqual(statsCheck([sent], null, failed, ticked), failed);\n"
+        + "assert.deepEqual(statsCheck([], null, undefined, ticked),"
+        + ' {state: "refreshed", at: 900, completed_at: 900, calculation: ticked.calculation});\n'
+        + 'assert.deepEqual(statsCheck([sent], null, undefined, ticked), {state: "pending", at: 100});\n'
+    )
+
+
+def test_the_stats_card_counts_unfrozen_and_frozen_work_apart():
+    script = (
+        "const nodes = {}; const $ = id => nodes[id] ||= {replaceChildren: (...rows) => {nodes[id].rows = rows;}};\n"
+        "const h = (tag, attrs, ...children) => [attrs.text, ...children].filter(Boolean).join(' ');\n"
+        "const when = () => 'now'; const inScope = list => list; const activeAgents = () => 0;\n"
+        "const swarm = null; const inboxPending = () => 0;\n"
+        "let meta = {created_at: 1, events: [],"
+        " time_left: {at: 5, calculation: {remaining: 2, frozen: 3, frozen_work: 90}}};\n"
+        "let doc = {phases: [], followups: [], questions: [], tasks: [], time_left_minutes: 30};\n"
+        + function_source("span")
+        + function_source("timeLeftInputs")
+        + function_source("renderStats")
+        + "\nconst assert = require('node:assert/strict');\n"
+        "renderStats();\n"
+        "assert.deepEqual(nodes.stats.rows.slice(2, 5), ['Time left 30m', 'Unfrozen 2', 'Frozen 3 · 1h 30m of work']);\n"
+        "meta = {created_at: 1, events: []};\n"
+        "renderStats();\n"
+        "assert.deepEqual(nodes.stats.rows.slice(3, 5), ['Unfrozen —', 'Frozen —']);\n"
+    )
+    subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)

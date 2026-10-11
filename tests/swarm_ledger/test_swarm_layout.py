@@ -393,7 +393,7 @@ def test_agents_table_lists_the_master_first_with_overlays_and_stats_carry_the_t
     pairs = page.tab.eval_on_selector_all(
         "#stats .stat", "rows => rows.map(r => [r.children[0].innerText, r.children[1].innerText])"
     )
-    figures = [[label.lower(), value] for label, value in pairs[4:12]]
+    figures = [[label.lower(), value] for label, value in pairs[6:14]]
     assert figures == [
         ["tasks", "0 / 1"],
         ["open", "9"],
