@@ -14,6 +14,7 @@ from scripts.claude_quota_balancer import (
     MASTERS_ONLY,
     NOT_APPLICABLE,
     OPEN,
+    QuotaWindow,
     RowMarks,
     _cap_text,
     _duration,
@@ -88,7 +89,10 @@ def _codex_state(account: "codex_router.CodexAccount", quota: "CodexQuota | None
         return "SIGNED_OUT"
     if quota is None:
         return "UNKNOWN"
-    return quota.state_at(now) if codex_router.usable(quota, now) else STALE
+    if not codex_router.usable(quota, now):
+        return STALE
+    current = quota if session_bands.fresh(quota.observed_at, now) else replace(quota, five_hour=QuotaWindow())
+    return current.state_at(now)
 
 
 def _codex_source(quota: "CodexQuota | None", now: float) -> str:

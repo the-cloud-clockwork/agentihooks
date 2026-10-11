@@ -9,6 +9,7 @@ from pathlib import Path
 START = "# ===AGENTIHOOKS-AICODING-TOKENS==="
 END = "# ===AGENTIHOOKS-AICODING-TOKENS-END==="
 REFRESH_FLAG = "AGENTIHOOKS_AICODE_TOKEN_REFRESH"
+TOKEN_EXPORTS = ("AH_CC_TOKEN_", "AH_CX_TOKEN_")
 RESERVED = ("api", "default", "help", "status")
 SLUG_RULE = f"slug must be letters, digits, '_' or '-', not start with '_' and not be {', '.join(RESERVED)}"
 _SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_]*")
@@ -66,7 +67,7 @@ def has_block(text: str) -> bool:
     return bool(_blocks(text.splitlines()))
 
 
-def exports(text: str) -> dict[str, str]:
+def token_exports(text: str) -> dict[str, str]:
     lines = text.splitlines(keepends=True)
     found = {}
     for start, end in _blocks(lines):
@@ -76,9 +77,9 @@ def exports(text: str) -> dict[str, str]:
             except ValueError:
                 continue
             if len(words) == 2 and words[0] == "export":
-                name, assigned, value = words[1].partition("=")
-                if assigned:
-                    found[name] = value
+                name, _, value = words[1].partition("=")
+                if value and name.startswith(TOKEN_EXPORTS):
+                    found.setdefault(name, value)
     return found
 
 

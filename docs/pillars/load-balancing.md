@@ -426,10 +426,12 @@ routing pool and the `agentihooks quota` rows.
   each Codex account judged on its week alone with the top band (6 sessions, none
   under 5% of the week). A reading older than fifteen minutes is refreshed by one
   tiny `codex exec` on that account before placing, at most once per fifteen
-  minutes per account. Until then the cap keeps reading an older one while its
-  7-day window has not reset and it is younger than
-  `AGENTIHOOKS_CODEX_READING_MAX_AGE_H` hours (default 6), so an idle account
-  keeps its seats; `agentihooks quota` shows `STALE` only past that age.
+  minutes per account. Until then the cap keeps reading an older one while it
+  is younger than `AGENTIHOOKS_CODEX_READING_MAX_AGE_H` hours (default 6), so an
+  idle account keeps its seats; a 7-day window that has reset in the meantime
+  reads 100% left. `agentihooks quota` shows `STALE` only past that age, and
+  judges a reading older than fifteen minutes on its week alone, without its old
+  five-hour window.
   `--route` forces one. `init-agent --agent
   codex` and the swarm tick launch through it, and the route report names the
   account for the swarm panel.
@@ -458,8 +460,11 @@ routing pool and the `agentihooks quota` rows.
 - The swarm tick, the controller and `init-agent` never source the shell rc, so
   they read the `AH_CC_TOKEN_*` and `AH_CX_TOKEN_*` export lines of the managed
   token block that `codex login` and `claude login` write, and nothing else in
-  that file. A name already in the environment wins, and a token whose value is
-  already present under another name is skipped, so each account counts once.
+  that file. The block value wins for a name the environment already holds (it
+  is the refreshed one); a name only in the environment stays. Every account
+  list (`balance`, `quota`, the tick, routing) counts a token value once: when
+  several names hold the same token, the block's name is kept, else the first
+  name in sort order.
 
 ### Logging in an account
 

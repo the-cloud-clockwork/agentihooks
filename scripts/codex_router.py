@@ -25,7 +25,7 @@ from hooks.context.account_sessions import (
     INTERNAL_RUN,
     codex_sessions_by_account,
 )
-from scripts import codex_quota, session_bands
+from scripts import codex_quota, operator_env, session_bands
 from scripts.codex_quota import CodexQuota
 from scripts.routing import codex_api, envs, place
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, Slot
@@ -144,13 +144,14 @@ def bearer_overrides() -> list[str]:
 
 
 def token_accounts(environ: Mapping[str, str]) -> list[CodexAccount]:
-    return [
-        CodexAccount(name.removeprefix(CODEX_TOKEN_PREFIX), name)
-        for name in sorted(environ)
+    names = [
+        name
+        for name in environ
         if name.startswith(CODEX_TOKEN_PREFIX)
         and name.removeprefix(CODEX_TOKEN_PREFIX) not in ("", API_ACCOUNT)
         and environ[name]
     ]
+    return [CodexAccount(name.removeprefix(CODEX_TOKEN_PREFIX), name) for name in operator_env.distinct(environ, names)]
 
 
 def _without_tokens(environ: Mapping[str, str]) -> dict[str, str]:
@@ -206,16 +207,15 @@ def _reading_max_age(environ: Mapping[str, str]) -> float:
         return READING_MAX_AGE_H * HOUR_S
 
 
-def usable(quota: CodexQuota, now: float) -> bool:
+def usable(quota: CodexQuota, now: float, environ: Mapping[str, str] | None = None) -> bool:
     if session_bands.fresh(quota.observed_at, now):
         return True
-    resets = quota.seven_day.resets_at
-    return resets is not None and now < resets and now - quota.observed_at <= _reading_max_age(os.environ)
+    return now - quota.observed_at <= _reading_max_age(os.environ if environ is None else environ)
 
 
-def account_cap(quota: CodexQuota | None, now: float) -> int | None:
+def account_cap(quota: CodexQuota | None, now: float, environ: Mapping[str, str] | None = None) -> int | None:
     """Live sessions under the session bands: the week alone sets it; None without a usable reading."""
-    if quota is None or not usable(quota, now):
+    if quota is None or not usable(quota, now, environ):
         return None
     if quota.reached:
         return 0
