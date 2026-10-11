@@ -1,0 +1,47 @@
+{
+  "package": "SV2-UX-01",
+  "package_complete": false,
+  "dependencies": {
+    "SV2-HDR-05": "merged into dev (#2558)",
+    "SV2-OBS-01": "merged into dev (#2584), the ledger task dependency",
+    "SV2-OBS-05": "not started; the operator decides whether it blocks G10"
+  },
+  "integration_gate": "G10",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2583",
+  "tested_commit": "faab46eca",
+  "status": "fixture-qualified: a local and a remote agent read from one swarm view with backend, generation, pool class, observed state, wait kind and last seen time; a terminal view checked before the heartbeat is marked behind and never changes the card; reloading rebuilds the same cards from the store with no write; no Anton rollout of this commit has been observed",
+  "evidence_class": "mocked: a fake Redis swarm store holds one published status for a mixed local and Kubernetes swarm and terminal views published after the heartbeat but checked before it; the swarm view the ledger server returns is read at a fixed clock; no ledger server, browser, worker Pod or cluster runs in these cases",
+  "interfaces": [
+    "scripts.swarm.execution_card.card(agent, terminal) projects one published agent row and its terminal view into a card: agent, backend (runtime_backend, local when absent), generation, pool (the approved resource profile the Kubernetes adapter records on the agent profile field; empty for local), observed (the classification state, or the heartbeat value when unclassified, or unobserved), wait (scheduling for a pending state or pod_scheduling failure, quota for waiting_quota or provider_wait, input for an agent at an input prompt), seen_at (latest non terminal source time in ms) and terminal_behind (a terminal view checked strictly before the latest heartbeat)",
+    "scripts.swarm.execution_card.cards(agents, terminals) builds every card and counts ledger_state_projection_errors: a nameless row is skipped and counted; an unreadable row is counted and shown as observed unreadable with its backend, or unknown when it names none",
+    "scripts.swarm.commands.view(store, slug), which the ledger server returns from /api/swarm/<slug>, carries executions and ledger_state_projection_errors computed at read time from the stored status and terminal views; it writes nothing",
+    "The ledger Agents table adds an execution column before the terminal column whenever an agent runs off the local backend or a terminal view exists: the wait kind or observed state with its seen age on one line, and backend, generation and pool on a muted second line; the terminal cell appends behind heartbeat; a local only swarm keeps its nine column table, and the lane, state and master presentation is unchanged"
+  ],
+  "authority": "The card is a display projection: it grants nothing, and no control reads it. Execution identity and generation come from the swarm store, and the observation from the controller's classification; the page holds no client mutation for it.",
+  "authoritative_objects": "The execution records, the observation classifications and the terminals hash stay authoritative. The cards are computed per read and stored nowhere; rollback deletes nothing.",
+  "rollback": "Hide the new fields behind compatible response handling: without executions in the view, the page falls back to the existing nine or ten column table and every card keeps working. Rehearsed by the layout test of a local only swarm and the HDR-05 terminal test, which render without execution cards.",
+  "states": {
+    "observed": "Cases A, B and C run the swarm view against a fake Redis store (evidence/SV2-UX-01/a-result.json, b-result.json, c-result.json); the page was checked by eye at 1920 by 1080 on a scratch ledger server",
+    "accepted": "Standards and Spec readers closed after round two; rulings are on issue 2583",
+    "committed": "Case records, result and manifest committed on the task branch; the pull request names the merged commit",
+    "externally_verified": "Not on Anton: no rollout of this commit has been observed"
+  },
+  "measurements": {
+    "ledger_state_projection_errors": {
+      "a": 1,
+      "b": 1,
+      "c": 1,
+      "note": "one per fixture run: the fixture's deliberately unreadable observation row"
+    }
+  },
+  "limitations": [
+    "Pool class shares the agent profile field for Kubernetes agents; a dedicated pool field would separate it from the role profile column",
+    "The seen age is judged at the browser clock like every other age on the page",
+    "ledger_state_projection_errors is an API field; no page section displays it"
+  ],
+  "cases": {
+    "a": "evidence/SV2-UX-01/a-result.json",
+    "b": "evidence/SV2-UX-01/b-result.json",
+    "c": "evidence/SV2-UX-01/c-result.json"
+  }
+}
