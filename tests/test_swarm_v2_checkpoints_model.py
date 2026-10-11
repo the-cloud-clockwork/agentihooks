@@ -219,6 +219,12 @@ def test_every_consistent_capture_qualifies_native_resume(native, method):
     assert validator.classify(doc) == verdict(model.COMPLETE, model.NATIVE, model.NATIVE)
 
 
+def test_a_watermark_at_the_first_record_is_complete(native):
+    validator = model.Validator(store(Path("/nonexistent-never-written")))
+    doc = mutate(native["manifest"], _set({"sequence": 0, "byte_offset": 0}, "transcript_durable_cursor"))
+    assert validator.classify(doc) == verdict(model.COMPLETE, model.NATIVE, model.NATIVE)
+
+
 def test_a_context_manifest_needs_no_native_material_or_consistent_capture(context):
     validator = model.Validator(store(Path("/nonexistent-never-written")))
     assert context["manifest"]["quiescence_method"] == "partial_capture"
