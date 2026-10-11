@@ -9,9 +9,8 @@ import new_ledger
 import pytest
 
 from scripts.hive import auth as hive_auth
-from scripts.swarm_ledger import ledger, ledger_server
+from scripts.swarm_ledger import ledger_server
 from scripts.swarm_ledger.repository import repository
-from scripts.swarm_v2 import ledger_writer
 from scripts.swarm_v2.api.tasks import RevisionConflict, spec_revision
 from scripts.swarm_v2.auth_context import GrantRefused
 from scripts.swarm_v2.hosted_ledger import HostedLedger
@@ -30,9 +29,10 @@ from tests.test_swarm_v2_control_service import (
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
-UNPINNED = ("AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM", "AGENTIHOOKS_LEDGER_AGENT_TOKEN")
+PINNED = {"AGENTIHOOKS_SWARM": "rig-grade-swarm", "AGENTIHOOKS_AGENT_NAME": "engineer@323133-0400"}
 MASTER = "master@323133-0001"
 PROGRESS = "Reading the task through the hosted ledger"
+REFUSED_CONNECTION = "the hosted ledger is unavailable: <urlopen error [Errno 111] Connection refused>"
 
 
 @pytest.fixture
@@ -54,11 +54,8 @@ def hosted(store, ledger_dir):
         patch.object(ledger_server, "relay_to_inbox", return_value=None),
         patch.object(ledger_server, "doctor_phrase", return_value=None),
         patch.object(ledger_server, "ALLOWED_HOSTS", {host}),
-        patch.object(ledger, "BASE", ""),
-        patch.dict(os.environ, remote),
+        patch.dict(os.environ, {**remote, **PINNED}),
     ):
-        for name in UNPINNED:
-            os.environ.pop(name, None)
         thread.start()
         try:
             yield SimpleNamespace(remote=remote, folder=ledger_dir)
@@ -80,6 +77,14 @@ def _hold(holder, tmp_path):
     document["tasks"] = [{**LEDGER_TASK, "claimed_by": holder}]
     document, meta, _ = core.load_state(tmp_path / "seed.json", document)
     repository.create_document(SLUG, document, meta, replace=True)
+
+
+def _hosted_ledger(hosted):
+    return HostedLedger(hosted.remote["LEDGER_URL"], hosted.remote[_cs().CREDENTIAL_ENV])
+
+
+def _closed():
+    return f"http://127.0.0.1:{_free_port()}"
 
 
 def _held_task():
@@ -131,14 +136,15 @@ def test_the_deployed_controller_serves_a_task_the_hosted_server_holds(deployed)
     assert deployed.service.tasks_api.writes_enabled is True
 
 
-def test_the_deployed_controller_keeps_no_ledger_folder_and_takes_no_writer_lease(deployed, hosted):
+def test_the_deployed_controller_keeps_no_ledger_folder_and_takes_no_writer_lease(deployed):
     _read(deployed)
 
     assert (deployed.service.writer, deployed.service.ledger_folder) == (None, None)
+    assert (deployed.service.hosted_ledger.base, deployed.service.hosted_ledger.credential) == (
+        os.environ["LEDGER_URL"],
+        os.environ[_cs().CREDENTIAL_ENV],
+    )
     assert not deployed.folder.exists()
-    probe = ledger_writer.WriterLease(hosted.folder).acquire(ledger_writer.owner())
-    assert probe.held is True
-    probe.release()
 
 
 def test_a_worker_task_update_lands_on_the_hosted_server(deployed):
@@ -240,7 +246,7 @@ def test_a_write_the_hosted_server_rejects_is_reported_rejected(hosted, tmp_path
     _hold("engineer@323133-0300", tmp_path)
     gate = Passing()
 
-    state, rejected = HostedLedger().apply_ops(SLUG, ops=[_update({"depends_on": ["t99"]})], gate=gate)
+    state, rejected = _hosted_ledger(hosted).apply_ops(SLUG, ops=[_update({"depends_on": ["t99"]})], gate=gate)
 
     assert (gate.sent, rejected) == (False, ["w-direct"])
     assert state["_meta"]["rev"] == repository.get_document(SLUG)["_meta"]["rev"]
@@ -255,9 +261,9 @@ def test_a_task_changed_between_read_and_write_is_a_revision_conflict(hosted, tm
         repository.apply_ops(SLUG, ops=[{**changed, "fields": {"title": "Changed meanwhile"}}])
 
     with pytest.raises(RevisionConflict) as raised:
-        HostedLedger().apply_ops(SLUG, ops=[_update({"state": "pr"})], gate=Passing(race))
+        _hosted_ledger(hosted).apply_ops(SLUG, ops=[_update({"state": "pr"})], gate=Passing(race))
 
-    current = HostedLedger().read(SLUG, "tasks/t1")["tasks"][0]
+    current = _hosted_ledger(hosted).read(SLUG, "tasks/t1")["tasks"][0]
     assert current["title"] == "Changed meanwhile"
     assert _held_task()["state"] == "claimed"
     assert raised.value.detail() == {
@@ -272,55 +278,85 @@ def test_a_task_changed_between_read_and_write_is_a_revision_conflict(hosted, tm
 
 def test_a_refused_controller_credential_on_write_is_a_dependency_failure(hosted, tmp_path):
     _hold("engineer@323133-0300", tmp_path)
+    hosted_ledger = _hosted_ledger(hosted)
 
     def forget():
-        os.environ[_cs().CREDENTIAL_ENV] = "wrong"
+        hosted_ledger.credential = "wrong"
 
     with pytest.raises(GrantRefused) as raised:
-        HostedLedger().apply_ops(SLUG, ops=[_update({"state": "pr"})], gate=Passing(forget))
+        hosted_ledger.apply_ops(SLUG, ops=[_update({"state": "pr"})], gate=Passing(forget))
 
     assert raised.value.error_class == "dependency_unavailable"
-    assert str(raised.value).startswith("the hosted ledger is unavailable: ")
+    assert str(raised.value) == "the hosted ledger is unavailable: HTTP Error 403: Forbidden"
     assert _held_task()["state"] == "claimed"
 
 
 def test_an_unreachable_hosted_server_on_write_is_a_dependency_failure(hosted, tmp_path):
     _hold("engineer@323133-0300", tmp_path)
+    hosted_ledger = _hosted_ledger(hosted)
 
     def vanish():
-        os.environ["LEDGER_URL"] = f"http://127.0.0.1:{_free_port()}"
+        hosted_ledger.base = _closed()
 
     with pytest.raises(GrantRefused) as raised:
-        HostedLedger().apply_ops(SLUG, ops=[_update({"state": "pr"})], gate=Passing(vanish))
+        hosted_ledger.apply_ops(SLUG, ops=[_update({"state": "pr"})], gate=Passing(vanish))
 
     assert raised.value.error_class == "dependency_unavailable"
+    assert str(raised.value) == REFUSED_CONNECTION
     assert _held_task()["state"] == "claimed"
 
 
 def test_an_unreachable_hosted_server_on_read_is_a_dependency_failure(hosted):
-    os.environ["LEDGER_URL"] = f"http://127.0.0.1:{_free_port()}"
-
     with pytest.raises(GrantRefused) as raised:
-        HostedLedger().read(SLUG, "tasks/t1")
+        HostedLedger(_closed(), hosted.remote[_cs().CREDENTIAL_ENV]).read(SLUG, "tasks/t1")
 
     assert raised.value.error_class == "dependency_unavailable"
-    assert str(raised.value).startswith("the hosted ledger is unavailable: ")
+    assert str(raised.value) == REFUSED_CONNECTION
 
 
 def test_a_task_the_hosted_server_lacks_reads_as_no_task(hosted, tmp_path):
     _hold("engineer@323133-0300", tmp_path)
 
-    assert HostedLedger().read(SLUG, "tasks/t9") == {"tasks": []}
+    assert _hosted_ledger(hosted).read(SLUG, "tasks/t9") == {"tasks": []}
 
 
 def test_a_refused_controller_credential_on_read_is_a_dependency_failure(hosted, tmp_path):
     _hold("engineer@323133-0300", tmp_path)
-    os.environ[_cs().CREDENTIAL_ENV] = "wrong"
 
     with pytest.raises(GrantRefused) as raised:
-        HostedLedger().read(SLUG, "tasks/t1")
+        HostedLedger(hosted.remote["LEDGER_URL"], "wrong").read(SLUG, "tasks/t1")
 
     assert raised.value.error_class == "dependency_unavailable"
+    assert str(raised.value) == (
+        "the hosted ledger is unavailable: unauthenticated: the ledger server refused the credential"
+    )
+
+
+def test_a_write_the_hosted_server_finds_malformed_is_an_invalid_request(hosted, tmp_path):
+    _hold("engineer@323133-0300", tmp_path)
+    malformed = {**_update({"state": "pr"}), "bogus": "field"}
+
+    with pytest.raises(GrantRefused) as raised:
+        _hosted_ledger(hosted).apply_ops(SLUG, ops=[malformed], gate=Passing())
+
+    assert raised.value.error_class == "invalid_request"
+    assert str(raised.value) == (
+        "the ledger refused this write: Operation task_update does not match its schema at field bogus"
+    )
+    assert _held_task()["state"] == "claimed"
+
+
+def test_a_gate_that_sends_nothing_leaves_no_revision_and_no_rejections(hosted, tmp_path):
+    _hold("engineer@323133-0300", tmp_path)
+
+    class Replayed:
+        def apply(self, doc, op, ctx, apply_op):
+            return True
+
+    assert _hosted_ledger(hosted).apply_ops(SLUG, ops=[_update({"state": "pr"})], gate=Replayed()) == (
+        {"_meta": {"rev": None}},
+        [],
+    )
 
 
 def test_a_local_controller_still_mounts_its_own_ledger_folder(store, tmp_path):
