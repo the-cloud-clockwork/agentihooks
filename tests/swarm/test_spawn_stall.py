@@ -141,6 +141,7 @@ def test_normal_findings_pass_sends_no_duplicate_alarm(stalled):
     other = {
         "id": "idle/worker",
         "kind": "idle",
+        "subject": "worker",
         "summary": "A worker is idle",
         "verdict": None,
     }
