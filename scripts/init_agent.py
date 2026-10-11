@@ -754,7 +754,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         report.append(f"route_error={route['error']}")
     pane = next((line.split("=", 1)[1] for line in report if line.startswith("pane_id=")), "")
     herdr_panes.mark(pane, active_env, route_status=route.get("status", "pending"))
-    if pane and route.get("status") in ("routed", "bare", "direct"):
+    if pane and route.get("status") in STARTED_ROUTES:
         renamed = herdr_host.rename_agent(pane, name, active_env)
         report.append(f"agent_name={herdr_host.agent_name(name) if renamed else 'unset'}")
         if channel:
