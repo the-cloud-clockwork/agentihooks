@@ -122,6 +122,7 @@ def test_a_scale_up_after_the_launch_request_is_not_its_cause():
     ]
     [entry] = stages.attribute(read(events))
     assert entry["node_kind"] == "warm" and entry["stages"]["instance"] is None
+    assert entry["from_zero"] is False
 
 
 def test_a_node_requested_before_the_pod_waited_is_a_warm_node():
@@ -479,6 +480,7 @@ def test_cli_reduce_report_and_claim_round_trip(tmp_path, capsys):
     assert bench.main(["reduce", "--capture", str(tmp_path / "capture"), "--output", str(tmp_path / "read.json")]) == 0
     reduced = json.loads((tmp_path / "read.json").read_text())
     assert sorted(reduced["inputs"]) == sorted(bench.LISTINGS)
+    assert reduced["read_at"] == "2026-10-11T14:57:00Z"
     assert all(len(digest) == 64 for digest in reduced["inputs"].values())
     args = [
         "report",
@@ -597,3 +599,123 @@ def test_a_failed_pull_without_a_recorded_attempt_or_success_has_no_retry_time()
         ev("p/z", "Pulled", 35, 'Successfully pulled image "x" in 10s'),
     ]
     assert stages.attribute(read(early))[0]["stages"]["pull_retry"] == 0
+
+
+def test_instant_counts_milliseconds_from_the_epoch():
+    assert stages.instant("1970-01-01T00:00:01Z") == 1000
+
+
+def test_a_scale_up_at_the_wait_and_a_request_at_the_scale_up_still_cause_the_node():
+    events = [
+        ev("default/a", "FailedScheduling", 0),
+        ev("default/a", "TriggeredScaleUp", 0, "pod triggered scale-up: [{anton-k3s-swarm 0->1 (max: 4)}]"),
+        ev("default/a", "Scheduled", 70, f"Successfully assigned default/a to {NODE}"),
+        ev("default/a", "Started", 72),
+    ]
+    [entry] = stages.attribute(read(events, requested=0))
+    assert (entry["node_kind"], entry["from_zero"]) == ("cold", True)
+    assert (entry["stages"]["trigger"], entry["stages"]["instance"]) == (0, 21000)
+
+
+def test_a_pull_of_one_millisecond_is_uncached():
+    [entry] = stages.attribute(
+        read(warm_events(message='Successfully pulled image "x" in 1ms (1ms including waiting)'))
+    )
+    assert entry["image_cache"] == "uncached"
+
+
+def test_a_failed_start_carries_no_transient_failure():
+    events = [
+        ev("anton-prod/web", "Scheduled", 1, f"Successfully assigned anton-prod/web to {OLD}"),
+        ev("anton-prod/web", "Pulling", 1.5),
+        ev("anton-prod/web", "Failed", 2, 'Failed to pull image "x": connection refused'),
+    ]
+    [entry] = stages.attribute(read(events))
+    assert (entry["outcome"], entry["transient"]) == ("registry_unavailable", "")
+
+
+def test_failure_and_backoff_events_without_a_message_are_not_pull_failures():
+    events = [{"pod": "p/x", "reason": "Failed", "at": T0}, {"pod": "p/x", "reason": "BackOff", "at": T0}]
+    assert stages.failure(events) == ("", None)
+
+
+def test_empty_and_unsupported_claims_name_no_refused_samples():
+    for samples, label, text in (
+        ([], stages.COLD_LABEL, "no samples to claim"),
+        ([{}], "fast", "unsupported claim label: fast"),
+    ):
+        with pytest.raises(ClaimRefused) as refused:
+            stages.claim(samples, label)
+        assert (str(refused.value), refused.value.refused) == (text, {})
+
+
+def test_reduce_reads_listings_with_absent_fields():
+    pod = {"kind": "Pod", "namespace": "d", "name": "z"}
+    ready = {"type": "Ready", "status": "True", "lastTransitionTime": "2026-10-11T14:36:20Z"}
+    raw = {
+        "read_at": "2026-10-11T14:57:00Z",
+        "events": {
+            "items": [
+                {"reason": "Scheduled", "firstTimestamp": "2026-10-11T14:36:08Z"},
+                {"reason": "Failed", "eventTime": "2026-10-11T14:36:09Z", "involvedObject": pod},
+            ]
+        },
+        "nodes": {"items": [{"metadata": {"name": "n"}, "spec": {}, "status": {}}]},
+        "pods": {
+            "items": [
+                {"metadata": {"namespace": "d", "name": "bare", "creationTimestamp": "2026-10-11T14:36:00Z"}},
+                {
+                    "metadata": {"namespace": "d", "name": "ready", "creationTimestamp": "2026-10-11T14:36:00Z"},
+                    "status": {"conditions": [ready]},
+                },
+            ]
+        },
+        "activities": {
+            "Activities": [
+                {"AutoScalingGroupName": "g", "StartTime": "2026-10-11T14:00:00Z", "StatusCode": "Successful"}
+            ]
+        },
+        "instances": {"Reservations": []},
+    }
+    reduced = stages.reduce(raw)
+    created = stages.instant("2026-10-11T14:36:00Z")
+    assert reduced["events"] == [
+        {"pod": "d/z", "reason": "Failed", "at": stages.instant("2026-10-11T14:36:09Z"), "message": ""}
+    ]
+    assert reduced["nodes"] == {"n": {"instance": "", "ready": None}}
+    assert reduced["pods"] == {
+        "d/bare": {"created": created, "ready": None},
+        "d/ready": {"created": created, "ready": stages.instant("2026-10-11T14:36:20Z")},
+    }
+    assert reduced["launches"] == {}
+
+
+def test_the_cli_is_named_and_needs_a_command():
+    assert bench._parser().prog == "startup_bench"
+    with pytest.raises(SystemExit) as exited:
+        bench.main([])
+    assert exited.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["reduce", "--output", "o.json"],
+        ["reduce", "--capture", "c"],
+        ["report", "--source", "s", "--output", "o.json"],
+        ["report", "--read", "r.json", "--output", "o.json"],
+        ["report", "--read", "r.json", "--source", "s"],
+        ["claim", "--scenario", "cold-node/uncached-image"],
+        ["claim", "--read", "r.json"],
+    ],
+)
+def test_every_required_option_is_required(argv):
+    with pytest.raises(SystemExit) as exited:
+        bench.main(argv)
+    assert exited.value.code == 2
+
+
+def test_written_records_are_sorted_indented_json_in_new_folders(tmp_path):
+    path = tmp_path / "a" / "b" / "record.json"
+    bench._write(path, {"b": 1, "a": [1]})
+    assert path.read_text() == '{\n  "a": [\n    1\n  ],\n  "b": 1\n}\n'

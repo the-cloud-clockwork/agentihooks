@@ -51,7 +51,7 @@ ASSIGNED = re.compile(r" to (?P<node>\S+)$")
 
 
 def instant(text: str) -> int:
-    return round(datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp() * 1000)
+    return round(datetime.fromisoformat(text).timestamp() * 1000)
 
 
 def pull_ms(message: str) -> int | None:
