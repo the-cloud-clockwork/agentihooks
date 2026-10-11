@@ -10,7 +10,7 @@ TOLERANCE = 64 * MIB
 def filesystem(path: Path) -> dict:
     mounts = []
     for line in Path("/proc/self/mountinfo").read_text().splitlines():
-        left, right = line.split(" - ", 1)
+        left, right = line.split(" - ")
         fields, source = left.split(), right.split()
         mount = Path(fields[4])
         if path == mount or mount in path.parents:
@@ -24,7 +24,7 @@ def filesystem(path: Path) -> dict:
 
 
 def memory() -> dict:
-    info = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines())
+    info = dict(line.split(":") for line in Path("/proc/meminfo").read_text().splitlines())
     values = {key: int(value.split()[0]) * 1024 for key, value in info.items()}
     return {
         "used": values["MemTotal"] - values["MemAvailable"],
@@ -36,9 +36,9 @@ def memory() -> dict:
 def main() -> None:
     chunk = bytes(MIB)
     baseline = memory()
-    print(json.dumps({"baseline": baseline}), flush=True)
+    print(json.dumps({"baseline": baseline}))
     for folder in (Path("/home/worker"), Path("/tmp")):  # NOSONAR: this workload runs on a worker Pod private root disk
-        print(json.dumps({"path": str(folder), "filesystem": filesystem(folder)}), flush=True)
+        print(json.dumps({"path": str(folder), "filesystem": filesystem(folder)}))
         file = folder / f"storage-proof-{os.getpid()}"
         try:
             with file.open("xb", buffering=0) as stream:
@@ -59,12 +59,12 @@ def main() -> None:
                     "after": after,
                     "peak": peak,
                 }
-                print(json.dumps(result), flush=True)
+                print(json.dumps(result))
                 if result["bytes"] != SIZE or any(peak[key] - baseline[key] > TOLERANCE for key in baseline):
                     raise RuntimeError("large file write increased guest memory beyond 64 MiB")
         finally:
             file.unlink(missing_ok=True)
-    print("storage proof passed", flush=True)
+    print("storage proof passed")
 
 
 if __name__ == "__main__":
