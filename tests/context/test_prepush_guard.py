@@ -1,6 +1,7 @@
 """Tests for hooks.context.prepush_guard."""
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -273,14 +274,11 @@ def test_swarm_push_in_pr_state_uses_its_recorded_branch(repo, swarm_worktree, t
 
 
 @pytest.mark.parametrize("directory", [None, "", "~/development-ledger"])
-def test_default_swarm_ledger_location_resolves_the_task_worktree(
-    repo, swarm_worktree, tmp_path, monkeypatch, directory
-):
+def test_default_swarm_ledger_location_resolves_the_task_worktree(repo, swarm_worktree, monkeypatch, directory):
     from tests.swarm_ledger import legacy_page
 
     task = {"id": "push", "state": "claimed", "claimed_by": "engineer@test", "branch": "task-branch"}
-    legacy_page.store(tmp_path / "development-ledger", "rig", {"tasks": [task]})
-    monkeypatch.setenv("HOME", str(tmp_path))
+    legacy_page.store(Path.home() / "development-ledger", "rig", {"tasks": [task]})
     if directory is None:
         monkeypatch.delenv("LEDGER_DIR")
     else:
