@@ -830,6 +830,15 @@ def test_the_agent_reads_the_bundle_read_only_and_the_kubelet_pulls_it_with_the_
     assert spec.BUNDLE_DIR == "/var/run/swarm/bundle"
 
 
+def test_each_container_owns_its_hardened_security_context(tmp_path):
+    pod = bundled_pod(tmp_path)
+
+    for container in (*pod["spec"]["initContainers"], *pod["spec"]["containers"]):
+        container["securityContext"]["capabilities"]["drop"].append("NONE")
+
+    assert spec.HARDENED["capabilities"] == {"drop": ["ALL"]}
+
+
 def test_a_policy_without_a_bundle_renders_no_init_container_and_no_pull_access():
     pod = render()[1].pod
 
