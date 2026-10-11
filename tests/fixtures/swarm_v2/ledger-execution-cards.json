@@ -1,0 +1,134 @@
+{
+  "now_ms": 1791300000000,
+  "status": {
+    "agents": [
+      {
+        "name": "master-1",
+        "lane": "master",
+        "status": "working",
+        "runtime_backend": "local",
+        "generation": 1,
+        "profile": "master",
+        "observation": {
+          "state": "unclassified",
+          "observed_at": 1791299990.0,
+          "sources": {"heartbeat": {"reading": "ok", "observed_at": 1791299990.0, "value": "working"}}
+        }
+      },
+      {
+        "name": "eng-1",
+        "lane": "eng",
+        "task": "t1",
+        "status": "waiting",
+        "input_prompt": "Allow external CLAUDE.md file imports?",
+        "runtime_backend": "local",
+        "generation": 3,
+        "profile": "engineer",
+        "observation": {
+          "state": "unclassified",
+          "observed_at": 1791299970.0,
+          "sources": {"heartbeat": {"reading": "ok", "observed_at": 1791299970.0, "value": "waiting"}}
+        }
+      },
+      {
+        "name": "eng-2",
+        "lane": "eng",
+        "task": "t2",
+        "status": "working",
+        "runtime_backend": "kubernetes",
+        "generation": 2,
+        "profile": "standard",
+        "observation": {
+          "state": "working",
+          "terminal": "reachable",
+          "failure": "none",
+          "confidence": "confirmed",
+          "observed_at": 1791299880.0,
+          "sources": {
+            "heartbeat": {"reading": "ok", "observed_at": 1791299880.0, "value": "working"},
+            "kubernetes": {"reading": "ok", "observed_at": 1791299820.0, "value": "Running"},
+            "terminal": {"reading": "ok", "observed_at": 1791299700.0, "value": "reachable"}
+          }
+        }
+      },
+      {
+        "name": "eng-3",
+        "lane": "eng",
+        "task": "t3",
+        "status": "working",
+        "runtime_backend": "kubernetes",
+        "generation": 1,
+        "profile": "standard",
+        "observation": {
+          "state": "waiting_quota",
+          "terminal": "unobserved",
+          "failure": "provider_wait",
+          "confidence": "partial",
+          "observed_at": 1791299940.0,
+          "sources": {
+            "heartbeat": {"reading": "ok", "observed_at": 1791299940.0, "value": "working"},
+            "provider": {"reading": "ok", "observed_at": 1791299930.0, "value": "quota_wait"}
+          }
+        }
+      },
+      {
+        "name": "ci-1",
+        "lane": "ci",
+        "task": "t4",
+        "status": "working",
+        "runtime_backend": "kubernetes",
+        "generation": 1,
+        "profile": "memory",
+        "observation": {
+          "state": "pending",
+          "terminal": "unobserved",
+          "failure": "pod_scheduling",
+          "confidence": "partial",
+          "observed_at": 1791299760.0,
+          "sources": {"kubernetes": {"reading": "ok", "observed_at": 1791299760.0, "value": "Pending"}}
+        }
+      },
+      {
+        "name": "eng-4",
+        "lane": "eng",
+        "task": "t5",
+        "status": "working",
+        "runtime_backend": "kubernetes",
+        "generation": 1,
+        "profile": "standard",
+        "observation": {"state": "working", "sources": {"heartbeat": "not a reading"}}
+      }
+    ],
+    "tasks": {"open": 0, "claimed": 5, "blocked": 0, "pr": 0, "done": 0}
+  },
+  "terminal_views_published_after_the_heartbeat": [
+    {
+      "agent": "eng-2",
+      "machine": "anton-worker-a",
+      "pane_id": "p1",
+      "state": "live",
+      "checked_at": 1791299700000,
+      "live_at": 1791299700000,
+      "reason": "",
+      "fresh_ms": 30000
+    },
+    {
+      "agent": "eng-3",
+      "machine": "anton-worker-b",
+      "pane_id": "p2",
+      "state": "live",
+      "checked_at": 1791299990000,
+      "live_at": 1791299990000,
+      "reason": "",
+      "fresh_ms": 30000
+    }
+  ],
+  "expected": {
+    "master-1": {"backend": "local", "generation": 1, "pool": "", "observed": "working", "wait": "", "seen_at": 1791299990000, "terminal_behind": false},
+    "eng-1": {"backend": "local", "generation": 3, "pool": "", "observed": "waiting", "wait": "input", "seen_at": 1791299970000, "terminal_behind": false},
+    "eng-2": {"backend": "kubernetes", "generation": 2, "pool": "standard", "observed": "working", "wait": "", "seen_at": 1791299880000, "terminal_behind": true},
+    "eng-3": {"backend": "kubernetes", "generation": 1, "pool": "standard", "observed": "waiting_quota", "wait": "quota", "seen_at": 1791299940000, "terminal_behind": false},
+    "ci-1": {"backend": "kubernetes", "generation": 1, "pool": "memory", "observed": "pending", "wait": "scheduling", "seen_at": 1791299760000, "terminal_behind": false},
+    "eng-4": {"backend": "kubernetes", "generation": 0, "pool": "", "observed": "unreadable", "wait": "", "seen_at": 0, "terminal_behind": false}
+  }
+}

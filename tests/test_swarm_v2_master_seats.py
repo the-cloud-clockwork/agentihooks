@@ -81,7 +81,7 @@ def test_only_a_master_record_in_the_lead_seat_or_with_no_seat_is_the_lead(lane,
 
 def test_a_seat_two_master_prompt_names_its_seat_the_count_the_lead_and_what_it_owns():
     task = {"seat": SECOND, "masters": 3, "owns": ["hives/anton-1", "p2"]}
-    (line_text,) = masters.seat_lines(SLUG, task)
+    line_text, *_ = masters.seat_lines(SLUG, task)
     assert line_text == (
         f"You hold master seat {SECOND}, one of 3 masters of swarm {SLUG}. The lead seat {LEAD} answers the operator "
         "and his chat; you act on the inbox items for the phases and hives you own: hives/anton-1, p2."
@@ -605,7 +605,7 @@ def test_a_hive_nobody_owns_has_no_owner():
 
 
 def test_a_seat_task_without_owned_items_says_none_yet():
-    (line_text,) = masters.seat_lines(SLUG, {"seat": SECOND, "masters": 2})
+    line_text, *_ = masters.seat_lines(SLUG, {"seat": SECOND, "masters": 2})
     assert line_text.endswith("you own: none yet.")
 
 

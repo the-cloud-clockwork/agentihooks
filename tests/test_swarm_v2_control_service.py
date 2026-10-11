@@ -538,3 +538,170 @@ def test_the_controller_loop_reports_a_hosting_refusal(monkeypatch, capsys):
     assert loop.main(["run", "--once"]) == 1
 
     assert capsys.readouterr().err == "controller: the control API needs AGENTIHOOKS_CONTROL_SWARM\n"
+
+
+LEDGER_TASK = {
+    "id": "t1",
+    "title": "Read through the controller",
+    "description": "The worker reads its task from the controller ledger",
+    "phase": "p1",
+    "lane": "eng",
+    "state": "claimed",
+    "done": False,
+}
+
+
+def _seed_ledger(folder):
+    from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
+    from tests.swarm_ledger.test_tasks import core, new_ledger
+
+    folder.mkdir(parents=True)
+    content = {
+        "title": "Controller ledger fixture",
+        "overview": "Tasks the controller serves to its workers",
+        "sources": [],
+        "phases": [{"title": "Ledger", "description": "Tasks read through the controller"}],
+        "tasks": [],
+    }
+    document = new_ledger.build_doc(content)
+    document["tasks"] = [dict(LEDGER_TASK)]
+    document, meta, _ = core.load_state(folder / "seed.json", document)
+    SQLiteLedgerRepository(folder / DATABASE, core).create_document(SLUG, document, meta)
+
+
+def _ledger_hosted(tmp_path, store, port):
+    folder = tmp_path / "ledger"
+    _seed_ledger(folder)
+    return {**_hosted_environ(tmp_path, store, port), "LEDGER_DIR": str(folder)}, folder
+
+
+def _get(url, token):
+    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        return error.code, json.loads(error.read())
+
+
+def _registered_read(service, store, port):
+    agent, token = _admitted(service, store)
+    base = f"http://127.0.0.1:{port}"
+    (registered, _), _ = _register_and_beat(base, service, agent, token)
+    return registered, token, _get(f"{base}/v2/tasks/t1", token)
+
+
+def test_the_controller_start_serves_ledger_tasks_beside_the_worker_api(tmp_path):
+    from scripts.swarm_v2.api.tasks import spec_revision
+
+    store = _store()
+    port = _free_port()
+    environ, _ = _ledger_hosted(tmp_path, store, port)
+    service = _cs().host(environ, store, "hive-fixture")
+    try:
+        registered, token, (status, body) = _registered_read(service, store, port)
+        controls = _get(f"http://127.0.0.1:{port}/v2/swarm", token)
+    finally:
+        service.stop()
+
+    assert (registered, status, body["task_id"]) == (200, 200, "t1")
+    assert {name: body["task"][name] for name in ("id", "title", "description", "phase", "lane", "state")} == {
+        name: LEDGER_TASK[name] for name in ("id", "title", "description", "phase", "lane", "state")
+    }
+    assert body["revision"] == spec_revision(body["task"])
+    assert (controls[0], controls[1]["error_class"], controls[1]["message"]) == (
+        403,
+        "forbidden_scope",
+        "swarm controls need the operator",
+    )
+    assert service.tasks_api.writes_enabled is True
+
+
+def test_the_ledger_writer_lease_waits_until_the_controller_holds_its_lease(tmp_path):
+    from scripts.swarm_v2 import ledger_writer
+
+    store = _store()
+    environ, folder = _ledger_hosted(tmp_path, store, _free_port())
+    rival = lease.acquire(store, SLUG, "hive-rival")
+    service = _cs().host(environ, store, "hive-fixture")
+    try:
+        probe = ledger_writer.WriterLease(folder).acquire(ledger_writer.owner())
+        probe.release()
+        assert (service.tasks_api, service.writer) == (None, None)
+        lease.release(store, SLUG, rival)
+
+        assert service.tick() is True
+        assert (service.writer.held, service.tasks_api.writes_enabled) == (True, True)
+    finally:
+        service.stop()
+
+
+def test_the_controller_holds_the_ledger_writer_lease_until_it_stops(tmp_path):
+    from scripts.swarm_v2 import ledger_writer
+
+    store = _store()
+    environ, folder = _ledger_hosted(tmp_path, store, _free_port())
+    service = _cs().host(environ, store, "hive-fixture")
+    try:
+        with pytest.raises(ledger_writer.WriterConflict):
+            ledger_writer.WriterLease(folder).acquire(ledger_writer.owner())
+    finally:
+        service.stop()
+
+    after = ledger_writer.WriterLease(folder).acquire(ledger_writer.owner())
+    assert after.held is True
+    after.release()
+
+
+def test_a_ledger_folder_another_writer_holds_serves_tasks_read_only(tmp_path, monkeypatch):
+    from scripts.swarm_v2 import ledger_writer
+
+    printed = []
+    monkeypatch.setattr(_cs(), "print", lambda *args, **kwargs: printed.append((args[0], kwargs)), raising=False)
+    store = _store()
+    port = _free_port()
+    environ, folder = _ledger_hosted(tmp_path, store, port)
+    rival = ledger_writer.WriterLease(folder).acquire(ledger_writer.owner())
+    try:
+        service = _cs().host(environ, store, "hive-fixture")
+        try:
+            _, token, (status, read) = _registered_read(service, store, port)
+            write = {
+                "operation_id": "op-1",
+                "task_generation": 1,
+                "expected_revision": read["revision"],
+                "fields": {"state": "pr"},
+            }
+            refused_status, refused = _post(f"http://127.0.0.1:{port}/v2/tasks/t1", token, write, "PATCH")
+        finally:
+            service.stop()
+        with pytest.raises(ledger_writer.WriterConflict):
+            ledger_writer.WriterLease(folder).acquire(ledger_writer.owner())
+    finally:
+        rival.release()
+
+    assert status == 200
+    assert (refused_status, refused["error_class"], refused["read_only"]) == (409, "revision_conflict", True)
+    assert service.tasks_api.writes_enabled is False
+    assert printed[0] == (
+        f"controller: serves the tasks API read only for {SLUG}: ledger folder {folder} already has an active "
+        f"writer, pid {ledger_writer.owner()['pid']} on {ledger_writer.owner()['host']}; a second writer is refused",
+        {"flush": True},
+    )
+
+
+def test_a_service_without_a_ledger_folder_serves_only_the_worker_api(tmp_path):
+    store = _store()
+    port = _free_port()
+    service = _cs().ControlService(store, SLUG, _cs().launch_key(_environ(tmp_path)), lambda: True)
+    service.listen = ("127.0.0.1", port)
+    try:
+        assert service.start() is True
+        agent, token = _admitted(service, store)
+        (registered, _), _ = _register_and_beat(f"http://127.0.0.1:{port}", service, agent, token)
+        status, refused = _get(f"http://127.0.0.1:{port}/v2/tasks/t1", token)
+    finally:
+        service.stop()
+
+    assert (service.ledger_folder, service.tasks_api, service.writer) == (None, None, None)
+    assert (registered, status, refused["message"]) == (200, 404, "no such execution endpoint")
