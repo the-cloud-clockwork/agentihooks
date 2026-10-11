@@ -304,6 +304,7 @@ def _task(execution="1"):
         "controller_epoch": 4,
         "execution_id": "exe-" + execution * 32,
         "generation": 1,
+        "account": ACCOUNT,
         "endpoints": {"api_url": API_URL},
     }
 

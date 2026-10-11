@@ -327,8 +327,8 @@ REFUSALS = [
         "account",
     ),
     (
-        "provider account without an at sign",
-        lambda d: d.update(provider_account="claude-fixture"),
+        "provider account that is neither an email nor a secret key",
+        lambda d: d.update(provider_account="claude_fixture"),
         "launch provider_account is not a valid value",
         "identity",
     ),
