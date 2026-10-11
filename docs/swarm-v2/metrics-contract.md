@@ -2,7 +2,7 @@
 
 The fleet dashboard is a projection of recorded observations. It holds no authority, starts no
 work and never acts on an alert. Panels, labels, limits and alert rules live in
-`docs/swarm-v2/fleet-dashboard.json`; `scripts.swarm_v2.fleet_dashboard` reads them.
+`observability/swarm-v2.json`; `scripts.swarm_v2.fleet_dashboard` reads them.
 
 ## Sample
 
@@ -72,7 +72,34 @@ window is taken as one the existing nodes cannot place.
   fails after those retries, `deliver` raises after the sink ran and the next delivery sends
   the same `incident_id` again, so a sink deduplicates by it.
 
+## Entrypoint and recorded canary
+
+`python -m scripts.swarm_v2.fleet_view --grant <grant.json>` with either `--samples <trace.json>`
+(a JSON list of samples) or `--canary <SV2-CAP-02 result> --overlay <readings.json>` prints, per
+trace, the dashboard of its last sample, the alerts held at every sample and the actionability
+review. A grant without a `brains` list exits 2 with the refusal on stderr.
+
+`scripts.swarm_v2.fleet_canary` turns each live run of the recorded antoncore SV2-CAP-02 scaling
+canary into one sample at the canary Pod's creation and one per recorded stage: the
+`anton-k3s-swarm` group with its configured maximum, the node once it is ready, and the Pod
+pending until it starts. The overlay joins the quota, archive, checkpoint and brain readings.
+The record carries no resource request or node template, and an unknown shape never proves a
+request impossible, so only the at maximum test applies to recorded runs.
+
+## Compatibility
+
+- The archive panel reads the SV2-OBS-04 `Health.diagnose` archive entry unchanged.
+- The dashboard, alerts and incidents add the keys `fleet-incidents` and `fleet-incidents-seq`
+  under each swarm and change no existing key, command or API.
+- The local swarm path never reads the definition or the module; with the module absent or alerts
+  off, local execution behaves as before.
+
 ## Rollback
 
 `AGENTIHOOKS_FLEET_ALERTS=off` stops evaluation, recording and delivery of alerts. The
 dashboard, the recorded incidents and worker execution are untouched.
+
+Data safety: the execution registry, quota, archive, checkpoint and brain records are
+authoritative and only read. The incident hash and evaluated sequence are operational records
+owned by this package; a rollback leaves them in place for audit, and removing them never
+touches an authoritative object.

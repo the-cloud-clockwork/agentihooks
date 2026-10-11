@@ -6,16 +6,18 @@ import fakeredis
 import redis
 
 from scripts.swarm.store import RedisStore
+from scripts.swarm_v2 import fleet_canary
 from scripts.swarm_v2 import fleet_dashboard as fleet
 
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2"
-DEFINITION = Path(__file__).parents[1] / "docs" / "swarm-v2" / "fleet-dashboard.json"
+DEFINITION = Path(__file__).parents[1] / "observability" / "swarm-v2.json"
 INPUTS = ("fleet-dashboard.json", "fleet-dashboard-second.json")
+RECORDED = ("scaling-canary-sv2-cap-02.json", "fleet-canary-overlay.json")
 EVIDENCE_CLASS = (
-    "mocked: two independent synthetic fixture traces modelled on the scaling canary and shaped like controller, "
-    "pool, quota, archive, checkpoint and brain readings, a fakeredis incident store behind a server that can be "
-    "disconnected and an in process notification sink that can fail; no recorded live canary, Kubernetes API server, "
-    "node, deployed brain or alert backend was used"
+    "mixed: the two live runs of the recorded SV2-CAP-02 scaling canary on the Anton anton-k3s-swarm group, joined "
+    "with synthetic quota wait, stale checkpoint and denied cross brain query readings, plus two independent "
+    "synthetic traces, a fakeredis incident store behind a server that can be disconnected and an in process "
+    "notification sink that can fail; no live controller, deployed brain or alert backend was used"
 )
 ON: dict[str, str] = {}
 OFF = {fleet.ALERTS_ENV: "off"}
@@ -29,7 +31,11 @@ def fixture() -> dict:
 FX = fixture()
 FOUND = fleet.definition(DEFINITION)
 FOUND_PANELS = [panel["id"] for panel in FOUND["panels"]]
-TITLES = sorted({d["session_title"] for t in FX["traces"].values() for s in t for d in s["brain"]["denials"]})
+OVERLAY_DENIALS = json.loads((FIXTURES / RECORDED[1]).read_text())["brain"]["denials"]
+TITLES = sorted(
+    {d["session_title"] for t in FX["traces"].values() for s in t for d in s["brain"]["denials"]}
+    | {d["session_title"] for d in OVERLAY_DENIALS}
+)
 
 
 class World:
@@ -102,8 +108,33 @@ def _run_trace(name: str) -> dict:
     }
 
 
+def _run_recorded() -> dict:
+    record, overlay = (json.loads((FIXTURES / name).read_text()) for name in RECORDED)
+    at_maximum = json.loads(json.dumps(record))
+    for run in at_maximum["runs"]:
+        run["classification"]["group"]["max"] = 0
+    observed = {}
+    for name, trace in fleet_canary.record_samples(record, overlay).items():
+        world = World(name)
+        fired, _ = first_fired(world, trace)
+        panels = fleet.dashboard(trace[-1], fleet.viewer(FX["grants"]["swarm"]), FOUND)["panels"]
+        capacity = panels["capacity"][0]
+        control, _ = first_fired(World(name), fleet_canary.record_samples(at_maximum, overlay)[name])
+        observed[name] = {
+            "pending_ms": trace[-1]["at_ms"] - trace[0]["at_ms"],
+            "first_fired_seq": fired,
+            "at_maximum_first_fired_seq": control,
+            "capacity": [capacity["pool"], *[capacity["series"][key]["value"] for key in capacity["series"]]],
+            "checkpoint_stale": panels["checkpoint_age"]["stale"]["value"],
+            "quota_waiting": panels["quota_wait"]["waiting_accounts"]["value"],
+            "leaked": leaked(world.snapshot(), world.notices, panels),
+        }
+    return observed
+
+
 def _positive() -> tuple[dict, bool]:
-    observed = {"first": _run_trace("first"), "second": _run_trace("second")}
+    observed = {"first": _run_trace("first"), "second": _run_trace("second"), "recorded": _run_recorded()}
+    recorded = observed["recorded"].values()
     first, second = observed["first"], observed["second"]
     checks = [
         first["first_fired_seq"]
@@ -125,6 +156,16 @@ def _positive() -> tuple[dict, bool]:
             for o in observed.values()
         ),
         first["leaked"] == [] and second["leaked"] == [],
+        len(recorded) == 2,
+        all(run["pending_ms"] > 120000 for run in recorded),
+        all(list(run["first_fired_seq"]) == ["cross_scope_denial:deny-anton-1"] for run in recorded),
+        all(
+            run["at_maximum_first_fired_seq"].get(f"impossible_pending:{name}") == 5
+            for name, run in observed["recorded"].items()
+        ),
+        all(run["capacity"] == ["anton-k3s-swarm", 4, 1, 1, 0] for run in recorded),
+        all(run["checkpoint_stale"] == 1 and run["quota_waiting"] == 1 for run in recorded),
+        all(run["leaked"] == [] for run in recorded),
     ]
     return observed, all(checks)
 
@@ -234,6 +275,8 @@ def run_case(case: str) -> dict:
         "case": f"T-SV2-OBS-05-{case.upper()}",
         "state": "passed" if passed else "failed",
         "evidence_class": EVIDENCE_CLASS,
-        "input_sha256": {name: hashlib.sha256((FIXTURES / name).read_bytes()).hexdigest() for name in INPUTS},
+        "input_sha256": {
+            name: hashlib.sha256((FIXTURES / name).read_bytes()).hexdigest() for name in INPUTS + RECORDED
+        },
         "observed": observed,
     }

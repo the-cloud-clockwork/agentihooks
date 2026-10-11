@@ -13,7 +13,7 @@ import redis
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2 import telemetry
 
-DEFINITION = Path(__file__).resolve().parents[2] / "docs" / "swarm-v2" / "fleet-dashboard.json"
+DEFINITION = Path(__file__).resolve().parents[2] / "observability" / "swarm-v2.json"
 ALERTS_ENV = "AGENTIHOOKS_FLEET_ALERTS"
 INCIDENTS = "fleet-incidents"
 EVALUATED = "fleet-incidents-seq"
@@ -147,13 +147,16 @@ def dashboard(sample: dict, seen: Viewer, found: dict) -> dict:
     }
 
 
-def _fits(requested: dict, template: dict) -> bool:
+def _fits(requested: dict | None, template: dict | None) -> bool:
+    """An unknown request or template cannot prove a request impossible."""
+    if requested is None or template is None:
+        return True
     return requested["cpu_millis"] <= template["cpu_millis"] and requested["memory_mib"] <= template["memory_mib"]
 
 
 def _impossible(attempt: dict, pools: dict[str, dict]) -> str:
     permitted = [pools[name] for name in attempt["permitted_pools"] if name in pools]
-    fitting = [pool for pool in permitted if _fits(attempt["requested"], pool["template"])]
+    fitting = [pool for pool in permitted if _fits(attempt.get("requested"), pool.get("template"))]
     if not fitting:
         return "no_permitted_template_fits"
     if all(pool["nodes"] >= pool["configured_maximum"] for pool in fitting):
