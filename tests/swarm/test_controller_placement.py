@@ -112,6 +112,41 @@ def test_distributed_controller_classifies_the_profile_before_it_places_the_task
     assert store.redis.hkeys(store.key("sw", "profile-decisions")) == ["page"]
 
 
+def test_a_task_classified_front_end_runs_on_the_workstation_and_an_engineer_task_on_anton(store, monkeypatch):
+    from scripts.swarm import profile_choice
+    from scripts.swarm.tick import Placed
+    from scripts.swarm_v2.kubernetes.watch import BACKEND
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+    from scripts.swarm_v2.runtime.routed import routed
+    from tests.swarm.test_tick import FakeLedger, FakeRuntime
+    from tests.test_swarm_v2_placement import Remote
+
+    profiles = {"page": "frontend", "build": "engineer"}
+
+    def classify(slug, task, environ):
+        profile = profiles[task["id"]]
+        return profile_choice.ProfileDecision(profile, "classifier", profile, "m1", 0.9, True)
+
+    launched = []
+
+    def launch(request):
+        launched.append((request.task["id"], request.task["profile_decision"]["profile"]))
+        return Outcome("spawn", Status.OK, BACKEND, Placed("", "claude", placement=BACKEND))
+
+    monkeypatch.setattr(profile_choice, "classify", classify)
+    herdr = FakeRuntime()
+    ledger = FakeLedger([{"id": "page"}, {"id": "build"}])
+    tick(store, ledger, routed({}, herdr, kubernetes=Remote(), launch=launch))
+    assert launched == [("build", "engineer")]
+    assert herdr.spawned == []
+    assert states(ledger) == {"page": "open", "build": "claimed"}
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    workstation = FakeRuntime()
+    tick(store, ledger, workstation)
+    assert [(lane, task) for lane, _, task in workstation.spawned] == [("eng", "page")]
+    assert states(ledger) == {"page": "claimed", "build": "claimed"}
+
+
 def test_seat_placement_refuses_the_dispatcher_and_passes_a_plain_runtime(store):
     from scripts.swarm import controller, dispatch_seat, lease, seat_spawn
     from tests.swarm.test_tick import FakeRuntime

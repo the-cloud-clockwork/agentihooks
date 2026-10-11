@@ -812,7 +812,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
 
 
 def _spawn_order(slug, config, store, agents, rows, doc, runtime):
-    from scripts.swarm import capacity, seat_spawn
+    from scripts.swarm import capacity
 
     decision = capacity.read(store, slug)
     caps = decision.get("effective", {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan})
@@ -822,9 +822,7 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
         ready = _launch_order(slug, store, _claimable(slug, store, rows, doc, lane))
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]
-        ready = [profile_first.decided(slug, config, store, runtime, lane, task) for task in ready]
-        ready = [task for task in ready if not seat_spawn.placed_elsewhere(runtime, lane, task)]
-        ready = ready[: max(cap - busy, 0)]
+        ready = profile_first.placeable(slug, config, store, runtime, lane, ready, max(cap - busy, 0))
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
     return [(lane, task) for _, lane, task in sorted(queue, key=lambda entry: entry[0])]
 
