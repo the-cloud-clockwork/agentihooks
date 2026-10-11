@@ -140,3 +140,44 @@ def test_a_definite_resume_blocker_uses_the_handoff_but_an_ambiguous_launch_does
         assert len(runtime.spawned) == launches
     assert store.claimant("sw", old.task) == old.name
     assert ledger.rows[old.task]["claimed_by"] == old.name
+
+
+def test_work_after_outage_closure_excludes_an_agent_that_only_becomes_idle_later(store):
+    from scripts.swarm import idle
+
+    ledger, runtime, agents = three_owners(store)
+    healthy = agents[0]
+    runtime.statuses[healthy.name] = "working"
+    outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
+    tick("sw", store, ledger, runtime, 8 * MINUTE)
+    outage.observe("sw", "provider", [], 9 * MINUTE)
+    tick("sw", store, ledger, runtime, 9 * MINUTE)
+    runtime.statuses[healthy.name] = "idle"
+    idle.beat(store.redis, "sw", healthy.name, "idle", 10 * MINUTE)
+    tick("sw", store, ledger, runtime, 10 * MINUTE)
+    assert healthy.name not in runtime.nudged
+    assert next(agent for agent in store.agents("sw") if agent.name == healthy.name).idle_ticks == 1
+
+
+def test_overlapping_outages_hold_recovery_and_persistent_errors_retry_three_times_then_count_idle(store):
+    from scripts.swarm.store import RedisStore
+
+    ledger, runtime, agents = three_owners(store)
+    stuck = agents[0]
+    runtime.errors[stuck.name] = "provider unavailable"
+    runtime.nudge_refusals[stuck.name] = "provider unavailable"
+    outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
+    outage.observe("sw", "redis", ["Redis unavailable"], 8 * MINUTE)
+    tick("sw", store, ledger, runtime, 8 * MINUTE)
+    outage.observe("sw", "provider", [], 9 * MINUTE)
+    tick("sw", store, ledger, runtime, 9 * MINUTE)
+    assert not runtime.nudged
+    outage.observe("sw", "redis", [], 10 * MINUTE)
+    for at in (10, 11, 12):
+        store = RedisStore(store.redis)
+        tick("sw", store, ledger, runtime, at * MINUTE)
+    assert runtime.nudged.count(stuck.name) == 3
+    tick("sw", store, ledger, runtime, 13 * MINUTE)
+    assert runtime.nudged.count(stuck.name) == 3
+    assert next(agent for agent in store.agents("sw") if agent.name == stuck.name).idle_ticks == 1
+    assert store.claimant("sw", stuck.task) == stuck.name
