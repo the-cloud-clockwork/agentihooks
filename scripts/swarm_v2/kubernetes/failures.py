@@ -260,9 +260,13 @@ class Recovery:
         node = self.store.redis.hget(self._key(NODES), agent.execution_id)
         if ready is not None and node and node not in ready:
             return NODE_LOST
+        return NODE_LOST if self._observed_gone(agent) else ""
+
+    def _observed_gone(self, agent: AgentRecord) -> bool:
         seen = observe.stored(self.store, self.slug, agent.execution_id)
-        lost = seen is not None and seen.generation == agent.generation and seen.state is observe.State.LOST
-        return NODE_LOST if lost else ""
+        if seen is None or seen.generation != agent.generation or seen.state is not observe.State.LOST:
+            return False
+        return seen.sources.get(observe.Source.KUBERNETES, {}).get("reading") == observe.Reading.NOT_FOUND
 
     def _pulling(self, execution_id: str) -> bool:
         now, key = lease.now_ms(self.store), self._key(PULLS)
