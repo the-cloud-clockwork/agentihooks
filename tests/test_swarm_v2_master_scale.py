@@ -474,15 +474,18 @@ def test_a_seat_without_phases_is_told_it_owns_none_yet():
     assert "you own: none yet." in text
 
 
-def test_the_tick_runs_the_scaling_pass_with_its_swarm_and_ledger_document(swarm, monkeypatch):
-    store, runtime = swarm
-    calls = []
+def test_the_tick_runs_the_scaling_pass_with_its_swarm_and_ledger_document(monkeypatch):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 20, 0, state="running"))
+    runtime, calls = FakeRuntime(), []
     monkeypatch.setattr(master_scale, "run", lambda *args: calls.append(args) or [])
 
-    tick_module.tick(SLUG, store, FakeLedger([{"id": "t1", "lane": "eng"}]), runtime, NOW)
+    tick_module.tick("sw", store, FakeLedger([{"id": "t1", "lane": "eng"}]), runtime, NOW)
 
     [(slug, config, passed_store, passed_runtime, doc, now)] = calls
-    assert (slug, config.slug, passed_store, passed_runtime, now) == (SLUG, SLUG, store, runtime, NOW)
+    assert (slug, config.slug, passed_store, passed_runtime, now) == ("sw", "sw", store, runtime, NOW)
     assert [t["id"] for t in doc["tasks"]] == ["t1"]
 
 
