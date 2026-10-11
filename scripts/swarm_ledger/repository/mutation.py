@@ -54,7 +54,9 @@ def apply(slug, state, core, changes=None, ops=None, gate=None, created=False):
     if ctx.changed:
         meta.update(rev=ctx.rev, updated_at=ctx.at, warnings=found)
         log = meta["events"] + ctx.events
-        start = retained(log, meta.get("events_ack"), core.EVENTS_KEPT, core.EVENTS_CEILING)
+        start = retained(
+            log, meta.get("events_ack"), core.EVENTS_KEPT, core.EVENTS_CEILING, ctx.at - core.EVENTS_WINDOW_MS
+        )
         if start:
             meta["events_trimmed"] = log[start - 1].get("rev", 0)
         meta["events"] = log[start:]

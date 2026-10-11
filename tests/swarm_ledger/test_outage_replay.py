@@ -91,9 +91,9 @@ def test_a_watcher_ahead_of_the_trim_hears_no_warning(repo, monkeypatch, capsys)
 
 def test_retained_keeps_every_event_inside_the_horizon():
     rows = [{"rev": n, "at": n * 10} for n in range(1, 7)]
-    assert events.retained(rows, None, 2, 9, horizon=30) == 2
-    assert events.retained(rows, None, 2, 9, horizon=31) == 3
-    assert events.retained(rows, None, 2, 9, horizon=61) == 4
-    assert events.retained(rows, None, 2, 3, horizon=0) == 3
-    assert events.retained(rows, 1, 2, 9, horizon=61) == 1
-    assert events.retained([{"rev": 1}, *rows], None, 2, 9, horizon=10) == 1
+    assert events.retained(rows, None, 2, 9, horizon=29) == 2
+    assert events.retained(rows, None, 2, 9, horizon=30) == 3
+    assert events.retained(rows, None, 2, 9, horizon=60) == 4
+    assert events.retained(rows, None, 2, 3, horizon=-1) == 3
+    assert events.retained(rows, 1, 2, 9, horizon=60) == 1
+    assert events.retained([{"rev": 1}, *rows], None, 2, 9, horizon=9) == 1

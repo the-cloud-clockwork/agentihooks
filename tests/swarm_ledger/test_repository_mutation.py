@@ -41,6 +41,7 @@ def domain(calls, chat_kept=2, events_kept=2):
         CHAT_KEPT=chat_kept,
         EVENTS_KEPT=events_kept,
         EVENTS_CEILING=events_kept * 5,
+        EVENTS_WINDOW_MS=0,
     )
 
 
