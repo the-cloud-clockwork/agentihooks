@@ -634,4 +634,9 @@ if [[ -z $kept ]]; then
   exit 1
 fi
 printf 'the controller loaded the mounted terminal CA key and logged its saved herdr machines on start: %s\n' "$kept"
+if [[ $kept != *"refused {}"* ]]; then
+  printf 'the controller start pass did not reach the herdr client: %s\n' "$kept" >&2
+  exit 1
+fi
+printf 'the controller start pass reached the herdr client and refused nothing\n'
 printf 'Helm chart kind proof passed\n'
