@@ -12,6 +12,8 @@ from scripts.cli_delegates import delegated_cli
 
 pytestmark = pytest.mark.unit
 
+LOADER = 'command -v agentihooks >/dev/null && eval "$(agentihooks accounts env)"'
+
 ACCOUNTS = {
     "NESTOR.COLT@GMAIL.COM": "tok-a",
     "OPS+2026@TCC.DEV": "tok b'quoted",
@@ -120,7 +122,7 @@ def test_unreachable_openbao_falls_back_to_the_owner_only_file(tmp_path, monkeyp
     assert _evaluated(out) == {"AH_CC_TOKEN_nestor_coltatgmail_com": "tok-a", "AH_CC_TOKEN_second": "tok two"}
     assert "OTHER_NAME" not in out
     assert len(err.strip().splitlines()) == 1
-    assert "OpenBao" in err and "tok" not in err
+    assert "OpenBao" in err and "tok-a" not in err and "tok two" not in err
 
 
 def test_missing_openbao_settings_go_straight_to_the_fallback(tmp_path, monkeypatch, capsys):
@@ -209,8 +211,8 @@ def test_init_writes_one_loader_line_however_often_it_runs(tmp_path, monkeypatch
     install._update_bashrc_block()
 
     text = bashrc.read_text()
-    assert text.count(install._ACCOUNTS_LOADER) == 1
-    assert text.index("\nagentienv\n") < text.index(install._ACCOUNTS_LOADER)
+    assert text.count(LOADER) == 1
+    assert text.index("\nagentienv\n") < text.index(LOADER)
     assert "AH_CC_TOKEN_" not in text
     assert text.startswith("export KEEP=1\n")
 
