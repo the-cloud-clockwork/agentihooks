@@ -1,0 +1,268 @@
+from argparse import Namespace
+from collections import Counter
+from dataclasses import replace
+
+import pytest
+
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+
+MINUTE = 60_000
+SENDERS = ("direct message", "swarm message", "operator chat", "operator comment", "operator answer", "tick notice")
+
+
+class Drill:
+    def __init__(self, server, store, ledger, runtime, monkeypatch):
+        from scripts.inbox.store import InboxStore
+        from scripts.swarm import cli
+
+        self.server, self.store, self.ledger, self.runtime = server, store, ledger, runtime
+        self.inbox, self.clock = InboxStore(store.redis), 1_000
+        self.errors, self.accepted, self.confirmed = [], [], []
+        monkeypatch.setattr(cli, "now_ms", lambda: self.clock)
+        self.tick()
+        store.update("sw", state="paused")
+        self.agents = [a for a in store.agents("sw") if a.lane == "eng"]
+        self.master = next(a for a in store.agents("sw") if a.lane == "master")
+        for index, agent in enumerate(self.agents):
+            store.put_agent("sw", replace(agent, conversation_id=f"conversation-{index}", profile="engineer"))
+        self.claims = {a.task: store.claimant("sw", a.task) for a in self.agents}
+        self.launches = list(runtime.spawned)
+
+    def tick(self):
+        from scripts.swarm import cli
+
+        return self.attempt(lambda: cli.run_tick(self.store, "sw", self.ledger, self.runtime, self.runtime))
+
+    def attempt(self, call):
+        from redis.exceptions import RedisError
+
+        from scripts.swarm.store import SwarmError
+
+        try:
+            return call()
+        except (RedisError, SwarmError) as exc:
+            self.errors.append(str(exc))
+            return None
+
+    def stop(self, kind):
+        self.clock = MINUTE
+        for agent in self.agents:
+            self.runtime.statuses[agent.name] = "idle"
+        if kind == "redis":
+            self.server.connected = False
+        elif kind == "network":
+            self.ledger.online = False
+        else:
+            self.runtime.errors[self.agents[0].name] = "API Error: 503 provider unavailable"
+        self.tick()
+
+    def send(self, monkeypatch):
+        from scripts.inbox import cli
+        from scripts.swarm import cli as swarm_cli
+        from scripts.swarm_ledger import ledger_server
+
+        monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", self.master.name)
+        self.accepted.append(cli.main(["send", self.agents[0].name, "drill direct message"]))
+        args = Namespace(
+            slug="sw", name=self.master.name, to=self.agents[0].name, fyi=False, text="drill swarm message"
+        )
+        self.accepted.append(self.attempt(lambda: swarm_cli.cmd_say(self.store, args)))
+        events = (
+            ("operator", "chat added", "chat", f"@{self.agents[0].name} drill operator chat"),
+            ("operator", "comment added", f"tasks/{self.agents[0].task}", "drill operator comment"),
+            ("operator", "answer added", f"tasks/{self.agents[0].task}", "drill operator answer"),
+            (self.agents[0].name, "added", "questions/drill", "drill tick notice"),
+        )
+        for by, kind, target, text in events:
+            self.ledger.write(by, kind, target, text, self.clock)
+            if self.ledger.online:
+                ledger_server.relay_to_inbox("sw", self.ledger.state("sw"))
+        self.tick()
+
+    def recover(self):
+        from scripts.swarm_ledger import ledger_server
+
+        self.server.connected, self.ledger.online, self.runtime.healthy = True, True, True
+        ledger_server.relay_to_inbox("sw", self.ledger.state("sw"))
+        ledger_server.replay_unrelayed()
+        for step in range(3):
+            self.clock = (10 + step) * MINUTE
+            self.tick()
+        ledger_server.relay_to_inbox("sw", self.ledger.state("sw"))
+        ledger_server.replay_unrelayed()
+
+    def items(self):
+        return {
+            item.id: item
+            for agent in [self.master, *self.agents]
+            for address in (agent.name, agent.seat)
+            for item in self.inbox.inbox(address)
+            if "drill" in item.text
+        }
+
+    def confirm(self):
+        from scripts.inbox.dispatch import Dispatcher
+
+        dispatcher = Dispatcher(self.inbox)
+        for agent in [self.master, *self.agents]:
+            owner = f"drill:{agent.name}"
+            dispatcher.own(agent.name, owner, takeover=True)
+            for delivery in dispatcher.reserve(agent.name, owner):
+                relevant = delivery.item in self.items()
+                dispatcher.receipts.submitting(delivery.id, owner)
+                receipt = dispatcher.receipts.accept(delivery.id, owner, delivery.digest)
+                assert receipt.state == "accepted" and receipt.committed
+                self.inbox.read(delivery.item, agent.name)
+                self.inbox.close(delivery.item, agent.name, "done", "drill receiver confirmed")
+                if relevant:
+                    self.confirmed.append(delivery.item)
+            assert not dispatcher.reserve(agent.name, owner)
+            dispatcher.release(agent.name, owner)
+
+
+@pytest.fixture
+def drill(tmp_path, monkeypatch):
+    import fakeredis
+
+    from scripts.inbox import cli as inbox_cli
+    from scripts.inbox import outbox
+    from scripts.inbox.store import InboxStore, Unreachable
+    from scripts.swarm import outage, snapshot
+    from scripts.swarm.pane import PaneObservation
+    from scripts.swarm.runtime import Placed
+    from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
+    from scripts.swarm_ledger import ledger_server
+    from tests.swarm.test_tick import FakeLedger, FakeRuntime
+
+    class Ledger(FakeLedger):
+        def __init__(self):
+            super().__init__([{"id": f"t{index}", "lane": "eng"} for index in range(3)])
+            self.online, self.log = True, []
+
+        def state(self, slug):
+            if not self.online:
+                raise SwarmError("ledger network unavailable")
+            return super().state(slug)
+
+        def write(self, by, kind, target, text, at):
+            rev = len(self.log) + 1
+            self.log.append(
+                {"rev": rev, "at": at, "by": by, "kind": kind, "target": target, "id": f"drill-{rev}", "text": text}
+            )
+
+    class Runtime(FakeRuntime):
+        def __init__(self):
+            super().__init__()
+            self.errors, self.resumed, self.healthy = {}, [], False
+
+        def observe(self, agent):
+            return PaneObservation(self.status(agent), provider_error=self.errors.get(agent.name, ""))
+
+        def nudge(self, agent, text):
+            result = super().nudge(agent, text)
+            if not result:
+                self.statuses[agent.name] = "working"
+                self.errors.pop(agent.name, None)
+            return result
+
+        def resume(self, config, agent, text):
+            self.resumed.append((agent.name, agent.task, agent.conversation_id, text))
+            self.live.add(agent.name)
+            self.statuses[agent.name] = "working"
+            return Placed("drill:recovered", agent.harness, profile=agent.profile)
+
+        def agent_status(self, agent):
+            return self.status(agent)
+
+        def typed_input(self, agent):
+            return ""
+
+        def prompt(self, agent, text):
+            return "provider unavailable" if not self.healthy else None
+
+    server = fakeredis.FakeServer()
+    redis = fakeredis.FakeRedis(server=server, decode_responses=True)
+    store = RedisStore(redis)
+    store.create(SwarmConfig("sw", str(tmp_path), max_eng=3, max_ci=0))
+    ledger, runtime = Ledger(), Runtime()
+
+    def connect():
+        if not server.connected:
+            raise Unreachable("drill Redis unavailable")
+        return InboxStore(redis)
+
+    monkeypatch.setattr("scripts.inbox.store.connect", connect)
+    monkeypatch.setattr(inbox_cli, "connect", connect)
+    monkeypatch.setattr(outbox, "home", lambda: tmp_path / "outbox")
+    monkeypatch.setattr(outage, "HOME", tmp_path / "outages")
+    monkeypatch.setattr(ledger_server, "unrelayed_path", lambda: tmp_path / "unrelayed.json")
+    monkeypatch.setattr(ledger_server.repository, "get_document", ledger.state)
+    monkeypatch.setattr(snapshot, "worktrees", lambda repo, names: {name: str(tmp_path) for name in names})
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES", "0")
+    monkeypatch.setenv("AGENTIHOOKS_INBOX_QUIET_S", "0")
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
+    return Drill(server, store, ledger, runtime, monkeypatch)
+
+
+def probe_recovery(drill, monkeypatch):
+    from scripts.swarm import provider_probe
+
+    calls = []
+
+    def check(agent):
+        calls.append((agent.name, drill.runtime.healthy))
+        return provider_probe.Result(drill.runtime.healthy, "drill account request")
+
+    monkeypatch.setattr(provider_probe, "check", check)
+    return calls
+
+
+@pytest.mark.parametrize("kind", ("redis", "network", "provider"))
+def test_every_sender_survives_an_outage_and_is_delivered_and_confirmed_once(drill, monkeypatch, kind):
+    if kind == "provider":
+        probe_recovery(drill, monkeypatch)
+    drill.stop(kind)
+    drill.send(monkeypatch)
+    drill.recover()
+    found = drill.items()
+    assert Counter(
+        sender for item in found.values() for sender in SENDERS if f"drill {sender}" in item.text
+    ) == Counter(SENDERS), drill.errors
+    assert drill.accepted[0] == 0
+    drill.confirm()
+    assert Counter(drill.confirmed) == Counter(found.keys())
+    for item_id in found:
+        assert drill.inbox.get(item_id).state == "done"
+        states = [entry["state"] for entry in drill.inbox.history(item_id)]
+        assert states.count("delivered") == 1 and states.count("read") == 1
+    drill.clock += MINUTE
+    drill.tick()
+    assert set(drill.items()) == set(found)
+    drill.confirm()
+    assert Counter(drill.confirmed) == Counter(found.keys())
+
+
+@pytest.mark.parametrize("kind", ("redis", "network", "provider"))
+def test_outage_stalled_owners_resume_within_three_ticks_without_a_new_claim(drill, monkeypatch, kind):
+    calls = probe_recovery(drill, monkeypatch) if kind == "provider" else []
+    drill.stop(kind)
+    drill.runtime.live.remove(drill.agents[2].name)
+    for step in range(3):
+        drill.clock = (5 + step) * MINUTE
+        drill.tick()
+    drill.server.connected = True
+    assert {a.task: drill.store.claimant("sw", a.task) for a in drill.agents} == drill.claims
+    assert drill.runtime.spawned == drill.launches
+    drill.recover()
+    assert all(drill.runtime.statuses[a.name] == "working" for a in drill.agents), drill.errors
+    assert {a.task: drill.store.claimant("sw", a.task) for a in drill.agents} == drill.claims
+    assert drill.runtime.spawned == drill.launches
+    assert [(name, task, conversation) for name, task, conversation, _ in drill.runtime.resumed] == [
+        (drill.agents[2].name, drill.agents[2].task, "conversation-2")
+    ]
+    assert Counter(drill.runtime.nudged) == Counter(a.name for a in drill.agents[:2])
+    if kind == "provider":
+        assert any(healthy for _, healthy in calls)
