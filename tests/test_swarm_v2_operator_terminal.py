@@ -1,4 +1,5 @@
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -231,6 +232,30 @@ def test_the_command_refuses_an_unknown_execution(operator_shell, monkeypatch, t
         f"swarm: the worker terminal was refused: host_key_unrecorded: no host key was recorded at launch for {EXE_A}\n"
     )
     assert run.commands == []
+
+
+@pytest.mark.parametrize(
+    ("failure", "said"),
+    [
+        (
+            FileNotFoundError(2, "No such file or directory", "herdr"),
+            "FileNotFoundError: [Errno 2] No such file or directory: 'herdr'",
+        ),
+        (subprocess.TimeoutExpired(["ssh"], 10), "TimeoutExpired: Command '['ssh']' timed out after 10 seconds"),
+    ],
+)
+def test_the_command_reports_a_client_that_cannot_run(operator_shell, monkeypatch, capsys, failure, said):
+    launched(operator_shell, HostIdentity.generate())
+
+    def broken(command):
+        raise failure
+
+    monkeypatch.setattr(operator_terminal, "runner", lambda environment: broken)
+    monkeypatch.setattr(attach.socket, "getaddrinfo", lookup)
+
+    assert cli.main([SWARM, "terminal", EXE_A]) == 1
+
+    assert capsys.readouterr().err == f"swarm: the worker terminal could not be opened: {said}\n"
 
 
 def test_an_encrypted_user_ca_key_is_refused(monkeypatch, tmp_path):

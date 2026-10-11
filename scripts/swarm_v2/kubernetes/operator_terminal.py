@@ -1,3 +1,4 @@
+import subprocess
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
@@ -72,6 +73,8 @@ def command(store: RedisStore, slug: str, execution_id: str, environ: Mapping[st
         verdict = attach(store, slug, caller, execution_id, build)
     except EndpointRefused as refused:
         raise SwarmError(f"the worker terminal was refused: {refused.reason}: {refused}") from None
+    except (OSError, subprocess.SubprocessError) as error:
+        raise SwarmError(f"the worker terminal could not be opened: {type(error).__name__}: {error}") from None
     if not verdict.compatible:
         raise SwarmError(f"the worker terminal {verdict.target} is incompatible: {'; '.join(verdict.refusals)}")
     return {"target": verdict.target, "incarnation": verdict.incarnation}
