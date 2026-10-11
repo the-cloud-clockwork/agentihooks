@@ -1,7 +1,8 @@
 """One reconcile pass over a swarm: retire finished agents, free dead or stalled agents' tasks, spawn up to the caps.
 
 Scaling up is immediate; scaling down happens only as agents finish, so a lowered cap never kills work.
-Each swarm keeps at most one master: an agent the operator talks to, which works no task.
+Each swarm keeps one lead master, the agent the operator talks to, which works no task; master_scale fills any
+further master seats its count holds.
 """
 
 import json
@@ -60,7 +61,7 @@ from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy
-from scripts.swarm_v2 import master_fill
+from scripts.swarm_v2 import master_scale
 from scripts.swarm_v2 import masters as master_seats
 
 LEASE_MS = 10 * 60 * 1000
@@ -208,7 +209,7 @@ def tick(slug, store, ledger, runtime, now_ms):
                 now_ms,
                 lambda: _master(slug, config, store, runtime, now_ms),
             )
-            actions += skip_refused(master_fill.run, slug, config, store, runtime, doc, now_ms)
+            actions += skip_refused(master_scale.run, slug, config, store, runtime, doc, now_ms)
             actions += skip_refused(dispatcher.rank_pass, slug, config, store, ledger, doc, now_ms)
             actions += skip_refused(lane_split.step, slug, config, store, doc, now_ms)
             if config.state == "running":
