@@ -389,6 +389,19 @@ def test_a_blocked_task_is_never_ranked_however_much_it_unblocks(store, home, sh
     assert ledger.ranks == [("a", "high", "dispatcher")]
 
 
+def test_a_doctor_fix_phase_task_outside_the_focus_is_still_ranked(store, home, shipped):
+    from scripts.doctor import loop, priming
+
+    store.update(SLUG, autonomy="delegate", template=priming.TEMPLATE)
+    tasks = [task("f", phase=loop.FIX_PHASE), task("w", phase=loop.FIX_PHASE, depends_on=["f"])]
+    found = doc(
+        tasks, phases=[{"id": loop.FIX_PHASE, "depends_on": []}], freezes=[{"verb": "focus", "target": "lane:ci"}]
+    )
+    ledger = Ledger()
+    dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
+    assert ledger.ranks == [("f", "high", "dispatcher")]
+
+
 def test_below_delegate_an_own_rank_is_never_lowered(store, home, shipped):
     store.update(SLUG, autonomy="assist")
     tasks = merging()
