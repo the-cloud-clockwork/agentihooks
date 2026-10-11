@@ -183,3 +183,15 @@ def test_codex_sessions_count_per_codex_account(tmp_path):
     assert acc.session_account(300, root) == "alpha"
     assert acc.session_account(302, root) == "default"
     assert acc.session_account(305, root) == "alpha"
+
+
+def test_a_codex_run_under_another_codex_process_is_part_of_that_session(tmp_path):
+    root = tmp_path / "proc"
+    _proc(root, 700, "codex", 1, ["codex", "--no-daemon"], {"AH_CX_TOKEN_alpha": "a"})
+    _proc(root, 701, "bash", 700, ["bash", "-lc", "codex exec ok"], {"AH_CX_TOKEN_alpha": "a"})
+    _proc(root, 702, "codex", 701, ["codex", "exec", "ok"], {"AH_CX_TOKEN_alpha": "a"})
+    _proc(root, 703, "codex", 700, ["codex", "exec", "ok"], {"AH_CX_TOKEN_alpha": "a"})
+    _proc(root, 710, "python3", 1, ["python3", "-m", "hooks"], {})
+    _proc(root, 711, "codex", 710, ["codex", "--no-daemon", "exec", "ok"], {"AH_CX_TOKEN_beta": "b"})
+    assert acc.codex_sessions_by_account(root) == {"alpha": 1, "beta": 1}
+    assert acc.live_codex_sessions(root) == 2

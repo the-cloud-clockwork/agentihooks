@@ -42,6 +42,7 @@ VALUE_FLAGS = frozenset(
     }
 )
 SERVERS = frozenset({"app-server", "mcp-server"})
+ANCESTRY_DEPTH = 64
 
 
 def account_from_names(names: Iterable[str], prefix: str = TOKEN_PREFIX) -> str:
@@ -161,13 +162,21 @@ def _codex_positionals(argv: list[str]) -> list[str]:
     return rest
 
 
+def _under_codex(pid: int, proc: Path) -> bool:
+    for _ in range(ANCESTRY_DEPTH):
+        pid = _ppid(pid, proc)
+        if _comm(pid, proc) == "codex":
+            return True
+    return False
+
+
 def _is_codex_session(pid: int, proc: Path) -> bool:
     if not _is_codex(pid, proc):
         return False
     argv = _cmdline(pid, proc)
     if "app-server" in argv[0] or SERVERS.intersection(_codex_positionals(argv)[:1]):
         return False
-    return _comm(_ppid(pid, proc), proc) != "codex"
+    return not _under_codex(pid, proc)
 
 
 def live_codex_sessions(proc: Path = _PROC) -> int:

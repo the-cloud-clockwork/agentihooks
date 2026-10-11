@@ -416,7 +416,9 @@ workspace access token per `AH_CX_TOKEN_<slug>`.
 - Live sessions are counted per account from `/proc`: a Codex process with
   exactly one `AH_CX_TOKEN_<slug>` is on that account, any other on `default`.
   An interactive session and a `codex exec` run each hold one slot until the
-  process ends; `app-server` and `mcp-server` processes hold none.
+  process ends, the router's quota probes and classifier calls included;
+  `app-server` and `mcp-server` processes hold none, and a Codex process
+  running under another Codex process belongs to that session.
   Quota per account is the newest rate-limit event in the session logs the
   session registry attributes to it; a token with no session yet shows no quota
   and still routes.
