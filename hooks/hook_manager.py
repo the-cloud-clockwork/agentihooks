@@ -322,6 +322,9 @@ def on_session_start(payload: dict) -> None:
         deps_kick()
     except Exception as e:
         log("deps kick failed", {"error": str(e)})
+    from hooks.lifecycle.codex_refresh_kick import kick as codex_refresh_kick
+
+    codex_refresh_kick()
     otel.emit_event(
         "agentihooks.session.started",
         {
