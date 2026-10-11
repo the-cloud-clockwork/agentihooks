@@ -546,7 +546,8 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     agent = replace(agent, input_prompt="", input_ticks=0)
     held = outage.held(store, slug, agent.name)
     exhausted = resume.recovery_exhausted(store, slug, agent)
-    if agent.lane == MASTER or resume.recovery_pending(store, slug, agent) or (held and not exhausted):
+    pending = resume.recovery_pending(store, slug, agent)
+    if agent.lane == MASTER or (held and not exhausted):
         store.put_agent(slug, agent)
         return []
     state = idle_state.verdict(
@@ -567,6 +568,8 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     gate_log.append(
         slug, gate_log.Row.of(IDLE_TICKS, "count", who, reason=f"idle tick {idle.idle_ticks}", now_ms=now_ms)
     )
+    if pending:
+        return []
     if idle.idle_ticks == IDLE_NUDGE_TICKS:
         refused = runtime.nudge(idle, NUDGE.format(slug=slug))
         return [f"nudge to {agent.name} refused: {refused}" if refused else f"nudged {agent.name}"]
