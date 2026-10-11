@@ -31,12 +31,12 @@ def test_the_download_is_tried_three_times_and_only_the_last_failure_is_red():
 def test_every_absorbed_failure_waits_and_warns_before_the_next_attempt():
     steps = _action()["runs"]["steps"]
     downloads = [i for i, s in enumerate(steps) if s.get("uses", "").startswith("actions/download-artifact@")]
-    for before, after in zip(downloads, downloads[1:]):
+    for before, after, wait in zip(downloads, downloads[1:], ("sleep 10", "sleep 20")):
         waits = steps[before + 1 : after]
         assert len(waits) == 1
         assert waits[0]["if"] == steps[after]["if"]
         assert "::warning title=Retried download::" in waits[0]["run"]
-        assert "sleep " in waits[0]["run"]
+        assert wait in waits[0]["run"]
         assert "${{" not in waits[0]["run"]
 
 
@@ -93,4 +93,8 @@ def test_the_guard_sees_a_retry_behind_a_reusable_workflow_or_a_composite_action
     assert _step_retries({"uses": f"{_RETRY}/"})
     assert not _retries({"steps": [{"uses": "./.github/actions/browser-cache"}]})
     assert _deploys({"permissions": "write-all"}, {})
+    assert _deploys({}, {"environment": "pypi"})
+    assert _deploys({}, {"permissions": {"id-token": "write"}})
+    assert _deploys({"permissions": {"id-token": "write"}}, {})
+    assert not _deploys({"permissions": {"id-token": "write"}}, {"permissions": {}})
     assert not _deploys({"permissions": {"id-token": "write"}}, {"permissions": {"contents": "read"}})
