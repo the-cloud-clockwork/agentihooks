@@ -102,6 +102,7 @@ kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/her
 printf 'worker terminal Pod, Secret, Service and NetworkPolicy passed server side strict validation\n'
 wait "$build"
 kind load docker-image "$image" --name "$cluster"
+bash "$chart/ci/terminal-route-proof.sh" "$image"
 helm install "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m
 helm test "$release" --logs --timeout 2m
 
