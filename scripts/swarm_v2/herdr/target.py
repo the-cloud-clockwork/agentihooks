@@ -13,7 +13,7 @@ from scripts.swarm_v2.herdr.catalog import Catalog
 from scripts.swarm_v2.herdr.endpoints import EndpointRefused
 from scripts.swarm_v2.herdr.reconcile import Record, Store
 
-PANE = re.compile(r"w[0-9]+:p[0-9]+")
+PANE = re.compile(r"w[0-9A-Z]+:p[0-9A-Z]+")
 CALLER = ("HERDR_PANE_ID", "HERDR_WORKSPACE_ID", "HERDR_TAB_ID", "HERDR_SOCKET_PATH")
 READS = frozenset({"pane_read", "pane_wait_output", "pane_process_info", "agent_get"})
 MUTATIONS = frozenset({"pane_run", "pane_send_text", "pane_send_keys", "pane_close", "agent_prompt", "agent_rename"})
@@ -135,7 +135,7 @@ class Router:
 
     def _pane(self, profile_id: str, pane_id: str) -> None:
         if not isinstance(pane_id, str) or not PANE.fullmatch(pane_id):
-            self._refuse("pane_id", "a herdr pane id reads w<number>:p<number>", profile_id)
+            self._refuse("pane_id", "a herdr pane id reads w<id>:p<id>, each id digits and capital letters", profile_id)
 
     def _listed(self, record: Record) -> None:
         saved = next((machine for machine in self.catalog.machines() if machine.profile_id == record.profile_id), None)
