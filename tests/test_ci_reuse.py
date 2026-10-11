@@ -223,6 +223,7 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
     canonical = ci_reuse.reuse_job()
     previous = ci_reuse.reuse_job()
     [step] = [step for step in previous["steps"] if step.get("name") == FETCH]
+    assert step["run"].count("gh api --allow-escape-sequences ") == 1
     step["run"] = step["run"].replace("gh api --allow-escape-sequences ", "gh api ")
     assert workflow["jobs"]["reuse"] in (canonical, previous)
 
