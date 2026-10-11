@@ -199,7 +199,7 @@ def test_the_entrypoint_help_names_every_input(capsys, monkeypatch):
         "quota, archive, checkpoint and brain readings for --canary",
         "viewer grant naming its brains",
     ):
-        assert text in out
+        assert f" {text} " in f" {out} "
 
 
 def test_a_canary_without_an_overlay_names_the_missing_flag(capsys):
