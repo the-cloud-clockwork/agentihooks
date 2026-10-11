@@ -67,13 +67,15 @@ def _operator_home() -> dict:
         document = policy(SEED, ARTIFACTS, CACHE, OPERATOR_HOME)
         loaded = load(Path(root), document)
         before = copy.deepcopy(loaded)
-        template = PodTemplate(loaded)
+        template = PodTemplate(loaded, "agentihooks-swarm-fixture")
         try:
             template.render(launch())
             message, reason = "", None
         except PodSpecRefused as refused:
             message, reason = str(refused), refused.reason
-        corrected = PodTemplate(load(Path(root), policy(SEED, ARTIFACTS, CACHE))).render(launch())
+        corrected = PodTemplate(load(Path(root), policy(SEED, ARTIFACTS, CACHE)), "agentihooks-swarm-fixture").render(
+            launch()
+        )
         return {
             "operator_home_refused": reason == "storage",
             "policy_unchanged": loaded == before,

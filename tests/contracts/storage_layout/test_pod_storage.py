@@ -51,7 +51,7 @@ def load(tmp_path, document: dict) -> dict:
 
 
 def safe_pod(tmp_path) -> dict:
-    return PodTemplate(load(tmp_path, policy(SEED, ARTIFACTS, CACHE))).render(launch()).pod
+    return PodTemplate(load(tmp_path, policy(SEED, ARTIFACTS, CACHE)), "agentihooks-swarm-fixture").render(launch()).pod
 
 
 def agent(pod: dict) -> dict:
@@ -80,7 +80,7 @@ def refused(pod: dict, checker: MountChecker | None = None) -> StorageRefused:
 
 
 def test_a_policy_without_shared_mounts_renders_only_the_private_volumes(tmp_path):
-    pod = PodTemplate(load(tmp_path, policy())).render(launch()).pod
+    pod = PodTemplate(load(tmp_path, policy()), "agentihooks-swarm-fixture").render(launch()).pod
     assert [found["name"] for found in pod["spec"]["volumes"]] == ["home", "tmp", "launch"]
     MountChecker().check(pod)
 
@@ -358,7 +358,7 @@ def test_rejections_count_by_reason_across_checks(tmp_path):
 
 
 def test_mounting_the_operator_home_into_all_workers_is_refused_by_the_template(tmp_path):
-    template = PodTemplate(load(tmp_path, policy(SEED, OPERATOR_HOME)))
+    template = PodTemplate(load(tmp_path, policy(SEED, OPERATOR_HOME)), "agentihooks-swarm-fixture")
     with pytest.raises(PodSpecRefused) as error:
         template.render(launch())
     assert error.value.reason == "storage"
@@ -372,7 +372,7 @@ def test_mounting_the_operator_home_into_all_workers_is_refused_by_the_template(
 
 def test_an_artifact_mount_over_a_native_home_is_refused_by_the_template(tmp_path):
     codex = {**ARTIFACTS, "name": "codex", "mount_path": "/home/worker/.codex"}
-    template = PodTemplate(load(tmp_path, policy(codex)))
+    template = PodTemplate(load(tmp_path, policy(codex)), "agentihooks-swarm-fixture")
     with pytest.raises(PodSpecRefused) as error:
         template.render(launch())
     assert error.value.reason == "storage"
@@ -448,7 +448,7 @@ def test_a_pod_without_labels_has_no_scoped_write():
 
 
 def test_every_refused_render_is_counted(tmp_path):
-    template = PodTemplate(load(tmp_path, policy(SEED, OPERATOR_HOME)))
+    template = PodTemplate(load(tmp_path, policy(SEED, OPERATOR_HOME)), "agentihooks-swarm-fixture")
     for _ in range(2):
         with pytest.raises(PodSpecRefused):
             template.render(launch())

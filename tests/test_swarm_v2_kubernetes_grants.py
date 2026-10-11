@@ -138,7 +138,7 @@ def test_the_grant_lands_in_the_launch_config_map_its_pod_owns():
 
 
 def test_the_config_map_is_the_one_the_pod_template_mounts_at_the_launch_folder():
-    rendered = PodTemplate(cases.policy()).render(cases.launch()).pod
+    rendered = PodTemplate(cases.policy(), "agentihooks-swarm-fixture").render(cases.launch()).pod
     [volume] = [volume for volume in rendered["spec"]["volumes"] if volume["name"] == "launch"]
     [mount] = [mount for mount in rendered["spec"]["containers"][0]["volumeMounts"] if mount["name"] == "launch"]
 
@@ -148,7 +148,7 @@ def test_the_config_map_is_the_one_the_pod_template_mounts_at_the_launch_folder(
 
 
 def test_the_launch_record_sits_where_the_pod_template_starts_the_supervisor():
-    rendered = PodTemplate(cases.policy()).render(cases.launch()).pod
+    rendered = PodTemplate(cases.policy(), "agentihooks-swarm-fixture").render(cases.launch()).pod
     args = rendered["spec"]["containers"][0]["args"]
 
     assert args[1] == "/opt/swarm-node/supervisor.py"

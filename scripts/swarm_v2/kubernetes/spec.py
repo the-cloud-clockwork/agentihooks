@@ -16,7 +16,7 @@ from jsonschema.exceptions import best_match
 
 from scripts.account_names import secret_key, token_env
 from scripts.swarm_v2.kubernetes.storage import MountChecker, StorageRefused, normal
-from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL, OWNER_LABEL
+from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL, OWNER_LABEL, owner_for
 
 SCHEMA = Path(__file__).resolve().parents[3] / "docs" / "swarm-v2" / "schemas" / "pod-policy.json"
 DOMAIN = "swarm.agentihooks.io"
@@ -209,7 +209,7 @@ def launch_volume(execution_id: str) -> dict:
     return {"name": "launch", "configMap": {"name": launch_name(execution_id), "defaultMode": 0o444}}
 
 
-def _metadata(policy: dict, launch: AdmittedLaunch, payload: str) -> dict:
+def _metadata(policy: dict, owner: str, launch: AdmittedLaunch, payload: str) -> dict:
     version = policy["template_version"]
     return {
         "name": pod_name(launch.execution_id),
@@ -217,7 +217,7 @@ def _metadata(policy: dict, launch: AdmittedLaunch, payload: str) -> dict:
         "labels": {
             "app.kubernetes.io/managed-by": "agentihooks",
             "app.kubernetes.io/component": "swarm-execution",
-            OWNER_LABEL: policy["owner"],
+            OWNER_LABEL: owner,
             EXECUTION_LABEL: launch.execution_id,
             f"{DOMAIN}/generation": str(launch.generation),
             f"{DOMAIN}/swarm": launch.swarm_id,
@@ -384,8 +384,8 @@ def _deliver(body: dict, bundle: dict) -> None:
 
 
 class PodTemplate:
-    def __init__(self, policy: dict, accounts: Callable[[], Collection[str]] | None = None) -> None:
-        self.policy, self.accounts = policy, accounts
+    def __init__(self, policy: dict, owner: str, accounts: Callable[[], Collection[str]] | None = None) -> None:
+        self.policy, self.owner, self.accounts = policy, owner, accounts
         self.failures = Counter()
         self.storage = MountChecker()
 
@@ -401,7 +401,7 @@ class PodTemplate:
         pod = {
             "apiVersion": "v1",
             "kind": "Pod",
-            "metadata": _metadata(self.policy, launch, payload),
+            "metadata": _metadata(self.policy, self.owner, launch, payload),
             "spec": _spec(self.policy, launch, profile),
         }
         try:
@@ -423,12 +423,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("action", choices=("render", "digest"))
     parser.add_argument("--policy", required=True)
     parser.add_argument("--launch", required=True)
+    parser.add_argument("--swarm", required=True)
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return 0 if exc.code == 0 else 64
     try:
-        rendered = PodTemplate(load_policy(args.policy)).render(_read(args.launch))
+        rendered = PodTemplate(load_policy(args.policy), owner_for(args.swarm)).render(_read(args.launch))
     except PodSpecRefused as refused:
         print(refused, file=sys.stderr)
         return 1

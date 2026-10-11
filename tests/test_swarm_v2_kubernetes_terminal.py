@@ -351,8 +351,8 @@ def launch() -> dict:
 
 
 def test_exposure_on_gives_the_rendered_pod_the_terminal_mount_and_port():
-    plain = PodTemplate(policy()).render(launch())
-    rendered = TerminalTemplate(PodTemplate(policy())).render(launch())
+    plain = PodTemplate(policy(), "agentihooks-swarm-fixture").render(launch())
+    rendered = TerminalTemplate(PodTemplate(policy(), "agentihooks-swarm-fixture")).render(launch())
 
     execution = launch()["execution_id"]
     container = rendered.pod["spec"]["containers"][0]
@@ -367,14 +367,14 @@ def test_exposure_on_gives_the_rendered_pod_the_terminal_mount_and_port():
 
 
 def test_exposure_off_renders_the_pod_unchanged():
-    plain = PodTemplate(policy()).render(launch())
+    plain = PodTemplate(policy(), "agentihooks-swarm-fixture").render(launch())
 
     assert "ports" not in plain.pod["spec"]["containers"][0]
     assert all(volume["name"] != "terminal" for volume in plain.pod["spec"]["volumes"])
 
 
 def test_the_terminal_template_refuses_what_the_pod_template_refuses():
-    template = PodTemplate(policy())
+    template = PodTemplate(policy(), "agentihooks-swarm-fixture")
 
     with pytest.raises(PodSpecRefused):
         TerminalTemplate(template).render({**launch(), "extra": 1})

@@ -1,0 +1,51 @@
+{
+ "schema_version": "1.0",
+ "package": "SV2-OBS-05",
+ "evidence_class": "synthetic pressure readings joined with the recorded SV2-CAP-02 scaling canary runs: one quota wait, one stale checkpoint and one denied cross brain query, timed before both runs",
+ "quota": [
+  {
+   "account": "acct-anton",
+   "state": "waiting",
+   "since_ms": 1791735000000,
+   "resets_at_ms": 1791738600000
+  },
+  {
+   "account": "acct-spare",
+   "state": "allowed",
+   "since_ms": 1791735000000,
+   "resets_at_ms": 1791738600000
+  }
+ ],
+ "archive": [
+  {
+   "execution_id": "exe-anton-1",
+   "seat": "eng-1@anton",
+   "process": "live",
+   "activity": "working",
+   "heartbeat_at_ms": 1791735600000,
+   "watermark": 8192,
+   "advanced_at_ms": 1791735540000,
+   "state": "ok",
+   "observed_at_ms": 1791735600000
+  }
+ ],
+ "checkpoints": [
+  {
+   "execution_id": "exe-anton-1",
+   "seat": "eng-1@anton",
+   "taken_at_ms": 1791732600000
+  }
+ ],
+ "brain": {
+  "feed_at_ms": 1791734400000,
+  "denials": [
+   {
+    "denial_id": "deny-anton-1",
+    "at_ms": 1791735540000,
+    "requester_scope": "swarm:anton",
+    "target_brain": "personal-operator",
+    "session_title": "Private personal planning session"
+   }
+  ]
+ }
+}
