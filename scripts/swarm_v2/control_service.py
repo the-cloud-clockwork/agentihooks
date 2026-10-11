@@ -209,7 +209,7 @@ def anton_client(environ: Mapping[str, str], slug: str, workers: deployed.Worker
         )
         return None
     home = ClientHome(Path.home())
-    return Upkeep(operator_terminal.terminal(slug, environ, home, runner(home.environment(dict(environ)))))
+    return Upkeep(operator_terminal.terminal(environ, home, runner(home.environment(dict(environ)))))
 
 
 def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlService | None:

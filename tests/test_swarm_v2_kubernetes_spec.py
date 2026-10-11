@@ -38,7 +38,7 @@ def write(tmp_path, doc, name="policy.json") -> Path:
 
 
 def render(launch: dict | None = None, policy: dict | None = None):
-    template = PodTemplate(policy or load_policy(POLICY))
+    template = PodTemplate(policy or load_policy(POLICY), "agentihooks-swarm-fixture")
     return template, template.render(launch or launch_doc())
 
 
@@ -382,7 +382,7 @@ REFUSALS = [
 
 @pytest.mark.parametrize(("change", "message", "reason"), [r[1:] for r in REFUSALS], ids=[r[0] for r in REFUSALS])
 def test_hostile_launches_are_refused_without_output_and_counted(change, message, reason):
-    template = PodTemplate(load_policy(POLICY))
+    template = PodTemplate(load_policy(POLICY), "agentihooks-swarm-fixture")
     doc = launch_doc()
     change(doc)
     before = copy.deepcopy(template.policy)
@@ -396,7 +396,7 @@ def test_hostile_launches_are_refused_without_output_and_counted(change, message
 
 
 def test_a_record_that_is_not_an_object_is_refused():
-    template = PodTemplate(load_policy(POLICY))
+    template = PodTemplate(load_policy(POLICY), "agentihooks-swarm-fixture")
     with pytest.raises(PodSpecRefused) as refused:
         template.render(["not", "a", "record"])
     assert str(refused.value) == "launch must be a JSON object"
@@ -404,7 +404,7 @@ def test_a_record_that_is_not_an_object_is_refused():
 
 
 def test_failures_accumulate_per_reason_and_success_counts_nothing():
-    template = PodTemplate(load_policy(POLICY))
+    template = PodTemplate(load_policy(POLICY), "agentihooks-swarm-fixture")
     template.render(launch_doc())
     assert template.pod_spec_validation_failures_total() == {}
     for profile in ("research", "memory"):
@@ -458,7 +458,7 @@ def test_render_does_not_mutate_the_launch_or_policy():
     snapshot = copy.deepcopy(policy)
     launch = launch_doc()
     before = copy.deepcopy(launch)
-    rendered = PodTemplate(policy).render(launch)
+    rendered = PodTemplate(policy, "agentihooks-swarm-fixture").render(launch)
     rendered.pod["spec"]["nodeSelector"]["x"] = "y"
     rendered.pod["spec"]["tolerations"][0]["key"] = "changed"
     rendered.pod["spec"]["affinity"]["nodeAffinity"]["requiredDuringSchedulingIgnoredDuringExecution"][
@@ -469,7 +469,7 @@ def test_render_does_not_mutate_the_launch_or_policy():
 
 
 def test_a_payload_that_refers_to_itself_is_refused():
-    template = PodTemplate(load_policy(POLICY))
+    template = PodTemplate(load_policy(POLICY), "agentihooks-swarm-fixture")
     doc = launch_doc()
     loop = {}
     loop["self"] = loop
@@ -571,7 +571,7 @@ KEY = "claude-fixtureatexample-com"
 def keyed(*keys: str) -> PodTemplate:
     policy = load_policy(POLICY)
     policy["provider_accounts"] = []
-    return PodTemplate(policy, lambda: frozenset(keys))
+    return PodTemplate(policy, "agentihooks-swarm-fixture", lambda: frozenset(keys))
 
 
 def test_a_launch_whose_account_key_the_shared_secret_holds_is_admitted():
@@ -602,7 +602,7 @@ def test_against_the_shared_secret_keys_an_account_email_is_never_approved():
 def test_the_shared_secret_keys_are_read_again_at_each_render():
     keys = {KEY}
     policy = load_policy(POLICY)
-    template = PodTemplate(policy, lambda: frozenset(keys))
+    template = PodTemplate(policy, "agentihooks-swarm-fixture", lambda: frozenset(keys))
     doc = launch_doc()
     doc["provider_account"] = KEY
     template.render(doc)
@@ -720,12 +720,52 @@ POLICY_REFUSALS = [
         lambda d: d.update(worker_pool={"pods": 8, "cpu_millis": "18", "memory_mib": 34816}),
         "pod policy is invalid at worker_pool/cpu_millis: '18' is not of type 'integer'",
     ),
+    (
+        "cpu request above the cpu limit",
+        lambda d: d["profiles"]["general"].update(requests={"cpu_millis": 2001}),
+        "pod policy profile general requests 2001m CPU, more than its 2000m limit",
+    ),
+    (
+        "memory request",
+        lambda d: d["profiles"]["general"].update(requests={"cpu_millis": 1000, "memory_mib": 1024}),
+        "pod policy is invalid at profiles/general/requests: Additional properties are not allowed "
+        "('memory_mib' was unexpected)",
+    ),
+    (
+        "cpu request below the minimum",
+        lambda d: d["profiles"]["general"].update(requests={"cpu_millis": 99}),
+        "pod policy is invalid at profiles/general/requests/cpu_millis: 99 is less than the minimum of 100",
+    ),
+    (
+        "empty requests",
+        lambda d: d["profiles"]["general"].update(requests={}),
+        "pod policy is invalid at profiles/general/requests: 'cpu_millis' is a required property",
+    ),
 ]
 
 
 def test_a_policy_declaring_its_worker_pool_loads(tmp_path):
     pool = {"pods": 8, "cpu_millis": 18000, "memory_mib": 34816}
     assert load_policy(write(tmp_path, {**policy_doc(), "worker_pool": pool}))["worker_pool"] == pool
+
+
+def test_a_profile_cpu_request_at_or_below_its_limit_loads(tmp_path):
+    for cpu in (100, 2000):
+        doc = policy_doc()
+        doc["profiles"]["general"]["requests"] = {"cpu_millis": cpu}
+        assert load_policy(write(tmp_path, doc))["profiles"]["general"]["requests"] == {"cpu_millis": cpu}
+
+
+def test_a_profile_cpu_request_reaches_the_pod_requests_and_the_limit_stays():
+    policy = load_policy(POLICY)
+    policy["profiles"]["general"]["requests"] = {"cpu_millis": 1000}
+    doc = launch_doc()
+    doc.update(cpu_millis=1000, memory_mib=4096)
+    _, rendered = render(doc, policy)
+    resources = rendered.pod["spec"]["containers"][0]["resources"]
+    assert resources["requests"]["cpu"] == "1000m"
+    assert resources["limits"]["cpu"] == "2000m"
+    assert resources["requests"]["memory"] == resources["limits"]["memory"] == "4096Mi"
 
 
 @pytest.mark.parametrize(("change", "message"), [r[1:] for r in POLICY_REFUSALS], ids=[r[0] for r in POLICY_REFUSALS])
@@ -787,14 +827,19 @@ def test_a_difference_outside_the_probes_is_reported():
 
 
 def test_the_command_line_renders_the_pod_as_sorted_json(capsys):
-    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(LAUNCH)]) == 0
+    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(LAUNCH), "--swarm", "fixture"]) == 0
     assert capsys.readouterr().out == json.dumps(render()[1].pod, sort_keys=True) + "\n"
 
 
 def test_the_command_line_refuses_a_hostile_launch_without_output(tmp_path, capsys):
     doc = launch_doc()
     doc["provider_account"] = "cluster-admin@token.io"
-    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(write(tmp_path, doc, "l.json"))]) == 1
+    assert (
+        spec.main(
+            ["render", "--policy", str(POLICY), "--launch", str(write(tmp_path, doc, "l.json")), "--swarm", "fixture"]
+        )
+        == 1
+    )
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == "launch provider_account is not an approved provider account\n"
@@ -804,9 +849,9 @@ def test_the_command_line_refuses_unreadable_inputs(tmp_path, capsys):
     missing = tmp_path / "missing.json"
     broken = tmp_path / "broken.json"
     broken.write_text("{not json")
-    assert spec.main(["render", "--policy", str(missing), "--launch", str(LAUNCH)]) == 1
+    assert spec.main(["render", "--policy", str(missing), "--launch", str(LAUNCH), "--swarm", "fixture"]) == 1
     assert capsys.readouterr().err == f"{missing} is not a readable JSON file\n"
-    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(broken)]) == 1
+    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(broken), "--swarm", "fixture"]) == 1
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == f"{broken} is not a readable JSON file\n"
@@ -823,20 +868,26 @@ def test_an_unreadable_policy_is_refused_as_input(tmp_path):
 
 
 def test_the_command_line_digest_action_prints_the_spec_digest(capsys):
-    assert spec.main(["digest", "--policy", str(POLICY), "--launch", str(LAUNCH)]) == 0
+    assert spec.main(["digest", "--policy", str(POLICY), "--launch", str(LAUNCH), "--swarm", "fixture"]) == 0
     assert capsys.readouterr().out == render()[1].digest + "\n"
 
 
 def test_the_command_line_refuses_an_unknown_action(capsys):
-    assert spec.main(["apply", "--policy", str(POLICY), "--launch", str(LAUNCH)]) == 64
+    assert spec.main(["apply", "--policy", str(POLICY), "--launch", str(LAUNCH), "--swarm", "fixture"]) == 64
     assert " ".join(capsys.readouterr().err.split()).startswith(
-        "usage: python -m scripts.swarm_v2.kubernetes.spec [-h] --policy POLICY --launch LAUNCH {render,digest}"
+        "usage: python -m scripts.swarm_v2.kubernetes.spec [-h] --policy POLICY --launch LAUNCH --swarm SWARM {render,digest}"
     )
 
 
-@pytest.mark.parametrize("missing", ["--policy", "--launch"])
-def test_the_command_line_requires_both_inputs(missing):
-    argv = ["render", "--policy", str(POLICY), "--launch", str(LAUNCH)]
+def test_the_command_line_labels_the_pod_with_the_named_swarms_owner(capsys):
+    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(LAUNCH), "--swarm", "other"]) == 0
+    labels = json.loads(capsys.readouterr().out)["metadata"]["labels"]
+    assert labels["swarm.agentihooks.io/controller-owner"] == "agentihooks-swarm-other"
+
+
+@pytest.mark.parametrize("missing", ["--policy", "--launch", "--swarm"])
+def test_the_command_line_requires_every_input(missing):
+    argv = ["render", "--policy", str(POLICY), "--launch", str(LAUNCH), "--swarm", "fixture"]
     index = argv.index(missing)
     del argv[index : index + 2]
     assert spec.main(argv) == 64

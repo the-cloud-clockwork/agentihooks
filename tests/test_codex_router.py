@@ -191,7 +191,7 @@ def test_route_reads_quotas_for_a_forced_account_and_refreshes_them_otherwise(mo
     pool = _accounts()
     runner = object()
     monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {})
-    monkeypatch.setattr(router, "routing_pool", lambda environ, run: pool)
+    monkeypatch.setattr(router, "accounts", lambda environ, run: pool)
     monkeypatch.setattr(router, "quotas", lambda p, environ: calls.append(("quotas", p, environ)) or {})
     monkeypatch.setattr(
         router,
@@ -378,9 +378,6 @@ def test_no_routable_account_fails_the_launch_and_reports_it(monkeypatch, tmp_pa
 
 
 def test_without_token_variables_the_default_login_is_judged_by_its_week(monkeypatch, tmp_path):
-    def no_status(argv, **kwargs):
-        raise AssertionError("no login status check without tokens")
-
     environ = {"AH_CC_TOKEN_ncgma": "cc-value"}
     rc, seen, report = _launch(monkeypatch, tmp_path, environ, ["-m", "o3", "do it"], {"default": _quota(50.0)})
     assert rc == 0
@@ -390,7 +387,9 @@ def test_without_token_variables_the_default_login_is_judged_by_its_week(monkeyp
     rc, seen, report = _launch(monkeypatch, tmp_path, environ, [], {"default": _quota(50.0)}, {"default": 6})
     assert rc == 3 and not seen
     monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {"default": 5})
-    assert router._route(environ, "", no_status, "") == (router.CodexAccount("default"), "open", 5, "6")
+    assert router._route(environ, "", _status(0), "") == (router.CodexAccount("default"), "open", 5, "6")
+    with pytest.raises(router.RoutingError, match="no signed in Codex account"):
+        router._route(environ, "", _status(1), "")
 
 
 def test_the_api_route_is_forced_with_its_own_live_count_and_no_cap(monkeypatch):
@@ -738,6 +737,65 @@ def test_an_open_route_never_places_an_account_whose_credential_is_refused(monke
         "AH_CX_TOKEN_keyed holds an api key; put it in CODEX_API_KEY and route api instead",
         "Codex account 'ghost' has no token in AH_CX_TOKEN_ghost",
     ]
+
+
+@pytest.mark.parametrize(
+    ("tokens", "signed_in", "offered"),
+    [
+        ({"AH_CX_TOKEN_alpha": OAUTH, "AH_CX_TOKEN_keyed": "sk-proj-value"}, None, ["alpha"]),
+        ({"AH_CX_TOKEN_alpha": OAUTH, "AH_CX_TOKEN_beta": OAUTH_TWO}, None, ["alpha", "beta"]),
+        ({}, True, ["default"]),
+        ({}, False, []),
+    ],
+)
+def test_the_tick_offers_codex_seats_only_on_accounts_the_launcher_routes(
+    monkeypatch, tmp_path, capsys, tokens, signed_in, offered
+):
+    from scripts.swarm import capacity
+
+    environ = {**tokens, "HOME": str(tmp_path)}
+    readings = {name: _quota(10.0) for name in ("default", "alpha", "beta", "keyed")}
+    statuses = []
+
+    def status(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0 if signed_in else 1, "", "")
+
+    monkeypatch.setattr(router, "default_signed_in", lambda env, run=None: statuses.append(env) or signed_in)
+    monkeypatch.setattr(router, "quotas", lambda pool, env: {account.name: readings[account.name] for account in pool})
+    monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {})
+    rows = capacity._codex(environ, NOW, refresh=False)
+    seats = [row.name for row in rows if row.state == "OPEN"]
+    assert seats == offered
+    assert statuses == ([] if tokens else [environ])
+    for name in seats:
+        launched = {}
+        rc = router.main(
+            ["--route", name],
+            environ=environ,
+            execvpe=lambda path, cmd, env: launched.update(cmd=cmd, env=env),
+            run=status,
+        )
+        assert rc == 0 and f"account={name} " in capsys.readouterr().out
+        assert launched["env"].get("CODEX_ACCESS_TOKEN") == environ.get(f"AH_CX_TOKEN_{name}")
+    if not tokens:
+        launched = {}
+        rc = router.main(
+            ["--route", "default"], environ=environ, execvpe=lambda *args: launched.update(go=1), run=status
+        )
+        assert (rc, bool(launched)) == ((0, True) if signed_in else (3, False))
+
+
+def test_a_forced_route_to_a_signed_out_default_is_refused_by_name(monkeypatch):
+    monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(router, "quotas", lambda pool, environ: {})
+    with pytest.raises(router.RoutingError, match="'default' is not signed in"):
+        router._route({"HOME": "/home/u"}, "default", _status(1), "")
+    pool = [router.CodexAccount("default", signed_in=False)]
+    with pytest.raises(router.RoutingError) as refused:
+        router.select(pool, {"default": _quota(10.0)}, {}, NOW, route="default")
+    assert str(refused.value) == "Codex account 'default' is not signed in; run codex login"
+    assert router.select(_accounts(), {}, {}, NOW, route="default") == (_accounts()[0], "forced", None)
 
 
 def test_an_open_route_with_no_seat_names_each_refused_credential(monkeypatch, tmp_path, capsys):

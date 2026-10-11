@@ -420,7 +420,10 @@ Codex routes the same way. Its accounts are one ChatGPT workspace access token
 per `AH_CX_TOKEN_<slug>`. Only when no `AH_CX_TOKEN_*` is set is the account the
 default `codex login` on this machine (named `default`, detected with
 `codex login status`); once any token account exists, `default` leaves the
-routing pool and the `agentihooks quota` rows.
+routing pool and the `agentihooks quota` rows. A signed out `default` gets no
+seat from automatic placement or the swarm tick, and `--route default` refuses
+it by name, so every Codex seat the tick offers is one `agentihooks codex
+--route` accepts.
 
 - `agentihooks codex [--route <slug>] [codex args]` picks by the same rule, with
   each Codex account judged on its week alone with the top band (6 sessions, none
