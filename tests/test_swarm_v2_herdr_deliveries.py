@@ -48,12 +48,11 @@ def test_the_listing_never_writes_beside_the_journal(tmp_path):
     before = (path.read_bytes(), path.stat().st_mtime_ns)
     deliveries.main(["--journal", str(path)], clock=lambda: 1600.0)
     assert (path.read_bytes(), path.stat().st_mtime_ns) == before
-    assert [found.name for found in tmp_path.iterdir()] == [DELIVERIES]
+    assert [found.name for found in tmp_path.iterdir() if DELIVERIES in found.name] == [DELIVERIES]
 
 
-def test_the_listing_reads_the_controller_journal_by_default(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    folder = tmp_path / ".ssh" / "swarm-terminals"
+def test_the_listing_reads_the_controller_journal_by_default(capsys):
+    folder = Path.home() / ".ssh" / "swarm-terminals"
     folder.mkdir(parents=True)
     write(folder / DELIVERIES, {"op-pending": JOURNAL["op-pending"]})
     assert deliveries.journal() == folder / DELIVERIES

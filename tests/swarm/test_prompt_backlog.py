@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -35,9 +36,8 @@ def observed(store, path, counts):
     return prompt_backlog.findings(store, "sw")
 
 
-def controller_home(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    folder = tmp_path / ".ssh" / "swarm-terminals"
+def controller_home():
+    folder = Path.home() / ".ssh" / "swarm-terminals"
     folder.mkdir(parents=True)
     return folder / DELIVERIES
 
@@ -84,17 +84,17 @@ def test_prompts_pending_past_the_window_are_not_counted(store, tmp_path):
     assert prompt_backlog.observe(store, "sw", 1600, tmp_path / DELIVERIES) == [2, 0]
 
 
-def test_the_controller_journal_is_read_by_default(store, tmp_path, monkeypatch):
-    path = controller_home(tmp_path, monkeypatch)
+def test_the_controller_journal_is_read_by_default(store):
+    path = controller_home()
     for count in [0, 1, 2, 3]:
         journal(path, count)
         prompt_backlog.observe(store, "sw", 1000)
     assert prompt_backlog.findings(store, "sw")[0].measure == 3
 
 
-def test_the_tick_samples_the_controller_journal(stalled, tmp_path, monkeypatch):
+def test_the_tick_samples_the_controller_journal(stalled):
     store, ledger, runtime, clock, error = stalled
-    journal(controller_home(tmp_path, monkeypatch), 2, since=clock[0] // 1000)
+    journal(controller_home(), 2, since=clock[0] // 1000)
     with pytest.raises(RuntimeError) as caught:
         cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
     assert caught.value is error
