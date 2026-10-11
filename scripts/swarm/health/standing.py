@@ -74,7 +74,6 @@ def _detector(old, reading, now_ms):
     added = [episode for episode in reading["episodes"] if episode not in known]
     row = {
         "stage": reading["stage"],
-        "value": reading["seconds"] / 3600,
         "threshold": 0.0,
         "unit": "task hours",
         "detail": "",

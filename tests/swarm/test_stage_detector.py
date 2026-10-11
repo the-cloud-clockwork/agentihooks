@@ -85,6 +85,12 @@ def test_record_keeps_the_shared_report_and_findings_stable_between_cadence_tick
         assert stages.read(store, "scratch") == found
         assert found["window_hours"] == 1.0
         assert found["top"] == found["stages"][:3]
+        assert found["total"] == 2700.0
+        assert [(row["stage"], row["seconds"]) for row in found["top"]] == [
+            ("review", 1200.0),
+            ("merge_queue", 900.0),
+            ("intent_fix", 600.0),
+        ]
         before = standing.read(store.redis, "scratch")
         assert stage_detector.record(box, store, "scratch", 10 * H + 60_000, [task], environ) == found
         assert standing.read(store.redis, "scratch") == before
@@ -188,3 +194,108 @@ def test_separate_task_observations_count_once_each_for_non_ci_stages(store):
     )
     stage_detector.update_findings(store, "scratch", found, NOW + 60_000)
     assert standing.read(store.redis, "scratch")["ci_run"] == row
+
+
+def test_standing_detector_retains_episode_counts_when_recent_history_rolls_over(store):
+    reading = {
+        "stage": "ci_overrun",
+        "seconds": 3600.0,
+        "labels": ["mutation-stats"],
+        "label": "mutation-stats",
+        "previous_seconds": 0.0,
+        "trend": "rising",
+        "episodes": [str(n) for n in range(30)],
+    }
+    row = standing.update_detector(store.redis, "scratch", reading, NOW)
+    assert row == {
+        "stage": "ci_overrun",
+        "value": 1.0,
+        "threshold": 0.0,
+        "unit": "task hours",
+        "detail": "",
+        "first_at": NOW,
+        "fired": 30,
+        "episodes": [str(n) for n in range(10, 30)],
+        "detector": reading,
+        "updated_at": NOW,
+    }
+    same = standing.fire(store.redis, "scratch", "ci_overrun", standing.Reading(19, 15, "minutes", "0", "old run"), NOW)
+    assert same["fired"] == 30
+    changed = {**reading, "seconds": 7200.0, "episodes": [*reading["episodes"], "30"]}
+    row = standing.update_detector(store.redis, "scratch", changed, NOW + 60_000)
+    assert row["fired"] == 31
+    assert row["episodes"] == [str(n) for n in range(11, 31)]
+    assert row["first_at"] == NOW
+    assert row["updated_at"] == NOW + 60_000
+    assert (row["value"], row["threshold"], row["unit"], row["detail"]) == (19, 15, "minutes", "old run")
+    row = standing.update_detector(store.redis, "scratch", {**changed, "seconds": 10800}, NOW + 120_000)
+    assert row["fired"] == 31
+
+
+@pytest.mark.parametrize("ticks,hours", [("0", "4"), ("1", "0"), ("1", "12.5"), ("-1", "13")])
+def test_detector_refuses_cadence_or_windows_outside_retained_history(ticks, hours):
+    with pytest.raises(ValueError) as error:
+        stage_detector.settings(
+            {"AGENTIHOOKS_STAGE_DETECTOR_TICKS": ticks, "AGENTIHOOKS_STAGE_DETECTOR_WINDOW_HOURS": hours}
+        )
+    assert str(error.value) == "stage detector needs positive ticks and a window of at most twelve hours"
+
+
+def test_detector_defaults_and_the_longest_equal_windows_are_supported():
+    assert stage_detector.settings({}) == stage_detector.Settings(5, 4 * H)
+    assert stage_detector.settings({"AGENTIHOOKS_STAGE_DETECTOR_TICKS": "1"}) == stage_detector.Settings(1, 4 * H)
+    assert stage_detector.settings({"AGENTIHOOKS_STAGE_DETECTOR_WINDOW_HOURS": "12"}) == stage_detector.Settings(
+        5, 12 * H
+    )
+
+
+def test_each_ledger_has_its_own_default_detector_cadence(tmp_path, store):
+    from scripts.swarm.metrics_outbox import Outbox, Settings
+
+    box = Outbox(tmp_path / "empty.db", Settings("http://sink", "writer", ""))
+    try:
+        initial = stage_detector.record(box, store, "scratch", NOW, [], {})
+        other = stage_detector.record(box, store, "another", NOW + 60_000, [], {})
+        assert initial["at"] == NOW
+        assert other["at"] == NOW + 60_000
+        for tick in range(1, 5):
+            assert stage_detector.record(box, store, "scratch", NOW + tick * 60_000, [], {}) == initial
+        assert stage_detector.record(box, store, "scratch", NOW + 300_000, [], {})["at"] == NOW + 300_000
+    finally:
+        box.close()
+
+
+def test_labels_of_the_same_stage_share_one_rank_and_loss_total():
+    source, tasks = replay()
+    source["ci_stages"][1]["stage"] = "unit"
+    source["ci_stages"][2]["stage"] = "unit"
+    report = stage_detector.report(source, tasks, NOW)
+    first = report["top"][0]
+    assert (first["stage"], first["seconds"], first["label"], first["labels"]) == (
+        "ci_overrun",
+        2289.0,
+        "mutation-stats, unit",
+        ["mutation-stats", "unit"],
+    )
+
+
+@pytest.mark.parametrize("previous,current,trend", [(3600, 3600, "unchanged"), (0, 1, "rising")])
+def test_identical_windows_are_unchanged_and_one_second_of_new_loss_is_rising(previous, current, trend):
+    source = rows()
+    tasks = []
+    for number, (end, duration) in enumerate([(NOW - H, previous), (NOW, current)], 1):
+        if not duration:
+            continue
+        task, branch = f"t{number}", f"b{number}"
+        tasks.append({"id": task, "state": "done", "branch": branch})
+        start = end - duration * 1000
+        source["agent_events"].append(agent("claim", task, start))
+        source["delivery_events"].append(delivery("merge", task, end))
+        source["ci_runs"].append(run(number, branch, start, end, "success"))
+    first = stage_detector.report(source, tasks, NOW, H)["top"][0]
+    assert (first["stage"], first["seconds"], first["previous_seconds"], first["trend"]) == (
+        "ci_run",
+        float(current),
+        float(previous),
+        trend,
+    )

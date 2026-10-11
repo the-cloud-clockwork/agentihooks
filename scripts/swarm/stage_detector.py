@@ -30,6 +30,8 @@ def _totals(found: dict) -> dict:
         total["seconds"] += row["seconds"]
         if row["label"]:
             total["labels"].append(row["label"])
+    for total in totals.values():
+        total["labels"].sort()
     return totals
 
 

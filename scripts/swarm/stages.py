@@ -252,7 +252,7 @@ def observations(rows: dict, tasks: list, now_ms: int, window_ms: int) -> dict:
     for timeline in timelines(rows, tasks, now_ms):
         for stage, _ in attribute(timeline, held, window):
             if stage != "ci_overrun":
-                found.setdefault(stage, set()).add(f"{stage}:{timeline.task}:{timeline.start:g}")
+                found.setdefault(stage, set()).add(f"{stage}:{timeline.task}:{int(timeline.start)}")
         overruns = _overrun_episodes(rows, timeline, branches.get(timeline.task), held, window)
         if overruns:
             found.setdefault("ci_overrun", set()).update(overruns)
