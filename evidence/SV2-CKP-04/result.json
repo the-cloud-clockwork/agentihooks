@@ -8,8 +8,8 @@
   ],
   "integration_gate": "G8",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2622",
-  "pull_request": null,
-  "tested_commit": "aad69ebd8b97c2e0c20761fe626fa5ccc525431f",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2728",
+  "tested_commit": "804a1f3cc99726fcab5f3b006c08a2094d322676",
   "status": "mocked-acceptance-qualified",
   "package_complete": false,
   "evidence_class": "mocked: a local durable directory backend behind a granted artifact store, fixture launch registrations, a backend wrapper that loses acknowledgements and a fake clock; no object store, worker Pod or harness was used. Live G8 qualification belongs to the integration package.",
@@ -32,12 +32,12 @@
     "T-SV2-CKP-04-C": "evidence/SV2-CKP-04/c-result.json"
   },
   "outcomes": {
-    "observed": "tests proof 38162749040 at the tested commit: 51 passed, cases A, B and C equal to their committed records, each case run twice in independent fixtures with equal results; mutation proof 38162743303 at the tested commit with the SV2-CKP-03 branch as base: no surviving mutant in the publisher or the schedule",
+    "observed": "mutation preflight 38183349005 at the tested commit: tests passed; mutation left no survivor in the native, publisher, redaction or supervisor modules; cases A, B and C equal to their committed records; the planted fake token test proves no published byte holds the token",
     "accepted": "the publisher returns promoted only after Validator.commit verifies the manifest and every inventory object",
     "committed": "a checkpoint is current only through its pointer, written after the manifest verifies",
     "externally_verified": "none: no object store or deployed worker was exercised"
   },
-  "red": "Tests dispatch 38151815386 at 3f44dc961 failed collection: cannot import name publisher from scripts.swarm_v2.checkpoints",
+  "red": "Tests dispatch 38151815386 at 3f44dc961 failed collection: cannot import name publisher from scripts.swarm_v2.checkpoints; proofs 38180384815 at 63cb1334c: 7 redaction tests failed; proofs 38181743529 at 5bcc68d99: 3 scanner tests failed",
   "rollback": "Stop calling Schedule.tick and Schedule.drain to stop periodic promotion; pointers and manifests already written stay, so Publisher.latest keeps returning the last complete checkpoint. Lowering the checkpoint write_minor below 2 makes Validator.commit refuse promotion_disabled, which the publisher reports without writing a pointer. Rehearsed in case C: with write_minor 1 a publish is refused promotion_disabled and latest stays on the last complete checkpoint; restoring write_minor promotes the same checkpoint.",
   "limitations": [
     "No production caller yet: the Pod supervisor drain path and the recovery Checkpoints listing do not call the publisher; SV2-CKP-05 owns restore decisions",
@@ -50,5 +50,5 @@
     "Each publish lists every pointer up to four times; pointers grow by one per promoted checkpoint with no compaction",
     "Two record keys that are themselves secrets and redact to the same marker collapse to one field; the count stays exact and no value is kept"
   ],
-  "mutation": "graded against the SV2-CKP-03 branch because the diff against dev still carries that open dependency; the branch preflight 38156178282 left every file not mutated, over budget, for that reason. Survivor history: 20 and 1 at 36edb88c6 (run 38160365501), 3 equivalent at 304abf546 (run 38161072329), none at the tested commit"
+  "mutation": "branch preflight 38183349005 graded the whole package against dev once SV2-CKP-03 merged: no survivors; earlier survivor history in proofs 38160365501, 38161072329 and preflight 38182042630, each fixed"
 }
