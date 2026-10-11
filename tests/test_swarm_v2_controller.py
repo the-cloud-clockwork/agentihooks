@@ -9,6 +9,7 @@ from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2.controller import Controller
 from scripts.swarm_v2.herdr.endpoints import Endpoint, Scope
+from scripts.swarm_v2.herdr.reconcile import Report
 from scripts.swarm_v2.herdr.upkeep import Attempt, Upkeep
 from scripts.swarm_v2.kubernetes import watch
 from scripts.swarm_v2.kubernetes.terminal import HostKeys
@@ -849,6 +850,7 @@ class Keeper:
 
     def start(self, attempts):
         self.calls.append(("start", list(attempts)))
+        return Report()
 
     def change(self, attempts):
         self.calls.append(("change", list(attempts)))
@@ -878,6 +880,36 @@ def test_a_starting_controller_reconciles_the_attachable_attempts(fixture):
     assert keeping(store, grant, keeper).acquire()
 
     assert keeper.calls == [("start", [wanted])]
+
+
+class Reporting(Keeper):
+    def start(self, attempts):
+        super().start(attempts)
+        return Report(
+            registered={"exec-b": "p2", "exec-a": "p1"},
+            refused={"exec-d": "machine_refused", "exec-c": "catalog_unreachable"},
+        )
+
+
+def test_a_starting_controller_logs_the_machines_it_registered(fixture, capsys):
+    store, _controllers, _transport, _clock, grant = fixture
+    capsys.readouterr()
+
+    assert keeping(store, grant, Reporting()).acquire()
+
+    assert capsys.readouterr().out == (
+        "controller: kept saved herdr machines for fixture on start: registered 2, "
+        "refused {'exec-c': 'catalog_unreachable', 'exec-d': 'machine_refused'}\n"
+    )
+
+
+def test_a_controller_without_a_herdr_client_logs_no_machines(fixture, capsys):
+    store, (first, _second), _transport, _clock, grant = fixture
+    capsys.readouterr()
+
+    assert first.acquire()
+
+    assert capsys.readouterr().out == ""
 
 
 def test_every_renewal_passes_the_attachable_attempts_for_change(fixture):
