@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from scripts.swarm_v2.herdr.attach import ClientHome, Terminal
+from scripts.swarm_v2.herdr.attach import SSH, ClientHome, Terminal
 from scripts.swarm_v2.herdr.capabilities import Qualifier, machine_probe
 from scripts.swarm_v2.herdr.catalog import Catalog
 from scripts.swarm_v2.herdr.endpoints import Endpoint, EndpointRefused, TerminalAuthority, operator_scope
@@ -480,4 +480,7 @@ def client_terminal(root: Path, herdr: Herdr, namespace: str, addresses=("10.43.
     def lookup(host, port, type):
         return [(socket.AF_INET, type, 6, "", (address, port)) for address in addresses]
 
-    return Terminal(ClientHome(root), authority, namespace, herdr, lookup)
+    def run(command: list[str]) -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess(command, 0, "", "") if command[0] == SSH else herdr(command)
+
+    return Terminal(ClientHome(root), authority, namespace, run, lookup)
