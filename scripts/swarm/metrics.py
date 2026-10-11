@@ -3,7 +3,7 @@ import sqlite3
 from collections.abc import Mapping
 from functools import partial
 
-from scripts.swarm import bottleneck, freeze, metrics_ledger, metrics_outbox, metrics_swarm
+from scripts.swarm import bottleneck, freeze, metrics_fleet, metrics_ledger, metrics_outbox, metrics_swarm, stages
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import SwarmError
 
@@ -15,11 +15,18 @@ def tick_row(slug, now_ms, actions):
     return {"event_id": f"tick:{slug}:{now_ms}", "ledger": slug, "ts_ms": now_ms, **path, "actions": actions}
 
 
-def _collect(slug, now_ms, swarm, box):
+def _collect(slug, now_ms, swarm, box, errors):
     pulls = metrics_swarm.pull_rows(box, now_ms, swarm)
     watched = freeze.watched(slug, swarm.store, swarm.ledger, swarm.doc)
     metrics_swarm.record_pass(box, slug, now_ms, swarm.store, watched, swarm.findings, pulls)
     bottleneck.record(box, swarm.store, slug, now_ms, swarm.doc.get("tasks", []))
+    stages.record(box, swarm.store, slug, now_ms, swarm.doc.get("tasks", []))
+    from redis.exceptions import RedisError
+
+    try:
+        metrics_fleet.record(box, swarm.store, slug, now_ms)
+    except (OSError, SwarmError, ValueError, KeyError, RedisError) as exc:
+        errors.append(f"fleet metrics failed: {exc}")
 
 
 def record(table, rows, now_ms, environ=os.environ, extra=None):
@@ -50,7 +57,7 @@ def _ledger(slug, now_ms, errors, box):
 def _pass(slug, now_ms, swarm, errors, box):
     _ledger(slug, now_ms, errors, box)
     if swarm is not None:
-        _collect(slug, now_ms, swarm, box)
+        _collect(slug, now_ms, swarm, box, errors)
 
 
 def record_pass(

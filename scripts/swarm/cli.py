@@ -99,6 +99,7 @@ from scripts.swarm import (
     reaper,
     snapshot,
     stack,
+    stages,
     take_master,
     templates,
     tick_master,
@@ -841,6 +842,7 @@ def cmd_status(store, args):
     for line in ledger_freezes.lines(doc) + quota + spawn_holds(store, args.slug):
         print(line)
     print(bottleneck.line(bottleneck.read(store, args.slug), now_ms()))
+    print(stages.line(stages.read(store, args.slug), now_ms()))
     print(_snapshot_line(auto_snapshot(config)))
     print(_affinity_line(affinity.report(store, args.slug, config, agents)))
     if promotion := tick_master.status_line(tick_master.read(store, args.slug)):
