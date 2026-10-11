@@ -1,0 +1,7 @@
+{"step": "installed_version", "exit": 0, "output": "2.1.296 (Claude Code)"}
+{"step": "account", "exit": 0, "output": "named by the operator environment, never written to the record or the carried material"}
+{"step": "source_session", "exit": 0, "output": "ok"}
+{"step": "commit", "exit": 0, "output": "{\"capture\": {\"outcome\": \"captured\", \"quiescence\": \"stopped_process\", \"session_id\": \"bed507b0-b4a0-4910-9309-af82f23f4aac\"}, \"committed\": {\"authoritative\": true, \"completeness\": \"complete\", \"continuation\": \"native\", \"reason\": \"native\"}, \"material_names_auth_files\": false, \"native_resume_success_by_target\": {\"capture\": {\"native_resume_success_by_target\": {\"claude/captured\": 1}}}, \"session_id\": \"bed507b0-b4a0-4910-9309-af82f23f4aac\"}"}
+{"step": "container_version", "exit": 0, "output": "2.1.295 (Claude Code)"}
+{"step": "fresh_container_resume", "exit": 0, "output": "{\"auth_files_in_fresh_home\": [], \"native_resume_success_by_target\": {\"restore\": {\"native_resume_success_by_target\": {\"claude/resumed\": 1}}}, \"restore\": {\"command\": [\"claude\", \"--resume\", \"bed507b0-b4a0-4910-9309-af82f23f4aac\"], \"outcome\": \"resumed\", \"session_id\": \"bed507b0-b4a0-4910-9309-af82f23f4aac\"}}\nPLUM-3792"}
+{"step": "codeword_recalled", "exit": 0, "output": "expected PLUM-3792 in the resumed answer"}

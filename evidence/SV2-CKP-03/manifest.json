@@ -1,16 +1,18 @@
 {
-  "tested_commit": "c3975cc8a2e21c1757086d491e48c5e29160e921",
+  "tested_commit": "317b2f4d59790f3e2674895e519307351ec5cb27",
   "evidence_class": "mocked: fixture Claude and Codex homes laid out as the qualified CLIs write them, a local durable directory backend behind a granted artifact store and fixture launch registrations; no CLI, account, worker Pod or object store was used",
   "inputs": {
     "tests/fixtures/swarm_v2/checkpoints/context-only.json": "0bef305b2565a336c5021606d2bf4b1a6f4b35f9cade44aee8c6720da27e5fda",
     "tests/sv2_ckp03_cases.py": "babae1dbc4a3b1d2030f821a734cff47fe9b37c8d2170f6f19924a571723f972",
     "tests/test_swarm_v2_checkpoints_native.py": "cb6251d5b8f05822876bfa1bd634640e30cac2f1119cb85e3b14a4dccdca53e6",
-    "scripts/swarm_v2/checkpoints/native.py": "21b88cf0ee38c669d6425f6b268b46027bbf3d734d1bcafc74cc7f6615cc7cd6",
+    "scripts/swarm_v2/checkpoints/native.py": "1a96635abbb90aafad94588d53a07c579dfc7dbfd3a5be8ff652b104567f7137",
     "scripts/swarm_v2/checkpoints/model.py": "760d5dfb8cc76722b87fc3315a9fd7a3fdc21e431e9581b6d0d3d62ff07cda39",
     "scripts/swarm_v2/artifacts/base.py": "bcc39bf6c81f689e35ce11ceebe9c2994519522fd3e8e337538e4c82dc8b02ea",
     "scripts/swarm_v2/artifacts/local.py": "57b3baf4a360307b1995f2068aee79370a03863c6902837fe2c0739a938c306d",
     "scripts/swarm_v2/filesystem.py": "fefd6faab289337d362bf99c94b415a70809e05506fd4f33761ec64ad3b591e6",
-    "tests/integration/native_resume/native_proof.py": "0921d4aa2f502c3897832cfaa25090e37fe5182a9f7013ffca22a88e4faf0cc4",
-    "tests/integration/native_resume/run_native_proof.sh": "dcdb4a88962743f68135b3ce621af1134c70624f47b664915472233d6f0932c7"
+    "tests/integration/native_resume/native_proof.py": "687bb1d2b975e72fbd4fcf8af887ea34830260a46c2c970770e01c98856e8415",
+    "tests/integration/native_resume/run_native_proof.sh": "fc5bca054229c475dc788216ab81070fac104349397083cdcee3872a512df0f4",
+    "scripts/swarm/snapshot.py": "2d05eccfca503adf25bd5dab901b79457c5316657b52290137eeafc350620fb4",
+    "tests/swarm/test_snapshot_natives.py": "77615e2ee0f3ba30ae4dc6bdf95a40a6936a656896134e1ba8aa958347942d9c"
   }
 }
