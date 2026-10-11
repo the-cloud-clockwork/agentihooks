@@ -574,6 +574,97 @@ def test_the_claim_key_bands_only_operator_ranks_ahead_of_the_queue_position(sto
     assert dispatcher.claim_key(store.update(SLUG, autonomy="assist"), found) is None
 
 
+def chain_merge(store, autonomy="delegate"):
+    from tests.swarm.test_tick import FakeLedger
+
+    config = store.update(SLUG, autonomy=autonomy, max_eng=1)
+    ledger = FakeLedger(
+        [
+            task("a", phase="", state="done"),
+            task("b", phase="", depends_on=["a"]),
+            task("c", phase="", depends_on=["b"]),
+            task("x", phase="", rank="urgent"),
+            task("r", phase="", branch="engineer-abcdef-0009"),
+            task("y", phase=""),
+        ]
+    )
+    found = ledger.state(SLUG)
+    found["_meta"]["stamps"] = {
+        "tasks/a/state": {"by": "engineer@abcdef-0001", "at": NOW - 30_000},
+        "tasks/x/rank": {"by": "operator"},
+    }
+    return config, ledger, found
+
+
+CHAIN_COMMENT = (
+    "The dispatcher's chain guard gave this task the next free eng seat 30 seconds after the task before it "
+    "on the critical chain merged."
+)
+
+
+def test_a_critical_chain_successor_takes_the_next_seat_ahead_of_operator_urgent_and_resumed_work(store):
+    config, ledger, found = chain_merge(store)
+    assert dispatcher.guarded(found) == {"b"}
+    key = dispatcher.claim_key(config, found)
+    assert key(ledger.rows["b"])[0] == dispatcher.GUARD < key(ledger.rows["x"])[0] == 0
+    assert spawned(store, config, ledger, found) == [("eng", "b")]
+    config, ledger, found = chain_merge(store, "assist")
+    assert spawned(store, config, ledger, found) == [("eng", "x")]
+
+
+def test_only_a_merged_predecessors_successor_on_the_critical_chain_is_guarded():
+    tasks = [
+        task("a", phase="", state="done"),
+        task("b", phase="", depends_on=["a"]),
+        task("p", phase=""),
+        task("q", phase="", depends_on=["p"]),
+        task("s", phase="", depends_on=["q"]),
+    ]
+    assert dispatcher.guarded(doc(tasks, phases=[])) == set()
+    tasks.append(task("c", phase="", depends_on=["b"]))
+    assert dispatcher.guarded(doc(tasks, phases=[])) == {"b"}
+
+
+def test_a_chain_claim_reports_the_seconds_from_the_merge_on_the_task_and_logs_it(store, home, shipped):
+    config, ledger, found = chain_merge(store)
+    actions = dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["b"], "eng", NOW)
+    assert actions == ["chain guard claimed task b 30 seconds after task a merged on the critical chain"]
+    assert ledger.comments == [("b", CHAIN_COMMENT, "dispatcher")]
+    (row,) = gate_log.recent(SLUG, None, home)
+    assert (row["gate"], row["kind"], row["task"], row["tool"], row["reason"]) == (
+        "dispatcher",
+        "apply",
+        "b",
+        "chain-guard",
+        actions[0],
+    )
+    assert [(r["task"], r["rule"], r["action"]) for _, rows, _ in shipped for r in rows] == [
+        ("b", "chain-guard", actions[0])
+    ]
+
+
+def test_a_refused_chain_comment_still_logs_the_claim(store, home, shipped):
+    config, _, found = chain_merge(store)
+    ledger = Ledger(refused={"comment:b"})
+    claimed = next(t for t in found["tasks"] if t["id"] == "b")
+    actions = dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW)
+    assert actions == [
+        "chain guard claimed task b 30 seconds after task a merged on the critical chain" + dispatcher.UNCOMMENTED
+    ]
+    assert [r["reason"] for r in gate_log.recent(SLUG, None, home)] == actions
+
+
+@pytest.mark.parametrize("autonomy", ["assist", "manual"])
+def test_an_unguarded_claim_below_delegate_or_without_a_merge_time_reports_nothing(store, home, shipped, autonomy):
+    config, ledger, found = chain_merge(store, autonomy)
+    assert dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["b"], "eng", NOW) == []
+    config = store.update(SLUG, autonomy="delegate")
+    assert dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["y"], "eng", NOW) == []
+    del found["_meta"]["stamps"]["tasks/a/state"]
+    assert dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["b"], "eng", NOW) == []
+    assert (ledger.comments, shipped, gate_log.recent(SLUG, None, home)) == ([], [], [])
+
+
 def test_a_master_urgent_fix_phase_leaf_outside_the_focus_gets_no_rank_write_and_no_head_comment(store, home, shipped):
     from scripts.doctor import loop, priming
 
