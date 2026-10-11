@@ -15,6 +15,8 @@ from scripts.ci_mutation.report import mutation_lines
 from scripts.ci_mutation.stats import write_part
 
 GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
+# This group only loads fakeredis once per xdist worker; it guards no shared resource.
+IMPORT_GROUPS = {"fakeredis"}
 
 
 def changed_mutations(filename: str, source: str, changed: set[int]) -> tuple[object, list]:
@@ -80,7 +82,8 @@ def stats_shards(root: Path, files: list[str], count: int) -> list[list[str]]:
     # Files that share an xdist group never run concurrently in CI, so they share a shard here.
     units = []
     for path in files:
-        keys = {f"group {group}" for group in GROUP.findall((root / path).read_text())} or {path}
+        groups = set(GROUP.findall((root / path).read_text())) - IMPORT_GROUPS
+        keys = {f"group {group}" for group in groups} or {path}
         members = [path]
         for unit in [unit for unit in units if unit[0] & keys]:
             units.remove(unit)

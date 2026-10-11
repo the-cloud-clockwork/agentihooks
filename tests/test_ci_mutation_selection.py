@@ -502,6 +502,14 @@ def test_stats_shards_balance_by_duration_and_keep_xdist_groups_together(tmp_pat
         (bridge / f"tests/test_{name}.py").write_text(text)
     bridged = [f"tests/test_{name}.py" for name in marks]
     assert stats_shards(bridge, bridged, 4) == [bridged[1:], bridged[:1]]
+    imports = tmp_path / "imports"
+    (imports / "tests").mkdir(parents=True)
+    for name in "pqr":
+        (imports / f"tests/test_{name}.py").write_text(
+            'import pytest\n\npytestmark = pytest.mark.xdist_group("fakeredis")\n'
+        )
+    imported = [f"tests/test_{name}.py" for name in "pqr"]
+    assert stats_shards(imports, imported, 3) == [[path] for path in imported]
     (tmp_path / ".test_durations").unlink()
     assert stats_shards(tmp_path, files, 3) == [
         ["tests/test_b.py", "tests/test_d.py"],
