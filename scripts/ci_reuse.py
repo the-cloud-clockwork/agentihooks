@@ -132,44 +132,67 @@ def _proof(path):
         return json.loads(archive.read(entry))
 
 
+def _differs(expected, actual, prefix=""):
+    keys = []
+    for key in sorted(set(expected) | set(actual)):
+        if isinstance(expected.get(key), dict) and isinstance(actual.get(key), dict):
+            keys += _differs(expected[key], actual[key], f"{prefix}{key}.")
+        elif (type(expected.get(key)), expected.get(key)) != (type(actual.get(key)), actual.get(key)):
+            keys.append(f"{prefix}{key}")
+    return keys
+
+
+def _refusal(args, current, workflow, run):
+    for key, value in (("event", "pull_request"), ("status", "completed"), ("conclusion", "success")):
+        if run[key] != value:
+            return f"{key} is {run[key]}"
+    folder = args.evidence / str(run["id"])
+    if missing := [name for name in EVIDENCE if not (folder / name).is_file()]:
+        return f"no {', '.join(missing)} evidence"
+    if _resolved(run["head_sha"], ":.github") != current["inputs"]["workflow"]:
+        return "workflow files differ at its head"
+    artifacts = _lines(folder / "artifacts.jsonl")
+    name = f"required-tree-{run['run_attempt']}"
+    if len([item for item in artifacts if item["name"] == name and not item["expired"]]) != 1:
+        return f"not exactly one {name} artifact"
+    record = _proof(folder / "proof.zip")
+    expected = {
+        "version": 1,
+        "event": "pull_request",
+        "reused": False,
+        "run": run["id"],
+        "attempt": run["run_attempt"],
+        "tree": current["tree"],
+        "inputs": current["inputs"],
+    }
+    if keys := _differs(expected, {key: record.get(key) for key in expected}):
+        return f"{', '.join(keys)} differed"
+    if _resolved(record["commit"], "^{tree}") != current["tree"]:
+        return "commit tree differed"
+    shards = workflow["jobs"]["unit"]["strategy"]["matrix"]["shard"]
+    kept = {item["name"] for item in artifacts if not item["expired"]}
+    if missing := sorted({f"coverage-3.12-{shard}" for shard in shards} - kept):
+        return f"no {', '.join(missing)} artifact"
+    jobs = _lines(folder / "jobs.jsonl")
+    if not _passed(workflow, jobs):
+        return "a required job did not pass"
+    if not _authenticated(folder, record, jobs):
+        return "its reuse log does not attest the record"
+    return None
+
+
 def _find(args, current):
     if _git("rev-parse", f"{current['commit']}:.github") != current["inputs"]["workflow"]:
+        print("No reuse: the queue tree changes workflow files")
         return None
     workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text())
     runs = json.loads((args.evidence / "runs.json").read_text())["workflow_runs"]
+    if not runs:
+        print("No passed pull request run for this head")
     for run in runs:
-        if run["event"] != "pull_request" or run["status"] != "completed" or run["conclusion"] != "success":
-            continue
-        folder = args.evidence / str(run["id"])
-        if not all((folder / name).is_file() for name in EVIDENCE):
-            continue
-        if _resolved(run["head_sha"], ":.github") != current["inputs"]["workflow"]:
-            continue
-        artifacts = _lines(folder / "artifacts.jsonl")
-        name = f"required-tree-{run['run_attempt']}"
-        metadata = [item for item in artifacts if item["name"] == name and not item["expired"]]
-        if len(metadata) != 1:
-            continue
-        record = _proof(folder / "proof.zip")
-        if (
-            record.get("version") != 1
-            or record.get("event") != "pull_request"
-            or record.get("reused") is not False
-            or record.get("run") != run["id"]
-            or record.get("attempt") != run["run_attempt"]
-            or record.get("tree") != current["tree"]
-            or record.get("inputs") != current["inputs"]
-        ):
-            continue
-        if _resolved(record["commit"], "^{tree}") != current["tree"]:
-            continue
-        shards = workflow["jobs"]["unit"]["strategy"]["matrix"]["shard"]
-        coverage = {f"coverage-3.12-{shard}" for shard in shards}
-        kept = {item["name"] for item in artifacts if not item["expired"]}
-        if coverage - kept:
-            continue
-        jobs = _lines(folder / "jobs.jsonl")
-        if _passed(workflow, jobs) and _authenticated(folder, record, jobs):
+        if reason := _refusal(args, current, workflow, run):
+            print(f"Refused run {run['id']}: {reason}")
+        else:
             return run
     return None
 

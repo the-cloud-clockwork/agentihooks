@@ -47,7 +47,10 @@ steps:
       evidence="$RUNNER_TEMP/evidence"
       actions="repos/$GITHUB_REPOSITORY/actions"
       mkdir -p "$evidence"
-      if ! gh api "$actions/workflows/test.yml/runs?event=pull_request&status=success&per_page=100" > "$evidence/runs.json"; then
+      if ! head="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pull" | jq -er '.head.sha')"; then
+        exit 0
+      fi
+      if ! gh api "$actions/workflows/test.yml/runs?event=pull_request&status=success&head_sha=$head&per_page=100" > "$evidence/runs.json"; then
         rm -f "$evidence/runs.json"
         exit 0
       fi
