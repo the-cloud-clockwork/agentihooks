@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -100,6 +101,26 @@ def renew(store: RedisStore, slug: str, held: Lease) -> Lease:
                 return renewed
             except WatchError:
                 continue
+
+
+def beat(store: RedisStore, slug: str, held: Lease, stop) -> None:
+    while not stop.wait(tick_ms() / 1000):
+        try:
+            renew(store, slug, held)
+        except SwarmError:
+            return
+
+
+@contextmanager
+def kept(store: RedisStore, slug: str, held: Lease) -> Iterator[None]:
+    stop = threading.Event()
+    beating = threading.Thread(target=beat, args=(store, slug, held, stop))
+    beating.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        beating.join()
 
 
 def require_epoch(store: RedisStore, slug: str, epoch: int) -> None:

@@ -49,7 +49,8 @@ class FencedRuntime:
 
         def call(*args, **kwargs):
             lease.renew(self.store, self.slug, self.held)
-            return value(*args, **kwargs)
+            with lease.kept(self.store, self.slug, self.held):
+                return value(*args, **kwargs)
 
         return call
 
@@ -82,7 +83,8 @@ class FencedRuntime:
         lease.renew(self.store, self.slug, self.held)
         if refused := self.placement_refusal(lane, task):
             raise SwarmError(refused)
-        return self.runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
+        with lease.kept(self.store, self.slug, self.held):
+            return self.runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
 
 
 def take_tick_lock(store: RedisStore, slug: str, held: lease.Lease, ttl_ms: int) -> str | None:

@@ -408,6 +408,13 @@ def _selection_refused(environ: dict[str, str]) -> bool:
     return bool(environ.get(binding.REPORT)) and binding.refused(Path(environ[binding.REPORT]))
 
 
+def _route_reported(environ: dict[str, str], timeout: float, route: dict) -> None:
+    from scripts.profiles import binding
+
+    if environ.get(binding.REPORT) and not route.get("status") and not _selection_refused(environ):
+        raise ValueError(f"the harness did not report its route within {timeout:g}s")
+
+
 def _binding_export(environ: dict[str, str]) -> str:
     names = (
         "AGENTIHOOKS_PROFILE_REPORT",
@@ -754,6 +761,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         )
         return 3
     try:
+        _route_reported(active_env, args.route_timeout, route)
         report += _binding_result(active_env, args.route_timeout, route)
     except (OSError, ValueError) as exc:
         print("\n".join([*report, "profile_validation=failed"]))
