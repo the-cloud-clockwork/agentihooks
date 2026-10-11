@@ -9,9 +9,11 @@ import pytest
 
 from scripts.hive import auth
 from scripts.swarm.store import AgentRecord
+from scripts.swarm_v2.api.recovery import RecoveryAPI
 from scripts.swarm_v2.auth_context import LaunchKey
 from scripts.swarm_v2.control_service import ControlService
 from scripts.swarm_v2.operator_auth import authenticator
+from scripts.swarm_v2.restore_decisions import decide
 from tests import sv2_kub05_cases as cases
 
 pytestmark = pytest.mark.unit
@@ -195,3 +197,112 @@ def test_overlapping_restore_decisions_accept_only_the_first_choice(pending, mon
     assert second_status == 409
     assert second_result["message"] == "no recovery decision is pending for this attempt"
     assert pending.recovery.decision(pending.old.execution_id).mode == "fresh"
+
+
+def test_invalid_decision_requests_write_nothing(pending):
+    api = pending.service.recovery_api
+    before = pending.world.protected()
+    authorization = f"Bearer {pending.token}"
+    cases = [
+        ("GET", pending.url.split("/v1/")[1], authorization, {}, 404, "no such recovery endpoint"),
+        ("POST", "/v1/executions/unknown/other", authorization, {}, 404, "no such recovery endpoint"),
+        ("POST", None, authorization, None, 400, "a recovery decision needs an object"),
+        ("POST", None, "", {}, 401, "a bearer credential is required"),
+        (
+            "POST",
+            None,
+            authorization,
+            {"agent": "coordinator", "choice": "invalid"},
+            400,
+            "a recovery decision is fresh or resume",
+        ),
+        (
+            "POST",
+            None,
+            authorization,
+            {"agent": 5, "choice": "fresh"},
+            401,
+            "the credential is not bound to this swarm and caller",
+        ),
+    ]
+    for method, path, header, body, expected, message in cases:
+        status, result = api.route(method, path or "/v1/" + pending.url.split("/v1/")[1], header, body)
+        assert (status, result["message"]) == (expected, message)
+    assert pending.world.protected() == before
+
+
+def test_missing_recovery_and_unavailable_store_are_reported(pending, monkeypatch):
+    from redis.exceptions import RedisError
+
+    slug = pending.recovery.slug
+    api = RecoveryAPI(pending.world.store, slug, lambda: None)
+    status, result = api.route(
+        "POST",
+        "/v1/executions/attempt/restore-decision",
+        f"Bearer {pending.token}",
+        {"agent": "coordinator", "choice": "fresh"},
+    )
+    assert (status, result["message"]) == (503, "controller recovery is unavailable")
+
+    def unavailable(*args):
+        raise RedisError("synthetic outage")
+
+    monkeypatch.setattr(pending.world.store, "agents", unavailable)
+    status, result = api.route(
+        "POST",
+        "/v1/executions/attempt/restore-decision",
+        f"Bearer {pending.token}",
+        {"agent": "coordinator", "choice": "fresh"},
+    )
+    assert (status, result["message"]) == (503, "the recovery store is unavailable")
+
+
+def test_finished_or_removed_master_cannot_decide_recovery(pending):
+    from dataclasses import replace
+
+    slug = pending.recovery.slug
+    pending.world.store.put_agent(slug, AgentRecord("coordinator", "master", "", state="finished"))
+    status, result = post(pending, pending.token, {"agent": "coordinator", "choice": "fresh"})
+    assert (status, result["error_class"]) == (403, "forbidden_scope")
+    pending.world.store.drop_agent(slug, "coordinator")
+    status, result = post(pending, pending.token, {"agent": "coordinator", "choice": "fresh"})
+    assert (status, result["error_class"]) == (403, "forbidden_scope")
+    pending.world.store.put_agent(slug, replace(pending.old, name="coordinator", lane="master"))
+    pending.world.store.redis.delete(f"{auth.PREFIX}:member:fixture")
+    status, result = post(pending, pending.token, {"agent": "coordinator", "choice": "fresh"})
+    assert (status, result["error_class"]) == (401, "unauthenticated")
+
+
+def test_command_refuses_missing_controller_or_operator_credential(pending, monkeypatch):
+    from scripts.gates import Who
+    from scripts.swarm.store import SwarmError
+    from scripts.swarm_v2 import control_service
+
+    slug = pending.recovery.slug
+    with pytest.raises(SwarmError, match="controller API address is unavailable"):
+        decide(pending.world.store, slug, pending.old, "fresh", Who())
+    pending.world.store.update(slug, api_url=pending.url.split("/v1/")[0])
+    monkeypatch.setattr(control_service, "page_credential", lambda _: None)
+    with pytest.raises(SwarmError, match="master or operator credential"):
+        decide(pending.world.store, slug, pending.old, "fresh", Who())
+    with pytest.raises(SwarmError, match="master or operator credential"):
+        decide(pending.world.store, slug, pending.old, "fresh", Who("worker"))
+
+
+def test_operator_command_reaches_anton_and_connection_errors_are_named(pending, monkeypatch):
+    from scripts.gates import Who
+    from scripts.swarm.store import SwarmError
+    from scripts.swarm_v2 import control_service
+
+    slug = pending.recovery.slug
+    pending.world.store.update(slug, api_url=pending.url.split("/v1/")[0] + "/")
+    monkeypatch.setattr(control_service, "page_credential", lambda _: "fixture operator credential")
+    result = decide(pending.world.store, slug, pending.old, "fresh", Who())
+    assert result["mode"] == "fresh"
+
+    def unreachable(*args, **kwargs):
+        raise TimeoutError("synthetic timeout")
+
+    monkeypatch.setattr(urllib.request, "urlopen", unreachable)
+    with pytest.raises(SwarmError, match="controller could not be reached: TimeoutError"):
+        decide(pending.world.store, slug, pending.old, "fresh", Who())

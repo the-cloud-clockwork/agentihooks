@@ -1,6 +1,7 @@
 import re
 from collections.abc import Callable
 from dataclasses import asdict
+from threading import Lock
 
 from redis.exceptions import RedisError
 
@@ -22,6 +23,7 @@ class RecoveryAPI:
         operator: Callable[[str, str], object] | None = None,
     ) -> None:
         self.store, self.slug, self.recovery, self.operator = store, slug, recovery, operator
+        self.lock = Lock()
 
     def route(self, method: str, path: str, authorization: str, body: object) -> tuple[int, dict]:
         subject = PATH.fullmatch(path)
@@ -38,7 +40,8 @@ class RecoveryAPI:
             recovery = self.recovery()
             if recovery is None:
                 raise GrantRefused("dependency_unavailable", "controller recovery is unavailable")
-            return 200, asdict(recovery.decide(subject[1], body["choice"]))
+            with self.lock:
+                return 200, asdict(recovery.decide(subject[1], body["choice"]))
         except GrantRefused as error:
             status = {"invalid_request": 400, "unauthenticated": 401, "forbidden_scope": 403}
             return status.get(error.error_class, 503), error.detail()
