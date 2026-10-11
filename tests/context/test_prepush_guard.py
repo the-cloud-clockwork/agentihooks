@@ -162,6 +162,38 @@ def test_the_push_is_graded_in_the_shell_tool_workdir(repo, tmp_path, workdir):
     assert str(blocked.value) == _message(worktree)
 
 
+@pytest.fixture
+def swarm_worktree(repo, tmp_path, monkeypatch):
+    from tests.swarm_ledger import legacy_page
+
+    _git(repo, "add", "scripts/ci_prepush/__init__.py")
+    _git(repo, "commit", "-q", "-m", "guard")
+    worktree = tmp_path / "worktree"
+    _git(repo, "worktree", "add", "-q", "-b", "task-branch", str(worktree))
+    task = {"id": "push", "state": "claimed", "claimed_by": "engineer@test", "branch": "task-branch"}
+    folder = tmp_path / "ledgers"
+    folder.mkdir()
+    legacy_page.store(folder, "rig", {"tasks": [task]})
+    monkeypatch.setenv("LEDGER_DIR", str(folder))
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "push")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@test")
+    return worktree
+
+
+def test_codex_command_only_push_grades_the_claimed_task_worktree(repo, swarm_worktree):
+    _stamp(swarm_worktree)
+    payload = _bash("git push origin HEAD", repo)
+
+    check_prepush(payload)
+
+    _stamp(repo)
+    _git(swarm_worktree, "commit", "-q", "--allow-empty", "-m", "more")
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == _message(swarm_worktree)
+
+
 def test_a_later_push_in_the_same_command_is_checked(repo, tmp_path):
     other = _init(tmp_path / "other", guarded=False)
 
