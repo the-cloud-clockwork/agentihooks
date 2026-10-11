@@ -26,6 +26,8 @@ CASES = {
         compact({WORD: f"{GENERIC} {HIDDEN}"}) + "\n",
         2,
     ),
+    "own before keyed": (json.dumps({WORD: TOKEN + " hunter2hunter2"}) + "\n", compact({WORD: GENERIC}) + "\n", 1),
+    "keyed merged with own": (json.dumps({KEY: "plain1234" + TOKEN}) + "\n", compact({KEY: GENERIC}) + "\n", 1),
     "keyed despite nosecret": (
         json.dumps({WORD: "hunter2hunter2 # nosecret"}) + "\n",
         compact({WORD: GENERIC}) + "\n",
@@ -34,6 +36,13 @@ CASES = {
     "keyed list": (json.dumps({KEY: ["abcd" + "1234efgh", 7]}) + "\n", compact({KEY: [GENERIC, 7]}) + "\n", 1),
     "key": (json.dumps({TOKEN: [1, "x"]}) + "\r\n", compact({HIDDEN: [1, "x"]}) + "\r\n", 1),
     "space before the line end": (json.dumps({"t": TOKEN}) + " \n", compact({"t": HIDDEN}) + "\n", 1),
+    "doubled carriage return": (json.dumps({"t": TOKEN}) + "\r\r\n", compact({"t": HIDDEN}) + "\r\r\n", 1),
+    "carriage return at the end": (json.dumps({"t": TOKEN}) + "\r", compact({"t": HIDDEN}) + "\r", 1),
+    "key with a number line": (
+        "-----BEGIN RSA PRIVATE" + " KEY-----\nAAAA\n12345\nBBBB\n-----END RSA PRIVATE" + " KEY-----\n",
+        "[REDACTED:private_key]\n",
+        1,
+    ),
     "colliding keys": (json.dumps({TOKEN: 1, OTHER: 2}) + "\n", compact({HIDDEN: 2}) + "\n", 2),
     "nested": (
         json.dumps({"items": [TOKEN, {"text": f"{TOKEN} and {TOKEN}"}], "n": 3}) + "\n",

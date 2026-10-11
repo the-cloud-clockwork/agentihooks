@@ -71,6 +71,10 @@ class Resumed:
     outcome: str = RESUMED
 
 
+def oversized(files: tuple[tuple[str, bytes], ...]) -> bool:
+    return len(files) > ARCHIVE_MEMBERS or sum(len(data) for _, data in files) > ARCHIVE_BYTES
+
+
 def archive(files: tuple[tuple[str, bytes], ...]) -> bytes:
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as written:  # NOSONAR: writes only
@@ -357,11 +361,11 @@ def capture(
         return Unavailable(harness, "identity_mismatch")
     if line(recorded) != line(version_text):
         return Unavailable(harness, "version_changed")
-    if len(files) > ARCHIVE_MEMBERS or sum(map(len, files.values())) > ARCHIVE_BYTES:
-        return Unavailable(harness, TOO_LARGE)
-    quiescence = "stopped_process" if stopped else "consistent_export"
     scrubbed = {name: redaction.scrub(data) for name, data in sorted(files.items())}
     kept = tuple((name, data) for name, (data, _) in scrubbed.items())
+    if oversized(kept):
+        return Unavailable(harness, TOO_LARGE)
+    quiescence = "stopped_process" if stopped else "consistent_export"
     count = sum(found for _, found in scrubbed.values())
     return NativeCapture(harness, recorded, session_id, kept, quiescence, count)
 

@@ -7,7 +7,7 @@ import pytest
 
 from scripts.swarm_v2 import contracts
 from scripts.swarm_v2.artifacts.base import ABSENT, VERIFIED, ArtifactRef
-from scripts.swarm_v2.checkpoints import model, native, publisher
+from scripts.swarm_v2.checkpoints import model, native, publisher, redaction
 from tests.sv2_ckp04_cases import LostAck, checkpoint, files, make, pointers, run_case
 
 pytestmark = pytest.mark.unit
@@ -564,3 +564,16 @@ def test_publication_adds_its_count_to_the_capture_count(root):
     materials[model.NATIVE_SESSION] = _native({"history.txt": f"token {TOKEN}\n"})
     assert pub.publish(doc, materials).promoted
     assert _committed(pub)["secret_redactions"] == 3
+
+
+@pytest.mark.parametrize(("slack", "promoted"), [(0, True), (-1, False)])
+def test_native_material_grown_past_the_bound_by_redaction_is_refused(root, monkeypatch, slack, promoted):
+    text = json.dumps({"type": "user", "t": "中" * 40 + " " + TOKEN}, ensure_ascii=False) + "\n"
+    grown, _ = redaction.scrub(text.encode())
+    assert len(grown) > len(text.encode())
+    monkeypatch.setattr(native, "ARCHIVE_BYTES", len(grown) + slack)
+    pub = make(root)
+    doc, materials = checkpoint(1)
+    materials[model.NATIVE_SESSION] = _native({"projects/s-1.jsonl": text})
+    result = pub.publish(doc, materials)
+    assert (result.promoted, result.reason) == (promoted, "promoted" if promoted else "native_too_large")

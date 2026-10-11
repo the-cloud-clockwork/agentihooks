@@ -10,7 +10,7 @@ MODE = "strict"
 MARK = "[REDACTED:"
 MARKER = re.compile(r"\[REDACTED:\w+\]")
 LINE = re.compile(r"[^\n]*\n|[^\n]+")
-ENDINGS = ("\r\n", "\n")
+END = re.compile(r"[\r\n]*\Z")
 CODEC_ERRORS = "surrogateescape"
 
 
@@ -33,41 +33,49 @@ def _value(text: str, key: str, found: list[int]) -> str:
     own = _redact(text)
     fragment = json.dumps({key: text})
     keyed = _redact(fragment)
-    if _count(fragment, keyed) > _count(text, own):
+    if set(MARKER.findall(keyed)) - set(MARKER.findall(own)):
         own = " ".join(MARKER.findall(keyed))
     found.append(_count(text, own))
     return own
 
 
+def _fields(record: dict, found: list[int]) -> dict:
+    safe = {name: _plain(name, found) for name in record}
+    return {safe[name]: _redacted(item, safe[name], found) for name, item in record.items()}
+
+
 def _redacted(value: object, key: str, found: list[int]) -> object:
     if isinstance(value, dict):
-        safe = {name: _plain(name, found) for name in value}
-        return {safe[name]: _redacted(item, safe[name], found) for name, item in value.items()}
+        return _fields(value, found)
     if isinstance(value, list):
         return [_redacted(item, key, found) for item in value]
     return _value(value, key, found) if isinstance(value, str) else value
 
 
-def _ending(line: str) -> str:
-    return next((end for end in ENDINGS if line.endswith(end)), "")
-
-
-def _rewritten(line: str, record: object, found: list[int]) -> str:
-    cleaned = _redacted(record, "", found)
+def _rewritten(line: str, record: dict, found: list[int]) -> str:
+    cleaned = _fields(record, found)
     if cleaned == record:
         return line
-    return json.dumps(cleaned, separators=(",", ":")) + _ending(line)
+    return json.dumps(cleaned, separators=(",", ":")) + END.search(line).group()
+
+
+def _record(line: str) -> dict | None:
+    try:
+        record = json.loads(line)
+    except ValueError:
+        return None
+    return record if isinstance(record, dict) else None
 
 
 def scrub(data: bytes) -> tuple[bytes, int]:
-    """JSON lines are redacted field by field; each run of other lines is redacted as one text."""
+    """JSON object lines are redacted field by field; each run of other lines is redacted as one text. The count is
+    the number of markers placed."""
     found: list[int] = []
     out: list[str] = []
     block: list[str] = []
     for line in LINE.findall(data.decode(errors=CODEC_ERRORS)):
-        try:
-            record = json.loads(line)
-        except ValueError:
+        record = _record(line)
+        if record is None:
             block.append(line)
             continue
         out += [_plain("".join(block), found), _rewritten(line, record, found)]

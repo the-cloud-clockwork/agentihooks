@@ -55,6 +55,8 @@ def _read(store: ArtifactStore, key: str) -> dict:
 def _scrubbed(material: bytes) -> tuple[bytes, int]:
     cleaned = {name: redaction.scrub(data) for name, data in native.members(material).items()}
     files = tuple((name, data) for name, (data, _) in cleaned.items())
+    if native.oversized(files):
+        raise native.NativeError(native.TOO_LARGE)
     return native.archive(files), sum(count for _, count in cleaned.values())
 
 

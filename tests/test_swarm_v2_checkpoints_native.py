@@ -843,6 +843,17 @@ def test_a_redacted_conversation_restores_with_its_marker(tmp_path):
     assert TOKEN not in placed
 
 
+@pytest.mark.parametrize(("slack", "available"), [(0, True), (-1, False)])
+def test_the_archive_bound_applies_to_the_redacted_files(tmp_path, monkeypatch, slack, available):
+    _, first = planted(tmp_path / "first")
+    kept = sum(len(data) for _, data in first.files)
+    monkeypatch.setattr(native, "ARCHIVE_BYTES", kept + slack)
+    _, result = planted(tmp_path / "second")
+    assert isinstance(result, native.NativeCapture) is available
+    if not available:
+        assert result.cause == native.TOO_LARGE
+
+
 @pytest.mark.parametrize("case", ["a", "b", "c"])
 def test_package_cases_match_their_committed_evidence(case):
     first, second = cases.run_case(case), cases.run_case(case)
