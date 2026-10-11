@@ -340,10 +340,9 @@ def test_ranks_follow_unblocked_work_as_tasks_merge(store, home, shipped):
     ]
     steady = merging()
     steady[0]["state"] = "done"
-    again = Ledger()
-    dispatcher.rank_pass(
-        SLUG, store.config(SLUG), store, again, stamped(steady, dict.fromkeys("bpq", "dispatcher")), NOW
-    )
+    again, held = Ledger(), stamped(steady, dict.fromkeys("bpq", "dispatcher"))
+    steady[2]["rank"], held["_meta"]["stamps"]["tasks/c/rank"] = "normal", {"by": "dispatcher"}
+    dispatcher.rank_pass(SLUG, store.config(SLUG), store, again, held, NOW)
     assert again.ranks == []
 
 
