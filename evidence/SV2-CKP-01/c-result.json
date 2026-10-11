@@ -71,6 +71,14 @@
         "limitations": [],
         "reason": "native"
       },
+      "stale_attempt_added_keys": [],
+      "stale_attempt_after_commit": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "continuation": "none",
+        "limitations": [],
+        "reason": "scope_mismatch"
+      },
       "unsupported_version": {
         "authoritative": false,
         "completeness": "incomplete",
@@ -142,6 +150,14 @@
         "continuation": "native",
         "limitations": [],
         "reason": "native"
+      },
+      "stale_attempt_added_keys": [],
+      "stale_attempt_after_commit": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "continuation": "none",
+        "limitations": [],
+        "reason": "scope_mismatch"
       },
       "unsupported_version": {
         "authoritative": false,

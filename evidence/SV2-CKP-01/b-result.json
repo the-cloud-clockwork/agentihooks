@@ -13,16 +13,16 @@
         "diagnostic_only/path_only": 1,
         "incomplete/missing_material": 1
       },
-      "conversation_id_and_branch_without_materials": {
+      "diagnostics_name_the_conversation": false,
+      "diagnostics_name_the_old_path": false,
+      "durable_keys_unchanged_by_rejections": true,
+      "manifest_without_materials": {
         "authoritative": false,
         "completeness": "incomplete",
         "continuation": "none",
         "limitations": [],
         "reason": "missing_material"
       },
-      "diagnostics_name_the_conversation": false,
-      "diagnostics_name_the_old_path": false,
-      "durable_keys_unchanged_by_rejections": true,
       "new_valid_request": {
         "authoritative": true,
         "completeness": "complete",
@@ -54,16 +54,16 @@
         "diagnostic_only/path_only": 1,
         "incomplete/missing_material": 1
       },
-      "conversation_id_and_branch_without_materials": {
+      "diagnostics_name_the_conversation": false,
+      "diagnostics_name_the_old_path": false,
+      "durable_keys_unchanged_by_rejections": true,
+      "manifest_without_materials": {
         "authoritative": false,
         "completeness": "incomplete",
         "continuation": "none",
         "limitations": [],
         "reason": "missing_material"
       },
-      "diagnostics_name_the_conversation": false,
-      "diagnostics_name_the_old_path": false,
-      "durable_keys_unchanged_by_rejections": true,
       "new_valid_request": {
         "authoritative": true,
         "completeness": "complete",
