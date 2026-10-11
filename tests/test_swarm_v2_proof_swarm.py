@@ -28,12 +28,13 @@ def store():
 class Ledger:
     def __init__(self, named=SLUG, live=(), binned=(), fail=None):
         self.named, self.alive, self.binned, self.fail = named, set(live), set(binned), fail
-        self.created, self.removed, self.asked = [], [], []
+        self.created, self.removed, self.asked, self.environs = [], [], [], []
 
     def state(self, slug, environ):
         if self.fail:
             raise self.fail
         self.asked.append(slug)
+        self.environs.append(environ)
         return "live" if slug in self.alive else "binned" if slug in self.binned else "missing"
 
     def create(self, content, environ):
@@ -72,6 +73,7 @@ def test_a_restart_after_the_ledger_was_created_only_creates_the_swarm(store):
         f"controller: created proof swarm {SLUG} with one engineer task"
     ]
     assert (ledger.asked, ledger.created, ledger.removed) == ([SLUG], [], [])
+    assert ledger.environs == [ENV]
     assert store.slugs() == [SLUG]
 
 
@@ -126,6 +128,7 @@ def test_a_cleared_setting_removes_every_proof_swarm_and_only_live_ledgers(store
         f"controller: removed proof swarm {OTHER}",
     ]
     assert ledger.asked == [SLUG, OTHER]
+    assert ledger.environs == [CLEARED, CLEARED]
     assert ledger.removed == [(SLUG, CLEARED)]
     assert store.slugs() == ["rig-grade-swarm"]
 
@@ -241,3 +244,21 @@ def test_a_failed_pass_is_reported_and_the_controller_keeps_running(store, capsy
         "controller: the proof swarm pass failed and runs again after the next tick: "
         "AGENTIHOOKS_CONTROL_PROOF must be a JSON object naming an agent and a task\n",
     )
+
+
+def test_every_pass_line_is_flushed_for_the_pod_log(store, monkeypatch):
+    printed = []
+    monkeypatch.setattr(proof_swarm, "print", lambda *args, **kwargs: printed.append((args, kwargs)), raising=False)
+    environ = {**ENV, "AGENTIHOOKS_DEPLOYMENT": "distributed", "AGENTIHOOKS_CONTROL_SWARM": SLUG}
+    monkeypatch.setattr(proof_swarm, "reconcile", lambda *args: ["controller: a"])
+
+    proof_swarm.run(environ, store)
+
+    def refuse(*args):
+        raise SwarmError("down")
+
+    monkeypatch.setattr(proof_swarm, "reconcile", refuse)
+    proof_swarm.run(environ, store)
+
+    assert [kwargs["flush"] for _, kwargs in printed] == [True, True]
+    assert printed[0][0] == ("controller: a",)

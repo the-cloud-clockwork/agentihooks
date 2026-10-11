@@ -211,6 +211,11 @@ def test_the_state_check_reports_a_refusal(live, credential):
         proof_ledger.state(SLUG, client_env(live, "wrong", "twrong"))
 
 
+def test_the_remote_client_refuses_removing_a_missing_proof_ledger(live, credential):
+    with pytest.raises(SystemExit, match="^server refused: 404 No such ledger$"):
+        proof_ledger.remove("proof-323133-tmissing-1", client_env(live, credential, "tmissing"))
+
+
 def test_the_proof_command_creates_and_removes_through_the_client(live, credential, tmp_path, capsys):
     path = tmp_path / "content.json"
     path.write_text(json.dumps(CONTENT))

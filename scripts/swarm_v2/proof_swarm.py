@@ -9,6 +9,7 @@ from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 PROOF_ENV = "AGENTIHOOKS_CONTROL_PROOF"
 PROJECTS_ENV = "AGENTIHOOKS_LAUNCH_PROJECTS"
 SWARM_ENV = "AGENTIHOOKS_CONTROL_SWARM"
+MALFORMED = f"{PROOF_ENV} must be a JSON object naming an agent and a task"
 CONTENT = {
     "title": "Anton launch proof",
     "overview": "One engineer Pod launches on Anton and registers with the controller.",
@@ -59,9 +60,9 @@ def _asked(environ: Mapping[str, str]) -> dict | None:
     try:
         asked = json.loads(setting)
     except json.JSONDecodeError:
-        asked = None
+        raise SwarmError(MALFORMED) from None
     if not isinstance(asked, dict) or not asked.get("agent") or not asked.get("task"):
-        raise SwarmError(f"{PROOF_ENV} must be a JSON object naming an agent and a task")
+        raise SwarmError(MALFORMED)
     return asked
 
 

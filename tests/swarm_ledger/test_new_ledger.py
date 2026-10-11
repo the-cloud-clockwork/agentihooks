@@ -1,3 +1,5 @@
+import pytest
+
 from scripts.swarm_ledger import ledger_server as server
 from scripts.swarm_ledger import new_ledger
 
@@ -31,6 +33,26 @@ def test_a_task_keeps_its_profile_only_when_the_content_names_one():
 def test_a_task_profile_must_be_a_string():
     assert new_ledger.check_types({**CONTENT, "tasks": [{"title": "a", "profile": 1}]}) == [
         "tasks[1].profile must be a string"
+    ]
+
+
+@pytest.mark.parametrize("field", ["title", "description", "phase", "lane", "profile"])
+def test_every_task_text_field_must_be_a_string(field):
+    assert new_ledger.check_types({**CONTENT, "tasks": [{field: 1}]}) == [f"tasks[1].{field} must be a string"]
+
+
+def test_a_built_task_carries_its_fields_and_open_defaults():
+    tasks = [
+        {"title": "a", "description": "d", "phase": "p1", "lane": "ci", "profile": "engineer"},
+        {"title": "b"},
+    ]
+
+    doc = new_ledger.build_doc({**CONTENT, "tasks": tasks})
+
+    opened = {"comments": [], "done": False, "state": "open", "claimed_by": "", "issue_url": "", "pr_url": ""}
+    assert doc["tasks"] == [
+        {"id": "t1", "title": "a", "description": "d", "phase": "p1", "lane": "ci", "profile": "engineer", **opened},
+        {"id": "t2", "title": "b", "description": "", "phase": "", "lane": "eng", **opened},
     ]
 
 
