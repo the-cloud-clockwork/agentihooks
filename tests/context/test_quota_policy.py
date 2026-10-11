@@ -540,6 +540,15 @@ def test_a_process_that_handed_its_resumed_conversation_on_is_blocked(tmp_path, 
     assert qp.handed_off_block(session) == (expected if blocked else None)
 
 
+def test_a_prompt_to_a_handed_off_process_gets_its_block_instead_of_a_new_handoff(monkeypatch):
+    def handoff(session_id):
+        raise AssertionError("a handed off process must not evaluate a new handoff")
+
+    monkeypatch.setattr(qp, "handed_off_block", lambda session_id: f"BLOCKED: {session_id} moved")
+    monkeypatch.setattr(qp, "evaluate", handoff)
+    assert qp.prompt_context("thread", "/repo") == "BLOCKED: thread moved"
+
+
 @pytest.mark.parametrize("harness", [None, "claude", "codex"])
 def test_api_slot_uses_its_harness_settings_namespace(tmp_path, monkeypatch, harness):
     from scripts.routing import claude_api, codex_api, place

@@ -438,6 +438,9 @@ def pretool(session_id: str, tool_name: str, cwd: str) -> tuple[str | None, str 
 
 
 def prompt_context(session_id: str, cwd: str) -> str | None:
+    blocked = handed_off_block(session_id)
+    if blocked:
+        return blocked
     d = evaluate(session_id)
     if d is None:
         return early_warning(session_id)
