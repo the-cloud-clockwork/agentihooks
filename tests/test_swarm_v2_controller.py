@@ -940,7 +940,8 @@ def test_start_and_an_attempt_change_each_save_the_client_machines(fixture, tmp_
     assert controller.acquire()
     assert sorted(terminal.registrations.store.load()) == [one.execution_id]
     assert controller.herdr_registration_drift() == 1
-    two = controller.admit(agent(store))
+    target = {"pod_namespace": "workers", "pod_name": "attempt-two"}
+    two = controller.admit(replace(agent(store), seat="eng-2@fixture", runtime_target=target))
     attachable(store, two)
     assert controller.renew()
 
