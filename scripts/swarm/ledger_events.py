@@ -317,13 +317,27 @@ def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
     events = doc.get("_meta", {}).get("events", [])
     tasks = {t["id"]: t for t in doc.get("tasks", [])}
     raised = _raised_for_operator(doc, events)
+    gap = _history_gap(mail, doc, store.redis.get(store.key(slug, "events-cursor")))
     return (
-        _events(mail, new_events(store, slug, doc, "events-cursor"), tasks, raised)
+        gap
+        + _events(mail, new_events(store, slug, doc, "events-cursor"), tasks, raised)
         + _followups(mail, doc, events, ledger, now_ms)
         + _pull_requests(mail, tasks.values(), now_ms, github)
         + _settle_red_notices(mail, github)
         + _priorities(mail, doc, raised)
     )
+
+
+def _history_gap(mail, doc, cursor):
+    trimmed = doc.get("_meta", {}).get("events_trimmed")
+    if cursor is None or trimmed is None or trimmed <= int(cursor):
+        return []
+    text = (
+        f"Ledger {mail.slug} trimmed its history after revision {cursor} through revision {trimmed} before the tick "
+        "passed it on, so agent follow ups, questions and task changes in that range reached no one. "
+        "Read the ledger for them."
+    )
+    return mail.send(f"history-gap:{cursor}:{trimmed}", mail.master, text)
 
 
 def _raised_for_operator(doc, events):
