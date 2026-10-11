@@ -134,7 +134,7 @@ def test_missing_native_route_never_launches_a_request(tmp_path, monkeypatch, ta
 
 @pytest.mark.parametrize("error", [OSError("unavailable"), subprocess.TimeoutExpired("request", 30)])
 def test_request_exception_retains_failure_evidence_and_completion_time(tmp_path, monkeypatch, error):
-    monkeypatch.setattr(provider_probe.time, "time_ns", lambda: 987_000_000)
+    monkeypatch.setattr(provider_probe.time, "time_ns", lambda: 987_654_321)
     run = MagicMock(side_effect=error)
     result = provider_probe.check(provider_probe.Target("claude", "alpha", ""), tmp_path, run)
     assert result == provider_probe.Result(False, f"Provider request failed: {type(error).__name__}", 987)
