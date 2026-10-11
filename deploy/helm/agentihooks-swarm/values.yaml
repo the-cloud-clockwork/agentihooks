@@ -101,6 +101,11 @@ controller:
     periodSeconds: 10
     timeoutSeconds: 5
     failureThreshold: 3
+  # Used with controller.api.enabled: the deep diagnostics report, failing while Redis is unavailable.
+  readinessProbe:
+    periodSeconds: 10
+    timeoutSeconds: 8
+    failureThreshold: 3
   terminationGracePeriodSeconds: 30
   env: {}
   # Secret env only the controller container reads, unlike secretEnv; optional: true lets it start before the Secret exists.

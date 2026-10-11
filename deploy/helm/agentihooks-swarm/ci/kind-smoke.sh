@@ -273,6 +273,27 @@ if [[ -z $built ]]; then
   exit 1
 fi
 printf 'the deployed controller built the Kubernetes runtime: %s\n' "$built"
+for probe in liveness readiness; do
+  wired="$(kubectl get deployment "$release-controller" -o jsonpath="{.spec.template.spec.containers[0].${probe}Probe.exec.command[2]}")"
+  want="live"
+  [[ $probe == readiness ]] && want="ready"
+  if [[ $wired != *"main([\"$want\"])"* ]]; then
+    printf 'the controller %s probe does not run controller %s: %s\n' "$probe" "$want" "$wired" >&2
+    exit 1
+  fi
+  if ! answer="$(kubectl exec "deployment/$release-controller" -c controller -- python -c "$wired")"; then
+    printf 'the controller %s probe failed: %s\n' "$probe" "$answer" >&2
+    exit 1
+  fi
+  printf 'controller %s probe passed: %s\n' "$probe" "$answer"
+done
+kubectl wait pod "${controller[@]}" --for=condition=Ready --timeout 2m
+restarts="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')"
+if [[ $restarts != 0 ]]; then
+  printf 'the controller with the control API on restarted %s times under its probes\n' "$restarts" >&2
+  exit 1
+fi
+printf 'controller with the control API on is Ready under the health probes, restarts: 0\n'
 registered="$(kubectl exec -i "deployment/$release-controller" -c controller -- env CONTROL_URL="http://$release-controller:8780" SLUG="$slug" python - <<'EOF'
 import json, os, time, urllib.request
 from pathlib import Path

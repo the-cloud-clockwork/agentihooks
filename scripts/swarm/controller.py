@@ -158,9 +158,13 @@ def tick_once(store: RedisStore, service: "ControlService | None") -> dict:
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks controller")
-    parser.add_argument("action", choices=("run",))
+    parser.add_argument("action", choices=("run", "live", "ready"))
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
+    if args.action != "run":
+        from scripts.swarm import controller_probes
+
+        return getattr(controller_probes, args.action)(os.environ, connect())
     from scripts import operator_env
     from scripts.swarm import commands
     from scripts.swarm_v2 import control_service
