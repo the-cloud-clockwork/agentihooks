@@ -362,6 +362,11 @@ def _spec(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
         ],
         "runtimeClassName": policy["runtime_class_name"],
     }
+    if policy["runtime_class_name"] == "kata-fc":
+        agent = body["containers"][0]
+        agent["securityContext"]["readOnlyRootFilesystem"] = False
+        agent["volumeMounts"] = [mount for mount in agent["volumeMounts"] if mount["name"] not in ("home", "tmp")]
+        body["volumes"] = [volume for volume in body["volumes"] if volume["name"] not in ("home", "tmp")]
     if "bundle" in policy:
         _deliver(body, policy["bundle"])
     return body

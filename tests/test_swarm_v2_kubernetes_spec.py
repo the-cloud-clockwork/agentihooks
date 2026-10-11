@@ -166,7 +166,7 @@ def test_the_worker_is_hardened_and_never_mounts_a_service_account_token():
     assert body["containers"][0]["securityContext"] == {
         "allowPrivilegeEscalation": False,
         "privileged": False,
-        "readOnlyRootFilesystem": True,
+        "readOnlyRootFilesystem": False,
         "capabilities": {"drop": ["ALL"]},
     }
 
@@ -210,7 +210,9 @@ def test_worker_scratch_uses_the_root_disk_only_for_firecracker(runtime):
 
 
 def test_volumes_are_private_scratch_and_the_launch_record_with_no_credential_mount():
-    _, rendered = render()
+    policy = policy_doc()
+    policy["runtime_class_name"] = "runc"
+    _, rendered = render(policy=policy)
     body = rendered.pod["spec"]
     assert body["volumes"] == [
         {"name": "home", "emptyDir": {"sizeLimit": "9216Mi"}},
