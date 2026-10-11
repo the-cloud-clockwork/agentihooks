@@ -30,7 +30,7 @@ def named(workflow, name):
 def test_dispatch_and_dev_pushes_trigger_it(workflow):
     triggers = workflow[True]
 
-    assert triggers["push"]["branches"] == ["dev", "diffcheck/**"]
+    assert triggers["push"]["branches"] == ["dev"]
     assert triggers["workflow_dispatch"]["inputs"]["publish"]["type"] == "boolean"
     assert "pull_request" not in triggers
 

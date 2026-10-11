@@ -2,7 +2,7 @@ name: Swarm worker image
 
 on:
   push:
-    branches: [dev, 'diffcheck/**']
+    branches: [dev]
   workflow_dispatch:
     inputs:
       publish:

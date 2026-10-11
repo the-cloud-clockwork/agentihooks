@@ -1,9 +1,6 @@
 name: Proofs
 
 on:
-  push:
-    branches: ['diffcheck/**']
-    paths: ['.github/workflows/proofs.yml']
   workflow_dispatch:
     inputs:
       proof:
@@ -66,11 +63,11 @@ jobs:
     uses: ./.github/workflows/helm-kind.yml
 
   tests:
-    if: github.event_name == 'push' || inputs.proof == 'tests'
+    if: inputs.proof == 'tests'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      TEST_PATHS: ${{ github.event_name == 'push' && 'tests/test_ci_proofs.py tests/test_ci_mutation_preflight.py' || inputs.tests }}
+      TEST_PATHS: ${{ inputs.tests }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
       - uses: actions/checkout@v4
