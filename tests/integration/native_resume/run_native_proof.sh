@@ -35,10 +35,10 @@ run_cli() {
 version="$("$harness" --version 2>&1)"
 version="${version%%$'\n'*}"
 record installed_version 0 "$version"
-if [[ "$harness" == "claude" ]]; then
-    record account 0 "claude account variable ${NATIVE_PROOF_CLAUDE_ACCOUNT:-unset}"
+if [[ -n "${NATIVE_PROOF_CLAUDE_ACCOUNT:-}${NATIVE_PROOF_CODEX_ROUTE:-}" ]]; then
+    record account 0 "named by the operator environment, never written to the record or the carried material"
 else
-    record account 0 "codex route ${NATIVE_PROOF_CODEX_ROUTE:-unset}"
+    record account 1 "no account named"
 fi
 
 set +e

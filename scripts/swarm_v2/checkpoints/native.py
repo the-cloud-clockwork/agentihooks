@@ -173,6 +173,20 @@ class Claude:
         return ("claude", "--resume", session_id)
 
 
+def _unlinked(root: Path, path: Path) -> Path:
+    """A path under root, reached through no link, resolved; anything else is refused as an escape."""
+    for base in (root, root.resolve()):
+        if path.is_relative_to(base):
+            relative = PurePosixPath(path.relative_to(base).as_posix())
+            if _linked(base, relative):
+                raise NativeError(ESCAPE)
+            try:
+                return contain(base, relative)
+            except LayoutError as error:
+                raise NativeError(ESCAPE) from error
+    raise NativeError(ESCAPE)
+
+
 class Codex:
     name = "codex"
     index = "state_5.sqlite"
@@ -194,19 +208,11 @@ class Codex:
         sessions = home / "sessions"
         indexed = self._indexed(home, session_id)
         if indexed:
-            if Path(indexed).is_symlink():
-                raise NativeError("conversation_absent")
-            try:
-                return contain(sessions, indexed)
-            except LayoutError as error:
-                raise NativeError(ESCAPE) from error
+            return _unlinked(sessions, sessions / indexed)
         found = sorted(sessions.glob(f"*/*/*/rollout-*-{session_id}.jsonl"))
-        if len(found) != 1 or found[0].is_symlink():
+        if len(found) != 1:
             raise NativeError("conversation_absent")
-        try:
-            return contain(sessions, found[0].relative_to(sessions))
-        except LayoutError as error:
-            raise NativeError(ESCAPE) from error
+        return _unlinked(sessions, found[0])
 
     def collect(self, home: Path, session_id: str, cwd: Path) -> dict[str, bytes]:
         path = self._rollout(home, session_id)
@@ -382,12 +388,15 @@ class Qualifier:
             raise NativeError("identity_mismatch")
         try:
             placed = [(native.placed(session_id, cwd, name), data) for name, data in members.items()]
-            if any(_linked(home, relative) for relative, _ in placed):
-                raise NativeError(ESCAPE)
-            targets = [(contain(home, relative), data) for relative, data in placed]
-        except (LayoutError, ValueError) as error:
+        except ValueError as error:
             raise NativeError(ESCAPE) from error
-        if any(path.exists() or path.is_symlink() for path, _ in targets):
+        if any(_linked(home, relative) for relative, _ in placed):
+            raise NativeError(ESCAPE)
+        try:
+            targets = [(contain(home, relative), data) for relative, data in placed]
+        except LayoutError as error:
+            raise NativeError(ESCAPE) from error
+        if any(path.exists() for path, _ in targets):
             raise NativeError("conversation_present")
         created: list[Path] = []
         try:

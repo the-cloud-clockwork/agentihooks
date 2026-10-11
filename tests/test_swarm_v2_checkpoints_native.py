@@ -299,7 +299,16 @@ def test_a_linked_rollout_found_by_name_is_not_read(tmp_path):
     rollout.unlink()
     rollout.symlink_to(target)
     result = qualifier(tmp_path).capture("codex", home, CODEX, tmp_path, cases.VERSIONS["codex"], True)
-    assert result == native.Unavailable("codex", "conversation_absent")
+    assert result == native.Unavailable("codex", native.ESCAPE)
+
+
+def test_a_rollout_under_a_linked_folder_inside_the_sessions_is_refused(tmp_path):
+    home = cases.codex_home(tmp_path, index=False)
+    day = home / "sessions" / "2026" / "10" / "11"
+    day.rename(day.with_name("12"))
+    day.symlink_to(day.with_name("12"))
+    result = qualifier(tmp_path).capture("codex", home, CODEX, tmp_path, cases.VERSIONS["codex"], True)
+    assert result == native.Unavailable("codex", native.ESCAPE)
 
 
 def test_a_rollout_under_a_linked_folder_outside_the_home_is_refused(tmp_path):
@@ -559,7 +568,32 @@ def test_an_indexed_rollout_that_is_a_link_is_not_read(tmp_path):
     rollout.rename(kept)
     rollout.symlink_to(kept)
     result = qualifier(tmp_path).capture("codex", home, CODEX, tmp_path, cases.VERSIONS["codex"], True)
-    assert result == native.Unavailable("codex", "conversation_absent")
+    assert result == native.Unavailable("codex", native.ESCAPE)
+
+
+@pytest.mark.parametrize("linked", [False, True])
+def test_a_relative_index_path_resolves_under_the_sessions_folder(tmp_path, linked):
+    home = cases.codex_home(tmp_path)
+    rollout = home / "sessions" / cases.ROLLOUT.format(CODEX)
+    if linked:
+        kept = rollout.with_name("kept.jsonl")
+        rollout.rename(kept)
+        rollout.symlink_to(kept)
+    with sqlite3.connect(home / native.Codex.index) as conn:
+        conn.execute("UPDATE threads SET rollout_path = ? WHERE id = ?", (cases.ROLLOUT.format(CODEX), CODEX))
+    result = qualifier(tmp_path).capture("codex", home, CODEX, tmp_path, cases.VERSIONS["codex"], True)
+    if linked:
+        assert result == native.Unavailable("codex", native.ESCAPE)
+    else:
+        assert result.session_id == CODEX
+
+
+def test_a_relative_index_path_climbing_out_is_refused(tmp_path):
+    home = cases.codex_home(tmp_path)
+    with sqlite3.connect(home / native.Codex.index) as conn:
+        conn.execute("UPDATE threads SET rollout_path = '../auth.json'")
+    result = qualifier(tmp_path).capture("codex", home, CODEX, tmp_path, cases.VERSIONS["codex"], True)
+    assert result == native.Unavailable("codex", native.ESCAPE)
 
 
 def test_cleanup_ignores_a_folder_that_gained_other_files(tmp_path):
