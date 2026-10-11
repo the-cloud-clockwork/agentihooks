@@ -330,6 +330,7 @@ def test_a_controller_with_no_local_accounts_sizes_engineer_and_ci_lanes_from_fl
     service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
     try:
         config = replace(store.config(SLUG), max_eng=2, max_ci=1)
+        service.runtime.herdr_runtime.host = lambda: None
         decision = service.runtime.quota_capacity(config, [], 1_800_000_000, {"eng": 2, "ci": 1, "plan": 0})
     finally:
         service.stop()

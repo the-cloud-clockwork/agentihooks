@@ -205,6 +205,7 @@ def test_an_exhausted_key_is_a_closed_row():
 
 
 def _sizing(runtime):
+    runtime.host = lambda: None
     config = SwarmConfig(SLUG, "agentihooks", max_eng=2, max_ci=1)
     return runtime.quota_capacity(config, [], NOW_MS / 1000, {"eng": 2, "ci": 1, "plan": 0})
 
