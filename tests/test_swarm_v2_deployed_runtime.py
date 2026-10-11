@@ -453,6 +453,48 @@ def test_the_deployed_controller_sizes_spawn_room_from_the_worker_namespace_quot
     )
 
 
+def _requesting(tmp_path, cpu_millis=1000):
+    doc = json.loads(_policy(tmp_path).read_text())
+    doc["profiles"]["general"]["requests"] = {"cpu_millis": cpu_millis}
+    path = tmp_path / "requesting-policy.json"
+    path.write_text(json.dumps(doc))
+    return path
+
+
+def test_the_quota_room_counts_each_launch_at_its_profile_cpu_request(tmp_path, monkeypatch):
+    monkeypatch.setattr(host_budget, "read_host", lambda *args, **kwargs: None)
+    pods = QuotaPods("swarm-pod-proof", [])
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: pods)
+    store = _store()
+    environ = _environ(tmp_path, store, **{deployed.POLICY_ENV: str(_requesting(tmp_path))})
+    service = _cs().host(environ, store, "hive-fixture")
+    try:
+        decision = service.runtime.quota_capacity(store.config(SLUG), [], 1_800_000_000, {"eng": 1, "ci": 0, "plan": 0})
+    finally:
+        service.stop()
+
+    assert decision["host"]["reason"] == (
+        "worker namespace quota leaves 2 Pods, 18000m CPU and 34816 MiB memory; 2 more fit at 1000m and 4096 MiB each"
+    )
+
+
+def test_the_worker_pool_room_counts_each_launch_at_its_profile_cpu_request(tmp_path, monkeypatch):
+    monkeypatch.setattr(host_budget, "read_host", lambda *args, **kwargs: None)
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: PoolPods("swarm-pod-proof", []))
+    doc = json.loads(_requesting(tmp_path).read_text())
+    doc["worker_pool"] = {"pods": 8, "cpu_millis": 3000, "memory_mib": 30000}
+    policy = tmp_path / "pool-policy.json"
+    policy.write_text(json.dumps(doc))
+    store = _store()
+    service = _cs().host(_environ(tmp_path, store, **{deployed.POLICY_ENV: str(policy)}), store, "hive-fixture")
+    try:
+        decision = service.runtime.quota_capacity(store.config(SLUG), [], 1_800_000_000, {"eng": 1, "ci": 0, "plan": 0})
+    finally:
+        service.stop()
+
+    assert (decision["host"]["room"], decision["host"]["limit"]) == (3, "cpu")
+
+
 def test_a_pod_policy_that_names_a_provider_account_is_refused(tmp_path):
     path = tmp_path / "named-pod-policy.json"
     path.write_text(json.dumps({**json.loads(_policy(tmp_path).read_text()), "provider_accounts": ["a@example.com"]}))
@@ -618,6 +660,25 @@ def test_the_launch_record_names_the_admitted_execution_and_the_worker_settings(
         "task_payload": {"task_id": "t1", "lane": "eng", "name": "engineer-1", "endpoints": {"api_url": API_URL}},
     }
     assert registry[0] == [(REPOSITORY, "dev")]
+
+
+def test_a_launch_requests_the_profile_cpu_request_and_its_whole_memory_limit(tmp_path):
+    workers = deployed.Workers.from_environ(
+        _workers(tmp_path, **{deployed.POLICY_ENV: str(_requesting(tmp_path, 1500))}), SLUG
+    )
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=API_URL)
+    task = {
+        "id": "t1",
+        "seat": SEAT,
+        "controller_epoch": 4,
+        "execution_id": "exe-" + "1" * 32,
+        "generation": 1,
+        "endpoints": {"api_url": API_URL},
+        "account": ACCOUNT,
+    }
+    record = workers.launch(SpawnRequest(config, "eng", "engineer-1", task))
+
+    assert (record["cpu_millis"], record["memory_mib"]) == (1500, 4096)
 
 
 def test_a_replacement_launch_record_carries_the_checkpoint_it_resumes_from(tmp_path, registry):

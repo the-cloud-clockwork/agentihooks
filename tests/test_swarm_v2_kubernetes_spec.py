@@ -720,12 +720,52 @@ POLICY_REFUSALS = [
         lambda d: d.update(worker_pool={"pods": 8, "cpu_millis": "18", "memory_mib": 34816}),
         "pod policy is invalid at worker_pool/cpu_millis: '18' is not of type 'integer'",
     ),
+    (
+        "cpu request above the cpu limit",
+        lambda d: d["profiles"]["general"].update(requests={"cpu_millis": 2001}),
+        "pod policy profile general requests 2001m CPU, more than its 2000m limit",
+    ),
+    (
+        "memory request",
+        lambda d: d["profiles"]["general"].update(requests={"cpu_millis": 1000, "memory_mib": 1024}),
+        "pod policy is invalid at profiles/general/requests: Additional properties are not allowed "
+        "('memory_mib' was unexpected)",
+    ),
+    (
+        "cpu request below the minimum",
+        lambda d: d["profiles"]["general"].update(requests={"cpu_millis": 99}),
+        "pod policy is invalid at profiles/general/requests/cpu_millis: 99 is less than the minimum of 100",
+    ),
+    (
+        "empty requests",
+        lambda d: d["profiles"]["general"].update(requests={}),
+        "pod policy is invalid at profiles/general/requests: 'cpu_millis' is a required property",
+    ),
 ]
 
 
 def test_a_policy_declaring_its_worker_pool_loads(tmp_path):
     pool = {"pods": 8, "cpu_millis": 18000, "memory_mib": 34816}
     assert load_policy(write(tmp_path, {**policy_doc(), "worker_pool": pool}))["worker_pool"] == pool
+
+
+def test_a_profile_cpu_request_at_or_below_its_limit_loads(tmp_path):
+    for cpu in (100, 2000):
+        doc = policy_doc()
+        doc["profiles"]["general"]["requests"] = {"cpu_millis": cpu}
+        assert load_policy(write(tmp_path, doc))["profiles"]["general"]["requests"] == {"cpu_millis": cpu}
+
+
+def test_a_profile_cpu_request_reaches_the_pod_requests_and_the_limit_stays():
+    policy = load_policy(POLICY)
+    policy["profiles"]["general"]["requests"] = {"cpu_millis": 1000}
+    doc = launch_doc()
+    doc.update(cpu_millis=1000, memory_mib=4096)
+    _, rendered = render(doc, policy)
+    resources = rendered.pod["spec"]["containers"][0]["resources"]
+    assert resources["requests"]["cpu"] == "1000m"
+    assert resources["limits"]["cpu"] == "2000m"
+    assert resources["requests"]["memory"] == resources["limits"]["memory"] == "4096Mi"
 
 
 @pytest.mark.parametrize(("change", "message"), [r[1:] for r in POLICY_REFUSALS], ids=[r[0] for r in POLICY_REFUSALS])
