@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_stages.py:scripts.swarm_v2.startup_stages.x_sample__mutmut_47:c26a5180235b0cf0a07acd80016b63b76f8a7d7c7c2b48b6f55e7ee8405800e4": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "The XXXX key can never equal a launch key, since launch keys always begin with i- and match the instance id regex, so the lookup returns None as it does for the empty default."
+  }
+}
