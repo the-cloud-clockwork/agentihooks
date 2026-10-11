@@ -64,9 +64,6 @@ spec:
         - podSelector:
             matchLabels:
               {{- toYaml $release | nindent 14 }}
-        {{- with .Values.networkPolicy.ingressFrom }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
         {{- with .Values.controller.api.ingressFrom }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
