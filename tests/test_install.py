@@ -346,7 +346,12 @@ class TestClaudeRouting:
         monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/claude")
         monkeypatch.setattr(balancer, "discover_credentials", lambda environ: [credential])
         monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([result], "cached"))
-        monkeypatch.setattr(balancer, "cached_observations", lambda include_fable=False: [(1.0, result)])
+        fable_asks = []
+        monkeypatch.setattr(
+            balancer,
+            "cached_observations",
+            lambda include_fable=False: fable_asks.append(include_fable) or [(1.0, result)],
+        )
         monkeypatch.setattr(
             balancer, "identify_session_account", lambda *args: balancer.SessionAccount("ALPHA", "token")
         )
@@ -364,6 +369,9 @@ class TestClaudeRouting:
         assert lines[0] == "current=ALPHA method=token"
         assert lines[3].split()[1:6] == ["claude", "ALPHA", "(current)", "MASTER", "max"]
         assert "?" not in "\n".join(lines) and "AGE" not in lines[1]
+        assert fable_asks[-1] is False
+        assert install.cmd_balance(include_fable=True, refresh=False, timeout=10, current=True) == 0
+        assert fable_asks[-1] is True and capsys.readouterr().out.splitlines()[1].endswith("FABLE LEFT  FABLE RESET")
 
     def test_cmd_balance_lists_every_codex_account_even_without_claude_tokens(self, monkeypatch, capsys):
         from scripts import agents_quota

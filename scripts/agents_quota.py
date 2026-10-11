@@ -83,7 +83,7 @@ class QuotaRow:
 def claude_rows(
     results: list,
     sessions: dict[str, int],
-    source: str,
+    source: str = CACHED,
     observed: dict[str, float] | None = None,
     now: float | None = None,
     include_fable: bool = False,
@@ -373,7 +373,7 @@ def balance_table(
     from scripts.routing.claude_api import ClaudeApiSource
 
     observed = {result.account: now for result in results} if observed is None else observed
-    claude = claude_rows(results, sessions, CACHED, observed, now, fable)
+    claude = claude_rows(results, sessions, observed=observed, now=now, include_fable=fable)
     claude = with_masters(claude + api_rows(ClaudeApiSource(sessions), "claude", now), _masters("claude"), sessions)
     return _render_live(claude + ([] if fable else _codex(now)), sessions, now, fable, current)
 

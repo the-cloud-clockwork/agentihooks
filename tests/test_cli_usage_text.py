@@ -29,3 +29,10 @@ def test_the_codex_quota_and_balance_lines_describe_today(monkeypatch, capsys):
     assert "Route to the default login or an AH_CX_TOKEN account" not in text
     assert "Probe and rank Claude OAuth accounts" not in text
     assert "no leading _, and not api, default, help or status" in text
+
+
+def test_the_subcommand_list_describes_codex_and_quota(monkeypatch, capsys):
+    monkeypatch.setenv("COLUMNS", "300")
+    lines = [line.split(None, 1) for line in _help(monkeypatch, capsys).splitlines()]
+    assert ["codex", "Route to an AH_CX_TOKEN account (default login if none is set) and launch Codex"] in lines
+    assert ["quota", "One table for every Claude and Codex account"] in lines
