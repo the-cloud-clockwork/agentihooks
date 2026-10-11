@@ -13,11 +13,16 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from scripts.swarm_v2.herdr.capabilities import Qualifier, Verdict, machine_probe
-from scripts.swarm_v2.herdr.endpoints import PORT, Endpoint, EndpointRefused, Scope, TerminalAuthority
+from scripts.swarm_v2.herdr.endpoints import PORT, Endpoint, EndpointRefused, Scope, TerminalAuthority, known_hosts
 
 USER = "worker"
 SSH = "/usr/bin/ssh"
-REFUSALS = (("Host key verification failed", "host_key_changed"), ("Permission denied", "unauthorized"))
+REFUSALS = (
+    ("REMOTE HOST IDENTIFICATION HAS CHANGED", "host_key_changed"),
+    ("Host key verification failed", "host_key_unverified"),
+    ("Permission denied", "unauthorized"),
+)
+AUTH_FAILURES = frozenset({"host_key_changed", "host_key_unverified", "unauthorized", "client_key"})
 
 Run = Callable[[list[str]], subprocess.CompletedProcess]
 
@@ -146,7 +151,7 @@ class Terminal:
         address = route(endpoint, self.lookup)
         home = self.home
         _write(home.certificate(endpoint), self.authority.issue(scope, self._client_key()))
-        _write(home.known_hosts(endpoint), f"{endpoint.host} {host_public}\n")
+        _write(home.known_hosts(endpoint), known_hosts(endpoint, host_public))
         _write(home.block(endpoint), ssh_block(home, endpoint, address))
         current = home.config.read_text() if home.config.exists() else ""
         if home.include not in current:
@@ -187,4 +192,7 @@ class Terminal:
         return self.qualifier.verdict(endpoint.name, endpoint.incarnation)
 
     def terminal_endpoint_auth_failures(self) -> dict[str, int]:
+        return {reason: count for reason, count in self.failures.items() if reason in AUTH_FAILURES}
+
+    def terminal_endpoint_refusals(self) -> dict[str, int]:
         return dict(self.failures)

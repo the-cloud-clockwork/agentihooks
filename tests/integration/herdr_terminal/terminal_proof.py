@@ -196,6 +196,12 @@ class Worker:
 
 
 served: dict[str, str] = {}
+ENVIRONMENT = (
+    "live on a workstation, not Anton: the image sshd template and start script and the session entry run "
+    "unprivileged on 127.0.0.1 with the pinned herdr behind them; the cluster DNS name is answered by an injected "
+    "resolver mapping it to 127.0.0.1, except the missing route step, which uses the system resolver, and the "
+    "public route step, whose injected resolver answers 1.1.1.1"
+)
 
 
 def lookup(host, port, type):  # noqa: A002
@@ -225,6 +231,7 @@ def main() -> int:
     identity_a = HostIdentity.generate()
     worker_a = Worker("a", EXE_A, identity_a, authority.user_ca)
     workers = [worker_a]
+    record("environment", True, ENVIRONMENT)
     try:
         started = worker_a.start_sshd(identity_a)
         record("a_sshd_started", started.returncode == 0 and (worker_a.state / "sshd.pid").exists(), started.stderr)
@@ -337,7 +344,7 @@ def main() -> int:
         fresh = operator.attach(scope_c, identity_c.public)
         record(
             "c_replacement_verified",
-            fresh.compatible and fresh.incarnation == EXE_C,
+            fresh.compatible and fresh.incarnation == f"{EXE_C}/1",
             {"target": fresh.target, "incarnation": fresh.incarnation},
         )
         replay = operator.attach(scope_c, identity_c.public)
@@ -354,11 +361,14 @@ def main() -> int:
             "terminal_endpoint_auth_failures",
             True,
             {
-                "operator": operator.terminal_endpoint_auth_failures(),
-                "unauthorized": unauthorized.terminal_endpoint_auth_failures(),
-                "other_execution": other.terminal_endpoint_auth_failures(),
-                "cluster_dns": resolver.terminal_endpoint_auth_failures(),
-                "public_route": public.terminal_endpoint_auth_failures(),
+                name: {"auth": found.terminal_endpoint_auth_failures(), "all": found.terminal_endpoint_refusals()}
+                for name, found in (
+                    ("operator", operator),
+                    ("unauthorized", unauthorized),
+                    ("other_execution", other),
+                    ("cluster_dns", resolver),
+                    ("public_route", public),
+                )
             },
         )
     finally:

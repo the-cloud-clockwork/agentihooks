@@ -213,4 +213,4 @@ def main(argv: list[str], environ: dict[str, str]) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:], dict(os.environ)))
+    sys.exit(main(sys.argv[1:], os.environ))

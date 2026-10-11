@@ -226,7 +226,7 @@ def test_the_client_key_is_made_once_and_reused(tmp_path):
 def test_attach_connects_saves_the_machine_and_qualifies_its_incarnation(tmp_path):
     found, runner = terminal(tmp_path)
     verdict = found.attach(scope(), HOST_KEY)
-    assert (verdict.target, verdict.incarnation, verdict.compatible) == (NAME, EXE_A, True)
+    assert (verdict.target, verdict.incarnation, verdict.compatible) == (NAME, f"{EXE_A}/2", True)
     assert runner.commands[:3] == [
         ["/usr/bin/ssh", "-F", str(found.home.config), HOST, "true"],
         ["herdr", "machine", "list", "--json"],
@@ -261,13 +261,18 @@ def test_a_refused_machine_save_is_counted(tmp_path):
     found, runner = terminal(tmp_path)
     runner.added = subprocess.CompletedProcess([], 1, "", "boom")
     assert refusal(lambda: found.attach(scope(), HOST_KEY)) == ("machine_refused", f"herdr could not save {NAME}")
-    assert found.terminal_endpoint_auth_failures() == {"machine_refused": 1}
+    assert found.terminal_endpoint_refusals() == {"machine_refused": 1}
+    assert found.terminal_endpoint_auth_failures() == {}
 
 
 @pytest.mark.parametrize(
     ("stderr", "reason"),
     [
-        ("@@@ WARNING\r\nHost key verification failed.\r\n", "host_key_changed"),
+        (
+            "@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @\r\nHost key verification failed.\r\n",
+            "host_key_changed",
+        ),
+        ("No ED25519 host key is known for x.\r\nHost key verification failed.\r\n", "host_key_unverified"),
         ("worker@10.43.12.7: Permission denied (publickey).\r\n", "unauthorized"),
         ("ssh: connect to host 10.43.12.7 port 2222: Connection refused\r\n", "unreachable"),
         (None, "unreachable"),
@@ -281,7 +286,8 @@ def test_a_refused_connection_is_classified_counted_and_ends_the_attach(tmp_path
         f"{NAME} terminal refused the connection: {reason}",
     )
     assert runner.commands == [["/usr/bin/ssh", "-F", str(found.home.config), HOST, "true"]]
-    assert found.terminal_endpoint_auth_failures() == {reason: 1}
+    assert found.terminal_endpoint_refusals() == {reason: 1}
+    assert found.terminal_endpoint_auth_failures() == ({} if reason == "unreachable" else {reason: 1})
 
 
 def test_failures_accumulate_by_reason(tmp_path):
@@ -291,20 +297,21 @@ def test_failures_accumulate_by_reason(tmp_path):
         refusal(lambda: found.attach(scope(), HOST_KEY))
     found.lookup = no_dns
     refusal(lambda: found.attach(scope(), HOST_KEY))
-    assert found.terminal_endpoint_auth_failures() == {"unauthorized": 2, "no_route": 1}
+    assert found.terminal_endpoint_refusals() == {"unauthorized": 2, "no_route": 1}
+    assert found.terminal_endpoint_auth_failures() == {"unauthorized": 2}
 
 
 def test_no_route_refuses_before_any_file_or_command(tmp_path):
     found, runner = terminal(tmp_path, addresses=())
     assert refusal(lambda: found.attach(scope(), HOST_KEY))[0] == "no_route"
     assert (runner.commands, found.home.root.exists()) == ([], False)
-    assert found.terminal_endpoint_auth_failures() == {"no_route": 1}
+    assert found.terminal_endpoint_refusals() == {"no_route": 1}
 
 
 def test_an_invalid_namespace_is_counted(tmp_path):
     found, runner = terminal(tmp_path, namespace="Bad")
     assert refusal(lambda: found.attach(scope(), HOST_KEY))[0] == "namespace"
-    assert found.terminal_endpoint_auth_failures() == {"namespace": 1}
+    assert found.terminal_endpoint_refusals() == {"namespace": 1}
 
 
 def test_an_incompatible_server_is_a_verdict_not_an_auth_failure(tmp_path):

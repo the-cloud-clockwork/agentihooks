@@ -11,11 +11,23 @@ python="${SWARM_TERMINAL_PYTHON:-/opt/venv/bin/python}"
 session_path="${SWARM_TERMINAL_PATH:-/usr/local/bin:/usr/bin:/bin}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-for name in host_key user_ca.pub principals; do
-    if [[ ! -s "$material/$name" ]]; then
-        echo "terminal endpoint off: $material/$name is missing" >&2
+wait_seconds="${SWARM_TERMINAL_WAIT_SECONDS:-180}"
+
+mounted() {
+    local name
+    for name in host_key user_ca.pub principals; do
+        [[ -s "$material/$name" ]] || return 1
+    done
+}
+
+waited=0
+until mounted; do
+    if (( waited >= wait_seconds )); then
+        echo "terminal endpoint off: no terminal material in $material after ${wait_seconds}s" >&2
         exit 0
     fi
+    sleep 1
+    waited=$((waited + 1))
 done
 
 umask 077

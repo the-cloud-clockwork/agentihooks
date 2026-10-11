@@ -13,6 +13,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from scripts.swarm_v2.auth_context import Registration
 from scripts.swarm_v2.herdr import attach, endpoints
 from scripts.swarm_v2.herdr.attach import ClientHome, Terminal
+from scripts.swarm_v2.herdr.capabilities import Incompatible
 from scripts.swarm_v2.herdr.endpoints import (
     Clients,
     Endpoint,
@@ -69,7 +70,9 @@ class World:
         name = host.split(".", 1)[0]
         pinned = (self.home.terminals / "known_hosts" / name).read_text().split(" ", 1)[1].strip()
         if pinned != server["key"]:
-            return subprocess.CompletedProcess([], 255, "", "Host key verification failed.\r\n")
+            return subprocess.CompletedProcess(
+                [], 255, "", "@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @\r\nHost key verification failed.\r\n"
+            )
         certificate = serialization.load_ssh_public_identity(
             (self.home.terminals / "certificates" / f"{name}-cert.pub").read_bytes()
         )
@@ -120,7 +123,7 @@ def _rendered(endpoint: Endpoint) -> dict:
     fx = fixture()
     identity = HostIdentity(b"fixture host key\n", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureHostKey")
     user_ca = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureUserCa"
-    items = endpoints.objects(endpoint, fx["pod"], identity, user_ca, Clients(**fx["clients"]))
+    items = endpoints.objects(endpoint, fx["pod"], identity, user_ca, Clients(**fx["clients"]), enabled=True)
     principals = base64.b64decode(items[0]["data"][endpoints.PRINCIPALS]).decode()
     return {
         "kinds": [item["kind"] for item in items],
@@ -196,6 +199,7 @@ def _rejection_case(change) -> dict:
             "client_files_before": before,
             "client_files_after": _listing(terminal.home.root),
             "terminal_endpoint_auth_failures": terminal.terminal_endpoint_auth_failures(),
+            "terminal_endpoint_refusals": terminal.terminal_endpoint_refusals(),
         }
 
 
@@ -261,7 +265,7 @@ def _rejection() -> tuple[dict, bool]:
     }
     refused = all(observed[name]["reason"] == reason for name, reason in expected.items())
     untouched = all(
-        not observed[name]["machines"] and observed[name]["terminal_endpoint_auth_failures"] == {reason: 1}
+        not observed[name]["machines"] and observed[name]["terminal_endpoint_refusals"] == {reason: 1}
         for name, reason in expected.items()
     )
     unrouted = [observed[name] for name in ("missing_cluster_dns_route", "public_route")]
@@ -299,14 +303,26 @@ def _recovery() -> tuple[dict, bool]:
         steps["old_pin_after_replacement"] = (
             terminal.home.known_hosts(old).read_text() == f"{old.host} {old_identity.public}\n"
         )
+        bumped = grant_scope(_registration(fixture()["registration"]["execution_id"], 3))
+        regenerated = HostIdentity.generate()
+        world.servers[old.host]["key"] = regenerated.public
+        steps["new_generation"] = terminal.attach(bumped, regenerated.public).incarnation
+        try:
+            terminal.qualifier.require(old.name, f"{first.execution_id}/2", "pane_read")
+            steps["stale_generation"] = ""
+        except Incompatible as exc:
+            steps["stale_generation"] = str(exc)
         steps["terminal_endpoint_auth_failures"] = terminal.terminal_endpoint_auth_failures()
+        exe_a, exe_b = fixture()["registration"]["execution_id"], fixture()["other_execution"]["execution_id"]
         passed = (
-            steps["accepted"] == fixture()["registration"]["execution_id"]
+            steps["accepted"] == f"{exe_a}/2"
             and steps["old_name_with_new_key"] == "host_key_changed"
             and steps["old_pin_kept"]
-            and steps["replacement"] == steps["replayed"] == fixture()["other_execution"]["execution_id"]
+            and steps["replacement"] == steps["replayed"] == f"{exe_b}/1"
             and steps["machine_adds"] == 2
             and steps["old_pin_after_replacement"]
+            and steps["new_generation"] == f"{exe_a}/3"
+            and "was replaced" in steps["stale_generation"]
             and steps["terminal_endpoint_auth_failures"] == {"host_key_changed": 1}
         )
         return steps, passed

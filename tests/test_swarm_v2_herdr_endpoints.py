@@ -107,7 +107,7 @@ def test_the_endpoint_names_come_from_the_execution():
         name,
         f"{name}.swarm-workers.svc.cluster.local",
         f"ssh://{name}.swarm-workers.svc.cluster.local",
-        EXE_A,
+        f"{EXE_A}/2",
         OWNER,
     )
 
@@ -132,13 +132,13 @@ def test_terminal_clients_are_a_namespace_and_a_label_selector(namespace, labels
 
 
 def test_the_rendered_objects_match_the_golden_manifests():
-    rendered = endpoints.objects(endpoint(), fixture()["pod"], IDENTITY, USER_CA, clients())
+    rendered = endpoints.objects(endpoint(), fixture()["pod"], IDENTITY, USER_CA, clients(), enabled=True)
     golden = json.loads((FIXTURES / "herdr-terminal-objects.json").read_text())
     assert rendered == golden["items"]
 
 
 def test_the_secret_carries_the_host_key_the_user_ca_and_the_only_principal():
-    secret = endpoints.objects(endpoint(), fixture()["pod"], IDENTITY, USER_CA, clients())[0]
+    secret = endpoints.objects(endpoint(), fixture()["pod"], IDENTITY, USER_CA, clients(), enabled=True)[0]
     decoded = {name: base64.b64decode(value) for name, value in secret["data"].items()}
     assert decoded == {
         "host_key": b"fixture host key\n",
@@ -167,14 +167,17 @@ def _pod(change) -> dict:
 )
 def test_only_the_live_attempt_pod_owns_a_terminal(change):
     pod = _pod(change)
-    assert refusal(lambda: endpoints.objects(endpoint(), pod, IDENTITY, USER_CA, clients())) == (
+    assert refusal(lambda: endpoints.objects(endpoint(), pod, IDENTITY, USER_CA, clients(), enabled=True)) == (
         "pod_foreign",
         "the Pod is not this execution's live attempt",
     )
 
 
 def test_a_pod_without_metadata_owns_no_terminal():
-    assert refusal(lambda: endpoints.objects(endpoint(), {}, IDENTITY, USER_CA, clients()))[0] == "pod_foreign"
+    assert (
+        refusal(lambda: endpoints.objects(endpoint(), {}, IDENTITY, USER_CA, clients(), enabled=True))[0]
+        == "pod_foreign"
+    )
 
 
 def _service(change) -> dict:
@@ -245,7 +248,7 @@ def test_a_policy_without_rules_admits_nothing_extra():
 
 
 def test_the_rendered_service_and_policy_are_private():
-    for manifest in endpoints.objects(endpoint(), fixture()["pod"], IDENTITY, USER_CA, clients()):
+    for manifest in endpoints.objects(endpoint(), fixture()["pod"], IDENTITY, USER_CA, clients(), enabled=True):
         assert endpoints.public_exposure(endpoint(), manifest) == []
 
 
@@ -262,7 +265,9 @@ def test_a_publicly_exposed_render_is_refused(monkeypatch):
         return manifest
 
     monkeypatch.setattr(endpoints, "service", load_balancer)
-    assert refusal(lambda: endpoints.objects(endpoint(), fixture()["pod"], IDENTITY, USER_CA, clients())) == (
+    assert refusal(
+        lambda: endpoints.objects(endpoint(), fixture()["pod"], IDENTITY, USER_CA, clients(), enabled=True)
+    ) == (
         "public_exposure",
         "service type LoadBalancer is not ClusterIP; service sets externalIPs",
     )
@@ -270,9 +275,12 @@ def test_a_publicly_exposed_render_is_refused(monkeypatch):
 
 def test_the_pod_mounts_its_terminal_material_and_names_the_private_port():
     pod = fixture()["pod"]
-    mounted = endpoints.with_terminal(pod, endpoint())
+    mounted = endpoints.with_terminal(pod, endpoint(), enabled=True)
     assert mounted["spec"]["volumes"] == [
-        {"name": "terminal", "secret": {"secretName": f"swarm-{EXE_A}-terminal", "defaultMode": 0o440}}
+        {
+            "name": "terminal",
+            "secret": {"secretName": f"swarm-{EXE_A}-terminal", "defaultMode": 0o440, "optional": True},
+        }
     ]
     assert mounted["spec"]["containers"][0]["volumeMounts"] == [
         {"name": "terminal", "mountPath": "/var/run/swarm/terminal", "readOnly": True}
@@ -281,6 +289,26 @@ def test_the_pod_mounts_its_terminal_material_and_names_the_private_port():
         {"name": "herdr-ssh", "containerPort": 2222, "protocol": "TCP"}
     ]
     assert pod == fixture()["pod"]
+
+
+def test_disabled_exposure_renders_nothing_and_leaves_the_pod_alone():
+    pod = fixture()["pod"]
+    assert endpoints.objects(endpoint(), {}, IDENTITY, USER_CA, clients(), enabled=False) == []
+    unchanged = endpoints.with_terminal(pod, endpoint(), enabled=False)
+    assert unchanged == pod
+    unchanged["spec"]["volumes"].append("x")
+    assert pod == fixture()["pod"]
+
+
+def test_known_hosts_lines_come_from_one_function():
+    assert endpoints.known_hosts(endpoint(), "ssh-ed25519 KEY") == (
+        f"swarm-{EXE_A}-terminal.swarm-workers.svc.cluster.local ssh-ed25519 KEY\n"
+    )
+
+
+def test_a_new_generation_of_an_execution_is_a_new_incarnation():
+    newer = Endpoint(Scope("operator/operator", "fixture-swarm", EXE_A, 3), "swarm-workers")
+    assert (newer.name, newer.incarnation) == (endpoint().name, f"{EXE_A}/3")
 
 
 def test_a_host_identity_is_a_fresh_ed25519_key_pair():
@@ -377,7 +405,9 @@ def test_the_rendered_execution_pod_with_its_terminal_matches_the_golden_pod():
     pod = json.loads((FIXTURES / "pod-rendered.json").read_text())
     execution = SimpleNamespace(execution_id="exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0", generation=3)
     found = Endpoint(operator_scope(OPERATOR, "fixture", execution), "swarm-pod-proof")
-    assert endpoints.with_terminal(pod, found) == json.loads((FIXTURES / "herdr-terminal-pod.json").read_text())
+    assert endpoints.with_terminal(pod, found, enabled=True) == json.loads(
+        (FIXTURES / "herdr-terminal-pod.json").read_text()
+    )
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])

@@ -102,7 +102,7 @@ class Endpoint:
 
     @property
     def incarnation(self) -> str:
-        return self.scope.execution_id
+        return f"{self.scope.execution_id}/{self.scope.generation}"
 
     @property
     def labels(self) -> dict[str, str]:
@@ -122,6 +122,10 @@ def _public(key) -> str:
     return key.public_bytes(serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH).decode()
 
 
+def known_hosts(endpoint: Endpoint, host_public: str) -> str:
+    return f"{endpoint.host} {host_public}\n"
+
+
 @dataclass(frozen=True)
 class HostIdentity:
     private: bytes = field(repr=False)
@@ -136,7 +140,7 @@ class HostIdentity:
         return cls(private, _public(key.public_key()))
 
     def known_hosts(self, endpoint: Endpoint) -> str:
-        return f"{endpoint.host} {self.public}\n"
+        return known_hosts(endpoint, self.public)
 
 
 class TerminalAuthority:
@@ -262,7 +266,11 @@ def public_exposure(endpoint: Endpoint, manifest: dict) -> list[str]:
     return check(manifest.get("spec", {}), endpoint.labels) if check else []
 
 
-def objects(endpoint: Endpoint, pod: dict, identity: HostIdentity, user_ca: str, clients: Clients) -> list[dict]:
+def objects(
+    endpoint: Endpoint, pod: dict, identity: HostIdentity, user_ca: str, clients: Clients, *, enabled: bool
+) -> list[dict]:
+    if not enabled:
+        return []
     owner = _owned(endpoint, pod)
     rendered = [
         host_secret(endpoint, owner, identity, user_ca),
@@ -275,10 +283,13 @@ def objects(endpoint: Endpoint, pod: dict, identity: HostIdentity, user_ca: str,
     return rendered
 
 
-def with_terminal(pod: dict, endpoint: Endpoint) -> dict:
+def with_terminal(pod: dict, endpoint: Endpoint, *, enabled: bool) -> dict:
     mounted = copy.deepcopy(pod)
+    if not enabled:
+        return mounted
     spec = mounted["spec"]
-    spec["volumes"].append({"name": VOLUME, "secret": {"secretName": endpoint.name, "defaultMode": 0o440}})
+    secret = {"secretName": endpoint.name, "defaultMode": 0o440, "optional": True}
+    spec["volumes"].append({"name": VOLUME, "secret": secret})
     container = spec["containers"][0]
     container["volumeMounts"].append({"name": VOLUME, "mountPath": MATERIAL_DIR, "readOnly": True})
     container["ports"] = [{"name": PORT_NAME, "containerPort": PORT, "protocol": "TCP"}]
