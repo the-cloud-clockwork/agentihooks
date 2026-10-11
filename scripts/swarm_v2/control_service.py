@@ -21,6 +21,8 @@ from scripts.swarm_v2.herdr.attach import ClientHome
 from scripts.swarm_v2.herdr.capabilities import runner
 from scripts.swarm_v2.herdr.upkeep import Upkeep, switched_on
 from scripts.swarm_v2.kubernetes import operator_terminal
+from scripts.swarm_v2.kubernetes.client import ApiRefused
+from scripts.swarm_v2.kubernetes.runtime import PodStatus
 from scripts.swarm_v2.kubernetes.watch import BACKEND
 from scripts.swarm_v2.reconciliation.accounts import Finding
 from scripts.swarm_v2.runtime.observe import Observer, Reading, Signal, Source, Thresholds
@@ -37,6 +39,7 @@ THREAD = "swarm-v2-api"
 VIEWS_THREAD = "swarm-v2-terminal-views"
 ISSUER = "controller"
 AUDIENCE = "workers"
+REFUSED = {401: Reading.UNAUTHENTICATED, 403: Reading.FORBIDDEN}
 
 
 class ControlError(SwarmError):
@@ -65,6 +68,20 @@ def _heartbeat(agent: AgentRecord, raw: str | None) -> list[Signal]:
     return [Signal(Source.HEARTBEAT, Reading.OK, seen, agent.execution_id, agent.generation, beat["state"])]
 
 
+def _pod(status: Callable[[str], tuple[PodStatus, ...]] | None, agent: AgentRecord, now: float) -> list[Signal]:
+    if status is None:
+        return []
+    try:
+        found = status(agent.execution_id)
+    except ApiRefused as refused:
+        reading, phase = REFUSED.get(refused.status, Reading.UNREACHABLE), ""
+    except (ConnectionError, TimeoutError):
+        reading, phase = Reading.UNREACHABLE, ""
+    else:
+        reading, phase = (Reading.OK, found[0].phase) if found else (Reading.NOT_FOUND, "")
+    return [Signal(Source.KUBERNETES, reading, now, agent.execution_id, agent.generation, phase)]
+
+
 class ControlService:
     def __init__(
         self,
@@ -86,6 +103,7 @@ class ControlService:
         self.server: ThreadingHTTPServer | None = None
         self.listen: tuple[str, int] | None = None
         self.runtime = None
+        self.pods: Callable[[str], tuple[PodStatus, ...]] | None = None
         self.api_url = ""
         self.recover: Callable[[], dict[str, str]] | None = None
         self.views: Callable[[], dict] | None = None
@@ -122,7 +140,12 @@ class ControlService:
         beats = store.redis.hgetall(store.key(slug, "heartbeats"))
         remote = [agent for agent in store.execution_occupants(slug).values() if agent.runtime_backend == BACKEND]
         found = [
-            self.controller.observe(self.observer, agent, _heartbeat(agent, beats.get(agent.execution_id)), now)
+            self.controller.observe(
+                self.observer,
+                agent,
+                _heartbeat(agent, beats.get(agent.execution_id)) + _pod(self.pods, agent, now),
+                now,
+            )
             for agent in remote
         ]
         return [finding for finding in found if finding is not None]
@@ -199,6 +222,7 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
     if workers is not None:
         service.api_url = workers.terms.api_url
         service.runtime = deployed.tick_runtime(service, workers, environ)
+        service.pods = transports[0].status
         service.recover = deployed.recovery_pass(service, workers, transports[0].api, LedgerClient())
         if service.controller.terminals is not None:
             service.views = deployed.terminal_views(service.controller, environ)
