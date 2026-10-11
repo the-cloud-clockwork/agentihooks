@@ -1,6 +1,0 @@
-{
-  "scripts/claude_login.py:scripts.claude_login.x__pump__mutmut_29:2654068ac0a3bff6b10714ef238b3135a52a6442a1a82d1d9fb88ae1794b747c": {
-    "reader": "standards_reader",
-    "reason": "In the EIO branch `data = b\"\"` becomes `data = None`; the only use is the next line `if not data:`, and both values are falsy, so the relay returns the captured bytes either way. Equivalent."
-  }
-}

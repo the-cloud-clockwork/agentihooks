@@ -81,7 +81,7 @@ def _pump(master: int, terminal: Terminal, forward: bool) -> bytes:
             try:
                 data = os.read(master, CHUNK)
             except OSError:
-                data = b""
+                return bytes(captured)
             if not data:
                 return bytes(captured)
             captured += data
