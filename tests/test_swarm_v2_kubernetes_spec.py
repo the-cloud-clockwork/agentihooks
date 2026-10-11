@@ -969,7 +969,10 @@ def test_a_policy_bundle_is_copied_by_an_init_container_into_a_private_folder(tm
     assert init["imagePullPolicy"] == "Always"
     assert init["command"] == ["cp", "-R", "/bundle", "/linked", "/revision.json", spec.BUNDLE_DIR + "/"]
     assert init["volumeMounts"] == [{"name": "bundle", "mountPath": spec.BUNDLE_DIR}]
-    assert init["securityContext"] == pod["spec"]["containers"][0]["securityContext"]
+    assert init["securityContext"] == {
+        **pod["spec"]["containers"][0]["securityContext"],
+        "readOnlyRootFilesystem": True,
+    }
     assert "env" not in init and "envFrom" not in init
     assert {"name": "bundle", "emptyDir": {"sizeLimit": f"{spec.BUNDLE_MIB}Mi"}} in pod["spec"]["volumes"]
 
