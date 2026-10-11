@@ -317,6 +317,7 @@ from scripts.hive import auth as hive_auth
 from scripts.swarm import commands
 from scripts.swarm.store import AgentRecord, connect
 from scripts.swarm_v2 import control_service
+from scripts.swarm_v2.filesystem import LAYOUTS
 from scripts.swarm_v2.kubernetes.client import KubeHttp, PodClient
 from scripts.swarm_v2.kubernetes.grants import PodGrants, Supervision
 from scripts.swarm_v2.kubernetes.runtime import GENERATION_LABEL
@@ -351,7 +352,11 @@ agent = probe.controller.admit(record, "")
 grant = probe.grants.issue(
     slug, agent.execution_id, project_ids=["github.com/the-cloud-clockwork/agentihooks"], brain_id="swarm", account="kind"
 )
-seed = f"import profiles, shutil; from pathlib import Path; shutil.copytree(Path(profiles.__file__).parent, {str(TEMPLATES)!r}, dirs_exist_ok=True)"
+seed = (
+    "import os, profiles, shutil; from pathlib import Path; "
+    f"shutil.copytree(Path(profiles.__file__).parent, {str(TEMPLATES)!r}, dirs_exist_ok=True); "
+    f"Path({str(LAYOUTS[1])!r}).write_text(os.environ['LAYOUT'])"
+)
 name = pod_name(agent.execution_id)
 labels = {
     OWNER_LABEL: owner_for(slug),
@@ -372,7 +377,11 @@ api.create_pod({
             "image": env["IMAGE"],
             "imagePullPolicy": "Never",
             "command": ["python", "-c", seed],
-            "volumeMounts": [{"name": "templates", "mountPath": str(TEMPLATES.parent)}],
+            "env": [{"name": "LAYOUT", "value": env["LAYOUT"]}],
+            "volumeMounts": [
+                {"name": "templates", "mountPath": str(TEMPLATES.parent)},
+                {"name": "node", "mountPath": str(LAYOUTS[1].parent)},
+            ],
         }],
         "containers": [{
             "name": "worker",
@@ -383,9 +392,10 @@ api.create_pod({
                 {"name": "launch", "mountPath": LAUNCH_DIR, "readOnly": True},
                 {"name": "home", "mountPath": "/home/worker"},
                 {"name": "templates", "mountPath": str(TEMPLATES.parent), "readOnly": True},
+                {"name": "node", "mountPath": str(LAYOUTS[1].parent), "readOnly": True},
             ],
         }],
-        "volumes": [launch_volume(agent.execution_id), {"name": "home", "emptyDir": {}}, {"name": "templates", "emptyDir": {}}],
+        "volumes": [launch_volume(agent.execution_id), {"name": "home", "emptyDir": {}}, {"name": "templates", "emptyDir": {}}, {"name": "node", "emptyDir": {}}],
     },
 })
 handed = PodGrants(api, slug, lambda token: probe.grants.verify(slug, token), Supervision("claude", None, env["CONTROL_URL"])).hand(agent, grant)
@@ -393,7 +403,7 @@ scratch.cleanup()
 print(json.dumps({"pod": name, "handed": handed}, sort_keys=True))
 EOF
 )"
-handed="$(python3 - <<'EOF' | kubectl exec -i "deployment/$release-controller" -c controller -- env CONTROL_URL="http://$release-controller:8780" SLUG="$slug" RELEASE="$release" IMAGE="$image" python -c "$hand_grant"
+handed="$(python3 - <<'EOF' | kubectl exec -i "deployment/$release-controller" -c controller -- env CONTROL_URL="http://$release-controller:8780" SLUG="$slug" RELEASE="$release" IMAGE="$image" LAYOUT="$(cat docker/swarm-node/layout.json)" python -c "$hand_grant"
 import base64, json, subprocess
 
 
