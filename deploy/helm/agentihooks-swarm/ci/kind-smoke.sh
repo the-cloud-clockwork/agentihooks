@@ -425,7 +425,7 @@ for _ in $(seq 120); do
 done
 supervised="$(kubectl logs "$worker_pod" || true)"
 exit_code="$(kubectl get pod "$worker_pod" -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}')"
-if [[ $phase != Succeeded && $phase != Failed ]] || [[ $exit_code == 64 || $supervised == *"ERROR "*"refused"* ]]; then
+if [[ $phase != Succeeded && $phase != Failed ]] || [[ $exit_code == 64 ]] || grep -q '^ERROR .*refused' <<< "$supervised"; then
   kubectl describe pod "$worker_pod"
   printf 'the worker Pod start step did not hand a prepared attempt to its supervisor (phase %s, exit %s): %s\n' "$phase" "$exit_code" "$supervised" >&2
   exit 1

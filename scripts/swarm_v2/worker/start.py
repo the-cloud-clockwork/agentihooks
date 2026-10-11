@@ -32,7 +32,7 @@ Send = Callable[[str, str, dict], tuple[int, object]]
 
 def post(url: str, grant: str, body: dict) -> tuple[int, object]:
     headers = {"Authorization": f"Bearer {grant}", "Content-Type": "application/json"}
-    request = urllib.request.Request(url + REGISTER, json.dumps(body).encode(), headers, method="POST")
+    request = urllib.request.Request(url.rstrip("/") + REGISTER, json.dumps(body).encode(), headers, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as answer:
             status, text = answer.status, answer.read()
@@ -62,7 +62,7 @@ def _launch(path: Path) -> dict:
 
 def _control_url(url: object) -> None:
     refused = LaunchRefused("invalid control url")
-    if not isinstance(url, str) or url.endswith("/"):
+    if not isinstance(url, str):
         raise refused
     try:
         parts = urlsplit(url)

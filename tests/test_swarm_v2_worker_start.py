@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.swarm_v2 import worker_home
+from scripts.swarm_v2 import filesystem, worker_home
 from scripts.swarm_v2.broadcast_bridge import API_URL, GRANT_NAME
 from scripts.swarm_v2.supervision import Launch, LaunchRefused
 from scripts.swarm_v2.worker import start
@@ -155,7 +155,6 @@ def test_a_controller_busy_on_every_attempt_refuses_the_start(tmp_path):
         ({**RECORD, "control_url": "file:///etc/passwd"}, "invalid control url"),
         ({**RECORD, "control_url": "http://"}, "invalid control url"),
         ({**RECORD, "control_url": 8780}, "invalid control url"),
-        ({**RECORD, "control_url": CONTROL + "/"}, "invalid control url"),
         ({**RECORD, "control_url": "http://controller.swarm.invalid:port"}, "invalid control url"),
     ],
 )
@@ -287,6 +286,14 @@ def test_post_registers_with_the_grant_as_bearer(server, monkeypatch):
     ]
 
 
+def test_post_registers_on_the_same_path_for_a_slash_terminated_control_url(server, monkeypatch):
+    monkeypatch.setattr(Recorder, "answer", json.dumps(ANSWER).encode())
+
+    assert start.post(server + "/", GRANT, {}) == (200, ANSWER)
+
+    assert [seen[0] for seen in Recorder.seen] == ["/v2/executions/register"]
+
+
 def test_post_reports_a_refusal_status_without_its_body(server, monkeypatch):
     monkeypatch.setattr(Recorder, "status", 401)
     monkeypatch.setattr(Recorder, "answer", b'{"error_class": "unauthenticated"}')
@@ -323,7 +330,7 @@ def test_a_stale_staged_record_never_loosens_the_registration_record(tmp_path):
     staged.write_text("stale")
     staged.chmod(0o644)
 
-    prepare(tmp_path, material(tmp_path), Controller((200, ANSWER)), lambda request: {})
+    prepare(tmp_path, material(tmp_path), Controller((200, ANSWER)))
 
     record = staged.with_name("registration.json")
     assert stat.S_IMODE(record.stat().st_mode) == 0o600
@@ -380,7 +387,8 @@ class Bootstrap(Boot):
         super().__call__(request)
         attempt = request.root / request.attempt
         (attempt / "homes" / "claude").mkdir(parents=True)
-        record = {"attempt": request.attempt, "homes": {"claude": "homes/claude"}}
+        layout = filesystem.mapping(filesystem.load())
+        record = {"attempt": request.attempt, "homes": {"claude": "homes/claude"}, "layout": layout}
         (attempt / "execution.json").write_text(json.dumps(record))
         return record
 
