@@ -145,3 +145,16 @@ The unit job's Run tests command line carries `-p tests.flake_ledger --reruns 2`
 | [38103411818](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38103411818) | one test fails every attempt | exactly the two shards that ran it failed, `unit (3.11, 4)` and `unit (3.12, 8)`; each records it `failed`, 3 attempts, run 38103411818; the other 10 shards green |
 
 Cost to the phase: a retry spends time only on a failing test, at most two more runs of it. The pull request run of this slice (38103509370) took 160 to 276 s per unit shard against the 7 minute job timeout, with an empty flake report on every shard. A flake absorbed in the queue saves the replacement queue run, about 6 minutes each, 32 of them last week.
+
+## Slice 2 as delivered
+
+`.github/actions/retry-download` downloads one artifact of the run with `actions/download-artifact`, up to three attempts. Attempts 1 and 2 are `continue-on-error`; each failure raises a `Retried download` warning annotation and waits 10 s, then 20 s. Attempt 3 is not, so an artifact that never appears still fails the step. Using the action is the declaration that a step is idempotent. `split` downloads the queued run's dev durations through it and `unit` downloads the durations it splits on. `tests/test_ci_step_retry.py` fails when a job holding a deployment environment or an OIDC token uses it, directly, through a local composite action or through a called workflow.
+
+The 10 queue failures counted above all ran on 2026-10-08 in the unit job's older durations lookup, which called the GitHub API and ran out of the shared token quota; the cache restore that replaced it had no repeat. The retry covers what remains: one transient artifact service error no longer fails a shard and its queue entry.
+
+| Run | Plant on the delivered code | Result |
+|---|---|---|
+| [38108213778](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38108213778) | attempt 1 asks for a name that does not exist | 2 of 2 split and 12 of 12 unit download steps green on attempt 2, each with one `Retried download` warning; the two shards running `test_ci_step_retry` went red on the planted action file, as that test should |
+| [38108215538](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38108215538) | `unit` asks for a durations artifact that does not exist | 12 of 12 unit shards red in the download step after three `Artifact not found` attempts and two warnings; Run tests skipped |
+
+Cost: nothing when the first attempt succeeds; 30 s plus the attempts when an artifact is missing for good.
