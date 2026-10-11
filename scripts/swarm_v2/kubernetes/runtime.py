@@ -3,6 +3,7 @@
 from collections import Counter
 from dataclasses import dataclass
 
+from scripts.swarm_v2.kubernetes import adoption
 from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused, PodApi
 from scripts.swarm_v2.kubernetes.spec import DOMAIN, PodSpecRefused, PodTemplate
 from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL, OWNER_LABEL, owner_for
@@ -71,6 +72,12 @@ class KubernetesTransport:
         except ApiRefused:
             return Observation(Phase.REFUSED)
 
+    def spec_digest(self, payload: dict) -> str:
+        try:
+            return self.template.render(payload).digest
+        except PodSpecRefused:
+            return ""
+
     def status(self, execution_id: str) -> tuple[PodStatus, ...]:
         return tuple(pod_status(pod) for pod in self.api.list_pods(self._selector(execution_id)))
 
@@ -94,6 +101,7 @@ class KubernetesTransport:
         if (
             metadata["namespace"] != self.api.namespace
             or {key: metadata["labels"][key] for key in expected} != expected
+            or rendered.digest != operation.spec_digest
         ):
             return None
         # The API server defaults the live spec, so a later match compares these digests instead.
@@ -128,9 +136,9 @@ class KubernetesTransport:
             return "generation"
         if notes.get(OPERATION_DIGEST) != operation.payload_digest:
             return "operation"
-        if rendered is not None and notes.get(SPEC_DIGEST) != rendered["metadata"]["annotations"][SPEC_DIGEST]:
+        if notes.get(SPEC_DIGEST) != operation.spec_digest:
             return "spec"
-        return ""
+        return "" if rendered is None else adoption.mismatch(rendered, pod)
 
     def _applied(self, pod: dict, outcome: str) -> Observation:
         self.reconciliations[outcome] += 1
