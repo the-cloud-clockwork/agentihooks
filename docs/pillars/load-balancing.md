@@ -428,10 +428,12 @@ routing pool and the `agentihooks quota` rows.
   before placing, at most once per fifteen minutes per account: a ChatGPT token
   account, or a default login whose `auth.json` holds its token, gets a free
   read of the ChatGPT usage endpoint (`/backend-api/wham/usage`, no inference
-  spent), cached in `~/.agentihooks/codex-usage.json` with the windows, plan and
-  limit only; any other account gets one tiny `codex exec`. A read answered
-  `401 token_expired` marks the account `EXPIRED`: no seats, and `agentihooks
-  quota` names the login that renews it. Until then the cap keeps reading an older one while it
+  spent), cached with mode 0600 in `codex-usage.json` under `AGENTIHOOKS_HOME`
+  with the windows, plan and limit only, keyed by the account slug. Any other
+  account, and a read that fails for any reason but an expired token, gets one
+  tiny `codex exec`. A read answered `401 token_expired` marks the account
+  `EXPIRED`: no seats, and `agentihooks quota` names the login that renews it.
+  A limit reached before the 7-day reset stops counting once that reset passes. Until then the cap keeps reading an older one while it
   is younger than `AGENTIHOOKS_CODEX_READING_MAX_AGE_H` hours (default 6), so an
   idle account keeps its seats; a 7-day window that has reset in the meantime
   reads 100% left. `agentihooks quota` shows `STALE` only past that age, and

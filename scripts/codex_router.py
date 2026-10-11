@@ -202,8 +202,10 @@ def quotas(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, Co
     return {name: _newest(found, usage.get(name)) for name, found in readings.items()}
 
 
-def _newest(*readings: CodexQuota | None) -> CodexQuota | None:
-    return max((found for found in readings if found is not None), key=lambda found: found.observed_at, default=None)
+def _newest(found: CodexQuota | None, cached: CodexQuota | None) -> CodexQuota | None:
+    if found is None or cached is None:
+        return found or cached
+    return max(found, cached, key=lambda reading: reading.observed_at)
 
 
 def _reading_max_age(environ: Mapping[str, str]) -> float:
@@ -227,7 +229,7 @@ def account_cap(quota: CodexQuota | None, now: float, environ: Mapping[str, str]
         return 0
     if not usable(quota, now, environ):
         return None
-    if quota.reached:
+    if quota.reached and not codex_quota.passed(quota.seven_day, now):
         return 0
     return session_bands.week_cap(session_bands.left(quota.seven_day.used, quota.seven_day.resets_at, now))
 
@@ -268,7 +270,7 @@ def probe(account: CodexAccount, environ: Mapping[str, str], run: Callable = sub
             found = codex_usage.read(*bearer, time.time())
             if found:
                 codex_usage.store(account.name, found)
-            return found
+                return found
         account = credential(account, environ)
         done = run(
             command(account, codex_bin, PROBE_ARGS),

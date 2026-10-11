@@ -8,6 +8,8 @@ from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 
+from hooks import config
+from scripts import aicode_tokens
 from scripts.claude_quota_balancer import QuotaWindow
 from scripts.codex_quota import CodexQuota
 
@@ -18,6 +20,7 @@ FIVE_HOUR_SECONDS = 18000
 EXPIRED_CODE = "token_expired"
 LIMIT_REACHED = "limit_reached"
 CACHE_FILE = "codex-usage.json"
+CACHE_MODE = 0o600
 WINDOWS = ("primary_window", "secondary_window")
 
 
@@ -59,11 +62,14 @@ def read(token: str, account_id: str, now: float, opener: Callable | None = None
         return CodexQuota(now, "?", expired=True) if exc.code == 401 and _code(exc) == EXPIRED_CODE else None
     except (OSError, ValueError):
         return None
-    return parse(body, now) if isinstance(body, dict) else None
+    try:
+        return parse(body, now) if isinstance(body, dict) else None
+    except (TypeError, ValueError, KeyError):
+        return None
 
 
 def _cache_path() -> Path:
-    return Path.home() / ".agentihooks" / CACHE_FILE
+    return Path(config.AGENTIHOOKS_HOME) / CACHE_FILE
 
 
 def _reading(item: dict) -> CodexQuota:
@@ -86,4 +92,4 @@ def store(name: str, quota: CodexQuota) -> None:
     with contextlib.suppress(OSError):
         path = _cache_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(readings))
+        aicode_tokens.atomic_write(path, json.dumps(readings).encode(), CACHE_MODE)
