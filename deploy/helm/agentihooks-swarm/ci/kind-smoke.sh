@@ -333,7 +333,7 @@ beat_status, beat_ack = send(f"/v2/executions/{agent.execution_id}/heartbeat", b
 seen = None
 for _ in range(60):
     seen = observe.stored(store, slug, agent.execution_id)
-    if seen and "heartbeat" in seen.sources:
+    if seen and {"heartbeat", "kubernetes"} <= set(seen.sources):
         break
     time.sleep(1)
 print(json.dumps({
@@ -341,10 +341,12 @@ print(json.dumps({
     "heartbeat": beat_status,
     "renewal_sequence": beat_ack["renewal_sequence"],
     "observed": seen.state.value if seen else None,
+    "pod": seen.sources.get("kubernetes", {}).get("reading") if seen else None,
 }, sort_keys=True))
 EOF
 )"
-if [[ $registered != *'"heartbeat": 200'* || $registered != *'"register": 200'* || $registered != *'"observed": "working"'* ]]; then
+# The probe execution has no Pod, so the deployed controller's Pod reading is not_found and a beating worker is suspect.
+if [[ $registered != *'"heartbeat": 200'* || $registered != *'"register": 200'* || $registered != *'"observed": "suspect"'* || $registered != *'"pod": "not_found"'* ]]; then
   printf 'a worker did not register, heartbeat and get observed through the deployed controller: %s\n' "$registered" >&2
   exit 1
 fi

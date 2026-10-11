@@ -1,0 +1,90 @@
+{
+  "case": "T-SV2-OBS-04-C",
+  "evidence_class": "mocked: fakeredis execution registry, task claims and heartbeats behind a server that can be disconnected, a fake wall and Redis clock, signed fixture launch grants, a fixture operator page credential and an in process brain health server that answers 401 or 200; no Kubernetes API server, worker Pod, transcript exporter process or deployed brain was used",
+  "input_sha256": {
+    "health-diagnostics.json": "c9ee91f0cb3f4abf4bcd56ca2f7d534943bd0513fd03d529acbfa76fe2684139"
+  },
+  "observed": {
+    "after_brain": {
+      "dependencies": {
+        "brain": "ok",
+        "redis": "ok"
+      },
+      "remediation": [
+        "pipeline_stalled"
+      ]
+    },
+    "after_redis": {
+      "archive": {
+        "<healthy>": "ok",
+        "<stuck>": "stalled"
+      },
+      "dependencies": {
+        "brain": "auth_failed",
+        "redis": "ok"
+      }
+    },
+    "during": {
+      "dependencies": {
+        "brain": "auth_failed",
+        "redis": "unavailable"
+      },
+      "healthy": {
+        "activity": "working",
+        "advanced_at_ms": 1250000,
+        "execution_id": "<healthy>",
+        "heartbeat_at_ms": 1250000,
+        "last_observed_state": "ok",
+        "observed_at_ms": 1250000,
+        "process": "live",
+        "seat": "eng-2@fixture",
+        "state": "unknown",
+        "watermark": 3072
+      },
+      "live": 200,
+      "redis_last_ok_kept": true,
+      "redis_reason": "ConnectionError: FakeRedis is emulating a connection error.",
+      "remediation": [
+        "dependency_unavailable",
+        "credential_rejected"
+      ],
+      "status": [
+        200,
+        "degraded"
+      ],
+      "stuck": {
+        "activity": "working",
+        "advanced_at_ms": 1000000,
+        "execution_id": "<stuck>",
+        "heartbeat_at_ms": 1250000,
+        "last_observed_state": "stalled",
+        "observed_at_ms": 1250000,
+        "process": "live",
+        "seat": "eng-1@fixture",
+        "state": "unknown",
+        "watermark": 4096
+      },
+      "worker": 503
+    },
+    "execution_state_changed": [
+      "control-owner"
+    ],
+    "leaked": [],
+    "replay": [
+      200,
+      3072,
+      6,
+      true
+    ],
+    "rollback": {
+      "diagnose": 503,
+      "live": 200
+    },
+    "stale": 409,
+    "stuck_after_stale": [
+      4096,
+      "stalled"
+    ]
+  },
+  "state": "passed"
+}

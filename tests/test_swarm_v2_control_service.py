@@ -9,6 +9,9 @@ import pytest
 from scripts.hive import auth as hive_auth
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
+from scripts.swarm_v2.kubernetes.client import ApiRefused
+from scripts.swarm_v2.kubernetes.runtime import PodStatus
+from scripts.swarm_v2.kubernetes.spec import pod_name
 from scripts.swarm_v2.kubernetes.watch import BACKEND
 from scripts.swarm_v2.runtime import observe
 
@@ -328,6 +331,77 @@ def test_a_tick_sends_each_remote_heartbeat_through_the_controller(tmp_path):
     assert observe.stored(store, SLUG, local.execution_id) is None
 
 
+def _pod(execution_id, phase="Running", name=""):
+    return PodStatus(name or pod_name(execution_id), "uid-1", phase, (), False)
+
+
+def test_a_tick_delivers_each_remote_pod_reading_beside_its_heartbeat(tmp_path):
+    store = _store()
+    service = _cs().ControlService(store, SLUG, _cs().launch_key(_environ(tmp_path)), lambda: True)
+    assert service.start()
+    beating, token = _admitted(service, store)
+    silent, _ = _admitted(service, store, seat=f"eng-2@{SLUG}", task="t2")
+    local = service.controller.admit(AgentRecord(store.next_name(SLUG, "eng"), "eng", "t3", seat=f"eng-3@{SLUG}"), "")
+    asked = []
+    service.pods = lambda execution_id: asked.append(execution_id) or (_pod(execution_id),)
+    service.executions.register(token, {"execution_id": beating.execution_id, "generation": beating.generation})
+    service.executions.heartbeat(beating.execution_id, token, _beat(service, beating))
+    accepted = json.loads(store.redis.hget(store.key(SLUG, "heartbeats"), beating.execution_id))["accepted_at_ms"]
+    now = accepted / 1000 + 1
+
+    assert service.tick(now=now) is True
+
+    seen = observe.stored(store, SLUG, beating.execution_id)
+    assert seen.sources == {
+        "heartbeat": {"reading": "ok", "observed_at": accepted / 1000, "value": "working"},
+        "kubernetes": {"reading": "ok", "observed_at": now, "value": "Running"},
+    }
+    assert (seen.state.value, seen.confidence.value) == ("working", "confirmed")
+    assert observe.stored(store, SLUG, silent.execution_id).sources == {
+        "kubernetes": {"reading": "ok", "observed_at": now, "value": "Running"},
+    }
+    assert observe.stored(store, SLUG, local.execution_id) is None
+    assert sorted(asked) == sorted([beating.execution_id, silent.execution_id])
+
+
+def _refused(error):
+    def status(execution_id):
+        raise error
+
+    return status
+
+
+@pytest.mark.parametrize(
+    ("status", "reading", "value"),
+    [
+        (lambda execution_id: (), "not_found", ""),
+        (
+            lambda execution_id: (_pod(execution_id, name="swarm-foreign"), _pod(execution_id, "Pending")),
+            "ok",
+            "Pending",
+        ),
+        (lambda execution_id: (_pod(execution_id, name="swarm-foreign"),), "not_found", ""),
+        (_refused(ApiRefused(401, "Unauthorized")), "unauthenticated", ""),
+        (_refused(ApiRefused(403, "Forbidden")), "forbidden", ""),
+        (_refused(ApiRefused(404, "NotFound")), "unreachable", ""),
+        (_refused(ConnectionError("API server answered 503")), "unreachable", ""),
+        (_refused(TimeoutError("timed out")), "unreachable", ""),
+    ],
+)
+def test_each_pod_read_outcome_becomes_its_kubernetes_reading(tmp_path, status, reading, value):
+    store = _store()
+    service = _cs().ControlService(store, SLUG, _cs().launch_key(_environ(tmp_path)), lambda: True)
+    assert service.start()
+    agent, _ = _admitted(service, store)
+    service.pods = status
+
+    service.observe(50.0)
+
+    assert observe.stored(store, SLUG, agent.execution_id).sources == {
+        "kubernetes": {"reading": reading, "observed_at": 50.0, "value": value},
+    }
+
+
 def test_hosting_is_off_without_an_api_port(tmp_path):
     assert _cs().host(_environ(tmp_path), _store(), "hive-fixture") is None
 
@@ -432,6 +506,56 @@ def test_the_api_opens_only_once_the_controller_holds_the_lease(tmp_path):
         assert service.server is not None
     finally:
         service.stop()
+
+
+def test_the_hosted_api_serves_shallow_liveness_and_guards_diagnostics(tmp_path, monkeypatch):
+    from scripts.swarm_v2 import worker_health
+
+    probed = []
+    monkeypatch.setattr(_cs(), "page_credential", lambda slug: "operator-fixture")
+    monkeypatch.setattr(
+        worker_health, "brain_state", lambda environ, timeout: probed.append(timeout) or "brain_http_401"
+    )
+    store = _store()
+    port = _free_port()
+    service = _cs().host(_hosted_environ(tmp_path, store, port), store, "hive-fixture")
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/v2/health/live", timeout=5) as response:
+            live = json.loads(response.read())
+        status, refused = _post(f"http://127.0.0.1:{port}/v2/health/qualify", "stranger", {})
+        found, report = _post(
+            f"http://127.0.0.1:{port}/v2/health/qualify",
+            "operator-fixture",
+            {"purpose": "backup", "report": live},
+        )
+    finally:
+        service.stop()
+    assert (live["probe"], live["status"]) == ("shallow", "live")
+    assert (status, refused["error_class"]) == (401, "unauthenticated")
+    assert (found, report["reason"]) == (409, "shallow_report")
+    assert service.health.controller is service.controller
+    assert (service.health.store, service.health_api.grants) == (store, service.grants)
+    assert service.health.diagnose()["dependencies"]["brain"]["state"] == "auth_failed"
+    assert probed == [worker_health.BRAIN_TIMEOUT]
+
+
+def test_the_hosted_api_honours_the_deep_diagnostics_switch(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_HEALTH_DEEP", "off")
+    store = _store()
+    port = _free_port()
+    service = _cs().host(_hosted_environ(tmp_path, store, port), store, "hive-fixture")
+    try:
+        status, refused = _post(f"http://127.0.0.1:{port}/v2/health/qualify", "anyone", {})
+    finally:
+        service.stop()
+    assert (status, refused["message"]) == (503, "deep diagnostics are switched off")
+
+
+def test_the_page_credential_comes_from_the_ledger_repository(monkeypatch):
+    from scripts.swarm_ledger.repository import repository
+
+    monkeypatch.setattr(repository, "token", lambda slug: f"token-for-{slug}")
+    assert _cs().page_credential(SLUG) == f"token-for-{SLUG}"
 
 
 def test_a_port_it_cannot_bind_releases_the_lease(tmp_path):

@@ -7,6 +7,7 @@ import { clearNoteError, renderControls, renderGates, showNote } from "./control
 import { firstPage, moreButton, wanted } from "./pages.js";
 import { doc, queue } from "./sync.js";
 import { snowflake, targetText } from "./freezes.js";
+import { agentActions, reconcile, settle, titlePause } from "./lifecycle.js";
 
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
 const ROLES = ["master", "engineer", "planner", "qa", "cicd"];
@@ -25,8 +26,10 @@ export function receiveSwarm(sw) {
   if (swarmReadError && !pending) $("swarm-note").textContent = "";
   swarmReadError = false;
   clearNoteError();
+  const resend = reconcile(sw);
   renderSwarm(sw);
   renderChatTo(sw);
+  if (resend && !pending) swarmControl(resend, resend.control);
 }
 
 export function swarmLost(reason) {
@@ -47,6 +50,7 @@ export async function swarmControl(body, op = body.action) {
   renderControls();
   try {
     const resp = await writeSwarm(body);
+    settle(body);
     if (resp.ok) {
       swarm = await resp.json();
       if (op === "apply") capDraft = {};
@@ -62,7 +66,7 @@ export async function swarmControl(body, op = body.action) {
   renderSwarm(swarm);
 }
 
-function label(text, tone) {
+export function label(text, tone) {
   return h("span", { class: `lbl ${tone || String(text).replace(/\s+/g, "-")}`, text });
 }
 
@@ -131,18 +135,18 @@ function remoteSwarm(sw) {
 function agentRows(sw, now) {
   const agents = [...(sw.agents || [])].sort((x, y) => (y.lane === "master") - (x.lane === "master"));
   return agents.map((a) => {
-    const master = a.lane === "master";
+    const master = a.lane === "master", offer = sw.lifecycle && sw.lifecycle.agents && sw.lifecycle.agents[a.name];
     return { name: a.name, master, gates: a.gates || [], lane: master ? "—" : a.lane, profile: a.profile || "—", overlays: (a.overlays || []).join(" · ") || "—", model: modelText(a) || "—", task: master ? "" : a.task || "",
       state: master && (a.status || "working") === "working" ? "live" : a.status || "working", promoted: !!a.promoted, age: a.started_at ? span(now - a.started_at) : "—",
       finished: a.status === "finished", since: a.state_since || 0, terminal: terminalView((sw.terminals || {})[a.name], now),
-      execution: executionView((sw.executions || {})[a.name], now) };
+      execution: executionView((sw.executions || {})[a.name], now), lifecycle: offer ? { offer, controls: sw.lifecycle.controls.filter((c) => c.action in offer.disabled), terminate: !!offer.terminate } : null };
   });
 }
 
 function agentRow(a, remote) {
   return withId(cells(idCell(a.name), a.lane, a.profile, a.overlays, a.model, a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
     a.promoted ? h("span", { class: "sw-promoted" }, label(a.state), label("promoted")) : label(a.state),
-    ...(remote ? [executionCell(a.execution), terminalCell(a.terminal, a.execution)] : []), a.age, a.finished ? h("span") : agentActions(a)), `agent-${a.name}`);
+    ...(remote ? [executionCell(a.execution), terminalCell(a.terminal, a.execution)] : []), a.age, a.finished ? h("span") : agentActions(a, pending, swarmReadError)), `agent-${a.name}`);
 }
 
 function executionCell(e) {
@@ -153,14 +157,6 @@ function terminalCell(t, e) {
   if (!t) return "—";
   const detail = [t.detail, e && e.behind ? "behind heartbeat" : ""].filter(Boolean).join(" · ");
   return h("span", {}, label(t.state, TERMINAL_TONES[t.state]), detail && ` ${detail}`);
-}
-
-function agentActions(a) {
-  return h("div", { class: "sw-acts" },
-    ...a.gates.map((g) => g.lifted ? label(`${g.gate} lifted`, "on")
-      : h("button", { class: "sw-btn", type: "button", "data-lift": g.gate, "data-agent": a.name, "aria-label": `Lift the ${g.gate} gate for ${a.name}`, disabled: !!pending, text: `lift ${g.gate}` })),
-    h("button", { class: "sw-btn", type: "button", "data-message": a.master ? "" : a.name, "aria-label": `Message ${a.name}`, text: "message" }),
-    h("button", { class: "sw-btn danger", type: "button", "data-terminate": a.name, "aria-label": `Terminate ${a.name}`, disabled: !!pending, text: "terminate" }));
 }
 
 export function wornOverlays(sw, role) {
@@ -314,6 +310,7 @@ export function renderSwarm(sw) {
     sw && (openFindings(sw).length || sw.tasks.blocked) ? h("span", { class: "attention-dot", "aria-label": "Needs attention" }) : null].filter(Boolean));
   renderGates(sw);
   renderControls();
+  titlePause(sw);
   if ($("swarm").hidden) return renderStats();
   renderFreezes();
   if (!sw) {
