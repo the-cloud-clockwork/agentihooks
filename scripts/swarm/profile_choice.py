@@ -80,6 +80,19 @@ def kept(task: dict, saved: dict, relaunch: dict) -> ProfileDecision | None:
     )
 
 
+def transfer(task: dict) -> dict:
+    from scripts.swarm.tick import SpawnError
+
+    saved = (task.get("handoff_envelope") or {}).get("launch")
+    if not task.get("handoff") and not saved:
+        return {}
+    if not saved or not all(saved.get(key) for key in ("profile", "harness", "model", "effort")):
+        raise SpawnError("unsupported handoff: original profile and run options are missing", "unsupported")
+    if saved["harness"] not in ("claude", "codex"):
+        raise SpawnError(f"unsupported handoff harness: {saved['harness']}", "unsupported")
+    return saved
+
+
 def needs_ci_push(task: dict) -> bool:
     return (task.get("contract") or {}).get("push") == "yes"
 

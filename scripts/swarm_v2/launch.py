@@ -71,7 +71,7 @@ class Launch:
 def seat_profile(request: SpawnRequest) -> str:
     task, lane = request.task, request.config.lanes.get(request.lane, {})
     relaunch = live_binding.complete(task.get("launch_assignment"))
-    saved = relaunch or (task.get("handoff_envelope") or {}).get("launch") or {}
+    saved = relaunch or profile_choice.transfer(task)
     decision = profile_choice.kept(task, saved, relaunch) or profile_choice.pick(
         request.config.slug, request.lane, lane, task, dict(os.environ)
     )

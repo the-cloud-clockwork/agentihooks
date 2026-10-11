@@ -6,6 +6,7 @@ import pytest
 from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
 from scripts.swarm import capacity, profile_choice, runtime
 from scripts.swarm.store import SwarmConfig
+from scripts.swarm.tick import SpawnError
 from scripts.swarm_v2 import launch
 from scripts.swarm_v2.runtime.base import SpawnRequest, Status
 from scripts.swarm_v2.runtime.routed import routed
@@ -170,12 +171,39 @@ def test_a_pod_launch_keeps_the_saved_seat_profile_without_the_classifier(monkey
     [
         ({**TASK, "profile": "engineer", "handoff_envelope": {"launch": LAUNCH}}, "engineer"),
         ({**TASK, "launch_assignment": {**LAUNCH, "effort": ""}}, "frontend"),
-        ({**TASK, "handoff_envelope": {"launch": {**LAUNCH, "profile": ""}}}, "frontend"),
     ],
-    ids=["task-over-handoff", "incomplete-relaunch", "handoff-without-profile"],
+    ids=["task-over-handoff", "incomplete-relaunch"],
 )
 def test_a_pod_launch_without_a_kept_profile_picks_afresh(monkeypatch, asked, task, profile):
     assert pod(World(monkeypatch), task, {}) == profile
+
+
+@pytest.mark.parametrize(
+    ("task", "reason"),
+    [
+        ({**TASK, "handoff": True}, "unsupported handoff: original profile and run options are missing"),
+        (
+            {**TASK, "handoff_envelope": {"launch": {**LAUNCH, "profile": ""}}},
+            "unsupported handoff: original profile and run options are missing",
+        ),
+        (
+            {**TASK, "handoff_envelope": {"launch": {**LAUNCH, "harness": "gemini"}}},
+            "unsupported handoff harness: gemini",
+        ),
+    ],
+    ids=["handoff-without-launch", "handoff-without-profile", "handoff-on-another-harness"],
+)
+def test_a_pod_launch_refuses_an_incomplete_handoff_like_the_local_launch(tmp_path, monkeypatch, asked, task, reason):
+    with pytest.raises(SpawnError) as on_local:
+        local(tmp_path, task, {})
+    world = World(monkeypatch)
+    with pytest.raises(SpawnError) as on_pod:
+        pod(world, task, {})
+
+    assert (str(on_local.value), on_local.value.status) == (reason, "unsupported")
+    assert (str(on_pod.value), on_pod.value.status) == (reason, "unsupported")
+    assert world.runtime.requests == []
+    assert asked == []
 
 
 def test_a_pod_launch_reads_the_classifier_floor_from_its_environment(monkeypatch, asked):
