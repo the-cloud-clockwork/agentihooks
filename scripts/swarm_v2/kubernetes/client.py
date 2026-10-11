@@ -55,6 +55,8 @@ class PodApi(Protocol):
 
     def ready_nodes(self) -> list[str] | None: ...
 
+    def list_quotas(self) -> list[dict]: ...
+
     def create_config_map(self, body: dict) -> dict: ...
 
     def create_object(self, body: dict) -> dict: ...
@@ -195,6 +197,9 @@ class PodClient:
     def list_services(self, selector: str) -> list[dict]:
         query = urllib.parse.urlencode({"labelSelector": selector})
         return _answer(*self.http.send("GET", f"{self._path(kind='services')}?{query}"))["items"]
+
+    def list_quotas(self) -> list[dict]:
+        return _answer(*self.http.send("GET", self._path(kind="resourcequotas")))["items"]
 
     def read(self, kind: str, name: str) -> dict | None:
         status, answer = self.http.send("GET", self._path(name, kind))

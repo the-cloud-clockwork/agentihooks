@@ -28,6 +28,16 @@
       "description": "The private bundle image. An init container copies its /bundle, /linked and /revision.json into a Pod private folder the agent mounts read only."
     },
     "provider_accounts": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/account"}},
+    "worker_pool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pods", "cpu_millis", "memory_mib"],
+      "properties": {
+        "pods": {"type": "integer", "minimum": 1, "maximum": 1000},
+        "cpu_millis": {"type": "integer", "minimum": 1, "maximum": 10000000},
+        "memory_mib": {"type": "integer", "minimum": 1, "maximum": 67108864}
+      }
+    },
     "profiles": {
       "type": "object",
       "minProperties": 1,

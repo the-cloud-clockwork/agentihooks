@@ -259,7 +259,7 @@ class ScaleInputs:
     observations: list[Account]
     agents: list
     demand: dict | None
-    host: Callable[[], host_budget.HostSample | None]
+    host: Callable[[], host_budget.HostSample | host_budget.Room | None]
     previous: dict
     warned: dict = field(default_factory=dict)
     spent: Callable[[int], int] = no_spawns
