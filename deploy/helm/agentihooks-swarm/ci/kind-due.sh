@@ -14,6 +14,8 @@ paths=(
   docker/swarm/requirements.lock
   docker/swarm-node/versions.lock
   docker/swarm-node/requirements.lock
+  docker/swarm-node/layout.json
+  docker/swarm-node/ssh/
   hooks/
   scripts/
   profiles/

@@ -639,4 +639,5 @@ if [[ $kept != *"refused {}"* ]]; then
   exit 1
 fi
 printf 'the controller start pass reached the herdr client and refused nothing\n'
+bash "$chart/ci/terminal-attach-proof.sh" "$image" "$cluster" "$release" "$slug"
 printf 'Helm chart kind proof passed\n'
