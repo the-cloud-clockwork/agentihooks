@@ -271,7 +271,7 @@ class Mail:
         agents = store.agents(slug)
         live = [a for a in agents if a.state != "finished"]
         self.seats = {a.name: a.seat or a.name for a in live}
-        self.held = {a.name: a.task for a in agents}
+        self.held = {a.name: a.task for a in agents if a.lane != MASTER}
         self.has_master = any(a.lane == MASTER for a in live)
         self.master = operator_mail.master_address(slug, live)
         self.masters = masters.live_seats(live)

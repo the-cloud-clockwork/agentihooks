@@ -289,7 +289,8 @@ def test_the_tick_hands_the_findings_pass_its_ledger(env, monkeypatch):
     seen = []
     monkeypatch.setattr(cli.ledger_events, "findings_pass", lambda *args: seen.append(args[-1]) or [])
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert [doc["tasks"] for doc in seen] == [ledger.state("sw")["tasks"]]
+    state = ledger.state("sw")
+    assert [(doc["tasks"], doc["phases"]) for doc in seen] == [(state["tasks"], state["phases"])]
 
 
 @pytest.mark.parametrize("dependencies", [None, [], ["done"]])

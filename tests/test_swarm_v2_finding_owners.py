@@ -80,10 +80,11 @@ def test_a_finding_about_a_task_reaches_the_master_owning_its_phase(swarm, kind,
     assert texts(inbox, other) == []
 
 
-@pytest.mark.parametrize("subject", ["sw-eng-9", "sw-gone"])
-def test_a_finding_on_an_agent_holding_no_task_reaches_the_lead(swarm, subject):
+@pytest.mark.parametrize("kind", HELD_KINDS)
+@pytest.mark.parametrize("subject", ["sw-eng-9", "sw-gone", "sw-master-2"])
+def test_a_finding_on_an_agent_holding_no_task_reaches_the_lead(swarm, kind, subject):
     store, inbox = swarm
-    ledger_events.findings_pass(inbox, store, SLUG, [finding("stalled", subject)], DOC)
+    ledger_events.findings_pass(inbox, store, SLUG, [finding(kind, subject)], DOC)
     assert len(texts(inbox, LEAD)) == 1 and texts(inbox, SECOND) == []
 
 
