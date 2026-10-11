@@ -91,25 +91,84 @@ def pool_room(pool: dict, launch: dict, used: Usage) -> Room:
     )
 
 
+def _count(quantity: str) -> int:
+    return int(_amount(quantity))
+
+
+QUOTA_KEYS = (
+    (PODS, "pods", _count),
+    (CPU, "requests.cpu", cpu_millis),
+    (CPU, "cpu", cpu_millis),
+    (MEMORY, "requests.memory", memory_mib),
+    (MEMORY, "memory", memory_mib),
+)
+UNITS = {PODS: "{} Pods", CPU: "{}m CPU", MEMORY: "{} MiB memory"}
+
+
+def _left(quotas: list[dict]) -> dict[str, int]:
+    left: dict[str, int] = {}
+    for quota in quotas:
+        status = quota.get("status", {})
+        hard, used = status.get("hard", {}), status.get("used", {})
+        for resource, key, read in QUOTA_KEYS:
+            if key in hard:
+                free = read(hard[key]) - read(used.get(key, "0"))
+                left[resource] = min(left.get(resource, free), free)
+    return left
+
+
+def quota_room(quotas: list[dict], launch: dict) -> Room | None:
+    left = _left(quotas)
+    if not left:
+        return None
+    each = {PODS: 1, CPU: launch["cpu_millis"], MEMORY: launch["memory_mib"]}
+    named = [resource for resource in UNITS if resource in left]
+    fits = {resource: left[resource] // each[resource] for resource in named}
+    limit = min(named, key=fits.__getitem__)
+    room = max(0, fits[limit])
+    parts = [UNITS[resource].format(left[resource]) for resource in named]
+    listed = f"{', '.join(parts[:-1])} and {parts[-1]}" if len(parts) > 1 else parts[0]
+    return Room(
+        room,
+        f"worker namespace quota leaves {listed}; {room} more fit at {launch['cpu_millis']}m and "
+        f"{launch['memory_mib']} MiB each",
+        f"quota {limit}",
+    )
+
+
 class WorkerPool:
-    """Lists every Pod in the worker namespace, with no label selector."""
+    """Lists every Pod and quota in the worker namespace, with no label selector."""
 
     def __init__(self, api: PodApi, pool: dict | None, launch: dict) -> None:
         self.api, self.pool, self.launch = api, pool, launch
 
     def __call__(self) -> Room:
+        readings = [self._quota(), self._pool()]
+        known = [reading for reading in readings if reading.room is not None]
+        if known:
+            return min(known, key=lambda reading: reading.room)
+        return Room(None, f"{'; '.join(reading.reason for reading in readings)}, so spawns pass", UNKNOWN)
+
+    def _quota(self) -> Room:
+        try:
+            found = quota_room(self.api.list_quotas(), self.launch)
+        except (ApiRefused, OSError) as error:
+            return Room(None, f"worker namespace quota cannot be read ({type(error).__name__})", UNKNOWN)
+        except ValueError as error:
+            return Room(None, f"worker namespace quota is {error}", UNKNOWN)
+        return found or Room(None, "worker namespace quota sets no Pod, CPU or memory limit", UNKNOWN)
+
+    def _pool(self) -> Room:
         if self.pool is None:
-            return Room(None, "worker pool undeclared: the Pod policy names no worker_pool, so spawns pass", UNKNOWN)
+            return Room(None, "worker pool undeclared: the Pod policy names no worker_pool", UNKNOWN)
         try:
             pods = self.api.list_pods("")
         except (ApiRefused, OSError) as error:
             return Room(
-                None,
-                f"worker pool unknown: the worker Pods cannot be listed ({type(error).__name__}), so spawns pass",
-                UNKNOWN,
+                None, f"worker pool unknown: the worker Pods cannot be listed ({type(error).__name__})", UNKNOWN
             )
         try:
             used = usage(pods)
         except ValueError as error:
-            return Room(None, f"worker pool unknown: a worker Pod request is {error}, so spawns pass", UNKNOWN)
+            return Room(None, f"worker pool unknown: a worker Pod request is {error}", UNKNOWN)
         return pool_room(self.pool, self.launch, used)
