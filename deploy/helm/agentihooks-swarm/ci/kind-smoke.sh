@@ -346,7 +346,13 @@ server = f"https://{env['KUBERNETES_SERVICE_HOST']}:{env['KUBERNETES_SERVICE_POR
 api = PodClient(KubeHttp(server, token_file, ssl.create_default_context(cadata=access["ca"])), "default")
 target = {"pod_namespace": "default", "pod_name": "swarm-kind-grant"}
 record = AgentRecord(
-    store.next_name(slug, "eng"), "eng", "kind-grant", seat=f"eng-2@{slug}", runtime_backend=BACKEND, runtime_target=target
+    store.next_name(slug, "eng"),
+    "eng",
+    "kind-grant",
+    seat=f"eng-2@{slug}",
+    runtime_backend=BACKEND,
+    runtime_target=target,
+    profile="engineer",
 )
 agent = probe.controller.admit(record, "")
 grant = probe.grants.issue(
@@ -355,6 +361,7 @@ grant = probe.grants.issue(
 seed = (
     "import os, profiles, shutil; from pathlib import Path; "
     f"shutil.copytree(Path(profiles.__file__).parent, {str(TEMPLATES)!r}, dirs_exist_ok=True); "
+    f"shutil.copytree(Path(profiles.__file__).parent / 'package' / 'roles', {str(TEMPLATES)!r}, dirs_exist_ok=True); "
     f"Path({str(LAYOUTS[1])!r}).write_text(os.environ['LAYOUT'])"
 )
 name = pod_name(agent.execution_id)
