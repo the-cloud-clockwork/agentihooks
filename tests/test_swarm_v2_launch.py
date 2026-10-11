@@ -31,6 +31,7 @@ PROJECT = "github.com/the-cloud-clockwork/agentihooks"
 FIRST, SECOND = "eng-1@fixture", "eng-2@fixture"
 API = "http://swarm-api.agentihooks-swarm.svc:8780"
 OTHER_API = "https://swarm.example.test:8443"
+HANDED_OFF = {"profile": "default", "harness": "claude", "model": "opus", "effort": "high"}
 MACHINE = Scope(BACKEND, "pod-0000000000000000000000000000c003", "boot-worker/pid:[4026531836]")
 
 
@@ -676,11 +677,11 @@ def test_a_tick_spawn_launches_on_the_account_its_route_chooses_for_the_launch_c
 @pytest.mark.parametrize(
     ("envelope", "assignment", "predecessor"),
     [
-        ({"reason": "quota", "launch": {"harness": "claude", "account": "spent-key"}}, {}, ("claude", "spent-key")),
+        ({"reason": "quota", "launch": {**HANDED_OFF, "account": "spent-key"}}, {}, ("claude", "spent-key")),
         ({"reason": "quota"}, {"harness": "claude", "account": "assigned-key"}, ("claude", "assigned-key")),
-        ({"reason": "recycle", "launch": {"harness": "claude", "account": "spent-key"}}, {}, None),
-        ({"reason": "quota", "launch": {"harness": "claude"}}, {}, None),
-        ({"reason": "quota", "launch": {"account": "spent-key"}}, {}, None),
+        ({"reason": "recycle", "launch": {**HANDED_OFF, "account": "spent-key"}}, {}, None),
+        ({"reason": "quota", "launch": HANDED_OFF}, {}, None),
+        ({"reason": "quota"}, {"account": "assigned-key"}, None),
         ({}, {}, None),
     ],
 )
