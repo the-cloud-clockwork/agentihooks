@@ -1,10 +1,11 @@
-"""The dispatcher's tick step: rank by the open work each task unblocks, grouping and the priority sweep, by autonomy.
+"""The dispatcher's tick step: rank by critical path and work unblocked, grouping and the priority sweep, by autonomy.
 
-Each tick it orders the claimable tasks in focus by leverage. At delegate and full it raises the top ones to high and
-lowers a high or urgent rank once that task leaves the top. A rank the master or the swarm set is a default it
-reorders; only an operator rank, set by him or relayed with his quoted words, stays fixed. Below delegate it proposes
-each raise to the master. Every action is a gate log row, a dispatch metrics row naming its rule and, for a rank, a
-comment on the task.
+Each tick it orders every open ungrouped task, leaves included, by the longest open dependency chain behind it, then
+the open work it unblocks, the bottleneck lane, focus order and ledger position. Of the claimable tasks that unblock
+work, at delegate and full it raises the top ones to high and lowers a high or urgent rank once that task leaves the
+top. A rank the master or the swarm set is a default it reorders; only an operator rank, set by him or relayed with
+his quoted words, stays fixed. Below delegate it proposes each raise to the master. Every action is a gate log row, a
+dispatch metrics row naming its rule and, for a rank, a comment on the task.
 """
 
 from dataclasses import dataclass
@@ -31,7 +32,7 @@ UNCOMMENTED = "; the ledger did not take its comment"
 TABLE = metrics_outbox.Table("dispatch_actions", (("rule", "String"), ("mode", "String"), ("action", "String")))
 RAISED = "The dispatcher raised this task to high rank because it unblocks {work}."
 LOWERED = "The dispatcher lowered this task to normal rank because {why}."
-OUTRANKED = "it unblocks {work} and {top} claimable tasks in focus unblock more"
+OUTRANKED = "it unblocks {work} and {top} claimable tasks in focus lead longer chains or unblock more"
 UNREADY = "it is no longer a claimable task in focus that unblocks open work"
 IDLE = "it unblocks no open work"
 PROPOSED = "The dispatcher proposed high rank for this task to the master because it unblocks {work}."
@@ -50,6 +51,22 @@ class Action:
 
 
 def leverage(doc: dict) -> dict[str, int]:
+    waiters = _waiters(doc)
+    return {task_id: len(_downstream(task_id, waiters)) for task_id in waiters}
+
+
+def chains(doc: dict) -> dict[str, int]:
+    waiters, found = _waiters(doc), {}
+    reach = {task_id: _downstream(task_id, waiters) for task_id in waiters}
+    for task_id in sorted(waiters, key=lambda t: len(reach[t])):
+        # A dependency loop counts as one block of its size: the longest simple path through it is NP-hard.
+        loop = {task_id} | {w for w in reach[task_id] if task_id in reach[w]}
+        after = {w for member in loop for w in waiters[member]} - loop
+        found.update(dict.fromkeys(loop, len(loop) - 1 + max((found[w] + 1 for w in after), default=0)))
+    return {task_id: found[task_id] for task_id in waiters}
+
+
+def _waiters(doc):
     tasks = {t["id"]: t for t in doc["tasks"] if _open(t)}
     nodes, edges = hierarchy.project(doc)
     under = {}
@@ -65,20 +82,24 @@ def leverage(doc: dict) -> dict[str, int]:
             for needed in required.get(node, ()):
                 for blocker in under.get(needed, ()):
                     waiters[blocker].add(task_id)
-    return {task_id: len(_downstream(task_id, waiters)) for task_id in tasks}
+    return waiters
 
 
 def ordered(doc: dict, named: str, scores: dict) -> list[str]:
-    lane = LANES.get(named)
-    focused = _focused(doc)
+    lane, depth, focus = LANES.get(named), chains(doc), _focus_order(doc)
     position = {t["id"]: index for index, t in enumerate(doc["tasks"])}
-    rows = [t for t in doc["tasks"] if scores.get(t["id"]) and t.get("state") == "open"]
-    rows = [t for t in rows if not t.get("merged_into")]
+    rows = [t for t in doc["tasks"] if t["id"] in depth and t.get("state") == "open" and not t.get("merged_into")]
     return [
         t["id"]
         for t in sorted(
             rows,
-            key=lambda t: (-scores[t["id"]], t.get("lane") != lane, t["id"] not in focused, position[t["id"]]),
+            key=lambda t: (
+                -depth[t["id"]],
+                -scores.get(t["id"], 0),
+                t.get("lane") != lane,
+                focus[t["id"]],
+                position[t["id"]],
+            ),
         )
     ]
 
@@ -90,7 +111,7 @@ def rank_pass(slug, config, store, ledger, doc, now_ms):
     named = bottleneck.read(store, slug).get("bottleneck")
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
     claimable = {task_id for task_id, t in known.items() if tick.ready(t, known, doc, graph, fix)}
-    queue = [task_id for task_id in ordered(doc, named, scores) if task_id in claimable]
+    queue = [task_id for task_id in ordered(doc, named, scores) if task_id in claimable and scores[task_id]]
     top = [task_id for task_id in queue if task_id not in fixed or known[task_id].get("rank") in WINDOW][:TOP]
     raises = [
         (known[task_id], _work(scores[task_id]))
@@ -245,14 +266,14 @@ def _downstream(task_id, waiters):
     return found
 
 
-def _focused(doc):
-    targets = {row.get("target") for row in doc.get("freezes", []) if row.get("verb") == "focus"}
+def _focus_order(doc):
+    targets = [row.get("target") for row in doc.get("freezes", []) if row.get("verb") == "focus"]
     nodes, _ = hierarchy.project(doc)
-    return {
-        t["id"]
-        for t in doc["tasks"]
-        if targets & {*_lineage(f"tasks/{t['id']}", nodes), f"lane:{t.get('lane')}", f"kind:{t.get('kind', 'code')}"}
-    }
+    order = {}
+    for t in doc["tasks"]:
+        covers = {*_lineage(f"tasks/{t['id']}", nodes), f"lane:{t.get('lane')}", f"kind:{t.get('kind', 'code')}"}
+        order[t["id"]] = next((index for index, target in enumerate(targets) if target in covers), len(targets))
+    return order
 
 
 def _work(count):

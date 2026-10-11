@@ -228,8 +228,11 @@ class FakePubSub:
             raise KeyboardInterrupt
         return self.messages.pop(0)
 
+    def close(self):
+        pass
 
-def test_the_waker_runs_a_wake_pass_on_each_notify_only(redis, inbox, monkeypatch, capsys):
+
+def test_the_waker_runs_a_wake_pass_on_each_notify_only(redis, inbox, monkeypatch, capsys, recovery_deadline):
     store = RedisStore(redis)
     pubsub = FakePubSub([None, {"data": "sw-eng-1"}, None])
     monkeypatch.setattr(redis, "pubsub", lambda: pubsub)
@@ -246,8 +249,8 @@ def test_the_waker_runs_a_wake_pass_on_each_notify_only(redis, inbox, monkeypatc
     with pytest.raises(KeyboardInterrupt):
         waker.run(store, herdr, lambda: 42, env)
     assert pubsub.subscribed == [NOTIFY] and pubsub.timeouts == [waker.RECHECK_S] * 4
-    assert passes == [(herdr, (42, 60_000, 7_000), {})]
-    assert capsys.readouterr().out == "sw: woke sw-eng-1 for message m1\n"
+    assert passes == [(herdr, (42, 60_000, 7_000), {})] * 2
+    assert capsys.readouterr().out == "sw: woke sw-eng-1 for message m1\n" * 2
 
 
 def test_wake_now_moves_past_agents_it_cannot_or_need_not_wake(inbox):

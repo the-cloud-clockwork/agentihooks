@@ -136,7 +136,7 @@
             ]
           },
           "privileged": false,
-          "readOnlyRootFilesystem": true
+          "readOnlyRootFilesystem": false
         },
         "startupProbe": {
           "exec": {
@@ -160,14 +160,6 @@
           "timeoutSeconds": 6
         },
         "volumeMounts": [
-          {
-            "mountPath": "/home/worker",
-            "name": "home"
-          },
-          {
-            "mountPath": "/tmp",
-            "name": "tmp"
-          },
           {
             "mountPath": "/var/run/swarm/launch",
             "name": "launch",
@@ -225,18 +217,6 @@
       }
     ],
     "volumes": [
-      {
-        "emptyDir": {
-          "sizeLimit": "9216Mi"
-        },
-        "name": "home"
-      },
-      {
-        "emptyDir": {
-          "sizeLimit": "1024Mi"
-        },
-        "name": "tmp"
-      },
       {
         "configMap": {
           "defaultMode": 292,

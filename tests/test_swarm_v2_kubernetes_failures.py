@@ -8,7 +8,7 @@ import pytest
 
 from scripts.swarm import lease
 from scripts.swarm.store import SwarmError
-from scripts.swarm_v2 import deployed
+from scripts.swarm_v2 import deployed, retention
 from scripts.swarm_v2.kubernetes import client, failures, replacement
 from scripts.swarm_v2.kubernetes.failures import AccountSlot, Decision
 from scripts.swarm_v2.runtime import observe
@@ -541,6 +541,43 @@ def test_a_finished_deleted_pod_on_a_node_the_listing_no_longer_shows_is_node_lo
     last = _gone(world)
     assert recovery.reconcile([], ["worker-a"], [last]) == {world.old.execution_id: "fenced"}
     assert recovery.fence(world.old.execution_id)["reason"] == "node_lost"
+
+
+def test_a_completed_attempt_is_never_fenced_when_its_pod_and_node_are_gone(world):
+    recovery = world.recovery(world.live)
+    world.show(world.old, "clean_exit")
+    retention.finalize(world.store, cases.SLUG, world.live.require, world.old.execution_id, "completed", 0, "ref")
+    last = _gone(world)
+    assert recovery.reconcile([], ["worker-a"], [last]) == {world.old.execution_id: "completed"}
+    assert recovery.fence(world.old.execution_id) is None
+
+
+class _Cleaning(_Cluster):
+    def __getattr__(self, name):
+        return getattr(self.world.api, name)
+
+
+def test_the_deployed_pass_deletes_a_completed_attempt_pod_and_scale_down_never_fences_it(world):
+    grants, cluster = _Grants(), _Cleaning(world)
+    service = SimpleNamespace(controller=world.live, grants=grants)
+    recover = deployed.recovery_pass(service, SimpleNamespace(image_tag="dev"), cluster)
+    node = world.fx["first"]["node"]
+    world.show(world.old, "clean_exit", node)
+    assert recover() == {world.old.execution_id: "working"}
+    assert f"swarm-{world.old.execution_id}" not in world.api.objects
+    assert grants.revoked == [(cases.SLUG, world.old.execution_id)]
+    world.ready.discard(node)
+    assert recover() == {world.old.execution_id: "completed"}
+    assert world.recovery(world.live).fence(world.old.execution_id) is None
+
+
+def test_the_deployed_pass_keeps_a_running_attempt_pod(world):
+    recover = deployed.recovery_pass(
+        SimpleNamespace(controller=world.live, grants=_Grants()), SimpleNamespace(image_tag="dev"), _Cleaning(world)
+    )
+    assert recover() == {world.old.execution_id: "working"}
+    assert f"swarm-{world.old.execution_id}" in world.api.objects
+    assert world.api.deletes == []
 
 
 def test_a_live_pod_outranks_a_deleted_state_of_the_same_attempt(world):
