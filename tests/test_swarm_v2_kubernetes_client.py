@@ -461,3 +461,19 @@ def test_a_refused_or_unreadable_watch_is_not_an_expired_cursor(token):
     with pytest.raises(ConnectionError) as raised:
         watched(token, Response(200, b'{"type": "DELETED"\n'))[0].watch_pods("a=b", "9")
     assert str(raised.value) == "the API server answer is unreadable"
+
+
+class Streamed:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def send(self, method, path, body=None, read=None):
+        self.calls.append((method, path, body, read))
+        return 200, [{"type": "DELETED", "object": {"metadata": {"uid": "u"}}}]
+
+
+def test_watch_sends_a_get_read_as_line_delimited_events():
+    transport = Streamed()
+    assert PodClient(transport, "ns").watch_pods("a=b", "9") == [("DELETED", {"metadata": {"uid": "u"}})]
+    path = "/api/v1/namespaces/ns/pods?labelSelector=a%3Db&watch=1&resourceVersion=9&timeoutSeconds=1"
+    assert transport.calls == [("GET", path, None, client._events)]

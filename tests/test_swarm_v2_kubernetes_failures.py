@@ -96,6 +96,16 @@ def test_a_lost_node_is_read_from_namespaced_pod_conditions(condition, reason):
     assert failures.NODE_DISRUPTIONS == frozenset(("DeletionByTaintManager", "DeletionByPodGC"))
 
 
+def test_a_deleted_pod_is_judged_by_its_last_state_then_by_its_last_node():
+    finished = _pod({"phase": "Succeeded"}, "worker-b")
+    assert failures.deleted_reason(finished, None) == ""
+    assert failures.deleted_reason(finished, frozenset({"worker-b"})) == ""
+    assert failures.deleted_reason(finished, frozenset()) == "node_lost"
+    assert failures.deleted_reason({"metadata": {}, "spec": {"nodeName": "worker-b"}}, None) == "node_lost"
+    assert failures.deleted_reason({"metadata": {}, "status": {"phase": "Running"}}, None) == ""
+    assert failures.deleted_reason({"metadata": {}}, None) == ""
+
+
 def test_init_containers_and_a_missing_exit_code_count_as_exits():
     init = {"phase": "Failed", "initContainerStatuses": [{"name": "home", "state": {"terminated": {}}}]}
     assert failures.classify(_pod(init)) == "application_exit"
@@ -520,6 +530,14 @@ def test_a_finished_or_unscheduled_deleted_pod_is_not_a_node_loss(world):
     for last in (finished, unscheduled):
         assert recovery.reconcile([], None, [last]) == {world.old.execution_id: "unobserved"}
     assert recovery.fence(world.old.execution_id) is None
+
+
+def test_a_finished_deleted_pod_on_a_node_the_listing_no_longer_shows_is_node_lost(world):
+    recovery = world.recovery(world.live)
+    world.show(world.old, "clean_exit")
+    last = _gone(world)
+    assert recovery.reconcile([], ["worker-a"], [last]) == {world.old.execution_id: "fenced"}
+    assert recovery.fence(world.old.execution_id)["reason"] == "node_lost"
 
 
 def test_a_live_pod_outranks_a_deleted_state_of_the_same_attempt(world):
