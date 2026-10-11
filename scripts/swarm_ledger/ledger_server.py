@@ -570,8 +570,12 @@ def unrelayed_on(exc, kind, slug, rev):
 
     from scripts.inbox.store import InboxError
 
+    def keep(found):
+        held = found.setdefault(kind, {})
+        held[slug] = sorted({*held.get(slug, []), rev})
+
     if isinstance(exc, (RedisError, InboxError)):
-        _change_unrelayed(lambda found: found.setdefault(kind, {}).setdefault(slug, []).append(rev))
+        _change_unrelayed(keep)
 
 
 def relayed(kind, slug, since, rev):
