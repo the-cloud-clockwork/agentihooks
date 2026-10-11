@@ -525,7 +525,7 @@ jobs:
         run: |
           touch flakes.jsonl
           echo "Tests retried in place: $(wc -l < flakes.jsonl)" | tee -a "$GITHUB_STEP_SUMMARY"
-          tee -a "$GITHUB_STEP_SUMMARY" < flakes.jsonl
+          jq -r '"\(.outcome) after \(.attempts) attempts: \(.test)"' flakes.jsonl | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the flake report
         if: ${{ !cancelled() }}

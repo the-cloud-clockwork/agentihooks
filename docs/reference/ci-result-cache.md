@@ -56,7 +56,7 @@ These two tests stay unfixed until slice 1 lands, so they keep proving the retry
 | Helm kind due check: `kind-due` | one job | chart paths changed | path rule written by hand |
 | Dev push | whole run | none | always runs everything; `ci_reuse.py` decides reuse only for `merge_group`, so the dev push reuse named in the task does not exist yet |
 
-Nothing retries. A failed test fails its shard, the shard fails `Gate — Required`, and the only recovery is a rerun of failed jobs on a pull request or a new queue entry.
+Before slice 1 nothing retried. A failed test failed its shard, the shard failed `Gate — Required`, and the only recovery was a rerun of failed jobs on a pull request or a new queue entry.
 
 ## The algorithm
 

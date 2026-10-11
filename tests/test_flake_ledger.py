@@ -62,7 +62,7 @@ def test_teardown_always_fails(teardown_breaks):
 """
 
 
-def _run(tmp_path: Path, *select: str, workers: str = "0") -> tuple[subprocess.CompletedProcess, list[dict]]:
+def _run(tmp_path, *select, workers="0"):
     (tmp_path / "test_probes.py").write_text(_PROBES)
     ledger = tmp_path / "flakes.jsonl"
     targets = [f"test_probes.py::{name}" for name in select] or ["test_probes.py"]

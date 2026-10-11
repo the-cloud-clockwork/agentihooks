@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 
 
-def _error(report) -> str:
+def _error(report):
     crash = getattr(report.longrepr, "reprcrash", None)
     text = crash.message if crash else report.longreprtext
     return (text.strip().splitlines() or [""])[0][:300]
@@ -18,10 +18,10 @@ def _error(report) -> str:
 class FlakeLedger:
     def __init__(self, path: Path):
         self.path = path
-        self.attempts: dict[str, int] = {}
-        self.errors: dict[str, list[str]] = {}
-        self.retrying: set[str] = set()
-        self.failed: set[str] = set()
+        self.attempts = {}
+        self.errors = {}
+        self.retrying = set()
+        self.failed = set()
 
     def pytest_runtest_logreport(self, report):
         if report.outcome == "rerun":
