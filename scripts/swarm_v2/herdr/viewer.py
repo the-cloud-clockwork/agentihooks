@@ -7,6 +7,7 @@ from scripts.swarm_v2.herdr.capabilities import Unreachable
 from scripts.swarm_v2.herdr.endpoints import EndpointRefused
 from scripts.swarm_v2.herdr.target import Router, Run, Target, pane_conversation
 from scripts.swarm_v2.herdr.visibility import CACHED, FRESH_MS, LIVE, UNVERIFIED, View, judged
+from scripts.swarm_v2.runtime.commands import Principal, Role
 
 
 @dataclass(frozen=True)
@@ -26,11 +27,14 @@ class Viewer:
         self,
         router: Router,
         run: Run,
+        caller: Principal,
         clock: Callable[[], float] = time.time,
         *,
         fresh_ms: int = FRESH_MS,
         aggregation: bool = True,
     ) -> None:
+        if caller.role is not Role.OPERATOR:
+            raise EndpointRefused("unauthorized", "only the operator role opens a terminal view")
         self.router, self.run, self.clock = router, run, clock
         self.fresh_ms, self.aggregation = fresh_ms, aggregation
         self.watched: dict[str, Watched] = {}
@@ -49,7 +53,7 @@ class Viewer:
         if not conversation_id:
             raise EndpointRefused("conversation_required", f"{agent}'s terminal view needs its conversation id")
         target = self.router.resolve(machine, pane_id, conversation_id)
-        view = View(agent, machine, target.pane_id, target.incarnation, UNVERIFIED, fresh_ms=self.fresh_ms)
+        view = View(agent, machine, target.pane_id, UNVERIFIED, fresh_ms=self.fresh_ms)
         self.watched[agent] = Watched(target, machine, view)
         return view
 

@@ -7,6 +7,8 @@ import pytest
 from scripts.swarm_v2.herdr.endpoints import EndpointRefused
 from scripts.swarm_v2.herdr.viewer import Viewer, Watched
 from scripts.swarm_v2.herdr.visibility import CACHED, FRESH_MS, LIVE, UNVERIFIED, View
+from scripts.swarm_v2.operator_auth import OPERATOR
+from scripts.swarm_v2.runtime.commands import Principal, Role
 from tests import sv2_hdr03_cases, sv2_hdr04_cases, sv2_hdr05_cases
 from tests.sv2_hdr05_cases import Clock, Workers
 
@@ -23,7 +25,7 @@ def rig(tmp_path, run=None, **options):
     workers, desired = Workers(clock), sv2_hdr03_cases.endpoints()
     client = sv2_hdr04_cases.Client(workers, tmp_path)
     registered = client.register(desired)
-    viewer = Viewer(client.router, run or workers, clock, fresh_ms=FX["fresh_ms"], **options)
+    viewer = Viewer(client.router, run or workers, OPERATOR, clock, fresh_ms=FX["fresh_ms"], **options)
     label = {endpoint.scope.execution_id: endpoint.name for endpoint in desired}
     return SimpleNamespace(
         clock=clock, workers=workers, desired=desired, client=client, registered=registered, viewer=viewer, label=label
@@ -52,17 +54,28 @@ def remote_verbs(workers, since=0):
 
 def test_defaults_read_the_wall_clock_with_aggregation_on(tmp_path):
     r = rig(tmp_path)
-    plain = Viewer(r.client.router, r.workers)
+    plain = Viewer(r.client.router, r.workers, OPERATOR)
     assert (plain.clock, plain.fresh_ms, plain.aggregation) == (time.time, FRESH_MS, True)
     assert plain.watched == {}
     assert plain.terminal_reconnect_latency_seconds() == []
+
+
+def test_only_the_operator_role_opens_a_terminal_view(tmp_path):
+    r = rig(tmp_path)
+    since = len(r.workers.commands)
+    master = Principal("operator", Role.MASTER)
+    assert refused(lambda: Viewer(r.client.router, r.workers, master)) == (
+        "unauthorized",
+        "only the operator role opens a terminal view",
+    )
+    assert len(r.workers.commands) == since
 
 
 def test_watch_resolves_the_target_through_the_registration_record_and_starts_unverified(tmp_path):
     r = rig(tmp_path)
     view = r.viewer.watch(AGENT_A, r.label[EXE_A], PANE, CONVERSATION[EXE_A])
     endpoint = r.desired[0]
-    assert view == View(AGENT_A, endpoint.name, PANE, endpoint.incarnation, UNVERIFIED, fresh_ms=FX["fresh_ms"])
+    assert view == View(AGENT_A, endpoint.name, PANE, UNVERIFIED, fresh_ms=FX["fresh_ms"])
     target = r.client.router.resolve(endpoint.name, PANE, CONVERSATION[EXE_A])
     assert r.viewer.watched[AGENT_A] == Watched(target, endpoint.name, view)
 
@@ -121,7 +134,7 @@ def test_an_unreachable_capability_probe_reads_unreachable(tmp_path):
     r = rig(tmp_path)
     r.workers.cut.add(r.registered[EXE_A])
     restarted = sv2_hdr04_cases.Client(r.workers, tmp_path)
-    viewer = Viewer(restarted.router, r.workers, r.clock, fresh_ms=FX["fresh_ms"])
+    viewer = Viewer(restarted.router, r.workers, OPERATOR, r.clock, fresh_ms=FX["fresh_ms"])
     viewer.watch(AGENT_A, r.label[EXE_A], PANE, CONVERSATION[EXE_A])
     assert viewer.refresh()[AGENT_A].reason == "unreachable"
 

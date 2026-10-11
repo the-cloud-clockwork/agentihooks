@@ -10,6 +10,8 @@ from scripts.swarm_v2.herdr import visibility
 from scripts.swarm_v2.herdr.endpoints import Endpoint, EndpointRefused
 from scripts.swarm_v2.herdr.target import DELIVERIES
 from scripts.swarm_v2.herdr.viewer import Viewer
+from scripts.swarm_v2.operator_auth import OPERATOR
+from scripts.swarm_v2.runtime.commands import Principal, Role
 from tests import sv2_hdr03_cases, sv2_hdr04_cases
 
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2"
@@ -108,7 +110,7 @@ class Workers(sv2_hdr04_cases.Fleet):
 
 def _viewer(client: sv2_hdr04_cases.Client, workers: Workers, desired: list[Endpoint], **options) -> Viewer:
     fx, routing = fixture(), sv2_hdr04_cases.fixture()
-    viewer = Viewer(client.router, workers, workers.clock, fresh_ms=fx["fresh_ms"], **options)
+    viewer = Viewer(client.router, workers, OPERATOR, workers.clock, fresh_ms=fx["fresh_ms"], **options)
     for endpoint in desired:
         execution_id = endpoint.scope.execution_id
         conversation = routing["remote"][execution_id]["conversation_id"]
@@ -136,6 +138,15 @@ def _refused(action) -> dict:
     except EndpointRefused as refused:
         return {"reason": refused.reason, "message": str(refused)}
     return {}
+
+
+def _journal(root: Path) -> bytes | None:
+    path = root / DELIVERIES
+    return path.read_bytes() if path.exists() else None
+
+
+def routing_conversation(execution_id: str) -> str:
+    return sv2_hdr04_cases.fixture()["remote"][execution_id]["conversation_id"]
 
 
 def _names() -> tuple[str, str]:
@@ -197,6 +208,8 @@ def _positive() -> tuple[dict, bool]:
             first["while_closed"][execution_id]["work"]
             == first["at_close"][execution_id]["work"] + fx["ticks_while_closed"]
             and first["while_closed"][execution_id]["pid"] == first["at_close"][execution_id]["pid"]
+            and first["while_closed"][execution_id]["conversation_id"]
+            == first["at_close"][execution_id]["conversation_id"]
             for execution_id in fx["agents"]
         ),
         "reopen_shows_the_same_conversations_and_their_progress": {
@@ -232,14 +245,18 @@ def _rejection_once() -> dict:
         workers, desired = Workers(clock), sv2_hdr03_cases.endpoints()
         client = sv2_hdr04_cases.Client(workers, root)
         registered = client.register(desired)
+        commands = len(workers.commands)
+        master = Principal("master@a1b2c3-0001", Role.MASTER)
+        unauthorized = _refused(lambda: Viewer(client.router, workers, master, clock))
+        unauthorized["commands"] = len(workers.commands) - commands
         viewer = _viewer(client, workers, desired)
         never = _refused(lambda: viewer.send(first_agent, "agent_prompt", "op-never", "before any check"))
         viewer.refresh()
         workers.cut.add(registered[fx["lost"]])
         cached = _views(viewer.refresh())
-        before = (workers.received(), len(workers.mutations()), (root / DELIVERIES).exists())
+        before = (workers.received(), len(workers.mutations()), _journal(root))
         refused = _refused(lambda: viewer.send(lost_agent, "agent_prompt", "op-cached", "into a cached view"))
-        unchanged = (workers.received(), len(workers.mutations()), (root / DELIVERIES).exists()) == before
+        unchanged = (workers.received(), len(workers.mutations()), _journal(root)) == before
         clock.advance(fx["fresh_ms"] + 1)
         expired = _views(viewer.views())
         expired_send = _refused(lambda: viewer.send(first_agent, "agent_prompt", "op-expired", "after the window"))
@@ -249,6 +266,7 @@ def _rejection_once() -> dict:
         viewer.reconnect(lost_agent)
         corrected = viewer.send(lost_agent, "agent_prompt", "op-corrected", "after reconnect")
         return {
+            "unauthorized_view": unauthorized,
             "never_live_send": never,
             "cached": cached,
             "cached_send": refused,
@@ -268,6 +286,8 @@ def _rejection() -> tuple[dict, bool]:
     first_agent, lost_agent = _names()
     refusals = [first[name] for name in ("never_live_send", "cached_send", "expired_send", "restored_without_a_check")]
     checks = {
+        "only_the_operator_role_opens_a_view": first["unauthorized_view"]
+        == {"reason": "unauthorized", "message": "only the operator role opens a terminal view", "commands": 0},
         "every_send_into_an_unverified_view_is_refused": [entry.get("reason") for entry in refusals]
         == ["unverified"] * 4,
         "a_never_checked_view_reads_unverified": first["never_live_send"]["message"]
@@ -319,6 +339,11 @@ def _recovery_once() -> dict:
         pane = workers.remote[fx["lost"]]["panes"][sv2_hdr04_cases.fixture()["pane_id"]]
         pane["agent_session"] = {"kind": "id", "value": fx["replacement_conversation_id"]}
         replaced = _refused(lambda: reopened.reconnect(lost_agent))
+        replaced_view = asdict(reopened.views()[lost_agent])
+        pane["agent_session"] = {"kind": "id", "value": routing_conversation(fx["lost"])}
+        restarted.register(sv2_hdr03_cases.endpoints(desired[0].scope.generation, desired[1].scope.generation + 1))
+        stale = _refused(lambda: reopened.reconnect(lost_agent))
+        stale_send = _refused(lambda: reopened.send(lost_agent, "agent_prompt", "op-4", "from the old attempt"))
         return {
             "registered": registered,
             "accepted": accepted,
@@ -330,7 +355,9 @@ def _recovery_once() -> dict:
             "after_reconnect": workers.processes(),
             "replayed": replayed,
             "replaced": replaced,
-            "replaced_view": asdict(reopened.views()[lost_agent]),
+            "replaced_view": replaced_view,
+            "stale": stale,
+            "stale_send": stale_send,
             "received": workers.received(),
             "launches": workers.launches(),
             "journal": json.loads((root / DELIVERIES).read_text()),
@@ -356,6 +383,9 @@ def _recovery() -> tuple[dict, bool]:
         "a_replaced_conversation_is_refused": first["replaced"].get("reason") == "conversation_mismatch"
         and first["replaced_view"]["state"] == visibility.CACHED,
         "nothing_launched_stopped_or_closed": first["launches"] == [],
+        "an_older_attempt_cannot_act_for_a_newer_generation": first["stale"].get("reason") == "stale_incarnation"
+        and first["stale_send"].get("reason") == "unverified"
+        and first["received"][lost] == ["first prompt"],
         "durable_journal_records_the_delivery_once": {
             key: entry["state"] for key, entry in first["journal"]["deliveries"].items()
         }

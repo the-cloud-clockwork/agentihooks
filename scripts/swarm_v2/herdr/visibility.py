@@ -17,7 +17,6 @@ class View:
     agent: str
     machine: str
     pane_id: str
-    incarnation: str
     state: str
     checked_at: int = 0
     live_at: int = 0

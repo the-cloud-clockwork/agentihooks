@@ -18,7 +18,7 @@ def clock(now_ms):
 
 
 def live(checked_at=NOW, **changes):
-    return View(AGENT, "sv2-exe-a", "w1:p1", "exe-a/1", LIVE, checked_at, checked_at, **changes)
+    return View(AGENT, "sv2-exe-a", "w1:p1", LIVE, checked_at, checked_at, **changes)
 
 
 @pytest.fixture
@@ -34,34 +34,34 @@ def store():
 
 def test_constants():
     assert (KEY, FRESH_MS, LIVE, CACHED, UNVERIFIED) == ("terminals", 30_000, "live", "cached", "unverified")
-    assert View(AGENT, "m", "w1:p1", "i", LIVE) == View(AGENT, "m", "w1:p1", "i", LIVE, 0, 0, "", 30_000)
+    assert View(AGENT, "m", "w1:p1", LIVE) == View(AGENT, "m", "w1:p1", LIVE, 0, 0, "", 30_000)
 
 
 def test_a_live_view_stays_live_only_inside_its_window_either_side_of_the_reader_clock():
     view = live()
     assert judged(view, NOW + FRESH_MS) == view
     assert judged(view, NOW - FRESH_MS) == view
-    assert judged(view, NOW + FRESH_MS + 1) == View(AGENT, "sv2-exe-a", "w1:p1", "exe-a/1", CACHED, NOW, NOW, "stale")
+    assert judged(view, NOW + FRESH_MS + 1) == View(AGENT, "sv2-exe-a", "w1:p1", CACHED, NOW, NOW, "stale")
     assert judged(view, NOW - FRESH_MS - 1).state == CACHED
     assert judged(live(fresh_ms=10), NOW + 11).state == CACHED
 
 
 def test_a_live_state_whose_latest_check_failed_is_cached():
-    view = View(AGENT, "m", "w1:p1", "i", LIVE, NOW, NOW - 1)
-    assert judged(view, NOW) == View(AGENT, "m", "w1:p1", "i", CACHED, NOW, NOW - 1, "stale")
+    view = View(AGENT, "m", "w1:p1", LIVE, NOW, NOW - 1)
+    assert judged(view, NOW) == View(AGENT, "m", "w1:p1", CACHED, NOW, NOW - 1, "stale")
 
 
 def test_a_failed_view_keeps_its_reason_and_reads_cached_or_unverified():
-    seen = View(AGENT, "m", "w1:p1", "i", CACHED, NOW, NOW - 5, "unreachable")
+    seen = View(AGENT, "m", "w1:p1", CACHED, NOW, NOW - 5, "unreachable")
     assert judged(seen, NOW) == seen
-    never = View(AGENT, "m", "w1:p1", "i", CACHED, NOW, 0, "unreachable")
-    assert judged(never, NOW) == View(AGENT, "m", "w1:p1", "i", UNVERIFIED, NOW, 0, "unreachable")
-    fresh = View(AGENT, "m", "w1:p1", "i", UNVERIFIED)
-    assert judged(fresh, NOW) == View(AGENT, "m", "w1:p1", "i", UNVERIFIED, 0, 0, "never_live")
+    never = View(AGENT, "m", "w1:p1", CACHED, NOW, 0, "unreachable")
+    assert judged(never, NOW) == View(AGENT, "m", "w1:p1", UNVERIFIED, NOW, 0, "unreachable")
+    fresh = View(AGENT, "m", "w1:p1", UNVERIFIED)
+    assert judged(fresh, NOW) == View(AGENT, "m", "w1:p1", UNVERIFIED, 0, 0, "never_live")
 
 
 def test_publish_replaces_every_row_without_screen_text(store):
-    other = View("engineer@a1b2c3-0002", "sv2-exe-b", "w1:p1", "exe-b/1", CACHED, NOW, NOW - 9, "unreachable")
+    other = View("engineer@a1b2c3-0002", "sv2-exe-b", "w1:p1", CACHED, NOW, NOW - 9, "unreachable")
     visibility.publish(store, "sw", [live(), other])
     raw = store.redis.hgetall(store.key("sw", "terminals"))
     assert {agent: json.loads(row) for agent, row in raw.items()} == {
@@ -75,7 +75,7 @@ def test_publish_replaces_every_row_without_screen_text(store):
 
 
 def test_read_judges_every_row_at_the_reader_clock_in_agent_order(store):
-    visibility.publish(store, "sw", [live(), View("b", "m", "w1:p1", "i", LIVE, NOW, NOW)])
+    visibility.publish(store, "sw", [live(), View("b", "m", "w1:p1", LIVE, NOW, NOW)])
     rows = visibility.read(store, "sw", NOW + FRESH_MS + 1)
     assert list(rows) == ["b", AGENT]
     assert rows[AGENT] == asdict(judged(live(), NOW + FRESH_MS + 1))
