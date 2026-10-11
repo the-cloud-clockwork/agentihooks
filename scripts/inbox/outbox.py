@@ -18,7 +18,7 @@ from scripts.inbox.store import Contended, DuplicateItem, InboxError, new_item_i
 NAME = "inbox-outbox.jsonl"
 SKIPPED = "inbox-outbox.skipped.jsonl"
 LOCK = "inbox-outbox.lock"
-OPS = ("send", "reply", "close")
+OPS = ("send", "reply", "close", "post")
 MAX_ENV = "AGENTIHOOKS_INBOX_OUTBOX_MAX_BYTES"
 WARN_ENV = "AGENTIHOOKS_INBOX_OUTBOX_WARN_BYTES"
 DEFAULT_MAX_BYTES = 1_048_576
@@ -225,3 +225,26 @@ def _tell(report: Report) -> None:
             f"agentihooks msg: queued message {item} was refused on replay ({reason}); kept in {skipped_path()}",
             file=sys.stderr,
         )
+
+
+def stable_id(*parts: str) -> str:
+    """An item id fixed by what the item answers, so every retry of the same send writes it at most once."""
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:12]
+
+
+def post(store, sender: str, address: str, text: str, ref="", fyi=False, task="", item=""):
+    """A send from swarm code, written now or queued on a Redis error; the live item, or None while it waits queued."""
+    args = {"address": address, "text": text, "ref": ref, "fyi": fyi, "task": task}
+    entry = record("post", sender, args, item=item)
+    try:
+        found = submit(store, entry, apply_post)
+    except DuplicateItem:
+        return store.get(entry["item"])
+    return None if isinstance(found, dict) else found
+
+
+def apply_post(store, by: str, entry: dict):
+    args = entry["args"]
+    return store.send(
+        by, args["address"], args["text"], ref=args["ref"], fyi=args["fyi"], task=args["task"], item_id=entry["item"]
+    )

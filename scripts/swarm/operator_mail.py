@@ -5,6 +5,7 @@ the lead seat while it is live, else the lowest numbered live master. A gone add
 
 import functools
 
+from scripts.inbox import outbox
 from scripts.inbox.seen import write_ref
 from scripts.swarm.store import MASTER, SwarmError
 from scripts.swarm_ledger.ledger_gate import IGNORED_KINDS, MENTION_RE
@@ -85,18 +86,15 @@ def relay(inbox, store, slug, doc, events, line):
         if event.get("by") != OPERATOR or event.get("kind") in IGNORED_KINDS:
             continue
         ref = write_ref(slug, event)
-        if not inbox.redis.set(inbox.key("ledger-sent", ref), 1, nx=True, ex=SENT_TTL_S):
+        mark = inbox.key("ledger-sent", ref)
+        if inbox.redis.exists(mark):
             continue
         text = f"On ledger {slug}: {line(event)}"
         master = master_address(slug, _live(agents))
-        sent += [
-            inbox.send(
-                OPERATOR,
-                address,
-                primed(text, event, address, master),
-                ref=ref,
-                fyi=informed(event, address, master),
-            )
-            for address in addresses(slug, event, doc, agents, owners)
-        ]
+        for address in addresses(slug, event, doc, agents, owners):
+            primer = primed(text, event, address, master)
+            fyi = informed(event, address, master)
+            item = outbox.post(inbox, OPERATOR, address, primer, ref=ref, fyi=fyi, item=outbox.stable_id(ref, address))
+            sent += [item] if item else []
+        inbox.redis.set(mark, 1, ex=SENT_TTL_S)
     return sent

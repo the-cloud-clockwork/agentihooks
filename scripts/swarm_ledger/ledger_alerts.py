@@ -130,14 +130,22 @@ def message(slug, alert):
     )
 
 
-def deliver(inbox, slug, alerts, rev, master):
-    """Send each alert raised at rev to its target's inbox, once."""
+def deliver(inbox, slug, alerts, rev, master, since=None):
+    """Send each alert raised from since through rev to its target's inbox, once."""
+    from scripts.inbox import outbox
+
+    since = rev if since is None else since
     sent = []
     for alert in alerts:
-        if alert.get("rev") != rev or alert["state"] != OPEN:
+        if alert["state"] != OPEN or not since <= alert.get("rev", -1) <= rev:
             continue
-        if not inbox.redis.set(inbox.key("alert-sent", slug, alert["id"]), 1, nx=True, ex=SENT_TTL_S):
+        mark = inbox.key("alert-sent", slug, alert["id"])
+        if inbox.redis.exists(mark):
             continue
         address = master if alert["target"] in ("master", OPERATOR) else alert["target"]
-        sent.append(inbox.send(SENDER, address, message(slug, alert)))
+        item = outbox.post(
+            inbox, SENDER, address, message(slug, alert), item=outbox.stable_id("alert", slug, alert["id"])
+        )
+        inbox.redis.set(mark, 1, ex=SENT_TTL_S)
+        sent += [item] if item else []
     return sent

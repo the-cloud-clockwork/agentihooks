@@ -471,10 +471,14 @@ def refresh_quota(slug: str) -> tuple[dict | None, str]:
 
 
 def relay_to_inbox(slug, state):
-    """Operator writes from this sync become inbox items for the swarm on this ledger, if it has one."""
+    """Operator writes since the oldest revision not yet relayed become inbox items for the swarm on this ledger."""
     meta = state["_meta"]
-    events = [e for e in meta.get("events", []) if e.get("rev") == meta["rev"] and e.get("by") == "operator"]
+    since = unrelayed_since(RELAY, slug, meta["rev"])
+    events = [
+        e for e in meta.get("events", []) if since <= e.get("rev", -1) <= meta["rev"] and e.get("by") == "operator"
+    ]
     if not events:
+        relayed(RELAY, slug, since, meta["rev"])
         return []
     try:
         import watch_ledger
@@ -484,16 +488,25 @@ def relay_to_inbox(slug, state):
         from scripts.swarm.store import RedisStore
 
         inbox = connect()
-        return operator_mail.relay(inbox, RedisStore(inbox.redis), slug, state, events, watch_ledger.line)
+        sent = operator_mail.relay(inbox, RedisStore(inbox.redis), slug, state, events, watch_ledger.line)
     except Exception as exc:  # the ledger write stands whatever the inbox does
         sys.stderr.write(f"inbox relay for {slug}: {exc}\n")
+        unrelayed_on(exc, RELAY, slug, meta["rev"])
         return []
+    relayed(RELAY, slug, since, meta["rev"])
+    return sent
 
 
 def deliver_alerts(slug, state):
     meta = state["_meta"]
-    fresh = [a for a in state.get("alerts", []) if a.get("rev") == meta["rev"] and a["state"] == ledger_alerts.OPEN]
+    since = unrelayed_since(ALERTS, slug, meta["rev"])
+    fresh = [
+        a
+        for a in state.get("alerts", [])
+        if since <= a.get("rev", -1) <= meta["rev"] and a["state"] == ledger_alerts.OPEN
+    ]
     if not fresh:
+        relayed(ALERTS, slug, since, meta["rev"])
         return []
     try:
         from scripts.inbox.store import connect
@@ -505,10 +518,87 @@ def deliver_alerts(slug, state):
         master = operator_mail.master_address(slug, live)
         addresses = {a.name: a.seat or a.name for a in live}
         alerts = [{**a, "target": addresses.get(a["target"], "master")} for a in fresh]
-        return ledger_alerts.deliver(inbox, slug, alerts, meta["rev"], master)
+        sent = ledger_alerts.deliver(inbox, slug, alerts, meta["rev"], master, since=since)
     except Exception as exc:  # the ledger write stands whatever the inbox does
         sys.stderr.write(f"alert delivery for {slug}: {exc}\n")
+        unrelayed_on(exc, ALERTS, slug, meta["rev"])
         return []
+    relayed(ALERTS, slug, since, meta["rev"])
+    return sent
+
+
+RELAY, ALERTS = "relay", "alerts"
+UNRELAYED = "ledger-unrelayed.json"
+REPLAY_EVERY = 5
+_UNRELAYED_LOCK = threading.Lock()
+
+
+def unrelayed_path() -> Path:
+    from hooks import config
+
+    return Path(config.AGENTIHOOKS_HOME) / UNRELAYED
+
+
+def unrelayed() -> dict:
+    """{kind: {slug: [revisions]}} the inbox could not take; kept on disk because Redis is what was down."""
+    try:
+        found = json.loads(unrelayed_path().read_text())
+    except (OSError, ValueError):
+        return {}
+    return found if isinstance(found, dict) else {}
+
+
+def _change_unrelayed(change) -> None:
+    with _UNRELAYED_LOCK:
+        found = unrelayed()
+        change(found)
+        found = {kind: {s: revs for s, revs in slugs.items() if revs} for kind, slugs in found.items()}
+        found = {kind: slugs for kind, slugs in found.items() if slugs}
+        staged = unrelayed_path().with_suffix(".tmp")
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        staged.write_text(json.dumps(found))
+        os.replace(staged, unrelayed_path())
+
+
+def unrelayed_since(kind, slug, rev) -> int:
+    return min([rev, *unrelayed().get(kind, {}).get(slug, [])])
+
+
+def unrelayed_on(exc, kind, slug, rev):
+    """Keep the revision for replay when the inbox was unreachable or could not queue it."""
+    from redis.exceptions import RedisError
+
+    from scripts.inbox.store import InboxError
+
+    if isinstance(exc, (RedisError, InboxError)):
+        _change_unrelayed(lambda found: found.setdefault(kind, {}).setdefault(slug, []).append(rev))
+
+
+def relayed(kind, slug, since, rev):
+    """Forget the revisions a relay from since through rev covered; one recorded meanwhile outside it stays."""
+    if not unrelayed().get(kind, {}).get(slug):
+        return
+
+    def forget(found):
+        held = found.get(kind, {})
+        held[slug] = [r for r in held.get(slug, []) if not since <= r <= rev]
+
+    _change_unrelayed(forget)
+
+
+def replay_unrelayed() -> None:
+    """Relay again every revision the inbox could not take, from the stored ledger, once Redis answers."""
+    for kind, slugs in unrelayed().items():
+        for slug in list(slugs):
+            try:
+                state = repository.get_document(slug)
+            except KeyError:
+                _change_unrelayed(lambda found, kind=kind, slug=slug: found.get(kind, {}).pop(slug, None))
+                continue
+            REPLAYS[kind](slug, state)
+
+
+REPLAYS = {RELAY: relay_to_inbox, ALERTS: deliver_alerts}
 
 
 def expire_alerts() -> None:
@@ -951,6 +1041,8 @@ def watch_ledgers(interval=2.0):
             bin_closed_without_swarm()
         if passes and passes % BIN_SWEEP_EVERY == 0:
             expire_alerts()
+        if passes % REPLAY_EVERY == 0 and unrelayed_path().exists():
+            replay_unrelayed()
         sample_streams()
         time.sleep(interval)
 
