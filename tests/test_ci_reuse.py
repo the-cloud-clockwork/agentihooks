@@ -346,6 +346,21 @@ def test_unavailable_source_evidence_runs_fully(full_source, tmp_path, kind):
     result = invoke(root, base, queue, "merge_group", tmp_path / "missing.json", env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "reused=false" in result.stdout
+    unfetched = "Refused run 7: no proof.zip, jobs.jsonl, reuse.log evidence\n"
+    reasons = {
+        "missing-unit": "Refused run 7: a required job did not pass\n",
+        "missing-metadata": unfetched,
+        "expired-metadata": unfetched,
+        "expired-coverage": "Refused run 7: no coverage-3.12-1 artifact\n",
+        "bad-archive": "Refused run 7: BadZipFile\n",
+        "missing-log": "Refused run 7: no reuse.log evidence\n",
+        "unlisted-runs": "No reusable full result: FileNotFoundError\n",
+        "unlisted-artifacts": "Refused run 7: no artifacts.jsonl, proof.zip, jobs.jsonl, reuse.log evidence\n",
+        "missing-archive": unfetched,
+        "unlisted-jobs": "Refused run 7: no jobs.jsonl, reuse.log evidence\n",
+        "unlisted-pull": "No reusable full result: FileNotFoundError\n",
+    }
+    assert reasons[kind] in result.stdout
 
 
 @pytest.mark.parametrize("field, value", [("event", "push"), ("status", "in_progress"), ("conclusion", "failure")])
@@ -576,7 +591,20 @@ def test_a_queue_tree_that_changes_workflows_runs_fully(full_source, tmp_path):
     assert "No reuse: the queue tree changes workflow files\n" in result.stdout
 
 
-DECOYS = ["valid", "event", "evidence", "head", "workflow", "metadata", "record", "commit", "tree", "coverage", "jobs"]
+DECOYS = [
+    "valid",
+    "event",
+    "evidence",
+    "head",
+    "workflow",
+    "metadata",
+    "record",
+    "commit",
+    "tree",
+    "coverage",
+    "jobs",
+    "archive",
+]
 ABSENT = "0123456789abcdef0123456789abcdef01234567"
 
 
@@ -618,6 +646,8 @@ def test_a_rejected_newer_run_still_lets_an_older_full_pass_reuse(full_source, t
     responses["repos/o/r/actions/runs/8/artifacts?per_page=100"] = {"artifacts": artifacts}
     responses["repos/o/r/actions/runs/8/attempts/1/jobs?per_page=100"] = {"jobs": jobs}
     responses["repos/o/r/actions/artifacts/142/zip"] = {"binary": base64.b64encode(archive.getvalue()).decode()}
+    if decoy == "archive":
+        responses["repos/o/r/actions/artifacts/142/zip"] = {"binary": base64.b64encode(b"invalid").decode()}
     if decoy != "evidence":
         responses["repos/o/r/actions/jobs/191/logs"] = {"binary": base64.b64encode(log.encode()).decode()}
     Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
@@ -657,3 +687,29 @@ def test_a_queue_ref_naming_no_pull_request_fetches_nothing(full_source, tmp_pat
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert list(temp.iterdir()) == []
+
+
+@pytest.mark.parametrize("pull", [{"number": 5, "head": {}}, {"number": 5, "head": {"sha": "main"}}, None])
+def test_an_unreadable_pull_request_head_lists_no_runs(full_source, tmp_path, pull):
+    from scripts import ci_reuse
+
+    _, _, _, _, env, responses, _ = full_source
+    if pull is None:
+        responses.pop(PULL)
+    else:
+        responses[PULL] = pull
+    for head in ("", "main", "null"):
+        responses[RUNS.format(head)] = {"workflow_runs": []}
+    Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
+    [step] = [step for step in ci_reuse.reuse_job()["steps"] if step.get("name") == FETCH]
+    temp = tmp_path / "runner"
+    temp.mkdir()
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        env=dict(env, GITHUB_REPOSITORY="o/r", RUNNER_TEMP=str(temp), QUEUE_REF=QUEUE_REF),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == "No reuse: cannot read the head of pull request 5\n"
+    assert not (temp / "evidence/runs.json").exists()

@@ -149,7 +149,10 @@ def _refusal(args, current, workflow, run):
     folder = args.evidence / str(run["id"])
     if missing := [name for name in EVIDENCE if not (folder / name).is_file()]:
         return f"no {', '.join(missing)} evidence"
-    if _resolved(run["head_sha"], ":.github") != current["inputs"]["workflow"]:
+    workflow_files = _resolved(run["head_sha"], ":.github")
+    if workflow_files is None:
+        return "head commit unavailable"
+    if workflow_files != current["inputs"]["workflow"]:
         return "workflow files differ at its head"
     artifacts = _lines(folder / "artifacts.jsonl")
     name = f"required-tree-{run['run_attempt']}"
@@ -168,7 +171,7 @@ def _refusal(args, current, workflow, run):
     if keys := _differs(expected, {key: record.get(key) for key in expected}):
         return f"{', '.join(keys)} differed"
     if _resolved(record["commit"], "^{tree}") != current["tree"]:
-        return "commit tree differed"
+        return "commit.tree differed"
     shards = workflow["jobs"]["unit"]["strategy"]["matrix"]["shard"]
     kept = {item["name"] for item in artifacts if not item["expired"]}
     if missing := sorted({f"coverage-3.12-{shard}" for shard in shards} - kept):
@@ -190,7 +193,11 @@ def _find(args, current):
     if not runs:
         print("No passed pull request run for this head")
     for run in runs:
-        if reason := _refusal(args, current, workflow, run):
+        try:
+            reason = _refusal(args, current, workflow, run)
+        except (subprocess.CalledProcessError, KeyError, ValueError, OSError, zipfile.BadZipFile) as exc:
+            reason = type(exc).__name__
+        if reason:
             print(f"Refused run {run['id']}: {reason}")
         else:
             return run
