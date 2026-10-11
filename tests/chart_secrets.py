@@ -1,16 +1,27 @@
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import yaml
 from chart_workers import merged
 
 
-def containers(documents: list):
+def pods(node) -> Iterator[dict]:
+    if isinstance(node, dict):
+        if isinstance(node.get("containers"), list):
+            yield node
+        for value in node.values():
+            yield from pods(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from pods(value)
+
+
+def containers(documents: list) -> Iterator[tuple[dict, dict, dict]]:
     for document in documents:
-        spec = document.get("spec", {})
-        pod = (spec if document["kind"] == "Pod" else spec.get("template", {}).get("spec")) or {}
-        for container in pod.get("initContainers", []) + pod.get("containers", []):
-            yield document, pod, container
+        for pod in pods(document.get("spec", {})):
+            for container in pod.get("initContainers", []) + pod.get("containers", []):
+                yield document, pod, container
 
 
 def references(pod: dict, container: dict, secret: str) -> list[dict]:

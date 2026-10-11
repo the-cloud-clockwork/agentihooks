@@ -31,7 +31,13 @@ planted="$(helm template "$release" "$chart" "${secrets[@]}" --set 'secretEnv[0]
   --set 'secretEnv[0].secretName=swarm-worker-terminal' --set 'secretEnv[0].key=setting' \
   | python3 tests/chart_secrets.py "$chart/ci/kind-values.yaml" 2>&1 >/dev/null || true)"
 if [[ $planted != *"StatefulSet $release-ledger container ledger references the controller only Secret swarm-worker-terminal"* ]]; then
-  printf 'the chart check passed a planted shared reference to the controller only Secret: %s\n' "$planted" >&2
+  printf 'the chart check did not flag a planted shared reference to the controller only Secret: %s\n' "$planted" >&2
+  exit 1
+fi
+planted="$(helm template "$release" "$chart" "${secrets[@]}" --set 'controller.secretEnv[0].optional=false' \
+  | python3 tests/chart_secrets.py "$chart/ci/kind-values.yaml" 2>&1 >/dev/null || true)"
+if [[ $planted != *"the controller container references swarm-worker-terminal as"* ]]; then
+  printf 'the chart check did not flag a required reference where the values say optional: %s\n' "$planted" >&2
   exit 1
 fi
 digest="sha256:$(printf 'a%.0s' $(seq 64))"

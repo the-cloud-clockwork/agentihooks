@@ -12,7 +12,7 @@ controller:
     timeoutSeconds: 5
     failureThreshold: 2
   terminationGracePeriodSeconds: 1
-  # A Secret the kind cluster never creates: the controller and the ledger must start without it.
+  # Never created in kind; optional lets the controller start without it.
   secretEnv:
     - name: AGENTIHOOKS_WORKER_TERMINAL
       secretName: swarm-worker-terminal
