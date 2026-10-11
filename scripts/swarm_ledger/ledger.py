@@ -669,7 +669,7 @@ def cmd_hierarchy(args) -> None:
 
 
 def refuse_unset_quote(args):
-    if getattr(args, "quote", "") and args.action != "set":
+    if vars(args).get("quote") and args.action != "set":
         sys.exit(f"task {args.action} takes no --quote: run task set <id> rank=<rank> --quote <his words> after it")
 
 
@@ -741,8 +741,8 @@ def cmd_task(args):
             sys.exit(f"task set takes {name}=VALUE or {name}.KEY=VALUE pairs, not both")
         fields.setdefault(name, {})[sub] = fields.pop(dotted)
     refuse_plain_objects(fields)
-    quoted = {"quote": args.quote} if getattr(args, "quote", "") else {}
-    send(args, "task_update", item=f"tasks/{args.id}", fields=fields, **quoted)
+    quote = vars(args).get("quote")
+    send(args, "task_update", item=f"tasks/{args.id}", fields=fields, **({"quote": quote} if quote else {}))
     print(json.dumps({"task": args.id, **fields}))
 
 
@@ -896,7 +896,7 @@ def build_parser():
     task.add_argument(
         "--not-duplicate", default="", help="why the task differs from the one it resembles; skips the duplicate check"
     )
-    task.add_argument("--quote", default="", help="task set rank=...: the operator's words, so the rank stays his")
+    task.add_argument("--quote", help="task set rank=...: the operator's words, so the rank stays his")
     publish = sub.add_parser("publish-plan")
     publish.add_argument("path")
     publish.add_argument("--phase", required=True, help="comma separated ids of the phases the plan fills")

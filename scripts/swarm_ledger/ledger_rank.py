@@ -50,7 +50,7 @@ def apply(doc, op, ctx):
         ctx.refused.append(refusal)
         return False
     rank, path = canonical(op["rank"]), f"{op['item']}/rank"
-    if refusal := pinned(task_id, author(ctx, path) if "rank" in task else None, by):
+    if by != OPERATOR and (refusal := pinned(task_id, author(ctx, path) if "rank" in task else None)):
         ctx.refused.append(refusal)
         return False
     if task.get("rank") != rank or author(ctx, path) != by:
@@ -65,8 +65,8 @@ def author(ctx, path):
     return ctx.stamps.get(path, {}).get("by")
 
 
-def pinned(task_id, owner, by) -> str:
-    if owner != OPERATOR or by == OPERATOR:
+def pinned(task_id, owner) -> str:
+    if owner != OPERATOR:
         return ""
     return f"task {task_id} has a rank the operator set: relay his words with task set {task_id} rank=<rank> --quote"
 

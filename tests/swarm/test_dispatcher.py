@@ -359,7 +359,7 @@ def test_a_task_the_dispatcher_lowered_is_raised_again_when_it_regains_the_top(s
 
 def test_the_dispatcher_reorders_ranks_a_master_set_by_hand_and_keeps_the_operator_rank(store, home, shipped):
     store.update(SLUG, autonomy="full")
-    tasks = [*merging(), task("e", state="claimed"), task("f"), task("g"), task("h", lane="ci")]
+    tasks = [*merging(), task("e", state="claimed"), task("f"), task("g", depends_on=["a"]), task("h", lane="ci")]
     tasks[0]["state"] = "done"
     hands = {t: MASTER_NAME for t in ("b", "q", "c0", "e", "f", "g", "h")} | {"c": "operator"}
     found = stamped(tasks, hands)
@@ -419,6 +419,30 @@ def test_a_doctor_fix_phase_task_outside_the_focus_is_still_ranked(store, home, 
     ledger = Ledger()
     dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
     assert ledger.ranks == [("f", "high", "dispatcher")]
+
+
+def test_a_master_urgent_fix_phase_task_outside_the_focus_is_lowered_since_it_stays_claimable(store, home, shipped):
+    from scripts.doctor import loop, priming
+
+    store.update(SLUG, autonomy="delegate", template=priming.TEMPLATE)
+    found = stamped([task("f", phase=loop.FIX_PHASE, rank="urgent")], {"f": MASTER_NAME}, rank="urgent")
+    found["phases"] = [{"id": loop.FIX_PHASE, "depends_on": []}]
+    found["freezes"] = [{"verb": "focus", "target": "lane:ci"}]
+    ledger = Ledger()
+    dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
+    assert ledger.ranks == [("f", "normal", "dispatcher")]
+
+
+def test_two_operator_high_ranks_hold_two_of_the_top_places(store, home, shipped):
+    store.update(SLUG, autonomy="delegate")
+    tasks = [task(f"t{i}", phase="") for i in range(5)]
+    tasks.append(task("w", phase="", depends_on=[f"t{i}" for i in range(5)]))
+    tasks.append(task("v", phase="", depends_on=["t0", "t1"]))
+    tasks[0]["rank"] = tasks[1]["rank"] = "high"
+    stamps = {f"tasks/t{i}/rank": {"by": "operator"} for i in range(2)}
+    ledger = Ledger()
+    dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, doc(tasks, phases=[], _meta={"stamps": stamps}), NOW)
+    assert ledger.ranks == [("t2", "high", "dispatcher")]
 
 
 def test_below_delegate_an_own_rank_is_never_lowered(store, home, shipped):

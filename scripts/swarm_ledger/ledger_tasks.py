@@ -383,10 +383,10 @@ def update_refusal(doc: dict, op: dict, meta: dict | None = None) -> str:
 
 
 def pinned_refusal(op: dict, meta: dict | None) -> str:
-    stamps = (meta or {}).get("stamps", {})
-    if "rank" not in op["fields"] or "quote" in op:
+    if "rank" not in op["fields"]:
         return ""
-    return ledger_rank.pinned(op["item"].split("/")[1], stamps.get(f"{op['item']}/rank", {}).get("by"), op["by"])
+    stamps = (meta or {}).get("stamps", {})
+    return ledger_rank.pinned(op["item"].split("/")[1], stamps.get(f"{op['item']}/rank", {}).get("by"))
 
 
 def _known(tasks, ids):
@@ -484,13 +484,10 @@ def _update(doc, op, ctx):
 def _relay_rank(doc, op, ctx):
     from scripts.swarm_ledger.ledger_relay import RELAYED_FROM, relayed
 
-    task = next((t for t in doc.get("tasks", []) if t["id"] == op["item"].split("/")[1]), None)
-    if task is None:
-        return False
+    task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), None)
     rank, words = ledger_rank.canonical(op["fields"]["rank"]), relayed(op, ctx.meta)
-    named = ledger_rank.quoted(rank, words)
-    if refusal := update_refusal(doc, op, ctx.meta) or ("" if named else UNRELAYED):
-        ctx.refused.append(refusal)
+    if task is None or not ledger_rank.quoted(rank, words):
+        ctx.refused.append(UNRELAYED)
         return False
     task["rank"] = rank
     ctx.stamp(f"{op['item']}/rank", ledger_rank.OPERATOR)

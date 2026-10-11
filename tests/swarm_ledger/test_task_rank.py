@@ -280,17 +280,53 @@ def test_a_rank_the_master_relays_with_the_operators_words_is_his_and_stays_fixe
 
     operator_words.record(MASTER, "Rank the login fix high, it blocks everything")
     core.sync(SLUG, ops=[{"op": "join", "id": "j1", "by": MASTER, "role": "orchestrator"}])
-    state, rejected = relayed("rank the login fix high")
-    assert (rejected, rank_of(state), state["_meta"]["stamps"]["tasks/t1/rank"]["by"]) == ([], "high", "operator")
+    core.sync(SLUG, ops=[{"op": "task_rank", "id": "g-1", "item": "tasks/t1", "rank": "low"}])
+    relayed("rank the login fix high")
+    state, _ = core.sync(SLUG)
+    assert (rank_of(state), state["_meta"]["stamps"]["tasks/t1/rank"]["by"]) == ("high", "operator")
     event = state["_meta"]["events"][-1]
-    assert (event["by"], event["kind"], event["relayed_by"], event["quote"]) == (
-        "operator",
-        "rank set",
-        MASTER,
-        "Rank the login fix high",
-    )
+    assert {k: event[k] for k in ("by", "kind", "target", "text", "relayed_by", "relayed_from", "quote")} == {
+        "by": "operator",
+        "kind": "rank set",
+        "target": "tasks/t1",
+        "text": "high",
+        "relayed_by": MASTER,
+        "relayed_from": "master pane",
+        "quote": "Rank the login fix high",
+    }
     state, rejected = owned_rank("normal", 2)
     assert (rejected, rank_of(state)) == (["o-2"], "high")
+    state, rejected = update(MASTER, "low", 3)
+    assert (rejected, rank_of(state)) == (["rank-3"], "high")
+    scoped = {"op": "task_update", "id": "s-1", "by": MASTER, "item": "tasks/t1", "fields": {"territory": ["docs"]}}
+    state, rejected = core.sync(SLUG, ops=[scoped])
+    assert (rejected, rank_of(state), next(t for t in state["tasks"] if t["id"] == "t1")["territory"]) == (
+        [],
+        "high",
+        ["docs"],
+    )
+
+
+def test_a_relay_on_a_missing_task_is_refused():
+    from hooks.context import operator_words
+
+    operator_words.record(MASTER, "Rank the login fix high, it blocks everything")
+    core.sync(SLUG, ops=[{"op": "join", "id": "j1", "by": MASTER, "role": "orchestrator"}])
+    op = {"op": "task_update", "id": "rel-9", "by": MASTER, "item": "tasks/nope", "fields": {"rank": "high"}}
+    state, rejected = core.sync(SLUG, ops=[{**op, "quote": "rank the login fix high"}])
+    assert (rejected, state["_meta"]["warnings"][0]) == (["rel-9"], ledger_tasks.UNRELAYED)
+
+
+@pytest.mark.parametrize("meta", [None, {}, {"stamps": {}}])
+def test_an_unstamped_rank_is_never_pinned(meta):
+    assert ledger_tasks.pinned_refusal({"item": "tasks/t1", "fields": {"rank": "high"}}, meta) == ""
+
+
+def test_the_task_help_names_the_quote(capsys):
+    with pytest.raises(SystemExit):
+        ledger.build_parser().parse_args(["task", "--help"])
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "--quote QUOTE task set rank=...: the operator's words, so the rank stays his" in help_text
 
 
 @pytest.mark.parametrize("member", [None, "member"])
@@ -325,7 +361,8 @@ def test_a_relayed_rank_needs_three_of_his_words_naming_the_rank(quote):
         ("urgent", "make it urgent now", True),
         ("high", "make it highest now", False),
         ("low", "low", False),
-        ("normal", "leave it at normal", True),
+        ("normal", "keep it normal", True),
+        ("normal", "keep normal", False),
     ],
 )
 def test_quoted_needs_three_words_and_the_rank_or_its_alias(rank, words, named):
