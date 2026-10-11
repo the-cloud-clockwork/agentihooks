@@ -173,6 +173,21 @@ def test_revoked_grant_blocks_cached_authority(fixture):
     assert transport.creations == 0
 
 
+def test_a_renewal_refused_its_grant_closes_admission_until_a_granted_renewal(fixture):
+    store, (first, _), transport, _, grant = fixture
+    assert first.acquire()
+    grant["allowed"] = False
+    with pytest.raises(SwarmError, match="^a scoped controller grant is required$"):
+        first.renew()
+    assert first.ready is False
+    grant["allowed"] = True
+    with pytest.raises(SwarmError, match="^controller admission is disabled until reconciliation completes$"):
+        first.admit(agent(store))
+    assert first.renew() is True
+    assert first.admit(agent(store)).generation == 1
+    assert transport.creations == 0
+
+
 @pytest.mark.parametrize("run", range(2))
 def test_independent_controllers_race_for_one_admission(fixture, run):
     from concurrent.futures import ThreadPoolExecutor
