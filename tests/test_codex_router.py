@@ -157,6 +157,7 @@ def test_route_reads_quotas_for_a_forced_account_and_refreshes_them_otherwise(mo
     runner = object()
     monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {})
     monkeypatch.setattr(router, "routing_pool", lambda environ, run: pool)
+    monkeypatch.setattr(router, "accounts", lambda environ, run: pool)
     monkeypatch.setattr(router, "quotas", lambda p, environ: calls.append(("quotas", p, environ)) or {})
     monkeypatch.setattr(
         router,
@@ -343,9 +344,6 @@ def test_no_routable_account_fails_the_launch_and_reports_it(monkeypatch, tmp_pa
 
 
 def test_without_token_variables_the_default_login_is_judged_by_its_week(monkeypatch, tmp_path):
-    def no_status(argv, **kwargs):
-        raise AssertionError("no login status check without tokens")
-
     environ = {"AH_CC_TOKEN_ncgma": "cc-value"}
     rc, seen, report = _launch(monkeypatch, tmp_path, environ, ["-m", "o3", "do it"], {"default": _quota(50.0)})
     assert rc == 0
@@ -355,7 +353,9 @@ def test_without_token_variables_the_default_login_is_judged_by_its_week(monkeyp
     rc, seen, report = _launch(monkeypatch, tmp_path, environ, [], {"default": _quota(50.0)}, {"default": 6})
     assert rc == 3 and not seen
     monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {"default": 5})
-    assert router._route(environ, "", no_status, "") == (router.CodexAccount("default"), "open", 5, "6")
+    assert router._route(environ, "", _status(0), "") == (router.CodexAccount("default"), "open", 5, "6")
+    with pytest.raises(router.RoutingError, match="no signed in Codex account"):
+        router._route(environ, "", _status(1), "")
 
 
 def test_the_api_route_is_forced_with_its_own_live_count_and_no_cap(monkeypatch):

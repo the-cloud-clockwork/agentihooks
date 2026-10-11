@@ -270,7 +270,7 @@ class CodexAccountSource:
         return () if self.run is None else (self.run,)
 
     def pool(self, environ: Mapping[str, str]) -> list[CodexAccount]:
-        return [account for account in routing_pool(environ, *self._run()) if not refusal(account, environ)]
+        return [account for account in accounts(environ, *self._run()) if not refusal(account, environ)]
 
     def readings(
         self, pool: list[CodexAccount], environ: Mapping[str, str], now: float
