@@ -65,7 +65,7 @@ class World:
         return dict(sorted(Counter(masters.MasterSeats(self.store.redis).owners(SLUG, DOC).values()).items()))
 
     def announcements(self):
-        return [post.text for post in MastersChannel(self.store.redis)._posts(SLUG, 0)]
+        return [post.text for post in MastersChannel(self.store.redis).read(SLUG, f"{SLUG}-master-1")]
 
     def pending(self, address):
         return [item.sender for item in self.inbox.pending_items(address)]
@@ -126,6 +126,8 @@ def _negative(world):
 
 
 def _recovery(world):
+    import fakeredis
+
     world.grow()
     world.staffed(5)
     start = NOW + 2 * MINUTE
@@ -135,8 +137,6 @@ def _recovery(world):
     for agent in world.extras():
         world.hand_off(agent)
     retired = world.tick(start + master_scale.HOLD_MS + MINUTE)
-    import fakeredis
-
     restarted = masters.MasterSeats(fakeredis.FakeRedis(server=world.server, decode_responses=True))
     lead_items = world.inbox.pending_items(LEAD)
     return {

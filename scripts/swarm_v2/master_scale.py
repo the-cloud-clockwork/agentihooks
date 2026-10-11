@@ -14,7 +14,7 @@ from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import seat_spawn
 from scripts.swarm.store import MASTER
 from scripts.swarm_v2 import masters
-from scripts.swarm_v2.masters_channel import MastersChannel
+from scripts.swarm_v2.masters_channel import SWARM, MastersChannel
 
 OFF = "off"
 PER_HIVE = "hive"
@@ -22,7 +22,7 @@ RULE = "per"
 BELOW = "below"
 RETIRING = "retiring"
 RETIRE_SECONDS = "retire-seconds"
-SENDER = "swarm"
+SENDER = SWARM
 HOLD_MS = 10 * 60_000
 ENDED = ("stopping", "stopped")
 ASK = (
@@ -117,7 +117,7 @@ def _ask(slug, store, occupied, retiring, indexes, want, now_ms):
 def _retire(slug, store, address, asked, now_ms):
     """asked is [ask time, ask item id] when the seat's master was asked to hand off, else None."""
     inbox, lead, seat_name = InboxStore(store.redis), _address(slug, 1), address.removesuffix(f"@{slug}")
-    ask_id = asked and asked[1]
+    ask_id = asked[1] if asked else ""
     text = store.handoff(slug, seat_name)
     if text:
         inbox.send(SENDER, lead, HANDED.format(address=address, slug=slug) + text)

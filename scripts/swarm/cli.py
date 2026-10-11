@@ -656,23 +656,16 @@ def config_value(key, value):
     return api_address(value) if key in ADDRESS_KEYS else scaling_value(key, value)
 
 
-def _split_master_pairs(pairs):
-    """The master seat count lives beside the swarm config: checked with the other pairs, stored after them."""
+def _split_master_pairs(pairs, key, parse):
+    """The master seat count and its scaling rule live beside the swarm config: checked with the other pairs, stored after them."""
     split = [(pair, *pair.partition("=")) for pair in pairs]
-    counts = [masters.count_of(value) for _, key, _, value in split if key == "masters"]
-    return counts, [pair for pair, key, _, _ in split if key != "masters"]
+    values = [parse(value) for _, name, _, value in split if name == key]
+    return values, [pair for pair, name, _, _ in split if name != key]
 
 
 def _store_master_counts(store, slug, counts):
     for count in counts:
         masters.MasterSeats(store.redis).set_count(slug, count)
-
-
-def _master_rules(pairs):
-    """The rule the master count follows, checked with the other pairs and stored after them like the count."""
-    split = [(pair, *pair.partition("=")) for pair in pairs]
-    rules = [master_scale.rule_of(value) for _, key, _, value in split if key == "master-per"]
-    return rules, [pair for pair, key, _, _ in split if key != "master-per"]
 
 
 def _store_master_rules(store, slug, rules):
@@ -682,8 +675,8 @@ def _store_master_rules(store, slug, rules):
 
 def cmd_set(store, args):
     changes, lanes = {}, {key: dict(value) for key, value in store.config(args.slug).lanes.items()}
-    counts, pairs = _split_master_pairs(args.pairs)
-    rules, pairs = _master_rules(pairs)
+    counts, pairs = _split_master_pairs(args.pairs, "masters", masters.count_of)
+    rules, pairs = _split_master_pairs(pairs, "master-per", master_scale.rule_of)
     for pair in pairs:
         key, _, value = pair.partition("=")
         if key in LANE_KEYS:
