@@ -17,7 +17,7 @@ from urllib.request import Request, urlopen
 from scripts.account_names import TOKEN_PREFIX, token_env
 
 SECRET_PATH = "secret/data/k8s/swarm-claude-creds"
-FALLBACK_NAME = ".accounts.env"
+FALLBACK_NAME = Path("accounts") / "claude.env"
 TIMEOUT_S = 3
 USAGE = "usage: agentihooks accounts env"
 NAME = re.compile(rf"{TOKEN_PREFIX}[A-Za-z0-9_]+")

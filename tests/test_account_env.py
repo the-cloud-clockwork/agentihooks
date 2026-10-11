@@ -54,8 +54,8 @@ def _environ(tmp_path, monkeypatch, url="http://bao:8200/", bao="fixture-bao"):
 
 def _fallback(tmp_path, text, mode=0o600):
     state = tmp_path / ".agentihooks"
-    state.mkdir(exist_ok=True)
-    path = state / ".accounts.env"
+    path = state / "accounts" / "claude.env"
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     path.chmod(mode)
     return path
@@ -143,8 +143,8 @@ def test_missing_openbao_settings_go_straight_to_the_fallback(tmp_path, monkeypa
 def test_the_fallback_follows_the_agentihooks_home(tmp_path, monkeypatch, capsys):
     _environ(tmp_path, monkeypatch, url="", bao="")
     state = tmp_path / "elsewhere"
-    state.mkdir()
-    path = state / ".accounts.env"
+    path = state / "accounts" / "claude.env"
+    path.parent.mkdir(parents=True)
     path.write_text("AH_CC_TOKEN_one=tok-1\n")
     path.chmod(0o600)
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(state))
@@ -152,6 +152,16 @@ def test_the_fallback_follows_the_agentihooks_home(tmp_path, monkeypatch, capsys
     account_env.main(["env"])
 
     assert _evaluated(capsys.readouterr().out) == {"AH_CC_TOKEN_one": "tok-1"}
+
+
+def test_neither_env_loader_reads_the_fallback(tmp_path):
+    from scripts import operator_env
+
+    path = _fallback(tmp_path, "AH_CC_TOKEN_one=tok-1\n")
+    (path.parent.parent / ".env").write_text("MAIN=1\n")
+
+    assert path not in set(path.parent.parent.glob("*.env"))
+    assert path not in operator_env.files({"HOME": str(tmp_path)})
 
 
 @pytest.mark.parametrize("mode", [0o644, 0o640, 0o604, 0o660])
