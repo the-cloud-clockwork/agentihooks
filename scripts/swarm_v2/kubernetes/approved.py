@@ -1,10 +1,12 @@
 """The approved launch accounts are the key names of Secret swarm-claude-accounts, which external secrets syncs from
 the source of swarm-claude-creds with every value replaced, so the controller never holds a provider credential."""
 
+import os
 from collections.abc import Callable, Collection, Mapping
 
 from scripts import session_bands
-from scripts.swarm.capacity import Account, offered
+from scripts.swarm import quota_handoff
+from scripts.swarm.capacity import Account, free_seats, offered
 from scripts.swarm_v2.kubernetes.client import ApiRefused, PodApi
 from scripts.swarm_v2.kubernetes.spec import KEY
 from scripts.swarm_v2.quota import UNKNOWN, QuotaObservations
@@ -64,8 +66,16 @@ class AccountRoute:
         held = self.held()
         return [self._row(key, cap, held.get(key, 0), now) for key in sorted(self.keys())]
 
-    def choose(self, cap: int) -> str | None:
-        seat = session_bands.pick(offered(self.rows(cap, self.quota.clock() / 1000)))
+    def choose(self, cap: int, planned: str | None = None, predecessor: tuple[str, str] | None = None) -> str | None:
+        """A planned account with a free slot is kept; a quota successor never lands on the account handing off or
+        on one the handoff thresholds exclude, as the capacity plan for it was made."""
+        rows = self.rows(cap, self.quota.clock() / 1000)
+        if predecessor is not None:
+            thresholds = quota_handoff.Thresholds.from_env(dict(os.environ))
+            rows = [row for row in rows if not quota_handoff.exclusion(row, thresholds, predecessor)]
+        if any(row.name == planned and free_seats(row) for row in rows):
+            return planned
+        seat = session_bands.pick(offered(rows))
         return None if seat is None else seat.account
 
 

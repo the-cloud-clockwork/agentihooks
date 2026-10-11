@@ -188,6 +188,7 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
         environ, kubernetes=kubernetes, launch=partial(launcher.from_tick, terms=workers.terms, target=workers.target)
     )
     runtime.herdr_runtime.quota_accounts = FleetAccounts(route, workers.terms.cap)
+    launcher.planned = partial(runtime.herdr_runtime.planned_account, agent=HARNESS)
     launcher.router = runtime.router
     return runtime
 

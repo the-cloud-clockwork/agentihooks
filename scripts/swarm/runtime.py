@@ -418,7 +418,7 @@ class HerdrRuntime:
             decision = replace(decision, bundle_revision=kept or overlays.revision())
         return decision
 
-    def _planned_account(self, task_id, agent):
+    def planned_account(self, task_id, agent):
         planned = getattr(self, "_quota_tasks", {}).get(task_id)
         return getattr(self, "_quota_task_accounts", {}).get(task_id) if planned == agent else None
 
@@ -511,7 +511,7 @@ class HerdrRuntime:
         route = ["--route", saved["account"]] if saved.get("account") else []
         account = None
         if hasattr(self, "_quota_accounts"):
-            account = self._quota_account(agent, saved.get("account") or self._planned_account(task["id"], agent), None)
+            account = self._quota_account(agent, saved.get("account") or self.planned_account(task["id"], agent), None)
             route = ["--route", account.name]
         placed = timing.call(
             self._launch,
