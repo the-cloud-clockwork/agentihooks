@@ -106,7 +106,7 @@ def test_a_pass_publishes_each_remote_agent_live_on_its_own_machine_and_pane(rig
         name(EXE_B): (LIVE, ENDPOINT_B.name, PANE, ""),
     }
     assert sorted(returned) == [name(EXE_A), name(EXE_B)]
-    assert {verb for verb in workers.verbs()} == {("agent", "list"), ("agent", "get"), ("pane", "read")}
+    assert set(workers.verbs()) == {("status", "server"), ("agent", "list"), ("agent", "get"), ("pane", "read")}
     assert workers.launches() == []
 
 
