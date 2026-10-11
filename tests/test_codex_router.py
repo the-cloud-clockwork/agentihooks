@@ -704,6 +704,46 @@ def test_an_open_route_never_places_an_account_whose_credential_is_refused(monke
     ]
 
 
+@pytest.mark.parametrize(
+    ("tokens", "signed_in", "offered"),
+    [
+        ({"AH_CX_TOKEN_alpha": OAUTH, "AH_CX_TOKEN_keyed": "sk-proj-value"}, False, ["alpha"]),
+        ({"AH_CX_TOKEN_alpha": OAUTH, "AH_CX_TOKEN_beta": OAUTH_TWO}, True, ["alpha", "beta"]),
+        ({}, True, ["default"]),
+        ({}, False, []),
+    ],
+)
+def test_the_tick_offers_codex_seats_only_on_accounts_the_launcher_routes(
+    monkeypatch, tmp_path, tokens, signed_in, offered
+):
+    from scripts.swarm import capacity
+
+    environ = {**tokens, "HOME": str(tmp_path)}
+    readings = {name: _quota(10.0) for name in ("default", "alpha", "beta", "keyed")}
+    statuses = []
+
+    def status(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0 if signed_in else 1, "", "")
+
+    monkeypatch.setattr(router, "default_signed_in", lambda env, run=None: statuses.append(env) or signed_in)
+    monkeypatch.setattr(router, "quotas", lambda pool, env: {account.name: readings[account.name] for account in pool})
+    monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {})
+    rows = capacity._codex(environ, NOW, refresh=False)
+    seats = [row.name for row in rows if row.state == "OPEN"]
+    assert seats == offered
+    assert statuses == ([] if tokens else [environ])
+    for name in seats:
+        launched = {}
+        rc = router.main(
+            ["--route", name],
+            environ=environ,
+            execvpe=lambda path, cmd, env: launched.update(cmd=cmd),
+            run=status,
+        )
+        assert rc == 0 and launched["cmd"][0].endswith("codex")
+
+
 def test_an_open_route_with_no_seat_names_each_refused_credential(monkeypatch, tmp_path, capsys):
     environ = {"HOME": "/home/u", "AH_CX_TOKEN_keyed": "sk-proj-value", "AH_CX_TOKEN_gamma": AGENT}
     quotas = {"default": _quota(97.0), "gamma": _quota(97.0), "keyed": _quota(1.0)}
