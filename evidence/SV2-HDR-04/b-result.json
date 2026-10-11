@@ -30,7 +30,7 @@
         },
         "malformed_pane": {
           "reason": "pane_id",
-          "message": "a herdr pane id reads w<number>:p<number>",
+          "message": "a herdr pane id reads w<id>:p<id>, each id digits and capital letters",
           "unchanged": true
         },
         "manual_machine_label": {

@@ -13,6 +13,7 @@ from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 from scripts.swarm_v2.kubernetes.client import ApiRefused, KubeHttp, PodApi, PodClient
 from scripts.swarm_v2.kubernetes.failures import AccountSlot, Recovery
 from scripts.swarm_v2.kubernetes.grants import PodGrants, Supervision
+from scripts.swarm_v2.kubernetes.prompts import TerminalPrompts
 from scripts.swarm_v2.kubernetes.runtime import KubernetesTransport
 from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, PodTemplate, load_policy
 from scripts.swarm_v2.kubernetes.terminal import Exposure, HostKeys, TerminalObjects, TerminalTemplate
@@ -174,7 +175,8 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
     launcher = DistributedLaunch(
         controller, grants, capacity, fleet, None, workers.grants(environ, slug, verify, controller.store)
     )
-    kubernetes = KubernetesRuntime(controller.execute, workers.launch)
+    prompts = None if controller.terminals is None else TerminalPrompts(controller.terminals.terminal.router())
+    kubernetes = KubernetesRuntime(controller.execute, workers.launch, prompts)
     runtime = routed(
         environ, kubernetes=kubernetes, launch=partial(launcher.from_tick, terms=workers.terms, target=workers.target)
     )

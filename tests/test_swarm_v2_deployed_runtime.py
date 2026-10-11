@@ -853,3 +853,35 @@ def test_a_controller_without_kubernetes_workers_keeps_no_client(tmp_path, monke
         assert herdr.commands == []
     finally:
         service.stop()
+
+
+def test_the_kubernetes_runtime_prompts_through_the_controller_terminal(tmp_path, monkeypatch):
+    from scripts.swarm_v2.herdr.target import DELIVERIES
+    from scripts.swarm_v2.kubernetes.prompts import TerminalPrompts
+    from scripts.swarm_v2.runtime.base import Capability
+
+    service, _, _ = _anton_client(tmp_path, monkeypatch, _store())
+    try:
+        kubernetes = service.runtime.router.runtimes[BACKEND]
+        terminal = service.controller.terminals.terminal
+        assert Capability.COMMAND in kubernetes.capabilities
+        assert isinstance(kubernetes.prompts, TerminalPrompts)
+        router = kubernetes.prompts.router
+        assert router.store is terminal.registrations.store
+        assert router.catalog is terminal.registrations.catalog
+        assert (router.qualifier, router.run) == (terminal.qualifier, terminal.run)
+        assert router.deliveries.path == terminal.home.terminals / DELIVERIES
+    finally:
+        service.stop()
+
+
+def test_a_controller_keeping_no_saved_machines_leaves_kubernetes_command_unsupported(tmp_path, monkeypatch):
+    from scripts.swarm_v2.runtime.base import Capability
+
+    service, _, _ = _anton_client(tmp_path, monkeypatch, _store(), **{operator_terminal.CA_KEY_ENV: None})
+    try:
+        kubernetes = service.runtime.router.runtimes[BACKEND]
+        assert kubernetes.prompts is None
+        assert Capability.COMMAND not in kubernetes.capabilities
+    finally:
+        service.stop()

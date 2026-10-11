@@ -13,10 +13,11 @@ from scripts.swarm_v2.herdr.catalog import Catalog
 from scripts.swarm_v2.herdr.endpoints import EndpointRefused
 from scripts.swarm_v2.herdr.reconcile import Record, Store
 
-PANE = re.compile(r"w[0-9]+:p[0-9]+")
+PANE = re.compile(r"w[0-9A-Z]+:p[0-9A-Z]+")
 CALLER = ("HERDR_PANE_ID", "HERDR_WORKSPACE_ID", "HERDR_TAB_ID", "HERDR_SOCKET_PATH")
 READS = frozenset({"pane_read", "pane_wait_output", "pane_process_info", "agent_get"})
 MUTATIONS = frozenset({"pane_run", "pane_send_text", "pane_send_keys", "pane_close", "agent_prompt", "agent_rename"})
+LISTING = "agent_list"
 DELIVERIES = "deliveries.json"
 VERSION = 1
 KEPT = 1024
@@ -65,6 +66,18 @@ def pane_conversation(reply: str) -> tuple[str, str] | None:
     session = agent.get("agent_session")
     found = session.get("value") if isinstance(session, dict) and session.get("kind") == "id" else ""
     return str(agent.get("pane_id")), found or ""
+
+
+def _agent_panes(reply: str) -> list[str] | None:
+    try:
+        document = json.loads(reply)
+    except ValueError:
+        return None
+    result = document.get("result") if isinstance(document, dict) else None
+    agents = result.get("agents") if isinstance(result, dict) else None
+    if not isinstance(agents, list):
+        return None
+    return [agent["pane_id"] for agent in agents if isinstance(agent, dict) and agent.get("pane_id")]
 
 
 class Deliveries:
@@ -122,7 +135,7 @@ class Router:
 
     def _pane(self, profile_id: str, pane_id: str) -> None:
         if not isinstance(pane_id, str) or not PANE.fullmatch(pane_id):
-            self._refuse("pane_id", "a herdr pane id reads w<number>:p<number>", profile_id)
+            self._refuse("pane_id", "a herdr pane id reads w<id>:p<id>, each id digits and capital letters", profile_id)
 
     def _listed(self, record: Record) -> None:
         saved = next((machine for machine in self.catalog.machines() if machine.profile_id == record.profile_id), None)
@@ -164,6 +177,9 @@ class Router:
         if operation not in READS | MUTATIONS:
             self._refuse("operation", f"{operation} does not address one pane", target.profile_id)
         self._pane(target.profile_id, target.pane_id)
+        return [*self._server(target, operation), target.pane_id, *args]
+
+    def _server(self, target: Target, operation: str) -> list[str]:
         record = self._owned(target.profile_id)
         if record.session != target.session:
             self._refuse("session_mismatch", f"{record.label} is saved for another remote session", target.profile_id)
@@ -173,7 +189,23 @@ class Router:
             base = self.qualifier.require(target.profile_id, target.incarnation, operation)
         except Incompatible as exc:
             self._refuse("incompatible", str(exc), target.profile_id)
-        return [*base, target.pane_id, *args]
+        return base
+
+    def agent_panes(self, target: Target) -> list[str]:
+        """The panes the target's server lists as agents; the target's own pane id is not read."""
+        if not _qualified(target):
+            self._refuse("bare_pane", BARE)
+        argv = self._server(target, LISTING)
+        try:
+            done = self.run(argv)
+        except (OSError, subprocess.TimeoutExpired):
+            done = None
+        if done is None or done.returncode != 0:
+            raise EndpointRefused("unreachable", f"{target.incarnation} did not list its agents")
+        panes = _agent_panes(done.stdout)
+        if panes is None:
+            raise EndpointRefused("agent_list", f"{target.incarnation} answered an unreadable agent list")
+        return panes
 
     def _confirm(self, target: Target) -> None:
         if not target.conversation_id:
