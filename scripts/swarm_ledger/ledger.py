@@ -66,7 +66,8 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       refused while the same write names a plan_slice or slice;
                                       proof.KEY=VALUE and contract.KEY=VALUE pairs form one object, e.g.
                                       proof.command=C proof.output=O; contract pairs update only the keys they
-                                      name, e.g. contract.push=yes
+                                      name, e.g. contract.push=yes; --quote with rank=R relays the
+                                      operator's words so the rank stays his and the dispatcher keeps it
   plan-backfill                       compute missing plan lines for linked unfinished tasks; list missing slices
   prompt                              print the join paragraph for a launch prompt
   url                                 print the ledger page link for the operator (no --as needed)
@@ -667,7 +668,13 @@ def cmd_hierarchy(args) -> None:
     hierarchy_backfill.run(args)
 
 
+def refuse_unset_quote(args):
+    if vars(args).get("quote") and args.action != "set":
+        sys.exit(f"task {args.action} takes no --quote: run task set <id> rank=<rank> --quote <his words> after it")
+
+
 def cmd_task(args):
+    refuse_unset_quote(args)
     if args.action == "add":
         if args.id == "-":
             args.id = ledger_tasks.next_id(resource(args.slug, "tasks", collection=True))
@@ -734,7 +741,8 @@ def cmd_task(args):
             sys.exit(f"task set takes {name}=VALUE or {name}.KEY=VALUE pairs, not both")
         fields.setdefault(name, {})[sub] = fields.pop(dotted)
     refuse_plain_objects(fields)
-    send(args, "task_update", item=f"tasks/{args.id}", fields=fields)
+    quote = vars(args).get("quote")
+    send(args, "task_update", item=f"tasks/{args.id}", fields=fields, **({"quote": quote} if quote else {}))
     print(json.dumps({"task": args.id, **fields}))
 
 
@@ -888,6 +896,7 @@ def build_parser():
     task.add_argument(
         "--not-duplicate", default="", help="why the task differs from the one it resembles; skips the duplicate check"
     )
+    task.add_argument("--quote", help="task set rank=...: the operator's words, so the rank stays his")
     publish = sub.add_parser("publish-plan")
     publish.add_argument("path")
     publish.add_argument("--phase", required=True, help="comma separated ids of the phases the plan fills")
