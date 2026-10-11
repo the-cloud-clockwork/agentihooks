@@ -861,7 +861,9 @@ class Keeper:
 
 
 def keeping(store, grant, terminals):
-    return Controller(store, "fixture", [Transport()], lambda: grant["allowed"], terminals=terminals)
+    controller = Controller(store, "fixture", [Transport()], lambda: grant["allowed"])
+    controller.terminals = terminals
+    return controller
 
 
 def attachable(store, attempt) -> Attempt:

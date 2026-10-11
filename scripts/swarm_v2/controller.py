@@ -37,9 +37,9 @@ class Controller:
         admission_enabled: bool = True,
         pods: PodView | None = None,
         orphan_cleanup: bool = True,
-        terminals: Upkeep | None = None,
     ) -> None:
-        self.terminals, self.host_keys = terminals, HostKeys(store)
+        self.terminals: Upkeep | None = None
+        self.host_keys = HostKeys(store)
         self.store, self.slug, self.authorize = store, slug, authorize
         self.pods, self.reconciler = pods, Reconciler(owner_for(slug), orphan_cleanup)
         self.accounts = AccountReconciler(store, slug)
