@@ -44,6 +44,26 @@ def test_launch_binds_registered_authority_and_private_home(tmp_path):
     assert launch.herdr == ("herdr", "server")
 
 
+def test_a_launch_without_an_exporter_loads_with_none(tmp_path):
+    attempt, path, spec = launch_files(tmp_path)
+    del spec["exporter"]
+    path.write_text(json.dumps(spec))
+
+    assert Launch.load(attempt, path).exporter is None
+
+
+@pytest.mark.parametrize("value", [None, [], [""], ["ok", 1], "exporter", ["a\0b"]])
+def test_a_launch_with_a_malformed_exporter_is_refused(tmp_path, value):
+    attempt, path, spec = launch_files(tmp_path)
+    spec["exporter"] = value
+    path.write_text(json.dumps(spec))
+
+    with pytest.raises(LaunchRefused) as refused:
+        Launch.load(attempt, path)
+
+    assert str(refused.value) == "invalid command"
+
+
 @pytest.mark.parametrize("field,value", [("generation", 2), ("execution_id", "exe-" + "c" * 32), ("grant_id", "other")])
 def test_launch_refuses_authority_changes_before_creating_runtime(tmp_path, field, value):
     attempt, path, spec = launch_files(tmp_path)
@@ -229,7 +249,7 @@ def test_detaching_viewers_keeps_agent_exporter_and_grandchildren_alive(worker):
 @pytest.mark.parametrize("mode,reason,code", [("complete", "agent_completed", 0), ("fail", "agent_failure", 70)])
 def test_agent_completion_is_distinct_from_failure(worker, mode, reason, code):
     start, attempt, spec = worker
-    child = start(agent=[*spec["agent"][:-1], mode])
+    child = start(agent=[*spec["agent"][:-1], mode], checkpoint_seconds=5 if mode == "complete" else 0.4)
     root = runtime_directory(attempt, child)
     result = wait_for(root / "result.json", child)
     assert child.wait(timeout=8) == code

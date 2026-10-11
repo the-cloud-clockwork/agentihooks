@@ -684,9 +684,10 @@ def on_session_end(payload: dict) -> None:
 
     if BROADCAST_ENABLED:
         try:
+            from hooks.context.account_sessions import agent_pid
             from hooks.context.broadcast import heartbeat_sessions, mark_session_closed
 
-            mark_session_closed(session_id)
+            mark_session_closed(session_id, agent_pid())
             heartbeat_sessions()
         except Exception as e:
             log("broadcast session_end failed", {"error": str(e)})
@@ -1027,6 +1028,18 @@ def _confirm_inbox(session_id: str) -> None:
         confirm_shown(session_id)
     except Exception as e:
         log("inbox confirmation failed", {"error": str(e)})
+
+
+def _inject_after_tool(payload: dict) -> None:
+    from hooks.common import inject_context
+    from hooks.context.quota_policy import posttool_context
+
+    session_id, cwd = payload.get("session_id", ""), payload.get("cwd", "")
+    _inject_inbox(session_id, cwd)
+    _inject_refocus(session_id, "tool")
+    quota = posttool_context(session_id, payload.get("tool_name"), cwd)
+    if quota:
+        inject_context(quota, also_log=False, skip_compression=True)
 
 
 def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None = None) -> None:
@@ -1844,8 +1857,7 @@ def on_post_tool_use(payload: dict) -> None:
                 )
                 if enforcement_context:
                     inject_context(enforcement_context, also_log=False, skip_compression=True)
-            _inject_inbox(_trace_session_id, payload.get("cwd", ""))
-            _inject_refocus(_trace_session_id, "tool")
+            _inject_after_tool(payload)
     except Exception as e:
         log("enforcement posttool fallback failed", {"error": str(e)})
 

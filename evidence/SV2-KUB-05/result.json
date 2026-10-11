@@ -1,0 +1,89 @@
+{
+  "package": "SV2-KUB-05",
+  "package_complete": false,
+  "dependency": "SV2-KUB-04",
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2470",
+  "tested_commit": "d86134419c0f31473d5a4b5c09d417fed82230eb",
+  "status": "fixture-qualified",
+  "evidence_class": "Mocked: fakeredis execution registry, heartbeat archive watermarks, real AccountCapacity provider slots in fakeredis, fence and recovery records, a fake lease clock, an in process API server whose Pods carry fixture statuses, an in process grant registry and an in process checkpoint list. No Kubernetes API server, node or worker Pod was used.",
+  "interfaces": [
+    "scripts.swarm_v2.kubernetes.failures.classify(pod, ready) names one of oom_killed, evicted, node_lost, image_pull, application_exit, or empty, each from its own signal in that precedence: a terminated OOMKilled container, Pod reason Evicted, Pod reason NodeLost or a NodeNotReady condition or a node outside the Ready set, a waiting ErrImagePull, ImagePullBackOff or InvalidImageName container, then a Failed phase or a non zero exit; init containers count; ready None means no node listing succeeded",
+    "Recovery(store, slug, controller, checkpoints, releases, compatibility, automatic).reconcile(pods, ready_nodes) resumes any fence without a decision, observes each Kubernetes seat occupant, holds an image pull for PULL_GRACE_MS, fences on a failure, judges a vanished Pod node_lost only when its recorded node is outside a successful node listing, and counts observations of fenced attempts as late without changing them",
+    "Recovery.handle(execution_id, reason) writes a write once fence (reason, generation, seat, controller epoch, native session, archive watermark, unarchived tail explanation), releases the attempt grant then its provider account slot, then decides: resume from the latest complete compatible checkpoint with exactly one replacement admitted through Controller.admit with the fenced attempt as predecessor, or recovery_pending with the seat state awaiting-decision when there is no such checkpoint, the reason is image_pull, automatic replacement is off, or the operator paused it",
+    "Recovery.decide(execution_id, fresh|resume) settles a pending decision with one replacement; Recovery.pause(True|False) and paused() hold the operator pause in Redis under the swarm key",
+    "AccountSlot(store, slug, capacity).release(execution_id) ends the provider slot held by exactly that execution and generation through AccountCapacity.end",
+    "Recovery.execution_failures_by_reason() counts fence records by reason; late_observations(execution_id) counts ignored late observations",
+    "scripts.swarm_v2.deployed.recovery_pass(service, workers, api) builds the production Recovery with GrantRelease (LaunchAuthority.revoke), AccountSlot and NoCheckpoints, and returns the pass that reconciles the swarm owner's Pods from PodClient.list_pods against PodClient.ready_nodes",
+    "scripts.swarm_v2.kubernetes.client.PodClient.ready_nodes() lists the names of nodes whose Ready condition is True, or None when the listing is refused or fails",
+    "scripts.swarm_v2.control_service.ControlService.tick runs its recover pass after each held controller tick; control_service.host wires it whenever the Kubernetes worker settings are present"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "kubernetes": "core v1 Pod status fields: phase, reason, conditions, containerStatuses and initContainerStatuses state.waiting and state.terminated; exercised only against the in process API server",
+    "redis": "the SV2-RUN execution registry, SV2-ACC account slots and SV2-LDG heartbeat records; attempt-fences, attempt-recoveries, attempt-late-observations, attempt-nodes, image-pull-since and recovery-paused are new keys under the swarm",
+    "compatibility": "Public behaviour that changes: a Kubernetes attempt replaced by recovery has its execution record state set to fenced, a new value; scripts.swarm.tick.agent_status maps an unknown state by idle ticks exactly as before, and the replacement with the same name overwrites the agents projection at admission. A pending attempt reads awaiting-decision, the state the local Handoff v2 resume path already uses. Recovery.reconcile is a new interface with no earlier protocol. Local attempts are skipped, and Pod creation, the orphan reconcile and SV2-KUB-04 cleanup are unchanged; the cleanup and retention suites pass in the same proofs run."
+  },
+  "authority": "Every Redis write calls Controller.require, which the fixture binds to a scoped controller grant and the current controller lease. A stale controller and a revoked grant are refused before any write (case B). The generation, seat, account and native session come from the execution registry, never from a Pod label or a caller argument.",
+  "authoritative_objects": "The execution registry, fence records, recovery decisions and heartbeat archive watermarks are authoritative and never deleted. attempt-nodes and image-pull-since are working observations. Pods are runtime objects and are not deleted by this package.",
+  "states": {
+    "observed": "Cases A, B and C each ran twice with identical records in proofs run 38088189562.",
+    "accepted": "Deleting the worker node fenced the attempt once, released its grant and slot, recorded the archive watermark, native session and tail explanation, and admitted exactly one replacement resuming from the latest complete compatible checkpoint (A, two fixtures). An image pull held the slot only until PULL_GRACE_MS, then released it with no automatic replacement (B). Restarts between fence and release and between admission and decision produced one replacement, and reappearing old Pod observations left the retired generation fenced (C).",
+    "committed": "Code and fixture inputs are at tested_commit; manifest.json hashes them.",
+    "externally_verified": "None: no live API server, node deletion or G3 deployment was exercised."
+  },
+  "validation": {
+    "red": "proofs run 38074717774 on the tests and stub commit 53e769806: 34 failed",
+    "tests": "proofs run 38088189562 at d86134419: 92 passed across the failures, cleanup and retention modules, the three case records included",
+    "lint": "ruff check and ruff format passed through python -m scripts.ci_prepush",
+    "review": "Standards and Spec readers, three rounds each; open rulings are listed under remaining_limitations",
+    "mutation": "mutation preflight 38088189454 at d86134419: 590 mutants killed, none survived, after survivors from preflight 38087678660 were killed by tests or removed in code"
+  },
+  "measurements": {
+    "execution_failures_by_reason": {
+      "a": {
+        "oom_killed": 0,
+        "evicted": 0,
+        "node_lost": 1,
+        "image_pull": 0,
+        "application_exit": 0
+      },
+      "b": {
+        "oom_killed": 0,
+        "evicted": 0,
+        "node_lost": 0,
+        "image_pull": 1,
+        "application_exit": 0
+      },
+      "c": {
+        "oom_killed": 1,
+        "evicted": 1,
+        "node_lost": 0,
+        "image_pull": 0,
+        "application_exit": 0
+      }
+    }
+  },
+  "cases": {
+    "a": "evidence/SV2-KUB-05/a-result.json",
+    "b": "evidence/SV2-KUB-05/b-result.json",
+    "c": "evidence/SV2-KUB-05/c-result.json",
+    "manifest": "evidence/SV2-KUB-05/manifest.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Construct Recovery with automatic False, or call Recovery.pause(True): every failure is still fenced and its grant and slot released, but no replacement is admitted and the seat waits as awaiting-decision with a recovery_pending decision for the operator.",
+    "test": "tests/test_swarm_v2_kubernetes_failures.py::test_an_operator_pause_outlives_the_recovery_instance",
+    "proof": "Case C runs the evicted attempt with automatic replacement off: one fence, a recovery_pending decision, state awaiting-decision, one attempt for the seat, and a later old Pod observation leaves it retired."
+  },
+  "remaining_limitations": [
+    "ControlService.tick runs the recovery pass in production, but no checkpoint store is deployed, so every failure waits for an explicit fresh or resume decision, and no operator control calls Recovery.pause or Recovery.decide yet.",
+    "The swarm-controller ServiceAccount holds only namespaced grants, so PodClient.ready_nodes answers None on Anton until the operator decides on a cluster scoped node read; until then a Pod whose node is deleted is fenced only when its own status shows the loss, and a Pod that vanishes with its node stays unobserved.",
+    "A Pod deleted before any reconcile recorded its node stays unobserved; the controller loop must pass each DELETED watch event's last Pod object so its node is seen.",
+    "Decision.checkpoint is recorded but no launch path reads it yet; the replacement record carries no checkpoint field.",
+    "The task level recovery_pending state is not written to the ledger; the seat state and the decision record carry it.",
+    "Fenced old Pods are left in place; their deletion belongs to the orphan path or a final attempt cleanup.",
+    "The resume order test kills the unsorted mutant only when set iteration order differs from sorted order."
+  ],
+  "pull_request": "pending",
+  "follow_ups": []
+}

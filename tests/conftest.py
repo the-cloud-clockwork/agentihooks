@@ -430,6 +430,17 @@ def _task_grouping_offline(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _profile_pick_offline(monkeypatch):
+    from hooks.classifier import Answer, DecisionResult
+    from scripts.swarm import profile_choice
+
+    def engineer(*args, **kwargs):
+        return DecisionResult({"responsibility": Answer("choice", choice="engineer", confidence=1.0)}, "unit-test")
+
+    monkeypatch.setattr(profile_choice, "decide", engineer)
+
+
+@pytest.fixture(autouse=True)
 def _ledger_duplicates_offline(monkeypatch):
     from hooks.classifier import ClassifierUnavailable
     from scripts.swarm_ledger import ledger_duplicates, ledger_task_duplicates

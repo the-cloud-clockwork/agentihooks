@@ -7,12 +7,18 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow == 'Swarm worker image smoke' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('swarm-node-smoke-{0}', github.run_id) }}
+  queue: ${{ github.workflow == 'Swarm worker image smoke' && 'max' || 'single' }}
+
 jobs:
   worker-image:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - name: Prove clean worker builds and offline startup
         run: bash docker/swarm-node/smoke.sh "$HOME/scratchpad/worker-image-evidence"
       - uses: actions/upload-artifact@v4

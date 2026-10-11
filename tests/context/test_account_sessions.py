@@ -161,14 +161,14 @@ def test_session_account_reads_the_agent_process(tmp_path):
     assert acc.session_account(102, root) == "beta"
 
 
-def test_live_codex_sessions_count_interactive_codex_only(tmp_path):
+def test_live_codex_sessions_count_interactive_codex_and_exec_runs(tmp_path):
     root = tmp_path / "proc"
     _proc(root, 200, "codex", 1, ["/home/u/.local/bin/codex"], {})
     _proc(root, 201, "codex", 1, ["/home/u/.codex/packages/app-server-daemon/releases/1/bin/codex"], {})
     _proc(root, 202, "codex-code-mode", 200, ["codex-code-mode"], {})
     _proc(root, 203, "codex", 1, ["codex", "exec", "summarize"], {})
     _proc(root, 204, "codex", 1, ["codex", "--yolo"], {})
-    assert acc.live_codex_sessions(root) == 2
+    assert acc.live_codex_sessions(root) == 3
 
 
 def test_codex_sessions_count_per_codex_account(tmp_path):
@@ -179,7 +179,25 @@ def test_codex_sessions_count_per_codex_account(tmp_path):
     _proc(root, 303, "codex", 1, ["codex"], {"AH_CX_TOKEN_alpha": "cx-a", "AH_CX_TOKEN_beta": "cx-b"})
     _proc(root, 304, "codex", 1, ["codex", "exec", "x"], {"AH_CX_TOKEN_beta": "cx-b"})
     _proc(root, 305, "claude", 1, ["claude"], {"AH_CC_TOKEN_alpha": "cc"})
-    assert acc.codex_sessions_by_account(root) == {"alpha": 2, "default": 2}
+    assert acc.codex_sessions_by_account(root) == {"alpha": 2, "default": 2, "beta": 1}
     assert acc.session_account(300, root) == "alpha"
     assert acc.session_account(302, root) == "default"
     assert acc.session_account(305, root) == "alpha"
+
+
+def test_a_codex_child_of_a_codex_process_is_part_of_its_session_and_a_shell_run_is_not(tmp_path):
+    root = tmp_path / "proc"
+    _proc(root, 700, "codex", 1, ["codex", "--no-daemon"], {"AH_CX_TOKEN_alpha": "a"})
+    _proc(root, 701, "bash", 700, ["bash", "-lc", "codex exec ok"], {"AH_CX_TOKEN_alpha": "a"})
+    _proc(root, 702, "codex", 701, ["codex", "exec", "ok"], {"AH_CX_TOKEN_alpha": "a"})
+    _proc(root, 703, "codex", 700, ["codex", "exec", "ok"], {"AH_CX_TOKEN_alpha": "a"})
+    _proc(root, 710, "python3", 1, ["python3", "-m", "hooks"], {})
+    _proc(root, 711, "codex", 710, ["codex", "--no-daemon", "exec", "ok"], {"AH_CX_TOKEN_beta": "b"})
+    assert acc.codex_sessions_by_account(root) == {"alpha": 2, "beta": 1}
+    assert acc.live_codex_sessions(root) == 3
+
+
+def test_an_exec_run_whose_prompt_names_a_server_still_counts(tmp_path):
+    root = tmp_path / "proc"
+    _proc(root, 720, "codex", 1, ["codex", "exec", "mcp-server"], {"AH_CX_TOKEN_alpha": "a"})
+    assert acc.codex_sessions_by_account(root) == {"alpha": 1}

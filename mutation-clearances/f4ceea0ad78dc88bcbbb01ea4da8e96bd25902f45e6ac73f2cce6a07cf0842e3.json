@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/image_tag.py:scripts.swarm_v2.image_tag.x__head__mutmut_29:7aa9b2a45c4c0c4e3c29cce88031f34788f3d9a5024ff8d2b71d840a47a17ca6": {
+    "reader": "standards_reader",
+    "reason": "Changes only the case of the header name looked up on an email.message.Message, whose get is case blind, so the same value is returned."
+  }
+}

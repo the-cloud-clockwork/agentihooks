@@ -1,0 +1,50 @@
+name: Retried artifact download
+description: Download an artifact of this run, retried in place up to two more times. A download is idempotent; deploys never use this.
+inputs:
+  name:
+    description: Artifact name
+    required: true
+  path:
+    description: Destination directory; the workspace when empty
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Download, attempt 1
+      id: first
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ inputs.path || github.workspace }}
+    - name: Wait before attempt 2
+      if: steps.first.outcome == 'failure'
+      shell: bash
+      env:
+        ARTIFACT: ${{ inputs.name }}
+      run: |
+        echo "::warning title=Retried download::Attempt 1 to download $ARTIFACT failed; retrying in place."
+        sleep 10
+    - name: Download, attempt 2
+      id: second
+      if: steps.first.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ inputs.path || github.workspace }}
+    - name: Wait before attempt 3
+      if: steps.second.outcome == 'failure'
+      shell: bash
+      env:
+        ARTIFACT: ${{ inputs.name }}
+      run: |
+        echo "::warning title=Retried download::Attempt 2 to download $ARTIFACT failed; retrying in place."
+        sleep 20
+    - name: Download, attempt 3
+      if: steps.second.outcome == 'failure'
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ inputs.path || github.workspace }}

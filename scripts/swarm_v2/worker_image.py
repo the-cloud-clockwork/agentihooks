@@ -10,6 +10,8 @@ import tarfile
 import urllib.request
 from pathlib import Path
 
+TOOLS = ("herdr", "claude", "codex")
+
 
 def checksum(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -40,7 +42,7 @@ def load_lock(path: Path, architecture: str) -> dict:
         raise ValueError("base image requires a sha256 digest")
     if checksum(path.with_name("requirements.lock")) != lock["requirements_sha256"]:
         raise ValueError("Python requirements checksum mismatch")
-    for name in ("herdr", "claude", "codex"):
+    for name in TOOLS:
         validate_artifact(name, lock["tools"].get(name, {}))
     return lock
 
@@ -147,10 +149,18 @@ def main() -> None:
     parser.add_argument("--base-image")
     parser.add_argument("--source-revision", default="unknown")
     parser.add_argument("--cache", type=Path)
+    parser.add_argument("--tool", action="append", choices=TOOLS)
+    parser.add_argument("--package", action="append")
     args = parser.parse_args()
     lock = load_lock(args.lock, args.architecture)
     if args.base_image is not None and args.base_image != lock["base_image"]:
         raise ValueError("base image differs from lock")
+    if args.tool:
+        lock = {**lock, "tools": {name: lock["tools"][name] for name in args.tool}}
+    if args.package:
+        if unlocked := sorted(set(args.package) - set(lock["shell_packages"])):
+            parser.error(f"--package names packages the lock does not pin: {', '.join(unlocked)}")
+        lock = {**lock, "shell_packages": {name: lock["shell_packages"][name] for name in args.package}}
     if args.action == "download":
         for name, artifact in lock["tools"].items():
             fetch(name, artifact, args.cache)

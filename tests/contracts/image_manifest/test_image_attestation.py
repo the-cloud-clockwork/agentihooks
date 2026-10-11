@@ -20,6 +20,7 @@ RUNTIME_METHODS = [
     "pane.list",
     "pane.process_info",
     "pane.read",
+    "pane.send_input",
     "pane.send_keys",
     "pane.send_text",
     "pane.split",
@@ -36,7 +37,12 @@ STATUS = {
     "running": True,
     "version": "0.9.1",
     "protocol": 22,
-    "capabilities": {"detached_server_daemon": False, "endpoint_protocol_generation": 1, "health_check": True},
+    "capabilities": {
+        "detached_server_daemon": True,
+        "endpoint_protocol_generation": 1,
+        "health_check": True,
+        "surface_interest": True,
+    },
 }
 VALID = {
     "manifest": MANIFEST,
@@ -100,6 +106,11 @@ def test_incompatible_herdr_server_capabilities_fail_only_the_herdr_target():
         (lambda h: h["status"].update(running="yes"), "herdr headless server did not run"),
         (lambda h: h["schema"].update(protocol=23), "herdr protocol is not 22"),
         (lambda h: h["status"]["capabilities"].pop("health_check"), "herdr server lacks health_check=True"),
+        (lambda h: h["status"]["capabilities"].pop("surface_interest"), "herdr server lacks surface_interest=True"),
+        (
+            lambda h: h["status"]["capabilities"].update(detached_server_daemon=False),
+            "herdr server lacks detached_server_daemon=True",
+        ),
         (lambda h: h["status"]["capabilities"].update(health_check="yes"), "herdr server lacks health_check=True"),
         (lambda h: h["status"]["capabilities"].update(health_check=1), "herdr server lacks health_check=True"),
         (
@@ -204,7 +215,12 @@ def test_the_release_artifact_names_digest_manifest_report_and_commit_provenance
         "compatibility": {
             "baseline": "local herdr 0.9.1 runtime path",
             "herdr_protocol": 22,
-            "herdr_server_capabilities": {"endpoint_protocol_generation": 1, "health_check": True},
+            "herdr_server_capabilities": {
+                "endpoint_protocol_generation": 1,
+                "surface_interest": True,
+                "health_check": True,
+                "detached_server_daemon": True,
+            },
             "herdr_methods": RUNTIME_METHODS,
             "targets": TOOLS,
         },

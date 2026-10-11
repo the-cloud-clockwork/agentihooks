@@ -485,6 +485,7 @@ def test_worker_home_record_names_homes_under_the_layout_home():
         accounts={},
         endpoints={},
         interpreter=Path("/bin/python"),
+        bundle=None,
     )
     record = worker_home._record(request, "d", {}, 1.0, filesystem.parse(MOVED))
     assert record["homes"] == {"claude": "h/claude", "codex": "h/codex"}

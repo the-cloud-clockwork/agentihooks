@@ -10,12 +10,27 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
+from scripts.swarm_v2.kubernetes.watch import CursorExpired
+
 ACCOUNT = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 TIMEOUT_SECONDS = 10
+DELETABLE = ("pods", "services")
+NODES = "/api/v1/nodes"
+WATCH_SECONDS = 1
+GONE = 410
+OBJECTS = {
+    "Secret": ("api/v1", "secrets"),
+    "Service": ("api/v1", "services"),
+    "NetworkPolicy": ("apis/networking.k8s.io/v1", "networkpolicies"),
+}
 Opener = Callable[..., Any]
 
 
 class AlreadyExists(Exception):
+    pass
+
+
+class PreconditionFailed(Exception):
     pass
 
 
@@ -34,6 +49,20 @@ class PodApi(Protocol):
 
     def list_pods(self, selector: str) -> list[dict]: ...
 
+    def snapshot(self, selector: str) -> tuple[list[dict], str]: ...
+
+    def watch_pods(self, selector: str, version: str) -> list[tuple[str, dict]]: ...
+
+    def ready_nodes(self) -> list[str] | None: ...
+
+    def create_config_map(self, body: dict) -> dict: ...
+
+    def create_object(self, body: dict) -> dict: ...
+
+    def read(self, kind: str, name: str) -> dict | None: ...
+
+    def delete(self, kind: str, name: str, uid: str) -> bool: ...
+
 
 class KubeHttp:
     def __init__(
@@ -50,7 +79,9 @@ class KubeHttp:
         context = ssl.create_default_context(cafile=str(account / "ca.crt"))
         return cls(f"https://{host}:{environ['KUBERNETES_SERVICE_PORT']}", account / "token", context, opener)
 
-    def send(self, method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
+    def send(
+        self, method: str, path: str, body: dict | None = None, read: Callable[[bytes], Any] = json.loads
+    ) -> tuple[int, Any]:
         try:
             token = self.token_path.read_text().strip()
         except OSError:
@@ -76,7 +107,7 @@ class KubeHttp:
         except (OSError, http.client.HTTPException) as error:
             raise ConnectionError(f"the API server exchange failed: {type(error).__name__}") from None
         try:
-            return status, json.loads(raw)
+            return status, read(raw)
         except ValueError:
             raise ConnectionError("the API server answer is unreadable") from None
 
@@ -89,26 +120,99 @@ def _answer(status: int, body: dict) -> dict:
     raise ApiRefused(status, body.get("reason", ""))
 
 
+def _events(raw: bytes) -> list[dict]:
+    return [json.loads(line) for line in raw.splitlines() if line.strip()]
+
+
+def _ready(node: dict) -> bool:
+    conditions = node.get("status", {}).get("conditions", [])
+    return any(condition["type"] == "Ready" and condition["status"] == "True" for condition in conditions)
+
+
 class PodClient:
     """List calls carry no resourceVersion, so the API server answers from a quorum read."""
 
     def __init__(self, http: KubeHttp, namespace: str) -> None:
         self.http, self.namespace = http, namespace
 
-    def _path(self, name: str = "") -> str:
-        path = f"/api/v1/namespaces/{self.namespace}/pods"
+    def _path(self, name: str = "", kind: str = "pods") -> str:
+        path = f"/api/v1/namespaces/{self.namespace}/{kind}"
         return f"{path}/{name}" if name else path
 
     def create_pod(self, body: dict) -> dict:
-        status, answer = self.http.send("POST", self._path(), body)
+        return self._create("pods", body)
+
+    def _create(self, kind: str, body: dict) -> dict:
+        return self._post(self._path(kind=kind), body)
+
+    def _post(self, path: str, body: dict) -> dict:
+        status, answer = self.http.send("POST", path, body)
         if status == 409 and answer.get("reason") == "AlreadyExists":
             raise AlreadyExists(body["metadata"]["name"])
         return _answer(status, answer)
 
+    def create_object(self, body: dict) -> dict:
+        if body.get("kind") not in OBJECTS:
+            raise ValueError("the controller creates only Secret, Service and NetworkPolicy objects")
+        group, plural = OBJECTS[body["kind"]]
+        return self._post(f"/{group}/namespaces/{self.namespace}/{plural}", body)
+
     def read_pod(self, name: str) -> dict | None:
-        status, answer = self.http.send("GET", self._path(name))
-        return None if status == 404 else _answer(status, answer)
+        return self.read("pods", name)
 
     def list_pods(self, selector: str) -> list[dict]:
+        return self.snapshot(selector)[0]
+
+    def snapshot(self, selector: str) -> tuple[list[dict], str]:
+        """The resource version is empty when the answer names none, so the caller lists again instead of watching."""
         query = urllib.parse.urlencode({"labelSelector": selector})
-        return _answer(*self.http.send("GET", f"{self._path()}?{query}"))["items"]
+        answer = _answer(*self.http.send("GET", f"{self._path()}?{query}"))
+        return answer["items"], answer.get("metadata", {}).get("resourceVersion", "")
+
+    def watch_pods(self, selector: str, version: str) -> list[tuple[str, dict]]:
+        """Raises CursorExpired when the API server no longer holds events after `version`."""
+        query = urllib.parse.urlencode(
+            {"labelSelector": selector, "watch": "1", "resourceVersion": version, "timeoutSeconds": WATCH_SECONDS}
+        )
+        status, events = self.http.send("GET", f"{self._path()}?{query}", read=_events)
+        if status == GONE:
+            raise CursorExpired(version)
+        events = _answer(status, events)
+        if any(event["type"] == "ERROR" for event in events):
+            raise CursorExpired(version)
+        return [(event["type"], event["object"]) for event in events]
+
+    def ready_nodes(self) -> list[str] | None:
+        """None when the nodes cannot be listed, so an unlisted node is never taken as proof of loss."""
+        try:
+            status, answer = self.http.send("GET", NODES)
+        except ConnectionError:
+            return None
+        if status != 200:
+            return None
+        return [node["metadata"]["name"] for node in answer["items"] if _ready(node)]
+
+    def list_services(self, selector: str) -> list[dict]:
+        query = urllib.parse.urlencode({"labelSelector": selector})
+        return _answer(*self.http.send("GET", f"{self._path(kind='services')}?{query}"))["items"]
+
+    def read(self, kind: str, name: str) -> dict | None:
+        status, answer = self.http.send("GET", self._path(name, kind))
+        return None if status == 404 else _answer(status, answer)
+
+    def delete(self, kind: str, name: str, uid: str) -> bool:
+        """False when the name is gone; PreconditionFailed when the name now holds another object."""
+        if kind not in DELETABLE:
+            raise ValueError("cleanup deletes only pods and services")
+        options = {"apiVersion": "v1", "kind": "DeleteOptions", "preconditions": {"uid": uid}}
+        status, answer = self.http.send("DELETE", self._path(name, kind), options)
+        if status == 404:
+            return False
+        if status == 409:
+            raise PreconditionFailed(name)
+        if status not in (202, 204):
+            _answer(status, answer)
+        return True
+
+    def create_config_map(self, body: dict) -> dict:
+        return self._create("configmaps", body)

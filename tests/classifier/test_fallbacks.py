@@ -31,6 +31,7 @@ def test_cli_contract_and_result(monkeypatch, backend):
     def run(args, **kwargs):
         seen.append((args, kwargs))
         assert kwargs["env"]["AGENTIHOOKS_CLASSIFIER_CHILD"] == "1"
+        assert kwargs["env"][fallbacks.INTERNAL_RUN] == "1"
         assert "CLAUDECODE" not in kwargs["env"]
         assert Path(kwargs["cwd"]).parent == fallbacks.log_path().parent / "children"
         assert kwargs["capture_output"] is True

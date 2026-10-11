@@ -2,6 +2,7 @@
 /.semgrep/ @nestorcolt
 /scripts/ci_mutation/ @nestorcolt
 /scripts/ci_*.py @nestorcolt
+/scripts/ci_reuse_job.yml @nestorcolt
 /scripts/gates/ @nestorcolt
 /scripts/gate_* @nestorcolt
 /scripts/size_limits.py @nestorcolt
@@ -15,6 +16,7 @@
 /tests/coverage_*.py @nestorcolt
 /tests/test_coverage_*.py @nestorcolt
 /tests/dev_durations.py @nestorcolt
+/tests/flake_budget.py @nestorcolt
 /tests/leaks.py @nestorcolt
 /tests/refresh_durations.py @nestorcolt
 /tests/shard_budget.py @nestorcolt

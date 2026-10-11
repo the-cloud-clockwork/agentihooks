@@ -80,7 +80,8 @@ def test_a_reset_window_raises_the_cap_and_the_effective_caps_on_the_next_tick(m
     agents = [AgentRecord("engineer", "eng", "e", harness="claude")]
     (drained,) = capacity.accounts({}, 150)
     (freed,) = capacity.accounts({}, 300)
-    assert (drained.state, drained.cap, drained.week_resets_at) == ("CLOSED", 0, 250)
+    assert (drained.state, drained.cap, drained.week_resets_at, drained.five_resets_at) == ("CLOSED", 0, 250, 200)
+    assert (freed.five_resets_at, freed.week_resets_at) == (None, None)
     assert (freed.state, freed.cap, freed.five_left, freed.week_left) == ("OPEN", 6, 100, 100)
     before = capacity.calculate(config, [drained], agents)
     after = capacity.calculate(config, [freed], agents)
@@ -122,7 +123,7 @@ def test_a_fresh_codex_reading_with_only_the_week_gets_the_top_band(monkeypatch)
     weekly = CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=10, resets_at=500))
     monkeypatch.setattr(capacity.codex_router, "quotas", lambda accounts, env: {"a": weekly})
     monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: pytest.fail("reached the real codex probe"))
-    seen = capacity.accounts({}, 100)
+    seen = capacity.accounts({"AH_CX_TOKEN_a": "fake-a"}, 100)
     assert seen == [capacity.Account("codex", "a", "OPEN", 0, None, 90, 6, 500)]
 
 
@@ -149,8 +150,8 @@ def test_accounts_judge_every_window_at_the_given_time_and_pass_the_environment(
         capacity.codex_router, "quotas", lambda p, environ: calls.append(("quotas", [a.name for a in p], environ)) or {}
     )
     assert capacity.accounts(env, now) == [
-        capacity.Account("claude", "a", "OPEN", 0, 5.0, 100.0, 2),
-        capacity.Account("codex", "default", "OPEN", 0, 60.0, 100.0, 6),
+        capacity.Account("claude", "a", "OPEN", 0, 5.0, 100.0, 2, five_resets_at=now + 100),
+        capacity.Account("codex", "default", "OPEN", 0, 60.0, 100.0, 6, five_resets_at=now + 100),
         capacity.Account("codex", "x", "UNKNOWN", 1, None, None, None),
     ]
     assert calls == [("pool", env), ("fresh", env, now), ("quotas", ["x"], env)]
@@ -171,7 +172,7 @@ def test_a_stale_codex_reading_gets_no_seat(monkeypatch):
     stale = CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=10))
     monkeypatch.setattr(capacity.codex_router, "quotas", lambda accounts, env: {"a": stale})
     monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: None)
-    seen = capacity.accounts({}, stale_at)
+    seen = capacity.accounts({"AH_CX_TOKEN_a": "fake-a"}, stale_at)
     assert seen == [capacity.Account("codex", "a", "UNKNOWN", 0, None, 90, None)]
 
 
@@ -377,7 +378,7 @@ def test_codex_accounts_with_live_sessions_keep_their_own_quotas(monkeypatch):
 
     monkeypatch.setattr(capacity.codex_router, "quotas", quotas)
     monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: pytest.fail("reached the real codex probe"))
-    seen = capacity.accounts({}, 100)
+    seen = capacity.accounts({"AH_CX_TOKEN_a": "fake-a"}, 100)
     assert [(row.name, row.sessions, row.week_left, row.cap) for row in seen] == [("a", 1, 80, 6), ("b", 2, 80, None)]
     assert [(seat.account, seat.free) for seat in capacity.offered(seen)] == [("a", 5), ("b", 0)]
 
@@ -475,6 +476,7 @@ def test_finished_agents_do_not_reserve_capacity_and_reason_lists_all_restrictio
             "week_left": 90,
             "cap": cap,
             "week_resets_at": None,
+            "five_resets_at": None,
         }
         for name, state, cap in (("z", "CLOSED", 0), ("a", "OPEN", 3), ("b", "OPEN", 3))
     ]
@@ -560,9 +562,10 @@ def test_unplaceable_first_task_does_not_block_other_ready_work(monkeypatch, tmp
 
     store.redis.set(store.key("sw", "quota-capacity"), dumps(decision))
     rows = ledger.rows
-    assert [(lane, task["id"]) for lane, task in _spawn_order("sw", config, store, [], rows, ledger.state("sw"))] == [
-        ("eng", "auto")
-    ]
+    assert [
+        (lane, task["id"])
+        for lane, task in _spawn_order("sw", config, store, [], rows, ledger.state("sw"), FakeRuntime())
+    ] == [("eng", "auto")]
 
 
 def test_runtime_preserves_flexible_first_then_fixed_task_reservations(monkeypatch, tmp_path):
@@ -990,7 +993,7 @@ def test_legacy_effective_caps_still_limit_spawns_when_task_mapping_is_absent():
     store.create(config)
     ledger = FakeLedger([{"id": "e"}])
     store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"effective": {"eng": 0, "ci": 0, "plan": 0}}))
-    assert _spawn_order("sw", config, store, [], ledger.rows, ledger.state("sw")) == []
+    assert _spawn_order("sw", config, store, [], ledger.rows, ledger.state("sw"), FakeRuntime()) == []
 
 
 def test_lane_harness_pin_wins_over_a_saved_different_harness(tmp_path, monkeypatch):

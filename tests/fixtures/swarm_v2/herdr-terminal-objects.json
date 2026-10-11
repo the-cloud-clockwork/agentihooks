@@ -1,0 +1,131 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Secret",
+      "metadata": {
+        "name": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+        "namespace": "swarm-workers",
+        "labels": {
+          "swarm.agentihooks.io/controller-owner": "agentihooks-swarm-fixture-swarm",
+          "swarm.agentihooks.io/execution-id": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "swarm.agentihooks.io/generation": "2",
+          "swarm.agentihooks.io/component": "swarm-terminal"
+        },
+        "ownerReferences": [
+          {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "name": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "uid": "11111111-2222-3333-4444-555555555555"
+          }
+        ]
+      },
+      "type": "Opaque",
+      "immutable": true,
+      "data": {
+        "host_key": "Zml4dHVyZSBob3N0IGtleQo=",
+        "user_ca.pub": "c3NoLWVkMjU1MTkgQUFBQUMzTnphQzFsWkRJMU5URTVBQUFBSUZpeHR1cmVVc2VyQ2EK",
+        "principals": "ZXhlLWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhCg=="
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+        "name": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+        "namespace": "swarm-workers",
+        "labels": {
+          "swarm.agentihooks.io/controller-owner": "agentihooks-swarm-fixture-swarm",
+          "swarm.agentihooks.io/execution-id": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "swarm.agentihooks.io/generation": "2",
+          "swarm.agentihooks.io/component": "swarm-terminal"
+        },
+        "ownerReferences": [
+          {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "name": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "uid": "11111111-2222-3333-4444-555555555555"
+          }
+        ]
+      },
+      "spec": {
+        "type": "ClusterIP",
+        "selector": {
+          "swarm.agentihooks.io/controller-owner": "agentihooks-swarm-fixture-swarm",
+          "swarm.agentihooks.io/execution-id": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "swarm.agentihooks.io/generation": "2"
+        },
+        "ports": [
+          {
+            "name": "herdr-ssh",
+            "protocol": "TCP",
+            "port": 2222,
+            "targetPort": 2222
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "networking.k8s.io/v1",
+      "kind": "NetworkPolicy",
+      "metadata": {
+        "name": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+        "namespace": "swarm-workers",
+        "labels": {
+          "swarm.agentihooks.io/controller-owner": "agentihooks-swarm-fixture-swarm",
+          "swarm.agentihooks.io/execution-id": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "swarm.agentihooks.io/generation": "2",
+          "swarm.agentihooks.io/component": "swarm-terminal"
+        },
+        "ownerReferences": [
+          {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "name": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "uid": "11111111-2222-3333-4444-555555555555"
+          }
+        ]
+      },
+      "spec": {
+        "podSelector": {
+          "matchLabels": {
+            "swarm.agentihooks.io/controller-owner": "agentihooks-swarm-fixture-swarm",
+            "swarm.agentihooks.io/execution-id": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "swarm.agentihooks.io/generation": "2"
+          }
+        },
+        "policyTypes": [
+          "Ingress"
+        ],
+        "ingress": [
+          {
+            "from": [
+              {
+                "namespaceSelector": {
+                  "matchLabels": {
+                    "kubernetes.io/metadata.name": "swarm-control"
+                  }
+                },
+                "podSelector": {
+                  "matchLabels": {
+                    "app.kubernetes.io/name": "agentihooks-controller"
+                  }
+                }
+              }
+            ],
+            "ports": [
+              {
+                "protocol": "TCP",
+                "port": 2222
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "case": "T-SV2-HDR-01-C",
+  "evidence_class": "mocked: status and schema replies captured from the pinned herdr 0.9.1 binary over saved machine forwarding, replayed through a recording command runner; no herdr process or SSH connection runs in these cases",
+  "input_sha256": {
+    "herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940"
+  },
+  "observed": {
+    "accepted": [
+      "herdr",
+      "--machine",
+      "worker-fixture",
+      "pane",
+      "read"
+    ],
+    "herdr_capability_mismatch_total": 1,
+    "mismatches_by_target_and_reason": [
+      [
+        "worker-fixture",
+        "herdr server lacks surface_interest=true",
+        1
+      ]
+    ],
+    "probes": 3,
+    "restarted_compatible": [
+      "herdr",
+      "--machine",
+      "worker-fixture",
+      "pane",
+      "read"
+    ],
+    "restarted_without_capability": "herdr server lacks surface_interest=true",
+    "same_incarnation_cached": [
+      "herdr",
+      "--machine",
+      "worker-fixture",
+      "pane",
+      "read"
+    ],
+    "stale_incarnation": "herdr server incarnation incarnation-1 on worker-fixture was replaced"
+  },
+  "state": "passed"
+}

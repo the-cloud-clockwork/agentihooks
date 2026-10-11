@@ -1,0 +1,13 @@
+{"detail": "live on a workstation, not Anton: the pinned herdr client saves machines through herdr machine commands; two worker sshds from docker/swarm-node/ssh with supervised herdr servers run unprivileged on 127.0.0.1 and 127.0.0.2; cluster DNS names are answered by an injected resolver", "held": true, "step": "environment"}
+{"detail": "", "held": true, "step": "workers_started"}
+{"detail": {"labels": ["swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal", "swarm-exe-cccccccccccccccccccccccccccccccc-terminal"]}, "held": true, "step": "b_manual_machine_saved_by_hand"}
+{"detail": {"drift": {"collision": 1, "missing": 1}, "manual_kept": true, "refused": {"exe-cccccccccccccccccccccccccccccccc": "label_collision"}}, "held": true, "step": "b_label_collision_not_adopted"}
+{"detail": {"drift": {"missing": 1}, "registered": ["exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "exe-cccccccccccccccccccccccccccccccc"], "sidebar": ["Local", "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal", "swarm-exe-cccccccccccccccccccccccccccccccc-terminal"]}, "held": true, "step": "a_two_workers_beside_local"}
+{"detail": [0, 0], "held": true, "step": "a_each_registration_reaches_its_server"}
+{"detail": {"drift": {"missing": 1}, "labels": ["swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal", "swarm-exe-cccccccccccccccccccccccccccccccc-terminal"]}, "held": true, "step": "c_restart_restores_missing_without_duplicates"}
+{"detail": {"exit": 0, "labels": ["by-hand", "swarm-exe-cccccccccccccccccccccccccccccccc-terminal"], "output": "Renamed SSH machine 946d7c85801b2532342f20d5959db2da.\n"}, "held": true, "step": "c_hand_rename_applied"}
+{"detail": {"drift": {"label": 1}, "labels": ["swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal", "swarm-exe-cccccccccccccccccccccccccccccccc-terminal"]}, "held": true, "step": "c_label_drift_renamed_back"}
+{"detail": {}, "held": true, "step": "c_replay_has_no_drift"}
+{"detail": {"labels": ["swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal"], "retired": ["exe-cccccccccccccccccccccccccccccccc"], "worker_c_server_running": true}, "held": true, "step": "c_retired_registration_removed_and_its_server_keeps_running"}
+{"detail": {"drift": {"missing": 1}, "labels": ["swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal", "swarm-exe-cccccccccccccccccccccccccccccccc-terminal"], "registered": ["exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "exe-cccccccccccccccccccccccccccccccc"]}, "held": true, "step": "a_sync_registers_every_live_attempt"}
+{"detail": {"labels": ["swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal", "swarm-exe-cccccccccccccccccccccccccccccccc-terminal"]}, "held": true, "step": "rollback_stopped_registration_leaves_profiles"}

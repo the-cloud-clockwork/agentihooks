@@ -58,9 +58,9 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
         }
     )
     assert gate["if"] == "${{ always() }}"
-    assert jobs["unit"]["needs"] in (["split"], ["split", "reuse"])
-    assert jobs["split"]["needs"] in (["durations"], ["durations", "reuse"])
-    assert jobs["lint"].get("needs") in (None, ["reuse"])
+    assert jobs["unit"]["needs"] == ["split", "reuse"]
+    assert jobs["split"]["needs"] == ["durations", "reuse"]
+    assert jobs["lint"]["needs"] == ["reuse"]
     if "swarm-image" in gate["needs"]:
         assert jobs["swarm-image"]["uses"] == "./.github/workflows/swarm-smoke.yml"
 
@@ -98,7 +98,7 @@ def test_post_shard_graders_do_not_wait_on_each_other_and_the_gate_needs_each():
 
 def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel():
     job = _workflow()["jobs"]["semgrep"]
-    assert "needs" not in job
+    assert job["needs"] == ["reuse"]
     assert job["uses"] == "./.github/workflows/semgrep.yml"
     assert job["with"]["base"] == (
         "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
@@ -118,7 +118,12 @@ def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel(
         "yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag"
     ]
     assert all("if" not in step and "continue-on-error" not in step for step in scan["steps"])
-    assert not {"if", "continue-on-error"} & (set(scan) | set(job))
+    assert not {"if", "continue-on-error"} & set(scan)
+    assert "continue-on-error" not in job
+    assert (
+        job["if"]
+        == "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}"
+    )
 
 
 def test_no_workflow_run_script_embeds_an_expression_semgrep_cannot_parse():
@@ -141,7 +146,7 @@ def test_unit_matrix_does_not_fail_fast():
 
 def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
     job = _workflow()["jobs"]["test-count"]
-    assert job.get("needs") in (None, ["reuse"])
+    assert job["needs"] == ["reuse"]
     assert (
         job["strategy"]["matrix"]["python-version"]
         == _workflow()["jobs"]["unit"]["strategy"]["matrix"]["python-version"]
@@ -165,7 +170,7 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
 def test_coverage_ratchet_grades_the_merged_shards_from_the_base_copy():
     jobs = _workflow()["jobs"]
     job = jobs["coverage-ratchet"]
-    assert job["needs"] in (["durations", "unit", "queue-baseline"], ["durations", "unit", "queue-baseline", "reuse"])
+    assert job["needs"] == ["durations", "unit", "queue-baseline", "reuse"]
     download = next(step for step in job["steps"] if step.get("name") == "Download shard coverage")
     assert download["with"]["pattern"] == "coverage-3.12-*"
     grade = next(step for step in job["steps"] if step.get("name") == "Hold every line the base ran")
@@ -505,9 +510,9 @@ def test_unit_and_lint_run_on_every_event_and_feed_the_required_gate():
     jobs = _workflow()["jobs"]
     for name in ("unit", "lint"):
         job = jobs[name]
-        assert job.get("if") in (
-            None,
-            "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+        assert (
+            job["if"]
+            == "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}"
         )
         assert all("steps.lookup" not in step.get("if", "") for step in job["steps"])
     step = jobs["gate-required"]["steps"][0]

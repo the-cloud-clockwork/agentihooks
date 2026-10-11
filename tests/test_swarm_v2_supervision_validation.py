@@ -49,13 +49,13 @@ def test_authority_validation_refuses_invalid_scope(changes):
         "swarm_id": "swarm",
     }
     with pytest.raises(config.LaunchRefused, match="^invalid authority$"):
-        config._authority({**authority, **changes})
+        config.checked_authority({**authority, **changes})
 
 
 @pytest.mark.parametrize("value,message", [(None, "invalid authority"), ({}, "missing authority")])
 def test_authority_requires_complete_object(value, message):
     with pytest.raises(config.LaunchRefused, match=f"^{message}$"):
-        config._authority(value)
+        config.checked_authority(value)
 
 
 @pytest.mark.parametrize("state", ["trusted", "untrusted"])
@@ -160,7 +160,7 @@ def test_authority_accepts_case_preserving_scope_names():
         "seat_id": "Seat",
         "swarm_id": "Swarm",
     }
-    assert config._authority(authority) == authority
+    assert config.checked_authority(authority) == authority
 
 
 def test_cleanup_stops_observing_at_the_deadline(monkeypatch):

@@ -17,6 +17,32 @@ API_MARKER = "AH_ROUTE_API"
 API_ACCOUNT = "api"
 _SHELLS = frozenset({"sh", "bash", "dash", "zsh", "fish", "ksh"})
 _PROC = Path("/proc")
+VALUE_FLAGS = frozenset(
+    {
+        "-c",
+        "--config",
+        "--enable",
+        "--disable",
+        "--remote",
+        "--remote-auth-token-env",
+        "-i",
+        "--image",
+        "-m",
+        "--model",
+        "--local-provider",
+        "-p",
+        "--profile",
+        "-s",
+        "--sandbox",
+        "-C",
+        "--cd",
+        "--add-dir",
+        "-a",
+        "--ask-for-approval",
+    }
+)
+SERVERS = frozenset({"app-server", "mcp-server"})
+INTERNAL_RUN = "AGENTIHOOKS_INTERNAL_RUN"
 
 
 def account_from_names(names: Iterable[str], prefix: str = TOKEN_PREFIX) -> str:
@@ -129,33 +155,42 @@ def _is_codex(pid: int, proc: Path) -> bool:
     return bool(argv) and (_comm(pid, proc) == "codex" or Path(argv[0]).name == "codex")
 
 
-def _is_interactive_codex(pid: int, proc: Path) -> bool:
+def _codex_positionals(argv: list[str]) -> list[str]:
+    rest = argv[1:]
+    while rest and rest[0].startswith("-"):
+        rest = rest[2:] if rest[0] in VALUE_FLAGS else rest[1:]
+    return rest
+
+
+def _is_codex_session(pid: int, proc: Path) -> bool:
     if not _is_codex(pid, proc):
         return False
     argv = _cmdline(pid, proc)
-    if "app-server" in argv[0] or (len(argv) > 1 and argv[1] in ("exec", "app-server", "mcp-server")):
+    if "app-server" in argv[0] or SERVERS.intersection(_codex_positionals(argv)[:1]):
+        return False
+    if INTERNAL_RUN in _env_names(pid, proc):
         return False
     return _comm(_ppid(pid, proc), proc) != "codex"
 
 
 def live_codex_sessions(proc: Path = _PROC) -> int:
-    """Interactive Codex sessions on this host; one CODEX_HOME is one account."""
+    """Interactive Codex sessions and exec runs on this host; one CODEX_HOME is one account."""
     try:
         entries = [int(entry.name) for entry in proc.iterdir() if entry.name.isdigit()]
     except OSError:
         return 0
-    return sum(1 for pid in entries if _is_interactive_codex(pid, proc))
+    return sum(1 for pid in entries if _is_codex_session(pid, proc))
 
 
 def codex_sessions_by_account(proc: Path = _PROC) -> dict[str, int]:
-    """Interactive Codex sessions per Codex account: a token slug, or the default login."""
+    """Interactive Codex sessions and exec runs per Codex account: a token slug, or the default login."""
     try:
         entries = [int(entry.name) for entry in proc.iterdir() if entry.name.isdigit()]
     except OSError:
         return {}
     counts: dict[str, int] = {}
     for pid in entries:
-        if _is_interactive_codex(pid, proc):
+        if _is_codex_session(pid, proc):
             account = codex_account_from_names(_env_names(pid, proc))
             counts[account] = counts.get(account, 0) + 1
     return counts

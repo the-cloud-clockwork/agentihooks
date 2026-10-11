@@ -1,28 +1,40 @@
 """The capacity and registry given here must authorize with LaunchAuthority.verify, never register."""
 
+import json
 import subprocess
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
 
+from hooks.context.profile_chain import PACKAGE_ROLES
+from scripts.swarm import live_binding, profile_choice
 from scripts.swarm.store import AgentRecord, SwarmError
-from scripts.swarm_v2 import broadcast_bridge
-from scripts.swarm_v2.accounts import AccountCapacity, Slot
+from scripts.swarm_v2 import broadcast_bridge, worker_home
+from scripts.swarm_v2.accounts import ACCOUNT_FULL, AccountCapacity, Slot
 from scripts.swarm_v2.auth_context import LaunchAuthority
 from scripts.swarm_v2.controller import Controller
+from scripts.swarm_v2.hand import HANDED, Hand
 from scripts.swarm_v2.registry import FleetRegistry, Session
 from scripts.swarm_v2.runtime.base import Outcome, RuntimeRouter, SpawnRequest, Status
 
 NOT_LAUNCHED = (Status.REFUSED, Status.UNAVAILABLE, Status.UNSUPPORTED)
 GRANT_SECONDS = 30
 NO_API_URL = "the swarm config has no API address"
+NOT_HANDED = "launch grant not handed: "
+HANDS = "launch-grant-hands"
+ENDINGS = "launch-endings"
+ENDED = "ended"
+WORKER_DEFAULT = "default"
+NO_ACCOUNT = "no approved account has quota and a free launch slot"
 Target = Callable[[SpawnRequest], dict]
+AccountChooser = Callable[[int, str | None, tuple[str, str] | None], str | None]
+PlannedAccount = Callable[[str], str | None]
 
 
 class WorkerHomes(Protocol):
-    def hand(self, agent: AgentRecord, grant: str) -> bool: ...
+    def hand(self, agent: AgentRecord, grant: str) -> Hand: ...
 
 
 @dataclass(frozen=True)
@@ -31,14 +43,14 @@ class WorkerHomeCommand:
 
     root: Path
 
-    def hand(self, agent: AgentRecord, grant: str) -> bool:
+    def hand(self, agent: AgentRecord, grant: str) -> Hand:
         attempt = self.root / agent.execution_id
         command = [sys.executable, "-m", "scripts.swarm_v2.worker_home", "grant", str(attempt)]
         try:
             done = subprocess.run(command, input=grant, capture_output=True, text=True, timeout=GRANT_SECONDS)
         except (OSError, subprocess.TimeoutExpired):
-            return False
-        return done.returncode == 0
+            return Hand(False, "grant_command_unavailable")
+        return HANDED if done.returncode == 0 else Hand(False, "grant_command_failed")
 
 
 @dataclass(frozen=True)
@@ -49,6 +61,7 @@ class LaunchTerms:
     project_ids: tuple[str, ...]
     brain_id: str
     api_url: str
+    bundled: bool = False
 
 
 @dataclass(frozen=True)
@@ -57,7 +70,35 @@ class Launch:
     grant: str = field(repr=False)
     slot: Slot | None
     outcome: Outcome
-    handed: bool = False
+    hand: Hand | None = None
+
+
+def seat_profile(request: SpawnRequest) -> str:
+    task, lane = request.task, request.config.lanes.get(request.lane, {})
+    relaunch = live_binding.complete(task.get("launch_assignment"))
+    saved = relaunch or profile_choice.transfer(task)
+    decision = profile_choice.kept(task, saved, relaunch) or profile_choice.pick(
+        request.config.slug, request.lane, lane, task
+    )
+    return decision.profile
+
+
+def worker_profiles() -> set[str]:
+    roles = {path.name for path in PACKAGE_ROLES.iterdir() if path.is_dir() and not path.name.startswith("_")}
+    return {WORKER_DEFAULT, *roles}
+
+
+def shipped(profile: str, bundled: bool) -> bool:
+    return profile in worker_profiles() or (bundled and worker_home.NAME.fullmatch(profile) is not None)
+
+
+def quota_predecessor(task: dict) -> tuple[str, str] | None:
+    """The account a quota handoff leaves, read as ``HerdrRuntime.quota_requirements`` reads it."""
+    envelope = task.get("handoff_envelope") or {}
+    saved = task.get("launch_assignment") or envelope.get("launch") or {}
+    if envelope.get("reason") != "quota" or not saved.get("harness") or not saved.get("account"):
+        return None
+    return saved["harness"], saved["account"]
 
 
 class DistributedLaunch:
@@ -73,6 +114,8 @@ class DistributedLaunch:
         self.controller, self.grants, self.capacity = controller, grants, capacity
         self.fleet, self.router, self.homes = fleet, router, homes
         self.slug = capacity.slug
+        self.accounts: AccountChooser | None = None
+        self.planned: PlannedAccount | None = None
 
     def spawn(self, request: SpawnRequest, agent: AgentRecord, terms: LaunchTerms, previous: str) -> Launch:
         admitted = self.controller.admit(replace(agent, account=terms.account), previous)
@@ -87,23 +130,47 @@ class DistributedLaunch:
         try:
             slot = self.capacity.reserve(grant, terms.cap, terms.ttl_ms)
         except SwarmError as error:
-            return Launch(admitted, grant, None, Outcome("spawn", Status.REFUSED, backend, detail=str(error)))
+            ended = self.end_refused(admitted, str(error))
+            self.grants.withdraw(self.slug, grant)
+            status = Status.UNAVAILABLE if str(error) == ACCOUNT_FULL else Status.REFUSED
+            return Launch(ended, grant, None, Outcome("spawn", status, backend, detail=str(error)))
         identity = {
             "launch_grant": grant,
             "execution_id": admitted.execution_id,
             "generation": admitted.generation,
+            "account": terms.account,
             "endpoints": {broadcast_bridge.API_URL: terms.api_url},
         }
         outcome = self.router.spawn(replace(request, task={**request.task, **identity}))
         if outcome.status in NOT_LAUNCHED:
             self.exited(admitted)
             return Launch(admitted, grant, slot, outcome)
-        return Launch(admitted, grant, slot, outcome, self.homes.hand(admitted, grant))
+        hand = self.homes.hand(admitted, grant)
+        store = self.controller.store
+        store.redis.hset(store.key(self.slug, HANDS), admitted.execution_id, json.dumps(asdict(hand)))
+        if hand.handed or outcome.status is Status.AMBIGUOUS:
+            return Launch(admitted, grant, slot, outcome, hand)
+        self.exited(admitted)
+        self.grants.withdraw(self.slug, grant)
+        return Launch(
+            admitted, grant, slot, Outcome("spawn", Status.REFUSED, backend, detail=NOT_HANDED + hand.reason), hand
+        )
 
     def from_tick(self, request: SpawnRequest, terms: LaunchTerms, target: Target) -> Outcome:
         api_url, backend = request.config.api_url, self.router.spawn_backend(request)
         if not api_url:
             return Outcome("spawn", Status.REFUSED, backend, detail=NO_API_URL)
+        profile = seat_profile(request)
+        if not shipped(profile, terms.bundled):
+            return Outcome(
+                "spawn", Status.REFUSED, backend, detail=f"profile {profile} is not shipped in the worker image"
+            )
+        if self.accounts is not None:
+            planned = None if self.planned is None else self.planned(request.task["id"])
+            account = self.accounts(terms.cap, planned, quota_predecessor(request.task))
+            if account is None:
+                return Outcome("spawn", Status.UNAVAILABLE, backend, detail=NO_ACCOUNT)
+            terms = replace(terms, account=account)
         agent = AgentRecord(
             request.name,
             request.lane,
@@ -111,8 +178,21 @@ class DistributedLaunch:
             seat=request.task["seat"],
             runtime_backend=backend,
             runtime_target=target(request),
+            profile=profile,
         )
-        return self.spawn(request, agent, replace(terms, api_url=api_url), "").outcome
+        store = self.controller.store
+        occupant = store.execution_occupants(self.slug).get(agent.seat)
+        refused = occupant and store.redis.hexists(store.key(self.slug, ENDINGS), occupant.execution_id)
+        previous = occupant.execution_id if refused else ""
+        return self.spawn(request, agent, replace(terms, api_url=api_url), previous).outcome
+
+    def end_refused(self, agent: AgentRecord, reason: str) -> AgentRecord:
+        store, ended = self.controller.store, replace(agent, state=ENDED)
+        self.controller.require()
+        ending = {"reason": reason, "generation": agent.generation}
+        store.redis.hset(store.key(self.slug, ENDINGS), agent.execution_id, json.dumps(ending))
+        store.put_agent(self.slug, ended)
+        return ended
 
     def registered(self, session: Session, grant: str) -> Slot:
         body = {"execution_id": session.execution_id, "generation": session.generation}

@@ -5506,20 +5506,17 @@ def cmd_ignore(target_dir: Path, *, force: bool = False) -> None:
     print("       Edit it to add project-specific exclusions.")
 
 
-def _load_claude_runtime_env() -> None:
+def _load_claude_runtime_env(*, shell_wins: bool = False) -> None:
     env_file = _ENV_FILE_DST
     if env_file.is_file():
         from dotenv import dotenv_values
 
-        for k, v in dotenv_values(env_file).items():
-            if v is not None:
-                os.environ[k] = v
-        # Also load companion .env files
-        for f in sorted(env_file.parent.glob("*.env")):
-            if f != env_file:
-                for k, v in dotenv_values(f).items():
-                    if v is not None:
-                        os.environ[k] = v
+        shell = set(os.environ) if shell_wins else set()
+        companions = [f for f in sorted(env_file.parent.glob("*.env")) if f != env_file]
+        for f in [env_file, *companions]:
+            for k, v in dotenv_values(f).items():
+                if v is not None and k not in shell:
+                    os.environ[k] = v
 
 
 def _extract_claude_route(extra_args: list[str]) -> tuple[str, list[str]]:
@@ -6412,7 +6409,7 @@ def main() -> None:
     if _argv and _argv[0] == "codex":
         from scripts.codex_router import main as codex_main
 
-        _load_claude_runtime_env()
+        _load_claude_runtime_env(shell_wins=True)
         raise SystemExit(codex_main(_argv[1:]))
     if _argv and _argv[0] == "init-agent":
         from scripts.init_agent import main as terminal_main

@@ -95,6 +95,10 @@ def launch_grant_rejections_total(store: RedisStore, slug: str) -> int:
     return sum(launch_grant_rejections(store, slug).values())
 
 
+def _revoked(audit: dict) -> dict | None:
+    return None if audit["state"] == "revoked" else {**audit, "state": "revoked"}
+
+
 class LaunchAuthority:
     def __init__(
         self,
@@ -318,11 +322,11 @@ class LaunchAuthority:
         registration = self.registration(slug, execution_id)
         if registration is None:
             return False
+        return self._rewrite(slug, registration.grant_id, _revoked, "the registration was not revoked") is not None
 
-        def revoked(audit: dict) -> dict | None:
-            return None if audit["state"] == "revoked" else {**audit, "state": "revoked"}
-
-        return self._rewrite(slug, registration.grant_id, revoked, "the registration was not revoked") is not None
+    def withdraw(self, slug: str, token: str) -> bool:
+        claims = self._verify(slug, token)
+        return self._rewrite(slug, claims["grant_id"], _revoked, "the grant was not withdrawn") is not None
 
     def _audit(self, reader: Redis | Pipeline, slug: str, grant_id: str) -> dict:
         return json.loads(reader.hget(self.store.key(slug, "launch-grants"), grant_id))

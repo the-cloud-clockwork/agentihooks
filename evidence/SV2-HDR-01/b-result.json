@@ -1,0 +1,151 @@
+{
+  "case": "T-SV2-HDR-01-B",
+  "evidence_class": "mocked: status and schema replies captured from the pinned herdr 0.9.1 binary over saved machine forwarding, replayed through a recording command runner; no herdr process or SSH connection runs in these cases",
+  "input_sha256": {
+    "herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940"
+  },
+  "observed": {
+    "missing_surface_interest": {
+      "commands_run": [
+        [
+          "herdr",
+          "--machine",
+          "worker-fixture",
+          "status",
+          "server",
+          "--json"
+        ],
+        [
+          "herdr",
+          "status",
+          "client",
+          "--json"
+        ],
+        [
+          "herdr",
+          "api",
+          "schema",
+          "--json"
+        ]
+      ],
+      "herdr_capability_mismatch_total": 2,
+      "mismatches_by_target_and_reason": [
+        [
+          "worker-fixture",
+          "herdr server lacks surface_interest=true",
+          2
+        ]
+      ],
+      "mutating_commands": [],
+      "refusal": "herdr server lacks surface_interest=true",
+      "repeat_refusal": "herdr server lacks surface_interest=true"
+    },
+    "no_target": "a remote herdr operation needs a target and a confirmed server incarnation",
+    "session_member_server": {
+      "commands_run": [
+        [
+          "herdr",
+          "--machine",
+          "worker-fixture",
+          "status",
+          "server",
+          "--json"
+        ],
+        [
+          "herdr",
+          "status",
+          "client",
+          "--json"
+        ],
+        [
+          "herdr",
+          "api",
+          "schema",
+          "--json"
+        ]
+      ],
+      "herdr_capability_mismatch_total": 2,
+      "mismatches_by_target_and_reason": [
+        [
+          "worker-fixture",
+          "herdr server lacks detached_server_daemon=true",
+          2
+        ]
+      ],
+      "mutating_commands": [],
+      "refusal": "herdr server lacks detached_server_daemon=true",
+      "repeat_refusal": "herdr server lacks detached_server_daemon=true"
+    },
+    "unforwarded_local_fallback": {
+      "commands_run": [
+        [
+          "herdr",
+          "--machine",
+          "worker-fixture",
+          "status",
+          "server",
+          "--json"
+        ],
+        [
+          "herdr",
+          "status",
+          "client",
+          "--json"
+        ],
+        [
+          "herdr",
+          "api",
+          "schema",
+          "--json"
+        ]
+      ],
+      "herdr_capability_mismatch_total": 2,
+      "mismatches_by_target_and_reason": [
+        [
+          "worker-fixture",
+          "local_fallback unsupported: a machine command never falls back to the local server",
+          2
+        ]
+      ],
+      "mutating_commands": [],
+      "refusal": "local_fallback unsupported: a machine command never falls back to the local server",
+      "repeat_refusal": "local_fallback unsupported: a machine command never falls back to the local server"
+    },
+    "unforwarded_update": {
+      "commands_run": [
+        [
+          "herdr",
+          "--machine",
+          "worker-fixture",
+          "status",
+          "server",
+          "--json"
+        ],
+        [
+          "herdr",
+          "status",
+          "client",
+          "--json"
+        ],
+        [
+          "herdr",
+          "api",
+          "schema",
+          "--json"
+        ]
+      ],
+      "herdr_capability_mismatch_total": 2,
+      "mismatches_by_target_and_reason": [
+        [
+          "worker-fixture",
+          "update unsupported: local installation is not forwarded",
+          2
+        ]
+      ],
+      "mutating_commands": [],
+      "refusal": "update unsupported: local installation is not forwarded",
+      "repeat_refusal": "update unsupported: local installation is not forwarded"
+    }
+  },
+  "state": "passed"
+}

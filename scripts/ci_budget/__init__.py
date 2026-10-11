@@ -10,6 +10,7 @@ RUN_BUDGET_S = 15 * 60
 GATE = "Gate — Required"
 SELF = "stage-budget"
 BUDGETS = {
+    "reuse": 30,
     "durations": 60,
     "split": 120,
     "unit": 300,
@@ -32,6 +33,7 @@ BUDGETS = {
     "gate-required": 60,
     "refresh-durations": 120,
     "coverage-baseline": 120,
+    "flake-budget": 120,
     "stage-budget": 60,
 }
 

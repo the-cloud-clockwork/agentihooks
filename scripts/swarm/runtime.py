@@ -42,6 +42,7 @@ STARTED_ROUTES = ("routed", "bare", "direct")
 AUTO = "auto"
 PICKED_LANES = ("eng", "ci")
 PLAN_MODE = ["--permission-mode", "plan"]
+REMOTE_PANE = "a remote agent's pane lives on its worker herdr server, never on the local one"
 
 
 def codex_plan_mode(environ):
@@ -139,17 +140,6 @@ def _registered_conversations(found):
     return ids
 
 
-def _transfer(task):
-    saved = (task.get("handoff_envelope") or {}).get("launch")
-    if not task.get("handoff") and not saved:
-        return {}
-    if not saved or not all(saved.get(key) for key in ("profile", "harness", "model", "effort")):
-        raise SpawnError("unsupported handoff: original profile and run options are missing", "unsupported")
-    if saved["harness"] not in ("claude", "codex"):
-        raise SpawnError(f"unsupported handoff harness: {saved['harness']}", "unsupported")
-    return saved
-
-
 def _recorded_revision(saved):
     return saved.get("bundle_revision") or saved.get("profile_decision", {}).get("bundle_revision")
 
@@ -168,6 +158,8 @@ def _predecessor(task):
 
 
 class HerdrRuntime:
+    quota_accounts: Callable[..., list] | None = None
+
     def __init__(self, home=SWARM_HOME, run=subprocess.run, choose=None, herdr=herdr_call):
         self.home, self.run, self.herdr = home, run, herdr
         self.choose = choose or agent_choice.choose
@@ -180,6 +172,8 @@ class HerdrRuntime:
 
     def has_capacity(self, config):
         environ = dict(os.environ)
+        if self.quota_accounts is not None:
+            self._quota_accounts = self.quota_accounts(environ, time.time(), refresh=False)
         if hasattr(self, "_quota_accounts"):
             from scripts.swarm.capacity import free_seats
 
@@ -223,7 +217,8 @@ class HerdrRuntime:
         from scripts.swarm import capacity
 
         placing = demand is None or any(demand.values())
-        self._quota_accounts = capacity.accounts(dict(os.environ), now, refresh=placing and refresh)
+        read = self.quota_accounts or capacity.accounts
+        self._quota_accounts = read(dict(os.environ), now, refresh=placing and refresh)
         self._quota_held = {}
         accounts = self._quota_successor_accounts(requirements) if requirements else None
         if requirements:
@@ -413,24 +408,17 @@ class HerdrRuntime:
         return self.choose(saved["harness"], environ)
 
     def _profile_decision(self, config, lane, chosen, task, saved, relaunch, environ):
-        decision = (
-            profile_choice.ProfileDecision(
-                saved["profile"],
-                "handoff",
-                "original seat profile",
-                overlays=tuple(saved.get("overlays", ())),
-            )
-            if saved and (relaunch or not task.get("profile"))
-            else timing.call(
+        decision = profile_choice.kept(task, saved, relaunch)
+        if decision is None:
+            decision = timing.call(
                 profile_choice.choose, config.slug, lane, chosen, task, environ, getattr(config, "overlays", {})
             )
-        )
         if not decision.bundle_revision:
             kept = _recorded_revision(saved) if saved.get("profile") == decision.profile else ""
             decision = replace(decision, bundle_revision=kept or overlays.revision())
         return decision
 
-    def _planned_account(self, task_id, agent):
+    def planned_account(self, task_id, agent):
         planned = getattr(self, "_quota_tasks", {}).get(task_id)
         return getattr(self, "_quota_task_accounts", {}).get(task_id) if planned == agent else None
 
@@ -462,7 +450,7 @@ class HerdrRuntime:
     def spawn(self, config, lane, name, task):
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
         relaunch = live_binding.complete(task.get("launch_assignment"))
-        saved = relaunch or _transfer(task)
+        saved = relaunch or profile_choice.transfer(task)
         decision = self._profile_decision(config, lane, chosen, task, saved, relaunch, environ)
         profile = decision.profile
         requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
@@ -523,7 +511,7 @@ class HerdrRuntime:
         route = ["--route", saved["account"]] if saved.get("account") else []
         account = None
         if hasattr(self, "_quota_accounts"):
-            account = self._quota_account(agent, saved.get("account") or self._planned_account(task["id"], agent), None)
+            account = self._quota_account(agent, saved.get("account") or self.planned_account(task["id"], agent), None)
             route = ["--route", account.name]
         placed = timing.call(
             self._launch,
@@ -752,6 +740,9 @@ class HerdrRuntime:
         return self.retire_process(agent, pid, homes)
 
     def retire_process(self, agent, pid, homes=(), start=0):
+        if agent.runtime_backend != "local":
+            self.refusals[agent.name] = {"process": 0, "refusal": REMOTE_PANE}
+            return False
         outcome = self.end(agent.name, pid, list(homes), start)
         if outcome.refusal:
             self.refusals[agent.name] = {"process": outcome.process, "refusal": outcome.refusal}
@@ -799,6 +790,8 @@ class HerdrRuntime:
         return self.observe(agent).state
 
     def observe(self, agent: AgentRecord) -> PaneObservation:
+        if agent.runtime_backend != "local":
+            return PaneObservation("unknown")
         found = self._get(pane_target(agent))
         if found is None or not _owns(found, agent):
             return PaneObservation("unknown")
@@ -824,7 +817,7 @@ class HerdrRuntime:
 
     def name_pane(self, agent):
         """Name the agent's own pane: unnamed and holding its conversation, or carrying the 32 character cut of its name."""
-        found = self._get(agent.pane_id) if agent.pane_id else None
+        found = self._get(agent.pane_id) if agent.pane_id and agent.runtime_backend == "local" else None
         if found is None:
             return False
         name = found.get("name")
@@ -858,7 +851,9 @@ class HerdrRuntime:
     def nudge(self, agent, text):
         from scripts.swarm.delivery import marked
 
+        if agent.runtime_backend != "local":
+            return
         try:
             self.herdr(["agent", "prompt", pane_target(agent), marked(text)])
-        except Exception:
-            pass
+        except Exception as exc:
+            return str(exc) or type(exc).__name__

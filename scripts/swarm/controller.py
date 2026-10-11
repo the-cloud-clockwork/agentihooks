@@ -8,9 +8,16 @@ from typing import TYPE_CHECKING
 
 from scripts.swarm import lease
 from scripts.swarm.store import RedisStore, SwarmError, connect
+from scripts.swarm_v2.runtime.base import LOCAL as WORKSTATION_BACKEND
 
 if TYPE_CHECKING:
     from scripts.swarm_v2.control_service import ControlService
+
+LOCAL, DISTRIBUTED = "local", "distributed"
+NO_SPAWNING = "controller spawning is disabled in this deployment mode"
+NO_KUBERNETES = "the distributed controller spawns only through its Kubernetes runtime"
+WORKSTATION = "the workstation hive spawns {lane} work"
+DISABLED = "the {backend} runtime is disabled on this controller"
 
 
 class FencedLedger:
@@ -31,9 +38,9 @@ class FencedLedger:
 
 
 class FencedRuntime:
-    def __init__(self, store: RedisStore, slug: str, held: lease.Lease, runtime, spawning: bool):
+    def __init__(self, store: RedisStore, slug: str, held: lease.Lease, runtime, deployment: str):
         self.store, self.slug, self.held = store, slug, held
-        self.runtime, self.spawning = runtime, spawning
+        self.runtime, self.deployment = runtime, deployment
 
     def __getattr__(self, name):
         value = getattr(self.runtime, name)
@@ -46,14 +53,35 @@ class FencedRuntime:
 
         return call
 
+    def _mode_refusal(self) -> str:
+        if self.deployment == LOCAL:
+            return ""
+        if self.deployment != DISTRIBUTED:
+            return NO_SPAWNING
+        router = getattr(self.runtime, "router", None)
+        return "" if getattr(router, "placement", None) is not None else NO_KUBERNETES
+
+    def placement_refusal(self, lane: str, task: dict) -> str:
+        if refused := self._mode_refusal():
+            return refused
+        if self.deployment == LOCAL:
+            return ""
+        router = self.runtime.router
+        wanted = router.placed_backend(lane, task)
+        if wanted == WORKSTATION_BACKEND:
+            return WORKSTATION.format(lane=lane)
+        return DISABLED.format(backend=wanted) if router.enabled_backend(wanted) != wanted else ""
+
     def has_capacity(self, config) -> bool:
         lease.renew(self.store, self.slug, self.held)
-        return self.spawning and self.runtime.has_capacity(config)
+        if self._mode_refusal():
+            return False
+        return self.deployment == DISTRIBUTED or self.runtime.has_capacity(config)
 
     def spawn(self, config, lane, name, task):
         lease.renew(self.store, self.slug, self.held)
-        if not self.spawning:
-            raise SwarmError("controller spawning is disabled in this deployment mode")
+        if refused := self.placement_refusal(lane, task):
+            raise SwarmError(refused)
         return self.runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
 
 

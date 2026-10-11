@@ -129,7 +129,7 @@ def _reached_source(path: Path) -> str:
 
 def test_no_script_a_step_runs_calls_the_api():
     calls = _api_calls((step.get("run", ""), here) for _, step, here in _all_steps())
-    assert sorted(str(path.relative_to(ROOT)) for path in calls) == [
+    expected = [
         ".github/actions/browser-cache/select-artifacts.sh",
         ".github/actions/browser-cache/verify.sh",
         ".github/coverage/combine.sh",
@@ -149,20 +149,26 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/ci_wiring.py",
         "scripts/packaging/compose-hive-smoke.sh",
         "scripts/packaging/hive-join-smoke.sh",
+        "scripts/packaging/swarm-image-clients.sh",
         "scripts/packaging/swarm-smoke.sh",
         "scripts/size_limits.py",
         "scripts/swarm_ledger/artifact_sanity.py",
+        "tests/chart_secrets.py",
+        "tests/chart_workers.py",
         "tests/count_floor.py",
         "tests/coverage_baseline.py",
         "tests/coverage_ratchet.py",
         "tests/dev_durations.py",
+        "tests/flake_budget.py",
         "tests/integration/swarm_node/run_health_proof.sh",
         "tests/js_lcov.py",
         "tests/ledger_load/gate.py",
         "tests/refresh_durations.py",
         "tests/shard_budget.py",
         "tests/shard_check.py",
+        "scripts/ci_reuse.py",
     ]
+    assert sorted(str(path.relative_to(ROOT)) for path in calls) == sorted(expected)
     assert {path: count for path, count in calls.items() if count} == {}
 
 
@@ -365,7 +371,7 @@ def test_a_value_without_the_workflow_token_holds_none(value):
 
 def test_sonar_downloads_this_runs_coverage_after_the_shards():
     sonar = _jobs()["sonar"]
-    assert sonar["needs"] == ["unit"]
+    assert sonar["needs"] == ["unit", "reuse"]
     steps = sonar["steps"]
     download = next(step for step in steps if step.get("name") == "Download shard coverage")
     merge = next(step for step in steps if step.get("name") == "Merge shard coverage")

@@ -202,11 +202,24 @@ def _handoff_agent(requested: str, environ: dict[str, str], agent_args: list[str
     target = requested or source
     if _flag_value(agent_args, ("--route",)) == "api":
         return target
-    if requested == "codex" or source == "codex":
+    if "codex" in (requested, source) and target != source:
         raise ValueError(
-            f"unsupported quota transfer: {source.capitalize()} cannot transfer to a {(requested or 'claude').capitalize()} account"
+            f"unsupported quota transfer: {source.capitalize()} cannot transfer to a {target.capitalize()} account"
         )
-    return "claude"
+    return "codex" if source == "codex" else "claude"
+
+
+def _handoff_exclude(agent: str, environ: dict[str, str]) -> str:
+    """The account a quota handoff leaves; for Codex it comes from the live process because the
+    operator environment can carry every AH_CX_TOKEN_*, which hides the session's own account."""
+    from hooks.context.account_sessions import UNROUTED, environment_account
+    from scripts.profiles import binding
+
+    if agent == "codex":
+        _, _, _, current = binding.process()
+        return current
+    current = environment_account(environ)
+    return "" if current == UNROUTED else current
 
 
 def model_effort(agent: str, agent_args: list[str], environ: dict[str, str]) -> tuple[str, str]:
@@ -253,6 +266,7 @@ def _agent_command(
         command = [
             agentihooks_bin,
             "codex",
+            *(["--agentihooks-exclude", spec.exclude] if spec.exclude else []),
             "--agentihooks-report",
             str(report),
             *(["resume", spec.resume] if spec.resume else []),
@@ -602,10 +616,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         )
         agent = agent or "claude"
         if args.handoff:
-            from hooks.context.account_sessions import UNROUTED, environment_account
-
-            current = environment_account(active_env)
-            exclude = "" if current == UNROUTED else current
+            exclude = _handoff_exclude(agent, active_env)
             if not prompt:
                 raise ValueError("--handoff needs the handoff document as --prompt-file")
         claude_args = _prepare_profile(args, agent, claude_args, active_env)

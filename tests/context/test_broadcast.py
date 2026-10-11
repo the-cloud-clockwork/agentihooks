@@ -1184,3 +1184,23 @@ class TestLeftoverDirectedMessages:
         from hooks.context.broadcast import _message_matches_channel
 
         assert _message_matches_channel({"message": "hi", "severity": "info"}, session_channels=[]) is True
+
+
+def test_the_old_terminal_never_closes_the_conversation_its_successor_resumed(sessions_file, monkeypatch):
+    from hooks.context import broadcast
+    from hooks.context.quota_policy import handed_off_block
+
+    monkeypatch.setattr(broadcast, "_sessions_path", lambda: sessions_file)
+    monkeypatch.setattr(broadcast, "_local_namespace", lambda: "host")
+    cwd = str(sessions_file.parent)
+    broadcast.register_session("thread", pid=100, cwd=cwd, model="gpt", account="alpha")
+    assert broadcast.mark_handed_off(100, "beta") == ["thread"]
+    broadcast.register_session("thread", pid=200, cwd=cwd, model="gpt", account="beta")
+    broadcast.mark_session_closed("thread", 100)
+    assert broadcast.session_status("thread")["status"] == "alive"
+    assert handed_off_block("thread") is None
+    broadcast.mark_session_closed("thread", 200)
+    assert broadcast.session_status("thread")["status"] == "closed"
+    broadcast.register_session("legacy", pid=300, cwd=cwd, model="gpt")
+    broadcast.mark_session_closed("legacy")
+    assert broadcast.session_status("legacy")["status"] == "closed"

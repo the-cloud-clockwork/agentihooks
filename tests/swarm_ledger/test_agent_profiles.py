@@ -7,7 +7,7 @@ from tests.swarm_ledger.ledger_page import page_source
 def test_agent_rows_show_the_model_and_effort_for_claude_and_codex():
     page = page_source()
     functions = []
-    for name in ("span", "modelText", "agentRows"):
+    for name in ("span", "modelText", "terminalView", "agentRows"):
         functions.append(
             "function " + name + "(" + page.split("  function " + name + "(", 1)[1].split("\n  }\n", 1)[0] + "\n}"
         )

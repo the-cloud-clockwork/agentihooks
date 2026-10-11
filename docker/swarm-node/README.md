@@ -15,12 +15,41 @@ checksums, and the hashed Python requirements closure. The agentihooks source
 wheel uses version zero with its tested source revision recorded in the manifest.
 Changing requirements also requires updating their checksum in `versions.lock`.
 Template inputs come from the repository's packaged profiles, never a host home
-or credential store. Runtime homes are writable; templates and the environment
-are owned by root and read only to the worker user.
+or credential store. Every package role profile and the shared `_guards` folder
+also sit at the template root, so a role name resolves as a template and a
+seeded role's conditions find the guard beside it; bootstrap refuses templates
+without that folder. The controller admits a seat profile only when it is
+`default` or a role its own package ships, which matches the image built from
+the same commit; an older image ignores the record's `profile` and renders
+`default`. Runtime homes are writable; templates and the environment are owned
+by root and read only to the worker user.
+
+The image never carries a private bundle. A Pod policy `bundle` section names a
+private bundle image, its tag and the image pull Secret only the kubelet reads.
+The Pod template then adds an init container that copies the image's `/bundle`
+(the bundle tree), `/linked` (linked profiles such as `brain`) and
+`/revision.json` into a Pod private emptyDir, which the agent mounts read only at
+`/var/run/swarm/bundle`. With that section the controller admits any valid
+profile name, and the start step accepts a profile shipped in either the
+templates or the bundle, refusing one in neither with exit sixty four.
+Bootstrap seeds the bundle and its linked profiles into the attempt and renders
+through the same chain, bundle global layer, persona, settings and MCP rules as
+a local launch; the execution record names the rendered `chains`, the bundle
+`revision` and its `digest`, and the `worker_start` line prints the chains.
 
 The default command verifies and reports installed inventory without a network.
 Every command runs under Tini as PID one, which reaps children. Production
 execution supplies `python /opt/swarm-node/supervisor.py ATTEMPT LAUNCH_JSON`.
+That entry first prepares the attempt under a private umask: it reads the
+launch record and the launch grant beside it, registers with the control API
+the record names, bootstraps the attempt for the record's harness from the
+template the record's `profile` names and writes the record's authority as
+`registration.json` once the answer has confirmed its execution, task and
+grant. A missing or malformed record or grant, a record naming no profile or
+one the image does not ship, a refused registration or an answer naming
+another execution, task or grant exits sixty four before the attempt is touched; a bootstrap refusal, an
+unreadable file or a failed probe exits sixty four too. The supervisor never starts after a refusal. A prepared start prints one
+`worker_start` line naming the attempt and the worker uid.
 The supervisor owns a headless herdr server, an exporter and one main agent in
 a herdr pane. Viewers can attach and detach without owning those processes.
 
@@ -101,7 +130,9 @@ Each launch has an exclusive attempt lock and a new random incarnation under
 its run directory. `SWARM_SUPERVISION_DIR` points to that directory; its
 `context.json` binds authority and incarnation. An exporter calls
 `scripts.swarm_v2.supervision_protocol.acknowledge("exporter", status="ready")`
-when usable. Only then does the main agent start. SIGTERM or SIGINT publishes
+when usable. Only then does the main agent start. A launch record with no
+`exporter` starts herdr and the agent alone and reports its checkpoint
+incomplete. SIGTERM or SIGINT publishes
 `drain.json`, stops the agent and herdr process trees including escaped
 grandchildren, and publishes `quiesced.json`. The exporter remains alive to
 flush. No task reconciliation, authority renewal or second swarm timer runs
@@ -187,12 +218,32 @@ launches `claude -p` and `codex exec` from fixture profiles and counts the
 sessions their SessionStart hooks registered. `scripts.swarm_v2.image_attestation`
 qualifies each target against the image manifest's pinned version and the
 accepted herdr contract of the local herdr 0.9.1 runtime path (protocol 22,
-endpoint protocol generation one and the health check capability, and every
-socket method the runtime calls). The contract leaves out `detached_server_daemon`: that flag
-reports whether a client spawned the server as a background daemon, and the
-supervisor runs `herdr server` in the foreground, where herdr 0.9.1 reports it
-false. Viewers attach and detach over the server socket, which protocol 22 and
-the socket methods cover. Qualification reports
+every socket method the runtime calls, and the server capabilities saved machine
+forwarding needs: endpoint protocol generation one, `surface_interest`,
+`health_check` and `detached_server_daemon`). herdr 0.9.1 reports
+`detached_server_daemon` true only when the server leads its own session, and
+`herdr machine add` refuses any other server as not ready for saved machines; the
+supervisor and the probe both start `herdr server` in a new session.
+`scripts.swarm_v2.herdr.capabilities` (SV2-HDR-01) holds that contract and the
+remote operation matrix; `python -m scripts.swarm_v2.herdr.capabilities TARGET
+INCARNATION` qualifies a saved machine before any remote terminal is promised
+(exit 0 compatible, 1 when the client and server pair is incompatible, 2
+unreachable or missing arguments), and
+`tests/integration/herdr_remote/run_remote_proof.sh`
+proves it against the pinned binary behind a private sshd. That raw target
+command is operator only; agents qualify a worker through its terminal scope.
+`docker/swarm-node/ssh` is the worker terminal endpoint (SV2-HDR-02): when the Pod
+mounts its terminal Secret at `/var/run/swarm/terminal`, the entrypoint starts an
+unprivileged sshd on port 2222 that loads that execution's host key, trusts only
+the mounted user CA and admits only certificates naming the execution, with every
+forwarding off; its forced command, `scripts.swarm_v2.herdr.session`, enters the
+supervised herdr environment of the attempt. The start script waits in the
+background up to `SWARM_TERMINAL_WAIT_SECONDS` (180) for the Secret; without it the
+endpoint stays off for that attempt and the agent still runs. The image keeps no host key of its own.
+`scripts.swarm_v2.herdr.endpoints` renders the Secret, a ClusterIP Service and a
+NetworkPolicy per execution, and `scripts.swarm_v2.herdr.attach` connects the
+client; `tests/integration/herdr_terminal/terminal_proof.py` proves the pair
+against the pinned herdr on localhost. Qualification reports
 `worker_image_qualified_targets`. Any refused target, or a manifest naming another
 commit, leaves the image unpromotable and nothing is pushed. The same job builds
 an incompatible herdr fixture and requires its refusal, and qualifies the
@@ -211,13 +262,15 @@ the source revision. `docker/swarm-node/publish.sh` confirms the registry config
 digest equals the tested image before recording the digest. An existing commit
 tag is never pushed again: a rerun records it as a replay only when it holds the
 tested image, and a registry that cannot say whether the tag exists stops the
-run with nothing pushed. The
+run with nothing pushed. On dev the floating `dev` tag then moves to the published
+digest; the deployed controller resolves that tag to its digest at each launch. The
 `swarm-worker-image-attestation` artifact holds the probe output and the
 attestation with the registry digest, which is the immutable digest reference
 `agentihooks-worker@sha256:...`, the version manifest, the protocol compatibility
 manifest, the test report and provenance naming the commit and run. Publication
-runs only from dev or a proof branch; a dispatch elsewhere qualifies without
-pushing. `diffcheck/` proof branches publish only to the
+runs only from a dev push or a `publish` dispatch on dev or a proof branch; a
+dispatch elsewhere qualifies without pushing. A push to a `diffcheck/` proof
+branch starts no build. Proof branch publication goes only to the
 `agentihooks-worker-proof` repository. Rollback points deployment at the last
 accepted digest without rebuilding or retagging it; deployment selection belongs
 to antoncore GitOps.

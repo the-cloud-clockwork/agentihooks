@@ -14,6 +14,10 @@ from scripts.swarm_v2.api.server import serve
 from scripts.swarm_v2.auth_context import LaunchAuthority, LaunchKey
 from scripts.swarm_v2.authority import TaskAuthority
 from scripts.swarm_v2.controller import Controller
+from scripts.swarm_v2.herdr.attach import ClientHome
+from scripts.swarm_v2.herdr.capabilities import runner
+from scripts.swarm_v2.herdr.upkeep import Upkeep, switched_on
+from scripts.swarm_v2.kubernetes import operator_terminal
 from scripts.swarm_v2.kubernetes.watch import BACKEND
 from scripts.swarm_v2.reconciliation.accounts import Finding
 from scripts.swarm_v2.runtime.observe import Observer, Reading, Signal, Source, Thresholds
@@ -27,6 +31,7 @@ CREDENTIAL_ENV = "AGENTIHOOKS_CONTROLLER_CREDENTIAL"
 HOST = "0.0.0.0"
 MAX_PORT = 65535
 THREAD = "swarm-v2-api"
+VIEWS_THREAD = "swarm-v2-terminal-views"
 ISSUER = "controller"
 AUDIENCE = "workers"
 
@@ -78,6 +83,9 @@ class ControlService:
         self.listen: tuple[str, int] | None = None
         self.runtime = None
         self.api_url = ""
+        self.recover: Callable[[], dict[str, str]] | None = None
+        self.views: Callable[[], dict] | None = None
+        self.viewing: threading.Thread | None = None
 
     def start(self) -> bool:
         if not self.controller.acquire():
@@ -91,7 +99,16 @@ class ControlService:
         self._open()
         store = self.controller.store
         self.observe(lease.now_ms(store) / 1000 if now is None else now)
+        if self.recover is not None:
+            self.recover()
+        self._view()
         return True
+
+    def _view(self) -> None:
+        if self.views is None or (self.viewing is not None and self.viewing.is_alive()):
+            return
+        self.viewing = threading.Thread(target=self.views, name=VIEWS_THREAD, daemon=True)
+        self.viewing.start()
 
     def observe(self, now: float) -> list[Finding]:
         store, slug = self.controller.store, self.controller.slug
@@ -124,6 +141,18 @@ class ControlService:
             self.controller.release()
 
 
+def anton_client(environ: Mapping[str, str], slug: str, workers: deployed.Workers | None) -> Upkeep | None:
+    if workers is None or workers.terminal is None or not switched_on(environ):
+        return None
+    if not environ.get(operator_terminal.CA_KEY_ENV):
+        print(
+            f"controller: keeps no saved herdr machines for {slug}: {operator_terminal.CA_KEY_ENV} is unset", flush=True
+        )
+        return None
+    home = ClientHome(Path.home())
+    return Upkeep(operator_terminal.terminal(slug, environ, home, runner(home.environment(dict(environ)))))
+
+
 def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlService | None:
     port = environ.get(PORT_ENV)
     if not port:
@@ -144,13 +173,23 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
         transports,
         owner=owner,
     )
+    service.controller.terminals = anton_client(environ, slug, workers)
     service.listen = (HOST, int(port))
     if workers is not None:
         service.api_url = workers.terms.api_url
         service.runtime = deployed.tick_runtime(service, workers, environ)
+        service.recover = deployed.recovery_pass(service, workers, transports[0].api)
+        if service.controller.terminals is not None:
+            service.views = deployed.terminal_views(service.controller, environ)
     try:
         service.start()
     except BaseException:
         service.stop()
         raise
+    if workers is not None:
+        print(
+            f"controller: built the Kubernetes runtime for {slug}: workers in {workers.policy['namespace']} "
+            f"run {workers.policy['image_repository']}:{workers.image_tag} with profile {workers.profile}",
+            flush=True,
+        )
     return service

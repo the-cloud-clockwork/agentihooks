@@ -7,12 +7,18 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow == 'Swarm container smoke' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('swarm-smoke-{0}', github.run_id) }}
+  queue: ${{ github.workflow == 'Swarm container smoke' && 'max' || 'single' }}
+
 jobs:
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - name: Prove a clean local Compose install
         run: bash scripts/packaging/swarm-smoke.sh
   hive-join:
@@ -20,6 +26,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - name: Join a member container to a hive container over Redis ACL
         run: bash scripts/packaging/hive-join-smoke.sh
   compose-hive:
@@ -27,5 +35,18 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - name: Join a hive container to the Compose stack and hold the controller lease
         run: bash scripts/packaging/compose-hive-smoke.sh
+  terminal-clients:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Build the swarm image
+        run: docker build -t local/agentihooks-swarm:clients-check .
+      - name: Run the pinned herdr and ssh clients inside the swarm image
+        run: bash scripts/packaging/swarm-image-clients.sh local/agentihooks-swarm:clients-check

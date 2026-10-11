@@ -64,7 +64,7 @@ def request(lane, name="a1", **task):
 )
 def test_placement_sends_engineer_and_ci_spawns_remote_and_keeps_the_rest_local(lane, task, backend):
     router = RuntimeRouter([Remote()], placement=Placement(BACKEND))
-    assert Placement(BACKEND).backend_for(request(lane, **task)) == backend
+    assert Placement(BACKEND).backend_for(lane, task) == backend
     assert router.spawn_backend(request(lane, **task)) == backend
 
 

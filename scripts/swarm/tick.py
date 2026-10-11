@@ -13,6 +13,7 @@ from itertools import count
 from typing import Protocol
 
 from scripts.ci_budget import defects as ci_defects
+from scripts.ci_budget import flakes as ci_flakes
 from scripts.doctor import priming
 from scripts.gates import Who, modes
 from scripts.gates import claims as claim_cap
@@ -135,7 +136,7 @@ class Runtime(Protocol):
     def reap_name(self, name: str) -> bool: ...
     def status(self, agent: AgentRecord) -> str: ...
     def observe(self, agent: AgentRecord) -> PaneObservation: ...
-    def nudge(self, agent: AgentRecord, text: str) -> None: ...
+    def nudge(self, agent: AgentRecord, text: str) -> str | None: ...
     def name_pane(self, agent: AgentRecord) -> bool: ...
     def conversations(self) -> dict[str, str] | None: ...
     def resume(self, config, agent: AgentRecord, text: str) -> Placed: ...
@@ -190,6 +191,7 @@ def tick(slug, store, ledger, runtime, now_ms):
         actions += skip_refused(quota_notice.refresh, slug, config, store, ledger, runtime, now_ms)
         actions += skip_refused(ci_speed.refresh, slug, config, store, now_ms)
         actions += skip_refused(ci_defects.refresh, slug, config, store, ledger, now_ms)
+        actions += skip_refused(ci_flakes.refresh, slug, config, store, ledger, now_ms)
         actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, doc, now_ms)
         if not sleeping:
             actions += skip_refused(_codex_hook_order)
@@ -534,8 +536,8 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
         slug, gate_log.Row.of(IDLE_TICKS, "count", who, reason=f"idle tick {idle.idle_ticks}", now_ms=now_ms)
     )
     if idle.idle_ticks == IDLE_NUDGE_TICKS:
-        runtime.nudge(idle, NUDGE.format(slug=slug))
-        return [f"nudged {agent.name}"]
+        refused = runtime.nudge(idle, NUDGE.format(slug=slug))
+        return [f"nudge to {agent.name} refused: {refused}" if refused else f"nudged {agent.name}"]
     if idle.idle_ticks >= IDLE_KILL_TICKS and runtime.retire(idle, homes=reaper.scratch_homes(slug, idle.task)):
         return [f"stalled {agent.name}" + _drop(slug, store, ledger, rows, idle)]
     return []
@@ -717,17 +719,20 @@ def _spawn_stop(slug, config, store, runtime, now_ms):
 def _record_spawn_failure(slug, store, record, error):
     if record_failure := timing.ON_FAILURE.get():
         record_failure(f"{__name__}._spawn", error)
-    transfers.failed(store, slug, record)
-    if not isinstance(error, SpawnError) or error.status != "unavailable":
+    waiting = isinstance(error, SpawnError) and error.status == "unavailable"
+    if waiting:
+        transfers.detach(store, slug, record)
+    else:
+        transfers.failed(store, slug, record)
         store.note_launch_failure(slug, record.task, str(error))
-    store.record_launch(slug, record, "failed", str(error))
+    store.record_launch(slug, record, "waiting" if waiting else "failed", str(error))
 
 
 def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     agents, actions = store.agents(slug), []
     taken = {a.seat for a in agents}
     held = _held_for_master(slug, store, now_ms)
-    for lane, task in _spawn_order(slug, config, store, agents, rows, doc):
+    for lane, task in _spawn_order(slug, config, store, agents, rows, doc, runtime):
         if held:
             return actions + held
         if stop := _spawn_stop(slug, config, store, runtime, now_ms):
@@ -801,8 +806,8 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     return actions
 
 
-def _spawn_order(slug, config, store, agents, rows, doc):
-    from scripts.swarm import capacity
+def _spawn_order(slug, config, store, agents, rows, doc, runtime):
+    from scripts.swarm import capacity, seat_spawn
 
     decision = capacity.read(store, slug)
     caps = decision.get("effective", {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan})
@@ -812,6 +817,7 @@ def _spawn_order(slug, config, store, agents, rows, doc):
         ready = _launch_order(slug, store, _claimable(slug, store, rows, doc, lane))
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]
+        ready = [task for task in ready if not seat_spawn.placed_elsewhere(runtime, lane, task)]
         ready = ready[: max(cap - busy, 0)]
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
     return [(lane, task) for _, lane, task in sorted(queue, key=lambda entry: entry[0])]
@@ -974,6 +980,8 @@ def _master(slug, config, store, runtime, now_ms):
         return []
     if any(m.name in runtime.live_names() for m in masters):
         return ["the old master is still running, waiting for it to end before starting the next"]
+    if refused := seat_spawn.placed_elsewhere(runtime, MASTER, {}):
+        return [refused]
     if refused := seat_spawn.no_slot(config, runtime, MASTER):
         store.redis.hset(MASTER_WAITING, slug, now_ms)
         return [refused]

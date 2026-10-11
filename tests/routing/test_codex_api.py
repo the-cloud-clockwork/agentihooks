@@ -174,7 +174,7 @@ def test_the_login_status_check_runs_without_api_credentials():
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     assert router.default_signed_in({**SUBSCRIPTION, **API_NAMES}, run) is True
-    assert seen == {"HOME": "/home/u"}
+    assert seen == {"HOME": "/home/u", router.INTERNAL_RUN: "1"}
 
 
 def _profile_home(tmp_path):

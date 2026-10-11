@@ -22,6 +22,7 @@ agentihooks swarm <id> save-template NAME                         write this swa
 agentihooks swarm <id> send-message TEXT                          message to every live agent's inbox
 agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]     master or operator judges a health finding
 agentihooks swarm <id> classify EXECUTION lost|working --reason TEXT  master or operator classifies a suspect execution attempt
+agentihooks swarm <id> terminal EXECUTION                         operator opens the worker terminal of an execution in herdr
 agentihooks swarm <id> lift AGENT GATE                            operator or master lets one agent past a gate for one hour
 agentihooks swarm <id> freeze | focus | unfreeze TARGET [--reason TEXT] [--quote WORDS]   operator, or master with his words
 agentihooks swarm <id> learned                                    list every seat's learned notes with seat and number
@@ -184,13 +185,14 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             slug,
             held,
             runtime or routed(herdr=HerdrRuntime()),
-            os.environ.get("AGENTIHOOKS_DEPLOYMENT", "local") == "local",
+            os.environ.get("AGENTIHOOKS_DEPLOYMENT", controller.LOCAL),
         )
-        from scripts.swarm.health import spawn_stall
+        from scripts.swarm.health import prompt_backlog, spawn_stall
 
         pressured = skip_refused(incidents.host_pressure, store, slug)
         restarted = pressured + timing.call(ledger_watchdog.watch, store, slug, ledger, runtime)
         probed = restarted + timing.call(ledger_probe.observe, store, slug, ledger, runtime, now_ms())
+        timing.call(prompt_backlog.observe, store, slug, now_ms() // 1000)
         with spawn_stall.watch(store, slug, ledger, now_ms, runtime):
             controls = timing.call(command_runner.consume, store, slug)
             if timing.call(ledger.binned, slug):
@@ -1483,6 +1485,12 @@ def cmd_say(store, args):
     print(json.dumps({"sent": sent}))
 
 
+def cmd_terminal(store, args):
+    from scripts.swarm_v2.kubernetes import operator_terminal
+
+    print(json.dumps(operator_terminal.command(store, args.slug, args.execution, os.environ, Who.from_env())))
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="agentihooks swarm", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -1528,6 +1536,7 @@ def build_parser():
     verdict.add_argument("finding")
     verdict.add_argument("verdict")
     verdict.add_argument("--note", default="")
+    sub.add_parser("terminal").add_argument("execution")
     classify = sub.add_parser("classify")
     classify.add_argument("execution_id")
     classify.add_argument("ruling", choices=("lost", "working"))

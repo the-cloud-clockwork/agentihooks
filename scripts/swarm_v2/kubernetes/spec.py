@@ -7,7 +7,7 @@ import json
 import re
 import sys
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, fields
 from pathlib import Path
 
@@ -22,7 +22,18 @@ SCHEMA = Path(__file__).resolve().parents[3] / "docs" / "swarm-v2" / "schemas" /
 DOMAIN = "swarm.agentihooks.io"
 ATTEMPTS = "/home/worker/attempts"
 LAUNCH_DIR = "/var/run/swarm/launch"
+LAUNCH_RECORD = "launch.json"
 ACCOUNTS_OBJECT = "swarm-claude-creds"
+BUNDLE_DIR = "/var/run/swarm/bundle"
+BUNDLE_VOLUME = "bundle"
+BUNDLE_MIB = 256
+BUNDLE_CONTENT = ("/bundle", "/linked", "/revision.json")
+HARDENED = {
+    "allowPrivilegeEscalation": False,
+    "privileged": False,
+    "readOnlyRootFilesystem": True,
+    "capabilities": {"drop": ["ALL"]},
+}
 WORKER_ID = 10001
 TMP_MIB = 1024
 PROBES = ("startup", "readiness", "liveness")
@@ -30,6 +41,7 @@ HARNESSES = ("claude", "codex")
 LABEL_VALUE = re.compile(r"[A-Za-z0-9]([A-Za-z0-9._-]{0,61}[A-Za-z0-9])?")
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,127}")
 ACCOUNT = re.compile(r"(?=.{3,62}\Z)[A-Za-z0-9]([A-Za-z0-9._+-]*[A-Za-z0-9])?@[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?")
+KEY = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
 PROJECT = re.compile(r"github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+|local:[A-Za-z0-9._-]+|unknown")
 IDENTITY = {
     "execution_id": re.compile(r"exe-[0-9a-f]{32}"),
@@ -38,7 +50,7 @@ IDENTITY = {
     "seat_id": IDENTIFIER,
     "grant_ref": IDENTIFIER,
     "project_id": PROJECT,
-    "provider_account": ACCOUNT,
+    "provider_account": re.compile(f"{ACCOUNT.pattern}|{KEY.pattern}"),
 }
 COUNTS = ("generation", "controller_epoch")
 
@@ -146,7 +158,13 @@ def _identity(launch: AdmittedLaunch) -> None:
         raise PodSpecRefused("launch image_digest must be a sha256 digest", "image")
 
 
-def _profile(policy: dict, launch: AdmittedLaunch) -> dict:
+def _approved(policy: dict, launch: AdmittedLaunch, keys: Collection[str] | None) -> bool:
+    if keys is not None:
+        return launch.provider_account in keys
+    return launch.provider_account.lower() in {account.lower() for account in policy["provider_accounts"]}
+
+
+def _profile(policy: dict, launch: AdmittedLaunch, keys: Collection[str] | None) -> dict:
     if not isinstance(launch.profile, str) or launch.profile not in policy["profiles"]:
         raise PodSpecRefused("launch profile is not an approved resource profile", "profile")
     limits = policy["profiles"][launch.profile]["limits"]
@@ -154,7 +172,7 @@ def _profile(policy: dict, launch: AdmittedLaunch) -> dict:
         raise PodSpecRefused("launch resources must be positive integers", "resources")
     if launch.memory_mib > limits["memory_mib"] or launch.cpu_millis > limits["cpu_millis"]:
         raise PodSpecRefused(f"launch resources exceed the {launch.profile} profile limits", "resources")
-    if launch.provider_account.lower() not in {account.lower() for account in policy["provider_accounts"]}:
+    if not _approved(policy, launch, keys):
         raise PodSpecRefused("launch provider_account is not an approved provider account", "account")
     return policy["profiles"][launch.profile]
 
@@ -168,10 +186,22 @@ def _payload(launch: AdmittedLaunch) -> str:
         raise PodSpecRefused("launch task_payload must be a JSON object", "payload") from None
 
 
+def pod_name(execution_id: str) -> str:
+    return f"swarm-{execution_id}"
+
+
+def launch_name(execution_id: str) -> str:
+    return f"{pod_name(execution_id)}-launch"
+
+
+def launch_volume(execution_id: str) -> dict:
+    return {"name": "launch", "configMap": {"name": launch_name(execution_id), "defaultMode": 0o444}}
+
+
 def _metadata(policy: dict, launch: AdmittedLaunch, payload: str) -> dict:
     version = policy["template_version"]
     return {
-        "name": f"swarm-{launch.execution_id}",
+        "name": pod_name(launch.execution_id),
         "namespace": policy["namespace"],
         "labels": {
             "app.kubernetes.io/managed-by": "agentihooks",
@@ -264,22 +294,18 @@ def _container(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
             "python",
             "/opt/swarm-node/supervisor.py",
             f"{ATTEMPTS}/{launch.execution_id}",
-            f"{LAUNCH_DIR}/launch.json",
+            f"{LAUNCH_DIR}/{LAUNCH_RECORD}",
         ],
         "env": [_token(launch)]
         + ([{"name": "BRAIN_URL", "value": policy["brain_url"]}] if "brain_url" in policy else []),
         "resources": _resources(launch, profile["limits"]),
-        "securityContext": {
-            "allowPrivilegeEscalation": False,
-            "privileged": False,
-            "readOnlyRootFilesystem": True,
-            "capabilities": {"drop": ["ALL"]},
-        },
+        "securityContext": copy.deepcopy(HARDENED),
         "volumeMounts": [
             {"name": "home", "mountPath": "/home/worker"},
             {"name": "tmp", "mountPath": "/tmp"},  # NOSONAR: a Pod-private emptyDir, never the host /tmp
             {"name": "launch", "mountPath": LAUNCH_DIR, "readOnly": True},
             *_shared_mounts(policy, launch),
+            *([{"name": BUNDLE_VOLUME, "mountPath": BUNDLE_DIR, "readOnly": True}] if "bundle" in policy else []),
         ],
     }
     for mode in PROBES:
@@ -320,17 +346,35 @@ def _spec(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
         "volumes": [
             {"name": "home", "emptyDir": {"sizeLimit": f"{profile['limits']['ephemeral_mib'] - TMP_MIB}Mi"}},
             {"name": "tmp", "emptyDir": {"sizeLimit": f"{TMP_MIB}Mi"}},
-            {"name": "launch", "configMap": {"name": f"swarm-{launch.execution_id}-launch", "defaultMode": 0o444}},
+            launch_volume(launch.execution_id),
             *_shared_volumes(policy),
         ],
         "runtimeClassName": policy["runtime_class_name"],
     }
+    if "bundle" in policy:
+        _deliver(body, policy["bundle"])
     return body
 
 
+def _deliver(body: dict, bundle: dict) -> None:
+    body["initContainers"] = [
+        {
+            "name": BUNDLE_VOLUME,
+            "image": f"{bundle['image_repository']}:{bundle['tag']}",
+            "imagePullPolicy": "Always",
+            "command": ["cp", "-R", *BUNDLE_CONTENT, BUNDLE_DIR + "/"],
+            "resources": {"requests": {"cpu": "100m", "memory": "64Mi"}, "limits": {"cpu": "500m", "memory": "128Mi"}},
+            "securityContext": copy.deepcopy(HARDENED),
+            "volumeMounts": [{"name": BUNDLE_VOLUME, "mountPath": BUNDLE_DIR}],
+        }
+    ]
+    body["imagePullSecrets"] = [{"name": bundle["pull_access"]}]
+    body["volumes"].append({"name": BUNDLE_VOLUME, "emptyDir": {"sizeLimit": f"{BUNDLE_MIB}Mi"}})
+
+
 class PodTemplate:
-    def __init__(self, policy: dict) -> None:
-        self.policy = policy
+    def __init__(self, policy: dict, accounts: Callable[[], Collection[str]] | None = None) -> None:
+        self.policy, self.accounts = policy, accounts
         self.failures = Counter()
         self.storage = MountChecker()
 
@@ -338,7 +382,7 @@ class PodTemplate:
         try:
             launch = AdmittedLaunch.from_record(record)
             _identity(launch)
-            profile = _profile(self.policy, launch)
+            profile = _profile(self.policy, launch, None if self.accounts is None else self.accounts())
             payload = _payload(launch)
         except PodSpecRefused as refused:
             self.failures[refused.reason] += 1

@@ -406,6 +406,34 @@ def test_agents_table_lists_the_master_first_with_overlays_and_stats_carry_the_t
     ]
 
 
+def test_agents_table_shows_live_terminals_and_never_shows_an_aged_or_failed_view_as_live(open_page):
+    payload = status()
+    fresh = {"state": "live", "checked_at": NOW_MS - 30_000, "live_at": NOW_MS - 30_000, "fresh_ms": 30_000}
+    payload["terminals"] = {
+        "master-1": {**fresh, "checked_at": NOW_MS - 31_000, "live_at": NOW_MS - 31_000, "reason": ""},
+        "eng-58": fresh | {"reason": ""},
+    }
+    page = open_page(payload, clock=True)
+    heads = page.tab.eval_on_selector_all("#agents-table thead th", "ths => ths.map(t => t.innerText.trim())")
+    assert heads[6:9] == ["state", "terminal", "age"]
+    assert [row[7] for row in page.table("swarm-agents")] == ["CACHED live 1m ago · stale", "LIVE"]
+    payload["terminals"] = {
+        "master-1": {
+            "state": "unverified",
+            "checked_at": NOW_MS,
+            "live_at": 0,
+            "fresh_ms": 30_000,
+            "reason": "unreachable",
+        },
+        "eng-58": {**fresh, "state": "cached", "live_at": NOW_MS - 120_000, "reason": "conversation_mismatch"},
+    }
+    page = open_page(payload, clock=True)
+    assert [row[7] for row in page.table("swarm-agents")] == [
+        "UNVERIFIED unreachable",
+        "CACHED live 2m ago · conversation mismatch",
+    ]
+
+
 def test_an_agents_table_without_agents_spans_all_nine_columns(open_page):
     page = open_page(status(agents=[]))
     assert page.tab.eval_on_selector("#swarm-agents td", "td => td.colSpan") == 9
