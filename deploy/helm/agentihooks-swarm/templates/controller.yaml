@@ -179,6 +179,10 @@ spec:
               value: {{ $api.signingKey.keyId | quote }}
             - name: AGENTIHOOKS_LAUNCH_SIGNING_KEY_FILE
               value: /run/secrets/launch-signing/{{ $api.signingKey.secretKey }}
+            {{- with $api.proof }}
+            - name: AGENTIHOOKS_CONTROL_PROOF
+              value: {{ toJson . | quote }}
+            {{- end }}
             {{- end }}
             {{- if $workers.apiUrl }}
             - name: AGENTIHOOKS_CONTROL_API_URL

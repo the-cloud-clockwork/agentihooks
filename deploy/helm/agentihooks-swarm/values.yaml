@@ -82,6 +82,8 @@ controller:
       secretKey: signing-key
     # Peers beside the controller's own Pods, such as worker Pods; networkPolicy.ingressFrom never reaches the API.
     ingressFrom: []
+    # {agent, task} of the swarm task proving a launch: the controller creates that proof swarm, and removes it once cleared.
+    proof: {}
   # Kubernetes runtime settings, rendered once apiUrl is set and read while the API is on. The worker
   # image stays on a floating tag; the controller resolves its digest at each launch. No launch account
   # lives here: approved accounts come from the shared account secret.

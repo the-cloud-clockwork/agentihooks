@@ -142,6 +142,17 @@ done
 refuse_workers "controller.terminalCa needs secretName and key with controller.workers.apiUrl" \
   --set controller.terminalCa=null
 printf 'the chart refused every incomplete or pinned worker setting\n'
+proof="$(helm template "$release" "$chart" "${api[@]}" --set controller.api.proof.agent=engineer@323133-0001 \
+  --set controller.api.proof.task=t1 | grep -A1 'name: AGENTIHOOKS_CONTROL_PROOF' | tail -1)"
+if [[ $proof != *'value: "{\"agent\":\"engineer@323133-0001\",\"task\":\"t1\"}"' ]]; then
+  printf 'the chart did not render the proof setting: %s\n' "$proof" >&2
+  exit 1
+fi
+if helm template "$release" "$chart" "${api[@]}" | grep -q AGENTIHOOKS_CONTROL_PROOF; then
+  printf 'the chart rendered a proof setting nobody set\n' >&2
+  exit 1
+fi
+printf 'the chart renders the proof setting only when set: %s\n' "$proof"
 docker build -q -t "$image" . >/dev/null &
 build=$!
 trap finish EXIT

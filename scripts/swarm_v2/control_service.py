@@ -9,9 +9,9 @@ from scripts.hive import auth as hive_auth
 from scripts.swarm import lease, ledger_host
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
-from scripts.swarm_ledger import ledger_link
+from scripts.swarm_ledger import ledger_link, proof_ledger
 from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
-from scripts.swarm_v2 import deployed, ledger_writer, operator_auth, telemetry
+from scripts.swarm_v2 import deployed, ledger_writer, operator_auth, proof_swarm, telemetry
 from scripts.swarm_v2.api import health
 from scripts.swarm_v2.api.executions import ExecutionsAPI
 from scripts.swarm_v2.api.server import Routes, serve
@@ -225,6 +225,8 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
     hosted = ledger_link.remote(environ)
     if hosted and not credential:
         raise ControlError(f"the hosted ledger needs {CREDENTIAL_ENV}")
+    if hosted and (proven := proof_swarm.reconcile(environ, store, slug, proof_ledger)):
+        print(proven, flush=True)
     workers = deployed.Workers.from_environ(environ, slug)
     transports = () if workers is None else (workers.transport(environ, slug),)
     service = ControlService(
