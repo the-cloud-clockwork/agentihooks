@@ -27,8 +27,10 @@ setsid "${herdr_env[@]}" herdr server > "$HOME/herdr-server.log" 2>&1 &
 for _ in $(seq 100); do
   if "${herdr_env[@]}" herdr status server --json 2>/dev/null | grep -q '"running":true'; then
     printf 'terminal worker ready: herdr server running for %s\n' "$EXECUTION_ID"
-    break
+    wait
+    exit
   fi
   sleep 0.2
 done
-wait
+printf 'the terminal worker herdr server never ran: %s\n' "$(cat "$HOME/herdr-server.log")" >&2
+exit 1

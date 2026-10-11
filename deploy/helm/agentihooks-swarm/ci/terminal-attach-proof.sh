@@ -171,5 +171,10 @@ if [[ $attached != *"registered 1, refused {}"* ]]; then
   exit 1
 fi
 printf 'the controller start pass attached to the worker attempt over ssh and qualified its herdr server: %s\n' "$attached"
+execution="$(python3 -c 'import json, sys; print(json.loads(sys.argv[1])["execution"])' "$opened")"
 machines="$(kubectl exec "deployment/$release-controller" -c controller -- herdr machine list --json)"
+if [[ $machines != *"$execution"* ]]; then
+  printf 'the controller saved no herdr machine for the worker attempt %s: %s\n' "$execution" "$machines" >&2
+  exit 1
+fi
 printf 'the controller saved the worker attempt as a herdr machine: %s\n' "$machines"
