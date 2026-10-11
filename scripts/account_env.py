@@ -27,7 +27,7 @@ def from_openbao(environ: Mapping[str, str]) -> dict[str, str] | None:
     url, bao = environ.get("OPENBAO_URL"), environ.get("OPENBAO_TOKEN")
     if not url or not bao:
         return None
-    request = Request(f"{url.rstrip('/')}/v1/{SECRET_PATH}", headers={"X-Vault-Token": bao})
+    request = Request(f"{url.removesuffix('/')}/v1/{SECRET_PATH}", headers={"X-Vault-Token": bao})
     try:
         with urlopen(request, timeout=TIMEOUT_S) as response:
             accounts = json.load(response)["data"]["data"]
@@ -59,7 +59,7 @@ def from_file(path: Path) -> tuple[dict[str, str], str]:
     try:
         if path.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO):
             return {}, f"{path} is readable by others; chmod 600 it"
-        return parse(path.read_text(encoding="utf-8")), f"accounts from {path}"
+        return parse(path.read_bytes().decode()), f"accounts from {path}"
     except OSError:
         return {}, f"no fallback at {path}"
 

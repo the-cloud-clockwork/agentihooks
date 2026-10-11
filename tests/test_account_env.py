@@ -116,13 +116,19 @@ def test_unreachable_openbao_falls_back_to_the_owner_only_file(tmp_path, monkeyp
     _fallback(
         tmp_path,
         "# operator written\nexport AH_CC_TOKEN_nestor_coltatgmail_com='tok-a'\n"
-        '  AH_CC_TOKEN_second="tok two"\nOTHER_NAME=nope\nAH_CC_TOKEN_bad name=x\nAH_CC_TOKEN_split=tok one\n\n',
+        "AH_CC_TOKEN_broken='unclosed\n"
+        '  AH_CC_TOKEN_second="tok two"\nOTHER_NAME=nope\nAH_CC_TOKEN_bad name=x\nAH_CC_TOKEN_split=tok one\n'
+        "AH_CC_TOKEN_padded=tok==\n\n",
     )
 
     assert account_env.main(["env"]) == 0
 
     out, err = capsys.readouterr()
-    assert _evaluated(out) == {"AH_CC_TOKEN_nestor_coltatgmail_com": "tok-a", "AH_CC_TOKEN_second": "tok two"}
+    assert _evaluated(out) == {
+        "AH_CC_TOKEN_nestor_coltatgmail_com": "tok-a",
+        "AH_CC_TOKEN_second": "tok two",
+        "AH_CC_TOKEN_padded": "tok==",
+    }
     assert "OTHER_NAME" not in out
     assert len(err.strip().splitlines()) == 1
     assert "OpenBao" in err and "tok-a" not in err and "tok two" not in err
