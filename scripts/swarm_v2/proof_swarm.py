@@ -60,17 +60,17 @@ def reconcile(environ: Mapping[str, str], store: RedisStore, slug: str, ledger: 
 
 
 def choose_fresh(environ: Mapping[str, str], recovery: "Recovery") -> list[str]:
-    served = environ.get(SWARM_ENV, "")
+    slug = recovery.slug
     try:
         asked = _asked(environ)
     except SwarmError:
         return []
-    if asked is None or recovery.slug != served or not naming.PROOF_RE.fullmatch(served):
+    if asked is None or environ.get(SWARM_ENV) != slug or not naming.PROOF_RE.fullmatch(slug):
         return []
     lines = []
     for execution_id in recovery.pending():
         recovery.decide(execution_id, FRESH)
-        lines.append(f"controller: chose fresh for {execution_id} in proof swarm {served}: {FRESH_REASON}")
+        lines.append(f"controller: chose fresh for {execution_id} in proof swarm {slug}: {FRESH_REASON}")
     return lines
 
 
