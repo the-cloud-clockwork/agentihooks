@@ -700,7 +700,32 @@ POLICY_REFUSALS = [
         lambda d: d["probes"]["liveness"].update(timeout_seconds=4),
         "liveness probe timeout_seconds must exceed the herdr and brain timeouts together",
     ),
+    (
+        "worker pool without pods",
+        lambda d: d.update(worker_pool={"pods": 0, "cpu_millis": 18000, "memory_mib": 34816}),
+        "pod policy is invalid at worker_pool/pods: 0 is less than the minimum of 1",
+    ),
+    (
+        "worker pool with an unknown resource",
+        lambda d: d.update(worker_pool={"pods": 8, "cpu_millis": 18000, "memory_mib": 34816, "gpus": 1}),
+        "pod policy is invalid at worker_pool: Additional properties are not allowed ('gpus' was unexpected)",
+    ),
+    (
+        "worker pool without memory",
+        lambda d: d.update(worker_pool={"pods": 8, "cpu_millis": 18000}),
+        "pod policy is invalid at worker_pool: 'memory_mib' is a required property",
+    ),
+    (
+        "worker pool cpu as text",
+        lambda d: d.update(worker_pool={"pods": 8, "cpu_millis": "18", "memory_mib": 34816}),
+        "pod policy is invalid at worker_pool/cpu_millis: '18' is not of type 'integer'",
+    ),
 ]
+
+
+def test_a_policy_declaring_its_worker_pool_loads(tmp_path):
+    pool = {"pods": 8, "cpu_millis": 18000, "memory_mib": 34816}
+    assert load_policy(write(tmp_path, {**policy_doc(), "worker_pool": pool}))["worker_pool"] == pool
 
 
 @pytest.mark.parametrize(("change", "message"), [r[1:] for r in POLICY_REFUSALS], ids=[r[0] for r in POLICY_REFUSALS])
