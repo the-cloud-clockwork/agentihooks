@@ -491,7 +491,7 @@ def relay_to_inbox(slug, state):
         sent = operator_mail.relay(inbox, RedisStore(inbox.redis), slug, state, events, watch_ledger.line)
     except Exception as exc:  # the ledger write stands whatever the inbox does
         sys.stderr.write(f"inbox relay for {slug}: {exc}\n")
-        unrelayed_on(exc, RELAY, slug, meta["rev"])
+        unrelayed_on(RELAY, slug, meta["rev"])
         return []
     relayed(RELAY, slug, since, meta["rev"])
     return sent
@@ -521,7 +521,7 @@ def deliver_alerts(slug, state):
         sent = ledger_alerts.deliver(inbox, slug, alerts, meta["rev"], master, since=since)
     except Exception as exc:  # the ledger write stands whatever the inbox does
         sys.stderr.write(f"alert delivery for {slug}: {exc}\n")
-        unrelayed_on(exc, ALERTS, slug, meta["rev"])
+        unrelayed_on(ALERTS, slug, meta["rev"])
         return []
     relayed(ALERTS, slug, since, meta["rev"])
     return sent
@@ -556,7 +556,10 @@ def _change_unrelayed(change) -> None:
         found = {kind: slugs for kind, slugs in found.items() if slugs}
         staged = unrelayed_path().with_suffix(".tmp")
         staged.parent.mkdir(parents=True, exist_ok=True)
-        staged.write_text(json.dumps(found))
+        with staged.open("w") as handle:
+            handle.write(json.dumps(found))
+            handle.flush()
+            os.fsync(handle.fileno())
         os.replace(staged, unrelayed_path())
 
 
@@ -564,18 +567,14 @@ def unrelayed_since(kind, slug, rev) -> int:
     return min([rev, *unrelayed().get(kind, {}).get(slug, [])])
 
 
-def unrelayed_on(exc, kind, slug, rev):
-    """Keep the revision for replay when the inbox was unreachable or could not queue it."""
-    from redis.exceptions import RedisError
-
-    from scripts.inbox.store import InboxError
+def unrelayed_on(kind, slug, rev):
+    """Keep the revision for replay whatever stopped the inbox from taking it."""
 
     def keep(found):
         held = found.setdefault(kind, {})
         held[slug] = sorted({*held.get(slug, []), rev})
 
-    if isinstance(exc, (RedisError, InboxError)):
-        _change_unrelayed(keep)
+    _change_unrelayed(keep)
 
 
 def relayed(kind, slug, since, rev):
@@ -1046,7 +1045,10 @@ def watch_ledgers(interval=2.0):
         if passes and passes % BIN_SWEEP_EVERY == 0:
             expire_alerts()
         if passes % REPLAY_EVERY == 0 and unrelayed_path().exists():
-            replay_unrelayed()
+            try:
+                replay_unrelayed()
+            except Exception as exc:  # the watch loop also tidies the bin, expires alerts and samples streams
+                sys.stderr.write(f"unrelayed replay: {exc}\n")
         sample_streams()
         time.sleep(interval)
 

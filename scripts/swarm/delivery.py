@@ -9,7 +9,7 @@ import json
 
 from scripts.inbox import links, outbox
 from scripts.inbox.store import DuplicateItem, InboxError, InboxStore
-from scripts.swarm.store import SwarmError
+from scripts.swarm.store import RedisStore, SwarmError
 
 READY = ("idle", "done")
 OPERATOR = "operator"
@@ -77,8 +77,6 @@ def queue(slug, text, sender, to, fyi=False):
 
 
 def apply_say(inbox, sender, entry):
-    from scripts.swarm.store import RedisStore
-
     args, store = entry["args"], RedisStore(inbox.redis)
     try:
         slug = store.names.swarm_slug(args["slug"])
