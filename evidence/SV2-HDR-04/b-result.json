@@ -3,7 +3,7 @@
   "state": "passed",
   "evidence_class": "mocked: a recording stand in for the Anton herdr client answers herdr machine commands with the 0.9.1 reply shapes of SV2-HDR-03 and serves agent get, agent prompt and pane send-text for Local and each saved machine from the fixture; no herdr process, SSH connection or cluster runs in these cases",
   "input_sha256": {
-    "herdr-pane-routing.json": "b5d540a071e09a0d24d1ef831dcdcccfcd185d78852e90efb119ada7b00dcc11",
+    "herdr-pane-routing.json": "36a84ba856cd6c2cdc3f57e7ca84227a9908e2de7046ea57056ca2329a8c730d",
     "herdr-registrations.json": "eb069f75d17862be563e36f558ee14db60cd24d7982bb042f2232db5bb81a57c",
     "herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940"
   },
@@ -35,7 +35,7 @@
         },
         "manual_machine_label": {
           "reason": "unregistered",
-          "message": "devbox is not a machine this controller registered",
+          "message": "devbox is not one machine this controller registered",
           "unchanged": true
         },
         "wrong_conversation": {

@@ -15,6 +15,7 @@
   },
   "caller_environment": {
     "HERDR_PANE_ID": "w1:p1",
+    "HERDR_SOCKET_PATH": "/home/operator/.config/herdr/herdr.sock",
     "HERDR_WORKSPACE_ID": "w1",
     "HERDR_TAB_ID": "w1:t1",
     "PATH": "/usr/bin:/bin"

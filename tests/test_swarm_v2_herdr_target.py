@@ -160,6 +160,22 @@ def test_a_label_resolves_only_through_the_controller_record(tmp_path):
     assert refusal(lambda: client.router.resolve("unknown", PANE))[0] == "unregistered"
 
 
+def test_the_agent_label_shared_by_every_server_resolves_nothing(tmp_path):
+    client, fleet, _ = world(tmp_path)
+    before = list(fleet.commands)
+    assert refusal(lambda: client.router.resolve(FX["agent"], PANE))[0] == "unregistered"
+    assert fleet.commands == before
+
+
+def test_a_label_two_records_share_is_refused(tmp_path):
+    client, _, desired = world(tmp_path)
+    store = client.registrations.store
+    records = store.load()
+    records[EXE_B] = Record(**{**records[EXE_B].__dict__, "label": desired[0].name})
+    store.save(records)
+    assert refusal(lambda: resolved(client, desired[0]))[0] == "unregistered"
+
+
 def test_resolve_refuses_a_record_whose_add_is_unconfirmed(tmp_path):
     client, fleet, desired = world(tmp_path)
     store = client.registrations.store
@@ -191,19 +207,29 @@ def test_the_expected_conversation_admits_the_prompt(tmp_path):
     assert gets == [["herdr", "--machine", resolved(client, desired[0]).profile_id, "agent", "get", PANE]]
 
 
-def test_a_pane_that_exposes_no_conversation_is_admitted(tmp_path):
+def test_a_pane_that_reports_no_conversation_is_unconfirmed(tmp_path):
     client, fleet, desired = world(tmp_path)
     fleet.remote[EXE_A]["panes"][PANE].pop("agent_session")
-    client.router.send(resolved(client, desired[0], CONVERSATION_A), "agent_prompt", "op", "x")
-    assert fleet.received()[EXE_A] == ["x"]
+    found = resolved(client, desired[0], CONVERSATION_A)
+    assert refusal(lambda: client.router.send(found, "agent_prompt", "op", "x"))[0] == "conversation_unconfirmed"
+    assert fleet.received()[EXE_A] == []
 
 
 @pytest.mark.parametrize("session", [{"kind": "path", "value": "x"}, {"kind": "id", "value": ""}, "id"])
-def test_a_session_that_is_not_an_id_is_not_compared(tmp_path, session):
+def test_a_session_that_is_not_an_id_is_unconfirmed(tmp_path, session):
     client, fleet, desired = world(tmp_path)
     fleet.remote[EXE_A]["panes"][PANE]["agent_session"] = session
-    client.router.send(resolved(client, desired[0], CONVERSATION_A), "agent_prompt", "op", "x")
+    found = resolved(client, desired[0], CONVERSATION_A)
+    assert refusal(lambda: client.router.send(found, "agent_prompt", "op", "x"))[0] == "conversation_unconfirmed"
+    assert fleet.received()[EXE_A] == []
+
+
+def test_a_target_without_an_expected_conversation_is_sent_on_its_pane_alone(tmp_path):
+    client, fleet, desired = world(tmp_path)
+    fleet.remote[EXE_A]["panes"][PANE].pop("agent_session")
+    client.router.send(resolved(client, desired[0]), "agent_prompt", "op", "x")
     assert fleet.received()[EXE_A] == ["x"]
+    assert not any(command[3:5] == ["agent", "get"] for command in fleet.commands)
 
 
 def test_an_agent_reply_for_another_pane_is_refused(tmp_path):
@@ -255,30 +281,36 @@ def test_a_repeated_operation_id_sends_nothing_again(tmp_path):
 def test_an_operation_id_reused_for_another_pane_is_refused(tmp_path):
     client, fleet, desired = world(tmp_path)
     client.router.send(resolved(client, desired[0]), "agent_prompt", "op-1", "a")
-    reason, _ = refusal(lambda: client.router.send(resolved(client, desired[1]), "agent_prompt", "op-1", "b"))
+    other = resolved(client, desired[1])
+    reason, _ = refusal(lambda: client.router.send(other, "agent_prompt", "op-1", "b"))
     assert reason == "operation_reused"
     assert fleet.received()[EXE_B] == []
+    assert client.router.mismatches == {(other.profile_id, "operation_reused"): 1}
 
 
 @pytest.mark.parametrize("operation_id", ["", 7, None])
 def test_a_send_needs_an_operation_id(tmp_path, operation_id):
     client, fleet, desired = world(tmp_path)
     found = resolved(client, desired[0])
+    before = list(fleet.commands)
     assert refusal(lambda: client.router.send(found, "agent_prompt", operation_id, "x"))[0] == "operation_id"
-    assert fleet.mutations() == []
+    assert fleet.commands == before
 
 
-def test_a_refused_send_forgets_its_operation_so_a_retry_can_run(tmp_path):
+def test_a_send_herdr_refuses_stays_pending_and_needs_a_new_operation_id(tmp_path):
     client, fleet, desired = world(tmp_path)
     found = resolved(client, desired[0])
     real = fleet.__call__
     client.router.run = lambda command: (
         subprocess.CompletedProcess(command, 1, "", "busy") if command[3:5] == ["agent", "prompt"] else real(command)
     )
-    assert refusal(lambda: client.router.send(found, "agent_prompt", "op-1", "x"))[0] == "send_refused"
-    assert not json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]
+    reason, message = refusal(lambda: client.router.send(found, "agent_prompt", "op-1", "x"))
+    assert (reason, message) == ("send_refused", f"herdr exited 1 for op-1 on {found.incarnation}/{PANE}")
+    entries = json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]
+    assert entries == {"op-1": {"target": f"{found.incarnation}/{PANE}", "state": "pending"}}
     client.router.run = fleet
-    client.router.send(found, "agent_prompt", "op-1", "x")
+    assert refusal(lambda: client.router.send(found, "agent_prompt", "op-1", "x"))[0] == "ambiguous_delivery"
+    client.router.send(found, "agent_prompt", "op-2", "x")
     assert fleet.received()[EXE_A] == ["x"]
 
 
@@ -305,11 +337,22 @@ def test_a_send_with_an_unknown_outcome_stays_pending_and_is_never_resent(tmp_pa
 
 def test_the_journal_keeps_only_the_newest_deliveries(tmp_path, monkeypatch):
     monkeypatch.setattr(target_module, "KEPT", 2)
-    client, _, desired = world(tmp_path)
+    client, fleet, desired = world(tmp_path)
     found = resolved(client, desired[0])
+    real = fleet.__call__
+
+    def lose(command):
+        if command[-1] == "lost":
+            raise subprocess.TimeoutExpired(command, 30)
+        return real(command)
+
+    client.router.run = lose
+    refusal(lambda: client.router.send(found, "agent_prompt", "op-pending", "lost"))
     for number in range(3):
         client.router.send(found, "agent_prompt", f"op-{number}", "x")
-    assert list(json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]) == ["op-1", "op-2"]
+    entries = json.loads((tmp_path / DELIVERIES).read_text())["deliveries"]
+    assert list(entries) == ["op-pending", "op-1", "op-2"]
+    assert entries["op-pending"]["state"] == "pending"
     assert KEPT == 1024
 
 
@@ -366,7 +409,7 @@ def test_refresh_refuses_a_bare_target(tmp_path):
 
 def test_remote_commands_drop_the_local_caller_pane_identity():
     assert remote_environ(FX["caller_environment"]) == {"PATH": "/usr/bin:/bin"}
-    assert set(CALLER) == {"HERDR_PANE_ID", "HERDR_WORKSPACE_ID", "HERDR_TAB_ID"}
+    assert set(CALLER) == {"HERDR_PANE_ID", "HERDR_WORKSPACE_ID", "HERDR_TAB_ID", "HERDR_SOCKET_PATH"}
 
 
 def test_the_client_runner_runs_herdr_without_the_caller_pane(monkeypatch):

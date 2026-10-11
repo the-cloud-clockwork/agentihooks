@@ -14,7 +14,7 @@ from scripts.swarm_v2.herdr.endpoints import EndpointRefused
 from scripts.swarm_v2.herdr.reconcile import Record, Store
 
 PANE = re.compile(r"w[0-9]+:p[0-9]+")
-CALLER = ("HERDR_PANE_ID", "HERDR_WORKSPACE_ID", "HERDR_TAB_ID")
+CALLER = ("HERDR_PANE_ID", "HERDR_WORKSPACE_ID", "HERDR_TAB_ID", "HERDR_SOCKET_PATH")
 READS = frozenset({"pane_read", "pane_wait_output", "pane_process_info", "agent_get"})
 MUTATIONS = frozenset({"pane_run", "pane_send_text", "pane_send_keys", "pane_close", "agent_prompt", "agent_rename"})
 DELIVERIES = "deliveries.json"
@@ -86,7 +86,9 @@ class Deliveries:
         return entries
 
     def save(self, entries: dict[str, dict]) -> None:
-        kept = dict(list(entries.items())[-KEPT:])
+        sent = [key for key, entry in entries.items() if entry.get("state") == "sent"]
+        dropped = set(sent[: max(len(sent) - KEPT, 0)])
+        kept = {key: entry for key, entry in entries.items() if key not in dropped}
         staged = self.path.with_name(f".{self.path.name}.tmp")
         staged.unlink(missing_ok=True)
         with os.fdopen(os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as handle:
@@ -94,11 +96,17 @@ class Deliveries:
             handle.flush()
             os.fsync(handle.fileno())
         staged.replace(self.path)
+        folder = os.open(self.path.parent, os.O_RDONLY)
+        try:
+            os.fsync(folder)
+        finally:
+            os.close(folder)
 
 
 class Router:
     """Every remote pane operation names one saved machine profile owned by the controller and one confirmed server
-    incarnation; it never falls back to the local server."""
+    incarnation; it never falls back to the local server. A pane whose agent reports no id session is admitted on its
+    pane id and incarnation, because herdr exposes no conversation to compare."""
 
     def __init__(
         self, store: Store, catalog: Catalog, qualifier: Qualifier, run: Run, journal: Path, *, mutations: bool = True
@@ -129,10 +137,10 @@ class Router:
         return record
 
     def resolve(self, label: str, pane_id: str, conversation_id: str = "") -> Target:
-        records = self.store.load().values()
-        record = next((entry for entry in records if entry.label == label and entry.profile_id), None)
-        if record is None:
-            self._refuse("", "unregistered", f"{label} is not a machine this controller registered")
+        found = [entry for entry in self.store.load().values() if entry.label == label and entry.profile_id]
+        if len(found) != 1:
+            self._refuse("", "unregistered", f"{label} is not one machine this controller registered")
+        record = found[0]
         self._pane(record.profile_id, pane_id)
         self._listed(record)
         return Target(record.profile_id, record.session, _incarnation(record), pane_id, conversation_id)
@@ -175,10 +183,9 @@ class Router:
         except (OSError, subprocess.TimeoutExpired):
             done = None
         found = _conversation(done.stdout) if done is not None and done.returncode == 0 else None
-        if found is None:
-            self._refuse(target.profile_id, "conversation_unconfirmed", f"{target.pane_id} did not report its agent")
-        pane_id, conversation_id = found
-        if pane_id != target.pane_id or conversation_id not in ("", target.conversation_id):
+        if found is None or not found[1]:
+            self._refuse(target.profile_id, "conversation_unconfirmed", f"{target.pane_id} reported no conversation")
+        if found != (target.pane_id, target.conversation_id):
             self._refuse(target.profile_id, "conversation_mismatch", f"{target.pane_id} holds another conversation")
 
     def send(self, target: Target, operation: str, operation_id: str, *args: str) -> subprocess.CompletedProcess | None:
@@ -186,15 +193,15 @@ class Router:
             raise EndpointRefused("read_only", "pane mutations are switched off; only read only inspection runs")
         if operation not in MUTATIONS:
             self._refuse(getattr(target, "profile_id", ""), "operation", f"{operation} is not a pane mutation")
-        argv = self.command(target, operation, *args)
         if not isinstance(operation_id, str) or not operation_id:
             raise EndpointRefused("operation_id", "a pane mutation needs an operation id")
+        argv = self.command(target, operation, *args)
         key = f"{target.incarnation}/{target.pane_id}"
         with self.deliveries.locked():
             entries = self.deliveries.load()
             held = entries.get(operation_id)
             if held is not None:
-                return self._replayed(held, key, operation_id)
+                return self._replayed(held, target, key, operation_id)
             self._confirm(target)
             entries[operation_id] = {"target": key, "state": "pending"}
             self.deliveries.save(entries)
@@ -203,19 +210,16 @@ class Router:
             except (OSError, subprocess.TimeoutExpired):
                 raise EndpointRefused("ambiguous_delivery", f"{operation_id} may have reached {key}") from None
             if done.returncode != 0:
-                del entries[operation_id]
-                self.deliveries.save(entries)
-                raise EndpointRefused("send_refused", f"herdr refused {operation} on {target.pane_id}")
+                raise EndpointRefused("send_refused", f"herdr exited {done.returncode} for {operation_id} on {key}")
             entries[operation_id] = {"target": key, "state": "sent"}
             self.deliveries.save(entries)
         return done
 
-    def _replayed(self, held: dict, key: str, operation_id: str) -> None:
+    def _replayed(self, held: dict, target: Target, key: str, operation_id: str) -> None:
         if held.get("target") != key:
-            raise EndpointRefused("operation_reused", f"{operation_id} was sent to another pane")
+            self._refuse(target.profile_id, "operation_reused", f"{operation_id} was sent to another pane")
         if held.get("state") != "sent":
             raise EndpointRefused("ambiguous_delivery", f"{operation_id} may have reached {key}")
-        return None
 
     def herdr_target_mismatch_total(self) -> int:
         return sum(self.mismatches.values())
