@@ -51,7 +51,12 @@ STALE = "{slug}: removing {path}, older than the pair in OpenBao"
 UNREADABLE = "{slug}: ignoring unreadable {path}"
 NO_LOCAL_ACCOUNT = "{slug}: no such Codex account under {root}"
 NO_BAO_ACCOUNT = "{slug}: no such Codex account in OpenBao"
-LEGACY = "{name}: skipped, the name is not a slug; run agentihooks codex login {name} to store it as {slug}"
+LEGACY = (
+    "{name}: not refreshed, the name is not a slug; sign in again with agentihooks codex login {name} "
+    "to store it as {slug}"
+)
+FORCED = "{name}: refreshed under its old name; agentihooks codex login {name} stores it as {slug}"
+UNUSABLE = "{name}: not refreshed, the name cannot become a slug; sign in again with agentihooks codex login <slug>"
 
 
 class GrantError(RuntimeError):
@@ -189,13 +194,15 @@ def _select(names: list[str], force: str) -> list[str]:
         try:
             found = aicode_tokens.slug(name)
         except aicode_tokens.SlugError:
+            if not force:
+                print(term_colors.yellow(UNUSABLE.format(name=name)))
             continue
         if force and found != force:
             continue
-        if found == name:
+        if found != name:
+            print(term_colors.yellow((FORCED if force else LEGACY).format(name=name, slug=found)))
+        if force or found == name:
             kept.append(name)
-        else:
-            print(term_colors.yellow(LEGACY.format(name=name, slug=found)))
     return kept
 
 

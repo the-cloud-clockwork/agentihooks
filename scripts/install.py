@@ -84,7 +84,7 @@ import textwrap
 from collections.abc import Callable, Sequence
 from copy import deepcopy
 from datetime import datetime, timezone
-from importlib import metadata
+from importlib import import_module, metadata
 from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import url2pathname
@@ -6401,11 +6401,10 @@ def main() -> None:
             _at = _argv.index(_option, 2)
             _argv[1:1] = [_argv.pop(_at) for _ in range(min(2, len(_argv) - _at))]
 
-    # Fast path: "agentihooks claude ..." skips argparse so claude flags (-r, --resume, -p) pass through untouched
+    # Fast path: "agentihooks claude ..." bypasses argparse entirely
+    # so that any claude flags (-r, --resume, -p, etc.) pass through untouched
     if _argv and _argv[0] == "claude":
-        from scripts.claude_login import dispatch
-
-        return dispatch(_argv[1:], cmd_claude)
+        return import_module("scripts.claude_login").dispatch(_argv[1:], cmd_claude)
     if _argv and _argv[0] == "codex":
         from scripts.codex_router import main as codex_main
 

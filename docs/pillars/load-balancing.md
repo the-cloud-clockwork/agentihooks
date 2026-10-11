@@ -462,9 +462,14 @@ days, so the refresher below keeps it alive.
   becomes `team_a`) and the login prints a note recommending the email of the
   target account. A result that is empty, starts with `_`, or is `status`,
   `help`, `default` or `api` is refused. Both logins use this rule. An account
-  stored under an older mixed-case name (`ncgmaTCC`) is skipped by
-  `codex refresh`, which names the `agentihooks codex login <old name>` that
-  stores it again under the new slug.
+  stored under an older mixed-case name (`ncgmaTCC`) keeps routing on its
+  current access token, but `codex refresh` no longer renews it, so it stops
+  working when that token expires; the refresher names it on every run.
+  `codex refresh --force <name>` still renews it once under the old name. The
+  fix is a fresh browser sign-in with `agentihooks codex login <old name>`,
+  which stores it under the new slug and removes the old keys. A name that
+  cannot become a slug at all is named the same way and needs a login under a
+  new slug.
   `agentihooks codex login` with no slug, `login status`, `login help` and
   `login --<flag>` still go straight to `codex login`.
 - The login runs `codex login -c cli_auth_credentials_store="file"` (browser
