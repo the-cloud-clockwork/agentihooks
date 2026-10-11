@@ -109,7 +109,7 @@ def test_writes_made_while_redis_is_down_reach_their_agents_once_after_recovery(
     ledger_server.replay_unrelayed()
     replay_outbox(outage)
     assert_each_write_reached_its_agent_once(outage)
-    assert len(mentions(outage.texts(ENG.seat), "the docs build is green")) == 1
+    assert len(mentions(outage.texts(ENG.name), "the docs build is green")) == 1
 
 
 def swarm_say(monkeypatch):
@@ -135,7 +135,7 @@ def test_a_swarm_say_whose_recipient_lookup_loses_redis_reaches_its_agent_once_a
     swarm_say(monkeypatch)
     outage.down(False)
     replay_outbox(outage)
-    assert len(mentions(outage.texts(ENG.seat), "the docs build is green")) == 1
+    assert len(mentions(outage.texts(ENG.name), "the docs build is green")) == 1
 
 
 def test_the_next_write_after_recovery_replays_every_revision_it_could_not_relay(outage):

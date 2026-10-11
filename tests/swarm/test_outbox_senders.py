@@ -55,10 +55,10 @@ def test_swarm_say_queues_a_send_redis_dropped_and_replays_it_once(swarm, lost):
     store, inbox = swarm
     lost()
     assert delivery.send(store, SLUG, "the docs build is green", sender=BOSS.name, to=ENG.name) == [ENG.name]
-    assert items(inbox, ENG.seat) == [] and outbox.waiting()
+    assert items(inbox, ENG.name) == [] and outbox.waiting()
     outbox.flush(inbox)
     outbox.flush(inbox)
-    [item] = items(inbox, ENG.seat)
+    [item] = items(inbox, ENG.name)
     assert (item.sender, item.text, item.task) == (BOSS.name, "the docs build is green", ENG.task)
 
 
@@ -159,10 +159,10 @@ def test_swarm_say_while_redis_is_fully_down_reaches_its_recipient_once_after_re
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", BOSS.name)
     monkeypatch.setattr(cli, "connect", unreachable)
     assert cli.main([SLUG, "say", "the docs build is green", "--to", "eng"]) == 0
-    assert items(inbox, ENG.seat) == [] and outbox.waiting()
+    assert items(inbox, ENG.name) == [] and outbox.waiting()
     outbox.flush(inbox)
     outbox.flush(inbox)
-    [item] = items(inbox, ENG.seat)
+    [item] = items(inbox, ENG.name)
     assert (item.sender, item.text, item.task) == (BOSS.name, "the docs build is green", ENG.task)
     assert not outbox.waiting()
 
@@ -173,5 +173,5 @@ def test_a_queued_swarm_say_naming_nobody_is_set_aside_and_the_next_record_still
     delivery.queue(SLUG, "the docs build is green", BOSS.name, ENG.name)
     report = outbox.flush(inbox)
     assert report.rejected and not outbox.waiting()
-    [item] = items(inbox, ENG.seat)
+    [item] = items(inbox, ENG.name)
     assert item.text == "the docs build is green"
