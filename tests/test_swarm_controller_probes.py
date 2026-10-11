@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 
@@ -118,10 +119,10 @@ def test_ready_fails_with_its_hint_when_redis_is_unavailable(store, server, caps
 def test_the_controller_command_runs_each_probe(monkeypatch, action):
     calls = []
     monkeypatch.setattr("scripts.swarm.controller.connect", lambda: "store")
-    monkeypatch.setattr(controller_probes, action, lambda environ, store: calls.append(store) or 3)
+    monkeypatch.setattr(controller_probes, action, lambda environ, store: calls.append((environ, store)) or 3)
 
     assert main([action]) == 3
-    assert calls == ["store"]
+    assert calls == [(os.environ, "store")]
 
 
 @pytest.mark.parametrize("action", ["live", "ready"])
