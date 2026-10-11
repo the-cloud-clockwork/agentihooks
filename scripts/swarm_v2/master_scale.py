@@ -117,7 +117,7 @@ def _ask(slug, store, occupied, retiring, indexes, want, now_ms):
 def _retire(slug, store, address, asked, now_ms):
     """asked is [ask time, ask item id] when the seat's master was asked to hand off, else None."""
     inbox, lead, seat_name = InboxStore(store.redis), _address(slug, 1), address.removesuffix(f"@{slug}")
-    ask_id = asked[1] if asked else ""
+    ask_id = asked and asked[1]
     text = store.handoff(slug, seat_name)
     if text:
         inbox.send(SENDER, lead, HANDED.format(address=address, slug=slug) + text)

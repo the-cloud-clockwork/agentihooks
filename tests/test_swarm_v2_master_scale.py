@@ -360,6 +360,98 @@ def test_an_extra_master_never_stands_in_for_a_lead_that_is_down(swarm):
     assert [a.name for a in store.agents(SLUG) if masters.is_lead(SLUG, a)] == []
 
 
+def test_the_shrink_state_lives_in_this_swarms_masters_hash_and_the_ask_names_the_new_count(swarm):
+    store, runtime = swarm
+    grown(swarm)
+    staffed(store, 5)
+    key = masters.MasterSeats(store.redis).key(SLUG)
+    run(store, runtime, NOW + MINUTE)
+    assert store.redis.hget(key, master_scale.BELOW) == str(NOW + MINUTE)
+
+    run(store, runtime, NOW + MINUTE + HOLD)
+
+    [item] = InboxStore(store.redis).pending_items(FOURTH)
+    assert item.text == master_scale.ASK.format(slug=SLUG, want=1, address=FOURTH, lead=LEAD)
+    assert set(json.loads(store.redis.hget(key, master_scale.RETIRING))) == {SECOND, THIRD, FOURTH}
+
+
+def test_a_retired_seat_forwards_its_handoff_and_moves_and_withdraws_items_as_the_swarm(swarm):
+    store, runtime = swarm
+    inbox = InboxStore(store.redis)
+    _, _, fourth = asked(swarm)
+    [ask] = inbox.pending_items(FOURTH)
+    question = inbox.send(f"{SLUG}-eng-1", FOURTH, "a question")
+    store.put_handoff(SLUG, fourth.task, "# Handoff v2\nnotes", seat=FOURTH)
+    store.put_agent(SLUG, replace(fourth, state="finished"))
+    runtime.live.discard(fourth.name)
+
+    run(store, runtime, NOW + 2 * MINUTE + HOLD)
+
+    forwarded = [i.text for i in inbox.pending_items(LEAD) if i.sender == "swarm"]
+    assert forwarded == [master_scale.HANDED.format(address=FOURTH, slug=SLUG) + "# Handoff v2\nnotes"]
+    assert inbox.history(ask.id)[-1]["by"] == "swarm"
+    assert inbox.history(question.id)[-1]["by"] == "swarm"
+
+
+def test_a_regrowth_withdraws_the_asks_as_the_swarm(swarm):
+    store, runtime = swarm
+    inbox = InboxStore(store.redis)
+    seated = asked(swarm)
+    asks = [item for agent in seated for item in inbox.pending_items(agent.seat)]
+    staffed(store, 20)
+
+    run(store, runtime, NOW + 2 * MINUTE + HOLD)
+
+    assert [inbox.history(item.id)[-1]["by"] for item in asks] == ["swarm"] * 3
+
+
+def test_retiring_a_seat_no_master_was_asked_to_leave_moves_its_items_to_the_lead(swarm):
+    store, _ = swarm
+    inbox = InboxStore(store.redis)
+    waiting = inbox.send(f"{SLUG}-eng-1", THIRD, "for an empty seat")
+
+    action = master_scale._retire(SLUG, store, THIRD, None, NOW)
+
+    assert action == f"closed empty master seat {THIRD}"
+    assert inbox.get(waiting.id).address == LEAD and inbox.get(waiting.id).state == "pending"
+
+
+def test_a_finished_master_that_left_its_seat_is_replaced(swarm):
+    store, runtime = swarm
+    master_scale.set_rule(store.redis, SLUG, "")
+    masters.MasterSeats(store.redis).set_count(SLUG, 2)
+    store.put_agent(SLUG, AgentRecord(f"{SLUG}-master-2", MASTER, "master-2", seat=SECOND, state="finished"))
+
+    actions = run(store, runtime)
+
+    [second] = extras(store)
+    assert actions == [f"spawned master {second.name} in seat {SECOND}"]
+
+
+def test_a_failed_master_launch_leaves_no_record_behind(swarm):
+    store, runtime = swarm
+    master_scale.set_rule(store.redis, SLUG, "")
+    masters.MasterSeats(store.redis).set_count(SLUG, 2)
+    runtime.fail = True
+
+    actions = run(store, runtime)
+
+    assert len(actions) == 1 and actions[0].startswith(f"master spawn failed in seat {SECOND}: ")
+    assert [a.name for a in store.agents(SLUG)] == [LEAD_NAME]
+
+
+def test_only_a_master_record_in_the_lead_seat_is_the_lead():
+    assert masters.is_lead(SLUG, AgentRecord(LEAD_NAME, MASTER, MASTER, seat=LEAD))
+    assert masters.is_lead(SLUG, AgentRecord(LEAD_NAME, MASTER, MASTER))
+    assert not masters.is_lead(SLUG, AgentRecord("e", "eng", "t1"))
+    assert not masters.is_lead(SLUG, AgentRecord("m2", MASTER, "master-2", seat=SECOND))
+
+
+def test_a_seat_without_phases_is_told_it_owns_none_yet():
+    text = prompt.build(SLUG, "/repo", MASTER, "m2", {"id": "master-2", "seat": SECOND, "phases": [], "masters": 2})
+    assert "you own: none yet." in text
+
+
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-MST-03"
 
 
