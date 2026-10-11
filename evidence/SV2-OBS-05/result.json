@@ -32,8 +32,8 @@
     "red": "proofs run 38149502432 on tests only commit ece33d8a1: collection error, the module absent",
     "tests": "proofs run 38149860889 at 9f83839bf produced the first records; proofs run 38155608685 at tested_commit: 67 passed, 3 parity failures only because the records changed with the review fixes, records regenerated from it",
     "lint": "ruff check, ruff format and size limits passed through python -m scripts.ci_prepush",
-    "mutation": "mutation preflight 38153474445 at 7833362a5: fleet_dashboard 811 killed, none survived, after 91 survivors in preflight 38152463800 were killed by tests or removed in code (sort_keys dropped, alerts_enabled default made observable)",
-    "review": "Standards and Spec readers round 1: 17 findings, fixed at 60f6f452e or ruled with evidence in the task proof; round 2 pending"
+    "mutation": "mutation preflight 38159055518 at eae9c8bb8: fleet_dashboard 849 killed, none survived; earlier survivors (91 at 6e47090e6, 1 at e20ea5d3f) were killed by tests or removed in code",
+    "review": "Standards reader closed after three rounds, Spec reader after two; every finding fixed, documented in metrics-contract.md, or ruled with evidence in the task proof"
   },
   "measurements": {
     "alert_actionability_review": {
@@ -82,5 +82,6 @@
     "No collector builds a sample from the live execution registry, pool readings, quota store, Health.diagnose, checkpoint manifests and brain denials yet; the projection runs on recorded samples only.",
     "No Grafana dashboard or alert backend consumes the definition; incidents are delivered to a sink function.",
     "The owned path candidate observability/swarm-v2.json moved to docs/swarm-v2/fleet-dashboard.json because the mutation workspace copies docs but not observability."
-  ]
+  ],
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2636"
 }
