@@ -1,3 +1,4 @@
+from functools import partial
 from types import SimpleNamespace
 
 import pytest
@@ -6,13 +7,15 @@ from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
 from scripts.swarm import capacity, profile_choice, runtime
 from scripts.swarm.store import SwarmConfig
 from scripts.swarm_v2 import launch
-from scripts.swarm_v2.runtime.base import SpawnRequest
+from scripts.swarm_v2.runtime.base import SpawnRequest, Status
+from scripts.swarm_v2.runtime.routed import routed
 from tests.swarm.profile_fixture import validated
-from tests.test_swarm_v2_launch import FIRST, OTHER_API, SLUG, World, pod_target
+from tests.test_swarm_v2_launch import FIRST, OTHER_API, SLUG, Herdr, World, pod_target
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
 TASK = {"id": "t1", "title": "Restyle the ledger page header"}
+SHIPPED = launch.worker_profiles
 REMEDY = (
     f"set it with agentihooks ledger --slug {SLUG} task set t1 profile=<frontend|engineer|qa>, "
     "or split the task into one public responsibility each, then reopen it"
@@ -71,6 +74,19 @@ def test_a_task_the_classifier_sends_to_frontend_gets_frontend_on_both_paths(tmp
     assert asked == ["t1", "t1"]
 
 
+def test_a_pod_launch_refuses_a_classifier_profile_the_worker_image_does_not_ship(monkeypatch, asked):
+    monkeypatch.setattr(launch, "worker_profiles", SHIPPED)
+    world = World(monkeypatch)
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+    request = SpawnRequest(config, "eng", world.store.next_name(SLUG, "eng"), {**TASK, "seat": FIRST})
+
+    outcome = world.launcher.from_tick(request, world.terms, pod_target)
+
+    assert (outcome.status, outcome.detail) == (Status.REFUSED, "profile frontend is not shipped in the worker image")
+    assert asked == ["t1"]
+    assert world.runtime.requests == []
+
+
 @pytest.mark.parametrize(
     ("task", "lanes"),
     [({**TASK, "profile": "qa"}, {}), (TASK, {"eng": {"profile": "qa"}})],
@@ -97,6 +113,27 @@ def test_a_pod_launch_the_classifier_cannot_place_is_unresolved_before_admission
     assert str(unresolved.value) == f"task t1 profile classification is unavailable (down): {REMEDY}"
     assert world.runtime.requests == []
     assert world.rows() == {}
+
+
+def test_the_tick_runtime_hands_the_tick_an_unresolved_pod_profile(monkeypatch):
+    def down(*args, **kwargs):
+        raise ClassifierUnavailable("down")
+
+    monkeypatch.setattr(profile_choice, "decide", down)
+    world = World(monkeypatch)
+    tick_runtime = routed(
+        {},
+        Herdr(),
+        kubernetes=world.runtime,
+        launch=partial(world.launcher.from_tick, terms=world.terms, target=pod_target),
+    )
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+
+    with pytest.raises(profile_choice.ProfileUnresolved) as unresolved:
+        tick_runtime.spawn(config, "eng", world.store.next_name(SLUG, "eng"), {**TASK, "seat": FIRST})
+
+    assert str(unresolved.value) == f"task t1 profile classification is unavailable (down): {REMEDY}"
+    assert world.runtime.requests == []
 
 
 def test_the_shared_pick_decides_without_the_local_install_or_overlays(monkeypatch, asked):
