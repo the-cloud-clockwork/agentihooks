@@ -398,11 +398,20 @@ def test_command_delivers_through_the_herdr_nudge(tmp_path, monkeypatch):
     assert calls == [["agent", "prompt", "w1:p1", "[swarm delivery] wake"]]
 
 
-def test_a_command_herdr_fails_to_deliver_is_refused_with_the_failure():
-    herdr = SimpleNamespace(nudge=lambda agent, text: "agent_not_found")
+@pytest.mark.parametrize(
+    ("answer", "outcome"),
+    [
+        (None, Outcome("command", Status.OK, LOCAL, "accepted")),
+        ("", Outcome("command", Status.OK, LOCAL, "accepted")),
+        ("agent_not_found", Outcome("command", Status.REFUSED, LOCAL, detail="agent_not_found")),
+    ],
+)
+def test_a_local_command_answers_by_the_herdr_delivery(answer, outcome):
+    seen = []
+    herdr = SimpleNamespace(nudge=lambda agent, text: seen.append((agent.name, text)) or answer)
     agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w1:p1")
-    outcome = LocalHerdrRuntime(herdr).command(agent, "wake")
-    assert outcome == Outcome("command", Status.REFUSED, LOCAL, detail="agent_not_found")
+    assert LocalHerdrRuntime(herdr).command(agent, "wake") == outcome
+    assert seen == [(agent.name, "wake")]
 
 
 def test_a_local_tick_nudge_herdr_fails_to_deliver_returns_the_failure():
