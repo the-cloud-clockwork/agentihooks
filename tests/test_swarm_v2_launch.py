@@ -917,7 +917,7 @@ def test_a_tick_records_the_refusal_of_an_unshipped_agent_profile(world):
     with pytest.raises(SpawnError) as failed:
         runtime.spawn(config, "eng", name, {"id": "task", "seat": FIRST, "profile": "designer"})
 
-    tick_module._record_spawn_failure(SLUG, world.store, AgentRecord(name, "eng", "task"), failed.value)
+    tick_module._record_spawn_failure(SLUG, world.store, AgentRecord(name, "eng", "task"), failed.value, 0)
     assert world.store.launch_failure(SLUG, "task") == "profile designer is not shipped in the worker image"
     assert failed.value.status == Status.REFUSED
     assert world.runtime.requests == []
