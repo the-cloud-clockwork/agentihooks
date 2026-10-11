@@ -854,6 +854,15 @@ def test_the_archive_bound_applies_to_the_redacted_files(tmp_path, monkeypatch, 
         assert result.cause == native.TOO_LARGE
 
 
+def test_a_key_split_across_records_makes_the_capture_unavailable(tmp_path):
+    cwd = tmp_path / "repo"
+    common = {"sessionId": CLAUDE, "version": "2.1.296", "cwd": cases.LOGICAL_CWD}
+    opened = {"type": "user", **common, "toolUseResult": {"stdout": "-----BEGIN RSA PRIVATE" + " KEY-----\nAAAA"}}
+    home = cases.claude_home(tmp_path, cwd, [*cases.claude_records(CLAUDE), opened])
+    result = qualifier(tmp_path).capture("claude", home, CLAUDE, cwd, cases.VERSIONS["claude"], True)
+    assert result == native.Unavailable("claude", "secret_unredactable")
+
+
 @pytest.mark.parametrize("case", ["a", "b", "c"])
 def test_package_cases_match_their_committed_evidence(case):
     first, second = cases.run_case(case), cases.run_case(case)

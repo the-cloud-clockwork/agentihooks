@@ -57,7 +57,7 @@ CASES = {
     ),
     "keyed list": (json.dumps({KEY: ["abcd" + "1234efgh", 7]}) + "\n", compact({KEY: [GENERIC, 7]}) + "\n", 1),
     "key": (json.dumps({TOKEN: [1, "x"]}) + "\r\n", compact({HIDDEN: [1, "x"]}) + "\r\n", 1),
-    "space before the line end": (json.dumps({"t": TOKEN}) + " \n", compact({"t": HIDDEN}) + "\n", 1),
+    "space before the line end": (json.dumps({"t": TOKEN}) + " \t\n", compact({"t": HIDDEN}) + " \t\n", 1),
     "doubled carriage return": (json.dumps({"t": TOKEN}) + "\r\r\n", compact({"t": HIDDEN}) + "\r\r\n", 1),
     "carriage return at the end": (json.dumps({"t": TOKEN}) + "\r", compact({"t": HIDDEN}) + "\r", 1),
     "key with a number line": (
@@ -112,3 +112,25 @@ def test_a_second_scrub_changes_nothing(case):
 def test_bytes_that_are_not_text_pass_through_unchanged():
     given = b"\xff " + TOKEN.encode() + b"\n\xfe\n"
     assert redaction.scrub(given) == (b"\xff " + HIDDEN.encode() + b"\n\xfe\n", 1)
+
+
+OPENED = "-----BEGIN RSA PRIVATE" + " KEY-----\nAAAA"
+CLOSED = "BBBB\n-----END RSA PRIVATE" + " KEY-----"
+
+
+@pytest.mark.parametrize(
+    "given",
+    [
+        json.dumps({"t": OPENED}) + "\n" + json.dumps({"t": CLOSED}) + "\n",
+        OPENED + "\n" + json.dumps({"t": CLOSED}) + "\n",
+        json.dumps({"t": f"{OPENED}\n{CLOSED}\n{OPENED}"}) + "\n",
+    ],
+)
+def test_a_key_opened_without_its_end_in_the_same_value_or_text_is_refused(given):
+    with pytest.raises(redaction.Unredactable, match="^secret_unredactable$"):
+        redaction.scrub(given.encode())
+
+
+def test_a_key_opened_and_closed_in_one_value_is_redacted():
+    given = json.dumps({"t": f"{OPENED}\n{CLOSED}"}) + "\n"
+    assert redaction.scrub(given.encode()) == (compact({"t": "[REDACTED:private_key]"}).encode() + b"\n", 1)

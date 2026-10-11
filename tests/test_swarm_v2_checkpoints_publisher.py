@@ -577,3 +577,13 @@ def test_native_material_grown_past_the_bound_by_redaction_is_refused(root, monk
     materials[model.NATIVE_SESSION] = _native({"projects/s-1.jsonl": text})
     result = pub.publish(doc, materials)
     assert (result.promoted, result.reason) == (promoted, "promoted" if promoted else "native_too_large")
+
+
+def test_native_material_holding_a_key_without_its_end_is_refused_before_any_upload(root):
+    pub = make(root)
+    doc, materials = checkpoint(1)
+    opened = json.dumps({"t": "-----BEGIN RSA PRIVATE" + " KEY-----\nAAAA"})
+    materials[model.NATIVE_SESSION] = _native({"projects/s-1.jsonl": opened + "\n"})
+    result = pub.publish(doc, materials)
+    assert (result.promoted, result.reason) == (False, "secret_unredactable")
+    assert files(root) == {}

@@ -102,7 +102,7 @@ class Publisher:
             return self.refuse(blocked)
         try:
             doc, materials = _withheld(doc, materials)
-        except native.NativeError as error:
+        except (native.NativeError, redaction.Unredactable) as error:
             return self.refuse(str(error))
         listed = _listed(doc, materials)
         recorded = self.store.recorded(checkpoint_id)

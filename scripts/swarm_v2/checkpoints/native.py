@@ -361,7 +361,10 @@ def capture(
         return Unavailable(harness, "identity_mismatch")
     if line(recorded) != line(version_text):
         return Unavailable(harness, "version_changed")
-    scrubbed = {name: redaction.scrub(data) for name, data in sorted(files.items())}
+    try:
+        scrubbed = {name: redaction.scrub(data) for name, data in sorted(files.items())}
+    except redaction.Unredactable as error:
+        return Unavailable(harness, str(error))
     kept = tuple((name, data) for name, (data, _) in scrubbed.items())
     if oversized(kept):
         return Unavailable(harness, TOO_LARGE)

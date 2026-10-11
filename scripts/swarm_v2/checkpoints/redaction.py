@@ -10,11 +10,20 @@ MODE = "strict"
 MARK = "[REDACTED:"
 MARKER = re.compile(r"\[REDACTED:\w+\]")
 LINE = re.compile(r"[^\n]*\n|[^\n]+")
-END = re.compile(r"[\r\n]*\Z")
+OPENING = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
+CLOSING = re.compile(r"-----END [A-Z ]*PRIVATE KEY-----")
+UNREDACTABLE = "secret_unredactable"
 CODEC_ERRORS = "surrogateescape"
 
 
+class Unredactable(ValueError):
+    pass
+
+
 def _redact(text: str) -> str:
+    """A key whose end lies in another record cannot be hidden from here, so the material is refused."""
+    if len(OPENING.findall(text)) > len(CLOSING.findall(text)):
+        raise Unredactable(UNREDACTABLE)
     return secrets.redact(text, mode=MODE)
 
 
@@ -56,7 +65,7 @@ def _rewritten(line: str, record: object, found: list[int]) -> str:
     cleaned = _redacted(record, "", found)
     if cleaned == record:
         return line
-    return json.dumps(cleaned, separators=(",", ":")) + END.search(line).group()
+    return json.dumps(cleaned, separators=(",", ":")) + line[len(line.rstrip()) :]
 
 
 def _record(line: str) -> object:
