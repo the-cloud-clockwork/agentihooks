@@ -38,7 +38,7 @@
     "red": [
       "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38073494779 on 38997c46: tests only commit, ModuleNotFoundError for scripts.swarm_v2.kubernetes.storage and scripts.swarm_v2.artifacts.publication"
     ],
-    "green": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38080492598 on the merged head 3d946b17e54ecce3726e2f4e4bc257963f9d3117: Tests on the push to dev, every split and shard-check on 3.11 and 3.12, lint, sonar and Gate Required passed; the merge queue run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38080002366 on the same commit passed",
+    "green": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38080492598 on the merged head 3d946b17e54ecce3726e2f4e4bc257963f9d3117, the single parent squash merge of pull request 2472 on dev: Tests on the push to dev, every split and shard-check on 3.11 and 3.12, lint, sonar and Gate Required passed; the merge queue run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38080002366 on the same commit passed",
     "branch_green": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38075950364 on 6a13b96fa4e52183965b2af1d213ac5822dd0944: every unit shard on 3.11 and 3.12, test-count and the mutation shards passed; sonar failed only on one unreviewed python:S5443 hotspot, reviewed SAFE afterwards",
     "mutation": "Branch preflight on every pushed head; 27 survivors on d0ba29e3 killed by 32f17171 and 478b8965; the PR mutation shard survivor in normal killed by 4430c6c7",
     "review": "Spec reader closed with no findings; Standards reader ran three rounds and closed, its last two held items fixed or documented in b39ccb42",
