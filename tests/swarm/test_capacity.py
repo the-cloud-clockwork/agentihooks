@@ -161,14 +161,13 @@ def test_accounts_judge_every_window_at_the_given_time_and_pass_the_environment(
 
 
 def test_a_stale_codex_reading_gets_no_seat(monkeypatch):
-    from scripts import session_bands
     from scripts.codex_quota import CodexQuota
 
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
     pool = [capacity.codex_router.CodexAccount("a", "AH_CX_TOKEN_a")]
     monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: pool)
-    stale_at = 100 + session_bands.FRESH_SECONDS + 1
+    stale_at = 100 + 6 * 3600 + 1
     stale = CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=10))
     monkeypatch.setattr(capacity.codex_router, "quotas", lambda accounts, env: {"a": stale})
     monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: None)
@@ -196,29 +195,29 @@ def test_codex_token_accounts_from_the_rc_block_get_seats_and_default_none(monke
 
 
 def test_tick_capacity_balance_and_quota_list_the_same_accounts_and_caps(monkeypatch, tmp_path):
-    from scripts import agents_quota, aicode_tokens, operator_env
+    from scripts import agents_quota, aicode_tokens, codex_usage, operator_env
     from scripts.codex_quota import CodexQuota
 
     monkeypatch.delenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", raising=False)
+    environ = {"HOME": str(tmp_path), "AH_CC_TOKEN_ncgma": "cc1", "AH_CC_TOKEN_other": "cc2"}
+
     aicode_tokens.rc_file().write_text(
-        f"{aicode_tokens.START}\nexport AH_CX_TOKEN_alpha=cx1\nexport AH_CX_TOKEN_beta=cx2\n"
+        f"{aicode_tokens.START}\nexport AH_CX_TOKEN_alpha=cx1\nexport AH_CX_TOKEN_beta=cx2\nexport AH_CX_TOKEN_gamma=cx3\n"
         f"export AH_CC_TOKEN_mail=cc1\n{aicode_tokens.END}\n"
     )
-    environ = {"HOME": str(tmp_path), "AH_CC_TOKEN_ncgma": "cc1", "AH_CC_TOKEN_other": "cc2"}
     operator_env.fill(environ)
-    readings = {
-        "alpha": CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=10, resets_at=10**10)),
-        "beta": CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=97, resets_at=10**10)),
-    }
-    monkeypatch.setattr(
-        capacity.codex_router, "quotas", lambda accounts, env: {a.name: readings[a.name] for a in accounts}
-    )
+    codex_usage.store("alpha", CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=10, resets_at=10**10)))
+    codex_usage.store("beta", CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=97, resets_at=10**10)))
+    codex_usage.store("gamma", CodexQuota(100 - 6 * 3600, "pro", seven_day=balancer.QuotaWindow(used=10)))
+    monkeypatch.setattr(capacity.codex_router.codex_quota, "latest_codex_quota", lambda environ, keep: None)
+    monkeypatch.setattr(capacity.codex_router, "_registry", lambda: {})
     monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: None)
     now = 100 + 3600
     tick = [(row.name, row.cap) for row in capacity._codex(environ, now, True)]
     pool = capacity.codex_router.routing_pool(environ)
-    quota = [(row.account, row.cap) for row in agents_quota.codex_rows(pool, readings, {}, now)]
-    assert tick == quota == [("alpha", 6), ("beta", 0)]
+    rows = agents_quota.codex_rows(pool, capacity.codex_router.quotas(pool, environ), {}, now)
+    assert tick == [(row.account, row.cap) for row in rows] == [("alpha", 6), ("beta", 0), ("gamma", None)]
+    assert [row.state for row in rows][2] == "STALE"
     assert [credential.account for credential in balancer.discover_credentials(environ)] == ["mail", "other"]
 
 

@@ -2,9 +2,11 @@ import io
 import json
 import subprocess
 import urllib.error
+from pathlib import Path
 
 import pytest
 
+from hooks import config
 from scripts import agents_quota, codex_router, codex_usage
 from scripts.claude_quota_balancer import QuotaWindow
 from scripts.codex_quota import CodexQuota
@@ -86,6 +88,9 @@ def test_an_expired_token_reads_as_expired(body):
         (urllib.error.URLError("down"), None),
         (None, b"not json"),
         (None, b"[1]"),
+        (None, json.dumps({"rate_limit": {"primary_window": {**WEEK, "used_percent": "x"}}}).encode()),
+        (None, json.dumps({"rate_limit": {"primary_window": {**WEEK, "reset_at": "soon"}}}).encode()),
+        (None, json.dumps({"rate_limit": {"primary_window": {**WEEK, "used_percent": [1]}}}).encode()),
     ],
 )
 def test_any_other_failure_reads_as_nothing(error, body):
@@ -104,8 +109,10 @@ def test_readings_are_cached_by_account_without_any_identity():
     codex_usage.store("alpha", first)
     codex_usage.store("beta", expired)
     assert codex_usage.cached() == {"alpha": first, "beta": expired}
-    text = codex_usage._cache_path().read_text()
-    assert "u-1" not in text and "user_id" not in text
+    path = codex_usage._cache_path()
+    assert path == Path(config.AGENTIHOOKS_HOME) / "codex-usage.json"
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert "u-1" not in path.read_text() and "user_id" not in path.read_text()
 
 
 @pytest.mark.parametrize("content", ["not json", "[]", '{"alpha": {"observed_at": 1}}'])
@@ -155,11 +162,31 @@ def test_the_default_login_reads_its_file_token(monkeypatch, tmp_path):
     assert found == codex_usage.parse(PRO, NOW)
 
 
-def test_a_failed_usage_read_returns_nothing_and_caches_nothing(monkeypatch):
+def test_a_failed_usage_read_falls_back_to_exec_and_caches_nothing(monkeypatch):
     monkeypatch.setattr(codex_usage.urllib.request, "urlopen", _opener(error=urllib.error.URLError("down")))
     account = codex_router.CodexAccount("alpha", "AH_CX_TOKEN_alpha")
-    assert codex_router.probe(account, {"AH_CX_TOKEN_alpha": access_token(5)}, _no_exec) is None
+    ran = []
+    assert codex_router.probe(account, {"AH_CX_TOKEN_alpha": access_token(5)}, _exec(ran)) is None
+    assert ran == [1]
     assert codex_usage.cached() == {}
+
+
+def test_an_expired_read_is_kept_and_never_runs_exec(monkeypatch):
+    error = _http(401, b'{"code": "token_expired"}')
+    monkeypatch.setattr(codex_usage.urllib.request, "urlopen", _opener(error=error))
+    monkeypatch.setattr(codex_router.time, "time", lambda: NOW)
+    account = codex_router.CodexAccount("alpha", "AH_CX_TOKEN_alpha")
+    expired = CodexQuota(NOW, "?", expired=True)
+    assert codex_router.probe(account, {"AH_CX_TOKEN_alpha": access_token(5)}, _no_exec) == expired
+    assert codex_usage.cached() == {"alpha": expired}
+
+
+def test_a_limit_reached_before_the_week_reset_stops_counting_after_it(monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", raising=False)
+    blocked = CodexQuota(NOW - 3600, "pro", seven_day=QuotaWindow(100.0, NOW + 60), reached="workspace")
+    assert (codex_router.account_cap(blocked, NOW), blocked.state_at(NOW)) == (0, "BLOCKED")
+    after = NOW + 60
+    assert (codex_router.account_cap(blocked, after), blocked.state_at(after)) == (6, "NORMAL")
 
 
 @pytest.mark.parametrize(

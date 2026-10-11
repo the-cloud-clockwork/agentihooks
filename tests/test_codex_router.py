@@ -121,10 +121,10 @@ def test_a_week_under_five_percent_or_a_full_band_takes_no_session():
 
 
 def test_a_signed_out_missing_or_stale_reading_is_never_picked():
-    quotas = {"default": _quota(10.0), "alpha": _quota(10.0, observed_at=NOW - 901), "beta": None}
+    quotas = {"default": _quota(10.0), "alpha": _quota(10.0, observed_at=NOW - 6 * 3600 - 1), "beta": None}
     with pytest.raises(router.RoutingError):
         router.select(_accounts(signed_in=False), quotas, {}, NOW)
-    quotas["alpha"] = _quota(10.0, observed_at=NOW - 900)
+    quotas["alpha"] = _quota(10.0, observed_at=NOW - 6 * 3600)
     assert router.select(_accounts(signed_in=False), quotas, {}, NOW)[0] == _accounts()[1]
 
 
@@ -688,6 +688,7 @@ def test_the_probe_of_a_chatgpt_account_runs_the_bearer_provider_and_skips_an_un
 
     monkeypatch.setattr(router.shutil, "which", lambda name: "/usr/bin/codex")
     monkeypatch.setattr(router.codex_quota, "session_quota", lambda environ, thread: thread)
+    monkeypatch.setattr(router.codex_usage, "read", lambda *a, **k: None)
     assert router.probe(_token("alpha"), OAUTH_ENV, run) == "t-9"
     argv, env = seen[0]
     assert argv == ["/usr/bin/codex", "--no-daemon", *router.bearer_overrides(), *router.PROBE_ARGS]
