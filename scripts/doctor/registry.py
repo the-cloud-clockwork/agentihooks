@@ -183,13 +183,13 @@ def _unread() -> dict:
 
 
 def _attempts(get, slug: str, binding: dict, marks: dict, page: int, ended: Event, slot: dict) -> tuple[dict, dict]:
-    for _ in range(ATTEMPTS):
-        if ended.is_set():
-            break
+    tries = 0
+    while tries < ATTEMPTS and not ended.is_set():
+        tries += 1
         kept: dict = {}
         try:
             remote = _read_binding(get, slug, binding, marks, kept, page)
-            slot["error"] = None
+            slot.clear()
             return remote, kept
         except Exception as exc:  # noqa: BLE001
             slot["error"] = f"active read of {binding['agent']} failed: {type(exc).__name__}: {exc}"
@@ -199,14 +199,14 @@ def _attempts(get, slug: str, binding: dict, marks: dict, page: int, ended: Even
 def _read_all(get, slug: str, active: list[dict], marks: dict, page: int, remaining: float) -> list[tuple]:
     if remaining <= 0:
         return [(_unread(), {}, None) for _ in active]
-    slots: list[dict] = [{"error": None} for _ in active]
+    slots: list[dict] = [{} for _ in active]
     ended, pool = Event(), ThreadPoolExecutor(max_workers=WORKERS)
     futures = [pool.submit(_attempts, get, slug, b, marks, page, ended, slot) for b, slot in zip(active, slots)]
     wait(futures, timeout=remaining)
     ended.set()
-    pool.shutdown(wait=False, cancel_futures=True)
-    done = [f.result() if f.done() and not f.cancelled() else (_unread(), {}) for f in futures]
-    return [(remote, kept, slot["error"]) for (remote, kept), slot in zip(done, slots)]
+    pool.shutdown(wait=False)
+    done = [f.result() if f.done() else (_unread(), {}) for f in futures]
+    return [(remote, kept, slot.get("error")) for (remote, kept), slot in zip(done, slots)]
 
 
 def read(

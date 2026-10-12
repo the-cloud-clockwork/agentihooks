@@ -376,6 +376,31 @@ def test_bindings_are_read_at_the_same_time(cursors):
     assert failures == [] and [b["read"] for b in found] == [True, True]
 
 
+def test_no_more_bindings_than_the_workers_are_read_at_once(cursors, monkeypatch):
+    monkeypatch.setattr(registry, "WORKERS", 2)
+    agents = [{**AGENT, "name": f"engineer@1-000{n}"} for n in range(1, 5)]
+    langfuse, lock = Langfuse([], []), threading.Lock()
+    running, peak = [0], [0]
+
+    def get(path, params):
+        with lock:
+            running[0] += 1
+            peak[0] = max(peak[0], running[0])
+        threading.Event().wait(0.1)
+        with lock:
+            running[0] -= 1
+        return langfuse(path, params)
+
+    found, failures = registry.read("s", agents, get, {}, 15, 50)
+    assert failures == [] and all(b["read"] for b in found)
+    assert peak[0] == 2
+
+
+def test_a_budget_under_one_second_still_reads(cursors):
+    found, failures = registry.read("s", [AGENT], Langfuse([], []), {}, 15, 50, clock=_clock(0, 14.5))
+    assert failures == [] and found[0]["read"] is True
+
+
 def test_a_read_unfinished_when_the_budget_ends_leaves_its_binding_unread(cursors):
     second = {**AGENT, "name": "engineer@1-0002"}
     langfuse = Langfuse([], [])
