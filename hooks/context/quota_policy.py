@@ -15,7 +15,7 @@ import fcntl
 import os
 import time
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -35,6 +35,7 @@ from hooks.config import (
 
 if TYPE_CHECKING:
     from scripts.claude_quota_balancer import ProbeResult
+    from scripts.routing.reservation import Reservation
 
 MIN_ROUTING_LEFT = 5.0
 PUSH_SIGNALS = ["keep pushing", "push to 100", "push until 100", "burn it to 100"]
@@ -50,6 +51,7 @@ class Candidate:
     sessions: int
     observed_at: float
     cap: int | None = None
+    reserved: bool = False
 
     def full(self) -> bool:
         return self.cap is not None and self.sessions >= self.cap
@@ -70,6 +72,7 @@ class Decision:
     week_reset: float | None
     target: Candidate | None
     others: tuple[Candidate, ...]
+    week_limit: float = QUOTA_HANDOFF_WEEK_PCT
 
 
 def _effective(used: float | None, resets_at: float | None, now: float) -> float | None:
@@ -102,7 +105,9 @@ def decide(
 
     api = next((c for c in others if c.account == "api" and not c.full()), None)
     pool = [
-        c for c in others if c.account not in (account, "api") and c.five_used < five_pct and c.week_used < week_pct
+        c
+        for c in others
+        if c.account not in (account, "api") and not c.reserved and c.five_used < five_pct and c.week_used < week_pct
     ]
     open_slots = [c for c in pool if not c.full() and c.routing_left >= MIN_ROUTING_LEFT]
     unreserved = [c for c in open_slots or pool if c.account not in reserve and c.routing_left >= MIN_ROUTING_LEFT]
@@ -238,6 +243,7 @@ def _api_accounts(sessions: dict[str, int]) -> list[Candidate]:
 
 def evaluate(session_id: str) -> Decision | None:
     from hooks.context.account_sessions import agent_pid, session_account, sessions_by_account
+    from scripts.routing import reservation
     from scripts.swarm_v2.quota import fleet_observations
 
     if os.environ.get("AH_ROUTE_API"):
@@ -246,23 +252,46 @@ def evaluate(session_id: str) -> Decision | None:
     if windows is None:
         return None
     five_used, week_used, five_reset, week_reset = windows
-    if five_used < QUOTA_HANDOFF_5H_PCT and week_used < QUOTA_HANDOFF_WEEK_PCT:
+    if five_used < QUOTA_HANDOFF_5H_PCT and week_used < min(QUOTA_HANDOFF_WEEK_PCT, reservation.LOWEST):
+        return None
+    harness = "codex" if os.environ.get("AGENTIHOOKS_TARGET") == "codex" else "claude"
+    held = reservation.current(harness, os.environ)
+    account = session_account(agent_pid())
+    ceiling = _own_ceiling(held, account, reservation.is_master_session(os.environ))
+    week_pct = QUOTA_HANDOFF_WEEK_PCT if ceiling is None else min(QUOTA_HANDOFF_WEEK_PCT, ceiling)
+    if five_used < QUOTA_HANDOFF_5H_PCT and week_used < week_pct:
         return None
     sessions = sessions_by_account()
     subscriptions = (
-        _codex_accounts()
-        if os.environ.get("AGENTIHOOKS_TARGET") == "codex"
-        else _other_accounts(sessions, fleet_observations(os.environ))
+        _codex_accounts() if harness == "codex" else _other_accounts(sessions, fleet_observations(os.environ))
     )
-    return decide(
-        account=session_account(agent_pid()),
+    return decide_reserved(
+        ceiling,
+        account=account,
         five_used=five_used,
         week_used=week_used,
         five_reset=five_reset,
         week_reset=week_reset,
-        others=subscriptions + _api_accounts(sessions),
+        others=reserved(subscriptions, held) + _api_accounts(sessions),
         push=push_active(session_id),
     )
+
+
+def decide_reserved(ceiling: float | None, *, week_used: float, **inputs) -> Decision | None:
+    if ceiling is None or week_used < ceiling:
+        return decide(week_used=week_used, **inputs)
+    decision = decide(week_used=max(week_used, QUOTA_HANDOFF_WEEK_PCT), **inputs)
+    return decision and replace(decision, week_used=week_used, week_limit=ceiling)
+
+
+def _own_ceiling(held: "Reservation | None", account: str, master: bool) -> float | None:
+    return None if held is None or master or account != held.slug else held.ceiling
+
+
+def reserved(candidates: list[Candidate], held: "Reservation | None") -> list[Candidate]:
+    if held is None:
+        return candidates
+    return [replace(c, reserved=True) if held.closes(c.account, c.week_used) else c for c in candidates]
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +344,7 @@ def reset_when(epoch: float | None) -> str:
 
 def _trigger_text(d: Decision) -> str:
     if d.trigger == "week":
-        return f"7-day quota {d.week_used:.1f}% used (limit {QUOTA_HANDOFF_WEEK_PCT:g}%)"
+        return f"7-day quota {d.week_used:.1f}% used (limit {d.week_limit:g}%)"
     return f"5-hour quota {d.five_used:.1f}% used (limit {QUOTA_HANDOFF_5H_PCT:g}%)"
 
 
