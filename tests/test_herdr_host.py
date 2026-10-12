@@ -637,6 +637,14 @@ def test_ready_with_no_time_reads_once(monkeypatch):
     assert pane.calls == [["agent", "get", "w1:p2"]] and clock.slept == []
 
 
+def test_a_first_ready_read_is_not_enough(monkeypatch):
+    pane = CodexPane(["idle", "working", "done", "done"])
+    pane.attach(monkeypatch)
+    clock = Clock(monkeypatch)
+    assert herdr_host.wait_ready("w1:p2", ENV, 60) is True
+    assert pane.calls == [["agent", "get", "w1:p2"]] * 4 and clock.slept == [1.5, 1.5, 1.5]
+
+
 def test_a_reply_without_an_agent_record_reads_unknown(monkeypatch):
     monkeypatch.setattr(herdr_host, "_cli", lambda args, environ: {})
     assert herdr_host.agent_status("w1:p2", ENV) == "unknown"

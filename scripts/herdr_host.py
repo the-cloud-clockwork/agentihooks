@@ -219,12 +219,11 @@ def _read(pane_id: str, environ: dict[str, str]) -> str:
 def wait_ready(pane_id: str, environ: dict[str, str], timeout: float) -> bool:
     """True once the agent reads ready twice in a row: Codex reads idle for a moment before its startup turns busy."""
     deadline = time.monotonic() + timeout
-    seen = False
+    streak = 0
     while True:
-        ready = agent_status(pane_id, environ) in READY
-        if ready and seen:
+        streak = streak + 1 if agent_status(pane_id, environ) in READY else 0
+        if streak == 2:
             return True
-        seen = ready
         if time.monotonic() >= deadline:
             return False
         time.sleep(READY_SETTLE_S)
