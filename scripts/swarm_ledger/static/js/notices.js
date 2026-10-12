@@ -128,11 +128,15 @@ export function showNotifications(open) {
   renderNotifications();
   if (open) anchorPanel($("notif"), $("bell"));
 }
+function measuredAge(top) {
+  const minutes = /^(\d+) minutes? ago$/.exec(top.measured || "");
+  return minutes ? `${minutes[1]}m ago` : "never";
+}
+
 export function bottleneckStat(top) {
-  return h("div", { class: "stat top-bottleneck" }, h("dt", { text: "Top bottleneck" }),
+  return h("div", { class: "stat top-bottleneck" }, h("dt", { text: top ? `Top bottleneck · ${measuredAge(top)}` : "Top bottleneck" }),
     h("dd", {}, h("ul", { class: "bottleneck-list" }, h("li", { class: "bottleneck-stage", text: top ? top.label || "none" : "unavailable" }),
       h("li", { text: `Trend ${top && top.trend || "unknown"}` }),
-      top && h("li", { text: `Measured ${top.measured || "never"}` }),
       h("li", { text: `Last action ${top && top.last_action || "none recorded"}` }))));
 }
 
