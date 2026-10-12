@@ -43,8 +43,7 @@ redis:
   existingSecret:
     name: ""
     key: ""
-  # Narrow Redis users, one Secret each; set all three or none. Once set, existingSecret, the administrator
-  # credential that mints hive members, reaches no container of this chart.
+  # Set all three or none; once set, existingSecret (the administrator credential) reaches no container.
   roles:
     ledger:
       name: ""

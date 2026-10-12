@@ -43,8 +43,8 @@ app.kubernetes.io/component: {{ .component }}
 {{- if and $named (ne (len $named) 3) }}
 {{- fail "redis.roles sets every role or none: ledger, controller and worker each name their own Secret" }}
 {{- end }}
-{{- if and $named .role }}
-{{- $ref := get $roles .role }}
+{{- if $named }}
+{{- $ref := get $roles (required "swarm.redisEnv needs a role when redis.roles is set" .role) }}
 {{- if eq $ref.name .Values.redis.existingSecret.name }}
 {{- fail (printf "redis.roles.%s must not name the administrator Redis Secret %s" .role $ref.name) }}
 {{- end }}
