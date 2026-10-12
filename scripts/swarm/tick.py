@@ -686,8 +686,13 @@ def _stackable(dep):
 
 
 def _stack_base(task, rows):
-    deps = task.get("depends_on") or []
-    return [{"task": dep, "branch": rows[dep]["branch"]} for dep in deps if rows[dep].get("state") != "done"]
+    deps = [dep for dep in task.get("depends_on") or [] if rows[dep].get("state") != "done"]
+    return [_stacked_dep(dep, rows[dep]) for dep in deps]
+
+
+def _stacked_dep(dep, row):
+    base = {"task": dep, "branch": row["branch"]}
+    return {**base, "repo": row["branch_repo"]} if row.get("branch_repo") else base
 
 
 def _refund_parked(slug, store, rows, task_id):
