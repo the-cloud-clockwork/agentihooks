@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 
 import pytest
 
@@ -321,10 +322,39 @@ def test_one_slow_read_is_retried_once_inside_the_budget(cursors):
 def test_the_read_budget_leaves_later_bindings_unread_and_says_so(cursors):
     second = {**AGENT, "name": "engineer@1-0002"}
     langfuse = Langfuse([], [])
-    found, failures = registry.read("s", [AGENT, second], langfuse, {}, 15, 50, clock=_clock(0, 1, 16))
+    found, failures = registry.read("s", [AGENT, second], langfuse, {}, 15, 50, clock=_clock(0, 1, 16, 2))
     assert [b["read"] for b in found] == [True, False]
     assert failures == ["active read budget of 15 seconds spent before engineer@1-0002"]
     assert len(langfuse.calls) == 1
+
+
+def test_bindings_are_read_at_the_same_time(cursors):
+    second = {**AGENT, "name": "engineer@1-0002"}
+    langfuse = Langfuse([], [])
+    both = threading.Barrier(2, timeout=5)
+
+    def get(path, params):
+        both.wait()
+        return langfuse(path, params)
+
+    found, failures = registry.read("s", [AGENT, second], get, {}, 15, 50)
+    assert failures == [] and [b["read"] for b in found] == [True, True]
+
+
+def test_a_read_unfinished_when_the_budget_ends_leaves_its_binding_unread(cursors):
+    second = {**AGENT, "name": "engineer@1-0002"}
+    langfuse = Langfuse([], [])
+    release = threading.Event()
+
+    def get(path, params):
+        if "agent:engineer@1-0002" in params.get("tags", []):
+            release.wait(5)
+        return langfuse(path, params)
+
+    found, failures = registry.read("s", [AGENT, second], get, {}, 0.2, 50)
+    release.set()
+    assert [b["read"] for b in found] == [True, False]
+    assert failures == ["active read budget of 0.2 seconds spent before engineer@1-0002"]
 
 
 def test_a_full_read_drops_watermarks_of_traces_no_longer_active(cursors):
@@ -451,7 +481,7 @@ def test_every_failed_binding_is_reported(cursors):
 
 def test_a_budget_spent_exactly_leaves_the_binding_unread(cursors):
     second = {**AGENT, "name": "engineer@1-0002"}
-    found, failures = registry.read("s", [AGENT, second], Langfuse([], []), {}, 15, 50, clock=_clock(0, 1, 15))
+    found, failures = registry.read("s", [AGENT, second], Langfuse([], []), {}, 15, 50, clock=_clock(0, 1, 15, 2))
     assert [b["read"] for b in found] == [True, False]
 
 
