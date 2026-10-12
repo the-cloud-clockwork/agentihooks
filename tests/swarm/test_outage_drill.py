@@ -1,4 +1,3 @@
-from argparse import Namespace
 from collections import Counter
 from dataclasses import replace
 
@@ -63,10 +62,7 @@ class Drill:
 
         monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", self.master.name)
         self.accepted.append(cli.main(["send", self.agents[0].name, "drill direct message"]))
-        args = Namespace(
-            slug="sw", name=self.master.name, to=self.agents[0].name, fyi=False, text="drill swarm message"
-        )
-        self.accepted.append(self.attempt(lambda: swarm_cli.cmd_say(self.store, args)))
+        self.accepted.append(swarm_cli.main(["sw", "say", "drill swarm message", "--to", self.agents[0].name]))
         events = (
             ("operator", "chat added", "chat", f"@{self.agents[0].name} drill operator chat"),
             ("operator", "comment added", f"tasks/{self.agents[0].task}", "drill operator comment"),
@@ -75,8 +71,7 @@ class Drill:
         )
         for by, kind, target, text in events:
             self.ledger.write(by, kind, target, text, self.clock)
-            if self.ledger.online:
-                ledger_server.relay_to_inbox("sw", self.ledger.state("sw"))
+            ledger_server.relay_to_inbox("sw", self.ledger.document("sw"))
         self.tick()
 
     def recover(self):
@@ -148,6 +143,9 @@ def fake_ledger():
         def state(self, slug):
             if not self.online:
                 raise SwarmError("ledger network unavailable")
+            return self.document(slug)
+
+        def document(self, slug):
             return super().state(slug)
 
         def write(self, by, kind, target, text, at):
@@ -205,6 +203,7 @@ def drill(tmp_path, monkeypatch):
     from scripts.inbox import cli as inbox_cli
     from scripts.inbox import outbox
     from scripts.inbox.store import InboxStore, Unreachable
+    from scripts.swarm import cli as swarm_cli
     from scripts.swarm import outage, snapshot
     from scripts.swarm.store import RedisStore, SwarmConfig
     from scripts.swarm_ledger import ledger_link, ledger_server
@@ -220,8 +219,14 @@ def drill(tmp_path, monkeypatch):
             raise Unreachable("drill Redis unavailable")
         return InboxStore(redis)
 
-    monkeypatch.setattr("scripts.inbox.store.connect", connect)
+    def relay_connect():
+        if not ledger.online:
+            raise Unreachable("drill relay network unavailable")
+        return connect()
+
+    monkeypatch.setattr("scripts.inbox.store.connect", relay_connect)
     monkeypatch.setattr(inbox_cli, "connect", connect)
+    monkeypatch.setattr(swarm_cli, "connect", lambda: store)
     monkeypatch.setattr(outbox, "home", lambda: tmp_path / "outbox")
     monkeypatch.setattr(outage, "HOME", tmp_path / "outages")
     monkeypatch.setattr(ledger_server, "unrelayed_path", lambda: tmp_path / "unrelayed.json")
@@ -282,7 +287,7 @@ def test_every_sender_survives_an_outage_and_is_delivered_and_confirmed_once(dri
     assert Counter(
         sender for item in found.values() for sender in SENDERS if f"drill {sender}" in item.text
     ) == Counter(SENDERS), drill.errors
-    assert drill.accepted[0] == 0
+    assert drill.accepted == [0, 0]
     for item in found.values():
         receiver = drill.master if "drill tick notice" in item.text else drill.agents[0]
         assert item.address in (receiver.name, receiver.seat)
