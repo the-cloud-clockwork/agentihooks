@@ -240,6 +240,32 @@ def test_quota_hold_naming_no_harness_is_proposed(store, home, shipped):
     assert lane_of(store, "ci") == ("codex", "opus")
 
 
+def test_quota_held_samples_on_one_harness_move_its_pinned_lane_through_the_detector(store, home, shipped):
+    from scripts.swarm import stage_detector
+    from tests.swarm import test_stages as recorded_stages
+
+    now = recorded_stages.at(9, 30)
+    held = [
+        {**recorded_stages.sample(at, 1, "quota"), "held_harness": "codex"}
+        for at in range(recorded_stages.at(7), now, bottleneck.SAMPLE_GAP_MS)
+    ]
+    found = stage_detector.report(
+        recorded_stages.rows(
+            ledger_events=[recorded_stages.ledger("task done", recorded_stages.at(7), "tasks/t0")],
+            host_samples=held,
+            agent_events=[recorded_stages.agent("claim", "t1", now)],
+        ),
+        [{**recorded_stages.TASK, "state": "claimed"}],
+        now,
+    )
+    stage_detector.update_findings(store, SLUG, found, now)
+    pin(store, "eng", "codex")
+    targeted = "quota hold at 2.5 task hours, over its 2 threshold"
+    text = bottleneck_remedy.MOVED.format(lane="eng", source="codex", target="claude", targeted=targeted)
+    assert run(store, at=now) == [text]
+    assert lane_of(store, "eng") == ("claude", "auto")
+
+
 def test_a_stage_with_a_fix_task_raises_it_to_urgent(store, home, shipped):
     fire(store, "review")
     ledger = FakeLedger()
