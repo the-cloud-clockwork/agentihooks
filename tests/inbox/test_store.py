@@ -200,6 +200,170 @@ def test_reply_goes_to_the_sender_and_closes_the_original_done(store):
     assert closed.state == "done" and answer.id in closed.reason
 
 
+def test_reply_retry_returns_the_same_outgoing_item(store):
+    original = store.send("alice", "bob", "question")
+    answer = store.reply(original.id, "bob", "answer")
+    replay = store.reply(original.id, "bob", "answer")
+    assert replay.id == answer.id
+    assert [item.id for item in store.inbox("alice")] == [answer.id]
+    assert len(store.history(original.id)) == 2
+
+
+def test_reply_retry_keeps_the_resolved_sender_alias(store):
+    store.names.mint_code("sw", "sw", "/repo")
+    renamed = store.names.next("sw", "eng")
+    original = store.send("alice", "bob", "question")
+    store.names.alias("alice", renamed)
+    answer = store.reply(original.id, "bob", "answer")
+    assert answer.address == renamed
+    assert store.reply(original.id, "bob", "answer").id == answer.id
+    assert [item.id for item in store.inbox(renamed)] == [answer.id]
+
+
+def test_reply_retry_refuses_different_text(store):
+    original = store.send("alice", "bob", "question")
+    answer = store.reply(original.id, "bob", "answer", answer_id="reply-one")
+    with pytest.raises(InboxError) as refused:
+        store.reply(original.id, "bob", "changed", answer_id="reply-one")
+    assert str(refused.value) == "a reply retry must keep its sender, recipient, text and informational flag"
+    assert store.get(answer.id).text == "answer"
+
+
+@pytest.mark.parametrize("text", ["answer", "changed"])
+@pytest.mark.parametrize("alias", ["", "alice", "bob"])
+def test_reply_replay_reconciles_an_answer_saved_before_reservations(store, text, alias):
+    from scripts.inbox.store import DuplicateItem
+
+    original = store.send("alice", "bob", "question")
+    store.send("bob", "alice", "answer", item_id="legacy-answer")
+    store.close(original.id, "bob", "done", "replied with message legacy-answer")
+    if alias:
+        store.names.mint_code("sw", "sw", "/repo")
+        store.names.alias(alias, store.names.next("sw", "eng"))
+    error = DuplicateItem if text == "answer" else InboxError
+    with pytest.raises(error) as refused:
+        store.reply(original.id, "bob", text, answer_id="legacy-answer")
+    assert str(refused.value) == (
+        f"message {original.id} was already answered with message legacy-answer"
+        if text == "answer"
+        else "a reply retry must keep its sender, recipient, text and informational flag"
+    )
+    assert [item.id for item in store.inbox("alice")] == ["legacy-answer"]
+
+
+@pytest.mark.parametrize("address", ["alice", "carol"])
+def test_reply_reconciles_a_legacy_send_whose_original_close_never_landed(store, address):
+    original = store.send("alice", "bob", "question")
+    store.send("bob", address, "answer", item_id="legacy-pending")
+    if address == "alice":
+        answer = store.reply(original.id, "bob", "answer", answer_id="legacy-pending")
+        assert answer.id == "legacy-pending"
+        assert store.get(original.id).reason == "done: replied with message legacy-pending"
+    else:
+        with pytest.raises(InboxError) as refused:
+            store.reply(original.id, "bob", "answer", answer_id="legacy-pending")
+        assert str(refused.value) == "a reply retry must keep its sender, recipient, text and informational flag"
+        assert store.get(original.id).state == "pending"
+    assert [item.id for item in store.inbox(address)] == ["legacy-pending"]
+
+
+def test_a_non_reply_close_refuses_new_reply_operations_before_sending(store):
+    original = store.send("alice", "bob", "question")
+    store.close(original.id, "bob", "cancel", "request withdrawn")
+    with pytest.raises(InboxError) as refused:
+        store.reply(original.id, "bob", "answer", answer_id="new-reply")
+    assert str(refused.value) == f"message {original.id} is closed: cancelled: request withdrawn"
+    assert store.inbox("alice") == []
+
+
+@pytest.mark.parametrize("kind", ["done", "cancel"])
+def test_a_racing_original_close_is_reconciled_only_when_its_reply_outcome_matches(server, monkeypatch, kind):
+    first, second = fresh(server), fresh(server)
+    original = first.send("alice", "bob", "question")
+    close = first.close
+
+    def racing_close(item_id, by, reason, detail):
+        second.close(item_id, by, kind, detail if kind == "done" else "withdrawn")
+        return close(item_id, by, reason, detail)
+
+    monkeypatch.setattr(first, "close", racing_close)
+    if kind == "done":
+        answer = first.reply(original.id, "bob", "answer")
+        assert first.get(original.id).reason == f"done: replied with message {answer.id}"
+    else:
+        with pytest.raises(InboxError) as refused:
+            first.reply(original.id, "bob", "answer")
+        assert str(refused.value) == f"message {original.id} is closed: cancelled: withdrawn"
+        assert first.get(original.id).state == "cancelled"
+    assert len(first.inbox("alice")) == 1
+    assert len(first.history(original.id)) == 2
+
+
+def test_reply_retry_after_a_lost_close_keeps_one_outgoing_item(store, monkeypatch):
+    original = store.send("alice", "bob", "question")
+    close = store.close
+    monkeypatch.setattr(store, "close", lambda *args: (_ for _ in ()).throw(ConnectionError("lost close")))
+    with pytest.raises(ConnectionError):
+        store.reply(original.id, "bob", "answer")
+    monkeypatch.setattr(store, "close", close)
+    answer = store.reply(original.id, "bob", "answer")
+    assert [item.id for item in store.inbox("alice")] == [answer.id]
+    assert store.get(original.id).reason == f"done: replied with message {answer.id}"
+
+
+def test_reply_retry_after_recipient_handoff_keeps_the_same_outgoing_item(store, monkeypatch):
+    original = store.send("alice", "bob", "question")
+    close = store.close
+    monkeypatch.setattr(store, "close", lambda *args: (_ for _ in ()).throw(ConnectionError("lost close")))
+    with pytest.raises(ConnectionError):
+        store.reply(original.id, "bob", "answer")
+    monkeypatch.setattr(store, "close", close)
+    [answer] = store.inbox("alice")
+    store.redirect(answer.id, "swarm", "eng-1@sw", "the task continues in its seat")
+    replay = store.reply(original.id, "bob", "answer")
+    assert replay.id == answer.id
+    assert [item.id for item in store.inbox("eng-1@sw")] == [answer.id]
+    assert store.get(original.id).reason == f"done: replied with message {answer.id}"
+
+
+def test_reply_operation_cannot_reuse_another_originals_outgoing_item(store):
+    first = store.send("alice", "bob", "first question")
+    answer = store.reply(first.id, "bob", "answer")
+    second = store.send("alice", "bob", "second question")
+    with pytest.raises(InboxError) as refused:
+        store.reply(second.id, "bob", "answer", answer_id=answer.id)
+    assert str(refused.value) == "a reply retry must keep its sender, recipient, text and informational flag"
+    assert store.get(second.id).state == "pending"
+    assert [item.id for item in store.inbox("alice")] == [answer.id]
+
+
+def test_racing_reply_retries_return_one_outgoing_answer(server, monkeypatch):
+    first, second = fresh(server), fresh(server)
+    original = first.send("alice", "bob", "question")
+    pipeline = first.redis.pipeline
+    raced = []
+
+    def racing_pipeline(*args, **kwargs):
+        pipe = pipeline(*args, **kwargs)
+        exists = pipe.exists
+
+        def racing_exists(key):
+            found = exists(key)
+            reply_id = first.redis.hget(first.key("item", original.id), "reply:bob")
+            if key == first.key("item", reply_id) and not raced:
+                raced.append(second.reply(original.id, "bob", "answer"))
+            return found
+
+        pipe.exists = racing_exists
+        return pipe
+
+    monkeypatch.setattr(first.redis, "pipeline", racing_pipeline)
+    answer = first.reply(original.id, "bob", "answer")
+    assert answer.id == raced[0].id
+    assert [item.id for item in first.inbox("alice")] == [answer.id]
+    assert [event["state"] for event in first.history(original.id)] == ["pending", "done"]
+
+
 def test_only_the_addressee_can_reply(store):
     item = store.send("alice", "bob", "hi")
     with pytest.raises(InboxError):

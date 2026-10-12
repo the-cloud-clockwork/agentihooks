@@ -848,7 +848,7 @@ def on_user_prompt_submit(payload: dict) -> None:
         from hooks.context.prod_lockdown import set_hotfix_signal, set_release_signal
 
         prompt = payload.get("prompt", "")
-        if prompt:
+        if prompt and typed:
             from hooks.context.conditions import arm_gate, contains_condition_signal
 
             if typed and contains_condition_signal(prompt):

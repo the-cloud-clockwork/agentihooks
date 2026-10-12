@@ -382,26 +382,51 @@ class InboxStore:
             pipe.execute()
             return moved
 
-    def reply(self, item_id, replier, text, fyi=False, answer_id=""):
-        """A given answer_id makes the reply replayable: an answer already sent is kept and only the close runs."""
+    def reply(self, item_id: str, replier: str, text: str, fyi: bool = False, answer_id: str = "") -> Item:
+        from redis.exceptions import WatchError
+
         item = self.get(item_id)
+        replier = self.names.resolve(replier)
         if not self.acts_for(replier, item.address):
             raise InboxError(f"message {item_id} belongs to {item.address}, not {replier}")
-        if answer_id and (item.state, item.reason) == close_reason("done", replied(answer_id)):
-            raise DuplicateItem(f"message {item_id} was already answered with message {answer_id}")
-        if item.state in CLOSED:
-            raise InboxError(f"message {item_id} is closed: {item.reason}")
         if not text.strip():
             raise InboxError("a reply needs text")
-        answer_id = answer_id or new_item_id()
+        key = self.key("item", item_id)
+        field = f"reply:{replier}"
+        legacy = answer_id and (item.state, item.reason) == close_reason("done", replied(answer_id))
+        if item.state in CLOSED and not self.redis.hexists(key, field) and not legacy:
+            raise InboxError(f"message {item_id} is closed: {item.reason}")
+        self.redis.hsetnx(key, field, answer_id or new_item_id())
+        reply_id = self.redis.hget(key, field)
         if entry := self.entry_of(item_id):
-            self.about(answer_id, entry)
+            self.about(reply_id, entry)
         try:
-            answer = self.send(replier, item.sender, text, fyi=fyi, item_id=answer_id)
-        except DuplicateItem:
-            answer = self.get(answer_id)
-        self.close(item_id, replier, "done", replied(answer.id))
+            answer = self.send(replier, item.sender, text, ref=item_id, fyi=fyi, item_id=reply_id)
+        except (DuplicateItem, WatchError):
+            answer = self.get(reply_id)
+            legacy_recipient = not answer.ref and (
+                legacy or self.names.resolve(answer.address) == self.names.resolve(item.sender)
+            )
+            if (self.names.resolve(answer.sender), answer.text, answer.fyi) != (replier, text, fyi) or not (
+                answer.ref == item_id or legacy_recipient
+            ):
+                raise InboxError("a reply retry must keep its sender, recipient, text and informational flag") from None
+        self._close_reply(item_id, replier, answer.id, answer_id)
         return answer
+
+    def _close_reply(self, item_id, replier, reply_id, operation_id):
+        item = self.get(item_id)
+        expected = close_reason("done", replied(reply_id))
+        if (item.state, item.reason) == expected:
+            if operation_id == reply_id:
+                raise DuplicateItem(f"message {item_id} was already answered with message {reply_id}")
+            return
+        try:
+            self.close(item_id, replier, "done", replied(reply_id))
+        except InboxError:
+            item = self.get(item_id)
+            if (item.state, item.reason) != expected:
+                raise
 
     def about(self, item_id, entry):
         """Name the ledger entry an item is about, before the item is written."""
