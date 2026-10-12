@@ -454,6 +454,27 @@ def test_a_notify_delivers_before_the_scan_is_due(rig, recovery_deadline):
     assert rig.store.get(item.id).state == "delivered"
 
 
+def test_hint_checks_never_block(rig):
+    rig.pump.start()
+    real = rig.pump.subscription
+    timeouts = []
+
+    class Spy:
+        def get_message(self, timeout):
+            timeouts.append(timeout)
+            return real.get_message(timeout=0)
+
+        def close(self):
+            real.close()
+
+    rig.pump.subscription = Spy()
+    rig.store.send("alice", ME, "hint")
+    rig.pump.step()
+    rig.pump.step()
+    assert len(timeouts) >= 3
+    assert set(timeouts) == {0}
+
+
 def test_items_go_one_at_a_time_in_inbox_order(rig, recovery_deadline):
     first = rig.store.send("alice", ME, "first")
     second = rig.store.send("bob", ME, "second")
