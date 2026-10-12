@@ -48,7 +48,7 @@ def tab(browser, request):
         """
         const write = Storage.prototype.setItem;
         Storage.prototype.setItem = function(key, value) {
-            if (window.delayFolds && (key.endsWith(":fold") || key.endsWith(":comments"))) {
+            if (DELAY > 0 && window.delayFolds && (key.endsWith(":fold") || key.endsWith(":comments"))) {
                 setTimeout(() => write.call(this, key, value), DELAY);
             } else {
                 write.call(this, key, value);

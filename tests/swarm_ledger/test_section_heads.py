@@ -177,9 +177,12 @@ def test_sections_toggle_leaves_comments_and_outline_alone(tab):
 
 
 def test_sections_state_survives_a_reload(tab):
+    changed = tab.locator(".col > section[data-outline]:not(#sec-overview) > details.fold:not([open])").evaluate_all(
+        "boxes => boxes.map(box => '#' + box.id).join(',')"
+    )
     tab.click("#sections-all")
     settle(tab)
-    reload_after_folds(tab, ".col > section[data-outline]:not(#sec-overview) > details.fold")
+    reload_after_folds(tab, changed)
     assert sections(tab) == {"labels": ["Collapse all"], "open": [True] * len(SECTIONS)}
     tab.evaluate("() => { document.getElementById('notes-box').open = false; }")
     settle(tab)
