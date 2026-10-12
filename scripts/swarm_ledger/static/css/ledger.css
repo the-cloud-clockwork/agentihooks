@@ -64,8 +64,8 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 .sources li::before { content: "•"; color: var(--signal); margin-right: 8px; }
 .sources li { padding: 4px 0; border-top: 1px solid var(--rule); font-size: var(--fs-meta); line-height: 1.5; color: var(--text-2); word-break: break-all; }
 .sources li:first-child { border-top: 0; }
-.item { position: relative; padding: 12px 14px; border-radius: 6px; background: var(--surface-2); }
-.item + .item { margin-top: 6px; }
+.item { position: relative; padding: 12px 0; border-top: 1px solid var(--rule); }
+.item:first-child { border-top: 0; padding-top: 0; }
 .row { display: flex; gap: 12px; align-items: flex-start; }
 .row > div { min-width: 0; }
 h1, p, .item-title, .text, .desc, textarea { overflow-wrap: anywhere; }
@@ -115,8 +115,7 @@ details.phase-fold > summary::before, details.plan-fold > summary::before { alig
 .plan { position: relative; }
 .snowflake { position: absolute; display: inline-block; top: 14px; left: -18px; width: 13px; height: 13px; color: var(--frozen); }
 .snowflake svg { display: block; width: 100%; height: 100%; }
-.item:has(> .snowflake) { padding-left: 35px; }
-.item > .snowflake { left: 14px; }
+.item:first-child > .snowflake { top: 2px; }
 .slice { display: inline-flex; align-items: baseline; gap: 8px; }
 .slice > .snowflake, .plan-fold > summary > .snowflake, .sw-table .snowflake { position: static; align-self: center; }
 .frozen > .row > :not(.item-actions), .frozen > .row > .item-actions > :not(.freeze),
@@ -132,8 +131,8 @@ details.phase-fold > summary::before, details.plan-fold > summary::before { alig
 .sync svg { width: 20px; height: 20px; }
 .prio-head[hidden] { display: none; }
 .prio-head { display: flex; justify-content: flex-end; margin-bottom: 4px; }
-.prio { display: flex; gap: 12px; align-items: baseline; padding: 6px 14px; border-radius: 6px; background: var(--surface-2); }
-.prio + .prio { margin-top: 6px; }
+.prio { display: flex; gap: 12px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--rule); }
+.prio:first-child { border-top: 0; }
 .prio-link { flex: none; color: var(--destructive); font-weight: 700; text-decoration: none; }
 .prio-link:hover, .prio-link:focus-visible { text-decoration: underline; outline: none; }
 .task-id { color: var(--destructive); font-weight: 700; text-decoration: none; }
@@ -302,10 +301,10 @@ textarea.line { min-height: 0; margin-top: 10px; padding: 6px 2px; border-radius
 textarea.line:focus { box-shadow: inset 0 -1px 0 var(--accent); }
 .hint { font-size: var(--fs-meta); color: var(--dim); margin-top: 4px; }
 .col { min-width: 0; }
-.stat { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; align-items: baseline; padding: 4px 14px; border-radius: 6px; background: var(--surface-2); }
-.stat + .stat { margin-top: 4px; }
+.stat { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--rule); }
+.stat:first-child { border-top: 0; padding-top: 0; }
 .stat dt { font-size: var(--fs-meta); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
-.stat dd { margin: 0; font-size: var(--fs-item); font-weight: 700; text-align: right; }
+.stat dd { margin: 0; min-width: 0; font-size: var(--fs-item); font-weight: 700; text-align: right; overflow-wrap: anywhere; }
 .bar { height: 6px; margin-top: 4px; background: var(--rule); overflow: hidden; }
 .bar > i { display: block; height: 100%; background: linear-gradient(90deg, var(--data-fill-start), var(--data-fill-end)); border-right: 2.5px solid var(--data-line); }
 .chat-log { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
@@ -648,8 +647,8 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 #stats-column { flex: 0 0 280px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: max(.5%, 8px); }
 #stats-column section { padding: 16px; margin: 0; }
 #stats { margin: 0; }
-#stats .stat { grid-template-columns: minmax(0, 1fr) auto; }
-#stats .top-bottleneck { grid-template-columns: 1fr; gap: 6px; }
+#stats .stat { grid-template-columns: 112px minmax(0, 1fr); }
+#stats .top-bottleneck { grid-template-columns: 1fr; gap: 6px; padding-top: 12px; padding-bottom: 12px; }
 #stats .bottleneck-list { margin: 0; padding-left: 16px; list-style: disc; }
 #stats .bottleneck-list li::marker { color: var(--accent); }
 #stats .top-bottleneck dd { text-align: left; min-width: 0; overflow-wrap: anywhere; }
