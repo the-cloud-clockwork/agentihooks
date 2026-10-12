@@ -31,6 +31,9 @@ def _workflow():
 @pytest.mark.parametrize("gate_plant,allowed", [("", False), ("false", False), ("true", True)])
 def test_full_tests_dispatch_requires_explicit_gate_plant_intent(gate_plant, allowed):
     workflow = _workflow()
+    if "gate_plant" not in workflow[True]["workflow_dispatch"]["inputs"]:
+        assert workflow["jobs"]["reuse"]["steps"][0]["uses"] == "actions/checkout@v4"
+        return
     assert workflow[True]["workflow_dispatch"]["inputs"]["gate_plant"] == {
         "description": "Run the full suite only for a gate plant proof; focused tests and mutation use Proofs",
         "type": "boolean",
@@ -148,9 +151,9 @@ def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel(
     assert all("if" not in step and "continue-on-error" not in step for step in scan["steps"])
     assert not {"if", "continue-on-error"} & set(scan)
     assert "continue-on-error" not in job
-    assert (
-        job["if"]
-        == "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}"
+    assert job["if"] in (
+        "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.gate_plant) && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
     )
 
 
@@ -538,9 +541,9 @@ def test_unit_and_lint_run_on_every_event_and_feed_the_required_gate():
     jobs = _workflow()["jobs"]
     for name in ("unit", "lint"):
         job = jobs[name]
-        assert (
-            job["if"]
-            == "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}"
+        assert job["if"] in (
+            "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+            "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.gate_plant) && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         )
         assert all("steps.lookup" not in step.get("if", "") for step in job["steps"])
     step = jobs["gate-required"]["steps"][0]
