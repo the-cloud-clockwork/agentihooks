@@ -221,16 +221,23 @@ def test_launch_failure_without_one_failing_harness_is_proposed(store, home, shi
     assert lane_of(store, "eng") == ("claude", "opus")
 
 
-def test_quota_hold_releases_a_pinned_lane_to_the_rotation_once(store, home, shipped):
+def test_quota_hold_moves_the_lane_pinned_to_the_held_harness_once(store, home, shipped):
     pin(store, "ci", "codex")
-    detect(store, "quota_hold", 3.0, 2.0)
-    text = bottleneck_remedy.MOVED.format(lane="ci", source="codex", target="auto", targeted=HELD)
+    detect(store, "quota_hold", 3.0, 2.0, labels=("codex",))
+    text = bottleneck_remedy.MOVED.format(lane="ci", source="codex", target="claude", targeted=HELD)
     assert run(store) == [text]
-    assert lane_of(store, "ci") == ("auto", "auto")
-    detect(store, "quota_hold", 3.0, 2.0, at=LATER)
-    why = bottleneck_remedy.UNPINNED.format(harness="claude or codex")
+    assert lane_of(store, "ci") == ("claude", "auto")
+    detect(store, "quota_hold", 3.0, 2.0, labels=("codex",), at=LATER)
+    why = bottleneck_remedy.UNPINNED.format(harness="codex")
     assert run(store, at=LATER) == [proposed(HELD, why)]
     assert master_items(store) == [proposal("quota hold", HELD, why)]
+
+
+def test_quota_hold_naming_no_harness_is_proposed(store, home, shipped):
+    pin(store, "ci", "codex")
+    detect(store, "quota_hold", 3.0, 2.0)
+    assert run(store) == [proposed(HELD, bottleneck_remedy.UNKNOWN)]
+    assert lane_of(store, "ci") == ("codex", "opus")
 
 
 def test_a_stage_with_a_fix_task_raises_it_to_urgent(store, home, shipped):

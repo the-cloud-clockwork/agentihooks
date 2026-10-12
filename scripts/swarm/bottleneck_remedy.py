@@ -149,13 +149,10 @@ def _shift(slug, config, store, lanes, stage):
 
 
 def _move(slug, config, store, stage):
-    if stage.name == "quota_hold":
-        stuck, target = agent_choice.AGENTS, templates.AUTO
-    elif len(stage.harnesses) == 1:
-        stuck = stage.harnesses
-        target = next(agent for agent in agent_choice.AGENTS if agent not in stuck)
-    else:
+    if len(stage.harnesses) != 1:
         return UNKNOWN
+    stuck = stage.harnesses
+    target = next(agent for agent in agent_choice.AGENTS if agent not in stuck)
     lanes = {key: dict(value) for key, value in config.lanes.items()}
     lane = next((key for key in PINNABLE if lanes.get(key, {}).get("agent") in stuck), None)
     if lane is None:
