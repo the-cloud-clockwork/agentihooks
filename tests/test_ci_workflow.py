@@ -26,6 +26,16 @@ def _pytest_command() -> str:
     raise AssertionError("no pytest step in test.yml")
 
 
+def _slowest_committed_test() -> float:
+    root = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], cwd=_ROOT, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    return max(
+        max(json.loads(subprocess.check_output(["git", "show", f"HEAD:{name}"], cwd=root, text=True)).values())
+        for name in (".test_durations", ".test_durations-3.12")
+    )
+
+
 @pytest.mark.parametrize("plugin", ["pytest-xdist", "pytest-split"])
 def test_dev_extra_declares_test_plugin(plugin):
     dev = tomllib.loads((_ROOT / "pyproject.toml").read_text())["project"]["optional-dependencies"]["dev"]
@@ -181,9 +191,7 @@ def test_a_hung_unit_shard_fails_near_twice_the_slowest_shard():
 
 def test_a_hung_unit_test_dumps_every_thread_stack_within_a_minute():
     command = _pytest_command()
-    slowest_test = max(
-        max(json.loads((_ROOT / name).read_text()).values()) for name in (".test_durations", ".test_durations-3.12")
-    )
+    slowest_test = _slowest_committed_test()
     timeout = int(re.search(r"-o faulthandler_timeout=(\d+)", command).group(1))
     assert slowest_test < timeout <= 60
     assert "no:faulthandler" not in command
