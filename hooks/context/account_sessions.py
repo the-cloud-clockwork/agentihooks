@@ -18,13 +18,14 @@ INTERACTIVE_PREFIX = "AH_ROUTE_INTERACTIVE_"
 API_ACCOUNT = "api"
 _SHELLS = frozenset({"sh", "bash", "dash", "zsh", "fish", "ksh"})
 _PROC = Path("/proc")
+REMOTE = "--remote"
 VALUE_FLAGS = frozenset(
     {
         "-c",
         "--config",
         "--enable",
         "--disable",
-        "--remote",
+        REMOTE,
         "--remote-auth-token-env",
         "-i",
         "--image",
@@ -44,7 +45,6 @@ VALUE_FLAGS = frozenset(
 )
 SERVERS = frozenset({"app-server", "mcp-server"})
 INTERNAL_RUN = "AGENTIHOOKS_INTERNAL_RUN"
-REMOTE = "--remote"
 LISTEN = "--listen"
 UNIX = "unix://"
 MANAGED_RUNTIME = "cx"
@@ -188,7 +188,6 @@ def _is_codex_session(pid: int, proc: Path) -> bool:
 
 
 def execution_key(endpoint: str) -> str:
-    """The execution a supervised app-server endpoint belongs to: its socket folder, named from the execution id."""
     if not endpoint.startswith(UNIX):
         return ""
     path = Path(endpoint.removeprefix(UNIX))
@@ -223,13 +222,25 @@ def _codex_processes(proc: Path) -> tuple[dict[int, str], dict[tuple[str, str], 
 
 
 def live_codex_sessions(proc: Path = _PROC) -> int:
-    """Interactive Codex sessions, exec runs and managed executions on this host; viewers and probes add nothing."""
+    """Interactive Codex sessions and exec runs on this host; one CODEX_HOME is one account."""
     sessions, managed = _codex_processes(proc)
     return len(sessions) + len(managed)
 
 
+def _held(raw: str) -> tuple[str, str] | None:
+    from scripts.codex_session import binding
+
+    try:
+        record = binding.decode(raw)
+    except (binding.BindingError, ValueError, TypeError):
+        return raw, CODEX_DEFAULT
+    if record.state in (binding.EXITED, binding.FAILED):
+        return None
+    return execution_key(record.endpoint_ref) or record.execution_id, record.account or CODEX_DEFAULT
+
+
 def managed_held() -> set[tuple[str, str]]:
-    """Managed executions whose transport record, written before the server starts, has not reached a terminal state."""
+    """Transport records are written before the server starts; an unreadable record holds its slot."""
     from hooks._redis import get_redis
 
     redis = get_redis()
@@ -245,12 +256,7 @@ def managed_held() -> set[tuple[str, str]]:
         raws = [raw for slug in store.slugs() for raw in redis.hvals(store.key(slug, binding.RECORDS))]
     except RedisError:
         return set()
-    records = [binding.decode(raw) for raw in raws]
-    return {
-        (execution_key(record.endpoint_ref), record.account or CODEX_DEFAULT)
-        for record in records
-        if record.state not in (binding.EXITED, binding.FAILED)
-    }
+    return {held for raw in raws if (held := _held(raw))}
 
 
 def codex_sessions_by_account(proc: Path = _PROC, *, local: bool = False) -> dict[str, int]:

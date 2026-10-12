@@ -1,5 +1,6 @@
 """Tests for hooks.context.account_sessions — live sessions per account from /proc."""
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -210,8 +211,6 @@ def test_an_exec_run_whose_prompt_names_a_server_still_counts(tmp_path):
 
 
 def _endpoint(execution_id):
-    from pathlib import Path
-
     from scripts.codex_session import supervisor
 
     key = execution_id.removeprefix(supervisor.EXECUTION_PREFIX)[: supervisor.ENDPOINT_ID_CHARS]
@@ -219,8 +218,6 @@ def _endpoint(execution_id):
 
 
 def _managed_host(root, viewers):
-    from pathlib import Path
-
     from scripts.codex_session import supervisor
 
     endpoint = _endpoint("exe-0123456789abcdef0123")
@@ -275,6 +272,7 @@ def _held_store(monkeypatch, *rows):
         bindings.reserve("sw", record)
         if state != "starting":
             bindings.put("sw", replace(record, state=state))
+    return redis
 
 
 def test_a_reserved_execution_holds_its_slot_before_its_server_is_seen(tmp_path, monkeypatch):
@@ -304,6 +302,50 @@ def test_unknown_liveness_holds_the_slot_and_termination_releases_it(tmp_path, m
         ("exe-a000000000000005", "starting", ""),
     )
     assert acc.codex_sessions_by_account(root) == {"alpha": 2, "default": 1}
+
+
+def test_a_finished_execution_releases_its_slot(tmp_path, monkeypatch):
+    from scripts.codex_session import supervisor
+    from scripts.codex_session.binding import BindingStore
+    from scripts.swarm.store import RedisStore
+
+    root = tmp_path / "proc"
+    root.mkdir()
+    execution = "exe-c000000000000001"
+    store = RedisStore(_held_store(monkeypatch, (execution, "connected", "alpha")))
+    record = BindingStore(store).get("sw", execution)
+    assert acc.codex_sessions_by_account(root) == {"alpha": 1}
+    supervisor.finish(store, "sw", supervisor.Started(record, None, None), 1)
+    assert acc.codex_sessions_by_account(root) == {}
+
+
+def test_an_unreadable_record_holds_a_default_slot(tmp_path, monkeypatch):
+    import json
+
+    from scripts.codex_session.binding import RECORDS
+    from scripts.swarm.store import RedisStore
+
+    root = tmp_path / "proc"
+    root.mkdir()
+    redis = _held_store(monkeypatch)
+    records = RedisStore(redis).key("sw", RECORDS)
+    newer, corrupt, foreign = json.dumps({"schema_version": 2}), "{not json", json.dumps({"schema_version": 1, "x": 1})
+    redis.hset(records, mapping={"exe-d002": newer, "exe-d003": corrupt, "exe-d004": foreign})
+    assert acc.managed_held() == {(newer, "default"), (corrupt, "default"), (foreign, "default")}
+    assert acc.codex_sessions_by_account(root) == {"default": 3}
+
+
+def test_a_record_on_an_unmanaged_endpoint_keys_by_its_execution(monkeypatch):
+    from scripts.codex_session.binding import BindingStore, TransportRecord
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(_held_store(monkeypatch))
+    for execution in ("exe-e001", "exe-e002"):
+        record = TransportRecord(
+            execution, 1, "eng-1@sw", "engineer@1", "t1", f"unix:///tmp/{execution}", account="beta"
+        )
+        BindingStore(store).reserve("sw", record)
+    assert acc.managed_held() == {("exe-e001", "beta"), ("exe-e002", "beta")}
 
 
 def test_no_redis_holds_nothing(monkeypatch):
