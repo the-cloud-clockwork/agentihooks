@@ -25,7 +25,7 @@ GRADING = (
     "sonar-project.properties",
     ".coveragerc",
 )
-FIELDS = 'id state headRefOid baseRefName isDraft reviewDecision statusCheckRollup { state } mergeQueueEntry { id position state } repository { mergeQueue(branch: "dev") { id } }'
+FIELDS = 'id state headRefOid baseRefName mergeQueueEntry { id position state } isDraft reviewDecision statusCheckRollup { state } repository { mergeQueue(branch: "dev") { id } }'
 STATE = "query($url: URI!) { resource(url: $url) { ... on PullRequest { " + FIELDS + " } } }"
 QUEUE = """mutation($id: ID!, $head: GitObjectID!) {
     enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head}) { mergeQueueEntry { id } }
