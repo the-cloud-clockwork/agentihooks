@@ -137,9 +137,7 @@ def claim_key(config, doc):
 
 def guarded(doc: dict, fix: str) -> set[str]:
     graph, known = hierarchy.project(doc)[0], {t["id"]: t for t in doc["tasks"]}
-    depth = {
-        task_id: length for task_id, length in chains(doc).items() if not freeze.held(known[task_id], doc, graph, fix)
-    }
+    depth = chains({**doc, "tasks": [t for t in doc["tasks"] if not freeze.held(t, doc, graph, fix)]})
     longest = depth and max(depth.values())
     return {task_id for task_id, length in depth.items() if length + 1 >= longest and _merged(known[task_id], known)}
 

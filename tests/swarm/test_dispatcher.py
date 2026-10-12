@@ -626,7 +626,7 @@ def test_only_a_merged_predecessors_successor_on_the_critical_chain_is_guarded()
     assert dispatcher.guarded(doc(tasks, phases=[]), "") == {"b"}
 
 
-def test_the_critical_chain_counts_only_work_no_focus_holds_unless_the_fix_phase_exempts_it():
+def held_fix_chain(freezes=()):
     from scripts.doctor import loop
 
     fix = loop.FIX_PHASE
@@ -638,10 +638,44 @@ def test_the_critical_chain_counts_only_work_no_focus_holds_unless_the_fix_phase
         task("s", phase=fix, depends_on=["q"]),
     ]
     phases = [{"id": "p1", "depends_on": []}, {"id": fix, "depends_on": []}]
-    focus = [{"verb": "focus", "target": "phases/p1"}]
-    assert dispatcher.guarded(doc(tasks, phases=phases), "") == set()
-    assert dispatcher.guarded(doc(tasks, phases=phases, freezes=focus), "") == {"b"}
-    assert dispatcher.guarded(doc(tasks, phases=phases, freezes=focus), fix) == set()
+    stamps = {"tasks/a/state": {"by": "engineer@abcdef-0001", "at": NOW - 30_000}}
+    return doc(tasks, phases=phases, freezes=list(freezes), _meta={"stamps": stamps})
+
+
+FOCUS = [{"verb": "focus", "target": "phases/p1"}]
+
+
+def test_the_critical_chain_counts_only_work_no_focus_holds_unless_the_fix_phase_exempts_it():
+    from scripts.doctor import loop
+
+    assert dispatcher.guarded(held_fix_chain(), "") == set()
+    assert dispatcher.guarded(held_fix_chain(FOCUS), "") == {"b"}
+    assert dispatcher.guarded(held_fix_chain(FOCUS), loop.FIX_PHASE) == set()
+    tasks = [
+        task("a", state="done"),
+        task("t", depends_on=["a"]),
+        task("u1", phase="p2", depends_on=["t"]),
+        task("u2", phase="p2", depends_on=["u1"]),
+        task("u3", phase="p2", depends_on=["u2"]),
+        task("a2", state="done"),
+        task("c", depends_on=["a2"]),
+        task("w", depends_on=["c"]),
+    ]
+    phases = [{"id": "p1", "depends_on": []}, {"id": "p2", "depends_on": []}]
+    assert dispatcher.guarded(doc(tasks, phases=phases, freezes=FOCUS), "") == {"c", "t"}
+
+
+def test_the_doctor_fix_phase_reaches_the_guard_in_the_claim_key_and_the_chain_report(store, home, shipped):
+    from scripts.doctor import priming
+
+    found, ledger = held_fix_chain(FOCUS), Ledger()
+    claimed = found["tasks"][1]
+    config = store.update(SLUG, autonomy="delegate")
+    assert dispatcher.claim_key(config, found)(claimed)[0] == dispatcher.GUARD
+    assert dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW) != []
+    config = store.update(SLUG, template=priming.TEMPLATE)
+    assert dispatcher.claim_key(config, found)(claimed)[0] != dispatcher.GUARD
+    assert dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW) == []
 
 
 def test_a_chain_claim_reports_the_seconds_from_the_merge_on_the_task_and_logs_it(store, home, shipped):
