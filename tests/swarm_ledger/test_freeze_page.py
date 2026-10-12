@@ -122,7 +122,7 @@ def test_freezing_a_plan_from_its_row_sends_the_freeze_and_disables_its_rows(pag
 def test_a_frozen_plan_dims_and_disables_everything_under_it_while_comments_stay_open(page):
     tab, _ = page
     assert tab.evaluate("() => document.querySelector('#item-plans-v2').classList.contains('frozen')") is True
-    assert tab.locator("#item-plans-v2 > .snowflake").count() == 1
+    assert tab.locator("#item-plans-v2 > details.plan-fold > summary > .snowflake").count() == 1
     for selector in ("#item-phases-p2", "#item-phases-p3"):
         state = row_state(tab, selector)
         assert (state["frozen"], state["flake"], state["checkbox"], state["verdicts"], state["scope"]) == (
@@ -174,11 +174,11 @@ def test_a_focus_puts_the_snowflake_on_items_outside_it_only(page):
     outside = row_state(tab, "#item-phases-p2")
     assert (outside["held"], outside["flake"], outside["frozen"], outside["checkbox"]) == (True, True, False, [False])
     assert row_state(tab, "#item-tasks-t2")["held"] is True
-    assert tab.locator("#item-plans-v2 > .snowflake").count() == 1
+    assert tab.locator("#item-plans-v2 > details.plan-fold > summary > .snowflake").count() == 1
     for selector in ("#item-phases-p1", "#item-tasks-t1", "#item-tasks-t3"):
         state = row_state(tab, selector)
         assert (state["held"], state["flake"]) == (False, False)
-    assert tab.locator("#item-plans-hier > .snowflake").count() == 0
+    assert tab.locator("#item-plans-hier > details.plan-fold > summary > .snowflake").count() == 0
 
 
 @pytest.mark.parametrize("page", [[freeze("lane:ci")]], indirect=True)
@@ -230,14 +230,13 @@ def test_end_focus_in_the_swarm_panel_sends_the_clear(page):
     tab.wait_for_function("() => document.querySelectorAll('#swarm-freezes tr').length === 2")
 
 
-def test_the_freezes_block_folds_and_remembers_it_after_a_reload(page):
+def test_the_freezes_block_folds_on_its_header_and_remembers_it(page):
     tab, _ = page
     open_swarm(tab)
+    assert tab.locator("#freeze-table").is_visible()
     tab.locator("#freeze-fold > summary h3").click()
-    tab.wait_for_function("() => Object.values(localStorage).some((v) => v.includes('\"freeze-fold\":false'))")
-    tab.reload()
-    loaded(tab)
     assert tab.eval_on_selector("#freeze-fold", "d => d.open") is False
+    tab.wait_for_function("() => Object.values(localStorage).some((v) => v.includes('\"freeze-fold\":false'))")
 
 
 def test_the_swarm_panel_says_when_nothing_is_frozen(page):
@@ -296,4 +295,4 @@ def test_a_lane_focus_holds_tasks_outside_the_lane_and_no_phase(page):
     assert row_state(tab, "#item-tasks-t3")["held"] is False
     for selector in ("#item-phases-p1", "#item-phases-p2"):
         assert row_state(tab, selector)["held"] is False
-    assert tab.locator("#item-plans-v2 > .snowflake").count() == 0
+    assert tab.locator("#item-plans-v2 > details.plan-fold > summary > .snowflake").count() == 0

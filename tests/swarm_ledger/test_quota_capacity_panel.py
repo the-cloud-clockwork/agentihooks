@@ -43,10 +43,6 @@ def run_js(names, expr):
     return json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
 
 
-def span(ms):
-    return f"{round(ms / 60000)}m"
-
-
 def test_each_quota_row_carries_the_state_and_routing_left_the_tick_decided_on_and_dashes_without_one():
     sw = {
         "quota_capacity": DECISION,
@@ -79,23 +75,7 @@ def test_routing_left_is_unknown_when_a_window_is_unknown():
     assert out == [{"state": "unknown", "routing": "—"}]
 
 
-def test_the_capacity_line_reads_each_lane_against_its_cap_the_change_age_and_the_reason():
-    out = run_js(
-        ["span", "capacityLine"],
-        f"[capacityLine({json.dumps(DECISION)}, {NOW}), capacityLine({{}}, {NOW}), capacityLine(undefined, {NOW})]",
-    )
-    assert out == [
-        {
-            "lanes": "eng 2 of 4 · ci 1 of 1 · plan 0 of 1",
-            "changed": "changed 5m ago",
-            "reason": "because accounts are closed; Claude has 1 free seats and Codex has 0 free seats",
-        },
-        None,
-        None,
-    ]
-
-
-def test_the_quota_table_heads_state_and_routing_and_the_box_holds_the_capacity_line():
+def test_the_quota_table_heads_state_and_routing():
     page = page_source()
     head = re.search(r'<table class="sw-table" id="quota-table"><thead><tr>(.*?)</tr>', page).group(1)
     assert re.findall(r"<th[^>]*>(.*?)</th>", head) == [
@@ -113,9 +93,8 @@ def test_the_quota_table_heads_state_and_routing_and_the_box_holds_the_capacity_
         "cap",
         '<span class="sr-only">master</span>',
     ]
-    box = page.split('id="quota-box"', 1)[1].split('id="doctor-box"', 1)[0]
-    assert 'id="quota-capacity"' in box
     assert 'emptyRow(13, "No quota observed yet.")' in page
+    assert 'id="quota-capacity"' not in page
 
 
 def test_account_states_take_their_role_colour():

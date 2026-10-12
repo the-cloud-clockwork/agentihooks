@@ -245,15 +245,15 @@ def test_a_home_row_tip_hides_on_click_or_scroll(tab, leave):
 
 def test_an_empty_row_tip_leaves_the_enclosing_control_its_own_tip(tab):
     page = tab(home_html("home"))
-    page.locator("li.row button.fold").wait_for()
+    page.locator("li.row a.title").first.wait_for()
     found = page.evaluate(
-        """() => { const fold = document.querySelector("li.row button.fold");
+        """() => { const title = document.querySelector("li.row a.title");
           const empty = document.createElement("span");
           empty.dataset.tip = "";
-          fold.append(empty);
-          return [ledgerTip(empty), ledgerTip(fold)]; }"""
+          title.append(empty);
+          return [ledgerTip(empty), ledgerTip(title)]; }"""
     )
-    assert found == ["Show this ledger's full title and overview, or fold it back to one line."] * 2
+    assert found == [ROW_TITLE] * 2
 
 
 @pytest.mark.parametrize("view", ["home", "bin"])
