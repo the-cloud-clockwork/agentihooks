@@ -48,7 +48,11 @@ def _totals(found: dict) -> dict:
 
 
 def report(
-    rows: dict, tasks: list, now_ms: int, window_ms: int = bottleneck.WINDOW_MS, ready: Callable | None = None
+    rows: dict,
+    tasks: list,
+    now_ms: int,
+    window_ms: int = bottleneck.WINDOW_MS,
+    ready: Callable[[dict], bool] | None = None,
 ) -> dict:
     current = stages.report(rows, tasks, now_ms, window_ms, ready)
     previous = _totals(stages.report(rows, tasks, now_ms - window_ms, window_ms, ready))
@@ -101,7 +105,7 @@ def record(
     now_ms: int,
     tasks: list,
     environ: Mapping[str, str] = os.environ,
-    ready: Callable | None = None,
+    ready: Callable[[dict], bool] | None = None,
 ) -> dict:
     config = settings(environ)
     count = store.redis.incr(store.key(slug, "stage-detector-ticks"))

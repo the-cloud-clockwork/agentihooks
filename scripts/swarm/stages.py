@@ -260,7 +260,9 @@ def _overrun_episodes(rows, timeline, branch, held, window):
     return episodes
 
 
-def observations(rows: dict, tasks: list, now_ms: int, window_ms: int, ready: Callable | None = None) -> dict:
+def observations(
+    rows: dict, tasks: list, now_ms: int, window_ms: int, ready: Callable[[dict], bool] | None = None
+) -> dict:
     window = bottleneck.Window(now_ms - window_ms, now_ms)
     held = holds(rows["host_samples"], now_ms)
     branches = {task["id"]: task.get("branch") for task in tasks}
@@ -276,7 +278,11 @@ def observations(rows: dict, tasks: list, now_ms: int, window_ms: int, ready: Ca
 
 
 def report(
-    rows: dict, tasks: list, now_ms: int, window_ms: int = bottleneck.WINDOW_MS, ready: Callable | None = None
+    rows: dict,
+    tasks: list,
+    now_ms: int,
+    window_ms: int = bottleneck.WINDOW_MS,
+    ready: Callable[[dict], bool] | None = None,
 ) -> dict:
     window = bottleneck.Window(now_ms - window_ms, now_ms)
     held = holds(rows["host_samples"], now_ms)

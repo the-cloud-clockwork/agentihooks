@@ -207,6 +207,12 @@ def test_a_frozen_task_opens_no_claim_wait():
     assert waiting_of(tasks, freezes=[{"verb": "freeze", "target": "tasks/t3"}]) == {}
 
 
+def test_a_task_under_a_frozen_plan_opens_no_claim_wait():
+    tasks = [{"id": "t3", "state": "open", "phase": "p1"}]
+    doc = {"plans": [{"id": "pl1"}], "phases": [{"id": "p1", "plan": "plans/pl1"}]}
+    assert waiting_of(tasks, **doc, freezes=[{"verb": "freeze", "target": "plans/pl1"}]) == {}
+
+
 def test_a_task_in_a_phase_waiting_on_another_phase_opens_no_claim_wait():
     tasks = [{"id": "t3", "state": "open", "phase": "p2"}]
     assert waiting_of(tasks, phases=[{"id": "p1"}, {"id": "p2", "depends_on": ["p1"]}]) == {}

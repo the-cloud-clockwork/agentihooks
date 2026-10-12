@@ -230,11 +230,13 @@ def test_a_swarm_pass_measures_the_stages_of_the_ledger_tasks_and_reports_a_flee
         lambda box, store, slug, now_ms, tasks, environ, ready: seen.append((tasks, [ready(t) for t in tasks])),
     )
     monkeypatch.setattr(metrics.metrics_fleet, "record", broken)
-    tasks = [{"id": "t1", "state": "open", "phase": "p2"}, {"id": "t2", "state": "open", "phase": "p2"}]
-    doc = {
-        "tasks": tasks,
-        "freezes": [{"verb": "freeze", "target": "tasks/t2"}, {"verb": "focus", "target": "tasks/t9"}],
-    }
+    tasks = [{"id": f"t{n}", "state": "open", "phase": phase} for n, phase in ((1, "p2"), (2, "p2"), (3, "p1"))]
+    doc = {"tasks": tasks, "freezes": [{"verb": "freeze", "target": "tasks/t2"}]}
+    monkeypatch.setattr(
+        metrics.freeze,
+        "watched",
+        lambda slug, store, ledger, doc: {**doc, metrics.freeze.WATCHED: ["the focus on t9 in the watched swarm"]},
+    )
     swarm = metrics.metrics_swarm.TickInput(store, doc, [], lambda url: None, None)
     assert metrics.record_pass("sw", NOW, 0, ON, swarm) == ["fleet metrics failed: registry down"]
-    assert seen == [(tasks, [True, False])]
+    assert seen == [(tasks, [True, False, False])]
