@@ -313,7 +313,15 @@ def _container(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
             f"{LAUNCH_DIR}/{LAUNCH_RECORD}",
         ],
         "env": [_token(launch)]
-        + ([{"name": "BRAIN_URL", "value": policy["brain_url"]}] if "brain_url" in policy else []),
+        + ([{"name": "BRAIN_URL", "value": policy["brain_url"]}] if "brain_url" in policy else [])
+        + (
+            [
+                {"name": key, "valueFrom": {"secretKeyRef": {"name": policy["git_app_secret_name"], "key": key}}}
+                for key in ("GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY")
+            ]
+            if "git_app_secret_name" in policy
+            else []
+        ),
         "resources": _resources(launch, profile["limits"]),
         "securityContext": copy.deepcopy(HARDENED),
         "volumeMounts": [

@@ -13,6 +13,7 @@
     "runtime_class_name": {"$ref": "#/$defs/dns_label"},
     "image_repository": {"type": "string", "maxLength": 200, "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?(/[a-z0-9]+([._-][a-z0-9]+)*)+$"},
     "brain_url": {"type": "string", "maxLength": 200, "pattern": "^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$"},
+    "git_app_secret_name": {"$ref": "#/$defs/dns_label"},
     "termination_grace_seconds": {"type": "integer", "minimum": 1, "maximum": 900},
     "mounts": {"type": "array", "maxItems": 8, "items": {"$ref": "#/$defs/mount"}, "description": "Shared storage. A seed and the node cache mount read only; an artifact mount is writable only in the subPath of its execution. The rendered Pod passes the storage checker or is refused."},
     "bundle": {

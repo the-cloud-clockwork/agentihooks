@@ -159,6 +159,7 @@ APPLY = {
     "close": _apply_close,
     "post": outbox.apply_post,
     "say": _apply_say,
+    "ledger": outbox.apply_ledger,
 }
 
 
