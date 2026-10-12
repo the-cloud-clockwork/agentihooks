@@ -99,6 +99,13 @@ def test_collected_items_run_in_the_requested_order_after_the_conftest_sorts_pat
     ]
 
 
+def test_a_memory_that_prepared_no_mutant_keeps_the_collected_order(tmp_path):
+    memory = killers.KillMemory(tmp_path / "killers")
+    items = [SimpleNamespace(nodeid=nodeid) for nodeid in TESTS]
+    memory.pytest_collection_modifyitems(items)
+    assert [item.nodeid for item in items] == TESTS
+
+
 def test_the_selection_runner_orders_by_kills_and_records_them_only_for_mutants(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     selection_file = tmp_path / "selection.json"
