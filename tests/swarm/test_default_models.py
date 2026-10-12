@@ -145,12 +145,16 @@ def test_a_missing_harness_catalog_refuses_its_model(harness):
     assert default_models.refusal({field: "missing"}, {}) == f"{field} must be a model listed in the {harness} catalog"
 
 
-def test_model_validation_uses_the_store_cache_and_current_context(store):
+@pytest.mark.parametrize("operation", ("create", "update"))
+def test_model_validation_uses_the_store_cache_and_current_context(store, operation):
     with (
         patch.object(model_catalog, "catalog", return_value=CATALOG) as load,
         patch.object(runtime.time, "time", return_value=123456.0),
     ):
-        store.update("sw", claude_model="sonnet")
+        if operation == "create":
+            store.create(SwarmConfig("new", "/repo", 2, 1, claude_model="sonnet"))
+        else:
+            store.update("sw", claude_model="sonnet")
     environ, cache, now = load.call_args.args
     context_matches = environ is os.environ
     cache_matches = cache is store.redis
