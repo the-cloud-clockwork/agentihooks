@@ -283,7 +283,6 @@ class Mail:
         return masters.MasterSeats(self.store.redis).owners(self.slug, self.doc) if self.doc else {}
 
     def owner(self, target):
-        """A phase's or a task's item goes to the live master owning its phase, anything else to the lead."""
         return masters.route(target, self.doc, lambda: self.owners, self.masters, self.master)
 
     def once(self, key, act):

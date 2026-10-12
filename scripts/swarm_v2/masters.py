@@ -110,7 +110,6 @@ def owner_of(target: str, doc: dict, owners: dict[str, str]) -> str:
 
 
 def route(target: str, doc: dict, owners: Callable[[], dict[str, str]], live: list[str], lead: str) -> str:
-    """owners is read only for a phase, task or hive target, so other items write no owner state."""
     if target.partition("/")[0] not in ("phases", "tasks", "questions", "followups", HIVES):
         return lead
     owner = owner_of(target, doc, owners())
