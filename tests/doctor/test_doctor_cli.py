@@ -204,7 +204,18 @@ def test_the_watched_master_reopens_its_closed_doctor_as_itself(env, monkeypatch
     assert state(DOCTOR)["_meta"]["stamps"]["closed_at"]["by"] == MASTER
 
 
-def test_the_operator_shell_still_starts_the_doctor_as_doctor(env, capsys):
+def test_the_watched_master_stops_its_doctor_as_itself(env, pinned_master, capsys):
+    store, _, _ = env
+    assert doctor.main([WATCHED, "start"]) == 0, capsys.readouterr().err
+    assert doctor.main([WATCHED, "stop"]) == 0, capsys.readouterr().err
+    assert state(DOCTOR)["closed_at"]
+    assert state(DOCTOR)["_meta"]["stamps"]["closed_at"]["by"] == MASTER
+    assert state(DOCTOR)["_meta"]["stamps"]["overview"]["by"] == MASTER
+    assert store.config(DOCTOR).state == "stopped"
+
+
+def test_the_operator_shell_still_starts_the_doctor_as_doctor(env, monkeypatch, capsys):
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
     assert doctor.main([WATCHED, "start"]) == 0, capsys.readouterr().err
     assert state(DOCTOR)["_meta"]["stamps"]["sources"]["by"] == doctor.BY
     assert state(WATCHED)["_meta"]["stamps"]["sources"]["by"] == doctor.BY

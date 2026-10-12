@@ -196,7 +196,7 @@ def fixes_note(tasks):
 
 def _close(store, slug, doctor, lead="", announce=True):
     note = (lead + fixes_note(swarm.LedgerClient().tasks(doctor)))[:NOTE_MAX]
-    swarm.cmd_close(store, Namespace(slug=doctor, note=note, now=True, name="operator"))
+    swarm.cmd_close(store, Namespace(slug=doctor, note=note, now=True, name=None))
     store.clear_peer(slug)
     store.clear_peer(doctor)
     inbox = InboxStore(store.redis)
