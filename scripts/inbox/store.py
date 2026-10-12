@@ -382,7 +382,7 @@ class InboxStore:
             pipe.execute()
             return moved
 
-    def reply(self, item_id, replier, text, fyi=False, answer_id=""):
+    def reply(self, item_id: str, replier: str, text: str, fyi: bool = False, answer_id: str = "") -> Item:
         from redis.exceptions import WatchError
 
         item = self.get(item_id)

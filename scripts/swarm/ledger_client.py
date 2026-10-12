@@ -131,7 +131,7 @@ class LedgerClient:
             op.pop("to")
         self._call(slug, [op])
 
-    def relay(self, slug, text, by, op_id=""):
+    def relay(self, slug: str, text: str, by: str, op_id: str = "") -> None:
         op = _op("add", by, thread="chat", text=text, to="operator")
         if op_id:
             op["id"] = op_id
