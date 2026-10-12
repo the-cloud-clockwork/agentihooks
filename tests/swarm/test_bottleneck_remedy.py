@@ -230,7 +230,7 @@ def test_quota_hold_moves_the_lane_pinned_to_the_held_harness_once(store, home, 
     detect(store, "quota_hold", 3.0, 2.0, labels=("codex",), at=LATER)
     why = bottleneck_remedy.UNPINNED.format(harness="codex")
     assert run(store, at=LATER) == [proposed(HELD, why)]
-    assert master_items(store) == [proposal("quota hold", HELD, why)]
+    assert master_items(store) == [proposal("quota hold", HELD, why, fired=2)]
 
 
 def test_quota_hold_naming_no_harness_is_proposed(store, home, shipped):
