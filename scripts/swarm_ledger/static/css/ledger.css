@@ -649,7 +649,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 #stats-column section { padding: 16px; margin: 0; }
 #stats { margin: 0; }
 #stats .stat { grid-template-columns: minmax(0, 1fr) auto; }
-#stats .top-bottleneck { grid-template-columns: 1fr; gap: 6px; padding-top: 12px; padding-bottom: 12px; }
+#stats .top-bottleneck { grid-template-columns: 1fr; gap: 6px; }
 #stats .bottleneck-list { margin: 0; padding-left: 16px; list-style: disc; }
 #stats .bottleneck-list li::marker { color: var(--accent); }
 #stats .top-bottleneck dd { text-align: left; min-width: 0; overflow-wrap: anywhere; }
