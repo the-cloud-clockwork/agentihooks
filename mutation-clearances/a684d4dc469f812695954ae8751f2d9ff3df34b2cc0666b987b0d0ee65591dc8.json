@@ -1,0 +1,6 @@
+{
+  "scripts/init_agent.py:scripts.init_agent.x__parser__mutmut_14:f77a407854e430838dc15186f767258bed58739c3de32d145edee2f4ffbed48e": {
+    "reader": "Standards reader for cxc2",
+    "reason": "Only the --codex-transport help text gains XX wrapping, shown only by --help and read by no program or test."
+  }
+}

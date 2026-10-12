@@ -190,7 +190,7 @@ def test_a_placement_refusal_holds_the_seat_and_says_why(store):
     MasterSeats(store.redis).set_count("sw", 2)
     runtime = Recording("placed on another host")
     assert master_fill.run("sw", store.config("sw"), store, runtime, {}, 1) == ["placed on another host"]
-    assert runtime.asked == [(MASTER, {})] and runtime.masters == []
+    assert runtime.asked == [(MASTER, {"id": "master-2"})] and runtime.masters == []
 
 
 def test_no_session_slot_holds_the_seat_and_says_why(store):

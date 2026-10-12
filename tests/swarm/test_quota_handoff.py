@@ -893,3 +893,25 @@ def test_api_successor_ties_use_the_existing_account_name_order():
     api = capacity.Account("claude", "api", "OPEN", 0, None, None, 1, kind="api")
     token = account("aaa", five=0, week=0, sessions=0)
     assert quota_handoff.successor([api, token], ("claude",), quota_handoff.Thresholds()) == token
+
+
+CEILING_REASON = "reserved for 1 live master: workers stop at 70% of the week"
+
+
+def test_handoff_trigger_fires_at_the_ceiling():
+    reserved = replace(account("main", five=10, week=70), reserved=CEILING_REASON)
+    thresholds = quota_handoff.Thresholds()
+    assert quota_handoff.trigger(reserved, thresholds) == "week"
+    assert quota_handoff.trigger(account("main", five=10, week=70), thresholds) == ""
+    assert quota_handoff.windows(replace(reserved, week_left=None), thresholds) == []
+
+
+def test_warn_spares_the_master_lane_on_a_reserved_account():
+    import fakeredis
+
+    storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    storage.put_agent("sw", AgentRecord("master@x", "master", "m", harness="claude", account="main"))
+    storage.put_agent("sw", AgentRecord("worker", "eng", "w", harness="claude", account="main"))
+    reserved = replace(account("main", five=10, week=70), reserved=CEILING_REASON)
+    storage.redis.set(storage.key("sw", "quota-capacity"), json.dumps({"accounts": [capacity.record(reserved)]}))
+    assert quota_handoff.warn("sw", storage, {}) == ["early quota handoff warning sent to worker"]

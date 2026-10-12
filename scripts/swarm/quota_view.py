@@ -35,6 +35,7 @@ def api_share(account: dict, accounts: list[dict]) -> tuple[int, int]:
 def _account_line(row: dict, accounts: list[dict]) -> str:
     if row.get("kind") != API:
         detail = f"routing {left_text(routing_left(row))}"
+        detail += f", {row['reserved']}" if row.get("reserved") else ""
     else:
         share, total = api_share(row, accounts)
         weight = "no weight" if row.get("weight") is None else f"weight {row['weight']}%"
