@@ -69,6 +69,12 @@ def account_type(account: codex_router.CodexAccount, route: str) -> str:
     return "chatgpt" if route == INTERACTIVE or not (account.is_token or account.bearer) else ""
 
 
+def _opening(prompt_file: str) -> str:
+    if not prompt_file:
+        return ""
+    return Path(prompt_file).read_bytes().decode().replace("\r\n", "\n").replace("\r", "\n")
+
+
 def route_account(environ: Mapping[str, str], route: str, exclude: str) -> tuple[codex_router.CodexAccount, str, dict]:
     if route == INTERACTIVE:
         from scripts.routing import interactive
@@ -130,7 +136,7 @@ def prepare(args: argparse.Namespace, agent_args: list[str], environ: dict[str, 
         server_args=(*provider_args(account), *server_args),
         previous_execution_id=args.previous_execution,
         resume_thread=args.resume,
-        opening=Path(args.prompt_file).read_bytes().decode() if args.prompt_file else "",
+        opening=_opening(args.prompt_file),
         account_type=account_type(account, route),
         allowed_tokens=frozenset(name for name in (account.env_name, account.key_env) if name),
         bundle_revision=args.bundle_revision,

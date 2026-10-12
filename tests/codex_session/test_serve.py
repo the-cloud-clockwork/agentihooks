@@ -242,6 +242,14 @@ def test_prepare_checks_the_login_of_an_interactive_route_and_opens_nothing_with
     assert (spec.account_type, spec.opening, spec.agent.effort) == ("chatgpt", "", "")
 
 
+def test_the_opening_prompt_reads_as_utf8_text_with_every_line_ending_as_a_newline(tmp_path):
+    prompt = tmp_path / "opening"
+    prompt.write_bytes("café\r\nline\rlast\n".encode())
+    assert serve._opening(str(prompt)) == "café\nline\nlast\n"
+    assert serve._opening(str(prompt)) == prompt.read_text(encoding="utf-8")
+    assert serve._opening("") == ""
+
+
 def supervised(monkeypatch, wait, returncode=0):
     process = SimpleNamespace(wait=wait, returncode=returncode)
     record = SimpleNamespace(
