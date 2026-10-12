@@ -401,6 +401,19 @@ def test_a_budget_under_one_second_still_reads(cursors):
     assert failures == [] and found[0]["read"] is True
 
 
+def test_a_failing_binding_is_tried_exactly_the_attempts(cursors):
+    tries = []
+
+    def get(path, params):
+        tries.append(path)
+        raise ConnectionError("refused")
+
+    [found], failures = registry.read("s", [AGENT], get, {}, 1, 50)
+    assert found["read"] is False
+    assert len(tries) == registry.ATTEMPTS
+    assert failures == ["active read of engineer@1-0001 failed: ConnectionError: refused"]
+
+
 def test_a_read_unfinished_when_the_budget_ends_leaves_its_binding_unread(cursors):
     second = {**AGENT, "name": "engineer@1-0002"}
     langfuse = Langfuse([], [])
