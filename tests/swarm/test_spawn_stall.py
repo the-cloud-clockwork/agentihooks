@@ -2,7 +2,7 @@ import pytest
 
 from scripts.inbox import store as inbox_store
 from scripts.inbox.store import InboxStore
-from scripts.swarm import capacity, cli, status, tick
+from scripts.swarm import capacity, cli, commands, status, tick
 from scripts.swarm.health import spawn_stall
 from scripts.swarm.store import AgentRecord, SwarmConfig
 from tests.swarm.test_cli import env as env
@@ -84,6 +84,22 @@ def test_repeated_failed_tick_alarms_at_ten_minutes_and_names_the_step(stalled):
     )
     tick_failure(stalled)
     assert len(InboxStore(store.redis).pending_mail("master@sw")) == 1
+
+
+def test_failed_ticks_publish_the_spawn_stall_alarm_for_the_page(stalled):
+    store, _, _, clock, _ = stalled
+    tick_failure(stalled)
+    assert commands.view(store, "sw").get("findings") == []
+    clock[0] += 600_000
+    tick_failure(stalled)
+    (finding,) = commands.view(store, "sw")["findings"]
+    assert finding["id"] == "spawn-stall/sw"
+    assert finding["kind"] == "spawn stall"
+    assert finding["summary"] == "No agent has launched for ten minutes"
+    assert finding["evidence"] == [
+        "A lane has a free seat, quota and claimable work",
+        "Last failed step tests.swarm.test_spawn_stall.stalled.<locals>.broken: RuntimeError: forced phase failure",
+    ]
 
 
 def test_unanswered_alarm_notifies_the_operator_after_ten_further_minutes(stalled):
