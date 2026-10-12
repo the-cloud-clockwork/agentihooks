@@ -101,6 +101,7 @@ from scripts.swarm import (
     plan_review,
     priming_trace,
     prompt,
+    ready,
     reaper,
     snapshot,
     stack,
@@ -272,6 +273,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], view, now_ms())
             rows = {t["id"]: t for t in doc["tasks"]}
             actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms(), ledger_events.view)
+            actions += skip_refused(ready.merge_pass, store, slug, rows, ledger, view, ledger_events.view, now_ms())
             actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
             actions += skip_refused(dispatcher.priorities, store, slug, doc, ledger, view, now_ms())
             if scheduled:
@@ -1402,6 +1404,31 @@ def cmd_park(store, args):
     )
 
 
+def cmd_ready(store, args):
+    agent = _worker(store, args)
+    done_gate.require_local(store, args.slug, agent.task)
+    text = _read(args.doc, "handoff document")
+    ledger = LedgerClient()
+    row = next((t for t in ledger.tasks(args.slug) if t.get("id") == agent.task), {})
+    found = ready.check(row, agent, store.config(args.slug).autonomy, ledger_events.view, now_ms())
+    problems = handoff_check.problems(text, Resolver(args.slug, store.redis, ledger.state))
+    if problems:
+        raise SwarmError(handoff_check.refusal(problems))
+    ready.release(store, args.slug, agent.task, found, ledger, agent.name)
+    _hand_off(store, args.slug, agent, text, "exit", ledger)
+    print(
+        json.dumps(
+            {
+                "task": agent.task,
+                "pr_url": found["url"],
+                "head": found["head"],
+                "awaiting": ready.AWAITING,
+                "next": "stop now; the swarm carries the pull request to merge and closes this session",
+            }
+        )
+    )
+
+
 def cmd_restack(store, args):
     agent = _worker(store, args)
     fields = stack.restack(args.slug, agent, LedgerClient())
@@ -1657,6 +1684,7 @@ def build_parser():
     reported.add_argument("--doing", required=True)
     reported.add_argument("--ends-when", required=True)
     sub.add_parser("park").add_argument("doc")
+    sub.add_parser("ready").add_argument("doc")
     sub.add_parser("restack")
     handoff = sub.add_parser("handoff")
     handoff.add_argument("doc")
