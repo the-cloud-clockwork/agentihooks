@@ -67,6 +67,7 @@ class TestOneshotDelivery:
         marker = {
             "ts": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "profile": profile,
+            "home": rules_refresh.profile_home(rules_refresh.claude_home()),
             "content_hash": "abc",
             "payload": payload,
             "pending": pending,
