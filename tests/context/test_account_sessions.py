@@ -207,3 +207,103 @@ def test_an_exec_run_whose_prompt_names_a_server_still_counts(tmp_path):
     root = tmp_path / "proc"
     _proc(root, 720, "codex", 1, ["codex", "exec", "mcp-server"], {"AH_CX_TOKEN_alpha": "a"})
     assert acc.codex_sessions_by_account(root) == {"alpha": 1}
+
+
+def _endpoint(execution_id):
+    from pathlib import Path
+
+    from scripts.codex_session import supervisor
+
+    key = execution_id.removeprefix(supervisor.EXECUTION_PREFIX)[: supervisor.ENDPOINT_ID_CHARS]
+    return f"{supervisor.UNIX}{Path('/run/user/1000') / supervisor.RUNTIME_SUBDIR / key / supervisor.SOCKET_NAME}"
+
+
+def _managed_host(root, viewers):
+    from pathlib import Path
+
+    from scripts.codex_session import supervisor
+
+    endpoint = _endpoint("exe-0123456789abcdef0123")
+    socket = Path(endpoint.removeprefix(supervisor.UNIX))
+    _proc(root, 800, "python3", 1, ["python3", "-m", "scripts.codex_session"], {"AH_CX_TOKEN_alpha": "a"})
+    _proc(root, 801, "codex", 800, supervisor.server_command("codex", socket, ()), {"AH_CX_TOKEN_alpha": "a"})
+    remotes = (["codex", "resume", "thread-1", "--remote", endpoint], ["codex", f"--remote={endpoint}"])
+    for pid, argv in zip((810, 811), remotes[:viewers], strict=False):
+        _proc(root, pid, "codex", 1, argv, {"AH_CX_TOKEN_alpha": "a"})
+    _proc(root, 820, "python3", 1, ["python3", "-m", "scripts.inbox.codex", "eng-1@sw"], {"AH_CX_TOKEN_alpha": "a"})
+    _proc(root, 821, "python3", 1, ["python3", "-m", "scripts.codex_app_server_probe", str(socket), "r", "s", "o"], {})
+    _proc(
+        root, 822, "codex", 1, ["codex", "app-server", "--listen", "unix:///tmp/probe.sock"], {"AH_CX_TOKEN_alpha": "a"}
+    )
+    return endpoint
+
+
+@pytest.mark.parametrize("viewers", [0, 1, 2])
+def test_a_managed_execution_counts_once_whatever_its_viewers(tmp_path, viewers, monkeypatch):
+    root = tmp_path / "proc"
+    _managed_host(root, viewers)
+    monkeypatch.setattr(acc, "handed_off_pids", set)
+    assert acc.codex_sessions_by_account(root, local=True) == {"alpha": 1}
+    assert acc.live_codex_sessions(root) == 1
+    assert acc.local_processes(root)["codex"] == {801: "alpha"}
+
+
+def test_an_execution_key_names_the_execution_of_its_endpoint():
+    assert acc.execution_key(_endpoint("exe-0123456789abcdef0123")) == "0123456789abcdef"
+    assert acc.execution_key("unix:///tmp/probe.sock") == ""
+    assert acc.execution_key("unix:///run/cx/abc/other") == ""
+    assert acc.execution_key("/run/user/1000/cx/abc/s") == ""
+    assert acc.execution_key("unix:///run/user/1000/cx/abc/s") == "abc"
+
+
+def _held_store(monkeypatch, *rows):
+    from dataclasses import replace
+
+    import fakeredis
+
+    from scripts.codex_session.binding import BindingStore, TransportRecord
+    from scripts.swarm.store import PREFIX, RedisStore
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr("hooks._redis.get_redis", lambda: redis)
+    redis.sadd(f"{PREFIX}:index", "sw")
+    bindings = BindingStore(RedisStore(redis))
+    for execution, state, account in rows:
+        record = TransportRecord(execution, 1, "eng-1@sw", "engineer@1", "t1", _endpoint(execution), account=account)
+        bindings.reserve("sw", record)
+        if state != "starting":
+            bindings.put("sw", replace(record, state=state))
+
+
+def test_a_reserved_execution_holds_its_slot_before_its_server_is_seen(tmp_path, monkeypatch):
+    root = tmp_path / "proc"
+    root.mkdir()
+    _held_store(monkeypatch, ("exe-a000000000000001", "starting", "alpha"))
+    assert acc.codex_sessions_by_account(root) == {"alpha": 1}
+    assert acc.codex_sessions_by_account(root, local=True) == {}
+
+
+def test_a_held_execution_and_its_observed_server_count_once(tmp_path, monkeypatch):
+    root = tmp_path / "proc"
+    _managed_host(root, 2)
+    _held_store(monkeypatch, ("exe-0123456789abcdef0123", "connected", "alpha"))
+    assert acc.codex_sessions_by_account(root) == {"alpha": 1}
+
+
+def test_unknown_liveness_holds_the_slot_and_termination_releases_it(tmp_path, monkeypatch):
+    root = tmp_path / "proc"
+    root.mkdir()
+    _held_store(
+        monkeypatch,
+        ("exe-a000000000000001", "connected", "alpha"),
+        ("exe-a000000000000002", "degraded", "alpha"),
+        ("exe-a000000000000003", "exited", "alpha"),
+        ("exe-a000000000000004", "failed", "alpha"),
+        ("exe-a000000000000005", "starting", ""),
+    )
+    assert acc.codex_sessions_by_account(root) == {"alpha": 2, "default": 1}
+
+
+def test_no_redis_holds_nothing(monkeypatch):
+    monkeypatch.setattr("hooks._redis.get_redis", lambda: None)
+    assert acc.managed_held() == set()
