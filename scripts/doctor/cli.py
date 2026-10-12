@@ -159,7 +159,7 @@ def cmd_start(store, args):
     _pair(store, slug, doctor)
     loop.reset(store, doctor)
     if ledger.closed(doctor):
-        swarm.cmd_reopen(store, Namespace(slug=doctor, name=None))
+        swarm.cmd_reopen(store, Namespace(slug=doctor, name=_name()))
     else:
         swarm.cmd_start(store, Namespace(slug=doctor))
 
@@ -196,7 +196,7 @@ def fixes_note(tasks):
 
 def _close(store, slug, doctor, lead="", announce=True):
     note = (lead + fixes_note(swarm.LedgerClient().tasks(doctor)))[:NOTE_MAX]
-    swarm.cmd_close(store, Namespace(slug=doctor, note=note, now=True, name=None))
+    swarm.cmd_close(store, Namespace(slug=doctor, note=note, now=True, name=_name()))
     store.clear_peer(slug)
     store.clear_peer(doctor)
     inbox = InboxStore(store.redis)

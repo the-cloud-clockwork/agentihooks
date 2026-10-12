@@ -219,6 +219,11 @@ def test_the_operator_shell_still_starts_the_doctor_as_doctor(env, monkeypatch, 
     assert doctor.main([WATCHED, "start"]) == 0, capsys.readouterr().err
     assert state(DOCTOR)["_meta"]["stamps"]["sources"]["by"] == doctor.BY
     assert state(WATCHED)["_meta"]["stamps"]["sources"]["by"] == doctor.BY
+    assert doctor.main([WATCHED, "stop"]) == 0
+    assert state(DOCTOR)["_meta"]["stamps"]["closed_at"]["by"] == doctor.BY
+    assert doctor.main([WATCHED, "start"]) == 0, capsys.readouterr().err
+    assert not state(DOCTOR)["closed_at"]
+    assert state(DOCTOR)["_meta"]["stamps"]["closed_at"]["by"] == doctor.BY
 
 
 @pytest.mark.parametrize("name", [MASTER, "engineer@323133-1244"])
