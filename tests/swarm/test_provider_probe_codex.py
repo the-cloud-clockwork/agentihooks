@@ -1,5 +1,6 @@
 import base64
 import json
+import shutil
 import subprocess
 import uuid
 from unittest.mock import patch
@@ -31,7 +32,7 @@ def test_codex_probe_launch_authenticates_like_the_routed_pane(tmp_path, monkeyp
     else:
         account = codex_router.CodexAccount("default")
     account = codex_router.credential(account, env)
-    monkeypatch.setattr(provider_probe.shutil, "which", lambda name: "/probe-bin/codex")
+    monkeypatch.setattr(shutil, "which", lambda name: "/probe-bin/codex")
     calls = []
 
     def run(args, **kwargs):
