@@ -321,7 +321,9 @@ def apply_ledger(store, by: str, entry: dict) -> dict:
     try:
         state = ledger.replay(args["slug"], args["ops"], args["agent"], args["service"])
     except urllib.error.HTTPError as exc:
-        if exc.code >= 500 or exc.code == 429:
+        from scripts.swarm_ledger.api.client import failure
+
+        if exc.code >= 500 or exc.code == 429 or failure(exc)[1].get("code") == "revision_conflict":
             raise LedgerBusy(f"the ledger server answered {exc.code}") from None
         raise InboxError(f"the ledger server refused it: {exc.code}") from None
     except OSError as exc:

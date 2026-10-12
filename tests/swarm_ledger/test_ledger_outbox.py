@@ -1,3 +1,4 @@
+import io
 import itertools
 import json
 import sys
@@ -180,10 +181,11 @@ def test_a_busy_or_conflicting_server_answer_keeps_the_record_for_a_later_replay
     server.stop()
     run(capsys, ENG, "say", "Kept through a busy server")
     held = outbox.path().read_text()
-    for code in (503, 500, 429):
+    revision = json.dumps({"error": {"code": "revision_conflict", "message": "persisted"}}).encode()
+    for code, body in ((503, b""), (500, b""), (429, b""), (409, revision)):
 
-        def busy(*args, code=code):
-            raise urllib.error.HTTPError("http://ledger", code, "busy", {}, None)
+        def busy(*args, code=code, body=body):
+            raise urllib.error.HTTPError("http://ledger", code, "busy", {}, io.BytesIO(body))
 
         monkeypatch.setattr(ledger, "replay", busy)
         report = outbox.flush(None)
@@ -192,7 +194,8 @@ def test_a_busy_or_conflicting_server_answer_keeps_the_record_for_a_later_replay
     assert not outbox.skipped_path().exists()
 
     def conflict(*args):
-        raise urllib.error.HTTPError("http://ledger", 409, "operation conflict", {}, None)
+        body = json.dumps({"error": {"code": "operation_conflict"}}).encode()
+        raise urllib.error.HTTPError("http://ledger", 409, "operation conflict", {}, io.BytesIO(body))
 
     monkeypatch.setattr(ledger, "replay", conflict)
     report = outbox.flush(None)
