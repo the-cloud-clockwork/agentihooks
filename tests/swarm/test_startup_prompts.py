@@ -366,6 +366,31 @@ def test_a_stacked_claim_reuses_the_recorded_issue_and_merges_every_other_open_d
     assert "git merge origin/eng-two" in _step(lines, 2)
 
 
+def test_a_stacked_claim_names_the_repository_of_a_dependency_branch_in_a_second_repository():
+    other = "https://github.com/o/other"
+    lines = _steps({"kind": "code", "stack_base": [{"task": "t1", "branch": "eng-one", "repo": other}]})
+    assert f"Dependency t1 is still open on branch eng-one in repository {other}." in lines
+    worktree = _step(lines, 2)
+    assert f"in its repository {other}: {CUT} --from origin/eng-one" in worktree
+    assert f"When your task's repository is not {other}, cut from dev in your own repository: {CUT}." in worktree
+
+
+def test_a_stacked_claim_merges_another_dependency_only_in_its_own_repository():
+    lines = _steps(
+        {
+            "kind": "code",
+            "stack_base": [
+                {"task": "t1", "branch": "eng-one"},
+                {"task": "t2", "branch": "eng-two", "repo": "https://github.com/o/other"},
+            ],
+        }
+    )
+    assert (
+        "Merge eng-two into it when your task's repository is https://github.com/o/other: git merge origin/eng-two."
+        in _step(lines, 2)
+    )
+
+
 def test_a_stacked_claim_continues_its_predecessors_branch_over_the_dependency_branch():
     envelope = {"continue_from": "origin/eng-mine", "remote_head": "abc"}
     lines = _steps({"kind": "code", "stack_base": [{"task": "t1", "branch": "eng-one"}], "handoff_envelope": envelope})

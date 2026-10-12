@@ -1468,6 +1468,18 @@ def test_a_task_starts_stacked_on_claimed_and_in_pr_dependencies_that_carry_a_br
     assert runtime.tasks[0]["stack_base"] == []
 
 
+def test_a_stacked_claim_carries_the_repository_recorded_with_a_dependency_branch(store):
+    ledger = FakeLedger([{"id": "t1"}, {"id": "t2", "depends_on": ["t1"]}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"].update(branch="engineer-a1b2c3-0001", branch_repo="https://github.com/o/other")
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime) == ["t1", "t2"]
+    assert runtime.tasks[-1]["stack_base"] == [
+        {"task": "t1", "branch": "engineer-a1b2c3-0001", "repo": "https://github.com/o/other"}
+    ]
+
+
 @pytest.mark.parametrize(
     ("state", "branch"), [("open", "engineer-x"), ("blocked", "engineer-x"), ("claimed", ""), ("pr", "")]
 )
