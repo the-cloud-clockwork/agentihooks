@@ -7,6 +7,22 @@ image:
 
 hive:
   id: ""
+  join:
+    enabled: false
+    port: 8770
+    memberRedisUrl: ""
+    tlsSecretName: ""
+    affinity: {}
+    tolerations: []
+    ingressFrom: []
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+        ephemeral-storage: 16Mi
+      limits:
+        memory: 256Mi
+        ephemeral-storage: 64Mi
 
 secretEnv: []
 envFromSecrets: []
