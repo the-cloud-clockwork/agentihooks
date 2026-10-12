@@ -287,6 +287,33 @@ def test_linked_appends_each_anchored_section_once_in_link_order():
     assert plan_read.linked(LINKED_PLAN, "3-6") == f"\n{CASE_A}\n{CASE_B}\n{CASE_C}"
 
 
+@pytest.mark.parametrize(
+    ("source", "lines", "margin", "expected"),
+    [
+        ('[A](#a)\n<a id="a"></a>\n### A\nbody\n', "1-1", 3, ""),
+        ('<a id="a"></a>\n### A\nfirst\nlast\n### Work\n[A](#a)\n', "6-6", 2, "\n### A\nfirst\n"),
+        (
+            '[A](#a) [B](#b)\n<a id="a"></a>\n### A\nsame\n<a id="b"></a>\n#### B\nsame\n',
+            "1-1",
+            0,
+            '\n### A\nsame\n<a id="b"></a>\n#### B\nsame\n',
+        ),
+    ],
+)
+def test_linked_omits_printed_lines_without_dropping_distinct_equal_rows(source, lines, margin, expected):
+    assert plan_read.linked(source, lines, margin=margin) == expected
+
+
+def test_linked_keeps_unprinted_earlier_cases_when_links_are_reversed():
+    source = '[B](#b) [A](#a)\n<a id="a"></a>\n### A\nfirst\n<a id="b"></a>\n### B\nlast\n'
+    assert plan_read.linked(source, "1-1") == "\n### B\nlast\n\n### A\nfirst\n"
+
+
+def test_linked_defaults_to_excluding_only_the_slice():
+    source = '<a id="a"></a>\n### A\n[A](#a)\nbody\n'
+    assert plan_read.linked(source, "3-3") == "\n### A\nbody\n"
+
+
 def test_linked_follows_only_links_inside_the_slice():
     assert plan_read.linked(LINKED_PLAN, "4-4") == f"\n{CASE_A}"
     assert plan_read.linked(LINKED_PLAN, "3-5") == f"\n{CASE_A}\n{CASE_B}"
@@ -330,7 +357,10 @@ def test_task_read_appends_the_linked_cases_after_the_slice(tmp_path, monkeypatc
     SQLiteLedgerRepository(tmp_path / DATABASE).import_document("linked", {**doc, "_meta": {"rev": 1}})
     rows = LINKED_PLAN.splitlines()
     margin = "".join(f"{row}\n" for row in rows[:16])
-    assert run(capsys, ["--task", "w1"], {"AGENTIHOOKS_SWARM": "linked"}) == f"{margin}\n{CASE_A}\n{CASE_B}\n{CASE_C}"
+    assert (
+        run(capsys, ["--task", "w1"], {"AGENTIHOOKS_SWARM": "linked"})
+        == f"{margin}\n#### Detail\n- a detail\n\n{CASE_B}\n{CASE_C}"
+    )
     assert run(capsys, ["--task", "head"], {"AGENTIHOOKS_SWARM": "linked"}) == "".join(f"{row}\n" for row in rows[:11])
     assert run(capsys, ["--phase", "p1"], {"AGENTIHOOKS_SWARM": "linked"}) == LINKED_PLAN
 
@@ -340,4 +370,7 @@ def test_swarm_v2_package_read_appends_the_linked_cases(monkeypatch):
 
     plan = "## 1. One\n## 2. Two\n## 3. Three\n" + LINKED_PLAN.replace("# Plan\n", "")
     monkeypatch.setattr(plan_packages, "text", lambda: plan)
-    assert plan_packages.read("5-8").endswith(f"\n{CASE_A}\n{CASE_B}\n{CASE_C}")
+    result = plan_packages.read("5-8")
+    assert result.endswith(f"\n#### Detail\n- a detail\n\n{CASE_B}\n{CASE_C}")
+    assert result.count("### Case A\n") == 1
+    assert result.count("- a body\n") == 1
