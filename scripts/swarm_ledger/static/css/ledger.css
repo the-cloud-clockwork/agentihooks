@@ -378,6 +378,7 @@ a.sw-task:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .outline .ol-items a.st-done::before, .outline .ol-items a.st-done.on::before { color: var(--positive); }
 .outline .ol-items a.st-out::before, .outline .ol-items a.st-out.on::before { color: var(--warn); }
 .outline a.pending::after { content: "+"; position: absolute; left: 2px; font-weight: 700; color: var(--pending); }
+.outline .ol-sec summary > a.pending { position: relative; padding-left: 14px; }
 .fab-outline { bottom: 240px; }
 @media (min-width: 1280px) {
   body { padding-left: var(--outline-w); }
