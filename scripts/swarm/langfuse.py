@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable
@@ -76,6 +77,13 @@ def refresh(
     key = f"{ROOT}:swarm:{slug}:langfuse-summary"
     raw = store.redis.get(key)
     cached = json.loads(raw) if raw else {}
+    if not os.environ.get("LANGFUSE_MCP_URL"):
+        if cached.get("disabled"):
+            return []
+        store.redis.set(key, json.dumps({**cached, "disabled": True}))
+        return ["Langfuse sampling is off: configure LANGFUSE_MCP_URL"]
+    if cached.get("disabled"):
+        cached = {}
     if "tried_at" in cached and now_ms - cached["tried_at"] < limits.interval_ms:
         return []
     window = {

@@ -14,7 +14,7 @@ async def summary(slug: str, window: dict, timeout: float) -> dict:
     }
     async with asyncio.timeout(timeout):
         async with streamablehttp_client(
-            os.environ.get("LANGFUSE_MCP_URL", "http://10.10.30.200/mcp/"), headers=headers, timeout=timeout
+            os.environ["LANGFUSE_MCP_URL"], headers=headers, timeout=timeout
         ) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
