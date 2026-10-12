@@ -153,6 +153,34 @@ if [[ $planted != *"StatefulSet $release-ledger container ledger references the 
   exit 1
 fi
 printf 'the chart check flagged a planted ledger reference to the terminal CA Secret\n'
+roles=(-f "$chart/ci/kind-redis-roles.yaml")
+helm template "$release" "$chart" "${roles[@]}" | python3 tests/chart_redis.py "$chart/ci/kind-redis-roles.yaml"
+helm template "$release" "$chart" "${roles[@]}" "${api[@]}" | python3 tests/chart_redis.py "$chart/ci/kind-redis-roles.yaml"
+joined="$(helm template "$release" "$chart" "${roles[@]}" -f "$chart/ci/kind-hive-join.yaml" \
+  --set redis.existingSecret.name=swarm-redis-admin --set hive.join.redisSecret.name=)"
+python3 tests/chart_redis.py "$chart/ci/kind-redis-roles.yaml" <<<"$joined"
+if [[ $joined != *"name: swarm-redis-admin"* ]]; then
+  printf 'the hive join service lost the administrator Redis Secret under redis.roles\n' >&2
+  exit 1
+fi
+planted="$(helm template "$release" "$chart" "${roles[@]}" --set 'secretEnv[0].name=ADMIN_URL' \
+  --set 'secretEnv[0].secretName=swarm-redis-admin' --set 'secretEnv[0].key=url' \
+  | python3 tests/chart_redis.py "$chart/ci/kind-redis-roles.yaml" 2>&1 >/dev/null || true)"
+if [[ $planted != *"StatefulSet $release-ledger container ledger references the administrator Redis Secret swarm-redis-admin"* ]]; then
+  printf 'the chart check did not flag a planted administrator Redis Secret in secretEnv: %s\n' "$planted" >&2
+  exit 1
+fi
+planted="$(helm template "$release" "$chart" "${roles[@]}" --set redis.roles.worker.name=swarm-redis-admin 2>&1 >/dev/null || true)"
+if [[ $planted != *"redis.roles.worker must not name the administrator Redis Secret"* ]]; then
+  printf 'the chart did not refuse a worker role naming the administrator Redis Secret: %s\n' "$planted" >&2
+  exit 1
+fi
+refusal="$(helm template "$release" "$chart" "${roles[@]}" --set redis.roles.ledger.name= 2>&1 >/dev/null || true)"
+if [[ $refusal != *"redis.roles sets every role or none"* ]]; then
+  printf 'the chart did not refuse a partial set of Redis roles: %s\n' "$refusal" >&2
+  exit 1
+fi
+printf 'the chart gives the ledger, controller and worker their own Redis Secrets and refuses the administrator one\n'
 policy_map=(-f "$chart/ci/kind-policy-configmap.yaml")
 helm template "$release" "$chart" "${workers[@]}" "${policy_map[@]}" "${api[@]}" \
   | python3 tests/chart_workers.py "$chart/ci/kind-workers.yaml" "$chart/ci/kind-policy-configmap.yaml"

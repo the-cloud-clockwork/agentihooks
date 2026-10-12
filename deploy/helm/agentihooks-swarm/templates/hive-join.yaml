@@ -70,7 +70,7 @@ spec:
                   name: {{ $join.redisSecret.name }}
                   key: {{ required "hive.join.redisSecret.key names the key holding the administrator Redis URL" $join.redisSecret.key }}
             {{- else }}
-            {{- include "swarm.redisEnv" . | nindent 12 }}
+            {{- include "swarm.redisEnv" (dict "Values" .Values "Chart" .Chart "Release" .Release "role" "hive-join") | nindent 12 }}
             {{- end }}
           ports:
             - name: join

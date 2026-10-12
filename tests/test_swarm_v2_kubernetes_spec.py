@@ -127,6 +127,21 @@ def test_worker_git_app_credentials_are_only_secret_key_references():
     assert rendered.pod["spec"]["volumes"] == render()[1].pod["spec"]["volumes"]
 
 
+def test_worker_redis_url_reads_only_the_policy_worker_secret(tmp_path):
+    doc = policy_doc()
+    doc["redis_secret_name"] = "agentihooks-swarm-redis-worker"
+    _, rendered = render(policy=load_policy(write(tmp_path, doc)))
+    environ = rendered.pod["spec"]["containers"][0]["env"]
+    redis = [entry for entry in environ if "REDIS" in entry["name"]]
+    assert redis == [
+        {
+            "name": "AGENTIHOOKS_SWARM_REDIS_URL",
+            "valueFrom": {"secretKeyRef": {"name": "agentihooks-swarm-redis-worker", "key": "url"}},
+        }
+    ]
+    assert not [entry for entry in render()[1].pod["spec"]["containers"][0]["env"] if "REDIS" in entry["name"]]
+
+
 def test_requests_come_from_the_admitted_launch_and_limits_from_the_profile():
     _, rendered = render()
     assert rendered.pod["spec"]["containers"][0]["resources"] == {

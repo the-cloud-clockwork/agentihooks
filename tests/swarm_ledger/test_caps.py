@@ -126,7 +126,10 @@ class StopOrReportStack(unittest.TestCase):
         ready = core.LEDGER_DIR / "hang.ready"
         ready.unlink(missing_ok=True)
         code = (
-            "import signal, sys, time\n"
+            "import ctypes, signal, sys, time\n"
+            "PR_SET_DUMPABLE = 4\n"
+            "if ctypes.CDLL(None, use_errno=True).prctl(PR_SET_DUMPABLE, 0):\n"
+            "    raise OSError(ctypes.get_errno(), 'prctl PR_SET_DUMPABLE failed')\n"
             "signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})\n"
             "def hang():\n"
             "    open(sys.argv[1], 'w').close()\n"

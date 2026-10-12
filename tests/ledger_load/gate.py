@@ -1,6 +1,7 @@
 """Ten clients write and read a scratch ledger server holding a ledger the size of the live one; red past budget."""
 
 import argparse
+import ast
 import inspect
 import itertools
 import json
@@ -41,6 +42,18 @@ CPU_WINDOW_S = 10
 MIN_WRITES = 0.9
 SERVER_WAIT_S = 60.0
 ALERT_QUIET_MS = 3_600_000
+BUDGETS = {
+    "WRITE_P95_S": min,
+    "CPU_CORES": min,
+    "CPU_WINDOW_S": min,
+    "LEDGER_BYTES": max,
+    "CLIENTS": max,
+    "LIVE_PEAK_WRITES_PER_MINUTE": max,
+    "HEADROOM": max,
+    "MIN_WRITES": max,
+    "READS_PER_SECOND": max,
+    "SWEEPS": max,
+}
 WORDS = "the swarm keeps every task with its comments proof and the work that landed for the operator".split()
 
 
@@ -352,12 +365,40 @@ def run(folder: Path) -> list[str]:
     return problems
 
 
+def budgets(source: str) -> dict:
+    found = {
+        node.targets[0].id: ast.literal_eval(node.value)
+        for node in ast.parse(source).body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id in BUDGETS
+    }
+    if missing := sorted(set(BUDGETS) - set(found)):
+        sys.exit(f"the base gate assigns no {', '.join(missing)}")
+    return found
+
+
+def base_budgets(revision: str) -> dict:
+    gate = Path(__file__)
+    show = subprocess.run(["git", "show", f"{revision}:./{gate.name}"], cwd=gate.parent, capture_output=True, text=True)
+    if show.returncode:
+        sys.exit(f"git could not show the ledger load gate at base {revision}: {show.stderr.strip()}")
+    return budgets(show.stdout)
+
+
+def graded(base: dict) -> dict:
+    return {name: pick(globals()[name], base[name]) for name, pick in BUDGETS.items()}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--folder", type=Path, required=True, help="an empty scratch ledger folder")
+    parser.add_argument("--base", required=True, help="the revision whose budgets grade this run")
     args = parser.parse_args(argv)
     if os.environ.get("GITHUB_ACTIONS") != "true":
         sys.exit("the ledger load gate runs in CI only: it loads the machine for a minute and a half")
+    globals().update(graded(base_budgets(args.base)))
     args.folder.mkdir(parents=True, exist_ok=True)
     problems = run(args.folder)
     for problem in problems:

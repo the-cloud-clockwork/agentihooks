@@ -2509,6 +2509,13 @@ def on_permission_request(payload: dict) -> None:
 
     if planner_plan.accepts(tool_name):
         print(json.dumps(planner_plan.grant(payload.get("tool_input") or {})))
+    elif os.environ.get("AGENTIHOOKS_SWARM"):
+        emit_permission_decision(
+            "PermissionRequest",
+            "deny",
+            f"Denied {tool_name}: swarm sessions and subagents cannot wait for permission. "
+            "Use an allowed tool or report the missing capability through the swarm inbox.",
+        )
 
 
 def emit_permission_decision(
@@ -2567,6 +2574,19 @@ def emit_permission_decision(
         if reason:
             output["reason"] = reason
         print(json.dumps(output))
+        return
+
+    if target == "claude" and event_name == "PermissionRequest":
+        print(
+            json.dumps(
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": event_name,
+                        "decision": {"behavior": decision, "message": reason},
+                    }
+                }
+            )
+        )
         return
 
     output = {
