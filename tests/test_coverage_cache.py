@@ -58,6 +58,13 @@ def test_a_head_split_another_way_grades_against_the_cached_base(measured, monke
     assert result.lost == {}
 
 
+def test_the_ratchet_refuses_a_cached_base_from_another_tree(measured, monkeypatch):
+    root, target = measured
+    monkeypatch.setattr(ratchet, "git", lambda *args, **kwargs: "another-tree")
+    with pytest.raises(ValueError, match="tree differs"):
+        next(ratchet._cached_runs(root, "base", target))
+
+
 def test_cache_miss_fails_the_cli_with_recovery_guidance(measured, capsys):
     root, _ = measured
     folder = root / "coverage-3.12-1"
