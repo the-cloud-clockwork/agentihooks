@@ -25,9 +25,9 @@ def storage(tmp_path, monkeypatch):
     return store
 
 
-def legacy_agent(name="agent"):
+def legacy_agent(storage):
     return AgentRecord(
-        name,
+        storage.next_name("sw", "eng", 1000),
         "eng",
         "task",
         harness="codex",
@@ -38,9 +38,16 @@ def legacy_agent(name="agent"):
     )
 
 
+def test_transport_defaults_remain_legacy_for_older_launch_configurations():
+    config = SimpleNamespace()
+    placed = Placed("window:pane", "codex")
+    assert codex.arguments(config, "codex", {}) == ["--codex-transport", "legacy"]
+    assert codex.complete(config, "agent", placed, None) == replace(placed, transport="legacy")
+
+
 @pytest.mark.parametrize("has_previous", [False, True])
 def test_launch_arguments_carry_the_primed_execution_predecessor(storage, has_previous):
-    previous = storage.start_execution("sw", legacy_agent("previous")) if has_previous else None
+    previous = storage.start_execution("sw", legacy_agent(storage)) if has_previous else None
     config = replace(storage.config("sw"), codex_inbox_transport="app_server")
     task = tick.primed(storage, "sw", "eng-1@sw", {"id": "task"})
     assert task["previous_execution_id"] == (previous.execution_id if previous else "")
@@ -51,9 +58,9 @@ def test_launch_arguments_carry_the_primed_execution_predecessor(storage, has_pr
 
 
 def test_legacy_admission_replaces_the_predecessor_and_records_process_identity(storage):
-    previous = storage.start_execution("sw", legacy_agent("previous"))
+    previous = storage.start_execution("sw", legacy_agent(storage))
     retired = []
-    agent = legacy_agent()
+    agent = legacy_agent(storage)
     admitted = codex.admit_legacy(storage, "sw", agent, SimpleNamespace(retire=retired.append))
     assert admitted.execution_id != previous.execution_id
     assert admitted.generation == previous.generation + 1
@@ -67,14 +74,14 @@ def test_legacy_admission_replaces_the_predecessor_and_records_process_identity(
     [("claude", "legacy", ""), ("codex", "app_server", ""), ("codex", "legacy", "already-admitted")],
 )
 def test_admission_leaves_other_transports_and_admitted_executions_unchanged(storage, harness, transport, execution_id):
-    agent = replace(legacy_agent(), harness=harness, transport=transport, execution_id=execution_id)
+    agent = replace(legacy_agent(storage), harness=harness, transport=transport, execution_id=execution_id)
     assert codex.admit_legacy(storage, "sw", agent, None) is agent
     assert storage.execution_occupants("sw") == {}
 
 
 def test_failed_legacy_identity_keeps_the_failure_and_cleanup_target(storage):
     retired = []
-    agent = replace(legacy_agent(), profile_decision={})
+    agent = replace(legacy_agent(storage), profile_decision={})
     with pytest.raises(SpawnError) as caught:
         codex.admit_legacy(storage, "sw", agent, SimpleNamespace(retire=retired.append))
     assert str(caught.value) == "local launch refused: its process number and start time could not be read"
@@ -110,7 +117,7 @@ def test_shared_seat_launch_admits_its_execution_and_retires_failed_admission(st
 
 
 def test_app_server_completion_preserves_the_admitted_execution_and_transport(storage):
-    execution = storage.start_execution("sw", replace(legacy_agent(), transport="app_server"))
+    execution = storage.start_execution("sw", replace(legacy_agent(storage), transport="app_server"))
     placed = Placed("window:pane", "codex")
     config = replace(storage.config("sw"), codex_inbox_transport="app_server")
     result = codex.complete(config, execution.name, placed, None)
@@ -119,15 +126,17 @@ def test_app_server_completion_preserves_the_admitted_execution_and_transport(st
 
 @pytest.mark.parametrize("admitted_transport", [None, "legacy"])
 def test_app_server_completion_rejects_missing_or_wrong_transport_with_cleanup(storage, admitted_transport):
+    name = "agent"
     if admitted_transport:
-        storage.start_execution("sw", replace(legacy_agent(), transport=admitted_transport))
+        execution = storage.start_execution("sw", replace(legacy_agent(storage), transport=admitted_transport))
+        name = execution.name
     ended = []
     config = replace(storage.config("sw"), codex_inbox_transport="app_server")
     with pytest.raises(SpawnError) as caught:
-        codex.complete(config, "agent", Placed("window:pane", "codex"), ended.append)
+        codex.complete(config, name, Placed("window:pane", "codex"), ended.append)
     assert str(caught.value) == "the Codex app server launch has no matching admitted execution"
     assert caught.value.pane_id == "window:pane"
-    assert ended == ["agent"]
+    assert ended == [name]
 
 
 @pytest.mark.parametrize("value", [{}, None])

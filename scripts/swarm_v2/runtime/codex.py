@@ -18,7 +18,7 @@ from scripts.swarm_v2.runtime import process
 def arguments(config: SwarmConfig, harness: str, task: dict) -> list[str]:
     if harness != "codex":
         return []
-    transport = config.codex_inbox_transport
+    transport = getattr(config, "codex_inbox_transport", LEGACY_TRANSPORT)
     result = ["--codex-transport", transport]
     if transport == APP_SERVER_TRANSPORT:
         result += ["--seat", task["seat"]]
@@ -31,7 +31,7 @@ def arguments(config: SwarmConfig, harness: str, task: dict) -> list[str]:
 def complete(config: SwarmConfig, name: str, placed: Placed, terminate: Callable[[str], object]) -> Placed:
     if placed.harness != "codex":
         return placed
-    transport = config.codex_inbox_transport
+    transport = getattr(config, "codex_inbox_transport", LEGACY_TRANSPORT)
     if transport == LEGACY_TRANSPORT:
         return replace(placed, transport=transport)
     try:
