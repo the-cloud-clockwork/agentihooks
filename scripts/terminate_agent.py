@@ -69,7 +69,7 @@ def sessions(
     from hooks.context.broadcast import foreign_session
     from scripts.swarm_v2.runtime.process import local_namespace
 
-    table = processes(proc)
+    table = {pid: item for pid, item in processes(proc).items() if item.state not in {"Z", "X"}}
     records = _registry() if registry is None else registry
     here = local_namespace() if namespace is None else namespace
     result = []
@@ -166,6 +166,8 @@ def validate(
         session.process.argv,
     ):
         raise ValueError("target process disappeared or its PID was reused")
+    if current.state in {"Z", "X"}:
+        raise ValueError("target process has ended")
     if current.pgid <= 1:
         raise ValueError(f"unsafe process group {current.pgid}")
     caller_ancestors = _ancestors(os.getpid(), table)
