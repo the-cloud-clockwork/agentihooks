@@ -309,7 +309,7 @@ def test_one_seat_goes_to_the_empty_lane_before_another_engineer():
 
 def test_reduced_caps_do_not_retire_running_agents_and_comment_once(monkeypatch):
     store = _store()
-    config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=1, max_plan=0, state="running")
+    config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=1, max_plan=0, state="running", autonomy="assist")
     store.create(config)
     ledger = FakeLedger([{"id": "e"}, {"id": "e2"}, {"id": "c", "lane": "ci"}])
     ledger.comments = []
@@ -1150,6 +1150,17 @@ def test_capacity_places_ready_tasks_in_the_claim_order():
     )
     capacity.apply("sw", config, store, ledger, runtime, 1000)
     assert capacity.read(store, "sw")["tasks"] == {"deep": "claude"}
+
+
+def test_ready_work_orders_a_lane_by_the_dispatcher_queue_at_delegate():
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=0, max_plan=0))
+    store.update("sw", autonomy="delegate")
+    ledger = FakeLedger([{"id": "leaf", "rank": "high"}, {"id": "head"}, {"id": "after", "depends_on": ["head"]}])
+    found = ledger.state("sw")
+    found["_meta"]["stamps"] = {}
+    _, ready = capacity.ready_work("sw", store, found)
+    assert [t["id"] for t in ready["eng"]] == ["head", "leaf"]
 
 
 def test_allocation_skips_a_harness_whose_only_room_is_on_accounts_the_handoff_cannot_take():

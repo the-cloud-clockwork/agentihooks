@@ -1,20 +1,23 @@
-"""The dispatcher's tick step: rank by critical path and work unblocked, grouping and the priority sweep, by autonomy.
+"""The dispatcher's tick step: the claim queue by critical path and work unblocked, grouping and the priority sweep.
 
-Each tick it orders every open ungrouped task, leaves included, by the longest open dependency chain behind it, then
-the open work it unblocks, the bottleneck lane, focus order and ledger position. Of the claimable tasks that unblock
-work, at delegate and full it raises the top ones to high and lowers a high or urgent rank once that task leaves the
-top. A rank the master or the swarm set is a default it reorders; only an operator rank, set by him or relayed with
-his quoted words, stays fixed. Below delegate it proposes each raise to the master. Every action is a gate log row, a
-dispatch metrics row naming its rule and, for a rank, a comment on the task.
+Each tick it orders every claimable task in focus, leaves included, by the longest open dependency chain behind it,
+then the open work it unblocks, the bottleneck lane, focus order and ledger position. A rank the master or the swarm
+set is a default it reorders; only an operator rank, set by him or relayed with his quoted words, orders ahead of or
+behind that queue. At delegate and full the tick claims from this queue, resumed work first within a rank band and
+clear territory before overlapping, and the dispatcher writes no rank: it comments on a task only when the task
+enters the head of its lane's queue, as many tasks as the lane has seats among those that unblock work or carry an
+operator rank, or leaves it while still open; a lane with no seats keeps its head until seats return. Below delegate
+it proposes each raise to the master. Every action is a gate log row, a dispatch metrics row naming its rule and a
+comment on the task.
 """
 
+import json
 from dataclasses import dataclass
 from functools import partial
 
 from scripts.gates import log as gate_log
 from scripts.inbox.store import InboxStore
-from scripts.swarm import bottleneck, freeze, grouping, metrics_outbox, priority_sweep
-from scripts.swarm.ledger_client import LedgerRefused
+from scripts.swarm import bottleneck, capacity, freeze, grouping, metrics_outbox, priority_sweep
 from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger_rank
@@ -23,17 +26,21 @@ from scripts.swarm_ledger.repository import hierarchy
 AUTHOR = "dispatcher"
 APPLIES = ("delegate", "full")
 TOP = 3
-RANK, LOWER = "high", "normal"
+HEAD = "dispatch-head"
 LANES = {"engineering": "eng", "ci": "ci"}
-LEVERAGE, GROUPING, PRIORITIES = "leverage-rank", "grouping", "priority-sweep"
+LEVERAGE, QUEUE, GROUPING, PRIORITIES = "leverage-rank", "queue-head", "grouping", "priority-sweep"
 SKIPPED = "skipped "
 WINDOW = (None, "high", "urgent")
 UNCOMMENTED = "; the ledger did not take its comment"
 TABLE = metrics_outbox.Table("dispatch_actions", (("rule", "String"), ("mode", "String"), ("action", "String")))
-RAISED = "The dispatcher raised this task to high rank because it unblocks {work}."
-LOWERED = "The dispatcher lowered this task to normal rank because {why}."
-OUTRANKED = "it unblocks {work} and {top} claimable tasks in focus lead longer chains or unblock more"
-UNREADY = "it is no longer a claimable task in focus that unblocks open work"
+ENTERED = "The dispatcher put this task at the head of the {lane} claim queue: {why}."
+LEFT = "The dispatcher moved this task out of the head of the {lane} claim queue: {why}."
+LEADS = "it leads a chain of {chain} and unblocks {work}"
+OPERATOR_RANK = "the operator ranked it {rank}"
+OUTRANKED = "it was outranked by {ahead} in focus with longer chains, more unblocked work or an operator rank"
+ENTER = (ENTERED, "put task {} at the head of")
+LEAVE = (LEFT, "moved task {} out of the head of")
+UNREADY = "it is no longer a claimable task in focus"
 IDLE = "it unblocks no open work"
 PROPOSED = "The dispatcher proposed high rank for this task to the master because it unblocks {work}."
 PROPOSE = (
@@ -104,30 +111,50 @@ def ordered(doc: dict, named: str, scores: dict) -> list[str]:
     ]
 
 
+def queue(doc: dict) -> list[str]:
+    fixed, known = _fixed(doc), {t["id"]: t for t in doc["tasks"]}
+    return sorted(ordered(doc, None, leverage(doc)), key=lambda task_id: _band(known[task_id], fixed))
+
+
+def claim_key(config, doc):
+    if config.autonomy not in APPLIES:
+        return None
+    fixed = _fixed(doc)
+    lined = queue(doc)
+    position = {task_id: index for index, task_id in enumerate(lined)}
+    return lambda task: (_band(task, fixed), position.get(task["id"], len(lined)))
+
+
+def _band(task, fixed):
+    return ledger_rank.order(task) if task["id"] in fixed else ledger_rank.RANKS.index(ledger_rank.DEFAULT)
+
+
 def rank_pass(slug, config, store, ledger, doc, now_ms):
     from scripts.swarm import tick
 
-    scores, known, owned, fixed = leverage(doc), {t["id"]: t for t in doc["tasks"]}, _owned(doc), _fixed(doc)
-    named = bottleneck.read(store, slug).get("bottleneck")
+    known, named = {t["id"]: t for t in doc["tasks"]}, bottleneck.read(store, slug).get("bottleneck")
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
     claimable = {task_id for task_id, t in known.items() if tick.ready(t, known, doc, graph, fix)}
-    queue = [task_id for task_id in ordered(doc, named, scores) if task_id in claimable and scores[task_id]]
-    top = [task_id for task_id in queue if task_id not in fixed or known[task_id].get("rank") in WINDOW][:TOP]
-    raises = [
-        (known[task_id], _work(scores[task_id]))
-        for task_id in top
-        if known[task_id].get("rank") not in WINDOW[1:] and task_id not in fixed
-    ]
+    scores, fixed = leverage(doc), _fixed(doc)
     if config.autonomy in APPLIES:
-        mine = owned | (claimable - fixed)
-        held = partial(_claimable_lowered, known, doc, graph, fix)
-        stale = [t for t in doc["tasks"] if t["id"] in mine and _open(t) and _lowerable(t, held)]
-        lowers = [(t, _why(t["id"], queue, scores, claimable)) for t in stale if t["id"] not in top]
-        steps = [partial(_lower, slug, ledger, *row) for row in lowers]
-        steps += [partial(_raise, slug, ledger, *row) for row in raises]
+        before = _saved_heads(store, slug)
+        leading = [t for t in queue(doc) if t in claimable and (scores[t] or t in fixed)]
+        heads = _heads(store, slug, config, leading, known, before)
+        landed = {
+            lane: [t for t in before.get(lane, []) if t in head or known.get(t, {}).get("state") == "open"]
+            for lane, head in heads.items()
+        }
+        led = set(leading)
+        standing = {task_id: task_id in led for task_id in claimable}
+        steps = _head_steps(slug, ledger, doc, before, heads, standing, landed)
     else:
+        lined = [t for t in ordered(doc, named, scores) if t in claimable and scores[t]]
+        top = [t for t in lined if t not in fixed or known[t].get("rank") in WINDOW][:TOP]
+        raises = [
+            (known[t], _work(scores[t])) for t in top if known[t].get("rank") not in WINDOW[1:] and t not in fixed
+        ]
         mail = Mail(InboxStore(store.redis), store, slug)
-        steps = [partial(_propose, slug, ledger, mail, *row) for row in raises]
+        steps, landed = [partial(_propose, slug, ledger, mail, *row) for row in raises], None
     done = []
     try:
         for step in steps:
@@ -135,42 +162,65 @@ def rank_pass(slug, config, store, ledger, doc, now_ms):
                 done.append(action)
     finally:
         errors = log(slug, done, now_ms)
+        if landed is not None:
+            store.redis.set(store.key(slug, HEAD), json.dumps(landed))
     return [action.text for action in done] + errors
 
 
-def _raise(slug, ledger, task, work):
-    text = f"ranked task {task['id']} high: it unblocks {work}"
-    return _rank(slug, ledger, task, RANK, text, RAISED.format(work=work))
+def _heads(store, slug, config, lined, known, before):
+    seats = capacity.caps(capacity.read(store, slug), config)
+    return {
+        lane: [t for t in lined if known[t].get("lane") == lane][:cap] if cap else before.get(lane, [])
+        for lane, cap in seats.items()
+    }
 
 
-def _lower(slug, ledger, task, why):
-    text = f"lowered task {task['id']} to normal: {why}"
-    return _rank(slug, ledger, task, LOWER, text, LOWERED.format(why=why))
+def _saved_heads(store, slug):
+    saved = store.redis.get(store.key(slug, HEAD))
+    return json.loads(saved) if saved else {}
 
 
-def _rank(slug, ledger, task, rank, text, comment):
-    try:
-        ledger.rank_task(slug, task["id"], rank, AUTHOR, if_owned=True)
-    except LedgerRefused:
-        return None
-    task["rank"] = rank
-    return Action(LEVERAGE, "apply", text + _comment(slug, ledger, task, comment), task)
+def _head_steps(slug, ledger, doc, before, heads, standing, landed):
+    known, depth, scores, fixed = {t["id"]: t for t in doc["tasks"]}, chains(doc), leverage(doc), _fixed(doc)
+    steps = []
+    for lane, head in heads.items():
+        earlier = before.get(lane, [])
+        why = partial(_left_why, standing, len(head))
+        steps += [
+            partial(_head, slug, ledger, lane, known[t], LEAVE, why(t), landed)
+            for t in earlier
+            if t not in head and known.get(t, {}).get("state") == "open"
+        ]
+        steps += [
+            partial(_head, slug, ledger, lane, known[t], ENTER, _entered_why(known[t], fixed, depth, scores), landed)
+            for t in head
+            if t not in earlier
+        ]
+    return steps
 
 
-def _why(task_id, queue, scores, claimable):
-    if task_id in queue:
-        return OUTRANKED.format(work=_work(scores[task_id]), top=TOP)
-    return IDLE if task_id in claimable else UNREADY
+def _entered_why(task, fixed, depth, scores):
+    if task["id"] in fixed:
+        return OPERATOR_RANK.format(rank=task["rank"])
+    return LEADS.format(chain=_work(depth[task["id"]]), work=_work(scores[task["id"]]))
 
 
-def _lowerable(task, claimable_at_lower):
-    return task.get("rank") == RANK or task.get("rank") == "urgent" and claimable_at_lower(task)
+def _left_why(standing, seats, task_id):
+    ahead = "1 claimable task" if seats == 1 else f"{seats} claimable tasks"
+    if task_id not in standing:
+        return UNREADY
+    return OUTRANKED.format(ahead=ahead) if standing[task_id] else IDLE
 
 
-def _claimable_lowered(known, doc, graph, fix, task):
-    from scripts.swarm import tick
-
-    return tick.ready({**task, "rank": LOWER}, known, doc, graph, fix)
+def _head(slug, ledger, lane, task, kind, why, landed):
+    template, moved = kind
+    text = f"{moved.format(task['id'])} the {lane} claim queue: {why}"
+    action = Action(QUEUE, "apply", text + _comment(slug, ledger, task, template.format(lane=lane, why=why)), task)
+    if kind == ENTER:
+        landed[lane].append(task["id"])
+    else:
+        landed[lane].remove(task["id"])
+    return action
 
 
 def _comment(slug, ledger, task, text):
@@ -231,10 +281,6 @@ def dispatch_row(slug, index, action, now_ms):
 
 def _open(task):
     return task.get("state") != "done" and not task.get("out_of_scope")
-
-
-def _owned(doc):
-    return _ranked_by(doc, AUTHOR)
 
 
 def _fixed(doc):
