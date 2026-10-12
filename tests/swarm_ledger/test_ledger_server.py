@@ -165,14 +165,15 @@ def test_the_header_brands_home_without_a_ledger_count_and_names_each_column(bro
     assert count > 1
     assert (
         '<header><a class="logo-link" href="/" aria-label="HOME"><span class="logo" aria-hidden="true"></span></a><span class="brand">agentihooks</span><h1>HOME</h1>'
-        '<button class="act toggle-all" id="fold-all" type="button">Expand all</button></header>' in page
+        "</header>" in page
     )
     assert 'class="total"' not in page
+    assert 'id="fold-all"' not in page
     head = re.search(r'<div class="row head">(.*?)</div>', page).group(1)
     arrow = '<i aria-hidden="true">▼</i></button>'
     still = '<i aria-hidden="true">↕</i></button>'
     assert head == (
-        f'<span></span><span>Ledger</span><button class="sort" type="button" data-sort="kind">Kind{still}'
+        f'<span>Ledger</span><button class="sort" type="button" data-sort="kind">Kind{still}'
         f'<span>Overview</span><button class="sort r" type="button" data-sort="open">Open{still}'
         f'<button class="sort r" type="button" data-sort="done">Done{still}'
         f'<button class="sort" type="button" data-sort="swarm">Swarm{still}'

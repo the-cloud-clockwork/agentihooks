@@ -182,12 +182,9 @@ def test_rows_run_header_alert_capacity_work_accounts_health_handoffs():
     box = page.split('<div id="swarm-box">', 1)[1].split('<aside id="stats-column"', 1)[0]
     positions = [box.index(f'id="{row}"') for row in ROWS]
     assert positions == sorted(positions)
-    assert 'class="fold sw-command-log" id="command-log"' in box
-    assert '<details class="fold sw-fold" id="overlays-fold" open>' in box
-    assert '<details class="fold sw-fold" id="quota-fold" open>' in box
-    box = re.sub(
-        r'<details[^>]*id="(command-log|overlays-fold|quota-fold|freeze-fold)".*?</details>', "", box, flags=re.S
-    )
+    assert 'id="command-log"' not in box
+    assert '<div class="sw-fold" id="overlays-fold">' in box
+    assert '<div class="sw-fold" id="quota-fold">' in box
     for gone in ("crew", "needs-you", "swarm-figs", "swarm-work", "restore-box", "<section", "<details"):
         assert gone not in box, gone
 
@@ -664,16 +661,13 @@ def test_toggling_an_overlay_back_leaves_nothing_to_apply(open_page):
     assert page.tab.locator("#overlays-apply").is_disabled()
 
 
-def test_the_overlays_box_folds_on_its_header_and_remembers_it(open_page):
+def test_the_overlays_box_header_does_not_fold_it(open_page):
     page = open_page(status(overlays_available=OFFERED))
+    assert page.tab.locator("#overlays-fold").evaluate("el => el.querySelector('summary')") is None
     assert page.tab.locator("#swarm-overlays").is_visible()
-    page.tab.locator("#overlays-fold > summary").click()
-    assert not page.tab.locator("#swarm-overlays").is_visible()
-    page.tab.wait_for_function("() => Object.values(localStorage).some((v) => v.includes('\"overlays-fold\":false'))")
-    page.tab.reload()
-    loaded(page.tab)
-    page.tab.locator("#swarm-agents tr").first.wait_for(timeout=3000)
-    assert page.tab.eval_on_selector("#overlays-fold", "d => d.open") is False
+    page.tab.locator("#overlays-fold .sw-blockhead h3").click()
+    assert page.tab.locator("#swarm-overlays").is_visible()
+    assert page.tab.evaluate("() => Object.values(localStorage).some((v) => v.includes('overlays-fold'))") is False
 
 
 @pytest.mark.parametrize("width", [1440, 390])

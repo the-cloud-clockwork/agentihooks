@@ -2,7 +2,6 @@ import json
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import loaded
 from tests.swarm_ledger.test_swarm_layout import Page, status
 from tests.swarm_ledger.test_swarm_layout import browser as chromium_browser
 
@@ -157,22 +156,13 @@ def test_a_refused_write_names_the_reason_and_restores_the_stored_value(routing_
     assert dict((key, value) for key, value, _ in inputs(page))["claude-api-weight"] == "25"
 
 
-def test_the_quota_box_folds_on_its_header_and_remembers_it(routing_page):
+def test_the_quota_box_header_does_not_fold_it(routing_page):
     page = routing_page()
+    assert page.tab.eval_on_selector("#quota-fold", "el => el.querySelector('summary')") is None
     assert page.tab.locator("#quota-table").is_visible()
-    page.tab.locator("#quota-fold > summary h3").click()
-    assert not page.tab.locator("#quota-table").is_visible()
-    page.tab.wait_for_function("() => Object.values(localStorage).some((v) => v.includes('\"quota-fold\":false'))")
-    page.tab.reload()
-    loaded(page.tab)
-    page.tab.locator("#swarm-agents tr").first.wait_for(timeout=3000)
-    assert page.tab.eval_on_selector("#quota-fold", "d => d.open") is False
-
-
-def test_the_refresh_icon_in_the_folding_header_does_not_fold_the_box(routing_page):
-    page = routing_page()
-    page.tab.locator("#quota-refresh").click()
-    assert page.tab.eval_on_selector("#quota-fold", "d => d.open") is True
+    page.tab.locator("#quota-fold .sw-blockhead h3").click()
+    assert page.tab.locator("#quota-table").is_visible()
+    assert page.tab.evaluate("() => Object.values(localStorage).some((v) => v.includes('quota-fold'))") is False
 
 
 def test_the_wider_quota_table_still_fits_its_box_at_1920(routing_page):

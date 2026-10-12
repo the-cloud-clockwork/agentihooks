@@ -258,7 +258,6 @@ export function render(focusKey) {
   document.title = doc.title;
   $("title").textContent = doc.title;
   $("overview").textContent = doc.overview;
-  $("overview-box").querySelector("summary").textContent = "Overview";
   $("closed-label").textContent = closedText(doc.closed_at);
   $("closed-banner").hidden = !doc.closed_at;
   $("sources-count").textContent = headCount([[doc.sources.length]]);
