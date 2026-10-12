@@ -50,6 +50,17 @@ def test_swarm_pr_on_a_split_task_marks_the_pending_verdict(tmp_path):
     assert (record["url"], record["split"]) == (SECOND, True)
 
 
+@pytest.mark.parametrize("view", [lambda url: None, lambda url: {**VIEW, "draft": True}])
+def test_a_split_verdict_held_pending_by_the_tick_keeps_its_half(tmp_path, view):
+    task = split_task(pr_url=SECOND, split_pulls=[FIRST, SECOND])
+    intent.Check(SLUG, "enforce", NOW, Ledger(), Mail(), view, lambda state: ("pass", "judged"), home=tmp_path).run(
+        {**DOC, "tasks": [task]}
+    )
+    record = verdicts(tmp_path).read(TASK)
+    assert (record["verdict"], record["url"], record["split"]) == ("pending", SECOND, True)
+    assert not intent.IntentGate().decide(bash(f"gh pr merge {FIRST}"), WHO, verdicts(tmp_path)).allowed
+
+
 @pytest.mark.parametrize(
     "command",
     [

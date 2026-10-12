@@ -549,7 +549,14 @@ class Check:
             tasks.append((task, record, moved))
         for task, record, _ in tasks:
             if _drafted(record):
-                verdicts.write(task["id"], PENDING, RUNNING, self.now_ms, phase=task.get("phase"))
+                verdicts.write(
+                    task["id"],
+                    PENDING,
+                    RUNNING,
+                    self.now_ms,
+                    phase=task.get("phase"),
+                    **_split_fields(task, task["pr_url"]),
+                )
         with ThreadPoolExecutor(max_workers=2) as workers:
             pending = [
                 (task, record, moved, workers.submit(copy_context().run, self._judge, doc, task))
@@ -557,10 +564,24 @@ class Check:
             ]
             for task, record, moved, future in pending:
                 if not record or not _same_phase(record, task) or moved:
-                    verdicts.write(task["id"], PENDING, RUNNING, self.now_ms, phase=task.get("phase"))
+                    verdicts.write(
+                        task["id"],
+                        PENDING,
+                        RUNNING,
+                        self.now_ms,
+                        phase=task.get("phase"),
+                        **_split_fields(task, task["pr_url"]),
+                    )
                 judgment = future.result()
                 if judgment is None and _drafted(record):
-                    verdicts.write(task["id"], PENDING, DRAFT, record["at"], phase=record.get("phase"))
+                    verdicts.write(
+                        task["id"],
+                        PENDING,
+                        DRAFT,
+                        record["at"],
+                        phase=record.get("phase"),
+                        **_split_fields(task, task["pr_url"]),
+                    )
                 if judgment is not None:
                     actions += self._check(task, judgment, verdicts)
                     timing.keep()
@@ -613,7 +634,9 @@ class Check:
     def _check(self, task, judgment, verdicts):
         previous, pr = judgment.previous, judgment.pr
         if judgment.state is None and previous is None:
-            verdicts.write(task["id"], PENDING, DRAFT, self.now_ms, phase=task.get("phase"))
+            verdicts.write(
+                task["id"], PENDING, DRAFT, self.now_ms, phase=task.get("phase"), **_split_fields(task, task["pr_url"])
+            )
             return []
         if judgment.state is None:
             self._keep(task, previous, verdicts)
