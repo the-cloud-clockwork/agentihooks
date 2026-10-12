@@ -1,7 +1,7 @@
 import json
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from scripts.swarm_v2 import filesystem
@@ -55,6 +55,9 @@ class Budgets:
     checkpoint: float = 10
     kill: float = 2
 
+    def record(self) -> dict:
+        return {f"{name}_seconds": value for name, value in asdict(self).items()}
+
 
 @dataclass(frozen=True)
 class Launch:
@@ -73,6 +76,15 @@ class Launch:
     @property
     def home(self) -> Path:
         return self.execution.path("home") / self.harness
+
+    def record(self) -> dict:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "authority": self.authority,
+            "harness": self.harness,
+            **self.budgets.record(),
+            "checkpoint_acknowledgement": {"status": "pending"},
+        }
 
     @classmethod
     def load(cls, attempt: Path, path: Path) -> "Launch":

@@ -37,20 +37,23 @@ def payload(*alerts):
     return {"receiver": "swarm-ledger", "status": "firing", "alerts": list(alerts)}
 
 
-def test_every_stage_the_report_names_is_accepted():
+def test_every_lost_time_stage_the_report_names_is_accepted():
     assert alert_intake.STAGES == (
         "claim_wait",
-        "build",
-        "ci_run",
         "review",
         "merge_queue",
         "intent_fix",
         "launch_failure",
-        "launch",
         "ci_queue",
         "quota_hold",
         "host_hold",
     )
+
+
+@pytest.mark.parametrize("stage", ["build", "ci_run", "launch"])
+def test_productive_stage_alerts_raise_no_standing_finding(redis, stage):
+    assert alert_intake.receive(redis, payload(alert(stage=stage)), NOW) == [f"skipped an alert: unknown stage {stage}"]
+    assert standing.read(redis, "sw") == {}
 
 
 def test_a_firing_alert_keeps_one_standing_finding_with_its_numbers(redis):
@@ -283,10 +286,10 @@ def test_a_wrong_shaped_body_is_a_bad_request(redis):
 def test_an_unreachable_store_answers_retry_later(redis, monkeypatch):
     from redis.exceptions import ConnectionError as RedisConnectionError
 
-    def down(*args):
+    def down(*args, **kwargs):
         raise RedisConnectionError("store down")
 
-    monkeypatch.setattr(redis, "hget", down)
+    monkeypatch.setattr(redis, "transaction", down)
     sent, body = handler(redis, payload(alert()))
     assert (sent.code, body) == (503, {"error": "swarm store unreachable"})
 

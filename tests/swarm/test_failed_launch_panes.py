@@ -267,13 +267,13 @@ def test_status_lists_failed_launches_with_their_lines(store):
     assert [(r["task"], r["pane_id"], r["pane_lines"][-1]) for r in rows] == [("t1", "w1:p9", "$")]
 
 
-def _launch_fails(tmp_path, stdout, returncode=0, run_error=None):
+def _launch_fails(tmp_path, stdout, returncode=0, run_error=None, stderr="Codex account default not found\n"):
     def run(argv, **kwargs):
         if "terminate-agent" in argv:
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         if run_error:
             raise run_error
-        return SimpleNamespace(returncode=returncode, stdout=stdout, stderr="Codex account default not found\n")
+        return SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
     config = SimpleNamespace(slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="full")
@@ -329,6 +329,27 @@ def test_a_timed_out_launch_names_the_newest_pane_it_opened(tmp_path, monkeypatc
         "ambiguous",
         "init-agent timed out for engineer@a1b2c3-0001",
     )
+
+
+@pytest.mark.parametrize("stdout", ["", "status=started\nroute_status=pending\n"])
+def test_a_route_timeout_without_a_pane_report_closes_its_recorded_pane_after_two_minutes(
+    store, tmp_path, monkeypatch, stdout
+):
+    monkeypatch.setattr(runtime_module.time, "time", lambda: 5.0)
+    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0001", "w1:p9", "term_route", 5_000)
+    error = _launch_fails(tmp_path, stdout, returncode=3, stderr="the harness did not report its route within 90s\n")
+    assert str(error) == "the harness did not report its route within 90s"
+    runtime = PaneRuntime({"w1:p9": SCREEN}, crash=error)
+    ledger = tasks(("t1", "eng"))
+    tick("sw", store, ledger, runtime, now_ms=FAILED_AT)
+    assert _failed_row(store)["pane_id"] == "w1:p9"
+    runtime.crash = None
+    store.update("sw", state="paused")
+    tick("sw", store, ledger, runtime, now_ms=DUE - 1)
+    assert runtime.panes_closed == []
+    tick("sw", store, ledger, runtime, now_ms=DUE)
+    assert runtime.panes_closed == ["w1:p9"]
+    assert failed_panes.held(store, "sw") == {}
 
 
 def test_a_timed_out_launch_never_adopts_a_pane_opened_before_it(tmp_path, monkeypatch):

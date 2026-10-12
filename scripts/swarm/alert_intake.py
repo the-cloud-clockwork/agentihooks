@@ -31,13 +31,10 @@ EPISODE_CHARS = 40
 UNIT = "task hours in the window"
 STAGES = (
     "claim_wait",
-    "build",
-    "ci_run",
     "review",
     "merge_queue",
     "intent_fix",
     "launch_failure",
-    "launch",
     "ci_queue",
     "quota_hold",
     "host_hold",

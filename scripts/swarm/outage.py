@@ -4,6 +4,7 @@ import fcntl
 import json
 from collections.abc import Callable
 from contextlib import contextmanager
+from dataclasses import replace
 from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -12,9 +13,15 @@ from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2.records import _write
 
 if TYPE_CHECKING:
+    from scripts.swarm.health.findings import Finding
+    from scripts.swarm.store import AgentRecord
     from scripts.swarm.tick import Runtime
 
 HOME = None
+PANE = "provider-error"
+PANE_TTL_S = 24 * 3600
+PAST_SPANS = 50
+HELD = {"idle with claim": "idle during outage", "stale claim": "stale during outage"}
 
 
 def home() -> Path:
@@ -43,10 +50,18 @@ def observe(slug: str, kind: str, evidence: list[str], now_ms: int) -> None:
     with _edit(slug) as records:
         record = records.get(kind)
         if evidence:
-            started = record["started_at"] if record and record["ended_at"] is None else now_ms
-            records[kind] = {"kind": kind, "started_at": started, "evidence": evidence, "ended_at": None}
+            ongoing = record is not None and record["ended_at"] is None
+            past = record.get("past") if ongoing else _history(record) if record else None
+            fresh = {"kind": kind, "started_at": record["started_at"] if ongoing else now_ms, "evidence": evidence}
+            records[kind] = {**fresh, "ended_at": None, **({"past": past} if past else {})}
         elif record and record["ended_at"] is None:
             record["ended_at"] = now_ms
+
+
+def _history(record: dict) -> list:
+    """Closed spans of a closed record's kind, its own included, which paused time still counts after a new outage
+    of that kind opens."""
+    return [*record.get("past", []), [record["started_at"], record["ended_at"]]][-PAST_SPANS:]
 
 
 def open_records(slug: str) -> list[dict]:
@@ -58,6 +73,50 @@ def lines(slug: str) -> list[str]:
         f"outage {record['kind']} since {record['started_at']}: {' ; '.join(record['evidence'])}"
         for record in open_records(slug)
     ]
+
+
+def mark_pane(store: RedisStore, slug: str, name: str, error: str) -> None:
+    store.redis.set(store.key(slug, PANE, name), error, ex=PANE_TTL_S)
+
+
+def held(store: RedisStore, slug: str, name: str | None) -> str:
+    """The evidence holding an agent: the swarm's open outages, else a provider error on its own pane."""
+    evidence = [line for record in open_records(slug) for line in record["evidence"]]
+    pane = store.redis.get(store.key(slug, PANE, name)) if name else None
+    return "; ".join(evidence) or pane or ""
+
+
+def paused_ms(slug: str, since_ms: int, now_ms: int) -> int:
+    spans = sorted(
+        (max(started_at, since_ms), now_ms if ended_at is None else min(ended_at, now_ms))
+        for record in read(slug).values()
+        for started_at, ended_at in [*record.get("past", []), [record["started_at"], record["ended_at"]]]
+    )
+    total, reach = 0, since_ms
+    for start, end in spans:
+        total += max(0, end - max(start, reach))
+        reach = max(reach, end)
+    return total
+
+
+def hold_findings(store: RedisStore, slug: str, found: list[Finding], agents: list[AgentRecord]) -> list[Finding]:
+    claimants = {agent.task: agent.name for agent in agents}
+    return [_hold(store, slug, finding, claimants) for finding in found]
+
+
+def _hold(store, slug, finding, claimants):
+    if finding.kind not in HELD:
+        return finding
+    name = finding.subject if finding.kind == "idle with claim" else claimants.get(finding.subject)
+    evidence = held(store, slug, name)
+    if not evidence:
+        return finding
+    return replace(
+        finding,
+        kind=HELD[finding.kind],
+        summary=f"{finding.summary}, held by an outage",
+        evidence=(*finding.evidence, f"outage: {evidence}"),
+    )
 
 
 def show(slug: str, as_json: bool) -> bool:
@@ -108,6 +167,8 @@ def _provider_record(record, observed, now_ms):
         if fresh:
             episode = _with_error(episode, agent, pane, now_ms)
     if episode:
+        if record and episode is not record:
+            episode["past"] = _history(record)
         episode["observed_errors"] = seen
         if affected := episode.get("affected_agents"):
             episode["evidence"] = [actor["evidence"] for actor in affected.values()]

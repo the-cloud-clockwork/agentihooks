@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
-from scripts.swarm import profile_choice, runtime, store, tick
+from scripts.swarm import dispatcher, profile_choice, runtime, store, tick
 from tests.swarm.test_tick import FakeRuntime, tasks
 from tests.swarm_ledger import legacy_page
 
@@ -399,7 +399,8 @@ def test_tick_blocks_task_with_the_unresolved_reason(swarm):
     rt = FakeRuntime(crash=profile_choice.ProfileUnresolved("profile unresolved: set it"))
     actions = tick.tick("sw", swarm, ledger, rt, now_ms=1_000)
     assert ledger.rows["t1"]["state"] == "blocked" and swarm.claimant("sw", "t1") is None
-    assert ledger.comments == [("sw", "t1", "profile unresolved: set it", "swarm")]
+    comments = [row for row in ledger.comments if row[-1] != dispatcher.AUTHOR]
+    assert comments == [("sw", "t1", "profile unresolved: set it", "swarm")]
     assert "blocked t1: profile unresolved: set it" in actions
 
 

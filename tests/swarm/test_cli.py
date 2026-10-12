@@ -7,7 +7,7 @@ from scripts.gates import intent
 from scripts.gates import log as gate_log
 from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, runtime, timer
+from scripts.swarm import cli, dispatcher, runtime, timer
 from scripts.swarm.health import checks
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.resume import Outcome
@@ -306,7 +306,8 @@ def test_block_comments_parks_and_finishes(env, dependencies, capsys):
     capsys.readouterr()
     assert run("sw", "--as", "ci@a1b2c3-0001", "block", "waiting on a token only the operator can create") == 0
     assert ledger.rows["t2"]["state"] == "blocked"
-    assert ledger.comments == [("t2", "waiting on a token only the operator can create", "ci@a1b2c3-0001")]
+    comments = [row for row in ledger.comments if row[-1] != dispatcher.AUTHOR]
+    assert comments == [("t2", "waiting on a token only the operator can create", "ci@a1b2c3-0001")]
     assert store.agents("sw")[0].state == "finished"
     assert store.claimant("sw", "t2") is None
     assert idle.wait(store.redis, "sw", "ci@a1b2c3-0001") is None

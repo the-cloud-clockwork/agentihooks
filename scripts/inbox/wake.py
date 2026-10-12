@@ -10,7 +10,7 @@ from scripts.inbox import addresses
 from scripts.inbox.seats import is_seat
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
 from scripts.inbox.store import redelivery_ms
-from scripts.swarm import idle
+from scripts.swarm import idle, outage
 from scripts.swarm.delivery import READY, post
 from scripts.swarm.store import MASTER
 from scripts.swarm_ledger import ledger_comments
@@ -43,14 +43,16 @@ def typed_wake(agent):
     return bool(agent.pane_id) and agent.lane != MASTER and agent.harness not in WATCHED
 
 
-def decide(item, pane, history, now_ms, window):
-    """pane is the receiver's herdr status, None when it sits outside herdr."""
+def decide(item, pane, history, now_ms, window, slug):
+    """pane is the receiver's herdr status, None when it sits outside herdr; the window clock skips the swarm's
+    outage time since the item's last step."""
     if item.state != "pending":
         return None
     steps = [e.get("event") for e in history]
     if TO_OPERATOR in steps:
         return None
-    due = now_ms - max(e["at"] for e in history) >= window
+    last = max(e["at"] for e in history)
+    due = now_ms - last - outage.paused_ms(slug, last, now_ms) >= window
     if TO_MASTER in steps:
         return TO_OPERATOR if due else None
     wakes = steps.count(WOKEN)
@@ -78,9 +80,9 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_
     marks = SeenMarks(inbox.redis)
     statuses, prompted = {}, set()
     actions = [f"redelivered message {item.id}" for item in inbox.redeliver(now_ms, redelivery_ms())]
-    actions += addresses.settle_unresolved(inbox, names, inbox.pending(), now_ms, window)
+    actions += addresses.settle_unresolved(inbox, names, _ladder(inbox, slug), now_ms, window)
     doc = None
-    for item in inbox.pending():
+    for item in _ladder(inbox, slug):
         item = replace(item, address=inbox.names.resolve(item.address), sender=inbox.names.resolve(item.sender))
         if item.address not in names and item.sender not in names and not item.address.endswith(f"@{slug}"):
             continue
@@ -97,7 +99,7 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_
         agent = panes.get(receiver)
         if agent and agent.name not in statuses:
             statuses[agent.name] = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
-        step = decide(item, statuses.get(receiver), inbox.history(item.id), now_ms, window)
+        step = decide(item, statuses.get(receiver), inbox.history(item.id), now_ms, window, slug)
         if step == WOKEN and _still_held(inbox, held) and _wake(herdr, agent, prompted):
             if inbox.note(item.id, WOKEN, BY, f"prompted {receiver} to read its inbox", now_ms, held):
                 actions.append(f"woke {receiver} for message {item.id}")
@@ -119,19 +121,24 @@ def wake_now(inbox, slug, agents, herdr, now_ms, window, quiet=DEFAULT_QUIET_S *
     channel, and escalation stays with the tick's wake pass."""
     actions = []
     for agent in agents:
-        if agent.harness != "codex" or not typed_wake(agent):
+        if agent.harness != "codex" or not typed_wake(agent) or outage.open_records(slug):
             continue
         mail = inbox.pending_mail(agent.name)
         if not mail:
             continue
         state = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
-        due = [item for item in mail if decide(item, state, inbox.history(item.id), now_ms, window) == WOKEN]
+        due = [item for item in mail if decide(item, state, inbox.history(item.id), now_ms, window, slug) == WOKEN]
         if not due or not _wake(herdr, agent, set()):
             continue
         for item in due:
             inbox.note(item.id, WOKEN, BY, f"prompted {agent.name} to read its inbox", now_ms)
             actions.append(f"woke {agent.name} for message {item.id}")
     return actions
+
+
+def _ladder(inbox, slug):
+    """No wake, escalation or withdrawal step runs while the swarm has an open outage."""
+    return [] if outage.open_records(slug) else inbox.pending()
 
 
 def _decided(ref, doc):
