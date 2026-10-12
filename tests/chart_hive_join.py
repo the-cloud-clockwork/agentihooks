@@ -57,6 +57,11 @@ def selector(release: str) -> dict:
     }
 
 
+def chart_fullname(release: str) -> str:
+    name = release if "agentihooks-swarm" in release else f"{release}-agentihooks-swarm"
+    return name[:50].rstrip("-")
+
+
 def container_problems(container: dict, values: dict, fullname: str) -> list[str]:
     join = values["hive"]["join"]
     problems = []
@@ -83,7 +88,8 @@ def pod_problems(pod: dict, values: dict, fullname: str) -> list[str]:
     problems = []
     if len(pod["containers"]) != 1:
         problems.append(f"the hive join pod runs {len(pod['containers'])} containers, expected one")
-    problems += container_problems(pod["containers"][0], values, fullname)
+    if pod["containers"]:
+        problems += container_problems(pod["containers"][0], values, fullname)
     if pod.get("initContainers"):
         problems.append("the hive join pod runs init containers")
     if pod.get("volumes") != [{"name": "tls", "secret": {"secretName": join["tlsSecretName"]}}]:
@@ -156,7 +162,12 @@ def problems_in(release: str, values: dict, documents: list[dict]) -> list[str]:
     problems += [f"the chart renders an extra hive join {d['kind']}" for d in documents if d["kind"] not in KINDS]
     if len(documents) != len(found):
         problems.append("the chart renders a hive join kind twice")
-    fullname = documents[0]["metadata"]["name"].removesuffix(SUFFIX) if documents else release
+    fullname = chart_fullname(release)
+    problems += [
+        f"the chart names a hive join {d['kind']} {d['metadata']['name']}, not {fullname}{SUFFIX}"
+        for d in documents
+        if d["metadata"]["name"] != fullname + SUFFIX
+    ]
     labels = selector(release)
     if "Deployment" in found:
         problems += deployment_problems(found["Deployment"], values, fullname, labels)
@@ -207,6 +218,23 @@ PLANTS = (
     ),
     ("policy ports", lambda d: d["NetworkPolicy"]["spec"]["ingress"][0].pop("ports"), "ports other than join"),
     ("policy types", lambda d: d["NetworkPolicy"]["spec"].pop("policyTypes"), "does not limit ingress"),
+    (
+        "pod labels",
+        lambda d: d["Deployment"]["spec"]["template"]["metadata"]["labels"].update(
+            {"app.kubernetes.io/component": "other"}
+        ),
+        "lack the hive join labels",
+    ),
+    ("no containers", lambda d: _pod(d).update(containers=[]), "runs 0 containers"),
+    ("name", lambda d: d["Service"]["metadata"].update(name=f"other{SUFFIX}"), "the chart names a hive join"),
+)
+LIST_PLANTS = (
+    ("duplicate", lambda docs: docs.append(copy.deepcopy(docs[0])), "kind twice"),
+    (
+        "extra",
+        lambda docs: docs.append({"kind": "ConfigMap", "metadata": {"name": docs[0]["metadata"]["name"]}}),
+        "an extra hive join ConfigMap",
+    ),
 )
 
 
@@ -214,9 +242,10 @@ def self_test(release: str, values_paths: list[str], rendered: str) -> list[str]
     values = load_values(values_paths)
     documents = [d for d in yaml.safe_load_all(rendered) if d and d["metadata"]["name"].endswith(SUFFIX)]
     failures = [f"the clean render fails: {problem}" for problem in problems_in(release, values, documents)]
-    for name, plant, expected in PLANTS:
+    plants = [(name, lambda docs, p=plant: p({d["kind"]: d for d in docs}), text) for name, plant, text in PLANTS]
+    for name, plant, expected in [*plants, *LIST_PLANTS]:
         planted = copy.deepcopy(documents)
-        plant({d["kind"]: d for d in planted})
+        plant(planted)
         if not any(expected in problem for problem in problems_in(release, values, planted)):
             failures.append(f"the chart check did not flag the planted {name} fault with {expected!r}")
     return failures
@@ -232,6 +261,6 @@ if __name__ == "__main__":
     if found:
         sys.exit(1)
     if check is self_test:
-        print(f"the chart check flagged all {len(PLANTS)} planted hive join render faults")
+        print(f"the chart check flagged all {len(PLANTS) + len(LIST_PLANTS)} planted hive join render faults")
     else:
         print("the hive join service renders as hive.join says")
