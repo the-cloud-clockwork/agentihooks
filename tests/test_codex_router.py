@@ -668,6 +668,22 @@ def test_a_bearer_child_carries_its_token_and_account_id_and_runs_the_bearer_pro
     assert (second["CODEX_ACCESS_TOKEN"], second["AGENTIHOOKS_CHATGPT_ACCOUNT_ID"]) == (OAUTH_TWO, "acct-2")
 
 
+@pytest.mark.parametrize("kind", ["bearer", "api"])
+@pytest.mark.parametrize("mode", ["exec", "interactive"])
+def test_routed_auth_overrides_share_the_exec_config_scope_and_preserve_interactive_order(kind, mode):
+    if kind == "bearer":
+        account = router.credential(_token("alpha"), OAUTH_ENV)
+        overrides = router.bearer_overrides()
+    else:
+        account = router.CodexAccount("api", key_env="CODEX_API_KEY", base_url="https://api.invalid")
+        overrides = codex_api.overrides("CODEX_API_KEY", "https://api.invalid")
+    options = ["--model", "chosen-model", "-c", 'model_reasoning_effort="low"', "probe"]
+    args = ["exec", *options] if mode == "exec" else options
+    expected = ["/usr/bin/codex", "--no-daemon"]
+    expected += [*args, *overrides] if mode == "exec" else [*overrides, *args]
+    assert router.command(account, "/usr/bin/codex", args) == expected
+
+
 def test_default_api_and_access_token_children_never_inherit_an_account_id():
     for account in (router.CodexAccount("default"), _token("gamma"), _token("delta")):
         child = router.child_environment(router.credential(account, OAUTH_ENV), OAUTH_ENV)
