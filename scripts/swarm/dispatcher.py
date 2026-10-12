@@ -284,7 +284,8 @@ def _open(task):
 
 
 def _fixed(doc):
-    return _ranked_by(doc, ledger_rank.OPERATOR)
+    urgent = {t["id"] for t in doc["tasks"] if t.get("rank") == "urgent"}
+    return _ranked_by(doc, ledger_rank.OPERATOR) | (_ranked_by(doc, AUTHOR) & urgent)
 
 
 def _ranked_by(doc, author):
