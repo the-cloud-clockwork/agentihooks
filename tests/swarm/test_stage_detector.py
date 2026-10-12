@@ -46,6 +46,19 @@ def test_eleventh_replay_counts_three_overruns_in_one_standing_finding(store):
     assert len(report["top"]) <= 3
 
 
+def test_the_detector_measures_claim_wait_against_claimable_tasks_only():
+    from scripts.swarm import stages
+    from tests.swarm.test_stages import ledger
+
+    tasks = [{"id": "t1", "state": "open"}, {"id": "t2", "state": "open"}]
+    source = rows(ledger_events=[ledger("added", NOW - H, f"tasks/{task['id']}") for task in tasks])
+    ready = stages.claimable({"tasks": tasks, "freezes": [{"verb": "freeze", "target": "tasks/t2"}]})
+    found = stage_detector.report(source, tasks, NOW, 4 * H, ready)
+    assert [(row["stage"], row["seconds"], row["previous_seconds"], row["episodes"]) for row in found["stages"]] == [
+        ("claim_wait", 3600.0, 0.0, [f"claim_wait:t1:{NOW - H}"])
+    ]
+
+
 FIRST_LIVE_PASS = {
     "claim_wait": 579440.0,
     "quota_hold": 303960.0,
