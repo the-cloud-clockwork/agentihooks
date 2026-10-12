@@ -408,7 +408,7 @@ def test_required_gate_accepts_a_skipped_chart_proof_only_when_its_path_rule_sai
     assert jobs["helm-kind"]["needs"] == "kind-due"
     assert jobs["helm-kind"]["if"] in (
         "${{ needs.kind-due.outputs.due == 'true' }}",
-        "${{ !cancelled() && needs.kind-due.outputs.due == 'true' }}",
+        "${{ !cancelled() && needs.kind-due.result == 'success' && needs.kind-due.outputs.due == 'true' }}",
     )
     assert step["env"]["KIND"] == "${{ needs.kind-due.outputs.due }}"
     needs = {"kind-due": {"result": due_job}, "helm-kind": {"result": kind}}
