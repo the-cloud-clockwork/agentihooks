@@ -103,6 +103,7 @@ from scripts.swarm import (
     prompt,
     ready,
     reaper,
+    review_rounds,
     snapshot,
     stack,
     stages,
@@ -1082,6 +1083,11 @@ def cmd_issue(store, args):
     print(json.dumps({"task": agent.task, "issue_url": args.url}))
 
 
+def cmd_review(store, args):
+    agent = _worker(store, args)
+    print(json.dumps(review_rounds.start(args.slug, agent.task)))
+
+
 def _git(run, *args):
     try:
         return run(["git", *args], capture_output=True, text=True, timeout=20)
@@ -1660,6 +1666,7 @@ def build_parser():
     merge.add_argument("action", choices=("queue", "dequeue", "state"))
     merge.add_argument("url")
     sub.add_parser("branch")
+    sub.add_parser("review")
     done = sub.add_parser("done")
     done.add_argument("--pr", default="")
     for key in ledger_kinds.PROOF_KEYS:

@@ -503,7 +503,8 @@ def code_steps(me, led, name, phase):
         "4. Gates green (ruff check, ruff format --check and the tests), commit in the worktree; at your first commit "
         f"push the branch (git push -u origin HEAD) and record it: {me} branch. Then review per the "
         "dev-cycle skill: at most two critic sub agents, Standards and Spec, that never edit and send every finding "
-        "back to you; fix each finding, the same reader re-reviews, and review closes after three rounds.",
+        "back to you; fix each finding, the same reader re-reviews, and review closes after three rounds. "
+        f"Start every review round with {me} review; the third round closes review and a fourth is refused.",
         f"5. Push, open the pull request into dev (with Closes #<n> when there is an issue), record it: {me} pr <pr url>",
         "6. Once both reviews closed and the pull request is out of draft, write a short Handoff v2 document with "
         "the handoff skill: what the pull request delivers, how review closed and what a successor fixes if its "

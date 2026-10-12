@@ -406,7 +406,7 @@ def _codex_stamp(path: Path) -> dict | None:
         return None
 
 
-def _operator_codex_home() -> Path:
+def operator_codex_home() -> Path:
     home = codex_home()
     # A session running in a rendered Codex home renders too; links must still reach the operator's home.
     return Path.home() / ".codex" if home.resolve().is_relative_to(rendered_root().resolve()) else home
@@ -448,7 +448,7 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = ()) -
     bundle, dirs = _bundle(), _chain(name, overlays)
     master = any(n.removeprefix("package:") == "master" for n, _ in dirs)
     claude_fresh = render_claude(name, force=force, overlays=overlays) is None
-    operator = _operator_codex_home()
+    operator = operator_codex_home()
     config = operator / "config.toml"
     text = config.read_text() if config.exists() else ""
     installed = tomllib.loads(text)
@@ -557,7 +557,7 @@ def rendered_profiles(target: str) -> list[str]:
         return sorted(home.parent.name for home in rendered_root().glob("*/claude"))
     if target == "codex":
         homes = {config.parent.parent.name for config in rendered_root().glob("*/codex/config.toml")}
-        legacy = _operator_codex_home().glob("*.config.toml")
+        legacy = operator_codex_home().glob("*.config.toml")
         return sorted(homes | {p.name.removesuffix(".config.toml") for p in legacy if _codex_stamp(p)})
     return sorted(config.parent.parent.name for config in rendered_root().glob(f"*/{target}/mcp-config.json"))
 
