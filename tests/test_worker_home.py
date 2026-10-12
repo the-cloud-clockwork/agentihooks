@@ -146,6 +146,7 @@ def test_bootstrap_completes_native_claude_onboarding(fixture, attempt_id):
     home = volume / attempt_id / record["homes"]["claude"]
     state = claude_json({"HOME": str(home), "CLAUDE_CONFIG_DIR": str(home / ".claude")})
     assert json.loads(state.read_text())["hasCompletedOnboarding"] is True
+    assert state.parent.stat().st_mode & 0o777 == 0o700
     assert not (volume / attempt_id / record["homes"]["codex"] / ".claude").exists()
 
 
