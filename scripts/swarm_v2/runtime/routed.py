@@ -98,4 +98,5 @@ def hive_controller(runtime: RoutedRuntime, store, slug: str, held) -> RoutedRun
     )
     placed = RoutedRuntime(runtime.herdr_runtime, router)
     placed.hive_launch = hive
+    placed.original_runtime = runtime
     return placed

@@ -42,7 +42,11 @@ class FencedRuntime:
         self.store, self.slug, self.held = store, slug, held
         from scripts.swarm_v2.runtime.routed import RoutedRuntime, hive_controller
 
-        if deployment != LOCAL and isinstance(runtime, RoutedRuntime):
+        if (
+            deployment in ("compose", "hybrid", DISTRIBUTED)
+            and isinstance(runtime, RoutedRuntime)
+            and callable(getattr(runtime.herdr_runtime, "_profile_decision", None))
+        ):
             runtime = hive_controller(runtime, store, slug, held)
         self.runtime, self.deployment = runtime, deployment
 
@@ -77,7 +81,13 @@ class FencedRuntime:
         router = self.runtime.router
         if router.placement.backend == "hive":
             if lane not in ("eng", "ci"):
-                return WORKSTATION.format(lane=lane)
+                original = self.runtime.original_runtime.router
+                wanted = original.placed_backend(lane, task)
+                return (
+                    ""
+                    if wanted != WORKSTATION_BACKEND and original.enabled_backend(wanted) == wanted
+                    else WORKSTATION.format(lane=lane)
+                )
             from scripts.hive.placement import Wait
 
             selected = self.runtime.hive_launch.select(self.store.config(self.slug), lane, task)
@@ -98,7 +108,10 @@ class FencedRuntime:
         if refused := self.placement_refusal(lane, task):
             raise SwarmError(refused)
         with lease.kept(self.store, self.slug, self.held):
-            return self.runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
+            runtime = self.runtime
+            if lane not in ("eng", "ci") and getattr(runtime, "hive_launch", None) is not None:
+                runtime = runtime.original_runtime
+            return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
 
 
 def take_tick_lock(store: RedisStore, slug: str, held: lease.Lease, ttl_ms: int) -> str | None:
