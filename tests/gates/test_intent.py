@@ -91,6 +91,7 @@ class TestGate:
         gate = intent.IntentGate()
         assert gate.matches(bash("gh pr merge 9 --squash"))
         assert gate.matches(bash("agentihooks swarm demo done --pr x"))
+        assert gate.matches(bash("agentihooks swarm demo ready handoff.md"))
         assert not gate.matches(bash("gh pr view 9"))
         assert not gate.matches(Call("Read", {"command": "gh pr merge 9"}))
 
@@ -102,6 +103,7 @@ class TestGate:
             f"agentihooks swarm {SLUG} done --pr {URL}",
             f"env A=1 agentihooks swarm {SLUG} done",
             f"agentihooks swarm {SLUG} merge queue {URL}",
+            f"agentihooks swarm {SLUG} ready handoff.md",
         ],
     )
     def test_a_failed_verdict_refuses_merge_and_done(self, tmp_path, command):
