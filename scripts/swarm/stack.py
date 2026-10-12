@@ -78,10 +78,7 @@ def repo_key(url: str) -> str:
 
 
 def origin_key(repo: str) -> str:
-    try:
-        return repo_key(_out(["git", "-C", repo, "remote", "get-url", "origin"], "cannot read the origin url"))
-    except SwarmError:
-        return ""
+    return repo_key(shell(["git", "-C", repo, "remote", "get-url", "origin"]).stdout.strip())
 
 
 def public_url(url: str) -> str:

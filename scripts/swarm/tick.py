@@ -688,13 +688,12 @@ def _stackable(dep):
 
 def _stack_base(task, rows, repo):
     deps = [dep for dep in task.get("depends_on") or [] if rows[dep].get("state") != "done"]
-    home = stack.origin_key(repo) if any(rows[dep].get("branch_repo") for dep in deps) else ""
-    return [_stacked_dep(dep, rows[dep], home) for dep in deps]
+    return [_stacked_dep(dep, rows[dep], repo) for dep in deps]
 
 
-def _stacked_dep(dep, row, home):
+def _stacked_dep(dep, row, repo):
     base = {"task": dep, "branch": row["branch"]}
-    elsewhere = row.get("branch_repo") and (not home or stack.repo_key(row["branch_repo"]) != home)
+    elsewhere = row.get("branch_repo") and stack.repo_key(row["branch_repo"]) != stack.origin_key(repo)
     return {**base, "repo": row["branch_repo"]} if elsewhere else base
 
 
