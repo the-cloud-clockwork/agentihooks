@@ -2,6 +2,7 @@ import json
 import multiprocessing
 import time
 
+import pytest
 from opentelemetry.sdk.trace.export import SpanExportResult
 
 from hooks.observability import agent_trace, otel, trace_flush, transcript
@@ -90,14 +91,15 @@ def test_deadline_checkpoints_a_growing_open_turn(tmp_path, monkeypatch):
     assert child.exitcode == 0
 
 
-def test_retry_returns_with_checkpoint_before_its_deadline(monkeypatch):
+@pytest.mark.parametrize("page_seconds", [1, 3])
+def test_retry_returns_with_checkpoint_before_its_deadline(monkeypatch, page_seconds):
     elapsed = [0.0]
     state = {"source": {"accepted_bytes": 0}, "overflow": {"bytes": 1}}
 
     def advance(*args):
-        elapsed[0] += 1
+        elapsed[0] += page_seconds
         state["source"]["accepted_bytes"] += 1
-        if elapsed[0] == 10:
+        if state["source"]["accepted_bytes"] == 10:
             state.pop("overflow")
 
     monkeypatch.setattr(trace_flush.time, "monotonic", lambda: elapsed[0])
