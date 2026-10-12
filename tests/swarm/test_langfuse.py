@@ -89,6 +89,8 @@ def test_unconfigured_sampling_reports_once_and_resumes_without_losing_findings(
         return {"swarm": slug, "window": window, "agents": []}
 
     store = SimpleNamespace(redis=redis, execution_registry=SimpleNamespace(records=lambda slug: bindings))
+    langfuse.refresh(store, "rig-grade-swarm", 3599999, read=lambda *args: summary)
+    before = standing.read(redis, "rig-grade-swarm")
     monkeypatch.delenv("LANGFUSE_MCP_URL")
     assert langfuse.refresh(store, "rig-grade-swarm", 3600000, read=read) == [
         "Langfuse sampling is off: configure LANGFUSE_MCP_URL"

@@ -80,3 +80,71 @@ def test_explicit_blank_endpoint_overrides_native_metadata(tmp_path):
     settings["env"] = {"LANGFUSE_MCP_URL": ""}
     seed(lambda: [], destination, settings)
     assert "LANGFUSE_MCP_URL" not in dotenv_values(destination)
+
+
+@pytest.mark.parametrize("prefix", ["", "  export "])
+def test_init_preserves_operator_endpoint_with_query_parameters(tmp_path, prefix):
+    from scripts.runtime_env import seed
+
+    destination = tmp_path / ".env"
+    body = f"{prefix}LANGFUSE_MCP_URL=http://operator.example/mcp/?scope=summary\n"
+    destination.write_text(body)
+    seed(lambda: [], destination, {"env": {"LANGFUSE_MCP_URL": "http://configured.example/mcp/"}})
+    assert destination.read_text() == body
+
+
+def test_init_creates_a_private_environment_file_without_an_existing_seed(tmp_path):
+    import stat
+
+    from dotenv import dotenv_values
+
+    from scripts.runtime_env import seed
+
+    destination = tmp_path / ".env"
+    endpoint = "http://configured.example/mcp/"
+    seed(lambda: [], destination, {"env": {"LANGFUSE_MCP_URL": endpoint}})
+    assert dotenv_values(destination) == {"LANGFUSE_MCP_URL": endpoint}
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize("after", ["X_NOTE=kept\n", "  X_NOTE=kept\n"])
+def test_init_preserves_operator_lines_surrounding_its_owned_block(tmp_path, after):
+    from dotenv import dotenv_values
+
+    from scripts import runtime_env
+
+    destination = tmp_path / ".env"
+    destination.write_text("  BEFORE=kept\n")
+    settings = {"env": {"LANGFUSE_MCP_URL": "http://configured.example/mcp/"}}
+    runtime_env.seed(lambda: [], destination, settings)
+    with destination.open("a") as stream:
+        stream.write(f"\n\n{after}")
+    runtime_env.seed(lambda: [], destination, settings)
+    assert destination.read_text().startswith(f"  BEFORE=kept\n{after.rstrip()}\n\n")
+    assert dotenv_values(destination) == {
+        "BEFORE": "kept",
+        "X_NOTE": "kept",
+        "LANGFUSE_MCP_URL": settings["env"]["LANGFUSE_MCP_URL"],
+    }
+
+
+def test_init_preserves_comments_describing_its_markers_after_the_owned_block(tmp_path):
+    from dotenv import dotenv_values
+
+    from scripts import runtime_env
+
+    destination = tmp_path / ".env"
+    destination.write_text("BEFORE=kept\n")
+    settings = {"env": {"LANGFUSE_MCP_URL": "http://configured.example/mcp/"}}
+    runtime_env.seed(lambda: [], destination, settings)
+    notes = f"# Note: {runtime_env.START} describes the owned block\nX_NOTE=kept\n# Note: {runtime_env.END} ends it\n"
+    with destination.open("a") as stream:
+        stream.write(notes)
+    settings["env"]["LANGFUSE_MCP_URL"] = "http://changed.example/mcp/"
+    runtime_env.seed(lambda: [], destination, settings)
+    assert notes in destination.read_text()
+    assert dotenv_values(destination) == {
+        "BEFORE": "kept",
+        "X_NOTE": "kept",
+        "LANGFUSE_MCP_URL": "http://changed.example/mcp/",
+    }
