@@ -51,6 +51,8 @@ BUDGETS = {
     "LIVE_PEAK_WRITES_PER_MINUTE": max,
     "HEADROOM": max,
     "MIN_WRITES": max,
+    "READS_PER_SECOND": max,
+    "SWEEPS": max,
 }
 WORDS = "the swarm keeps every task with its comments proof and the work that landed for the operator".split()
 
@@ -381,7 +383,7 @@ def base_budgets(revision: str) -> dict:
     gate = Path(__file__)
     show = subprocess.run(["git", "show", f"{revision}:./{gate.name}"], cwd=gate.parent, capture_output=True, text=True)
     if show.returncode:
-        sys.exit(f"the base {revision} has no ledger load gate to grade from: {show.stderr.strip()}")
+        sys.exit(f"git could not show the ledger load gate at base {revision}: {show.stderr.strip()}")
     return budgets(show.stdout)
 
 

@@ -99,6 +99,7 @@ def test_a_head_that_tightens_its_budgets_keeps_its_own(monkeypatch):
 def test_every_load_shape_constant_a_head_could_loosen_is_graded_from_the_base(monkeypatch):
     base = head_budgets()
     loose = {"CPU_WINDOW_S": 600, "CLIENTS": 1, "LIVE_PEAK_WRITES_PER_MINUTE": 1, "HEADROOM": 0.1, "MIN_WRITES": 0}
+    loose |= {"READS_PER_SECOND": 0.01, "SWEEPS": 0}
     for name, value in loose.items():
         monkeypatch.setattr(ledger_load, name, value)
     assert ledger_load.graded(base) == base
@@ -125,7 +126,7 @@ def test_budgets_are_read_from_the_source_given_not_the_running_module():
 
 
 def test_a_base_without_the_gate_is_red():
-    with pytest.raises(SystemExit, match="no ledger load gate"):
+    with pytest.raises(SystemExit, match="could not show the ledger load gate"):
         ledger_load.base_budgets("0" * 40)
 
 
