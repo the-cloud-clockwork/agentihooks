@@ -97,17 +97,24 @@ def test_a_group_holds_at_most_five_tasks():
     assert rejected == [] and len(rows(state)["t1"]["group_members"]) == 4
 
 
-def test_the_combined_size_never_passes_m():
+def test_the_ledger_groups_two_medium_tasks_under_the_fold_ceiling():
+    size("t1", "M")
     size("t2", "M")
     state, rejected = group("t1", ["t2"])
-    assert rejected == ["group-1"] and "group_members" not in rows(state)["t1"]
-    assert "together they pass M" in state["_meta"]["warnings"][-1]
+    assert rejected == [] and rows(state)["t1"]["group_members"] == ["t2"]
 
 
-def test_an_l_task_never_joins_a_group():
+def test_the_combined_size_never_passes_the_fold_ceiling():
     size("t2", "L")
-    state, rejected = group("t1", ["t2"])
-    assert rejected == ["group-1"]
+    size("t3", "L")
+    state, rejected = group("t1", ["t2", "t3"])
+    assert rejected == ["group-1"] and "group_members" not in rows(state)["t1"]
+    assert "together they pass 80 minutes of work" in state["_meta"]["warnings"][-1]
+
+
+def test_the_dispatcher_ceiling_stays_at_one_medium_task():
+    assert ledger_groups.refusal([task("a"), task("b", difficulty="M")], {}) == "together they pass 25 minutes of work"
+    assert ledger_groups.refusal([task("a"), task("b", difficulty="M")], {}, ledger_groups.FOLD_CEILING) == ""
 
 
 @pytest.mark.parametrize(
@@ -126,8 +133,8 @@ def test_an_l_task_never_joins_a_group():
         ([task("a"), task("b", depends_on=["x", "y"])], "task b depends on task a"),
         ([task("a"), task("b", depends_on=["missing"])], "task b waits on task missing"),
         ([task("a"), task("b"), task("c"), task("d"), task("e"), task("f")], "a group holds at most 5 tasks"),
-        ([task("a"), task("b", difficulty="M")], "together they pass M"),
-        ([task("a", difficulty="L")], "together they pass M"),
+        ([task("a"), task("b", difficulty="M")], "together they pass 25 minutes of work"),
+        ([task("a", difficulty="L")], "together they pass 25 minutes of work"),
     ],
 )
 def test_the_refusal_names_why_tasks_cannot_group(tasks, reason):

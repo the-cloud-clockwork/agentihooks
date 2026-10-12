@@ -1,6 +1,8 @@
 """One supervised Codex app-server per admitted execution: admit, spawn, connect, bind, then open exactly once."""
 
+import json
 import os
+import shutil
 import socket
 import subprocess
 import time
@@ -11,6 +13,7 @@ from pathlib import Path
 from hooks.observability.trace_flush import start_time
 from scripts.codex_session import protocol
 from scripts.codex_session.binding import CONNECTED, EXITED, FAILED, BindingStore, TransportRecord
+from scripts.profiles import binding
 from scripts.routing import envs
 from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord, RedisStore
 
@@ -269,6 +272,23 @@ def spawn(spec: Launch, deps: Deps, path: Path) -> subprocess.Popen:
         raise LaunchFailure("spawn", SPAWN_FAILED.format(exc)) from exc
 
 
+def execution_home(spec: Launch, directory: Path) -> Launch:
+    source = Path(spec.codex_home)
+    home = directory / "codex"
+    shutil.copytree(source, home, ignore_dangling_symlinks=True)
+    home.chmod(PRIVATE_MODE)
+    for name in ("codex.sources.json", "codex.mounts.json"):
+        manifest = source.parent / name
+        if manifest.is_file():
+            shutil.copyfile(manifest, directory / name)
+    evidence = home / binding.FILE
+    if evidence.is_file():
+        data = json.loads(evidence.read_text())
+        data["home"] = str(home.resolve())
+        evidence.write_text(json.dumps(data) + "\n")
+    return replace(spec, codex_home=str(home), environ={**spec.environ, "CODEX_HOME": str(home)})
+
+
 def launch(store: RedisStore, spec: Launch, deps: Deps) -> Started:
     check_environment(spec.environ, spec.allowed_tokens)
     agent = admit(store, spec, deps)
@@ -277,6 +297,7 @@ def launch(store: RedisStore, spec: Launch, deps: Deps) -> Started:
     record = bindings.reserve(spec.slug, _record(spec, agent, path))
     process = None
     try:
+        spec = execution_home(spec, path.parent)
         process = spawn(spec, deps, path)
         record = replace(record, server_pid=process.pid, server_start_identity=deps.start_identity(process.pid) or 0)
         bindings.put(spec.slug, record)

@@ -181,6 +181,62 @@ class TestGate:
         )
         assert row["reason"] == "intent check still pending after two minutes, passed unchecked"
 
+    @pytest.mark.parametrize(
+        "command", [f"agentihooks swarm {SLUG} merge queue {URL}", f"agentihooks swarm {SLUG} done --pr {URL}"]
+    )
+    def test_a_draft_record_on_a_ready_pull_request_refuses_as_running(self, tmp_path, command):
+        verdicts(tmp_path).write(TASK, "pending", intent.DRAFT, NOW - 60_000, phase="p8")
+        ran = Ran((0, "false\n"))
+        gate = intent.IntentGate(clock=lambda: NOW / 1000, run=ran)
+        decision = gate.decide(bash(command), WHO, verdicts(tmp_path))
+        assert not decision.allowed
+        assert decision.reason.startswith(f"intent check running for task {TASK}, started 0 s ago")
+        assert ran.calls[0][0] == ["gh", "api", "repos/o/r/pulls/9", "--jq", ".draft"]
+        assert verdicts(tmp_path).read(TASK) == {
+            "verdict": "pending",
+            "reason": intent.RUNNING,
+            "at": NOW,
+            "phase": "p8",
+        }
+
+    @pytest.mark.parametrize("result", [(0, "true\n"), (1, ""), subprocess.TimeoutExpired("gh", 20)])
+    def test_a_draft_record_stays_draft_while_github_reads_draft_or_fails(self, tmp_path, result):
+        verdicts(tmp_path).write(TASK, "pending", intent.DRAFT, NOW - 60_000, phase="p8")
+        gate = intent.IntentGate(clock=lambda: NOW / 1000, run=Ran(result))
+        decision = gate.decide(bash(f"agentihooks swarm {SLUG} merge queue {URL}"), WHO, verdicts(tmp_path))
+        assert decision.reason.startswith(f"intent for task {TASK} is judged once its pull request is ready")
+        assert verdicts(tmp_path).read(TASK)["reason"] == intent.DRAFT
+
+    def test_a_draft_record_without_a_pull_request_url_reads_nothing(self, tmp_path):
+        verdicts(tmp_path).write(TASK, "pending", intent.DRAFT, NOW - 60_000)
+        ran = Ran()
+        gate = intent.IntentGate(clock=lambda: NOW / 1000, run=ran)
+        assert not gate.decide(bash(f"agentihooks swarm {SLUG} done"), WHO, verdicts(tmp_path)).allowed
+        assert ran.calls == []
+        assert intent.IntentGate().run is subprocess.run
+
+    def test_a_verdict_landing_during_the_draft_read_is_kept(self, tmp_path):
+        verdicts(tmp_path).write(TASK, "pending", intent.DRAFT, NOW - 60_000, phase="p8")
+
+        def judged(args, **kwargs):
+            verdicts(tmp_path).write(TASK, "pass", "fine", NOW - 1, phase="p8")
+            return subprocess.CompletedProcess(args, 0, stdout="false\n", stderr="")
+
+        gate = intent.IntentGate(clock=lambda: NOW / 1000, run=judged)
+        assert gate.decide(bash(f"agentihooks swarm {SLUG} merge queue {URL}"), WHO, verdicts(tmp_path)).allowed
+        assert verdicts(tmp_path).read(TASK) == {"verdict": "pass", "reason": "fine", "at": NOW - 1, "phase": "p8"}
+
+    def test_a_verdict_landing_during_the_draft_read_is_decided_in_the_same_mode(self, tmp_path):
+        verdicts(tmp_path).write(TASK, "pending", intent.DRAFT, NOW - 60_000, phase="p8")
+
+        def failed(args, **kwargs):
+            verdicts(tmp_path).write(TASK, "fail", "missing behavior", NOW - 1, coach_rounds=2)
+            return subprocess.CompletedProcess(args, 0, stdout="false\n", stderr="")
+
+        gate = intent.IntentGate(clock=lambda: NOW / 1000, run=failed)
+        command = bash(f"agentihooks swarm {SLUG} merge queue {URL}")
+        assert gate.decide(command, WHO, verdicts(tmp_path), "coach").allowed
+
 
 class TestBody:
     def test_the_section_names_project_phase_and_task(self):
