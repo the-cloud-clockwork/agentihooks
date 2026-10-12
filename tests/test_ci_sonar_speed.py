@@ -30,7 +30,7 @@ def _run(step, cwd, bin_dir, **env):
     return subprocess.run(
         ["bash", "-e", "-c", step["run"]],
         cwd=cwd,
-        env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", **env},
+        env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "GITHUB_WORKSPACE": str(_ROOT), **env},
         capture_output=True,
         text=True,
         timeout=30,
