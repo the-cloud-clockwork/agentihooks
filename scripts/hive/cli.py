@@ -7,6 +7,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Mapping, MutableMapping
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
@@ -30,7 +31,7 @@ def _join(url: str, code: str) -> dict:
     return _post(url, server.JOIN_PATH, {"code": code}, "join")
 
 
-def refresh_env(environ) -> str:
+def refresh_env(environ: MutableMapping[str, str]) -> str:
     url, credential = environ.get("AGENTIHOOKS_HIVE_URL"), environ.get("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL")
     if not (url and credential):
         raise auth.HiveError(
@@ -38,9 +39,18 @@ def refresh_env(environ) -> str:
             "AGENTIHOOKS_HIVE_URL and AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL must both be set"
         )
     grant = _post(url, server.REFRESH_PATH, {"ledger_credential": credential}, "refresh")
-    auth.write_env(registry.home(), url, {**grant, "ledger_credential": credential})
+    auth.write_env(registry.home(environ), url, {**grant, "ledger_credential": credential})
     environ["AGENTIHOOKS_HIVE_REDIS_URL"] = grant["redis_url"]
     return grant["id"]
+
+
+def saved_redis_url(environ: Mapping[str, str]) -> str | None:
+    try:
+        lines = (registry.home(environ) / auth.ENV_FILE).read_text().splitlines()
+    except OSError:
+        return None
+    saved = dict(line.partition("=")[::2] for line in lines)
+    return saved.get("AGENTIHOOKS_HIVE_REDIS_URL") or None
 
 
 def _post(url: str, path: str, body: dict, action: str) -> dict:

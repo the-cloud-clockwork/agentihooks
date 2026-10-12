@@ -527,8 +527,22 @@ def redis_client(environ=None):
     except redis.AuthenticationError:
         if url != environ.get("AGENTIHOOKS_HIVE_REDIS_URL"):
             raise
+    return _hive_recovered(redis, environ, url)
+
+
+def _hive_recovered(redis, environ, refused):
     from scripts.hive import auth, cli
 
+    saved = cli.saved_redis_url(environ)
+    if saved not in (None, refused):
+        # Another process on this host may have refreshed already; a second refresh would retire its password.
+        try:
+            client = _pinged(redis, saved)
+        except redis.AuthenticationError:
+            pass
+        else:
+            environ["AGENTIHOOKS_HIVE_REDIS_URL"] = saved
+            return client
     try:
         cli.refresh_env(environ)
     except auth.HiveError as exc:

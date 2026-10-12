@@ -167,19 +167,21 @@ def controller(redis: "Redis", credential: str) -> bool:
 def revoke(redis: "Redis", member_id: str) -> None:
     from redis.exceptions import RedisError
 
-    member = redis.hgetall(f"{PREFIX}:member:{member_id}")
+    member_key = f"{PREFIX}:member:{member_id}"
+    member = redis.hgetall(member_key)
     if not member:
         raise HiveError(f"no hive member {member_id}")
     with redis.pipeline() as pipe:
-        pipe.delete(f"{PREFIX}:member:{member_id}", f"{PREFIX}:ledger:{member['ledger']}")
+        pipe.delete(f"{PREFIX}:ledger:{member['ledger']}")
         pipe.acl_deluser(f"hive-{member_id}")
         pipe.execute()
     try:
         _persist(redis)
     except RedisError as exc:
         raise HiveError(
-            f"revoked {member_id}, but Redis could not save its ACL file, so a restart revives it ({exc})"
+            f"Redis could not save its ACL file, so revoking {member_id} is incomplete; run revoke again ({exc})"
         ) from exc
+    redis.delete(member_key)
 
 
 def write_env(home: Path | str, url: str, grant: dict) -> Path:

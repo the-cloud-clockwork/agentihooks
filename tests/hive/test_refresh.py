@@ -154,24 +154,32 @@ def test_a_failed_acl_save_undoes_the_join(saved, redis_lib, monkeypatch):
     assert redis.keys(f"{auth.PREFIX}:ledger:*") == []
 
 
-def test_a_failed_acl_save_after_a_revoke_is_reported(saved, redis_lib, monkeypatch):
+def test_a_revoke_whose_acl_save_fails_is_reported_and_completes_on_retry(saved, redis_lib, monkeypatch):
     redis, aclfile = saved
     grant = auth.exchange(redis, auth.invite(redis, "laptop"), PUBLIC)
 
     def refuse(self):
         raise redis_lib.exceptions.ResponseError("ERR There was an error trying to save the ACLs")
 
-    monkeypatch.setattr(redis_lib.Redis, "acl_save", refuse)
-
-    with pytest.raises(auth.HiveError) as refused:
-        auth.revoke(redis, grant["id"])
+    with monkeypatch.context() as patched:
+        patched.setattr(redis_lib.Redis, "acl_save", refuse)
+        with pytest.raises(auth.HiveError) as refused:
+            auth.revoke(redis, grant["id"])
 
     assert str(refused.value) == (
-        f"revoked {grant['id']}, but Redis could not save its ACL file, so a restart revives it "
+        f"Redis could not save its ACL file, so revoking {grant['id']} is incomplete; run revoke again "
         "(ERR There was an error trying to save the ACLs)"
     )
     assert redis.acl_users() == ["default"]
+    assert auth.ledger_member(redis, grant["ledger_credential"]) is None
     assert _saved_users(aclfile) == ["default", f"hive-{grant['id']}"]
+
+    auth.revoke(redis, grant["id"])
+
+    assert _saved_users(aclfile) == ["default"]
+    assert redis.keys(f"{auth.PREFIX}:member:*") == []
+    with pytest.raises(auth.HiveError, match=f"^no hive member {grant['id']}$"):
+        auth.revoke(redis, grant["id"])
 
 
 def test_the_refresh_endpoint_answers_with_the_refreshed_grant(admin, hive):
@@ -281,8 +289,9 @@ def _fake_ping(admin, redis_lib, monkeypatch):
     return pinged
 
 
-def _hive_environ(hive, grant):
+def _hive_environ(hive, grant, home):
     return {
+        "AGENTIHOOKS_HOME": str(home),
         "AGENTIHOOKS_DEPLOYMENT": "distributed",
         "AGENTIHOOKS_HIVE_URL": hive,
         "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": grant["ledger_credential"],
@@ -294,7 +303,7 @@ def test_a_refused_hive_credential_is_refreshed_once_and_reconnects(admin, hive,
     grant = _joined(admin, hive, tmp_path, monkeypatch)
     admin.acl_deluser(f"hive-{grant['id']}")
     pinged = _fake_ping(admin, redis_lib, monkeypatch)
-    environ = _hive_environ(hive, grant)
+    environ = _hive_environ(hive, grant, tmp_path)
 
     client = store.redis_client(environ)
 
@@ -308,12 +317,53 @@ def test_a_refused_hive_credential_is_refreshed_once_and_reconnects(admin, hive,
 def test_an_accepted_hive_credential_is_not_refreshed(admin, hive, redis_lib, tmp_path, monkeypatch):
     grant = _joined(admin, hive, tmp_path, monkeypatch)
     pinged = _fake_ping(admin, redis_lib, monkeypatch)
-    environ = _hive_environ(hive, grant)
+    environ = _hive_environ(hive, grant, tmp_path)
 
     store.redis_client(environ)
 
     assert pinged == [f"hive-{grant['id']}"]
     assert environ["AGENTIHOOKS_HIVE_REDIS_URL"] == grant["redis_url"]
+
+
+def test_a_credential_another_process_refreshed_is_adopted_without_a_second_refresh(
+    admin, hive, redis_lib, tmp_path, monkeypatch
+):
+    grant = _joined(admin, hive, tmp_path, monkeypatch)
+    sibling = auth.refresh(admin, grant["ledger_credential"], PUBLIC)
+    auth.write_env(tmp_path, hive, {**sibling, "ledger_credential": grant["ledger_credential"]})
+    pinged = _fake_ping(admin, redis_lib, monkeypatch)
+    environ = _hive_environ(hive, grant, tmp_path)
+
+    client = store.redis_client(environ)
+
+    assert pinged == [f"hive-{grant['id']}", f"hive-{grant['id']}"]
+    assert environ["AGENTIHOOKS_HIVE_REDIS_URL"] == sibling["redis_url"]
+    assert _env_file(tmp_path)["AGENTIHOOKS_HIVE_REDIS_URL"] == sibling["redis_url"]
+    assert _accepts(admin, sibling["redis_url"])
+    assert client.connection_pool.connection_kwargs["password"] == _password(sibling["redis_url"])
+
+
+def test_a_saved_credential_that_is_also_refused_is_refreshed(admin, hive, redis_lib, tmp_path, monkeypatch):
+    grant = _joined(admin, hive, tmp_path, monkeypatch)
+    stale = auth.refresh(admin, grant["ledger_credential"], PUBLIC)
+    auth.write_env(tmp_path, hive, {**stale, "ledger_credential": grant["ledger_credential"]})
+    admin.acl_deluser(f"hive-{grant['id']}")
+    pinged = _fake_ping(admin, redis_lib, monkeypatch)
+    environ = _hive_environ(hive, grant, tmp_path)
+
+    store.redis_client(environ)
+
+    assert pinged == [f"hive-{grant['id']}"] * 3
+    assert environ["AGENTIHOOKS_HIVE_REDIS_URL"] not in (grant["redis_url"], stale["redis_url"])
+    assert _accepts(admin, environ["AGENTIHOOKS_HIVE_REDIS_URL"])
+
+
+@pytest.mark.parametrize("content", [None, "AGENTIHOOKS_HIVE_ID=a\n", "AGENTIHOOKS_HIVE_REDIS_URL=\n"])
+def test_no_saved_hive_redis_url_reads_as_none(tmp_path, content):
+    if content is not None:
+        (tmp_path / "hive.env").write_text(content)
+
+    assert cli.saved_redis_url({"AGENTIHOOKS_HOME": str(tmp_path)}) is None
 
 
 def test_a_refused_swarm_credential_is_not_refreshed(admin, redis_lib, monkeypatch):
@@ -331,7 +381,7 @@ def test_a_refused_refresh_reports_both_refusals(admin, hive, redis_lib, tmp_pat
     grant = _joined(admin, hive, tmp_path, monkeypatch)
     auth.revoke(admin, grant["id"])
     pinged = _fake_ping(admin, redis_lib, monkeypatch)
-    environ = _hive_environ(hive, grant)
+    environ = _hive_environ(hive, grant, tmp_path)
 
     with pytest.raises(redis_lib.exceptions.AuthenticationError) as refused:
         store.redis_client(environ)

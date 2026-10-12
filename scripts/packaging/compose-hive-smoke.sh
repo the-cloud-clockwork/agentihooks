@@ -104,8 +104,7 @@ for _ in $(seq 30); do
 done
 printf 'after a Redis restart, '
 docker exec "$run-member" python -c "$member_auth"
-refreshed="$(docker exec "$run-member" agentihooks hive refresh)"
-printf 'member: %s\n' "${refreshed%%;*}"
+docker exec "$run-member" agentihooks hive refresh >/dev/null
 printf 'after a refresh through the join service, '
 docker exec "$run-member" python -c "$member_auth"
 printf 'Compose hive smoke passed\n'

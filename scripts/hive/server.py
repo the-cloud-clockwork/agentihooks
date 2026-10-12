@@ -58,12 +58,12 @@ def _handler(redis: "Redis", redis_url: str, context: ssl.SSLContext | None) -> 
         def do_POST(self):
             if self.path not in ROUTES:
                 return self._answer(404, {"error": "not found"})
-            field, bad_body, grant = ROUTES[self.path]
+            field, bad_body, operation = ROUTES[self.path]
             value = self._field(field)
             if value is None:
                 return self._answer(400, {"error": bad_body})
             try:
-                return self._answer(200, getattr(auth, grant)(redis, value, redis_url))
+                return self._answer(200, getattr(auth, operation)(redis, value, redis_url))
             except auth.HiveError as exc:
                 return self._answer(403, {"error": str(exc)})
 
