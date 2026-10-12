@@ -10,7 +10,7 @@ from scripts.gates.base import Who
 from scripts.swarm import clearance
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2.deployed import POLICY_ENV, pod_policy
-from scripts.swarm_v2.herdr.attach import ClientHome, Lookup, Run, Terminal
+from scripts.swarm_v2.herdr.attach import ClientHome, Jump, Lookup, Run, Terminal
 from scripts.swarm_v2.herdr.capabilities import Verdict, runner
 from scripts.swarm_v2.herdr.endpoints import EndpointRefused, TerminalAuthority
 from scripts.swarm_v2.kubernetes.terminal import HostKeys, operator_attach
@@ -18,6 +18,22 @@ from scripts.swarm_v2.operator_auth import OPERATOR
 from scripts.swarm_v2.runtime.commands import Principal, Role
 
 CA_KEY_ENV = "AGENTIHOOKS_TERMINAL_CA_KEY"
+JUMP_ENV = "AGENTIHOOKS_TERMINAL_JUMP"
+JUMP_KEY_ENV = "AGENTIHOOKS_TERMINAL_JUMP_HOST_KEY"
+
+
+def jump(environ: Mapping[str, str]) -> Jump | None:
+    if not environ.get(JUMP_ENV):
+        return None
+    host, _, port = environ[JUMP_ENV].rpartition(":")
+    valid = host and not any(char.isspace() for char in host) and port.isdigit() and 0 < int(port) < 65536
+    if not (valid and environ.get(JUMP_KEY_ENV)):
+        raise SwarmError(f"{JUMP_ENV} must be host:port with {JUMP_KEY_ENV} naming its host key")
+    return Jump(host, int(port), environ[JUMP_KEY_ENV])
+
+
+def client_home(environ: Mapping[str, str]) -> ClientHome:
+    return ClientHome(Path.home(), jump=jump(environ))
 
 
 def principal(store: RedisStore, slug: str, who: Who, environ: Mapping[str, str]) -> Principal:
@@ -62,7 +78,7 @@ def attach(
 
 def command(store: RedisStore, slug: str, execution_id: str, environ: Mapping[str, str], who: Who) -> dict:
     caller = principal(store, slug, who, environ)
-    home = ClientHome(Path.home())
+    home = client_home(environ)
 
     def build() -> Terminal:
         return terminal(environ, home, runner(home.environment(dict(environ))))

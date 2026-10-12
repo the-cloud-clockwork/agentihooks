@@ -345,6 +345,29 @@ class TestGenericSecretShape:
         assert "sk9f8a7s6d5f4g3h2j1k" not in result
 
 
+@pytest.mark.parametrize("mode", ["standard", "strict", "memory"])
+def test_external_secret_remote_property_references_are_not_credential_values(mode):
+    from hooks.secrets import scan
+
+    key = "GITHUB_APP_" + "PRIVATE_KEY"
+    document = (
+        "apiVersion: external-secrets.io/v1beta1\nkind: ExternalSecret\n"
+        "spec:\n  data:\n  - secretKey: " + key + "\n"
+        "    remoteRef:\n      key: k8s/agenticore\n      property: " + key + "\n"
+    )
+    assert scan(document, mode=mode) == []
+
+
+def test_a_git_app_secret_name_is_a_reference_while_a_private_key_literal_is_refused():
+    from hooks.secrets import scan
+
+    field = "git_app_" + "secret_name"
+    reference = '"' + field + '": "swarm-git-app"'
+    assert scan(reference, mode="standard") == []
+    literal = "GITHUB_APP_" + "PRIVATE_KEY" + "=literalcredentialvalue"
+    assert "generic_secret" in scan(literal, mode="standard")
+
+
 PEM_BODY = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC"
 
 

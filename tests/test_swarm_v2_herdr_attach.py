@@ -531,3 +531,59 @@ def test_an_unreadable_client_identity_refuses_each_attempt(tmp_path, identity):
     assert report.refused == {EXE_A: "client_key", EXE_B: "client_key"}
     assert found.terminal_endpoint_refusals() == {"client_key": 2}
     assert not any(command[0] == attach.SSH for command in runner.commands)
+
+
+JUMP_HOST = "swarm.homeofanton.com"
+JUMP_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJumpHostKey"
+
+
+def jumped(tmp_path) -> ClientHome:
+    return ClientHome(tmp_path / "client", jump=attach.Jump(JUMP_HOST, 2223, JUMP_KEY))
+
+
+def test_a_jumped_block_keeps_the_cluster_name_behind_the_controller_jump(tmp_path):
+    home = jumped(tmp_path)
+    lines = attach.ssh_block(home, endpoint(), HOST).splitlines()
+    assert lines[:3] == [f"Host {HOST}", f"  HostName {HOST}", f"  ProxyJump {attach.JUMP}"]
+    assert lines[3:] == attach.ssh_block(ClientHome(tmp_path / "client"), endpoint(), HOST).splitlines()[2:]
+
+
+def test_the_jump_block_pins_the_controller_host_key(tmp_path):
+    home = jumped(tmp_path)
+    terminals = tmp_path / "client" / ".ssh" / "swarm-terminals"
+    assert attach.jump_block(home).splitlines() == [
+        f"Host {attach.JUMP}",
+        f"  HostName {JUMP_HOST}",
+        "  Port 2223",
+        "  User jump",
+        f"  HostKeyAlias {JUMP_HOST}",
+        f'  UserKnownHostsFile "{terminals}/known_hosts/{attach.JUMP}"',
+        "  GlobalKnownHostsFile /dev/null",
+        "  StrictHostKeyChecking yes",
+        "  CheckHostIP no",
+        "  UpdateHostKeys no",
+        "  BatchMode yes",
+        "  IdentitiesOnly yes",
+        f'  IdentityFile "{terminals}/id_ed25519"',
+        "  ForwardAgent no",
+    ]
+
+
+def test_register_through_the_jump_needs_no_workstation_dns_and_pins_both_hosts(tmp_path):
+    home = jumped(tmp_path)
+    authority = TerminalAuthority(Ed25519PrivateKey.generate(), lambda: fixture()["now"])
+    found = Terminal(home, authority, "swarm-workers", Runner(home), no_dns)
+
+    assert found.register(scope(), HOST_KEY) == endpoint()
+
+    assert home.block(endpoint()).read_text() == attach.ssh_block(home, endpoint(), HOST)
+    assert home.known_hosts(endpoint()).read_text() == f"{HOST} {HOST_KEY}\n"
+    assert home.jump_config.read_text() == attach.jump_block(home)
+    assert home.jump_known_hosts.read_text() == f"{JUMP_HOST} {JUMP_KEY}\n"
+    assert _mode(home.jump_known_hosts) == 0o600
+
+
+def test_without_a_jump_no_jump_files_are_written(tmp_path):
+    found, _ = terminal(tmp_path)
+    found.register(scope(), HOST_KEY)
+    assert (found.home.jump_config.exists(), found.home.jump_known_hosts.exists()) == (False, False)

@@ -1,13 +1,17 @@
-"""agentihooks swarm-terminal setup|install: the operator machine's terminal attach files, placed by reference."""
+"""agentihooks swarm-terminal setup|install|sync: the operator machine's terminal attach files, placed by reference,
+and the service that keeps every hive's published workers in the operator's herdr."""
 
 import argparse
 import base64
+import dataclasses
 import hashlib
+import itertools
 import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,8 +20,14 @@ import yaml
 
 from scripts import openbao_kv
 from scripts.gates.base import Who
-from scripts.swarm.store import SwarmError
+from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2.deployed import POLICY_ENV, pod_policy
+from scripts.swarm_v2.herdr import publications
+from scripts.swarm_v2.herdr.attach import ClientHome, Run
+from scripts.swarm_v2.herdr.capabilities import runner
+from scripts.swarm_v2.herdr.operator_service import Service
+from scripts.swarm_v2.herdr.upkeep import Upkeep
+from scripts.swarm_v2.kubernetes import operator_terminal
 from scripts.swarm_v2.kubernetes.operator_terminal import CA_KEY_ENV, authority
 
 CA_PATH = "agentihooks-swarm/terminal-attach"
@@ -29,6 +39,8 @@ ANTONCORE_ENV = "AGENTIHOOKS_ANTONCORE_DIR"
 FOLDER = "swarm-terminal"
 UNIT = "agentihooks-swarm-terminal.service"
 TIMER = "agentihooks-swarm-terminal.timer"
+SYNC = "agentihooks-swarm-terminal-sync.service"
+SYNC_SECONDS = 15
 
 
 class SetupRefused(SwarmError):
@@ -128,6 +140,36 @@ def place(home: Path, bao: openbao_kv.OpenBao, antoncore: Path) -> dict:
     }
 
 
+def service(
+    environ: Mapping[str, str],
+    client: ClientHome,
+    root: Path,
+    run: Run | None = None,
+    connect: Callable[[], RedisStore] | None = None,
+) -> Service:
+    try:
+        placed = settings(root)
+    except OSError:
+        raise SetupRefused("the terminal files are not placed: run agentihooks swarm-terminal setup first") from None
+    try:
+        terminal = operator_terminal.terminal(
+            {**environ, **placed}, client, run or runner(client.environment(dict(environ)))
+        )
+    except SwarmError as refused:
+        raise SetupRefused(str(refused)) from None
+    return Service(Upkeep(terminal), connect or (lambda: publications.connect(environ)))
+
+
+def serve(running: Service, passes: int | None = None, sleep: Callable = time.sleep, out=None) -> int:
+    for count in itertools.count(1):
+        report = running.run_pass()
+        if report is not None:
+            print(json.dumps(dataclasses.asdict(report)), file=out or sys.stdout, flush=True)
+        if count == passes:
+            return 0
+        sleep(SYNC_SECONDS)
+
+
 def outside_agent(who: Who) -> None:
     if who.name or who.swarm:
         raise SetupRefused(
@@ -146,6 +188,7 @@ def unit(binary: str) -> str:
         "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
         "EnvironmentFile=-%h/.agentihooks/.env\n"
         f'ExecStart="{binary}" swarm-terminal setup\n'
+        f"ExecStartPost=-systemctl --user try-restart {SYNC}\n"
     )
 
 
@@ -157,23 +200,39 @@ def timer() -> str:
     )
 
 
-def install(binary: str | None = None, unit_dir: Path | None = None, run: Callable = subprocess.run) -> bool:
+def sync_unit(binary: str) -> str:
+    return (
+        "[Unit]\nDescription=agentihooks operator herdr sync of hive workers\n\n"
+        "[Service]\nType=simple\nRestart=always\nRestartSec=30\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        f'ExecStart="{binary}" swarm-terminal sync\n\n'
+        "[Install]\nWantedBy=default.target\n"
+    )
+
+
+def install(binary: str | None = None, unit_dir: Path | None = None, run: Callable = subprocess.run) -> None:
     binary = binary or shutil.which("agentihooks")
     if not binary:
         raise SetupRefused("the agentihooks executable is not on PATH")
     unit_dir = unit_dir or Path.home() / ".config" / "systemd" / "user"
     unit_dir.mkdir(parents=True, exist_ok=True)
-    wanted = ((unit_dir / UNIT, unit(binary)), (unit_dir / TIMER, timer()))
+    wanted = ((unit_dir / UNIT, unit(binary)), (unit_dir / TIMER, timer()), (unit_dir / SYNC, sync_unit(binary)))
     stale = [(path, text) for path, text in wanted if not path.exists() or path.read_text() != text]
     for path, text in stale:
         _stage(path, text.encode()).replace(path)
     try:
         if stale:
             run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, timeout=30, check=True)
-        result = run(["systemctl", "--user", "enable", "--now", TIMER], capture_output=True, text=True, timeout=30)
+        results = {
+            name: run(["systemctl", "--user", "enable", "--now", name], capture_output=True, text=True, timeout=30)
+            for name in (TIMER, SYNC)
+        }
     except (OSError, subprocess.SubprocessError) as error:
-        raise SetupRefused(f"systemctl could not enable {TIMER}: {type(error).__name__}") from None
-    return result.returncode == 0
+        raise SetupRefused(f"systemctl could not enable {TIMER} and {SYNC}: {type(error).__name__}") from None
+    failed = [f"{name}: {result.stderr.strip()}" for name, result in results.items() if result.returncode]
+    if failed:
+        raise SetupRefused(f"systemctl could not enable {'; '.join(failed)}")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -181,7 +240,8 @@ def _parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     setup = sub.add_parser("setup", help="Place the terminal user CA key and the Pod policy from their sources")
     setup.add_argument("--antoncore", help=f"antoncore checkout; defaults to {ANTONCORE_ENV}")
-    sub.add_parser("install", help="Write and enable the user timer that runs setup")
+    sub.add_parser("install", help="Write and enable the user timer that runs setup and the sync service")
+    sub.add_parser("sync", help="Keep every hive's published workers in the operator's herdr")
     return parser
 
 
@@ -193,13 +253,16 @@ def main(
     try:
         outside_agent(Who.from_env() if who is None else who)
         if args.command == "install":
-            return 0 if install() else 1
+            install()
+            return 0
+        root = home or Path(environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks")
+        if args.command == "sync":
+            return serve(service(environ, operator_terminal.client_home(environ), root))
         bao = openbao_kv.from_env(environ)
         if bao is None:
             raise SetupRefused(f"it needs {openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV}")
-        root = home or Path(environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks")
         report = place(root, bao, antoncore_dir(environ, args.antoncore))
-    except SetupRefused as refused:
+    except SwarmError as refused:
         print(f"operator terminal {args.command} refused: {refused}", file=sys.stderr)
         return 1
     print(json.dumps(report))

@@ -33,6 +33,7 @@ REFUSALS = (
     ("Permission denied", "unauthorized"),
 )
 AUTH_FAILURES = frozenset({"host_key_changed", "host_key_unverified", "unauthorized", "client_key"})
+JUMP = "swarm-terminal-jump"
 
 Run = Callable[[list[str]], subprocess.CompletedProcess]
 Lookup = Callable[..., list[tuple]]
@@ -52,12 +53,29 @@ def route(endpoint: Endpoint, lookup: Lookup | None = None) -> str:
 
 
 @dataclass(frozen=True)
+class Jump:
+    host: str
+    port: int
+    host_public: str
+    user: str = "jump"
+
+
+@dataclass(frozen=True)
 class ClientHome:
     """herdr's -F config includes $HOME/.ssh/config, but its no -F health check reads the passwd home's config."""
 
     root: Path
     user: str = USER
     port: int = PORT
+    jump: Jump | None = None
+
+    @property
+    def jump_config(self) -> Path:
+        return self.terminals / "endpoints" / f"{JUMP}.conf"
+
+    @property
+    def jump_known_hosts(self) -> Path:
+        return self.terminals / "known_hosts" / JUMP
 
     @property
     def config(self) -> Path:
@@ -108,6 +126,7 @@ def ssh_block(home: ClientHome, endpoint: Endpoint, address: str) -> str:
     lines = [
         f"Host {endpoint.host}",
         f"  HostName {address}",
+        *([f"  ProxyJump {JUMP}"] if home.jump else []),
         f"  Port {home.port}",
         f"  User {home.user}",
         f"  HostKeyAlias {endpoint.host}",
@@ -122,6 +141,27 @@ def ssh_block(home: ClientHome, endpoint: Endpoint, address: str) -> str:
         f'  CertificateFile "{home.certificate(endpoint)}"',
         "  ForwardAgent no",
         "  ClearAllForwardings yes",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def jump_block(home: ClientHome) -> str:
+    jump = home.jump
+    lines = [
+        f"Host {JUMP}",
+        f"  HostName {jump.host}",
+        f"  Port {jump.port}",
+        f"  User {jump.user}",
+        f"  HostKeyAlias {jump.host}",
+        f'  UserKnownHostsFile "{home.jump_known_hosts}"',
+        "  GlobalKnownHostsFile /dev/null",
+        "  StrictHostKeyChecking yes",
+        "  CheckHostIP no",
+        "  UpdateHostKeys no",
+        "  BatchMode yes",
+        "  IdentitiesOnly yes",
+        f'  IdentityFile "{home.identity}"',
+        "  ForwardAgent no",
     ]
     return "\n".join(lines) + "\n"
 
@@ -175,7 +215,10 @@ class Terminal:
         recorded = home.generation(endpoint)
         if recorded.exists() and scope.generation < (newest := int(recorded.read_text())):
             raise EndpointRefused("stale_generation", f"{endpoint.name} already serves generation {newest}")
-        address = route(endpoint, self.lookup)
+        address = endpoint.host if home.jump else route(endpoint, self.lookup)
+        if home.jump:
+            _write(home.jump_known_hosts, f"{home.jump.host} {home.jump.host_public}\n")
+            _write(home.jump_config, jump_block(home))
         _write(recorded, f"{scope.generation}\n")
         _write(home.certificate(endpoint), self.authority.issue(scope, self._client_key()))
         _write(home.known_hosts(endpoint), known_hosts(endpoint, host_public))
