@@ -187,6 +187,8 @@ def test_delivery_session_survives_reconnecting_to_the_store(store):
     assert replacement.history(item.id)[-1]["session_id"] == "s1"
     assert replacement.confirm_shown("bob", item.updated_at + 1) == []
     assert replacement.get(item.id).state == "pending"
+    assert replacement.get(item.id).reason == "receiving session changed"
+    assert replacement.history(item.id)[-1]["by"] == "bob"
 
 
 def test_unknown_session_never_automatically_confirms_an_unknown_delivery(store):
@@ -203,6 +205,51 @@ def test_known_session_redelivers_a_legacy_delivery_without_session_identity(sto
     store.redis.hdel(store.key("item", item.id), "delivery_session")
     assert store.confirm_shown("bob", item.updated_at + 1) == []
     assert store.get(item.id).state == "pending"
+
+
+def test_another_session_cannot_directly_confirm_the_delivery(store):
+    item = store.deliver(store.send("alice", "bob", "review").id, "bob")
+    replacement = InboxStore(store.redis, session_id="s2")
+    assert replacement.confirm(item.id, "bob") is None
+    assert replacement.get(item.id).state == "delivered"
+    assert replacement.read(item.id, "bob").state == "read"
+
+
+def test_confirmation_continues_after_requeuing_a_previous_sessions_item(store, monkeypatch):
+    clock = iter(range(1000, 2000))
+    monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: next(clock))
+    previous = InboxStore(store.redis, session_id="previous")
+    first = previous.deliver(previous.send("alice", "bob", "first").id, "bob")
+    second = store.deliver(store.send("alice", "bob", "second").id, "bob")
+    assert [item.id for item in store.confirm_shown("bob", second.updated_at + 1)] == [second.id]
+    assert store.get(first.id).state == "pending"
+
+
+def test_confirmation_does_not_requeue_a_delivery_updated_during_the_hook(store, monkeypatch):
+    previous = InboxStore(store.redis, session_id="previous")
+    item = previous.deliver(previous.send("alice", "bob", "review").id, "bob")
+    before = item.updated_at + 1
+    get = store.get
+
+    def update_delivery(item_id):
+        current = get(item_id)
+        store.redis.hset(store.key("item", item_id), "updated_at", before)
+        return current
+
+    monkeypatch.setattr(store, "get", update_delivery)
+    assert store.confirm_shown("bob", before) == []
+    assert get(item.id).state == "delivered"
+
+
+def test_connect_binds_deliveries_to_the_supplied_session(store, monkeypatch):
+    from scripts.inbox import outbox
+    from scripts.inbox.store import connect
+
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda environ=None: store.redis)
+    monkeypatch.setattr(outbox, "flush", lambda inbox: None)
+    connected = connect({"CLAUDE_CODE_SESSION_ID": "supplied-session"})
+    item = connected.deliver(connected.send("alice", "bob", "review").id, "bob")
+    assert item.delivery_session == "supplied-session"
 
 
 @pytest.mark.parametrize("env", [{"CLAUDE_CODE_SESSION_ID": "s1"}, {"CODEX_THREAD_ID": "s1"}])
