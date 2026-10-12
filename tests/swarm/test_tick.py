@@ -1426,6 +1426,30 @@ def test_a_task_waits_on_an_open_dependency_and_is_claimed_once_it_is_done(store
     assert spawned_ids(runtime) == ["t1", "t2"]
 
 
+def test_a_critical_chain_successor_is_claimed_the_tick_after_its_predecessor_merges_while_other_work_waits(store):
+    store.update("sw", max_eng=1)
+    ledger = FakeLedger(
+        [{"id": "a"}, {"id": "b", "depends_on": ["a"]}, {"id": "c", "depends_on": ["b"]}, {"id": "x"}, {"id": "y"}]
+    )
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["a"]
+    ledger.rows["a"]["state"] = "done"
+    ledger.rows["x"]["rank"] = "urgent"
+    ledger.rows["y"]["branch"] = "engineer-a1b2c3-0009"
+    ledger.stamps = {"tasks/a/state": {"by": "engineer@a1b2c3-0001", "at": 61_000}, "tasks/x/rank": {"by": "operator"}}
+    actions = tick("sw", store, ledger, runtime, now_ms=121_000)
+    assert spawned_ids(runtime) == ["a", "b"]
+    assert [ledger.rows[t]["state"] for t in ("x", "y", "c")] == ["open", "open", "open"]
+    assert "chain guard claimed task b 60 seconds after task a merged on the critical chain" in actions
+    assert (
+        "b",
+        "The dispatcher's chain guard gave this task the next free eng seat 60 seconds after the task before it "
+        "on the critical chain merged.",
+        "dispatcher",
+    ) in ledger.comments
+
+
 def test_a_task_starts_stacked_on_claimed_and_in_pr_dependencies_that_carry_a_branch(store):
     store.update("sw", max_eng=3)
     ledger = FakeLedger([{"id": "t1"}, {"id": "t0"}, {"id": "t2", "depends_on": ["t1", "t0", "t9"]}, {"id": "t9"}])

@@ -5,10 +5,12 @@ and an instant of claim wait while host samples hold spawns is that holder's hol
 """
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from scripts.swarm import bottleneck, metrics_outbox
 from scripts.swarm.store import RedisStore
+from scripts.swarm_ledger.repository import hierarchy
 
 KEY = "bottleneck-stages"
 TOP = 3
@@ -18,6 +20,7 @@ DONE = "task done"
 JOINED = "joined"
 OVERLAYS = ("merge_queue", "intent_fix", "launch_failure", "launch", "claim_wait", "ci_overrun", "ci_queue")
 INTENT = ("intent_failed", "intent_passed")
+NO_FIX_PHASE = ""
 SPOKEN = {"ci_overrun": "in", "review": "in"}
 TABLE = metrics_outbox.Table(
     "bottleneck_stages",
@@ -170,26 +173,34 @@ def _claimed(task: dict, rows: dict, now_ms: int, live: bool) -> Timeline:
     return Timeline(start, end, base, overlays, task_id)
 
 
-def _waiting(task: dict, rows: dict, done: set, now_ms: int) -> Timeline | None:
-    if task.get("state") != "open" or not set(task.get("depends_on") or []) <= done:
+def _waiting(task: dict, rows: dict, ready: Callable[[dict], bool], now_ms: int) -> Timeline | None:
+    if not ready(task):
         return None
-    ready = _ready(task, rows["ledger_events"], now_ms)
-    if ready is None:
+    start = _ready(task, rows["ledger_events"], now_ms)
+    if start is None:
         return None
-    return Timeline(ready, now_ms, (Span("claim_wait", ready, now_ms),), (), task["id"])
+    return Timeline(start, now_ms, (Span("claim_wait", start, now_ms),), (), task["id"])
 
 
-def timelines(rows: dict, tasks: list, now_ms: int) -> list[Timeline]:
+def claimable(doc: dict, fix_phase: str) -> Callable[[dict], bool]:
+    from scripts.swarm import tick
+
+    rows = {task["id"]: task for task in doc.get("tasks", [])}
+    graph = hierarchy.project(doc)[0]
+    return lambda task: tick.ready(task, rows, doc, graph, fix_phase)
+
+
+def timelines(rows: dict, tasks: list, now_ms: int, ready: Callable[[dict], bool] | None = None) -> list[Timeline]:
     claimed = {event["task"] for event in rows["agent_events"] if event["kind"] == "claim"}
     by_id = {task["id"]: task for task in tasks}
-    done = {task["id"] for task in tasks if task.get("state") == "done"}
+    ready = ready or claimable({"tasks": tasks}, NO_FIX_PHASE)
     found = [
         _claimed(
             by_id.get(task_id, {"id": task_id}), rows, now_ms, by_id.get(task_id, {}).get("state") in bottleneck.OPEN
         )
         for task_id in sorted(claimed)
     ]
-    waiting = [_waiting(task, rows, done, now_ms) for task in tasks if task["id"] not in claimed]
+    waiting = [_waiting(task, rows, ready, now_ms) for task in tasks if task["id"] not in claimed]
     return found + [timeline for timeline in waiting if timeline is not None]
 
 
@@ -249,12 +260,14 @@ def _overrun_episodes(rows, timeline, branch, held, window):
     return episodes
 
 
-def observations(rows: dict, tasks: list, now_ms: int, window_ms: int) -> dict:
+def observations(
+    rows: dict, tasks: list, now_ms: int, window_ms: int, ready: Callable[[dict], bool] | None = None
+) -> dict:
     window = bottleneck.Window(now_ms - window_ms, now_ms)
     held = holds(rows["host_samples"], now_ms)
     branches = {task["id"]: task.get("branch") for task in tasks}
     found = {}
-    for timeline in timelines(rows, tasks, now_ms):
+    for timeline in timelines(rows, tasks, now_ms, ready):
         for stage, _ in attribute(timeline, held, window):
             if stage != "ci_overrun":
                 found.setdefault(stage, set()).add(f"{stage}:{timeline.task}:{int(timeline.start)}")
@@ -264,11 +277,17 @@ def observations(rows: dict, tasks: list, now_ms: int, window_ms: int) -> dict:
     return {stage: sorted(episodes) for stage, episodes in found.items()}
 
 
-def report(rows: dict, tasks: list, now_ms: int, window_ms: int = bottleneck.WINDOW_MS) -> dict:
+def report(
+    rows: dict,
+    tasks: list,
+    now_ms: int,
+    window_ms: int = bottleneck.WINDOW_MS,
+    ready: Callable[[dict], bool] | None = None,
+) -> dict:
     window = bottleneck.Window(now_ms - window_ms, now_ms)
     held = holds(rows["host_samples"], now_ms)
     seconds = {}
-    for timeline in timelines(rows, tasks, now_ms):
+    for timeline in timelines(rows, tasks, now_ms, ready):
         for key, value in attribute(timeline, held, window).items():
             seconds[key] = seconds.get(key, 0.0) + value
     found = [{"stage": stage, "label": label, "seconds": value} for (stage, label), value in seconds.items()]

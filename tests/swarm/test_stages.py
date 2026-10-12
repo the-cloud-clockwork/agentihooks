@@ -183,6 +183,77 @@ def test_an_open_task_with_an_unfinished_dependency_is_not_waiting():
     assert found["stages"] == [] and found["total"] == 0.0
 
 
+def waiting_of(tasks, **doc):
+    found = stages.report(
+        rows(ledger_events=[ledger("added", at(8), f"tasks/{task['id']}") for task in tasks]),
+        tasks,
+        NOW,
+        ready=stages.claimable({"tasks": tasks, **doc}, ""),
+    )
+    return seconds_of(found)
+
+
+def test_the_tick_readiness_exempts_the_doctor_fix_phase_from_a_focus_and_needs_no_task_list():
+    from scripts.doctor import loop
+
+    task = {"id": "t3", "state": "open", "phase": loop.FIX_PHASE}
+    doc = {"tasks": [task], "freezes": [{"verb": "focus", "target": "tasks/t9"}]}
+    assert [stages.claimable(doc, loop.FIX_PHASE)(task), stages.claimable(doc, "")(task)] == [True, False]
+    assert stages.claimable({}, "")({"id": "t3", "state": "open"}) is True
+
+
+def test_a_frozen_task_opens_no_claim_wait():
+    tasks = [{"id": "t3", "state": "open"}]
+    assert waiting_of(tasks, freezes=[{"verb": "freeze", "target": "tasks/t3"}]) == {}
+
+
+def test_a_task_under_a_frozen_plan_opens_no_claim_wait():
+    tasks = [{"id": "t3", "state": "open", "phase": "p1"}]
+    doc = {"plans": [{"id": "pl1"}], "phases": [{"id": "p1", "plan": "plans/pl1"}]}
+    assert waiting_of(tasks, **doc, freezes=[{"verb": "freeze", "target": "plans/pl1"}]) == {}
+
+
+def test_a_task_in_a_phase_waiting_on_another_phase_opens_no_claim_wait():
+    tasks = [{"id": "t3", "state": "open", "phase": "p2"}]
+    assert waiting_of(tasks, phases=[{"id": "p1"}, {"id": "p2", "depends_on": ["p1"]}]) == {}
+
+
+def test_an_out_of_scope_task_opens_no_claim_wait():
+    assert waiting_of([{"id": "t3", "state": "open", "out_of_scope": True}]) == {}
+
+
+def test_a_parked_task_opens_no_claim_wait():
+    tasks = [{"id": "t0", "state": "claimed", "branch": "b0"}, {"id": "t3", "state": "open", "parked_on": ["t0"]}]
+    assert waiting_of(tasks) == {}
+
+
+def test_a_task_the_tick_would_claim_waits_from_its_ready_time():
+    tasks = [{"id": "t3", "state": "open", "phase": "p1"}, {"id": "t4", "state": "open", "phase": "p2"}]
+    found = waiting_of(
+        tasks,
+        phases=[{"id": "p1"}, {"id": "p2", "depends_on": ["p1"]}],
+        freezes=[{"verb": "freeze", "target": "tasks/t4"}],
+    )
+    assert found == {("claim_wait", ""): 7200.0}
+
+
+def test_a_task_stacked_on_a_claimed_branch_waits_like_the_tick_would_claim_it():
+    tasks = [{"id": "t0", "state": "claimed", "branch": "b0"}, {"id": "t3", "state": "open", "depends_on": ["t0"]}]
+    assert waiting_of(tasks) == {("claim_wait", ""): 7200.0}
+
+
+def test_without_a_ledger_doc_the_tick_readiness_still_skips_out_of_scope_and_parked_tasks():
+    tasks = [
+        {"id": "t0", "state": "claimed"},
+        {"id": "t1", "state": "open", "out_of_scope": True},
+        {"id": "t2", "state": "open", "parked_on": ["t0"]},
+        {"id": "t3", "state": "open"},
+    ]
+    found = stages.report(rows(ledger_events=[ledger("added", at(8), f"tasks/{t['id']}") for t in tasks]), tasks, NOW)
+    assert seconds_of(found) == {("claim_wait", ""): 7200.0}
+    assert stages.observations(rows(ledger_events=[ledger("added", at(8), "tasks/t1")]), tasks, NOW, 4 * H) == {}
+
+
 def test_a_task_without_ready_evidence_starts_at_its_claim():
     found = stages.report(
         rows(agent_events=[agent("claim", "t1", at(9)), agent("spawn", "t1", at(9), "e1", "claude")]),
