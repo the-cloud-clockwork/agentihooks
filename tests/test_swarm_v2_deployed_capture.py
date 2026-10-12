@@ -3,6 +3,8 @@ from contextlib import contextmanager
 
 import pytest
 
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+
 
 @pytest.mark.parametrize("capture_at,status", [(39, "complete"), (40, "incomplete")])
 def test_production_remote_capture_completes_within_its_pod_grace(tmp_path, monkeypatch, capture_at, status):
