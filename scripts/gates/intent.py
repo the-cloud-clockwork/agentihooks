@@ -417,10 +417,6 @@ def _drafted(record):
     return bool(record) and record["verdict"] == PENDING and record["reason"] == DRAFT
 
 
-def _rearmed(record, task, moved):
-    return not record or not _same_phase(record, task) or moved or _drafted(record)
-
-
 @dataclass(frozen=True)
 class _Judgment:
     pr: dict | None
@@ -456,14 +452,17 @@ class Check:
             if self.mode != "coach" and judged and _same_phase(record, task) and not moved:
                 continue
             tasks.append((task, record, moved))
-        for task, record, moved in tasks:
-            if _rearmed(record, task, moved):
+        for task, record, _ in tasks:
+            if _drafted(record):
                 verdicts.write(task["id"], PENDING, RUNNING, self.now_ms, phase=task.get("phase"))
         with ThreadPoolExecutor(max_workers=2) as workers:
             pending = [
-                (task, record, workers.submit(copy_context().run, self._judge, doc, task)) for task, record, _ in tasks
+                (task, record, moved, workers.submit(copy_context().run, self._judge, doc, task))
+                for task, record, moved in tasks
             ]
-            for task, record, future in pending:
+            for task, record, moved, future in pending:
+                if not record or not _same_phase(record, task) or moved:
+                    verdicts.write(task["id"], PENDING, RUNNING, self.now_ms, phase=task.get("phase"))
                 judgment = future.result()
                 if judgment is None and _drafted(record):
                     verdicts.write(task["id"], PENDING, DRAFT, record["at"], phase=record.get("phase"))
