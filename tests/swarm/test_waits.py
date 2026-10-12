@@ -642,6 +642,29 @@ def test_checks_declaration_refuses_an_unknown_head(started, monkeypatch, capsys
     assert capsys.readouterr().err == "swarm: cannot read the pull request head; retry the checks wait\n"
 
 
+GH_2_4 = """#!/usr/bin/env bash
+case "$1 $2" in
+  "api graphql") echo "HTTP 502: Bad Gateway (https://api.github.com/graphql)" >&2; exit 1 ;;
+  "pr view") [[ "$*" == *headRefOid* ]] && { echo 'Unknown JSON field: "headRefOid"' >&2; exit 1; } ;;
+  "api repos/o/r/pulls/7") echo '{"state": "open", "head": {"sha": "first", "ref": "branch"}}' ;;
+  *) echo "unexpected gh $*" >&2; exit 1 ;;
+esac
+"""
+
+
+def test_a_checks_wait_reads_the_head_through_rest_on_gh_2_4(started, monkeypatch, tmp_path, capsys):
+    import os
+
+    store, _ = started
+    gh = tmp_path / "gh"
+    gh.write_text(GH_2_4)
+    gh.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setattr(cli.ledger_events, "view", github_view)
+    assert run("sw", "--as", ME, "wait", "--on", "checks", URL) == 0, capsys.readouterr().err
+    assert held(store)["on"] == {"kind": "checks", "target": URL, "head": "first"}
+
+
 def test_pull_request_reads_the_head_commit():
     from scripts.swarm.ledger_events import pull_request
 
