@@ -223,7 +223,7 @@ class Langfuse:
 
 def _clock(*times):
     values = iter(times)
-    return lambda: next(values)
+    return lambda: next(values, times[-1])
 
 
 def test_read_joins_the_newest_trace_and_reads_freshness_from_a_watermark(cursors):
@@ -341,7 +341,7 @@ def test_a_failure_before_the_budget_ends_keeps_its_text(cursors):
         release.wait(5)
         raise ConnectionError("late")
 
-    [found], failures = registry.read("s", [AGENT], get, {}, 0.5, 50)
+    [found], failures = registry.read("s", [AGENT], get, {}, 2, 50)
     release.set()
     assert found["read"] is False
     assert failures == ["active read of engineer@1-0001 failed: ConnectionError: refused"]
