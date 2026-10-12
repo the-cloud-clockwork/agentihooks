@@ -113,6 +113,21 @@ if [[ $planted != *"StatefulSet $release-ledger container ledger references the 
   exit 1
 fi
 printf 'the chart check flagged a planted ledger reference to the terminal CA Secret\n'
+roles=(-f "$chart/ci/kind-redis-roles.yaml")
+helm template "$release" "$chart" "${roles[@]}" | python3 tests/chart_redis.py "$chart/ci/kind-redis-roles.yaml"
+helm template "$release" "$chart" "${roles[@]}" "${api[@]}" | python3 tests/chart_redis.py "$chart/ci/kind-redis-roles.yaml"
+planted="$(helm template "$release" "$chart" "${roles[@]}" --set redis.roles.worker.name=swarm-redis-admin \
+  2>&1 | python3 tests/chart_redis.py "$chart/ci/kind-redis-roles.yaml" 2>&1 >/dev/null || true)"
+if [[ $planted != *"redis.roles.worker must not name the administrator Redis Secret"* ]]; then
+  printf 'the chart did not refuse a worker role naming the administrator Redis Secret: %s\n' "$planted" >&2
+  exit 1
+fi
+refusal="$(helm template "$release" "$chart" "${roles[@]}" --set redis.roles.ledger.name= 2>&1 >/dev/null || true)"
+if [[ $refusal != *"redis.roles sets every role or none"* ]]; then
+  printf 'the chart did not refuse a partial set of Redis roles: %s\n' "$refusal" >&2
+  exit 1
+fi
+printf 'the chart gives the ledger, controller and worker their own Redis Secrets and refuses the administrator one\n'
 policy_map=(-f "$chart/ci/kind-policy-configmap.yaml")
 helm template "$release" "$chart" "${workers[@]}" "${policy_map[@]}" "${api[@]}" \
   | python3 tests/chart_workers.py "$chart/ci/kind-workers.yaml" "$chart/ci/kind-policy-configmap.yaml"
