@@ -230,12 +230,16 @@ def test_reply_retry_refuses_different_text(store):
 
 
 @pytest.mark.parametrize("text", ["answer", "changed"])
-def test_reply_replay_reconciles_an_answer_saved_before_reservations(store, text):
+@pytest.mark.parametrize("alias", ["", "alice", "bob"])
+def test_reply_replay_reconciles_an_answer_saved_before_reservations(store, text, alias):
     from scripts.inbox.store import DuplicateItem
 
     original = store.send("alice", "bob", "question")
     store.send("bob", "alice", "answer", item_id="legacy-answer")
     store.close(original.id, "bob", "done", "replied with message legacy-answer")
+    if alias:
+        store.names.mint_code("sw", "sw", "/repo")
+        store.names.alias(alias, store.names.next("sw", "eng"))
     error = DuplicateItem if text == "answer" else InboxError
     with pytest.raises(error) as refused:
         store.reply(original.id, "bob", text, answer_id="legacy-answer")

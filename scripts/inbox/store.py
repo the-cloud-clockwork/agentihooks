@@ -393,7 +393,8 @@ class InboxStore:
             raise InboxError("a reply needs text")
         key = self.key("item", item_id)
         field = f"reply:{replier}"
-        if item.state in CLOSED and not self.redis.hexists(key, field):
+        legacy = answer_id and (item.state, item.reason) == close_reason("done", replied(answer_id))
+        if item.state in CLOSED and not self.redis.hexists(key, field) and not legacy:
             raise InboxError(f"message {item_id} is closed: {item.reason}")
         self.redis.hsetnx(key, field, answer_id or new_item_id())
         reply_id = self.redis.hget(key, field)
@@ -403,7 +404,7 @@ class InboxStore:
             answer = self.send(replier, item.sender, text, fyi=fyi, item_id=reply_id)
         except (DuplicateItem, WatchError):
             answer = self.get(reply_id)
-            if (answer.sender, answer.address, answer.text, answer.fyi) != (
+            if (self.names.resolve(answer.sender), self.names.resolve(answer.address), answer.text, answer.fyi) != (
                 replier,
                 self.names.resolve(item.sender),
                 text,
