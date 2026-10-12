@@ -227,6 +227,8 @@ def _managed_host(root, viewers):
     socket = Path(endpoint.removeprefix(supervisor.UNIX))
     _proc(root, 800, "python3", 1, ["python3", "-m", "scripts.codex_session"], {"AH_CX_TOKEN_alpha": "a"})
     _proc(root, 801, "codex", 800, supervisor.server_command("codex", socket, ()), {"AH_CX_TOKEN_alpha": "a"})
+    _proc(root, 802, "codex", 800, supervisor.server_command("codex", socket, ()), {"AH_CX_TOKEN_alpha": "a"})
+    _proc(root, 803, "codex", 1, ["codex", "app-server", "--listen"], {"AH_CX_TOKEN_alpha": "a"})
     remotes = (["codex", "resume", "thread-1", "--remote", endpoint], ["codex", f"--remote={endpoint}"])
     for pid, argv in zip((810, 811), remotes[:viewers], strict=False):
         _proc(root, pid, "codex", 1, argv, {"AH_CX_TOKEN_alpha": "a"})
@@ -306,4 +308,15 @@ def test_unknown_liveness_holds_the_slot_and_termination_releases_it(tmp_path, m
 
 def test_no_redis_holds_nothing(monkeypatch):
     monkeypatch.setattr("hooks._redis.get_redis", lambda: None)
+    assert acc.managed_held() == set()
+
+
+def test_a_redis_failure_holds_nothing(monkeypatch):
+    from redis.exceptions import RedisError
+
+    class Broken:
+        def smembers(self, key):
+            raise RedisError("down")
+
+    monkeypatch.setattr("hooks._redis.get_redis", lambda: Broken())
     assert acc.managed_held() == set()

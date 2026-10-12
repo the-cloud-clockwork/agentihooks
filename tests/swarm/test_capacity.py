@@ -480,7 +480,7 @@ def test_codex_rows_count_a_managed_execution_once_and_hold_it_until_termination
     from tests.context.test_account_sessions import _held_store, _managed_host
 
     root = tmp_path / "proc"
-    _managed_host(root, 2)
+    _managed_host(root, 1)
     _held_store(
         monkeypatch,
         ("exe-0123456789abcdef0123", "connected", "alpha"),
