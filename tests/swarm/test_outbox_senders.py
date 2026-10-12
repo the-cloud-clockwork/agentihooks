@@ -92,7 +92,7 @@ def test_operator_mail_queued_on_a_dropped_send_is_marked_sent_and_replays_once(
     event = write(5)
     lost()
     operator_mail.relay(inbox, store, SLUG, {}, [event], line)
-    assert inbox.redis.exists(inbox.key("ledger-sent", write_ref(SLUG, event)))
+    assert 0 < inbox.redis.ttl(inbox.key("ledger-sent", write_ref(SLUG, event))) <= operator_mail.SENT_TTL_S
     operator_mail.relay(inbox, store, SLUG, {}, [event], line)
     outbox.flush(inbox)
     outbox.flush(inbox)
@@ -158,20 +158,57 @@ def test_swarm_say_while_redis_is_fully_down_reaches_its_recipient_once_after_re
     _, inbox = swarm
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", BOSS.name)
     monkeypatch.setattr(cli, "connect", unreachable)
-    assert cli.main([SLUG, "say", "the docs build is green", "--to", "eng"]) == 0
+    assert cli.main([SLUG, "say", "the docs build is green", "--to", "eng", "--fyi"]) == 0
     assert items(inbox, ENG.name) == [] and outbox.waiting()
     outbox.flush(inbox)
     outbox.flush(inbox)
     [item] = items(inbox, ENG.name)
-    assert (item.sender, item.text, item.task) == (BOSS.name, "the docs build is green", ENG.task)
+    assert (item.sender, item.text, item.task, item.fyi) == (BOSS.name, "the docs build is green", ENG.task, True)
     assert not outbox.waiting()
 
 
-def test_a_queued_swarm_say_naming_nobody_is_set_aside_and_the_next_record_still_lands(swarm):
+def test_a_say_to_the_operator_while_redis_is_down_is_refused_not_queued(swarm, monkeypatch, capsys):
+    from scripts.swarm import cli
+
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", BOSS.name)
+    monkeypatch.setattr(cli, "connect", unreachable)
+    assert cli.main([SLUG, "say", "for the page", "--to", "operator"]) == 1
+    assert "swarm: Redis is unreachable" in capsys.readouterr().err and not outbox.waiting()
+
+
+def test_a_queued_swarm_say_naming_nobody_is_set_aside_and_the_next_records_still_land(swarm):
     _, inbox = swarm
     delivery.queue(SLUG, "anyone there", BOSS.name, "ci")
     delivery.queue(SLUG, "the docs build is green", BOSS.name, ENG.name)
+    delivery.queue(SLUG, "and rebase onto dev", BOSS.name, ENG.name)
     report = outbox.flush(inbox)
-    assert report.rejected and not outbox.waiting()
-    [item] = items(inbox, ENG.name)
-    assert item.text == "the docs build is green"
+    [(_, reason)] = report.rejected
+    assert "nobody in swarm" in reason and not outbox.waiting()
+    found = items(inbox, ENG.name)
+    assert [(i.text, i.fyi) for i in found] == [("the docs build is green", False), ("and rebase onto dev", False)]
+
+
+def test_a_say_record_applied_twice_writes_each_recipient_once(swarm):
+    from scripts.inbox import cli as inbox_cli
+
+    _, inbox = swarm
+    record = outbox.record("say", BOSS.name, {"slug": SLUG, "to": ENG.name, "text": "rebase first", "fyi": False})
+    assert inbox_cli.apply(inbox, record) == [ENG.name]
+    assert inbox_cli.apply(inbox, record) == [ENG.name]
+    assert [i.text for i in items(inbox, ENG.name)] == ["rebase first"]
+
+
+def test_an_alert_without_a_revision_is_never_delivered(swarm):
+    _, inbox = swarm
+    bare = {key: value for key, value in alert(3).items() if key != "rev"}
+    assert ledger_alerts.deliver(inbox, SLUG, [bare], 4, BOSS.seat, since=0) == []
+    assert items(inbox, BOSS.seat) == []
+
+
+def test_an_alert_delivered_again_after_its_mark_expired_is_one_item_with_its_stable_id(swarm):
+    _, inbox = swarm
+    ledger_alerts.deliver(inbox, SLUG, [alert(3)], 3, BOSS.seat)
+    inbox.redis.delete(inbox.key("alert-sent", SLUG, "al-3-0"))
+    ledger_alerts.deliver(inbox, SLUG, [alert(3)], 3, BOSS.seat)
+    [item] = items(inbox, BOSS.seat)
+    assert item.id == outbox.stable_id("alert", SLUG, "al-3-0")

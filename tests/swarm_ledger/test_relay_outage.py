@@ -6,12 +6,12 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
-import ledger_server  # noqa: E402
 import new_ledger  # noqa: E402
 
 from scripts.inbox import seen  # noqa: E402
 from scripts.inbox.store import InboxStore  # noqa: E402
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig  # noqa: E402
+from scripts.swarm_ledger import ledger_server  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -110,6 +110,7 @@ def test_writes_made_while_redis_is_down_reach_their_agents_once_after_recovery(
     replay_outbox(outage)
     assert_each_write_reached_its_agent_once(outage)
     assert len(mentions(outage.texts(ENG.name), "the docs build is green")) == 1
+    assert ledger_server.unrelayed() == {}
 
 
 def swarm_say(monkeypatch):
@@ -166,6 +167,31 @@ def test_an_alert_raised_while_redis_is_down_reaches_the_master_once_after_recov
     ledger_server.replay_unrelayed()
     ledger_server.replay_unrelayed()
     assert len([text for text in outage.texts(BOSS.seat) if "alert" in text]) == 1
+    assert ledger_server.unrelayed() == {}
+
+
+@pytest.mark.parametrize("kind", [ledger_server.RELAY, ledger_server.ALERTS])
+def test_a_held_revision_with_nothing_left_to_send_clears_on_replay(outage, kind):
+    make_ledger()
+    state, _ = core.sync(SLUG)
+    ledger_server.unrelayed_on(kind, SLUG, state["_meta"]["rev"])
+    ledger_server.replay_unrelayed()
+    assert ledger_server.unrelayed() == {}
+
+
+def test_a_held_revision_of_a_ledger_that_is_gone_is_dropped(outage):
+    ledger_server.unrelayed_on(ledger_server.RELAY, "gone-2026-01-01", 3)
+    ledger_server.replay_unrelayed()
+    assert ledger_server.unrelayed() == {}
+
+
+def test_a_trimmed_range_notice_names_the_range_and_resumes_the_relay_after_it(outage):
+    make_ledger()
+    ledger_server.unrelayed_on(ledger_server.RELAY, SLUG, 3)
+    assert ledger_server.record_trimmed(SLUG, 3, 7) == 8
+    state, _ = core.sync(SLUG)
+    [notice] = [row["text"] for row in state["notifications"] if "left the ledger history" in row["text"]]
+    assert "from revision 3 through 7" in notice and ledger_server.unrelayed() == {}
 
 
 def test_each_operator_write_trimmed_before_its_relay_leaves_one_notice_for_the_operator(outage, monkeypatch):
