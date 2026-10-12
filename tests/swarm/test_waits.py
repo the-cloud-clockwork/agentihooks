@@ -896,7 +896,7 @@ def test_the_probe_reads_the_gate_from_the_last_commit():
 @pytest.mark.parametrize(
     ("rollup", "outcome"),
     [
-        (UNIT_PASSED, [f"checks on {URL}, now red; Gate — Required never passed"]),
+        (UNIT_PASSED, []),
         (UNIT_PASSED + [{"name": "Gate — Required", "conclusion": "SUCCESS"}], [f"checks on {URL}, now green"]),
         (UNIT_PASSED + [{"name": "Gate — Required", "conclusion": "FAILURE"}], [f"checks on {URL}, now red"]),
     ],
@@ -1038,18 +1038,75 @@ def test_a_replaced_wait_does_not_stop_resolution_for_the_next_agent(tick):
 
 
 @pytest.mark.parametrize("rollup", [[], UNIT_PASSED, [{"name": "Gate — Required", "conclusion": "SKIPPED"}]])
-def test_a_dead_required_gate_ends_the_wait_red_and_names_the_gate(tick, rollup):
+def test_a_missing_or_skipped_required_gate_keeps_the_checks_wait_active(tick, rollup):
+    tick.hold("checks", URL)
+    tick.pulls[URL] = gated_probe(rollup, [], workflows(GATE_WORKFLOW))
+    assert tick.pulls[URL].failed == ()
+    assert tick.end() == []
+    held = idle.wait(tick.store.redis, "sw", ME)
+    assert held["on"] == {"kind": "checks", "target": URL, "head": "second"}
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME) == held
+    assert tick.told() == []
+    assert idle.verdict("idle", None, held, 9_999_999) == "waiting"
+    assert idle.verdict("idle", None, held, 10_000_000) == "idle"
+
+
+@pytest.mark.parametrize(
+    "rollup",
+    [
+        UNIT_PASSED + [{"name": "Gate — Required", "status": "QUEUED"}],
+        UNIT_PASSED + [{"name": "Gate — Required", "status": "IN_PROGRESS"}],
+    ],
+)
+def test_a_pending_required_gate_keeps_the_checks_wait_active(tick, rollup):
     tick.hold("checks", URL)
     tick.pulls[URL] = gated_probe(rollup, [], workflows(GATE_WORKFLOW))
     assert tick.end() == []
-    outcome = f"checks on {URL}, now red; Gate — Required never passed"
-    assert tick.end() == [f"ended the wait of {ME}: {outcome}"]
-    assert idle.wait(tick.store.redis, "sw", ME) is None
-    assert tick.told() == [
-        f"Your wait on {outcome} has ended. Pick task t1 back up: "
-        "agentihooks swarm sw done, block, or wait on the next thing."
-    ]
+    held = idle.wait(tick.store.redis, "sw", ME)
     assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME) == held
+    assert tick.told() == []
+
+
+def test_a_missing_gate_on_the_confirming_read_keeps_the_wait(tick):
+    tick.hold("checks", URL)
+    tick.pulls[URL] = gated_probe(UNIT_PASSED, [], workflows(GATE_WORKFLOW))
+    assert tick.end() == []
+    held = idle.wait(tick.store.redis, "sw", ME)
+    passed = gated_probe(
+        UNIT_PASSED + [{"name": "Gate — Required", "conclusion": "SUCCESS"}], [], workflows(GATE_WORKFLOW)
+    )
+    replies = iter([passed, tick.pulls[URL]])
+    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, lambda url: next(replies), 5_000, None) == []
+    assert idle.wait(tick.store.redis, "sw", ME) == held
+    assert tick.told() == []
+
+
+def test_a_pending_first_read_keeps_waiting_before_a_successful_confirmation(tick):
+    tick.hold("checks", URL)
+    pending = gated_probe(
+        UNIT_PASSED + [{"name": "Gate — Required", "status": "IN_PROGRESS"}], [], workflows(GATE_WORKFLOW)
+    )
+    tick.pulls[URL] = pending
+    assert tick.end() == []
+    held = idle.wait(tick.store.redis, "sw", ME)
+    passed = gated_probe(
+        UNIT_PASSED + [{"name": "Gate — Required", "conclusion": "SUCCESS"}], [], workflows(GATE_WORKFLOW)
+    )
+    replies = iter([pending, passed])
+    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, lambda url: next(replies), 5_000, None) == []
+    assert idle.wait(tick.store.redis, "sw", ME) == held
+    assert tick.told() == []
+
+
+def test_a_concluded_failure_ends_the_wait_with_a_missing_gate(tick):
+    tick.hold("checks", URL)
+    tick.pulls[URL] = gated_probe([{"name": "Unit tests", "conclusion": "FAILURE"}], [], workflows(GATE_WORKFLOW))
+    assert tick.end() == []
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red; Gate — Required never passed"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+    assert len(tick.told()) == 1
 
 
 @pytest.mark.parametrize("rollup", [[], UNIT_PASSED, [{"name": "Gate — Required", "conclusion": "SKIPPED"}]])

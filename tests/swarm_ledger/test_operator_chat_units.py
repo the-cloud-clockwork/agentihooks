@@ -117,12 +117,15 @@ def test_an_unaddressed_agent_message_is_refused_and_not_kept():
     assert [e["id"] for e in thread] == ["m-0"]
 
 
-@pytest.mark.parametrize("fields", [{"to": "operator"}, {"reply_to": "m-0"}])
-def test_an_addressed_agent_message_is_kept(fields):
+@pytest.mark.parametrize(
+    ("fields", "reply"),
+    [({"to": "operator"}, {}), ({"reply_to": "m-0"}, {"reply_to": "m-0"})],
+)
+def test_an_addressed_agent_message_is_kept(fields, reply):
     thread, c = [{"id": "m-0", "by": "operator", "text": "hi"}], ctx()
     assert ledger_comments.agent_thread_op(thread, op(**fields), c, "chat", "message") is True
     assert c.refused == []
-    assert thread[-1] == {"id": "m-1", "by": "eng", "at": 7, "text": "Phase one is done."}
+    assert thread[-1] == {"id": "m-1", "by": "eng", "at": 7, "text": "Phase one is done.", **reply}
 
 
 def notice(**fields):

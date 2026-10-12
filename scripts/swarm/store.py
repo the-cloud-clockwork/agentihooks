@@ -28,6 +28,8 @@ AUTO_SCALING, MANUAL_SCALING = SCALING
 DEFAULT_LOAD_HIGH, DEFAULT_LOAD_LOW = 1.5, 1.0
 DEFAULT_MEMORY_PER_AGENT_MB = 700
 MAX_LOAD = 10.0
+CODEX_TRANSPORTS = ("legacy", "app_server")
+LEGACY_TRANSPORT, APP_SERVER_TRANSPORT = CODEX_TRANSPORTS
 
 
 class SwarmError(RuntimeError):
@@ -66,6 +68,7 @@ class SwarmConfig:
     claude_model: str = default_models.DEFAULTS["claude"]
     codex_model: str = default_models.DEFAULTS["codex"]
     scratch: bool = False
+    codex_inbox_transport: str = LEGACY_TRANSPORT
 
 
 def scaling_refusal(config):
@@ -114,6 +117,7 @@ class AgentRecord:
     launch_timings: dict = field(default_factory=dict)
     hive: str = ""
     route_kind: str = "subscription"
+    transport: str = ""
 
 
 class RedisStore:
@@ -191,6 +195,7 @@ class RedisStore:
             raw.get("claude_model") or default_models.DEFAULTS["claude"],
             raw.get("codex_model") or default_models.DEFAULTS["codex"],
             raw.get("scratch") == "True",
+            raw.get("codex_inbox_transport") or LEGACY_TRANSPORT,
         )
 
     def update(self, slug, **changes):
@@ -200,6 +205,8 @@ class RedisStore:
             raise SwarmError(f"state must be one of {STATES}")
         if changes.get("autonomy", DELEGATE) not in AUTONOMY:
             raise SwarmError(f"autonomy must be one of {AUTONOMY}")
+        if changes.get("codex_inbox_transport", LEGACY_TRANSPORT) not in CODEX_TRANSPORTS:
+            raise SwarmError(f"codex inbox transport must be one of {', '.join(CODEX_TRANSPORTS)}")
         if set(default_models.FIELDS.values()) & changes.keys():
             if refused := default_models.refusal(changes, model_catalog.catalog(os.environ, self.redis, time.time())):
                 raise SwarmError(refused)

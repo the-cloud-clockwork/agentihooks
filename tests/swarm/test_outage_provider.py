@@ -8,6 +8,8 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
+CAPACITY = "\x1b[31m■ Selected model is at capacity. Please try a different model.\x1b[0m"
+
 
 @pytest.mark.parametrize(
     ("harness", "text", "match"),
@@ -23,6 +25,10 @@ pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
         ("copilot", "Failed to connect to model provider", "Failed to connect to model provider"),
         ("claude", "API Error: 401 Unauthorized", ""),
         ("codex", "unexpected status 429 Too Many Requests", ""),
+        ("codex", CAPACITY, "Selected model is at capacity"),
+        ("claude", CAPACITY, ""),
+        ("copilot", CAPACITY, ""),
+        ("codex", "steering.md:3: the Codex error Selected model is at capacity", ""),
         ("unknown", "API Error: 529", ""),
     ],
 )
@@ -57,6 +63,37 @@ def test_runtime_carries_provider_evidence_until_an_affirmative_probe_succeeds(t
     assert set(outage.read("sw")["provider"]["affected_agents"]) == {"worker"}
     outage.providers(store, "sw", runtime, 62000)
     assert outage.read("sw")["provider"]["started_at"] == 1000
+    assert outage.read("sw")["provider"]["ended_at"] == 61000
+
+
+def test_a_codex_pane_at_model_capacity_holds_with_a_stable_error_id_until_a_probe_succeeds(tmp_path, monkeypatch):
+    import hashlib
+
+    import fakeredis
+
+    monkeypatch.setattr(outage, "HOME", tmp_path)
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 1, 1))
+    agent = AgentRecord("worker", "eng", "t1", pane_id="p1", harness="codex", account="alpha", model="model")
+    store.put_agent("sw", agent)
+
+    def herdr(args):
+        if args[1] == "get":
+            return {"name": "worker", "pane_id": "p1", "agent_status": "idle"}
+        return {"text": f"working on the task\n{CAPACITY}\n› "}
+
+    runtime = HerdrRuntime(herdr=herdr)
+    observed = runtime.observe(agent)
+    line = "■ Selected model is at capacity. Please try a different model."
+    assert observed.provider_error == "Selected model is at capacity"
+    assert observed.provider_error_id == hashlib.sha256(line.encode()).hexdigest()
+    assert runtime.observe(agent).provider_error_id == observed.provider_error_id
+    outage.providers(store, "sw", runtime, 1000)
+    record = outage.read("sw")["provider"]
+    assert record["affected_agents"]["worker"]["error_id"] == observed.provider_error_id
+    assert outage.held(store, "sw", "worker") == "worker (codex, account alpha): Selected model is at capacity"
+    monkeypatch.setattr(provider_probe, "check", lambda *args: provider_probe.Result(True, "request succeeded"))
+    outage.providers(store, "sw", runtime, 61000)
     assert outage.read("sw")["provider"]["ended_at"] == 61000
 
 
