@@ -37,7 +37,9 @@ jobs:
   github-access:
     if: inputs.proof == 'github-access'
     uses: ./.github/workflows/github-access-audit.yml
-    secrets: inherit
+    secrets:
+      TCC_CI_CLIENT_ID: ${{ secrets.TCC_CI_CLIENT_ID }}
+      TCC_CI_APP_PRIVATE_KEY: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
 
   mutation:
     if: inputs.proof == 'mutation'
