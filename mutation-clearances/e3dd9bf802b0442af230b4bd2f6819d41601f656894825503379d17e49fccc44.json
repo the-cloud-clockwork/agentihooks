@@ -1,0 +1,6 @@
+{
+  "scripts/init_agent.py:scripts.init_agent.x__parser__mutmut_8:22ea99caf9846113bc5c8212be1d4da20a5b9b7c36e7a8b624e1e52249db693f": {
+    "reader": "Standards reader for cxc2",
+    "reason": "Dropping the --codex-transport help kwarg removes only its --help description; choices and default are unchanged."
+  }
+}
