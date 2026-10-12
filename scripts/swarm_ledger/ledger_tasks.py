@@ -43,8 +43,8 @@ UPDATABLE = (
     "phase",
     "slice",
     "follow_up",
-    "recovery",
     "split_pulls",
+    "recovery",
 )
 BOOL_FIELDS = ("artifact", "follow_up")
 DIFFICULTIES = ("S", "M", "L")
