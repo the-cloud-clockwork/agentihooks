@@ -59,6 +59,11 @@ def test_trend_is_unknown_only_before_the_detector_runs(store):
     assert (found["stage"], found["label"], found["trend"]) == ("", "none", "none")
 
 
+def test_a_ranking_stamped_ahead_of_the_reader_clock_reads_as_just_measured(store):
+    detect(store, ("build", 3600.0, "rising"))
+    assert bottleneck_status.report(store, "sw", NOW - 120_000)["measured"] == "0 minutes ago"
+
+
 def test_action_is_per_stage_and_survives_reading_updates(store):
     detect(store, ("ci_overrun", 3600.0, "rising"))
     bottleneck_status.record_action(store, "sw", "build", "Added a seat", NOW)
